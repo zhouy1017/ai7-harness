@@ -54,7 +54,7 @@ The revised estimate is **36 questions**. Question 36 was added when Question 29
 | Question | Decision | Recommended answer | Blocks |
 | --- | --- | --- | --- |
 | 29 | Meaning of “full Harness capability” after accepting DSH as the Agent Behavior Framework | **Accepted.** Full engine, narrow tool surface: no generic shell, roaming filesystem, or arbitrary network in an editorial Run. Agent Data Root with Run Source Scope nested inside. Editorial and Developer Capability Profiles with no self-service escalation. Everything agent-proposable, but capability expansion never self-activates | Security and profile composition — **resolved** |
-| 30 | Upstream consumption strategy | Fresh repo + exactly pinned public packages; process boundary or source fork only if a seam fails | Bootstrap and upgrade workflow |
+| 30 | Upstream consumption strategy | **Accepted.** Exactly pinned public npm packages, no fork and no vendored source; only the subset AI7 needs, never the `@deepseek-ai/dsh` CLI aggregate; exact versions with a committed lockfile; consumed baseline `0.1.0-rc.6` with `0.1.0-rc.5` retained as the audited-but-uninstallable reference; upstream tracked by commit and npm version since no release channel exists; SDK/ACP kept as a fallback isolation seam; six-point upgrade verification | Bootstrap and upgrade workflow — **resolved** |
 | 31 | Single execution authority | Harness owns generic agent lifecycle; AI7 durable business lifecycle coordinates without a second agent loop | Runtime ownership |
 | 32 | AI7-to-Harness record mapping | Task Ledger and Harness Session Ledger retain separate authority; exact Execution Bindings/Spans correlate them; active Operation records are retired | Persistence/event design; **accepted early by Question 22** |
 
@@ -107,6 +107,8 @@ It was re-proposed under those constraints and accepted: two Windows-only workfl
 
 **Question 36 is closed.** The metric system and the two-sided Behavior Evaluation Gate are accepted in [29-editorial-quality-metrics.md](./29-editorial-quality-metrics.md) and [ADR 0019](../docs/adr/0019-editorial-quality-metrics-and-behavior-evaluation-gate.md). Agent Behavior Improvement now has both a mechanism and a measure.
 
-**Question 30 is the current question**: the upstream consumption strategy — pinned public packages, a process or SDK boundary, or a source fork — and the upgrade contract that goes with it. Harness is a `0.1.0-rc.5` developer preview whose README warns of compatibility-breaking changes, which makes this the highest-severity remaining risk-register entry.
+**Question 30 is closed.** AI7 consumes an exactly pinned subset of public Harness packages, recorded in [30-upstream-consumption-and-upgrade-contract.md](./30-upstream-consumption-and-upgrade-contract.md) and [ADR 0020](../docs/adr/0020-consume-pinned-harness-package-subset.md). The last of the five original implementation blockers other than the Standalone topology is now cleared.
 
-Remaining after Question 30: Questions 31 through 35, plus Question 26, which waits until after Question 34.
+**Question 31 is the current question**: single execution authority — confirming that Harness owns the generic agent lifecycle while AI7's durable business lifecycle coordinates without a second agent loop. Much of its substance was settled indirectly by Question 22's ledger split and Question 29's composition boundary, so this may resolve quickly.
+
+Remaining after Question 31: Questions 33 through 35, plus Question 26, which waits until after Question 34. Question 32 was settled early by Question 22.

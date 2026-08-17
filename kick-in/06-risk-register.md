@@ -4,7 +4,10 @@ Status: **initial design risks**
 
 | Risk | Severity | Early control / decision gate |
 | --- | --- | --- |
-| Harness is `0.1.0-rc.5` developer preview with breaking changes | Critical | Exact dependency/source pin, compatibility adapter, controlled upgrade PR, effective-config and behavior snapshots |
+| Harness is a `0.1.0-rc.x` developer preview with breaking changes | Critical | Exact version pins with a committed lockfile, one coherent version across the selected subset, controlled one-at-a-time upgrade PR with a six-point verification contract, effective-config and behavior snapshots. ADR 0020 |
+| A dependency range or bare install pulls a stale Harness build | Critical | `latest` points at `0.0.1-rc.1` on nearly every package while `next` is `0.1.0-rc.6`. Never use `^`, `~`, or `latest`; pin exact versions and commit integrity hashes |
+| Depending on the `@deepseek-ai/dsh` CLI aggregate reinstalls the excluded generic tool surface | High | Depend only on the packages AI7's composition needs. Absence from the dependency graph makes the narrow surface structural rather than configured |
+| The Windows sandbox is weaker than the Linux Landlock path assumed by the Agent Data Root | High | Published native addons are Landlock, which is Linux-only; Windows runs through `dsh-pwsh-sandbox`/`dsh-sandbox-local`. Verify actual enforcement on Windows before describing the data root as enforced; if advisory, state that the AI7 facade is the only real boundary |
 | Two agent/task lifecycle authorities survive migration | Critical | Accept one ownership map before scaffolding; retire legacy agent loop/scheduler as Harness paths land |
 | AI7 business records are naively equated with Harness events | Critical | Enforce accepted Task Ledger/Harness Session Ledger authority plus exact Execution Bindings; never infer causality from timestamps or adjacency |
 | ~~Private AI7 source has no declared license~~ **Resolved at Question 27** | — | Repo is private, `LICENSE` declares AI7 proprietary with all rights reserved to the sole rights-holder, and reuse of predecessor assets is authorized. Per-asset provenance, sanitization review, and provider-terms checks still apply |
@@ -41,4 +44,4 @@ Status: **initial design risks**
 2. ~~Accepted meaning of full Harness capability and default exposure.~~ **Resolved at Question 29.**
 3. Accepted single-authority and record-correlation model.
 4. Windows Standalone shell, professional editor, and local-process topology.
-5. Exact dependency strategy and upgrade contract.
+5. ~~Exact dependency strategy and upgrade contract.~~ **Resolved at Question 30.**

@@ -16,7 +16,7 @@ The blanket “not accepted” label this document previously carried had become
 **Still proposals, and not to be treated as project truth:**
 
 - The product composition sequence below (pin, stack bundles, AI7 bundle, presets, client plugins) — Question 29/30.
-- The architecture-alternatives table and its “Preferred” marking — Question 30.
+- ~~The architecture-alternatives table and its “Preferred” marking~~ — **accepted at Question 30**: exactly pinned public packages, taking only the subset AI7 needs. Source fork and process/SDK boundary remain documented fallbacks rather than the plan. See [ADR 0020](../docs/adr/0020-consume-pinned-harness-package-subset.md).
 - The claim that AI7 must own the semantic quality evaluation layer. This is a well-supported audit finding about the pinned Harness, but it was reported to the owner rather than put as a question, and silence is not acceptance.
 - Every process-topology choice: gateway/Host co-location, Electron embedding, and IPC boundaries — Question 34.
 - Semantic mappings other than Run Record ↔ Session, which Question 22 settled.

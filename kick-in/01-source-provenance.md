@@ -26,6 +26,9 @@ Audit date: 2026-08-15 (Asia/Shanghai)
 ### DeepSeek Harness
 
 - The audited package family is `0.1.0-rc.5`; its README explicitly warns of compatibility-breaking changes.
+- **`0.1.0-rc.5` was never published to npm.** Verified 2026-08-17: the ladder runs `0.0.1-rc.1 → rc.2 → rc.3 → rc.5 → 0.1.0-rc.2 → rc.3 → rc.6`, skipping rc.4 and rc.5 of the 0.1.0 line. The audited commit is therefore not installable, and Question 30 sets the **consumed baseline to `0.1.0-rc.6`** while retaining `47f9438` as the audited reference. These are two different artifacts and must not be conflated.
+- **There are no git tags and no GitHub releases** — zero of each. The version string lives only in `package.json` files and on npm, so there is no release channel to track.
+- All 219 packages under `packages/*/*` publish as `@deepseek-ai/dsh-*` with an identical version ladder, but **`latest` is stale on nearly every one** (`latest = 0.0.1-rc.1`, `next = 0.1.0-rc.6`). Pins must be exact versions, never ranges. `@deepseek-ai/cordis` publishes separately at `^4.0.1`.
 - It is a large pnpm monorepo with roughly 241 package manifests and a pluginized Host/Client split.
 - The current fork adds no value beyond an owner-controlled pointer; maintaining a deep fork would inherit a large upstream merge burden.
 - The source history includes older BSD-3-Clause snapshots, current MIT material, a BSD-licensed native component, third-party notices, and vendored payload-specific obligations. Copying source is more complex than consuming current published packages.
