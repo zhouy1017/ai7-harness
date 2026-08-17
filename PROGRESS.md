@@ -142,10 +142,17 @@
 - Recorded a new Windows exposure: the published native sandbox addons are Landlock, which is Linux-only, while the Windows-only target sandboxes through a different path. Because the Agent Data Root treats an OS sandbox as its outer boundary, that mechanism's enforcement strength must be verified on Windows before the boundary is described as enforced rather than intended.
 - Added `kick-in/30-upstream-consumption-and-upgrade-contract.md` and `docs/adr/0020-consume-pinned-harness-package-subset.md`; updated `AGENTS.md`, source provenance, the risk register, the target-architecture status split, the decision map, and the kick-in index. Cleared the fifth original implementation blocker.
 
+- Completed Question 31/36. Clarified that a "second agent loop" means a second **implementation** of the model-conversation cycle, not concurrency. Ten Books worked at once means ten Harness Sessions each running an instance of the same loop, which is not a second loop. Parallel Runs across multiple Books, plus background analysis and learning work, are recorded as required product behavior rather than a tolerated exception.
+- Recorded the four accepted decisions a genuine second implementation would break — the authoritative Session Ledger, single ambiguous-outcome semantics, the capability guard, and replay-evidence completeness — so the prohibition rests on consequences rather than preference.
+- Accepted the division: AI7 schedules and Harness converses. AI7 owns which Runs exist, workflow state, continuation, concurrency, budget, Effects, and model-free background jobs such as indexing and metric computation; Harness owns turn structure, tool dispatch, in-turn retry, subagents, compaction, and Session events. AI7 business scheduling does not use Harness `schedule`, `jobs`, or workflow packages.
+- Named two consequences that parallelism makes load-bearing: an instance-level concurrency and budget governor is AI7's to own, and concurrent Runs on different Books must not share scratch or cache.
+- Accepted the owner's framing that AI7 **learns** the Harness framework rather than cloning it. Harness is built primarily for agentic coding while AI7 serves specialized Chinese literary publishing, so AI7 adopts composition machinery and rejects the coding-agent purpose, default presets and prompts, default tool set, and web surface. Recorded the principle that adopting a framework is not adopting its defaults, and that "full engine" means full composition capability rather than the full package set.
+- Added `kick-in/31-single-execution-authority.md` and `docs/adr/0021-single-execution-authority.md`; updated `AGENTS.md`, the risk register, decision map, kick-in index, and the glossary collision table. Branch D is fully resolved.
+
 ## What's next
 
-- Ask Question 31/36: single execution authority — confirming Harness owns the generic agent lifecycle while AI7's durable business lifecycle coordinates without a second agent loop. Much of its substance was settled indirectly by Question 22's ledger split and Question 29's composition boundary.
-- Then Questions 33 through 35: Python and legacy-runtime posture, the Windows Standalone shell and professional editor topology, and the first tracer slice. Question 32 was settled early by Question 22.
+- Ask Question 33/36: the Python and legacy-runtime posture. Its data half was accepted at Question 22, so what remains is whether any legacy Python domain behavior sits behind a bounded provider or process boundary during migration, or whether the new implementation is TypeScript throughout.
+- Then Questions 34 and 35: the Windows Standalone shell and professional editor topology, and the first tracer slice. Question 32 was settled early by Question 22.
 - Verify the Windows sandbox enforcement strength before describing the Agent Data Root boundary as enforced rather than intended.
 - Question 26 is deferred until after Question 34 by owner instruction, because what remains of it is largely a packaging, installer, signing, and release-evidence question that depends on the Standalone shell and process topology Question 34 decides.
 - Confirm whether the Question 16 answer of "mostly okay" endorsed the four content/evidence classes other than the one the owner corrected; that scope was never itemized.
@@ -212,6 +219,8 @@
 - Editor decisions are the oracle for taste, style, and editorial judgment, and never for factual correctness. Quality measurement and Factual Verification are separate systems, because collapsing them would let an approving editor silently certify a false claim.
 - Privacy for this product is an egress boundary, not an identity boundary. Local access by authorized personnel is unrestricted; what is controlled is every automated path that could carry a manuscript off the machine, with a configured model call the one permitted exception.
 - AI7 must operate at zero data. Cold start is a required tolerance rather than a degraded mode, so evidence thresholds may gate auto-activation but never operation.
+- AI7 learns the Harness framework rather than cloning it. Harness is built for agentic coding; AI7 serves Chinese literary publishing. Adopting a framework is not adopting its defaults — every preset, prompt, persona, and tool reaching an editorial Run must be justified for publishing work rather than inherited because it shipped.
+- "No second agent loop" constrains implementations, not instances. Parallel Runs across Books and background work are required behavior; many instances of one loop are not a second loop.
 - AI7 takes part of Harness, not all of it, and pins exact versions rather than ranges. Not depending on a package is a stronger guarantee than not wiring it: absence from the dependency graph cannot be undone by a later composition edit, while absence from the wiring can.
 - The audited Harness revision and the installable Harness artifact are different things. `0.1.0-rc.5` was audited but never published; `0.1.0-rc.6` is consumed. Design documents must never imply a single artifact.
 - AI7 composes the full Harness engine behind a narrow tool surface. The engine and the tool surface are separable, so "full capability" and least privilege are not in conflict. Capability decisions belong to AI7's composition, never to a runtime prompt that asks a non-expert user to authorize something they cannot evaluate.
@@ -225,4 +234,4 @@
 
 ## Resume Prompt
 
-Resume at Question 31/36: confirm single execution authority — Harness owning the generic agent lifecycle while AI7's durable business lifecycle coordinates without a second agent loop — then continue through Questions 33 to 35, with Question 26 waiting until after Question 34.
+Resume at Question 33/36: decide the Python and legacy-runtime posture, then Questions 34 and 35, with Question 26 waiting until after Question 34.

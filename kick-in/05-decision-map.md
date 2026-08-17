@@ -55,7 +55,7 @@ The revised estimate is **36 questions**. Question 36 was added when Question 29
 | --- | --- | --- | --- |
 | 29 | Meaning of “full Harness capability” after accepting DSH as the Agent Behavior Framework | **Accepted.** Full engine, narrow tool surface: no generic shell, roaming filesystem, or arbitrary network in an editorial Run. Agent Data Root with Run Source Scope nested inside. Editorial and Developer Capability Profiles with no self-service escalation. Everything agent-proposable, but capability expansion never self-activates | Security and profile composition — **resolved** |
 | 30 | Upstream consumption strategy | **Accepted.** Exactly pinned public npm packages, no fork and no vendored source; only the subset AI7 needs, never the `@deepseek-ai/dsh` CLI aggregate; exact versions with a committed lockfile; consumed baseline `0.1.0-rc.6` with `0.1.0-rc.5` retained as the audited-but-uninstallable reference; upstream tracked by commit and npm version since no release channel exists; SDK/ACP kept as a fallback isolation seam; six-point upgrade verification | Bootstrap and upgrade workflow — **resolved** |
-| 31 | Single execution authority | Harness owns generic agent lifecycle; AI7 durable business lifecycle coordinates without a second agent loop | Runtime ownership |
+| 31 | Single execution authority | **Accepted.** Harness owns the one agent-loop implementation; AI7 schedules and owns business lifecycle. Instances are not authorities, so parallel Runs across Books plus background work are required behavior. Business scheduling avoids Harness job/schedule/workflow packages; AI7 owns a concurrency and budget governor. Learn the framework, not its coding-agent defaults | Runtime ownership — **resolved** |
 | 32 | AI7-to-Harness record mapping | Task Ledger and Harness Session Ledger retain separate authority; exact Execution Bindings/Spans correlate them; active Operation records are retired | Persistence/event design; **accepted early by Question 22** |
 
 ## Branch E — Runtime, data, surfaces, and proof
@@ -109,6 +109,8 @@ It was re-proposed under those constraints and accepted: two Windows-only workfl
 
 **Question 30 is closed.** AI7 consumes an exactly pinned subset of public Harness packages, recorded in [30-upstream-consumption-and-upgrade-contract.md](./30-upstream-consumption-and-upgrade-contract.md) and [ADR 0020](../docs/adr/0020-consume-pinned-harness-package-subset.md). The last of the five original implementation blockers other than the Standalone topology is now cleared.
 
-**Question 31 is the current question**: single execution authority — confirming that Harness owns the generic agent lifecycle while AI7's durable business lifecycle coordinates without a second agent loop. Much of its substance was settled indirectly by Question 22's ledger split and Question 29's composition boundary, so this may resolve quickly.
+**Question 31 is closed**, recorded in [31-single-execution-authority.md](./31-single-execution-authority.md) and [ADR 0021](../docs/adr/0021-single-execution-authority.md). Branch D is now fully resolved.
 
-Remaining after Question 31: Questions 33 through 35, plus Question 26, which waits until after Question 34. Question 32 was settled early by Question 22.
+**Question 33 is the current question**: the Python and legacy-runtime posture. Its data half was accepted at Question 22, so what remains is whether any legacy Python domain behavior sits behind a bounded provider or process boundary during migration, or whether the new implementation is TypeScript throughout. Question 30's package-subset decision and Question 31's single-authority rule both narrow the plausible answers.
+
+Remaining after Question 33: Questions 34 and 35, then Question 26, which waits until after Question 34. Question 32 was settled early by Question 22.

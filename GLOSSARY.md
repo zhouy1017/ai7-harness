@@ -230,6 +230,7 @@ The inheritance audit must resolve these known collisions before definitions are
 | Agent Data Root | Run Source Scope / a general filesystem grant / a repository working tree |
 | Agent Behavior Asset | Policy Document / House Editorial Memory / model weights |
 | Behavior Evaluation Gate | Workflow Gate / Standalone Editing Sufficiency Gate / Pull-request Gate |
+| Harness agent loop | AI7 business scheduling / a limit on parallel Runs / AI7-owned workflow continuation |
 | Quality Signal | Learning Material / Memory Candidate / a rating alone |
 | Delivery Quality Metric | Factual correctness / acceptance rate alone / task authority |
 | Review Decision | Proposal Decision / Effect Approval / a Repository Development Dispatch reviewer report |

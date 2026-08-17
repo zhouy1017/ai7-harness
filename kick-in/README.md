@@ -54,7 +54,8 @@ The rest is still **proposed, not accepted**. The license, the recorded authoriz
 29. [Harness capability and authority boundary](./28-harness-capability-and-authority-boundary.md) — accepted Question 29 full-engine/narrow-surface split, Agent Data Root, profile separation, and tiered activation for agent-authored revisions.
 30. [Editorial quality metrics](./29-editorial-quality-metrics.md) — accepted Question 36 Quality Signal families, derived metrics, cold-start tolerance, low-burden feedback interaction, and the two-sided Behavior Evaluation Gate.
 31. [Upstream consumption and upgrade contract](./30-upstream-consumption-and-upgrade-contract.md) — accepted Question 30 exact-pin discipline, package-subset selection, registry evidence, and the six-point upgrade verification.
-32. [Decision records](./decisions/README.md) — accepted hard-to-reverse decisions only.
+32. [Single execution authority](./31-single-execution-authority.md) — accepted Question 31 agent-loop definition, instances-versus-authorities rule, required parallelism, scheduling split, and the learn-the-framework-not-its-defaults boundary.
+33. [Decision records](./decisions/README.md) — accepted hard-to-reverse decisions only.
 
 ## Decision discipline
 

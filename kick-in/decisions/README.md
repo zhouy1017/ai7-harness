@@ -22,6 +22,7 @@ Accepted system-wide architecture decisions live under [`docs/adr/`](../../docs/
 - [ADR 0018: Tier activation for agent-authored revisions](../../docs/adr/0018-tiered-activation-for-agent-authored-revisions.md)
 - [ADR 0019: Measure editorial quality from editor decisions and gate behavior on it](../../docs/adr/0019-editorial-quality-metrics-and-behavior-evaluation-gate.md)
 - [ADR 0020: Consume a pinned subset of Harness packages](../../docs/adr/0020-consume-pinned-harness-package-subset.md)
+- [ADR 0021: Keep one agent-loop implementation and schedule from AI7](../../docs/adr/0021-single-execution-authority.md)
 
 Create a record here only when a choice is hard to reverse, surprising without context, and the result of a real trade-off. Use sequential names such as `0001-fresh-ai7-repository.md` and keep the record concise: what was decided, why, meaningful rejected alternatives, and any non-obvious consequence.
 
