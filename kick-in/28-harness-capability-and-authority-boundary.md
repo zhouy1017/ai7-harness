@@ -59,10 +59,10 @@ Three constraints on the root:
 
 | Profile | Shipped | Surface |
 | --- | --- | --- |
-| **Editorial Profile** | Yes — what every user gets | Domain capabilities only |
-| **Developer Profile** | Never to editors | Full generic tool surface; what Repository Development Dispatch workers run under |
+| **Editorial Capability Profile** | Yes — what every user gets | Domain capabilities only |
+| **Developer Capability Profile** | Never to editors | Full generic tool surface; what Repository Development Dispatch workers run under |
 
-**A user cannot escalate themselves into the Developer Profile.** It is a build and repository artifact, not a settings toggle. A self-service escalation path would hand exactly the expert judgment to exactly the person the user story says does not have it.
+**A user cannot escalate themselves into the Developer Capability Profile.** It is a build and repository artifact, not a settings toggle. A self-service escalation path would hand exactly the expert judgment to exactly the person the user story says does not have it.
 
 A middle "power user" profile is **deferred**. It has no demonstrated demand and recreates the judgment burden. Trigger: a named workflow that genuinely requires it.
 
@@ -107,7 +107,7 @@ Accepted with owner revisions:
 - domain-shaped capabilities only, with bounded import/export and provenance-bearing research;
 - users reach all their own material without filesystem literacy, and retrievability is guaranteed;
 - an Agent Data Root gives the agent real filesystem permission inside it and nothing outside, with Run Source Scope nested inside as the semantic boundary;
-- two profiles, Editorial and Developer, with no self-service escalation and a middle profile deferred; and
+- two capability profiles, Editorial and Developer, with no self-service escalation and a middle profile deferred; and
 - everything is proposable by agents while capability expansion never self-activates, with all revisions recorded and developer-reviewed.
 
 See [ADR 0017](../docs/adr/0017-full-engine-narrow-tool-surface.md) and [ADR 0018](../docs/adr/0018-tiered-activation-for-agent-authored-revisions.md).

@@ -262,3 +262,13 @@ _Avoid_: Approval, Effect Approval, publication receipt
 A professional editorial judgment at a review gate, such as accept, accept with conditions, revise, defer, or reject.
 _中文_: 编辑评审决定
 _Avoid_: Effect Approval, factual proof
+
+**Quality Signal**:
+A captured, attributable feedback event from explicit editor feedback, editor-authored content, or a proposal decision/version difference. Captured globally on the local instance by default and attributed for per-Book, per-editor, or per-house aggregation.
+_中文_: 质量信号
+_Avoid_: Learning Material, Memory Candidate, a rating alone, task authority
+
+**Delivery Quality Metric**:
+A versioned measure derived from Quality Signals over a defined window and scope, covering verbatim acceptance, revision distance, survival to delivery, dissatisfaction by Editorial Dimension, and phase-weighted workload displacement. Aggregating it globally never grants global retrieval access.
+_中文_: 交付质量度量
+_Avoid_: Editor-comparable Delivery Quality as a goal statement, factual correctness, acceptance rate alone

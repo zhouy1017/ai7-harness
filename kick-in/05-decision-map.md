@@ -53,7 +53,7 @@ The revised estimate is **36 questions**. Question 36 was added when Question 29
 
 | Question | Decision | Recommended answer | Blocks |
 | --- | --- | --- | --- |
-| 29 | Meaning of “full Harness capability” after accepting DSH as the Agent Behavior Framework | **Accepted.** Full engine, narrow tool surface: no generic shell, roaming filesystem, or arbitrary network in an editorial Run. Agent Data Root with Run Source Scope nested inside. Editorial and Developer profiles with no self-service escalation. Everything agent-proposable, but capability expansion never self-activates | Security and profile composition — **resolved** |
+| 29 | Meaning of “full Harness capability” after accepting DSH as the Agent Behavior Framework | **Accepted.** Full engine, narrow tool surface: no generic shell, roaming filesystem, or arbitrary network in an editorial Run. Agent Data Root with Run Source Scope nested inside. Editorial and Developer Capability Profiles with no self-service escalation. Everything agent-proposable, but capability expansion never self-activates | Security and profile composition — **resolved** |
 | 30 | Upstream consumption strategy | Fresh repo + exactly pinned public packages; process boundary or source fork only if a seam fails | Bootstrap and upgrade workflow |
 | 31 | Single execution authority | Harness owns generic agent lifecycle; AI7 durable business lifecycle coordinates without a second agent loop | Runtime ownership |
 | 32 | AI7-to-Harness record mapping | Task Ledger and Harness Session Ledger retain separate authority; exact Execution Bindings/Spans correlate them; active Operation records are retired | Persistence/event design; **accepted early by Question 22** |
@@ -70,7 +70,7 @@ The revised estimate is **36 questions**. Question 36 was added when Question 29
 
 | Question | Decision | Recommended answer | Blocks |
 | --- | --- | --- | --- |
-| 36 | Automated editorial quality metrics and the Behavior Evaluation Gate | Three Quality Signal families — explicit feedback, editor-authored content, and decision/version differences — yielding verbatim acceptance, revision distance, survival, dissatisfaction by dimension, and workload displacement; a two-sided gate combining fixed-corpus replay with production metrics; editor decisions are the oracle for taste but never for factual correctness | Agent Behavior Improvement activation; **proposed, not accepted** |
+| 36 | Automated editorial quality metrics and the Behavior Evaluation Gate | **Accepted.** Three Quality Signal families captured globally on the local instance and attributed per Book/editor/house; five derived metrics with workload displacement as phase-weighted edit volume and time tracking rejected; N = 0 cold start required with sample size gating auto-activation only; actively queried non-blocking one-click reason chips with anti-steering mitigations; privacy as an egress boundary rather than an identity boundary; editor decisions the oracle for taste but never for factual correctness | Agent Behavior Improvement activation — **resolved** |
 
 ## Dependency view
 
@@ -105,6 +105,8 @@ It was re-proposed under those constraints and accepted: two Windows-only workfl
 
 **Question 29 is closed**, resolving the last unaddressed Critical risk-register entry about generic tool exposure. See [28-harness-capability-and-authority-boundary.md](./28-harness-capability-and-authority-boundary.md), [ADR 0017](../docs/adr/0017-full-engine-narrow-tool-surface.md), and [ADR 0018](../docs/adr/0018-tiered-activation-for-agent-authored-revisions.md).
 
-**Question 36 is newly opened and is the current question.** Question 29 established that agent-authored revisions cannot activate without an evaluation gate, and the pinned Harness has no general quality evaluator, so AI7 must own one. The proposal is in [29-editorial-quality-metrics.md](./29-editorial-quality-metrics.md). It is large enough to decide on its own rather than as a sub-clause of the capability boundary, which is why the estimate rises from 35 to 36.
+**Question 36 is closed.** The metric system and the two-sided Behavior Evaluation Gate are accepted in [29-editorial-quality-metrics.md](./29-editorial-quality-metrics.md) and [ADR 0019](../docs/adr/0019-editorial-quality-metrics-and-behavior-evaluation-gate.md). Agent Behavior Improvement now has both a mechanism and a measure.
 
-Remaining after Question 36: Questions 30 through 35, plus Question 26, which waits until after Question 34.
+**Question 30 is the current question**: the upstream consumption strategy — pinned public packages, a process or SDK boundary, or a source fork — and the upgrade contract that goes with it. Harness is a `0.1.0-rc.5` developer preview whose README warns of compatibility-breaking changes, which makes this the highest-severity remaining risk-register entry.
+
+Remaining after Question 30: Questions 31 through 35, plus Question 26, which waits until after Question 34.

@@ -372,15 +372,15 @@ Reconstruction or return of existing durable records without invoking the model,
 _中文_: 重放
 _Avoid_: Retry, re-execution, regeneration
 
-**Editorial Profile**:
+**Editorial Capability Profile**:
 The shipped capability profile for editorial users, exposing domain-shaped AI7 Capabilities only and never a generic shell, roaming filesystem, or arbitrary network tool. Users cannot escalate out of it.
 _中文_: 编辑端能力档案
-_Avoid_: Editorial Profile in the dimension sense, Harness Profile, a settings toggle
+_Avoid_: Editorial Profile (the Editorial-context dimension defaults), Harness Profile, a settings toggle
 
-**Developer Profile**:
+**Developer Capability Profile**:
 The unshipped capability profile carrying the generic tool surface, used to build AI7 and by Repository Development Dispatch workers. A build and repository artifact, never a product setting.
 _中文_: 开发端能力档案
-_Avoid_: Editorial Profile, an in-product power-user mode, an escalation path
+_Avoid_: Editorial Capability Profile, an in-product power-user mode, an escalation path
 
 **Agent Data Root**:
 The AI7-owned directory inside which the agent holds genuine filesystem permission and outside which it has none. Contains governed Book stores plus a per-Run unscoped scratch area; excludes the Protected Secret Store and lives outside any repository working tree.
@@ -391,3 +391,8 @@ _Avoid_: Run Source Scope, a general filesystem grant, a repository working tree
 A versioned prompt, instructional text, task guidance, or bounded ranking parameter that shapes output quality and never grants authority. Agent-proposable, with auto-activation limited to non-expansive calibration inside a user-approved envelope.
 _中文_: 智能体行为资产
 _Avoid_: Policy Document, House Editorial Memory, model weights, hidden runtime configuration
+
+**Behavior Evaluation Gate**:
+The two-sided check an Agent Behavior Asset, Policy Document, or composition revision must pass before activation: deterministic replay against a fixed scenario corpus for regression, plus production Delivery Quality Metrics for real-world gain. Sample size below the confidence threshold permits proposal but never auto-activation.
+_中文_: 行为评估关口
+_Avoid_: Workflow Gate, Standalone Editing Sufficiency Gate, the Pull-request Gate, Effect Approval
