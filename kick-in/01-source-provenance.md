@@ -9,6 +9,7 @@ Audit date: 2026-08-15 (Asia/Shanghai)
 | Source | Visibility and lineage | Audited revision | License at revision | Planning role |
 | --- | --- | --- | --- | --- |
 | [AI7 Reborn](https://github.com/zhouy1017/ai7-reborn-ai) | Private, independent repo; default branch `dev` | `3e6e9ac772b7f07832154fa39d7de8a4deca51b1` | No `LICENSE`, `COPYING`, `NOTICE`, or package license | Product/domain reference, selective migration source, behavioral evidence |
+| AI7 Redesign (local `codebase/ai7-redesign`) | Private; branch `main`; **strict ancestor of AI7 Reborn** | `fc2f4d85afd2a5372c89f3c755727df54b1b2cb0` (2026-07-04) | Same — no declared license | Authorized copy source, but holds nothing unique |
 | [Zhou DeepSeek Harness fork](https://github.com/zhouy1017/deepseek-harness) | Public fork of `deepseek-ai/deepseek-harness`; no fork-only commits at audit | `47f943859bef60e4160492346772ded9b24f765a` | MIT, plus third-party notices and separately licensed vendored/native content | Candidate execution foundation |
 | [DeepSeek Harness upstream](https://github.com/deepseek-ai/deepseek-harness) | Public upstream | Same revision as the fork at audit | MIT at this revision | True upstream and upgrade source |
 
@@ -46,6 +47,16 @@ Start a fresh, initially private AI7 repository and record both pins as external
 **Fully accepted at Question 27.** AI7 is proprietary with all rights reserved to the sole rights-holder (`LICENSE`), and that same owner is the sole rights-holder of the private predecessor and authorizes reuse of its code, documentation, tests, and fixtures for AI7. Source copying is no longer blocked on authority — the per-asset provenance ledger below, sanitization review, and provider-terms checks all still apply, and upstream third-party obligations must be verified per component rather than assumed to extend to an AI7-branded distribution.
 
 Sample manuscripts are authorized separately and more narrowly: real manuscripts, usable for AI7 only while kept private and local, never committed or distributed, with outbound transmission an ungranted separate decision. See [ADR 0016](../docs/adr/0016-proprietary-license-and-local-only-sample-manuscripts.md).
+
+### Authorized copy sources
+
+Both local predecessor checkouts may be read and copied from as needed: `C:\Users\Chooo\codebase\ai7-reborn-ai` and `C:\Users\Chooo\codebase\ai7-redesign`.
+
+`ai7-redesign@fc2f4d8` was verified to be a **strict ancestor** of `ai7-reborn-ai@3e6e9ac` — its HEAD commit is reachable from the reborn HEAD, and `ai7-reborn-ai/package.json` still declares `"name": "ai7-redesign"`. AI7 Reborn is therefore the continuation of the same line, not an independent project, and everything in the redesign checkout already exists in the reborn history at or before that commit. Prefer the audited `ai7-reborn-ai` pin; use the redesign checkout only as a convenient earlier snapshot.
+
+**AI7 Redesign was never audited.** No keep/adapt/drop analysis, capability inventory, or behavioral-evidence review was performed against it. Its authorization to be copied from is not a statement that its contents have been evaluated.
+
+Manuscripts are excluded from this grant. They are governed by [ADR 0016](../docs/adr/0016-proprietary-license-and-local-only-sample-manuscripts.md) and never enter any repository.
 
 The upstream-consumption strategy remains a recommendation only.
 

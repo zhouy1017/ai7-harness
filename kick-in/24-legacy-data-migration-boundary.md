@@ -71,17 +71,19 @@ The legacy `public-synthetic-corpus-v1.json` must not be byte-copied merely beca
 
 ### Authorization and the local-only constraint
 
-Accepted at Question 27: the existing sample Books are **real manuscripts**, and the owner holds authorization to use them for the AI7 project. That authorization is conditional and narrow — **they must be kept private and local**.
+Accepted at Question 27: the existing sample Books are **real manuscripts**, and the owner holds authorization to use them for the AI7 project. The constraint governs **persistence and publication, not processing**.
 
-Concretely, a private sample Book:
+**Processing is permitted.** Sending manuscript content to a configured model provider is a normal, intended AI7 function — it is the basic feature of the product, not an exception requiring separate justification. It is controlled processing under the Provider Processing Policy and the Plan Envelope's declared Outbound Data Category. A configured model call is not public release and never becomes one.
 
-- is never committed to any repository, in any form, in history or working tree. They are git-ignored in all three legacy repositories today and no copy is tracked; keep it that way;
+**Storage in a repository is prohibited, and private visibility does not cure it.** A sample manuscript:
+
+- never enters any repository, public or private, in history or working tree. They are git-ignored in all three legacy repositories today with zero tracked files; keep it that way. This design room excludes manuscript formats by pattern in `.gitignore`;
 - never enters hosted CI, a hosted runner, a build artifact, a distributable fixture, or the shipped product;
 - never becomes mock-provider evidence, and never contributes a corpus, cassette, or fingerprint. Provider Rehearsal accepts public-synthetic inputs only;
 - is never a substitute for the regenerated public-synthetic corpus; and
-- carries no redistribution right. Authorization to use is not authorization to publish, share, or transmit.
+- carries no redistribution right, and reaches no public channel without Public Release Permission.
 
-**Outbound transmission is a separate decision and is not implied.** Under the accepted Question 21 boundary, reading material within a Run Source Scope never by itself permits sending it outward, and Provider Processing Policy is distinct from External Export Policy. "Private and local" is therefore read conservatively: a private sample Book stays on the owner's device, and sending its text to any external model service — including during ordinary local development against a live provider — requires a separate explicit decision that this authorization does not grant.
+Authorization to use and to process is not authorization to store, publish, or redistribute. The accepted Question 21 rule still holds structurally — a Run Source Scope does not by itself confer transmission authority — but for manuscripts that authority is granted by the Provider Processing Policy as a matter of ordinary product function.
 
 ### Eligibility
 
