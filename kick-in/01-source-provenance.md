@@ -43,7 +43,11 @@ Start a fresh, initially private AI7 repository and record both pins as external
 
 **Partially accepted on 2026-08-17.** By owner instruction, this design room was initialized with a fresh unrelated history and published as private `zhouy1017/ai7-harness` on branch `main`. Neither input repository's history was merged and no product source was copied; the initial commit contains 58 Markdown documents.
 
-Still not accepted, and still blocking any source copy: the repository license, and the recorded rights-holder/authorization for reusing assets from the unlicensed private AI7 repository. The upstream-consumption strategy remains a recommendation only.
+**Fully accepted at Question 27.** AI7 is proprietary with all rights reserved to the sole rights-holder (`LICENSE`), and that same owner is the sole rights-holder of the private predecessor and authorizes reuse of its code, documentation, tests, and fixtures for AI7. Source copying is no longer blocked on authority — the per-asset provenance ledger below, sanitization review, and provider-terms checks all still apply, and upstream third-party obligations must be verified per component rather than assumed to extend to an AI7-branded distribution.
+
+Sample manuscripts are authorized separately and more narrowly: real manuscripts, usable for AI7 only while kept private and local, never committed or distributed, with outbound transmission an ungranted separate decision. See [ADR 0016](../docs/adr/0016-proprietary-license-and-local-only-sample-manuscripts.md).
+
+The upstream-consumption strategy remains a recommendation only.
 
 ## Source-copy rules
 

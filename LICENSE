@@ -1,0 +1,20 @@
+Copyright (c) 2026 zhouy1017. All rights reserved.
+
+AI7 is proprietary. It is not open-source software and carries no
+open-source grant.
+
+No permission is granted to any person to use, copy, modify, merge,
+publish, distribute, sublicense, or sell any part of this repository or
+its derivatives, except by separate written permission from the
+copyright holder.
+
+This repository contains and refers to unpublished editorial material.
+Nothing in this repository constitutes Public Release Permission for any
+manuscript, source, or derivative work.
+
+Third-party components consumed by AI7 remain under their own licenses.
+DeepSeek Harness and its dependencies are used under their respective
+terms, and their notices are reproduced in THIRD-PARTY-NOTICES when AI7
+distributes any build. Some upstream vendored payload authorizations may
+be identity- or distribution-scoped and must be verified rather than
+assumed to extend to an AI7-branded distribution.

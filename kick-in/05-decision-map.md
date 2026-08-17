@@ -44,7 +44,7 @@ The revised estimate is **35 questions**. Question 6 replaced the all-at-once in
 
 | Question | Decision | Recommended answer | Blocks |
 | --- | --- | --- | --- |
-| 27 | New repo visibility, license, and authority to reuse private AI7 assets | Start private; record rights-holder; choose license before any public copy | Git init/remote, history, source copying |
+| 27 | New repo visibility, license, and authority to reuse private AI7 assets | **Accepted.** Private repository; proprietary `LICENSE`, all rights reserved to the sole rights-holder; predecessor asset reuse authorized; sample manuscripts authorized for AI7 use only while private and local, with outbound transmission a separate ungranted decision | Git init/remote, history, source copying — **no longer blocking** |
 | 28 | AI7 branding, product-language policy, and relationship to Harness | AI7 remains the product identity; Harness is the execution foundation, not the user-facing brand | Repository, docs, and release naming |
 
 **Question 27 is partially resolved.** On 2026-08-17 the owner directed that this design room be initialized as a Git repository and published as private `zhouy1017/ai7-harness` on branch `main`. That settles repository existence and visibility only. Two parts remain open and still block source copying: the license, and the recorded rights-holder/authorization for reusing assets from the unlicensed private `ai7-reborn-ai`. This initialization also ran ahead of the documented Phase 0 exit gate in [the migration workflow](./04-migration-workflow.md); that is a deliberate owner sequencing choice, not evidence that Phase 0 is complete.
@@ -93,4 +93,6 @@ It was re-proposed under those constraints and accepted: two Windows-only workfl
 
 **Question 26 is deferred until after Question 34, by owner instruction.** Its data half is accepted. What remains is largely a packaging, installer, signing, and release-evidence question, and Question 34 decides the Standalone shell and process topology that packaging would serve. Deciding what installer evidence to keep before knowing what it packages would invert the dependency. Questions 23 and 24 already removed the Word packaging and release-verification portions of this row.
 
-**Question 27 is the current question**, reduced to its two unresolved halves: the repository license, and the recorded rights-holder and authorization for reusing assets from the unlicensed private AI7 repository. Repository visibility was settled on 2026-08-17. Both remaining halves are Critical entries in [the risk register](./06-risk-register.md) and continue to block any source, fixture, or visual-asset copy.
+**Question 27 is closed.** AI7 is proprietary with all rights reserved to the sole rights-holder, predecessor asset reuse is authorized, and sample manuscripts are authorized for AI7 use only while private and local. See [ADR 0016](../docs/adr/0016-proprietary-license-and-local-only-sample-manuscripts.md) and the `LICENSE`. This clears the last Critical authority blocker on source copying; per-asset provenance, sanitization, and provider-terms checks still apply.
+
+**Question 28 is the current question**: AI7 branding, product-language policy, and the stated relationship to Harness. It is the smallest remaining governance item and unblocks repository, documentation, and release naming.
