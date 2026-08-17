@@ -149,10 +149,20 @@
 - Accepted the owner's framing that AI7 **learns** the Harness framework rather than cloning it. Harness is built primarily for agentic coding while AI7 serves specialized Chinese literary publishing, so AI7 adopts composition machinery and rejects the coding-agent purpose, default presets and prompts, default tool set, and web surface. Recorded the principle that adopting a framework is not adopting its defaults, and that "full engine" means full composition capability rather than the full package set.
 - Added `kick-in/31-single-execution-authority.md` and `docs/adr/0021-single-execution-authority.md`; updated `AGENTS.md`, the risk register, decision map, kick-in index, and the glossary collision table. Branch D is fully resolved.
 
+- Audited the legacy Python runtime before deciding Question 33 and found the working premise was wrong. Its 62 files carry **zero third-party dependencies** — no `requirements.txt`, no `python-docx`, no PDF library — and DOCX is handled with `zipfile` plus `xml.etree`, treating it as the zip of XML it is. Python was the backend implementation language rather than a document-processing capability, and the packaged interpreter existed only to ship that backend all-in-one.
+- Completed Question 33/36. Accepted TypeScript and Node throughout with no embedded Python. Every legacy capability has a direct Node equivalent, mostly stdlib to stdlib, and the business logic is being re-expressed from contract regardless under ADR 0006 — so keeping Python would port nothing while carrying a second runtime, roughly 50 to 100 MB, a second security surface, and cross-language IPC. Reconsideration trigger is narrow: a named capability with no adequate Node implementation enters as a bounded native module or sidecar under its own ADR, never as a general-purpose interpreter.
+- Accepted a portable all-in-one Windows folder as the only V1 release channel, which also settles the release-channel half of Question 26. No installer, no admin rights, no registry writes — the intended users are publishing professionals on managed corporate machines, so removing the installer removes an IT gate.
+- Accepted, by owner decision overriding the recommendation, that the Agent Data Root lives **inside** the AI7 folder so an installation is genuinely self-contained. Program files and user data separate within it so updates replace `app/` and preserve `data/`, and the data root carries a version marker so an older build refuses newer data.
+- Kept the Protected Secret Store outside the folder as the deliberate "when possible" exception: a portable folder is designed to be copied, and a copied folder carrying credentials to another machine would be a real leak.
+- Recorded the residual sync exposure with detection rather than a different default. A portable folder on a synced cloud drive would carry manuscripts off the machine; this does not violate the Question 36 egress rule as written, since that rule governs paths AI7 automates and folder placement is a user decision, so AI7 warns clearly without blocking. ADR 0016's prohibition now extends to the whole AI7 folder, which must stay outside any repository working tree.
+- Specified an unwritable-location fallback to `%LOCALAPPDATA%\AI7` with a plain notice, and retained executable signing despite having no installer, since SmartScreen is a hard stop for a non-expert user on a corporate machine.
+- Amended Question 24's `release` proof from install/launch/journey/uninstall to extract, first-run data-root creation, launch, canonical journey, and removal leaving no residue.
+- Added `kick-in/32-runtime-language-and-release-channel.md`, `docs/adr/0022-typescript-only-runtime.md`, and `docs/adr/0023-portable-release-with-self-contained-data-root.md`; updated `AGENTS.md`, the risk register, decision map, Question 24 contract, and both indexes.
+
 ## What's next
 
-- Ask Question 33/36: the Python and legacy-runtime posture. Its data half was accepted at Question 22, so what remains is whether any legacy Python domain behavior sits behind a bounded provider or process boundary during migration, or whether the new implementation is TypeScript throughout.
-- Then Questions 34 and 35: the Windows Standalone shell and professional editor topology, and the first tracer slice. Question 32 was settled early by Question 22.
+- Ask Question 34/36: the Windows Standalone shell and professional editor topology. It is the last remaining implementation blocker, Question 26's residual packaging mechanics wait behind it, and Question 35's tracer slice depends on it.
+- Then Question 35, the first tracer slice, and finally Question 26's residual packaging detail.
 - Verify the Windows sandbox enforcement strength before describing the Agent Data Root boundary as enforced rather than intended.
 - Question 26 is deferred until after Question 34 by owner instruction, because what remains of it is largely a packaging, installer, signing, and release-evidence question that depends on the Standalone shell and process topology Question 34 decides.
 - Confirm whether the Question 16 answer of "mostly okay" endorsed the four content/evidence classes other than the one the owner corrected; that scope was never itemized.
@@ -219,6 +229,8 @@
 - Editor decisions are the oracle for taste, style, and editorial judgment, and never for factual correctness. Quality measurement and Factual Verification are separate systems, because collapsing them would let an approving editor silently certify a false claim.
 - Privacy for this product is an egress boundary, not an identity boundary. Local access by authorized personnel is unrestricted; what is controlled is every automated path that could carry a manuscript off the machine, with a configured model call the one permitted exception.
 - AI7 must operate at zero data. Cold start is a required tolerance rather than a degraded mode, so evidence thresholds may gate auto-activation but never operation.
+- AI7 is TypeScript and Node throughout; no interpreter ships. A named capability gap enters as a bounded native module or sidecar under its own ADR, never as a general-purpose embedded runtime.
+- AI7 ships portable and self-contained: data inside the folder, secrets outside it. A portable folder is designed to be copied, so anything that must not travel with it stays out.
 - AI7 learns the Harness framework rather than cloning it. Harness is built for agentic coding; AI7 serves Chinese literary publishing. Adopting a framework is not adopting its defaults — every preset, prompt, persona, and tool reaching an editorial Run must be justified for publishing work rather than inherited because it shipped.
 - "No second agent loop" constrains implementations, not instances. Parallel Runs across Books and background work are required behavior; many instances of one loop are not a second loop.
 - AI7 takes part of Harness, not all of it, and pins exact versions rather than ranges. Not depending on a package is a stronger guarantee than not wiring it: absence from the dependency graph cannot be undone by a later composition edit, while absence from the wiring can.
@@ -234,4 +246,4 @@
 
 ## Resume Prompt
 
-Resume at Question 33/36: decide the Python and legacy-runtime posture, then Questions 34 and 35, with Question 26 waiting until after Question 34.
+Resume at Question 34/36: decide the Windows Standalone shell and professional editor topology, then Question 35's tracer slice and Question 26's residual packaging detail.

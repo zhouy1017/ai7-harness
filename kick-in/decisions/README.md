@@ -23,6 +23,8 @@ Accepted system-wide architecture decisions live under [`docs/adr/`](../../docs/
 - [ADR 0019: Measure editorial quality from editor decisions and gate behavior on it](../../docs/adr/0019-editorial-quality-metrics-and-behavior-evaluation-gate.md)
 - [ADR 0020: Consume a pinned subset of Harness packages](../../docs/adr/0020-consume-pinned-harness-package-subset.md)
 - [ADR 0021: Keep one agent-loop implementation and schedule from AI7](../../docs/adr/0021-single-execution-authority.md)
+- [ADR 0022: Ship a TypeScript-only runtime with no embedded Python](../../docs/adr/0022-typescript-only-runtime.md)
+- [ADR 0023: Ship a portable release with a self-contained data root](../../docs/adr/0023-portable-release-with-self-contained-data-root.md)
 
 Create a record here only when a choice is hard to reverse, surprising without context, and the result of a real trade-off. Use sequential names such as `0001-fresh-ai7-repository.md` and keep the record concise: what was decided, why, meaningful rejected alternatives, and any non-obvious consequence.
 

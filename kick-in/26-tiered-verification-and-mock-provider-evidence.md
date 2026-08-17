@@ -17,7 +17,7 @@ The reduction is deliberate. The proposal it replaced specified four active tier
 | Workflow | Trigger | Platform and content | Budget |
 | --- | --- | --- | --- |
 | **`pr`** — the only required gate | `pull_request` (open, synchronize, reopen, ready-for-review) and push to `main`. **No path filters**: a filtered gate can report green on an untested change. Superseded runs cancel per PR | One job on `windows-2025`. Format, typecheck/build, all provider-free unit and contract tests, and one assembled mock-provider replay through the AI7 test driver | Target ≤10 minutes; hard timeout 20 |
-| **`release`** | A `v*` tag | One job on `windows-2025`. Build the Windows package once, then prove install → launch → canonical Standalone journey → uninstall against that exact package. Fail closed unless a green `pr` run exists for the same source SHA | Target ≤30 minutes |
+| **`release`** | A `v*` tag | One job on `windows-2025`. Build the Windows package once, then prove extract → first-run data-root creation → launch → canonical Standalone journey → removal leaving no residue outside the folder, against that exact package. Fail closed unless a green `pr` run exists for the same source SHA | Target ≤30 minutes |
 
 Budgets are calibration, not contracts. They were set before any code existed and must be revisited once a real suite is measurable.
 
@@ -108,6 +108,10 @@ The new corpus must use licensed or purpose-written Chinese publishing scenarios
 | Live-provider calls in required CI | **Prohibit** | Provider Rehearsal is opt-in, local, and non-gating |
 | Word, COM, and dual-surface verification lanes | **Drop from V1** | Historical and contingency evidence only; never quarantined as if still required |
 | Mock fixtures in the production package | **Drop by default** | Development and test only, unless a later ADR creates an offline demo |
+
+### Amended at Question 33
+
+The release proof originally read install → launch → journey → uninstall. Question 33 made a portable folder the only V1 channel, so there is no install or uninstall step; the sequence above replaces it. Executable signing remains required.
 
 ## Question 24 decision
 

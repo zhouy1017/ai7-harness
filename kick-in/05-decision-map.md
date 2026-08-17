@@ -62,7 +62,7 @@ The revised estimate is **36 questions**. Question 36 was added when Question 29
 
 | Question | Decision | Recommended answer | Blocks |
 | --- | --- | --- | --- |
-| 33 | Python and legacy-data posture | Keep selected domain behavior behind bounded providers first; legacy production-data migration is already excluded, with only the accepted allowlist exceptions | Process topology, packaging, storage; **data half accepted** |
+| 33 | Python and legacy-data posture | **Accepted.** TypeScript and Node throughout with no embedded Python; the legacy Python had zero third-party dependencies and handled DOCX with stdlib zip/XML, so nothing required it. Portable all-in-one folder is the only V1 channel, with the Agent Data Root inside the AI7 folder and the Protected Secret Store outside it | Process topology, packaging, storage — **resolved** |
 | 34 | New Windows Standalone shell and professional editor topology | Design a new AI7-owned desktop editor/workbench over one local authority; reuse no legacy UI/editor source or layout | Client, editor, gateway, installer |
 | 35 | First tracer slice and exit gate | Standalone-only read-only, source-grounded Q&A over one selected synthetic DOCX with real + replay adapters and restart proof | PRD and issue decomposition |
 
@@ -111,6 +111,8 @@ It was re-proposed under those constraints and accepted: two Windows-only workfl
 
 **Question 31 is closed**, recorded in [31-single-execution-authority.md](./31-single-execution-authority.md) and [ADR 0021](../docs/adr/0021-single-execution-authority.md). Branch D is now fully resolved.
 
-**Question 33 is the current question**: the Python and legacy-runtime posture. Its data half was accepted at Question 22, so what remains is whether any legacy Python domain behavior sits behind a bounded provider or process boundary during migration, or whether the new implementation is TypeScript throughout. Question 30's package-subset decision and Question 31's single-authority rule both narrow the plausible answers.
+**Question 33 is closed**, recorded in [32-runtime-language-and-release-channel.md](./32-runtime-language-and-release-channel.md), [ADR 0022](../docs/adr/0022-typescript-only-runtime.md), and [ADR 0023](../docs/adr/0023-portable-release-with-self-contained-data-root.md). It also settled the release-channel half of Question 26.
 
-Remaining after Question 33: Questions 34 and 35, then Question 26, which waits until after Question 34. Question 32 was settled early by Question 22.
+**Question 34 is the current question**: the Windows Standalone shell and professional editor topology. It is the last remaining implementation blocker, Question 26's residual packaging mechanics wait behind it, and Question 35's tracer slice depends on it.
+
+Remaining after Question 34: Question 35, then Question 26.
