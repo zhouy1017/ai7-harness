@@ -119,8 +119,8 @@
 
 ## What's next
 
-- Ask Question 26/35: the remaining legacy implementation, packaging, release, and Git-specific documentation dispositions. The data half was settled at Question 22; what stays open is which packaging, installer, signing, release, and repository-governance evidence is preserved, adapted, or archived.
-- Resolve the remaining halves of Question 27: repository license and the recorded rights-holder/authorization for reusing assets from the unlicensed private AI7 repository. Both still block any source copy.
+- Ask Question 27/35, reduced to its two unresolved halves: the repository license, and the recorded rights-holder and authorization for reusing assets from the unlicensed private AI7 repository. Both are Critical risk-register entries and still block any source, fixture, or visual-asset copy.
+- Question 26 is deferred until after Question 34 by owner instruction, because what remains of it is largely a packaging, installer, signing, and release-evidence question that depends on the Standalone shell and process topology Question 34 decides.
 - Confirm whether the Question 16 answer of "mostly okay" endorsed the four content/evidence classes other than the one the owner corrected; that scope was never itemized.
 - Keep Word vocabulary and implementation outside the active V1 domain; reconsider it only through a later proportional-remedy ADR after failure of the Standalone Editing Sufficiency Gate.
 - After the interview, promote only accepted hard-to-reverse choices into concise decision records and finalize the migration handoff.
@@ -190,4 +190,4 @@
 
 ## Resume Prompt
 
-Resume at Question 26/35: decide which legacy implementation, packaging, installer, signing, release, and Git-specific documentation evidence is preserved, adapted, or archived, given that the legacy production-data boundary and the two-workflow Windows-only verification contract are already accepted.
+Resume at Question 27/35: decide the repository license and record the rights-holder and authorization for reusing assets from the unlicensed private AI7 repository, keeping code-reuse rights separate from the rights covering sample manuscripts; Question 26 waits until after Question 34.

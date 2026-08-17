@@ -38,7 +38,7 @@ The revised estimate is **35 questions**. Question 6 replaced the all-at-once in
 | 23 | Standalone/Word parity, exact host binding, drift, and synchronization | Ship Standalone-only V1; make professional editing release-critical; defer Word as an evidence-triggered future alternative | **Accepted with owner revision** | Standalone architecture and journeys |
 | 24 | Exact verification tiers and generated mock-provider corpus | Two workflows, `pr` and `release`, both single-job on `windows-2025`; no Ubuntu lane, nightly, Test Catalog, or quarantine registry in V1, each deferred behind a named trigger; focused and rehearsal stay local; keep provider-free CI, the request-fingerprint guard, a regenerated corpus, and a five-field release receipt | **Accepted with owner revision** | Testing strategy |
 | 25 | Local development multi-agent dispatch contract | Three roles — Commander, Worker, independent Reviewer; Codex normally commands at top capability; workers prefer Claude with bidirectional fallback; reviewer task class at least that of the work reviewed, cross-provider by default; provider-neutral operating rules with one binding table as the sole provider-specific artifact; legacy pilot and host connector rejected as baselines | **Accepted with owner revisions** | Repository-agent runbook |
-| 26 | Legacy implementation, data, packaging, release, and Git-specific documentation | Production-data migration is excluded except protected credentials, mock-provider evidence, and selected test sample Books; remaining implementation/packaging/release/Git evidence stays selective | **Data boundary accepted; other detail open** | Migration and repository governance |
+| 26 | Legacy implementation, data, packaging, release, and Git-specific documentation | Production-data migration is excluded except protected credentials, mock-provider evidence, and selected test sample Books; remaining implementation/packaging/release/Git evidence stays selective | **Data boundary accepted; remainder deferred until after Question 34** | Migration and repository governance |
 
 ## Branch C — Repository identity and governance
 
@@ -70,10 +70,11 @@ The revised estimate is **35 questions**. Question 6 replaced the all-at-once in
 
 ```mermaid
 flowchart LR
-    Setup["Q1–Q5 Planning setup"] --> Inheritance["Q6–Q26 Original-AI7 review"]
+    Setup["Q1–Q5 Planning setup"] --> Inheritance["Q6–Q25 Original-AI7 review"]
     Inheritance --> Governance["Q27–Q28 Identity and governance"]
     Governance --> Harness["Q29–Q32 Harness boundary"]
     Harness --> Product["Q33–Q34 Runtime, data and surfaces"]
+    Product --> Packaging["Q26 Packaging, release and Git evidence"]
     Product --> Slice["Q35 First vertical proof"]
     Slice --> PRD["PRD and independently grabbable issues"]
 ```
@@ -90,4 +91,6 @@ It was re-proposed under those constraints and accepted: two Windows-only workfl
 
 **Question 25 is closed.** Repository Development Dispatch is three roles with provider-neutral operating rules and a single binding table, recorded in [27-repository-development-dispatch.md](./27-repository-development-dispatch.md) and [ADR 0015](../docs/adr/0015-provider-neutral-development-dispatch.md). The legacy orchestration pilot and its host connector are rejected as baselines and remain old-repository evidence.
 
-**Question 26 is the current question**: the remaining legacy implementation, packaging, release, and Git-specific documentation dispositions. Its data half was already accepted at Question 22 — production data does not migrate except protected credentials, reviewed mock-provider evidence, and selected test sample Books. What stays open is everything else in that cluster: which packaging, installer, signing, release, and repository-governance evidence is preserved, adapted, or archived.
+**Question 26 is deferred until after Question 34, by owner instruction.** Its data half is accepted. What remains is largely a packaging, installer, signing, and release-evidence question, and Question 34 decides the Standalone shell and process topology that packaging would serve. Deciding what installer evidence to keep before knowing what it packages would invert the dependency. Questions 23 and 24 already removed the Word packaging and release-verification portions of this row.
+
+**Question 27 is the current question**, reduced to its two unresolved halves: the repository license, and the recorded rights-holder and authorization for reusing assets from the unlicensed private AI7 repository. Repository visibility was settled on 2026-08-17. Both remaining halves are Critical entries in [the risk register](./06-risk-register.md) and continue to block any source, fixture, or visual-asset copy.
