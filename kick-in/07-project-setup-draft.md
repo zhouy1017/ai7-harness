@@ -16,6 +16,8 @@ Per-context `CONTEXT.md` files and ADR folders will be created lazily as terms a
 
 ## Proposed `AGENTS.md` foundation
 
+This block is the text approved in Question 5 and is preserved as a record of that approval. It is **not** the live standing rules and has since diverged — most visibly, its prohibition on initializing or publishing a remote was lifted on 2026-08-17 by owner instruction. Read `AGENTS.md` at the repository root for the current rules.
+
 ```markdown
 # AI7 Harness Project
 

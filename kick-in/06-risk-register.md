@@ -7,8 +7,8 @@ Status: **initial design risks**
 | Harness is `0.1.0-rc.5` developer preview with breaking changes | Critical | Exact dependency/source pin, compatibility adapter, controlled upgrade PR, effective-config and behavior snapshots |
 | Two agent/task lifecycle authorities survive migration | Critical | Accept one ownership map before scaffolding; retire legacy agent loop/scheduler as Harness paths land |
 | AI7 business records are naively equated with Harness events | Critical | Enforce accepted Task Ledger/Harness Session Ledger authority plus exact Execution Bindings; never infer causality from timestamps or adjacency |
-| Private AI7 source has no declared license | Critical | Keep new repo private, name rights-holder/authorization, choose license before source or visual asset copying |
-| A public repo accidentally imports private Git history or fixtures | Critical | Fresh history by default; provenance ledger; no unrelated-history merge; privacy scan before publication |
+| Private AI7 source has no declared license | Critical | Repo is now private as required. Still outstanding: name rights-holder/authorization and choose a license before any source or visual asset copying |
+| A public repo accidentally imports private Git history or fixtures | Critical | Fresh unrelated history created 2026-08-17; provenance ledger; no unrelated-history merge; privacy scan before publication. Re-run a content and metadata scan before any change of visibility |
 | “Full Harness” exposes shell/filesystem/network powers to unpublished editorial material outside the intended task | Critical | Separate safe editorial and developer profiles; least privilege; source-scope guards; deny public disclosure paths by default |
 | Harness web server is exposed beyond loopback | Critical | Keep local-only unless a new authenticated TLS/origin design is accepted |
 | Model-visible state is hidden outside the Session log | High | Durable AI7 event projection; invariant tests that every request is reconstructable |
@@ -33,7 +33,7 @@ Status: **initial design risks**
 
 ## Immediate blockers before implementation
 
-1. Repository visibility, license, and private-source authorization.
+1. Repository license and private-source reuse authorization. Visibility is resolved: private `zhouy1017/ai7-harness`, created 2026-08-17.
 2. Accepted meaning of full Harness capability and default exposure.
 3. Accepted single-authority and record-correlation model.
 4. Windows Standalone shell, professional editor, and local-process topology.

@@ -17,7 +17,9 @@ The Harness fork was identical to `deepseek-ai/deepseek-harness` at the audited 
 
 Use a fresh AI7-owned repository and consume an exactly pinned Harness release/commit behind a narrow compatibility boundary. Build AI7 as a profile, bundle, domain plugins, and surface adapters; do not fork the Harness agent loop or carry the current AI7 monolith forward as the new foundation.
 
-This recommendation is **proposed, not accepted**. Repository visibility/licensing, the meaning of “full Harness capability,” dependency strategy, and several domain mappings must be resolved in the design interview first.
+The fresh-repository half is now **settled by owner instruction**: this design room was initialized on 2026-08-17 and published as private `zhouy1017/ai7-harness` on branch `main`. It contains documentation only and no copied source.
+
+The rest is still **proposed, not accepted**. The license, the recorded authorization to reuse unlicensed private AI7 assets, the meaning of “full Harness capability,” dependency strategy, and several domain mappings must be resolved in the design interview first.
 
 ## Document map
 
@@ -47,7 +49,7 @@ This recommendation is **proposed, not accepted**. Repository visibility/licensi
 24. [Linked Task and Harness ledgers](./23-linked-task-and-harness-ledgers.md) — accepted Question 22 boundary between AI7 business provenance and canonical Harness execution history.
 25. [Legacy data migration boundary](./24-legacy-data-migration-boundary.md) — accepted production-data exclusion with protected credential, mock-provider evidence, and selected test-Book exceptions.
 26. [Standalone-only V1 and deferred Word alternative](./25-standalone-word-surface-boundary.md) — accepted Question 23 single-surface boundary and professional editing obligation.
-27. [Tiered verification and mock-provider evidence](./26-tiered-verification-and-mock-provider-evidence.md) — proposed Question 24 provider-free GitHub Actions ladder, receipts, quarantine, and generated replay contract.
+27. [Tiered verification and mock-provider evidence](./26-tiered-verification-and-mock-provider-evidence.md) — **superseded** Question 24 proposal, retained as the unreduced version to cut down from after the owner's Windows-only and concise/quick correction.
 28. [Decision records](./decisions/README.md) — accepted hard-to-reverse decisions only.
 
 ## Decision discipline
@@ -62,3 +64,5 @@ The canonical multi-context glossary is now established through `CONTEXT-MAP.md`
 ## Planning boundary
 
 This folder may contain analyses, diagrams, matrices, and proposed decisions. It must not contain copied product source code, vendored Harness packages, private fixtures, credentials, or a merged Git history.
+
+The repository now has its own fresh Git history. That history is unrelated to both input repositories by construction, and this boundary is unchanged by it: initializing a repository authorized version control, not source copying.

@@ -1,6 +1,25 @@
 # Proposed Target Architecture
 
-Status: **proposal for grilling; not accepted**
+Status: **mixed — some parts became accepted through named questions and ADRs; the composition and dependency strategy remain proposals**
+
+## What is accepted, and what is not
+
+The blanket “not accepted” label this document previously carried had become misleading: `AGENTS.md`, the charter, and several ADRs already depend on parts of it. The split is exact:
+
+**Accepted, and binding:**
+
+- The three-layer Foundation Model / Harness Agent Behavior / AI7 Editorial Intelligence separation, and the no-LLM-training invariant — Question 14 and the owner's Harness-purpose statement, ADR 0003.
+- Harness as AI7's Agent Behavior Framework rather than merely an agent-loop dependency — the owner's statement at Question 15.
+- The record-ownership split: AI7 owns manuscript history, named authorities, Effects, receipts, Policy Documents, and the Task Ledger; the Harness Session Ledger owns model/executor events; the two are joined by Execution Bindings — ADRs 0006, 0007, 0011.
+- One Windows Standalone surface in V1, no Word — ADR 0013.
+
+**Still proposals, and not to be treated as project truth:**
+
+- The product composition sequence below (pin, stack bundles, AI7 bundle, presets, client plugins) — Question 29/30.
+- The architecture-alternatives table and its “Preferred” marking — Question 30.
+- The claim that AI7 must own the semantic quality evaluation layer. This is a well-supported audit finding about the pinned Harness, but it was reported to the owner rather than put as a question, and silence is not acceptance.
+- Every process-topology choice: gateway/Host co-location, Electron embedding, and IPC boundaries — Question 34.
+- Semantic mappings other than Run Record ↔ Session, which Question 22 settled.
 
 ## Recommendation
 

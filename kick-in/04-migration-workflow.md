@@ -7,13 +7,17 @@ Status: **proposed sequence**
 Outputs:
 
 - Accepted charter and V1 boundary.
-- Repository visibility/license/source authorization decision.
+- Repository license and source-authorization decision. Visibility is already settled: private.
 - Accepted target architecture and semantic mapping.
 - Keep/adapt/drop matrix with owners and deferrals.
 - Security, provider, data, Windows Standalone/editor, and upstream strategies; Word explicitly deferred.
 - First tracer-slice acceptance contract.
 
 Exit gate: every item in the decision map is resolved or explicitly deferred. No runtime scaffold is needed to pass this gate.
+
+### Repository initialization ran early, by instruction
+
+On 2026-08-17 the owner directed that the design room itself be placed under version control and published as private `zhouy1017/ai7-harness`. This deliberately runs one Phase 1 step during Phase 0, and it changes nothing else: Phase 0 is still active, its exit gate is unmet, and the license, private-source reuse authorization, Harness pin, profile/bundle skeleton, and build faces all remain Phase 1 work that is not authorized yet.
 
 ### Accepted legacy-transfer gate
 
@@ -23,7 +27,7 @@ The new production business store starts empty. Future implementation may provid
 
 Create the repository only after Phase 0:
 
-- Initialize the chosen GitHub/private visibility and license.
+- Choose and add the license. Repository creation and private visibility already happened during Phase 0.
 - Pin the exact Harness package family and record upstream SHA/notices.
 - Add the AI7 profile/bundle skeleton without changing Harness core.
 - Establish Host/Client build faces, domain boundary packages, test catalog, and provenance ledger.

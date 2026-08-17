@@ -2,7 +2,9 @@
 
 ## Project phase
 
-This repository is in architecture and migration design. Read `kick-in/README.md` and the current `PROGRESS.md` before acting. Do not add product implementation, copy source from either input repository, vendor Harness, initialize or publish a remote, or merge histories until the relevant accepted decision explicitly authorizes it.
+This repository is in architecture and migration design. Read `kick-in/README.md` and the current `PROGRESS.md` before acting. Do not add product implementation, copy source from either input repository, vendor Harness, or merge histories until the relevant accepted decision explicitly authorizes it.
+
+The design room is now a Git repository published as private `zhouy1017/ai7-harness` on branch `main`, by explicit owner instruction on 2026-08-17. This resolved only repository existence and visibility. The license and the authorization to reuse assets from the unlicensed private `ai7-reborn-ai` remain open in Question 27, and both must be settled before any source, fixture, or visual asset from either input repository enters this repository.
 
 Review original-AI7 documentation one topic cluster at a time through `kick-in/08-source-document-inheritance.md`. Do not copy source documents wholesale. Accepted new decisions and canonical context definitions outrank source-project instructions; unresolved source material remains evidence only. Harness-specific inheritance is an architecture-maintainer decision, subordinate to accepted AI7 product and safety constraints.
 

@@ -1,0 +1,3 @@
+# Normalize line endings so Markdown-only design documents do not churn
+# between Windows and hosted CI checkouts.
+* text=auto eol=lf

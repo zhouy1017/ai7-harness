@@ -1,8 +1,24 @@
 # Tiered Verification and Mock-provider Evidence
 
-Status: **proposed for Question 24; preservation direction already accepted**
+Status: **superseded proposal; Question 24 remains open**
 
-## Recommendation
+## Owner correction of 2026-08-17
+
+This document was put to the owner as the Question 24 proposal and was **not accepted**. The answer was a correction:
+
+> The ubuntu setup is just for github actions. The target platform is just windows-only. We do not need a production for ubuntu at this stage. And the tiered verification/build/test should be concise and quick
+
+Consequences for everything below:
+
+- **Windows is the only target platform.** Ubuntu has no product or production role. Whether a Ubuntu CI lane is worth keeping at all is now an open question, not a settled detail.
+- **"Concise and quick" is a binding constraint** on tier count, lane count, and elapsed time. The four-tier ladder, the eight-field Test Catalog schema, the Proof-input Fingerprint receipts, and the quarantine registry below are all candidates for reduction.
+- The pinned runner labels, the `0 18 * * *` nightly cron, and the 15/20-minute budgets carry no authority.
+
+What survives is only the Question 6 preservation direction the owner accepted earlier: keep a tiered GitHub Actions workflow combined with generated mock-LLM-provider test cases, and keep required CI provider-free.
+
+Treat the rest of this document as evidence and as the maximal version to cut down from. A revised, Windows-only, concise proposal must be put to the owner before any part of it becomes project truth.
+
+## Superseded recommendation
 
 Use four active, provider-free verification tiers plus one explicitly non-gating provider rehearsal. GitHub Actions owns hosted orchestration, while a machine-readable Test Catalog owns test identity, routing, timeouts, fixtures, and evidence. Promotion is based on exact source and proof-input identity, never merely on a green branch name.
 
@@ -132,6 +148,16 @@ Only reviewed, normalized, public-synthetic, sanitized replay cassettes qualify 
 | Word, COM, and dual-surface verification lanes | **Drop from V1** | Historical/contingency evidence only; never quarantine them as if still required. |
 | Mock fixtures in production package | **Drop by default** | Development/test only unless a later ADR creates an offline demo. |
 
-## Proposed Question 24 resolution
+## Superseded Question 24 resolution
 
-Accept the four active tiers (`focused`, `pr`, `nightly`, `release`), the separate non-gating Provider Rehearsal, machine-owned Test Catalog, exact proof receipts, scenario-exact quarantine, three-part mock model, AI7 request-fingerprint guard, regenerated Chinese public-synthetic corpus, and the rule that all promotion evidence remains provider-free.
+The proposal below was rejected by the owner correction recorded at the top of this document. It is retained only as the unreduced version.
+
+~~Accept the four active tiers (`focused`, `pr`, `nightly`, `release`), the separate non-gating Provider Rehearsal, machine-owned Test Catalog, exact proof receipts, scenario-exact quarantine, three-part mock model, AI7 request-fingerprint guard, regenerated Chinese public-synthetic corpus, and the rule that all promotion evidence remains provider-free.~~
+
+Open questions the revised proposal must answer:
+
+1. Does required CI run on Windows only, or is a Ubuntu lane retained purely because hosted Linux minutes are cheaper and faster?
+2. How many tiers survive "concise" — plausibly two rather than four?
+3. Does a machine-owned Test Catalog earn its cost at this repository's size, or is direct test selection sufficient until it does?
+4. Does a nightly tier exist, given no external contributors and no production Ubuntu?
+5. What elapsed-time budget makes a gate "quick"?

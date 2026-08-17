@@ -41,7 +41,9 @@ Audit date: 2026-08-15 (Asia/Shanghai)
 
 Start a fresh, initially private AI7 repository and record both pins as external sources. Consume pinned Harness packages or a pinned build artifact before considering source vendoring. Keep the private AI7 history outside any public fork network until visibility, license, and reuse authority are accepted.
 
-This is a recommendation, not an accepted decision.
+**Partially accepted on 2026-08-17.** By owner instruction, this design room was initialized with a fresh unrelated history and published as private `zhouy1017/ai7-harness` on branch `main`. Neither input repository's history was merged and no product source was copied; the initial commit contains 58 Markdown documents.
+
+Still not accepted, and still blocking any source copy: the repository license, and the recorded rights-holder/authorization for reusing assets from the unlicensed private AI7 repository. The upstream-consumption strategy remains a recommendation only.
 
 ## Source-copy rules
 

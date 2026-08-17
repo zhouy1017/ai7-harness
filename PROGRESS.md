@@ -101,10 +101,16 @@
 - Audited the pinned Harness and original-AI7 verification systems for Question 24, including hosted tiers, exact-SHA admission, test catalogs, replay/mock-server helpers, fixture generation, request-matching gaps, quarantine, and Windows proof ownership.
 - Added `kick-in/26-tiered-verification-and-mock-provider-evidence.md`; updated `kick-in/{README,05-decision-map,09-retained-development-workflows}.md` with the detailed four-tier provider-free proposal, non-gating local provider rehearsal, exact receipts, replay fingerprint guard, and regenerated Chinese public-synthetic corpus contract.
 - Verified current `ubuntu-24.04` and `windows-2025` standard runner labels in GitHub's official hosted-runner reference, resolved all local Markdown links, confirmed the exact `@AGENTS.md` Claude wrapper, and revalidated 137 unique one-to-one canonical glossary/context terms.
+- Asked Question 24/35 with the four-tier verification proposal. The owner answered with a correction rather than an acceptance: Ubuntu is only a GitHub Actions runner, the target platform is Windows-only, no Ubuntu production is needed at this stage, and the tiered verification/build/test must be concise and quick. The prior Codex session reached its usage limit before recording this, so it was reconstructed from the raw transcript.
+- Reconstructed the full project state from `handoff20260817/raw-conversation.md` after the Codex session ended without a curated handoff. Recorded objective, confirmed requirements and constraints, non-goals, accepted decisions with citations, unaccepted proposals, superseded decisions, repository state, design-versus-repository gaps, open questions, contradictions, and confidence levels in `handoff20260817/STATE-RECONSTRUCTION.md`.
+- Initialized this design room as a Git repository on branch `main` by owner instruction and published it as private `zhouy1017/ai7-harness`. The initial commit `579fbeb` contains 58 Markdown documents, no product source, and a fresh history unrelated to either input repository. A secret-pattern scan over all Markdown ran clean before the push.
+- Swept the records that the Q24 correction and the repository creation had made stale or self-contradictory: `AGENTS.md` standing rules, `kick-in/05-decision-map.md` Question 24 and 27 status, the superseded Q24 proposal, `kick-in/README.md`, `kick-in/01-source-provenance.md`, `kick-in/04-migration-workflow.md`, `kick-in/06-risk-register.md`, and the mixed accepted/proposed status of `kick-in/02-target-architecture.md`. Added `.gitattributes` to normalize line endings.
 
 ## What's next
 
-- Ask Question 24/35 about the exact provider-free GitHub Actions tiers, generated mock-provider evidence flow, quarantine, and packaged-Windows proof.
+- Re-propose Question 24/35 under the accepted Windows-only and concise/quick constraints. The revised proposal must settle whether required CI runs on Windows only, how many tiers survive, whether a machine-owned Test Catalog earns its cost yet, whether a nightly tier exists, and what elapsed-time budget makes a gate quick.
+- Resolve the remaining halves of Question 27: repository license and the recorded rights-holder/authorization for reusing assets from the unlicensed private AI7 repository. Both still block any source copy.
+- Confirm whether the Question 16 answer of "mostly okay" endorsed the four content/evidence classes other than the one the owner corrected; that scope was never itemized.
 - Keep Word vocabulary and implementation outside the active V1 domain; reconsider it only through a later proportional-remedy ADR after failure of the Standalone Editing Sufficiency Gate.
 - After the interview, promote only accepted hard-to-reverse choices into concise decision records and finalize the migration handoff.
 
@@ -163,7 +169,11 @@
 - The Task Ledger owns AI7 task-business facts while the Harness Session Ledger owns model/executor events. Exact Execution Bindings correlate them; no active Operation ledger or copied transcript is permitted.
 - Legacy production data is not migrated. Only protected user-selected API credential transfer, reviewed mock-provider evidence, and explicitly selected test-only sample Books may cross the allowlist; all new business, Harness, manuscript, workflow, and learning records start fresh.
 - V1 is a Chinese-first Windows Standalone desktop product. Word integration is excluded from V1, both old UI/editor implementations are dropped, and professional long-form editing must pass an evidence-backed Standalone Editing Sufficiency Gate; Word is only a future contingency requiring a separate ADR.
+- Windows is the only target platform. Ubuntu has no production or product role; it may appear only as a GitHub Actions runner if a Ubuntu CI lane is separately justified. Tiered verification, build, and test must be concise and quick.
+- The design room is a Git repository published as private `zhouy1017/ai7-harness` on branch `main`. This settles Question 27's visibility half only; the license and private-source reuse authorization remain open and still block source copying.
+- Repository initialization deliberately ran one Phase 1 step during Phase 0. Phase 0 remains active and its exit gate is unmet.
+- A decision is recorded as accepted only when the owner explicitly accepted it. Absence of objection to a reported audit finding does not make that finding project truth; `kick-in/02-target-architecture.md` now separates its accepted parts from its proposals on that basis.
 
 ## Resume Prompt
 
-Resume at Question 24/35: decide the exact provider-free GitHub Actions tiers, generated mock-provider evidence lifecycle, quarantine policy, and packaged-Windows release proof.
+Resume at Question 24/35: re-propose the tiered verification contract under the accepted Windows-only and concise/quick constraints, deciding whether a Ubuntu CI lane exists at all, how many tiers survive, whether a machine-owned Test Catalog is justified yet, whether nightly exists, and what elapsed-time budget makes a gate quick.
