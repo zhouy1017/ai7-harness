@@ -1,0 +1,3 @@
+# Use authority-bearing Plan Envelopes
+
+AI7 makes each visible plan an authority-bearing boundary rather than optional information or blanket approval: Run Authorization binds an exact Task Intent and Plan Envelope digest, recorded Plan Adaptations may proceed only inside that unchanged envelope, and material drift suspends work for a versioned Plan Revision and renewed authorization. Effect Approval, Proposal Decision, Review Decision, and Public Release Permission remain independent; this preserves useful autonomy without per-step prompting or silent expansion of agent authority, while legacy Task Composer/workbench/agent-console presentation is not inherited.

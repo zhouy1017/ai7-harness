@@ -1,0 +1,3 @@
+# Separate decisions, authority, and Effect proof
+
+AI7 replaces generic “Approval” with distinct Run Authorization, Execution Grant, Proposal Decision, Review Decision, Effect Approval, and Public Release Permission records. One editor interaction may create both a content Proposal Decision and exact Effect Approval, but only an Effect Receipt or explicitly classified reconciliation/manual outcome evidence establishes whether the Effect completed; stable Effect identity, staged per-Effect publication, drift invalidation, idempotent replay, and no automatic retry after an ambiguous external outcome preserve safety without requiring duplicate user prompts.
