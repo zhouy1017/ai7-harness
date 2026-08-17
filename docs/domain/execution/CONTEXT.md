@@ -371,3 +371,23 @@ _Avoid_: Retry, Resume, in-place Run mutation
 Reconstruction or return of existing durable records without invoking the model, repeating an Effect, or creating a new execution attempt.
 _中文_: 重放
 _Avoid_: Retry, re-execution, regeneration
+
+**Editorial Profile**:
+The shipped capability profile for editorial users, exposing domain-shaped AI7 Capabilities only and never a generic shell, roaming filesystem, or arbitrary network tool. Users cannot escalate out of it.
+_中文_: 编辑端能力档案
+_Avoid_: Editorial Profile in the dimension sense, Harness Profile, a settings toggle
+
+**Developer Profile**:
+The unshipped capability profile carrying the generic tool surface, used to build AI7 and by Repository Development Dispatch workers. A build and repository artifact, never a product setting.
+_中文_: 开发端能力档案
+_Avoid_: Editorial Profile, an in-product power-user mode, an escalation path
+
+**Agent Data Root**:
+The AI7-owned directory inside which the agent holds genuine filesystem permission and outside which it has none. Contains governed Book stores plus a per-Run unscoped scratch area; excludes the Protected Secret Store and lives outside any repository working tree.
+_中文_: 智能体数据根目录
+_Avoid_: Run Source Scope, a general filesystem grant, a repository working tree
+
+**Agent Behavior Asset**:
+A versioned prompt, instructional text, task guidance, or bounded ranking parameter that shapes output quality and never grants authority. Agent-proposable, with auto-activation limited to non-expansive calibration inside a user-approved envelope.
+_中文_: 智能体行为资产
+_Avoid_: Policy Document, House Editorial Memory, model weights, hidden runtime configuration

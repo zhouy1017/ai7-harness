@@ -2,7 +2,7 @@
 
 Status: **active interview**
 
-The revised estimate is **35 questions**. Question 6 replaced the all-at-once inheritance approval with a topic-by-topic review of original-AI7 documentation. Questions 7–12 resolved the product spine, Editorial Dimensions, learning scopes, and Series. Question 13 accepted the memory-promotion model and added two distinct requirements: auditable end-to-end learning lineage and an adaptive policy for future material eligibility. The owner has also fixed the purpose of DeepSeek Harness: learn and use its framework to improve Agent Behavior without model training; Question 29 still decides the exact capability/profile boundary. Harness-document choices are delegated to the architecture maintainer. Questions are asked one at a time; code/source facts are investigated rather than asked.
+The revised estimate is **36 questions**. Question 36 was added when Question 29 established that agent-authored revisions require an evaluation gate that AI7 must own. Question 6 replaced the all-at-once inheritance approval with a topic-by-topic review of original-AI7 documentation. Questions 7–12 resolved the product spine, Editorial Dimensions, learning scopes, and Series. Question 13 accepted the memory-promotion model and added two distinct requirements: auditable end-to-end learning lineage and an adaptive policy for future material eligibility. The owner has also fixed the purpose of DeepSeek Harness: learn and use its framework to improve Agent Behavior without model training; Question 29 still decides the exact capability/profile boundary. Harness-document choices are delegated to the architecture maintainer. Questions are asked one at a time; code/source facts are investigated rather than asked.
 
 ## Branch A — Planning mechanics
 
@@ -53,7 +53,7 @@ The revised estimate is **35 questions**. Question 6 replaced the all-at-once in
 
 | Question | Decision | Recommended answer | Blocks |
 | --- | --- | --- | --- |
-| 29 | Meaning of “full Harness capability” after accepting DSH as the Agent Behavior Framework | Preserve the full versioned behavior-composition engine; least-privilege editorial default; separate developer/admin profile; no silent runtime self-modification | Security and profile composition; **purpose accepted, authority/detail open** |
+| 29 | Meaning of “full Harness capability” after accepting DSH as the Agent Behavior Framework | **Accepted.** Full engine, narrow tool surface: no generic shell, roaming filesystem, or arbitrary network in an editorial Run. Agent Data Root with Run Source Scope nested inside. Editorial and Developer profiles with no self-service escalation. Everything agent-proposable, but capability expansion never self-activates | Security and profile composition — **resolved** |
 | 30 | Upstream consumption strategy | Fresh repo + exactly pinned public packages; process boundary or source fork only if a seam fails | Bootstrap and upgrade workflow |
 | 31 | Single execution authority | Harness owns generic agent lifecycle; AI7 durable business lifecycle coordinates without a second agent loop | Runtime ownership |
 | 32 | AI7-to-Harness record mapping | Task Ledger and Harness Session Ledger retain separate authority; exact Execution Bindings/Spans correlate them; active Operation records are retired | Persistence/event design; **accepted early by Question 22** |
@@ -65,6 +65,12 @@ The revised estimate is **35 questions**. Question 6 replaced the all-at-once in
 | 33 | Python and legacy-data posture | Keep selected domain behavior behind bounded providers first; legacy production-data migration is already excluded, with only the accepted allowlist exceptions | Process topology, packaging, storage; **data half accepted** |
 | 34 | New Windows Standalone shell and professional editor topology | Design a new AI7-owned desktop editor/workbench over one local authority; reuse no legacy UI/editor source or layout | Client, editor, gateway, installer |
 | 35 | First tracer slice and exit gate | Standalone-only read-only, source-grounded Q&A over one selected synthetic DOCX with real + replay adapters and restart proof | PRD and issue decomposition |
+
+## Branch F — Editorial quality measurement
+
+| Question | Decision | Recommended answer | Blocks |
+| --- | --- | --- | --- |
+| 36 | Automated editorial quality metrics and the Behavior Evaluation Gate | Three Quality Signal families — explicit feedback, editor-authored content, and decision/version differences — yielding verbatim acceptance, revision distance, survival, dissatisfaction by dimension, and workload displacement; a two-sided gate combining fixed-corpus replay with production metrics; editor decisions are the oracle for taste but never for factual correctness | Agent Behavior Improvement activation; **proposed, not accepted** |
 
 ## Dependency view
 
@@ -97,4 +103,8 @@ It was re-proposed under those constraints and accepted: two Windows-only workfl
 
 **Question 28 is closed.** The product display name is exactly AI7. Repository suffixes are developer-facing track markers with no product meaning, so `ai7-harness` needs no rename and future agents should not "correct" it. Harness stays the execution foundation and never appears as user-facing branding. Branch C — repository identity and governance — is now fully resolved. This was recorded in the decision map rather than an ADR: it is a routine planning answer, not a hard-to-reverse trade-off.
 
-**Question 29 is the current question**: what "full Harness capability" means now that Harness is accepted as the Agent Behavior Framework — default capability exposure, whether a separate developer/admin profile exists alongside a least-privilege editorial profile, and whether any runtime self-modification is permitted. The purpose was accepted at Question 15; the authority boundary is what remains open, and it is the first Critical item in [the risk register](./06-risk-register.md) that is still unresolved.
+**Question 29 is closed**, resolving the last unaddressed Critical risk-register entry about generic tool exposure. See [28-harness-capability-and-authority-boundary.md](./28-harness-capability-and-authority-boundary.md), [ADR 0017](../docs/adr/0017-full-engine-narrow-tool-surface.md), and [ADR 0018](../docs/adr/0018-tiered-activation-for-agent-authored-revisions.md).
+
+**Question 36 is newly opened and is the current question.** Question 29 established that agent-authored revisions cannot activate without an evaluation gate, and the pinned Harness has no general quality evaluator, so AI7 must own one. The proposal is in [29-editorial-quality-metrics.md](./29-editorial-quality-metrics.md). It is large enough to decide on its own rather than as a sub-clause of the capability boundary, which is why the estimate rises from 35 to 36.
+
+Remaining after Question 36: Questions 30 through 35, plus Question 26, which waits until after Question 34.

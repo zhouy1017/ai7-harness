@@ -134,6 +134,10 @@ This maintained bilingual reference routes readers to canonical definitions and 
 | Provider Processing Policy | 模型服务数据处理策略 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |
 | External Export Policy | 对外导出策略 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |
 | Bundled Promotion Gate | 内置技能晋级关口 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |
+| Editorial Profile | 编辑端能力档案 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |
+| Developer Profile | 开发端能力档案 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |
+| Agent Data Root | 智能体数据根目录 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |
+| Agent Behavior Asset | 智能体行为资产 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |
 | Run Authorization | 任务运行授权 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |
 | Execution Grant | 单次执行许可 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |
 | Effect | 受控动作 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |
@@ -219,6 +223,9 @@ The inheritance audit must resolve these known collisions before definitions are
 | Outbound Data Category | Run Source Scope / Public Release Permission |
 | Provider Processing Policy | External Export Policy / Public Release Permission |
 | Bundled Promotion Gate | Task Skill Enablement / in-product trust elevation |
+| Editorial Profile | Editorial Dimension profile / Harness Profile / a user-facing setting |
+| Agent Data Root | Run Source Scope / a general filesystem grant / a repository working tree |
+| Agent Behavior Asset | Policy Document / House Editorial Memory / model weights |
 | Review Decision | Proposal Decision / Effect Approval / a Repository Development Dispatch reviewer report |
 
 Two collisions come from repository tooling rather than from Harness, and are recorded here because the words are nearly identical:

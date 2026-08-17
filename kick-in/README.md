@@ -51,7 +51,9 @@ The rest is still **proposed, not accepted**. The license, the recorded authoriz
 26. [Standalone-only V1 and deferred Word alternative](./25-standalone-word-surface-boundary.md) — accepted Question 23 single-surface boundary and professional editing obligation.
 27. [Tiered verification and mock-provider evidence](./26-tiered-verification-and-mock-provider-evidence.md) — accepted Question 24 two-workflow Windows-only contract, retained mock-provider requirements, and the deferral triggers for everything cut.
 28. [Repository development dispatch](./27-repository-development-dispatch.md) — accepted Question 25 three-role model, provider-neutral operating rules, and the single binding table that is the only provider-specific artifact.
-29. [Decision records](./decisions/README.md) — accepted hard-to-reverse decisions only.
+29. [Harness capability and authority boundary](./28-harness-capability-and-authority-boundary.md) — accepted Question 29 full-engine/narrow-surface split, Agent Data Root, profile separation, and tiered activation for agent-authored revisions.
+30. [Editorial quality metrics](./29-editorial-quality-metrics.md) — **proposed** Question 36 Quality Signal families, derived metrics, and the two-sided Behavior Evaluation Gate.
+31. [Decision records](./decisions/README.md) — accepted hard-to-reverse decisions only.
 
 ## Decision discipline
 

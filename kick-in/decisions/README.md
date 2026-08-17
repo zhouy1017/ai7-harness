@@ -18,6 +18,8 @@ Accepted system-wide architecture decisions live under [`docs/adr/`](../../docs/
 - [ADR 0014: Verify on one Windows gate and defer additional tiers](../../docs/adr/0014-verify-on-one-windows-gate.md)
 - [ADR 0015: Keep development dispatch rules provider-neutral](../../docs/adr/0015-provider-neutral-development-dispatch.md)
 - [ADR 0016: Keep AI7 proprietary and sample manuscripts local-only](../../docs/adr/0016-proprietary-license-and-local-only-sample-manuscripts.md)
+- [ADR 0017: Compose the full Harness engine behind a narrow tool surface](../../docs/adr/0017-full-engine-narrow-tool-surface.md)
+- [ADR 0018: Tier activation for agent-authored revisions](../../docs/adr/0018-tiered-activation-for-agent-authored-revisions.md)
 
 Create a record here only when a choice is hard to reverse, surprising without context, and the result of a real trade-off. Use sequential names such as `0001-fresh-ai7-repository.md` and keep the record concise: what was decided, why, meaningful rejected alternatives, and any non-obvious consequence.
 
