@@ -1,6 +1,6 @@
 # Retained Original-AI7 Development Workflows
 
-Status: **preservation direction accepted; Question 24 detail superseded and owed a revision; Question 25 remains open**
+Status: **preservation direction accepted; Question 24 closed; Question 25 remains open**
 
 ## Source and status vocabulary
 
@@ -95,5 +95,5 @@ The source had not completed its required real Host observations at the pin. The
 
 ## Next decisions
 
-- Question 24 remains open. Its first detailed proposal in [Tiered Verification and Mock-provider Evidence](./26-tiered-verification-and-mock-provider-evidence.md) was superseded by the owner's Windows-only and concise/quick correction and must be re-proposed. The preservation direction recorded in this file — a tiered GitHub Actions workflow with generated mock-LLM-provider cases, required CI provider-free — is unaffected and still accepted.
+- Question 24 is closed. The accepted contract is in [Tiered Verification and Mock-provider Evidence](./26-tiered-verification-and-mock-provider-evidence.md) and [ADR 0014](../docs/adr/0014-verify-on-one-windows-gate.md): two Windows-only workflows, with several tiers deferred behind named triggers. The preservation direction recorded in this file is unaffected, but read the source inventory above through that reduction — the four legacy workflows map onto two, and the legacy test catalog is deferred rather than rebaselined immediately.
 - Question 25 will define Repository Development Dispatch roles, authority ceilings, worktree ownership, handoffs, receipts, and the relationship to available development-agent tooling.

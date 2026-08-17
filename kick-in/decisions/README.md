@@ -15,6 +15,7 @@ Accepted system-wide architecture decisions live under [`docs/adr/`](../../docs/
 - [ADR 0011: Separate task-business and Harness-execution ledgers](../../docs/adr/0011-separate-task-business-and-harness-execution-ledgers.md)
 - [ADR 0012: Exclude legacy production-data migration](../../docs/adr/0012-exclude-legacy-production-data-migration.md)
 - [ADR 0013: Ship a Standalone-only V1 and defer Word integration](../../docs/adr/0013-ship-standalone-only-v1.md)
+- [ADR 0014: Verify on one Windows gate and defer additional tiers](../../docs/adr/0014-verify-on-one-windows-gate.md)
 
 Create a record here only when a choice is hard to reverse, surprising without context, and the result of a real trade-off. Use sequential names such as `0001-fresh-ai7-repository.md` and keep the record concise: what was decided, why, meaningful rejected alternatives, and any non-obvious consequence.
 

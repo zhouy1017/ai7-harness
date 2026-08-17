@@ -1,120 +1,81 @@
 # Tiered Verification and Mock-provider Evidence
 
-Status: **superseded proposal; Question 24 remains open**
+Status: **accepted in Question 24 with owner revision**
 
-## Owner correction of 2026-08-17
+## Decision
 
-This document was put to the owner as the Question 24 proposal and was **not accepted**. The answer was a correction:
+Verification uses **two GitHub Actions workflows on one platform**. Windows is the only target, so Windows is the only place required evidence is produced. Everything else is either local or deferred behind a named trigger.
+
+This replaces the four-tier, five-lane proposal originally put to the owner. That proposal was answered with a correction:
 
 > The ubuntu setup is just for github actions. The target platform is just windows-only. We do not need a production for ubuntu at this stage. And the tiered verification/build/test should be concise and quick
 
-Consequences for everything below:
+The reduction is deliberate. The proposal it replaced specified four active tiers, an eight-field Test Catalog schema, a twelve-field proof fingerprint, and a quarantine registry for a repository that contains no code. Machinery is added when a concrete problem appears, not in advance.
 
-- **Windows is the only target platform.** Ubuntu has no product or production role. Whether a Ubuntu CI lane is worth keeping at all is now an open question, not a settled detail.
-- **"Concise and quick" is a binding constraint** on tier count, lane count, and elapsed time. The four-tier ladder, the eight-field Test Catalog schema, the Proof-input Fingerprint receipts, and the quarantine registry below are all candidates for reduction.
-- The pinned runner labels, the `0 18 * * *` nightly cron, and the 15/20-minute budgets carry no authority.
+## The two required workflows
 
-What survives is only the Question 6 preservation direction the owner accepted earlier: keep a tiered GitHub Actions workflow combined with generated mock-LLM-provider test cases, and keep required CI provider-free.
+| Workflow | Trigger | Platform and content | Budget |
+| --- | --- | --- | --- |
+| **`pr`** — the only required gate | `pull_request` (open, synchronize, reopen, ready-for-review) and push to `main`. **No path filters**: a filtered gate can report green on an untested change. Superseded runs cancel per PR | One job on `windows-2025`. Format, typecheck/build, all provider-free unit and contract tests, and one assembled mock-provider replay through the AI7 test driver | Target ≤10 minutes; hard timeout 20 |
+| **`release`** | A `v*` tag | One job on `windows-2025`. Build the Windows package once, then prove install → launch → canonical Standalone journey → uninstall against that exact package. Fail closed unless a green `pr` run exists for the same source SHA | Target ≤30 minutes |
 
-Treat the rest of this document as evidence and as the maximal version to cut down from. A revised, Windows-only, concise proposal must be put to the owner before any part of it becomes project truth.
+Budgets are calibration, not contracts. They were set before any code existed and must be revisited once a real suite is measurable.
 
-## Superseded recommendation
+## Deliberately not in CI
 
-Use four active, provider-free verification tiers plus one explicitly non-gating provider rehearsal. GitHub Actions owns hosted orchestration, while a machine-readable Test Catalog owns test identity, routing, timeouts, fixtures, and evidence. Promotion is based on exact source and proof-input identity, never merely on a green branch name.
+- **Focused verification** is a plain local test command. It gets no workflow and carries no promotion authority.
+- **Provider Rehearsal** is local-only, manual, and separately authorized. The recorder refuses to run under `CI`, accepts only public-synthetic inputs, and requires an explicit provider/model binding, an outbound-data preflight digest, and hard call/cost ceilings. Output is staged; sanitization, schema validation, and human review must pass before an immutable fixture version is published atomically. **No GitHub live-provider recording workflow exists.**
 
-Pin hosted jobs to `ubuntu-24.04` and `windows-2025`, not moving `*-latest` aliases. These labels are listed for standard public and private repositories in the [GitHub-hosted runners reference](https://docs.github.com/en/actions/reference/runners/github-hosted-runners) as checked on 2026-08-17. Recheck availability during repository initialization and controlled runner-image upgrades.
+## Single-platform rationale
 
-Required CI must never call a live model service, require an API key, upload an unpublished manuscript, or depend on a private sample Book. Generated mock-provider cases must exercise the assembled AI7-to-Harness path and fail closed when the effective request drifts from the reviewed fixture.
+A Ubuntu lane was rejected for V1, not forgotten. The product ships on Windows only, so every test that matters must pass on Windows regardless. Two lanes mean two checkouts, two dependency installs, two caches, and an aggregator job — the opposite of concise — and a Ubuntu pass that Windows later contradicts was never evidence.
+
+The honest cost: hosted Windows minutes bill at twice Linux, and Linux is genuinely faster for pure-logic tests. One Windows job running one setup is still cheaper and simpler than a Ubuntu job plus a Windows job. That arithmetic reverses if the gate grows, which is what the deferral trigger below is for.
+
+## Deferred, with trigger conditions
+
+None of these is rejected on the merits. Each is postponed until it earns its cost, and each has a stated trigger so it is not lost.
+
+| Deferred | Add it when |
+| --- | --- |
+| Ubuntu fast-fail lane | The `pr` gate exceeds roughly 10 minutes and a measurable majority of it is platform-neutral |
+| Nightly tier | External contributors arrive, or a suite genuinely cannot fit the `pr` budget. Same-SHA suppression machinery is only needed once nightly exists |
+| Machine-owned Test Catalog | A test route is actually missed after a rename or move. The original AI7 needed this at roughly 360 tests; this repository starts at zero |
+| Quarantine registry | The first test is quarantined. Until then the rule is simply that no skipped or quarantined test may exist without a linked GitHub issue |
+| Wire-level fault server | Effects, retry, cancellation, and ambiguous-outcome handling land in Phase 3 and need transport-level proof |
+| Separate `focused` promotion semantics | Never, unless local runs are ever asked to admit a release |
+
+## Retained requirements
+
+These survived the reduction because they are cheap and load-bearing.
+
+1. **Required CI is provider-free.** No live model call, no API key, no unpublished manuscript text, no private sample Book. Required jobs explicitly select replay mode, receive no provider credentials, and have outbound model-service access disabled. This was already accepted at Question 6.
+2. **Request-fingerprint guard.** Replay fails closed when the effective normalized request drifts from the recorded fixture. Without it a changed prompt, tool set, policy snapshot, or source pin silently reuses a stale cassette and the generated mock-provider evidence proves nothing. The fingerprint covers the normalized message/system/tool inputs, the model role and adapter identity, the effective AI7 preset and policy snapshot, and the source/revision pins, with declared normalization for volatile IDs, timestamps, and temporary paths. Semantic content is never scrubbed merely to make a cassette match.
+3. **Regenerated public-synthetic corpus.** Do not byte-copy the legacy `public-synthetic-corpus-v1.json`: its recorded byte length was generated to match a private `sample1.docx`, leaking that source-size fingerprint through its metadata. Generate a new corpus at an independently chosen public size and ID, then refresh every derived fingerprint and cassette.
+4. **Minimal release receipt.** Five fields, at release only: source SHA, pinned Harness SHA/package set, lockfile hash, fixture-manifest digest, and package hash. Receipts contain no raw unpublished text, credentials, or provider payloads. The twelve-field proof-input fingerprint from the superseded proposal is not adopted.
 
 ## Bilingual engineering labels
 
-These labels are for repository and verification documentation; they are not promoted into the AI7 product-domain glossary.
+Repository and verification vocabulary only. These are not promoted into the AI7 product-domain glossary.
 
 | English label | Simplified Chinese |
 | --- | --- |
-| Focused Verification | 聚焦验证 |
 | Pull-request Gate | 拉取请求关口 |
-| Nightly Full Verification | 夜间完整验证 |
 | Release Admission | 发布准入 |
+| Focused Verification | 聚焦验证 |
 | Provider Rehearsal | 模型服务演练 |
-| Test Catalog | 测试目录 |
 | Verification Receipt | 验证回执 |
-| Proof-input Fingerprint | 验证输入指纹 |
-| Quarantined Test | 隔离测试 |
 | Mock-provider Evidence Set | 模拟模型服务证据集 |
-
-## Proposed verification ladder
-
-| Tier | Trigger and purpose | Required lanes and result semantics |
-| --- | --- | --- |
-| **`focused`** | Local/on-demand; no hosted workflow required and no promotion authority | Catalog-selected unit, contract, and component routes. Provider-free. Path impact may narrow only this tier. It emits diagnostics, not an authoritative promotion receipt. |
-| **`pr`** | `.github/workflows/pr-gate.yml` on every `pull_request` open/synchronize/reopen/ready-for-review event, with no path filters; superseded runs cancel per PR | A `pr-portable` job on `ubuntu-24.04` plus `pr-windows-smoke` on `windows-2025`; a stable protected `Complete Fast PR Gate` aggregator requires both. The portable lane checks formatting, types/build contracts, domain/manuscript/Task/Effect contracts, privacy/catalog guards, client components, and one synthetic-DOCX assembled replay. The Windows lane proves Windows compilation and an unpacked Standalone shell/carrier launch against the same replay. Suggested budgets: 15 and 20 minutes. |
-| **`nightly`** | `.github/workflows/nightly-full.yml` at cron `0 18 * * *` (02:00 China) plus `workflow_dispatch`, always against exact default-branch HEAD | Run `nightly-portable` on `ubuntu-24.04` first, then two independent fresh `windows-2025` jobs: real Standalone editor/GUI journeys with restart, recovery, and performance budgets; and release-shaped package/install/upgrade/uninstall/launch/system proof. Full-green requires all lanes. Quarantined, recovered, skipped, incomplete, or cancelled work never counts as full-green. |
-| **`release`** | `.github/workflows/release-candidate.yml` on a strict `vX.Y.Z-rc.N` tag; a manual rerun must still identify and verify a real tag | Fail closed unless the tag resolves to checked-out HEAD and the newest authoritative nightly receipt is full-green for the exact source SHA and Proof-input Fingerprint. On `windows-2025`, test one immutable Windows package for identity, clean install, upgrade, repair, uninstall, installed Standalone canonical journey, and signature/manifest checks after packaging is chosen. Do not rerun the whole source suite or rebuild bytes during final promotion. |
-
-### Non-gating `provider-rehearsal`
-
-Provider Rehearsal is local-only, manual, separately authorized, and never ordinary CI or promotion evidence. The recorder refuses `CI`, uses only public-synthetic inputs, requires explicit opt-in plus an explicit provider/model binding, outbound-data preflight digest, and hard call/cost ceilings. Output goes to staging; sanitization, schema validation, and human review must succeed before an immutable fixture version is published atomically. No GitHub live-provider recording workflow is created.
-
-All required Actions explicitly select replay mode, receive no provider credentials, and disable outbound model-service access. GitHub's `windows-2025` image is a fresh hosted Windows Server VM, so it cannot replace supported-client Windows 10/11 and professional-editor acceptance under the Standalone Editing Sufficiency Gate.
-
-## Test Catalog contract
-
-Workflows request Test Catalog plans rather than enumerating test files. Every active route records at least:
-
-- stable route ID, owning module, and responsible maintainer;
-- seam: `unit`, `contract`, `component`, `headless-scenario`, `desktop-gui`, `system`, or `release`;
-- supported platform and eligible tiers;
-- one stable command plus timeout/resource class;
-- required capabilities and test isolation needs;
-- fixture-set IDs and content digests; and
-- expected evidence outputs.
-
-The catalog and workflows are themselves schema- and contract-tested. A route cannot silently disappear from required coverage because a directory or package was renamed.
-
-## Exact proof and receipts
-
-Nightly and release evidence must bind at least:
-
-- receipt schema version, source SHA, workflow/run/attempt, and lane/route outcomes;
-- pinned Harness SHA/package set, lockfile, toolchain, OS, and runtime facts;
-- effective AI7 profile, bundle, Agent Preset, policy/configuration, and Test Catalog digests;
-- scenario-corpus, cassette-manifest, and request-fingerprint-rule digests;
-- package/artifact hashes and applicable sanitization classification; and
-- timestamps and the identity of the workflow that issued the receipt.
-
-A newer rerun/attempt supersedes an older green result. Receipts contain no raw unpublished text, credentials, or provider payloads.
-
-Scheduled same-SHA suppression is allowed only when the newest authoritative receipt matches the exact source SHA and complete Proof-input Fingerprint. Uncertain lookup runs the nightly; manual dispatch always runs it.
-
-## Quarantine
-
-Quarantine is scenario-exact, not a broad module waiver. Each entry requires a GitHub issue, owner, reason, first-seen evidence, expiry, and removal condition. A quarantined route may continue diagnostically so other failures remain visible, but no result containing a quarantine can mint full-green nightly evidence or admit a release candidate.
-
-Archived Word/COM tests are not quarantined V1 tests. They remain source locators outside the active Test Catalog.
 
 ## Mock-provider evidence model
 
-Keep three distinct forms of deterministic evidence:
+Original AI7 contained two complementary deterministic systems; the new project should not collapse them into one low-fidelity mock. Under the accepted contract they arrive in phases rather than all at once:
 
-1. **Canonical semantic Session replay** — complete persisted Harness Session JSONL for assembled agent-loop, Session, and execution-presentation behavior.
-2. **Wire-level fault server** — HTTP/SSE adapter, malformed-stream, retry, cancellation, timeout, and transport behavior.
-3. **Small sanitized response fixtures** — parser, schema, normalization, and adapter unit/contract behavior.
+1. **Canonical semantic Session replay** — persisted Harness Session JSONL proving assembled agent-loop, Session, and execution-presentation behavior. **Required from the first slice.**
+2. **Small sanitized response fixtures** — parser, schema, normalization, and adapter unit/contract behavior. **Required from the first slice.**
+3. **Wire-level fault server** — HTTP/SSE adapter, malformed-stream, retry, cancellation, timeout, and transport behavior. **Deferred to Phase 3**, when Effects and ambiguous-outcome handling create something for it to prove.
 
-None substitutes for the other two. The synthetic-DOCX tracer and broader editorial scenarios enter through an AI7 test driver so Task Ledger, source scope, policy snapshots, Execution Binding, Harness Session, proposals, and receipts are all exercised; the stock Harness headless runner alone cannot prove those AI7 business records.
-
-## Request-fingerprint guard
-
-Pinned Harness replay selects scripts primarily by Session/call order, which is insufficient for exact AI7 proof and can become nondeterministic with concurrent sibling agents. Add a test-only request-fingerprint guard over the normalized, semantically relevant request:
-
-- complete message/system/tool inputs;
-- provider, model, and adapter identity;
-- effective AI7 profile, bundle, and Agent Preset;
-- Task Skill Activation and capability grants;
-- policy snapshots, source/revision pins, and outbound-data class; and
-- declared normalization rules for volatile IDs, timestamps, and temporary paths.
-
-Replay fails closed on a fingerprint mismatch. Semantic content is never scrubbed merely to make a cassette match. Concurrent scenarios use isolated replay/fault-server instances or explicitly deterministic dispatch ordering.
+None substitutes for another. The synthetic-DOCX tracer and broader editorial scenarios enter through an AI7 test driver so the Task Ledger, source scope, policy snapshots, Execution Binding, Harness Session, proposals, and receipts are all exercised; the stock Harness headless runner alone cannot prove those AI7 business records.
 
 ## Fixture lifecycle
 
@@ -129,35 +90,34 @@ flowchart LR
     Publish --> Replay["Provider-free CI replay"]
 ```
 
-The new corpus must use licensed or purpose-written Chinese publishing scenarios, immutable scenario IDs, a closed manifest, and independently selected public sizes. Do not byte-copy the legacy `public-synthetic-corpus-v1.json`: its recorded byte size matched a private sample document. Generate a new ID/size and regenerate every derived fingerprint and cassette.
-
-Only reviewed, normalized, public-synthetic, sanitized replay cassettes qualify for migration. Raw/private/live recordings and logs remain excluded. User-selected private test Books stay local and cannot contribute hosted-CI or distributable fixtures. Evidence sets are development/test assets and do not ship in the desktop product unless a later explicit offline-demo decision permits it.
+The new corpus must use licensed or purpose-written Chinese publishing scenarios, immutable scenario IDs, a closed manifest, and independently selected public sizes. Only reviewed, normalized, public-synthetic, sanitized replay cassettes qualify for transfer under [the accepted legacy-data boundary](./24-legacy-data-migration-boundary.md). Raw, private, and live recordings remain excluded. User-selected private test Books stay local and cannot contribute hosted-CI or distributable fixtures. Evidence sets are development assets and do not ship in the desktop product unless a later explicit offline-demo decision permits it.
 
 ## Original-AI7 and Harness disposition
 
 | Source concept | Disposition | New-project treatment |
 | --- | --- | --- |
-| Provider-free PR/nightly/release tiering | **Keep and rebaseline** | Preserve purpose and exact-evidence discipline; use new routes, commands, topology, and package owners. |
-| Machine-owned test catalog and workflow contract tests | **Keep** | Regenerate for the new modules and verify workflows as code. |
-| Exact-SHA nightly-to-release admission | **Keep and strengthen** | Bind full Proof-input Fingerprint and immutable package identity. |
-| Legacy generated public-synthetic corpus | **Regenerate** | Preserve scenario/cassette method, not the private-size-linked artifact or fixed provider identity. |
-| Legacy exact safe-request matching | **Adapt** | Add an AI7 fingerprint guard around Harness semantic replay. |
-| Harness Session replay test support | **Keep behind AI7 driver** | Use for executor truth while the AI7 tracer proves business truth and Execution Bindings. |
-| Harness wire mock server | **Keep as a separate seam** | Isolate instances for concurrent scenarios; do not confuse transport proof with semantic replay. |
-| Live-provider calls in required CI | **Drop/prohibit** | Provider Rehearsal is opt-in and non-gating. |
-| Word, COM, and dual-surface verification lanes | **Drop from V1** | Historical/contingency evidence only; never quarantine them as if still required. |
-| Mock fixtures in production package | **Drop by default** | Development/test only unless a later ADR creates an offline demo. |
+| Provider-free tiering principle | **Keep, reduced** | Two workflows rather than four tiers; the provider-free and fail-closed discipline is unchanged |
+| Multi-platform CI matrix | **Drop for V1** | One `windows-2025` lane; Ubuntu deferred behind a stated trigger |
+| Nightly fan-out and same-SHA suppression | **Defer** | Not justified without contributors or an oversized suite |
+| Machine-owned test catalog and workflow contract tests | **Defer** | Reconsider at the first missed route; workflows remain small enough to review directly |
+| Exact-SHA nightly-to-release admission | **Keep, simplified** | `release` requires a green `pr` run for the same SHA plus a five-field receipt |
+| Legacy generated public-synthetic corpus | **Regenerate** | Preserve the scenario/cassette method, not the private-size-linked artifact or fixed provider identity |
+| Legacy exact safe-request matching | **Adapt** | Becomes the AI7 request-fingerprint guard around Harness semantic replay |
+| Harness Session replay test support | **Keep behind an AI7 driver** | Executor truth, while the AI7 tracer proves business truth and Execution Bindings |
+| Harness wire mock server | **Defer to Phase 3** | Transport proof is not semantic proof; isolate instances if concurrent scenarios ever need it |
+| Live-provider calls in required CI | **Prohibit** | Provider Rehearsal is opt-in, local, and non-gating |
+| Word, COM, and dual-surface verification lanes | **Drop from V1** | Historical and contingency evidence only; never quarantined as if still required |
+| Mock fixtures in the production package | **Drop by default** | Development and test only, unless a later ADR creates an offline demo |
 
-## Superseded Question 24 resolution
+## Question 24 decision
 
-The proposal below was rejected by the owner correction recorded at the top of this document. It is retained only as the unreduced version.
+Accepted with owner revision:
 
-~~Accept the four active tiers (`focused`, `pr`, `nightly`, `release`), the separate non-gating Provider Rehearsal, machine-owned Test Catalog, exact proof receipts, scenario-exact quarantine, three-part mock model, AI7 request-fingerprint guard, regenerated Chinese public-synthetic corpus, and the rule that all promotion evidence remains provider-free.~~
+- two workflows, `pr` and `release`, both on `windows-2025`;
+- no Ubuntu lane, no nightly tier, no Test Catalog, and no quarantine registry in V1, each deferred behind a named trigger;
+- focused verification is local and provider rehearsal is local, opt-in, and never gating;
+- required CI stays provider-free;
+- the request-fingerprint guard, regenerated corpus, and five-field release receipt are retained; and
+- the stated time budgets are calibration to revise once a measurable suite exists.
 
-Open questions the revised proposal must answer:
-
-1. Does required CI run on Windows only, or is a Ubuntu lane retained purely because hosted Linux minutes are cheaper and faster?
-2. How many tiers survive "concise" — plausibly two rather than four?
-3. Does a machine-owned Test Catalog earn its cost at this repository's size, or is direct test selection sufficient until it does?
-4. Does a nightly tier exist, given no external contributors and no production Ubuntu?
-5. What elapsed-time budget makes a gate "quick"?
+See [ADR 0014](../docs/adr/0014-verify-on-one-windows-gate.md).

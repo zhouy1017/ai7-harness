@@ -31,7 +31,7 @@ Create the repository only after Phase 0:
 - Pin the exact Harness package family and record upstream SHA/notices.
 - Add the AI7 profile/bundle skeleton without changing Harness core.
 - Establish Host/Client build faces, domain boundary packages, test catalog, and provenance ledger.
-- Establish the rebaselined tiered GitHub Actions ladder and reviewed/regenerated mock-LLM-provider corpus before behavior migration.
+- Establish the two accepted GitHub Actions workflows, `pr` and `release`, both single-job on `windows-2025`, plus the reviewed and regenerated mock-LLM-provider corpus, before behavior migration.
 - Dump and snapshot the effective Cordis configuration so upgrades cannot silently change capability exposure.
 
 Exit gate: an empty AI7 composition boots deterministically, has no manuscript data, exposes only its declared capabilities, and can be upgraded/reverted by changing one pin.
