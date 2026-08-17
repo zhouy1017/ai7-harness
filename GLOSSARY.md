@@ -211,7 +211,7 @@ The inheritance audit must resolve these known collisions before definitions are
 | Harness Tool | AI7 Capability / authority boundary / Effect Receipt |
 | Task Skill Activation | Task Skill Enablement / Harness Skill Projection / Harness Session |
 | Run Source Scope | Working Corpus / Outbound Data Category / mutation authority |
-| Model Role | Model Provider / model name / Provider Binding |
+| Model Role | Model Provider / model name / Provider Binding / Repository Development Dispatch binding table |
 | Provider Resolution Plan | Plan Envelope / dynamic provider choice / skill preference |
 | Provider Preflight | Run Authorization / live model call |
 | Credential Reference | Secret value / API key / environment variable |
@@ -219,6 +219,12 @@ The inheritance audit must resolve these known collisions before definitions are
 | Outbound Data Category | Run Source Scope / Public Release Permission |
 | Provider Processing Policy | External Export Policy / Public Release Permission |
 | Bundled Promotion Gate | Task Skill Enablement / in-product trust elevation |
+| Review Decision | Proposal Decision / Effect Approval / a Repository Development Dispatch reviewer report |
+
+Two collisions come from repository tooling rather than from Harness, and are recorded here because the words are nearly identical:
+
+- A **Repository Development Dispatch reviewer** produces a *review report* about a code branch. It is engineering tooling and carries no product authority. A **Review Decision** is a professional editorial judgment at a workflow gate, defined in the Editorial context. Never let one term stand for the other.
+- The Dispatch **binding table** names providers, models, and reasoning effort for development agents. A **Model Role** declares product model requirements and by design names no provider, model, endpoint, or credential; provider selection is frozen by Provider Preflight into the Plan Envelope. A development binding table must never be readable as a Provider Resolution Plan, and the two must not share vocabulary, configuration, or code paths.
 
 ## Simplified Chinese label discipline
 

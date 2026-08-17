@@ -1,6 +1,6 @@
 # Retained Original-AI7 Development Workflows
 
-Status: **preservation direction accepted; Question 24 closed; Question 25 remains open**
+Status: **preservation direction accepted; Questions 24 and 25 both closed**
 
 ## Source and status vocabulary
 
@@ -96,4 +96,4 @@ The source had not completed its required real Host observations at the pin. The
 ## Next decisions
 
 - Question 24 is closed. The accepted contract is in [Tiered Verification and Mock-provider Evidence](./26-tiered-verification-and-mock-provider-evidence.md) and [ADR 0014](../docs/adr/0014-verify-on-one-windows-gate.md): two Windows-only workflows, with several tiers deferred behind named triggers. The preservation direction recorded in this file is unaffected, but read the source inventory above through that reduction — the four legacy workflows map onto two, and the legacy test catalog is deferred rather than rebaselined immediately.
-- Question 25 will define Repository Development Dispatch roles, authority ceilings, worktree ownership, handoffs, receipts, and the relationship to available development-agent tooling.
+- Question 25 is closed. The accepted contract is in [Repository Development Dispatch](./27-repository-development-dispatch.md) and [ADR 0015](../docs/adr/0015-provider-neutral-development-dispatch.md). Read the pilot inventory above through that decision: the preserved guarantees survive as operating rules, while the lifecycle state machine, `agent-host-connector/`, DPAPI, and Windows Hello enrollment are rejected as baselines rather than reimplemented.

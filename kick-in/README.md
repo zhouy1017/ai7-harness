@@ -50,7 +50,8 @@ The rest is still **proposed, not accepted**. The license, the recorded authoriz
 25. [Legacy data migration boundary](./24-legacy-data-migration-boundary.md) — accepted production-data exclusion with protected credential, mock-provider evidence, and selected test-Book exceptions.
 26. [Standalone-only V1 and deferred Word alternative](./25-standalone-word-surface-boundary.md) — accepted Question 23 single-surface boundary and professional editing obligation.
 27. [Tiered verification and mock-provider evidence](./26-tiered-verification-and-mock-provider-evidence.md) — accepted Question 24 two-workflow Windows-only contract, retained mock-provider requirements, and the deferral triggers for everything cut.
-28. [Decision records](./decisions/README.md) — accepted hard-to-reverse decisions only.
+28. [Repository development dispatch](./27-repository-development-dispatch.md) — accepted Question 25 three-role model, provider-neutral operating rules, and the single binding table that is the only provider-specific artifact.
+29. [Decision records](./decisions/README.md) — accepted hard-to-reverse decisions only.
 
 ## Decision discipline
 
