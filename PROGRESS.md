@@ -125,9 +125,10 @@
 - Cleared the last Critical authority blocker on source copying, and added two replacement risks: a private sample manuscript escaping its local-only authorization, and upstream third-party obligations being assumed to transfer to an AI7-branded distribution.
 - Added `LICENSE` and `docs/adr/0016-proprietary-license-and-local-only-sample-manuscripts.md`; updated `AGENTS.md`, `kick-in/{01-source-provenance,05-decision-map,06-risk-register,24-legacy-data-migration-boundary,decisions/README}.md`.
 
-## What's next
+- Completed Question 28/35. The product display name is exactly AI7, with no separate Chinese product name. Repository suffixes `-harness`, `-reborn`, and `-redesign` are developer-facing development-track markers carrying no product meaning, so `ai7-harness` is not renamed and future agents should not treat the name as a defect. Harness remains the execution foundation and never user-facing branding, appearing only in third-party notices. Recorded in the decision map rather than an ADR, as a routine planning answer rather than a hard-to-reverse trade-off. Branch C is now fully resolved.
+- Confirmed explicitly, replacing an inference flagged at Question 27: all AI7 projects are solely owned by the repository owner, and agents are authorized to modify them. Recorded that this is a statement of rights, not of workflow — the Repository Development Dispatch role authority is unchanged, and a Worker still never merges, pushes, publishes, or takes external actions.
 
-- Ask Question 28/35: AI7 branding, product-language policy, and the stated relationship to Harness. It is the smallest remaining governance item and unblocks repository, documentation, and release naming.
+## What's next
 - Question 26 is deferred until after Question 34 by owner instruction, because what remains of it is largely a packaging, installer, signing, and release-evidence question that depends on the Standalone shell and process topology Question 34 decides.
 - Confirm whether the Question 16 answer of "mostly okay" endorsed the four content/evidence classes other than the one the owner corrected; that scope was never itemized.
 - Keep Word vocabulary and implementation outside the active V1 domain; reconsider it only through a later proportional-remedy ADR after failure of the Standalone Editing Sufficiency Gate.
@@ -199,4 +200,4 @@
 
 ## Resume Prompt
 
-Resume at Question 28/35: decide AI7 branding, product-language policy, and how the product states its relationship to Harness across repository, documentation, and release naming; Question 26 waits until after Question 34.
+Resume at Question 29/35: decide what "full Harness capability" means in practice — default capability exposure, whether a separate developer/admin profile stands alongside a least-privilege editorial profile, and whether any runtime self-modification is permitted; Question 26 waits until after Question 34.

@@ -18,6 +18,10 @@ AI7 protects unpublished editorial material from release to public channels with
 
 AI7 does not train an LLM. It uses replaceable provided Foundation Models through an AI7-owned Editorial Intelligence Layer built from professionally supervised, produced, approved, and revised knowledge. The product target is Editor-comparable Delivery Quality that materially reduces workload without displacing professional judgment or publication authority.
 
+## Product identity
+
+The product is called **AI7**, displayed exactly that way, with no separate Chinese product name. DeepSeek Harness is the execution foundation beneath it and never a user-facing brand; it is disclosed in third-party notices only. Repository names carry development-track suffixes for developers and are not product identity.
+
 ## Primary product story
 
 As an editorial professional in a leading literary publishing house in mainland China, I use one Chinese-first Windows desktop workspace to perform multi-aspect work across a Book, its sources, and its Editorial Deliverables; I can inspect evidence, reasoning, plans, and proposed changes, retain publication authority and recovery history, and prevent unpublished material from reaching public channels without permission.
