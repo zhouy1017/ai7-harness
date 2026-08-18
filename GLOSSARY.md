@@ -141,6 +141,7 @@ This maintained bilingual reference routes readers to canonical definitions and 
 | Behavior Evaluation Gate | 行为评估关口 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |
 | Quality Signal | 质量信号 | [AI7 Editorial](./docs/domain/editorial/CONTEXT.md) |
 | Delivery Quality Metric | 交付质量度量 | [AI7 Editorial](./docs/domain/editorial/CONTEXT.md) |
+| Manuscript Retrieval Chunk | 稿件检索片段 | [AI7 Editorial](./docs/domain/editorial/CONTEXT.md) |
 | Run Authorization | 任务运行授权 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |
 | Execution Grant | 单次执行许可 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |
 | Effect | 受控动作 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |
@@ -233,6 +234,7 @@ The inheritance audit must resolve these known collisions before definitions are
 | Harness agent loop | AI7 business scheduling / a limit on parallel Runs / AI7-owned workflow continuation |
 | Quality Signal | Learning Material / Memory Candidate / a rating alone |
 | Delivery Quality Metric | Factual correctness / acceptance rate alone / task authority |
+| Manuscript Retrieval Chunk | Manuscript Block / Source Index Chunk / a quotation source |
 | Review Decision | Proposal Decision / Effect Approval / a Repository Development Dispatch reviewer report |
 
 Two collisions come from repository tooling rather than from Harness, and are recorded here because the words are nearly identical:

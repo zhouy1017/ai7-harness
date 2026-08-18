@@ -168,10 +168,19 @@
 - Refined the scale requirement on owner clarification: windowed display is **accepted rather than merely tolerated**, since an editor reads only part of a manuscript at a time and rendering everything at once is not a requirement. The binding performance constraint is therefore whole-manuscript **index time** — find, replace, and jump — which moves the principal risk from the renderer to the store and its indexes, and correspondingly reduces how much the ProseMirror confidence gap matters. Specified three disk-backed incrementally maintained indexes: block, CJK-aware substring full-text, and outline. Noted that a word tokenizer built for space-delimited languages will not serve Chinese.
 - Added `kick-in/33-standalone-shell-and-editor-topology.md`, `docs/adr/0024-electron-shell-with-isolated-ai7-service.md`, and `docs/adr/0025-windowed-editing-over-a-paging-manuscript-store.md`; updated `AGENTS.md`, the risk register, decision map, Standalone Editing Sufficiency Gate criteria, and both indexes. The last implementation blocker is cleared.
 
+- Completed Question 35/36, the final interview question. Accepted a two-step approach that separates technical-feasibility risk from architectural-integration risk: a throwaway, time-boxed store-and-index spike runs first, followed by a permanent read-only tracer slice.
+- Retargeted the spike after the index-time refinement. Its subject is the paging store and its indexes rather than the editor, since the editor only ever holds a bounded window. It measures cold open, find, jump, replace, keystroke latency, retrieval index build and re-index cost, and peak memory across generated 500K, 1M, and 10M-character Chinese corpora. Corpora must be generated rather than real sample Books, which ADR 0016 forbids in fixtures.
+- Accepted the tracer slice: open one Book, import one DOCX, view it in the real windowed editor, ask one source-grounded question, and receive an answer whose citation resolves to an exact highlighted Manuscript Block range. Read-only throughout. The editor surface earns its place by proving the editor-to-service seam and by making provenance visible rather than merely recorded.
+- Accepted a thirteen-point exit gate: the eight original migration criteria plus headless replay inside the ten-minute `pr` gate, exact block-range citation highlighting, in-folder data-root creation with sync detection and no credentials, request-fingerprint fail-closed, and portable extract/run/remove with no residue. The additions make the tracer a test of the accepted decisions rather than only of code.
+- Accepted manuscript retrieval as a required capability, extending the Source Search to Exact Fetch to Synthesis pipeline from imported sources to manuscripts. Retrieval returns candidates and never truth; only Exact Fetch against the pinned revision yields authoritative text.
+- Recorded the genuinely new problem that manuscript retrieval faces and source retrieval does not: manuscripts mutate, so a retrieval index over changing text feeds superseded content silently, since a stale hit is indistinguishable from a fresh one. Accepted block-level incremental re-indexing with revision stamps so staleness becomes detectable. The Manuscript Block is now the unit for three separate jobs — editor windowing, lexical indexing, and retrieval invalidation.
+- Deferred retrieval strategy between lexical, vector, and hybrid to the spike, recording that a well-built lexical index performs better for Chinese than commonly assumed and costs no model call, while vector retrieval at the 10M tier means embedding fifty to a hundred thousand blocks with real build time and, if remote, real cost per block.
+- Added `kick-in/34-first-tracer-slice.md` and `docs/adr/0026-manuscript-retrieval-returns-candidates.md`; promoted Manuscript Retrieval Chunk into the Editorial context with its Chinese label and collision entry; updated `AGENTS.md`, the migration workflow Phase 2, the source-grounding boundary, the risk register, decision map, and both indexes.
+
 ## What's next
 
-- Ask Question 35/36: the first vertical tracer slice and its exit gate — the final question in the interview.
-- Then Question 26's residual packaging mechanics, now unblocked by Question 34.
+- Close Question 26's residual packaging mechanics, now unblocked by Question 34. This is the only decision-map row still open.
+- Then run the Phase 0 exit review: confirm every row is resolved or explicitly deferred, and decompose the accepted design into independently grabbable vertical issues.
 - Verify the Windows sandbox enforcement strength before describing the Agent Data Root boundary as enforced rather than intended.
 - Question 26 is deferred until after Question 34 by owner instruction, because what remains of it is largely a packaging, installer, signing, and release-evidence question that depends on the Standalone shell and process topology Question 34 decides.
 - Confirm whether the Question 16 answer of "mostly okay" endorsed the four content/evidence classes other than the one the owner corrected; that scope was never itemized.
@@ -239,6 +248,7 @@
 - Privacy for this product is an egress boundary, not an identity boundary. Local access by authorized personnel is unrestricted; what is controlled is every automated path that could carry a manuscript off the machine, with a configured model call the one permitted exception.
 - AI7 must operate at zero data. Cold start is a required tolerance rather than a degraded mode, so evidence thresholds may gate auto-activation but never operation.
 - Long Chinese manuscripts are a required feature, not a stretch goal. The scale tiers force the architecture: the renderer never holds a whole manuscript, and the largest tier is met by the paging store and windowing rather than by the editor library.
+- Retrieval over manuscripts returns candidates, never truth, and must be revision-aware because manuscripts mutate while sources do not. A stale retrieval hit is indistinguishable from a fresh one unless entries carry the revision they were built from.
 - Windowed display is accepted, so the scale requirement lands on index time rather than render time. Find, replace, and jump must stay reasonable at every tier; typing latency depends on window size and never on manuscript size.
 - AI7 is TypeScript and Node throughout; no interpreter ships. A named capability gap enters as a bounded native module or sidecar under its own ADR, never as a general-purpose embedded runtime.
 - AI7 ships portable and self-contained: data inside the folder, secrets outside it. A portable folder is designed to be copied, so anything that must not travel with it stays out.
@@ -257,4 +267,4 @@
 
 ## Resume Prompt
 
-Resume at Question 35/36: decide the first vertical tracer slice and its exit gate, then close out Question 26's residual packaging mechanics.
+Resume by closing Question 26's residual packaging mechanics — the last open decision-map row — then run the Phase 0 exit review and decompose the accepted design into independently grabbable vertical issues.

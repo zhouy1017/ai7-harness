@@ -272,3 +272,8 @@ _Avoid_: Learning Material, Memory Candidate, a rating alone, task authority
 A versioned measure derived from Quality Signals over a defined window and scope, covering verbatim acceptance, revision distance, survival to delivery, dissatisfaction by Editorial Dimension, and phase-weighted workload displacement. Aggregating it globally never grants global retrieval access.
 _中文_: 交付质量度量
 _Avoid_: Editor-comparable Delivery Quality as a goal statement, factual correctness, acceptance rate alone
+
+**Manuscript Retrieval Chunk**:
+A ranked, approximate retrieval unit over manuscript text used to assemble model context beyond the editing window. It may span or subdivide Manuscript Blocks, returns candidates rather than authoritative text, and is stamped with the Manuscript Revision it was built from so a stale hit is detectable. Authoritative text comes only from Exact Fetch against the current pin.
+_中文_: 稿件检索片段
+_Avoid_: Manuscript Block, Source Index Chunk, a quotation source, a truth path

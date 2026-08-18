@@ -64,7 +64,7 @@ The revised estimate is **36 questions**. Question 36 was added when Question 29
 | --- | --- | --- | --- |
 | 33 | Python and legacy-data posture | **Accepted.** TypeScript and Node throughout with no embedded Python; the legacy Python had zero third-party dependencies and handled DOCX with stdlib zip/XML, so nothing required it. Portable all-in-one folder is the only V1 channel, with the Agent Data Root inside the AI7 folder and the Protected Secret Store outside it | Process topology, packaging, storage — **resolved** |
 | 34 | New Windows Standalone shell and professional editor topology | **Accepted.** Long Chinese manuscripts are a required feature with binding tiers at 500K, 1M, and 10M Chinese characters; the renderer never holds a whole manuscript. Electron shell, three processes with a separate AI7 service, stdio/named-pipe IPC and no TCP listener, ProseMirror over bounded windows at medium confidence pending a scale spike | Client, editor, gateway, packaging — **resolved** |
-| 35 | First tracer slice and exit gate | Standalone-only read-only, source-grounded Q&A over one selected synthetic DOCX with real + replay adapters and restart proof | PRD and issue decomposition |
+| 35 | First tracer slice and exit gate | **Accepted.** A throwaway store-and-index spike runs first, targeting the paging store rather than the editor; then a read-only tracer ending at a citation that resolves to an exact highlighted block range in the real windowed editor. Manuscript retrieval is required, returns candidates never truth, and invalidates per block with revision stamps; strategy deferred to the spike. Thirteen-point exit gate | PRD and issue decomposition — **resolved** |
 
 ## Branch F — Editorial quality measurement
 
@@ -115,4 +115,8 @@ It was re-proposed under those constraints and accepted: two Windows-only workfl
 
 **Question 34 is closed**, recorded in [33-standalone-shell-and-editor-topology.md](./33-standalone-shell-and-editor-topology.md), [ADR 0024](../docs/adr/0024-electron-shell-with-isolated-ai7-service.md), and [ADR 0025](../docs/adr/0025-windowed-editing-over-a-paging-manuscript-store.md). The last implementation blocker is cleared.
 
-**Question 35 is the current question**: the first vertical tracer slice and its exit gate. Question 26's residual packaging mechanics are now also unblocked.
+**Question 35 is closed**, recorded in [34-first-tracer-slice.md](./34-first-tracer-slice.md) and [ADR 0026](../docs/adr/0026-manuscript-retrieval-returns-candidates.md).
+
+**The design interview is complete except for Question 26's residual packaging mechanics**, which were deferred until after Question 34 and are now unblocked. Thirty-five of thirty-six questions are resolved; Question 32 was settled early by Question 22, and Question 26's data half was accepted at Question 22 while its release-channel half was accepted at Question 33.
+
+What remains before implementation is not another interview question but the Phase 0 exit review: confirm every decision-map row is resolved or explicitly deferred, then decompose the accepted design into independently grabbable vertical issues.

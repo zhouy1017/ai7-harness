@@ -1,5 +1,7 @@
 # Source–Generation–Grounding Boundary
 
+> **Extended at Question 35.** The Search → Exact Fetch → Synthesis pipeline described here now covers retrieval over **manuscripts**, not only imported sources. Retrieval returns candidates and never truth, and because manuscripts mutate while Source Versions do not, manuscript retrieval invalidates per Manuscript Block with revision stamps so a stale hit is detectable. See [ADR 0026](../docs/adr/0026-manuscript-retrieval-returns-candidates.md).
+
 Status: **accepted**
 
 ## Why this needs a new boundary name

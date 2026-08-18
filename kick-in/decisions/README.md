@@ -27,6 +27,7 @@ Accepted system-wide architecture decisions live under [`docs/adr/`](../../docs/
 - [ADR 0023: Ship a portable release with a self-contained data root](../../docs/adr/0023-portable-release-with-self-contained-data-root.md)
 - [ADR 0024: Run an Electron shell with an isolated AI7 service process](../../docs/adr/0024-electron-shell-with-isolated-ai7-service.md)
 - [ADR 0025: Edit through bounded windows over a paging manuscript store](../../docs/adr/0025-windowed-editing-over-a-paging-manuscript-store.md)
+- [ADR 0026: Retrieve over manuscripts, returning candidates rather than truth](../../docs/adr/0026-manuscript-retrieval-returns-candidates.md)
 
 Create a record here only when a choice is hard to reverse, surprising without context, and the result of a real trade-off. Use sequential names such as `0001-fresh-ai7-repository.md` and keep the record concise: what was decided, why, meaningful rejected alternatives, and any non-obvious consequence.
 

@@ -38,7 +38,7 @@ Exit gate: an empty AI7 composition boots deterministically, has no manuscript d
 
 ## Phase 2 — Read-only vertical tracer
 
-Recommended first slice: create/open one Book, import and index one synthetic DOCX, ask one source-grounded question, and return an answer with exact retrieved text and provenance through a real Harness model adapter plus a deterministic replay adapter.
+**Accepted at Question 35**, and preceded by a throwaway store-and-index spike. The slice: create or open one Book, import and index one synthetic DOCX, view it in the real windowed editor, ask one source-grounded question, and return an answer whose citation resolves to an exact highlighted Manuscript Block range — through a real Harness model adapter plus a deterministic replay adapter. The full definition and thirteen-point exit gate are in [First tracer slice and exit gate](./34-first-tracer-slice.md).
 
 The slice must prove end to end:
 
