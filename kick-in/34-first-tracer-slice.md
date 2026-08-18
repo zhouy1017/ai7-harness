@@ -61,13 +61,34 @@ The rule accepted at Question 16 carries over unchanged: **search discovers cand
 
 This matters more for manuscripts than for sources, because the model is being asked about text the editor is actively changing.
 
+### One authority, many projections
+
+**Corrected at Question 26.** An earlier version of this design unified the editor window, the lexical index, and the retrieval chunk onto the Manuscript Block and treated that as evidence the block was the right primitive. That over-unified three things with different consumers.
+
+Chunks, rankings, and embeddings exist **for models and agents**. The editor reads **ordinary text**. The Manuscript Revision is the sole authority; everything else is a derived projection — the display window, the lexical find index, the outline, retrieval chunks and their embeddings — each disposable and rebuildable from the authority alone.
+
+Projections may choose boundaries suited to their consumer. A retrieval chunk may span or subdivide what the editor renders, sized for a model's context rather than a reader's eye. If a shared block boundary happens to help windowed display, that is a convenience to exploit rather than a constraint to design toward.
+
+**The requirement is consistency across forms, not unification.** Four obligations:
+
+1. Every projection records the Manuscript Revision it was derived from.
+2. Every projection is reconstructable from the authority alone, without reference to any other projection.
+3. A change marks overlapping projection entries dirty **by text-range overlap rather than structural identity**, so projections with unrelated boundaries still invalidate correctly.
+4. A stale entry is always detectable, never silently served as current. Deletions are tombstoned, so absence fails differently from staleness.
+
+Re-derivation is cadenced at **Manuscript Checkpoints** rather than per keystroke, reusing the journal-versus-checkpoint separation already accepted at ADR 0006. That gives staleness a bounded window an editor can understand: the projections reflect the last checkpoint.
+
+### Two consequences worth stating outright
+
+**A stale projection produces a stale ranking, not merely stale text.** Retrieval ranks on projected content, so a chunk may be selected on superseded text while the now-relevant passage never surfaces. Fetching fresh text for a stale ranking would look well-formed while being wrong. The remedy is re-derivation of the affected range and re-ranking — not text substitution.
+
+**Candidates and truth may come from different moments.** A Run pins a revision while the editor keeps working, so candidates may be drawn from a newer projection than the pin the answer is bound to. This is acceptable precisely because retrieval yields candidates rather than truth, but it is recorded rather than left as an accident.
+
 ### Manuscripts mutate, and that is the new problem
 
 Source Versions are immutable. Manuscripts are the thing being edited. A retrieval index over changing text will feed the model superseded content unless it is revision-aware — and it will do so **silently**, because a stale hit looks exactly like a fresh one.
 
-**Block-level incremental re-indexing.** Manuscript Blocks carry stable identities under ADR 0006, so a changed block is re-indexed alone. Every index entry is stamped with the revision it was built from, making a stale hit **detectable rather than invisible**, and Exact Fetch against the current pin resolves it.
-
-The block model is now the right unit for three separate jobs: editor windowing, lexical indexing, and retrieval invalidation.
+Incremental re-derivation by affected range, with every entry stamped with the revision it was built from, makes a stale hit **detectable rather than invisible**.
 
 ### Strategy is deferred to the spike
 
@@ -113,7 +134,9 @@ Accepted with owner revisions:
 
 - a throwaway, time-boxed store-and-index spike runs first, targeting the paging store and its indexes rather than the editor;
 - the tracer is read-only and ends at a citation resolving to an exact highlighted block range in the real windowed editor;
-- retrieval over manuscripts is a required capability that returns candidates and never truth, with block-level revision-aware invalidation so stale hits are detectable;
+- retrieval over manuscripts is a required capability that returns candidates and never truth;
+- one authority and many projections: chunks and embeddings serve models while the editor reads ordinary text, projections may use boundaries suited to their consumer, and the requirement is consistency across forms rather than a shared unit;
+- projections carry their derivation revision, rebuild from the authority alone, invalidate by range overlap, tombstone deletions, and re-derive at Manuscript Checkpoints;
 - retrieval strategy — lexical, vector, or hybrid — is deferred to the spike;
 - the thirteen-point exit gate governs completion; and
 - mutation, learning, workflow, concurrency, and export are explicitly out.

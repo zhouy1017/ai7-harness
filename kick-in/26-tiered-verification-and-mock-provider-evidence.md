@@ -17,7 +17,7 @@ The reduction is deliberate. The proposal it replaced specified four active tier
 | Workflow | Trigger | Platform and content | Budget |
 | --- | --- | --- | --- |
 | **`pr`** — the only required gate | `pull_request` (open, synchronize, reopen, ready-for-review) and push to `main`. **No path filters**: a filtered gate can report green on an untested change. Superseded runs cancel per PR | One job on `windows-2025`. Format, typecheck/build, all provider-free unit and contract tests, and one assembled mock-provider replay through the AI7 test driver | Target ≤10 minutes; hard timeout 20 |
-| **`release`** | A `v*` tag | One job on `windows-2025`. Build the Windows package once, then prove extract → first-run data-root creation → launch → canonical Standalone journey → removal leaving no residue outside the folder, against that exact package. Fail closed unless a green `pr` run exists for the same source SHA | Target ≤30 minutes |
+| **`release`** | A `v*` tag | One job on `windows-2025`. Build the Windows package once, then prove both channels against those exact artifacts: for the zip, extract → first-run data-root creation → launch → canonical Standalone journey → removal leaving no residue; for the installer, install → launch → canonical journey → uninstall. Fail closed unless a green `pr` run exists for the same source SHA | Target ≤30 minutes |
 
 Budgets are calibration, not contracts. They were set before any code existed and must be revisited once a real suite is measurable.
 

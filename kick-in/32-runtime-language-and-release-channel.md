@@ -32,13 +32,19 @@ The cost avoided: roughly 50 to 100 MB in a portable build, a second dependency 
 
 **Reconsideration trigger.** A *named* capability with no adequate Node implementation may enter as a bounded native module or a sidecar process under its own ADR. It never enters as a general-purpose embedded interpreter. PDF import, if it becomes V1 scope, is greenfield in either language and is covered by `pdfjs-dist` in Node; it is not a Python-forcing requirement.
 
-## Decision 2 — Portable is the only V1 release channel
+## Decision 2 — Portable release, revised at Question 26 to two channels
+
+> **Revised at Question 26.** V1 ships **both** a zip portable folder and an NSIS installer, built by the same builder from the same source. The portable channel keeps the no-admin, no-registry, no-IT-gate property that motivated it; the installer serves users who expect one. Code signing is deferred until explicitly requested.
+
+### Original Question 33 decision
 
 AI7 ships as an all-in-one portable Windows folder. No installer, no admin rights, no registry writes, no IT ticket. The intended users are publishing professionals on managed corporate machines, so avoiding an installer is an adoption lever rather than a convenience. The legacy product already shipped this way, and Question 24's concise-and-quick verification favors one artifact over two.
 
 An installer is deferred until a concrete need appears.
 
-### The data root lives inside the AI7 folder
+### The data root lives inside the AI7 folder — in the portable channel
+
+Under the dual-channel revision, the accepted unwritable-location fallback stops being an edge case and becomes the installer channel's normal path: an installed application under Program Files cannot host a writable data root, so it resolves to `%LOCALAPPDATA%\AI7`. The rule is unchanged, only its frequency.
 
 By owner decision, AI7 stores its data and files inside its own folder whenever possible. A portable installation is genuinely self-contained: copying the folder moves the work with it, and backing up the folder backs up everything.
 
@@ -72,9 +78,9 @@ A portable folder placed somewhere unwritable — `Program Files`, a read-only s
 
 ### Consequences for release and update
 
-**Question 24's `release` workflow is amended.** It currently proves install, launch, canonical journey, and uninstall. A portable build has no install or uninstall, so the proof becomes: extract → first-run data-root creation → launch → canonical Standalone journey → removal leaves no residue outside the folder and outside the Protected Secret Store.
+**Question 24's `release` workflow proves both channels.** For the zip: extract → first-run data-root creation → launch → canonical Standalone journey → removal leaving no residue outside the folder and outside the Protected Secret Store. For the installer: install → launch → canonical journey → uninstall.
 
-**Sign the executable regardless.** No installer does not remove the signing requirement. An unsigned executable triggers SmartScreen, which for a non-expert user on a corporate machine is a hard stop rather than a warning.
+**Signing is deferred until explicitly requested** (Question 26). Unsigned builds trigger SmartScreen, which for a non-expert user on a corporate machine is a hard stop rather than a warning, so this is recorded as a known adoption cost to be paid when the owner chooses.
 
 **Updates replace `app/` and preserve `data/`.** With no installer there is no updater, so a new build must locate an existing data root and the data root needs a version marker allowing an older build to refuse newer data rather than corrupt it.
 
@@ -83,10 +89,11 @@ A portable folder placed somewhere unwritable — `Program Files`, a read-only s
 Accepted with owner revisions:
 
 - TypeScript and Node throughout, with no embedded Python interpreter, and a named-capability trigger for a bounded native module or sidecar;
-- portable all-in-one Windows folder as the only V1 release channel, with an installer deferred;
+- two Windows channels from one builder and one source, a zip portable folder and an NSIS installer (revised at Question 26 from portable-only);
 - the Agent Data Root lives inside the AI7 folder, keeping the installation self-contained;
 - the Protected Secret Store remains outside it, since a copied folder must not carry credentials;
 - sync-root placement is detected and warned about rather than prevented, and the whole folder must stay outside any repository working tree; and
-- an unwritable location falls back to `%LOCALAPPDATA%\AI7` with a clear notice.
+- an unwritable location falls back to `%LOCALAPPDATA%\AI7` with a clear notice, which is the installer channel's normal path; and
+- code signing is deferred until the owner explicitly requests it, with unsigned builds recorded as a known SmartScreen adoption cost.
 
 See [ADR 0022](../docs/adr/0022-typescript-only-runtime.md) and [ADR 0023](../docs/adr/0023-portable-release-with-self-contained-data-root.md).
