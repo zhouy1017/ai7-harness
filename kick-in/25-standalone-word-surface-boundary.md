@@ -61,7 +61,7 @@ These are outcome requirements, not a prescribed layout or component library. Th
 
 Word is not added merely because it is familiar or because the old Standalone was weak. First evaluate the new Standalone against an explicit **Standalone Editing Sufficiency Gate / 独立桌面端编辑能力达标关口** covering:
 
-1. long-document load, navigation, typing, save/checkpoint, and recovery behavior;
+1. long-document load, navigation, typing, save/checkpoint, and recovery behavior, meeting the binding scale tiers accepted at Question 34 — no sensible degradation below 500K Chinese characters, no critical performance issue to 1M, and no crash or unresponsiveness to 10M;
 2. Chinese-language composition and professional editorial operations;
 3. manuscript structure and import/export fidelity;
 4. proposal/review/annotation workflows and user workload;

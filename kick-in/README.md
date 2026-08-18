@@ -56,7 +56,8 @@ The rest is still **proposed, not accepted**. The license, the recorded authoriz
 31. [Upstream consumption and upgrade contract](./30-upstream-consumption-and-upgrade-contract.md) — accepted Question 30 exact-pin discipline, package-subset selection, registry evidence, and the six-point upgrade verification.
 32. [Single execution authority](./31-single-execution-authority.md) — accepted Question 31 agent-loop definition, instances-versus-authorities rule, required parallelism, scheduling split, and the learn-the-framework-not-its-defaults boundary.
 33. [Runtime language and release channel](./32-runtime-language-and-release-channel.md) — accepted Question 33 TypeScript-only runtime, portable-only V1 channel, self-contained data root, and the release-channel half of Question 26.
-34. [Decision records](./decisions/README.md) — accepted hard-to-reverse decisions only.
+34. [Standalone shell and editor topology](./33-standalone-shell-and-editor-topology.md) — accepted Question 34 manuscript scale tiers, Electron three-process topology, and the ProseMirror windowed-editing foundation.
+35. [Decision records](./decisions/README.md) — accepted hard-to-reverse decisions only.
 
 ## Decision discipline
 

@@ -159,10 +159,18 @@
 - Amended Question 24's `release` proof from install/launch/journey/uninstall to extract, first-run data-root creation, launch, canonical journey, and removal leaving no residue.
 - Added `kick-in/32-runtime-language-and-release-channel.md`, `docs/adr/0022-typescript-only-runtime.md`, and `docs/adr/0023-portable-release-with-self-contained-data-root.md`; updated `AGENTS.md`, the risk register, decision map, Question 24 contract, and both indexes.
 
+- Completed Question 34/36. Recorded that long Chinese manuscripts are a **required feature** with three binding tiers counted in Chinese characters: no sensible performance degradation below 500K, no critical performance issue up to 1M, and no crash or unresponsiveness up to 10M. For orientation, 10M Chinese characters is roughly 30 MB of UTF-8 text and 50,000 to 100,000 Manuscript Blocks, while the existing sample Books at 290K to 396K sit inside the easiest tier.
+- Derived the architecture the tiers force rather than merely stating a goal: the renderer never holds a whole manuscript and always edits a bounded window of blocks; the authoritative model lives in the AI7 service over a store that pages by block; whole-manuscript operations stream in the service, cancellable and with progress, never on the UI thread; no unbounded in-memory structure exists at any layer; and the memory ceiling is tested at the 10M tier rather than assumed. An early performance gate proves the tiers before the editor is built out.
+- Accepted Electron as the shell. Verified that Electron 43.4.0 bundles Node 24.18.1, which satisfies the Harness engine requirement of `^22.19.0 || >=24` directly. Rejected Tauri, which would add a Rust toolchain and still need a Node sidecar, and direct WebView2 hosting, which means native glue for a solved problem.
+- Accepted a three-process topology: a thin Electron main shell, a renderer with context isolation on and Node integration off, and a separate Node service process holding AI7 domain services plus the composed Harness runtime as the one local authority. The separation keeps the UI responsive under the parallel Runs Question 31 requires, isolates crashes from unsaved text, gives the concurrency governor a home, and makes the service drivable headlessly — which the ten-minute pull-request gate and the tracer slice both need. IPC uses stdio or a Windows named pipe and never a TCP listener, removing the exposed-web-server risk structurally.
+- Accepted ProseMirror as the editor foundation at **medium confidence**, operating over bounded windows each mapped to global Manuscript Block identities. Rejected Slate for IME fragility, CodeMirror 6 as a code-oriented engine, and a custom editor as the predecessor's rejected 26,484-line renderer; recorded Lexical as the credible alternative. Flagged that this is the one Question 34 choice warranting a spike before it is treated as settled.
+- Downgraded the Electron/native ABI risk from High to Medium after finding the selected core packages are pure JavaScript and the native modules live in the sandbox and shell packages Question 30 already excludes — the package-subset decision defused most of it as a side effect. Added a Critical risk for manuscript scale.
+- Added `kick-in/33-standalone-shell-and-editor-topology.md`, `docs/adr/0024-electron-shell-with-isolated-ai7-service.md`, and `docs/adr/0025-windowed-editing-over-a-paging-manuscript-store.md`; updated `AGENTS.md`, the risk register, decision map, Standalone Editing Sufficiency Gate criteria, and both indexes. The last implementation blocker is cleared.
+
 ## What's next
 
-- Ask Question 34/36: the Windows Standalone shell and professional editor topology. It is the last remaining implementation blocker, Question 26's residual packaging mechanics wait behind it, and Question 35's tracer slice depends on it.
-- Then Question 35, the first tracer slice, and finally Question 26's residual packaging detail.
+- Ask Question 35/36: the first vertical tracer slice and its exit gate — the final question in the interview.
+- Then Question 26's residual packaging mechanics, now unblocked by Question 34.
 - Verify the Windows sandbox enforcement strength before describing the Agent Data Root boundary as enforced rather than intended.
 - Question 26 is deferred until after Question 34 by owner instruction, because what remains of it is largely a packaging, installer, signing, and release-evidence question that depends on the Standalone shell and process topology Question 34 decides.
 - Confirm whether the Question 16 answer of "mostly okay" endorsed the four content/evidence classes other than the one the owner corrected; that scope was never itemized.
@@ -229,6 +237,7 @@
 - Editor decisions are the oracle for taste, style, and editorial judgment, and never for factual correctness. Quality measurement and Factual Verification are separate systems, because collapsing them would let an approving editor silently certify a false claim.
 - Privacy for this product is an egress boundary, not an identity boundary. Local access by authorized personnel is unrestricted; what is controlled is every automated path that could carry a manuscript off the machine, with a configured model call the one permitted exception.
 - AI7 must operate at zero data. Cold start is a required tolerance rather than a degraded mode, so evidence thresholds may gate auto-activation but never operation.
+- Long Chinese manuscripts are a required feature, not a stretch goal. The scale tiers force the architecture: the renderer never holds a whole manuscript, and the largest tier is met by the paging store and windowing rather than by the editor library.
 - AI7 is TypeScript and Node throughout; no interpreter ships. A named capability gap enters as a bounded native module or sidecar under its own ADR, never as a general-purpose embedded runtime.
 - AI7 ships portable and self-contained: data inside the folder, secrets outside it. A portable folder is designed to be copied, so anything that must not travel with it stays out.
 - AI7 learns the Harness framework rather than cloning it. Harness is built for agentic coding; AI7 serves Chinese literary publishing. Adopting a framework is not adopting its defaults — every preset, prompt, persona, and tool reaching an editorial Run must be justified for publishing work rather than inherited because it shipped.
@@ -246,4 +255,4 @@
 
 ## Resume Prompt
 
-Resume at Question 34/36: decide the Windows Standalone shell and professional editor topology, then Question 35's tracer slice and Question 26's residual packaging detail.
+Resume at Question 35/36: decide the first vertical tracer slice and its exit gate, then close out Question 26's residual packaging mechanics.
