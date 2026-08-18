@@ -16,6 +16,30 @@ Long Chinese manuscripts are not a stretch goal. The product must meet three tie
 
 For orientation: 10M Chinese characters is roughly 30 MB of UTF-8 text and, at typical Chinese prose paragraph lengths, somewhere between 50,000 and 100,000 Manuscript Blocks. The existing sample Books run 290K to 396K characters, so real material sits inside the easiest tier and the upper tiers are robustness headroom.
 
+### Windowed display is accepted; index time is the binding constraint
+
+An editor reads only part of a manuscript at a time, so **rendering the whole manuscript at once is not a requirement**. Windowed display is the accepted design rather than a compromise forced by performance.
+
+The performance requirement therefore sits on **whole-manuscript index operations** — find, replace, and jump must complete in reasonable time at every tier. This moves the principal risk from the renderer to the store and its indexes.
+
+| Operation | Scales with | Requirement |
+| --- | --- | --- |
+| Typing and editing in a loaded window | Window size, never manuscript size | Immediate at every tier |
+| Jump to an outline node, character offset, or match | Index lookup | Immediate at every tier |
+| Find across the whole manuscript | Index | Reasonable at every tier, including 10M |
+| Replace across the whole manuscript | Match count | Reasonable, atomic, and recoverable; progress shown when long |
+| Cold Book open | Index load, not text load | Reasonable at every tier |
+
+Three indexes, all disk-backed and incrementally maintained on edit:
+
+1. **Block index** — identity, order, cumulative offsets, and length. Serves window loading and offset jumps by binary search rather than by scanning.
+2. **Full-text index** over block content, **CJK-aware**. Chinese has no word boundaries, so a substring-capable index such as a trigram tokenizer is required; a word tokenizer designed for space-delimited languages will not serve.
+3. **Outline index** — headings and sections for navigation.
+
+Proposed operation budgets, offered as calibration to confirm against the spike rather than as accepted figures: first match under one second at the 10M tier; jump under 200 milliseconds at any tier; typing latency within one frame and independent of manuscript size; replace showing progress beyond roughly two seconds while remaining atomic.
+
+**Consequence for the editor choice.** Because the editor only ever holds a bounded window, the library matters considerably less than the store. ProseMirror's medium confidence is correspondingly less critical, and the spike's primary target becomes the paging store and its indexes rather than the editor.
+
 ### What this forces
 
 These are consequences of the tiers, not preferences:
@@ -89,6 +113,7 @@ Layout, visual design, interaction patterns, information architecture, how propo
 Accepted with owner revisions:
 
 - long Chinese manuscripts are a required feature with three binding scale tiers at 500K, 1M, and 10M Chinese characters;
+- windowed display is accepted rather than merely tolerated, so the binding performance constraint is whole-manuscript index time for find, replace, and jump rather than render time;
 - the renderer never holds a whole manuscript, the authoritative model lives in the service over a paging store, and whole-manuscript operations stream in the service;
 - Electron is the shell, with Electron 43's bundled Node satisfying the Harness engine requirement;
 - three processes, with a separate AI7 service holding domain services and the Harness runtime;
