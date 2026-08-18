@@ -21,6 +21,8 @@ The fresh-repository half is now **settled by owner instruction**: this design r
 
 The rest is now accepted too. The license and reuse authorization were settled at Question 27, the meaning of full Harness capability at Question 29, and the dependency strategy at Question 30. **The design interview is complete**: all 36 questions are resolved or explicitly deferred.
 
+Agents arriving without prior context should start at the repository-root `HANDOFF.md`, then `AGENTS.md`.
+
 ## Document map
 
 1. [Charter](./00-charter.md) — product vision, design principles, scope, and success criteria.

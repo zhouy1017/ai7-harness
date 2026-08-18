@@ -2,7 +2,7 @@
 
 ## Project phase
 
-This repository is in architecture and migration design. Read `kick-in/README.md` and the current `PROGRESS.md` before acting. Do not add product implementation, copy source from either input repository, vendor Harness, or merge histories until the relevant accepted decision explicitly authorizes it.
+This repository is in architecture and migration design; the 36-question design interview is complete and no implementation has started. Agents arriving without prior context should read `HANDOFF.md` first, then this file. Read `kick-in/README.md` and the current `PROGRESS.md` before acting. Do not add product implementation, copy source from either input repository, vendor Harness, or merge histories until the relevant accepted decision explicitly authorizes it.
 
 The design room is a Git repository published as private `zhouy1017/ai7-harness` on branch `main`. AI7 is proprietary with all rights reserved to the sole rights-holder; see `LICENSE`. The owner is the sole rights-holder of the private predecessor and has authorized reuse of its code, documentation, tests, and fixtures for AI7, so source copying is unblocked — subject to the per-asset provenance ledger, sanitization review, and provider-terms checks that still apply. Upstream third-party obligations do not automatically extend to an AI7-branded distribution and must be verified per component, with a maintained third-party notices file in every build.
 
