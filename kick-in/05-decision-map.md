@@ -1,6 +1,6 @@
 # Decision Map
 
-Status: **active interview**
+Status: **complete — all 36 questions resolved or explicitly deferred**
 
 The revised estimate is **36 questions**. Question 36 was added when Question 29 established that agent-authored revisions require an evaluation gate that AI7 must own. Question 6 replaced the all-at-once inheritance approval with a topic-by-topic review of original-AI7 documentation. Questions 7–12 resolved the product spine, Editorial Dimensions, learning scopes, and Series. Question 13 accepted the memory-promotion model and added two distinct requirements: auditable end-to-end learning lineage and an adaptive policy for future material eligibility. The owner has also fixed the purpose of DeepSeek Harness: learn and use its framework to improve Agent Behavior without model training; Question 29 still decides the exact capability/profile boundary. Harness-document choices are delegated to the architecture maintainer. Questions are asked one at a time; code/source facts are investigated rather than asked.
 

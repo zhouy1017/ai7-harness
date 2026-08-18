@@ -1,6 +1,6 @@
 # Risk Register
 
-Status: **initial design risks**
+Status: **maintained; struck-through rows were closed by the named question**
 
 | Risk | Severity | Early control / decision gate |
 | --- | --- | --- |

@@ -59,7 +59,7 @@ Status: **row-by-row review; only rows explicitly marked accepted are settled**
 
 | Asset / behavior | Proposed decision | Target treatment | Why |
 | --- | --- | --- | --- |
-| Python manuscript/domain services | Adapt selectively | Bounded capability provider/worker first; port only when evidence supports it | Preserves mature semantics without preserving a competing orchestration shell. |
+| Python manuscript/domain services | **Accepted: drop the implementation, re-express the semantics** | TypeScript domain services in the AI7 service process | Question 33 found the legacy Python carried zero third-party dependencies and handled DOCX with stdlib zip and XML, so nothing required it. Semantics are re-expressed from contract under ADR 0006; no interpreter or worker ships (ADR 0022). |
 | `ai7.local-service/v1` concept | Adapt | Versioned local Standalone application boundary | One desktop client still needs one domain/Harness authority; the old Python protocol/process shape is not inherited. |
 | Direct Python CLI command path beside the shared service | Drop | One canonical gateway/control path | Current dual route splits authority and compatibility behavior. |
 | Atomic `projects.json` as permanent target model or import source | **Accepted: drop; no general importer** | Inspect only to locate user-selected credential references during protected transfer | Rich nested production state must not constrain the new schema or cross the accepted migration allowlist. |

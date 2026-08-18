@@ -1,6 +1,6 @@
 # Source Document Inheritance Audit
 
-Status: **active row-by-row original-AI7 review; cross-cutting directions accepted, domain rows unresolved unless marked otherwise**
+Status: **review complete; every topic cluster was resolved by a named question**
 
 ## Review scope accepted in Question 6
 
@@ -238,7 +238,7 @@ Conflict rule: AI7 product safety/domain authority beats Harness convenience. An
 | Product Direction | Relocate and re-ratify | Charter, domain contexts, UX design, and ADRs. Keep root `AGENTS.md` short and link to accepted owners. |
 | Core source/scope/approval/replay/recovery invariants | Preserve strongly | Editorial and Execution contexts plus architecture ADRs. Modify `kernel`, `orchestrator`, and similar names after Harness mapping. |
 | Task-skill manifest, trust, provider plan, secret rules | Preserve and modify | Execution context and skill/security ADRs. Harness Skill, AI7 Task Skill, and Cordis Plugin remain distinct terms. |
-| Windows, Electron, Python runtime, packaging | **Split: Windows desktop accepted; Electron, Python, and packaging unresolved** | Windows-focused desktop is a product constraint. Re-decide its shell, process topology, and packaging rather than inheriting them. |
+| Windows, Electron, Python runtime, packaging | **Accepted: all four resolved** | Windows-only (Q23); Electron with a three-process topology (Q34); no Python, TypeScript throughout (Q33); zip portable plus NSIS installer (Q26). None was inherited; each was re-decided. |
 | Deep-module/seam/testability principles | Preserve | Concise engineering rules after the target module boundaries exist. |
 | Monolithic renderer, legacy UI/component/layout model, and issue/PR chronology | **Accepted: drop as design authority** | Historical evidence only. User stories are reviewed separately and may be revised; UI source and presentation structure are not ported. |
 | Unified Standalone/Word authority, inward adapters, exact links, crash isolation | Archive as contingency evidence | V1 is Standalone-only; promote only surface-neutral single-authority lessons unless a future ADR adds Word. |

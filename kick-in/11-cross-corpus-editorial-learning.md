@@ -1,6 +1,6 @@
 # Cross-corpus Editorial Learning
 
-Status: **House Editorial Memory, Series exception, and signal promotion accepted; learning audit/eligibility controls open**
+Status: **accepted; audit and eligibility controls settled by Questions 14 and 15**
 
 ## Accepted boundary
 

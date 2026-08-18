@@ -13,7 +13,7 @@
 
 ## Relationships
 
-The context boundaries are accepted. Canonical relationships and terms are promoted one original-AI7 topic cluster at a time as the inheritance interview resolves them. Unresolved source definitions remain evidence rather than inherited truth.
+The context boundaries are accepted, and the inheritance interview is complete: every topic cluster was resolved by a named question and its terms promoted. Source definitions that were never promoted remain evidence rather than inherited truth.
 
 - **AI7 Editorial → AI7 Execution**: Professional Editorial Knowledge, exact source revisions, approved memory, and Editorial Dimensions are assembled by the Editorial Intelligence Layer for governed Foundation Model use.
 - **AI7 Execution → AI7 Editorial**: Model results remain proposals/evidence until Editorial-owned review and publication authority accepts them.

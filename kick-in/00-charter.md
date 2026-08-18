@@ -1,6 +1,6 @@
 # Charter
 
-Status: **working draft**
+Status: **accepted; the design interview is complete**
 
 ## Problem
 

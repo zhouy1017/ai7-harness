@@ -1,6 +1,6 @@
 # Harness Agent-behavior Purpose
 
-Status: **purpose accepted; production authority and exact composition remain open**
+Status: **accepted; authority and composition settled by Questions 29 to 31**
 
 ## Accepted purpose
 
@@ -73,14 +73,16 @@ Both loops may use the cross-context Policy Document pattern. After production r
 5. Propose the smallest owned change through a documented Harness extension seam.
 6. Review, version, validate, activate, observe, and retain rollback evidence.
 
-## Still open
+## Since resolved
 
-- Which Harness capabilities are present in the production editorial profile versus a developer/admin profile.
-- Whether and how an agent may propose changes to its own behavior composition.
-- The exact AI7-owned evaluation corpus, scorecards, promotion gates, and rollback thresholds.
-- The storage and correlation model for behavior-composition versions and Harness sessions.
-- The upstream package/process boundary and compatibility policy.
+Every item this document left open has since been answered. It fixed the purpose; these questions fixed the answers.
 
-These are resolved later by Questions 24 and 29–32; this document fixes their purpose, not their answers.
+| Formerly open | Resolved by |
+| --- | --- |
+| Which Harness capabilities reach the editorial profile versus a developer profile | Question 29 — full engine, narrow tool surface; Editorial and Developer Capability Profiles with no self-service escalation (ADR 0017) |
+| Whether an agent may propose changes to its own behavior composition | Question 29 — everything is proposable, activation is tiered, and capability expansion never self-activates (ADR 0018) |
+| The AI7-owned evaluation corpus, scorecards, and promotion gates | Question 36 — Quality Signals, five Delivery Quality Metrics, and the two-sided Behavior Evaluation Gate (ADR 0019). Numeric thresholds remain calibration against the spike |
+| Storage and correlation of behavior versions against Harness sessions | Question 22 — Task Ledger and Harness Session Ledger joined by Execution Bindings (ADR 0011) |
+| The upstream package or process boundary and compatibility policy | Question 30 — exactly pinned package subset with a six-point upgrade contract (ADR 0020) |
 
 See [target architecture](./02-target-architecture.md), [retained development workflows](./09-retained-development-workflows.md), and the [foundation-model/editorial-intelligence invariant](./14-foundation-model-editorial-intelligence.md).

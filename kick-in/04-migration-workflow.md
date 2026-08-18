@@ -1,6 +1,6 @@
 # Migration and Project Workflow
 
-Status: **proposed sequence**
+Status: **accepted sequence; phase contents settled by the completed interview**
 
 ## Phase 0 — Design and authority (active)
 

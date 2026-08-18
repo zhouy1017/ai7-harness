@@ -32,7 +32,7 @@ Nightly  broad portable suite + independent Windows suites
 RC       exact-SHA admission + catalog-selected release evidence
 ```
 
-Accepted invariant: required tiers are provider-free and fail closed. Open design: tier names, triggers, schedules, platforms, commands, catalog schema, quarantine rules, and which tier proves packaged Windows behavior.
+Accepted invariant: required tiers are provider-free and fail closed. Question 24 settled the rest — two workflows named `pr` and `release`, both single-job on `windows-2025`, with the Ubuntu lane, nightly tier, machine-owned Test Catalog, and quarantine registry each deferred behind a named trigger. The `release` workflow proves both packaged Windows channels.
 
 ## Generated mock-LLM-provider evidence
 
@@ -63,7 +63,7 @@ Original AI7 contains two complementary systems; the new project should not coll
 | `scripts/check-provider-fixtures.mjs` | Current guard | Preserve rejection of secrets, raw logs, and private text. |
 | `tests/backend-contract/provider-fixture-contract.test.mjs` | Current | Preserve provider-boundary and sanitization contracts. |
 
-Accepted invariant: generated cases and cassette playback provide deterministic provider-free CI. Live-provider rehearsal is separate, opt-in, and never required for an ordinary gate. Whether any fixture ships with the desktop application remains open.
+Accepted invariant: generated cases and cassette playback provide deterministic provider-free CI. Live-provider rehearsal is separate, opt-in, and never required for an ordinary gate. Question 24 settled the shipping question: evidence sets are development and test assets and do not ship in the desktop product unless a later explicit offline-demo decision permits it.
 
 Migration correction: do not byte-copy `public-synthetic-corpus-v1.json`. Although its text is synthetic, `scripts/prepare-model-generation-corpora.mjs` generated it to match a private `sample1.docx` byte length, leaking that source-size fingerprint through its metadata. Regenerate a new public corpus at an independently chosen fixed public size and ID, then refresh derived cassette fingerprints. Raw/private live recordings remain excluded; only reviewed, normalized, public-synthetic, sanitized replay cassettes qualify as mock-provider evidence under [the accepted legacy-data boundary](./24-legacy-data-migration-boundary.md).
 

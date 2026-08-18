@@ -1,6 +1,6 @@
 # Proposed Target Architecture
 
-Status: **mixed — some parts became accepted through named questions and ADRs; the composition and dependency strategy remain proposals**
+Status: **substantially accepted; the remaining proposals are narrow and listed below**
 
 ## What is accepted, and what is not
 
@@ -15,10 +15,10 @@ The blanket “not accepted” label this document previously carried had become
 
 **Still proposals, and not to be treated as project truth:**
 
-- The product composition sequence below (pin, stack bundles, AI7 bundle, presets, client plugins) — Question 29/30.
+- ~~The product composition sequence below~~ — **accepted**: Question 30 fixed the pinned package subset and Question 34 the three-process topology.
 - ~~The architecture-alternatives table and its “Preferred” marking~~ — **accepted at Question 30**: exactly pinned public packages, taking only the subset AI7 needs. Source fork and process/SDK boundary remain documented fallbacks rather than the plan. See [ADR 0020](../docs/adr/0020-consume-pinned-harness-package-subset.md).
-- The claim that AI7 must own the semantic quality evaluation layer. This is a well-supported audit finding about the pinned Harness, but it was reported to the owner rather than put as a question, and silence is not acceptance.
-- Every process-topology choice: gateway/Host co-location, Electron embedding, and IPC boundaries — Question 34.
+- ~~The claim that AI7 must own the semantic quality evaluation layer~~ — **accepted at Question 36**, which built the metric system and the Behavior Evaluation Gate on exactly this premise (ADR 0019). It was a reported audit finding until then.
+- ~~Every process-topology choice~~ — **accepted at Question 34**: Electron main, renderer, and a separate AI7 service process, with stdio or named-pipe IPC and no TCP listener (ADR 0024).
 - Semantic mappings other than Run Record ↔ Session, which Question 22 settled.
 
 ## Recommendation
@@ -28,8 +28,8 @@ Build an AI7-owned product layer over an exactly pinned Harness distribution:
 - Harness is the single generic agent execution plane and the framework for composing, observing, and improving Agent Behavior.
 - AI7 contributes a profile/bundle, domain services, model-facing capabilities, policy adapters, durable projections, and UI/host extensions.
 - AI7 business records remain distinct from Harness execution records and are linked by stable correlation IDs.
-- Existing Python domain behavior may sit behind a narrow provider/process boundary during migration; it does not remain a competing agent runtime.
-- The normal editorial profile exposes only the capabilities appropriate to unpublished editorial material and the user's authorized source scope. A separate developer/admin profile may expose broader Harness capabilities if accepted.
+- No Python ships. AI7 is TypeScript and Node throughout, and legacy Python domain behavior is re-expressed from contract rather than wrapped (ADR 0022).
+- The Editorial Capability Profile exposes only domain-shaped capabilities; the Developer Capability Profile carries the generic tool surface and never ships to editors, with no self-service escalation between them (ADR 0017).
 - AI7 never trains or fine-tunes the Foundation Model. Its durable intelligence is the provider-independent Editorial Intelligence Layer of governed sources, knowledge, memory, policies, skills, tools, provenance, and evaluation.
 - V1 exposes one Windows Standalone desktop surface with a new professional manuscript editor. Microsoft Word is a deferred contingency, not a peer surface or release dependency.
 
@@ -67,7 +67,7 @@ flowchart TB
     subgraph Providers["Platform and capability providers"]
         Store["AI7 domain store + Harness session persistence"]
         Source["Import, index, exact retrieval and grounding"]
-        Worker["Optional bounded Python/domain workers"]
+        Worker["AI7 domain services in the service process"]
         Desktop["Windows desktop and document adapters"]
     end
 
@@ -90,7 +90,7 @@ flowchart TB
     Session --> Store
 ```
 
-The diagram shows ownership, not a final process topology. Whether the local gateway and Harness Host share a process, and whether Electron embeds the Harness web client, remain open decisions.
+The diagram shows ownership. The process topology was settled at Question 34: a thin Electron main, a renderer holding the UI and editor, and a separate Node service process holding AI7 domain services together with the composed Harness runtime, communicating over stdio or a named pipe and never a TCP listener. AI7 does not embed the Harness web client, which Question 31 rejected along with the rest of the Harness product surface.
 
 ## Ownership boundaries
 

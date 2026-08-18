@@ -1,6 +1,6 @@
 # AI7 Harness Kick-in
 
-Status: **design only; no product implementation has started**
+Status: **design complete; no product implementation has started**
 
 This folder is the migration design room for a new AI7 product that preserves the valuable product language, safety invariants, workflows, and user evidence from AI7 Reborn while adopting DeepSeek Harness as its agent execution and Agent Behavior foundation.
 
@@ -19,7 +19,7 @@ Use a fresh AI7-owned repository and consume an exactly pinned Harness release/c
 
 The fresh-repository half is now **settled by owner instruction**: this design room was initialized on 2026-08-17 and published as private `zhouy1017/ai7-harness` on branch `main`. It contains documentation only and no copied source.
 
-The rest is still **proposed, not accepted**. The license, the recorded authorization to reuse unlicensed private AI7 assets, the meaning of “full Harness capability,” dependency strategy, and several domain mappings must be resolved in the design interview first.
+The rest is now accepted too. The license and reuse authorization were settled at Question 27, the meaning of full Harness capability at Question 29, and the dependency strategy at Question 30. **The design interview is complete**: all 36 questions are resolved or explicitly deferred.
 
 ## Document map
 
