@@ -7,7 +7,7 @@ Paste the block below. Replace the **Your task** line with one of the variants u
 ## The prompt
 
 ```text
-You are picking up AI7: a Chinese-first, Windows-only desktop editorial workbench
+You are picking up AI7: a Chinese-first Windows-and-macOS desktop editorial workbench
 for professionals in leading literary publishing houses in mainland China, built
 on DeepSeek Harness.
 
@@ -17,9 +17,11 @@ Read `HANDOFF.md` at the repository root before doing anything else. It is a
 router and a trap list. Then read `AGENTS.md`, which is canonical and binding.
 For recent history read `handoff20260817/SESSION-HANDOFF.md`.
 
-State: the 36-question design interview is COMPLETE. 26 ADRs, 36 design notes,
-three domain contexts, two policy documents. There is NO CODE — no package.json,
-no dependencies, no CI workflows. That is the expected state, not a gap to fill.
+State: the 36-question design interview is COMPLETE, but a later accepted
+Windows-and-macOS target revision reopened Phase 0. The current exit review did
+not pass. There are 27 ADRs, 37 numbered design notes, three domain contexts, and
+two policy documents. There is NO CODE — no package.json, no dependencies, no CI
+workflows. That is the expected state, not a gap to fill.
 
 Your task: <TASK>
 
@@ -54,14 +56,15 @@ How I want you to work:
 
 Pick one and substitute it for `<TASK>`.
 
-**Phase 0 exit review** — the recorded next step.
+**Resolve the next Phase 0 platform decision** — the recorded next step.
 
 ```text
-Run the Phase 0 exit review. Confirm that every row in
-kick-in/05-decision-map.md is resolved or explicitly deferred, that no document
-contradicts an accepted ADR, and that the risk register has an owner or an
-explicit deferral for every open entry. Report what you find; do not decompose
-into issues.
+Read kick-in/35-windows-macos-product-platform.md and
+kick-in/36-phase-0-exit-review.md. Ask the owner one question at a time, beginning
+with confirmation or revision of the proposed "consistent product outlook"
+contract. Record each accepted answer across the standing rules, ADRs, design
+notes, glossary where applicable, risk register, and PROGRESS.md. Do not
+implement or decompose into issues.
 ```
 
 **Store-and-index spike** — the first implementation step, once authorized.
@@ -75,15 +78,18 @@ design and retrieval strategy hold, and propose the per-operation latency budget
 that kick-in/33 deliberately left unset.
 ```
 
-**Resolve a carried question** — the two items that were never itemized.
+**Audit the consumed Harness baseline** — required before bootstrap.
 
 ```text
-Resolve two carried items. First, confirm whether the Question 16 answer of
-"mostly okay" endorsed the four content and evidence classes the owner did not
-correct; ADR 0005 currently treats them as accepted. Second, determine whether
-the Windows sandbox path genuinely enforces the Agent Data Root boundary, given
-that the published Landlock addons are Linux-only, and correct the wording in
-ADR 0017 and the risk register to match what you find.
+Identify the candidate Harness package subset, then audit the exact rc.5-to-rc.6
+delta and extension seams named in kick-in/30 and kick-in/36, including Session
+persistence/reconstruction, replay, subagent continuation, tool guards, third-
+party notices, and Electron/Node ABI. Do not add dependencies to the AI7 design
+repository or change the accepted rc.6 pin. Two-platform installed-closure and
+ABI proof may run only in separately authorized disposable audit environments;
+without that authorization, report that proof as an explicit Phase 0 blocker.
+DeepSeek Harness remains read-only reference evidence. rc.7 and rc.8 may be
+evaluated only as evidence under ADR 0020.
 ```
 
 **UI/UX session** — reserved by design.
@@ -93,8 +99,9 @@ Design the AI7 Standalone interaction and interface. Read
 kick-in/16-policy-documents-and-feedback-ux-handoff.md for the constraints
 already recorded, kick-in/25 for the Standalone editing obligation, and
 kick-in/33 for the topology and scale tiers you must design within. Architecture
-is settled; layout, interaction, information architecture, and the renderer
-framework are yours.
+has an accepted core but unresolved cross-platform mechanics; layout,
+interaction, information architecture, and the renderer framework are yours,
+subject to ADR 0027 and one consistent product outlook across both target systems.
 ```
 
 **Fresh review** — an independent check on this work.

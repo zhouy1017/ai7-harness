@@ -197,6 +197,36 @@ _Avoid_: Source truth, verified claim
 The evidence-based assessment of a Manuscript Assertion as supported, contradicted, or unresolved against appropriate factual authority.
 _Avoid_: Textual matching, Foundation Model belief
 
+**Evidence Link**:
+A typed, revision-bound relationship from a quotation, assertion, finding, or proposed correction to exact evidence identity, location, digest, role, and verification status.
+_中文_: 证据关联
+_Avoid_: Display-only citation, untyped source list
+
+**Reference Integrity**:
+The assessment that cited evidence has the stated identity, revision, span, digest, and exact text; it establishes authentic reference, not claim support or factual truth.
+_中文_: 引证完整性
+_Avoid_: Claim Support, Factual Verification
+
+**Claim Support**:
+The assessment that identified evidence supports a claim for its assigned role and scope without proving that the claim is factually true in every context.
+_中文_: 陈述支持性
+_Avoid_: Reference Integrity, Factual Verification
+
+**Quotation Verification**:
+The exact-text check that a quotation matches authoritative original text under only declared presentation normalization.
+_中文_: 引文核验
+_Avoid_: Fuzzy match, semantic similarity, factual verification
+
+**Source Search**:
+The non-authoritative retrieval step that discovers candidate source identities or passages for later Exact Fetch.
+_中文_: 来源检索
+_Avoid_: Exact Fetch, authoritative quotation
+
+**Exact Fetch**:
+The authorized resolution of a stable reference against one exact source or manuscript revision, returning authoritative text with its identity and integrity evidence.
+_中文_: 原文精确提取
+_Avoid_: Source Search result, model reconstruction
+
 **Factual Verification Policy Document**:
 A versioned Policy Document defining admissible factual evidence, domain-specific authority and precedence, corroboration and freshness requirements, and conflict outcomes for Manuscript Assertions.
 _Avoid_: Truth oracle, source-ranking prompt

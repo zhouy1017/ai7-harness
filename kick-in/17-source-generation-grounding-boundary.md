@@ -75,11 +75,11 @@ Not every sentence in literary-publishing work should pretend to be an externall
 | Content class | What the text can establish | Required treatment |
 | --- | --- | --- |
 | Exact Quotation | The Textual Source of Record establishes its exact wording. | Exact Fetch plus Quotation Verification; display authoritative source text or mark unverified. |
-| Report about the manuscript | The source establishes that the manuscript says or depicts something. | Evidence Link to the exact passage; do not turn the reported Manuscript Assertion into a verified real-world fact. |
-| Real-world Factual Assertion | The manuscript only supplies the assertion under review. | Compare against separately authorized factual evidence; record supported, contradicted, conflicting, or unresolved. |
+| Source-derived Factual Claim | An identified source establishes only what its exact passage or data supports. | Cite an Evidence Link to the exact evidence and do not claim more than it establishes; a manuscript passage does not by itself verify a real-world fact. |
+| Current or External Factual Claim | The manuscript or draft supplies the assertion under review, not current truth. | Compare against separately authorized research evidence carrying source/publication and retrieval/verification timestamps; record supported, contradicted, conflicting, or unresolved. |
 | Fictional/canonical Assertion | Relevant Book/Series sources and accepted Series Knowledge establish internal canon, possibly with conflicts. | Check continuity and expose conflicts; do not apply real-world fact rules to intentional fiction. |
-| Editorial Interpretation or Judgment | Evidence can show the passages considered, not objectively prove the judgment. | Mark as analysis/judgment with rationale and relevant passages; preserve reasonable disagreement. |
-| Creative or Promotional Synthesis | It is proposed generated editorial text. | Ground its quoted, factual, and canonical subclaims according to their own classes. |
+| Editorial interpretation or judgment | Evidence can show the passages considered, not objectively prove the judgment. | Mark as analysis/judgment with rationale and relevant passages; preserve reasonable disagreement. |
+| Creative or promotional synthesis | It is proposed generated editorial text. | Ground its quoted, factual, and canonical subclaims according to their own classes. |
 
 The second axis records whether the item is textually verified, factually supported, factually contradicted, internally inconsistent, conflicting, unresolved/not checked, or not applicable. One generic `grounded` badge is insufficient.
 
@@ -125,4 +125,4 @@ For staged delivery, the current recommendation is that local manuscript/Series 
 
 ## Decision resolution
 
-Question 16 accepted the complete boundary: textual authority is not truth authority; factual and semantic errors must be sought; fixes remain Correction Proposals or editor/author queries; factual authority follows the configurable Policy Document and default evidence preference above; Foundation Model knowledge is not evidence; and insufficient or conflicting evidence stays visible. The decision is recorded in [ADR 0005](../docs/adr/0005-separate-textual-and-factual-authority.md).
+Question 16 accepted the complete boundary: textual authority is not truth authority; factual and semantic errors must be sought; fixes remain Correction Proposals or editor/author queries; factual authority follows the configurable Policy Document and default evidence preference above; Foundation Model knowledge is not evidence; and insufficient or conflicting evidence stays visible. On 2026-08-21 the owner explicitly closed the earlier “mostly okay” ambiguity by confirming all five content/evidence rules: verified exact quotations, cited source-derived facts, timestamped current/external research, labeled editorial judgment, and class-by-class verification inside creative or promotional synthesis. The decision is recorded in [ADR 0005](../docs/adr/0005-separate-textual-and-factual-authority.md).

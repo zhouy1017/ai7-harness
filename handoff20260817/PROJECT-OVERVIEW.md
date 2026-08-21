@@ -1,14 +1,25 @@
 # AI7 — Project Overview
 
+> **Supersession notice — 2026-08-21.** This file is a dated summary of the
+> completed 36-question interview, not the current platform authority. The owner
+> subsequently accepted Windows **and** macOS as target platforms with a
+> consistent product outlook and explicitly accepted all five Question 16
+> evidence rules. ADR 0027 records the target while leaving the exact consistency
+> contract and platform mechanics proposed; `kick-in/36-phase-0-exit-review.md`
+> records that Phase 0 was run and did not pass. Any Windows-only,
+> single-Windows-job, unresolved-Q16, or unverified-sandbox sentence below is
+> historical and is superseded by `AGENTS.md`, ADR 0027, and the exit review.
+
 A synthesis of everything the design interview accepted, written to be checked against expectation rather than to record decisions. The authoritative records are `AGENTS.md`, `docs/adr/`, the context files, and `kick-in/`.
 
-Design interview: **36 questions, all resolved or explicitly deferred. 26 ADRs.**
+Design interview: **36 questions, all resolved or explicitly deferred.** Current
+repository after the platform revision: **27 ADRs.**
 
 ---
 
 ## 1. What AI7 is
 
-**AI7 is a Chinese-first, Windows-only desktop editorial workbench for professionals in leading literary publishing houses in mainland China.**
+**AI7 is a Chinese-first Windows-and-macOS desktop editorial workbench for professionals in leading literary publishing houses in mainland China.** The exact contract behind the owner's phrase “consistent product outlook” is still awaiting confirmation.
 
 It wraps agentic work into an editor's text-editing workflow. The intended user is a literature professional, not a computer expert — so the product never asks them to authorize something they have no basis to judge, and never requires filesystem literacy to reach their own work.
 
@@ -50,7 +61,7 @@ Success is **Editor-comparable Delivery Quality plus measurable workload reducti
 | **Python** | The legacy Python had zero third-party dependencies and handled DOCX with stdlib zip and XML. Nothing required it |
 | **Generic agent tools in editorial work** | No shell, roaming filesystem, or arbitrary network reaches an editorial Run |
 | **Legacy production data** | Nothing migrates except API credentials, reviewed mock-provider evidence, and selected test sample Books |
-| **Ubuntu as a target** | Windows only. Ubuntu may appear as a CI runner if separately justified |
+| **Ubuntu as a target** | Windows and macOS only. Ubuntu may appear as feedback infrastructure if separately justified, never as product/release evidence |
 
 ---
 
@@ -113,9 +124,9 @@ Two ledgers, one causal graph: the **AI7 Task Ledger** holds business truth; the
 
 TypeScript and Node throughout. Harness consumed as **exactly pinned npm packages** — only the subset AI7 needs, never the `@deepseek-ai/dsh` CLI aggregate, because *not depending on a package is a stronger guarantee than not wiring it*.
 
-Three processes: a thin **Electron main**, a **renderer** holding UI and editor, and a separate **Node service** holding domain services and the Harness runtime. IPC over stdio or a named pipe, never a TCP listener.
+Three processes: a thin **Electron main**, a **renderer** holding UI and editor, and a separate **Node service** holding domain services and the Harness runtime. IPC remains local and never uses TCP; the exact macOS carrier is open.
 
-Ships as a **zip portable folder and an NSIS installer**. In the portable channel the Agent Data Root lives inside the AI7 folder, so an installation is self-contained; the Protected Secret Store always stays outside, because a portable folder is designed to be copied.
+Windows ships as a **zip portable folder and an NSIS installer**. In the portable channel the Agent Data Root lives inside the AI7 folder, so an installation is self-contained; the Protected Secret Store always stays outside, because a portable folder is designed to be copied. The macOS package, update, mutable-data, Keychain, signing, and notarization decisions remain open.
 
 ### Scale
 
@@ -176,7 +187,7 @@ Any authorized person may read a manuscript locally, and Quality Signals may ret
 
 ## 8. How it gets built and verified
 
-**Verification is two workflows**, `pr` and `release`, each a single job on `windows-2025`. `pr` is the only required gate, provider-free, targeting ten minutes. A Ubuntu lane, nightly tier, Test Catalog, and quarantine registry are each deferred behind a named trigger — machinery arrives when a concrete problem appears.
+**Verification remains two concise workflows**, `pr` and `release`. The old single-Windows-job binding is superseded; the smallest required Windows/macOS native-evidence topology remains open. Required verification stays provider-free. A Ubuntu lane, nightly tier, Test Catalog, and quarantine registry are each deferred behind a named trigger — machinery arrives when a concrete problem appears.
 
 **Repository development uses three agent roles**: a Commander that dispatches and is sole integrator, Workers that write only their own branch, and an independent Reviewer at a task class at least equal to the work reviewed, cross-provider by default. Operating rules never depend on which model is running; a single binding table is the only provider-specific artifact.
 
@@ -193,9 +204,11 @@ Not questions, but things a reader should know are unsettled:
 | **Retrieval strategy** — lexical, vector, or hybrid | Deferred to the spike. Lexical is stronger for Chinese than commonly assumed and costs no model call |
 | **Editor library confidence** | ProseMirror at *medium* confidence. Windowing reduces how much this matters, but a spike should confirm |
 | **Per-operation latency budgets** | Proposed as calibration only; to be fixed against measurement |
-| **Code signing certificate** | Deferred until explicitly requested. Unsigned builds are a known SmartScreen adoption cost |
-| **Windows sandbox enforcement** | Landlock is Linux-only. Whether the Windows path genuinely enforces the Agent Data Root must be verified before the boundary is called *enforced* rather than *intended* |
-| **Question 16 scope** | The answer was "mostly okay" with one correction; whether the other four content/evidence classes were endorsed was never itemized |
+| **Cross-platform consistency** | The target wording is accepted; its exact feature/visual/native-difference contract awaits owner confirmation |
+| **macOS platform mechanics** | Minimum OS/architectures, package/update/data root, Keychain, signing/notarization, and native proof are open |
+| **Agent Data Root enforcement** | Harness Windows is explicitly partial; macOS Seatbelt governs writes only. Stronger platform isolation or an explicit guarantee revision is required |
+| **Harness baseline audit** | rc.6 remains accepted, but the rc.5-to-rc.6 selected-seam and two-platform installed-closure audit must precede Phase 0 exit/bootstrap; current rc.7/rc.8 pre-releases are evidence only |
+| **Windows code signing** | Deferred until explicitly requested. This does not settle Apple signing/notarization |
 | **UI/UX** | Reserved for a separate session by design — layout, interaction, information architecture, renderer framework |
 
 ---

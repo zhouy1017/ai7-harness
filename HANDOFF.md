@@ -6,9 +6,16 @@ Read this first if you are picking up AI7 without prior context. It is a **route
 
 ## Where the project is
 
-**Design complete. No implementation has started.**
+**The 36-question interview is complete. A post-interview platform revision has
+reopened Phase 0. No implementation has started.**
 
-A 36-question design interview ran to completion and produced 26 ADRs, three domain contexts, two policy documents, and 36 design notes. The repository contains **documentation only** — no source, no `package.json`, no dependencies, no CI workflows.
+A 36-question design interview ran to completion. The owner then expanded the
+target from Windows-only to Windows and macOS with a consistent product outlook,
+and explicitly closed the remaining Question 16 evidence ambiguity. The
+repository now contains 27 ADRs, three domain contexts, two policy documents, and
+38 numbered design notes. The current platform-revision branch is a frozen local
+candidate/reference, not canonical `main` or the v2 architecture line. It remains **documentation only** — no source, no
+`package.json`, no dependencies, no CI workflows.
 
 Nothing here is a stub waiting to be filled in. If you are looking for code, there is none, and that is the expected state.
 
@@ -19,11 +26,12 @@ Nothing here is a stub waiting to be filled in. If you are looking for code, the
 | # | File | Why |
 | --- | --- | --- |
 | 1 | `AGENTS.md` | **Canonical standing rules.** Everything binding is here or linked from here |
-| 2 | `handoff20260817/PROJECT-OVERVIEW.md` | The whole design in one pass — vision, domain, architecture, what is excluded, what is open |
-| 2b | `handoff20260817/SESSION-HANDOFF.md` | Recent history: what the last session decided, which recommendations the owner overrode, and which agent errors were corrected |
+| 2 | `kick-in/37-v1-platform-freeze-handoff.md` | The exact base/branch identity, candidate-only status, reusable assets, migration costs, and frozen next action |
+| 2a | `docs/adr/0027-support-windows-and-macos-as-one-product.md` and `kick-in/36-phase-0-exit-review.md` | The accepted post-interview target revision and the current failed Phase 0 audit |
+| 2b | `handoff20260817/PROJECT-OVERVIEW.md` and `handoff20260817/SESSION-HANDOFF.md` | Dated Windows-only baseline history; read their supersession notices before the older text |
 | 3 | `PROGRESS.md` | What has been done, what is next, and the Resume Prompt |
 | 4 | `kick-in/05-decision-map.md` | All 36 questions with their accepted answers |
-| 5 | `docs/adr/` | The 26 hard-to-reverse decisions, one per file |
+| 5 | `docs/adr/` | The 27 hard-to-reverse decisions, one per file |
 | 6 | `CONTEXT-MAP.md` → `docs/domain/*/CONTEXT.md` | Canonical term definitions. `GLOSSARY.md` is a bilingual index and collision guide, not a definition owner |
 
 `kick-in/` numbering does not match question numbers. Use the decision map to find the document for a question.
@@ -42,11 +50,18 @@ These are the mistakes most likely to be made by an agent arriving cold. Each ha
 
 **Do not depend on `@deepseek-ai/dsh`.** The CLI aggregate transitively installs the generic shell, pwsh, terminal, and web tool packages that the editorial tool surface excludes. Depend only on the subset AI7 needs.
 
-**Do not use version ranges for Harness.** `latest` still points at `0.0.1-rc.1` on nearly every package while `next` is `0.1.0-rc.6`. Pin exact versions, commit the lockfile. The consumed baseline is `0.1.0-rc.6`; the audited `0.1.0-rc.5` **was never published to npm** and is a provenance reference only.
+**Do not use version ranges, dist-tags, or release names for Harness.** As verified on 2026-08-21, sampled package `latest` values remain inconsistent while `next` is `0.1.0-rc.8`, and GitHub now has rc.7/rc.8 pre-releases. Pin exact versions and commit the lockfile. The consumed baseline remains the accepted `0.1.0-rc.6`; the audited `0.1.0-rc.5` **was never published to npm** and is a provenance reference only. Later releases are evidence until admitted through ADR 0020.
 
 **Do not confuse the two ledgers.** The AI7 Task Ledger holds business truth; the Harness Session Ledger alone holds model messages, turns, and tool calls. They join through Execution Bindings, never by copying transcripts.
 
 **Do not read a term across contexts.** Several words mean different things in different places — `Editorial Profile` (dimension defaults) versus `Editorial Capability Profile` (security), `Review Decision` (editorial judgment) versus a Dispatch reviewer report, `Model Role` (product, declares no provider) versus the Dispatch binding table. Check the collision table in `GLOSSARY.md` before using a term.
+
+**Do not claim the Harness sandbox enforces the Agent Data Root.** The audited
+Windows ACL path is explicitly partial. The macOS Seatbelt path confines file
+writes but not reads, network, or process visibility and relies on deprecated
+`sandbox-exec`. The AI7 capability/service facade is the only currently accepted
+enforceable product boundary; stronger OS confinement or a revision of the
+promise is a Phase 0 decision.
 
 ---
 
@@ -68,11 +83,21 @@ GitHub Issues is the canonical tracker. Five labels, no aliases: `needs-triage`,
 
 ## What happens next
 
-Phase 0 is complete but its **exit review has not been run**. That review confirms every decision-map row is resolved or explicitly deferred, then decomposes the accepted design into independently grabbable vertical issues.
+The Phase 0 exit review **has been run and did not pass**. Question 16 is fully
+resolved, but the platform revision leaves the consistency contract, macOS
+support/package/signing/credentials, per-platform confinement, native evidence,
+and the Harness rc.5-to-rc.6 seam audit open. See
+`kick-in/36-phase-0-exit-review.md`.
+
+The current branch is frozen as a local candidate/reference and returns to the
+Project Commander. Its immediate next action is separately authorized
+architecture exploration of those named risks and reconciliation of any
+noncanonical UI-branch dependency—not automatic integration, implementation, or
+issue decomposition. See `kick-in/37-v1-platform-freeze-handoff.md`.
 
 **Decomposition has not been authorized.** Do not begin it without the owner saying so.
 
-When implementation does start, the accepted order is:
+If implementation is later authorized after architecture reconciliation, the recorded v1 order is:
 
 1. **Store-and-index spike** — throwaway, time-boxed. Generated Chinese corpora at 500K / 1M / 10M characters, measuring find, jump, replace, cold open, retrieval build cost, and peak memory. Confirms or changes the store and retrieval strategy before anything is committed to.
 2. **Read-only tracer slice** — open a Book, import a DOCX, view it in the windowed editor, ask a source-grounded question, and have the citation resolve to an exact highlighted block range. Thirteen-point exit gate in `kick-in/34-first-tracer-slice.md`.
@@ -88,9 +113,11 @@ Not decisions waiting to be made unilaterally — things a reader should know ar
 | Retrieval strategy | Lexical, vector, or hybrid — deferred to the spike |
 | ProseMirror confidence | Medium. Windowing reduces the stakes; a spike should confirm |
 | Latency budgets | Proposed as calibration only, not accepted figures |
-| Code signing certificate | Deferred until the owner requests it. Unsigned builds are a known SmartScreen cost |
-| Windows sandbox enforcement | Landlock is Linux-only. Whether the Windows path genuinely enforces the Agent Data Root is **unverified** — do not describe that boundary as enforced until it is |
-| Question 16 scope | Answered "mostly okay" with one correction; the other four content classes were never itemized |
+| Cross-platform consistency | The target is accepted; the recommended exact meaning still needs owner confirmation |
+| macOS support and release | Minimum OS/architectures, package/update/data location, Keychain, signing/notarization, and exact native proof are open |
+| Agent Data Root enforcement | Harness Windows is partial and macOS Seatbelt is write-only in scope; stronger per-platform isolation or an explicit guarantee revision is required |
+| Harness consumed baseline | rc.6 remains accepted, but the rc.5-to-rc.6 selected-seam delta audit must precede Phase 0 exit and implementation; rc.7 and rc.8 are evidence only |
+| Windows code signing | Deferred until the owner requests it. This does not decide Apple signing/notarization |
 | UI/UX | Reserved for a separate owner-run session by design |
 
 ---
@@ -100,8 +127,9 @@ Not decisions waiting to be made unilaterally — things a reader should know ar
 - Private repository `zhouy1017/ai7-harness`, branch `main`, fresh history unrelated to either predecessor.
 - AI7 is proprietary, all rights reserved to the sole rights-holder. See `LICENSE`.
 - Predecessors may be read and copied from, subject to the provenance ledger: `ai7-reborn-ai` at `dev@3e6e9ac772b7f07832154fa39d7de8a4deca51b1`, and `ai7-redesign` at `fc2f4d8`, which is a strict ancestor and holds nothing unique.
-- Harness upstream is `deepseek-ai/deepseek-harness`, MIT, no git tags and no GitHub releases — track it by commit and npm version.
-- Target platform is Windows only. Ubuntu may appear as a CI runner if separately justified.
+- Harness upstream is `deepseek-ai/deepseek-harness`, MIT, with rc.7/rc.8 pre-release tags/releases as of 2026-08-21; track tags/releases, commits, npm versions, and dist-tags together without treating any moving channel as admission.
+- Target platforms are Windows and macOS. Ubuntu has no product or release role
+  and may appear only as separately justified feedback infrastructure.
 
 ---
 

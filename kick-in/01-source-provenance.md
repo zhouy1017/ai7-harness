@@ -27,8 +27,11 @@ Audit date: 2026-08-15 (Asia/Shanghai)
 
 - The audited package family is `0.1.0-rc.5`; its README explicitly warns of compatibility-breaking changes.
 - **`0.1.0-rc.5` was never published to npm.** Verified 2026-08-17: the ladder runs `0.0.1-rc.1 → rc.2 → rc.3 → rc.5 → 0.1.0-rc.2 → rc.3 → rc.6`, skipping rc.4 and rc.5 of the 0.1.0 line. The audited commit is therefore not installable, and Question 30 sets the **consumed baseline to `0.1.0-rc.6`** while retaining `47f9438` as the audited reference. These are two different artifacts and must not be conflated.
-- **There are no git tags and no GitHub releases** — zero of each. The version string lives only in `package.json` files and on npm, so there is no release channel to track.
-- All 219 packages under `packages/*/*` publish as `@deepseek-ai/dsh-*` with an identical version ladder, but **`latest` is stale on nearly every one** (`latest = 0.0.1-rc.1`, `next = 0.1.0-rc.6`). Pins must be exact versions, never ranges. `@deepseek-ai/cordis` publishes separately at `^4.0.1`.
+- The local upstream audit on 2026-08-21 identifies the rc.6 package-release commit as `15148dbd9a1d1f1ef1a26e5749b32af0cd663935`. GitHub now exposes pre-release tags/releases `dsh-v0.1.0-rc.7` at `99f6f02fecdb7dff40c3fbc9470f5907c29f74ca` and `dsh-v0.1.0-rc.8` at `141eb6fef83422698aef7a981029e843e8161534`. AI7 has adopted neither. Commit `7e95a00c8a5eed37fc8d16487b6a1a9b772b075c` in the later line contains a replay-state alignment fix relevant to max-token tool-call Sessions; it is upgrade evidence only.
+- The broad source audit was performed at rc.5, not at the accepted rc.6 package artifact. Phase 0 therefore requires an exact rc.5-to-rc.6 selected-package and extension-seam delta audit before dependencies are installed; the accepted pin is not permission to skip that comparison.
+- At the audited source, `packages/sandbox/sandbox-windows-acl/README.md` classifies Windows enforcement as partial. `packages/sandbox/sandbox-local/README.md` limits its sandbox vocabulary to file-write modes: the macOS Seatbelt backend does not restrict reads, network, or process visibility and relies on deprecated `sandbox-exec`. `packages/credentials/credentials-local/README.md` explicitly does not provide an OS-keychain security boundary. These are source constraints, not AI7 platform implementations.
+- The earlier no-tags/no-releases finding is superseded: upstream created the two pre-releases above on 2026-08-17 and 2026-08-19. They improve provenance visibility but do not make a moving release name an AI7 dependency contract.
+- Registry dist-tags remain inconsistent. On sampled AI7-relevant packages, `next = 0.1.0-rc.8`; `latest` remains `0.0.1-rc.1` for Session, sandbox-local, and credentials-local, while agent-loop is `0.1.0-rc.6`. Pins must be exact versions, never ranges or dist-tags. `@deepseek-ai/cordis` publishes separately.
 - It is a large pnpm monorepo with roughly 241 package manifests and a pluginized Host/Client split.
 - The current fork adds no value beyond an owner-controlled pointer; maintaining a deep fork would inherit a large upstream merge burden.
 - The source history includes older BSD-3-Clause snapshots, current MIT material, a BSD-licensed native component, third-party notices, and vendored payload-specific obligations. Copying source is more complex than consuming current published packages.
@@ -49,7 +52,7 @@ Start a fresh, initially private AI7 repository and record both pins as external
 
 **Fully accepted at Question 27.** AI7 is proprietary with all rights reserved to the sole rights-holder (`LICENSE`), and that same owner is the sole rights-holder of the private predecessor and authorizes reuse of its code, documentation, tests, and fixtures for AI7. Source copying is no longer blocked on authority — the per-asset provenance ledger below, sanitization review, and provider-terms checks all still apply, and upstream third-party obligations must be verified per component rather than assumed to extend to an AI7-branded distribution.
 
-Sample manuscripts are authorized separately and more narrowly: real manuscripts, usable for AI7 only while kept private and local, never committed or distributed, with outbound transmission an ungranted separate decision. See [ADR 0016](../docs/adr/0016-proprietary-license-and-local-only-sample-manuscripts.md).
+Sample manuscripts are authorized separately and more narrowly: real manuscripts, usable for AI7 while never committed, distributed, or publicly released without permission. Sending their content to a configured Model Provider is permitted controlled processing under the Provider Processing Policy and Plan Envelope; it is not public release. See [ADR 0016](../docs/adr/0016-proprietary-license-and-local-only-sample-manuscripts.md).
 
 ### Authorized copy sources
 
@@ -61,7 +64,7 @@ Both local predecessor checkouts may be read and copied from as needed: `C:\User
 
 Manuscripts are excluded from this grant. They are governed by [ADR 0016](../docs/adr/0016-proprietary-license-and-local-only-sample-manuscripts.md) and never enter any repository.
 
-The upstream-consumption strategy remains a recommendation only.
+The upstream-consumption strategy is accepted by Question 30 and ADR 0020: exact public npm pins, no fork or vendored source, and only the justified package subset. The candidate subset, rc.5-to-rc.6 seam delta, and two-platform installed closure remain mandatory Phase 0 audit outputs rather than permission to bootstrap this repository.
 
 ## Source-copy rules
 

@@ -8,7 +8,7 @@ Preserve original AI7's visible-plan hybrid autonomy, exact task context, durabl
 
 The visible plan is therefore neither merely informative nor blanket approval. It is an authority-bearing envelope that permits recorded, bounded adaptation. A material change suspends work and creates a **Plan Revision** for renewed Run Authorization. Effect Approval, Proposal Decision, Review Decision, and Public Release Permission remain separate authorities.
 
-This document defines interaction outcomes and state, not UI layout. The independent UI/UX design session may choose an appropriate Windows Standalone presentation without reviving the legacy Ribbon, Activity rail, panels, docking model, or agent console. A future surface may reuse the contract only after entering product scope through its own decision.
+This document defines interaction outcomes and state, not UI layout. The independent UI/UX design session may choose an appropriate Windows-and-macOS Standalone presentation without reviving the legacy Ribbon, Activity rail, panels, docking model, or agent console. A future surface may reuse the contract only after entering product scope through its own decision.
 
 ## Pinned original-AI7 evidence
 

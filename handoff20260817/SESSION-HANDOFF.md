@@ -1,5 +1,15 @@
 # Session handoff — 2026-08-17
 
+> **Supersession notice — 2026-08-21.** This is a dated Windows-only handoff.
+> Since it was written, the owner accepted Windows and macOS as target platforms,
+> explicitly accepted the remaining four Question 16 evidence rules, and asked
+> for a Phase 0 exit review. The review was run and did not pass. Harness Windows
+> confinement is now verified as partial rather than merely unknown; Harness
+> macOS Seatbelt covers file writes but not reads, network, or process visibility.
+> The accepted rc.6 baseline still requires a formal rc.5-to-rc.6 seam audit;
+> later GitHub rc.7/rc.8 pre-releases are not adopted. Read `AGENTS.md`, ADR 0027, and
+> `kick-in/36-phase-0-exit-review.md` before the historical notes below.
+
 What this session did, for a successor who needs recent history rather than end state. For end state read `HANDOFF.md`; for the whole design read `PROJECT-OVERVIEW.md`.
 
 ---

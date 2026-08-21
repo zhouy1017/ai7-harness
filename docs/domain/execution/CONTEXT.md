@@ -383,7 +383,7 @@ _中文_: 开发端能力档案
 _Avoid_: Editorial Capability Profile, an in-product power-user mode, an escalation path
 
 **Agent Data Root**:
-The AI7-owned directory inside which the agent holds genuine filesystem permission and outside which it has none. Contains governed Book stores plus a per-Run unscoped scratch area; excludes the Protected Secret Store and lives outside any repository working tree.
+The AI7-owned directory that bounds agent filesystem authority, contains governed Book stores plus isolated per-Run scratch, excludes the Protected Secret Store, and lives outside every repository working tree.
 _中文_: 智能体数据根目录
 _Avoid_: Run Source Scope, a general filesystem grant, a repository working tree
 
