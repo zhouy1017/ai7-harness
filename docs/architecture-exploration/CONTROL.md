@@ -33,7 +33,7 @@ The function labels “Architecture Reviewer” and “V2 Hostile Architecture R
 2. Neither Worker may add a new architecture assumption, consume the other candidate branch as truth, push, open a pull request, merge, publish, or dispatch further work.
 3. The Architecture Reviewer reads normalized conclusions from canonical `main`, not either legacy task history or active worktree.
 4. Worker handoffs enter the review packet only after Commander audit.
-5. A future v2 candidate receives an independent T3 hostile challenge before an owner decision.
+5. A future v2 candidate receives an independent T3-par-or-higher hostile verdict before an owner decision; T3 is sufficient only for the pre-candidate charter.
 6. The V2 hostile Reviewer may prepare its challenge charter now, but it receives no design-task transcript, worktree, branch diff, or candidate material until the Commander supplies an exact coherent-candidate review brief.
 
 ## V2 dispatch boundary
