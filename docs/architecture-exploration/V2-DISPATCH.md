@@ -13,6 +13,7 @@ This is a repository-development dispatch record, not a product architecture dec
 - Platform/Q16/Phase-0 frozen candidate: `960689172bcf54eb3f27b57045a4ce4e9f20695d`, noncanonical
 - UI/UX frozen candidate: `587d6455f6a578d3df8a39f534ec7a057c07a18c`, noncanonical
 - Evidence inventory: [PACKET-MANIFEST.md](./PACKET-MANIFEST.md)
+- Later owner direction and external evidence: [Codex-First V2 Harness Directive](./CODEX-HARNESS-DIRECTIVE.md)
 
 ## Design Worker
 
@@ -27,6 +28,8 @@ The first turn is limited to A1 one-product consistency and UI parity. It must m
 
 The Worker reads `PROGRESS.md` only for operational status. Inherited V1/candidate context and A1 architecture evidence are limited to the sealed packet and exact objects in its manifest. Later A2/A3 phases may collect separately Commander-authorized, exact, provenance-labeled direct evidence and probes; they still never consume another task's transcript, active worktree, or unlabeled context.
 
+The 2026-08-21 owner directive changes the future A2 working premise from DeepSeek-only to AI7-owned, Codex-first, and DeepSeek-comparative. The current A1 turn records that supersession and the revised phase gate but does not select or implement an integration.
+
 ## Hostile Reviewer
 
 - App task: `AI7 V2 反方审查（只读）`
@@ -40,14 +43,14 @@ The first turn produces only a challenge charter: candidate admission criteria, 
 
 The charter turn completed read-only after verifying all 51 manifest mappings. It covers candidate admission, eighteen attack domains, domain-specific falsification questions, P0–P3 Standards/Spec finding format, contamination/no-verdict handling, and exact-head invalidation. It issued no candidate verdict and the task is stopped until a coherent candidate exists.
 
-The future brief must name the exact base, candidate head, diff, evidence manifest, ADR disposition, trade-offs, migration direction, risks, owner choices, and validation evidence. A same-provider review must disclose `same-provider review — independence reduced`.
+The future brief must name the exact base, candidate head, diff, evidence manifest, ADR disposition, trade-offs, migration direction, risks, owner choices, validation evidence, and Codex/DeepSeek disposition. A same-provider review must disclose `same-provider review — independence reduced`.
 
 ## Phase gates
 
 1. A1 local candidate and exact-head handoff.
 2. Commander review and confirmation of the stable A1 invariant list; present the platform-consistency choice to the owner.
-3. A2 exact Harness `0.1.0-rc.6` composition/seam closure may begin after step 2 even while the owner choice is pending.
-4. A3 truthful OS isolation/local authority may begin after A1 and A2 establish its dependencies.
+3. A2 Codex-first agent-harness selection and composition closure may begin after step 2 even while the owner choice is pending; DeepSeek Harness remains the comparison candidate, not an automatic second runtime.
+4. A3 truthful OS isolation/local authority may begin after A1 and revised A2 establish the selected executable/process/tool/network surface.
 5. Record the owner platform-consistency choice before exact parity/support becomes canonical or the V2 candidate is declared coherent.
 6. Coherent V2 candidate with ADR disposition, trade-offs, migration direction, risks, and evidence.
 7. Independent T3-par-or-higher hostile review against the exact candidate head.

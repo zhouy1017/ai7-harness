@@ -207,13 +207,15 @@
 - Added `docs/architecture-exploration/V2-DISPATCH.md` and updated `docs/architecture-exploration/CONTROL.md` with exact task IDs, worktrees, authority boundaries, phase dependencies, and stop conditions.
 - Standards review of first dispatch commit `7263396` found four orchestration defects: a below-floor future Reviewer class, an unnecessary owner-choice gate before A2, nonbinding state labels, and packet-only wording that would block A2/A3 evidence. The corrective dispatch keeps the T3 charter but requires a T3-par final verdict, restores binding states, lets A2 follow stable A1 invariants, and permits separately authorized exact evidence in later phases. Follow-up review also caught and scoped one stale `What's next` packet-only sentence.
 - The read-only hostile Reviewer completed its T3 Challenge Charter after re-verifying all 51 manifest mappings. It returned candidate admission criteria, eighteen attack domains with falsification questions, P0–P3 Standards/Spec finding protocol, contamination/no-verdict rules, and exact-head invalidation. It made no V2 finding or verdict, changed no repository/external state, and stopped until a coherent candidate receives a T3-par review brief.
+- Verified the 2026-08-19 OpenAI platform article and `openai/codex` research snapshot `main@44e95c857f37f81a5731eab72c32a3d334d0e2c4`. The evidence supports app-server as the leading embedded-product integration surface, application ownership of business/UI concerns, Apache-2.0 plus `NOTICE`, and a distinction between the TypeScript SDK's CLI wrapper and app-server's richer lifecycle protocol.
+- Sent the active Issue #4 Worker a new owner directive without expanding its current A1 turn: AI7 remains the product/domain authority; Codex becomes the preferred future harness candidate; DeepSeek Harness becomes comparative; Codex Desktop-like remains a UX reference rather than a copied UI framework; revised A2 must prevent a second agent loop. Added `docs/architecture-exploration/CODEX-HARNESS-DIRECTIVE.md` and updated the durable dispatch/control surfaces.
 
 ## What's next
 
 - Monitor the A1 design Worker through compact snapshots; it must complete A1, commit locally, and stop. Keep the completed hostile-charter task idle until a coherent candidate exists.
 - Use only the sealed packet for inherited V1/candidate context and A1 architecture evidence; do not copy task transcripts or read active Worker worktrees. Later A2/A3 evidence must be separately authorized, exact, and provenance-labeled.
 - Review the exact A1 head, confirm its stable invariants, then present the platform consistency/support options to the owner without silently resolving them.
-- Authorize A2 exact Harness `rc.6` composition once A1 invariants are stable, even if the owner choice is pending; authorize A3 only after A1 and A2. Later direct evidence and probes must be separately scoped, exact, and provenance-labeled.
+- Authorize revised A2 Codex-first harness selection and composition closure once A1 invariants are stable, even if the owner choice is pending; keep DeepSeek Harness as the comparison candidate and authorize A3 only after A2 exposes the selected runtime surface. Later direct evidence and probes must be separately scoped, exact, and provenance-labeled.
 - Send a T3-par-or-higher hostile Reviewer an exact base/head/diff/evidence brief only after a coherent V2 candidate exists. Implementation planning and issue decomposition remain unauthorized until separate owner approval.
 
 ## Key decisions made
@@ -221,7 +223,7 @@
 - This phase produces design and migration documents only; it will not implement the new AI7 runtime.
 - Remote source repositories will be inspected read-only and will not be copied into the new project as implementation code.
 - Use a fresh AI7 product repository as the planning default, with both source revisions recorded explicitly; do not merge the private AI7 history or vendor the Harness monorepo before visibility, licensing, and dependency strategy are decided.
-- Treat DeepSeek Harness as the candidate single agent execution/control plane; preserve AI7's manuscript, publication, Task Ledger, safety, Effect, and surface-neutral editorial semantics above it rather than keeping a competing agent scheduler.
+- For V2, preserve AI7's manuscript, publication, Task Ledger, safety, Effect, and editorial semantics as the application authority; evaluate Codex first and DeepSeek Harness comparatively for one agent execution loop rather than keeping competing schedulers.
 - The current architecture, legacy dispositions, and phase order are explicitly proposals; none become accepted until the user resolves the relevant numbered question.
 - Delay the canonical glossary/context layout and engineering-skill configuration until the setup questions choose the issue tracker, labels, and domain-doc structure.
 - GitHub Issues will be the canonical work-item tracker once the new repository is initialized.
@@ -301,7 +303,8 @@
 - V2 architecture design and hostile review are deliberately asynchronous: the Reviewer may prepare an independent attack rubric now, but it receives no candidate content until the Commander declares an exact head coherent.
 - The Issue #4 Worker owns candidate writing. A1, A2, and A3 are dependency-gated phases inside the architecture issue, not permission to run all exploration at once.
 - Owner acceptance after A1 gates exact parity/support becoming canonical, not read-only noncanonical A2/A3 evidence exploration. The hard Reviewer floor applies to the eventual candidate verdict, so the T3 charter session must be rebound or redispatched at T3-par or higher for that turn.
+- The 2026-08-21 V2 direction is AI7-owned, Codex-first, and DeepSeek-comparative. Codex harness is a preferred technical candidate and Codex Desktop-like is an interaction reference; neither is permission to inherit coding defaults, copy UI implementation/branding, couple AI7 domain authority to execution approvals, or run two overlapping agent loops.
 
 ## Resume Prompt
 
-Resume as Project Commander: monitor the Issue #4 A1 Worker and the T3 read-only charter Reviewer; review A1 at its exact local head, confirm stable invariants, authorize A2 if ready while separately obtaining the owner's product-consistency choice, and reserve the final hostile verdict for T3-par or higher.
+Resume as Project Commander: monitor the Issue #4 A1 Worker, ensure its handoff records the Codex-first owner directive without entering A2, review A1 at its exact local head, then authorize a Codex-first/DeepSeek-comparative A2 while reserving the final hostile verdict for T3-par or higher.

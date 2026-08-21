@@ -35,10 +35,11 @@ The function labels “Architecture Reviewer” and “V2 Hostile Architecture R
 4. Worker handoffs enter the review packet only after Commander audit.
 5. A future v2 candidate receives an independent T3-par-or-higher hostile verdict before an owner decision; T3 is sufficient only for the pre-candidate charter.
 6. The V2 hostile Reviewer may prepare its challenge charter now, but it receives no design-task transcript, worktree, branch diff, or candidate material until the Commander supplies an exact coherent-candidate review brief.
+7. The 2026-08-21 owner direction makes Codex the preferred V2 harness candidate, keeps DeepSeek Harness as a comparison candidate, and leaves AI7 authoritative for product, domain, UI, policy, Effects, and business ledgers. It does not authorize two overlapping agent loops or implementation; see [CODEX-HARNESS-DIRECTIVE.md](./CODEX-HARNESS-DIRECTIVE.md).
 
 ## V2 dispatch boundary
 
-The exact dispatch is recorded in [V2-DISPATCH.md](./V2-DISPATCH.md). The design Worker starts with A1 only. A2 remains blocked on stable A1 invariants but not on the owner's exact parity/support choice; that choice gates canonical product promises and the coherent candidate. A3 remains blocked on A1 and A2. The hostile Reviewer is active only to establish an independent rubric and must then stop until the Commander supplies a coherent candidate.
+The exact dispatch is recorded in [V2-DISPATCH.md](./V2-DISPATCH.md). The design Worker starts with A1 only. A2 remains blocked on stable A1 invariants but not on the owner's exact parity/support choice; its scope is now Codex-first harness selection with DeepSeek comparison. That choice gates canonical product promises and the coherent candidate. A3 remains blocked on A1 and the revised A2. The hostile Reviewer is active only to establish an independent rubric and must then stop until the Commander supplies a coherent candidate.
 
 ## Candidate fork inputs
 
@@ -47,6 +48,7 @@ These inputs are material but are not canonical on this branch:
 - The owner instructed the platform candidate task to revise the Windows-only target into one Windows+macOS product. This is an owner-stated candidate input, not a canonical `main` decision until integration.
 - The UI/UX Worker began from the current Windows-only baseline and produced a candidate requirements/prototype line.
 - The platform candidate affects packaging, local storage, credentials, IPC, sandbox claims, signing, release evidence, and UI platform conventions; it is not a runner-label edit.
+- The owner added Codex as the preferred V2 harness and integration template after OpenAI published its open-harness platform guidance. Codex Desktop-like interaction remains a UX reference while AI7 owns the interface and publishing workflow; DeepSeek Harness remains comparative rather than an automatic co-runtime.
 
 The Commander must preserve both lines as candidate/evidence-only unless the owner later accepts a specific architecture change and the normal integration path promotes exact records.
 
@@ -74,14 +76,14 @@ The Commander must preserve both lines as candidate/evidence-only unless the own
 
 - **First round received from a clean read-only `main@c8cbe26` worktree with the contamination boundary intact.**
 - [Round 1 review](./ROUND-1-REVIEW.md) records the v1 assumptions, seven root tensions, twelve proposed principles, inheritance dispositions, a fourteen-stage exploration order, and freeze exit criteria.
-- [Candidate delta review](./CANDIDATE-DELTA-REVIEW.md) confirms the root tensions/principles, refines asset disposition, and recommends A1 product consistency, A2 exact Harness composition, then A3 truthful isolation.
+- [Candidate delta review](./CANDIDATE-DELTA-REVIEW.md) confirms the root tensions/principles, refines asset disposition, and recommends A1 product consistency, A2 exact Harness composition, then A3 truthful isolation. Its DeepSeek-only A2 scope is superseded by the later [Codex-first owner directive](./CODEX-HARNESS-DIRECTIVE.md), while its dependency order remains.
 
 ## Next control events
 
 1. Keep `c383afd2fdb5f08342cde277b7babced6c1207fc` as the immutable control/packet authority and both frozen legacy branches local and noncanonical.
 2. Let the Issue #4 Worker complete A1 from the sealed packet, commit locally, and stop at the owner-choice gate.
 3. Review the exact A1 head, confirm its invariant list, and present only the decision-ready platform consistency choices to the owner.
-4. Authorize A2 exact Harness composition after A1 invariants are stable even if the owner choice remains pending; authorize A3 truthful isolation after A1 and A2. The owner choice is required before exact parity/support becomes canonical or the candidate becomes coherent.
+4. Authorize revised A2 Codex-first harness selection and composition closure after A1 invariants are stable even if the owner choice remains pending; authorize A3 truthful isolation only after A2 exposes the selected runtime surface. The owner choice is required before exact parity/support becomes canonical or the candidate becomes coherent.
 5. Let the hostile Reviewer finish its T3 charter and stop. Supply an exact base/head/diff/evidence brief only after the Commander declares one V2 candidate coherent, and run that verdict at T3-par or higher.
 6. Do not begin implementation planning or issue decomposition without separate owner authorization.
 
