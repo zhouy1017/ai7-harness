@@ -315,4 +315,4 @@
 
 ## Resume Prompt
 
-Resume as Project Commander: publish Clarification 0001 as an exact Issue #4/Worker input, ask Question 2 through `grill-with-docs`, monitor the A1 Worker without entering A2, and review its exact A1 head before any A2 authorization.
+Resume as Project Commander: continue with Question 2 through `grill-with-docs`, monitor the A1 Worker after its verified Clarification 0001 handoff without entering A2, and review its exact A1 head before any A2 authorization.
