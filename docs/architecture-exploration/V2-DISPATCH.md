@@ -14,6 +14,7 @@ This is a repository-development dispatch record, not a product architecture dec
 - UI/UX frozen candidate: `587d6455f6a578d3df8a39f534ec7a057c07a18c`, noncanonical
 - Evidence inventory: [PACKET-MANIFEST.md](./PACKET-MANIFEST.md)
 - Later owner direction and external evidence: [Codex-First V2 Harness Directive](./CODEX-HARNESS-DIRECTIVE.md)
+- Commander-owned owner resolution: [Clarification 0001 — Codex and DeepSeek Harness production roles](./clarifications/0001-primary-agent-harness-role.md)
 
 ## Design Worker
 
@@ -34,9 +35,13 @@ The 2026-08-21 owner directive changes the future A2 working premise from DeepSe
 
 When an ambiguity could change product scope, platform promises, AI7/Codex/DeepSeek ownership, the single execution authority, Policy or Effect authority, privacy/data boundaries, UI business semantics, or A2/A3 evidence scope, the Worker must not infer an answer.
 
-The Worker records one decision-queue entry with the exact question, why it is load-bearing, exact evidence, two or three mutually exclusive options, its recommended answer, and the failure caused by leaving it vague. The Commander then uses `grill-with-docs`—one question at a time—to resolve it with the owner.
+First, the Worker investigates whether canonical artifacts, authorized exact source evidence, or an approved probe can answer the factual part. An evidence-answerable question is resolved in the candidate with exact provenance and does not consume owner interview time. Only a residual policy, priority, risk, or product trade-off enters the decision queue.
 
-Resolved domain terms are written immediately to the owning `CONTEXT.md` and bilingual glossary index. A decision becomes an ADR only when it is hard to reverse, surprising without context, and the result of a real trade-off. Until an exact owner resolution is returned, the affected design branch stops while unrelated evidence work may continue.
+For each residual choice, the Worker records one entry with the exact question, why it is load-bearing, the already-explored evidence, two or three mutually exclusive options, its recommended answer, and the failure caused by leaving it vague. The Commander then uses `grill-with-docs`—one question at a time—to resolve it with the owner.
+
+The Commander writes the exact question, answer, acceptance status, provenance, interpretation, and canonical-integration boundary into an immutable record under `docs/architecture-exploration/clarifications/`. The Worker receives an exact Commander commit and path, consumes that Git object rather than a transcript, cites it, and writes the resulting candidate `CONTEXT.md`, glossary, qualifying ADR disposition, and architecture changes on its own branch. A decision becomes an ADR only when it is hard to reverse, surprising without context, and the result of a real trade-off. Until that exact resolution is supplied, the affected design path stops while unrelated evidence work may continue.
+
+Clarification 0001 resolves one branch now: if A2 proves Codex Harness Capability Closure, Codex is the only Primary Agent Harness and DeepSeek Harness is a Development Reference Framework with no production dependency or fallback role. It does not claim closure and does not authorize A2 before the A1 gate.
 
 ## Hostile Reviewer
 

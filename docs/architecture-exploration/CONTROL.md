@@ -35,8 +35,8 @@ The function labels “Architecture Reviewer” and “V2 Hostile Architecture R
 4. Worker handoffs enter the review packet only after Commander audit.
 5. A future v2 candidate receives an independent T3-par-or-higher hostile verdict before an owner decision; T3 is sufficient only for the pre-candidate charter.
 6. The V2 hostile Reviewer may prepare its challenge charter now, but it receives no design-task transcript, worktree, branch diff, or candidate material until the Commander supplies an exact coherent-candidate review brief.
-7. The 2026-08-21 owner direction makes Codex the preferred V2 harness candidate, keeps DeepSeek Harness as a comparison candidate, and leaves AI7 authoritative for product, domain, UI, policy, Effects, and business ledgers. It does not authorize two overlapping agent loops or implementation; see [CODEX-HARNESS-DIRECTIVE.md](./CODEX-HARNESS-DIRECTIVE.md).
-8. Load-bearing ambiguity is never resolved by Worker inference. The Worker adds a structured decision-queue entry, and the Commander uses `grill-with-docs` with the owner one question at a time; resolved terms update their owning context/glossary and only qualifying hard trade-offs become ADRs.
+7. The 2026-08-21 owner direction makes Codex the preferred V2 harness candidate and leaves AI7 authoritative for product, domain, UI, policy, Effects, and business ledgers. If A2 proves Codex capability closure, Codex is the sole production Primary Agent Harness and DeepSeek becomes a non-runtime Development Reference Framework; see [Clarification 0001](./clarifications/0001-primary-agent-harness-role.md). This does not claim closure or authorize implementation.
+8. Load-bearing ambiguity is never resolved by Worker inference. The Worker first exhausts authorized factual evidence and probes; only a residual owner trade-off enters a structured decision queue. The Commander uses `grill-with-docs` one question at a time and creates an exact clarification record; the Worker consumes its exact Git object and writes resulting candidate terms and qualifying decisions on the Worker branch, never from a transcript.
 
 ## V2 dispatch boundary
 

@@ -16,6 +16,14 @@ V2 uses three layers of intent:
 
 “Codex-first” is an evaluation and design priority. It is not yet a canonical dependency decision.
 
+## Owner resolution: production role after capability closure
+
+The owner accepted [Clarification 0001](./clarifications/0001-primary-agent-harness-role.md): if A2 proves that Codex supplies every load-bearing production harness capability, Codex becomes AI7's sole **Primary Agent Harness** and DeepSeek Harness becomes a **Development Reference Framework** only.
+
+In that outcome, DeepSeek contributes development rules, architecture and composition experience, evaluation checklists, and documentation guidance. It contributes no production package, process, Session ledger, agent loop, tool runtime, fallback executor, capability authority, or user-facing branding. A failed Codex capability check reopens an evidence-bearing owner choice; it never activates DeepSeek silently.
+
+The vendor-neutral candidate terms and their preferred Chinese labels are defined in the exact clarification record for the Worker to place in its owning candidate context and glossary. This resolution is a V2 candidate input, not proof that Codex has passed A2 and not a direct edit to canonical V1 context or ADRs.
+
 ## Verified source basis
 
 ### Official OpenAI platform article
@@ -70,8 +78,8 @@ Codex Thread/Turn/Item records and DeepSeek Harness Session events are never AI7
 
 1. Codex app-server as the preferred embedded-product candidate.
 2. Codex SDK or `codex exec` only for bounded programmatic/background roles where their reduced lifecycle surface is sufficient.
-3. DeepSeek Harness `0.1.0-rc.6` as the alternative agent runtime and composition candidate.
-4. A mixed design only if it proves mutually exclusive responsibilities, one AI7 scheduling/effect authority, and no second implementation of the agent loop.
+3. DeepSeek Harness `0.1.0-rc.6` as the alternative agent runtime and composition candidate only if Codex fails a load-bearing closure criterion and the owner explicitly reopens the runtime choice.
+4. A mixed design only if Codex fails closure and a later owner decision accepts a composition that proves mutually exclusive responsibilities, one AI7 scheduling/effect authority, and no second implementation of the agent loop. Under Clarification 0001, a Codex-closed design has no DeepSeek production component.
 
 **Required evidence and dispositions:**
 
