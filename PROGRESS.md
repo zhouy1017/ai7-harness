@@ -201,14 +201,18 @@
 - Final exact-head T3 Standards and Spec reviewers both passed UI head `587d6455f6a578d3df8a39f534ec7a057c07a18c` with zero findings and no post-review changes. The Commander independently confirmed its exact head, base, one-commit history, clean worktree, clean diff, and one-line `CLAUDE.md`, then marked the UI line `frozen`. Both legacy lines are now frozen, local, noncanonical, and unmerged.
 - Added and sealed `docs/architecture-exploration/PACKET-MANIFEST.md` for the two Worker heads and canonical base. All 51 commit/path/blob/byte mappings verify exactly; the packet supplies Q16 wording, UI authority/state mapping, and exact candidate evidence while excluding transcripts, active worktrees, full chronological progress, and scratch.
 - First exact-head review of Commander commit `d129d9c` passed Spec with zero findings and found two Standards metadata defects: `ultra` was mislabeled T3 rather than T3-par, and Round 1 left cross-provider status pending. Both review records now use T3-par and disclose `same-provider review — independence reduced`; the amended head must repeat both review axes.
+- Amended Commander head `c383afd2fdb5f08342cde277b7babced6c1207fc` passed fresh exact-head Standards and Spec review with zero findings, no post-review changes, and `same-provider review — independence reduced`. It is the immutable authority for the control/runbook/sealed-packet unit; the working control branch remains local.
+- Created [Issue #4](https://github.com/zhouy1017/ai7-harness/issues/4) and local branch `docs/4-v2-architecture-candidate` at `c383afd`. Launched and pinned `AI7 V2 架构设计（Issue #4）` (`01a022de-f781-7d31-9a77-c3ce9ee1ce50`, `worktrees/1649`) as the sole writable Worker. Its first turn is limited to A1 and must stop at the owner-choice gate before A2.
+- Launched and pinned `AI7 V2 反方审查（只读）` (`01a022df-0d69-7173-ab31-679038c1f446`, `worktrees/1be4`) as an independent read-only Reviewer. Its first turn may produce only the challenge charter and must then wait for an exact coherent-candidate brief; it cannot inspect the design task or issue a premature verdict.
+- Added `docs/architecture-exploration/V2-DISPATCH.md` and updated `docs/architecture-exploration/CONTROL.md` with exact task IDs, worktrees, authority boundaries, phase dependencies, and stop conditions.
 
 ## What's next
 
-- Gate the Commander control/runbook/packet unit on exact-head Standards and Spec review. After a pass with no post-review change, the next uncompleted project action is the separately dispatched A1 investigation; both frozen Worker branches remain noncanonical and unmerged.
+- Monitor the two new tasks through compact snapshots. The design Worker must complete A1, commit locally, and stop; the hostile Reviewer must deliver its charter and enter `WAITING_FOR_CANDIDATE`.
 - Use only the sealed packet for later architecture investigation; do not copy task transcripts or read active Worker worktrees.
-- Reconcile the Windows-only canonical baseline with the candidate Windows+macOS revision through explicit architecture exploration and ADR disposition, not silent edits.
-- Resolve or assign evidence spikes for OS isolation, Harness rc.5/rc.6 seams and dependency closure, platform packaging/signing/CI, UI platform adaptation, retrieval/store performance, and ProseMirror confidence.
-- Dispatch an independent T3 hostile challenge only after one coherent v2 candidate exists. Implementation planning and issue decomposition remain unauthorized until separate owner approval.
+- Review the exact A1 head, then present the platform consistency/support options to the owner without silently resolving them.
+- Authorize A2 exact Harness `rc.6` composition and A3 truthful isolation only after their recorded dependencies are satisfied; later evidence spikes remain separately scoped.
+- Send the hostile Reviewer an exact base/head/diff/evidence brief only after a coherent V2 candidate exists. Implementation planning and issue decomposition remain unauthorized until separate owner approval.
 
 ## Key decisions made
 
@@ -292,7 +296,9 @@
 - `main@c8cbe26` is the design-freeze baseline. Neither the UI/UX branch nor the platform/Phase-0 branch is canonical or approved for merge.
 - New architecture work sees curated conclusions, evidence paths, and status labels—not legacy conversation transcripts, active worktrees, or process noise.
 - Architecture exploration switches to implementation only after a coherent architecture, explicit trade-offs and ADR disposition, migration direction, evidence/spike outcomes, independent T3 challenge, owner acceptance, and separate implementation authorization.
+- V2 architecture design and hostile review are deliberately asynchronous: the Reviewer may prepare an independent attack rubric now, but it receives no candidate content until the Commander declares an exact head coherent.
+- The Issue #4 Worker owns candidate writing. A1, A2, and A3 are dependency-gated phases inside the architecture issue, not permission to run all exploration at once.
 
 ## Resume Prompt
 
-Resume as Project Commander: dispatch A1 one-product consistency/UI parity from the sealed packet as a read-only noncanonical investigation; do not merge either candidate branch or start implementation.
+Resume as Project Commander: monitor the Issue #4 A1 Worker and the read-only hostile Reviewer; review A1 at its exact local head, obtain the owner's product-consistency choice, and do not authorize A2, hostile candidate review, integration, or implementation early.

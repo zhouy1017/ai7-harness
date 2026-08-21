@@ -2,6 +2,7 @@
 
 Status: **active**
 Commander issue: [#3 — Freeze v1 design and prepare v2 architecture exploration](https://github.com/zhouy1017/ai7-harness/issues/3)
+V2 architecture issue: [#4 — Design the AI7 V2 architecture candidate](https://github.com/zhouy1017/ai7-harness/issues/4)
 Last updated: **2026-08-21**
 
 This file records repository-development coordination only. It is not an AI7 product workflow or a replacement for the canonical architecture.
@@ -20,9 +21,11 @@ This file records repository-development coordination only. It is not an AI7 pro
 | `Commander — AI7 Design Freeze` | `01a02273-a4f7-7fa1-8d66-7130f7566cd4` | Commander | `docs/3-design-freeze-v2-exploration` / `worktrees/6bbc` | `active` | Control and curation files only | Freeze audit, curated packet, integration recommendation |
 | `Worker — Freeze V1 UI UX` | `01a02240-c432-7600-8fdf-008858cae447` | Worker | `docs/2-ai7-ui-ux@587d645` / `worktrees/062a` | `frozen` | Its branch only | Reviewed local V1 UI/UX reference; candidate/evidence-only assets |
 | `Worker — Freeze V1 Platform and Phase 0` | `01a005a7-019f-7203-ba38-2a367a667db8` | Worker | `docs/1-windows-macos-phase0@9606891` / saved-project checkout | `frozen` | Its branch only | Reviewed local V1 platform/Q16/Phase-0 reference; Phase 0 remains NOT PASSED |
-| `Architecture Reviewer — Prepare V2 Exploration` | `01a02278-cdc5-7c81-a08d-490b8b76bc26` | Reviewer | read-only `main@c8cbe26` / `worktrees/1d24` | `exploring` | No repository writes | [Round 1](./ROUND-1-REVIEW.md) and [candidate delta](./CANDIDATE-DELTA-REVIEW.md) complete; A1–A3 prepared |
+| `Architecture Reviewer — Prepare V2 Exploration` | `01a02278-cdc5-7c81-a08d-490b8b76bc26` | Reviewer | read-only `main@c8cbe26` / `worktrees/1d24` | `complete` | No repository writes | [Round 1](./ROUND-1-REVIEW.md) and [candidate delta](./CANDIDATE-DELTA-REVIEW.md) complete; A1–A3 prepared |
+| `AI7 V2 架构设计（Issue #4）` | `01a022de-f781-7d31-9a77-c3ce9ee1ce50` | Worker | `docs/4-v2-architecture-candidate@c383afd` / `worktrees/1649` | `starting-a1` | Its branch only | Decision-ready A1 product-consistency contract, then pause at the owner-choice gate |
+| `AI7 V2 反方审查（只读）` | `01a022df-0d69-7173-ab31-679038c1f446` | Reviewer | read-only `c383afd` / `worktrees/1be4` | `charter-only` | No repository writes | Independent challenge charter now; exact-head hostile review only after a coherent V2 candidate exists |
 
-The function label “Architecture Reviewer” does not create a fourth repository role. It is an independent Reviewer assignment under ADR 0015.
+The function labels “Architecture Reviewer” and “V2 Hostile Architecture Reviewer” do not create a fourth repository role. Both are independent Reviewer assignments under ADR 0015. The V2 architecture designer remains a Worker even when exercising Chief Architect responsibilities.
 
 ## Commander directives in force
 
@@ -31,6 +34,11 @@ The function label “Architecture Reviewer” does not create a fourth reposito
 3. The Architecture Reviewer reads normalized conclusions from canonical `main`, not either legacy task history or active worktree.
 4. Worker handoffs enter the review packet only after Commander audit.
 5. A future v2 candidate receives an independent T3 hostile challenge before an owner decision.
+6. The V2 hostile Reviewer may prepare its challenge charter now, but it receives no design-task transcript, worktree, branch diff, or candidate material until the Commander supplies an exact coherent-candidate review brief.
+
+## V2 dispatch boundary
+
+The exact dispatch is recorded in [V2-DISPATCH.md](./V2-DISPATCH.md). The design Worker starts with A1 only. A2 remains blocked on stable A1 invariants and the recorded owner choice; A3 remains blocked on A1 and A2. The hostile Reviewer is active only to establish an independent rubric and must then report `WAITING_FOR_CANDIDATE`.
 
 ## Candidate fork inputs
 
@@ -70,10 +78,11 @@ The Commander must preserve both lines as candidate/evidence-only unless the own
 
 ## Next control events
 
-1. Commit and exact-head review the Commander's control/runbook/packet unit; do not use a mutable checkout as the packet authority.
-2. Keep both candidate branches local and noncanonical; neither is a merge candidate as a whole.
-3. Begin A1 one-product consistency/UI parity only as a separately dispatched read-only, noncanonical investigation using the sealed packet.
-4. Follow with A2 exact Harness composition and A3 truthful isolation under the dependency order in the delta review.
-5. Dispatch a separate independent T3 hostile challenge only after one coherent v2 candidate exists.
+1. Keep `c383afd2fdb5f08342cde277b7babced6c1207fc` as the immutable control/packet authority and both frozen legacy branches local and noncanonical.
+2. Let the Issue #4 Worker complete A1 from the sealed packet, commit locally, and stop at the owner-choice gate.
+3. Review the exact A1 head and present only the decision-ready platform consistency choices to the owner.
+4. Authorize A2 exact Harness composition and then A3 truthful isolation only through explicit Commander follow-ups after their dependencies are satisfied.
+5. Let the hostile Reviewer finish its charter and wait. Supply an exact base/head/diff/evidence brief only after the Commander declares one V2 candidate coherent.
+6. Do not begin implementation planning or issue decomposition without separate owner authorization.
 
 The old lines do not need to finish every originally planned document before architecture exploration can advance.
