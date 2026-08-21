@@ -38,6 +38,8 @@ The Worker reads `PROGRESS.md` only for operational status. Inherited V1/candida
 
 The first turn produces only a challenge charter: candidate admission criteria, attack matrix, falsification questions, severity/evidence protocol, and a stop until a candidate exists. It must not inspect the design task or issue a V2 verdict before receiving an exact Commander review brief.
 
+The charter turn completed read-only after verifying all 51 manifest mappings. It covers candidate admission, eighteen attack domains, domain-specific falsification questions, P0–P3 Standards/Spec finding format, contamination/no-verdict handling, and exact-head invalidation. It issued no candidate verdict and the task is stopped until a coherent candidate exists.
+
 The future brief must name the exact base, candidate head, diff, evidence manifest, ADR disposition, trade-offs, migration direction, risks, owner choices, and validation evidence. A same-provider review must disclose `same-provider review — independence reduced`.
 
 ## Phase gates

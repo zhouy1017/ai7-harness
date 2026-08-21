@@ -206,10 +206,11 @@
 - Launched and pinned `AI7 V2 反方审查（只读）` (`01a022df-0d69-7173-ab31-679038c1f446`, `worktrees/1be4`) as an independent read-only Reviewer. Its first T3 turn may produce only the challenge charter and must then stop for an exact coherent-candidate brief; the eventual verdict must be rebound or redispatched at T3-par or higher to match the authoring class.
 - Added `docs/architecture-exploration/V2-DISPATCH.md` and updated `docs/architecture-exploration/CONTROL.md` with exact task IDs, worktrees, authority boundaries, phase dependencies, and stop conditions.
 - Standards review of first dispatch commit `7263396` found four orchestration defects: a below-floor future Reviewer class, an unnecessary owner-choice gate before A2, nonbinding state labels, and packet-only wording that would block A2/A3 evidence. The corrective dispatch keeps the T3 charter but requires a T3-par final verdict, restores binding states, lets A2 follow stable A1 invariants, and permits separately authorized exact evidence in later phases.
+- The read-only hostile Reviewer completed its T3 Challenge Charter after re-verifying all 51 manifest mappings. It returned candidate admission criteria, eighteen attack domains with falsification questions, P0–P3 Standards/Spec finding protocol, contamination/no-verdict rules, and exact-head invalidation. It made no V2 finding or verdict, changed no repository/external state, and stopped until a coherent candidate receives a T3-par review brief.
 
 ## What's next
 
-- Monitor the two new tasks through compact snapshots. The design Worker must complete A1, commit locally, and stop; the hostile Reviewer must deliver its charter and stop until a candidate exists.
+- Monitor the A1 design Worker through compact snapshots; it must complete A1, commit locally, and stop. Keep the completed hostile-charter task idle until a coherent candidate exists.
 - Use only the sealed packet for later architecture investigation; do not copy task transcripts or read active Worker worktrees.
 - Review the exact A1 head, confirm its stable invariants, then present the platform consistency/support options to the owner without silently resolving them.
 - Authorize A2 exact Harness `rc.6` composition once A1 invariants are stable, even if the owner choice is pending; authorize A3 only after A1 and A2. Later direct evidence and probes must be separately scoped, exact, and provenance-labeled.
