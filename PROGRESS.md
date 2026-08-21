@@ -2,6 +2,25 @@
 
 ## What's done
 
+- Opened GitHub Issue #2, `Design the complete AI7 V1 UI/UX`, and created the repository-compliant branch `docs/2-ai7-ui-ux` from the current design-complete checkpoint.
+- Began the separate owner-run UI/UX phase and created `docs/ui-ux/{README,requirements,information-architecture}.md` as the artifact router, numbered V1 experience requirements, and Book-first information architecture.
+- Captured a V1 candidate/reference UI direction from the planning interview: Codex-inspired quiet spatial language without developer metaphors; Book-first navigation plus a global work queue; editor-first center; one right context inspector; bottom task entry; inline proposal review with optional comparison; spacious light sage/warm-paper visual direction. None of these choices is promoted by this branch.
+- Requested and received installation confirmation for the Figma plugin; repository documentation and HTML prototyping remain independent of external connection availability.
+- Completed the throwaway, synthetic-data HTML prototype at `docs/ui-ux/prototype/` with three URL-addressable shell variants, keyboard switching, and the end-to-end selection → plan → Run Authorization → evidence → Correction Proposal → Effect Receipt journey.
+- Browser-verified all three variants at 1440×900, the overlay layout at 800×800, keyboard variant switching, semantic proposal insert/delete markup, revision progression from r7 to r8, and a zero-error/zero-warning console.
+- Created the external Figma file `AI7 V1 UI UX Design` and captured six editable 1440×900 synthetic candidate/reference frames: A/editor resting state, A/Plan Preview, A/Factual Verification, A/Effect Receipt, B/focus editor, and C/split proposal comparison. No variant is selected or defaulted by this branch.
+- Added `docs/ui-ux/figma-handoff.md` with exact node links, authority boundary, the Starter-plan MCP quota limitation, and captured-frame validation gaps. No further Figma work is authorized, and no real manuscript or user data entered Figma.
+- Completed `docs/ui-ux/{interaction-spec,visual-system,usability-test-plan,traceability}.md`: fourteen restart-safe V1 journeys, Windows/Chinese-editor visual and interaction contracts, the owner-to-editor research gate, and an explicit source/prototype/verification trace for every numbered requirement.
+- Verified all 79 UI/UX requirement IDs appear exactly once in the traceability matrix; all eleven V1 candidate/reference Markdown files have resolving local links; the prototype JavaScript parses; `git diff --check main` passes; and the final browser console reports zero errors, warnings, or other messages.
+- Kept two source-document conflicts visible rather than designing around them: editorial Policy Document activation remains excluded until its authority conflict is resolved, while packaging follows the V1 base's current zip-portable plus NSIS decision rather than superseded portable-only text.
+- Received the Commander DESIGN FREEZE directive and added `docs/ui-ux/V1-FREEZE-HANDOFF.md` with exact base `c8cbe26`, branch `docs/2-ai7-ui-ux`, candidate/reference status, captured evidence, reusable semantics, Windows/platform dependencies, migration cost, cross-branch comparison boundary, and open questions. The branch is not frozen or promoted until its exact head passes review; no decision from another active branch was imported.
+- Completed initial independent Standards and Spec reviews, followed by an exact-head T3 audit with `same-provider review — independence reduced`. The exact-head audit found seven bounded issues; the Commander-authorized corrective pass changes only freeze authority wording, hidden-policy navigation, accepted labels, the 15-character selection display, and the five factual-verification outcomes.
+- Re-ran the corrected prototype at 1440×900 and 800×800, checked Plan Preview, factual verification, proposal comparison, and applied receipt states, then stopped the local server/browser and moved `.playwright-cli/` QA scratch out of the worktree into the system temporary directory.
+- Applied the bounded freeze-candidate corrections in `PROGRESS.md` and `docs/ui-ux/{README,V1-FREEZE-HANDOFF,figma-handoff,information-architecture,interaction-spec,requirements,traceability,usability-test-plan,visual-system}.md` plus `docs/ui-ux/prototype/{NOTES,README}.md` and `docs/ui-ux/prototype/app.js`. Verified JavaScript syntax, all 11 local-Markdown link graphs, all 79/79 requirement-to-trace rows, the three exact `15 字` displays, the five factual-verification outcomes, the three evidence labels in all four required repository artifacts, hidden Policy Document navigation, the then-defined bounded terminology scan, `git diff --check`, and the exact one-line `CLAUDE.md` wrapper; the subsequent exact-head review showed that scan did not cover two residual normative-authority phrases or the stale external Figma frame description.
+- The complete exact-head T3 review of `67fc3b261b5ce2982b69e2ec42ac54bbd6d7f5ef` failed Standards with two findings and Spec with one: two visual-system passages still claimed normative authority, the unmodified factual-verification Figma frame was described with corrected repository vocabulary, and the corrective commit lacked the required model co-authorship trailer. The third bounded correction changes only those two candidate-authority passages, the stale-frame handoff, this checkpoint, and the existing unpushed commit metadata; it adds no design or Figma work.
+- Re-ran the post-third-correction checks: prototype JavaScript parses; all 11 candidate-package Markdown files have resolving local links and both newly linked section headings exist; requirements and traceability remain 79/79 and unique; the prohibited visual-authority phrases and corrected-label claim about the stale Figma frame are absent; the frame is explicitly excluded as vocabulary/implementation evidence; the three `15 字` displays and five factual-verification outcomes remain intact; `CLAUDE.md` is exactly the one-line wrapper; and `git diff --check` passes.
+- The complete exact-head T3 review of `6bdce59c490939d78076c1d9c0b014bfc34a28ee` passed Spec with zero findings and failed Standards with six hard findings: accepted-value language for the reading measure, an incomplete freeze-handoff audit sequence, two exact outcome-label drifts, remaining qualified manuscript-revision and Run Source Scope label drift, and obsolete authority/default claims in predecessor commit metadata. This final consolidation corrects only those six and rewrites the local unpushed Issue #2 history into one candidate commit so the obsolete metadata cannot survive.
+
 - Read the project checkpoint instructions and confirmed the workspace is currently empty and is not yet a Git repository.
 - Used the requested `ask-matt` router; selected the `setup-matt-pocock-skills` preflight followed by the stateful `grill-with-docs` design flow.
 - Loaded the grilling and domain-modeling conventions, including glossary and ADR formats.
@@ -188,16 +207,14 @@
 
 ## What's next
 
-- Run the Phase 0 exit review: confirm every decision-map row is resolved or explicitly deferred, then decompose the accepted design into independently grabbable vertical issues.
-- Resolve two carried items that are not interview questions: whether the Question 16 answer of "mostly okay" endorsed the four content/evidence classes the owner did not correct, and verification of Windows sandbox enforcement before the Agent Data Root boundary is described as enforced rather than intended.
-- Verify the Windows sandbox enforcement strength before describing the Agent Data Root boundary as enforced rather than intended.
-- Question 26 is deferred until after Question 34 by owner instruction, because what remains of it is largely a packaging, installer, signing, and release-evidence question that depends on the Standalone shell and process topology Question 34 decides.
-- Confirm whether the Question 16 answer of "mostly okay" endorsed the four content/evidence classes other than the one the owner corrected; that scope was never itemized.
-- Keep Word vocabulary and implementation outside the active V1 domain; reconsider it only through a later proportional-remedy ADR after failure of the Standalone Editing Sufficiency Gate.
-- After the interview, promote only accepted hard-to-reverse choices into concise decision records and finalize the migration handoff.
+- For `docs/2-ai7-ui-ux`, the only next action after local-history consolidation is a fresh complete exact-head Standards + Spec review and Commander audit. Do not resume A/B/C expansion, Figma work, user research, implementation, or product decisions from this candidate/reference branch.
 
 ## Key decisions made
 
+- Treat Variants A, B, and C only as V1 candidate/reference comparison artifacts. No variant is selected, recommended, accepted, authoritative, or default on this branch.
+- Retain the task-launcher placement, 800 px inspector overlay, and semantic `del`/`ins` markup only as V1 candidate/reference evidence; this branch does not promote those choices.
+- Treat the six captured Figma frames, repository requirements, interaction semantics, and visual system only as V1 candidate/reference artifacts. None is canonical product authority, and no Figma continuation or native componentization is authorized; the next decision belongs to the Commander.
+- Consolidate this unpushed Worker branch into exactly one V1 candidate/reference commit above `c8cbe26`; the local rewrite removes obsolete authority/default metadata and does not promote any artifact.
 - This phase produces design and migration documents only; it will not implement the new AI7 runtime.
 - Remote source repositories will be inspected read-only and will not be copied into the new project as implementation code.
 - Use a fresh AI7 product repository as the planning default, with both source revisions recorded explicitly; do not merge the private AI7 history or vendor the Harness monorepo before visibility, licensing, and dependency strategy are decided.
@@ -277,4 +294,4 @@
 
 ## Resume Prompt
 
-Resume with the Phase 0 exit review: confirm every decision-map row is resolved or explicitly deferred, then decompose the accepted design into independently grabbable vertical issues.
+Resume only for a fresh complete exact-head T3 Standards + Spec review and Commander audit of the single consolidated V1 candidate commit; do not extend the artifacts or resume Figma, research, implementation, or product design.
