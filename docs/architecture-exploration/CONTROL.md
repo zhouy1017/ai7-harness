@@ -21,9 +21,9 @@ This file records repository-development coordination only. It is not an AI7 pro
 | `Commander — AI7 Design Freeze` | `01a02273-a4f7-7fa1-8d66-7130f7566cd4` | Commander | `docs/3-design-freeze-v2-exploration` / `worktrees/6bbc` | `active` | Control and curation files only | Freeze audit, curated packet, integration recommendation |
 | `Worker — Freeze V1 UI UX` | `01a02240-c432-7600-8fdf-008858cae447` | Worker | `docs/2-ai7-ui-ux@587d645` / `worktrees/062a` | `frozen` | Its branch only | Reviewed local V1 UI/UX reference; candidate/evidence-only assets |
 | `Worker — Freeze V1 Platform and Phase 0` | `01a005a7-019f-7203-ba38-2a367a667db8` | Worker | `docs/1-windows-macos-phase0@9606891` / saved-project checkout | `frozen` | Its branch only | Reviewed local V1 platform/Q16/Phase-0 reference; Phase 0 remains NOT PASSED |
-| `Architecture Reviewer — Prepare V2 Exploration` | `01a02278-cdc5-7c81-a08d-490b8b76bc26` | Reviewer | read-only `main@c8cbe26` / `worktrees/1d24` | `complete` | No repository writes | [Round 1](./ROUND-1-REVIEW.md) and [candidate delta](./CANDIDATE-DELTA-REVIEW.md) complete; A1–A3 prepared |
-| `AI7 V2 架构设计（Issue #4）` | `01a022de-f781-7d31-9a77-c3ce9ee1ce50` | Worker | `docs/4-v2-architecture-candidate@c383afd` / `worktrees/1649` | `starting-a1` | Its branch only | Decision-ready A1 product-consistency contract, then pause at the owner-choice gate |
-| `AI7 V2 反方审查（只读）` | `01a022df-0d69-7173-ab31-679038c1f446` | Reviewer | read-only `c383afd` / `worktrees/1be4` | `charter-only` | No repository writes | Independent challenge charter now; exact-head hostile review only after a coherent V2 candidate exists |
+| `Architecture Reviewer — Prepare V2 Exploration` | `01a02278-cdc5-7c81-a08d-490b8b76bc26` | Reviewer | read-only `main@c8cbe26` / `worktrees/1d24` | `exploring` | No repository writes | [Round 1](./ROUND-1-REVIEW.md) and [candidate delta](./CANDIDATE-DELTA-REVIEW.md) complete; A1–A3 prepared |
+| `AI7 V2 架构设计（Issue #4）` | `01a022de-f781-7d31-9a77-c3ce9ee1ce50` | Worker / T3-par | `docs/4-v2-architecture-candidate@c383afd` / `worktrees/1649` | `exploring` | Its branch only | Decision-ready A1 product-consistency contract, then pause for Commander review |
+| `AI7 V2 反方审查（只读）` | `01a022df-0d69-7173-ab31-679038c1f446` | Reviewer / T3 charter | read-only `c383afd` / `worktrees/1be4` | `preparing` | No repository writes | Independent challenge charter now; a later exact-head verdict requires a T3-par Reviewer after a coherent V2 candidate exists |
 
 The function labels “Architecture Reviewer” and “V2 Hostile Architecture Reviewer” do not create a fourth repository role. Both are independent Reviewer assignments under ADR 0015. The V2 architecture designer remains a Worker even when exercising Chief Architect responsibilities.
 
@@ -38,7 +38,7 @@ The function labels “Architecture Reviewer” and “V2 Hostile Architecture R
 
 ## V2 dispatch boundary
 
-The exact dispatch is recorded in [V2-DISPATCH.md](./V2-DISPATCH.md). The design Worker starts with A1 only. A2 remains blocked on stable A1 invariants and the recorded owner choice; A3 remains blocked on A1 and A2. The hostile Reviewer is active only to establish an independent rubric and must then report `WAITING_FOR_CANDIDATE`.
+The exact dispatch is recorded in [V2-DISPATCH.md](./V2-DISPATCH.md). The design Worker starts with A1 only. A2 remains blocked on stable A1 invariants but not on the owner's exact parity/support choice; that choice gates canonical product promises and the coherent candidate. A3 remains blocked on A1 and A2. The hostile Reviewer is active only to establish an independent rubric and must then stop until the Commander supplies a coherent candidate.
 
 ## Candidate fork inputs
 
@@ -80,9 +80,9 @@ The Commander must preserve both lines as candidate/evidence-only unless the own
 
 1. Keep `c383afd2fdb5f08342cde277b7babced6c1207fc` as the immutable control/packet authority and both frozen legacy branches local and noncanonical.
 2. Let the Issue #4 Worker complete A1 from the sealed packet, commit locally, and stop at the owner-choice gate.
-3. Review the exact A1 head and present only the decision-ready platform consistency choices to the owner.
-4. Authorize A2 exact Harness composition and then A3 truthful isolation only through explicit Commander follow-ups after their dependencies are satisfied.
-5. Let the hostile Reviewer finish its charter and wait. Supply an exact base/head/diff/evidence brief only after the Commander declares one V2 candidate coherent.
+3. Review the exact A1 head, confirm its invariant list, and present only the decision-ready platform consistency choices to the owner.
+4. Authorize A2 exact Harness composition after A1 invariants are stable even if the owner choice remains pending; authorize A3 truthful isolation after A1 and A2. The owner choice is required before exact parity/support becomes canonical or the candidate becomes coherent.
+5. Let the hostile Reviewer finish its T3 charter and stop. Supply an exact base/head/diff/evidence brief only after the Commander declares one V2 candidate coherent, and run that verdict at T3-par or higher.
 6. Do not begin implementation planning or issue decomposition without separate owner authorization.
 
 The old lines do not need to finish every originally planned document before architecture exploration can advance.
