@@ -1,6 +1,8 @@
 # Consume a pinned subset of Harness packages
 
-Status: **accepted; platform package and sandbox consequences are extended by ADR 0027**
+Status: **accepted**
+
+Note: ADR 0027 extends the platform package and sandbox consequences without changing the accepted exact-pin subset strategy.
 
 AI7 consumes DeepSeek Harness as exactly pinned public npm packages rather than forking the monorepo or vendoring source. The registry carries a trap that makes how AI7 pins the decisive part of the decision: dist-tags are not coherent admission signals. As verified on 2026-08-21, most sampled AI7-relevant packages still expose `latest = 0.0.1-rc.1` while `next = 0.1.0-rc.8`; `dsh-agent-loop` instead exposes `latest = 0.1.0-rc.6`. Pins are therefore exact versions with a committed lockfile and integrity hashes, one coherent version across the selected subset, never a range, dist-tag, or release name. The audited revision `0.1.0-rc.5` was never published, so `0.1.0-rc.6` remains the accepted consumed baseline while the audited commit is retained separately as provenance; design documents must not imply the two are one artifact. That baseline is not implementation-ready until Phase 0 identifies the candidate subset and audits the rc.5-to-rc.6 delta across its exact closure and AI7 seams. Native installed-closure and ABI proof belongs in separately authorized disposable audit environments on Windows and macOS, not in this design repository. Upstream now has Git tags and GitHub pre-releases for rc.7 and rc.8; neither is adopted and either may enter only through the pin-bump contract below. AI7 tracks tags/releases and commits together with npm versions/dist-tags because no one channel is admission authority.
 

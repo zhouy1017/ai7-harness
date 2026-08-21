@@ -1,6 +1,8 @@
 # Verify on one Windows gate and defer additional tiers
 
-Status: **superseded by ADR 0027 for required-platform evidence; provider-free and concise-workflow constraints remain accepted**
+Status: **superseded by ADR 0027**
+
+Note: ADR 0027 supersedes the required-platform evidence topology. The provider-free and concise-workflow constraints remain accepted.
 
 The superseded Windows-only form used two GitHub Actions workflows, `pr` and `release`, both running a single job on `windows-2025`. At that time Windows was the only target platform and therefore the only place required evidence was produced. `pr` was the sole required gate: unfiltered, cancel-on-supersede, format plus typecheck/build plus provider-free unit and contract tests plus one assembled mock-provider replay, with ten minutes as an unmeasured calibration target. `release` built the Windows package once on a `v*` tag and proved install, launch, canonical journey, and uninstall against that exact package, failing closed without a green `pr` run for the same source SHA. Focused verification remained a local command with no workflow and no promotion authority; Provider Rehearsal remained local, opt-in, credential-bearing, and never gating. ADR 0027 supersedes the single-Windows-job topology and leaves the concise two-platform evidence shape open.
 

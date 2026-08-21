@@ -1,6 +1,8 @@
 # Run an Electron shell with an isolated AI7 service process
 
-Status: **accepted core on Windows and macOS; exact macOS IPC remains proposed under ADR 0027**
+Status: **accepted**
+
+Note: The exact macOS IPC remains open under ADR 0027; the core three-process and no-TCP topology remains accepted.
 
 AI7 ships as an Electron application over three processes. Electron main is a thin shell owning window lifecycle, file pickers, the single-instance lock, data-root resolution, and the sync-root warning. The renderer holds the AI7 UI and editor with context isolation enabled and Node integration disabled. A separate Node process hosts AI7 domain services and the composed Harness runtime, and that process is the one local AI7 authority. Electron is chosen because AI7 is TypeScript and Node and Harness is Node, so a Node runtime ships regardless. Electron 43.4.0 bundling Node 24.18.1 demonstrates feasibility against the Harness engine requirement, but it is not a durable release pin; scaffold-time selection must choose a then-supported Electron version and recheck Harness and native-module ABI on Windows and macOS. Tauri would add a Rust toolchain while still needing a Node sidecar, since Harness cannot run in Rust — two runtimes to avoid one — and native webview hosting means writing platform glue for a problem Electron already solves.
 

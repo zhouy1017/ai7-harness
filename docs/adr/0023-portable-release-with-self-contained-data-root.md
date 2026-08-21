@@ -1,6 +1,8 @@
 # Ship portable and installer channels with a self-contained data root
 
-Status: **accepted for Windows; macOS distribution and data-root policy are opened by ADR 0027**
+Status: **accepted**
+
+Note: This ADR defines the accepted Windows channels; macOS distribution and data-root policy remain open under ADR 0027.
 
 AI7 ships two Windows channels, a zip portable folder and an NSIS installer, produced by the same builder from the same source so that neither is a separate product. The portable channel is the reason this Windows design exists: the intended users are publishing professionals on managed corporate machines, and needing no admin rights, no registry writes, and no IT ticket removes a real adoption gate. The predecessor shipped portable builds for the same audience, and dropping the embedded Python interpreter makes the folder substantially smaller. The installer serves users who simply expect one. This revises the original decision, which shipped portable only and deferred an installer until a concrete need appeared. ADR 0027 does not copy this channel shape to macOS; its native package, update, mutable-data, signing, and notarization design remains open.
 

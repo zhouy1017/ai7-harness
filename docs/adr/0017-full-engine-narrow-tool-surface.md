@@ -1,6 +1,8 @@
 # Compose the full Harness engine behind a narrow tool surface
 
-Status: **accepted; its absolute Agent Data Root enforcement claim is unproven and reopened by ADR 0027**
+Status: **accepted**
+
+Note: Agent Data Root OS-enforcement evidence remains open; AI7 capability and service facades are the only currently proven enforceable product boundary.
 
 AI7 composes the complete Harness behavior engine — planning, context assembly, tool pipeline, subagents, workflows, sessions, replay, and snapshots — while an editorial Run never receives the generic coding-agent tool surface of shell, roaming filesystem, and arbitrary network. "Full capability" and least privilege conflict only when the engine is confused with the tool surface. The governing reason is the user: a literature professional cannot assess whether a proposed action is safe, so the product must never ask them to authorize one. Capability decisions belong to AI7's composition rather than to a runtime prompt that delegates expert judgment to someone without the basis to exercise it, and every capability an editor sees is expressed in editorial terms rather than in processes, paths, or endpoints.
 

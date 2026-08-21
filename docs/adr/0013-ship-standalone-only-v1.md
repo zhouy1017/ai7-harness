@@ -1,5 +1,7 @@
 # Ship a Standalone-only V1 and defer Word integration
 
-Status: **accepted; its Windows-only platform clause is superseded by ADR 0027**
+Status: **accepted**
+
+Note: Its Windows-only platform clause is superseded by ADR 0027; the Standalone-only decision remains accepted.
 
 AI7 V1 was accepted here as a Chinese-first Windows Standalone desktop product; ADR 0027 later expands the supported product to Windows and macOS without changing the Standalone-only decision. Microsoft Word integration is excluded from V1: it creates no cross-surface-parity, COM-add-in, Word-specific protocol, packaging, CI, or release-gate obligation, and neither legacy UI is a migration baseline. Professional long-form editing in Standalone is release-critical and must pass an evidence-backed Standalone Editing Sufficiency Gate against representative publishing workflows on every supported platform. Failure does not authorize a Word add-in; it triggers diagnosis of editor, document-conversion, or genuinely Word-dependent workflow gaps. Word may enter a later release only through a separate ADR that names the unmet workflow, shows live Word integration is the proportionate remedy, and defines its authority, binding, synchronization, packaging, and verification boundary.

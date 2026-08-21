@@ -19,7 +19,7 @@ For recent history read `handoff20260817/SESSION-HANDOFF.md`.
 
 State: the 36-question design interview is COMPLETE, but a later accepted
 Windows-and-macOS target revision reopened Phase 0. The current exit review did
-not pass. There are 27 ADRs, 37 numbered design notes, three domain contexts, and
+not pass. There are 27 ADRs, 38 numbered design notes, three domain contexts, and
 two policy documents. There is NO CODE — no package.json, no dependencies, no CI
 workflows. That is the expected state, not a gap to fill.
 

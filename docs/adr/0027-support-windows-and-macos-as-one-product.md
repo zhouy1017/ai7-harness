@@ -1,6 +1,8 @@
 # Support Windows and macOS as one AI7 product
 
-Status: **platform target accepted on 2026-08-21; consistency contract and platform mechanics remain proposed; supersedes the Windows-only clauses of ADRs 0013, 0014, 0023, and 0024**
+Status: **accepted**
+
+Note: The exact consistency contract and native platform mechanics remain open. This ADR supersedes the Windows-only clauses of ADRs 0013, 0014, 0023, and 0024.
 
 AI7 V1 targets Windows and macOS as a Chinese-first Standalone desktop product and must maintain what the owner called a “consistent product outlook.” This supersedes the earlier Windows-only target. The exact consistency boundary is not yet accepted: the current recommendation is one AI7 identity, renderer and visual system, information architecture, core feature set, workflows, domain and authority semantics, document fidelity contract, and release version, while allowing explicit and tested native differences in menus, shortcuts, dialogs, accessibility behavior, filesystem locations, secret stores, local IPC, packaging, signing, and security prompts. That recommendation must not be treated as accepted through silence.
 
