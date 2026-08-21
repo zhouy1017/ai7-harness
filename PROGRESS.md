@@ -195,10 +195,11 @@
 - **Applied the Project Commander design freeze.** Added `kick-in/37-v1-platform-freeze-handoff.md` for base `c8cbe26` and branch `docs/1-windows-macos-phase0`, marked this artifact candidate/reference rather than canonical or v2, recorded reusable assets, v2-sensitive assumptions, migration costs, the noncanonical UI-branch dependency, and every unresolved risk. No further architecture choice was made.
 - **The pre-commit T3 review passed, but a later exact-head audit superseded that confidence.** The exact review bound to `23df3c8` found three documentation-consistency issues: the Agent Data Root definition overclaimed current enforcement, the kickoff count was one note short, and eight ADR status fields used compound prose outside the prescribed vocabulary. Review was same-provider, so independence was explicitly reduced; no reviewer edited the branch.
 - **Applied only the Commander-authorized exact-head corrections.** The Agent Data Root is now an intended directory rather than a claimed OS boundary, the kickoff reports 38 notes, and the eight ADR statuses use only `accepted` or `superseded by ADR 0027` with their unchanged qualifications in immediately following notes. Focused status, term-owner, count, active-link, and `git diff --check` checks pass.
+- **Reviewed exact head `16a6ff1`; the review failed only on this stale checkpoint.** Spec passed with zero findings. Standards found only that `What's next` still instructed the next agent to create the corrective commit that `16a6ff1` already was. No design, Phase 0, or prohibition finding remained, and the reviewers made no changes.
 
 ## What's next
 
-- Create one local corrective commit, then run fresh independent exact-head T3 Standards and Spec review from `c8cbe26` to that immutable head. Stop without editing on any finding; on a clean pass, return the frozen candidate to the Project Commander without pushing or opening a PR.
+- Run a fresh independent exact-head T3 Standards and Spec review from `c8cbe26` to the immutable head containing this checkpoint correction as the Commander freeze audit. Stop without editing on any finding; on a clean pass, return the frozen candidate to the Project Commander without pushing or opening a PR.
 - Then resolve macOS minimum version/architectures, package/update/data-root model, Apple signing/notarization, protected credentials and transfer, the smallest concise two-platform `pr`/`release` topology, and per-platform Agent Data Root enforcement or an explicit revision of that promise.
 - Complete the formal rc.5-to-rc.6 Harness candidate-package/seam audit before Phase 0 exit or implementation. Any installed-closure and ABI proof requires separately authorized disposable Windows and macOS audit environments; consider rc.7 or rc.8 only through the accepted pin-bump process.
 - Keep Word vocabulary and implementation outside the active V1 domain; reconsider it only through a later proportional-remedy ADR after failure of the Standalone Editing Sufficiency Gate.
@@ -289,4 +290,4 @@
 
 ## Resume Prompt
 
-Resume by running the fresh independent exact-head T3 Standards and Spec review from `c8cbe26` to the local corrective commit; stop at any finding and make no post-review change.
+Resume by running the Commander freeze audit: fresh independent exact-head T3 Standards and Spec review from `c8cbe26` to the immutable head containing this checkpoint correction; stop at any finding and make no post-review change.
