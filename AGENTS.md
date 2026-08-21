@@ -113,6 +113,10 @@ At session start, read `PROGRESS.md` if it exists. After each sub-task, update i
 
 `AGENTS.md` is the canonical shared instruction file. Keep root `CLAUDE.md` as the single line `@AGENTS.md`; put shared context here, not in `CLAUDE.md`.
 
+### Multi-session architecture work
+
+Architecture and design forks follow [`docs/agents/multi-session-design-workflow.md`](docs/agents/multi-session-design-workflow.md). `main` remains the only canonical design line; task branches, prototypes, reviews, and freeze handoffs are candidate evidence until explicit owner acceptance and Commander integration. One writing task owns one branch/worktree, frozen legacy tasks add no new assumptions, and new architecture work consumes Commander-curated conclusions rather than legacy task transcripts. Current coordination state lives in [`docs/architecture-exploration/CONTROL.md`](docs/architecture-exploration/CONTROL.md).
+
 ## Agent skills
 
 ### Issue tracker
