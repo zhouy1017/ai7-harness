@@ -15,6 +15,7 @@ This is a repository-development dispatch record, not a product architecture dec
 - Evidence inventory: [PACKET-MANIFEST.md](./PACKET-MANIFEST.md)
 - Later owner direction and external evidence: [Codex-First V2 Harness Directive](./CODEX-HARNESS-DIRECTIVE.md)
 - Commander-owned owner resolution: [Clarification 0001 — Codex and DeepSeek Harness production roles](./clarifications/0001-primary-agent-harness-role.md)
+- Commander-owned gap-resolution threshold: [Clarification 0002 — Codex gap closure and DeepSeek runtime re-entry](./clarifications/0002-codex-gap-closure-and-dsh-reentry.md)
 
 ## Design Worker
 
@@ -42,6 +43,8 @@ For each residual choice, the Worker records one entry with the exact question, 
 The Commander writes the exact question, answer, acceptance status, provenance, interpretation, and canonical-integration boundary into an immutable record under `docs/architecture-exploration/clarifications/`. The Worker receives an exact Commander commit and path, consumes that Git object rather than a transcript, cites it, and writes the resulting candidate `CONTEXT.md`, glossary, qualifying ADR disposition, and architecture changes on its own branch. A decision becomes an ADR only when it is hard to reverse, surprising without context, and the result of a real trade-off. Until that exact resolution is supplied, the affected design path stops while unrelated evidence work may continue.
 
 Clarification 0001 resolves one branch now: if A2 proves Codex Harness Capability Closure, Codex is the only Primary Agent Harness and DeepSeek Harness is a Development Reference Framework with no production dependency or fallback role. It does not claim closure and does not authorize A2 before the A1 gate.
+
+Clarification 0002 resolves the failed-closure threshold: a Codex gap is handled first through verified, costed Codex secondary development. DeepSeek may re-enter runtime comparison only when Codex lacks the exact capability and an exact DeepSeek surface proves a mature substitute; even then it requires comparison and a new owner choice, never automatic fallback. The exact Codex adapter/upstream/patch/fork form remains open.
 
 ## Hostile Reviewer
 

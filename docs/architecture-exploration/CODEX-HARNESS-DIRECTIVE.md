@@ -24,6 +24,14 @@ In that outcome, DeepSeek contributes development rules, architecture and compos
 
 The vendor-neutral candidate terms and their preferred Chinese labels are defined in the exact clarification record for the Worker to place in its owning candidate context and glossary. This resolution is a V2 candidate input, not proof that Codex has passed A2 and not a direct edit to canonical V1 context or ADRs.
 
+## Owner resolution: capability-gap closure order
+
+The owner also accepted [Clarification 0002](./clarifications/0002-codex-gap-closure-and-dsh-reentry.md). A missing Codex capability does not make DeepSeek the default remedy. AI7 first verifies that the gap is real, then prefers low-cost secondary development on the open Codex base while retaining one production loop.
+
+DeepSeek may return to runtime comparison only when an exact Codex Capability Gap and an exact Mature Runtime Alternative in DeepSeek are both proven. This is a re-evaluation gate, not selection or fallback authority. A2 must compare the cost and risk of Codex secondary development with the DeepSeek alternative and return any residual runtime choice to the owner.
+
+The exact Codex maintenance form—external adapter or extension, upstream contribution, maintained patch set, or fork—remains open. No source modification or implementation is authorized during this design phase.
+
 ## Verified source basis
 
 ### Official OpenAI platform article
@@ -78,8 +86,9 @@ Codex Thread/Turn/Item records and DeepSeek Harness Session events are never AI7
 
 1. Codex app-server as the preferred embedded-product candidate.
 2. Codex SDK or `codex exec` only for bounded programmatic/background roles where their reduced lifecycle surface is sufficient.
-3. DeepSeek Harness `0.1.0-rc.6` as the alternative agent runtime and composition candidate only if Codex fails a load-bearing closure criterion and the owner explicitly reopens the runtime choice.
-4. A mixed design only if Codex fails closure and a later owner decision accepts a composition that proves mutually exclusive responsibilities, one AI7 scheduling/effect authority, and no second implementation of the agent loop. Under Clarification 0001, a Codex-closed design has no DeepSeek production component.
+3. Codex secondary development for verified gaps, with the exact adapter/upstream/patch/fork maintenance form still requiring a separate disposition.
+4. DeepSeek Harness `0.1.0-rc.6` as an alternative runtime candidate only after both an exact Codex Capability Gap and a Mature Runtime Alternative in DeepSeek are proven and the owner explicitly reopens the runtime choice.
+5. A mixed design only after the same re-entry gate and a later owner decision accepts a composition that proves mutually exclusive responsibilities, one AI7 scheduling/effect authority, and no second implementation of the agent loop. Under Clarification 0001, a Codex-closed design has no DeepSeek production component.
 
 **Required evidence and dispositions:**
 
@@ -95,6 +104,7 @@ Codex Thread/Turn/Item records and DeepSeek Harness Session events are never AI7
 - application-owned MCP/capability facade, Run Source Scope, per-Book isolation, concurrency, scratch/cache separation, and narrow tool surface;
 - UX event semantics needed by the AI7 desktop without inheriting Codex branding or coding-agent assumptions;
 - explicit Keep/Adapt/Reject/Spike disposition for both Codex and DeepSeek surfaces.
+- per-gap proof, Codex secondary-development design and lifecycle cost, DeepSeek maturity proof where claimed, and an auditable application of the gap-closure ladder.
 
 **Exit:** select one execution-loop authority, or document a provably non-overlapping composition; prove, reject, or spike every relied-on seam; and provide the exact executable/process/tool/network surface that A3 must attack.
 
