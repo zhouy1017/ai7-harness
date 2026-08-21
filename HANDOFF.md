@@ -20,6 +20,7 @@ Nothing here is a stub waiting to be filled in. If you are looking for code, the
 | --- | --- | --- |
 | 1 | `AGENTS.md` | **Canonical standing rules.** Everything binding is here or linked from here |
 | 2 | `handoff20260817/PROJECT-OVERVIEW.md` | The whole design in one pass — vision, domain, architecture, what is excluded, what is open |
+| 2b | `handoff20260817/SESSION-HANDOFF.md` | Recent history: what the last session decided, which recommendations the owner overrode, and which agent errors were corrected |
 | 3 | `PROGRESS.md` | What has been done, what is next, and the Resume Prompt |
 | 4 | `kick-in/05-decision-map.md` | All 36 questions with their accepted answers |
 | 5 | `docs/adr/` | The 26 hard-to-reverse decisions, one per file |
