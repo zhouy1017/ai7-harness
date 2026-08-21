@@ -209,12 +209,14 @@
 - The read-only hostile Reviewer completed its T3 Challenge Charter after re-verifying all 51 manifest mappings. It returned candidate admission criteria, eighteen attack domains with falsification questions, P0–P3 Standards/Spec finding protocol, contamination/no-verdict rules, and exact-head invalidation. It made no V2 finding or verdict, changed no repository/external state, and stopped until a coherent candidate receives a T3-par review brief.
 - Verified the 2026-08-19 OpenAI platform article and `openai/codex` research snapshot `main@44e95c857f37f81a5731eab72c32a3d334d0e2c4`. The evidence supports app-server as the leading embedded-product integration surface, application ownership of business/UI concerns, Apache-2.0 plus `NOTICE`, and a distinction between the TypeScript SDK's CLI wrapper and app-server's richer lifecycle protocol.
 - Sent the active Issue #4 Worker a new owner directive without expanding its current A1 turn: AI7 remains the product/domain authority; Codex becomes the preferred future harness candidate; DeepSeek Harness becomes comparative; Codex Desktop-like remains a UX reference rather than a copied UI framework; revised A2 must prevent a second agent loop. Added `docs/architecture-exploration/CODEX-HARNESS-DIRECTIVE.md` and updated the durable dispatch/control surfaces.
+- Adopted the owner's ambiguity protocol using the available `grill-with-docs` skill. The V2 Worker must route every load-bearing uncertainty through a structured decision-queue entry instead of inferring; the Commander interviews the owner one question at a time, updates resolved domain language immediately, and creates an ADR only for a hard-to-reverse, surprising, genuine trade-off.
 
 ## What's next
 
 - Monitor the A1 design Worker through compact snapshots; it must complete A1, commit locally, and stop. Keep the completed hostile-charter task idle until a coherent candidate exists.
 - Use only the sealed packet for inherited V1/candidate context and A1 architecture evidence; do not copy task transcripts or read active Worker worktrees. Later A2/A3 evidence must be separately authorized, exact, and provenance-labeled.
 - Review the exact A1 head, confirm its stable invariants, then present the platform consistency/support options to the owner without silently resolving them.
+- Use `grill-with-docs` for each load-bearing ambiguity surfaced by A1/A2/A3; do not batch questions or let a Worker choose for the owner.
 - Authorize revised A2 Codex-first harness selection and composition closure once A1 invariants are stable, even if the owner choice is pending; keep DeepSeek Harness as the comparison candidate and authorize A3 only after A2 exposes the selected runtime surface. Later direct evidence and probes must be separately scoped, exact, and provenance-labeled.
 - Send a T3-par-or-higher hostile Reviewer an exact base/head/diff/evidence brief only after a coherent V2 candidate exists. Implementation planning and issue decomposition remain unauthorized until separate owner approval.
 
@@ -304,7 +306,8 @@
 - The Issue #4 Worker owns candidate writing. A1, A2, and A3 are dependency-gated phases inside the architecture issue, not permission to run all exploration at once.
 - Owner acceptance after A1 gates exact parity/support becoming canonical, not read-only noncanonical A2/A3 evidence exploration. The hard Reviewer floor applies to the eventual candidate verdict, so the T3 charter session must be rebound or redispatched at T3-par or higher for that turn.
 - The 2026-08-21 V2 direction is AI7-owned, Codex-first, and DeepSeek-comparative. Codex harness is a preferred technical candidate and Codex Desktop-like is an interaction reference; neither is permission to inherit coding defaults, copy UI implementation/branding, couple AI7 domain authority to execution approvals, or run two overlapping agent loops.
+- Ambiguous architecture language is an explicit decision state, not permission for an agent to infer. `grill-with-docs` supplies the owner interview and domain-modeling discipline; exact answers, not transcripts, flow back into V2 artifacts.
 
 ## Resume Prompt
 
-Resume as Project Commander: monitor the Issue #4 A1 Worker, ensure its handoff records the Codex-first owner directive without entering A2, review A1 at its exact local head, then authorize a Codex-first/DeepSeek-comparative A2 while reserving the final hostile verdict for T3-par or higher.
+Resume as Project Commander: monitor the Issue #4 A1 Worker, route its first load-bearing ambiguity through `grill-with-docs` one question at a time, ensure the handoff records the Codex-first directive without entering A2, then review the exact A1 head before authorizing A2.

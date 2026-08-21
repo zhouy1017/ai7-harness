@@ -30,6 +30,14 @@ The Worker reads `PROGRESS.md` only for operational status. Inherited V1/candida
 
 The 2026-08-21 owner directive changes the future A2 working premise from DeepSeek-only to AI7-owned, Codex-first, and DeepSeek-comparative. The current A1 turn records that supersession and the revised phase gate but does not select or implement an integration.
 
+## Clarification protocol
+
+When an ambiguity could change product scope, platform promises, AI7/Codex/DeepSeek ownership, the single execution authority, Policy or Effect authority, privacy/data boundaries, UI business semantics, or A2/A3 evidence scope, the Worker must not infer an answer.
+
+The Worker records one decision-queue entry with the exact question, why it is load-bearing, exact evidence, two or three mutually exclusive options, its recommended answer, and the failure caused by leaving it vague. The Commander then uses `grill-with-docs`—one question at a time—to resolve it with the owner.
+
+Resolved domain terms are written immediately to the owning `CONTEXT.md` and bilingual glossary index. A decision becomes an ADR only when it is hard to reverse, surprising without context, and the result of a real trade-off. Until an exact owner resolution is returned, the affected design branch stops while unrelated evidence work may continue.
+
 ## Hostile Reviewer
 
 - App task: `AI7 V2 反方审查（只读）`
