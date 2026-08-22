@@ -1,6 +1,6 @@
 # A2 Codex-first capability-closure dispatch
 
-Status: **corrected A2 head `dcbd437` awaiting fresh exact-head T3-par review**
+Status: **`dcbd437` failed exact-head review; bounded execution-contract correction authorized**
 
 This is a repository-development dispatch record, not canonical product architecture and not implementation authorization.
 
@@ -21,6 +21,8 @@ Claude Haiku/T1 session `fb73bf3a-2d6b-40fb-8d83-1aaad14beccc` completed the fir
 The required review then failed on closed-set completeness, continuation authority, license-evidence scoring, DeepSeek disposition, traceability/checkpoint wording, and commit-subject form. [A2 exact-review rework dispatch](./A2-REWORK-DISPATCH.md) is the only active correction authority. It does not alter the original A2 question, admit new sources, or authorize A3.
 
 That correction completed at `dcbd4375e8f230e7620065a714b6ab5248d4241b` through the same-class GPT-5.6 Sol / `xhigh` fallback. The returned matrix has 44 rows / 43 load-bearing, `0 Proven / 15 Candidate / 2 Experimental / 26 Unknown / 1 Not applicable`, and zero gap classes. Commander mechanical checks passed; only fresh independent exact-head review may clear it. A3 remains blocked.
+
+Fresh review failed `dcbd437` on the distinct Execution Binding/Harness Execution Span contract, per-execution authority binding, dual capability enforcement, evidence claim mapping, and three bounded current-state/traceability statements. [A2 execution-contract review rework dispatch](./A2-CONTRACT-REWORK-DISPATCH.md) is now the only correction authority. It preserves all 44 rows, dispositions, totals, evidence sources, and non-closure/no-gap/DeepSeek/A3 boundaries.
 
 ## Question A2 must answer
 

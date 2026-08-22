@@ -3,7 +3,7 @@
 Status: **active**
 Commander issue: [#3 — Freeze v1 design and prepare v2 architecture exploration](https://github.com/zhouy1017/ai7-harness/issues/3)
 V2 architecture issue: [#4 — Design the AI7 V2 architecture candidate](https://github.com/zhouy1017/ai7-harness/issues/4)
-Last updated: **2026-08-22**
+Last updated: **2026-08-23**
 
 This file records repository-development coordination only. It is not an AI7 product workflow or a replacement for the canonical architecture.
 
@@ -22,7 +22,7 @@ This file records repository-development coordination only. It is not an AI7 pro
 | `Worker — Freeze V1 UI UX` | `01a02240-c432-7600-8fdf-008858cae447` | Worker | `docs/2-ai7-ui-ux@587d645` / `worktrees/062a` | `frozen` | Its branch only | Reviewed local V1 UI/UX reference; candidate/evidence-only assets |
 | `Worker — Freeze V1 Platform and Phase 0` | `01a005a7-019f-7203-ba38-2a367a667db8` | Worker | `docs/1-windows-macos-phase0@9606891` / saved-project checkout | `frozen` | Its branch only | Reviewed local V1 platform/Q16/Phase-0 reference; Phase 0 remains NOT PASSED |
 | `Architecture Reviewer — Prepare V2 Exploration` | `01a02278-cdc5-7c81-a08d-490b8b76bc26` | Reviewer | read-only `main@c8cbe26` / `worktrees/1d24` | `exploring` | No repository writes | [Round 1](./ROUND-1-REVIEW.md) and [candidate delta](./CANDIDATE-DELTA-REVIEW.md) complete; A1–A3 prepared |
-| `AI7 V2 架构设计（Issue #4）` | A1/A2 sessions recorded below; correction Worker `/root/a2_review_rework_t3` | A1 completed; A2 Worker / T3 exact-review correction | `docs/4-v2-architecture-candidate@dcbd437` / `worktrees/1649` | `awaiting fresh exact-head T3-par Standards and Spec review` | All candidate Workers stopped; exact head read-only | Review `b507617...dcbd437`; preserve corrected 44-row non-closure, no-gap/DSH/A3 boundaries |
+| `AI7 V2 架构设计（Issue #4）` | A1/A2 sessions recorded below; next correction binding pending | A1 completed; A2 Worker / T3 contract correction | `docs/4-v2-architecture-candidate@dcbd437` / `worktrees/1649` | `review failed; bounded correction authorized` | One exclusive Worker only after exact-head verification | Apply [A2 contract rework](./A2-CONTRACT-REWORK-DISPATCH.md); preserve 44-row non-closure, no-gap/DSH/A3 boundaries |
 | `AI7 V2 反方审查（只读）` | `01a022df-0d69-7173-ab31-679038c1f446` | Reviewer / T3 charter | read-only `c383afd` / `worktrees/1be4` | `preparing` | No repository writes | Challenge charter complete and task stopped; a later exact-head verdict requires a T3-par Reviewer after a coherent V2 candidate exists |
 
 The function labels “Architecture Reviewer” and “V2 Hostile Architecture Reviewer” do not create a fourth repository role. Both are independent Reviewer assignments under ADR 0015. The V2 architecture designer remains a Worker even when exercising Chief Architect responsibilities.
@@ -45,6 +45,7 @@ The function labels “Architecture Reviewer” and “V2 Hostile Architecture R
 - Preferred eligible-Worker binding: **Claude Code, same task class**.
 - Current observed availability: Claude Code `2.1.228` and the requested Claude bindings completed earlier eligible turns; A2 evidence-sync Haiku completed its first pass, but the same session's resume then returned HTTP 429 `You've hit your session limit · resets 2am (Asia/Shanghai)`.
 - Current fallback: **one observed same-class fallback**. The A2 evidence-sync task stayed Worker/T1 and moved from requested Claude Haiku 4.5 / low to GPT-5.6 Luna / medium only after that exact quota-exhaustion response.
+- Reset-sensitive next action: the quoted reset time has passed. The next eligible T3 correction must make a real Claude Opus attempt; yesterday's quota response cannot justify an immediate fallback.
 - Required future entry: task/branch, role and class, requested binding, actual provider/model/effort, availability or quota outcome, exact fallback reason, and reviewer independence.
 
 | Date | Task / branch | Role / class | Requested binding | Actual binding | Availability / quota | Fallback / reason | Review |
@@ -55,6 +56,7 @@ The function labels “Architecture Reviewer” and “V2 Hostile Architecture R
 | 2026-08-22 | A2 Codex-first capability closure / `docs/4-v2-architecture-candidate` | Worker / T3; returned candidate review floor T3-par | Claude Code / `claude-opus-5` / high; session `92ea5b6f-d0b3-45b8-90a3-804f9a4702e2` | Anthropic Claude Opus 5 / `claude-opus-5` / high; CLI also reported internal Haiku 4.5 usage | Available; completed successfully; CLI reported `$8.4924905` total | None — requested primary binding satisfied; auxiliary metering was not fallback | `Closure not proven` authored at `756f2f9`; 40 rows and no gaps; later evidence sync finalized the same A2 commit at `4cd8250`; T3-par review pending |
 | 2026-08-22 | A2 Commander-probe evidence sync / `docs/4-v2-architecture-candidate` | Worker / T1 exact, mechanically verifiable correction; A2 review floor remains T3-par | Claude Code / `claude-haiku-4-5-20251001` / low; session `fb73bf3a-2d6b-40fb-8d83-1aaad14beccc` | First pass: Anthropic Claude Haiku 4.5 / low; completion fallback: GPT-5.6 Luna / medium, Worker `/root/a2_probe_sync_fallback` | Haiku first pass completed and reported `$0.3161163`; resume returned HTTP 429 session limit and reported `$0.1652621` incremental cost | Same-class fallback after observed quota exhaustion: `You've hit your session limit · resets 2am (Asia/Shanghai)` | Sync complete at `4cd8250`; Commander verified exact parent/two-commit/seven-path/clean-tree boundary, 40 rows, 21 Unknowns, no gap, unchanged verdict; T3-par review pending |
 | 2026-08-22 | A2 exact-review architecture correction / `docs/4-v2-architecture-candidate` | Worker / T3; candidate review floor remains T3-par | Claude Code / `claude-opus-5` / high | GPT-5.6 Sol / `xhigh`; Worker `/root/a2_review_rework_t3` | Known exhausted quota window; no repeat Claude attempt before reset evidence; completed successfully | Same-class fallback required by the observed HTTP 429 session-limit response; no task-class downgrade | Corrected head `dcbd437`; Commander verified exact parent/two-commit/seven-path/clean-tree boundary, 44 rows, 26 matched Unknowns, two Experimentals, no gap, lowercase subject; fresh review pending |
+| 2026-08-23 | A2 execution-contract review correction / `docs/4-v2-architecture-candidate` | Worker / T3; candidate review floor remains T3-par | Claude Code / `claude-opus-5` / high | Pending real post-reset attempt | Pending | Fallback prohibited unless this attempt observes unavailability or exhaustion; then same-class GPT-5.6 Sol / `xhigh` | `dcbd437` review failed on binding/span separation, per-execution state, dual guards, traceability, and current-state wording; correction authorized |
 
 ## V2 dispatch boundary
 
@@ -102,7 +104,7 @@ The Commander must preserve both lines as candidate/evidence-only unless the own
 1. Keep `c383afd2fdb5f08342cde277b7babced6c1207fc` as the immutable control/packet authority and both frozen legacy branches local and noncanonical.
 2. Keep all four stopped A1 Worker assignments read-only at clean candidate head `b5076179a37f8d654e758ca0b4a8bdeec8caaaa5`; there is no active writer.
 3. Preserve final A1 head `b5076179a37f8d654e758ca0b4a8bdeec8caaaa5`: independent Standards and Spec both passed with zero findings, and the Commander confirms its stable invariant list. Present DQ-A1-01 one question at a time without treating any choice as already answered.
-4. Keep corrected candidate head `dcbd4375e8f230e7620065a714b6ab5248d4241b` and every A1/A2 Worker read-only. Run fresh independent T3-par Standards and Spec review over `b5076179a37f8d654e758ca0b4a8bdeec8caaaa5...dcbd4375e8f230e7620065a714b6ab5248d4241b`; A3 remains blocked.
+4. Treat exact candidate head `dcbd4375e8f230e7620065a714b6ab5248d4241b` as failed review evidence. Dispatch exactly one T3 Worker under [A2 contract rework](./A2-CONTRACT-REWORK-DISPATCH.md), attempting Claude Code first after the reset window; then stop the Worker and run fresh independent T3-par Standards and Spec review over the sealed A1 parent to the new exact head. A3 remains blocked.
 5. Keep the hostile charter task stopped. Supply a final hostile-verdict brief only after the Commander declares the full V2 candidate coherent, and run that verdict at T3-par or higher.
 6. Do not begin implementation planning or issue decomposition without separate owner authorization.
 
