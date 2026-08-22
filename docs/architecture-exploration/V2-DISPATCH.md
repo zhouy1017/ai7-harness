@@ -1,6 +1,6 @@
 # V2 Architecture Dispatch
 
-Status: **active, A1 in final bounded wording rework**
+Status: **active, corrected A1 under final exact-head review**
 
 This is a repository-development dispatch record, not a product architecture decision. All V2 outputs remain noncanonical until owner acceptance and normal integration.
 
@@ -36,6 +36,8 @@ That Claude Code Worker used the requested `claude-opus-5` high binding and comp
 Renewed Standards and Spec review passed every substantive and mechanical correction except two bounded record-identity defects: the README and candidate ADR wrongly attached the formal pending “Question 3” label to item 3 of the A2 technical-question list, while Commander owns Question 3 as the still-unanswered maintenance-policy choice; and Worker `PROGRESS.md` retained one stale “two exact post-packet owner objects” phrase without qualifying them as the two resolution objects. Claude Code session `f8248fbb-ebce-4b8c-9a2e-50602584bd41`, Worker/T1, now exclusively owns the mechanically specified correction in exactly those three existing paths and may amend the same local commit before stopping. It may not consume later Question 3/seam evidence into A1, alter any other content, enter A2/A3, or take external action. The candidate review floor remains T3-par.
 
 That Haiku session used the requested `claude-haiku-4-5-20251001` low binding without fallback and closed both review findings at `c264c716bd4e59b073abeeeb77e294ad2cb341d5`; the CLI reported `$0.4359874`. Commander pre-review then found two checkpoint-only defects introduced or left in candidate `PROGRESS.md`: its Resume Prompt prematurely says “fully reviewed” before the new exact head has a verdict, and its Key Decisions line credits Haiku only for mechanical recovery rather than both recovery and final wording correction. The same stopped session is reauthorized only for those exact one-file statements and one commit amendment. No architecture content or other path may change.
+
+The same Haiku session completed that one-file continuation without fallback at final candidate head `b5076179a37f8d654e758ca0b4a8bdeec8caaaa5`; its two passes reported `$0.7211562` total. Commander verification confirms one commit above `c383afd`, exactly the same eight-path candidate diff, a clean worktree/index, `git diff --check`, 598 Markdown links with 528 local targets and 487 anchors, 79 requirements at S60/N5/H10/E4, fourteen journeys, 21 options, I-01–I-13, and ten candidate-only choices. All Workers are stopped and the exact head is ready for final T3-par Standards and Spec review.
 
 The completed authoring turn was limited to A1 one-product consistency and UI parity: map the 79 requirements and fourteen journeys, define shared semantics versus bounded native variation, expose support/parity/accessibility/Policy-visibility options, avoid implementation mechanisms, and stop where an owner choice is required. A2 remains blocked on stable, Commander-reviewed A1 invariants, not on the owner's exact parity/support choice; that choice gates canonical product promises and the coherent candidate. A3 remains blocked on A1 and A2.
 
