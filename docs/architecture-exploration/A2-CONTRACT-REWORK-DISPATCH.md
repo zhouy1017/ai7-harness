@@ -1,6 +1,6 @@
 # A2 execution-contract review rework dispatch
 
-Status: **authorized from exact candidate head `dcbd437`; Claude-first T3 Worker attempt required; A3 and implementation remain blocked**
+Status: **Claude-first attempt returned HTTP 429; same-class GPT-5.6 Sol T3 fallback authorized from exact `dcbd437`; A3 and implementation remain blocked**
 
 This is a repository-development correction brief. It is not canonical product architecture, an owner answer, a capability-closure result, a maintenance-form choice, or implementation authority.
 
@@ -13,6 +13,7 @@ This is a repository-development correction brief. It is not canonical product a
 - Role / class: Worker / T3; the returned candidate still requires independent T3-par Standards and Spec review.
 - Required first binding attempt: Claude Code / `claude-opus-5` / high. The prior quota response named a 2026-08-23 02:00 Asia/Shanghai reset, and that window has now passed; yesterday's fallback reason cannot be reused without a new real attempt.
 - Permitted fallback: the existing same-class GPT-5.6 Sol / `xhigh` binding, only after the new Claude attempt returns an observed unavailability or exhaustion result. Record requested binding, actual binding, session/result, cost if reported, and exact downgrade reason.
+- Actual Claude result: session `1540bd4c-0b54-4454-8a5f-6b2dec2b1cc8` returned exit 1 / API HTTP 429, `You've hit your session limit · resets 2am (Asia/Shanghai)`, before model inference; the CLI reported `$0` and the candidate worktree remained unchanged and clean. The same-class GPT-5.6 Sol / `xhigh` fallback is therefore authorized; this is no task-class downgrade.
 - Every earlier candidate Worker and both Reviewers are stopped before the transfer. Exactly one Worker may write the candidate worktree.
 
 ## Exact review verdict being corrected

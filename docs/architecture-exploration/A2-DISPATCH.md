@@ -24,6 +24,8 @@ That correction completed at `dcbd4375e8f230e7620065a714b6ab5248d4241b` through 
 
 Fresh review failed `dcbd437` on the distinct Execution Binding/Harness Execution Span contract, per-execution authority binding, dual capability enforcement, evidence claim mapping, and three bounded current-state/traceability statements. [A2 execution-contract review rework dispatch](./A2-CONTRACT-REWORK-DISPATCH.md) is now the only correction authority. It preserves all 44 rows, dispositions, totals, evidence sources, and non-closure/no-gap/DeepSeek/A3 boundaries.
 
+The mandatory post-reset Claude Opus attempt returned exit 1 / API HTTP 429 before inference in session `1540bd4c-0b54-4454-8a5f-6b2dec2b1cc8`, reported `$0`, and changed nothing. The same Worker/T3 brief may therefore fall back to GPT-5.6 Sol / `xhigh`; review class and every stop boundary remain unchanged.
+
 ## Question A2 must answer
 
 Does one exact open-source Codex surface, together with narrowly named AI7-owned adapters that do not reproduce a second generic loop, satisfy every load-bearing row of **Harness Capability Closure** for AI7? If not, which rows remain unknown, experimental, gap claims, or verified **Codex Capability Gaps**?
