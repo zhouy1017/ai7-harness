@@ -1,6 +1,6 @@
 # V2 Architecture Dispatch
 
-Status: **active, A1 candidate sealed and awaiting Commander review**
+Status: **active, A1 in bounded rework after exact-head review**
 
 This is a repository-development dispatch record, not a product architecture decision. All V2 outputs remain noncanonical until owner acceptance and normal integration.
 
@@ -28,6 +28,8 @@ This is a repository-development dispatch record, not a product architecture dec
 - Write boundary: its Issue #4 branch only
 
 The authoring Worker completed the five-file A1 candidate and validation, then stopped when its task sandbox could not create the external worktree `index.lock`. Before any replacement writer began, that task was idle and instructed to make no further changes. The Commander then transferred only the mechanical stage-and-commit recovery to Claude Code session `7bfa7b54-9b68-4d30-9d63-a9c3870647de`, Worker/T1, in the same branch and worktree. Requested and actual binding were both `claude-haiku-4-5-20251001` at low effort; no fallback occurred. The recovery Worker was denied content-edit tools, committed exactly the five pre-existing paths at `80c4a6d514e351717bd35f0729c2fe7f91ded16d`, reported a clean tree, and stopped. The candidate's authoring and review class remains T3-par; the T1 recovery does not lower it or authorize A2/A3.
+
+Independent exact-head Standards and Spec review then failed `80c4a6d` on eight bounded findings: stale branch checkpoint; inaccurate commit gates and author trailer; missing exact provenance for the post-packet Codex-first directive; omitted candidate execution context, bilingual glossary, and qualifying ADR disposition required by Clarifications 0001/0002; an incomplete `UX-LEARN-006` canonical mapping and resulting disposition totals; and one false universal alias claim. Mechanical integrity otherwise passed. Both earlier Workers remain stopped. Claude Code session `e91a7cae-2a8b-49fe-a863-c788af4dd90c`, Worker/T3, now exclusively owns only the bounded correction over the five existing A1 paths plus `docs/architecture-v2/domain/execution/CONTEXT.md`, `docs/architecture-v2/GLOSSARY.md`, and `docs/architecture-v2/adr/0001-conditional-primary-agent-harness-and-gap-closure.md`. It may amend the local commit and must stop; it may not choose an owner option, consume Question 3 as decided, enter A2/A3, or alter canonical records.
 
 The completed authoring turn was limited to A1 one-product consistency and UI parity: map the 79 requirements and fourteen journeys, define shared semantics versus bounded native variation, expose support/parity/accessibility/Policy-visibility options, avoid implementation mechanisms, and stop where an owner choice is required. A2 remains blocked on stable, Commander-reviewed A1 invariants, not on the owner's exact parity/support choice; that choice gates canonical product promises and the coherent candidate. A3 remains blocked on A1 and A2.
 
