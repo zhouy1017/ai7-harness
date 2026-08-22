@@ -1,6 +1,6 @@
 # V2 Architecture Dispatch
 
-Status: **active, A1 sealed and A2 separately dispatchable**
+Status: **active, A1 sealed and A2 separately assigned**
 
 This is a repository-development dispatch record, not a product architecture decision. All V2 outputs remain noncanonical until owner acceptance and normal integration.
 
@@ -40,6 +40,8 @@ That Haiku session used the requested `claude-haiku-4-5-20251001` low binding wi
 The same Haiku session completed that one-file continuation without fallback at final candidate head `b5076179a37f8d654e758ca0b4a8bdeec8caaaa5`; its two passes reported `$0.7211562` total. Commander verification confirms one commit above `c383afd`, exactly the same eight-path candidate diff, a clean worktree/index, `git diff --check`, 598 Markdown links with 528 local targets and 487 anchors, 79 requirements at S60/N5/H10/E4, fourteen journeys, 21 options, I-01–I-13, and ten candidate-only choices. All Workers are stopped and the exact head is ready for final T3-par Standards and Spec review.
 
 Final independent T3-par Standards and Spec review of exact head `b5076179a37f8d654e758ca0b4a8bdeec8caaaa5` passed with zero findings and no post-target changes; both disclosed `same-provider review — independence reduced`. The Commander therefore confirms the A1 stable invariant list. This closes only the A1 entry gate: it does not select DQ-A1-01, answer the maintenance-policy Question 3, prove Codex closure or a gap, authorize DeepSeek re-entry, enter A2/A3, or make the candidate canonical. A2 now requires its own exact, provenance-bounded brief.
+
+The Commander issued that separate brief as [A2 Codex-first capability-closure dispatch](./A2-DISPATCH.md). Claude Code session `92ea5b6f-d0b3-45b8-90a3-804f9a4702e2`, Worker/T3, is the only next writer and may touch exactly seven named paths after verifying sealed A1 head `b507617`. It must build a closed capability matrix, deep AI7/Codex seam, exact evidence register, and gap register; it may run only two read-only local help/version observations, must use official OpenAI sources for Codex claims, and must stop with a truthful closure verdict. It may not answer owner choices, inspect DeepSeek for runtime re-entry, enter A3, prototype, install, clone/copy source, or implement.
 
 The completed authoring turn was limited to A1 one-product consistency and UI parity: map the 79 requirements and fourteen journeys, define shared semantics versus bounded native variation, expose support/parity/accessibility/Policy-visibility options, avoid implementation mechanisms, and stop where an owner choice is required. A2 remains blocked on stable, Commander-reviewed A1 invariants, not on the owner's exact parity/support choice; that choice gates canonical product promises and the coherent candidate. A3 remains blocked on A1 and A2.
 
