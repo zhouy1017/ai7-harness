@@ -215,6 +215,7 @@
 - Published Clarification 0001 to live Issue #4 as exact Commander object `92e2160fef9ce8195f1fee7fe29b60ba7e9d33a3:docs/architecture-exploration/clarifications/0001-primary-agent-harness-role.md`, blob `9666dccafcce3d46711bc3ce18c820fa8cc377bb`, 6162 bytes. Issue #4 now carries the evidence-first protocol and writer transition. Sent that exact reference to the active A1 Worker with an explicit instruction to record only the future-A2 input now, preserve the A1 gate, and later write candidate domain/ADR changes on its own branch without reading the Commander transcript.
 - Exact-head Standards and Spec re-review of the Clarification 0001 dispatch passed at `75ed9a929293b070ea8b8d7bd80281866517f5c0` with zero findings, a clean worktree, no post-review changes, and `same-provider review — independence reduced`. One intermediate P2 stale Resume Prompt was corrected before the final pass.
 - Completed V2 clarification Question 2. The owner accepted that a Codex gap should first be closed through low-cost secondary development on the open Codex base; DeepSeek runtime reconsideration is eligible only when Codex lacks the exact capability and DeepSeek proves a mature substitute, and still requires comparison plus a new owner decision rather than automatic fallback. Added `docs/architecture-exploration/clarifications/0002-codex-gap-closure-and-dsh-reentry.md` with exact terms, the ordered A2 gap-closure ladder, cost-evidence obligations, and the unchanged Worker/canonical boundaries.
+- Published Clarification 0002 to [Issue #4 comment 5366860643](https://github.com/zhouy1017/ai7-harness/issues/4#issuecomment-5366860643) as exact Commander object `753db78c15a1853047a41c1402d80c0ad8dbe2ea:docs/architecture-exploration/clarifications/0002-codex-gap-closure-and-dsh-reentry.md`, blob `b041b743e081ed93bf6d3a9f8187e5945d202f24`, 6467 bytes. Three attempts to replace the large Issue body failed remotely with HTTP 499 or unexpected EOF and made no change, so the exact issue comment is the durable issue input and must not be duplicated. Sent the same object to the interrupted A1 Worker with authority only to resume final validation/commit, register the future-A2 input, and stop without entering A2.
 
 ## What's next
 
@@ -318,4 +319,4 @@
 
 ## Resume Prompt
 
-Resume as Project Commander: publish Clarification 0002 as an exact Issue #4/Worker input, continue with Question 3 through `grill-with-docs`, monitor the A1 Worker without entering A2, and review its exact A1 head before any A2 authorization.
+Resume as Project Commander: continue with Question 3 through `grill-with-docs`, monitor the resumed A1 Worker after its verified Clarification 0002 handoff without entering A2, and review its exact A1 head before any A2 authorization.
