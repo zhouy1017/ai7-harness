@@ -1,8 +1,10 @@
-# AI7 V2 architecture candidate — A1
+# AI7 V2 architecture candidate — A1 and A2
 
-Status: **Issue #4 noncanonical candidate; A1 only; no implementation authority**
+Status: **Issue #4 noncanonical candidate; A1 sealed and A2 complete; no implementation authority**
 
-This directory records the decision-ready result of A1, **One-product consistency and UI parity**. It does not change canonical product architecture, accept either frozen Worker branch, select a runtime or packaging mechanism, or authorize A2, A3, implementation, issue decomposition, a pull request, or release.
+This directory records the decision-ready results of two phases. **A1, One-product consistency and UI parity**, remains sealed at exact commit/head `b5076179a37f8d654e758ca0b4a8bdeec8caaaa5`, unamended and the historical authority for every A1 claim. A2 updates this shared README and `DECISION-QUEUE.md` only to append its A2 results; it does not retroactively alter A1 semantics. **A2, Codex-first capability closure**, returns the verdict **`Closure not proven`**.
+
+Neither phase changes canonical product architecture, accepts either frozen Worker branch, selects a runtime, dependency, or packaging mechanism, or authorizes A3, implementation, issue decomposition, a pull request, or release.
 
 ## Exact authority and evidence boundary
 
@@ -25,18 +27,43 @@ Every substantive A1 claim is either:
 - marked `candidate hypothesis`, `option`, `conflict`, `open question`, or `evidence gap`; or
 - a derived A1 contract clause whose cited accepted records state all of its semantic inputs.
 
+## A2 result — Codex-first capability closure
+
+**Verdict: `Closure not proven`.** Exact review disproved the completeness of the previous set, so A2 re-opened it, traced the owner direction's eleven evidence bullets plus its separate K/A/R/S disposition bullet, added four omitted load-bearing rows, froze the corrected set, and re-scored it. Of 44 rows, 43 are load-bearing: **0 Proven**, 15 Candidate, 2 Experimental, 26 Unknown, **0 Gap claims, and 0 Verified Codex Capability Gaps**. One row is `Not applicable`.
+
+Non-closure is an evidence state, not a finding against Codex. Three blockers are independent of any single row:
+
+1. **No exact coherent surface exists to close against.** The pinned research snapshot `openai/codex@44e95c85…` is explicitly not a dependency pin, and the current official documentation names no version at all. Their documented method inventories, data-directory documentation, and the *scope of their production warning* differ.
+2. **The vendor excludes the candidate surface from production.** OpenAI recommends `codex app-server` for exactly AI7's integration shape *and* states that "The app-server command and WebSocket transport are experimental and aren't supported for production workloads." A2 holds both as simultaneous facts. Whether AI7 accepts an unsupported dependency is an owner trade-off, recorded as `DQ-A2-01`.
+3. **The narrow-tool-surface exclusion is unproven.** Shell, filesystem, network, and coding-oriented tooling are documented as sandbox-*constrained*; nothing in the admitted evidence shows they can be made *absent*, which is the standard AI7 accepted.
+
+Because no gap is verified, no maintenance form is selected, no costed secondary-development route is produced, and the **DeepSeek Runtime Re-entry Gate remains closed**. Its Codex-gap prerequisite was assessed and is not met; its Mature Runtime Alternative prerequisite was not assessed and is also not met. Equally, the [OR-2026-08-21-01](./DECISION-QUEUE.md#or-2026-08-21-01--conditional-primary-agent-harness-role-resolved-not-pending) closure-pass dispositions do not activate. Candidate C is **Keep — deferred candidate evidence only for this A2 evaluation**: not runtime selection/evaluation, reference-role activation, re-entry, or future admission.
+
+The evidence does support a strong Codex-first architecture candidate: the official ownership split matches AI7's own, and stdio JSONL over JSON-RPC 2.0 is simultaneously the documented default transport and the only transport compatible with AI7's accepted no-TCP-listener IPC rule.
+
 ## Outputs
+
+### A2 — Codex-first capability closure
+
+- [A2 Capability Closure](./A2-CAPABILITY-CLOSURE.md) — the re-derived and frozen 44-row matrix, its eleven-evidence-plus-one-disposition traceability, scoring rules, verdict, and three blockers.
+- [A2 Codex Seam](./A2-CODEX-SEAM.md) — the AI7-owned deep `PrimaryAgentHarness` Module, its full interface, the distinct AI7-owned Execution Binding and Harness Execution Span contracts, the seam placement, and its two adapters. It recommends a candidate seam; it selects no surface, dependency, or maintenance form.
+- [A2 Evidence Register](./A2-EVIDENCE-REGISTER.md) — every source with exact identity, retrieval date, evidence kind, supported-claim/matrix-row mapping, stability warning, and whether direct verification occurred; the Commander-executed version/help observations and the explicit absence of runtime-behavior or closure probes.
+- [A2 Gap Register](./A2-GAP-REGISTER.md) — Unknown, Experimental, Gap claim, and Verified Codex Capability Gap kept strictly apart, with exact next evidence for every Unknown.
+
+### A1 — product consistency (sealed, unchanged)
 
 - [A1 Product Consistency](./A1-PRODUCT-CONSISTENCY.md) — shared-product/native-variation contract, mutually exclusive support options, conflicts, non-goals, and the owner-choice boundary.
 - [A1 Evidence Crosswalk](./A1-EVIDENCE-CROSSWALK.md) — 79/79 requirement rows and 14/14 journey rows mapped to exact candidate sources and canonical record owners.
-- [Decision Queue](./DECISION-QUEUE.md) — the single owner decision packet, evidence gaps, invalidation conditions, affected canonical records, and later-phase entry rules.
+- [Decision Queue](./DECISION-QUEUE.md) — the compound A1 owner decision packet, evidence gaps, invalidation conditions, affected canonical records, and later-phase entry rules. A2 later added `DQ-A2-01`, `DQ-A2-02`, and the A2 evidence queue to the same file.
 - [Execution (V2 candidate)](./domain/execution/CONTEXT.md) — candidate-local, noncanonical definition owner for the seven execution terms required by the exact owner resolutions.
 - [Glossary Reference (V2 candidate)](./GLOSSARY.md) — candidate-local, noncanonical bilingual index and collision guide; it defines nothing and adds no row to the canonical root glossary.
 - [Candidate ADR 0001](./adr/0001-conditional-primary-agent-harness-and-gap-closure.md) — candidate-local, noncanonical record of the conditional Primary Agent Harness disposition and the gap-closure/re-entry ladder.
 
-The last three are required by the exact Clarification 0001/0002 resolutions and exist as of this candidate. Promotion to canonical `CONTEXT.md`, `GLOSSARY.md`, or `docs/adr/` still requires explicit owner acceptance and Commander integration. The A2 capability-gap matrix, evidence probes, technical selection, and canonical record updates remain deferred.
+The last three are required by the exact Clarification 0001/0002 resolutions and exist as of this candidate. Promotion to canonical `CONTEXT.md`, `GLOSSARY.md`, or `docs/adr/` still requires explicit owner acceptance and Commander integration. The A2 capability matrix now exists and is listed above; **runtime-behavior and closure probes, technical selection, any A2 ADR, and canonical record updates remain deferred.** The version/help probes already ran under Commander authority and established only binary identity/help facts. No candidate ADR was authorized for A2, and none was written — a later ADR requires a reviewed, decision-ready result plus any outstanding owner disposition.
 
 ## Owner direction registered after the sealed packet
+
+*This section records the direction as A1 registered it, and is retained unchanged as the historical basis A2 acted on. Where it says "future A2", read the [A2 result](#a2-result--codex-first-capability-closure) above: A2 has since run and returned `Closure not proven`, so none of the conditional dispositions described below has activated.*
 
 The effective future A2 working premise is **AI7 domain-owned, Codex-first capability-closure evaluation, DeepSeek reference-framework disposition**. AI7 remains the definition owner for business requirements, domain authority, Policy Documents, Effects/Receipts, ledgers, Book/manuscript scope, and professional editorial UX outcomes. “Codex-first” is an evaluation/design priority, not proof of capability closure or an active dependency.
 
@@ -51,11 +78,21 @@ The two exact owner resolutions make A2's condition explicit. A2 must prove or r
 | Gate | Entry | Exit / next authority |
 | --- | --- | --- |
 | A1 — product consistency | Sealed packet verified; Windows+macOS treated only as the owner-stated working premise recorded by the [review packet](../architecture-exploration/REVIEW-PACKET.md#audited-candidate-input--platform-q16-and-phase-0). | Invariant list, bounded native differences, options, and evidence gaps are explicit. This branch then stops for Commander review. |
-| Future A2 — Codex-first agent harness selection and composition closure | **Not entered here.** It may begin only after the Commander confirms that A1's invariant list is stable and issues a separate brief admitting the exact owner-direction object and both exact owner resolutions. The owner's exact parity/support choice is not an A2 evidence prerequisite; DQ-A1-01 gates canonical product promises and candidate coherence, not A2 or A3 work. | Prove or refute Codex Harness Capability Closure. Pass activates the conditional single-Codex candidate role and reference-only DeepSeek disposition. A claimed failure follows the exact gap-verification and costed Codex-secondary-development ladder; DeepSeek re-entry requires both a proven exact gap and a Mature Runtime Alternative, then a new owner choice. |
+| A2 — Codex-first capability closure | **Entered and corrected after exact review.** Entered under a separate Commander dispatch admitting the exact owner-direction object, both exact owner resolutions, and the Commander-curated seam audit. DQ-A1-01 was not an evidence prerequisite and remains unanswered. | **Exited with `Closure not proven`.** The corrected result is 44 rows / 43 load-bearing / 0 Proven / 15 Candidate / 2 Experimental / 26 Unknown / 1 Not applicable / 0 Gap claims / 0 Verified Codex Capability Gaps. Neither the closure-pass dispositions nor the gap ladder activates. Next authority is fresh independent exact-head T3-par review; A3 remains blocked. |
 | Owner product choice | The Commander presents the A1 option profile after reviewing this candidate. | The owner's exact parity/support choice gates a canonical product promise and the later coherent candidate; it does not retroactively make either frozen branch canonical. |
-| Future A3 — truthful OS isolation | **Not entered here.** A3 requires stable A1 invariants, one selected or decision-ready A2 runtime surface, and separate authorization. A Codex closure pass supplies the unique candidate surface. If closure fails, A3 remains stopped through gap verification, Codex secondary-development assessment, any eligible DeepSeek comparison, and the required owner choice until one decision-ready, single-execution-authority candidate surface exists. A gap report, re-entry eligibility, candidate list, or unresolved composition grants no entry. | Test that actual process, tool, network, approval, and sandbox surface on each claimed OS; support an honest confinement contract or explicitly reduce the claim. |
+| Future A3 — truthful OS isolation | **Not entered, and now explicitly stopped.** A3 requires one selected or decision-ready A2 runtime surface. A2 returned `Closure not proven` and identified no exact artifact (`CC-01`), so no such surface exists yet. A gap report, re-entry eligibility, candidate list, or unresolved composition grants no entry — and neither does this A2 result. | Test that actual process, tool, network, approval, and sandbox surface on each claimed OS; support an honest confinement contract or explicitly reduce the claim. |
 | Coherent V2 candidate | A1–A3 and other named evidence are reconciled. | Independent T3 hostile challenge, explicit owner acceptance, Commander integration, and separate implementation authorization remain mandatory under the [architecture-to-implementation gate](../agents/multi-session-design-workflow.md#architecture-to-implementation-gate). |
 
 ## A1 scope guard
 
 A1 may define product outcomes, record semantics, user-visible negative guarantees, native variation bounds, support options, accessibility outcomes, and Policy visibility options. It deliberately does **not** assert Codex Harness Capability Closure or a Codex Capability Gap, choose a Codex integration or maintenance form, create the future gap matrix, activate DeepSeek as runtime/fallback, select Electron, ProseMirror, process topology, IPC, store/index/retrieval design, package format, updater, signing mechanism, credential implementation, sandbox mechanism, or release-workflow topology. Codex Desktop-like interaction is a design reference, not permission to copy its implementation, layout, assets, brand, or coding-agent purpose. Historical UI geometry, Windows-specific behavior, browser-prototype health, and candidate ADR status are not architecture facts.
+
+## A2 scope guard
+
+A2 wrote exactly seven paths: this README, [`DECISION-QUEUE.md`](./DECISION-QUEUE.md), the four new `A2-*.md` records, and root `PROGRESS.md`. It preserved all A1 content and history and added no commit to the sealed A1 head.
+
+A2 deliberately did **not**: assert Harness Capability Closure; assert any Codex Capability Gap; select a Codex surface, artifact, version, package, or dependency; select the maintenance form among external adapter or extension, upstream contribution, maintained patch set, and fork; answer the formal pending maintenance-policy Question 3; answer `DQ-A1-01`; produce costed Codex Secondary Development routes; inspect DeepSeek runtime evidence or open its re-entry gate; write an ADR; promote any candidate term or record to a canonical context, glossary, or ADR; or enter A3.
+
+It took no external action of any kind: no clone, download, copy, vendoring, install, authentication, dependency resolution, model or provider call, app-server start, protocol handshake, schema generation, prototype, push, pull request, merge, or publication. Both separately authorized version/help probes (`P-A2-01`, `P-A2-02`) were refused by the original Worker session's permission mode and later executed successfully by Commander authority, establishing the installed binary identity `codex-cli 0.147.0` and the app-server help surface. **Those version/help probes ran; runtime-behavior and closure probes did not.** The observations do not run app-server or the editor and prove no matrix row.
+
+Only official OpenAI sources were used for Codex claims. One is recorded with its provenance caveat: the official documentation URL `developers.openai.com/codex/app-server` returned an HTTP 308 redirect to the OpenAI-owned host `learn.chatgpt.com/docs/app-server`, which was followed and recorded. No third-party page was admitted.
