@@ -1,6 +1,6 @@
 # A2 Codex-first capability-closure dispatch
 
-Status: **`dcbd437` failed exact-head review; bounded execution-contract correction authorized**
+Status: **A2 review-clean at `f1d212c5`; `Closure not proven`; one owner risk clarification is next; A3 remains blocked**
 
 This is a repository-development dispatch record, not canonical product architecture and not implementation authorization.
 
@@ -30,7 +30,9 @@ That same-class fallback completed at exact candidate head `059dd658beb5191cc06a
 
 Fresh review passed Standards with zero findings and failed Spec on one exact P2: offline-startup/`CC-44` support was falsely attributed to `S-A2-08` and `S-A2-09`, while only `S-A2-04` contains that owner requirement. [A2 offline-authority mapping correction](./A2-EVIDENCE-MAPPING-CORRECTION.md) permits only the two citation removals plus candidate `PROGRESS.md`; every result and boundary remains frozen.
 
-The T1 correction completed at exact head `f1d212c5ebc5287dbc2b97a716de14b8195e2c3c`. Commander confirmed only the three authorized paths changed from `059dd658`, the full A2 range remains exactly seven paths, all row/count/source/probe sets are unchanged, `CC-44` remains Unknown and cites only admitted `S-A2-02`/`S-A2-04` evidence in part 2, and the false A1/canonical mappings are gone. Fresh exact-head re-review remains mandatory.
+The T1 correction completed at exact head `f1d212c5ebc5287dbc2b97a716de14b8195e2c3c`. Commander confirmed only the three authorized paths changed from `059dd658`, the full A2 range remained exactly seven paths, all row/count/source/probe sets were unchanged, `CC-44` remained Unknown and cited only admitted `S-A2-02`/`S-A2-04` evidence in part 2, and the false A1/canonical mappings were gone. At that checkpoint fresh exact-head re-review was mandatory.
+
+Fresh read-only T3-par Standards and Spec re-review of exact range `b5076179a37f8d654e758ca0b4a8bdeec8caaaa5...f1d212c5ebc5287dbc2b97a716de14b8195e2c3c` both passed with zero findings and no post-target change. Both re-derived the unchanged 44-row / 43-load-bearing result, exact disposition/register/source/probe sets, execution contracts, DeepSeek gate, links/tables, and clean Git state; both disclosed `same-provider review — independence reduced for the corrected A2 content`. A2 is now review-clean but remains noncanonical `Closure not proven`: there is no verified Codex Capability Gap, no DeepSeek re-entry, and no A3 or implementation authority. The next owner trade-off is `DQ-A2-01`, the unsupported-dependency acceptance threshold, asked one question at a time through `grill-with-docs`.
 
 ## Question A2 must answer
 

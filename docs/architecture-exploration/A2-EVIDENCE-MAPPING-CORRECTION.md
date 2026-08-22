@@ -1,6 +1,6 @@
 # A2 offline-authority mapping correction
 
-Status: **completed at exact candidate head `f1d212c5`; fresh exact-head Spec and Standards re-review required; A3 and implementation remain blocked**
+Status: **completed and review-clean at exact candidate head `f1d212c5`; Standards and Spec both PASS with zero findings; A3 and implementation remain blocked**
 
 This is a repository-development wording/evidence correction, not architecture expansion, new evidence, an owner decision, or implementation authority.
 
@@ -57,3 +57,11 @@ Amend only the existing A2 commit; preserve sole parent `b507617`, exact two-com
 Report exact amended head and stop for a fresh exact-head Spec re-review plus Standards non-regression re-review.
 
 GPT-5.6 Luna / medium Worker `/root/a2_offline_mapping_t1` completed the exact three-path correction and stopped at amended candidate head `f1d212c5ebc5287dbc2b97a716de14b8195e2c3c`. Commander independently verified sole parent `b507617`, control merge-base `c383afd`, exact two-commit history, seven-path sealed-parent range, three-path old-head delta, clean worktree/index and diff, unchanged 44/43 row/count/disposition result, 11 source IDs and two probe IDs, seven-cell evidence rows, `CC-44` still Unknown, no remaining `S-A2-08`/`S-A2-09` `CC-44` citations or offline mappings, lowercase subject, and all three trailers. This is a mechanical checkpoint, not review acceptance.
+
+## Final exact-head review
+
+Fresh read-only T3-par Standards and Spec re-review of exact range `b5076179a37f8d654e758ca0b4a8bdeec8caaaa5...f1d212c5ebc5287dbc2b97a716de14b8195e2c3c` both returned **PASS with zero findings**. The prior P2 is closed exactly: `S-A2-08` and `S-A2-09` carry no offline/non-agent-startup claim or `CC-44` mapping; `CC-44` remains Unknown and cites only `S-A2-04` for the owner requirement, with `S-A2-02` used only for executor-surface/documentation-absence evidence where applicable.
+
+Both reviewers independently re-derived the 44-row / 43-load-bearing matrix and unchanged `0 Proven / 15 Candidate / 2 Experimental / 26 Unknown / 1 Not applicable / 0 Gap claims / 0 Verified Codex Capability Gaps` result, exact Unknown/Experimental register equality, `S-A2-01`–`11`, `P-A2-01`–`02`, the binding/span and dual-guard contracts, DeepSeek gate, local links/tables, and exact Git state. Start and end HEAD were both `f1d212c5`; the tree and index were clean, no post-target commit existed, and `git diff --check` passed. Both reports disclose `same-provider review — independence reduced for the corrected A2 content`.
+
+This review clears the A2 candidate record, not its substantive closure result: `Closure not proven` remains final for this pass, no Codex Capability Gap is verified, DeepSeek Runtime Re-entry remains closed, and no A3, maintenance-form, implementation, or canonical-integration authority follows.
