@@ -30,6 +30,8 @@ That same-class fallback completed at exact candidate head `059dd658beb5191cc06a
 
 Fresh review passed Standards with zero findings and failed Spec on one exact P2: offline-startup/`CC-44` support was falsely attributed to `S-A2-08` and `S-A2-09`, while only `S-A2-04` contains that owner requirement. [A2 offline-authority mapping correction](./A2-EVIDENCE-MAPPING-CORRECTION.md) permits only the two citation removals plus candidate `PROGRESS.md`; every result and boundary remains frozen.
 
+The T1 correction completed at exact head `f1d212c5ebc5287dbc2b97a716de14b8195e2c3c`. Commander confirmed only the three authorized paths changed from `059dd658`, the full A2 range remains exactly seven paths, all row/count/source/probe sets are unchanged, `CC-44` remains Unknown and cites only admitted `S-A2-02`/`S-A2-04` evidence in part 2, and the false A1/canonical mappings are gone. Fresh exact-head re-review remains mandatory.
+
 ## Question A2 must answer
 
 Does one exact open-source Codex surface, together with narrowly named AI7-owned adapters that do not reproduce a second generic loop, satisfy every load-bearing row of **Harness Capability Closure** for AI7? If not, which rows remain unknown, experimental, gap claims, or verified **Codex Capability Gaps**?

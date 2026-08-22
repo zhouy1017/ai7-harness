@@ -1,6 +1,6 @@
 # A2 offline-authority mapping correction
 
-Status: **authorized from exact candidate head `059dd658`; same-class T1 fallback pending; A3 and implementation remain blocked**
+Status: **completed at exact candidate head `f1d212c5`; fresh exact-head Spec and Standards re-review required; A3 and implementation remain blocked**
 
 This is a repository-development wording/evidence correction, not architecture expansion, new evidence, an owner decision, or implementation authority.
 
@@ -55,3 +55,5 @@ Amend only the existing A2 commit; preserve sole parent `b507617`, exact two-com
 - all evidence-register table rows retain seven cells, local links/anchors and all table shapes remain valid.
 
 Report exact amended head and stop for a fresh exact-head Spec re-review plus Standards non-regression re-review.
+
+GPT-5.6 Luna / medium Worker `/root/a2_offline_mapping_t1` completed the exact three-path correction and stopped at amended candidate head `f1d212c5ebc5287dbc2b97a716de14b8195e2c3c`. Commander independently verified sole parent `b507617`, control merge-base `c383afd`, exact two-commit history, seven-path sealed-parent range, three-path old-head delta, clean worktree/index and diff, unchanged 44/43 row/count/disposition result, 11 source IDs and two probe IDs, seven-cell evidence rows, `CC-44` still Unknown, no remaining `S-A2-08`/`S-A2-09` `CC-44` citations or offline mappings, lowercase subject, and all three trailers. This is a mechanical checkpoint, not review acceptance.
