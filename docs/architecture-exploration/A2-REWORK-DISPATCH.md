@@ -1,6 +1,6 @@
 # A2 exact-review rework dispatch
 
-Status: **authorized against failed target `4cd8250`; A3 and implementation remain blocked**
+Status: **completed at `dcbd437`; fresh exact-head review required; A3 and implementation remain blocked**
 
 This is a repository-development correction brief, not canonical product architecture, an owner decision, or implementation authority.
 
@@ -76,3 +76,5 @@ No new evidence source, web retrieval, local probe, source inspection, dependenc
 ## Exit
 
 Validate exact parent and two-commit history; seven-path boundary; clean worktree/index; `git diff --check`; 44 unique matrix rows and the expected score/load-bearing totals; exactly 26 unique Unknown entries mapped to all Unknown rows; two Experimental entries; zero Gap claim/Verified Gap; all local Markdown links/anchors and table shapes; no stale current-state wording; no new source; lowercase commit subject; and no post-amend work. Report exact head and stop for fresh independent T3-par review.
+
+The Worker completed the bounded correction and one Commander-requested residual wording continuation at exact head `dcbd4375e8f230e7620065a714b6ab5248d4241b`, then stopped. Commander revalidated the exact parent/two-commit/seven-path/clean-tree/diff-check boundary, 44 unique rows, score totals, exact equality between 26 matrix Unknowns and 26 register mappings, two Experimentals, zero gap classes, and the lowercase subject. This is a checkpoint, not review acceptance.

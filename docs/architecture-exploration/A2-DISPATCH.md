@@ -1,6 +1,6 @@
 # A2 Codex-first capability-closure dispatch
 
-Status: **exact-head review failed at `4cd8250`; bounded A2 rework separately authorized**
+Status: **corrected A2 head `dcbd437` awaiting fresh exact-head T3-par review**
 
 This is a repository-development dispatch record, not canonical product architecture and not implementation authorization.
 
@@ -19,6 +19,8 @@ The requested Opus Worker completed the seven-path A2 commit at `756f2f9b7de3316
 Claude Haiku/T1 session `fb73bf3a-2d6b-40fb-8d83-1aaad14beccc` completed the first authorized synchronization pass, then its resume returned HTTP 429 `You've hit your session limit · resets 2am (Asia/Shanghai)` and reported `$0.1652621` incremental cost. The task stayed Worker/T1 and fell back under the existing binding table to GPT-5.6 Luna / medium Worker `/root/a2_probe_sync_fallback`. That Worker changed only the six authorized synchronization paths, then two Commander-identified residual wording lines, and amended only A2. Final head `4cd825028c72d57e23a56f95685d59c75f027e6a` has parent `b5076179a37f8d654e758ca0b4a8bdeec8caaaa5`; all Workers stopped cleanly. The version/help observations establish installed binary identity and help surface only, not runtime behavior or any matrix-row closure. Verdict and scores remain unchanged: 40 rows, 39 load-bearing, 0 Proven, 16 Candidate, 2 Experimental, 21 Unknown, 1 Not applicable, zero Gap claims, and zero Verified Codex Capability Gaps. Exact-head T3-par review is required before any next architecture step; A3 remains blocked.
 
 The required review then failed on closed-set completeness, continuation authority, license-evidence scoring, DeepSeek disposition, traceability/checkpoint wording, and commit-subject form. [A2 exact-review rework dispatch](./A2-REWORK-DISPATCH.md) is the only active correction authority. It does not alter the original A2 question, admit new sources, or authorize A3.
+
+That correction completed at `dcbd4375e8f230e7620065a714b6ab5248d4241b` through the same-class GPT-5.6 Sol / `xhigh` fallback. The returned matrix has 44 rows / 43 load-bearing, `0 Proven / 15 Candidate / 2 Experimental / 26 Unknown / 1 Not applicable`, and zero gap classes. Commander mechanical checks passed; only fresh independent exact-head review may clear it. A3 remains blocked.
 
 ## Question A2 must answer
 
