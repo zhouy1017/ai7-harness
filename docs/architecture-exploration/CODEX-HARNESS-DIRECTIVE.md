@@ -55,7 +55,7 @@ The exact Codex maintenance form—external adapter or extension, upstream contr
 
 Any later A2 claim must use a separately authorized exact tag, release, package version, commit, schema, or binary rather than moving `main`.
 
-The factual adapter-versus-source-coupling audit is recorded in [Codex Extension-Seam Evidence](./CODEX-EXTENSION-SEAMS.md). It supports an adapter/extension-first recommendation for the next owner choice but leaves the maintenance strategy noncanonical and undecided.
+The factual adapter-versus-source-coupling audit is recorded in [Codex Extension-Seam Evidence](./CODEX-EXTENSION-SEAMS.md). It supports an adapter/extension-first recommendation for the next owner choice but leaves the maintenance strategy noncanonical and undecided. It also records the unresolved official-source tension between app-server's recommended deep-integration role and its current experimental, unsupported-for-production command status; A2 must not describe it as production-ready without new exact evidence or an accepted risk decision.
 
 ## Terminology boundary
 

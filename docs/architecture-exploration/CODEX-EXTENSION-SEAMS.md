@@ -10,16 +10,16 @@ This record answers the factual part of the Codex secondary-development question
 
 ## Official product boundary
 
-OpenAI's [Codex as a platform](https://developers.openai.com/blog/codex-as-a-platform) states that the open harness owns the reusable agent loop while a specialist host may retain its own interface, context, tools, operational boundaries, records, and approval flows. The [Codex App Server documentation](https://developers.openai.com/codex/app-server) identifies app-server as the deep product-integration surface for authentication, conversation history, approvals, and streamed agent events.
+OpenAI's [Codex as a platform](https://developers.openai.com/blog/codex-as-a-platform) states that the open harness owns the reusable agent loop while a specialist host may retain its own interface, context, tools, operational boundaries, records, and approval flows. The [Codex App Server documentation](https://developers.openai.com/codex/app-server) identifies app-server as the deep product-integration surface for authentication, conversation history, approvals, and streamed agent events, but also says that the app-server command and WebSocket transport are experimental and unsupported for production workloads. A2 must resolve this official recommendation-versus-maturity tension against an exact artifact; this record does not call app-server production-ready.
 
-The documented production-suitable local transport is stdio JSONL over a bidirectional JSON-RPC protocol. WebSocket app-server transport is experimental and unsupported for production. AI7 therefore has evidence for an out-of-process stdio integration candidate, not for an in-process Node library or a Windows named-pipe transport.
+The documented default local transport is stdio JSONL over a bidirectional JSON-RPC protocol; WebSocket is separately experimental. AI7 therefore has evidence for an out-of-process stdio integration **candidate**, not a supported production baseline, an in-process Node library, or a Windows named-pipe transport.
 
 ## Strong out-of-tree seams
 
 | Concern | Exact evidence | A2 implication |
 | --- | --- | --- |
 | AI7-owned product and UI | The platform article permits the host to retain dashboards, editors, records, tools, and approval flows around the harness. | AI7 can own Electron UI and every domain record while projecting Codex events through an adapter. |
-| Thread lifecycle and event streaming | Pinned [`app-server/README.md`](https://github.com/openai/codex/blob/44e95c857f37f81a5731eab72c32a3d334d0e2c4/codex-rs/app-server/README.md) and current official App Server docs expose thread start/resume/fork/read/list, turn start/interrupt, streamed items, approvals, and generated protocol schemas. | Generate or pin an exact JSON-RPC client rather than equating the TypeScript SDK with app-server. |
+| Thread lifecycle and event streaming | Pinned [`app-server/README.md`](https://github.com/openai/codex/blob/44e95c857f37f81a5731eab72c32a3d334d0e2c4/codex-rs/app-server/README.md) and current official App Server docs expose thread start/resume/fork/read/list, turn start/interrupt, streamed items, approvals, and generated protocol schemas. Current docs also leave the app-server command below a production-support threshold. | Generate or pin an exact JSON-RPC client rather than equating the TypeScript SDK with app-server, and make server maturity/support an A2 exit criterion. |
 | Per-thread configuration | Pinned [`ThreadStartParams`](https://github.com/openai/codex/blob/44e95c857f37f81a5731eab72c32a3d334d0e2c4/codex-rs/app-server-protocol/src/protocol/v2/thread.rs) includes model/provider, sandbox and approval settings, instruction fields, config overrides, and history controls. | Many execution boundaries can be selected by the AI7 host without changing the generic loop, subject to exact stability tests. |
 | AI7 capabilities | App-server exposes configured MCP servers; pinned and current docs also expose host callback `dynamicTools`. | AI7-owned MCP is the stronger current candidate. `dynamicTools` is experimental and cannot be a production premise without a compatibility decision. |
 | Execution approvals | App-server sends command, file-change, permission, and tool approval requests to the client. | AI7 can render and answer Codex execution requests out of tree, while keeping them strictly separate from AI7 Run Authorization, Effect Approval, and business decisions. |
@@ -42,6 +42,7 @@ These are categories to test, not evidence that AI7 needs any of them.
 ## Stability warnings
 
 - `dynamicTools`, newer permissions fields, selected capability roots, parts of history pagination, and several per-turn controls are experimental.
+- Official product guidance recommends app-server for deep integration while current App Server documentation marks the command experimental and unsupported for production; A2 must resolve the exact artifact's maturity and AI7's acceptance threshold.
 - Plugin installation and related app-server plugin APIs are documented as under development and not ready for production clients.
 - The audit has not proven that the stock app-server can exclude every coding-native prompt, tool, or default forbidden to an Editorial Run.
 - The audit has not proven that desired DeepSeek or other provider endpoints satisfy Codex's Responses contract.
@@ -49,7 +50,7 @@ These are categories to test, not evidence that AI7 needs any of them.
 
 ## Evidence-backed Question 3 framing
 
-The available official evidence supports **adapter/extension first** as the recommended maintenance policy:
+Subject to the app-server maturity gate, the available official evidence supports **adapter/extension first** as the recommended maintenance policy:
 
 1. pin the stock app-server and its exact generated protocol;
 2. keep AI7 product/domain/UI authority in the host;
