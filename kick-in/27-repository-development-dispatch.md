@@ -40,7 +40,7 @@ The reviewer's verdict is **advisory**. The commander decides and integrates.
 
 ### Reporting
 
-Every returned unit of work carries one line: role, provider, model, effort, task class, and whether cross-provider review was achieved.
+Every returned unit of work carries one line with: role, requested provider binding, actual provider, model, effort, task class, fallback status and exact reason, and whether cross-provider review was achieved. An unavailable or exhausted provider is an observed dispatch outcome, not an excuse to omit the attempted binding.
 
 ### Usage discipline
 
@@ -48,6 +48,7 @@ Every returned unit of work carries one line: role, provider, model, effort, tas
 2. Batch mechanical work into one T1 worker rather than several.
 3. Keep briefs tight; cold-start cost scales with what the worker must rediscover.
 4. Urgency is not a task class and never changes the binding.
+5. Do not consume or probe Worker quota for T0 work, Commander decisions, final integration, or independent review merely to satisfy a provider preference; those remain in their existing roles.
 
 ## Layer B — Bindings
 
@@ -62,6 +63,12 @@ The binding table is **the only provider-specific artifact in this design**. Rep
 | **T3-par** — high-stakes and genuinely splittable | `gpt-5.6-sol` @ `ultra` | — dispatch parallel workers instead | 5× plus subagents |
 
 Task class is the provider-neutral unit. The reviewer floor is evaluated **in task classes**, then bound — so a T3 branch written by `claude-opus-5` requires a reviewer at `gpt-5.6-sol` @ xhigh or above.
+
+### Worker provider order
+
+Effective with the owner's 2026-08-22 revision, every task that is both suitable for parallel dispatch and bounded enough to be a Worker brief uses the matching **Claude Code** binding first. Continue assigning eligible Worker work to Claude Code while its current quota is available; do not load-balance away from it merely to conserve that quota.
+
+When a real dispatch reports that Claude Code is unavailable or its usable quota is exhausted, record the attempted binding, observed condition, time, actual fallback binding, and exact downgrade reason. Then use the same task-class Codex binding from the table. Do not repeatedly spend attempts against a known exhausted quota window; retry Claude only after availability or quota reset is evidenced. This provider order does not apply to the Commander seat, final integration, or Reviewer assignment, whose role authority, task-class floor, and independence rules remain unchanged.
 
 ### Task classes
 
@@ -84,6 +91,8 @@ Tier selection is roughly a five-fold cost swing and is the primary lever; effor
 
 | Condition | Action |
 | --- | --- |
+| An eligible bounded Worker task and Claude Code quota is available | Use the same-class Claude binding first |
+| Claude Code is unavailable or its usable Worker quota is exhausted | Record the observed failure and reason; use the same-class Codex binding for the current quota window |
 | One provider's quota is short | Same task class, other provider's binding |
 | The commander's provider is exhausted | The commander seat moves to the other provider; task classes are unchanged |
 | Both providers are short | Stop dispatching; foreground work only |
@@ -111,7 +120,7 @@ Accepted with owner revisions:
 
 - three roles — Commander, Worker, Reviewer — with the reviewer an independent agent;
 - Codex is the main entry and normally holds the commander seat, at top capability;
-- workers prefer Claude and fall back to Codex, with fallback bidirectional;
+- dispatch-eligible, bounded parallel Worker tasks use Claude Code first while its quota is available, then fall back at the same task class under the existing table; every actual binding and downgrade reason is recorded;
 - the reviewer's task class is at least that of the work it reviews, and cross-provider review is the disclosed default;
 - operating rules stay identical across providers and models, with the binding table as the only provider-specific artifact; and
 - the legacy orchestration pilot and its host connector are rejected as baselines.

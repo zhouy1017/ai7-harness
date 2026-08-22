@@ -3,7 +3,7 @@
 Status: **active**
 Commander issue: [#3 — Freeze v1 design and prepare v2 architecture exploration](https://github.com/zhouy1017/ai7-harness/issues/3)
 V2 architecture issue: [#4 — Design the AI7 V2 architecture candidate](https://github.com/zhouy1017/ai7-harness/issues/4)
-Last updated: **2026-08-21**
+Last updated: **2026-08-22**
 
 This file records repository-development coordination only. It is not an AI7 product workflow or a replacement for the canonical architecture.
 
@@ -37,6 +37,15 @@ The function labels “Architecture Reviewer” and “V2 Hostile Architecture R
 6. The V2 hostile Reviewer may prepare its challenge charter now, but it receives no design-task transcript, worktree, branch diff, or candidate material until the Commander supplies an exact coherent-candidate review brief.
 7. The 2026-08-21 owner direction makes Codex the preferred V2 harness candidate and leaves AI7 authoritative for product, domain, UI, policy, Effects, and business ledgers. If A2 proves Codex capability closure, Codex is the sole production Primary Agent Harness and DeepSeek becomes a non-runtime Development Reference Framework. Verified gaps prefer costed Codex secondary development; DeepSeek may re-enter runtime comparison only after both an exact Codex gap and a mature DeepSeek substitute are proven, followed by a new owner choice. See [Clarification 0001](./clarifications/0001-primary-agent-harness-role.md) and [Clarification 0002](./clarifications/0002-codex-gap-closure-and-dsh-reentry.md). This does not claim closure or authorize implementation.
 8. Load-bearing ambiguity is never resolved by Worker inference. The Worker first exhausts authorized factual evidence and probes; only a residual owner trade-off enters a structured decision queue. The Commander uses `grill-with-docs` one question at a time and creates an exact clarification record; the Worker consumes its exact Git object and writes resulting candidate terms and qualifying decisions on the Worker branch, never from a transcript.
+9. From 2026-08-22, every suitable parallel, bounded Worker brief uses the same-class Claude Code binding first until its usable quota is observed unavailable or exhausted; only then does the Commander use the existing same-class fallback. Every dispatch records requested and actual binding plus the exact downgrade reason. Commander decisions, final integration, external actions, and independent Review remain in their existing authority boundaries. This is repository-development routing only and has no bearing on V2 product Model Roles or harness selection.
+
+## Provider dispatch log
+
+- Effective directive: **2026-08-22 owner instruction**.
+- Preferred eligible-Worker binding: **Claude Code, same task class**.
+- Current observed availability: Claude Code `2.1.228` is installed; usable quota is deliberately unprobed until the next eligible Worker dispatch.
+- Current fallback: **none under this directive**. Existing V2 tasks predate it and are not retroactively relabeled.
+- Required future entry: task/branch, role and class, requested binding, actual provider/model/effort, availability or quota outcome, exact fallback reason, and reviewer independence.
 
 ## V2 dispatch boundary
 
