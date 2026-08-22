@@ -26,6 +26,8 @@ Fresh review failed `dcbd437` on the distinct Execution Binding/Harness Executio
 
 The mandatory post-reset Claude Opus attempt returned exit 1 / API HTTP 429 before inference in session `1540bd4c-0b54-4454-8a5f-6b2dec2b1cc8`, reported `$0`, and changed nothing. The same Worker/T3 brief may therefore fall back to GPT-5.6 Sol / `xhigh`; review class and every stop boundary remain unchanged.
 
+That same-class fallback completed at exact candidate head `059dd658beb5191cc06abdc9fb8264db4be16b82`. Commander independently confirmed the sealed parent and control history, exact seven paths, clean state and diff, unchanged matrix/disposition/source/probe sets, corrected binding/span/guard/configuration trace, resolving local links, lowercase subject, and retained trailers. This is not acceptance; fresh independent T3-par Standards and Spec review remains required and A3 stays blocked.
+
 ## Question A2 must answer
 
 Does one exact open-source Codex surface, together with narrowly named AI7-owned adapters that do not reproduce a second generic loop, satisfy every load-bearing row of **Harness Capability Closure** for AI7? If not, which rows remain unknown, experimental, gap claims, or verified **Codex Capability Gaps**?
