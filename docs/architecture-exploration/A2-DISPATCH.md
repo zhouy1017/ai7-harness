@@ -1,6 +1,6 @@
 # A2 Codex-first capability-closure dispatch
 
-Status: **authorized, Worker not yet started**
+Status: **A2 Worker complete at `756f2f9`; bounded Commander-probe correction authorized before review**
 
 This is a repository-development dispatch record, not canonical product architecture and not implementation authorization.
 
@@ -13,6 +13,8 @@ This is a repository-development dispatch record, not canonical product architec
 - Branch / worktree: `docs/4-v2-architecture-candidate` / `worktrees/1649`.
 - Exact starting head: `b5076179a37f8d654e758ca0b4a8bdeec8caaaa5`.
 - All A1 Workers are stopped before this transfer. This Worker becomes the sole writer only after exact branch/head/clean-tree verification.
+
+The requested Opus Worker completed the seven-path A2 commit at `756f2f9b7de3316248834508b067e84b42a4522a` with verdict `Closure not proven` and stopped. Its own permission mode refused the two authorized local probes. The Commander then ran only those two commands read-only at `2026-08-22T14:50:23Z`: `codex --version` returned exit 0 / `codex-cli 0.147.0`; `codex app-server --help` returned exit 0 and identified the command as experimental, stdio as default, plus the displayed help surface. Session `fb73bf3a-2d6b-40fb-8d83-1aaad14beccc`, Worker/T1, is authorized to synchronize that exact evidence and correct the A1-history wording without changing the matrix dispositions or verdict, then amend only the A2 commit and stop.
 
 ## Question A2 must answer
 
