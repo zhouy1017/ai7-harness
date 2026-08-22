@@ -22,7 +22,7 @@ This file records repository-development coordination only. It is not an AI7 pro
 | `Worker — Freeze V1 UI UX` | `01a02240-c432-7600-8fdf-008858cae447` | Worker | `docs/2-ai7-ui-ux@587d645` / `worktrees/062a` | `frozen` | Its branch only | Reviewed local V1 UI/UX reference; candidate/evidence-only assets |
 | `Worker — Freeze V1 Platform and Phase 0` | `01a005a7-019f-7203-ba38-2a367a667db8` | Worker | `docs/1-windows-macos-phase0@9606891` / saved-project checkout | `frozen` | Its branch only | Reviewed local V1 platform/Q16/Phase-0 reference; Phase 0 remains NOT PASSED |
 | `Architecture Reviewer — Prepare V2 Exploration` | `01a02278-cdc5-7c81-a08d-490b8b76bc26` | Reviewer | read-only `main@c8cbe26` / `worktrees/1d24` | `exploring` | No repository writes | [Round 1](./ROUND-1-REVIEW.md) and [candidate delta](./CANDIDATE-DELTA-REVIEW.md) complete; A1–A3 prepared |
-| `AI7 V2 架构设计（Issue #4）` | `01a022de-f781-7d31-9a77-c3ce9ee1ce50` | Worker / T3-par | `docs/4-v2-architecture-candidate@c383afd` / `worktrees/1649` | `exploring` | Its branch only | Decision-ready A1 product-consistency contract, then pause for Commander review |
+| `AI7 V2 架构设计（Issue #4）` | Authoring task `01a022de-f781-7d31-9a77-c3ce9ee1ce50`; mechanical-recovery session `7bfa7b54-9b68-4d30-9d63-a9c3870647de` | Worker / T3-par authoring; Worker / T1 mechanical recovery | `docs/4-v2-architecture-candidate@80c4a6d` / `worktrees/1649` | `exploring — A1 sealed, awaiting Commander review` | One active writer at a time; original Worker stopped before transfer, recovery Worker stopped after commit | Noncanonical A1 product-consistency candidate at exact local head; no A2/A3 entry |
 | `AI7 V2 反方审查（只读）` | `01a022df-0d69-7173-ab31-679038c1f446` | Reviewer / T3 charter | read-only `c383afd` / `worktrees/1be4` | `preparing` | No repository writes | Challenge charter complete and task stopped; a later exact-head verdict requires a T3-par Reviewer after a coherent V2 candidate exists |
 
 The function labels “Architecture Reviewer” and “V2 Hostile Architecture Reviewer” do not create a fourth repository role. Both are independent Reviewer assignments under ADR 0015. The V2 architecture designer remains a Worker even when exercising Chief Architect responsibilities.
@@ -37,15 +37,19 @@ The function labels “Architecture Reviewer” and “V2 Hostile Architecture R
 6. The V2 hostile Reviewer may prepare its challenge charter now, but it receives no design-task transcript, worktree, branch diff, or candidate material until the Commander supplies an exact coherent-candidate review brief.
 7. The 2026-08-21 owner direction makes Codex the preferred V2 harness candidate and leaves AI7 authoritative for product, domain, UI, policy, Effects, and business ledgers. If A2 proves Codex capability closure, Codex is the sole production Primary Agent Harness and DeepSeek becomes a non-runtime Development Reference Framework. Verified gaps prefer costed Codex secondary development; DeepSeek may re-enter runtime comparison only after both an exact Codex gap and a mature DeepSeek substitute are proven, followed by a new owner choice. See [Clarification 0001](./clarifications/0001-primary-agent-harness-role.md) and [Clarification 0002](./clarifications/0002-codex-gap-closure-and-dsh-reentry.md). This does not claim closure or authorize implementation.
 8. Load-bearing ambiguity is never resolved by Worker inference. The Worker first exhausts authorized factual evidence and probes; only a residual owner trade-off enters a structured decision queue. The Commander uses `grill-with-docs` one question at a time and creates an exact clarification record; the Worker consumes its exact Git object and writes resulting candidate terms and qualifying decisions on the Worker branch, never from a transcript.
-9. From 2026-08-22, every suitable parallel, bounded Worker brief uses the same-class Claude Code binding first until its usable quota is observed unavailable or exhausted; only then does the Commander use the existing same-class fallback. Every dispatch records requested and actual binding plus the exact downgrade reason. Commander decisions, final integration, external actions, and independent Review remain in their existing authority boundaries. This is repository-development routing only and has no bearing on V2 product Model Roles or harness selection.
+9. From 2026-08-22, every suitable parallel, bounded Worker brief uses the matching Layer B Claude Code binding for that Worker's T1/T2/T3 class first until its usable quota is observed unavailable or exhausted; only then does the Commander use the existing same-class fallback. Every dispatch records requested and actual binding plus the exact downgrade reason. Commander decisions and T3-par synthesis, final integration, external actions, and independent Review remain in their existing authority boundaries. This is repository-development routing only and has no bearing on V2 product Model Roles or harness selection.
 
 ## Provider dispatch log
 
 - Effective directive: **2026-08-22 owner instruction**.
 - Preferred eligible-Worker binding: **Claude Code, same task class**.
-- Current observed availability: Claude Code `2.1.228` is installed; usable quota is deliberately unprobed until the next eligible Worker dispatch.
-- Current fallback: **none under this directive**. Existing V2 tasks predate it and are not retroactively relabeled.
+- Current observed availability: Claude Code `2.1.228` and the requested Claude Haiku 4.5 binding completed the first eligible dispatch successfully.
+- Current fallback: **none under this directive**. Existing V2 authoring tasks predate it; only the stopped A1 task's later mechanical recovery was explicitly transferred.
 - Required future entry: task/branch, role and class, requested binding, actual provider/model/effort, availability or quota outcome, exact fallback reason, and reviewer independence.
+
+| Date | Task / branch | Role / class | Requested binding | Actual binding | Availability / quota | Fallback / reason | Review |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 2026-08-22 | A1 five-file mechanical commit recovery / `docs/4-v2-architecture-candidate` | Worker / T1 mechanical recovery; candidate review floor remains T3-par | Claude Code / `claude-haiku-4-5-20251001` / low | Anthropic Claude Haiku 4.5 / `claude-haiku-4-5-20251001` / low; session `7bfa7b54-9b68-4d30-9d63-a9c3870647de` | Available; completed successfully | None — requested binding satisfied | Commander state verification complete; exact-head architecture review pending |
 
 ## V2 dispatch boundary
 
@@ -91,8 +95,8 @@ The Commander must preserve both lines as candidate/evidence-only unless the own
 ## Next control events
 
 1. Keep `c383afd2fdb5f08342cde277b7babced6c1207fc` as the immutable control/packet authority and both frozen legacy branches local and noncanonical.
-2. Let the Issue #4 Worker complete A1 from the sealed packet, commit locally, and stop at the owner-choice gate.
-3. Review the exact A1 head, confirm its invariant list, and present only the decision-ready platform consistency choices to the owner.
+2. Keep the stopped original A1 Worker and stopped Claude mechanical-recovery Worker read-only at candidate head `80c4a6d514e351717bd35f0729c2fe7f91ded16d`.
+3. Review exact A1 head `80c4a6d514e351717bd35f0729c2fe7f91ded16d`, confirm its invariant list, and present only the decision-ready platform consistency choices to the owner.
 4. Authorize revised A2 Codex-first harness selection and composition closure after A1 invariants are stable even if the owner choice remains pending; authorize A3 truthful isolation only after A2 exposes the selected runtime surface. The owner choice is required before exact parity/support becomes canonical or the candidate becomes coherent.
 5. Let the hostile Reviewer finish its T3 charter and stop. Supply an exact base/head/diff/evidence brief only after the Commander declares one V2 candidate coherent, and run that verdict at T3-par or higher.
 6. Do not begin implementation planning or issue decomposition without separate owner authorization.

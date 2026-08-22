@@ -178,7 +178,7 @@ Any authorized person may read a manuscript locally, and Quality Signals may ret
 
 **Verification is two workflows**, `pr` and `release`, each a single job on `windows-2025`. `pr` is the only required gate, provider-free, targeting ten minutes. A Ubuntu lane, nightly tier, Test Catalog, and quarantine registry are each deferred behind a named trigger — machinery arrives when a concrete problem appears.
 
-**Repository development uses three agent roles**: a Commander that dispatches and is sole integrator, Workers that write only their own branch, and an independent Reviewer at a task class at least equal to the work reviewed, cross-provider by default. Operating rules never depend on which model is running; a single binding table is the only provider-specific artifact.
+**Repository development uses three agent roles**: a Commander that dispatches and is sole integrator, Workers that write only their own branch, and an independent Reviewer at a task class at least equal to the work reviewed, cross-provider by default. Operating rules never depend on which model is running; Layer B is the only provider-specific policy surface, while actual dispatch logs are evidence rather than policy.
 
 **First implementation** is a throwaway store-and-index spike at 500K/1M/10M, then a read-only tracer: open a Book, import a DOCX, view it in the windowed editor, ask a source-grounded question, and have the citation resolve to an exact highlighted block range — against a thirteen-point exit gate.
 

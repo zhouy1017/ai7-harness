@@ -1,6 +1,6 @@
 # V2 Architecture Dispatch
 
-Status: **active, A1 only**
+Status: **active, A1 candidate sealed and awaiting Commander review**
 
 This is a repository-development dispatch record, not a product architecture decision. All V2 outputs remain noncanonical until owner acceptance and normal integration.
 
@@ -10,6 +10,7 @@ This is a repository-development dispatch record, not a product architecture dec
 - Commander-reviewed control and sealed packet: `c383afd2fdb5f08342cde277b7babced6c1207fc`
 - V2 work item: [Issue #4](https://github.com/zhouy1017/ai7-harness/issues/4)
 - V2 design branch: `docs/4-v2-architecture-candidate`, created at `c383afd2fdb5f08342cde277b7babced6c1207fc`
+- A1 candidate head: `80c4a6d514e351717bd35f0729c2fe7f91ded16d`, noncanonical and not yet architecture-reviewed
 - Platform/Q16/Phase-0 frozen candidate: `960689172bcf54eb3f27b57045a4ce4e9f20695d`, noncanonical
 - UI/UX frozen candidate: `587d6455f6a578d3df8a39f534ec7a057c07a18c`, noncanonical
 - Evidence inventory: [PACKET-MANIFEST.md](./PACKET-MANIFEST.md)
@@ -26,7 +27,9 @@ This is a repository-development dispatch record, not a product architecture dec
 - Worktree: `worktrees/1649`
 - Write boundary: its Issue #4 branch only
 
-The first turn is limited to A1 one-product consistency and UI parity. It must map the 79 requirements and fourteen journeys, define shared semantics versus bounded native variation, expose support/parity/accessibility/Policy-visibility options, and stop where an owner choice is required. It may not select implementation mechanisms. A2 is blocked on stable A1 invariants, not on the owner's exact parity/support choice; that choice gates canonical product promises and the coherent candidate. A3 is blocked on A1 and A2.
+The authoring Worker completed the five-file A1 candidate and validation, then stopped when its task sandbox could not create the external worktree `index.lock`. Before any replacement writer began, that task was idle and instructed to make no further changes. The Commander then transferred only the mechanical stage-and-commit recovery to Claude Code session `7bfa7b54-9b68-4d30-9d63-a9c3870647de`, Worker/T1, in the same branch and worktree. Requested and actual binding were both `claude-haiku-4-5-20251001` at low effort; no fallback occurred. The recovery Worker was denied content-edit tools, committed exactly the five pre-existing paths at `80c4a6d514e351717bd35f0729c2fe7f91ded16d`, reported a clean tree, and stopped. The candidate's authoring and review class remains T3-par; the T1 recovery does not lower it or authorize A2/A3.
+
+The completed authoring turn was limited to A1 one-product consistency and UI parity: map the 79 requirements and fourteen journeys, define shared semantics versus bounded native variation, expose support/parity/accessibility/Policy-visibility options, avoid implementation mechanisms, and stop where an owner choice is required. A2 remains blocked on stable, Commander-reviewed A1 invariants, not on the owner's exact parity/support choice; that choice gates canonical product promises and the coherent candidate. A3 remains blocked on A1 and A2.
 
 The Worker reads `PROGRESS.md` only for operational status. Inherited V1/candidate context and A1 architecture evidence are limited to the sealed packet and exact objects in its manifest. Later A2/A3 phases may collect separately Commander-authorized, exact, provenance-labeled direct evidence and probes; they still never consume another task's transcript, active worktree, or unlabeled context.
 

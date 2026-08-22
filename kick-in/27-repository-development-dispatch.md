@@ -52,7 +52,7 @@ Every returned unit of work carries one line with: role, requested provider bind
 
 ## Layer B — Bindings
 
-The binding table is **the only provider-specific artifact in this design**. Replacing a provider means replacing one row, not revising any rule in Layer A.
+This whole layer is **the only provider-specific policy surface in this design**. It contains the class-to-model table, Worker provider order, and quota fallback. Replacing a provider changes this layer, never Layer A. Operational dispatch logs may name an actual binding as evidence; they do not create another policy surface.
 
 | Class | Codex | Claude | Relative cost |
 | --- | --- | --- | --- |
@@ -69,6 +69,8 @@ Task class is the provider-neutral unit. The reviewer floor is evaluated **in ta
 Effective with the owner's 2026-08-22 revision, every task that is both suitable for parallel dispatch and bounded enough to be a Worker brief uses the matching **Claude Code** binding first. Continue assigning eligible Worker work to Claude Code while its current quota is available; do not load-balance away from it merely to conserve that quota.
 
 When a real dispatch reports that Claude Code is unavailable or its usable quota is exhausted, record the attempted binding, observed condition, time, actual fallback binding, and exact downgrade reason. Then use the same task-class Codex binding from the table. Do not repeatedly spend attempts against a known exhausted quota window; retry Claude only after availability or quota reset is evidenced. This provider order does not apply to the Commander seat, final integration, or Reviewer assignment, whose role authority, task-class floor, and independence rules remain unchanged.
+
+`T3-par` is a Commander coordination mode, not a missing Claude Worker model row. The Commander decomposes genuinely separable work into bounded T1, T2, or T3 Worker briefs; each brief applies the Claude-first order at its own class, while architecture decisions and synthesis stay with the Commander.
 
 ### Task classes
 
@@ -87,7 +89,7 @@ Codex exposes `none → low → medium → high → xhigh → max → ultra` on 
 
 Tier selection is roughly a five-fold cost swing and is the primary lever; effort is the fine dial. Sol is $5/$30 per million tokens, Terra $2.50/$15, Luna $1/$6.
 
-## Layer C — Fallback
+### Fallback
 
 | Condition | Action |
 | --- | --- |
@@ -122,7 +124,7 @@ Accepted with owner revisions:
 - Codex is the main entry and normally holds the commander seat, at top capability;
 - dispatch-eligible, bounded parallel Worker tasks use Claude Code first while its quota is available, then fall back at the same task class under the existing table; every actual binding and downgrade reason is recorded;
 - the reviewer's task class is at least that of the work it reviews, and cross-provider review is the disclosed default;
-- operating rules stay identical across providers and models, with the binding table as the only provider-specific artifact; and
+- operating rules stay identical across providers and models, with Layer B as the only provider-specific policy surface; and
 - the legacy orchestration pilot and its host connector are rejected as baselines.
 
 See [ADR 0015](../docs/adr/0015-provider-neutral-development-dispatch.md).

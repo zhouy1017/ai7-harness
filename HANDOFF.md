@@ -46,7 +46,7 @@ These are the mistakes most likely to be made by an agent arriving cold. Each ha
 
 **Do not confuse the two ledgers.** The AI7 Task Ledger holds business truth; the Harness Session Ledger alone holds model messages, turns, and tool calls. They join through Execution Bindings, never by copying transcripts.
 
-**Do not read a term across contexts.** Several words mean different things in different places — `Editorial Profile` (dimension defaults) versus `Editorial Capability Profile` (security), `Review Decision` (editorial judgment) versus a Dispatch reviewer report, `Model Role` (product, declares no provider) versus the Dispatch binding table. Check the collision table in `GLOSSARY.md` before using a term.
+**Do not read a term across contexts.** Several words mean different things in different places — `Editorial Profile` (dimension defaults) versus `Editorial Capability Profile` (security), `Review Decision` (editorial judgment) versus a Dispatch reviewer report, `Model Role` (product, declares no provider) versus the Dispatch Layer B binding policy. Check the collision table in `GLOSSARY.md` before using a term.
 
 ---
 
@@ -58,7 +58,7 @@ Repository development uses three roles, defined in `kick-in/27-repository-devel
 - **Worker** — writes only its own worktree and branch; never merges, pushes, publishes, or takes external actions
 - **Reviewer** — independent, never authored what it reviews, at a task class at least equal to the work
 
-Operating rules are provider-neutral and must never be conditioned on which model is running. A single binding table is the only provider-specific artifact.
+Operating rules are provider-neutral and must never be conditioned on which model is running. Layer B is the only provider-specific policy surface; operational usage logs are evidence, not additional policy.
 
 Branch naming, commit format, PR requirements, merge strategy, and tag format are binding and live in **`docs/agents/git-conventions.md`**. Nothing is pushed to `main` directly.
 
