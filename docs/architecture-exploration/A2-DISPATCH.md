@@ -1,6 +1,6 @@
 # A2 Codex-first capability-closure dispatch
 
-Status: **A2 Worker complete at `756f2f9`; bounded Commander-probe correction authorized before review**
+Status: **A2 complete at `4cd8250`; exact-head T3-par Standards and Spec review pending**
 
 This is a repository-development dispatch record, not canonical product architecture and not implementation authorization.
 
@@ -14,7 +14,9 @@ This is a repository-development dispatch record, not canonical product architec
 - Exact starting head: `b5076179a37f8d654e758ca0b4a8bdeec8caaaa5`.
 - All A1 Workers are stopped before this transfer. This Worker becomes the sole writer only after exact branch/head/clean-tree verification.
 
-The requested Opus Worker completed the seven-path A2 commit at `756f2f9b7de3316248834508b067e84b42a4522a` with verdict `Closure not proven` and stopped. Its own permission mode refused the two authorized local probes. The Commander then ran only those two commands read-only at `2026-08-22T14:50:23Z`: `codex --version` returned exit 0 / `codex-cli 0.147.0`; `codex app-server --help` returned exit 0 and identified the command as experimental, stdio as default, plus the displayed help surface. Session `fb73bf3a-2d6b-40fb-8d83-1aaad14beccc`, Worker/T1, is authorized to synchronize that exact evidence and correct the A1-history wording without changing the matrix dispositions or verdict, then amend only the A2 commit and stop.
+The requested Opus Worker completed the seven-path A2 commit at `756f2f9b7de3316248834508b067e84b42a4522a` with verdict `Closure not proven` and stopped. Its own permission mode refused the two authorized local probes. The Commander then ran only those two commands read-only at `2026-08-22T14:50:23Z`: `codex --version` returned exit 0 / `codex-cli 0.147.0`; `codex app-server --help` returned exit 0 and identified the command as experimental, stdio as default, plus the displayed help surface.
+
+Claude Haiku/T1 session `fb73bf3a-2d6b-40fb-8d83-1aaad14beccc` completed the first authorized synchronization pass, then its resume returned HTTP 429 `You've hit your session limit · resets 2am (Asia/Shanghai)` and reported `$0.1652621` incremental cost. The task stayed Worker/T1 and fell back under the existing binding table to GPT-5.6 Luna / medium Worker `/root/a2_probe_sync_fallback`. That Worker changed only the six authorized synchronization paths, then two Commander-identified residual wording lines, and amended only A2. Final head `4cd825028c72d57e23a56f95685d59c75f027e6a` has parent `b5076179a37f8d654e758ca0b4a8bdeec8caaaa5`; all Workers stopped cleanly. The version/help observations establish installed binary identity and help surface only, not runtime behavior or any matrix-row closure. Verdict and scores remain unchanged: 40 rows, 39 load-bearing, 0 Proven, 16 Candidate, 2 Experimental, 21 Unknown, 1 Not applicable, zero Gap claims, and zero Verified Codex Capability Gaps. Exact-head T3-par review is required before any next architecture step; A3 remains blocked.
 
 ## Question A2 must answer
 
