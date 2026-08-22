@@ -55,6 +55,8 @@ The exact Codex maintenance form—external adapter or extension, upstream contr
 
 Any later A2 claim must use a separately authorized exact tag, release, package version, commit, schema, or binary rather than moving `main`.
 
+The factual adapter-versus-source-coupling audit is recorded in [Codex Extension-Seam Evidence](./CODEX-EXTENSION-SEAMS.md). It supports an adapter/extension-first recommendation for the next owner choice but leaves the maintenance strategy noncanonical and undecided.
+
 ## Terminology boundary
 
 Codex is two different kinds of input to V2:
