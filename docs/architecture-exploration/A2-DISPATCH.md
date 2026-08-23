@@ -1,6 +1,6 @@
 # A2 Codex-first capability-closure dispatch
 
-Status: **A2 review-clean at `f1d212c5`; U2 accepted; stable `0.149.0` App Server x64 package selected as X2; artifact probe not yet authorized; A3 remains blocked**
+Status: **A2 review-clean at `f1d212c5`; U2 accepted; stable `0.149.0` App Server x64 package selected as X2; reworked static Commander probe awaiting review; all downloaded-binary execution and A3 remain blocked**
 
 This is a repository-development dispatch record, not canonical product architecture and not implementation authorization.
 

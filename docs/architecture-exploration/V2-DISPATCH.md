@@ -1,6 +1,6 @@
 # V2 Architecture Dispatch
 
-Status: **active; A1 sealed; A2 review-clean with `Closure not proven`; U2 accepted; stable `0.149.0` App Server x64 package selected as X2; artifact probe not yet authorized; A3 remains blocked**
+Status: **active; A1 sealed; A2 review-clean with `Closure not proven`; U2 accepted; stable `0.149.0` App Server x64 package selected as X2; reworked static Commander probe awaiting review; all downloaded-binary execution and A3 remain blocked**
 
 This is a repository-development dispatch record, not a product architecture decision. All V2 outputs remain noncanonical until owner acceptance and normal integration.
 
@@ -21,6 +21,7 @@ This is a repository-development dispatch record, not a product architecture dec
 - Commander-owned closure-subject scope: [A2 exact closure-subject decision](./A2-CLOSURE-SUBJECT-DECISION.md)
 - Completed read-only evidence continuation: [A2 exact Codex artifact discovery](./A2-EXACT-ARTIFACT-DISCOVERY-DISPATCH.md)
 - Commander-verified result: [A2 exact Codex artifact evidence](./A2-EXACT-ARTIFACT-EVIDENCE.md)
+- Reworked and awaiting review: [A2 selected Codex artifact static Commander probe](./A2-ARTIFACT-PROBE-DISPATCH.md)
 
 ## Design Worker
 
