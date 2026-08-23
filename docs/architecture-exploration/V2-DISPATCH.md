@@ -1,6 +1,6 @@
 # V2 Architecture Dispatch
 
-Status: **active; A1 sealed; A2 review-clean with `Closure not proven`; one owner risk clarification is next; A3 remains blocked**
+Status: **active; A1 sealed; A2 review-clean with `Closure not proven`; U2 accepted and X2 selected; exact artifact discovery is next; A3 remains blocked**
 
 This is a repository-development dispatch record, not a product architecture decision. All V2 outputs remain noncanonical until owner acceptance and normal integration.
 
@@ -17,6 +17,8 @@ This is a repository-development dispatch record, not a product architecture dec
 - Later owner direction and external evidence: [Codex-First V2 Harness Directive](./CODEX-HARNESS-DIRECTIVE.md)
 - Commander-owned owner resolution: [Clarification 0001 — Codex and DeepSeek Harness production roles](./clarifications/0001-primary-agent-harness-role.md)
 - Commander-owned gap-resolution threshold: [Clarification 0002 — Codex gap closure and DeepSeek runtime re-entry](./clarifications/0002-codex-gap-closure-and-dsh-reentry.md)
+- Commander-owned unsupported-risk resolution: [Clarification 0003 — Accept bounded unsupported Codex risk](./clarifications/0003-accept-bounded-unsupported-codex-risk.md)
+- Commander-owned closure-subject scope: [A2 exact closure-subject decision](./A2-CLOSURE-SUBJECT-DECISION.md)
 
 ## Design Worker
 
@@ -61,7 +63,9 @@ That fresh review passed Standards with zero findings and failed Spec on one P2 
 
 GPT-5.6 Luna / medium Worker `/root/a2_offline_mapping_t1` completed that amendment at exact candidate head `f1d212c5ebc5287dbc2b97a716de14b8195e2c3c` and stopped. Commander verification passed the exact three-path delta, seven-path sealed-parent range, parent/control history, clean state/diff, unchanged matrix/register/source/probe sets, `CC-44` Unknown status, evidence table shapes, and complete removal of the two false mappings. At that checkpoint fresh exact-head Spec and Standards non-regression verdicts were required; A3 and implementation remained unauthorized.
 
-Fresh read-only T3-par Standards and Spec review of exact range `b5076179a37f8d654e758ca0b4a8bdeec8caaaa5...f1d212c5ebc5287dbc2b97a716de14b8195e2c3c` both passed with zero findings, no post-target commit, clean tree/index, and clean diff check. They re-derived the complete matrix, register/source/probe sets, binding/span and capability-guard contracts, DeepSeek gate, and every scope boundary; both disclosed `same-provider review — independence reduced for the corrected A2 content`. The reviewed result remains noncanonical `Closure not proven`, with no verified Codex Capability Gap, no DeepSeek runtime admission, and no selected maintenance form. The Commander will now use `grill-with-docs` for exactly `DQ-A2-01`; `DQ-A2-02` remains a Commander-owned artifact-scope choice, and formal maintenance-policy Question 3 remains premature without a verified gap.
+Fresh read-only T3-par Standards and Spec review of exact range `b5076179a37f8d654e758ca0b4a8bdeec8caaaa5...f1d212c5ebc5287dbc2b97a716de14b8195e2c3c` both passed with zero findings, no post-target commit, clean tree/index, and clean diff check. They re-derived the complete matrix, register/source/probe sets, binding/span and capability-guard contracts, DeepSeek gate, and every scope boundary; both disclosed `same-provider review — independence reduced for the corrected A2 content`. The reviewed result remained noncanonical `Closure not proven`, with no verified Codex Capability Gap, no DeepSeek runtime admission, and no selected maintenance form. At that checkpoint the Commander proceeded to `DQ-A2-01`; `DQ-A2-02` remained a Commander-owned artifact-scope choice, and formal maintenance-policy Question 3 remained premature without a verified gap.
+
+The owner selected **U2** for `DQ-A2-01`. Clarification 0003 preserves the vendor's Experimental/unsupported fact while allowing one exact App Server artifact to continue under explicit owner-accepted risk and mandatory fail-closed controls; it grants no unqualified closure pass or implementation. The Commander then exercised its recorded `DQ-A2-02` authority and selected **X2**: identify an obtainable exact published release, package version, or binary before any re-score. The candidate stays frozen until a separately authorized evidence task returns that identity; A3, DeepSeek re-entry, maintenance-form selection, and implementation remain blocked.
 
 The completed A1 authoring turn was limited to one-product consistency and UI parity: map the 79 requirements and fourteen journeys, define shared semantics versus bounded native variation, expose support/parity/accessibility/Policy-visibility options, avoid implementation mechanisms, and stop where an owner choice is required. At that point A2 was blocked on stable, Commander-reviewed A1 invariants, not on the owner's exact parity/support choice; that choice still gates canonical product promises and the coherent candidate. A3 now remains blocked on A2's lack of a selected or decision-ready exact runtime surface.
 
@@ -82,6 +86,8 @@ The Commander writes the exact question, answer, acceptance status, provenance, 
 Clarification 0001 resolves one branch now: if A2 proves Codex Harness Capability Closure, Codex is the only Primary Agent Harness and DeepSeek Harness is a Development Reference Framework with no production dependency or fallback role. It does not claim closure and does not authorize A2 before the A1 gate.
 
 Clarification 0002 resolves the failed-closure threshold: a Codex gap is handled first through verified, costed Codex secondary development. DeepSeek may re-enter runtime comparison only when Codex lacks the exact capability and an exact DeepSeek surface proves a mature substitute; even then it requires comparison and a new owner choice, never automatic fallback. The exact Codex adapter/upstream/patch/fork form remains open.
+
+Clarification 0003 resolves only the unsupported-dependency risk threshold: the owner accepts U2 for one exact Codex App Server artifact under named controls. Evidence maturity remains truthful, and the Commander—not the Worker—selects the exact closure subject. No transcript or abbreviated `U2` token may substitute for the exact clarification object.
 
 ## Hostile Reviewer
 

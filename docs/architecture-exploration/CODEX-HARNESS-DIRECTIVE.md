@@ -1,6 +1,6 @@
 # Codex-First V2 Harness Directive
 
-Status: **owner-stated V2 design direction; exact integration remains noncanonical and evidence-gated**
+Status: **owner-stated V2 direction with accepted bounded unsupported-risk threshold; exact integration remains noncanonical and evidence-gated**
 
 Recorded: **2026-08-21**
 
@@ -32,6 +32,12 @@ DeepSeek may return to runtime comparison only when an exact Codex Capability Ga
 
 The exact Codex maintenance form—external adapter or extension, upstream contribution, maintained patch set, or fork—remains open. No source modification or implementation is authorized during this design phase.
 
+## Owner resolution: unsupported App Server risk
+
+The owner accepted **U2** in [Clarification 0003](./clarifications/0003-accept-bounded-unsupported-codex-risk.md): AI7 may continue evaluating one exact Codex App Server artifact despite its experimental and unsupported-for-production classification, but only as an explicit bounded risk behind the AI7-owned module, exact artifact/schema fingerprints, fail-closed drift handling, release gates, and an exit plan.
+
+This changes risk appetite, not evidence truth. The support classification remains Experimental; unrelated Unknown or Experimental capabilities remain unresolved; and no dependency, implementation, A3 entry, DeepSeek re-entry, or unqualified closure pass follows. The Commander separately selected X2 in [A2 exact closure-subject decision](./A2-CLOSURE-SUBJECT-DECISION.md): identify an obtainable exact published artifact before re-scoring.
+
 ## Verified source basis
 
 ### Official OpenAI platform article
@@ -55,7 +61,7 @@ The exact Codex maintenance form—external adapter or extension, upstream contr
 
 Any later A2 claim must use a separately authorized exact tag, release, package version, commit, schema, or binary rather than moving `main`.
 
-The factual adapter-versus-source-coupling audit is recorded in [Codex Extension-Seam Evidence](./CODEX-EXTENSION-SEAMS.md). It supports an adapter/extension-first recommendation for the next owner choice but leaves the maintenance strategy noncanonical and undecided. It also records the unresolved official-source tension between app-server's recommended deep-integration role and its current experimental, unsupported-for-production command status; A2 must not describe it as production-ready without new exact evidence or an accepted risk decision.
+The factual adapter-versus-source-coupling audit is recorded in [Codex Extension-Seam Evidence](./CODEX-EXTENSION-SEAMS.md). It supports an adapter/extension-first recommendation for a later maintenance choice but leaves that strategy noncanonical and undecided. It also records the official-source tension between app-server's recommended deep-integration role and its current experimental, unsupported-for-production command status. Clarification 0003 accepts that support risk narrowly; A2 must still preserve the vendor classification and must not describe the surface as supported, stable, or production-ready.
 
 ## Terminology boundary
 
