@@ -1,6 +1,6 @@
 # V2 Architecture Dispatch
 
-Status: **active; A1 sealed; A2 static-evidence re-score review-clean at `8eb70e3` with `Closure not proven`; exact tool-surface source-audit evidence review-clean at `91554647`; a separate metadata/lexical path-discovery brief awaits review; candidate writing, semantic trace, runtime and downloaded-binary execution, DeepSeek re-entry, maintenance selection, and A3 remain blocked**
+Status: **active; A1 sealed; A2 static-evidence re-score review-clean at `8eb70e3` with `Closure not proven`; exact path-discovery dispatch review-clean at `e5e21c9`, but its first attempt self-invalidated; a fresh retry brief awaits review; candidate writing, semantic trace, runtime and downloaded-binary execution, DeepSeek re-entry, maintenance selection, and A3 remain blocked**
 
 This is a repository-development dispatch record, not a product architecture decision. All V2 outputs remain noncanonical until owner acceptance and normal integration.
 
@@ -28,7 +28,9 @@ This is a repository-development dispatch record, not a product architecture dec
 - Independently review-clean at `8eb70e3`: [A2 exact-artifact static-evidence re-score](./A2-STATIC-EVIDENCE-RESCORE-DISPATCH.md); current result remains `Closure not proven`
 - Independently review-clean at `27891bab`: [A2 exact Codex tool-surface source-audit dispatch](./A2-TOOL-SURFACE-SOURCE-AUDIT-DISPATCH.md)
 - Independently review-clean at `91554647`: [A2 exact Codex tool-surface source-audit evidence](./A2-TOOL-SURFACE-SOURCE-AUDIT-EVIDENCE.md); four rows remain Unknown and `BLK-A2-03` remains open
-- Prepared and blocked pending exact-head review: [A2 exact Codex tool-surface path-discovery dispatch](./A2-TOOL-SURFACE-PATH-DISCOVERY-DISPATCH.md)
+- Independently review-clean at `e5e21c9`: [A2 exact Codex tool-surface path-discovery dispatch](./A2-TOOL-SURFACE-PATH-DISCOVERY-DISPATCH.md)
+- First attempt stopped fail-closed with no admitted result: [A2 path-discovery attempt evidence](./A2-TOOL-SURFACE-PATH-DISCOVERY-ATTEMPT-EVIDENCE.md)
+- Prepared and blocked pending exact-head review: [A2 path-discovery retry dispatch](./A2-TOOL-SURFACE-PATH-DISCOVERY-RETRY-DISPATCH.md)
 
 ## Design Worker
 
@@ -96,6 +98,8 @@ Current official App Server documentation describes the model-visible tool surfa
 After two bounded corrections, exact dispatch head `27891babd60baf7580a1be2368a61b0f07fb61a4` passed independent Standards and Spec review with zero findings and `same-provider review — independence reduced`. The read-only T3 audit matched all 43 exact source blobs and distinguished the five exposure planes without changing a row. Separate T2 source-fact and scope/provenance checks both passed. [The Commander source-audit evidence](./A2-TOOL-SURFACE-SOURCE-AUDIT-EVIDENCE.md) records no immutable start/resume/fork/model/turn closure: `CC-16`–`CC-19` remain Unknown, `BLK-A2-03` remains open, and the exact candidate remains frozen at `8eb70e3`. At that checkpoint this synthesis still required fresh exact-head review; even a clean review would authorize only a separate missing-path discovery/trace brief, not a candidate write, runtime probe, gap verdict, A3, DeepSeek re-entry, maintenance choice, or implementation.
 
 Independent T3-par Standards and Spec review then passed exact evidence head `915546477ca875494c7b3eb9c2d764d4513b328b` with zero findings and `same-provider review — independence reduced`. [The separate path-discovery dispatch](./A2-TOOL-SURFACE-PATH-DISCOVERY-DISPATCH.md) limits the next Worker to all 43 reviewed metadata rows plus zero-snippet lexical extraction over their 42 Rust-source rows and the three fixed leads. It freezes path identities for a later separately reviewed trace but reads no newly resolved source and changes no candidate row. Until this new brief itself passes both review axes, no Worker may run it; semantic tracing, candidate writing, re-score, runtime, gap verdict, A3, DeepSeek comparison, maintenance choice, and implementation remain blocked.
+
+After iterative deterministic-protocol corrections, both T3-par axes passed exact dispatch head `e5e21c90643366b6a81f9f13841d705ee263f9f4` with zero findings and `same-provider review — independence reduced`. The first read-only T2 attempt freshly matched every allowed identity but found that its own extractor violated the reviewed resolution-code precedence. It discarded source bytes, admitted no provisional output, exhausted the attempt's request ceiling, and stopped. [The evidence](./A2-TOOL-SURFACE-PATH-DISCOVERY-ATTEMPT-EVIDENCE.md) preserves that failure without converting it into an absence or capability claim. [The retry brief](./A2-TOOL-SURFACE-PATH-DISCOVERY-RETRY-DISPATCH.md) adds pre/post synthetic conformance vectors and requires wholly fresh bytes; it authorizes nothing until exact-head review passes.
 
 The completed A1 authoring turn was limited to one-product consistency and UI parity: map the 79 requirements and fourteen journeys, define shared semantics versus bounded native variation, expose support/parity/accessibility/Policy-visibility options, avoid implementation mechanisms, and stop where an owner choice is required. At that point A2 was blocked on stable, Commander-reviewed A1 invariants, not on the owner's exact parity/support choice; that choice still gates canonical product promises and the coherent candidate. A3 now remains blocked until separately authorized artifact probes and a later A2 evidence decision make the selected exact runtime surface decision-ready.
 
