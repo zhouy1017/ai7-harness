@@ -1,6 +1,8 @@
 # A1 evidence crosswalk
 
-Status: **Issue #4 noncanonical evidence analysis; no requirement or journey is promoted by this document**
+Status: **historical noncanonical reference; non-gating under ADR 0027 and Clarification 0004**
+
+> This crosswalk preserves useful requirement and journey semantics. Its counts, exact-object mapping, evidence gaps, macOS discussion, and validation language are not V2 acceptance criteria, proof requests, CI inputs, or owner blockers. Current decisions live in [README](./README.md), [Architecture](./ARCHITECTURE.md), and [Decision Queue](./DECISION-QUEUE.md).
 
 This crosswalk replaces the UI candidate's broad source aliases with exact, manifest-admitted Git objects. It covers all **79/79** numbered candidate requirements and all **14/14** candidate journeys. A row says which accepted record owns the semantic claim; it does not accept the candidate screen, geometry, mechanism, state enum, or validation status.
 

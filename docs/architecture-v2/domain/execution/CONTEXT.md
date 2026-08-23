@@ -1,51 +1,42 @@
 # Execution (V2 candidate)
 
-Status: **Issue #4 candidate-local noncanonical context; not a canonical term owner**
+Status: **candidate-local definition owner; noncanonical**
 
-This file is the definition owner for the execution-layer terms created by the exact owner resolutions registered in A1 and by the later U2 owner resolution admitted in A2. It is **candidate-local**: it belongs to the `docs/architecture-v2/` Issue #4 candidate only. It does not amend, supersede, or extend the canonical [Execution context](../../../domain/execution/CONTEXT.md) at `main@c8cbe26`, and none of its terms is a canonical AI7 term until the owner accepts the candidate and the Commander integrates it.
-
-Every term below is **conditional vocabulary**. Defining a term names a possible future state or a candidate-local risk disposition; it does not make that state canonical. A2 returns `Closure not proven`, proves no capability gap, selects no production runtime or dependency, and chooses no maintenance form. U2 changes the owner's bounded risk appetite for the selected closure subject; it does not change those technical results.
-
-The bilingual index for these terms — including collisions with canonical labels — is the candidate [GLOSSARY](../../GLOSSARY.md). The conditional disposition that uses them is candidate [ADR 0001](../../adr/0001-conditional-primary-agent-harness-and-gap-closure.md). Their exact owner basis is [OR-2026-08-21-01](../../DECISION-QUEUE.md#or-2026-08-21-01--conditional-primary-agent-harness-role-resolved-not-pending), [OR-2026-08-21-02](../../DECISION-QUEUE.md#or-2026-08-21-02--codex-gap-closure-and-deepseek-runtime-re-entry-resolved-not-pending), and [DQ-A2-01](../../DECISION-QUEUE.md#dq-a2-01--unsupported-dependency-acceptance-threshold-resolved-u2-not-pending).
+This context defines only V2-specific execution roles. All established AI7 terms retain their canonical definitions in [`docs/domain/execution/CONTEXT.md`](../../../domain/execution/CONTEXT.md), especially Task Ledger, Run Record, Harness Session Ledger, Execution Binding, Harness Execution Span, Task Skill Activation, Capability Grant, Provider Resolution Plan, Run Authorization, Effect Approval, Effect Receipt, Resume, Retry, Redo, and Replay.
 
 ## Language
 
-### Runtime roles
-
 **Primary Agent Harness** (`主代理执行框架`):
-The single framework that supplies AI7's generic agent loop in production — model conversation, context assembly, turn progression, model invocation, tool dispatch, streamed technical events, and in-turn recovery. Exactly one may exist for a production Run.
-_Avoid_: agent runtime, execution engine, the harness, primary harness.
+The single production framework that supplies AI7's generic model conversation, context assembly, turn progression, model invocation, tool dispatch, streamed technical events, compaction, subagent mechanics where used, and in-turn recovery. In the V2 candidate this role is assigned to Codex. AI7 retains every product and business authority.
+_Avoid_: AI7 runtime, product authority, generic harness, second loop.
 
 **Development Reference Framework** (`开发参考框架`):
-A framework AI7 studies but never ships: its rules, patterns, checklists, and documentation experience may be re-expressed in AI7-owned records and assets, while it contributes no package, process, Session, tool, capability grant, fallback executor, runtime authority, or user-facing branding.
-_Avoid_: reference implementation, inspiration source, secondary harness.
+A framework used only for development rules, architecture and composition experience, checklists, and documentation guidance. It contributes no product dependency, executable, process, Session authority, tool surface, fallback, branding, or capability grant. In V2 this describes DeepSeek Harness.
+_Avoid_: secondary harness, backup runtime, reference implementation.
 
-### Evidence results
-
-**Harness Capability Closure** (`执行框架能力闭合`):
-The evidence result that one exact candidate surface supplies every load-bearing AI7 agent-loop capability, either natively or through a narrow AI7 adapter that does not reproduce a second generic loop. `Codex Harness Capability Closure` is this result evaluated against an exact Codex surface. A2 has defined, frozen, and evaluated the 44-row matrix at `Closure not proven`; future exact evidence must make every load-bearing row `Proven` before closure. Compilation, repository shape, an official article, or a feature impression is not this result.
-_Avoid_: feature coverage, parity, capability match, "it can do everything".
-
-**Codex Capability Gap** (`Codex 能力缺口`):
-A verified finding that a load-bearing AI7 requirement cannot be satisfied by an exact Codex component, pin, protocol, and supported configuration. Missing documentation, an undiscovered seam, or an untested assumption is a claim, not this finding.
-_Avoid_: Codex limitation, missing feature, blocker.
-
-**Mature Runtime Alternative** (`成熟运行时替代方案`):
-An exact non-Codex surface proven obtainable, license- and platform-compatible, maintained, and testable, with credible lifecycle, persistence, security, upgrade, packaging, and verification behavior. A repository feature, design document, unpublished package, or marketing claim does not establish it.
-_Avoid_: viable option, backup runtime, second harness.
-
-### Risk disposition
-
-**Accepted Unsupported Dependency Risk** (`已接受的不受支持依赖风险`):
-An explicit owner decision that permits continued evaluation—and later candidate use—of one exact vendor-unsupported dependency under named fail-closed controls, suspension conditions, and an exit plan. It changes production risk appetite, not the dependency's factual support or maturity classification and not the evidence score of unrelated capabilities. It is neither a support claim, dependency selection, capability proof, Codex Capability Gap, Effect or authorization record, nor implementation authority.
-_Avoid_: supported dependency, accepted dependency, approved risk, production approval.
-
-### Remedies and gates
+**Primary Agent Harness Adapter** (`主代理执行框架适配器`):
+The AI7-owned module in the Node service that presents AI7-shaped execution operations while hiding Codex protocol, process, technical-session, tool-event, provider-invocation, storage, and source-build details. It writes no AI7 domain record and grants no authority.
+_Avoid_: agent loop, capability facade, provider broker.
 
 **Codex Secondary Development** (`Codex 二次开发`):
-AI7-owned work that closes a verified Codex Capability Gap while preserving one Primary Agent Harness and every AI7 authority boundary. It is costed across implementation, testing, security, licensing and notices, platform behavior, upstream updates, protocol migration, and long-term maintenance. Its form — external adapter or extension, upstream contribution, maintained patch set, or fork — is an open question, not a property of the term.
-_Avoid_: patching Codex, customization, extending Codex.
+Bounded AI7 engineering through Codex public seams or a small maintained Codex source build/fork to supply missing integration behavior while retaining Codex as the one Primary Agent Harness. It is an ordinary implementation option, not a capability-gap proof programme.
+_Avoid_: AI7 agent loop, Codex app clone, automatic DeepSeek re-entry.
 
-**DeepSeek Runtime Re-entry Gate** (`DeepSeek 运行时重评关口`):
-The two-condition test that must pass before DeepSeek Harness may be compared as a production runtime again: a proven Codex Capability Gap that remains unclosed, and an exact DeepSeek surface proven to be a Mature Runtime Alternative. Passing it admits comparison and returns a new choice to the owner; it never selects DeepSeek, creates automatic fallback, permits dual runtimes, or authorizes a second agent loop.
-_Avoid_: DeepSeek fallback, failover path, dual-runtime mode, reopening DeepSeek.
+**Implementation Assumption** (`实现假设`):
+A design-stage expectation about Codex or platform behavior paired with a bounded response if implementation finds otherwise. It records uncertainty without creating an evidence task, validation gate, authority, or product promise.
+_Avoid_: verified capability, defect, acceptance test, owner blocker.
+
+**Codex Desktop-like Interaction Reference** (`Codex Desktop 式交互参考`):
+Principles for task capture, context, progress, interruption, clarification, history, and review that AI7 may reinterpret for professional editorial work. It licenses no Codex branding, layout, source, assets, generic chat hierarchy, coding presets, or coding-agent purpose.
+_Avoid_: Codex UI baseline, component library, product shell.
+
+## Retained boundaries
+
+- The AI7 Task Ledger and domain ledgers own business truth; the Harness Session Ledger owns Codex technical history.
+- Execution Bindings and Harness Execution Spans correlate ledgers without copying transcripts or transferring authority.
+- Run Authorization, execution-layer approval, Effect Approval, editorial decisions, Public Release Permission, and Effect Receipts remain distinct.
+- Resume continues the same unchanged Run, Retry creates a new safe attempt, Redo creates a new authorized Run, and Replay performs no execution.
+- Provider Preflight and the Provider Resolution Plan bind providers, fallback, outbound data, credentials, and budget before execution.
+- The Task Skill Activation and Capability Grants are enforced at both the Codex-facing tool guard and the AI7 Capability Facade.
+
+The former candidate terms Harness Capability Closure, Codex Capability Gap, Mature Runtime Alternative, and DeepSeek Runtime Re-entry Gate are retired from active V2 language because Clarification 0004 removed the proof ladder. A future DeepSeek runtime proposal is simply a new explicit owner decision.
