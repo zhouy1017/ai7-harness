@@ -1,6 +1,6 @@
 # V2 Architecture Dispatch
 
-Status: **active; A1 sealed; A2 review-clean with `Closure not proven`; U2 accepted; stable `0.149.0` App Server x64 package selected as X2; first static evidence review-clean; exact Directory-terminal plan correction awaiting review; all downloaded-binary execution and A3 remain blocked**
+Status: **active; A1 sealed; A2 review-clean with `Closure not proven`; U2 accepted; stable `0.149.0` App Server x64 package selected as X2; first static evidence review-clean; corrected static retry review-clean and Commander-authorized; all downloaded-binary execution and A3 remain blocked**
 
 This is a repository-development dispatch record, not a product architecture decision. All V2 outputs remain noncanonical until owner acceptance and normal integration.
 
@@ -23,7 +23,7 @@ This is a repository-development dispatch record, not a product architecture dec
 - Commander-verified result: [A2 exact Codex artifact evidence](./A2-EXACT-ARTIFACT-EVIDENCE.md)
 - Executed once with a fail-closed result: [A2 selected Codex artifact static Commander probe](./A2-ARTIFACT-PROBE-DISPATCH.md)
 - Independently review-clean at `0e4fe465`: [A2 selected Codex artifact static-probe evidence](./A2-STATIC-ARTIFACT-PROBE-EVIDENCE.md)
-- Exact Directory-terminal correction awaiting independent review: [A2 selected Codex artifact static Commander probe](./A2-ARTIFACT-PROBE-DISPATCH.md)
+- Review-clean corrected static retry authorized at `711f676b`: [A2 selected Codex artifact static Commander probe](./A2-ARTIFACT-PROBE-DISPATCH.md)
 
 ## Design Worker
 
@@ -77,6 +77,8 @@ The Commander issued that separate task as a read-only T2 artifact-discovery bri
 After independent plan review passed, the Commander ran its static acquisition/integrity scope once. P1 matched the exact official size, SHA-256, release/tag object, and peeled source commit. P2 then stopped before extraction because the reviewed empty-segment rule rejected the admitted header name `bin/`. The task directory was validated and removed, both repositories remained clean, and no downloaded binary ran. The result is `probe failed`, not artifact invalidity or a Codex Capability Gap. The evidence unit and any later directory-terminal rule must receive separate exact-head review; no rerun or later phase is implied.
 
 Exact-head T3-par Standards and Spec review of the amended evidence unit passed with zero findings at `0e4fe4657ca4d2f2154178ce59d982aef2c37b12`; both disclosed `same-provider review — independence reduced`. A separately committed plan correction now permits exactly one terminal `/` to be structural only when the captured `TarReader` type is exactly `Directory`, keeps every other empty-segment and archive-safety rejection, and binds raw name/type/canonical path/size/order across both passes. It remains unreviewed and authorizes no second GET.
+
+Both T3-par review axes then passed the exact plan-correction head `711f676b98c69dda2f541b9de3f2096eb45c16f7` with zero findings and the same-provider disclosure. The Commander authorizes one new static attempt using exact blob `011c6bbf215cd42e8feabfd4bf93a910b1a70df4`, 16,511 bytes. It must reacquire the official package in a new task directory and may not execute any selected binary; no later phase or candidate change follows automatically.
 
 The completed A1 authoring turn was limited to one-product consistency and UI parity: map the 79 requirements and fourteen journeys, define shared semantics versus bounded native variation, expose support/parity/accessibility/Policy-visibility options, avoid implementation mechanisms, and stop where an owner choice is required. At that point A2 was blocked on stable, Commander-reviewed A1 invariants, not on the owner's exact parity/support choice; that choice still gates canonical product promises and the coherent candidate. A3 now remains blocked until separately authorized artifact probes and a later A2 evidence decision make the selected exact runtime surface decision-ready.
 
