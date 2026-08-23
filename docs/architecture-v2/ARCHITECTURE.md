@@ -85,10 +85,13 @@ The service is the only local product authority and contains these cohesive modu
 | Policy and Authority | Policy Documents, activation, named decisions, Effect intents/approvals, replay policy, receipts and reconciliation. |
 | Capability Facade | Domain-shaped operations, scope enforcement, per-Run activation, import/export and research boundaries. |
 | Provider and Credential | Model-role resolution, Provider Preflight, approved fallback, outbound-data category, opaque credentials. |
+| Provider Payload/Egress Gate | AI7-owned final inspection of the complete model-bound payload immediately before transmission. |
 | Editorial Intelligence | Context assembly inputs, factual review, proposal formation, quality signals, editorial memory and learning lineage. |
 | Primary Agent Harness Adapter | The only bridge to Codex technical sessions, turns, tools, events, interruption and compaction. |
 
 The service may schedule multiple Runs, model-free background work, indexing, and learning jobs. Codex owns only the generic agent turns inside agent executions; AI7 owns why those executions exist and what may follow from them.
+
+Indexing, Exact Fetch, deterministic policy evaluation, persistence, and other model-free work may run directly in AI7 services. **Every model-driven operation**—including editorial analysis, factual review, proposal generation, learning or policy candidates, and subagent work—must run through the sole `PrimaryAgentHarness`. No AI7 module calls a model provider around the adapter.
 
 ## Ownership and authority
 
@@ -123,10 +126,12 @@ Local manuscript access and editing work without Codex, a model provider, creden
 2. Provider Preflight resolves Model Roles, provider bindings, approved fallback, outbound-data category, credentials, and budget.
 3. AI7 creates an Execution Plan, a machine-authoritative Plan Envelope, and a human-readable Plan Preview.
 4. Run Authorization creates a Run Record; it grants no Effect Approval, Proposal Decision, Review Decision, or Public Release Permission.
-5. AI7 creates an execution attempt and persists an Execution Binding to the prepared Codex technical session before a model turn can invoke a capability.
-6. The adapter submits the turn and translates Codex technical events into a small AI7 event projection for the UI.
-7. Every capability request passes both the Codex-facing tool guard and the AI7 Capability Facade. The facade rechecks the exact activation, grant, scope, plan, provider, and policy state.
-8. AI7 persists proposals, findings, clarification requests, usage, and the Task Outcome in their owning records. A Codex terminal event is only technical history.
+5. AI7 creates an execution attempt and persists its one immutable Execution Binding to one Codex Session lineage before a model turn can invoke a capability. The binding also pins the exact AI7 behavior-composition version and digest: instructions, context-selection rules, compaction policy, subagent policy, and disabled-default policy.
+6. Immediately before every model call, the AI7-owned **Provider Payload/Egress Gate** evaluates the final complete payload—not only newly selected context—including prior Session content, compaction summaries, tool results, default instructions, and subagent context. It transmits only when the payload matches the Run Source Scope, Provider Resolution Plan, and Outbound Data Category; otherwise it fails closed.
+7. The adapter submits the turn and translates Codex technical events into a small AI7 event projection for the UI.
+8. Every capability request passes both the Codex-facing tool guard and the AI7 Capability Facade. The facade rechecks the exact activation, grant, scope, plan, provider, and policy state.
+9. Capability and Effect outcomes return through the adapter only after AI7 classifies and persists the authoritative result or ambiguity.
+10. AI7 persists proposals, findings, clarification requests, usage, and the Task Outcome in their owning records. A Codex terminal event is only technical history.
 
 ### Proposal and Effect
 
@@ -149,6 +154,7 @@ AI7 advances a deliverable through deterministic workflow commands. Review Decis
 | AI7 service crash | On-disk manuscript, domain ledgers, command outbox, receipts, and continuation checkpoints | Recover the service first. Renderer or Codex state cannot advance business records independently. |
 | Codex process/protocol failure | AI7 Run and attempt plus the last exact Harness Execution Span reference | Mark technical execution interrupted or indeterminate; preserve the Run; never fabricate Task Outcome or Effect failure. |
 | Provider failure before any ambiguous external action | Frozen Approved Fallback Chain and policy | Use only the next compatible approved binding when AI7 classifies retry as safe. |
+| Final provider payload violates scope or egress policy | Complete assembled payload plus the bound Run Source Scope, Provider Resolution Plan, and Outbound Data Category | Refuse transmission, pause the execution, and expose a safe AI7 reason without sending any part of the payload. |
 | Ambiguous provider or external Effect outcome | Effect identity, attempt, request and observed evidence | Stop automatic retry and fallback; require reconciliation or Manual Outcome Resolution. |
 | Capability refusal or scope drift | Current Plan Envelope, activation, grants and Run Source Scope | Refuse with no side effect. Material drift requires Plan Revision and renewed Run Authorization. |
 | User pause | Same Run and current attempt state | Stop dispatch at a safe boundary and retain a continuation checkpoint. |
@@ -165,7 +171,9 @@ The logical causal graph has two ledgers:
 - the **AI7 Task Ledger** owns Task Intents, Run Records, attempts, commands, decisions, Effects, outcomes, workflow references, and provenance; and
 - the **Harness Session Ledger** owns Codex messages, Threads, Turns, Items, tool calls/results, compaction, diagnostics, and technical attempt history.
 
-An immutable AI7 Execution Binding correlates the ledgers using exact identities and semantic digests. Harness Execution Spans identify the exact technical ranges for dispatch, Resume, or Retry. Bindings carry references, never copied transcript content or transferred authority.
+The cardinality is explicit: one Run owns one or more attempts; each attempt owns exactly one immutable Execution Binding and exactly one Codex Session lineage; each binding may reference one or more Harness Execution Spans. A Session lineage may never cross Run, Book, Run Source Scope, Provider Resolution Plan, or Outbound Data Category boundaries. Resume within the same attempt may add a new span only under the identical binding. Retry creates a new attempt, binding, and Session lineage. Permission expansion requires a Plan Revision and renewed Run Authorization and can never mutate an existing binding; continuing work receives a newly bound attempt, or Redo when Run semantics change. A live permission reduction may immediately refuse a call or pause/interrupt execution; the historical binding remains immutable.
+
+Bindings pin exact identities and semantic digests, including the AI7 behavior composition. Harness Execution Spans identify the exact technical ranges for dispatch, Resume, or Retry. Bindings carry references, never copied transcript content or transferred authority.
 
 All product persistence sits under AI7-controlled locations inside the Agent Data Root except the Protected Secret Store. The portable channel keeps data inside the AI7 folder; the installer normally uses `%LOCALAPPDATA%\AI7`. Secrets never travel with a portable folder. Manuscripts and their derivatives never enter repositories, hosted CI, build artifacts, or shipped fixtures.
 

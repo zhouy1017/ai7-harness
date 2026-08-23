@@ -14,6 +14,7 @@ V2 proceeds with Codex as the sole Primary Agent Harness. When implementation en
 | AI7 can expose domain capabilities through a Codex-supported tool seam. | Codex selects tools while AI7 retains authorization and execution. | Adapt the tool protocol or add a narrow contributor hook in Codex source. |
 | AI7 can intercept or pre-answer Codex execution approval requests. | Editors see AI7 decisions, not generic safety prompts. | Disable the Codex prompt path and route the technical decision through the adapter. Codex approval never becomes domain authority. |
 | Provider/model selection can be supplied per bound execution. | Provider Preflight remains AI7-owned and models stay replaceable. | Add a provider gateway or source hook behind the adapter; do not let Task Skills or Codex select an unapproved provider. |
+| AI7 can inspect the final complete Codex payload immediately before each model transmission. | The Provider Payload/Egress Gate can enforce scope and egress after Session history, compaction, tool results, subagent context, and defaults are assembled. | Move final assembly/transmission behind an AI7 provider gateway or add a Codex source hook; if the complete payload cannot be checked, send nothing. |
 | Credentials can be delivered transiently without entering Session content or diagnostics. | The Credential Broker remains the sole secret resolver. | Add a brokered credential channel in the adapter/source build or isolate the provider gateway. |
 | Approved provider fallback can be constrained by AI7. | Safe fallback follows the frozen Provider Resolution Plan. | Disable Codex-managed fallback and perform only AI7-classified safe continuation through a new technical span. |
 | Concurrent Codex executions can be isolated. | A bounded shared process or pool may be used. | Supervise one Codex process per Run or use isolated pools with per-execution storage, scratch, cache, and scope. |
@@ -25,5 +26,16 @@ V2 proceeds with Codex as the sole Primary Agent Harness. When implementation en
 | Codex Desktop-like task/progress/review principles translate to professional editorial work. | AI7 gains a familiar, legible agent interaction without becoming a chat clone. | Adjust AI7-owned interaction design around editor workflows; never copy Codex layout or branding. |
 | Manuscript scale and durability remain independent of model context and Codex memory. | The paging store, bounded editor, retrieval, and Exact Fetch carry long-document work. | Reduce model context further and stream through AI7 capabilities; never place a whole manuscript in the renderer or one model turn. |
 | A small maintained Codex source build remains materially smaller than owning a second harness. | Direct secondary development is a pragmatic option. | If changes grow into an independent platform or change authority, return the expanded choice to the owner before proceeding. |
+
+## Accepted implementation risks
+
+These risks are consciously accepted under the design-first/E2E-only policy. Their responses are runtime fail-closed behavior, not new validation, audit, review, probe, or proof tasks.
+
+| Accepted risk | What may go wrong | Fail-closed response |
+| --- | --- | --- |
+| Maintained Codex source build/fork | The local difference grows, drifts from upstream, or no longer matches the adapter's expected behavior. | Do not start or continue the harness on an unknown source/integration identity; keep the difference behind the adapter, and return to the owner only if it becomes a broad independent platform or authority change. |
+| E2E-only CI blind spots | Performance, security, provider, packaging, protocol, or rare edge-case regressions may escape CI. | At runtime, refuse any execution whose binding, scope, payload egress, capability authority, or Effect outcome cannot be established. When a user-visible bug is observed, fix it and add the applicable E2E regression; do not create a separate gate. |
+| Long-manuscript cursor and selection drift | A bounded editor cursor or selection may become stale or ambiguous after revision, window, block, or structure changes. | Bind every consequential cursor/range to branch, Manuscript Revision, stable block identity, offsets/range, and digest as applicable. If exact re-resolution is stale or ambiguous, refuse mutation/apply and require refresh or explicit reselection. |
+| Codex Desktop-like interaction drift | Task/progress/history patterns may slide into a coding chat, hide Book/scope/authority, or make the Codex thread appear authoritative. | Keep Book, manuscript, workflow, evidence, proposal, and named AI7 decisions as the visible anchors. If exact target, scope, or authority is not visible/understood at a consequential action, disable the action until AI7 context is restored. |
 
 The former exact-artifact, capability-score, proof, and probe questions are historical reference only. None is carried forward as a prerequisite, planned validation task, or CI surface.
