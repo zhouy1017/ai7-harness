@@ -1,6 +1,6 @@
 # A2 selected Codex artifact static-probe evidence
 
-Status: **Commander probe failed closed during the first archive-header pass; evidence unit awaiting independent review; no binary executed, no candidate changed, and no rerun is authorized**
+Status: **Commander probe failed closed during the first archive-header pass; exact evidence content passed independent Standards and Spec review at `0e4fe465`; no binary executed, no candidate changed, and no rerun is authorized**
 
 Recorded: **2026-08-23**
 

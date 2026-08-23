@@ -1,6 +1,6 @@
 # A2 selected Codex artifact static Commander probe
 
-Status: **amended after second independent re-review; static acquisition/integrity probe not yet executed; all selected binaries remain unexecuted; candidate writing and A3 remain stopped**
+Status: **amended after review-clean first-attempt evidence; static retry not authorized until this exact correction passes independent review; all selected binaries remain unexecuted; candidate writing and A3 remain stopped**
 
 Recorded: **2026-08-23**
 
@@ -27,6 +27,11 @@ Read these immutable objects with `git show <commit>:<path>`:
 3. Owner U2 risk decision:
    - `4704043d68da67f74d19dc2f2e3c798d5bd12dc2:docs/architecture-exploration/clarifications/0003-accept-bounded-unsupported-codex-risk.md`
    - blob `921983e817668b1a51f4799c4942e265ba4280a5`, 5661 bytes.
+4. Review-clean first-attempt evidence:
+   - `0e4fe4657ca4d2f2154178ce59d982aef2c37b12:docs/architecture-exploration/A2-STATIC-ARTIFACT-PROBE-EVIDENCE.md`
+   - blob `66d0a09b36c392254c8e93a4e1e21e205380742d`, 8789 bytes.
+
+The first real execution matched P1 identity and stopped in the first P2 header pass on `bin/`; the report did not retain that accepted header's exact permitted type. This corrected plan does not reconstruct the type or reuse the downloaded bytes. It authorizes no retry until the Commander records a clean independent review of the exact correction head.
 
 Do not read a task transcript or active candidate worktree. Candidate head `f1d212c5ebc5287dbc2b97a716de14b8195e2c3c` remains read-only and is not an input to this local artifact probe.
 
@@ -70,9 +75,9 @@ Stop at the first fail-closed condition and return the evidence collected so far
 
 1. Read gzip and tar in-process with `System.IO.Compression.GZipStream` and `System.Formats.Tar.TarReader`; do not pass the archive to `tar.exe`, Explorer, or another extractor.
 2. Complete a first header pass without extraction. Permit only `Directory`, `RegularFile`, and `V7RegularFile`. Reject every symlink, hardlink, device, FIFO, sparse, PAX header entry, or other type, and reject any non-empty link target or link metadata.
-3. Normalize separators and validate the effective entry name returned by `TarReader`. Reject an empty name; absolute, UNC, NT-device, or drive-qualified path; alternate data stream/colon; control character; empty, `.` or `..` segment; Windows reserved device name; trailing dot/space; case-insensitive duplicate; or file/directory prefix collision. Resolve the proposed destination with `Path.GetFullPath` and require an ordinal-ignore-case, separator-bounded prefix beneath the fresh extraction root.
+3. Record the raw effective entry name and exact `TarReader` entry type before path validation, including in any failure report. Normalize `\` to `/`. Only when the exact type is `Directory`, allow either no terminal separator or remove **exactly one** terminal `/` as structural directory notation; after removal, reject an empty name or a name still ending in `/`, so a root marker or repeated terminal separator cannot pass. Never remove a terminal separator from `RegularFile` or `V7RegularFile`, so it remains an empty-segment failure. Then reject an absolute, UNC, NT-device, or drive-qualified path; alternate data stream/colon; control character; leading, internal, or remaining terminal empty segment; `.` or `..` segment; Windows reserved device name; trailing dot/space; case-insensitive duplicate; or file/directory prefix collision. Resolve the canonical separator-free destination with `Path.GetFullPath` and require an ordinal-ignore-case, separator-bounded prefix beneath the fresh extraction root.
 4. Fail closed above 10,000 entries, 1 GiB for one declared regular file, or 2 GiB declared total uncompressed size. These are safety ceilings, not expected package facts.
-5. Only after the whole first pass succeeds, reopen the archive and repeat the same validation while extracting each regular file with `FileMode.CreateNew`. Create only validated directories, never follow a link, refuse an existing or reparse-point component, and verify actual count and byte totals against the first pass before inspecting content.
+5. Only after the whole first pass succeeds, reopen the archive and repeat the same validation while extracting each regular file with `FileMode.CreateNew`. Compare each second-pass raw name, exact entry type, canonical path, declared size, and ordinal position with the first-pass record before writing. Create only validated directories, never follow a link, refuse an existing or reparse-point component, and verify actual count and byte totals against the first pass before inspecting content.
 6. After extraction, fail if any descendant has the `ReparsePoint` attribute or resolves outside the extraction root. Return a sorted inventory of relative path, type, byte size, and SHA-256 for every regular file.
 7. Identify `codex-package.json`, the App Server entrypoint, helper executables, and any LICENSE, NOTICE, SBOM, signature, schema, or third-party attribution file. Absence is evidence, not permission to source it elsewhere.
 

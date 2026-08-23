@@ -1,6 +1,6 @@
 # A2 Codex-first capability-closure dispatch
 
-Status: **A2 review-clean at `f1d212c5`; U2 accepted; stable `0.149.0` App Server x64 package selected as X2; first static Commander probe failed closed at `bin/` before extraction and awaits evidence review; all downloaded-binary execution and A3 remain blocked**
+Status: **A2 review-clean at `f1d212c5`; U2 accepted; stable `0.149.0` App Server x64 package selected as X2; first static evidence review-clean; exact Directory-terminal plan correction awaiting review; all downloaded-binary execution and A3 remain blocked**
 
 This is a repository-development dispatch record, not canonical product architecture and not implementation authorization.
 
@@ -39,6 +39,8 @@ The owner answered `DQ-A2-01` with **U2**, recorded in [Clarification 0003](./cl
 [A2 exact Codex artifact discovery](./A2-EXACT-ARTIFACT-DISCOVERY-DISPATCH.md) completed read-only. The Commander-verified [exact-artifact evidence](./A2-EXACT-ARTIFACT-EVIDENCE.md) records both candidates, selects stable `0.149.0` x64 under `DQ-A2-02`, and preserves the missing version-bound support mapping plus unperformed artifact probes. Discovery downloaded or ran no artifact, edited or rescored no candidate, generated no schema, entered no A3, inspected no DeepSeek runtime, chose no maintenance form, and implemented nothing.
 
 The Commander executed the independently review-clean static plan once from authorization head `ebfcba5ddbc102a5d8b99a5230a2f33900246343`. [The resulting evidence](./A2-STATIC-ARTIFACT-PROBE-EVIDENCE.md) is **probe failed**: the official package size, SHA-256, release, annotated tag, and peeled source commit matched, but the first archive-header pass rejected the terminal empty segment in the admitted path `bin/` before extraction. Cleanup succeeded; both worktrees stayed clean; no downloaded binary ran. This is neither artifact invalidity nor a capability gap. The evidence unit requires independent review, and any retry requires a separately committed and reviewed directory-terminal rule; candidate re-score, dynamic execution, A3, DeepSeek re-entry, maintenance selection, and implementation remain prohibited.
+
+Independent T3-par Standards and Spec review of exact evidence head `0e4fe4657ca4d2f2154178ce59d982aef2c37b12` both passed with zero findings after one Spec P2 required the explicit unperformed/unknown inventory. Both confirmed the one-commit/five-path clean boundary, exact P1/P2/cleanup facts, bounded interpretation and non-authorizations, and disclosed `same-provider review — independence reduced`. The plan now proposes a new exact rule: only an exact `Directory` may lose one terminal `/`; root/repeated/internal empty segments and every regular-file terminal separator still fail, and both passes bind raw name/type/canonical path/size/order. This correction is not retry authority until its own exact head passes independent review.
 
 ## Question A2 must answer
 
