@@ -1,6 +1,6 @@
 # V2 Architecture Dispatch
 
-Status: **active; A1 sealed; A2 review-clean with `Closure not proven`; U2 accepted; stable `0.149.0` App Server x64 package selected as X2; static Commander probe review-clean and authorized but not yet run; all downloaded-binary execution and A3 remain blocked**
+Status: **active; A1 sealed; A2 review-clean with `Closure not proven`; U2 accepted; stable `0.149.0` App Server x64 package selected as X2; first static Commander probe failed closed before extraction and awaits evidence review; all downloaded-binary execution and A3 remain blocked**
 
 This is a repository-development dispatch record, not a product architecture decision. All V2 outputs remain noncanonical until owner acceptance and normal integration.
 
@@ -21,7 +21,8 @@ This is a repository-development dispatch record, not a product architecture dec
 - Commander-owned closure-subject scope: [A2 exact closure-subject decision](./A2-CLOSURE-SUBJECT-DECISION.md)
 - Completed read-only evidence continuation: [A2 exact Codex artifact discovery](./A2-EXACT-ARTIFACT-DISCOVERY-DISPATCH.md)
 - Commander-verified result: [A2 exact Codex artifact evidence](./A2-EXACT-ARTIFACT-EVIDENCE.md)
-- Review-clean and authorized but not yet run: [A2 selected Codex artifact static Commander probe](./A2-ARTIFACT-PROBE-DISPATCH.md)
+- Executed once with a fail-closed result: [A2 selected Codex artifact static Commander probe](./A2-ARTIFACT-PROBE-DISPATCH.md)
+- Awaiting independent review: [A2 selected Codex artifact static-probe evidence](./A2-STATIC-ARTIFACT-PROBE-EVIDENCE.md)
 
 ## Design Worker
 
@@ -71,6 +72,8 @@ Fresh read-only T3-par Standards and Spec review of exact range `b5076179a37f8d6
 The owner selected **U2** for `DQ-A2-01`. Clarification 0003 preserves the vendor's Experimental/unsupported fact while allowing one exact App Server artifact to continue under explicit owner-accepted risk and mandatory fail-closed controls; it grants no unqualified closure pass or implementation. The Commander then exercised its recorded `DQ-A2-02` authority and selected **X2**. Official evidence supplied stable `0.149.0` and prerelease `0.150.0-alpha.7`; because no alpha-only requirement, support-classification difference, or unaccepted cost triggers escalation, the Commander selected the stable x64 App Server package with its exact digest and source commit. The broader command-level support warning lacks an exact release mapping and remains a missing official link under conservative U2 treatment. A3, DeepSeek re-entry, maintenance-form selection, and implementation remain blocked.
 
 The Commander issued that separate task as a read-only T2 artifact-discovery brief. It admitted only exact owner/Commander objects, three exact candidate evidence/decision records, current official OpenAI documentation, immutable official `openai/codex` release/tag/commit objects, and read-only official npm metadata. The task completed without writes or prohibited actions; its Commander-verified result records both candidates, the stable x64 selection, and the remaining factual version-bound support/probe gaps. Candidate writing, downloading/executing an artifact, re-scoring, A3, DeepSeek, maintenance-form selection, and implementation remain stopped.
+
+After independent plan review passed, the Commander ran its static acquisition/integrity scope once. P1 matched the exact official size, SHA-256, release/tag object, and peeled source commit. P2 then stopped before extraction because the reviewed empty-segment rule rejected the admitted header name `bin/`. The task directory was validated and removed, both repositories remained clean, and no downloaded binary ran. The result is `probe failed`, not artifact invalidity or a Codex Capability Gap. The evidence unit and any later directory-terminal rule must receive separate exact-head review; no rerun or later phase is implied.
 
 The completed A1 authoring turn was limited to one-product consistency and UI parity: map the 79 requirements and fourteen journeys, define shared semantics versus bounded native variation, expose support/parity/accessibility/Policy-visibility options, avoid implementation mechanisms, and stop where an owner choice is required. At that point A2 was blocked on stable, Commander-reviewed A1 invariants, not on the owner's exact parity/support choice; that choice still gates canonical product promises and the coherent candidate. A3 now remains blocked until separately authorized artifact probes and a later A2 evidence decision make the selected exact runtime surface decision-ready.
 
