@@ -1,6 +1,6 @@
 # Architecture Exploration Control Board
 
-Status: **active**
+Status: **V2 design ready for owner decision; implementation not authorized**
 Commander issue: [#3 — Freeze v1 design and prepare v2 architecture exploration](https://github.com/zhouy1017/ai7-harness/issues/3)
 V2 architecture issue: [#4 — Design the AI7 V2 architecture candidate](https://github.com/zhouy1017/ai7-harness/issues/4)
 Last updated: **2026-08-23**
@@ -22,8 +22,8 @@ This file records repository-development coordination only. It is not an AI7 pro
 | `Worker — Freeze V1 UI UX` | `01a02240-c432-7600-8fdf-008858cae447` | Worker | `docs/2-ai7-ui-ux@587d645` / `worktrees/062a` | `frozen` | Its branch only | Reviewed local V1 UI/UX reference; candidate/evidence-only assets |
 | `Worker — Freeze V1 Platform and Phase 0` | `01a005a7-019f-7203-ba38-2a367a667db8` | Worker | `docs/1-windows-macos-phase0@9606891` / saved-project checkout | `frozen` | Its branch only | Reviewed local V1 platform/Q16/Phase-0 reference; Phase 0 remains NOT PASSED |
 | `Architecture Reviewer — Prepare V2 Exploration` | `01a02278-cdc5-7c81-a08d-490b8b76bc26` | Reviewer | read-only `main@c8cbe26` / `worktrees/1d24` | `exploring` | No repository writes | [Round 1](./ROUND-1-REVIEW.md) and [candidate delta](./CANDIDATE-DELTA-REVIEW.md) complete; A1–A3 prepared |
-| `AI7 V2 架构设计（Issue #4）` | A1/A2 and artifact/source evidence sessions recorded below | Chief Architect Worker | `docs/4-v2-architecture-candidate@8eb70e3` / `worktrees/1649` | `ready to resume design; prior closure/probe work is nonblocking reference` | Candidate architecture documents only | Produce one coherent Codex-first V2 design, assumptions, trade-offs, and migration direction without new validation tasks |
-| `AI7 V2 反方审查（只读）` | `01a022df-0d69-7173-ab31-679038c1f446` | Reviewer / advisory hostile review | read-only | `available after coherent draft` | No repository writes | Challenge architecture choices at a high level; advisory only, no exact-head verdict or proof cycle |
+| `AI7 V2 架构设计（Issue #4）` | A1/A2 history plus `/root/v2_codex_first_design_t3` | Chief Architect Worker | `docs/4-v2-architecture-candidate@38f47ea` / `worktrees/1649` | `coherent candidate complete; awaiting owner decision` | Candidate architecture documents only | Codex-first V2 design, assumptions, trade-offs, migration direction, and advisory corrections complete |
+| `AI7 V2 反方审查（只读）` | `/root/v2_hostile_architecture_advisory_t3` | Reviewer / advisory hostile review | read-only candidate `33b8f77` | `complete; coherent with assumptions` | No repository writes | Four logical seams were corrected at `38f47ea`; remaining findings are accepted implementation risks, not validation tasks |
 
 The function labels “Architecture Reviewer” and “V2 Hostile Architecture Reviewer” do not create a fourth repository role. Both are independent Reviewer assignments under ADR 0015. The V2 architecture designer remains a Worker even when exercising Chief Architect responsibilities.
 
@@ -118,13 +118,14 @@ The Commander must preserve both lines as candidate/evidence-only unless the own
 - **First round received from a clean read-only `main@c8cbe26` worktree with the contamination boundary intact.**
 - [Round 1 review](./ROUND-1-REVIEW.md) records the v1 assumptions, seven root tensions, twelve proposed principles, inheritance dispositions, a fourteen-stage exploration order, and freeze exit criteria.
 - [Candidate delta review](./CANDIDATE-DELTA-REVIEW.md) confirms the root tensions/principles, refines asset disposition, and recommends A1 product consistency, A2 exact Harness composition, then A3 truthful isolation. Its DeepSeek-only A2 scope is superseded by the later [Codex-first owner directive](./CODEX-HARNESS-DIRECTIVE.md), while its dependency order remains.
+- The optional hostile V2 consultation judged candidate `33b8f77` **coherent with assumptions**. It identified four logical seams worth closing without proof work: final Provider payload egress, Run/attempt/Session/Binding cardinality, Capability result and Effect-wait continuation, and the prohibition on model-driven work bypassing the sole Codex loop. The Chief Architect closed those seams in candidate `38f47ea`.
+- Codex fork maintenance, rare regressions missed by E2E-only CI, detailed long-manuscript cursor scheduling, and Desktop-like interaction drift remain accepted implementation risks with fail-closed responses. They do not create review, proof, or validation tasks.
 
 ## Next control events
 
-1. Preserve the frozen legacy branches and prior A1/A2 material as noncanonical design reference; no more validation, source audit, artifact probe, scoring, or qualification task will run.
-2. Resume one Chief Architect Worker on the V2 candidate and simplify it into a coherent Codex-first design: AI7 owns product/domain/UI/policy/Effects/ledgers; Codex supplies the preferred agent/runtime and Desktop-like interaction template; DeepSeek supplies development/documentation guidance only unless the owner later changes that choice.
-3. Record unknown Codex behavior as explicit assumptions and likely low-cost secondary-development work, not as blockers requiring proof.
-4. After a coherent draft, optionally run one read-only hostile architecture review focused on trade-offs, maintainability, UX fit, and migration risk. It is advisory and requires no exact-head re-review cycle.
-5. Present the design and material assumptions to the owner. Do not begin implementation planning or issue decomposition without separate owner authorization.
+1. Preserve the frozen legacy branches and prior A1/A2 material as noncanonical historical reference; no more validation, source audit, artifact probe, scoring, qualification, or formal review task will run.
+2. Present candidate `38f47ea762ff93275b5a5474caae7603792c0544` and its accepted implementation risks to the owner.
+3. If the owner accepts V2, integrate the architecture into the canonical line through a separate Commander action.
+4. Do not begin implementation planning, issue decomposition, source copying, dependency installation, or product code without separate owner authorization.
 
 The old lines do not need to finish every originally planned document before architecture exploration can advance.

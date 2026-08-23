@@ -1,6 +1,6 @@
 # V2 Architecture Dispatch
 
-Status: **active design-only; A1 and prior A2 evidence are reference material, capability closure and all remaining probe/qualification work are retired, and the next output is a coherent Codex-first V2 architecture plus optional advisory hostile review**
+Status: **coherent Codex-first V2 candidate complete at `38f47ea`; awaiting owner decision; implementation not authorized**
 
 This is a repository-development dispatch record, not a product architecture decision. All V2 outputs remain noncanonical until owner acceptance and normal integration.
 
@@ -10,6 +10,7 @@ This is a repository-development dispatch record, not a product architecture dec
 - Commander-reviewed control and sealed packet: `c383afd2fdb5f08342cde277b7babced6c1207fc`
 - V2 work item: [Issue #4](https://github.com/zhouy1017/ai7-harness/issues/4)
 - V2 design branch: `docs/4-v2-architecture-candidate`, created at `c383afd2fdb5f08342cde277b7babced6c1207fc`
+- Coherent V2 candidate: `38f47ea762ff93275b5a5474caae7603792c0544`, noncanonical pending owner acceptance
 - Sealed A1 candidate head: `b5076179a37f8d654e758ca0b4a8bdeec8caaaa5`, noncanonical; exact-head Standards and Spec passed with zero findings
 - Platform/Q16/Phase-0 frozen candidate: `960689172bcf54eb3f27b57045a4ce4e9f20695d`, noncanonical
 - UI/UX frozen candidate: `587d6455f6a578d3df8a39f534ec7a057c07a18c`, noncanonical
@@ -139,22 +140,13 @@ Clarification 0003 resolves only the unsupported-dependency risk threshold: the 
 - Worktree: `worktrees/1be4`, derived from `c383afd2fdb5f08342cde277b7babced6c1207fc`
 - Write boundary: none
 
-The first turn produces only a challenge charter: candidate admission criteria, attack matrix, falsification questions, severity/evidence protocol, and a stop until a candidate exists. It must not inspect the design task or issue a V2 verdict before receiving an exact Commander review brief.
-
-The charter turn completed read-only after verifying all 51 manifest mappings. It covers candidate admission, eighteen attack domains, domain-specific falsification questions, P0–P3 Standards/Spec finding format, contamination/no-verdict handling, and exact-head invalidation. It issued no candidate verdict and the task is stopped until a coherent candidate exists.
-
-The future brief must name the exact base, candidate head, diff, evidence manifest, ADR disposition, trade-offs, migration direction, risks, owner choices, validation evidence, and Codex/DeepSeek disposition. A same-provider review must disclose `same-provider review — independence reduced`.
+The optional final consultation ran read-only against coherent draft `33b8f77` and returned **coherent with assumptions**. It was a high-level design challenge, not Standards/Spec review or an acceptance gate. The Chief Architect applied only its four genuine logical corrections—final Provider egress, execution/session cardinality, Capability/Effect continuation, and sole-loop enforcement—and committed candidate `38f47ea`. No further review cycle follows.
 
 ## Phase gates
 
-1. A1 local candidate and exact-head handoff.
-2. Commander review and confirmation of the stable A1 invariant list; present the platform-consistency choice to the owner.
-3. A2 Codex-first agent-harness selection and composition closure may begin after step 2 even while the owner choice is pending; DeepSeek Harness remains the comparison candidate, not an automatic second runtime.
-4. A3 truthful OS isolation/local authority may begin after A1 and revised A2 establish the selected executable/process/tool/network surface.
-5. Record the owner platform-consistency choice before exact parity/support becomes canonical or the V2 candidate is declared coherent.
-6. Coherent V2 candidate with ADR disposition, trade-offs, migration direction, risks, and evidence.
-7. Independent T3-par-or-higher hostile review against the exact candidate head.
-8. Owner architecture decision.
-9. Separate implementation authorization, if granted.
+1. Coherent Codex-first V2 candidate with ownership seams, assumptions, trade-offs, migration direction, and DeepSeek guidance-only disposition — complete at `38f47ea`.
+2. Optional advisory hostile architecture consultation — complete; its bounded logical corrections are integrated.
+3. Owner architecture decision.
+4. Separate canonical integration and implementation authorization, if granted.
 
 No earlier gate implies a later one.

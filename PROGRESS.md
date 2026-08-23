@@ -300,13 +300,16 @@
 - The owner stopped the over-detailed verification line and accepted project-wide minimal validation. Standards/Spec review of `06a56e5` had identified extractor-suite, immutable-core, oracle-isolation, containment, and runtime-provenance defects; those findings are retained only as the reason not to run the task. The active qualification Worker was never started, the advisory oracle Worker was interrupted, no official request occurred, and no candidate content or score changed.
 - Added accepted ADR 0027 and `kick-in/35-minimal-e2e-validation.md`. Architecture/source/artifact proof tasks, formal exact-head review gates, and specialized implementation/release/runtime validation are retired. Windows CI retains only end-to-end functional completeness and observed-bug regression scenarios. Product Factual Verification, authority, Effect Receipt, recovery, and privacy behavior remain functional requirements rather than separate proof systems.
 - Updated `AGENTS.md`, execution terminology, dispatch/design workflow, historical verification records, and V2 control surfaces so `Closure not proven` and the abandoned A2 probes no longer block design. Optional hostile architecture review remains advisory. Commander/integration/external-action authority and Claude-first bounded Worker routing remain.
+- Chief Architect Worker `/root/v2_codex_first_design_t3` produced the coherent Codex-first candidate at `33b8f77e84469020f9b86f3dfd1b961f37f21f6e`, then applied one bounded advisory correction at `38f47ea762ff93275b5a5474caae7603792c0544`. The candidate defines AI7-owned product/domain/authority/UI/Effect/provider state, Codex as the sole Primary Agent Harness, DeepSeek as guidance-only, adapter-first with optional small source development, migration direction, and explicit assumptions. It deleted the four A2 proof/register/seam documents and replaced the old conditional ADR.
+- The optional read-only hostile consultation returned **coherent with assumptions**. Four logical seams were closed without validation: final Provider Payload/Egress Gate; Run/attempt/Binding/Session/Span cardinality; Capability-result and Effect-wait continuation; and the rule that every model-driven editorial/learning/subagent path uses the sole Primary Agent Harness with a pinned behavior-composition digest. Fork maintenance, rare E2E misses, long-manuscript cursor mechanics, and Desktop-like drift remain accepted implementation risks with fail-closed responses.
+- Requested Claude Opus/high was unavailable under the recorded HTTP 429 before inference at `$0`; the design Worker used the existing same-class GPT-5.6 Sol/`xhigh` fallback. No validation, test, source audit, probe, proof, formal review, runtime action, or implementation was performed.
 
 ## What's next
 
-- Resume V2 architecture drafting from candidate `8eb70e315ea4a4103c1820fe9fd0bdeae49f5f93`; treat its A1/A2 material as reference rather than a closure gate.
-- Produce one simple Codex-first architecture, explicit AI7/Codex ownership seams, low-cost secondary-development assumptions, DeepSeek guidance-only role, trade-offs, and migration direction. Run no further capability proof, artifact/source probe, scoring, qualification, or formal exact-head review.
-- After the draft is coherent, optionally request one high-level hostile architecture review. Use its findings as advisory design feedback, not a verification gate or re-review loop.
-- Present the coherent design to the owner. Implementation planning and issue decomposition remain unauthorized until separate owner approval.
+- Present candidate `38f47ea762ff93275b5a5474caae7603792c0544` and its accepted risks to the owner.
+- If accepted, integrate the V2 design into the canonical line through a separate Commander action.
+- Run no further capability proof, artifact/source probe, scoring, qualification, formal review, or non-E2E validation work.
+- Implementation planning, issue decomposition, source copying, dependency installation, and product code remain unauthorized until separate owner approval.
 
 ## Key decisions made
 
@@ -411,7 +414,8 @@
 - The exact tool-surface source audit establishes constituent configuration and routing facts but not one immutable AI7-only stock configuration across start, resume, fork, model switch, and turns. All four target rows remain Unknown, `BLK-A2-03` remains open, and the next source task must freeze the missing path set before tracing it; no gap, DSH re-entry, maintenance, A3, or implementation conclusion follows.
 - A deterministic pipeline success requires conformance as well as byte-identical reruns. The first path-discovery attempt's identical provisional hashes are unusable because the frozen extractor itself violated reviewed precedence; repeated wrong output is not reproducible evidence.
 - The extractor/source/artifact evidence program is retired. Its historical records do not constrain or block V2 architecture.
+- V2 candidate `38f47ea` is coherent with assumptions: Codex is the sole Primary Agent Harness; AI7 owns final provider egress, behavior composition, business authority, capabilities, Effects, and ledgers; DeepSeek is guidance-only. The optional hostile consultation is complete and creates no review gate.
 
 ## Resume Prompt
 
-Resume as Project Commander: keep all verification/probe work retired under ADR 0027; resume the V2 Chief Architect from candidate `8eb70e315ea4a4103c1820fe9fd0bdeae49f5f93` to produce one coherent Codex-first design with explicit assumptions and DeepSeek guidance-only, then optionally request one advisory hostile architecture review before presenting the design to the owner; do not begin implementation without separate authorization.
+Resume as Project Commander: present coherent V2 candidate `38f47ea762ff93275b5a5474caae7603792c0544` to the owner for architecture acceptance; keep all proof and non-E2E validation work retired, and do not integrate canonically or begin implementation planning without separate authorization.
