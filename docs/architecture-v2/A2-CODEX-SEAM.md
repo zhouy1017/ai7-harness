@@ -1,12 +1,12 @@
 # A2 Codex seam — the Primary Agent Harness Module
 
-Status: **Issue #4 noncanonical A2 seam design. It recommends a candidate seam. It does not select a surface, a dependency, or a maintenance form, and it does not call any App Server surface production-ready.**
+Status: **Issue #4 noncanonical A2 seam design. Stable `0.149.0` x64 App Server is the exact closure subject, not a selected product dependency. The design selects no maintenance form and does not call App Server production-ready.**
 
 This document designs the AI7-owned **Module** that stands between AI7 domain services and any agent executor. It uses the deep-module vocabulary exactly: **Module**, **Interface**, **Implementation**, **Adapter**, **Depth**, **Seam**, **Leverage**, **Locality**. Where a claim rests on evidence, the source ID resolves in the [A2 Evidence Register](./A2-EVIDENCE-REGISTER.md); row IDs resolve in the [A2 Capability Closure matrix](./A2-CAPABILITY-CLOSURE.md).
 
 The matrix returns **`Closure not proven`**. This design is therefore the *shape* a closed design would take, plus the test surface that would close it — not a claim that it is closed.
 
-The Commander-authorized version/help probes ran and established only binary identity and CLI help-surface facts. Runtime-behavior and closure probes did not run, so every restart, fallback, subagent, confinement, and offline-startup statement below remains an Interface invariant or exit-evidence requirement rather than observed capability.
+The Commander-authorized version/help probes ran against installed `codex-cli 0.147.0` and established only that local binary identity and CLI help-surface facts. A later corrected static observation matched the selected `0.149.0` official package and App Server digests and safely inventoried its archive without executing a downloaded binary (`S-A2-13`, `S-A2-14`, `P-A2-03`). Protocol/schema generation and all runtime-behavior and closure probes remain unrun, so every restart, fallback, subagent, confinement, and offline-startup statement below remains an Interface invariant or exit-evidence requirement rather than observed capability.
 
 ## Two things called "adapter" that must never be confused
 
@@ -38,11 +38,11 @@ Seven. The count is the design target: a small surface over a large Implementati
 | `decide(BoundExecutionHandle, RequestId, Decision)` | Answers one open execution-layer request only against the verified Execution Binding. | Approval-request taxonomy and decision enums such as `acceptForSession`; permission scopes. |
 | `cancel(BoundExecutionHandle, CancelReason) → CancellationOutcome` | Cooperative interruption. | `turn/interrupt`, terminal-state reconciliation, in-flight event drain. |
 | `close(BoundExecutionHandle, Disposition) → HarnessExecutionSpanDescriptor` | Ends the technical execution and finalizes or returns its exact Harness Execution Span descriptor; AI7 persists an append-only link from the existing Execution Binding to that descriptor. | Unsubscribe, grace periods, storage finalization, exact Session event-range assembly. |
-| `describeSurface() → SurfaceIdentity` | Reports adapter identity, exact artifact identity, schema fingerprint, and **vendor support classification**. | Nothing — this is the one place the Interface deliberately *exposes* rather than hides. |
+| `describeSurface() → SurfaceIdentity` | Reports adapter identity; exact tag, annotated tag object, source commit, asset name and digest, contained executable digest; expected and observed schema fingerprints; **vendor support classification**; the U2 risk-disposition identity; and current suspension state. | Nothing — this is the one place the Interface deliberately *exposes* rather than hides. |
 
 `ExecutionOpening` contains the opaque `ExecutionHandle` plus the technical identities and mapping reference required to persist the Execution Binding. A `BoundExecutionHandle` pairs that handle with the AI7-persisted Execution Binding reference and digest; constructing the pair grants no authority, and the Module verifies it before accepting every capability- or Effect-capable operation.
 
-`describeSurface()` exists because of `CC-02`. `S-A2-02` states that "The app-server command and WebSocket transport are experimental and aren't supported for production workloads." An unsupported dependency is a fact the system must be able to state about itself — once, at one call site, in one record — rather than a fact that leaks into every caller as folklore or hides entirely. Concentrating it here is what keeps it honest.
+`describeSurface()` exists because of `CC-01`, `CC-02`, and U2. For the current closure subject it reports tag `rust-v0.149.0`, tag object `a4e15bf371341b067c8278d3b70b1a8c7b3d793e`, source commit `758ef40f50c1a458425c7cfbf1eb12cbc07af0b0`, package digest `580207baa5ecabb8e42fd734bdb774ffcd82709ccd60bff8fa812b1b83962e28`, and App Server digest `d181a381eece22dd21f98a06006c03289fe1a705012b9ca8fb3596dc0d90ea61`. It also reports that current moving documentation classifies the App Server command as experimental and unsupported for production, that exact-release mapping is absent, and that U2 records Accepted Unsupported Dependency Risk without changing that maturity fact. Concentrating identity, risk, and suspension here keeps them explicit rather than letting them leak into every caller as folklore or disappear in a dependency lockfile.
 
 ### Invariants
 
@@ -59,6 +59,7 @@ Seven. The count is the design target: a small surface over a large Implementati
 - Before or as a governed capability call is admitted, AI7 persists an append-only applicable-Effect association linked to the Execution Binding: stable `effectId`, idempotency/replay identity, exact attempt, and—when allocated—the eventual Codex tool-call/item identity. The immutable binding payload does not change, and a Harness call result never becomes an Effect Receipt.
 - Agent Data Root and Run Source Scope confinement is evaluated against the effective target after Windows junction/reparse-point traversal and after any future supported symlink traversal. A lexical in-root path is insufficient if its effective target escapes the root (`CC-43`).
 - Application startup and non-agent editorial access do not depend on the Adapter: offline startup, local manuscript access, and local editing remain available with no provider, authentication, marketplace, network, or executor. Harness activation is lazy and scoped to authorized agent work (`CC-44`).
+- The exact artifact and protocol/schema fingerprints are independent fail-closed gates. Matching package bytes does not satisfy the still-unknown schema gate. A mismatch, unmitigated security issue, inability to reproduce or package the subject, failure of a load-bearing capability test, or material widening of the unsupported surface suspends production admissibility. Suspension never causes automatic upgrade, retry, provider fallback, DeepSeek re-entry, or a second agent loop (`S-A2-12`).
 
 ### Ordering
 
@@ -77,7 +78,7 @@ Four rules govern all of them. **`SurfaceIdentityMismatch` fails closed**: if th
 
 ### Configuration
 
-Static composition contains only facts common to the shipped Adapter: Adapter selection, exact artifact identity, expected schema fingerprint, technical storage root inside the Agent Data Root, reviewed Capability Implementation registry, and instance-wide concurrency and budget ceilings. Run Source Scope, grants, provider selection, sandbox policy, and per-Run budget are forbidden in this singleton configuration.
+Static composition contains only facts common to the shipped Adapter: Adapter selection; the exact artifact identity above; expected schema fingerprint; U2 risk-disposition identity; suspension/exit policy; technical storage root inside the Agent Data Root; reviewed Capability Implementation registry; documented rollback or replacement target; and instance-wide concurrency and budget ceilings. Artifact or schema drift fails closed; upgrades never float or activate silently. Deterministic compatibility and editorial-journey gates must pass for the exact subject. Run Source Scope, grants, provider selection, sandbox policy, and per-Run budget are forbidden in this singleton configuration.
 
 Each successful `openExecution` derives one immutable per-execution resolved context containing the exact Run Source Scope and roots, Task Skill Activation, Effective Capability Grants, Provider Resolution Plan, per-Run budget, sandbox/permission binding, and their references and digests. The context is bound to the opaque handle, verified against the AI7-owned Execution Binding, and compared in full on repeat open or reattachment. No caller may mutate it per tool call.
 
@@ -107,7 +108,7 @@ The **Seam** is at the `PrimaryAgentHarness` Interface, inside the AI7 service p
 
 Two Adapters make the Seam real. One would make it hypothetical.
 
-**`CodexAppServerAdapter` — production *candidate*.** An out-of-process sidecar over **stdio JSONL, JSON-RPC 2.0** (`S-A2-02`, `S-A2-03`). Transport choice is forced rather than preferred: AI7's accepted IPC rule permits stdio or a Windows named pipe and forbids a TCP listener (`S-A2-09`, ADR 0024). WebSocket is a TCP listener and is excluded; Unix socket is not a Windows target; no Windows named-pipe transport is documented (`S-A2-07`). Stdio is simultaneously the documented default and the only admissible option. This Adapter is a **candidate** and nothing more — `CC-01` has no exact artifact and `CC-02` is Experimental.
+**`CodexAppServerAdapter` — production *candidate*.** An out-of-process sidecar over **stdio JSONL, JSON-RPC 2.0** (`S-A2-02`, `S-A2-03`). Transport choice is forced rather than preferred: AI7's accepted IPC rule permits stdio or a Windows named pipe and forbids a TCP listener (`S-A2-09`, ADR 0024). WebSocket is a TCP listener and is excluded; Unix socket is not a Windows target; no Windows named-pipe transport is documented (`S-A2-07`). Stdio is simultaneously the documented default and the only admissible option. This Adapter is a **candidate** and nothing more: `CC-01` identifies exact stable `0.149.0` as the closure subject, while `CC-02` and `CC-03` remain Experimental and the remaining matrix is not closed.
 
 **`ReplayHarnessAdapter` — deterministic test and replay.** Satisfies the same Interface with no sidecar, no network, no provider, and no model call. It replays recorded `ExecutionSignal` sequences against recorded inputs under the request-fingerprint guard, failing closed on drift. This is what makes the provider-free `pr` gate possible at all (`CC-33`, `S-A2-09`, ADR 0014) — the gate needs the whole editorial journey to run with the executor absent.
 
@@ -136,7 +137,7 @@ Complexity does not vanish on deletion — it reappears in every caller, and one
 
 **Leverage**: every AI7 service that runs model work gets executor independence, cancellation, backpressure absorption, and authority separation without implementing any of them. One Implementation pays back across every domain caller and every test.
 
-**Locality**: the consequences of `CC-01`, `CC-02`, and `CC-32` — no exact artifact, an unsupported vendor classification, and no protocol compatibility contract — land in exactly one Module. When the artifact changes, one schema fingerprint and one Adapter change. Twenty-six Unknown rows resolve behind this Interface without a domain caller noticing, which is precisely why the seam is worth placing before the Unknowns are resolved rather than after.
+**Locality**: the consequences of `CC-01`, `CC-02`, and `CC-32` — an immutable exact artifact, an unsupported vendor classification under U2, and no proven protocol compatibility gate — land in exactly one Module. When the artifact changes, one identity/fingerprint record and one Adapter change. Twenty-four Unknown rows resolve behind this Interface without a domain caller noticing, which is precisely why the seam is worth placing before the Unknowns are resolved rather than after.
 
 ## The two-loop guard
 
@@ -162,9 +163,9 @@ This is a candidate. Commander version/help probes ran, but no runtime-behavior 
 
 ## What this document does not decide
 
-- It does not select a Codex surface, artifact, version, or dependency, and installs nothing.
+- It records X2's exact stable `0.149.0` closure subject. It does not select or install a production dependency and does not silently promote that evidence identity into implementation composition.
 - It does not select the maintenance form left open by `S-A2-06`, and does not answer the formal maintenance-policy Question 3.
-- It does not call app-server production-ready. `CC-02` is **Experimental** on the vendor's own current statement.
+- It does not call App Server production-ready. `CC-02` and `CC-03` are **Experimental** on the vendor's current statement; U2 is a separate Accepted Unsupported Dependency Risk record, not support or capability evidence.
 - It does not assert Harness Capability Closure or any Codex Capability Gap.
 - It does not activate the `S-A2-05` role assignments, admit DeepSeek to any runtime role, or open the `S-A2-06` re-entry gate. Candidate C is **Keep — deferred candidate evidence only for this A2 evaluation**, not runtime selection/evaluation, reference-role activation, re-entry, or future admission.
 - It does not answer `DQ-A1-01`, enter A3, or authorize implementation.

@@ -1,5 +1,37 @@
 # Progress
 
+## A2 exact-artifact static-evidence re-score (T3 fallback)
+
+### What's done
+
+- Verified the exact clean start `docs/4-v2-architecture-candidate@f1d212c5ebc5287dbc2b97a716de14b8195e2c3c`, the reviewed Commander dispatch at `3796de65f12257932ca3acc199a6f244c7a705bf`, and all four admitted `800a0d3` object/blob/byte identities before writing.
+- Re-scored the unchanged 44-row A2 matrix against stable tag `rust-v0.149.0`, annotated tag object `a4e15bf371341b067c8278d3b70b1a8c7b3d793e`, source commit `758ef40f50c1a458425c7cfbf1eb12cbc07af0b0`, x64 package SHA-256 `580207baa5ecabb8e42fd734bdb774ffcd82709ccd60bff8fa812b1b83962e28`, and contained/standalone App Server SHA-256 `d181a381eece22dd21f98a06006c03289fe1a705012b9ca8fb3596dc0d90ea61`.
+- Changed only `CC-01` and `CC-39` from Unknown to Candidate. The exact result is 44 rows / 43 load-bearing / 0 Proven / 17 Candidate / 2 Experimental / 24 Unknown / 1 Not applicable / 0 Gap claims / 0 Verified Codex Capability Gaps; verdict remains `Closure not proven`.
+- Integrated `S-A2-12`–`S-A2-14` and `P-A2-03`, retired active `UNK-A2-01` and `UNK-A2-20` into disposition-transition history without renumbering, resolved `DQ-A2-01 = U2` and `DQ-A2-02 = X2`, and preserved every static limitation: six path/type/size rows but five usable hashes, invalid 65-character `codex-package.json` field, unadmitted forensic/aggregate reconstruction, package absence without legal conclusion, cache-only trust limits, and no inferred runtime behavior.
+- Added candidate term **Accepted Unsupported Dependency Risk** / **已接受的不受支持依赖风险** and updated the candidate execution context, bilingual glossary, and existing ADR 0001 with exact controls, suspension/exit conditions, and non-effects. The term remains distinct from support, dependency selection, capability or gap proof, Effect/domain authority, and implementation authority.
+- Updated exactly these ten paths: `PROGRESS.md`; `docs/architecture-v2/README.md`; `docs/architecture-v2/DECISION-QUEUE.md`; `docs/architecture-v2/A2-CAPABILITY-CLOSURE.md`; `docs/architecture-v2/A2-CODEX-SEAM.md`; `docs/architecture-v2/A2-EVIDENCE-REGISTER.md`; `docs/architecture-v2/A2-GAP-REGISTER.md`; `docs/architecture-v2/domain/execution/CONTEXT.md`; `docs/architecture-v2/GLOSSARY.md`; and `docs/architecture-v2/adr/0001-conditional-primary-agent-harness-and-gap-closure.md`.
+- Complete local validation passed before commit: exact ten-path boundary; both matrix parts contain the same 44 unique ordered rows; only `CC-01` and `CC-39` changed; exact arithmetic and Unknown/Experimental register equality; source IDs `S-A2-01`–`S-A2-14` and probe IDs `P-A2-01`–`P-A2-03` with nonempty claim mappings and exact object tokens; retired-Unknown history; no stale current no-artifact, unresolved-U2/X2, or old-count claim; bilingual term/ADR/seam consistency; 98 local links including 33 anchors; 36 Markdown tables; 568 backtick-bearing lines with paired backticks; `git diff --check`; and zero canonical, control, A3, DeepSeek-runtime, maintenance-selection, implementation, dependency-selection, or source-code path change.
+- Requested binding was Claude Code / `claude-opus-5` / high. Actual binding is GPT-5.6 Sol / `xhigh`, same-class fallback because the latest real post-reset Claude session `1540bd4c-0b54-4454-8a5f-6b2dec2b1cc8` returned API HTTP 429 before inference and `$0`, with no later reset or availability evidence. No task-class downgrade occurred.
+
+### What's next
+
+- The amended re-score commit is complete; its exact SHA is supplied in the Worker report because a commit cannot self-name. Fresh exact-head independent T3-par Standards and Spec review is next.
+- A3, DeepSeek runtime evaluation/re-entry, cost modeling, Codex maintenance-form selection, canonical integration, dependency selection, implementation, and every dynamic action remain blocked.
+
+### Current checkpoint
+
+- At exact clean head `5275617a3ffd808a99a3063555267ecb9d2d98d6` (sole parent `f1d212c5ebc5287dbc2b97a716de14b8195e2c3c`), independent Standards and Spec reviews found exactly two P2 findings. This T1 correction changes only `PROGRESS.md` and `docs/architecture-v2/domain/execution/CONTEXT.md`, using requested Claude Code / `claude-haiku-4-5-20251001` / low and actual GPT-5.6 Luna / medium same-class fallback after post-reset session `1540bd4c-0b54-4454-8a5f-6b2dec2b1cc8` returned HTTP 429 before inference at `$0`; the amended SHA is reported by the Worker because a commit cannot self-name.
+
+### Key decisions made
+
+- X2 identifies the sole evidence subject and makes `CC-01`/`CC-39` Candidate; it is not a production dependency selection. U2 records bounded risk separately and leaves `CC-02`/`CC-03` Experimental.
+- Static package presence proves identity and inventory only. It does not prove tool absence, Windows enforcement, lifecycle, concurrency, schema compatibility, two-channel launch, or legal/distribution acceptance.
+- The former exact-surface and risk-appetite blockers are retained as resolved prerequisites; the narrow-tool-surface blocker and every remaining Unknown stay active. DeepSeek re-entry remains closed because zero Codex Capability Gaps are verified.
+
+Resume Prompt: Review the exact committed A2 static-evidence re-score independently at T3-par on both Standards and Spec; preserve the ten-path boundary and do not enter A3, DeepSeek runtime work, maintenance-form selection, canonical integration, dependency selection, or implementation.
+
+Earlier checkpoints below are historical records and are not the current state.
+
 ## A2 offline-authority mapping correction (T1 fallback)
 
 - At exact clean head `059dd658beb5191cc06abdc9fb8264db4be16b82`, fresh T3-par review reported Standards PASS with zero findings and Spec FAIL with one P2: `S-A2-08` and `S-A2-09` falsely supplied the offline/non-agent-startup authority mapping and `CC-44` citations. The sealed parent is `b5076179a37f8d654e758ca0b4a8bdeec8caaaa5`; control merge-base is `c383afd2fdb5f08342cde277b7babced6c1207fc`.

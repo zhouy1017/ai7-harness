@@ -1,6 +1,6 @@
 # A1 and A2 decision queue
 
-Status: **Issue #4 noncanonical queue; three decisions pending — the compound A1 owner decision `DQ-A1-01` plus the two A2 entries `DQ-A2-01` and `DQ-A2-02`; recommendations are advisory, not preselection**
+Status: **Issue #4 noncanonical queue; only the compound A1 owner decision `DQ-A1-01` remains pending; `DQ-A2-01 = U2` and `DQ-A2-02 = X2` are resolved**
 
 ## Commander clarification protocol
 
@@ -12,7 +12,7 @@ This protocol is binding from the 2026-08-21 Commander clarification and does no
 
 The Commander uses `grill-with-docs`—a one-question-at-a-time grilling flow with active domain modeling—to map the known decision tree, announce and revise its estimated question count, give a recommendation for each question, and obtain one exact answer before continuing. When an answer resolves domain language, the Commander updates the owning `CONTEXT.md` and the bilingual `GLOSSARY.md`; an ADR is warranted only when the result is simultaneously hard to reverse, surprising without context, and a real trade-off. The Worker does not run that owner interview or write canonical term/ADR changes on this branch.
 
-DQ-A1-01 below is still the **only compound owner decision requested by A1**, but it contains seven known sequential clarification questions. A2 later added two further entries, [DQ-A2-01](#dq-a2-01--unsupported-dependency-acceptance-threshold) and [DQ-A2-02](#dq-a2-02--exact-closure-subject-artifact), under this same protocol. Conditional exact parameters—OS versions, the value of `N`, CPU family names, channel membership, primary/preview cells, Core Parity Set IDs, an external accessibility standard, or a new Policy-governance role—remain evidence-blocked and require a new protocol-complete queue entry before a canonical promise; no default may be inferred.
+DQ-A1-01 below is still the **only compound owner decision requested by A1**, and it contains seven known sequential clarification questions. A2 later added [DQ-A2-01](#dq-a2-01--unsupported-dependency-acceptance-threshold-resolved-u2-not-pending) and [DQ-A2-02](#dq-a2-02--exact-closure-subject-artifact-resolved-x2-not-pending) under this protocol; both are now resolved and retained with their option history. Conditional exact parameters—OS versions, the value of `N`, CPU family names, channel membership, primary/preview cells, Core Parity Set IDs, an external accessibility standard, or a new Policy-governance role—remain evidence-blocked and require a new protocol-complete queue entry before a canonical promise; no default may be inferred.
 
 ## DQ-A1-01 — Product Support and Consistency Profile
 
@@ -178,7 +178,7 @@ In the A1-only turn, A2 **was unavailable**. It required Commander confirmation 
 | Corrected closed row set | 44 rows; exact review re-opened the incomplete former set, all eleven owner-direction evidence bullets plus the separate K/A/R/S disposition bullet were traced, four omitted rows were added, and the corrected set was frozen before re-scoring |
 | Load-bearing rows | 43 (`CC-36` is `Not applicable`: canonical baseline is Windows-only and `DQ-A1-01` is unresolved) |
 | Proven | **0** |
-| Candidate / Experimental / Unknown | 15 / 2 / 26 |
+| Candidate / Experimental / Unknown | 17 / 2 / 24 |
 | Gap claims | 0 |
 | **Verified Codex Capability Gaps** | **0** |
 
@@ -192,13 +192,13 @@ In the A1-only turn, A2 **was unavailable**. It required Commander confirmation 
 
 Candidate C receives the exact disposition **Keep — deferred candidate evidence only for this A2 evaluation**. “Keep” is neither DeepSeek runtime selection/evaluation nor Development Reference Framework activation; it does not pass the Runtime Re-entry Gate and promises no future admission.
 
-**The three blockers.** Each fails closure independently of any single row.
+**Original blocker transitions and remaining blocker.** History is retained without treating resolved prerequisites as current blockers.
 
-| ID | Blocker | Rows | Resolved by |
+| ID | Status | Rows | Current interpretation |
 | --- | --- | --- | --- |
-| **BLK-A2-01** | No exact coherent surface exists to close against. The pinned research snapshot is explicitly not a dependency pin; the current official documentation names no version. Their method inventories, data-directory documentation, and the scope of their production warning differ. | `CC-01` | `DQ-A2-02` |
-| **BLK-A2-02** | The vendor recommends `codex app-server` for exactly AI7's integration shape **and** states that "The app-server command and WebSocket transport are experimental and aren't supported for production workloads." Both are simultaneous facts; the stricter, current one governs the production question. | `CC-02`, `CC-03` | `DQ-A2-01`, or an upstream support change |
-| **BLK-A2-03** | The narrow-tool-surface exclusion is unproven in the direction AI7 defined as decisive. Shell, filesystem, network, and coding-oriented tooling are documented as sandbox-*constrained*; nothing shows they can be made *absent*. | `CC-16`–`CC-19` | Evidence (`UNK-A2-06`–`UNK-A2-09`), not a decision |
+| **BLK-A2-01** | **Resolved prerequisite** | `CC-01` | X2 selects the exact stable `0.149.0` x64 App Server package, and the official GET/digest match makes it concrete and obtainable. The former two-surface mismatch remains historical evidence, especially for the missing version-bound support link. `CC-01` is Candidate, not Proven. |
+| **BLK-A2-02** | **Risk prerequisite resolved as U2; maturity remains Experimental** | `CC-02`, `CC-03` | U2 records Accepted Unsupported Dependency Risk under exact controls and exit conditions. It does not change vendor maturity, make the current moving warning exact-version evidence, or prove capability closure. |
+| **BLK-A2-03** | **Remaining blocker** | `CC-16`–`CC-19` | Shell, filesystem, network, and coding-oriented tooling are documented as sandbox-constrained; static package names prove neither registration/reachability nor structural absence. Evidence `UNK-A2-06`–`UNK-A2-09` remains required. |
 
 ### Disposition of the four A1 candidates
 
@@ -206,16 +206,18 @@ A1 required A2 to disposition candidates A–D; here is where each stands. None 
 
 | Candidate | A2 disposition |
 | --- | --- |
-| **A — Codex app-server** | **Spike.** The preferred evaluation surface and the [seam design](./A2-CODEX-SEAM.md)'s production *candidate*. It does not contribute all required capabilities on the admitted evidence: 26 rows Unknown and the surface itself Experimental by vendor statement. Not a closure result, dependency pin, or authorization. |
+| **A — Codex app-server** | **Spike.** The preferred evaluation surface and the [seam design](./A2-CODEX-SEAM.md)'s production *candidate*. It does not contribute all required capabilities on the admitted evidence: 24 rows remain Unknown and the surface remains Experimental by vendor statement. Not a closure result, dependency pin, or authorization. |
 | **B — Codex SDK / `codex exec`** | **Reject as an additional production surface.** `S-A2-01` assigns the three integration layers distinct roles, and admitting more than one would create overlapping loops (`CC-04`). AI7's bounded background and verification role is served by the AI7-owned deterministic replay adapter, which needs no second Codex entry point. Not re-evaluated as a fallback. |
 | **C — DeepSeek Harness `0.1.0-rc.6`** | **Keep — deferred candidate evidence only for this A2 evaluation.** Keep means the already admitted candidate record remains available as deferred evidence only. It is explicitly not runtime selection or evaluation, Development Reference Framework activation, Runtime Re-entry Gate passage, or a promise of future admission. |
 | **D — Runtime composition** | **Reject.** No evidence supports a mixed or dual-runtime design, and none was sought. The one-loop invariant is enforced structurally by the Module admitting exactly one adapter per execution. |
 
 **The A2 stable-binding question is answered as a candidate.** A1 left open what binding correlates executor technical history with AI7 Tasks, Runs, Plans, and Effects. The [seam design](./A2-CODEX-SEAM.md#the-stable-binding-answer) keeps two canonical records distinct: the immutable AI7-owned Execution Binding binds the complete semantic/authority inputs and references, while each Harness Execution Span identifies the exact Harness Session event range or explicit range set for one dispatch, Resume, or Retry. AI7 persists the binding before capability- or Effect-capable action; repeat-open drift fails closed; append-only link records associate applicable Effects without mutating the binding, and no Harness result becomes an Effect Receipt. `CC-28` remains `Candidate`, not Proven. This is a different question from the formal pending maintenance-policy Question 3, which **A2 did not answer**.
 
-## DQ-A2-01 — Unsupported-dependency acceptance threshold
+## DQ-A2-01 — Unsupported-dependency acceptance threshold (resolved U2, not pending)
 
 **Decision owner:** repository owner, reached through the Commander.
+
+**Resolution:** **U2**, exact owner object [`800a0d3:docs/architecture-exploration/clarifications/0003-accept-bounded-unsupported-codex-risk.md`](https://github.com/zhouy1017/ai7-harness/blob/800a0d3c4b65388aaa6f122f84ea6a1821ad800a/docs/architecture-exploration/clarifications/0003-accept-bounded-unsupported-codex-risk.md), blob `921983e817668b1a51f4799c4942e265ba4280a5`, 5661 bytes (`S-A2-12`). U2 records **Accepted Unsupported Dependency Risk** for one exact surface under named controls. It does not relabel the surface supported, stable, Proven, or production-ready; `CC-02` and `CC-03` remain Experimental.
 
 **Exact question:** May AI7 ship a Primary Agent Harness whose vendor documents it as experimental and not supported for production workloads?
 
@@ -231,13 +233,15 @@ A1 required A2 to disposition candidates A–D; here is where each stands. None 
 | **U2** | Accept unsupported status as a recorded, bounded risk: one exact pin, an AI7-owned schema-fingerprint gate that fails closed on drift, and a stated exit plan. |
 | **U3** | Defer the decision and re-evaluate at a named later date or upstream milestone. |
 
-**Architect recommendation — U2.** U1 makes AI7's schedule a function of another vendor's release policy with no lever to move it, and the owner's Codex-first direction would stall indefinitely. U3 defers without reducing risk. U2 is honest about the exposure and converts it into something AI7 controls: the [seam design](./A2-CODEX-SEAM.md) already concentrates the entire exposure behind one Module and one `describeSurface()` call, and the fail-closed fingerprint gate is the concrete mitigation. U2 is a recommendation and is not a decision.
+**Historical architect recommendation — U2.** U1 would make AI7's schedule a function of another vendor's release policy with no lever to move it, while U3 would defer without reducing risk. U2 was recommended because the [seam design](./A2-CODEX-SEAM.md) concentrates the exposure behind one Module and one `describeSurface()` call. The exact owner resolution above, not this recommendation, is the decision.
 
 **Error if guessed:** guessing U2 ships a product on an explicitly unsupported vendor surface without the owner having accepted that risk. Guessing U1 silently blocks the owner's stated Codex-first direction on a condition the owner never set.
 
-## DQ-A2-02 — Exact closure-subject artifact
+## DQ-A2-02 — Exact closure-subject artifact (resolved X2, not pending)
 
 **Decision owner:** Repository Development Commander, escalating to the owner only if the choice changes the support classification decided in `DQ-A2-01` or implies a cost the owner has not accepted.
+
+**Resolution:** **X2**, exact Commander object [`800a0d3:docs/architecture-exploration/A2-CLOSURE-SUBJECT-DECISION.md`](https://github.com/zhouy1017/ai7-harness/blob/800a0d3c4b65388aaa6f122f84ea6a1821ad800a/docs/architecture-exploration/A2-CLOSURE-SUBJECT-DECISION.md), blob `7630529e3536fc1bc58e5c9ec4e4acffd22faeb6`, 4378 bytes (`S-A2-13`). The sole closure subject is stable tag `rust-v0.149.0`, annotated tag object `a4e15bf371341b067c8278d3b70b1a8c7b3d793e`, peeled commit `758ef40f50c1a458425c7cfbf1eb12cbc07af0b0`, and x64 asset `codex-app-server-package-x86_64-pc-windows-msvc.tar.gz` at SHA-256 `580207baa5ecabb8e42fd734bdb774ffcd82709ccd60bff8fa812b1b83962e28`; the contained and standalone App Server digest is `d181a381eece22dd21f98a06006c03289fe1a705012b9ca8fb3596dc0d90ea61`. This selects evidence scope, not a product dependency.
 
 **Exact question:** Which exact artifact is the subject of a re-scored capability-closure matrix?
 
@@ -253,7 +257,7 @@ A1 required A2 to disposition candidates A–D; here is where each stands. None 
 | **X2** | An exact published release, package version, or binary to be identified, which AI7 could actually consume. |
 | **X3** | Whatever is current at evaluation time. |
 
-**Architect recommendation — X2.** X1 scores closure against a surface the owner-direction object already says is not a pin, so a pass would prove nothing shippable. X3 reproduces the exact incoherence that produced `BLK-A2-01` and contradicts AI7's accepted rule against treating a moving branch as a pin. X2 requires one preliminary step — identifying what is actually published and obtainable, which is `UNK-A2-20` — and it is the only option under which a closure pass would mean anything. This is a recommendation and is not a decision.
+**Historical architect recommendation — X2.** X1 would score research code, while X3 would let the verdict drift with upstream. X2 was recommended because only an exact obtainable artifact can support reproducible closure. The exact Commander resolution above, not this recommendation, is the decision; `UNK-A2-01` and `UNK-A2-20` are retired into the gap register's disposition-transition history.
 
 **Error if guessed:** guessing X1 produces a closure verdict about research code. Guessing X3 makes the verdict expire silently as upstream moves, which is the failure mode ADR 0020 was written to prevent.
 
@@ -261,9 +265,9 @@ A1 required A2 to disposition candidates A–D; here is where each stands. None 
 
 | Later activity | Actual entry rule | What does **not** grant entry |
 | --- | --- | --- |
-| A2 — Codex-first capability closure | **Entered and corrected after exact review** under separate Commander dispatches. Owner selection of DQ-A1-01 was not required and did not occur. | Exited `Closure not proven` with 44 rows / 43 load-bearing / 0 Proven / 15 Candidate / 2 Experimental / 26 Unknown / 1 Not applicable / 0 Gap claims / 0 Verified Codex Capability Gaps. Fresh independent exact-head T3-par review is next. |
-| A2 continuation — re-scored matrix against one exact artifact | `DQ-A2-02` resolves the exact artifact; `DQ-A2-01` resolves the support threshold; every relied-on Unknown receives its named exit evidence, including `UNK-A2-06`–`UNK-A2-09` and `UNK-A2-22`–`UNK-A2-26`. A separate brief is still required, as is separate authorization for any probe or spike. | This A2 result grants no continuation by implication, and neither does the seam design. |
-| Future A3 isolation/local-authority exploration | **Stopped.** A3 requires one selected or decision-ready single-execution-authority surface. A2 identified no exact artifact (`CC-01`) and returned `Closure not proven`, so no such surface exists. | Exact gap evidence, DeepSeek re-entry eligibility, a candidate list, documented sandbox claims, UI claims, unresolved composition, current A1 options, **or this A2 result**. A `Closure not proven` verdict is not a decision-ready surface. |
+| A2 — Codex-first capability closure | **Entered, corrected, and re-scored against the exact X2 subject** under separate Commander dispatches. Owner selection of DQ-A1-01 was not required and did not occur. | Current verdict remains `Closure not proven`: 44 rows / 43 load-bearing / 0 Proven / 17 Candidate / 2 Experimental / 24 Unknown / 1 Not applicable / 0 Gap claims / 0 Verified Codex Capability Gaps. Fresh independent exact-head T3-par review is next. |
+| A2 continuation — remaining closure evidence | U2 and X2 are resolved prerequisites. Every remaining relied-on Unknown receives its named exit evidence, especially `UNK-A2-06`–`UNK-A2-09` and `UNK-A2-22`–`UNK-A2-26`; the two Experimental rows remain separately visible under U2. Any further source retrieval or probe requires a separate brief. | Exact artifact identity, static `probe partial`, U2, or this re-score grants no further execution by implication. |
+| Future A3 isolation/local-authority exploration | **Stopped.** A3 requires one selected or decision-ready single-execution-authority surface. X2 identifies an exact closure subject, but the matrix remains technically unclosed and no production dependency or runtime surface is selected. | Exact artifact identity, U2, gap evidence, DeepSeek re-entry eligibility, a candidate list, documented sandbox claims, UI claims, unresolved composition, current A1 options, **or this A2 result**. A `Closure not proven` verdict is not a decision-ready surface. |
 | Canonical product promise | Owner selects DQ-A1-01, evidence supports the exact cells, affected ADRs are explicitly disposed, and Commander integrates through normal review. | A1 completion, candidate ADR status, or Commander invariant confirmation alone. |
 | Coherent V2 candidate | A1 choice plus A2's capability-closure result and conditional role disposition, A3 tests, and other named evidence are reconciled into one candidate. | Either frozen Worker branch wholesale, treating the owner condition as proof of closure, or silently retaining DeepSeek runtime/fallback. |
 | Product implementation | Coherent candidate passes independent T3 hostile challenge, owner explicitly accepts it, Commander integrates it, and owner separately authorizes implementation planning. | Any architecture exploration result by implication. |
@@ -292,12 +296,12 @@ These rows record missing evidence only. They dispatch no spike, select no mecha
 | ID | Missing evidence | Needed by / exit condition | Invalidation consequence |
 | --- | --- | --- | --- |
 | **EV-A2-01** | The tool-registration surface of the exact artifact: whether shell, process, filesystem, network, and coding-oriented tools can be **absent** rather than sandbox-constrained. | `CC-16`–`CC-19`; `UNK-A2-06`–`UNK-A2-09`. The single highest-leverage item in the register. | ADR 0017's narrow-tool-surface guarantee cannot be claimed for a Codex-based composition. |
-| **EV-A2-02** | Exact artifact identity, publication channel, obtainability, and update cadence. | `CC-01`, `CC-39`; `UNK-A2-01`, `UNK-A2-20`; input to `DQ-A2-02`. | Every matrix row remains scored against a surface AI7 may never ship. |
+| **EV-A2-02** | **Partly delivered and re-scored.** X2, official release metadata, successful official GET, and digest match establish the exact stable `0.149.0` x64 subject, publication channel, and obtainability. Update cadence, pin-bump rehearsal, schema compatibility, and the complete upgrade contract remain untested. | `CC-01` and `CC-39` are Candidate; `UNK-A2-01` and `UNK-A2-20` are retired into disposition history. | The exact subject cannot silently drift or become a production dependency; later upgrade claims still require the remaining evidence. |
 | **EV-A2-03** | Provider replaceability for a named mainland-China provider, and the credential path. | `CC-13`, `CC-14`; `UNK-A2-04`, `UNK-A2-05`. Requires retrieving `model-provider-info` at the exact artifact. | Chinese-first provider independence and the Credential Broker boundary stay unproven. |
 | **EV-A2-04** | Windows sandbox enforcement strength, elevation behavior, immutable per-execution root/sandbox binding including junction/reparse-point traversal, crash, shutdown, concurrency, and scratch/cache/mutable-authority isolation across overlapping and disjoint authorized scopes. | `CC-22`–`CC-27`, `CC-43`; `UNK-A2-11`–`UNK-A2-16`, `UNK-A2-25`. | The Agent Data Root cannot be described as enforced rather than intended, junction/reparse-point escapes and semantic drift on reopen remain untested, and parallel-Run isolation stays unproven. |
 | **EV-A2-05** | Protocol compatibility policy, or acceptance that an AI7-owned schema-fingerprint gate is the entire contract. | `CC-32`; `UNK-A2-18`. | ADR 0020's pin-bump verification has no upstream stability contract to verify against. |
 | **EV-A2-06** | Egress inventory: whether compliance-log identification, attestation, feedback upload, or diagnostics transmit Run content, and what is enabled by default. | `CC-31`, `CC-40`; `UNK-A2-17`, `UNK-A2-21`. | The accepted egress boundary — only a configured model call may carry a manuscript off the machine — cannot be claimed. |
-| **EV-A2-07** | The four exact source paths cited only through the Commander-curated seam audit and never independently retrieved (`S-A2-10`), plus `LICENSE` and `NOTICE` at the exact artifact (`S-A2-11`). | `CC-09`, `CC-13`, `CC-25`, `CC-30`, `CC-35`, `CC-37`; `UNK-A2-22` is the exact license/notices exit evidence. | Index-mediated rows cannot close; `CC-37` remains Unknown until exact-pin license/notices retrieval. |
+| **EV-A2-07** | The four exact source paths cited only through the Commander-curated seam audit remain un-retrieved (`S-A2-10`). Exact source `LICENSE` and `NOTICE` objects are now matched while the package carries neither (`S-A2-14`, `P-A2-03`); distribution obligations, trademark treatment, and generated-notice reconciliation remain undone. | `CC-09`, `CC-13`, and `CC-30` remain index-mediated; `CC-25` and `CC-35` now have direct static artifact evidence but remain Unknown on runtime/channel behavior; `CC-37` and `UNK-A2-22` remain Unknown on the legal/distribution conclusion. | Package-file absence is not noncompliance or a legal conclusion; no row closes until its remaining exact evidence is supplied. |
 | **EV-A2-08** | The two separately authorized version/help probes, `codex --version` and `codex app-server --help`, ran successfully under Commander authority at `2026-08-22T14:50:23Z` after the original Worker refusal. | The observations establish only `codex-cli 0.147.0` and the local app-server help surface and close no matrix row. **Runtime-behavior and closure probes did not run.** | A2 still lacks runtime-behavior evidence and remains `Closure not proven`. |
 | **EV-A2-09** | Exact subagent lifecycle/event projection, provider-fallback/ambiguity-stop, and offline-startup behavior. | `CC-41`, `CC-42`, `CC-44`; `UNK-A2-23`, `UNK-A2-24`, `UNK-A2-26`. | Subagents, fallback, and offline startup remain required Interface invariants but cannot be claimed as executor capabilities. |
 
@@ -329,6 +333,6 @@ Issue #4 A1 completed by validating and locally committing its candidate documen
 
 ## Current A2 stop boundary
 
-A2 completes by locally committing exactly seven paths above the sealed A1 head `b5076179a37f8d654e758ca0b4a8bdeec8caaaa5`, which it neither amended nor altered. Beyond A1's admitted objects, A2 additionally admitted the Commander-curated seam audit `9af2a07f:docs/architecture-exploration/CODEX-EXTENSION-SEAMS.md` as an evidence index with warnings, two official OpenAI pages, and one exact `openai/codex@44e95c85…` source path — all recorded in the [A2 Evidence Register](./A2-EVIDENCE-REGISTER.md).
+A2's earlier result was committed above sealed A1 without amending it. This exact-artifact re-score adds one new commit above `f1d212c5` and edits exactly the ten authorized candidate paths. Beyond the preserved `S-A2-01`–`S-A2-11` and `P-A2-01`–`P-A2-02`, it admits only `S-A2-12`–`S-A2-14` and `P-A2-03`, all at the exact Git objects recorded in the [A2 Evidence Register](./A2-EVIDENCE-REGISTER.md).
 
-A2 does **not** assert Harness Capability Closure or any Codex Capability Gap; select a Codex surface, artifact, version, package, or dependency; select the maintenance form among external adapter or extension, upstream contribution, maintained patch set, and fork; answer the formal pending maintenance-policy Question 3; answer `DQ-A1-01`, `DQ-A2-01`, or `DQ-A2-02`; produce costed Codex Secondary Development routes; inspect DeepSeek runtime evidence or open its re-entry gate; write an ADR; promote any candidate term or record to a canonical context, glossary, or ADR; update canonical V1; enter A3 or implementation; install, clone, copy, or vendor anything; authenticate, call a model or provider, start app-server, or generate a schema; or push, open a pull request, merge, publish, or take any external action. The Worker session historically refused both separately authorized local probes; Commander later executed them successfully, observing only binary identity and local help-surface facts, with no runtime-behavior evidence.
+This re-score does **not** assert Harness Capability Closure or any Codex Capability Gap; select a production dependency or maintenance form; answer the formal pending maintenance-policy Question 3 or `DQ-A1-01`; produce costed Codex Secondary Development; inspect DeepSeek runtime evidence or open its re-entry gate; create a new ADR; promote any candidate term or record to canonical status; update canonical V1; enter A3 or implementation; or install, clone, copy, vendor, authenticate, call a model/provider, execute a downloaded binary, start App Server, generate a schema, push, open a pull request, merge, publish, or take any external action. It records the already-resolved U2 and X2 decisions and updates existing candidate ADR 0001 only. `P-A2-03` remains prior Commander static evidence, not an action repeated by this Worker.

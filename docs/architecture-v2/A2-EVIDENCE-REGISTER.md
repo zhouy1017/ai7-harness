@@ -1,13 +1,13 @@
 # A2 evidence register
 
-Status: **Issue #4 noncanonical A2 record; evidence index only; asserts no closure, no gap, and no selection**
+Status: **Issue #4 noncanonical A2 evidence index; exact stable `0.149.0` x64 App Server closure subject identified; no closure, gap, product-dependency selection, or implementation authority**
 
 This register is the single provenance surface for [A2 Capability Closure](./A2-CAPABILITY-CLOSURE.md), [A2 Codex Seam](./A2-CODEX-SEAM.md), and [A2 Gap Register](./A2-GAP-REGISTER.md). Every substantive A2 claim cites a source ID below. A claim with no source ID is a design derivation whose semantic inputs are themselves cited, or it is labelled as an open question.
 
 Two distinctions are load-bearing throughout and are never collapsed:
 
-- **Research snapshot versus proposed dependency pin.** `openai/codex@44e95c857f37f81a5731eab72c32a3d334d0e2c4` is research evidence recorded by the owner-direction object `S-A2-04`. A2 proposes no dependency pin and installs nothing.
-- **Documentation versus observed behavior.** Every source below is a document. Commander ran the authorized version/help probes, but A2 observed no app-server runtime behavior and ran no closure probe; see [Probes](#probes).
+- **Research snapshot, exact closure subject, and product dependency.** `openai/codex@44e95c857f37f81a5731eab72c32a3d334d0e2c4` remains research evidence recorded by `S-A2-04`. X2 separately selects the exact stable `0.149.0` x64 App Server package as the sole subject of this evidence matrix. That scope decision is not a production dependency selection, install, or implementation pin.
+- **Documents, static artifact observation, and runtime behavior.** `S-A2-01`–`S-A2-14` are exact source records. `P-A2-01` and `P-A2-02` are Commander version/help observations against a different local `0.147.0` installation. `P-A2-03` is a corrected static observation of the selected `0.149.0` package; no downloaded binary executed, no protocol/schema was generated, and no runtime-behavior or closure probe ran.
 
 ## Source registry
 
@@ -23,22 +23,50 @@ Two distinctions are load-bearing throughout and are never collapsed:
 | **S-A2-08** | Sealed A1 candidate head `b5076179a37f8d654e758ca0b4a8bdeec8caaaa5` and exactly seven A1 architecture paths: `docs/architecture-v2/README.md`, `docs/architecture-v2/A1-PRODUCT-CONSISTENCY.md`, `docs/architecture-v2/A1-EVIDENCE-CROSSWALK.md`, `docs/architecture-v2/DECISION-QUEUE.md`, `docs/architecture-v2/GLOSSARY.md`, `docs/architecture-v2/domain/execution/CONTEXT.md`, and `docs/architecture-v2/adr/0001-conditional-primary-agent-harness-and-gap-closure.md` | Candidate invariant | 2026-08-22 | Yes — read in the working tree at the exact head | A1 continuation distinctions, replay/seam requirements, Windows-only non-applicability, and the open stable-binding question. `CC-11`, `CC-33`, `CC-34`, `CC-36`. | Noncanonical candidate. A1 asserts no closure and no gap. |
 | **S-A2-09** | `AGENTS.md` at `b5076179a37f8d654e758ca0b4a8bdeec8caaaa5` | Accepted AI7 rule | 2026-08-22 | Yes — read at the exact head | Accepted execution, authority, capability, privacy, packaging, concurrency, ledger, and naming constraints. `CC-02`, `CC-03`, `CC-05`, `CC-07`–`CC-11`, `CC-13`–`CC-24`, `CC-26`–`CC-28`, `CC-30`–`CC-33`, `CC-35`, `CC-37`–`CC-43`. | Canonical accepted rules; they constrain A2 rather than being tested by it. |
 | **S-A2-10** | Exact source paths cited **through** `S-A2-07` and not independently retrieved: `codex-rs/app-server-protocol/src/protocol/v2/thread.rs`, `codex-rs/model-provider-info/src/lib.rs`, `codex-rs/thread-store/src/store.rs`, `codex-cli/bin/codex.js`, each at `44e95c857f37f81a5731eab72c32a3d334d0e2c4` | Unresolved claim (index-mediated) | Not retrieved | **No** | Index-mediated instruction, provider, Thread Store, native-launch, and packaging claims. `CC-09`, `CC-13`, `CC-25`, `CC-30`, `CC-35`. | Every claim resting only on `S-A2-10` is index-mediated and is scored no higher than Unknown. Retrieving these four paths is named exit evidence in the [gap register](./A2-GAP-REGISTER.md). |
-| **S-A2-11** | Repository license facts for `openai/codex`: Apache-2.0 with `NOTICE`, no trademark grant | Owner direction (recorded in `S-A2-04`) | 2026-08-22 | **No** — not verified against `LICENSE`/`NOTICE` at the pin | Owner-stated license/notice/trademark claim pending exact-artifact verification. `CC-37`. | Recorded by the owner-direction object rather than independently derived. Direct verification at the exact artifact is named exit evidence. |
+| **S-A2-11** | Repository license facts for `openai/codex`: Apache-2.0 with `NOTICE`, no trademark grant | Owner direction (recorded in `S-A2-04`) | 2026-08-22 | **No** — this source itself was not verified against exact legal objects | Historical owner-stated license/notice/trademark claim. `CC-37`. | Preserved rather than rewritten. `S-A2-14` and `P-A2-03` later match exact source `LICENSE`/`NOTICE` objects and observe their package absence; legal/distribution reconciliation remains Unknown. |
+| **S-A2-12** | [`800a0d3:docs/architecture-exploration/clarifications/0003-accept-bounded-unsupported-codex-risk.md`](https://github.com/zhouy1017/ai7-harness/blob/800a0d3c4b65388aaa6f122f84ea6a1821ad800a/docs/architecture-exploration/clarifications/0003-accept-bounded-unsupported-codex-risk.md); blob `921983e817668b1a51f4799c4942e265ba4280a5`; 5661 bytes | Owner resolution | 2026-08-23 | Yes — blob and byte count re-derived before reading | U2; Accepted Unsupported Dependency Risk; exact minimum controls, suspension/exit conditions, and non-effects. `CC-02`, `CC-03`, `CC-32`, `CC-39`; Experimental records and candidate ADR. | Changes owner risk appetite only. It does not relabel the surface supported, Proven, stable, or production-ready; it proves no unrelated row and grants no dependency or implementation authority. |
+| **S-A2-13** | [`800a0d3:docs/architecture-exploration/A2-CLOSURE-SUBJECT-DECISION.md`](https://github.com/zhouy1017/ai7-harness/blob/800a0d3c4b65388aaa6f122f84ea6a1821ad800a/docs/architecture-exploration/A2-CLOSURE-SUBJECT-DECISION.md); blob `7630529e3536fc1bc58e5c9ec4e4acffd22faeb6`; 4378 bytes | Commander scope decision | 2026-08-23 | Yes — blob and byte count re-derived before reading | X2 and the selected stable `rust-v0.149.0` Windows x64 App Server package as the sole closure subject. `CC-01`, `CC-39`; retirement of `UNK-A2-01` and `UNK-A2-20`. | Selects evidence scope, not a production dependency. The broader command-level support warning remains unbound to the exact release and is applied conservatively through U2, not as version-bound vendor evidence. |
+| **S-A2-14** | [`800a0d3:docs/architecture-exploration/A2-EXACT-ARTIFACT-EVIDENCE.md`](https://github.com/zhouy1017/ai7-harness/blob/800a0d3c4b65388aaa6f122f84ea6a1821ad800a/docs/architecture-exploration/A2-EXACT-ARTIFACT-EVIDENCE.md); blob `f934efbf48573a9404440c6b4eaf13461d4e8144`; 11902 bytes | Commander-verified official-source evidence | 2026-08-23 | Yes — blob and byte count re-derived before reading; underlying official-source checks were Commander-verified | Exact tag, annotated tag object, source commit, package and standalone asset digests, official obtainability channel, schema-source objects, exact source `LICENSE`/`NOTICE` objects, and missing version-bound support/schema/package links. `CC-01`, `CC-25`, `CC-32`, `CC-35`, `CC-37`, `CC-39`. | Identifies the exact subject and missing links. Source legal objects are not packaged legal objects; source schema objects are not a generated binary/schema fingerprint; current moving support wording is not exact-version evidence. |
 
 ## Probes
 
-Local observation was separately authorized for exactly two commands. Worker execution was refused; Commander execution succeeded.
+The first two observations were separately authorized local commands against installed `codex-cli 0.147.0`; Worker execution was refused and Commander execution succeeded. The third is the separately reviewed corrected static observation of the selected `0.149.0` package. It involved an official GET and bounded extraction under Commander authority, but **no downloaded binary execution**.
 
 | ID | Command | Outcome | Timestamp | Exit code | Output class | Execution authority |
 | --- | --- | --- | --- | --- | --- | --- |
 | **P-A2-01** | `codex --version` | Executed successfully. Exact output: `codex-cli 0.147.0` | 2026-08-22T14:50:23Z | 0 | Local CLI version string | Commander observation |
 | **P-A2-02** | `codex app-server --help` | Executed successfully. Output class: local CLI help surface. Exact relevant lines/facts: "[experimental] Run the app server or related tooling"; commands: daemon, proxy, generate-ts [experimental], generate-json-schema [experimental], help; --listen supports stdio:// (default), unix://, unix://PATH, ws://IP:PORT, off; --stdio equivalent to --listen stdio://; analytics disabled by default for app-server unless first-party use enables the flag. | 2026-08-22T14:50:23Z | 0 | Local CLI help | Commander observation |
+| **P-A2-03** | Corrected selected-package static probe; exact evidence object [`800a0d3:docs/architecture-exploration/A2-STATIC-ARTIFACT-PROBE-RETRY-EVIDENCE.md`](https://github.com/zhouy1017/ai7-harness/blob/800a0d3c4b65388aaa6f122f84ea6a1821ad800a/docs/architecture-exploration/A2-STATIC-ARTIFACT-PROBE-RETRY-EVIDENCE.md), blob `0d16aa81e4c8231873ad884b5d8c66abdaf813ec`, 16943 bytes | `probe partial`: official GET returned 200 after redirect; size and package SHA-256 matched; two-pass archive validation/extraction captured six path/type/size rows and five usable file SHA-256 values; contained App Server digest matched the standalone asset; source legal objects matched; package legal/schema/attribution objects were absent. No downloaded binary ran. | 2026-08-23T05:07:35.0636521Z–05:08:20.9246981Z | N/A — static operation record | Official bytes plus bounded static archive/trust/legal observation | Commander observation |
 
-Consequence: the installed binary's identity (`codex-cli 0.147.0`) and help surface are **observed** by Commander authority. The version/help probes ran; runtime-behavior and closure probes did not. These observations establish only installed binary identity and help surface facts; they do not select a dependency pin, prove runtime behavior, change vendor support classification, close any matrix row, prove closure/gap, or authorize a probe/spike. A2 capability evidence rests on documents; binary identity and help are supplements that establish facts about the artifact, not runtime-behavior proof.
+Consequence: `P-A2-01` and `P-A2-02` establish only the different installed `0.147.0` binary identity and help surface. `P-A2-03` establishes exact static facts about the selected `0.149.0` bytes and moves only `CC-01` and `CC-39` from Unknown to Candidate when combined with X2 and `S-A2-14`. It does not prove runtime behavior, change vendor support classification, close any other matrix row, prove closure or a gap, select a product dependency, or authorize another probe.
+
+## Exact closure subject
+
+Every matrix row is now re-scored against this sole subject:
+
+| Identity field | Exact value |
+| --- | --- |
+| Stable tag | `rust-v0.149.0` |
+| Annotated tag object | `a4e15bf371341b067c8278d3b70b1a8c7b3d793e` |
+| Peeled source commit | `758ef40f50c1a458425c7cfbf1eb12cbc07af0b0` |
+| Selected asset | `codex-app-server-package-x86_64-pc-windows-msvc.tar.gz` |
+| Asset SHA-256 | `580207baa5ecabb8e42fd734bdb774ffcd82709ccd60bff8fa812b1b83962e28` |
+| Contained and standalone App Server SHA-256 | `d181a381eece22dd21f98a06006c03289fe1a705012b9ca8fb3596dc0d90ea61` |
+
+This identity resolves obtainability and immutability for `CC-01` and the acquisition half of `CC-39`. Update cadence, pin-bump rehearsal, schema compatibility, binary/schema equivalence, the complete upgrade contract, and every runtime property remain untested.
+
+## Static-evidence preservation
+
+- The result label is exactly **`probe partial`** and remains static evidence only.
+- The archive retains six path/type/size rows and only five usable file SHA-256 values. The 65-character `codex-package.json` field `861c65efa4f6021352df256aa18b9c1d49feaef201e229c8e86678815dc37a515` is invalid and remains unknown/unusable.
+- `7af3ab526a2755743aaffefaa9e6a75309822d2cc720b87db20b4d1661276a0e` is the reconstruction from the six displayed fields including the malformed field. Deleting one adjacent duplicated `8` yields the 64-character forensic candidate `861c65efa4f6021352df256aa18b9c1d49feaef201e229c8e8667815dc37a515`, which reconciles the raw `e8676fb4daa693e21a97d681f5c945c464795b04ca4db9aff0003dc4ee066fc6` aggregate. Neither the candidate file digest nor an aggregate manifest fingerprint is admitted.
+- Package-file absence is not artifact invalidity, noncompliance, or a legal conclusion. Exact source `LICENSE` and `NOTICE` objects matched, while the archive carried neither; obligations, trademark treatment, and generated-notice reconciliation remain undone.
+- Cache-only non-revocation trust observations prove neither revocation status nor timestamp validity. `rg.exe` remains unknown, not a pass or failure.
+- No moving documentation statement becomes exact-version support evidence, and no unperformed runtime behavior is inferred.
 
 ## The two documented surfaces are not one surface
 
-This is the register's single most consequential finding and it is a comparison of two admitted sources, not an inference.
+This comparison is preserved because it explains the original `CC-01` Unknown and the missing version-bound support link. It is no longer the closure identity: X2 and the matched official package now provide that exact subject. The moving page's broader command-level warning still cannot be attributed to release `0.149.0` as vendor-version evidence; U2 applies it conservatively as risk control while the mismatch remains visible.
 
 | Question | `S-A2-03` — pinned snapshot `44e95c85` | `S-A2-02` — current official documentation |
 | --- | --- | --- |
@@ -50,6 +78,6 @@ This is the register's single most consequential finding and it is a comparison 
 
 The stricter and more current statement governs the production question. A2 records the official **recommendation** for app-server (`S-A2-01`: "Use Codex app-server when the agent is part of the product itself") and the official **maturity exclusion** (`S-A2-02`) as **simultaneous facts**. Neither cancels the other, and neither alone selects or rejects a surface.
 
-## What A2 did not do
+## What this re-score did not do
 
-No clone, download, copy, vendoring, install, authentication, dependency resolution, model or provider call, app-server start, handshake, schema generation, runtime-behavior probe, closure probe, prototype, or write outside the seven authorized repository paths. The only command observations were the Commander-executed version/help probes above. No DeepSeek runtime source was inspected; `S-A2-06`'s two-condition re-entry gate is untouched and remains closed. No transcript, active foreign worktree, unlabeled context, or third-party page was admitted at any point.
+The earlier Commander static probe performed the official GET and bounded extraction recorded by `P-A2-03`; this candidate re-score did not repeat or extend it. This re-score performed no clone, download, extraction, binary execution, install, authentication, dependency resolution, model or provider call, App Server start, handshake, schema generation, runtime-behavior probe, closure probe, prototype, or write outside the ten authorized candidate paths. No DeepSeek runtime source was inspected; `S-A2-06`'s two-condition re-entry gate remains closed. No transcript, active foreign worktree, unlabeled context, or new external source was admitted.

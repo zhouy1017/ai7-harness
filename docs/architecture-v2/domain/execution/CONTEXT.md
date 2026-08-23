@@ -2,11 +2,11 @@
 
 Status: **Issue #4 candidate-local noncanonical context; not a canonical term owner**
 
-This file is the definition owner for the execution-layer terms created by the exact owner resolutions registered in A1. It is **candidate-local**: it belongs to the `docs/architecture-v2/` Issue #4 candidate only. It does not amend, supersede, or extend the canonical [Execution context](../../../domain/execution/CONTEXT.md) at `main@c8cbe26`, and none of its terms is a canonical AI7 term until the owner accepts the candidate and the Commander integrates it.
+This file is the definition owner for the execution-layer terms created by the exact owner resolutions registered in A1 and by the later U2 owner resolution admitted in A2. It is **candidate-local**: it belongs to the `docs/architecture-v2/` Issue #4 candidate only. It does not amend, supersede, or extend the canonical [Execution context](../../../domain/execution/CONTEXT.md) at `main@c8cbe26`, and none of its terms is a canonical AI7 term until the owner accepts the candidate and the Commander integrates it.
 
-Every term below is **conditional vocabulary**. Defining a term names a possible future state; it does not assert that the state holds. A1 asserts no capability closure, no capability gap, no runtime selection, and no maintenance form.
+Every term below is **conditional vocabulary**. Defining a term names a possible future state or a candidate-local risk disposition; it does not make that state canonical. A2 returns `Closure not proven`, proves no capability gap, selects no production runtime or dependency, and chooses no maintenance form. U2 changes the owner's bounded risk appetite for the selected closure subject; it does not change those technical results.
 
-The bilingual index for these terms — including collisions with canonical labels — is the candidate [GLOSSARY](../../GLOSSARY.md). The conditional disposition that uses them is candidate [ADR 0001](../../adr/0001-conditional-primary-agent-harness-and-gap-closure.md). Their exact owner basis is [OR-2026-08-21-01](../../DECISION-QUEUE.md#or-2026-08-21-01--conditional-primary-agent-harness-role-resolved-not-pending) and [OR-2026-08-21-02](../../DECISION-QUEUE.md#or-2026-08-21-02--codex-gap-closure-and-deepseek-runtime-re-entry-resolved-not-pending).
+The bilingual index for these terms — including collisions with canonical labels — is the candidate [GLOSSARY](../../GLOSSARY.md). The conditional disposition that uses them is candidate [ADR 0001](../../adr/0001-conditional-primary-agent-harness-and-gap-closure.md). Their exact owner basis is [OR-2026-08-21-01](../../DECISION-QUEUE.md#or-2026-08-21-01--conditional-primary-agent-harness-role-resolved-not-pending), [OR-2026-08-21-02](../../DECISION-QUEUE.md#or-2026-08-21-02--codex-gap-closure-and-deepseek-runtime-re-entry-resolved-not-pending), and [DQ-A2-01](../../DECISION-QUEUE.md#dq-a2-01--unsupported-dependency-acceptance-threshold-resolved-u2-not-pending).
 
 ## Language
 
@@ -23,7 +23,7 @@ _Avoid_: reference implementation, inspiration source, secondary harness.
 ### Evidence results
 
 **Harness Capability Closure** (`执行框架能力闭合`):
-The evidence result that one exact candidate surface supplies every load-bearing AI7 agent-loop capability, either natively or through a narrow AI7 adapter that does not reproduce a second generic loop. `Codex Harness Capability Closure` is this result evaluated against an exact Codex surface. A future A2 must define and close the matrix; compilation, repository shape, an official article, or a feature impression is not this result.
+The evidence result that one exact candidate surface supplies every load-bearing AI7 agent-loop capability, either natively or through a narrow AI7 adapter that does not reproduce a second generic loop. `Codex Harness Capability Closure` is this result evaluated against an exact Codex surface. A2 has defined, frozen, and evaluated the 44-row matrix at `Closure not proven`; future exact evidence must make every load-bearing row `Proven` before closure. Compilation, repository shape, an official article, or a feature impression is not this result.
 _Avoid_: feature coverage, parity, capability match, "it can do everything".
 
 **Codex Capability Gap** (`Codex 能力缺口`):
@@ -33,6 +33,12 @@ _Avoid_: Codex limitation, missing feature, blocker.
 **Mature Runtime Alternative** (`成熟运行时替代方案`):
 An exact non-Codex surface proven obtainable, license- and platform-compatible, maintained, and testable, with credible lifecycle, persistence, security, upgrade, packaging, and verification behavior. A repository feature, design document, unpublished package, or marketing claim does not establish it.
 _Avoid_: viable option, backup runtime, second harness.
+
+### Risk disposition
+
+**Accepted Unsupported Dependency Risk** (`已接受的不受支持依赖风险`):
+An explicit owner decision that permits continued evaluation—and later candidate use—of one exact vendor-unsupported dependency under named fail-closed controls, suspension conditions, and an exit plan. It changes production risk appetite, not the dependency's factual support or maturity classification and not the evidence score of unrelated capabilities. It is neither a support claim, dependency selection, capability proof, Codex Capability Gap, Effect or authorization record, nor implementation authority.
+_Avoid_: supported dependency, accepted dependency, approved risk, production approval.
 
 ### Remedies and gates
 
