@@ -1,6 +1,6 @@
 # V2 Architecture Dispatch
 
-Status: **active; A1 sealed; A2 static-evidence re-score review-clean at `8eb70e3` with `Closure not proven`; exact path-discovery dispatch review-clean at `e5e21c9`, but its first attempt self-invalidated; a fresh retry brief awaits review; candidate writing, semantic trace, runtime and downloaded-binary execution, DeepSeek re-entry, maintenance selection, and A3 remain blocked**
+Status: **active; A1 sealed; A2 static-evidence re-score review-clean at `8eb70e3` with `Closure not proven`; two exact path-discovery attempts stopped without a result, the second before network; a synthetic-only extractor-qualification brief awaits review; official requests, candidate writing, semantic trace, runtime and downloaded-binary execution, DeepSeek re-entry, maintenance selection, and A3 remain blocked**
 
 This is a repository-development dispatch record, not a product architecture decision. All V2 outputs remain noncanonical until owner acceptance and normal integration.
 
@@ -30,7 +30,9 @@ This is a repository-development dispatch record, not a product architecture dec
 - Independently review-clean at `91554647`: [A2 exact Codex tool-surface source-audit evidence](./A2-TOOL-SURFACE-SOURCE-AUDIT-EVIDENCE.md); four rows remain Unknown and `BLK-A2-03` remains open
 - Independently review-clean at `e5e21c9`: [A2 exact Codex tool-surface path-discovery dispatch](./A2-TOOL-SURFACE-PATH-DISCOVERY-DISPATCH.md)
 - First attempt stopped fail-closed with no admitted result: [A2 path-discovery attempt evidence](./A2-TOOL-SURFACE-PATH-DISCOVERY-ATTEMPT-EVIDENCE.md)
-- Prepared and blocked pending exact-head review: [A2 path-discovery retry dispatch](./A2-TOOL-SURFACE-PATH-DISCOVERY-RETRY-DISPATCH.md)
+- Independently review-clean at `3a35400`: [A2 path-discovery retry dispatch and first-attempt evidence](./A2-TOOL-SURFACE-PATH-DISCOVERY-RETRY-DISPATCH.md)
+- Retry stopped before network with no admitted extractor/result: [A2 retry-attempt evidence](./A2-TOOL-SURFACE-PATH-DISCOVERY-RETRY-ATTEMPT-EVIDENCE.md)
+- Prepared and blocked pending exact-head review: [A2 offline extractor-qualification dispatch](./A2-TOOL-SURFACE-EXTRACTOR-QUALIFICATION-DISPATCH.md)
 
 ## Design Worker
 
@@ -100,6 +102,8 @@ After two bounded corrections, exact dispatch head `27891babd60baf7580a1be2368a6
 Independent T3-par Standards and Spec review then passed exact evidence head `915546477ca875494c7b3eb9c2d764d4513b328b` with zero findings and `same-provider review — independence reduced`. [The separate path-discovery dispatch](./A2-TOOL-SURFACE-PATH-DISCOVERY-DISPATCH.md) limits the next Worker to all 43 reviewed metadata rows plus zero-snippet lexical extraction over their 42 Rust-source rows and the three fixed leads. It freezes path identities for a later separately reviewed trace but reads no newly resolved source and changes no candidate row. Until this new brief itself passes both review axes, no Worker may run it; semantic tracing, candidate writing, re-score, runtime, gap verdict, A3, DeepSeek comparison, maintenance choice, and implementation remain blocked.
 
 After iterative deterministic-protocol corrections, both T3-par axes passed exact dispatch head `e5e21c90643366b6a81f9f13841d705ee263f9f4` with zero findings and `same-provider review — independence reduced`. The first read-only T2 attempt freshly matched every allowed identity but found that its own extractor violated the reviewed resolution-code precedence. It discarded source bytes, admitted no provisional output, exhausted the attempt's request ceiling, and stopped. [The evidence](./A2-TOOL-SURFACE-PATH-DISCOVERY-ATTEMPT-EVIDENCE.md) preserves that failure without converting it into an absence or capability claim. [The retry brief](./A2-TOOL-SURFACE-PATH-DISCOVERY-RETRY-DISPATCH.md) adds pre/post synthetic conformance vectors and requires wholly fresh bytes; it authorizes nothing until exact-head review passes.
+
+Both T3-par axes passed exact retry head `3a3540020f80be5090af9e8602104ba0fd796c6f`. The retry then failed its first offline conformance execution with a JavaScript syntax error, before any official request or source read. [The retry-attempt evidence](./A2-TOOL-SURFACE-PATH-DISCOVERY-RETRY-ATTEMPT-EVIDENCE.md) admits no extractor or result. [The qualification brief](./A2-TOOL-SURFACE-EXTRACTOR-QUALIFICATION-DISPATCH.md) now permits bounded in-memory iterations only over ten synthetic fixtures. Even `QUALIFIED` would require a separately persisted/reviewed immutable source and a new Phase-B dispatch before official retrieval.
 
 The completed A1 authoring turn was limited to one-product consistency and UI parity: map the 79 requirements and fourteen journeys, define shared semantics versus bounded native variation, expose support/parity/accessibility/Policy-visibility options, avoid implementation mechanisms, and stop where an owner choice is required. At that point A2 was blocked on stable, Commander-reviewed A1 invariants, not on the owner's exact parity/support choice; that choice still gates canonical product promises and the coherent candidate. A3 now remains blocked until separately authorized artifact probes and a later A2 evidence decision make the selected exact runtime surface decision-ready.
 
