@@ -1,10 +1,12 @@
 # A2 exact Codex artifact discovery dispatch
 
-Status: **authorized; read-only T2 evidence Worker next; candidate writing and A3 remain stopped**
+Status: **completed read-only; Commander-verified report admitted; stable `0.149.0` x64 App Server package selected under `DQ-A2-02`; version-bound support mapping and probes remain open; candidate writing and A3 remain stopped**
 
 Recorded: **2026-08-23**
 
 This is a repository-development evidence brief. It does not select a dependency, admit new candidate evidence by itself, authorize a behavioral probe or artifact download, rescore A2, enter A3, or authorize implementation.
+
+Completion record: the Worker returned the ten-question report without writes or prohibited actions. The Commander independently verified the official metadata and recorded the admitted result in [A2 exact Codex artifact evidence](./A2-EXACT-ARTIFACT-EVIDENCE.md). This dispatch remains the immutable controlling brief; the linked result does not retroactively widen it.
 
 ## Role and binding
 
