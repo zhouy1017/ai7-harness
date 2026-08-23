@@ -17,7 +17,7 @@ These are provider-neutral invariants. They are stated without reference to any 
 | Role | May | Never |
 | --- | --- | --- |
 | **Commander** | Decide dispatch, review returned work, integrate: merge, push, release. Sole external-action authority. Holds the owner's foreground session | — |
-| **Worker** | Read the repository, write only its own worktree and branch, run the verification gate, report | Merge, push to `main`, publish, take external actions, or read/write credentials, real manuscripts, or private sample Books |
+| **Worker** | Read the repository, write only its own worktree and branch, report; run the E2E Functional Gate only when its implementation change affects a supported journey or observed-bug regression | Merge, push to `main`, publish, take external actions, or read/write credentials, real manuscripts, or private sample Books |
 | **Reviewer** | Read the branch under review and its brief with fresh context; produce a review report and verdict | Write to the branch, merge, or dispatch |
 
 The reviewer's verdict is **advisory**. The commander decides and integrates.
@@ -28,19 +28,17 @@ The reviewer's verdict is **advisory**. The commander decides and integrates.
 - Soft cap of three concurrent workers. The binding constraint is commander review capacity, not dispatch capacity.
 - **T0 work is never dispatched**: ambiguous scope, a brief that is itself in doubt, or anything requiring the owner's decision. A worker starts cold and re-derives context the commander already holds; that is the most expensive path.
 - A worker whose brief turns out to be wrong **stops and reports**. It never self-escalates to a higher class.
-- Rebase onto current `main` and pass the verification gate before review.
+- Rebase onto current `main` before Commander integration. No design/document verification gate is required; implementation uses only the applicable E2E Functional Gate.
 
 ### Review
 
-- Every dispatched branch is reviewed by an agent that is **not its author**.
-- **The reviewer's task class is greater than or equal to the worker's task class. This is a hard floor.**
-- Cross-provider review is the default: a branch written on one provider is reviewed on the other.
-- When cross-provider review is impossible, proceed and flag `same-provider review — independence reduced`.
-- **Conflict ordering: the tier floor is hard; cross-provider is preferred with disclosure.** Competence to catch the error outranks independence from bias.
+- Independent review is optional and advisory, not a branch or exact-head gate. Use it for hostile architecture feedback or when the owner requests it.
+- When a Reviewer is used, it is not the author, its task class remains greater than or equal to the reviewed work, and cross-provider review is preferred with the existing disclosure when unavailable.
+- A review finding informs the Commander; it does not automatically trigger iterative proof or re-review cycles.
 
 ### Reporting
 
-Every returned unit of work carries one line with: role, requested provider binding, actual provider, model, effort, task class, fallback status and exact reason, and whether cross-provider review was achieved. An unavailable or exhausted provider is an observed dispatch outcome, not an excuse to omit the attempted binding.
+Every returned Worker unit carries one line with role, requested binding, actual provider/model/effort, task class, fallback status, and exact reason. Record reviewer independence only when a review was actually requested.
 
 ### Usage discipline
 
@@ -77,8 +75,8 @@ When a real dispatch reports that Claude Code is unavailable or its usable quota
 | Class | Definition | Examples in this project |
 | --- | --- | --- |
 | **T0** | Not dispatched | Ambiguous scope; brief in doubt; anything needing the owner's decision |
-| **T1** | Mechanical — correct output is verifiable without judgment | Link validation, glossary and index cross-checks, format and lint fixes, path renames, running the gate, cross-repository file inventory |
-| **T2** | Standard build from a written brief | A vertical slice with tests, CI workflow authoring, tests from an accepted contract, straightforward refactor |
+| **T1** | Mechanical — correct output needs little judgment | Small glossary/index updates, format fixes, path renames, cross-repository file inventory |
+| **T2** | Standard build from a written brief | A vertical slice, E2E journey or bug-regression scenario, straightforward refactor |
 | **T3** | High-stakes | Architecture, domain modeling, ADR drafting, Effects, named authorities, recovery and replay, credential broker, source-scope enforcement, manuscript revision and merge semantics |
 
 The T1 test is whether correctness can be checked without judgment. Running a link checker is T1; deciding which records contradict one another is T3.
@@ -123,7 +121,7 @@ Accepted with owner revisions:
 - three roles — Commander, Worker, Reviewer — with the reviewer an independent agent;
 - Codex is the main entry and normally holds the commander seat, at top capability;
 - dispatch-eligible, bounded parallel Worker tasks use Claude Code first while its quota is available, then fall back at the same task class under the existing table; every actual binding and downgrade reason is recorded;
-- the reviewer's task class is at least that of the work it reviews, and cross-provider review is the disclosed default;
+- independent review is optional and advisory; when requested, its existing task-class and independence boundaries remain;
 - operating rules stay identical across providers and models, with Layer B as the only provider-specific policy surface; and
 - the legacy orchestration pilot and its host connector are rejected as baselines.
 

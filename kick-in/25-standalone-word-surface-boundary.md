@@ -1,6 +1,6 @@
 # Standalone-only V1 and Deferred Word Alternative
 
-Status: **accepted in Question 23 with owner revision**
+Status: **accepted product boundary; any separate editing-sufficiency verification gate is superseded by ADR 0027**
 
 ## Decision
 

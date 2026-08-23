@@ -51,7 +51,7 @@ Agents arriving without prior context should start at the repository-root `HANDO
 24. [Linked Task and Harness ledgers](./23-linked-task-and-harness-ledgers.md) — accepted Question 22 boundary between AI7 business provenance and canonical Harness execution history.
 25. [Legacy data migration boundary](./24-legacy-data-migration-boundary.md) — accepted production-data exclusion with protected credential, mock-provider evidence, and selected test-Book exceptions.
 26. [Standalone-only V1 and deferred Word alternative](./25-standalone-word-surface-boundary.md) — accepted Question 23 single-surface boundary and professional editing obligation.
-27. [Tiered verification and mock-provider evidence](./26-tiered-verification-and-mock-provider-evidence.md) — accepted Question 24 two-workflow Windows-only contract, retained mock-provider requirements, and the deferral triggers for everything cut.
+27. [Tiered verification and mock-provider evidence](./26-tiered-verification-and-mock-provider-evidence.md) — historical Question 24 plan; its engineering-verification gates are superseded by the minimal E2E decision.
 28. [Repository development dispatch](./27-repository-development-dispatch.md) — accepted Question 25 three-role model, provider-neutral operating rules, and the single provider-specific Layer B binding policy.
 29. [Harness capability and authority boundary](./28-harness-capability-and-authority-boundary.md) — accepted Question 29 full-engine/narrow-surface split, Agent Data Root, profile separation, and tiered activation for agent-authored revisions.
 30. [Editorial quality metrics](./29-editorial-quality-metrics.md) — accepted Question 36 Quality Signal families, derived metrics, cold-start tolerance, low-burden feedback interaction, and the two-sided Behavior Evaluation Gate.
@@ -60,7 +60,8 @@ Agents arriving without prior context should start at the repository-root `HANDO
 33. [Runtime language and release channel](./32-runtime-language-and-release-channel.md) — accepted Question 33 TypeScript-only runtime, portable-only V1 channel, self-contained data root, and the release-channel half of Question 26.
 34. [Standalone shell and editor topology](./33-standalone-shell-and-editor-topology.md) — accepted Question 34 manuscript scale tiers, Electron three-process topology, and the ProseMirror windowed-editing foundation.
 35. [First tracer slice and exit gate](./34-first-tracer-slice.md) — accepted Question 35 store-and-index spike, read-only tracer, manuscript retrieval requirement, and the thirteen-point exit gate.
-36. [Decision records](./decisions/README.md) — accepted hard-to-reverse decisions only.
+36. [Minimal E2E validation](./35-minimal-e2e-validation.md) — accepted project-wide rule that CI covers only end-to-end functional completeness and observed-bug regressions.
+37. [Decision records](./decisions/README.md) — accepted hard-to-reverse decisions only.
 
 ## Decision discipline
 

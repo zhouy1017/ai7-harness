@@ -1,6 +1,8 @@
 # Tiered Verification and Mock-provider Evidence
 
-Status: **accepted in Question 24 with owner revision**
+Status: **superseded for engineering validation by ADR 0027 and `35-minimal-e2e-validation.md`; retained only as historical design context**
+
+The active rule is one Windows E2E Functional Gate for complete user-facing journeys and observed-bug regressions. None of the additional tiers, evidence machinery, receipts, fingerprints, provider rehearsals, or deferred triggers below is active.
 
 ## Decision
 

@@ -1,6 +1,6 @@
 # Runtime Language and Release Channel
 
-Status: **accepted in Question 33 with owner revisions; also settles the release-channel half of Question 26**
+Status: **accepted runtime/release direction; separate release-validation and proof gates are superseded by ADR 0027**
 
 ## Evidence: what the legacy Python actually was
 

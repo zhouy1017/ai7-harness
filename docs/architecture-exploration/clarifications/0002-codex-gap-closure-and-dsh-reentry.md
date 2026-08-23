@@ -1,5 +1,7 @@
 # Clarification 0002 — Codex gap closure and DeepSeek runtime re-entry
 
+Status note: Clarification 0004 supersedes this record's proof and validation threshold. Its no-automatic-DSH-runtime and no-dual-loop boundaries remain; Codex-first may now proceed by design assumption without capability-closure proof.
+
 Status: **owner accepted for the V2 candidate; canonical integration pending; exact Codex development form remains open**
 
 Recorded: **2026-08-21**

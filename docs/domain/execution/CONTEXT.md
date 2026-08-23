@@ -392,7 +392,7 @@ A versioned prompt, instructional text, task guidance, or bounded ranking parame
 _中文_: 智能体行为资产
 _Avoid_: Policy Document, House Editorial Memory, model weights, hidden runtime configuration
 
-**Behavior Evaluation Gate**:
-The two-sided check an Agent Behavior Asset, Policy Document, or composition revision must pass before activation: deterministic replay against a fixed scenario corpus for regression, plus production Delivery Quality Metrics for real-world gain. Sample size below the confidence threshold permits proposal but never auto-activation.
-_中文_: 行为评估关口
-_Avoid_: Workflow Gate, Standalone Editing Sufficiency Gate, the Pull-request Gate, Effect Approval
+**E2E Functional Gate**:
+The project's sole automated engineering-validation surface, covering complete user-facing journeys and regressions for observed bugs. It makes no separate performance, security, provider, packaging, reproducibility, or architecture-closure claim.
+_中文_: 端到端功能关口
+_Avoid_: Factual Verification, Workflow Gate, Effect Receipt, architecture proof

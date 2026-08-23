@@ -1,10 +1,12 @@
 # Codex-First V2 Harness Directive
 
-Status: **owner-stated V2 direction with accepted bounded unsupported-risk threshold; exact integration remains noncanonical and evidence-gated**
+Status: **owner-stated V2 direction; Codex-first now proceeds as a design assumption under Clarification 0004 without capability-closure or evidence gates**
 
 Recorded: **2026-08-21**
 
 This directive supersedes the assumption that A2 evaluates only DeepSeek Harness `0.1.0-rc.6`. It does not accept a Codex dependency, authorize implementation, or permit two overlapping agent loops.
+
+Clarification 0004 supersedes every later requirement in this historical directive to prove, verify, spike, score, or exactly close Codex capabilities before design proceeds. Keep those passages only as reference. The active design rule is: assume Codex as the preferred primary harness, add missing behavior through low-cost Codex secondary development where practical, and keep DeepSeek guidance-only unless the owner later makes a separate runtime choice.
 
 ## Owner direction
 
@@ -16,19 +18,19 @@ V2 uses three layers of intent:
 
 “Codex-first” is an evaluation and design priority. It is not yet a canonical dependency decision.
 
-## Owner resolution: production role after capability closure
+## Owner resolution: production role
 
-The owner accepted [Clarification 0001](./clarifications/0001-primary-agent-harness-role.md): if A2 proves that Codex supplies every load-bearing production harness capability, Codex becomes AI7's sole **Primary Agent Harness** and DeepSeek Harness becomes a **Development Reference Framework** only.
+The owner accepted [Clarification 0001](./clarifications/0001-primary-agent-harness-role.md) and later removed its proof precondition in [Clarification 0004](./clarifications/0004-minimal-validation-and-design-first.md): design Codex as AI7's sole **Primary Agent Harness** and DeepSeek Harness as a **Development Reference Framework** only.
 
-In that outcome, DeepSeek contributes development rules, architecture and composition experience, evaluation checklists, and documentation guidance. It contributes no production package, process, Session ledger, agent loop, tool runtime, fallback executor, capability authority, or user-facing branding. A failed Codex capability check reopens an evidence-bearing owner choice; it never activates DeepSeek silently.
+DeepSeek contributes development rules, architecture and composition experience, and documentation guidance. It contributes no production package, process, Session ledger, agent loop, tool runtime, fallback executor, capability authority, or user-facing branding. A missing Codex behavior normally becomes low-cost Codex secondary development; it never activates DeepSeek silently.
 
 The vendor-neutral candidate terms and their preferred Chinese labels are defined in the exact clarification record for the Worker to place in its owning candidate context and glossary. This resolution is a V2 candidate input, not proof that Codex has passed A2 and not a direct edit to canonical V1 context or ADRs.
 
 ## Owner resolution: capability-gap closure order
 
-The owner also accepted [Clarification 0002](./clarifications/0002-codex-gap-closure-and-dsh-reentry.md). A missing Codex capability does not make DeepSeek the default remedy. AI7 first verifies that the gap is real, then prefers low-cost secondary development on the open Codex base while retaining one production loop.
+The owner also accepted [Clarification 0002](./clarifications/0002-codex-gap-closure-and-dsh-reentry.md), with its proof threshold later superseded by Clarification 0004. A missing Codex behavior does not make DeepSeek the default remedy; AI7 prefers low-cost secondary development on the open Codex base while retaining one production loop.
 
-DeepSeek may return to runtime comparison only when an exact Codex Capability Gap and an exact Mature Runtime Alternative in DeepSeek are both proven. This is a re-evaluation gate, not selection or fallback authority. A2 must compare the cost and risk of Codex secondary development with the DeepSeek alternative and return any residual runtime choice to the owner.
+DeepSeek may return to runtime comparison only through a new explicit owner choice. There is no automatic fallback, evidence gate, or dual-runtime path.
 
 The exact Codex maintenance form—external adapter or extension, upstream contribution, maintained patch set, or fork—remains open. No source modification or implementation is authorized during this design phase.
 

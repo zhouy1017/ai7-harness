@@ -1,6 +1,6 @@
 # Upstream Consumption and the Upgrade Contract
 
-Status: **accepted in Question 30 with owner revisions**
+Status: **accepted dependency direction; the separate upgrade-verification checklist is superseded by ADR 0027**
 
 ## Decision
 

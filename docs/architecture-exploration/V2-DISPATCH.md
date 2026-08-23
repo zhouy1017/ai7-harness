@@ -1,6 +1,6 @@
 # V2 Architecture Dispatch
 
-Status: **active; A1 sealed; A2 static-evidence re-score review-clean at `8eb70e3` with `Closure not proven`; two exact path-discovery attempts stopped without a result, the second before network; a synthetic-only extractor-qualification brief awaits review; official requests, candidate writing, semantic trace, runtime and downloaded-binary execution, DeepSeek re-entry, maintenance selection, and A3 remain blocked**
+Status: **active design-only; A1 and prior A2 evidence are reference material, capability closure and all remaining probe/qualification work are retired, and the next output is a coherent Codex-first V2 architecture plus optional advisory hostile review**
 
 This is a repository-development dispatch record, not a product architecture decision. All V2 outputs remain noncanonical until owner acceptance and normal integration.
 
@@ -18,6 +18,7 @@ This is a repository-development dispatch record, not a product architecture dec
 - Commander-owned owner resolution: [Clarification 0001 — Codex and DeepSeek Harness production roles](./clarifications/0001-primary-agent-harness-role.md)
 - Commander-owned gap-resolution threshold: [Clarification 0002 — Codex gap closure and DeepSeek runtime re-entry](./clarifications/0002-codex-gap-closure-and-dsh-reentry.md)
 - Commander-owned unsupported-risk resolution: [Clarification 0003 — Accept bounded unsupported Codex risk](./clarifications/0003-accept-bounded-unsupported-codex-risk.md)
+- Owner minimal-validation resolution: [Clarification 0004 — Minimal validation and design-first continuation](./clarifications/0004-minimal-validation-and-design-first.md)
 - Commander-owned closure-subject scope: [A2 exact closure-subject decision](./A2-CLOSURE-SUBJECT-DECISION.md)
 - Completed read-only evidence continuation: [A2 exact Codex artifact discovery](./A2-EXACT-ARTIFACT-DISCOVERY-DISPATCH.md)
 - Commander-verified result: [A2 exact Codex artifact evidence](./A2-EXACT-ARTIFACT-EVIDENCE.md)
@@ -32,7 +33,9 @@ This is a repository-development dispatch record, not a product architecture dec
 - First attempt stopped fail-closed with no admitted result: [A2 path-discovery attempt evidence](./A2-TOOL-SURFACE-PATH-DISCOVERY-ATTEMPT-EVIDENCE.md)
 - Independently review-clean at `3a35400`: [A2 path-discovery retry dispatch and first-attempt evidence](./A2-TOOL-SURFACE-PATH-DISCOVERY-RETRY-DISPATCH.md)
 - Retry stopped before network with no admitted extractor/result: [A2 retry-attempt evidence](./A2-TOOL-SURFACE-PATH-DISCOVERY-RETRY-ATTEMPT-EVIDENCE.md)
-- Prepared and blocked pending exact-head review: [A2 offline extractor-qualification dispatch](./A2-TOOL-SURFACE-EXTRACTOR-QUALIFICATION-DISPATCH.md)
+- Superseded without execution: [A2 offline extractor-qualification dispatch](./A2-TOOL-SURFACE-EXTRACTOR-QUALIFICATION-DISPATCH.md)
+
+Under ADR 0027, none of the A2 proof artifacts above is an architecture gate. They may inform assumptions, but no further capability scoring, source trace, artifact probe, deterministic qualification, or exact-head review is required. The design may select Codex-first with named assumptions and prefer low-cost Codex secondary development for missing behavior; DeepSeek remains guidance-only unless the owner later makes a separate runtime choice.
 
 ## Design Worker
 

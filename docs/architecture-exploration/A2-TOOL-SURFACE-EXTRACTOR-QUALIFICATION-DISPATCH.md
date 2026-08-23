@@ -1,8 +1,8 @@
 # A2 tool-surface extractor offline-qualification dispatch
 
-Status: **prepared after two fail-closed discovery attempts; blocked until the exact control commit containing this brief and retry-attempt evidence passes independent Standards and Spec review; no qualification Worker, official Codex request, path discovery, semantic trace, candidate write, re-score, runtime probe, A3, DeepSeek comparison, maintenance choice, or implementation is authorized yet**
+Status: **superseded by the owner's minimal-validation decision and ADR 0027; no qualification, retry, official request, source trace, or proof task will run**
 
-This is a repository-development evidence-tool qualification brief. It is not product implementation, canonical architecture, official Codex evidence, a path-freeze result, a capability disposition, a Codex Capability Gap, or authority for an official execution.
+This historical brief records an abandoned evidence-tool direction. It is not active authority, product implementation, canonical architecture, official Codex evidence, a capability disposition, or a blocker for V2 design.
 
 ## Purpose and phase split
 

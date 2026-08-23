@@ -1,6 +1,6 @@
 # First Tracer Slice and Exit Gate
 
-Status: **accepted in Question 35 with owner revisions**
+Status: **accepted tracer direction; the multi-point exit/verification gate is superseded by ADR 0027**
 
 ## What a tracer slice is
 

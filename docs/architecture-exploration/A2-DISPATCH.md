@@ -1,6 +1,6 @@
 # A2 Codex-first capability-closure dispatch
 
-Status: **A2 static-evidence re-score review-clean at `8eb70e3` with `Closure not proven`; both tool-path discovery attempts stopped without a valid result, the second before network; an offline synthetic-only extractor-qualification brief awaits review; official requests, candidate writing, semantic trace, runtime execution, downloaded-binary execution, DeepSeek re-entry, maintenance selection, and A3 remain blocked**
+Status: **closed as a proof program by owner direction; prior A2 evidence remains reference-only, `Closure not proven` is no longer a design gate, and V2 proceeds through architectural judgment without further probes, scoring, or exact-source validation**
 
 This is a repository-development dispatch record, not canonical product architecture and not implementation authorization.
 

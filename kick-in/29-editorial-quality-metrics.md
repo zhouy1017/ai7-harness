@@ -1,6 +1,6 @@
 # Editorial Quality Metrics and the Behavior Evaluation Gate
 
-Status: **accepted in Question 36 with owner revisions**
+Status: **accepted product metrics; the mandatory two-sided Behavior Evaluation Gate is superseded by ADR 0027**
 
 Question 36 was opened because Question 29 established that agent-authored revisions require an evaluation gate, and the pinned Harness provides no general quality evaluator. AI7 owns that layer.
 

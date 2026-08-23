@@ -138,7 +138,7 @@ This maintained bilingual reference routes readers to canonical definitions and 
 | Developer Capability Profile | 开发端能力档案 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |
 | Agent Data Root | 智能体数据根目录 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |
 | Agent Behavior Asset | 智能体行为资产 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |
-| Behavior Evaluation Gate | 行为评估关口 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |
+| E2E Functional Gate | 端到端功能关口 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |
 | Quality Signal | 质量信号 | [AI7 Editorial](./docs/domain/editorial/CONTEXT.md) |
 | Delivery Quality Metric | 交付质量度量 | [AI7 Editorial](./docs/domain/editorial/CONTEXT.md) |
 | Manuscript Retrieval Chunk | 稿件检索片段 | [AI7 Editorial](./docs/domain/editorial/CONTEXT.md) |
@@ -230,7 +230,7 @@ The inheritance audit must resolve these known collisions before definitions are
 | Editorial Capability Profile | Editorial Profile (dimension defaults) / Harness Profile / a user-facing setting |
 | Agent Data Root | Run Source Scope / a general filesystem grant / a repository working tree |
 | Agent Behavior Asset | Policy Document / House Editorial Memory / model weights |
-| Behavior Evaluation Gate | Workflow Gate / Standalone Editing Sufficiency Gate / Pull-request Gate |
+| E2E Functional Gate | Factual Verification / Workflow Gate / Effect Receipt / architecture proof |
 | Harness agent loop | AI7 business scheduling / a limit on parallel Runs / AI7-owned workflow continuation |
 | Quality Signal | Learning Material / Memory Candidate / a rating alone |
 | Delivery Quality Metric | Factual correctness / acceptance rate alone / task authority |

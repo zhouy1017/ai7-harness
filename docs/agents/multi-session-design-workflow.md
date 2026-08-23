@@ -2,7 +2,7 @@
 
 Status: **binding for architecture and design forks when referenced by `AGENTS.md`**
 
-This runbook specializes the provider-neutral Commander, Worker, and Reviewer rules in [Repository Development Dispatch](../../kick-in/27-repository-development-dispatch.md). It does not add a fourth repository role, change the task-class floor, or describe AI7 product runtime behavior.
+This runbook specializes the provider-neutral Commander, Worker, and optional Reviewer rules in [Repository Development Dispatch](../../kick-in/27-repository-development-dispatch.md). Under ADR 0027, design validation is intentionally light: hostile review is advisory and source/evidence proof is not an architecture gate.
 
 ## Invariants
 
@@ -22,8 +22,8 @@ This runbook specializes the provider-neutral Commander, Worker, and Reviewer ru
 | --- | --- | --- |
 | `active` | The original brief is still executing. | `freeze-requested` |
 | `freeze-requested` | Commander has stopped new scope and new assumptions. | `freeze-validating` |
-| `freeze-validating` | Existing artifacts are being cleaned, checked, summarized, and committed as a candidate head. | `freeze-reviewing-head` or `needs-commander` |
-| `freeze-reviewing-head` | An independent Reviewer is checking the exact immutable candidate head. | `frozen` when it passes with no later change; otherwise `freeze-validating` or `needs-commander` |
+| `freeze-validating` | Existing artifacts are being cleaned, summarized, and committed as a candidate head. | `frozen` or `needs-commander` |
+| `freeze-reviewing-head` | Optional historical/advisory review state; no exact-head pass is required. | `frozen`, `freeze-validating`, or `needs-commander` at Commander discretion |
 | `frozen` | A local head commit and structured handoff exist; the task has stopped. | Commander review only |
 | `needs-commander` | Safe freezing needs a scope or conflict decision. | Commander supplies a narrower brief |
 
@@ -51,27 +51,25 @@ The Commander freeze brief states the exact base commit, branch, allowed finishi
 3. removes or relocates scratch outputs that must not enter Git;
 4. writes a freeze handoff using the schema below;
 5. updates `PROGRESS.md` with a safe next action;
-6. validates links, terminology, syntax, and task-specific evidence in proportion to risk;
-7. creates a local candidate commit when the branch is coherent;
-8. obtains the required independent review against the exact immutable base-to-head diff, recording the reviewed head SHA;
-9. if a finding causes any change, creates a new candidate commit and repeats exact-head review; and
-10. stops without pushing, opening a pull request, merging, publishing, or dispatching more work.
+6. creates a local candidate commit when the branch is coherent;
+7. records any obvious unresolved assumption without launching a proof task;
+8. optionally receives advisory review when the Commander requests it; and
+9. stops without pushing, opening a pull request, merging, publishing, or dispatching more work.
 
-The Commander marks a line `frozen` only after checking the final report, branch head, worktree status, handoff, validation evidence, reviewer independence disclosure, and proof that the passing review names the current head and that no change followed it.
+The Commander marks a line `frozen` after checking the final report, branch head, worktree status, and handoff. Validation evidence and an exact-head review are not required.
 
 ## Freeze record schema
 
-Every legacy freeze record consists of the Worker handoff plus the Commander control-board or packet-manifest entry. Together they contain these fields. This split avoids the impossible requirement for a commit to name its own final SHA: the Worker records what is knowable before commit, and the Commander records the immutable candidate/reviewed heads after exact-head review.
+Every legacy freeze record consists of the Worker handoff plus the Commander control-board or packet-manifest entry. Together they contain these fields. The Worker records what is knowable before commit, and the Commander records the candidate head and any optional review reference afterward.
 
-- **Identity:** task title and ID, role, task class, branch, worktree, base commit, candidate head commit, and exact reviewed head commit. Candidate and reviewed heads belong in the Commander record rather than inside the commit they identify.
+- **Identity:** task title and ID, role, task class, branch, worktree, base commit, and candidate head commit; include a reviewed head only when optional review occurred.
 - **Artifact status:** complete, partial, invalid, or deliberately omitted; candidate/reference status stated explicitly.
 - **Changed paths:** grouped by outcome rather than a raw transcript.
 - **Reusable assets:** requirements, domain discoveries, boundary cases, evidence, interfaces, prototypes, or tests worth inheriting.
 - **Incompatibilities:** assumptions that conflict with canonical `main`, another candidate line, or the proposed v2 direction.
 - **Migration cost:** expected rewrite, adapter, evidence, or deletion cost; use qualitative estimates unless measured.
 - **Open matters:** unanswered questions and unverified claims, each with its authoritative source or required evidence.
-- **Verification:** commands/checks run and their results.
-- **Review:** reviewer identity, class, exact base and head reviewed, verdict, findings, cross-provider status, and whether any post-review change occurred. Any post-review change invalidates the verdict until the new head is reviewed.
+- **Optional diagnostics/review:** include only when actually used; neither is required to freeze a design branch.
 - **Resume Prompt:** one sentence that does not silently authorize implementation.
 
 ## Context-contamination firewall
@@ -117,7 +115,7 @@ The soft cap of three concurrent Workers still applies. Reviewer work does not a
 4. Audit returned handoffs and branch state before feeding conclusions forward.
 5. Update the review packet with conclusions, not transcripts.
 6. Resolve contradictions into an explicit question, evidence task, or superseding ADR proposal.
-7. Dispatch an independent T3 challenge against the coherent candidate.
+7. Optionally dispatch one high-level hostile challenge against the coherent candidate; do not turn it into an exact-head proof cycle.
 8. Present one recommended decision to the owner, with trade-offs and rejected alternatives.
 9. Record acceptance immediately in the authority-owning documents; otherwise keep the item candidate, revised, or deferred.
 
@@ -129,9 +127,8 @@ Architecture exploration does not end because legacy tasks are closed. It ends o
 - core trade-offs and rejected alternatives are explicit;
 - every affected accepted ADR is kept, superseded, or deferred explicitly;
 - migration direction is credible;
-- security, platform, package-composition, data-scale, and UX claims are either evidenced or assigned to a named spike with exit criteria;
-- an independent Reviewer at T3 or above has challenged the candidate;
-- material findings are resolved or consciously accepted;
+- important assumptions are stated plainly, without mandatory evidence spikes;
+- any advisory hostile-review concerns the Commander considers material are visible to the owner;
 - the owner has explicitly accepted the architecture; and
 - the owner separately authorizes implementation planning.
 

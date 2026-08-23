@@ -1,6 +1,6 @@
 # Standalone Shell and Editor Topology
 
-Status: **accepted in Question 34 with owner revisions**
+Status: **accepted topology and scale targets; dedicated performance and editor-sufficiency gates are superseded by ADR 0027**
 
 Scope: process topology and the editor's technical foundation. Interaction design, layout, visual language, and information architecture remain with the owner's separate UI/UX session.
 
