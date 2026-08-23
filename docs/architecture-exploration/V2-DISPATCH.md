@@ -1,6 +1,6 @@
 # V2 Architecture Dispatch
 
-Status: **active; A1 sealed; A2 review-clean with `Closure not proven`; U2 accepted and X2 selected; exact artifact discovery is next; A3 remains blocked**
+Status: **active; A1 sealed; A2 review-clean with `Closure not proven`; U2/X2 recorded; read-only exact-artifact discovery dispatched; A3 remains blocked**
 
 This is a repository-development dispatch record, not a product architecture decision. All V2 outputs remain noncanonical until owner acceptance and normal integration.
 
@@ -19,6 +19,7 @@ This is a repository-development dispatch record, not a product architecture dec
 - Commander-owned gap-resolution threshold: [Clarification 0002 — Codex gap closure and DeepSeek runtime re-entry](./clarifications/0002-codex-gap-closure-and-dsh-reentry.md)
 - Commander-owned unsupported-risk resolution: [Clarification 0003 — Accept bounded unsupported Codex risk](./clarifications/0003-accept-bounded-unsupported-codex-risk.md)
 - Commander-owned closure-subject scope: [A2 exact closure-subject decision](./A2-CLOSURE-SUBJECT-DECISION.md)
+- Read-only evidence continuation: [A2 exact Codex artifact discovery](./A2-EXACT-ARTIFACT-DISCOVERY-DISPATCH.md)
 
 ## Design Worker
 
@@ -66,6 +67,8 @@ GPT-5.6 Luna / medium Worker `/root/a2_offline_mapping_t1` completed that amendm
 Fresh read-only T3-par Standards and Spec review of exact range `b5076179a37f8d654e758ca0b4a8bdeec8caaaa5...f1d212c5ebc5287dbc2b97a716de14b8195e2c3c` both passed with zero findings, no post-target commit, clean tree/index, and clean diff check. They re-derived the complete matrix, register/source/probe sets, binding/span and capability-guard contracts, DeepSeek gate, and every scope boundary; both disclosed `same-provider review — independence reduced for the corrected A2 content`. The reviewed result remained noncanonical `Closure not proven`, with no verified Codex Capability Gap, no DeepSeek runtime admission, and no selected maintenance form. At that checkpoint the Commander proceeded to `DQ-A2-01`; `DQ-A2-02` remained a Commander-owned artifact-scope choice, and formal maintenance-policy Question 3 remained premature without a verified gap.
 
 The owner selected **U2** for `DQ-A2-01`. Clarification 0003 preserves the vendor's Experimental/unsupported fact while allowing one exact App Server artifact to continue under explicit owner-accepted risk and mandatory fail-closed controls; it grants no unqualified closure pass or implementation. The Commander then exercised its recorded `DQ-A2-02` authority and selected **X2**: identify an obtainable exact published release, package version, or binary before any re-score. The candidate stays frozen until a separately authorized evidence task returns that identity; A3, DeepSeek re-entry, maintenance-form selection, and implementation remain blocked.
+
+The Commander issued that separate task as a read-only T2 artifact-discovery brief. It admits only exact owner/Commander objects, three exact candidate evidence/decision records, current official OpenAI documentation, immutable official `openai/codex` release/tag/commit objects, and read-only official npm metadata. It may return an artifact chain or missing links only; candidate writing, downloading/executing an artifact, re-scoring, A3, DeepSeek, maintenance-form selection, and implementation remain stopped.
 
 The completed A1 authoring turn was limited to one-product consistency and UI parity: map the 79 requirements and fourteen journeys, define shared semantics versus bounded native variation, expose support/parity/accessibility/Policy-visibility options, avoid implementation mechanisms, and stop where an owner choice is required. At that point A2 was blocked on stable, Commander-reviewed A1 invariants, not on the owner's exact parity/support choice; that choice still gates canonical product promises and the coherent candidate. A3 now remains blocked on A2's lack of a selected or decision-ready exact runtime surface.
 
