@@ -304,6 +304,9 @@
 - The optional read-only hostile consultation returned **coherent with assumptions**. Four logical seams were closed without validation: final Provider Payload/Egress Gate; Run/attempt/Binding/Session/Span cardinality; Capability-result and Effect-wait continuation; and the rule that every model-driven editorial/learning/subagent path uses the sole Primary Agent Harness with a pinned behavior-composition digest. Fork maintenance, rare E2E misses, long-manuscript cursor mechanics, and Desktop-like drift remain accepted implementation risks with fail-closed responses.
 - Requested Claude Opus/high was unavailable under the recorded HTTP 429 before inference at `$0`; the design Worker used the existing same-class GPT-5.6 Sol/`xhigh` fallback. No validation, test, source audit, probe, proof, formal review, runtime action, or implementation was performed.
 - Clarified the Codex UI boundary against current official OpenAI documentation: the published open-source components are the CLI, SDK, and App Server integration surface; the repository also provides a terminal UI, but the official component list does not publish the Codex Desktop GUI as a reusable open-source component. The platform guidance explicitly expects specialized products to keep their own editors, dashboards, records, and controls. Therefore the V2 Electron/ProseMirror frontend is intentional application-owned UI, while “Codex Desktop-like” remains an interaction-principle and event-model reference rather than UI source reuse.
+- Opened a new `grill-with-docs` architecture decision on whether DeepSeek V4 Flash/Pro as AI7's primary model family should reverse the noncanonical Codex-first candidate. Current official evidence shows that Codex custom providers can use a configurable base URL but only the Responses wire API, while DeepSeek V4 Flash/Pro now advertise Responses API, tool-call, thinking, 1M-context, and 384K-output support.
+- Compared protocol compatibility with model-native behavior fidelity. Current DeepSeek Harness upstream has a native DeepSeek adapter that explicitly translates SSE, preserves `reasoning_content` across tool turns, and carries DeepSeek session/request semantics; it is therefore the preliminary primary-runtime recommendation for a DeepSeek-first product, while Codex remains the interaction-model and engineering reference. No topology decision is accepted yet.
+- Dispatched the bounded read-only DSH audit to the requested Claude Code Sonnet/medium binding. Claude completed successfully for `$0.1552165` with no fallback, but the supplied local `C:\Users\Chooo\codebase\dsh` directory contained only `.claude/settings.local.json`, so it correctly returned a missing-source blocker rather than fabricating file/line evidence. The first stale-path attempt failed locally before invoking Claude and was neither quota failure nor provider fallback.
 
 ## What's next
 
@@ -312,6 +315,8 @@
 - Run no further capability proof, artifact/source probe, scoring, qualification, formal review, or non-E2E validation work.
 - Implementation planning, issue decomposition, source copying, dependency installation, and product code remain unauthorized until separate owner approval.
 - If the owner wants to replace Electron itself, treat that as a separate product-shell choice; it is not implied by adopting or rejecting Codex App Server.
+- Complete the short DSH-first decision interview: first choose the one-loop production topology and Codex residual role, then choose the default Flash/Pro Model Role split.
+- After those answers crystallize, supersede the noncanonical Codex-first candidate language with one focused ADR and aligned architecture/context/glossary updates; do not add implementation or validation work.
 
 ## Key decisions made
 
@@ -319,6 +324,7 @@
 - Remote source repositories will be inspected read-only and will not be copied into the new project as implementation code.
 - Use a fresh AI7 product repository as the planning default, with both source revisions recorded explicitly; do not merge the private AI7 history or vendor the Harness monorepo before visibility, licensing, and dependency strategy are decided.
 - For V2, preserve AI7's manuscript, publication, Task Ledger, safety, Effect, and editorial semantics as the application authority; evaluate Codex first and DeepSeek Harness comparatively for one agent execution loop rather than keeping competing schedulers.
+- The DSH-first question remains open. Protocol-level Codex compatibility with DeepSeek V4 is credible because both sides expose Responses API, but compatibility alone is not evidence of equal DeepSeek-specific agent behavior. The preliminary recommendation is one DSH production loop, no automatic Codex runtime fallback, and retained Codex interaction/engineering reference.
 - The current architecture, legacy dispositions, and phase order are explicitly proposals; none become accepted until the user resolves the relevant numbered question.
 - Delay the canonical glossary/context layout and engineering-skill configuration until the setup questions choose the issue tracker, labels, and domain-doc structure.
 - GitHub Issues will be the canonical work-item tracker once the new repository is initialized.
@@ -421,4 +427,4 @@
 
 ## Resume Prompt
 
-Resume as Project Commander: present coherent V2 candidate `38f47ea762ff93275b5a5474caae7603792c0544` to the owner for architecture acceptance, explaining that Codex supplies the open harness/protocol while Electron/ProseMirror remains AI7-owned UI; keep all proof and non-E2E validation work retired, and do not integrate canonically or begin implementation planning without separate authorization.
+Resume as Project Commander: continue the two-question `grill-with-docs` decision on a DeepSeek-V4-first AI7—first settle one DSH production loop versus an authorized secondary Codex runtime, then settle Flash/Pro Model Roles; only after owner acceptance update the V2 candidate and ADR, while keeping Codex interaction semantics, Electron/ProseMirror UI ownership, and all proof/non-E2E validation work unchanged.
