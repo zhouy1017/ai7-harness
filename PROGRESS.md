@@ -303,6 +303,7 @@
 - Chief Architect Worker `/root/v2_codex_first_design_t3` produced the coherent Codex-first candidate at `33b8f77e84469020f9b86f3dfd1b961f37f21f6e`, then applied one bounded advisory correction at `38f47ea762ff93275b5a5474caae7603792c0544`. The candidate defines AI7-owned product/domain/authority/UI/Effect/provider state, Codex as the sole Primary Agent Harness, DeepSeek as guidance-only, adapter-first with optional small source development, migration direction, and explicit assumptions. It deleted the four A2 proof/register/seam documents and replaced the old conditional ADR.
 - The optional read-only hostile consultation returned **coherent with assumptions**. Four logical seams were closed without validation: final Provider Payload/Egress Gate; Run/attempt/Binding/Session/Span cardinality; Capability-result and Effect-wait continuation; and the rule that every model-driven editorial/learning/subagent path uses the sole Primary Agent Harness with a pinned behavior-composition digest. Fork maintenance, rare E2E misses, long-manuscript cursor mechanics, and Desktop-like drift remain accepted implementation risks with fail-closed responses.
 - Requested Claude Opus/high was unavailable under the recorded HTTP 429 before inference at `$0`; the design Worker used the existing same-class GPT-5.6 Sol/`xhigh` fallback. No validation, test, source audit, probe, proof, formal review, runtime action, or implementation was performed.
+- Clarified the Codex UI boundary against current official OpenAI documentation: the published open-source components are the CLI, SDK, and App Server integration surface; the repository also provides a terminal UI, but the official component list does not publish the Codex Desktop GUI as a reusable open-source component. The platform guidance explicitly expects specialized products to keep their own editors, dashboards, records, and controls. Therefore the V2 Electron/ProseMirror frontend is intentional application-owned UI, while “Codex Desktop-like” remains an interaction-principle and event-model reference rather than UI source reuse.
 
 ## What's next
 
@@ -310,6 +311,7 @@
 - If accepted, integrate the V2 design into the canonical line through a separate Commander action.
 - Run no further capability proof, artifact/source probe, scoring, qualification, formal review, or non-E2E validation work.
 - Implementation planning, issue decomposition, source copying, dependency installation, and product code remain unauthorized until separate owner approval.
+- If the owner wants to replace Electron itself, treat that as a separate product-shell choice; it is not implied by adopting or rejecting Codex App Server.
 
 ## Key decisions made
 
@@ -415,7 +417,8 @@
 - A deterministic pipeline success requires conformance as well as byte-identical reruns. The first path-discovery attempt's identical provisional hashes are unusable because the frozen extractor itself violated reviewed precedence; repeated wrong output is not reproducible evidence.
 - The extractor/source/artifact evidence program is retired. Its historical records do not constrain or block V2 architecture.
 - V2 candidate `38f47ea` is coherent with assumptions: Codex is the sole Primary Agent Harness; AI7 owns final provider egress, behavior composition, business authority, capabilities, Effects, and ledgers; DeepSeek is guidance-only. The optional hostile consultation is complete and creates no review gate.
+- Codex open-source reuse and UI reuse are separate: AI7 reuses the harness/protocol and selected interaction semantics, not the unpublished Codex Desktop GUI. Electron remains the accepted AI7 shell unless the owner separately changes the frontend platform.
 
 ## Resume Prompt
 
-Resume as Project Commander: present coherent V2 candidate `38f47ea762ff93275b5a5474caae7603792c0544` to the owner for architecture acceptance; keep all proof and non-E2E validation work retired, and do not integrate canonically or begin implementation planning without separate authorization.
+Resume as Project Commander: present coherent V2 candidate `38f47ea762ff93275b5a5474caae7603792c0544` to the owner for architecture acceptance, explaining that Codex supplies the open harness/protocol while Electron/ProseMirror remains AI7-owned UI; keep all proof and non-E2E validation work retired, and do not integrate canonically or begin implementation planning without separate authorization.
