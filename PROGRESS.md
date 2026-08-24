@@ -311,6 +311,8 @@
 - Separated AI7-relevant model evidence from the DSH coding result. DeepSeek's V4 technical report gives strong first-party Chinese-writing results versus Gemini 3.1 Pro, but also reports that Opus 4.5 still wins the hardest complex-instruction/multi-turn writing subset. Chinese-SimpleQA supports strong Chinese factual recall, not evidence-grounded fact checking or low hallucination. A small independent fiction study reports style drift and a source-inconsistent proper noun in the 0813 build. Therefore DSH cannot be credited with improving writing or factuality without separate evidence.
 - Claude Code Sonnet/medium completed the bounded web-research Worker for `$0.6218775`, with no fallback or permission denial. Its report correctly separated coding evidence from editorial evidence but incorrectly said no DeepSeek/Fable head-to-head existed; Commander found the official model-card table, rejected that Worker assertion, and retained only independently verified findings.
 - Owner accepted the corrected V2 runtime/provider topology: DSH is the one production Primary Agent Harness; DeepSeek is the primary but not exclusive model provider; explicitly configured frontier models may serve authorized difficult-instruction or high-consequence verification roles through the same DSH loop; Codex remains an Interaction Model and engineering reference rather than a production runtime.
+- Owner accepted the default Model Role routing: V4 Flash handles quick interaction and low-risk candidate work; V4 Pro High is the main editorial model for Chinese long-form work, editorial proposals, cross-source synthesis, factual research, and complex instructions; V4 Pro Max handles difficult escalation. The Frontier Model Role defaults to DeepSeek V4 Pro Max while still permitting an explicitly configured alternative frontier provider/model through the same DSH loop.
+- Owner added a development-plan requirement permitting need-based discovery and use of third-party open-source DSH plugins from GitHub. Admission requires more than five stars, more than three qualifying updates, and a latest qualifying update no earlier than 30 days before selection; every admitted version must be locally managed and exactly pinned so upstream change cannot silently alter AI7. The exact meaning of a qualifying update remains the single open definition.
 
 ## What's next
 
@@ -319,10 +321,10 @@
 - Run no further capability proof, artifact/source probe, scoring, qualification, formal review, or non-E2E validation work.
 - Implementation planning, issue decomposition, source copying, dependency installation, and product code remain unauthorized until separate owner approval.
 - If the owner wants to replace Electron itself, treat that as a separate product-shell choice; it is not implied by adopting or rejecting Codex App Server.
-- Complete the short DSH-first decision interview: first choose the one-loop production topology and Codex residual role, then choose the default Flash/Pro Model Role split.
-- After those answers crystallize, supersede the noncanonical Codex-first candidate language with one focused ADR and aligned architecture/context/glossary updates; do not add implementation or validation work.
-- Refine the architecture choice around one DSH loop with provider-neutral Model Roles: DeepSeek may be the primary provider without being the factual authority or the only permitted provider. Decide whether difficult instruction-following and high-consequence verification work may use an explicitly configured secondary frontier model.
-- Complete Question 2/2 by accepting or revising the recommended Flash/Pro/frontier Model Role routing; then record the consolidated accepted decision in an ADR and aligned V2 candidate/domain terminology.
+- Complete the one-question plugin admission definition: decide whether a qualifying update is a plugin-relevant non-merge commit or a GitHub Release.
+- After that answer crystallizes, supersede the noncanonical Codex-first candidate language with one focused ADR and aligned architecture/context/glossary/development-plan updates; do not add implementation or validation work.
+- Preserve the accepted provider-neutral Model Role boundary: DeepSeek is primary without becoming factual authority or the only permitted provider, and explicitly configured frontier bindings remain inside the same DSH loop.
+- Record the accepted Flash/Pro/frontier routing and default V4 Pro Max binding together with the finalized third-party DSH plugin admission/versioning policy.
 
 ## Key decisions made
 
@@ -330,9 +332,11 @@
 - Remote source repositories will be inspected read-only and will not be copied into the new project as implementation code.
 - Use a fresh AI7 product repository as the planning default, with both source revisions recorded explicitly; do not merge the private AI7 history or vendor the Harness monorepo before visibility, licensing, and dependency strategy are decided.
 - For V2, preserve AI7's manuscript, publication, Task Ledger, safety, Effect, and editorial semantics as the application authority; evaluate Codex first and DeepSeek Harness comparatively for one agent execution loop rather than keeping competing schedulers.
-- The DSH-first question remains open. Protocol-level Codex compatibility with DeepSeek V4 is credible because both sides expose Responses API, but compatibility alone is not evidence of equal DeepSeek-specific agent behavior. The preliminary recommendation is one DSH production loop, no automatic Codex runtime fallback, and retained Codex interaction/engineering reference.
+- The DSH-first choice is accepted. Protocol-level Codex compatibility with DeepSeek V4 remains credible but is not evidence of equal DeepSeek-specific agent behavior; production uses one DSH loop with no automatic Codex runtime fallback, while Codex remains the Interaction Model and engineering reference.
 - “DeepSeek V4 + DSH matches Fable 5” is not an accepted product premise. The defensible statement is limited to several first-party coding-agent results under DSH Minimal mode; it does not establish equivalent Chinese writing, strict instruction following, factual verification, or hallucination resistance. Harness selection and editorial Model Role routing remain separate decisions.
 - Accepted: one DSH production loop, DeepSeek-primary but not DeepSeek-only. Secondary frontier providers are role-bound through the Provider Resolution Plan and Plan Envelope, never a second Harness or silent runtime fallback; no model is factual authority. Codex retains Interaction Model Reference status only.
+- Accepted: V4 Flash is the fast interaction/candidate role, V4 Pro High is the default main editorial role, and V4 Pro Max is the difficult-escalation role. Frontier Model Role also defaults to V4 Pro Max unless the user explicitly configures another eligible frontier binding.
+- Accepted in principle: third-party open-source DSH plugins may be discovered on GitHub and admitted only when they clear the owner's activity thresholds and are locally version-managed with exact immutable pins and no automatic upstream update. The activity counter is not yet canonical because “update” remains ambiguous.
 - The current architecture, legacy dispositions, and phase order are explicitly proposals; none become accepted until the user resolves the relevant numbered question.
 - Delay the canonical glossary/context layout and engineering-skill configuration until the setup questions choose the issue tracker, labels, and domain-doc structure.
 - GitHub Issues will be the canonical work-item tracker once the new repository is initialized.
@@ -435,4 +439,4 @@
 
 ## Resume Prompt
 
-Resume as Project Commander: ask Question 2/2 on the recommended routing—Flash for routine interactive and low-risk candidate work, Pro High for long-form editorial proposals/cross-source synthesis/factual research/complex instructions, Pro Max for difficult escalation, and an explicitly authorized secondary frontier model for challenge or fallback—then write the consolidated ADR and V2 candidate updates.
+Resume as Project Commander: ask the single remaining `grill-with-docs` question defining a qualifying third-party DSH plugin update (recommended: plugin-relevant non-merge commit), then write the consolidated DSH-first/model-routing/plugin-policy ADR and aligned V2 candidate updates.
