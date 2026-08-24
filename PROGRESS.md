@@ -315,6 +315,7 @@
 - Owner added a development-plan requirement permitting need-based discovery and use of third-party open-source DSH plugins from GitHub. Admission requires more than five stars, more than three qualifying plugin-related non-merge commits, and a latest qualifying commit no earlier than 30 days before selection; every admitted version must be locally managed and exactly pinned so upstream change cannot silently alter AI7. Standalone repositories use relevant default-branch commits; monorepos count only commits affecting the plugin directory or manifest.
 - Added owner Clarification 0005 with the accepted DSH-first topology, V4 Flash/Pro High/Pro Max/frontier routing, default Frontier Model Role binding to V4 Pro Max, Codex Interaction Model Reference, GitHub plugin admission snapshot, and immutable Local Plugin Pin. It supersedes the runtime parts of Clarifications 0001–0004 while retaining Clarification 0004's minimal-validation decision.
 - Prepared `docs/architecture-exploration/DSH-FIRST-CANDIDATE-REWRITE-DISPATCH.md` as the exact T3 Claude-first Worker brief over clean candidate head `38f47ea`, with a closed document write set, Clarification 0005 as the sole new-decision input, no external/plugin/runtime action, and no validation or formal-review work.
+- Dispatched the exact T3 rewrite to Claude Code Opus/high. Session `5041799a-7885-427d-a055-3d447372a922` authored most of the allowed candidate rewrite over 55 turns with zero web requests, then returned HTTP 429 before staging or commit; reported total cost was `$4.3264755`, including `$0.000781` auxiliary Haiku usage, with reset at 19:30 Asia/Shanghai. The candidate remains one dirty, uncommitted Worker unit, so same-class GPT-5.6 Sol/`xhigh` completion fallback is authorized without a task-class downgrade.
 
 ## What's next
 
@@ -440,4 +441,4 @@
 
 ## Resume Prompt
 
-Resume as Project Commander: commit the exact candidate-rewrite dispatch, run one real Claude Code Opus/high Worker attempt against candidate `38f47ea`, record actual usage or fresh same-class fallback, then inspect and integrate the returned document unit without formal review or implementation.
+Resume as Project Commander: dispatch GPT-5.6 Sol/`xhigh` to finish the unchanged T3 candidate rewrite from Claude's uncommitted state, record its final head and changed paths, then inspect and integrate the returned document unit without formal review or implementation.
