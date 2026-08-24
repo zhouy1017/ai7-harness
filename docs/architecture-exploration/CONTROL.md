@@ -1,9 +1,9 @@
 # Architecture Exploration Control Board
 
-Status: **V2 design ready for owner decision; implementation not authorized**
+Status: **V2 DSH-first candidate amendment authorized; implementation not authorized**
 Commander issue: [#3 — Freeze v1 design and prepare v2 architecture exploration](https://github.com/zhouy1017/ai7-harness/issues/3)
 V2 architecture issue: [#4 — Design the AI7 V2 architecture candidate](https://github.com/zhouy1017/ai7-harness/issues/4)
-Last updated: **2026-08-23**
+Last updated: **2026-08-24**
 
 This file records repository-development coordination only. It is not an AI7 product workflow or a replacement for the canonical architecture.
 
@@ -22,7 +22,7 @@ This file records repository-development coordination only. It is not an AI7 pro
 | `Worker — Freeze V1 UI UX` | `01a02240-c432-7600-8fdf-008858cae447` | Worker | `docs/2-ai7-ui-ux@587d645` / `worktrees/062a` | `frozen` | Its branch only | Reviewed local V1 UI/UX reference; candidate/evidence-only assets |
 | `Worker — Freeze V1 Platform and Phase 0` | `01a005a7-019f-7203-ba38-2a367a667db8` | Worker | `docs/1-windows-macos-phase0@9606891` / saved-project checkout | `frozen` | Its branch only | Reviewed local V1 platform/Q16/Phase-0 reference; Phase 0 remains NOT PASSED |
 | `Architecture Reviewer — Prepare V2 Exploration` | `01a02278-cdc5-7c81-a08d-490b8b76bc26` | Reviewer | read-only `main@c8cbe26` / `worktrees/1d24` | `exploring` | No repository writes | [Round 1](./ROUND-1-REVIEW.md) and [candidate delta](./CANDIDATE-DELTA-REVIEW.md) complete; A1–A3 prepared |
-| `AI7 V2 架构设计（Issue #4）` | A1/A2 history plus `/root/v2_codex_first_design_t3` | Chief Architect Worker | `docs/4-v2-architecture-candidate@38f47ea` / `worktrees/1649` | `coherent candidate complete; awaiting owner decision` | Candidate architecture documents only | Codex-first V2 design, assumptions, trade-offs, migration direction, and advisory corrections complete |
+| `AI7 V2 架构设计（Issue #4）` | A1/A2 history plus `/root/v2_codex_first_design_t3` | Chief Architect Worker | `docs/4-v2-architecture-candidate@38f47ea` / `worktrees/1649` | `DSH-first amendment authorized by Clarification 0005` | Candidate architecture documents only | Replace Codex-first topology with one DSH loop, accepted model routing, Codex reference role, and pinned third-party-plugin policy |
 | `AI7 V2 反方审查（只读）` | `/root/v2_hostile_architecture_advisory_t3` | Reviewer / advisory hostile review | read-only candidate `33b8f77` | `complete; coherent with assumptions` | No repository writes | Four logical seams were corrected at `38f47ea`; remaining findings are accepted implementation risks, not validation tasks |
 
 The function labels “Architecture Reviewer” and “V2 Hostile Architecture Reviewer” do not create a fourth repository role. Both are independent Reviewer assignments under ADR 0015. The V2 architecture designer remains a Worker even when exercising Chief Architect responsibilities.
@@ -34,7 +34,7 @@ The function labels “Architecture Reviewer” and “V2 Hostile Architecture R
 3. The Architecture Reviewer reads normalized conclusions from canonical `main`, not either legacy task history or active worktree.
 4. Worker handoffs may inform design after Commander curation; no evidence packet or proof audit is required.
 5. One high-level hostile review may be requested after a coherent draft, but it is advisory and never an acceptance gate.
-6. The 2026-08-21 direction makes Codex the preferred V2 harness candidate and leaves AI7 authoritative for product, domain, UI, policy, Effects, and business ledgers. [Clarification 0004](./clarifications/0004-minimal-validation-and-design-first.md) now makes that a design assumption without capability-closure proof: prefer low-cost Codex secondary development for missing behavior and keep DeepSeek as guidance-only unless the owner later chooses runtime re-entry.
+6. [Clarification 0005](./clarifications/0005-dsh-first-model-routing-and-plugin-admission.md) supersedes the Codex-first runtime direction: DeepSeek Harness is the one production Primary Agent Harness, DeepSeek is the primary but non-exclusive provider, Codex remains the Interaction Model and engineering reference, and the accepted Flash/Pro/frontier routing plus third-party-plugin policy must replace the current candidate language. AI7 remains authoritative for product, domain, UI, policy, Effects, providers, and business ledgers.
 7. Resolve material product trade-offs with `grill-with-docs`; technical unknowns may remain explicit implementation assumptions and do not trigger evidence probes by default.
 8. From 2026-08-22, every suitable parallel, bounded Worker brief uses the matching Layer B Claude Code binding first until its usable quota is observed unavailable or exhausted; only then does the Commander use the existing same-class fallback. Commander decisions, final integration, external actions, and any optional independent Review remain in their existing authority boundaries. This routing has no bearing on V2 product Model Roles or harness selection.
 
@@ -42,8 +42,8 @@ The function labels “Architecture Reviewer” and “V2 Hostile Architecture R
 
 - Effective directive: **2026-08-22 owner instruction**.
 - Preferred eligible-Worker binding: **Claude Code, same task class**.
-- Current observed availability: Claude Code `2.1.228`; the required post-reset Opus attempt, session `1540bd4c-0b54-4454-8a5f-6b2dec2b1cc8`, returned exit 1 / API HTTP 429 `You've hit your session limit · resets 2am (Asia/Shanghai)` before inference and reported `$0`.
-- Current fallback state: **bounded T1/T2/T3 Workers use their same-class fallbacks**. The real post-reset Claude attempt established the current exhausted window; no later reset/availability evidence exists, so the requested Claude bindings fall back without repeated failed attempts. This does not change task class or authority.
+- Last observed availability: Claude Code `2.1.228`; session `1540bd4c-0b54-4454-8a5f-6b2dec2b1cc8` returned exit 1 / API HTTP 429 on 2026-08-23 before inference and reported `$0`.
+- Current fallback state: **unknown after the next daily reset**. The next eligible Worker must make one real matching Claude Code attempt; only a fresh observed unavailability or quota-exhaustion result authorizes same-class fallback. This does not change task class or authority.
 - Required future Worker entry: task/branch, role and class, requested binding, actual provider/model/effort, availability or quota outcome, and exact fallback reason. Reviewer independence is recorded only when optional review occurs.
 
 | Date | Task / branch | Role / class | Requested binding | Actual binding | Availability / quota | Fallback / reason | Review |
@@ -89,7 +89,7 @@ These inputs are material but are not canonical on this branch:
 - The owner instructed the platform candidate task to revise the Windows-only target into one Windows+macOS product. This is an owner-stated candidate input, not a canonical `main` decision until integration.
 - The UI/UX Worker began from the current Windows-only baseline and produced a candidate requirements/prototype line.
 - The platform candidate affects packaging, local storage, credentials, IPC, sandbox claims, signing, release evidence, and UI platform conventions; it is not a runner-label edit.
-- The owner added Codex as the preferred V2 harness and integration template after OpenAI published its open-harness platform guidance. Codex Desktop-like interaction remains a UX reference while AI7 owns the interface and publishing workflow; DeepSeek Harness remains comparative rather than an automatic co-runtime.
+- The owner replaced the Codex-first runtime candidate with one DeepSeek Harness production loop because DeepSeek V4 is AI7's primary model family. Codex remains a non-runtime interaction and engineering reference; AI7 still owns Electron/ProseMirror, the interface, publishing workflow, domain authority, provider egress, and business state.
 
 The Commander must preserve both lines as candidate/evidence-only unless the owner later accepts a specific architecture change and the normal integration path promotes exact records.
 
@@ -124,8 +124,9 @@ The Commander must preserve both lines as candidate/evidence-only unless the own
 ## Next control events
 
 1. Preserve the frozen legacy branches and prior A1/A2 material as noncanonical historical reference; no more validation, source audit, artifact probe, scoring, qualification, or formal review task will run.
-2. Present candidate `38f47ea762ff93275b5a5474caae7603792c0544` and its accepted implementation risks to the owner.
-3. If the owner accepts V2, integrate the architecture into the canonical line through a separate Commander action.
-4. Do not begin implementation planning, issue decomposition, source copying, dependency installation, or product code without separate owner authorization.
+2. Supply exact Clarification 0005 to one bounded T3 Claude-first Worker and rewrite candidate `38f47ea762ff93275b5a5474caae7603792c0544` without consuming task transcripts.
+3. Commander-check the returned document unit and present the amended coherent V2 candidate to the owner; no formal review gate follows.
+4. If the owner accepts the amended V2 candidate, integrate it into the canonical line through a separate Commander action.
+5. Do not begin implementation planning, issue decomposition, GitHub plugin discovery, source copying, dependency installation, or product code without separate owner authorization.
 
 The old lines do not need to finish every originally planned document before architecture exploration can advance.
