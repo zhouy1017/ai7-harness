@@ -11,7 +11,7 @@ Product consistency is judged by domain identity, authority, state transition, u
 | ID | Shared V2 invariant |
 | --- | --- |
 | **I-01** | The product is exactly AI7: Chinese-first, professional literary publishing, Windows Standalone, with Word excluded from V1. |
-| **I-02** | AI7 business and domain records remain authoritative; Codex technical history correlates only through Execution Bindings and Harness Execution Spans. |
+| **I-02** | AI7 business and domain records remain authoritative; DeepSeek Harness technical history correlates only through Execution Bindings and Harness Execution Spans. |
 | **I-03** | Exact Book/deliverable/revision/scope, provider processing, budget, capabilities, expected outcome, and Effect classes are understandable before Run Authorization. |
 | **I-04** | Run Authorization, execution approval, Effect Approval, Proposal Decision, Review Decision, Public Release Permission, and Effect Receipt never collapse. |
 | **I-05** | Textual fidelity never becomes factual truth; Reference Integrity, Claim Support, and Factual Verification remain separate. |
@@ -38,4 +38,4 @@ Its 79-row and 14-journey counts, exact-source mapping, candidate dispositions, 
 
 ## V2 consequence
 
-The [Architecture](./ARCHITECTURE.md) and [Codex Integration](./CODEX-INTEGRATION.md) preserve these semantics while replacing the former conditional capability-closure path. The current [Decision Queue](./DECISION-QUEUE.md) has no product-consistency choice blocking V2.
+The [Architecture](./ARCHITECTURE.md) and [Harness Integration](./HARNESS-INTEGRATION.md) preserve these semantics while replacing the former conditional capability-closure path. The current [Decision Queue](./DECISION-QUEUE.md) has no product-consistency choice blocking V2.
