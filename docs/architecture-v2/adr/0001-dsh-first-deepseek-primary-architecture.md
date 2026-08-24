@@ -29,7 +29,7 @@ These are default bindings, not factual authority. Model output remains a propos
 
 **Electron and ProseMirror remain AI7-owned.** Assigning the Primary Agent Harness does not replace the desktop shell, renderer, editor, domain services, or AI7 service process.
 
-DSH is consumed as exactly pinned public npm packages: the selected subset AI7's composition needs, one coherent version across that subset, a committed lockfile, no `^`, `~`, branch, mutable tag, or `latest`, and never the `@deepseek-ai/dsh` CLI aggregate. Adopting the framework is not adopting its defaults: every DSH default reaching an editorial Run must be justified for publishing work.
+DSH is consumed as exactly pinned public npm packages: ADR 0020's accepted `0.1.0-rc.6` baseline, the selected subset AI7's composition needs, one coherent version across that subset, a committed lockfile, no `^`, `~`, branch, mutable tag, or `latest`, and never the `@deepseek-ai/dsh` CLI aggregate. Adopting the framework is not adopting its defaults: every DSH default reaching an editorial Run must be justified for publishing work.
 
 Missing product behavior is implemented cheaply, in this order of preference: AI7-owned adapters and capability implementations, then documented DSH extension seams, then—only when an identified need justifies it—an admitted third-party DSH plugin under [ADR 0002](./0002-admit-and-pin-third-party-dsh-plugins.md).
 
@@ -49,7 +49,7 @@ Engineering CI consists only of Windows E2E functional completeness and regressi
 - Local editing and recovery remain available offline without DSH, a provider, authentication, or network access.
 - Codex material may still inform AI7-owned interaction and engineering design. It creates no dependency, runtime obligation, or upgrade surface.
 - Pin bumps of the DSH subset remain explicit, one-at-a-time development changes rather than automatic updates. Only applicable Windows E2E journeys and observed-bug regressions are standing verification.
-- No exact DSH version, package list, plugin, provider endpoint, or credential is selected by this ADR.
+- This ADR retains ADR 0020's exact DSH `0.1.0-rc.6` baseline; it selects no final package list, plugin, provider endpoint, or credential.
 
 ## Canonical records affected after owner acceptance
 

@@ -205,7 +205,7 @@ All product persistence sits under AI7-controlled locations inside the Agent Dat
 
 ## Composition and dependency boundary
 
-DSH is consumed as exactly pinned public npm packages: the selected subset AI7's composition needs, one coherent version across that subset, and a committed lockfile. AI7 never depends on the `@deepseek-ai/dsh` CLI aggregate, because it transitively installs the generic shell, pwsh, terminal, and web tool packages the editorial surface excludes; absence from the dependency graph is a stronger guarantee than absence from the wiring. No `^`, `~`, branch, mutable tag, or `latest` is used. Pin bumps are explicit, one-at-a-time development changes, never automatic updates.
+DSH is consumed as exactly pinned public npm packages: ADR 0020's accepted `0.1.0-rc.6` baseline, the selected subset AI7's composition needs, one coherent version across that subset, and a committed lockfile. AI7 never depends on the `@deepseek-ai/dsh` CLI aggregate, because it transitively installs the generic shell, pwsh, terminal, and web tool packages the editorial surface excludes; absence from the dependency graph is a stronger guarantee than absence from the wiring. No `^`, `~`, branch, mutable tag, or `latest` is used. Pin bumps are explicit, one-at-a-time development changes, never automatic updates.
 
 Adopting the framework is not adopting its defaults. Every DSH default that would reach an editorial Run must be justified for publishing work rather than inherited because it shipped, and AI7's Agent Behavior Assets are authored for editorial work rather than adapted from coding presets.
 
@@ -219,4 +219,4 @@ There are no separate architecture-closure, unit, integration, contract, propert
 
 ## Design boundary
 
-This candidate selects responsibilities and seams. It does not select an exact DSH version or package list, a plugin, a provider endpoint, a credential, or a package layout; copy source; install dependencies; search GitHub; authorize implementation; decompose implementation issues; or change canonical `main`. Those actions require later owner acceptance, Commander integration, and separate implementation authorization.
+This candidate selects responsibilities and seams and retains ADR 0020's exact DSH `0.1.0-rc.6` baseline. It does not select the final package list, a plugin, a provider endpoint, a credential, or a package layout; copy source; install dependencies; search GitHub; authorize implementation; decompose implementation issues; or change canonical `main`. Those actions require later owner acceptance, Commander integration, and separate implementation authorization.

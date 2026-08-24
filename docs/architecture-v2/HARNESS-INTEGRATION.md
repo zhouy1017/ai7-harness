@@ -170,7 +170,7 @@ Forking the generic agent loop is out of scope. AI7 never writes a second implem
 
 ### Package and plugin pinning
 
-- Consume DSH as exactly pinned public npm packages: the selected subset only, one coherent version across that subset, and a committed lockfile.
+- Consume DSH as exactly pinned public npm packages: retain ADR 0020's `0.1.0-rc.6` baseline, install the selected subset only at one coherent version, and commit the lockfile.
 - Never depend on the `@deepseek-ai/dsh` CLI aggregate; it transitively installs the generic shell, pwsh, terminal, and web tool packages the editorial surface excludes.
 - Never use `^`, `~`, a branch, a mutable tag, or `latest`.
 - A pin bump is one explicit development change at a time. Only the applicable Windows E2E journeys and regressions for observed bugs are standing verification; composition diffs, capability-exposure diffs, schema checks, notice regeneration, ABI checks, and replay do not become separate gates. Applicable notices still remain current in every build.
@@ -198,4 +198,4 @@ The assumptions affecting this contract and the design response if they prove wr
 
 ## Non-decisions
 
-This document does not choose an exact DSH version, package list, configuration schema, plugin, provider endpoint, model identifier, credential, or package layout. It does not authorize a GitHub search, plugin download or installation, dependency change, source copy, prototype, product implementation, or canonical record change.
+This document retains ADR 0020's exact DSH `0.1.0-rc.6` baseline but does not choose the final package list, configuration schema, plugin, provider endpoint, model identifier, credential, or package layout. It does not authorize a GitHub search, plugin download or installation, dependency change, source copy, prototype, product implementation, or canonical record change.

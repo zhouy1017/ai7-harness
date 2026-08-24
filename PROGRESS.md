@@ -13,6 +13,7 @@
 - Left `docs/architecture-v2/A1-EVIDENCE-CROSSWALK.md`, canonical root architecture records, control documents, source, dependencies, tests, and workflows untouched.
 - Affected paths are exactly: `PROGRESS.md`; `docs/architecture-v2/{README,ARCHITECTURE,HARNESS-INTEGRATION,MIGRATION,ASSUMPTIONS,DECISION-QUEUE,GLOSSARY,A1-PRODUCT-CONSISTENCY}.md`; `docs/architecture-v2/domain/execution/CONTEXT.md`; added `docs/architecture-v2/adr/{0001-dsh-first-deepseek-primary-architecture,0002-admit-and-pin-third-party-dsh-plugins}.md`; deleted `docs/architecture-v2/CODEX-INTEGRATION.md` and `docs/architecture-v2/adr/0001-codex-first-ai7-owned-architecture.md`.
 - Requested routing: Claude Code / `claude-opus-5` / high. Actual routing: Claude wrote most of the bounded unit at a reported cost of `$4.3264755`, then a fresh HTTP 429 stopped the session before staging or commit; GPT-5.6 Sol / `xhigh` completed the same-class fallback, removed the remaining contradiction, and prepared the atomic commit.
+- Commander integration inspection corrected one candidate/canonical contradiction after the Worker stopped: ADR 0020 already accepts DSH `0.1.0-rc.6`, so the V2 candidate now retains that exact baseline while leaving only the final package subset and implementation composition unselected. No validation, dependency, or implementation work was added.
 
 ## What's next
 

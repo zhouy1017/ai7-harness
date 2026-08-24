@@ -5,7 +5,7 @@ Status: **coherent noncanonical design; no implementation authority**
 This candidate describes one simple architecture:
 
 - AI7 owns the product, domain model, UI/UX, policies, authority, capabilities, Effects, Task Ledger, scheduling, providers, persistence, and lifecycle.
-- **DeepSeek Harness (DSH)** is the sole production **Primary Agent Harness**, composed inside the AI7 Node service from an exactly pinned public npm package subset — full composition capability behind a narrow AI7 tool surface, never the `@deepseek-ai/dsh` CLI aggregate.
+- **DeepSeek Harness (DSH)** is the sole production **Primary Agent Harness**, composed inside the AI7 Node service from the ADR 0020 baseline `0.1.0-rc.6` and an exactly pinned public npm package subset — full composition capability behind a narrow AI7 tool surface, never the `@deepseek-ai/dsh` CLI aggregate.
 - **DeepSeek is primary but not exclusive.** Task Skills declare provider-neutral Model Roles; the accepted defaults are V4 Flash for Fast Interaction, V4 Pro High for Main Editorial, and V4 Pro Max for Difficult Escalation and, by default, the Frontier Model Role. The user may explicitly configure another eligible frontier provider, which enters the same loop, plan, credential brokering, budget, and egress gate. No model is a factual authority.
 - **Codex is not a production runtime.** It remains the **Codex Interaction Model Reference**: a non-runtime interaction and engineering reference. AI7 ships no Codex package, process, session, adapter target, provider invoker, fallback, or source build, and copies no Codex branding, GUI source, layout, assets, or coding presets.
 - Electron, ProseMirror, the renderer, domain services, and the AI7 service process remain AI7-owned and unchanged by the harness decision.
@@ -13,7 +13,7 @@ This candidate describes one simple architecture:
 - Unknown DSH behavior is an implementation assumption with a design response, never a capability-closure or proof blocker.
 - The only standing engineering CI surface is Windows E2E functional completeness and regressions for observed bugs.
 
-The design remains candidate-only until explicit owner acceptance and Commander integration. It selects no exact package version, plugin, provider endpoint, or credential, and authorizes no implementation, issue decomposition, GitHub search, installation, source copy, fork, push, merge, or release.
+The design remains candidate-only until explicit owner acceptance and Commander integration. It retains ADR 0020's exact DSH version baseline but selects no final package list, plugin, provider endpoint, or credential, and authorizes no implementation, issue decomposition, GitHub search, installation, source copy, fork, push, merge, or release.
 
 ## Reading order
 
