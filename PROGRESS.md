@@ -314,6 +314,7 @@
 - Owner accepted the default Model Role routing: V4 Flash handles quick interaction and low-risk candidate work; V4 Pro High is the main editorial model for Chinese long-form work, editorial proposals, cross-source synthesis, factual research, and complex instructions; V4 Pro Max handles difficult escalation. The Frontier Model Role defaults to DeepSeek V4 Pro Max while still permitting an explicitly configured alternative frontier provider/model through the same DSH loop.
 - Owner added a development-plan requirement permitting need-based discovery and use of third-party open-source DSH plugins from GitHub. Admission requires more than five stars, more than three qualifying plugin-related non-merge commits, and a latest qualifying commit no earlier than 30 days before selection; every admitted version must be locally managed and exactly pinned so upstream change cannot silently alter AI7. Standalone repositories use relevant default-branch commits; monorepos count only commits affecting the plugin directory or manifest.
 - Added owner Clarification 0005 with the accepted DSH-first topology, V4 Flash/Pro High/Pro Max/frontier routing, default Frontier Model Role binding to V4 Pro Max, Codex Interaction Model Reference, GitHub plugin admission snapshot, and immutable Local Plugin Pin. It supersedes the runtime parts of Clarifications 0001–0004 while retaining Clarification 0004's minimal-validation decision.
+- Prepared `docs/architecture-exploration/DSH-FIRST-CANDIDATE-REWRITE-DISPATCH.md` as the exact T3 Claude-first Worker brief over clean candidate head `38f47ea`, with a closed document write set, Clarification 0005 as the sole new-decision input, no external/plugin/runtime action, and no validation or formal-review work.
 
 ## What's next
 
@@ -439,4 +440,4 @@
 
 ## Resume Prompt
 
-Resume as Project Commander: commit Clarification 0005, dispatch the exact bounded DSH-first/model-routing/plugin-policy candidate rewrite to Claude Code Opus/high, record actual usage or same-class fallback, then inspect and integrate the returned candidate document unit without formal review or implementation.
+Resume as Project Commander: commit the exact candidate-rewrite dispatch, run one real Claude Code Opus/high Worker attempt against candidate `38f47ea`, record actual usage or fresh same-class fallback, then inspect and integrate the returned document unit without formal review or implementation.
