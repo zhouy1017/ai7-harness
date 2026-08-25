@@ -55,11 +55,8 @@
       "license": "MIT and bundled third-party notices",
       "notice": "https://github.com/electron/electron/blob/v43.4.1/LICENSE",
       "requiredNoticeFiles": [
-        { "id": "electron-license", "relativePath": "Electron.app/Contents/Resources/LICENSE" },
-        {
-          "id": "electron-chromium-notices",
-          "relativePath": "Electron.app/Contents/Resources/LICENSES.chromium.html"
-        }
+        { "id": "electron-license", "relativePath": "LICENSE" },
+        { "id": "electron-chromium-notices", "relativePath": "LICENSES.chromium.html" }
       ]
     }
   ]

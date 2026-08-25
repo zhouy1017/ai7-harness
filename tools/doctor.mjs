@@ -51,8 +51,9 @@ function verifyAmbientSelectors() {
     'SSL_CERT_FILE',
     'XDG_CONFIG_HOME',
   ]);
-  const forbidden = Object.keys(process.env).filter((name) => {
+  const forbidden = Object.entries(process.env).filter(([name, value]) => {
     const normalized = name.toUpperCase();
+    if (normalized === 'NPM_CONFIG_PREFIX' && value === '') return false;
     return (
       forbiddenExact.has(normalized) ||
       normalized.startsWith('ELECTRON_') ||
@@ -61,7 +62,7 @@ function verifyAmbientSelectors() {
       /^PNPM_(?:CACHE|REGISTRY|STORE)(?:_|$)/.test(normalized) ||
       /^PNPM_CONFIG_(?:CACHE|GLOBALCONFIG|REGISTRY|STORE_DIR|USERCONFIG)$/.test(normalized)
     );
-  });
+  }).map(([name]) => name);
   requireValue(
     forbidden.length === 0,
     `Ambient acquisition selectors are not allowed: ${forbidden.map((name) => name.toUpperCase()).sort().join(', ')}.`,
@@ -155,10 +156,7 @@ export function inspectDevelopmentInputs() {
     'Electron secondary artifact URL is not the exact official immutable release URL.',
   );
   requireValue(/^[0-9a-f]{64}$/.test(runtimeArtifact.sha256), 'Electron secondary artifact digest is invalid.');
-  const expectedNotices =
-    host.platform === 'win32'
-      ? ['LICENSE', 'LICENSES.chromium.html']
-      : ['Electron.app/Contents/Resources/LICENSE', 'Electron.app/Contents/Resources/LICENSES.chromium.html'];
+  const expectedNotices = ['LICENSE', 'LICENSES.chromium.html'];
   requireValue(
     Array.isArray(runtimeArtifact.requiredNoticeFiles) &&
       runtimeArtifact.requiredNoticeFiles.length === 2 &&
