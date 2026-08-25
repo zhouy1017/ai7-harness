@@ -383,9 +383,9 @@ _中文_: 开发端能力档案
 _Avoid_: Editorial Capability Profile, an in-product power-user mode, an escalation path
 
 **Agent Data Root**:
-The AI7-owned directory inside which the agent holds genuine filesystem permission and outside which it has none. Contains governed Book stores plus a per-Run unscoped scratch area; excludes the Protected Secret Store and lives outside any repository working tree.
+The AI7-owned directory intended to be the platform filesystem boundary for governed Book stores and per-Run scratch; it excludes the Protected Secret Store and lives outside any repository working tree. Run Source Scope is the nested semantic read boundary. Until a concrete Windows or macOS confinement mechanism is selected and shown sufficient for a stronger claim, AI7 capability and service facades are the enforceable boundary and AI7 assumes no whole-process OS filesystem isolation.
 _中文_: 智能体数据根目录
-_Avoid_: Run Source Scope, a general filesystem grant, a repository working tree
+_Avoid_: Run Source Scope, a general filesystem grant, a proven whole-process OS sandbox, a repository working tree
 
 **Agent Behavior Asset**:
 A versioned prompt, instructional text, task guidance, or bounded ranking parameter that shapes output quality and never grants authority. Agent-proposable, with auto-activation limited to non-expansive calibration inside a user-approved envelope.

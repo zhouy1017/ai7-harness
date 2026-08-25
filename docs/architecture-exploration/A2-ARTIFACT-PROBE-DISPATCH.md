@@ -1,6 +1,6 @@
 # A2 selected Codex artifact static Commander probe
 
-Status: **amended after review-clean first-attempt evidence; static retry not authorized until this exact correction passes independent review; all selected binaries remain unexecuted; candidate writing and A3 remain stopped**
+Status: **historical completed static-probe plan; the corrected retry later completed as `probe partial`, all selected binaries remained unexecuted, and the proof programme is retired rather than a current gate**
 
 Recorded: **2026-08-23**
 

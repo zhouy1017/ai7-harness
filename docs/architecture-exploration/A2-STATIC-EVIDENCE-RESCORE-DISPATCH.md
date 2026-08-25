@@ -1,6 +1,6 @@
 # A2 exact-artifact static-evidence re-score dispatch
 
-Status: **prepared by the Commander; candidate Writer remains blocked until this exact control head passes independent Standards and Spec review**
+Status: **historical completed Writer dispatch; the bounded re-score returned review-clean candidate `8eb70e3`, and the A2 proof programme is now retired rather than a current gate**
 
 Recorded: **2026-08-23**
 

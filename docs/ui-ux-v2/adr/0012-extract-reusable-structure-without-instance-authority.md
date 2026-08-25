@@ -1,3 +1,7 @@
+---
+status: candidate
+---
+
 # Extract reusable structure without instance data or authority
 
 Reusable Procedure Capture derives only reusable purpose, business steps and branches, parameter slots, output types, source classes, Model Roles, requested AI7 Capabilities, possible Effect classes and applicable Workflow structure from an exact user-selected completed source set. Manuscript text, Book identity, concrete source content, credentials, provider/model bindings, factual outcomes, decisions, approvals, receipts, hidden Harness activity and unsuccessful instance steps do not enter the reusable asset; local capture provenance remains a separate record. This sacrifices effortless verbatim recording so a reusable procedure cannot silently become a container for unpublished material, secrets or authority inherited from one historical execution.

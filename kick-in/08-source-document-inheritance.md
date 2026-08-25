@@ -9,7 +9,7 @@ The owner will review preservation decisions from the original AI7 documentation
 The following cross-cutting dispositions are accepted:
 
 - Keep a concise, revised new-project `AGENTS.md`; do not copy the legacy file wholesale.
-- Keep the legacy tiered GitHub Actions testing idea, combined with generated mock-LLM-provider cases. Rebaseline its names, commands, and tiers for the new architecture, and keep required CI provider-free.
+- **Superseded historical inheritance decision:** the earlier tiered GitHub Actions and generated mock-provider programme was later replaced by ADR 0027. Current CI is one provider-free E2E Functional Gate on Windows and macOS for supported journeys and observed-bug regressions.
 - Keep local multi-agent dispatch for repository development only. It is not a production AI7 workflow and must remain terminologically and architecturally separate from Harness-powered product agents.
 - Keep AI7 as one Windows-and-macOS desktop product under ADR 0028.
 - Discard the old UI implementation and presentation model. Review and revise its user stories and product outcomes rather than porting layouts or components.
@@ -231,7 +231,7 @@ Conflict rule: AI7 product safety/domain authority beats Harness convenience. An
 | --- | --- | --- |
 | Session start, document ownership, current checkpoint | **Accepted: preserve and simplify** | Root `AGENTS.md` + compact `PROGRESS.md`. Retain one current checkpoint; do not grow another multi-megabyte history log or parallel `MEMORY.md`. |
 | Repository-task receipts and Commander authority | Preserve principle, relocate detail | Future repository-agent runbook. Keep fail-closed Git/worktree identity and no implicit external-mutation authority. Do not copy the unfinished pilot machinery. |
-| Verification economy | Preserve | Future testing guide: focused checks during iteration; one final exact-HEAD matrix; docs-only checks for docs-only changes. |
+| Verification economy | **Superseded and narrowed by ADR 0027** | Current implementation authority is [`docs/agents/ci-test-boundaries.md`](../docs/agents/ci-test-boundaries.md): one provider-free E2E Functional Gate for supported journeys and observed-bug regressions. The former final exact-HEAD matrix is historical, not a gate. |
 | Local desktop and unpublished-material safety | **Accepted: preserve proportionately** | Root standing rule plus public-release/security design. Prevent unauthorized publication or exposure; do not import an unnecessarily classified-data threat model. |
 | Old installed skills, Codex Cloud review, AI7 scenario-audit rules | Do not inherit automatically | Reintroduce only if those workflows are actually installed and accepted here. |
 | Exact GPT/Claude model routing | Archive | Volatile operator policy, not durable project instruction. |
@@ -244,7 +244,7 @@ Conflict rule: AI7 product safety/domain authority beats Harness convenience. An
 | Unified Standalone/Word authority, inward adapters, exact links, crash isolation | Archive as contingency evidence | V1 is Standalone-only; promote only surface-neutral single-authority lessons unless a future ADR adds Word. |
 | Old compatibility inventories and retired CLI paths | Archive | Preserve only the general rule that compatibility paths cannot acquire new authority. |
 | `dev`/`master`/`release` policy and exact GitHub gates | Re-decide | New repository governance; preserve only concise commits and prohibition on secrets/private manuscripts. |
-| Provider-free CI, exact-SHA evidence, deterministic E2E, packaged-runtime proof | **Accepted in principle** | Rebuild as a tiered GitHub Actions ladder with generated mock-LLM-provider cases. New tier names, commands, exact topology, and packaged-runtime gates remain to be designed. |
+| Provider-free CI, exact-SHA evidence, deterministic E2E, packaged-runtime proof | **Historical; superseded by ADR 0027** | Retain only the provider-free principle and complete supported E2E journeys plus observed-bug regressions. Exact-SHA, tier, mock-provider programme, packaged-runtime proof, and separate topology gates are not current requirements. |
 | Old Issue `#14` obligations, schedules, lane names, tag algorithms | Archive/rebaseline | Historical bootstrap and release implementation, not standing orders. |
 | Safety-focused review rules | Preserve, relocate | Engineering review guide; source-truth, approval, revision, privacy, recovery, and replay violations remain high priority. |
 
@@ -315,7 +315,7 @@ The accepted reason for studying DeepSeek Harness is broader than replacing the 
 - Configuration is explicit and validated; misconfiguration fails at the earliest owned point.
 - Validate configuration, model/tool JSON, persistence, filesystem, process, worker, and wire inputs; avoid redundant hostile-input checks at trusted typed same-process boundaries.
 - Use strict TypeScript, explicit exports, branded cross-boundary IDs, concise README/JSDoc contracts, and one authoritative home per fact once the stack is accepted.
-- Use narrow affected-surface checks locally and assembled/keyless behavior evidence for agent- or user-visible behavior.
+- Historical Harness guidance favored narrow affected-surface checks and assembled/keyless behavior evidence. Current AI7 standing CI admits only applicable supported E2E journeys and observed-bug regressions under ADR 0027; it creates no separate affected-surface or behavior-evidence gate.
 
 ### Keep as commit-pinned upstream reference
 
@@ -342,7 +342,7 @@ The accepted reason for studying DeepSeek Harness is broader than replacing the 
 | AI7 Task Skill vs Harness Skill vs Cordis Plugin | Keep three explicit concepts and define projections/adapters. |
 | AI7 durable Approval/Effect policy vs Harness one-shot approval/tool effects | Harness execution remains subordinate to exact AI7 product authority for manuscript/external effects. |
 | Python domain backend vs TypeScript Harness Host | Select one topology and one state-transition owner before inheriting stack rules. |
-| Provider-free product gates vs Harness live-provider tests | Provider-free remains required; live tests are separately authorized, isolated evidence. |
+| Provider-free product gate vs Harness live-provider tests | Provider-free remains required. ADR 0027 excludes live-provider tests and separate provider evidence gates unless the owner explicitly reverses it. |
 
 ## Actions during the row-by-row review
 

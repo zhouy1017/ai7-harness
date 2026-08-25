@@ -10,7 +10,9 @@ Read this first if you are picking up AI7 without prior context. It is a **route
 
 **Design complete. No implementation has started.**
 
-A 36-question design interview ran to completion and produced 26 ADRs, three domain contexts, two policy documents, and 36 design notes. The repository contains **documentation only** — no source, no `package.json`, no dependencies, no CI workflows.
+A 36-question design interview ran to completion and the aggregate now contains 28 root ADRs, three domain contexts, two policy documents, and 36 design notes. The repository contains **documentation only** — no source, no `package.json`, no dependencies, no CI workflows.
+
+The frozen V1 UI/UX reference package and the completed V2 UI/UX candidate package are both present, but neither is canonical `main` authority. GitHub Issue #6 is integrated into `design-doc` as the accepted implementation boundary under ADR 0027. Issue #7 is the current bounded advisory-review repair; it changes no product implementation authority.
 
 Nothing here is a stub waiting to be filled in. If you are looking for code, there is none, and that is the expected state.
 
@@ -73,7 +75,7 @@ GitHub Issues is the canonical tracker. Five labels, no aliases: `needs-triage`,
 
 ## What happens next
 
-Phase 0 is complete but its **exit review has not been run**. That review confirms every decision-map row is resolved or explicitly deferred, then decomposes the accepted design into independently grabbable vertical issues.
+The Phase-0 exit review **has run** and historically returned `NOT PASSED` because the then-current platform revision was incomplete. `design-doc` later resolved the platform-scope conflict through accepted ADR 0028, but that aggregate resolution is not `main` integration and does not itself authorize issue decomposition or implementation.
 
 **Decomposition has not been authorized.** Do not begin it without the owner saying so.
 
@@ -94,7 +96,7 @@ Not decisions waiting to be made unilaterally — things a reader should know ar
 | Platform signing | Windows signing remains deferred with a known SmartScreen cost. macOS signing/notarization is a separate open implementation decision |
 | Platform sandbox enforcement | Do not describe the Agent Data Root as OS-confined on either platform until the selected Windows and macOS mechanisms support that claim; AI7 capability and service facades remain authoritative |
 | Question 16 scope | Answered "mostly okay" with one correction; the other four content classes were never itemized |
-| UI/UX | Reserved for a separate owner-run session by design |
+| UI/UX | The frozen V1 package is candidate/reference evidence and the V2 package is a completed candidate; neither is canonical `main` authority or an implementation baseline until explicit acceptance/integration |
 
 ---
 

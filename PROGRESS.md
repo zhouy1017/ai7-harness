@@ -340,12 +340,12 @@
 
 ## What's next
 
-- Present candidate `38f47ea762ff93275b5a5474caae7603792c0544` and its accepted risks to the owner.
+- **Superseded historical next action:** present Codex-first candidate `38f47ea762ff93275b5a5474caae7603792c0544` and its accepted risks to the owner; Clarification 0005 later replaced this topology.
 - If accepted, integrate the V2 design into the canonical line through a separate Commander action.
 - Run no further capability proof, artifact/source probe, scoring, qualification, formal review, or non-E2E validation work.
 - Implementation planning, issue decomposition, source copying, dependency installation, and product code remain unauthorized until separate owner approval.
 - If the owner wants to replace Electron itself, treat that as a separate product-shell choice; it is not implied by adopting or rejecting Codex App Server.
-- Present coherent DSH-first candidate `247b7dacb267ba2f4076ca8461c95e5f0508b343` to the owner for explicit acceptance; do not add implementation or validation work.
+- **Completed historical next action:** present coherent DSH-first candidate `247b7dacb267ba2f4076ca8461c95e5f0508b343` to the owner for explicit acceptance; it is now included as candidate material in `design-doc`, without `main` or implementation authority.
 - Preserve the accepted provider-neutral Model Role boundary: DeepSeek is primary without becoming factual authority or the only permitted provider, and explicitly configured frontier bindings remain inside the same DSH loop.
 - Record the accepted Flash/Pro/frontier routing and default V4 Pro Max binding together with the finalized third-party DSH plugin admission/versioning policy.
 
@@ -358,7 +358,7 @@
 - This phase produces design and migration documents only; it will not implement the new AI7 runtime.
 - Remote source repositories will be inspected read-only and will not be copied into the new project as implementation code.
 - Use a fresh AI7 product repository as the planning default, with both source revisions recorded explicitly; do not merge the private AI7 history or vendor the Harness monorepo before visibility, licensing, and dependency strategy are decided.
-- For V2, preserve AI7's manuscript, publication, Task Ledger, safety, Effect, and editorial semantics as the application authority; evaluate Codex first and DeepSeek Harness comparatively for one agent execution loop rather than keeping competing schedulers.
+- **Superseded historical Codex-first decision:** for the then-current V2 exploration, preserve AI7's manuscript, publication, Task Ledger, safety, Effect, and editorial semantics as the application authority while evaluating Codex first and DeepSeek Harness comparatively. Clarification 0005 later replaced this with one DSH production loop, DeepSeek-primary but non-exclusive, and Codex as Interaction Model/engineering reference.
 - The DSH-first choice is accepted. Protocol-level Codex compatibility with DeepSeek V4 remains credible but is not evidence of equal DeepSeek-specific agent behavior; production uses one DSH loop with no automatic Codex runtime fallback, while Codex remains the Interaction Model and engineering reference.
 - “DeepSeek V4 + DSH matches Fable 5” is not an accepted product premise. The defensible statement is limited to several first-party coding-agent results under DSH Minimal mode; it does not establish equivalent Chinese writing, strict instruction following, factual verification, or hallucination resistance. Harness selection and editorial Model Role routing remain separate decisions.
 - Accepted: one DSH production loop, DeepSeek-primary but not DeepSeek-only. Secondary frontier providers are role-bound through the Provider Resolution Plan and Plan Envelope, never a second Harness or silent runtime fallback; no model is factual authority. Codex retains Interaction Model Reference status only.
@@ -445,9 +445,9 @@
 - V2 architecture design may receive one optional high-level hostile review after a coherent draft; its verdict is advisory.
 - The Issue #4 Worker owns candidate writing. A1, A2, and A3 are dependency-gated phases inside the architecture issue, not permission to run all exploration at once.
 - Owner acceptance after A1 gates exact parity/support becoming canonical, not read-only noncanonical A2/A3 evidence exploration. The hard Reviewer floor applies to the eventual candidate verdict, so the T3 charter session must be rebound or redispatched at T3-par or higher for that turn.
-- The 2026-08-21 V2 direction is AI7-owned, Codex-first, and DeepSeek-comparative. Codex harness is a preferred technical candidate and Codex Desktop-like is an interaction reference; neither is permission to inherit coding defaults, copy UI implementation/branding, couple AI7 domain authority to execution approvals, or run two overlapping agent loops.
+- **Superseded historical Codex-first decision:** the 2026-08-21 V2 direction was AI7-owned, Codex-first, and DeepSeek-comparative. Clarification 0005 later replaced the runtime choice with one DSH production loop; the retained boundary is that Codex remains an interaction/engineering reference and never grants permission to inherit coding defaults, UI implementation/branding, or a second agent loop.
 - Ambiguous architecture language is an explicit decision state, not permission for an agent to infer. `grill-with-docs` supplies the owner interview and domain-modeling discipline; exact answers, not transcripts, flow back into V2 artifacts.
-- Codex is the assumed primary production agent-loop and Desktop-like interaction foundation without requiring capability-closure proof. Missing behavior is an implementation assumption and should normally be added through low-cost Codex secondary development. DeepSeek provides development rules and documentation/design guidance only unless the owner later makes a separate runtime choice; no automatic fallback or dual loop is permitted.
+- **Superseded historical Codex-first decision:** Codex was assumed to be the primary production agent loop and DeepSeek guidance-only. Clarification 0005 now controls: DSH is the one production loop, DeepSeek is primary but not exclusive, and Codex is an Interaction Model and engineering reference; no automatic second-loop fallback is permitted.
 - Suitable parallel, bounded repository Worker tasks consume the matching Claude Code binding first while quota is available. An unavailable or exhausted quota triggers the existing same-class fallback with an exact recorded reason; it never changes Commander, integration, external-action, or independent-Reviewer authority and never influences product runtime provider selection.
 - Execution Binding and Harness Execution Span are distinct accepted record terms. The review-clean A2 candidate aligns its seam to that canonical distinction, but the content remains noncanonical until later owner/Commander gates.
 - A2 exact head `8eb70e3` is review-clean after the bounded static-evidence re-score, but its result is still `Closure not proven`: zero rows are Proven, 17 are Candidate, 2 Experimental, 24 Unknown, and no Codex Capability Gap is verified; neither Codex production selection, DeepSeek re-entry, maintenance-form selection, nor A3 follows.
@@ -463,7 +463,7 @@
 - The exact tool-surface source audit establishes constituent configuration and routing facts but not one immutable AI7-only stock configuration across start, resume, fork, model switch, and turns. All four target rows remain Unknown, `BLK-A2-03` remains open, and the next source task must freeze the missing path set before tracing it; no gap, DSH re-entry, maintenance, A3, or implementation conclusion follows.
 - A deterministic pipeline success requires conformance as well as byte-identical reruns. The first path-discovery attempt's identical provisional hashes are unusable because the frozen extractor itself violated reviewed precedence; repeated wrong output is not reproducible evidence.
 - The extractor/source/artifact evidence program is retired. Its historical records do not constrain or block V2 architecture.
-- V2 candidate `38f47ea` is coherent with assumptions: Codex is the sole Primary Agent Harness; AI7 owns final provider egress, behavior composition, business authority, capabilities, Effects, and ledgers; DeepSeek is guidance-only. The optional hostile consultation is complete and creates no review gate.
+- **Superseded historical Codex-first candidate:** `38f47ea` was coherent under its then-current assumptions, but Clarification 0005 and DSH-first candidate `247b7da` replaced its runtime topology. AI7 still owns final provider egress, behavior composition, business authority, capabilities, Effects, and ledgers; the optional hostile consultation remains historical and creates no review gate.
 - Codex open-source reuse and UI reuse are separate: AI7 reuses the harness/protocol and selected interaction semantics, not the unpublished Codex Desktop GUI. Electron remains the accepted AI7 shell unless the owner separately changes the frontend platform.
 
 ## Resume Prompt
@@ -524,7 +524,7 @@ Resume from `origin/design-doc` with ADR 0028 as the current Windows-and-macOS p
 
 ### What's done
 
-- Completed GitHub Issue #6 as a documentation-only candidate from exact base `design-doc@a7fc9b4db014cb1a58ce3fe8d48239b4dfae47d8` on branch `docs/6-ci-test-boundaries`.
+- Completed GitHub Issue #6 from exact base `design-doc@a7fc9b4db014cb1a58ce3fe8d48239b4dfae47d8` on branch `docs/6-ci-test-boundaries`; the Commander integrated its candidate head through merge commit `9b3e949ac02ac1bd1b283c1d3c7db958733dda09` on `design-doc`.
 - Added `docs/agents/ci-test-boundaries.md` as the concise implementation-time authority under ADR 0027 for scenario admission, public-synthetic/provider-free data, the launchable product subject, Windows/macOS parity, observed-bug regressions, diagnostics, and excluded standing gates.
 - Updated `AGENTS.md`, `HANDOFF.md`, ADRs 0015 and 0027, `docs/agents/git-conventions.md`, `docs/design-doc/README.md`, `docs/domain/execution/CONTEXT.md`, `kick-in/README.md`, and `kick-in/{34-first-tracer-slice,35-minimal-e2e-validation}.md` to use the same boundary.
 - Reclassified the former mandatory store-and-index spike and thirteen-point tracer gate — including headless replay, provider rehearsal, request fingerprints, and portable/package proof — as superseded historical design while preserving the read-only tracer as a possible vertical implementation slice and supported journey.
@@ -534,7 +534,7 @@ Resume from `origin/design-doc` with ADR 0028 as the current Windows-and-macOS p
 
 ### What's next
 
-- The Commander may inspect the local candidate head and decide whether to integrate it into `design-doc`. This branch grants no `main` acceptance, implementation, merge, push, pull request, release, or branch/worktree deletion authority.
+- Issue #6 is integrated into `design-doc`; no further Issue #6 integration action is pending. That integration grants no `main` acceptance, product implementation, push, pull request, release, or branch/worktree deletion authority.
 
 ### Key decisions made
 
@@ -546,4 +546,33 @@ Resume from `origin/design-doc` with ADR 0028 as the current Windows-and-macOS p
 
 ### Resume Prompt
 
-Resume as Commander by inspecting the clean Issue #6 candidate head and, if accepted, integrating it into `design-doc` through the normal Commander-only flow without adding tests, formal review, implementation, or external action.
+Resume from `design-doc@9b3e949` with Issue #6 already integrated; keep ADR 0027 as the sole engineering-validation contract and do not infer `main` or implementation authority.
+
+## Design-doc advisory review repair — Issue #7 — 2026-08-25
+
+### What's done
+
+- Started the bounded owner-requested two-axis review repair from exact base `design-doc@9b3e949ac02ac1bd1b283c1d3c7db958733dda09` on branch `docs/7-design-review-repair`.
+- Reconciled the named current verification wording in `kick-in/{06-risk-register,08-source-document-inheritance,29-editorial-quality-metrics,30-upstream-consumption-and-upgrade-contract}.md` with ADR 0027 while retaining Quality Signals, behavior goals, long-manuscript targets, exact pins, provenance, licensing, and third-party-notice obligations.
+- Reclassified the stale top-level states in the five named `docs/architecture-exploration/A2-*` records as historical completed-or-retired evidence without changing their historical findings or restoring a current proof gate.
+- Corrected `docs/agents/ci-test-boundaries.md` to record that Issue #6 is integrated into `design-doc` as the accepted implementation boundary under ADR 0027, without granting `main` acceptance or implementation authority.
+- Corrected current routing in `HANDOFF.md` and this checkpoint: 28 root ADRs, the Phase-0 exit review has run, V1/V2 UI/UX packages exist as candidate/reference material, Issue #6 is integrated, and the DSH-first topology supersedes the explicitly marked historical Codex-first key-decision lines.
+- Corrected the canonical Agent Data Root definition in `docs/domain/execution/CONTEXT.md` and its `GLOSSARY.md` collision entry: it is the intended platform filesystem boundary, while capability/service facades remain enforceable and no whole-process OS isolation is assumed before a concrete platform mechanism supports it.
+- Aligned the V2 UI/UX Plugin-admission rule with Clarification 0005 and marked candidate ADRs 0011–0013 explicitly `status: candidate` without promoting them to `main` authority.
+- Added `docs/design-doc/REVIEW.md` with separate Standards and Spec findings plus Commander dispositions, including the six genuine source-head ancestors, rc.6/model routing, Proposal-card/atomic-group and Windows/macOS consistency, no scope creep, and the advisory `same-provider review — independence reduced` disclosure.
+- Recorded commits `0bcc784a704c4169e930dff33cea09a37633023e`, `ec26b70ad9a60cdfb046ca57ef441a38962e73ee`, and `7ecb8add6351764644aefc981dadcdfaef999746` as historical missing-trailer nonconformance in the review and aggregate router; shared history remains unchanged and future agent commits must follow the trailer convention.
+- Passed the authorized lightweight checks before commit: `git diff --check`; local-link resolution across all 21 changed Markdown files; exact one-line `CLAUDE.md`; 6/6 declared aggregate source heads as ancestors; and precise stale-status, gate, topology, Agent Data Root, Plugin-admission, candidate-status, metadata, and review-axis `rg` checks.
+- Created the single local Issue #7 commit with subject `docs(design): reconcile aggregate review findings`, a why-focused body, `Closes #7`, and the required GPT-5.6 Codex co-author trailer.
+
+### What's next
+
+- The Commander may inspect this clean Issue #7 candidate head and decide whether to integrate it into `design-doc`. No merge, push, pull request, `main` acceptance, implementation, publication, or branch/worktree deletion is authorized by this Worker checkpoint.
+
+### Key decisions made
+
+- This owner-requested review remains advisory rather than a formal gate; `same-provider review — independence reduced`.
+- Current production topology is one DSH loop, DeepSeek-primary but not exclusive; Codex remains an Interaction Model and engineering reference.
+
+### Resume Prompt
+
+Resume as Commander by inspecting the clean Issue #7 candidate head and its advisory Standards/Spec dispositions; if accepted, integrate it through the Commander-only flow without inferring `main` or implementation authority.

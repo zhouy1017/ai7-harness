@@ -1,6 +1,6 @@
 # A2 exact Codex tool-surface source-audit evidence
 
-Status: **Commander synthesis prepared from independently fact-checked read-only source evidence; exact-head Standards and Spec review pending; candidate remains unchanged at `8eb70e3`, `BLK-A2-03` remains open, and no re-score, gap verdict, A3, DeepSeek runtime comparison, maintenance-form choice, or implementation is authorized**
+Status: **historical completed source-audit evidence; exact-head corrections completed, all four target rows remained Unknown, and the source/artifact proof programme is retired with no current gate or implementation authority**
 
 Recorded: **2026-08-23**
 

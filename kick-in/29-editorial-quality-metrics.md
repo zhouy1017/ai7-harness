@@ -24,7 +24,7 @@ This family learns from the user's own writing, so it routes through the Learnin
 
 The strongest family, because it is behavioral rather than reported. Per proposal, capture the outcome — accepted verbatim, accepted with edits, rejected, discarded, or superseded — plus revision distance when edited, and whether the change survived into the delivered revision.
 
-Questions 13 and 14 already accepted capturing these as evidence. Question 36 turns that evidence into quantified, versioned measures that can gate an activation.
+Questions 13 and 14 already accepted capturing these as evidence. Question 36 turns that evidence into quantified, versioned measures that can inform governed activation. The former independent activation-evaluation gate is superseded by ADR 0027; these product Quality Signals and activation constraints remain.
 
 ## Capture scope
 
@@ -95,7 +95,7 @@ ADR 0005 and the accepted rule that workflow completion or signoff never implies
 1. **Acceptance rate alone is perverse.** An agent optimizing for acceptance learns to propose safe, trivial changes. High acceptance at low value is a failure mode wearing success's clothes, which is why weighted workload displacement is a required counterweight rather than a nice-to-have.
 2. **Silence is not consent.** An unreviewed proposal is weak evidence, not approval.
 3. **Attribution.** If a Behavior Asset changed while the editor's own standards drifted, production metrics cannot separate the two causes.
-4. **The gate is two-sided.** Deterministic replay against the Question 24 fixed scenario corpus proves no regression on known cases; production metrics show real-world improvement. Replay cannot see taste, and production evidence cannot isolate cause, so neither half is sufficient alone.
+4. **Historical evaluation-gate note — superseded by ADR 0027.** The earlier design required fixed-corpus replay plus production metrics as a separate two-sided Behavior Evaluation Gate. That engineering gate no longer applies. Production Quality Signals still inform product learning and calibration, while user-visible behavior is covered only when it belongs to an applicable supported E2E journey or observed-bug regression.
 
 ## Question 36 decision
 
