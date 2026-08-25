@@ -4,7 +4,11 @@ Binding for every agent and every human working in this repository. These rules 
 
 ## Branches
 
-`main` is the only long-lived branch. **Nothing is pushed to `main` directly**, including by the Commander — every change arrives through a pull request, so the `pr` gate always runs.
+See [Development lines](./development-lines.md) for the authorized line roles and current protection facts.
+
+`dev` is the long-lived development integration line. Start every task branch from current `dev` and target its pull request to `dev`. **Nothing is pushed directly to `dev` or `main`**, including by the Commander; both protected lines receive changes through pull requests.
+
+`main` is the protected stable and release-promotion line. No task branch or pull request targets it unless the Owner has separately authorized that exact promotion.
 
 Branch names are `<type>/<issue>-<slug>`:
 
@@ -43,11 +47,11 @@ Agent-authored commits carry the co-authorship trailer for the model that wrote 
 
 - Title matches the primary commit subject.
 - Body links the issue and states the user-visible outcome.
-- The `pr` gate must be green. A red gate is never merged around.
-- An independent Reviewer report is attached before merge, at a task class at least equal to the work reviewed. Where cross-provider review was impossible, the report says `same-provider review — independence reduced`.
+- Documentation-only changes require no automated proof. An implementation change proves its applicable one logical E2E journey gate; a red applicable gate is never merged around.
+- Independent review is optional and advisory, never a formal merge gate. When used, its reviewer must not author the work and must meet or exceed its task class; where cross-provider review was impossible, the report says `same-provider review — independence reduced`.
 - **Only the Commander merges.** Workers and Reviewers never do.
 
-**Squash merge.** Each merge to `main` is one complete task, so history reads as a sequence of finished outcomes rather than agent scratch work. The pull-request body becomes the squashed commit body.
+**Squash merge.** Each task merge to `dev` is one complete task, so history reads as a sequence of finished outcomes rather than agent scratch work. The pull-request body becomes the squashed commit body. A `dev` to `main` promotion remains subject to its separate Owner authorization.
 
 ## Tags and releases
 

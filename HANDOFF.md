@@ -6,11 +6,9 @@ Read this first if you are picking up AI7 without prior context. It is a **route
 
 ## Where the project is
 
-**Design complete. No implementation has started.**
+**Design is accepted. The Owner has authorized sequential design normalization and initial implementation work.**
 
-A 36-question design interview ran to completion and produced 26 ADRs, three domain contexts, two policy documents, and 36 design notes. The repository contains **documentation only** — no source, no `package.json`, no dependencies, no CI workflows.
-
-Nothing here is a stub waiting to be filled in. If you are looking for code, there is none, and that is the expected state.
+The current authorization covers exact `design-doc` allowlist normalization, policy baselines, implementation planning, and the bounded J-01 new-Book tracer. The next safe action is exact allowlist baseline normalization on `dev`; never target `main` without a separate exact Owner promotion authorization.
 
 ---
 
@@ -56,52 +54,28 @@ Repository development uses three roles, defined in `kick-in/27-repository-devel
 
 - **Commander** — decides dispatch, sole integrator, sole external-action authority
 - **Worker** — writes only its own worktree and branch; never merges, pushes, publishes, or takes external actions
-- **Reviewer** — independent, never authored what it reviews, at a task class at least equal to the work
+- **Reviewer** — optional and advisory; when used, independent, non-author, and at a task class at least equal to the work
 
 Operating rules are provider-neutral and must never be conditioned on which model is running. A single binding table is the only provider-specific artifact.
 
-Branch naming, commit format, PR requirements, merge strategy, and tag format are binding and live in **`docs/agents/git-conventions.md`**. Nothing is pushed to `main` directly.
+Branch naming, commit format, PR requirements, merge strategy, and tag format are binding in **`docs/agents/git-conventions.md`**. The authorized line roles and protection facts are in **`docs/agents/development-lines.md`**: task branches and PRs integrate to `dev`; `main` is a separately authorized promotion line. Nothing is pushed directly to either protected line.
 
 GitHub Issues is the canonical tracker. Five labels, no aliases: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`.
 
 ---
 
-## What happens next
+## Current route
 
-Phase 0 is complete but its **exit review has not been run**. That review confirms every decision-map row is resolved or explicitly deferred, then decomposes the accepted design into independently grabbable vertical issues.
-
-**Decomposition has not been authorized.** Do not begin it without the owner saying so.
-
-When implementation does start, the accepted order is:
-
-1. **Store-and-index spike** — throwaway, time-boxed. Generated Chinese corpora at 500K / 1M / 10M characters, measuring find, jump, replace, cold open, retrieval build cost, and peak memory. Confirms or changes the store and retrieval strategy before anything is committed to.
-2. **Read-only tracer slice** — open a Book, import a DOCX, view it in the windowed editor, ask a source-grounded question, and have the citation resolve to an exact highlighted block range. Thirteen-point exit gate in `kick-in/34-first-tracer-slice.md`.
-
----
-
-## Known open items
-
-Not decisions waiting to be made unilaterally — things a reader should know are unsettled. Full list in section 9 of the overview.
-
-| Open | Note |
-| --- | --- |
-| Retrieval strategy | Lexical, vector, or hybrid — deferred to the spike |
-| ProseMirror confidence | Medium. Windowing reduces the stakes; a spike should confirm |
-| Latency budgets | Proposed as calibration only, not accepted figures |
-| Code signing certificate | Deferred until the owner requests it. Unsigned builds are a known SmartScreen cost |
-| Windows sandbox enforcement | Landlock is Linux-only. Whether the Windows path genuinely enforces the Agent Data Root is **unverified** — do not describe that boundary as enforced until it is |
-| Question 16 scope | Answered "mostly okay" with one correction; the other four content classes were never itemized |
-| UI/UX | Reserved for a separate owner-run session by design |
+Execute the exact `design-doc` allowlist baseline normalization on `dev`, then proceed through the authorized policy baselines and implementation planning toward the bounded J-01 new-Book tracer. Preserve the sequential order and obtain separate exact Owner authorization for any `dev` to `main` promotion.
 
 ---
 
 ## Environment facts
 
-- Private repository `zhouy1017/ai7-harness`, branch `main`, fresh history unrelated to either predecessor.
+- Private repository `zhouy1017/ai7-harness`, default development branch `dev`, with protected `main` reserved for stable/release promotion; fresh history unrelated to either predecessor.
 - AI7 is proprietary, all rights reserved to the sole rights-holder. See `LICENSE`.
 - Predecessors may be read and copied from, subject to the provenance ledger: `ai7-reborn-ai` at `dev@3e6e9ac772b7f07832154fa39d7de8a4deca51b1`, and `ai7-redesign` at `fc2f4d8`, which is a strict ancestor and holds nothing unique.
 - Harness upstream is `deepseek-ai/deepseek-harness`, MIT, no git tags and no GitHub releases — track it by commit and npm version.
-- Target platform is Windows only. Ubuntu may appear as a CI runner if separately justified.
 
 ---
 

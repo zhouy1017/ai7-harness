@@ -17,7 +17,7 @@ These are provider-neutral invariants. They are stated without reference to any 
 | Role | May | Never |
 | --- | --- | --- |
 | **Commander** | Decide dispatch, review returned work, integrate: merge, push, release. Sole external-action authority. Holds the owner's foreground session | — |
-| **Worker** | Read the repository, write only its own worktree and branch, run the verification gate, report | Merge, push to `main`, publish, take external actions, or read/write credentials, real manuscripts, or private sample Books |
+| **Worker** | Read the repository, write only its own worktree and branch, run applicable verification, report | Merge, push, publish, take external actions, or read/write credentials, real manuscripts, or private sample Books |
 | **Reviewer** | Read the branch under review and its brief with fresh context; produce a review report and verdict | Write to the branch, merge, or dispatch |
 
 The reviewer's verdict is **advisory**. The commander decides and integrates.
@@ -28,19 +28,18 @@ The reviewer's verdict is **advisory**. The commander decides and integrates.
 - Soft cap of three concurrent workers. The binding constraint is commander review capacity, not dispatch capacity.
 - **T0 work is never dispatched**: ambiguous scope, a brief that is itself in doubt, or anything requiring the owner's decision. A worker starts cold and re-derives context the commander already holds; that is the most expensive path.
 - A worker whose brief turns out to be wrong **stops and reports**. It never self-escalates to a higher class.
-- Rebase onto current `main` and pass the verification gate before review.
+- Rebase onto current `dev` before integration. Documentation-only changes require no automated proof; implementation changes use their applicable one-logical-E2E-journey gate. Task branches and pull requests integrate to `dev`; `main` promotion requires separate exact Owner authorization. See `docs/agents/development-lines.md`.
 
 ### Review
 
-- Every dispatched branch is reviewed by an agent that is **not its author**.
-- **The reviewer's task class is greater than or equal to the worker's task class. This is a hard floor.**
-- Cross-provider review is the default: a branch written on one provider is reviewed on the other.
-- When cross-provider review is impossible, proceed and flag `same-provider review — independence reduced`.
+- Independent review is optional and advisory, never a formal merge gate.
+- When review is used, its reviewer is **not the author** and has a task class greater than or equal to the worker's task class. This is a hard floor.
+- Cross-provider review is the default when review is used. When it is impossible, proceed and flag `same-provider review — independence reduced`.
 - **Conflict ordering: the tier floor is hard; cross-provider is preferred with disclosure.** Competence to catch the error outranks independence from bias.
 
 ### Reporting
 
-Every returned unit of work carries one line: role, provider, model, effort, task class, and whether cross-provider review was achieved.
+Every returned unit of work carries one line: role, provider, model, effort, task class, and, when review occurred, whether cross-provider review was achieved.
 
 ### Usage discipline
 
