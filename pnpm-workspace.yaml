@@ -13,7 +13,6 @@ verifyStoreIntegrity: true
 verifyDepsBeforeRun: false
 
 allowBuilds:
-  electron@43.4.1: true
   esbuild@0.28.2: true
 
 overrides:

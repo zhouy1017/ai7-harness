@@ -17,6 +17,7 @@ const persistenceStatus = requiredElement('#persistence-status');
 if (!window.ai7) throw new Error('AI7_RENDERER_BOOTSTRAP_INVALID');
 
 let editor: BoundedEditor | undefined;
+let authorityInterrupted = false;
 
 function element<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string): HTMLElementTagNameMap[K] {
   const node = document.createElement(tag);
@@ -38,11 +39,30 @@ function setStatus(message: string, tone?: 'busy' | 'success' | 'error'): void {
   else delete persistenceStatus.dataset['tone'];
 }
 
+function setCloseRisk(risk: boolean): void {
+  document.documentElement.dataset['ai7CloseRisk'] = risk ? 'true' : 'false';
+}
+
+function applyAuthorityInterruption(): void {
+  if (authorityInterrupted) return;
+  authorityInterrupted = true;
+  for (const control of screen.querySelectorAll<HTMLButtonElement | HTMLInputElement>('button, input')) {
+    control.disabled = true;
+  }
+  if (editor) editor.interrupt();
+  else setStatus('本地业务服务已中断；当前业务操作已停止。', 'error');
+}
+
 function replaceScreen(state: string, content: HTMLElement): void {
   editor?.destroy();
   editor = undefined;
   screen.dataset['screen'] = state;
   screen.replaceChildren(content);
+  if (authorityInterrupted) {
+    for (const control of screen.querySelectorAll<HTMLButtonElement | HTMLInputElement>('button, input')) {
+      control.disabled = true;
+    }
+  }
 }
 
 function panel(): HTMLElement {
@@ -93,7 +113,7 @@ function fidelityTable(fidelity: ReadonlyArray<FidelityCategoryProjection>): HTM
     const detail = element('div', 'fidelity-detail', category.detail);
     detail.setAttribute('role', 'cell');
     if (category.key === 'round-trip-export') {
-      detail.append(element('span', 'roundtrip-note', '不提供往返保证；此能力限制不阻止本次 clean 文本导入。'));
+      detail.append(element('span', 'roundtrip-note', '不提供往返保证；此能力限制不阻止本次符合范围的文本导入。'));
     }
     row.append(name, status, detail);
     table.append(row);
@@ -106,7 +126,7 @@ function renderLanding(): void {
   content.classList.add('hero');
   const copy = element('div');
   copy.append(
-    element('p', 'section-label', 'J-01 · 新图书起稿'),
+    element('p', 'section-label', '本地 DOCX · 新图书起稿'),
     element('h2', undefined, '新建图书'),
     element('p', 'lede', '从一份本地 DOCX 开始，在创建任何图书记录之前先看清来源、保真结果和最终影响。'),
   );
@@ -217,7 +237,7 @@ function listSection(title: string, items: ReadonlyArray<string>): HTMLElement {
 function renderReview(review: ReviewBeforeImportProjection): void {
   const content = panel();
   content.append(
-    element('p', 'section-label', '步骤 2 / 3 · Review Before Import'),
+    element('p', 'section-label', '步骤 2 / 3 · 导入前复核'),
     element('h2', undefined, '导入前复核'),
     element('p', 'lede', '最后一次确认：下面的记录会在一个事务中一起创建；列出的非影响不会随导入发生。'),
   );
@@ -272,7 +292,7 @@ function renderReview(review: ReviewBeforeImportProjection): void {
   const explanation = element('div');
   explanation.append(
     element('strong', undefined, '一次提交，不能部分创建'),
-    element('div', 'field-note', '本次 clean 导入不创建导入降级决定，也不提供 DOCX 往返保证。'),
+    element('div', 'field-note', '本次符合范围的导入不创建导入降级决定，也不提供 DOCX 往返保证。'),
   );
   const commitButton = button('新建图书并导入稿件', 'primary', async () => {
     commitButton.disabled = true;
@@ -363,8 +383,9 @@ function renderEditor(result: ImportCommitProjection): void {
     initialWindow: result.firstWindow,
     flushJournalEdit: (input) => window.ai7.flushJournalEdit(input),
     onStateChange: (state) => {
-      save.disabled = !state.dirty || state.saving;
+      save.disabled = !state.dirty || state.saving || state.interrupted;
       journal.textContent = `修订日志序号 ${state.journalSequence}`;
+      setCloseRisk(state.dirty || state.saving || state.retryRequired || (state.interrupted && state.dirty));
     },
     onAnnouncement: setStatus,
   });
@@ -385,4 +406,17 @@ function renderError(error: unknown, retry: () => void): void {
   setStatus('操作未完成', 'error');
 }
 
+new MutationObserver(() => {
+  if (document.documentElement.dataset['ai7ServiceState'] === 'interrupted') applyAuthorityInterruption();
+  if (document.documentElement.dataset['ai7CloseState'] === 'blocked') {
+    setStatus('当前编辑尚未获得持久写入确认，请先保存成功后再关闭窗口。', 'error');
+    delete document.documentElement.dataset['ai7CloseState'];
+  }
+}).observe(document.documentElement, {
+  attributes: true,
+  attributeFilter: ['data-ai7-service-state', 'data-ai7-close-state'],
+});
+
+setCloseRisk(false);
 renderLanding();
+if (document.documentElement.dataset['ai7ServiceState'] === 'interrupted') applyAuthorityInterruption();

@@ -38,7 +38,11 @@
       "url": "https://github.com/electron/electron/releases/download/v43.4.1/electron-v43.4.1-win32-x64.zip",
       "sha256": "c2ef9a5f65472c34d14bd3e67b7d14e66b0c01f124aba45263d6a4232160e13a",
       "license": "MIT and bundled third-party notices",
-      "notice": "https://github.com/electron/electron/blob/v43.4.1/LICENSE"
+      "notice": "https://github.com/electron/electron/blob/v43.4.1/LICENSE",
+      "requiredNoticeFiles": [
+        { "id": "electron-license", "relativePath": "LICENSE" },
+        { "id": "electron-chromium-notices", "relativePath": "LICENSES.chromium.html" }
+      ]
     },
     {
       "id": "electron-macos-arm64",
@@ -49,7 +53,14 @@
       "url": "https://github.com/electron/electron/releases/download/v43.4.1/electron-v43.4.1-darwin-arm64.zip",
       "sha256": "fe3cac8cbfd9ba1739fac6c69166cf30848741f93cbe251d800ae6ef7cebb64b",
       "license": "MIT and bundled third-party notices",
-      "notice": "https://github.com/electron/electron/blob/v43.4.1/LICENSE"
+      "notice": "https://github.com/electron/electron/blob/v43.4.1/LICENSE",
+      "requiredNoticeFiles": [
+        { "id": "electron-license", "relativePath": "Electron.app/Contents/Resources/LICENSE" },
+        {
+          "id": "electron-chromium-notices",
+          "relativePath": "Electron.app/Contents/Resources/LICENSES.chromium.html"
+        }
+      ]
     }
   ]
 }

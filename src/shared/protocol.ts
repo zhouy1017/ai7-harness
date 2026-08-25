@@ -14,6 +14,12 @@ export const IPC_CHANNELS = {
   flushJournalEdit: 'ai7:j01:flush-journal-edit',
 } as const;
 
+export const MAIN_EVENTS = {
+  closeBlocked: 'ai7:j01:close-blocked',
+  closeRiskChanged: 'ai7:j01:close-risk-changed',
+  serviceInterrupted: 'ai7:j01:service-interrupted',
+} as const;
+
 export type RendererCallResult<T> =
   | { ok: true; result: T }
   | { ok: false; error: { code: string; message: string } };
@@ -50,7 +56,7 @@ export interface StagedImportProjection {
   };
   titleSuggestion: {
     value: string;
-    sourceLabel: 'DOCX 标题元数据' | '文档首个标题' | '文件名';
+    sourceLabel: 'DOCX 标题元数据' | '文件名';
   };
   targetChoices: ReadonlyArray<{
     id: 'new-book';

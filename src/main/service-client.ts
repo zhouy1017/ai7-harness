@@ -1,7 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { once } from 'node:events';
-import { dirname, isAbsolute } from 'node:path';
+import { delimiter, dirname, isAbsolute, resolve } from 'node:path';
 import {
   MAX_FRAME_BYTES,
   type ServiceOperation,
@@ -30,15 +30,22 @@ export class ServiceCallError extends Error {
   }
 }
 
-function serviceEnvironment(): NodeJS.ProcessEnv {
+function serviceEnvironment(executable: string): NodeJS.ProcessEnv {
   const selected: NodeJS.ProcessEnv = { ELECTRON_RUN_AS_NODE: '1' };
   const names =
     process.platform === 'win32'
-      ? ['SystemRoot', 'WINDIR', 'TEMP', 'TMP', 'PATH', 'PATHEXT', 'ComSpec']
-      : ['PATH', 'TMPDIR', 'LANG', 'LC_ALL'];
+      ? ['SystemRoot', 'WINDIR', 'TEMP', 'TMP', 'PATHEXT', 'ComSpec', 'APPDATA', 'LOCALAPPDATA', 'USERPROFILE']
+      : ['HOME', 'TMPDIR', 'LANG', 'LC_ALL'];
   for (const name of names) {
     const value = process.env[name];
     if (value !== undefined) selected[name] = value;
+  }
+  if (process.platform === 'win32') {
+    const systemRoot = process.env.SystemRoot ?? process.env.WINDIR;
+    if (!systemRoot || !isAbsolute(systemRoot)) throw new ServiceCallError('SERVICE_LAUNCH_INVALID', '本地业务服务启动参数无效。');
+    selected.PATH = [dirname(executable), resolve(systemRoot, 'System32'), resolve(systemRoot)].join(delimiter);
+  } else {
+    selected.PATH = [dirname(executable), '/usr/bin', '/bin', '/usr/sbin', '/sbin'].join(delimiter);
   }
   return selected;
 }
@@ -74,6 +81,7 @@ export class ServiceClient {
   #expectedExit = false;
   #stopped = false;
   #faulted = false;
+  #terminalUnexpected = false;
   #unexpectedExit: (() => void) | undefined;
 
   private constructor(child: ChildProcessWithoutNullStreams) {
@@ -87,7 +95,7 @@ export class ServiceClient {
       const unexpected = !this.#expectedExit;
       this.#stopped = true;
       this.#rejectPending(new ServiceCallError('SERVICE_STOPPED', '本地业务服务已停止。'));
-      if (unexpected) this.#unexpectedExit?.();
+      if (unexpected) this.#reportUnexpectedExit();
     });
   }
 
@@ -100,7 +108,7 @@ export class ServiceClient {
       [serviceEntry, '--data-root', dataRoot, '--parent-pid', String(process.pid)],
       {
         cwd: dirname(serviceEntry),
-        env: serviceEnvironment(),
+        env: serviceEnvironment(executable),
         stdio: ['pipe', 'pipe', 'pipe'],
         windowsHide: true,
       },
@@ -118,6 +126,7 @@ export class ServiceClient {
 
   onUnexpectedExit(callback: () => void): void {
     this.#unexpectedExit = callback;
+    if (this.#terminalUnexpected) callback();
   }
 
   call<Operation extends ServiceOperation>(
@@ -230,7 +239,13 @@ export class ServiceClient {
     this.#rejectPending(new ServiceCallError('SERVICE_PROTOCOL_FAILED', '本地业务服务边界失效。'));
     this.#child.stdin.destroy();
     this.#child.kill();
-    if (unexpected) this.#unexpectedExit?.();
+    if (unexpected) this.#reportUnexpectedExit();
+  }
+
+  #reportUnexpectedExit(): void {
+    if (this.#terminalUnexpected) return;
+    this.#terminalUnexpected = true;
+    this.#unexpectedExit?.();
   }
 
   #rejectPending(error: Error): void {

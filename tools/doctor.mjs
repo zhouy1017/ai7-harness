@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { arch, platform, release, version } from 'node:os';
-import { dirname, resolve } from 'node:path';
+import { dirname, isAbsolute, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -30,20 +30,33 @@ function verifyAmbientSelectors() {
     'COREPACK_INTEGRITY_KEYS',
     'COREPACK_NPM_REGISTRY',
     'ESBUILD_BINARY_PATH',
+    'NODE_EXTRA_CA_CERTS',
     'NODE_OPTIONS',
+    'NODE_TLS_REJECT_UNAUTHORIZED',
+    'NODE_USE_ENV_PROXY',
+    'NODE_USE_SYSTEM_CA',
     'NPM_CONFIG_CACHE',
     'NPM_CONFIG_GLOBALCONFIG',
+    'NPM_CONFIG_NPMRC_AUTH_FILE',
+    'NPM_CONFIG_NODE_OPTIONS',
+    'NPM_CONFIG_PREFIX',
     'NPM_CONFIG_REGISTRY',
     'NPM_CONFIG_STORE_DIR',
     'NPM_CONFIG_USERCONFIG',
     'PNPM_HOME',
+    'PNPM_CONFIG_CONFIG_DIR',
+    'PNPM_CONFIG_NPMRC_AUTH_FILE',
     'PNPM_STORE_PATH',
+    'SSL_CERT_DIR',
+    'SSL_CERT_FILE',
+    'XDG_CONFIG_HOME',
   ]);
   const forbidden = Object.keys(process.env).filter((name) => {
     const normalized = name.toUpperCase();
     return (
       forbiddenExact.has(normalized) ||
       normalized.startsWith('ELECTRON_') ||
+      /^(?:NPM|PNPM)_CONFIG_.*(?:AUTH|TOKEN|PASSWORD|USERNAME)/.test(normalized) ||
       /^NPM_CONFIG_(?:CAFILE|HTTPS?_PROXY|PROXY|STRICT_SSL)$/.test(normalized) ||
       /^PNPM_(?:CACHE|REGISTRY|STORE)(?:_|$)/.test(normalized) ||
       /^PNPM_CONFIG_(?:CACHE|GLOBALCONFIG|REGISTRY|STORE_DIR|USERCONFIG)$/.test(normalized)
@@ -72,13 +85,24 @@ function verifyHost() {
       isWindows11 || isAuthorizedServerCI,
       'J-01 requires Windows 11 24H2+, except the explicitly labelled Windows Server 2025 CI job.',
     );
-    return host;
+    const systemRoot = process.env.SystemRoot ?? process.env.WINDIR;
+    requireValue(systemRoot && isAbsolute(systemRoot), 'Windows system root is unavailable.');
+    const archiveAdapter = resolve(systemRoot, 'System32', 'tar.exe');
+    requireValue(
+      existsSync(archiveAdapter) && realpathSync(archiveAdapter).toLowerCase() === archiveAdapter.toLowerCase(),
+      'J-01 requires the canonical Windows System32 tar.exe archive adapter.',
+    );
+    return { ...host, archiveAdapter: { id: 'windows-system-tar', path: archiveAdapter } };
   }
 
   if (host.platform === 'darwin') {
     requireValue(host.arch === 'arm64', 'J-01 supports Apple Silicon only.');
     requireValue(Number(host.release.split('.')[0]) >= 24, 'J-01 requires macOS 15 or later.');
-    return host;
+    requireValue(
+      existsSync('/usr/bin/ditto') && realpathSync('/usr/bin/ditto') === '/usr/bin/ditto',
+      'J-01 requires the canonical macOS /usr/bin/ditto archive adapter.',
+    );
+    return { ...host, archiveAdapter: { id: 'macos-system-ditto', path: '/usr/bin/ditto' } };
   }
 
   throw new Error(`Unsupported J-01 development host: ${host.platform}/${host.arch}.`);
@@ -131,6 +155,27 @@ export function inspectDevelopmentInputs() {
     'Electron secondary artifact URL is not the exact official immutable release URL.',
   );
   requireValue(/^[0-9a-f]{64}$/.test(runtimeArtifact.sha256), 'Electron secondary artifact digest is invalid.');
+  const expectedNotices =
+    host.platform === 'win32'
+      ? ['LICENSE', 'LICENSES.chromium.html']
+      : ['Electron.app/Contents/Resources/LICENSE', 'Electron.app/Contents/Resources/LICENSES.chromium.html'];
+  requireValue(
+    Array.isArray(runtimeArtifact.requiredNoticeFiles) &&
+      runtimeArtifact.requiredNoticeFiles.length === 2 &&
+      runtimeArtifact.requiredNoticeFiles[0]?.id === 'electron-license' &&
+      runtimeArtifact.requiredNoticeFiles[1]?.id === 'electron-chromium-notices' &&
+      runtimeArtifact.requiredNoticeFiles.every((notice, index) => notice.relativePath === expectedNotices[index]),
+    'Electron required notice carrier declaration drifted.',
+  );
+  const nodeArtifact = artifactManifest.artifacts.find(
+    (artifact) => artifact.kind === 'development-toolchain' && artifact.platform === host.platform && artifact.arch === host.arch,
+  );
+  requireValue(nodeArtifact, 'No pinned Node distribution exists for this host.');
+  requireValue(
+    nodeArtifact.url === `https://nodejs.org/dist/v24.18.1/${nodeArtifact.fileName}`,
+    'Node distribution URL is not the exact official immutable release URL.',
+  );
+  requireValue(/^[0-9a-f]{64}$/.test(nodeArtifact.sha256), 'Node distribution digest is invalid.');
 
   return {
     host,
@@ -146,11 +191,19 @@ export function inspectDevelopmentInputs() {
       pnpmWorkspaceSha256: sha256('pnpm-workspace.yaml'),
       npmrcSha256: sha256('.npmrc'),
       artifactManifestSha256: sha256('config/dependency-artifacts.json'),
+      npmRegistry: 'https://registry.npmjs.org/',
+      nodeDistribution: {
+        id: nodeArtifact.id,
+        fileName: nodeArtifact.fileName,
+        url: nodeArtifact.url,
+        sha256: nodeArtifact.sha256,
+      },
       secondaryArtifact: {
         id: runtimeArtifact.id,
         fileName: runtimeArtifact.fileName,
         url: runtimeArtifact.url,
         sha256: runtimeArtifact.sha256,
+        requiredNoticeFiles: runtimeArtifact.requiredNoticeFiles,
       },
     },
   };

@@ -34,7 +34,7 @@ export interface ParsedDocx {
   fidelity: FidelityCategoryProjection[];
   titleSuggestion: {
     value: string;
-    sourceLabel: 'DOCX 标题元数据' | '文档首个标题' | '文件名';
+    sourceLabel: 'DOCX 标题元数据' | '文件名';
   };
 }
 
@@ -377,7 +377,7 @@ function fidelityReport(signals: DocumentSignals, entryNames: string[]): Fidelit
       count: signals.inlineStyles,
       status: signals.inlineStyles === 0 ? 'preserved' : 'degraded',
       statusLabel: signals.inlineStyles === 0 ? '完整保留' : '降级导入',
-      detail: signals.inlineStyles === 0 ? '未检测到行内样式。' : '可编辑内容块不保存行内样式；本次 clean tracer 不提交该分支。',
+      detail: signals.inlineStyles === 0 ? '未检测到行内样式。' : '可编辑内容块不保存行内样式；本次受限导入不提交该分支。',
     },
     {
       key: 'comments-revisions',
@@ -385,7 +385,7 @@ function fidelityReport(signals: DocumentSignals, entryNames: string[]): Fidelit
       count: signals.commentsRevisions,
       status: signals.commentsRevisions === 0 ? 'preserved' : 'unsupported',
       statusLabel: signals.commentsRevisions === 0 ? '完整保留' : '不支持导入',
-      detail: signals.commentsRevisions === 0 ? '未检测到批注或修订标记。' : '本次 tracer 不导入批注或修订标记。',
+      detail: signals.commentsRevisions === 0 ? '未检测到批注或修订标记。' : '本次受限导入不导入批注或修订标记。',
     },
     {
       key: 'notes',
@@ -393,7 +393,7 @@ function fidelityReport(signals: DocumentSignals, entryNames: string[]): Fidelit
       count: signals.notes,
       status: signals.notes === 0 ? 'preserved' : 'unsupported',
       statusLabel: signals.notes === 0 ? '完整保留' : '不支持导入',
-      detail: signals.notes === 0 ? '未检测到脚注或尾注。' : '本次 tracer 不导入脚注或尾注。',
+      detail: signals.notes === 0 ? '未检测到脚注或尾注。' : '本次受限导入不导入脚注或尾注。',
     },
     {
       key: 'tables',
@@ -401,7 +401,7 @@ function fidelityReport(signals: DocumentSignals, entryNames: string[]): Fidelit
       count: signals.tables,
       status: signals.tables === 0 ? 'preserved' : 'degraded',
       statusLabel: signals.tables === 0 ? '完整保留' : '降级导入',
-      detail: signals.tables === 0 ? '未检测到表格。' : '表格会退化为连续文本；本次 clean tracer 不提交该分支。',
+      detail: signals.tables === 0 ? '未检测到表格。' : '表格会退化为连续文本；本次受限导入不提交该分支。',
     },
     {
       key: 'images-captions',
@@ -409,7 +409,7 @@ function fidelityReport(signals: DocumentSignals, entryNames: string[]): Fidelit
       count: signals.imagesCaptions,
       status: signals.imagesCaptions === 0 ? 'preserved' : 'degraded',
       statusLabel: signals.imagesCaptions === 0 ? '完整保留' : '降级导入',
-      detail: signals.imagesCaptions === 0 ? '未检测到图片或图注。' : '图片不会进入可编辑稿件；本次 clean tracer 不提交该分支。',
+      detail: signals.imagesCaptions === 0 ? '未检测到图片或图注。' : '图片不会进入可编辑稿件；本次受限导入不提交该分支。',
     },
     {
       key: 'sections',
@@ -420,7 +420,7 @@ function fidelityReport(signals: DocumentSignals, entryNames: string[]): Fidelit
       detail:
         signals.sections === 0
           ? '未检测到额外分节；单节正文顺序完整保留，且不据此建立版式往返保证。'
-          : '额外分节语义不进入纯文本内容块；本次 clean tracer 不提交该分支。',
+          : '额外分节语义不进入纯文本内容块；本次受限导入不提交该分支。',
     },
     {
       key: 'headers-footers',
@@ -428,7 +428,7 @@ function fidelityReport(signals: DocumentSignals, entryNames: string[]): Fidelit
       count: headersFooters,
       status: headersFooters === 0 ? 'preserved' : 'degraded',
       statusLabel: headersFooters === 0 ? '完整保留' : '降级导入',
-      detail: headersFooters === 0 ? '未检测到页眉或页脚。' : '页眉页脚不进入稿件正文；本次 clean tracer 不提交该分支。',
+      detail: headersFooters === 0 ? '未检测到页眉或页脚。' : '页眉页脚不进入稿件正文；本次受限导入不提交该分支。',
     },
     {
       key: 'round-trip-export',
@@ -436,7 +436,7 @@ function fidelityReport(signals: DocumentSignals, entryNames: string[]): Fidelit
       count: 0,
       status: 'unsupported',
       statusLabel: '不支持导入',
-      detail: '本 tracer 不提供 DOCX 导出，因此无法建立往返行为、版式复原或导出结果保证。',
+      detail: '本导入功能不提供 DOCX 导出，因此无法建立往返行为、版式复原或导出结果保证。',
     },
   ];
   return rows;
@@ -460,16 +460,13 @@ export async function parseDocx(path: string, displayNameInput: string): Promise
   const { blocks, signals } = parseDocument(documentXml);
   const coreTitle = archive.entries.get('docProps/core.xml');
   const metadataTitle = parseCoreTitle(coreTitle ? decodeXml(coreTitle) : undefined);
-  const titleBlock = blocks.find((block) => block.kind === 'title' || block.kind === 'heading');
   const fallbackTitle = displayName.slice(0, -extname(displayName).length).trim();
   const titleSuggestion = metadataTitle
     ? { value: metadataTitle, sourceLabel: 'DOCX 标题元数据' as const }
-    : titleBlock
-      ? { value: titleBlock.text.slice(0, 180), sourceLabel: '文档首个标题' as const }
-      : { value: fallbackTitle, sourceLabel: '文件名' as const };
+    : { value: fallbackTitle, sourceLabel: '文件名' as const };
   requireDocx(titleSuggestion.value.length > 0, 'no usable title suggestion');
   const fidelity = fidelityReport(signals, archive.entryNames);
-  requireDocx(isCleanTracerFidelity(fidelity), 'document uses a fidelity branch outside the clean J-01 tracer');
+  requireDocx(isCleanTracerFidelity(fidelity), 'document uses a fidelity branch outside the bounded import');
 
   return {
     parserIdentity: PARSER_IDENTITY,

@@ -1,12 +1,14 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { copyFile, mkdir, readFile, readdir, rm } from 'node:fs/promises';
-import { dirname, relative, resolve, sep } from 'node:path';
+import { copyFile, mkdir, readFile, readdir, realpath, rm } from 'node:fs/promises';
+import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { build } from 'esbuild';
+import { inspectDevelopmentInputs } from './doctor.mjs';
+import { electronLicenseCarriers } from './electron-runtime.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const DIST = resolve(ROOT, 'dist');
+let runEsbuild;
 
 function requireBuild(condition, message) {
   if (!condition) throw new Error(message);
@@ -48,10 +50,14 @@ async function ensureClosedOutputs() {
   const expected = new Set([
     'main/index.cjs',
     'main/preload.cjs',
+    'notices/ELECTRON_LICENSE',
+    'notices/ELECTRON_LICENSES.chromium.html',
+    'notices/THIRD_PARTY_NOTICES.md',
     'renderer/index.html',
     'renderer/renderer.js',
     'renderer/styles.css',
     'service/index.mjs',
+    'shared/network-denial.mjs',
   ]);
   const found = [];
   async function visit(directory) {
@@ -86,6 +92,22 @@ async function ensureClosedOutputs() {
     'Built service omitted its exact Electron Node-mode guard.',
   );
   requireBuild(service.includes('@deepseek-ai/dsh-agent-loop'), 'Built service omitted the dormant six-service composition.');
+  requireBuild(main.includes('AI7_READY\\n'), 'Built main omitted its payload-free readiness handshake.');
+  requireBuild(main.includes('requestSingleInstanceLock'), 'Built main omitted its pre-store single-instance lock.');
+  requireBuild(
+    main.includes('ai7:j01:close-risk-changed') &&
+      main.includes('ai7:j01:close-blocked') &&
+      renderer.includes('ai7CloseState') &&
+      renderer.includes('data-ai7-close-state'),
+    'Built subject omitted the unconfirmed-editor close guard.',
+  );
+  const serviceRun = service.indexOf('async function run()');
+  const serviceRunGuard = service.indexOf('installNodeNetworkDenial();', serviceRun);
+  const deferredStore = service.indexOf('init_store(), store_exports', serviceRun);
+  requireBuild(
+    serviceRun >= 0 && serviceRunGuard > serviceRun && deferredStore > serviceRunGuard,
+    'Built service evaluated its store or third-party parser before network denial.',
+  );
   requireBuild(
     !renderer.includes('require("node:') && !renderer.includes('selectedPath'),
     'Renderer bundle gained Node or raw-path authority.',
@@ -93,35 +115,54 @@ async function ensureClosedOutputs() {
 }
 
 async function main() {
-  requireBuild(process.versions.node === '24.18.1', 'Build requires exact Node 24.18.1.');
+  const diagnosis = inspectDevelopmentInputs();
+  ({ build: runEsbuild } = await import('esbuild'));
   requireBuild(dirname(DIST) === ROOT && DIST !== ROOT, 'Unsafe dist target.');
   typecheck();
-  await rm(DIST, { recursive: true, force: true });
+  const checkoutRoot = await realpath(ROOT);
+  requireBuild(checkoutRoot === ROOT, 'Checkout root must not be redirected during build.');
+  if (existsSync(DIST)) {
+    const canonicalDist = await realpath(DIST);
+    const candidate = relative(checkoutRoot, canonicalDist);
+    requireBuild(
+      canonicalDist === DIST && candidate === 'dist' && !isAbsolute(candidate),
+      'Build dist root was redirected outside its exact generated path.',
+    );
+    await rm(DIST, { recursive: true, force: true });
+  }
   await mkdir(outputPath('main'), { recursive: true });
   await mkdir(outputPath('renderer'), { recursive: true });
   await mkdir(outputPath('service'), { recursive: true });
+  await mkdir(outputPath('shared'), { recursive: true });
+  await mkdir(outputPath('notices'), { recursive: true });
 
-  await build({
+  await runEsbuild({
     ...nodeBuild,
     entryPoints: [resolve(ROOT, 'src', 'main', 'index.ts')],
     external: ['electron'],
     format: 'cjs',
     outfile: outputPath('main', 'index.cjs'),
   });
-  await build({
+  await runEsbuild({
     ...nodeBuild,
     entryPoints: [resolve(ROOT, 'src', 'main', 'preload.ts')],
     external: ['electron'],
     format: 'cjs',
     outfile: outputPath('main', 'preload.cjs'),
   });
-  await build({
+  await runEsbuild({
     ...nodeBuild,
     entryPoints: [resolve(ROOT, 'src', 'service', 'index.ts')],
     format: 'esm',
     outfile: outputPath('service', 'index.mjs'),
   });
-  await build({
+  await runEsbuild({
+    ...nodeBuild,
+    entryPoints: [resolve(ROOT, 'src', 'shared', 'network-denial.ts')],
+    format: 'esm',
+    outfile: outputPath('shared', 'network-denial.mjs'),
+  });
+  await runEsbuild({
     absWorkingDir: ROOT,
     bundle: true,
     entryPoints: [resolve(ROOT, 'src', 'renderer', 'index.ts')],
@@ -136,6 +177,13 @@ async function main() {
   });
   await copyFile(resolve(ROOT, 'src', 'renderer', 'index.html'), outputPath('renderer', 'index.html'));
   await copyFile(resolve(ROOT, 'src', 'renderer', 'styles.css'), outputPath('renderer', 'styles.css'));
+  const electronNotices = electronLicenseCarriers(diagnosis.inputs.secondaryArtifact);
+  const electronLicense = electronNotices.find((notice) => notice.id === 'electron-license');
+  const electronChromium = electronNotices.find((notice) => notice.id === 'electron-chromium-notices');
+  requireBuild(electronLicense && electronChromium, 'Electron notice carrier declaration is incomplete.');
+  await copyFile(resolve(ROOT, 'THIRD_PARTY_NOTICES.md'), outputPath('notices', 'THIRD_PARTY_NOTICES.md'));
+  await copyFile(electronLicense.path, outputPath('notices', 'ELECTRON_LICENSE'));
+  await copyFile(electronChromium.path, outputPath('notices', 'ELECTRON_LICENSES.chromium.html'));
   await ensureClosedOutputs();
 }
 

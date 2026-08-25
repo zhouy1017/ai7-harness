@@ -1,7 +1,7 @@
 import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { constants, createReadStream } from 'node:fs';
-import { copyFile, mkdir, open, realpath, rename, rm } from 'node:fs/promises';
-import { basename, dirname, isAbsolute, join, posix, relative, resolve, sep } from 'node:path';
+import { copyFile, open, realpath, rename, rm } from 'node:fs/promises';
+import { basename, isAbsolute, posix, relative, resolve, sep } from 'node:path';
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
 import type {
   FidelityCategoryProjection,
@@ -21,7 +21,11 @@ import {
   MAX_WINDOW_BLOCKS,
 } from '../shared/protocol.js';
 import { isCleanTracerFidelity, parseDocx, type ParsedDocxBlock } from './docx.js';
-import { createCanonicalExternalDataRoot } from '../shared/data-root.js';
+import {
+  createCanonicalExternalDataRoot,
+  ensureCanonicalDataDirectory,
+  inspectCanonicalDataFile,
+} from '../shared/data-root.js';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const TOKEN_PATTERN = UUID_PATTERN;
@@ -67,7 +71,7 @@ const NON_EFFECTS = [
   '不创建公开发布许可或公开发布事实',
   '不导出、不发送、不交付、不发布',
   '不承诺 DOCX 往返或版式复原',
-  'clean 导入不创建导入降级决定',
+  '符合当前范围的导入不创建导入降级决定',
 ] as const;
 
 type SqlRow = Record<string, SQLOutputValue>;
@@ -473,14 +477,16 @@ interface DraftSnapshot {
 }
 
 export class EditorialStore {
+  readonly #dataRoot: string;
   readonly #objectsRoot: string;
   readonly #authority: DatabaseSync;
   readonly #journal: DatabaseSync;
   readonly #cursorSecret = randomBytes(32);
   #poisoned = false;
 
-  private constructor(dataRoot: string, authority: DatabaseSync, journal: DatabaseSync) {
-    this.#objectsRoot = resolve(dataRoot, 'objects');
+  private constructor(dataRoot: string, objectsRoot: string, authority: DatabaseSync, journal: DatabaseSync) {
+    this.#dataRoot = dataRoot;
+    this.#objectsRoot = objectsRoot;
     this.#authority = authority;
     this.#journal = journal;
   }
@@ -488,15 +494,18 @@ export class EditorialStore {
   static async open(dataRootInput: string, codeRoot: string): Promise<EditorialStore> {
     requireStore(isAbsolute(dataRootInput), 'DATA_ROOT_INVALID', 'Agent Data Root 必须是绝对路径。');
     const dataRoot = await createCanonicalExternalDataRoot(dataRootInput, codeRoot);
-    await mkdir(resolve(dataRoot, 'objects'), { recursive: true });
-    await mkdir(resolve(dataRoot, 'store'), { recursive: true });
-    const databasePath = resolve(dataRoot, 'store', 'ai7.sqlite');
+    const objectsRoot = await ensureCanonicalDataDirectory(dataRoot, 'objects');
+    const storeRoot = await ensureCanonicalDataDirectory(dataRoot, 'store');
+    const { path: databasePath } = await inspectCanonicalDataFile(dataRoot, storeRoot, 'ai7.sqlite');
+    for (const sidecar of ['ai7.sqlite-journal', 'ai7.sqlite-shm', 'ai7.sqlite-wal']) {
+      await inspectCanonicalDataFile(dataRoot, storeRoot, sidecar);
+    }
     const authority = new DatabaseSync(databasePath);
     configureDatabase(authority);
     initializeSchema(authority);
     const journal = new DatabaseSync(databasePath);
     configureDatabase(journal);
-    return new EditorialStore(dataRoot, authority, journal);
+    return new EditorialStore(dataRoot, objectsRoot, authority, journal);
   }
 
   close(): void {
@@ -517,18 +526,49 @@ export class EditorialStore {
       const displayName = safeDisplayName(basename(selectedPath));
       const parsed = await parseDocx(selectedPath, displayName);
       const relativeKey = posix.join('sha256', parsed.sourceDigest.slice(0, 2), `${parsed.sourceDigest}.docx`);
-      const objectPath = resolve(this.#objectsRoot, ...relativeKey.split('/'));
+      const objectDirectory = await ensureCanonicalDataDirectory(
+        this.#dataRoot,
+        'objects',
+        'sha256',
+        parsed.sourceDigest.slice(0, 2),
+      );
+      const objectFileName = `${parsed.sourceDigest}.docx`;
+      const inspectedObject = await inspectCanonicalDataFile(this.#dataRoot, objectDirectory, objectFileName);
+      const objectPath = inspectedObject.path;
       requireStore(isInside(this.#objectsRoot, objectPath), 'OBJECT_PATH_INVALID', '对象路径越界。');
-      await mkdir(dirname(objectPath), { recursive: true });
-      if ((await digestFileIfPresent(objectPath)) !== parsed.sourceDigest) {
-        await rm(objectPath, { force: true });
+      if (!inspectedObject.exists || (await digestFile(objectPath)) !== parsed.sourceDigest) {
+        if (inspectedObject.exists) await rm(objectPath, { force: true });
         const temporary = `${objectPath}.${process.pid}.${randomUUID()}.partial`;
-        await copyFile(selectedPath, temporary, constants.COPYFILE_EXCL);
-        const handle = await open(temporary, 'r+');
-        await handle.sync();
-        await handle.close();
-        requireStore((await digestFile(temporary)) === parsed.sourceDigest, 'OBJECT_VERIFY_FAILED', '暂存对象校验失败。');
-        await rename(temporary, objectPath);
+        const temporaryName = basename(temporary);
+        requireStore(
+          !(await inspectCanonicalDataFile(this.#dataRoot, objectDirectory, temporaryName)).exists,
+          'OBJECT_PATH_INVALID',
+          '暂存对象路径已存在。',
+        );
+        try {
+          await copyFile(selectedPath, temporary, constants.COPYFILE_EXCL);
+          const inspectedTemporary = await inspectCanonicalDataFile(this.#dataRoot, objectDirectory, temporaryName);
+          requireStore(inspectedTemporary.exists && inspectedTemporary.path === temporary, 'OBJECT_PATH_INVALID', '暂存对象路径无效。');
+          const handle = await open(temporary, 'r+');
+          try {
+            await handle.sync();
+          } finally {
+            await handle.close();
+          }
+          requireStore((await digestFile(temporary)) === parsed.sourceDigest, 'OBJECT_VERIFY_FAILED', '暂存对象校验失败。');
+          requireStore(
+            !(await inspectCanonicalDataFile(this.#dataRoot, objectDirectory, objectFileName)).exists,
+            'OBJECT_PATH_INVALID',
+            '对象路径在提交前发生变化。',
+          );
+          await rename(temporary, objectPath);
+          const activated = await inspectCanonicalDataFile(this.#dataRoot, objectDirectory, objectFileName);
+          requireStore(activated.exists && activated.path === objectPath, 'OBJECT_PATH_INVALID', '暂存对象激活无效。');
+        } catch (error) {
+          const cleanup = await inspectCanonicalDataFile(this.#dataRoot, objectDirectory, temporaryName);
+          if (cleanup.exists) await rm(cleanup.path, { force: true });
+          throw error;
+        }
       }
 
       const draftId = randomUUID();
@@ -604,7 +644,7 @@ export class EditorialStore {
     } catch (error) {
       if (error instanceof StoreError) throw error;
       if (error instanceof Error && error.message.startsWith('DOCX_REJECTED:')) {
-        throw new StoreError('DOCX_REJECTED', '该 DOCX 不符合当前 clean J-01 导入边界。');
+        throw new StoreError('DOCX_REJECTED', '该 DOCX 不符合当前受限本地导入边界。');
       }
       throw error;
     }
@@ -621,7 +661,7 @@ export class EditorialStore {
     const snapshot = this.#loadDraftSnapshot(draftId);
     requireStore(snapshot.state === 'staged', 'DRAFT_STATE_CHANGED', '导入草稿状态已变化。');
     requireStore(snapshot.version === expectedDraftVersion, 'DRAFT_VERSION_CHANGED', '导入草稿版本已变化。');
-    requireStore(isCleanTracerFidelity(snapshot.fidelity), 'FIDELITY_OUTSIDE_TRACER', '当前 tracer 仅提交 clean 导入，且不建立 DOCX 往返保证。');
+    requireStore(isCleanTracerFidelity(snapshot.fidelity), 'FIDELITY_OUTSIDE_TRACER', '当前导入仅提交符合受限范围的文本内容，且不建立 DOCX 往返保证。');
     const nextVersion = expectedDraftVersion + 1;
     const reviewDigest = sha256(
       canonicalJson({
@@ -688,7 +728,7 @@ export class EditorialStore {
       requireStore(snapshot.version === input.expectedDraftVersion, 'DRAFT_VERSION_CHANGED', '导入草稿版本已变化。');
       requireStore(snapshot.reviewDigest === input.reviewDigest, 'REVIEW_CHANGED', '导入前复核摘要已变化。');
       requireStore(snapshot.reviewedTitle, 'REVIEW_CHANGED', '确认书名缺失。');
-      requireStore(isCleanTracerFidelity(snapshot.fidelity), 'FIDELITY_OUTSIDE_TRACER', '当前 tracer 仅提交 clean 导入，且不建立 DOCX 往返保证。');
+      requireStore(isCleanTracerFidelity(snapshot.fidelity), 'FIDELITY_OUTSIDE_TRACER', '当前导入仅提交符合受限范围的文本内容，且不建立 DOCX 往返保证。');
       const stagedBlocks = this.#loadStagedBlocks(input.draftId);
       requireStore(stagedBlocks.length === snapshot.blockCount, 'SNAPSHOT_INCOMPLETE', '暂存快照不完整。');
 
@@ -1377,14 +1417,5 @@ export class EditorialStore {
       durableAt: asString(row.durable_at),
       completionLabel: '已写入修订日志',
     };
-  }
-}
-
-async function digestFileIfPresent(path: string): Promise<string | undefined> {
-  try {
-    return await digestFile(path);
-  } catch (error) {
-    if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return undefined;
-    throw error;
   }
 }

@@ -1,5 +1,4 @@
 import { randomUUID } from 'node:crypto';
-import { mkdir } from 'node:fs/promises';
 import { release } from 'node:os';
 import { basename, extname, isAbsolute, resolve } from 'node:path';
 import {
@@ -9,22 +8,26 @@ import {
   ipcMain,
   Menu,
   session,
+  type Event as ElectronEvent,
+  type IpcMainEvent,
   type IpcMainInvokeEvent,
   type Session,
 } from 'electron';
 import {
   IPC_CHANNELS,
+  MAIN_EVENTS,
   type CommitNewBookRendererInput,
   type PickerStageResult,
   type RendererCallResult,
   type ServiceOperationMap,
 } from '../shared/protocol.js';
 import { ServiceCallError, ServiceClient } from './service-client.js';
-import { createCanonicalExternalDataRoot } from '../shared/data-root.js';
+import { createCanonicalExternalDataRoot, ensureCanonicalDataDirectory } from '../shared/data-root.js';
 
 interface LaunchArguments {
   dataRoot: string;
   injectedPickerPath: string | undefined;
+  launcherPid: number;
 }
 
 function requireDesktop(condition: unknown, message = 'AI7_DESKTOP_STARTUP_INVALID'): asserts condition {
@@ -40,20 +43,31 @@ function parseArguments(argv: string[]): LaunchArguments {
       key !== undefined &&
         value !== undefined &&
         !values.has(key) &&
-        (key === '--data-root' || key === '--j01-picker-path'),
+        (key === '--data-root' || key === '--j01-picker-path' || key === '--launcher-pid'),
     );
     values.set(key, value);
   }
   const dataRoot = values.get('--data-root');
   requireDesktop(dataRoot !== undefined && isAbsolute(dataRoot));
   const injectedPickerPath = values.get('--j01-picker-path');
+  const launcherPid = Number(values.get('--launcher-pid'));
   requireDesktop(
     injectedPickerPath === undefined ||
       (process.env.AI7_E2E_JOURNEY === 'J-01' &&
         isAbsolute(injectedPickerPath) &&
         extname(injectedPickerPath).toLocaleLowerCase('en-US') === '.docx'),
   );
-  return { dataRoot, injectedPickerPath };
+  requireDesktop(Number.isSafeInteger(launcherPid) && launcherPid > 0 && launcherPid === process.ppid);
+  return { dataRoot, injectedPickerPath, launcherPid };
+}
+
+function processIsAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'EPERM';
+  }
 }
 
 function validateRuntime(): void {
@@ -91,10 +105,18 @@ async function envelope<Result>(operation: () => Promise<Result> | Result): Prom
   }
 }
 
+async function announceProductReadiness(): Promise<void> {
+  await new Promise<void>((resolveReady, reject) => {
+    process.stdout.write('AI7_READY\n', (error) => (error ? reject(error) : resolveReady()));
+  });
+}
+
 function registerRendererHandlers(
   window: BrowserWindow,
   service: ServiceClient,
   injectedPickerPathInput: string | undefined,
+  authorityIsAvailable: () => boolean,
+  onCloseRiskChanged: (risk: boolean) => void,
 ): () => void {
   let injectedPickerPath = injectedPickerPathInput;
   let commitBinding:
@@ -108,10 +130,23 @@ function registerRendererHandlers(
       'AI7_RENDERER_BOUNDARY_INVALID',
     );
   };
+  const requireAuthority = (): void => {
+    if (!authorityIsAvailable()) {
+      throw new ServiceCallError('SERVICE_INTERRUPTED', '本地业务服务已中断；当前业务操作不可继续。');
+    }
+  };
+  const closeRiskListener = (event: IpcMainEvent, input: unknown): void => {
+    requireSender(event);
+    requireDesktop(typeof input === 'boolean', 'AI7_RENDERER_BOUNDARY_INVALID');
+    onCloseRiskChanged(input);
+  };
+
+  ipcMain.on(MAIN_EVENTS.closeRiskChanged, closeRiskListener);
 
   ipcMain.handle(IPC_CHANNELS.selectAndStageDocx, (event) =>
     envelope<PickerStageResult>(async () => {
       requireSender(event);
+      requireAuthority();
       let selectedPath = injectedPickerPath;
       injectedPickerPath = undefined;
       if (!selectedPath) {
@@ -136,12 +171,14 @@ function registerRendererHandlers(
   ipcMain.handle(IPC_CHANNELS.prepareNewBookReview, (event, input: ServiceOperationMap['prepareNewBookReview']['input']) =>
     envelope(async () => {
       requireSender(event);
+      requireAuthority();
       return service.call('prepareNewBookReview', input);
     }),
   );
   ipcMain.handle(IPC_CHANNELS.commitNewBookImport, (event, input: CommitNewBookRendererInput) =>
     envelope(async () => {
       requireSender(event);
+      requireAuthority();
       if (!commitBinding) commitBinding = { ...input, commitId: randomUUID() };
       requireDesktop(
         commitBinding.draftId === input.draftId &&
@@ -154,37 +191,45 @@ function registerRendererHandlers(
   ipcMain.handle(IPC_CHANNELS.getManuscriptWindow, (event, input: ServiceOperationMap['getManuscriptWindow']['input']) =>
     envelope(async () => {
       requireSender(event);
+      requireAuthority();
       return service.call('getManuscriptWindow', input);
     }),
   );
   ipcMain.handle(IPC_CHANNELS.flushJournalEdit, (event, input: ServiceOperationMap['flushJournalEdit']['input']) =>
     envelope(async () => {
       requireSender(event);
+      requireAuthority();
       return service.call('flushJournalEdit', input);
     }),
   );
 
   return () => {
     for (const channel of Object.values(IPC_CHANNELS)) ipcMain.removeHandler(channel);
+    ipcMain.removeListener(MAIN_EVENTS.closeRiskChanged, closeRiskListener);
   };
 }
 
 export async function runApplication(): Promise<void> {
+  let startupLocation = 'runtime';
   let service: ServiceClient | undefined;
+  let serviceInterrupted = false;
+  let productReady = false;
   let quitting = false;
   let quitReady = false;
+  let closeRisk = false;
   let shutdown: Promise<void> | undefined;
   let window: BrowserWindow | undefined;
   let unregisterHandlers: (() => void) | undefined;
-  const stop = (): Promise<void> => {
-    if (!service) return Promise.resolve();
-    return (shutdown ??= (async () => {
+  let launcherLease: NodeJS.Timeout | undefined;
+  const stop = (): Promise<void> =>
+    (shutdown ??= (async () => {
+      if (launcherLease) clearInterval(launcherLease);
+      launcherLease = undefined;
       unregisterHandlers?.();
       unregisterHandlers = undefined;
-      await service.stop();
+      await service?.stop();
       quitReady = true;
     })());
-  };
   const terminate = (): void => {
     if (quitting) return;
     quitting = true;
@@ -194,9 +239,13 @@ export async function runApplication(): Promise<void> {
       () => app.exit(1),
     );
   };
-  const beforeQuit = (event: Electron.Event): void => {
+  const beforeQuit = (event: ElectronEvent): void => {
     if (quitReady) return;
     event.preventDefault();
+    if (!quitting && closeRisk && window && !window.isDestroyed()) {
+      window.webContents.send(MAIN_EVENTS.closeBlocked);
+      return;
+    }
     if (quitting) return;
     quitting = true;
     void stop().then(() => app.quit(), () => app.exit(1));
@@ -205,23 +254,46 @@ export async function runApplication(): Promise<void> {
 
   try {
     validateRuntime();
+    startupLocation = 'arguments';
     const entryIndex = process.argv.findIndex((value) => resolve(value) === resolve(__filename));
     requireDesktop(entryIndex > 0);
     const launch = parseArguments(process.argv.slice(entryIndex + 1));
+    requireDesktop(processIsAlive(launch.launcherPid));
+    launcherLease = setInterval(() => {
+      if (process.ppid !== launch.launcherPid || !processIsAlive(launch.launcherPid)) terminate();
+    }, 1_000);
+    launcherLease.unref();
     app.enableSandbox();
+    startupLocation = 'data-root';
     const codeRoot = resolve(__dirname, '..', '..');
     const dataRoot = await createCanonicalExternalDataRoot(launch.dataRoot, codeRoot);
-    const shellRoot = resolve(dataRoot, 'shell');
-    await mkdir(shellRoot, { recursive: true });
+    startupLocation = 'shell-root';
+    const shellRoot = await ensureCanonicalDataDirectory(dataRoot, 'shell');
     app.setPath('userData', shellRoot);
+    startupLocation = 'single-instance';
+    if (!app.requestSingleInstanceLock()) {
+      await stop();
+      app.exit(0);
+      return;
+    }
+    startupLocation = 'electron-ready';
     await app.whenReady();
     Menu.setApplicationMenu(null);
 
-    const productSession = session.fromPartition('ai7-j01');
+    const productSession = session.defaultSession;
     installChromiumDenial(productSession);
+    startupLocation = 'service-ready';
     const serviceEntry = resolve(__dirname, '..', 'service', 'index.mjs');
     service = await ServiceClient.start(process.execPath, serviceEntry, dataRoot);
-    service.onUnexpectedExit(terminate);
+    service.onUnexpectedExit(() => {
+      serviceInterrupted = true;
+      if (!productReady) {
+        terminate();
+      } else if (window && !window.isDestroyed()) {
+        window.webContents.send(MAIN_EVENTS.serviceInterrupted);
+      }
+    });
+    requireDesktop(!serviceInterrupted);
     app.on('before-quit', beforeQuit);
     app.on('window-all-closed', allWindowsClosed);
 
@@ -246,10 +318,39 @@ export async function runApplication(): Promise<void> {
     window.webContents.on('will-navigate', (event) => event.preventDefault());
     window.webContents.on('will-attach-webview', (event) => event.preventDefault());
     window.webContents.on('render-process-gone', terminate);
-    window.once('ready-to-show', () => window?.show());
-    unregisterHandlers = registerRendererHandlers(window, service, launch.injectedPickerPath);
-    await window.loadFile(resolve(__dirname, '..', 'renderer', 'index.html'));
+    window.on('close', (event: ElectronEvent) => {
+      if (!quitting && closeRisk) {
+        event.preventDefault();
+        window?.webContents.send(MAIN_EVENTS.closeBlocked);
+      }
+    });
+    startupLocation = 'renderer-first-paint';
+    const firstPaint = new Promise<void>((resolvePaint, reject) => {
+      const timeout = setTimeout(() => reject(new Error('AI7_RENDERER_FIRST_PAINT_TIMEOUT')), 30_000);
+      timeout.unref();
+      window!.once('ready-to-show', () => {
+        clearTimeout(timeout);
+        window?.show();
+        resolvePaint();
+      });
+    });
+    unregisterHandlers = registerRendererHandlers(
+      window,
+      service,
+      launch.injectedPickerPath,
+      () => !serviceInterrupted,
+      (risk) => {
+        closeRisk = risk;
+      },
+    );
+    await Promise.all([window.loadFile(resolve(__dirname, '..', 'renderer', 'index.html')), firstPaint]);
+    startupLocation = 'readiness-signal';
+    requireDesktop(!serviceInterrupted);
+    await announceProductReadiness();
+    requireDesktop(!serviceInterrupted);
+    productReady = true;
   } catch {
+    process.stderr.write(`AI7_STARTUP_FAILED/${startupLocation}\n`);
     quitting = true;
     app.removeListener('before-quit', beforeQuit);
     app.removeListener('window-all-closed', allWindowsClosed);

@@ -18,6 +18,8 @@ import {
 
 interface EditorUiState {
   dirty: boolean;
+  interrupted: boolean;
+  retryRequired: boolean;
   saving: boolean;
   journalSequence: number;
 }
@@ -25,6 +27,7 @@ interface EditorUiState {
 export interface BoundedEditor {
   focus(): void;
   flush(): Promise<void>;
+  interrupt(): void;
   destroy(): void;
 }
 
@@ -185,6 +188,7 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
   let retryRequired = false;
   let prepared: { input: JournalEditInput; submittedText: string } | undefined;
   let destroyed = false;
+  let interrupted = false;
 
   const changedBlocks = (document: ProseMirrorNode): string[] => {
     const changed: string[] = [];
@@ -231,7 +235,7 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
         return false;
       }
     }
-    return !saving && !retryRequired;
+    return !saving && !retryRequired && !interrupted;
   };
 
   const transactionFilter = new Plugin({ filterTransaction: candidateIsBounded });
@@ -245,10 +249,16 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
   let view: EditorView;
 
   const announceState = (): void =>
-    options.onStateChange({ dirty: dirtyBlockId !== undefined, saving, journalSequence: windowProjection.journalSequence });
+    options.onStateChange({
+      dirty: dirtyBlockId !== undefined,
+      interrupted,
+      retryRequired,
+      saving,
+      journalSequence: windowProjection.journalSequence,
+    });
 
   const flush = async (): Promise<void> => {
-    if (destroyed || saving || dirtyBlockId === undefined) return;
+    if (destroyed || interrupted || saving || dirtyBlockId === undefined) return;
     const baseline = baselines.get(dirtyBlockId);
     const current = findBlock(view.state.doc, dirtyBlockId);
     requireEditor(baseline && current, '待保存内容块不存在。');
@@ -302,13 +312,20 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
       retryRequired = true;
       view.setProps({ editable: () => false });
       announceState();
-      options.onAnnouncement(error instanceof Error ? error.message : '修订日志写入失败，请重试。', 'error');
+      options.onAnnouncement(
+        interrupted
+          ? '本地业务服务已中断；未保存文字仍保留在编辑区，但尚未获得持久写入确认。'
+          : error instanceof Error
+            ? error.message
+            : '修订日志写入失败，请重试。',
+        'error',
+      );
     }
   };
 
   view = new EditorView(options.host, {
     state: makeState(),
-    editable: () => !saving && !retryRequired,
+    editable: () => !saving && !retryRequired && !interrupted,
     dispatchTransaction(transaction) {
       const nextState = view.state.apply(transaction);
       if (nextState === view.state) return;
@@ -344,6 +361,13 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
   return {
     focus: () => view.focus(),
     flush,
+    interrupt: () => {
+      interrupted = true;
+      saving = false;
+      view.setProps({ editable: () => false });
+      announceState();
+      options.onAnnouncement('本地业务服务已中断；未保存文字仍保留在编辑区，但尚未获得持久写入确认。', 'error');
+    },
     destroy: () => {
       destroyed = true;
       view.destroy();

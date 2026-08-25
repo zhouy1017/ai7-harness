@@ -9,8 +9,8 @@ import {
   type ServiceSuccessResponse,
 } from '../shared/protocol.js';
 import { installNodeNetworkDenial } from '../shared/network-denial.js';
-import { mountDormantHarness, type DormantHarnessRuntime } from './runtime.js';
-import { EditorialStore, StoreError, StoreFatalError } from './store.js';
+import type { DormantHarnessRuntime } from './runtime.js';
+import type { EditorialStore } from './store.js';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const HEX_DIGEST_PATTERN = /^[0-9a-f]{64}$/;
@@ -204,8 +204,12 @@ async function* readFrames(): AsyncGenerator<Uint8Array> {
   if (headerOffset !== 0 || payload !== undefined) throw new ProtocolError();
 }
 
-function failureResponse(requestId: string, error: unknown): ServiceFailureResponse {
-  if (error instanceof StoreError || error instanceof ProtocolError) {
+function failureResponse(
+  requestId: string,
+  error: unknown,
+  StoreErrorClass?: typeof import('./store.js').StoreError,
+): ServiceFailureResponse {
+  if ((StoreErrorClass && error instanceof StoreErrorClass) || error instanceof ProtocolError) {
     return { id: requestId, ok: false, error: { code: error.code, message: error.message } };
   }
   return { id: requestId, ok: false, error: { code: 'SERVICE_REQUEST_FAILED', message: '服务请求失败。' } };
@@ -303,6 +307,10 @@ function parentIsAlive(parentPid: number): boolean {
 async function run(): Promise<void> {
   installNodeNetworkDenial();
   const { dataRoot, parentPid } = parseArguments(process.argv.slice(2));
+  const [{ EditorialStore, StoreError, StoreFatalError }, { mountDormantHarness }] = await Promise.all([
+    import('./store.js'),
+    import('./runtime.js'),
+  ]);
   let stopping = false;
   const stop = (): void => {
     if (stopping) return;
@@ -328,7 +336,7 @@ async function run(): Promise<void> {
         request = decodeRequest(frame);
       } catch (error) {
         const requestId = error instanceof ProtocolError ? error.requestId : 'invalid';
-        await writeResponse(failureResponse(requestId, error));
+        await writeResponse(failureResponse(requestId, error, StoreError));
         continue;
       }
       let response: ServiceResponse;
@@ -339,7 +347,7 @@ async function run(): Promise<void> {
           stop();
           throw error;
         }
-        response = failureResponse(request.id, error);
+        response = failureResponse(request.id, error, StoreError);
       }
       await writeResponse(response);
       if (request.op === 'shutdown') break;

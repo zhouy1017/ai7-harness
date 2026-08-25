@@ -1,12 +1,47 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import {
   IPC_CHANNELS,
+  MAIN_EVENTS,
   type CommitNewBookRendererInput,
   type PickerStageResult,
   type RendererApi,
   type RendererCallResult,
   type ServiceOperationMap,
 } from '../shared/protocol.js';
+
+function markServiceInterrupted(): void {
+  const mark = (): void => {
+    document.documentElement.dataset['ai7ServiceState'] = 'interrupted';
+  };
+  if (document.documentElement) mark();
+  else window.addEventListener('DOMContentLoaded', mark, { once: true });
+}
+
+function markCloseBlocked(): void {
+  const mark = (): void => {
+    document.documentElement.dataset['ai7CloseState'] = 'blocked';
+  };
+  if (document.documentElement) mark();
+  else window.addEventListener('DOMContentLoaded', mark, { once: true });
+}
+
+function reportCloseRisk(): void {
+  ipcRenderer.send(MAIN_EVENTS.closeRiskChanged, document.documentElement.dataset['ai7CloseRisk'] === 'true');
+}
+
+ipcRenderer.on(MAIN_EVENTS.serviceInterrupted, markServiceInterrupted);
+ipcRenderer.on(MAIN_EVENTS.closeBlocked, markCloseBlocked);
+
+const closeRiskObserver = new MutationObserver(reportCloseRisk);
+const observeCloseRisk = (): void => {
+  closeRiskObserver.observe(document.documentElement, {
+    attributes: true,
+    attributeFilter: ['data-ai7-close-risk'],
+  });
+  reportCloseRisk();
+};
+if (document.documentElement) observeCloseRisk();
+else window.addEventListener('DOMContentLoaded', observeCloseRisk, { once: true });
 
 async function invoke<Result>(channel: string, input?: unknown): Promise<Result> {
   const envelope = (await ipcRenderer.invoke(channel, input)) as RendererCallResult<Result>;
