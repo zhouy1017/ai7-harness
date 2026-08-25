@@ -12,7 +12,7 @@ Read this first if you are picking up AI7 without prior context. It is a **route
 
 A 36-question design interview ran to completion and the aggregate now contains 28 root ADRs, three domain contexts, two policy documents, and 36 design notes. The repository contains **documentation only** — no source, no `package.json`, no dependencies, no CI workflows.
 
-The frozen V1 UI/UX reference package and the completed V2 UI/UX candidate package are both present, but neither is canonical `main` authority. GitHub Issue #6 is integrated into `design-doc` as the accepted implementation boundary under ADR 0027. Issue #7 is the current bounded advisory-review repair; it changes no product implementation authority.
+The frozen V1 UI/UX reference package and the completed V2 UI/UX candidate package are both present, but neither is canonical `main` authority. GitHub Issue #6 is integrated into `design-doc` as the accepted implementation boundary under ADR 0027, and Issue #7's bounded advisory-review repairs are integrated as well. Neither integration changes `main` or grants product implementation authority.
 
 Nothing here is a stub waiting to be filled in. If you are looking for code, there is none, and that is the expected state.
 

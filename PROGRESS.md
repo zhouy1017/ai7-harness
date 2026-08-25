@@ -552,7 +552,7 @@ Resume from `design-doc@9b3e949` with Issue #6 already integrated; keep ADR 0027
 
 ### What's done
 
-- Started the bounded owner-requested two-axis review repair from exact base `design-doc@9b3e949ac02ac1bd1b283c1d3c7db958733dda09` on branch `docs/7-design-review-repair`.
+- Completed the bounded owner-requested two-axis review repair from exact base `design-doc@9b3e949ac02ac1bd1b283c1d3c7db958733dda09` on branch `docs/7-design-review-repair`; the Commander integrated candidate `66c556f4ef44ebb1f518e86528a3a2055e76755d` through merge commit `de16a2c3d3ee4a9f417a13c06d70e9f7b94b2bbf`.
 - Reconciled the named current verification wording in `kick-in/{06-risk-register,08-source-document-inheritance,29-editorial-quality-metrics,30-upstream-consumption-and-upgrade-contract}.md` with ADR 0027 while retaining Quality Signals, behavior goals, long-manuscript targets, exact pins, provenance, licensing, and third-party-notice obligations.
 - Reclassified the stale top-level states in the five named `docs/architecture-exploration/A2-*` records as historical completed-or-retired evidence without changing their historical findings or restoring a current proof gate.
 - Corrected `docs/agents/ci-test-boundaries.md` to record that Issue #6 is integrated into `design-doc` as the accepted implementation boundary under ADR 0027, without granting `main` acceptance or implementation authority.
@@ -566,7 +566,7 @@ Resume from `design-doc@9b3e949` with Issue #6 already integrated; keep ADR 0027
 
 ### What's next
 
-- The Commander may inspect this clean Issue #7 candidate head and decide whether to integrate it into `design-doc`. No merge, push, pull request, `main` acceptance, implementation, publication, or branch/worktree deletion is authorized by this Worker checkpoint.
+- Issue #7 is integrated into `design-doc`; no further Issue #7 integration action is pending. The advisory review and repair grant no `main` acceptance, implementation, publication, or release authority.
 
 ### Key decisions made
 
@@ -575,4 +575,30 @@ Resume from `design-doc@9b3e949` with Issue #6 already integrated; keep ADR 0027
 
 ### Resume Prompt
 
-Resume as Commander by inspecting the clean Issue #7 candidate head and its advisory Standards/Spec dispositions; if accepted, integrate it through the Commander-only flow without inferring `main` or implementation authority.
+Resume from `design-doc@de16a2c` with Issues #6 and #7 integrated and the advisory Standards/Spec dispositions recorded; do not infer `main` or implementation authority.
+
+## Design branch purge and Commander consolidation — 2026-08-25
+
+### What's done
+
+- Accepted the branch audit classification: `docs/1-windows-macos-phase0`, `docs/2-ai7-ui-ux`, `docs/3-design-freeze-v2-exploration`, `docs/4-v2-architecture-candidate`, and `docs/5-ui-ux-v2-delta` each had zero commits unique relative to `design-doc`; Issues #6 and #7 were first integrated and then met the same ancestor condition.
+- Deleted local branch refs `docs/1-windows-macos-phase0` through `docs/7-design-review-repair` with ordinary `git branch -d`. Their accepted aggregate histories remain reachable through `design-doc`; the 43 abandoned amend/reset iterations that existed only in branch reflogs were deliberately classified as discarded intermediate work and received no archive refs.
+- Switched the primary repository worktree `C:/Users/Chooo/codebase/ai7-harness` from `docs/1-windows-macos-phase0` back to clean `main@c8cbe26c4cccc4a912b3bbc05bd5b23fbf5468b9`.
+- Removed the completed clean linked worktrees for `docs/2`, the detached architecture Reviewer, Issue #6, and Issue #7. The former `docs/3` worktree was unregistered after its stale `PROGRESS.md` diff was preserved as recoverable stash commit `a1fc8b782b8a2b4fce9043bd9de79693762b7095`; its now-empty directory remains temporarily because another process holds an open handle.
+- Retained only the primary `main` worktree, the target `design-doc` worktree, and this task's detached `25be` worktree. No remote branch was deleted; the remote already contained only `main` and `design-doc`.
+
+### What's next
+
+- Push the consolidated `design-doc` head and close Issues #6 and #7 with explicit notes that `main` and implementation authority remain unchanged.
+- If the empty unregistered `C:/Users/Chooo/.codex/worktrees/6bbc/ai7-harness` directory is still present after its external handle closes, it may be removed; it contains no repository data and is not a registered worktree or branch.
+- Any later `main` integration requires a separately authorized normal pull request. Product implementation, dependency installation, source copying, Plugin discovery, and release work remain unauthorized.
+
+### Key decisions made
+
+- Preserve final candidate histories through the `design-doc` merge graph, not through redundant local branch refs.
+- Preserve the single stale uncommitted checkpoint in a stash for recovery, but do not merge it because Issue #5 and the aggregate already resolved its substance.
+- Do not preserve failed or superseded reflog-only iterations as archive refs; branch purge removes their naming surface without changing the aggregate's reachable commits.
+
+### Resume Prompt
+
+Resume from `origin/design-doc` after the Commander push: read `docs/design-doc/{README,REVIEW}.md`, keep `main` unchanged, and require separate owner authorization before canonical integration or implementation.
