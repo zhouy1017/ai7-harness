@@ -1,6 +1,6 @@
 # AI7 V2 information architecture
 
-Status: **candidate information architecture under Issue #8 missing-design completion**
+Status: **candidate information architecture under Issue #8 missing-design completion and the response-presentation delta**
 
 ## Accepted organizing model
 
@@ -1069,6 +1069,9 @@ right Task surface
    ├─ Measured Run Progress when a real denominator exists
    └─ expand
       ├─ Editorial Milestone Timeline
+      ├─ Response Presentation Mode
+      │  ├─ Waiting Only (default) → exact wait state; completed candidate only after Provider response settles
+      │  └─ Interactive Stream → foreground Interactive Editorial Dialogue only
       ├─ Usable Candidate Stream
       ├─ exact terminal/blocking/continuation state
       │  ├─ 任务运行预算已达上限 → partial Task Outcome + 调整预算并重做
@@ -1077,7 +1080,33 @@ right Task surface
       └─ secondary provider / usage / diagnostic detail
 ```
 
-The activity layer is compact by default and does not replace or narrow the Manuscript beyond the accepted contextual side surface. An editor may explicitly move evidence comparison or candidate review into a Dedicated Work Workspace. Global Attention shows only a projection of phase, last milestone, and wait reason and routes back to this exact Book-owned Run context.
+The activity layer is compact by default and does not replace or narrow the Manuscript beyond the accepted contextual side surface. Ordinary Provider-bound Runs use Waiting Only; they do not expose progressive Provider output. An editor may explicitly move a completed candidate or evidence comparison into a Dedicated Work Workspace. Global Attention shows only a projection of phase, last milestone, and wait reason and routes back to this exact Book-owned Run context.
+
+## Interactive Editorial Dialogue organization
+
+Interactive question answering remains subordinate to the current editorial context:
+
+```text
+Book
+└─ exact Active Work Object
+   └─ Task Context Layer
+      └─ Interactive Editorial Dialogue
+         ├─ Dialogue Answer History
+         │  ├─ question
+         │  ├─ completed answer attempts
+         │  └─ Incomplete Dialogue Answer attempts
+         └─ active turn
+            ├─ foreground
+            │  ├─ optional Live Reasoning Summary (generation-only)
+            │  ├─ Interactive Answer Stream
+            │  └─ 停止回答
+            └─ background
+               └─ 等待回答
+```
+
+There is no instance-wide generic chat root. Opening a dialogue restores the exact Book, work object, Task context, answer attempt, and scroll position through exact Execution Binding and Harness Execution Span joins. Dialogue Answer History survives navigation and restart as a non-authoritative projection over Harness Session Ledger-owned messages and attempt history; it excludes Live Reasoning Summary, copies no transcript into the AI7 Task Ledger, and creates no third ledger. Moving the dialogue between foreground and background changes presentation only and does not change Provider execution, priority, scope, or authority.
+
+Completed and incomplete answers are generated-content projections, not Manuscript, Editorial Artifact, factual-verification, Proposal, Learning Material, or Effect authority. Named actions such as `转为提案` or `用于新任务草稿` begin a separate governed object with provenance; they do not silently promote the answer, widen source/egress scope, or bypass Proposal Decision and Apply. A new Task Intent Draft is not the `Task Input / 任务输入` Manuscript Checkpoint purpose; that checkpoint appears only later if the new task meets D-075's journal-newer manuscript condition.
 
 ## Concurrent Run organization
 
@@ -1384,7 +1413,7 @@ Source discovery and assurance state are separate so candidate material can appe
 
 ## Evidence assurance levels
 
-The same evidence workspace progressively increases assurance instead of duplicating three workflows:
+The same evidence workspace increases assurance through discrete completed check states instead of duplicating three workflows. This progression does not stream Provider-answer content:
 
 ```text
 Evidence Assurance Level
@@ -1393,7 +1422,7 @@ Evidence Assurance Level
 │  ├─ eligible checks lazy/background
 │  └─ pending finding/draft only; no formal supported/contradicted result
 ├─ 标准核查 (default)
-│  ├─ pinned/quoted/high-relevance sources checked progressively
+│  ├─ pinned/quoted/high-relevance source checks appear as each discrete check settles
 │  └─ Minimum Evidence Gate at formal determination
 └─ 严格核查
    └─ full policy-required selected-evidence assurance before determination

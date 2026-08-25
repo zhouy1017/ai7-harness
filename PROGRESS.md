@@ -859,3 +859,90 @@ Resume Issue #8 on `docs/8-complete-missing-design-audit` after accepted Batch 4
 ### Resume Prompt
 
 Resume by integrating the completed Issue #8 branch through its normal `design-doc` pull request; preserve destination-independent Delivery Packages, OS-native collision presentation under exact Effect authority, immutable Maintenance Cases, and the no-external-delivery boundary.
+
+## UI/UX response-presentation delta — 2026-08-25
+
+### What's done
+
+- Read the current `design-doc` UI/UX context and Run presentation contract in `docs/ui-ux-v2/{CONTEXT,GLOSSARY,README,requirements,interaction-spec,information-architecture,journeys}.md` plus the execution context.
+- Confirmed that the current design defines `Usable Candidate Stream` for progressive, visibly provisional content and exact waiting states, but does not yet distinguish ordinary provider-bound background work from a strongly interactive question-answering experience.
+- Started a `grill-with-docs` decision interview without Claude Worker use; the removed `6bbc` path contains no repository, so `design-doc` is the active design-document worktree.
+- Resolved Question 1/6 and added `Interactive Editorial Dialogue / 交互式编辑问答` to `docs/ui-ux-v2/{CONTEXT,GLOSSARY}.md` as a user-facing contextual question-answering sequence, not software QA or a generic chat root.
+- Resolved Question 2/6 and added `Response Presentation Mode / 响应呈现模式` to the same files. It has exactly `Waiting Only` and `Interactive Stream`; ordinary tasks default to waiting-only, and the Commander owns the explicit task-type allocation rather than users or runtime inference.
+- Resolved Question 3/6 and added `Live Reasoning Summary / 实时思路摘要` to `docs/ui-ux-v2/{CONTEXT,GLOSSARY}.md`: Interactive Stream may transiently show user-facing approach, checks, evidence comparison, and explicit uncertainty, then automatically hides it when the formal answer begins. It never claims to expose raw chain-of-thought.
+- Resolved Question 4/7 and added `Interactive Answer Stream / 交互回答流` to the same files: formal answer prose appends by semantic fragment, structured content by complete item/row, and citations only after source binding; unfinished content remains labeled and cannot create a Proposal, factual conclusion, authoritative record, or executable action.
+- Resolved Question 5/7 and added `Background Answer Wait / 等待回答` to the same files: only the foreground dialogue displays the Live Reasoning Summary or Interactive Answer Stream; background projection shows waiting only, execution continues unchanged, and returning restores complete received fragments before live presentation resumes.
+- Resolved Question 6/7 and added `Incomplete Dialogue Answer / 未完成回答` to the same files: stop/interruption preserves only complete semantic fragments as readable/copyable incomplete content, hides the reasoning summary, and offers explicit new `继续回答` or `重新回答` attempts without silent Retry or Provider fallback.
+- Resolved Question 7/7 and added `Dialogue Answer History / 问答记录` to the same files: completed and incomplete answers persist under the exact Book/work-object/Task context across navigation and restart; Live Reasoning Summary is excluded from visible history; generated answers gain no editorial authority and require an explicit named action before entering a governed object.
+- Landed the response-presentation direction and requirements `V2-UX-DIALOG-001`–`016` in `docs/ui-ux-v2/{README,requirements}.md`; reconciled D-022 and `V2-UX-RUN-005`–`006` so ordinary Provider-bound Runs are Waiting Only and the foreground Interactive Editorial Dialogue is the sole progressive-provider-content exception. The original local D-073 allocation was reconciled as D-084 when replayed after Issue #8.
+- Added the full foreground/background, semantic-fragment, citation, stop/interruption, history, and explicit-promotion state contract to `docs/ui-ux-v2/interaction-spec.md`, and added its Book/work-object-bound placement to `docs/ui-ux-v2/information-architecture.md` without creating a generic chat root.
+- Added new feature journey `J-16` and updated the cross-platform J-14 coverage language in `docs/ui-ux-v2/journeys.md`; reconciled `visual-direction.md` and `migration-from-v1.md` so ordinary/background work waits quietly, foreground dialogue streams without typewriter jitter, and contextual dialogue does not revive a generic chat hierarchy.
+- Created candidate `docs/ui-ux-v2/adr/0014-wait-by-default-and-stream-only-interactive-dialogue.md`; closed the seven-question history in `DECISION-QUEUE.md`; and updated `docs/ui-ux-v2/HANDOFF.md` plus `docs/design-doc/README.md` to reflect the response direction, J-16, fourteen UI/UX ADRs, and the candidate authority boundary.
+- Reconciled the pre-existing progressive evidence-assurance language in `docs/ui-ux-v2/{README,CONTEXT,requirements,interaction-spec,information-architecture}.md` and ADR 0014: discrete completed source/check records may appear incrementally, but Provider-generated factual-verification content remains Waiting Only until its response settles.
+- Before cross-branch reconciliation, passed documentation-only checks on the local response delta: `git diff --check`; 315/315 resolving relative Markdown links; 73/73 unique directions on its then-current base; 754 unique requirement IDs; journey rows J-01 through J-16; fourteen UI/UX ADR files; and the exact one-line `CLAUDE.md` wrapper. Final aggregate checks follow after the Issue #8 replay.
+
+### What's next
+
+- No response-presentation design question remains open. Under the owner's Commander integration instruction, complete its normal Issue #12 branch/PR path into `design-doc`; `main` integration and product implementation remain separate later decisions.
+
+### Key decisions made
+
+- `QA` in this design means user-facing contextual question answering. Its canonical term is `Interactive Editorial Dialogue / 交互式编辑问答`, and it remains attached to an exact Book/work object rather than becoming a standalone conversation product root.
+- Every task type defaults to `Waiting Only`. `Interactive Stream` is an explicit allowlist classification limited to `Interactive Editorial Dialogue`; writing, rewriting, factual verification, research, Proposal generation, automation, export, and other ordinary/background Runs remain waiting-only.
+- `Response Presentation Mode` is presentation metadata, not an authority-bearing Policy Document, provider setting, runtime output guess, or per-Run user preference.
+- `Live Reasoning Summary` supplies common-tool-like process visibility without exposing or claiming raw chain-of-thought; it is transient presentation rather than factual evidence, a durable milestone, or execution authority.
+- `Interactive Answer Stream` permits semantic-fragment answer text and atomic structured/citation additions only. Any Proposal, verification conclusion, authoritative record, or executable action waits for a complete validated object.
+- Leaving the active dialogue changes presentation only: background rows show `等待回答`, never stream content or notify per fragment, and do not pause, cancel, or reprioritize provider execution.
+- Stopped or interrupted streams retain only complete semantic fragments as an `Incomplete Dialogue Answer`; it is readable/copyable but not a final answer, factual conclusion, Proposal, Learning Material, or executable action. Continuation and regeneration are explicit new attempts.
+- Completed and incomplete dialogue answers persist as `Dialogue Answer History` within the exact context and may inform later turns without broadening source or provider-egress scope. Live Reasoning Summary is generation-only and absent from visible history; any conversion of answer content to a Proposal, Task input, or other governed object is explicit and preserves the normal authority path.
+- Existing bans on raw chain-of-thought, raw provider-token diagnostics, technical transcripts, and silent authority promotion remain constraints for every option.
+
+### Resume Prompt
+
+Resume from `docs/12-response-presentation`: finish the conflict-safe replay on `origin/design-doc`, keep Issue #8 D-073–D-083 intact, use D-084 for response presentation, validate the combined package, and integrate it through the Commander-owned pull request while leaving `main` and implementation unchanged.
+
+## Commander response-presentation reconciliation — 2026-08-25
+
+### What's done
+
+- Captured the previously uncommitted response-presentation work as recovery commit `43398d769bbc55d7e78e8a4f1892ee8d4e61cb5c` on `docs/12-response-presentation` under Issue #12.
+- Rebased that candidate onto `origin/design-doc@226ccfd1e34665c42af178e54d47f6d0c918138c`, preserving the Source Checkout Buildability contract and all five Issue #8 batches rather than choosing either side wholesale.
+- Resolved the independent D-073 allocation collision by retaining Issue #8 directions D-073–D-083 and assigning response presentation to D-084; combined J-13/J-14 semantics and retained J-15/J-16.
+- Reconciled the combined package across `PROGRESS.md`, `docs/design-doc/README.md`, and fourteen paths under `docs/ui-ux-v2/`, including candidate UI ADR 0014.
+
+### What's next
+
+- Run the whole-aggregate documentation checks, obtain a bounded advisory review, then push `docs/12-response-presentation`, open and merge its Commander-owned pull request into `design-doc`, and close Issue #12 with the no-`main`/no-implementation boundary.
+- Continue with the separately recovered repository-governance documentation candidate before creating the final freeze marker.
+
+### Key decisions made
+
+- Direction numbers are aggregate identities, so a recovered candidate must be renumbered when its old base independently allocated the same number; source history stays reachable through the recovery commit.
+- Response presentation remains D-084/J-16 and UI ADR 0014. It does not weaken Issue #8 Book/import, Task Input, budget/Resume, Source/Series, Delivery Package/export, or maintenance contracts.
+- Aggregate integration preserves both candidate lines and their authority limits; it does not imply canonical `main` acceptance or implementation authorization.
+
+### Resume Prompt
+
+Resume on `docs/12-response-presentation`: validate D-001–D-084, 851 requirements, J-01–J-16, 40 root ADRs and 14 UI ADRs, then complete the normal PR integration into `design-doc` before reconciling governance snapshot `93c9e406c33cc44019555b92e51e6d10094c938e`.
+
+## Response-presentation advisory-review correction — 2026-08-25
+
+### What's done
+
+- Ran a bounded same-provider Standards/Spec review of `docs/12-response-presentation`; independence is reduced and the review is advisory rather than a gate.
+- Corrected the P1 terminology collision by naming the answer-conversion target `Task Intent Draft / 任务意图草稿` and reserving `Task Input / 任务输入` solely for the D-075 Manuscript Checkpoint purpose.
+- Corrected the P1 two-ledger ambiguity by defining Dialogue Answer History as a recoverable, non-authoritative joined projection through exact Execution Bindings/Harness Execution Spans to messages and attempt history owned only by the Harness Session Ledger. It creates no third ledger and copies no transcript into the AI7 Task Ledger.
+- Corrected five stale UI/UX status lines so Issue #8 and the response-presentation delta are both visible at document entry points.
+
+### What's next
+
+- Re-run the complete lightweight documentation checks, update remote PR #13, verify its exact head/base and mergeability, then merge it into `design-doc` and close Issue #12.
+
+### Key decisions made
+
+- User-facing recovery can join the two authoritative ledgers without inventing a third persistence authority or duplicating model transcripts.
+- Explicit promotion copies only selected answer content into a newly governed object with provenance; it does not change the ledger ownership of the originating dialogue or silently create a manuscript checkpoint.
+
+### Resume Prompt
+
+Resume by validating and merging PR #13 into `design-doc`; preserve D-084/J-16/UI ADR 0014, the Task Intent versus Task Input distinction, and the two-ledger Dialogue Answer History projection, then continue Issue #14 governance reconciliation.

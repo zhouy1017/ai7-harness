@@ -1,6 +1,6 @@
 # AI7 V2 UI/UX decision queue
 
-Status: **Issue #5 feature-delta complete; Issue #8 Batches 1–5 resolved, all 18 decisions complete**
+Status: **61-question base, Issue #5 9-question feature delta, Issue #8 Batches 1–5 with all 18 decisions resolved, and response-presentation 7-question delta complete**
 
 Question 16 originally expanded the interview to 59 questions and resolved the Default Execution Rule envelope. Question 35 expanded it to 60, and Question 54 exposed a new Detached Manuscript Reader authority branch, producing the current 61-question tree. Choices enter this file only when an answer exposes a material unresolved branch or a recorded decision needs a durable pointer.
 
@@ -135,3 +135,21 @@ Decision 5.2 accepted the current platform's native save/copy conflict workflow 
 Decision 5.3 accepted stable Maintenance Cases with immutable revisions for Correction, Errata, Supersession, Withdrawal, Reissue and Archive bound to exact Publication Version/Deliverable revision. Correction uses Proposal/Apply and a new revision, Errata stays an Editorial Artifact, Supersession/Reissue needs a separately designated newer Publication Version, and Withdrawal/Archive remains internal AI7 status without external recall/takedown proof. Prior versions, permissions, packages, exports and receipts remain immutable. See root [ADR 0040](../adr/0040-preserve-post-designation-maintenance-as-versioned-cases.md).
 
 Batch 5 closes the 18-decision five-batch omission audit. V1 remains local-export-only with independent manual exact `发稿版本`; no accepted answer adds external sending, publisher/platform integration, delivery proof, recall, takedown, or automatic publication.
+
+## Response-presentation feature delta
+
+Response Question 1/7 defined `QA` as user-facing Interactive Editorial Dialogue: contextual question answering bound to one exact Book and active manuscript, deliverable, source, or other work object. It is not software QA, a generic chat root, or a Harness Session transcript.
+
+Response Question 2/7 assigned every task type one explicit Response Presentation Mode with exactly `Waiting Only` and `Interactive Stream`. Waiting Only is the default. Writing, rewriting, factual verification, research, Proposal generation, automation, export, and all ordinary/background Runs retain it; only Interactive Editorial Dialogue is allowlisted for Interactive Stream. Users and runtime heuristics do not reclassify individual Runs.
+
+Response Question 3/7 resolved the request for visible chain-of-thought-like progress through `Live Reasoning Summary`: a transient user-facing account of approach, checks, evidence comparison, and uncertainty that never claims raw chain of thought, system prompts, Provider reasoning tokens, or tool parameters and automatically hides before formal answer text begins.
+
+Response Question 4/7 defined `Interactive Answer Stream`: prose arrives as complete semantic fragments, lists/tables as complete items/rows, and citations only after exact source binding. Proposal content, factual conclusions, structured authoritative records, and executable actions wait for complete valid objects; unfinished answers remain explicitly labeled.
+
+Response Question 5/7 made streaming foreground-only. Leaving the dialogue hides summary and answer content behind `等待回答`, produces no fragment notification or focus theft, and changes no Provider execution, pause, cancellation, or priority. Returning restores complete received fragments and resumes live presentation or shows the settled answer.
+
+Response Question 6/7 defined stop/interruption behavior. AI7 preserves only complete semantic fragments as an Incomplete Dialogue Answer, discards malformed tails, hides the reasoning summary, and provides explicit `继续回答`/`重新回答` new attempts. It never silently retries, continues, changes Provider, or falls back, and incomplete content gains no final, factual, Proposal, learning, or executable authority.
+
+Response Question 7/7 placed completed and incomplete answers in recoverable Dialogue Answer History under the exact Book/work-object/Task context across navigation and restart. It is a non-authoritative join through exact Execution Bindings/Spans to messages and attempt history owned only by the Harness Session Ledger, not a third ledger or Task Ledger transcript copy. Live Reasoning Summary is excluded from visible history. Later dialogue turns may use prior answers without widening source or Provider-egress scope, and an explicit named action is required to create a governed Proposal, Task Intent Draft, or other object from selected answer content; the draft does not itself create the `Task Input / 任务输入` Manuscript Checkpoint purpose.
+
+The response-presentation decision tree is closed. The hard-to-reverse default/exception, foreground/background, persistence, attempt, and authority tradeoff is recorded in [ADR 0014](./adr/0014-wait-by-default-and-stream-only-interactive-dialogue.md). The delta is mapped into D-084, requirements, information architecture, interaction behavior, visual direction, migration semantics, J-16, bilingual terms, and this queue. It remains candidate design and grants no implementation authority.

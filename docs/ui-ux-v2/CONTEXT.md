@@ -1,6 +1,6 @@
 # AI7 V2 UI/UX
 
-Status: **candidate context under Issue #8 missing-design completion; presentation authority only**
+Status: **candidate context under Issue #8 missing-design completion and the response-presentation delta; presentation authority only**
 
 The candidate language for how professional editors perceive and operate AI7. It owns presentation concepts only and does not redefine editorial or execution authority.
 
@@ -29,6 +29,10 @@ _Avoid_: current chat, renderer authority, whole Book
 **Task Context Layer** (`任务上下文层`):
 The presentation of Task Intent, Plan, Run activity, clarification, and outcome in relation to an exact Book and work object without allowing the Task or Harness Session to replace that object's authority.
 _Avoid_: chat workspace, task ledger UI, Harness Session view
+
+**Interactive Editorial Dialogue** (`交互式编辑问答`):
+A user-facing sequence of contextual questions and streamed answers bound to one exact Book and active manuscript, deliverable, source, or other work object, without becoming a generic chat product root or a software-quality-assurance workflow.
+_Avoid_: QA test, generic chatbot, Harness Session transcript, unowned conversation
 
 **Global Attention View** (`全局待处理视图`):
 A cross-Book projection of work requiring awareness or action, whose items navigate back to their authoritative Book, Task, decision, Effect, or workflow record.
@@ -402,6 +406,10 @@ _Avoid_: AI7 Capability, Capability Grant, model truth level
 The compact always-reachable readiness summary for resolved provider/model, connection, outbound category, fallback presence, reliable estimate, and exact Run Budget Ceiling state. The default value is displayed as `未设置任务预算上限`, while a Provider Account Limit is separately named and may remain `未知 / 提供方未返回`; full details stay in secondary Task detail and Settings/Usage surfaces.
 _Avoid_: primary model picker, billing settings, hidden provider state, `免费`, provider-unlimited claim
 
+**Response Presentation Mode** (`响应呈现模式`):
+The explicit per-task-type presentation contract selecting `Waiting Only` or `Interactive Stream`; every task defaults to waiting-only, and only an expressly classified Interactive Editorial Dialogue may stream its current user-facing answer.
+_Avoid_: Policy Document, provider-token mode, output-length inference, per-Run user preference
+
 **Run Activity Header** (`任务运行状态栏`):
 The compact current-Run projection showing the editorial business phase, current work object, last meaningful update, and exact wait reason when present, with immediate access to currently valid Run controls.
 _Avoid_: technical status console, Harness Session header, generic spinner
@@ -410,9 +418,25 @@ _Avoid_: technical status console, Harness Session header, generic spinner
 The expandable chronological projection of durable or meaningful business events such as source review, evidence comparison, candidate creation, clarification, interruption, continuation, and outcome, without exposing raw model reasoning or technical execution traces.
 _Avoid_: chain of thought, tool log, Harness event stream
 
+**Live Reasoning Summary** (`实时思路摘要`):
+A transient user-facing summary of the approach, checks, evidence comparison, and explicit uncertainty currently shaping one Interactive Editorial Dialogue answer; it is automatically hidden when the formal answer begins and never claims to expose raw internal reasoning.
+_Avoid_: chain of thought, system prompt, provider reasoning tokens, tool parameters, factual evidence
+
+**Interactive Answer Stream** (`交互回答流`):
+The progressive formal answer of an Interactive Editorial Dialogue, rendered in complete semantic text fragments and atomic structured items while source-bound citations appear only after binding; the unfinished stream creates no Proposal, factual conclusion, authoritative record, or executable action.
+_Avoid_: raw token stream, partial structured record, unbound citation, completed authoritative result
+
+**Incomplete Dialogue Answer** (`未完成回答`):
+The readable and copyable complete semantic fragments preserved after an Interactive Answer Stream is stopped or interrupted, visibly carrying its exact incomplete reason and never qualifying as a formal answer, factual conclusion, Proposal, Learning Material, or executable action.
+_Avoid_: completed answer, failed empty turn, authoritative result, silently resumed stream
+
+**Dialogue Answer History** (`问答记录`):
+The recoverable, non-authoritative joined presentation of questions, completed formal answers, and Incomplete Dialogue Answers under one exact Book, work object, and Task context. Exact Execution Bindings and Harness Execution Spans resolve the presentation to model messages and attempt history owned only by the Harness Session Ledger; it copies no transcript into the AI7 Task Ledger and creates no third ledger. It excludes Live Reasoning Summary and grants no factual, manuscript, Proposal, learning, or execution authority.
+_Avoid_: raw transcript, hidden reasoning archive, generic chat history, authoritative editorial record, third ledger, copied transcript
+
 **Usable Candidate Stream** (`可用候选结果流`):
-A progressive presentation of content or structured intermediate results that an editor can inspect or reuse, visibly marked as candidate or draft and never promoted to an authoritative artifact, Proposal Decision, or committed Effect merely because it appeared during execution.
-_Avoid_: model thoughts, authoritative result, auto-applied proposal
+The umbrella presentation of provisional content or structured intermediate results that an editor can inspect only when the explicit Response Presentation Mode permits progressive display. Under the current allocation, provider-generated answer content enters it only as an Interactive Answer Stream; ordinary Runs remain Waiting Only, and appearance never promotes content to an authoritative artifact, Proposal Decision, factual conclusion, or committed Effect.
+_Avoid_: default provider stream, model thoughts, authoritative result, auto-applied proposal
 
 **Measured Run Progress** (`可测任务进度`):
 Exact completed-versus-total progress shown only when the work units are semantically comparable and the denominator is real and stable enough to remain meaningful; otherwise AI7 reports stage and milestones without a percentage.
@@ -429,6 +453,10 @@ _Avoid_: conversation tabs, scheduler control, Task history
 **Foreground Run Projection** (`前台任务投影`):
 The one Run activity surface currently expanded for inspection in the active Book, distinct from execution priority and from whether other Runs continue in the background.
 _Avoid_: foreground process, highest-priority Run, exclusive execution
+
+**Background Answer Wait** (`等待回答`):
+The compact background projection of an active Interactive Editorial Dialogue turn, hiding its Live Reasoning Summary and Interactive Answer Stream while provider work may continue unchanged and restoring received complete fragments when the user returns.
+_Avoid_: Connectivity Wait State, Run Capacity Wait, pause, cancellation, provider inactivity
 
 **Run Capacity Wait** (`等待运行名额`):
 The explicit queued condition in which an authorized Run is waiting for instance concurrency capacity, shown without a position or duration unless that value is stable and authoritative.
@@ -811,7 +839,7 @@ The Dedicated Work Workspace for one exact Manuscript Assertion, presenting its 
 _Avoid_: global research dashboard, truth oracle, Correction Proposal itself
 
 **Evidence Source Card** (`证据来源卡`):
-The progressive source/version presentation showing identity, provenance, freshness, integrity, exact-excerpt availability, and relation to the assertion, with incomplete assurance explicitly visible rather than blocking all discovery.
+The source/version presentation that adds discrete completed identity, provenance, freshness, integrity, exact-excerpt, and assertion-relation fields as checks settle, with incomplete assurance explicitly visible rather than blocking all discovery; it is not progressive Provider-answer content.
 _Avoid_: source equals evidence, model summary, citation badge alone
 
 **Evidence Comparison Matrix** (`证据比较矩阵`):
@@ -839,7 +867,7 @@ The discovery-first level that returns labeled candidate sources and comparison 
 _Avoid_: weak verification, checked evidence, fast factual verdict
 
 **Standard Evidence Assurance** (`标准核查`):
-The default level that progressively and in background checks pinned/high-relevance evidence, blocking only on the active policy's Minimum Evidence Gate before a formal determination.
+The default level that checks pinned/high-relevance evidence in background and exposes each completed discrete check state, blocking only on the active policy's Minimum Evidence Gate before a formal determination; Provider-bound content remains Waiting Only.
 _Avoid_: every-source exhaustive check, quick triage, policy bypass
 
 **Strict Evidence Assurance** (`严格核查`):
