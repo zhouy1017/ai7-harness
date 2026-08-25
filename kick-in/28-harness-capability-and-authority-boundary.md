@@ -24,6 +24,7 @@ This is not "no filesystem and no network":
 
 - Editors import DOCX and export deliverables, so file access exists as a **bounded import/export capability** over a user-chosen file or destination.
 - Factual Verification accepts authorized external research with immutable source snapshots, so network access exists as a **research capability with recorded provenance**, never raw fetch.
+- A research result or snapshot does not become a Book-owned Source Version merely because a Task retrieved or used it; `保存为来源材料` is a separate explicit Book-targeted acquisition.
 
 Enforcement follows the existing ADR 0010 rule: the same activation is enforced at both the Harness tool guard and the AI7 capability/service facade.
 
@@ -32,20 +33,20 @@ Enforcement follows the existing ADR 0010 rule: the same activation is enforced 
 Users have complete access to their own material without the agent gaining roam rights.
 
 - **AI7 owns storage location; the user owns content.** Editors work with Books, sources, and deliverables, never paths. Import is a file picker; export is a destination choice. No directory literacy is required at any point.
-- **Retrievability is a guarantee, not a feature.** Every imported source and every generated deliverable stays reachable and exportable. "You do not need to understand the filesystem" must never degrade into "your work is trapped in an opaque store." Revealing a file's location is a user action, not an agent capability.
+- **Retrievability is a guarantee, not a feature.** Every retained Source Version and every generated deliverable stays reachable and exportable. "You do not need to understand the filesystem" must never degrade into "your work is trapped in an opaque store." Revealing a file's location is a user action, not an agent capability.
 
 ### Agent Data Root
 
-AI7 owns a data root, and the agent holds genuine filesystem permission inside it: read, write, create, organize. Outside it there is nothing — no user Documents, no Desktop, no system paths, no other applications' data.
+AI7 owns a data root as the intended platform filesystem boundary. Editorial Runs use domain-shaped AI7 Capabilities and the AI7 service facade for file access; neither Windows nor macOS is assumed to provide whole-process confinement until a concrete native mechanism supports that claim.
 
 Two **nested** boundaries are required, because one is not sufficient:
 
 | Boundary | Enforced by | Catches |
 | --- | --- | --- |
-| **Agent Data Root** | OS sandbox and tool guard | Escape from AI7 entirely; the backstop for implementation bugs |
+| **Agent Data Root** | AI7 capability/service facade, optionally supplemented by native OS controls | Escape from AI7-managed storage; do not claim whole-process OS confinement from the current design alone |
 | **Run Source Scope** | AI7 capability and service facade | Reading Book B during a Book A task; the semantic guarantee |
 
-A data root holds every Book. Raw filesystem access across it would let a Run scoped to one Book read another's manuscript directly, silently regressing ADR 0002's rule that no task searches or mutates every available Book. The OS sandbox alone would satisfy the letter of the data-root decision while breaking the scope model.
+A data root holds every Book. Raw filesystem access across it would let a Run scoped to one Book read another's manuscript directly, silently regressing ADR 0002's rule that no task searches or mutates every available Book. Native OS controls cannot replace the Run Source Scope check, and the product does not rely on them as the sole boundary.
 
 Inside the root, a **per-Run scratch area** is unscoped: the agent writes temporary and intermediate files there freely, without touching governed Book material.
 
@@ -93,11 +94,11 @@ Editorial users never need to see prompt diffs, and these assets are hidden from
 
 "Silent" in the charter's prohibition means unrecorded and ungoverned, not invisible to editors.
 
-### Improvement requires a measure
+### Improvement requires observable quality evidence
 
-The pinned Harness audit found no general quality evaluator, so AI7 owns that layer. Without an evaluation gate, a behavior revision claiming improvement is unfalsifiable and indistinguishable from drift.
+The pinned Harness audit found no general quality evaluator, so AI7 owns Quality Signals and Delivery Quality Metrics. A behavior revision claiming improvement must identify the observed signal, governed activation boundary, and rollback path rather than relying on Harness technical success.
 
-The gate is two-sided: deterministic **replay** against the fixed scenario corpus proves no regression on known cases, and **production metrics** show real-world improvement. Neither is sufficient alone — replay cannot see taste, and production evidence cannot isolate cause. The metric system itself is Question 36.
+Question 36 originally proposed a mandatory two-sided replay-and-production gate. ADR 0027 supersedes that separate proof programme. Current standing automation is only the applicable complete provider-free E2E journey and observed-bug regressions; production Quality Signals inform calibration and governed activation without becoming an independent CI or promotion gate.
 
 ## Question 29 decision
 
@@ -106,8 +107,8 @@ Accepted with owner revisions:
 - full Harness engine, narrow tool surface: no generic shell, roaming filesystem, or arbitrary network in an editorial Run;
 - domain-shaped capabilities only, with bounded import/export and provenance-bearing research;
 - users reach all their own material without filesystem literacy, and retrievability is guaranteed;
-- an Agent Data Root gives the agent real filesystem permission inside it and nothing outside, with Run Source Scope nested inside as the semantic boundary;
+- the Agent Data Root is the intended platform storage boundary, with enforceable AI7 capability/service facades and Run Source Scope nested inside; whole-process Windows/macOS confinement is not claimed before its mechanism is selected;
 - two capability profiles, Editorial and Developer, with no self-service escalation and a middle profile deferred; and
 - everything is proposable by agents while capability expansion never self-activates, with all revisions recorded and developer-reviewed.
 
-See [ADR 0017](../docs/adr/0017-full-engine-narrow-tool-surface.md) and [ADR 0018](../docs/adr/0018-tiered-activation-for-agent-authored-revisions.md).
+See [ADR 0017](../docs/adr/0017-full-engine-narrow-tool-surface.md), [ADR 0018](../docs/adr/0018-tiered-activation-for-agent-authored-revisions.md), and [ADR 0027](../docs/adr/0027-concentrate-ci-on-e2e-functionality.md).

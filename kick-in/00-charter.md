@@ -12,9 +12,9 @@ The migration must combine them without running two competing agent systems or f
 
 ## Working vision
 
-AI7 is a Chinese-first, Windows-focused desktop editorial workbench for professionals in leading literary publishing houses in mainland China. It supports multi-aspect judgment across a Book and its related editorial deliverables, including manuscript revisions, promotional articles, news reports, and reviews. DeepSeek Harness powers agent execution and behavior composition underneath the product: AI7 learns from the framework's context, planning, tool, policy, workflow, subagent, session, replay, and snapshot patterns to make agents behave better, while AI7 supplies the missing semantic quality evaluator. Harness does not replace AI7's product identity or editorial domain.
+AI7 is one Chinese-first Windows-and-macOS desktop editorial workbench for professionals in leading literary publishing houses in mainland China. It supports multi-aspect judgment across a Book and its related editorial deliverables, including manuscript revisions, promotional articles, news reports, and reviews. DeepSeek Harness powers agent execution and behavior composition underneath the product: AI7 learns from the framework's context, planning, tool, policy, workflow, subagent, session, replay, and snapshot patterns to make agents behave better, while AI7 supplies the missing semantic quality evaluator. Harness does not replace AI7's product identity or editorial domain.
 
-AI7 protects unpublished editorial material from release to public channels without permission. This is a controlled non-publication requirement, not an assumption that every Book needs classified-data or high-secrecy controls. V1 is now Standalone-only; its new professional text-editing experience remains to be designed independently, while Word is a conditional future alternative.
+AI7 protects unpublished editorial material from release to public channels without permission. This is a controlled non-publication requirement, not an assumption that every Book needs classified-data or high-secrecy controls. V1 is Standalone-only; the accepted V2 UI/UX baseline defines its professional text-editing experience, while Word remains a conditional future alternative.
 
 AI7 does not train an LLM. It uses replaceable provided Foundation Models through an AI7-owned Editorial Intelligence Layer built from professionally supervised, produced, approved, and revised knowledge. The product target is Editor-comparable Delivery Quality that materially reduces workload without displacing professional judgment or publication authority.
 
@@ -24,7 +24,7 @@ The product is called **AI7**, displayed exactly that way, with no separate Chin
 
 ## Primary product story
 
-As an editorial professional in a leading literary publishing house in mainland China, I use one Chinese-first Windows desktop workspace to perform multi-aspect work across a Book, its sources, and its Editorial Deliverables; I can inspect evidence, reasoning, plans, and proposed changes, retain publication authority and recovery history, and prevent unpublished material from reaching public channels without permission.
+As an editorial professional in a leading literary publishing house in mainland China, I use one Chinese-first AI7 desktop workspace on Windows or macOS to perform multi-aspect work across a Book, its sources, and its Editorial Deliverables; I can inspect evidence, reasoning, plans, and proposed changes, retain publication authority and recovery history, and prevent unpublished material from reaching public channels without permission.
 
 ## Design principles
 
@@ -43,7 +43,7 @@ As an editorial professional in a leading literary publishing house in mainland 
 13. **A Book produces a family of texts.** Manuscript editing is central but not exclusive; AI7 also supports related promotional, journalistic, critical, and publication texts.
 14. **Editorial judgment is explicit and extensible.** AI7 supplies a professional baseline of Editorial Dimensions while allowing production users to introduce concerns required by their house, Book, or task.
 15. **Book-scoped authority, corpus-wide learning.** Text access and mutation remain explicitly scoped, while derived patterns and feedback from the Working Corpus help future delivery quality approach the user's editorial standard.
-16. **Series is a richer intermediate scope.** Explicitly related Books may share versioned Series Knowledge and a governed read scope, while manuscript mutations remain Book-targeted.
+16. **Series is a richer intermediate scope.** Explicitly related Books may share explicitly promoted, immutable Series Knowledge Revisions and a governed read scope, while manuscript mutations remain Book-targeted and current Series Retrieval Exclusions guard every later Series read.
 17. **Learning is inspectable and self-correcting.** Users can trace every learned item to its materials, decide learning eligibility, and teach a separate policy which kinds of future material should or should not contribute.
 18. **Intelligence lives outside model weights.** Foundation Models are replaceable capabilities; AI7's durable advantage is governed Professional Editorial Knowledge, context, tools, skills, memory, feedback, provenance, and evaluation.
 19. **Harness improves agent behavior.** Agent conduct is assembled through versioned profiles, bundles, presets, plugins, context, tools, policies, workflows, and session hooks, then improved from evaluation evidence. This is distinct from training a Foundation Model and from learning editorial knowledge.
@@ -61,15 +61,15 @@ As an editorial professional in a leading literary publishing house in mainland 
 - Standalone desktop/editor, client/Host, local application-boundary, and document import/export architecture; Word remains contingency evidence only.
 - The accepted protected-credential, mock-provider-evidence, and selected-test-Book transfer allowlist; no general legacy-data importer.
 - Keep/adapt/drop decisions for code, documentation, tests, fixtures, release assets, and the internal orchestration pilot.
-- A tiered, provider-free GitHub Actions verification design with generated mock-LLM-provider cases.
+- One logical provider-free E2E Functional Gate for complete supported journeys on Windows and macOS; the earlier tiered/mock-provider proof programme is superseded history.
 - A development-only local multi-agent dispatch workflow, explicitly separate from product runtime orchestration.
 - A staged delivery and verification workflow.
 
-## Out of scope in this phase
+## Not authorized by this charter alone
 
-- Scaffolding runtime packages or installing dependencies.
-- Copying either source tree into this workspace.
-- Implementing a plugin, importer, UI, IPC server, or Word adapter.
+- Scaffolding runtime packages or installing dependencies without an exact implementation Issue and Change Brief.
+- Copying either source tree without an exact allowlist, provenance ledger, and sanitization review.
+- Implementing a plugin, importer, UI, IPC server, or Word adapter outside a separately authorized vertical outcome; Word remains outside V1.
 - Merging Git histories or publishing a new repository.
 - Reopening superseded AI7 UI issues.
 - Carrying the legacy UI implementation, component hierarchy, or layout forward as the new shell.
@@ -84,6 +84,6 @@ The design phase is complete when:
 - Every important AI7 capability has a keep/adapt/drop disposition and target owner.
 - Harness Session/Turn/Tool/Approval/Skill/Workspace semantics are distinguished from AI7 Task Ledger/Run Record/Execution Binding/Effect/Task Skill/Book semantics.
 - One architecture is selected, with no duplicate agent execution authority.
-- The first vertical tracer slice has measurable acceptance gates.
-- Security, privacy, data migration, Windows Standalone/editor, and upgrade risks have owners or explicit deferrals; Word is explicitly deferred.
-- The future implementation can be split into independently testable vertical issues without rediscovering core product decisions.
+- The first vertical tracer is a named, bounded user-visible outcome mapped to one complete E2E journey, without a separate acceptance/proof programme.
+- Security, privacy, data migration, Windows/macOS Standalone/editor, native-adapter, and upgrade risks have owners or explicit deferrals; Word is explicitly deferred.
+- Authorized implementation can proceed as independently bounded vertical Issues without rediscovering core product decisions.

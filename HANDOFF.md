@@ -1,90 +1,62 @@
-# Handoff for remote agents
+# AI7 development handoff
 
-Read this first if you are picking up AI7 without prior context. It is a **router and a trap list**, not a source of truth — every rule here is enforced somewhere else, and that somewhere else wins.
+Read this first when arriving without prior context. It is a cold-start router and trap list, not an authority owner; the exact target commit and the documents linked below win.
 
----
+## Current state
 
-## Where the project is
+The design interview and V2 normalization are complete for the `dev` development baseline. The exact frozen provenance source is `design-doc@6895f02d2983865516d267809d8cdda77026f62c`, admitted only through the Issue #20 allowlist recorded in [`docs/development/design-baseline-allowlist.md`](docs/development/design-baseline-allowlist.md). It is not a branch to merge or an authority that outranks current `dev`.
 
-**Design is accepted. The Owner has authorized sequential design normalization and initial implementation work.**
+Development work starts from and targets `dev`. `main` remains the protected stable/release-promotion line; advancing it requires another exact Owner authorization. This branch strategy is repository workflow, never AI7 product-domain language. See [development lines](docs/agents/development-lines.md) and [Git conventions](docs/agents/git-conventions.md).
 
-The current authorization covers exact `design-doc` allowlist normalization, policy baselines, implementation planning, and the bounded J-01 new-Book tracer. The next safe action is exact allowlist baseline normalization on `dev`; never target `main` without a separate exact Owner promotion authorization.
+The Owner-authorized sequence is:
 
----
+1. normalize the exact V2 baseline into `dev`;
+2. establish minimum versioned Provider Processing and External Export policy baselines in their own Issue;
+3. create the implementation plan and full Change Brief, including the Supported Development Host matrix, exact Node/Electron compatibility, and one exact package-manager version; and
+4. implement the bounded provider-free J-01 new-Book happy-path tracer.
+
+No design document authorizes an adjacent step by itself. Provider/model calls and export implementation remain blocked until their policy baselines are active. Release, tag, publication, external distribution, and `dev`→`main` promotion are outside the current authorization.
 
 ## Read in this order
 
-| # | File | Why |
-| --- | --- | --- |
-| 1 | `AGENTS.md` | **Canonical standing rules.** Everything binding is here or linked from here |
-| 2 | `handoff20260817/PROJECT-OVERVIEW.md` | The whole design in one pass — vision, domain, architecture, what is excluded, what is open |
-| 2b | `handoff20260817/SESSION-HANDOFF.md` | Recent history: what the last session decided, which recommendations the owner overrode, and which agent errors were corrected |
-| 3 | `PROGRESS.md` | What has been done, what is next, and the Resume Prompt |
-| 4 | `kick-in/05-decision-map.md` | All 36 questions with their accepted answers |
-| 5 | `docs/adr/` | The 26 hard-to-reverse decisions, one per file |
-| 6 | `CONTEXT-MAP.md` → `docs/domain/*/CONTEXT.md` | Canonical term definitions. `GLOSSARY.md` is a bilingual index and collision guide, not a definition owner |
+1. [`AGENTS.md`](AGENTS.md) — canonical standing rules, architecture, safety, and dispatch boundaries.
+2. [`PROGRESS.md`](PROGRESS.md) — exact current checkpoint, next action, decisions, and Resume Prompt.
+3. [`docs/agents/README.md`](docs/agents/README.md) — task-specific governance router.
+4. [`CONTEXT-MAP.md`](CONTEXT-MAP.md) — domain ownership routes; follow the applicable context `CONTEXT.md` and use [`GLOSSARY.md`](GLOSSARY.md) only as the bilingual cross-context index.
+5. [`docs/architecture-v2/README.md`](docs/architecture-v2/README.md) and [`docs/ui-ux-v2/README.md`](docs/ui-ux-v2/README.md) — accepted implementation-facing architecture and interaction baselines.
+6. [`docs/adr/`](docs/adr/) — hard-to-reverse decisions, including root ADR 0041 and 0042 promoted from the frozen architecture package.
+7. The current GitHub Issue and complete Change Brief before any task action.
 
-`kick-in/` numbering does not match question numbers. Use the decision map to find the document for a question.
+Use [`kick-in/05-decision-map.md`](kick-in/05-decision-map.md) only to trace the 36-question decision history. Historical or excluded packages are evidence only when an active owner names an exact question; they are not cold-start routes.
 
----
+## Current implementation tracer
+
+The authorized first tracer is exactly:
+
+> fresh checkout → public-synthetic DOCX → Review Before Import → atomic Book / primary Manuscript / initial Manuscript Revision / import records → bounded manuscript window → user-confirmed durable Edit Journal.
+
+It traverses the production-shaped Electron renderer + thin Electron main + separate Node service + composed Harness/domain boundary through one root bootstrap/build/readiness/launch/E2E command surface. It makes no live model/provider call, uses no credential or private manuscript, and implements no export. It is one clean new-Book happy path, not complete J-01: restart, ambiguity, cancellation, existing-Book, source-only, reimport, retrieval/model, export, and other branches remain outside it unless separately authorized.
 
 ## Traps
 
-These are the mistakes most likely to be made by an agent arriving cold. Each has bitten during design.
+- **Never merge or cherry-pick `design-doc` history wholesale.** Only the exact normalized allowlist is admitted; excluded V1 UI, architecture exploration, freeze/recovery records, archive material, prototypes/Figma artifacts, and unrelated kick-in history remain excluded or fixed-base-owned as the manifest states.
+- **Do not treat the old grounded-Q&A tracer as current.** Its retrieval design remains useful, but the current tracer ends at a bounded manuscript window and confirmed durable Edit Journal.
+- **Do not recreate old proof programmes.** Required verification is one logical provider-free E2E Functional Gate for complete supported journeys on Windows and macOS. Service-only/headless runs, request fingerprints, package probes, performance gates, formal review gates, and separate layer suites are not substitutes or standing gates.
+- **Do not mistake a Harness event for AI7 business proof.** A Harness success, tool result, Session event, or watermark is never an AI7 Effect Receipt or business-completion record.
+- **Do not expose manuscript material.** Private or real manuscripts and their derivatives never enter a repository, hosted CI, fixtures, logs, artifacts, or the shipped product. Public-synthetic DOCX material supplies repository evidence.
+- **Do not grant provider or export authority by implication.** Reading local material, Run Authorization, configured credentials, Provider Processing Policy, External Export Policy, Effect Approval, and Public Release Permission remain separate.
+- **Do not depend on the `@deepseek-ai/dsh` CLI aggregate, version ranges, or mutable dist-tags.** The accepted subset baseline remains exact `0.1.0-rc.6`; implementation planning checks current immutable package metadata, pins every selected version and the lockfile, and maintains provenance, license review, sanitization, and third-party notices. `kick-in/01-source-provenance.md` is a dated fixed-base audit record whose old dist-tag observation is not current registry authority.
+- **Do not fork the topology or Harness loop.** Electron main, isolated renderer with ProseMirror bounded windows, and the separate Node service are accepted. Harness owns the generic agent loop; AI7 owns business scheduling, domain state, capabilities, Effects, and receipts.
+- **Do not use repository roles as product concepts.** Commander, Worker, and optional Reviewer govern repository development only.
 
-**Do not treat "Harness" as a product to clone.** AI7 adopts its *composition machinery* and rejects its coding-agent purpose, default presets, default tool set, and web surface. Adopting a framework is not adopting its defaults.
+## Repository roles
 
-**Do not rename the repository.** The `-harness`, `-reborn`, `-redesign` suffixes are developer-facing track markers with no product meaning. The product is called exactly **AI7**.
+- **Commander:** decides dispatch and is the sole integrator and external-action authority.
+- **Worker:** writes only its assigned branch/worktree and never merges, pushes, publishes, or performs external actions.
+- **Reviewer:** optional, independent, read-only, and advisory; it creates no formal gate.
 
-**Do not put a manuscript anywhere near git.** Manuscripts, and any derivative including retrieval indexes and embeddings, never enter any repository — public or private, history or working tree. `.gitignore` excludes document formats by pattern for this reason. Sending manuscript text to a configured model provider *is* permitted; that is the product's function.
+Every task follows Issue → complete Change Brief → Worker branch/worktree → pull request → Commander integration into `dev`. See [Repository Development Dispatch](kick-in/27-repository-development-dispatch.md).
 
-**Do not depend on `@deepseek-ai/dsh`.** The CLI aggregate transitively installs the generic shell, pwsh, terminal, and web tool packages that the editorial tool surface excludes. Depend only on the subset AI7 needs.
+## Next safe action
 
-**Do not use version ranges for Harness.** `latest` still points at `0.0.1-rc.1` on nearly every package while `next` is `0.1.0-rc.6`. Pin exact versions, commit the lockfile. The consumed baseline is `0.1.0-rc.6`; the audited `0.1.0-rc.5` **was never published to npm** and is a provenance reference only.
-
-**Do not confuse the two ledgers.** The AI7 Task Ledger holds business truth; the Harness Session Ledger alone holds model messages, turns, and tool calls. They join through Execution Bindings, never by copying transcripts.
-
-**Do not read a term across contexts.** Several words mean different things in different places — `Editorial Profile` (dimension defaults) versus `Editorial Capability Profile` (security), `Review Decision` (editorial judgment) versus a Dispatch reviewer report, `Model Role` (product, declares no provider) versus the Dispatch binding table. Check the collision table in `GLOSSARY.md` before using a term.
-
----
-
-## How to work here
-
-Repository development uses three roles, defined in `kick-in/27-repository-development-dispatch.md`:
-
-- **Commander** — decides dispatch, sole integrator, sole external-action authority
-- **Worker** — writes only its own worktree and branch; never merges, pushes, publishes, or takes external actions
-- **Reviewer** — optional and advisory; when used, independent, non-author, and at a task class at least equal to the work
-
-Operating rules are provider-neutral and must never be conditioned on which model is running. A single binding table is the only provider-specific artifact.
-
-Branch naming, commit format, PR requirements, merge strategy, and tag format are binding in **`docs/agents/git-conventions.md`**. The authorized line roles and protection facts are in **`docs/agents/development-lines.md`**: task branches and PRs integrate to `dev`; `main` is a separately authorized promotion line. Nothing is pushed directly to either protected line.
-
-GitHub Issues is the canonical tracker. Five labels, no aliases: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`.
-
----
-
-## Current route
-
-Execute the exact `design-doc` allowlist baseline normalization on `dev`, then proceed through the authorized policy baselines and implementation planning toward the bounded J-01 new-Book tracer. Preserve the sequential order and obtain separate exact Owner authorization for any `dev` to `main` promotion.
-
----
-
-## Environment facts
-
-- Private repository `zhouy1017/ai7-harness`, default development branch `dev`, with protected `main` reserved for stable/release promotion; fresh history unrelated to either predecessor.
-- AI7 is proprietary, all rights reserved to the sole rights-holder. See `LICENSE`.
-- Predecessors may be read and copied from, subject to the provenance ledger: `ai7-reborn-ai` at `dev@3e6e9ac772b7f07832154fa39d7de8a4deca51b1`, and `ai7-redesign` at `fc2f4d8`, which is a strict ancestor and holds nothing unique.
-- Harness upstream is `deepseek-ai/deepseek-harness`, MIT, no git tags and no GitHub releases — track it by commit and npm version.
-
----
-
-## The rule behind most of the rules
-
-When a decision looks arbitrary, it usually traces to one of these:
-
-1. The user is a literature professional, not a computer expert — never ask them to authorize what they cannot assess.
-2. Text is authoritative for what it says, never for whether it is true.
-3. Authority and proof are different records; a decision is never evidence that something happened.
-4. Add machinery when a concrete problem appears, not in advance.
-5. Hidden is permitted; silent is not.
+After Commander integration of Issue #20 into `dev`, execute the separately tracked minimum Provider Processing and External Export policy-baseline Issue. Then plan—and only then implement—the bounded provider-free tracer above. Any product/domain expansion, private material use, core-topology replacement, provider/export work before policy activation, release action, or `main` promotion requires new authority.

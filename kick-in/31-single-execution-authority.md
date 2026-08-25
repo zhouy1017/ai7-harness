@@ -23,7 +23,7 @@ Four accepted decisions would break, which is the whole of the reason:
 | ADR 0011 | Two places emitting what the model saw means the Harness Session Ledger stops being the authoritative execution record |
 | ADR 0007 | Two retry semantics means ambiguous-outcome handling has two answers |
 | ADR 0017 | Two tool-dispatch paths means the capability guard has a hole in one of them |
-| Question 24 | The request-fingerprint guard covers one path, so replay evidence silently becomes partial |
+| ADR 0011 | Two execution paths split the exact Execution Binding and Harness Execution Span, so business attempts no longer have one authoritative execution trace |
 
 ## The division of authority
 
@@ -34,7 +34,7 @@ Four accepted decisions would break, which is the whole of the reason:
 | Which Runs exist and their business state | How one agent conversation proceeds |
 | Workflow Instances, phases, gates, signoff | Turn and step structure |
 | Start, pause, resume, cancel, continuation | Tool dispatch and in-turn transient retry |
-| Concurrency, queuing, and budget across Books | Subagents within a Run |
+| Concurrency, queuing, usage observation, and optional per-Run ceiling enforcement | Subagents within a Run |
 | Background jobs: indexing, analysis, metric computation, learning candidates | Session event emission |
 | Effects, receipts, and Task Ledger records | Context assembly and compaction |
 
@@ -48,7 +48,7 @@ AI7 owns Workflow Instances, Run Continuation Checkpoints, decisions, and Effect
 
 Two consequences follow directly from parallelism:
 
-- **An instance-level concurrency and budget governor is AI7's to own.** Each parallel Run carries its own Plan Envelope budget, and something must arbitrate across them against provider quota.
+- **Instance concurrency, usage observation, and optional explicit Run Budget Ceiling enforcement are AI7's to own.** Each parallel Run carries its own exact ceiling state, which defaults to `unset`; Provider Account Limits are external service blockers rather than a shared AI7 capacity pool.
 - **Parallel Runs on different Books must not share scratch or cache.** Question 29's per-Run scratch area already provides this; concurrency makes it load-bearing rather than theoretical.
 
 ## Learn the framework; do not clone the product
@@ -74,7 +74,7 @@ Accepted with owner revisions:
 
 - Harness owns the generic agent lifecycle and AI7 runs no second implementation of it;
 - parallel Runs across multiple Books, plus background analysis and learning work, are required behavior, and many instances of one loop are not a second loop;
-- AI7 owns business lifecycle, workflow state, continuation, concurrency, budget, and Effects, while Harness owns per-unit agent execution;
+- AI7 owns business lifecycle, workflow state, continuation, concurrency, usage observation, optional explicit Run Budget Ceiling enforcement, and Effects, while Harness owns per-unit agent execution;
 - AI7's business scheduling does not use Harness job, schedule, or workflow machinery; and
 - AI7 learns the Harness framework rather than cloning it, adopting composition machinery while rejecting its coding-agent purpose, defaults, presets, and tool set.
 

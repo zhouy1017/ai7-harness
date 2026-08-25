@@ -8,7 +8,7 @@ See [Development lines](./development-lines.md) for the authorized line roles an
 
 `dev` is the long-lived development integration line. Start every task branch from current `dev` and target its pull request to `dev`. **Nothing is pushed directly to `dev` or `main`**, including by the Commander; both protected lines receive changes through pull requests.
 
-`main` is the protected stable and release-promotion line. No task branch or pull request targets it unless the Owner has separately authorized that exact promotion.
+`main` is the protected stable and release-promotion line. No task branch or pull request targets it unless the Owner has separately authorized that exact promotion. Frozen `design-doc@6895f02d2983865516d267809d8cdda77026f62c` is an allowlist source, not a branch to merge into development.
 
 Branch names are `<type>/<issue>-<slug>`:
 
@@ -23,6 +23,8 @@ docs/17-glossary-collision-guard
 - `<slug>` is two to five lowercase words, hyphen-separated, describing the outcome rather than the method.
 
 One issue, one branch, one pull request. One writable worker per branch, per the Repository Development Dispatch rules.
+
+Before work is labeled `ready-for-agent` or dispatched, the Issue contains the applicable [Change Brief](change-brief.md). Mechanical T1 work may use the short form; every non-mechanical change uses the full authority, reuse, structural-budget, non-goal, consequence, and stop-condition form. A Worker never enlarges that brief itself.
 
 ## Commits
 
@@ -46,18 +48,24 @@ Agent-authored commits carry the co-authorship trailer for the model that wrote 
 ## Pull requests
 
 - Title matches the primary commit subject.
-- Body links the issue and states the user-visible outcome.
-- Documentation-only changes require no automated proof. An implementation change proves its applicable one logical E2E journey gate; a red applicable gate is never merged around.
-- Independent review is optional and advisory, never a formal merge gate. When used, its reviewer must not author the work and must meet or exceed its task class; where cross-provider review was impossible, the report says `same-provider review — independence reduced`.
+- Body links the Issue and states the user-visible outcome or exact non-product outcome.
+- Body records only the Change Brief closure delta: planned versus actual structure, existing implementation reused, any new owner/dependency and why, journey/bug outcome or `N/A` for non-behavior work, migration/cleanup, unresolved matters, and archive-sweep result when a lifecycle node was triggered.
+- For an implementation change affecting a supported journey or observed-bug outcome, the one logical E2E Functional Gate must pass the same applicable journey IDs on Windows and macOS. A failure on either platform is not merged around.
+- Documentation-only and design-only changes do not create automated proof work. Lint, type-check, format, build, package, signing, release, same-SHA, or formal-review checks are not additional required pull-request gates.
+- Independent review is optional and advisory. When the Commander or owner requests it, use a read-only non-author Reviewer at least equal to the work's task class and disclose `same-provider review — independence reduced` when cross-provider review was unavailable.
 - **Only the Commander merges.** Workers and Reviewers never do.
 
+The E2E scenario admission, data, subject, and platform rules live in [`ci-test-boundaries.md`](ci-test-boundaries.md).
+
 **Squash merge.** Each task merge to `dev` is one complete task, so history reads as a sequence of finished outcomes rather than agent scratch work. The pull-request body becomes the squashed commit body. A `dev` to `main` promotion remains subject to its separate Owner authorization.
+
+After merge, closure, or abandonment, run the applicable [documentation archive sweep](document-lifecycle.md). This is lifecycle maintenance, not an additional merge or review gate.
 
 ## Tags and releases
 
 `vX.Y.Z` for releases, `vX.Y.Z-rc.N` for candidates. These match the `v*` trigger on the `release` workflow.
 
-Tags are created only by the Commander, only on `main`, and only on a commit whose `pr` gate is green for that exact SHA.
+Tags are created only by the Commander, only on `main`, and only after the separately authorized promotion path. Tagging or release automation creates no separate release, receipt, packaging, signing, reproducibility, provenance, or same-SHA proof gate.
 
 ## What never enters the repository
 

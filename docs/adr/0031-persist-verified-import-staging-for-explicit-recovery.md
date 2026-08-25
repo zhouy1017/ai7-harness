@@ -1,0 +1,7 @@
+# Persist verified import staging for explicit recovery
+
+After local staging and preflight complete successfully, AI7 persists the exact non-authoritative import draft and Staged Import Snapshot under the Agent Data Root until the editor completes or explicitly abandons the import. Restart never auto-resumes or commits: it offers explicit continuation after revalidating source, target, relationship and consequential review. A complete verified snapshot may continue after the originally selected file becomes unreadable, while incomplete staging or parse failure retains no manuscript payload; completion first persists the authoritative Source Version and records, and cancellation deletes the staged content only when no uncertain commit boundary exists. If restart cannot prove whether the atomic commit crossed its boundary, AI7 preserves the evidence and staged material, blocks retry, cancellation cleanup, and duplicate dispatch, and fails closed until local reconciliation resolves the outcome. This trades bounded local pre-authority retention for interruption continuity without allowing the material into repositories, hosted CI, Provider calls or network transmission.
+
+## Considered options
+
+Discarding all staged content on interruption would minimize retention but force editors to repeat potentially long local parsing and review. Automatically resuming or committing an apparently unchanged draft would reduce friction but could bypass explicit target, relationship, degradation and authority decisions.

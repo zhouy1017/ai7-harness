@@ -1,12 +1,12 @@
 # Standalone-only V1 and Deferred Word Alternative
 
-Status: **accepted in Question 23 with owner revision**
+Status: **accepted product boundary; any separate editing-sufficiency verification gate is superseded by ADR 0027**
 
 ## Decision
 
-The new AI7 V1 is a **Standalone-only Windows desktop product**. Microsoft Word integration is excluded from V1 scope: it is not a surface, parity target, runtime dependency, packaging component, verification gate, or first-release deliverable.
+The new AI7 V1 is one **Standalone-only Windows-and-macOS desktop product**. Microsoft Word integration is excluded from V1 scope: it is not a surface, parity target, runtime dependency, packaging component, verification gate, or first-release deliverable.
 
-Word remains only a deferred contingency if the Standalone Editing Sufficiency Gate fails and diagnosis shows that live Word integration is the proportionate remedy for a genuinely Word-dependent publishing workflow. A future Word surface requires a new explicit scope/architecture decision; gate failure alone never adds it.
+Word remains only a deferred contingency if a named supported workflow or production feedback repeatedly exposes a genuinely Word-dependent gap and diagnosis shows that live Word integration is the proportionate remedy. A future Word surface requires a new explicit Owner-authorized scope and architecture decision; an observed failure alone never adds it.
 
 The old Standalone experience is negative design evidence: its editor, renderer, workbench layout, components, and interaction model are not reused. “Standalone-only” therefore does not mean accepting the old editor—it makes a strong new Standalone editing experience a product requirement.
 
@@ -23,7 +23,7 @@ flowchart LR
 
 V1 has one user-facing product surface and one AI7 business authority. Harness may supply Host/Client composition, agent Sessions, tools, profiles, and projections, but it does not own the manuscript editor, document model, Book identity, revision graph, or editing UX.
 
-The exact desktop shell, editor framework, rendering technology, and client/Host process topology remain later design choices. No choice may bypass the accepted Manuscript History, Proposal Branch, Task Ledger, Effect, Policy Document, source-scope, or learning boundaries.
+The accepted implementation topology is the Electron main + isolated renderer + separate Node service design in [Standalone Shell and Editor Topology](./33-standalone-shell-and-editor-topology.md), with ProseMirror over bounded windows. No implementation choice may bypass the accepted Manuscript History, Proposal Branch, Task Ledger, Effect, Policy Document, source-scope, or learning boundaries.
 
 ## Pinned original-AI7 evidence
 
@@ -53,30 +53,30 @@ The new Standalone must be designed for Chinese professional publishing work, no
 - source-grounded task results and agent progress that do not displace the editing surface;
 - DOCX and other accepted source import with explicit fidelity/provenance limits, including per-workflow preserve/degrade/reject decisions for inline styles, comments/revisions, notes, tables, images/captions, sections, headers/footers, and round-trip behavior;
 - dependable export/delivery with exact revision and receipt evidence; and
-- practical performance, recovery, and usability evaluation with professional editors and representative sample Books.
+- practical performance, recovery, and usability outcomes that can be observed in complete supported journeys and through production editor feedback.
 
-These are outcome requirements, not a prescribed layout or component library. The planned independent UI/UX session owns interaction design, while architecture preserves the record identities and authority needed to make the experience trustworthy.
+These are outcome requirements, not a prescribed layout or component library. The accepted [V2 UI/UX baseline](../docs/ui-ux-v2/README.md) owns interaction design, while architecture preserves the record identities and authority needed to make the experience trustworthy.
 
-## Standalone Editing Sufficiency Gate
+## Professional editing outcome and Word reconsideration trigger
 
-Word is not added merely because it is familiar or because the old Standalone was weak. First evaluate the new Standalone against an explicit **Standalone Editing Sufficiency Gate / 独立桌面端编辑能力达标关口** covering:
+Word is not added merely because it is familiar or because the old Standalone was weak. The Standalone product must support:
 
 1. long-document load, navigation, typing, save/checkpoint, and recovery behavior, meeting the binding scale tiers accepted at Question 34 — no sensible degradation below 500K Chinese characters, no critical performance issue to 1M, and no crash or unresponsiveness to 10M;
 2. Chinese-language composition and professional editorial operations;
 3. manuscript structure and import/export fidelity;
 4. proposal/review/annotation workflows and user workload;
-5. selected test-Book scenarios plus private local evaluation material where authorized; and
-6. direct editor feedback on whether daily manuscript work can be completed satisfactorily.
+5. public-synthetic journey material for repository and hosted-CI evidence, with no private or real manuscript fixture; and
+6. direct production editor feedback on whether daily manuscript work can be completed satisfactorily.
 
-If the gate passes, Word remains unnecessary. If it fails, the response is not automatically “build a Word add-in”: diagnose whether the failure is fixable in the Standalone editor, belongs to document-conversion quality, or represents a genuinely Word-only requirement, then compare proportionate remedies.
+These requirements are product behavior, not a separate proof programme or gate. The applicable behavior is exercised through complete provider-free supported journeys; production feedback supplies real-world evidence without placing private material in a repository, hosted CI, fixture, log, or artifact. If a named workflow repeatedly fails, the response is not automatically “build a Word add-in”: diagnose whether the failure is fixable in the Standalone editor, belongs to document-conversion quality, or represents a genuinely Word-only requirement, then compare proportionate remedies.
 
-The gate fails on silent loss. A deliberately unsupported feature may be rejected or degraded only when the behavior is detected, disclosed, and acceptable for the named workflow; V1 need not promise every Word feature.
+Silent loss is always a product failure. A deliberately unsupported feature may be rejected or degraded only when the behavior is detected, disclosed, and acceptable for the named workflow; V1 need not promise every Word feature.
 
 ## Conditions for a future Word reconsideration
 
 A Word surface may be proposed later only when all of the following are true:
 
-- an evidence-backed Standalone Editing Sufficiency Gate fails for a named professional workflow;
+- repeated supported-journey or production evidence identifies a named genuinely Word-dependent professional workflow gap;
 - live Word integration provides a clear benefit beyond DOCX import/export or familiar presentation;
 - the required Word scope is named and bounded;
 - the additional COM, IPC, association, drift, synchronization, installer, signing, and real-Word verification costs are justified; and
@@ -98,7 +98,7 @@ These Word concepts remain contingency constraints, not active V1 domain languag
 
 | Legacy element | Accepted disposition | New treatment |
 | --- | --- | --- |
-| Windows-focused Standalone product goal | **Keep and strengthen** | One Chinese-first professional editorial desktop product |
+| Windows-and-macOS Standalone product goal | **Keep and strengthen under ADR 0028** | One Chinese-first professional editorial desktop product with native adapters |
 | Old Standalone user stories and failure evidence | **Adapt selectively** | Define editor outcomes and evaluation scenarios; discard layout/component assumptions |
 | Old Standalone renderer/editor/workbench | **Drop** | No UI source, editor architecture, or component parity |
 | Manuscript-native editing/history/proposal semantics | **Keep** | AI7-owned capabilities beneath the new editor |
@@ -112,12 +112,12 @@ These Word concepts remain contingency constraints, not active V1 domain languag
 
 ## Consequences for the remaining plan
 
-- Question 34 becomes the **new Windows Standalone shell and professional editor topology** decision; Word topology is removed.
-- Question 35 is a Standalone-only tracer over a selected synthetic DOCX.
+- Question 34 becomes the **new Standalone shell and professional editor topology** decision, applied on Windows and macOS by ADR 0028; Word topology is removed.
+- The current first tracer is the bounded provider-free J-01 new-Book happy path over one public-synthetic DOCX, ending at a bounded manuscript window and confirmed durable Edit Journal; it is not complete J-01.
 - Phase 4 builds and evaluates one Standalone product surface; it does not attach or package a Word add-in.
 - V1 has no Word-specific glossary terms, COM packages, named-pipe Word protocol, synchronization branch, Word installer/repair path, or clean-machine Word gate.
 - DOCX remains an important source/delivery format, but importing or exporting a DOCX is not a Word surface.
-- The independent UI/UX session must treat satisfactory long-form editing as a release-critical product outcome.
+- The accepted V2 UI/UX baseline treats satisfactory long-form editing as a release-critical product outcome.
 
 ## Question 23 decision
 
