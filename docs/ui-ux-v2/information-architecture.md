@@ -759,8 +759,13 @@ Developer Capability Proposal
    ├─ missing capability and affected procedure
    ├─ suggested implementation direction
    └─ possible Plugin route · developer process only
-      └─ GitHub >5 stars / >3 updates / updated within 30 days
-         └─ accepted exact version managed locally
+      ├─ GitHub >5 stars · at least 6
+      ├─ >3 qualifying plugin-related non-merge commits · at least 4
+      │  ├─ standalone repo · relevant default-branch commits only
+      │  └─ monorepo · plugin-directory or manifest-affecting commits only
+      ├─ newest qualifying commit · no earlier than 30 days before selection
+      └─ immutable Local Plugin Pin · exact commit and artifact
+         └─ mutable branch / tag / `latest` prohibited
 ```
 
 No shared `save and activate` action crosses these branches. Profile default designation, rule enablement and future developer implementation remain exact type-specific acts, and every edit creates a new version rather than mutating the version already linked to work or deliveries.

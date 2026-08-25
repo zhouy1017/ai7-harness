@@ -1,8 +1,8 @@
 # CI and test boundaries
 
-Status: **implementation boundary under [ADR 0027](../adr/0027-concentrate-ci-on-e2e-functionality.md); candidate on this Worker branch until Commander integration**
+Status: **accepted implementation boundary under [ADR 0027](../adr/0027-concentrate-ci-on-e2e-functionality.md), integrated into `design-doc` through Issue #6; not `main` acceptance or implementation authorization**
 
-Once integrated, this file is the concise authority for implementation-time CI and test admission. ADR 0027 remains the decision authority.
+On `design-doc`, this file is the concise authority for implementation-time CI and test admission. ADR 0027 remains the decision authority; aggregate integration alone grants no `main` or product-implementation authority.
 
 ## One standing automated test surface
 

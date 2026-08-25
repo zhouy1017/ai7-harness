@@ -228,7 +228,7 @@ The inheritance audit must resolve these known collisions before definitions are
 | Provider Processing Policy | External Export Policy / Public Release Permission |
 | Bundled Promotion Gate | Task Skill Enablement / in-product trust elevation |
 | Editorial Capability Profile | Editorial Profile (dimension defaults) / Harness Profile / a user-facing setting |
-| Agent Data Root | Run Source Scope / a general filesystem grant / a repository working tree |
+| Agent Data Root | Run Source Scope / a general filesystem grant / a proven whole-process OS sandbox / a repository working tree |
 | Agent Behavior Asset | Policy Document / House Editorial Memory / model weights |
 | E2E Functional Gate | Factual Verification / Workflow Gate / Effect Receipt / architecture proof |
 | Harness agent loop | AI7 business scheduling / a limit on parallel Runs / AI7-owned workflow continuation |

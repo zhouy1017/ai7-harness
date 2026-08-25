@@ -1,6 +1,6 @@
 # A2 execution-contract review rework dispatch
 
-Status: **completed at exact candidate head `059dd658`; fresh independent T3-par review required; A3 and implementation remain blocked**
+Status: **historical completed correction brief; candidate review and bounded follow-up completed before the A2 evidence programme was retired; no current review gate, A3 authority, or implementation authority**
 
 This is a repository-development correction brief. It is not canonical product architecture, an owner answer, a capability-closure result, a maintenance-form choice, or implementation authority.
 

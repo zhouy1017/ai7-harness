@@ -42,7 +42,7 @@ A first-cut classification, to be verified per package during implementation rat
 | Bundle/preset/context composition, `@deepseek-ai/cordis` | `dsh-shell`, `dsh-terminal` |
 | LLM adapters and credentials seams | `dsh-tool-web` and other generic network tools |
 | Skill projection, guards and policies, persistence | `dsh-web-app`, `dsh-web-frontend` — AI7 ships its own surface |
-| Headless execution for tests | Generic filesystem tools, superseded by AI7 capabilities over the Agent Data Root |
+| Agent-loop operation needed by the launchable product path | Generic filesystem tools, superseded by AI7 capabilities over the Agent Data Root |
 
 Every inclusion needs a stated reason. A package that is merely convenient is not a package AI7 should depend on.
 
@@ -56,16 +56,9 @@ Every inclusion needs a stated reason. A package that is merely convenient is no
 
 ## Upgrade contract
 
-A pin bump is a dedicated pull request, one pin at a time, and must verify at minimum:
+A pin bump remains a dedicated pull request, one pin at a time. Under ADR 0027, it runs only the applicable supported E2E journeys and observed-bug regressions on Windows and macOS. The former separate six-point proof checklist—composed-configuration diff, capability-exposure diff, schema fixtures, fixed-corpus replay, notice-regeneration proof, and ABI gate—is superseded historical design and must not be recreated as standing gates.
 
-- the effective composed Cordis configuration diff, since a row override replaces a whole row and can silently drop upstream fields;
-- the **capability exposure diff**, which is Critical under the Question 29 tool-surface boundary;
-- session schema compatibility against stored fixtures;
-- AI7 journey replay on the Question 24 fixed scenario corpus;
-- regenerated third-party notices, per ADR 0016; and
-- Node and Electron ABI compatibility.
-
-Compilation is never acceptance. A green build alone does not admit a pin bump.
+Exact pins, the committed lockfile, capability restrictions, provenance, license review, and the obligation to maintain third-party notices in every build remain product and distribution requirements; removing their separate proof gates does not remove those obligations. Compilation alone does not authorize a pin bump.
 
 ## Supported-platform confinement exposure
 
@@ -83,6 +76,6 @@ Accepted with owner revisions:
 - consumed baseline `0.1.0-rc.6`, with `0.1.0-rc.5` retained as the audited-but-uninstallable reference;
 - upstream tracked by commit and npm version, since no release channel exists;
 - SDK or ACP retained as a fallback isolation seam; and
-- a dedicated upgrade pull request with a six-point verification contract.
+- a dedicated one-version-at-a-time upgrade pull request. Its former six-point verification contract is superseded by ADR 0027; only applicable supported E2E journeys and observed-bug regressions are standing CI.
 
 See [ADR 0020](../docs/adr/0020-consume-pinned-harness-package-subset.md).

@@ -1,6 +1,6 @@
 # A2 selected Codex artifact corrected static-retry evidence
 
-Status: **Commander retry completed as `probe partial`; evidence integration preserves one malformed retained hash field plus an unadmitted forensic reconciliation and awaits exact-head Standards and Spec re-review; no downloaded binary executed, no candidate changed, and no later action is authorized**
+Status: **historical completed `probe partial` evidence; its review and bounded re-score completed, no downloaded binary executed, and the retired proof programme grants no later authority**
 
 Recorded: **2026-08-23**
 
