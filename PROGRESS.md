@@ -946,3 +946,24 @@ Resume on `docs/12-response-presentation`: validate D-001–D-084, 851 requireme
 ### Resume Prompt
 
 Resume by validating and merging PR #13 into `design-doc`; preserve D-084/J-16/UI ADR 0014, the Task Intent versus Task Input distinction, and the two-ledger Dialogue Answer History projection, then continue Issue #14 governance reconciliation.
+
+## Commander response-presentation integration complete — 2026-08-25
+
+### What's done
+
+- Pushed `docs/12-response-presentation@56cb1d56a9a9a823ef7f0cda8ad3f7832e88fabc`, opened PR #13 against exact base `design-doc@226ccfd1e34665c42af178e54d47f6d0c918138c`, verified it `MERGEABLE/CLEAN`, and merged it as Commander.
+- `origin/design-doc` advanced to merge commit `4ee5d4bb0967f82c7f8abb01aa2541616052710b`; Issue #12 was closed with the explicit no-`main`/no-implementation boundary.
+- Final lightweight validation passed after advisory corrections: 851/851 unique requirements, D-001–D-084 contiguous and unique, J-01–J-16, 40 root ADRs, 14 UI ADRs, no conflict markers or active broken local links, exact one-line `CLAUDE.md`, and clean diff whitespace.
+
+### What's next
+
+- Reconcile governance snapshot `93c9e406c33cc44019555b92e51e6d10094c938e` through Issue #14 without overwriting PR #10, Issue #8, or response-presentation semantics.
+
+### Key decisions made
+
+- PR #13 preserves candidate status inside `design-doc`; it grants no canonical `main` acceptance, implementation, publication, or new validation authority.
+- The source recovery commit `43398d769bbc55d7e78e8a4f1892ee8d4e61cb5c`, final candidate head `56cb1d56a9a9a823ef7f0cda8ad3f7832e88fabc`, and merge commit `4ee5d4bb0967f82c7f8abb01aa2541616052710b` remain the exact recovery-to-integration chain for the freeze manifest.
+
+### Resume Prompt
+
+Resume on `docs/14-incremental-agent-guidance` from `origin/design-doc@4ee5d4bb0967f82c7f8abb01aa2541616052710b`: apply governance snapshot `93c9e406c33cc44019555b92e51e6d10094c938e` semantically, preserve all later product/buildability constraints, and integrate it through Issue #14 before creating the freeze baseline.
