@@ -6,10 +6,11 @@ This directory records owner decisions from the independent AI7 V2 UI/UX intervi
 
 ## Authority and reference
 
-- The V2 architecture input is exact Git object `247b7dacb267ba2f4076ca8461c95e5f0508b343`. It governs product authority, runtime boundaries, state meaning, and the Codex Interaction Model Reference.
+- Frozen V2 architecture provenance input is exact Git object `247b7dacb267ba2f4076ca8461c95e5f0508b343`. It records the architecture supplied to the design session, but it is provenance evidence only and has no current authority by itself.
+- Current architecture and domain authority comes from target-qualified `dev` root owners routed through [`CONTEXT-MAP.md`](../../CONTEXT-MAP.md), accepted root [`docs/adr/`](../adr/), and the accepted [`architecture-v2`](../architecture-v2/README.md) package. This directory owns only the accepted presentation and interaction projection.
 - The V1 freeze input is exact Git object `587d6455f6a578d3df8a39f534ec7a057c07a18c`. It contributes requirement semantics, state distinctions, fourteen journey hypotheses, and design assumptions only.
 - The owner-provided Codex Desktop screenshot dated 2026-08-24 is visual and interaction reference evidence. It is not an asset, layout specification, component implementation, or permission to copy Codex identity.
-- ADR 0028 applies after the source architecture object: AI7 V1 is one product on Windows and macOS. Native platform presentation adapts without changing shared product objects, journeys, state meaning, authority, fidelity, or negative guarantees.
+- Root [ADR 0028](../adr/0028-support-windows-and-macos-as-one-product.md) is the current platform authority: AI7 V1 is one product on Windows and macOS. Native platform presentation adapts without changing shared product objects, journeys, state meaning, authority, fidelity, or negative guarantees.
 
 ## Accepted direction
 
@@ -407,4 +408,4 @@ Every task type carries an explicit Response Presentation Mode and defaults to `
 - [ADR 0011](./adr/0011-use-proposal-change-items-and-explicit-atomic-groups.md) — accepted per-change decision identity and the narrow explicit exception for semantically indivisible change groups.
 - [ADR 0012](./adr/0012-extract-reusable-structure-without-instance-authority.md) — accepted reusable-procedure extraction boundary that excludes manuscript instance data, secrets and prior authority.
 - [ADR 0013](./adr/0013-use-latest-eligible-new-version-and-preserve-historical-pins.md) — accepted latest-eligible default for new use together with exact historical pins and non-destructive referenced-version removal.
-- [ADR 0014](./adr/0014-wait-by-default-and-stream-only-interactive-dialogue.md) — candidate waiting-by-default and foreground-streaming boundary for contextual editorial dialogue.
+- [ADR 0014](./adr/0014-wait-by-default-and-stream-only-interactive-dialogue.md) — accepted waiting-by-default and foreground-streaming boundary for contextual editorial dialogue.

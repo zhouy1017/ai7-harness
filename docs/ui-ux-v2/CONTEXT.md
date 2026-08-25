@@ -2,7 +2,7 @@
 
 Status: **Owner-accepted `dev` V2 presentation context; root domain contexts retain semantic authority**
 
-The candidate language for how professional editors perceive and operate AI7. It owns presentation concepts only and does not redefine editorial or execution authority.
+The accepted presentation language for how professional editors perceive and operate AI7 in the current `dev` baseline. It owns presentation concepts only and does not redefine editorial or execution authority.
 
 ## Language
 
@@ -998,9 +998,7 @@ _Avoid_: generic warning, import fidelity review, visual preview alone, proof of
 The editor's exact format-specific response to disclosed export degradation: accept it for this export, choose another representation, or stop and resolve the source/package requirement. It is bound into the prepared payload and grants no delivery or release authority.
 _Avoid_: generic approval, permanent preference, import acceptance, proof of successful export
 
-**Local Export Preparation** (`本地导出准备`):
-The separately identified pre-Effect surface binding one exact milestone or Delivery Package version, export-specific formats, filenames, Export Fidelity Disposition, and one Resolved Local Export Target before exact target-bound Effect Approval. A changed format or target creates a new preparation and never re-versions the package.
-_Avoid_: Delivery Package Preparation, external handoff, save-as working copy, committed export
+`Local Export Preparation / 本地导出准备` is a shared Execution record defined only by the canonical [AI7 Execution context](../domain/execution/CONTEXT.md#local-export-preparation). This UI context presents that frozen record and its consequences; it does not redefine its target, payload, policy, or Effect bindings.
 
 **Local Export Destination** (`本地导出位置`):
 The exact local file or folder target explicitly selected for one export through the current platform's system picker, distinct from the Delivery Package Purpose and from any external channel.

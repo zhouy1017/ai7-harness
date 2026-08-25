@@ -1,6 +1,6 @@
 # AI7 development handoff
 
-Read this first when arriving without prior context. It is a cold-start router and trap list, not an authority owner; the exact target commit and the documents linked below win.
+Start with root [`AGENTS.md`](AGENTS.md), inspect the exact repository state as it directs, and then read current [`PROGRESS.md`](PROGRESS.md). Use this file afterward as the cold-start router and trap list when more orientation is needed. It is not an authority owner; the exact target commit and the documents linked below win.
 
 ## Current state
 

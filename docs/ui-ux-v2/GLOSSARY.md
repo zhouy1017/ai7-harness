@@ -276,7 +276,7 @@ Status: **accepted V2 package-local bilingual index; root contexts and `GLOSSARY
 | Fixed-layout PDF Export | PDF 定版导出 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Export Fidelity Review | 导出保真审阅 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Export Fidelity Disposition | 导出保真处置 | [AI7 V2 UI/UX](./CONTEXT.md) |
-| Local Export Preparation | 本地导出准备 | [AI7 V2 UI/UX](./CONTEXT.md) |
+| Local Export Preparation | 本地导出准备 | [AI7 Execution](../domain/execution/CONTEXT.md#local-export-preparation) |
 | Local Export Destination | 本地导出位置 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Native Export Collision Resolution | 系统原生导出冲突处理 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Resolved Local Export Target | 已确定本地导出目标 | [AI7 V2 UI/UX](./CONTEXT.md) |

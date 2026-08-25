@@ -138,7 +138,7 @@ Under the current rule, any retained user-visible behavior belongs in the applic
 
 ## Explicitly out of scope for the current tracer
 
-The current tracer does not implement Proposal Branches, AI-generated manuscript changes, model-facing Runs, retrieval, Factual Verification, Learning, Quality Signals, metrics, multiple Books, Series, Cross-project scope, general Workflow Instances or gates, export, or parallel Runs. It also does not cover the unaccepted J-01 branches listed above. Import publication and the durable Edit Journal use their accepted atomic and restart-safe domain shapes, but one happy-path result is not evidence that interruption, ambiguity, recovery, or every import branch is complete.
+The current tracer does not implement Proposal Branches, AI-generated manuscript changes, model-facing Runs, retrieval, Factual Verification, Learning, Quality Signals, metrics, multiple Books, Series, Cross-project scope, general Workflow Instances or gates, export, or parallel Runs. It also does not cover the accepted J-01 design branches listed above that are outside this tracer's implementation authorization. Import publication and the durable Edit Journal use their accepted atomic and restart-safe domain shapes, but one happy-path result is not evidence that interruption, ambiguity, recovery, or every import branch is complete.
 
 ## Current disposition
 
@@ -152,6 +152,6 @@ The Owner's current tracer authorization replaces the earlier Question 35 implem
 - projections carry their derivation revision, rebuild from the authority alone, invalidate by range overlap, tombstone deletions, and re-derive at Manuscript Checkpoints;
 - retrieval strategy — lexical, vector, or hybrid — remains an implementation choice, not a spike-gated decision;
 - applicable user-visible tracer behavior enters the one E2E Functional Gate only as the complete authorized happy-path journey; and
-- model/provider work, proposal mutation, retrieval, learning, general workflow, concurrency, export, and unaccepted J-01 branches are explicitly out.
+- model/provider work, proposal mutation, retrieval, learning, general workflow, concurrency, export, and accepted J-01 branches outside the current tracer authorization are explicitly out.
 
 See [ADR 0026](../docs/adr/0026-manuscript-retrieval-returns-candidates.md).

@@ -369,6 +369,7 @@ A Policy Document governing transfer of an exact deliverable revision, source, o
 _中文_: 对外导出策略
 _Avoid_: Provider Processing Policy, Delivery Package authority, Effect Approval, Effect Receipt, Public Release Permission
 
+<a id="local-export-preparation"></a>
 **Local Export Preparation**:
 A frozen per-file pre-Effect record created after platform-native destination and collision resolution, binding one exact Delivery Package version or Editorial Deliverable Revision, rendered format, filename, final local path, fidelity disposition, payload digest, create-or-replace disposition, and applicable External Export Policy. It supplies the exact target for a separate Effect Intent and Effect Approval; a changed path or disposition requires a new preparation.
 _中文_: 本地导出准备

@@ -312,7 +312,7 @@ The accepted source files intentionally differ from their frozen blobs only in t
 
 ### Source-blob equality after normalization
 
-Of the 100 direct-copy paths, 31 remain byte-identical to their frozen-source blobs and 69 intentionally differ after source restore and semantic review. The 69 normalized direct paths are exactly:
+Of the 100 direct-copy paths, 29 remain byte-identical to their frozen-source blobs and 71 intentionally differ after source restore and semantic review. The 71 normalized direct paths are exactly:
 
 ```text
 docs/architecture-v2/README.md
@@ -349,6 +349,7 @@ docs/ui-ux-v2/requirements.md
 docs/ui-ux-v2/visual-direction.md
 docs/adr/0012-exclude-legacy-production-data-migration.md
 docs/adr/0014-verify-on-one-windows-gate.md
+docs/adr/0017-full-engine-narrow-tool-surface.md
 docs/adr/0020-consume-pinned-harness-package-subset.md
 docs/adr/0021-single-execution-authority.md
 docs/adr/0024-electron-shell-with-isolated-ai7-service.md
@@ -384,6 +385,7 @@ kick-in/33-standalone-shell-and-editor-topology.md
 kick-in/34-first-tracer-slice.md
 kick-in/35-windows-macos-product-platform.md
 kick-in/README.md
+kick-in/decisions/README.md
 ```
 
 The four promoted source paths intentionally have no byte-identical same-path destination: their semantics are merged into the root glossary/context owners or renumbered into root ADR 0041/0042. `HANDOFF.md` and `PROGRESS.md` are intentional current-state rewrites. `CONTEXT-MAP.md`, root ADR 0025, and this manifest are the three fixed-base normalization destinations. These are all accepted-path source-normalization deviations; no other source path is admitted.

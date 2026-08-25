@@ -5,8 +5,8 @@ Status: **accepted V2 semantic mapping on `dev`; design and provenance only**
 ## Authority and purpose
 
 - Frozen reference input: exact Git object `587d6455f6a578d3df8a39f534ec7a057c07a18c` under `docs/ui-ux/`.
-- V2 architecture authority for this session: exact Git object `247b7dacb267ba2f4076ca8461c95e5f0508b343`.
-- Owner-accepted V2 decisions in this directory and ADR 0028's Windows-and-macOS one-product contract override the frozen reference.
+- Frozen V2 architecture provenance input: exact Git object `247b7dacb267ba2f4076ca8461c95e5f0508b343`; it is input evidence only, not current authority.
+- Current authority comes from target-qualified `dev` root owners routed through [`CONTEXT-MAP.md`](../../CONTEXT-MAP.md), accepted root [`docs/adr/`](../adr/), the accepted [`architecture-v2`](../architecture-v2/README.md) package, and the presentation decisions in this directory. Root ADR 0028's Windows-and-macOS one-product contract overrides the frozen reference.
 
 This document records how individually accepted portable V1 meanings were reshaped into the V2 `dev` baseline. It does not migrate screens, code, components or test evidence; authorize adjacent implementation, prototypes or Figma work; or claim that any journey has been implemented or validated.
 
@@ -59,8 +59,8 @@ This document records how individually accepted portable V1 meanings were reshap
 | Frozen artifact/assumption | Why it is not a V2 baseline |
 | --- | --- |
 | A/B/C geometry, exact columns, proportions and viewport layouts | No shell variant was selected, and V2 workbench structure was independently decided |
-| HTML/CSS/JavaScript prototype and its component behavior | Throwaway reference implementation; current session explicitly does not implement or prototype |
-| Figma raw frames, old component tree and handoff geometry | Reference artifacts only; no Figma/native library is authorized in this session |
+| HTML/CSS/JavaScript prototype and its component behavior | Throwaway reference implementation; it supplies no implementation or prototype authority |
+| Figma raw frames, old component tree and handoff geometry | Reference artifacts only; any Figma or native-library work requires separate explicit authority |
 | Exact V1 palette, typography sizes, radii, shadows, spacing and token values | V2 has independent theme, density, reading and semantic-state direction |
 | Codex brand, assets, copied microcopy, code/repository/terminal or unbound generic-chat hierarchy | Codex supplies interaction principles only; AI7 owns publishing objects and authority. New contextual Interactive Editorial Dialogue remains subordinate to an exact Book/work object rather than reviving chat as the product root |
 | Editor-facing Policy/Composition activation or capability-expansion controls | Hidden governed assets remain developer-controlled and cannot become editorial self-service elevation |

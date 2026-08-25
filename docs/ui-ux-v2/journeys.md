@@ -4,7 +4,7 @@ Status: **Owner-accepted V2 journey design on `dev`; not implementation or valid
 
 ## Source and use
 
-The stable IDs and original business hypotheses come only from `docs/ui-ux/interaction-spec.md` in exact frozen object `587d6455f6a578d3df8a39f534ec7a057c07a18c`. They are retained here under V2 architecture object `247b7dacb267ba2f4076ca8461c95e5f0508b343` and the owner-accepted UI/UX decisions in this directory.
+The stable IDs and original business hypotheses come only from `docs/ui-ux/interaction-spec.md` in exact frozen object `587d6455f6a578d3df8a39f534ec7a057c07a18c`. Exact object `247b7dacb267ba2f4076ca8461c95e5f0508b343` is the frozen V2 architecture provenance input used during design, not a current authority. Current journey meaning comes from target-qualified `dev` root owners routed through [`CONTEXT-MAP.md`](../../CONTEXT-MAP.md), accepted root [`docs/adr/`](../adr/), the accepted [`architecture-v2`](../architecture-v2/README.md) package, and the Owner-accepted UI/UX decisions in this directory.
 
 The list is a semantic coverage map. It does not inherit old screen geometry, prototype/Figma artifacts, component implementation, Windows-specific mechanism detail or completed verification claims. One logical provider-free E2E Functional Gate may cover these as complete Windows-and-macOS user journeys plus discovered bug regressions; this document creates no separate usability, accessibility, performance, platform-certification or UI gate.
 

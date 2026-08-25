@@ -63,9 +63,9 @@ After merge, closure, or abandonment, run the applicable [documentation archive 
 
 ## Tags and releases
 
-`vX.Y.Z` for releases, `vX.Y.Z-rc.N` for candidates. These match the `v*` trigger on the `release` workflow.
+Reserved tag syntax is `vX.Y.Z` for releases and `vX.Y.Z-rc.N` for release candidates. This syntax is defined independently of automation and does not assert that a release workflow or `v*` trigger exists.
 
-Tags are created only by the Commander, only on `main`, and only after the separately authorized promotion path. Tagging or release automation creates no separate release, receipt, packaging, signing, reproducibility, provenance, or same-SHA proof gate.
+No release workflow is implemented or authorized by this baseline. Any release automation requires its own exact Owner authorization and task scope. Tags are created only by the Commander, only on `main`, and only after the separately authorized promotion path. Tagging or later release automation creates no separate release, receipt, packaging, signing, reproducibility, provenance, or same-SHA proof gate.
 
 ## What never enters the repository
 

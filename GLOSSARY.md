@@ -200,7 +200,7 @@ This maintained bilingual reference routes readers to canonical definitions and 
 
 ## Terms requiring qualification
 
-The inheritance audit must resolve these known collisions before definitions are promoted:
+The inheritance audit resolved the definition owners for these terms. They remain qualification traps, so use the canonical context definitions and preserve the distinctions below:
 
 | AI7 term | Potentially confused Harness term |
 | --- | --- |

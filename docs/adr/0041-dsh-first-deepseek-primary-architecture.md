@@ -58,7 +58,7 @@ Engineering CI consists only of one logical provider-free E2E Functional Gate, e
 | Execution context and root glossary | Add the Codex Interaction Model Reference and the four Model Roles; keep the Primary Agent Harness role bound to DSH. |
 | ADR 0011 | Unchanged in substance: keep the two-ledger and continuation model with the technical ledger owned by the DSH Session store. |
 | ADR 0017 | Unchanged: full engine behind a narrow AI7 tool surface, enforced by the AI7 Capability Facade. |
-| ADR 0020 | Retained and confirmed: continue consuming the pinned DSH package subset with no CLI aggregate. Add the third-party plugin rules from ADR 0002. |
+| ADR 0020 | Retained and confirmed: continue consuming the pinned DSH package subset with no CLI aggregate. Add the third-party plugin rules from [ADR 0042](./0042-admit-and-pin-third-party-dsh-plugins.md). |
 | ADR 0021 | Unchanged: single execution authority, one loop, AI7 scheduling, no automatic harness fallback. |
 | ADR 0024 | Unchanged: three AI7 process roles, no TCP listener, composed Harness runtime inside the Node service. |
 | ADR 0027 | Keep as the engineering-verification authority. |

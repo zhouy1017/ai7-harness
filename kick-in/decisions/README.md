@@ -1,6 +1,6 @@
 # Decision Records
 
-Accepted system-wide architecture decisions live under [`docs/adr/`](../../docs/adr/). The current root sequence contains 40 records, ADR 0001 through ADR 0040:
+Accepted system-wide architecture decisions live under [`docs/adr/`](../../docs/adr/). The current root sequence contains 42 records, ADR 0001 through ADR 0042:
 
 - [ADR 0001: Version Editorial Dimension configuration at task start](../../docs/adr/0001-versioned-editorial-dimension-configuration.md)
 - [ADR 0002: Separate Book, Series, Cross-project, and House-learning scopes](../../docs/adr/0002-book-series-cross-project-and-house-learning-scopes.md)
@@ -42,6 +42,8 @@ Accepted system-wide architecture decisions live under [`docs/adr/`](../../docs/
 - [ADR 0038: Separate Delivery Package identity from local export](../../docs/adr/0038-separate-delivery-package-identity-from-local-export.md)
 - [ADR 0039: Delegate local-export collisions to native OS workflows](../../docs/adr/0039-delegate-local-export-collisions-to-native-os-workflows.md)
 - [ADR 0040: Preserve post-designation maintenance as versioned cases](../../docs/adr/0040-preserve-post-designation-maintenance-as-versioned-cases.md)
+- [ADR 0041: Use a DSH-first, DeepSeek-primary, AI7-owned architecture](../../docs/adr/0041-dsh-first-deepseek-primary-architecture.md)
+- [ADR 0042: Admit and locally pin third-party DSH plugins](../../docs/adr/0042-admit-and-pin-third-party-dsh-plugins.md)
 
 Create a record here only when a choice is hard to reverse, surprising without context, and the result of a real trade-off. Use sequential names such as `0001-fresh-ai7-repository.md` and keep the record concise: what was decided, why, meaningful rejected alternatives, and any non-obvious consequence.
 

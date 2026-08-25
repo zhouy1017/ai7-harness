@@ -42,9 +42,9 @@ Most background work involves no model at all — indexing a DOCX, computing Del
 
 ## Business scheduling stays in AI7
 
-Harness ships `dsh-schedule`, `dsh-jobs-local`, and workflow packages. AI7's **business** scheduling does not use them.
+Harness publishes `dsh-schedule`, `dsh-jobs-local`, and workflow packages. AI7's selected subset excludes all of them; no AI7 scheduling or technical-attempt path depends on them.
 
-AI7 owns Workflow Instances, Run Continuation Checkpoints, decisions, and Effects. Harness job machinery may drive technical attempts inside a Run. The risk register already records that Harness Workflow/Job/Goal limitations weaken durable business continuation, and under Question 30's subset rule AI7 most likely does not depend on those packages at all — which makes the boundary structural rather than conventional.
+AI7 owns Workflow Instances, Run Continuation Checkpoints, decisions, and Effects. Inside one AI7-dispatched Run, the selected Harness generic loop may drive turns, steps, tool calls, and safe technical attempts; Harness job, schedule, and workflow machinery never drives them and is absent from the package subset. The boundary is therefore structural rather than conventional.
 
 Two consequences follow directly from parallelism:
 
