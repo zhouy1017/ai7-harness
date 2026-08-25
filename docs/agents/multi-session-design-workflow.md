@@ -13,6 +13,7 @@ This runbook specializes the provider-neutral Commander, Worker, and optional Re
 5. A Reviewer starts from fresh, curated context, never the authoring task transcript. Architecture review and hostile challenge are Reviewer assignments, not new roles.
 6. Accepted ADRs and canonical context definitions outrank summaries. Candidate revisions must identify every accepted decision they would supersede; they never rewrite history silently.
 7. Design exploration and product implementation are separate authorization boundaries. An exploration outcome cannot start scaffolding, dependency installation, implementation issue decomposition, or a product branch by implication.
+8. Archives are historical storage, never additional design lines. New work consumes current authority owners and Commander-curated conclusions; it reads an exact archive artifact only when a current record names a blocking historical question.
 
 ## Task states
 
@@ -58,6 +59,8 @@ The Commander freeze brief states the exact base commit, branch, allowed finishi
 
 The Commander marks a line `frozen` after checking the final report, branch head, worktree status, and handoff. Validation evidence and an exact-head review are not required.
 
+Freeze is a document-lifecycle node. After the new unique Resume Prompt and handoff are current, run the scoped [archive sweep](document-lifecycle.md) for superseded progress, packets, and scratch. Do not archive the still-unconsumed freeze handoff itself.
+
 ## Freeze record schema
 
 Every legacy freeze record consists of the Worker handoff plus the Commander control-board or packet-manifest entry. Together they contain these fields. The Worker records what is knowable before commit, and the Commander records the candidate head and any optional review reference afterward.
@@ -88,6 +91,7 @@ It excludes:
 - raw or reconstructed design conversations;
 - another task's active worktree;
 - unreviewed scratch notes;
+- archive directories not named by the current packet for one exact historical question;
 - chain-of-thought, tool logs, and failed intermediate drafts; and
 - candidate conclusions presented without their status.
 
@@ -138,5 +142,6 @@ Architecture exploration does not end because legacy tasks are closed. It ends o
 - Curated inputs: [Architecture Review Packet](../architecture-exploration/REVIEW-PACKET.md)
 - Open tensions: [Known Problems](../architecture-exploration/KNOWN-PROBLEMS.md)
 - Session checkpoint: root `PROGRESS.md`
+- Document lifecycle: [Document lifecycle and archiving](./document-lifecycle.md)
 
-Update the control board after dispatch, freeze, review, acceptance, or a branch-head change. Update `PROGRESS.md` after each completed sub-task as required by `AGENTS.md`.
+Update the control board after dispatch, freeze, review, acceptance, or a branch-head change. Update `PROGRESS.md` after each sub-task by replacing its current checkpoint as required by `AGENTS.md`; archive at most the defined node-level outgoing snapshot, and only at the defined lifecycle nodes.

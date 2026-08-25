@@ -72,3 +72,5 @@ This exclusion removes separate engineering proof machinery. It does not remove 
 ## Pull-request application
 
 Normal pull-request flow and Commander-only integration remain in force. An implementation change that affects a supported journey or an observed-bug outcome updates the applicable E2E scenario and runs the one logical gate on both platforms. Documentation-only and design-only changes do not invent an automated proof task. Independent Reviewer work is optional and advisory under [Repository Development Dispatch](../../kick-in/27-repository-development-dispatch.md), not a prerequisite for the pull request or the gate.
+
+The active Issue's [Change Brief](change-brief.md) names the applicable journey or observed bug before implementation. Verification follows that bounded outcome; it does not expand the Issue's structural budget or create adjacent scenarios.

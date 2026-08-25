@@ -28,7 +28,8 @@ The reviewer's verdict is **advisory**. The commander decides and integrates.
 - Soft cap of three concurrent workers. The binding constraint is commander review capacity, not dispatch capacity.
 - **T0 work is never dispatched**: ambiguous scope, a brief that is itself in doubt, or anything requiring the owner's decision. A worker starts cold and re-derives context the commander already holds; that is the most expensive path.
 - A worker whose brief turns out to be wrong **stops and reports**. It never self-escalates to a higher class.
-- Rebase onto current `main` before Commander integration. No design/document verification gate is required; implementation uses only the applicable E2E Functional Gate.
+- Before Commander integration, rebase onto the current intended integration target (`main` normally; the documented `design-doc` exception only when explicitly targeted). Record the new exact target commit and re-resolve every `<target-commit>:<path>` authority in the Change Brief. If authority or semantics drifted, stop for re-scoping; this integration maintenance is not a new review or proof gate. Implementation uses only the applicable E2E Functional Gate.
+- Every dispatched unit is extracted from the applicable [`Change Brief`](../docs/agents/change-brief.md): exact base/target-qualified authority, one outcome, current reuse anchor, structural budget, non-goals, stop conditions, implementation journey/bug or non-behavior `N/A`, and reporting boundary. Do not send full transcripts, archive trees, or unrelated design packages.
 
 ### Review
 
@@ -47,6 +48,7 @@ Every returned Worker unit carries one line with role, requested binding, actual
 3. Keep briefs tight; cold-start cost scales with what the worker must rediscover.
 4. Urgency is not a task class and never changes the binding.
 5. Do not consume or probe Worker quota for T0 work, Commander decisions, final integration, or independent review merely to satisfy a provider preference; those remain in their existing roles.
+6. Map the current implementation narrowly before dispatch and use the earliest adequate rung in the [incremental development lifecycle](../docs/agents/incremental-development.md). Do not pay cold-start cost for a parallel design the existing owner can absorb.
 
 ## Layer B — Bindings
 
@@ -104,6 +106,8 @@ Tier selection is roughly a five-fold cost swing and is the primary lever; effor
 Cross-provider dispatch needs one small mechanism, not a system: the commander shells out to the other provider's CLI non-interactively with a brief, a worktree path, and a model and effort selection, then collects the report. Codex CLI 0.147.0 provides `codex exec` for this; Claude Code provides subagents with per-agent model selection, worktree isolation, and background execution.
 
 Specify the contract tool-agnostically and implement it on whichever tooling is installed. Do not hard-code one vendor's mechanism into Layer A.
+
+At merge, closure, abandonment, accepted integration, supersession, confirmed handoff consumption, or long-task freeze, the responsible foreground session runs the scoped [documentation archive sweep](../docs/agents/document-lifecycle.md). Archiving is node-driven and does not create a timer, host service, or additional agent role.
 
 ## Deferred
 
