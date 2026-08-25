@@ -208,7 +208,11 @@ async function clickExactButton(renderer, label, location) {
 
 async function runJourney(renderer) {
   at('renderer-ready');
-  await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'renderer-ready');
+  await waitFor(
+    renderer,
+    `document.documentElement.dataset.ai7ProductReady === 'true' && document.querySelector('[data-screen="landing"]')`,
+    'renderer-ready',
+  );
   await assertRenderer(
     renderer,
     `typeof globalThis.process === 'undefined' && typeof globalThis.require === 'undefined' && Object.keys(window.ai7).sort().join(',') === 'commitNewBookImport,flushJournalEdit,getManuscriptWindow,platform,prepareNewBookReview,selectAndStageDocx'`,
@@ -319,39 +323,41 @@ async function main() {
     !pathIsInside(checkoutRoot, tempParent) && !pathIsInside(tempParent, checkoutRoot),
     'temp-parent-boundary',
   );
-  const runRoot = await realpath(await mkdtemp(join(tempParent, 'ai7-j01-e2e-')));
-  requireJourney(dirname(runRoot) === tempParent && basename(runRoot).startsWith('ai7-j01-e2e-'), 'temp-root');
-  const dataRoot = await createCanonicalExternalDataRoot(resolve(runRoot, 'data'), checkoutRoot);
-  const shellRoot = await ensureCanonicalDataDirectory(dataRoot, 'shell');
-  const docx = await createSyntheticDocx(runRoot);
-  const executable = electronExecutable();
-  const entry = resolve(ROOT, 'dist', 'main', 'index.cjs');
-  const productArgs = [
-    '--disable-background-networking',
-    '--disable-component-update',
-    '--disable-default-apps',
-    '--disable-domain-reliability',
-    '--disable-sync',
-    '--metrics-recording-only',
-    '--no-first-run',
-    '--remote-debugging-pipe',
-    `--user-data-dir=${shellRoot}`,
-    entry,
-    '--data-root',
-    dataRoot,
-    '--launcher-pid',
-    String(process.pid),
-    '--j01-picker-path',
-    docx,
-  ];
-  requireJourney(
-    isAbsolute(dataRoot) &&
-      isAbsolute(docx) &&
-      !productArgs.some((argument) => /--inspect|--remote-debugging-port|^https?:|^wss?:/i.test(argument)),
-    'pipe-only-product-transport',
-  );
+  let runRoot;
   let browser;
   try {
+    runRoot = await mkdtemp(join(tempParent, 'ai7-j01-e2e-'));
+    requireJourney(dirname(runRoot) === tempParent && basename(runRoot).startsWith('ai7-j01-e2e-'), 'temp-root');
+    requireJourney((await realpath(runRoot)) === runRoot, 'temp-root');
+    const dataRoot = await createCanonicalExternalDataRoot(resolve(runRoot, 'data'), checkoutRoot);
+    const shellRoot = await ensureCanonicalDataDirectory(dataRoot, 'shell');
+    const docx = await createSyntheticDocx(runRoot);
+    const executable = electronExecutable();
+    const entry = resolve(ROOT, 'dist', 'main', 'index.cjs');
+    const productArgs = [
+      '--disable-background-networking',
+      '--disable-component-update',
+      '--disable-default-apps',
+      '--disable-domain-reliability',
+      '--disable-sync',
+      '--metrics-recording-only',
+      '--no-first-run',
+      '--remote-debugging-pipe',
+      `--user-data-dir=${shellRoot}`,
+      entry,
+      '--data-root',
+      dataRoot,
+      '--launcher-pid',
+      String(process.pid),
+      '--j01-picker-path',
+      docx,
+    ];
+    requireJourney(
+      isAbsolute(dataRoot) &&
+        isAbsolute(docx) &&
+        !productArgs.some((argument) => /--inspect|--remote-debugging-port|^https?:|^wss?:/i.test(argument)),
+      'pipe-only-product-transport',
+    );
     at('launch');
     browser = await chromium.launch({
       executablePath: executable,
@@ -367,8 +373,15 @@ async function main() {
     browser = undefined;
   } finally {
     await browser?.close().catch(() => undefined);
-    requireJourney(dirname(runRoot) === tempParent && basename(runRoot).startsWith('ai7-j01-e2e-'), 'cleanup-target');
-    await rm(runRoot, { recursive: true, force: true });
+    if (runRoot !== undefined) {
+      requireJourney(
+        dirname(runRoot) === tempParent &&
+          basename(runRoot).startsWith('ai7-j01-e2e-') &&
+          (await realpath(runRoot)) === runRoot,
+        'cleanup-target',
+      );
+      await rm(runRoot, { recursive: true, force: true });
+    }
   }
 }
 

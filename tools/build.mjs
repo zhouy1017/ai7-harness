@@ -105,9 +105,11 @@ async function ensureClosedOutputs() {
   requireBuild(
     main.includes('ai7:j01:close-risk-changed') &&
       main.includes('ai7:j01:close-blocked') &&
+      main.includes('ai7:j01:product-ready') &&
+      preload.includes('ai7ProductReady') &&
       renderer.includes('ai7CloseState') &&
       renderer.includes('data-ai7-close-state'),
-    'Built subject omitted the unconfirmed-editor close guard.',
+    'Built subject omitted its close guard or persistent product-readiness bridge.',
   );
   const serviceRun = service.indexOf('async function run()');
   const serviceRunGuard = service.indexOf('installNodeNetworkDenial();', serviceRun);

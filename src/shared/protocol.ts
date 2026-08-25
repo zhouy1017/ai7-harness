@@ -17,6 +17,7 @@ export const IPC_CHANNELS = {
 export const MAIN_EVENTS = {
   closeBlocked: 'ai7:j01:close-blocked',
   closeRiskChanged: 'ai7:j01:close-risk-changed',
+  productReady: 'ai7:j01:product-ready',
   serviceInterrupted: 'ai7:j01:service-interrupted',
 } as const;
 

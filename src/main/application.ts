@@ -356,6 +356,8 @@ export async function runApplication(): Promise<void> {
     requireDesktop(!serviceInterrupted);
     await announceProductReadiness();
     requireDesktop(!serviceInterrupted);
+    window.webContents.send(MAIN_EVENTS.productReady);
+    requireDesktop(!serviceInterrupted);
     productReady = true;
   } catch {
     process.stderr.write(`AI7_STARTUP_FAILED/${startupLocation}\n`);

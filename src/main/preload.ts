@@ -25,12 +25,21 @@ function markCloseBlocked(): void {
   else window.addEventListener('DOMContentLoaded', mark, { once: true });
 }
 
+function markProductReady(): void {
+  const mark = (): void => {
+    document.documentElement.dataset['ai7ProductReady'] = 'true';
+  };
+  if (document.documentElement) mark();
+  else window.addEventListener('DOMContentLoaded', mark, { once: true });
+}
+
 function reportCloseRisk(): void {
   ipcRenderer.send(MAIN_EVENTS.closeRiskChanged, document.documentElement.dataset['ai7CloseRisk'] === 'true');
 }
 
 ipcRenderer.on(MAIN_EVENTS.serviceInterrupted, markServiceInterrupted);
 ipcRenderer.on(MAIN_EVENTS.closeBlocked, markCloseBlocked);
+ipcRenderer.on(MAIN_EVENTS.productReady, markProductReady);
 
 const closeRiskObserver = new MutationObserver(reportCloseRisk);
 const observeCloseRisk = (): void => {
