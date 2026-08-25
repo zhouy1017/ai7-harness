@@ -63,7 +63,7 @@ Consequently:
 
 ### Verification surface
 
-Applicable user-visible behavior is covered only by the standing Windows E2E complete-journey suite and observed-bug regressions. This decision creates **no** separate plugin validation gate, scoring, audit, probe, capability matrix, or CI job.
+Applicable user-visible behavior is covered only by the standing logical E2E complete-journey suite on Windows and macOS and observed-bug regressions. This decision creates **no** separate plugin or platform validation gate, scoring, audit, probe, capability matrix, or CI job.
 
 ## Consequences
 

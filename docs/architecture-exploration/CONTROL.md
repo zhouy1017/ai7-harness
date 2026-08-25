@@ -3,7 +3,7 @@
 Status: **V2 DSH-first candidate amendment authorized; implementation not authorized**
 Commander issue: [#3 — Freeze v1 design and prepare v2 architecture exploration](https://github.com/zhouy1017/ai7-harness/issues/3)
 V2 architecture issue: [#4 — Design the AI7 V2 architecture candidate](https://github.com/zhouy1017/ai7-harness/issues/4)
-Last updated: **2026-08-24**
+Last updated: **2026-08-25**
 
 This file records repository-development coordination only. It is not an AI7 product workflow or a replacement for the canonical architecture.
 
@@ -48,6 +48,7 @@ The function labels “Architecture Reviewer” and “V2 Hostile Architecture R
 
 | Date | Task / branch | Role / class | Requested binding | Actual binding | Availability / quota | Fallback / reason | Review |
 | --- | --- | --- | --- | --- | --- | --- | --- |
+| 2026-08-25 | Windows+macOS product-scope unification / `design-doc` | Workers / bounded read-only design inventories | Claude Code first, matching bounded Worker class | GPT-5.6 Sol inherited-fallback Workers `/root/platform_candidate_inventory` and `/root/platform_core_inventory`; Commander performed decisions and integration | Claude Code returned HTTP 429 before inference and produced no Worker result for this unit | Existing same-class fallback after observed quota exhaustion; no role, authority, or product-runtime change | No formal review; the owner explicitly permits simplified design checks, and both Workers were advisory inventories only |
 | 2026-08-24 | DSH-first candidate rewrite / `docs/4-v2-architecture-candidate` | Worker / T3 architecture-document rewrite | Claude Code / `claude-opus-5` / high; session `5041799a-7885-427d-a055-3d447372a922` | Claude Opus 5/high authored the partial rewrite; GPT-5.6 Sol/`xhigh` Worker `/root/dsh_candidate_fallback` completed the same unit at `2094303`; Commander integration correction finalized `247b7da` | Claude completed 55 turns and most file writes, then returned API HTTP 429 `You've hit your session limit · resets 7:30pm (Asia/Shanghai)` before stage/commit; total `$4.3264755`, including `$0.000781` internal Haiku usage; zero web search/fetch | Same T3 completion fallback after fresh observed exhaustion; local first-launch argument error occurred before inference and is not a quota event | No formal review requested or performed; Commander inspection corrected only the inherited ADR 0020 version-baseline contradiction |
 | 2026-08-22 | A1 five-file mechanical commit recovery / `docs/4-v2-architecture-candidate` | Worker / T1 mechanical recovery; candidate review floor remains T3-par | Claude Code / `claude-haiku-4-5-20251001` / low | Anthropic Claude Haiku 4.5 / `claude-haiku-4-5-20251001` / low; session `7bfa7b54-9b68-4d30-9d63-a9c3870647de` | Available; completed successfully | None — requested binding satisfied | Commander state verification complete; exact-head architecture review pending |
 | 2026-08-22 | A1 exact-review fixes / `docs/4-v2-architecture-candidate` | Worker / T3 bounded architecture-document correction; candidate review floor remains T3-par | Claude Code / `claude-opus-5` / high; session `e91a7cae-2a8b-49fe-a863-c788af4dd90c` | Anthropic Claude Opus 5 / `claude-opus-5` / high; the CLI also reported a small internal Haiku 4.5 auxiliary call | Available; completed successfully; CLI reported `$7.298785` total | None — requested primary binding satisfied; auxiliary metering was not a provider/model fallback | Commander mechanical verification passed at `92d1089`; renewed Standards and Spec review in progress |
@@ -85,14 +86,14 @@ The exact dispatch is recorded in [V2-DISPATCH.md](./V2-DISPATCH.md). The design
 
 ## Candidate fork inputs
 
-These inputs are material but are not canonical on this branch:
+These inputs remain historical evidence; `design-doc` has since resolved the platform scope:
 
-- The owner instructed the platform candidate task to revise the Windows-only target into one Windows+macOS product. This is an owner-stated candidate input, not a canonical `main` decision until integration.
-- The UI/UX Worker began from the current Windows-only baseline and produced a candidate requirements/prototype line.
-- The platform candidate affects packaging, local storage, credentials, IPC, sandbox claims, signing, release evidence, and UI platform conventions; it is not a runner-label edit.
+- On 2026-08-25 the owner resolved the platform fork: ADR 0028 makes Windows and macOS one AI7 product on `design-doc`; `main` remains unchanged until separately authorized integration.
+- The frozen V1 UI/UX Worker began from the old Windows-only baseline. The active V2 UI/UX candidate now carries the shared product contract and native-adapter boundary; the frozen package remains historical reference.
+- Platform mechanics still affect packaging, local storage, credentials, IPC, confinement claims, signing, and UI conventions, but ADR 0027 permits only the one logical Windows/macOS E2E Functional Gate rather than separate release-proof machinery.
 - The owner replaced the Codex-first runtime candidate with one DeepSeek Harness production loop because DeepSeek V4 is AI7's primary model family. Codex remains a non-runtime interaction and engineering reference; AI7 still owns Electron/ProseMirror, the interface, publishing workflow, domain authority, provider egress, and business state.
 
-The Commander must preserve both lines as candidate/evidence-only unless the owner later accepts a specific architecture change and the normal integration path promotes exact records.
+The Commander preserves the source lines as historical candidate/evidence branches. The owner-accepted platform scope and ADR renumbering live on `design-doc`; no automatic `main` promotion or implementation follows.
 
 ## Expected freeze evidence
 

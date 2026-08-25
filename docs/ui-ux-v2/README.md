@@ -1,6 +1,6 @@
 # AI7 V2 UI/UX design session
 
-Status: **61-question base and Issue #5 9-question feature delta complete; candidate design only; no implementation authority**
+Status: **61-question base, Issue #5 feature delta, and Windows/macOS scope integration complete; candidate design only; no implementation authority**
 
 This directory records owner decisions from the independent AI7 V2 UI/UX interview. It defines product presentation and interaction only; it does not authorize product code, prototypes, Figma work, dependency installation, testing, review, publishing, or external action.
 
@@ -9,6 +9,7 @@ This directory records owner decisions from the independent AI7 V2 UI/UX intervi
 - The V2 architecture input is exact Git object `247b7dacb267ba2f4076ca8461c95e5f0508b343`. It governs product authority, runtime boundaries, state meaning, and the Codex Interaction Model Reference.
 - The V1 freeze input is exact Git object `587d6455f6a578d3df8a39f534ec7a057c07a18c`. It contributes requirement semantics, state distinctions, fourteen journey hypotheses, and design assumptions only.
 - The owner-provided Codex Desktop screenshot dated 2026-08-24 is visual and interaction reference evidence. It is not an asset, layout specification, component implementation, or permission to copy Codex identity.
+- ADR 0028 applies after the source architecture object: AI7 V1 is one product on Windows and macOS. Native platform presentation adapts without changing shared product objects, journeys, state meaning, authority, fidelity, or negative guarantees.
 
 ## Accepted direction
 
@@ -68,7 +69,7 @@ Ordinary text selection remains ephemeral. An editor explicitly pins one or more
 
 ### D-013 — Journal-first persistence with explicit checkpoints
 
-Editing persists continuously to the Edit Journal. `Ctrl+S` and `保存` request immediate journal durability and report success only after service acknowledgement; they never create a Manuscript Checkpoint. The user-facing meaningful action is `保存为里程碑版本`: for a Manuscript it validates current journal state into an immutable Manuscript Revision and adds the explicit milestone label/purpose without clearing durable undo/redo. Persistence status distinguishes journal state, latest milestone relation, and failure, while Recovery Snapshots remain recovery-only records.
+Editing persists continuously to the Edit Journal. The native journal-save shortcut—`Ctrl+S` on Windows and `⌘S` on macOS—and `保存` request immediate journal durability and report success only after service acknowledgement; they never create a Manuscript Checkpoint. The user-facing meaningful action is `保存为里程碑版本`: for a Manuscript it validates current journal state into an immutable Manuscript Revision and adds the explicit milestone label/purpose without clearing durable undo/redo. Persistence status distinguishes journal state, latest milestone relation, and failure, while Recovery Snapshots remain recovery-only records.
 
 ### D-014 — Staged fidelity-reviewed manuscript import
 
@@ -124,7 +125,7 @@ AI7 distinguishes the accepted execution continuations: Resume continues the sam
 
 ### D-027 — Quiet, privacy-safe notification hierarchy
 
-Routine progress remains inline, and ordinary foreground completion receives only a quiet transient notice plus durable `最近完成` history. Clarification, failure, ambiguous outcomes, and named decision-ready records create persistent actionable in-app attention. Windows notifications are reserved for backgrounded action-required or abnormal states by default; ordinary completion is configurable. System notifications reveal no Book title, manuscript/source text, claim, or candidate content and make no sound unless the editor explicitly changes those settings. Events coalesce by Book, deep-link to the exact record, and use outcome-accurate language rather than equating model or Harness completion with business completion.
+Routine progress remains inline, and ordinary foreground completion receives only a quiet transient notice plus durable `最近完成` history. Clarification, failure, ambiguous outcomes, and named decision-ready records create persistent actionable in-app attention. Native system notifications on Windows and macOS are reserved for backgrounded action-required or abnormal states by default; ordinary completion is configurable. System notifications reveal no Book title, manuscript/source text, claim, or candidate content and make no sound unless the editor explicitly changes those settings. Events coalesce by Book, deep-link to the exact record, and use outcome-accurate language rather than equating model or Harness completion with business completion.
 
 ### D-028 — Contextual, bounded Proposal review
 
@@ -192,7 +193,7 @@ DOCX is the ordinary editor's primary editable import/export and professional ex
 
 ### D-044 — V1 ends at local export
 
-AI7 V1 provides local export only. It does not send files through email, cloud drives, publishing-house OA, or any other external channel, and it does not add `记录已交接`, `确认送达`, recipient tracking, or manually asserted delivery states. A successful Local Export Receipt proves only that the exact files were atomically published to the user-selected Windows location. The UI stops at `已导出到所选位置`; it never infers `已发送`, `已交付`, or `已确认送达`. External-channel delivery may be designed in a later release without changing the V1 local-export record.
+AI7 V1 provides local export only. It does not send files through email, cloud drives, publishing-house OA, or any other external channel, and it does not add `记录已交接`, `确认送达`, recipient tracking, or manually asserted delivery states. A successful Local Export Receipt proves only that the exact files were atomically published to the user-selected local destination on the current platform. The UI stops at `已导出到所选位置`; it never infers `已发送`, `已交付`, or `已确认送达`. External-channel delivery may be designed in a later release without changing the V1 local-export record.
 
 ### D-045 — User-facing Publication Version instead of public-release permission workflow
 
@@ -228,11 +229,11 @@ First launch never requires a Provider connection, credential or budget setup be
 
 ### D-053 — Settings-centered channel/data location with exception-led notices
 
-Normal portable/installer and Product Data Location state stays in `设置 > 数据与存储` rather than permanent navigation or editor chrome. The Data and Storage Summary shows `运行方式：便携版 / 安装版`, the actual user-readable data location, local footprint, `查看数据位置`, and the statement that Model Service credentials are protected separately by Windows and never travel with the portable folder. A writable portable folder uses its own separated program/data areas; the installer normally uses `%LOCALAPPDATA%\AI7`. If a portable location is unwritable, AI7 falls back to the supported local location, reports the actual location once, and keeps the state reviewable in Settings rather than continuing to claim complete portability. A known sync/backup root produces a clear non-blocking unpublished-material warning. A prohibited development/repository location routes to supported-location guidance without asking an editor to judge technical risk. V1 has no arbitrary Agent Data Root picker; viewing a location changes no storage, source scope or agent permission.
+Product platform, actual distribution channel, and Product Data Location stay in `设置 > 数据与存储` rather than permanent navigation or editor chrome. The Data and Storage Summary shows the current platform and channel, actual user-readable data location, local footprint, `查看数据位置`, and the statement that Model Service credentials are protected separately by the OS and never travel with copied product data. On Windows, `便携版 / 安装版`, the writable portable folder, `%LOCALAPPDATA%\AI7` installer location, and unwritable-portable fallback retain their accepted behavior. macOS presents its own package and data-location language after those mechanics are selected; it never pretends to be portable/NSIS. A known sync/backup root produces a clear non-blocking unpublished-material warning. A prohibited development/repository location routes to supported-location guidance without asking an editor to judge technical risk. V1 has no arbitrary Agent Data Root picker; viewing a location changes no storage, source scope or agent permission.
 
-### D-054 — Windows-first limited shortcut remapping with discoverable action entries
+### D-054 — Platform-native limited shortcut remapping with discoverable action entries
 
-AI7 preserves familiar Windows editing commands and makes only navigation, search and view commands eligible for Limited Shortcut Remapping with conflict detection and reset. Text editing, OS-reserved and IME-reserved behavior is not remappable. Run Authorization, Proposal/Review Decision, Effect Approval, `设为发稿版本` and destructive actions have no global shortcut; where a focused exact surface supports a modified shortcut, its named action and consequence remain visible there. IME-safe Command Guard prevents AI7 commands from intercepting keys during active composition. Every supported action has a pointer- and keyboard-reachable Discoverable Action Entry, but this does not require permanent always-on chrome: secondary or infrequent actions may live in a clearly labeled disclosure, overflow menu or second-level menu. No action exists only as a shortcut, hover affordance, unlabeled icon or hidden gesture. A currently required authority/safety action and its exact consequence cannot be demoted from its accepted contextual bar merely to save space.
+AI7 preserves familiar native Windows and macOS editing commands and makes only navigation, search and view commands eligible for Limited Shortcut Remapping with conflict detection and reset. Text editing, OS-reserved and IME-reserved behavior is not remappable. Run Authorization, Proposal/Review Decision, Effect Approval, `设为发稿版本` and destructive actions have no global shortcut; where a focused exact surface supports a modified shortcut, its named action and consequence remain visible there. IME-safe Command Guard prevents AI7 commands from intercepting keys during active composition. Every supported action has a pointer- and keyboard-reachable Discoverable Action Entry, but this does not require permanent always-on chrome: secondary or infrequent actions may live in a clearly labeled disclosure, overflow menu or second-level menu. No action exists only as a shortcut, hover affordance, unlabeled icon or hidden gesture. A currently required authority/safety action and its exact consequence cannot be demoted from its accepted contextual bar merely to save space.
 
 ### D-055 — Layered workbench density, adjustable reading typography and flexible work surfaces
 
@@ -246,11 +247,11 @@ A Detached Manuscript Window hosts the same editable manuscript subpage that nor
 
 The main workbench unloads that manuscript body and shows a quiet `稿件已在独立窗口打开` placeholder with `显示独立窗口` and `移回工作台`. Transfer waits for active Chinese IME composition to end naturally and for current Edit Journal acknowledgement. Editing Protection Mode, an At-risk Edit Extent or a Bounded Edit Safety Buffer blocks transfer so process-local input is never treated as portable state. Closing the detached window normally performs the same guarded transfer back to the workbench. A failed transfer leaves the source surface active; it never creates two writable surfaces or destroys the only one. See [ADR 0010](./adr/0010-transfer-one-editable-manuscript-surface-between-windows.md).
 
-### D-057 — System-following light/dark themes with Windows forced-colors priority
+### D-057 — System-following themes with native accessibility appearance priority
 
 AI7 defaults its Application Theme Preference to `跟随系统` and lets the user choose `浅色` or `深色` manually. The preference is local, applies coherently to the main workbench and every detached/application window, and changes display only. Light mode uses cool-neutral shell chrome with a slightly warm manuscript surface; dark mode uses low-glare charcoal chrome and a neutral reading surface without pure black/white glare.
 
-Windows high contrast/forced-colors always overrides AI7's decorative theme as an unconditional system behavior, not a fourth theme. Components consume semantic color roles rather than hard-coded state colors; color never owns status, authority or factual meaning. V1 offers no custom accent palette. Theme choice changes no manuscript content, selection, Task, record, decision, Effect, export or authority.
+Native accessibility appearance settings always override AI7's decorative theme as unconditional system behavior, not a fourth theme. This includes Windows high contrast/forced-colors and the applicable macOS contrast, transparency, and color-accessibility settings. Components consume semantic color roles rather than hard-coded state colors; color never owns status, authority or factual meaning. V1 offers no custom accent palette. Theme choice changes no manuscript content, selection, Task, record, decision, Effect, export or authority.
 
 ### D-058 — One presentation grammar without flattening domain states
 
@@ -266,7 +267,7 @@ Provider/Harness diagnostics, codes and support data live under `查看技术详
 
 ### D-060 — Retain V1 semantics, reshape them through V2, and drop frozen artifacts
 
-AI7 retains the frozen V1 package's portable semantic assets: Book-first/editor-first outcomes, exact context and authority distinctions, three independent factual states, Proposal-first mutation, durability/recovery distinctions, continuation meanings, DOCX fidelity disclosure, Windows professional-work behavior and all fourteen journey IDs. It reshapes them through the accepted V2 Book Workbench, action-first Global Attention, Task/Run shortcuts and default execution, role-first model setup, Milestone/Publication Version language, local-only export, governed learning, detached editable manuscript-page transfer and the V2 theme/state/copy system.
+AI7 retains the frozen V1 package's portable semantic assets: Book-first/editor-first outcomes, exact context and authority distinctions, three independent factual states, Proposal-first mutation, durability/recovery distinctions, continuation meanings, DOCX fidelity disclosure, professional desktop-work behavior and all fourteen journey IDs. Windows-specific mechanisms become platform adapters rather than product-wide defaults. It reshapes the shared outcomes through the accepted V2 Book Workbench, action-first Global Attention, Task/Run shortcuts and default execution, role-first model setup, Milestone/Publication Version language, local-only export, governed learning, detached editable manuscript-page transfer and the V2 theme/state/copy system.
 
 AI7 drops the frozen A/B/C geometry, HTML prototype, Figma frames, component tree, exact visual tokens, developer/coding metaphors, editor-facing Policy/Composition elevation, formal Signoff ceremony, external send/handoff tracking and standalone usability/accessibility/performance/UI gates. Dropping those artifacts never deletes their retained professional outcome. The mapping is explicit in [`migration-from-v1.md`](./migration-from-v1.md), and [`journeys.md`](./journeys.md) keeps `J-01`–`J-14` as V2 semantic continuity IDs. Question 60 subsequently closes the identified `J-01` import-completion and `J-13` Series-membership seams in D-061.
 
@@ -317,6 +318,10 @@ An enabled local-user Task Skill is discoverable across the local AI7 instance b
 ### D-071 — Keep every reusable-result publication and activation path explicit
 
 A Workflow Profile result may be saved as a new inactive draft version, published as a new immutable version, and only then separately designated as the default for newly created Editorial Deliverables; existing Workflow Instances never migrate without their own exact impact preview and confirmation. A Default Execution Rule result may be saved as a draft version or reviewed and explicitly enabled only after its exact Task Skill/version, applicability, source rule, provider/egress, budget, result and Effect envelope are visible; it reacts only to future user-submitted exact matches and never schedules work or applies results. A Developer Capability Proposal offers `保存开发建议` only: it records the missing capability, implementation direction and possible Plugin route for later developer work but cannot generate, install or enable code. Every later edit creates a new version and preserves old links.
+
+### D-072 — Present one AI7 product through Windows and macOS native adapters
+
+AI7 presents the same Book, Manuscript, Task, Run, Proposal, evidence, workflow, automation, decision, Effect, receipt, fidelity, recovery, and privacy semantics on Windows and macOS. Information architecture, core journeys, Chinese-first microcopy, document outcomes, and negative guarantees are shared. Native menus and shortcuts, file dialogs, system notifications, accessibility integration, window conventions, paths, secret-store language, distribution-channel presentation, and OS security prompts adapt to the current platform without creating a second product edition or weakening a supported journey. Windows zip/NSIS and `%LOCALAPPDATA%` behavior remain Windows-only; macOS package, data-location, Keychain, and signing/notarization presentation follows the later platform-mechanics decision. The one logical provider-free E2E Functional Gate exercises complete supported journeys on both platforms and creates no separate UI, accessibility, performance, package, or platform-certification gate.
 
 ## Current documents
 

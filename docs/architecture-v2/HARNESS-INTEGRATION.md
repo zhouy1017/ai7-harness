@@ -173,7 +173,7 @@ Forking the generic agent loop is out of scope. AI7 never writes a second implem
 - Consume DSH as exactly pinned public npm packages: retain ADR 0020's `0.1.0-rc.6` baseline, install the selected subset only at one coherent version, and commit the lockfile.
 - Never depend on the `@deepseek-ai/dsh` CLI aggregate; it transitively installs the generic shell, pwsh, terminal, and web tool packages the editorial surface excludes.
 - Never use `^`, `~`, a branch, a mutable tag, or `latest`.
-- A pin bump is one explicit development change at a time. Only the applicable Windows E2E journeys and regressions for observed bugs are standing verification; composition diffs, capability-exposure diffs, schema checks, notice regeneration, ABI checks, and replay do not become separate gates. Applicable notices still remain current in every build.
+- A pin bump is one explicit development change at a time. Only the applicable complete E2E journeys on Windows and macOS and regressions for observed bugs are standing verification; composition diffs, capability-exposure diffs, schema checks, notice regeneration, ABI checks, and replay do not become separate gates. Applicable notices still remain current in every build.
 - An admitted third-party plugin follows the same discipline through its Plugin Admission Snapshot and immutable Local Plugin Pin, resolved from the AI7-controlled local plugin store plus the committed manifest and lockfile, with no automatic update and a retained rollback predecessor.
 - Every admitted package and plugin contributes to the maintained third-party notices file in every build. Harness is never user-facing branding; the product display name is exactly **AI7**.
 

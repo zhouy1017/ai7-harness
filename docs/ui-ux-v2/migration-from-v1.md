@@ -6,7 +6,7 @@ Status: **candidate V2 semantic mapping complete for this session; design only**
 
 - Frozen reference input: exact Git object `587d6455f6a578d3df8a39f534ec7a057c07a18c` under `docs/ui-ux/`.
 - V2 architecture authority for this session: exact Git object `247b7dacb267ba2f4076ca8461c95e5f0508b343`.
-- Owner-accepted V2 decisions in this directory override the frozen reference.
+- Owner-accepted V2 decisions in this directory and ADR 0028's Windows-and-macOS one-product contract override the frozen reference.
 
 This document maps portable V1 meanings into the V2 candidate. It does not migrate screens, code, components or test evidence; authorize implementation, prototypes or Figma work; or claim that any journey has been implemented or validated.
 
@@ -29,7 +29,7 @@ This document maps portable V1 meanings into the V2 candidate. It does not migra
 | Edit Journal, Manuscript Checkpoint and independent Recovery Snapshot | Retain their separate durability/history/recovery meanings | editing persistence and recovery sections |
 | Pause/cancel and Resume/Retry/Redo/Replay | Retain exact continuation meanings; add accepted Rewind | running work and continuation sections |
 | DOCX fidelity classification and zero silent loss | Retain preserve/degrade/reject disclosure across supported content classes | import and representation/export sections |
-| Chinese IME, keyboard, high contrast, zoom/reflow and long-manuscript windowing | Retain as unconditional professional Windows behavior | editor, keyboard, theme and flexible-surface sections |
+| Chinese IME, keyboard, accessibility appearance, zoom/reflow and long-manuscript windowing | Retain as unconditional professional behavior on Windows and macOS, with native adapters | editor, keyboard, theme and flexible-surface sections |
 | Fourteen stable journey IDs `J-01`–`J-14` | Retain every frozen journey identity and underlying business outcome; add J-15 only for the newly accepted reusable-procedure/automation-management feature | [`journeys.md`](./journeys.md) |
 
 ## Reshape
@@ -47,8 +47,8 @@ This document maps portable V1 meanings into the V2 candidate. It does not migra
 | Signoff-to-delivery journey with external handoff semantics | Milestone Version + Prepared Delivery Package + local export receipt; no direct send, recipient, handoff log or delivery tracking |
 | Equal-format export framing | DOCX as primary user format, Markdown as internal/fallback and secondary user option, PDF as optional fixed-layout export |
 | Broad learning/feedback surface | Quiet contextual reason prompts, Book-first explicit Learning Material eligibility, governed Series/House scope and object-centered bidirectional Learning Audit |
-| Fixed light-first visual values | Codex-referential AI7-owned low-noise language with system-following light/dark themes, forced-colors override, adjustable density/typography and semantic state grammar |
-| Screen-by-screen accessibility/usability/performance test gates | Retain behavior in complete Windows end-to-end journeys and discovered bug regressions; do not create independent UI/usability/accessibility/performance gates |
+| Fixed light-first visual values | Codex-referential AI7-owned low-noise language with system-following light/dark themes, native accessibility appearance, adjustable density/typography and semantic state grammar |
+| Screen-by-screen accessibility/usability/performance test gates | Retain behavior in complete Windows-and-macOS end-to-end journeys and discovered bug regressions; do not create independent UI/usability/accessibility/performance/platform gates |
 | V1 requirement IDs and screen codes as organizing authority | Rehome accepted meanings into V2 candidate requirement IDs and domain-shaped surfaces; old IDs remain provenance only |
 
 ## Drop
@@ -63,7 +63,7 @@ This document maps portable V1 meanings into the V2 candidate. It does not migra
 | Editor-facing Policy/Composition activation or capability-expansion controls | Hidden governed assets remain developer-controlled and cannot become editorial self-service elevation |
 | Formal `签发` wording, signature ceremony and generic approval styling | Target-house workflow uses Milestone Version language and keeps exact internal records separate |
 | Direct send/handoff/recipient/delivery-confirmation UI | V1 ends at a local Export Effect Receipt |
-| Owner walkthrough, 3–5-editor study and standalone UI/accessibility/performance gates | No such independent gates are authorized; only full Windows E2E journeys and discovered bug regression remain |
+| Owner walkthrough, 3–5-editor study and standalone UI/accessibility/performance gates | No such independent gates are authorized; only the logical E2E Functional Gate on Windows and macOS and discovered bug regression remain |
 | Any claim that frozen checks prove production behavior | Frozen checks establish artifact integrity only and are not V2 implementation evidence |
 
 ## Journey continuity

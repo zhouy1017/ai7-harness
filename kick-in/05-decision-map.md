@@ -93,7 +93,7 @@ Questions 1–5 completed the canonical planning setup. Question 6 accepted the 
 
 > The ubuntu setup is just for github actions. The target platform is just windows-only. We do not need a production for ubuntu at this stage. And the tiered verification/build/test should be concise and quick
 
-It was re-proposed under those constraints and accepted: two Windows-only workflows, with the Ubuntu lane, nightly tier, Test Catalog, quarantine registry, and wire-level fault server each deferred behind a named trigger rather than rejected. See [26-tiered-verification-and-mock-provider-evidence.md](./26-tiered-verification-and-mock-provider-evidence.md) and [ADR 0014](../docs/adr/0014-verify-on-one-windows-gate.md).
+It was historically re-proposed under those constraints and accepted as two Windows-only workflows. That answer is now superseded by ADR 0027's one logical provider-free E2E Functional Gate on Windows and macOS and ADR 0028's one-product platform scope. The quoted owner statement remains decision-history evidence, not current scope.
 
 **Question 25 is closed.** Repository Development Dispatch is three roles with provider-neutral operating rules and one provider-specific Layer B binding policy, recorded in [27-repository-development-dispatch.md](./27-repository-development-dispatch.md) and [ADR 0015](../docs/adr/0015-provider-neutral-development-dispatch.md). The legacy orchestration pilot and its host connector are rejected as baselines and remain old-repository evidence.
 

@@ -494,3 +494,28 @@ Resume as Project Commander: present exact DSH-first candidate `247b7dacb267ba2f
 ### Resume Prompt
 
 Resume from `origin/design-doc` by reading `docs/design-doc/README.md`; treat it as a consolidated design archive/candidate review line, not implementation or `main` integration authority.
+
+## Windows-and-macOS product-scope unification — 2026-08-25
+
+### What's done
+
+- Unified the active product contract on `design-doc` as one Chinese-first AI7 Standalone product supporting Windows and macOS; updated `AGENTS.md`, `HANDOFF.md`, current root ADRs, `kick-in/`, V2 architecture, V2 UI/UX, architecture-exploration coordination, current handoff aids, and the aggregate index.
+- Kept minimal engineering validation as ADR 0027 and renumbered the colliding platform decision to ADR 0028 while preserving the source-branch path and fixed historical references.
+- Marked frozen or dated Windows-only material as superseded historical evidence instead of rewriting transcripts, review packets, source manifests, or frozen V1 design internals.
+- Recorded Claude-first dispatch: Claude Code returned HTTP 429 before inference; bounded read-only inventories used the same-class GPT-5.6 Sol fallback Workers `/root/platform_candidate_inventory` and `/root/platform_core_inventory`, while Commander retained decisions, integration, and the external push.
+
+### What's next
+
+- When implementation planning reaches the platform layer, decide the macOS minimum version and CPU policy, package/update channel, Agent Data Root location, Keychain adapter details, private local IPC carrier, and signing/notarization posture. These open mechanics do not reopen macOS product scope and do not create new validation gates.
+- No `main` integration, pull request, or product implementation is authorized by this checkpoint.
+
+### Key decisions made
+
+- Windows and macOS share product identity, domain and authority semantics, workflows, core capabilities, document/data meaning, long-manuscript obligations, UI/UX outcomes, and supported journeys.
+- Platform-native menus, shortcuts, windows, dialogs, accessibility integration, paths, secret stores, IPC, packages, signing/notarization, and security prompts may differ explicitly without creating separate product editions or weaker support tiers.
+- Windows keeps zip portable and NSIS channels. macOS distribution and system-integration mechanics remain explicit implementation decisions rather than inferred copies of Windows behavior.
+- The only standing CI surface is one logical provider-free E2E Functional Gate executed on Windows and macOS for complete user journeys and regressions for observed bugs; all other standing verification programmes remain excluded by ADR 0027.
+
+### Resume Prompt
+
+Resume from `origin/design-doc` with ADR 0028 as the current Windows-and-macOS product contract and ADR 0027 as the only engineering-validation contract; keep macOS mechanics explicit and deferred until implementation planning.

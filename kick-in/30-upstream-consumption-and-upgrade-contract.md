@@ -67,11 +67,11 @@ A pin bump is a dedicated pull request, one pin at a time, and must verify at mi
 
 Compilation is never acceptance. A green build alone does not admit a pin bump.
 
-## Windows sandbox exposure
+## Supported-platform confinement exposure
 
-The published native sandbox addons are `node-addon-landlock-run-linux-x64` and `-arm64`. **Landlock is Linux-only.** Windows sandboxing runs a different path through `dsh-pwsh-sandbox` and `dsh-sandbox-local`.
+The published native sandbox addons are `node-addon-landlock-run-linux-x64` and `-arm64`. **Landlock is Linux-only.** Windows and macOS therefore require different native mechanisms and neither mechanism is inferred from the Linux package.
 
-Question 29's Agent Data Root treats an OS sandbox as its outer boundary. On the Windows-only target that layer is a different and possibly weaker mechanism, so its actual enforcement strength must be verified before the data-root boundary is described as enforced rather than intended. If the Windows path proves advisory, the AI7 capability and service facade becomes the only real boundary rather than the second of two, and the design must say so plainly rather than claiming defence in depth it does not have.
+ADR 0028 makes Windows and macOS supported product platforms. The Agent Data Root remains an intended platform boundary; AI7 capability and service facades are the enforceable product boundary on both. Native controls may add defence in depth only after their concrete design supports that statement, and their uncertainty creates no separate validation gate under ADR 0027.
 
 ## Question 30 decision
 

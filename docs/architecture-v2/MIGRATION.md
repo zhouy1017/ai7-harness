@@ -6,14 +6,14 @@ Migration preserves AI7's product and domain model, **preserves and reshapes the
 
 ## Retain
 
-- The Chinese-first Windows Standalone product, exact AI7 name, professional publishing audience, Word exclusion, and two Windows channels.
+- One Chinese-first Standalone AI7 product on Windows and macOS, the exact AI7 name, professional publishing audience, Word exclusion, and the two existing Windows-specific channels.
 - Book, Series, source, manuscript, revision, branch, journal, checkpoint, recovery, projection, retrieval, and Exact Fetch semantics.
 - Deliverable-owned workflows, artifacts, gates, decisions, signoffs, delivery packages, and the seven shared phases.
 - Task Intent, Execution Plan, Plan Envelope, Run Record, Task Ledger, Execution Binding, Harness Execution Span, and Resume/Retry/Redo/Replay meanings.
 - Named authority, proposal-first mutation, atomic apply, Effects, receipts, ambiguity handling, privacy, credentials, provider resolution, capabilities, policies, learning lineage, and factual-verification behavior.
 - **DeepSeek Harness as the one production Primary Agent Harness**, composed inside the AI7 Node service: the full composition machinery behind a narrow tool surface, the pinned exact package subset with a committed lockfile, no `@deepseek-ai/dsh` CLI aggregate, AI7-owned scheduling and concurrency, the AI7 Capability Facade, dual grant enforcement, the two ledgers, and the exclusion of generic shell, roaming filesystem, and arbitrary network tools.
 - Provider-neutral Model Roles declared by Task Skills, now with the accepted DeepSeek defaults and an explicitly configurable alternative frontier binding.
-- The Electron main/renderer/Node-service topology, ProseMirror bounded editor, Agent Data Root outcomes, and provider-free Windows E2E journey concept.
+- The Electron main/renderer/Node-service topology, ProseMirror bounded editor, Agent Data Root outcomes, and one provider-free E2E journey surface executed on Windows and macOS.
 - Surface-neutral user outcomes in the A1 product-consistency and evidence-crosswalk documents. The crosswalk is historical design reference, not a gate.
 - Codex material as the non-runtime **Codex Interaction Model Reference** for interaction, host-boundary, and extension-design ideas.
 - Authorized predecessor code, documentation, tests, and fixtures only when an implementation task selects an asset and records its provenance, sanitization, and applicable third-party/provider obligations.
@@ -46,7 +46,7 @@ Migration preserves AI7's product and domain model, **preserves and reshapes the
 | ADR 0020 | Retained and confirmed: continue consuming the pinned DSH package subset with no CLI aggregate. Extend it with the plugin admission and pinning rules from candidate ADR 0002. |
 | ADR 0021 | Unchanged: single execution authority, one loop, AI7 scheduling, no automatic fallback. |
 | ADR 0024 | Unchanged: three AI7 process roles, no TCP listener, composed Harness runtime inside the Node service. |
-| ADRs 0014 and 0027 | Treat ADR 0027 as current: one Windows E2E functional/regression surface only. |
+| ADRs 0014, 0027 and 0028 | Treat ADR 0014 as historical, ADR 0027 as the one logical Windows-and-macOS E2E functional/regression surface, and ADR 0028 as the one-product platform contract. |
 | ADRs 0018, 0019, 0023, 0025 | Retain product behavior; remove their separate proof or validation gates as superseded by ADR 0027. |
 | ADR 0003 and provider records | Add the accepted Model Role defaults and the primary-not-exclusive provider boundary without making any model a factual authority. |
 | `AGENTS.md` and `kick-in/` runtime descriptions | Preserve the DSH production and pinning language; add the Model Role defaults, Codex's reference-only role, and the plugin admission policy; remove proof-first clauses. |
@@ -59,14 +59,14 @@ These are sequencing directions, not validation gates.
 
 1. **Integrate the decision records.** After owner acceptance, update canonical context, glossary, ADRs, standing instructions, and design notes through the Commander path.
 2. **Establish the offline product spine.** Build the Electron shell, renderer, Node service, local stores, bounded editor, journal/recovery, and typed IPC without requiring the harness or a provider at startup.
-3. **Establish business execution.** Implement Task/Run records, Plan Envelopes, scheduling and budget governance, provider and credential brokers, capability grants, Effect handling, and the two-ledger binding against a provider-free test double used by the Windows journey.
+3. **Establish business execution.** Implement Task/Run records, Plan Envelopes, scheduling and budget governance, provider and credential brokers, capability grants, Effect handling, and the two-ledger binding against the provider-free test double used by complete journeys on both supported platforms.
 4. **Compose the harness.** Retain ADR 0020's `0.1.0-rc.6` baseline, select and pin the exact DSH package subset with a committed lockfile, implement `PrimaryAgentHarness`, disable inherited defaults, expose only editorial capabilities, and connect technical spans without copying transcripts.
 5. **Bind the Model Roles.** Wire Provider Preflight to the accepted DeepSeek defaults, add the explicit alternative frontier configuration, and place the Provider Payload/Egress Gate before every transmission.
 6. **Complete vertical user journeys.** Add import/edit/recovery, task-to-proposal, proposal apply, factual review with Exact Fetch, workflow delivery, concurrency/continuation, and learning/feedback as coherent end-to-end slices.
 7. **Admit a plugin only if a need appears.** If and only if an identified capability or composition need has no adequate AI7-owned or DSH-seam answer, take a Plugin Admission Snapshot, record a Local Plugin Pin, and ship the change through reviewed deployment composition.
-8. **Package both Windows channels.** Produce zip-portable and NSIS outcomes from one source while keeping data, plugin store, and secrets in their accepted locations.
+8. **Package supported platforms.** Produce the Windows zip-portable and NSIS outcomes from the shared source. Add the macOS outcome after its package/update, data-root, CPU, and signing/notarization mechanics are selected; do not copy Windows portable assumptions into macOS.
 
-The single standing CI suite grows with these complete user journeys and with regressions for observed bugs. Ordinary implementation diagnostics stop when the bug is understood; they do not become new permanent gates by default.
+The single logical standing E2E suite runs on Windows and macOS and grows with these complete user journeys and with regressions for observed bugs. Ordinary implementation diagnostics stop when the bug is understood; they do not become new permanent gates by default.
 
 ## Data migration
 

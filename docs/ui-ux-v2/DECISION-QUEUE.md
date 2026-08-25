@@ -42,6 +42,8 @@ Question 55/61 rejected both a read-only detached Reader and concurrent editable
 
 Question 56/61 accepted `跟随系统` as the default Application Theme Preference with manual `浅色`/`深色` overrides, coherent behavior across every AI7 window, semantic color roles and unconditional Windows high-contrast/forced-colors priority. No ADR was created because this is reversible presentation configuration and changes no product authority or document state.
 
+> Platform-scope integration (2026-08-25): ADR 0028 now makes Windows and macOS one product. Earlier Windows-first answers remain Windows adapter decisions, not cross-platform defaults. The same objects, journeys, state meanings, authority and negative guarantees apply on macOS; menus/shortcuts, dialogs, notifications, accessibility behavior, paths, Protected Secret Store, distribution presentation and security prompts adapt natively. This integration creates no new non-E2E validation gate.
+
 Question 57/61 accepted one cross-surface Semantic State Presentation Grammar while retaining every exact domain-state name and negative authority. Authoritative Completion Styling is reserved for a supporting AI7 record, classified outcome evidence or verified Effect Receipt. No ADR was created because this is an evolvable presentation system constrained by already-fixed domain semantics.
 
 Question 58/61 accepted consequence-first, two-layer Chinese microcopy: the primary layer names object, exact state, consequence, retained-safe boundary and one safe next action; sanitized Provider/Harness/support detail expands secondarily. No ADR was created because copy rules are reversible presentation policy over fixed authority and privacy constraints.

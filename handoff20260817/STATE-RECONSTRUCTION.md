@@ -2,6 +2,8 @@
 
 Reconstructed 2026-08-17 by Claude, taking over from Codex.
 
+> Historical-state note (2026-08-25): this reconstruction preserves the decisions and evidence available on 2026-08-17. Its Windows-only product statements were later superseded by [ADR 0028](../docs/adr/0028-support-windows-and-macos-as-one-product.md). Current scope is one Windows-and-macOS product; use root `HANDOFF.md` and `AGENTS.md` for current authority.
+
 Sources used, in the authority order you specified:
 
 1. `handoff20260817/raw-conversation.md` (2180 lines) — the only conversational record. Citations below are `raw-conversation.md:LINE`.

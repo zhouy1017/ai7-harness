@@ -114,7 +114,7 @@ Status: **candidate-local bilingual index complete for this session**
 | Superseded Attempt Branch | 已被新方向取代的尝试分支 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Run Notification Tier | 任务通知层级 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Quiet Completion Notice | 安静结果提示 | [AI7 V2 UI/UX](./CONTEXT.md) |
-| Privacy-safe Windows Notification | 隐私保护型 Windows 通知 | [AI7 V2 UI/UX](./CONTEXT.md) |
+| Privacy-safe System Notification | 隐私保护型系统通知 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Book-coalesced Notification | Book 合并通知 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Contextual Proposal Review | 上下文提案审阅 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Proposal Margin Anchor | 提案边栏锚点 | [AI7 V2 UI/UX](./CONTEXT.md) |
@@ -166,7 +166,7 @@ Status: **candidate-local bilingual index complete for this session**
 | Detached Manuscript Placeholder | 稿件独立显示占位 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Application Theme Preference | 应用主题偏好 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | System-following Theme | 跟随系统主题 | [AI7 V2 UI/UX](./CONTEXT.md) |
-| Forced-colors Override | Windows 强制色接管 | [AI7 V2 UI/UX](./CONTEXT.md) |
+| Native Accessibility Appearance Override | 原生辅助显示接管 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Semantic State Presentation Grammar | 语义状态呈现语法 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Authoritative Completion Styling | 权威完成样式 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Consequence-first Message | 后果优先提示 | [AI7 V2 UI/UX](./CONTEXT.md) |
@@ -356,7 +356,7 @@ Status: **candidate-local bilingual index complete for this session**
 | Superseded Attempt Branch | Deleted history, a cancelled Run, automatically false evidence, or proof that Effects were undone. |
 | Run Notification Tier | Provider error severity, technical log level, unread count, workflow status, or generic priority. |
 | Quiet Completion Notice | Task Outcome authority, Effect Receipt, Proposal Decision, or guaranteed success. |
-| Privacy-safe Windows Notification | An authoritative record, an in-app decision surface, consent to reveal manuscript content, or public release. |
+| Privacy-safe System Notification | An authoritative record, an in-app decision surface, consent to reveal manuscript content, or public release. |
 | Book-coalesced Notification | Merged Task/Run records, one aggregate decision, shared Book scope, or loss of exact deep links. |
 | Contextual Proposal Review | Proposal Apply, a generic diff tool, a chat response, or permission to mutate the Manuscript. |
 | Proposal Margin Anchor | A comment, approximate highlight, acceptance mark, or manuscript content. |
@@ -397,7 +397,7 @@ Status: **candidate-local bilingual index complete for this session**
 | Limited Shortcut Remapping | Full macro/keybinding system, text-editor key override, authority grant, accessibility toggle, or Task Skill. |
 | IME-safe Command Guard | Configurable shortcut, visual composition underline, focus trap, read-only state, or optional accessibility mode. |
 | Discoverable Action Entry | Permanent toolbar button, shortcut-only command, icon without label/tooltip, hover-only control, or authority record. |
-| Workspace Density Mode | Manuscript font size, Windows display scaling, browser zoom, hidden content, or responsive breakpoint. |
+| Workspace Density Mode | Manuscript font size, operating-system display scaling, application zoom, hidden content, or responsive breakpoint. |
 | Manuscript Reading Preset | Manuscript Editing Mode, stored document style, export template, or locked typography configuration. |
 | View-only Typography Preference | Manuscript mutation, DOCX style, export formatting, factual annotation, or permission to override reflow/accessibility. |
 | Resizable Workspace Region | Manuscript Block/window size, content scope, document geometry, authority boundary, or unmanaged OS window. |
@@ -407,8 +407,8 @@ Status: **candidate-local bilingual index complete for this session**
 | Active Manuscript Surface Binding | Manuscript authority, Book lock, Run lock, Effect Approval, or OS focus ownership. |
 | Detached Manuscript Placeholder | Read-only manuscript mirror, closed Book, hidden safety state, or empty-state error. |
 | Application Theme Preference | Manuscript/DOCX style, custom palette, accessibility mode, or domain state. |
-| System-following Theme | Windows high contrast, scheduled theme, content formatting, or Provider state. |
-| Forced-colors Override | Optional theme, warning severity, custom accent, or reduced-motion preference. |
+| System-following Theme | Native accessibility appearance, scheduled theme, content formatting, or Provider state. |
+| Native Accessibility Appearance Override | Optional theme, warning severity, custom accent, or reduced-motion preference. |
 | Semantic State Presentation Grammar | Generic traffic-light taxonomy, badge palette, domain state machine, or permission to rename records. |
 | Authoritative Completion Styling | Model/Harness success, optimistic UI, tool result, Proposal generation, or selected state. |
 | Consequence-first Message | Generic toast, raw exception, success slogan, or technical event log. |
@@ -463,7 +463,7 @@ Status: **candidate-local bilingual index complete for this session**
 | Workflow Gate Disposition | Readiness status, Review Decision, phase status, Signoff, or Delivery permission. |
 | Conditional Gate Passage | Mandatory-criterion override, skip, unconditional pass, Signoff exception, or release exception. |
 | Milestone Version | Journal state, latest working draft, filename copy, Delivery Package, Signoff UI, or release authority. |
-| Save as Milestone Version | Ctrl+S, ordinary checkpoint jargon, file export, generic approval, or delivery action. |
+| Save as Milestone Version | Native Journal Save shortcut, ordinary checkpoint jargon, file export, generic approval, or delivery action. |
 | Milestone Version Label | Revision identity, filename, Workflow phase status, or authority record. |
 | Milestone Purpose | Actual handoff, Delivery Package authority, Public Release Permission, or Workflow completion. |
 | Delivery Package Preparation | External export, file transfer, Public Release Permission, generic archive creation, or Signoff UI. |

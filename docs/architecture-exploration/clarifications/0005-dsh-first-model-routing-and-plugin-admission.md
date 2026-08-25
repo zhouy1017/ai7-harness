@@ -69,7 +69,7 @@ Every admitted plugin version receives an immutable Local Plugin Pin containing 
 
 AI7 development and production builds resolve only the admitted immutable artifact through an AI7-controlled local plugin store plus the committed plugin manifest and dependency lockfile. Branch names, mutable tags, version ranges, and `latest` are forbidden. AI7 performs no automatic upstream plugin update. An upgrade is an explicit, one-version-at-a-time development change that creates a new admission snapshot and Local Plugin Pin; the previous admitted pin remains available for rollback.
 
-A third-party DSH plugin is a code-bearing Capability Implementation or composition dependency. It is never a Task Skill, Policy Document, Model Provider, credential, Authority Ceiling, Effective Capability Grant, or user-facing brand. Activation still requires the normal pinned deployment composition and dual capability enforcement. Applicable user-visible behavior is covered only by the standing Windows E2E journey and observed-bug regression policy; this decision creates no separate plugin validation gate.
+A third-party DSH plugin is a code-bearing Capability Implementation or composition dependency. It is never a Task Skill, Policy Document, Model Provider, credential, Authority Ceiling, Effective Capability Grant, or user-facing brand. Activation still requires the normal pinned deployment composition and dual capability enforcement. Applicable user-visible behavior is covered only by the standing logical E2E Functional Gate on Windows and macOS and the observed-bug regression policy; this decision creates no separate plugin or platform validation gate.
 
 ## Resolved V2 terms
 

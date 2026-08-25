@@ -2,11 +2,11 @@
 
 Status: **superseded for engineering validation by ADR 0027 and `35-minimal-e2e-validation.md`; retained only as historical design context**
 
-The active rule is one Windows E2E Functional Gate for complete user-facing journeys and observed-bug regressions. None of the additional tiers, evidence machinery, receipts, fingerprints, provider rehearsals, or deferred triggers below is active.
+The active rule is one logical provider-free E2E Functional Gate, executed on Windows and macOS, for complete user-facing journeys and observed-bug regressions. None of the additional tiers, evidence machinery, receipts, fingerprints, provider rehearsals, or deferred triggers below is active.
 
-## Decision
+## Superseded historical decision
 
-Verification uses **two GitHub Actions workflows on one platform**. Windows is the only target, so Windows is the only place required evidence is produced. Everything else is either local or deferred behind a named trigger.
+The following section records the superseded Question 24 design. It does not describe current product scope or CI.
 
 This replaces the four-tier, five-lane proposal originally put to the owner. That proposal was answered with a correction:
 

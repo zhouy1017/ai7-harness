@@ -6,7 +6,7 @@ Status: **frozen candidate/reference; not canonical `main` and not the v2 archit
 
 - Base commit: `c8cbe26c4cccc4a912b3bbc05bd5b23fbf5468b9` (`c8cbe26`).
 - Working branch: `docs/1-windows-macos-phase0`.
-- Artifact purpose: finish the already-accepted Question 16 evidence rules, record the accepted Windows-and-macOS target as a superseding decision, and report the resulting Phase 0 status.
+- Artifact purpose: finish the already-accepted Question 16 evidence rules, record the Windows-and-macOS target that is now integrated as [ADR 0028](../docs/adr/0028-support-windows-and-macos-as-one-product.md), and preserve the resulting historical Phase 0 status.
 - This branch makes no product implementation, scaffold, dependency, CI, issue decomposition, UI/UX, isolation, retrieval, or Harness-pin choice. It is a reviewable v1 reference candidate only.
 
 ## Accepted inputs recorded here

@@ -281,18 +281,19 @@ The Task surface remains role/capability-first. Model Service Settings configure
 设置
 └─ 数据与存储
    └─ Data and Storage Summary
-      ├─ 运行方式：便携版 / 安装版
+      ├─ 当前平台：Windows / macOS
+      ├─ 运行方式：actual platform channel（Windows: 便携版 / 安装版）
       ├─ 数据保存在：user-readable location
       ├─ 本机占用
       ├─ 查看数据位置
-      ├─ 凭据由 Windows 单独保护，不随便携文件夹复制
+      ├─ 凭据由当前系统单独保护（Windows Credential Manager / macOS Keychain），不随产品数据复制
       └─ Data Location Exception State · only when applicable
-         ├─ 已改用本机位置 · portable unwritable fallback
+         ├─ 已改用本机位置 · Windows portable unwritable fallback
          ├─ 此位置可能被同步或备份 · non-blocking
          └─ 当前位置不受支持 · Data Location Remediation Guidance
 ```
 
-Normal state remains secondary and quiet. The exact technical path can expand for support, but the first layer uses `便携版`, `安装版`, `本机位置`, `可能被同步` and `当前位置不受支持`. No path field or arbitrary location picker appears. Data/storage navigation is distinct from Book import/export and from Settings `模型服务`; viewing a location changes no product record or permission.
+Normal state remains secondary and quiet. The exact technical path can expand for support, but the first layer uses the actual platform/channel plus `本机位置`, `可能被同步` and `当前位置不受支持`; `便携版` and `安装版` appear only for the Windows channels. No path field or arbitrary location picker appears. Data/storage navigation is distinct from Book import/export and from Settings `模型服务`; viewing a location changes no product record or permission.
 
 ## Appearance settings
 
@@ -311,8 +312,9 @@ Normal state remains secondary and quiet. The exact technical path can expand fo
    ├─ 编辑 / 审读 preset
    └─ font / size / line height / text width / alignment
 
-Windows high contrast / forced colors
-└─ system-owned override across all AI7 windows
+Native accessibility appearance
+├─ Windows high contrast / forced colors
+└─ applicable macOS contrast / transparency / color accessibility
 ```
 
 The appearance hierarchy does not offer a custom palette or treat high contrast as decoration. All entries are local view preferences; changing one preserves exact focus, position, selection and business state.
@@ -326,7 +328,7 @@ The appearance hierarchy does not offer a custom palette or treat high contrast 
       ├─ 导航 · eligible for remapping
       ├─ 搜索 · eligible for remapping
       ├─ 视图 · eligible for remapping
-      ├─ 编辑 · fixed Windows/editor behavior
+      ├─ 编辑 · native Windows/macOS editor behavior
       ├─ 权威与受控动作 · no global shortcut
       ├─ conflict explanation
       └─ 恢复默认
@@ -1002,7 +1004,7 @@ Run event
 └─ action-required or abnormal event
    ├─ persistent exact item in Global Attention
    ├─ Actionable Attention Count when editor action is required
-   └─ Privacy-safe Windows Notification when AI7 is backgrounded
+   └─ Privacy-safe System Notification when AI7 is backgrounded
 
 successive events for one Book
 └─ Book-coalesced Notification
@@ -1414,7 +1416,7 @@ exact Milestone Version or Prepared Delivery Package
    │  └─ 无法导出 · affected format blocked
    ├─ exact version + eligible formats + filenames
    ├─ Export Fidelity Disposition
-   ├─ Local Export Destination · Windows picker
+   ├─ Local Export Destination · current platform system picker
    ├─ exact local Effect Approval
    └─ atomic publication → Effect Receipt
 

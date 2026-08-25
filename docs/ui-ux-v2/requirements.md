@@ -4,14 +4,25 @@ Status: **candidate requirements complete for this session; no implementation au
 
 Only owner-accepted decisions are requirements here. Future feature requirements must enter as an explicit decision delta; they do not revive the V1 freeze package as a screen baseline.
 
+## Supported-platform product contract
+
+- **V2-UX-PLAT-001**: AI7 V1 is one Chinese-first Standalone product on Windows and macOS, not separate platform editions.
+- **V2-UX-PLAT-002**: Product objects, information architecture, state meanings, authority, workflows, core journeys, document-fidelity outcomes, data meaning, recovery, privacy, and negative guarantees are shared across both platforms.
+- **V2-UX-PLAT-003**: Menus, shortcuts, window conventions, system dialogs, notifications, accessibility integration, paths, secret stores, local IPC presentation, packages, signing/notarization, and OS security prompts may adapt natively without removing or weakening a supported journey.
+- **V2-UX-PLAT-004**: Windows zip-portable, NSIS, `%LOCALAPPDATA%`, Credential Manager, SmartScreen, and Windows named-pipe behavior is never presented as a macOS rule. macOS-specific package, data-location, Keychain, Gatekeeper/signing/notarization, and IPC language follows its selected platform mechanics.
+- **V2-UX-PLAT-005**: Native save, find, undo/redo, menu and navigation commands preserve familiar Windows and macOS conventions while retaining the same exact Chinese action names and authority consequences.
+- **V2-UX-PLAT-006**: System pickers, notifications, theme state, accessibility appearance and assistive technology use the current platform's native integration and never expose unpublished content or change business state merely through presentation.
+- **V2-UX-PLAT-007**: `设置 > 数据与存储` names the current platform, actual distribution channel, actual product-data location, and OS-protected credential separation without requiring filesystem literacy or implying that copied product data contains credentials.
+- **V2-UX-PLAT-008**: One logical provider-free E2E Functional Gate executes complete supported journeys and observed-bug regressions on Windows and macOS. Platform-native setup does not create separate UI, usability, accessibility, performance, package, or certification gates.
+
 ## Visual and interaction direction
 
 - **V2-UX-VIS-001**: AI7 develops an AI7-owned desktop interaction language that feels similar to the owner-provided Codex Desktop reference through calm low-noise surfaces, restrained chrome, progressive disclosure, focused central work, contextual side surfaces, compact task entry, and visible interruptible activity.
 - **V2-UX-VIS-002**: Similarity to Codex does not copy its brand, text, assets, GUI source, exact geometry, coding objects, generic terminal/chat hierarchy, or product authority.
 - **V2-UX-VIS-003**: Visual similarity never collapses AI7's exact object identities, factual statuses, named decisions, Effects, or receipts.
 - **V2-UX-VIS-004**: Application Theme Preference defaults to `跟随系统` and offers manual `浅色` and `深色`. The local preference updates the main workbench and every AI7 application/detached window coherently.
-- **V2-UX-VIS-005**: System-following Theme follows the current Windows light/dark application-theme state. A system change updates AI7 without changing view position, focus, selection, editing state or any business record.
-- **V2-UX-VIS-006**: Windows high contrast/forced-colors always takes priority over AI7 light/dark decoration. Forced-colors Override is unconditional supported behavior, not an optional fourth theme.
+- **V2-UX-VIS-005**: System-following Theme follows the current operating system's light/dark application-theme state. A system change updates AI7 without changing view position, focus, selection, editing state or any business record.
+- **V2-UX-VIS-006**: Native accessibility appearance settings take priority over AI7 light/dark decoration. Windows high contrast/forced-colors and applicable macOS contrast, transparency, and color-accessibility behavior are unconditional supported behavior, not optional themes.
 - **V2-UX-VIS-007**: Components consume semantic color roles for shell, manuscript surface, text, subdued text, focus, selection, boundary, status and action. A semantic role retains the same meaning in light, dark and forced-colors mappings.
 - **V2-UX-VIS-008**: Light mode uses calm cool-neutral shell chrome and a slightly warm manuscript surface; dark mode uses low-glare charcoal chrome and a neutral manuscript surface. Neither mode relies on pure black/white glare or decorative saturation for long-session hierarchy.
 - **V2-UX-VIS-009**: V1 exposes no custom accent/palette editor. Theme, color and appearance preferences never change manuscript content/style, DOCX/PDF/Markdown output, model context, Task/Run state, decisions, Effects, receipts or authority.
@@ -57,7 +68,7 @@ Only owner-accepted decisions are requirements here. Future feature requirements
 - **V2-UX-MIG-004**: V1 Artifact Drop excludes A/B/C geometry, HTML prototype, Figma frames, component tree, exact visual tokens and coding/developer metaphors from the V2 baseline.
 - **V2-UX-MIG-005**: Formal user-facing Signoff, direct send/handoff/recipient/delivery tracking and editorial Policy/Composition elevation are dropped; their absence cannot merge or weaken internal exact records, local receipts or developer governance.
 - **V2-UX-MIG-006**: All fourteen stable journey IDs remain in `journeys.md`. Their V2 text may add accepted behaviors such as Quick Start/default execution, Rewind, Milestone/Publication Version, local-only export and editable manuscript-window transfer while preserving the original business outcome.
-- **V2-UX-MIG-007**: The frozen package's owner walkthrough, 3–5-editor study and standalone usability/accessibility/performance/UI gates are not V2 gates. Required behavior remains covered in future complete Windows E2E user journeys and discovered bug regressions only.
+- **V2-UX-MIG-007**: The frozen package's owner walkthrough, 3–5-editor study and standalone usability/accessibility/performance/UI gates are not V2 gates. Required behavior remains covered in complete E2E user journeys on Windows and macOS and discovered bug regressions only.
 - **V2-UX-MIG-008**: A migration mapping or journey entry is design coverage, not implementation, test, review, performance, fidelity, accessibility, provider, Effect or release evidence.
 - **V2-UX-MIG-009**: Dropping an artifact cannot silently drop the semantic outcome it once represented. Any intentional future outcome removal must be an explicit product-scope decision rather than an implied migration side effect.
 - **V2-UX-MIG-010**: `J-01` import-completion evidence naming and `J-13` Series membership/knowledge-exclusion management were the only identified seams after Q59; D-061 closes both through Manuscript Import Record and Series membership/shared-scope interaction contracts.
@@ -158,7 +169,7 @@ Only owner-accepted decisions are requirements here. Future feature requirements
 - **V2-UX-ED-048**: The task entry and contextual supporting surface keep the complete Manuscript Range Set visible before Plan Preview and Run Authorization.
 - **V2-UX-ED-049**: Normal editing writes continuously to the Edit Journal and shows Editing Persistence Status only from service-confirmed persistence state.
 - **V2-UX-ED-050**: The status can simultaneously disclose `已写入修订日志` and `自里程碑版本「{标签}」后有修改`; AI7 never replaces these distinct facts with one generic `已保存` label.
-- **V2-UX-ED-051**: `Ctrl+S` and the menu Journal Save Action immediately flush pending edits and show `已写入修订日志` only after acknowledgement; they never create a Manuscript Checkpoint.
+- **V2-UX-ED-051**: The native Journal Save shortcut (`Ctrl+S` on Windows, `⌘S` on macOS) and the menu Journal Save Action immediately flush pending edits and show `已写入修订日志` only after acknowledgement; they never create a Manuscript Checkpoint.
 - **V2-UX-ED-052**: `保存为里程碑版本` is a separate explicit action with a required concise label, stated purpose, and optional note; for Manuscripts it creates a new immutable Manuscript Revision through a Manuscript Checkpoint only after successful validation and persistence.
 - **V2-UX-ED-053**: AI7 may show a Milestone Version Suggestion around large replacement, structural adjustment, Proposal application, or delivery preparation, but the suggestion never claims creation, blocks ordinary editing by itself, or changes downstream authority.
 - **V2-UX-ED-054**: Durable undo/redo belongs to the current Manuscript Branch, survives restart, and is not cleared by creating a Manuscript Checkpoint; undo across a checkpoint produces descendant working state rather than rewriting an immutable revision.
@@ -169,7 +180,7 @@ Only owner-accepted decisions are requirements here. Future feature requirements
 
 ## Manuscript import and fidelity
 
-- **V2-UX-IMP-001**: Manuscript import begins through a user-selected Windows file picker and performs parsing and fidelity preflight locally without requiring a model provider, credential, Harness, or network.
+- **V2-UX-IMP-001**: Manuscript import begins through the current platform's user-selected native file picker and performs parsing and fidelity preflight locally without requiring a model provider, credential, Harness, or network.
 - **V2-UX-IMP-002**: Before editable import commits, an Import Fidelity Review separately classifies inline styles, comments/revisions, notes, tables, images/captions, sections, headers/footers, and expected round-trip export behavior.
 - **V2-UX-IMP-003**: Each content class is labeled `完整保留`, `降级导入`, or `不支持导入` with text and icon/shape as well as color.
 - **V2-UX-IMP-004**: Every material degradation shows exact count, representative examples, affected behavior, and expected export consequence before the editor may decide.
@@ -402,11 +413,11 @@ Only owner-accepted decisions are requirements here. Future feature requirements
 ## Notifications
 
 - **V2-UX-NOTIF-001**: Run Notification Tiers are determined by user consequence and required attention, not raw provider, Harness, tool, or technical severity events.
-- **V2-UX-NOTIF-002**: Routine progress updates only the relevant Run Activity Header, timeline, switcher row, and Global Attention projection and never produces a toast or Windows notification.
+- **V2-UX-NOTIF-002**: Routine progress updates only the relevant Run Activity Header, timeline, switcher row, and Global Attention projection and never produces a toast or system notification.
 - **V2-UX-NOTIF-003**: An ordinary non-actionable foreground outcome produces at most one Quiet Completion Notice that auto-dismisses and remains retrievable in `最近完成` without entering the Actionable Attention Count.
 - **V2-UX-NOTIF-004**: Clarification Requests, failures, ambiguous external outcomes, and Proposal/Review/Effect or other named decision-ready records create persistent actionable in-app attention using their accepted user-facing labels; target-house internal Signoff/Public Release items appear only as Milestone Version or Publication Version actions.
-- **V2-UX-NOTIF-005**: While AI7 is backgrounded or minimized, action-required and abnormal events may produce a Privacy-safe Windows Notification. Ordinary completion notifications are a separate user setting and are not enabled by default.
-- **V2-UX-NOTIF-006**: Windows notification content defaults to generic AI7 event wording and omits Book name, manuscript/source/candidate text, factual claims, people/place names derived from unpublished material, provider payload, and decision detail.
+- **V2-UX-NOTIF-005**: While AI7 is backgrounded or minimized, action-required and abnormal events may produce a Privacy-safe System Notification through Windows or macOS. Ordinary completion notifications are a separate user setting and are not enabled by default.
+- **V2-UX-NOTIF-006**: System notification content defaults to generic AI7 event wording and omits Book name, manuscript/source/candidate text, factual claims, people/place names derived from unpublished material, provider payload, and decision detail.
 - **V2-UX-NOTIF-007**: Notification sound and richer identity/detail are disabled by default and configurable separately; changing notification privacy never grants provider processing, export, or Public Release Permission.
 - **V2-UX-NOTIF-008**: Repeated events coalesce per Book into a Book-coalesced Notification without merging authoritative records. Opening it routes to the Book-grouped exact event list, and a single event deep-links directly to its Run/record.
 - **V2-UX-NOTIF-009**: Editorial Focus Mode suppresses transient foreground presentation but does not pause Runs, clear badges, or hide durable actionable attention. Suppressed ordinary notices remain reachable in history.
@@ -632,7 +643,7 @@ Only owner-accepted decisions are requirements here. Future feature requirements
 ## Milestone Version designation
 
 - **V2-UX-MILE-001**: The target People's Literature Publishing House Workflow Profiles expose no user-facing `Signoff`, `签发`, Signoff readiness card, or formal signing step; ordinary editorial users work with Milestone Versions.
-- **V2-UX-MILE-002**: `保存为里程碑版本` is available from Deliverable version/history context and relevant Workflow phases and is never conflated with `Ctrl+S`, journal persistence, file Save As, export, Delivery, or Public Release.
+- **V2-UX-MILE-002**: `保存为里程碑版本` is available from Deliverable version/history context and relevant Workflow phases and is never conflated with the native Journal Save shortcut, journal persistence, file Save As, export, Delivery, or Public Release.
 - **V2-UX-MILE-003**: The action requires a Milestone Version Label and Milestone Purpose and permits an optional note. AI7 may recommend phase/date-based labels and purposes, but the editor can edit them and no recommendation creates the milestone.
 - **V2-UX-MILE-004**: For a Manuscript with journal state newer than its latest immutable revision, one activation first validates/persists a Manuscript Checkpoint and creates a new Manuscript Revision; when an exact immutable version already exists, it may designate that version without duplicating content.
 - **V2-UX-MILE-005**: The same user interaction records milestone metadata and a separate internal Signoff Record binding exact Deliverable revision, workflow evidence, actor/time, label, and stated next use. The ordinary UI exposes only milestone language.
@@ -759,7 +770,7 @@ Only owner-accepted decisions are requirements here. Future feature requirements
 - **V2-UX-FDBK-005**: Every reason interaction offers two or three context-specific alternatives with none preselected, keeps `其他 / 自行输入` adjacent, and supports Chinese IME without delaying the next editorial action.
 - **V2-UX-FDBK-006**: An AI7-generated reason appears only as an explicitly labeled `AI7 的猜测` among the alternatives. Capture distinguishes acceptance as-is, editor correction, another alternative, editor-authored free text, and dismissal.
 - **V2-UX-FDBK-007**: Dismissal records only the absence of an optional reason. It never implies satisfaction, dissatisfaction, agreement, factual correctness, Learning Eligibility, or refusal to participate in future learning.
-- **V2-UX-FDBK-008**: The prompt produces no unread count, reminder loop, Global Attention item, Windows notification, celebratory response, or penalty. Its originating business decision/outcome remains usable immediately.
+- **V2-UX-FDBK-008**: The prompt produces no unread count, reminder loop, Global Attention item, system notification, celebratory response, or penalty. Its originating business decision/outcome remains usable immediately.
 - **V2-UX-FDBK-009**: Feedback History View groups attributable Quality Signals and optional reasons by Book, origin type, time, and Editorial Dimension and deep-links to the exact decision/outcome without exposing a copied Harness transcript.
 - **V2-UX-FDBK-010**: `质量与学习` is passive history for ordinary feedback and becomes action-oriented only for a real governed Learning Material, eligibility, memory, or audit decision; the design of those later decisions remains separate.
 - **V2-UX-FDBK-011**: Capturing or displaying feedback does not by itself create a Learning Eligibility Decision, approve a Memory Candidate, activate House/Series/Book memory, expand Run Source Scope, train/fine-tune a Foundation Model, or authorize any Effect/publication.
@@ -813,22 +824,22 @@ Only owner-accepted decisions are requirements here. Future feature requirements
 ## Distribution channel and Product Data Location presentation
 
 - **V2-UX-DSTO-001**: Normal channel/data-location state appears in `设置 > 数据与存储`, not as permanent sidebar, Manuscript, Book or Task chrome.
-- **V2-UX-DSTO-002**: Data and Storage Summary shows Distribution Channel Status (`便携版` or `安装版`), actual user-readable Product Data Location, local footprint, `查看数据位置`, and Protected Secret Store separation.
-- **V2-UX-DSTO-003**: A writable portable channel states that program files and product data occupy separate areas inside the AI7 folder and that moving/copying the folder moves product data but never Model Service credentials.
-- **V2-UX-DSTO-004**: The installer channel states that product data normally lives in the supported local Windows application-data location without requiring the editor to understand `%LOCALAPPDATA%` notation; the exact path is secondary detail.
+- **V2-UX-DSTO-002**: Data and Storage Summary shows the current product platform, actual Distribution Channel Status, actual user-readable Product Data Location, local footprint, `查看数据位置`, and Protected Secret Store separation.
+- **V2-UX-DSTO-003**: On Windows, a writable portable channel states that program files and product data occupy separate areas inside the AI7 folder and that moving/copying the folder moves product data but never Model Service credentials.
+- **V2-UX-DSTO-004**: On Windows, the installer channel states that product data normally lives in the supported local application-data location without requiring the editor to understand `%LOCALAPPDATA%` notation; the exact path is secondary detail. macOS uses its selected native channel and location language instead.
 - **V2-UX-DSTO-005**: If the portable folder is unwritable, AI7 automatically uses the supported local fallback, shows one clear ordinary notice naming the actual location, persists a reviewable Data Location Exception State, and no longer describes the instance as fully self-contained.
 - **V2-UX-DSTO-006**: Placement beneath a known sync/backup root produces a non-blocking warning that unpublished editorial material may be copied by that external service; AI7 does not silently move data or imply that model processing/public release occurred.
 - **V2-UX-DSTO-007**: Placement in a prohibited repository/development tree routes directly to Data Location Remediation Guidance and a supported local destination. The editor is never asked to evaluate repository, shell, permission-escalation or agent-safety concepts.
-- **V2-UX-DSTO-008**: V1 exposes no arbitrary Product Data Location/Agent Data Root picker. Portable placement follows the AI7 folder; installer/fallback placement follows the supported local path.
+- **V2-UX-DSTO-008**: V1 exposes no arbitrary Product Data Location/Agent Data Root picker. Windows portable placement follows the AI7 folder; every installed/fallback platform placement follows its supported local path.
 - **V2-UX-DSTO-009**: `查看数据位置` is a secondary support/awareness action. It does not edit the path, grant a Run or agent filesystem scope, turn internal records into ordinary manuscript files, or authorize manual mutation of product storage.
-- **V2-UX-DSTO-010**: Model Service credentials remain in the Protected Secret Store outside both portable and installer product data. No channel status, folder copy or location view claims that credentials are included.
+- **V2-UX-DSTO-010**: Model Service credentials remain in the OS Protected Secret Store—Windows Credential Manager or macOS Keychain—outside product data. No channel status, folder copy or location view claims that credentials are included.
 - **V2-UX-DSTO-011**: Data-location notices use distinct plain-language states for fallback, sync/backup exposure and prohibited placement; they never reuse Editing Protection Mode, Recovery Attention, Provider offline or Local Export wording.
 - **V2-UX-DSTO-012**: A dismissed non-blocking sync warning remains reachable in Data and Storage Summary. A prohibited placement remains actionable until the supported-location condition is restored; hiding a notice never changes the underlying state.
 - **V2-UX-DSTO-013**: Any future arbitrary/custom/network data root, credential-carrying portable mode or automatic cross-channel migration protocol requires a new storage-authority decision rather than being introduced as a Settings toggle.
 
 ## Keyboard commands and action discoverability
 
-- **V2-UX-KEY-001**: AI7 preserves familiar Windows editing defaults for find, replacement preview, journal save, undo/redo, back/return and region navigation, with exact Chinese action names and visible shortcut hints.
+- **V2-UX-KEY-001**: AI7 preserves familiar native Windows and macOS editing defaults for find, replacement preview, journal save, undo/redo, back/return and region navigation, with exact Chinese action names and visible platform-appropriate shortcut hints.
 - **V2-UX-KEY-002**: Limited Shortcut Remapping applies only to declared navigation, search and view commands under `设置 > 键盘与无障碍 > 快捷键`; editable-text, OS-reserved and IME-reserved keys are not remappable.
 - **V2-UX-KEY-003**: Remapping detects exact and prefix conflicts, identifies the affected contexts, refuses ambiguous bindings, and provides per-command and whole-section `恢复默认` actions.
 - **V2-UX-KEY-004**: Run Authorization, Proposal Decision, Review Decision, Effect Approval, `保存为里程碑版本`, `设为发稿版本`, deletion and other destructive/authority-bearing actions have no application-global shortcut.
@@ -840,7 +851,7 @@ Only owner-accepted decisions are requirements here. Future feature requirements
 - **V2-UX-KEY-010**: Menu/disclosure navigation is keyboard complete, announces expanded state and restores focus to its trigger or resulting exact context. Closing a menu never invokes, resolves, dismisses or changes an underlying record.
 - **V2-UX-KEY-011**: Shortcut labels update immediately after a valid remap across menus, tooltips and command help; stale labels cannot remain beside active commands.
 - **V2-UX-KEY-012**: Shortcut preferences are local view/input configuration and do not travel in manuscripts, Delivery Packages or exports or change Task Skills, AI7 Capabilities, Run authority or domain commands.
-- **V2-UX-KEY-013**: Keyboard-only operation, visible focus, Windows high contrast, system zoom/reflow and applicable assistive-technology semantics are unconditional product behavior, not a user-selectable accessibility mode.
+- **V2-UX-KEY-013**: Keyboard-only operation, visible focus, native accessibility appearance, system zoom/reflow and applicable Windows/macOS assistive-technology semantics are unconditional product behavior, not a user-selectable accessibility mode.
 - **V2-UX-KEY-014**: At high zoom or reduced space, action entries may consolidate into labeled menus only if state, consequence, error and current primary action remain readable without horizontal scrolling or hidden focus.
 
 ## Workbench density, reading typography and flexible surfaces
@@ -868,4 +879,4 @@ Only owner-accepted decisions are requirements here. Future feature requirements
 - **V2-UX-VIEW-021**: Position, exact durable selection anchors, search state and view preferences transfer when representable from acknowledged state. Renderer-local unacknowledged buffers and unverifiable undo state never receive a cross-window durability claim.
 - **V2-UX-VIEW-022**: Every embedded or detached Renderer receives only bounded projections from the authoritative service and never holds the whole Manuscript. Renderer crash recovery starts from acknowledged service state and makes no promise about a lost process-local buffer.
 - **V2-UX-VIEW-023**: Opening, closing, moving, resizing or transferring a window never by itself pauses/cancels a Run, closes a Book, changes manuscript authority, records a decision, approves an Effect, acknowledges attention or commits/undoes an edit.
-- **V2-UX-VIEW-024**: Windows high contrast, 125/150/200% scaling, zoom/reflow, reduced motion, visible focus and non-color state meaning remain supported under both density modes, every typography preference and every region/window arrangement.
+- **V2-UX-VIEW-024**: Native high-contrast/accessibility appearance, platform scaling, zoom/reflow, reduced motion, visible focus and non-color state meaning remain supported under both density modes, every typography preference and every region/window arrangement.

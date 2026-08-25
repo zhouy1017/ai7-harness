@@ -2,7 +2,7 @@
 
 Status: **historical noncanonical reference; non-gating under ADR 0027 and Clarification 0004**
 
-> This crosswalk preserves useful requirement and journey semantics. Its counts, exact-object mapping, evidence gaps, macOS discussion, and validation language are not V2 acceptance criteria, proof requests, CI inputs, or owner blockers. Current decisions live in [README](./README.md), [Architecture](./ARCHITECTURE.md), and [Decision Queue](./DECISION-QUEUE.md).
+> This crosswalk preserves useful requirement and journey semantics. Its counts, exact-object mapping, evidence gaps, macOS discussion, and validation language are not V2 acceptance criteria, proof requests, CI inputs, or owner blockers. ADR 0028 now accepts Windows and macOS as one product; statements below about missing macOS evidence describe the historical packet only. Current decisions live in [README](./README.md), [Architecture](./ARCHITECTURE.md), and [Decision Queue](./DECISION-QUEUE.md).
 
 This crosswalk replaces the UI candidate's broad source aliases with exact, manifest-admitted Git objects. It covers all **79/79** numbered candidate requirements and all **14/14** candidate journeys. A row says which accepted record owns the semantic claim; it does not accept the candidate screen, geometry, mechanism, state enum, or validation status.
 
@@ -45,7 +45,7 @@ All links below are immutable commit permalinks. The 51 row-mapped objects are e
 | [U-V](https://github.com/zhouy1017/ai7-harness/blob/587d6455f6a578d3df8a39f534ec7a057c07a18c/docs/ui-ux/visual-system.md) | UI candidate visual/accessibility reference; geometry and Windows mechanics remain candidate-only. |
 | [P-H](https://github.com/zhouy1017/ai7-harness/blob/960689172bcf54eb3f27b57045a4ce4e9f20695d/kick-in/37-v1-platform-freeze-handoff.md) | Platform candidate freeze handoff. |
 | [P-W](https://github.com/zhouy1017/ai7-harness/blob/960689172bcf54eb3f27b57045a4ce4e9f20695d/kick-in/35-windows-macos-product-platform.md) | Platform candidate consistency recommendation and open mechanics. |
-| [P-27](https://github.com/zhouy1017/ai7-harness/blob/960689172bcf54eb3f27b57045a4ce4e9f20695d/docs/adr/0027-support-windows-and-macos-as-one-product.md) | Candidate ADR 0027; not canonical despite its branch-local status. |
+| [P-27](https://github.com/zhouy1017/ai7-harness/blob/960689172bcf54eb3f27b57045a4ce4e9f20695d/docs/adr/0027-support-windows-and-macos-as-one-product.md) | Historical source-branch platform ADR 0027; integrated as current ADR 0028 after resolving the aggregate numbering collision. |
 | [P-F](https://github.com/zhouy1017/ai7-harness/blob/960689172bcf54eb3f27b57045a4ce4e9f20695d/docs/policies/factual-verification-policy.md) | Candidate Q16 five-rule policy wording. |
 | [K-R](https://github.com/zhouy1017/ai7-harness/blob/c383afd2fdb5f08342cde277b7babced6c1207fc/docs/architecture-exploration/REVIEW-PACKET.md) | Commander-curated evidence/status packet at `c383afd`. |
 | [K-D](https://github.com/zhouy1017/ai7-harness/blob/c383afd2fdb5f08342cde277b7babced6c1207fc/docs/architecture-exploration/CANDIDATE-DELTA-REVIEW.md) | Independent candidate-delta synopsis and A1 brief at `c383afd`. |

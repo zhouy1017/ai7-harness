@@ -2,7 +2,7 @@
 
 Status: **coherent noncanonical candidate; no implementation authorization**
 
-AI7 V2 is a Chinese-first Windows desktop publishing product. AI7 owns the product, its business truth, and every consequential action. **DeepSeek Harness (DSH)** supplies the one generic agent loop, composed inside the AI7 Node service behind an AI7-owned boundary. **DeepSeek is the primary but not the exclusive model provider**, and every configured model—including an optional alternative frontier provider—runs through that same loop and the same AI7 provider, scope, budget, and egress boundaries.
+AI7 V2 is one Chinese-first desktop publishing product on Windows and macOS. Both platforms share product identity, domain and authority semantics, workflows, core features, document fidelity, data meaning, and UI/UX outcomes while native OS adapters handle platform conventions. AI7 owns the product, its business truth, and every consequential action. **DeepSeek Harness (DSH)** supplies the one generic agent loop, composed inside the AI7 Node service behind an AI7-owned boundary. **DeepSeek is the primary but not the exclusive model provider**, and every configured model—including an optional alternative frontier provider—runs through that same loop and the same AI7 provider, scope, budget, and egress boundaries.
 
 Codex is not part of the product. It remains the **Codex Interaction Model Reference**: a non-runtime interaction and engineering reference for task capture, progress, interruption, clarification, history, review, host boundaries, and extension design.
 
@@ -17,7 +17,7 @@ This is a design-stage architecture. Unknown DSH details are recorded in [Assump
 5. **Primary, not exclusive.** DeepSeek is the default model family for every Model Role. An alternative provider is a configuration inside the AI7 Provider Resolution Plan, never a second harness, silent fallback, or separate authority path.
 6. **Full engine, narrow tool surface.** AI7 adopts DSH composition machinery—profiles, bundles, presets, plugins, context assembly, tool pipelines, policy seams, replay—and rejects its coding-agent purpose, default presets and prompts, default tool set, and web surface. Editorial Runs receive AI7 Capabilities, not a shell, roaming filesystem, arbitrary network, coding presets, or developer-profile escalation.
 7. **One authority, many projections.** The Manuscript Revision is authoritative. Editor windows, indexes, outlines, retrieval chunks, embeddings, progress views, and assembled model context are rebuildable projections.
-8. **Functional completeness over proof machinery.** Engineering CI covers Windows end-to-end user journeys and regressions for observed bugs. Architecture assumptions do not create separate qualification or verification programmes.
+8. **Functional completeness over proof machinery.** One logical provider-free E2E Functional Gate covers complete user journeys and observed-bug regressions on Windows and macOS. Architecture assumptions and native platform differences do not create separate qualification or verification programmes.
 
 ## Product boundary
 
@@ -46,7 +46,7 @@ AI7 retains the accepted three-process product topology:
 │ Electron main                                               │
 │ windows, native lifecycle, service supervision, safe IPC    │
 └───────────────────────┬─────────────────────────────────────┘
-                        │ typed IPC: stdio or Windows pipe
+                        │ typed IPC: stdio or private local adapter
 ┌───────────────────────▼─────────────────────────────────────┐
 │ Renderer                                                    │
 │ AI7 UI, ProseMirror bounded window, task/review projections │
@@ -201,7 +201,7 @@ The cardinality is explicit: one Run owns one or more attempts; each attempt own
 
 Bindings pin exact identities and semantic digests, including the AI7 behavior composition and the composed DSH configuration and plugin pins. Harness Execution Spans identify the exact technical ranges for dispatch, Resume, or Retry. Bindings carry references, never copied transcript content or transferred authority.
 
-All product persistence sits under AI7-controlled locations inside the Agent Data Root except the Protected Secret Store, and this includes the Harness Session Ledger and the AI7-controlled local plugin store. The portable channel keeps data inside the AI7 folder; the installer normally uses `%LOCALAPPDATA%\AI7`. Secrets never travel with a portable folder. Manuscripts and their derivatives never enter repositories, hosted CI, build artifacts, or shipped fixtures.
+All product persistence sits under AI7-controlled locations inside the Agent Data Root except the Protected Secret Store, and this includes the Harness Session Ledger and the AI7-controlled local plugin store. On Windows, the portable channel keeps data inside the AI7 folder and the installer normally uses `%LOCALAPPDATA%\AI7`. macOS uses a platform-appropriate application-data location selected by its implementation decision. Secrets remain outside copied product data and are resolved through Windows Credential Manager or macOS Keychain behind the same Credential Broker. Manuscripts and their derivatives never enter repositories, hosted CI, build artifacts, or shipped fixtures.
 
 ## Composition and dependency boundary
 
@@ -213,7 +213,7 @@ When product behavior is missing, prefer in order: an AI7-owned adapter or capab
 
 ## Engineering verification
 
-The standing CI surface is one Windows E2E suite covering complete user-facing journeys and regressions for observed bugs. It remains provider-free and contains no unpublished manuscript text or secret. Build or packaging runs only when needed to launch the E2E subject.
+The standing CI surface is one logical E2E Functional Gate, executed on Windows and macOS, covering complete user-facing journeys and regressions for observed bugs. It remains provider-free and contains no unpublished manuscript text or secret. Platform-native setup may differ inside this same gate. Build or packaging runs only when needed to launch each platform's E2E subject.
 
 There are no separate architecture-closure, unit, integration, contract, property, coverage, static-analysis, performance, security, provider, plugin, schema, ABI, packaging, replay, provenance, reproducibility, or release-proof gates. The accepted product behaviors above remain requirements and may be exercised through complete journeys.
 

@@ -72,15 +72,15 @@ Status: **row-by-row review; only rows explicitly marked accepted are settled**
 
 | Asset / behavior | Proposed decision | Target treatment | Why |
 | --- | --- | --- | --- |
-| Standalone-only V1 | **Accepted Q23** | One Chinese-first Windows desktop workbench over one AI7 domain/Task Ledger authority and one Harness runtime | Avoids dual-surface complexity while making the new Standalone editor—not the old UI—the complete V1 product. |
+| Standalone-only V1 | **Accepted Q23, platform scope amended by ADR 0028** | One Chinese-first Windows-and-macOS desktop workbench over one AI7 domain/Task Ledger authority and one Harness runtime | Avoids dual-surface complexity while making the new Standalone editor—not the old UI—the complete V1 product. |
 | Professional Standalone text editing | **Accepted as release-critical** | New editor and UI/UX evaluated on long Chinese manuscripts, structure/selection, durable editing/recovery, proposals/review, and import/export | The old Standalone editor was unsatisfactory; dropping Word cannot reduce V1 to chat plus a weak text box. |
 | Standalone/Word parity, Word binding, drift, and synchronization | **Dropped/deferred from V1** | Contingency safety evidence only; a future Word scope needs a new evidence-backed decision | One V1 surface has no cross-surface parity or synchronization contract. |
 | Word C# COM implementation and add-in | **Do not migrate in V1** | Old-repository/offline contingency evidence | No COM packages, Host protocol, Word installer, signing, or clean-machine Word gate in V1. |
 | Existing monolithic renderer/main/runtime modules | Drop as foundation | Rewrite around new client/domain seams; retain journey contracts | File sizes and mixed responsibilities make them poor migration roots. |
 | Legacy layouts, Ribbon/component semantics, and Operations/evidence presentation | **Accepted: drop as UI authority** | Mine only for candidate user outcomes and failure cases | The new UI starts fresh; no legacy component or layout parity obligation. |
 | Superseded UI PRDs/prototypes | Drop as authority | Reference only | The source repo explicitly closed them for redesign. |
-| Windows installer/repair/release machinery | Adapt later | Re-evaluate after final component/process topology | Useful evidence, but premature to port before deployable boundaries exist. |
-| Windows-focused desktop target | **Accepted: keep** | Product/platform constraint | It shapes the Standalone runtime, distribution, editor, test, and local application boundary materially. |
+| Windows installer/repair/release machinery | Adapt as the Windows platform implementation | Keep zip-portable and NSIS outcomes separate from future macOS packaging mechanics | Useful Windows evidence, not a cross-platform package template. |
+| Windows-and-macOS desktop target | **Accepted: keep under ADR 0028** | One product contract plus native platform adapters | It shapes the Standalone runtime, distribution, editor, E2E journeys, and local application boundary materially. |
 
 ## Tests and documentation
 
@@ -89,7 +89,7 @@ Status: **row-by-row review; only rows explicitly marked accepted are settled**
 | Glossary and high-value ADRs | Keep as evidence; re-ratify selectively | Import concepts with source attribution; do not blindly inherit every implementation decision | The new foundation invalidates some assumptions. |
 | Capability inventory and user journeys | Keep | Target acceptance ledger | Best source of product parity truth. |
 | Behavioral, backend-contract, system, and release tests | Adapt/classify | Migrate by behavior class and target seam; retain only surface-neutral value from Word-coupled tests | Word/COM/IPC tests are deferred, while manuscript/Effect behaviors are re-expressed against Standalone/domain seams. |
-| Tiered GitHub Actions verification ladder | **Accepted: keep, reduced to two Windows workflows** | `pr` and `release`, each a single job on `windows-2025`; focused verification stays local | Windows is the only target, so it is the only place required evidence is produced. Ubuntu lane, nightly, Test Catalog, and quarantine registry are deferred behind named triggers, not rejected. ADR 0014. |
+| Tiered GitHub Actions verification ladder | **Superseded by ADR 0027** | One logical provider-free E2E Functional Gate executed on Windows and macOS | Only complete supported journeys and observed-bug regressions remain standing CI; no additional tier or platform-certification programme is revived. |
 | Generated mock-LLM-provider test cases | **Accepted: keep and integrate** | Deterministic, provider-free fixtures/cases shared across appropriate tiers | They are required CI evidence; live-provider rehearsals remain separate and optional/authorized. |
 | Revised root `AGENTS.md` and one-line `CLAUDE.md` wrapper | **Accepted: keep** | Concise new-project standing rules plus focused linked runbooks | Preserve durable rules, not the legacy file's implementation chronology. |
 | Static byte/digest/source-shape tests | Drop unless they protect a real invariant | Replace with behavioral/contract proof | Avoid freezing old decomposition. |

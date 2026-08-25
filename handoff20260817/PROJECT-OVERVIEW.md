@@ -8,7 +8,7 @@ Design interview: **36 questions, all resolved or explicitly deferred. 26 ADRs.*
 
 ## 1. What AI7 is
 
-**AI7 is a Chinese-first, Windows-only desktop editorial workbench for professionals in leading literary publishing houses in mainland China.**
+**AI7 is one Chinese-first Windows-and-macOS desktop editorial workbench for professionals in leading literary publishing houses in mainland China.**
 
 It wraps agentic work into an editor's text-editing workflow. The intended user is a literature professional, not a computer expert — so the product never asks them to authorize something they have no basis to judge, and never requires filesystem literacy to reach their own work.
 
@@ -16,7 +16,7 @@ The product display name is exactly **AI7**. Harness is the execution foundation
 
 ### The primary story
 
-> As an editorial professional in a leading Chinese literary publishing house, I use one Windows desktop workspace to do multi-aspect work across a Book, its sources, and its deliverables. I can inspect evidence, reasoning, plans, and proposed changes; I keep publication authority and recovery history; and unpublished material never reaches a public channel without my permission.
+> As an editorial professional in a leading Chinese literary publishing house, I use one AI7 desktop workspace on Windows or macOS to do multi-aspect work across a Book, its sources, and its deliverables. I can inspect evidence, reasoning, plans, and proposed changes; I keep publication authority and recovery history; and unpublished material never reaches a public channel without my permission.
 
 ### What it produces
 
@@ -50,7 +50,7 @@ Success is **Editor-comparable Delivery Quality plus measurable workload reducti
 | **Python** | The legacy Python had zero third-party dependencies and handled DOCX with stdlib zip and XML. Nothing required it |
 | **Generic agent tools in editorial work** | No shell, roaming filesystem, or arbitrary network reaches an editorial Run |
 | **Legacy production data** | Nothing migrates except API credentials, reviewed mock-provider evidence, and selected test sample Books |
-| **Ubuntu as a target** | Windows only. Ubuntu may appear as a CI runner if separately justified |
+| **Ubuntu as a target** | Product platforms are Windows and macOS. Ubuntu has no product or release role |
 
 ---
 
@@ -113,9 +113,9 @@ Two ledgers, one causal graph: the **AI7 Task Ledger** holds business truth; the
 
 TypeScript and Node throughout. Harness consumed as **exactly pinned npm packages** — only the subset AI7 needs, never the `@deepseek-ai/dsh` CLI aggregate, because *not depending on a package is a stronger guarantee than not wiring it*.
 
-Three processes: a thin **Electron main**, a **renderer** holding UI and editor, and a separate **Node service** holding domain services and the Harness runtime. IPC over stdio or a named pipe, never a TCP listener.
+Three processes on both supported platforms: a thin **Electron main**, a **renderer** holding UI and editor, and a separate **Node service** holding domain services and the Harness runtime. IPC over stdio or a private platform-local adapter, never a TCP listener.
 
-Ships as a **zip portable folder and an NSIS installer**. In the portable channel the Agent Data Root lives inside the AI7 folder, so an installation is self-contained; the Protected Secret Store always stays outside, because a portable folder is designed to be copied.
+Windows ships a **zip portable folder and an NSIS installer**. In the Windows portable channel the Agent Data Root lives inside the AI7 folder, so that installation is self-contained; the Protected Secret Store always stays outside copied product data. macOS is an equal product platform whose floor/CPU, package/update, data-root, Keychain, IPC, and signing/notarization mechanics remain separate implementation decisions.
 
 ### Scale
 
@@ -176,7 +176,7 @@ Any authorized person may read a manuscript locally, and Quality Signals may ret
 
 ## 8. How it gets built and verified
 
-**Verification is two workflows**, `pr` and `release`, each a single job on `windows-2025`. `pr` is the only required gate, provider-free, targeting ten minutes. A Ubuntu lane, nightly tier, Test Catalog, and quarantine registry are each deferred behind a named trigger — machinery arrives when a concrete problem appears.
+**Verification is one logical provider-free E2E Functional Gate**, executed on Windows and macOS, covering complete supported journeys and observed-bug regressions. There are no separate unit, integration, contract, static-analysis, accessibility, performance, security, package, signing, replay, or release-proof gates.
 
 **Repository development uses three agent roles**: a Commander that dispatches and is sole integrator, Workers that write only their own branch, and an independent Reviewer at a task class at least equal to the work reviewed, cross-provider by default. Operating rules never depend on which model is running; Layer B is the only provider-specific policy surface, while actual dispatch logs are evidence rather than policy.
 
@@ -193,8 +193,8 @@ Not questions, but things a reader should know are unsettled:
 | **Retrieval strategy** — lexical, vector, or hybrid | Deferred to the spike. Lexical is stronger for Chinese than commonly assumed and costs no model call |
 | **Editor library confidence** | ProseMirror at *medium* confidence. Windowing reduces how much this matters, but a spike should confirm |
 | **Per-operation latency budgets** | Proposed as calibration only; to be fixed against measurement |
-| **Code signing certificate** | Deferred until explicitly requested. Unsigned builds are a known SmartScreen adoption cost |
-| **Windows sandbox enforcement** | Landlock is Linux-only. Whether the Windows path genuinely enforces the Agent Data Root must be verified before the boundary is called *enforced* rather than *intended* |
+| **Platform distribution and signing mechanics** | Windows retains zip/NSIS and deferred signing with a known SmartScreen cost. macOS package/update, floor/CPU, data location, and signing/notarization remain open implementation decisions |
+| **Platform confinement** | AI7 capability/service facades are the enforceable boundary. Do not claim whole-process Windows or macOS confinement before a concrete native mechanism supports it |
 | **Question 16 scope** | The answer was "mostly okay" with one correction; whether the other four content/evidence classes were endorsed was never itemized |
 | **UI/UX** | Reserved for a separate session by design — layout, interaction, information architecture, renderer framework |
 

@@ -7,7 +7,7 @@ Paste the block below. Replace the **Your task** line with one of the variants u
 ## The prompt
 
 ```text
-You are picking up AI7: a Chinese-first, Windows-only desktop editorial workbench
+You are picking up AI7: one Chinese-first Windows-and-macOS desktop editorial workbench
 for professionals in leading literary publishing houses in mainland China, built
 on DeepSeek Harness.
 
@@ -80,10 +80,10 @@ that kick-in/33 deliberately left unset.
 ```text
 Resolve two carried items. First, confirm whether the Question 16 answer of
 "mostly okay" endorsed the four content and evidence classes the owner did not
-correct; ADR 0005 currently treats them as accepted. Second, determine whether
-the Windows sandbox path genuinely enforces the Agent Data Root boundary, given
-that the published Landlock addons are Linux-only, and correct the wording in
-ADR 0017 and the risk register to match what you find.
+correct; ADR 0005 currently treats them as accepted. Second, preserve the rule
+that AI7 capability/service facades are the enforceable Agent Data Root boundary
+on Windows and macOS; native controls add defence in depth only after a concrete
+mechanism supports that claim.
 ```
 
 **UI/UX session** — reserved by design.

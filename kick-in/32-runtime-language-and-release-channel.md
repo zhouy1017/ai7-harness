@@ -2,6 +2,8 @@
 
 Status: **accepted runtime/release direction; separate release-validation and proof gates are superseded by ADR 0027**
 
+> Platform scope note (2026-08-25): AI7 is one Windows-and-macOS product under ADR 0028. The zip-portable, NSIS, `%LOCALAPPDATA%`, DPAPI/Credential Manager, and SmartScreen clauses below are Windows adapter decisions. macOS minimum version/CPU, package/update, Agent Data Root, Keychain, IPC, and signing/notarization mechanics remain separate implementation decisions and must not inherit Windows behavior silently.
+
 ## Evidence: what the legacy Python actually was
 
 Audited at `ai7-reborn-ai@3e6e9ac`.
@@ -23,7 +25,7 @@ Every legacy capability has a direct Node equivalent, most of them stdlib to std
 | --- | --- |
 | `zipfile` + `xml.etree` for DOCX | A zip library plus an XML parser. Direct OOXML control is arguably better for the round-trip fidelity Question 23 requires |
 | `hashlib` | `node:crypto` |
-| `ctypes` into DPAPI | Harness ships `dsh-credentials`; Windows Credential Manager bindings exist |
+| `ctypes` into DPAPI | AI7 Credential Broker with Windows Credential Manager and macOS Keychain target adapters |
 | `pathlib`, `json`, `re`, `uuid`, `datetime`, `tempfile`, `threading` | Direct Node equivalents |
 
 Three accepted decisions already pointed here. Question 30 pins a TypeScript/ESM package family on Node `^22.19.0 || >=24`. Question 31 forbids a competing runtime. ADR 0006 accepted manuscript *semantics* while explicitly rejecting the legacy Python, JSON-store, and proof-compatibility machinery — so that business logic is being re-expressed from contract regardless, and keeping Python would mean porting nothing while carrying a second runtime.
@@ -59,7 +61,7 @@ AI7/
 
 ### What stays outside, and why
 
-**The Protected Secret Store.** ADR 0017 places it outside the Agent Data Root, and that constraint survives unchanged — this is the case where "inside the folder" is not possible. Credentials live in Windows Credential Manager or DPAPI, resolved through the Credential Broker. A portable folder is designed to be copied, and a copied folder carrying credential material to another machine would be a genuine leak rather than a theoretical one.
+**The Protected Secret Store.** ADR 0017 places it outside the Agent Data Root, and that constraint survives unchanged — this is the case where "inside the folder" is not possible. Credentials live in Windows Credential Manager or macOS Keychain, resolved through the Credential Broker. Copied product data must never carry credential material to another machine.
 
 ### Residual risk and its mitigation
 
@@ -78,7 +80,7 @@ A portable folder placed somewhere unwritable — `Program Files`, a read-only s
 
 ### Consequences for release and update
 
-**Question 24's `release` workflow proves both channels.** For the zip: extract → first-run data-root creation → launch → canonical Standalone journey → removal leaving no residue outside the folder and outside the Protected Secret Store. For the installer: install → launch → canonical journey → uninstall.
+**Historical release-proof wording is superseded by ADR 0027.** The Windows zip and installer remain supported outcomes, but their user-visible behavior is covered only through applicable complete E2E journeys; no separate package or release-proof gate exists.
 
 **Signing is deferred until explicitly requested** (Question 26). Unsigned builds trigger SmartScreen, which for a non-expert user on a corporate machine is a hard stop rather than a warning, so this is recorded as a known adoption cost to be paid when the owner chooses.
 
@@ -89,11 +91,11 @@ A portable folder placed somewhere unwritable — `Program Files`, a read-only s
 Accepted with owner revisions:
 
 - TypeScript and Node throughout, with no embedded Python interpreter, and a named-capability trigger for a bounded native module or sidecar;
-- two Windows channels from one builder and one source, a zip portable folder and an NSIS installer (revised at Question 26 from portable-only);
-- the Agent Data Root lives inside the AI7 folder, keeping the installation self-contained;
+- one Windows-and-macOS product from one source, with two Windows channels—a zip portable folder and an NSIS installer—and macOS distribution mechanics deferred;
+- in the Windows portable channel, the Agent Data Root lives inside the AI7 folder, keeping that installation self-contained; macOS uses its later-selected platform location;
 - the Protected Secret Store remains outside it, since a copied folder must not carry credentials;
 - sync-root placement is detected and warned about rather than prevented, and the whole folder must stay outside any repository working tree; and
 - an unwritable location falls back to `%LOCALAPPDATA%\AI7` with a clear notice, which is the installer channel's normal path; and
-- code signing is deferred until the owner explicitly requests it, with unsigned builds recorded as a known SmartScreen adoption cost.
+- Windows code signing is deferred until the owner explicitly requests it, with unsigned builds recorded as a known SmartScreen adoption cost; this does not decide macOS signing/notarization.
 
 See [ADR 0022](../docs/adr/0022-typescript-only-runtime.md) and [ADR 0023](../docs/adr/0023-portable-release-with-self-contained-data-root.md).

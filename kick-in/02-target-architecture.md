@@ -11,7 +11,7 @@ The blanket “not accepted” label this document previously carried had become
 - The three-layer Foundation Model / Harness Agent Behavior / AI7 Editorial Intelligence separation, and the no-LLM-training invariant — Question 14 and the owner's Harness-purpose statement, ADR 0003.
 - Harness as AI7's Agent Behavior Framework rather than merely an agent-loop dependency — the owner's statement at Question 15.
 - The record-ownership split: AI7 owns manuscript history, named authorities, Effects, receipts, Policy Documents, and the Task Ledger; the Harness Session Ledger owns model/executor events; the two are joined by Execution Bindings — ADRs 0006, 0007, 0011.
-- One Windows Standalone surface in V1, no Word — ADR 0013.
+- One Windows-and-macOS Standalone product in V1, no Word — ADRs 0013 and 0028.
 
 **Still proposals, and not to be treated as project truth:**
 
@@ -31,7 +31,7 @@ Build an AI7-owned product layer over an exactly pinned Harness distribution:
 - No Python ships. AI7 is TypeScript and Node throughout, and legacy Python domain behavior is re-expressed from contract rather than wrapped (ADR 0022).
 - The Editorial Capability Profile exposes only domain-shaped capabilities; the Developer Capability Profile carries the generic tool surface and never ships to editors, with no self-service escalation between them (ADR 0017).
 - AI7 never trains or fine-tunes the Foundation Model. Its durable intelligence is the provider-independent Editorial Intelligence Layer of governed sources, knowledge, memory, policies, skills, tools, provenance, and evaluation.
-- V1 exposes one Windows Standalone desktop surface with a new professional manuscript editor. Microsoft Word is a deferred contingency, not a peer surface or release dependency.
+- V1 exposes one Standalone desktop product on Windows and macOS with a new professional manuscript editor. Microsoft Word is a deferred contingency, not a peer surface or release dependency.
 
 ## Three-layer model
 
@@ -68,7 +68,7 @@ flowchart TB
         Store["AI7 domain store + Harness session persistence"]
         Source["Import, index, exact retrieval and grounding"]
         Worker["AI7 domain services in the service process"]
-        Desktop["Windows desktop and document adapters"]
+        Desktop["Windows/macOS desktop and document adapters"]
     end
 
     User --> Standalone
@@ -90,7 +90,7 @@ flowchart TB
     Session --> Store
 ```
 
-The diagram shows ownership. The process topology was settled at Question 34: a thin Electron main, a renderer holding the UI and editor, and a separate Node service process holding AI7 domain services together with the composed Harness runtime, communicating over stdio or a named pipe and never a TCP listener. AI7 does not embed the Harness web client, which Question 31 rejected along with the rest of the Harness product surface.
+The diagram shows ownership. The process topology was settled at Question 34 and extended to both supported platforms by ADR 0028: a thin Electron main, a renderer holding the UI and editor, and a separate Node service process holding AI7 domain services together with the composed Harness runtime, communicating over stdio or a private platform-local adapter and never a TCP listener. AI7 does not embed the Harness web client, which Question 31 rejected along with the rest of the Harness product surface.
 
 ## Ownership boundaries
 

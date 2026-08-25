@@ -2,7 +2,7 @@
 
 Status: **noncanonical design reference; compacted and non-gating**
 
-The former A1 packet explored Windows+macOS parity and a seven-axis owner decision. That premise was not accepted and is retired. V2 is Windows-only. What survives is the product-semantics discipline below, applied across the zip-portable and NSIS channels and every later supported Windows cell.
+The owner has accepted Windows and macOS as one AI7 product under ADR 0028. The former A1 packet's evidence counts and proof programme remain retired, while its product-semantics and native-variation discipline now apply across both supported platforms. Windows zip-portable and NSIS are Windows channel mechanics, not the definition of product scope.
 
 Product consistency is judged by domain identity, authority, state transition, user-visible outcome, and negative guarantees—not pixels, source trees, package shapes, or evidence counts.
 
@@ -10,7 +10,7 @@ Product consistency is judged by domain identity, authority, state transition, u
 
 | ID | Shared V2 invariant |
 | --- | --- |
-| **I-01** | The product is exactly AI7: Chinese-first, professional literary publishing, Windows Standalone, with Word excluded from V1. |
+| **I-01** | The product is exactly AI7: one Chinese-first professional literary-publishing Standalone product on Windows and macOS, with Word excluded from V1. |
 | **I-02** | AI7 business and domain records remain authoritative; DeepSeek Harness technical history correlates only through Execution Bindings and Harness Execution Spans. |
 | **I-03** | Exact Book/deliverable/revision/scope, provider processing, budget, capabilities, expected outcome, and Effect classes are understandable before Run Authorization. |
 | **I-04** | Run Authorization, execution approval, Effect Approval, Proposal Decision, Review Decision, Public Release Permission, and Effect Receipt never collapse. |
@@ -21,7 +21,7 @@ Product consistency is judged by domain identity, authority, state transition, u
 | **I-09** | Manuscripts remain outside repositories and hosted CI; Editorial Runs receive AI7 Capabilities rather than generic shell/filesystem/network or coding defaults. |
 | **I-10** | Long-manuscript editing keeps no-silent-loss fidelity, bounded rendering, service-streamed whole-manuscript operations, and the 500K/1M/10M design targets. |
 | **I-11** | Parallel Runs, pause/cancel, clarification, Task Outcome, Resume/Retry/Redo/Replay, partial outcomes, and ambiguity stops retain their exact identity consequences. |
-| **I-12** | Chinese IME, keyboard, focus, zoom/reflow, non-color meaning, and applicable Windows assistive technology preserve every supported journey. |
+| **I-12** | Chinese IME, native keyboard conventions, focus, zoom/reflow, non-color meaning, and applicable Windows and macOS assistive technology preserve every supported journey. |
 | **I-13** | Material channel or CPU differences are disclosed before reliance and never weaken I-01–I-12. |
 
 ## Permitted native/channel variation
@@ -34,7 +34,7 @@ A difference is not “native variation” if it changes Book or manuscript auth
 
 The historical [A1 Evidence Crosswalk](./A1-EVIDENCE-CROSSWALK.md) remains a useful inventory of import/fidelity, long-manuscript editing, task authorization, execution/continuation, evidence/factual review, proposals/conflicts, workflow/delivery, recovery/concurrency, learning, Series/Cross-project work, onboarding, and accessibility/IME journeys.
 
-Its 79-row and 14-journey counts, exact-source mapping, candidate dispositions, macOS material, and missing-evidence lists are historical reference only. They do not define V2 completeness, CI, proof, or an owner decision.
+Its 79-row and 14-journey counts, exact-source mapping, candidate dispositions, and missing-evidence lists are historical reference only. They do not define V2 completeness, CI, or proof. Where the crosswalk says macOS had no admitted journey, that is a historical evidence observation and no longer a product-scope statement.
 
 ## V2 consequence
 

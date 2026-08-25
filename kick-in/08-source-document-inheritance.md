@@ -11,7 +11,7 @@ The following cross-cutting dispositions are accepted:
 - Keep a concise, revised new-project `AGENTS.md`; do not copy the legacy file wholesale.
 - Keep the legacy tiered GitHub Actions testing idea, combined with generated mock-LLM-provider cases. Rebaseline its names, commands, and tiers for the new architecture, and keep required CI provider-free.
 - Keep local multi-agent dispatch for repository development only. It is not a production AI7 workflow and must remain terminologically and architecturally separate from Harness-powered product agents.
-- Keep AI7 as a Windows-focused desktop product.
+- Keep AI7 as one Windows-and-macOS desktop product under ADR 0028.
 - Discard the old UI implementation and presentation model. Review and revise its user stories and product outcomes rather than porting layouts or components.
 - Discuss only original-AI7 inheritance rows with the owner. Harness-specific choices may be made by the architecture maintainer, with provenance and compatibility constraints documented.
 
@@ -163,7 +163,7 @@ The accepted boundary and bilingual terms are in [Linked Task and Harness Ledger
 
 ## Question 23 — accepted Standalone-only V1
 
-- Ship one Chinese-first Windows Standalone desktop surface over one AI7 domain/Task Ledger authority and one Harness runtime. V1 has no Word parity, COM add-in, Host protocol, synchronization, Word packaging, or Word verification gate.
+- Ship one Chinese-first Windows-and-macOS Standalone desktop product over one AI7 domain/Task Ledger authority and one Harness runtime. V1 has no Word parity, COM add-in, Host protocol, synchronization, Word packaging, or Word verification gate.
 - Treat the old Standalone editor and workbench as negative evidence, not a migration asset. Professional long-form Chinese editing quality is release-critical and must cover structure/selection, durable editing/recovery, proposals/review, Chinese input/typography, performance, and import/export fidelity.
 - Retain surface-neutral Task Intent, decision, Effect, manuscript history, merge, recovery, and evidence semantics from Word-coupled tests only by re-expressing them against Standalone/domain seams.
 - Leave the C# add-in, exact Host binding, cross-surface drift/synchronization machinery, named-pipe protocol, Word installer, and Word/COM proof corpus in the old repository or offline contingency evidence. Do not migrate or run them as V1 gates.
@@ -238,7 +238,7 @@ Conflict rule: AI7 product safety/domain authority beats Harness convenience. An
 | Product Direction | Relocate and re-ratify | Charter, domain contexts, UX design, and ADRs. Keep root `AGENTS.md` short and link to accepted owners. |
 | Core source/scope/approval/replay/recovery invariants | Preserve strongly | Editorial and Execution contexts plus architecture ADRs. Modify `kernel`, `orchestrator`, and similar names after Harness mapping. |
 | Task-skill manifest, trust, provider plan, secret rules | Preserve and modify | Execution context and skill/security ADRs. Harness Skill, AI7 Task Skill, and Cordis Plugin remain distinct terms. |
-| Windows, Electron, Python runtime, packaging | **Accepted: all four resolved** | Windows-only (Q23); Electron with a three-process topology (Q34); no Python, TypeScript throughout (Q33); zip portable plus NSIS installer (Q26). None was inherited; each was re-decided. |
+| Platforms, Electron, Python runtime, packaging | **Accepted with platform mechanics partly deferred** | Windows and macOS as one product (ADR 0028); Electron with a three-process topology (Q34); no Python, TypeScript throughout (Q33); Windows zip portable plus NSIS (Q26); concrete macOS package mechanics remain separate. None was inherited blindly. |
 | Deep-module/seam/testability principles | Preserve | Concise engineering rules after the target module boundaries exist. |
 | Monolithic renderer, legacy UI/component/layout model, and issue/PR chronology | **Accepted: drop as design authority** | Historical evidence only. User stories are reviewed separately and may be revised; UI source and presentation structure are not ported. |
 | Unified Standalone/Word authority, inward adapters, exact links, crash isolation | Archive as contingency evidence | V1 is Standalone-only; promote only surface-neutral single-authority lessons unless a future ADR adds Word. |

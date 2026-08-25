@@ -231,7 +231,7 @@ The overview may use visually prominent cards and quiet state summaries in the C
 
 ### Commands and history
 
-- `Ctrl+S` and `保存当前编辑` immediately request journal flush and wait for acknowledgement; repeated input after the request forms a newer pending state.
+- The native Journal Save shortcut—`Ctrl+S` on Windows or `⌘S` on macOS—and `保存当前编辑` immediately request journal flush and wait for acknowledgement; repeated input after the request forms a newer pending state.
 - `保存为里程碑版本` is separately named, requires label/purpose, may accept a note, and never shares a shortcut or completion message with Journal Save.
 - A Milestone Version Suggestion around large replacement, structural adjustment, Proposal application, or delivery is a quiet recommendation with `保存里程碑版本` and `暂不` actions; neither is preselected.
 - Durable undo/redo survives renderer/service restart and remains branch-scoped. Crossing a checkpoint through undo creates new working state and never deletes or edits the immutable checkpoint revision.
@@ -652,13 +652,13 @@ choose `回退并调整方向`
 ### Notification rules
 
 - A transient notice contains a concise accurate outcome label and direct navigation target but no generic `成功` when candidate review, a named decision, Effect commitment, or workflow work remains.
-- Windows notifications default to application identity plus generic event class only. Book title, deliverable, excerpt, source, claim, candidate, person/place name, provider, cost, and decision details stay inside AI7.
+- Native Windows and macOS system notifications default to application identity plus generic event class only. Book title, deliverable, excerpt, source, claim, candidate, person/place name, provider, cost, and decision details stay inside AI7.
 - Notification Settings separately control ordinary completion, sound, and richer Book identity. All default off except generic action-required/abnormal background notices.
 - Sound is never used by default. An accessibility setting may provide non-audio persistent alternatives independently from notification sound.
 - Multiple events for one Book within a short active burst produce one Book-coalesced Notification. Opening it displays the exact separate items; coalescing changes no badge count or authority.
 - Clicking navigates to the exact Book/Run/record and preserves the editor's prior return position. Dismissing only removes the transient/system projection and never resolves its underlying record.
 - Editorial Focus Mode queues Quiet Completion Notices for history and suppresses foreground popups. Actionable count and exact records remain visible when the editor exits focus mode.
-- Restart or ledger catch-up computes current unresolved attention and does not emit one Windows notification per historical event.
+- Restart or ledger catch-up computes current unresolved attention and does not emit one system notification per historical event.
 
 ## Proposal review workspace
 
@@ -993,7 +993,7 @@ committed Apply Effect Receipt
 ### Package rules
 
 - The milestone selector shows label, purpose, exact version, author/time, later-edit relation, and recommendation reason. Selection remains explicit.
-- Delivery Package Purpose names the local package's intended editorial use without collecting a recipient or external-channel target. Local Export Destination is chosen later through the Windows picker.
+- Delivery Package Purpose names the local package's intended editorial use without collecting a recipient or external-channel target. Local Export Destination is chosen later through the current platform's system picker.
 - Included files/artifacts show type, originating exact version, expected filename/format, requirement source, status, and limitation. Exclusions remain a first-class list.
 - Version/change/source/factual supporting materials remain typed Editorial Artifacts and never merge with the public-facing Deliverable text.
 - Fidelity summary states fully preserved, degraded with exact disclosure, or unavailable content classes for every planned format. DOCX is the primary editable format, PDF is an optional fixed-layout format, and Markdown is the explicit fallback format; the linked Export Fidelity Disposition is frozen with the package.
@@ -1023,12 +1023,12 @@ committed Apply Effect Receipt
 - PDF preview emphasizes page/print result and states `固定版式，不支持可编辑往返`; it is never represented as a proof, factual authority, or release state.
 - Markdown fallback states which structure and rich-document semantics are flattened, externalized, or omitted. A DOCX failure never silently substitutes Markdown.
 - Fidelity rows cover every applicable content class and remain summarized when fully preserved. Any degraded/unavailable class expands automatically and places its consequence beside the choice.
-- The remembered destination is a user-recognizable recent location hint only. Final export still uses the Windows picker and binds the resolved exact target in Effect Approval.
+- The remembered destination is a user-recognizable recent location hint only. Final export still uses the current platform's system picker and binds the resolved exact target in Effect Approval.
 - Export runs outside the renderer. Cancellation is available until the commit boundary; after atomic commit the UI shows the receipt rather than pretending cancellation reversed the file.
 - Temporary output stays product-managed and cannot be mistaken for a completed destination file. Each declared local publication has stable Effect identity and one classified receipt/outcome.
 - Agent Exchange Projection is never a normal file-editing surface. Its freshness and revision binding are enforced behind AI7 Capabilities, and agent-authored revisions always return through Proposal review and Apply.
 - The committed receipt ends the V1 export flow. No `发送`, `记录已交接`, `确认送达`, recipient, email, cloud-drive, OA, or external-channel action follows it.
-- Local export proves only atomic publication at the chosen Windows target. Product status never upgrades it to `已交付` or another external outcome, and activity/notifications do not imply that the user later shared the file.
+- Local export proves only atomic publication at the chosen local target on the current platform. Product status never upgrades it to `已交付` or another external outcome, and activity/notifications do not imply that the user later shared the file.
 
 ## Publication Version
 
@@ -1147,9 +1147,10 @@ committed Apply Effect Receipt
 
 | State | Settings presentation | Active behavior |
 | --- | --- | --- |
-| Writable portable folder | `便携版 · 数据位于 AI7 文件夹内` | Normal; credentials stated separately |
-| Installer/default local location | `安装版 · 数据位于本机` | Normal; exact path expandable |
-| Portable folder unwritable | `已改用本机位置` plus actual location and reason | One ordinary notice; Settings retains exception state |
+| Windows writable portable folder | `Windows · 便携版 · 数据位于 AI7 文件夹内` | Normal; credentials stated separately |
+| Windows installer/default local location | `Windows · 安装版 · 数据位于本机` | Normal; exact path expandable |
+| Windows portable folder unwritable | `Windows · 已改用本机位置` plus actual location and reason | One ordinary notice; Settings retains exception state |
+| macOS selected native channel/location | `macOS · <actual channel> · 数据位于本机` | Exact wording follows the macOS package/data decision; never claims portable/NSIS behavior |
 | Known sync/backup root | `此位置可能被同步或备份` plus unpublished-material consequence | Non-blocking acknowledge; warning remains reviewable |
 | Prohibited repository/development location | `当前位置不受支持` plus Data Location Remediation Guidance | Do not ask for technical risk judgment; guide to supported placement |
 | `查看数据位置` | Open/reveal actual location as secondary support action | No path edit, migration, export, scope or authority change |
@@ -1161,14 +1162,14 @@ committed Apply Effect Receipt
 - Sync/backup warning explains possible external copying without asserting whether the third-party service actually synchronized anything. It does not block local work.
 - Prohibited placement is stronger than a sync warning but uses guided plain language and a supported destination, not repository/worktree/shell terminology.
 - The exact path may be copied/revealed from secondary detail for support. It is never an editable text field and never becomes a source selector or Local Export Destination.
-- Credential separation remains visible in both normal channel states and every exception: copied portable data is never described as carrying Provider credentials.
+- Credential separation remains visible in every platform/channel state and exception: copied product data is never described as carrying Provider credentials; Windows uses Credential Manager and macOS uses Keychain behind the same Credential Broker.
 - Viewing, acknowledging or hiding an informational notice changes no Product Data Location. Any future product-owned migration requires its own exact outcome and recovery semantics rather than being implied by this design.
 
 ## Keyboard commands and discoverable action entries
 
 | Command/action class | Default placement | Remapping and IME behavior |
 | --- | --- | --- |
-| Text editing/selection/clipboard/undo | Editor and Windows conventions | Fixed; IME/system reserved behavior wins |
+| Text editing/selection/clipboard/undo | Native editor and current-platform conventions | Fixed; IME/system reserved behavior wins |
 | Navigation | Direct common control or labeled menu | Eligible with conflict detection; blocked during composition when it would leave context |
 | Search and jump | Right entry/panel plus menu command | Eligible; no command fires during composition |
 | View/layout | `视图` menu or local disclosure | Eligible; changes view state only |
@@ -1184,7 +1185,7 @@ committed Apply Effect Receipt
 - Secondary placement saves always-on space but does not create hunt-by-memory interaction: a stable category, search/help index and keyboard route lead to the action.
 - Opening/closing disclosures changes no underlying Task, Proposal, decision, Effect, Workflow, persistence or recovery state. Focus returns predictably.
 - At the moment a named authority action is valid, its dedicated contextual bar remains visible with exact scope and negative authority. An overflow menu may contain related inspection/history actions, not replace the record action itself.
-- All remaps remain local preferences and have `恢复默认`. A missing/corrupt preference falls back to safe Windows-oriented defaults without changing content or authority.
+- All remaps remain local preferences and have `恢复默认`. A missing/corrupt preference falls back to safe native Windows or macOS defaults without changing content or authority.
 
 ## Workbench density, reading typography and flexible surfaces
 
@@ -1227,15 +1228,16 @@ committed Apply Effect Receipt
 - Active Manuscript Surface Binding is an input-routing invariant, not a Book/manuscript business lock. It neither pauses background Runs nor weakens exact-pin and drift checks for Task, Proposal or Effect operations.
 - Every Renderer still receives only bounded service projections. Opening, closing, moving or resizing windows changes no business record by itself.
 
-## Application theme and forced colors
+## Application theme and native accessibility appearance
 
 | Preference/system state | Presentation | Invariant |
 | --- | --- | --- |
-| `跟随系统` + Windows light | AI7 light semantic-token mapping | Default; no content/state change |
-| `跟随系统` + Windows dark | AI7 dark semantic-token mapping | All AI7 windows update coherently |
-| Manual `浅色` | Keep light mapping across ordinary Windows light/dark changes | Forced colors still wins |
-| Manual `深色` | Keep dark mapping across ordinary Windows light/dark changes | Forced colors still wins |
-| Windows high contrast/forced colors active | Use system-owned colors and expose exact focus/boundary/state semantics | Not a fourth user-selectable theme |
+| `跟随系统` + OS light | AI7 light semantic-token mapping | Default; no content/state change |
+| `跟随系统` + OS dark | AI7 dark semantic-token mapping | All AI7 windows update coherently |
+| Manual `浅色` | Keep light mapping across ordinary OS light/dark changes | Native accessibility appearance still wins |
+| Manual `深色` | Keep dark mapping across ordinary OS light/dark changes | Native accessibility appearance still wins |
+| Windows high contrast/forced colors active | Use system-owned colors and expose exact focus/boundary/state semantics | Windows native adapter; not a fourth theme |
+| Applicable macOS contrast/transparency/color-accessibility setting active | Preserve exact focus/boundary/state semantics through native adaptation | macOS native adapter; not a fourth theme |
 
 ### Theme rules
 

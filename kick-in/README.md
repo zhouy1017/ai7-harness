@@ -19,7 +19,7 @@ Use a fresh AI7-owned repository and consume an exactly pinned Harness release/c
 
 The fresh-repository half is now **settled by owner instruction**: this design room was initialized on 2026-08-17 and published as private `zhouy1017/ai7-harness` on branch `main`. It contains documentation only and no copied source.
 
-The rest is now accepted too. The license and reuse authorization were settled at Question 27, the meaning of full Harness capability at Question 29, and the dependency strategy at Question 30. **The design interview is complete**: all 36 questions are resolved or explicitly deferred.
+The rest is now accepted too. The license and reuse authorization were settled at Question 27, the meaning of full Harness capability at Question 29, and the dependency strategy at Question 30. After the interview, ADR 0028 unified product scope as one Windows-and-macOS Standalone product; concrete macOS mechanics remain explicitly deferred. **The design interview is complete**: all 36 questions are resolved or explicitly deferred.
 
 Agents arriving without prior context should start at the repository-root `HANDOFF.md`, then `AGENTS.md`.
 
@@ -55,13 +55,14 @@ Agents arriving without prior context should start at the repository-root `HANDO
 28. [Repository development dispatch](./27-repository-development-dispatch.md) — accepted Question 25 three-role model, provider-neutral operating rules, and the single provider-specific Layer B binding policy.
 29. [Harness capability and authority boundary](./28-harness-capability-and-authority-boundary.md) — accepted Question 29 full-engine/narrow-surface split, Agent Data Root, profile separation, and tiered activation for agent-authored revisions.
 30. [Editorial quality metrics](./29-editorial-quality-metrics.md) — accepted Question 36 Quality Signal families, derived metrics, cold-start tolerance, low-burden feedback interaction, and the two-sided Behavior Evaluation Gate.
-31. [Upstream consumption and upgrade contract](./30-upstream-consumption-and-upgrade-contract.md) — accepted Question 30 exact-pin discipline, package-subset selection, registry evidence, and the six-point upgrade verification.
+31. [Upstream consumption and upgrade contract](./30-upstream-consumption-and-upgrade-contract.md) — accepted Question 30 exact-pin discipline and package-subset selection; its separate upgrade-proof programme is superseded by ADR 0027.
 32. [Single execution authority](./31-single-execution-authority.md) — accepted Question 31 agent-loop definition, instances-versus-authorities rule, required parallelism, scheduling split, and the learn-the-framework-not-its-defaults boundary.
-33. [Runtime language and release channel](./32-runtime-language-and-release-channel.md) — accepted Question 33 TypeScript-only runtime, portable-only V1 channel, self-contained data root, and the release-channel half of Question 26.
+33. [Runtime language and release channel](./32-runtime-language-and-release-channel.md) — accepted TypeScript-only runtime and Windows zip/NSIS mechanics; macOS release/data mechanics remain separate implementation decisions under ADR 0028.
 34. [Standalone shell and editor topology](./33-standalone-shell-and-editor-topology.md) — accepted Question 34 manuscript scale tiers, Electron three-process topology, and the ProseMirror windowed-editing foundation.
 35. [First tracer slice and exit gate](./34-first-tracer-slice.md) — accepted Question 35 store-and-index spike, read-only tracer, manuscript retrieval requirement, and the thirteen-point exit gate.
-36. [Minimal E2E validation](./35-minimal-e2e-validation.md) — accepted project-wide rule that CI covers only end-to-end functional completeness and observed-bug regressions.
-37. [Decision records](./decisions/README.md) — accepted hard-to-reverse decisions only.
+36. [Minimal E2E validation](./35-minimal-e2e-validation.md) — accepted project-wide rule that one provider-free E2E Functional Gate runs complete journeys and observed-bug regressions on Windows and macOS.
+37. [Windows and macOS product platform](./35-windows-macos-product-platform.md) — accepted one-product scope and native-adapter boundary; concrete macOS mechanics remain deferred.
+38. [Decision records](./decisions/README.md) — accepted hard-to-reverse decisions only.
 
 ## Decision discipline
 

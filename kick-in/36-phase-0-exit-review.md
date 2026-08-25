@@ -1,6 +1,6 @@
 # Phase 0 Exit Review
 
-Status: **not passed — Question 16 is resolved; the post-interview Windows-and-macOS target has reopened platform decisions**
+Status: **historical 2026-08-21 result: not passed; product scope and consistency contract were later resolved by ADR 0028**
 
 Review date: 2026-08-21
 
@@ -12,11 +12,13 @@ Freeze status: this audit is part of the v1 candidate/reference branch based on
 `c8cbe26`; it is not canonical `main` and does not decide the separate v2
 architecture line.
 
+> Supersession note (2026-08-25): the owner has since unified product scope as one Windows-and-macOS product in [ADR 0028](../docs/adr/0028-support-windows-and-macos-as-one-product.md). The proof and multi-gate programme below is also superseded by [ADR 0027](../docs/adr/0027-concentrate-ci-on-e2e-functionality.md). This document remains a dated audit record, not a current blocker list.
+
 ## Result
 
 The 36-question design interview is complete. All 36 decision-map rows have an accepted or explicitly deferred answer, and Question 16's former “mostly okay” ambiguity is now closed by the owner's explicit acceptance of all five content/evidence rules.
 
-Phase 0 nevertheless cannot pass. The owner subsequently changed the supported product target from Windows-only to Windows and macOS with a consistent product outlook. [ADR 0027](../docs/adr/0027-support-windows-and-macos-as-one-product.md) records the accepted platform target and identifies the earlier platform clauses it supersedes. The exact consistency contract and several macOS/platform-pair mechanics have not yet been accepted, so the Phase 0 rule that every design item be resolved or explicitly deferred is not met.
+At the review date, Phase 0 could not pass. The owner had changed the supported product target from Windows-only to Windows and macOS, while the exact consistency contract and several macOS/platform-pair mechanics were still open. ADR 0028 later accepted the consistency contract and explicitly deferred the concrete macOS mechanics without reopening product scope.
 
 No product implementation, scaffold, dependency install, CI workflow, PRD, or issue decomposition is authorized by this review.
 
@@ -48,7 +50,7 @@ The platform expansion does not reopen:
 - the two concise workflow names `pr` and `release`, provider-free required verification, request-fingerprint guard, and regenerated public-synthetic evidence; or
 - the legacy production-data migration exclusion.
 
-## Open decisions blocking Phase 0
+## Decisions that were open at the review date
 
 | Blocker | Why it cannot be inferred | Current recommendation, not accepted |
 | --- | --- | --- |

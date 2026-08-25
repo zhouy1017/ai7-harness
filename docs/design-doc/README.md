@@ -1,6 +1,6 @@
 # Design document integration branch
 
-Status: **aggregate Git branch; documentation only; not canonical product authority**
+Status: **aggregate Git branch with owner-resolved Windows-and-macOS product scope; documentation only; not canonical `main` authority**
 
 The owner explicitly requested a `design-doc` branch containing the design work produced across the active sessions. This branch is therefore an intentional exception to the normal issue-branch naming rule and to `main` being the only long-lived line. It preserves each source branch as a merge parent and makes its unique artifacts reachable in one working tree. It does not turn candidate, frozen-reference, exploration, or historical material into an accepted design.
 
@@ -26,18 +26,20 @@ Merge commits on this branch are `8b0580b`, `95b52d6`, `63865fa`, and `b2034e2`.
 | `docs/ui-ux/` | Frozen V1 UI/UX reference, including its historical prototype; not the V2 implementation baseline |
 | `docs/ui-ux-v2/` | Completed V2 UI/UX candidate plus Proposal-card and reusable-automation delta |
 | `kick-in/35-windows-macos-product-platform.md`, `kick-in/36-phase-0-exit-review.md`, `kick-in/37-v1-platform-freeze-handoff.md` | Unique Phase-0/platform candidate artifacts |
-| `docs/adr/0027-support-windows-and-macos-as-one-product.md` | Phase-0 platform candidate ADR; qualify it by full path |
-| `docs/adr/0027-concentrate-ci-on-e2e-functionality.md` | Later minimal-engineering-validation ADR used by the V2 exploration line; qualify it by full path |
+| `docs/adr/0027-concentrate-ci-on-e2e-functionality.md` | Accepted minimal-engineering-validation decision: one logical provider-free E2E Functional Gate on both supported platforms |
+| `docs/adr/0028-support-windows-and-macos-as-one-product.md` | Accepted integration decision: Windows and macOS are one AI7 product |
 
-## Unresolved integration conflicts
+## Resolved integration decisions
 
 ### Platform target
 
-The Phase-0 line records an owner-accepted Windows-and-macOS target inside a branch explicitly labeled frozen candidate/reference. The later V2 architecture candidate describes V1 as Windows-only and calls the macOS option historical. These statements were produced in separate sessions and were never reconciled by one owner decision. This aggregate preserves both and makes no new platform choice.
+The owner resolved the cross-session conflict on 2026-08-25: AI7 V1 is one Chinese-first Standalone product on Windows and macOS. Both platforms share product identity, domain and authority semantics, workflows, core features, document fidelity, data meaning, and UI/UX outcomes. Explicit native variation is permitted for menus, shortcuts, dialogs, accessibility integration, paths, secret stores, IPC carriers, packages, signing/notarization, and security prompts. Windows zip/NSIS mechanics remain Windows-specific; the exact macOS floor, CPU policy, distribution/update, data-root, Keychain, IPC, and signing/notarization mechanics remain implementation decisions, not a reason to treat macOS as future scope.
 
-### ADR number 0027
+### ADR numbering
 
-Two branches independently allocated ADR number 0027 to different decisions. Neither file is renamed here because exact branch history and existing links must remain inspectable. Never cite unqualified `ADR 0027` on this branch; use its full path and title.
+The source branches independently allocated ADR number 0027 to two decisions. The aggregate resolves the collision without rewriting source-branch history: minimal E2E validation remains ADR 0027 and the platform decision is ADR 0028. The original platform file remains reachable at `docs/1-windows-macos-phase0@9606891:docs/adr/0027-support-windows-and-macos-as-one-product.md`; active links use ADR 0028.
+
+## Remaining authority boundary
 
 ### Candidate versus canonical authority
 
@@ -45,8 +47,8 @@ The DSH-first architecture and V2 UI/UX packages are coherent candidate document
 
 ### Historical verification material
 
-The repository contains extensive earlier capability-proof and verification design records. The later project decision in `docs/adr/0027-concentrate-ci-on-e2e-functionality.md` keeps engineering validation minimal: only complete Windows E2E journeys and observed-bug regressions are standing CI. Historical proof documents remain evidence of the design process and do not reopen those gates.
+The repository contains extensive earlier capability-proof and verification design records. ADR 0027 keeps engineering validation minimal: one logical provider-free E2E Functional Gate executes complete supported journeys and observed-bug regressions on Windows and macOS. It creates no separate per-platform certification, unit, integration, contract, static-analysis, accessibility, performance, security, package, signing, replay, or release-proof gate. Historical proof documents remain evidence of the design process and do not reopen those gates.
 
 ## Integration rule
 
-Use this branch for consolidated design reading and review. Before anything can enter `main`, the owner and Commander must explicitly resolve cross-line conflicts, identify the accepted source paths, and authorize a normal pull-request integration. Do not implement from the aggregate merely because every design branch is now reachable from one ref.
+Use this branch for consolidated design reading and review. The platform scope and ADR numbering are resolved here, but no automatic `main` integration follows. Before anything can enter `main`, the owner and Commander must identify the accepted design paths and authorize a normal pull-request integration. Do not implement from the aggregate merely because every design branch is now reachable from one ref.

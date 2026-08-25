@@ -10,7 +10,7 @@ Outputs:
 - Repository license and source-authorization decision. Visibility is already settled: private.
 - Accepted target architecture and semantic mapping.
 - Keep/adapt/drop matrix with owners and deferrals.
-- Security, provider, data, Windows Standalone/editor, and upstream strategies; Word explicitly deferred.
+- Security, provider, data, Windows/macOS Standalone/editor, native-adapter, and upstream strategies; Word explicitly deferred.
 - First tracer-slice acceptance contract.
 
 Exit gate: every item in the decision map is resolved or explicitly deferred. No runtime scaffold is needed to pass this gate.
@@ -66,7 +66,7 @@ Exit gate: a text-changing task can propose, review, accept/reject, publish once
 - Keep one versioned local domain/Harness authority behind the desktop client.
 - Re-evaluate installer, helper processes, signing, repair, and release packaging against the final Standalone topology; include no Word add-in or COM component.
 
-Exit gate: Standalone satisfies the professional-editing gate, executes canonical Task Intents, and presents consistent Run/workflow/decision/Effect state plus linked Harness status on a clean Windows machine.
+Exit outcome: the one Standalone product executes canonical Task Intents and presents consistent Run/workflow/decision/Effect state plus linked Harness status on Windows and macOS. Under ADR 0027 this is exercised only through complete E2E journeys, not a separate professional-editing or platform gate.
 
 ## Phase 5 — Capability expansion
 

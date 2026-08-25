@@ -85,7 +85,7 @@ The service is separate rather than living in Electron main for four reasons:
 3. **Headless testability.** The same service is drivable without a GUI, which is exactly what Question 24's ten-minute `pr` gate and Question 35's tracer slice need. A service inside Electron main would force every test through an Electron harness.
 4. The Question 31 concurrency and budget governor gets a natural home.
 
-**IPC uses stdio or a Windows named pipe. No TCP listener.** The register carries "Harness web server is exposed beyond loopback" as Critical; never opening a socket removes that structurally rather than configuring it away, following the same reasoning as Question 30's dependency-graph argument.
+**IPC uses stdio or a private platform-local adapter, such as a Windows named pipe when needed. No TCP listener.** The macOS carrier remains an adapter decision and creates no new authority or process. The register carries "Harness web server is exposed beyond loopback" as Critical; never opening a socket removes that structurally rather than configuring it away, following the same reasoning as Question 30's dependency-graph argument.
 
 ## Editor foundation: ProseMirror
 

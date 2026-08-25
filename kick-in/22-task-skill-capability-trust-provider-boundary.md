@@ -36,7 +36,7 @@ Audit pins:
 | Source scope | ADRs 0017/0018/0072 default to the active Book; broader access is exact, user-designated, and Run-local. | Keep and align Series/Cross-project behavior with Questions 10–12. |
 | Model Roles | ADRs 0023/0024 let skills declare only used roles, hard requirements, and soft preferences—never provider, model, endpoint, or credential. | Keep. |
 | Resolution/preflight | ADR 0080 and `runtime/provider_resolution.py` freeze a compatible primary/fallback plan under exact privacy, capability, context, source, outbound-data, budget, and configuration revisions. | Keep semantics inside the accepted Plan Envelope. |
-| Credentials | Ordinary configuration accepts only opaque references; the current Windows adapter uses Credential Manager. | Keep references-only and Windows protection; deepen per-consumer brokering. |
+| Credentials | Ordinary configuration accepts only opaque references; the current legacy adapter uses Windows Credential Manager. | Keep references-only; use the AI7 Credential Broker with Windows Credential Manager and macOS Keychain target adapters and per-consumer authorization. |
 | Live providers | Current generation explicitly has no live network adapter and uses mock/cassette providers. | Provider governance is substantive, but production live-provider execution is a gap. |
 | Historical agent/tool API | Old `/agent/plan`, `/agent/run`, `/agent/approve`, and typed tool registry are reference-only. | Drop the API/runtime; retain bounded typed-operation lessons. |
 
@@ -194,7 +194,7 @@ Task Skill Enablement permits only future requests up to an Authority Ceiling. R
 5. A provider outside the plan, wider data/source scope, or higher budget requires a Plan Revision and renewed Run Authorization.
 6. Credential values never appear in Task Skill packages, Cordis config, prompts, generic environment maps, Session text, tool schemas/results, diagnostics, or client-facing settings. The Credential Broker resolves an opaque reference only inside the final authorized adapter/capability consumer.
 
-Harness's credential reference and per-operation resolution seam are useful, but its flat namespace has no per-skill/consumer ACL and its local file store is not an OS keychain. AI7 therefore wraps it with per-consumer authorization and a Windows-protected backend. MCP literal environment/header secrets are prohibited unless adapted through this broker.
+Harness's credential reference and per-operation resolution seam are useful, but its flat namespace has no per-skill/consumer ACL and its local file store is not an OS keychain. AI7 therefore wraps it with per-consumer authorization and a platform Protected Secret Store backend: Windows Credential Manager or macOS Keychain. MCP literal environment/header secrets are prohibited unless adapted through this broker.
 
 ## Proportional unpublished-material boundary
 
@@ -225,7 +225,7 @@ Credentials are never an Outbound Data Category. They are prohibited from model-
 | Active-Book default and exact Run-local broader scope | Keep | Run Source Scope aligned with Book/Series/Cross-project decisions. |
 | Model Roles, hard requirements, soft preferences | Keep | User-owned Provider Resolution Plan; skills never name providers or secrets. |
 | Frozen fallback, drift, ambiguous-outcome behavior | Keep | Part of Plan Envelope, Effect/replay, and provider policies. |
-| Opaque credential references and Windows protection | Keep/deepen | AI7 Credential Broker plus OS-protected backend and per-consumer ACL. |
+| Opaque credential references and OS protection | Keep/deepen | AI7 Credential Broker plus Windows Credential Manager/macOS Keychain backends and per-consumer ACL. |
 | `ui.surfaces`, forms, skill cards, settings layouts | Drop from manifest authority | Separate later UI/UX descriptor and design. |
 | `trustLevel`, `implementationStatus` as editable manifest fields | Drop/derive | Installer/release/catalog projections only. |
 | Fixed generic `approvalPolicy` block | Replace | Named capability/Effect gate declarations compatible with Questions 18–20. |

@@ -2,6 +2,8 @@
 
 Status: **V1 freeze candidate/reference; exact-head review determines freeze eligibility; not canonical product or future-architecture authority**
 
+> Platform supersession: ADR 0028 now defines one Windows-and-macOS product. The Windows mechanics below remain frozen historical evidence and must not be read as current product scope or macOS behavior.
+
 ## Freeze identity
 
 - Base commit: `c8cbe26`

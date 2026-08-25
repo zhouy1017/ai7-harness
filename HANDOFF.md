@@ -1,6 +1,6 @@
 # Handoff for remote agents
 
-> **Branch-local integration notice:** on `design-doc`, start with [`docs/design-doc/README.md`](docs/design-doc/README.md). This branch preserves multiple candidate/frozen design histories and includes unresolved cross-session decisions; it is not `main`, a canonical design acceptance, or implementation permission.
+> **Branch-local integration notice:** on `design-doc`, start with [`docs/design-doc/README.md`](docs/design-doc/README.md). This branch preserves multiple candidate/frozen design histories. The owner has resolved their platform-scope conflict in favor of one Windows-and-macOS product, but the branch is still not `main`, a complete canonical design acceptance, or implementation permission.
 
 Read this first if you are picking up AI7 without prior context. It is a **router and a trap list**, not a source of truth — every rule here is enforced somewhere else, and that somewhere else wins.
 
@@ -90,8 +90,9 @@ Not decisions waiting to be made unilaterally — things a reader should know ar
 | Retrieval strategy | Lexical, vector, or hybrid — deferred to the spike |
 | ProseMirror confidence | Medium. Windowing reduces the stakes; a spike should confirm |
 | Latency budgets | Proposed as calibration only, not accepted figures |
-| Code signing certificate | Deferred until the owner requests it. Unsigned builds are a known SmartScreen cost |
-| Windows sandbox enforcement | Landlock is Linux-only. Whether the Windows path genuinely enforces the Agent Data Root is **unverified** — do not describe that boundary as enforced until it is |
+| Platform distribution mechanics | Windows retains zip portable plus NSIS. macOS package/update channel, minimum OS, CPU policy, and Agent Data Root location remain open implementation decisions |
+| Platform signing | Windows signing remains deferred with a known SmartScreen cost. macOS signing/notarization is a separate open implementation decision |
+| Platform sandbox enforcement | Do not describe the Agent Data Root as OS-confined on either platform until the selected Windows and macOS mechanisms support that claim; AI7 capability and service facades remain authoritative |
 | Question 16 scope | Answered "mostly okay" with one correction; the other four content classes were never itemized |
 | UI/UX | Reserved for a separate owner-run session by design |
 
@@ -103,7 +104,7 @@ Not decisions waiting to be made unilaterally — things a reader should know ar
 - AI7 is proprietary, all rights reserved to the sole rights-holder. See `LICENSE`.
 - Predecessors may be read and copied from, subject to the provenance ledger: `ai7-reborn-ai` at `dev@3e6e9ac772b7f07832154fa39d7de8a4deca51b1`, and `ai7-redesign` at `fc2f4d8`, which is a strict ancestor and holds nothing unique.
 - Harness upstream is `deepseek-ai/deepseek-harness`, MIT, no git tags and no GitHub releases — track it by commit and npm version.
-- Target platform is Windows only. Ubuntu may appear as a CI runner if separately justified.
+- Product platforms are Windows and macOS as one AI7 product. Ubuntu has no product or release role.
 
 ---
 

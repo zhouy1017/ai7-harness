@@ -15,7 +15,7 @@ Accepted system-wide architecture decisions live under [`docs/adr/`](../../docs/
 - [ADR 0011: Separate task-business and Harness-execution ledgers](../../docs/adr/0011-separate-task-business-and-harness-execution-ledgers.md)
 - [ADR 0012: Exclude legacy production-data migration](../../docs/adr/0012-exclude-legacy-production-data-migration.md)
 - [ADR 0013: Ship a Standalone-only V1 and defer Word integration](../../docs/adr/0013-ship-standalone-only-v1.md)
-- [ADR 0014: Verify on one Windows gate and defer additional tiers](../../docs/adr/0014-verify-on-one-windows-gate.md)
+- [ADR 0014: Historical one-Windows verification decision, superseded by ADRs 0027 and 0028](../../docs/adr/0014-verify-on-one-windows-gate.md)
 - [ADR 0015: Keep development dispatch rules provider-neutral](../../docs/adr/0015-provider-neutral-development-dispatch.md)
 - [ADR 0016: Keep AI7 proprietary and sample manuscripts local-only](../../docs/adr/0016-proprietary-license-and-local-only-sample-manuscripts.md)
 - [ADR 0017: Compose the full Harness engine behind a narrow tool surface](../../docs/adr/0017-full-engine-narrow-tool-surface.md)
@@ -24,10 +24,12 @@ Accepted system-wide architecture decisions live under [`docs/adr/`](../../docs/
 - [ADR 0020: Consume a pinned subset of Harness packages](../../docs/adr/0020-consume-pinned-harness-package-subset.md)
 - [ADR 0021: Keep one agent-loop implementation and schedule from AI7](../../docs/adr/0021-single-execution-authority.md)
 - [ADR 0022: Ship a TypeScript-only runtime with no embedded Python](../../docs/adr/0022-typescript-only-runtime.md)
-- [ADR 0023: Ship a portable release with a self-contained data root](../../docs/adr/0023-portable-release-with-self-contained-data-root.md)
+- [ADR 0023: Ship Windows portable and installer channels with a self-contained portable data root](../../docs/adr/0023-portable-release-with-self-contained-data-root.md)
 - [ADR 0024: Run an Electron shell with an isolated AI7 service process](../../docs/adr/0024-electron-shell-with-isolated-ai7-service.md)
 - [ADR 0025: Edit through bounded windows over a paging manuscript store](../../docs/adr/0025-windowed-editing-over-a-paging-manuscript-store.md)
 - [ADR 0026: Retrieve over manuscripts, returning candidates rather than truth](../../docs/adr/0026-manuscript-retrieval-returns-candidates.md)
+- [ADR 0027: Concentrate engineering verification on E2E functionality](../../docs/adr/0027-concentrate-ci-on-e2e-functionality.md)
+- [ADR 0028: Support Windows and macOS as one AI7 product](../../docs/adr/0028-support-windows-and-macos-as-one-product.md)
 
 Create a record here only when a choice is hard to reverse, surprising without context, and the result of a real trade-off. Use sequential names such as `0001-fresh-ai7-repository.md` and keep the record concise: what was decided, why, meaningful rejected alternatives, and any non-obvious consequence.
 

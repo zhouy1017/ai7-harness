@@ -2,6 +2,8 @@
 
 Status: **V1 freeze candidate/reference; not canonical product or future-architecture authority**
 
+> Platform supersession: this package intentionally preserves its original Windows-specific assumptions as historical reference. Current product scope is one Windows-and-macOS product under ADR 0028; use `docs/ui-ux-v2/` for the integrated shared-outcome and native-adapter design.
+
 This directory is the V1 UI/UX freeze-candidate reference package produced for GitHub Issue #2. It translates the constraints available at base commit `c8cbe26` into candidate requirements, interaction guidance, and review artifacts. It does not change domain authority, bind a later platform architecture, or revive the legacy AI7 interface. Start with [V1 freeze handoff](./V1-FREEZE-HANDOFF.md) before reusing any part of it.
 
 ## Product direction

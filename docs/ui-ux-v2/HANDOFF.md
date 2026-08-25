@@ -1,6 +1,6 @@
 # AI7 V2 UI/UX candidate handoff
 
-Status: **61-question base and Issue #5 9-question feature delta complete; candidate design only**
+Status: **61-question base, Issue #5 feature delta, and Windows/macOS scope integration complete; candidate design only**
 
 ## Authority
 
@@ -8,10 +8,11 @@ Status: **61-question base and Issue #5 9-question feature delta complete; candi
 - Frozen V1 semantics consumed only from exact object `587d6455f6a578d3df8a39f534ec7a057c07a18c`.
 - Owner-provided Codex Desktop screenshot is interaction/visual reference evidence only.
 - The candidate package is subordinate to architecture and accepted future decisions. It contains no implementation authority.
+- ADR 0028 now governs platform scope: one AI7 product on Windows and macOS, with shared outcomes and explicit native adapters. Exact macOS package, data, Keychain, IPC, and signing/notarization mechanics remain deferred.
 
 ## Completed package
 
-- [`README.md`](./README.md): accepted directions D-001–D-071 and authority boundary.
+- [`README.md`](./README.md): accepted directions D-001–D-072 and authority boundary.
 - [`CONTEXT.md`](./CONTEXT.md) and [`GLOSSARY.md`](./GLOSSARY.md): candidate presentation language and bilingual index.
 - [`requirements.md`](./requirements.md): owner-accepted candidate UI/UX requirements.
 - [`information-architecture.md`](./information-architecture.md): Book-anchored workbench and navigation/object relationships.
@@ -24,7 +25,7 @@ Status: **61-question base and Issue #5 9-question feature delta complete; candi
 
 ## High-level result
 
-The package defines a Chinese-first professional publishing workbench anchored by Book and Manuscript, with exact long-manuscript navigation/editing, Task Intent/Plan/authorization, fast/default execution, parallel Run controls and Rewind, choice-first clarification, manuscript-anchored independently decidable Proposal cards, diff-merge/Apply/receipt flow, factual evidence work, Milestone and Publication Versions, DOCX-primary local export, recovery/offline/learning/audit, role-first model setup, Windows professional-work behavior, editable detached manuscript-window transfer and a complete V1 semantic migration.
+The package defines one Windows-and-macOS Chinese-first professional publishing workbench anchored by Book and Manuscript, with exact long-manuscript navigation/editing, Task Intent/Plan/authorization, fast/default execution, parallel Run controls and Rewind, choice-first clarification, manuscript-anchored independently decidable Proposal cards, diff-merge/Apply/receipt flow, factual evidence work, Milestone and Publication Versions, DOCX-primary local export, recovery/offline/learning/audit, role-first model setup, platform-native professional-work behavior, editable detached manuscript-window transfer and a complete V1 semantic migration.
 
 The Issue #5 delta adds one low-burden reusable-procedure capture flow that classifies prior visible work into exactly one Default Execution Rule, Task Skill Candidate, Workflow Profile Draft or Developer Capability Proposal; strips instance data and authority; preserves type-specific admission/publication/enablement; and manages exact versions, linked deliveries, latest-eligible selection and history-preserving deletion through one Automation Center projection.
 

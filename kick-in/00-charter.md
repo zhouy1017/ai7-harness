@@ -12,7 +12,7 @@ The migration must combine them without running two competing agent systems or f
 
 ## Working vision
 
-AI7 is a Chinese-first, Windows-focused desktop editorial workbench for professionals in leading literary publishing houses in mainland China. It supports multi-aspect judgment across a Book and its related editorial deliverables, including manuscript revisions, promotional articles, news reports, and reviews. DeepSeek Harness powers agent execution and behavior composition underneath the product: AI7 learns from the framework's context, planning, tool, policy, workflow, subagent, session, replay, and snapshot patterns to make agents behave better, while AI7 supplies the missing semantic quality evaluator. Harness does not replace AI7's product identity or editorial domain.
+AI7 is one Chinese-first Windows-and-macOS desktop editorial workbench for professionals in leading literary publishing houses in mainland China. It supports multi-aspect judgment across a Book and its related editorial deliverables, including manuscript revisions, promotional articles, news reports, and reviews. DeepSeek Harness powers agent execution and behavior composition underneath the product: AI7 learns from the framework's context, planning, tool, policy, workflow, subagent, session, replay, and snapshot patterns to make agents behave better, while AI7 supplies the missing semantic quality evaluator. Harness does not replace AI7's product identity or editorial domain.
 
 AI7 protects unpublished editorial material from release to public channels without permission. This is a controlled non-publication requirement, not an assumption that every Book needs classified-data or high-secrecy controls. V1 is now Standalone-only; its new professional text-editing experience remains to be designed independently, while Word is a conditional future alternative.
 
@@ -24,7 +24,7 @@ The product is called **AI7**, displayed exactly that way, with no separate Chin
 
 ## Primary product story
 
-As an editorial professional in a leading literary publishing house in mainland China, I use one Chinese-first Windows desktop workspace to perform multi-aspect work across a Book, its sources, and its Editorial Deliverables; I can inspect evidence, reasoning, plans, and proposed changes, retain publication authority and recovery history, and prevent unpublished material from reaching public channels without permission.
+As an editorial professional in a leading literary publishing house in mainland China, I use one Chinese-first AI7 desktop workspace on Windows or macOS to perform multi-aspect work across a Book, its sources, and its Editorial Deliverables; I can inspect evidence, reasoning, plans, and proposed changes, retain publication authority and recovery history, and prevent unpublished material from reaching public channels without permission.
 
 ## Design principles
 
@@ -85,5 +85,5 @@ The design phase is complete when:
 - Harness Session/Turn/Tool/Approval/Skill/Workspace semantics are distinguished from AI7 Task Ledger/Run Record/Execution Binding/Effect/Task Skill/Book semantics.
 - One architecture is selected, with no duplicate agent execution authority.
 - The first vertical tracer slice has measurable acceptance gates.
-- Security, privacy, data migration, Windows Standalone/editor, and upgrade risks have owners or explicit deferrals; Word is explicitly deferred.
+- Security, privacy, data migration, Windows/macOS Standalone/editor, native-adapter, and upgrade risks have owners or explicit deferrals; Word is explicitly deferred.
 - The future implementation can be split into independently testable vertical issues without rediscovering core product decisions.

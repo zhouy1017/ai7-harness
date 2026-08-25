@@ -35,7 +35,7 @@ Missing product behavior is implemented cheaply, in this order of preference: AI
 
 Unknown DSH behavior is recorded in `ASSUMPTIONS.md` with a bounded design response. It does not block architecture on audits, probes, scores, exact hashes, prototypes, or closure proof.
 
-Engineering CI consists only of Windows E2E functional completeness and regressions for observed bugs, under ADR 0027. Product Factual Verification, named authority, Effect Receipts, recovery, privacy, and related behaviors remain functional requirements rather than separate proof systems.
+Engineering CI consists only of one logical provider-free E2E Functional Gate, executed on Windows and macOS for functional completeness and regressions for observed bugs, under ADR 0027. Product Factual Verification, named authority, Effect Receipts, recovery, privacy, and related behaviors remain functional requirements rather than separate proof systems.
 
 ## Consequences
 
@@ -48,7 +48,7 @@ Engineering CI consists only of Windows E2E functional completeness and regressi
 - DSH approvals and successful turns never create Run Authorization, Effect Approval, Proposal Decision, Review Decision, Public Release Permission, Task Outcome, or Effect Receipt.
 - Local editing and recovery remain available offline without DSH, a provider, authentication, or network access.
 - Codex material may still inform AI7-owned interaction and engineering design. It creates no dependency, runtime obligation, or upgrade surface.
-- Pin bumps of the DSH subset remain explicit, one-at-a-time development changes rather than automatic updates. Only applicable Windows E2E journeys and observed-bug regressions are standing verification.
+- Pin bumps of the DSH subset remain explicit, one-at-a-time development changes rather than automatic updates. Only applicable complete E2E journeys on Windows and macOS and observed-bug regressions are standing verification.
 - This ADR retains ADR 0020's exact DSH `0.1.0-rc.6` baseline; it selects no final package list, plugin, provider endpoint, or credential.
 
 ## Canonical records affected after owner acceptance
@@ -62,6 +62,7 @@ Engineering CI consists only of Windows E2E functional completeness and regressi
 | ADR 0021 | Unchanged: single execution authority, one loop, AI7 scheduling, no automatic harness fallback. |
 | ADR 0024 | Unchanged: three AI7 process roles, no TCP listener, composed Harness runtime inside the Node service. |
 | ADR 0027 | Keep as the engineering-verification authority. |
+| ADR 0028 | Apply the one-product Windows-and-macOS contract without changing harness ownership. |
 | `AGENTS.md` and dependent `kick-in/` notes | Preserve the DSH production language; add the accepted Model Role defaults, the primary-not-exclusive provider boundary, and Codex's reference-only role. |
 
 ## Rejected alternatives

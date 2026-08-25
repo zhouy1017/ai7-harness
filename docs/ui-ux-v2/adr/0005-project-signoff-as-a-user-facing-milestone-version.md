@@ -9,7 +9,7 @@ The target People's Literature Publishing House workflow exposes no Signoff/`签
 ## Considered options
 
 - A visible formal Signoff workflow was rejected because it does not match the target institution's editorial practice and adds unexplained approval friction to ordinary version work.
-- Treating every `Ctrl+S` or journal state as a milestone was rejected because persistence does not identify a meaningful immutable revision or stated next use.
+- Treating every native Journal Save shortcut (`Ctrl+S` on Windows, `⌘S` on macOS) or journal state as a milestone was rejected because persistence does not identify a meaningful immutable revision or stated next use.
 - Creating only a version label with no separate internal stated-use record was rejected because Delivery Package and workflow evidence still require an exact human decision about which version is ready for a named next use.
 - Automatically creating a milestone when a Workflow phase or Task completes was rejected because runtime/phase state cannot choose the editor's meaningful version, label, or intended use.
 

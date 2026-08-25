@@ -195,7 +195,7 @@ The affected-manuscript state entered when AI7 can no longer safely accept more 
 _Avoid_: permission restriction, ordinary read-only source, locked Book, recovery completed
 
 **Journal Save Action** (`保存当前编辑`):
-The explicit `Ctrl+S` or menu action that requests immediate persistence of pending edits to the Edit Journal and confirms only the journal acknowledgement, never a Manuscript Checkpoint.
+The native shortcut—`Ctrl+S` on Windows or `⌘S` on macOS—or menu action that requests immediate persistence of pending edits to the Edit Journal and confirms only the journal acknowledgement, never a Manuscript Checkpoint.
 _Avoid_: create checkpoint, export, save file copy
 
 **Milestone Version Suggestion** (`里程碑版本建议`):
@@ -439,15 +439,15 @@ A retained, replayable portion of Run attempt history that no longer represents 
 _Avoid_: erased history, cancelled Run, invalid evidence, rollback
 
 **Run Notification Tier** (`任务通知层级`):
-The consequence-based level that determines whether one Run event stays inline, produces a quiet transient notice, enters persistent actionable attention, or may also produce a privacy-safe Windows notification.
+The consequence-based level that determines whether one Run event stays inline, produces a quiet transient notice, enters persistent actionable attention, or may also produce a privacy-safe native system notification.
 _Avoid_: technical severity alone, unread-message count, provider event level
 
 **Quiet Completion Notice** (`安静结果提示`):
 The transient non-modal in-app indication that a Run produced an ordinary non-actionable outcome, retained durably in `最近完成` without increasing actionable attention.
 _Avoid_: success proof, Effect Receipt, celebratory toast
 
-**Privacy-safe Windows Notification** (`隐私保护型 Windows 通知`):
-A background desktop notification whose default content identifies only AI7 and a generic action-required or abnormal event, omitting Book identity and unpublished editorial content unless the editor explicitly relaxes notification privacy settings.
+**Privacy-safe System Notification** (`隐私保护型系统通知`):
+A native Windows or macOS background notification whose default content identifies only AI7 and a generic action-required or abnormal event, omitting Book identity and unpublished editorial content unless the editor explicitly relaxes notification privacy settings.
 _Avoid_: in-app attention record, manuscript preview, Public Release Permission
 
 **Book-coalesced Notification** (`Book 合并通知`):
@@ -583,7 +583,7 @@ The durable local view state that returns an editor from Model Service Settings 
 _Avoid_: Run continuation checkpoint, browser history, Run Authorization, saved credential
 
 **Distribution Channel Status** (`运行方式状态`):
-The user-readable current Windows distribution mode—`便携版` or `安装版`—together with any declared fallback that changes where product data actually lives, without implying a different AI7 authority model.
+The user-readable current platform and distribution mode together with any declared fallback that changes where product data actually lives, without implying a different AI7 authority model. Windows uses `便携版` or `安装版`; macOS uses the language selected by its package decision.
 _Avoid_: release channel selector, update status, data path, product edition
 
 **Data and Storage Summary** (`数据与存储摘要`):
@@ -599,7 +599,7 @@ The bounded product guidance that explains the actual supported location and saf
 _Avoid_: automatic migration receipt, file picker, local export, credential transfer
 
 **Limited Shortcut Remapping** (`有限快捷键重映射`):
-The local preference capability for changing only eligible navigation, search and view command shortcuts with conflict detection and reset, while preserving Windows text-editing, system, IME and authority-bearing command safety.
+The local preference capability for changing only eligible navigation, search and view command shortcuts with conflict detection and reset, while preserving the current platform's text-editing, system, IME and authority-bearing command safety.
 _Avoid_: arbitrary keybinding editor, macro system, Task Skill, command authority
 
 **IME-safe Command Guard** (`输入法安全命令保护`):
@@ -631,7 +631,7 @@ The local collapsed/hidden/closed state allowed for a lower-importance supportin
 _Avoid_: Global Attention dismissal, record deletion, decision, permission to hide safety state
 
 **Detached Manuscript Window** (`独立稿件窗口`):
-A separate Windows application window that hosts the one active editable manuscript subpage after it is transferred from the Book Workbench, retaining its eligible manuscript operations while remaining a bounded service projection.
+A separate desktop application window on Windows or macOS that hosts the one active editable manuscript subpage after it is transferred from the Book Workbench, retaining its eligible manuscript operations while remaining a bounded service projection.
 _Avoid_: read-only exported-document viewer, parallel editor, second Manuscript Revision, independent manuscript store
 
 **Manuscript Surface Transfer** (`稿件页面转移`):
@@ -651,11 +651,11 @@ The local display choice `跟随系统`, `浅色` or `深色` applied coherently
 _Avoid_: document theme, DOCX style, custom palette, accessibility mode
 
 **System-following Theme** (`跟随系统主题`):
-The default theme behavior that selects AI7's light or dark semantic-token mapping from the current Windows application-theme preference and updates all AI7 windows coherently.
-_Avoid_: Windows high contrast, time-based theme, automatic content style, Provider state
+The default theme behavior that selects AI7's light or dark semantic-token mapping from the current operating system's application-theme preference and updates all AI7 windows coherently.
+_Avoid_: native accessibility appearance, time-based theme, automatic content style, Provider state
 
-**Forced-colors Override** (`Windows 强制色接管`):
-The unconditional Windows high-contrast/forced-colors rendering layer that takes priority over AI7 light/dark decoration while preserving exact text, focus, boundary and non-color state semantics.
+**Native Accessibility Appearance Override** (`原生辅助显示接管`):
+The unconditional platform rendering layer—Windows high contrast/forced-colors or applicable macOS contrast, transparency, and color-accessibility settings—that takes priority over AI7 light/dark decoration while preserving exact text, focus, boundary and non-color state semantics.
 _Avoid_: optional fourth theme, custom accent palette, warning state, reduced motion
 
 **Semantic State Presentation Grammar** (`语义状态呈现语法`):
@@ -876,7 +876,7 @@ _Avoid_: journal save, latest draft, Delivery Package, Public Release Permission
 
 **Save as Milestone Version** (`保存为里程碑版本`):
 The explicit user action that identifies or first creates the exact immutable content version, records its milestone label/purpose, and appends the separate internal Signoff Record required by the domain without exposing signoff workflow jargon.
-_Avoid_: Ctrl+S, Save As file, generic signoff, export
+_Avoid_: native Journal Save shortcut, Save As file, generic signoff, export
 
 **Milestone Version Label** (`里程碑版本标签`):
 The concise editor-chosen name used to recognize one exact Milestone Version, such as `一审修改完成` or `2026-08 交付候选`, distinct from its immutable content identity.
@@ -935,11 +935,11 @@ The pre-Effect surface binding one exact milestone or prepared package version, 
 _Avoid_: Delivery Package Preparation, external handoff, save-as working copy, committed export
 
 **Local Export Destination** (`本地导出位置`):
-The exact Windows file or folder target explicitly selected for one local export through the system picker, distinct from the Delivery Package Purpose and from any external channel.
+The exact local file or folder target explicitly selected for one export through the current platform's system picker, distinct from the Delivery Package Purpose and from any external channel.
 _Avoid_: named recipient, product-managed staging root, remembered hint alone, Public Release destination
 
 **Local-only Export Boundary** (`仅本地导出边界`):
-The V1 product boundary in which AI7 may prepare and atomically publish files only to a user-selected local Windows destination, producing no direct external transmission, handoff log, recipient tracking, or delivery-confirmation state.
+The V1 product boundary in which AI7 may prepare and atomically publish files only to a user-selected local destination on Windows or macOS, producing no direct external transmission, handoff log, recipient tracking, or delivery-confirmation state.
 _Avoid_: offline-only product, prohibition on later manual sharing, External Export Policy, proof of delivery
 
 **Publication Version** (`发稿版本`):

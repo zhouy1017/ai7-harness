@@ -6,7 +6,7 @@ Status: **accepted; supersedes the engineering-verification gates in earlier des
 
 AI7 has one CI testing purpose: demonstrate that complete user-facing workflows still function and that previously observed bugs do not recur.
 
-The required CI surface is one Windows end-to-end suite. It covers representative journeys across the packaged application or the closest launchable application boundary available at that stage. A bug fix adds an E2E regression scenario when the failure can be reproduced through a user-visible journey.
+The required CI surface is one logical provider-free end-to-end suite executed on Windows and macOS. It covers complete supported journeys across each platform's packaged application or the closest launchable application boundary available at that stage. Platform-native setup may differ inside this same gate; it does not create separate certification programmes. A bug fix adds an E2E regression scenario when the failure can be reproduced through a user-visible journey.
 
 CI does not add separate unit, integration, contract, property, coverage, lint, static-analysis, performance, load, security, privacy, compliance, accessibility, provider-conformance, schema-compatibility, ABI, packaging-integrity, reproducibility, signature, provenance, replay, request-fingerprint, release-receipt, architecture-closure, or source/artifact-evidence gates. Build and packaging commands may run only when needed to launch the E2E subject.
 

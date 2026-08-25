@@ -36,16 +36,16 @@ Users have complete access to their own material without the agent gaining roam 
 
 ### Agent Data Root
 
-AI7 owns a data root, and the agent holds genuine filesystem permission inside it: read, write, create, organize. Outside it there is nothing — no user Documents, no Desktop, no system paths, no other applications' data.
+AI7 owns a data root as the intended platform filesystem boundary. Editorial Runs use domain-shaped AI7 Capabilities and the AI7 service facade for file access; neither Windows nor macOS is assumed to provide whole-process confinement until a concrete native mechanism supports that claim.
 
 Two **nested** boundaries are required, because one is not sufficient:
 
 | Boundary | Enforced by | Catches |
 | --- | --- | --- |
-| **Agent Data Root** | OS sandbox and tool guard | Escape from AI7 entirely; the backstop for implementation bugs |
+| **Agent Data Root** | AI7 capability/service facade, optionally supplemented by native OS controls | Escape from AI7-managed storage; do not claim whole-process OS confinement from the current design alone |
 | **Run Source Scope** | AI7 capability and service facade | Reading Book B during a Book A task; the semantic guarantee |
 
-A data root holds every Book. Raw filesystem access across it would let a Run scoped to one Book read another's manuscript directly, silently regressing ADR 0002's rule that no task searches or mutates every available Book. The OS sandbox alone would satisfy the letter of the data-root decision while breaking the scope model.
+A data root holds every Book. Raw filesystem access across it would let a Run scoped to one Book read another's manuscript directly, silently regressing ADR 0002's rule that no task searches or mutates every available Book. Native OS controls cannot replace the Run Source Scope check, and the product does not rely on them as the sole boundary.
 
 Inside the root, a **per-Run scratch area** is unscoped: the agent writes temporary and intermediate files there freely, without touching governed Book material.
 
@@ -106,7 +106,7 @@ Accepted with owner revisions:
 - full Harness engine, narrow tool surface: no generic shell, roaming filesystem, or arbitrary network in an editorial Run;
 - domain-shaped capabilities only, with bounded import/export and provenance-bearing research;
 - users reach all their own material without filesystem literacy, and retrievability is guaranteed;
-- an Agent Data Root gives the agent real filesystem permission inside it and nothing outside, with Run Source Scope nested inside as the semantic boundary;
+- the Agent Data Root is the intended platform storage boundary, with enforceable AI7 capability/service facades and Run Source Scope nested inside; whole-process Windows/macOS confinement is not claimed before its mechanism is selected;
 - two capability profiles, Editorial and Developer, with no self-service escalation and a middle profile deferred; and
 - everything is proposable by agents while capability expansion never self-activates, with all revisions recorded and developer-reviewed.
 
