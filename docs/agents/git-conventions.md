@@ -22,6 +22,8 @@ docs/17-glossary-collision-guard
 
 One issue, one branch, one pull request. One writable worker per branch, per the Repository Development Dispatch rules.
 
+Before work is labeled `ready-for-agent` or dispatched, the Issue contains the applicable [Change Brief](change-brief.md). Mechanical T1 work may use the short form; every non-mechanical change uses the full authority, reuse, structural-budget, non-goal, consequence, and stop-condition form. A Worker never enlarges that brief itself.
+
 ## Commits
 
 Conventional Commits: `type(scope): subject`.
@@ -44,7 +46,8 @@ Agent-authored commits carry the co-authorship trailer for the model that wrote 
 ## Pull requests
 
 - Title matches the primary commit subject.
-- Body links the issue and states the user-visible outcome.
+- Body links the Issue and states the user-visible outcome or exact non-product outcome.
+- Body records only the Change Brief closure delta: planned versus actual structure, existing implementation reused, any new owner/dependency and why, journey/bug outcome or `N/A` for non-behavior work, migration/cleanup, unresolved matters, and archive-sweep result when a lifecycle node was triggered.
 - For an implementation change affecting a supported journey or observed-bug outcome, the one logical E2E Functional Gate must pass the same applicable journey IDs on Windows and macOS. A failure on either platform is not merged around.
 - Documentation-only and design-only changes do not create automated proof work. Lint, type-check, format, build, package, signing, release, same-SHA, or formal-review checks are not additional required pull-request gates.
 - Independent review is optional and advisory. When the Commander or owner requests it, use a read-only non-author Reviewer at least equal to the work's task class and disclose `same-provider review — independence reduced` when cross-provider review was unavailable.
@@ -53,6 +56,8 @@ Agent-authored commits carry the co-authorship trailer for the model that wrote 
 The E2E scenario admission, data, subject, and platform rules live in [`ci-test-boundaries.md`](ci-test-boundaries.md).
 
 **Squash merge.** Each merge to `main` is one complete task, so history reads as a sequence of finished outcomes rather than agent scratch work. The pull-request body becomes the squashed commit body.
+
+After merge, closure, or abandonment, run the applicable [documentation archive sweep](document-lifecycle.md). This is lifecycle maintenance, not an additional merge or review gate.
 
 ## Tags and releases
 

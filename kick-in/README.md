@@ -19,9 +19,9 @@ Use a fresh AI7-owned repository and consume an exactly pinned Harness release/c
 
 The fresh-repository half is now **settled by owner instruction**: this design room was initialized on 2026-08-17 and published as private `zhouy1017/ai7-harness` on branch `main`. It contains documentation only and no copied source.
 
-The rest is now accepted too. The license and reuse authorization were settled at Question 27, the meaning of full Harness capability at Question 29, and the dependency strategy at Question 30. After the interview, ADR 0028 unified product scope as one Windows-and-macOS Standalone product; concrete macOS mechanics remain explicitly deferred. Issue #8's five-batch candidate missing-design audit is also complete through root ADR 0040, including the destination-independent package, native local-export collision, and versioned maintenance refinements. **The design interview is complete**: all 36 questions are resolved or explicitly deferred.
+The rest is now accepted too. The license and reuse authorization were settled at Question 27, the meaning of full Harness capability at Question 29, and the dependency strategy at Question 30. After the interview, ADR 0028 unified product scope as one Windows-and-macOS Standalone product; concrete macOS mechanics remain explicitly deferred. Issue #8's five-batch candidate missing-design audit is complete through root ADR 0040, including the destination-independent package, native local-export collision, and versioned maintenance refinements. The later response-presentation candidate adds wait-by-default D-084, Interactive Editorial Dialogue J-16, and UI ADR 0014 without changing authority or exposing raw chain of thought. **The design interview is complete**: all 36 questions are resolved or explicitly deferred.
 
-Agents arriving without prior context should start at the repository-root `HANDOFF.md`, then `AGENTS.md`.
+Agents arriving without prior context start at repository-root `AGENTS.md`, then the compact current `PROGRESS.md`. Use `HANDOFF.md` only as the current cold-start router and `docs/agents/README.md` to load task-specific material. Do not read this entire design room or `docs/archive/` by default.
 
 ## Document map
 
@@ -29,12 +29,12 @@ Agents arriving without prior context should start at the repository-root `HANDO
 2. [Source provenance](./01-source-provenance.md) — exact inputs, licensing, history, and source-copy rules.
 3. [Target architecture](./02-target-architecture.md) — proposed component boundaries, semantic mappings, and alternatives.
 4. [Keep / adapt / drop matrix](./03-keep-adapt-drop.md) — the initial evidence-backed legacy disposition.
-5. [Migration workflow](./04-migration-workflow.md) — design gates and future vertical-slice sequence.
+5. [Migration workflow](./04-migration-workflow.md) — compact current routing from accepted design into later authorized incremental vertical slices; the superseded full sequence is archived.
 6. [Decision map](./05-decision-map.md) — the one-question-at-a-time interview and dependencies.
 7. [Risk register](./06-risk-register.md) — major technical, product, security, and provenance risks.
 8. [Canonical setup record](./07-project-setup-draft.md) — the approved agent, tracker, context-map, and glossary configuration now applied to the repository.
-9. [Source-document inheritance](./08-source-document-inheritance.md) — active row-by-row original-AI7 preserve/modify/relocate/archive review plus architecture-maintainer-owned Harness guidance.
-10. [Retained development workflows](./09-retained-development-workflows.md) — exact pinned source inventory for tiered CI, generated mock-provider evidence, and development-only multi-agent dispatch.
+9. [Source-document inheritance](./08-source-document-inheritance.md) — completed row-by-row original-AI7 preserve/modify/relocate/archive review plus architecture-maintainer-owned Harness guidance.
+10. [Retained development workflows](./09-retained-development-workflows.md) — historical source inventory; current dispatch lives in item 28 and current CI in item 36.
 11. [Editorial dimension catalog](./10-editorial-dimensions.md) — accepted eight-dimension baseline and the open production-customization contract.
 12. [Cross-corpus editorial learning](./11-cross-corpus-editorial-learning.md) — Book-scoped task authority plus the accepted cross-Book House Editorial Memory boundary.
 13. [Series work boundary](./12-series-work.md) — accepted richer shared knowledge and exact retrieval among explicitly related Books.
@@ -54,7 +54,7 @@ Agents arriving without prior context should start at the repository-root `HANDO
 27. [Tiered verification and mock-provider evidence](./26-tiered-verification-and-mock-provider-evidence.md) — historical Question 24 plan; its engineering-verification gates are superseded by the minimal E2E decision.
 28. [Repository development dispatch](./27-repository-development-dispatch.md) — accepted Question 25 three-role model, provider-neutral operating rules, and the single provider-specific Layer B binding policy.
 29. [Harness capability and authority boundary](./28-harness-capability-and-authority-boundary.md) — accepted Question 29 full-engine/narrow-surface split, Agent Data Root, profile separation, and tiered activation for agent-authored revisions.
-30. [Editorial quality metrics](./29-editorial-quality-metrics.md) — accepted Question 36 Quality Signal families, derived metrics, cold-start tolerance, low-burden feedback interaction, and the two-sided Behavior Evaluation Gate.
+30. [Editorial quality metrics](./29-editorial-quality-metrics.md) — accepted Question 36 Quality Signal families, derived metrics, cold-start tolerance, and low-burden feedback interaction; any separate Behavior Evaluation Gate is superseded by ADR 0027.
 31. [Upstream consumption and upgrade contract](./30-upstream-consumption-and-upgrade-contract.md) — accepted Question 30 exact-pin discipline and package-subset selection; its separate upgrade-proof programme is superseded by ADR 0027.
 32. [Single execution authority](./31-single-execution-authority.md) — accepted Question 31 agent-loop definition, instances-versus-authorities rule, required parallelism, scheduling split, and the learn-the-framework-not-its-defaults boundary.
 33. [Runtime language and release channel](./32-runtime-language-and-release-channel.md) — accepted TypeScript-only runtime and Windows zip/NSIS mechanics; macOS release/data mechanics remain separate implementation decisions under ADR 0028.

@@ -1,114 +1,45 @@
-# Migration and Project Workflow
+# Migration and project workflow
 
-Status: **accepted sequence; phase contents settled by the completed interview**
+Status: **current compact router; the full historical sequence is archived and is not an implementation plan**
 
-## Phase 0 — Design and authority (complete on `design-doc`; canonical `main` integration pending)
+The original phase-by-phase document mixed still-useful migration direction with verification programmes and implementation prerequisites later superseded by ADR 0027. Its captured form is preserved in the [agent-guidance baseline archive](../docs/archive/agent-guidance-baseline-2026-08-25/migration-workflow-before-compaction.md). Do not recover requirements from that snapshot unless a current authority record explicitly re-admits them.
 
-Outputs:
+## Current boundary
 
-- Accepted charter and V1 boundary.
-- Repository license and source-authorization decision. Visibility is already settled: private.
-- Accepted target architecture and semantic mapping.
-- Keep/adapt/drop matrix with owners and deferrals.
-- Security, provider, data, Windows/macOS Standalone/editor, native-adapter, and upstream strategies; Word explicitly deferred.
-- First tracer-slice acceptance contract.
+- The design interview is complete and the repository remains documentation-only.
+- `main` is the only canonical line. The `design-doc` aggregate and its V2 architecture/UI packages do not supply implementation authority by themselves.
+- Before implementation begins, the owner must accept the intended design path, the Commander must integrate it through the normal pull-request path, and the owner must separately authorize implementation planning.
+- No dependency installation, product scaffold, predecessor asset copy, Plugin discovery, data migration, or release follows from this router.
 
-Completion outcome: every item in the decision map is resolved or explicitly deferred. No runtime scaffold was needed. The `design-doc` aggregate records this completed design state but does not become canonical `main` or authorize implementation by itself.
+## Direction after authorization
 
-### Repository initialization ran early, by instruction
+This is a sequence, not a set of independent gates:
 
-On 2026-08-17 the owner directed that the design room itself be placed under version control and published as private `zhouy1017/ai7-harness`. This ran one repository-setup action early. The proprietary license, private-source reuse authorization, and `0.1.0-rc.6` Harness baseline are now accepted design inputs. Selecting the final package subset, adding the profile/bundle skeleton and build faces, and implementing the Source Checkout Buildability Contract remain Phase 1 work that requires separate implementation authorization.
-
-### Accepted legacy-transfer gate
-
-The new production business store starts empty. Future implementation may provide only three narrow transfer paths: local protected API-credential transfer/re-enrollment, reviewed mock-provider evidence intake, and explicitly selected test-sample-Book intake. It must not build a general `projects.json`, Book/history, index, memory, Run/Operation, workflow, or UI-state importer. See [Legacy Data Migration Boundary](./24-legacy-data-migration-boundary.md).
-
-## Phase 1 — Foundation bootstrap (future implementation)
-
-The repository already exists. After separate implementation authorization, establish its source-complete development surface as setup inside the first vertical product journey, not as a standalone build issue or test result:
-
-- Apply the [Source Checkout Buildability Contract](../docs/agents/source-checkout-buildability.md) on every declared Windows and macOS Supported Development Host.
-- Pin the exact Node and selected package-manager versions; commit the root/workspace manifests and one frozen lockfile.
-- Pin the exact Harness package subset, record upstream provenance and notices, and add the AI7 profile/bundle skeleton without changing Harness core.
-- Provide one documented root command surface for host checking, declared-source-assisted bootstrap, host-native build, readiness/lifecycle-aware provider-free launch, and E2E execution. CI invokes that same surface rather than a CI-only build path.
-- Track or derive every required source, static asset, schema, migration, default, public-synthetic fixture, license, and notice from tracked inputs and immutable declared dependencies.
-- Reject predecessor or sibling checkouts, personal paths, ambient payload discovery, untracked source, pre-generated output, private material, AI7 product/provider/signing credentials, release secrets, and CI-image-only state as build inputs. Permit narrowly scoped repository/dependency-source infrastructure authentication only during checkout and bootstrap.
-- Keep development and E2E Agent Data Roots outside the repository. Startup reaches an interactive empty product without a provider, API key, manuscript, or outbound product request.
-- Declare and integrity-bind registry dependencies and all secondary artifacts, including lifecycle-script downloads; reconstruct any local dependency store from empty; and materialize Agent Data Root-owned runtime dependencies atomically from a verified snapshot rather than another root or global store. Provider-free/E2E launch retains the normal non-provider topology and may substitute only the deterministic model fixture, isolated data root, disabled outbound network, and non-substituting test hooks. Prepare the same root path that the one logical Windows/macOS E2E Functional Gate will use. Dependency restoration may use approved package registries and immutable artifact sources before the product no-network interval; this setup creates no separate build, package, or reproducibility gate and receives no result before the first complete journey exists.
-
-Phase-1 sequencing state: the host matrix, pinned toolchain, lockfile, root command surface, tracked-input boundary, and provider-free empty-product launch exist on Windows and macOS. This state has no independent pass/fail record. The Source Checkout Buildability Contract is first fulfilled only when Phase 2 uses that setup to pass its complete journey through the one E2E Functional Gate on both platforms. Release signing, notarization, and final package mechanics may remain later work only when they do not block local build and launch.
-
-## Phase 2 — Read-only vertical tracer
-
-The retained slice is a useful first supported journey after implementation authorization: create or open one Book, import and index one public-synthetic DOCX, view it in the real windowed editor, ask one source-grounded question through the in-boundary deterministic model fixture, and return an answer whose citation resolves to an exact highlighted Manuscript Block range. It starts with the Phase-1 fresh-checkout build path and crosses the launchable renderer/main/service/Harness/domain product path. The current definition and superseded historical gate material are separated in [First tracer slice](./34-first-tracer-slice.md).
-
-The slice must prove end to end:
-
-- Book identity is not inferred from cwd.
-- Source revision and scope are exact and durable.
-- Retrieval, exact fetch, synthesis, and grounding are separate.
-- The model sees only logged/reconstructable input.
-- The AI7 Run Record has exact Execution Bindings to Harness Session/turn/tool event ranges without copied transcripts.
-- Default profile cannot use undeclared shell/filesystem/network paths.
-- The provider-free deterministic fixture remains inside the same product boundary and makes no live provider call.
-- Restart/reopen reconstructs the user-visible result without hidden provider state.
-
-Completion outcome: the complete read-only user journey passes on Windows and macOS through the one E2E Functional Gate; no document mutation, general data import, headless substitute, provider rehearsal, replay proof, or separate tracer gate is included.
-
-## Phase 3 — Durable controlled mutation
-
-Add proposal branches, durable approval, Effects, receipts, recovery, retry/cancel, and ambiguous-outcome fencing through the Harness tool pipeline.
-
-Completion outcome: an applicable complete E2E journey shows that a text-changing task can propose, review, accept/reject, publish once, recover after interruption, and stop rather than silently repeat an uncertain external Effect.
-
-## Phase 4 — Standalone product surface and professional editor
-
-- Build one new Chinese-first editorial workbench and manuscript editor from accepted journeys through the chosen AI7 shell/client extension model; do not recreate the legacy UI or editor.
-- Cover long-document Chinese editing, structure/selection fidelity, journal/checkpoint/recovery, proposals/review, source-grounded agent interaction, and import/export outcomes inside applicable complete supported E2E journeys.
-- Keep one versioned local domain/Harness authority behind the desktop client.
-- Re-evaluate installer, helper processes, signing, repair, and release packaging against the final Standalone topology; include no Word add-in or COM component.
-
-Exit outcome: the one Standalone product executes canonical Task Intents and presents consistent Run/workflow/decision/Effect state plus linked Harness status on Windows and macOS. Under ADR 0027 this is exercised only through complete E2E journeys, not a separate professional-editing or platform gate.
-
-## Phase 5 — Capability expansion
-
-Migrate remaining task skills as vertical journeys, not a bulk manifest copy:
-
-1. Summary, review, and writing generation.
-2. Annotation and side-by-side proposal review.
-3. Publication-lifecycle skills.
-4. Skill authoring and managed installation after the trust boundary is proven.
-5. Cross-project and Series workflows; no general legacy production-data import.
-
-Each skill must declare its domain inputs/outputs, Harness primitives, allowed AI7 capabilities, source/privacy scope, approval rules, durable records, UI surfaces, and supported-journey or observed-bug mapping when it changes admitted behavior.
-
-## Phase 6 — Release and upstream operations
-
-- Pin updates enter through dedicated upstream-upgrade PRs.
-- Each update retains exact pin, provenance, rollback, and applicable notices/license obligations, and runs only the applicable complete E2E journeys plus observed-bug regressions on Windows and macOS.
-- AI7 never tracks an unbounded moving branch for release.
-- A source fork is opened only for a documented missing seam with an upstream/contribution strategy.
-- Release automation packages an accepted source state without creating same-SHA, package, signing, notarization, release-proof, or release-receipt gates.
+1. **Promote the exact accepted baseline.** Update canonical ADRs, contexts, Policy Documents, product constraints, supported journeys, and current UI/architecture routing. Candidate or historical documents remain labeled and cannot silently fill gaps.
+2. **Bootstrap through the first vertical outcome.** Apply the [Source Checkout Buildability Contract](../docs/agents/source-checkout-buildability.md) on every declared Windows/macOS development host while implementing the first thinnest runnable end-to-end outcome. Use one documented root command surface, regular tracked inputs, immutable declared dependencies, and reconstructable dependency stores; never depend on predecessor/sibling checkouts, personal paths, ambient or untracked payloads, pre-generated output, private material, product/provider/signing credentials, or CI-image-only state. Approved registries and immutable artifact sources may be used during exact dependency restoration before the product E2E no-network interval. Launch the same production-shaped non-provider renderer/main/service/Harness/domain topology as normal local use, differing only by the deterministic model fixture, isolated data root, disabled outbound network, and non-substituting test hooks. This setup belongs to the existing E2E Functional Gate and creates no separate build, package, or reproducibility gate. Do not build empty packages or a horizontal architecture skeleton before the outcome.
+3. **Deliver further vertical journeys incrementally.** Implement one complete user-visible outcome at a time across the real product path. Once a responsibility exists, follow the [incremental development lifecycle](../docs/agents/incremental-development.md) and its reuse-before-new-code ladder. Do not create layer-porting issues, parallel authorities, a second loop, or speculative infrastructure.
+4. **Expand capabilities only for admitted outcomes.** Add skills, providers, native adapters, dependencies, and platform mechanics only through a bounded Change Brief and the applicable authority decision.
+5. **Package accepted source.** Windows and macOS share product outcomes while native mechanics may differ explicitly. Packaging or release automation creates no additional engineering proof gate.
 
 ## Work-item shape
 
-After the PRD/issues phase, implementation work should be independently grabbable vertical slices. Every issue should name:
+Every implementation Issue uses the [Change Brief](../docs/agents/change-brief.md) and names:
 
-- User-visible outcome.
-- AI7 domain owner and Harness extension point.
-- Source provenance rows affected.
-- Data/event/schema changes.
-- Approval, privacy, and ambiguous-effect behavior.
-- Supported journey ID, or the observed-bug issue and nearest complete journey, affected by the change.
-- Any change to root commands, Supported Development Host prerequisites, immutable dependencies, generated inputs, or launch semantics.
-- Explicit non-goals and cleanup/migration behavior.
+- one user-visible outcome or observed defect;
+- exact accepted design and action authority;
+- the current owner/reuse seam, or an authorized first-owner bootstrap;
+- structural budget and explicit non-goals;
+- data, authority, privacy, Effect, migration, and platform consequences;
+- any root-command, declared-host-tool, immutable-dependency, generated-input, or launch-contract consequence;
+- applicable supported journey or bug regression; and
+- stop conditions plus cleanup/archive disposition.
 
-Layer-only issues such as “port all Python” or “copy all tests” should be rejected unless they enable a complete, measurable vertical outcome.
+Layer-only rewrites and wholesale predecessor migration are not admissible outcomes.
 
-## Repository-development orchestration
+## Validation
 
-Preserve and revise original AI7's local multi-agent dispatch as a developer workflow. Its workers may inspect, implement, test, and review repository changes under explicit scoped authority and recorded handoffs. It must not become a product runtime dependency, ship as an AI7 end-user workflow, or be conflated with Harness sessions/subagents used by the product. Exact source assets and current/stale status will be recorded in a focused legacy workflow inventory before its future implementation is planned.
+The only standing automated engineering surface is the provider-free [E2E Functional Gate](../docs/agents/ci-test-boundaries.md) on Windows and macOS. Each platform subject is constructed from a fresh checkout through the documented bootstrap/build/launch path before the product's no-network execution interval. That setup has no independent pass/fail record. Historical Test Catalogs, tiered workflows, live-provider/replay proof, request fingerprints, exact-head review, package/signing proof, performance gates, or separate editor/platform/build/reproducibility gates are not current requirements.
 
-## Legacy test disposition
+## Development roles and records
 
-Do not migrate a legacy test because its layer or suite existed. Re-express a legacy user-visible contract only when it belongs to an accepted supported journey or an observed-bug outcome inside the nearest complete journey. Retain allowed public-synthetic fixtures only when that journey needs them. Implementation-coupled, provider-rehearsal, replay, package-proof, platform-proof, and historical/prototype tests remain reference evidence and do not become standing gates.
+Repository work follows [Repository Development Dispatch](./27-repository-development-dispatch.md), [Git conventions](../docs/agents/git-conventions.md), and the [document lifecycle](../docs/agents/document-lifecycle.md). `PROGRESS.md` holds only the current checkpoint; consumed plans and handoffs leave the active path at lifecycle nodes.

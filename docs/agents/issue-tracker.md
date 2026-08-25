@@ -9,6 +9,10 @@ Issues and PRDs for this repository live as GitHub Issues. Use authenticated Git
 - Fetch labels and comments when a skill needs the full ticket state.
 - A request to “publish to the issue tracker” means create a GitHub issue.
 - A request to “fetch the relevant ticket” means read the GitHub issue and its comments and labels.
+- Every work-ready Issue contains the applicable [Change Brief](change-brief.md). Keep it in the Issue rather than creating a duplicate planning file.
+- `ready-for-agent` means the outcome, exact target-qualified authority/base, existing implementation or authorized first owner, structural budget, non-goals, consequences, applicable implementation journey/bug or explicit non-behavior `N/A`, and stop conditions are complete enough for a cold Worker.
+- Use `needs-info` when factual inputs are missing and `ready-for-human` when product scope, domain meaning, authority, privacy/egress, foundation replacement, or another owner decision is required. Do not dispatch T0 ambiguity.
+- When an Issue is merged, closed, or abandoned, its owner runs the scoped [documentation archive sweep](document-lifecycle.md) and leaves one current safe next action.
 
 ## Pull requests as a triage surface
 
