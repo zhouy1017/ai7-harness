@@ -38,7 +38,7 @@ Preferred flow:
 
 1. The user selects an old provider credential identity to transfer.
 2. A local migration utility resolves it only through the old Windows-protected credential mechanism under the current user identity.
-3. The utility immediately writes the value into a distinct versioned new-AI7 Protected Secret Store namespace through the new Credential Broker; it does not reuse the old `AI7/` reference identity.
+3. The utility immediately writes the value into a distinct versioned new-AI7 Protected Secret Store namespace for the current supported operating system through the new Credential Broker; it does not reuse the old `AI7/` reference identity. The exact Windows-to-macOS transfer behavior remains a Phase 0 decision.
 4. The new system persists only a new Credential Reference and non-secret provider metadata.
 5. The utility reports success/failure without displaying, logging, exporting, copying to clipboard, or writing the secret to a repository/configuration file.
 6. If protected resolution cannot be proven, the user performs **Credential Re-enrollment / 凭据重新登记** by entering the credential again; insecure fallback is prohibited.

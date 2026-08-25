@@ -1,8 +1,8 @@
 # Migration and Project Workflow
 
-Status: **accepted sequence; phase contents settled by the completed interview**
+Status: **accepted sequence; platform-dependent Phase 0 contents reopened by ADR 0027**
 
-## Phase 0 — Design and authority (active)
+## Phase 0 — Design and authority (reopened by the 2026-08-21 platform revision)
 
 Outputs:
 
@@ -10,14 +10,14 @@ Outputs:
 - Repository license and source-authorization decision. Visibility is already settled: private.
 - Accepted target architecture and semantic mapping.
 - Keep/adapt/drop matrix with owners and deferrals.
-- Security, provider, data, Windows Standalone/editor, and upstream strategies; Word explicitly deferred.
+- Security, provider, data, Windows-and-macOS Standalone/editor, and upstream strategies; Word explicitly deferred.
 - First tracer-slice acceptance contract.
 
-Exit gate: every item in the decision map is resolved or explicitly deferred. No runtime scaffold is needed to pass this gate.
+Exit gate: every interview item and every later owner revision is resolved or explicitly deferred, including the post-interview platform blockers in note 35 and the Harness baseline audit in note 36. The required evidence checks pass, but no runtime scaffold is needed or authorized to pass this gate.
 
 ### Repository initialization ran early, by instruction
 
-On 2026-08-17 the owner directed that the design room itself be placed under version control and published as private `zhouy1017/ai7-harness`. This deliberately runs one Phase 1 step during Phase 0, and it changes nothing else: Phase 0 is still active, its exit gate is unmet, and the license, private-source reuse authorization, Harness pin, profile/bundle skeleton, and build faces all remain Phase 1 work that is not authorized yet.
+On 2026-08-17 the owner directed that the design room itself be placed under version control and published as private `zhouy1017/ai7-harness`. Repository visibility, proprietary licensing, predecessor reuse authority, and the intended Harness package baseline are now resolved design facts. Product scaffolding, profile/bundle composition, dependencies, build faces, and CI remain future implementation and are not authorized. On 2026-08-21 the owner expanded the target to Windows and macOS, reopening only the platform-dependent Phase 0 decisions listed in the [current exit review](./36-phase-0-exit-review.md).
 
 ### Accepted legacy-transfer gate
 
@@ -25,13 +25,11 @@ The new production business store starts empty. Future implementation may provid
 
 ## Phase 1 — Foundation bootstrap (future implementation)
 
-Create the repository only after Phase 0:
-
-- Choose and add the license. Repository creation and private visibility already happened during Phase 0.
-- Pin the exact Harness package family and record upstream SHA/notices.
+- Work only after explicit implementation authorization; repository creation and licensing are already complete.
+- Install the accepted exact Harness package family only after the mandatory `rc.5` to `rc.6` delta and two-platform package-closure audit; record upstream SHA/notices.
 - Add the AI7 profile/bundle skeleton without changing Harness core.
-- Establish Host/Client build faces, domain boundary packages, test catalog, and provenance ledger.
-- Establish the two accepted GitHub Actions workflows, `pr` and `release`, both single-job on `windows-2025`, plus the reviewed and regenerated mock-LLM-provider corpus, before behavior migration.
+- Establish Host/Client build faces, domain boundary packages, the provenance ledger, and only the verification machinery accepted at the Phase 0 exit; the Test Catalog remains trigger-deferred.
+- Establish the two accepted workflow names, `pr` and `release`, with the smallest accepted Windows/macOS evidence topology, plus the reviewed and regenerated mock-LLM-provider corpus, before behavior migration.
 - Dump and snapshot the effective Cordis configuration so upgrades cannot silently change capability exposure.
 
 Exit gate: an empty AI7 composition boots deterministically, has no manuscript data, exposes only its declared capabilities, and can be upgraded/reverted by changing one pin.
@@ -64,9 +62,9 @@ Exit gate: a text-changing task can propose, review, accept/reject, publish once
 - Build one new Chinese-first editorial workbench and manuscript editor from accepted journeys through the chosen AI7 shell/client extension model; do not recreate the legacy UI or editor.
 - Prove long-document Chinese editing, structure/selection fidelity, journal/checkpoint/recovery, proposals/review, source-grounded agent interaction, and import/export outcomes through the Standalone Editing Sufficiency Gate.
 - Keep one versioned local domain/Harness authority behind the desktop client.
-- Re-evaluate installer, helper processes, signing, repair, and release packaging against the final Standalone topology; include no Word add-in or COM component.
+- Implement only the Windows and macOS helper-process, data, packaging, signing, repair, and release mechanics accepted at the Phase 0 exit, and honor every explicit deferral; include no Word add-in or COM component.
 
-Exit gate: Standalone satisfies the professional-editing gate, executes canonical Task Intents, and presents consistent Run/workflow/decision/Effect state plus linked Harness status on a clean Windows machine.
+Exit gate: Standalone satisfies the professional-editing and cross-platform consistency gates, executes canonical Task Intents, and presents consistent Run/workflow/decision/Effect state plus linked Harness status on clean supported Windows and macOS machines.
 
 ## Phase 5 — Capability expansion
 
@@ -90,7 +88,7 @@ Each skill must declare its domain inputs/outputs, Harness primitives, allowed A
 
 ## Work-item shape
 
-After the PRD/issues phase, implementation work should be independently grabbable vertical slices. Every issue should name:
+Only after explicit owner authorization to create a PRD/issues phase, implementation work should be divided into independently grabbable vertical slices. Every issue should name:
 
 - User-visible outcome.
 - AI7 domain owner and Harness extension point.

@@ -1,6 +1,6 @@
 # Harness Capability and Authority Boundary
 
-Status: **accepted in Question 29 with owner revisions**
+Status: **accepted in Question 29; filesystem-enforcement claim reopened by ADR 0027 and the Phase 0 audit**
 
 ## The framing that resolves the tension
 
@@ -36,14 +36,19 @@ Users have complete access to their own material without the agent gaining roam 
 
 ### Agent Data Root
 
-AI7 owns a data root, and the agent holds genuine filesystem permission inside it: read, write, create, organize. Outside it there is nothing — no user Documents, no Desktop, no system paths, no other applications' data.
+The accepted target is that AI7 owns a data root and the agent holds genuine filesystem permission inside it—read, write, create, organize—with none outside it. The Phase 0 audit shows that the selected Harness mechanisms do not currently satisfy that target on either supported platform: Windows enforcement is explicitly partial, and macOS Seatbelt confines file writes but not reads, network, or process visibility. The statement therefore remains a required boundary, not a claim about current enforcement. Phase 0 must either select and prove stronger per-platform isolation or explicitly revise the guarantee.
 
 Two **nested** boundaries are required, because one is not sufficient:
 
 | Boundary | Enforced by | Catches |
 | --- | --- | --- |
-| **Agent Data Root** | OS sandbox and tool guard | Escape from AI7 entirely; the backstop for implementation bugs |
+| **Agent Data Root** | Intended per-platform OS confinement plus tool guard; mechanism not yet accepted or proven | Escape from AI7 entirely; intended backstop for implementation bugs |
 | **Run Source Scope** | AI7 capability and service facade | Reading Book B during a Book A task; the semantic guarantee |
+
+Until the outer mechanism is resolved, the AI7 capability and service facade is
+the only accepted enforceable product boundary. It is necessary but not
+equivalent to the promised OS permission boundary, so it cannot be described as
+defence in depth by itself.
 
 A data root holds every Book. Raw filesystem access across it would let a Run scoped to one Book read another's manuscript directly, silently regressing ADR 0002's rule that no task searches or mutates every available Book. The OS sandbox alone would satisfy the letter of the data-root decision while breaking the scope model.
 
@@ -106,7 +111,7 @@ Accepted with owner revisions:
 - full Harness engine, narrow tool surface: no generic shell, roaming filesystem, or arbitrary network in an editorial Run;
 - domain-shaped capabilities only, with bounded import/export and provenance-bearing research;
 - users reach all their own material without filesystem literacy, and retrievability is guaranteed;
-- an Agent Data Root gives the agent real filesystem permission inside it and nothing outside, with Run Source Scope nested inside as the semantic boundary;
+- an Agent Data Root is the accepted target for real filesystem permission inside it and nothing outside, with Run Source Scope nested inside as the semantic boundary; the per-platform mechanism is a Phase 0 blocker and no current Harness backend is claimed to satisfy it;
 - two capability profiles, Editorial and Developer, with no self-service escalation and a middle profile deferred; and
 - everything is proposable by agents while capability expansion never self-activates, with all revisions recorded and developer-reviewed.
 

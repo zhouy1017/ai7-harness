@@ -1,6 +1,6 @@
 # AI7 Harness Kick-in
 
-Status: **design complete; no product implementation has started**
+Status: **36-question interview complete; post-interview platform revision reopened Phase 0, whose exit review is not passed; no product implementation has started**
 
 This folder is the migration design room for a new AI7 product that preserves the valuable product language, safety invariants, workflows, and user evidence from AI7 Reborn while adopting DeepSeek Harness as its agent execution and Agent Behavior foundation.
 
@@ -19,7 +19,7 @@ Use a fresh AI7-owned repository and consume an exactly pinned Harness release/c
 
 The fresh-repository half is now **settled by owner instruction**: this design room was initialized on 2026-08-17 and published as private `zhouy1017/ai7-harness` on branch `main`. It contains documentation only and no copied source.
 
-The rest is now accepted too. The license and reuse authorization were settled at Question 27, the meaning of full Harness capability at Question 29, and the dependency strategy at Question 30. **The design interview is complete**: all 36 questions are resolved or explicitly deferred.
+The license and reuse authorization were settled at Question 27, the meaning of full Harness capability at Question 29, and the dependency strategy at Question 30. **The design interview is complete**: all 36 questions are resolved or explicitly deferred, and the later explicit Question 16 confirmation closed its only acceptance ambiguity. A 2026-08-21 post-interview owner revision expanded the target to Windows and macOS, so Phase 0 is reopened for the dependent platform decisions listed in the current exit review.
 
 Agents arriving without prior context should start at the repository-root `HANDOFF.md`, then `AGENTS.md`.
 
@@ -57,7 +57,7 @@ Agents arriving without prior context should start at the repository-root `HANDO
 30. [Editorial quality metrics](./29-editorial-quality-metrics.md) — accepted Question 36 Quality Signal families, derived metrics, cold-start tolerance, low-burden feedback interaction, and the two-sided Behavior Evaluation Gate.
 31. [Upstream consumption and upgrade contract](./30-upstream-consumption-and-upgrade-contract.md) — accepted Question 30 exact-pin discipline, package-subset selection, registry evidence, and the six-point upgrade verification.
 32. [Single execution authority](./31-single-execution-authority.md) — accepted Question 31 agent-loop definition, instances-versus-authorities rule, required parallelism, scheduling split, and the learn-the-framework-not-its-defaults boundary.
-33. [Runtime language and release channel](./32-runtime-language-and-release-channel.md) — accepted Question 33 TypeScript-only runtime, portable-only V1 channel, self-contained data root, and the release-channel half of Question 26.
+33. [Runtime language and release channel](./32-runtime-language-and-release-channel.md) — accepted Question 33 TypeScript-only runtime and Windows release/data decisions; portable-only wording was superseded first by NSIS and then extended to a macOS target under ADR 0027.
 34. [Standalone shell and editor topology](./33-standalone-shell-and-editor-topology.md) — accepted Question 34 manuscript scale tiers, Electron three-process topology, and the ProseMirror windowed-editing foundation.
 35. [First tracer slice and exit gate](./34-first-tracer-slice.md) — accepted Question 35 store-and-index spike, read-only tracer, manuscript retrieval requirement, and the thirteen-point exit gate.
 36. [Minimal E2E validation](./35-minimal-e2e-validation.md) — accepted project-wide rule that CI covers only end-to-end functional completeness and observed-bug regressions.
@@ -66,7 +66,7 @@ Agents arriving without prior context should start at the repository-root `HANDO
 ## Decision discipline
 
 - **Proposed** means the audit supports it, but the owner has not accepted it.
-- **Accepted** means it was resolved in the design interview and, when warranted, recorded under `decisions/`.
+- **Accepted** means the owner explicitly accepted it—during the interview or in a later revision—and, when warranted, it is recorded under `docs/adr/`. Absence of objection is never acceptance.
 - **Deferred** means it is intentionally outside the first migration boundary.
 - **Dropped** means old-repository/offline reference only unless the accepted three-category transfer allowlist explicitly names the asset; it never means deleting the source repository during planning.
 

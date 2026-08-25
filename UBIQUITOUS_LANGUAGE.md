@@ -11,6 +11,12 @@ This is a concise bilingual reading view of AI7's ambiguity-sensitive domain lan
 | **Textual Source of Record** | 文本原文基准 | The exact revision that establishes what a text says, not whether its assertions are true. | 事实权威、真相来源 |
 | **Manuscript Assertion** | 稿件陈述 | A factual, logical, referential, or semantic claim expressed or implied by manuscript text. | 已核实事实 |
 | **Factual Verification** | 事实核验 | The evidence-based assessment of a Manuscript Assertion against appropriate factual authority. | 原文匹配、模型判断 |
+| **Evidence Link** | 证据关联 | A typed exact-revision relationship from a quotation, assertion, finding, or correction proposal to evidence and its assigned role. | 显示引用、无类型来源列表 |
+| **Reference Integrity** | 引证完整性 | The check that cited evidence has the stated identity, revision, location, digest, and text. | 陈述支持性、事实核验 |
+| **Claim Support** | 陈述支持性 | The check that evidence supports a claim for its assigned role and scope. | 引证完整性、普遍事实真相 |
+| **Quotation Verification** | 引文核验 | The exact-text check against authoritative original text under declared presentation-only normalization. | 模糊匹配、语义相似、事实核验 |
+| **Source Search** | 来源检索 | Non-authoritative discovery of candidate source identities or passages. | 原文精确提取、权威原文 |
+| **Exact Fetch** | 原文精确提取 | Authorized resolution of a stable reference against one exact revision to return authoritative text and integrity evidence. | 检索候选、模型重构文本 |
 | **Semantic Review** | 语义审读 | Editorial assessment of coherence, meaning, reference, contradiction, and intended consistency. | 语法检查、事实核验 |
 | **Editorial Error Finding** | 编辑差错发现项 | A revision-bound, evidence-linked record of a suspected factual or semantic defect. | 模型裁决、已完成更正 |
 | **Correction Proposal** | 更正提案 | A suggested exact-revision change that does not alter the active manuscript until accepted and committed. | 静默改写、已应用修改 |

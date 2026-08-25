@@ -28,6 +28,16 @@ The active policy may refine precedence by task and subject domain. Its default 
 
 An evidence record must identify its role, source kind, authority scope, title or local identity, author/publisher when applicable, exact supporting passage or data, revision or publication time, retrieval time when external, digest, access provenance, and quality assessment. The policy may require multiple independent records for sensitive or disputed claims.
 
+## Content and evidence treatment
+
+These rules are machine-validatable policy requirements rather than optional presentation advice:
+
+1. An exact quotation requires Quotation Verification against authoritative original text; approximate or model-reconstructed wording is never displayed as a verified quotation.
+2. A source-derived factual claim requires one or more cited Evidence Links to the exact supporting passage or data and must not claim more than those sources establish.
+3. A current or external factual claim requires research evidence carrying both its publication or source revision time and the time AI7 retrieved or verified it; evidence without the required timestamps cannot close the claim.
+4. An editorial interpretation is identified as analysis or judgment, with its rationale and considered passages, and is not presented as objectively proved by those passages.
+5. Creative or promotional synthesis remains identified as generated editorial text; each quotation, factual assertion, and canonical assertion inside it is classified and verified under its own rule.
+
 ## Outcomes and conflicts
 
 A verification outcome is one of `supported`, `contradicted`, `conflicting`, `unresolved`, or `not-applicable`; textual and internal-consistency statuses remain separately reportable. Conflicting evidence is retained rather than collapsed, with the applicable precedence rule, contrary evidence, uncertainty, and human disposition recorded.

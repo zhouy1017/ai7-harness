@@ -60,15 +60,15 @@ Per-operation latency budgets are deliberately not set here. They should be fixe
 
 ## Shell: Electron
 
-AI7 is TypeScript and Node, and Harness is Node, so a Node runtime ships regardless. **Electron 43.4.0 bundles Node 24.18.1**, which satisfies the Harness engine requirement of `^22.19.0 || >=24` directly.
+AI7 is TypeScript and Node, and Harness is Node, so a Node runtime ships regardless. **Electron 43.4.0 bundles Node 24.18.1**, which demonstrates compatibility with the Harness engine requirement of `^22.19.0 || >=24`; it is a feasibility reference, not a durable release pin. A supported Electron version must be selected at scaffold time and rechecked against Harness and native-module ABI on both target platforms.
 
 Rejected alternatives: **Tauri** would add a Rust toolchain and still need a Node sidecar, since Harness cannot run in Rust — two runtimes to avoid one. **Direct WebView2 hosting** means writing native glue for a problem Electron already solves.
 
-The predecessor used Electron 43 for this same application shape, and portable-folder packaging with Electron is well established. The cost is roughly 200 MB portable, affordable now that no Python interpreter ships.
+The predecessor used Electron 43 for this same application shape, and Electron supports the accepted Windows-and-macOS shell. Platform packaging differs and is governed separately. The size cost remains acceptable now that no Python interpreter ships.
 
-### The ABI risk is smaller than recorded
+### The ABI risk is reduced, not closed
 
-The register carried "Electron/native dependencies conflict with Harness Node/package stack" as High. Two findings reduce it: Electron 43's bundled Node already satisfies the Harness engines constraint, and the core packages AI7 selects are pure JavaScript — `dsh-agent-loop` depends only on `schemastery`. The native modules live in the sandbox and shell packages that Question 30 already excludes. The package-subset decision defused most of this risk as a side effect.
+Electron 43 demonstrates a compatible Node line, and the core agent loop itself is JavaScript. Those facts reduce risk but do not prove the candidate AI7 closure: sandbox, credential, image, FFI, or transitive packages may introduce native dependencies on either target. Phase 0 therefore requires exact installed-closure and Electron/Node ABI evidence from separately authorized disposable audit environments on Windows and macOS, without adding dependencies to this design repository.
 
 ## Topology: three processes
 
@@ -82,10 +82,10 @@ The service is separate rather than living in Electron main for four reasons:
 
 1. **UI responsiveness under parallel Runs.** Question 31 requires multiple concurrent Runs; a busy agent loop must never block paint.
 2. **Crash isolation.** A provider or Harness failure must not take down an editor holding unsaved text, which serves Question 23's no-silent-loss obligation directly.
-3. **Headless testability.** The same service is drivable without a GUI, which is exactly what Question 24's ten-minute `pr` gate and Question 35's tracer slice need. A service inside Electron main would force every test through an Electron harness.
+3. **Headless testability.** The same service is drivable without a GUI, which is exactly what Question 24's concise `pr` gate and Question 35's tracer slice need. The numeric gate budget remains pending measurement. A service inside Electron main would force every test through an Electron harness.
 4. The Question 31 concurrency and budget governor gets a natural home.
 
-**IPC uses stdio or a Windows named pipe. No TCP listener.** The register carries "Harness web server is exposed beyond loopback" as Critical; never opening a socket removes that structurally rather than configuring it away, following the same reasoning as Question 30's dependency-graph argument.
+**IPC remains local and never uses a TCP listener.** Stdio is the cross-platform preference and a Windows named pipe is an accepted option; a macOS Unix-domain socket is a candidate only. The register carries "Harness web server is exposed beyond loopback" as Critical; never opening a network socket removes that structurally rather than configuring it away, following the same reasoning as Question 30's dependency-graph argument. The exact macOS carrier and protocol adaptation are Phase 0 decisions.
 
 ## Editor foundation: ProseMirror
 
@@ -115,10 +115,14 @@ Accepted with owner revisions:
 - long Chinese manuscripts are a required feature with three binding scale tiers at 500K, 1M, and 10M Chinese characters;
 - windowed display is accepted rather than merely tolerated, so the binding performance constraint is whole-manuscript index time for find, replace, and jump rather than render time;
 - the renderer never holds a whole manuscript, the authoritative model lives in the service over a paging store, and whole-manuscript operations stream in the service;
-- Electron is the shell, with Electron 43's bundled Node satisfying the Harness engine requirement;
+- Electron is the cross-platform shell; Electron 43 proves feasibility but the supported release pin is chosen at scaffold time;
 - three processes, with a separate AI7 service holding domain services and the Harness runtime;
-- IPC over stdio or a named pipe, never a TCP listener;
+- IPC over stdio or an operating-system-local carrier, never a TCP listener;
 - ProseMirror is the editor foundation, used over bounded windows, at medium confidence pending a scale spike; and
 - interaction design remains with the separate UI/UX session.
 
-See [ADR 0024](../docs/adr/0024-electron-shell-with-isolated-ai7-service.md) and [ADR 0025](../docs/adr/0025-windowed-editing-over-a-paging-manuscript-store.md).
+The platform revision additionally requires installed-closure/ABI, Chinese IME,
+clipboard, file-dialog, and long-document proof on Windows and macOS. The exact
+consistency contract and platform-native deviations remain pending.
+
+See [ADR 0024](../docs/adr/0024-electron-shell-with-isolated-ai7-service.md), [ADR 0025](../docs/adr/0025-windowed-editing-over-a-paging-manuscript-store.md), and [ADR 0027](../docs/adr/0027-support-windows-and-macos-as-one-product.md).
