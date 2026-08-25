@@ -1,4 +1,5 @@
 import { isAbsolute } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   MAX_EDIT_CODE_UNITS,
   MAX_FRAME_BYTES,
@@ -7,8 +8,9 @@ import {
   type ServiceResponse,
   type ServiceSuccessResponse,
 } from '../shared/protocol.js';
-import { installServiceNetworkDenial, mountDormantHarness, type DormantHarnessRuntime } from './runtime.js';
-import { EditorialStore, StoreError } from './store.js';
+import { installNodeNetworkDenial } from '../shared/network-denial.js';
+import { mountDormantHarness, type DormantHarnessRuntime } from './runtime.js';
+import { EditorialStore, StoreError, StoreFatalError } from './store.js';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const HEX_DIGEST_PATTERN = /^[0-9a-f]{64}$/;
@@ -38,7 +40,7 @@ function isSafeInteger(value: unknown, minimum = 0): value is number {
 }
 
 function isBoundedString(value: unknown, maximum: number, allowEmpty = false): value is string {
-  return typeof value === 'string' && value.length <= maximum && (allowEmpty || value.length > 0);
+  return typeof value === 'string' && value.isWellFormed() && value.length <= maximum && (allowEmpty || value.length > 0);
 }
 
 function requireInput(value: unknown, keys: readonly string[], requestId: string): Record<string, unknown> {
@@ -299,7 +301,7 @@ function parentIsAlive(parentPid: number): boolean {
 }
 
 async function run(): Promise<void> {
-  installServiceNetworkDenial();
+  installNodeNetworkDenial();
   const { dataRoot, parentPid } = parseArguments(process.argv.slice(2));
   let stopping = false;
   const stop = (): void => {
@@ -317,7 +319,8 @@ async function run(): Promise<void> {
   let store: EditorialStore | undefined;
   let harness: DormantHarnessRuntime | undefined;
   try {
-    store = await EditorialStore.open(dataRoot);
+    const codeRoot = fileURLToPath(new URL('../../', import.meta.url));
+    store = await EditorialStore.open(dataRoot, codeRoot);
     harness = await mountDormantHarness();
     for await (const frame of readFrames()) {
       let request: ServiceRequest;
@@ -332,6 +335,10 @@ async function run(): Promise<void> {
       try {
         response = await dispatch(store, harness, request);
       } catch (error) {
+        if (error instanceof StoreFatalError) {
+          stop();
+          throw error;
+        }
         response = failureResponse(request.id, error);
       }
       await writeResponse(response);

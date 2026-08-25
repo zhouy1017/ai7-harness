@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { createReadStream, existsSync } from 'node:fs';
 import { mkdir, open, rename, rm } from 'node:fs/promises';
-import { dirname, join, posix, resolve, sep } from 'node:path';
+import { delimiter, dirname, join, posix, resolve, sep } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { inspectDevelopmentInputs } from './doctor.mjs';
@@ -17,10 +17,35 @@ function requireValue(condition, message) {
   }
 }
 
+function childEnvironment(extraEnv = {}) {
+  const selected = {
+    npm_config_cache: resolve(CACHE_ROOT, 'pnpm'),
+    npm_config_registry: 'https://registry.npmjs.org/',
+    npm_config_userconfig: resolve(ROOT, '.npmrc'),
+  };
+  const names = process.platform === 'win32' ? ['TEMP', 'TMP'] : ['TMPDIR', 'LANG', 'LC_ALL'];
+  for (const name of names) {
+    const value = process.env[name];
+    if (value !== undefined) selected[name] = value;
+  }
+  if (process.platform === 'win32') {
+    const systemRoot = process.env.SystemRoot ?? process.env.WINDIR;
+    requireValue(systemRoot, 'Windows system root is unavailable.');
+    selected.SystemRoot = systemRoot;
+    selected.WINDIR = systemRoot;
+    selected.ComSpec = resolve(systemRoot, 'System32', 'cmd.exe');
+    selected.PATHEXT = '.COM;.EXE;.BAT;.CMD';
+    selected.PATH = [dirname(process.execPath), resolve(systemRoot, 'System32'), systemRoot].join(delimiter);
+  } else {
+    selected.PATH = [dirname(process.execPath), '/usr/bin', '/bin', '/usr/sbin', '/sbin'].join(delimiter);
+  }
+  return { ...selected, ...extraEnv };
+}
+
 function runNode(script, args = [], extraEnv = {}) {
   const result = spawnSync(process.execPath, [script, ...args], {
     cwd: ROOT,
-    env: { ...process.env, ...extraEnv },
+    env: childEnvironment(extraEnv),
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
     maxBuffer: 4 * 1024 * 1024,
@@ -133,7 +158,7 @@ function verifyElectronNodeMode() {
   ].join('');
   const output = spawnSync(binary, ['-e', probe], {
     cwd: ROOT,
-    env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
+    env: childEnvironment({ ELECTRON_RUN_AS_NODE: '1' }),
     encoding: 'utf8',
     windowsHide: true,
     maxBuffer: 1024 * 1024,

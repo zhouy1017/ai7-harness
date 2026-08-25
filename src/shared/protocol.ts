@@ -6,6 +6,18 @@ export const MAX_BLOCK_CODE_UNITS = 4_096;
 export const MAX_EDIT_GRAPHEMES = 256;
 export const MAX_EDIT_CODE_UNITS = 1_024;
 
+export const IPC_CHANNELS = {
+  selectAndStageDocx: 'ai7:j01:select-and-stage-docx',
+  prepareNewBookReview: 'ai7:j01:prepare-new-book-review',
+  commitNewBookImport: 'ai7:j01:commit-new-book-import',
+  getManuscriptWindow: 'ai7:j01:get-manuscript-window',
+  flushJournalEdit: 'ai7:j01:flush-journal-edit',
+} as const;
+
+export type RendererCallResult<T> =
+  | { ok: true; result: T }
+  | { ok: false; error: { code: string; message: string } };
+
 export type FidelityCategoryKey =
   | 'inline-styles'
   | 'comments-revisions'
@@ -70,6 +82,7 @@ export interface ReviewBeforeImportProjection {
   };
   editorialDimensionSet: {
     profileId: string;
+    name: string;
     profileVersion: string;
     digest: string;
     weightSemantics: '中性起始权重；非穷尽评分量表';
@@ -145,6 +158,8 @@ export interface JournalAcknowledgement {
   durableAt: string;
   completionLabel: '已写入修订日志';
 }
+
+export type CommitNewBookRendererInput = Omit<ServiceOperationMap['commitNewBookImport']['input'], 'commitId'>;
 
 export interface ServiceReadiness {
   protocolVersion: typeof SERVICE_PROTOCOL_VERSION;
@@ -232,7 +247,7 @@ export interface RendererApi {
   readonly platform: 'win32' | 'darwin';
   selectAndStageDocx(): Promise<PickerStageResult>;
   prepareNewBookReview(input: ServiceOperationMap['prepareNewBookReview']['input']): Promise<ReviewBeforeImportProjection>;
-  commitNewBookImport(input: ServiceOperationMap['commitNewBookImport']['input']): Promise<ImportCommitProjection>;
+  commitNewBookImport(input: CommitNewBookRendererInput): Promise<ImportCommitProjection>;
   getManuscriptWindow(input: ServiceOperationMap['getManuscriptWindow']['input']): Promise<ManuscriptWindowProjection>;
   flushJournalEdit(input: JournalEditInput): Promise<JournalAcknowledgement>;
 }

@@ -24,6 +24,37 @@ function requireValue(condition, message) {
   }
 }
 
+function verifyAmbientSelectors() {
+  const forbiddenExact = new Set([
+    'COREPACK_HOME',
+    'COREPACK_INTEGRITY_KEYS',
+    'COREPACK_NPM_REGISTRY',
+    'ESBUILD_BINARY_PATH',
+    'NODE_OPTIONS',
+    'NPM_CONFIG_CACHE',
+    'NPM_CONFIG_GLOBALCONFIG',
+    'NPM_CONFIG_REGISTRY',
+    'NPM_CONFIG_STORE_DIR',
+    'NPM_CONFIG_USERCONFIG',
+    'PNPM_HOME',
+    'PNPM_STORE_PATH',
+  ]);
+  const forbidden = Object.keys(process.env).filter((name) => {
+    const normalized = name.toUpperCase();
+    return (
+      forbiddenExact.has(normalized) ||
+      normalized.startsWith('ELECTRON_') ||
+      /^NPM_CONFIG_(?:CAFILE|HTTPS?_PROXY|PROXY|STRICT_SSL)$/.test(normalized) ||
+      /^PNPM_(?:CACHE|REGISTRY|STORE)(?:_|$)/.test(normalized) ||
+      /^PNPM_CONFIG_(?:CACHE|GLOBALCONFIG|REGISTRY|STORE_DIR|USERCONFIG)$/.test(normalized)
+    );
+  });
+  requireValue(
+    forbidden.length === 0,
+    `Ambient acquisition selectors are not allowed: ${forbidden.map((name) => name.toUpperCase()).sort().join(', ')}.`,
+  );
+}
+
 function verifyHost() {
   const host = { platform: platform(), arch: arch(), release: release(), version: version() };
 
@@ -54,6 +85,7 @@ function verifyHost() {
 }
 
 export function inspectDevelopmentInputs() {
+  verifyAmbientSelectors();
   const packageManifest = readJson('package.json');
   const artifactManifest = readJson('config/dependency-artifacts.json');
   const host = verifyHost();
@@ -65,6 +97,11 @@ export function inspectDevelopmentInputs() {
   requireValue(packageManifest.engines?.node === '24.18.1', 'The exact Node engine pin drifted.');
   requireValue(packageManifest.engines?.pnpm === '11.24.0', 'The exact pnpm engine pin drifted.');
   requireValue(readFileSync(resolve(ROOT, '.node-version'), 'utf8').trim() === '24.18.1', '.node-version drifted.');
+  requireValue(
+    readFileSync(resolve(ROOT, '.npmrc'), 'utf8').replace(/\r\n/g, '\n') ===
+      'registry=https://registry.npmjs.org/\nalways-auth=false\n',
+    '.npmrc must keep the exact official unauthenticated registry boundary.',
+  );
 
   for (const [name, specifier] of Object.entries({
     ...packageManifest.dependencies,
@@ -107,6 +144,7 @@ export function inspectDevelopmentInputs() {
       packageJsonSha256: sha256('package.json'),
       lockfileSha256: sha256('pnpm-lock.yaml'),
       pnpmWorkspaceSha256: sha256('pnpm-workspace.yaml'),
+      npmrcSha256: sha256('.npmrc'),
       artifactManifestSha256: sha256('config/dependency-artifacts.json'),
       secondaryArtifact: {
         id: runtimeArtifact.id,

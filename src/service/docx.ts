@@ -52,6 +52,7 @@ function requireDocx(condition: unknown, message: string): asserts condition {
 }
 
 function canonicalJson(value: unknown): string {
+  if (typeof value === 'string') requireDocx(value.isWellFormed(), 'non-canonical text');
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
   if (value !== null && typeof value === 'object') {
     return `{${Object.entries(value as Record<string, unknown>)
@@ -73,6 +74,7 @@ function graphemeCount(value: string): number {
 }
 
 function safeDisplayName(input: string): string {
+  requireDocx(input.isWellFormed(), 'invalid display name');
   const name = basename(input).normalize('NFC').replace(/[\u0000-\u001f\u007f]/g, '').trim();
   requireDocx(name.length > 0 && name.length <= 180, 'invalid display name');
   requireDocx(extname(name).toLowerCase() === '.docx', 'selected file is not DOCX');
@@ -209,6 +211,7 @@ function parseCoreTitle(xml: string | undefined): string | undefined {
     if (tag.local === 'title') inTitle -= 1;
   });
   parser.write(xml).close();
+  requireDocx(value.isWellFormed(), 'invalid title text');
   const normalized = value.normalize('NFC').replace(/\s+/g, ' ').trim();
   return normalized.length > 0 && normalized.length <= 180 ? normalized : undefined;
 }
@@ -225,6 +228,10 @@ function parseDocument(xml: string): { blocks: ParsedDocxBlock[]; signals: Docum
   };
   let textCodeUnits = 0;
   let textDepth = 0;
+  const ancestors: string[] = [];
+  let runProperties: { depth: number; styled: boolean } | undefined;
+  let terminalSectionSeen = false;
+  let terminalSectionDepth: number | undefined;
   let paragraph:
     | {
         text: string;
@@ -236,6 +243,10 @@ function parseDocument(xml: string): { blocks: ParsedDocxBlock[]; signals: Docum
   parser.on('doctype', () => requireDocx(false, 'DOCTYPE in document XML'));
   parser.on('processinginstruction', () => requireDocx(false, 'processing instruction in document XML'));
   parser.on('opentag', (tag) => {
+    const parent = ancestors.at(-1);
+    const grandparent = ancestors.at(-2);
+    if (terminalSectionSeen && parent === 'body') requireDocx(false, 'terminal section properties are not terminal');
+    if (runProperties) runProperties.styled = true;
     switch (tag.local) {
       case 'p':
         requireDocx(paragraph === undefined, 'nested paragraph');
@@ -246,6 +257,10 @@ function parseDocument(xml: string): { blocks: ParsedDocxBlock[]; signals: Docum
         break;
       case 't':
         textDepth += 1;
+        break;
+      case 'rPr':
+        requireDocx(runProperties === undefined, 'nested run properties');
+        runProperties = { depth: ancestors.length, styled: false };
         break;
       case 'tab':
         if (paragraph) paragraph.text += '\t';
@@ -260,7 +275,7 @@ function parseDocument(xml: string): { blocks: ParsedDocxBlock[]; signals: Docum
       case 'strike':
       case 'color':
       case 'highlight':
-        signals.inlineStyles += 1;
+        if (!runProperties) signals.inlineStyles += 1;
         break;
       case 'commentRangeStart':
       case 'commentReference':
@@ -280,11 +295,22 @@ function parseDocument(xml: string): { blocks: ParsedDocxBlock[]; signals: Docum
         signals.imagesCaptions += 1;
         break;
       case 'sectPr':
-        signals.sections += 1;
+        if (parent === 'body') {
+          requireDocx(!terminalSectionSeen && Object.keys(tag.attributes).length === 0, 'non-default terminal section properties');
+          terminalSectionDepth = ancestors.length;
+        } else if (parent === 'pPr' && grandparent === 'p') {
+          signals.sections += 1;
+        } else {
+          requireDocx(false, 'unsupported section properties');
+        }
         break;
       default:
         break;
     }
+    if (terminalSectionDepth !== undefined && tag.local !== 'sectPr' && ancestors.length > terminalSectionDepth) {
+      requireDocx(false, 'non-default terminal section properties');
+    }
+    ancestors.push(tag.local);
   });
   parser.on('text', (text) => {
     if (paragraph && textDepth > 0) {
@@ -294,9 +320,20 @@ function parseDocument(xml: string): { blocks: ParsedDocxBlock[]; signals: Docum
     }
   });
   parser.on('closetag', (tag) => {
+    requireDocx(ancestors.pop() === tag.local, 'document element stack mismatch');
     if (tag.local === 't') textDepth -= 1;
+    if (tag.local === 'rPr') {
+      requireDocx(runProperties?.depth === ancestors.length, 'run properties state mismatch');
+      if (runProperties.styled) signals.inlineStyles += 1;
+      runProperties = undefined;
+    }
+    if (tag.local === 'sectPr' && terminalSectionDepth !== undefined && terminalSectionDepth === ancestors.length) {
+      terminalSectionSeen = true;
+      terminalSectionDepth = undefined;
+    }
     if (tag.local !== 'p') return;
     requireDocx(paragraph, 'paragraph state missing');
+    requireDocx(paragraph.text.isWellFormed(), 'paragraph contains invalid text');
     const text = paragraph.text.normalize('NFC').replace(/[ \t]+/g, ' ').replace(/ *\n */g, '\n').trim();
     if (text.length > 0) {
       requireDocx(text.length <= MAX_BLOCK_CODE_UNITS && graphemeCount(text) <= MAX_BLOCK_GRAPHEMES, 'paragraph exceeds the bounded block size');
@@ -319,7 +356,14 @@ function parseDocument(xml: string): { blocks: ParsedDocxBlock[]; signals: Docum
     paragraph = undefined;
   });
   parser.write(xml).close();
-  requireDocx(paragraph === undefined && textDepth === 0, 'incomplete document XML state');
+  requireDocx(
+    paragraph === undefined &&
+      textDepth === 0 &&
+      ancestors.length === 0 &&
+      runProperties === undefined &&
+      terminalSectionDepth === undefined,
+    'incomplete document XML state',
+  );
   requireDocx(blocks.length > 0, 'DOCX contains no editable text blocks');
   return { blocks, signals };
 }
@@ -331,9 +375,9 @@ function fidelityReport(signals: DocumentSignals, entryNames: string[]): Fidelit
       key: 'inline-styles',
       label: '行内样式',
       count: signals.inlineStyles,
-      status: 'preserved',
-      statusLabel: '完整保留',
-      detail: signals.inlineStyles === 0 ? '未检测到行内样式。' : '检测到的基础粗体、斜体、下划线与颜色标记可保留。',
+      status: signals.inlineStyles === 0 ? 'preserved' : 'degraded',
+      statusLabel: signals.inlineStyles === 0 ? '完整保留' : '降级导入',
+      detail: signals.inlineStyles === 0 ? '未检测到行内样式。' : '可编辑内容块不保存行内样式；本次 clean tracer 不提交该分支。',
     },
     {
       key: 'comments-revisions',
@@ -371,9 +415,12 @@ function fidelityReport(signals: DocumentSignals, entryNames: string[]): Fidelit
       key: 'sections',
       label: '分节',
       count: signals.sections,
-      status: 'preserved',
-      statusLabel: '完整保留',
-      detail: '分节只用于确认文档结构；可编辑文本按稳定段落顺序保留。',
+      status: signals.sections === 0 ? 'preserved' : 'degraded',
+      statusLabel: signals.sections === 0 ? '完整保留' : '降级导入',
+      detail:
+        signals.sections === 0
+          ? '未检测到额外分节；单节正文顺序完整保留，且不据此建立版式往返保证。'
+          : '额外分节语义不进入纯文本内容块；本次 clean tracer 不提交该分支。',
     },
     {
       key: 'headers-footers',

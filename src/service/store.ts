@@ -21,6 +21,7 @@ import {
   MAX_WINDOW_BLOCKS,
 } from '../shared/protocol.js';
 import { isCleanTracerFidelity, parseDocx, type ParsedDocxBlock } from './docx.js';
+import { createCanonicalExternalDataRoot } from '../shared/data-root.js';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const TOKEN_PATTERN = UUID_PATTERN;
@@ -33,6 +34,7 @@ const WORKFLOW_PROFILE = {
 } as const;
 const BASELINE_EDITORIAL_DIMENSION_SET = {
   profileId: 'ai7.editorial.baseline',
+  name: '基础图书编辑维度集',
   profileVersion: '1.0.0',
   weightSemantics: '中性起始权重；非穷尽评分量表',
   dimensions: [
@@ -80,11 +82,21 @@ export class StoreError extends Error {
   }
 }
 
+export class StoreFatalError extends Error {
+  constructor(cause: unknown) {
+    super('AI7 authority transaction boundary failed.', { cause });
+    this.name = 'StoreFatalError';
+  }
+}
+
 function requireStore(condition: unknown, code: string, message: string): asserts condition {
   if (!condition) throw new StoreError(code, message);
 }
 
 function canonicalJson(value: unknown): string {
+  if (typeof value === 'string') {
+    requireStore(value.isWellFormed(), 'CANONICAL_VALUE_INVALID', '无法形成规范记录摘要。');
+  }
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
   if (value !== null && typeof value === 'object') {
     return `{${Object.entries(value as Record<string, unknown>)
@@ -111,7 +123,7 @@ function one<T extends SqlRow>(rows: T[], code: string, message: string): T {
 }
 
 function asString(value: SQLOutputValue | undefined, code = 'STORE_CORRUPT'): string {
-  requireStore(typeof value === 'string', code, '持久化记录类型无效。');
+  requireStore(typeof value === 'string' && value.isWellFormed(), code, '持久化记录类型无效。');
   return value;
 }
 
@@ -121,12 +133,14 @@ function asNumber(value: SQLOutputValue | undefined, code = 'STORE_CORRUPT'): nu
 }
 
 function safeTitle(input: string): string {
+  requireStore(input.isWellFormed(), 'TITLE_INVALID', '书名必须是有效文本。');
   const title = input.normalize('NFC').replace(/[\u0000-\u001f\u007f]/g, '').replace(/\s+/g, ' ').trim();
   requireStore(title.length > 0 && title.length <= 180, 'TITLE_INVALID', '书名必须为 1–180 个字符。');
   return title;
 }
 
 function safeDisplayName(input: string): string {
+  requireStore(input.isWellFormed(), 'SOURCE_IDENTITY_INVALID', '来源标识无效。');
   const name = input.normalize('NFC').replace(/[\u0000-\u001f\u007f]/g, '').trim();
   requireStore(name.length > 0 && name.length <= 180 && !/[\\/]/.test(name), 'SOURCE_IDENTITY_INVALID', '来源标识无效。');
   requireStore(name.toLowerCase().endsWith('.docx'), 'SOURCE_IDENTITY_INVALID', '来源必须是 DOCX。');
@@ -463,6 +477,7 @@ export class EditorialStore {
   readonly #authority: DatabaseSync;
   readonly #journal: DatabaseSync;
   readonly #cursorSecret = randomBytes(32);
+  #poisoned = false;
 
   private constructor(dataRoot: string, authority: DatabaseSync, journal: DatabaseSync) {
     this.#objectsRoot = resolve(dataRoot, 'objects');
@@ -470,10 +485,9 @@ export class EditorialStore {
     this.#journal = journal;
   }
 
-  static async open(dataRootInput: string): Promise<EditorialStore> {
+  static async open(dataRootInput: string, codeRoot: string): Promise<EditorialStore> {
     requireStore(isAbsolute(dataRootInput), 'DATA_ROOT_INVALID', 'Agent Data Root 必须是绝对路径。');
-    const dataRoot = resolve(dataRootInput);
-    requireStore(!isInside(resolve(process.cwd()), dataRoot), 'DATA_ROOT_INVALID', 'Agent Data Root 必须位于仓库外。');
+    const dataRoot = await createCanonicalExternalDataRoot(dataRootInput, codeRoot);
     await mkdir(resolve(dataRoot, 'objects'), { recursive: true });
     await mkdir(resolve(dataRoot, 'store'), { recursive: true });
     const databasePath = resolve(dataRoot, 'store', 'ai7.sqlite');
@@ -486,11 +500,15 @@ export class EditorialStore {
   }
 
   close(): void {
-    this.#journal.close();
-    this.#authority.close();
+    try {
+      this.#journal.close();
+    } finally {
+      this.#authority.close();
+    }
   }
 
   async stageSelectedDocx(selectionToken: string, selectedPathInput: string): Promise<StagedImportProjection> {
+    this.#assertAvailable();
     requireStore(TOKEN_PATTERN.test(selectionToken), 'SELECTION_INVALID', '文件选择令牌无效。');
     requireStore(isAbsolute(selectedPathInput), 'SELECTION_INVALID', '文件选择结果无效。');
 
@@ -597,6 +615,7 @@ export class EditorialStore {
     expectedDraftVersion: number,
     confirmedTitleInput: string,
   ): ReviewBeforeImportProjection {
+    this.#assertAvailable();
     requireStore(UUID_PATTERN.test(draftId), 'DRAFT_INVALID', '导入草稿标识无效。');
     const confirmedTitle = safeTitle(confirmedTitleInput);
     const snapshot = this.#loadDraftSnapshot(draftId);
@@ -650,6 +669,7 @@ export class EditorialStore {
     reviewDigest: string;
     commitId: string;
   }): ImportCommitProjection {
+    this.#assertAvailable();
     requireStore(UUID_PATTERN.test(input.draftId) && UUID_PATTERN.test(input.commitId), 'COMMIT_INVALID', '导入提交标识无效。');
     requireStore(/^[0-9a-f]{64}$/.test(input.reviewDigest), 'COMMIT_INVALID', '导入复核摘要无效。');
     const requestFingerprint = sha256(canonicalJson(input));
@@ -904,6 +924,7 @@ export class EditorialStore {
   }
 
   getManuscriptWindow(manuscriptId: string, branchId: string, cursor: string | null): ManuscriptWindowProjection {
+    this.#assertAvailable();
     requireStore(UUID_PATTERN.test(manuscriptId) && UUID_PATTERN.test(branchId), 'WINDOW_INVALID', '稿件窗口标识无效。');
     const binding = one(
       this.#authority
@@ -968,6 +989,7 @@ export class EditorialStore {
   }
 
   flushJournalEdit(input: JournalEditInput): JournalAcknowledgement {
+    this.#assertAvailable();
     requireStore(
       UUID_PATTERN.test(input.clientEditId) &&
         UUID_PATTERN.test(input.manuscriptId) &&
@@ -978,6 +1000,7 @@ export class EditorialStore {
     );
     requireStore(/^blk_[0-9a-f]{24}$/.test(input.blockId), 'EDIT_INVALID', '稳定内容块标识无效。');
     requireStore(/^[0-9a-f]{64}$/.test(input.baseBlockDigest), 'EDIT_INVALID', '内容块摘要无效。');
+    requireStore(input.insertText.isWellFormed(), 'EDIT_INVALID', '编辑文本无效。');
     requireStore(
       Number.isSafeInteger(input.expectedJournalSequence) && input.expectedJournalSequence >= 0,
       'EDIT_INVALID',
@@ -1285,6 +1308,7 @@ export class EditorialStore {
   }
 
   #transaction<T>(db: DatabaseSync, operation: () => T): T {
+    this.#assertAvailable();
     db.exec('BEGIN IMMEDIATE');
     try {
       const result = operation();
@@ -1293,11 +1317,16 @@ export class EditorialStore {
     } catch (error) {
       try {
         db.exec('ROLLBACK');
-      } catch {
-        // Preserve the operation failure; the connection will fail closed afterward.
+      } catch (rollbackError) {
+        this.#poisoned = true;
+        throw new StoreFatalError(new AggregateError([error, rollbackError], 'SQLite rollback failed.'));
       }
       throw error;
     }
+  }
+
+  #assertAvailable(): void {
+    if (this.#poisoned) throw new StoreFatalError(new Error('Authority store is poisoned.'));
   }
 
   #encodeCursor(value: {
