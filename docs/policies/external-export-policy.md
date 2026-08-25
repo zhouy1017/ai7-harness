@@ -1,14 +1,16 @@
 # External Export Policy v1
 
-Status: **active minimum baseline; default deny with one local-filesystem policy-eligibility rule**
+Status: **policy-version lifecycle `active`; repository authority is target-qualified; default deny with one local-filesystem policy-eligibility rule**
 
-The authority-bearing Policy Document is the canonical serialized [`external-export-policy.v1.json`](external-export-policy.v1.json), validated by its policy-specific [`external-export-policy.v1.schema.json`](external-export-policy.v1.schema.json) and selected by the digest-pinned [`active-policy-set.v1.json`](active-policy-set.v1.json). This Markdown file is its human-readable projection. It carries no independent authority; any difference from the canonical JSON is a defect and must be resolved by correcting the projection or issuing a new reviewed policy version, never by silently changing the meaning here.
+The authority-bearing serialization of this immutable policy version is [`external-export-policy.v1.json`](external-export-policy.v1.json), validated by its policy-specific [`external-export-policy.v1.schema.json`](external-export-policy.v1.schema.json). Its `lifecycleStatus: "active"` value describes lifecycle inside the policy version only. Repository-level current/canonical authority exists only at an exact integrated `dev` commit that contains this JSON and whose same-tree [`active-policy-set.v1.json`](active-policy-set.v1.json) pin matches its identity, version, path, and SHA-256. On any task branch not yet integrated into `dev`, this record is `accepted-but-unintegrated`.
+
+This Markdown file is the human-readable projection. It carries no independent authority; any difference from the canonical JSON is a defect and must be resolved by correcting the projection or issuing a new reviewed policy version, never by silently changing the meaning here.
 
 ## Identity and default
 
 - Policy identity: `external-export-policy`
 - Version: `v1`
-- Lifecycle status: `active`
+- Policy-version lifecycle status: `active`
 - Predecessor: none
 - Default decision: **deny**
 

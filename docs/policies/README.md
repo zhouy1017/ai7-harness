@@ -1,17 +1,23 @@
 # AI7 policy documents
 
-This directory owns current Policy Document artifacts. For the Provider Processing and External Export minimum baselines, the versioned JSON file is the authority-bearing canonical serialization. Its policy-specific JSON Schema constrains the exact v1 decision, the Markdown file is a human-readable projection that must not drift, and the active-policy-set manifest selects exact immutable bytes by version, repository-relative path, and SHA-256 digest.
+This directory is the stable owner for Policy Document artifacts. For the Provider Processing and External Export minimum baselines, the versioned JSON file is the authority-bearing canonical serialization of that immutable policy version. Its policy-specific JSON Schema constrains the exact v1 decision, the Markdown file is a human-readable projection that must not drift, and the active-policy-set manifest can select exact immutable bytes by version, repository-relative path, and SHA-256 digest.
 
-## Active minimum baselines
+## Target qualification
+
+The JSON value `lifecycleStatus: "active"` describes lifecycle inside that policy version. It does not by itself make a visible file current or canonical for a repository target.
+
+A policy version is repository-current and repository-canonical only at an exact integrated `dev` commit that contains its canonical JSON and whose same-tree active-policy-set entry matches the policy identity, version, repository-relative path, and SHA-256 of those exact bytes. On any task branch not yet integrated into `dev`, the same record is `accepted-but-unintegrated`, even when its internal lifecycle status is `active` and all pins validate locally.
+
+## Restrictive v1 policy records
 
 | Policy | Canonical serialized policy | Schema | Human projection |
 | --- | --- | --- | --- |
 | Provider Processing v1 | [`provider-processing-policy.v1.json`](provider-processing-policy.v1.json) | [`provider-processing-policy.v1.schema.json`](provider-processing-policy.v1.schema.json) | [`provider-processing-policy.md`](provider-processing-policy.md) |
 | External Export v1 | [`external-export-policy.v1.json`](external-export-policy.v1.json) | [`external-export-policy.v1.schema.json`](external-export-policy.v1.schema.json) | [`external-export-policy.md`](external-export-policy.md) |
 
-[`active-policy-set.v1.json`](active-policy-set.v1.json), validated by [`active-policy-set.v1.schema.json`](active-policy-set.v1.schema.json), is the active selection owner for these two policies. A policy pin is valid only when its policy identity, version, canonical path, and SHA-256 digest all match. Selecting a predecessor for rollback means changing the active-set selection through reviewed policy activation; it never means mutating an immutable policy version.
+At a qualifying integrated `dev` target, [`active-policy-set.v1.json`](active-policy-set.v1.json), validated by [`active-policy-set.v1.schema.json`](active-policy-set.v1.schema.json), is the active selection owner for these two policies. A policy selection is valid only when its policy identity, version, canonical path, and SHA-256 digest all match at that exact target. Selecting a predecessor for rollback means changing the active-set selection through reviewed policy activation; it never means mutating an immutable policy version.
 
-Provider Processing v1 denies by default, has exactly zero provider allow rules, and authorizes no live transmission. External Export v1 denies by default and contains only one policy-eligibility rule for a platform-native user-selected local-filesystem file Effect over an exact Delivery Package version or Editorial Deliverable Revision; every file still requires its own frozen preparation, exact Effect Intent and Effect Approval, atomic commit/verification, and Effect Receipt or classified outcome. The active set creates no provider, endpoint, model, credential, file-operation implementation, network/cloud/email destination, Public Release Permission, or outcome proof.
+When target-qualified as above, Provider Processing v1 denies by default, has exactly zero provider allow rules, and authorizes no live transmission. External Export v1 denies by default and contains only one policy-eligibility rule for a platform-native user-selected local-filesystem file Effect over an exact Delivery Package version or Editorial Deliverable Revision; every file still requires its own frozen preparation, exact Effect Intent and Effect Approval, atomic commit/verification, and Effect Receipt or classified outcome. The active set creates no provider, endpoint, model, credential, file-operation implementation, network/cloud/email destination, Public Release Permission, or outcome proof.
 
 ## Existing design-phase policy references
 
