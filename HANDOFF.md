@@ -4,18 +4,18 @@ Start with root [`AGENTS.md`](AGENTS.md), inspect the exact repository state as 
 
 ## Current state
 
-The design interview and V2 normalization are complete for the `dev` development baseline. The exact frozen provenance source is `design-doc@6895f02d2983865516d267809d8cdda77026f62c`, admitted only through the Issue #20 allowlist recorded in [`docs/development/design-baseline-allowlist.md`](docs/development/design-baseline-allowlist.md). It is not a branch to merge or an authority that outranks current `dev`.
+The design interview and V2 normalization are complete for the `dev` development baseline, with Issue #20 / PR #21 integrated at exact `dev@2e0018ce8ce586e4d15949b19c72569cba762bed`. The exact frozen provenance source is `design-doc@6895f02d2983865516d267809d8cdda77026f62c`, admitted only through the Issue #20 allowlist recorded in [`docs/development/design-baseline-allowlist.md`](docs/development/design-baseline-allowlist.md). It is not a branch to merge or an authority that outranks current `dev`.
 
 Development work starts from and targets `dev`. `main` remains the protected stable/release-promotion line; advancing it requires another exact Owner authorization. This branch strategy is repository workflow, never AI7 product-domain language. See [development lines](docs/agents/development-lines.md) and [Git conventions](docs/agents/git-conventions.md).
 
-The Owner-authorized sequence is:
+The Owner-authorized sequence is now at implementation planning:
 
-1. normalize the exact V2 baseline into `dev`;
-2. establish minimum versioned Provider Processing and External Export policy baselines in their own Issue;
-3. create the implementation plan and full Change Brief, including the Supported Development Host matrix, exact Node/Electron compatibility, and one exact package-manager version; and
-4. implement the bounded provider-free J-01 new-Book happy-path tracer.
+1. normalize the exact V2 baseline into `dev` — complete through Issue #20 / PR #21;
+2. establish minimum versioned Provider Processing and External Export policy baselines — complete in the current [`docs/policies/` owner](docs/policies/README.md), with exact selection pins in [`active-policy-set.v1.json`](docs/policies/active-policy-set.v1.json);
+3. create the implementation plan and full Change Brief, including the Supported Development Host matrix, exact Node/Electron compatibility, and one exact package-manager version — next after Commander integration of this policy unit; and
+4. implement the bounded provider-free J-01 new-Book happy-path tracer — only after that plan and separate implementation dispatch.
 
-No design document authorizes an adjacent step by itself. Provider/model calls and export implementation remain blocked until their policy baselines are active. Release, tag, publication, external distribution, and `dev`→`main` promotion are outside the current authorization.
+No design document authorizes an adjacent step by itself. The active Provider Processing v1 baseline authorizes zero live transmissions. External Export v1 contains only one local-filesystem policy-eligibility rule and creates neither Effect Approval nor implementation authority. Provider/model calls, every export runtime path, and all network/cloud/email destinations remain blocked pending separate authority. Release, tag, publication, external distribution, and `dev`→`main` promotion are outside the current authorization.
 
 ## Read in this order
 
@@ -44,7 +44,7 @@ It traverses the production-shaped Electron renderer + thin Electron main + sepa
 - **Do not recreate old proof programmes.** Required verification is one logical provider-free E2E Functional Gate for complete supported journeys on Windows and macOS. Service-only/headless runs, request fingerprints, package probes, performance gates, formal review gates, and separate layer suites are not substitutes or standing gates.
 - **Do not mistake a Harness event for AI7 business proof.** A Harness success, tool result, Session event, or watermark is never an AI7 Effect Receipt or business-completion record.
 - **Do not expose manuscript material.** Private or real manuscripts and their derivatives never enter a repository, hosted CI, fixtures, logs, artifacts, or the shipped product. Public-synthetic DOCX material supplies repository evidence.
-- **Do not grant provider or export authority by implication.** Reading local material, Run Authorization, configured credentials, Provider Processing Policy, External Export Policy, Effect Approval, and Public Release Permission remain separate.
+- **Do not grant provider or export authority by implication.** Reading local material, Run Authorization, configured credentials, Provider Processing Policy, External Export Policy, Effect Approval, and Public Release Permission remain separate. Active Provider Processing v1 has zero allow rules; the sole External Export v1 match is only policy eligibility for one exact local-file Effect, never approval, receipt, sending, delivery, publication, or permission for a network/cloud/email destination.
 - **Do not depend on the `@deepseek-ai/dsh` CLI aggregate, version ranges, or mutable dist-tags.** The accepted subset baseline remains exact `0.1.0-rc.6`; implementation planning checks current immutable package metadata, pins every selected version and the lockfile, and maintains provenance, license review, sanitization, and third-party notices. `kick-in/01-source-provenance.md` is a dated fixed-base audit record whose old dist-tag observation is not current registry authority.
 - **Do not fork the topology or Harness loop.** Electron main, isolated renderer with ProseMirror bounded windows, and the separate Node service are accepted. Harness owns the generic agent loop; AI7 owns business scheduling, domain state, capabilities, Effects, and receipts.
 - **Do not use repository roles as product concepts.** Commander, Worker, and optional Reviewer govern repository development only.
@@ -59,4 +59,4 @@ Every task follows Issue → complete Change Brief → Worker branch/worktree �
 
 ## Next safe action
 
-After Commander integration of Issue #20 into `dev`, execute the separately tracked minimum Provider Processing and External Export policy-baseline Issue. Then plan—and only then implement—the bounded provider-free tracer above. Any product/domain expansion, private material use, core-topology replacement, provider/export work before policy activation, release action, or `main` promotion requires new authority.
+Commander reviews and integrates the exact Issue #22 policy-baseline branch into `dev`; the Worker performs no push, pull request, merge, release, or other external action. After integration, create the separately scoped implementation plan and complete Change Brief, then—and only then—implement the bounded provider-free tracer above. Any product/domain expansion, private material use, core-topology replacement, live provider call, export runtime, network/cloud/email destination, release action, or `main` promotion requires separate authority.

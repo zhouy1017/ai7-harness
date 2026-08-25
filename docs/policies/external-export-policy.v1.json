@@ -1,0 +1,113 @@
+{
+  "schemaDialect": "http://json-schema.org/draft-07/schema#",
+  "schemaPath": "docs/policies/external-export-policy.v1.schema.json",
+  "documentType": "ai7-policy-document",
+  "policyId": "external-export-policy",
+  "policyType": "external-export",
+  "version": "v1",
+  "lifecycleStatus": "active",
+  "predecessorVersion": null,
+  "canonicalPath": "docs/policies/external-export-policy.v1.json",
+  "humanProjectionPath": "docs/policies/external-export-policy.md",
+  "authorityBasis": [
+    "docs/domain/execution/CONTEXT.md",
+    "docs/adr/0007-separate-decisions-authority-and-effect-proof.md",
+    "docs/adr/0018-tiered-activation-for-agent-authored-revisions.md",
+    "docs/adr/0038-separate-delivery-package-identity-from-local-export.md",
+    "docs/adr/0039-delegate-local-export-collisions-to-native-os-workflows.md",
+    "docs/architecture-v2/HARNESS-INTEGRATION.md"
+  ],
+  "decision": {
+    "default": "deny",
+    "allowRules": [
+      {
+        "ruleId": "user-selected-local-filesystem-file",
+        "policyResult": "eligible-only",
+        "effectKind": "file-effect",
+        "destination": {
+          "kind": "local-filesystem",
+          "objectKind": "file",
+          "selection": "platform-native-user-selector"
+        },
+        "target": {
+          "exactIdentityRequired": true,
+          "eligibleKinds": [
+            "delivery-package-version",
+            "editorial-deliverable-revision"
+          ]
+        }
+      }
+    ],
+    "excludedDestinationKinds": {
+      "network": true,
+      "cloud": true,
+      "email": true
+    }
+  },
+  "perFileEffectRequirements": {
+    "localExportPreparation": {
+      "required": true,
+      "perFile": true,
+      "frozen": true,
+      "createdAfterNativeDestinationAndCollisionResolution": true,
+      "bindings": {
+        "exactTargetObjectAndVersionOrRevision": true,
+        "renderedFormat": true,
+        "filename": true,
+        "finalLocalPath": true,
+        "fidelityDisposition": true,
+        "payloadDigest": true,
+        "createOrReplaceDisposition": true,
+        "externalExportPolicyIdAndVersion": true
+      }
+    },
+    "effectIntent": {
+      "required": true,
+      "stableIdentityRequired": true,
+      "bindsExactLocalExportPreparation": true,
+      "bindsExactTargetPayloadAndPolicy": true
+    },
+    "effectApproval": {
+      "required": true,
+      "exactEffectIntentOnly": true,
+      "separateFromPolicyEligibility": true,
+      "requiredBeforeCommit": true
+    },
+    "commitAndVerification": {
+      "stageBeforeTargetMutation": true,
+      "atomicFileCommit": true,
+      "verifyFinalLocalOutcome": true,
+      "receiptOnlyAfterVerification": true
+    },
+    "outcomeEvidence": {
+      "perFile": true,
+      "successRequiresEffectReceipt": true,
+      "nonSuccessRequiresClassifiedOutcome": true,
+      "ambiguousOutcomeAllowsAutomaticRetry": false,
+      "ambiguousOutcomeRequiresReconciliation": true
+    },
+    "driftInvalidation": {
+      "materialTargetPayloadOrPolicyDriftInvalidatesPreparationIntentAndApproval": true,
+      "pathOrDispositionChangeRequiresNewNativeResolution": true
+    },
+    "cancellation": {
+      "classification": "no-effect",
+      "attemptedFileEffect": false,
+      "effectReceipt": false
+    },
+    "nativeBatchChoice": {
+      "onlyExactCurrentlyEnumeratedCollisions": true,
+      "standingOverwritePermission": false
+    }
+  },
+  "authoritySeparations": {
+    "policyEligibilityIsEffectApproval": false,
+    "localExportGrantsPublicReleasePermission": false,
+    "localExportProvesPublicReleasePermission": false,
+    "localExportProvesSending": false,
+    "localExportProvesDelivery": false,
+    "localExportProvesPublication": false,
+    "platformResponseIsEffectReceipt": false,
+    "harnessOrToolResultIsEffectReceipt": false
+  }
+}

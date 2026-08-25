@@ -28,7 +28,7 @@ Run Authorization, Proposal Decision, Review Decision, Effect Approval, Effect R
 
 ## Current implementation route
 
-The next separately authorized work after baseline normalization is: land the minimum Provider Processing and External Export policy baselines in their own Issue, write the implementation-planning Issue and Change Brief, then deliver the bounded provider-free J-01 new-Book happy path.
+The restrictive Provider Processing and External Export v1 policy baselines are now present. Provider Processing v1 has exactly zero provider allow rules; External Export v1 makes only one exact local-file Effect policy-eligible and grants no implementation authority. Runtime enforcement, live-provider transmission, local-export implementation, and network export remain unimplemented and separately authorized. The next work is the implementation-planning Issue and Change Brief, followed by the bounded provider-free J-01 new-Book happy path under its own dispatch.
 
 That first tracer starts from a fresh checkout and public-synthetic DOCX, presents Review Before Import, atomically creates the Book, primary Manuscript, initial Manuscript Revision and import records, opens a bounded manuscript window, and confirms a durable Edit Journal through the production-shaped Electron main, renderer, separate Node service, and composed Harness/domain boundary. It does not claim the restart, ambiguity, reimport, existing-Book, source-only, or other accepted branches and therefore is not full J-01.
 
