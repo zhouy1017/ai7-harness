@@ -1,6 +1,6 @@
 # CI and test boundaries
 
-Status: **accepted implementation boundary under [ADR 0027](../adr/0027-concentrate-ci-on-e2e-functionality.md), integrated into `design-doc` through Issue #6; not `main` acceptance or implementation authorization**
+Status: **accepted implementation boundary under [ADR 0027](../adr/0027-concentrate-ci-on-e2e-functionality.md), integrated into `design-doc` through Issue #6 and amended by the owner-accepted Source Checkout Buildability Contract; not `main` integration or implementation authorization**
 
 On `design-doc`, this file is the concise authority for implementation-time CI and test admission. ADR 0027 remains the decision authority; aggregate integration alone grants no `main` or product-implementation authority.
 
@@ -30,7 +30,9 @@ For an observed bug, add the smallest end-to-end variation of the nearest comple
 
 ## Provider-free and public-synthetic boundary
 
-The gate uses public synthetic data only. It never uses a live model or provider, API key, credential, outbound network request, unpublished manuscript, private sample Book, or derivative of either.
+The product E2E execution interval uses public synthetic data only. After exact dependency restoration finishes, the product subject and scenario make no live model or provider call, receive no API key or credential, perform no outbound network request, and contain no unpublished manuscript, private sample Book, or derivative of either.
+
+Before that interval, CI may use narrowly scoped repository checkout and declared dependency-source authentication plus approved package registries and immutable artifact sources to restore the exact committed lockfile, declared pins, and integrity-bound secondary downloads. Those infrastructure credentials never reach the product process. Any local dependency store must be reconstructable from empty. Job-local dependency caches may accelerate this step, but their initially absent state must remain supported without deleting global or shared caches. This is the declared-source-assisted bootstrap defined by the [Source Checkout Buildability Contract](./source-checkout-buildability.md), not product network access or a provider rehearsal.
 
 A deterministic model fixture is allowed only as an in-process or local part of the same AI7 E2E journey boundary. It supplies predictable model-facing turns so the product journey can proceed; it is not a provider emulator, provider-conformance subject, replay proof, cassette programme, or request-fingerprint proof.
 
@@ -38,7 +40,7 @@ Repository fixtures may contain only clearly public synthetic material. CI logs 
 
 ## Product subject and platform contract
 
-The E2E subject follows the launchable product path. Build or package only as far as needed to start that subject on the current platform. A service-only, headless, package-only, signing-only, or installer-only execution is not a substitute for the supported journey and does not become another gate.
+The E2E subject follows the launchable product path. Each Windows and macOS execution begins from a fresh checkout or an equivalently empty job checkout, selects the repository-pinned toolchain, starts with empty job-local dependency-store/build-output roots, and uses the same documented root bootstrap, build, readiness, and lifecycle semantics used by developers. An optional cache may be restored only into a job-local cache root, and the first contract fulfillment on each host succeeds with that cache absent inside the same complete journey. Any Agent Data Root-owned runtime store is atomically materialized and re-verified from the declared snapshot rather than another root or a global/pre-filled store. E2E instantiates the same renderer, Electron main, service, composed Harness runtime, private IPC, required platform adapters, and non-release-only startup dependencies as local launch; only the deterministic model fixture, isolated data root, disabled outbound network, and non-substituting observation/control hooks may differ. No sibling checkout, personal path, ambient payload discovery, untracked source, pre-generated application output, private material, or CI-image-only tool is a permitted input. Build or package only as far as needed to start that subject on the current platform. A service-only, headless, topology-skipping, detached-or-immediately-exited, package-only, signing-only, or installer-only execution is not a substitute for the supported journey and does not become another gate.
 
 Windows and macOS run the same supported journey IDs. Native setup and mechanics may differ for menus, shortcuts, dialogs, filesystem locations, protected secret stores, private IPC adapters, packages, signing/notarization, and OS prompts. The supported function, domain meaning, authority transition, data outcome, and user-visible result may not differ.
 
@@ -50,7 +52,7 @@ An admitted scenario has no quarantine, flaky registry, tolerated-failure status
 
 Temporary diagnostics may be created while diagnosing or implementing a concrete change. They are local or otherwise non-gating and must be deleted before integration unless their user-visible behavior is admitted into the E2E Functional Gate under the rules above.
 
-Lint, type-check, format, and build commands may exist as developer commands. They are not required CI gates, merge evidence, coverage programmes, or substitutes for the E2E Functional Gate.
+Lint, type-check, format, and build commands may exist as developer commands. The Buildability Contract requires the root build and launch semantics only because the E2E subject must be constructed from the fresh checkout; they have no independent scenario, success record, CI gate, merge evidence, coverage programme, or authority and never substitute for the E2E Functional Gate.
 
 ## Explicitly excluded standing gates
 

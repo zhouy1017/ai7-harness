@@ -15,13 +15,15 @@ A scenario starts through the launchable product path and crosses the applicable
 
 ## Data and model boundary
 
-The gate uses public synthetic data only. It has no live provider or model call, API key, credential, outbound network request, unpublished manuscript, private sample Book, or derivative.
+After exact dependency restoration, the product E2E execution interval uses public synthetic data only. It has no live provider or model call, API key, credential, outbound network request, unpublished manuscript, private sample Book, or derivative.
+
+Before that interval, each Windows and macOS execution starts from a fresh checkout and empty job-local dependency-store/build-output roots. It may use narrowly scoped repository and declared dependency-source authentication plus approved package registries and immutable artifact sources to restore the committed lockfile, declared pins, and integrity-bound secondary downloads. Those infrastructure credentials never reach the product process. Optional caches remain job-local and non-authoritative, the first contract fulfillment on each host succeeds with them absent inside the same complete journey, and the same developer bootstrap/build/readiness/lifecycle semantics construct the E2E subject under the [Source Checkout Buildability Contract](../docs/agents/source-checkout-buildability.md).
 
 A deterministic model fixture may participate only inside the same AI7 E2E journey boundary. It keeps the journey predictable; it does not become provider conformance, replay, cassette, or request-fingerprint proof. CI logs and uploaded artifacts retain no manuscript payload.
 
 ## Product and platform boundary
 
-Build or package only as far as needed to launch the product subject. Service-only headless, package-only, installer-only, signing-only, release-only, and same-SHA checks are neither substitutes nor separate gates.
+Build or package only as far as needed to launch the product subject. Fresh-checkout bootstrap/build/launch is setup for this one gate and has no independent scenario or success record. E2E retains the normal renderer/main/service/Harness/private-IPC/platform-adapter topology; only the deterministic model fixture, isolated data root, disabled outbound network, and non-substituting test hooks may differ. Service-only headless, topology-skipping, package-only, installer-only, signing-only, release-only, and same-SHA checks are neither substitutes nor separate gates.
 
 Platform-native setup may differ inside the one gate. Functional behavior, domain meaning, authority transitions, data outcomes, and user-visible results may not differ. The same supported journey IDs run on both platforms.
 

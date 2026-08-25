@@ -24,6 +24,7 @@ Nothing here is a stub waiting to be filled in. If you are looking for code, the
 | --- | --- | --- |
 | 1 | `AGENTS.md` | **Canonical standing rules.** Everything binding is here or linked from here |
 | 1b | [`docs/agents/ci-test-boundaries.md`](docs/agents/ci-test-boundaries.md) | Concise implementation boundary for the sole Windows/macOS E2E Functional Gate |
+| 1c | [`docs/agents/source-checkout-buildability.md`](docs/agents/source-checkout-buildability.md) | Fresh-checkout input, command, host, launch, and E2E-setup contract |
 | 2 | `handoff20260817/PROJECT-OVERVIEW.md` | The whole design in one pass — vision, domain, architecture, what is excluded, what is open |
 | 2b | `handoff20260817/SESSION-HANDOFF.md` | Recent history: what the last session decided, which recommendations the owner overrode, and which agent errors were corrected |
 | 3 | `PROGRESS.md` | What has been done, what is next, and the Resume Prompt |
@@ -48,6 +49,8 @@ These are the mistakes most likely to be made by an agent arriving cold. Each ha
 **Do not depend on `@deepseek-ai/dsh`.** The CLI aggregate transitively installs the generic shell, pwsh, terminal, and web tool packages that the editorial tool surface excludes. Depend only on the subset AI7 needs.
 
 **Do not use version ranges for Harness.** `latest` still points at `0.0.1-rc.1` on nearly every package while `next` is `0.1.0-rc.6`. Pin exact versions, commit the lockfile. The consumed baseline is `0.1.0-rc.6`; the audited `0.1.0-rc.5` **was never published to npm** and is a provenance reference only.
+
+**Do not make the build depend on the machine that authored it.** Every supported Windows or macOS development host starts from a fresh checkout and the documented root command surface. A predecessor repository, sibling worktree, personal absolute path, ambient payload, pre-generated output, untracked source, private data, AI7 product/provider/signing credential, or CI-image accident is never a build input. Narrow repository/dependency-source infrastructure authentication and approved registry or immutable-artifact acquisition may happen before the product E2E no-network interval. Every secondary download is declared and integrity-bound; every local dependency store is reconstructable from empty; and an Agent Data Root-owned store is materialized from the verified snapshot rather than another root or a global store. Provider-free/E2E mode may replace only the provider binding, data root, outbound-network policy, and non-substituting test hooks — it never skips a required helper, IPC carrier, adapter, or product process. This is source-complete, declared-source-assisted bootstrap, not a vendored or fully offline build.
 
 **Do not confuse the two ledgers.** The AI7 Task Ledger holds business truth; the Harness Session Ledger alone holds model messages, turns, and tool calls. They join through Execution Bindings, never by copying transcripts.
 
