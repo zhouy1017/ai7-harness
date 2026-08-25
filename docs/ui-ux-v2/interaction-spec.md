@@ -1,6 +1,6 @@
 # AI7 V2 interaction specification
 
-Status: **candidate interaction contract complete for this session; not implementation evidence**
+Status: **candidate interaction contract under Issue #8 missing-design completion; not implementation evidence**
 
 ## Startup and restart
 
@@ -9,7 +9,11 @@ Status: **candidate interaction contract complete for this session; not implemen
 | One Recovery Attention State exists | Exact affected Book and Book Recovery Workspace | Durable Recovered Working State, relevant Milestone Version/Manuscript Checkpoint, any applicable verified Recovery Snapshot, and safe next actions | Global modal, silent restore/overwrite, or claiming recovery completed |
 | Multiple Recovery Attention States exist | Global Attention recovery list plus one explicitly opened affected-Book workspace | Separate Book identity, urgency, durable boundary, and unresolved count | Cross-Book merge, forced global wizard, or silently choosing the newest item |
 | No recovery attention; previous work resolves exactly | Last Active Work Object at its prior whole-manuscript position | Current Book, deliverable or manuscript identity, branch/revision, journal/checkpoint state, and any recovered-state label | Generic dashboard detour or silently switching to latest revision |
-| No Book exists | Book creation or manuscript import | Local data location at the point it matters and the ability to work locally before provider setup | Forcing model credentials before local editing |
+| No Book exists | `新建图书` / `导入稿件` | Standalone creation uses Review Before Book Creation for an intentional empty Book; import first opens an unresolved Manuscript Import Target where `新建图书` remains unselected and creates an import-bound draft only after explicit selection; local work remains available before Provider setup | Forcing model credentials, silently choosing the new-Book target, silently creating a Book, or treating either draft as authority |
+| Import Draft Recovery exists | `继续导入` / `放弃` over the exact staged file, target and last completed review state | Non-authoritative status, staging completeness, target/relationship drift, original-file access state, and every review that must be repeated | Auto-resume, auto-commit, presenting it as manuscript recovery, or hiding a changed target |
+| Safely reconciled interrupted Run exists | Exact Book/Task Run Activity surface and `任务已中断 · 可续行` attention | Existing Run Authorization, last durable milestone, verified Run Continuation Checkpoint, retained candidates/evidence, and `续行` consequence | Automatic Resume, new provider dispatch, calling the interruption a Retry, or hiding material drift/ambiguous Effects |
+
+Startup resolves those rows in safety order: manuscript Recovery Attention first; then Import Draft Recovery, with Import Commit Outcome Uncertain ahead of an ordinary staged draft inside that workspace; then any Resume-ready Run State as durable attention without dispatch; then exact prior work; and finally the no-Book entry. Lower-priority state remains reachable and is never discarded by the higher-priority opening.
 
 ### Background attention
 
@@ -21,6 +25,16 @@ Status: **candidate interaction contract complete for this session; not implemen
 ### Focus preservation
 
 Reconstruction of the shell restores the last meaningful editor focus and whole-manuscript location when exact resolution remains possible. A Recovery Attention State may place focus on its explanation or first safe action, but it never applies recovered text merely by receiving focus.
+
+### Standalone Book creation
+
+| State | Primary surface | Available action |
+| --- | --- | --- |
+| `新建图书` opened outside import | Non-authoritative Book Creation Draft with required `书名`, optional `内部编号`, and effective Book Editorial Dimension Set | Edit, cancel, or open Review Before Book Creation |
+| Review Before Book Creation ready | Exact Book identity/defaults and explicit `不创建稿件、来源材料或工作流程` plus named Series/learning/Provider/publication/delivery non-effects | `新建图书`, return to edit, or cancel |
+| Atomic creation completed | `图书已创建`; intentional empty Book, not partial import | `打开图书` or `导入首份稿件` |
+
+A manuscript-import-bound or source-bound Book Creation Draft cannot use the standalone commit without explicitly leaving its flow. Conversely, standalone creation does not inherit staged content, title suggestion, Source Version, fidelity review, Source Acquisition Record or Manuscript objects.
 
 ### Recovery comparison and restoration
 
@@ -61,7 +75,8 @@ The sidebar never renders Books as filesystem roots or Tasks as peer chat thread
 
 | Interaction | Result | Guardrail |
 | --- | --- | --- |
-| Continue from the Manuscript Visual Anchor | Opens the exact active manuscript branch/revision and last resolvable whole-manuscript position | Does not silently choose `latest` when the recorded pin differs |
+| Continue from the Manuscript Visual Anchor when a primary Manuscript exists | Opens the exact active manuscript branch/revision and last resolvable whole-manuscript position | Does not silently choose `latest` when the recorded pin differs |
+| Open the Manuscript Visual Anchor when no primary Manuscript exists | Shows `尚无稿件` and offers `导入首份稿件` | Creates no placeholder Manuscript, branch, revision, journal, checkpoint, recovery state, or Workflow Instance |
 | Open a related Editorial Deliverable | Opens that deliverable's own Active Work Object and Workflow Instance context | Does not inherit the Manuscript's phase, decisions, or completion state |
 | Open a Workflow lens | Navigates to the selected deliverable's authoritative Workflow Instance | Does not show or mutate a Book-wide scalar lifecycle |
 | Open a Task, Evidence, or Proposal lens | Navigates to the exact Book- or deliverable-bound record | Summary counts are not decisions or outcome proof |
@@ -73,21 +88,45 @@ The overview may use visually prominent cards and quiet state summaries in the C
 
 | State/request | Primary surface | Result |
 | --- | --- | --- |
-| Open exact Series | `成员与共享范围` | Show member Books, governed Series Knowledge, explicit exclusions and membership history |
+| Open exact Series | `成员与共享范围` | Show member Books, Series Knowledge Items with immutable revisions, Candidates/promotion history, current Series Retrieval Exclusions and membership history |
 | Request `加入书系` | Series Membership Impact Preview | Name Book/Series and consequences for future Tasks, frozen Runs, knowledge/learning and history |
 | Commit `加入书系` against current preview | Inline exact command | Append membership and Series Membership Change Record; enable future explicit Series selection |
 | Request `移出书系` | Series Membership Impact Preview | Name future removal, unchanged frozen Runs/history and separately governed knowledge/learning records |
 | Commit `移出书系` against current preview | Inline exact command | Remove future membership-derived selection and append change record |
 | Preview or governing state drifted | Keep command unavailable | Refresh exact preview; do not apply stale membership change |
+| Start editor-authored knowledge | `提议为书系知识` | Create a non-authoritative Series Knowledge Candidate bound to the exact Series |
+| Propose exact member-Book material | `提议为书系知识` with exact Manuscript Revision, Source Version or reviewed-evidence provenance | Create a provenance-bound candidate; source remains source of record |
+| Candidate ready | `书系知识纳入审阅` | Show item identity, content, provenance, conflicts, existing/superseded revision and future reuse scope; `纳入书系知识` remains unavailable until review and any conflict disposition are explicit |
+| Conflict disclosed | `存在书系知识冲突 · 需要处理` | Offer unselected `编辑候选项`, `保留已披露冲突`, and `取消`; preserving records the conflict and never resolves factual truth |
+| Promotion committed | `书系知识已纳入` or `书系知识已更新` | Create a stable Series Knowledge Item with its first revision or append one immutable revision to the exact item, plus a Series Knowledge Promotion Decision |
+| Request add/change/end exclusion | `书系检索排除影响预览` | Show exact target/scope/effective time and impact on future reads, current Runs, history and unaffected authority |
+| Exclusion committed | `书系检索排除已生效` | Append exclusion revision and immediately block every later affected Series read |
+| Affected queued/authorized/active Run | `书系检索范围已变化 · 需要重新确认计划` | `修改计划并重新授权` or `取消任务`; no ordinary `续行` |
 
 ### Series-membership rules
 
 - The impact preview starts with exact Book and Series identity and separates `未来任务`, `已授权或正在运行`, `书系知识与学习` and `历史记录`. It never compresses these into `将共享所有内容`.
 - Membership is eligibility for explicit future Series-scope selection, not the selection itself. It grants no Run Authorization, source scope, learning eligibility, provider egress or cross-Book mutation.
-- Adding membership does not alter existing drafts/Runs automatically. Removing membership does not alter already frozen authorized/running Runs; their exact source pins and normal drift/revalidation remain visible.
+- Adding membership does not alter existing drafts/Runs automatically. Removing membership does not alter already frozen authorized/running Runs; their exact source pins and normal drift/revalidation remain visible. This prospective membership rule must never be reused for an immediate Series Retrieval Exclusion.
 - Related Series Knowledge, Learning Material, eligibility, memory and lineage remain governed by their own records. Membership change neither silently activates nor deletes them.
 - Final actions are `加入书系` and `移出书系`. Successful change shows the exact new membership and links its Series Membership Change Record; no generic approval or celebratory state appears.
 - A failed/stale command leaves membership unchanged. Viewing, filtering or closing the workspace creates no membership change.
+
+### Series-knowledge rules
+
+- Candidate entry has only two paths: exact editor authorship or exact provenance from a member-Book Manuscript Revision, Source Version, or reviewed evidence. Membership, model output, Learning Eligibility, Proposal acceptance and Milestone designation never auto-populate governed knowledge.
+- A candidate remains non-authoritative and absent from Series retrieval until the exact promotion review commits. Conflict copy is `存在书系知识冲突 · 需要处理`; no competing statement is preselected or merged silently. The unselected handling choices are `编辑候选项`, `保留已披露冲突`, and `取消`. Preserving a disclosed conflict permits the final commit only after explicit selection and stores the conflict on the revision; it never resolves factual truth.
+- `纳入书系知识` creates a stable item with its first immutable revision or appends one immutable revision to the exact selected item, plus a promotion decision. It never rewrites the Book/source of record, establishes factual truth, creates Run Source Scope, authorizes or performs retrieval, permits provider transmission, decides learning eligibility, mutates a manuscript, or authorizes publication. The revision becomes eligible only for later exact Series-scoped selection and pinning.
+- Candidate/provenance/conflict drift invalidates the review. Failure or cancellation retains safe draft input but creates no knowledge revision or promotion decision.
+
+### Series-retrieval-exclusion rules
+
+- The target may be an exact member Book, Source Version, Series Knowledge Item, or stable knowledge class. An item target covers its current and future revisions; a class target also covers later matching items. The preview states the exact continuing behavior and shows optional reason, actor and effective time.
+- Create, change and end are append-only revisions. Ending or narrowing an exclusion does not restore an old authorization or auto-resume stopped work.
+- Once committed, the current read guard blocks not-yet-performed affected reads in queued, authorized and active Runs. The original Plan Envelope, Run Authorization, Execution Binding, already-fetched evidence, Session/history and completed results remain immutable; data already sent to a Provider cannot be recalled.
+- A stopped Run cannot use same-binding `续行`, Retry, fallback or silent substitution. Only a current Plan Revision plus renewed Run Authorization may resume permissible work; cancellation remains available.
+- Completed results receive `此结果使用的材料后来被排除` when applicable. The marker is historical impact, not deletion or a factual verdict.
+- The restriction belongs to the Series retrieval path only. It does not globally delete/hide the Book or source, decide Learning Eligibility, or silently decide separately authorized Cross-project access.
 
 ## Global Attention
 
@@ -200,8 +239,9 @@ The overview may use visually prominent cards and quiet state summaries in the C
 | Interaction/state | Visible behavior | Binding consequence |
 | --- | --- | --- |
 | Select text | Show ordinary editing selection and context actions | Live Manuscript Selection only; no durable context |
-| `加入任务范围` | Add a range card with chapter/location, preview, character count, and current state | Creates one Pinned Manuscript Range for the current Task draft |
-| Add another distant range | Preserve existing cards while the editor navigates and selects elsewhere | Extends the same Manuscript Range Set without creating a cross-window live selection |
+| `加入任务范围` on revision-exact text | Add a range card with chapter/location, preview, character count, and current state | Creates one Pinned Manuscript Range for the current Task draft |
+| `加入任务范围` on journal-newer text | Add the same card labeled `待保存修订版` | Retains a non-authoritative pending range in the Task Intent Draft; no Pinned Manuscript Range exists until Task Input Revision Preparation succeeds |
+| Add another distant range | Preserve existing cards while the editor navigates and selects elsewhere | Extends the exact Manuscript Range Set when all cards are pinned, or the visible Task Intent Draft range list while any card remains pending; never creates a cross-window live selection |
 | Create comment/finding/Evidence Link/Proposal context | Ask for or use the explicitly relevant current/pinned range | Does not inherit every range in a Task set unless explicitly selected |
 | Open a range card | Load the exact bound neighborhood and highlight it; preserve a return location | Preview text is not authoritative; Exact Fetch supplies wording |
 | Target changes but exact stable resolution succeeds | Mark current and update visible location metadata without changing intended text | Range remains valid with recorded derivation/re-resolution history |
@@ -222,6 +262,7 @@ The overview may use visually prominent cards and quiet state summaries in the C
 | Edit awaiting journal acknowledgement | `正在写入修订日志…` | Working input exists but durability is not yet confirmed |
 | Journal acknowledgement, no newer pending edit | `已写入修订日志` | Current edits are durable in the Edit Journal; no checkpoint implication |
 | Durable journal differs from latest milestone | `已写入修订日志 · 自里程碑版本「{标签}」后有修改` | Durable working state exists after the latest designated immutable version |
+| Manuscript-bound Task needs exact input while journal is newer than latest revision | `为任务保存修订版` | Create one Manuscript Checkpoint with purpose `任务输入`; bind the Task to its resulting revision without creating a Milestone Version or Signoff |
 | Milestone successfully saved | `已保存里程碑版本「{标签}」 · rN` | A new/existing immutable Manuscript Revision has the exact milestone designation |
 | Journal acknowledgement delayed beyond normal pending state | `本地写入中断 · 最近持久写入 {time}` | Enter Editing Protection Mode; bounded input only |
 | At-risk buffered input exists | `{count} 字可能尚未持久化` + structural location | Automatic exact retry; unsafe departure/mutation blocked |
@@ -233,6 +274,7 @@ The overview may use visually prominent cards and quiet state summaries in the C
 
 - The native Journal Save shortcut—`Ctrl+S` on Windows or `⌘S` on macOS—and `保存当前编辑` immediately request journal flush and wait for acknowledgement; repeated input after the request forms a newer pending state.
 - `保存为里程碑版本` is separately named, requires label/purpose, may accept a note, and never shares a shortcut or completion message with Journal Save.
+- `为任务保存修订版` appears only as a local prerequisite when journal-newer acknowledged text needs an exact Task/Run pin. It requires no editor-authored milestone label, and success returns directly to task preparation; failure retains both the journaled text and Task draft while blocking authorization.
 - A Milestone Version Suggestion around large replacement, structural adjustment, Proposal application, or delivery is a quiet recommendation with `保存里程碑版本` and `暂不` actions; neither is preselected.
 - Durable undo/redo survives renderer/service restart and remains branch-scoped. Crossing a checkpoint through undo creates new working state and never deletes or edits the immutable checkpoint revision.
 - A persistence failure remains visible in all manuscript presentation modes. Before close or a high-risk batch/apply transition, AI7 requires durability resolution or an explicitly safe recovery path rather than relying on a toast.
@@ -251,51 +293,128 @@ The overview may use visually prominent cards and quiet state summaries in the C
 
 ## Manuscript import
 
+### Target, relationship and exact-match selection
+
 | State | Primary surface | Available action |
 | --- | --- | --- |
-| File selected | Local parsing/preflight progress | Cancel without creating Book/manuscript state |
-| Fidelity review contains only `完整保留` | Concise summary with expandable per-class detail | Commit import or cancel |
-| Fidelity review contains `降级导入` | Expanded material degradation count, examples, behavior, and export consequence | Explicit `按上述降级方式导入` or cancel; no preselection |
-| Fidelity review contains critical `不支持导入` | Blocking explanation identifying unsupported classes | Cancel; optionally choose separately eligible `作为来源材料导入` |
-| Service import running | Business-readable progress | Cancel before atomic commit |
-| Atomic commit completed and all records persisted | `稿件已导入` with exact Book/manuscript/revision and degradation summary | `打开稿件` or `查看导入记录` |
+| File selected | Local parsing/preflight and staging; possible title candidates remain hidden as Book metadata before target selection | Continue to exact-match/target review; cancel without creating Book/manuscript authority |
+| Exact Import Match found | Exact matching Book, Source Version, prior import/reimport/source record, and whether identity or parsed content/structure matched | Choose unselected `打开已有导入`, eligible `重新导入并比较`, or `按已选择的关系继续`; a cross-Book match may change target but cannot share Book-owned source authority |
+| Filename Collision only | `名称相同，内容不同` with the exact prior item named | Continue normally; the collision neither blocks nor selects anything |
+| Manuscript Import Target unresolved | Unselected `新建图书` and eligible exact existing-Book choices; current context may be `建议目标` | Explicitly select one target or cancel |
+| Existing Book without primary Manuscript selected | Book identity plus unselected `作为首份稿件导入` and eligible `作为来源材料导入` | Choose one relationship, change target, or cancel |
+| Existing Book with primary Manuscript selected | Exact current Manuscript/revision plus unselected `重新导入当前稿件` and eligible `作为来源材料导入`; no second-Manuscript action | Choose one relationship, change to `新建图书` for a different intended work, or cancel |
+| `新建图书` selected | Non-authoritative Book Creation Draft with source-labeled Book Title Suggestions, required editable `书名`, and optional `内部编号` | Edit/confirm the title, validate the draft, return to target selection, or cancel |
+
+### New-Book and first-Manuscript import
+
+| State | Primary surface | Available action |
+| --- | --- | --- |
+| New-Book draft and preflight valid | Direct transition into fidelity review and then Review Before Import | No separate empty-Book commit or creation-success state |
+| `作为首份稿件导入` selected | Existing empty Book, effective dimension set, proposed primary Manuscript/branch/revision, exact Workflow Profile/Instance and original Source Version | Continue to fidelity review, change relationship, or cancel |
+| New-Book fidelity review contains only `完整保留` | Concise summary with expandable per-class detail | Open the new-Book Review Before Import or cancel |
+| New-Book fidelity review contains `降级导入` | Expanded material degradation count, examples, behavior, and export consequence | Record explicit degradation intent for this review or cancel; no preselection |
+| First-Manuscript fidelity review | Same content-class fidelity contract, with exact existing Book and no Book-creation consequence | Open its Review Before Import, change relationship, or cancel |
+| Initial editable-import fidelity review contains critical `不支持导入` | Blocking explanation identifying unsupported classes | Cancel, or choose eligible `作为来源材料导入` and then select an exact existing Book or source-bound `新建图书`; no partial Manuscript extraction |
+| New-Book Review Before Import ready | Exact new-Book target/title, file/provenance, initial Manuscript/branch/revision, Workflow Profile/Instance, effective Book Editorial Dimension Set, fidelity outcome, created records, and named non-effects | `新建图书并导入稿件`; degraded path uses `按上述降级方式新建图书并导入稿件`; change an applicable input or cancel |
+| First-Manuscript Review Before Import ready | Exact existing Book, source/provenance, proposed primary Manuscript/branch/revision, Workflow Profile/Instance, effective existing dimension set, fidelity outcome, created records and named non-effects | `导入为首份稿件`; degraded path uses `按上述降级方式导入为首份稿件`; change an applicable input or cancel |
+| Initial editable import running | Business-readable progress and exact relationship | `取消导入` before atomic commit |
+| New-Book atomic commit completed and all records persisted | `稿件已导入` with exact new Book/manuscript/revision and degradation summary | `打开稿件` or `查看导入记录` |
+| First-Manuscript atomic commit completed | `稿件已导入` with exact existing Book, new primary Manuscript/revision and degradation summary | `打开稿件` or `查看导入记录` |
+
+### Source-only import
+
+| State | Primary surface | Available action |
+| --- | --- | --- |
+| `作为来源材料导入` selected | Eligible retained file and unselected exact existing-Book / `新建图书` target | Select target, change relationship, or cancel |
+| Exact existing Book selected | Source identity/provenance, eligible retained content, Source Version and Source Import Record preview; explicit `不创建稿件` | Open Review Before Source Retention, change target/relationship, or cancel |
+| Existing-Book Review Before Source Retention ready | Exact Source Version/result plus no Manuscript, revision, Workflow Instance, Run Source Scope, factual, learning or publication consequence | `作为来源材料导入` or cancel; no generic continue |
+| `新建图书` selected | Source-bound Book Creation Draft with required confirmed title and source-labeled local suggestions only where defined | Open source-bound Review Before Book Creation, change target/relationship, or cancel |
+| Source-bound Review Before Book Creation ready | Exact zero-Manuscript Book/defaults, retained file/provenance, Source Version, Source Import Record and named non-effects | `新建图书并导入来源材料` or cancel |
+| Source-only commit completed | `来源材料已导入`; no manuscript-success styling | `查看来源材料` or `查看来源导入记录` |
 
 ### Import invariants
 
-- Preflight is local and provider-independent.
+- Preflight and Book Title Suggestion are local and Provider-independent. Candidate extraction may begin during preflight, but Book-title presentation/editing begins only after `新建图书` is selected. Non-empty DOCX title metadata supplies the primary candidate and filename stem is its fallback; a bounded subset of title-bearing early content may supply separately source-labeled alternatives. No content candidate silently displaces the primary/fallback rule or becomes Book identity without editor confirmation, and model output is never a title source in this flow.
+- Target and Existing-Book Import Relationship are separate choices and both start unselected. Context may mark one exact Book as `建议目标`, while verified Source Version lineage may recommend a relationship with its basis shown; current/last-open Book, filename, path, recency, source location or fuzzy similarity creates no selection.
+- One Book owns at most one primary Manuscript. A populated Book has no `作为新稿件导入` action; another intended work changes the target to `新建图书`, while supporting material remains source-only.
+- None of the three Book Creation Draft variants is a Book, Manuscript, revision, Workflow Instance, acquisition/import record, or partial success. Once valid, the manuscript-import-bound variant immediately leads to Review Before Import and cannot commit an empty Book; the standalone variant leads to Review Before Book Creation and may create an intentionally empty Book; the source-bound variant leads to its source-bearing Review Before Book Creation and may create only a zero-Manuscript Book plus first Source Version.
+- Only `书名` is required and a working title is allowed; `内部编号` is optional and richer bibliographic metadata may be added later. The editor must enter or confirm the title before commitment and must explicitly confirm or edit any source-derived suggestion shown in either the manuscript-import-bound or source-bound variant. The manuscript-import-bound variant follows the disclosed DOCX-metadata, filename-fallback and bounded-content rules above; the source-bound variant uses only separately disclosed source-specific metadata and bounded title-bearing content and never silently inherits manuscript-import heuristics.
 - Status meaning never depends only on green/amber/red; text and icon/shape carry the classification.
 - An Import Degradation Decision applies only to the displayed report for this import and never grants standing acceptance of future degradation.
-- No completion state appears before the original file record, report, provenance, and resulting revision are persisted.
-- A failed or cancelled import exposes no partially editable Manuscript.
+- Every Review Before Import, Review Before Source Retention and Review Before Book Creation variant is relationship-specific. Manuscript variants keep exact Workflow Profile/version and effective Book Editorial Dimension defaults visible; source-only variants explicitly omit Manuscript/Workflow objects. All state that no Series membership, learning eligibility, Provider transmission, Publication Version, public release, or delivery record results.
+- One final new-Book action atomically creates the Book/stable identity, effective Book Editorial Dimension Set, Book-owned original Source Version, primary Manuscript, initial branch/revision, pinned Workflow Instance, provenance/fidelity records, applicable degradation decision, and Manuscript Import Record.
+- One final first-Manuscript action creates the same source/manuscript/workflow/import objects without recreating or replacing the existing Book or dimension set. One final source-only action creates a target-Book-owned Source Version, provenance and Source Import Record; it may reuse an existing Source Version identity only after the editor selects an exact match already owned by that same Book.
+- No completion state appears before all of those records are persisted.
+- A failed atomic action exposes no new partial Book, Source Version, Manuscript, revision or record. Interruption may retain only the non-authoritative staged recovery state below; explicit cancellation deletes it.
 - The Manuscript Import Record remains reachable from Book history and links original-file identity, final fidelity review, accepted degradation, provenance and resulting revision.
 - `含已接受的降级` persists on the record and opens the exact affected classes/examples/export consequence; it is not hidden after the first completion card.
 - The user-facing record is not a Manuscript Checkpoint, Milestone Version, export receipt or round-trip guarantee. Any internally applicable Effect Receipt remains separately linked in audit/technical detail.
+
+### Duplicate and interruption invariants
+
+- Exact immutable original-file identity associated with a prior Source Version and exact parsed content/structure are disclosed separately. Membership in one source family or lineage is not exact identity by itself; a different filename does not hide an Exact Import Match, a same filename does not create one, and fuzzy similarity is merely non-authoritative related-material guidance.
+- Exact matching never selects a target/relationship, rewrites provenance, reuses authority silently, or exposes a hash/canonicalization algorithm as an editorial decision.
+- Complete verified staging persists one Staged Import Snapshot and non-authoritative draft under the Agent Data Root until completion or explicit cancellation. It remains local, Provider-independent, outside repositories and hosted CI, and distinct from a Source Version, Manuscript Revision, Recovery Snapshot or successful import.
+- Restart opens Import Draft Recovery with `继续导入` and `放弃` unselected. Continuation revalidates snapshot identity, target/relationship, lineage/comparison, fidelity/degradation and consequential review; it never auto-resumes or commits.
+- Target/relationship drift preserves the draft but invalidates stale review. Loss of original-file access after complete staging permits continuation from the exact snapshot with disclosure; incomplete staging requires native-picker reselection and an exact match. Parse failure retains payload-free diagnostics only.
+- Outside an uncertain atomic boundary, `取消导入` or `放弃` deletes the draft and staged payload and creates no success record. Successful completion deletes that non-authoritative payload only after the durable current-Book Source Version/link and completion record verify. At an interrupted atomic boundary AI7 first reconciles authoritative commit identity and returns exact committed evidence or recoverable uncommitted review; if neither can be proven, `导入提交结果待确认` preserves evidence, blocks retry/cancellation cleanup, and never dispatches the same commit twice.
 
 ## Reimport
 
 | Step | Visible behavior | Guardrail |
 | --- | --- | --- |
-| Select replacement external document | Parse locally and open Reimport Comparison | Does not alter current Manuscript |
+| Enter reimport | Exact populated Book and sole primary Manuscript/revision; dirty journal state first receives its labeled safety checkpoint | Checkpoint failure preserves edits and aborts before comparison |
+| Select replacement external document | Parse/stage locally, show Exact Import Matches, and bind one Staged Import Snapshot | Does not alter current Manuscript or infer lineage from filename/location/time |
+| Verified prior Source Version lineage | Three-way Reimport Comparison: prior Source Version, exact current Manuscript Revision, staged document | Common-base claim exists only from exact Book-owned lineage |
+| Lineage not verified | Two-way current/staged comparison labeled `来源关系未确认` | No invented ancestry or structural continuity |
 | Review mappings | Show exact stable mappings, changed structure, additions/deletions, and ambiguities | Automatic mapping is limited to unambiguous identities |
 | Resolve ambiguity | Editor selects or creates intended structural relationships | No default mapping is preselected where identity is ambiguous |
-| Commit | Create a new descendant Manuscript Revision atomically | Never overwrite current revision or imply live external synchronization |
+| Changed result ready | Review exact base/status/current/staged pins, mappings, fidelity, descendant revision and Manuscript Reimport Record | `重新导入并创建新修订版`; never overwrite current or imply synchronization |
+| Changed commit completed | New current-Book Source Version—or explicitly selected exact existing current-Book version—plus descendant Manuscript Revision and Manuscript Reimport Record persist atomically | `稿件已重新导入`; open exact revision or record |
+| No editable change | Exact `未发现稿件变化` result and Manuscript Reimport Record linked to comparison evidence and the durable current-Book Source Version | No empty Manuscript Revision; open record or return to manuscript |
+
+## Source Version acquisition
+
+| State | Primary surface | Available action / invariant |
+| --- | --- | --- |
+| Supported local file selected outside manuscript import | Exact file identity, locally parsed retained-content boundary and provenance | `作为来源材料导入`; no automatic Source Version |
+| Exact editor-pasted/entered material captured | Exact entered content and editor-authored provenance fields | `保存为来源材料`; Task use or attachment alone does not retain it |
+| External research fully retrieved and retention permitted | Complete retrieved snapshot, source URL/identity, retrieval time and permission state | `保存为来源材料`; initial retrieval is not canonical Exact Fetch |
+| External research incomplete/failed or retention prohibited | `尚未完整读取，不能保存为来源材料` with retained Task/evidence history disclosed separately | Complete/repeat research where permitted or leave without Source Version |
+| Target unresolved | `选择目标图书` with exact existing Books and unselected `新建图书` | Select one target or cancel; context never selects it |
+| Existing Book selected | Review Before Source Retention with retained boundary, provenance, Source Version result, Source Acquisition Record and non-effects | File: `作为来源材料导入`; paste/research: `保存为来源材料` |
+| No-Book `新建图书` selected | Source-bound Book Creation Draft with required confirmed `书名`, optional `内部编号`, effective dimensions and source-labeled local suggestions where defined | Edit, open source-bound Review Before Book Creation, change target, or cancel |
+| Source-bound review ready | Exact Book/defaults + first Source Version/provenance/acquisition record + explicit zero-Manuscript/non-authority consequences | File: `新建图书并导入来源材料`; paste/research: `新建图书并保存来源材料` |
+| Existing-Book acquisition completed | `来源材料已导入` for file or `来源材料已保存` for paste/research | `查看来源材料` and applicable `查看来源获取记录` / `查看来源导入记录` |
+| Source-bound acquisition completed | Exact `图书已创建` plus source completion and `尚无稿件` | `打开图书`, `查看来源材料`, or applicable acquisition record |
+| Review drift/failure/cancellation | No optimistic completion or partial Book/Source Version | Correct/review again, cancel, or reconcile an ambiguous atomic outcome before retry |
+
+- On a local-file path, same-Book Exact Import Match reuse requires explicit selection. On a pasted/entered or research path, only an explicitly disclosed exact existing Source Version identity match may be selected under the same same-Book rule. Cross-Book acquisition always creates a new target-owned Source Version and provenance.
+- Source-type-specific title suggestions use only disclosed local metadata and bounded title-bearing content. They remain editable and cannot silently inherit manuscript-import rules or use a model/provider.
+- Search snippets, failed retrievals, model answers, attachments and mere Task use never auto-create Source Versions. Their separate Task/evidence records may still remain durable.
+- Only a committed Source Version may later enter indexing, search or Exact Fetch through a separate exact Run Source Scope. Acquisition grants no Run read, provider transmission, factual status, learning eligibility, mutation or publication authority.
 
 ## Task Intent capture
 
 | Entry | Seeded context | Result |
 | --- | --- | --- |
 | Bottom composer from active manuscript/deliverable | Exact Book and Active Work Object; no inferred text range | Editable composer text with visible context chips |
-| Selection action | Explicit Pinned Manuscript Range or newly anchored range | Adds only that range to the Task Intent Draft context |
+| Selection action | Explicit Pinned Manuscript Range, or journal-newer range labeled `待保存修订版` | Adds only that exact or pending range to the Task Intent Draft context; the pending form grants no exact pin |
 | Finding/Evidence/Proposal action | Exact selected record and its permitted target reference | Does not inherit every related source or range |
 | Book Work Overview action | Explicitly selected Manuscript or Editorial Deliverable | No implicit whole-Manuscript source scope |
 | `准备任务` | Current visible composer text and exact context | Persist/open Task Intent Draft in the right surface; no model, provider, Run, or authority transition |
+| Planning begins while acknowledged journal state is newer than the latest revision | Exact current branch and journal-reconstructed state | Show `为任务保存修订版`, create a Manuscript Checkpoint with purpose `任务输入`, then bind the draft to its resulting revision before Plan Preview |
 
 ### Draft lifecycle
 
-- The composer and right Task surface always show Book, target, branch/revision, and each Pinned Manuscript Range currently attached.
+- The composer and right Task surface always show Book, target, branch/revision, each attached Pinned Manuscript Range, and any non-authoritative pending range. A pending range is labeled `待保存修订版`; when the journal advances beyond a pin's revision, that unchanged original pin remains visible as `待核对到任务修订版` until a new task-bound pin is created.
 - Missing target or context is explicit and blocks later planning only when required; AI7 never fills it with ambient Book-wide authority.
 - Switching Books collapses the draft under its original Book and offers `返回继续`. It cannot rewrite context chips to the newly active Book.
 - A draft remains restart-safe until discarded or advanced; discarding it deletes no manuscript text, Task Ledger Run, or authoritative outcome because none exists yet.
+- Task Input Revision Preparation is local and low-ceremony. It does not ask for a Milestone Version label or Signoff, make a model call, or create a second checkpoint type; Quick Start and Default Execution invoke the same prerequisite without bypass.
+- On success, every attached prior-revision pin and pending manuscript target/range/source/evidence reference exact-resolves against the new revision and creates a new task-bound pin; original pins and provenance remain immutable. Only then do Task Intent, sources, evidence and the later Plan/Run use that one exact revision. Newer editor changes remain newer working state and never silently retarget the Task or authorized Run.
+- If the checkpoint succeeds but a changed or ambiguous attached reference cannot exact-resolve, the new revision remains valid while the Task draft shows `任务范围需要重新选择` with `查看变化`, `重新选择`, and `移除`; no Plan Preview or Run Authorization is created until every required reference resolves.
+- On checkpoint failure, the Task Intent Draft and acknowledged journaled edits remain intact, `本地无法为任务保存修订版` names the blocker, and every Run Authorization path stays unavailable until exact materialization succeeds.
 - The round-arrow visual may be retained from the Codex-referential language, but accessible name and status say `准备任务`; no sent/streaming animation appears.
 - Active Chinese IME composition consumes Enter and related keys normally and can never invoke `准备任务`.
 
@@ -388,7 +507,7 @@ Selecting a recommendation changes only the Task Intent Draft. Runtime Task Skil
 
 - Workflow Profile publication creates an immutable available version. Default designation is separately named, applies only to newly created Workflow Instances and identifies the Editorial Deliverable types affected.
 - Existing Workflow Instance migration begins from the exact instance/profile pin or a named same-profile batch, previews phase/Gate/responsibility/artifact/history consequences and never occurs as a side effect of publication or default designation.
-- Default Execution Rule enablement presents the exact Task Skill/version, required fields/variation, applicability, source rule, provider/egress, budget, result classes and possible Effect classes in one review. A future match still requires user submission and deterministic preflight.
+- Default Execution Rule enablement presents the exact Task Skill/version, required fields/variation, applicability, source rule, provider/egress, exact Run Budget Ceiling state—including `未设置`—result classes and possible Effect classes in one review. A future match still requires user submission and deterministic preflight.
 - Editing any saved draft, published profile, enabled rule or developer proposal uses `保存为新版本`; version history and related-work/delivery links remain reachable.
 - A Developer Capability Proposal may name a possible Plugin and the accepted developer-side eligibility/pinning policy: more than five GitHub stars, more than three repository updates, a latest update within the 30 days before development, and one exact locally managed version. The ordinary editor never sees a Plugin marketplace, code-generation action or capability escalation control.
 
@@ -400,17 +519,17 @@ Selecting a recommendation changes only the Task Intent Draft. Runtime Task Skil
 - A user may approve a Default Execution Rule after developing Task Pattern Confidence; future user-initiated matching Tasks may then start after deterministic preflight without a separate Task Intent review screen.
 - Every such Run remains exact and points to the rule version that permitted automatic creation of its Run Authorization.
 - Rule applicability may be one Book, an identified Series, or identified/all Books, but never silently expands the source scope of an individual Run.
-- The rule binds exact Task Skill/version, required fields and allowed variation, source-scope rule, provider/outbound constraints, budget ceiling, outcome classes, and allowed Effect classes.
+- The rule binds exact Task Skill/version, required fields and allowed variation, source-scope rule, provider/outbound constraints, Run Budget Ceiling state, outcome classes, and allowed Effect classes.
 - Only a user submission triggers matching; the rule never schedules or invents Tasks.
 
 ### Default execution state table
 
 | State | Visible behavior | Authority behavior |
 | --- | --- | --- |
-| User approves rule | Show complete rule envelope, applicability, source rule, provider/outbound, budget, outcomes/Effects, version, and revoke control | Creates/revises Default Execution Rule only; no Run |
+| User approves rule | Show complete rule envelope, applicability, source rule, provider/outbound, Run Budget Ceiling state, outcomes/Effects, version, and revoke control | Creates/revises Default Execution Rule only; no Run |
 | User submits one exact match and preflight passes | Start immediately; show `已按“{规则名}”默认直接运行` with expandable detail plus pause/cancel | Create exact Task/Plan/Envelope and per-Run Run Authorization linked to rule version |
 | Ambiguous/multiple match | Explain ambiguity and open standard Task preparation | No Run Authorization or dispatch |
-| Context/provider/outbound/budget/outcome/Effect drift | Name the mismatched field and open standard preparation | Never widen or rewrite the rule |
+| Context/source/current Series Retrieval Exclusion/provider/outbound/Run Budget Ceiling/outcome/Effect drift | Name the mismatched field and open standard preparation | Never widen, bypass a current restriction, or rewrite the rule |
 | Rule paused/revoked | Show rule status where it would have matched | Standard preparation only |
 | Rule revised | New submissions use the new version after explicit user activation | Historical Runs keep their original rule-version link |
 
@@ -428,14 +547,14 @@ Task Pattern Confidence governs reduced Run-review burden only. Output remains a
 
 - The Source Scope Builder uses Book, Series, source, revision, exclusion, and approved-memory labels rather than paths or folders.
 - A Task Skill recommendation is visible and editable and never silently includes all Book, Series, or Cross-project material.
-- Selecting Series scope expands its current eligible members and exclusions for review; later membership changes do not alter the frozen Run.
+- Selecting Series scope expands its current eligible members and effective exclusions for review. Later membership changes do not alter the frozen Run; a later effective Series Retrieval Exclusion immediately blocks further affected reads and stops the Run for Plan Revision plus renewed authorization or cancellation.
 - Cross-project selection is itemized and never inferred from recent Books, Working Corpus, search history, or House Editorial Memory.
 - Removing a source updates the draft plan and reveals any requirement it can no longer satisfy; it never substitutes another source automatically.
-- Material expansion after Run Authorization suspends execution for Plan Revision and renewed authorization.
+- Material expansion after Run Authorization suspends execution for Plan Revision and renewed authorization. Material restriction through a new effective exclusion also suspends before further use and cannot use ordinary same-binding Resume.
 
 ### Provider-bound disclosure
 
-- The summary uses plain categories and counts, for example `当前稿件选段、3 项 Book 来源、1 项已批准社级编辑记忆摘要`.
+- The summary uses plain categories and counts, for example `当前稿件选段、3 项图书来源、1 项已批准社级编辑记忆摘要`.
 - It distinguishes local readability from potential provider transmission and never labels configured model processing as public release.
 - Actual payload audit remains reachable after the Run, but the preflight UI does not expose secrets, raw Harness Session content, or technical context-assembly details.
 
@@ -447,13 +566,13 @@ Task Pattern Confidence governs reduced Run-review burden only. Output remains a
 | `处理对象与来源` | Book/work object/range plus source classes and counts | Exact revisions, exclusions, memory records, and scope digest |
 | `执行步骤` | Three to seven editorial business steps with intermediate outcomes | Task Skill step configuration, without raw Harness internals |
 | `需要你参与的位置` | Named possible Clarification/Proposal/Review/Effect actions or `预计无需中途参与` | Conditions that cause each request |
-| `模型服务与预算` | Model Role, provider, outbound categories, estimate/range, and ceiling | Binding/fallback and detailed budget assumptions |
+| `模型服务与预算` | Model Role, provider, outbound categories, reliable estimate/range, and exact Run Budget Ceiling state such as `未设置任务预算上限` | Binding/fallback, optional explicit ceiling, Provider Account Limit status, and detailed assumptions |
 | `结果与受控动作` | Named outcome/Effect classes and important `不会做` statements | Exact replay/approval requirements and targets |
 
 ### Plan boundary behavior
 
-- `运行中可调整` uses concrete editorial examples such as search terms, candidate-evidence count, non-critical step ordering, and safe retries within the frozen source/provider/budget/outcome/Effect envelope.
-- `变化后必须暂停并重新授权` names goal, target, source expansion, provider, outbound category, budget ceiling, expected outcome, Effect class, and authority-bearing pin changes.
+- `运行中可调整` uses concrete editorial examples such as search terms, candidate-evidence count, non-critical step ordering, and safe retries within the frozen source/provider/Run Budget Ceiling/outcome/Effect envelope.
+- `变化后必须暂停并重新授权` names goal, target, source expansion, provider, outbound category, Run Budget Ceiling state, expected outcome, Effect class, and authority-bearing pin changes.
 - Expanding/collapsing detail changes no plan record or authorization state.
 - The preview footer states `计划说明，不是运行授权` until the separate authorization interaction occurs.
 - A material edit creates a new Plan Revision diff; the previous preview remains immutable and linked to any prior Run Authorization.
@@ -469,8 +588,8 @@ Task Pattern Confidence governs reduced Run-review burden only. Output remains a
 | Offline; exact boundary not locally identifiable | `仅保存任务草稿` | No Run or authorization; live-dependent fields remain `待联网确认` |
 | Offline; exact boundary locally identifiable | `授权并在联网后开始` or `仅保存任务草稿` | Explicit choice; first creates exact Run/authorization in Connectivity Wait State |
 | Any material drift | `查看计划修订` | Shows exact diff; old plan cannot be authorized |
-| Authorized, waiting for connectivity | `等待网络` or `等待模型服务` plus cancel | No provider work or budget consumption has begun |
-| Connectivity returns; preflight unchanged | `联网恢复预检` then ordinary queue/run state | Same exact authorized Run may dispatch automatically |
+| Authorized, waiting for connectivity | `等待网络` or `等待模型服务` plus cancel | No provider work, usage, or cost has begun |
+| Connectivity returns; preflight unchanged, including no new effective source restriction | `联网恢复预检` then ordinary queue/run state | Same exact authorized Run may dispatch automatically |
 | Connectivity returns; material boundary drift | `需要重新确认计划` | Exact Plan Revision and renewed Run Authorization; no silent start or fallback |
 | Connectivity returns; credential/provider-service blocker without boundary drift | `需要处理模型连接` | Preserve exact Run Authorization, route to connection remediation, and re-run preflight; no silent fallback |
 | Authorized, waiting for capacity | `正在排队` plus pause/cancel | Run exists; provider execution has not necessarily begun |
@@ -479,37 +598,38 @@ Task Pattern Confidence governs reduced Run-review burden only. Output remains a
 ### Authorization invariants
 
 - The authorization bar stays inline and sticky within Plan Preview and never opens a duplicate confirmation modal.
-- Its compact summary always includes Book/target, plan version, provider, budget ceiling, outcome, and possible Effect classes.
+- Its compact summary always includes Book/target, plan version, provider, exact Run Budget Ceiling state, outcome, and possible Effect classes. The default is literal `未设置任务预算上限`, never `免费`, `0`, or `无限`.
 - The exact negative-authority statement remains visible before activation.
 - Disabled readiness states identify the specific stale/missing field rather than presenting a generic disabled button.
-- Successful activation records actor, time, plan version, target/source/outbound/budget boundary, and exact Run Authorization identity for expansion after dispatch.
+- Successful activation records actor, time, plan version, target/source/outbound/Run Budget Ceiling boundary, and exact Run Authorization identity for expansion after dispatch.
 - `正在排队` is not model activity, and `运行中` is not Task Outcome or proof of any Effect.
 - Creating or changing a Default Execution Rule requires its separate explicit action and never rides along with standard Run Authorization.
 
 ### Offline preparation and reconnect
 
 - Offline Plan Preview distinguishes locally authoritative plan facts from `待联网确认` live provider facts. Unknown data is never shown as a zero-cost or ready state.
-- `授权并在联网后开始` summarizes the same exact target, source, outbound, provider/fallback, budget, outcome, and Effect boundary as ordinary Run Authorization and explicitly states `当前不会调用模型`.
+- `授权并在联网后开始` summarizes the same exact target, source, outbound, provider/fallback, Run Budget Ceiling state, outcome, and Effect boundary as ordinary Run Authorization and explicitly states `当前不会调用模型`.
 - After activation, the bar becomes a Connectivity Wait status card. Cancel remains immediate; there is no background toggle that silently changes future drafts.
 - Reconnect Preflight runs only while the supervised AI7 service is active. Network return does not launch the desktop application.
-- Unchanged preflight hands the existing Run to the normal scheduler. Material boundary drift replaces auto-start with Plan Revision and renewed authorization. Credential or provider-service readiness failure under an unchanged binding preserves the authorization, names the blocker, and routes to connection remediation before preflight runs again.
-- Mid-Run disconnection does not pretend the Run is still progressing. The last durable milestone remains visible; safe continuation uses the already accepted Resume/Retry meanings.
+- Unchanged preflight hands the existing Run to the normal scheduler. A new effective Series Retrieval Exclusion is material restriction even though the historical binding is unchanged, so it replaces auto-start with Plan Revision and renewed authorization or cancellation. Other material boundary drift does the same; credential or provider-service readiness failure under an otherwise unchanged permissible binding preserves the authorization, names the blocker, and routes to connection remediation before preflight runs again.
+- Mid-Run disconnection does not pretend the Run is still progressing. The last durable milestone remains visible; once safely reconciled it becomes `任务已中断 · 可续行` and waits for explicit Resume. The already-authorized deferred-start path above is the only ordinary automatic-dispatch exception.
 
 ## Model role, capability, provider, and budget
 
 | Layer | Visible by default | Interaction |
 | --- | --- | --- |
 | Primary Task surface | Compact Model Role selector and Model Capability Requirement chips | Editor changes desired work capability; Provider Preflight recomputes |
-| Compact disclosure | Exact provider/model label, ready/blocking state, outbound category, fallback presence, reliable estimate/range, hard ceiling | Expand secondary detail; no raw provider control here |
-| Secondary Task detail | Binding rationale, fallback conditions, provider policy, outbound classes, connection name, budget assumptions/rules | Review; material changes return through Plan Revision |
-| Settings | Connections, credentials, eligible alternative frontier, default bindings, billing currency, budget defaults | Configure persistent service state; secrets never displayed after entry |
+| Compact disclosure | Exact provider/model label, ready/blocking state, outbound category, fallback presence, reliable estimate/range, Run Budget Ceiling state | Expand secondary detail; no raw provider control here |
+| Secondary Task detail | Binding rationale, fallback conditions, provider policy, outbound classes, connection name, explicit/unset ceiling, reported Provider Account Limit, and estimate assumptions | Review; material Plan-boundary changes return through Plan Revision |
+| Settings | Connections, credentials, eligible alternative frontier, default bindings, billing currency, and optional Run Budget Ceiling preference | Configure persistent service state; provider-side limits stay provider-owned and secrets never display after entry |
 | Usage | Historical/aggregate usage and cost plus per-Run links | Inspect; no Task or Run authority |
 
 ### Compactness and exception behavior
 
 - The Model Selection Strip occupies one compact row or disclosure group and never becomes a large provider dashboard.
-- Exact provider, outbound, and budget facts cannot disappear entirely before Run Authorization; they remain in one compact readable line with accessible expansion.
-- A missing connection, changed outbound category, unavailable model, ambiguous fallback, unreliable estimate, or exceeded ceiling expands inline automatically with the exact safe action.
+- Exact provider, outbound, and Run Budget Ceiling facts cannot disappear entirely before Run Authorization; they remain in one compact readable line with accessible expansion.
+- AI7 defaults the ceiling to `未设置` and explains that provider-side quotas, spending controls and billing still apply. A Provider Account Limit may be `未知 / 提供方未返回`; no unavailable value becomes `0`, `免费`, or `无限`.
+- A missing connection, changed outbound category, unavailable model, ambiguous fallback, unreliable estimate, invalid explicit ceiling, reached Run Budget Ceiling, or Provider Account Limit expands inline automatically with its own exact safe action.
 - Model Role and Model Capability Requirements are not quality/factual sliders and never use labels such as `更正确` or `事实可靠`.
 - DeepSeek default bindings and any explicitly configured alternative frontier binding remain exact detail, not user-facing product authority.
 - After execution, actual use/cost moves to Run detail and Usage rather than permanently occupying the manuscript/task surface.
@@ -522,8 +642,11 @@ Task Pattern Confidence governs reduced Run-review burden only. Output remains a
 | Running without a stable denominator | Business phase, current object, last meaningful update; no percentage | Milestones and any usable candidate stream |
 | Waiting for clarification | `等待你的说明` plus the named Clarification Request | Prior milestones, exact request, and context needed to answer |
 | Connectivity/model-service wait | `等待网络` or `等待模型服务`, authorized plan identity, and last completed milestone | Connection detail, Reconnect Preflight state, and cancel; no provider activity implied |
+| Provider Account Limit blocker | `模型服务账户限额` plus affected provider/connection and last completed milestone | Provider-reported condition or `提供方未返回`, remediation route, retained Run Authorization, and explicit `续行` only after the condition clears |
 | Run Capacity Wait | `等待运行名额` and last completed milestone | Queue position when trustworthy plus pause/cancel; connectivity is not the blocker |
-| Paused or interrupted | Exact state, cause when known, last completed milestone | Continuation checkpoint/context and valid next actions |
+| Paused | `已暂停` and last completed milestone | Continuation checkpoint/context and explicit `续行` when still valid |
+| Safely reconciled interruption | `任务已中断 · 可续行` and last completed milestone | Existing authorization, Run Continuation Checkpoint, retained work, lightweight revalidation scope, and explicit `续行`; no automatic dispatch |
+| Explicit Run Budget Ceiling reached | `任务运行预算已达上限 · 已保留部分结果` | Terminal partial Task Outcome, actual usage, candidates/evidence, unresolved matters, Effects/receipts, and `调整预算并重做`; no Resume/Retry |
 | Completed | Named Task Outcome summary, not merely `100%` | Actual-versus-planned milestones, results, unresolved matters, Effects and receipts |
 
 ### Activity projection rules
@@ -536,6 +659,7 @@ Task Pattern Confidence governs reduced Run-review burden only. Output remains a
 - When meaningful activity stops, the UI reports the last completed milestone, current wait/stall reason, time since the meaningful update, and valid safe action. Elapsed time alone is never a progress measure.
 - Clicking an expanded candidate, evidence comparison, or result may explicitly open a Dedicated Work Workspace; no background event changes work-surface mode automatically.
 - Provider/model/cost and diagnostics remain behind secondary disclosure unless they are the blocking condition. No activity surface implies factual verification, Proposal Decision, Effect Approval, Effect Receipt, workflow completion, Signoff, or Public Release Permission.
+- Run Budget Ceiling Reached, Provider Account Limit, Run Capacity Wait, Connectivity Wait State, Cooperative Run Pause, and Resume-ready Run State retain different labels and action sets; no generic `预算不足` or `继续` collapses them.
 
 ## Concurrent Run presentation
 
@@ -551,7 +675,7 @@ Task Pattern Confidence governs reduced Run-review burden only. Output remains a
 
 ### Concurrency invariants
 
-- Foreground and background are display states only. They do not change scheduler priority, budget allocation, provider selection, execution grants, or Run authority.
+- Foreground and background are display states only. They do not change scheduler priority, Run Budget Ceiling state, provider selection, execution grants, or Run authority.
 - Each Run row carries enough identity to distinguish same-skill work on different deliverables, revisions, selections, or Books without displaying technical IDs by default.
 - Activity scroll/expansion, candidate selection, and secondary-detail state are retained per Run when the editor switches projections.
 - No background candidate inserts into, selects, scrolls, or otherwise disturbs the foreground Manuscript; a later exact Proposal/Effect interaction remains separate.
@@ -564,8 +688,8 @@ Task Pattern Confidence governs reduced Run-review burden only. Output remains a
 | --- | --- | --- | --- |
 | Queued | `暂停` | `正在暂停` only while the queue removal/state record settles | `已暂停 · 尚未开始运行` |
 | Running | `暂停` | `正在暂停 · 正在到达安全停止位置` plus current milestone | `已暂停` with preserved continuation summary |
-| Paused and exact envelope still valid | `继续任务` | `正在恢复` or capacity wait | Same Run returns to running |
-| Paused with material drift | `继续任务` attempt | Blocked with exact changed boundary | Plan Revision and renewed authorization route |
+| Paused and exact envelope still valid | `续行` | `正在核对续行条件` or capacity wait | Same Run returns to running after lightweight revalidation |
+| Paused with material drift | `续行` attempt | Blocked with exact changed boundary | Plan Revision and renewed authorization route |
 | Queued or running | `取消任务` | Inline Cancellation Impact Summary, then `正在取消` | `已取消` only after durable terminal classification |
 | Effect already committed | `取消任务` | Summary identifies committed Effect and receipt | Run cancels future work; Effect remains committed |
 | External Effect outcome ambiguous | `取消任务` | Stop automatic retry/fallback and classify uncertainty | `结果待确认`, never false `已取消且无影响` |
@@ -577,7 +701,7 @@ Task Pattern Confidence governs reduced Run-review burden only. Output remains a
 - The Cancellation Impact Summary states future work to be stopped, retained candidate/evidence records, known committed Effects/receipts, and any action whose outcome is not yet known.
 - Confirmation cancels only the named Run. It grants no rollback, Proposal Decision, Effect Approval/reversal, Signoff change, or Public Release change.
 - Candidate and partial-result retention does not make those records authoritative or eligible for automatic Apply.
-- Terminal cancellation disables `继续任务`. A later attempt must use the separately defined Redo path rather than mutating the cancelled Run.
+- Terminal cancellation disables `续行`. A later attempt must use the separately defined Redo path rather than mutating the cancelled Run.
 - Pause/cancel state and receipts survive restart. A crash or network loss is an interruption condition, not an inferred user cancellation.
 
 ## Clarification Requests
@@ -611,6 +735,14 @@ Task Pattern Confidence governs reduced Run-review burden only. Output remains a
 | `回退并调整方向` | Editor wants an earlier eligible milestone and revised direction | Preserve prior path; append a new attempt branch or route to Redo | Same Run only for valid in-envelope adaptation; otherwise renewed authorization/new Run |
 | `重做` | Fresh result requested or semantics materially change | Link a new Task/Run to the prior one | New intent, plan, envelope, preflight, authorization, and Run |
 | `重放` | Existing durable history is available | Reconstruct existing records in causal order | No provider, model, Capability, Effect, or execution attempt |
+
+### Resume after interruption
+
+- Startup/service reconciliation that proves the same semantics, exact target/source/provider/outbound/Run Budget Ceiling pins, safe Effect state, and verified Run Continuation Checkpoint settles the Run as `任务已中断 · 可续行`; it does not create a Harness Execution Span or provider transmission.
+- `续行` is the explicit user action. It runs a lightweight current-state revalidation and, when unchanged, opens a new Harness Execution Span in the same Run without inventing a Retry merely because a process restarted.
+- Material drift produces the exact Plan Revision diff and routes to a newly authorized Redo Run. A current Series Retrieval Exclusion is such a blocker before any further affected read. An ambiguous Effect remains `结果待确认`; prior Run Authorization cannot override either blocker.
+- Run Budget Ceiling Reached is terminal and offers `调整预算并重做`, not `续行` or `重试`. Provider Account Limit is nonterminal only when the provider-side condition is resolved and the same unchanged Run then passes explicit Resume revalidation.
+- Start When Online remains the narrow exception: its existing Run may dispatch automatically only after Reconnect Preflight confirms the plan and every current source restriction remain unchanged, because the editor explicitly authorized later start before the interruption/connectivity wait.
 
 ### Rewind flow
 
@@ -822,7 +954,7 @@ committed Apply Effect Receipt
 | --- | --- | --- |
 | Selection `核查事实` | Book/branch/revision plus Pinned Manuscript Range | Open exact first result beside selection |
 | `核查本章` | Current structural heading/range and revision | Fact-check Lens filtered to that chapter |
-| `全稿事实核查` | Whole Manuscript revision, policy, scope/provider/budget | Fact-check Lens virtualized across all results |
+| `全稿事实核查` | Whole Manuscript revision, policy, scope/provider/Run Budget Ceiling state | Fact-check Lens virtualized across all results |
 
 ### Marker and lens rules
 
@@ -876,7 +1008,7 @@ committed Apply Effect Receipt
 - `建议更正` remains available to draft a Correction Proposal in Quick mode, but both draft and later review display `证据核查未完成` and the precise missing checks.
 - Raising level starts only missing/stale work and shows `复用 {n} 项已有核查 · 补充 {m} 项`. Lowering does not cancel a check already needed by another current decision or policy.
 - Policy may require Strict for named high-risk classes or workflow points. The UI exposes the professional reason and required checks, not hidden prompt or policy implementation detail.
-- No assurance selection changes Run Source Scope or provider-bound data silently; any material source/egress/budget change follows Plan Revision and renewed authorization.
+- No assurance selection changes Run Source Scope or provider-bound data silently; any material source/egress/Run Budget Ceiling change follows Plan Revision and renewed authorization.
 
 ## Factual result and Review Decision
 
@@ -985,22 +1117,22 @@ committed Apply Effect Receipt
 | Preparation state | Presentation | Consequence |
 | --- | --- | --- |
 | No milestone selected | Unselected milestone cards; latest delivery candidate may be recommended | No package target |
-| Selected milestone has later edits | Exact Milestone Change Exclusion Notice | Continue with old version or return to save a new milestone |
+| Selected revision has later edits | Exact change-exclusion notice; use Milestone Change Exclusion Notice when a Milestone Version identifies it | Continue with the selected revision or explicitly select/save a newer exact revision |
 | Required item missing | Exact item, profile requirement, safe route | Package freeze unavailable until requirement/profile exception resolves |
-| Manifest/fidelity ready | Full Delivery Package Manifest Preview | `准备交付包` available; still no external action |
-| Frozen | `已准备 · 尚未导出` + Package ID/version | Inspect package or enter Local Export Preparation |
+| Content manifest ready | Full destination-/format-independent Delivery Package Manifest Preview | `准备交付包` available; still no export or external action |
+| Frozen | `交付包已准备` + Package ID/version + separate Package Export History | Inspect package or begin a new Local Export Preparation |
 
 ### Package rules
 
 - The milestone selector shows label, purpose, exact version, author/time, later-edit relation, and recommendation reason. Selection remains explicit.
-- Delivery Package Purpose names the local package's intended editorial use without collecting a recipient or external-channel target. Local Export Destination is chosen later through the current platform's system picker.
-- Included files/artifacts show type, originating exact version, expected filename/format, requirement source, status, and limitation. Exclusions remain a first-class list.
+- Delivery Package Purpose names the package's intended editorial use without collecting a recipient, output format, filename, Local Export Destination, or external-channel target. Those export choices occur later through a separate preparation and the current platform's system picker.
+- Included content/artifacts show type, originating exact version, requirement source, status, applicable Gate/Signoff reference, and limitation. Exclusions remain a first-class list; ordinary users see familiar Gate/milestone language rather than internal Signoff jargon.
 - Version/change/source/factual supporting materials remain typed Editorial Artifacts and never merge with the public-facing Deliverable text.
-- Fidelity summary states fully preserved, degraded with exact disclosure, or unavailable content classes for every planned format. DOCX is the primary editable format, PDF is an optional fixed-layout format, and Markdown is the explicit fallback format; the linked Export Fidelity Disposition is frozen with the package.
-- Local generation validates manifest completeness and file digests and provides product-level preview/open actions without exposing the staging root.
-- If one required staged file fails, no immutable prepared package version is recorded. The user may inspect exact failure and retry local generation safely.
-- Freeze records Package ID/version, selected milestone, purpose/target, exact manifest, exclusions, limitations, fidelity state, artifact/decision lineage, and generated-file digests.
-- Post-freeze changes use `创建新交付包版本`; the previous package stays immutable and clearly unexported/exported according to its own Effect Receipts.
+- Format-specific fidelity is absent from package identity. DOCX, PDF, Markdown, filenames, path, and Export Fidelity Disposition are selected only in each later Local Export Preparation.
+- Local preparation validates content-manifest completeness and exact integrity identities and provides product-level inspect actions without exposing internal storage paths or generating a user-facing export file.
+- If one required content/artifact/reference is unavailable, no immutable prepared package version is recorded. The user may inspect the exact failure and retry preparation safely.
+- Freeze records Package ID/version, one selected exact Editorial Deliverable Revision, its optional identifying Milestone Version, purpose, exact content manifest, exclusions, limitations, applicable Gate/Signoff references, and artifact/decision lineage—never another Deliverable, whole-Book content, output format, destination, fidelity disposition, approval, or receipt.
+- Post-freeze content-manifest changes use `创建新交付包版本`; the previous package stays immutable. Export history is a separate 0..N projection rather than one exported/unexported package state.
 - Preparing or previewing never emits a success term such as `已交付` and never creates Export authority or Public Release Permission.
 
 ## Local Export Formats and Fidelity
@@ -1008,11 +1140,14 @@ committed Apply Effect Receipt
 | Export state | Presentation | Available action |
 | --- | --- | --- |
 | Exact milestone selected for standalone export | DOCX recommended; PDF visible; Markdown under `备用格式` | Choose one or more formats |
-| Prepared package selected | Frozen package files/formats; Delivery Package Purpose shown separately | Continue with eligible files or create a new package version for another format |
+| Prepared package selected | Exact content manifest and Delivery Package Purpose shown separately; no format/path inherited | Choose export-specific eligible format(s) |
 | Fidelity calculating | Progressive per-format/content-class rows | Inspect completed rows; no premature approval |
 | Material degradation | Exact transformed/lost classes; acceptance unselected | Accept for this exact export, change format, or return |
 | Required class unavailable | Affected format and reason | Choose valid format or resolve the source/package requirement |
-| Ready | Exact version, formats, filenames, Local Export Destination, Export Fidelity Disposition | Exact local Effect Approval |
+| Destination unresolved | Current platform system picker | Select a path; any existing-target choice remains OS-owned |
+| Existing target | Native Export Collision Resolution | Choose an alternative name/path, cancel, replace/overwrite, or native equivalent |
+| Native cancellation | Package and safe export draft retained | No Effect Approval, dispatch, or Receipt |
+| Ready | Exact version/package, formats, filenames, Resolved Local Export Target, Export Fidelity Disposition | One exact target-bound local Effect Approval |
 | Generating | Compact measurable background progress | Cancel before commit boundary |
 | Committed | Effect Receipt and `已导出到所选位置` | Open local result or return to package; no follow-on handoff step |
 | Ambiguous/failed | Exact outcome classification; no success label | Inspect safe next action; never blind retry |
@@ -1023,7 +1158,11 @@ committed Apply Effect Receipt
 - PDF preview emphasizes page/print result and states `固定版式，不支持可编辑往返`; it is never represented as a proof, factual authority, or release state.
 - Markdown fallback states which structure and rich-document semantics are flattened, externalized, or omitted. A DOCX failure never silently substitutes Markdown.
 - Fidelity rows cover every applicable content class and remain summarized when fully preserved. Any degraded/unavailable class expands automatically and places its consequence beside the choice.
-- The remembered destination is a user-recognizable recent location hint only. Final export still uses the current platform's system picker and binds the resolved exact target in Effect Approval.
+- The remembered destination is a user-recognizable recent location hint only. Final export still uses the current platform's system picker; choosing a format, filename, or destination freezes a separate Local Export Preparation and never changes the Delivery Package.
+- When the selected target exists, Windows or macOS owns the save/copy conflict dialog, localized wording, action order, geometry, accessibility, and equivalent rename/replace mechanics. AI7 does not imitate it, translate it into a second custom dialog, or ask the collision choice again.
+- Alternative name/path returns one Resolved Local Export Target; native cancellation returns to the safe export context with no Effect Approval or attempted Effect; replacement returns the exact existing target plus replace disposition. Only then may the existing single exact export approval bind the target before commit.
+- A native apply-to-all choice covers only the exact colliding files already enumerated in that interaction. Each receives its own target-bound approval and receipt; the choice is never saved as a future overwrite preference.
+- Target drift after the native decision removes approval readiness and reopens native conflict handling. The final file state is reconciled by stable Effect identity before a verified created/replaced receipt appears; an ambiguous OS result remains `结果待确认` and cannot Retry blindly.
 - Export runs outside the renderer. Cancellation is available until the commit boundary; after atomic commit the UI shows the receipt rather than pretending cancellation reversed the file.
 - Temporary output stays product-managed and cannot be mistaken for a completed destination file. Each declared local publication has stable Effect identity and one classified receipt/outcome.
 - Agent Exchange Projection is never a normal file-editing surface. Its freshness and revision binding are enforced behind AI7 Capabilities, and agent-authored revisions always return through Proposal review and Apply.
@@ -1040,7 +1179,7 @@ committed Apply Effect Receipt
 | Ready | `仅表示此版本可用于上述发稿范围；AI7 不会发布或发送` beside the exact action | One interaction records separate linked identities |
 | Designated | `发稿版本` on the exact version-history item | May be referenced for package preparation; no export/publication occurs |
 | Later material edits exist | Publication Version Change Notice with exact change relationship | Keep historical version or designate a newer exact milestone |
-| Replaced/withdrawn | Historical state and succeeding record | Never erase or retarget the earlier version/permission |
+| Linked post-designation maintenance exists | Exact Maintenance Case identity, latest revision, classification and internal consequence | Open Maintenance Case Workspace; never erase or retarget the earlier version/permission |
 
 ### Publication-version rules
 
@@ -1050,6 +1189,30 @@ committed Apply Effect Receipt
 - Publication Version does not include later edits, another Deliverable, source materials, or every file in a later package unless its exact permission scope says so.
 - Ordinary exports remain entirely unchanged whether no Publication Version exists, one exists, or the editor chooses a different internal-use milestone.
 - Global Attention uses `发稿版本待设定` only for a real profile/policy-required action; it never treats every local export as pending publication work.
+
+## Post-designation Maintenance Cases
+
+| Maintenance state | Presentation | Safe next action / consequence |
+| --- | --- | --- |
+| No case draft | Exact Publication Version / Deliverable revision context | `记录维护事项` opens an uncommitted draft |
+| Draft | Unselected `更正` / `勘误` / `替代` / `撤回` / `再版` / `归档`, reason/evidence, actor/time | Record first immutable case revision or cancel with no case |
+| Correction selected | Exact target and current Case Timeline | Create/attach Correction Proposal; normal Decision/Apply path creates any new revision |
+| Errata selected | Versioned Errata Editorial Artifact | Link artifact; changing content still follows Correction Proposal/Apply |
+| Supersession/Reissue waiting | No successor assumption | Select/save exact milestone, then separately `设为发稿版本` |
+| Withdrawal/Archive recorded | Internal-only Maintenance Notice | Change only future AI7 use/visibility; no external action |
+| New local output needed | Prior package/export history remains immutable | Begin a separate Delivery Package version only if content manifest changed, then a separate Local Export Preparation |
+| Resolved/closed internally | Latest immutable Maintenance Case Revision + retained unresolved detail | Append `记录维护事项结论`; claim only the internal record outcome |
+
+### Maintenance rules
+
+- Entry is contextual to one exact Publication Version and exact Editorial Deliverable revision from version history or the `维护` phase. The Workflow phase is navigation/state context, never the Maintenance Case authority.
+- The six classifications begin unselected. `记录维护事项` commits one stable case plus its first immutable revision or reports no case; selection, editing, or cancellation remains draft-only.
+- Every later reason, evidence, classification, status, link, or outcome change appends a Maintenance Case Revision. The timeline never edits a previous case revision, Publication Version, Public Release Permission, package, export, approval, or receipt.
+- Correction follows the existing Correction Proposal → Proposal Decision → Apply Preparation → Effect Approval → Effect Receipt flow. Errata stays a versioned Editorial Artifact. Neither one proves factual resolution merely because the Maintenance Case exists.
+- A resulting exact Deliverable revision gains no milestone or publication designation automatically. Supersession and Reissue may link only a separately manually designated newer Publication Version.
+- Withdrawal and Archive present `仅在 AI7 内记录；不代表已撤稿、下架、召回、通知接收方或删除外部文件`. They offer no send, recall, takedown, recipient, or local-file-delete control and produce no external Effect Receipt.
+- A corrected/reissued export begins a new Local Export Preparation and receives new per-file receipts. Existing files and receipts remain unchanged even when an internal case is later closed.
+- Only a current unresolved named action appears in Global Attention as `维护事项待处理`. Completion wording is `维护事项已记录` or `维护事项结论已记录`, never `已更正发布`, `已撤稿`, `已下架`, `已召回`, or `已再版`.
 
 ## Contextual result feedback
 
@@ -1080,7 +1243,7 @@ committed Apply Effect Receipt
 | Identified; no explicit decision currently required | Quiet candidate/history row in `质量与学习` | Inspect only; no badge or eligibility inference |
 | Explicit decision required | Book-grouped `学习准入待处理` item | Open exact Learning Material Review Card |
 | Review opened | Bounded material, provenance, origin, candidate rationale, governing basis, possible future influence | Inspect/deep-link without creating a decision |
-| No scope selected | All include/exclude/defer choices unselected; `仅纳入当前 Book` marked recommended | Select/edit only; no authority yet |
+| No scope selected | All include/exclude/defer choices unselected; `仅纳入当前图书` marked recommended | Select/edit only; no authority yet |
 | Named Series selected | Exact Series and cross-Book influence expand inline | Record eligibility for that displayed Series scope only |
 | House selected | House-wide future-influence consequence expands inline | Record eligibility for House scope only |
 | Exclude selected | Exact material and optional reason remain visible | Explicit exclusion supersedes inferred recommendation for this material |
@@ -1095,7 +1258,7 @@ committed Apply Effect Receipt
 - Selection remains draft state until the exact record action. Recording binds material/version, scope, actor/time, optional reason, and governing basis; later correction appends a superseding decision.
 - `明确排除` does not delete the originating feedback/edit or Learning Material evidence. `稍后决定` does not count as inclusion, exclusion, or a negative Quality Signal.
 - Hidden Learning Eligibility Policy or behavior-composition assets may explain why a decision is required through plain-language basis text, but editors receive no policy editing or authority-expansion control.
-- Inclusion permits downstream signals or Memory Candidates only. Memory approval/activation, task retrieval, provider egress, factual status, and every named product authority remain separate.
+- Inclusion permits downstream signals or Memory Candidates only. `纳入当前书系` never means `纳入书系知识` and cannot create or bypass a Series Knowledge Candidate/Promotion Review. Memory approval/activation, task retrieval, provider egress, factual status, and every named product authority remain separate.
 - Series/House eligibility does not make raw material a global browsing result. Every later use remains attributable through Learning Lineage and bound by the future Run's exact source scope.
 
 ## Learning Audit and remediation
@@ -1141,7 +1304,7 @@ committed Apply Effect Receipt
 - A secret entry may support paste and password-manager behavior but offers no reveal-after-save, copy, export or diagnostic action. Replacement does not expose the old value.
 - Removing a connection names affected defaults and waiting/blocked Runs without deleting their history or silently choosing another Provider.
 - Role cards remain primary. Raw model/endpoint/fallback detail expands only when needed for configuration or support, and no label implies one role is more factually correct.
-- Budget defaults never hide per-Run estimate uncertainty or ceiling. `用量` presents aggregate and exact history without becoming a source of authorization.
+- Optional Run Budget Ceiling preferences never hide per-Run estimate uncertainty, the exact default `未设置`, or Provider Account Limit uncertainty. `用量` presents aggregate and exact history without becoming a source of authorization or a substitute for provider account controls.
 
 ## Distribution channel and Product Data Location
 
@@ -1274,6 +1437,9 @@ committed Apply Effect Receipt
 | --- | --- | --- |
 | Field input invalid | `{字段}需要{修正}` beside retained input | Optional concise example; no global error |
 | Run/provider blocker | `{任务/模型角色} · {exact blocker}` + what remains available + safe action | `查看技术详情` with sanitized code/diagnostics |
+| Explicit Run Budget Ceiling reached | `任务运行预算已达上限 · 已保留部分结果` + `调整预算并重做` | Terminal Task Outcome; never success, pause, or provider-account wording |
+| Provider Account Limit | `模型服务账户限额` + affected connection + `处理模型服务` | Keep separate from AI7 ceiling; no silent fallback or `无限` claim |
+| Resume-ready interruption | `任务已中断 · 可续行` + last durable milestone + `续行` | No automatic dispatch; material drift and ambiguous Effects retain their own blockers |
 | Editing persistence failure | `本地写入中断` + last durable boundary + at-risk extent + `查看保护选项` | Never `已保存`; technical cause secondary |
 | Proposal/decision drift | `{record}已变化 · 需要重新确认` + unchanged content boundary | Link exact current/previous pins |
 | Ambiguous external outcome | `{Effect}结果待确认` + no-repeat consequence + reconciliation action | No ordinary Retry/fallback |
@@ -1296,4 +1462,4 @@ committed Apply Effect Receipt
 - Reshape preserves the professional intent while applying current V2 authority. For example, Signoff becomes the user-facing Milestone Version projection, and delivery becomes local export plus an exact receipt rather than send/handoff tracking.
 - Drop means the artifact has no V2 interaction contract. No route, hidden mode or fallback may silently reintroduce old A/B/C geometry, prototype behavior, editor-facing Policy/Composition elevation or external-channel delivery.
 - Journey entries are design narratives, not completed acceptance evidence. They create no independent UI/usability/accessibility/performance gate.
-- Question 60 closes the former `J-01` and `J-13` seams through the Manuscript Import Record and Series membership/shared-scope interaction; all fourteen IDs now have candidate mappings.
+- Question 60 historically closed the then-known `J-01` completion-record and `J-13` Series-membership seams. Issue #8 Batches 1–5 now close the separately discovered Book/import, Task-input, budget/Resume, Source/Series, destination-independent package, native export-conflict and versioned-maintenance branches.

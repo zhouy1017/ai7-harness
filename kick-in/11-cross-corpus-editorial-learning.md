@@ -54,9 +54,10 @@ Direct source retrieval remains a separate, explicitly scoped capability.
 
 ## Accepted learning-signal governance
 
-- An explicit “remember this” instruction becomes active immediately at the user-selected Book, Series, or House scope.
+- An explicit “remember this” instruction follows the accepted activation rule at the selected Book or House-memory scope. At Series scope it creates an editor-authored, non-authoritative Series Knowledge Candidate and still requires the explicit promotion review accepted in Issue #8 Batch 4.
 - Accept/reject actions, editor feedback, ratings, user rewrites, and generated-to-final-deliverable differences are captured automatically as evidence.
 - Implicit patterns create provenance-bearing Memory Candidates; repeated evidence may strengthen or merge them, but cross-Book activation requires user approval.
+- A Memory Candidate, Learning Eligibility Decision, accepted Proposal, Milestone Version, or model output may inform a Series Knowledge Candidate but never creates a Series Knowledge Item or active revision by itself.
 - Users can edit, approve, reject, bulk-review, roll back, or forget learned items.
 - Forgetting stops retrieval without deleting the original Book/task evidence, and every task snapshots the exact approved memory revision it used.
 - No feedback enters model training automatically.

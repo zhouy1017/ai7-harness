@@ -19,7 +19,7 @@ Use a fresh AI7-owned repository and consume an exactly pinned Harness release/c
 
 The fresh-repository half is now **settled by owner instruction**: this design room was initialized on 2026-08-17 and published as private `zhouy1017/ai7-harness` on branch `main`. It contains documentation only and no copied source.
 
-The rest is now accepted too. The license and reuse authorization were settled at Question 27, the meaning of full Harness capability at Question 29, and the dependency strategy at Question 30. After the interview, ADR 0028 unified product scope as one Windows-and-macOS Standalone product; concrete macOS mechanics remain explicitly deferred. **The design interview is complete**: all 36 questions are resolved or explicitly deferred.
+The rest is now accepted too. The license and reuse authorization were settled at Question 27, the meaning of full Harness capability at Question 29, and the dependency strategy at Question 30. After the interview, ADR 0028 unified product scope as one Windows-and-macOS Standalone product; concrete macOS mechanics remain explicitly deferred. Issue #8's five-batch candidate missing-design audit is also complete through root ADR 0040, including the destination-independent package, native local-export collision, and versioned maintenance refinements. **The design interview is complete**: all 36 questions are resolved or explicitly deferred.
 
 Agents arriving without prior context should start at the repository-root `HANDOFF.md`, then `AGENTS.md`.
 
@@ -45,7 +45,7 @@ Agents arriving without prior context should start at the repository-root `HANDO
 18. [Source–generation–grounding boundary](./17-source-generation-grounding-boundary.md) — accepted separation of textual fidelity, claim support, and factual verification, backed by pinned original-AI7 evidence.
 19. [Manuscript revision and recovery boundary](./18-manuscript-revision-and-recovery-boundary.md) — accepted stable-block revision graph, journal/checkpoint split, proposal-merge, and recovery semantics.
 20. [Proposal, authority, Effect, and replay boundary](./19-proposal-approval-effect-replay-boundary.md) — accepted named-authority, per-Effect publication, receipt, and ambiguous-outcome semantics.
-21. [Deliverable workflow and editorial artifacts](./20-deliverable-workflow-and-artifacts.md) — accepted Question 19 deliverable-owned workflow, V1 profile, artifact, and legacy-disposition boundary.
+21. [Deliverable workflow and editorial artifacts](./20-deliverable-workflow-and-artifacts.md) — accepted Question 19 deliverable-owned workflow plus Batch 5's immutable revision, destination-independent package, native local-export, and versioned maintenance boundary.
 22. [Bounded-plan task interaction](./21-bounded-plan-task-interaction.md) — accepted Question 20 authority-bearing Plan Envelope, bounded adaptation, typed outcome, and legacy UI/agent-console disposition.
 23. [Task Skill, capability, trust, and provider boundary](./22-task-skill-capability-trust-provider-boundary.md) — accepted Question 21 layered authority, Harness projection, model-service, credential, and outbound-data boundary.
 24. [Linked Task and Harness ledgers](./23-linked-task-and-harness-ledgers.md) — accepted Question 22 boundary between AI7 business provenance and canonical Harness execution history.

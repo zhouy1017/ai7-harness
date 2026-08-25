@@ -40,7 +40,7 @@ Engineering CI consists only of one logical provider-free E2E Functional Gate, e
 ## Consequences
 
 - AI7 has one generic loop implementation and may run many isolated instances of it. Parallel Runs across Books, plus background analysis and learning work, are many instances of one loop, not a second loop.
-- AI7 schedules and DSH converses. AI7 owns which Runs exist, workflow state, continuation, concurrency, budget, Effects, and model-free background jobs. AI7's business scheduling does not use the Harness `schedule`, `jobs`, or workflow packages.
+- AI7 schedules and DSH converses. AI7 owns which Runs exist, workflow state, continuation, concurrency, usage observation, optional explicit Run Budget Ceiling enforcement, Effects, and model-free background jobs. The default ceiling state is `unset`; Provider Account Limits remain external service blockers. AI7's business scheduling does not use the Harness `schedule`, `jobs`, or workflow packages.
 - The Node service is the only local product authority; the renderer is a projection and DSH is an executor.
 - The `PrimaryAgentHarness` boundary localizes DSH composition, Cordis wiring, session storage, event taxonomy, provider invocation, and tool-registry differences.
 - AI7 exposes only domain capabilities and rechecks every call at the AI7 Capability Facade. The Editorial Capability Profile exposes no generic shell, process runner, roaming filesystem, arbitrary network, or developer-mode escalation.

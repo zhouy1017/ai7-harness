@@ -1,6 +1,6 @@
 # AI7 V2 UI/UX
 
-Status: **candidate context complete for this session; presentation authority only**
+Status: **candidate context under Issue #8 missing-design completion; presentation authority only**
 
 The candidate language for how professional editors perceive and operate AI7. It owns presentation concepts only and does not redefine editorial or execution authority.
 
@@ -14,9 +14,13 @@ _Avoid_: Codex clone, Codex layout, generic chat shell, component copy
 An external screenshot or observed interaction used to identify desirable experience qualities without making its geometry, content hierarchy, assets, source, branding, or product semantics an AI7 baseline.
 _Avoid_: UI specification, implementation baseline, reusable asset
 
-**Book-anchored Workbench** (`Book 锚定工作台`):
+**Book-anchored Workbench** (`图书锚定工作台`):
 The AI7 workspace model in which a Book is the stable editorial context, one Book-owned manuscript or Editorial Deliverable is the active work object, and Tasks enter as context-bound activity rather than peer conversations.
 _Avoid_: folder workspace, conversation list, task-first shell
+
+**Book Library** (`书库`):
+The searchable user-facing collection of every locally available exact Book and the stable global entry for opening or creating one, without granting task scope, publication status, or filesystem meaning merely by listing it.
+_Avoid_: folder browser, manuscript list, task scope, published-book catalog
 
 **Active Work Object** (`当前工作对象`):
 The one manuscript, Editorial Deliverable, proposal comparison, evidence review, workflow record, or other authoritative AI7 object occupying the primary central surface at a given moment.
@@ -38,7 +42,7 @@ _Avoid_: dashboard-first launch, silent recovery, most-recent notification
 A startup state indicating that recovered working content or recovery evidence requires explicit user understanding before ordinary continuation, without implying that a Recovery Snapshot or recovered text has already replaced the active manuscript.
 _Avoid_: automatic restore, unsaved-file dialog, recovery completed
 
-**Book Recovery Workspace** (`Book 恢复工作区`):
+**Book Recovery Workspace** (`图书恢复工作区`):
 The affected-Book central workspace that compares exact recoverable manuscript states and lets the editor inspect, defer, copy/export, or restore one as a new descendant without blocking access to every other Book.
 _Avoid_: system crash modal, generic backup manager, filesystem recovery tool, automatic restore
 
@@ -62,16 +66,16 @@ _Avoid_: recovery failure, unsaved status, automatic milestone, proof of complet
 The single collapsible navigation surface combining stable global destinations with pinned/recent Book switching and navigation for the current Book, without introducing a second permanent sidebar or an all-Books object tree.
 _Avoid_: filesystem tree, two permanent left rails, conversation list
 
-**Book Convenience View** (`Book 便捷视图`):
+**Book Convenience View** (`图书便捷视图`):
 A non-authoritative selection of pinned or recently used Books that accelerates switching while the searchable Book library remains the route to the complete collection.
 _Avoid_: Working Corpus, source scope, Book ownership list
 
-**Book Work Overview** (`Book 工作概览`):
-The Book-owned orientation surface that foregrounds the Manuscript, presents related Editorial Deliverables independently, and links to their contextual Workflow, Task, Evidence, Proposal, source, Series, and recovery records.
+**Book Work Overview** (`图书工作概览`):
+The Book-owned orientation surface that foregrounds the sole primary Manuscript when present, or explicitly shows `尚无稿件` and the first-Manuscript entry when absent, while presenting related Editorial Deliverables independently and linking to contextual Workflow, Task, Evidence, Proposal, source, Series, and recovery records.
 _Avoid_: Book dashboard, Book-wide workflow, conversation home
 
 **Manuscript Visual Anchor** (`稿件视觉主锚`):
-The deliberate visual priority given to the Manuscript as a Book's central continuation point without making related Editorial Deliverables share its Workflow Instance or lose their own authority.
+The deliberate primary slot in a Book Work Overview that either shows the exact sole Manuscript continuation state or, for a zero-Manuscript Book, shows `尚无稿件` with `导入首份稿件` and no fabricated branch, revision, journal, checkpoint, or recovery state. It never makes related Editorial Deliverables share a Workflow Instance or lose their own authority.
 _Avoid_: only deliverable, Book-wide phase owner, manuscript truth authority
 
 **Contextual Work Lens** (`上下文工作入口`):
@@ -159,7 +163,7 @@ The ephemeral cursor or text range currently selected for direct editing, which 
 _Avoid_: Pinned Manuscript Range, task scope, proposal target
 
 **Pinned Manuscript Range** (`已固定稿件范围`):
-An explicitly created exact reference to one Book, Manuscript Branch, Manuscript Revision, stable block identity, Unicode range, and text digest for later navigation or binding to a specific record.
+An explicitly created exact reference to one Book, Manuscript Branch, Manuscript Revision, stable block identity, Unicode range, and text digest for later navigation or binding to a specific record. Journal-newer text cannot become this reference until Task Input Revision Preparation materializes its exact revision; before then, the Task Intent Draft may show only a non-authoritative pending range.
 _Avoid_: copied excerpt, current selection, fuzzy anchor
 
 **Manuscript Range Set** (`稿件范围集合`):
@@ -202,6 +206,30 @@ _Avoid_: create checkpoint, export, save file copy
 A non-authoritative prompt to save current exact working content as a labeled Milestone Version before or after consequential editing work, which never implies that a checkpoint/milestone already exists or blocks ordinary editing by itself.
 _Avoid_: automatic milestone, required approval, recovery snapshot
 
+**Manuscript Import Target** (`稿件导入目标`):
+The explicitly selected new-Book draft or eligible exact existing Book that would own the result of one staged file import; context may recommend a target but never selects one implicitly.
+_Avoid_: file destination, current folder, last-open Book, source-only relationship
+
+**Book Creation Draft** (`图书创建草稿`):
+The non-authoritative proposed Book identity and initialization defaults used for explicit standalone Book creation, inside a new-Book manuscript import, or inside source-bound Book creation. Its standalone variant may create an intentionally empty Book, its manuscript-import-bound variant becomes authoritative only with the first Manuscript, and its source-bound variant becomes authoritative only with the first Source Version while the Book remains zero-Manuscript.
+_Avoid_: Book, silently committed empty Book, Manuscript Import Record, Source Acquisition Record, partial import
+
+**Review Before Book Creation** (`新建图书前确认`):
+The consequence-first creation surface showing exact Book identity/defaults and named non-effects before either an intentional empty Book is created alone or a source-bound zero-Manuscript Book and its first Source Version are created atomically. The source-bound variant additionally shows exact retained content, provenance and Source Acquisition Record; neither variant silently inherits manuscript-import objects.
+_Avoid_: Review Before Import, Review Before Source Retention for an existing Book, Book completion, optimistic creation
+
+**Book Title Suggestion** (`建议书名`):
+A source-labeled editable title candidate extracted locally during preflight but presented as Book metadata only after the editor selects `新建图书`: non-empty document title metadata supplies the primary candidate, filename stem is its fallback, and bounded title-bearing early content may supply separately labeled alternatives.
+_Avoid_: authoritative Book title, model-generated title, filename identity, silent first-heading inference
+
+**Exact Import Match** (`精确导入匹配`):
+A local disclosure that a staged file exactly matches either the immutable original-file identity of a previously imported Source Version or its exact parsed content and structure, with the matched Book, Source Version, and record visible but no target or relationship selected automatically. Membership in the same source family or lineage is not exact identity by itself.
+_Avoid_: filename match, fuzzy similarity, automatic deduplication, reimport decision
+
+**Filename Collision** (`文件名冲突`):
+The disclosed condition in which a staged file has the same display filename as prior material but different exact content, carrying no duplicate identity or blocking authority by itself.
+_Avoid_: Exact Import Match, overwrite warning, duplicate proof
+
 **Import Fidelity Review** (`导入保真审阅`):
 The local pre-commit review that classifies each supported document-content class and round-trip behavior as fully preserved, degraded with exact disclosure, or unsupported for editable Manuscript import.
 _Avoid_: import log, successful import, generic preview
@@ -210,9 +238,21 @@ _Avoid_: import log, successful import, generic preview
 The editor's explicit unselected decision to proceed with the exact material degradations disclosed by one Import Fidelity Review for the named import, without accepting unsupported or undisclosed loss.
 _Avoid_: generic continue, silent loss waiver, standing preference
 
+**Import Draft Recovery** (`导入草稿恢复`):
+The restart state that offers explicit continuation or abandonment of a verified non-authoritative import draft after revalidating its staged source, target relationship, and consequential review.
+_Avoid_: automatic resume, successful import, manuscript recovery, authority restoration
+
 **Reimport Comparison** (`重新导入对照`):
-The staged comparison between the current Manuscript state and a newly parsed version of an external document, including exact structural mappings and unresolved ambiguities before any descendant revision may be created.
+The staged comparison that uses prior Source Version, current Manuscript Revision, and the staged document when lineage is verified, or only current and staged states under Source Relationship Unconfirmed; exact mappings and unresolved ambiguities remain visible before any descendant revision may be created.
 _Avoid_: overwrite, synchronization, automatic remap
+
+**Review Before Import** (`导入前确认`):
+The relationship-specific consequence-first pre-commit surface binding the exact target, staged source, fidelity or comparison result, records to create, and named non-effects before initial Manuscript import or reimport. File retention as source material uses Review Before Source Retention even when entered from manuscript-import preflight.
+_Avoid_: Import Fidelity Review, Book creation completion, Effect Approval, Manuscript Import Record
+
+**Review Before Source Retention** (`保存来源材料前确认`):
+The consequence-first pre-commit surface binding one exact existing target Book, the complete retained-content boundary, source type, provenance, resulting Source Version and Source Acquisition Record plus named non-effects before the file-specific `作为来源材料导入` or the pasted/entered-and-research `保存为来源材料`; the file path retains the Source Import Record specialization.
+_Avoid_: Review Before Import, source preview, Task evidence persistence, Run Source Scope, automatic source capture
 
 **Context-bound Task Composer** (`上下文绑定任务输入框`):
 The compact manuscript- or deliverable-adjacent entry that captures an editor's requested work while visibly retaining its exact Book, work object, revision, and explicitly selected range context.
@@ -221,6 +261,10 @@ _Avoid_: chat box, model prompt, Run input
 **Task Intent Draft** (`任务意图草稿`):
 The durable editable pre-Run state created by `准备任务`, containing requested goal, target, expected outcome, and selected context without yet creating a Run, model transmission, or authority record.
 _Avoid_: Task Intent authorization, Run, model message
+
+**Task Input Revision Preparation** (`为任务保存修订版`):
+The low-ceremony pre-authorization transition that, whenever a Task would use acknowledged Edit Journal state newer than the latest Manuscript Revision as target, range, source, or evidence, creates an existing Manuscript Checkpoint with purpose `Task Input / 任务输入`; it exact-resolves every attached prior-revision pin and pending manuscript target/range/source/evidence reference on the resulting revision, creates new task-bound pins without mutating original pins or provenance, and blocks planning when a changed or ambiguous reference needs explicit reselection or removal.
+_Avoid_: a new checkpoint type, Journal Save, Milestone Version, Signoff, model dispatch
 
 **Prepare Task Action** (`准备任务`):
 The transition from compact task text to the editable right-side Task Intent Draft, which invokes no model and grants no Run or Effect authority.
@@ -295,7 +339,7 @@ A user-invoked Task shortcut that skips the separate Task Intent review surface 
 _Avoid_: send without authorization, generic chat, Effect Approval shortcut
 
 **Default Execution Rule** (`默认直接运行规则`):
-A versioned user-approved rule that permits a future user-initiated Task matching its exact Task Skill, intent pattern, applicability scope, provider/egress, budget, outcome, and Effect-class envelope to receive an exact per-Run Run Authorization and start without separate Task Intent review.
+A versioned user-approved rule that permits a future user-initiated Task matching its exact Task Skill, intent pattern, applicability scope, provider/egress, Run Budget Ceiling state, outcome, and Effect-class envelope to receive an exact per-Run Run Authorization and start without separate Task Intent review.
 _Avoid_: standing Run Authorization, auto-apply rule, model confidence
 
 **Task Pattern Confidence** (`任务模式信心`):
@@ -311,7 +355,7 @@ The exact visible Book, manuscript or Editorial Deliverable, branch/revision, an
 _Avoid_: source scope, current editor tab, provider context
 
 **Source Scope Builder** (`来源范围选择器`):
-The product-record interface for reviewing a Task Skill's minimum readable-source recommendation and explicitly adding or removing exact current-Book, Series, Cross-project, and approved-memory sources before Run Source Scope freezes.
+The product-record interface for reviewing a Task Skill's minimum readable-source recommendation and explicitly adding or removing exact current-Book, Series, Cross-project, and approved-memory sources before Run Source Scope freezes, while applying the current effective Series Retrieval Exclusions both before authorization and again at later read/payload guards.
 _Avoid_: filesystem picker, whole workspace, mutation scope
 
 **Potential Provider Data Summary** (`模型可能接收内容摘要`):
@@ -335,7 +379,7 @@ The sticky Plan Preview action region that summarizes the exact current Run boun
 _Avoid_: approval dialog, Quick Start, Effect Approval bar
 
 **Run Authorization Readiness** (`任务运行授权就绪状态`):
-The current preflight condition for the displayed Run Authorization action. Immediate start requires exact target/source versions, plan, provider/fallback binding, outbound category, budget, governing constraints, and live credential/service readiness. Deferred start requires the same locally fixed authority boundary plus an exact Credential Reference; live credential/service readiness is postponed to Reconnect Preflight rather than guessed offline.
+The current preflight condition for the displayed Run Authorization action. Immediate start requires exact target/source versions, plan, provider/fallback binding, outbound category, exact Run Budget Ceiling state, governing constraints, and live credential/service readiness. Deferred start requires the same locally fixed authority boundary plus an exact Credential Reference; live credential/service readiness is postponed to Reconnect Preflight rather than guessed offline.
 _Avoid_: provider online status, Run started, plan accepted
 
 **Offline Task Preparation** (`离线任务准备`):
@@ -346,14 +390,6 @@ _Avoid_: offline model execution, frozen plan guarantee, Run Authorization, loca
 The explicit alternate Run Authorization action that creates one exact Run and permits it to enter scheduling automatically after connectivity returns only if Reconnect Preflight confirms the unchanged authorized boundary.
 _Avoid_: background preference, Default Execution Rule, automatic retry, saved Task draft
 
-**Connectivity Wait State** (`等待网络`):
-The durable queued state of an exactly authorized Run that cannot begin provider work because required network or model-service connectivity is unavailable, with cancellation available and no implication of model activity.
-_Avoid_: Run Capacity Wait, paused Run, provider call in progress, Editing Protection Mode
-
-**Reconnect Preflight** (`联网恢复预检`):
-The deterministic revalidation performed after connectivity/model-service readiness returns, confirming exact plan, target/source pins, provider/fallback, outbound category, budget, unchanged Credential Reference, live credential readiness, and governing constraints before a Start When Online Run may dispatch.
-_Avoid_: new authorization, silent provider fallback, connection test only, Retry
-
 **Model Selection Strip** (`模型选择条`):
 The compact primary Task control for choosing a Model Role and visible model capability requirements without exposing raw provider/model catalogs or consuming a full plan section.
 _Avoid_: raw model picker, quality slider, Provider settings
@@ -363,8 +399,8 @@ A user-understandable requirement or preference for model work, such as long-for
 _Avoid_: AI7 Capability, Capability Grant, model truth level
 
 **Provider and Budget Disclosure** (`模型服务与预算披露`):
-The compact always-reachable readiness summary for resolved provider/model, connection, outbound category, fallback presence, estimate, and hard budget ceiling, with full details in secondary Task detail and Settings/Usage surfaces.
-_Avoid_: primary model picker, billing settings, hidden provider state
+The compact always-reachable readiness summary for resolved provider/model, connection, outbound category, fallback presence, reliable estimate, and exact Run Budget Ceiling state. The default value is displayed as `未设置任务预算上限`, while a Provider Account Limit is separately named and may remain `未知 / 提供方未返回`; full details stay in secondary Task detail and Settings/Usage surfaces.
+_Avoid_: primary model picker, billing settings, hidden provider state, `免费`, provider-unlimited claim
 
 **Run Activity Header** (`任务运行状态栏`):
 The compact current-Run projection showing the editorial business phase, current work object, last meaningful update, and exact wait reason when present, with immediate access to currently valid Run controls.
@@ -382,11 +418,11 @@ _Avoid_: model thoughts, authoritative result, auto-applied proposal
 Exact completed-versus-total progress shown only when the work units are semantically comparable and the denominator is real and stable enough to remain meaningful; otherwise AI7 reports stage and milestones without a percentage.
 _Avoid_: estimated spinner percentage, model confidence, workflow completion
 
-**Book-grouped Run Overview** (`按 Book 分组的任务概览`):
+**Book-grouped Run Overview** (`按图书分组的任务概览`):
 The Global Attention projection that groups queued, running, paused, and attention-requiring Runs beneath their authoritative Books while preserving each Run's exact target and state.
 _Avoid_: thread list, global task authority, cross-Book source scope
 
-**Current Book Run Switcher** (`当前 Book 任务切换器`):
+**Current Book Run Switcher** (`当前图书任务切换器`):
 The compact control for selecting which one of the current Book's concurrent Runs is expanded in the right Task surface without pausing, reprioritizing, or changing any Run merely by switching the projection.
 _Avoid_: conversation tabs, scheduler control, Task history
 
@@ -395,8 +431,8 @@ The one Run activity surface currently expanded for inspection in the active Boo
 _Avoid_: foreground process, highest-priority Run, exclusive execution
 
 **Run Capacity Wait** (`等待运行名额`):
-The explicit queued condition in which an authorized Run is waiting for instance concurrency or budget capacity, shown without a position or duration unless that value is stable and authoritative.
-_Avoid_: provider activity, paused Run, estimated completion time
+The explicit queued condition in which an authorized Run is waiting for instance concurrency capacity, shown without a position or duration unless that value is stable and authoritative.
+_Avoid_: provider activity, Run Budget Ceiling, Provider Account Limit, paused Run, estimated completion time
 
 **Cooperative Run Pause** (`协作式任务暂停`):
 A user-requested transition that allows current work to reach an execution-safe boundary, records durable continuation state, and then suspends the same Run without revoking its authorization or undoing committed Effects.
@@ -450,7 +486,7 @@ _Avoid_: success proof, Effect Receipt, celebratory toast
 A native Windows or macOS background notification whose default content identifies only AI7 and a generic action-required or abnormal event, omitting Book identity and unpublished editorial content unless the editor explicitly relaxes notification privacy settings.
 _Avoid_: in-app attention record, manuscript preview, Public Release Permission
 
-**Book-coalesced Notification** (`Book 合并通知`):
+**Book-coalesced Notification** (`按图书合并通知`):
 A rate-limited notification summary that combines successive events for one Book while preserving separate exact records and deep links inside AI7.
 _Avoid_: merged Run history, generic digest, one combined authority decision
 
@@ -567,11 +603,11 @@ The pre-action comparison of how excluding or stopping future use of exact learn
 _Avoid_: deletion confirmation, effect receipt, promise to rewrite past output, policy editor
 
 **Historically Affected Result Marker** (`历史受影响结果标记`):
-The durable label on an immutable completed Task/result showing that a material or memory item which influenced it was later excluded, forgotten, or otherwise remediated, without changing the historical result itself.
+The durable label on an immutable completed Task/result showing that a learning material, memory item, Source Version, Series Knowledge Item, member Book or stable knowledge class which influenced it was later excluded, forgotten, or otherwise restricted, without changing the historical result itself.
 _Avoid_: result invalidation, factual verdict, output deletion, current Run blocker
 
 **On-demand Model Service Setup** (`按需模型服务设置`):
-The local-first onboarding behavior that postpones Provider connection, credential and budget configuration until an editor first prepares a Task that actually requires model processing, while leaving all healthy local-only work available beforehand.
+The local-first onboarding behavior that postpones Provider connection, credential, billing-currency and optional Run Budget Ceiling preference configuration until an editor first prepares a Task that actually requires model processing, while leaving all healthy local-only work available beforehand.
 _Avoid_: first-run requirement, offline editing mode, Provider Preflight, Run Authorization
 
 **Model Connection Blocker Card** (`模型连接阻断卡`):
@@ -690,12 +726,8 @@ _Avoid_: cosmetic reskin, domain migration, prototype port, artifact retention
 The explicit exclusion of a frozen V1 screen geometry, prototype, Figma frame, component implementation, token value, validation gate or incompatible interaction assumption from the V2 baseline without silently deleting a retained outcome.
 _Avoid_: feature deletion, evidence destruction, journey removal, source-history rewrite
 
-**Manuscript Import Record** (`稿件导入记录`):
-The durable Book-owned user-facing completion evidence for one atomic manuscript import, linking the original file identity, Import Fidelity Review, accepted degradation, provenance and exact resulting Manuscript Revision.
-_Avoid_: Manuscript Checkpoint, export receipt, success toast, round-trip guarantee
-
 **Series Membership and Sharing Scope** (`书系成员与共享范围`):
-The Series-owned workspace for inspecting exact member Books, Series Knowledge and explicit exclusions and for initiating exact membership changes without becoming a Task source-scope or learning-eligibility authority.
+The Series-owned workspace for inspecting exact member Books, Series Knowledge Candidates and immutable revisions, promotion history, explicit Series Retrieval Exclusions and membership history, and for initiating only the corresponding exact commands without becoming a Task source-scope or learning-eligibility authority.
 _Avoid_: Book library grouping, Run Source Scope, Learning Eligibility Scope, shared manuscript browser
 
 **Series Membership Impact Preview** (`书系成员变更影响预览`):
@@ -705,6 +737,14 @@ _Avoid_: Plan Preview, Learning Remediation Impact Preview, deletion confirmatio
 **Series Membership Change Record** (`书系成员变更记录`):
 The durable append-only record of one exact Book being added to or removed from one exact Series, including actor, absolute local time, prior/new membership and the displayed impact basis.
 _Avoid_: Run Authorization, source-scope grant, Learning Eligibility Decision, manuscript mutation
+
+**Series Knowledge Promotion Review** (`书系知识纳入审阅`):
+The consequence-first review of one editor-authored or provenance-bound Series Knowledge Candidate, naming the exact Series, proposed new or exact existing Series Knowledge Item, content, provenance, conflicts, current/superseded revision and future reuse scope. A disclosed conflict offers unselected `编辑候选项`, `保留已披露冲突`, and `取消`; only after explicit disposition may the exact `纳入书系知识` action create the item with its first Series Knowledge Revision or append a revision and Series Knowledge Promotion Decision.
+_Avoid_: Learning Eligibility review, Proposal acceptance, factual verification, automatic memory activation
+
+**Series Retrieval Exclusion Impact Preview** (`书系检索排除影响预览`):
+The pre-command comparison for adding, superseding or ending one Series Retrieval Exclusion, separating later retrieval, queued/authorized/active Runs, immutable completed history and unaffected Book/source authority while naming the immediate current-read consequence.
+_Avoid_: Series Membership Impact Preview, Learning Remediation Impact Preview, deletion confirmation, Plan Revision
 
 **Apply Preparation** (`稿件应用准备`):
 The local pre-Effect surface that selects accepted exact Proposal changes, revalidates current authority and merge safety, previews the bounded result, and freezes an Effect target/payload without authorizing or committing it.
@@ -870,12 +910,8 @@ _Avoid_: generic approval, phase completion, Signoff
 A profile-authorized Workflow Gate Disposition that permits identified downstream work while retaining exact unmet advisory conditions and their restrictions; never a bypass for mandatory criteria.
 _Avoid_: override, unconditional pass, skipped Gate
 
-**Milestone Version** (`里程碑版本`):
-A user-designated exact immutable Editorial Deliverable or Manuscript version carrying a concise label, stated next-use purpose, author/time, and optional note while granting no Delivery, export, factual, or public-release authority.
-_Avoid_: journal save, latest draft, Delivery Package, Public Release Permission
-
 **Save as Milestone Version** (`保存为里程碑版本`):
-The explicit user action that identifies or first creates the exact immutable content version, records its milestone label/purpose, and appends the separate internal Signoff Record required by the domain without exposing signoff workflow jargon.
+The explicit user action that identifies or first creates the exact immutable content version, records the canonical [Milestone Version](../domain/editorial/CONTEXT.md#milestone-version) label/purpose, and appends the separate internal Signoff Record required by the domain without exposing signoff workflow jargon.
 _Avoid_: native Journal Save shortcut, Save As file, generic signoff, export
 
 **Milestone Version Label** (`里程碑版本标签`):
@@ -887,24 +923,28 @@ The stated next use for which the editor designates the exact version as ready, 
 _Avoid_: Delivery Permission, Public Release Permission, phase completion
 
 **Delivery Package Preparation** (`交付包准备`):
-The local pre-export surface that selects one exact Milestone Version and one stated Delivery Package Purpose, composes required files/artifacts/limitations, and freezes a Delivery Package version without choosing the Local Export Destination or transmitting it.
+The local content-manifest surface that selects one exact Editorial Deliverable Revision, optionally identified by an exact Milestone Version, and one stated Delivery Package Purpose; it composes required artifacts, applicable Gate/Signoff references, exclusions, and limitations, and freezes one canonical [Delivery Package](../domain/editorial/CONTEXT.md#delivery-package) version without choosing formats, filenames, fidelity disposition, or Local Export Destination.
 _Avoid_: export, Public Release, folder compression alone
 
 **Delivery Package Purpose** (`交付包用途`):
-The concise stated reason for preparing one package, such as internal review copy, archive copy, or delivery candidate, without recording a recipient, external channel, transmission event, or Local Export Destination.
+The concise user-facing presentation of the canonical Delivery Package's stated purpose, such as internal review copy, archive copy, or delivery candidate, without recording a recipient, output format, external channel, transmission event, or Local Export Destination.
 _Avoid_: Milestone Purpose, handoff record, delivery proof, Public Release purpose, Effect target
 
 **Milestone Change Exclusion Notice** (`里程碑后修改排除提示`):
-The explicit statement that edits after the selected Milestone Version are not included in the prepared package, with counts/locations and a route to create a newer milestone rather than silently moving the package target.
+The explicit statement, used when a Milestone Version identifies the selected Editorial Deliverable Revision, that later edits are not included in the prepared package, with counts/locations and a route to create a newer milestone rather than silently moving the package target.
 _Avoid_: stale warning alone, auto-update, data-loss notice
 
 **Delivery Package Manifest Preview** (`交付包清单预览`):
-The user-readable exact list of included/excluded files, formats, Editorial Artifacts, version/source/factual materials, limitations, and expected fidelity for one package version before its exact local export Effect.
-_Avoid_: filesystem tree, archive contents after export, Effect payload log
+The user-readable exact list of included/excluded content, Editorial Artifacts, applicable Gate/Signoff references, version/source/factual materials, and limitations before one destination- and format-independent Delivery Package version is frozen.
+_Avoid_: output-format selector, filesystem tree, archive contents after export, Effect payload log
 
 **Prepared Delivery Package** (`已准备交付包`):
-One immutable locally staged Delivery Package version with stable Package identity, exact milestone and Delivery Package Purpose binding, manifest/file digests, fidelity state, limitations, and no implication of transmission.
-_Avoid_: delivered package, exported file, public release
+The editor-visible `交付包已准备` presentation of one immutable canonical Delivery Package version, with stable Package identity, unconditional binding to one exact Editorial Deliverable Revision, optional identifying Milestone Version, purpose, manifest integrity, applicable authority references, exclusions/limitations, and a separate Package Export History. It has no output format, destination, fidelity disposition, or implication of transmission.
+_Avoid_: delivered package, exported file, export preparation, public release
+
+**Package Export History** (`交付包导出记录`):
+The read-only projection from one exact Delivery Package version to zero or more separately identified Local Export Preparations and per-file Effect Receipts, shown as `暂无导出记录` or exact receipt links without changing package identity or state.
+_Avoid_: package status, delivery log, recipient tracking, one mutable latest export
 
 **Primary Editable Export** (`主要可编辑导出`):
 The ordinary user-facing DOCX representation generated from one exact Milestone Version or Prepared Delivery Package for continued professional editing and handoff, with explicit round-trip and content-class fidelity disclosure.
@@ -931,25 +971,45 @@ The editor's exact format-specific response to disclosed export degradation: acc
 _Avoid_: generic approval, permanent preference, import acceptance, proof of successful export
 
 **Local Export Preparation** (`本地导出准备`):
-The pre-Effect surface binding one exact milestone or prepared package version, its eligible frozen/planned formats, filenames, Export Fidelity Disposition, and one Local Export Destination before local file publication.
+The separately identified pre-Effect surface binding one exact milestone or Delivery Package version, export-specific formats, filenames, Export Fidelity Disposition, and one Resolved Local Export Target before exact target-bound Effect Approval. A changed format or target creates a new preparation and never re-versions the package.
 _Avoid_: Delivery Package Preparation, external handoff, save-as working copy, committed export
 
 **Local Export Destination** (`本地导出位置`):
 The exact local file or folder target explicitly selected for one export through the current platform's system picker, distinct from the Delivery Package Purpose and from any external channel.
 _Avoid_: named recipient, product-managed staging root, remembered hint alone, Public Release destination
 
+**Native Export Collision Resolution** (`系统原生导出冲突处理`):
+The current platform's OS-owned save/copy conflict interaction for an existing local target, whose native alternative-name/path, cancellation, replacement/overwrite, or equivalent outcome is normalized into AI7's exact export semantics without a duplicate AI7 collision modal.
+_Avoid_: import Filename Collision, AI7 confirmation modal, standing overwrite permission, Effect Approval by itself
+
+**Resolved Local Export Target** (`已确定本地导出目标`):
+The exact final local path plus create-or-replace disposition returned from native selection/conflict handling and bound to one current Local Export Preparation before Effect Approval; later target drift invalidates that readiness.
+_Avoid_: remembered destination, unresolved filename, external endpoint, immutable package identity
+
+**Local Export Receipt Card** (`本地导出凭据卡`):
+The durable per-file presentation of a verified Effect Receipt showing the actual final local path, created-or-replaced outcome, exact package/version and format/fidelity binding, actor/time, and no external delivery or publication claim.
+_Avoid_: delivery confirmation, package completion, native-dialog confirmation, optimistic export toast
+
 **Local-only Export Boundary** (`仅本地导出边界`):
 The V1 product boundary in which AI7 may prepare and atomically publish files only to a user-selected local destination on Windows or macOS, producing no direct external transmission, handoff log, recipient tracking, or delivery-confirmation state.
 _Avoid_: offline-only product, prohibition on later manual sharing, External Export Policy, proof of delivery
 
-**Publication Version** (`发稿版本`):
-The user-facing designation of one exact immutable Milestone Version as permitted for an identified publication scope and public channel, backed by but not merged with a separate internal Public Release Permission. It grants no export, sending, publication Effect, or claim that publication occurred.
-_Avoid_: publication candidate, latest working draft, ordinary version label, published edition, Effect Approval
-
 **Set as Publication Version** (`设为发稿版本`):
-The explicit exact-version action that records the Publication Version designation and the separately identified internal Public Release Permission in one deterministic interaction, with publication scope/public channel, actor, time, and basis visible in user language.
+The explicit exact-version action that records the canonical [Publication Version](../domain/editorial/CONTEXT.md#publication-version) designation and the separately identified internal Public Release Permission in one deterministic interaction, with publication scope/public channel, actor, time, and basis visible in user language.
 _Avoid_: generic approval, Save as Milestone Version, local export, Publish button, automatic Workflow transition
 
 **Publication Version Change Notice** (`发稿版本后修改提示`):
 The explicit statement that current working content contains material edits after the selected Publication Version and that those edits are not covered by its designation or internal permission.
 _Avoid_: automatic permission transfer, stale warning alone, revocation, proof the later edits are unsuitable
+
+**Maintenance Case Workspace** (`维护事项工作区`):
+The exact Publication Version-context surface for drafting, recording, and following one canonical [Maintenance Case](../domain/editorial/CONTEXT.md#maintenance-case), with classification, reason/evidence, current safe next action, and immutable revision history visible without turning the Workflow phase into authority.
+_Avoid_: phase notes, mutable Publication Version, external recall center, Correction Proposal workspace
+
+**Maintenance Case Timeline** (`维护事项时间线`):
+The read-only causal presentation of canonical [Maintenance Case Revisions](../domain/editorial/CONTEXT.md#maintenance-case-revision) and their exact linked reasons/evidence, Proposals, Errata artifacts, resulting Deliverable revisions, Milestone/Publication Versions, and local export receipts.
+_Avoid_: mutable activity feed, publication history replacement, merged authority, external delivery timeline
+
+**Internal-only Maintenance Notice** (`仅内部维护提示`):
+The persistent consequence copy attached to Withdrawal or Archive stating `仅在 AI7 内记录；不代表已撤稿、下架、召回、通知接收方或删除外部文件` and granting no external outcome.
+_Avoid_: external withdrawal confirmation, takedown receipt, delete warning, Public Release revocation

@@ -35,7 +35,7 @@ Audit pins:
 | Authoring/promotion | ADR 0082 produces a disabled `local-user` declarative candidate; it cannot self-install, self-enable, mint `builtin.*`, or generate native code. Promotion belongs to repository/release gates. | Keep V1 constraint and separate developer extensions. |
 | Source scope | ADRs 0017/0018/0072 default to the active Book; broader access is exact, user-designated, and Run-local. | Keep and align Series/Cross-project behavior with Questions 10–12. |
 | Model Roles | ADRs 0023/0024 let skills declare only used roles, hard requirements, and soft preferences—never provider, model, endpoint, or credential. | Keep. |
-| Resolution/preflight | ADR 0080 and `runtime/provider_resolution.py` freeze a compatible primary/fallback plan under exact privacy, capability, context, source, outbound-data, budget, and configuration revisions. | Keep semantics inside the accepted Plan Envelope. |
+| Resolution/preflight | ADR 0080 and `runtime/provider_resolution.py` freeze a compatible primary/fallback plan under exact privacy, capability, context, source, outbound-data, Run Budget Ceiling state, and configuration revisions. | Keep semantics inside the accepted Plan Envelope. |
 | Credentials | Ordinary configuration accepts only opaque references; the current legacy adapter uses Windows Credential Manager. | Keep references-only; use the AI7 Credential Broker with Windows Credential Manager and macOS Keychain target adapters and per-consumer authorization. |
 | Live providers | Current generation explicitly has no live network adapter and uses mock/cassette providers. | Provider governance is substantive, but production live-provider execution is a gap. |
 | Historical agent/tool API | Old `/agent/plan`, `/agent/run`, `/agent/approve`, and typed tool registry are reference-only. | Drop the API/runtime; retain bounded typed-operation lessons. |
@@ -81,7 +81,7 @@ Hard corrections:
 | **Capability Grant** | 能力使用许可 | Exact authority for one Task Skill Activation to invoke an AI7 Capability under stated operation and scope constraints. |
 | **Task Skill Activation** | 任务技能运行激活 | The immutable per-Run intersection of skill identity, trust/enablement ceilings, Plan Envelope, source/provider scope, policies, capabilities, and credential references. |
 | **Harness Skill Projection** | Harness 技能投影 | The non-authoritative instructional/catalog representation of an AI7 Task Skill in the Harness Skill registry. |
-| **Run Source Scope** | 任务运行来源范围 | The exact Book, Series, Cross-project, source, and revision read boundary authorized for one Run. |
+| **Run Source Scope** | 任务运行来源范围 | The exact Book, Series, Cross-project, source, and revision read boundary authorized for one Run; the frozen record remains historical while a later effective restriction can narrow executable reads and force Plan Revision plus renewed authorization. |
 | **Model Role** | 模型角色 | A provider-independent function actually needed by a Task Skill, such as planner, writer, reviewer, embedder, or reranker. |
 | **Model-role Requirement** | 模型角色硬性要求 | A non-negotiable capability, context, policy, or compatibility condition for one used Model Role. |
 | **Model-role Preference** | 模型角色偏好 | A quality, cost, or speed ranking applied only after hard user and policy constraints are satisfied. |
@@ -106,6 +106,7 @@ Qualification rules:
 - AI7 Capability, Capability Implementation, Harness Tool, Harness Skill Projection, and Task Skill are five distinct concepts. A visible tool or loaded projection grants no capability authority.
 - Authority Ceiling says what one version can never exceed; Capability Grant says which AI7 Capabilities one activation may use; Execution Grant says whether one guarded step may execute now. None is Effect Approval.
 - Run Source Scope controls what this Run may read. It neither permits outbound transmission nor changes Working Corpus or Learning Eligibility.
+- A current Series Retrieval Exclusion is rechecked at each affected Series read. It never rewrites the frozen Run Source Scope, but it blocks the call and makes ordinary same-binding Resume invalid until Plan Revision and renewed Run Authorization create current authority.
 - Model Role, Model-role Requirement, Model-role Preference, and Provider Binding must remain distinct; hard requirements filter before preferences rank.
 - Credential Reference is a non-secret handle; Credential Broker authorizes resolution; Protected Secret Store holds the value.
 - Outbound Data Category, Provider Processing Policy, External Export Policy, and Public Release Permission cannot imply one another.
@@ -191,7 +192,7 @@ Task Skill Enablement permits only future requests up to an Authority Ceiling. R
 2. User-owned resolution precedence is explicit per-Run override, then the owning Book or Cross-project configuration, then global configuration.
 3. Provider Preflight freezes the compatible primary and Approved Fallback Chain inside the Plan Envelope.
 4. Only conclusive failure may advance within that chain; an Ambiguous External Outcome stops fallback and retry.
-5. A provider outside the plan, wider data/source scope, or higher budget requires a Plan Revision and renewed Run Authorization.
+5. A provider outside the plan, wider data/source scope, or changed Run Budget Ceiling state requires a Plan Revision and renewed Run Authorization.
 6. Credential values never appear in Task Skill packages, Cordis config, prompts, generic environment maps, Session text, tool schemas/results, diagnostics, or client-facing settings. The Credential Broker resolves an opaque reference only inside the final authorized adapter/capability consumer.
 
 Harness's credential reference and per-operation resolution seam are useful, but its flat namespace has no per-skill/consumer ACL and its local file store is not an OS keychain. AI7 therefore wraps it with per-consumer authorization and a platform Protected Secret Store backend: Windows Credential Manager or macOS Keychain. MCP literal environment/header secrets are prohibited unless adapted through this broker.

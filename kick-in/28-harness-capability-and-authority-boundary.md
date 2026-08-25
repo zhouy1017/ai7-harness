@@ -24,6 +24,7 @@ This is not "no filesystem and no network":
 
 - Editors import DOCX and export deliverables, so file access exists as a **bounded import/export capability** over a user-chosen file or destination.
 - Factual Verification accepts authorized external research with immutable source snapshots, so network access exists as a **research capability with recorded provenance**, never raw fetch.
+- A research result or snapshot does not become a Book-owned Source Version merely because a Task retrieved or used it; `保存为来源材料` is a separate explicit Book-targeted acquisition.
 
 Enforcement follows the existing ADR 0010 rule: the same activation is enforced at both the Harness tool guard and the AI7 capability/service facade.
 
@@ -32,7 +33,7 @@ Enforcement follows the existing ADR 0010 rule: the same activation is enforced 
 Users have complete access to their own material without the agent gaining roam rights.
 
 - **AI7 owns storage location; the user owns content.** Editors work with Books, sources, and deliverables, never paths. Import is a file picker; export is a destination choice. No directory literacy is required at any point.
-- **Retrievability is a guarantee, not a feature.** Every imported source and every generated deliverable stays reachable and exportable. "You do not need to understand the filesystem" must never degrade into "your work is trapped in an opaque store." Revealing a file's location is a user action, not an agent capability.
+- **Retrievability is a guarantee, not a feature.** Every retained Source Version and every generated deliverable stays reachable and exportable. "You do not need to understand the filesystem" must never degrade into "your work is trapped in an opaque store." Revealing a file's location is a user action, not an agent capability.
 
 ### Agent Data Root
 

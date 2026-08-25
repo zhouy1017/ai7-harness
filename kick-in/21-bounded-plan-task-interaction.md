@@ -34,7 +34,9 @@ Audit pin: `ai7-reborn-ai@3e6e9ac772b7f07832154fa39d7de8a4deca51b1`.
 | **Task Intent** | 任务意图 | The exact goal, Task Skill, inputs, Book/deliverable/document/revision/selection context, and expected outcome of one requested task. |
 | **Execution Plan** | 执行计划 | A versioned plan of capabilities, steps, expected artifacts, declared Effects and gates, stop conditions, and provider needs for one Task Intent. |
 | **Plan Preview** | 计划预览 | The concise human-readable projection of an Execution Plan and its uncertainty, authority, and expected outcomes; it is not itself authorization. |
-| **Plan Envelope** | 计划权限边界 | The machine-authoritative limits within which Run Authorization permits execution: capabilities, tools, sources, providers, privacy category, budget, ceilings, fallback/retry rules, adaptation classes, and Effect gates. |
+| **Plan Envelope** | 计划权限边界 | The machine-authoritative limits within which Run Authorization permits execution: capabilities, tools, sources, providers, privacy category, exact Run Budget Ceiling state, fallback/retry rules, adaptation classes, and Effect gates. |
+| **Run Budget Ceiling** | 任务运行预算上限 | The optional AI7 per-Run hard monetary or usage ceiling, bound as `未设置` by default or as an explicit value; `未设置` does not describe Provider availability or price. |
+| **Provider Account Limit** | 模型服务账户限额 | A provider-side quota, spending control, or credit condition that may block model dispatch independently of the Plan Envelope's Run Budget Ceiling; provider rate/service limits remain separate blockers. |
 | **Plan Adaptation** | 计划内调整 | A recorded execution-plan adjustment explicitly permitted by the unchanged Plan Envelope. |
 | **Plan Revision** | 计划修订 | A material change to the Task Intent, Execution Plan, or Plan Envelope that suspends execution and requires renewed Run Authorization. |
 | **Clarification Request** | 澄清请求 | A durable typed wait asking the user for information needed to resolve ambiguity in intent, evidence, authority, or a safe next action. |
@@ -47,7 +49,7 @@ Audit pin: `ai7-reborn-ai@3e6e9ac772b7f07832154fa39d7de8a4deca51b1`.
 ### May continue without renewed Run Authorization
 
 - Reorder or skip declared read-only steps when the Plan Envelope allows it and records the reason.
-- Substitute a declared capability with an equivalent read-only capability that cannot expand source, provider, privacy, budget, output, or Effect authority.
+- Substitute a declared capability with an equivalent read-only capability that cannot expand source, provider, privacy, the exact Run Budget Ceiling state, output, or Effect authority.
 - Retry under the declared idempotency and Effect-replay policy.
 - Advance to an already frozen fallback provider after a conclusively classified primary failure.
 - Pause at a safe boundary or issue a Clarification Request.
@@ -57,7 +59,8 @@ Audit pin: `ai7-reborn-ai@3e6e9ac772b7f07832154fa39d7de8a4deca51b1`.
 - Add a Task Skill, tool, or capability outside the envelope.
 - Expand Book, Series, corpus, document, revision, selection, source, or destination scope.
 - Use a provider outside the frozen approved chain or enlarge the outbound-data category.
-- Increase budget, time, token, step, or attempt ceilings beyond the approved bounds.
+- Add, increase, or remove an explicit Run Budget Ceiling after authorization; a ceiling reached by the current Run is terminal and the revised boundary belongs to a newly authorized Redo Run.
+- Increase time, token, step, or attempt ceilings beyond other approved bounds.
 - Change the goal, expected Task Outcome type, material quality criterion, Effect class, or risk boundary.
 - Continue after evidence or target drift invalidates an authority-bearing pin.
 
@@ -65,8 +68,8 @@ Run Authorization permits bounded execution and arrival at declared gates. It ne
 
 ## Surface-neutral task lifecycle
 
-1. **Capture intent** — bind the exact Book, deliverable, document, revision, selection, skill, inputs, requested Editorial Dimensions, and expected Task Outcome.
-2. **Preflight** — resolve sources, providers, privacy/outbound category, budget, capabilities, policies, dependencies, and any blocking ambiguity.
+1. **Capture intent** — retain the exact Book, deliverable, document, selection, skill, inputs, requested Editorial Dimensions, expected Task Outcome, and any prior-revision pins or pending manuscript references in the Task draft. Whenever the Task would use acknowledged Edit Journal state newer than the latest Manuscript Revision as target, range, source, or evidence, first materialize it through a Manuscript Checkpoint with purpose `Task Input / 任务输入`, then exact-resolve every attached manuscript target/range/source/evidence reference on the resulting revision into a new task-bound pin while preserving the original pin and provenance. Checkpoint failure or unresolved changed/ambiguous references keep the draft and block Plan Preview/authorization.
+2. **Preflight** — resolve sources, providers, privacy/outbound category, exact Run Budget Ceiling state, Provider Account Limit blockers, capabilities, policies, dependencies, and any blocking ambiguity.
 3. **Preview and authorize** — show the Plan Preview and obtain Run Authorization for the exact Task Intent and Plan Envelope digest.
 4. **Execute with bounded adaptation** — log Plan Adaptations and evidence in AI7 business records while projecting live progress from Harness Session Events; pause for Clarification Requests or named gates.
 5. **Revise when material assumptions change** — suspend, preserve current evidence, issue a Plan Revision, and require renewed authorization.
@@ -85,9 +88,9 @@ V1 should support typed outcomes rather than a generic response blob:
 - proposed Editorial Artifact or Correction Proposal;
 - Clarification Request or unresolved evidence record;
 - Effect request awaiting exact authority;
-- completed Editorial Artifact or Delivery Package only when the required authoritative transition and receipts exist.
+- completed Editorial Artifact only when its required authoritative transition exists, or a frozen Delivery Package only when its exact destination-independent package transition exists; any later local export remains a separate per-file preparation, approval, Effect, and receipt.
 
-Every Task Outcome records the originating Task Intent and Execution Plan versions, actual-versus-planned trace, exact source/manuscript pins, applicable policy and Editorial Dimension snapshots, Foundation Model/Harness composition identity, evidence, confidence or unresolved state, linked Run Record and Execution Bindings, decisions, Effects/receipts, and safe next action. A model-generated outcome never silently becomes an authoritative manuscript revision, Editorial Artifact, factual finding resolution, or public release.
+Every Task Outcome records the originating Task Intent and Execution Plan versions, actual-versus-planned trace, exact source/manuscript pins, applicable policy and Editorial Dimension snapshots, Foundation Model/Harness composition identity, evidence, confidence or unresolved state, linked Run Record and Execution Bindings, decisions, Effects/receipts, and safe next action. `Run Budget Ceiling Reached / 任务运行预算已达上限` is a terminal partial classification of this existing record: further model dispatch stops, partial candidates and evidence remain, and changing the ceiling requires a Plan Revision plus a newly authorized Redo Run. A Provider Account Limit denial instead leaves an otherwise unchanged Run blocked/interrupted; after the account condition is resolved, only explicit Resume plus revalidation may continue it. A model-generated outcome never silently becomes an authoritative manuscript revision, Editorial Artifact, factual finding resolution, or public release.
 
 ## Keep / adapt / drop
 
@@ -110,4 +113,4 @@ Tests should prove exact Task Intent/Plan Envelope digest binding across support
 
 ## Decision resolution
 
-Question 20 accepted the authority-bearing Plan Envelope, exact Task Intent and Run Authorization binding, bounded Plan Adaptation, material Plan Revision, separate Effect/editorial authorities, durable clarification/continuation, typed Task Outcomes, and the complete legacy UI/agent-console drop boundary above. See [ADR 0009](../docs/adr/0009-use-authority-bearing-plan-envelopes.md).
+Question 20 accepted the authority-bearing Plan Envelope, exact Task Intent and Run Authorization binding, bounded Plan Adaptation, material Plan Revision, separate Effect/editorial authorities, durable clarification/continuation, typed Task Outcomes, and the complete legacy UI/agent-console drop boundary above. Issue #8 Batch 3 later set the default Run Budget Ceiling to `未设置`, distinguished Provider Account Limits, made an explicitly reached ceiling terminal, and required explicit Resume after ordinary interruption. See [ADR 0009](../docs/adr/0009-use-authority-bearing-plan-envelopes.md), [ADR 0033](../docs/adr/0033-default-run-budget-ceiling-to-unset.md), and [ADR 0034](../docs/adr/0034-require-explicit-resume-after-interruption.md).

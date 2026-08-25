@@ -16,6 +16,10 @@ Engineering validation remains minimal under ADR 0027: one logical provider-free
 
 AI7 capability and service facades remain the enforceable product boundary on both platforms. No current Harness sandbox mechanism is assumed to provide whole-process filesystem, network, or process confinement merely because a platform adapter exists.
 
+## Later refinement
+
+[ADR 0039](./0039-delegate-local-export-collisions-to-native-os-workflows.md) applies the native-variation rule to local-export collisions: Windows and macOS may use their own save/copy wording and layout, but both normalize to exact rename, cancel, or replace outcomes while AI7 retains the same preparation, approval-before-commit, per-file receipt, and ambiguity semantics.
+
 ## Supersession
 
 This ADR supersedes every active Windows-only product-scope clause in ADRs 0013, 0014, 0023, and 0024 and in their dependent design notes. Historical quotes and frozen artifacts may retain the old decision only when clearly labeled as superseded evidence. It does not change Windows-specific channel decisions or pre-decide the open macOS mechanics listed above.

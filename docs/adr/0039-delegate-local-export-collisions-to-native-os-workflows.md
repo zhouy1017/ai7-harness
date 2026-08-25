@@ -1,0 +1,9 @@
+# Delegate local-export collisions to native OS workflows
+
+When a local export target already exists, AI7 invokes the current platform's native save or copy conflict workflow instead of presenting a second AI7 collision modal. The OS may use platform-specific wording and layout, but its resolved outcomes normalize to an alternative final name/path, cancellation, or replacement. A create or replace choice supplies the exact final target and disposition for a frozen Local Export Preparation, from which AI7 records the target-bound Effect Intent and Effect Approval before file commit; cancellation creates no attempted file Effect and no success receipt. A native apply-to-all choice may create individual approvals only for the exact currently enumerated colliding files, never standing overwrite permission for unseen or future files.
+
+The OS workflow is a platform-native projection and input seam, not the authority or receipt owner. The AI7 service then verifies and records a per-file Effect Receipt for the actual resolved local outcome. If the target or disposition changes after the native choice, the Local Export Preparation and approval are stale and the native conflict workflow runs again; an ambiguous OS outcome is reconciled before retry. No Harness Run receives roaming filesystem access. This preserves familiar Windows and macOS file behavior while keeping AI7's authority, history, and no-blind-retry rules exact.
+
+## Considered options
+
+A custom cross-platform conflict modal would duplicate familiar OS behavior and could drift from native accessibility and filesystem conventions. Automatic filename versioning would silently choose a destination, while forbidding replacement would remove an ordinary filesystem capability. Native resolution keeps the interaction familiar without surrendering exact Effect evidence.

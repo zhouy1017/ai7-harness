@@ -15,7 +15,7 @@ On 2026-08-21 the owner revised the post-interview product target from Windows-o
 - one release version and explicit compatibility contract; and
 - the same professional-editor acceptance outcomes.
 
-The product may follow native platform conventions for menus, keyboard shortcuts, window chrome, dialogs, accessibility behavior, paths, protected credential facilities, local IPC, packages, signing, notarization, and security prompts. Those differences are named and remain subject to the same product outcomes. The contract does not require pixel-for-pixel rendering, identical installers, or suppressing useful native behavior.
+The product may follow native platform conventions for menus, keyboard shortcuts, window chrome, dialogs, accessibility behavior, paths, protected credential facilities, local IPC, packages, signing, notarization, and security prompts. Those differences are named and remain subject to the same product outcomes. For existing-file collisions, native save/copy workflows may use platform wording and layout but normalize to exact rename, cancel, or replace results; AI7 still owns Local Export Preparation, approval before commit, per-file receipt, reconciliation, and history. The contract does not require pixel-for-pixel rendering, identical installers, or suppressing useful native behavior.
 
 ## Preserved decisions
 
@@ -38,6 +38,7 @@ The product may follow native platform conventions for menus, keyboard shortcuts
 | Distribution | zip folder + NSIS | native package/archive and update behavior | macOS decision open |
 | Trust | Windows signing deferred; SmartScreen cost recorded | Gatekeeper plus signing/notarization policy | must be decided independently |
 | Filesystem confinement | Harness Windows ACL path is partial | Harness Seatbelt path covers file writes only and depends on deprecated `sandbox-exec` | neither proves the accepted Agent Data Root target |
+| Existing-file collision | Native Windows save/copy rename, cancel, or replace interaction | Native macOS save/copy rename, cancel, or replace interaction | presentation differs; both feed the same exact AI7 preparation/approval/commit/receipt semantics and no roaming filesystem |
 | Standing E2E | Windows launch and complete journeys | macOS launch and the same supported outcomes | one logical provider-free E2E Functional Gate on both platforms; no separate certification programme |
 
 ## Deferred platform implementation decisions
@@ -51,6 +52,8 @@ The following must be decided before the corresponding implementation is complet
 5. the smallest CI topology that executes the one logical E2E Functional Gate on both targets;
 6. per-platform Agent Data Root enforcement or an explicit revision of that guarantee;
 7. Keychain-backed credential storage and user-initiated legacy credential transfer; and
-8. the native-input, shortcut, accessibility, dialog, document-fidelity, and long-manuscript adaptations on both systems.
+8. the native-input, shortcut, accessibility, dialog, local-export collision, document-fidelity, and long-manuscript adaptations on both systems.
 
 Harness is reference evidence, not the product answer. Its platform helpers do not by themselves establish a whole-process privacy/egress boundary. AI7 capability and service facades remain authoritative, and the Credential Broker requires platform adapters for Windows Credential Manager and macOS Keychain.
+
+Issue #8 Batch 5 records the local-export collision refinement in [ADR 0039](../docs/adr/0039-delegate-local-export-collisions-to-native-os-workflows.md). Native cancellation attempts no file Effect; a changed final target or disposition invalidates preparation and approval; uncertainty stops automatic retry; and a successful local receipt proves neither external sending nor publication.

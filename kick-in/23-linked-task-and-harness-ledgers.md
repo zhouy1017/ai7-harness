@@ -159,7 +159,7 @@ Use **Domain Command** for a request to change AI7 business state. `Prepare` is 
 
 | Action | Identity rule | Harness consequence |
 | --- | --- | --- |
-| **Resume / 续行** | Same Run and unchanged semantics; continue from authoritative Task Ledger/workflow/Effect state | May create a new Session or Harness Execution Span; never claims mid-tool continuation |
+| **Resume / 续行** | Explicit user continuation of the same Run under unchanged semantics from authoritative Task Ledger/workflow/Effect state | After lightweight revalidation, creates a new Session or Harness Execution Span; never auto-dispatches merely because restart reconciliation is safe and never claims mid-tool continuation |
 | **Retry / 重试** | Same semantic request and Run, but a new explicitly linked safe execution attempt | New Span and possibly new Session; forbidden automatically when an Effect outcome is unknown |
 | **Redo / 重做** | Changed semantics or a user request for a fresh result creates a new Run and new authorization | New dispatch and Span; old Run remains immutable |
 | **Replay / 重放** | Read and reconstruct existing records | Does not invoke the model, repeat an Effect, or create a new attempt |
@@ -182,7 +182,9 @@ outbox/projector watermarks
 next safe business transition
 ```
 
-On restart, AI7 acquires the Session lease, loads and repairs the Session, reconciles outbox items and unknown Effects, and then starts a new Harness Execution Span. It never pretends to continue inside a partially completed model or tool step.
+On restart, AI7 acquires the Session lease, loads and repairs the Session, and reconciles outbox items and unknown Effects. A safely reconciled interrupted Run settles as `任务已中断 · 可续行`; its existing Run Authorization remains, but no new Harness Execution Span starts until the user explicitly invokes Resume and lightweight revalidation succeeds. Material drift routes to Plan Revision and Redo, while an ambiguous Effect remains unresolved. The separately authorized deferred-connectivity path may auto-dispatch after unchanged Reconnect Preflight because that future start was already explicit. AI7 never pretends to continue inside a partially completed model or tool step.
+
+A newly effective Series Retrieval Exclusion is material source-authority drift, not an ordinary interruption. AI7 preserves the original Plan Envelope, Run Authorization, Execution Binding, already fetched evidence, and Session history but refuses every later affected read. The Run requires Plan Revision plus renewed Run Authorization or cancellation; superseding the exclusion never restores the old binding or auto-resumes work, and excluded historical context cannot silently enter a new provider payload.
 
 ## Persistence and migration consequences
 
@@ -248,4 +250,4 @@ Accepted linked-ledger boundary:
 - cross-ledger correlation uses Execution Bindings and Harness Execution Spans; and
 - Resume, Retry, Redo, Replay, Effects, commands, and continuation state retain the distinct rules above.
 
-See [ADR 0011](../docs/adr/0011-separate-task-business-and-harness-execution-ledgers.md).
+Issue #8 Batch 3 later fixed the restart-dispatch consequence: a safely reconciled interrupted Run retains authorization but waits in Resume-ready Run State for explicit `续行`; only the separately authorized deferred-connectivity path may auto-dispatch after unchanged Reconnect Preflight. See [ADR 0011](../docs/adr/0011-separate-task-business-and-harness-execution-ledgers.md) and [ADR 0034](../docs/adr/0034-require-explicit-resume-after-interruption.md).

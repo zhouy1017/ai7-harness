@@ -704,3 +704,158 @@ Resume by committing `docs/9-source-checkout-buildability`, opening and merging 
 ### Resume Prompt
 
 Resume from the integrated `origin/design-doc` buildability contract, preserve the separate dirty UI/UX worktree, and request explicit owner authorization before implementation planning or canonical `main` integration.
+## Missing-design audit Batch 1 — Issue #8 — 2026-08-25
+
+### What's done
+
+- Created private GitHub Issue #8, `Complete the AI7 V2 missing-design audit`, because binding repository conventions require one discoverable issue per branch. Created local branch `docs/8-complete-missing-design-audit` from clean exact `origin/design-doc@2932f61f5907558587122c7c4e0b92580951ab58`; no push, pull request, merge, `main` change, implementation, dependency, prototype, test expansion, publication, or release occurred.
+- Recorded accepted Batch 1 decisions in `docs/ui-ux-v2/{README,requirements,information-architecture,interaction-spec,journeys,visual-direction,migration-from-v1,DECISION-QUEUE,CONTEXT,GLOSSARY}.md` and candidate ADR 0009's affected Chinese label. The new-Book J-01 path now covers explicit unselected target selection, a non-authoritative Book Creation Draft, locally bounded source-labeled title suggestions, Review Before Import, one all-or-nothing initialization/import commit, exact completion routes, and named non-effects.
+- Added `docs/ui-ux-v2/MISSING-DESIGN-DECISION-MAP.md` as the compact Issue #8 dependency map: Batch 1 is resolved; four later batches remain pending behind the recorded edges.
+- Added canonical `Book / 图书` to `docs/domain/editorial/CONTEXT.md` and root `GLOSSARY.md`, changed `Book Editorial Dimension Set` to preferred Chinese `图书编辑维度集`, and normalized affected candidate Chinese-first labels without changing English record identifiers.
+- Interpreted the owner's Batch 1 qualifications consistently with the accepted atomic boundary: once the draft/preflight is valid, AI7 immediately leads to `导入前确认`, whose final action converts the draft into the authoritative Book while importing the first Manuscript in the same commit; title suggestions may inspect only a locally bounded subset of document metadata and title-bearing early content plus filename fallback, remain editable, and disclose their source.
+- Created no ADR: the decisions complete and expose the already accepted Book authority and atomic-import boundaries; the label, suggestion, and progressive interaction choices do not meet the three-part ADR threshold.
+- Completed independent read-only diff review and corrected every finding: the canonical Chinese label owner now matches the glossary; content-derived title alternatives remain allowed but never silently authoritative; metadata/filename/content precedence is exact; title editing begins only after `新建图书`; Review Before Import and its commit are scoped to the new-Book path; `Book Library / 书库` has one candidate definition owner; and empty-library import still requires explicit target selection. The final bounded review reported zero findings.
+- Revalidated the documentation-only diff: all 748 `V2-UX-*` requirement IDs are unique, `git diff --check` passes, the affected mixed Chinese/English label scan is clean, root `CLAUDE.md` remains exactly `@AGENTS.md`, and branch/base remain `docs/8-complete-missing-design-audit@2932f61` / exact `origin/design-doc@2932f61`.
+
+### What's next
+
+- Run bilingual Batch 2/5 for existing-Book import relationships/cardinality, exact duplicate handling, reimport base/comparison, source-only treatment, and draft interruption/restart behavior. Recalculate the remaining decision count if those answers collapse dependencies.
+- After Batch 2 is answered, immediately update the same candidate requirement/IA/interaction/journey/term surfaces, the decision map/queue, and this checkpoint before moving to Run lifecycle questions.
+- Keep the owner-settled local-export/manual exact `发稿版本` boundary closed; do not introduce publisher/platform integration, external sending, recipient/delivery proof, or publication execution.
+
+### Key decisions made
+
+- `Book` keeps its stable English identifier and uses preferred Chinese `图书`; `Manuscript` remains `稿件`, and neither is a filesystem project/workspace or publication-status claim.
+- Every manuscript import has one explicit Manuscript Import Target. Context may recommend but never preselect a current Book; filename, path, recency, or source location never determines ownership.
+- New-Book import begins with a non-authoritative Book Creation Draft. Only editor-confirmed `书名` is required, `内部编号` is optional, and richer bibliographic metadata remains later-editable.
+- Book Title Suggestions are local, bounded, source-labeled, and editable only after `新建图书` is selected, although candidate extraction may begin during preflight. Non-empty DOCX title metadata is primary, filename stem is the fallback, and bounded title-bearing early content may supply separately labeled alternatives; no model/Provider/network call or silent content candidate creates title authority.
+- The new-Book Review Before Import exposes exact initial Book/Manuscript/branch/revision, Workflow Profile/Instance, effective Book Editorial Dimension Set, provenance/fidelity/degradation records and non-effects; one exact clean/degraded action creates every authoritative record or none. Existing-Book review/commit semantics remain pending Batch 2.
+
+### Resume Prompt
+
+Resume Issue #8 on `docs/8-complete-missing-design-audit` after accepted Batch 1: verify the current uncommitted candidate/checkpoint diff, then ask bilingual Batch 2/5 about existing-Book import modes, duplicates, reimport base, source-only treatment, and interruption/restart without weakening the explicit-target or atomic-new-Book boundary.
+
+## Missing-design audit Batch 2 — Issue #8 — 2026-08-25
+
+### What's done
+
+- Recorded accepted Decisions 2.1–2.4 across `AGENTS.md`, `GLOSSARY.md`, `HANDOFF.md`, `docs/domain/editorial/CONTEXT.md`, `docs/ui-ux-v2/{README,requirements,information-architecture,interaction-spec,journeys,visual-direction,migration-from-v1,CONTEXT,GLOSSARY,DECISION-QUEUE,MISSING-DESIGN-DECISION-MAP,HANDOFF}.md`, `kick-in/18-manuscript-revision-and-recovery-boundary.md`, and `kick-in/decisions/README.md`. The Issue #8 map now records 9 of an estimated 18 owner decisions resolved; Batches 3–5 contain the remaining 9.
+- Created root ADRs `docs/adr/0029-keep-one-primary-manuscript-per-book.md`, `0030-compare-reimports-without-inventing-source-lineage.md`, and `0031-persist-verified-import-staging-for-explicit-recovery.md`. The reversible exact-match disclosure rules did not receive an ADR.
+- Added canonical Editorial definitions and preferred Chinese labels for Existing-Book Import Relationship / `既有图书导入关系`, Staged Import Snapshot / `导入暂存快照`, Source Relationship Unconfirmed / `来源关系未确认`, Import Commit Outcome Uncertain / `导入提交结果待确认`, Manuscript Import Record / `稿件导入记录`, Manuscript Reimport Record / `稿件重新导入记录`, and Source Import Record / `来源导入记录`; candidate UI documents now index rather than redefine the durable domain states.
+- Closed derived interaction couplings: standalone Book creation may intentionally create a zero-Manuscript Book only through Review Before Book Creation; an import-bound Book Creation Draft still cannot commit empty; a zero-Manuscript Book Work Overview shows `尚无稿件` / `导入首份稿件` without fabricated revision state; and startup prioritizes manuscript recovery, then import-draft/uncertain-commit recovery, then exact prior work.
+- Completed two independent read-only reviews and corrected every reported issue: exact immutable original-file identity is not confused with source family/lineage; cross-Book Source Versions are not reused; root versus presentation term ownership is clean; source-only and no-change outcomes create no Manuscript Revision; uncertain commit blocks retry and cancellation cleanup; and Book Library, empty-Book overview, ADR wording, and stale aliases are resolved.
+- Revalidated the documentation-only delta: all 772 `V2-UX-*` requirement IDs are unique, changed Markdown links resolve, root glossary row cardinality is clean, `git diff --check` passes, root `CLAUDE.md` remains exactly `@AGENTS.md`, and branch/base remain `docs/8-complete-missing-design-audit@2932f61` / exact `origin/design-doc@2932f61`. Changes remain uncommitted; no product code, test, dependency, push, pull request, merge, `main` change, publication, or release occurred.
+
+### What's next
+
+- Ask bilingual Batch 3/5 about: materializing journal-newer acknowledged text into an exact Task/Run/evidence pin; the terminal and continuation consequences of reaching a hard Run budget ceiling; and whether a safely reconciled interrupted active Run waits for explicit `续行` or resumes automatically.
+- After the owner answers, update root domain/ADR surfaces only where the answer changes hard authority or history semantics, update the candidate Run requirements/IA/interaction/journey/terms immediately, then checkpoint before Batch 4.
+- Keep the accepted import rules closed and keep the owner-settled local-export/manual exact `发稿版本` boundary out of the grill; do not add external publisher integration or delivery proof.
+
+### Key decisions made
+
+- One Book owns zero or one primary Manuscript. An empty Book may receive its first Manuscript; a populated Book may reimport only its sole primary Manuscript; supporting material remains a Book-owned Source Version; and a different intended work requires another Book.
+- Target Book and Existing-Book Import Relationship are separate unselected choices. Source-only import ends in a target-owned Source Version plus Source Import Record and `来源材料已导入`, with no Manuscript, revision, Workflow Instance, source-scope grant, factual status, learning eligibility, or publication authority.
+- Exact matching separately discloses immutable original-file identity, exact parsed content/structure, same-name/different-content collision, and fuzzy similarity. It never auto-deduplicates, selects a target/relationship, invents lineage, or shares Book-owned source authority across Books.
+- Reimport uses a prior Source Version as a third comparison state only when exact lineage proves it; otherwise it displays `来源关系未确认` and compares current versus staged states conservatively. Changed content creates a current-Book Source Version, descendant revision, and Manuscript Reimport Record; no-change creates the Source Version/evidence and record without an empty revision.
+- A complete verified Staged Import Snapshot and non-authoritative draft persist only under the Agent Data Root until completion or explicit abandonment. Restart never auto-resumes/commits, target drift invalidates stale review, complete staging can survive original-file permission loss, cancellation deletes safe-to-delete staging, and `导入提交结果待确认` preserves evidence while blocking retry, cleanup, and duplicate dispatch.
+
+### Resume Prompt
+
+Resume Issue #8 on `docs/8-complete-missing-design-audit` after accepted Batch 2: verify the current uncommitted docs-only delta, then ask bilingual Batch 3/5 about task-input checkpointing for journal-newer text, hard budget exhaustion, and explicit versus automatic continuation of a safely reconciled interrupted Run.
+
+## Missing-design audit Batch 3 — Issue #8 — 2026-08-25
+
+### What's done
+
+- Recorded accepted Decisions 3.1–3.3 across the canonical Editorial and Execution contexts, root glossary/instructions/handoff, affected root ADR and kick-in architecture surfaces, the architecture-v2 candidate, and the UI/UX-v2 candidate requirements, information architecture, interactions, journeys, visual direction, decision records, glossary, migration notes, handoff, and router.
+- Created root ADRs `docs/adr/0032-materialize-task-input-before-exact-run-pinning.md`, `0033-default-run-budget-ceiling-to-unset.md`, and `0034-require-explicit-resume-after-interruption.md`. They fix exact `Task Input / 任务输入` authority, the default budget state and terminal explicit-ceiling consequence, and the ordinary interrupted-Run continuation boundary.
+- Added or completed canonical terms for Task Input / `任务输入` as a Manuscript Checkpoint purpose, Run Budget Ceiling / `任务运行预算上限`, Run Budget Ceiling Reached / `任务运行预算已达上限`, Provider Account Limit / `模型服务账户限额`, Resume-ready Run State / `任务运行可续行状态`, Resume / `续行`, Connectivity Wait State / `联网等待状态`, and Reconnect Preflight / `联网恢复预检`.
+- Closed an exact-binding dependency exposed by independent review: acknowledged journal-newer text first produces an immutable `Task Input / 任务输入` Manuscript Revision; every attached prior-revision pin and pending manuscript target/range/source/evidence reference then exact-resolves into a new task-bound pin without mutating the original. Changed or ambiguous references preserve the checkpoint and draft but block planning/authorization until the editor reselects or removes them.
+- Completed two independent read-only review passes. Their findings corrected the pre-checkpoint range representation, default-execution ordering, prior-pin rebinding risk, trigger scope, exact terminology, and status copy; the final pass reported zero findings across Decisions 3.1–3.3.
+- Revalidated the uncommitted documentation-only delta: `git diff --check` passes; all 788 `V2-UX-*` IDs are unique; 626 local links across all 49 changed Markdown files resolve; the root and candidate accepted-term tables have no duplicate English identifiers or shared Chinese-label mismatch; stale Task Input, budget, and status aliases are absent; and root `CLAUDE.md` remains exactly `@AGENTS.md`.
+- The task branch remains deliberately at `docs/8-complete-missing-design-audit@2932f61f5907558587122c7c4e0b92580951ab58`. During this batch `origin/design-doc` advanced independently to `7f622ddcfa774477a256a44998d56a2f8cadd326`; no pull, rebase, merge, reset, commit, push, pull request, `main` change, implementation, dependency, test-program expansion, publication, or release was attempted.
+
+### What's next
+
+- Ask bilingual Batch 4/5 about the remaining Source Version acquisition paths, the authoring/review/promotion boundary for Series Knowledge, and persistent Series Retrieval Exclusion semantics.
+- After the owner answers, update the same canonical/candidate surfaces, record an ADR only if a hard-to-reverse authority/history boundary changes, re-run the lightweight documentation checks, and checkpoint before Batch 5.
+- Preserve the accepted one-primary-Manuscript, exact `Task Input / 任务输入`, unset-budget, explicit-Resume, and local-export/manual exact `发稿版本` boundaries. Do not integrate the independently advanced remote branch or add external publisher delivery without owner/Commander authority.
+
+### Key decisions made
+
+- Any Task that would use acknowledged Edit Journal state newer than the latest Manuscript Revision as manuscript target, range, source, or evidence must first create the existing Manuscript Checkpoint with exact purpose `Task Input / 任务输入`, before Plan Preview or any Run Authorization. The resulting revision and newly resolved task-bound pins stay exact; later edits never retarget them.
+- Run Budget Ceiling defaults to the exact state `unset`, shown as `未设置任务预算上限`. AI7 imposes no local per-Run stop in that state; Provider quota, spend, credit, and billing controls remain a separate Provider Account Limit rather than being described as free, zero, unlimited, or infinity.
+- Reaching an explicit Run Budget Ceiling stops new dispatch and records the existing terminal Task Outcome classification `Run Budget Ceiling Reached / 任务运行预算已达上限`, preserving partial work, evidence, usage, Effects, and receipts. Raising/removing the ceiling requires Plan Revision, renewed authorization, and linked Redo; a remediated Provider Account Limit instead permits explicit same-Run Resume after revalidation.
+- Ordinary safe restart/reconciliation yields `Resume-ready Run State / 任务运行可续行状态` and never auto-dispatches; explicit `续行` plus lightweight revalidation starts a new Harness Execution Span in the same unchanged Run. The only narrow automatic-dispatch exception is a previously authorized `授权并在联网后开始` action after an unchanged Reconnect Preflight from Connectivity Wait State.
+
+### Resume Prompt
+
+Resume Issue #8 on `docs/8-complete-missing-design-audit` after accepted Batch 3: preserve the uncommitted docs-only delta and original `2932f61` base despite `origin/design-doc` advancing independently to `7f622dd`; ask bilingual Batch 4/5 about Source Version acquisition, Series Knowledge promotion, and persistent Series Retrieval Exclusions, and do not integrate the remote branch without owner/Commander authority.
+
+## Missing-design audit Batch 4 — Issue #8 — 2026-08-25
+
+### What's done
+
+- Recorded accepted Decisions 4.1–4.3 across `AGENTS.md`, `GLOSSARY.md`, `HANDOFF.md`, the canonical Editorial and Execution contexts, the architecture-v2 candidate, affected kick-in design notes, and the UI/UX-v2 requirements, context/glossary, information architecture, interaction specification, journeys, visual direction, migration, decision queue/map, and handoff.
+- Created root ADRs `docs/adr/0035-require-explicit-book-targeted-source-acquisition.md`, `0036-promote-series-knowledge-through-explicit-review.md`, and `0037-enforce-versioned-series-retrieval-exclusions-immediately.md`. They fix explicit Book-targeted Source Version acquisition, conflict-aware Series Knowledge promotion, and immediate append-only Series retrieval restrictions.
+- Added or completed canonical definitions and preferred Chinese labels for Source Acquisition Record / `来源获取记录`, Exact Fetch / `精确获取`, Series Knowledge Candidate / `书系知识候选项`, Series Knowledge Item / `书系知识项`, Series Knowledge Revision / `书系知识修订版`, Series Knowledge Promotion Decision / `书系知识纳入决定`, and Series Retrieval Exclusion / `书系检索排除`.
+- Closed the dependencies exposed by independent review: separate Task/evidence records may persist without becoming Source Versions; exact existing Source Version identity reuse is same-Book-only; cross-Book retention creates new target-owned authority and provenance; `Exact Import Match` remains file-only; file versus paste/research actions use distinct labels; both source-bound and manuscript-import-bound title suggestions require explicit confirmation under separate heuristics; and canonical Exact Fetch never names initial external research retrieval.
+- Defined stable Series Knowledge Item identity across immutable revisions. Promotion may create an item with its first revision or append a revision to an exact item. A disclosed conflict offers unselected edit, preserve, or cancel handling; preservation is explicit and recorded, never factual resolution. Promotion makes the revision eligible for later exact Series-scoped selection but creates no Run Source Scope, retrieval authorization/performed retrieval, or Provider-transmission authority.
+- Defined item-targeted exclusions to cover current and future revisions and stable-class exclusions to cover later matching items. Once effective, the guard blocks every later affected Series read; queued/authorized/active work stops for Plan Revision plus renewed authorization or cancellation, while original authorization/evidence/history remains immutable and no superseding/end action auto-resumes work.
+- Completed final independent read-only canonical and UI/UX reviews; both reported zero actionable findings after the fixes.
+- Revalidated the uncommitted documentation-only delta: `git diff --check` passes; all 817 `V2-UX-*` requirement IDs are unique; 679 local links across all 63 changed Markdown status entries resolve; root and UI accepted-term tables contain 166 and 269 unique English identifiers with no duplicate or shared-translation mismatch; all 166 canonical domain-context terms and 247 UI context terms are indexed; root `CLAUDE.md` remains exactly `@AGENTS.md`; and all status entries remain Markdown.
+- The branch remains deliberately at `docs/8-complete-missing-design-audit@2932f61f5907558587122c7c4e0b92580951ab58` while `origin/design-doc` remains independently advanced at `7f622ddcfa774477a256a44998d56a2f8cadd326`. No fetch, pull, rebase, merge, reset, commit, push, pull request, `main` change, implementation, dependency, prototype, test-program expansion, publication, or release occurred.
+
+### What's next
+
+- Ask bilingual Batch 5/5 about the destination-independent versus export-bound meaning of Delivery Package, explicit existing-file export collision behavior, and immutable correction/errata/supersession/withdrawal/reissue/archive maintenance records.
+- After the owner answers, update the same canonical/candidate surfaces, add an ADR only for a hard-to-reverse authority/history boundary, rerun the lightweight documentation checks, and checkpoint the completed five-batch audit for Commander handoff.
+- Keep the owner-settled V1 boundary closed: AI7 performs local export and the editor independently designates an exact `发稿版本`; it does not send to a publisher/platform, prove external delivery, recall external content, or claim publication.
+
+### Key decisions made
+
+- A Book-owned Source Version arises only from explicit file-specific `作为来源材料导入` or pasted/entered-and-research `保存为来源材料` over eligible exact content and provenance. A no-Book path uses a source-bound Book Creation Draft and reviewed atomic creation of a zero-Manuscript Book plus first Source Version; it creates no Manuscript, Workflow Instance, Run Source Scope, factual, learning, or publication authority.
+- An exact existing Source Version identity may be selected only when already owned by the target Book. Cross-Book acquisition creates a new target-owned version and provenance; snippets, incomplete retrieval, model answers, attachments, and mere Task use never auto-create source authority, although separately governed Task/evidence records may persist.
+- A Series Knowledge Candidate targets a proposed new or exact existing stable Series Knowledge Item. Only explicit `纳入书系知识` after item/content/provenance/conflict/reuse review creates the first or next immutable revision and Promotion Decision; conflicts may remain only after explicit preservation and remain unresolved facts.
+- Promotion makes the new revision eligible for later exact Series-scoped selection and pinning; it does not itself create or expand Run Source Scope, authorize/perform retrieval, permit Provider transmission, decide Learning Eligibility or factual status, mutate a manuscript, or authorize publication.
+- Series Retrieval Exclusions are versioned and append-only. Their immediate prospective guard constrains current dispatch authority without rewriting frozen Plans, authorizations, bindings, already-fetched evidence, Provider transmissions, Session history, or completed outcomes; an affected same-binding Resume/Retry/fallback is unavailable.
+
+### Resume Prompt
+
+Resume Issue #8 on `docs/8-complete-missing-design-audit` after accepted Batch 4: preserve the uncommitted docs-only delta and exact `2932f61` base despite the independently advanced remote, then ask bilingual Batch 5/5 about Delivery Package identity, existing-file export collision handling, and versioned maintenance without reopening the local-export/manual exact `发稿版本` boundary or adding external delivery authority.
+
+## Missing-design audit Batch 5 — Issue #8 — 2026-08-25 — complete
+
+### What's done
+
+- Accepted Decision 5.1 A: Delivery Package identity is versioned but destination- and format-independent; exact format, filename/path, fidelity disposition and local Effect Receipt belong to a separate Local Export Preparation/export attempt.
+- Interpreted the owner's Decision 5.2 refinement as a binding native-platform boundary: AI7 invokes the current OS save/copy conflict workflow and lets the OS present its ordinary alternative-name/rename, cancel and replace/overwrite choices instead of implementing a second AI7 collision modal. The returned final target and disposition must still bind the exact local Effect authority and outcome evidence.
+- Accepted Decision 5.3 A: post-designation maintenance uses versioned records bound to an exact Publication Version and Deliverable revision; correction/errata/supersession/withdrawal/reissue/archive never rewrite prior versions, and withdrawal/archive are internal AI7 states rather than external recall or takedown claims.
+- Audited the current canonical and UI/UX candidate surfaces. The existing Delivery Package definition still embeds destination/export authority, while the candidate package manifest freezes planned formats, generated-file digests and fidelity state; these are the principal contradictions to remove. Existing maintenance coverage stops at a phase name and one withdrawal row, so it lacks an authoritative post-designation record model.
+- Completed three independent read-only Batch 5 audits over canonical domain/architecture language, the UI/UX candidate, and cross-document consistency. All three identified the same exact-binding defect: a Delivery Package must bind an immutable Editorial Deliverable revision—optionally identified by an exact Milestone Version—not a stable Deliverable identity, path, format, generated file, or export state.
+- Confirmed the six maintenance classifications need one bilingual canonical value set and non-overlapping behavior: Correction changes content only through a proposal and new revision; Errata is an artifact; Supersession relates exact Publication Versions; Reissue may culminate in a separately designated Publication Version; Withdrawal and Archive are internal append-only states with no external recall, takedown, deletion, or notification claim.
+- Completed the Batch 5 UI/UX candidate integration across 14 files under `docs/ui-ux-v2/`: revised package/export/platform/copy/state/workflow/milestone/publication requirements; added DPKG-013–014, EXP-019–022, and MAINT-001–012; added the native collision and maintenance state machines, IA, journeys, visual rules, terms, decisions D-081–D-083, and closed the decision queue/map at 18/18.
+- UI-scoped checks pass: all 835 requirement IDs are unique; all 18 requested Batch 5 IDs exist; all 252 UI context terms are indexed among 279 unique glossary rows; local links and scoped `git diff --check` have no findings; stale pending and format-bound package wording is absent from the UI package.
+- Completed the non-UI canonical integration across 28 files: added Editorial Deliverable Revision, Local Export Preparation and the bilingual Maintenance Classification; revised Delivery Package/Correction Proposal/External Export Policy; integrated native OS collision authority and post-designation maintenance through `AGENTS.md`, root handoff/glossaries, domain contexts, architecture/migration/crosswalks, kick-in records, ADR indexes, and ADRs 0038–0040.
+- Canonical-scoped checks pass: exactly 40 root ADRs exist; `git diff --check` has no findings; the active non-UI design surfaces contain no remaining format/path/export-authority package contradiction. Frozen V1 `docs/ui-ux/` wording remains historical reference evidence and is explicitly superseded by the V2 candidate and ADRs 0038–0040 rather than rewritten.
+- Completed the bounded post-review correction pass: the UI/UX handoff covers D-001–D-083 and states that all five bilingual grill batches are complete; Delivery Package, export, and maintenance language is consistent across canonical, architecture, and UI/UX surfaces.
+- Recovered source snapshot `ca55b4255669eefd184a027e83a913e1875bbdc7` onto `origin/design-doc@7f622ddcfa774477a256a44998d56a2f8cadd326`. Conflict resolution retained PR #10's Source Checkout Buildability contract while applying Issue #8's exact Run Budget Ceiling and vertical-journey refinements; no whole-file side was selected.
+- Re-ran the lightweight whole-delta checks: 835/835 unique `V2-UX-*` requirements, D-001–D-083 unique and contiguous, 40 uniquely numbered root ADRs, thirteen UI/UX ADRs, zero conflict markers, zero broken local links across 187 active Markdown files, exact one-line `CLAUDE.md`, and clean whitespace after normalizing the decision-map line breaks.
+- Independent advisory review passed Standards and found one Spec issue: candidate UI shorthand allowed a Delivery Package to appear bound to a Deliverable or Milestone and permitted multi-Deliverable inclusion by default. Corrected every affected candidate surface to the ADR 0038 invariant—one package binds unconditionally to one exact Editorial Deliverable Revision, optionally identified by an exact Milestone Version, and never includes another Deliverable or whole-Book content. `same-provider review — independence reduced`.
+
+### What's next
+
+- Commit and push the completed Issue #8 candidate, open its pull request against `design-doc`, verify exact base/head and mergeability, and integrate it as Commander.
+- Keep canonical `main`, product implementation, dependency installation, testing expansion, publication, and release unchanged.
+
+### Key decisions made
+
+- One immutable Delivery Package version may be exported repeatedly in different formats and locations without mutation; every export creates its own exact preparation and per-file Effect Receipt.
+- OS-native collision UI owns the visible rename/cancel/replace choice. AI7 owns the durable binding, per-file Effect identity/receipt, drift handling and ambiguous-outcome reconciliation; a native dialog is not permission to overwrite unseen future files.
+- Maintenance changes create proposals/artifacts/new revisions and require a separate manual `设为发稿版本` when a newer Publication Version is intended. No maintenance record proves external withdrawal, recall, takedown, delivery or publication.
+- Milestone Version, Publication Version, Delivery Package, Maintenance Case and Maintenance Case Revision are canonical Editorial terms; UI-only surfaces must project rather than redefine them. A durable Local Export Preparation belongs with Execution/Effect semantics.
+
+### Resume Prompt
+
+Resume by integrating the completed Issue #8 branch through its normal `design-doc` pull request; preserve destination-independent Delivery Packages, OS-native collision presentation under exact Effect authority, immutable Maintenance Cases, and the no-external-delivery boundary.

@@ -98,15 +98,15 @@ The diagram shows ownership. The process topology was settled at Question 34 and
 | --- | --- | --- |
 | Model turns, tool calls, agent lifecycle, subagents | Harness | Do not fork `agent-loop` unless an extension-seam gap is proven. |
 | Agent-visible history | Harness Session log | Every model-visible AI7 input needs a durable event/projection. |
-| Books, source assets, manuscript blocks/revisions, publication state | AI7 domain services | These are product truth, not generic Harness workspace state. |
+| Books, source assets, manuscript blocks/revisions, publication state | AI7 domain services | A Source Version enters Book truth only through explicit Book-targeted acquisition with provenance; these records are not generic Harness workspace state. |
 | Cross-Book editorial patterns and feedback | AI7 House Editorial Memory | Derived learning is user-owned, versioned, inspectable, and provider-independent; it does not grant direct access to every Book's text. |
-| Series canon, continuity, and shared member knowledge | AI7 Series service | Explicit membership enables shared Series Knowledge and exact read-only retrieval across non-excluded member sources; mutations remain Book-owned. |
+| Series canon, continuity, and shared member knowledge | AI7 Series service | Explicit membership exposes only reviewed Series Knowledge Revisions and exact read-only retrieval across currently non-excluded member sources; exclusions immediately guard later Series reads and mutations remain Book-owned. |
 | Task-business lifecycle and provenance | AI7 Task Ledger plus owning domain records | Run, workflow, decision, command, and Effect facts survive Harness attempts without recreating a technical event timeline. |
 | Tool execution policy | Harness pipeline + AI7 policy plugins | AI7 adds source/privacy/effect rules through canonical seams. |
 | One-shot in-turn tool consent | Harness approval seam | Insufficient for durable/out-of-turn editorial approval by itself. |
 | Durable Approval, Effect, receipt, replay safety | AI7 | Correlate to Harness turn/tool IDs without collapsing concepts. |
 | Product authority rules and revisions | AI7 Policy Documents | Human-reviewable and machine-validatable; post-run agents may author evidence-linked proposed versions without rewriting history. |
-| Model/provider transport | Harness LLM adapters | AI7 adds role, privacy, budget, fallback, and credential-reference policy. |
+| Model/provider transport | Harness LLM adapters | AI7 adds role, privacy, exact Run Budget Ceiling state, fallback, and credential-reference policy. |
 | Agent behavior composition and improvement | Harness profiles, bundles, presets, plugins, session events, replay, and snapshots | AI7 versions and evaluates the effective composition; this is neither model training nor editorial-memory promotion. |
 | Agent-behavior and editorial-quality evaluation | AI7 evaluation service over Harness replay/snapshot evidence | The pinned Harness has substantial deterministic regression support but no general quality evaluator or independent goal verifier. |
 | Professional adaptation and delivery quality | AI7 Editorial Intelligence Layer | Uses professionally governed knowledge/context and feedback; never updates Foundation Model weights. |
@@ -125,7 +125,7 @@ The diagram shows ownership. The process topology was settled at Question 34 and
 | Durable Approval | `ctx.approval` | Use the Harness seam for in-turn asks; keep the durable AI7 record for resumable, exact-target decisions. |
 | Effect + commit receipt | Tool call/result | A tool call may initiate an Effect; only AI7's fenced external commit protocol establishes product truth. |
 | Q&A conversation / turn | Session / turn | Candidate for close mapping, but revision/source-scope pinning and reopen semantics must be specified first. |
-| Provider role plan | LLM adapter/model setting | Add an AI7 resolver that selects a Harness adapter/model under privacy, budget, and fallback constraints. |
+| Provider role plan | LLM adapter/model setting | Add an AI7 resolver that selects a Harness adapter/model under privacy, exact Run Budget Ceiling state, and fallback constraints. |
 | Shared local backend | Harness Host + AI7 domain authority | One deployed authority; exact process and IPC boundaries remain open. |
 
 ## Product composition

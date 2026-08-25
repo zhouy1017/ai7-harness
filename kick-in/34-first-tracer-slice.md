@@ -128,7 +128,7 @@ Under the current rule, any retained user-visible behavior belongs in the applic
 
 ## Explicitly out of scope
 
-Manuscript mutation of any kind — proposals, Effects, receipts — which is Phase 3. Learning, Quality Signals, and metrics, which need mutation first. Multiple Books, Series, and Cross-project scope. Workflow Instances and gates. Export. Parallel Runs: Question 31 makes concurrency required *behavior*, but one Run is correct for a first trace, and the concurrency and budget governor arrives later.
+Manuscript mutation of any kind — proposals, Effects, receipts — which is Phase 3. Learning, Quality Signals, and metrics, which need mutation first. Multiple Books, Series, and Cross-project scope. Workflow Instances and gates. Export. Parallel Runs: Question 31 makes concurrency required *behavior*, but one Run is correct for a first trace, and concurrency governance, usage observation, and optional explicit Run Budget Ceiling enforcement arrive later; the default ceiling is `unset` and Provider Account Limits remain external.
 
 ## Current disposition of the Question 35 decision
 

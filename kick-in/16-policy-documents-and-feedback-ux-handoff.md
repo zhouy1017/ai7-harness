@@ -14,7 +14,8 @@ This document defines required interaction outcomes only. It does not choose a w
 | --- | --- | --- |
 | Result feedback | Whether a result met editorial expectations and why | Permission to learn from every underlying material |
 | Learning-material eligibility | Whether identified material may contribute Editorial Learning Signals at a stated scope | Approval of a Memory Candidate or access to another Book |
-| Memory review | Whether a candidate becomes active Book, Series, or House knowledge | A change to the rules selecting future material |
+| Memory review | Whether a candidate becomes active Book or House memory | A change to the rules selecting future material or automatic Series Knowledge promotion |
+| Series Knowledge promotion | Whether one exact candidate creates a new stable Series Knowledge Item with its first immutable revision or appends one revision to an exact existing item after provenance/conflict/reuse review | Learning Eligibility, factual proof, membership change, Run Source Scope, retrieval or provider authority, or automatic activation from another decision |
 | Policy-revision review | Whether a Proposed Policy Revision should become active | Retroactive rewriting of prior decisions or completed tasks |
 | Audit remediation | How an exclusion or rollback affects descendants and running work | Deletion of original editorial evidence |
 

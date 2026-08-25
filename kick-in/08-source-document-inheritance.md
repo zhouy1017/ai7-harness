@@ -55,9 +55,9 @@ The following cross-cutting dispositions are accepted:
 ## Question 12 — accepted Series sharing boundary
 
 - Series membership is explicit, versioned, and never inferred from similarity.
-- Member Books automatically share versioned Series Knowledge.
+- Membership makes only explicitly promoted immutable Series Knowledge Revisions eligible for governed future sharing; it never promotes Book content, a Proposal, a Milestone Version, learning material, or model output automatically.
 - A Series-scoped Task may perform exact, provenance-bearing, read-only retrieval across current member revisions without selecting every Book separately; it receives relevant passages rather than whole manuscripts in context.
-- Users may create Series Retrieval Exclusions for specific Books or sources.
+- Users may create versioned Series Retrieval Exclusions for exact member Books, Source Versions, Series Knowledge Items, or stable knowledge classes; once effective they immediately prevent later affected Series reads without deleting membership or history.
 - Every mutation remains a Book-targeted proposal bound to an exact revision. Membership changes are prospective and preserve historical evidence.
 
 ## Question 13 — accepted learning-signal governance with audit requirement
@@ -83,8 +83,8 @@ The following cross-cutting dispositions are accepted:
 
 ## Question 16 — accepted textual and factual authority boundary
 
-- Preserve and sharpen the source-truth invariant from current `AGENTS.md`, `CONTEXT.md`, ADR 0021, and ADR 0022: imported source revisions and index chunks—not model prose—are the Textual Source of Record for exact wording and quotations.
-- The manuscript is not a truth oracle. Its Manuscript Assertions may contain factual, logical, referential, or semantic errors; AI7 must help detect them against separate evidence/context and create evidence-linked Correction Proposals.
+- Preserve and sharpen the source-truth invariant from current `AGENTS.md`, `CONTEXT.md`, ADR 0021, and ADR 0022: explicitly retained Source Versions and their exact-fetch projections—not model prose—are the Textual Source of Record for exact wording and quotations.
+- The manuscript is not a truth oracle. Its Manuscript Assertions may contain factual, logical, referential, or semantic errors; AI7 must help detect them against separate evidence/context and create evidence-linked Correction Proposals bound to an exact Editorial Deliverable Revision. For a manuscript, that shared target is realized as an exact Manuscript Revision and any text change remains proposal-first.
 - Current import/index publication is staged, digest-bound, verified, and atomic. Current search is deterministic literal substring matching; it returns full exact text as well as IDs, weakening the conceptual separation between candidate discovery and exact fetch.
 - Current general grounding largely treats “nonempty exact sources” as grounded. The narrow Task Skill kernel verifies that reference project/chunk/version/asset/text fields exactly match fetched sources, but neither path proves that each generated claim is semantically supported.
 - Durable Project Q&A correctly pins each answer to source revisions, approved scope, provider plan, records, and a source bundle, but its whole-answer source list is not claim/span-level citation grounding.
@@ -118,19 +118,21 @@ The pinned evidence and accepted full contract are in [Proposal, Authority, Effe
 
 - Keep the Book as source/privacy/mutation authority, but do not inherit one scalar eleven-stage Book lifecycle. Manuscript, promotion article, news report, and Review Article workflows are independently revision-addressed within the Book.
 - Introduce versioned Workflow Profiles and durable Workflow Instances composed from intake, source development, drafting, review/verification, finalization, delivery, and maintenance; phases may overlap, skip with reason, and reopen.
-- Keep lifecycle metadata, evidence-bearing human gates/signoff, proof/correction history, typed versioned Editorial Artifacts, and narrow Prepare/Commit/receipt command safety.
-- V1 profiles cover Manuscript, Promotion Article, News Report, and Review Article with profile-specific briefs, source/quotation/fact records, style/review gates, signoff, Delivery Package, and correction history.
+- Keep immutable Editorial Deliverable Revisions, lifecycle metadata, evidence-bearing human gates/signoff, proof/correction history, typed versioned Editorial Artifacts, and narrow Prepare/Commit/receipt command safety. Manuscript Revision is the manuscript realization of the shared revision boundary.
+- V1 profiles cover Manuscript, Promotion Article, News Report, and Review Article with profile-specific briefs, source/quotation/fact records, style/review gates, signoff, a destination- and format-independent Delivery Package bound to one exact revision, and versioned Maintenance Cases.
+- Treat each local export as a separate per-file Local Export Preparation, exact AI7 Effect Approval, commit, and receipt after native-OS rename/cancel/replace resolution. Cancellation attempts no file Effect, ambiguity stops retry, and neither package nor receipt proves sending, delivery, or publication.
+- Classify a Maintenance Case permanently as `correction / 更正`, `errata / 勘误`, `supersession / 替代`, `withdrawal / 撤回`, `reissue / 再版`, or `archive / 归档`; append immutable Maintenance Case Revisions without mutating the target Publication Version or implying external recall/takedown.
 - Treat the five shipped provider-free lifecycle handlers as contract tracers rather than mature professional behavior. Adapt developmental/style work, broaden production copy to Publication Communications, make acquisition optional, and move memory review into continuous Editorial Learning governance.
 - Drop universal stage enums, mandatory three-review/three-proof for every deliverable, old `ai7.workflow.*` execution, fixed UI, and automated legal/regulatory/ideological/publication authority; defer contracting, ISBN/CIP, print logistics, rights, awards, and backlist automation from V1 core.
 
-The exact-pin evidence, accepted bilingual terms, profiles, artifacts, and full disposition are in [Deliverable Workflow and Editorial Artifact Boundary](./20-deliverable-workflow-and-artifacts.md). See [ADR 0008](../docs/adr/0008-use-deliverable-owned-workflow-profiles.md).
+The exact-pin evidence, accepted bilingual terms, profiles, artifacts, package/export split, maintenance classifications, and full disposition are in [Deliverable Workflow and Editorial Artifact Boundary](./20-deliverable-workflow-and-artifacts.md). See [ADR 0008](../docs/adr/0008-use-deliverable-owned-workflow-profiles.md), [ADR 0038](../docs/adr/0038-separate-delivery-package-identity-from-local-export.md), [ADR 0039](../docs/adr/0039-delegate-local-export-collisions-to-native-os-workflows.md), and [ADR 0040](../docs/adr/0040-preserve-post-designation-maintenance-as-versioned-cases.md).
 
 ## Question 20 — accepted bounded-plan task interaction
 
 - Preserve visible-plan hybrid autonomy, but make the plan an authority-bearing boundary rather than optional information or blanket approval.
 - Keep one surface-neutral Task Intent and exact Book/deliverable/document/revision/selection capture; discard the Task Composer's visual form and every workbench layout prescription.
 - Generalize the shipped provider-plan precedent into a versioned Execution Plan and machine-authoritative Plan Envelope. Run Authorization binds their exact digest.
-- Permit logged Plan Adaptation only within unchanged capability, source, provider, privacy, budget, outcome, and Effect bounds. Material drift suspends execution and requires a Plan Revision plus renewed Run Authorization.
+- Permit logged Plan Adaptation only within unchanged capability, source, provider, privacy, exact Run Budget Ceiling state, outcome, and Effect bounds. Material drift suspends execution and requires a Plan Revision plus renewed Run Authorization.
 - Keep durable clarification waits, safe pause/cancel, verified-checkpoint Resume, linked Retry, new-Run Redo, and typed evidence-bearing Task Outcomes.
 - Drop the old `/agent/plan`, `/agent/run`, `/agent/approve`, step resubmission, optional-plan visibility, Agent Command Center, Ribbon, Activity rail, panels, inspectors, docking model, and other UI/component authority.
 
@@ -143,7 +145,7 @@ The exact-pin evidence, accepted bilingual terms, authority matrix, lifecycle, o
 - Rename Kernel Capability to AI7 Capability. Install code-bearing Capability Implementations separately as pinned static Cordis plugins/bundles; a Task Skill cannot install, mount, or self-authorize code.
 - Project each Task Skill into one non-authoritative Harness instructional skill plus one AI7-owned per-Run Task Skill Activation. Enforce activation both in Harness tool guards and AI7 service/backend facades because visibility is not authority.
 - Preserve active-Book default and exact user-designated Run Source Scope, Model Roles with hard requirements/soft preferences, frozen Provider Resolution Plans and fallback, ambiguous-outcome stop, and opaque credential references.
-- Separate Provider Processing Policy, External Export Policy, and Public Release Permission. Configured model processing is not public release, but its provider, source scope, outbound-data category, and budget are visible in the Plan Envelope.
+- Separate Provider Processing Policy, External Export Policy, and Public Release Permission. Configured model processing is not public release, but its provider, source scope, outbound-data category, and exact Run Budget Ceiling state are visible in the Plan Envelope.
 - Treat all 13 bundled skills as shipped legacy capability evidence while recording two current gaps: enabled managed local skills are non-runnable, and the provider execution path is mock/cassette-only.
 
 The exact-pin evidence, accepted bilingual language, manifest boundary, authority intersection, Harness anti-corruption mapping, proportional outbound-data policy, and full disposition are in [Task Skill, Capability, Trust, and Provider Boundary](./22-task-skill-capability-trust-provider-boundary.md). See [ADR 0010](../docs/adr/0010-separate-task-skill-instruction-implementation-and-authority.md).
