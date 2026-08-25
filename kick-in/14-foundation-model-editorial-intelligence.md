@@ -13,7 +13,7 @@ The durable product value lives outside model weights:
 - exact Book and Series sources with revision provenance;
 - Professional Editorial Knowledge and explicit style/policy entries;
 - Editorial Dimensions and task-specific rubrics;
-- approved House Editorial Memory and Series Knowledge;
+- approved House Editorial Memory and explicitly promoted Series Knowledge Revisions;
 - Learning Eligibility Policy and complete Learning Lineage;
 - Task Skills, tools, workflows, plans, approvals, and effect controls;
 - provider-neutral context assembly and retrieval;

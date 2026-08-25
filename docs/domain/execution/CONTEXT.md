@@ -68,9 +68,19 @@ _中文_: 计划预览
 _Avoid_: Run Authorization, Plan Envelope
 
 **Plan Envelope**:
-The machine-authoritative limits within which Run Authorization permits execution, including capabilities, tools, sources, providers, privacy category, budget, ceilings, fallback/retry rules, adaptation classes, and Effect gates.
+The machine-authoritative limits within which Run Authorization permits execution, including capabilities, tools, sources, providers, privacy category, the exact Run Budget Ceiling state, fallback/retry rules, adaptation classes, and Effect gates.
 _中文_: 计划权限边界
 _Avoid_: Plan Preview, Effect Approval, standing permission
+
+**Run Budget Ceiling**:
+The optional AI7-owned hard monetary or usage ceiling for one Run, bound in the Plan Envelope as either an explicit value or `unset`; `unset` is the default and means only that AI7 applies no product-side per-Run ceiling, not that provider service is free, unlimited, or exempt from Provider Account Limits.
+_中文_: 任务运行预算上限
+_Avoid_: Provider Account Limit, cost estimate, Authority Ceiling, free service, unlimited provider account
+
+**Run Budget Ceiling Reached**:
+The terminal Task Outcome classification used when an explicit Run Budget Ceiling prevents further model dispatch; it preserves partial results and actual work but creates no new result-record type and cannot continue through Resume or Retry.
+_中文_: 任务运行预算已达上限
+_Avoid_: Provider Account Limit, Task success, paused Run, new Task Outcome type
 
 **Plan Adaptation**:
 A recorded adjustment to an Execution Plan that remains explicitly permitted by its unchanged Plan Envelope.
@@ -213,7 +223,7 @@ _中文_: Harness 技能投影
 _Avoid_: Task Skill Package, Capability Implementation, authority grant
 
 **Run Source Scope**:
-The exact Book, Series, Cross-project, source, and revision read boundary authorized for one Run.
+The exact Book, Series, Cross-project, source, and revision read boundary authorized for one Run. Its frozen record is never rewritten, while a later effective restriction may reduce executable access and force Plan Revision plus renewed Run Authorization but can never expand access silently.
 _中文_: 任务运行来源范围
 _Avoid_: Working Corpus, Outbound Data Category, mutation authority
 
@@ -248,9 +258,24 @@ _中文_: 模型服务选用方案
 _Avoid_: Plan Envelope, dynamic provider selection, skill-owned provider
 
 **Provider Preflight**:
-The review that resolves Model Roles and shows Provider Bindings, Outbound Data Category, Run Source Scope, budget, and blockers before Run Authorization.
+The review that resolves Model Roles and shows Provider Bindings, Outbound Data Category, Run Source Scope, exact Run Budget Ceiling state, and blockers before Run Authorization.
 _中文_: 模型服务预检
 _Avoid_: Run Authorization, provider picker, live model call
+
+**Provider Account Limit**:
+An external Model Provider account quota, spending control, or credit condition that can block dispatch independently of the Run Budget Ceiling and Plan Envelope.
+_中文_: 模型服务账户限额
+_Avoid_: Run Budget Ceiling, Run Budget Ceiling Reached, provider rate limit, AI7 scheduler capacity, automatic fallback authority, free-service claim
+
+**Connectivity Wait State**:
+The durable state of an exactly authorized deferred-start Run that has not begun model work because required network or Model Provider service connectivity is unavailable; it remains cancellable and carries no implication of provider transmission or usage.
+_中文_: 联网等待状态
+_Avoid_: Resume-ready Run State, Run Capacity Wait, paused Run, provider call in progress
+
+**Reconnect Preflight**:
+The deterministic revalidation after connectivity or model-service readiness returns that may automatically dispatch only a Start When Online Run whose exact authorized target, scope, provider, outbound category, Run Budget Ceiling state, credential reference, policies, and other material boundaries remain unchanged.
+_中文_: 联网恢复预检
+_Avoid_: Resume, new Run Authorization, connection test alone, silent fallback
 
 **Approved Fallback Chain**:
 The ordered compatible Provider Bindings already visible and frozen in an authorized Provider Resolution Plan.
@@ -283,9 +308,14 @@ _中文_: 模型服务数据处理策略
 _Avoid_: External Export Policy, Public Release Permission
 
 **External Export Policy**:
-A Policy Document governing transfer of an exact deliverable, source, or package to a named non-provider destination.
+A Policy Document governing transfer of an exact deliverable revision, source, or package across AI7-controlled storage to a named non-provider destination, including a user-chosen local filesystem destination. It is evaluated for each export Effect and is never a Delivery Package field, standing overwrite grant, Public Release Permission, or outcome proof.
 _中文_: 对外导出策略
-_Avoid_: Provider Processing Policy, Public Release Permission
+_Avoid_: Provider Processing Policy, Delivery Package authority, Effect Approval, Effect Receipt, Public Release Permission
+
+**Local Export Preparation**:
+A frozen per-file pre-Effect record created after platform-native destination and collision resolution, binding one exact Delivery Package version or Editorial Deliverable Revision, rendered format, filename, final local path, fidelity disposition, payload digest, create-or-replace disposition, and applicable External Export Policy. It supplies the exact target for a separate Effect Intent and Effect Approval; a changed path or disposition requires a new preparation.
+_中文_: 本地导出准备
+_Avoid_: Delivery Package, mutable file-dialog state, standing overwrite permission, Effect Approval, Effect Receipt, exported file
 
 **Bundled Promotion Gate**:
 The repository and release process that alone may assign bundled provenance to a validated Task Skill.
@@ -293,7 +323,7 @@ _中文_: 内置技能晋级关口
 _Avoid_: Task Skill Enablement, in-product trust escalation, self-promotion
 
 **Run Authorization**:
-The user's decision to start one exact Task Intent under one exact Plan Envelope digest, including its provider, data, source scope, budget, adaptation, and other reviewed bindings.
+The user's decision to start one exact Task Intent under one exact Plan Envelope digest, including its provider, data, source scope, exact Run Budget Ceiling state, adaptation, and other reviewed bindings.
 _中文_: 任务运行授权
 _Avoid_: Execution Grant, Effect Approval, standing permission
 
@@ -352,10 +382,15 @@ A verified AI7 semantic boundary recording unchanged Run state, authoritative wo
 _中文_: 运行续行检查点
 _Avoid_: Durable Session Watermark, Session flush, Manuscript Checkpoint
 
+**Resume-ready Run State**:
+The settled interrupted-Run state in which unchanged semantics and pins plus a verified Run Continuation Checkpoint permit—but never dispatch—Resume after lightweight revalidation and explicit user action.
+_中文_: 任务运行可续行状态
+_Avoid_: Cooperative Run Pause, Connectivity Wait State, Run Capacity Wait, Retry availability, process restoration, Run invalidated by an effective source restriction
+
 **Resume**:
-Continuation of the same Run under unchanged semantics from authoritative AI7 state, possibly through a new Harness Session or Harness Execution Span.
+User-requested continuation of the same Run under unchanged semantics from authoritative AI7 state after lightweight revalidation, possibly through a new Harness Session or Harness Execution Span; safe restart reconciliation alone never dispatches it.
 _中文_: 续行
-_Avoid_: Retry, Redo, process restoration
+_Avoid_: Retry, Redo, automatic process restoration, continuation after a material source restriction
 
 **Retry**:
 A new explicitly linked execution attempt within the same unchanged Run when evidence proves repetition is safe.
@@ -363,7 +398,7 @@ _中文_: 重试
 _Avoid_: Resume, Redo, automatic ambiguous-Effect repetition
 
 **Redo**:
-A new Run with renewed authorization when semantics change or the user requests a fresh result.
+A new Run with renewed authorization when semantics change, the user requests a fresh result, or a terminal Run requires a changed Run Budget Ceiling.
 _中文_: 重做
 _Avoid_: Retry, Resume, in-place Run mutation
 

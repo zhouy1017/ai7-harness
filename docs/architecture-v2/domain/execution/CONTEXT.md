@@ -31,7 +31,7 @@ The Model Role for difficult or unusually consequential work that exceeds the Ma
 _Avoid_: retry model, automatic fallback, authority upgrade.
 
 **Frontier Model Role** (`前沿模型角色`):
-The Model Role for challenge or explicitly authorized high-consequence work. Default binding: DeepSeek V4 Pro Max; the user may explicitly configure another eligible provider/model, which enters the same one-loop topology, Provider Resolution Plan, credential brokering, budget, and egress gate.
+The Model Role for challenge or explicitly authorized high-consequence work. Default binding: DeepSeek V4 Pro Max; the user may explicitly configure another eligible provider/model, which enters the same one-loop topology, Provider Resolution Plan, credential brokering, exact Run Budget Ceiling state, and egress gate.
 _Avoid_: second harness, silent fallback, escape hatch, truth oracle.
 
 All four are Model Roles: Task Skills declare a role with hard requirements and soft preferences, never a provider, model, endpoint, or credential. A default binding is a configuration fact, never factual authority — output at any role remains a proposal or research lead.
@@ -58,8 +58,9 @@ _Avoid_: verified capability, defect, acceptance test, owner blocker.
 - Execution Bindings and Harness Execution Spans correlate ledgers without copying transcripts or transferring authority. A binding also pins the composed DSH configuration digest and admitted plugin pins.
 - Run Authorization, execution-layer approval, Effect Approval, editorial decisions, Public Release Permission, and Effect Receipts remain distinct.
 - Resume continues the same unchanged Run, Retry creates a new safe attempt, Redo creates a new authorized Run, and Replay performs no execution.
-- Provider Preflight and the Provider Resolution Plan bind Model Roles, providers, fallback, outbound data, credentials, and budget before execution. Provider fallback exists; harness fallback does not.
+- Immutable Execution Bindings record historical authorization; a newly effective Series Retrieval Exclusion is a current read restriction that must refuse affected calls and force Plan Revision plus renewed authorization or cancellation rather than same-binding Resume.
+- Provider Preflight and the Provider Resolution Plan bind Model Roles, providers, fallback, outbound data, credentials, and the exact Run Budget Ceiling state before execution. That state defaults to `unset`; Provider fallback exists, harness fallback does not, and Provider Account Limits remain external blockers.
 - The Task Skill Activation and Capability Grants are enforced at both the DSH-facing tool guard and the AI7 Capability Facade.
-- AI7 schedules and DSH converses: AI7 owns which Runs exist, concurrency, budget, continuation, and model-free background work, and does not use the Harness `schedule`, `jobs`, or workflow packages.
+- AI7 schedules and DSH converses: AI7 owns which Runs exist, concurrency, usage observation, optional explicit Run Budget Ceiling enforcement, continuation, and model-free background work, and does not use the Harness `schedule`, `jobs`, or workflow packages.
 
 The former candidate terms Harness Capability Closure, Codex Capability Gap, Mature Runtime Alternative, and DeepSeek Runtime Re-entry Gate were retired when Clarification 0004 removed the proof ladder. The candidate terms Development Reference Framework, Codex Secondary Development, and Codex Desktop-like Interaction Reference are retired by Clarification 0005: DeepSeek Harness is the production Primary Agent Harness, and Codex's residual role is the Codex Interaction Model Reference.

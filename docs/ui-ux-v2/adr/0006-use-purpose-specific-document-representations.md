@@ -20,3 +20,7 @@ Every user-facing export binds one exact milestone/package/version and format. E
 ## Consequences
 
 The document pipeline must keep exact revision pins, derivation identity, freshness, and Proposal remapping for Markdown projections. Long manuscripts require bounded or streamed projections rather than whole-manuscript prompt material. Export preparation must present format-specific fidelity by content class, never fall back silently, and publish local files atomically with receipts. The detailed Markdown serialization, extension syntax, and file layout remain architecture decisions rather than UI/UX commitments.
+
+## Later refinements
+
+Root [ADR 0038](../../adr/0038-separate-delivery-package-identity-from-local-export.md) clarifies that representation/format, filename, path and fidelity belong to a separate Local Export Preparation rather than Delivery Package identity; one destination-/format-independent package may be exported repeatedly. Root [ADR 0039](../../adr/0039-delegate-local-export-collisions-to-native-os-workflows.md) delegates existing-target choices to the current platform's native alternative-name/cancel/replace workflow while retaining exact target-bound Effect Approval, per-file receipts and reconciliation. These refinements preserve this ADR's representation hierarchy and local-only authority boundary.

@@ -57,7 +57,7 @@ For reproducibility, a future record should include the Harness source/package p
 
 | Loop | Input | Changes | Required evidence |
 | --- | --- | --- | --- |
-| Editorial Learning | Editor-supervised materials, decisions, corrections, and feedback | AI7 Professional Editorial Knowledge, candidates, Series Knowledge, or House Editorial Memory | Learning Lineage, eligibility, approval, memory revision, and task-use audit |
+| Editorial Learning | Editor-supervised materials, decisions, corrections, and feedback | AI7 Professional Editorial Knowledge, candidates including Series Knowledge Candidates, or House Editorial Memory | Learning Lineage, eligibility, explicit Series promotion where applicable, memory/knowledge revision, and task-use audit |
 | Agent Behavior Improvement | Task traces, failures, evaluations, workload/quality measures, and framework findings | Harness Behavior Composition | Composition version, evaluation result, review/activation decision, rollout, and rollback record |
 
 Both loops seek Editor-comparable Delivery Quality and lower workload, but neither updates Foundation Model weights.

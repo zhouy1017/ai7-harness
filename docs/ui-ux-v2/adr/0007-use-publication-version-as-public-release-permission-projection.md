@@ -18,3 +18,7 @@ Ordinary local export neither displays nor requires this interaction and cannot 
 ## Consequences
 
 The UI must prevent `发稿版本` from looking like `已发布`: exact version, scope, actor/time, basis, and `AI7 不会自动发布或发送` remain available in compact detail. Later material edits show a Publication Version Change Notice and never inherit the designation. Version history preserves earlier publication designations and their internal permission identities. If a later release adds actual publishing or external transmission, it still requires a separate exact Effect Approval and Effect Receipt; the Publication Version record is permission evidence, never execution evidence.
+
+## Later refinement
+
+Root [ADR 0040](../../adr/0040-preserve-post-designation-maintenance-as-versioned-cases.md) assigns Correction, Errata, Supersession, Withdrawal, Reissue and Archive to stable Maintenance Cases with immutable revisions. Correction proceeds through Proposal/Apply/new content revision, Supersession/Reissue references a separately designated newer Publication Version, and Withdrawal/Archive remains internal AI7 status only. The original Publication Version and Public Release Permission remain exact historical records and no maintenance status proves external recall, takedown, delivery or publication.

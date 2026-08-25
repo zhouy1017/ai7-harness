@@ -1,6 +1,6 @@
 # Source–Generation–Grounding Boundary
 
-> **Extended at Question 35.** The Search → Exact Fetch → Synthesis pipeline described here now covers retrieval over **manuscripts**, not only imported sources. Retrieval returns candidates and never truth, and because manuscripts mutate while Source Versions do not, manuscript retrieval invalidates per Manuscript Block with revision stamps so a stale hit is detectable. See [ADR 0026](../docs/adr/0026-manuscript-retrieval-returns-candidates.md).
+> **Extended at Question 35.** The Search → Exact Fetch → Synthesis pipeline described here now covers retrieval over **manuscripts**, not only retained Source Versions. Retrieval returns candidates and never truth, and because manuscripts mutate while Source Versions do not, manuscript retrieval invalidates per Manuscript Block with revision stamps so a stale hit is detectable. See [ADR 0026](../docs/adr/0026-manuscript-retrieval-returns-candidates.md).
 
 Status: **accepted**
 
@@ -56,9 +56,9 @@ Authorized source scope
 
 Rules:
 
-1. Imported Source Revisions remain the immutable Textual Source of Record. Generated outputs can become later editorial material only through an explicit accepted transition; they never silently become textual authority.
+1. Explicitly acquired Source Versions remain immutable Textual Sources of Record. A supported local file, exact editor-pasted or entered material, or retention-permitted fully retrieved external research snapshot becomes a Book-owned Source Version only through file-specific `作为来源材料导入` or pasted/entered-and-research `保存为来源材料` into a selected Book. Mere retrieval, use, attachment, Task evidence, or generated output never silently creates source authority; separately governed Task/evidence records remain distinct unless exact eligible material is explicitly acquired through one of those paths.
 2. Source Search discovers candidates. Ranking may use literal, lexical, vector, or hybrid strategies later, but its result is not authoritative text. Return stable IDs, revision/digests, and clearly non-authoritative selection hints; Exact Fetch owns displayable source text.
-3. Exact Fetch resolves an authorized stable reference against one exact source revision and returns authoritative text plus identity, offsets when available, and digest.
+3. Exact Fetch resolves an authorized stable reference against one already retained Source Version or Manuscript Revision and returns authoritative text plus identity, offsets when available, and digest. It is not the name for initially retrieving external research.
 4. Synthesis is provider-neutral. RAG, long context, model family, and prompt strategy are interchangeable implementations rather than top-level domain architecture.
 5. Reference Integrity checks identity, revision, asset, digest, offsets, and text. It must not be reported as semantic Claim Grounding.
 6. A link back to the manuscript proves what the manuscript says, not that the assertion is true. Factual Verification must use separately classified factual authority; Semantic Review may use the wider passage, whole-work context, Series Knowledge, professional knowledge, and other accepted evidence.
@@ -115,7 +115,7 @@ For staged delivery, the current recommendation is that local manuscript/Series 
 | Legacy concept | Recommendation | Reason |
 | --- | --- | --- |
 | Textual source-of-record boundary | Keep and rename | Protects exact wording without implying that manuscript claims are true. |
-| Read-only imported sources and revision-bound Source Index Chunks | Keep | Durable exact text and provenance; chunks are retrieval units, not manuscript structural identity. |
+| Read-only explicitly acquired Source Versions and revision-bound Source Index Chunks | Keep | Durable exact text and provenance; chunks are retrieval units, not manuscript structural identity. |
 | Explicit active-Book/Series/Cross-project source scope | Keep with already accepted scope decisions | Access authority precedes retrieval. |
 | Separate exact retrieval, synthesis, and grounding | Keep and deepen | Add Search, Exact Fetch, Reference Integrity, Assertion Classification, Factual Verification, Semantic Review, and Quotation Verification. |
 | Whole-answer source arrays called grounded citations | Modify | Preserve as a source bundle, but require Evidence Links for claim/quote grounding. |

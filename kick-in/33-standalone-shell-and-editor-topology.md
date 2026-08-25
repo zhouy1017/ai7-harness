@@ -83,7 +83,7 @@ The service is separate rather than living in Electron main for four reasons:
 1. **UI responsiveness under parallel Runs.** Question 31 requires multiple concurrent Runs; a busy agent loop must never block paint.
 2. **Crash isolation.** A provider or Harness failure must not take down an editor holding unsaved text, which serves Question 23's no-silent-loss obligation directly.
 3. **Headless testability.** The same service is drivable without a GUI, which is exactly what Question 24's ten-minute `pr` gate and Question 35's tracer slice need. A service inside Electron main would force every test through an Electron harness.
-4. The Question 31 concurrency and budget governor gets a natural home.
+4. The Question 31 concurrency governor, usage observation, and optional explicit Run Budget Ceiling enforcement get a natural home; Issue #8 Batch 3 later fixed the default ceiling at `unset` and kept Provider Account Limits external.
 
 **IPC uses stdio or a private platform-local adapter, such as a Windows named pipe when needed. No TCP listener.** The macOS carrier remains an adapter decision and creates no new authority or process. The register carries "Harness web server is exposed beyond loopback" as Critical; never opening a socket removes that structurally rather than configuring it away, following the same reasoning as Question 30's dependency-graph argument.
 

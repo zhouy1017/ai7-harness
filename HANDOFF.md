@@ -8,9 +8,9 @@ Read this first if you are picking up AI7 without prior context. It is a **route
 
 ## Where the project is
 
-**Design complete. No implementation has started.**
+**The accepted design baseline and Issue #8's five-batch candidate missing-design audit are complete. No implementation has started.**
 
-A 36-question design interview ran to completion and the aggregate now contains 28 root ADRs, three domain contexts, two policy documents, and 36 design notes. The repository contains **documentation only** — no source, no `package.json`, no dependencies, no CI workflows.
+A 36-question design interview ran to completion and the current Issue #8 branch now contains 40 root ADRs, three domain contexts, two policy documents, and 36 original design notes plus later candidate deltas. Issue #8 Batches 1–5 are resolved in the branch candidate, including exact import/source/Series/task-continuation and delivery/export/maintenance boundaries. The repository contains **documentation only** — no source, no `package.json`, no dependencies, no CI workflows.
 
 The frozen V1 UI/UX reference package and the completed V2 UI/UX candidate package are both present, but neither is canonical `main` authority. GitHub Issue #6 is integrated into `design-doc` as the accepted implementation boundary under ADR 0027, and Issue #7's bounded advisory-review repairs are integrated as well. Neither integration changes `main` or grants product implementation authority.
 
@@ -29,7 +29,7 @@ Nothing here is a stub waiting to be filled in. If you are looking for code, the
 | 2b | `handoff20260817/SESSION-HANDOFF.md` | Recent history: what the last session decided, which recommendations the owner overrode, and which agent errors were corrected |
 | 3 | `PROGRESS.md` | What has been done, what is next, and the Resume Prompt |
 | 4 | `kick-in/05-decision-map.md` | All 36 questions with their accepted answers |
-| 5 | `docs/adr/` | The 26 hard-to-reverse decisions, one per file |
+| 5 | `docs/adr/` | The 40 hard-to-reverse root decisions, one per file |
 | 6 | `CONTEXT-MAP.md` → `docs/domain/*/CONTEXT.md` | Canonical term definitions. `GLOSSARY.md` is a bilingual index and collision guide, not a definition owner |
 
 `kick-in/` numbering does not match question numbers. Use the decision map to find the document for a question.
@@ -53,6 +53,8 @@ These are the mistakes most likely to be made by an agent arriving cold. Each ha
 **Do not make the build depend on the machine that authored it.** Every supported Windows or macOS development host starts from a fresh checkout and the documented root command surface. A predecessor repository, sibling worktree, personal absolute path, ambient payload, pre-generated output, untracked source, private data, AI7 product/provider/signing credential, or CI-image accident is never a build input. Narrow repository/dependency-source infrastructure authentication and approved registry or immutable-artifact acquisition may happen before the product E2E no-network interval. Every secondary download is declared and integrity-bound; every local dependency store is reconstructable from empty; and an Agent Data Root-owned store is materialized from the verified snapshot rather than another root or a global store. Provider-free/E2E mode may replace only the provider binding, data root, outbound-network policy, and non-substituting test hooks — it never skips a required helper, IPC carrier, adapter, or product process. This is source-complete, declared-source-assisted bootstrap, not a vendored or fully offline build.
 
 **Do not confuse the two ledgers.** The AI7 Task Ledger holds business truth; the Harness Session Ledger alone holds model messages, turns, and tool calls. They join through Execution Bindings, never by copying transcripts.
+
+**Do not turn a Delivery Package into an exported archive or delivery claim.** It is a destination- and format-independent manifest over one exact Editorial Deliverable Revision. Local files have separate preparations, approvals, and per-file receipts; native rename/cancel/replace UI does not transfer Effect authority to the OS, and V1 never sends, publishes, confirms delivery, recalls, or takes down external material.
 
 **Do not read a term across contexts.** Several words mean different things in different places — `Editorial Profile` (dimension defaults) versus `Editorial Capability Profile` (security), `Review Decision` (editorial judgment) versus a Dispatch reviewer report, `Model Role` (product, declares no provider) versus the Dispatch Layer B binding policy. Check the collision table in `GLOSSARY.md` before using a term.
 
@@ -79,6 +81,8 @@ GitHub Issues is the canonical tracker. Five labels, no aliases: `needs-triage`,
 ## What happens next
 
 The Phase-0 exit review **has run** and historically returned `NOT PASSED` because the then-current platform revision was incomplete. `design-doc` later resolved the platform-scope conflict through accepted ADR 0028, but that aggregate resolution is not `main` integration and does not itself authorize issue decomposition or implementation.
+
+Issue #8's completed five-batch candidate now awaits Commander review and any explicitly authorized integration. Its completion is not `main` acceptance or implementation authority.
 
 **Decomposition has not been authorized.** Do not begin it without the owner saying so.
 

@@ -1,10 +1,10 @@
 # Deliverable Workflow and Editorial Artifact Boundary
 
-Status: **accepted in Question 19**
+Status: **accepted in Question 19; refined by Issue #8 Batch 5**
 
 ## Recommendation
 
-Preserve original AI7's durable lifecycle records, evidence-linked gates, typed editorial artifacts, human signoff, and narrow authoritative commands, but do not inherit one fixed Book-wide eleven-stage state machine. Keep the accepted **Book** as the source, privacy, and mutation authority; give each Book-owned **Editorial Deliverable** its own versioned **Workflow Profile** and revision-addressed **Workflow Instance**.
+Preserve original AI7's durable lifecycle records, evidence-linked gates, typed editorial artifacts, human signoff, and narrow authoritative commands, but do not inherit one fixed Book-wide eleven-stage state machine. Keep the accepted **Book** as the source, privacy, and mutation authority; give each Book-owned **Editorial Deliverable** its own versioned **Workflow Profile** and revision-addressed **Workflow Instance**. Treat each **Editorial Deliverable Revision** as immutable, keep a **Delivery Package** independent of any concrete export, and preserve post-designation change through versioned **Maintenance Cases** rather than rewriting prior versions.
 
 This matches the revised product scope: a manuscript, promotion article, news report, and review article may belong to the same Book while occupying different phases at the same time. In V1, these related deliverables remain Book-owned; an unrelated general-purpose article/news project is outside the current boundary and may be revisited later.
 
@@ -35,8 +35,14 @@ The historical PRD is useful workflow research, not current architecture authori
 | **Workflow Phase** | 工作阶段 | One named area of work whose status, evidence, responsible actor, and next action are recorded without requiring a universal linear transition. |
 | **Workflow Gate** | 工作关口 | A profile-defined point requiring identified evidence and a named Review Decision or signoff before a specified transition or delivery. |
 | **Editorial Artifact** | 编辑工作资料 | A versioned, typed, provenance-bearing supporting record around a deliverable, distinct from manuscript/source text and from a public-facing Editorial Deliverable. |
-| **Signoff Record** | 签发记录 | The exact human decision that identified workflow evidence and deliverable revision are ready for a stated next use. |
-| **Delivery Package** | 交付包 | The exact deliverable revision plus required artifacts, signoffs, destination, and release/export authority prepared for one handoff or publication action. |
+| **Editorial Deliverable Revision** | 编辑交付成果修订版 | One immutable revision of an Editorial Deliverable. Manuscript Revision is the manuscript realization of this shared boundary. |
+| **Signoff Record** | 签发记录 | The exact human decision that identified workflow evidence and one exact Editorial Deliverable Revision are ready for a stated next use. |
+| **Milestone Version** | 里程碑版本 | A durable human designation of one exact Editorial Deliverable Revision for a named internal milestone; it creates no package, export, delivery, publication, or release authority. |
+| **Delivery Package** | 交付包 | A versioned, destination- and format-independent content manifest bound to one exact Editorial Deliverable Revision, optionally identified by an exact Milestone Version, plus purpose, included artifacts, gate/signoff references, exclusions, and limitations. |
+| **Publication Version** | 发稿版本 | An exact designation over one Milestone Version for a stated publication scope; designation is not proof of export, sending, delivery, or publication. |
+| **Maintenance Case** | 维护事项 | A stable post-designation matter permanently bound to one exact Publication Version and Editorial Deliverable Revision and to one immutable Maintenance Classification. |
+| **Maintenance Classification** | 维护分类 | One stable typed consequence: `correction`, `errata`, `supersession`, `withdrawal`, `reissue`, or `archive`. |
+| **Maintenance Case Revision** | 维护事项修订版 | One immutable revision of a Maintenance Case's findings, evidence, proposals, status, disposition, and links, without changing its target or classification. |
 | **Editorial Review** | 编辑审读 | Professional assessment of a deliverable or manuscript; it is not itself a publishable review article. |
 | **Review Article** | 评论文章 | An Editorial Deliverable discussing a work for readers or publication, with its own evidence, quotation, disclosure, and signoff requirements. |
 
@@ -53,8 +59,8 @@ Every V1 deliverable profile composes from these shared phase identities, omitti
 | `drafting` | 撰写与编辑 | Create or revise deliverable content through human work and governed proposals. |
 | `review-verification` | 审读与核验 | Perform editorial review, factual/semantic checks, quotation/citation verification, and required gates. |
 | `finalization` | 定稿与签发 | Resolve findings, freeze the intended revision, and record human signoff. |
-| `delivery` | 交付与发布 | Prepare the exact Delivery Package for export, handoff, or separately permitted public release. |
-| `maintenance` | 更正与归档 | Record corrections, errata, supersession, withdrawal, reissue, and archival status. |
+| `delivery` | 交付与发布 | Freeze the destination-independent Delivery Package and prepare separately governed local exports; the phase creates no sending, handoff, delivery, or public-release proof. |
+| `maintenance` | 更正与归档 | Create and advance versioned Maintenance Cases without rewriting the exact Publication Version or deliverable revision concerned. |
 
 Phases have durable statuses such as not started, active, waiting, completed, skipped with reason, and reopened. A profile may allow overlap—for example source development continuing while drafting starts—and identifies one primary phase only for orientation. Completion never implies factual truth, legal/regulatory approval, public-release authority, or eligibility for Editorial Learning.
 
@@ -82,15 +88,33 @@ The extensible registry starts with stable types for:
 - style or voice guidance;
 - approved-claims sheet;
 - signoff record;
-- Delivery Package;
 - correction or errata log.
 
 Each Editorial Artifact version records its stable type, owner Book and deliverable, author/actor, status, source/evidence links, exact revision pins, provenance, confidentiality/public-release state, linked Proposal/Review Decisions, linked Effects/receipts, and supersession history. Artifact eligibility for learning remains a separate Learning Eligibility Decision.
 
+## Package, local export, and maintenance boundary
+
+A Delivery Package version freezes editorial content identity only. It binds one exact immutable Editorial Deliverable Revision; an optional Milestone Version can identify that same revision but cannot substitute a different target. Format, filename, destination path, fidelity disposition, Effect Approval, and outcome never belong to package identity.
+
+Each concrete file export instead creates one frozen **Local Export Preparation / 本地导出准备** after the platform-native save/copy conflict interaction resolves the exact final name and path plus create or replace disposition. AI7 then records the exact target-bound Effect Intent and Effect Approval before file commit. Windows and macOS may present their normal rename, cancel, or replace wording and layout, but the AI7 service owns preparation, authority, commit, verification, history, and one per-file Effect Receipt. Cancellation attempts no file Effect and creates no success receipt; a changed path or disposition invalidates preparation and approval; uncertainty stops automatic retry. A receipt proves only the actual local file outcome, never sending, handoff, delivery, or publication. No Harness Run receives roaming filesystem access.
+
+Post-designation maintenance uses this stable bilingual classification:
+
+| Stable value | Preferred Simplified Chinese | Exact consequence |
+| --- | --- | --- |
+| `correction` | 更正 | A Correction Proposal may create a new Editorial Deliverable Revision; neither target nor Publication Version changes automatically. |
+| `errata` | 勘误 | A versioned Editorial Artifact states identified errors and corrections without mutating the target. |
+| `supersession` | 替代 | A separately and manually designated newer Publication Version replaces the target for future AI7 use only. |
+| `withdrawal` | 撤回 | The target becomes ineligible for future AI7 publication use while remaining readable and historically intact; archival and separately governed local recovery export remain available, and AI7 claims no external withdrawal, takedown, recall, or notice. |
+| `reissue` | 再版 | A new issue or edition always receives a distinct manually designated Publication Version for its scope. It may use the same exact Editorial Deliverable Revision or a separately created newer one; only content change uses the applicable proposal/mutation path to create that newer revision. |
+| `archive` | 归档 | The target closes and leaves ordinary active-maintenance visibility and queues while its existing publication-use eligibility, authority state, readability, and exact history remain unchanged; nothing is deleted or externally archived by implication. |
+
+The Maintenance Case target and classification are immutable. Maintenance Case Revisions append evidence and disposition history. Withdrawal changes future AI7 publication-use eligibility without blocking readability, archival, or separately governed local recovery export; Archive changes active-maintenance visibility and queues without changing existing eligibility or authority history. Prior revisions, Publication Versions, packages, exports, and receipts remain immutable; no Maintenance Case itself grants export, delivery, publication, recall, or takedown authority.
+
 ## Capability and authority split
 
 1. AI-assisted Task Skills analyze, draft, and produce proposal artifacts. They have no broad lifecycle or Book write authority.
-2. Narrow deterministic commands update Workflow Instances, artifacts, gates, signoffs, packages, and correction state through the accepted Effect Intent/Approval/Receipt boundary.
+2. Narrow deterministic commands update Workflow Instances, artifacts, gates, signoffs, packages, local export records, and Maintenance Case state through the accepted Effect Intent/Approval/Receipt boundary.
 3. A generated proposal can become an authoritative Editorial Artifact version only through an explicit accepted transition; skill output and Run history are not the artifact itself.
 4. Memory review moves out of a fixed `backlist` lifecycle skill family and into the already accepted continuous Editorial Learning and Learning Eligibility governance.
 5. Public release remains a separate Effect requiring Public Release Permission; workflow completion and Signoff Record do not imply it.
@@ -101,7 +125,7 @@ Each Editorial Artifact version records its stable type, owner Book and delivera
 | --- | --- | --- |
 | Book-owned local records and source scope | Keep | Book remains evidence, privacy, and mutation authority for its related deliverables. |
 | One scalar eleven-stage Book lifecycle | Modify | Optional manuscript-publication profile; deliverable-owned Workflow Instances are the core. |
-| Lifecycle metadata, gates, proof/correction history, human signoff | Keep semantics | Profile-defined, revision-addressed, evidence-bearing records. |
+| Lifecycle metadata, gates, proof/correction history, human signoff | Keep semantics | Profile-defined, exact-Editorial-Deliverable-Revision-addressed, evidence-bearing records. |
 | Editorial Artifact family | Keep and deepen | Stable extensible type registry, versioning, provenance, exact evidence, decisions, and Effects. |
 | Acquisition dossier | Adapt | Optional acquisition/commissioning profile, not a universal V1 phase. |
 | Developmental review | Keep/adapt | Long-form Manuscript capability with real model/evaluation work still required. |
@@ -115,8 +139,8 @@ Each Editorial Artifact version records its stable type, owner Book and delivera
 
 ## Verification direction
 
-Provider-free tests should prove profile version pinning, independent workflows for two deliverables in one Book, phase overlap/reopen/skip history, gate and evidence drift invalidation, artifact version/provenance, distinction between proposal and authoritative artifact, exact signoff/delivery package binding, no public release without permission, and no cross-deliverable stage leakage.
+Applicable complete provider-free E2E journeys preserve profile version pinning, independent workflows for two deliverables in one Book, phase overlap/reopen/skip history, gate and evidence drift invalidation, artifact version/provenance, distinction between proposal and authoritative artifact, exact signoff/package/revision binding, native local-export resolution with approval before commit and per-file receipts, immutable Maintenance Case history, no public release without permission, and no cross-deliverable stage leakage. This is part of the one logical E2E Functional Gate, not a separate workflow or package gate.
 
 ## Decision resolution
 
-Question 19 accepted the Book-owned, deliverable-specific Workflow Profile/Instance model, the seven shared phases, the four V1 profiles, the typed artifact family, and the keep/adapt/drop boundary above. See [ADR 0008](../docs/adr/0008-use-deliverable-owned-workflow-profiles.md).
+Question 19 accepted the Book-owned, deliverable-specific Workflow Profile/Instance model, the seven shared phases, the four V1 profiles, the typed artifact family, and the keep/adapt/drop boundary above. Issue #8 Batch 5 later fixed immutable Editorial Deliverable Revision identity, separated Delivery Package identity from each format/path-bound local export, delegated existing-file choices to native OS workflows without moving AI7 authority, and made post-designation maintenance a versioned classified case history. See [ADR 0008](../docs/adr/0008-use-deliverable-owned-workflow-profiles.md), [ADR 0038](../docs/adr/0038-separate-delivery-package-identity-from-local-export.md), [ADR 0039](../docs/adr/0039-delegate-local-export-collisions-to-native-os-workflows.md), and [ADR 0040](../docs/adr/0040-preserve-post-designation-maintenance-as-versioned-cases.md).

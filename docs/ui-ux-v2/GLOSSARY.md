@@ -1,25 +1,26 @@
 # AI7 V2 UI/UX glossary
 
-Status: **candidate-local bilingual index complete for this session**
+Status: **candidate-local bilingual index under Issue #8 missing-design completion**
 
 | English term | Preferred Simplified Chinese | Definition owner |
 | --- | --- | --- |
 | AI7 Desktop Interaction Language | AI7 桌面交互语言 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Interaction Reference Evidence | 交互参考证据 | [AI7 V2 UI/UX](./CONTEXT.md) |
-| Book-anchored Workbench | Book 锚定工作台 | [AI7 V2 UI/UX](./CONTEXT.md) |
+| Book-anchored Workbench | 图书锚定工作台 | [AI7 V2 UI/UX](./CONTEXT.md) |
+| Book Library | 书库 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Active Work Object | 当前工作对象 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Task Context Layer | 任务上下文层 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Global Attention View | 全局待处理视图 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Continuity-first Return | 连续工作续接 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Recovery Attention State | 恢复待确认状态 | [AI7 V2 UI/UX](./CONTEXT.md) |
-| Book Recovery Workspace | Book 恢复工作区 | [AI7 V2 UI/UX](./CONTEXT.md) |
+| Book Recovery Workspace | 图书恢复工作区 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Recovered Working State | 恢复的工作状态 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Recovery State Comparison | 恢复状态对比 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Restore as New Version | 恢复为新版本 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Recovered-state Review Status | 恢复状态待复核 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Two-level Contextual Sidebar | 两级上下文侧栏 | [AI7 V2 UI/UX](./CONTEXT.md) |
-| Book Convenience View | Book 便捷视图 | [AI7 V2 UI/UX](./CONTEXT.md) |
-| Book Work Overview | Book 工作概览 | [AI7 V2 UI/UX](./CONTEXT.md) |
+| Book Convenience View | 图书便捷视图 | [AI7 V2 UI/UX](./CONTEXT.md) |
+| Book Work Overview | 图书工作概览 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Manuscript Visual Anchor | 稿件视觉主锚 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Contextual Work Lens | 上下文工作入口 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Actionable Attention Count | 待处理计数 | [AI7 V2 UI/UX](./CONTEXT.md) |
@@ -53,11 +54,26 @@ Status: **candidate-local bilingual index complete for this session**
 | Protective Read-only State | 保护性只读状态 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Journal Save Action | 保存当前编辑 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Milestone Version Suggestion | 里程碑版本建议 | [AI7 V2 UI/UX](./CONTEXT.md) |
+| Manuscript Import Target | 稿件导入目标 | [AI7 V2 UI/UX](./CONTEXT.md) |
+| Existing-Book Import Relationship | 既有图书导入关系 | [AI7 Editorial](../domain/editorial/CONTEXT.md) |
+| Book Creation Draft | 图书创建草稿 | [AI7 V2 UI/UX](./CONTEXT.md) |
+| Review Before Book Creation | 新建图书前确认 | [AI7 V2 UI/UX](./CONTEXT.md) |
+| Book Title Suggestion | 建议书名 | [AI7 V2 UI/UX](./CONTEXT.md) |
+| Exact Import Match | 精确导入匹配 | [AI7 V2 UI/UX](./CONTEXT.md) |
+| Filename Collision | 文件名冲突 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Import Fidelity Review | 导入保真审阅 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Import Degradation Decision | 导入降级决定 | [AI7 V2 UI/UX](./CONTEXT.md) |
+| Staged Import Snapshot | 导入暂存快照 | [AI7 Editorial](../domain/editorial/CONTEXT.md) |
+| Import Draft Recovery | 导入草稿恢复 | [AI7 V2 UI/UX](./CONTEXT.md) |
+| Import Commit Outcome Uncertain | 导入提交结果待确认 | [AI7 Editorial](../domain/editorial/CONTEXT.md) |
+| Source Relationship Unconfirmed | 来源关系未确认 | [AI7 Editorial](../domain/editorial/CONTEXT.md) |
 | Reimport Comparison | 重新导入对照 | [AI7 V2 UI/UX](./CONTEXT.md) |
+| Review Before Import | 导入前确认 | [AI7 V2 UI/UX](./CONTEXT.md) |
+| Review Before Source Retention | 保存来源材料前确认 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Context-bound Task Composer | 上下文绑定任务输入框 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Task Intent Draft | 任务意图草稿 | [AI7 V2 UI/UX](./CONTEXT.md) |
+| Task Input (Manuscript Checkpoint purpose) | 任务输入 | [AI7 Editorial](../domain/editorial/CONTEXT.md) |
+| Task Input Revision Preparation | 为任务保存修订版 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Prepare Task Action | 准备任务 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Task Skill Recommendation | 任务技能建议 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Reusable Procedure Capture | 保存为可复用工序 | [AI7 V2 UI/UX](./CONTEXT.md) |
@@ -89,19 +105,24 @@ Status: **candidate-local bilingual index complete for this session**
 | Run Authorization Readiness | 任务运行授权就绪状态 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Offline Task Preparation | 离线任务准备 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Start When Online Action | 授权并在联网后开始 | [AI7 V2 UI/UX](./CONTEXT.md) |
-| Connectivity Wait State | 等待网络 | [AI7 V2 UI/UX](./CONTEXT.md) |
-| Reconnect Preflight | 联网恢复预检 | [AI7 V2 UI/UX](./CONTEXT.md) |
+| Connectivity Wait State | 联网等待状态 | [AI7 Execution](../domain/execution/CONTEXT.md) |
+| Reconnect Preflight | 联网恢复预检 | [AI7 Execution](../domain/execution/CONTEXT.md) |
 | Model Selection Strip | 模型选择条 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Model Capability Requirement | 模型能力要求 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Provider and Budget Disclosure | 模型服务与预算披露 | [AI7 V2 UI/UX](./CONTEXT.md) |
+| Run Budget Ceiling | 任务运行预算上限 | [AI7 Execution](../domain/execution/CONTEXT.md) |
+| Run Budget Ceiling Reached | 任务运行预算已达上限 | [AI7 Execution](../domain/execution/CONTEXT.md) |
+| Provider Account Limit | 模型服务账户限额 | [AI7 Execution](../domain/execution/CONTEXT.md) |
 | Run Activity Header | 任务运行状态栏 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Editorial Milestone Timeline | 编辑里程碑时间线 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Usable Candidate Stream | 可用候选结果流 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Measured Run Progress | 可测任务进度 | [AI7 V2 UI/UX](./CONTEXT.md) |
-| Book-grouped Run Overview | 按 Book 分组的任务概览 | [AI7 V2 UI/UX](./CONTEXT.md) |
-| Current Book Run Switcher | 当前 Book 任务切换器 | [AI7 V2 UI/UX](./CONTEXT.md) |
+| Book-grouped Run Overview | 按图书分组的任务概览 | [AI7 V2 UI/UX](./CONTEXT.md) |
+| Current Book Run Switcher | 当前图书任务切换器 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Foreground Run Projection | 前台任务投影 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Run Capacity Wait | 等待运行名额 | [AI7 V2 UI/UX](./CONTEXT.md) |
+| Resume-ready Run State | 任务运行可续行状态 | [AI7 Execution](../domain/execution/CONTEXT.md) |
+| Resume | 续行 | [AI7 Execution](../domain/execution/CONTEXT.md) |
 | Cooperative Run Pause | 协作式任务暂停 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Cancellation Impact Summary | 取消影响摘要 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Terminal Run Cancellation | 终止任务 | [AI7 V2 UI/UX](./CONTEXT.md) |
@@ -115,7 +136,7 @@ Status: **candidate-local bilingual index complete for this session**
 | Run Notification Tier | 任务通知层级 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Quiet Completion Notice | 安静结果提示 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Privacy-safe System Notification | 隐私保护型系统通知 | [AI7 V2 UI/UX](./CONTEXT.md) |
-| Book-coalesced Notification | Book 合并通知 | [AI7 V2 UI/UX](./CONTEXT.md) |
+| Book-coalesced Notification | 按图书合并通知 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Contextual Proposal Review | 上下文提案审阅 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Proposal Margin Anchor | 提案边栏锚点 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Manuscript-anchored Proposal Card | 稿件锚定提案卡 | [AI7 V2 UI/UX](./CONTEXT.md) |
@@ -175,10 +196,21 @@ Status: **candidate-local bilingual index complete for this session**
 | V1 Semantic Retention | V1 语义保留 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | V1 Interaction Reshaping | V1 交互重塑 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | V1 Artifact Drop | V1 设计资产舍弃 | [AI7 V2 UI/UX](./CONTEXT.md) |
-| Manuscript Import Record | 稿件导入记录 | [AI7 V2 UI/UX](./CONTEXT.md) |
+| Manuscript Import Record | 稿件导入记录 | [AI7 Editorial](../domain/editorial/CONTEXT.md) |
+| Manuscript Reimport Record | 稿件重新导入记录 | [AI7 Editorial](../domain/editorial/CONTEXT.md) |
+| Source Acquisition Record | 来源获取记录 | [AI7 Editorial](../domain/editorial/CONTEXT.md) |
+| Exact Fetch | 精确获取 | [AI7 Editorial](../domain/editorial/CONTEXT.md) |
+| Source Import Record | 来源导入记录 | [AI7 Editorial](../domain/editorial/CONTEXT.md) |
+| Series Knowledge Candidate | 书系知识候选项 | [AI7 Editorial](../domain/editorial/CONTEXT.md) |
+| Series Knowledge Item | 书系知识项 | [AI7 Editorial](../domain/editorial/CONTEXT.md) |
+| Series Knowledge Revision | 书系知识修订版 | [AI7 Editorial](../domain/editorial/CONTEXT.md) |
+| Series Knowledge Promotion Decision | 书系知识纳入决定 | [AI7 Editorial](../domain/editorial/CONTEXT.md) |
+| Series Retrieval Exclusion | 书系检索排除 | [AI7 Editorial](../domain/editorial/CONTEXT.md) |
 | Series Membership and Sharing Scope | 书系成员与共享范围 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Series Membership Impact Preview | 书系成员变更影响预览 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Series Membership Change Record | 书系成员变更记录 | [AI7 V2 UI/UX](./CONTEXT.md) |
+| Series Knowledge Promotion Review | 书系知识纳入审阅 | [AI7 V2 UI/UX](./CONTEXT.md) |
+| Series Retrieval Exclusion Impact Preview | 书系检索排除影响预览 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Apply Preparation | 稿件应用准备 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Apply Change Set | 稿件应用修改集合 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Apply Result Preview | 应用结果预览 | [AI7 V2 UI/UX](./CONTEXT.md) |
@@ -220,15 +252,17 @@ Status: **candidate-local bilingual index complete for this session**
 | Gate Readiness | 关口就绪状态 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Workflow Gate Disposition | 工作流关口处置 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Conditional Gate Passage | 有条件通过关口 | [AI7 V2 UI/UX](./CONTEXT.md) |
-| Milestone Version | 里程碑版本 | [AI7 V2 UI/UX](./CONTEXT.md) |
+| Milestone Version | 里程碑版本 | [AI7 Editorial](../domain/editorial/CONTEXT.md) |
 | Save as Milestone Version | 保存为里程碑版本 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Milestone Version Label | 里程碑版本标签 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Milestone Purpose | 里程碑用途 | [AI7 V2 UI/UX](./CONTEXT.md) |
+| Delivery Package | 交付包 | [AI7 Editorial](../domain/editorial/CONTEXT.md) |
 | Delivery Package Preparation | 交付包准备 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Delivery Package Purpose | 交付包用途 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Milestone Change Exclusion Notice | 里程碑后修改排除提示 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Delivery Package Manifest Preview | 交付包清单预览 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Prepared Delivery Package | 已准备交付包 | [AI7 V2 UI/UX](./CONTEXT.md) |
+| Package Export History | 交付包导出记录 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Primary Editable Export | 主要可编辑导出 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Agent Exchange Projection | Agent 交换投影 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Markdown Fallback Export | Markdown 备用导出 | [AI7 V2 UI/UX](./CONTEXT.md) |
@@ -237,10 +271,18 @@ Status: **candidate-local bilingual index complete for this session**
 | Export Fidelity Disposition | 导出保真处置 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Local Export Preparation | 本地导出准备 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Local Export Destination | 本地导出位置 | [AI7 V2 UI/UX](./CONTEXT.md) |
+| Native Export Collision Resolution | 系统原生导出冲突处理 | [AI7 V2 UI/UX](./CONTEXT.md) |
+| Resolved Local Export Target | 已确定本地导出目标 | [AI7 V2 UI/UX](./CONTEXT.md) |
+| Local Export Receipt Card | 本地导出凭据卡 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Local-only Export Boundary | 仅本地导出边界 | [AI7 V2 UI/UX](./CONTEXT.md) |
-| Publication Version | 发稿版本 | [AI7 V2 UI/UX](./CONTEXT.md) |
+| Publication Version | 发稿版本 | [AI7 Editorial](../domain/editorial/CONTEXT.md) |
 | Set as Publication Version | 设为发稿版本 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Publication Version Change Notice | 发稿版本后修改提示 | [AI7 V2 UI/UX](./CONTEXT.md) |
+| Maintenance Case | 维护事项 | [AI7 Editorial](../domain/editorial/CONTEXT.md) |
+| Maintenance Case Revision | 维护事项修订版 | [AI7 Editorial](../domain/editorial/CONTEXT.md) |
+| Maintenance Case Workspace | 维护事项工作区 | [AI7 V2 UI/UX](./CONTEXT.md) |
+| Maintenance Case Timeline | 维护事项时间线 | [AI7 V2 UI/UX](./CONTEXT.md) |
+| Internal-only Maintenance Notice | 仅内部维护提示 | [AI7 V2 UI/UX](./CONTEXT.md) |
 
 ## Collision guide
 
@@ -295,11 +337,27 @@ Status: **candidate-local bilingual index complete for this session**
 | Protective Read-only State | Access-control denial, archived Book, ordinary reference view, or proof content was lost. |
 | Journal Save Action | Manuscript Checkpoint creation, export, or `Save As`. |
 | Milestone Version Suggestion | A completed milestone, automatic mutation, required Signoff prompt, or Recovery Snapshot. |
+| Book Library | Book Convenience View, Working Corpus, Series Corpus, Run Source Scope, filesystem folder, or published-book catalog. |
+| Manuscript Import Target | File destination, current folder, last-open Book, or an inferred target. |
+| Existing-Book Import Relationship | Target Book, inferred intent, second peer Manuscript, or file-location choice. |
+| Book Creation Draft | Authoritative Book, empty Book, Manuscript Import Record, Source Acquisition Record, or partial successful import/acquisition. |
+| Review Before Book Creation | Review Before Import, existing-Book Review Before Source Retention, completed Book, import target selection, or optimistic creation. |
+| Book Title Suggestion | Confirmed Book title, file identity, model-generated text, or silent content inference. |
+| Exact Import Match | Filename match, fuzzy similarity, automatic deduplication, or import decision. |
+| Filename Collision | Exact duplicate identity, overwrite authority, or reason to block import. |
 | Import Fidelity Review | A completed import, import provenance record, or generic file preview. |
 | Import Degradation Decision | Standing permission, acceptance of unknown loss, or Public Release Permission. |
+| Staged Import Snapshot | Source Version, Manuscript Revision, Recovery Snapshot, Run Continuation Checkpoint, partial parse, or committed import. |
+| Import Draft Recovery | Automatic resume, successful import, manuscript recovery, or restored authority. |
+| Import Commit Outcome Uncertain | Proven failure, proven success, automatic retry, or ambiguous external Effect. |
+| Source Relationship Unconfirmed | Proof that files are unrelated, a parse failure, or verified common ancestry. |
 | Reimport Comparison | Live synchronization, overwrite, merge completion, or a Proposal Branch. |
+| Review Before Import | Import Fidelity Review, Book completion, Effect Approval, or Manuscript Import Record. |
+| Review Before Source Retention | Review Before Import, Task evidence persistence, Source Acquisition Record, Run Source Scope, or automatic source capture. |
 | Context-bound Task Composer | Generic chat, a raw prompt box, Task Ledger, or model message entry. |
 | Task Intent Draft | Run Record, authorized Task Intent, Plan Preview, or Harness Session draft. |
+| Task Input (Manuscript Checkpoint purpose) | Context-bound Task Composer, Task Input Revision Preparation, Task Intent, or a new checkpoint type. |
+| Task Input Revision Preparation | A new checkpoint type, Journal Save, Milestone Version, Signoff, or Run dispatch. |
 | Prepare Task Action | Model send, Run Authorization, Task dispatch, or Effect Approval. |
 | Task Skill Recommendation | Task Skill Activation, installed code, Capability Grant, Model Role selection, or authority. |
 | Reusable Procedure Capture | Macro recorder, saved generic automation, Plugin installation, or Task execution. |
@@ -336,6 +394,9 @@ Status: **candidate-local bilingual index complete for this session**
 | Model Selection Strip | Raw model catalog, provider credential settings, reasoning slider, or authority control. |
 | Model Capability Requirement | AI7 Capability, Capability Grant, model quality guarantee, or factual authority. |
 | Provider and Budget Disclosure | Hidden processing, full billing configuration, or a primary task-form section. |
+| Run Budget Ceiling | Provider Account Limit, Authority Ceiling, reliable cost estimate, or free/unlimited service. |
+| Run Budget Ceiling Reached | Provider Account Limit, Task success, ordinary pause, or a new Task Outcome type. |
+| Provider Account Limit | Run Budget Ceiling, provider rate limit, Run Capacity Wait, automatic fallback permission, or AI7 billing authority. |
 | Run Activity Header | Harness Session status, Task Outcome, Effect Receipt, or a technical process console. |
 | Editorial Milestone Timeline | Chain of thought, raw tool calls, transcript, or proof that a business Effect committed. |
 | Usable Candidate Stream | An authoritative Editorial Artifact, accepted Proposal, factual evidence, or applied mutation. |
@@ -344,6 +405,8 @@ Status: **candidate-local bilingual index complete for this session**
 | Current Book Run Switcher | Execution priority, pause/resume control, Task Skill selector, or conversation navigation. |
 | Foreground Run Projection | OS foreground execution, scheduler priority, exclusive provider use, or manuscript authority. |
 | Run Capacity Wait | A running provider call, a paused/cancelled Run, guaranteed queue order, or completion estimate. |
+| Resume-ready Run State | Cooperative Run Pause, Connectivity Wait State, Run Capacity Wait, Retry availability, automatic process restoration, or a Run invalidated by an effective Series Retrieval Exclusion or other material source restriction. |
+| Resume | Retry, Redo, Cooperative Run Pause itself, automatic process restoration, or continuation after a material source restriction without Plan Revision and renewed Run Authorization. |
 | Cooperative Run Pause | Immediate process termination, Run cancellation, authorization revocation, rollback, or undo. |
 | Cancellation Impact Summary | A generic danger modal, deletion confirmation, promise to reverse Effects, or Public Release revocation. |
 | Terminal Run Cancellation | Pause, deletion of history, rollback of committed Effects, Retry, or Redo. |
@@ -418,9 +481,20 @@ Status: **candidate-local bilingual index complete for this session**
 | V1 Interaction Reshaping | Cosmetic reskin, domain migration, prototype port, or unchanged artifact retention. |
 | V1 Artifact Drop | Feature deletion, evidence destruction, journey removal, or source-history rewrite. |
 | Manuscript Import Record | Manuscript Checkpoint, export receipt, generic success toast, or round-trip guarantee. |
+| Manuscript Reimport Record | Initial import evidence, live synchronization log, overwrite history, or empty revision. |
+| Source Acquisition Record | Source Version, Source Import Record for every path, task evidence snapshot, cross-Book source reuse, or Run Source Scope grant. |
+| Exact Fetch | Source Search, initial web/external-research retrieval, fuzzy match, factual verification, or retrieval/provider authority. |
+| Source Import Record | Manuscript import evidence, factual verification, Run Source Scope grant, or manuscript creation. |
+| Series Knowledge Item | Series Knowledge Revision, Series Knowledge Candidate, stable knowledge class, or whole Series Knowledge body. |
+| Series Knowledge Candidate | Series Knowledge Item, Series Knowledge Revision, Memory Candidate, model answer, membership consequence, or retrievable Series authority. |
+| Series Knowledge Revision | Series Knowledge Item, Series Knowledge Candidate, member-Book source revision, mutable latest draft, or factual truth record. |
+| Series Knowledge Promotion Decision | Review Decision, Learning Eligibility Decision, Proposal Decision, membership change, factual proof, automatic activation, Run Source Scope, retrieval authorization or performed retrieval, or provider-transmission authority. |
+| Series Retrieval Exclusion | Series membership removal, Learning Material exclusion, global Book/source deletion, historical erasure, or Run Source Scope. |
 | Series Membership and Sharing Scope | Book grouping, Run Source Scope, Learning Eligibility Scope, or ambient cross-Book manuscript browser. |
 | Series Membership Impact Preview | Plan Preview, Learning Remediation Impact Preview, deletion confirmation, or generic approval. |
 | Series Membership Change Record | Run Authorization, source-scope grant, Learning Eligibility Decision, manuscript mutation, or history rewrite. |
+| Series Knowledge Promotion Review | Learning Eligibility review, Proposal review, factual verification, automatic activation, or generic approval. |
+| Series Retrieval Exclusion Impact Preview | Series Membership Impact Preview, Learning Remediation Impact Preview, deletion confirmation, Plan Revision, or promise to recall Provider data. |
 | Apply Preparation | Apply execution, Effect Approval, Proposal Decision, or committed Manuscript Revision. |
 | Apply Change Set | Every accepted change, a mutable filter, Proposal version, Effect Approval, or applied result. |
 | Apply Result Preview | Authoritative manuscript text, new Manuscript Revision, Effect Receipt, or proof of commit. |
@@ -466,22 +540,32 @@ Status: **candidate-local bilingual index complete for this session**
 | Save as Milestone Version | Native Journal Save shortcut, ordinary checkpoint jargon, file export, generic approval, or delivery action. |
 | Milestone Version Label | Revision identity, filename, Workflow phase status, or authority record. |
 | Milestone Purpose | Actual handoff, Delivery Package authority, Public Release Permission, or Workflow completion. |
+| Delivery Package | Output format, filename/path, Local Export Preparation, Effect Approval/Receipt, delivery, or publication proof. |
 | Delivery Package Preparation | External export, file transfer, Public Release Permission, generic archive creation, or Signoff UI. |
 | Delivery Package Purpose | Milestone purpose, recipient record, external-channel target, delivery proof, or Public Release purpose. |
 | Milestone Change Exclusion Notice | Permission to update the milestone, automatic package refresh, or proof later edits are irrelevant. |
-| Delivery Package Manifest Preview | Filesystem browser, exact Effect payload log, export receipt, or public release manifest. |
-| Prepared Delivery Package | Delivered/exported content, Effect Receipt, Public Release, or a mutable package draft. |
+| Delivery Package Manifest Preview | Output-format selector, filesystem browser, exact Effect payload log, export receipt, or public release manifest. |
+| Prepared Delivery Package | Delivered/exported content, output format/path, Effect Receipt, Public Release, or a mutable package draft. |
+| Package Export History | Package state, delivery log, recipient tracking, copied receipts, or one mutable latest export. |
 | Primary Editable Export | Manuscript Revision, internal persistence format, exact-layout proof, or Public Release. |
 | Agent Exchange Projection | Manuscript Revision, Markdown source of record, whole-manuscript prompt, direct mutation surface, or Proposal. |
 | Markdown Fallback Export | Lossless rich-document export, silent automatic fallback, internal authority, or DOCX round-trip promise. |
 | Fixed-layout PDF Export | Editable round-trip format, factual proof, manuscript authority, or release permission. |
 | Export Fidelity Review | Import review, visual preview alone, delivery receipt, or permission to hide format loss. |
 | Export Fidelity Disposition | Generic approval, reusable global preference, export success, or delivery/release authority. |
-| Local Export Preparation | Delivery Package Preparation, external transmission, working-file Save As, or committed file publication. |
+| Local Export Preparation | Delivery Package identity/preparation, external transmission, working-file Save As, or committed file publication. |
 | Local Export Destination | Handoff recipient, product staging path, remembered location hint, external endpoint, or release audience. |
+| Native Export Collision Resolution | Import Filename Collision, custom AI7 confirmation, standing overwrite grant, Effect Approval, or Receipt. |
+| Resolved Local Export Target | Remembered destination, unresolved filename, package identity, recipient, or external endpoint. |
+| Local Export Receipt Card | Delivery confirmation, package completion, native-dialog acknowledgement, or optimistic success toast. |
 | Local-only Export Boundary | A ban on manual sharing after export, offline/provider mode, External Export Policy, or delivery proof. |
 | Publication Version | Latest draft, generic milestone label, publication Effect, published artifact, or merged Public Release Permission record. |
 | Set as Publication Version | Save, export, generic approval, automatic phase completion, or action that publishes content. |
 | Publication Version Change Notice | Permission inheritance, automatic revocation, content rejection, or publication-outcome evidence. |
+| Maintenance Case | Workflow phase, free-form note, mutable Publication Version, external recall request, or Correction Proposal. |
+| Maintenance Case Revision | In-place case edit, Publication Version, Errata artifact, external outcome, or local export receipt. |
+| Maintenance Case Workspace | External recall/takedown center, phase-note editor, Publication Version mutation, or Correction Proposal workspace. |
+| Maintenance Case Timeline | Mutable activity feed, replacement publication history, merged authority, or external delivery timeline. |
+| Internal-only Maintenance Notice | External withdrawal/takedown receipt, file deletion, Public Release revocation, or recipient notification. |
 
 The architecture term **Codex Interaction Model Reference** remains owned by the exact V2 candidate execution context. The UI/UX context applies that permitted reference without redefining it.

@@ -14,9 +14,9 @@ The audit feature traces the full chain:
 Learning Material
   → Learning Eligibility Decision
   → Editorial Learning Signal
-  → Memory Candidate
-  → approved House/Series/Book memory
-  → task that retrieved the memory
+  ├─→ Memory Candidate → approved House/Book memory
+  └─→ Series Knowledge Candidate → Series Knowledge Promotion Decision → Series Knowledge Item + immutable revision
+  → task that retrieved the exact approved memory or promoted knowledge revision
 ```
 
 A user should be able to move in both directions: from a task result to the memory and source materials that influenced it, or from a material to every candidate, memory item, and task descended from it.
@@ -30,8 +30,8 @@ Use an append-only, user-readable audit history with projected current status. F
 - eligibility status and whether it came from an explicit decision or policy suggestion;
 - the exact Learning Eligibility Policy revision and explanation used;
 - user include/exclude/undo decisions and optional rationale;
-- descendant signals, candidates, approved/rejected/forgotten memory items, and merges;
-- every task that retrieved an approved descendant and the exact memory revision used.
+- descendant signals, Memory Candidates, Series Knowledge Candidates, promotion decisions, approved/rejected/forgotten memory items, promoted knowledge revisions, and merges;
+- every task that retrieved an approved descendant and the exact memory or Series Knowledge revision used.
 
 The production view should support filtering and bulk review by Book, Series, material type, time, eligibility state, candidate state, and downstream use.
 
@@ -65,7 +65,7 @@ The new design preserves those mechanics but adds typed source IDs/revisions/dig
 - Let the user inspect, correct, disable, roll back, or forget learned eligibility rules.
 - Let the user return the policy to recommendation-only mode or disable automatic decisions.
 - Keep editorial-memory learning and eligibility-policy learning as separate models: deciding that material is eligible does not decide what editorial preference it proves.
-- Eligibility permits evidence/candidate creation only; it never approves House/Series memory, grants task source access, or authorizes Model Training.
+- Eligibility permits evidence/candidate creation only; it never approves House/Book memory, promotes a Series Knowledge Candidate, grants task source access, or authorizes Model Training.
 - Run a Post-run Policy Review over production evidence. AI agents may create and edit Proposed Policy Revisions with diffs, rationale, evidence, evaluation results, and expected effects while preserving prior versions.
 - Permit automatic Policy Revision Activation only for evaluated, non-expansive calibration of an existing rule inside a user-approved parameter envelope; log and notify with immediate rollback.
 - Require explicit user activation for new rules, material types/scopes, action or precedence changes, lowered confidence floors, weakened safeguards, or any expanded authority.

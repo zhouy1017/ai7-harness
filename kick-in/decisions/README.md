@@ -1,6 +1,6 @@
 # Decision Records
 
-Accepted system-wide architecture decisions live under [`docs/adr/`](../../docs/adr/):
+Accepted system-wide architecture decisions live under [`docs/adr/`](../../docs/adr/). The current root sequence contains 40 records, ADR 0001 through ADR 0040:
 
 - [ADR 0001: Version Editorial Dimension configuration at task start](../../docs/adr/0001-versioned-editorial-dimension-configuration.md)
 - [ADR 0002: Separate Book, Series, Cross-project, and House-learning scopes](../../docs/adr/0002-book-series-cross-project-and-house-learning-scopes.md)
@@ -30,6 +30,18 @@ Accepted system-wide architecture decisions live under [`docs/adr/`](../../docs/
 - [ADR 0026: Retrieve over manuscripts, returning candidates rather than truth](../../docs/adr/0026-manuscript-retrieval-returns-candidates.md)
 - [ADR 0027: Concentrate engineering verification on E2E functionality](../../docs/adr/0027-concentrate-ci-on-e2e-functionality.md)
 - [ADR 0028: Support Windows and macOS as one AI7 product](../../docs/adr/0028-support-windows-and-macos-as-one-product.md)
+- [ADR 0029: Keep one primary Manuscript per Book](../../docs/adr/0029-keep-one-primary-manuscript-per-book.md)
+- [ADR 0030: Compare reimports without inventing source lineage](../../docs/adr/0030-compare-reimports-without-inventing-source-lineage.md)
+- [ADR 0031: Persist verified import staging for explicit recovery](../../docs/adr/0031-persist-verified-import-staging-for-explicit-recovery.md)
+- [ADR 0032: Materialize task input before exact Run pinning](../../docs/adr/0032-materialize-task-input-before-exact-run-pinning.md)
+- [ADR 0033: Default the Run Budget Ceiling to unset](../../docs/adr/0033-default-run-budget-ceiling-to-unset.md)
+- [ADR 0034: Require explicit Resume after Run interruption](../../docs/adr/0034-require-explicit-resume-after-interruption.md)
+- [ADR 0035: Require explicit Book-targeted source acquisition](../../docs/adr/0035-require-explicit-book-targeted-source-acquisition.md)
+- [ADR 0036: Promote Series Knowledge through explicit review](../../docs/adr/0036-promote-series-knowledge-through-explicit-review.md)
+- [ADR 0037: Enforce versioned Series Retrieval Exclusions immediately](../../docs/adr/0037-enforce-versioned-series-retrieval-exclusions-immediately.md)
+- [ADR 0038: Separate Delivery Package identity from local export](../../docs/adr/0038-separate-delivery-package-identity-from-local-export.md)
+- [ADR 0039: Delegate local-export collisions to native OS workflows](../../docs/adr/0039-delegate-local-export-collisions-to-native-os-workflows.md)
+- [ADR 0040: Preserve post-designation maintenance as versioned cases](../../docs/adr/0040-preserve-post-designation-maintenance-as-versioned-cases.md)
 
 Create a record here only when a choice is hard to reverse, surprising without context, and the result of a real trade-off. Use sequential names such as `0001-fresh-ai7-repository.md` and keep the record concise: what was decided, why, meaningful rejected alternatives, and any non-obvious consequence.
 

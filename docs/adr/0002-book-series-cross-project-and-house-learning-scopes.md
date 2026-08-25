@@ -9,3 +9,7 @@ AI7 uses four explicit scopes because direct manuscript authority and adaptive l
 ## Consequences
 
 Series membership and exclusions are visible and versioned, task evidence records the exact Book/Series/memory revisions used, and no similarity inference silently creates Series membership or whole-library source access.
+
+## Later refinements
+
+[ADR 0036](./0036-promote-series-knowledge-through-explicit-review.md) requires an explicit promotion review before a Series Knowledge Candidate creates a new stable Series Knowledge Item with its first immutable revision or appends one revision to an exact existing item. [ADR 0037](./0037-enforce-versioned-series-retrieval-exclusions-immediately.md) makes an effective exclusion an immediate guard on later Series-scoped reads without rewriting the original authorization or completed history.
