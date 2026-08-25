@@ -1,35 +1,39 @@
 # Current progress
 
-Status: **Issue #14 repository-guidance reconciliation complete on `docs/14-incremental-agent-guidance`; awaiting advisory review and Commander PR integration; documentation only**
+Status: **Issue #16 freeze payload validated; on the source branch it awaits the dedicated PR/merge, while at that merge commit or a descendant this checkpoint records the completed documentation freeze; no implementation authority**
 
 ## What's done
 
-- Preserved the current aggregate chain before this task: Source Checkout Buildability through PR #10, Issue #8 through PR #11 at `226ccfd1e34665c42af178e54d47f6d0c918138c`, and response presentation through PR #13 at `4ee5d4bb0967f82c7f8abb01aa2541616052710b`.
-- Recovered governance source snapshot `93c9e406c33cc44019555b92e51e6d10094c938e` onto Issue #14 rather than treating the internal snapshot as an integration parent or authority owner.
-- Added the task-oriented agent router, design-authority, Change Brief, incremental-development, document-lifecycle, and detailed-project-constraint guidance under `docs/agents/`.
-- Moved consumed `handoff20260817/` material into the indexed `docs/archive/agent-guidance-baseline-2026-08-25/` historical package; archive content remains evidence, not current authority.
-- Replaced root `AGENTS.md` and `HANDOFF.md` with thin current routers while preserving the later Book/import, Task Input, budget/Resume, Source/Series, Delivery Package/export, maintenance, and fresh-checkout buildability constraints in `docs/agents/project-constraints.md`.
-- Replaced the obsolete phase/gate migration plan with a compact vertical-outcome router that keeps the full Source Checkout Buildability contract inside the existing E2E Functional Gate boundary.
-- Passed lightweight maintenance checks: 190 active Markdown files with zero broken local links, eight archived payloads byte-identical to `design-doc@2932f61`, 851 requirements, D-001–D-084, J-01–J-16, 40 root ADRs, 14 UI ADRs, no conflict markers, exact `CLAUDE.md`, clean diff whitespace, and unchanged `origin/main@c8cbe26`.
-- Consumed a bounded same-provider advisory review with reduced independence. Its status finding was corrected by making archive activation conditional on the actual Commander PR integration. Its governance findings were resolved from the recovery snapshot's explicit owner decision: root `AGENTS.md` now records the 2026-08-25 supersession of the monolithic layout, and checkpoint cadence is reconciled to update the current `PROGRESS.md` after every sub-task while archiving at most one outgoing snapshot at a lifecycle node. Bounded re-review passed with no remaining actionable Standards or Spec finding.
+- Integrated all discovered branch/PR document outcomes through `design-doc@779db44cb557156f71af17e5b240b03681264ad5`: initial Issues #1–#5, direct Issues #6–#7, PR #10/Issue #9, PR #11/Issue #8, PR #13/Issue #12, and PR #15/Issue #14.
+- Preserved canonical `main@c8cbe26c4cccc4a912b3bbc05bd5b23fbf5468b9` unchanged.
+- Added `docs/design-doc/FREEZE-BASELINE.md` with exact source heads, merge/PR identities, recovery-snapshot mappings, stash/evidence/Git-only dispositions, aggregate reconciliations, deferred decisions, and the validation contract.
+- Replaced the obsolete active-exploration control board with a current frozen-state board and replaced root `HANDOFF.md` with a freeze cold-start router.
+- Made the lifecycle disposition for this node explicit: retain the existing indexed archive, add no duplicate archive payload, and keep superseded pre-freeze control/progress chronology at the exact pre-marker Git head.
+- Completed an independent read-only inventory audit: no named branch, PR, snapshot, worktree, stash, tag, or release carries an unmerged selected outcome. Added exact Issue #6/#7 source heads, the integrated Codex-first intermediate, grouped disposition of 52 no-ref recovery commits, and SHA-256 dispositions for two repository-external Issue #8 evidence artifacts in `docs/design-doc/RECOVERY-OBJECT-DISPOSITIONS.md`.
+- Passed the pre-PR freeze checks: all 12 integrated-table heads and all three historical intermediates are ancestors of `779db44`; `origin/main` and `origin/design-doc` match their pins; 192 active Markdown files have zero broken local links; 851/851 requirement definitions are unique; D-001–D-084 and J-01–J-16 are complete; 40 root and 14 UI ADR IDs are unique; the 52-row recovery inventory is complete; all eight archive payloads match `2932f61`; `CLAUDE.md` is exact; and there are no conflict markers, trailing whitespace, package manifests, or non-document changes.
+- Added the mandatory full Change Brief to Issue #16 and reconciled advisory findings: freeze activation is explicit across the source/merge boundary, every replaced outgoing router is Git-only, the literal lifecycle result is **archive sweep: none**, and the aggregate map now routes to context, glossary, domain, policy, and `kick-in/` owners.
 
 ## What's next
 
-- Re-run the lightweight checks, commit and push the advisory correction, open and merge Issue #14's Commander-owned pull request into `design-doc`, then create the separate freeze-baseline Issue/branch/PR.
+- Before the marker exists: commit/push, open the dedicated Issue #16 pull request, record its identity, complete re-review, and merge it into `design-doc` as Commander; close stale Issues #1–#5 and Issue #16 with exact dispositions.
+- At the marker or any descendant: no freeze-repository work remains. The next valid work requires an explicit owner decision on candidate selection; leave no active Worker dispatch and keep `main` unchanged.
 
 ## Key decisions
 
-- Root `AGENTS.md`, `HANDOFF.md`, and `PROGRESS.md` are current routing surfaces. Stable authority remains in ADRs, Policy Documents, context definitions, and detailed runbooks; consumed chronology is archived or Git-only.
-- `AGENTS.md` remains the canonical shared instruction entry point after the owner-approved thin-router supersession; routed shared detail is edited in its exact owning runbook, while `CLAUDE.md` remains import-only.
-- The governance compaction changes repository-development guidance only. It does not promote `design-doc` to canonical `main`, accept every candidate conclusion, authorize implementation, or add a validation gate.
-- Source Checkout Buildability remains part of the existing provider-free E2E Functional Gate setup and is not a separate build/package/reproducibility programme.
-- The final freeze will claim aggregate completeness only when every discovered branch, PR, recovery snapshot, worktree delta, and stash has an explicit disposition.
+- The exact immutable content baseline is `779db44cb557156f71af17e5b240b03681264ad5`; the freeze marker is Issue #16's merge commit. This avoids an impossible self-referential SHA in the marker payload.
+- Aggregate completeness means explicit disposition of every discovered outcome, not blanket owner acceptance of candidate conclusions.
+- Recovery commits were reconciled semantically onto the then-current aggregate, rather than merged as stale parents that could overwrite later work.
+- Evidence-only snapshots, stale progress stash, Codex turn-diff refs, and superseded chronology are recorded but do not become design authority.
+- Unreferenced retry/amend commits and machine-local evidence artifacts are explicitly excluded; ignored private sample material was not inspected or merged.
+- Candidate selection for `main` and any implementation planning remain separate owner decisions.
+- Archive sweep: none. The existing indexed archive is retained; outgoing CONTROL/HANDOFF/PROGRESS/design-doc README states remain Git-only at `779db44`.
 
 ## Unresolved matters or blockers
 
-- No product-design decision is reopened by Issue #14. Retrieval strategy and concrete macOS mechanics remain deferred design/implementation matters, not blockers for this documentation integration.
-- No blocking product or repository question remains. The completed same-provider advisory review has reduced independence and remains evidence, not a gate.
+- No blocker prevents the documentation freeze.
+- Retrieval implementation, calibrated long-manuscript budgets, concrete platform confinement, exact macOS mechanics, and candidate acceptance remain deliberately deferred after the freeze.
+- Advisory review may have reduced provider independence; it remains evidence, never a gate.
 
 ## Resume Prompt
 
-Resume on `docs/14-incremental-agent-guidance`: validate and commit the review correction, integrate Issue #14 into `design-doc`, and then create the separate freeze-baseline record and disposition manifest.
+Before the marker, resume on `docs/16-freeze-design-doc` and complete only its dedicated review/PR/Commander merge plus exact Issue closures. At the marker or a descendant, obtain a separate owner decision before any allowlisted `main` promotion or implementation planning.
