@@ -21,6 +21,7 @@ Nothing here is a stub waiting to be filled in. If you are looking for code, the
 | # | File | Why |
 | --- | --- | --- |
 | 1 | `AGENTS.md` | **Canonical standing rules.** Everything binding is here or linked from here |
+| 1b | [`docs/agents/ci-test-boundaries.md`](docs/agents/ci-test-boundaries.md) | Concise implementation boundary for the sole Windows/macOS E2E Functional Gate |
 | 2 | `handoff20260817/PROJECT-OVERVIEW.md` | The whole design in one pass — vision, domain, architecture, what is excluded, what is open |
 | 2b | `handoff20260817/SESSION-HANDOFF.md` | Recent history: what the last session decided, which recommendations the owner overrode, and which agent errors were corrected |
 | 3 | `PROGRESS.md` | What has been done, what is next, and the Resume Prompt |
@@ -50,6 +51,8 @@ These are the mistakes most likely to be made by an agent arriving cold. Each ha
 
 **Do not read a term across contexts.** Several words mean different things in different places — `Editorial Profile` (dimension defaults) versus `Editorial Capability Profile` (security), `Review Decision` (editorial judgment) versus a Dispatch reviewer report, `Model Role` (product, declares no provider) versus the Dispatch Layer B binding policy. Check the collision table in `GLOSSARY.md` before using a term.
 
+**Do not rebuild the retired verification programme.** The active rule is one provider-free E2E Functional Gate running the same complete supported journey IDs on Windows and macOS. The historical tracer's thirteen-point gate, headless replay, request fingerprints, portable/package proof, exact-head review cycles, and separate engineering gates are not implementation requirements.
+
 ---
 
 ## How to work here
@@ -58,7 +61,7 @@ Repository development uses three roles, defined in `kick-in/27-repository-devel
 
 - **Commander** — decides dispatch, sole integrator, sole external-action authority
 - **Worker** — writes only its own worktree and branch; never merges, pushes, publishes, or takes external actions
-- **Reviewer** — independent, never authored what it reviews, at a task class at least equal to the work
+- **Reviewer** — optional, independent and read-only when used; its report is advisory, not a pull-request gate
 
 Operating rules are provider-neutral and must never be conditioned on which model is running. Layer B is the only provider-specific policy surface; operational usage logs are evidence, not additional policy.
 
@@ -74,10 +77,7 @@ Phase 0 is complete but its **exit review has not been run**. That review confir
 
 **Decomposition has not been authorized.** Do not begin it without the owner saying so.
 
-When implementation does start, the accepted order is:
-
-1. **Store-and-index spike** — throwaway, time-boxed. Generated Chinese corpora at 500K / 1M / 10M characters, measuring find, jump, replace, cold open, retrieval build cost, and peak memory. Confirms or changes the store and retrieval strategy before anything is committed to.
-2. **Read-only tracer slice** — open a Book, import a DOCX, view it in the windowed editor, ask a source-grounded question, and have the citation resolve to an exact highlighted block range. Thirteen-point exit gate in `kick-in/34-first-tracer-slice.md`.
+When implementation does start, the read-only tracer remains a useful vertical implementation slice: open a Book, import a DOCX, view it in the windowed editor, ask a source-grounded question, and resolve its citation to an exact highlighted block range. The former mandatory store-and-index spike and thirteen-point tracer exit gate are superseded historical design. If the tracer is admitted as a supported journey, it runs through the launchable product path under [`docs/agents/ci-test-boundaries.md`](docs/agents/ci-test-boundaries.md); it creates no headless, replay, request-fingerprint, package, performance, or release-proof gate.
 
 ---
 

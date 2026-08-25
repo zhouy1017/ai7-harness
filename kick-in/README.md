@@ -59,8 +59,8 @@ Agents arriving without prior context should start at the repository-root `HANDO
 32. [Single execution authority](./31-single-execution-authority.md) — accepted Question 31 agent-loop definition, instances-versus-authorities rule, required parallelism, scheduling split, and the learn-the-framework-not-its-defaults boundary.
 33. [Runtime language and release channel](./32-runtime-language-and-release-channel.md) — accepted TypeScript-only runtime and Windows zip/NSIS mechanics; macOS release/data mechanics remain separate implementation decisions under ADR 0028.
 34. [Standalone shell and editor topology](./33-standalone-shell-and-editor-topology.md) — accepted Question 34 manuscript scale tiers, Electron three-process topology, and the ProseMirror windowed-editing foundation.
-35. [First tracer slice and exit gate](./34-first-tracer-slice.md) — accepted Question 35 store-and-index spike, read-only tracer, manuscript retrieval requirement, and the thirteen-point exit gate.
-36. [Minimal E2E validation](./35-minimal-e2e-validation.md) — accepted project-wide rule that one provider-free E2E Functional Gate runs complete journeys and observed-bug regressions on Windows and macOS.
+35. [First tracer slice](./34-first-tracer-slice.md) — retained read-only vertical implementation slice and manuscript-retrieval design; the prerequisite spike and thirteen-point exit gate are superseded historical material.
+36. [Minimal E2E validation](./35-minimal-e2e-validation.md) — accepted project-wide rule that one provider-free E2E Functional Gate runs the same complete journey IDs and observed-bug regressions on Windows and macOS; implementation details live in [CI and test boundaries](../docs/agents/ci-test-boundaries.md).
 37. [Windows and macOS product platform](./35-windows-macos-product-platform.md) — accepted one-product scope and native-adapter boundary; concrete macOS mechanics remain deferred.
 38. [Decision records](./decisions/README.md) — accepted hard-to-reverse decisions only.
 

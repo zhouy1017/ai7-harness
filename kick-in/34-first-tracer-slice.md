@@ -1,18 +1,18 @@
-# First Tracer Slice and Exit Gate
+# First Tracer Slice and Historical Exit Gate
 
-Status: **accepted tracer direction; the multi-point exit/verification gate is superseded by ADR 0027**
+Status: **accepted tracer implementation direction; the prerequisite spike and thirteen-point exit/verification gate are superseded historical design under ADR 0027**
 
 ## What a tracer slice is
 
 From the tracer-bullet idea: rather than building layer by layer — all the storage, then all the domain, then the surface — build one thin, complete path through every layer, end to end. Like a tracer round, it shows whether the aim is right before the rest is committed.
 
-Three properties separate it from a prototype: it is **vertical rather than horizontal**, touching every layer thinly; it is **real rather than throwaway**, and the code grows into the product; and it **proves the seams connect**.
+Three properties separate it from a prototype: it is **vertical rather than horizontal**, touching every layer thinly; it is **real rather than throwaway**, and the code grows into the product; and it **connects the seams in one usable path**.
 
-That last property is why it matters here. This design room produced twenty-five architectural decisions before a line of code existed, and every one is a hypothesis. Does a pinned Harness subset compose? Does the Task Ledger bind to the Session Ledger without copying transcripts? Do capability guards hold at both enforcement points? Does the service run headlessly inside ten minutes? The tracer is the first real test of any of it.
+That last property is why it matters here. The tracer is a useful implementation slice because it reaches from the launchable product through the editor, service, Harness composition, and domain records to one user-visible result. It is not an architecture proof programme or a substitute for a complete supported E2E journey.
 
-## Two steps, in order
+## Historical two-step plan
 
-The scale question and the integration question are different kinds of risk, and merging them would force either the scale work to be production-quality before its approach is validated, or the tracer to be disposable.
+The earlier design required a store-and-index spike before the tracer. ADR 0027 supersedes that prerequisite and its measurement gate. The comparison is retained only to explain the design history; neither step is a standing validation gate.
 
 | | Step 0 — spike | Step 1 — tracer |
 | --- | --- | --- |
@@ -20,11 +20,11 @@ The scale question and the integration question are different kinds of risk, and
 | Answer shape | A measurement | A working path |
 | Code lifespan | Throwaway | Permanent |
 
-### Step 0 — Store and index spike
+### Historical Step 0 — Store and index spike
 
-**Throwaway, time-boxed, before any tracer work.** Its target is the paging store and its indexes, not the editor: because the editor only ever holds a bounded window, the store carries the risk.
+This was proposed as throwaway, time-boxed work before the tracer. It is no longer required before implementation or integration. A developer may use a bounded temporary diagnostic when a concrete implementation problem demands it, but it remains non-gating and is removed before integration unless its behavior becomes part of an admitted E2E journey.
 
-Generate Chinese corpora at 500K, 1M, and 10M characters. Build a paging block store with the three indexes, then measure:
+The historical plan would have generated Chinese corpora at 500K, 1M, and 10M characters, built a paging block store with the three indexes, and measured:
 
 - cold Book open and time to first editable view;
 - find first match, and find all matches;
@@ -34,15 +34,17 @@ Generate Chinese corpora at 500K, 1M, and 10M characters. Build a paging block s
 - **retrieval index build time and per-block re-index cost**; and
 - peak memory at the 10M tier.
 
-**Outcome:** either the store design and the retrieval strategy are confirmed, or they change before the architecture is committed. Then discard the code.
+**Historical outcome:** the store design or retrieval strategy would have changed before architecture commitment, after which the code would be discarded. This proof obligation is superseded.
 
-Corpora must be **generated**, never real sample Books. A real manuscript in a test fixture would violate ADR 0016.
+Any temporary diagnostic or admitted journey still uses **public synthetic data**, never real sample Books. A real manuscript in a test fixture would violate ADR 0016 and the current CI boundary.
 
-### Step 1 — The read-only tracer
+### Retained Step 1 — The read-only tracer implementation slice
 
 > Open one Book → import one DOCX → **view it in the real windowed editor** → ask one source-grounded question → receive an answer whose citation **resolves to an exact highlighted Manuscript Block range** in that editor.
 
-Read-only throughout. The editor surface earns its place for two reasons: it proves the editor-to-service seam and exact block-range anchoring, and it makes provenance **visible** rather than merely recorded — a citation the editor can click through to in the actual document, which is the point of the whole grounding architecture.
+Read-only throughout. The editor surface earns its place because the journey must cross the launchable renderer/main/service/Harness/domain path and make provenance **visible** rather than merely recorded — a citation the editor can click through to in the actual document.
+
+If this becomes a supported journey, its E2E scenario runs under [`docs/agents/ci-test-boundaries.md`](../docs/agents/ci-test-boundaries.md): the same journey ID on Windows and macOS, public synthetic data, a deterministic model fixture inside the same AI7 boundary, no network or live provider, and no manuscript payload retained in CI logs or artifacts.
 
 ## Manuscript retrieval is a required capability
 
@@ -99,9 +101,9 @@ Lexical, vector, or hybrid remains open, for two reasons worth stating plainly:
 
 Embeddings and retrieval indexes derived from manuscript text are manuscript derivatives, so ADR 0016 governs them: never in a repository, never in hosted CI, never in a distributable artifact.
 
-## Exit gate
+## Superseded historical thirteen-point gate
 
-The slice is complete when all thirteen hold.
+The earlier design made the following thirteen items an active tracer exit gate. ADR 0027 supersedes that gate in full. These items are historical rationale only: they do not block the tracer, a pull request, a release, or implementation, and they do not authorize headless, replay, request-fingerprint, package, or other separate proof machinery.
 
 From the original migration workflow:
 
@@ -111,34 +113,34 @@ From the original migration workflow:
 4. The model sees only logged, reconstructable input.
 5. The Run Record carries exact Execution Bindings to Harness Session spans, with no copied transcripts.
 6. The Editorial Capability Profile cannot reach undeclared shell, filesystem, or network paths.
-7. The replay fixture and a real-provider rehearsal share the same contracts.
+7. **Historical provider/replay criterion:** a replay fixture and real-provider rehearsal would share contracts.
 8. Restart and reopen reconstruct the user-visible result without hidden provider state.
 
 Added by decisions taken since that document was written:
 
-9. The whole slice runs **headlessly against replay inside the `pr` gate, under ten minutes**, proving the service is drivable without Electron.
+9. **Historical headless/replay criterion:** the whole slice would run headlessly against replay inside the `pr` gate under ten minutes.
 10. The citation resolves to an **exact Manuscript Block range and highlights in the editor**.
 11. The **Agent Data Root is created inside the AI7 folder** on first run, holds no credential material, and sync-root detection fires when the folder sits beneath a sync path.
-12. The **request-fingerprint guard fails closed** when prompt, tools, or policy snapshot change.
-13. **Portable proof**: extract, run, remove, leaving no residue outside the folder.
+12. **Historical request-fingerprint criterion:** a guard would fail closed when prompt, tools, or policy snapshot changed.
+13. **Historical portable/package criterion:** extract, run, and remove with no residue outside the folder.
 
-Criteria 9 through 13 make the tracer a test of the accepted decisions rather than only of code.
+Under the current rule, any retained user-visible behavior belongs in the applicable complete supported journey. The historical headless/replay condition, request-fingerprint check, portable extract/run/remove proof, and every other layer- or package-only item above are not standing tests. Build or package only enough to launch the product journey.
 
 ## Explicitly out of scope
 
 Manuscript mutation of any kind — proposals, Effects, receipts — which is Phase 3. Learning, Quality Signals, and metrics, which need mutation first. Multiple Books, Series, and Cross-project scope. Workflow Instances and gates. Export. Parallel Runs: Question 31 makes concurrency required *behavior*, but one Run is correct for a first trace, and the concurrency and budget governor arrives later.
 
-## Question 35 decision
+## Current disposition of the Question 35 decision
 
-Accepted with owner revisions:
+ADR 0027 supersedes the mandatory spike and thirteen-point gate while retaining the product and implementation content:
 
-- a throwaway, time-boxed store-and-index spike runs first, targeting the paging store and its indexes rather than the editor;
+- the store-and-index spike is historical rather than a prerequisite or gate; temporary diagnostics follow the current non-gating rule;
 - the tracer is read-only and ends at a citation resolving to an exact highlighted block range in the real windowed editor;
 - retrieval over manuscripts is a required capability that returns candidates and never truth;
 - one authority and many projections: chunks and embeddings serve models while the editor reads ordinary text, projections may use boundaries suited to their consumer, and the requirement is consistency across forms rather than a shared unit;
 - projections carry their derivation revision, rebuild from the authority alone, invalidate by range overlap, tombstone deletions, and re-derive at Manuscript Checkpoints;
-- retrieval strategy — lexical, vector, or hybrid — is deferred to the spike;
-- the thirteen-point exit gate governs completion; and
+- retrieval strategy — lexical, vector, or hybrid — remains an implementation choice, not a spike-gated decision;
+- applicable user-visible tracer behavior may enter the one E2E Functional Gate only as a complete supported journey; and
 - mutation, learning, workflow, concurrency, and export are explicitly out.
 
 See [ADR 0026](../docs/adr/0026-manuscript-retrieval-returns-candidates.md).
