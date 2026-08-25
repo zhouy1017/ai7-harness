@@ -603,3 +603,104 @@ Resume from `design-doc@de16a2c` with Issues #6 and #7 integrated and the adviso
 ### Resume Prompt
 
 Resume from `origin/design-doc` after the Commander push: read `docs/design-doc/{README,REVIEW}.md`, keep `main` unchanged, and require separate owner authorization before canonical integration or implementation.
+
+## Clean-checkout buildability assessment — 2026-08-25
+
+### What's done
+
+- Completed a read-only comparison of the current design plan and pinned `ai7-reborn-ai@3e6e9ac772b7f07832154fa39d7de8a4deca51b1` against the requirement that a fresh checkout build and launch locally on each supported host.
+- Confirmed that the current design allows build commands and requires a launchable Windows/macOS E2E product path, but does not yet define a fresh-checkout bootstrap/build/start contract or prohibit hidden repository-external build inputs.
+- Identified the minimal plan correction: make source-checkout buildability an explicit Phase-1 completion outcome and use the same documented bootstrap/build/launch commands as setup for the existing E2E Functional Gate, without adding a separate build, packaging, or reproducibility gate.
+- Made no product, dependency, CI, migration-plan, or implementation change at that checkpoint; the owner's subsequent instruction accepted the documentation design and is recorded in the following checkpoint.
+
+### What's next
+
+- At that checkpoint the next action was owner acceptance or revision. The owner subsequently accepted the documentation design; the following checkpoint records its candidate implementation while canonical `main` integration and product implementation remain separate.
+
+### Key decisions made
+
+- No new project decision had been made at that checkpoint. The recommendation scoped the promise to host-native builds on Windows and macOS, distinguished registry-assisted source completeness from a vendored/offline build, and kept dependency restoration outside the product E2E no-network interval; the owner accepted that design in the subsequent turn.
+
+### Resume Prompt
+
+Historical resume state: decide whether to adopt the Source Checkout Buildability Contract. The owner subsequently adopted it and the following checkpoint supersedes this prompt.
+
+## Source Checkout Buildability documentation design — 2026-08-25
+
+### What's done
+
+- Used the owner-invoked `ask-matt` skill, which routed this work through `grill-with-docs` and `domain-modeling`; the already-resolved platform, network, CI, and phase choices left zero new interview questions.
+- Added the owner-accepted, branch-candidate [Source Checkout Buildability Contract](docs/agents/source-checkout-buildability.md). It defines Supported Development Hosts, permitted and prohibited inputs, host tools versus product payloads, immutable package/secondary-artifact acquisition, reconstructable local dependency stores, a closed ambient-input surface, root command semantics, launch readiness/process lifecycle, persistent development data, and isolated E2E data.
+- Updated standing/router/integration context in `AGENTS.md`, `HANDOFF.md`, and `docs/design-doc/README.md`.
+- Reconciled the one-gate setup boundary in `docs/adr/0027-concentrate-ci-on-e2e-functionality.md`, `docs/agents/ci-test-boundaries.md`, `docs/architecture-v2/ARCHITECTURE.md`, and `kick-in/35-minimal-e2e-validation.md` without adding a build, cache-miss, package, reproducibility, or platform gate.
+- Reworked `docs/architecture-v2/MIGRATION.md` and `kick-in/04-migration-workflow.md` so Phase 1 establishes the command/input boundary inside the first vertical slice, Harness composition extends the same path, and the first complete Windows/macOS journey is the contract's first fulfillment and only pass/fail result.
+- Applied advisory hostile review against the predecessor's actual failure patterns: Electron postinstall secondary downloads, a potentially prefilled local plugin store, ambient Python/PIA payload discovery, author-specific paths, unsafe shared-cache deletion, divergent GUI-smoke versus normal-start topology, detached or immediately exited launch, and orphaned children after startup failure are all closed by the contract.
+- Verified `git diff --check`, all changed Markdown file links, the exact one-line `CLAUDE.md` wrapper, and the absence of product-domain glossary/context changes. No product code, dependency, CI workflow, implementation issue, branch, commit, push, merge, or `main` change was made.
+
+### What's next
+
+- Route this owner-accepted candidate through normal Commander integration to canonical `main`; the current `design-doc` working tree is documentation evidence, not canonical integration or product-implementation authority.
+- After separate implementation authorization, select the exact Windows and macOS host matrix plus Node/package-manager versions, then implement the contract as setup within the first complete vertical journey rather than as a horizontal build-only issue.
+
+### Key decisions made
+
+- “Clone and build anywhere” means a host-native build on every declared Windows and macOS Supported Development Host; it does not promise Linux support or cross-compilation.
+- Bootstrap is declared-source-assisted rather than fully offline or byte-reproducible: exact lockfile packages and any lifecycle/secondary artifacts may come from approved declared sources, but every input is identity- and integrity-bound, every local dependency store rebuilds from empty, and no product process receives infrastructure credentials.
+- A host prerequisite is only an OS/toolchain tool. Any byte copied into the product or loaded at runtime is tracked or immutably acquired; documenting an ambient Office PIA, Python payload, sibling bundle, or arbitrary installed runtime cannot legalize it.
+- `start-built` must reach a stable base readiness handshake, stay attached, fail nonzero before readiness, preserve an existing development Agent Data Root, and clean up owned children on failure, cancellation, normal exit, or parent death. E2E retains the same production-shaped non-provider topology; only the deterministic model fixture, isolated data root, disabled outbound network, and non-substituting test hooks may differ. Harness may activate lazily, but the first supported Harness journey must activate the composed runtime before producing its outcome.
+- The same root bootstrap/build/start semantics construct the existing E2E Functional Gate subject. First fulfillment includes an absent job-local cache on each supported host, but receives no separate result or standing proof gate.
+- Source Checkout Buildability and Supported Development Host remain repository-development vocabulary, so no AI7 product `CONTEXT.md`, `GLOSSARY.md`, or new ADR was added; ADR 0027 was amended only to keep its existing E2E setup boundary consistent.
+
+### Resume Prompt
+
+Resume by integrating the owner-accepted Source Checkout Buildability documentation candidate through the normal Commander path, then seek separate implementation authorization before selecting the host matrix or creating the first vertical-journey work items.
+
+## Source Checkout Buildability design-doc integration preflight — 2026-08-25
+
+### What's done
+
+- Created GitHub Issue #9, `Define source-checkout buildability contract`, as the canonical integration work item and created branch `docs/9-source-checkout-buildability` from `design-doc@2932f61f5907558587122c7c4e0b92580951ab58` in this isolated worktree.
+- Fetched `origin` and confirmed local `design-doc` and `origin/design-doc` both pointed to the same base before integration.
+- Found the dedicated `design-doc` worktree contains unrelated, uncommitted UI/UX work, including overlapping edits to `PROGRESS.md` and `docs/design-doc/README.md`. Preserved that worktree exactly: no stash, reset, checkout, edit, branch movement, or merge was performed there.
+- Selected an isolated Issue-branch and remote pull-request integration path so the accepted buildability documents can enter `origin/design-doc` without modifying or staging the unrelated dirty worktree.
+
+### What's next
+
+- Commit and push the Issue #9 documentation branch, open a pull request targeting `design-doc`, verify its exact diff and mergeability, then merge it as Commander.
+- After remote integration, leave the dirty dedicated `design-doc` worktree untouched; it will be behind `origin/design-doc` until the owner of its UI/UX work reconciles that branch normally.
+
+### Key decisions made
+
+- Issue #8 is not reused because its missing-design-audit scope and existing branch ownership are distinct from Source Checkout Buildability.
+- Updating the checked-out `design-doc` branch ref beneath a dirty foreign worktree is rejected. Remote PR integration preserves all existing local files and makes the new aggregate head explicit.
+- This integration still grants no `main` change or product-implementation authority.
+
+### Resume Prompt
+
+Resume by committing `docs/9-source-checkout-buildability`, opening and merging its pull request into `design-doc`, while leaving the unrelated dirty `design-doc` worktree untouched.
+
+## Source Checkout Buildability design-doc integration — 2026-08-25
+
+### What's done
+
+- Committed the accepted documentation as `docs/9-source-checkout-buildability@2ba95c60f729317f489e3f40768efa2302b5e46f`, pushed the Issue #9 branch, and opened PR #10 targeting `design-doc`; GitHub reported the exact base/head pair `2932f61f5907558587122c7c4e0b92580951ab58` / `2ba95c60f729317f489e3f40768efa2302b5e46f` as `MERGEABLE` and `CLEAN` with no required checks.
+- Integrated PR #10 through this Commander merge commit so the Source Checkout Buildability Contract and its coordinated AGENTS, handoff, migration, architecture, ADR 0027, CI, design-doc routing, and progress changes enter the `design-doc` history together.
+- Updated `docs/design-doc/README.md` so its initial aggregate merge list no longer claims to enumerate every later Commander task integration.
+- Preserved the unrelated dirty dedicated `design-doc` worktree exactly. Its UI/UX files, `PROGRESS.md`, and `docs/design-doc/README.md` were never edited, staged, stashed, reset, checked out, or merged in place; only the remote branch advances.
+- Re-ran merge-result `git diff --check`, changed-Markdown local-link resolution, the exact one-line `CLAUDE.md` wrapper check, and merge-parent/diff inspection before publication.
+
+### What's next
+
+- Treat the new `origin/design-doc` head as the integrated documentation aggregate while keeping canonical `main` unchanged.
+- Reconcile the separate dirty UI/UX worktree against the advanced remote branch only through its owning task; do not discard or overwrite its local changes.
+- Seek separate owner authorization before selecting concrete host-matrix/toolchain values, creating implementation work items, or adding product code and dependencies.
+
+### Key decisions made
+
+- The dirty checked-out `design-doc` worktree is not an integration surface. An isolated detached Commander worktree forms and publishes the merge without moving the local checked-out branch beneath uncommitted work.
+- PR #10 remains the single review/integration artifact for Issue #9; this merge commit preserves the candidate commit as a parent rather than recreating or copying its files.
+- Integration into `design-doc` records the owner-accepted development-plan contract but does not make `main` canonical integration or product implementation implicit.
+
+### Resume Prompt
+
+Resume from the integrated `origin/design-doc` buildability contract, preserve the separate dirty UI/UX worktree, and request explicit owner authorization before implementation planning or canonical `main` integration.
