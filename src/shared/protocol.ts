@@ -1,8 +1,10 @@
 export const SERVICE_PROTOCOL_VERSION = 1 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
-export const MAX_BLOCK_GRAPHEMES = 8_192;
+export const MAX_BLOCK_GRAPHEMES = 2_048;
+export const MAX_BLOCK_CODE_UNITS = 4_096;
 export const MAX_EDIT_GRAPHEMES = 256;
+export const MAX_EDIT_CODE_UNITS = 1_024;
 
 export type FidelityCategoryKey =
   | 'inline-styles'
@@ -147,16 +149,26 @@ export interface JournalAcknowledgement {
 export interface ServiceReadiness {
   protocolVersion: typeof SERVICE_PROTOCOL_VERSION;
   state: 'ready';
+  runtime: {
+    electron: '43.4.1';
+    node: '24.18.1';
+    modules: '148';
+  };
   harness: {
     state: 'mounted-dormant';
     executionReady: false;
     providerFree: true;
+    services: 6;
+    serviceSet: readonly ['agents', 'sessions', 'llm', 'systemPrompt', 'tools', 'agentLoop'];
+    configuredAgents: 0;
     agents: 0;
     sessions: 0;
     providers: 0;
     configurableProviders: 0;
     tools: 0;
+    assembledTools: 0;
     renderedPrompt: '';
+    renderedRuntimeContext: '';
   };
 }
 

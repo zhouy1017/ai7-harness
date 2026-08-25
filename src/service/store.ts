@@ -13,7 +13,13 @@ import type {
   ReviewBeforeImportProjection,
   StagedImportProjection,
 } from '../shared/protocol.js';
-import { MAX_BLOCK_GRAPHEMES, MAX_EDIT_GRAPHEMES, MAX_WINDOW_BLOCKS } from '../shared/protocol.js';
+import {
+  MAX_BLOCK_CODE_UNITS,
+  MAX_BLOCK_GRAPHEMES,
+  MAX_EDIT_CODE_UNITS,
+  MAX_EDIT_GRAPHEMES,
+  MAX_WINDOW_BLOCKS,
+} from '../shared/protocol.js';
 import { isCleanTracerFidelity, parseDocx, type ParsedDocxBlock } from './docx.js';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -978,7 +984,11 @@ export class EditorialStore {
       '修订日志序号无效。',
     );
     const insertedGraphemes = segmentGraphemes(input.insertText);
-    requireStore(insertedGraphemes.length <= MAX_EDIT_GRAPHEMES, 'EDIT_TOO_LARGE', '单次编辑超出安全范围。');
+    requireStore(
+      input.insertText.length <= MAX_EDIT_CODE_UNITS && insertedGraphemes.length <= MAX_EDIT_GRAPHEMES,
+      'EDIT_TOO_LARGE',
+      '单次编辑超出安全范围。',
+    );
     const requestFingerprint = sha256(canonicalJson(input));
     const prior = this.#journal
       .prepare(
@@ -1034,7 +1044,11 @@ export class EditorialStore {
         ...insertedGraphemes,
         ...originalGraphemes.slice(input.toGrapheme),
       ].join('');
-      requireStore(segmentGraphemes(resultingText).length <= MAX_BLOCK_GRAPHEMES, 'EDIT_TOO_LARGE', '编辑后内容块超出安全范围。');
+      requireStore(
+        resultingText.length <= MAX_BLOCK_CODE_UNITS && segmentGraphemes(resultingText).length <= MAX_BLOCK_GRAPHEMES,
+        'EDIT_TOO_LARGE',
+        '编辑后内容块超出安全范围。',
+      );
       const kind = asString(block.kind) as ManuscriptBlockProjection['kind'];
       const level = block.level === null ? null : asNumber(block.level);
       const resultingBlockDigest = sha256(canonicalJson({ kind, level, text: resultingText }));

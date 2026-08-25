@@ -16,15 +16,20 @@
 - Added the deep SQLite authority boundary in [`src/service/store.ts`](src/service/store.ts): content-addressed local source staging, digest-bound Review Before Import, one atomic exact new-Book/dimension/source/fidelity/primary-Manuscript/branch/r1/block/workflow/import-record graph, a signed maximum-32-block cursor window, and a separate committed journal transaction with exact idempotent acknowledgment binding.
 - Replaced provisional dimensions with the accepted Q8 baseline set under stable IDs and an implementation-owned `1.0.0` profile/digest; equal values are explicitly labeled neutral starting weights, not an exhaustive scoring rubric. The seven accepted workflow phases remain pinned to a separate versioned/digested Manuscript profile.
 - Exact Node `24.18.1` type-check is green. A public-synthetic 40-block DOCX runtime diagnostic exercised stage/review/atomic commit, verified a `32 of 40` first window, and verified sequence-1 journal durability/idempotency; it also found and fixed Windows `fsync` requiring a read/write temporary-object handle.
+- Added the service guard/composition in [`src/service/runtime.ts`](src/service/runtime.ts). It denies default and synchronized ESM named HTTP(S), HTTP/2, TCP/TLS, UDP, DNS, fetch, WebSocket, and EventSource paths before dynamically importing DSH; then it awaits six Cordis plugin start barriers and proves the provider-free graph has zero configured/live agents, Sessions, providers, configurable providers, tools, assembled tools, prompt, and runtime context while excluded services remain absent.
+- Added the private service executable in [`src/service/index.ts`](src/service/index.ts). It requires exact Electron `43.4.1` Node mode (`24.18.1`, ABI `148`), opens SQLite before reporting readiness, validates a four-byte/maximum-512-KiB framed protocol, processes requests serially, emits payload-bounded responses, and tears down the whole Cordis fiber plus both database connections on explicit shutdown, parent EOF, signals, or parent-lease loss.
+- Aligned per-block and edit code-unit/grapheme bounds across [`src/shared/protocol.ts`](src/shared/protocol.ts), [`src/service/docx.ts`](src/service/docx.ts), and [`src/service/store.ts`](src/service/store.ts) so every maximum-32-block projection fits the framed carrier. An exact Electron Node-mode boundary probe produced a 203,397-byte commit response for 32 maximum 2,048-grapheme synthetic blocks against the 524,288-byte limit.
+- Exact Electron service diagnostics are green: 51 public-synthetic blocks staged and atomically committed, 32 of 51 projected, sequence-1 journal ack returned, explicit shutdown and parent EOF exited cleanly, and parent lease loss terminated the service while its inherited stdin pipe was still held open. Network probes covered pre-import default functions, post-sync named functions, and callable/constructable ClientRequest paths without emitting URLs or payloads.
 
 ## What's next
 
-- Add the bounded framed-stdio service entry point, fail-closed outbound-network denial, and real dormant DSH composition; then bundle and exercise it through the separate exact Electron Node-mode subject.
+- Implement the Electron main/preload supervision and context-isolated renderer/editor projection, then bundle the single built subject and drive the one admitted UI journey through it.
 
 ## Unresolved matters or blockers
 
 - Audit nuance, not a stop condition: otherwise-required DSH package APIs contain unused replay/fork, test-fixture, and Code Mode symbols, but no excluded package/service is installed, mounted, or invoked and the actual dormant graph is clean. Dependency provenance must state this boundary without claiming byte-level absence.
 - Bootstrap hardening remains required: child acquisition processes must receive an explicit registry/cache/proxy environment boundary so ambient npm/pnpm/Electron mirror or custom-directory selectors cannot alter selected inputs.
+- Main-process and Chromium renderer outbound denial, exact service environment allowlisting, and the built-bundle post-guard inspection remain to be completed with the Electron integration slice.
 - macOS host execution and Windows/macOS E2E remain unproven; no claim is made for them.
 
 ## Key decisions made
@@ -35,7 +40,9 @@
 - DSH is composed in process from concrete public packages only; no aggregate/CLI, source subpath, provider, Session, approval, attachment, code runtime, persistence, settings, or Typert service is activated.
 - The main-owned picker passes its selected path only over the private main-to-service request; the service alone parses and content-addresses the source. The renderer-facing picker method remains argument-free and never receives a path, bytes, database location, or whole manuscript.
 - `round-trip-export` is truthfully `unsupported` because this tracer has no export behavior. The shared clean-tracer predicate requires the other seven categories to be preserved, records `clean-import-no-round-trip`, and leaves Import Degradation Decision absent.
+- Service readiness is available only after both SQLite authority and the fully awaited Cordis composition exist. It proves infrastructure state only; import completion and journal durability continue to come solely from their committed domain transactions.
+- The service binds to its spawning main-process PID as well as inherited stdin, so a lost supervisor cannot leave an orphan holding the business store. Explicit shutdown writes its bounded response before whole-graph disposal.
 
 ## Resume Prompt
 
-Resume Issue #24 by adding the fail-closed framed-stdio service runtime and mounting only the proven dormant provider-free DSH composition around the completed SQLite import/journal authority.
+Resume Issue #24 by implementing the Electron main-owned picker/service supervisor and the context-isolated Chinese Review Before Import plus bounded ProseMirror editor renderer over the completed framed service.

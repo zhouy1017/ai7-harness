@@ -3,7 +3,7 @@ import { createReadStream } from 'node:fs';
 import { basename, extname, posix } from 'node:path';
 import { Unzip, UnzipInflate, UnzipPassThrough } from 'fflate';
 import { SaxesParser, type SaxesTagNS } from 'saxes';
-import type { FidelityCategoryProjection } from '../shared/protocol.js';
+import { MAX_BLOCK_CODE_UNITS, MAX_BLOCK_GRAPHEMES, type FidelityCategoryProjection } from '../shared/protocol.js';
 
 const MAX_ARCHIVE_BYTES = 16 * 1024 * 1024;
 const MAX_EXPANDED_BYTES = 64 * 1024 * 1024;
@@ -66,6 +66,10 @@ function canonicalJson(value: unknown): string {
 
 function sha256(value: string | Uint8Array): string {
   return createHash('sha256').update(value).digest('hex');
+}
+
+function graphemeCount(value: string): number {
+  return Array.from(new Intl.Segmenter('zh-CN', { granularity: 'grapheme' }).segment(value)).length;
 }
 
 function safeDisplayName(input: string): string {
@@ -295,6 +299,7 @@ function parseDocument(xml: string): { blocks: ParsedDocxBlock[]; signals: Docum
     requireDocx(paragraph, 'paragraph state missing');
     const text = paragraph.text.normalize('NFC').replace(/[ \t]+/g, ' ').replace(/ *\n */g, '\n').trim();
     if (text.length > 0) {
+      requireDocx(text.length <= MAX_BLOCK_CODE_UNITS && graphemeCount(text) <= MAX_BLOCK_GRAPHEMES, 'paragraph exceeds the bounded block size');
       requireDocx(blocks.length < MAX_BLOCK_COUNT, 'too many manuscript blocks');
       const style = paragraph.style?.toLocaleLowerCase('en-US') ?? '';
       const headingMatch = /(?:heading|标题)\s*([1-6])/.exec(style);
