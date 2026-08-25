@@ -6,12 +6,12 @@ Status: **freeze-marker cold-start router; active at the dedicated Issue #16 mer
 
 - Canonical line: `main@c8cbe26c4cccc4a912b3bbc05bd5b23fbf5468b9`, unchanged by the aggregation and freeze work.
 - Exact content baseline before the freeze marker: `design-doc@779db44cb557156f71af17e5b240b03681264ad5`.
-- Freeze identity: the merge commit of the dedicated Issue #16 pull request into `design-doc`; Git/PR metadata supplies its exact SHA because a merge commit cannot embed its own identity.
+- Freeze identity: the merge commit of [PR #17](https://github.com/zhouy1017/ai7-harness/pull/17) into `design-doc`; Git/PR metadata supplies its exact SHA because a merge commit cannot embed its own identity.
 - [`docs/design-doc/FREEZE-BASELINE.md`](docs/design-doc/FREEZE-BASELINE.md) lists every integrated source line, recovery snapshot, stash, evidence-only ref, superseded item, reconciliation, and deferred matter.
 - The aggregate has 40 root ADRs, 851 unique V2 UI/UX requirements, D-001–D-084, J-01–J-16, and 14 V2 UI ADRs.
 - No product implementation, dependency manifest, CI workflow, supported-journey implementation, manuscript, credential, or private fixture exists in this freeze work.
 
-Before the dedicated pull request merges, this file routes only to completing the bounded Commander integration. At the merge commit or any descendant, it routes to later owner selection from the frozen aggregate.
+Before PR #17 merges, this file routes only to completing the bounded Commander integration. At the merge commit or any descendant, it routes to later owner selection from the frozen aggregate.
 
 ## Start here
 
@@ -42,4 +42,4 @@ The freeze does not accept every candidate conclusion, promote anything to canon
 
 ## Safe next action
 
-If this is the pre-merge Issue #16 source branch, complete only its dedicated Commander PR into `design-doc`. At the merge commit or any descendant, obtain an explicit owner decision naming the exact candidate paths to accept, reject, or revise. Only then may the Commander prepare a separate allowlisted `main` integration. Implementation planning and implementation require their own later authorization.
+If this is the pre-merge Issue #16 source branch, complete only PR #17 into `design-doc`. At the merge commit or any descendant, obtain an explicit owner decision naming the exact candidate paths to accept, reject, or revise. Only then may the Commander prepare a separate allowlisted `main` integration. Implementation planning and implementation require their own later authorization.

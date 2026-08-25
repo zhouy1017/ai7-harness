@@ -4,6 +4,8 @@ Status: **freeze-marker payload; active at the dedicated Issue #16 merge commit 
 
 Freeze work item: [Issue #16](https://github.com/zhouy1017/ai7-harness/issues/16)
 
+Freeze pull request: [PR #17](https://github.com/zhouy1017/ai7-harness/pull/17)
+
 Canonical integration line: `main@c8cbe26c4cccc4a912b3bbc05bd5b23fbf5468b9`
 
 Exact pre-marker aggregate content head: `design-doc@779db44cb557156f71af17e5b240b03681264ad5`
@@ -14,7 +16,7 @@ Last updated: **2026-08-25**
 
 This board controls repository-development coordination only. It is not an AI7 product workflow, a Policy Document, or a replacement for canonical context and ADR definitions.
 
-On the source branch before the Issue #16 pull request merges, the only remaining action is Commander integration into `design-doc`. At that merge commit or any descendant, the frozen-state directives and next control event below are active.
+On the source branch before PR #17 merges, the only remaining action is Commander integration into `design-doc`. At that merge commit or any descendant, the frozen-state directives and next control event below are active.
 
 ## Current disposition
 

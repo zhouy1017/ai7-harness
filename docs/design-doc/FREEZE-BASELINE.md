@@ -8,15 +8,17 @@ Owner instruction: aggregate every discovered documentation outcome into `design
 
 Freeze work item: [Issue #16](https://github.com/zhouy1017/ai7-harness/issues/16)
 
+Freeze pull request: [PR #17](https://github.com/zhouy1017/ai7-harness/pull/17)
+
 Canonical line held unchanged: `main@c8cbe26c4cccc4a912b3bbc05bd5b23fbf5468b9`
 
 Exact pre-marker aggregate content head: `design-doc@779db44cb557156f71af17e5b240b03681264ad5`
 
-The freeze marker is the merge commit of Issue #16's dedicated pull request into `design-doc`. Its SHA is resolved from Git and the pull-request record rather than embedded in this commit: a merge commit cannot contain its own identity. The exact content being frozen before this marker is the immutable head above; the six Issue #16 paths — this baseline, the recovery disposition appendix, aggregate README, current control board, handoff, and progress checkpoint — form the marker payload.
+The freeze marker is the merge commit of [PR #17](https://github.com/zhouy1017/ai7-harness/pull/17) into `design-doc`. Its SHA is resolved from Git and the pull-request record rather than embedded in this commit: a merge commit cannot contain its own identity. The exact content being frozen before this marker is the immutable head above; the six Issue #16 paths — this baseline, the recovery disposition appendix, aggregate README, current control board, handoff, and progress checkpoint — form the marker payload.
 
 ## Activation rule
 
-- On `docs/16-freeze-design-doc` before the dedicated pull request merges, this is a validated candidate marker payload and the Commander integration remains outstanding.
+- On `docs/16-freeze-design-doc` before PR #17 merges, this is a validated candidate marker payload and the Commander integration remains outstanding.
 - At that pull request's merge commit or any descendant on `design-doc`, this is the active frozen aggregate starting point and the next repository-development event requires a separate owner decision.
 
 This rule keeps the same committed text accurate on both sides of the merge boundary without falsely embedding or preclaiming the merge commit.

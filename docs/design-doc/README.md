@@ -6,7 +6,7 @@ The owner explicitly requested a `design-doc` branch containing the design work 
 
 Start with the [`design-doc` freeze baseline](./FREEZE-BASELINE.md). It is the authoritative source/disposition manifest for this aggregate, but it is not a substitute for the owning ADRs, Policy Documents, or context definitions.
 
-On the Issue #16 source branch before merge, the freeze documents are a validated marker payload. At the dedicated pull request's merge commit or any descendant, they are the active frozen starting point.
+On the Issue #16 source branch before PR #17 merges, the freeze documents are a validated marker payload. At PR #17's merge commit or any descendant, they are the active frozen starting point.
 
 ## Included design heads
 
@@ -32,7 +32,7 @@ The initial aggregate merge commits are `8b0580b`, `95b52d6`, `63865fa`, and `b2
 | Issue #12 response presentation | `56cb1d56a9a9a823ef7f0cda8ad3f7832e88fabc` | [PR #13](https://github.com/zhouy1017/ai7-harness/pull/13), merge `4ee5d4bb0967f82c7f8abb01aa2541616052710b` |
 | Issue #14 incremental agent guidance | `e0d0d1bc7d4af40805b63834e6f12bed0eab7201` | [PR #15](https://github.com/zhouy1017/ai7-harness/pull/15), merge `779db44cb557156f71af17e5b240b03681264ad5` |
 
-The dedicated Issue #16 merge commit is the freeze marker. Git and the Issue #16 pull request provide its exact SHA; `779db44cb557156f71af17e5b240b03681264ad5` is the immutable aggregate content head immediately before the marker payload.
+[PR #17](https://github.com/zhouy1017/ai7-harness/pull/17)'s merge commit is the freeze marker. Git and PR #17 provide its exact SHA; `779db44cb557156f71af17e5b240b03681264ad5` is the immutable aggregate content head immediately before the marker payload.
 
 ## Working-tree map
 

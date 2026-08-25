@@ -1,6 +1,6 @@
 # Current progress
 
-Status: **Issue #16 freeze payload validated; on the source branch it awaits the dedicated PR/merge, while at that merge commit or a descendant this checkpoint records the completed documentation freeze; no implementation authority**
+Status: **Issue #16 freeze payload validated and opened as PR #17; on the source branch it awaits re-review/Commander merge, while at that merge commit or a descendant this checkpoint records the completed documentation freeze; no implementation authority**
 
 ## What's done
 
@@ -12,10 +12,11 @@ Status: **Issue #16 freeze payload validated; on the source branch it awaits the
 - Completed an independent read-only inventory audit: no named branch, PR, snapshot, worktree, stash, tag, or release carries an unmerged selected outcome. Added exact Issue #6/#7 source heads, the integrated Codex-first intermediate, grouped disposition of 52 no-ref recovery commits, and SHA-256 dispositions for two repository-external Issue #8 evidence artifacts in `docs/design-doc/RECOVERY-OBJECT-DISPOSITIONS.md`.
 - Passed the pre-PR freeze checks: all 12 integrated-table heads and all three historical intermediates are ancestors of `779db44`; `origin/main` and `origin/design-doc` match their pins; 192 active Markdown files have zero broken local links; 851/851 requirement definitions are unique; D-001–D-084 and J-01–J-16 are complete; 40 root and 14 UI ADR IDs are unique; the 52-row recovery inventory is complete; all eight archive payloads match `2932f61`; `CLAUDE.md` is exact; and there are no conflict markers, trailing whitespace, package manifests, or non-document changes.
 - Added the mandatory full Change Brief to Issue #16 and reconciled advisory findings: freeze activation is explicit across the source/merge boundary, every replaced outgoing router is Git-only, the literal lifecycle result is **archive sweep: none**, and the aggregate map now routes to context, glossary, domain, policy, and `kick-in/` owners.
+- Committed and pushed the six-path payload at `9ad084c` and opened dedicated [PR #17](https://github.com/zhouy1017/ai7-harness/pull/17) against `design-doc`; the exact merge commit remains external Git/PR metadata by design.
 
 ## What's next
 
-- Before the marker exists: commit/push, open the dedicated Issue #16 pull request, record its identity, complete re-review, and merge it into `design-doc` as Commander; close stale Issues #1–#5 and Issue #16 with exact dispositions.
+- Before the marker exists: commit/push the PR-identity checkpoint, complete re-review, and merge PR #17 into `design-doc` as Commander; close stale Issues #1–#5 and Issue #16 with exact dispositions.
 - At the marker or any descendant: no freeze-repository work remains. The next valid work requires an explicit owner decision on candidate selection; leave no active Worker dispatch and keep `main` unchanged.
 
 ## Key decisions
