@@ -10,8 +10,11 @@
 
 - [Learning Eligibility Policy](./docs/policies/learning-eligibility-policy.md) — current design baseline for material-selection authority, bounded automation, revision evidence, and rollback.
 - [Factual Verification Policy](./docs/policies/factual-verification-policy.md) — current design baseline for factual-evidence authority, provenance, independent verification statuses, and conflict handling.
+- [Provider Processing Policy v1](./docs/policies/provider-processing-policy.v1.json) — authority-bearing canonical serialized minimum baseline; see its [human projection](./docs/policies/provider-processing-policy.md) and [policy-specific schema](./docs/policies/provider-processing-policy.v1.schema.json).
+- [External Export Policy v1](./docs/policies/external-export-policy.v1.json) — authority-bearing canonical serialized minimum baseline; see its [human projection](./docs/policies/external-export-policy.md) and [policy-specific schema](./docs/policies/external-export-policy.v1.schema.json).
+- [Active policy set v1](./docs/policies/active-policy-set.v1.json) — exact version, path, and SHA-256 selection pins for those two concrete baselines; [`docs/policies/README.md`](./docs/policies/README.md) owns the artifact routes and validation instructions.
 
-Provider Processing Policy and External Export Policy are required separate Execution-context Policy Documents. Their minimum active baselines are the next authorized Issue after design normalization; until then, no provider/model transmission or external export implementation is admitted.
+Provider Processing Policy and External Export Policy remain separate Execution-context Policy Documents and remain separate from Public Release Permission. Provider Processing v1 authorizes zero live transmissions. External Export v1 makes only one exact user-selected local-filesystem file Effect policy-eligible and is never Effect Approval or outcome proof. These policy-only baselines authorize no provider/model call, local-export implementation, or network/cloud/email destination.
 
 ## Implementation-facing specifications
 

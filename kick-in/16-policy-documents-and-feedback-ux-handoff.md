@@ -36,4 +36,8 @@ The concrete accepted flows, states, microcopy, keyboard/accessibility behavior,
 
 ## Current policy-baseline boundary
 
-Learning Eligibility and Factual Verification policy baselines already exist. Provider Processing Policy and External Export Policy remain distinct required Policy Documents and are the next separately authorized Issue after baseline normalization. Until their active minimum baselines exist, no model/provider transmission or external-export implementation is admitted. This document does not choose a provider, endpoint, credential, external destination, or Public Release Permission.
+Learning Eligibility and Factual Verification retain their existing design-baseline status and formats; they are not claimed to have migrated to the new serialized schemas. The separate Provider Processing and External Export active minimum baselines now exist under the [`docs/policies/` owner](../docs/policies/README.md) and are selected by the exact digest-pinned [`active-policy-set.v1.json`](../docs/policies/active-policy-set.v1.json).
+
+Provider Processing v1 denies by default, has zero provider allow rules, and authorizes no live transmission. External Export v1 denies by default and makes only an exact platform-native user-selected local-filesystem file Effect over an exact Delivery Package version or Editorial Deliverable Revision policy-eligible; exact per-file preparation, Effect Approval, commit/verification, receipt or classified outcome, drift, cancellation, and ambiguity safeguards still apply. Policy eligibility is not Effect authority or outcome proof.
+
+These concrete baselines do not choose a provider, endpoint, model, credential, format, or implementation. They authorize no live provider/model call, no local-export implementation, no network/cloud/email destination, and no Public Release Permission. Any such work remains a separately scoped and authorized task.

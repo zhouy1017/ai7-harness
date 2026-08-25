@@ -364,10 +364,14 @@ A Policy Document deciding which Outbound Data Categories and scopes may be sent
 _中文_: 模型服务数据处理策略
 _Avoid_: External Export Policy, Public Release Permission
 
+_Current active minimum baseline_: authority-bearing canonical [`provider-processing-policy.v1.json`](../../policies/provider-processing-policy.v1.json), with its [policy-specific schema](../../policies/provider-processing-policy.v1.schema.json), [human projection](../../policies/provider-processing-policy.md), and exact [active-set pin](../../policies/active-policy-set.v1.json).
+
 **External Export Policy**:
 A Policy Document governing transfer of an exact deliverable revision, source, or package across AI7-controlled storage to a named non-provider destination, including a user-chosen local filesystem destination. It is evaluated for each export Effect and is never a Delivery Package field, standing overwrite grant, Public Release Permission, or outcome proof.
 _中文_: 对外导出策略
 _Avoid_: Provider Processing Policy, Delivery Package authority, Effect Approval, Effect Receipt, Public Release Permission
+
+_Current active minimum baseline_: authority-bearing canonical [`external-export-policy.v1.json`](../../policies/external-export-policy.v1.json), with its [policy-specific schema](../../policies/external-export-policy.v1.schema.json), [human projection](../../policies/external-export-policy.md), and exact [active-set pin](../../policies/active-policy-set.v1.json).
 
 <a id="local-export-preparation"></a>
 **Local Export Preparation**:

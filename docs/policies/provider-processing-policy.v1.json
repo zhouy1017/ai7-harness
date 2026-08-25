@@ -1,0 +1,55 @@
+{
+  "schemaDialect": "http://json-schema.org/draft-07/schema#",
+  "schemaPath": "docs/policies/provider-processing-policy.v1.schema.json",
+  "documentType": "ai7-policy-document",
+  "policyId": "provider-processing-policy",
+  "policyType": "provider-processing",
+  "version": "v1",
+  "lifecycleStatus": "active",
+  "predecessorVersion": null,
+  "canonicalPath": "docs/policies/provider-processing-policy.v1.json",
+  "humanProjectionPath": "docs/policies/provider-processing-policy.md",
+  "authorityBasis": [
+    "docs/domain/execution/CONTEXT.md",
+    "docs/adr/0007-separate-decisions-authority-and-effect-proof.md",
+    "docs/adr/0016-proprietary-license-and-local-only-sample-manuscripts.md",
+    "docs/adr/0018-tiered-activation-for-agent-authored-revisions.md",
+    "docs/architecture-v2/HARNESS-INTEGRATION.md",
+    "kick-in/22-task-skill-capability-trust-provider-boundary.md"
+  ],
+  "decision": {
+    "default": "deny",
+    "providerAllowRules": [],
+    "authorizedLiveTransmissionCount": 0
+  },
+  "outboundDataCategories": {
+    "public-or-synthetic": {
+      "labelZh": "公开或合成内容"
+    },
+    "unpublished-metadata": {
+      "labelZh": "未公开材料元数据"
+    },
+    "unpublished-excerpts": {
+      "labelZh": "未公开材料选段"
+    },
+    "unpublished-full-content": {
+      "labelZh": "未公开材料全文"
+    }
+  },
+  "credentialBoundary": {
+    "isOutboundDataCategory": false,
+    "permittedInModelVisibleMaterial": false,
+    "permittedInGeneralOutboundMaterial": false,
+    "opaqueReferenceOnlyOutsideFinalConsumer": true,
+    "finalProtocolUseRequiresSeparateAuthorization": true,
+    "thisPolicyAuthorizesCredentialUse": false
+  },
+  "authoritySeparations": {
+    "runSourceScopeAloneAuthorizesTransmission": false,
+    "runAuthorizationAloneOverridesThisPolicy": false,
+    "configuredProviderAloneAuthorizesTransmission": false,
+    "configuredCredentialAloneAuthorizesTransmission": false,
+    "externalExportPolicyAuthorizesProviderTransmission": false,
+    "publicReleasePermissionAuthorizesProviderTransmission": false
+  }
+}
