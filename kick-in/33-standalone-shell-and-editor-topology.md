@@ -1,8 +1,8 @@
 # Standalone Shell and Editor Topology
 
-Status: **accepted in Question 34 with owner revisions**
+Status: **accepted topology and scale targets; dedicated performance and editor-sufficiency gates are superseded by ADR 0027**
 
-Scope: process topology and the editor's technical foundation. Interaction design, layout, visual language, and information architecture remain with the owner's separate UI/UX session.
+Scope: process topology and the editor's technical foundation. Interaction design, layout, visual language, and information architecture are owned by the accepted [V2 UI/UX baseline](../docs/ui-ux-v2/README.md).
 
 ## Manuscript scale is a required feature
 
@@ -14,7 +14,7 @@ Long Chinese manuscripts are not a stretch goal. The product must meet three tie
 | **up to 1M chars** | No critical performance issue. Operations may be visibly slower, but nothing blocks work and long operations show progress | Store and index operations, whole-manuscript search, scroll to an arbitrary position |
 | **up to 10M chars** | No crash and no unresponsiveness. The application opens, stays interactive, never hangs the UI thread, never exhausts memory, and never loses data. Degraded speed is acceptable; breaking is not | Store scale, memory ceiling, absence of unbounded in-memory structures |
 
-For orientation: 10M Chinese characters is roughly 30 MB of UTF-8 text and, at typical Chinese prose paragraph lengths, somewhere between 50,000 and 100,000 Manuscript Blocks. The existing sample Books run 290K to 396K characters, so real material sits inside the easiest tier and the upper tiers are robustness headroom.
+For orientation: 10M Chinese characters is roughly 30 MB of UTF-8 text and, at typical Chinese prose paragraph lengths, somewhere between 50,000 and 100,000 Manuscript Blocks. Repository and hosted-CI evidence uses generated public-synthetic material only; no private or real manuscript is a fixture or calibration source.
 
 ### Windowed display is accepted; index time is the binding constraint
 
@@ -36,9 +36,9 @@ Three indexes, all disk-backed and incrementally maintained on edit:
 2. **Full-text index** over block content, **CJK-aware**. Chinese has no word boundaries, so a substring-capable index such as a trigram tokenizer is required; a word tokenizer designed for space-delimited languages will not serve.
 3. **Outline index** — headings and sections for navigation.
 
-Proposed operation budgets, offered as calibration to confirm against the spike rather than as accepted figures: first match under one second at the 10M tier; jump under 200 milliseconds at any tier; typing latency within one frame and independent of manuscript size; replace showing progress beyond roughly two seconds while remaining atomic.
+Illustrative latency numbers from the design interview are not accepted budgets. Implementation may calibrate concrete targets from the complete supported journeys and production observations without creating a separate performance gate.
 
-**Consequence for the editor choice.** Because the editor only ever holds a bounded window, the library matters considerably less than the store. ProseMirror's medium confidence is correspondingly less critical, and the spike's primary target becomes the paging store and its indexes rather than the editor.
+**Consequence for the editor choice.** Because the editor only ever holds a bounded window, the library matters considerably less than the store. ProseMirror's medium confidence is correspondingly less critical, while paging and indexing remain principal implementation risks. They do not require a prerequisite spike; a concrete blocker may trigger only a bounded non-gating diagnostic.
 
 ### What this forces
 
@@ -48,19 +48,19 @@ These are consequences of the tiers, not preferences:
 2. **The authoritative document model lives in the AI7 service process**, backed by a store that pages by block rather than by whole document. A local embedded database is the expected shape.
 3. **Whole-manuscript operations run in the service**, streaming over blocks — search, replace, statistics, verification passes, export. They are cancellable, report progress, and never run on the UI thread.
 4. **No unbounded in-memory structures anywhere.** Indexes are disk-backed or explicitly bounded, at every layer.
-5. **The memory ceiling is explicit and tested at the 10M tier**, not assumed.
+5. **Memory is explicitly bounded through the 10M tier**, with no unbounded in-memory representation at any layer.
 
 Because the editor only ever holds a bounded window, the 10M tier is met by the store and the windowing rather than by the editor library. That makes the editor choice more robust, not less.
 
-### Proving it
+### Exercising the behavior
 
-These tiers become explicit criteria in the Standalone Editing Sufficiency Gate, and an **early performance gate** proves them before the editor is built out rather than at the end. The operations to measure are cold Book open, time to first editable view, keystroke-to-paint latency inside a loaded window, navigation to an arbitrary position, whole-manuscript search, save and checkpoint, and export.
+These tiers remain product behavior. Where a complete provider-free supported journey exercises cold Book open, first editable view, keystroke-to-paint latency, navigation, whole-manuscript search, save/checkpoint, or export, the behavior stays inside that same journey rather than creating a separate performance or editing-sufficiency gate.
 
-Per-operation latency budgets are deliberately not set here. They should be fixed against measurements from generated corpora at each tier plus the real 396K-character sample Book, rather than guessed in advance.
+Per-operation latency budgets are deliberately not set here. Any later calibration uses generated public-synthetic corpora and production observations; private or real manuscript material never enters repository or hosted-CI evidence.
 
 ## Shell: Electron
 
-AI7 is TypeScript and Node, and Harness is Node, so a Node runtime ships regardless. **Electron 43.4.0 bundles Node 24.18.1**, which satisfies the Harness engine requirement of `^22.19.0 || >=24` directly.
+AI7 is TypeScript and Node, and Harness is Node, so a Node runtime ships regardless. Electron is the accepted shell. The implementation plan must select and pin the exact Electron version, its bundled Node version, the Supported Development Host matrix, and one package-manager version after checking the accepted Harness engine range and the public package metadata together.
 
 Rejected alternatives: **Tauri** would add a Rust toolchain and still need a Node sidecar, since Harness cannot run in Rust — two runtimes to avoid one. **Direct WebView2 hosting** means writing native glue for a problem Electron already solves.
 
@@ -68,7 +68,7 @@ The predecessor used Electron 43 for this same application shape, and portable-f
 
 ### The ABI risk is smaller than recorded
 
-The register carried "Electron/native dependencies conflict with Harness Node/package stack" as High. Two findings reduce it: Electron 43's bundled Node already satisfies the Harness engines constraint, and the core packages AI7 selects are pure JavaScript — `dsh-agent-loop` depends only on `schemastery`. The native modules live in the sandbox and shell packages that Question 30 already excludes. The package-subset decision defused most of this risk as a side effect.
+The register carried "Electron/native dependencies conflict with Harness Node/package stack" as High. The exact-version plan must verify the chosen Electron-bundled Node against the accepted Harness engine range and the exact selected package subset. Excluding generic sandbox and shell packages removes much of the native surface, but the committed lockfile and selected dependency metadata—not this design document—determine the actual compatibility claim.
 
 ## Topology: three processes
 
@@ -82,10 +82,10 @@ The service is separate rather than living in Electron main for four reasons:
 
 1. **UI responsiveness under parallel Runs.** Question 31 requires multiple concurrent Runs; a busy agent loop must never block paint.
 2. **Crash isolation.** A provider or Harness failure must not take down an editor holding unsaved text, which serves Question 23's no-silent-loss obligation directly.
-3. **Headless testability.** The same service is drivable without a GUI, which is exactly what Question 24's ten-minute `pr` gate and Question 35's tracer slice need. A service inside Electron main would force every test through an Electron harness.
-4. The Question 31 concurrency and budget governor gets a natural home.
+3. **Independent service control and diagnosis.** The same service is directly drivable for focused local diagnosis and process-control hooks. The product E2E journey and current tracer still launch and traverse the renderer, Electron main, service, composed Harness runtime, and domain boundary; service-only execution never substitutes for that path.
+4. The Question 31 concurrency governor, usage observation, and optional explicit Run Budget Ceiling enforcement get a natural home; Issue #8 Batch 3 later fixed the default ceiling at `unset` and kept Provider Account Limits external.
 
-**IPC uses stdio or a Windows named pipe. No TCP listener.** The register carries "Harness web server is exposed beyond loopback" as Critical; never opening a socket removes that structurally rather than configuring it away, following the same reasoning as Question 30's dependency-graph argument.
+**IPC uses stdio or a private platform-local adapter, such as a Windows named pipe when needed. No TCP listener.** The macOS carrier remains an adapter decision and creates no new authority or process. The register carries "Harness web server is exposed beyond loopback" as Critical; never opening a socket removes that structurally rather than configuring it away, following the same reasoning as Question 30's dependency-graph argument.
 
 ## Editor foundation: ProseMirror
 
@@ -102,11 +102,11 @@ Rejected: **Slate**, for known IME fragility that is disqualifying in Chinese-fi
 
 **Windowing is what makes this work at scale.** Each loaded window is its own ProseMirror document with its own coordinate space, mapped to global Manuscript Block identities. Whole-manuscript navigation uses a lightweight outline that never materializes text.
 
-Confidence here is **medium rather than high**. This is the one Question 34 choice that warrants a spike against the scale tiers before it is treated as settled.
+ProseMirror over bounded windows is accepted. Concrete schema, paging, and IME behavior is refined through the applicable complete vertical journey; a separate scale spike is not a prerequisite or gate.
 
-## What remains with the UI/UX session
+## UI/UX owner
 
-Layout, visual design, interaction patterns, information architecture, how proposals and comments surface, onboarding, and the renderer framework — subject to the already-accepted constraint that AI7 does not adopt the Harness web client.
+The accepted [V2 UI/UX baseline](../docs/ui-ux-v2/README.md) owns layout, visual design, interaction patterns, information architecture, proposal/comment presentation, and onboarding, subject to the accepted constraint that AI7 does not adopt the Harness web client. ProseMirror remains the renderer's editor foundation.
 
 ## Question 34 decision
 
@@ -115,10 +115,10 @@ Accepted with owner revisions:
 - long Chinese manuscripts are a required feature with three binding scale tiers at 500K, 1M, and 10M Chinese characters;
 - windowed display is accepted rather than merely tolerated, so the binding performance constraint is whole-manuscript index time for find, replace, and jump rather than render time;
 - the renderer never holds a whole manuscript, the authoritative model lives in the service over a paging store, and whole-manuscript operations stream in the service;
-- Electron is the shell, with Electron 43's bundled Node satisfying the Harness engine requirement;
+- Electron is the shell; implementation planning pins its exact version, bundled Node compatibility, Supported Development Host matrix, and one package-manager version;
 - three processes, with a separate AI7 service holding domain services and the Harness runtime;
 - IPC over stdio or a named pipe, never a TCP listener;
-- ProseMirror is the editor foundation, used over bounded windows, at medium confidence pending a scale spike; and
-- interaction design remains with the separate UI/UX session.
+- ProseMirror is the accepted editor foundation over bounded windows; and
+- interaction design is owned by the accepted V2 UI/UX baseline.
 
 See [ADR 0024](../docs/adr/0024-electron-shell-with-isolated-ai7-service.md) and [ADR 0025](../docs/adr/0025-windowed-editing-over-a-paging-manuscript-store.md).

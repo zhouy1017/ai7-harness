@@ -24,6 +24,21 @@ _Avoid_: Foundation Model capability, editorial knowledge
 A software framework whose extension and composition mechanisms shape, observe, and evaluate Agent Behavior without owning AI7 editorial truth or changing Foundation Model weights; DeepSeek Harness is the accepted foundation for this role.
 _Avoid_: Foundation Model, Editorial Intelligence Layer
 
+**Primary Agent Harness**:
+The single production framework that supplies AI7's generic model conversation, context assembly, turn progression, model invocation, technical tool dispatch, streamed technical events, compaction, subagent mechanics where used, and in-turn recovery. DeepSeek Harness holds this role and is composed inside the AI7 Node service from an exactly pinned package subset; AI7 retains every product and business authority.
+_中文_: 主代理执行框架
+_Avoid_: AI7 runtime, product authority, second loop, Model Provider
+
+**Primary Agent Harness Adapter**:
+The AI7-owned module in the Node service that presents AI7-shaped execution operations while hiding DSH composition, Session, tool-event, provider-invocation, and storage details. It contains a composed in-process runtime, writes no AI7 domain record, and grants no authority.
+_中文_: 主代理执行框架适配器
+_Avoid_: Agent loop, AI7 Capability Facade, Provider broker, external process client
+
+**Codex Interaction Model Reference**:
+The non-runtime interaction and engineering reference from which AI7 may reinterpret task capture, context, progress, interruption, clarification, history, review, host boundaries, and extension ideas without adopting Codex branding, GUI code, coding defaults, or execution authority. It ships no dependency, process, Session, provider, fallback, adapter target, or source baseline.
+_中文_: Codex 交互模型参考
+_Avoid_: Codex runtime, Primary Agent Harness, UI baseline, component library, product shell
+
 **Harness Agent Behavior Layer**:
 AI7's configured use of the DeepSeek Harness Agent Behavior Framework, shaping Agent Behavior through profiles, bundles, presets, plugins, prompts/context, tools, policies, workflows, subagents, sessions, and hooks.
 _Avoid_: Editorial Intelligence Layer, AI7 business authority
@@ -68,9 +83,19 @@ _中文_: 计划预览
 _Avoid_: Run Authorization, Plan Envelope
 
 **Plan Envelope**:
-The machine-authoritative limits within which Run Authorization permits execution, including capabilities, tools, sources, providers, privacy category, budget, ceilings, fallback/retry rules, adaptation classes, and Effect gates.
+The machine-authoritative limits within which Run Authorization permits execution, including capabilities, tools, sources, providers, privacy category, the exact Run Budget Ceiling state, fallback/retry rules, adaptation classes, and Effect gates.
 _中文_: 计划权限边界
 _Avoid_: Plan Preview, Effect Approval, standing permission
+
+**Run Budget Ceiling**:
+The optional AI7-owned hard monetary or usage ceiling for one Run, bound in the Plan Envelope as either an explicit value or `unset`; `unset` is the default and means only that AI7 applies no product-side per-Run ceiling, not that provider service is free, unlimited, or exempt from Provider Account Limits.
+_中文_: 任务运行预算上限
+_Avoid_: Provider Account Limit, cost estimate, Authority Ceiling, free service, unlimited provider account
+
+**Run Budget Ceiling Reached**:
+The terminal Task Outcome classification used when an explicit Run Budget Ceiling prevents further model dispatch; it preserves partial results and actual work but creates no new result-record type and cannot continue through Resume or Retry.
+_中文_: 任务运行预算已达上限
+_Avoid_: Provider Account Limit, Task success, paused Run, new Task Outcome type
 
 **Plan Adaptation**:
 A recorded adjustment to an Execution Plan that remains explicitly permitted by its unchanged Plan Envelope.
@@ -212,8 +237,28 @@ The non-authoritative instructional and catalog representation of an admitted AI
 _中文_: Harness 技能投影
 _Avoid_: Task Skill Package, Capability Implementation, authority grant
 
+**Third-Party DSH Plugin**:
+An externally authored open-source DSH plugin admitted into AI7's composition for an identified capability or composition need. It is a code-bearing Capability Implementation or composition dependency, never a Task Skill, Policy Document, Model Provider, credential, Authority Ceiling, Capability Grant, or user-facing brand. It supplies mechanism only; capability expansion never self-activates.
+_中文_: 第三方 DSH 插件
+_Avoid_: Task Skill, extension marketplace item, Capability Grant, product feature brand
+
+**Plugin Admission Snapshot**:
+The dated immutable record of a Third-Party DSH Plugin's repository identity, open-source license, GitHub stars, qualifying update commits, latest qualifying update date, selected version/commit, artifact identity, and notice obligations when AI7 selects that version. These are admission facts, not continuing runtime inputs or scheduled re-measurements; another upstream version requires another snapshot.
+_中文_: 插件准入快照
+_Avoid_: Health check, quality score, evaluation report, monitoring signal
+
+**Local Plugin Pin**:
+The immutable AI7-controlled binding from one admitted plugin identity/version to its exact upstream commit, local artifact digest, manifest entry, lockfile entry, provenance, and rollback predecessor. Ranges, branches, mutable tags, and `latest` are forbidden; AI7 performs no automatic upstream update.
+_中文_: 本地插件版本锁定
+_Avoid_: Dependency range, update channel, automatic update policy
+
+**Implementation Assumption**:
+A design-stage expectation about DSH or platform behavior paired with the bounded response if implementation finds otherwise. It records uncertainty without creating an evidence task, validation gate, authority, or product promise.
+_中文_: 实现假设
+_Avoid_: Verified capability, defect, acceptance test, Owner blocker
+
 **Run Source Scope**:
-The exact Book, Series, Cross-project, source, and revision read boundary authorized for one Run.
+The exact Book, Series, Cross-project, source, and revision read boundary authorized for one Run. Its frozen record is never rewritten, while a later effective restriction may reduce executable access and force Plan Revision plus renewed Run Authorization but can never expand access silently.
 _中文_: 任务运行来源范围
 _Avoid_: Working Corpus, Outbound Data Category, mutation authority
 
@@ -221,6 +266,28 @@ _Avoid_: Working Corpus, Outbound Data Category, mutation authority
 A provider-independent function actually needed by a Task Skill, such as planner, writer, reviewer, embedder, or reranker.
 _中文_: 模型角色
 _Avoid_: Model Provider, model name, Provider Binding
+
+**Fast Interaction Role**:
+The Model Role for quick interaction, low-risk candidate generation, and latency-sensitive assistance. Its accepted default binding is DeepSeek V4 Flash.
+_中文_: 快速交互角色
+_Avoid_: Cheap model, draft-only model, factual authority
+
+**Main Editorial Role**:
+The Model Role for Chinese long-form writing, editorial proposals, cross-source synthesis, factual research, and complex instruction following. Its accepted default binding is DeepSeek V4 Pro High.
+_中文_: 主编辑角色
+_Avoid_: Default model, editor, decision maker, factual authority
+
+**Difficult Escalation Role**:
+The Model Role for difficult or unusually consequential work that exceeds the Main Editorial Role's expected capability. Its accepted default binding is DeepSeek V4 Pro Max; escalation is an AI7 policy and plan decision, never a model's own choice.
+_中文_: 疑难升级角色
+_Avoid_: Retry model, automatic fallback, authority upgrade
+
+**Frontier Model Role**:
+The Model Role for challenge or explicitly authorized high-consequence work. Its accepted default binding is DeepSeek V4 Pro Max; an explicitly configured eligible alternative enters the same one-loop topology, Provider Resolution Plan, Credential Broker, Run Budget Ceiling state, and egress boundary.
+_中文_: 前沿模型角色
+_Avoid_: Second harness, silent fallback, escape hatch, truth oracle
+
+These four named roles remain Model Roles: Task Skills declare hard requirements and soft preferences, never a provider, model, endpoint, or credential. A default binding is a configuration fact, never factual authority; output remains a proposal or research lead.
 
 **Model-role Requirement**:
 A non-negotiable capability, context, policy, or compatibility condition for one used Model Role.
@@ -248,9 +315,24 @@ _中文_: 模型服务选用方案
 _Avoid_: Plan Envelope, dynamic provider selection, skill-owned provider
 
 **Provider Preflight**:
-The review that resolves Model Roles and shows Provider Bindings, Outbound Data Category, Run Source Scope, budget, and blockers before Run Authorization.
+The review that resolves Model Roles and shows Provider Bindings, Outbound Data Category, Run Source Scope, exact Run Budget Ceiling state, and blockers before Run Authorization.
 _中文_: 模型服务预检
 _Avoid_: Run Authorization, provider picker, live model call
+
+**Provider Account Limit**:
+An external Model Provider account quota, spending control, or credit condition that can block dispatch independently of the Run Budget Ceiling and Plan Envelope.
+_中文_: 模型服务账户限额
+_Avoid_: Run Budget Ceiling, Run Budget Ceiling Reached, provider rate limit, AI7 scheduler capacity, automatic fallback authority, free-service claim
+
+**Connectivity Wait State**:
+The durable state of an exactly authorized deferred-start Run that has not begun model work because required network or Model Provider service connectivity is unavailable; it remains cancellable and carries no implication of provider transmission or usage.
+_中文_: 联网等待状态
+_Avoid_: Resume-ready Run State, Run Capacity Wait, paused Run, provider call in progress
+
+**Reconnect Preflight**:
+The deterministic revalidation after connectivity or model-service readiness returns that may automatically dispatch only a Start When Online Run whose exact authorized target, scope, provider, outbound category, Run Budget Ceiling state, credential reference, policies, and other material boundaries remain unchanged.
+_中文_: 联网恢复预检
+_Avoid_: Resume, new Run Authorization, connection test alone, silent fallback
 
 **Approved Fallback Chain**:
 The ordered compatible Provider Bindings already visible and frozen in an authorized Provider Resolution Plan.
@@ -283,9 +365,15 @@ _中文_: 模型服务数据处理策略
 _Avoid_: External Export Policy, Public Release Permission
 
 **External Export Policy**:
-A Policy Document governing transfer of an exact deliverable, source, or package to a named non-provider destination.
+A Policy Document governing transfer of an exact deliverable revision, source, or package across AI7-controlled storage to a named non-provider destination, including a user-chosen local filesystem destination. It is evaluated for each export Effect and is never a Delivery Package field, standing overwrite grant, Public Release Permission, or outcome proof.
 _中文_: 对外导出策略
-_Avoid_: Provider Processing Policy, Public Release Permission
+_Avoid_: Provider Processing Policy, Delivery Package authority, Effect Approval, Effect Receipt, Public Release Permission
+
+<a id="local-export-preparation"></a>
+**Local Export Preparation**:
+A frozen per-file pre-Effect record created after platform-native destination and collision resolution, binding one exact Delivery Package version or Editorial Deliverable Revision, rendered format, filename, final local path, fidelity disposition, payload digest, create-or-replace disposition, and applicable External Export Policy. It supplies the exact target for a separate Effect Intent and Effect Approval; a changed path or disposition requires a new preparation.
+_中文_: 本地导出准备
+_Avoid_: Delivery Package, mutable file-dialog state, standing overwrite permission, Effect Approval, Effect Receipt, exported file
 
 **Bundled Promotion Gate**:
 The repository and release process that alone may assign bundled provenance to a validated Task Skill.
@@ -293,7 +381,7 @@ _中文_: 内置技能晋级关口
 _Avoid_: Task Skill Enablement, in-product trust escalation, self-promotion
 
 **Run Authorization**:
-The user's decision to start one exact Task Intent under one exact Plan Envelope digest, including its provider, data, source scope, budget, adaptation, and other reviewed bindings.
+The user's decision to start one exact Task Intent under one exact Plan Envelope digest, including its provider, data, source scope, exact Run Budget Ceiling state, adaptation, and other reviewed bindings.
 _中文_: 任务运行授权
 _Avoid_: Execution Grant, Effect Approval, standing permission
 
@@ -352,10 +440,15 @@ A verified AI7 semantic boundary recording unchanged Run state, authoritative wo
 _中文_: 运行续行检查点
 _Avoid_: Durable Session Watermark, Session flush, Manuscript Checkpoint
 
+**Resume-ready Run State**:
+The settled interrupted-Run state in which unchanged semantics and pins plus a verified Run Continuation Checkpoint permit—but never dispatch—Resume after lightweight revalidation and explicit user action.
+_中文_: 任务运行可续行状态
+_Avoid_: Cooperative Run Pause, Connectivity Wait State, Run Capacity Wait, Retry availability, process restoration, Run invalidated by an effective source restriction
+
 **Resume**:
-Continuation of the same Run under unchanged semantics from authoritative AI7 state, possibly through a new Harness Session or Harness Execution Span.
+User-requested continuation of the same Run under unchanged semantics from authoritative AI7 state after lightweight revalidation, possibly through a new Harness Session or Harness Execution Span; safe restart reconciliation alone never dispatches it.
 _中文_: 续行
-_Avoid_: Retry, Redo, process restoration
+_Avoid_: Retry, Redo, automatic process restoration, continuation after a material source restriction
 
 **Retry**:
 A new explicitly linked execution attempt within the same unchanged Run when evidence proves repetition is safe.
@@ -363,7 +456,7 @@ _中文_: 重试
 _Avoid_: Resume, Redo, automatic ambiguous-Effect repetition
 
 **Redo**:
-A new Run with renewed authorization when semantics change or the user requests a fresh result.
+A new Run with renewed authorization when semantics change, the user requests a fresh result, or a terminal Run requires a changed Run Budget Ceiling.
 _中文_: 重做
 _Avoid_: Retry, Resume, in-place Run mutation
 
@@ -383,16 +476,16 @@ _中文_: 开发端能力档案
 _Avoid_: Editorial Capability Profile, an in-product power-user mode, an escalation path
 
 **Agent Data Root**:
-The AI7-owned directory inside which the agent holds genuine filesystem permission and outside which it has none. Contains governed Book stores plus a per-Run unscoped scratch area; excludes the Protected Secret Store and lives outside any repository working tree.
+The AI7-owned directory intended to be the platform filesystem boundary for governed Book stores and per-Run scratch; it excludes the Protected Secret Store and lives outside any repository working tree. Run Source Scope is the nested semantic read boundary. Until a concrete Windows or macOS confinement mechanism is selected and shown sufficient for a stronger claim, AI7 capability and service facades are the enforceable boundary and AI7 assumes no whole-process OS filesystem isolation.
 _中文_: 智能体数据根目录
-_Avoid_: Run Source Scope, a general filesystem grant, a repository working tree
+_Avoid_: Run Source Scope, a general filesystem grant, a proven whole-process OS sandbox, a repository working tree
 
 **Agent Behavior Asset**:
 A versioned prompt, instructional text, task guidance, or bounded ranking parameter that shapes output quality and never grants authority. Agent-proposable, with auto-activation limited to non-expansive calibration inside a user-approved envelope.
 _中文_: 智能体行为资产
 _Avoid_: Policy Document, House Editorial Memory, model weights, hidden runtime configuration
 
-**Behavior Evaluation Gate**:
-The two-sided check an Agent Behavior Asset, Policy Document, or composition revision must pass before activation: deterministic replay against a fixed scenario corpus for regression, plus production Delivery Quality Metrics for real-world gain. Sample size below the confidence threshold permits proposal but never auto-activation.
-_中文_: 行为评估关口
-_Avoid_: Workflow Gate, Standalone Editing Sufficiency Gate, the Pull-request Gate, Effect Approval
+**E2E Functional Gate**:
+The project's sole automated engineering-test surface: one logical provider-free gate running the same complete supported journey IDs and observed-bug regressions on Windows and macOS through the launchable product path. It uses public synthetic data, fails when either platform fails, and makes no separate layer, performance, security, provider, packaging, replay, release, or architecture-closure claim.
+_中文_: 端到端功能关口
+_Avoid_: Factual Verification, Workflow Gate, Effect Receipt, architecture proof

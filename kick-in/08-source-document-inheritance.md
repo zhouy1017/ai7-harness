@@ -9,9 +9,9 @@ The owner will review preservation decisions from the original AI7 documentation
 The following cross-cutting dispositions are accepted:
 
 - Keep a concise, revised new-project `AGENTS.md`; do not copy the legacy file wholesale.
-- Keep the legacy tiered GitHub Actions testing idea, combined with generated mock-LLM-provider cases. Rebaseline its names, commands, and tiers for the new architecture, and keep required CI provider-free.
+- **Superseded historical inheritance decision:** the earlier tiered GitHub Actions and generated mock-provider programme was later replaced by ADR 0027. Current CI is one provider-free E2E Functional Gate on Windows and macOS for supported journeys and observed-bug regressions.
 - Keep local multi-agent dispatch for repository development only. It is not a production AI7 workflow and must remain terminologically and architecturally separate from Harness-powered product agents.
-- Keep AI7 as a Windows-focused desktop product.
+- Keep AI7 as one Windows-and-macOS desktop product under ADR 0028.
 - Discard the old UI implementation and presentation model. Review and revise its user stories and product outcomes rather than porting layouts or components.
 - Discuss only original-AI7 inheritance rows with the owner. Harness-specific choices may be made by the architecture maintainer, with provenance and compatibility constraints documented.
 
@@ -55,9 +55,9 @@ The following cross-cutting dispositions are accepted:
 ## Question 12 — accepted Series sharing boundary
 
 - Series membership is explicit, versioned, and never inferred from similarity.
-- Member Books automatically share versioned Series Knowledge.
+- Membership makes only explicitly promoted immutable Series Knowledge Revisions eligible for governed future sharing; it never promotes Book content, a Proposal, a Milestone Version, learning material, or model output automatically.
 - A Series-scoped Task may perform exact, provenance-bearing, read-only retrieval across current member revisions without selecting every Book separately; it receives relevant passages rather than whole manuscripts in context.
-- Users may create Series Retrieval Exclusions for specific Books or sources.
+- Users may create versioned Series Retrieval Exclusions for exact member Books, Source Versions, Series Knowledge Items, or stable knowledge classes; once effective they immediately prevent later affected Series reads without deleting membership or history.
 - Every mutation remains a Book-targeted proposal bound to an exact revision. Membership changes are prospective and preserve historical evidence.
 
 ## Question 13 — accepted learning-signal governance with audit requirement
@@ -83,8 +83,8 @@ The following cross-cutting dispositions are accepted:
 
 ## Question 16 — accepted textual and factual authority boundary
 
-- Preserve and sharpen the source-truth invariant from current `AGENTS.md`, `CONTEXT.md`, ADR 0021, and ADR 0022: imported source revisions and index chunks—not model prose—are the Textual Source of Record for exact wording and quotations.
-- The manuscript is not a truth oracle. Its Manuscript Assertions may contain factual, logical, referential, or semantic errors; AI7 must help detect them against separate evidence/context and create evidence-linked Correction Proposals.
+- Preserve and sharpen the source-truth invariant from current `AGENTS.md`, `CONTEXT.md`, ADR 0021, and ADR 0022: explicitly retained Source Versions and their exact-fetch projections—not model prose—are the Textual Source of Record for exact wording and quotations.
+- The manuscript is not a truth oracle. Its Manuscript Assertions may contain factual, logical, referential, or semantic errors; AI7 must help detect them against separate evidence/context and create evidence-linked Correction Proposals bound to an exact Editorial Deliverable Revision. For a manuscript, that shared target is realized as an exact Manuscript Revision and any text change remains proposal-first.
 - Current import/index publication is staged, digest-bound, verified, and atomic. Current search is deterministic literal substring matching; it returns full exact text as well as IDs, weakening the conceptual separation between candidate discovery and exact fetch.
 - Current general grounding largely treats “nonempty exact sources” as grounded. The narrow Task Skill kernel verifies that reference project/chunk/version/asset/text fields exactly match fetched sources, but neither path proves that each generated claim is semantically supported.
 - Durable Project Q&A correctly pins each answer to source revisions, approved scope, provider plan, records, and a source bundle, but its whole-answer source list is not claim/span-level citation grounding.
@@ -109,7 +109,7 @@ The pinned evidence, accepted semantic model, and full disposition are in [Manus
 - Keep Run Authorization, transient Execution Grant, Proposal Decision, Review Decision, exact durable Effect Approval, Public Release Permission, and Effect Receipt semantically distinct. One user interaction may create both Proposal Decision and Effect Approval without collapsing their records.
 - Preserve stable Effect identity/idempotency across safe Resume/Retry, exact payload/target conflict detection, staged verification, per-Effect atomicity, expected-revision fencing, commit receipts, read-only reconciliation, no automatic ambiguous-outcome retry/fallback, cooperative cancellation, and drift invalidation.
 - Treat proposal persistence and later manuscript publication as separate Effects with separate receipts. Tool output, Session history, attempted dispatch, and proposal receipt cannot prove manuscript publication.
-- Preserve the six underlying proposal outcomes but do not inherit the conflicting four-versus-six always-visible UI contracts; interaction layout remains for the independent UI/UX session.
+- Preserve the six underlying proposal outcomes but do not inherit the conflicting four-versus-six always-visible UI contracts; the accepted V2 interaction baseline owns their presentation.
 - Drop/archive the old `/agent/approve` endpoint, step-ID continuation, old agent console, runtime-specific schemas, Python/JSON identities, and surface-owned orchestration.
 
 The pinned evidence and accepted full contract are in [Proposal, Authority, Effect, and Replay Boundary](./19-proposal-approval-effect-replay-boundary.md). See [ADR 0007](../docs/adr/0007-separate-decisions-authority-and-effect-proof.md).
@@ -118,19 +118,21 @@ The pinned evidence and accepted full contract are in [Proposal, Authority, Effe
 
 - Keep the Book as source/privacy/mutation authority, but do not inherit one scalar eleven-stage Book lifecycle. Manuscript, promotion article, news report, and Review Article workflows are independently revision-addressed within the Book.
 - Introduce versioned Workflow Profiles and durable Workflow Instances composed from intake, source development, drafting, review/verification, finalization, delivery, and maintenance; phases may overlap, skip with reason, and reopen.
-- Keep lifecycle metadata, evidence-bearing human gates/signoff, proof/correction history, typed versioned Editorial Artifacts, and narrow Prepare/Commit/receipt command safety.
-- V1 profiles cover Manuscript, Promotion Article, News Report, and Review Article with profile-specific briefs, source/quotation/fact records, style/review gates, signoff, Delivery Package, and correction history.
+- Keep immutable Editorial Deliverable Revisions, lifecycle metadata, evidence-bearing human gates/signoff, proof/correction history, typed versioned Editorial Artifacts, and narrow Prepare/Commit/receipt command safety. Manuscript Revision is the manuscript realization of the shared revision boundary.
+- V1 profiles cover Manuscript, Promotion Article, News Report, and Review Article with profile-specific briefs, source/quotation/fact records, style/review gates, signoff, a destination- and format-independent Delivery Package bound to one exact revision, and versioned Maintenance Cases.
+- Treat each local export as a separate per-file Local Export Preparation, exact AI7 Effect Approval, commit, and receipt after native-OS rename/cancel/replace resolution. Cancellation attempts no file Effect, ambiguity stops retry, and neither package nor receipt proves sending, delivery, or publication.
+- Classify a Maintenance Case permanently as `correction / 更正`, `errata / 勘误`, `supersession / 替代`, `withdrawal / 撤回`, `reissue / 再版`, or `archive / 归档`; append immutable Maintenance Case Revisions without mutating the target Publication Version or implying external recall/takedown.
 - Treat the five shipped provider-free lifecycle handlers as contract tracers rather than mature professional behavior. Adapt developmental/style work, broaden production copy to Publication Communications, make acquisition optional, and move memory review into continuous Editorial Learning governance.
 - Drop universal stage enums, mandatory three-review/three-proof for every deliverable, old `ai7.workflow.*` execution, fixed UI, and automated legal/regulatory/ideological/publication authority; defer contracting, ISBN/CIP, print logistics, rights, awards, and backlist automation from V1 core.
 
-The exact-pin evidence, accepted bilingual terms, profiles, artifacts, and full disposition are in [Deliverable Workflow and Editorial Artifact Boundary](./20-deliverable-workflow-and-artifacts.md). See [ADR 0008](../docs/adr/0008-use-deliverable-owned-workflow-profiles.md).
+The exact-pin evidence, accepted bilingual terms, profiles, artifacts, package/export split, maintenance classifications, and full disposition are in [Deliverable Workflow and Editorial Artifact Boundary](./20-deliverable-workflow-and-artifacts.md). See [ADR 0008](../docs/adr/0008-use-deliverable-owned-workflow-profiles.md), [ADR 0038](../docs/adr/0038-separate-delivery-package-identity-from-local-export.md), [ADR 0039](../docs/adr/0039-delegate-local-export-collisions-to-native-os-workflows.md), and [ADR 0040](../docs/adr/0040-preserve-post-designation-maintenance-as-versioned-cases.md).
 
 ## Question 20 — accepted bounded-plan task interaction
 
 - Preserve visible-plan hybrid autonomy, but make the plan an authority-bearing boundary rather than optional information or blanket approval.
 - Keep one surface-neutral Task Intent and exact Book/deliverable/document/revision/selection capture; discard the Task Composer's visual form and every workbench layout prescription.
 - Generalize the shipped provider-plan precedent into a versioned Execution Plan and machine-authoritative Plan Envelope. Run Authorization binds their exact digest.
-- Permit logged Plan Adaptation only within unchanged capability, source, provider, privacy, budget, outcome, and Effect bounds. Material drift suspends execution and requires a Plan Revision plus renewed Run Authorization.
+- Permit logged Plan Adaptation only within unchanged capability, source, provider, privacy, exact Run Budget Ceiling state, outcome, and Effect bounds. Material drift suspends execution and requires a Plan Revision plus renewed Run Authorization.
 - Keep durable clarification waits, safe pause/cancel, verified-checkpoint Resume, linked Retry, new-Run Redo, and typed evidence-bearing Task Outcomes.
 - Drop the old `/agent/plan`, `/agent/run`, `/agent/approve`, step resubmission, optional-plan visibility, Agent Command Center, Ribbon, Activity rail, panels, inspectors, docking model, and other UI/component authority.
 
@@ -143,7 +145,7 @@ The exact-pin evidence, accepted bilingual terms, authority matrix, lifecycle, o
 - Rename Kernel Capability to AI7 Capability. Install code-bearing Capability Implementations separately as pinned static Cordis plugins/bundles; a Task Skill cannot install, mount, or self-authorize code.
 - Project each Task Skill into one non-authoritative Harness instructional skill plus one AI7-owned per-Run Task Skill Activation. Enforce activation both in Harness tool guards and AI7 service/backend facades because visibility is not authority.
 - Preserve active-Book default and exact user-designated Run Source Scope, Model Roles with hard requirements/soft preferences, frozen Provider Resolution Plans and fallback, ambiguous-outcome stop, and opaque credential references.
-- Separate Provider Processing Policy, External Export Policy, and Public Release Permission. Configured model processing is not public release, but its provider, source scope, outbound-data category, and budget are visible in the Plan Envelope.
+- Separate Provider Processing Policy, External Export Policy, and Public Release Permission. Configured model processing is not public release, but its provider, source scope, outbound-data category, and exact Run Budget Ceiling state are visible in the Plan Envelope.
 - Treat all 13 bundled skills as shipped legacy capability evidence while recording two current gaps: enabled managed local skills are non-runnable, and the provider execution path is mock/cassette-only.
 
 The exact-pin evidence, accepted bilingual language, manifest boundary, authority intersection, Harness anti-corruption mapping, proportional outbound-data policy, and full disposition are in [Task Skill, Capability, Trust, and Provider Boundary](./22-task-skill-capability-trust-provider-boundary.md). See [ADR 0010](../docs/adr/0010-separate-task-skill-instruction-implementation-and-authority.md).
@@ -163,11 +165,11 @@ The accepted boundary and bilingual terms are in [Linked Task and Harness Ledger
 
 ## Question 23 — accepted Standalone-only V1
 
-- Ship one Chinese-first Windows Standalone desktop surface over one AI7 domain/Task Ledger authority and one Harness runtime. V1 has no Word parity, COM add-in, Host protocol, synchronization, Word packaging, or Word verification gate.
+- Ship one Chinese-first Windows-and-macOS Standalone desktop product over one AI7 domain/Task Ledger authority and one Harness runtime. V1 has no Word parity, COM add-in, Host protocol, synchronization, Word packaging, or Word verification gate.
 - Treat the old Standalone editor and workbench as negative evidence, not a migration asset. Professional long-form Chinese editing quality is release-critical and must cover structure/selection, durable editing/recovery, proposals/review, Chinese input/typography, performance, and import/export fidelity.
 - Retain surface-neutral Task Intent, decision, Effect, manuscript history, merge, recovery, and evidence semantics from Word-coupled tests only by re-expressing them against Standalone/domain seams.
 - Leave the C# add-in, exact Host binding, cross-surface drift/synchronization machinery, named-pipe protocol, Word installer, and Word/COM proof corpus in the old repository or offline contingency evidence. Do not migrate or run them as V1 gates.
-- Reconsider Word only after the evidence-backed Standalone Editing Sufficiency Gate fails for a named workflow and a proportional-remedy review shows that live Word integration, rather than editor or document-conversion improvements, is justified. Gate failure does not add Word; a later Word scope requires a new ADR.
+- Reconsider Word only after repeated failure of a named supported workflow or production feedback identifies a genuinely Word-dependent gap and a proportional-remedy review shows that live Word integration, rather than editor or document-conversion improvements, is justified. An observed failure does not add Word; a later Word scope requires a new Owner-authorized ADR.
 - If reconsidered, preserve one AI7 authority, exact association/binding/observation separation, fail-closed drift, directional Effects, manuscript-native merge, and no raw Harness Web/ACP/dynamic Cordis boundary.
 
 The accepted boundary and contingency constraints are in [Standalone-only V1 and Deferred Word Alternative](./25-standalone-word-surface-boundary.md). See [ADR 0013](../docs/adr/0013-ship-standalone-only-v1.md).
@@ -231,20 +233,20 @@ Conflict rule: AI7 product safety/domain authority beats Harness convenience. An
 | --- | --- | --- |
 | Session start, document ownership, current checkpoint | **Accepted: preserve and simplify** | Root `AGENTS.md` + compact `PROGRESS.md`. Retain one current checkpoint; do not grow another multi-megabyte history log or parallel `MEMORY.md`. |
 | Repository-task receipts and Commander authority | Preserve principle, relocate detail | Future repository-agent runbook. Keep fail-closed Git/worktree identity and no implicit external-mutation authority. Do not copy the unfinished pilot machinery. |
-| Verification economy | Preserve | Future testing guide: focused checks during iteration; one final exact-HEAD matrix; docs-only checks for docs-only changes. |
+| Verification economy | **Superseded and narrowed by ADR 0027** | Current implementation authority is [`docs/agents/ci-test-boundaries.md`](../docs/agents/ci-test-boundaries.md): one provider-free E2E Functional Gate for supported journeys and observed-bug regressions. The former final exact-HEAD matrix is historical, not a gate. |
 | Local desktop and unpublished-material safety | **Accepted: preserve proportionately** | Root standing rule plus public-release/security design. Prevent unauthorized publication or exposure; do not import an unnecessarily classified-data threat model. |
 | Old installed skills, Codex Cloud review, AI7 scenario-audit rules | Do not inherit automatically | Reintroduce only if those workflows are actually installed and accepted here. |
 | Exact GPT/Claude model routing | Archive | Volatile operator policy, not durable project instruction. |
 | Product Direction | Relocate and re-ratify | Charter, domain contexts, UX design, and ADRs. Keep root `AGENTS.md` short and link to accepted owners. |
 | Core source/scope/approval/replay/recovery invariants | Preserve strongly | Editorial and Execution contexts plus architecture ADRs. Modify `kernel`, `orchestrator`, and similar names after Harness mapping. |
 | Task-skill manifest, trust, provider plan, secret rules | Preserve and modify | Execution context and skill/security ADRs. Harness Skill, AI7 Task Skill, and Cordis Plugin remain distinct terms. |
-| Windows, Electron, Python runtime, packaging | **Accepted: all four resolved** | Windows-only (Q23); Electron with a three-process topology (Q34); no Python, TypeScript throughout (Q33); zip portable plus NSIS installer (Q26). None was inherited; each was re-decided. |
+| Platforms, Electron, Python runtime, packaging | **Accepted with platform mechanics partly deferred** | Windows and macOS as one product (ADR 0028); Electron with a three-process topology (Q34); no Python, TypeScript throughout (Q33); Windows zip portable plus NSIS (Q26); concrete macOS package mechanics remain separate. None was inherited blindly. |
 | Deep-module/seam/testability principles | Preserve | Concise engineering rules after the target module boundaries exist. |
 | Monolithic renderer, legacy UI/component/layout model, and issue/PR chronology | **Accepted: drop as design authority** | Historical evidence only. User stories are reviewed separately and may be revised; UI source and presentation structure are not ported. |
 | Unified Standalone/Word authority, inward adapters, exact links, crash isolation | Archive as contingency evidence | V1 is Standalone-only; promote only surface-neutral single-authority lessons unless a future ADR adds Word. |
 | Old compatibility inventories and retired CLI paths | Archive | Preserve only the general rule that compatibility paths cannot acquire new authority. |
 | `dev`/`master`/`release` policy and exact GitHub gates | Re-decide | New repository governance; preserve only concise commits and prohibition on secrets/private manuscripts. |
-| Provider-free CI, exact-SHA evidence, deterministic E2E, packaged-runtime proof | **Accepted in principle** | Rebuild as a tiered GitHub Actions ladder with generated mock-LLM-provider cases. New tier names, commands, exact topology, and packaged-runtime gates remain to be designed. |
+| Provider-free CI, exact-SHA evidence, deterministic E2E, packaged-runtime proof | **Historical; superseded by ADR 0027** | Retain only the provider-free principle and complete supported E2E journeys plus observed-bug regressions. Exact-SHA, tier, mock-provider programme, packaged-runtime proof, and separate topology gates are not current requirements. |
 | Old Issue `#14` obligations, schedules, lane names, tag algorithms | Archive/rebaseline | Historical bootstrap and release implementation, not standing orders. |
 | Safety-focused review rules | Preserve, relocate | Engineering review guide; source-truth, approval, revision, privacy, recovery, and replay violations remain high priority. |
 
@@ -315,7 +317,7 @@ The accepted reason for studying DeepSeek Harness is broader than replacing the 
 - Configuration is explicit and validated; misconfiguration fails at the earliest owned point.
 - Validate configuration, model/tool JSON, persistence, filesystem, process, worker, and wire inputs; avoid redundant hostile-input checks at trusted typed same-process boundaries.
 - Use strict TypeScript, explicit exports, branded cross-boundary IDs, concise README/JSDoc contracts, and one authoritative home per fact once the stack is accepted.
-- Use narrow affected-surface checks locally and assembled/keyless behavior evidence for agent- or user-visible behavior.
+- Historical Harness guidance favored narrow affected-surface checks and assembled/keyless behavior evidence. Current AI7 standing CI admits only applicable supported E2E journeys and observed-bug regressions under ADR 0027; it creates no separate affected-surface or behavior-evidence gate.
 
 ### Keep as commit-pinned upstream reference
 
@@ -342,7 +344,7 @@ The accepted reason for studying DeepSeek Harness is broader than replacing the 
 | AI7 Task Skill vs Harness Skill vs Cordis Plugin | Keep three explicit concepts and define projections/adapters. |
 | AI7 durable Approval/Effect policy vs Harness one-shot approval/tool effects | Harness execution remains subordinate to exact AI7 product authority for manuscript/external effects. |
 | Python domain backend vs TypeScript Harness Host | Select one topology and one state-transition owner before inheriting stack rules. |
-| Provider-free product gates vs Harness live-provider tests | Provider-free remains required; live tests are separately authorized, isolated evidence. |
+| Provider-free product gate vs Harness live-provider tests | Provider-free remains required. ADR 0027 excludes live-provider tests and separate provider evidence gates unless the owner explicitly reverses it. |
 
 ## Actions during the row-by-row review
 

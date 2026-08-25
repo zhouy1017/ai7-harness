@@ -13,7 +13,7 @@ This is a concise bilingual reading view of AI7's ambiguity-sensitive domain lan
 | **Factual Verification** | 事实核验 | The evidence-based assessment of a Manuscript Assertion against appropriate factual authority. | 原文匹配、模型判断 |
 | **Semantic Review** | 语义审读 | Editorial assessment of coherence, meaning, reference, contradiction, and intended consistency. | 语法检查、事实核验 |
 | **Editorial Error Finding** | 编辑差错发现项 | A revision-bound, evidence-linked record of a suspected factual or semantic defect. | 模型裁决、已完成更正 |
-| **Correction Proposal** | 更正提案 | A suggested exact-revision change that does not alter the active manuscript until accepted and committed. | 静默改写、已应用修改 |
+| **Correction Proposal** | 更正提案 | A suggested change bound to one exact Editorial Deliverable Revision that does not alter active deliverable content until accepted through the applicable mutation workflow. | 静默改写、已应用修改 |
 
 ## Manuscript history
 
@@ -33,6 +33,7 @@ This is a concise bilingual reading view of AI7's ambiguity-sensitive domain lan
 | English term | 推荐简体中文 | Definition | Aliases to avoid |
 | --- | --- | --- | --- |
 | **Manuscript** | 稿件 | The Book's primary long-form editable text, with its own manuscript history. | 源材料、全部编辑交付成果 |
+| **Editorial Deliverable Revision** | 编辑交付成果修订版 | An immutable exact content version of one Editorial Deliverable; Manuscript Revision is its manuscript realization. | 交付成果身份、最新草稿、源材料版本 |
 | **Promotion Article** | 宣传文章 | A Book-related deliverable written for an identified promotional audience or channel. | 公开发布许可、通用生产文案 |
 | **News Report** | 新闻报道 | A Book-related factual deliverable with explicit source, quotation, chronology, signoff, and correction requirements. | 未核实宣传稿 |
 | **Review Article** | 评论文章 | A publishable deliverable discussing a work under evidence, quotation, disclosure, and signoff requirements. | 编辑审读、编辑评审决定 |
@@ -43,7 +44,12 @@ This is a concise bilingual reading view of AI7's ambiguity-sensitive domain lan
 | **Workflow Gate** | 工作关口 | A profile-defined evidence and human-decision requirement before a specified transition or delivery. | 受控动作批准、通用审批 |
 | **Editorial Artifact** | 编辑工作资料 | A versioned, typed, provenance-bearing supporting record around a deliverable. | 编辑交付成果、任意运行输出 |
 | **Signoff Record** | 签发记录 | A human decision that exact evidence and an exact revision are ready for a stated next use. | 公开发布许可、事实证明 |
-| **Delivery Package** | 交付包 | The exact deliverable revision, required artifacts, signoffs, destination, and release/export authority for one handoff. | 压缩包、已发布证明 |
+| **Milestone Version** | 里程碑版本 | A user-designated exact Editorial Deliverable Revision with a stated next-use purpose but no export or release authority. | 最新草稿、签发记录、发稿版本 |
+| **Delivery Package** | 交付包 | A versioned format- and destination-independent manifest bound to one exact Editorial Deliverable Revision, its purpose, included artifacts, gate/signoff references, exclusions, and limitations. | 导出文件、本地导出准备、路径绑定压缩包、交付或发布证明 |
+| **Publication Version** | 发稿版本 | An append-only exact designation over one Milestone Version, linked to a separate Public Release Permission and proving no export, sending, delivery, or publication. | 最新草稿、已发布成果、本地导出、公开发布许可 |
+| **Maintenance Case** | 维护事项 | A stable post-designation matter permanently bound to one exact Publication Version and Editorial Deliverable Revision under one Maintenance Classification. | 工作阶段、自由备注、外部召回请求 |
+| **Maintenance Classification** | 维护分类 | One immutable typed consequence for a Maintenance Case: `correction / 更正`, `errata / 勘误`, `supersession / 替代`, `withdrawal / 撤回`, `reissue / 再版`, or `archive / 归档`. | 工作阶段、事项状态、自由标签 |
+| **Maintenance Case Revision** | 维护事项修订版 | An immutable evidence-and-outcome revision of one Maintenance Case that changes neither its target nor classification. | 更正提案、原地维护备注、外部结果证明 |
 | **Editorial Review** | 编辑审读 | Professional assessment that produces findings and Review Decisions rather than a publishable article. | 评论文章、单独事实核验 |
 
 ## Learning and model boundaries
@@ -107,7 +113,8 @@ This is a concise bilingual reading view of AI7's ambiguity-sensitive domain lan
 | **Protected Secret Store** | 安全凭据库 | The OS-protected store that alone holds secret values. | 普通配置、凭据代理服务 |
 | **Outbound Data Category** | 外发数据类别 | The policy classification of exact content permitted to leave local AI7 for model processing. | 任务运行来源范围、公开发布许可 |
 | **Provider Processing Policy** | 模型服务数据处理策略 | The rule governing which content categories and scopes may be sent to which configured model services. | 对外导出策略、公开发布许可 |
-| **External Export Policy** | 对外导出策略 | The rule governing transfer of exact material to a named non-provider destination. | 模型服务数据处理策略、公开发布许可 |
+| **External Export Policy** | 对外导出策略 | The rule governing transfer of an exact deliverable revision, source, or package across AI7-controlled storage to a named non-provider destination; it is neither package authority nor outcome proof. | 模型服务数据处理策略、交付包权限、公开发布许可 |
+| **Local Export Preparation** | 本地导出准备 | A frozen per-file pre-Effect record of exact package/revision, format, final local path, fidelity, payload digest, create/replace disposition, and applicable export policy after native collision resolution. | 交付包、文件对话框状态、受控动作批准、受控动作回执 |
 | **Bundled Promotion Gate** | 内置技能晋级关口 | The repository/release gate that alone assigns bundled Task Skill provenance. | 技能启用、应用内信任升级 |
 
 ## Task and Harness execution records
@@ -171,6 +178,8 @@ This is a concise bilingual reading view of AI7's ambiguity-sensitive domain lan
 - A **Manuscript Checkpoint** creates a **Manuscript Revision**; a **Run Continuation Checkpoint** safely continues unchanged task semantics; a **Recovery Snapshot** reconstructs protected manuscript state. Harness owns its own technical checkpoints.
 - A **Book** owns related **Editorial Deliverables**, but each deliverable follows its own **Workflow Instance** pinned to a versioned **Workflow Profile**; one Book may therefore have a Manuscript in finalization and a Promotion Article in drafting at the same time.
 - A completed **Workflow Gate** or **Signoff Record** establishes readiness for its stated next use only; it never establishes factual truth, Public Release Permission, or Learning Eligibility.
+- A **Delivery Package** binds one exact immutable Editorial Deliverable Revision and stays independent of format and destination. Each concrete file instead has its own **Local Export Preparation**, exact approval-before-commit, and per-file receipt; native rename/cancel/replace presentation grants no authority and a local receipt proves no sending or publication.
+- A **Maintenance Case** never changes its target or **Maintenance Classification**. **Maintenance Case Revisions** append history; correction/reissue may create new deliverable revisions, and supersession/reissue requires a separately manual Publication Version designation, while withdrawal/archive claim no external recall or takedown.
 - An **Editorial Review** is work performed on a deliverable; a **Review Article** is itself a deliverable.
 - **Editorial Learning**, **Agent Behavior Improvement**, and **Model Training** are three different processes; only the last changes model weights, and it is outside AI7's product thesis.
 
@@ -219,7 +228,7 @@ This is a concise bilingual reading view of AI7's ambiguity-sensitive domain lan
 - “Checkpoint / 检查点” must be qualified as **稿件修订检查点**, **运行续行检查点**, or Harness technical checkpoint; none is a **恢复快照**. **操作续行检查点** is reserved for imported legacy history.
 - **Operation Record / 操作记录**, **Operation Event / 操作事件**, and `operationRuns` are legacy-read terms only. New execution truth lives in the **Harness 会话账本**, while AI7 business truth lives in the **任务账本**.
 - **任务运行记录**, **Harness 会话**, **Harness 执行区段**, and an execution attempt are four different identities and need not map one-to-one.
-- “Version / 版本” must be qualified as **源材料版本** or **稿件修订版**.
+- “Version / 版本” must be qualified as **源材料版本**, **稿件修订版**, **编辑交付成果修订版**, **里程碑版本**, **发稿版本**, or another exact accepted record type.
 - “Series” uses **书系**, not the narrower **丛书**, because it also covers sequels and shared-world works.
 - **文本原文基准** establishes wording, never factual truth.
 - **工作流程方案** is an editorial-business definition, not an **编辑维度方案**, Harness Profile, or Harness Workflow.

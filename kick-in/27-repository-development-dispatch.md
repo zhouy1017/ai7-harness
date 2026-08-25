@@ -17,7 +17,7 @@ These are provider-neutral invariants. They are stated without reference to any 
 | Role | May | Never |
 | --- | --- | --- |
 | **Commander** | Decide dispatch, review returned work, integrate: merge, push, release. Sole external-action authority. Holds the owner's foreground session | — |
-| **Worker** | Read the repository, write only its own worktree and branch, run applicable verification, report | Merge, push, publish, take external actions, or read/write credentials, real manuscripts, or private sample Books |
+| **Worker** | Read the repository, write only its own worktree and branch, report; run the E2E Functional Gate only when its implementation change affects a supported journey or observed-bug regression | Merge, push any branch, publish, take external actions, or read/write credentials, real manuscripts, or private sample Books |
 | **Reviewer** | Read the branch under review and its brief with fresh context; produce a review report and verdict | Write to the branch, merge, or dispatch |
 
 The reviewer's verdict is **advisory**. The commander decides and integrates.
@@ -28,18 +28,18 @@ The reviewer's verdict is **advisory**. The commander decides and integrates.
 - Soft cap of three concurrent workers. The binding constraint is commander review capacity, not dispatch capacity.
 - **T0 work is never dispatched**: ambiguous scope, a brief that is itself in doubt, or anything requiring the owner's decision. A worker starts cold and re-derives context the commander already holds; that is the most expensive path.
 - A worker whose brief turns out to be wrong **stops and reports**. It never self-escalates to a higher class.
-- Rebase onto current `dev` before integration. Documentation-only changes require no automated proof; implementation changes use their applicable one-logical-E2E-journey gate. Task branches and pull requests integrate to `dev`; `main` promotion requires separate exact Owner authorization. See `docs/agents/development-lines.md`.
+- Before Commander integration, rebase onto the current intended integration target (`dev` for ordinary development work). Record the new exact target commit and re-resolve every `<target-commit>:<path>` authority in the Change Brief. If authority or semantics drifted, stop for re-scoping; this integration maintenance is not a new review or proof gate. `main` is the stable/release-promotion line and needs a separate exact Owner authorization; frozen `design-doc` is an allowlist source, never an integration target. Implementation uses only the applicable E2E Functional Gate.
+- Every dispatched unit is extracted from the applicable [`Change Brief`](../docs/agents/change-brief.md): exact base/target-qualified authority, one outcome, current reuse anchor, structural budget, non-goals, stop conditions, implementation journey/bug or non-behavior `N/A`, and reporting boundary. Do not send full transcripts, archive trees, or unrelated design packages.
 
 ### Review
 
-- Independent review is optional and advisory, never a formal merge gate.
-- When review is used, its reviewer is **not the author** and has a task class greater than or equal to the worker's task class. This is a hard floor.
-- Cross-provider review is the default when review is used. When it is impossible, proceed and flag `same-provider review — independence reduced`.
-- **Conflict ordering: the tier floor is hard; cross-provider is preferred with disclosure.** Competence to catch the error outranks independence from bias.
+- Independent review is optional and advisory, not a branch or exact-head gate. Use it for hostile architecture feedback or when the owner requests it.
+- When a Reviewer is used, it is not the author, its task class remains greater than or equal to the reviewed work, and cross-provider review is preferred with the existing disclosure when unavailable.
+- A review finding informs the Commander; it does not automatically trigger iterative proof or re-review cycles.
 
 ### Reporting
 
-Every returned unit of work carries one line: role, provider, model, effort, task class, and, when review occurred, whether cross-provider review was achieved.
+Every returned Worker unit carries one line with role, requested binding, actual provider/model/effort, task class, fallback status, and exact reason. Record reviewer independence only when a review was actually requested.
 
 ### Usage discipline
 
@@ -47,10 +47,12 @@ Every returned unit of work carries one line: role, provider, model, effort, tas
 2. Batch mechanical work into one T1 worker rather than several.
 3. Keep briefs tight; cold-start cost scales with what the worker must rediscover.
 4. Urgency is not a task class and never changes the binding.
+5. Do not consume or probe Worker quota for T0 work, Commander decisions, final integration, or independent review merely to satisfy a provider preference; those remain in their existing roles.
+6. Map the current implementation narrowly before dispatch and use the earliest adequate rung in the [incremental development lifecycle](../docs/agents/incremental-development.md). Do not pay cold-start cost for a parallel design the existing owner can absorb.
 
 ## Layer B — Bindings
 
-The binding table is **the only provider-specific artifact in this design**. Replacing a provider means replacing one row, not revising any rule in Layer A.
+This whole layer is **the only provider-specific policy surface in this design**. It contains the class-to-model table, Worker provider order, and quota fallback. Replacing a provider changes this layer, never Layer A. Operational dispatch logs may name an actual binding as evidence; they do not create another policy surface.
 
 | Class | Codex | Claude | Relative cost |
 | --- | --- | --- | --- |
@@ -62,13 +64,21 @@ The binding table is **the only provider-specific artifact in this design**. Rep
 
 Task class is the provider-neutral unit. The reviewer floor is evaluated **in task classes**, then bound — so a T3 branch written by `claude-opus-5` requires a reviewer at `gpt-5.6-sol` @ xhigh or above.
 
+### Worker provider order
+
+Effective with the owner's 2026-08-22 revision, every task that is both suitable for parallel dispatch and bounded enough to be a Worker brief uses the matching **Claude Code** binding first. Continue assigning eligible Worker work to Claude Code while its current quota is available; do not load-balance away from it merely to conserve that quota.
+
+When a real dispatch reports that Claude Code is unavailable or its usable quota is exhausted, record the attempted binding, observed condition, time, actual fallback binding, and exact downgrade reason. Then use the same task-class Codex binding from the table. Do not repeatedly spend attempts against a known exhausted quota window; retry Claude only after availability or quota reset is evidenced. This provider order does not apply to the Commander seat, final integration, or Reviewer assignment, whose role authority, task-class floor, and independence rules remain unchanged.
+
+`T3-par` is a Commander coordination mode, not a missing Claude Worker model row. The Commander decomposes genuinely separable work into bounded T1, T2, or T3 Worker briefs; each brief applies the Claude-first order at its own class, while architecture decisions and synthesis stay with the Commander.
+
 ### Task classes
 
 | Class | Definition | Examples in this project |
 | --- | --- | --- |
 | **T0** | Not dispatched | Ambiguous scope; brief in doubt; anything needing the owner's decision |
-| **T1** | Mechanical — correct output is verifiable without judgment | Link validation, glossary and index cross-checks, format and lint fixes, path renames, running the gate, cross-repository file inventory |
-| **T2** | Standard build from a written brief | A vertical slice with tests, CI workflow authoring, tests from an accepted contract, straightforward refactor |
+| **T1** | Mechanical — correct output needs little judgment | Small glossary/index updates, format fixes, path renames, cross-repository file inventory |
+| **T2** | Standard build from a written brief | A vertical slice, E2E journey or bug-regression scenario, straightforward refactor |
 | **T3** | High-stakes | Architecture, domain modeling, ADR drafting, Effects, named authorities, recovery and replay, credential broker, source-scope enforcement, manuscript revision and merge semantics |
 
 The T1 test is whether correctness can be checked without judgment. Running a link checker is T1; deciding which records contradict one another is T3.
@@ -79,10 +89,12 @@ Codex exposes `none → low → medium → high → xhigh → max → ultra` on 
 
 Tier selection is roughly a five-fold cost swing and is the primary lever; effort is the fine dial. Sol is $5/$30 per million tokens, Terra $2.50/$15, Luna $1/$6.
 
-## Layer C — Fallback
+### Fallback
 
 | Condition | Action |
 | --- | --- |
+| An eligible bounded Worker task and Claude Code quota is available | Use the same-class Claude binding first |
+| Claude Code is unavailable or its usable Worker quota is exhausted | Record the observed failure and reason; use the same-class Codex binding for the current quota window |
 | One provider's quota is short | Same task class, other provider's binding |
 | The commander's provider is exhausted | The commander seat moves to the other provider; task classes are unchanged |
 | Both providers are short | Stop dispatching; foreground work only |
@@ -94,6 +106,8 @@ Tier selection is roughly a five-fold cost swing and is the primary lever; effor
 Cross-provider dispatch needs one small mechanism, not a system: the commander shells out to the other provider's CLI non-interactively with a brief, a worktree path, and a model and effort selection, then collects the report. Codex CLI 0.147.0 provides `codex exec` for this; Claude Code provides subagents with per-agent model selection, worktree isolation, and background execution.
 
 Specify the contract tool-agnostically and implement it on whichever tooling is installed. Do not hard-code one vendor's mechanism into Layer A.
+
+At merge, closure, abandonment, accepted integration, supersession, confirmed handoff consumption, or long-task freeze, the responsible foreground session runs the scoped [documentation archive sweep](../docs/agents/document-lifecycle.md). Archiving is node-driven and does not create a timer, host service, or additional agent role.
 
 ## Deferred
 
@@ -110,9 +124,9 @@ Accepted with owner revisions:
 
 - three roles — Commander, Worker, Reviewer — with the reviewer an independent agent;
 - Codex is the main entry and normally holds the commander seat, at top capability;
-- workers prefer Claude and fall back to Codex, with fallback bidirectional;
-- the reviewer's task class is at least that of the work it reviews, and cross-provider review is the disclosed default;
-- operating rules stay identical across providers and models, with the binding table as the only provider-specific artifact; and
+- dispatch-eligible, bounded parallel Worker tasks use Claude Code first while its quota is available, then fall back at the same task class under the existing table; every actual binding and downgrade reason is recorded;
+- independent review is optional and advisory; when requested, its existing task-class and independence boundaries remain;
+- operating rules stay identical across providers and models, with Layer B as the only provider-specific policy surface; and
 - the legacy orchestration pilot and its host connector are rejected as baselines.
 
 See [ADR 0015](../docs/adr/0015-provider-neutral-development-dispatch.md).
