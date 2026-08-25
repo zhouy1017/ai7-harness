@@ -1,6 +1,6 @@
 # Design document integration branch
 
-Status: **aggregate Git branch with owner-resolved Windows-and-macOS product scope; documentation only; not canonical `main` authority**
+Status: **aggregate Git branch with owner-resolved Windows-and-macOS product scope, completed Issue #8 missing-design candidate, and response-presentation candidate delta; documentation only; not canonical `main` authority**
 
 The owner explicitly requested a `design-doc` branch containing the design work produced across the active sessions. This branch is therefore an intentional exception to the normal issue-branch naming rule and to `main` being the only long-lived line. It preserves each source branch as a merge parent and makes its unique artifacts reachable in one working tree. It does not turn candidate, frozen-reference, exploration, or historical material into an accepted design.
 
@@ -24,13 +24,14 @@ The initial aggregate merge commits are `8b0580b`, `95b52d6`, `63865fa`, and `b2
 | `docs/architecture-exploration/` | Architecture fork control, evidence history, clarifications, dispatch records, and the later coherent candidate path |
 | `docs/architecture-v2/` | Dedicated DSH-first V2 architecture candidate; candidate only |
 | `docs/ui-ux/` | Frozen V1 UI/UX reference, including its historical prototype; not the V2 implementation baseline |
-| `docs/ui-ux-v2/` | Completed V2 UI/UX candidate plus Proposal-card and reusable-automation delta |
+| `docs/ui-ux-v2/` | Completed V2 UI/UX candidate through D-084/J-16, including Proposal-card, reusable-automation, Issue #8 missing-design, and wait-versus-stream response-presentation deltas |
 | [`docs/design-doc/REVIEW.md`](./REVIEW.md) | Owner-requested two-axis advisory review and Commander dispositions; not a formal gate or `main` acceptance |
 | `kick-in/35-windows-macos-product-platform.md`, `kick-in/36-phase-0-exit-review.md`, `kick-in/37-v1-platform-freeze-handoff.md` | Unique Phase-0/platform candidate artifacts |
 | `docs/adr/0027-concentrate-ci-on-e2e-functionality.md` | Accepted minimal-engineering-validation decision: one logical provider-free E2E Functional Gate on both supported platforms |
 | `docs/agents/ci-test-boundaries.md` | Concise implementation boundary for scenario admission, synthetic data, launchable subject, platform parity, diagnostics, and excluded gates |
 | `docs/agents/source-checkout-buildability.md` | Owner-accepted fresh-checkout build/launch contract; candidate here until normal `main` integration and not implementation authority |
 | `docs/adr/0028-support-windows-and-macos-as-one-product.md` | Accepted integration decision: Windows and macOS are one AI7 product |
+| `docs/adr/0029-*` through `docs/adr/0040-*` | Issue #8 candidate decisions for Book/import, Task Input, budget/Resume, Source/Series, Delivery Package/export, and maintenance boundaries |
 
 ## Resolved integration decisions
 

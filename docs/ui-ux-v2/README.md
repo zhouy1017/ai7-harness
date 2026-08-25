@@ -1,6 +1,6 @@
 # AI7 V2 UI/UX design session
 
-Status: **61-question base, Issue #5 feature delta, Windows/macOS scope integration, and all five Issue #8 batches complete; candidate design only; no implementation authority**
+Status: **61-question base, Issue #5 feature delta, Windows/macOS scope integration, all five Issue #8 batches, and the 7-question response-presentation delta complete; candidate design only; no implementation authority**
 
 This directory records owner decisions from the independent AI7 V2 UI/UX interview. It defines product presentation and interaction only; it does not authorize product code, prototypes, Figma work, dependency installation, testing, review, publishing, or external action.
 
@@ -105,7 +105,7 @@ The primary Task surface gives editors only compact controls for Model Role and 
 
 ### D-022 — Layered editorial Run activity
 
-Running work uses a compact business-state header in the right Task surface and an expandable Editorial Milestone Timeline. AI7 shows numeric progress only when a real, stable denominator exists; otherwise it shows the current editorial phase, current object, last meaningful milestone, and any exact wait reason. Only usable candidate content or structured partial results may stream into the interface, always marked non-authoritative; raw model reasoning, Harness events, tool traces, and subagent mechanics remain excluded. Run activity never displaces the Manuscript automatically, and a Dedicated Work Workspace opens only by explicit editor action.
+Running work uses a compact business-state header in the right Task surface and an expandable Editorial Milestone Timeline. AI7 shows numeric progress only when a real, stable denominator exists; otherwise it shows the current editorial phase, current object, last meaningful milestone, and any exact wait reason. Provider-bound ordinary Runs use Waiting Only and do not progressively reveal provider output. Progressive provider content is limited to the expressly classified Interactive Editorial Dialogue path in D-084; all visible candidates remain non-authoritative, and raw model reasoning, Harness events, tool traces, and subagent mechanics remain excluded. Run activity never displaces the Manuscript automatically, and a Dedicated Work Workspace opens only by explicit editor action.
 
 ### D-023 — Book-grouped concurrent Run presentation
 
@@ -161,7 +161,7 @@ One Manuscript Assertion opens an evidence workspace with exact assertion/revisi
 
 ### D-036 — Tiered progressive evidence assurance
 
-Evidence work uses `快速整理`, default `标准核查`, and `严格核查` levels. Quick mode prioritizes candidates and permits pending findings or evidence-incomplete Correction Proposal drafts but cannot record supported/contradicted formal verification. Standard mode renders progressively, checks selected/high-relevance sources in background, and blocks only on the active policy's minimum gate before determination. Strict mode completes full selected-evidence authority, freshness, integrity, lineage, Exact Fetch, and conflict checks for high-risk or policy-required work. No level turns model knowledge into evidence, certifies a quotation without Exact Fetch, hides conflict, or undercuts a Policy Document minimum. Raising the level reuses prior work. See [ADR 0004](./adr/0004-use-tiered-progressive-evidence-assurance.md).
+Evidence work uses `快速整理`, default `标准核查`, and `严格核查` levels. Quick mode prioritizes candidates and permits pending findings or evidence-incomplete Correction Proposal drafts but cannot record supported/contradicted formal verification. Standard mode adds discrete completed check records as selected/high-relevance sources are checked in background and blocks only on the active policy's minimum gate before determination; this incremental assurance display never permits progressive Provider-answer content outside Interactive Editorial Dialogue. Strict mode completes full selected-evidence authority, freshness, integrity, lineage, Exact Fetch, and conflict checks for high-risk or policy-required work. No level turns model knowledge into evidence, certifies a quotation without Exact Fetch, hides conflict, or undercuts a Policy Document minimum. Raising the level reuses prior work. See [ADR 0004](./adr/0004-use-tiered-progressive-evidence-assurance.md).
 
 ### D-037 — Compact separation of verification result and Review Decision
 
@@ -377,18 +377,22 @@ Windows and macOS keep their familiar save/copy conflict surfaces and may use di
 
 Every Correction, Errata, Supersession, Withdrawal, Reissue or Archive matter binds one stable Maintenance Case to an exact Publication Version and Deliverable revision. Correction uses Correction Proposal/Apply into a new revision, Errata remains a versioned Editorial Artifact, and Supersession/Reissue needs a separately designated newer Publication Version. Withdrawal/Archive is internal AI7 state only. Earlier versions, permissions, packages, exports and receipts remain immutable. See root [ADR 0040](../adr/0040-preserve-post-designation-maintenance-as-versioned-cases.md).
 
+### D-084 — Wait by default and stream only foreground interactive editorial dialogue
+
+Every task type carries an explicit Response Presentation Mode and defaults to `Waiting Only`; writing, rewriting, research, factual verification, Proposal generation, automation, export, and ordinary/background Runs show exact waiting state without progressive provider output. Only an Interactive Editorial Dialogue bound to an exact Book and active work object uses `Interactive Stream`, and only while that dialogue is foregrounded. It may transiently show a user-facing Live Reasoning Summary that never claims raw chain of thought and automatically hides when the formal answer starts; the Interactive Answer Stream then appends complete semantic fragments, atomic structured items, and citations only after exact source binding. Moving away reduces the turn to `等待回答` without pausing or reprioritizing execution, while return restores complete received fragments. Stop or interruption preserves only complete fragments as a visibly Incomplete Dialogue Answer; `继续回答` and `重新回答` create traceable new attempts without silent Retry or Provider fallback. Completed and incomplete answers remain recoverable through Dialogue Answer History, a non-authoritative join from exact Book/Task bindings to Harness Session Ledger-owned messages and attempt history; it creates no third ledger or Task Ledger transcript copy, and the reasoning summary does not enter it. No answer becomes factual authority, manuscript text, Proposal, Learning Material, or executable action merely by appearing; an explicit named conversion action and every normal downstream decision/Apply boundary still apply. See [ADR 0014](./adr/0014-wait-by-default-and-stream-only-interactive-dialogue.md).
+
 ## Current documents
 
 - [UI/UX context](./CONTEXT.md) — candidate-local design language.
 - [Glossary](./GLOSSARY.md) — bilingual index for candidate UI/UX terms.
 - [Visual direction](./visual-direction.md) — accepted reference qualities, required reinterpretations, and exclusions.
-- [Requirements](./requirements.md) — accepted requirements including all five Issue #8 batches.
-- [Information architecture](./information-architecture.md) — accepted organizing model including import recovery, exact Run pins/lifecycle, Source/Series governance, destination-independent packages, native export conflicts, and maintenance cases.
+- [Requirements](./requirements.md) — accepted requirements including all five Issue #8 batches and the response-presentation delta.
+- [Information architecture](./information-architecture.md) — accepted organizing model including import recovery, exact Run pins/lifecycle, Source/Series governance, destination-independent packages, native export conflicts, maintenance cases, and contextual Interactive Editorial Dialogue.
 - [Interaction specification](./interaction-spec.md) — accepted state and transition contracts.
 - [V1 semantic migration](./migration-from-v1.md) — retain/reshape/drop mapping from the exact frozen reference.
-- [Semantic journeys](./journeys.md) — current V2 continuity mapping for frozen IDs `J-01`–`J-14`, including completed Issue #8 import, Run-lifecycle, Source and Series branches, plus V2 `J-15`.
-- [Commander handoff](./HANDOFF.md) — completed Issue #8 design closure, artifact inventory, and authority boundary.
-- [Decision queue](./DECISION-QUEUE.md) — closed historical interviews plus all 18 Issue #8 decisions.
+- [Semantic journeys](./journeys.md) — complete V2 continuity mapping for frozen IDs `J-01`–`J-14`, including completed Issue #8 import, Run-lifecycle, Source and Series branches, plus V2 `J-15` and `J-16`.
+- [Commander handoff](./HANDOFF.md) — completed Issue #8 and response-presentation closures, artifact inventory, and authority boundary.
+- [Decision queue](./DECISION-QUEUE.md) — closed historical interviews, all 18 Issue #8 decisions, and the 7-question response-presentation delta.
 - [Missing-design decision map](./MISSING-DESIGN-DECISION-MAP.md) — completed Issue #8 dependency order and accepted batch answers.
 - [ADR 0001](./adr/0001-user-approved-default-execution-rules.md) — accepted speed-versus-authority boundary for recurring task execution.
 - [ADR 0002](./adr/0002-append-only-run-rewind.md) — accepted append-only history and Effect boundary for editor-directed Run rewind.
@@ -403,3 +407,4 @@ Every Correction, Errata, Supersession, Withdrawal, Reissue or Archive matter bi
 - [ADR 0011](./adr/0011-use-proposal-change-items-and-explicit-atomic-groups.md) — accepted per-change decision identity and the narrow explicit exception for semantically indivisible change groups.
 - [ADR 0012](./adr/0012-extract-reusable-structure-without-instance-authority.md) — accepted reusable-procedure extraction boundary that excludes manuscript instance data, secrets and prior authority.
 - [ADR 0013](./adr/0013-use-latest-eligible-new-version-and-preserve-historical-pins.md) — accepted latest-eligible default for new use together with exact historical pins and non-destructive referenced-version removal.
+- [ADR 0014](./adr/0014-wait-by-default-and-stream-only-interactive-dialogue.md) — candidate waiting-by-default and foreground-streaming boundary for contextual editorial dialogue.

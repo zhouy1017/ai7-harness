@@ -1,6 +1,6 @@
 # AI7 V2 interaction specification
 
-Status: **candidate interaction contract under Issue #8 missing-design completion; not implementation evidence**
+Status: **candidate interaction contract under Issue #8 missing-design completion and the response-presentation delta; not implementation evidence**
 
 ## Startup and restart
 
@@ -638,8 +638,8 @@ Task Pattern Confidence governs reduced Run-review burden only. Output remains a
 
 | Run condition | Compact header | Expanded activity |
 | --- | --- | --- |
-| Running with measurable units | Business phase, current object, exact `completed/total`, last meaningful update | Milestones plus inspectable candidate/partial results |
-| Running without a stable denominator | Business phase, current object, last meaningful update; no percentage | Milestones and any usable candidate stream |
+| Running with measurable units | Business phase, current object, exact `completed/total`, last meaningful update | Milestones plus already completed provisional results; no progressive Provider output under Waiting Only |
+| Running without a stable denominator | Business phase, current object, last meaningful update; no percentage | Milestones and exact wait state; a completed candidate appears only after its Provider response settles |
 | Waiting for clarification | `等待你的说明` plus the named Clarification Request | Prior milestones, exact request, and context needed to answer |
 | Connectivity/model-service wait | `等待网络` or `等待模型服务`, authorized plan identity, and last completed milestone | Connection detail, Reconnect Preflight state, and cancel; no provider activity implied |
 | Provider Account Limit blocker | `模型服务账户限额` plus affected provider/connection and last completed milestone | Provider-reported condition or `提供方未返回`, remediation route, retained Run Authorization, and explicit `续行` only after the condition clears |
@@ -654,12 +654,64 @@ Task Pattern Confidence governs reduced Run-review burden only. Output remains a
 - The Run Activity Header stays compact in the right Task surface and is also projected into `运行中与已暂停` without duplicating Task Ledger authority.
 - The Editorial Milestone Timeline contains business-readable events with stable links to exact source, candidate, Clarification Request, outcome, Effect, or receipt records when those records exist.
 - Technical attempts, raw tool calls, Harness events, provider token streaming, subagent identities, and chain of thought never become the normal timeline vocabulary.
-- A Usable Candidate Stream may progressively reveal draft prose, candidate claims, comparison rows, or other inspectable intermediate material; every item remains visibly provisional until the appropriate later decision or Effect succeeds.
+- Waiting Only is the default for Provider-bound work. Its activity surface may reveal a completed provisional candidate after the applicable Provider response settles, but it never progressively renders that response. Progressive provider content is reserved for the Interactive Answer Stream defined below.
 - Measured Run Progress uses exact comparable work units, for example `已核对 12/37 条引文`. If the total changes materially or ceases to be trustworthy, AI7 drops the numeric indicator and explains the current phase rather than preserving a misleading percentage.
 - When meaningful activity stops, the UI reports the last completed milestone, current wait/stall reason, time since the meaningful update, and valid safe action. Elapsed time alone is never a progress measure.
 - Clicking an expanded candidate, evidence comparison, or result may explicitly open a Dedicated Work Workspace; no background event changes work-surface mode automatically.
 - Provider/model/cost and diagnostics remain behind secondary disclosure unless they are the blocking condition. No activity surface implies factual verification, Proposal Decision, Effect Approval, Effect Receipt, workflow completion, Signoff, or Public Release Permission.
 - Run Budget Ceiling Reached, Provider Account Limit, Run Capacity Wait, Connectivity Wait State, Cooperative Run Pause, and Resume-ready Run State retain different labels and action sets; no generic `预算不足` or `继续` collapses them.
+
+## Interactive Editorial Dialogue presentation
+
+Response Presentation Mode is assigned explicitly by task type:
+
+| Task category | Mode | Provider-content behavior |
+| --- | --- | --- |
+| Writing, rewriting, research, factual verification, Proposal generation, automation, export, and other ordinary Runs | `Waiting Only` | Show exact phase/wait state; reveal no progressive Provider answer |
+| Interactive Editorial Dialogue bound to the exact active Book/work object | `Interactive Stream` | Stream only while that dialogue is foregrounded, under the boundaries below |
+
+The product never infers this mode from response length, latency, provider protocol, model, user impatience, or current window location. The user does not toggle an individual Run into streaming.
+
+### Foreground turn sequence
+
+| Turn state | User-facing presentation | Required transition |
+| --- | --- | --- |
+| Submitted / awaiting first useful content | Exact contextual question and `等待回答` | Remain quiet until a safe user-facing summary or formal fragment exists |
+| Approach/checking work is useful to disclose | `实时思路摘要` with concise approach, checks, evidence comparison, and uncertainty | Do not claim raw chain of thought; hide automatically before the first formal-answer fragment appears |
+| Formal answer has begun | `正在回答 · 内容尚未完成` plus complete semantic fragments | Append only complete prose fragments or atomic structured items |
+| Formal answer has settled | Complete answer without the incomplete label | Expose through the recoverable Dialogue Answer History projection; retain no visible Live Reasoning Summary |
+
+### Stream content boundaries
+
+- Prose appends by a complete short sentence or coherent semantic fragment, never by raw character/token jitter or an exposed broken tail.
+- A list item or table row appears only when complete. A later correction to streamed prose is explicit rather than silently rewriting already presented text.
+- A citation or evidence reference appears only after exact source binding and remains attached to the corresponding claim. Unbound citation placeholders do not appear.
+- Proposal content, factual-verification conclusions, structured authoritative records, and executable actions wait until the applicable object is complete and structurally valid, then appear atomically in their governed surface rather than being assembled as authority inside the answer stream.
+
+### Foreground/background transition
+
+| Event | Active dialogue surface | Background/global projection | Execution consequence |
+| --- | --- | --- | --- |
+| Editor leaves the active dialogue | Hide Live Reasoning Summary and Interactive Answer Stream | Show only `等待回答`; no fragment notice or focus theft | None; Provider work continues without pause, cancel, or reprioritization |
+| Editor returns before completion | Restore every received complete fragment, then resume live presentation | Remove the compact background projection | None |
+| Turn completes while backgrounded | Show the settled formal answer on return | Quiet completed state; no per-fragment notification | None |
+
+### Stop, interruption, and later attempts
+
+| Event | Preserved content | Settled presentation | Available next action |
+| --- | --- | --- | --- |
+| User invokes `停止回答` | Complete semantic fragments only; discard incomplete sentence/item/row tail | `回答已停止 · 内容不完整`; Live Reasoning Summary hidden | `继续回答` or `重新回答` as a new traceable attempt |
+| Provider/network interruption | Complete semantic fragments only; known cause retained | `回答中断 · 内容不完整`; Live Reasoning Summary hidden | Explicit new attempt after the blocker is understood |
+| Interruption before any usable fragment | Question plus failed attempt metadata | No fabricated Incomplete Dialogue Answer body | Explicit retry/re-answer action only |
+
+AI7 never silently retries, continues, changes Provider, or falls back after these states. An Incomplete Dialogue Answer remains readable and copyable but is not a completed formal answer, factual conclusion, Proposal, Learning Material, authoritative record, or executable action.
+
+### History and promotion boundary
+
+- Dialogue Answer History is a recoverable, non-authoritative joined projection under the exact Book, active work object, and Task context. Exact Execution Bindings and Harness Execution Spans resolve it to model messages and attempt history owned only by the Harness Session Ledger; no transcript is copied into the AI7 Task Ledger and no third ledger is created.
+- Live Reasoning Summary is generation-only presentation and does not appear in visible history.
+- A subsequent turn may reference prior questions and answers in the same dialogue but gains no broader manuscript/source scope, Provider outbound category, or authorization from that history.
+- A completed answer remains generated content. `转为提案`, `用于新任务草稿`, or another exact named action may copy selected answer content into a new governed draft while preserving provenance back to the joined history; no conversion is implicit, and manuscript mutation still requires Proposal Decision plus the normal Apply path. `用于新任务草稿` creates a Task Intent Draft, not a `Task Input / 任务输入` Manuscript Checkpoint; D-075 applies later only if that task actually targets journal-newer manuscript state.
 
 ## Concurrent Run presentation
 
@@ -981,7 +1033,7 @@ committed Apply Effect Receipt
 ### Comparison rules
 
 - The header shows original manuscript text and AI7's normalized assertion in separately labeled fields. Editing the normalization changes no manuscript text and requires exact review before it becomes the assessed assertion.
-- Evidence Source Cards may render progressively; missing publisher, version, freshness, provenance, integrity, exact fetch, or relation fields remain explicit rather than blocking the entire source list with a spinner.
+- Evidence Source Cards add publisher, version, freshness, provenance, integrity, exact-fetch, and relation fields only as each discrete check settles; missing/running fields remain explicit rather than blocking the entire source list with a spinner. This is not progressive Provider-answer rendering.
 - Pinning adds no evidentiary authority. The matrix aligns source identity/version, exact excerpt or candidate state, authority under policy, dates, provenance/lineage, integrity, applicability, and relation to the assertion.
 - At most four sources occupy comparison columns at once; keyboard and source-list navigation make replacement/pinning fast while retaining the rest in the virtualized list.
 - Exact Evidence Excerpts preserve punctuation, surrounding context, Source Version, exact range/digest, fetch time, and source link. Search snippets and retrieval chunks retain their own labels.
@@ -995,9 +1047,11 @@ committed Apply Effect Receipt
 
 | Level | Initial experience | Blocking point | Formal outcome ceiling |
 | --- | --- | --- | --- |
-| `快速整理` | Candidate sources/snippets and summary return first; checks fill progressively | Exact quotation requires Exact Fetch; no general determination gate because formal determination unavailable | `待核查` finding or evidence-incomplete Correction Proposal draft |
+| `快速整理` | Completed candidate sources/snippets and summary return first; settled check states fill incrementally | Exact quotation requires Exact Fetch; no general determination gate because formal determination unavailable | `待核查` finding or evidence-incomplete Correction Proposal draft |
 | `标准核查` | Candidates first; pinned/quoted/high-relevance evidence checks in background | Minimum Evidence Gate when recording formal verification | Policy-permitted supported/contradicted/unresolved result |
 | `严格核查` | Selected evidence assurance runs to full required depth | Full policy-required selected-evidence gate | Same result vocabulary with higher documented assurance |
+
+Here, incremental assurance means that independently completed check records become visible one by one. It does not stream a Provider response; any Provider-bound factual-verification contribution follows Waiting Only until that response settles.
 
 ### Assurance interaction rules
 

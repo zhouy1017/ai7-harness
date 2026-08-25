@@ -35,7 +35,7 @@ AI7 should be recognizably its own Chinese professional editorial product while 
 - pixel-for-pixel geometry, exact proportions, or a replica component tree;
 - coding objects such as repositories, worktrees, branches, commits, terminals, pull requests, or developer access levels;
 - a generic chat-first hierarchy that displaces Books, manuscripts, deliverables, evidence, proposals, or workflows;
-- raw model reasoning, DSH technical sessions, tool traces, or provider internals as the normal user experience; and
+- raw model reasoning, DSH technical sessions, tool traces, or provider internals as the normal user experience; a separately labeled Live Reasoning Summary may describe user-facing approach/checks but never claims those internals; and
 - visual similarity that merges AI7's distinct authority or factual-status records.
 
 ## Candidate completion boundary
@@ -90,7 +90,9 @@ Task Skill discovery keeps catalog presence, recommendation and source access vi
 
 Workflow Profile, Default Execution Rule and Developer Capability Proposal cards share catalog typography but not primary actions. Profile draft, publication, future-default designation and existing-instance migration occupy distinct labeled states; rule draft and enabled status expose the exact envelope before activation; developer proposals end with a calm saved handoff state and no install affordance. Version creation uses one consistent `保存为新版本` grammar, while type-specific consequences remain adjacent so visual consistency never implies shared authority.
 
-Running activity follows a similarly quiet hierarchy. One compact right-side status header carries the current editorial phase, object, last meaningful update, and real measured progress when available. Expansion reveals a restrained milestone timeline and usable candidates rather than a dense console, animated reasoning feed, or wall of technical events. Indeterminate work uses precise phase and wait language instead of decorative percentages, and background changes never seize the central Manuscript surface.
+Running activity follows a similarly quiet hierarchy. One compact right-side status header carries the current editorial phase, object, last meaningful update, and real measured progress when available. Ordinary and background Provider-bound work shows an exact waiting/phase state without progressive content, decorative percentages, animated reasoning, or a wall of technical events; a completed provisional candidate appears only after its response settles.
+
+Foreground Interactive Editorial Dialogue is the sole streaming exception. A low-height `实时思路摘要` may calmly replace the waiting line while approach/check information is useful, then disappears before formal answer text begins. The answer grows by complete semantic fragments or atomic items rather than character-by-character typewriter motion; source-bound citations arrive with their claims. Leaving the dialogue collapses it to `等待回答`, with no fragment badges or focus theft. Stop/interruption preserves a quiet, clearly labeled incomplete body instead of styling it as success or authoritative completion.
 
 Budget, provider and interruption states use separate consequence-first treatments. `任务运行预算已达上限 · 已保留部分结果` is a terminal partial-outcome state with `调整预算并重做`; `模型服务账户限额` is a provider-remediation blocker; `任务已中断 · 可续行` is a settled same-Run state with explicit `续行`. None uses celebratory completion, an indefinite spinner, generic `预算不足`, or the concurrency label `等待运行名额`.
 

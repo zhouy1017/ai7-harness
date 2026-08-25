@@ -1,6 +1,6 @@
 # AI7 V2 UI/UX glossary
 
-Status: **candidate-local bilingual index under Issue #8 missing-design completion**
+Status: **candidate-local bilingual index under Issue #8 missing-design completion and the response-presentation delta**
 
 | English term | Preferred Simplified Chinese | Definition owner |
 | --- | --- | --- |
@@ -10,6 +10,7 @@ Status: **candidate-local bilingual index under Issue #8 missing-design completi
 | Book Library | 书库 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Active Work Object | 当前工作对象 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Task Context Layer | 任务上下文层 | [AI7 V2 UI/UX](./CONTEXT.md) |
+| Interactive Editorial Dialogue | 交互式编辑问答 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Global Attention View | 全局待处理视图 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Continuity-first Return | 连续工作续接 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Recovery Attention State | 恢复待确认状态 | [AI7 V2 UI/UX](./CONTEXT.md) |
@@ -113,13 +114,19 @@ Status: **candidate-local bilingual index under Issue #8 missing-design completi
 | Run Budget Ceiling | 任务运行预算上限 | [AI7 Execution](../domain/execution/CONTEXT.md) |
 | Run Budget Ceiling Reached | 任务运行预算已达上限 | [AI7 Execution](../domain/execution/CONTEXT.md) |
 | Provider Account Limit | 模型服务账户限额 | [AI7 Execution](../domain/execution/CONTEXT.md) |
+| Response Presentation Mode | 响应呈现模式 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Run Activity Header | 任务运行状态栏 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Editorial Milestone Timeline | 编辑里程碑时间线 | [AI7 V2 UI/UX](./CONTEXT.md) |
+| Live Reasoning Summary | 实时思路摘要 | [AI7 V2 UI/UX](./CONTEXT.md) |
+| Interactive Answer Stream | 交互回答流 | [AI7 V2 UI/UX](./CONTEXT.md) |
+| Incomplete Dialogue Answer | 未完成回答 | [AI7 V2 UI/UX](./CONTEXT.md) |
+| Dialogue Answer History | 问答记录 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Usable Candidate Stream | 可用候选结果流 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Measured Run Progress | 可测任务进度 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Book-grouped Run Overview | 按图书分组的任务概览 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Current Book Run Switcher | 当前图书任务切换器 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Foreground Run Projection | 前台任务投影 | [AI7 V2 UI/UX](./CONTEXT.md) |
+| Background Answer Wait | 等待回答 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Run Capacity Wait | 等待运行名额 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Resume-ready Run State | 任务运行可续行状态 | [AI7 Execution](../domain/execution/CONTEXT.md) |
 | Resume | 续行 | [AI7 Execution](../domain/execution/CONTEXT.md) |
@@ -293,6 +300,7 @@ Status: **candidate-local bilingual index under Issue #8 missing-design completi
 | Book-anchored Workbench | A filesystem folder, a Book-wide scalar workflow, or a list of agent conversations. |
 | Active Work Object | The authoritative object itself, the whole Book, or a renderer window treated as manuscript authority. |
 | Task Context Layer | The AI7 Task Ledger, a Harness Session, or a generic chat surface. |
+| Interactive Editorial Dialogue | Software QA, a generic chat root, a raw provider transcript, or an unbound conversation. |
 | Global Attention View | A third ledger, a global source scope, or authority to mutate across Books. |
 | Continuity-first Return | Automatic mutation, generic dashboard routing, or whichever notification arrived most recently. |
 | Recovery Attention State | A Recovery Snapshot, Manuscript Checkpoint, successful restore, or proof that no edits were lost. |
@@ -397,13 +405,19 @@ Status: **candidate-local bilingual index under Issue #8 missing-design completi
 | Run Budget Ceiling | Provider Account Limit, Authority Ceiling, reliable cost estimate, or free/unlimited service. |
 | Run Budget Ceiling Reached | Provider Account Limit, Task success, ordinary pause, or a new Task Outcome type. |
 | Provider Account Limit | Run Budget Ceiling, provider rate limit, Run Capacity Wait, automatic fallback permission, or AI7 billing authority. |
+| Response Presentation Mode | A Policy Document, provider protocol setting, output-length guess, user quality option, or execution authority. |
 | Run Activity Header | Harness Session status, Task Outcome, Effect Receipt, or a technical process console. |
 | Editorial Milestone Timeline | Chain of thought, raw tool calls, transcript, or proof that a business Effect committed. |
-| Usable Candidate Stream | An authoritative Editorial Artifact, accepted Proposal, factual evidence, or applied mutation. |
+| Live Reasoning Summary | Raw chain of thought, hidden reasoning, a system prompt, provider reasoning tokens, tool parameters, factual evidence, or a durable business event. |
+| Interactive Answer Stream | A raw token feed, half-formed structured record, unbound citation, accepted Proposal, factual conclusion, or executable action. |
+| Incomplete Dialogue Answer | A completed formal answer, failed turn with no usable fragment, factual conclusion, accepted Proposal, Learning Material, or permission for silent Retry/fallback. |
+| Dialogue Answer History | A raw provider transcript, hidden-reasoning archive, generic chat root, third ledger, transcript copy in the AI7 Task Ledger, authoritative Editorial Artifact, or permission to widen source/egress scope. |
+| Usable Candidate Stream | A default provider stream for ordinary Runs, authoritative Editorial Artifact, accepted Proposal, factual evidence, or applied mutation. |
 | Measured Run Progress | Model confidence, elapsed-time estimate, fake percentage, Workflow completion, or delivery readiness. |
 | Book-grouped Run Overview | A new global ledger, a generic thread list, Working Corpus, or authority across Books. |
 | Current Book Run Switcher | Execution priority, pause/resume control, Task Skill selector, or conversation navigation. |
 | Foreground Run Projection | OS foreground execution, scheduler priority, exclusive provider use, or manuscript authority. |
+| Background Answer Wait | Network disconnection, capacity queue, pause, cancellation, provider inactivity, or permission to show streamed content outside the active dialogue. |
 | Run Capacity Wait | A running provider call, a paused/cancelled Run, guaranteed queue order, or completion estimate. |
 | Resume-ready Run State | Cooperative Run Pause, Connectivity Wait State, Run Capacity Wait, Retry availability, automatic process restoration, or a Run invalidated by an effective Series Retrieval Exclusion or other material source restriction. |
 | Resume | Retry, Redo, Cooperative Run Pause itself, automatic process restoration, or continuation after a material source restriction without Plan Revision and renewed Run Authorization. |
