@@ -22,7 +22,11 @@ import {
   type ServiceOperationMap,
 } from '../shared/protocol.js';
 import { ServiceCallError, ServiceClient } from './service-client.js';
-import { createCanonicalExternalDataRoot, ensureCanonicalDataDirectory } from '../shared/data-root.js';
+import {
+  createCanonicalExternalDataRoot,
+  ensureCanonicalDataDirectory,
+  requireSameCanonicalDataDirectory,
+} from '../shared/data-root.js';
 
 interface LaunchArguments {
   dataRoot: string;
@@ -269,7 +273,11 @@ export async function runApplication(): Promise<void> {
     const dataRoot = await createCanonicalExternalDataRoot(launch.dataRoot, codeRoot);
     startupLocation = 'shell-root';
     const shellRoot = await ensureCanonicalDataDirectory(dataRoot, 'shell');
+    const earlyUserDataSwitch = app.commandLine.getSwitchValue('user-data-dir');
+    requireDesktop(isAbsolute(earlyUserDataSwitch));
+    await requireSameCanonicalDataDirectory(shellRoot, earlyUserDataSwitch, app.getPath('userData'));
     app.setPath('userData', shellRoot);
+    await requireSameCanonicalDataDirectory(shellRoot, app.getPath('userData'));
     startupLocation = 'single-instance';
     if (!app.requestSingleInstanceLock()) {
       await stop();

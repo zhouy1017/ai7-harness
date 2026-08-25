@@ -33,7 +33,9 @@ declare module 'electron' {
     show(): void;
   }
   export const app: {
+    commandLine: { getSwitchValue(name: string): string };
     enableSandbox(): void;
+    getPath(name: 'userData'): string;
     requestSingleInstanceLock(): boolean;
     setPath(name: 'userData', path: string): void;
     whenReady(): Promise<void>;

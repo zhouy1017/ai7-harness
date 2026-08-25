@@ -306,6 +306,11 @@ async function main() {
   installNodeNetworkDenial();
   at('controller-imports');
   ({ electronExecutable } = await import('../tools/electron-runtime.mjs'));
+  const dataRootEntry = resolve(ROOT, 'dist', 'shared', 'data-root.mjs');
+  requireJourney(existsSync(dataRootEntry), 'controller-data-root-carrier');
+  const { createCanonicalExternalDataRoot, ensureCanonicalDataDirectory } = await import(
+    pathToFileURL(dataRootEntry).href
+  );
   ({ strToU8, zipSync } = await import('fflate'));
   const { chromium } = await import('playwright-core');
   const tempParent = await realpath(tmpdir());
@@ -316,7 +321,8 @@ async function main() {
   );
   const runRoot = await realpath(await mkdtemp(join(tempParent, 'ai7-j01-e2e-')));
   requireJourney(dirname(runRoot) === tempParent && basename(runRoot).startsWith('ai7-j01-e2e-'), 'temp-root');
-  const dataRoot = resolve(runRoot, 'data');
+  const dataRoot = await createCanonicalExternalDataRoot(resolve(runRoot, 'data'), checkoutRoot);
+  const shellRoot = await ensureCanonicalDataDirectory(dataRoot, 'shell');
   const docx = await createSyntheticDocx(runRoot);
   const executable = electronExecutable();
   const entry = resolve(ROOT, 'dist', 'main', 'index.cjs');
@@ -329,6 +335,7 @@ async function main() {
     '--metrics-recording-only',
     '--no-first-run',
     '--remote-debugging-pipe',
+    `--user-data-dir=${shellRoot}`,
     entry,
     '--data-root',
     dataRoot,

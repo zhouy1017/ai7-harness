@@ -84,6 +84,23 @@ export async function ensureCanonicalDataDirectory(dataRootInput: string, ...seg
   return current;
 }
 
+/** Require every already-existing directory value to resolve to the same canonical owner. */
+export async function requireSameCanonicalDataDirectory(
+  expectedInput: string,
+  ...candidateInputs: string[]
+): Promise<void> {
+  requireBoundary(isAbsolute(expectedInput) && candidateInputs.length > 0);
+  const expected = await realpath(resolve(expectedInput));
+  const expectedMetadata = await stat(expected);
+  requireBoundary(expectedMetadata.isDirectory());
+  for (const candidateInput of candidateInputs) {
+    requireBoundary(isAbsolute(candidateInput));
+    const candidate = await realpath(resolve(candidateInput));
+    const candidateMetadata = await stat(candidate);
+    requireBoundary(candidateMetadata.isDirectory() && samePath(candidate, expected));
+  }
+}
+
 /** Validate an existing file or prove its exact canonical parent before first creation. */
 export async function inspectCanonicalDataFile(
   dataRootInput: string,

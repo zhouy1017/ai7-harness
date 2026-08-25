@@ -19,10 +19,11 @@
 - Final local Windows 11 Pro `10.0.26200` x64 evidence is green with exact Node `24.18.1` and pnpm `11.24.0`: `pnpm run doctor`, closed frozen `pnpm run bootstrap` from a reconstructed dependency tree, `pnpm run build`, and full raw-pipe `pnpm run e2e -- --journey J-01`. The final bootstrap proved Electron `43.4.1`, embedded Node `24.18.1`, ABI `148`, SQLite `3.53.1`, and FTS5; a poisoned `NODE_USE_ENV_PROXY` diagnostic failed closed without printing a value. Additional sanitized probes verified clean/default-section acceptance, styled/real-section rejection, lone-surrogate rejection with continued readiness, both-direction canonical code/data-root exclusion, and fixed readiness while the launcher remains attached.
 - The final closure/artifact/notices sweep found 64 lock package identities and 54 snapshots, no Electron/native-extractor npm carrier, zero installed `.node` files, no tracked DOCX/database, exactly one workflow, and no uploaded screenshot/trace/video/artifact carrier. Tracked notices exactly match the built copy, both built Electron notice carriers match the verified generated runtime, local Markdown links resolve, and `git diff --check` is clean. The document-lifecycle sweep found no consumed working record to archive and no new archive authority.
 - Final task units are committed with required why bodies and model trailers: `7f5e9e7` closes runtime/supply-chain/lifecycle boundaries, `8f0474d` records the source-checkout/provenance/current handoff, and `d814bba` adds the sole dual-host workflow.
+- Commander process inspection at `4ec119b` found Electron's earliest NetworkService using its default profile before main's prior `app.setPath` call, so that head and its reviews are invalidated. The in-scope correction in [`src/shared/data-root.ts`](src/shared/data-root.ts), [`tools/start-built.mjs`](tools/start-built.mjs), [`e2e/run-j01.mjs`](e2e/run-j01.mjs), [`src/main/application.ts`](src/main/application.ts), and [`tools/build.mjs`](tools/build.mjs) now preflights the canonical external data/shell root before Electron launch, passes the standard `--user-data-dir=<canonical-shell>` switch before the built entry, and makes main prove both the early switch and Electron `userData` path resolve to that same owner before startup continues. Live `start-built` inspection found one Electron main, GPU, renderer, and NetworkService all carrying the exact selected shell, one separate Node-mode service with no Chromium profile switch, no process referencing the roaming default, and zero remaining product processes after launcher interruption.
 
 ## What's next
 
-- Commit this current checkpoint and obtain the required read-only standards/spec review over the resulting clean final SHA; address only in-scope findings, then report the proven Windows evidence and explicit unproven host branches to Commander.
+- Commit the bounded pre-Electron profile-root correction with the required why body/model trailer, verify the new clean SHA, and re-run read-only standards/spec review because the prior `4ec119b` reviews are invalid.
 
 ## Unresolved matters or blockers
 
@@ -44,4 +45,4 @@
 
 ## Resume Prompt
 
-Resume Issue #24 under Commander amendments 1–2 by obtaining standards/spec review over the clean committed no-native raw-pipe J-01 tracer; address only in-scope findings and do not claim unrun macOS or hosted CI evidence.
+Resume Issue #24 under Commander amendments 1–2 by committing the exact-command-green pre-Electron canonical `--user-data-dir` fix and re-reviewing the new clean SHA without claiming unrun macOS or hosted CI evidence.

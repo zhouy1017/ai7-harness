@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { delimiter, dirname, isAbsolute, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { electronExecutable } from './electron-runtime.mjs';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
@@ -42,7 +42,13 @@ async function main() {
   requireLaunch(args.length === 2 && args[0] === '--data-root' && isAbsolute(args[1]));
   const executable = electronExecutable();
   const entry = resolve(ROOT, 'dist', 'main', 'index.cjs');
-  requireLaunch(existsSync(executable) && existsSync(entry));
+  const dataRootEntry = resolve(ROOT, 'dist', 'shared', 'data-root.mjs');
+  requireLaunch(existsSync(executable) && existsSync(entry) && existsSync(dataRootEntry));
+  const { createCanonicalExternalDataRoot, ensureCanonicalDataDirectory } = await import(
+    pathToFileURL(dataRootEntry).href
+  );
+  const dataRoot = await createCanonicalExternalDataRoot(args[1], ROOT);
+  const shellRoot = await ensureCanonicalDataDirectory(dataRoot, 'shell');
   const child = spawn(executable, [
     '--disable-background-networking',
     '--disable-component-update',
@@ -51,9 +57,10 @@ async function main() {
     '--disable-sync',
     '--metrics-recording-only',
     '--no-first-run',
+    `--user-data-dir=${shellRoot}`,
     entry,
     '--data-root',
-    args[1],
+    dataRoot,
     '--launcher-pid',
     String(process.pid),
   ], {

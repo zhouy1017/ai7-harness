@@ -57,6 +57,7 @@ async function ensureClosedOutputs() {
     'renderer/renderer.js',
     'renderer/styles.css',
     'service/index.mjs',
+    'shared/data-root.mjs',
     'shared/network-denial.mjs',
   ]);
   const found = [];
@@ -73,6 +74,7 @@ async function ensureClosedOutputs() {
   const main = await readFile(outputPath('main', 'index.cjs'), 'utf8');
   const preload = await readFile(outputPath('main', 'preload.cjs'), 'utf8');
   const service = await readFile(outputPath('service', 'index.mjs'), 'utf8');
+  const dataRoot = await readFile(outputPath('shared', 'data-root.mjs'), 'utf8');
   const renderer = await readFile(outputPath('renderer', 'renderer.js'), 'utf8');
   for (const [name, source] of Object.entries({ main, service })) {
     requireBuild(source.includes('installNodeNetworkDenial();'), `${name} omitted the synchronous Node network guard.`);
@@ -94,6 +96,12 @@ async function ensureClosedOutputs() {
   requireBuild(service.includes('@deepseek-ai/dsh-agent-loop'), 'Built service omitted the dormant six-service composition.');
   requireBuild(main.includes('AI7_READY\\n'), 'Built main omitted its payload-free readiness handshake.');
   requireBuild(main.includes('requestSingleInstanceLock'), 'Built main omitted its pre-store single-instance lock.');
+  requireBuild(
+    main.includes('getSwitchValue("user-data-dir")') &&
+      main.includes('getPath("userData")') &&
+      dataRoot.includes('requireSameCanonicalDataDirectory'),
+    'Built subject omitted the pre-Electron canonical shell-root binding.',
+  );
   requireBuild(
     main.includes('ai7:j01:close-risk-changed') &&
       main.includes('ai7:j01:close-blocked') &&
@@ -155,6 +163,12 @@ async function main() {
     entryPoints: [resolve(ROOT, 'src', 'service', 'index.ts')],
     format: 'esm',
     outfile: outputPath('service', 'index.mjs'),
+  });
+  await runEsbuild({
+    ...nodeBuild,
+    entryPoints: [resolve(ROOT, 'src', 'shared', 'data-root.ts')],
+    format: 'esm',
+    outfile: outputPath('shared', 'data-root.mjs'),
   });
   await runEsbuild({
     ...nodeBuild,

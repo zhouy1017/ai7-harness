@@ -37,7 +37,7 @@ Only the final command is the one admitted standing scenario. `doctor`, bootstra
 - Product and E2E-controller egress are denied after restoration. Playwright uses inherited `--remote-debugging-pipe`; no debugger port, TCP listener, dev server, inspector, WebSocket endpoint, screenshot, trace, video, or payload log is admitted.
 - Harness readiness is infrastructure evidence only. Import completion is the atomic AI7 transaction; edit completion appears only after the separate committed journal acknowledgement.
 - Ordinary close is blocked while the editor is dirty, saving, retry-required, or interrupted with unconfirmed text. A service crash preserves the visible buffer but makes no recovery or durability claim.
-- Agent Data Root, shell, SQLite/store, object directories, sidecars, and content objects are canonicalized and cannot redirect through a pre-existing symlink or junction.
+- Agent Data Root and shell are canonicalized by the shared owner before Electron starts; Chromium's standard early user-data switch and main's observed Electron path must match that shell. SQLite/store, object directories, sidecars, and content objects likewise cannot redirect through a pre-existing symlink or junction.
 - Windows Server 2025 is truthfully labelled CI evidence; local Windows evidence is Windows 11. macOS behavior must not be claimed until its exact host run is green.
 - Only the Commander may push, open or change a pull request, merge, tag, publish, release, or touch `dev`/`main`.
 
