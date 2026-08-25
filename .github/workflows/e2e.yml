@@ -1,0 +1,61 @@
+name: E2E Functional Gate
+
+on:
+  pull_request:
+    branches:
+      - dev
+
+permissions:
+  contents: read
+
+jobs:
+  j01:
+    name: J-01 (${{ matrix.label }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: Windows Server 2025 x64 CI
+            runner: windows-2025
+            architecture: x64
+            windows_server_marker: '1'
+          - label: macOS 15 arm64
+            runner: macos-15
+            architecture: arm64
+            windows_server_marker: '0'
+    env:
+      AI7_CI_WINDOWS_SERVER_2025: ${{ matrix.windows_server_marker }}
+      NPM_CONFIG_PREFIX: ''
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Select exact Node
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24.18.1
+          architecture: ${{ matrix.architecture }}
+          check-latest: false
+
+      - name: Activate repository-pinned pnpm
+        shell: bash
+        run: |
+          corepack enable
+          pnpm --version
+
+      - name: Check supported host and closed inputs
+        run: pnpm run doctor
+
+      - name: Restore exact declared inputs
+        run: pnpm run bootstrap
+
+      - name: Build the production-shaped subject
+        run: pnpm run build
+
+      - name: Run the admitted product journey
+        run: pnpm run e2e -- --journey J-01

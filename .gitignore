@@ -1,15 +1,28 @@
 # Private sample manuscripts are authorized for AI7 use only while they
 # remain private and local (ADR 0016). They must never be committed, in
-# history or working tree. This design room is Markdown-only, so document
-# formats are excluded outright rather than by path.
+# history or working tree. Document formats are excluded outright rather
+# than by path.
 SampleBooks/
 *.doc
 *.docx
-*.pdf
 *.odt
 *.rtf
+*.pdf
 
 # Local secrets and credential material never enter the repository.
 .env
 *.key
 *.pem
+
+# Generated dependencies, builds, caches, business stores, and diagnostics.
+node_modules/
+dist/
+.cache/
+.runtime/
+.pnpm-store/
+test-results/
+*.log
+*.sqlite
+*.sqlite-*
+*.db
+*.db-*

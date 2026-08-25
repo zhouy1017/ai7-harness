@@ -14,7 +14,7 @@ manuscript, source, or derivative work.
 
 Third-party components consumed by AI7 remain under their own licenses.
 DeepSeek Harness and its dependencies are used under their respective
-terms, and their notices are reproduced in THIRD-PARTY-NOTICES when AI7
+terms, and their notices are reproduced in `THIRD_PARTY_NOTICES.md` when AI7
 distributes any build. Some upstream vendored payload authorizations may
 be identity- or distribution-scoped and must be verified rather than
 assumed to extend to an AI7-branded distribution.
