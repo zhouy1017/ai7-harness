@@ -586,10 +586,11 @@ Resume from `design-doc@de16a2c` with Issues #6 and #7 integrated and the adviso
 - Switched the primary repository worktree `C:/Users/Chooo/codebase/ai7-harness` from `docs/1-windows-macos-phase0` back to clean `main@c8cbe26c4cccc4a912b3bbc05bd5b23fbf5468b9`.
 - Removed the completed clean linked worktrees for `docs/2`, the detached architecture Reviewer, Issue #6, and Issue #7. The former `docs/3` worktree was unregistered after its stale `PROGRESS.md` diff was preserved as recoverable stash commit `a1fc8b782b8a2b4fce9043bd9de79693762b7095`; its now-empty directory remains temporarily because another process holds an open handle.
 - Retained only the primary `main` worktree, the target `design-doc` worktree, and this task's detached `25be` worktree. No remote branch was deleted; the remote already contained only `main` and `design-doc`.
+- Pushed the consolidated `design-doc` history to `origin/design-doc`, verified `origin/main` remained exactly `c8cbe26c4cccc4a912b3bbc05bd5b23fbf5468b9`, and closed GitHub Issues #6 and #7 with explicit no-`main`/no-implementation notices.
 
 ### What's next
 
-- Push the consolidated `design-doc` head and close Issues #6 and #7 with explicit notes that `main` and implementation authority remain unchanged.
+- No design branch integration or purge action remains. The consolidated target is `origin/design-doc`; `main` remains unchanged.
 - If the empty unregistered `C:/Users/Chooo/.codex/worktrees/6bbc/ai7-harness` directory is still present after its external handle closes, it may be removed; it contains no repository data and is not a registered worktree or branch.
 - Any later `main` integration requires a separately authorized normal pull request. Product implementation, dependency installation, source copying, Plugin discovery, and release work remain unauthorized.
 
