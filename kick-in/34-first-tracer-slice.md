@@ -8,7 +8,7 @@ From the tracer-bullet idea: rather than building layer by layer — all the sto
 
 Three properties separate it from a prototype: it is **vertical rather than horizontal**, touching every layer thinly; it is **real rather than throwaway**, and the code grows into the product; and it **proves the seams connect**.
 
-That last property is why it matters here. This design room now contains twenty-seven ADRs before a line of code exists, and their implementation assumptions still need proof. Does a pinned Harness subset compose? Does the Task Ledger bind to the Session Ledger without copying transcripts? Do capability guards hold at both enforcement points? Does the service run headlessly inside the accepted concise budget? The tracer is the first real test of any of it.
+That last property is why it matters here. This design room produced twenty-five architectural decisions before a line of code existed, and every one is a hypothesis. Does a pinned Harness subset compose? Does the Task Ledger bind to the Session Ledger without copying transcripts? Do capability guards hold at both enforcement points? Does the service run headlessly inside ten minutes? The tracer is the first real test of any of it.
 
 ## Two steps, in order
 
@@ -116,13 +116,13 @@ From the original migration workflow:
 
 Added by decisions taken since that document was written:
 
-9. The whole slice runs **headlessly against replay inside the concise `pr` gate**, proving the service is drivable without Electron; the numeric budget and exact Windows/macOS job shape remain pending.
+9. The whole slice runs **headlessly against replay inside the `pr` gate, under ten minutes**, proving the service is drivable without Electron.
 10. The citation resolves to an **exact Manuscript Block range and highlights in the editor**.
-11. The **Agent Data Root resolves to the accepted governed location for the native package under test**, holds no credential material, and platform-specific unsafe-placement detection fires. The Windows portable-folder rule remains accepted; the macOS location and enforcement mechanism remain pending.
+11. The **Agent Data Root is created inside the AI7 folder** on first run, holds no credential material, and sync-root detection fires when the folder sits beneath a sync path.
 12. The **request-fingerprint guard fails closed** when prompt, tools, or policy snapshot change.
-13. **Native package proof**: every accepted release channel launches the same tracer artifact and preserves/removes owned data according to its platform contract. Windows zip and NSIS are accepted; the macOS package proof remains pending.
+13. **Portable proof**: extract, run, remove, leaving no residue outside the folder.
 
-Criteria 9 through 13 make the tracer a test of the accepted decisions rather than only of code. Phase 0 must settle their remaining platform parameters before implementation begins.
+Criteria 9 through 13 make the tracer a test of the accepted decisions rather than only of code.
 
 ## Explicitly out of scope
 

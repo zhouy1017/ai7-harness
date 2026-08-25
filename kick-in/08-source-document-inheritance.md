@@ -11,7 +11,7 @@ The following cross-cutting dispositions are accepted:
 - Keep a concise, revised new-project `AGENTS.md`; do not copy the legacy file wholesale.
 - Keep the legacy tiered GitHub Actions testing idea, combined with generated mock-LLM-provider cases. Rebaseline its names, commands, and tiers for the new architecture, and keep required CI provider-free.
 - Keep local multi-agent dispatch for repository development only. It is not a production AI7 workflow and must remain terminologically and architecturally separate from Harness-powered product agents.
-- Keep AI7 as a desktop product. The original Windows-focused inheritance target was superseded on 2026-08-21 by an accepted Windows-and-macOS target; exact cross-platform consistency mechanics are handled by ADR 0027 rather than inherited from legacy AI7.
+- Keep AI7 as a Windows-focused desktop product.
 - Discard the old UI implementation and presentation model. Review and revise its user stories and product outcomes rather than porting layouts or components.
 - Discuss only original-AI7 inheritance rows with the owner. Harness-specific choices may be made by the architecture maintainer, with provenance and compatibility constraints documented.
 
@@ -90,7 +90,6 @@ The following cross-cutting dispositions are accepted:
 - Durable Project Q&A correctly pins each answer to source revisions, approved scope, provider plan, records, and a source bundle, but its whole-answer source list is not claim/span-level citation grounding.
 - The legacy reference-only citation design contains a valuable rule absent from the current runtime: displayed quotations must normalized-exact-match authoritative source text; fuzzy matching may discover candidates but never certify or substitute a quote.
 - Proposed disposition: keep immutable textual authority and durable provenance; separate candidate Search, Exact Fetch, Synthesis, Reference Integrity, Factual Verification, Semantic Review, and Quotation Verification; add typed Evidence Links, Editorial Error Findings, and Correction Proposals; archive old `pipelines/*`, FastAPI/SSE/Qdrant/BM25, and mandatory RAG-versus-long-context vocabulary.
-- Explicit follow-up accepted on 2026-08-21: exact quotations require verification; source-derived factual claims require cited evidence; current/external factual claims require timestamped research evidence; editorial interpretations are labeled as judgment; and creative/promotional synthesis remains generated while its factual subclaims follow their own evidence class.
 
 The evidence and accepted two-axis verification model are detailed in [Source–Generation–Grounding Boundary](./17-source-generation-grounding-boundary.md). Factual authority follows a configurable Factual Verification Policy Document; Model knowledge can initiate research but is not evidence; conflicting or insufficient evidence remains visible. See [ADR 0005](../docs/adr/0005-separate-textual-and-factual-authority.md).
 
@@ -164,7 +163,7 @@ The accepted boundary and bilingual terms are in [Linked Task and Harness Ledger
 
 ## Question 23 — accepted Standalone-only V1
 
-- Ship one Chinese-first Standalone product on Windows and macOS over one AI7 domain/Task Ledger authority and one Harness runtime. V1 has no Word parity, COM add-in, Host protocol, synchronization, Word packaging, or Word verification gate. The detailed platform-consistency contract is a new decision, not legacy inheritance.
+- Ship one Chinese-first Windows Standalone desktop surface over one AI7 domain/Task Ledger authority and one Harness runtime. V1 has no Word parity, COM add-in, Host protocol, synchronization, Word packaging, or Word verification gate.
 - Treat the old Standalone editor and workbench as negative evidence, not a migration asset. Professional long-form Chinese editing quality is release-critical and must cover structure/selection, durable editing/recovery, proposals/review, Chinese input/typography, performance, and import/export fidelity.
 - Retain surface-neutral Task Intent, decision, Effect, manuscript history, merge, recovery, and evidence semantics from Word-coupled tests only by re-expressing them against Standalone/domain seams.
 - Leave the C# add-in, exact Host binding, cross-surface drift/synchronization machinery, named-pipe protocol, Word installer, and Word/COM proof corpus in the old repository or offline contingency evidence. Do not migrate or run them as V1 gates.
@@ -186,7 +185,7 @@ Important facts:
 - AI7 Reborn's `CLAUDE.md` is the portable one-line `@AGENTS.md` wrapper.
 - DeepSeek Harness has no `CONTEXT.md`; its framework vocabulary lives mainly in `docs/glossary.md`, architecture docs, and package READMEs.
 - Harness uses Git symlinks from `CLAUDE.md` to `AGENTS.md`. Those materialize poorly on Windows, so the new project must not inherit that mechanism.
-- At the audited predecessor pin, the private AI7 documents had no declared project license. Question 27 later recorded the sole rights-holder's authorization and this repository's proprietary license, so reuse is no longer blocked on authority; asset provenance, sanitization, and third-party/provider terms still apply.
+- The private AI7 documents have no declared project license. Substantial copied prose must not be published until reuse authority/license is recorded.
 
 ## Recommendation
 
@@ -239,13 +238,13 @@ Conflict rule: AI7 product safety/domain authority beats Harness convenience. An
 | Product Direction | Relocate and re-ratify | Charter, domain contexts, UX design, and ADRs. Keep root `AGENTS.md` short and link to accepted owners. |
 | Core source/scope/approval/replay/recovery invariants | Preserve strongly | Editorial and Execution contexts plus architecture ADRs. Modify `kernel`, `orchestrator`, and similar names after Harness mapping. |
 | Task-skill manifest, trust, provider plan, secret rules | Preserve and modify | Execution context and skill/security ADRs. Harness Skill, AI7 Task Skill, and Cordis Plugin remain distinct terms. |
-| Product platforms, Electron, Python runtime, packaging | **Accepted core; platform details reopened** | Windows and macOS target (post-interview ADR 0027); Electron with a three-process topology (Q34); no Python, TypeScript throughout (Q33); Windows zip plus NSIS retained; macOS packaging/data/signing remains open. None is inherited from legacy AI7. |
+| Windows, Electron, Python runtime, packaging | **Accepted: all four resolved** | Windows-only (Q23); Electron with a three-process topology (Q34); no Python, TypeScript throughout (Q33); zip portable plus NSIS installer (Q26). None was inherited; each was re-decided. |
 | Deep-module/seam/testability principles | Preserve | Concise engineering rules after the target module boundaries exist. |
 | Monolithic renderer, legacy UI/component/layout model, and issue/PR chronology | **Accepted: drop as design authority** | Historical evidence only. User stories are reviewed separately and may be revised; UI source and presentation structure are not ported. |
 | Unified Standalone/Word authority, inward adapters, exact links, crash isolation | Archive as contingency evidence | V1 is Standalone-only; promote only surface-neutral single-authority lessons unless a future ADR adds Word. |
 | Old compatibility inventories and retired CLI paths | Archive | Preserve only the general rule that compatibility paths cannot acquire new authority. |
 | `dev`/`master`/`release` policy and exact GitHub gates | Re-decide | New repository governance; preserve only concise commits and prohibition on secrets/private manuscripts. |
-| Provider-free CI, exact-SHA evidence, deterministic E2E, packaged-runtime proof | **Accepted in principle** | Keep the concise `pr`/`release` model with generated mock-LLM-provider cases; the smallest required Windows/macOS topology and packaged-runtime proof remain open under ADR 0027. |
+| Provider-free CI, exact-SHA evidence, deterministic E2E, packaged-runtime proof | **Accepted in principle** | Rebuild as a tiered GitHub Actions ladder with generated mock-LLM-provider cases. New tier names, commands, exact topology, and packaged-runtime gates remain to be designed. |
 | Old Issue `#14` obligations, schedules, lane names, tag algorithms | Archive/rebaseline | Historical bootstrap and release implementation, not standing orders. |
 | Safety-focused review rules | Preserve, relocate | Engineering review guide; source-truth, approval, revision, privacy, recovery, and replay violations remain high priority. |
 
@@ -288,7 +287,7 @@ Question 23 intentionally promoted no Word terms. Keep AI7 interaction-surface, 
 | Recovery storage and publication implementation mechanics | Persistence/recovery ADRs |
 | Necessary default skill set and production workflow set | Capability catalog/roadmap |
 | Test-first gates, test catalog, fixtures, quarantine, evidence | Testing strategy/glossary |
-| Windows/macOS packages, RC tags, promotions, release schedules | Release strategy |
+| Windows package, RC tags, promotions, release schedules | Release strategy |
 | Concept-preserving redesign, proof slices, protected credential transfer, and fixture/sample allowlist | Migration charter/plan |
 
 ### Archive or rename

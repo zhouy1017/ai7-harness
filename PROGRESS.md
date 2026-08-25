@@ -469,3 +469,28 @@
 ## Resume Prompt
 
 Resume as Project Commander: present exact DSH-first candidate `247b7dacb267ba2f4076ca8461c95e5f0508b343` for owner acceptance; if accepted, perform a separate canonical design integration, while keeping implementation, GitHub plugin discovery, dependency installation, and non-E2E validation unauthorized.
+
+## Design-doc aggregate branch checkpoint — 2026-08-25
+
+### What's done
+
+- Created the owner-requested `design-doc` branch in an isolated worktree from `docs/3-design-freeze-v2-exploration@b5cb8d3e51cb64552352c7f90335534580bfdb51`.
+- Merged the exact Phase-0, frozen V1 UI/UX, dedicated V2 architecture and completed V2 UI/UX heads as four real merge parents, preserving all branch histories and unique artifacts.
+- Recovered the still-uncommitted Commander audit from the V2 exploration worktree as historical context: before Issue #5, the V2 UI/UX package did not hard-require one manuscript-anchored Word-style card per independently reviewable change, did not define low-burden reusable-procedure capture, and existed only as an untracked detached-worktree package. The merged `docs/5-ui-ux-v2-delta@b903bbf` resolves all three findings; the audit is not a remaining gap.
+- Restored shared project files to the exact V2 exploration versions after the merges so older branch changes could not silently rewrite current operating instructions.
+- Added `docs/design-doc/README.md` and branch-local routers in `AGENTS.md` and `HANDOFF.md`, including the unresolved Windows-only versus Windows+macOS decision and the two different ADR 0027 files.
+- Created and pushed the aggregate branch only; `main` and every source design branch remain unchanged.
+
+### What's next
+
+- No automatic canonical merge or implementation follows. The owner must resolve the recorded cross-session platform conflict and explicitly authorize any later pull request into `main`.
+
+### Key decisions made
+
+- Git aggregation preserves evidence and history but is not product-design acceptance.
+- Shared-path precedence is mechanical only: the V2 exploration head supplies the aggregate working-tree versions, while every older exact version remains reachable through its merge parent.
+- The literal `design-doc` name is an owner-requested branch-policy exception and does not change normal repository conventions for future work.
+
+### Resume Prompt
+
+Resume from `origin/design-doc` by reading `docs/design-doc/README.md`; treat it as a consolidated design archive/candidate review line, not implementation or `main` integration authority.

@@ -4,7 +4,7 @@ Status: **accepted product boundary; any separate editing-sufficiency verificati
 
 ## Decision
 
-The new AI7 V1 is a **Standalone-only Windows-and-macOS desktop product**. Microsoft Word integration is excluded from V1 scope: it is not a surface, parity target, runtime dependency, packaging component, verification gate, or first-release deliverable.
+The new AI7 V1 is a **Standalone-only Windows desktop product**. Microsoft Word integration is excluded from V1 scope: it is not a surface, parity target, runtime dependency, packaging component, verification gate, or first-release deliverable.
 
 Word remains only a deferred contingency if the Standalone Editing Sufficiency Gate fails and diagnosis shows that live Word integration is the proportionate remedy for a genuinely Word-dependent publishing workflow. A future Word surface requires a new explicit scope/architecture decision; gate failure alone never adds it.
 
@@ -98,7 +98,7 @@ These Word concepts remain contingency constraints, not active V1 domain languag
 
 | Legacy element | Accepted disposition | New treatment |
 | --- | --- | --- |
-| Standalone desktop product goal | **Keep and strengthen** | One Chinese-first professional editorial product for Windows and macOS |
+| Windows-focused Standalone product goal | **Keep and strengthen** | One Chinese-first professional editorial desktop product |
 | Old Standalone user stories and failure evidence | **Adapt selectively** | Define editor outcomes and evaluation scenarios; discard layout/component assumptions |
 | Old Standalone renderer/editor/workbench | **Drop** | No UI source, editor architecture, or component parity |
 | Manuscript-native editing/history/proposal semantics | **Keep** | AI7-owned capabilities beneath the new editor |
@@ -112,7 +112,7 @@ These Word concepts remain contingency constraints, not active V1 domain languag
 
 ## Consequences for the remaining plan
 
-- Question 34 remains the **Standalone shell and professional editor topology** decision; its Windows-only platform clauses are superseded by ADR 0027 and Word topology remains removed.
+- Question 34 becomes the **new Windows Standalone shell and professional editor topology** decision; Word topology is removed.
 - Question 35 is a Standalone-only tracer over a selected synthetic DOCX.
 - Phase 4 builds and evaluates one Standalone product surface; it does not attach or package a Word add-in.
 - V1 has no Word-specific glossary terms, COM packages, named-pipe Word protocol, synchronization branch, Word installer/repair path, or clean-machine Word gate.

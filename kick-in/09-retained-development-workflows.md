@@ -32,7 +32,7 @@ Nightly  broad portable suite + independent Windows suites
 RC       exact-SHA admission + catalog-selected release evidence
 ```
 
-Accepted invariant: required tiers are provider-free and fail closed. Question 24 also settled two workflows named `pr` and `release`, with the Ubuntu lane, nightly tier, machine-owned Test Catalog, and quarantine registry each deferred behind a named trigger. Its single-job Windows binding was superseded by the accepted Windows-and-macOS product target; the exact concise two-platform job topology remains a Phase 0 decision.
+Accepted invariant: required tiers are provider-free and fail closed. Question 24 settled the rest — two workflows named `pr` and `release`, both single-job on `windows-2025`, with the Ubuntu lane, nightly tier, machine-owned Test Catalog, and quarantine registry each deferred behind a named trigger. The `release` workflow proves both packaged Windows channels.
 
 ## Generated mock-LLM-provider evidence
 
@@ -95,5 +95,5 @@ The source had not completed its required real Host observations at the pin. The
 
 ## Next decisions
 
-- Question 24's workflow reduction remains closed, while its Windows-only platform clause is superseded. The current contract is in [Tiered Verification and Mock-provider Evidence](./26-tiered-verification-and-mock-provider-evidence.md), [ADR 0014](../docs/adr/0014-verify-on-one-windows-gate.md), and [ADR 0027](../docs/adr/0027-support-windows-and-macos-as-one-product.md): four legacy workflows still map onto two, the legacy Test Catalog remains deferred, and the native Windows/macOS evidence shape must be resolved before Phase 0 exits.
+- Question 24 is closed. The accepted contract is in [Tiered Verification and Mock-provider Evidence](./26-tiered-verification-and-mock-provider-evidence.md) and [ADR 0014](../docs/adr/0014-verify-on-one-windows-gate.md): two Windows-only workflows, with several tiers deferred behind named triggers. The preservation direction recorded in this file is unaffected, but read the source inventory above through that reduction — the four legacy workflows map onto two, and the legacy test catalog is deferred rather than rebaselined immediately.
 - Question 25 is closed. The accepted contract is in [Repository Development Dispatch](./27-repository-development-dispatch.md) and [ADR 0015](../docs/adr/0015-provider-neutral-development-dispatch.md). Read the pilot inventory above through that decision: the preserved guarantees survive as operating rules, while the lifecycle state machine, `agent-host-connector/`, DPAPI, and Windows Hello enrollment are rejected as baselines rather than reimplemented.

@@ -32,16 +32,9 @@ The cost avoided: roughly 50 to 100 MB in a portable build, a second dependency 
 
 **Reconsideration trigger.** A *named* capability with no adequate Node implementation may enter as a bounded native module or a sidecar process under its own ADR. It never enters as a general-purpose embedded interpreter. PDF import, if it becomes V1 scope, is greenfield in either language and is covered by `pdfjs-dist` in Node; it is not a Python-forcing requirement.
 
-## Decision 2 — Windows release channels, with macOS channel pending
+## Decision 2 — Portable release, revised at Question 26 to two channels
 
 > **Revised at Question 26.** V1 ships **both** a zip portable folder and an NSIS installer, built by the same builder from the same source. The portable channel keeps the no-admin, no-registry, no-IT-gate property that motivated it; the installer serves users who expect one. Code signing is deferred until explicitly requested.
-
-> **Platform revision, 2026-08-21.** The Windows channels above remain accepted.
-> AI7 must also ship on macOS, but its minimum OS, architecture set, package and
-> update channel, data-root location, signing, and notarization are not yet
-> accepted. The current recommendation is a signed and notarized DMG with mutable
-> data in the operating-system application-support location, no portable Mac or
-> Mac App Store channel in V1; this remains a proposal.
 
 ### Original Question 33 decision
 
@@ -66,7 +59,7 @@ AI7/
 
 ### What stays outside, and why
 
-**The Protected Secret Store.** ADR 0017 places it outside the Agent Data Root, and that constraint survives unchanged — this is the case where "inside the folder" is not possible. Credentials use an operating-system-protected backend resolved through the Credential Broker: Windows Credential Manager/DPAPI is accepted, while the exact macOS Keychain binding remains open. A portable folder is designed to be copied, and a copied folder carrying credential material to another machine would be a genuine leak rather than a theoretical one.
+**The Protected Secret Store.** ADR 0017 places it outside the Agent Data Root, and that constraint survives unchanged — this is the case where "inside the folder" is not possible. Credentials live in Windows Credential Manager or DPAPI, resolved through the Credential Broker. A portable folder is designed to be copied, and a copied folder carrying credential material to another machine would be a genuine leak rather than a theoretical one.
 
 ### Residual risk and its mitigation
 
@@ -89,7 +82,7 @@ A portable folder placed somewhere unwritable — `Program Files`, a read-only s
 
 **Signing is deferred until explicitly requested** (Question 26). Unsigned builds trigger SmartScreen, which for a non-expert user on a corporate machine is a hard stop rather than a warning, so this is recorded as a known adoption cost to be paid when the owner chooses.
 
-**Updates replace program files and preserve governed data.** The Windows portable layout replaces `app/` and preserves `data/`; installer and future macOS channel behavior must preserve the same data-schema and downgrade-safety guarantees without assuming identical paths or packages.
+**Updates replace `app/` and preserve `data/`.** With no installer there is no updater, so a new build must locate an existing data root and the data root needs a version marker allowing an older build to refuse newer data rather than corrupt it.
 
 ## Question 33 decision
 
@@ -103,11 +96,4 @@ Accepted with owner revisions:
 - an unwritable location falls back to `%LOCALAPPDATA%\AI7` with a clear notice, which is the installer channel's normal path; and
 - code signing is deferred until the owner explicitly requests it, with unsigned builds recorded as a known SmartScreen adoption cost.
 
-These bullets govern Windows. ADR 0027 adds macOS as a product target without
-silently importing Windows path, packaging, or signing choices. Cross-platform
-data compatibility must cover path separators, case sensitivity, and filename
-Unicode while never normalizing manuscript text. See the current
-[platform design note](./35-windows-macos-product-platform.md) for the still-open
-macOS decisions.
-
-See [ADR 0022](../docs/adr/0022-typescript-only-runtime.md), [ADR 0023](../docs/adr/0023-portable-release-with-self-contained-data-root.md), and [ADR 0027](../docs/adr/0027-support-windows-and-macos-as-one-product.md).
+See [ADR 0022](../docs/adr/0022-typescript-only-runtime.md) and [ADR 0023](../docs/adr/0023-portable-release-with-self-contained-data-root.md).

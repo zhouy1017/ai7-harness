@@ -11,14 +11,14 @@ The blanket “not accepted” label this document previously carried had become
 - The three-layer Foundation Model / Harness Agent Behavior / AI7 Editorial Intelligence separation, and the no-LLM-training invariant — Question 14 and the owner's Harness-purpose statement, ADR 0003.
 - Harness as AI7's Agent Behavior Framework rather than merely an agent-loop dependency — the owner's statement at Question 15.
 - The record-ownership split: AI7 owns manuscript history, named authorities, Effects, receipts, Policy Documents, and the Task Ledger; the Harness Session Ledger owns model/executor events; the two are joined by Execution Bindings — ADRs 0006, 0007, 0011.
-- One Standalone product on Windows and macOS in V1, no Word — ADRs 0013 and 0027.
+- One Windows Standalone surface in V1, no Word — ADR 0013.
 
 **Still proposals, and not to be treated as project truth:**
 
-- ~~The product composition boundary below~~ — **accepted in principle**: Question 30 fixed exact-version subset consumption and Question 34 fixed the three-process topology. The exact selected-package closure and effective composition remain Phase 0 audit work, not settled implementation detail.
+- ~~The product composition sequence below~~ — **accepted**: Question 30 fixed the pinned package subset and Question 34 the three-process topology.
 - ~~The architecture-alternatives table and its “Preferred” marking~~ — **accepted at Question 30**: exactly pinned public packages, taking only the subset AI7 needs. Source fork and process/SDK boundary remain documented fallbacks rather than the plan. See [ADR 0020](../docs/adr/0020-consume-pinned-harness-package-subset.md).
 - ~~The claim that AI7 must own the semantic quality evaluation layer~~ — **accepted at Question 36**, which built the metric system and the Behavior Evaluation Gate on exactly this premise (ADR 0019). It was a reported audit finding until then.
-- ~~The core process topology~~ — **accepted at Question 34**: Electron main, renderer, and a separate AI7 service process, preferably using stdio and never a TCP listener. A Windows named pipe remains an accepted option; the exact macOS carrier/protocol adaptation is still open (ADRs 0024 and 0027).
+- ~~Every process-topology choice~~ — **accepted at Question 34**: Electron main, renderer, and a separate AI7 service process, with stdio or named-pipe IPC and no TCP listener (ADR 0024).
 - Semantic mappings other than Run Record ↔ Session, which Question 22 settled.
 
 ## Recommendation
@@ -31,7 +31,7 @@ Build an AI7-owned product layer over an exactly pinned Harness distribution:
 - No Python ships. AI7 is TypeScript and Node throughout, and legacy Python domain behavior is re-expressed from contract rather than wrapped (ADR 0022).
 - The Editorial Capability Profile exposes only domain-shaped capabilities; the Developer Capability Profile carries the generic tool surface and never ships to editors, with no self-service escalation between them (ADR 0017).
 - AI7 never trains or fine-tunes the Foundation Model. Its durable intelligence is the provider-independent Editorial Intelligence Layer of governed sources, knowledge, memory, policies, skills, tools, provenance, and evaluation.
-- V1 exposes one Windows-and-macOS Standalone product with a new professional manuscript editor. Microsoft Word is a deferred contingency, not a peer surface or release dependency. The exact cross-platform consistency contract and native adapters remain open under ADR 0027.
+- V1 exposes one Windows Standalone desktop surface with a new professional manuscript editor. Microsoft Word is a deferred contingency, not a peer surface or release dependency.
 
 ## Three-layer model
 
@@ -68,7 +68,7 @@ flowchart TB
         Store["AI7 domain store + Harness session persistence"]
         Source["Import, index, exact retrieval and grounding"]
         Worker["AI7 domain services in the service process"]
-        Desktop["Windows/macOS desktop and document adapters"]
+        Desktop["Windows desktop and document adapters"]
     end
 
     User --> Standalone
@@ -90,7 +90,7 @@ flowchart TB
     Session --> Store
 ```
 
-The diagram shows ownership. The process topology was settled at Question 34 and retained by ADR 0027: a thin Electron main, a renderer holding the UI and editor, and a separate Node service process holding AI7 domain services together with the composed Harness runtime. Local IPC prefers stdio and never opens a TCP listener. Windows named-pipe support remains an accepted option; the exact macOS carrier and protocol adaptation are open under ADR 0027. AI7 does not embed the Harness web client, which Question 31 rejected along with the rest of the Harness product surface.
+The diagram shows ownership. The process topology was settled at Question 34: a thin Electron main, a renderer holding the UI and editor, and a separate Node service process holding AI7 domain services together with the composed Harness runtime, communicating over stdio or a named pipe and never a TCP listener. AI7 does not embed the Harness web client, which Question 31 rejected along with the rest of the Harness product surface.
 
 ## Ownership boundaries
 
@@ -126,20 +126,18 @@ The diagram shows ownership. The process topology was settled at Question 34 and
 | Effect + commit receipt | Tool call/result | A tool call may initiate an Effect; only AI7's fenced external commit protocol establishes product truth. |
 | Q&A conversation / turn | Session / turn | Candidate for close mapping, but revision/source-scope pinning and reopen semantics must be specified first. |
 | Provider role plan | LLM adapter/model setting | Add an AI7 resolver that selects a Harness adapter/model under privacy, budget, and fallback constraints. |
-| Shared local backend | Harness Host + AI7 domain authority | The separate AI7 service process is the one deployed authority. The renderer reaches it only through typed AI7 IPC; stdio is preferred, TCP is excluded, and the exact macOS carrier/protocol adaptation remains open. |
+| Shared local backend | Harness Host + AI7 domain authority | One deployed authority; exact process and IPC boundaries remain open. |
 
 ## Product composition
 
-The binding composition rule is explicit admission, not inheritance from a Harness product bundle:
+The initial composition should be additive:
 
-1. Pin one coherent Harness package version with a committed lockfile and retain the audited source identity separately.
-2. Inspect the installed dependency closure and include only individually justified packages and seams. Do not depend on the CLI aggregate, generic coding tools, `dsh-base`, or the Web product bundle merely for convenience.
-3. Build an AI7-owned composition that mounts the required Harness primitives behind AI7 domain services, capability facades, providers, and policy guards.
-4. Add AI7 editorial presets with isolated per-Run tools, context, source scope, and Capability Grants; do not adapt the upstream coding presets.
-5. Add only trusted, shipped AI7 client modules around the independently owned manuscript editor. UI state never becomes manuscript or Task authority.
-6. Freeze and inspect the complete effective Cordis tree. Because a row override replaces its whole configuration, every pin bump must revalidate configuration, package exposure, session compatibility, and the AI7 journeys.
-
-The concrete package list in Question 30 is a first-cut classification. Phase 0 must audit the rc.5-to-rc.6 delta and exact selected-package closure before this sequence is implementation-ready.
+1. Pin the Harness package family and source SHA.
+2. Stack the official base and appropriate surface bundle.
+3. Add one AI7 bundle that mounts Host-level domain singletons and providers.
+4. Add AI7 agent presets with isolated per-agent tools, prompt context, and capability scope.
+5. Add AI7 client plugins and durable renderers.
+6. Patch or disable generic rows only through documented configuration. Because a Cordis row override replaces its whole config, every upstream upgrade must revalidate the complete effective tree.
 
 ## Architecture alternatives
 

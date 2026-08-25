@@ -58,12 +58,6 @@ This maintained bilingual reference routes readers to canonical definitions and 
 | Textual Source of Record | 文本原文基准 | [AI7 Editorial](./docs/domain/editorial/CONTEXT.md) |
 | Manuscript Assertion | 稿件陈述 | [AI7 Editorial](./docs/domain/editorial/CONTEXT.md) |
 | Factual Verification | 事实核验 | [AI7 Editorial](./docs/domain/editorial/CONTEXT.md) |
-| Evidence Link | 证据关联 | [AI7 Editorial](./docs/domain/editorial/CONTEXT.md) |
-| Reference Integrity | 引证完整性 | [AI7 Editorial](./docs/domain/editorial/CONTEXT.md) |
-| Claim Support | 陈述支持性 | [AI7 Editorial](./docs/domain/editorial/CONTEXT.md) |
-| Quotation Verification | 引文核验 | [AI7 Editorial](./docs/domain/editorial/CONTEXT.md) |
-| Source Search | 来源检索 | [AI7 Editorial](./docs/domain/editorial/CONTEXT.md) |
-| Exact Fetch | 原文精确提取 | [AI7 Editorial](./docs/domain/editorial/CONTEXT.md) |
 | Factual Verification Policy Document | 事实核验规则文档 | [AI7 Editorial](./docs/domain/editorial/CONTEXT.md) |
 | Semantic Review | 语义审读 | [AI7 Editorial](./docs/domain/editorial/CONTEXT.md) |
 | Editorial Error Finding | 编辑差错发现项 | [AI7 Editorial](./docs/domain/editorial/CONTEXT.md) |
@@ -182,12 +176,6 @@ The inheritance audit must resolve these known collisions before definitions are
 | Agent Behavior Improvement | Editorial Learning / Model Training |
 | Policy Document | Repository documentation / hidden runtime configuration |
 | Textual Source of Record | Truth oracle / verified factual authority |
-| Evidence Link | Display-only citation / untyped source bundle / factual proof |
-| Reference Integrity | Claim Support / Factual Verification |
-| Claim Support | Reference Integrity / universal factual truth |
-| Quotation Verification | Fuzzy match / semantic similarity / Factual Verification |
-| Source Search | Exact Fetch / authoritative text |
-| Exact Fetch | Search candidate / model reconstruction |
 | Factual Verification Policy Document | Foundation Model belief / universal source ranking |
 | Source Version | Manuscript Revision / current draft |
 | Manuscript Block | Source Index Chunk / Word bookmark |
