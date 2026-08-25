@@ -43,4 +43,4 @@ Only the final command is the one admitted standing scenario. `doctor`, bootstra
 
 ## Next safe action
 
-Run the final exact command sequence and dependency/notices/archive sweep, commit the remaining task units with the required model trailer, obtain the requested read-only standards/spec review over the clean final SHA, and report only locally proven hosts. Do not broaden the Change Brief to resolve a failure.
+Obtain the requested read-only standards/spec review over the clean final SHA, address only in-scope findings, and report only locally proven hosts. The exact command sequence and dependency/notices/archive sweep are green on the local Windows 11 carrier; do not broaden the Change Brief to resolve a failure or imply that macOS/hosted CI already ran.

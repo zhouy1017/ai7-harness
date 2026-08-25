@@ -18,10 +18,11 @@
 - Added exactly one [`.github/workflows/e2e.yml`](.github/workflows/e2e.yml) for the same J-01 semantics on truthfully labelled `windows-2025` x64 and `macos-15` arm64. It uses Commander-approved full-SHA v6 checkout/setup-node actions, `contents: read`, no persisted checkout credential or cache action, exact Node/pnpm selection, and the same doctor/bootstrap/build/E2E commands without a CI-only subject or uploaded artifact.
 - Final local Windows 11 Pro `10.0.26200` x64 evidence is green with exact Node `24.18.1` and pnpm `11.24.0`: `pnpm run doctor`, closed frozen `pnpm run bootstrap` from a reconstructed dependency tree, `pnpm run build`, and full raw-pipe `pnpm run e2e -- --journey J-01`. The final bootstrap proved Electron `43.4.1`, embedded Node `24.18.1`, ABI `148`, SQLite `3.53.1`, and FTS5; a poisoned `NODE_USE_ENV_PROXY` diagnostic failed closed without printing a value. Additional sanitized probes verified clean/default-section acceptance, styled/real-section rejection, lone-surrogate rejection with continued readiness, both-direction canonical code/data-root exclusion, and fixed readiness while the launcher remains attached.
 - The final closure/artifact/notices sweep found 64 lock package identities and 54 snapshots, no Electron/native-extractor npm carrier, zero installed `.node` files, no tracked DOCX/database, exactly one workflow, and no uploaded screenshot/trace/video/artifact carrier. Tracked notices exactly match the built copy, both built Electron notice carriers match the verified generated runtime, local Markdown links resolve, and `git diff --check` is clean. The document-lifecycle sweep found no consumed working record to archive and no new archive authority.
+- Final task units are committed with required why bodies and model trailers: `7f5e9e7` closes runtime/supply-chain/lifecycle boundaries, `8f0474d` records the source-checkout/provenance/current handoff, and `d814bba` adds the sole dual-host workflow.
 
 ## What's next
 
-- Commit the final runtime, source-checkout, and CI task units with the required why bodies/model trailer, then obtain the required read-only standards/spec review over the clean final SHA.
+- Commit this current checkpoint and obtain the required read-only standards/spec review over the resulting clean final SHA; address only in-scope findings, then report the proven Windows evidence and explicit unproven host branches to Commander.
 
 ## Unresolved matters or blockers
 
@@ -43,4 +44,4 @@
 
 ## Resume Prompt
 
-Resume Issue #24 under Commander amendments 1–2 by committing the fully green and audited no-native raw-pipe J-01 tracer, then obtain standards/spec review over its clean final SHA without claiming unrun macOS or hosted CI evidence.
+Resume Issue #24 under Commander amendments 1–2 by obtaining standards/spec review over the clean committed no-native raw-pipe J-01 tracer; address only in-scope findings and do not claim unrun macOS or hosted CI evidence.
