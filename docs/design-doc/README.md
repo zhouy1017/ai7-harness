@@ -27,6 +27,7 @@ Merge commits on this branch are `8b0580b`, `95b52d6`, `63865fa`, and `b2034e2`.
 | `docs/ui-ux-v2/` | Completed V2 UI/UX candidate plus Proposal-card and reusable-automation delta |
 | `kick-in/35-windows-macos-product-platform.md`, `kick-in/36-phase-0-exit-review.md`, `kick-in/37-v1-platform-freeze-handoff.md` | Unique Phase-0/platform candidate artifacts |
 | `docs/adr/0027-concentrate-ci-on-e2e-functionality.md` | Accepted minimal-engineering-validation decision: one logical provider-free E2E Functional Gate on both supported platforms |
+| `docs/agents/ci-test-boundaries.md` | Concise implementation boundary for scenario admission, synthetic data, launchable subject, platform parity, diagnostics, and excluded gates |
 | `docs/adr/0028-support-windows-and-macos-as-one-product.md` | Accepted integration decision: Windows and macOS are one AI7 product |
 
 ## Resolved integration decisions
@@ -47,7 +48,9 @@ The DSH-first architecture and V2 UI/UX packages are coherent candidate document
 
 ### Historical verification material
 
-The repository contains extensive earlier capability-proof and verification design records. ADR 0027 keeps engineering validation minimal: one logical provider-free E2E Functional Gate executes complete supported journeys and observed-bug regressions on Windows and macOS. It creates no separate per-platform certification, unit, integration, contract, static-analysis, accessibility, performance, security, package, signing, replay, or release-proof gate. Historical proof documents remain evidence of the design process and do not reopen those gates.
+The repository contains extensive earlier capability-proof and verification design records. ADR 0027 keeps engineering validation minimal: one logical provider-free E2E Functional Gate executes the same complete supported journey IDs and observed-bug regressions on Windows and macOS. Every scenario maps to a supported journey or an observed-bug issue and outcome, uses public synthetic data without network/live providers, and follows the launchable product path. A failure on either platform fails the logical gate.
+
+It creates no separate per-platform certification, unit, integration, contract, property, coverage, lint/type/static-analysis, accessibility, performance/load, security/privacy/compliance, provider/schema/ABI, headless, package, signing/notarization, replay, provenance, reproducibility, release-proof/receipt, same-SHA, exact-head-review, or formal-review gate. The tracer's former prerequisite spike and thirteen-point exit gate — including headless replay, request fingerprints, and portable/package proof — are superseded historical material. Historical proof documents remain evidence of the design process and do not reopen those gates.
 
 ## Integration rule
 

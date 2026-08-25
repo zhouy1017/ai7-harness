@@ -519,3 +519,31 @@ Resume from `origin/design-doc` by reading `docs/design-doc/README.md`; treat it
 ### Resume Prompt
 
 Resume from `origin/design-doc` with ADR 0028 as the current Windows-and-macOS product contract and ADR 0027 as the only engineering-validation contract; keep macOS mechanics explicit and deferred until implementation planning.
+
+## CI and test boundary design — 2026-08-25
+
+### What's done
+
+- Completed GitHub Issue #6 as a documentation-only candidate from exact base `design-doc@a7fc9b4db014cb1a58ce3fe8d48239b4dfae47d8` on branch `docs/6-ci-test-boundaries`.
+- Added `docs/agents/ci-test-boundaries.md` as the concise implementation-time authority under ADR 0027 for scenario admission, public-synthetic/provider-free data, the launchable product subject, Windows/macOS parity, observed-bug regressions, diagnostics, and excluded standing gates.
+- Updated `AGENTS.md`, `HANDOFF.md`, ADRs 0015 and 0027, `docs/agents/git-conventions.md`, `docs/design-doc/README.md`, `docs/domain/execution/CONTEXT.md`, `kick-in/README.md`, and `kick-in/{34-first-tracer-slice,35-minimal-e2e-validation}.md` to use the same boundary.
+- Reclassified the former mandatory store-and-index spike and thirteen-point tracer gate — including headless replay, provider rehearsal, request fingerprints, and portable/package proof — as superseded historical design while preserving the read-only tracer as a possible vertical implementation slice and supported journey.
+- Made independent Reviewer use optional and advisory rather than a branch, exact-head, pull-request, or integration gate, while retaining normal pull-request flow and Commander-only integration.
+- Ran only lightweight documentation checks: `git diff --check`, resolving local Markdown links in every changed file, exact one-line `CLAUDE.md`, and worktree status. No formal review, product test, workflow, implementation, dependency, source copy, or external action was created.
+- Dispatch record: requested `claude-opus-5` / high, actual partial Claude analysis followed by same-class `gpt-5.6-sol` / xhigh completion, Worker/T3; Claude session `af4bc066-a8a5-4f86-b7c3-2f1c1251340f` returned HTTP 429 `resets 2pm (Asia/Shanghai)` after 23 turns and `$1.8754225`, leaving no file changes before fallback.
+
+### What's next
+
+- The Commander may inspect the local candidate head and decide whether to integrate it into `design-doc`. This branch grants no `main` acceptance, implementation, merge, push, pull request, release, or branch/worktree deletion authority.
+
+### Key decisions made
+
+- One logical provider-free E2E Functional Gate is the only standing automated test surface; the same supported journey IDs run on Windows and macOS and either platform can fail the gate.
+- Every standing scenario maps to a supported journey or to an observed-bug issue and outcome inside the nearest complete journey. Speculative edges, layer-only tests, coverage, and component ownership do not generate tests.
+- The gate uses public synthetic data, no network/live provider/API key/private manuscript material, and no manuscript payload in logs or artifacts. A deterministic model fixture stays inside the same AI7 E2E boundary and proves no provider, replay, cassette, or request fingerprint.
+- The subject follows the launchable renderer/main/service/Harness/domain product path; native mechanics may differ, but functional, domain, authority, data, and user-visible outcomes may not.
+- Product Factual Verification, authority, Effect Receipt, recovery, privacy, accessibility, document fidelity, and long-manuscript requirements remain functional behavior and enter applicable complete journeys rather than separate gates.
+
+### Resume Prompt
+
+Resume as Commander by inspecting the clean Issue #6 candidate head and, if accepted, integrating it into `design-doc` through the normal Commander-only flow without adding tests, formal review, implementation, or external action.

@@ -4,7 +4,9 @@ Binding for every agent and every human working in this repository. These rules 
 
 ## Branches
 
-`main` is the only long-lived branch. **Nothing is pushed to `main` directly**, including by the Commander — every change arrives through a pull request, so the `pr` gate always runs.
+`main` is the only canonical long-lived branch. **Nothing is pushed to `main` directly**, including by the Commander — every change arrives through a pull request and only the applicable functional gate below is required.
+
+The owner-requested `design-doc` aggregate is a documented branch-policy exception, not a second canonical line. Candidate work targeting it still follows one issue, one branch, one writable Worker, and Commander-only integration.
 
 Branch names are `<type>/<issue>-<slug>`:
 
@@ -43,9 +45,12 @@ Agent-authored commits carry the co-authorship trailer for the model that wrote 
 
 - Title matches the primary commit subject.
 - Body links the issue and states the user-visible outcome.
-- The `pr` gate must be green. A red gate is never merged around.
-- An independent Reviewer report is attached before merge, at a task class at least equal to the work reviewed. Where cross-provider review was impossible, the report says `same-provider review — independence reduced`.
+- For an implementation change affecting a supported journey or observed-bug outcome, the one logical E2E Functional Gate must pass the same applicable journey IDs on Windows and macOS. A failure on either platform is not merged around.
+- Documentation-only and design-only changes do not create automated proof work. Lint, type-check, format, build, package, signing, release, same-SHA, or formal-review checks are not additional required pull-request gates.
+- Independent review is optional and advisory. When the Commander or owner requests it, use a read-only non-author Reviewer at least equal to the work's task class and disclose `same-provider review — independence reduced` when cross-provider review was unavailable.
 - **Only the Commander merges.** Workers and Reviewers never do.
+
+The E2E scenario admission, data, subject, and platform rules live in [`ci-test-boundaries.md`](ci-test-boundaries.md).
 
 **Squash merge.** Each merge to `main` is one complete task, so history reads as a sequence of finished outcomes rather than agent scratch work. The pull-request body becomes the squashed commit body.
 
@@ -53,7 +58,7 @@ Agent-authored commits carry the co-authorship trailer for the model that wrote 
 
 `vX.Y.Z` for releases, `vX.Y.Z-rc.N` for candidates. These match the `v*` trigger on the `release` workflow.
 
-Tags are created only by the Commander, only on `main`, and only on a commit whose `pr` gate is green for that exact SHA.
+Tags are created only by the Commander and only on `main` after normal pull-request integration. Tagging or release automation creates no separate release, receipt, packaging, signing, reproducibility, provenance, or same-SHA proof gate.
 
 ## What never enters the repository
 
