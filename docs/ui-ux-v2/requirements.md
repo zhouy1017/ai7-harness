@@ -1,0 +1,871 @@
+# AI7 V2 UI/UX requirements
+
+Status: **candidate requirements complete for this session; no implementation authority**
+
+Only owner-accepted decisions are requirements here. Future feature requirements must enter as an explicit decision delta; they do not revive the V1 freeze package as a screen baseline.
+
+## Visual and interaction direction
+
+- **V2-UX-VIS-001**: AI7 develops an AI7-owned desktop interaction language that feels similar to the owner-provided Codex Desktop reference through calm low-noise surfaces, restrained chrome, progressive disclosure, focused central work, contextual side surfaces, compact task entry, and visible interruptible activity.
+- **V2-UX-VIS-002**: Similarity to Codex does not copy its brand, text, assets, GUI source, exact geometry, coding objects, generic terminal/chat hierarchy, or product authority.
+- **V2-UX-VIS-003**: Visual similarity never collapses AI7's exact object identities, factual statuses, named decisions, Effects, or receipts.
+- **V2-UX-VIS-004**: Application Theme Preference defaults to `跟随系统` and offers manual `浅色` and `深色`. The local preference updates the main workbench and every AI7 application/detached window coherently.
+- **V2-UX-VIS-005**: System-following Theme follows the current Windows light/dark application-theme state. A system change updates AI7 without changing view position, focus, selection, editing state or any business record.
+- **V2-UX-VIS-006**: Windows high contrast/forced-colors always takes priority over AI7 light/dark decoration. Forced-colors Override is unconditional supported behavior, not an optional fourth theme.
+- **V2-UX-VIS-007**: Components consume semantic color roles for shell, manuscript surface, text, subdued text, focus, selection, boundary, status and action. A semantic role retains the same meaning in light, dark and forced-colors mappings.
+- **V2-UX-VIS-008**: Light mode uses calm cool-neutral shell chrome and a slightly warm manuscript surface; dark mode uses low-glare charcoal chrome and a neutral manuscript surface. Neither mode relies on pure black/white glare or decorative saturation for long-session hierarchy.
+- **V2-UX-VIS-009**: V1 exposes no custom accent/palette editor. Theme, color and appearance preferences never change manuscript content/style, DOCX/PDF/Markdown output, model context, Task/Run state, decisions, Effects, receipts or authority.
+- **V2-UX-VIS-010**: Color is always supplemental to exact text, icon/shape, structure or other non-color cues; no status, selected state, focus, factual conclusion or named authority is color-only in any theme.
+
+## Semantic component-state presentation
+
+- **V2-UX-STATE-001**: Cards, lists, panels, rows, notices and action regions follow the Semantic State Presentation Grammar: exact Chinese state term first, redundant icon/shape, necessary boundary/structure, then optional detail and one safe next action.
+- **V2-UX-STATE-002**: The shared grammar standardizes presentation behavior, not domain meaning. Run Authorization, Proposal Decision, Review Decision, Effect Approval, Effect Receipt, Milestone Version, Publication Version, factual dimensions, recovery and persistence each retain their exact names and negative authority.
+- **V2-UX-STATE-003**: Focus, hover, selected, disabled, loading, error and committed states have consistent structure across components and remain distinguishable in light, dark and forced-colors mappings without color alone.
+- **V2-UX-STATE-004**: Selected means only current UI focus/choice. It cannot look or read like accepted, approved, applied, reviewed, verified, signed, published or completed.
+- **V2-UX-STATE-005**: A disabled consequential action stays visible in its exact context and exposes the specific missing condition or drift reason. Disabled styling never hides the consequence or converts a blocked action into absence.
+- **V2-UX-STATE-006**: Local projection loading, active Run work, Provider wait, capacity wait, connectivity wait, pause, cancellation and outcome recovery use different exact labels; a generic spinner or `处理中` cannot collapse them.
+- **V2-UX-STATE-007**: Error presentation names the affected object and consequence, preserves safe content/input, and exposes the next safe action. Severity changes prominence, not the underlying state name.
+- **V2-UX-STATE-008**: Authoritative Completion Styling appears only when an authoritative AI7 record, classified outcome evidence or verified Effect Receipt supports the exact claim. Model/Harness completion, a tool result, generated text, Proposal existence and optimistic dispatch never qualify.
+- **V2-UX-STATE-009**: A verified completion treatment remains scoped: `任务已有结果` does not imply an Effect committed; `已采纳` does not imply `已应用`; `已应用` does not imply factual verification, workflow completion, export or publication.
+- **V2-UX-STATE-010**: State density is restrained. Repeated badges, colored card walls, decorative pulses and celebratory motion cannot compete with manuscript prose or create a stronger result than the record supports.
+- **V2-UX-STATE-011**: Icon-only and color-only status are prohibited. Repeated compact rows may abbreviate secondary detail only when the exact state term remains available to pointer, keyboard and assistive technology without relying solely on a tooltip.
+- **V2-UX-STATE-012**: State presentation is a projection. Expanding, collapsing, filtering, selecting or dismissing a transient notice changes no underlying record or authority.
+
+## Microcopy, errors and technical disclosure
+
+- **V2-UX-COPY-001**: Every consequential primary message is a Consequence-first Message that identifies the affected object and exact state, states what remains safe/unchanged when useful, and gives one Safe-next-action Copy.
+- **V2-UX-COPY-002**: Message headings use `对象 + 状态`. Action labels use an exact `动词 + 对象` phrase such as `查看恢复选项`, `重新确认计划` or `移回工作台`; generic `确定`, `批准`, `继续` and `重试` cannot replace a named consequence.
+- **V2-UX-COPY-003**: AI7 does not use `出错了`, `失败，请重试`, `任务完成`, `已保存` or `AI 正在思考` when a more exact object/state is available. Examples include `本地写入中断`, `任务已有结果 · 尚有未解决事项`, `已写入修订日志` and `等待模型服务`.
+- **V2-UX-COPY-004**: A field-level validation error appears beside the affected input, preserves all valid input and focus/return context, names the correction, and does not open a global toast or modal by default.
+- **V2-UX-COPY-005**: A Task/Run/Proposal/Effect error remains attached to the exact record or action surface. A durability, recovery, privacy or authority blocker retains a named persistent entry until its underlying state changes.
+- **V2-UX-COPY-006**: A modal is used only when proceeding/closing could lose manuscript input, destroy the sole at-risk Renderer buffer, or create a material irreversible misunderstanding that cannot be safely explained inline. Modal presence itself grants no authority.
+- **V2-UX-COPY-007**: Technical codes, stack/Provider/Harness diagnostics and copyable support information are secondary under `查看技术详情`. The primary editor layer uses product language and never requires filesystem, shell, agent-permission or generic security expertise.
+- **V2-UX-COPY-008**: Sanitized Technical Detail excludes manuscript/source excerpts, credentials or secret references that reveal values, Provider request/response bodies, raw Harness transcripts, hidden Behavior/Policy/Composition content and unrestricted internal paths.
+- **V2-UX-COPY-009**: An ambiguous external Effect outcome names `结果待确认` and offers investigation/reconciliation; it cannot present ordinary Retry, provider fallback or cancellation as safe repetition.
+- **V2-UX-COPY-010**: Error copy distinguishes retained versus lost versus unknown state. It never claims `未保存内容已恢复`, `未发生修改`, `已撤销` or `可安全重试` without exact supporting evidence.
+- **V2-UX-COPY-011**: Durable receipts, milestone/publication versions, decisions and audit/remediation records show absolute local date/time; relative time may supplement it. Routine ephemeral notices may lead with relative time when no durable identity depends on it.
+- **V2-UX-COPY-012**: Error and warning language is calm, specific and non-blaming. It states consequence before cause, avoids celebratory success, and does not expose English implementation terms on the primary Chinese layer unless no accepted Chinese product label exists.
+- **V2-UX-COPY-013**: Copy that names a recommendation, default or AI7 guess cannot present it as preselected, authorized, factually verified or editor-authored.
+- **V2-UX-COPY-014**: Dismissing a transient message hides only that projection. It never acknowledges Global Attention, resolves a record, clears a warning state, records satisfaction or suppresses a required safe-next-action entry.
+
+## V1 semantic migration and journey continuity
+
+- **V2-UX-MIG-001**: The only frozen UI/UX reference is exact object `587d6455f6a578d3df8a39f534ec7a057c07a18c`. It supplies semantics, state distinctions and `J-01`–`J-14` hypotheses only; V2 architecture and owner-accepted decisions govern every conflict.
+- **V2-UX-MIG-002**: V1 Semantic Retention preserves accepted professional outcomes, exact authority/factual/durability distinctions, negative guarantees and journey identities without preserving their screen placement or component implementation.
+- **V2-UX-MIG-003**: V1 Interaction Reshaping re-expresses retained needs through the accepted Book Workbench, Global Attention, manuscript/task/review workspaces, model-role setup, Milestone/Publication Version and local-export language.
+- **V2-UX-MIG-004**: V1 Artifact Drop excludes A/B/C geometry, HTML prototype, Figma frames, component tree, exact visual tokens and coding/developer metaphors from the V2 baseline.
+- **V2-UX-MIG-005**: Formal user-facing Signoff, direct send/handoff/recipient/delivery tracking and editorial Policy/Composition elevation are dropped; their absence cannot merge or weaken internal exact records, local receipts or developer governance.
+- **V2-UX-MIG-006**: All fourteen stable journey IDs remain in `journeys.md`. Their V2 text may add accepted behaviors such as Quick Start/default execution, Rewind, Milestone/Publication Version, local-only export and editable manuscript-window transfer while preserving the original business outcome.
+- **V2-UX-MIG-007**: The frozen package's owner walkthrough, 3–5-editor study and standalone usability/accessibility/performance/UI gates are not V2 gates. Required behavior remains covered in future complete Windows E2E user journeys and discovered bug regressions only.
+- **V2-UX-MIG-008**: A migration mapping or journey entry is design coverage, not implementation, test, review, performance, fidelity, accessibility, provider, Effect or release evidence.
+- **V2-UX-MIG-009**: Dropping an artifact cannot silently drop the semantic outcome it once represented. Any intentional future outcome removal must be an explicit product-scope decision rather than an implied migration side effect.
+- **V2-UX-MIG-010**: `J-01` import-completion evidence naming and `J-13` Series membership/knowledge-exclusion management were the only identified seams after Q59; D-061 closes both through Manuscript Import Record and Series membership/shared-scope interaction contracts.
+
+## Workspace organization
+
+- **V2-UX-IA-001**: The primary workspace is a Book-anchored Workbench. A Book is the stable editorial context and is never inferred from a filesystem folder or a conversation.
+- **V2-UX-IA-002**: The central surface shows one Active Work Object, normally a Book-owned manuscript or Editorial Deliverable, and AI activity never replaces it merely because a Run starts or completes.
+- **V2-UX-IA-003**: A Task appears through a Task Context Layer bound to the exact Book, deliverable, manuscript revision or selection, source scope, and intended outcome; it is not a peer conversation beside Books.
+- **V2-UX-IA-004**: Cross-Book work requiring awareness or action may appear in a Global Attention View, but each item navigates to its authoritative record and the view owns no business state.
+- **V2-UX-IA-005**: The compact bottom task entry and contextual side surface inherit the current Active Work Object rather than silently selecting a different Book, deliverable, revision, or scope.
+- **V2-UX-IA-006**: AI7 uses one collapsible Two-level Contextual Sidebar; it does not add a second permanent left sidebar or expose the complete library as an expanded object tree.
+- **V2-UX-IA-007**: Stable global destinations are `待我处理`, `书库`, `书系`, and `质量与学习`; Settings remains reachable from the bottom application/account area.
+- **V2-UX-IA-008**: The Book area shows pinned and recently used Books plus navigation for the current Book. The complete collection remains searchable through `书库`.
+- **V2-UX-IA-009**: Pinning, recency, grouping, or hiding in a Book Convenience View changes no Series membership, Working Corpus eligibility, Run Source Scope, privacy boundary, or mutation authority.
+- **V2-UX-IA-010**: When collapsed, the sidebar preserves recognizable global destinations, current Book identity, and Global Attention count without requiring descriptive text to remain visible.
+- **V2-UX-BOOK-001**: A Book Work Overview gives the Manuscript the strongest visual priority and exposes its exact active branch/revision, journal state, latest Manuscript Checkpoint, recovery state, and continuation action.
+- **V2-UX-BOOK-002**: Promotion Article, News Report, and Review Article appear as independent Editorial Deliverables with their own current version, Workflow Instance state, next action, and attention status.
+- **V2-UX-BOOK-003**: AI7 never reduces a Book to one progress percentage or implies that its Editorial Deliverables share one Workflow Instance or phase.
+- **V2-UX-BOOK-004**: Workflow, Tasks, Evidence, Proposals, sources, Series context, and history/recovery appear as Contextual Work Lenses bound to the relevant Book or deliverable and open their authoritative records.
+- **V2-UX-BOOK-005**: Visual priority for the Manuscript does not merge authority, version history, workflow state, review, signoff, delivery, or release decisions across Editorial Deliverables.
+
+## Series membership and sharing scope
+
+- **V2-UX-SER-001**: `书系` remains a stable global destination. Opening one Series exposes `成员与共享范围` with exact member Books, governed Series Knowledge, explicit exclusions and membership history; it is not an ambient cross-Book manuscript reader.
+- **V2-UX-SER-002**: `加入书系` and `移出书系` always name one exact Book and Series. A recent/pinned/library grouping, Task selection or learning scope cannot silently change membership.
+- **V2-UX-SER-003**: Before either command, a Series Membership Impact Preview separates `未来任务`, `已授权或正在运行`, `书系知识与学习` and `历史记录` and states what changes versus remains unchanged.
+- **V2-UX-SER-004**: Adding a Book makes it eligible for explicit future Series-scope selection/recommendation only. It does not automatically enter a Task, authorize a Run, expose raw text to another Book, grant Provider transmission, establish Learning Eligibility or permit mutation.
+- **V2-UX-SER-005**: Removing a Book stops future membership-derived Series-scope selection/recommendation after the command. It does not alter an already frozen Run Source Scope, retarget a mutation, cancel a Run, delete Book/Series history or invalidate prior exact records.
+- **V2-UX-SER-006**: The preview identifies applicable authorized/running Runs by count and exact route when they retain a frozen scope. Membership change never silently edits their Plan Envelope; their existing drift/revalidation rules continue independently.
+- **V2-UX-SER-007**: Existing Series Knowledge, Learning Material, eligibility, memory and lineage potentially related to the Book are named in the preview but are not automatically activated, deleted or re-scoped by membership. Their existing review/remediation records own later disposition.
+- **V2-UX-SER-008**: The final action is exactly `加入书系` or `移出书系`, not generic `批准` or `继续`. It commits only the displayed membership transition and creates no separate confirmation when the full consequence remains inline.
+- **V2-UX-SER-009**: Every successful command appends a Series Membership Change Record with exact Book, Series, prior/new membership, actor, absolute local time and displayed impact basis. The record is reachable from both Series and Book history.
+- **V2-UX-SER-010**: A failed command leaves membership unchanged and names the safe next action. A stale preview requires refresh/review rather than silently applying against changed membership or governing records.
+- **V2-UX-SER-011**: Source Scope Builder expands a selected Series into its current eligible members and exclusions before Run Authorization. Once authorized, the exact resolved records remain frozen even if Series membership later changes.
+- **V2-UX-SER-012**: A Series Membership Change Record is not Run Authorization, a source-scope grant, Learning Eligibility Decision, factual evidence, manuscript mutation, Effect Approval or Public Release Permission.
+
+## Global Attention
+
+- **V2-UX-ATTN-001**: Global Attention groups items in this order: `异常与结果待确认`, `等待你的决定`, `运行中与已暂停`, and `最近完成`.
+- **V2-UX-ATTN-002**: `异常与结果待确认` includes ambiguous external outcomes, Recovery Attention States, material drift, Manuscript Conflicts, and failures that cannot continue safely.
+- **V2-UX-ATTN-003**: `等待你的决定` preserves each exact record type and its accepted user-facing projection for Clarification Request, Plan Revision, Proposal Decision, Review Decision, Effect Approval, internal Signoff Record, and Public Release Permission. In the target-house profile the latter two appear only through Milestone Version and Publication Version language, never generic approval.
+- **V2-UX-ATTN-004**: `运行中与已暂停` shows the business-readable phase, current object, next step or wait reason without contributing to the Actionable Attention Count.
+- **V2-UX-ATTN-005**: `最近完成` links to the Task Outcome, Effect Receipt, or classified outcome evidence and ages out of the recent projection without deleting its authoritative Book-owned record.
+- **V2-UX-ATTN-006**: The sidebar badge is the Actionable Attention Count and includes only unresolved items in the first two groups that require editor action.
+- **V2-UX-ATTN-007**: Every Attention Projection Item shows its Book, Active Work Object, exact state or named decision, reason for attention, and safe next action, and navigates to the authoritative record.
+- **V2-UX-ATTN-008**: Attention ordering, grouping, badge changes, filtering, and dismissal never grant authority or mutate the underlying Task, decision, Effect, Workflow Instance, or recovery record.
+
+## Manuscript work-surface modes
+
+- **V2-UX-ED-001**: Manuscript Editing Mode is the normal state: the Manuscript dominates the central surface, the left sidebar may be shown or collapsed, the contextual supporting surface is closed by default, and task entry remains compact.
+- **V2-UX-ED-002**: Contextual Collaboration Mode opens one supporting side surface for Task, Evidence, Proposal, or Workflow context while keeping the Manuscript and relevant exact selection visible.
+- **V2-UX-ED-003**: A Dedicated Work Workspace may temporarily occupy the center for large/structural proposal comparison, factual review, multi-evidence comparison, or Manuscript Conflict resolution, while persistently showing exact Book, deliverable, branch/revision, and target context plus an explicit return to the Manuscript.
+- **V2-UX-ED-004**: Editorial Focus Mode hides the sidebar, supporting surface, and task entry while retaining the Manuscript, necessary save/recovery state, and keyboard- and pointer-accessible restoration controls.
+- **V2-UX-ED-005**: Changing presentation modes creates no Task, decision, Workflow transition, Effect, receipt, or authority change.
+- **V2-UX-ED-006**: A Run starting, pausing, requesting clarification, failing, or completing never changes the editor's work-surface mode or steals focus automatically.
+- **V2-UX-ED-007**: Background Runs continue during Editorial Focus Mode and surface actionable changes through the non-interrupting Global Attention rules.
+- **V2-UX-ED-008**: The editor presents a Continuous Manuscript Experience across bounded rendering windows and exposes no load-more control, technical window selector, or Manuscript Block pagination for ordinary reading and editing.
+- **V2-UX-ED-009**: Wheel, trackpad, keyboard, and page navigation cross rendering-window boundaries without visible location jumps or loss of the exact text anchor, cursor, selection, or active Chinese IME composition.
+- **V2-UX-ED-010**: AI7 provides Dual-scale Manuscript Navigation: local reading scroll for the current neighborhood and a visually distinct indexed whole-manuscript position and jump system.
+- **V2-UX-ED-011**: The local scroll thumb never visually implies that its range is the complete Manuscript; Whole-manuscript Position remains visible through structural location and a proportional global indicator.
+- **V2-UX-ED-012**: A distant outline, search, or position jump loads the target neighborhood and uses short business-readable wording such as `正在打开第十二章`, not technical block/window terminology.
+- **V2-UX-ED-013**: When the whole-manuscript outline or index is unavailable or updating, AI7 discloses that global navigation is updating while preserving responsive editing in the current bounded window.
+- **V2-UX-ED-014**: No visual or interaction treatment claims that the complete Manuscript resides in the renderer.
+- **V2-UX-ED-015**: The right contextual navigation contains persistent `大纲` and `搜索与跳转` entries; each opens the single supporting side surface while preserving the Manuscript as the central object.
+- **V2-UX-ED-016**: The Manuscript Outline Navigator virtualizes the full structural hierarchy, supports expand/collapse and indexed jump, and marks the current section without forcibly scrolling the outline away from the editor's chosen browsing position.
+- **V2-UX-ED-017**: Normal outline navigation does not permit incidental drag-to-reorder, hierarchy change, or structural mutation.
+- **V2-UX-ED-018**: Editor-authored section movement or hierarchy change requires explicit Structure Adjustment Mode, identifies the affected headings and text range before commitment, writes to the current Manuscript working state, and supports durable undo.
+- **V2-UX-ED-019**: Model-suggested structural changes remain exact-pin-bound Proposals and cannot be applied by presenting them as ordinary outline gestures.
+- **V2-UX-ED-020**: The Whole-manuscript Position Rail provides coarse position plus sparse, filterable markers for relevant search hits, findings, Proposals, and comments without becoming a dense document minimap.
+- **V2-UX-ED-021**: Outline and position-rail freshness is disclosed against the active Manuscript Revision; a stale or updating projection never silently targets current text.
+- **V2-UX-ED-022**: The Manuscript Search and Jump Panel provides `文字`, `标题`, and `位置` modes and is restricted to the current Manuscript and active revision context.
+- **V2-UX-ED-023**: Text search defaults to the whole current Manuscript and may narrow to the current chapter or exact selection; it never silently expands to sources, other Books, Series, or the local instance.
+- **V2-UX-ED-024**: Text search supports CJK-aware continuous substring and exact-phrase discovery plus ordinary Latin case and whole-word options; regular expression syntax is not part of the default professional editing surface.
+- **V2-UX-ED-025**: Text results are virtualized and grouped by heading with context, total count, exact revision/range identity, previous/next keyboard navigation, and Whole-manuscript Position markers.
+- **V2-UX-ED-026**: Heading mode performs tolerant lookup over the current revision's outline; position mode accepts structural location, whole-manuscript proportion, or revision-specific character position, not unstable editor line numbers.
+- **V2-UX-ED-027**: Page-number navigation appears only when an identified paginated layout version defines those pages; it is never the normal Manuscript location authority.
+- **V2-UX-ED-028**: Following a result preserves a Search Return Position and keeps the panel available until the editor closes it or changes mode.
+- **V2-UX-ED-029**: A result whose revision/range binding drifted becomes a Stale Search Result and must refresh or re-resolve exactly; it never jumps to merely similar current text.
+- **V2-UX-ED-030**: Search and jump are local, provider-independent operations that require no Harness, model call, credential, or network access.
+- **V2-UX-ED-031**: `替换此处` revalidates the exact current hit, writes it as an ordinary Edit Journal-backed editor change, and participates in normal durable undo.
+- **V2-UX-ED-032**: `替换所选` and `全部替换` require a Replacement Preview showing search/replacement text, explicit scope, matching rules, bound Manuscript Revision, total count, and representative context grouped by heading.
+- **V2-UX-ED-033**: Editors may exclude individual matches before commitment; the resulting Frozen Match Set, not a reinterpreted live query, is the complete intended target.
+- **V2-UX-ED-034**: Tolerant search or character normalization never silently widens replacement. Every replaced range must be an exact displayed member of the Frozen Match Set.
+- **V2-UX-ED-035**: Atomic Manuscript Replacement executes in the service off the renderer thread with progress and permits cancellation before the atomic commit boundary; cancellation or failure before commit writes no replacement.
+- **V2-UX-ED-036**: Commitment revalidates every selected target and the match-set meaning. Intersecting text drift or semantic change to the frozen set stops the entire operation and requires a refreshed preview; no stale match is skipped to produce partial success.
+- **V2-UX-ED-037**: A successful Atomic Manuscript Replacement writes one durable undoable Edit Journal transaction and displays the exact committed count and scope after persistence acknowledgement.
+- **V2-UX-ED-038**: Replacement completion is never labeled as a Manuscript Checkpoint. After atomic commit, `取消` cannot claim reversal; ordinary manuscript undo or history/recovery is used.
+- **V2-UX-ED-039**: Other Books remain editable during whole-manuscript replacement. Current-Book editing that changes a frozen target or match-set meaning invalidates the staged replacement rather than being silently overwritten.
+- **V2-UX-ED-040**: A Live Manuscript Selection remains ephemeral and does not automatically become Task context, source scope, comment, finding, Evidence Link, Proposal target, or Effect target.
+- **V2-UX-ED-041**: Explicit `加入任务范围` or record-specific anchoring creates a Pinned Manuscript Range containing exact Book, branch, revision, stable block, Unicode range, and digest identity.
+- **V2-UX-ED-042**: Editors may add ranges from different chapters and bounded windows to one visible Manuscript Range Set; each item shows structural location, short preview, character count, and exact-current/drifted state and may be removed independently.
+- **V2-UX-ED-043**: A Task, comment, finding, Evidence Link, or Proposal receives only the Pinned Manuscript Range or Range Set explicitly attached to that record; one record's context never silently expands another's.
+- **V2-UX-ED-044**: Unchanged ranges may exact-re-resolve across non-interacting edits; changed text, splits/merges, or structurally ambiguous targets become Drifted Manuscript Ranges with `查看变化`, `重新选择`, and `移除` actions.
+- **V2-UX-ED-045**: Drifted Manuscript Ranges cannot be fuzzy-retargeted, authorized for a new Task plan, used as exact evidence, or mutated until explicitly resolved.
+- **V2-UX-ED-046**: Opening a Pinned Manuscript Range loads its target neighborhood and highlights the exact range; displayed excerpt text is preview only and authoritative wording comes from Exact Fetch against the bound revision.
+- **V2-UX-ED-047**: Selection and anchoring operate on Unicode grapheme boundaries and preserve Chinese punctuation, combining characters, and active Chinese IME composition; anchoring and Task shortcuts do not intercept composition input.
+- **V2-UX-ED-048**: The task entry and contextual supporting surface keep the complete Manuscript Range Set visible before Plan Preview and Run Authorization.
+- **V2-UX-ED-049**: Normal editing writes continuously to the Edit Journal and shows Editing Persistence Status only from service-confirmed persistence state.
+- **V2-UX-ED-050**: The status can simultaneously disclose `已写入修订日志` and `自里程碑版本「{标签}」后有修改`; AI7 never replaces these distinct facts with one generic `已保存` label.
+- **V2-UX-ED-051**: `Ctrl+S` and the menu Journal Save Action immediately flush pending edits and show `已写入修订日志` only after acknowledgement; they never create a Manuscript Checkpoint.
+- **V2-UX-ED-052**: `保存为里程碑版本` is a separate explicit action with a required concise label, stated purpose, and optional note; for Manuscripts it creates a new immutable Manuscript Revision through a Manuscript Checkpoint only after successful validation and persistence.
+- **V2-UX-ED-053**: AI7 may show a Milestone Version Suggestion around large replacement, structural adjustment, Proposal application, or delivery preparation, but the suggestion never claims creation, blocks ordinary editing by itself, or changes downstream authority.
+- **V2-UX-ED-054**: Durable undo/redo belongs to the current Manuscript Branch, survives restart, and is not cleared by creating a Manuscript Checkpoint; undo across a checkpoint produces descendant working state rather than rewriting an immutable revision.
+- **V2-UX-ED-055**: Journal failure enters Editing Protection Mode and remains persistently visible as `本地写入中断 · 当前更改尚未持久保存`; AI7 removes every saved/durable implication until exact acknowledgement succeeds.
+- **V2-UX-ED-056**: While persistence is unresolved, visible working input follows the Bounded Edit Safety Buffer and Protective Read-only State rules; close, batch mutation, Proposal application, or another high-risk transition cannot bypass them.
+- **V2-UX-ED-057**: Recovery Snapshot appears only in recovery context and is never presented as Journal Save, Manuscript Checkpoint, export, or `另存为`.
+- **V2-UX-ED-058**: Persistence meaning uses text and icon/shape as well as color and remains visible in Editorial Focus Mode when action is required.
+
+## Manuscript import and fidelity
+
+- **V2-UX-IMP-001**: Manuscript import begins through a user-selected Windows file picker and performs parsing and fidelity preflight locally without requiring a model provider, credential, Harness, or network.
+- **V2-UX-IMP-002**: Before editable import commits, an Import Fidelity Review separately classifies inline styles, comments/revisions, notes, tables, images/captions, sections, headers/footers, and expected round-trip export behavior.
+- **V2-UX-IMP-003**: Each content class is labeled `完整保留`, `降级导入`, or `不支持导入` with text and icon/shape as well as color.
+- **V2-UX-IMP-004**: Every material degradation shows exact count, representative examples, affected behavior, and expected export consequence before the editor may decide.
+- **V2-UX-IMP-005**: Proceeding with degradation requires an explicit Import Degradation Decision using wording such as `按上述降级方式导入`; no degradation is preselected and generic `继续` is insufficient.
+- **V2-UX-IMP-006**: A critical `不支持导入` classification blocks creation of an editable Manuscript. If the file is eligible for source-only retention, `作为来源材料导入` is a separate explicit path and never silently extracts partial text as the complete Manuscript.
+- **V2-UX-IMP-007**: Import executes in the service with business-readable progress and cancellation before atomic commit; cancellation or failure creates no partial Book, Manuscript, or Manuscript Revision.
+- **V2-UX-IMP-008**: Successful import records and exposes the original file record, Import Fidelity Review, file identity, time, format, detected structure, accepted degradation, and resulting Manuscript Revision within the Book.
+- **V2-UX-IMP-009**: Successful atomic import appends one Book-owned Manuscript Import Record linking the exact original file identity, final Import Fidelity Review, applicable Import Degradation Decision, provenance and resulting Book/Manuscript Revision.
+- **V2-UX-IMP-010**: `稿件已导入` appears only after every required import record and the resulting revision are durably persisted. Service completion, renderer navigation or optimistic Book creation cannot trigger it early.
+- **V2-UX-IMP-011**: The compact completion surface leads with the resulting Book/manuscript/revision and offers `打开稿件` as primary and `查看导入记录` as secondary. It remains reachable from Book history after any transient notice disappears.
+- **V2-UX-IMP-012**: Any accepted degradation is persistently summarized as `含已接受的降级` with a route to the exact affected classes/examples/export consequences; a clean import does not hide the underlying review record.
+- **V2-UX-IMP-013**: Manuscript Import Record is user-facing import completion evidence, not a Manuscript Checkpoint, Milestone Version, export/Apply Effect Receipt, round-trip guarantee or factual verification.
+- **V2-UX-IMP-014**: If execution architecture classifies the atomic import command as an Effect, its exact Effect Receipt remains separately linked in audit/technical detail and never replaces the editor-facing `稿件导入记录` label.
+- **V2-UX-IMP-015**: Cancelled/failed import produces no successful Manuscript Import Record or partial editable Book. Its retained diagnostic/import-attempt evidence, if any, cannot use `稿件已导入` styling.
+- **V2-UX-IMP-016**: Reimport creates a Reimport Comparison against the current Manuscript, auto-maps only exact unambiguous stable structure, and requires explicit resolution of ambiguity before creating a descendant revision.
+- **V2-UX-IMP-017**: Reimport never overwrites the active Manuscript, silently replaces current structural identities, or treats an imported document as live synchronization.
+
+## Task capture
+
+- **V2-UX-TASK-001**: A compact Context-bound Task Composer remains available beside an active manuscript or Editorial Deliverable and uses editorial wording such as `描述希望 AI7 完成的编辑工作`, not generic chat wording.
+- **V2-UX-TASK-002**: The composer visibly shows the exact Book, Active Work Object, branch/revision, and Pinned Manuscript Ranges it currently carries; absent context remains visibly absent rather than defaulting to whole-Book access.
+- **V2-UX-TASK-003**: Invoking the composer from a Live Manuscript Selection, Pinned Manuscript Range, finding, Evidence Link, Proposal, or Book Work Overview seeds only the explicitly selected target/context and never expands source or mutation scope.
+- **V2-UX-TASK-004**: The primary composer action is `准备任务`. It creates or opens a durable Task Intent Draft and expands the right-side Task surface without making a model call, provider transmission, Run Record, Run Authorization, or Effect authority.
+- **V2-UX-TASK-005**: A Task Intent Draft keeps requested goal, exact target, intended outcome, and selected context editable before source scope, Plan Preview, and Run Authorization.
+- **V2-UX-TASK-006**: Switching Books leaves an unfinished draft bound to its original Book and collapses it with a clear `返回继续` route; the draft never silently follows the new current Book.
+- **V2-UX-TASK-007**: A draft initiated from a Book Work Overview may target the Manuscript or a selected Editorial Deliverable without a text range, but that does not imply whole-Manuscript source access.
+- **V2-UX-TASK-008**: A Codex-referential round arrow may represent the Prepare Task Action only when tooltip, accessible name, state transition, and following surface consistently communicate `准备任务`, never `已发送` or `运行中`.
+- **V2-UX-TASK-009**: Active Chinese IME composition cannot trigger the Prepare Task Action or any Task shortcut.
+- **V2-UX-TASK-010**: Natural language is the primary Task drafting input; selecting a Task Skill catalog entry first remains an alternative route to the same Task Intent Draft.
+- **V2-UX-TASK-011**: AI7 shows one Task Skill Recommendation when fit is clear or two to three unselected candidates when materially ambiguous, with purpose, match rationale, required inputs, expected outcome, and possible Proposal/Effect classes.
+- **V2-UX-TASK-012**: A selected Task Skill reveals only required Progressive Task Fields in the right surface; optional fields remain collapsed and the original natural-language goal remains visible and editable.
+- **V2-UX-TASK-013**: Task Skill recommendation or draft selection is not Task Skill Activation, Capability Grant, Provider Binding, Run Authorization, or Effect Approval.
+- **V2-UX-TASK-014**: A material goal change marks the existing Task Skill Recommendation as needing update and never silently replaces one selected skill with another.
+- **V2-UX-TASK-015**: When no suitable Task Skill exists, AI7 states `暂无适合的任务技能` and permits intent revision or available-skill browsing; it never executes through unbounded generic chat fallback.
+- **V2-UX-TASK-016**: Editorial surfaces name Task Skills by professional outcome and keep package names, plugins, Harness concepts, and developer trust tiers out of the normal selection experience.
+- **V2-UX-TASK-017**: The composer offers a distinct `快速开始` option that can skip the separate Task Intent review surface and begin execution from the compact entry.
+- **V2-UX-TASK-018**: Quick Start still creates and binds an exact Task Intent, Execution Plan, Plan Envelope, and Run Authorization before execution and never grants Proposal Decision, Review Decision, Effect Approval, Signoff Record, or Public Release Permission.
+- **V2-UX-TASK-019**: After developing Task Pattern Confidence, a user can explicitly approve a Default Execution Rule so future user-initiated matching Tasks start without repeated separate Task Intent review when deterministic preflight passes.
+- **V2-UX-TASK-020**: Every default-executed Task still receives its own exact Task Intent, Execution Plan, Plan Envelope, Run Authorization, and provenance link to the governing Default Execution Rule version.
+- **V2-UX-TASK-021**: Task Pattern Confidence reduces repeated Run-review interaction only; it never establishes factual correctness or grants Proposal Decision, Review Decision, Effect Approval, Signoff Record, Public Release Permission, or Effect completion.
+- **V2-UX-TASK-022**: A Default Execution Rule binds the exact Task Skill/version, required field constraints, allowed variability, applicability scope, per-Run source-scope rule, Provider/outbound-data constraints, budget ceiling, outcome classes, and permitted Effect classes.
+- **V2-UX-TASK-023**: Rule applicability (`本 Book`, identified Series, or identified/all Books) never expands a matching Run's source scope; every Run separately resolves and records only the sources its rule permits.
+- **V2-UX-TASK-024**: Default execution begins only after deterministic preflight establishes exact unambiguous Task Skill match, complete fields, current non-drifted context, permitted source scope, available credentials/provider, unchanged outbound category, budget compliance, and allowed outcome/Effect class.
+- **V2-UX-TASK-025**: A matching user submission receives exact per-Run records and starts without an additional confirmation click, then shows a quiet persistent notice naming the Default Execution Rule with expandable scope, provider, budget, plan, and authorization details.
+- **V2-UX-TASK-026**: A rule mismatch, ambiguity, skill-version change, widened source/provider/outbound/budget/outcome/Effect boundary, or context drift prevents default execution and routes to `准备任务` with a precise reason; AI7 never widens the rule.
+- **V2-UX-TASK-027**: Users can inspect, pause, revoke, or revise a Default Execution Rule. Revision creates a new rule version; historical Runs retain the exact version that authorized them.
+- **V2-UX-TASK-028**: A Default-executed Run is always user-initiated. The rule does not create scheduled, ambient, or model-triggered Tasks and does not auto-accept or auto-apply results.
+- **V2-UX-TASK-029**: Pause and cancel become immediately available after default dispatch; neither claims to retract provider transmission or undo an already committed Effect.
+- **V2-UX-TASK-030**: Task preparation separately presents `要处理什么`, `允许参考什么`, and `哪些内容可能发送给模型`; no combined scope control may imply that one grants the others.
+- **V2-UX-TASK-031**: The Task Target Card shows the exact Book, manuscript or Editorial Deliverable, branch/revision, and Pinned Manuscript Ranges or intended outcome target; selecting a readable source never grants mutation of that source.
+- **V2-UX-TASK-032**: The Source Scope Builder begins with a Task Skill-proposed minimum set and identifies every source as a product record and exact version, never as a raw path or filesystem permission.
+- **V2-UX-TASK-033**: Current-Book manuscript/source records, Series scope and exclusions, explicit Cross-project Books/sources, and approved House Editorial Memory remain separately labeled source classes and never collapse into `整个工作区`.
+- **V2-UX-TASK-034**: Series or Cross-project expansion requires explicit selection and identifies the current included/excluded records; later membership or library changes do not silently enter an authorized Run.
+- **V2-UX-TASK-035**: The Potential Provider Data Summary names maximum outbound data categories and source boundaries separately from readable local scope; local indexing, Exact Fetch, or editing never implies provider transmission.
+- **V2-UX-TASK-036**: Run Authorization freezes exact source identities/versions and the outbound maximum. Material additions or expansions require Plan Revision and renewed Run Authorization.
+- **V2-UX-TASK-037**: The final provider payload remains subject to the AI7 egress gate and is traceable after execution; the preflight summary never claims to be an exact advance transcript of dynamically selected context.
+- **V2-UX-TASK-038**: A Default Execution Rule may use only its approved source-scope rule and outbound envelope and falls back to standard preparation whenever the proposed Task requires expansion.
+
+## Reusable procedure capture
+
+- **V2-UX-REUSE-001**: Eligible completed or selected editorial work exposes one exact `将以上工序保存为可复用工序` action; ordinary users do not need to choose among Skill, Workflow or Plugin terminology before invoking it.
+- **V2-UX-REUSE-002**: The action first opens a Reusable Procedure Classification Preview and saves nothing until the editor reviews the recommended result type and its concise consequence.
+- **V2-UX-REUSE-003**: One capture creates exactly one result type: Default Execution Rule, Task Skill Candidate, Workflow Profile Draft or Developer Capability Proposal. AI7 never persists one generic object that later behaves as any of them.
+- **V2-UX-REUSE-004**: AI7 recommends Default Execution Rule only when reuse stays within an already identified Task Skill/version and means reduced future Run-review burden rather than a new procedure definition.
+- **V2-UX-REUSE-005**: AI7 recommends Task Skill Candidate for reusable model-assisted work with variable inputs and outputs that fits declarative instructions and existing AI7 Capabilities without introducing code.
+- **V2-UX-REUSE-006**: AI7 recommends Workflow Profile Draft when the reusable object primarily defines Deliverable phases, gates, responsibilities, required artifacts or lifecycle transitions rather than one agent-executed Task.
+- **V2-UX-REUSE-007**: AI7 recommends Developer Capability Proposal when reuse requires new code, tool integration, external-system behavior or another code-bearing Capability Implementation. The proposal may recommend evaluating a Plugin but creates, installs, enables and activates none.
+- **V2-UX-REUSE-008**: The editor may correct Task Skill Candidate versus Workflow Profile Draft classification after seeing purpose and consequences. A classification requiring code cannot be relabeled as a declarative Task Skill merely to avoid the developer path.
+- **V2-UX-REUSE-009**: Classification preview and correction create no Run Authorization, Task Skill installation/enablement, Workflow Profile activation/migration, Capability Grant, Plugin admission, Effect Approval or Public Release Permission.
+- **V2-UX-REUSE-010**: User-facing copy uses professional purpose and future use rather than Harness, Cordis, package or Plugin mechanics; developer identity and implementation suggestions appear only inside the Developer Capability Proposal route.
+- **V2-UX-REUSE-011**: A Procedure Capture Source Set is either one completed Run or an explicitly selected ordered set of completed user-visible editorial steps; AI7 never infers it from an ambient recent-activity feed or whole Book history.
+- **V2-UX-REUSE-012**: Eligible selected steps are visible Task-plan editorial business steps, deterministic commands and Workflow actions. The editor may add, remove and reorder them before classification and save.
+- **V2-UX-REUSE-013**: The Reusable Procedure Extraction Preview names both `将提取什么` and `不会保存什么` before a candidate, draft, rule proposal or developer proposal is created.
+- **V2-UX-REUSE-014**: Extractable structure is limited to reusable purpose, ordered steps and branches, parameterized inputs, expected output types, source classes, Model Roles, requested AI7 Capabilities, possible Effect classes and applicable Workflow phases, gates, responsibilities and artifact types.
+- **V2-UX-REUSE-015**: Reusable asset content excludes manuscript text, Book identity and concrete source content. Local provenance may point to the capture source record without embedding that instance content in the asset.
+- **V2-UX-REUSE-016**: Capture excludes credentials, secret values, provider identity, endpoint and concrete model binding. A Task Skill Candidate may retain abstract Model Roles and requirements only.
+- **V2-UX-REUSE-017**: Capture excludes factual conclusions, Proposal Decisions, Review Decisions, Run Authorizations, Effect Approvals, Effect Receipts and Public Release Permissions; no historical outcome grants authority to future Runs.
+- **V2-UX-REUSE-018**: Hidden Harness messages, model reasoning, tool calls, retries, diagnostics and technical checkpoints never appear as reusable steps or saved instructional content.
+- **V2-UX-REUSE-019**: Failed, cancelled, rejected or later user-corrected steps are excluded by default. A corrected reusable step enters only when the editor explicitly authors or confirms the corrected version in the extraction preview.
+- **V2-UX-REUSE-020**: AI7 never silently creates a reusable-procedure candidate or draft from recent activity, Quality Signals or learned behavior; capture always starts from the editor's exact invocation and source selection.
+- **V2-UX-REUSE-021**: A Task Skill result offers exactly named `仅保存候选版本` and `保存并送交检查` actions; neither label claims installation, validation, enablement or execution before that state exists.
+- **V2-UX-REUSE-022**: Either action first creates one exact immutable local-user Task Skill Candidate version. Editing or repair after save creates a new version rather than mutating the prior bytes.
+- **V2-UX-REUSE-023**: `保存并送交检查` enters the AI7-owned admission sequence: admission checks may install the exact version disabled, followed by an independent provider-free check. It never dispatches the candidate as an editorial Task.
+- **V2-UX-REUSE-024**: The authoring Run cannot validate, install, enable, approve, promote or activate its own Task Skill Candidate. Its output and status never count as independent admission evidence.
+- **V2-UX-REUSE-025**: A rejected or failed candidate remains inspectable with exact reasons; repair produces a new immutable candidate version and never rewrites the failed record.
+- **V2-UX-REUSE-026**: A successfully checked installed Task Skill version remains disabled until the editor invokes the separately named `查看权限上限并启用` action.
+- **V2-UX-REUSE-027**: Before enablement, AI7 shows the exact admitted Authority Ceiling across requested AI7 Capabilities, eligible scope kinds, Model Roles/provider needs and possible Effect classes, including what remains unavailable.
+- **V2-UX-REUSE-028**: Task Skill Enablement permits only future Tasks to request authority within the version's Authority Ceiling. It creates no Task Skill Activation, Run Authorization, Capability Grant, Execution Grant, Effect Approval, Proposal Decision, Review Decision or Public Release Permission.
+- **V2-UX-REUSE-029**: One global `自动化中心` provides centralized management for Task Skills, Workflow Profiles, Default Execution Rules and Developer Capability Proposals; it is a cross-type projection and never creates a generic persisted automation object or runtime.
+- **V2-UX-REUSE-030**: The Automation Center groups exact versions beneath one stable typed identity, shows type-specific lifecycle state, and permits type-specific actions without flattening installation, enablement, profile activation, rule approval or developer-proposal status into one flag.
+- **V2-UX-REUSE-031**: Each exact version opens one Version-linked Work and Delivery View containing only exact links to its Runs, Workflow Instances, Editorial Deliverables, Editorial Artifacts and Delivery Packages. It does not copy their content or expand source/retrieval authority.
+- **V2-UX-REUSE-032**: For a new unpinned Task Skill use, Latest Eligible Version Resolution selects the newest enabled version within the same stable Task Skill identity that is compatible with the current AI7 protocol, required Capability Implementations and active policy constraints.
+- **V2-UX-REUSE-033**: Candidates, rejected/failed versions, disabled versions, retired versions and incompatible versions are never selected as the latest eligible version.
+- **V2-UX-REUSE-034**: Latest Eligible Version Resolution freezes the exact selected version before Plan Preview and Run Authorization. It is not an in-Run fallback and may not change after authorization without Plan Revision and renewed Run Authorization.
+- **V2-UX-REUSE-035**: Existing authorized Runs, Default Execution Rules, Task Skill Activations and Workflow Instances retain their exact version pins when a newer version becomes available. AI7 may offer a separately reviewed update action but never migrates them silently.
+- **V2-UX-REUSE-036**: New Workflow Instances use the current explicitly activated default Workflow Profile version for their Deliverable type; drafts and merely newer inactive profile versions do not become defaults. Existing instances remain pinned until explicit migration.
+- **V2-UX-REUSE-037**: A Default Execution Rule remains bound to its exact Task Skill/version. Enabling a newer Task Skill version may surface affected rules and offer a new rule version, but cannot rewrite or widen an existing rule.
+- **V2-UX-REUSE-038**: Every version and whole-entry deletion begins with a Version Removal Preview naming active blockers, future availability, linked historical work/deliveries, package bytes that may be removed and records that must remain.
+- **V2-UX-REUSE-039**: A never-admitted and wholly unreferenced Task Skill Candidate, Workflow Profile Draft or Developer Capability Proposal may be permanently deleted after explicit confirmation.
+- **V2-UX-REUSE-040**: Removing a version that was installed, enabled, activated, pinned, approved or referenced makes it unavailable for future selection and may delete safely removable package bytes, but preserves a Historical Version Stub and every linked authoritative Run, decision, Workflow Instance, outcome and delivery record.
+- **V2-UX-REUSE-041**: A version with an active Run, active Task Skill Activation, enabled Default Execution Rule dependency or current Workflow Instance pin cannot be deleted until the exact blocker is completed, cancelled, disabled or explicitly migrated as applicable.
+- **V2-UX-REUSE-042**: Whole-entry deletion applies the same rule to every version, reports permanent-delete versus retained-stub counts before confirmation, and never cascades into Books, manuscripts, Runs, Workflow Instances, decisions, Editorial Deliverables, Editorial Artifacts or Delivery Packages.
+- **V2-UX-REUSE-043**: When the current latest eligible version is disabled, retired or removed, later unpinned uses resolve to the next newest eligible version and disclose that selection; no existing pin or historical link changes.
+- **V2-UX-REUSE-044**: An enabled compatible local-user Task Skill is visible across the local AI7 instance by default through Automation Center and the manual Task Skill selector, regardless of the Book in which it was authored.
+- **V2-UX-REUSE-045**: AI7 may surface an enabled Task Skill through intent-based Task Skill Recommendation in the context-bound composer, but recommendation state creates no Task Intent, version pin, Task Skill Activation, Capability Grant, Run Source Scope or Run Authorization.
+- **V2-UX-REUSE-046**: Reusing a Task Skill in another Book transfers only its immutable parameterized procedure and declared abstract requirements; original Book identity, manuscript/source content, factual results, decisions and prior outputs never prefill or enter the new Task.
+- **V2-UX-REUSE-047**: Every new Task using a reusable Task Skill defaults its Run Source Scope to the current Book and exact active target. Catalog availability and prior use never widen that default.
+- **V2-UX-REUSE-048**: Series, Cross-project and House Editorial Memory sources require explicit selection and authorization in the new Task even when the Task Skill declares those scope kinds as eligible.
+- **V2-UX-REUSE-049**: An editor may restrict Task Skill Recommendation Applicability to one or more named Books, Series, Editorial Deliverable types or Workflow phases. No filter is required; local-instance recommendation availability is the default.
+- **V2-UX-REUSE-050**: Recommendation Applicability controls proactive suggestion only. It does not alter Task Skill Enablement or Authority Ceiling, grant access, or prevent compatible manual selection elsewhere.
+- **V2-UX-REUSE-051**: Manual selection of an enabled compatible Task Skill outside its Recommendation Applicability remains available and shows a concise mismatch explanation before Task preparation continues.
+- **V2-UX-REUSE-052**: A disabled, retired, incompatible or unavailable version cannot be manually selected merely because it remains visible in version history; the selector resolves only Latest Eligible Version or another explicitly chosen eligible version.
+- **V2-UX-REUSE-053**: Task Skill selection always displays the exact version that will enter the Plan Envelope and allows review/change before Run Authorization; neither intent matching nor latest-version default hides the exact pin.
+- **V2-UX-REUSE-054**: A Workflow Profile result offers `仅保存草案` and `发布为新版本`; either update creates a new version and never overwrites a prior draft or published profile version.
+- **V2-UX-REUSE-055**: `仅保存草案` creates an inactive editable Workflow Profile Draft version with no effect on profile defaults or Workflow Instances.
+- **V2-UX-REUSE-056**: `发布为新版本` creates an immutable available Workflow Profile version after required fields and structure are complete, but does not make it the default or migrate any instance.
+- **V2-UX-REUSE-057**: A published profile version exposes the separate `设为新建交付成果的默认方案` action. It affects only Workflow Instances created afterward for the applicable Editorial Deliverable type.
+- **V2-UX-REUSE-058**: Migrating an existing Workflow Instance to another profile version is a separate exact flow that previews phase, Gate, responsibility, artifact and history consequences and requires explicit confirmation for that instance or named batch.
+- **V2-UX-REUSE-059**: A Default Execution Rule result offers `仅保存规则草稿` and `审阅并启用规则`; drafts grant no standing or per-Run authority and cannot match Tasks.
+- **V2-UX-REUSE-060**: `审阅并启用规则` displays and binds the exact Task Skill/version, required fields and allowed variation, applicability, source-scope rule, provider/egress constraints, budget ceiling, result classes and possible Effect classes before explicit activation.
+- **V2-UX-REUSE-061**: An enabled Default Execution Rule reacts only to a future user-submitted exact match after deterministic preflight. It never schedules or invents a Task, grants Effect Approval, applies a Proposal or migrates an existing Run.
+- **V2-UX-REUSE-062**: Editing, widening or updating a Default Execution Rule creates a new immutable rule version and requires explicit review/enablement; historical Runs retain the exact rule version that authorized them.
+- **V2-UX-REUSE-063**: A Developer Capability Proposal result offers `保存开发建议` only and remains non-executing in the Automation Center developer-proposal section.
+- **V2-UX-REUSE-064**: A Developer Capability Proposal may record the missing capability, affected procedure, proposed implementation direction and possible Plugin candidate, but offers no `生成插件`, install, enable, capability-grant or runtime activation action.
+- **V2-UX-REUSE-065**: Later implementation of a Developer Capability Proposal enters the separate repository-development process. Any third-party GitHub Plugin considered there must have more than five stars, more than three repository updates, and a latest update no earlier than 30 days before the development date; the accepted exact Plugin version is pinned and managed locally so upstream updates cannot change AI7 silently. The editorial capture flow performs none of that work.
+- **V2-UX-REUSE-066**: Across Task Skills, Workflow Profiles, Default Execution Rules and Developer Capability Proposals, every update creates a new exact version, version-specific links remain stable and removal follows the accepted Version Removal Preview rules.
+
+- **V2-UX-PLAN-001**: Standard task preparation shows one Editorial Plan Summary that fits its primary six sections into a coherent single-scroll view and keeps exact machine detail expandable.
+- **V2-UX-PLAN-002**: The summary covers goal and expected outcome; exact target and sources; three to seven editorial business steps; expected Editor Participation Points; Model Role/provider/outbound data/budget; and possible results/Effect classes plus important negative guarantees.
+- **V2-UX-PLAN-003**: Business steps describe editorial work and intermediate outcomes, not tool calls, subagents, Harness Sessions, context compaction, or provider diagnostics.
+- **V2-UX-PLAN-004**: The Plan Boundary Split explicitly lists permitted in-envelope adaptations and material goal, target, source, provider, outbound category, budget, outcome, Effect-class, or authority-pin changes that require suspension, Plan Revision, and renewed Run Authorization.
+- **V2-UX-PLAN-005**: The summary identifies whether and where Clarification Requests, Proposal Decisions, Review Decisions, Effect Approvals, or other named editor participation may arise, and states when none are expected.
+- **V2-UX-PLAN-006**: Possible actions include important `不会做` statements such as `不会直接修改当前稿件`, preventing absence of an Effect class from remaining implicit.
+- **V2-UX-PLAN-007**: Plan Preview is persistently labeled `计划说明，不是运行授权` and no interaction within its expandable detail silently authorizes a Run or Effect.
+- **V2-UX-PLAN-008**: Quick Start and Default-executed Runs need not open Plan Preview before dispatch, but store and expose the identical frozen human-readable preview and exact plan/envelope from Run details.
+- **V2-UX-PLAN-009**: When a material plan field changes, the prior and proposed values appear as a concise Plan Revision diff; the old preview never silently refreshes while retaining its authorization state.
+- **V2-UX-AUTH-001**: Standard Plan Preview ends with an Inline Run Authorization Bar showing exact Book/target, plan version, provider, budget ceiling, expected outcome, and possible Effect classes.
+- **V2-UX-AUTH-002**: When immediate readiness is valid, the one primary action is `授权并开始任务`; an eligible offline/deferred state instead offers `授权并在联网后开始`. Secondary actions are `返回修改` and the applicable draft-save action. The surface never shows both start actions ambiguously or substitutes generic `批准`, `确认`, or an unlabeled send action.
+- **V2-UX-AUTH-003**: The bar states `仅授权本次任务按当前计划运行；不代表接受提案、批准受控动作、保存里程碑版本或设为发稿版本`.
+- **V2-UX-AUTH-004**: One activation creates the exact Run Authorization and Run Record without a second modal confirmation, then either hands an immediately ready Run to the AI7 scheduler or places an explicitly deferred Run in Connectivity Wait State.
+- **V2-UX-AUTH-005**: Immediate Run Authorization Readiness requires current exact target/source versions, unchanged plan/envelope, exact provider/fallback and outbound boundaries, budget validity, governing constraints, and live credential/service readiness. Deferred readiness requires those locally fixed boundaries plus an exact Credential Reference; live readiness is revalidated by Reconnect Preflight.
+- **V2-UX-AUTH-006**: Any material drift removes/disables the applicable start action and presents `查看计划修订`; stale Plan Preview cannot retain a live authorization control.
+- **V2-UX-AUTH-007**: After authorization, the same region transitions to `等待网络`/`等待模型服务`, `正在排队`, or `运行中` according to exact state and immediately exposes the controls valid for that state: cancel while waiting, and pause/cancel once schedulable or running.
+- **V2-UX-AUTH-008**: Expandable authorization detail shows actor, time, plan version, target/source/outbound/budget boundary, and record identity without making hashes or Harness technical records default content.
+- **V2-UX-AUTH-009**: Standard Run Authorization never silently creates or changes a Default Execution Rule; that rule requires its separately named explicit user action.
+- **V2-UX-MODEL-001**: The primary Task surface uses one compact Model Selection Strip whose editable controls are Model Role and user-understandable Model Capability Requirements.
+- **V2-UX-MODEL-002**: Model Role choices use the accepted preferred labels `快速交互角色`, `主编辑角色`, `疑难升级角色`, and `前沿模型角色` and explain intended work without presenting a truth or quality hierarchy.
+- **V2-UX-MODEL-003**: Model Capability Requirements express editorial needs and preferences and remain visibly distinct from AI7 Capabilities, Capability Grants, Task Skills, and authority.
+- **V2-UX-MODEL-004**: Raw provider/model lists, endpoint fields, credential controls, fallback-chain editing, and detailed billing assumptions do not occupy the normal Task form.
+- **V2-UX-MODEL-005**: A compact Provider and Budget Disclosure remains present/reachable before Run Authorization and summarizes exact binding, connection readiness, outbound category, fallback presence, estimate when reliable, and hard ceiling without taking substantial space.
+- **V2-UX-MODEL-006**: Secondary Task detail exposes exact provider/model binding, role requirements and rationale, Approved Fallback Chain, Provider Processing Policy, Outbound Data Category, credential connection name, estimate assumptions, and budget rules without secrets.
+- **V2-UX-MODEL-007**: Tertiary Settings owns provider connections, credential setup, eligible alternative frontier configuration, default Role bindings, billing currency, and budget defaults; Usage owns historical and aggregate actual consumption/cost.
+- **V2-UX-MODEL-008**: Missing credentials, unavailable binding, outbound expansion, fallback change, unreliable estimate, or budget violation surfaces inline where it blocks Run Authorization rather than remaining buried in Settings.
+- **V2-UX-MODEL-009**: Changing Model Role/capability requirements may recompute Provider Preflight; changing provider, outbound category, fallback or budget after preview creates Plan Revision when material.
+- **V2-UX-MODEL-010**: An approved in-envelope escalation/fallback is disclosed in compact detail and may proceed only after an unambiguously safe prior outcome; ambiguous provider or external-Effect outcomes stop fallback.
+- **V2-UX-MODEL-011**: After a Run, the detail/Usage surfaces show actual provider/model, fallback use, model usage, and actual cost; normal editorial results do not carry persistent billing chrome.
+- **V2-UX-MODEL-012**: Factual-review surfaces state `模型角色影响处理能力，不构成事实证据`, and no role or capability option appears as factual confidence.
+
+## Running activity
+
+- **V2-UX-RUN-001**: A running Run is represented by one compact Run Activity Header in the right Task surface, showing its editorial business phase, current work object, and last meaningful update without permanently reducing the Manuscript's central work area.
+- **V2-UX-RUN-002**: When a Run is waiting, stalled, paused, or interrupted, the header names the exact current condition and last completed milestone and exposes only safe actions valid for that state; it does not substitute an indefinite spinner.
+- **V2-UX-RUN-003**: The default activity presentation uses editorial language such as `检索来源`, `比较证据`, `形成候选`, or `等待澄清`, never raw provider, Harness, tool, subagent, token, or infrastructure events.
+- **V2-UX-RUN-004**: An expandable Editorial Milestone Timeline preserves meaningful start, source-use, candidate/result, clarification, interruption, continuation, and completion events in causal order while retaining links to their authoritative records.
+- **V2-UX-RUN-005**: AI7 never displays or claims to expose hidden chain of thought, raw model reasoning, or a technical transcript as Run progress.
+- **V2-UX-RUN-006**: Progressive content appears only through a Usable Candidate Stream and is visibly labeled `候选` or `草稿`; appearance never makes it an authoritative manuscript revision, Editorial Artifact, factual conclusion, accepted Proposal, or committed Effect.
+- **V2-UX-RUN-007**: Numeric or percentage progress is displayed only as Measured Run Progress when completed and total work units are real, semantically comparable, and sufficiently stable; otherwise the UI reports phase and milestones without inventing a percentage.
+- **V2-UX-RUN-008**: Elapsed time is contextual secondary information and never masquerades as progress; a lack of meaningful updates triggers precise wait/stall disclosure rather than animation alone.
+- **V2-UX-RUN-009**: Model usage, cost, exact binding, fallback, and technical diagnostics remain secondary Run detail or Usage/diagnostic information except when one becomes the exact blocker requiring editor attention.
+- **V2-UX-RUN-010**: Run events never switch the central work surface automatically. The editor explicitly opens a Dedicated Work Workspace when a candidate, comparison, or evidence set requires full central space.
+- **V2-UX-RUN-011**: Global Attention may project the same compact phase, last milestone, and wait reason, but opening it returns to the Run's exact Book and Task context rather than creating a second activity authority.
+
+## Concurrent Runs
+
+- **V2-UX-CONC-001**: Concurrent Runs are presented by authoritative Book and exact work object; no normal surface reorganizes them as generic chats, Harness Sessions, or an unowned instance-wide task pool.
+- **V2-UX-CONC-002**: Global Attention uses a Book-grouped Run Overview for queued, running, paused, failed, clarification-waiting, and result-ready Runs while remaining a navigation projection rather than a new ledger.
+- **V2-UX-CONC-003**: The current Book exposes a compact Current Book Run Switcher that shows Run name, target, business phase, and exact state without consuming a permanent large panel.
+- **V2-UX-CONC-004**: Only one Foreground Run Projection is expanded in the right Task surface at a time; switching it preserves each Run's activity position and does not pause, cancel, reprioritize, or otherwise mutate execution.
+- **V2-UX-CONC-005**: Starting, progressing, or completing a background Run never steals manuscript focus, changes the active Book, opens a Dedicated Work Workspace, or replaces the current foreground Run.
+- **V2-UX-CONC-006**: Routine background progress and ordinary completion use quiet status presentation. Clarification Requests, failures, and outcomes requiring a named editor decision enter the appropriate actionable Global Attention group.
+- **V2-UX-CONC-007**: An authorized Run waiting on the concurrency or budget governor shows `等待运行名额` and the relevant plain-language reason; queue position appears only if stable and authoritative, and speculative wait-duration estimates are prohibited.
+- **V2-UX-CONC-008**: Every concurrent Run retains isolated candidate, scratch, cache, source, budget, activity, continuation, and outcome context; visual grouping or switching never implies shared scope or state.
+- **V2-UX-CONC-009**: A foreground/background distinction is purely presentational and never communicates provider priority, execution priority, factual authority, or permission to affect the foreground Manuscript.
+
+## Pause and cancel
+
+- **V2-UX-CTRL-001**: Pause is a one-click per-Run action that immediately records the request and shows `正在暂停`; the UI does not claim `已暂停` until a safe boundary and durable continuation state are confirmed.
+- **V2-UX-CTRL-002**: A Cooperative Run Pause preserves the exact Run, Run Authorization, Plan Envelope, candidates, evidence, activity, and committed Effects and exposes `继续任务` only when continuation preconditions remain valid.
+- **V2-UX-CTRL-003**: If goal, target, source scope, provider/outbound category, budget, outcome, Effect class, authority-bearing pins, or other material boundaries drift while paused, the same Run cannot silently continue and must route through the applicable Plan Revision/authorization interaction.
+- **V2-UX-CTRL-004**: Cancellation requires one compact inline Cancellation Impact Summary and explicit confirmation; pause never inherits that confirmation burden.
+- **V2-UX-CTRL-005**: Cancellation first shows `正在取消` and stops future work at the earliest safe boundary. It shows `已取消` only after unsettled execution is classified and the terminal Run state is durably recorded.
+- **V2-UX-CTRL-006**: Terminal Run Cancellation retains candidate content, evidence, milestones, diagnostics, Task Outcome information, and all Effect Receipts or classified outcome evidence; it deletes no history and the same Run cannot resume.
+- **V2-UX-CTRL-007**: Cancellation never claims to undo or revoke a committed Effect. An ambiguous external outcome enters `结果待确认`, blocks automatic retry/fallback, and remains distinct from successful cancellation.
+- **V2-UX-CTRL-008**: A queued Run can be paused or cancelled without beginning provider work; an executing Run may remain in a precise transitional state while it reaches a safe boundary.
+- **V2-UX-CTRL-009**: Normal pause and cancellation controls target one exact Run. AI7 exposes no default global bulk pause/cancel control in primary navigation or Global Attention.
+- **V2-UX-CTRL-010**: Closing a panel, switching Books/Runs, entering focus mode, going offline, or exiting the desktop shell is never interpreted as pause or cancellation without a distinct recorded action.
+
+## Clarification and bounded user input
+
+- **V2-UX-CLAR-001**: Every Clarification Request appears as a durable Context-bound Clarification Card linked to the exact Book, work object, Run, plan version, causal milestone, and relevant pinned text/source context.
+- **V2-UX-CLAR-002**: The card states the question, why the answer is needed, its Clarification Blocking Scope, what work is paused or still continuing, and what will happen after an answer.
+- **V2-UX-CLAR-003**: A clarification is not presented as generic chat, a provider message, or one of the named authority decisions; answering it grants no Proposal Decision, Review Decision, Effect Approval, Signoff, or Public Release Permission.
+- **V2-UX-CLAR-004**: Only work dependent on the answer pauses. Independent work may continue only when it remains safe inside the unchanged Plan Envelope and the card visibly states `其他步骤仍在继续`; otherwise the Run states `任务等待你的说明`.
+- **V2-UX-CLAR-005**: A Clarification Answer is durable, restart-safe, author-attributed, timestamped, and bound to the exact context shown when the request was issued; later context drift remains visible.
+- **V2-UX-CLAR-006**: An answer that only supplies information already allowed by the current envelope may continue the dependent work automatically. An answer that materially changes goal, target, scope, provider, outbound category, budget, outcome, Effect class, or authority-bearing pin creates Plan Revision and routes through a newly authorized Redo Run rather than mutating the original Run.
+- **V2-UX-CLAR-007**: `暂不回答` preserves the waiting request and does not cancel, answer, or authorize the Run. Reminders use quiet actionable attention rather than repeated interrupting dialogs.
+- **V2-UX-INPUT-001**: Clarifications and other bounded user-input interactions use a Choice-first Input Card whenever the product can offer a small set of meaningful alternatives without hiding a material possibility.
+- **V2-UX-INPUT-002**: Direct choices use concise selectable cards or chips with consequence text. One option may carry `推荐` plus a reason, but no choice is preselected and recommendation never counts as user input.
+- **V2-UX-INPUT-003**: Every Choice-first Input Card provides `自行输入` or an equivalent free-input path; choosing it reveals an IME-safe text field without discarding the original choices or context.
+- **V2-UX-INPUT-004**: A selected choice remains editable until the user invokes the exact submit/decision action. Selection alone never creates an authority record or resumes execution.
+- **V2-UX-INPUT-005**: Choice-first presentation does not merge distinct authorities: Proposal Decision, Review Decision, Effect Approval, internal Signoff/Public Release Permission, feedback reasons, and clarification answers retain separate records even when they share a visual pattern; the target-house authority projections use Milestone Version and Publication Version language.
+- **V2-UX-INPUT-006**: When choices would be misleading, excessively numerous, or unable to express the required editorial nuance, free input is the primary control rather than a fabricated exhaustive list.
+
+## Continuation, rewind, and replay
+
+- **V2-UX-CONT-001**: User-facing controls preserve the canonical meanings: `续行` continues the same unchanged Run from authoritative state; `重试` creates a new explicitly linked safe attempt in that same unchanged Run; `重做` creates a new Run with renewed authorization; `重放` reconstructs durable history without execution.
+- **V2-UX-CONT-002**: `回退并调整方向` is a distinct editor-facing workflow, not a redefinition of Resume, Retry, Redo, Replay, manuscript undo, cancellation, or Effect reversal.
+- **V2-UX-CONT-003**: Starting Rewind cooperatively pauses active work before presenting eligible Rewind Points. Only business-readable milestones backed by a verified safe continuation boundary are selectable; arbitrary messages, turns, tools, tokens, and Harness checkpoints remain hidden.
+- **V2-UX-CONT-004**: The Rewind Impact Preview identifies the chosen point, current authoritative target/source state, later candidates and attempts, preserved evidence, committed and ambiguous Effects, applicable plan boundary, and exact next semantic operation.
+- **V2-UX-CONT-005**: The new direction uses a Choice-first Input Card where bounded alternatives exist and always permits free input. Submission alone grants no expanded plan or execution authority.
+- **V2-UX-CONT-006**: If the direction is an allowed Plan Adaptation and all exact target/source/provider/budget/authority pins remain valid, Rewind creates a linked Retry attempt branch within the same Run from the selected safe boundary.
+- **V2-UX-CONT-007**: If the direction materially changes Run semantics or any Plan Envelope boundary, Rewind cannot mutate the current Run; AI7 creates a Plan Revision diff and routes to a newly authorized Redo Run.
+- **V2-UX-CONT-008**: Events, candidates, and attempts after the selected point remain immutable and replayable as a Superseded Attempt Branch; AI7 never truncates or rewrites either authoritative ledger.
+- **V2-UX-CONT-009**: Rewind revalidates against current authoritative Manuscript Revision, source versions, decisions, policies, and Effects. It never dispatches against a historical projection merely because that projection was current at the selected milestone.
+- **V2-UX-CONT-010**: No Resume, Retry, Rewind, or Redo reverses a committed Effect. A selected point earlier than a committed Effect visibly retains the Effect and Receipt; correction or compensating work requires its own Proposal and exact controlled Effect path.
+- **V2-UX-CONT-011**: An ambiguous external outcome blocks Retry/Rewind/Redo that could repeat the Effect until the uncertainty is resolved or an explicitly safe non-repeating path is authorized.
+- **V2-UX-CONT-012**: Replay is read-only and provider-free: it may reconstruct plans, milestones, candidates, decisions, outcomes, Effects, and receipts but invokes no model, Capability, provider transmission, or new execution attempt.
+- **V2-UX-CONT-013**: Redo begins from a copyable prior intent/plan for convenience but creates new exact intent, plan, envelope, preflight, Run Authorization, and Run identities; links to the prior Run remain visible.
+
+## Notifications
+
+- **V2-UX-NOTIF-001**: Run Notification Tiers are determined by user consequence and required attention, not raw provider, Harness, tool, or technical severity events.
+- **V2-UX-NOTIF-002**: Routine progress updates only the relevant Run Activity Header, timeline, switcher row, and Global Attention projection and never produces a toast or Windows notification.
+- **V2-UX-NOTIF-003**: An ordinary non-actionable foreground outcome produces at most one Quiet Completion Notice that auto-dismisses and remains retrievable in `最近完成` without entering the Actionable Attention Count.
+- **V2-UX-NOTIF-004**: Clarification Requests, failures, ambiguous external outcomes, and Proposal/Review/Effect or other named decision-ready records create persistent actionable in-app attention using their accepted user-facing labels; target-house internal Signoff/Public Release items appear only as Milestone Version or Publication Version actions.
+- **V2-UX-NOTIF-005**: While AI7 is backgrounded or minimized, action-required and abnormal events may produce a Privacy-safe Windows Notification. Ordinary completion notifications are a separate user setting and are not enabled by default.
+- **V2-UX-NOTIF-006**: Windows notification content defaults to generic AI7 event wording and omits Book name, manuscript/source/candidate text, factual claims, people/place names derived from unpublished material, provider payload, and decision detail.
+- **V2-UX-NOTIF-007**: Notification sound and richer identity/detail are disabled by default and configurable separately; changing notification privacy never grants provider processing, export, or Public Release Permission.
+- **V2-UX-NOTIF-008**: Repeated events coalesce per Book into a Book-coalesced Notification without merging authoritative records. Opening it routes to the Book-grouped exact event list, and a single event deep-links directly to its Run/record.
+- **V2-UX-NOTIF-009**: Editorial Focus Mode suppresses transient foreground presentation but does not pause Runs, clear badges, or hide durable actionable attention. Suppressed ordinary notices remain reachable in history.
+- **V2-UX-NOTIF-010**: Notification wording distinguishes candidate availability, Task Outcome, committed Effect Receipt, ambiguous result, failure, and named pending decision and never uses generic `任务已完成` when only model/Harness execution ended.
+- **V2-UX-NOTIF-011**: Clicking or dismissing a notification grants no authority and never marks a Clarification Request or decision as answered; it only navigates or dismisses the transient projection.
+- **V2-UX-NOTIF-012**: Restart, reconnection, or a burst of reconstructed ledger events does not replay old system notifications; AI7 coalesces current unresolved attention and preserves exact event history in-app.
+
+## Proposal review
+
+- **V2-UX-PROP-001**: A small single-range manuscript Proposal opens in Contextual Proposal Review beside the exact affected text and does not replace the Manuscript with a conversation or generic result page.
+- **V2-UX-PROP-002**: Large, structural, cross-chapter, or multi-range Proposals offer an explicit Dedicated Work Workspace; no Proposal completion automatically changes the current presentation mode.
+- **V2-UX-PROP-003**: The Proposal Change Navigator is virtualized and shows exact location, change type, review state, stale/conflict state, and sparse whole-manuscript markers without loading all manuscript text or all comparisons into the renderer.
+- **V2-UX-PROP-004**: Bounded Proposal Comparison loads only the active changed range and sufficient surrounding context from the exact authoritative/pinned revisions. Moving between changes preserves keyboard focus and does not expose Manuscript Blocks as editorial units.
+- **V2-UX-PROP-005**: Chinese prose defaults to a readable inline difference treatment. Long rewrites, structural changes, tables, and other complex structures may switch to side-by-side comparison while retaining exact range correspondence.
+- **V2-UX-PROP-006**: Each change may progressively disclose concise rationale, relevant sources, evidence links, and verification records without exposing model chain of thought, raw tool traces, or Foundation Model knowledge as evidence.
+- **V2-UX-PROP-007**: Reference Integrity, Claim Support, and Factual Verification appear as separate status dimensions with their own unresolved/conflicting states and never collapse into one confidence badge.
+- **V2-UX-PROP-008**: Every Proposal surface displays its exact base Manuscript Revision and current revision. A Stale Proposal Base is disclosed immediately and invokes exact safe-merge/conflict analysis rather than fuzzy or silent retargeting.
+- **V2-UX-PROP-009**: Proposal review filtering and navigation support at least unreviewed, reviewed, stale, and conflicting ranges while preserving the distinction between per-change review state and an authoritative Proposal Decision.
+- **V2-UX-PROP-010**: Proposal Review Return Position persists manuscript location, active change, comparison mode, filters, and relevant expanded context across workspace changes and restart.
+- **V2-UX-PROP-011**: Opening, reading, navigating, selecting, filtering, or expanding a Proposal creates no Proposal Decision, manuscript mutation, Apply Effect, Effect Approval, or Effect Receipt.
+- **V2-UX-PROP-012**: Proposal text is never rendered as the current authoritative Manuscript merely because it is selected or previewed; current, base, and proposed states remain visually and semantically labeled.
+- **V2-UX-PROP-013**: Every independently reviewable Proposal change has one persistent Manuscript-anchored Proposal Card identity bound to its exact base revision and exact target range or range set; navigation, filtering, window loading and workspace changes never silently replace that binding.
+- **V2-UX-PROP-014**: A text change displays readable inline insertion/deletion semantics at the exact Manuscript location together with a compact Proposal Margin Anchor that opens the corresponding card; neither inline proposal text nor its anchor becomes authoritative Manuscript content.
+- **V2-UX-PROP-015**: Only the active or nearby Manuscript-anchored Proposal Card expands beside the Manuscript. Other card identities remain reachable through collapsed anchors and the virtualized Proposal Change Navigator without loading every card, range context or comparison into the renderer.
+- **V2-UX-PROP-016**: Cross-chapter, structural, table and long-rewrite changes may move their active comparison into the Dedicated Work Workspace, but retain the same Proposal change identity, exact anchor or range set, card state, review progress and later per-change disposition.
+- **V2-UX-PROP-017**: Word-like revision semantics are a behavior requirement rather than a geometry dependency; no AI7 surface must copy Word layout, keep every margin card expanded, or expose a whole-manuscript in-memory review document.
+- **V2-UX-PROP-018**: Each semantically independent editorial intent is one Proposal Change Item with stable identity, exact target range or range set, visible change type and its own draft/recorded disposition.
+- **V2-UX-PROP-019**: Adjacent Proposal Change Items may share one visual card group, but every item retains a separate anchor, focus target, disposition control, navigation state and later Proposal Decision identity.
+- **V2-UX-PROP-020**: AI7 never merges Proposal Change Items merely because they share a paragraph, Task, Run, model response, generation step, reason category or nearby location.
+- **V2-UX-PROP-021**: AI7 may form an Atomic Proposal Change Group only when partial acceptance would produce a named internal inconsistency. The UI exposes every member item, exact dependency and partial-acceptance consequence and offers only one group-level accept/reject/defer/edit disposition until an editor explicitly restructures the Proposal into a consistent alternative version.
+- **V2-UX-PROP-022**: Every Manuscript-anchored Proposal Card uses four separately titled regions in this order: `修改内容`, `修改理由`, `依据与核查`, and `你的处理`; responsive presentation may collapse secondary regions but never rename or merge their meanings.
+- **V2-UX-PROP-023**: `修改内容` is the primary region and displays exact current and proposed wording or structure, change type, location and affected scope. It contains no AI7 rationale, evidence claim or editor disposition text inside the proposed content.
+- **V2-UX-PROP-024**: `修改理由` displays a concise Proposal Change Rationale explaining why AI7 recommends that exact change. It exposes no chain of thought and cannot serve as a source, factual evidence, verification result or editor-authored decision reason.
+- **V2-UX-PROP-025**: `依据与核查` independently expands Proposal Support Detail: exact sources and versions, evidence links, limitations, and separate Reference Integrity, Claim Support and Factual Verification states. Missing support remains visibly missing even when the rationale is persuasive.
+- **V2-UX-PROP-026**: `你的处理` owns the item's accept/reject/defer/edit controls and the editor's optional Non-blocking Decision Reason. That editor reason is visibly attributed and never overwrites or validates AI7's Proposal Change Rationale.
+
+## Proposal conflicts and Diff-Merge
+
+- **V2-UX-CONFLICT-001**: A Stale Proposal Base is exactly classified as unchanged affected target, Safe Non-interacting Merge, or Three-way Proposal Conflict before any Apply readiness is shown.
+- **V2-UX-CONFLICT-002**: Safe non-interaction requires exact stable-block/range and structural-effect analysis. Its label explains why current edits do not interact and never implies Proposal Decision, completed merge, Apply, or Effect Receipt.
+- **V2-UX-CONFLICT-003**: Same-block changes, deleted targets, overlapping ranges, competing structure changes, and ambiguous structural interactions enter Three-way Proposal Conflict and cannot auto-merge or fuzzy-retarget.
+- **V2-UX-CONFLICT-004**: The conflict surface persistently labels and aligns `提案基准`, `当前权威稿件`, and `提议内容`, with the exact interacting units and surrounding bounded context.
+- **V2-UX-CONFLICT-005**: Each conflict provides unselected choice-first paths for `保留当前稿件`, `自行编辑解决草稿`, `基于当前稿件重新生成建议`, and `暂不处理`, with a recommendation allowed but never preselected.
+- **V2-UX-CONFLICT-006**: The conflict surface also provides Diff-Merge Quick Actions for exact units: `采用当前内容`, `采用提议内容`, explicit ordered `两者都保留` where structurally valid, `编辑合并结果`, undo/redo, and previous/next unresolved conflict.
+- **V2-UX-CONFLICT-007**: Quick-action units prefer meaningful Chinese phrase, sentence, paragraph, or structure boundaries over noisy character-level fragments while retaining exact Unicode/range identity.
+- **V2-UX-CONFLICT-008**: Every Diff-Merge Quick Action modifies only a Resolution Draft, is immediately reversible, and never creates a manuscript edit, Proposal Decision, Apply Effect, Effect Approval, or receipt.
+- **V2-UX-CONFLICT-009**: `两者都保留` requires explicit order and is disabled when the structures cannot coexist safely; the UI explains the exact structural incompatibility rather than producing malformed content.
+- **V2-UX-CONFLICT-010**: `将全部无冲突更改加入解决草稿` may accelerate a large change set only after exact classification; unresolved conflicts remain excluded and visible, and no primary `自动解决全部冲突` action exists.
+- **V2-UX-CONFLICT-011**: Manual Resolution Draft content and model-regenerated content each create a new exact Proposal version. The original Proposal, base, conflict analysis, user operations, and regenerated lineage remain immutable and replayable.
+- **V2-UX-CONFLICT-012**: The Resolution Draft shows unsaved/durable state, supports Chinese IME and keyboard navigation, and survives workspace switching/restart without being promoted to manuscript authority.
+- **V2-UX-CONFLICT-013**: Saving the Resolution Draft uses explicit `保存为新提案版本`; it does not imply acceptance or Apply and returns the new version to Proposal review.
+
+## Proposal Decision
+
+- **V2-UX-PDEC-001**: Each exact Proposal change begins with no selected Proposal Change Disposition and offers `拟采纳`, `拟拒绝`, and `暂不决定`; unresolved conflict remains a separate blocking state rather than a disposition.
+- **V2-UX-PDEC-002**: Per-change choices first update a durable reversible Proposal Decision Draft. Selection, keyboard focus, review navigation, and saved review progress create no authoritative Proposal Decision.
+- **V2-UX-PDEC-003**: Selecting a disposition may automatically advance to the next undecided item, with discoverable keyboard actions and immediate undo, without auto-submitting the overall decision.
+- **V2-UX-PDEC-004**: Exact homogeneous non-conflicting sets may receive batch draft dispositions by explicit selected items, chapter, change type, or current filter. The frozen scope and all excluded conflict/stale/unloaded items appear before execution.
+- **V2-UX-PDEC-005**: `采纳全部无冲突项` never includes unresolved conflict, unclassified stale-base change, a different Proposal version, or an item outside the visible exact filter summary.
+- **V2-UX-PDEC-006**: One explicit `记录提案决定` action displays the Proposal Decision Scope Summary and records one immutable Proposal Decision containing exact Proposal/version, base/current pins, per-change dispositions, actor, time, and unresolved items.
+- **V2-UX-PDEC-007**: Partial Proposal Decisions are valid: accepted, rejected, deferred, and unresolved changes remain distinct, and no whole-Proposal `已采纳` label hides deferred or conflicting items.
+- **V2-UX-PDEC-008**: Changing a recorded disposition creates a new linked Proposal Decision that supersedes the prior current decision without rewriting its history or silently changing any existing Apply payload.
+- **V2-UX-PDEC-009**: A Non-blocking Decision Reason uses unselected choice cards such as `语言更准确`, `保持作者风格`, `证据不足`, `方向不合适`, and `自行输入`; reason capture never blocks decision recording or continued editorial work.
+- **V2-UX-PDEC-010**: AI7 records whether a suggested reason was selected, corrected, or replaced with free text so later learning can distinguish accepted guesses from editor-authored reasons; no reason is preselected.
+- **V2-UX-PDEC-011**: Accepted disposition means only eligibility for later Apply preparation. It does not establish factual truth, Review Decision, Effect Approval, committed manuscript text, workflow completion, Signoff, or Public Release Permission.
+- **V2-UX-PDEC-012**: After an accepted disposition exists, the next primary route is `准备应用`, which opens a separately bound Apply preparation surface and does not mutate the Manuscript.
+- **V2-UX-PDEC-013**: Every non-atomic Proposal Change Item remains independently accepted, rejected, deferred or edited even when it appears inside one visual card group or participates in an explicit batch draft action.
+- **V2-UX-PDEC-014**: An Atomic Proposal Change Group records one indivisible disposition over its exact visible member set. It cannot be silently treated as an ordinary batch, partially accepted, or expanded by later drift; splitting it requires a new exact Proposal version whose consistency can be reviewed independently.
+- **V2-UX-PDEC-015**: A Non-blocking Decision Reason is captured only inside or immediately after `你的处理`, remains optional and editor-attributed, and never appears under `修改理由` or `依据与核查`.
+
+## Apply preparation
+
+- **V2-UX-APREP-001**: `准备应用` opens Apply Preparation and creates no manuscript mutation, Effect Approval, Effect dispatch, or Effect Receipt.
+- **V2-UX-APREP-002**: The initial Apply Change Set includes exactly the currently accepted, exact, conflict-free changes from the identified Proposal Decision; every included item is visible and removable before freezing.
+- **V2-UX-APREP-003**: Removing an accepted change from this Apply Change Set leaves its Proposal Change Disposition as `已采纳 · 尚未应用`; it never rewrites acceptance as rejection or deferment.
+- **V2-UX-APREP-004**: Apply Preparation displays target Book, manuscript branch, current Manuscript Revision, Proposal/version, Proposal Decision, exact included change/range count, affected headings, explicit exclusions, expected new revision, and important `会发生什么`/`不会发生什么` statements.
+- **V2-UX-APREP-005**: Apply Result Preview compares the exact current authoritative text with the bounded predicted result for each included range and supports virtualized navigation without materializing the whole Manuscript.
+- **V2-UX-APREP-006**: Preflight revalidates exact text/range digests, stable blocks, current revision, structural interactions, Proposal Decision currency, policies, and authority-bearing pins before Apply Readiness becomes valid.
+- **V2-UX-APREP-007**: Any target drift, deletion, overlapping mutation, structural ambiguity, superseding Proposal Decision, or changed authority pin invalidates affected Apply Readiness and deep-links to exact review/conflict resolution; no fuzzy retarget or partial silent exclusion occurs.
+- **V2-UX-APREP-008**: Freezing preparation binds one stable Effect ID, exact target, immutable payload digest, Proposal/decision lineage, all-or-none atomic scope, declared replay policy, and expected result identity.
+- **V2-UX-APREP-009**: Apply Change Set execution is per-Effect atomic: all included manuscript changes commit into one authoritative result or none commit. A prepared Effect never advertises partial success as a valid outcome.
+- **V2-UX-APREP-010**: Apply Preparation is provider-free and model-free; provider availability, credentials, model role, and network access cannot block local preflight or commit.
+- **V2-UX-APREP-011**: Scope edits before freeze update the preview and create no new Proposal Decision. Scope drift after freeze creates a new payload identity and invalidates any prior Effect Approval.
+- **V2-UX-APREP-012**: The prepared surface states `尚未批准应用，稿件未发生变化` and proceeds only to a separately named Effect Approval interaction.
+
+## Apply Effect Approval
+
+- **V2-UX-EAPP-001**: A frozen current Apply Preparation exposes one Inline Apply Approval Bar and does not open a duplicate modal that repeats the same exact Effect summary.
+- **V2-UX-EAPP-002**: The bar continuously displays target Book/branch/current Manuscript Revision, Apply Change Set count, expected new revision, atomic scope, and `本次授权仅针对这一精确稿件应用`.
+- **V2-UX-EAPP-003**: The exact primary action is `批准并应用到稿件`; generic `批准`, `确定`, `继续`, or an icon-only action is prohibited at this authority boundary.
+- **V2-UX-EAPP-004**: One activation atomically records an Effect Approval bound to the current stable Effect ID/target/payload and dispatches that same Effect. Approval and dispatch remain distinct records even though one user interaction initiates both.
+- **V2-UX-EAPP-005**: Effect Approval is single-Effect, exact-payload authority and never derives from Run Authorization, Default Execution Rule, Proposal Decision, Review Decision, Signoff, prior similar Apply, or model confidence.
+- **V2-UX-EAPP-006**: On activation, the action becomes a non-repeatable Applying Manuscript State. Repeated click, keyboard repeat, restart, or renderer reconnection cannot dispatch a second Effect with the same identity.
+- **V2-UX-EAPP-007**: Navigation, panel closure, Book switching, or focus mode does not cancel the dispatched Apply; its durable state remains reachable from the Run/Proposal/Effect context and Global Attention when attention is required.
+- **V2-UX-EAPP-008**: Target revision, included scope, Proposal Decision, Effect payload, replay policy, policy pin, or expected-result drift invalidates Apply Approval Readiness and replaces the action with `重新准备应用` plus an exact diff.
+- **V2-UX-EAPP-009**: Large, cross-chapter, structural, or numerous changes do not add a second confirmation merely because of size; the complete persistent preparation summary is the deliberation surface.
+- **V2-UX-EAPP-010**: An optional keyboard shortcut is active only while the approval bar has explicit focus, is discoverable in the label/tooltip, and never fires during Chinese IME composition.
+- **V2-UX-EAPP-011**: After dispatch, UI wording remains `正在应用` or an exact exceptional state until a verified Effect Receipt or classified outcome evidence exists. Effect Approval, service acknowledgement, or renderer update alone never yields `已应用`.
+- **V2-UX-EAPP-012**: Cancellation before an exact commit boundary may request safe stop, but no UI action claims to cancel or reverse an Effect once commit is recorded; later correction/undo remains a separate Effect path.
+
+## Apply Effect Receipt and reversal
+
+- **V2-UX-EREC-001**: Every dispatched manuscript Apply remains represented by one durable Apply Effect Receipt Card showing exactly one current classified state: `已应用`, `未应用`, `正在确认应用结果`, or `结果待确认`.
+- **V2-UX-EREC-002**: `已应用` requires a verified Effect Receipt binding Effect identity/idempotency key, actor, approval/commit time, target Book/branch, old and new Manuscript Revisions, atomic change count, Proposal Decision lineage, replay policy, and exact authoritative result.
+- **V2-UX-EREC-003**: `未应用` requires classified evidence that no included change committed and identifies the failed/stopped stage and authoritative reason the Manuscript remains unchanged.
+- **V2-UX-EREC-004**: `正在确认应用结果` invokes Apply Outcome Recovery against local authoritative Effect/command/manuscript records by stable identity and never dispatches a repeated Apply merely because acknowledgement was lost.
+- **V2-UX-EREC-005**: If recovery cannot yet prove commit or safe non-commit, the card enters Unresolved Apply Outcome, creates high-priority actionable attention, and prohibits automatic Retry, fallback, Redo, Rewind, or another Apply that could duplicate the Effect.
+- **V2-UX-EREC-006**: A safe retry action appears only when the declared replay policy and authoritative outcome evidence prove non-commit/repetition safety; the UI names whether a new attempt, approval, or prepared Effect identity is required.
+- **V2-UX-EREC-007**: The compact card exposes `在稿件中查看`, `返回提案`, and `查看完整凭据`; each applied Proposal item identifies the resulting Manuscript Revision without replacing its Proposal Decision history.
+- **V2-UX-EREC-008**: An Effect Receipt proves only the classified outcome of that Effect. It does not prove content quality, factual truth, Review Decision, workflow completion, Signoff, delivery, or Public Release Permission.
+- **V2-UX-EREC-009**: Receipt/outcome state survives renderer/service/application restart and is reconstructed from authoritative records rather than a Harness Session, transient success event, or cached UI state.
+- **V2-UX-EREC-010**: `准备撤销本次应用` creates Reverse Apply Preparation against the current authoritative Manuscript; it never deletes, mutates, or relabels the original Effect Receipt.
+- **V2-UX-EREC-011**: A Reverse Apply Effect receives a new Effect ID, exact target/payload, preflight, Effect Approval, atomic commit, and Effect Receipt linked to the original Apply.
+- **V2-UX-EREC-012**: If later manuscript edits interact with the inverse change, reversal routes through exact conflict or Correction Proposal handling; AI7 never restores an old revision wholesale, silently discards later edits, or fuzzy-retargets inverse text.
+- **V2-UX-EREC-013**: A committed Apply is not exposed as an ordinary instantaneous undo-stack erasure. Any convenience shortcut opens or initiates the exact Reverse Apply Preparation and states that a new governed Effect will be created.
+
+## Factual-verification overview
+
+- **V2-UX-FACT-001**: Editors can initiate factual-verification Tasks from an exact pinned selection, current chapter, or whole Manuscript; each route shows target revision/scope and never directly rewrites text.
+- **V2-UX-FACT-002**: Every displayed result binds a Manuscript Assertion or Editorial Error Finding to an exact Book, branch, Manuscript Revision, stable range, and applicable Factual Verification Policy Document version.
+- **V2-UX-FACT-003**: Manuscript Assertion Markers use restrained margin/position-rail treatment and do not cover long Chinese text with default full-density colored underlines.
+- **V2-UX-FACT-004**: By default, the Manuscript emphasizes only the selected assertion, high-risk results, and findings requiring editor action; complete results remain reachable through the virtualized Fact-check Lens.
+- **V2-UX-FACT-005**: The Fact-check Lens lists assertion summary, exact heading/location, attention/risk, and separate Reference Integrity, Claim Support, and Factual Verification states, with filters by chapter, status, risk, source condition, and action need.
+- **V2-UX-FACT-006**: User-facing Factual Verification sub-states include `待核查`, `证据支持`, `疑似错误`, `证据不足`, `证据冲突`, and `无法核实`, mapped to policy-governed supported/contradicted/unresolved outcomes rather than a model confidence scale.
+- **V2-UX-FACT-007**: Reference Integrity, Claim Support, and Factual Verification never collapse into one traffic light, confidence percentage, risk score, or generic `已验证` badge.
+- **V2-UX-FACT-008**: A result row deep-links to the exact manuscript location and evidence comparison and shows sparse whole-manuscript position markers without loading all affected text into the renderer.
+- **V2-UX-FACT-009**: Foundation Model knowledge may generate a verification question or research direction but is never displayed or counted as evidence, citation, source corroboration, or factual authority.
+- **V2-UX-FACT-010**: Edits overlapping or structurally invalidating an assertion/finding create a Stale Verification Anchor. The prior result stays historical and cannot silently/fuzzily migrate to similar text.
+- **V2-UX-FACT-011**: Unaffected exact assertions may remain current only after exact range/revision derivation checks; source freshness and manuscript-anchor freshness remain separate dimensions.
+- **V2-UX-FACT-012**: `疑似错误`, contradicted, unresolved, or other factual states never directly mutate text. Correction proceeds only through a revision-bound Correction Proposal and the accepted Proposal/Apply workflow.
+- **V2-UX-FACT-013**: Factual status grants no Review Decision, workflow completion, Signoff, delivery, legal/regulatory authority, or Public Release Permission.
+
+## Evidence comparison
+
+- **V2-UX-EVID-001**: Opening a Factual Review Result Item creates an Assertion-centered Evidence Workspace bound to one exact Manuscript Assertion, revision/range, finding when present, and Factual Verification Policy Document version.
+- **V2-UX-EVID-002**: The workspace header preserves the exact manuscript wording separately from AI7's normalized statement of what is being checked; the normalized assertion never replaces the Textual Source of Record.
+- **V2-UX-EVID-003**: Evidence Source Cards progressively disclose Source Version identity, publisher/issuing body, publication/update/acquisition times, provenance, policy authority, freshness, Reference Integrity, exact-excerpt state, and relation to the assertion.
+- **V2-UX-EVID-004**: A candidate source or retrieval snippet may appear quickly with explicit `候选来源 · 尚未核对` state; it cannot be styled, counted, quoted, or summarized as checked evidence before the applicable assurance work completes.
+- **V2-UX-EVID-005**: Only an Exact Evidence Excerpt obtained from a pinned Source Version may certify what a source exactly says. Every displayed quotation deep-links to its exact source context and version.
+- **V2-UX-EVID-006**: The editor can pin two to four Evidence Source Cards into an Evidence Comparison Matrix. Additional sources remain virtualized rather than expanding the horizontal comparison without bound.
+- **V2-UX-EVID-007**: Each source independently expresses `支持`, `部分支持`, `反驳`, `仅提供背景`, or `关系待判断`; these relations do not automatically produce Factual Verification by counting sources.
+- **V2-UX-EVID-008**: Evidence Source Lineage groups original, syndicated, quoted, translated, summarized, and otherwise derived material and prevents dependent sources from appearing as independent corroboration.
+- **V2-UX-EVID-009**: Conflicting evidence remains side by side with authority, freshness, applicability, exact conflict point, and unresolved status; AI7 never silently chooses a winning source.
+- **V2-UX-EVID-010**: An AI7 Evidence Comparison Summary is explicitly non-evidentiary, links each statement to exact checked evidence or labeled candidates, and contains no model-knowledge assertion presented as support.
+- **V2-UX-EVID-011**: Source unavailability, Source Version drift, failed Exact Fetch, changed provenance, or expired freshness state invalidates only the affected evidence status and clearly identifies which prior determination requires review.
+- **V2-UX-EVID-012**: Evidence comparison creates no manuscript mutation, Proposal Decision, Review Decision, Effect Approval, Signoff, or Public Release Permission; correction continues through a separate Correction Proposal.
+- **V2-UX-EVID-013**: Source assurance timing follows the selected Evidence Assurance Level and active policy minimum; no efficiency choice converts model knowledge into evidence or fuzzy retrieval into an exact quotation.
+
+## Progressive evidence assurance
+
+- **V2-UX-EASSURE-001**: Task preparation and the evidence workspace expose one compact Evidence Assurance Level selector with `快速整理`, `标准核查`, and `严格核查`, an understandable consequence summary, and any policy-enforced minimum.
+- **V2-UX-EASSURE-002**: Standard Evidence Assurance is the normal default. A Task Skill or policy may recommend/require a higher level based on assertion risk, workflow stage, or intended outcome, but no hidden rule may silently lower the displayed level.
+- **V2-UX-EASSURE-003**: Quick Evidence Triage prioritizes candidate discovery, retrieval snippets, and AI7 comparison summaries; eligible publisher/provenance/freshness/independence/integrity checks may run lazily or in background and remain visibly incomplete.
+- **V2-UX-EASSURE-004**: Quick Evidence Triage may create a `待核查` Editorial Error Finding or evidence-incomplete Correction Proposal draft, but it cannot record a formal supported or contradicted Factual Verification outcome.
+- **V2-UX-EASSURE-005**: Standard Evidence Assurance checks pinned, quoted, selected, high-relevance, and decision-bearing sources progressively in background and blocks only on the Minimum Evidence Gate when the editor attempts a formal determination.
+- **V2-UX-EASSURE-006**: Strict Evidence Assurance completes the active policy's full selected-evidence checks for exact excerpt, source authority, provenance, freshness, Reference Integrity, Evidence Source Lineage, applicability, corroboration, and conflict handling before determination.
+- **V2-UX-EASSURE-007**: Across all levels, a quotation requires Exact Evidence Excerpt, model knowledge remains non-evidence, unchecked sources cannot count as independent corroboration, conflicting evidence remains visible, and policy minimums cannot be lowered through UI.
+- **V2-UX-EASSURE-008**: The Factual Verification Policy Document may raise the minimum level or exact checks for an assertion/risk/workflow context. The selector disables a lower invalid option and explains the concrete requirement without exposing policy code.
+- **V2-UX-EASSURE-009**: Raising assurance level reuses candidates, exact fetches, metadata, lineage, and prior checks that remain current; only missing/stale assurance work runs, and progress identifies reused versus new checks.
+- **V2-UX-EASSURE-010**: Lowering a level affects future assurance work and display only. It never downgrades immutable prior evidence records, erases conflicts, or changes a formal determination without a new versioned assessment.
+- **V2-UX-EASSURE-011**: Background assurance does not block reading, pinning, comparing, drafting a pending finding, or switching Books. It becomes a blocker only at the exact action whose semantics require the missing evidence.
+- **V2-UX-EASSURE-012**: A Correction Proposal drafted below the formal gate remains labeled `证据核查未完成`; Proposal review and Apply surfaces preserve that state and never imply the correction is factually verified.
+- **V2-UX-EASSURE-013**: Evidence Assurance Level is not Model Role, provider/model selection, AI7 Capability, Run Authorization, Review Decision, legal authority, Signoff, or Public Release Permission.
+
+## Factual verification review
+
+- **V2-UX-FREV-001**: A Versioned Verification Result binds one exact assertion/range, evidence snapshot and source versions, Evidence Assurance Level, Factual Verification Policy Document version, producer/time, and separate Reference Integrity, Claim Support, and Factual Verification states.
+- **V2-UX-FREV-002**: The result is presented as an evidence assessment with limitations and unresolved evidence, never as absolute truth, a model verdict, editor Review Decision, or legal/regulatory conclusion.
+- **V2-UX-FREV-003**: Quick Evidence Triage can persist only pending/incomplete results. Formal supported or contradicted result recording requires the exact Minimum Evidence Gate for the selected Standard/Strict assurance state.
+- **V2-UX-FREV-004**: The same evidence workspace places one Factual Review Decision Card directly after the result without a duplicate navigation page or modal, while retaining visibly separate result and decision identities.
+- **V2-UX-FREV-005**: The card presents unselected `接受当前核查结论`, `要求补充证据`, `维持未决`, `不采纳该核查判断`, and `自行输入` choices. One may be recommended with rationale but never preselected.
+- **V2-UX-FREV-006**: `记录核查审阅决定` creates a distinct immutable Review Decision bound to the exact verification-result version, actor, time, selected Verification Review Disposition, and optional non-blocking reason.
+- **V2-UX-FREV-007**: New evidence or a later verification-result version never rewrites a prior Review Decision. The UI marks the older decision's bound version and returns the new result to pending review.
+- **V2-UX-FREV-008**: Accepting a suspected-error conclusion exposes `准备更正提案`; requesting evidence creates a context-bound supplementary verification Task; accepting a supported conclusion closes the current attention item without Signoff; declining retains result/evidence/reason history.
+- **V2-UX-FREV-009**: Review reason choices are unselected, optional, free-text-capable, and non-blocking. Their suggestion acceptance/correction state may inform learning only through later eligibility and lineage rules.
+- **V2-UX-FREV-010**: The Review Decision creates no manuscript mutation, Correction Proposal Decision, Effect Approval, workflow completion, Signoff, delivery, legal authority, or Public Release Permission.
+- **V2-UX-FREV-011**: Evidence or manuscript-anchor drift before decision invalidates the current decision action and shows the exact changed dependency; no Review Decision silently binds a stale replacement result.
+
+## Correction Proposal drafting
+
+- **V2-UX-CORR-001**: `准备更正提案` opens a Correction Proposal Draft bound to the exact Editorial Error Finding, accepted Review Decision, current Book/branch/Manuscript Revision/range, selected evidence versions/states, Evidence Assurance Level, and policy version.
+- **V2-UX-CORR-002**: When genuine wording or editorial tradeoffs exist, AI7 presents two or three unselected Correction Variants plus `自行编辑`; when one minimal correction is clearly indicated, it presents one recommendation and does not manufacture alternatives.
+- **V2-UX-CORR-003**: Every variant shows resulting text, concise rationale, exact evidence links, unresolved/contradictory evidence, assurance limitations, and affected ranges without chain of thought or model knowledge as evidence.
+- **V2-UX-CORR-004**: Correction Variants are unselected. Recommendation display creates no variant selection, Proposal Decision, Review Decision, or mutation, and free editing remains Chinese-IME-safe.
+- **V2-UX-CORR-005**: Minimal Correction Scope is the default and excludes unrelated language polishing, structural reorganization, adjacent-content optimization, and other changes not required by the reviewed finding.
+- **V2-UX-CORR-006**: If a desirable stylistic/structural improvement is discovered, AI7 may offer `另建提案` with exact scope; it cannot add that improvement silently to the Correction Proposal.
+- **V2-UX-CORR-007**: Repeated occurrences use a Linked Correction Range Set with every exact range, wording, heading, current pin, and include/exclude state visible. Approximate similar text is never auto-included.
+- **V2-UX-CORR-008**: Quotation-content correction, reference/source metadata repair, body factual rewrite, qualifier/note insertion, and other correction types remain labeled per change even when one Proposal links them.
+- **V2-UX-CORR-009**: A Quick Evidence Triage draft retains `证据核查未完成` and exact missing checks through save, Proposal review, Proposal Decision, and Apply Preparation; generated wording never upgrades assurance.
+- **V2-UX-CORR-010**: Target overlap/drift, deletion, or structural ambiguity before save blocks silent retargeting and routes to exact current/base/proposed comparison, refreshed finding, or conflict handling.
+- **V2-UX-CORR-011**: `保存为更正提案` creates one versioned Correction Proposal with exact finding/review/evidence/policy lineage, selected/edited wording, range set, authorship, and limitations; it creates no Proposal Decision or Apply.
+- **V2-UX-CORR-012**: A saved Correction Proposal enters the same Proposal Review → Proposal Decision → Apply Preparation → Effect Approval → Effect Receipt workflow already defined; factual provenance remains visible throughout.
+
+## Workflow overview
+
+- **V2-UX-WORK-001**: Every Editorial Deliverable exposes its own Deliverable Workflow Lens within the Book context; Workflow is not a Book-wide scalar, global navigation root, Harness Workflow, or generic Task board.
+- **V2-UX-WORK-002**: The lens shows one Workflow Profile Pin Display with exact profile name/version, activation time, and migration availability without silently replacing the current instance when defaults change.
+- **V2-UX-WORK-003**: The seven shared phases use preferred Chinese labels `接收与准备`, `来源建设`, `起草`, `审阅与核查`, `定稿`, `交付`, and `维护`, with profile-specific explanation expandable rather than replacing shared vocabulary.
+- **V2-UX-WORK-004**: Parallel Phase View supports independently visible `未开始`, `进行中`, `等待你处理`, `已阻塞`, `已完成`, `已重新打开`, and `已跳过 · 查看原因` states; multiple phases may be active simultaneously.
+- **V2-UX-WORK-005**: The default lens header is an Action-first Workflow Summary named `下一项需要处理`, ordered by exact blocker, required named decision/gate, and editorial relevance rather than phase number alone.
+- **V2-UX-WORK-006**: Each phase progressively exposes its linked Deliverable/artifacts, Tasks/Runs, Evidence, Proposals, Findings, Workflow Gates, Review Decisions, Milestone Versions, and Delivery records while preserving their separate internal authorities.
+- **V2-UX-WORK-007**: Workflow uses factual summaries such as `2 个阶段进行中 · 1 项等待处理` and prohibits a single Book/Deliverable/Workflow percentage that implies linear progress.
+- **V2-UX-WORK-008**: Harness success, model response, Task Outcome, Proposal Decision, Factual Verification, or Effect Receipt never automatically completes a phase. Only narrow deterministic AI7 commands may transition authoritative Workflow state.
+- **V2-UX-WORK-009**: Reopen and skip interactions require an unselected choice-first reason set plus free input and record actor, time, affected phase/gates, prior state, and reason. Neither action deletes prior completion history.
+- **V2-UX-WORK-010**: A profile update creates no silent instance change. `查看新版本` shows an exact phase/gate/default diff, and migration requires a separate explicitly authorized deterministic command with retained prior profile pin.
+- **V2-UX-WORK-011**: Opening/completing/reopening/skipping a phase grants no factual authority, Review Decision, Effect Approval, Signoff, delivery proof, Public Release Permission, or Learning Eligibility.
+- **V2-UX-WORK-012**: Workflow lens state, phase expansion, active filters, and return positions survive workspace switching/restart without becoming the source of authoritative Workflow state.
+
+## Workflow Gate interaction
+
+- **V2-UX-WGATE-001**: Every Gate opens a Workflow Gate Card displaying exact Gate/version, Deliverable, phase, pinned Workflow Profile/version, mandatory/advisory criteria, current evidence, missing/abnormal items, and downstream pass/return consequences.
+- **V2-UX-WGATE-002**: Gate Readiness is computed and displayed separately as `尚未就绪`, `可供审阅`, `存在建议项未完成`, or `存在强制条件未满足`; no readiness label itself transitions Gate state.
+- **V2-UX-WGATE-003**: The choice-first disposition set is unselected and includes `通过此关口`, `退回补充`, `有条件通过` when profile-permitted, `暂不决定`, and `自行输入`; an AI7 recommendation may be shown with evidence but never preselected.
+- **V2-UX-WGATE-004**: Any unmet mandatory criterion disables pass/conditional-pass and links to the exact missing evidence/action. Advisory criteria may be left open only according to pinned profile rules and with a recorded rationale.
+- **V2-UX-WGATE-005**: Conditional Gate Passage appears only when the pinned profile defines eligible conditions, downstream permissions, and restrictions. The editor cannot use it as a generic override or to bypass mandatory policy/Gate criteria.
+- **V2-UX-WGATE-006**: `记录关口决定` invokes one exact deterministic AI7 command with actor, time, Gate/profile version, evidence snapshot, disposition, reason/conditions, and expected transition; it is not a Task Skill or model Effect.
+- **V2-UX-WGATE-007**: If the Gate requires an exact Review Decision, the same user action may append both Review Decision and Workflow Gate transition records, but the UI names and links them separately and neither substitutes for the other.
+- **V2-UX-WGATE-008**: Recorded Gate states use `已通过`, `已退回`, `有条件通过`, `暂未决定`, or `已重新打开`, with immutable causal history. Readiness/evidence drift before record invalidates a stale action.
+- **V2-UX-WGATE-009**: Conditional passage displays outstanding conditions and downstream restrictions in every affected phase/action until satisfied, superseded, returned, or reopened through an exact command.
+- **V2-UX-WGATE-010**: No primary or secondary surface offers `全部通过`, bulk pass, or a generic approval action across multiple Gates.
+- **V2-UX-WGATE-011**: Gate passage grants no factual correctness, Proposal Decision, Effect Approval, phase completion by itself, Signoff, Delivery Package authority, export, Public Release Permission, or Learning Eligibility.
+
+## Milestone Version designation
+
+- **V2-UX-MILE-001**: The target People's Literature Publishing House Workflow Profiles expose no user-facing `Signoff`, `签发`, Signoff readiness card, or formal signing step; ordinary editorial users work with Milestone Versions.
+- **V2-UX-MILE-002**: `保存为里程碑版本` is available from Deliverable version/history context and relevant Workflow phases and is never conflated with `Ctrl+S`, journal persistence, file Save As, export, Delivery, or Public Release.
+- **V2-UX-MILE-003**: The action requires a Milestone Version Label and Milestone Purpose and permits an optional note. AI7 may recommend phase/date-based labels and purposes, but the editor can edit them and no recommendation creates the milestone.
+- **V2-UX-MILE-004**: For a Manuscript with journal state newer than its latest immutable revision, one activation first validates/persists a Manuscript Checkpoint and creates a new Manuscript Revision; when an exact immutable version already exists, it may designate that version without duplicating content.
+- **V2-UX-MILE-005**: The same user interaction records milestone metadata and a separate internal Signoff Record binding exact Deliverable revision, workflow evidence, actor/time, label, and stated next use. The ordinary UI exposes only milestone language.
+- **V2-UX-MILE-006**: One Deliverable may retain multiple Milestone Versions with distinct labels/purposes. No milestone is silently treated as the unique final or latest delivery version.
+- **V2-UX-MILE-007**: After further edits, the old milestone remains immutable and the current working state shows `自「{标签}」后有修改`; saving another milestone creates/designates a new exact version and never moves the old label to new content.
+- **V2-UX-MILE-008**: Milestone lists show label, purpose, exact version/revision, author/time, note, and whether later working changes exist. Technical/internal Signoff identity remains in audit detail rather than ordinary editorial UI.
+- **V2-UX-MILE-009**: A milestone purpose such as `阶段留档`, `送审候选`, or `交付候选` states intended next use only and grants no Gate passage, Review Decision, Delivery Package creation, external export, or Public Release Permission.
+- **V2-UX-MILE-010**: Delivery preparation explicitly selects one exact Milestone Version; later content edits do not silently update that selection or package.
+- **V2-UX-MILE-011**: The target-house profile contains no separate exception Signoff, withdrawal, or re-signing workflow. Historical milestone/internal records remain immutable, while later versions and milestone labels represent subsequent editorial states.
+- **V2-UX-MILE-012**: Creating a Milestone Version uses deterministic local domain commands and requires neither model/provider access nor a Task Skill Run.
+- **V2-UX-MILE-013**: Publication Version is a specialized exact designation over an existing immutable Milestone Version, not a free-form milestone label, latest-draft alias, phase status, or automatic consequence of choosing a publication-related purpose.
+
+## Delivery Package preparation
+
+- **V2-UX-DPKG-001**: `准备交付` opens Delivery Package Preparation and does not create an external export, Effect Approval, Effect Receipt, handoff, or Public Release Permission.
+- **V2-UX-DPKG-002**: Preparation requires explicit selection of one exact Milestone Version. AI7 may recommend the most recent `交付候选` with rationale, but no milestone is silently selected or moved to later content.
+- **V2-UX-DPKG-003**: If later working edits exist, a Milestone Change Exclusion Notice shows their exact count/range/relationship and offers `保存新的里程碑版本`; it never silently includes them or blocks use of the older milestone by itself.
+- **V2-UX-DPKG-004**: The surface displays Deliverable, milestone label/version, Delivery Package Purpose, planned files/formats, required Editorial Artifacts, version/change summary, source/factual materials, unresolved matters, evidence limitations, explicit exclusions, and export-fidelity/degradation summary. It collects no recipient or external-channel target.
+- **V2-UX-DPKG-005**: Profile-required missing items identify the exact artifact/evidence/decision/metadata needed and link to its safe creation/review route; a generic `未就绪` label is insufficient.
+- **V2-UX-DPKG-006**: Every included/excluded item remains inspectable in a Delivery Package Manifest Preview without requiring filesystem literacy or exposing internal storage paths.
+- **V2-UX-DPKG-007**: `准备交付包` stages all package files locally, computes a stable Package ID/version and manifest/file digests, and either commits one complete immutable Prepared Delivery Package or reports no prepared version.
+- **V2-UX-DPKG-008**: Changing selected milestone, included file/artifact, output format, Delivery Package Purpose, fidelity handling, or limitation after freeze creates a new Delivery Package version with lineage rather than mutating the frozen package.
+- **V2-UX-DPKG-009**: One Delivery Package serves one exact Deliverable and one stated local-export purpose by default. Other Deliverables or whole-Book material require explicit separate inclusion supported by profile and scope.
+- **V2-UX-DPKG-010**: Package preparation is local/provider-free and transmits no file to the named destination, opens no external channel, and grants no External Export authority or Public Release Permission.
+- **V2-UX-DPKG-011**: Prepared state is `已准备 · 尚未导出`; neither local file generation, preview success, archive formation, nor package completeness is delivery proof.
+- **V2-UX-DPKG-012**: The ordinary surface identifies the selected Milestone Version and never requires the editor to understand the linked internal Signoff Record.
+
+## Local export formats and fidelity
+
+- **V2-UX-EXP-001**: DOCX is the ordinary editor's Primary Editable Export and the default professional handoff format. The format selector presents PDF as an optional fixed-layout export and Markdown as a secondary fallback rather than three equivalent defaults.
+- **V2-UX-EXP-002**: The internal Agent Exchange Projection is bounded or streamed Markdown derived from and pinned to one exact Manuscript Revision; it is disposable, re-derivable, and never becomes manuscript persistence or text authority.
+- **V2-UX-EXP-003**: An agent reads the projection only through bounded AI7 Capabilities. Agent-authored content against it creates an exact-source-revision Proposal or typed change set; it never writes through to a Markdown file or creates a Manuscript Revision without Proposal Decision and Apply.
+- **V2-UX-EXP-004**: A stale Agent Exchange Projection is visibly re-derived or explicitly rebound before further proposal work. It never fuzzily overwrites current text, and the renderer/model context never receives the whole long manuscript solely because Markdown exists.
+- **V2-UX-EXP-005**: Markdown Fallback Export is available through a secondary `备用格式` route for explicit portability or recovery use; it is never selected automatically when DOCX generation fails.
+- **V2-UX-EXP-006**: Fixed-layout PDF Export is an optional user-selected reading/printing/handoff representation and makes no editable round-trip promise.
+- **V2-UX-EXP-007**: Before local export, Export Fidelity Review classifies applicable inline styles, comments/revisions, notes, tables, images/captions, sections, headers/footers, and other profile-defined content as `完整保留`, `降级导出`, or `无法导出` for each selected format.
+- **V2-UX-EXP-008**: Material degradation requires an unselected explicit user choice after exact loss/transformation disclosure. An unavailable required class blocks only the affected format/package requirement and offers valid alternative routes; no format loss is silent.
+- **V2-UX-EXP-009**: DOCX states its editable and round-trip expectations, Markdown states structural/rich-content losses, and PDF states fixed-layout/non-editable behavior in user language before approval.
+- **V2-UX-EXP-010**: Local Export Preparation binds the exact Milestone Version or Prepared Delivery Package version, chosen eligible format(s), expected filenames, Export Fidelity Disposition, and one user-chosen Local Export Destination before Effect Approval. For a frozen Prepared Delivery Package, adding or changing a planned format first creates a new package version rather than altering it during export.
+- **V2-UX-EXP-011**: Long export work runs off the renderer with compact measurable progress and remains cancellable until commit begins; cancellation never claims to undo a committed file publication.
+- **V2-UX-EXP-012**: Local publication is atomic per declared file/Effect. A partial or temporary target is never presented as success, and ambiguous completion is not automatically retried.
+- **V2-UX-EXP-013**: A committed local export produces an Effect Receipt bound to the exact target, payload/version, format, fidelity disposition, and outcome; export approval/receipt grants neither external delivery nor Public Release Permission.
+- **V2-UX-EXP-014**: Local export and internal Markdown projection are provider-free operations and expose neither internal storage paths nor generic filesystem/agent permission concepts to ordinary editors.
+- **V2-UX-EXP-015**: AI7 V1 enforces a Local-only Export Boundary: no email, cloud-drive, publishing-house OA, messaging, upload, or other external-channel transmission control appears in package or export surfaces.
+- **V2-UX-EXP-016**: V1 provides no `记录已交接`, `确认送达`, recipient tracking, manual delivery assertion, or external-channel credential setup. Local export is complete without a subsequent handoff-record step.
+- **V2-UX-EXP-017**: The terminal successful status is `已导出到所选位置`, backed by the Local Export Effect Receipt. The UI never derives `已发送`, `已交付`, `已确认送达`, or equivalent external outcome wording from that receipt.
+- **V2-UX-EXP-018**: Users remain free to share exported files through workflows outside AI7, but AI7 V1 neither observes nor claims those outcomes. A future external-channel feature must begin as a separately designed Effect flow and cannot reinterpret historical local receipts as delivery proof.
+
+## Publication Version
+
+- **V2-UX-PUB-001**: Ordinary package preparation and local export contain no `公开发布候选`, `公开发布许可`, or Public Release Permission step and remain available without a Publication Version designation.
+- **V2-UX-PUB-002**: `设为发稿版本` requires an explicitly selected exact Milestone Version. A relevant Workflow entry may route to that selector but cannot designate current/latest content directly; phase completion never performs the action automatically.
+- **V2-UX-PUB-003**: One deterministic interaction creates the user-facing Publication Version designation and a separately identified internal Public Release Permission. The two remain linked but unmerged authoritative records.
+- **V2-UX-PUB-004**: Before commitment the compact surface shows exact Book/Deliverable, milestone label/version, identified publication scope/public channel, current-versus-selected relationship, actor, time, basis/note, and `仅表示此版本可用于上述发稿范围；AI7 不会发布或发送`.
+- **V2-UX-PUB-005**: Active policy/profile blockers identify exact missing decisions or scope problems and prevent the designation from being recorded; the UI does not use a generic approval checklist or permit one option to bypass a mandatory authority condition.
+- **V2-UX-PUB-006**: Material edits after a Publication Version produce a Publication Version Change Notice. Current working content and later package versions never silently inherit the designation or its internal Public Release Permission.
+- **V2-UX-PUB-007**: A newer Publication Version, replacement, or withdrawal appends a new exact record and preserves all prior version/permission history; display metadata correction never retargets the designated content.
+- **V2-UX-PUB-008**: Publication Version grants no local Export Effect Approval, produces no Effect Receipt, and does not change the V1 terminal export status `已导出到所选位置`.
+- **V2-UX-PUB-009**: AI7 never labels a Publication Version as `已发布`, `已发送`, `已交付`, or `已确认送达`, and no local export, Workflow Gate, milestone, factual status, or Task outcome creates the designation implicitly.
+- **V2-UX-PUB-010**: If a later release introduces actual publication or transmission, it requires a separate exact Effect Approval and Effect Receipt. Historical Publication Version/Public Release Permission records remain permission evidence only.
+
+## Startup and return
+
+- **V2-UX-RET-001**: When a Recovery Attention State exists, AI7 opens the exact affected Book and explains the recovered working state before ordinary continuation; it never silently overwrites or promotes recovered text.
+- **V2-UX-RET-002**: Without a Recovery Attention State, AI7 returns to the last active Book, Active Work Object, and whole-manuscript position rather than routing through a generic dashboard.
+- **V2-UX-RET-003**: Background Runs, Clarification Requests, pending decisions, failures, and completed outcomes update Global Attention without automatically replacing the Active Work Object or taking editor focus.
+- **V2-UX-RET-004**: When no Book exists, the initial destination is Book creation or manuscript import. Provider setup remains secondary because local editing and recovery do not depend on a provider.
+- **V2-UX-RET-005**: Startup visibly distinguishes recovered working content, a Manuscript Checkpoint, and a Recovery Snapshot; none may be presented as another.
+
+## Manuscript recovery
+
+- **V2-UX-REC-001**: The recovery UI appears only when AI7-owned persistence yields a durable, verifiable candidate from per-branch acknowledged Edit Journal entries, immutable Manuscript Revisions/Checkpoints, or independently stored verified Recovery Snapshots. Renderer, Harness, provider, or unacknowledged state is never presented as durable recovery evidence.
+- **V2-UX-REC-002**: One affected Book opens its Book Recovery Workspace before ordinary continuation. Multiple affected Books create separate `恢复待确认状态` items in Global Attention and never merge their manuscript state or resolution.
+- **V2-UX-REC-003**: Recovery uses a central affected-Book workspace rather than a global blocking system modal; other unaffected Books remain reachable without resolving or dismissing the recovery item.
+- **V2-UX-REC-004**: Recovery State Comparison shows the most recent durable Recovered Working State, relevant Milestone Version/Manuscript Checkpoint, and any applicable independently verified Recovery Snapshot with exact branch, last successful persistence time, covered change extent, verification state, and known limitation. A Recovery Snapshot is not implied to exist for every crash.
+- **V2-UX-REC-005**: No comparison entry is preselected or labeled current/recovered merely because it is newest. A state becomes authoritative only through an explicit valid restoration command.
+- **V2-UX-REC-006**: The recommended `恢复为新版本` action creates a new descendant Manuscript Revision and never rewrites, deletes, retargets, or silently promotes prior history.
+- **V2-UX-REC-007**: `仅查看`, `稍后处理`, and safe `导出或复制受影响内容` remain available. Deferral leaves durable actionable attention; viewing or export/copy does not resolve or restore the state.
+- **V2-UX-REC-008**: Selecting an older checkpoint/snapshot preserves any newer journal-reconstructed state as recoverable material until explicitly resolved under retention policy; no choice silently discards the alternative.
+- **V2-UX-REC-009**: After descendant restoration, Recovered-state Review Status displays `当前为恢复的工作状态` until review and an explicit new Milestone Version. Restoration does not create that milestone automatically.
+- **V2-UX-REC-010**: Runs, Proposals, findings, evidence, and decisions pinned to prior exact revisions remain pinned; restoration never silently retargets dependent records to the new descendant.
+- **V2-UX-REC-011**: Failure-origin detail such as renderer reload, Electron main exit, AI7 service restart, or Harness technical failure stays in secondary diagnostics. Primary UI states which manuscript data is durable, recovered, unavailable, or unresolved.
+- **V2-UX-REC-012**: Local recovery and access to recovery evidence require no Harness initialization, provider availability, credential, or network connection.
+- **V2-UX-REC-013**: If Edit Journal persistence fails during editing, AI7 never shows `已保存`; it keeps a persistent high-priority durability warning, prevents unsafe navigation/close from discarding the Bounded Edit Safety Buffer, and explicitly states that this buffer is not durable recovery evidence.
+- **V2-UX-REC-014**: The UI never promises recovery of input that lacked persistence acknowledgement. It distinguishes acknowledged durable journal content from any bounded process-local buffer and states the exact at-risk extent when known.
+
+## Editing durability interruption
+
+- **V2-UX-DUR-001**: Editing Protection Mode begins only when the affected manuscript's Edit Journal acknowledgement or required local AI7 service durability becomes unavailable; provider, credential, internet, or Harness unavailability alone does not trigger it.
+- **V2-UX-DUR-002**: Active Chinese IME composition and immediate typing may continue only into a strictly bounded process-local safety buffer sized independently of manuscript length. The buffer is not an Edit Journal, Recovery Snapshot, or durability guarantee.
+- **V2-UX-DUR-003**: The persistent context header replaces saved styling with `本地写入中断`, Last Durable Edit Boundary/time, At-risk Edit Extent, automatic retry state, and one direct `查看保护选项` action.
+- **V2-UX-DUR-004**: At-risk extent uses editor-readable locations and character counts where known. Technical buffer bytes, process IDs, IPC, and stack traces remain in diagnostics.
+- **V2-UX-DUR-005**: While at-risk input exists, AI7 blocks leaving/closing the affected editing context, branch switching, Apply, bulk replacement, reimport, restore, and other graph-changing commands that could discard, duplicate, or fork the buffer. It explains the exact reason beside each attempted action.
+- **V2-UX-DUR-006**: AI7 retries local persistence automatically without creating duplicate journal entries. Normal state returns only after deterministic service commands acknowledge the exact buffered sequence and current manuscript binding.
+- **V2-UX-DUR-007**: If service recovery reveals target drift or cannot bind the buffered sequence exactly, AI7 stops replay and routes the content to an exact Recovery State Comparison or salvage path rather than fuzzy application.
+- **V2-UX-DUR-008**: As the buffer approaches its declared safe capacity or another safety limit, AI7 reserves enough protection to complete any active Chinese IME composition and then enters Protective Read-only State before capacity is exhausted; composition is never forcibly committed, cancelled, or dropped.
+- **V2-UX-DUR-009**: Protective Read-only State always offers `重试写入` and `复制受影响内容`. Exact local salvage export appears only when authoritative local service state can reconstruct and receipt the payload; neither action claims journal persistence or recovery resolution.
+- **V2-UX-DUR-010**: A close request with at-risk input opens the same protection surface and cannot silently terminate the app. Any explicitly permitted exit path states which input remains unacknowledged and requires a safe copy/export choice when available.
+- **V2-UX-DUR-011**: If the process is forcibly terminated, AI7 promises recovery only through the Last Durable Edit Boundary. Process-local buffered input may be unavailable on restart and is never described as safely saved.
+- **V2-UX-DUR-012**: Successful persistence clears Editing Protection Mode without creating a Milestone Version, Manuscript Checkpoint, Recovery Snapshot, Task state, or notification celebration; the context returns to the normal Editing Persistence Status.
+
+## Offline Task preparation and deferred start
+
+- **V2-UX-OFF-001**: Network, Provider, credential, or Harness unavailability never disables local manuscript editing, local indexes/search, history/recovery, task-draft editing, or local export where their own local service state is healthy.
+- **V2-UX-OFF-002**: Offline Task Preparation allows Task Intent drafting, locally resolvable source selection, and a Plan Preview based on current authoritative local configuration; fields requiring live provider facts are explicitly `待联网确认`, never guessed as ready.
+- **V2-UX-OFF-003**: If no exact locally known eligible provider binding, credential reference, outbound-data classification, or budget boundary can be identified, only `仅保存任务草稿` is available; AI7 cannot authorize an unspecified future provider choice.
+- **V2-UX-OFF-004**: When the exact boundary is locally identifiable but connectivity blocks dispatch, the Inline Run Authorization Bar offers separate `授权并在联网后开始` and `仅保存任务草稿` actions with neither preselected.
+- **V2-UX-OFF-005**: Start When Online Action durably creates the exact Run Record and Run Authorization, then enters Connectivity Wait State without invoking a model, consuming provider budget, or implying execution began.
+- **V2-UX-OFF-006**: Waiting copy distinguishes `等待网络` from `等待模型服务`, `等待运行名额`, pause, and active execution; it shows the authorized plan/version and currently safe cancel action without invented timing.
+- **V2-UX-OFF-007**: Reconnect Preflight revalidates exact goal/plan, target and source pins, Task Skill/version, provider/model/fallback, outbound category, unchanged Credential Reference, live credential readiness, budget, policies, and other authority-bearing constraints before dispatch; secret values are never compared or displayed.
+- **V2-UX-OFF-008**: If Reconnect Preflight finds no material change, the exact authorized Run enters normal scheduling automatically. If any material boundary drifted, the state becomes `需要重新确认计划` and routes through Plan Revision plus renewed Run Authorization.
+- **V2-UX-OFF-009**: A credential that is missing, invalid, expired, or inaccessible after reconnect is a named blocking condition with a route to the connection setting; when no material authority boundary changed, the exact Run Authorization remains pending and no Plan Revision is invented. The blocker never triggers silent provider/fallback substitution.
+- **V2-UX-OFF-010**: A Connectivity Wait Run can be cancelled before dispatch and records terminal cancellation without provider work. Pausing is not required to prevent start; cancellation is the direct waiting-state control.
+- **V2-UX-OFF-011**: A Task draft for which Start When Online Action was never invoked does not create a Run and never starts because connectivity changes.
+- **V2-UX-OFF-012**: If connectivity disappears during an executing Run, AI7 persists the last authoritative business milestone and classifies the technical attempt. It uses Resume or Retry only when their exact safety conditions hold and never presents uninterrupted activity or a fabricated result.
+- **V2-UX-OFF-013**: Connectivity return while the desktop application/service is not running never launches AI7 or starts the Run by itself. Reconnect Preflight occurs when the supervised local service is next active.
+
+## Contextual result feedback
+
+- **V2-UX-FDBK-001**: An exact Proposal Decision, Review Decision, or clear Task Outcome may expose at most one Contextual Feedback Prompt attached to that originating record/version; ordinary navigation, reopening, restart, or elapsed time never creates a second prompt.
+- **V2-UX-FDBK-002**: The prompt appears inline or immediately adjacent to the originating decision/outcome, occupies one compact disclosure row/card, and never uses a modal, interstitial, blocked next action, or forced detour to `质量与学习`.
+- **V2-UX-FDBK-003**: When accept/edit/reject or an exact version difference already supplies a Quality Signal, the prompt asks only for an optional reason and never requests a duplicate star score, satisfaction scale, or second disposition.
+- **V2-UX-FDBK-004**: A clear Task Outcome without an existing editor disposition may use the same single interaction for an outcome-specific optional reason response; it does not add a recurring survey or reinterpret mere Task completion as satisfaction.
+- **V2-UX-FDBK-005**: Every reason interaction offers two or three context-specific alternatives with none preselected, keeps `其他 / 自行输入` adjacent, and supports Chinese IME without delaying the next editorial action.
+- **V2-UX-FDBK-006**: An AI7-generated reason appears only as an explicitly labeled `AI7 的猜测` among the alternatives. Capture distinguishes acceptance as-is, editor correction, another alternative, editor-authored free text, and dismissal.
+- **V2-UX-FDBK-007**: Dismissal records only the absence of an optional reason. It never implies satisfaction, dissatisfaction, agreement, factual correctness, Learning Eligibility, or refusal to participate in future learning.
+- **V2-UX-FDBK-008**: The prompt produces no unread count, reminder loop, Global Attention item, Windows notification, celebratory response, or penalty. Its originating business decision/outcome remains usable immediately.
+- **V2-UX-FDBK-009**: Feedback History View groups attributable Quality Signals and optional reasons by Book, origin type, time, and Editorial Dimension and deep-links to the exact decision/outcome without exposing a copied Harness transcript.
+- **V2-UX-FDBK-010**: `质量与学习` is passive history for ordinary feedback and becomes action-oriented only for a real governed Learning Material, eligibility, memory, or audit decision; the design of those later decisions remains separate.
+- **V2-UX-FDBK-011**: Capturing or displaying feedback does not by itself create a Learning Eligibility Decision, approve a Memory Candidate, activate House/Series/Book memory, expand Run Source Scope, train/fine-tune a Foundation Model, or authorize any Effect/publication.
+- **V2-UX-FDBK-012**: Editor feedback may express taste, style, usefulness, or editorial judgment but never establishes Reference Integrity, Claim Support, or Factual Verification. Any locally retained excerpt remains governed by the accepted egress boundary.
+
+## Learning Material eligibility
+
+- **V2-UX-LEARN-001**: Identifying a candidate Learning Material item is quiet background classification and never appends another mandatory or optional question to the originating Contextual Feedback Prompt.
+- **V2-UX-LEARN-002**: Only a candidate that genuinely requires an explicit editor decision creates a Book-grouped Learning Eligibility Attention Item in `待我处理`; passive candidates and already governed decisions remain in `质量与学习` without unread pressure.
+- **V2-UX-LEARN-003**: The Learning Material Review Card shows a bounded excerpt or typed item, exact provenance/version, originating Book, Task and decision/outcome when applicable, candidate rationale, current governing basis, and a plain-language preview of possible later influence.
+- **V2-UX-LEARN-004**: Eligibility and scope choices start unselected. `仅纳入当前 Book` is the non-binding recommendation; no default selection or elapsed-time action creates a Learning Eligibility Decision.
+- **V2-UX-LEARN-005**: `纳入当前书系` is available only for an exact named Series and displays the cross-Book reuse consequence. `纳入出版社经验` separately discloses House-wide influence. Neither wider option is hidden behind the Book choice or inferred from aggregation.
+- **V2-UX-LEARN-006**: `明确排除`, `稍后决定`, and optional `补充说明 / 自行输入` remain first-class choices. Deferral preserves one unresolved candidate without treating it as eligible or excluded.
+- **V2-UX-LEARN-007**: Recording the choice creates one exact Learning Eligibility Decision bound to the material/version, selected scope, actor, time, optional reason, and governing basis; a later explicit decision supersedes rather than rewrites history.
+- **V2-UX-LEARN-008**: Explicit inclusion or exclusion overrides any inferred eligibility recommendation for that exact material. AI7 may explain a recommendation but never expose hidden Policy/Composition assets as editor-editable authority.
+- **V2-UX-LEARN-009**: Inclusion permits only the candidate material to contribute Editorial Learning Signals or later Memory Candidates within the displayed scope. It does not approve a Memory Candidate, activate memory, expand a Run's source scope, or permit provider transmission.
+- **V2-UX-LEARN-010**: Eligibility creates no factual evidence, Reference Integrity, Claim Support, Factual Verification, Proposal/Review Decision, Effect authority, workflow transition, Milestone/Publication Version, or Public Release Permission.
+- **V2-UX-LEARN-011**: Learning Material excerpts and eligibility records remain local, attributable, and reachable through exact product records. House or Series aggregation never becomes an ambient cross-Book manuscript-reading surface.
+- **V2-UX-LEARN-012**: A broader-scope choice expands inline with the affected named scope and future-influence consequence before the single exact record action; it does not use a duplicate generic confirmation modal.
+
+## Learning Audit and remediation
+
+- **V2-UX-LAUD-001**: `质量与学习 > 学习回溯` defaults to a searchable, filterable, Book-grouped object list with current state and downstream-use summary; it is not a raw event log, model transcript, or mandatory whole-lineage graph.
+- **V2-UX-LAUD-002**: Filters cover exact Book, Series, material type, time, eligibility state, candidate/memory state, downstream use, and historical-impact state without changing any authoritative record.
+- **V2-UX-LAUD-003**: Opening one item creates a Learning Lineage Explorer in the stable sequence `学习材料 → 准入决定 → 学习信号 → 记忆候选 → 已启用记忆 → 使用过的任务`, with branches collapsed until requested.
+- **V2-UX-LAUD-004**: Every relevant Task/result offers `为什么会影响这个结果`, and every eligible material/candidate/memory item offers `后来影响了什么`; both routes preserve the exact object and return position.
+- **V2-UX-LAUD-005**: Default nodes show editor-readable source, scope, current state, decision and consequence. Stable IDs, exact governing-version references and implementation detail remain under `审计详情`; raw Harness Sessions and hidden Policy/Composition controls never appear.
+- **V2-UX-LAUD-006**: `停止今后使用` first opens a Learning Remediation Impact Preview separated into `未来使用`, `正在运行`, `候选或已启用记忆`, and `已完成历史`, with exact counts and named scopes where available.
+- **V2-UX-LAUD-007**: Exclusion/remediation immediately prevents future influence or triggers the required re-evaluation/recomputation; a solely supported activated memory item becomes unavailable, while multiply supported material is recalculated rather than silently retained.
+- **V2-UX-LAUD-008**: A running Task using affected material pauses for revalidation with its exact Run and safe next action. Completed Tasks/results remain immutable and receive a Historically Affected Result Marker with a link to the later remediation.
+- **V2-UX-LAUD-009**: Exclusion never deletes the original Book/edit/feedback evidence or rewrites an earlier eligibility/memory decision. Re-inclusion appends a new decision and evaluation with retained causal history.
+- **V2-UX-LAUD-010**: Batch remediation requires an explicitly selected set sharing the same material class, displayed scope and exact disposition. The summary names counts, exclusions and impact before one record action; Series/House expansion is never inferred from selection.
+- **V2-UX-LAUD-011**: If one batch member drifts or has a different consequence, it is excluded and named rather than coerced into the batch. Partial outcomes remain exact per item and never claim whole-batch completion.
+- **V2-UX-LAUD-012**: Learning Audit is product/business history. It grants no Run Source Scope, provider egress, factual status, memory approval, Policy editing, Effect authority, or permission to erase completed history.
+
+## On-demand Model Service setup
+
+- **V2-UX-MSET-001**: First launch and Book creation/import never require a Provider connection, credential, budget or Harness start. Healthy local reading, editing, indexing/search, history/recovery, Task drafting and local export remain available.
+- **V2-UX-MSET-002**: Model Service setup begins when the editor explicitly enters Settings or first prepares a Task whose Model Role cannot pass connection/credential readiness; AI7 never turns local-first onboarding into an account wall.
+- **V2-UX-MSET-003**: A Task-context Model Connection Blocker Card names the requested Model Role, exact missing/unavailable binding or Credential Reference readiness, effect on dispatch, and one `设置模型服务` route without exposing a secret.
+- **V2-UX-MSET-004**: Opening Settings captures a Model Setup Return Point containing the exact Task draft, Book/target, selected sources, current plan version/scroll and focus. Returning restores those states without creating Run Authorization or dispatch.
+- **V2-UX-MSET-005**: Successful connection setup re-runs applicable preflight in the restored Task context. It does not silently select a different Model Role/provider/fallback, change outbound categories, authorize the Run or auto-start an unselected draft.
+- **V2-UX-MSET-006**: `设置 > 模型服务` groups the four accepted Model Roles first and shows each role's user-readable `可用`, `需设置`, `需处理`, or `不可用` state; Provider/model/fallback bindings expand one level deeper.
+- **V2-UX-MSET-007**: A Provider connection card shows an editor-chosen connection name, Provider, eligible purpose/role and exact status. Endpoint/advanced binding detail is secondary and cannot appear as product or factual authority.
+- **V2-UX-MSET-008**: After credential entry, AI7 displays only the connection name and protected status. The secret value cannot be revealed, copied, exported, placed in Task/session text or diagnostics; actions are `重新输入` and `移除` with exact consequences.
+- **V2-UX-MSET-009**: Budget defaults and billing currency remain secondary Model Service settings. Each Task still displays its own reliable estimate/range and hard ceiling before Run Authorization; an unavailable estimate is named rather than represented as zero.
+- **V2-UX-MSET-010**: `用量` owns historical/aggregate consumption and links to exact Run detail. It is reachable from the lower application area but does not occupy normal Manuscript, Task or Book chrome.
+- **V2-UX-MSET-011**: A connection blocker may expand inline where it blocks an exact Task even if Settings also contains the same service status. Dismissing the card or leaving Settings never converts the blocker into readiness.
+- **V2-UX-MSET-012**: Model Role, Provider connection and credential state do not grant factual authority, Run Source Scope, outbound permission, Run Authorization, Effect Approval or Public Release Permission.
+
+## Distribution channel and Product Data Location presentation
+
+- **V2-UX-DSTO-001**: Normal channel/data-location state appears in `设置 > 数据与存储`, not as permanent sidebar, Manuscript, Book or Task chrome.
+- **V2-UX-DSTO-002**: Data and Storage Summary shows Distribution Channel Status (`便携版` or `安装版`), actual user-readable Product Data Location, local footprint, `查看数据位置`, and Protected Secret Store separation.
+- **V2-UX-DSTO-003**: A writable portable channel states that program files and product data occupy separate areas inside the AI7 folder and that moving/copying the folder moves product data but never Model Service credentials.
+- **V2-UX-DSTO-004**: The installer channel states that product data normally lives in the supported local Windows application-data location without requiring the editor to understand `%LOCALAPPDATA%` notation; the exact path is secondary detail.
+- **V2-UX-DSTO-005**: If the portable folder is unwritable, AI7 automatically uses the supported local fallback, shows one clear ordinary notice naming the actual location, persists a reviewable Data Location Exception State, and no longer describes the instance as fully self-contained.
+- **V2-UX-DSTO-006**: Placement beneath a known sync/backup root produces a non-blocking warning that unpublished editorial material may be copied by that external service; AI7 does not silently move data or imply that model processing/public release occurred.
+- **V2-UX-DSTO-007**: Placement in a prohibited repository/development tree routes directly to Data Location Remediation Guidance and a supported local destination. The editor is never asked to evaluate repository, shell, permission-escalation or agent-safety concepts.
+- **V2-UX-DSTO-008**: V1 exposes no arbitrary Product Data Location/Agent Data Root picker. Portable placement follows the AI7 folder; installer/fallback placement follows the supported local path.
+- **V2-UX-DSTO-009**: `查看数据位置` is a secondary support/awareness action. It does not edit the path, grant a Run or agent filesystem scope, turn internal records into ordinary manuscript files, or authorize manual mutation of product storage.
+- **V2-UX-DSTO-010**: Model Service credentials remain in the Protected Secret Store outside both portable and installer product data. No channel status, folder copy or location view claims that credentials are included.
+- **V2-UX-DSTO-011**: Data-location notices use distinct plain-language states for fallback, sync/backup exposure and prohibited placement; they never reuse Editing Protection Mode, Recovery Attention, Provider offline or Local Export wording.
+- **V2-UX-DSTO-012**: A dismissed non-blocking sync warning remains reachable in Data and Storage Summary. A prohibited placement remains actionable until the supported-location condition is restored; hiding a notice never changes the underlying state.
+- **V2-UX-DSTO-013**: Any future arbitrary/custom/network data root, credential-carrying portable mode or automatic cross-channel migration protocol requires a new storage-authority decision rather than being introduced as a Settings toggle.
+
+## Keyboard commands and action discoverability
+
+- **V2-UX-KEY-001**: AI7 preserves familiar Windows editing defaults for find, replacement preview, journal save, undo/redo, back/return and region navigation, with exact Chinese action names and visible shortcut hints.
+- **V2-UX-KEY-002**: Limited Shortcut Remapping applies only to declared navigation, search and view commands under `设置 > 键盘与无障碍 > 快捷键`; editable-text, OS-reserved and IME-reserved keys are not remappable.
+- **V2-UX-KEY-003**: Remapping detects exact and prefix conflicts, identifies the affected contexts, refuses ambiguous bindings, and provides per-command and whole-section `恢复默认` actions.
+- **V2-UX-KEY-004**: Run Authorization, Proposal Decision, Review Decision, Effect Approval, `保存为里程碑版本`, `设为发稿版本`, deletion and other destructive/authority-bearing actions have no application-global shortcut.
+- **V2-UX-KEY-005**: An authority-bearing action may expose a modified shortcut only inside its explicitly focused exact surface after its named scope/consequence is present; the shortcut cannot bypass selection, readiness, drift or confirmation semantics.
+- **V2-UX-KEY-006**: IME-safe Command Guard suppresses AI7 command dispatch throughout active composition, including navigation, search, Task submission, Proposal operations and menu accelerators. Composition completion/cancellation follows the IME rather than AI7.
+- **V2-UX-KEY-007**: Every supported action has a Discoverable Action Entry reachable by pointer and keyboard. No functionality exists only through a shortcut, hover, unlabeled icon, gesture, context-menu guess or screen-reader-only control.
+- **V2-UX-KEY-008**: Discoverability does not require permanent display. Secondary/infrequent actions may occupy a labeled disclosure, overflow or second-level menu with predictable location, visible focus, tooltip/description and current shortcut.
+- **V2-UX-KEY-009**: The current primary action, active safety/durability blocker and accepted named authority bar remain directly visible while actionable. They cannot be moved into a generic menu merely to reduce always-on space.
+- **V2-UX-KEY-010**: Menu/disclosure navigation is keyboard complete, announces expanded state and restores focus to its trigger or resulting exact context. Closing a menu never invokes, resolves, dismisses or changes an underlying record.
+- **V2-UX-KEY-011**: Shortcut labels update immediately after a valid remap across menus, tooltips and command help; stale labels cannot remain beside active commands.
+- **V2-UX-KEY-012**: Shortcut preferences are local view/input configuration and do not travel in manuscripts, Delivery Packages or exports or change Task Skills, AI7 Capabilities, Run authority or domain commands.
+- **V2-UX-KEY-013**: Keyboard-only operation, visible focus, Windows high contrast, system zoom/reflow and applicable assistive-technology semantics are unconditional product behavior, not a user-selectable accessibility mode.
+- **V2-UX-KEY-014**: At high zoom or reduced space, action entries may consolidate into labeled menus only if state, consequence, error and current primary action remain readable without horizontal scrolling or hidden focus.
+
+## Workbench density, reading typography and flexible surfaces
+
+- **V2-UX-VIEW-001**: Workspace Density Mode offers `标准` and `紧凑`, with `标准` as the initial default. Density is a local presentation preference and never changes content, records, scope, authority or supported actions.
+- **V2-UX-VIEW-002**: Compact mode may reduce spacing in navigation, tables, queues, filters and metadata but cannot reduce manuscript typography, decision-consequence visibility, error explanation, focus ring, touch/pointer target usability or high-contrast boundaries below the supported experience.
+- **V2-UX-VIEW-003**: Manuscript Reading Presets provide distinct editing-oriented and reading-oriented starting rhythms independent of Workspace Density Mode; choosing a preset never switches business work mode or pauses background work.
+- **V2-UX-VIEW-004**: Users may adjust manuscript font family, font size, line height, text-column width, alignment and related reading presentation within readable supported bounds. Missing CJK glyphs use stable fallback without altering stored Unicode or exact selection.
+- **V2-UX-VIEW-005**: Initial recommended reading values use a dependable Chinese serif around 17 px, 1.9–2.0 line height and 30–38 fullwidth characters per line. These are adjustable design defaults, not frozen document tokens.
+- **V2-UX-VIEW-006**: Every View-only Typography Preference affects local rendering only. It never writes manuscript characters/styles, changes DOCX round-trip semantics, alters PDF/Markdown export or enters an agent/model context as authorial formatting.
+- **V2-UX-VIEW-007**: Subpages, contextual panels, comparison columns and supporting regions may become Resizable Workspace Regions with pointer drag separators, keyboard adjustment, announced current size, safe minimum/maximum bounds and `恢复默认布局`.
+- **V2-UX-VIEW-008**: Resizing cannot squeeze the central Manuscript or an exact decision/consequence below its usable minimum. When space is insufficient, supporting comparisons switch to tabs, drawers or vertical stacking without removing content or authority.
+- **V2-UX-VIEW-009**: Density, region sizes, visibility and typography preferences persist locally across restart by applicable work-surface type and remain resettable. They are not Book/Manuscript authority and do not migrate through document export.
+- **V2-UX-VIEW-010**: Lower-importance explanatory, history, metadata and optional supporting cards/views may use Optional Surface Visibility and expose `折叠`, `隐藏` or `关闭` according to whether quick restoration is needed.
+- **V2-UX-VIEW-011**: Current Book/manuscript/revision identity, Editing Persistence Status, recovery/durability danger, exact decision consequence, active blocker and currently required authority action cannot be permanently hidden. They may collapse only to a persistent named status/entry that preserves urgency and exact return.
+- **V2-UX-VIEW-012**: Hiding/closing a projection never dismisses Global Attention, resolves a Clarification Request, records a decision, cancels a Run, approves an Effect, clears a warning or deletes any record. `视图` provides a stable restore list and `恢复默认布局`.
+- **V2-UX-VIEW-013**: AI7 provides `在独立窗口打开稿件`, initiating a Manuscript Surface Transfer of the exact active editable manuscript subpage rather than creating a read-only copy or parallel editor.
+- **V2-UX-VIEW-014**: An Active Manuscript Surface Binding permits only one Renderer surface to submit edit commands for one exact Book/manuscript/branch at a time. The binding is a UI input boundary, not a manuscript/Book lock, Run pause, Effect authority or second text authority.
+- **V2-UX-VIEW-015**: A Detached Manuscript Window retains the embedded manuscript subpage's eligible editing, selection, search/replace/jump, contextual Task, Proposal, factual-review and named-authority interactions; detachment grants no additional operation, scope or authority.
+- **V2-UX-VIEW-016**: While detached, the main workbench unloads the duplicate manuscript body and shows a noninteractive Detached Manuscript Placeholder with exact identity, persistence/safety status, `显示独立窗口` and `移回工作台`. It may collapse or hide only while leaving a stable named return entry.
+- **V2-UX-VIEW-017**: Manuscript Surface Transfer waits for active IME composition to finish under the IME's control and for current Edit Journal acknowledgement. It never forces composition commit/cancel or treats pending process-local input as transferable.
+- **V2-UX-VIEW-018**: Editing Protection Mode, an At-risk Edit Extent or a Bounded Edit Safety Buffer blocks detach, reattach and any window close that would destroy the source Renderer. AI7 preserves the source surface and exposes the existing protection options until durability is restored or the user makes an exact recovery decision.
+- **V2-UX-VIEW-019**: Transfer uses an all-or-source-safe handshake: the target loads exact identity and a bounded noninteractive projection, the service atomically changes the Active Manuscript Surface Binding, and only then may the source unload. Timeout or failure leaves the source active and cannot yield two writable surfaces or no writable surface.
+- **V2-UX-VIEW-020**: `移回工作台` and ordinary detached-window close use the same guarded reverse transfer. If the main window is unavailable, AI7 restores an appropriate workbench host before releasing the detached surface; application exit still follows the existing safe-close/recovery rules.
+- **V2-UX-VIEW-021**: Position, exact durable selection anchors, search state and view preferences transfer when representable from acknowledged state. Renderer-local unacknowledged buffers and unverifiable undo state never receive a cross-window durability claim.
+- **V2-UX-VIEW-022**: Every embedded or detached Renderer receives only bounded projections from the authoritative service and never holds the whole Manuscript. Renderer crash recovery starts from acknowledged service state and makes no promise about a lost process-local buffer.
+- **V2-UX-VIEW-023**: Opening, closing, moving, resizing or transferring a window never by itself pauses/cancels a Run, closes a Book, changes manuscript authority, records a decision, approves an Effect, acknowledges attention or commits/undoes an edit.
+- **V2-UX-VIEW-024**: Windows high contrast, 125/150/200% scaling, zoom/reflow, reduced motion, visible focus and non-color state meaning remain supported under both density modes, every typography preference and every region/window arrangement.
