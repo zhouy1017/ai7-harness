@@ -24,7 +24,7 @@
 
 ## What's next
 
-- Commit this refreshed checkpoint, verify the new clean SHA, and re-run both read-only review axes over the final delta; address only in-scope findings.
+- Commander owns final clean-head acceptance, any authorized push/pull-request action targeting `dev`, and both hosted Windows Server 2025 and macOS 15 J-01 jobs; this Worker resumes only if review or CI returns a concrete in-scope finding.
 
 ## Unresolved matters or blockers
 
@@ -46,4 +46,4 @@
 
 ## Resume Prompt
 
-Resume Issue #24 under Commander amendments 1–2 by re-reviewing the clean persistent-readiness/fail-safe-cleanup head and addressing only in-scope findings without claiming unrun macOS or hosted CI evidence.
+Resume Issue #24 under Commander amendments 1–2 only if Commander returns a concrete in-scope review or CI finding against the current clean head; otherwise Commander owns external PR/CI actions, and unrun macOS or hosted evidence remains unclaimed.
