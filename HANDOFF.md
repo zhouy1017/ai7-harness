@@ -1,45 +1,45 @@
 # Current handoff
 
-Status: **current cold-start router for the `design-doc` freeze-preparation line; not a design authority or historical narrative**
+Status: **freeze-marker cold-start router; active at the dedicated Issue #16 merge commit or its descendants; documentation only; no implementation authority**
 
 ## Current state
 
-- `main@c8cbe26c4cccc4a912b3bbc05bd5b23fbf5468b9` remains the recorded canonical integration baseline. Refresh that pin before any future `main` integration.
-- Before Issue #14, `design-doc@4ee5d4bb0967f82c7f8abb01aa2541616052710b` contains PR #10 Source Checkout Buildability, PR #11 Issue #8 completion, and PR #13 response presentation through D-084/J-16/UI ADR 0014.
-- The current Issue #14 candidate reorganizes repository-agent guidance and archives consumed working history. It preserves 40 root ADRs, 851 unique V2 UI/UX requirements, 84 directions, 16 journeys, and 14 UI ADRs.
-- `design-doc` remains an aggregate/candidate line. Branch-local accepted records do not become `main` implementation authority by visibility, completeness, review, or merge ancestry.
-- No product implementation, `package.json`, dependency graph, CI workflow, or supported-journey implementation exists.
+- Canonical line: `main@c8cbe26c4cccc4a912b3bbc05bd5b23fbf5468b9`, unchanged by the aggregation and freeze work.
+- Exact content baseline before the freeze marker: `design-doc@779db44cb557156f71af17e5b240b03681264ad5`.
+- Freeze identity: the merge commit of [PR #17](https://github.com/zhouy1017/ai7-harness/pull/17) into `design-doc`; Git/PR metadata supplies its exact SHA because a merge commit cannot embed its own identity.
+- [`docs/design-doc/FREEZE-BASELINE.md`](docs/design-doc/FREEZE-BASELINE.md) lists every integrated source line, recovery snapshot, stash, evidence-only ref, superseded item, reconciliation, and deferred matter.
+- The aggregate has 40 root ADRs, 851 unique V2 UI/UX requirements, D-001–D-084, J-01–J-16, and 14 V2 UI ADRs.
+- No product implementation, dependency manifest, CI workflow, supported-journey implementation, manuscript, credential, or private fixture exists in this freeze work.
+
+Before PR #17 merges, this file routes only to completing the bounded Commander integration. At the merge commit or any descendant, it routes to later owner selection from the frozen aggregate.
 
 ## Start here
 
 1. Read root [`AGENTS.md`](AGENTS.md).
-2. Read current [`PROGRESS.md`](PROGRESS.md).
-3. Read the active Issue/Change Brief and resolve authority from its exact intended target commit.
-4. Use the [agent document router](docs/agents/README.md) to load only task-specific material.
-5. If working from `design-doc`, read its [aggregate router](docs/design-doc/README.md).
+2. Read the [freeze baseline](docs/design-doc/FREEZE-BASELINE.md).
+3. Read current [`PROGRESS.md`](PROGRESS.md) and the [control board](docs/architecture-exploration/CONTROL.md).
+4. Use the [agent document router](docs/agents/README.md) to load only the runbooks relevant to the authorized task.
+5. Resolve product definitions from the exact target commit and their owning ADR, Policy Document, or context `CONTEXT.md`.
 
-Do not start from chronological history, archived handoffs, all of `kick-in/`, or a candidate package chosen because it is newer or more complete.
+Do not start from chronological history, archived handoffs, all of `kick-in/`, or whichever candidate looks newest or most complete.
 
-## Guidance now available
+## What the freeze means
 
-- [Design authority and action authorization](docs/agents/design-authority.md) separates target-qualified truth from Owner, Commander, Worker, and Reviewer permissions.
-- [Incremental development](docs/agents/incremental-development.md) enforces reuse-first vertical change, structural budgets, cumulative replacement detection, narrow bootstrap, and version iteration from the last integrated implementation.
-- [Change Brief](docs/agents/change-brief.md) supplies compact and full forms inside the existing Issue/dispatch flow.
-- [Detailed project constraints](docs/agents/project-constraints.md) retain product, authority, runtime, buildability, and migration rules behind the thin root router.
-- [Document lifecycle](docs/agents/document-lifecycle.md) drives recurring keep/archive/delete/Git-only decisions from development nodes rather than dates.
-- [Archive index](docs/archive/agent-guidance-baseline-2026-08-25/INDEX.md) records the exact first lifecycle sweep and its current replacements.
+Every discovered documentation outcome has a recorded disposition and all integrated source heads are reachable from `design-doc`. This is a stable design-reading and later-selection point.
+
+The freeze does not accept every candidate conclusion, promote anything to canonical `main`, authorize implementation planning, or grant product implementation, source-copying, dependency-installation, publication, migration, or release authority.
 
 ## Immediate traps
 
-- A same-named ADR, context, or rule in the current worktree is not canonical for another target; resolve `<target-commit>:<path>`.
-- Owner authorization defines outer scope; Commander authority dispatches, integrates, and performs approved external actions inside it. Neither substitutes for the other.
-- Bootstrap means the first thinnest accepted runnable end-to-end outcome, not empty packages or a horizontal architecture skeleton.
-- Fresh-checkout buildability is an input/launch contract for the existing provider-free E2E Functional Gate, not a separate build, package, or reproducibility gate.
-- One Book owns at most one primary Manuscript; Delivery Package binds one exact Editorial Deliverable Revision; Task Input is a Manuscript Checkpoint purpose; Run Budget Ceiling and Provider Account Limit remain distinct.
-- The AI7 Task Ledger and Harness Session Ledger join through exact Execution Bindings/Spans without transcript copying; Dialogue Answer History is a non-authoritative joined projection, not a third ledger.
-- Manuscripts, derivatives, credentials, and private samples never enter the repository or hosted CI.
-- Do not revive retired verification programmes or create a second generic agent loop.
+- Candidate status is target-qualified. Branch visibility, merge ancestry, review, or completeness does not establish canonical authority.
+- Owner authorization sets outer scope; Commander dispatch and integration authority operates inside it. Worker and Reviewer roles do not inherit either authority.
+- One Book owns at most one primary Manuscript. A Delivery Package binds exactly one Editorial Deliverable Revision, optionally at one exact Milestone Version.
+- `Task Input` is a Manuscript Checkpoint purpose. Promoting a response targets a `Task Intent Draft`.
+- Dialogue Answer History is a non-authoritative joined projection across the AI7 Task Ledger and Harness Session Ledger, not a third ledger or copied transcript.
+- Source Checkout Buildability is setup for the existing E2E Functional Gate, not a separate proof programme.
+- Manuscripts, derivatives, credentials, and private samples never enter repositories or hosted CI.
+- Do not revive retired validation programmes or create a second generic agent loop.
 
 ## Safe next action
 
-Complete the Commander-owned Issue #14 pull request into `design-doc`, then create the separate freeze-baseline Issue/branch/PR that records the disposition of every discovered documentation outcome. Keep `main` unchanged and do not infer product implementation planning or implementation permission.
+If this is the pre-merge Issue #16 source branch, complete only PR #17 into `design-doc`. At the merge commit or any descendant, obtain an explicit owner decision naming the exact candidate paths to accept, reject, or revise. Only then may the Commander prepare a separate allowlisted `main` integration. Implementation planning and implementation require their own later authorization.

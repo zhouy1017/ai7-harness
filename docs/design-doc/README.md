@@ -1,8 +1,12 @@
 # Design document integration branch
 
-Status: **aggregate Git branch with owner-resolved Windows-and-macOS product scope, completed Issue #8 and response-presentation candidates, and current repository-agent guidance/archive routing; documentation only; not canonical `main` authority**
+Status: **freeze-marker aggregate router; active at the dedicated Issue #16 merge commit or its descendants; every discovered documentation outcome has an explicit disposition; documentation only; not canonical `main` authority**
 
-The owner explicitly requested a `design-doc` branch containing the design work produced across the active sessions. This branch is therefore an intentional exception to the normal issue-branch naming rule and to `main` being the only long-lived line. It preserves each source branch as a merge parent and makes its unique artifacts reachable in one working tree. It does not turn candidate, frozen-reference, exploration, or historical material into an accepted design.
+The owner explicitly requested a `design-doc` branch containing the design work produced across the active sessions and then directed the Commander to freeze the complete aggregate as a starting point. This branch is therefore an intentional exception to the normal issue-branch naming rule and to `main` being the only long-lived line. It preserves each integrated source branch as ancestry and records an explicit disposition for recovery and evidence-only material. It does not turn candidate, frozen-reference, exploration, or historical material into an accepted design.
+
+Start with the [`design-doc` freeze baseline](./FREEZE-BASELINE.md). It is the authoritative source/disposition manifest for this aggregate, but it is not a substitute for the owning ADRs, Policy Documents, or context definitions.
+
+On the Issue #16 source branch before PR #17 merges, the freeze documents are a validated marker payload. At PR #17's merge commit or any descendant, they are the active frozen starting point.
 
 ## Included design heads
 
@@ -17,10 +21,29 @@ The owner explicitly requested a `design-doc` branch containing the design work 
 
 The initial aggregate merge commits are `8b0580b`, `95b52d6`, `63865fa`, and `b2034e2`; later Commander task integrations remain visible in branch history. Shared project paths were then restored to the exact V2 exploration head so aggregating an older branch could not silently rewrite current operating instructions. Older versions remain fully reachable through the merge parents.
 
+## Later Commander integrations
+
+| Work item | Exact source head | Pull request / aggregate merge |
+| --- | --- | --- |
+| Issue #6 CI/development boundaries | `08912db0eeb7b2ef8995988762d19d1ade710d09` | merge `9b3e949ac02ac1bd1b283c1d3c7db958733dda09` |
+| Issue #7 aggregate review repair | `66c556f4ef44ebb1f518e86528a3a2055e76755d` | merge `de16a2c3d3ee4a9f417a13c06d70e9f7b94b2bbf`, closure through `2932f61f5907558587122c7c4e0b92580951ab58` |
+| Issue #9 Source Checkout Buildability | `2ba95c60f729317f489e3f40768efa2302b5e46f` | [PR #10](https://github.com/zhouy1017/ai7-harness/pull/10), merge `7f622ddcfa774477a256a44998d56a2f8cadd326` |
+| Issue #8 missing-design completion | `55a33a2410aa385eb10277359944e7ac8f7d5ff5` | [PR #11](https://github.com/zhouy1017/ai7-harness/pull/11), merge `226ccfd1e34665c42af178e54d47f6d0c918138c` |
+| Issue #12 response presentation | `56cb1d56a9a9a823ef7f0cda8ad3f7832e88fabc` | [PR #13](https://github.com/zhouy1017/ai7-harness/pull/13), merge `4ee5d4bb0967f82c7f8abb01aa2541616052710b` |
+| Issue #14 incremental agent guidance | `e0d0d1bc7d4af40805b63834e6f12bed0eab7201` | [PR #15](https://github.com/zhouy1017/ai7-harness/pull/15), merge `779db44cb557156f71af17e5b240b03681264ad5` |
+
+[PR #17](https://github.com/zhouy1017/ai7-harness/pull/17)'s merge commit is the freeze marker. Git and PR #17 provide its exact SHA; `779db44cb557156f71af17e5b240b03681264ad5` is the immutable aggregate content head immediately before the marker payload.
+
 ## Working-tree map
 
 | Path | Interpretation |
 | --- | --- |
+| [`CONTEXT-MAP.md`](../../CONTEXT-MAP.md) | Root router to the canonical bounded-context definition owners and cross-context Policy Documents |
+| [`GLOSSARY.md`](../../GLOSSARY.md) and [`UBIQUITOUS_LANGUAGE.md`](../../UBIQUITOUS_LANGUAGE.md) | Bilingual term index and ambiguity-sensitive reading guide; neither replaces canonical context definitions |
+| [`docs/domain/`](../domain/) | Canonical Editorial, Execution, and deferred Word-integration context definitions |
+| [`docs/policies/`](../policies/) | Versioned factual-verification and learning-eligibility authority policies |
+| [`docs/design-doc/FREEZE-BASELINE.md`](./FREEZE-BASELINE.md) | Exact source, recovery, evidence, supersession, reconciliation, validation, and deferred-decision manifest for the freeze |
+| [`docs/design-doc/RECOVERY-OBJECT-DISPOSITIONS.md`](./RECOVERY-OBJECT-DISPOSITIONS.md) | Exact grouped disposition of no-ref commits and repository-external evidence found by the freeze audit |
 | `docs/architecture-exploration/` | Architecture fork control, evidence history, clarifications, dispatch records, and the later coherent candidate path |
 | `docs/architecture-v2/` | Dedicated DSH-first V2 architecture candidate; candidate only |
 | `docs/ui-ux/` | Frozen V1 UI/UX reference, including its historical prototype; not the V2 implementation baseline |
@@ -28,6 +51,7 @@ The initial aggregate merge commits are `8b0580b`, `95b52d6`, `63865fa`, and `b2
 | [`docs/design-doc/REVIEW.md`](./REVIEW.md) | Owner-requested two-axis advisory review and Commander dispositions; not a formal gate or `main` acceptance |
 | `docs/agents/` | Current focused repository-agent routing, authority, detailed constraints, incremental-development, Change Brief, document-lifecycle, Git, domain, dispatch-link, buildability, and CI runbooks |
 | [`docs/archive/`](../archive/README.md) | Node-indexed consumed working documents whose activation is atomic with their integrating Issue/PR; historical only and excluded from ordinary agent search/reading |
+| [`kick-in/`](../../kick-in/README.md) | Design-interview, inheritance, provenance, and decision-history route; read one relevant topic cluster at a time, not as current work discovery |
 | `kick-in/35-windows-macos-product-platform.md`, `kick-in/36-phase-0-exit-review.md`, `kick-in/37-v1-platform-freeze-handoff.md` | Unique Phase-0/platform candidate artifacts |
 | `docs/adr/0027-concentrate-ci-on-e2e-functionality.md` | Accepted minimal-engineering-validation decision: one logical provider-free E2E Functional Gate on both supported platforms |
 | `docs/agents/ci-test-boundaries.md` | Concise implementation boundary for scenario admission, synthetic data, launchable subject, platform parity, diagnostics, and excluded gates |
@@ -63,4 +87,4 @@ The bounded aggregate findings and their dispositions are recorded in [`REVIEW.m
 
 ## Integration rule
 
-Use this branch for consolidated design reading and review. The platform scope and ADR numbering are resolved here, but no automatic `main` integration follows. Before anything can enter `main`, the owner and Commander must identify the accepted design paths and authorize a normal pull-request integration. Do not implement from the aggregate merely because every design branch is now reachable from one ref.
+Use the Issue #16 marker as the stable starting point for consolidated design reading and later owner selection. The platform scope and ADR numbering are resolved in the aggregate, but no automatic `main` integration follows. Before anything can enter `main`, the owner must identify the accepted design paths and authorize a separate Commander pull-request integration with an exact path allowlist. Do not plan or implement the product merely because every discovered documentation outcome now has a disposition.
