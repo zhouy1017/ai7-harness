@@ -1,6 +1,6 @@
 # AI7 policy documents
 
-This directory is the stable owner for Policy Document artifacts. For the Provider Processing and External Export minimum baselines, the versioned JSON file is the authority-bearing canonical serialization of that immutable policy version. Its policy-specific JSON Schema constrains the exact v1 decision, the Markdown file is a human-readable projection that must not drift, and the active-policy-set manifest can select exact immutable bytes by version, repository-relative path, and SHA-256 digest.
+This directory is the stable owner for Policy Document artifacts. For Provider Processing and External Export, each versioned JSON file is the authority-bearing canonical serialization of that immutable policy version. Its policy-specific JSON Schema constrains that exact decision, its version-specific Markdown file is a human-readable projection that must not drift, and an active-policy-set manifest selects exact immutable bytes by version, repository-relative path, and SHA-256 digest.
 
 ## Target qualification
 
@@ -8,16 +8,22 @@ The JSON value `lifecycleStatus: "active"` describes lifecycle inside that polic
 
 A policy version is repository-current and repository-canonical only at an exact integrated `dev` commit that contains its canonical JSON and whose same-tree active-policy-set entry matches the policy identity, version, repository-relative path, and SHA-256 of those exact bytes. On any task branch not yet integrated into `dev`, the same record is `accepted-but-unintegrated`, even when its internal lifecycle status is `active` and all pins validate locally.
 
-## Restrictive v1 policy records
+## Current selected policy records
 
 | Policy | Canonical serialized policy | Schema | Human projection |
 | --- | --- | --- | --- |
-| Provider Processing v1 | [`provider-processing-policy.v1.json`](provider-processing-policy.v1.json) | [`provider-processing-policy.v1.schema.json`](provider-processing-policy.v1.schema.json) | [`provider-processing-policy.md`](provider-processing-policy.md) |
+| Provider Processing v2 | [`provider-processing-policy.v2.json`](provider-processing-policy.v2.json) | [`provider-processing-policy.v2.schema.json`](provider-processing-policy.v2.schema.json) | [`provider-processing-policy.v2.md`](provider-processing-policy.v2.md) |
 | External Export v1 | [`external-export-policy.v1.json`](external-export-policy.v1.json) | [`external-export-policy.v1.schema.json`](external-export-policy.v1.schema.json) | [`external-export-policy.md`](external-export-policy.md) |
 
-At a qualifying integrated `dev` target, [`active-policy-set.v1.json`](active-policy-set.v1.json), validated by [`active-policy-set.v1.schema.json`](active-policy-set.v1.schema.json), is the active selection owner for these two policies. A policy selection is valid only when its policy identity, version, canonical path, and SHA-256 digest all match at that exact target. Selecting a predecessor for rollback means changing the active-set selection through reviewed policy activation; it never means mutating an immutable policy version.
+At a qualifying integrated `dev` target, [`active-policy-set.v2.json`](active-policy-set.v2.json), validated by [`active-policy-set.v2.schema.json`](active-policy-set.v2.schema.json), is the active selection owner for Provider Processing v2 and unchanged External Export v1. A policy selection is valid only when its policy identity, version, canonical path, and SHA-256 digest all match at that exact target. Selecting a predecessor for rollback means creating and reviewing the applicable active-set selection; it never means mutating an immutable policy version.
 
-When target-qualified as above, Provider Processing v1 denies by default, has exactly zero provider allow rules, and authorizes no live transmission. External Export v1 denies by default and contains only one policy-eligibility rule for a platform-native user-selected local-filesystem file Effect over an exact Delivery Package version or Editorial Deliverable Revision; every file still requires its own frozen preparation, exact Effect Intent and Effect Approval, atomic commit/verification, and Effect Receipt or classified outcome. The active set creates no provider, endpoint, model, credential, file-operation implementation, network/cloud/email destination, Public Release Permission, or outcome proof.
+When target-qualified as above, Provider Processing v2 denies by default and has exactly one eligible-only rule, `sample1-manual-model-fixture-recording`. Under [ADR 0044](../adr/0044-use-sample1-as-compatibility-and-recording-baseline.md), that rule is exact-source, local-only, human-attended, CI-denied, one-call, non-`unset`-budget, exact-binding and no-fallback. Policy eligibility does not implement or dispatch the future call; follow the [manual recording runbook](../development/manual-model-fixture-recording.md) only after separate action authorization and immediate human intervention.
+
+External Export v1 denies by default and contains only one policy-eligibility rule for a platform-native user-selected local-filesystem file Effect over an exact Delivery Package version or Editorial Deliverable Revision; every file still requires its own frozen preparation, exact Effect Intent and Effect Approval, atomic commit/verification, and Effect Receipt or classified outcome. The active set creates no provider, endpoint, model, credential, file-operation implementation, current recording, network/cloud/email destination, learning, publication, Public Release Permission, or outcome proof.
+
+## Immutable predecessor records
+
+Provider Processing [`v1 JSON`](provider-processing-policy.v1.json), [`v1 schema`](provider-processing-policy.v1.schema.json) and its unchanged [`v1 human projection`](provider-processing-policy.md), plus [`active-policy-set.v1.json`](active-policy-set.v1.json) and its [`v1 schema`](active-policy-set.v1.schema.json), remain immutable predecessor history. Provider Processing v1 denies every live transmission. External Export v1 is selected unchanged by both active-set generations.
 
 ## Existing design-phase policy references
 
@@ -29,6 +35,8 @@ The schemas deliberately declare JSON Schema Draft 7 and are self-contained. Wit
 
 ```powershell
 $cases = @(
+  @('docs/policies/provider-processing-policy.v2.json', 'docs/policies/provider-processing-policy.v2.schema.json'),
+  @('docs/policies/active-policy-set.v2.json', 'docs/policies/active-policy-set.v2.schema.json'),
   @('docs/policies/provider-processing-policy.v1.json', 'docs/policies/provider-processing-policy.v1.schema.json'),
   @('docs/policies/external-export-policy.v1.json', 'docs/policies/external-export-policy.v1.schema.json'),
   @('docs/policies/active-policy-set.v1.json', 'docs/policies/active-policy-set.v1.schema.json')
@@ -43,7 +51,7 @@ foreach ($case in $cases) {
 JSON Schema validates the manifest shape but cannot read repository files to prove a digest. Verify every pin separately against the exact file bytes:
 
 ```powershell
-$set = Get-Content -Raw -LiteralPath 'docs/policies/active-policy-set.v1.json' | ConvertFrom-Json -ErrorAction Stop
+$set = Get-Content -Raw -LiteralPath 'docs/policies/active-policy-set.v2.json' | ConvertFrom-Json -ErrorAction Stop
 foreach ($pin in $set.activePolicies.PSObject.Properties.Value) {
   $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath $pin.canonicalPath).Hash.ToLowerInvariant()
   if ($actual -cne $pin.sha256) { throw "Digest mismatch: $($pin.canonicalPath)" }

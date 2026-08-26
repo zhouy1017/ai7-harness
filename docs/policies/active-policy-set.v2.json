@@ -1,0 +1,25 @@
+{
+  "schemaDialect": "http://json-schema.org/draft-07/schema#",
+  "schemaPath": "docs/policies/active-policy-set.v2.schema.json",
+  "manifestType": "ai7-active-policy-set",
+  "version": "v2",
+  "predecessorVersion": "v1",
+  "predecessorCanonicalPath": "docs/policies/active-policy-set.v1.json",
+  "digestAlgorithm": "sha256",
+  "activePolicies": {
+    "provider-processing-policy": {
+      "policyId": "provider-processing-policy",
+      "policyType": "provider-processing",
+      "version": "v2",
+      "canonicalPath": "docs/policies/provider-processing-policy.v2.json",
+      "sha256": "d0e3996ce7ba091200d83178b48fb578090bf73b509406182a2d5403ab2a4ebc"
+    },
+    "external-export-policy": {
+      "policyId": "external-export-policy",
+      "policyType": "external-export",
+      "version": "v1",
+      "canonicalPath": "docs/policies/external-export-policy.v1.json",
+      "sha256": "b66fa0f2ad7d721f879c91e3cbb8e84f6a7bb08b107424d87871ab07937242de"
+    }
+  }
+}

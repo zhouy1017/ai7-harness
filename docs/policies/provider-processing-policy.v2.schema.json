@@ -1,0 +1,792 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "AI7 Provider Processing Policy v2",
+  "description": "Validates the exact default-deny Provider Processing Policy v2 and its sole sample1 local manual recording eligibility rule.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaDialect",
+    "schemaPath",
+    "documentType",
+    "policyId",
+    "policyType",
+    "version",
+    "lifecycleStatus",
+    "predecessorVersion",
+    "predecessorCanonicalPath",
+    "canonicalPath",
+    "humanProjectionPath",
+    "authorityBasis",
+    "decision",
+    "outboundDataCategories",
+    "credentialBoundary",
+    "rawRecordingStaging",
+    "fixtureAdmission",
+    "authoritySeparations"
+  ],
+  "properties": {
+    "schemaDialect": {
+      "enum": [
+        "http://json-schema.org/draft-07/schema#"
+      ]
+    },
+    "schemaPath": {
+      "enum": [
+        "docs/policies/provider-processing-policy.v2.schema.json"
+      ]
+    },
+    "documentType": {
+      "enum": [
+        "ai7-policy-document"
+      ]
+    },
+    "policyId": {
+      "enum": [
+        "provider-processing-policy"
+      ]
+    },
+    "policyType": {
+      "enum": [
+        "provider-processing"
+      ]
+    },
+    "version": {
+      "enum": [
+        "v2"
+      ]
+    },
+    "lifecycleStatus": {
+      "enum": [
+        "active"
+      ]
+    },
+    "predecessorVersion": {
+      "enum": [
+        "v1"
+      ]
+    },
+    "predecessorCanonicalPath": {
+      "enum": [
+        "docs/policies/provider-processing-policy.v1.json"
+      ]
+    },
+    "canonicalPath": {
+      "enum": [
+        "docs/policies/provider-processing-policy.v2.json"
+      ]
+    },
+    "humanProjectionPath": {
+      "enum": [
+        "docs/policies/provider-processing-policy.v2.md"
+      ]
+    },
+    "authorityBasis": {
+      "type": "array",
+      "minItems": 7,
+      "maxItems": 7,
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "docs/domain/execution/CONTEXT.md",
+          "docs/adr/0007-separate-decisions-authority-and-effect-proof.md",
+          "docs/adr/0016-proprietary-license-and-local-only-sample-manuscripts.md",
+          "docs/adr/0018-tiered-activation-for-agent-authored-revisions.md",
+          "docs/adr/0043-allow-public-samplebooks-in-repository-and-ci.md",
+          "docs/adr/0044-use-sample1-as-compatibility-and-recording-baseline.md",
+          "docs/architecture-v2/HARNESS-INTEGRATION.md"
+        ]
+      }
+    },
+    "decision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "default",
+        "providerAllowRules"
+      ],
+      "properties": {
+        "default": {
+          "enum": [
+            "deny"
+          ]
+        },
+        "providerAllowRules": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 1,
+          "items": {
+            "$ref": "#/definitions/sample1ManualRecordingRule"
+          }
+        }
+      }
+    },
+    "outboundDataCategories": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "public-or-synthetic",
+        "unpublished-metadata",
+        "unpublished-excerpts",
+        "unpublished-full-content"
+      ],
+      "properties": {
+        "public-or-synthetic": {
+          "$ref": "#/definitions/publicOrSynthetic"
+        },
+        "unpublished-metadata": {
+          "$ref": "#/definitions/unpublishedMetadata"
+        },
+        "unpublished-excerpts": {
+          "$ref": "#/definitions/unpublishedExcerpts"
+        },
+        "unpublished-full-content": {
+          "$ref": "#/definitions/unpublishedFullContent"
+        }
+      }
+    },
+    "credentialBoundary": {
+      "$ref": "#/definitions/credentialBoundary"
+    },
+    "rawRecordingStaging": {
+      "$ref": "#/definitions/rawRecordingStaging"
+    },
+    "fixtureAdmission": {
+      "$ref": "#/definitions/fixtureAdmission"
+    },
+    "authoritySeparations": {
+      "$ref": "#/definitions/authoritySeparations"
+    }
+  },
+  "definitions": {
+    "trueValue": {
+      "enum": [
+        true
+      ]
+    },
+    "falseValue": {
+      "enum": [
+        false
+      ]
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "sample1ManualRecordingRule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ruleId",
+        "policyResult",
+        "purpose",
+        "outboundDataCategory",
+        "source",
+        "payloadScope",
+        "executionMode",
+        "providerBinding",
+        "authorizationPreconditions",
+        "requiredProductPath"
+      ],
+      "properties": {
+        "ruleId": {
+          "enum": [
+            "sample1-manual-model-fixture-recording"
+          ]
+        },
+        "policyResult": {
+          "enum": [
+            "eligible-only"
+          ]
+        },
+        "purpose": {
+          "enum": [
+            "recorded-deterministic-model-fixture-source"
+          ]
+        },
+        "outboundDataCategory": {
+          "enum": [
+            "public-or-synthetic"
+          ]
+        },
+        "source": {
+          "$ref": "#/definitions/source"
+        },
+        "payloadScope": {
+          "$ref": "#/definitions/payloadScope"
+        },
+        "executionMode": {
+          "$ref": "#/definitions/executionMode"
+        },
+        "providerBinding": {
+          "$ref": "#/definitions/providerBinding"
+        },
+        "authorizationPreconditions": {
+          "$ref": "#/definitions/authorizationPreconditions"
+        },
+        "requiredProductPath": {
+          "$ref": "#/definitions/requiredProductPath"
+        }
+      }
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "repositoryPath",
+        "byteLength",
+        "sha256",
+        "classification",
+        "requiredImportedLineage"
+      ],
+      "properties": {
+        "repositoryPath": {
+          "enum": [
+            "SampleBooks/sample1.docx"
+          ]
+        },
+        "byteLength": {
+          "type": "integer",
+          "minimum": 29550,
+          "maximum": 29550
+        },
+        "sha256": {
+          "enum": [
+            "b8a3dbde0aa8a1ec7265f9ae3fe47877759e7947c5ab69682cd0a8f424a8d483"
+          ]
+        },
+        "classification": {
+          "enum": [
+            "owner-designated-public-samplebook"
+          ]
+        },
+        "requiredImportedLineage": {
+          "$ref": "#/definitions/requiredImportedLineage"
+        }
+      }
+    },
+    "requiredImportedLineage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "exactSourceIdentity",
+        "book",
+        "primaryManuscript",
+        "manuscriptRevision",
+        "sourceAndImportRecords"
+      ],
+      "properties": {
+        "exactSourceIdentity": {
+          "$ref": "#/definitions/trueValue"
+        },
+        "book": {
+          "$ref": "#/definitions/trueValue"
+        },
+        "primaryManuscript": {
+          "$ref": "#/definitions/trueValue"
+        },
+        "manuscriptRevision": {
+          "$ref": "#/definitions/trueValue"
+        },
+        "sourceAndImportRecords": {
+          "$ref": "#/definitions/trueValue"
+        }
+      }
+    },
+    "payloadScope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "usesImportedStateOnly",
+        "publicRecordingInstructionRequired",
+        "publicRecordingInstructionHumanConfirmed",
+        "privateMaterialAllowed",
+        "unrelatedSessionOrToolMaterialAllowed"
+      ],
+      "properties": {
+        "usesImportedStateOnly": {
+          "$ref": "#/definitions/trueValue"
+        },
+        "publicRecordingInstructionRequired": {
+          "$ref": "#/definitions/trueValue"
+        },
+        "publicRecordingInstructionHumanConfirmed": {
+          "$ref": "#/definitions/trueValue"
+        },
+        "privateMaterialAllowed": {
+          "$ref": "#/definitions/falseValue"
+        },
+        "unrelatedSessionOrToolMaterialAllowed": {
+          "$ref": "#/definitions/falseValue"
+        }
+      }
+    },
+    "executionMode": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "localOnly",
+        "humanAttended",
+        "manualStartOnly",
+        "ciAllowed",
+        "scheduledAllowed",
+        "backgroundAllowed",
+        "automaticRetryAllowed"
+      ],
+      "properties": {
+        "localOnly": {
+          "$ref": "#/definitions/trueValue"
+        },
+        "humanAttended": {
+          "$ref": "#/definitions/trueValue"
+        },
+        "manualStartOnly": {
+          "$ref": "#/definitions/trueValue"
+        },
+        "ciAllowed": {
+          "$ref": "#/definitions/falseValue"
+        },
+        "scheduledAllowed": {
+          "$ref": "#/definitions/falseValue"
+        },
+        "backgroundAllowed": {
+          "$ref": "#/definitions/falseValue"
+        },
+        "automaticRetryAllowed": {
+          "$ref": "#/definitions/falseValue"
+        }
+      }
+    },
+    "providerBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "humanConfirmationRequired",
+        "exactTaskRequired",
+        "exactProviderRequired",
+        "exactModelRequired",
+        "exactEndpointRequired",
+        "exactAdapterConfigRevisionRequired",
+        "exactModelRoleRequired",
+        "exactCredentialReferenceRequired",
+        "fallbackAllowed",
+        "approvedFallbackChainMaximumItems"
+      ],
+      "properties": {
+        "humanConfirmationRequired": {
+          "$ref": "#/definitions/trueValue"
+        },
+        "exactTaskRequired": {
+          "$ref": "#/definitions/trueValue"
+        },
+        "exactProviderRequired": {
+          "$ref": "#/definitions/trueValue"
+        },
+        "exactModelRequired": {
+          "$ref": "#/definitions/trueValue"
+        },
+        "exactEndpointRequired": {
+          "$ref": "#/definitions/trueValue"
+        },
+        "exactAdapterConfigRevisionRequired": {
+          "$ref": "#/definitions/trueValue"
+        },
+        "exactModelRoleRequired": {
+          "$ref": "#/definitions/trueValue"
+        },
+        "exactCredentialReferenceRequired": {
+          "$ref": "#/definitions/trueValue"
+        },
+        "fallbackAllowed": {
+          "$ref": "#/definitions/falseValue"
+        },
+        "approvedFallbackChainMaximumItems": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 0
+        }
+      }
+    },
+    "authorizationPreconditions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "providerPreflightRequired",
+        "runAuthorizationRequired",
+        "planEnvelopeRequired",
+        "runSourceScopeRequired",
+        "immediateHumanInterventionRequired",
+        "frozenBeforeTransmission",
+        "maxCalls",
+        "nonUnsetRunBudgetCeilingRequired",
+        "promptContractDigestRequired",
+        "providerTermsReviewRequired"
+      ],
+      "properties": {
+        "providerPreflightRequired": {
+          "$ref": "#/definitions/trueValue"
+        },
+        "runAuthorizationRequired": {
+          "$ref": "#/definitions/trueValue"
+        },
+        "planEnvelopeRequired": {
+          "$ref": "#/definitions/trueValue"
+        },
+        "runSourceScopeRequired": {
+          "$ref": "#/definitions/trueValue"
+        },
+        "immediateHumanInterventionRequired": {
+          "$ref": "#/definitions/trueValue"
+        },
+        "frozenBeforeTransmission": {
+          "$ref": "#/definitions/trueValue"
+        },
+        "maxCalls": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1
+        },
+        "nonUnsetRunBudgetCeilingRequired": {
+          "$ref": "#/definitions/trueValue"
+        },
+        "promptContractDigestRequired": {
+          "$ref": "#/definitions/trueValue"
+        },
+        "providerTermsReviewRequired": {
+          "$ref": "#/definitions/trueValue"
+        }
+      }
+    },
+    "requiredProductPath": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "actualAI7ProductPathRequired",
+        "primaryAgentHarnessRequired",
+        "providerAdapterRequired",
+        "finalProviderPayloadEgressGateRequired",
+        "directProviderRequestAllowed",
+        "sideScriptAllowed",
+        "generalNetworkToolAllowed"
+      ],
+      "properties": {
+        "actualAI7ProductPathRequired": {
+          "$ref": "#/definitions/trueValue"
+        },
+        "primaryAgentHarnessRequired": {
+          "$ref": "#/definitions/trueValue"
+        },
+        "providerAdapterRequired": {
+          "$ref": "#/definitions/trueValue"
+        },
+        "finalProviderPayloadEgressGateRequired": {
+          "$ref": "#/definitions/trueValue"
+        },
+        "directProviderRequestAllowed": {
+          "$ref": "#/definitions/falseValue"
+        },
+        "sideScriptAllowed": {
+          "$ref": "#/definitions/falseValue"
+        },
+        "generalNetworkToolAllowed": {
+          "$ref": "#/definitions/falseValue"
+        }
+      }
+    },
+    "publicOrSynthetic": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "labelZh"
+      ],
+      "properties": {
+        "labelZh": {
+          "enum": [
+            "公开或合成内容"
+          ]
+        }
+      }
+    },
+    "unpublishedMetadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "labelZh"
+      ],
+      "properties": {
+        "labelZh": {
+          "enum": [
+            "未公开材料元数据"
+          ]
+        }
+      }
+    },
+    "unpublishedExcerpts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "labelZh"
+      ],
+      "properties": {
+        "labelZh": {
+          "enum": [
+            "未公开材料选段"
+          ]
+        }
+      }
+    },
+    "unpublishedFullContent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "labelZh"
+      ],
+      "properties": {
+        "labelZh": {
+          "enum": [
+            "未公开材料全文"
+          ]
+        }
+      }
+    },
+    "credentialBoundary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "isOutboundDataCategory",
+        "permittedInModelVisibleMaterial",
+        "permittedInGeneralOutboundMaterial",
+        "opaqueReferenceOnlyOutsideFinalConsumer",
+        "credentialBrokerResolutionRequired",
+        "finalAdapterOnly",
+        "policyEligibilityConfiguresCredential"
+      ],
+      "properties": {
+        "isOutboundDataCategory": {
+          "$ref": "#/definitions/falseValue"
+        },
+        "permittedInModelVisibleMaterial": {
+          "$ref": "#/definitions/falseValue"
+        },
+        "permittedInGeneralOutboundMaterial": {
+          "$ref": "#/definitions/falseValue"
+        },
+        "opaqueReferenceOnlyOutsideFinalConsumer": {
+          "$ref": "#/definitions/trueValue"
+        },
+        "credentialBrokerResolutionRequired": {
+          "$ref": "#/definitions/trueValue"
+        },
+        "finalAdapterOnly": {
+          "$ref": "#/definitions/trueValue"
+        },
+        "policyEligibilityConfiguresCredential": {
+          "$ref": "#/definitions/falseValue"
+        }
+      }
+    },
+    "rawRecordingStaging": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "location",
+        "rawRequestAndResponseAllowedOnlyThere",
+        "repositoryAllowed",
+        "logsAllowed",
+        "diagnosticsAllowed",
+        "uploadedArtifactsAllowed",
+        "distributionAllowed",
+        "deleteAfterAdmissionOrAbandonment"
+      ],
+      "properties": {
+        "location": {
+          "enum": [
+            "protected-local-staging-outside-repository"
+          ]
+        },
+        "rawRequestAndResponseAllowedOnlyThere": {
+          "$ref": "#/definitions/trueValue"
+        },
+        "repositoryAllowed": {
+          "$ref": "#/definitions/falseValue"
+        },
+        "logsAllowed": {
+          "$ref": "#/definitions/falseValue"
+        },
+        "diagnosticsAllowed": {
+          "$ref": "#/definitions/falseValue"
+        },
+        "uploadedArtifactsAllowed": {
+          "$ref": "#/definitions/falseValue"
+        },
+        "distributionAllowed": {
+          "$ref": "#/definitions/falseValue"
+        },
+        "deleteAfterAdmissionOrAbandonment": {
+          "$ref": "#/definitions/trueValue"
+        }
+      }
+    },
+    "fixtureAdmission": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "separateAuthorizedIssueAndPullRequestRequired",
+        "normalizationRequired",
+        "sanitizationRequired",
+        "provenanceRequired",
+        "providerRetentionTermsReviewRequired",
+        "providerTestReuseTermsReviewRequired",
+        "providerRedistributionTermsReviewRequired",
+        "humanContentReviewRequired",
+        "requiredImmutableDigests",
+        "rawRecordingMayBeAdmitted",
+        "reviewedFixtureOnly"
+      ],
+      "properties": {
+        "separateAuthorizedIssueAndPullRequestRequired": {
+          "$ref": "#/definitions/trueValue"
+        },
+        "normalizationRequired": {
+          "$ref": "#/definitions/trueValue"
+        },
+        "sanitizationRequired": {
+          "$ref": "#/definitions/sanitizationRequired"
+        },
+        "provenanceRequired": {
+          "$ref": "#/definitions/trueValue"
+        },
+        "providerRetentionTermsReviewRequired": {
+          "$ref": "#/definitions/trueValue"
+        },
+        "providerTestReuseTermsReviewRequired": {
+          "$ref": "#/definitions/trueValue"
+        },
+        "providerRedistributionTermsReviewRequired": {
+          "$ref": "#/definitions/trueValue"
+        },
+        "humanContentReviewRequired": {
+          "$ref": "#/definitions/trueValue"
+        },
+        "requiredImmutableDigests": {
+          "type": "array",
+          "minItems": 7,
+          "maxItems": 7,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "source",
+              "provider",
+              "model",
+              "prompt-contract",
+              "provider-processing-policy",
+              "raw-response",
+              "fixture"
+            ]
+          }
+        },
+        "rawRecordingMayBeAdmitted": {
+          "$ref": "#/definitions/falseValue"
+        },
+        "reviewedFixtureOnly": {
+          "$ref": "#/definitions/trueValue"
+        }
+      }
+    },
+    "sanitizationRequired": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "secrets",
+        "accountIdentifiers",
+        "privateMaterial",
+        "unnecessarySourceEcho",
+        "unnecessaryProviderMetadata"
+      ],
+      "properties": {
+        "secrets": {
+          "$ref": "#/definitions/trueValue"
+        },
+        "accountIdentifiers": {
+          "$ref": "#/definitions/trueValue"
+        },
+        "privateMaterial": {
+          "$ref": "#/definitions/trueValue"
+        },
+        "unnecessarySourceEcho": {
+          "$ref": "#/definitions/trueValue"
+        },
+        "unnecessaryProviderMetadata": {
+          "$ref": "#/definitions/trueValue"
+        }
+      }
+    },
+    "authoritySeparations": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "policyEligibilityDispatchesProviderCall",
+        "policyEligibilityCreatesProviderImplementation",
+        "runSourceScopeAloneAuthorizesTransmission",
+        "runAuthorizationAloneOverridesThisPolicy",
+        "configuredProviderAloneAuthorizesTransmission",
+        "configuredCredentialAloneAuthorizesTransmission",
+        "externalExportPolicyAuthorizesProviderTransmission",
+        "recordingPermissionAuthorizesExternalExport",
+        "recordingPermissionAuthorizesLearning",
+        "recordingPermissionAuthorizesPublication",
+        "recordingPermissionGrantsPublicReleasePermission",
+        "recordedFixtureIsEffectReceipt",
+        "recordedFixtureProvesProviderConformance",
+        "recordedFixtureProvesCurrentModelQuality",
+        "recordedFixtureShipsWithProduct"
+      ],
+      "properties": {
+        "policyEligibilityDispatchesProviderCall": {
+          "$ref": "#/definitions/falseValue"
+        },
+        "policyEligibilityCreatesProviderImplementation": {
+          "$ref": "#/definitions/falseValue"
+        },
+        "runSourceScopeAloneAuthorizesTransmission": {
+          "$ref": "#/definitions/falseValue"
+        },
+        "runAuthorizationAloneOverridesThisPolicy": {
+          "$ref": "#/definitions/falseValue"
+        },
+        "configuredProviderAloneAuthorizesTransmission": {
+          "$ref": "#/definitions/falseValue"
+        },
+        "configuredCredentialAloneAuthorizesTransmission": {
+          "$ref": "#/definitions/falseValue"
+        },
+        "externalExportPolicyAuthorizesProviderTransmission": {
+          "$ref": "#/definitions/falseValue"
+        },
+        "recordingPermissionAuthorizesExternalExport": {
+          "$ref": "#/definitions/falseValue"
+        },
+        "recordingPermissionAuthorizesLearning": {
+          "$ref": "#/definitions/falseValue"
+        },
+        "recordingPermissionAuthorizesPublication": {
+          "$ref": "#/definitions/falseValue"
+        },
+        "recordingPermissionGrantsPublicReleasePermission": {
+          "$ref": "#/definitions/falseValue"
+        },
+        "recordedFixtureIsEffectReceipt": {
+          "$ref": "#/definitions/falseValue"
+        },
+        "recordedFixtureProvesProviderConformance": {
+          "$ref": "#/definitions/falseValue"
+        },
+        "recordedFixtureProvesCurrentModelQuality": {
+          "$ref": "#/definitions/falseValue"
+        },
+        "recordedFixtureShipsWithProduct": {
+          "$ref": "#/definitions/falseValue"
+        }
+      }
+    }
+  }
+}

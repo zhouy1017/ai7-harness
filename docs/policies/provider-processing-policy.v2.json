@@ -1,0 +1,172 @@
+{
+  "schemaDialect": "http://json-schema.org/draft-07/schema#",
+  "schemaPath": "docs/policies/provider-processing-policy.v2.schema.json",
+  "documentType": "ai7-policy-document",
+  "policyId": "provider-processing-policy",
+  "policyType": "provider-processing",
+  "version": "v2",
+  "lifecycleStatus": "active",
+  "predecessorVersion": "v1",
+  "predecessorCanonicalPath": "docs/policies/provider-processing-policy.v1.json",
+  "canonicalPath": "docs/policies/provider-processing-policy.v2.json",
+  "humanProjectionPath": "docs/policies/provider-processing-policy.v2.md",
+  "authorityBasis": [
+    "docs/domain/execution/CONTEXT.md",
+    "docs/adr/0007-separate-decisions-authority-and-effect-proof.md",
+    "docs/adr/0016-proprietary-license-and-local-only-sample-manuscripts.md",
+    "docs/adr/0018-tiered-activation-for-agent-authored-revisions.md",
+    "docs/adr/0043-allow-public-samplebooks-in-repository-and-ci.md",
+    "docs/adr/0044-use-sample1-as-compatibility-and-recording-baseline.md",
+    "docs/architecture-v2/HARNESS-INTEGRATION.md"
+  ],
+  "decision": {
+    "default": "deny",
+    "providerAllowRules": [
+      {
+        "ruleId": "sample1-manual-model-fixture-recording",
+        "policyResult": "eligible-only",
+        "purpose": "recorded-deterministic-model-fixture-source",
+        "outboundDataCategory": "public-or-synthetic",
+        "source": {
+          "repositoryPath": "SampleBooks/sample1.docx",
+          "byteLength": 29550,
+          "sha256": "b8a3dbde0aa8a1ec7265f9ae3fe47877759e7947c5ab69682cd0a8f424a8d483",
+          "classification": "owner-designated-public-samplebook",
+          "requiredImportedLineage": {
+            "exactSourceIdentity": true,
+            "book": true,
+            "primaryManuscript": true,
+            "manuscriptRevision": true,
+            "sourceAndImportRecords": true
+          }
+        },
+        "payloadScope": {
+          "usesImportedStateOnly": true,
+          "publicRecordingInstructionRequired": true,
+          "publicRecordingInstructionHumanConfirmed": true,
+          "privateMaterialAllowed": false,
+          "unrelatedSessionOrToolMaterialAllowed": false
+        },
+        "executionMode": {
+          "localOnly": true,
+          "humanAttended": true,
+          "manualStartOnly": true,
+          "ciAllowed": false,
+          "scheduledAllowed": false,
+          "backgroundAllowed": false,
+          "automaticRetryAllowed": false
+        },
+        "providerBinding": {
+          "humanConfirmationRequired": true,
+          "exactTaskRequired": true,
+          "exactProviderRequired": true,
+          "exactModelRequired": true,
+          "exactEndpointRequired": true,
+          "exactAdapterConfigRevisionRequired": true,
+          "exactModelRoleRequired": true,
+          "exactCredentialReferenceRequired": true,
+          "fallbackAllowed": false,
+          "approvedFallbackChainMaximumItems": 0
+        },
+        "authorizationPreconditions": {
+          "providerPreflightRequired": true,
+          "runAuthorizationRequired": true,
+          "planEnvelopeRequired": true,
+          "runSourceScopeRequired": true,
+          "immediateHumanInterventionRequired": true,
+          "frozenBeforeTransmission": true,
+          "maxCalls": 1,
+          "nonUnsetRunBudgetCeilingRequired": true,
+          "promptContractDigestRequired": true,
+          "providerTermsReviewRequired": true
+        },
+        "requiredProductPath": {
+          "actualAI7ProductPathRequired": true,
+          "primaryAgentHarnessRequired": true,
+          "providerAdapterRequired": true,
+          "finalProviderPayloadEgressGateRequired": true,
+          "directProviderRequestAllowed": false,
+          "sideScriptAllowed": false,
+          "generalNetworkToolAllowed": false
+        }
+      }
+    ]
+  },
+  "outboundDataCategories": {
+    "public-or-synthetic": {
+      "labelZh": "公开或合成内容"
+    },
+    "unpublished-metadata": {
+      "labelZh": "未公开材料元数据"
+    },
+    "unpublished-excerpts": {
+      "labelZh": "未公开材料选段"
+    },
+    "unpublished-full-content": {
+      "labelZh": "未公开材料全文"
+    }
+  },
+  "credentialBoundary": {
+    "isOutboundDataCategory": false,
+    "permittedInModelVisibleMaterial": false,
+    "permittedInGeneralOutboundMaterial": false,
+    "opaqueReferenceOnlyOutsideFinalConsumer": true,
+    "credentialBrokerResolutionRequired": true,
+    "finalAdapterOnly": true,
+    "policyEligibilityConfiguresCredential": false
+  },
+  "rawRecordingStaging": {
+    "location": "protected-local-staging-outside-repository",
+    "rawRequestAndResponseAllowedOnlyThere": true,
+    "repositoryAllowed": false,
+    "logsAllowed": false,
+    "diagnosticsAllowed": false,
+    "uploadedArtifactsAllowed": false,
+    "distributionAllowed": false,
+    "deleteAfterAdmissionOrAbandonment": true
+  },
+  "fixtureAdmission": {
+    "separateAuthorizedIssueAndPullRequestRequired": true,
+    "normalizationRequired": true,
+    "sanitizationRequired": {
+      "secrets": true,
+      "accountIdentifiers": true,
+      "privateMaterial": true,
+      "unnecessarySourceEcho": true,
+      "unnecessaryProviderMetadata": true
+    },
+    "provenanceRequired": true,
+    "providerRetentionTermsReviewRequired": true,
+    "providerTestReuseTermsReviewRequired": true,
+    "providerRedistributionTermsReviewRequired": true,
+    "humanContentReviewRequired": true,
+    "requiredImmutableDigests": [
+      "source",
+      "provider",
+      "model",
+      "prompt-contract",
+      "provider-processing-policy",
+      "raw-response",
+      "fixture"
+    ],
+    "rawRecordingMayBeAdmitted": false,
+    "reviewedFixtureOnly": true
+  },
+  "authoritySeparations": {
+    "policyEligibilityDispatchesProviderCall": false,
+    "policyEligibilityCreatesProviderImplementation": false,
+    "runSourceScopeAloneAuthorizesTransmission": false,
+    "runAuthorizationAloneOverridesThisPolicy": false,
+    "configuredProviderAloneAuthorizesTransmission": false,
+    "configuredCredentialAloneAuthorizesTransmission": false,
+    "externalExportPolicyAuthorizesProviderTransmission": false,
+    "recordingPermissionAuthorizesExternalExport": false,
+    "recordingPermissionAuthorizesLearning": false,
+    "recordingPermissionAuthorizesPublication": false,
+    "recordingPermissionGrantsPublicReleasePermission": false,
+    "recordedFixtureIsEffectReceipt": false,
+    "recordedFixtureProvesProviderConformance": false,
+    "recordedFixtureProvesCurrentModelQuality": false,
+    "recordedFixtureShipsWithProduct": false
+  }
+}
