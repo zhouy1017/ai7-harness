@@ -4,6 +4,8 @@ status: accepted
 
 # Allow Owner-designated Public SampleBooks in repository and CI
 
+Partial-supersession status: [ADR 0044](./0044-use-sample1-as-compatibility-and-recording-baseline.md) supersedes this decision only for exact `SampleBooks/sample1.docx` standing compatibility and its separately governed local manual recording / reviewed-fixture exception. The historical decision body below is unchanged and continues to govern every other Public SampleBook.
+
 This ADR supersedes only the blanket repository and hosted-CI prohibition in [ADR 0016](./0016-proprietary-license-and-local-only-sample-manuscripts.md) for the narrow class defined here. ADR 0016 remains historical evidence and continues to govern private sample Books and every manuscript not expressly admitted by this decision.
 
 ## Context

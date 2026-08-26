@@ -1,0 +1,148 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "AI7 Active Policy Set v2",
+  "description": "Validates the exact active-set shape selecting Provider Processing v2 and unchanged External Export v1. Digest equality is verified separately against canonical file bytes.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaDialect",
+    "schemaPath",
+    "manifestType",
+    "version",
+    "predecessorVersion",
+    "predecessorCanonicalPath",
+    "digestAlgorithm",
+    "activePolicies"
+  ],
+  "properties": {
+    "schemaDialect": {
+      "enum": [
+        "http://json-schema.org/draft-07/schema#"
+      ]
+    },
+    "schemaPath": {
+      "enum": [
+        "docs/policies/active-policy-set.v2.schema.json"
+      ]
+    },
+    "manifestType": {
+      "enum": [
+        "ai7-active-policy-set"
+      ]
+    },
+    "version": {
+      "enum": [
+        "v2"
+      ]
+    },
+    "predecessorVersion": {
+      "enum": [
+        "v1"
+      ]
+    },
+    "predecessorCanonicalPath": {
+      "enum": [
+        "docs/policies/active-policy-set.v1.json"
+      ]
+    },
+    "digestAlgorithm": {
+      "enum": [
+        "sha256"
+      ]
+    },
+    "activePolicies": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "provider-processing-policy",
+        "external-export-policy"
+      ],
+      "properties": {
+        "provider-processing-policy": {
+          "$ref": "#/definitions/providerProcessingPin"
+        },
+        "external-export-policy": {
+          "$ref": "#/definitions/externalExportPin"
+        }
+      }
+    }
+  },
+  "definitions": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "providerProcessingPin": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "policyId",
+        "policyType",
+        "version",
+        "canonicalPath",
+        "sha256"
+      ],
+      "properties": {
+        "policyId": {
+          "enum": [
+            "provider-processing-policy"
+          ]
+        },
+        "policyType": {
+          "enum": [
+            "provider-processing"
+          ]
+        },
+        "version": {
+          "enum": [
+            "v2"
+          ]
+        },
+        "canonicalPath": {
+          "enum": [
+            "docs/policies/provider-processing-policy.v2.json"
+          ]
+        },
+        "sha256": {
+          "$ref": "#/definitions/sha256"
+        }
+      }
+    },
+    "externalExportPin": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "policyId",
+        "policyType",
+        "version",
+        "canonicalPath",
+        "sha256"
+      ],
+      "properties": {
+        "policyId": {
+          "enum": [
+            "external-export-policy"
+          ]
+        },
+        "policyType": {
+          "enum": [
+            "external-export"
+          ]
+        },
+        "version": {
+          "enum": [
+            "v1"
+          ]
+        },
+        "canonicalPath": {
+          "enum": [
+            "docs/policies/external-export-policy.v1.json"
+          ]
+        },
+        "sha256": {
+          "$ref": "#/definitions/sha256"
+        }
+      }
+    }
+  }
+}

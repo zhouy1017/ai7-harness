@@ -21,13 +21,20 @@ and SHA-256 allowlist below. The repository copies are byte-for-byte identical.
 
 Total: 6 files, 6,755,431 bytes.
 
+Under [ADR 0044](../docs/adr/0044-use-sample1-as-compatibility-and-recording-baseline.md), exact `sample1.docx` is also the standing **Sample1 Compatibility Baseline / sample1 兼容性基线** for manuscript-dependent supported journeys. Downstream components consume its imported Book/Manuscript/Revision state rather than each reparsing DOCX. Every exact fidelity signal must be truthfully preserved or disclosed through an explicit initially-unselected degradation decision; a newly discovered representable signal is not a reason to reject or replace this exact baseline. This invariant is not full J-01 or one giant test.
+
 These files may be used as provider-free input to local and hosted-CI tests,
 including authoring synthetic test data. A consuming scenario must still bind the
 exact admitted input in its own authorized Change Brief.
 
 This admission does not authorize raw manuscript payload in logs, diagnostics,
-screenshots, traces, videos, or uploaded artifacts. It also grants no application
-distribution, live-provider use, credential use, production learning, export,
-external delivery, publication, or Public Release Permission. Runtime derivatives
-remain confined to disposable external test data roots under the existing cleanup
-lifecycle.
+screenshots, traces, videos, or uploaded artifacts. For the other five files it
+also grants no live-provider use. Exact `sample1` alone has ADR 0044's future,
+separately authorized local manual recording eligibility under Provider Processing
+v2; no call, credential setup, or fixture exists now. Raw recording stays in
+protected local staging outside repositories, and only a normalized, sanitized,
+rights-reviewed and human-reviewed fixture may later enter through a separate
+Issue and pull request. Neither exception grants application distribution,
+production learning, export, external delivery, publication, Public Release
+Permission, or release-asset use. Runtime derivatives remain confined to
+disposable external test data roots under the existing cleanup lifecycle.
