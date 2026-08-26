@@ -194,7 +194,7 @@ function renderLanding(): void {
         return;
       }
       setStatus('DOCX 已完成本地暂存', 'success');
-      renderTargetChoice(result.staged, false);
+      renderTargetChoice(result.staged, null);
     } catch (error) {
       renderError(error, renderLanding);
     }
@@ -206,7 +206,10 @@ function renderLanding(): void {
   setStatus('准备就绪');
 }
 
-function renderTargetChoice(staged: StagedImportProjection, selected: boolean): void {
+function renderTargetChoice(
+  staged: StagedImportProjection,
+  selectedChoiceId: StagedImportProjection['targetChoices'][number]['id'] | null,
+): void {
   const content = panel();
   content.append(
     element('p', 'section-label', '步骤 1 / 3'),
@@ -227,7 +230,7 @@ function renderTargetChoice(staged: StagedImportProjection, selected: boolean): 
   radio.name = 'import-target';
   radio.value = targetChoice.id;
   radio.setAttribute('aria-label', targetChoice.label);
-  radio.checked = selected;
+  radio.checked = selectedChoiceId === targetChoice.id;
   const copy = element('span');
   copy.append(
     element('strong', undefined, targetChoice.label),
@@ -242,9 +245,9 @@ function renderTargetChoice(staged: StagedImportProjection, selected: boolean): 
   choice.append(radio, copy);
   choices.append(legend, choice);
   content.append(choices);
-  radio.addEventListener('change', () => renderTargetChoice(staged, true));
+  radio.addEventListener('change', () => renderTargetChoice(staged, targetChoice.id));
 
-  if (selected) {
+  if (selectedChoiceId !== null) {
     const form = element('section', 'form-row');
     const label = element('label', undefined, '书名');
     label.htmlFor = 'book-title';
@@ -269,6 +272,7 @@ function renderTargetChoice(staged: StagedImportProjection, selected: boolean): 
         const review = await window.ai7.prepareNewBookReview({
           draftId: staged.draftId,
           expectedDraftVersion: staged.draftVersion,
+          targetChoiceId: selectedChoiceId,
           confirmedTitle,
           acceptDegradation: false,
         });
@@ -284,7 +288,7 @@ function renderTargetChoice(staged: StagedImportProjection, selected: boolean): 
     queueMicrotask(() => title.focus());
   }
 
-  replaceScreen(selected ? 'title' : 'target', content);
+  replaceScreen(selectedChoiceId === null ? 'target' : 'title', content);
 }
 
 function listSection(title: string, items: ReadonlyArray<string>): HTMLElement {
@@ -371,6 +375,7 @@ function renderReview(review: ReviewBeforeImportProjection): void {
           const acceptedReview = await window.ai7.prepareNewBookReview({
             draftId: review.draftId,
             expectedDraftVersion: review.draftVersion,
+            targetChoiceId: review.target.choiceId,
             confirmedTitle: review.target.confirmedTitle,
             acceptDegradation: true,
           });

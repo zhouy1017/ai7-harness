@@ -83,13 +83,14 @@ function decodeRequest(frame: Uint8Array): ServiceRequest {
     case 'prepareNewBookReview': {
       const input = requireInput(
         value.input,
-        ['draftId', 'expectedDraftVersion', 'confirmedTitle', 'acceptDegradation'],
+        ['draftId', 'expectedDraftVersion', 'targetChoiceId', 'confirmedTitle', 'acceptDegradation'],
         tentativeId,
       );
       if (
         !isBoundedString(input.draftId, 36) ||
         !UUID_PATTERN.test(input.draftId) ||
         !isSafeInteger(input.expectedDraftVersion, 1) ||
+        (input.targetChoiceId !== 'new-book' && input.targetChoiceId !== 'new-book-distinct-intended-work') ||
         !isBoundedString(input.confirmedTitle, 180) ||
         typeof input.acceptDegradation !== 'boolean'
       ) {
@@ -263,6 +264,7 @@ async function dispatch(
         result: store.prepareNewBookReview(
           request.input.draftId,
           request.input.expectedDraftVersion,
+          request.input.targetChoiceId,
           request.input.confirmedTitle,
           request.input.acceptDegradation,
         ),

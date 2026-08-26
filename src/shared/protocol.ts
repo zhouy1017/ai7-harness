@@ -59,6 +59,8 @@ export type ImportDegradationDecisionReviewProjection =
 
 export type ImportFidelityOutcome = 'clean-import-no-round-trip' | 'degraded-import-no-round-trip';
 
+export type NewBookImportTargetChoiceId = 'new-book' | 'new-book-distinct-intended-work';
+
 export interface ExactImportMatchProjection {
   bookId: string;
   bookTitle: string;
@@ -86,7 +88,7 @@ export interface StagedImportProjection {
   };
   exactMatches: ReadonlyArray<ExactImportMatchProjection>;
   targetChoices: ReadonlyArray<{
-    id: 'new-book';
+    id: NewBookImportTargetChoiceId;
     label: '新建图书' | '新建图书（作为不同作品）';
     selected: false;
   }>;
@@ -99,6 +101,7 @@ export interface ReviewBeforeImportProjection {
   draftVersion: number;
   reviewDigest: string | null;
   target: {
+    choiceId: NewBookImportTargetChoiceId;
     kind: 'new-book';
     label: '新建图书' | '新建图书（作为不同作品）';
     confirmedTitle: string;
@@ -245,7 +248,13 @@ export interface ServiceOperationMap {
     output: StagedImportProjection;
   };
   prepareNewBookReview: {
-    input: { draftId: string; expectedDraftVersion: number; confirmedTitle: string; acceptDegradation: boolean };
+    input: {
+      draftId: string;
+      expectedDraftVersion: number;
+      targetChoiceId: NewBookImportTargetChoiceId;
+      confirmedTitle: string;
+      acceptDegradation: boolean;
+    };
     output: ReviewBeforeImportProjection;
   };
   commitNewBookImport: {
