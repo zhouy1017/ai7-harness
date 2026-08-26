@@ -2,16 +2,16 @@
 
 ## What's done
 
-- Issue #30's documentation Worker implemented the Owner-designated Public SampleBooks exception on branch `docs/30-public-samplebooks-exception` from exact `dev@85c4a098e6809ce94bb8aaa97d5648e378166db3`.
-- Added successor [`ADR 0043`](docs/adr/0043-allow-public-samplebooks-in-repository-and-ci.md) and updated the current rule owners: [`AGENTS.md`](AGENTS.md), [`.gitignore`](.gitignore), [`README.md`](README.md), [`docs/agents/project-constraints.md`](docs/agents/project-constraints.md), [`docs/agents/ci-test-boundaries.md`](docs/agents/ci-test-boundaries.md), [`docs/agents/source-checkout-buildability.md`](docs/agents/source-checkout-buildability.md), [`docs/agents/git-conventions.md`](docs/agents/git-conventions.md), and [`docs/architecture-v2/MIGRATION.md`](docs/architecture-v2/MIGRATION.md).
-- Added no file under `SampleBooks/` and changed no product code, E2E scenario, dependency, provider/export policy, domain owner, test gate, release state, or `main` state.
+- Integrated [Issue #30](https://github.com/zhouy1017/ai7-harness/issues/30) through [PR #31](https://github.com/zhouy1017/ai7-harness/pull/31). Successor [`ADR 0043`](docs/adr/0043-allow-public-samplebooks-in-repository-and-ci.md) and the updated current owners now carry the Owner-designated Public SampleBooks repository/provider-free-CI exception.
+- Corrected [Issue #28](https://github.com/zhouy1017/ai7-harness/issues/28) and its first human-review comment so the PRD projection no longer treats the exception as an unresolved repository/CI conflict.
+- Added no file under `SampleBooks/` and changed no product behavior, E2E scenario, dependency, provider/export authority, domain owner, test gate, release state, or `main` state.
 - Archive sweep: none. ADR 0016 and historical kick-ins remain immutable evidence; the successor ADR and current owners carry the clarified rule, and the prior root routing remains recoverable in Git history.
 
 ## What's next
 
-- Commander reviews the exact Worker diff and authority, creates the Issue #30 pull request, and alone integrates it to `dev` if accepted.
-- After integration, the Commander corrects Issue #28's PRD projection and first human-review comment so they no longer describe the Public SampleBooks exception as unresolved.
-- Adding or consuming any exact Public SampleBook still requires its own Owner designation through an authorized Issue/pull request and, for test consumption, a separately authorized bounded journey Change Brief.
+- Human-review Issue #28 and its linked summary against the accepted authority owners.
+- Start one next bounded implementation outcome only after separate Owner authorization and an implementation-planning Change Brief that extends existing owners.
+- Any exact Public SampleBook addition or consumption still requires Owner designation through its authorized Issue/pull request and, for test consumption, the applicable bounded Journey Change Brief.
 
 ## Key decisions made
 
@@ -22,9 +22,9 @@
 
 ## Unresolved matters or blockers
 
-- No implementation blocker exists inside Issue #30. No Public SampleBooks content is present or selected by this change.
-- Issue #28 external records remain for the Commander to correct after integration; the Worker has no external-action authority.
+- No Public SampleBooks content is present or selected. There is no remaining repository/CI rule conflict about the authorized exception.
+- The next bounded implementation outcome has not been selected or authorized. Provider, export, release, `main` promotion, and unimplemented J-01 branches remain outside current authority.
 
 ## Resume Prompt
 
-Review and integrate Issue #30's narrow Public SampleBooks governance change to `dev`; then correct Issue #28's PRD projection, while treating every exact SampleBook addition or use as separately designated input and preserving the bounded J-01 tracer boundary.
+Human-review Issue #28 and its summary; preserve the Public SampleBooks admission boundary and bounded Issue #24 tracer, and start only one separately authorized implementation outcome under its own planning Change Brief.
