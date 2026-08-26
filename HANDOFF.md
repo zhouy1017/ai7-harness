@@ -1,17 +1,19 @@
-# Reviewed PRD implementation-planning handoff
+# Approved PRD issue-decomposition handoff
 
-Start with root [`AGENTS.md`](AGENTS.md), verify the exact current `dev` tip, then read current [`PROGRESS.md`](PROGRESS.md). This file is a cold-start router, not product, domain, or implementation authority.
+Start with root [`AGENTS.md`](AGENTS.md), verify the exact current `dev` tip and its ancestry from immutable Issue #24 checkpoint `4ef62ac1d1de37c2cc644fd17669bd4669ec8441`, then read current [`PROGRESS.md`](PROGRESS.md). This file is a cold-start router, not product, domain, or implementation authority.
 
 ## Current state
 
-At exact `dev@257b361f6aa923704ecfd4ed7eed75ee1df3fb16`, [Issue #32](https://github.com/zhouy1017/ai7-harness/issues/32) is integrated through [PR #33](https://github.com/zhouy1017/ai7-harness/pull/33). Root [`SampleBooks/`](SampleBooks/) contains 6 exact Owner-designated Public SampleBooks totaling 6,755,431 bytes; [`SampleBooks/README.md`](SampleBooks/README.md) owns their provenance, integrity, permitted-use, and closed-boundary manifest.
+The Owner approved the `to-issues` decomposition of [PRD Issue #28](https://github.com/zhouy1017/ai7-harness/issues/28) into S01–S31, published as [Issues #36–#66](https://github.com/zhouy1017/ai7-harness/issues?q=is%3Aissue%20number%3A36..66) from planning base `dev@e385e767d343485d0ca1a58f82b3d015c7a3e078`.
 
-The `to-prd` revision of [PRD Issue #28](https://github.com/zhouy1017/ai7-harness/issues/28) is complete with 141 user stories across J-01–J-16. Its concise human-review projection is [Issue #28 comment 5420777600](https://github.com/zhouy1017/ai7-harness/issues/28#issuecomment-5420777600). The PRD records requirements; it does not itself authorize implementation.
+[Issue #36](https://github.com/zhouy1017/ai7-harness/issues/36) is the only `ready-for-agent` Issue. Its exact bounded outcome replaces runtime synthetic-DOCX generation in the existing J-01 tracer with admitted [`SampleBooks/sample1.docx`](SampleBooks/sample1.docx), 29,550 bytes, SHA-256 `b8a3dbde0aa8a1ec7265f9ae3fe47877759e7947c5ab69682cd0a8f424a8d483`. It extends existing owners and does not grant full J-01 authority.
 
-No Journey consumes a SampleBook. The Issue #24 J-01 tracer still generates its public-synthetic DOCX at runtime, remains bounded, and is not full J-01 authority.
+[Issues #37–#66](https://github.com/zhouy1017/ai7-harness/issues?q=is%3Aissue%20number%3A37..66) carry only the `enhancement` backlog classification. They are not implementation or dispatch authority until the Owner later selects an exact bounded outcome and it becomes work-ready against the then-current `dev`.
+
+J-14 is acceptance coverage embedded in each applicable Journey—cross-platform behavior, keyboard use, Chinese input and presentation, zoom, and accessibility—not an independent slice or standing proof gate.
 
 ## Next safe action
 
-Proceed only under a separately authorized bounded implementation-planning Change Brief for one next outcome. Extend existing owners. If the outcome consumes a SampleBook, name the exact admitted input in that brief.
+The Commander may separately dispatch only Issue #36 after reverifying the then-current exact `dev` and the Issue's bounded Change Brief. Do not dispatch Issues #37–#66, broaden the tracer into full J-01, consume another SampleBook, or introduce provider/export work.
 
-Archive sweep: none. Full J-01, provider/export work, release, `main` promotion, and unnamed SampleBook consumption remain outside current authority.
+Archive sweep: none. Release, `main` promotion, live-provider use, and all authority outside the selected bounded outcome remain closed.
