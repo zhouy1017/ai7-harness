@@ -1,23 +1,23 @@
-# AI7 V2 PRD review handoff
+# Public SampleBooks admission handoff
 
-Start with root [`AGENTS.md`](AGENTS.md), verify the exact current `dev` tip, then read current [`PROGRESS.md`](PROGRESS.md). This file is a cold-start router, not product or domain authority.
+Start with root [`AGENTS.md`](AGENTS.md), verify the exact branch and base, then read current [`PROGRESS.md`](PROGRESS.md) and [Issue #32](https://github.com/zhouy1017/ai7-harness/issues/32). This file is a cold-start router, not product or domain authority.
 
-## Current review subject
+## Current subject
 
-[Issue #28](https://github.com/zhouy1017/ai7-harness/issues/28) synthesizes the accepted AI7 V2 design into a product-level PRD with a linked human-review summary. Its body and first review comment now reflect the Public SampleBooks exception integrated through [Issue #30](https://github.com/zhouy1017/ai7-harness/issues/30) and [PR #31](https://github.com/zhouy1017/ai7-harness/pull/31); no unresolved repository/CI conflict remains.
+Branch `docs/32-admit-public-samplebooks` starts from clean `dev@9ecbbd6f8207e2583221593c9653bc96886641af` and carries only the exact Public SampleBooks admission authorized by Issue #32 and [ADR 0043](docs/adr/0043-allow-public-samplebooks-in-repository-and-ci.md).
 
-The PRD remains a review index over accepted authority owners. It grants no implementation, issue-decomposition, provider/export, release, or `main`-promotion authority.
+The six binary inputs were copied unchanged from the ignored, untracked `SampleBooks/` directory in `C:\Users\Chooo\codebase\ai7-harness` beside `main@c8cbe26c4cccc4a912b3bbc05bd5b23fbf5468b9`. Their exact paths, sizes, SHA-256 values, source identity, and boundaries are recorded in [`SampleBooks/README.md`](SampleBooks/README.md).
+
+They remain candidate inputs until the exact pull request is merged to `dev`. Issue #32 permits no additional SampleBooks file or content change.
 
 ## Exact boundary
 
-A Public SampleBook requires both exact-root `SampleBooks/` placement and explicit Owner designation of the selected material through an authorized Issue and pull request. Placement alone is not admission. The exception permits repository tracking and provider-free local/hosted-CI test input only; raw payload remains prohibited from logs, diagnostics, screenshots, traces, videos, uploaded build/test artifacts, and distributions. It grants no live-provider call, credential, outbound product network, learning, export, external delivery, publication, or public-release authority.
+The admission permits repository tracking and provider-free local/hosted-CI test input, including synthetic test-data authoring. It grants no raw manuscript payload in logs or uploaded evidence; no distribution, provider, credential, learning, export, external-delivery, publication, or Public Release authority.
 
-All other manuscripts, derivatives, and private sample Books remain excluded from repositories and hosted CI. Document formats remain ignored elsewhere in the tree.
-
-No `SampleBooks/` content is present. The current J-01 tracer still generates its public-synthetic DOCX at runtime and remains only the bounded Issue #24 result, not full J-01.
+No test currently consumes these files. The Issue #24 runtime-generated J-01 tracer is unchanged and remains a bounded happy-path tracer, not full J-01.
 
 ## Next safe action
 
-Human-review Issue #28 and its summary. Start one next bounded implementation outcome only after separate Owner authorization and its own implementation-planning Change Brief extending existing owners. A later exact Public SampleBook addition or consumption still requires Owner designation through an authorized Issue/pull request and the applicable bounded Journey Change Brief.
+The Commander may verify the exact nine-path diff and six-file byte identity, open the Issue #32 pull request, and alone integrate it to `dev`. The Commander may then update PRD Issue #28 and its concise review projection as the external-record portion of Issue #32.
 
-Archive sweep: none. ADR 0016 and historical kick-ins remain unchanged as historical evidence; ADR 0043 supersedes only their blanket repository/hosted-CI prohibition for the exact admitted class.
+Any future consumption requires a separate bounded Journey Change Brief naming the exact admitted input and extending existing owners. Archive sweep: none.
