@@ -59,6 +59,17 @@ export type ImportDegradationDecisionReviewProjection =
 
 export type ImportFidelityOutcome = 'clean-import-no-round-trip' | 'degraded-import-no-round-trip';
 
+export interface ExactImportMatchProjection {
+  bookId: string;
+  bookTitle: string;
+  sourceVersionId: string;
+  importRecordId: string;
+  identityClasses: ReadonlyArray<{
+    kind: 'immutable-original' | 'parsed-content-structure';
+    label: '精确原始文件身份' | '精确解析内容与结构身份';
+  }>;
+}
+
 export interface StagedImportProjection {
   draftId: string;
   draftVersion: number;
@@ -73,9 +84,10 @@ export interface StagedImportProjection {
     value: string;
     sourceLabel: 'DOCX 标题元数据' | '文件名';
   };
+  exactMatches: ReadonlyArray<ExactImportMatchProjection>;
   targetChoices: ReadonlyArray<{
     id: 'new-book';
-    label: '新建图书';
+    label: '新建图书' | '新建图书（作为不同作品）';
     selected: false;
   }>;
   fidelity: ReadonlyArray<FidelityCategoryProjection>;
@@ -88,10 +100,11 @@ export interface ReviewBeforeImportProjection {
   reviewDigest: string | null;
   target: {
     kind: 'new-book';
-    label: '新建图书';
+    label: '新建图书' | '新建图书（作为不同作品）';
     confirmedTitle: string;
   };
   source: StagedImportProjection['source'];
+  exactMatches: ReadonlyArray<ExactImportMatchProjection>;
   fidelity: ReadonlyArray<FidelityCategoryProjection>;
   recordsToCreate: ReadonlyArray<string>;
   nonEffects: ReadonlyArray<string>;

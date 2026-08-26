@@ -6,11 +6,11 @@ status: accepted
 
 This ADR partially supersedes [ADR 0043](./0043-allow-public-samplebooks-in-repository-and-ci.md) only for exact [`SampleBooks/sample1.docx`](../../SampleBooks/sample1.docx). It makes that exact file the standing development compatibility baseline and permits a separately governed local manual recording plus reviewed-fixture path. ADR 0043 continues to govern every other Public SampleBook, and [ADR 0016](./0016-proprietary-license-and-local-only-sample-manuscripts.md) continues to govern ordinary and private manuscripts.
 
-The Owner accepted this decision for intended integration target `dev`. On this unintegrated task branch it is `accepted-but-unintegrated`; only Commander integration can make it repository-current on `dev`. It authorizes canonical design and policy records only. It performs and authorizes no immediate Provider call, credential setup, fixture generation, product implementation, CI-workflow change, export, learning, publication, release, or `main` promotion.
+The Owner accepted this decision for intended integration target `dev`, and Commander integration made it repository-current there. A later task branch inherits this target-qualified design authority without gaining adjacent implementation authority. The decision authorizes canonical design and policy records only. It performs and authorizes no immediate Provider call, credential setup, fixture generation, product implementation, CI-workflow change, export, learning, publication, release, or `main` promotion.
 
 ## Context
 
-The first provider-free tracer currently generates a synthetic DOCX. Exact `sample1.docx` is nevertheless the Owner-selected functional target for manuscript-dependent supported journeys. Treating each newly discovered fidelity signal as a reason to reject that file would make the target unstable and would hide compatibility work behind repeated admission decisions.
+The first provider-free tracer originally generated a synthetic DOCX. Issue #36 / PR #75 subsequently extended that bounded tracer to consume exact `sample1.docx`, which remains the Owner-selected functional target for manuscript-dependent supported journeys. Treating each newly discovered fidelity signal as a reason to reject that file would make the target unstable and would hide compatibility work behind repeated admission decisions.
 
 Later model-dependent journeys also need deterministic responses. A synthetic response can exercise plumbing, but one future real response over the accepted target is needed as source material for deterministic replay. That narrow recording must not turn ordinary CI into a provider rehearsal, create a general provider exception, copy raw Provider material into Git, or bypass AI7's product authority seams.
 
@@ -92,4 +92,4 @@ Ordinary Windows and macOS CI remains provider-free and network-disabled with id
 
 This decision records the Owner clarification in Issue #73. Stop if the exception cannot remain exact-source, local-only, human-attended, non-CI, one-call, non-`unset`-budget, exact-binding and no-fallback; if a Credential Reference cannot remain opaque until the Credential Broker supplies the final adapter; or if raw recording material would enter Git, logs, artifacts or distributions.
 
-The next safe action after integration is to revise Issue #36 against the then-current exact `dev`. The actual recording remains deferred until a model-dependent product path exists and the Commander requests immediate human intervention.
+Issue #36's bounded compatibility/degraded-import implementation is complete. Any later implementation must proceed only through its own authorized bounded Change Brief against the then-current exact `dev`. The actual recording remains deferred until a model-dependent product path exists and the Commander requests immediate human intervention.
