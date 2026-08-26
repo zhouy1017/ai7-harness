@@ -490,6 +490,6 @@ _中文_: 智能体行为资产
 _Avoid_: Policy Document, House Editorial Memory, model weights, hidden runtime configuration
 
 **E2E Functional Gate**:
-The project's sole automated engineering-test surface: one logical provider-free gate running the same complete supported journey IDs and observed-bug regressions on Windows and macOS through the launchable product path. It uses public synthetic data, fails when either platform fails, and makes no separate layer, performance, security, provider, packaging, replay, release, or architecture-closure claim.
+The project's sole automated engineering-test surface: one logical provider-free gate running the same complete supported journey IDs and observed-bug regressions on Windows and macOS through the launchable product path. It uses only public test material admitted for the exact journey—public synthetic data or an Owner-designated Public SampleBook—fails when either platform fails, and makes no separate layer, performance, security, provider, packaging, replay, release, or architecture-closure claim.
 _中文_: 端到端功能关口
 _Avoid_: Factual Verification, Workflow Gate, Effect Receipt, architecture proof

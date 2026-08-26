@@ -52,7 +52,7 @@ function serviceEnvironment(executable: string): NodeJS.ProcessEnv {
 
 function readinessIsExact(value: ServiceReadiness): boolean {
   return (
-    value.protocolVersion === 1 &&
+    value.protocolVersion === 2 &&
     value.state === 'ready' &&
     value.runtime.electron === '43.4.1' &&
     value.runtime.node === '24.18.1' &&

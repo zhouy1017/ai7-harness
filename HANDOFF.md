@@ -1,29 +1,33 @@
-# Issue #73 sample1 compatibility and recording-baseline handoff
+# Issue #36 sample1 degraded-import implementation handoff
 
-Start with root [`AGENTS.md`](AGENTS.md), verify the current exact `dev` target and [`PROGRESS.md`](PROGRESS.md), then use the authority owners below. This is a cold-start router for an Owner-accepted design/policy baseline intended for `dev`; it is not authority to call a Provider, generate a fixture, implement product behavior, push, merge, release or touch `main`.
+Start with root [`AGENTS.md`](AGENTS.md), verify branch `feat/36-import-sample1-degradation`, current `HEAD`, and [`PROGRESS.md`](PROGRESS.md), then inspect live Issue #36 and its current Change Brief. This is the completed Worker handoff for the one bounded provider-free implementation outcome targeting `dev`; it grants no push, merge, release, Provider, fixture, export, full-J-01, Issue #37, `main`, or other external authority.
 
-## Exact baseline
+## Exact binding and input
 
-- Issue branch/base: `docs/73-sample1-recording-baseline` from exact `dev@4c50f0a39a81a6945cbcc87d17531f122354f6d2`, targeting `dev` only.
-- Exact compatibility input: [`SampleBooks/sample1.docx`](SampleBooks/sample1.docx), 29,550 bytes, SHA-256 `b8a3dbde0aa8a1ec7265f9ae3fe47877759e7947c5ab69682cd0a8f424a8d483`.
-- New decision owner: [ADR 0044](docs/adr/0044-use-sample1-as-compatibility-and-recording-baseline.md), partially superseding ADR 0043 only for this exact file's standing compatibility and separately governed local manual recording / reviewed-fixture exception.
-- Current policy selection only after qualifying `dev` integration: [`active-policy-set.v2.json`](docs/policies/active-policy-set.v2.json) selects Provider Processing v2 SHA-256 `d0e3996ce7ba091200d83178b48fb578090bf73b509406182a2d5403ab2a4ebc` and unchanged External Export v1 SHA-256 `b66fa0f2ad7d721f879c91e3cbb8e84f6a7bb08b107424d87871ab07937242de`.
-- Worker binding: requested `claude-opus-5@high`; actual `gpt-5.6-sol@xhigh`; T3; fallback because the Owner explicitly reported local Claude disabled.
+- Base/target: exact clean `dev@1249ed8f1b4bc57a30fa95adf36ada1d7e89d9ae`; target `dev` only; never `main`.
+- Requested Worker binding: `claude-opus-5@high`; actual: `gpt-5.6-sol@xhigh`; T3 same-class fallback because the Owner explicitly disabled local Claude.
+- Immutable input: [`SampleBooks/sample1.docx`](SampleBooks/sample1.docx), regular non-symlink file, 29,550 bytes, SHA-256 `b8a3dbde0aa8a1ec7265f9ae3fe47877759e7947c5ab69682cd0a8f424a8d483`.
+- Toolchain used without repository changes: exact Node 24.18.1 and pnpm 11.24.0.
 
-## Current decision
+## Completed outcome
 
-- `sample1` is the cross-Issue compatibility invariant for manuscript-dependent supported journeys. Truthfully representable fidelity signals resolve through preserve or an explicit initially-unselected degradation decision; discovery is not another Owner-admission trigger and cannot silently reject or replace the exact file.
-- Current implementation still uses a runtime-generated synthetic DOCX. This baseline is the accepted next target, not a claim that Issue #36, full J-01 or every manuscript-dependent outcome is implemented.
-- Provider Processing v2 remains default-deny and contains exactly one eligible-only rule, `sample1-manual-model-fixture-recording`. It creates no implementation, credential or current call.
-- Any future recording is local-only, human-attended, manually started, `maxCalls: 1`, non-`unset`-budget, exact-binding and no-fallback through the actual AI7 product / Primary Agent Harness / Provider adapter / final Payload-Egress path. Ordinary Windows/macOS CI remains provider-free and network-disabled.
-- Raw request/response bytes stay in protected local staging outside repositories and are deleted after admission or abandonment. Only a separately authorized normalized, sanitized, rights-reviewed and human-reviewed fixture may enter through another Issue/pull request. It never ships, enters learning/export/publication, proves Provider conformance/current quality, or becomes an Effect Receipt.
+- The existing DOCX parser admits the exact sample1 terminal body-section shape, keeps it out of manuscript text, and produces the authoritative ordered eight-row fidelity projection with only `inline-styles:266` and `sections:1` degraded. Generic clean fidelity remains supported; other unsupported branches remain fail-closed.
+- Protocol v2 and the existing prepare ingress accept only `acceptDegradation: boolean`. The first degraded review is a non-mutating preview with `reviewDigest:null`, the complete server-derived ordered set, and no commit. The one initially-unselected renderer checkbox sends only `true`; it cannot author keys or counts.
+- Accepted finalization creates `ai7.new-book-import-review/2`, binding exact source identity, title, all eight rows, and the canonical current-import-only decision. Commit recomputes that digest from the authoritative snapshot.
+- SQLite schema v2 reuses the existing degradation-decision owner. One transaction creates and verifies the review, eight categories, exactly one canonical decision, and the manuscript import record's exact decision link. Clean imports retain no decision.
+- The forward v1→v2 migration recreates only the two constrained tables, preserves existing clean values/digests/IDs/null links, checks references before commit, and restores foreign-key enforcement on every path. Legacy v1 clean commit results are hydrated into the current projection without rewriting persisted JSON.
+- The product UI exposes basename/bytes/SHA-256, full fidelity truth, acceptance state, degraded action wording, `含已接受的降级`, exact accepted items/counts, and linked fidelity-review/decision/import-record identities.
+- The existing exact root J-01 journey now selects sample1 directly and covers the same renderer/main/separate service/composed dormant provider-free Harness/store/window/journal path, including the bounded 32-of-97 window and durable journal acknowledgement. It reads no product DB or manuscript text and retains/uploads/logs no manuscript payload, screenshot, trace, video, artifact, or SampleBook derivative; disposable external runtime state is deleted.
 
-## Deferred recording-time human inputs
+## Evidence
 
-Immediately before any future transmission, the Commander must request human intervention to freeze the exact Provider, model, endpoint, adapter/config revision, Task, Model Role, public instruction/prompt contract, explicit monetary/token ceiling, Credential Reference enrollment and then-current Provider retention/test-reuse/redistribution terms. The recording remains deferred until the model-dependent product path exists.
+- RED: exact Node/pnpm `doctor`, `bootstrap`, and `build` passed; the first revised product-interface E2E exited 1 at payload-free `J-01/stage-target`. After the parser slice it advanced to payload-free `J-01/title-contract`.
+- GREEN: exact `pnpm run e2e -- --journey J-01` exited 0 through the complete product path.
+- Migration: a disposable diagnostic exercised the actual initializer; v1 clean review/category/import/legacy-result values were byte-for-byte unchanged, the null decision link remained null, `user_version=2`, foreign keys were restored/on, `foreign_key_check` was empty, `integrity_check` was `ok`, and a new degraded review→decision→import link succeeded. The script and data root were deleted; no gate was added.
+- No dependency, workflow, topology, host, pin, Provider, credential, recording, fixture, export, release, or SampleBook change occurred.
 
 ## Safe next action
 
-After this baseline is integrated, revise Issue #36 against the then-current exact `dev` so its bounded provider-free J-01 path consumes exact `sample1` and truthfully handles its fidelity signals. Re-dispatch only after that revised Issue/Change Brief is authorized. Do not start real recording from Issue #36 or this handoff.
+Commander may inspect the exact branch diff and commit, run the existing required validations, and decide whether to push/open the Issue #36 pull request against `dev` under separate external-action authority. Do not claim full J-01, broaden parser/import support into Issue #37, call a Provider, generate a fixture, touch `main`, or retain test runtime derivatives.
 
-Archive sweep: none. No lifecycle trigger completed in this task, historical `kick-in/26` remains historical, and no history was rewritten.
+Archive sweep: no consumed working document or disposable diagnostic remains, and no lifecycle node requires an archive move. `PROGRESS.md` and this handoff are the only current routing documents updated by the Worker.

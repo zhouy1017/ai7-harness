@@ -6,6 +6,7 @@ import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
 import type {
   FidelityCategoryProjection,
   ImportCommitProjection,
+  ImportDegradationDecisionReviewProjection,
   JournalAcknowledgement,
   JournalEditInput,
   ManuscriptBlockProjection,
@@ -20,7 +21,12 @@ import {
   MAX_EDIT_GRAPHEMES,
   MAX_WINDOW_BLOCKS,
 } from '../shared/protocol.js';
-import { isCleanTracerFidelity, parseDocx, type ParsedDocxBlock } from './docx.js';
+import {
+  deriveImportFidelityPlan,
+  parseDocx,
+  type ImportFidelityPlan,
+  type ParsedDocxBlock,
+} from './docx.js';
 import {
   createCanonicalExternalDataRoot,
   ensureCanonicalDataDirectory,
@@ -29,7 +35,7 @@ import {
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const TOKEN_PATTERN = UUID_PATTERN;
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 const WORKFLOW_PROFILE = {
   id: 'ai7.manuscript.editorial.zh-CN',
   name: '基础书稿编辑流程',
@@ -52,7 +58,7 @@ const BASELINE_EDITORIAL_DIMENSION_SET = {
     { id: 'production-cross-deliverable-consistency', label: '制作与跨交付物一致性', weight: 1 },
   ],
 } as const;
-const RECORDS_TO_CREATE = [
+const BASE_RECORDS_TO_CREATE = [
   '图书与稳定标识',
   '图书编辑维度集（8 项）',
   '源材料版本与来源记录',
@@ -71,8 +77,9 @@ const NON_EFFECTS = [
   '不创建公开发布许可或公开发布事实',
   '不导出、不发送、不交付、不发布',
   '不承诺 DOCX 往返或版式复原',
-  '符合当前范围的导入不创建导入降级决定',
 ] as const;
+const CLEAN_IMPORT_NON_EFFECT = '符合当前范围的导入不创建导入降级决定';
+const DEGRADATION_DECISION_SCHEMA = 'ai7.import-degradation-decision/1';
 
 type SqlRow = Record<string, SQLOutputValue>;
 
@@ -182,11 +189,91 @@ function configureDatabase(db: DatabaseSync): void {
   `);
 }
 
+function migrateSchemaV1ToV2(db: DatabaseSync): void {
+  db.exec('PRAGMA foreign_keys = OFF');
+  let migrationError: unknown;
+  try {
+    const foreignKeys = one(db.prepare('PRAGMA foreign_keys').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取引用校验状态。');
+    requireStore(asNumber(foreignKeys.foreign_keys) === 0, 'SCHEMA_INVALID', '无法暂时停用引用校验以迁移数据库。');
+    db.exec(`
+      BEGIN IMMEDIATE;
+
+      CREATE TABLE import_fidelity_reviews_v2 (
+        fidelity_review_id TEXT PRIMARY KEY,
+        book_id TEXT NOT NULL REFERENCES books(book_id),
+        source_version_id TEXT NOT NULL UNIQUE REFERENCES source_versions(source_version_id),
+        review_digest TEXT NOT NULL UNIQUE,
+        outcome TEXT NOT NULL CHECK(outcome IN ('clean-import-no-round-trip', 'degraded-import-no-round-trip')),
+        round_trip_guaranteed INTEGER NOT NULL CHECK(round_trip_guaranteed = 0),
+        created_at TEXT NOT NULL
+      ) STRICT;
+
+      INSERT INTO import_fidelity_reviews_v2(
+        fidelity_review_id, book_id, source_version_id, review_digest, outcome, round_trip_guaranteed, created_at
+      )
+      SELECT fidelity_review_id, book_id, source_version_id, review_digest, outcome, round_trip_guaranteed, created_at
+      FROM import_fidelity_reviews;
+
+      CREATE TABLE manuscript_import_records_v2 (
+        import_record_id TEXT PRIMARY KEY,
+        commit_id TEXT NOT NULL UNIQUE,
+        book_id TEXT NOT NULL UNIQUE REFERENCES books(book_id),
+        manuscript_id TEXT NOT NULL UNIQUE REFERENCES manuscripts(manuscript_id),
+        source_version_id TEXT NOT NULL UNIQUE REFERENCES source_versions(source_version_id),
+        fidelity_review_id TEXT NOT NULL UNIQUE REFERENCES import_fidelity_reviews_v2(fidelity_review_id),
+        degradation_decision_id TEXT REFERENCES import_degradation_decisions(degradation_decision_id),
+        resulting_revision_id TEXT NOT NULL UNIQUE REFERENCES manuscript_revisions(revision_id),
+        provenance_id TEXT NOT NULL UNIQUE REFERENCES source_provenance(provenance_id),
+        imported_at TEXT NOT NULL
+      ) STRICT;
+
+      INSERT INTO manuscript_import_records_v2(
+        import_record_id, commit_id, book_id, manuscript_id, source_version_id, fidelity_review_id,
+        degradation_decision_id, resulting_revision_id, provenance_id, imported_at
+      )
+      SELECT import_record_id, commit_id, book_id, manuscript_id, source_version_id, fidelity_review_id,
+             degradation_decision_id, resulting_revision_id, provenance_id, imported_at
+      FROM manuscript_import_records;
+
+      DROP TABLE manuscript_import_records;
+      DROP TABLE import_fidelity_reviews;
+      ALTER TABLE import_fidelity_reviews_v2 RENAME TO import_fidelity_reviews;
+      ALTER TABLE manuscript_import_records_v2 RENAME TO manuscript_import_records;
+      PRAGMA user_version = 2;
+    `);
+    const violations = db.prepare('PRAGMA foreign_key_check').all();
+    requireStore(violations.length === 0, 'SCHEMA_MIGRATION_FAILED', '数据库迁移后的引用校验失败。');
+    db.exec('COMMIT');
+  } catch (error) {
+    migrationError = error;
+    try {
+      db.exec('ROLLBACK');
+    } catch (rollbackError) {
+      migrationError = new AggregateError([error, rollbackError], 'SQLite schema migration rollback failed.');
+    }
+  } finally {
+    try {
+      db.exec('PRAGMA foreign_keys = ON');
+      const foreignKeys = one(db.prepare('PRAGMA foreign_keys').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取引用校验状态。');
+      requireStore(asNumber(foreignKeys.foreign_keys) === 1, 'SCHEMA_INVALID', '无法恢复引用校验。');
+    } catch (restoreError) {
+      migrationError = migrationError
+        ? new AggregateError([migrationError, restoreError], 'SQLite schema migration and foreign-key restoration failed.')
+        : restoreError;
+    }
+  }
+  if (migrationError) throw migrationError;
+}
+
 function initializeSchema(db: DatabaseSync): void {
   const versionRow = one(db.prepare('PRAGMA user_version').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取数据库版本。');
   const currentVersion = asNumber(versionRow.user_version);
-  requireStore(currentVersion === 0 || currentVersion === SCHEMA_VERSION, 'SCHEMA_UNSUPPORTED', '数据库版本不受支持。');
+  requireStore(currentVersion === 0 || currentVersion === 1 || currentVersion === SCHEMA_VERSION, 'SCHEMA_UNSUPPORTED', '数据库版本不受支持。');
   if (currentVersion === SCHEMA_VERSION) return;
+  if (currentVersion === 1) {
+    migrateSchemaV1ToV2(db);
+    return;
+  }
 
   db.exec(`
     BEGIN IMMEDIATE;
@@ -295,7 +382,7 @@ function initializeSchema(db: DatabaseSync): void {
       book_id TEXT NOT NULL REFERENCES books(book_id),
       source_version_id TEXT NOT NULL UNIQUE REFERENCES source_versions(source_version_id),
       review_digest TEXT NOT NULL UNIQUE,
-      outcome TEXT NOT NULL CHECK(outcome = 'clean-import-no-round-trip'),
+      outcome TEXT NOT NULL CHECK(outcome IN ('clean-import-no-round-trip', 'degraded-import-no-round-trip')),
       round_trip_guaranteed INTEGER NOT NULL CHECK(round_trip_guaranteed = 0),
       created_at TEXT NOT NULL
     ) STRICT;
@@ -398,8 +485,7 @@ function initializeSchema(db: DatabaseSync): void {
       degradation_decision_id TEXT REFERENCES import_degradation_decisions(degradation_decision_id),
       resulting_revision_id TEXT NOT NULL UNIQUE REFERENCES manuscript_revisions(revision_id),
       provenance_id TEXT NOT NULL UNIQUE REFERENCES source_provenance(provenance_id),
-      imported_at TEXT NOT NULL,
-      CHECK(degradation_decision_id IS NULL)
+      imported_at TEXT NOT NULL
     ) STRICT;
 
     CREATE TABLE import_commits (
@@ -453,7 +539,7 @@ function initializeSchema(db: DatabaseSync): void {
     CREATE INDEX working_blocks_window ON working_blocks(branch_id, position);
     CREATE INDEX journal_branch_order ON edit_journal_entries(branch_id, sequence);
 
-    PRAGMA user_version = 1;
+    PRAGMA user_version = 2;
     COMMIT;
   `);
 }
@@ -468,12 +554,95 @@ interface DraftSnapshot {
   reviewDigest: string | null;
   parserIdentity: string;
   sourceDigest: string;
+  sourceBytes: number;
   contentDigest: string;
   structureDigest: string;
   blockCount: number;
   fidelity: FidelityCategoryProjection[];
   titleSuggestion: string;
   titleSource: StagedImportProjection['titleSuggestion']['sourceLabel'];
+}
+
+function recordsToCreate(plan: ImportFidelityPlan): ReadonlyArray<string> {
+  if (plan.degradations.length === 0) return BASE_RECORDS_TO_CREATE;
+  return [...BASE_RECORDS_TO_CREATE.slice(0, 4), '导入降级决定', ...BASE_RECORDS_TO_CREATE.slice(4)];
+}
+
+function nonEffects(plan: ImportFidelityPlan): ReadonlyArray<string> {
+  return plan.degradations.length === 0 ? [...NON_EFFECTS, CLEAN_IMPORT_NON_EFFECT] : NON_EFFECTS;
+}
+
+function degradationReview(
+  plan: ImportFidelityPlan,
+  accepted: boolean,
+): ImportDegradationDecisionReviewProjection {
+  if (plan.degradations.length === 0) return { state: 'not-required-clean-import', items: [] };
+  return {
+    state: accepted ? 'accepted-complete-set' : 'required-unselected',
+    items: plan.degradations,
+  };
+}
+
+function canonicalDegradationDecision(plan: ImportFidelityPlan): string | null {
+  if (plan.degradations.length === 0) return null;
+  return canonicalJson({
+    schema: DEGRADATION_DECISION_SCHEMA,
+    scope: 'this-import-only',
+    state: 'accepted-complete-set',
+    items: plan.degradations,
+  });
+}
+
+function parseStoredJson(value: string, message: string): unknown {
+  try {
+    return JSON.parse(value) as unknown;
+  } catch {
+    throw new StoreError('STORE_CORRUPT', message);
+  }
+}
+
+function createNewBookReviewDigest(
+  snapshot: DraftSnapshot,
+  confirmedTitle: string,
+  draftVersion: number,
+  plan: ImportFidelityPlan,
+): string {
+  return sha256(
+    canonicalJson({
+      schema: 'ai7.new-book-import-review/2',
+      draftId: snapshot.draftId,
+      draftVersion,
+      target: 'new-book',
+      confirmedTitle,
+      source: {
+        displayName: snapshot.displayName,
+        provenance: 'native-file-picker/local-provider-free',
+        objectDigest: snapshot.objectDigest,
+        parserIdentity: snapshot.parserIdentity,
+        sourceDigest: snapshot.sourceDigest,
+        sourceBytes: snapshot.sourceBytes,
+        contentDigest: snapshot.contentDigest,
+        structureDigest: snapshot.structureDigest,
+      },
+      fidelity: snapshot.fidelity,
+      degradationDecision:
+        plan.degradations.length === 0
+          ? null
+          : {
+              schema: DEGRADATION_DECISION_SCHEMA,
+              scope: 'this-import-only',
+              state: 'accepted-complete-set',
+              items: plan.degradations,
+            },
+      recordsToCreate: recordsToCreate(plan),
+      nonEffects: nonEffects(plan),
+      workflowProfile: { ...WORKFLOW_PROFILE, digest: WORKFLOW_PROFILE_DIGEST },
+      editorialDimensionSet: {
+        ...BASELINE_EDITORIAL_DIMENSION_SET,
+        digest: BASELINE_EDITORIAL_DIMENSION_SET_DIGEST,
+      },
+    }),
+  );
 }
 
 export class EditorialStore {
@@ -634,6 +803,7 @@ export class EditorialStore {
         reviewDigest: null,
         parserIdentity: parsed.parserIdentity,
         sourceDigest: parsed.sourceDigest,
+        sourceBytes: parsed.archiveBytes,
         contentDigest: parsed.contentDigest,
         structureDigest: parsed.structureDigest,
         blockCount: parsed.blocks.length,
@@ -654,6 +824,7 @@ export class EditorialStore {
     draftId: string,
     expectedDraftVersion: number,
     confirmedTitleInput: string,
+    acceptDegradation: boolean,
   ): ReviewBeforeImportProjection {
     this.#assertAvailable();
     requireStore(UUID_PATTERN.test(draftId), 'DRAFT_INVALID', '导入草稿标识无效。');
@@ -661,34 +832,17 @@ export class EditorialStore {
     const snapshot = this.#loadDraftSnapshot(draftId);
     requireStore(snapshot.state === 'staged', 'DRAFT_STATE_CHANGED', '导入草稿状态已变化。');
     requireStore(snapshot.version === expectedDraftVersion, 'DRAFT_VERSION_CHANGED', '导入草稿版本已变化。');
-    requireStore(isCleanTracerFidelity(snapshot.fidelity), 'FIDELITY_OUTSIDE_TRACER', '当前导入仅提交符合受限范围的文本内容，且不建立 DOCX 往返保证。');
-    const nextVersion = expectedDraftVersion + 1;
-    const reviewDigest = sha256(
-      canonicalJson({
-        schema: 'ai7.new-book-import-review/1',
-        draftId,
-        draftVersion: nextVersion,
-        target: 'new-book',
-        confirmedTitle,
-        source: {
-          displayName: snapshot.displayName,
-          provenance: 'native-file-picker/local-provider-free',
-          objectDigest: snapshot.objectDigest,
-          parserIdentity: snapshot.parserIdentity,
-          sourceDigest: snapshot.sourceDigest,
-          contentDigest: snapshot.contentDigest,
-          structureDigest: snapshot.structureDigest,
-        },
-        fidelity: snapshot.fidelity,
-        recordsToCreate: RECORDS_TO_CREATE,
-        nonEffects: NON_EFFECTS,
-        workflowProfile: { ...WORKFLOW_PROFILE, digest: WORKFLOW_PROFILE_DIGEST },
-        editorialDimensionSet: {
-          ...BASELINE_EDITORIAL_DIMENSION_SET,
-          digest: BASELINE_EDITORIAL_DIMENSION_SET_DIGEST,
-        },
-      }),
+    const plan = this.#requireFidelityPlan(snapshot);
+    if (plan.degradations.length > 0 && !acceptDegradation) {
+      return this.#reviewProjection(snapshot, confirmedTitle, null, plan, false);
+    }
+    requireStore(
+      plan.degradations.length > 0 || !acceptDegradation,
+      'DEGRADATION_ACCEPTANCE_INVALID',
+      '本次导入不需要降级接受。',
     );
+    const nextVersion = expectedDraftVersion + 1;
+    const reviewDigest = createNewBookReviewDigest(snapshot, confirmedTitle, nextVersion, plan);
     const reviewedAt = new Date().toISOString();
     this.#transaction(this.#authority, () => {
       const update = this.#authority
@@ -700,7 +854,13 @@ export class EditorialStore {
         .run(nextVersion, confirmedTitle, reviewDigest, reviewedAt, draftId, expectedDraftVersion);
       requireStore(update.changes === 1, 'DRAFT_VERSION_CHANGED', '导入草稿在复核时已变化。');
     });
-    return this.#reviewProjection({ ...snapshot, state: 'reviewed', version: nextVersion, reviewedTitle: confirmedTitle, reviewDigest });
+    return this.#reviewProjection(
+      { ...snapshot, state: 'reviewed', version: nextVersion, reviewedTitle: confirmedTitle, reviewDigest },
+      confirmedTitle,
+      reviewDigest,
+      plan,
+      plan.degradations.length > 0,
+    );
   }
 
   commitNewBookImport(input: {
@@ -719,7 +879,9 @@ export class EditorialStore {
       const existing = this.#authority.prepare('SELECT request_fingerprint, result_json FROM import_commits WHERE commit_id = ?').all(input.commitId) as SqlRow[];
       if (existing.length === 1) {
         requireStore(asString(existing[0]!.request_fingerprint) === requestFingerprint, 'IDEMPOTENCY_CONFLICT', '提交标识已用于另一项导入。');
-        result = JSON.parse(asString(existing[0]!.result_json)) as Omit<ImportCommitProjection, 'firstWindow'>;
+        const storedResult = parseStoredJson(asString(existing[0]!.result_json), '导入提交结果记录无效。');
+        requireStore(storedResult !== null && typeof storedResult === 'object' && !Array.isArray(storedResult), 'STORE_CORRUPT', '导入提交结果记录无效。');
+        result = this.#loadStoredCommitResult(input.commitId);
         return;
       }
 
@@ -728,7 +890,12 @@ export class EditorialStore {
       requireStore(snapshot.version === input.expectedDraftVersion, 'DRAFT_VERSION_CHANGED', '导入草稿版本已变化。');
       requireStore(snapshot.reviewDigest === input.reviewDigest, 'REVIEW_CHANGED', '导入前复核摘要已变化。');
       requireStore(snapshot.reviewedTitle, 'REVIEW_CHANGED', '确认书名缺失。');
-      requireStore(isCleanTracerFidelity(snapshot.fidelity), 'FIDELITY_OUTSIDE_TRACER', '当前导入仅提交符合受限范围的文本内容，且不建立 DOCX 往返保证。');
+      const plan = this.#requireFidelityPlan(snapshot);
+      requireStore(
+        createNewBookReviewDigest(snapshot, snapshot.reviewedTitle, snapshot.version, plan) === input.reviewDigest,
+        'REVIEW_CHANGED',
+        '导入前复核摘要无法由当前权威快照重建。',
+      );
       const stagedBlocks = this.#loadStagedBlocks(input.draftId);
       requireStore(stagedBlocks.length === snapshot.blockCount, 'SNAPSHOT_INCOMPLETE', '暂存快照不完整。');
 
@@ -738,6 +905,7 @@ export class EditorialStore {
       const sourceVersionId = randomUUID();
       const provenanceId = randomUUID();
       const fidelityReviewId = randomUUID();
+      const degradationDecisionId = plan.degradations.length > 0 ? randomUUID() : null;
       const manuscriptId = randomUUID();
       const branchId = randomUUID();
       const revisionId = randomUUID();
@@ -806,9 +974,9 @@ export class EditorialStore {
         .prepare(
           `INSERT INTO import_fidelity_reviews(
              fidelity_review_id, book_id, source_version_id, review_digest, outcome, round_trip_guaranteed, created_at
-           ) VALUES (?, ?, ?, ?, 'clean-import-no-round-trip', 0, ?)`,
+           ) VALUES (?, ?, ?, ?, ?, 0, ?)`,
         )
-        .run(fidelityReviewId, bookId, sourceVersionId, input.reviewDigest, now);
+        .run(fidelityReviewId, bookId, sourceVersionId, input.reviewDigest, plan.outcome, now);
       const insertFidelity = this.#authority.prepare(
         `INSERT INTO import_fidelity_categories(
            fidelity_review_id, category_key, display_label, item_count, status, detail, position
@@ -825,6 +993,17 @@ export class EditorialStore {
           index + 1,
         ),
       );
+      if (degradationDecisionId) {
+        const decision = canonicalDegradationDecision(plan);
+        requireStore(decision, 'FIDELITY_OUTSIDE_TRACER', '降级决定无法形成规范记录。');
+        this.#authority
+          .prepare(
+            `INSERT INTO import_degradation_decisions(
+               degradation_decision_id, fidelity_review_id, decision, created_at
+             ) VALUES (?, ?, ?, ?)`,
+          )
+          .run(degradationDecisionId, fidelityReviewId, decision, now);
+      }
       this.#authority.prepare("INSERT INTO manuscripts(manuscript_id, book_id, role, created_at) VALUES (?, ?, 'primary', ?)").run(manuscriptId, bookId, now);
       this.#authority.prepare('INSERT INTO manuscript_branches(branch_id, manuscript_id, name, created_at) VALUES (?, ?, ?, ?)').run(branchId, manuscriptId, '主分支', now);
       this.#authority
@@ -897,9 +1076,20 @@ export class EditorialStore {
           `INSERT INTO manuscript_import_records(
              import_record_id, commit_id, book_id, manuscript_id, source_version_id, fidelity_review_id,
              degradation_decision_id, resulting_revision_id, provenance_id, imported_at
-           ) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)`,
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
-        .run(importRecordId, input.commitId, bookId, manuscriptId, sourceVersionId, fidelityReviewId, revisionId, provenanceId, now);
+        .run(
+          importRecordId,
+          input.commitId,
+          bookId,
+          manuscriptId,
+          sourceVersionId,
+          fidelityReviewId,
+          degradationDecisionId,
+          revisionId,
+          provenanceId,
+          now,
+        );
       this.#authority
         .prepare(
           `INSERT INTO branch_working_state(
@@ -917,6 +1107,23 @@ export class EditorialStore {
         branchId,
         revisionId,
         importRecordId,
+        source: this.#stagedProjection(snapshot).source,
+        fidelityReview: {
+          fidelityReviewId,
+          outcome: plan.outcome,
+          categories: snapshot.fidelity,
+        },
+        importRecord: {
+          importRecordId,
+          fidelityReviewId,
+          degradationDecision: degradationDecisionId
+            ? {
+                degradationDecisionId,
+                summaryLabel: '含已接受的降级',
+                acceptedItems: plan.degradations,
+              }
+            : null,
+        },
       };
       this.#authority
         .prepare(
@@ -950,9 +1157,14 @@ export class EditorialStore {
         revisionId,
         sourceVersionId,
         fidelityReviewId,
+        degradationDecisionId,
         workflowInstanceId,
         importRecordId,
         blockCount: authoritativeBlocks.length,
+        reviewDigest: input.reviewDigest,
+        fidelityPlan: plan,
+        sourceDigest: snapshot.sourceDigest,
+        sourceBytes: snapshot.sourceBytes,
       });
       this.#authority.prepare('DELETE FROM staged_import_snapshots WHERE draft_id = ?').run(input.draftId);
       this.#assertForeignKeys(this.#authority);
@@ -1188,6 +1400,7 @@ export class EditorialStore {
         displayName: snapshot.displayName,
         format: 'DOCX',
         sourceSha256: snapshot.sourceDigest,
+        sourceBytes: snapshot.sourceBytes,
         provenanceLabel: '本机文件选择器 · 本地解析 · 未联网',
       },
       titleSuggestion: { value: snapshot.titleSuggestion, sourceLabel: snapshot.titleSource },
@@ -1197,17 +1410,22 @@ export class EditorialStore {
     };
   }
 
-  #reviewProjection(snapshot: DraftSnapshot): ReviewBeforeImportProjection {
-    requireStore(snapshot.reviewedTitle && snapshot.reviewDigest, 'REVIEW_CHANGED', '导入复核记录不完整。');
+  #reviewProjection(
+    snapshot: DraftSnapshot,
+    confirmedTitle: string,
+    reviewDigest: string | null,
+    plan: ImportFidelityPlan,
+    accepted: boolean,
+  ): ReviewBeforeImportProjection {
     return {
       draftId: snapshot.draftId,
       draftVersion: snapshot.version,
-      reviewDigest: snapshot.reviewDigest,
-      target: { kind: 'new-book', label: '新建图书', confirmedTitle: snapshot.reviewedTitle },
+      reviewDigest,
+      target: { kind: 'new-book', label: '新建图书', confirmedTitle },
       source: this.#stagedProjection(snapshot).source,
       fidelity: snapshot.fidelity,
-      recordsToCreate: RECORDS_TO_CREATE,
-      nonEffects: NON_EFFECTS,
+      recordsToCreate: recordsToCreate(plan),
+      nonEffects: nonEffects(plan),
       workflowProfile: {
         id: WORKFLOW_PROFILE.id,
         name: WORKFLOW_PROFILE.name,
@@ -1218,7 +1436,7 @@ export class EditorialStore {
         ...BASELINE_EDITORIAL_DIMENSION_SET,
         digest: BASELINE_EDITORIAL_DIMENSION_SET_DIGEST,
       },
-      degradationDecision: 'not-created-clean-import',
+      degradationDecision: degradationReview(plan, accepted),
     };
   }
 
@@ -1229,15 +1447,24 @@ export class EditorialStore {
           `SELECT d.draft_id, d.state, d.draft_version, d.display_name, d.object_digest,
                   d.reviewed_title, d.review_digest, s.parser_identity, s.source_digest,
                   s.content_digest, s.structure_digest, s.block_count, s.fidelity_json,
-                  s.title_suggestion, s.title_source
+                  s.title_suggestion, s.title_source, co.byte_length
            FROM import_drafts d
            JOIN staged_import_snapshots s ON s.draft_id = d.draft_id
+           JOIN content_objects co ON co.object_digest = d.object_digest
            WHERE d.draft_id = ?`,
         )
         .all(draftId) as SqlRow[],
       'DRAFT_NOT_FOUND',
       '导入草稿不存在或已完成。',
     );
+    const sourceDigest = asString(row.source_digest);
+    const sourceBytes = asNumber(row.byte_length);
+    requireStore(asString(row.object_digest) === sourceDigest, 'STORE_CORRUPT', '暂存对象与来源摘要不一致。');
+    const fidelityValue = parseStoredJson(asString(row.fidelity_json), '导入保真快照无效。');
+    const plan = deriveImportFidelityPlan(fidelityValue, sourceDigest, sourceBytes);
+    requireStore(plan, 'FIDELITY_OUTSIDE_TRACER', '持久化导入保真快照不符合当前受限边界。');
+    const titleSource = asString(row.title_source);
+    requireStore(titleSource === 'DOCX 标题元数据' || titleSource === '文件名', 'STORE_CORRUPT', '书名建议来源无效。');
     return {
       draftId: asString(row.draft_id),
       state: asString(row.state),
@@ -1247,13 +1474,126 @@ export class EditorialStore {
       reviewedTitle: row.reviewed_title === null ? null : asString(row.reviewed_title),
       reviewDigest: row.review_digest === null ? null : asString(row.review_digest),
       parserIdentity: asString(row.parser_identity),
-      sourceDigest: asString(row.source_digest),
+      sourceDigest,
+      sourceBytes,
       contentDigest: asString(row.content_digest),
       structureDigest: asString(row.structure_digest),
       blockCount: asNumber(row.block_count),
-      fidelity: JSON.parse(asString(row.fidelity_json)) as FidelityCategoryProjection[],
+      fidelity: fidelityValue as FidelityCategoryProjection[],
       titleSuggestion: asString(row.title_suggestion),
-      titleSource: asString(row.title_source) as DraftSnapshot['titleSource'],
+      titleSource,
+    };
+  }
+
+  #requireFidelityPlan(snapshot: DraftSnapshot): ImportFidelityPlan {
+    const plan = deriveImportFidelityPlan(snapshot.fidelity, snapshot.sourceDigest, snapshot.sourceBytes);
+    requireStore(plan, 'FIDELITY_OUTSIDE_TRACER', '当前导入的保真计划不符合受限边界。');
+    return plan;
+  }
+
+  #loadPersistedFidelity(fidelityReviewId: string): FidelityCategoryProjection[] {
+    return (
+      this.#authority
+        .prepare(
+          `SELECT category_key, display_label, item_count, status, detail
+           FROM import_fidelity_categories WHERE fidelity_review_id = ? ORDER BY position`,
+        )
+        .all(fidelityReviewId) as SqlRow[]
+    ).map((row) => {
+      const status = asString(row.status);
+      requireStore(status === 'preserved' || status === 'degraded' || status === 'unsupported', 'STORE_CORRUPT', '保真状态无效。');
+      return {
+        key: asString(row.category_key) as FidelityCategoryProjection['key'],
+        label: asString(row.display_label),
+        count: asNumber(row.item_count),
+        status,
+        statusLabel: status === 'preserved' ? '完整保留' : status === 'degraded' ? '降级导入' : '不支持导入',
+        detail: asString(row.detail),
+      };
+    });
+  }
+
+  #loadStoredCommitResult(commitId: string): Omit<ImportCommitProjection, 'firstWindow'> {
+    const row = one(
+      this.#authority
+        .prepare(
+          `SELECT ic.commit_id, ic.committed_at, ir.import_record_id, ir.book_id, ir.manuscript_id,
+                  ir.fidelity_review_id, ir.degradation_decision_id, ir.resulting_revision_id,
+                  mr.branch_id, sv.display_name, sv.object_digest, sv.source_digest, co.byte_length,
+                  fr.outcome, fr.round_trip_guaranteed, dd.fidelity_review_id decision_fidelity_review_id,
+                  dd.decision
+           FROM import_commits ic
+           JOIN manuscript_import_records ir ON ir.commit_id = ic.commit_id
+           JOIN manuscript_revisions mr
+             ON mr.revision_id = ir.resulting_revision_id
+            AND mr.manuscript_id = ir.manuscript_id
+            AND mr.source_version_id = ir.source_version_id
+           JOIN source_versions sv
+             ON sv.source_version_id = ir.source_version_id
+            AND sv.book_id = ir.book_id
+           JOIN content_objects co ON co.object_digest = sv.object_digest
+           JOIN import_fidelity_reviews fr
+             ON fr.fidelity_review_id = ir.fidelity_review_id
+            AND fr.book_id = ir.book_id
+            AND fr.source_version_id = ir.source_version_id
+           LEFT JOIN import_degradation_decisions dd
+             ON dd.degradation_decision_id = ir.degradation_decision_id
+            AND dd.fidelity_review_id = ir.fidelity_review_id
+           WHERE ic.commit_id = ?`,
+        )
+        .all(commitId) as SqlRow[],
+      'STORE_CORRUPT',
+      '导入提交记录图不完整。',
+    );
+    const fidelityReviewId = asString(row.fidelity_review_id);
+    const sourceDigest = asString(row.source_digest);
+    const sourceBytes = asNumber(row.byte_length);
+    requireStore(asString(row.object_digest) === sourceDigest, 'STORE_CORRUPT', '提交来源对象与来源摘要不一致。');
+    const categories = this.#loadPersistedFidelity(fidelityReviewId);
+    const plan = deriveImportFidelityPlan(categories, sourceDigest, sourceBytes);
+    requireStore(plan, 'STORE_CORRUPT', '导入提交保真记录无效。');
+    requireStore(asString(row.outcome) === plan.outcome && asNumber(row.round_trip_guaranteed) === 0, 'STORE_CORRUPT', '导入保真结论无效。');
+    const degradationDecisionId = row.degradation_decision_id === null ? null : asString(row.degradation_decision_id);
+    if (plan.degradations.length === 0) {
+      requireStore(degradationDecisionId === null && row.decision === null, 'STORE_CORRUPT', '洁净导入意外关联了降级决定。');
+    } else {
+      requireStore(
+        degradationDecisionId !== null &&
+          asString(row.decision_fidelity_review_id) === fidelityReviewId &&
+          asString(row.decision) === canonicalDegradationDecision(plan),
+        'STORE_CORRUPT',
+        '导入降级决定无效。',
+      );
+    }
+    const importRecordId = asString(row.import_record_id);
+    return {
+      commitId: asString(row.commit_id),
+      importedAt: asString(row.committed_at),
+      completionLabel: '稿件已导入',
+      bookId: asString(row.book_id),
+      manuscriptId: asString(row.manuscript_id),
+      branchId: asString(row.branch_id),
+      revisionId: asString(row.resulting_revision_id),
+      importRecordId,
+      source: {
+        displayName: asString(row.display_name),
+        format: 'DOCX',
+        sourceSha256: sourceDigest,
+        sourceBytes,
+        provenanceLabel: '本机文件选择器 · 本地解析 · 未联网',
+      },
+      fidelityReview: { fidelityReviewId, outcome: plan.outcome, categories },
+      importRecord: {
+        importRecordId,
+        fidelityReviewId,
+        degradationDecision: degradationDecisionId
+          ? {
+              degradationDecisionId,
+              summaryLabel: '含已接受的降级',
+              acceptedItems: plan.degradations,
+            }
+          : null,
+      },
     };
   }
 
@@ -1283,9 +1623,14 @@ export class EditorialStore {
     revisionId: string;
     sourceVersionId: string;
     fidelityReviewId: string;
+    degradationDecisionId: string | null;
     workflowInstanceId: string;
     importRecordId: string;
     blockCount: number;
+    reviewDigest: string;
+    fidelityPlan: ImportFidelityPlan;
+    sourceDigest: string;
+    sourceBytes: number;
   }): void {
     const counts = one(
       this.#authority
@@ -1297,14 +1642,19 @@ export class EditorialStore {
              (SELECT count(*) FROM manuscript_branches WHERE branch_id = ? AND base_revision_id = ?) branches,
              (SELECT count(*) FROM manuscript_revisions WHERE revision_id = ? AND revision_label = 'r1' AND parent_revision_id IS NULL) revisions,
              (SELECT count(*) FROM manuscript_block_versions WHERE revision_id = ?) blocks,
-             (SELECT count(*) FROM source_versions WHERE source_version_id = ?) sources,
+             (SELECT count(*) FROM source_versions
+                WHERE source_version_id = ? AND object_digest = ? AND source_digest = ?) sources,
              (SELECT count(*) FROM import_fidelity_reviews
-                WHERE fidelity_review_id = ? AND outcome = 'clean-import-no-round-trip'
+                WHERE fidelity_review_id = ? AND book_id = ? AND source_version_id = ?
+                  AND outcome = ? AND review_digest = ?
                   AND round_trip_guaranteed = 0) fidelity_reviews,
              (SELECT count(*) FROM import_fidelity_categories WHERE fidelity_review_id = ?) fidelity_categories,
              (SELECT count(*) FROM import_degradation_decisions WHERE fidelity_review_id = ?) degradation_decisions,
              (SELECT count(*) FROM workflow_instances WHERE workflow_instance_id = ?) workflows,
-             (SELECT count(*) FROM manuscript_import_records WHERE import_record_id = ?) imports`,
+             (SELECT count(*) FROM manuscript_import_records
+                WHERE import_record_id = ? AND book_id = ? AND manuscript_id = ?
+                  AND source_version_id = ? AND fidelity_review_id = ? AND resulting_revision_id = ?
+                  AND degradation_decision_id IS ?) imports`,
         )
         .all(
           input.bookId,
@@ -1315,11 +1665,23 @@ export class EditorialStore {
           input.revisionId,
           input.revisionId,
           input.sourceVersionId,
+          input.sourceDigest,
+          input.sourceDigest,
           input.fidelityReviewId,
+          input.bookId,
+          input.sourceVersionId,
+          input.fidelityPlan.outcome,
+          input.reviewDigest,
           input.fidelityReviewId,
           input.fidelityReviewId,
           input.workflowInstanceId,
           input.importRecordId,
+          input.bookId,
+          input.manuscriptId,
+          input.sourceVersionId,
+          input.fidelityReviewId,
+          input.revisionId,
+          input.degradationDecisionId,
         ) as SqlRow[],
       'IMPORT_POSTCONDITION_FAILED',
       '导入提交后置条件缺失。',
@@ -1334,12 +1696,36 @@ export class EditorialStore {
         asNumber(counts.sources) === 1 &&
         asNumber(counts.fidelity_reviews) === 1 &&
         asNumber(counts.fidelity_categories) === 8 &&
-        asNumber(counts.degradation_decisions) === 0 &&
+        asNumber(counts.degradation_decisions) === (input.degradationDecisionId === null ? 0 : 1) &&
         asNumber(counts.workflows) === 1 &&
         asNumber(counts.imports) === 1,
       'IMPORT_POSTCONDITION_FAILED',
       '导入提交未形成完整记录图。',
     );
+    const categories = this.#loadPersistedFidelity(input.fidelityReviewId);
+    const persistedPlan = deriveImportFidelityPlan(categories, input.sourceDigest, input.sourceBytes);
+    requireStore(
+      persistedPlan && canonicalJson(persistedPlan) === canonicalJson(input.fidelityPlan),
+      'IMPORT_POSTCONDITION_FAILED',
+      '导入提交未形成精确保真分类。',
+    );
+    const decisions = this.#authority
+      .prepare(
+        `SELECT degradation_decision_id, decision
+         FROM import_degradation_decisions WHERE fidelity_review_id = ?`,
+      )
+      .all(input.fidelityReviewId) as SqlRow[];
+    if (input.degradationDecisionId === null) {
+      requireStore(decisions.length === 0, 'IMPORT_POSTCONDITION_FAILED', '洁净导入意外创建了降级决定。');
+    } else {
+      const decision = one(decisions, 'IMPORT_POSTCONDITION_FAILED', '降级导入未形成唯一决定。');
+      requireStore(
+        asString(decision.degradation_decision_id) === input.degradationDecisionId &&
+          asString(decision.decision) === canonicalDegradationDecision(input.fidelityPlan),
+        'IMPORT_POSTCONDITION_FAILED',
+        '降级导入决定与保真审阅不匹配。',
+      );
+    }
   }
 
   #assertForeignKeys(db: DatabaseSync): void {

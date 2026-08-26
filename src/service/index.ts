@@ -81,12 +81,17 @@ function decodeRequest(frame: Uint8Array): ServiceRequest {
       break;
     }
     case 'prepareNewBookReview': {
-      const input = requireInput(value.input, ['draftId', 'expectedDraftVersion', 'confirmedTitle'], tentativeId);
+      const input = requireInput(
+        value.input,
+        ['draftId', 'expectedDraftVersion', 'confirmedTitle', 'acceptDegradation'],
+        tentativeId,
+      );
       if (
         !isBoundedString(input.draftId, 36) ||
         !UUID_PATTERN.test(input.draftId) ||
         !isSafeInteger(input.expectedDraftVersion, 1) ||
-        !isBoundedString(input.confirmedTitle, 180)
+        !isBoundedString(input.confirmedTitle, 180) ||
+        typeof input.acceptDegradation !== 'boolean'
       ) {
         throw new ProtocolError(tentativeId);
       }
@@ -259,6 +264,7 @@ async function dispatch(
           request.input.draftId,
           request.input.expectedDraftVersion,
           request.input.confirmedTitle,
+          request.input.acceptDegradation,
         ),
       };
     case 'commitNewBookImport':
