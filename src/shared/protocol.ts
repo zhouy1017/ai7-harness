@@ -1,4 +1,4 @@
-export const SERVICE_PROTOCOL_VERSION = 1 as const;
+export const SERVICE_PROTOCOL_VERSION = 2 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -46,6 +46,19 @@ export interface FidelityCategoryProjection {
   detail: string;
 }
 
+export interface ImportDegradationItemProjection {
+  categoryKey: FidelityCategoryKey;
+  label: string;
+  count: number;
+}
+
+export type ImportDegradationDecisionReviewProjection =
+  | { state: 'not-required-clean-import'; items: ReadonlyArray<never> }
+  | { state: 'required-unselected'; items: ReadonlyArray<ImportDegradationItemProjection> }
+  | { state: 'accepted-complete-set'; items: ReadonlyArray<ImportDegradationItemProjection> };
+
+export type ImportFidelityOutcome = 'clean-import-no-round-trip' | 'degraded-import-no-round-trip';
+
 export interface StagedImportProjection {
   draftId: string;
   draftVersion: number;
@@ -53,6 +66,7 @@ export interface StagedImportProjection {
     displayName: string;
     format: 'DOCX';
     sourceSha256: string;
+    sourceBytes: number;
     provenanceLabel: '本机文件选择器 · 本地解析 · 未联网';
   };
   titleSuggestion: {
@@ -71,7 +85,7 @@ export interface StagedImportProjection {
 export interface ReviewBeforeImportProjection {
   draftId: string;
   draftVersion: number;
-  reviewDigest: string;
+  reviewDigest: string | null;
   target: {
     kind: 'new-book';
     label: '新建图书';
@@ -99,7 +113,7 @@ export interface ReviewBeforeImportProjection {
       weight: number;
     }>;
   };
-  degradationDecision: 'not-created-clean-import';
+  degradationDecision: ImportDegradationDecisionReviewProjection;
 }
 
 export interface ManuscriptBlockProjection {
@@ -138,6 +152,23 @@ export interface ImportCommitProjection {
   branchId: string;
   revisionId: string;
   importRecordId: string;
+  source: StagedImportProjection['source'];
+  fidelityReview: {
+    fidelityReviewId: string;
+    outcome: ImportFidelityOutcome;
+    categories: ReadonlyArray<FidelityCategoryProjection>;
+  };
+  importRecord: {
+    importRecordId: string;
+    fidelityReviewId: string;
+    degradationDecision:
+      | null
+      | {
+          degradationDecisionId: string;
+          summaryLabel: '含已接受的降级';
+          acceptedItems: ReadonlyArray<ImportDegradationItemProjection>;
+        };
+  };
   firstWindow: ManuscriptWindowProjection;
 }
 
@@ -201,7 +232,7 @@ export interface ServiceOperationMap {
     output: StagedImportProjection;
   };
   prepareNewBookReview: {
-    input: { draftId: string; expectedDraftVersion: number; confirmedTitle: string };
+    input: { draftId: string; expectedDraftVersion: number; confirmedTitle: string; acceptDegradation: boolean };
     output: ReviewBeforeImportProjection;
   };
   commitNewBookImport: {

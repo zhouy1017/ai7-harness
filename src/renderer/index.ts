@@ -75,11 +75,19 @@ function sourceCard(staged: StagedImportProjection): HTMLElement {
   const heading = element('h3', undefined, staged.source.displayName);
   card.append(heading);
   const details = element('dl');
+  const sourceBytes = element('dd', undefined, String(staged.source.sourceBytes));
+  sourceBytes.setAttribute('data-source-bytes', '');
+  const sourceDigest = element('dd', 'technical-identity', staged.source.sourceSha256);
+  sourceDigest.setAttribute('data-source-sha256', '');
   details.append(
     element('dt', undefined, '格式'),
     element('dd', undefined, staged.source.format),
     element('dt', undefined, '来源'),
     element('dd', undefined, staged.source.provenanceLabel),
+    element('dt', undefined, '来源字节数'),
+    sourceBytes,
+    element('dt', undefined, '来源 SHA-256'),
+    sourceDigest,
     element('dt', undefined, '检测结果'),
     element('dd', undefined, `${staged.detectedBlockCount} 个可编辑内容块`),
   );
@@ -209,6 +217,7 @@ function renderTargetChoice(staged: StagedImportProjection, selected: boolean): 
           draftId: staged.draftId,
           expectedDraftVersion: staged.draftVersion,
           confirmedTitle,
+          acceptDegradation: false,
         });
         setStatus('导入前复核已准备', 'success');
         renderReview(review);
@@ -234,6 +243,17 @@ function listSection(title: string, items: ReadonlyArray<string>): HTMLElement {
   return section;
 }
 
+function degradationItems(review: ReviewBeforeImportProjection): HTMLElement {
+  const list = element('ul', 'degradation-list');
+  for (const item of review.degradationDecision.items) {
+    const row = element('li', undefined, `${item.label} · ${item.count} 项`);
+    row.dataset['degradationCategory'] = item.categoryKey;
+    row.dataset['degradationCount'] = String(item.count);
+    list.append(row);
+  }
+  return list;
+}
+
 function renderReview(review: ReviewBeforeImportProjection): void {
   const content = panel();
   content.append(
@@ -244,13 +264,22 @@ function renderReview(review: ReviewBeforeImportProjection): void {
   const identity = element('section', 'source-card');
   identity.append(element('h3', undefined, `${review.target.label} · ${review.target.confirmedTitle}`));
   const identityDetails = element('dl');
+  const sourceBytes = element('dd', undefined, String(review.source.sourceBytes));
+  sourceBytes.setAttribute('data-source-bytes', '');
+  const sourceDigest = element('dd', 'technical-identity', review.source.sourceSha256);
+  sourceDigest.setAttribute('data-source-sha256', '');
+  const degraded = review.degradationDecision.state !== 'not-required-clean-import';
   identityDetails.append(
     element('dt', undefined, '本地来源'),
     element('dd', undefined, review.source.displayName),
     element('dt', undefined, '来源边界'),
     element('dd', undefined, review.source.provenanceLabel),
+    element('dt', undefined, '来源字节数'),
+    sourceBytes,
+    element('dt', undefined, '来源 SHA-256'),
+    sourceDigest,
     element('dt', undefined, '最终动作'),
-    element('dd', undefined, '新建图书并导入稿件'),
+    element('dd', undefined, degraded ? '按上述降级方式新建图书并导入稿件' : '新建图书并导入稿件'),
   );
   identity.append(identityDetails);
   content.append(identity);
@@ -258,6 +287,48 @@ function renderReview(review: ReviewBeforeImportProjection): void {
   const fidelity = element('section', 'review-section');
   fidelity.append(element('h3', undefined, '导入保真审阅 · 8 类'), fidelityTable(review.fidelity));
   content.append(fidelity);
+
+  if (review.degradationDecision.state !== 'not-required-clean-import') {
+    const decision = element('section', 'review-section degradation-decision');
+    decision.append(
+      element('h3', undefined, '导入降级决定'),
+      element('p', undefined, '本次接受只适用于当前导入，并覆盖下面由服务端确定的完整降级集合。'),
+      degradationItems(review),
+    );
+    const acceptance = element('label', 'choice degradation-acceptance');
+    const checkbox = element('input');
+    checkbox.type = 'checkbox';
+    checkbox.id = 'accept-import-degradation';
+    checkbox.checked = review.degradationDecision.state === 'accepted-complete-set';
+    checkbox.disabled = review.degradationDecision.state === 'accepted-complete-set';
+    const copy = element('span');
+    copy.append(
+      element('strong', undefined, '接受上述完整降级集合'),
+      element('small', undefined, '接受后才会形成复核摘要，并允许一次性创建全部导入记录。'),
+    );
+    acceptance.append(checkbox, copy);
+    decision.append(acceptance);
+    if (review.degradationDecision.state === 'required-unselected') {
+      checkbox.addEventListener('change', async () => {
+        if (!checkbox.checked) return;
+        checkbox.disabled = true;
+        setStatus('正在记录本次导入的完整降级接受…', 'busy');
+        try {
+          const acceptedReview = await window.ai7.prepareNewBookReview({
+            draftId: review.draftId,
+            expectedDraftVersion: review.draftVersion,
+            confirmedTitle: review.target.confirmedTitle,
+            acceptDegradation: true,
+          });
+          setStatus('已接受本次导入的完整降级集合', 'success');
+          renderReview(acceptedReview);
+        } catch (error) {
+          renderError(error, renderLanding);
+        }
+      });
+    }
+    content.append(decision);
+  }
 
   const grid = element('div', 'review-grid');
   const workflow = element('section', 'review-section');
@@ -288,41 +359,58 @@ function renderReview(review: ReviewBeforeImportProjection): void {
   grid.append(workflow, dimensions, listSection('将创建的记录', review.recordsToCreate), listSection('明确不会发生', review.nonEffects));
   content.append(grid);
 
-  const commitBar = element('section', 'commit-bar');
-  const explanation = element('div');
-  explanation.append(
-    element('strong', undefined, '一次提交，不能部分创建'),
-    element('div', 'field-note', '本次符合范围的导入不创建导入降级决定，也不提供 DOCX 往返保证。'),
-  );
-  const commitButton = button('新建图书并导入稿件', 'primary', async () => {
-    commitButton.disabled = true;
-    setStatus('正在原子提交图书与稿件记录…', 'busy');
-    try {
-      const result = await window.ai7.commitNewBookImport({
-        draftId: review.draftId,
-        expectedDraftVersion: review.draftVersion,
-        reviewDigest: review.reviewDigest,
-      });
-      setStatus(result.completionLabel, 'success');
-      renderImported(result);
-    } catch (error) {
-      commitButton.disabled = false;
-      setStatus(error instanceof Error ? error.message : '导入未完成，请重试。', 'error');
-    }
-  });
-  commitBar.append(explanation, commitButton);
-  content.append(commitBar);
+  if (review.reviewDigest !== null) {
+    const commitBar = element('section', 'commit-bar');
+    const explanation = element('div');
+    const acceptedDegradation = review.degradationDecision.state === 'accepted-complete-set';
+    explanation.append(
+      element('strong', undefined, '一次提交，不能部分创建'),
+      element(
+        'div',
+        'field-note',
+        acceptedDegradation
+          ? '已接受的完整降级集合、保真审阅、降级决定和稿件导入记录会原子关联；不提供 DOCX 往返保证。'
+          : '本次符合范围的导入不创建导入降级决定，也不提供 DOCX 往返保证。',
+      ),
+    );
+    const commitLabel = acceptedDegradation ? '按上述降级方式新建图书并导入稿件' : '新建图书并导入稿件';
+    const commitButton = button(commitLabel, 'primary', async () => {
+      commitButton.disabled = true;
+      setStatus('正在原子提交图书与稿件记录…', 'busy');
+      try {
+        const result = await window.ai7.commitNewBookImport({
+          draftId: review.draftId,
+          expectedDraftVersion: review.draftVersion,
+          reviewDigest: review.reviewDigest!,
+        });
+        setStatus(result.completionLabel, 'success');
+        renderImported(result);
+      } catch (error) {
+        commitButton.disabled = false;
+        setStatus(error instanceof Error ? error.message : '导入未完成，请重试。', 'error');
+      }
+    });
+    commitBar.append(explanation, commitButton);
+    content.append(commitBar);
+  }
   replaceScreen('review', content);
 }
 
 function renderImported(result: ImportCommitProjection): void {
   const content = panel();
   content.classList.add('completion');
+  const degradation = result.importRecord.degradationDecision;
   content.append(
     element('div', 'completion-mark', '✓'),
     element('p', 'section-label', '步骤 3 / 3'),
     element('h2', undefined, result.completionLabel),
-    element('p', 'lede', '图书、维度集、来源与保真记录、主稿件、主分支、r1、工作流程实例和稿件导入记录已一起创建。'),
+    element(
+      'p',
+      'lede',
+      degradation
+        ? '图书、维度集、来源、导入保真审阅、导入降级决定、主稿件、主分支、r1、工作流程实例和稿件导入记录已一起创建。'
+        : '图书、维度集、来源与保真记录、主稿件、主分支、r1、工作流程实例和稿件导入记录已一起创建。',
+    ),
   );
   const actions = element('div', 'button-row');
   const open = button('打开稿件', 'primary', () => renderEditor(result));
@@ -333,8 +421,33 @@ function renderImported(result: ImportCommitProjection): void {
       element('h3', undefined, '稿件导入记录'),
       element('p', undefined, `完成时间：${new Date(result.importedAt).toLocaleString('zh-CN')}`),
       element('p', undefined, '结果：主稿件 · 主分支 · 稿件修订版 r1'),
+      element('p', undefined, `来源：${result.source.displayName} · ${result.source.sourceBytes} 字节 · SHA-256 ${result.source.sourceSha256}`),
+      element('p', undefined, `导入保真审阅：${result.fidelityReview.fidelityReviewId} · 8 类`),
+      element('p', undefined, `稿件导入记录：${result.importRecord.importRecordId} · 已链接导入保真审阅`),
       element('p', 'field-note', '这不是稿件检查点、里程碑版本、导出回执、往返保证或发布事实。'),
     );
+    if (degradation) {
+      detail.append(
+        element(
+          'p',
+          undefined,
+          `导入降级决定：${degradation.degradationDecisionId} · ${degradation.summaryLabel} · 已链接稿件导入记录`,
+        ),
+      );
+      const disclosure = element('details', 'degradation-disclosure');
+      disclosure.append(element('summary', undefined, '查看受影响类别、示例与导出后果'));
+      const accepted = element('ul', 'degradation-list');
+      for (const item of degradation.acceptedItems) {
+        const category = result.fidelityReview.categories.find((candidate) => candidate.key === item.categoryKey);
+        if (!category) throw new Error('AI7_IMPORT_RESULT_INVALID');
+        const row = element('li', undefined, `${item.label} · ${item.count} 项 · ${category.detail}`);
+        row.dataset['degradationCategory'] = item.categoryKey;
+        row.dataset['degradationCount'] = String(item.count);
+        accepted.append(row);
+      }
+      disclosure.append(accepted);
+      detail.append(disclosure);
+    }
     content.append(detail);
   });
   actions.append(open, record);

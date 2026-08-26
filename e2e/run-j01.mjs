@@ -1,15 +1,17 @@
-import { mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
+import { lstat, mkdtemp, realpath, rm } from 'node:fs/promises';
+import { createReadStream, existsSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { arch, platform, release, tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
+const SAMPLE1_PATH = resolve(ROOT, 'SampleBooks', 'sample1.docx');
+const SAMPLE1_BYTES = 29_550;
+const SAMPLE1_SHA256 = 'b8a3dbde0aa8a1ec7265f9ae3fe47877759e7947c5ab69682cd0a8f424a8d483';
 const DEBUG_SELECTORS = new Set(['DEBUG', 'DEBUG_FILE', 'PWDEBUG', 'PWDEBUGIMPL']);
 let diagnosticLocation = 'entry';
 let electronExecutable;
-let strToU8;
-let zipSync;
 
 function at(location) {
   diagnosticLocation = location;
@@ -22,6 +24,12 @@ function requireJourney(condition, location) {
 function pathIsInside(parent, child) {
   const relation = relative(parent, child);
   return relation === '' || (!relation.startsWith(`..${sep}`) && relation !== '..' && !isAbsolute(relation));
+}
+
+async function digestFile(path) {
+  const hash = createHash('sha256');
+  for await (const chunk of createReadStream(path)) hash.update(chunk);
+  return hash.digest('hex');
 }
 
 function parseJourney() {
@@ -38,61 +46,6 @@ function parseJourney() {
     !Object.keys(process.env).some((name) => DEBUG_SELECTORS.has(name.toUpperCase())),
     'debug-environment',
   );
-}
-
-function xmlText(value) {
-  return value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
-}
-
-async function createSyntheticDocx(runRoot) {
-  const paragraphs = [
-    { style: 'Title', text: '公共合成书稿' },
-    { style: 'Heading1', text: '第一部分' },
-    ...Array.from({ length: 24 }, (_, index) => ({ text: `公共合成段落${index + 1}，用于验证本地导入与稳定内容块。` })),
-    { style: 'Heading1', text: '第二部分' },
-    ...Array.from({ length: 24 }, (_, index) => ({ text: `公共合成段落${index + 25}，不含真实稿件或私人材料。` })),
-  ];
-  requireJourney(paragraphs.length === 51, 'synthetic-block-count');
-  const documentBody = paragraphs
-    .map(({ style, text }) => {
-      const properties = style ? `<w:pPr><w:pStyle w:val="${style}"/></w:pPr>` : '';
-      return `<w:p>${properties}<w:r><w:t>${xmlText(text)}</w:t></w:r></w:p>`;
-    })
-    .join('');
-  const archive = zipSync(
-    {
-      '[Content_Types].xml': strToU8(
-        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
-          '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">' +
-          '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>' +
-          '<Default Extension="xml" ContentType="application/xml"/>' +
-          '<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>' +
-          '<Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>' +
-          '</Types>',
-      ),
-      '_rels/.rels': strToU8(
-        '<?xml version="1.0" encoding="UTF-8"?>' +
-          '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
-          '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>' +
-          '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/>' +
-          '</Relationships>',
-      ),
-      'docProps/core.xml': strToU8(
-        '<?xml version="1.0" encoding="UTF-8"?>' +
-          '<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/">' +
-          '<dc:title>公共合成书稿</dc:title></cp:coreProperties>',
-      ),
-      'word/document.xml': strToU8(
-        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
-          '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">' +
-          `<w:body>${documentBody}<w:sectPr/></w:body></w:document>`,
-      ),
-    },
-    { level: 6 },
-  );
-  const path = resolve(runRoot, 'public-synthetic-j01.docx');
-  await writeFile(path, archive, { flag: 'wx' });
-  return path;
 }
 
 function productEnvironment(executable) {
@@ -239,7 +192,7 @@ async function runJourney(renderer) {
   await waitFor(renderer, `document.querySelector('[data-screen="title"]')`, 'target-title');
   await assertRenderer(
     renderer,
-    `document.querySelector('#book-title')?.value.length > 0 && Array.from(document.querySelectorAll('.field-note')).some((note) => note.textContent.includes('建议来源：DOCX 标题元数据')) && document.querySelectorAll('[data-fidelity-category]').length === 8`,
+    `document.querySelector('#book-title')?.value.length > 0 && Array.from(document.querySelectorAll('.field-note')).some((note) => note.textContent.includes('建议来源：')) && document.querySelector('[data-source-sha256]')?.textContent === ${JSON.stringify(SAMPLE1_SHA256)} && document.querySelector('[data-source-bytes]')?.textContent === ${JSON.stringify(String(SAMPLE1_BYTES))} && document.querySelectorAll('[data-fidelity-category]').length === 8`,
     'title-contract',
   );
   await clickExactButton(renderer, '确认书名并复核', 'review-click');
@@ -247,8 +200,33 @@ async function runJourney(renderer) {
   at('review');
   await assertRenderer(
     renderer,
-    `(() => { const rows = Array.from(document.querySelectorAll('[data-fidelity-category]')); const expected = [['inline-styles','status-preserved'],['comments-revisions','status-preserved'],['notes','status-preserved'],['tables','status-preserved'],['images-captions','status-preserved'],['sections','status-preserved'],['headers-footers','status-preserved'],['round-trip-export','status-unsupported']]; return rows.length === expected.length && rows.every((row, index) => row.dataset.fidelityCategory === expected[index][0] && row.querySelector('.count')?.textContent.includes('· 0 项') && row.querySelector('.status-pill')?.classList.contains(expected[index][1])); })()`,
+    `document.querySelector('[data-screen="review"] [data-source-sha256]')?.textContent === ${JSON.stringify(SAMPLE1_SHA256)} && document.querySelector('[data-screen="review"] [data-source-bytes]')?.textContent === ${JSON.stringify(String(SAMPLE1_BYTES))} && Array.from(document.querySelectorAll('[data-screen="review"] dd')).some((item) => item.textContent === '按上述降级方式新建图书并导入稿件')`,
+    'review-source-and-action',
+  );
+  await assertRenderer(
+    renderer,
+    `(() => { const rows = Array.from(document.querySelectorAll('[data-fidelity-category]')); const expected = [['inline-styles',266,'status-degraded'],['comments-revisions',0,'status-preserved'],['notes',0,'status-preserved'],['tables',0,'status-preserved'],['images-captions',0,'status-preserved'],['sections',1,'status-degraded'],['headers-footers',0,'status-preserved'],['round-trip-export',0,'status-unsupported']]; return rows.length === expected.length && rows.every((row, index) => row.dataset.fidelityCategory === expected[index][0] && row.querySelector('.count')?.textContent.includes('· ' + expected[index][1] + ' 项') && row.querySelector('.status-pill')?.classList.contains(expected[index][2])); })()`,
     'review-fidelity-exact',
+  );
+  await assertRenderer(
+    renderer,
+    `(() => { const acceptance = document.querySelector('#accept-import-degradation'); const commit = Array.from(document.querySelectorAll('button')).find((button) => button.textContent.includes('新建图书并导入稿件')); return acceptance && !acceptance.checked && (!commit || commit.disabled); })()`,
+    'degradation-initially-unselected',
+  );
+  await assertRenderer(
+    renderer,
+    `(() => { const items = Array.from(document.querySelectorAll('[data-degradation-category]')); const expected = [['inline-styles','266'],['sections','1']]; return items.length === expected.length && items.every((item, index) => item.dataset.degradationCategory === expected[index][0] && item.dataset.degradationCount === expected[index][1]); })()`,
+    'degradation-complete-server-set',
+  );
+  await assertRenderer(
+    renderer,
+    `(() => { const acceptance = document.querySelector('#accept-import-degradation'); if (!acceptance) return false; acceptance.click(); return true; })()`,
+    'degradation-accept',
+  );
+  await waitFor(
+    renderer,
+    `document.querySelector('#accept-import-degradation')?.checked && Array.from(document.querySelectorAll('button')).some((button) => button.textContent === '按上述降级方式新建图书并导入稿件' && !button.disabled)`,
+    'degradation-accepted-review',
   );
   await assertRenderer(
     renderer,
@@ -257,7 +235,7 @@ async function runJourney(renderer) {
   );
   await assertRenderer(
     renderer,
-    `(() => { const sections = Array.from(document.querySelectorAll('.review-section')); const exact = (heading, expected) => { const section = sections.find((item) => item.querySelector('h3')?.textContent === heading); const actual = Array.from(section?.querySelectorAll('li') ?? [], (item) => item.textContent); return actual.length === expected.length && actual.every((item, index) => item === expected[index]); }; return exact('将创建的记录', ['图书与稳定标识','图书编辑维度集（8 项）','源材料版本与来源记录','导入保真审阅','主稿件','稿件分支','稿件修订版 r1 与有序稳定内容块','工作流程实例与精确方案版本绑定','稿件导入记录']) && exact('明确不会发生', ['不创建书系或书系成员关系','不创建编辑学习准入决定','不授予或执行模型提供方传输','不创建发稿版本','不创建公开发布许可或公开发布事实','不导出、不发送、不交付、不发布','不承诺 DOCX 往返或版式复原','符合当前范围的导入不创建导入降级决定']); })()`,
+    `(() => { const sections = Array.from(document.querySelectorAll('.review-section')); const exact = (heading, expected) => { const section = sections.find((item) => item.querySelector('h3')?.textContent === heading); const actual = Array.from(section?.querySelectorAll('li') ?? [], (item) => item.textContent); return actual.length === expected.length && actual.every((item, index) => item === expected[index]); }; return exact('将创建的记录', ['图书与稳定标识','图书编辑维度集（8 项）','源材料版本与来源记录','导入保真审阅','导入降级决定','主稿件','稿件分支','稿件修订版 r1 与有序稳定内容块','工作流程实例与精确方案版本绑定','稿件导入记录']) && exact('明确不会发生', ['不创建书系或书系成员关系','不创建编辑学习准入决定','不授予或执行模型提供方传输','不创建发稿版本','不创建公开发布许可或公开发布事实','不导出、不发送、不交付、不发布','不承诺 DOCX 往返或版式复原']); })()`,
     'review-exact-effects',
   );
   await assertRenderer(
@@ -265,24 +243,30 @@ async function runJourney(renderer) {
     `!/(?:J-01|tracer|clean|Review Before Import)/.test(document.body.textContent)`,
     'product-language',
   );
-  await clickExactButton(renderer, '新建图书并导入稿件', 'commit-click');
+  await clickExactButton(renderer, '按上述降级方式新建图书并导入稿件', 'commit-click');
   await waitFor(renderer, `document.querySelector('[data-screen="imported"]')`, 'imported');
   await assertRenderer(
     renderer,
     `Array.from(document.querySelectorAll('h2')).some((heading) => heading.textContent === '稿件已导入')`,
     'import-completion',
   );
+  await clickExactButton(renderer, '查看导入记录', 'record-open');
+  await assertRenderer(
+    renderer,
+    `(() => { const record = document.querySelector('.record-detail'); const items = Array.from(record?.querySelectorAll('[data-degradation-category]') ?? []); return record?.textContent.includes('含已接受的降级') && record?.textContent.includes('导入保真审阅') && record?.textContent.includes('导入降级决定') && record?.textContent.includes('查看受影响类别、示例与导出后果') && record?.textContent.includes('rFonts') && record?.textContent.includes('文档网格') && record?.textContent.includes('后续导出无法恢复') && items.length === 2 && items[0].dataset.degradationCategory === 'inline-styles' && items[0].dataset.degradationCount === '266' && items[1].dataset.degradationCategory === 'sections' && items[1].dataset.degradationCount === '1'; })()`,
+    'import-record-degradation',
+  );
   await clickExactButton(renderer, '打开稿件', 'editor-open');
   await waitFor(renderer, `document.querySelector('[data-screen="editor"]')`, 'editor-screen');
   at('editor');
   await assertRenderer(
     renderer,
-    `document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]').length === 32 && /1\\D+32\\D+51/.test(document.querySelector('.editor-meta')?.textContent ?? '')`,
+    `document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]').length === 32 && /1\\D+32\\D+97/.test(document.querySelector('.editor-meta')?.textContent ?? '')`,
     'bounded-window',
   );
   await assertRenderer(
     renderer,
-    `(() => { const block = document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]')[3]; if (!block) return false; block.focus(); const range = document.createRange(); range.selectNodeContents(block); range.collapse(false); const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range); return document.execCommand('insertText', false, '，新增合成编辑'); })()`,
+    `(() => { const block = document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]')[3]; if (!block) return false; block.focus(); const range = document.createRange(); range.selectNodeContents(block); range.collapse(false); const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range); return document.execCommand('insertText', false, '，新增编辑'); })()`,
     'bounded-edit',
   );
   await waitFor(renderer, `!Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '保存当前编辑')?.disabled`, 'edit-dirty');
@@ -315,7 +299,6 @@ async function main() {
   const { createCanonicalExternalDataRoot, ensureCanonicalDataDirectory } = await import(
     pathToFileURL(dataRootEntry).href
   );
-  ({ strToU8, zipSync } = await import('fflate'));
   const { chromium } = await import('playwright-core');
   const tempParent = await realpath(tmpdir());
   const checkoutRoot = await realpath(ROOT);
@@ -331,7 +314,16 @@ async function main() {
     requireJourney((await realpath(runRoot)) === runRoot, 'temp-root');
     const dataRoot = await createCanonicalExternalDataRoot(resolve(runRoot, 'data'), checkoutRoot);
     const shellRoot = await ensureCanonicalDataDirectory(dataRoot, 'shell');
-    const docx = await createSyntheticDocx(runRoot);
+    const docx = SAMPLE1_PATH;
+    const sampleInfo = await lstat(docx);
+    requireJourney(
+      sampleInfo.isFile() &&
+        !sampleInfo.isSymbolicLink() &&
+        sampleInfo.size === SAMPLE1_BYTES &&
+        (await realpath(docx)) === docx &&
+        (await digestFile(docx)) === SAMPLE1_SHA256,
+      'sample1-identity',
+    );
     const executable = electronExecutable();
     const entry = resolve(ROOT, 'dist', 'main', 'index.cjs');
     const productArgs = [

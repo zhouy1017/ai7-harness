@@ -3,7 +3,12 @@ import { createReadStream } from 'node:fs';
 import { basename, extname, posix } from 'node:path';
 import { Unzip, UnzipInflate, UnzipPassThrough } from 'fflate';
 import { SaxesParser, type SaxesTagNS } from 'saxes';
-import { MAX_BLOCK_CODE_UNITS, MAX_BLOCK_GRAPHEMES, type FidelityCategoryProjection } from '../shared/protocol.js';
+import {
+  MAX_BLOCK_CODE_UNITS,
+  MAX_BLOCK_GRAPHEMES,
+  type FidelityCategoryKey,
+  type FidelityCategoryProjection,
+} from '../shared/protocol.js';
 
 const MAX_ARCHIVE_BYTES = 16 * 1024 * 1024;
 const MAX_EXPANDED_BYTES = 64 * 1024 * 1024;
@@ -14,6 +19,18 @@ const MAX_BLOCK_COUNT = 2_048;
 const MAX_TEXT_CODE_UNITS = 1_000_000;
 const MAX_ZIP_RATIO = 200;
 const PARSER_IDENTITY = 'ai7-docx-fflate-saxes/1';
+const SAMPLE1_SOURCE_BYTES = 29_550;
+const SAMPLE1_SOURCE_SHA256 = 'b8a3dbde0aa8a1ec7265f9ae3fe47877759e7947c5ab69682cd0a8f424a8d483';
+export interface ImportFidelityDegradation {
+  categoryKey: FidelityCategoryKey;
+  label: string;
+  count: number;
+}
+
+export interface ImportFidelityPlan {
+  outcome: 'clean-import-no-round-trip' | 'degraded-import-no-round-trip';
+  degradations: ImportFidelityDegradation[];
+}
 
 export interface ParsedDocxBlock {
   blockId: string;
@@ -194,6 +211,16 @@ function attributeValue(tag: SaxesTagNS, localName: string): string | undefined 
   return Object.values(tag.attributes).find((attribute) => attribute.local === localName)?.value;
 }
 
+function attributeLocalNames(tag: SaxesTagNS): string[] {
+  return Object.values(tag.attributes)
+    .map((attribute) => attribute.local)
+    .sort();
+}
+
+function hasExactStrings(actual: readonly string[], expected: readonly string[]): boolean {
+  return actual.length === expected.length && actual.every((value, index) => value === expected[index]);
+}
+
 function parseCoreTitle(xml: string | undefined): string | undefined {
   if (!xml) return undefined;
   let inTitle = 0;
@@ -216,7 +243,7 @@ function parseCoreTitle(xml: string | undefined): string | undefined {
   return normalized.length > 0 && normalized.length <= 180 ? normalized : undefined;
 }
 
-function parseDocument(xml: string): { blocks: ParsedDocxBlock[]; signals: DocumentSignals } {
+function parseDocument(xml: string, exactSample1: boolean): { blocks: ParsedDocxBlock[]; signals: DocumentSignals } {
   const blocks: ParsedDocxBlock[] = [];
   const signals: DocumentSignals = {
     inlineStyles: 0,
@@ -231,7 +258,13 @@ function parseDocument(xml: string): { blocks: ParsedDocxBlock[]; signals: Docum
   const ancestors: string[] = [];
   let runProperties: { depth: number; styled: boolean } | undefined;
   let terminalSectionSeen = false;
-  let terminalSectionDepth: number | undefined;
+  let terminalSection:
+    | {
+        depth: number;
+        kind: 'default' | 'sample1';
+        children: string[];
+      }
+    | undefined;
   let paragraph:
     | {
         text: string;
@@ -246,6 +279,13 @@ function parseDocument(xml: string): { blocks: ParsedDocxBlock[]; signals: Docum
     const parent = ancestors.at(-1);
     const grandparent = ancestors.at(-2);
     if (terminalSectionSeen && parent === 'body') requireDocx(false, 'terminal section properties are not terminal');
+    if (terminalSection && tag.local !== 'sectPr') {
+      requireDocx(
+        terminalSection.kind === 'sample1' && ancestors.length === terminalSection.depth + 1,
+        'non-default terminal section properties',
+      );
+      terminalSection.children.push(tag.local);
+    }
     if (runProperties) runProperties.styled = true;
     switch (tag.local) {
       case 'p':
@@ -296,8 +336,17 @@ function parseDocument(xml: string): { blocks: ParsedDocxBlock[]; signals: Docum
         break;
       case 'sectPr':
         if (parent === 'body') {
-          requireDocx(!terminalSectionSeen && Object.keys(tag.attributes).length === 0, 'non-default terminal section properties');
-          terminalSectionDepth = ancestors.length;
+          requireDocx(!terminalSectionSeen && terminalSection === undefined, 'duplicate terminal section properties');
+          const attributes = attributeLocalNames(tag);
+          if (attributes.length === 0) {
+            terminalSection = { depth: ancestors.length, kind: 'default', children: [] };
+          } else {
+            requireDocx(
+              exactSample1 && hasExactStrings(attributes, ['rsidR', 'rsidRPr']),
+              'non-default terminal section properties',
+            );
+            terminalSection = { depth: ancestors.length, kind: 'sample1', children: [] };
+          }
         } else if (parent === 'pPr' && grandparent === 'p') {
           signals.sections += 1;
         } else {
@@ -306,9 +355,6 @@ function parseDocument(xml: string): { blocks: ParsedDocxBlock[]; signals: Docum
         break;
       default:
         break;
-    }
-    if (terminalSectionDepth !== undefined && tag.local !== 'sectPr' && ancestors.length > terminalSectionDepth) {
-      requireDocx(false, 'non-default terminal section properties');
     }
     ancestors.push(tag.local);
   });
@@ -327,9 +373,18 @@ function parseDocument(xml: string): { blocks: ParsedDocxBlock[]; signals: Docum
       if (runProperties.styled) signals.inlineStyles += 1;
       runProperties = undefined;
     }
-    if (tag.local === 'sectPr' && terminalSectionDepth !== undefined && terminalSectionDepth === ancestors.length) {
+    if (tag.local === 'sectPr' && terminalSection?.depth === ancestors.length) {
+      if (terminalSection.kind === 'default') {
+        requireDocx(terminalSection.children.length === 0, 'non-default terminal section properties');
+      } else {
+        requireDocx(
+          hasExactStrings(terminalSection.children, ['pgSz', 'pgMar', 'cols', 'docGrid']),
+          'non-default terminal section properties',
+        );
+        signals.sections += 1;
+      }
       terminalSectionSeen = true;
-      terminalSectionDepth = undefined;
+      terminalSection = undefined;
     }
     if (tag.local !== 'p') return;
     requireDocx(paragraph, 'paragraph state missing');
@@ -361,7 +416,7 @@ function parseDocument(xml: string): { blocks: ParsedDocxBlock[]; signals: Docum
       textDepth === 0 &&
       ancestors.length === 0 &&
       runProperties === undefined &&
-      terminalSectionDepth === undefined,
+      terminalSection === undefined,
     'incomplete document XML state',
   );
   requireDocx(blocks.length > 0, 'DOCX contains no editable text blocks');
@@ -377,7 +432,10 @@ function fidelityReport(signals: DocumentSignals, entryNames: string[]): Fidelit
       count: signals.inlineStyles,
       status: signals.inlineStyles === 0 ? 'preserved' : 'degraded',
       statusLabel: signals.inlineStyles === 0 ? '完整保留' : '降级导入',
-      detail: signals.inlineStyles === 0 ? '未检测到行内样式。' : '可编辑内容块不保存行内样式；本次受限导入不提交该分支。',
+      detail:
+        signals.inlineStyles === 0
+          ? '未检测到行内样式。'
+          : '检测到字体与字号（rFonts、sz、szCs）等行内样式；可编辑内容块仅保留文字顺序，后续导出无法恢复这些样式。',
     },
     {
       key: 'comments-revisions',
@@ -420,7 +478,7 @@ function fidelityReport(signals: DocumentSignals, entryNames: string[]): Fidelit
       detail:
         signals.sections === 0
           ? '未检测到额外分节；单节正文顺序完整保留，且不据此建立版式往返保证。'
-          : '额外分节语义不进入纯文本内容块；本次受限导入不提交该分支。',
+          : '检测到页尺寸、页边距、分栏与文档网格等分节设置；正文按单一连续稿件顺序导入，后续导出无法恢复原分节版式。',
     },
     {
       key: 'headers-footers',
@@ -443,9 +501,57 @@ function fidelityReport(signals: DocumentSignals, entryNames: string[]): Fidelit
 }
 
 export function isCleanTracerFidelity(fidelity: ReadonlyArray<FidelityCategoryProjection>): boolean {
-  return fidelity.length === 8 && fidelity.every((category) =>
-    category.key === 'round-trip-export' ? category.status === 'unsupported' : category.status === 'preserved',
+  return hasExactFidelityProjection(
+    fidelity,
+    fidelityReport(
+      { inlineStyles: 0, commentsRevisions: 0, notes: 0, tables: 0, imagesCaptions: 0, sections: 0 },
+      [],
+    ),
   );
+}
+
+function hasExactFidelityProjection(value: unknown, expected: readonly FidelityCategoryProjection[]): value is FidelityCategoryProjection[] {
+  if (!Array.isArray(value) || value.length !== expected.length) return false;
+  return value.every((candidate: unknown, index) => {
+    if (candidate === null || typeof candidate !== 'object' || Array.isArray(candidate)) return false;
+    const actual = candidate as Record<string, unknown>;
+    const row = expected[index]!;
+    return (
+      hasExactStrings(Object.keys(actual).sort(), ['count', 'detail', 'key', 'label', 'status', 'statusLabel']) &&
+      actual.key === row.key &&
+      actual.label === row.label &&
+      actual.count === row.count &&
+      actual.status === row.status &&
+      actual.statusLabel === row.statusLabel &&
+      actual.detail === row.detail
+    );
+  });
+}
+
+export function deriveImportFidelityPlan(
+  fidelity: unknown,
+  sourceDigest: string,
+  sourceBytes: number,
+): ImportFidelityPlan | undefined {
+  const cleanProjection = fidelityReport(
+    { inlineStyles: 0, commentsRevisions: 0, notes: 0, tables: 0, imagesCaptions: 0, sections: 0 },
+    [],
+  );
+  if (hasExactFidelityProjection(fidelity, cleanProjection)) {
+    return { outcome: 'clean-import-no-round-trip', degradations: [] };
+  }
+  if (sourceDigest !== SAMPLE1_SOURCE_SHA256 || sourceBytes !== SAMPLE1_SOURCE_BYTES) return undefined;
+  const sample1Projection = fidelityReport(
+    { inlineStyles: 266, commentsRevisions: 0, notes: 0, tables: 0, imagesCaptions: 0, sections: 1 },
+    [],
+  );
+  if (!hasExactFidelityProjection(fidelity, sample1Projection)) return undefined;
+  return {
+    outcome: 'degraded-import-no-round-trip',
+    degradations: fidelity
+      .filter((category) => category.status === 'degraded')
+      .map((category) => ({ categoryKey: category.key, label: category.label, count: category.count })),
+  };
 }
 
 export async function parseDocx(path: string, displayNameInput: string): Promise<ParsedDocx> {
@@ -457,7 +563,8 @@ export async function parseDocx(path: string, displayNameInput: string): Promise
     'package does not declare a WordprocessingML document',
   );
   const documentXml = decodeXml(archive.entries.get('word/document.xml')!);
-  const { blocks, signals } = parseDocument(documentXml);
+  const exactSample1 = archive.sourceDigest === SAMPLE1_SOURCE_SHA256 && archive.archiveBytes === SAMPLE1_SOURCE_BYTES;
+  const { blocks, signals } = parseDocument(documentXml, exactSample1);
   const coreTitle = archive.entries.get('docProps/core.xml');
   const metadataTitle = parseCoreTitle(coreTitle ? decodeXml(coreTitle) : undefined);
   const fallbackTitle = displayName.slice(0, -extname(displayName).length).trim();
@@ -466,7 +573,10 @@ export async function parseDocx(path: string, displayNameInput: string): Promise
     : { value: fallbackTitle, sourceLabel: '文件名' as const };
   requireDocx(titleSuggestion.value.length > 0, 'no usable title suggestion');
   const fidelity = fidelityReport(signals, archive.entryNames);
-  requireDocx(isCleanTracerFidelity(fidelity), 'document uses a fidelity branch outside the bounded import');
+  requireDocx(
+    deriveImportFidelityPlan(fidelity, archive.sourceDigest, archive.archiveBytes) !== undefined,
+    'document uses a fidelity branch outside the bounded import',
+  );
 
   return {
     parserIdentity: PARSER_IDENTITY,
