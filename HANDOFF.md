@@ -1,9 +1,9 @@
 # Current handoff
 
-Start with [`AGENTS.md`](AGENTS.md) and [`PROGRESS.md`](PROGRESS.md). Issue #36 / PR #75 is integrated on `dev` at exact commit `57e5800e8dca8e179d16b6fc48f0f1669397ccb6`; the completed outcome is the bounded provider-free sample1 compatibility/degraded-import slice, not full J-01.
+Issue #78 is implemented on `feat/78-exact-sample1-match`, based on exact `dev@a955de94abc7dc2ce86e9c9235efde44f335e3c6`. It extends the integrated Issue #36 / PR #75 exact-sample1 path only for a second-selection Exact Import Match disclosure followed by an explicit distinct-work/new-Book choice and reuse of the existing terminal commit. It is not full J-01.
 
-The lifecycle snapshots are preserved in [`docs/archive/issue-36-sample1-import-2026-08-26/INDEX.md`](docs/archive/issue-36-sample1-import-2026-08-26/INDEX.md). No product, design, domain, policy, ADR, code, test, workflow, dependency, SampleBook, Provider, export, release, or `main` change is authorized by this routing record.
+Start with [`AGENTS.md`](AGENTS.md), [`PROGRESS.md`](PROGRESS.md), and the live Issue #78 Change Brief. Use only exact tracked `SampleBooks/sample1.docx`; do not use Claude, Provider/network/credentials, export, recording, derived manuscripts, unnamed SampleBooks, or Issues #38–#41 behavior.
 
 ## Safe next action
 
-Any next implementation requires a separate authorized bounded Change Brief from the then-current `dev`. Real Provider recording remains deferred; when it is ready, request human intervention for the local, human-attended recording path. Do not claim full J-01, broaden scope, push, merge, publish, or promote to `main`.
+Commander reviews the committed branch against Issue #78, obtains the identical provider-free J-01 gate on Windows and macOS through PR CI, and integrates only into `dev` if accepted. Do not expand into Issues #38–#41, Provider, export, recording, full J-01, or `main` authority.

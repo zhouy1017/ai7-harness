@@ -159,7 +159,7 @@ async function clickExactButton(renderer, label, location) {
   );
 }
 
-async function runJourney(renderer) {
+async function runJourney(renderer, expectExactMatch) {
   at('renderer-ready');
   await waitFor(
     renderer,
@@ -179,14 +179,32 @@ async function runJourney(renderer) {
   at('landing');
   await clickExactButton(renderer, '导入稿件', 'stage-click');
   await waitFor(renderer, `document.querySelector('[data-screen="target"]')`, 'stage-target');
+  if (expectExactMatch) {
+    await assertRenderer(
+      renderer,
+      `document.querySelector('[data-exact-match-class="immutable-original"]')?.textContent.includes('精确原始文件身份')`,
+      'exact-original-identity-disclosed',
+    );
+    await assertRenderer(
+      renderer,
+      `document.querySelector('[data-exact-match-class="parsed-content-structure"]')?.textContent.includes('精确解析内容与结构身份')`,
+      'exact-parsed-content-structure-disclosed',
+    );
+    await assertRenderer(
+      renderer,
+      `(() => { const match = document.querySelector('.exact-match-disclosure'); const radio = document.querySelector('input[aria-label="新建图书（作为不同作品）"]'); return match?.textContent.includes('匹配图书') && match.textContent.includes('来源材料版本') && match.textContent.includes('稿件导入记录') && match.textContent.includes('不会选择目标或关系') && match.textContent.includes('不授予去重、覆盖或重新导入权限') && radio && !radio.checked; })()`,
+      'exact-match-records-and-distinct-work-unselected',
+    );
+  }
+  const targetLabel = expectExactMatch ? '新建图书（作为不同作品）' : '新建图书';
   await assertRenderer(
     renderer,
-    `!document.querySelector('input[aria-label="新建图书"]').checked && !document.querySelector('#book-title')`,
+    `!document.querySelector('input[aria-label=${JSON.stringify(targetLabel)}]').checked && !document.querySelector('#book-title')`,
     'no-preselection',
   );
   await assertRenderer(
     renderer,
-    `(() => { const radio = document.querySelector('input[aria-label="新建图书"]'); if (!radio) return false; radio.click(); return true; })()`,
+    `(() => { const radio = document.querySelector('input[aria-label=${JSON.stringify(targetLabel)}]'); if (!radio) return false; radio.click(); return true; })()`,
     'target-select',
   );
   await waitFor(renderer, `document.querySelector('[data-screen="title"]')`, 'target-title');
@@ -195,9 +213,23 @@ async function runJourney(renderer) {
     `document.querySelector('#book-title')?.value.length > 0 && Array.from(document.querySelectorAll('.field-note')).some((note) => note.textContent.includes('建议来源：')) && document.querySelector('[data-source-sha256]')?.textContent === ${JSON.stringify(SAMPLE1_SHA256)} && document.querySelector('[data-source-bytes]')?.textContent === ${JSON.stringify(String(SAMPLE1_BYTES))} && document.querySelectorAll('[data-fidelity-category]').length === 8`,
     'title-contract',
   );
+  if (expectExactMatch) {
+    await assertRenderer(
+      renderer,
+      `(() => { const title = document.querySelector('#book-title'); if (!title) return false; title.value = title.value + '（不同作品）'; title.dispatchEvent(new Event('input', { bubbles: true })); return title.value.endsWith('（不同作品）') && Array.from(document.querySelectorAll('.field-note')).some((note) => note.textContent.includes('建议来源：') && note.textContent.includes('可编辑建议')); })()`,
+      'distinct-work-title-edited',
+    );
+  }
   await clickExactButton(renderer, '确认书名并复核', 'review-click');
   await waitFor(renderer, `document.querySelector('[data-screen="review"]')`, 'review-screen');
   at('review');
+  if (expectExactMatch) {
+    await assertRenderer(
+      renderer,
+      `(() => { const summary = document.querySelector('.review-exact-match-summary'); return summary?.textContent.includes('精确原始文件身份') && summary.textContent.includes('精确解析内容与结构身份') && summary.textContent.includes('本次选择：新建图书（作为不同作品）') && summary.textContent.includes('匹配不授予目标、关系、去重、覆盖或重新导入权限') && document.querySelector('[data-screen="review"] h3')?.textContent.endsWith('（不同作品）'); })()`,
+      'review-binds-exact-match-and-distinct-work',
+    );
+  }
   await assertRenderer(
     renderer,
     `document.querySelector('[data-screen="review"] [data-source-sha256]')?.textContent === ${JSON.stringify(SAMPLE1_SHA256)} && document.querySelector('[data-screen="review"] [data-source-bytes]')?.textContent === ${JSON.stringify(String(SAMPLE1_BYTES))} && Array.from(document.querySelectorAll('[data-screen="review"] dd')).some((item) => item.textContent === '按上述降级方式新建图书并导入稿件')`,
@@ -351,18 +383,22 @@ async function main() {
       'pipe-only-product-transport',
     );
     at('launch');
-    browser = await chromium.launch({
-      executablePath: executable,
-      headless: false,
-      ignoreDefaultArgs: true,
-      args: productArgs,
-      env: productEnvironment(executable),
-      timeout: 30_000,
-    });
-    const renderer = await attachRendererTarget(browser);
-    await runJourney(renderer);
-    await browser.close();
-    browser = undefined;
+    const launchJourney = async (expectExactMatch) => {
+      browser = await chromium.launch({
+        executablePath: executable,
+        headless: false,
+        ignoreDefaultArgs: true,
+        args: productArgs,
+        env: productEnvironment(executable),
+        timeout: 30_000,
+      });
+      const renderer = await attachRendererTarget(browser);
+      await runJourney(renderer, expectExactMatch);
+      await browser.close();
+      browser = undefined;
+    };
+    await launchJourney(false);
+    await launchJourney(true);
   } finally {
     await browser?.close().catch(() => undefined);
     if (runRoot !== undefined) {

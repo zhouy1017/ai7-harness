@@ -95,6 +95,47 @@ function sourceCard(staged: StagedImportProjection): HTMLElement {
   return card;
 }
 
+function exactMatchDisclosure(
+  matches: StagedImportProjection['exactMatches'],
+  reviewTarget?: ReviewBeforeImportProjection['target']['label'],
+): HTMLElement {
+  const disclosure = element('section', 'source-card exact-match-disclosure');
+  if (reviewTarget) disclosure.classList.add('review-exact-match-summary');
+  disclosure.append(
+    element('p', 'section-label', reviewTarget ? '精确匹配与本次关系' : '发现精确导入匹配'),
+    element('h3', undefined, reviewTarget ? '复核匹配记录与不同作品后果' : '已有导入与当前文件精确匹配'),
+    ...(reviewTarget ? [element('p', undefined, `本次选择：${reviewTarget}`)] : []),
+    element(
+      'p',
+      'field-note',
+      reviewTarget
+        ? '匹配不授予目标、关系、去重、覆盖或重新导入权限；现有匹配记录保持不变，本次提交将创建另一图书的完整新记录。'
+        : '匹配仅用于披露，不会选择目标或关系，也不授予去重、覆盖或重新导入权限。',
+    ),
+  );
+  for (const match of matches) {
+    const item = element('section', 'review-section');
+    const classes = element('ul', 'degradation-list');
+    for (const identityClass of match.identityClasses) {
+      const row = element('li', undefined, identityClass.label);
+      row.dataset['exactMatchClass'] = identityClass.kind;
+      classes.append(row);
+    }
+    const details = element('dl');
+    details.append(
+      element('dt', undefined, '匹配图书'),
+      element('dd', undefined, `${match.bookTitle} · ${match.bookId}`),
+      element('dt', undefined, '来源材料版本'),
+      element('dd', 'technical-identity', match.sourceVersionId),
+      element('dt', undefined, '稿件导入记录'),
+      element('dd', 'technical-identity', match.importRecordId),
+    );
+    item.append(classes, details);
+    disclosure.append(item);
+  }
+  return disclosure;
+}
+
 function statusIcon(status: FidelityCategoryProjection['status']): string {
   if (status === 'preserved') return '✓';
   if (status === 'degraded') return '△';
@@ -153,7 +194,7 @@ function renderLanding(): void {
         return;
       }
       setStatus('DOCX 已完成本地暂存', 'success');
-      renderTargetChoice(result.staged, false);
+      renderTargetChoice(result.staged, null);
     } catch (error) {
       renderError(error, renderLanding);
     }
@@ -165,7 +206,10 @@ function renderLanding(): void {
   setStatus('准备就绪');
 }
 
-function renderTargetChoice(staged: StagedImportProjection, selected: boolean): void {
+function renderTargetChoice(
+  staged: StagedImportProjection,
+  selectedChoiceId: StagedImportProjection['targetChoices'][number]['id'] | null,
+): void {
   const content = panel();
   content.append(
     element('p', 'section-label', '步骤 1 / 3'),
@@ -173,6 +217,9 @@ function renderTargetChoice(staged: StagedImportProjection, selected: boolean): 
     element('p', 'lede', '系统不会替你选择。先明确这份来源要建立什么关系。'),
     sourceCard(staged),
   );
+  if (staged.exactMatches.length > 0) content.append(exactMatchDisclosure(staged.exactMatches));
+  const targetChoice = staged.targetChoices[0];
+  if (!targetChoice) throw new Error('AI7_IMPORT_TARGET_INVALID');
   const choices = element('fieldset');
   const legend = element('legend', undefined, '稿件导入目标');
   choices.setAttribute('role', 'radiogroup');
@@ -181,17 +228,26 @@ function renderTargetChoice(staged: StagedImportProjection, selected: boolean): 
   const radio = element('input');
   radio.type = 'radio';
   radio.name = 'import-target';
-  radio.value = 'new-book';
-  radio.setAttribute('aria-label', '新建图书');
-  radio.checked = selected;
+  radio.value = targetChoice.id;
+  radio.setAttribute('aria-label', targetChoice.label);
+  radio.checked = selectedChoiceId === targetChoice.id;
   const copy = element('span');
-  copy.append(element('strong', undefined, '新建图书'), element('small', undefined, '以这份来源建立图书、主稿件、r1 和工作流程实例'));
+  copy.append(
+    element('strong', undefined, targetChoice.label),
+    element(
+      'small',
+      undefined,
+      staged.exactMatches.length > 0
+        ? '将当前文件作为不同作品，建立新的图书、主稿件、r1 和工作流程实例'
+        : '以这份来源建立图书、主稿件、r1 和工作流程实例',
+    ),
+  );
   choice.append(radio, copy);
   choices.append(legend, choice);
   content.append(choices);
-  radio.addEventListener('change', () => renderTargetChoice(staged, true));
+  radio.addEventListener('change', () => renderTargetChoice(staged, targetChoice.id));
 
-  if (selected) {
+  if (selectedChoiceId !== null) {
     const form = element('section', 'form-row');
     const label = element('label', undefined, '书名');
     label.htmlFor = 'book-title';
@@ -216,6 +272,7 @@ function renderTargetChoice(staged: StagedImportProjection, selected: boolean): 
         const review = await window.ai7.prepareNewBookReview({
           draftId: staged.draftId,
           expectedDraftVersion: staged.draftVersion,
+          targetChoiceId: selectedChoiceId,
           confirmedTitle,
           acceptDegradation: false,
         });
@@ -231,7 +288,7 @@ function renderTargetChoice(staged: StagedImportProjection, selected: boolean): 
     queueMicrotask(() => title.focus());
   }
 
-  replaceScreen(selected ? 'title' : 'target', content);
+  replaceScreen(selectedChoiceId === null ? 'target' : 'title', content);
 }
 
 function listSection(title: string, items: ReadonlyArray<string>): HTMLElement {
@@ -283,6 +340,7 @@ function renderReview(review: ReviewBeforeImportProjection): void {
   );
   identity.append(identityDetails);
   content.append(identity);
+  if (review.exactMatches.length > 0) content.append(exactMatchDisclosure(review.exactMatches, review.target.label));
 
   const fidelity = element('section', 'review-section');
   fidelity.append(element('h3', undefined, '导入保真审阅 · 8 类'), fidelityTable(review.fidelity));
@@ -317,6 +375,7 @@ function renderReview(review: ReviewBeforeImportProjection): void {
           const acceptedReview = await window.ai7.prepareNewBookReview({
             draftId: review.draftId,
             expectedDraftVersion: review.draftVersion,
+            targetChoiceId: review.target.choiceId,
             confirmedTitle: review.target.confirmedTitle,
             acceptDegradation: true,
           });

@@ -4,6 +4,7 @@ import { copyFile, open, realpath, rename, rm } from 'node:fs/promises';
 import { basename, isAbsolute, posix, relative, resolve, sep } from 'node:path';
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
 import type {
+  ExactImportMatchProjection,
   FidelityCategoryProjection,
   ImportCommitProjection,
   ImportDegradationDecisionReviewProjection,
@@ -11,6 +12,7 @@ import type {
   JournalEditInput,
   ManuscriptBlockProjection,
   ManuscriptWindowProjection,
+  NewBookImportTargetChoiceId,
   ReviewBeforeImportProjection,
   StagedImportProjection,
 } from '../shared/protocol.js';
@@ -80,6 +82,8 @@ const NON_EFFECTS = [
 ] as const;
 const CLEAN_IMPORT_NON_EFFECT = '符合当前范围的导入不创建导入降级决定';
 const DEGRADATION_DECISION_SCHEMA = 'ai7.import-degradation-decision/1';
+const SAMPLE1_SOURCE_BYTES = 29_550;
+const SAMPLE1_SOURCE_SHA256 = 'b8a3dbde0aa8a1ec7265f9ae3fe47877759e7947c5ab69682cd0a8f424a8d483';
 
 type SqlRow = Record<string, SQLOutputValue>;
 
@@ -572,6 +576,14 @@ function nonEffects(plan: ImportFidelityPlan): ReadonlyArray<string> {
   return plan.degradations.length === 0 ? [...NON_EFFECTS, CLEAN_IMPORT_NON_EFFECT] : NON_EFFECTS;
 }
 
+function newBookTargetChoice(
+  exactMatches: ReadonlyArray<ExactImportMatchProjection>,
+): StagedImportProjection['targetChoices'][number] {
+  return exactMatches.length > 0
+    ? { id: 'new-book-distinct-intended-work', label: '新建图书（作为不同作品）', selected: false }
+    : { id: 'new-book', label: '新建图书', selected: false };
+}
+
 function degradationReview(
   plan: ImportFidelityPlan,
   accepted: boolean,
@@ -601,7 +613,7 @@ function parseStoredJson(value: string, message: string): unknown {
   }
 }
 
-function createNewBookReviewDigest(
+function createLegacyNewBookReviewDigestV2(
   snapshot: DraftSnapshot,
   confirmedTitle: string,
   draftVersion: number,
@@ -624,6 +636,56 @@ function createNewBookReviewDigest(
         contentDigest: snapshot.contentDigest,
         structureDigest: snapshot.structureDigest,
       },
+      fidelity: snapshot.fidelity,
+      degradationDecision:
+        plan.degradations.length === 0
+          ? null
+          : {
+              schema: DEGRADATION_DECISION_SCHEMA,
+              scope: 'this-import-only',
+              state: 'accepted-complete-set',
+              items: plan.degradations,
+            },
+      recordsToCreate: recordsToCreate(plan),
+      nonEffects: nonEffects(plan),
+      workflowProfile: { ...WORKFLOW_PROFILE, digest: WORKFLOW_PROFILE_DIGEST },
+      editorialDimensionSet: {
+        ...BASELINE_EDITORIAL_DIMENSION_SET,
+        digest: BASELINE_EDITORIAL_DIMENSION_SET_DIGEST,
+      },
+    }),
+  );
+}
+
+function createNewBookReviewDigestV3(
+  snapshot: DraftSnapshot,
+  confirmedTitle: string,
+  draftVersion: number,
+  plan: ImportFidelityPlan,
+  targetChoiceId: NewBookImportTargetChoiceId,
+  exactMatches: ReadonlyArray<ExactImportMatchProjection>,
+): string {
+  return sha256(
+    canonicalJson({
+      schema: 'ai7.new-book-import-review/3',
+      draftId: snapshot.draftId,
+      draftVersion,
+      target:
+        targetChoiceId === 'new-book-distinct-intended-work'
+          ? { choiceId: targetChoiceId, kind: 'new-book', relationship: 'distinct-intended-work' }
+          : { choiceId: targetChoiceId, kind: 'new-book' },
+      confirmedTitle,
+      source: {
+        displayName: snapshot.displayName,
+        provenance: 'native-file-picker/local-provider-free',
+        objectDigest: snapshot.objectDigest,
+        parserIdentity: snapshot.parserIdentity,
+        sourceDigest: snapshot.sourceDigest,
+        sourceBytes: snapshot.sourceBytes,
+        contentDigest: snapshot.contentDigest,
+        structureDigest: snapshot.structureDigest,
+      },
+      exactMatches,
       fidelity: snapshot.fidelity,
       degradationDecision:
         plan.degradations.length === 0
@@ -823,6 +885,7 @@ export class EditorialStore {
   prepareNewBookReview(
     draftId: string,
     expectedDraftVersion: number,
+    targetChoiceId: NewBookImportTargetChoiceId,
     confirmedTitleInput: string,
     acceptDegradation: boolean,
   ): ReviewBeforeImportProjection {
@@ -832,9 +895,12 @@ export class EditorialStore {
     const snapshot = this.#loadDraftSnapshot(draftId);
     requireStore(snapshot.state === 'staged', 'DRAFT_STATE_CHANGED', '导入草稿状态已变化。');
     requireStore(snapshot.version === expectedDraftVersion, 'DRAFT_VERSION_CHANGED', '导入草稿版本已变化。');
+    const exactMatches = this.#exactImportMatches(snapshot);
+    const targetChoice = newBookTargetChoice(exactMatches);
+    requireStore(targetChoiceId === targetChoice.id, 'TARGET_CHOICE_CHANGED', '导入目标选择已变化，请重新选择。');
     const plan = this.#requireFidelityPlan(snapshot);
     if (plan.degradations.length > 0 && !acceptDegradation) {
-      return this.#reviewProjection(snapshot, confirmedTitle, null, plan, false);
+      return this.#reviewProjection(snapshot, confirmedTitle, null, plan, false, targetChoiceId, exactMatches);
     }
     requireStore(
       plan.degradations.length > 0 || !acceptDegradation,
@@ -842,7 +908,14 @@ export class EditorialStore {
       '本次导入不需要降级接受。',
     );
     const nextVersion = expectedDraftVersion + 1;
-    const reviewDigest = createNewBookReviewDigest(snapshot, confirmedTitle, nextVersion, plan);
+    const reviewDigest = createNewBookReviewDigestV3(
+      snapshot,
+      confirmedTitle,
+      nextVersion,
+      plan,
+      targetChoiceId,
+      exactMatches,
+    );
     const reviewedAt = new Date().toISOString();
     this.#transaction(this.#authority, () => {
       const update = this.#authority
@@ -860,6 +933,8 @@ export class EditorialStore {
       reviewDigest,
       plan,
       plan.degradations.length > 0,
+      targetChoiceId,
+      exactMatches,
     );
   }
 
@@ -891,8 +966,22 @@ export class EditorialStore {
       requireStore(snapshot.reviewDigest === input.reviewDigest, 'REVIEW_CHANGED', '导入前复核摘要已变化。');
       requireStore(snapshot.reviewedTitle, 'REVIEW_CHANGED', '确认书名缺失。');
       const plan = this.#requireFidelityPlan(snapshot);
+      const exactMatches = this.#exactImportMatches(snapshot);
+      const targetChoice = newBookTargetChoice(exactMatches);
+      const currentReviewDigest = createNewBookReviewDigestV3(
+        snapshot,
+        snapshot.reviewedTitle,
+        snapshot.version,
+        plan,
+        targetChoice.id,
+        exactMatches,
+      );
+      const legacyReviewDigest =
+        exactMatches.length === 0
+          ? createLegacyNewBookReviewDigestV2(snapshot, snapshot.reviewedTitle, snapshot.version, plan)
+          : null;
       requireStore(
-        createNewBookReviewDigest(snapshot, snapshot.reviewedTitle, snapshot.version, plan) === input.reviewDigest,
+        currentReviewDigest === input.reviewDigest || legacyReviewDigest === input.reviewDigest,
         'REVIEW_CHANGED',
         '导入前复核摘要无法由当前权威快照重建。',
       );
@@ -1393,6 +1482,8 @@ export class EditorialStore {
   }
 
   #stagedProjection(snapshot: DraftSnapshot): StagedImportProjection {
+    const exactMatches = this.#exactImportMatches(snapshot);
+    const targetChoice = newBookTargetChoice(exactMatches);
     return {
       draftId: snapshot.draftId,
       draftVersion: snapshot.version,
@@ -1404,7 +1495,8 @@ export class EditorialStore {
         provenanceLabel: '本机文件选择器 · 本地解析 · 未联网',
       },
       titleSuggestion: { value: snapshot.titleSuggestion, sourceLabel: snapshot.titleSource },
-      targetChoices: [{ id: 'new-book', label: '新建图书', selected: false }],
+      exactMatches,
+      targetChoices: [targetChoice],
       fidelity: snapshot.fidelity,
       detectedBlockCount: snapshot.blockCount,
     };
@@ -1416,13 +1508,23 @@ export class EditorialStore {
     reviewDigest: string | null,
     plan: ImportFidelityPlan,
     accepted: boolean,
+    targetChoiceId: NewBookImportTargetChoiceId,
+    exactMatches: ReadonlyArray<ExactImportMatchProjection>,
   ): ReviewBeforeImportProjection {
+    const targetChoice = newBookTargetChoice(exactMatches);
+    requireStore(targetChoiceId === targetChoice.id, 'TARGET_CHOICE_CHANGED', '导入目标选择已变化，请重新选择。');
     return {
       draftId: snapshot.draftId,
       draftVersion: snapshot.version,
       reviewDigest,
-      target: { kind: 'new-book', label: '新建图书', confirmedTitle },
+      target: {
+        choiceId: targetChoiceId,
+        kind: 'new-book',
+        label: targetChoice.label,
+        confirmedTitle,
+      },
       source: this.#stagedProjection(snapshot).source,
+      exactMatches,
       fidelity: snapshot.fidelity,
       recordsToCreate: recordsToCreate(plan),
       nonEffects: nonEffects(plan),
@@ -1438,6 +1540,36 @@ export class EditorialStore {
       },
       degradationDecision: degradationReview(plan, accepted),
     };
+  }
+
+  #exactImportMatches(snapshot: DraftSnapshot): ExactImportMatchProjection[] {
+    if (snapshot.sourceBytes !== SAMPLE1_SOURCE_BYTES || snapshot.sourceDigest !== SAMPLE1_SOURCE_SHA256) return [];
+    return (
+      this.#authority
+        .prepare(
+          `SELECT b.book_id, b.title, sv.source_version_id, sv.content_digest, sv.structure_digest,
+                  ir.import_record_id
+           FROM source_versions sv
+           JOIN books b ON b.book_id = sv.book_id
+           JOIN manuscript_import_records ir
+             ON ir.book_id = sv.book_id
+            AND ir.source_version_id = sv.source_version_id
+           WHERE sv.source_digest = ?
+           ORDER BY ir.imported_at, b.book_id, sv.source_version_id`,
+        )
+        .all(snapshot.sourceDigest) as SqlRow[]
+    ).map((row) => ({
+      bookId: asString(row.book_id),
+      bookTitle: asString(row.title),
+      sourceVersionId: asString(row.source_version_id),
+      importRecordId: asString(row.import_record_id),
+      identityClasses: [
+        { kind: 'immutable-original', label: '精确原始文件身份' } as const,
+        ...(asString(row.content_digest) === snapshot.contentDigest && asString(row.structure_digest) === snapshot.structureDigest
+          ? ([{ kind: 'parsed-content-structure', label: '精确解析内容与结构身份' }] as const)
+          : []),
+      ],
+    }));
   }
 
   #loadDraftSnapshot(draftId: string): DraftSnapshot {
