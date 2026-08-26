@@ -1,6 +1,6 @@
 # Current handoff
 
-Issue [#86](https://github.com/zhouy1017/ai7-harness/issues/86) owns the accepted-but-unintegrated documentation normalization for the completed 23-question design interview. This handoff branch is `codex/docs/86-design-handoff`, created from exact `dev@2f8471f0d80ffa79f3cbdf1d79b0f0491697ca63`.
+Issue [#86](https://github.com/zhouy1017/ai7-harness/issues/86) owns the accepted-but-unintegrated documentation normalization for the completed 23-question design interview. The published remote handoff branch is `codex/docs/86-design-handoff`, created from exact `dev@2f8471f0d80ffa79f3cbdf1d79b0f0491697ca63`; the Issue's latest handoff comment records its exact remote head.
 
 The full accepted decision checkpoint, consistency repairs, domain-object closure, current-document impact audit, proposed successor ADR set, unresolved details, and exact safety invariants are in [`PROGRESS.md`](PROGRESS.md). Treat that record and the working UI context/glossary diffs as candidate inputs under Issue #86, not as target-qualified canonical authority. Do not read `docs/archive/` unless a current authority record names an exact blocking artifact.
 
