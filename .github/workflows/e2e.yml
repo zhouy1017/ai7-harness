@@ -4,14 +4,49 @@ on:
   pull_request:
     branches:
       - dev
-    paths-ignore:
-      - '**/*.md'
 
 permissions:
   contents: read
 
 jobs:
+  route:
+    name: Route E2E
+    runs-on: ubuntu-24.04
+    outputs:
+      run_j01: ${{ steps.route.outputs.run_j01 }}
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Route complete pull-request diff
+        id: route
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          changes_file="${RUNNER_TEMP:?}/ai7-e2e-route-paths-$$"
+          trap 'rm -f "$changes_file"' EXIT
+          git diff --no-renames --name-only -z "$BASE_SHA...$HEAD_SHA" > "$changes_file"
+
+          run_j01=false
+          while IFS= read -r -d '' path; do
+            case "$path" in
+              *.md) ;;
+              *) run_j01=true; break ;;
+            esac
+          done < "$changes_file"
+
+          printf 'run_j01=%s\n' "$run_j01" >> "$GITHUB_OUTPUT"
+
   j01:
+    needs: route
+    if: ${{ needs.route.outputs.run_j01 == 'true' }}
     name: J-01 (${{ matrix.label }})
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30

@@ -1,7 +1,7 @@
 # Current handoff
 
-Issue #82 locally extends `.github/workflows/e2e.yml` with `pull_request.paths-ignore: '**/*.md'`. Markdown-only pull requests skip the existing E2E Functional Gate; any non-Markdown path retains the unchanged Windows/macOS J-01 matrix, commands, pins, and permissions. No product or test scenario changed.
+Issue #82 review repair keeps the `dev` pull-request trigger unconditional and routes the complete exact `BASE_SHA...HEAD_SHA` path-name diff inside `.github/workflows/e2e.yml`. The pinned Ubuntu `route` job ignores only lowercase `*.md` paths; any other added, deleted, or rename-side path enables the unchanged Windows/macOS J-01 matrix. Git or routing errors fail closed. No product or test scenario changed.
 
 ## Safe next action
 
-Commander review and authorized integration only. Rebase/re-resolve against then-current `dev` before integration; do not expand this CI-process change into branch-protection, product, Provider, export, recording, release, or `main` work.
+Disposable-repository routing checks passed, including both >300-path cases, non-Markdown deletion, and Markdown/non-Markdown renames. Commander review and authorized integration only. Rebase/re-resolve against then-current `dev` before integration; do not expand this CI-process change into branch-protection, product, Provider, export, recording, release, or `main` work.
