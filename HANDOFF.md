@@ -1,17 +1,17 @@
-# Public SampleBooks review handoff
+# Reviewed PRD implementation-planning handoff
 
-Start with root [`AGENTS.md`](AGENTS.md), verify the exact current `dev` tip, then read current [`PROGRESS.md`](PROGRESS.md). This file is a cold-start router, not product or domain authority.
+Start with root [`AGENTS.md`](AGENTS.md), verify the exact current `dev` tip, then read current [`PROGRESS.md`](PROGRESS.md). This file is a cold-start router, not product, domain, or implementation authority.
 
 ## Current state
 
-[Issue #32](https://github.com/zhouy1017/ai7-harness/issues/32) is integrated through [PR #33](https://github.com/zhouy1017/ai7-harness/pull/33). Root [`SampleBooks/`](SampleBooks/) tracks the six exact Owner-designated Public SampleBooks—6,755,431 bytes total—plus their [`README.md`](SampleBooks/README.md) provenance, integrity, permitted-use, and closed-boundary manifest.
+At exact `dev@257b361f6aa923704ecfd4ed7eed75ee1df3fb16`, [Issue #32](https://github.com/zhouy1017/ai7-harness/issues/32) is integrated through [PR #33](https://github.com/zhouy1017/ai7-harness/pull/33). Root [`SampleBooks/`](SampleBooks/) contains 6 exact Owner-designated Public SampleBooks totaling 6,755,431 bytes; [`SampleBooks/README.md`](SampleBooks/README.md) owns their provenance, integrity, permitted-use, and closed-boundary manifest.
 
-The original local source, repository destinations, and raw committed Git blobs have matching SHA-256 identities. [ADR 0043](docs/adr/0043-allow-public-samplebooks-in-repository-and-ci.md) remains the admission authority.
+The `to-prd` revision of [PRD Issue #28](https://github.com/zhouy1017/ai7-harness/issues/28) is complete with 141 user stories across J-01–J-16. Its concise human-review projection is [Issue #28 comment 5420777600](https://github.com/zhouy1017/ai7-harness/issues/28#issuecomment-5420777600). The PRD records requirements; it does not itself authorize implementation.
 
-No test or Journey currently consumes these inputs. The Issue #24 J-01 tracer still generates its public-synthetic DOCX at runtime and remains a bounded happy-path tracer, not full J-01.
+No Journey consumes a SampleBook. The Issue #24 J-01 tracer still generates its public-synthetic DOCX at runtime, remains bounded, and is not full J-01 authority.
 
 ## Next safe action
 
-Update and human-review PRD [Issue #28](https://github.com/zhouy1017/ai7-harness/issues/28) and its concise review projection to reflect the integrated inputs.
+Proceed only under a separately authorized bounded implementation-planning Change Brief for one next outcome. Extend existing owners. If the outcome consumes a SampleBook, name the exact admitted input in that brief.
 
-Any later consumption requires a separately authorized bounded Journey Change Brief naming an exact admitted input and extending existing owners. Archive sweep: none. No blockers remain for the admission itself.
+Archive sweep: none. Full J-01, provider/export work, release, `main` promotion, and unnamed SampleBook consumption remain outside current authority.
