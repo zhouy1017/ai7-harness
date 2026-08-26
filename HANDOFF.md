@@ -1,25 +1,21 @@
-# AI7 V2 PRD review handoff
+# Public SampleBooks exception handoff
 
-Start with root [`AGENTS.md`](AGENTS.md), verify the exact current `dev` tip, and read current [`PROGRESS.md`](PROGRESS.md). This file is a cold-start router, not a product or domain authority owner.
+Start with root [`AGENTS.md`](AGENTS.md), verify the exact branch/head and intended `dev` target, then read current [`PROGRESS.md`](PROGRESS.md) and [Issue #30](https://github.com/zhouy1017/ai7-harness/issues/30). This file is a cold-start router, not product or domain authority.
 
-## Current review subject
+## Current change
 
-[Issue #28](https://github.com/zhouy1017/ai7-harness/issues/28) synthesizes the accepted AI7 V2 design into a product-level PRD. Its [human-review summary](https://github.com/zhouy1017/ai7-harness/issues/28#issuecomment-5420437858) provides the rapid review route. Review the product boundary, authority separations, J-01–J-16 coverage, current-versus-future status, testing seam, explicit exclusions, and unresolved matters.
+Issue #30 records the Owner's clarification that the general repository/hosted-CI manuscript prohibition governs other manuscripts, while exact Owner-designated Public SampleBooks are a narrow public test-input exception. The Worker branch adds root [ADR 0043](docs/adr/0043-allow-public-samplebooks-in-repository-and-ci.md) and aligns the current repository, CI, buildability, migration, ignore, and entry-point owners.
 
-The PRD is an index over existing authority owners. It does not supersede contexts, ADRs, Policy Documents, V2 architecture/UI/UX, or source-checkout owners; its `ready-for-agent` label does not authorize implementation or issue decomposition.
+No `SampleBooks/` content, product code, scenario, dependency, provider/export path, domain definition, or test gate was added. The current J-01 tracer still generates its public-synthetic DOCX under an external disposable temp root and remains only the bounded Issue #24 outcome, not full J-01.
 
-## Current implementation boundary
+## Exact boundary
 
-Immutable Issue #24 integration checkpoint `4ef62ac1d1de37c2cc644fd17669bd4669ec8441` proves only the provider-free J-01 new-Book happy-path tracer: public-synthetic DOCX, Review Before Import, atomic initial Book graph, bounded ProseMirror window, one edit, and durable Edit Journal acknowledgement. It is not full J-01.
+A Public SampleBook requires both exact-root `SampleBooks/` placement and explicit Owner designation of the selected material through an authorized Issue and pull request. Placement alone is not admission. The exception permits repository tracking and provider-free local/hosted-CI test input only; raw payload remains prohibited from logs, diagnostics, screenshots, traces, videos, uploaded build/test artifacts, and distributions. It grants no live-provider call, credential, outbound product network, learning, export, external delivery, publication, or public-release authority.
 
-The single standing acceptance seam is the launchable-product E2E Functional Gate. An admitted Journey ID runs through the built Electron product on Windows and macOS and observes user-visible, domain, authority, and durable-data consequences. Issue #28 creates no lower-level or additional gate.
-
-## Unresolved input
-
-The Owner states that original manuscript material intended for public synthetic-data generation exists under a `samplebooks` directory and may be used publicly for test authoring. The directory is absent from the PRD's exact `dev` base, and current rules prohibit manuscripts and derivatives in the repository, hosted CI, fixtures, and corpora. Issue #28 reads, copies, and authorizes none of that material. A future exact Change Brief must resolve path, provenance/public-use grant, transformation, sanitization, and current-rule reconciliation before use.
+All other manuscripts, derivatives, and private sample Books remain excluded from repositories and hosted CI. Document formats remain ignored elsewhere in the tree.
 
 ## Next safe action
 
-Human-review Issue #28 and its linked summary. Any implementation, issue decomposition, provider/export work, or broader J-01 claim requires separate Owner authorization and an implementation-planning Change Brief for one bounded outcome that extends existing owners.
+The Commander reviews the Worker diff against Issue #30, creates and integrates the pull request to `dev` if accepted, then corrects Issue #28's body and first review comment as the authorized external records. A later Public SampleBook addition or consumption starts only under its exact Owner designation and applicable bounded Change Brief.
 
-Archive sweep: none. The PRD and review comment are active external review records; prior routing remains recoverable in Git history.
+Archive sweep: none. ADR 0016 and historical kick-ins remain unchanged as historical evidence; ADR 0043 supersedes only their blanket repository/hosted-CI prohibition for the exact admitted class.

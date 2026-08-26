@@ -34,6 +34,6 @@ Run the one admitted provider-free journey with:
 pnpm run e2e -- --journey J-01
 ```
 
-The scenario generates its public-synthetic Chinese DOCX under an external disposable temp root at runtime. Do not place a manuscript, manuscript derivative, credential, screenshot, trace, video, or product database in this repository.
+The current J-01 scenario generates its public-synthetic Chinese DOCX under an external disposable temp root at runtime and does not use `SampleBooks/`. Under [ADR 0043](docs/adr/0043-allow-public-samplebooks-in-repository-and-ci.md), only exact-root `SampleBooks/` material explicitly designated by the Owner through an authorized Issue and pull request may later be tracked and used as provider-free local/hosted-CI test input. Directory placement alone grants no admission. Do not place any other manuscript or derivative, private sample Book, credential, screenshot, trace, video, product database, or manuscript payload in logs, uploaded artifacts, or a distribution.
 
 See [`docs/development/source-checkout.md`](docs/development/source-checkout.md) for lifecycle and environment details and [`docs/development/dependency-provenance.md`](docs/development/dependency-provenance.md) for the exact acquisition, integrity, and license ledger.
