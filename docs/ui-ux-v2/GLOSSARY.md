@@ -7,6 +7,7 @@ Status: **accepted V2 package-local bilingual index; root contexts and `GLOSSARY
 | AI7 Desktop Interaction Language | AI7 桌面交互语言 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Interaction Reference Evidence | 交互参考证据 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Book-anchored Workbench | 图书锚定工作台 | [AI7 V2 UI/UX](./CONTEXT.md) |
+| Book-bound DSH-composed Agent Workspace | 图书绑定的 DSH 组合式智能体工作区 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Book Library | 书库 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Active Work Object | 当前工作对象 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Task Context Layer | 任务上下文层 | [AI7 V2 UI/UX](./CONTEXT.md) |
@@ -298,6 +299,7 @@ Status: **accepted V2 package-local bilingual index; root contexts and `GLOSSARY
 | AI7 Desktop Interaction Language | Codex branding, an exact Codex layout, a chat-first product hierarchy, or the architecture-level Primary Agent Harness. |
 | Interaction Reference Evidence | A production asset, component library, copied GUI source, accepted screen geometry, or proof of usability. |
 | Book-anchored Workbench | A filesystem folder, a Book-wide scalar workflow, or a list of agent conversations. |
+| Book-bound DSH-composed Agent Workspace | Raw DSH Web, a global chat root, a second Book or Task authority, an unrestricted plugin host, or the Developer Capability Profile. |
 | Active Work Object | The authoritative object itself, the whole Book, or a renderer window treated as manuscript authority. |
 | Task Context Layer | The AI7 Task Ledger, a Harness Session, or a generic chat surface. |
 | Interactive Editorial Dialogue | Software QA, a generic chat root, a raw provider transcript, or an unbound conversation. |

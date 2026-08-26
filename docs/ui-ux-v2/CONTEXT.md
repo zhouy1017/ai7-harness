@@ -18,6 +18,10 @@ _Avoid_: UI specification, implementation baseline, reusable asset
 The AI7 workspace model in which a Book is the stable editorial context, one Book-owned manuscript or Editorial Deliverable is the active work object, and Tasks enter as context-bound activity rather than peer conversations.
 _Avoid_: folder workspace, conversation list, task-first shell
 
+**Book-bound DSH-composed Agent Workspace** (`图书绑定的 DSH 组合式智能体工作区`):
+The explicitly selected agent-primary work surface inside one exact Book where AI7 retains the desktop shell, Book and Active Work Object bindings, product records, capability and authority boundaries, while an admitted DSH composition supplies the inner agent experience and may host compatible admitted DSH UI plugins. Explicit entry temporarily gives this workspace the primary central presentation slot while preserving the prior Active Work Object, visible Book and safety state, and a direct return route; entering, leaving, or projecting it creates no second Book, generic chat root, Harness-owned product authority, Run, grant, or manuscript mutation.
+_Avoid_: raw DSH Web console, instance-wide agent home, ungoverned plugin surface, Developer Capability Profile
+
 **Book Library** (`书库`):
 The searchable user-facing collection of every locally available exact Book and the stable global entry for opening or creating one, without granting task scope, publication status, or filesystem meaning merely by listing it.
 _Avoid_: folder browser, manuscript list, task scope, published-book catalog
