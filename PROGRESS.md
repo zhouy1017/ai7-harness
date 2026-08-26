@@ -17,12 +17,12 @@
 - The required two-axis advisory review found no scope creep and identified bounded closure gaps. The existing renderer/E2E now keep exact bytes/SHA and degraded action wording on Review Before Import and expose matching fidelity examples/export consequences from the persistent import record. Current routed synthetic-input claims were corrected in `docs/agents/ci-test-boundaries.md`, `docs/architecture-v2/MIGRATION.md`, and `docs/domain/execution/CONTEXT.md`.
 - Post-review exact `build` and `e2e -- --journey J-01` both exit 0 with the repaired public projections and assertions.
 - Both read-only review axes now confirm the fixes: Spec reports no remaining Issue #36 gap or scope creep; Standards confirms the current-truth docs and ADR 0044 commit rationale, with its sole final checkpoint finding resolved by this replacement. Same-provider review independence remains reduced.
-- Commander confirmed the live Issue #36 Change Brief now explicitly allows the minimum current-truth reconciliation in `docs/agents/ci-test-boundaries.md`, `docs/architecture-v2/MIGRATION.md`, and `docs/domain/execution/CONTEXT.md`. The sole coherent local commit remains at current branch `HEAD`; no push or external action occurred.
+- Commander confirmed the live Issue #36 Change Brief now explicitly allows the minimum current-truth reconciliation in `docs/agents/ci-test-boundaries.md`, `docs/architecture-v2/MIGRATION.md`, and `docs/domain/execution/CONTEXT.md`. Exact reviewed implementation head `2e3ba9b1f733f9dc3e92726fe9d75e0af04a1dff` is carried by PR #75 against `dev`; the Worker performed no push or external action.
 - Requested binding `claude-opus-5@high`; actual `gpt-5.6-sol@xhigh`; T3 same-class fallback because the Owner explicitly disabled local Claude.
 
 ## What's next
 
-- Commander inspection and any final independent review; under separate authority, push/open the Issue #36 pull request against `dev`, observe the existing Windows/macOS J-01 CI gate, and integrate only if both platforms pass.
+- PR #75's integration lifecycle is tracked on GitHub. If it is unmerged, Commander waits for both platform checks and integrates only if both pass. Once merged, resume only from then-current `dev` under a separately authorized bounded Change Brief; never treat this outcome as full J-01.
 
 ## Key decisions made
 
@@ -33,8 +33,8 @@
 
 ## Unresolved matters or blockers
 
-- No Worker blocker or unresolved implementation matter. Commander-owned push/PR, dual-platform CI, and integration remain; `main`, Provider/fixture/export, Issue #37, and full-J-01 scope remain excluded.
+- No Worker blocker or unresolved implementation matter. PR #75 check/integration state is GitHub-owned; `main`, Provider/fixture/export, Issue #37, and full-J-01 scope remain excluded.
 
 ## Resume Prompt
 
-Commander: inspect the clean current `HEAD` and completed handoff, arrange any final independent review, then—only under external-action authority—push/open the Issue #36 PR to `dev`, require the existing Windows/macOS J-01 gate, and integrate without touching `main` or broadening scope.
+Commander: follow PR #75 on GitHub. If unmerged, wait for both platform checks and integrate into `dev` only when both pass; after merge, resume solely from then-current `dev` under a separately authorized bounded Change Brief, without touching `main`, broadening scope, or claiming full J-01.
