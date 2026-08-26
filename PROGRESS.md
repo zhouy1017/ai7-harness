@@ -2,28 +2,29 @@
 
 ## What's done
 
-- The Owner approved the `to-issues` decomposition of [PRD Issue #28](https://github.com/zhouy1017/ai7-harness/issues/28) into 31 bounded outcomes, S01–S31, published as [Issues #36–#66](https://github.com/zhouy1017/ai7-harness/issues?q=is%3Aissue%20number%3A36..66). The exact planning base `dev@e385e767d343485d0ca1a58f82b3d015c7a3e078` descends from immutable Issue #24 integration checkpoint `4ef62ac1d1de37c2cc644fd17669bd4669ec8441`.
-- [Issue #36](https://github.com/zhouy1017/ai7-harness/issues/36) is the only `ready-for-agent` outcome. It authorizes the existing bounded J-01 tracer to use exact admitted input [`SampleBooks/sample1.docx`](SampleBooks/sample1.docx) (29,550 bytes; SHA-256 `b8a3dbde0aa8a1ec7265f9ae3fe47877759e7947c5ab69682cd0a8f424a8d483`) instead of generating a synthetic DOCX at runtime. This remains an extension of the tracer, not full J-01 authority.
-- [Issues #37–#66](https://github.com/zhouy1017/ai7-harness/issues?q=is%3Aissue%20number%3A37..66) are `enhancement` backlog only. Their approved decomposition records requirements and dependencies but does not authorize dispatch or implementation.
-- J-14 accessibility, keyboard, Chinese, zoom, and cross-platform coverage is carried as acceptance coverage inside each applicable Journey; it is not an independent Journey slice, proof programme, or gate.
-- Archive sweep: none. The approved decomposition created active backlog and current routing; it did not complete an implementation or supersede material that needs archiving.
+- Issue #69 verified the exact admitted regular input [`SampleBooks/sample1.docx`](SampleBooks/sample1.docx): 29,550 bytes; SHA-256 `b8a3dbde0aa8a1ec7265f9ae3fe47877759e7947c5ab69682cd0a8f424a8d483`.
+- The initial Issue #36 Codex Worker inherited Commander configuration, violating Layer B. Its `doctor`, `bootstrap`, `build`, and RED J-01 `stage-target` observations remain payload-free diagnostic evidence only, with no retained diff, manuscript payload, export, provider call, or artifact.
+- Independent confirmation verified the exact regular `sample1` size/hash and `src/service/docx.ts:299` rejection for `non-default terminal section properties`, which requires parser/fidelity product work. The pinned root commands were not rerun because that process saw ambient Node `24.19.0` / pnpm `11.19.0`; the prior command results are not compliant verification.
+- Issue #36 remains an open enhancement, and its `ready-for-agent` classification was removed after the blocker was recorded. Issue #69 is therefore a routing/blocker record, not implementation authority.
+- Archive sweep: none.
 
 ## What's next
 
-- The Commander may separately dispatch only [Issue #36](https://github.com/zhouy1017/ai7-harness/issues/36) from the then-current exact `dev` under its bounded Change Brief.
-- Do not dispatch Issues #37–#66 until the Owner makes a later exact selection and the selected Issue is made work-ready against the then-current `dev`.
+- The Owner must choose one exact resolution before any implementation dispatch: (a) revise the authority to extend the existing `src/service/docx.ts` parser/fidelity owner and reconcile S02 / Issue #37 overlap; or (b) keep the parser unchanged and designate another exact admitted DOCX.
+- Until that decision is recorded against the intended target, do not dispatch Issue #36 or any adjacent Issue.
 
 ## Key decisions made
 
-- PRD decomposition and implementation authority remain separate: publishing S01–S31 does not authorize implementing the full PRD or full J-01.
-- `SampleBooks/sample1.docx` is the one exact admitted input authorized for Issue #36; no other SampleBook gains Journey-consumption authority from this routing update.
-- Existing owners must be extended; the integrated tracer is not treated as complete J-01 and J-14 does not become a new standing gate.
+- The requested Worker model was `claude-haiku-4-5-20251001@low`; local Claude was explicitly reported disabled, so the authorized same-class fallback was `gpt-5.6-luna@medium`. This record preserves requested, actual, and fallback reason.
+- Model-binding audit: the initial Issue #36 Codex Worker inherited Commander configuration and violated Layer B. After the Owner confirmed local Claude disabled, the correct T2 fallback binding was requested `claude-sonnet-5@medium`, actual `gpt-5.6-terra@high`.
+- The existing parser/fidelity owner is the only proposed implementation seam; this checkpoint does not choose whether to revise its authority.
+- The bounded input remains the canonical regular `sample1` only. No other SampleBook, full J-01, provider processing, external export, `main` promotion, or release authority is granted.
 
 ## Unresolved matters or blockers
 
-- Issues #37–#66 await later exact Owner selection and work-ready authorization; none is currently dispatchable.
-- Provider/export work, live-provider calls, release, `main` promotion, and any unnamed SampleBook consumption remain outside current authority.
+- Owner decision required between extending `src/service/docx.ts` with S02 / #37 reconciliation and designating another exact admitted DOCX while keeping the parser unchanged.
+- Issue #36 remains open enhancement work without `ready-for-agent`; no implementation, push, PR, merge, or external action is authorized from this checkpoint.
 
 ## Resume Prompt
 
-As Commander, reverify the then-current exact `dev` and separately dispatch only Issue #36 under its bounded Change Brief, extending existing owners and using exact `SampleBooks/sample1.docx`; do not treat the tracer as full J-01 or dispatch Issues #37–#66 without later exact Owner selection.
+As Commander, obtain and record the Owner's choice between revising the existing `src/service/docx.ts` parser/fidelity authority with S02/#37 reconciliation or designating another exact admitted DOCX; keep Issue #36 blocked and preserve the no-full-J01/provider/export/main boundary until then.
