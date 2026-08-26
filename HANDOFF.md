@@ -1,9 +1,9 @@
 # Current handoff
 
-Issue #78 is implemented on `feat/78-exact-sample1-match`, based on exact `dev@a955de94abc7dc2ce86e9c9235efde44f335e3c6`. It extends the integrated Issue #36 / PR #75 exact-sample1 path only for a second-selection Exact Import Match disclosure followed by an explicit distinct-work/new-Book choice and reuse of the existing terminal commit. It is not full J-01.
+Issue #78 / PR #79 is integrated into `dev` at exact `72fa74698e6bbd79e111f953f4959a900c52783f`. The provider-free J-01 extension discloses exact immutable-original and parsed-content-and-structure matches on the second exact `sample1` import, identifies the matched Book, Source Version, and Import Record, requires an explicit `新建图书（作为不同作品）` distinct-work choice, and reuses the existing atomic result. It is not full J-01.
 
-Start with [`AGENTS.md`](AGENTS.md), [`PROGRESS.md`](PROGRESS.md), and the live Issue #78 Change Brief. Use only exact tracked `SampleBooks/sample1.docx`; do not use Claude, Provider/network/credentials, export, recording, derived manuscripts, unnamed SampleBooks, or Issues #38–#41 behavior.
+The identical Windows/macOS J-01 gate passed in [run 32958560819](https://github.com/zhouy1017/ai7-harness/actions/runs/32958560819). No Claude, Provider call, credentials, export, or protected material was used. Real Provider recording is deferred to a future local, human-attended, no-fallback intervention under its separate baseline.
 
 ## Safe next action
 
-Commander reviews the committed branch against Issue #78, obtains the identical provider-free J-01 gate on Windows and macOS through PR CI, and integrates only into `dev` if accepted. Do not expand into Issues #38–#41, Provider, export, recording, full J-01, or `main` authority.
+Any further implementation must begin from the then-current `dev` under another separately authorized bounded Change Brief. Do not expand this closure into full J-01, adjacent Issues, Provider/export work, recording now, release, or `main`.
