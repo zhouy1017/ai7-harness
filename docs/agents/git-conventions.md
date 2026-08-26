@@ -67,6 +67,8 @@ Reserved tag syntax is `vX.Y.Z` for releases and `vX.Y.Z-rc.N` for release candi
 
 No release workflow is implemented or authorized by this baseline. Any release automation requires its own exact Owner authorization and task scope. Tags are created only by the Commander, only on `main`, and only after the separately authorized promotion path. Tagging or later release automation creates no separate release, receipt, packaging, signing, reproducibility, provenance, or same-SHA proof gate.
 
-## What never enters the repository
+## Protected material and the narrow test-input exception
 
-Manuscripts and their derivatives in any form, including retrieval indexes and embeddings. Credentials and secret values. Private sample Books. The `.gitignore` excludes document formats by pattern rather than by path, because a manuscript dropped anywhere in the tree must still be caught.
+Credentials, secret values, private sample Books, and ordinary manuscripts or derivatives—including retrieval indexes and embeddings—never enter the repository. Document formats remain ignored by pattern everywhere by default.
+
+[ADR 0043](../adr/0043-allow-public-samplebooks-in-repository-and-ci.md) permits only exact-root `SampleBooks/` files explicitly designated by the Owner through an authorized Issue and pull request to be tracked as provider-free local/hosted-CI test inputs. Placement in that directory alone is not authority. The `.gitignore` exception makes such an authorized commit technically possible; it does not admit a file. Public SampleBooks remain excluded from raw logs and uploaded artifacts, distributions, live-provider calls, production learning, export, and public-release authority.

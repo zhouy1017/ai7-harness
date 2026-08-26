@@ -28,15 +28,17 @@ A complete journey starts through the launchable AI7 product path and reaches a 
 
 For an observed bug, add the smallest end-to-end variation of the nearest complete journey that reproduces the reported outcome. Preserve the issue link and expected outcome in the scenario. Do not build speculative edge-case catalogs, generate tests from coverage gaps or component ownership, or add cases for failures nobody has observed and no supported journey requires.
 
-## Provider-free and public-synthetic boundary
+## Provider-free public-test-material boundary
 
-The product E2E execution interval uses public synthetic data only. After exact dependency restoration finishes, the product subject and scenario make no live model or provider call, receive no API key or credential, perform no outbound network request, and contain no unpublished manuscript, private sample Book, or derivative of either.
+The product E2E execution interval uses only public test material: runtime-generated public synthetic data, or an Owner-designated **Public SampleBook** admitted under [ADR 0043](../adr/0043-allow-public-samplebooks-in-repository-and-ci.md). A Public SampleBook must be under exact root `SampleBooks/` and explicitly designated through an authorized Issue and pull request; directory placement alone is not admission. A future scenario that consumes one names the exact admitted input in its own Change Brief. The current J-01 tracer continues to generate its synthetic DOCX at runtime and consumes no SampleBook.
+
+After exact dependency restoration finishes, the product subject and scenario make no live model or provider call, receive no API key or credential, perform no outbound network request, and contain no unpublished manuscript, private sample Book, or derivative of either. Public SampleBook admission does not grant provider, product-learning, export, distribution, or public-release authority.
 
 Before that interval, CI may use narrowly scoped repository checkout and declared dependency-source authentication plus approved package registries and immutable artifact sources to restore the exact committed lockfile, declared pins, and integrity-bound secondary downloads. Those infrastructure credentials never reach the product process. Any local dependency store must be reconstructable from empty. Job-local dependency caches may accelerate this step, but their initially absent state must remain supported without deleting global or shared caches. This is the declared-source-assisted bootstrap defined by the [Source Checkout Buildability Contract](./source-checkout-buildability.md), not product network access or a provider rehearsal.
 
 A deterministic model fixture is allowed only as an in-process or local part of the same AI7 E2E journey boundary. It supplies predictable model-facing turns so the product journey can proceed; it is not a provider emulator, provider-conformance subject, replay proof, cassette programme, or request-fingerprint proof.
 
-Repository fixtures may contain only clearly public synthetic material. CI logs and uploaded artifacts must not retain manuscript payloads, including synthetic manuscript-shaped text emitted while the journey runs. Report scenario identity, state, and failure location without copying editorial payloads.
+Repository test inputs may contain only clearly public synthetic material or exact Public SampleBooks admitted under ADR 0043. CI logs and uploaded build/test artifacts must not retain manuscript payloads, including Public SampleBook content or synthetic manuscript-shaped text emitted while the journey runs. Report scenario identity, state, and failure location without copying editorial payloads. Public SampleBooks are test inputs only and never enter a shipped distribution.
 
 ## Product subject and platform contract
 

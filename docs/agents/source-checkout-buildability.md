@@ -47,7 +47,7 @@ Repository checkout authentication and declared dependency-source access are dev
 
 Any required dependency-source authorization is part of the documented standard AI7 developer access path; it cannot depend on an author's personal account, undocumented entitlement, or manually transferred secret. A developer who has the declared standard access must not need another machine's state to complete bootstrap.
 
-Every source file, static asset, schema, migration, default configuration, public-synthetic fixture, generation input, license, and notice needed to build or launch must either be tracked or be derivable by a repository command from a tracked input plus an immutable declared dependency. Generated outputs remain ignored build products, never hidden source inputs.
+Every source file, static asset, schema, migration, default configuration, public test input, generation input, license, and notice needed to build or launch must either be tracked or be derivable by a repository command from a tracked input plus an immutable declared dependency. A tracked manuscript-shaped input is permitted only when it is an Owner-designated Public SampleBook under [ADR 0043](../adr/0043-allow-public-samplebooks-in-repository-and-ci.md); exact-root `SampleBooks/` placement alone is insufficient. Generated outputs remain ignored build products, never hidden source inputs.
 
 ## Host prerequisites are tools, not payloads
 
@@ -96,7 +96,7 @@ Source completeness does not mean vendoring Harness or committing `node_modules`
 2. every acquired package or artifact is checked against its lockfile integrity or declared digest before it can become an input;
 3. after restoration, required Agent Data Root-owned runtime dependencies are atomically materialized and re-verified from the generated snapshot without network access;
 4. the product E2E execution interval begins with outbound product network access disabled;
-5. the E2E journey uses public synthetic data and its in-boundary deterministic model fixture; and
+5. the E2E journey uses only public test material—runtime-generated public synthetic data or an exact Public SampleBook admitted for that journey under ADR 0043—and its in-boundary deterministic model fixture; and
 6. the product process receives no registry token, repository token, artifact-store credential, provider credential, or signing secret.
 
 A truly offline dependency installation, a required AI7-maintained offline package mirror, a vendored Harness tree, or a byte-for-byte reproducible build is outside this contract. Adopting one would require a separate owner decision and must not be inferred from “fresh checkout.” A transport mirror remains permitted only under the identity-and-digest rule above and never becomes a required hidden input.
@@ -117,7 +117,7 @@ Phase 1 establishes and continuously maintains the command and input boundary, b
 - frozen dependency and secondary-artifact restoration succeeds, including reconstruction of any declared local store, without a sibling checkout or hidden local artifact;
 - any Agent Data Root-owned runtime dependency store is atomically materialized and re-verified from the declared snapshot without consulting another root or global store;
 - the host-native product builds, instantiates the production-shaped non-provider topology, completes the base multi-process readiness handshake, remains running, reaches an interactive provider-free state, and activates the composed Harness runtime when the journey first requires it;
-- the persistent development Agent Data Root is created when absent and preserved when present, while the E2E Agent Data Root plus runtime copies, imports, indexes, journals, databases, and outputs remain outside the repository; regular tracked public-synthetic fixture inputs may remain inside it;
+- the persistent development Agent Data Root is created when absent and preserved when present, while the E2E Agent Data Root plus runtime copies, imports, indexes, journals, databases, and outputs remain outside the repository; regular tracked public synthetic inputs and exact Public SampleBooks admitted under ADR 0043 may remain inside it, but no runtime derivative may be written back there;
 - the applicable complete E2E journey starts through that same built product path; and
 - the first fulfillment succeeds with absent job-local caches; later restored caches may accelerate restoration but supply no required source, local-store content, or application output.
 

@@ -1,13 +1,14 @@
-# Private sample manuscripts are authorized for AI7 use only while they
-# remain private and local (ADR 0016). They must never be committed, in
-# history or working tree. Document formats are excluded outright rather
-# than by path.
-SampleBooks/
+# Manuscripts and private sample Books remain local-only. Document formats
+# are ignored everywhere by default. ADR 0043 permits only exact-root
+# SampleBooks files that the Owner separately designates through an
+# authorized Issue and pull request; placement alone is not admission.
 *.doc
 *.docx
 *.odt
 *.rtf
 *.pdf
+!/SampleBooks/
+!/SampleBooks/**
 
 # Local secrets and credential material never enter the repository.
 .env
