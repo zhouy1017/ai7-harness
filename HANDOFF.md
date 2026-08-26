@@ -1,9 +1,7 @@
 # Current handoff
 
-Issue #78 / PR #79 is integrated into `dev` at exact `72fa74698e6bbd79e111f953f4959a900c52783f`. The provider-free J-01 extension discloses exact immutable-original and parsed-content-and-structure matches on the second exact `sample1` import, identifies the matched Book, Source Version, and Import Record, requires an explicit `新建图书（作为不同作品）` distinct-work choice, and reuses the existing atomic result. It is not full J-01.
-
-The identical Windows/macOS J-01 gate passed in [run 32958560819](https://github.com/zhouy1017/ai7-harness/actions/runs/32958560819). No Claude, Provider call, credentials, export, or protected material was used. Real Provider recording is deferred to a future local, human-attended, no-fallback intervention under its separate baseline.
+Issue #82 review repair keeps the `dev` pull-request trigger unconditional and routes the complete exact `BASE_SHA...HEAD_SHA` path-name diff inside `.github/workflows/e2e.yml`. The pinned Ubuntu `route` job ignores only lowercase `*.md` paths; any other added, deleted, or rename-side path enables the unchanged Windows/macOS J-01 matrix. Git or routing errors fail closed. No product or test scenario changed.
 
 ## Safe next action
 
-Any further implementation must begin from the then-current `dev` under another separately authorized bounded Change Brief. Do not expand this closure into full J-01, adjacent Issues, Provider/export work, recording now, release, or `main`.
+Disposable-repository routing checks passed, including both >300-path cases, non-Markdown deletion, and Markdown/non-Markdown renames. Commander review and authorized integration only. Rebase/re-resolve against then-current `dev` before integration; do not expand this CI-process change into branch-protection, product, Provider, export, recording, release, or `main` work.
