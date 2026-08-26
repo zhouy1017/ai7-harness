@@ -1,37 +1,25 @@
-# AI7 integrated J-01 tracer handoff
+# AI7 V2 PRD review handoff
 
-Start with root [`AGENTS.md`](AGENTS.md), verify the then-current exact `dev` tip and that it descends from the immutable Issue #24 integration checkpoint `4ef62ac1d1de37c2cc644fd17669bd4669ec8441`, and read current [`PROGRESS.md`](PROGRESS.md). This file is a cold-start router, not a product or domain authority owner.
+Start with root [`AGENTS.md`](AGENTS.md), verify the exact current `dev` tip, and read current [`PROGRESS.md`](PROGRESS.md). This file is a cold-start router, not a product or domain authority owner.
 
-## Current baseline
+## Current review subject
 
-Issue #24 integrated through [PR #25](https://github.com/zhouy1017/ai7-harness/pull/25) at immutable checkpoint `4ef62ac1d1de37c2cc644fd17669bd4669ec8441` in `dev` history. This Issue #26 routing update sits above that checkpoint; the then-current `dev` tip owns one deep root package and one provider-free product subject:
+[Issue #28](https://github.com/zhouy1017/ai7-harness/issues/28) synthesizes the accepted AI7 V2 design into a product-level PRD. Its [human-review summary](https://github.com/zhouy1017/ai7-harness/issues/28#issuecomment-5420437858) provides the rapid review route. Review the product boundary, authority separations, J-01–J-16 coverage, current-versus-future status, testing seam, explicit exclusions, and unresolved matters.
 
-> fresh supported checkout → verified Electron carrier → isolated Electron main/renderer plus separate Node service and dormant DSH → runtime-generated public-synthetic Chinese DOCX → no-preselection import review → one atomic initial Book graph → bounded ProseMirror window → explicit platform save → independently committed durable Edit Journal acknowledgement.
+The PRD is an index over existing authority owners. It does not supersede contexts, ADRs, Policy Documents, V2 architecture/UI/UX, or source-checkout owners; its `ready-for-agent` label does not authorize implementation or issue decomposition.
 
-[E2E Functional Gate run 32904102760](https://github.com/zhouy1017/ai7-harness/actions/runs/32904102760) completed successfully on both required carriers:
+## Current implementation boundary
 
-- `J-01 (Windows Server 2025 x64 CI)`
-- `J-01 (macOS 15 arm64)`
+Immutable Issue #24 integration checkpoint `4ef62ac1d1de37c2cc644fd17669bd4669ec8441` proves only the provider-free J-01 new-Book happy-path tracer: public-synthetic DOCX, Review Before Import, atomic initial Book graph, bounded ProseMirror window, one edit, and durable Edit Journal acknowledgement. It is not full J-01.
 
-No review, push, pull request, merge, or hosted-CI action from Issue #24 remains pending. No active implementation blocker is recorded.
+The single standing acceptance seam is the launchable-product E2E Functional Gate. An admitted Journey ID runs through the built Electron product on Windows and macOS and observes user-visible, domain, authority, and durable-data consequences. Issue #28 creates no lower-level or additional gate.
 
-## Read next
+## Unresolved input
 
-1. [`README.md`](README.md) for supported hosts and the exact command surface.
-2. [`docs/development/source-checkout.md`](docs/development/source-checkout.md) for closed inputs, lifecycle, readiness, and pipe-only E2E control.
-3. [`docs/development/dependency-provenance.md`](docs/development/dependency-provenance.md) and [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) for package, artifact, integrity, and license routing.
-4. [`config/dependency-artifacts.json`](config/dependency-artifacts.json), [`package.json`](package.json), [`pnpm-workspace.yaml`](pnpm-workspace.yaml), and [`pnpm-lock.yaml`](pnpm-lock.yaml) for machine-readable pins.
-5. The separately authorized next Issue and Change Brief before any implementation or design mutation.
-
-## Scope boundary
-
-- The integrated outcome is the bounded first J-01 new-Book happy-path tracer, not full J-01.
-- Existing-Book or source-only import, cancellation and ambiguity branches, restart/recovery, reimport comparison, retrieval/model work, providers, exports, installers, releases, and private manuscripts remain excluded.
-- The dual-host result proves the one admitted provider-free journey; it does not revise policy/domain authority or authorize another scenario, gate, product subject, dependency, or release path.
-- Only the Commander may take external GitHub actions. `dev` remains the integration line; `main` remains outside this checkpoint.
+The Owner states that original manuscript material intended for public synthetic-data generation exists under a `samplebooks` directory and may be used publicly for test authoring. The directory is absent from the PRD's exact `dev` base, and current rules prohibit manuscripts and derivatives in the repository, hosted CI, fixtures, and corpora. Issue #28 reads, copies, and authorizes none of that material. A future exact Change Brief must resolve path, provenance/public-use grant, transformation, sanitization, and current-rule reconciliation before use.
 
 ## Next safe action
 
-Prepare and authorize a separate implementation-planning Issue and Change Brief for exactly one next bounded outcome. It must name the accepted authority, the existing owner to extend, structural budget, non-goals, stop conditions, and any effect on the admitted J-01 journey. Until that brief exists, this integrated checkpoint grants no adjacent implementation authority.
+Human-review Issue #28 and its linked summary. Any implementation, issue decomposition, provider/export work, or broader J-01 claim requires separate Owner authorization and an implementation-planning Change Brief for one bounded outcome that extends existing owners.
 
-Archive sweep: none. The outgoing pre-integration routing is retained in Git history; no active working record requires relocation.
+Archive sweep: none. The PRD and review comment are active external review records; prior routing remains recoverable in Git history.
