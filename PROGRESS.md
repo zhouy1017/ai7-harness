@@ -12,6 +12,7 @@
 - Preserved outgoing `ec623a6...:PROGRESS.md` and `:HANDOFF.md` byte-for-byte in one indexed historical archive node and replaced root routing with the integrated/tracker/next-target state without routing ordinary reading into archive content.
 - Validated the exact Issue #96 six-path lowercase-`.md` boundary: both archived Git blobs match `ec623a6...`, the archive index/router and changed local links resolve, and `git diff --check` is clean.
 - One bounded same-provider read-only advisory review found two root-routing wording defects; both were repaired by removing direct root-to-archive links and naming #37 only as the next `ready-for-agent` development target. No other finding remained.
+- Submitted [PR #97](https://github.com/zhouy1017/ai7-harness/pull/97) to `dev` for this exact lifecycle tree. Its live merge/check state must be verified rather than inferred from a branch checkout.
 - No product/source/test code, dependency/plugin, Provider, new manuscript/derivative, export, release, Issue implementation dispatch or `main` action was performed in the tracker/lifecycle stage.
 
 ## What's next
