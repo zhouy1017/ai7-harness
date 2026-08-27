@@ -98,6 +98,15 @@ legend { margin-bottom: .7rem; font-weight: 800; }
 .dimension-list li { display: flex; justify-content: space-between; gap: 1rem; padding-bottom: .55rem; border-bottom: 1px solid #e3dfd5; }
 .neutral-weight { color: #697167; font-size: .82rem; white-space: nowrap; }
 .commit-bar { position: sticky; bottom: 1rem; display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-top: 1.4rem; padding: 1rem 1.15rem; border: 1px solid #bdc8ba; border-radius: 12px; background: rgba(247, 249, 243, .97); box-shadow: 0 8px 28px rgba(43, 54, 42, .12); }
+.compact-actions { margin-top: 0; justify-content: flex-end; }
+.recovery-panel { max-width: 820px; margin: 0 auto; }
+.recovery-notice, .attention-note, .success-note, .uncertain-support { margin-top: 1rem; padding: .85rem 1rem; border-radius: 9px; line-height: 1.55; }
+.recovery-notice, .attention-note { border: 1px solid #d7bd83; background: #fff5dc; color: #684b14; }
+.success-note { border: 1px solid #a9c5ad; background: #edf6ed; color: #28533a; }
+.uncertain-support { border: 1px solid #d6a7a0; background: #fff2ef; color: #672f2a; }
+.uncertain-support h3 { margin-top: 0; }
+.uncertain-support p { overflow-wrap: anywhere; }
+.recovery-actions { margin-top: 1.5rem; }
 
 .completion { text-align: center; padding: 3.5rem 2rem; }
 .completion-mark { display: grid; place-items: center; width: 58px; height: 58px; margin: 0 auto 1rem; border-radius: 50%; background: #dfeee1; color: #28523a; font-size: 1.8rem; font-weight: 900; }

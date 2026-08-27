@@ -3,6 +3,7 @@ import {
   IPC_CHANNELS,
   MAIN_EVENTS,
   type CommitNewBookRendererInput,
+  type PickerReselectResult,
   type PickerStageResult,
   type RendererApi,
   type RendererCallResult,
@@ -64,11 +65,21 @@ if (process.platform !== 'win32' && process.platform !== 'darwin') throw new Err
 
 const api: RendererApi = Object.freeze({
   platform: process.platform,
+  getImportStartup: () =>
+    invoke<ServiceOperationMap['getImportStartup']['output']>(IPC_CHANNELS.getImportStartup),
   selectAndStageDocx: () => invoke<PickerStageResult>(IPC_CHANNELS.selectAndStageDocx),
+  continueImportDraft: (input: ServiceOperationMap['continueImportDraft']['input']) =>
+    invoke<ServiceOperationMap['continueImportDraft']['output']>(IPC_CHANNELS.continueImportDraft, input),
+  reselectImportDraft: (input: { draftId: string; expectedDraftVersion: number }) =>
+    invoke<PickerReselectResult>(IPC_CHANNELS.reselectImportDraft, input),
+  abandonImportDraft: (input: ServiceOperationMap['abandonImportDraft']['input']) =>
+    invoke<ServiceOperationMap['abandonImportDraft']['output']>(IPC_CHANNELS.abandonImportDraft, input),
   prepareNewBookReview: (input: ServiceOperationMap['prepareNewBookReview']['input']) =>
     invoke<ServiceOperationMap['prepareNewBookReview']['output']>(IPC_CHANNELS.prepareNewBookReview, input),
   commitNewBookImport: (input: CommitNewBookRendererInput) =>
     invoke<ServiceOperationMap['commitNewBookImport']['output']>(IPC_CHANNELS.commitNewBookImport, input),
+  acknowledgeImportCompletion: (input: ServiceOperationMap['acknowledgeImportCompletion']['input']) =>
+    invoke<ServiceOperationMap['acknowledgeImportCompletion']['output']>(IPC_CHANNELS.acknowledgeImportCompletion, input),
   getManuscriptWindow: (input: ServiceOperationMap['getManuscriptWindow']['input']) =>
     invoke<ServiceOperationMap['getManuscriptWindow']['output']>(IPC_CHANNELS.getManuscriptWindow, input),
   flushJournalEdit: (input: ServiceOperationMap['flushJournalEdit']['input']) =>

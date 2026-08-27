@@ -1,4 +1,4 @@
-import { lstat, mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
+import { copyFile, lstat, mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { createReadStream, existsSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
@@ -50,7 +50,9 @@ async function createSyntheticDocx(path, variant) {
   const entries = {
     '[Content_Types].xml': strToU8(contentTypes),
     'word/document.xml': strToU8(documentXml),
-    ...(variant === 'b' ? { 'docProps/app.xml': strToU8('<Properties><Application>AI7 J-01 synthetic B</Application></Properties>') } : {}),
+    ...(variant === 'b'
+      ? { 'docProps/app.xml': strToU8('<Properties><Application>AI7 J-01 synthetic B</Application></Properties>') }
+      : {}),
   };
   await writeFile(path, zipSync(entries, { level: 6, mtime: new Date('2026-01-01T00:00:00.000Z') }));
 }
@@ -182,7 +184,11 @@ async function clickExactButton(renderer, label, location) {
   );
 }
 
-async function runJourney(renderer, expectation) {
+async function runJourney(
+  renderer,
+  expectation,
+  options = {},
+) {
   const {
     sourceSha256,
     sourceBytes,
@@ -192,6 +198,13 @@ async function runJourney(renderer, expectation) {
     degraded,
     exerciseEditor = false,
   } = expectation;
+  const {
+    start = 'landing',
+    expectInterruption = false,
+    editAfterCommit = exerciseEditor,
+    stopAfterAcceptedReview = false,
+    holdCompletionPaint = false,
+  } = options;
   const hasIdentityFinding = identityClass !== null;
   const expectedNonEffects = degraded
     ? [
@@ -214,14 +227,15 @@ async function runJourney(renderer, expectation) {
         '符合当前范围的导入不创建导入降级决定',
       ];
   at('renderer-ready');
+  const initialScreen = start === 'accepted-review' ? 'review' : start;
   await waitFor(
     renderer,
-    `document.documentElement.dataset.ai7ProductReady === 'true' && document.querySelector('[data-screen="landing"]')`,
+    `document.documentElement.dataset.ai7ProductReady === 'true' && document.querySelector('[data-screen=${JSON.stringify(initialScreen)}]')`,
     'renderer-ready',
   );
   await assertRenderer(
     renderer,
-    `typeof globalThis.process === 'undefined' && typeof globalThis.require === 'undefined' && Object.keys(window.ai7).sort().join(',') === 'commitNewBookImport,flushJournalEdit,getManuscriptWindow,platform,prepareNewBookReview,selectAndStageDocx'`,
+    `typeof globalThis.process === 'undefined' && typeof globalThis.require === 'undefined' && Object.keys(window.ai7).sort().join(',') === 'abandonImportDraft,acknowledgeImportCompletion,commitNewBookImport,continueImportDraft,flushJournalEdit,getImportStartup,getManuscriptWindow,platform,prepareNewBookReview,reselectImportDraft,selectAndStageDocx'`,
     'renderer-isolation',
   );
   await assertRenderer(
@@ -229,16 +243,19 @@ async function runJourney(renderer, expectation) {
     `(async () => { try { await fetch('http://127.0.0.1:9/ai7-j01-denial-probe'); return false; } catch { return true; } })()`,
     'renderer-network-denial',
   );
-  at('landing');
-  await clickExactButton(renderer, '导入稿件', 'stage-click');
-  await waitFor(renderer, `document.querySelector('[data-screen="target"]')`, 'stage-target');
-  if (hasIdentityFinding) {
-    await assertRenderer(
-      renderer,
-      `(() => { const findings = Array.from(document.querySelectorAll('[data-import-identity-class]')); const disclosure = document.querySelector('.identity-finding-disclosure'); const radio = document.querySelector('input[aria-label="新建图书（作为不同作品）"]'); return findings.length === ${identityFindingCount} && findings.every((item) => item.dataset.importIdentityClass === ${JSON.stringify(identityClass)} && item.textContent.includes(${JSON.stringify(identityLabel)})) && disclosure?.textContent.includes('匹配图书') && disclosure.textContent.includes('来源材料版本') && disclosure.textContent.includes('稿件导入记录') && disclosure.textContent.includes('不会选择目标或关系') && disclosure.textContent.includes('不授予去重、覆盖或重新导入权限') && radio && !radio.checked; })()`,
-      'identity-finding-disclosed-and-distinct-work-unselected',
-    );
+  if (start === 'landing') {
+    at('landing');
+    await clickExactButton(renderer, '导入稿件', 'stage-click');
+    await waitFor(renderer, `document.querySelector('[data-screen="target"]')`, 'stage-target');
   }
+  if (start !== 'accepted-review') {
+    if (hasIdentityFinding) {
+      await assertRenderer(
+        renderer,
+        `(() => { const findings = Array.from(document.querySelectorAll('[data-import-identity-class]')); const disclosure = document.querySelector('.identity-finding-disclosure'); const radio = document.querySelector('input[aria-label="新建图书（作为不同作品）"]'); return findings.length === ${identityFindingCount} && findings.every((item) => item.dataset.importIdentityClass === ${JSON.stringify(identityClass)} && item.textContent.includes(${JSON.stringify(identityLabel)})) && disclosure?.textContent.includes('匹配图书') && disclosure.textContent.includes('来源材料版本') && disclosure.textContent.includes('稿件导入记录') && disclosure.textContent.includes('不会选择目标或关系') && disclosure.textContent.includes('不授予去重、覆盖或重新导入权限') && radio && !radio.checked; })()`,
+        'identity-finding-disclosed-and-distinct-work-unselected',
+      );
+    }
   const targetLabel = hasIdentityFinding ? '新建图书（作为不同作品）' : '新建图书';
   await assertRenderer(
     renderer,
@@ -279,14 +296,43 @@ async function runJourney(renderer, expectation) {
     'review-source-and-action',
   );
   if (degraded) {
-    await assertRenderer(renderer, `(() => { const rows = Array.from(document.querySelectorAll('[data-fidelity-category]')); const expected = [['inline-styles',266,'status-degraded'],['comments-revisions',0,'status-preserved'],['notes',0,'status-preserved'],['tables',0,'status-preserved'],['images-captions',0,'status-preserved'],['sections',1,'status-degraded'],['headers-footers',0,'status-preserved'],['round-trip-export',0,'status-unsupported']]; return rows.length === expected.length && rows.every((row, index) => row.dataset.fidelityCategory === expected[index][0] && row.querySelector('.count')?.textContent.includes('· ' + expected[index][1] + ' 项') && row.querySelector('.status-pill')?.classList.contains(expected[index][2])); })()`, 'review-fidelity-degraded');
-    await assertRenderer(renderer, `(() => { const acceptance = document.querySelector('#accept-import-degradation'); const commit = Array.from(document.querySelectorAll('button')).find((button) => button.textContent.includes('新建图书并导入稿件')); return acceptance && !acceptance.checked && (!commit || commit.disabled); })()`, 'degradation-initially-unselected');
-    await assertRenderer(renderer, `(() => { const items = Array.from(document.querySelectorAll('[data-degradation-category]')); const expected = [['inline-styles','266'],['sections','1']]; return items.length === expected.length && items.every((item, index) => item.dataset.degradationCategory === expected[index][0] && item.dataset.degradationCount === expected[index][1]); })()`, 'degradation-complete-server-set');
-    await assertRenderer(renderer, `(() => { const acceptance = document.querySelector('#accept-import-degradation'); if (!acceptance) return false; acceptance.click(); return true; })()`, 'degradation-accept');
-    await waitFor(renderer, `document.querySelector('#accept-import-degradation')?.checked && Array.from(document.querySelectorAll('button')).some((button) => button.textContent === '按上述降级方式新建图书并导入稿件' && !button.disabled)`, 'degradation-accepted-review');
+    await assertRenderer(
+      renderer,
+      `(() => { const rows = Array.from(document.querySelectorAll('[data-fidelity-category]')); const expected = [['inline-styles',266,'status-degraded'],['comments-revisions',0,'status-preserved'],['notes',0,'status-preserved'],['tables',0,'status-preserved'],['images-captions',0,'status-preserved'],['sections',1,'status-degraded'],['headers-footers',0,'status-preserved'],['round-trip-export',0,'status-unsupported']]; return rows.length === expected.length && rows.every((row, index) => row.dataset.fidelityCategory === expected[index][0] && row.querySelector('.count')?.textContent.includes('· ' + expected[index][1] + ' 项') && row.querySelector('.status-pill')?.classList.contains(expected[index][2])); })()`,
+      'review-fidelity-degraded',
+    );
+    await assertRenderer(
+      renderer,
+      `(() => { const acceptance = document.querySelector('#accept-import-degradation'); const commit = Array.from(document.querySelectorAll('button')).find((button) => button.textContent.includes('新建图书并导入稿件')); return acceptance && !acceptance.checked && (!commit || commit.disabled); })()`,
+      'degradation-initially-unselected',
+    );
+    await assertRenderer(
+      renderer,
+      `(() => { const items = Array.from(document.querySelectorAll('[data-degradation-category]')); const expected = [['inline-styles','266'],['sections','1']]; return items.length === expected.length && items.every((item, index) => item.dataset.degradationCategory === expected[index][0] && item.dataset.degradationCount === expected[index][1]); })()`,
+      'degradation-complete-server-set',
+    );
+    await assertRenderer(
+      renderer,
+      `(() => { const acceptance = document.querySelector('#accept-import-degradation'); if (!acceptance) return false; acceptance.click(); return true; })()`,
+      'degradation-accept',
+    );
+    await waitFor(
+      renderer,
+      `document.querySelector('#accept-import-degradation')?.checked && Array.from(document.querySelectorAll('button')).some((button) => button.textContent === '按上述降级方式新建图书并导入稿件' && !button.disabled)`,
+      'degradation-accepted-review',
+    );
   } else {
-    await assertRenderer(renderer, `(() => { const rows = Array.from(document.querySelectorAll('[data-fidelity-category]')); return rows.length === 8 && rows.every((row) => row.dataset.fidelityCategory === 'round-trip-export' ? row.querySelector('.status-pill')?.classList.contains('status-unsupported') : row.querySelector('.count')?.textContent.includes('· 0 项') && row.querySelector('.status-pill')?.classList.contains('status-preserved')) && !document.querySelector('#accept-import-degradation'); })()`, 'review-fidelity-clean');
+    await assertRenderer(
+      renderer,
+      `(() => { const rows = Array.from(document.querySelectorAll('[data-fidelity-category]')); return rows.length === 8 && rows.every((row) => row.dataset.fidelityCategory === 'round-trip-export' ? row.querySelector('.status-pill')?.classList.contains('status-unsupported') : row.querySelector('.count')?.textContent.includes('· 0 项') && row.querySelector('.status-pill')?.classList.contains('status-preserved')) && !document.querySelector('#accept-import-degradation'); })()`,
+      'review-fidelity-clean',
+    );
   }
+  await assertRenderer(
+    renderer,
+    `document.querySelector('[data-fidelity-category="round-trip-export"]')?.textContent.includes('不提供往返保证') && document.querySelector('[data-fidelity-category="round-trip-export"]')?.textContent.includes('不阻止本次符合范围的文本导入')`,
+    'review-roundtrip-non-effect',
+  );
   await assertRenderer(
     renderer,
     `(() => { const sections = Array.from(document.querySelectorAll('.review-section')); const exact = (heading, expected) => { const section = sections.find((item) => item.querySelector('h3')?.textContent === heading); const actual = Array.from(section?.querySelectorAll('li') ?? [], (item) => item.textContent); return actual.length === expected.length && actual.every((item, index) => item === expected[index]); }; return exact('将创建的记录', ${JSON.stringify(degraded ? ['图书与稳定标识','图书编辑维度集（8 项）','源材料版本与来源记录','导入保真审阅','导入降级决定','主稿件','稿件分支','稿件修订版 r1 与有序稳定内容块','工作流程实例与精确方案版本绑定','稿件导入记录'] : ['图书与稳定标识','图书编辑维度集（8 项）','源材料版本与来源记录','导入保真审阅','主稿件','稿件分支','稿件修订版 r1 与有序稳定内容块','工作流程实例与精确方案版本绑定','稿件导入记录'])}) && exact('明确不会发生', ${JSON.stringify(expectedNonEffects)}); })()`,
@@ -297,16 +343,71 @@ async function runJourney(renderer, expectation) {
     `!/(?:J-01|tracer|clean|Review Before Import)/.test(document.body.textContent)`,
     'product-language',
   );
-  await clickExactButton(renderer, degraded ? '按上述降级方式新建图书并导入稿件' : '新建图书并导入稿件', 'commit-click');
+  }
+  if (start === 'accepted-review') {
+    at('review');
+    await assertRenderer(
+      renderer,
+      `document.querySelector('[data-screen="review"] [data-source-sha256]')?.textContent === ${JSON.stringify(sourceSha256)} && document.querySelector('[data-screen="review"] [data-source-bytes]')?.textContent === ${JSON.stringify(String(sourceBytes))} && Array.from(document.querySelectorAll('button')).some((button) => button.textContent === ${JSON.stringify(degraded ? '按上述降级方式新建图书并导入稿件' : '新建图书并导入稿件')} && !button.disabled)`,
+      'restored-review-source-and-action',
+    );
+    if (hasIdentityFinding) {
+      await assertRenderer(
+        renderer,
+        `(() => { const findings = Array.from(document.querySelectorAll('[data-import-identity-class]')); const summary = document.querySelector('.review-identity-finding-summary'); return findings.length === ${identityFindingCount} && findings.every((item) => item.dataset.importIdentityClass === ${JSON.stringify(identityClass)} && item.textContent.includes(${JSON.stringify(identityLabel)})) && summary?.textContent.includes('本次选择：新建图书（作为不同作品）') && summary.textContent.includes('身份提示不授予目标、关系、去重、覆盖或重新导入权限'); })()`,
+        'restored-review-retains-identity-findings',
+      );
+    }
+  }
+  if (stopAfterAcceptedReview) return;
+  if (holdCompletionPaint) {
+    await assertRenderer(
+      renderer,
+      `(() => { let frameId = 0; globalThis.__ai7HeldCompletionFrames = []; globalThis.requestAnimationFrame = (callback) => { globalThis.__ai7HeldCompletionFrames.push(callback); frameId += 1; return frameId; }; return true; })()`,
+      'completion-paint-held',
+    );
+  }
+  await clickExactButton(
+    renderer,
+    degraded ? '按上述降级方式新建图书并导入稿件' : '新建图书并导入稿件',
+    'commit-click',
+  );
+  if (expectInterruption) {
+    await waitFor(
+      renderer,
+      `document.documentElement.dataset.ai7ServiceState === 'interrupted'`,
+      'commit-interruption-visible',
+    );
+    await assertRenderer(renderer, `!document.querySelector('[data-screen="imported"]')`, 'no-optimistic-import-success');
+    return;
+  }
   await waitFor(renderer, `document.querySelector('[data-screen="imported"]')`, 'imported');
   await assertRenderer(
     renderer,
     `Array.from(document.querySelectorAll('h2')).some((heading) => heading.textContent === '稿件已导入')`,
     'import-completion',
   );
-  if (!exerciseEditor) return;
+  if (holdCompletionPaint) {
+    await waitFor(renderer, `globalThis.__ai7HeldCompletionFrames?.length === 1`, 'completion-awaits-first-paint');
+    await assertRenderer(
+      renderer,
+      `document.documentElement.dataset.ai7ImportCompletionPainted === undefined && document.documentElement.dataset.ai7ImportCompletionAcknowledged === undefined && Boolean(document.querySelector('[data-screen="imported"] [data-import-commit-id]'))`,
+      'completion-unacknowledged-before-paint',
+    );
+    return;
+  }
+  await waitFor(
+    renderer,
+    `document.visibilityState === 'visible' && document.documentElement.dataset.ai7ProductReady === 'true' && document.documentElement.dataset.ai7ImportCompletionPainted === 'true' && document.documentElement.dataset.ai7ImportCompletionAcknowledged === 'true' && Boolean(document.querySelector('[data-screen="imported"] [data-import-commit-id]'))`,
+    'completion-observed-durable',
+  );
+  if (!editAfterCommit) return;
   await clickExactButton(renderer, '查看导入记录', 'record-open');
-  await assertRenderer(renderer, `(() => { const record = document.querySelector('.record-detail'); const items = Array.from(record?.querySelectorAll('[data-degradation-category]') ?? []); return record?.textContent.includes('含已接受的降级') && record?.textContent.includes('导入保真审阅') && record?.textContent.includes('导入降级决定') && record?.textContent.includes('查看受影响类别、示例与导出后果') && record?.textContent.includes('rFonts') && record?.textContent.includes('文档网格') && record?.textContent.includes('后续导出无法恢复') && items.length === 2 && items[0].dataset.degradationCategory === 'inline-styles' && items[0].dataset.degradationCount === '266' && items[1].dataset.degradationCategory === 'sections' && items[1].dataset.degradationCount === '1'; })()`, 'import-record-degradation');
+  await assertRenderer(
+    renderer,
+    `(() => { const record = document.querySelector('.record-detail'); const items = Array.from(record?.querySelectorAll('[data-degradation-category]') ?? []); return record?.textContent.includes('含已接受的降级') && record?.textContent.includes('导入保真审阅') && record?.textContent.includes('导入降级决定') && record?.textContent.includes('查看受影响类别、示例与导出后果') && record?.textContent.includes('rFonts') && record?.textContent.includes('文档网格') && record?.textContent.includes('后续导出无法恢复') && items.length === 2 && items[0].dataset.degradationCategory === 'inline-styles' && items[0].dataset.degradationCount === '266' && items[1].dataset.degradationCategory === 'sections' && items[1].dataset.degradationCount === '1'; })()`,
+    'import-record-degradation',
+  );
   await clickExactButton(renderer, '打开稿件', 'editor-open');
   await waitFor(renderer, `document.querySelector('[data-screen="editor"]')`, 'editor-screen');
   at('editor');
@@ -363,15 +464,14 @@ async function main() {
     runRoot = await mkdtemp(join(tempParent, 'ai7-j01-e2e-'));
     requireJourney(dirname(runRoot) === tempParent && basename(runRoot).startsWith('ai7-j01-e2e-'), 'temp-root');
     requireJourney((await realpath(runRoot)) === runRoot, 'temp-root');
-    const dataRoot = await createCanonicalExternalDataRoot(resolve(runRoot, 'data'), checkoutRoot);
-    const shellRoot = await ensureCanonicalDataDirectory(dataRoot, 'shell');
-    const sampleInfo = await lstat(SAMPLE1_PATH);
+    const docx = SAMPLE1_PATH;
+    const sampleInfo = await lstat(docx);
     requireJourney(
       sampleInfo.isFile() &&
         !sampleInfo.isSymbolicLink() &&
         sampleInfo.size === SAMPLE1_BYTES &&
-        (await realpath(SAMPLE1_PATH)) === SAMPLE1_PATH &&
-        (await digestFile(SAMPLE1_PATH)) === SAMPLE1_SHA256,
+        (await realpath(docx)) === docx &&
+        (await digestFile(docx)) === SAMPLE1_SHA256,
       'sample1-identity',
     );
     const syntheticRoot = resolve(runRoot, 'synthetic-inputs');
@@ -398,34 +498,34 @@ async function main() {
     );
     const executable = electronExecutable();
     const entry = resolve(ROOT, 'dist', 'main', 'index.cjs');
-    const baseProductArgs = [
-      '--disable-background-networking',
-      '--disable-component-update',
-      '--disable-default-apps',
-      '--disable-domain-reliability',
-      '--disable-sync',
-      '--metrics-recording-only',
-      '--no-first-run',
-      '--remote-debugging-pipe',
-      `--user-data-dir=${shellRoot}`,
-      entry,
-      '--data-root',
-      dataRoot,
-      '--launcher-pid',
-      String(process.pid),
-    ];
-    requireJourney(
-      isAbsolute(dataRoot) &&
-        !baseProductArgs.some((argument) => /--inspect|--remote-debugging-port|^https?:|^wss?:/i.test(argument)),
-      'pipe-only-product-transport',
-    );
-    at('launch');
-    const launchJourney = async (docx, expectation) => {
-      const productArgs = [...baseProductArgs, '--j01-picker-path', docx];
+    const launchProduct = async ({ dataRoot, pickerPath, importControl }) => {
+      const shellRoot = await ensureCanonicalDataDirectory(dataRoot, 'shell');
+      const productArgs = [
+        '--disable-background-networking',
+        '--disable-component-update',
+        '--disable-default-apps',
+        '--disable-domain-reliability',
+        '--disable-sync',
+        '--metrics-recording-only',
+        '--no-first-run',
+        '--remote-debugging-pipe',
+        `--user-data-dir=${shellRoot}`,
+        entry,
+        '--data-root',
+        dataRoot,
+        '--launcher-pid',
+        String(process.pid),
+      ];
+      if (pickerPath) productArgs.push('--j01-picker-path', pickerPath);
+      if (importControl) productArgs.push('--j01-import-control', importControl);
       requireJourney(
-        isAbsolute(docx) && (docx === SAMPLE1_PATH || pathIsInside(runRoot, docx)),
-        'picker-input-boundary',
+        isAbsolute(dataRoot) &&
+          (!pickerPath ||
+            (isAbsolute(pickerPath) && (pickerPath === docx || pathIsInside(runRoot, pickerPath)))) &&
+          !productArgs.some((argument) => /--inspect|--remote-debugging-port|^https?:|^wss?:/i.test(argument)),
+        'pipe-only-product-transport',
       );
+      at('launch');
       browser = await chromium.launch({
         executablePath: executable,
         headless: false,
@@ -434,41 +534,360 @@ async function main() {
         env: productEnvironment(executable),
         timeout: 30_000,
       });
-      const renderer = await attachRendererTarget(browser);
-      await runJourney(renderer, expectation);
+      return attachRendererTarget(browser);
+    };
+    const closeProduct = async () => {
       await browser.close();
       browser = undefined;
     };
-    await launchJourney(SAMPLE1_PATH, {
+    const sample1Expectation = {
       sourceSha256: SAMPLE1_SHA256,
       sourceBytes: SAMPLE1_BYTES,
       degraded: true,
-      exerciseEditor: true,
-    });
-    await launchJourney(SAMPLE1_PATH, {
-      sourceSha256: SAMPLE1_SHA256,
-      sourceBytes: SAMPLE1_BYTES,
+    };
+    const exactSample1Expectation = {
+      ...sample1Expectation,
       identityClass: 'immutable-original',
       identityLabel: '精确原始文件身份',
       identityFindingCount: 1,
-      degraded: true,
-    });
-    await launchJourney(syntheticAPath, {
+    };
+    const syntheticAExpectation = {
       sourceSha256: syntheticASha256,
       sourceBytes: syntheticAInfo.size,
       identityClass: 'filename-collision',
       identityLabel: '名称相同，内容不同',
       identityFindingCount: 2,
       degraded: false,
-    });
-    await launchJourney(syntheticBPath, {
+    };
+    const syntheticBExpectation = {
       sourceSha256: syntheticBSha256,
       sourceBytes: syntheticBInfo.size,
       identityClass: 'parsed-content-structure',
       identityLabel: '发现相同内容',
       identityFindingCount: 1,
       degraded: false,
+    };
+
+    const continuityRoot = await createCanonicalExternalDataRoot(resolve(runRoot, 'continuity-data'), checkoutRoot);
+    const selectedRoot = resolve(runRoot, 'selected-input');
+    await mkdir(selectedRoot);
+    const selectedCopy = resolve(selectedRoot, 'sample1.docx');
+    await copyFile(docx, selectedCopy);
+    requireJourney((await realpath(selectedCopy)) === selectedCopy, 'selected-copy-identity');
+
+    let renderer = await launchProduct({ dataRoot: continuityRoot, pickerPath: selectedCopy });
+    await waitFor(
+      renderer,
+      `document.documentElement.dataset.ai7ProductReady === 'true' && document.querySelector('[data-screen="landing"]')`,
+      'restart-before-review-landing',
+    );
+    await clickExactButton(renderer, '导入稿件', 'restart-before-review-stage');
+    await waitFor(renderer, `document.querySelector('[data-screen="target"]')`, 'restart-before-review-target');
+    await closeProduct();
+    await rm(selectedCopy, { force: true });
+
+    renderer = await launchProduct({ dataRoot: continuityRoot });
+    await waitFor(
+      renderer,
+      `document.documentElement.dataset.ai7ProductReady === 'true' && document.querySelector('[data-screen="import-recovery"]')`,
+      'path-loss-recovery',
+    );
+    await assertRenderer(
+      renderer,
+      `(() => { const screen = document.querySelector('[data-screen="import-recovery"]'); const labels = Array.from(screen?.querySelectorAll('button') ?? [], (button) => button.textContent); return screen?.textContent.includes('完整暂存快照') && screen.textContent.includes('原始所选文件已无法访问') && labels.includes('继续导入') && labels.includes('放弃') && !screen.querySelector('input:checked'); })()`,
+      'path-loss-recovery-unselected',
+    );
+    await clickExactButton(renderer, '继续导入', 'path-loss-continue');
+    await waitFor(renderer, `document.querySelector('[data-screen="target"]')`, 'path-loss-target');
+    await assertRenderer(
+      renderer,
+      `document.querySelector('.recovery-notice')?.textContent.includes('不会从原路径读取或替换暂存内容')`,
+      'path-loss-snapshot-disclosure',
+    );
+    await runJourney(renderer, { ...sample1Expectation, exerciseEditor: true }, { start: 'target' });
+    await closeProduct();
+
+    renderer = await launchProduct({ dataRoot: continuityRoot, pickerPath: docx });
+    await runJourney(renderer, exactSample1Expectation);
+    await closeProduct();
+
+    renderer = await launchProduct({ dataRoot: continuityRoot, pickerPath: syntheticAPath });
+    await runJourney(renderer, syntheticAExpectation, { stopAfterAcceptedReview: true });
+    await closeProduct();
+    renderer = await launchProduct({ dataRoot: continuityRoot });
+    await waitFor(
+      renderer,
+      `document.documentElement.dataset.ai7ProductReady === 'true' && document.querySelector('[data-screen="import-recovery"]')`,
+      'identity-review-recovery',
+    );
+    await assertRenderer(
+      renderer,
+      `(() => { const screen = document.querySelector('[data-screen="import-recovery"]'); return screen?.textContent.includes('导入前复核') && screen.textContent.includes('新建图书（作为不同作品）') && Array.from(screen.querySelectorAll('button')).some((button) => button.textContent === '继续导入'); })()`,
+      'identity-review-recovery-boundary',
+    );
+    await clickExactButton(renderer, '继续导入', 'identity-review-continue');
+    await waitFor(renderer, `document.querySelector('[data-screen="review"]')`, 'identity-review-restored');
+    await assertRenderer(
+      renderer,
+      `document.querySelector('.recovery-notice')?.textContent.includes('已重新校验完整暂存快照')`,
+      'identity-review-revalidated',
+    );
+    await runJourney(renderer, syntheticAExpectation, { start: 'accepted-review' });
+    await closeProduct();
+
+    renderer = await launchProduct({ dataRoot: continuityRoot, pickerPath: syntheticBPath });
+    await runJourney(renderer, syntheticBExpectation);
+    await closeProduct();
+
+    renderer = await launchProduct({ dataRoot: continuityRoot, pickerPath: docx });
+    await waitFor(
+      renderer,
+      `document.documentElement.dataset.ai7ProductReady === 'true' && document.querySelector('[data-screen="landing"]')`,
+      'abandon-stage-landing',
+    );
+    await clickExactButton(renderer, '导入稿件', 'abandon-stage-click');
+    await waitFor(renderer, `document.querySelector('[data-screen="target"]')`, 'abandon-stage-target');
+    await closeProduct();
+    renderer = await launchProduct({ dataRoot: continuityRoot });
+    await waitFor(renderer, `document.querySelector('[data-screen="import-recovery"]')`, 'abandon-recovery');
+    await clickExactButton(renderer, '放弃', 'abandon-explicit');
+    await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'abandon-landing');
+    const sharedObject = resolve(
+      continuityRoot,
+      'objects',
+      'sha256',
+      SAMPLE1_SHA256.slice(0, 2),
+      `${SAMPLE1_SHA256}.docx`,
+    );
+    const sharedObjectInfo = await lstat(sharedObject);
+    requireJourney(sharedObjectInfo.isFile() && sharedObjectInfo.size === SAMPLE1_BYTES, 'abandon-shared-object-reference');
+    await closeProduct();
+
+    const legacyReviewRoot = await createCanonicalExternalDataRoot(resolve(runRoot, 'legacy-reviewed-data'), checkoutRoot);
+    renderer = await launchProduct({
+      dataRoot: legacyReviewRoot,
+      pickerPath: docx,
+      importControl: 'legacy-reviewed-v2',
     });
+    await runJourney(renderer, sample1Expectation, { stopAfterAcceptedReview: true });
+    await closeProduct();
+    renderer = await launchProduct({ dataRoot: legacyReviewRoot });
+    await waitFor(
+      renderer,
+      `document.documentElement.dataset.ai7ProductReady === 'true' && document.querySelector('[data-screen="import-recovery"]')`,
+      'legacy-review-recovery',
+    );
+    await assertRenderer(
+      renderer,
+      `(() => { const screen = document.querySelector('[data-screen="import-recovery"]'); return screen?.textContent.includes('上次完成位置') && screen.textContent.includes('导入前复核') && !screen.textContent.includes('已复核目标') && Array.from(screen.querySelectorAll('button')).some((button) => button.textContent === '继续导入'); })()`,
+      'legacy-review-recovered-without-authority',
+    );
+    await clickExactButton(renderer, '继续导入', 'legacy-review-continue');
+    await waitFor(renderer, `document.querySelector('[data-screen="target"]')`, 'legacy-review-invalidated');
+    await assertRenderer(
+      renderer,
+      `document.querySelector('.recovery-notice')?.textContent.includes('旧复核已失效') && !Array.from(document.querySelectorAll('button')).some((button) => button.textContent === '按上述降级方式新建图书并导入稿件')`,
+      'legacy-review-requires-v4-rereview',
+    );
+    await runJourney(renderer, sample1Expectation, { start: 'target' });
+    await closeProduct();
+
+    const beforePaintRoot = await createCanonicalExternalDataRoot(resolve(runRoot, 'before-paint-data'), checkoutRoot);
+    renderer = await launchProduct({ dataRoot: beforePaintRoot, pickerPath: docx });
+    await runJourney(renderer, sample1Expectation, { holdCompletionPaint: true });
+    await closeProduct();
+    renderer = await launchProduct({ dataRoot: beforePaintRoot });
+    await waitFor(
+      renderer,
+      `document.documentElement.dataset.ai7ProductReady === 'true' && document.querySelector('[data-screen="imported"]')`,
+      'before-paint-completion-recovered',
+    );
+    await assertRenderer(
+      renderer,
+      `document.querySelector('[data-screen="imported"] h2')?.textContent === '稿件已导入'`,
+      'before-paint-exact-completion',
+    );
+    await waitFor(
+      renderer,
+      `document.visibilityState === 'visible' && document.documentElement.dataset.ai7ImportCompletionPainted === 'true' && document.documentElement.dataset.ai7ImportCompletionAcknowledged === 'true'`,
+      'before-paint-recovery-acknowledged',
+    );
+    await closeProduct();
+
+    const abandonFailureRoot = await createCanonicalExternalDataRoot(resolve(runRoot, 'abandon-failure-data'), checkoutRoot);
+    renderer = await launchProduct({ dataRoot: abandonFailureRoot, pickerPath: docx });
+    await waitFor(
+      renderer,
+      `document.documentElement.dataset.ai7ProductReady === 'true' && document.querySelector('[data-screen="landing"]')`,
+      'abandon-failure-stage-landing',
+    );
+    await clickExactButton(renderer, '导入稿件', 'abandon-failure-stage-click');
+    await waitFor(renderer, `document.querySelector('[data-screen="target"]')`, 'abandon-failure-stage-target');
+    await closeProduct();
+    const abandonFailureObject = resolve(
+      abandonFailureRoot,
+      'objects',
+      'sha256',
+      SAMPLE1_SHA256.slice(0, 2),
+      `${SAMPLE1_SHA256}.docx`,
+    );
+    renderer = await launchProduct({
+      dataRoot: abandonFailureRoot,
+      importControl: 'abandon-object-delete-failure',
+    });
+    await waitFor(renderer, `document.querySelector('[data-screen="import-recovery"]')`, 'abandon-failure-recovery');
+    await clickExactButton(renderer, '放弃', 'abandon-failure-explicit');
+    await waitFor(renderer, `document.querySelector('[data-screen="error"]')`, 'abandon-failure-error');
+    await assertRenderer(
+      renderer,
+      `document.querySelector('.error-panel')?.textContent.includes('持久放弃清理意图与导入草稿仍保留') && !document.querySelector('[data-screen="landing"]')`,
+      'abandon-failure-no-false-success',
+    );
+    requireJourney(existsSync(abandonFailureObject), 'abandon-failure-object-preserved');
+    await clickExactButton(renderer, '重新开始', 'abandon-failure-retry-startup');
+    await waitFor(renderer, `document.querySelector('[data-screen="import-cleanup"]')`, 'abandon-failure-authority-recovered');
+    await assertRenderer(
+      renderer,
+      `(() => { const screen = document.querySelector('[data-screen="import-cleanup"]'); const buttons = Array.from(screen?.querySelectorAll('button') ?? [], (button) => button.textContent); return screen?.textContent.includes('放弃意图已经持久化') && screen.textContent.includes('ABANDON_CLEANUP_PENDING') && buttons.includes('重试放弃清理') && !buttons.some((label) => ['继续导入','重新选择原文件','放弃'].includes(label)); })()`,
+      'abandon-failure-intent-preserved',
+    );
+    await clickExactButton(renderer, '重试放弃清理', 'abandon-failure-repeat');
+    await waitFor(renderer, `document.querySelector('[data-screen="error"]')`, 'abandon-failure-repeat-error');
+    await assertRenderer(
+      renderer,
+      `document.querySelector('.error-panel')?.textContent.includes('持久放弃清理意图与导入草稿仍保留') && !document.querySelector('[data-screen="landing"]')`,
+      'abandon-failure-repeat-no-false-success',
+    );
+    await closeProduct();
+    renderer = await launchProduct({ dataRoot: abandonFailureRoot });
+    await waitFor(
+      renderer,
+      `document.documentElement.dataset.ai7ProductReady === 'true' && document.querySelector('[data-screen="landing"]')`,
+      'abandon-retry-finalized',
+    );
+    requireJourney(!existsSync(abandonFailureObject), 'abandon-retry-unshared-object-removed');
+    await closeProduct();
+
+    const abandonInterruptionRoot = await createCanonicalExternalDataRoot(resolve(runRoot, 'abandon-interruption-data'), checkoutRoot);
+    renderer = await launchProduct({ dataRoot: abandonInterruptionRoot, pickerPath: docx });
+    await waitFor(
+      renderer,
+      `document.documentElement.dataset.ai7ProductReady === 'true' && document.querySelector('[data-screen="landing"]')`,
+      'abandon-interruption-stage-landing',
+    );
+    await clickExactButton(renderer, '导入稿件', 'abandon-interruption-stage-click');
+    await waitFor(renderer, `document.querySelector('[data-screen="target"]')`, 'abandon-interruption-stage-target');
+    await closeProduct();
+    const interruptedAbandonObject = resolve(
+      abandonInterruptionRoot,
+      'objects',
+      'sha256',
+      SAMPLE1_SHA256.slice(0, 2),
+      `${SAMPLE1_SHA256}.docx`,
+    );
+    renderer = await launchProduct({
+      dataRoot: abandonInterruptionRoot,
+      importControl: 'after-abandon-object-delete-before-finalize',
+    });
+    await waitFor(renderer, `document.querySelector('[data-screen="import-recovery"]')`, 'abandon-interruption-recovery');
+    await clickExactButton(renderer, '放弃', 'abandon-interruption-explicit');
+    await waitFor(
+      renderer,
+      `document.documentElement.dataset.ai7ServiceState === 'interrupted'`,
+      'abandon-interruption-visible',
+    );
+    await assertRenderer(renderer, `!document.querySelector('[data-screen="landing"]')`, 'abandon-interruption-no-success');
+    requireJourney(!existsSync(interruptedAbandonObject), 'abandon-interruption-object-removed');
+    await closeProduct();
+    renderer = await launchProduct({ dataRoot: abandonInterruptionRoot, pickerPath: docx });
+    await waitFor(
+      renderer,
+      `document.documentElement.dataset.ai7ProductReady === 'true' && document.querySelector('[data-screen="landing"]')`,
+      'abandon-interruption-finalized-on-restart',
+    );
+    requireJourney(!existsSync(interruptedAbandonObject), 'abandon-interruption-authority-finalized');
+    await clickExactButton(renderer, '导入稿件', 'abandon-interruption-restage');
+    await waitFor(renderer, `document.querySelector('[data-screen="target"]')`, 'abandon-interruption-reference-unblocked');
+    requireJourney(existsSync(interruptedAbandonObject), 'abandon-interruption-object-reactivated');
+    await clickExactButton(renderer, '取消导入', 'abandon-interruption-restage-cancel');
+    await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'abandon-interruption-restage-cleaned');
+    requireJourney(!existsSync(interruptedAbandonObject), 'abandon-interruption-restage-object-cleaned');
+    await closeProduct();
+
+    const beforeCommitRoot = await createCanonicalExternalDataRoot(resolve(runRoot, 'before-commit-data'), checkoutRoot);
+    renderer = await launchProduct({
+      dataRoot: beforeCommitRoot,
+      pickerPath: docx,
+      importControl: 'before-commit',
+    });
+    await runJourney(renderer, sample1Expectation, { expectInterruption: true });
+    await closeProduct();
+    renderer = await launchProduct({ dataRoot: beforeCommitRoot });
+    await waitFor(renderer, `document.querySelector('[data-screen="import-recovery"]')`, 'before-commit-recovery');
+    await assertRenderer(
+      renderer,
+      `document.querySelector('[data-screen="import-recovery"]')?.textContent.includes('已持久化提交尝试，尚未证明提交') && Array.from(document.querySelectorAll('button')).some((button) => button.textContent === '继续导入')`,
+      'before-commit-proven-uncommitted',
+    );
+    await clickExactButton(renderer, '继续导入', 'before-commit-continue');
+    await waitFor(renderer, `document.querySelector('[data-screen="review"]')`, 'before-commit-review');
+    await assertRenderer(
+      renderer,
+      `document.querySelector('.recovery-notice')?.textContent.includes('已重新校验完整暂存快照')`,
+      'before-commit-review-revalidated',
+    );
+    await runJourney(renderer, sample1Expectation, { start: 'accepted-review' });
+    await closeProduct();
+
+    const afterCommitRoot = await createCanonicalExternalDataRoot(resolve(runRoot, 'after-commit-data'), checkoutRoot);
+    renderer = await launchProduct({
+      dataRoot: afterCommitRoot,
+      pickerPath: docx,
+      importControl: 'after-commit-before-response',
+    });
+    await runJourney(renderer, sample1Expectation, { expectInterruption: true });
+    await closeProduct();
+    renderer = await launchProduct({ dataRoot: afterCommitRoot });
+    await waitFor(
+      renderer,
+      `document.documentElement.dataset.ai7ProductReady === 'true' && document.querySelector('[data-screen="imported"]')`,
+      'after-commit-completion-recovered',
+    );
+    await assertRenderer(
+      renderer,
+      `document.querySelector('[data-screen="imported"] h2')?.textContent === '稿件已导入' && !document.body.textContent.includes('导入提交结果待确认')`,
+      'after-commit-exact-completion',
+    );
+    await waitFor(
+      renderer,
+      `document.visibilityState === 'visible' && document.documentElement.dataset.ai7ProductReady === 'true' && document.documentElement.dataset.ai7ImportCompletionPainted === 'true' && document.documentElement.dataset.ai7ImportCompletionAcknowledged === 'true' && Boolean(document.querySelector('[data-screen="imported"] [data-import-commit-id]'))`,
+      'after-commit-completion-acknowledged',
+    );
+    await closeProduct();
+
+    const uncertainRoot = await createCanonicalExternalDataRoot(resolve(runRoot, 'uncertain-data'), checkoutRoot);
+    renderer = await launchProduct({
+      dataRoot: uncertainRoot,
+      pickerPath: docx,
+      importControl: 'uncertain-reconciliation',
+    });
+    await runJourney(renderer, sample1Expectation, { expectInterruption: true });
+    await closeProduct();
+    renderer = await launchProduct({
+      dataRoot: uncertainRoot,
+      importControl: 'uncertain-reconciliation',
+    });
+    await waitFor(
+      renderer,
+      `document.documentElement.dataset.ai7ProductReady === 'true' && document.querySelector('[data-screen="import-uncertain"]')`,
+      'uncertain-reconciliation',
+    );
+    await assertRenderer(
+      renderer,
+      `(() => { const screen = document.querySelector('[data-screen="import-uncertain"]'); const buttons = Array.from(screen?.querySelectorAll('button') ?? [], (button) => button.textContent); return screen?.textContent.includes('导入提交结果待确认') && screen.textContent.includes('COMMIT_PROOF_INCONCLUSIVE') && screen.textContent.includes('阻止重试、放弃和暂存清理') && !buttons.some((label) => ['继续导入','放弃','新建图书并导入稿件','按上述降级方式新建图书并导入稿件'].includes(label)); })()`,
+      'uncertain-fail-closed',
+    );
+    await closeProduct();
   } finally {
     await browser?.close().catch(() => undefined);
     if (runRoot !== undefined) {
