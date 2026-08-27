@@ -312,16 +312,34 @@ async function runWorkspaceJourney(renderer) {
   );
   requireJourney(INTERIOR_BLOCK_POSITION === 37_501 && INTERIOR_FOCUS_GRAPHEME === 130, 'position-interior-fixture-truth');
   await renderer.evaluate(`globalThis.__ai7BeforeForward = document.querySelector('[data-testid="manuscript-editor"] > [data-block-id]')?.dataset.blockId`);
-  await assertRenderer(
-    renderer,
-    `(() => { const editor = document.querySelector('[data-testid="manuscript-editor"]'); const surface = document.querySelector('.editor-window'); const blocks = Array.from(document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]')); const block = blocks[4]; const text = block?.firstChild; if (!(editor instanceof HTMLElement) || !(surface instanceof HTMLElement) || !(block instanceof HTMLElement) || !(text instanceof Text) || text.length < 4) return false; editor.focus(); block.scrollIntoView({ block: 'center' }); const containerTop = surface.getBoundingClientRect().top; const visible = blocks.find((candidate) => candidate.getBoundingClientRect().bottom >= containerTop); const selection = window.getSelection(); selection.setBaseAndExtent(text, 3, text, 1); globalThis.__ai7WindowContinuity = { blockId: block.dataset.blockId, text: selection.toString(), anchor: 3, head: 1, scrollBlockId: visible?.dataset.blockId, scrollOffset: visible?.getBoundingClientRect().top - containerTop }; return document.activeElement === editor && selection.anchorOffset === 3 && selection.focusOffset === 1; })()`,
-    'window-continuity-prepare',
+  const continuityPrepared = await renderer.evaluate(
+    `(async () => {
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      const editor = document.querySelector('[data-testid="manuscript-editor"]');
+      const surface = document.querySelector('.editor-window');
+      const blocks = Array.from(document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]'));
+      const block = blocks[4];
+      const text = block?.firstChild;
+      if (!(editor instanceof HTMLElement) || !(surface instanceof HTMLElement) || !(block instanceof HTMLElement) || !(text instanceof Text) || text.length < 4) return false;
+      editor.focus();
+      block.scrollIntoView({ block: 'center' });
+      const selection = window.getSelection();
+      if (!selection) return false;
+      selection.setBaseAndExtent(text, 3, text, 1);
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      const containerTop = surface.getBoundingClientRect().top;
+      const visible = blocks.find((candidate) => candidate.getBoundingClientRect().bottom >= containerTop);
+      globalThis.__ai7WindowContinuity = { blockId: block.dataset.blockId, text: selection.toString(), anchor: 3, head: 1, scrollBlockId: visible?.dataset.blockId, scrollOffset: visible?.getBoundingClientRect().top - containerTop };
+      return document.activeElement === editor && selection.anchorOffset === 3 && selection.focusOffset === 1;
+    })()`,
   );
+  requireJourney(continuityPrepared === true, 'window-continuity-prepare');
   await press(renderer, 'PageDown');
   await waitFor(renderer, `document.querySelector('[data-testid="manuscript-editor"] > [data-block-id]')?.dataset.blockId !== globalThis.__ai7BeforeForward`, 'forward-window-resolved');
   await assertRenderer(renderer, `(() => { const expected = globalThis.__ai7WindowContinuity; const editor = document.querySelector('[data-testid="manuscript-editor"]'); if (!(editor instanceof HTMLElement)) return false; globalThis.__ai7DeferredWindowText = editor.textContent; globalThis.__ai7DeferredJournal = document.querySelector('.editor-meta')?.textContent; return editor.getAttribute('contenteditable') === 'false' && editor.getAttribute('aria-readonly') === 'true' && document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]').length <= 32 && !document.querySelector('[data-block-id="' + expected.blockId + '"]') && !document.querySelector('[data-block-id="' + expected.scrollBlockId + '"]'); })()`, 'forward-non-overlap-readonly-endpoints-unrendered');
   await renderer.send('Input.insertText', { text: '拒' });
   await assertRenderer(renderer, `(() => { const editor = document.querySelector('[data-testid="manuscript-editor"]'); return editor?.getAttribute('contenteditable') === 'false' && editor.getAttribute('aria-readonly') === 'true' && editor.textContent === globalThis.__ai7DeferredWindowText && document.querySelector('.editor-meta')?.textContent === globalThis.__ai7DeferredJournal; })()`, 'forward-non-overlap-insert-blocked');
+  await renderer.evaluate(`new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
   await press(renderer, 'PageUp');
   await waitFor(renderer, `(() => { const expected = globalThis.__ai7WindowContinuity; const editor = document.querySelector('[data-testid="manuscript-editor"]'); const selection = window.getSelection(); const surface = document.querySelector('.editor-window'); const anchorBlock = selection?.anchorNode?.parentElement?.closest('[data-block-id]'); const headBlock = selection?.focusNode?.parentElement?.closest('[data-block-id]'); const scrollBlock = document.querySelector('[data-block-id="' + expected.scrollBlockId + '"]'); return editor?.getAttribute('contenteditable') === 'true' && editor.getAttribute('aria-readonly') === 'false' && document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]').length <= 32 && anchorBlock?.dataset.blockId === expected.blockId && headBlock?.dataset.blockId === expected.blockId && selection.anchorOffset === expected.anchor && selection.focusOffset === expected.head && selection.anchorOffset > selection.focusOffset && selection.toString() === expected.text && surface instanceof HTMLElement && scrollBlock instanceof HTMLElement && Math.abs((scrollBlock.getBoundingClientRect().top - surface.getBoundingClientRect().top) - expected.scrollOffset) <= 3; })()`, 'back-non-overlap-selection-continuity');
   await assertRenderer(renderer, `document.querySelectorAll('.outline-list button').length === 64 && !Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '下一组结构')?.hidden`, 'outline-first-page-bounded');
