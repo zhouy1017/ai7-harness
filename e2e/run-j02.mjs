@@ -14,6 +14,8 @@ const REPLACEMENT_TEXT = '星海校准';
 const EXPECTED_MATCHES = 25;
 const OVERLAP_SOURCE_TEXT = '哈哈哈';
 const OVERLAP_QUERY = '哈哈';
+const EXCLUSION_TEXT = '边界排除校验';
+const EXPECTED_EXCLUSION_MATCHES = 1_001;
 const DEBUG_SELECTORS = new Set(['DEBUG', 'DEBUG_FILE', 'PWDEBUG', 'PWDEBUGIMPL']);
 const CJK_BASE = 0x4e00;
 const CJK_SPAN = 0x1000;
@@ -72,6 +74,7 @@ function blockText(position) {
   );
   if (position % 2_000 === 0) characters.splice(97, SEARCH_TEXT.length, ...SEARCH_TEXT);
   if (position === 1_000) characters.splice(41, OVERLAP_SOURCE_TEXT.length, ...OVERLAP_SOURCE_TEXT);
+  if (position <= EXPECTED_EXCLUSION_MATCHES) characters.splice(151, EXCLUSION_TEXT.length, ...EXCLUSION_TEXT);
   return characters.join('');
 }
 
@@ -283,14 +286,14 @@ async function runWorkspaceJourney(renderer) {
   await renderer.evaluate(`globalThis.__ai7BeforeForward = document.querySelector('[data-testid="manuscript-editor"] > [data-block-id]')?.dataset.blockId`);
   await assertRenderer(
     renderer,
-    `(() => { const surface = document.querySelector('.editor-window'); const blocks = Array.from(document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]')); const block = blocks[20]; const text = block?.firstChild; if (!(surface instanceof HTMLElement) || !(block instanceof HTMLElement) || !(text instanceof Text) || text.length < 4) return false; block.scrollIntoView({ block: 'center' }); const containerTop = surface.getBoundingClientRect().top; const visible = blocks.find((candidate) => candidate.getBoundingClientRect().bottom >= containerTop); const selection = window.getSelection(); selection.setBaseAndExtent(text, 3, text, 1); globalThis.__ai7WindowContinuity = { blockId: block.dataset.blockId, text: selection.toString(), anchor: 3, head: 1, scrollBlockId: visible?.dataset.blockId, scrollOffset: visible?.getBoundingClientRect().top - containerTop }; return selection.anchorOffset === 3 && selection.headOffset === 1; })()`,
+    `(() => { const surface = document.querySelector('.editor-window'); const blocks = Array.from(document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]')); const block = blocks[4]; const text = block?.firstChild; if (!(surface instanceof HTMLElement) || !(block instanceof HTMLElement) || !(text instanceof Text) || text.length < 4) return false; block.scrollIntoView({ block: 'center' }); const containerTop = surface.getBoundingClientRect().top; const visible = blocks.find((candidate) => candidate.getBoundingClientRect().bottom >= containerTop); const selection = window.getSelection(); selection.setBaseAndExtent(text, 3, text, 1); globalThis.__ai7WindowContinuity = { blockId: block.dataset.blockId, text: selection.toString(), anchor: 3, head: 1, scrollBlockId: visible?.dataset.blockId, scrollOffset: visible?.getBoundingClientRect().top - containerTop }; return selection.anchorOffset === 3 && selection.headOffset === 1; })()`,
     'window-continuity-prepare',
   );
   await clickButton(renderer, '向后浏览', 'forward-window');
   await waitFor(renderer, `document.querySelector('[data-testid="manuscript-editor"] > [data-block-id]')?.dataset.blockId !== globalThis.__ai7BeforeForward`, 'forward-window-resolved');
-  await waitFor(renderer, `(() => { const expected = globalThis.__ai7WindowContinuity; const selection = window.getSelection(); const anchorBlock = selection?.anchorNode?.parentElement?.closest('[data-block-id]'); const headBlock = selection?.focusNode?.parentElement?.closest('[data-block-id]'); const surface = document.querySelector('.editor-window'); const scrollBlock = document.querySelector('[data-block-id="' + expected.scrollBlockId + '"]'); return anchorBlock?.dataset.blockId === expected.blockId && headBlock?.dataset.blockId === expected.blockId && selection.anchorOffset === expected.anchor && selection.focusOffset === expected.head && selection.toString() === expected.text && surface instanceof HTMLElement && scrollBlock instanceof HTMLElement && Math.abs((scrollBlock.getBoundingClientRect().top - surface.getBoundingClientRect().top) - expected.scrollOffset) <= 3; })()`, 'forward-selection-continuity');
+  await assertRenderer(renderer, `(() => { const expected = globalThis.__ai7WindowContinuity; return document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]').length <= 32 && !document.querySelector('[data-block-id="' + expected.blockId + '"]') && !document.querySelector('[data-block-id="' + expected.scrollBlockId + '"]'); })()`, 'forward-non-overlap-endpoints-unrendered');
   await clickButton(renderer, '向前浏览', 'back-window');
-  await waitFor(renderer, `(() => { const expected = globalThis.__ai7WindowContinuity; const selection = window.getSelection(); return document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]').length <= 32 && selection?.anchorNode?.parentElement?.closest('[data-block-id]')?.dataset.blockId === expected.blockId && selection.anchorOffset === expected.anchor && selection.focusOffset === expected.head; })()`, 'back-selection-continuity');
+  await waitFor(renderer, `(() => { const expected = globalThis.__ai7WindowContinuity; const selection = window.getSelection(); const surface = document.querySelector('.editor-window'); const anchorBlock = selection?.anchorNode?.parentElement?.closest('[data-block-id]'); const headBlock = selection?.focusNode?.parentElement?.closest('[data-block-id]'); const scrollBlock = document.querySelector('[data-block-id="' + expected.scrollBlockId + '"]'); return document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]').length <= 32 && anchorBlock?.dataset.blockId === expected.blockId && headBlock?.dataset.blockId === expected.blockId && selection.anchorOffset === expected.anchor && selection.focusOffset === expected.head && selection.anchorOffset > selection.focusOffset && selection.toString() === expected.text && surface instanceof HTMLElement && scrollBlock instanceof HTMLElement && Math.abs((scrollBlock.getBoundingClientRect().top - surface.getBoundingClientRect().top) - expected.scrollOffset) <= 3; })()`, 'back-non-overlap-selection-continuity');
   await assertRenderer(renderer, `document.querySelectorAll('.outline-list button').length === 64 && !Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '下一组结构')?.hidden`, 'outline-first-page-bounded');
   await clickButton(renderer, '下一组结构', 'outline-next-page');
   await waitFor(renderer, `document.querySelectorAll('.outline-list button').length > 0 && document.querySelectorAll('.outline-list button').length <= 64 && !Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '上一组结构')?.hidden`, 'outline-next-page-bounded');
@@ -302,6 +305,16 @@ async function runWorkspaceJourney(renderer) {
   await waitFor(renderer, `document.querySelector('.editor-meta')?.textContent.includes('99.998%')`, 'outline-exact-resolve');
 
   at('cooperative-edit');
+  await assertRenderer(
+    renderer,
+    `(() => { const rail = document.querySelector('#manuscript-position'); if (!(rail instanceof HTMLInputElement)) return false; rail.value = '0'; rail.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`,
+    'near-start-position-jump',
+  );
+  await waitFor(
+    renderer,
+    `document.querySelector('.editor-meta')?.textContent.includes('0.000%') && document.querySelector('[data-testid="manuscript-editor"] > [data-block-id]')?.dataset.blockId === globalThis.__ai7FirstBlock && document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]').length <= 32`,
+    'near-start-position-resolved',
+  );
   await fill(renderer, '#manuscript-search', '天', 'common-search-fill');
   const commonSearchObservation = await renderer.observeIpc();
   await assertRenderer(
@@ -384,11 +397,42 @@ async function runWorkspaceJourney(renderer) {
   await clickButton(renderer, '取消并关闭替换预览', 'dismiss-preview');
   await waitFor(renderer, `document.querySelector('.replacement-review')?.hidden && document.querySelector('.search-results')?.dataset.inclusionLocked === 'false' && document.querySelector('#persistence-status')?.textContent.includes('稿件未发生替换')`, 'dismiss-preview-reclaimed');
 
+  at('bounded-exclusions');
+  await fill(renderer, '#manuscript-search', EXCLUSION_TEXT, 'exclusion-search-fill');
+  await clickButton(renderer, '查找全稿', 'exclusion-search-start');
+  await waitFor(renderer, `document.querySelector('.search-section .field-note')?.textContent.includes('共 ${EXPECTED_EXCLUSION_MATCHES.toLocaleString('zh-CN')} 处')`, 'exclusion-search-ready', 120_000);
+  let excludedCount = 0;
+  while (excludedCount < 1_000) {
+    const pageTake = Math.min(24, 1_000 - excludedCount);
+    await assertRenderer(
+      renderer,
+      `(() => { const controls = Array.from(document.querySelectorAll('.match-inclusion input[type="checkbox"]')); if (controls.length < ${pageTake}) return false; for (const control of controls.slice(0, ${pageTake})) { if (!control.checked) return false; control.click(); } return controls.slice(0, ${pageTake}).every((control) => !control.checked); })()`,
+      `exclusion-select-${excludedCount}`,
+    );
+    excludedCount += pageTake;
+    if (excludedCount < 1_000) {
+      await renderer.evaluate(`globalThis.__ai7ExclusionPageFirst = document.querySelector('.match-inclusion input')?.dataset.matchId`);
+      await clickButton(renderer, '下一组结果', `exclusion-next-${excludedCount}`);
+      await waitFor(renderer, `document.querySelector('.match-inclusion input')?.dataset.matchId !== globalThis.__ai7ExclusionPageFirst`, `exclusion-next-ready-${excludedCount}`);
+    }
+  }
+  await assertRenderer(
+    renderer,
+    `(() => { const controls = Array.from(document.querySelectorAll('.match-inclusion input[type="checkbox"]')); const remaining = controls.find((control) => control.checked); if (!remaining) return false; remaining.click(); return remaining.checked && document.querySelector('.replacement-exclusion-summary')?.dataset.excludedCount === '1000' && document.querySelector('.replacement-exclusion-summary')?.textContent.includes('至少保留 1 处') && controls.length <= 24; })()`,
+    'exclusion-cap-and-retain-one',
+  );
+  await fill(renderer, '#manuscript-replacement', '边界保留校验', 'exclusion-replacement-fill');
+  await clickButton(renderer, '预览替换', 'exclusion-preview');
+  await waitFor(renderer, `!document.querySelector('.replacement-review')?.hidden && document.querySelector('.replacement-review')?.textContent.includes('纳入 1 处') && document.querySelector('.replacement-review')?.textContent.includes('排除 1000 处')`, 'exclusion-preview-exact', 120_000);
+  await clickButton(renderer, '取消并关闭替换预览', 'exclusion-preview-dismiss');
+  await waitFor(renderer, `document.querySelector('.replacement-review')?.hidden`, 'exclusion-preview-dismissed');
+
   at('search-replace');
   await fill(renderer, '#manuscript-search', SEARCH_TEXT, 'search-fill');
   await clickButton(renderer, '查找全稿', 'search-start');
   await waitFor(renderer, `document.querySelector('.search-section .field-note')?.textContent.includes('共 ${EXPECTED_MATCHES} 处')`, 'search-results', 120_000);
   await assertRenderer(renderer, `document.querySelectorAll('.search-result').length === 24 && !Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '下一组结果')?.hidden`, 'search-virtualized');
+  await assertRenderer(renderer, `(() => { const encoded = (value) => new TextEncoder().encode(JSON.stringify(value)).length; const rows = Array.from(document.querySelectorAll('.search-result')); const ids = rows.map((row) => row.querySelector('input')?.dataset.matchId); return rows.length === 24 && new Set(ids).size === ids.length && rows.every((row) => { const heading = row.querySelector('.field-note')?.textContent ?? ''; const context = row.querySelector('button')?.textContent ?? ''; return encoded(heading) <= 2048 && encoded(context) <= 2048; }); })()`, 'search-display-frame-bounded-and-identities-unique');
   await assertRenderer(renderer, `(() => { const surface = document.querySelector('.editor-window'); const blocks = Array.from(document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]')); const block = blocks[5]; const text = block?.firstChild; if (!(surface instanceof HTMLElement) || !(block instanceof HTMLElement) || !(text instanceof Text) || text.length < 5) return false; block.scrollIntoView({ block: 'center' }); const containerTop = surface.getBoundingClientRect().top; const visible = blocks.find((candidate) => candidate.getBoundingClientRect().bottom >= containerTop); const selection = window.getSelection(); selection.setBaseAndExtent(text, 4, text, 1); globalThis.__ai7SearchReturn = { meta: document.querySelector('.editor-meta')?.textContent, blockId: block.dataset.blockId, text: selection.toString(), anchor: 4, head: 1, scrollBlockId: visible?.dataset.blockId, scrollOffset: visible?.getBoundingClientRect().top - containerTop }; return true; })()`, 'search-return-prepare');
   await assertRenderer(renderer, `(() => { const open = document.querySelector('.search-result button'); if (!open) return false; open.click(); return true; })()`, 'search-jump');
   await waitFor(renderer, `document.querySelector('.editor-meta')?.textContent !== globalThis.__ai7SearchReturn.meta`, 'search-jump-resolved');

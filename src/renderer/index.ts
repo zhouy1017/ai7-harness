@@ -10,6 +10,7 @@ import type {
   ServiceJobProjection,
   StagedImportProjection,
 } from '../shared/protocol.js';
+import { MAX_REPLACEMENT_EXCLUSIONS } from '../shared/protocol.js';
 import { mountBoundedEditor, type BoundedEditor, type EditorContinuity } from './editor.js';
 
 function requiredElement(selector: string): HTMLElement {
@@ -636,6 +637,13 @@ function renderEditorWindow(initialWindow: ManuscriptWindowProjection, bookTitle
   searchActions.append(searchButton, prepareReplacementButton, cancelJob);
   const searchSummary = element('p', 'field-note', '范围：全稿。结果会记录查找时的稿件版本。');
   searchSummary.setAttribute('aria-live', 'polite');
+  const exclusionSummary = element(
+    'p',
+    'field-note replacement-exclusion-summary',
+    `最多排除 ${MAX_REPLACEMENT_EXCLUSIONS.toLocaleString('zh-CN')} 处，且至少保留 1 处；当前排除 0 处。`,
+  );
+  exclusionSummary.id = 'replacement-exclusion-summary';
+  exclusionSummary.setAttribute('aria-live', 'polite');
   const searchResults = element('div', 'search-results');
   const resultPaging = element('div', 'button-row');
   const previousResults = button('上一组结果', 'quiet', () => void loadSearchResults(searchPage?.previousCursor ?? null));
@@ -654,6 +662,7 @@ function renderEditorWindow(initialWindow: ManuscriptWindowProjection, bookTitle
     replacementInput,
     searchActions,
     searchSummary,
+    exclusionSummary,
     searchResults,
     resultPaging,
     replacementReview,
@@ -739,6 +748,12 @@ function renderEditorWindow(initialWindow: ManuscriptWindowProjection, bookTitle
 
   const serviceJobBusy = (): boolean => serviceJobStarting || activeJob !== undefined;
   const authoritativeMutationBusy = (): boolean => authoritativeMutationStarting || authoritativeMutation;
+  const updateExclusionSummary = (): void => {
+    exclusionSummary.textContent =
+      `最多排除 ${MAX_REPLACEMENT_EXCLUSIONS.toLocaleString('zh-CN')} 处，且至少保留 1 处；当前排除 ${excludedMatchIds.size.toLocaleString('zh-CN')} 处。`;
+    exclusionSummary.dataset['excludedCount'] = String(excludedMatchIds.size);
+    exclusionSummary.dataset['exclusionLimit'] = String(MAX_REPLACEMENT_EXCLUSIONS);
+  };
 
   const updateServiceControls = (): void => {
     const busy = serviceJobBusy();
@@ -948,6 +963,7 @@ function renderEditorWindow(initialWindow: ManuscriptWindowProjection, bookTitle
   async function navigate(
     target: Parameters<typeof window.ai7.getManuscriptWindowAt>[0]['target'],
     continuity?: EditorContinuity,
+    preserveOffWindowContinuity = false,
   ): Promise<boolean> {
     if (authoritativeMutationBusy() || !(await settleLocalEdit()) || !editor) return false;
     try {
@@ -957,7 +973,10 @@ function renderEditorWindow(initialWindow: ManuscriptWindowProjection, bookTitle
         branchId: binding.branchId,
         target,
       });
-      if (!editor.loadWindow(next, continuity)) return false;
+      const loaded = preserveOffWindowContinuity && continuity
+        ? editor.loadNavigationWindow(next, continuity)
+        : editor.loadWindow(next, continuity);
+      if (!loaded) return false;
       currentWindow = next;
       updateWindowChrome();
       setStatus(`已到达${next.position.structureLabel ? `“${next.position.structureLabel}”附近，` : ''}${next.position.label}。`, 'success');
@@ -974,8 +993,8 @@ function renderEditorWindow(initialWindow: ManuscriptWindowProjection, bookTitle
     if (!cursor) return;
     edgeNavigation = true;
     try {
-      const continuity = editor.captureContinuity();
-      await navigate({ kind: 'cursor', cursor }, continuity);
+      const continuity = editor.captureNavigationContinuity();
+      await navigate({ kind: 'cursor', cursor }, continuity, true);
       await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
     } finally {
       edgeNavigation = false;
@@ -1111,6 +1130,7 @@ function renderEditorWindow(initialWindow: ManuscriptWindowProjection, bookTitle
     searchPage = undefined;
     searchReturn = undefined;
     excludedMatchIds.clear();
+    updateExclusionSummary();
     clearReplacementPresentation();
     searchResults.replaceChildren();
     previousResults.hidden = true;
@@ -1222,13 +1242,24 @@ function renderEditorWindow(initialWindow: ManuscriptWindowProjection, bookTitle
       include.type = 'checkbox';
       include.dataset['matchId'] = match.matchId;
       include.checked = !excludedMatchIds.has(match.matchId);
+      include.setAttribute('aria-describedby', exclusionSummary.id);
       include.addEventListener('change', () => {
         if (replacementPreview) {
           include.checked = !excludedMatchIds.has(match.matchId);
           return;
         }
-        if (include.checked) excludedMatchIds.delete(match.matchId);
-        else excludedMatchIds.add(match.matchId);
+        if (include.checked) {
+          excludedMatchIds.delete(match.matchId);
+        } else if (excludedMatchIds.size >= MAX_REPLACEMENT_EXCLUSIONS) {
+          include.checked = true;
+          setStatus(`最多只能排除 ${MAX_REPLACEMENT_EXCLUSIONS.toLocaleString('zh-CN')} 处匹配。`, 'error');
+        } else if (searchPage && excludedMatchIds.size + 1 >= searchPage.totalMatches) {
+          include.checked = true;
+          setStatus('至少保留一处精确匹配用于替换。', 'error');
+        } else {
+          excludedMatchIds.add(match.matchId);
+        }
+        updateExclusionSummary();
       });
       includeLabel.append(include, document.createTextNode(' 纳入替换'));
       row.append(element('p', 'field-note', match.headingLabel), open, includeLabel);
@@ -1237,6 +1268,7 @@ function renderEditorWindow(initialWindow: ManuscriptWindowProjection, bookTitle
     previousResults.hidden = page.previousCursor === null;
     nextResults.hidden = page.nextCursor === null;
     setInclusionControlsLocked(replacementPreview !== undefined);
+    updateExclusionSummary();
     updateServiceControls();
   }
 
@@ -1263,6 +1295,10 @@ function renderEditorWindow(initialWindow: ManuscriptWindowProjection, bookTitle
     const searchId = searchPage.searchId;
     const replacement = replacementInput.value.normalize('NFC');
     const exclusions = [...excludedMatchIds];
+    if (exclusions.length > MAX_REPLACEMENT_EXCLUSIONS || exclusions.length >= searchPage.totalMatches) {
+      setStatus('替换排除清单超出上限或没有保留任何精确匹配。', 'error');
+      return;
+    }
     let preparedPreviewId: string | undefined;
     try {
       const completed = await runOwnedServiceJob(async () => {
@@ -1299,8 +1335,12 @@ function renderEditorWindow(initialWindow: ManuscriptWindowProjection, bookTitle
   }
 
   function renderReplacementReview(preview: ReplacementPreviewProjection): void {
+    if (preview.excludedMatchIds.length > MAX_REPLACEMENT_EXCLUSIONS || preview.includedMatches < 1) {
+      throw new Error('替换预览的纳入集合超出安全范围。');
+    }
     excludedMatchIds.clear();
     for (const matchId of preview.excludedMatchIds) excludedMatchIds.add(matchId);
+    updateExclusionSummary();
     setInclusionControlsLocked(true);
     replacementReview.hidden = false;
     replacementReview.replaceChildren(

@@ -31,7 +31,9 @@ export interface BoundedEditor {
   focus(): void;
   flush(): Promise<void>;
   captureContinuity(): EditorContinuity;
+  captureNavigationContinuity(): EditorContinuity;
   loadWindow(windowProjection: ManuscriptWindowProjection, continuity?: EditorContinuity): boolean;
+  loadNavigationWindow(windowProjection: ManuscriptWindowProjection, continuity: EditorContinuity): boolean;
   selectRange(blockId: string, fromGrapheme: number, toGrapheme: number): boolean;
   currentWindow(): ManuscriptWindowProjection;
   isComposing(): boolean;
@@ -271,6 +273,7 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
   let interrupted = false;
   let composing = false;
   let operationLocked = false;
+  let deferredNavigationContinuity: EditorContinuity | undefined;
 
   const isEditable = (): boolean => !retryRequired && !interrupted && !operationLocked;
 
@@ -332,7 +335,7 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
     view.dom.dataset['operationLocked'] = operationLocked ? 'true' : 'false';
   };
 
-  const captureContinuity = (): EditorContinuity => {
+  const captureRenderedContinuity = (): EditorContinuity => {
     const selection = view.state.selection;
     const containerRect = options.scrollContainer.getBoundingClientRect();
     const rendered = Array.from(view.dom.querySelectorAll<HTMLElement>('[data-block-id]'));
@@ -356,16 +359,25 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
     state: EditorState,
     continuity: EditorContinuity | undefined,
     focusBlockId: string | null,
+    deferMissing: boolean,
   ): void => {
     let nextState = state;
     let selectionRestored = false;
     if (continuity) {
       const anchor = positionAtPoint(state.doc, continuity.anchor);
       const head = positionAtPoint(state.doc, continuity.head);
-      if (anchor !== undefined && head !== undefined) {
+      const scrollAnchor = findBlockPosition(state.doc, continuity.scrollAnchor.blockId);
+      if (anchor !== undefined && head !== undefined && scrollAnchor !== undefined) {
         nextState = state.apply(state.tr.setSelection(TextSelection.create(state.doc, anchor, head)));
         selectionRestored = true;
+        deferredNavigationContinuity = undefined;
+      } else if (deferMissing) {
+        deferredNavigationContinuity = continuity;
+      } else {
+        deferredNavigationContinuity = undefined;
       }
+    } else {
+      deferredNavigationContinuity = undefined;
     }
     if (!selectionRestored && focusBlockId) {
       const target = findBlockPosition(state.doc, focusBlockId);
@@ -373,9 +385,9 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
     }
     view.updateState(nextState);
     requestAnimationFrame(() => {
-      const scrollId = continuity?.scrollAnchor.blockId ?? focusBlockId;
+      const scrollId = selectionRestored ? continuity?.scrollAnchor.blockId : focusBlockId;
       const target = scrollId ? view.dom.querySelector<HTMLElement>(`[data-block-id="${scrollId}"]`) : undefined;
-      if (target && continuity) {
+      if (target && continuity && selectionRestored) {
         const containerTop = options.scrollContainer.getBoundingClientRect().top;
         options.scrollContainer.scrollTop += target.getBoundingClientRect().top - containerTop - continuity.scrollAnchor.offset;
       } else if (target) {
@@ -453,13 +465,13 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
             '修订日志确认与当前编辑不匹配。',
           );
           await waitForComposition();
-          const continuity = captureContinuity();
+          const continuity = captureRenderedContinuity();
           const localText = new Map<string, string>();
           view.state.doc.forEach((node) => localText.set(String(node.attrs['blockId']), node.textContent));
           windowProjection = ack.window;
           baselines = baselineMap(windowProjection);
           const visibleBlocks = windowProjection.blocks.map((block) => ({ ...block, text: localText.get(block.blockId) ?? block.text }));
-          restoreContinuity(makeState(visibleBlocks), continuity, null);
+          restoreContinuity(makeState(visibleBlocks), continuity, null, false);
           retryPrepared = undefined;
           retryRequired = false;
           applyEditableState();
@@ -514,6 +526,7 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
     state: makeState(),
     editable: isEditable,
     dispatchTransaction(transaction) {
+      if (transaction.docChanged || transaction.selectionSet) deferredNavigationContinuity = undefined;
       const nextState = view.state.apply(transaction);
       if (nextState === view.state) return;
       view.updateState(nextState);
@@ -586,13 +599,23 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
   return {
     focus: () => view.focus(),
     flush,
-    captureContinuity,
+    captureContinuity: captureRenderedContinuity,
+    captureNavigationContinuity: () => deferredNavigationContinuity ?? captureRenderedContinuity(),
     loadWindow: (nextWindow, continuity) => {
       if (destroyed || interrupted || saving || retryRequired || changedBlocks(view.state.doc).length > 0 || composing) return false;
       windowProjection = nextWindow;
       baselines = baselineMap(nextWindow);
       retryPrepared = undefined;
-      restoreContinuity(makeState(), continuity, nextWindow.focusBlockId);
+      restoreContinuity(makeState(), continuity, nextWindow.focusBlockId, false);
+      announceState();
+      return true;
+    },
+    loadNavigationWindow: (nextWindow, continuity) => {
+      if (destroyed || interrupted || saving || retryRequired || changedBlocks(view.state.doc).length > 0 || composing) return false;
+      windowProjection = nextWindow;
+      baselines = baselineMap(nextWindow);
+      retryPrepared = undefined;
+      restoreContinuity(makeState(), continuity, nextWindow.focusBlockId, true);
       announceState();
       return true;
     },

@@ -47,7 +47,8 @@ const BASE_SCHEMA_VERSION = 2;
 const PRE_SIGNOFF_SCHEMA_VERSION = 3;
 const OFFSET_REPAIR_SCHEMA_VERSION = 4;
 const SEARCH_BINDING_SCHEMA_VERSION = 5;
-const SCHEMA_VERSION = 6;
+const OFFSET_INDEX_SCHEMA_VERSION = 6;
+const SCHEMA_VERSION = 7;
 const WORKFLOW_PROFILE = {
   id: 'ai7.manuscript.editorial.zh-CN',
   name: '基础书稿编辑流程',
@@ -277,13 +278,14 @@ function initializeSchema(db: DatabaseSync): void {
   requireStore(
     currentVersion === 0 || currentVersion === 1 || currentVersion === BASE_SCHEMA_VERSION ||
       currentVersion === PRE_SIGNOFF_SCHEMA_VERSION || currentVersion === OFFSET_REPAIR_SCHEMA_VERSION ||
-      currentVersion === SEARCH_BINDING_SCHEMA_VERSION || currentVersion === SCHEMA_VERSION,
+      currentVersion === SEARCH_BINDING_SCHEMA_VERSION || currentVersion === OFFSET_INDEX_SCHEMA_VERSION ||
+      currentVersion === SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
   if (currentVersion === BASE_SCHEMA_VERSION || currentVersion === PRE_SIGNOFF_SCHEMA_VERSION ||
       currentVersion === OFFSET_REPAIR_SCHEMA_VERSION || currentVersion === SEARCH_BINDING_SCHEMA_VERSION ||
-      currentVersion === SCHEMA_VERSION) return;
+      currentVersion === OFFSET_INDEX_SCHEMA_VERSION || currentVersion === SCHEMA_VERSION) return;
   if (currentVersion === 1) {
     migrateSchemaV1ToV2(db);
     return;
@@ -1018,6 +1020,7 @@ export class EditorialStore {
         return;
       }
 
+      this.#boundedCall(() => this.#bounded.assertStagedDraftIntegrity(input.draftId));
       const snapshot = this.#loadDraftSnapshot(input.draftId);
       requireStore(snapshot.state === 'reviewed', 'DRAFT_NOT_REVIEWED', '导入草稿尚未完成复核。');
       requireStore(snapshot.version === input.expectedDraftVersion, 'DRAFT_VERSION_CHANGED', '导入草稿版本已变化。');
@@ -1182,8 +1185,8 @@ export class EditorialStore {
       ).run(revisionId, input.draftId);
       this.#authority.prepare(
         `INSERT INTO working_blocks(
-           branch_id, block_id, position, kind, level, text, digest, start_offset, grapheme_length
-         ) SELECT ?, staged_block_id, position, kind, level, text, digest, start_offset, grapheme_length
+           branch_id, block_id, position, kind, level, text, digest, grapheme_length
+         ) SELECT ?, staged_block_id, position, kind, level, text, digest, grapheme_length
            FROM staged_import_blocks WHERE draft_id = ? ORDER BY position`,
       ).run(branchId, input.draftId);
       this.#authority

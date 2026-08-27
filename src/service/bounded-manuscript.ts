@@ -36,11 +36,11 @@ const LEGACY_BOUNDED_SCHEMA_VERSION = 2;
 const SIGNOFF_MIGRATION_SOURCE_VERSION = 3;
 const OFFSET_REPAIR_SOURCE_VERSION = 4;
 const SEARCH_BINDING_SOURCE_VERSION = 5;
-const SCHEMA_VERSION = 6;
+const OFFSET_INDEX_SOURCE_VERSION = 6;
+const SCHEMA_VERSION = 7;
 const MIGRATION_BATCH = 256;
 const SEARCH_BATCH = 128;
 const HISTORY_BATCH = 128;
-const CONTEXT_GRAPHEMES = 36;
 const WINDOW_STRIDE = Math.floor(MAX_WINDOW_BLOCKS / 2);
 const MAX_RETAINED_TRANSIENT_SEARCHES = 32;
 const MAX_RETAINED_REPLACEMENT_PREVIEWS = 8;
@@ -290,7 +290,7 @@ const SOURCE_V2_SCHEMA_SQL = {
   ) STRICT`,
 } as const;
 
-const TARGET_SCHEMA_SQL = {
+const SOURCE_V6_SCHEMA_SQL = {
   staged_import_snapshots: `CREATE TABLE staged_import_snapshots (
     draft_id TEXT PRIMARY KEY REFERENCES import_drafts(draft_id) ON DELETE CASCADE,
     parser_identity TEXT NOT NULL,
@@ -505,8 +505,42 @@ const TARGET_SCHEMA_SQL = {
   ) STRICT`,
 } as const;
 
+const TARGET_SCHEMA_SQL = {
+  ...SOURCE_V6_SCHEMA_SQL,
+  working_blocks: `CREATE TABLE working_blocks (
+    branch_id TEXT NOT NULL REFERENCES manuscript_branches(branch_id),
+    block_id TEXT NOT NULL REFERENCES manuscript_blocks(block_id),
+    position INTEGER NOT NULL CHECK(position > 0),
+    kind TEXT NOT NULL CHECK(kind IN ('title', 'heading', 'paragraph')),
+    level INTEGER,
+    text TEXT NOT NULL,
+    digest TEXT NOT NULL CHECK(length(digest) = 64),
+    grapheme_length INTEGER NOT NULL DEFAULT 0 CHECK(grapheme_length >= 0),
+    PRIMARY KEY(branch_id, block_id),
+    UNIQUE(branch_id, position)
+  ) STRICT`,
+  manuscript_outline: `CREATE TABLE manuscript_outline (
+    branch_id TEXT NOT NULL REFERENCES manuscript_branches(branch_id),
+    block_id TEXT NOT NULL REFERENCES manuscript_blocks(block_id),
+    position INTEGER NOT NULL CHECK(position > 0),
+    kind TEXT NOT NULL CHECK(kind IN ('title', 'heading')),
+    level INTEGER NOT NULL CHECK(level BETWEEN 1 AND 6),
+    text TEXT NOT NULL,
+    digest TEXT NOT NULL CHECK(length(digest) = 64),
+    PRIMARY KEY(branch_id, block_id),
+    UNIQUE(branch_id, position)
+  ) STRICT`,
+  working_offset_nodes: `CREATE TABLE working_offset_nodes (
+    branch_id TEXT NOT NULL,
+    position INTEGER NOT NULL CHECK(position > 0),
+    span_graphemes INTEGER NOT NULL CHECK(span_graphemes >= 0),
+    PRIMARY KEY(branch_id, position),
+    FOREIGN KEY(branch_id, position) REFERENCES working_blocks(branch_id, position) ON DELETE CASCADE
+  ) STRICT`,
+} as const;
+
 const SOURCE_V3_TO_V5_SCHEMA_SQL = {
-  ...TARGET_SCHEMA_SQL,
+  ...SOURCE_V6_SCHEMA_SQL,
   manuscript_search_sessions: `CREATE TABLE manuscript_search_sessions (
     search_id TEXT PRIMARY KEY,
     manuscript_id TEXT NOT NULL REFERENCES manuscripts(manuscript_id),
@@ -541,6 +575,7 @@ const SOURCE_V3_TO_V5_SCHEMA_SQL = {
 
 const FULL_SOURCE_V2_SCHEMA_SQL = { ...COMMON_SCHEMA_SQL, ...SOURCE_V2_SCHEMA_SQL } as const;
 const FULL_SOURCE_V3_TO_V5_SCHEMA_SQL = { ...COMMON_SCHEMA_SQL, ...SOURCE_V3_TO_V5_SCHEMA_SQL } as const;
+const FULL_SOURCE_V6_SCHEMA_SQL = { ...COMMON_SCHEMA_SQL, ...SOURCE_V6_SCHEMA_SQL } as const;
 const FULL_TARGET_SCHEMA_SQL = { ...COMMON_SCHEMA_SQL, ...TARGET_SCHEMA_SQL } as const;
 
 const TARGET_VIRTUAL_TABLE_SQL = `CREATE VIRTUAL TABLE working_block_search USING fts5(
@@ -568,10 +603,17 @@ const SOURCE_V2_INDEX_SQL = {
   journal_branch_order: 'CREATE INDEX journal_branch_order ON edit_journal_entries(branch_id, sequence)',
 } as const;
 
-const TARGET_INDEX_SQL = {
+const SOURCE_V6_INDEX_SQL = {
   ...SOURCE_V2_INDEX_SQL,
   manuscript_outline_order: 'CREATE INDEX manuscript_outline_order ON manuscript_outline(branch_id, position)',
   working_blocks_global_offset: 'CREATE INDEX working_blocks_global_offset ON working_blocks(branch_id, start_offset)',
+  command_history_state: 'CREATE INDEX command_history_state ON manuscript_command_groups(branch_id, status, ordinal)',
+  replacement_matches_block: 'CREATE INDEX replacement_matches_block ON manuscript_replacement_matches(preview_id, included, block_id, from_grapheme)',
+} as const;
+
+const TARGET_INDEX_SQL = {
+  ...SOURCE_V2_INDEX_SQL,
+  manuscript_outline_order: 'CREATE INDEX manuscript_outline_order ON manuscript_outline(branch_id, position)',
   command_history_state: 'CREATE INDEX command_history_state ON manuscript_command_groups(branch_id, status, ordinal)',
   replacement_matches_block: 'CREATE INDEX replacement_matches_block ON manuscript_replacement_matches(preview_id, included, block_id, from_grapheme)',
 } as const;
@@ -682,6 +724,10 @@ const SCHEMA_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
     'milestone_id>milestone_versions.milestone_id:NO ACTION/NO ACTION/NONE',
     'revision_id>manuscript_revisions.revision_id:NO ACTION/NO ACTION/NONE',
     'workflow_instance_id>workflow_instances.workflow_instance_id:NO ACTION/NO ACTION/NONE',
+  ],
+  working_offset_nodes: [
+    'branch_id>working_blocks.branch_id:NO ACTION/CASCADE/NONE',
+    'position>working_blocks.position:NO ACTION/CASCADE/NONE',
   ],
 };
 
@@ -953,11 +999,15 @@ function requireSourceSchema(db: DatabaseSync, version: number): void {
     requireExactSchema(db, FULL_SOURCE_V2_SCHEMA_SQL, SOURCE_V2_INDEX_SQL, false);
     return;
   }
+  if (version === OFFSET_INDEX_SOURCE_VERSION) {
+    requireExactSchema(db, FULL_SOURCE_V6_SCHEMA_SQL, SOURCE_V6_INDEX_SQL, true);
+    return;
+  }
   const includeSignoff = version !== SIGNOFF_MIGRATION_SOURCE_VERSION || hasSchemaObject(db, 'milestone_signoff_records');
   const expectedTables = Object.fromEntries(
     Object.entries(FULL_SOURCE_V3_TO_V5_SCHEMA_SQL).filter(([name]) => includeSignoff || name !== 'milestone_signoff_records'),
   );
-  requireExactSchema(db, expectedTables, TARGET_INDEX_SQL, true);
+  requireExactSchema(db, expectedTables, SOURCE_V6_INDEX_SQL, true);
 }
 
 function requireTargetSchema(db: DatabaseSync): void {
@@ -986,21 +1036,205 @@ function graphemes(text: string): string[] {
   return Array.from(segmenter.segment(text), ({ segment }) => segment);
 }
 
-function boundedOutlineDisplay(text: string): { text: string; truncated: boolean } {
-  if (Buffer.byteLength(text, 'utf8') <= MAX_OUTLINE_DISPLAY_UTF8_BYTES) return { text, truncated: false };
+interface OffsetSegment {
+  size: number;
+  total: number;
+}
+
+function fenwickSpan(position: number): number {
+  requireBounded(Number.isSafeInteger(position) && position > 0, 'OFFSET_INDEX_INVALID', '稿件偏移索引位置无效。');
+  let remainder = position;
+  let span = 1;
+  while (remainder % 2 === 0) {
+    remainder /= 2;
+    span *= 2;
+  }
+  return span;
+}
+
+function appendOffsetSegment(stack: OffsetSegment[], position: number, length: number): number {
+  requireBounded(Number.isSafeInteger(length) && length >= 0, 'OFFSET_INDEX_INVALID', '稿件偏移索引长度无效。');
+  let segment: OffsetSegment = { size: 1, total: length };
+  while (stack.at(-1)?.size === segment.size) {
+    const previous = stack.pop()!;
+    const total = previous.total + segment.total;
+    requireBounded(Number.isSafeInteger(total), 'OFFSET_INDEX_INVALID', '稿件偏移索引总量无效。');
+    segment = { size: segment.size * 2, total };
+  }
+  requireBounded(segment.size === fenwickSpan(position), 'OFFSET_INDEX_INVALID', '稿件偏移索引范围无效。');
+  stack.push(segment);
+  return segment.total;
+}
+
+function lastWorkingPosition(db: DatabaseSync, branchId: string): number {
+  const row = db.prepare(
+    'SELECT position FROM working_blocks WHERE branch_id = ? ORDER BY position DESC LIMIT 1',
+  ).get(branchId) as SqlRow | undefined;
+  requireBounded(row !== undefined, 'WINDOW_NOT_FOUND', '稿件窗口为空。');
+  return asNumber(row.position);
+}
+
+function workingOffsetPrefix(db: DatabaseSync, branchId: string, throughPosition: number): number {
+  requireBounded(Number.isSafeInteger(throughPosition) && throughPosition >= 0, 'OFFSET_INDEX_INVALID', '稿件偏移查询位置无效。');
+  let position = throughPosition;
+  let total = 0;
+  const read = db.prepare('SELECT span_graphemes FROM working_offset_nodes WHERE branch_id = ? AND position = ?');
+  while (position > 0) {
+    const row = read.get(branchId, position) as SqlRow | undefined;
+    requireBounded(row !== undefined, 'OFFSET_INDEX_INVALID', '稿件偏移索引节点缺失。');
+    total += asNumber(row.span_graphemes);
+    requireBounded(Number.isSafeInteger(total), 'OFFSET_INDEX_INVALID', '稿件偏移查询总量无效。');
+    position -= fenwickSpan(position);
+  }
+  return total;
+}
+
+function workingOffsetBefore(db: DatabaseSync, branchId: string, position: number): number {
+  requireBounded(Number.isSafeInteger(position) && position > 0, 'OFFSET_INDEX_INVALID', '稿件偏移查询位置无效。');
+  return workingOffsetPrefix(db, branchId, position - 1);
+}
+
+function resolveWorkingCharacter(
+  db: DatabaseSync,
+  branchId: string,
+  character: number,
+  totalCharacters: number,
+): { position: number; startCharacter: number } {
+  const totalBlocks = lastWorkingPosition(db, branchId);
+  if (totalCharacters === 0) return { position: 1, startCharacter: 0 };
+  requireBounded(
+    Number.isSafeInteger(character) && character >= 0 && character < totalCharacters,
+    'OFFSET_INDEX_INVALID',
+    '全稿字符位置超出偏移索引范围。',
+  );
+  let step = 1;
+  while (step <= Math.floor(totalBlocks / 2)) step *= 2;
+  let position = 0;
+  let prefix = 0;
+  const read = db.prepare('SELECT span_graphemes FROM working_offset_nodes WHERE branch_id = ? AND position = ?');
+  while (step >= 1) {
+    const next = position + step;
+    if (next <= totalBlocks) {
+      const row = read.get(branchId, next) as SqlRow | undefined;
+      requireBounded(row !== undefined, 'OFFSET_INDEX_INVALID', '稿件偏移索引节点缺失。');
+      const candidate = prefix + asNumber(row.span_graphemes);
+      requireBounded(Number.isSafeInteger(candidate), 'OFFSET_INDEX_INVALID', '稿件偏移查询总量无效。');
+      if (candidate <= character) {
+        position = next;
+        prefix = candidate;
+      }
+    }
+    step /= 2;
+  }
+  requireBounded(position < totalBlocks, 'OFFSET_INDEX_INVALID', '全稿字符位置无法解析。');
+  return { position: position + 1, startCharacter: prefix };
+}
+
+function updateWorkingOffsetNodes(db: DatabaseSync, branchId: string, position: number, delta: number): number {
+  requireBounded(Number.isSafeInteger(delta), 'OFFSET_INDEX_INVALID', '稿件偏移变化无效。');
+  if (delta === 0) return 0;
+  const totalBlocks = lastWorkingPosition(db, branchId);
+  requireBounded(position <= totalBlocks, 'OFFSET_INDEX_INVALID', '稿件偏移更新位置无效。');
+  const update = db.prepare(
+    'UPDATE working_offset_nodes SET span_graphemes = span_graphemes + ? WHERE branch_id = ? AND position = ?',
+  );
+  let nodePosition = position;
+  let changes = 0;
+  while (nodePosition <= totalBlocks) {
+    requireBounded(
+      update.run(delta, branchId, nodePosition).changes === 1,
+      'OFFSET_INDEX_INVALID',
+      '稿件偏移索引节点无法更新。',
+    );
+    changes += 1;
+    nodePosition += fenwickSpan(nodePosition);
+  }
+  requireBounded(
+    changes <= Math.ceil(Math.log2(totalBlocks)) + 1,
+    'OFFSET_INDEX_INVALID',
+    '稿件偏移索引更新超出对数边界。',
+  );
+  return changes;
+}
+
+function encodedJsonStringBytes(text: string): number {
+  return Buffer.byteLength(JSON.stringify(text), 'utf8');
+}
+
+function encodedJsonContentBytes(text: string): number {
+  return encodedJsonStringBytes(text) - 2;
+}
+
+function boundedProtocolDisplay(text: string): { text: string; truncated: boolean } {
+  if (encodedJsonStringBytes(text) <= MAX_OUTLINE_DISPLAY_UTF8_BYTES) return { text, truncated: false };
   const suffix = '…';
-  const budget = MAX_OUTLINE_DISPLAY_UTF8_BYTES - Buffer.byteLength(suffix, 'utf8');
+  const budget = MAX_OUTLINE_DISPLAY_UTF8_BYTES - 2 - encodedJsonContentBytes(suffix);
   const parts: string[] = [];
   let bytes = 0;
   for (const part of graphemes(text)) {
-    const partBytes = Buffer.byteLength(part, 'utf8');
+    const partBytes = encodedJsonContentBytes(part);
     if (bytes + partBytes > budget) break;
     parts.push(part);
     bytes += partBytes;
   }
   const display = `${parts.join('')}${suffix}`;
-  requireBounded(Buffer.byteLength(display, 'utf8') <= MAX_OUTLINE_DISPLAY_UTF8_BYTES, 'OUTLINE_FRAME_INVALID', '结构标题显示超出协议范围。');
+  requireBounded(encodedJsonStringBytes(display) <= MAX_OUTLINE_DISPLAY_UTF8_BYTES, 'OUTLINE_FRAME_INVALID', '显示文字超出协议范围。');
   return { text: display, truncated: true };
+}
+
+function boundedOutlineDisplay(text: string): { text: string; truncated: boolean } {
+  return boundedProtocolDisplay(text);
+}
+
+function boundedSearchContext(text: ReadonlyArray<string>, from: number, to: number): string {
+  requireBounded(
+    Number.isSafeInteger(from) && Number.isSafeInteger(to) && from >= 0 && to > from && to <= text.length,
+    'SEARCH_FRAME_INVALID',
+    '搜索上下文范围无效。',
+  );
+  const ellipsis = '…';
+  const ellipsisBytes = encodedJsonContentBytes(ellipsis);
+  let left = from;
+  let right = to;
+  let contentBytes = text.slice(from, to).reduce((total, part) => total + encodedJsonContentBytes(part), 0);
+  requireBounded(contentBytes + 2 <= MAX_OUTLINE_DISPLAY_UTF8_BYTES, 'SEARCH_FRAME_INVALID', '精确搜索文字超出显示范围。');
+  let preferLeft = true;
+  while (left > 0 || right < text.length) {
+    const tryLeft = preferLeft ? left > 0 : right >= text.length && left > 0;
+    const nextLeft = tryLeft ? left - 1 : left;
+    const nextRight = tryLeft ? right : right + 1;
+    const part = tryLeft ? text[nextLeft]! : text[right]!;
+    const projected = 2 + contentBytes + encodedJsonContentBytes(part) +
+      (nextLeft > 0 ? ellipsisBytes : 0) + (nextRight < text.length ? ellipsisBytes : 0);
+    if (projected <= MAX_OUTLINE_DISPLAY_UTF8_BYTES) {
+      left = nextLeft;
+      right = nextRight;
+      contentBytes += encodedJsonContentBytes(part);
+    } else if ((tryLeft && right < text.length) || (!tryLeft && left > 0)) {
+      preferLeft = !preferLeft;
+      const alternateLeft = preferLeft;
+      const alternateNextLeft = alternateLeft ? left - 1 : left;
+      const alternateNextRight = alternateLeft ? right : right + 1;
+      const alternatePart = alternateLeft ? text[alternateNextLeft]! : text[right]!;
+      const alternateProjected = 2 + contentBytes + encodedJsonContentBytes(alternatePart) +
+        (alternateNextLeft > 0 ? ellipsisBytes : 0) + (alternateNextRight < text.length ? ellipsisBytes : 0);
+      if (alternateProjected > MAX_OUTLINE_DISPLAY_UTF8_BYTES) break;
+      left = alternateNextLeft;
+      right = alternateNextRight;
+      contentBytes += encodedJsonContentBytes(alternatePart);
+    } else {
+      break;
+    }
+    preferLeft = !preferLeft;
+  }
+  const context = `${left > 0 ? ellipsis : ''}${text.slice(left, right).join('')}${right < text.length ? ellipsis : ''}`;
+  requireBounded(
+    encodedJsonStringBytes(context) <= MAX_OUTLINE_DISPLAY_UTF8_BYTES &&
+      context.includes(text.slice(from, to).join('')),
+    'SEARCH_FRAME_INVALID',
+    '搜索上下文显示无法保留精确匹配。',
+  );
+  return context;
 }
 
 function blockDigest(kind: ManuscriptBlockProjection['kind'], level: number | null, text: string): string {
@@ -1011,7 +1245,12 @@ function stagedBlockId(draftId: string, position: number, digest: string): strin
   return `blk_${sha256(`${draftId}\u0000${position}\u0000${digest}`).slice(0, 24)}`;
 }
 
+function parsedBlockId(position: number, digest: string): string {
+  return `blk_${sha256(`${position}\u0000${digest}`).slice(0, 24)}`;
+}
+
 function stableRevisionWorkingDigest(db: DatabaseSync, revisionId: string): string {
+  requirePersistedBlockTextBounds(db, 'manuscript_block_versions', revisionId, 'SCHEMA_MIGRATION_FAILED', '旧版基础修订版文字超出有界校验范围。');
   const digest = createHash('sha256');
   digest.update('[');
   let position = 0;
@@ -1093,15 +1332,107 @@ function recreateRevisionTable(db: DatabaseSync): void {
   `);
 }
 
-function stagedBlockLength(text: string): number {
+function stagedBlockLength(
+  text: string,
+  code = 'SCHEMA_MIGRATION_FAILED',
+  message = '暂存稿件包含无法按内容块有界校验的文字。',
+): number {
   requireBounded(
     text.isWellFormed() && text.length <= MAX_BLOCK_CODE_UNITS,
-    'SCHEMA_MIGRATION_FAILED',
-    '暂存稿件包含无法按内容块有界迁移的文字。',
+    code,
+    message,
   );
   const length = graphemes(text).length;
-  requireBounded(length <= MAX_BLOCK_GRAPHEMES, 'SCHEMA_MIGRATION_FAILED', '暂存稿件内容块超过字素上限。');
+  requireBounded(length <= MAX_BLOCK_GRAPHEMES, code, message);
   return length;
+}
+
+function requirePersistedBlockTextBounds(
+  db: DatabaseSync,
+  table: 'manuscript_block_versions' | 'working_blocks',
+  ownerId: string,
+  code: string,
+  message: string,
+): void {
+  const ownerColumn = table === 'manuscript_block_versions' ? 'revision_id' : 'branch_id';
+  const oversized = db.prepare(
+    `SELECT position FROM ${table}
+     WHERE ${ownerColumn} = ? AND (typeof(text) <> 'text' OR length(CAST(text AS BLOB)) > ?)
+     ORDER BY position LIMIT 1`,
+  ).get(ownerId, MAX_BLOCK_CODE_UNITS * 3) as SqlRow | undefined;
+  requireBounded(oversized === undefined, code, message);
+}
+
+function validateStagedDraftContentTruth(db: DatabaseSync, draftId: string, requireCharacterCount = true): void {
+  const snapshot = one(
+    db.prepare(
+      `SELECT content_digest, structure_digest, block_count, character_count
+       FROM staged_import_snapshots WHERE draft_id = ?`,
+    ).all(draftId) as SqlRow[],
+    'SCHEMA_MIGRATION_FAILED',
+    '暂存稿件快照缺失。',
+  );
+  const oversized = db.prepare(
+    `SELECT position FROM staged_import_blocks
+     WHERE draft_id = ? AND (typeof(text) <> 'text' OR length(CAST(text AS BLOB)) > ?)
+     ORDER BY position LIMIT 1`,
+  ).get(draftId, MAX_BLOCK_CODE_UNITS * 3) as SqlRow | undefined;
+  requireBounded(oversized === undefined, 'SCHEMA_MIGRATION_FAILED', '暂存稿件文字超出有界校验范围。');
+  const contentHash = createHash('sha256');
+  const structureHash = createHash('sha256');
+  structureHash.update('[');
+  let position = 0;
+  let expectedPosition = 1;
+  let characters = 0;
+  while (true) {
+    const rows = db.prepare(
+      `SELECT position, kind, level, text, digest FROM staged_import_blocks
+       WHERE draft_id = ? AND position > ? ORDER BY position LIMIT ?`,
+    ).all(draftId, position, MIGRATION_BATCH) as SqlRow[];
+    if (rows.length === 0) break;
+    for (const row of rows) {
+      position = asNumber(row.position);
+      const kind = asString(row.kind) as ManuscriptBlockProjection['kind'];
+      const level = row.level === null ? null : asNumber(row.level);
+      const text = asString(row.text);
+      const digest = asString(row.digest);
+      const shapeValid =
+        (kind === 'title' && level === 1) ||
+        (kind === 'heading' && level !== null && Number.isSafeInteger(level) && level >= 1 && level <= 6) ||
+        (kind === 'paragraph' && level === null);
+      const length = stagedBlockLength(text);
+      requireBounded(
+        position === expectedPosition && shapeValid && DIGEST_PATTERN.test(digest) &&
+          blockDigest(kind, level, text) === digest,
+        'SCHEMA_MIGRATION_FAILED',
+        '暂存稿件内容块的结构、文字或摘要无法证明。',
+      );
+      if (expectedPosition > 1) {
+        contentHash.update('\u001e');
+        structureHash.update(',');
+      }
+      contentHash.update(text);
+      structureHash.update(canonicalJson({
+        blockId: parsedBlockId(position, digest),
+        position,
+        kind,
+        level,
+        digest,
+      }));
+      characters += length;
+      requireBounded(Number.isSafeInteger(characters), 'SCHEMA_MIGRATION_FAILED', '暂存稿件字符总数无效。');
+      expectedPosition += 1;
+    }
+  }
+  const blockCount = expectedPosition - 1;
+  requireBounded(
+    blockCount > 0 && blockCount === asNumber(snapshot.block_count) &&
+      (!requireCharacterCount || characters === asNumber(snapshot.character_count)) &&
+      contentHash.digest('hex') === asString(snapshot.content_digest) &&
+      structureHash.update(']').digest('hex') === asString(snapshot.structure_digest),
+    'SCHEMA_MIGRATION_FAILED',
+    '暂存稿件完整内容或结构身份与权威快照不一致。',
+  );
 }
 
 function rekeyStagedDraftBlocks(db: DatabaseSync, draftId: string): void {
@@ -1202,6 +1533,7 @@ function rebuildStagedDraftDerived(db: DatabaseSync, draftId: string): void {
 }
 
 function validateStagedDraftDerived(db: DatabaseSync, draftId: string): void {
+  validateStagedDraftContentTruth(db, draftId);
   const snapshot = one(
     db.prepare(
       `SELECT s.block_count, s.character_count, d.state FROM staged_import_snapshots s
@@ -1255,6 +1587,7 @@ function validateStagedDraftInventory(db: DatabaseSync): void {
 }
 
 function rebuildRevisionOffsets(db: DatabaseSync, revisionId: string): number {
+  requirePersistedBlockTextBounds(db, 'manuscript_block_versions', revisionId, 'SCHEMA_MIGRATION_FAILED', '不可变修订版文字超出有界校验范围。');
   const updateVersion = db.prepare(
     `UPDATE manuscript_block_versions SET start_offset = ?, grapheme_length = ?
      WHERE revision_id = ? AND block_id = ?`,
@@ -1270,7 +1603,7 @@ function rebuildRevisionOffsets(db: DatabaseSync, revisionId: string): number {
     for (const row of rows) {
       const blockId = asString(row.block_id);
       position = asNumber(row.position);
-      const length = graphemes(asString(row.text)).length;
+      const length = stagedBlockLength(asString(row.text));
       updateVersion.run(offset, length, revisionId, blockId);
       offset += length;
     }
@@ -1279,6 +1612,7 @@ function rebuildRevisionOffsets(db: DatabaseSync, revisionId: string): number {
 }
 
 function validateRevisionOffsets(db: DatabaseSync, revisionId: string): void {
+  requirePersistedBlockTextBounds(db, 'manuscript_block_versions', revisionId, 'SCHEMA_MIGRATION_FAILED', '不可变修订版文字超出有界校验范围。');
   let position = 0;
   let offset = 0;
   let blocks = 0;
@@ -1290,7 +1624,7 @@ function validateRevisionOffsets(db: DatabaseSync, revisionId: string): void {
     if (rows.length === 0) break;
     for (const row of rows) {
       position = asNumber(row.position);
-      const length = graphemes(asString(row.text)).length;
+      const length = stagedBlockLength(asString(row.text));
       requireBounded(
         asNumber(row.start_offset) === offset && asNumber(row.grapheme_length) === length,
         'SCHEMA_MIGRATION_FAILED',
@@ -1303,7 +1637,8 @@ function validateRevisionOffsets(db: DatabaseSync, revisionId: string): void {
   requireBounded(blocks > 0, 'SCHEMA_MIGRATION_FAILED', '不可变修订版缺少内容块。');
 }
 
-function validateBranchOffsets(db: DatabaseSync, branchId: string): void {
+function validateLegacyBranchOffsets(db: DatabaseSync, branchId: string): void {
+  requirePersistedBlockTextBounds(db, 'working_blocks', branchId, 'SCHEMA_MIGRATION_FAILED', '工作稿文字超出有界校验范围。');
   let position = 0;
   let offset = 0;
   let blocks = 0;
@@ -1315,7 +1650,7 @@ function validateBranchOffsets(db: DatabaseSync, branchId: string): void {
     if (rows.length === 0) break;
     for (const row of rows) {
       position = asNumber(row.position);
-      const length = graphemes(asString(row.text)).length;
+      const length = stagedBlockLength(asString(row.text));
       requireBounded(
         asNumber(row.start_offset) === offset && asNumber(row.grapheme_length) === length,
         'SCHEMA_MIGRATION_FAILED',
@@ -1331,6 +1666,90 @@ function validateBranchOffsets(db: DatabaseSync, branchId: string): void {
     '工作稿状态缺失。',
   );
   requireBounded(blocks > 0 && asNumber(state.total_graphemes) === offset, 'SCHEMA_MIGRATION_FAILED', '工作稿总偏移校验失败。');
+}
+
+function rebuildWorkingOffsetIndex(db: DatabaseSync, branchId: string): number {
+  requirePersistedBlockTextBounds(db, 'working_blocks', branchId, 'SCHEMA_MIGRATION_FAILED', '工作稿文字超出有界索引范围。');
+  db.prepare('DELETE FROM working_offset_nodes WHERE branch_id = ?').run(branchId);
+  const insert = db.prepare(
+    'INSERT INTO working_offset_nodes(branch_id, position, span_graphemes) VALUES (?, ?, ?)',
+  );
+  const stack: OffsetSegment[] = [];
+  let position = 0;
+  let expectedPosition = 1;
+  let total = 0;
+  while (true) {
+    const rows = db.prepare(
+      `SELECT position, text, grapheme_length FROM working_blocks
+       WHERE branch_id = ? AND position > ? ORDER BY position LIMIT ?`,
+    ).all(branchId, position, MIGRATION_BATCH) as SqlRow[];
+    if (rows.length === 0) break;
+    for (const row of rows) {
+      position = asNumber(row.position);
+      const length = stagedBlockLength(asString(row.text));
+      requireBounded(
+        position === expectedPosition && asNumber(row.grapheme_length) === length,
+        'SCHEMA_MIGRATION_FAILED',
+        '工作稿内容块顺序或字素长度无法建立偏移索引。',
+      );
+      insert.run(branchId, position, appendOffsetSegment(stack, position, length));
+      total += length;
+      requireBounded(Number.isSafeInteger(total), 'SCHEMA_MIGRATION_FAILED', '工作稿字符总数无效。');
+      expectedPosition += 1;
+    }
+  }
+  const state = one(
+    db.prepare('SELECT total_graphemes FROM branch_working_state WHERE branch_id = ?').all(branchId) as SqlRow[],
+    'SCHEMA_MIGRATION_FAILED',
+    '工作稿状态缺失。',
+  );
+  requireBounded(
+    expectedPosition > 1 && asNumber(state.total_graphemes) === total,
+    'SCHEMA_MIGRATION_FAILED',
+    '工作稿总量无法建立偏移索引。',
+  );
+  return total;
+}
+
+function validateBranchOffsets(db: DatabaseSync, branchId: string): void {
+  requirePersistedBlockTextBounds(db, 'working_blocks', branchId, 'SCHEMA_MIGRATION_FAILED', '工作稿文字超出有界校验范围。');
+  const stack: OffsetSegment[] = [];
+  let position = 0;
+  let expectedPosition = 1;
+  let total = 0;
+  while (true) {
+    const rows = db.prepare(
+      `SELECT wb.position, wb.text, wb.grapheme_length, oi.span_graphemes
+       FROM working_blocks wb
+       LEFT JOIN working_offset_nodes oi ON oi.branch_id = wb.branch_id AND oi.position = wb.position
+       WHERE wb.branch_id = ? AND wb.position > ? ORDER BY wb.position LIMIT ?`,
+    ).all(branchId, position, MIGRATION_BATCH) as SqlRow[];
+    if (rows.length === 0) break;
+    for (const row of rows) {
+      position = asNumber(row.position);
+      const length = stagedBlockLength(asString(row.text));
+      requireBounded(
+        position === expectedPosition && asNumber(row.grapheme_length) === length &&
+          asNumber(row.span_graphemes) === appendOffsetSegment(stack, position, length),
+        'SCHEMA_MIGRATION_FAILED',
+        '工作稿的内容块顺序、字素长度或偏移索引校验失败。',
+      );
+      total += length;
+      requireBounded(Number.isSafeInteger(total), 'SCHEMA_MIGRATION_FAILED', '工作稿字符总数无效。');
+      expectedPosition += 1;
+    }
+  }
+  const state = one(
+    db.prepare('SELECT total_graphemes FROM branch_working_state WHERE branch_id = ?').all(branchId) as SqlRow[],
+    'SCHEMA_MIGRATION_FAILED',
+    '工作稿状态缺失。',
+  );
+  requireBounded(
+    expectedPosition > 1 && asNumber(state.total_graphemes) === total &&
+      workingOffsetPrefix(db, branchId, expectedPosition - 1) === total,
+    'SCHEMA_MIGRATION_FAILED',
+    '工作稿总量或偏移索引根校验失败。',
+  );
 }
 
 function forEachSchemaId(
@@ -1354,7 +1773,10 @@ function forEachSchemaId(
 
 function repairAllDerivedOffsets(db: DatabaseSync): void {
   validateStagedDraftInventory(db);
-  forEachSchemaId(db, 'staged_import_snapshots', 'draft_id', (draftId) => rebuildStagedDraftDerived(db, draftId));
+  forEachSchemaId(db, 'staged_import_snapshots', 'draft_id', (draftId) => {
+    validateStagedDraftContentTruth(db, draftId, false);
+    rebuildStagedDraftDerived(db, draftId);
+  });
   forEachSchemaId(db, 'manuscript_revisions', 'revision_id', (revisionId) => rebuildRevisionOffsets(db, revisionId));
   forEachSchemaId(db, 'branch_working_state', 'branch_id', (branchId) => rebuildBranchDerived(db, branchId));
 }
@@ -1366,7 +1788,21 @@ function validateAllDerivedOffsets(db: DatabaseSync): void {
   forEachSchemaId(db, 'branch_working_state', 'branch_id', (branchId) => validateBranchOffsets(db, branchId));
 }
 
+function validateAllLegacyDerivedOffsets(db: DatabaseSync): void {
+  validateStagedDraftInventory(db);
+  forEachSchemaId(db, 'staged_import_snapshots', 'draft_id', (draftId) => validateStagedDraftDerived(db, draftId));
+  forEachSchemaId(db, 'manuscript_revisions', 'revision_id', (revisionId) => validateRevisionOffsets(db, revisionId));
+  forEachSchemaId(db, 'branch_working_state', 'branch_id', (branchId) => validateLegacyBranchOffsets(db, branchId));
+}
+
 function validateMilestoneSignoffTruth(db: DatabaseSync): void {
+  const unsigned = asNumber(one(db.prepare(
+    `SELECT count(*) total FROM milestone_versions mv
+     WHERE NOT EXISTS (
+       SELECT 1 FROM milestone_signoff_records sr WHERE sr.milestone_id = mv.milestone_id
+     )`,
+  ).all() as SqlRow[], 'SCHEMA_MIGRATION_FAILED', '无法读取里程碑签核覆盖。').total);
+  requireBounded(unsigned === 0, 'SCHEMA_MIGRATION_FAILED', '候选数据库含有无法证明签核事实的里程碑。');
   let cursor = '';
   while (true) {
     const rows = db.prepare(
@@ -1480,17 +1916,24 @@ function reclaimOrphanedSearchSessions(db: DatabaseSync): void {
 }
 
 function rebuildBranchDerived(db: DatabaseSync, branchId: string): number {
+  requirePersistedBlockTextBounds(db, 'working_blocks', branchId, 'SCHEMA_MIGRATION_FAILED', '工作稿文字超出有界重建范围。');
   db.prepare('DELETE FROM manuscript_outline WHERE branch_id = ?').run(branchId);
   db.prepare('DELETE FROM working_block_search WHERE branch_id = ?').run(branchId);
+  db.prepare('DELETE FROM working_offset_nodes WHERE branch_id = ?').run(branchId);
   const updateBlock = db.prepare(
-    'UPDATE working_blocks SET start_offset = ?, grapheme_length = ? WHERE branch_id = ? AND block_id = ?',
+    'UPDATE working_blocks SET grapheme_length = ? WHERE branch_id = ? AND block_id = ?',
   );
   const insertOutline = db.prepare(
-    `INSERT INTO manuscript_outline(branch_id, block_id, position, start_offset, kind, level, text, digest)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO manuscript_outline(branch_id, block_id, position, kind, level, text, digest)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
   );
   const insertSearch = db.prepare('INSERT INTO working_block_search(branch_id, block_id, text) VALUES (?, ?, ?)');
+  const insertOffset = db.prepare(
+    'INSERT INTO working_offset_nodes(branch_id, position, span_graphemes) VALUES (?, ?, ?)',
+  );
+  const offsetSegments: OffsetSegment[] = [];
   let position = 0;
+  let expectedPosition = 1;
   let offset = 0;
   while (true) {
     const rows = db.prepare(
@@ -1505,15 +1948,66 @@ function rebuildBranchDerived(db: DatabaseSync, branchId: string): number {
       const level = row.level === null ? null : asNumber(row.level);
       const text = asString(row.text);
       const digest = asString(row.digest);
-      const length = graphemes(text).length;
-      updateBlock.run(offset, length, branchId, blockId);
-      if (kind === 'title' || kind === 'heading') insertOutline.run(branchId, blockId, position, offset, kind, level ?? 1, text, digest);
+      const length = stagedBlockLength(text);
+      requireBounded(position === expectedPosition, 'SCHEMA_MIGRATION_FAILED', '工作稿内容块顺序不连续。');
+      updateBlock.run(length, branchId, blockId);
+      insertOffset.run(branchId, position, appendOffsetSegment(offsetSegments, position, length));
+      if (kind === 'title' || kind === 'heading') insertOutline.run(branchId, blockId, position, kind, level ?? 1, text, digest);
       insertSearch.run(branchId, blockId, text);
       offset += length;
+      requireBounded(Number.isSafeInteger(offset), 'SCHEMA_MIGRATION_FAILED', '工作稿字符总数无效。');
+      expectedPosition += 1;
     }
   }
   db.prepare('UPDATE branch_working_state SET total_graphemes = ? WHERE branch_id = ?').run(offset, branchId);
+  requireBounded(expectedPosition > 1, 'SCHEMA_MIGRATION_FAILED', '工作稿缺少内容块。');
   return offset;
+}
+
+function snapshotWorkingRevision(
+  db: DatabaseSync,
+  branchId: string,
+  revisionId: string,
+  expectedTotal: number,
+): void {
+  requirePersistedBlockTextBounds(db, 'working_blocks', branchId, 'MILESTONE_INVALID', '工作稿文字超出里程碑快照边界。');
+  const insert = db.prepare(
+    `INSERT INTO manuscript_block_versions(
+       revision_id, block_id, position, kind, level, text, digest, start_offset, grapheme_length
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  );
+  let cursor = 0;
+  let expectedPosition = 1;
+  let offset = 0;
+  while (true) {
+    const rows = db.prepare(
+      `SELECT block_id, position, kind, level, text, digest, grapheme_length
+       FROM working_blocks WHERE branch_id = ? AND position > ? ORDER BY position LIMIT ?`,
+    ).all(branchId, cursor, MIGRATION_BATCH) as SqlRow[];
+    if (rows.length === 0) break;
+    for (const row of rows) {
+      cursor = asNumber(row.position);
+      const kind = asString(row.kind) as ManuscriptBlockProjection['kind'];
+      const level = row.level === null ? null : asNumber(row.level);
+      const text = asString(row.text);
+      const length = stagedBlockLength(text, 'MILESTONE_INVALID', '工作稿文字超出里程碑快照边界。');
+      requireBounded(
+        cursor === expectedPosition && asNumber(row.grapheme_length) === length &&
+          blockDigest(kind, level, text) === asString(row.digest),
+        'MILESTONE_INVALID',
+        '工作稿内容无法建立精确里程碑修订版。',
+      );
+      insert.run(revisionId, asString(row.block_id), cursor, kind, level, text, asString(row.digest), offset, length);
+      offset += length;
+      requireBounded(Number.isSafeInteger(offset), 'MILESTONE_INVALID', '工作稿字符总数无效。');
+      expectedPosition += 1;
+    }
+  }
+  requireBounded(
+    expectedPosition > 1 && offset === expectedTotal && workingOffsetPrefix(db, branchId, expectedPosition - 1) === offset,
+    'MILESTONE_INVALID',
+    '工作稿偏移索引与里程碑修订版不一致。',
+  );
 }
 
 function migrateLegacyJournal(db: DatabaseSync, branchId: string): number {
@@ -1634,6 +2128,87 @@ function validateLegacyHistoryRoots(db: DatabaseSync): void {
   forEachSchemaId(db, 'branch_working_state', 'branch_id', (branchId) => validateLegacyHistoryRoot(db, branchId));
 }
 
+function validateCommandHistoryGroup(db: DatabaseSync, groupId: string): void {
+  requireBounded(UUID_PATTERN.test(groupId), 'HISTORY_CORRUPT', '历史命令组标识无效。');
+  const group = one(
+    db.prepare(
+      'SELECT branch_id, before_working_digest, after_working_digest FROM manuscript_command_groups WHERE command_group_id = ?',
+    ).all(groupId) as SqlRow[],
+    'HISTORY_CORRUPT',
+    '历史命令组缺失。',
+  );
+  requireBounded(
+    UUID_PATTERN.test(asString(group.branch_id)) && DIGEST_PATTERN.test(asString(group.before_working_digest)) &&
+      DIGEST_PATTERN.test(asString(group.after_working_digest)),
+    'HISTORY_CORRUPT',
+    '历史命令组绑定摘要无效。',
+  );
+  const oversized = db.prepare(
+    `SELECT position FROM manuscript_command_edits
+     WHERE command_group_id = ? AND (
+       typeof(before_text) <> 'text' OR typeof(after_text) <> 'text' OR
+       length(CAST(before_text AS BLOB)) > ? OR length(CAST(after_text AS BLOB)) > ?
+     ) ORDER BY position LIMIT 1`,
+  ).get(groupId, MAX_BLOCK_CODE_UNITS * 3, MAX_BLOCK_CODE_UNITS * 3) as SqlRow | undefined;
+  requireBounded(oversized === undefined, 'HISTORY_CORRUPT', '历史命令文字超出有界校验范围。');
+  let position = 0;
+  let expectedPosition = 1;
+  while (true) {
+    const rows = db.prepare(
+      `SELECT ce.position, ce.block_id, ce.before_text, ce.before_digest, ce.after_text, ce.after_digest,
+              wb.kind, wb.level, wb.block_id working_block_id
+       FROM manuscript_command_edits ce
+       JOIN manuscript_command_groups cg ON cg.command_group_id = ce.command_group_id
+       LEFT JOIN working_blocks wb ON wb.branch_id = cg.branch_id AND wb.block_id = ce.block_id
+       WHERE ce.command_group_id = ? AND ce.position > ? ORDER BY ce.position LIMIT ?`,
+    ).all(groupId, position, HISTORY_BATCH) as SqlRow[];
+    if (rows.length === 0) break;
+    for (const row of rows) {
+      position = asNumber(row.position);
+      requireBounded(
+        position === expectedPosition && typeof row.working_block_id === 'string' &&
+          typeof row.kind === 'string',
+        'HISTORY_CORRUPT',
+        '历史命令内容块顺序或绑定无效。',
+      );
+      const kind = asString(row.kind) as ManuscriptBlockProjection['kind'];
+      const level = row.level === null ? null : asNumber(row.level);
+      const shapeValid =
+        (kind === 'title' && level === 1) ||
+        (kind === 'heading' && level !== null && Number.isSafeInteger(level) && level >= 1 && level <= 6) ||
+        (kind === 'paragraph' && level === null);
+      const beforeText = asString(row.before_text);
+      const afterText = asString(row.after_text);
+      const beforeLength = stagedBlockLength(beforeText, 'HISTORY_CORRUPT', '历史命令文字超出内容块边界。');
+      const afterLength = stagedBlockLength(afterText, 'HISTORY_CORRUPT', '历史命令文字超出内容块边界。');
+      requireBounded(
+        shapeValid && beforeLength <= MAX_BLOCK_GRAPHEMES && afterLength <= MAX_BLOCK_GRAPHEMES &&
+          blockDigest(kind, level, beforeText) === asString(row.before_digest) &&
+          blockDigest(kind, level, afterText) === asString(row.after_digest),
+        'HISTORY_CORRUPT',
+        '历史命令的前后文字与摘要不一致。',
+      );
+      expectedPosition += 1;
+    }
+  }
+  requireBounded(expectedPosition > 1, 'HISTORY_CORRUPT', '历史命令组没有可重放内容。');
+}
+
+function validateAllCommandHistory(db: DatabaseSync): void {
+  let cursor = '';
+  while (true) {
+    const rows = db.prepare(
+      `SELECT command_group_id FROM manuscript_command_groups
+       WHERE command_group_id > ? ORDER BY command_group_id LIMIT ?`,
+    ).all(cursor, MIGRATION_BATCH) as SqlRow[];
+    if (rows.length === 0) break;
+    for (const row of rows) {
+      cursor = asString(row.command_group_id);
+      validateCommandHistoryGroup(db, cursor);
+    }
+  }
+}
+
 function createMilestoneSignoffTable(db: DatabaseSync): void {
   db.exec(`
     CREATE TABLE IF NOT EXISTS milestone_signoff_records (
@@ -1649,6 +2224,18 @@ function createMilestoneSignoffTable(db: DatabaseSync): void {
       label TEXT NOT NULL,
       stated_next_use TEXT NOT NULL
     ) STRICT;
+  `);
+}
+
+function createWorkingOffsetTable(db: DatabaseSync): void {
+  db.exec(TARGET_SCHEMA_SQL.working_offset_nodes);
+}
+
+function retireMutableOffsetColumns(db: DatabaseSync): void {
+  db.exec(`
+    DROP INDEX working_blocks_global_offset;
+    ALTER TABLE working_blocks DROP COLUMN start_offset;
+    ALTER TABLE manuscript_outline DROP COLUMN start_offset;
   `);
 }
 
@@ -1672,14 +2259,23 @@ function migrateCandidateSchemaToCurrent(db: DatabaseSync, sourceVersion: number
   const foreignKeys = one(db.prepare('PRAGMA foreign_keys').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取引用校验状态。');
   requireBounded(asNumber(foreignKeys.foreign_keys) === 1, 'SCHEMA_INVALID', '数据库引用校验未启用。');
   transact(db, () => {
-    if (sourceVersion === SIGNOFF_MIGRATION_SOURCE_VERSION) createMilestoneSignoffTable(db);
+    if (sourceVersion === SIGNOFF_MIGRATION_SOURCE_VERSION && !hasSchemaObject(db, 'milestone_signoff_records')) {
+      const milestones = asNumber(one(db.prepare('SELECT count(*) total FROM milestone_versions').all() as SqlRow[], 'SCHEMA_MIGRATION_FAILED', '无法读取候选里程碑。').total);
+      requireBounded(milestones === 0, 'SCHEMA_MIGRATION_FAILED', '候选 v3 数据库含有无法证明签核事实的里程碑。');
+      createMilestoneSignoffTable(db);
+    } else {
+      validateMilestoneSignoffTruth(db);
+    }
+    createWorkingOffsetTable(db);
     recreateTransientSearchBindingTables(db);
-    requireTargetSchema(db);
+    retireMutableOffsetColumns(db);
     reclaimOrphanedSearchSessions(db);
     repairAllDerivedOffsets(db);
     repairLegacyHistoryRoots(db);
+    requireTargetSchema(db);
     validateAllDerivedOffsets(db);
     validateLegacyHistoryRoots(db);
+    validateAllCommandHistory(db);
     validateMilestoneSignoffTruth(db);
     const violations = db.prepare('PRAGMA foreign_key_check').all();
     requireBounded(violations.length === 0, 'SCHEMA_MIGRATION_FAILED', '数据库迁移后的引用校验失败。');
@@ -1691,11 +2287,36 @@ function migrateCandidateSchemaToCurrent(db: DatabaseSync, sourceVersion: number
   requireBounded(asNumber(restoredForeignKeys.foreign_keys) === 1, 'SCHEMA_INVALID', '数据库引用校验未保持启用。');
 }
 
+function migrateOffsetIndexSchemaToCurrent(db: DatabaseSync): void {
+  const foreignKeys = one(db.prepare('PRAGMA foreign_keys').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取引用校验状态。');
+  requireBounded(asNumber(foreignKeys.foreign_keys) === 1, 'SCHEMA_INVALID', '数据库引用校验未启用。');
+  transact(db, () => {
+    validateAllLegacyDerivedOffsets(db);
+    validateLegacyHistoryRoots(db);
+    validateAllCommandHistory(db);
+    validateMilestoneSignoffTruth(db);
+    createWorkingOffsetTable(db);
+    forEachSchemaId(db, 'branch_working_state', 'branch_id', (branchId) => rebuildWorkingOffsetIndex(db, branchId));
+    retireMutableOffsetColumns(db);
+    requireTargetSchema(db);
+    validateAllDerivedOffsets(db);
+    validateLegacyHistoryRoots(db);
+    validateAllCommandHistory(db);
+    validateMilestoneSignoffTruth(db);
+    const violations = db.prepare('PRAGMA foreign_key_check').all();
+    requireBounded(violations.length === 0, 'SCHEMA_MIGRATION_FAILED', '偏移索引迁移后的引用校验失败。');
+    db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
+  });
+  const migratedVersion = one(db.prepare('PRAGMA user_version').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取数据库版本。');
+  requireBounded(asNumber(migratedVersion.user_version) === SCHEMA_VERSION, 'SCHEMA_MIGRATION_FAILED', '偏移索引迁移未完成。');
+}
+
 export function initializeBoundedSchema(db: DatabaseSync): void {
   const version = asNumber(one(db.prepare('PRAGMA user_version').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取数据库版本。').user_version);
   requireBounded(
     version === LEGACY_BOUNDED_SCHEMA_VERSION || version === SIGNOFF_MIGRATION_SOURCE_VERSION ||
-      version === OFFSET_REPAIR_SOURCE_VERSION || version === SEARCH_BINDING_SOURCE_VERSION || version === SCHEMA_VERSION,
+      version === OFFSET_REPAIR_SOURCE_VERSION || version === SEARCH_BINDING_SOURCE_VERSION ||
+      version === OFFSET_INDEX_SOURCE_VERSION || version === SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -1706,6 +2327,7 @@ export function initializeBoundedSchema(db: DatabaseSync): void {
       reclaimOrphanedSearchSessions(db);
       validateAllDerivedOffsets(db);
       validateLegacyHistoryRoots(db);
+      validateAllCommandHistory(db);
       validateMilestoneSignoffTruth(db);
       const violations = db.prepare('PRAGMA foreign_key_check').all();
       requireBounded(violations.length === 0, 'SCHEMA_MIGRATION_FAILED', '数据库引用校验失败。');
@@ -1713,6 +2335,10 @@ export function initializeBoundedSchema(db: DatabaseSync): void {
     return;
   }
   requireSourceSchema(db, version);
+  if (version === OFFSET_INDEX_SOURCE_VERSION) {
+    migrateOffsetIndexSchemaToCurrent(db);
+    return;
+  }
   if (
     version === SIGNOFF_MIGRATION_SOURCE_VERSION || version === OFFSET_REPAIR_SOURCE_VERSION ||
     version === SEARCH_BINDING_SOURCE_VERSION
@@ -1734,7 +2360,6 @@ export function initializeBoundedSchema(db: DatabaseSync): void {
       ALTER TABLE staged_import_blocks ADD COLUMN grapheme_length INTEGER NOT NULL DEFAULT 0 CHECK(grapheme_length >= 0);
       ALTER TABLE manuscript_block_versions ADD COLUMN start_offset INTEGER NOT NULL DEFAULT 0 CHECK(start_offset >= 0);
       ALTER TABLE manuscript_block_versions ADD COLUMN grapheme_length INTEGER NOT NULL DEFAULT 0 CHECK(grapheme_length >= 0);
-      ALTER TABLE working_blocks ADD COLUMN start_offset INTEGER NOT NULL DEFAULT 0 CHECK(start_offset >= 0);
       ALTER TABLE working_blocks ADD COLUMN grapheme_length INTEGER NOT NULL DEFAULT 0 CHECK(grapheme_length >= 0);
       ALTER TABLE branch_working_state ADD COLUMN total_graphemes INTEGER NOT NULL DEFAULT 0 CHECK(total_graphemes >= 0);
       ALTER TABLE branch_working_state ADD COLUMN history_sequence INTEGER NOT NULL DEFAULT 0 CHECK(history_sequence >= 0);
@@ -1746,7 +2371,6 @@ export function initializeBoundedSchema(db: DatabaseSync): void {
         branch_id TEXT NOT NULL REFERENCES manuscript_branches(branch_id),
         block_id TEXT NOT NULL REFERENCES manuscript_blocks(block_id),
         position INTEGER NOT NULL CHECK(position > 0),
-        start_offset INTEGER NOT NULL CHECK(start_offset >= 0),
         kind TEXT NOT NULL CHECK(kind IN ('title', 'heading')),
         level INTEGER NOT NULL CHECK(level BETWEEN 1 AND 6),
         text TEXT NOT NULL,
@@ -1755,7 +2379,6 @@ export function initializeBoundedSchema(db: DatabaseSync): void {
         UNIQUE(branch_id, position)
       ) STRICT;
       CREATE INDEX manuscript_outline_order ON manuscript_outline(branch_id, position);
-      CREATE INDEX working_blocks_global_offset ON working_blocks(branch_id, start_offset);
 
       CREATE VIRTUAL TABLE working_block_search USING fts5(
         branch_id UNINDEXED,
@@ -1864,11 +2487,15 @@ export function initializeBoundedSchema(db: DatabaseSync): void {
       CREATE INDEX replacement_matches_block ON manuscript_replacement_matches(preview_id, included, block_id, from_grapheme);
     `);
     createMilestoneSignoffTable(db);
+    createWorkingOffsetTable(db);
     requireTargetSchema(db);
     reclaimOrphanedSearchSessions(db);
 
     validateStagedDraftInventory(db);
-    forEachSchemaId(db, 'staged_import_snapshots', 'draft_id', (draftId) => rebuildStagedDraftDerived(db, draftId));
+    forEachSchemaId(db, 'staged_import_snapshots', 'draft_id', (draftId) => {
+      validateStagedDraftContentTruth(db, draftId, false);
+      rebuildStagedDraftDerived(db, draftId);
+    });
 
     forEachSchemaId(db, 'manuscript_revisions', 'revision_id', (revisionId) => rebuildRevisionOffsets(db, revisionId));
 
@@ -1886,6 +2513,7 @@ export function initializeBoundedSchema(db: DatabaseSync): void {
     db.exec('DROP TABLE IF EXISTS temp.migration_block_state');
     validateAllDerivedOffsets(db);
     validateLegacyHistoryRoots(db);
+    validateAllCommandHistory(db);
     validateMilestoneSignoffTruth(db);
     const violations = db.prepare('PRAGMA foreign_key_check').all();
     requireBounded(violations.length === 0, 'SCHEMA_MIGRATION_FAILED', '数据库迁移后的引用校验失败。');
@@ -1936,6 +2564,11 @@ export class BoundedManuscriptStore {
       terminalizeOrphanedReplacementPreviews(this.#db);
       reclaimOrphanedSearchSessions(this.#db);
     });
+  }
+
+  assertStagedDraftIntegrity(draftId: string): void {
+    requireBounded(UUID_PATTERN.test(draftId), 'DRAFT_INVALID', '暂存稿件草稿标识无效。');
+    validateStagedDraftDerived(this.#db, draftId);
   }
 
   initializeImportedBranch(branchId: string): number {
@@ -1992,27 +2625,26 @@ export class BoundedManuscriptStore {
     } else if (target.kind === 'character') {
       requireBounded(Number.isSafeInteger(target.character) && target.character >= 0, 'WINDOW_INVALID', '全稿位置无效。');
       const character = Math.min(target.character, Math.max(0, binding.totalCharacters - 1));
+      const resolved = resolveWorkingCharacter(this.#db, branchId, character, binding.totalCharacters);
       const row = one(this.#db.prepare(
-        `SELECT block_id, position FROM working_blocks WHERE branch_id = ? AND start_offset <= ?
-         ORDER BY start_offset DESC LIMIT 1`,
-      ).all(branchId, character) as SqlRow[], 'WINDOW_NOT_FOUND', '全稿位置不存在。');
-      targetPosition = asNumber(row.position);
+        'SELECT block_id FROM working_blocks WHERE branch_id = ? AND position = ?',
+      ).all(branchId, resolved.position) as SqlRow[], 'WINDOW_NOT_FOUND', '全稿位置不存在。');
+      targetPosition = resolved.position;
       focusBlockId = asString(row.block_id);
     } else if (target.kind === 'proportion') {
       requireBounded(Number.isFinite(target.proportion) && target.proportion >= 0 && target.proportion <= 1, 'WINDOW_INVALID', '全稿比例无效。');
       const character = Math.min(Math.max(0, binding.totalCharacters - 1), Math.floor(binding.totalCharacters * target.proportion));
+      const resolved = resolveWorkingCharacter(this.#db, branchId, character, binding.totalCharacters);
       const row = one(this.#db.prepare(
-        `SELECT block_id, position FROM working_blocks WHERE branch_id = ? AND start_offset <= ?
-         ORDER BY start_offset DESC LIMIT 1`,
-      ).all(branchId, character) as SqlRow[], 'WINDOW_NOT_FOUND', '全稿位置不存在。');
-      targetPosition = asNumber(row.position);
+        'SELECT block_id FROM working_blocks WHERE branch_id = ? AND position = ?',
+      ).all(branchId, resolved.position) as SqlRow[], 'WINDOW_NOT_FOUND', '全稿位置不存在。');
+      targetPosition = resolved.position;
       focusBlockId = asString(row.block_id);
     }
-    const totalBlocks = asNumber(one(this.#db.prepare('SELECT count(*) total FROM working_blocks WHERE branch_id = ?').all(branchId) as SqlRow[], 'WINDOW_NOT_FOUND', '稿件窗口计数缺失。').total);
-    requireBounded(totalBlocks > 0, 'WINDOW_NOT_FOUND', '稿件窗口为空。');
+    const totalBlocks = lastWorkingPosition(this.#db, branchId);
     const startPosition = Math.min(Math.max(1, targetPosition - (focusBlockId ? Math.floor(MAX_WINDOW_BLOCKS / 2) : 0)), Math.max(1, totalBlocks - MAX_WINDOW_BLOCKS + 1));
     const rows = this.#db.prepare(
-      `SELECT block_id, position, kind, level, text, digest, start_offset, grapheme_length
+      `SELECT block_id, position, kind, level, text, digest, grapheme_length
        FROM working_blocks WHERE branch_id = ? AND position >= ? ORDER BY position LIMIT ?`,
     ).all(branchId, startPosition, MAX_WINDOW_BLOCKS + 1) as SqlRow[];
     const visible = rows.slice(0, MAX_WINDOW_BLOCKS);
@@ -2027,14 +2659,12 @@ export class BoundedManuscriptStore {
     requireBounded(blocks.length > 0 && blocks.length <= MAX_WINDOW_BLOCKS, 'WINDOW_NOT_FOUND', '稿件窗口为空。');
     const first = visible[0]!;
     const last = visible.at(-1)!;
-    const startCharacter = asNumber(first.start_offset);
-    const endCharacter = asNumber(last.start_offset) + asNumber(last.grapheme_length);
+    const startCharacter = workingOffsetBefore(this.#db, branchId, asNumber(first.position));
+    const endCharacter = workingOffsetPrefix(this.#db, branchId, asNumber(last.position));
     const resolvedPosition = focusBlockId === null ? asNumber(first.position) : targetPosition;
     const resolvedCharacter = focusBlockId === null
       ? startCharacter
-      : asNumber(one(this.#db.prepare(
-          'SELECT start_offset FROM working_blocks WHERE branch_id = ? AND position = ?',
-        ).all(branchId, resolvedPosition) as SqlRow[], 'WINDOW_NOT_FOUND', '稿件精确位置不存在。').start_offset);
+      : workingOffsetBefore(this.#db, branchId, resolvedPosition);
     const structure = this.#db.prepare(
       'SELECT text FROM manuscript_outline WHERE branch_id = ? AND position <= ? ORDER BY position DESC LIMIT 1',
     ).get(branchId, resolvedPosition) as SqlRow | undefined;
@@ -2071,7 +2701,7 @@ export class BoundedManuscriptStore {
     const binding = this.#binding(manuscriptId, branchId);
     const position = cursor === null ? 0 : this.#decodeCursor(cursor, 'outline', binding).position;
     const rows = this.#db.prepare(
-      `SELECT block_id, position, kind, level, text, start_offset FROM manuscript_outline
+      `SELECT block_id, position, kind, level, text FROM manuscript_outline
        WHERE branch_id = ? AND position > ? ORDER BY position LIMIT ?`,
     ).all(branchId, position, MAX_OUTLINE_RESULTS + 1) as SqlRow[];
     const visible = rows.slice(0, MAX_OUTLINE_RESULTS);
@@ -2082,6 +2712,7 @@ export class BoundedManuscriptStore {
       workingDigest: binding.workingDigest,
       entries: visible.map((row) => {
         const display = boundedOutlineDisplay(asString(row.text));
+        const character = workingOffsetBefore(this.#db, branchId, asNumber(row.position));
         return {
           outlineId: `${branchId}:${asString(row.block_id)}`,
           blockId: asString(row.block_id),
@@ -2089,8 +2720,8 @@ export class BoundedManuscriptStore {
           level: asNumber(row.level),
           text: display.text,
           displayTextTruncated: display.truncated,
-          character: asNumber(row.start_offset),
-          proportion: binding.totalCharacters === 0 ? 0 : asNumber(row.start_offset) / binding.totalCharacters,
+          character,
+          proportion: binding.totalCharacters === 0 ? 0 : character / binding.totalCharacters,
         };
       }),
       previousCursor: position === 0
@@ -2177,7 +2808,7 @@ export class BoundedManuscriptStore {
          WHERE branch_id = ? AND block_id = ? AND digest = ?`,
       ).run(afterText, afterDigest, after.length, input.branchId, input.blockId, input.baseBlockDigest);
       requireBounded(updated.changes === 1, 'EDIT_BLOCK_CHANGED', '内容块在保存时已变化。');
-      if (delta !== 0) this.#db.prepare('UPDATE working_blocks SET start_offset = start_offset + ? WHERE branch_id = ? AND position > ?').run(delta, input.branchId, asNumber(block.position));
+      updateWorkingOffsetNodes(this.#db, input.branchId, asNumber(block.position), delta);
       this.#refreshBlockIndexes(input.branchId, input.blockId, asNumber(block.position), kind, level, afterText, afterDigest);
       this.#db.prepare(
         `INSERT INTO edit_journal_entries(
@@ -2207,7 +2838,7 @@ export class BoundedManuscriptStore {
     requireBounded(graphemes(query).length <= MAX_SEARCH_QUERY_GRAPHEMES, 'SEARCH_INVALID', '搜索文字过长。');
     const binding = this.#binding(manuscriptId, branchId);
     this.#pruneTransientSearches();
-    const totalBlocks = asNumber(one(this.#db.prepare('SELECT count(*) total FROM working_blocks WHERE branch_id = ?').all(branchId) as SqlRow[], 'SEARCH_INVALID', '稿件内容缺失。').total);
+    const totalBlocks = lastWorkingPosition(this.#db, branchId);
     const searchId = randomUUID();
     this.#db.prepare(
       `INSERT INTO manuscript_search_sessions(
@@ -2244,7 +2875,7 @@ export class BoundedManuscriptStore {
     const ftsQuery = `"${query.replace(/"/g, '""')}"`;
     const rows = (useTrigram
       ? this.#db.prepare(
-          `SELECT wb.block_id, wb.position, wb.text, wb.digest, wb.start_offset
+          `SELECT wb.block_id, wb.position, wb.text, wb.digest
            FROM working_block_search
            JOIN working_blocks wb ON wb.branch_id = working_block_search.branch_id
              AND wb.block_id = working_block_search.block_id
@@ -2252,11 +2883,12 @@ export class BoundedManuscriptStore {
            ORDER BY wb.position LIMIT ?`,
         ).all(binding.branchId, ftsQuery, afterPosition, SEARCH_BATCH)
       : this.#db.prepare(
-          `SELECT block_id, position, text, digest, start_offset FROM working_blocks
+          `SELECT block_id, position, text, digest FROM working_blocks
            WHERE branch_id = ? AND position > ? ORDER BY position LIMIT ?`,
         ).all(binding.branchId, afterPosition, SEARCH_BATCH)) as SqlRow[];
     let scannedPosition = afterPosition;
     let nextOrdinal = asNumber(session.total_matches);
+    const needle = graphemes(query);
     const insert = this.#db.prepare(
       `INSERT INTO manuscript_search_results(
          search_id, ordinal, match_id, block_id, from_grapheme, to_grapheme,
@@ -2266,22 +2898,32 @@ export class BoundedManuscriptStore {
     transact(this.#db, () => {
       for (const row of rows) {
         const blockId = asString(row.block_id);
-        scannedPosition = Math.max(scannedPosition, asNumber(row.position));
+        const blockPosition = asNumber(row.position);
+        scannedPosition = Math.max(scannedPosition, blockPosition);
         const text = graphemes(asString(row.text));
-        const needle = graphemes(query);
+        const heading = this.#db.prepare(
+          'SELECT text FROM manuscript_outline WHERE branch_id = ? AND position <= ? ORDER BY position DESC LIMIT 1',
+        ).get(binding.branchId, blockPosition) as SqlRow | undefined;
+        const headingLabel = boundedProtocolDisplay(heading ? asString(heading.text) : '正文').text;
+        const blockStart = workingOffsetBefore(this.#db, binding.branchId, blockPosition);
         for (let start = 0; start <= text.length - needle.length; start += 1) {
           if (!needle.every((part, index) => text[start + index] === part)) continue;
           nextOrdinal += 1;
           const to = start + needle.length;
-          const contextStart = Math.max(0, start - CONTEXT_GRAPHEMES);
-          const contextEnd = Math.min(text.length, to + CONTEXT_GRAPHEMES);
           const rangeDigest = sha256(canonicalJson({ blockDigest: asString(row.digest), from: start, to, query }));
-          const heading = this.#db.prepare(
-            'SELECT text FROM manuscript_outline WHERE branch_id = ? AND position <= ? ORDER BY position DESC LIMIT 1',
-          ).get(binding.branchId, asNumber(row.position)) as SqlRow | undefined;
           const matchId = `hit_${sha256(`${searchId}\u0000${blockId}\u0000${start}`).slice(0, 24)}`;
-          insert.run(searchId, nextOrdinal, matchId, blockId, start, to, asNumber(row.start_offset) + start,
-            heading ? asString(heading.text) : '正文', text.slice(contextStart, contextEnd).join(''), rangeDigest);
+          insert.run(
+            searchId,
+            nextOrdinal,
+            matchId,
+            blockId,
+            start,
+            to,
+            blockStart + start,
+            headingLabel,
+            boundedSearchContext(text, start, to),
+            rangeDigest,
+          );
           start = to - 1;
         }
       }
@@ -2326,12 +2968,18 @@ export class BoundedManuscriptStore {
     ).all(searchId, offset, MAX_SEARCH_RESULTS + 1) as SqlRow[];
     const visible = rows.slice(0, MAX_SEARCH_RESULTS);
     const results = visible.map((row) => this.#searchMatch(row));
-    return {
+    const projection: SearchResultsProjection = {
       ...this.#searchSummary(session),
       results,
       previousCursor: offset > 0 ? this.#encodeSimpleCursor(`search:${searchId}`, Math.max(0, offset - MAX_SEARCH_RESULTS)) : null,
       nextCursor: rows.length > MAX_SEARCH_RESULTS ? this.#encodeSimpleCursor(`search:${searchId}`, asNumber(visible.at(-1)!.ordinal)) : null,
     };
+    requireBounded(
+      Buffer.byteLength(JSON.stringify(projection), 'utf8') < MAX_FRAME_BYTES,
+      'SEARCH_FRAME_INVALID',
+      '搜索结果响应超出协议范围。',
+    );
+    return projection;
   }
 
   prepareReplacement(searchId: string, replacementInput: string, excludedMatchIds: ReadonlyArray<string>): ReplacementPreviewProjection {
@@ -2551,6 +3199,7 @@ export class BoundedManuscriptStore {
       let editPosition = 0;
       let firstBlockId: string | undefined;
       let firstDigest: string | undefined;
+      let totalDelta = 0;
       while (true) {
         const page = this.#db.prepare(
           `SELECT DISTINCT rm.block_id, wb.position, wb.kind, wb.level, wb.text, wb.digest
@@ -2565,7 +3214,8 @@ export class BoundedManuscriptStore {
           editPosition += 1;
           const blockId = asString(row.block_id);
           const beforeText = asString(row.text);
-          const text = graphemes(beforeText);
+          const before = graphemes(beforeText);
+          const text = [...before];
           const matches = this.#db.prepare(
             `SELECT from_grapheme, to_grapheme FROM manuscript_replacement_matches
              WHERE preview_id = ? AND included = 1 AND block_id = ? ORDER BY from_grapheme DESC`,
@@ -2573,20 +3223,27 @@ export class BoundedManuscriptStore {
           const replacement = graphemes(asString(preview.replacement));
           for (const match of matches) text.splice(asNumber(match.from_grapheme), asNumber(match.to_grapheme) - asNumber(match.from_grapheme), ...replacement);
           const afterText = text.join('');
-          requireBounded(afterText.length <= MAX_BLOCK_CODE_UNITS && text.length <= MAX_BLOCK_GRAPHEMES, 'REPLACEMENT_TOO_LARGE', '替换后内容块超出安全范围。');
+          const after = graphemes(afterText);
+          requireBounded(afterText.length <= MAX_BLOCK_CODE_UNITS && after.length <= MAX_BLOCK_GRAPHEMES, 'REPLACEMENT_TOO_LARGE', '替换后内容块超出安全范围。');
           const kind = asString(row.kind) as ManuscriptBlockProjection['kind'];
           const level = row.level === null ? null : asNumber(row.level);
           const afterDigest = blockDigest(kind, level, afterText);
           insertEdit.run(groupId, editPosition, blockId, beforeText, asString(row.digest), afterText, afterDigest);
-          const update = this.#db.prepare('UPDATE working_blocks SET text = ?, digest = ? WHERE branch_id = ? AND block_id = ? AND digest = ?').run(afterText, afterDigest, binding.branchId, blockId, asString(row.digest));
+          const delta = after.length - before.length;
+          const update = this.#db.prepare(
+            'UPDATE working_blocks SET text = ?, digest = ?, grapheme_length = ? WHERE branch_id = ? AND block_id = ? AND digest = ?',
+          ).run(afterText, afterDigest, after.length, binding.branchId, blockId, asString(row.digest));
           requireBounded(update.changes === 1, 'REPLACEMENT_STALE', '匹配范围在提交时已变化。');
+          updateWorkingOffsetNodes(this.#db, binding.branchId, blockCursor, delta);
+          this.#refreshBlockIndexes(binding.branchId, blockId, blockCursor, kind, level, afterText, afterDigest);
+          totalDelta += delta;
+          requireBounded(Number.isSafeInteger(totalDelta), 'REPLACEMENT_TOO_LARGE', '替换后的全稿字符总数无效。');
           firstBlockId ??= blockId;
           firstDigest ??= afterDigest;
         }
         if (page.length < HISTORY_BATCH) break;
       }
       requireBounded(firstBlockId && firstDigest, 'REPLACEMENT_NOT_READY', '替换匹配缺失。');
-      rebuildBranchDerived(this.#db, binding.branchId);
       this.#db.prepare(
         `INSERT INTO edit_journal_entries(
            journal_entry_id, client_edit_id, request_fingerprint, manuscript_id, branch_id, base_revision_id,
@@ -2595,11 +3252,17 @@ export class BoundedManuscriptStore {
          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?, ?, 'replacement')`,
       ).run(randomUUID(), randomUUID(), sha256(canonicalJson({ previewId })), binding.manuscriptId, binding.branchId,
         binding.revisionId, sequence, firstBlockId, asString(preview.replacement), firstDigest, workingDigest, now, groupId);
-      this.#db.prepare(
-        `UPDATE branch_working_state SET journal_sequence = ?, working_digest = ?, history_sequence = ?
+      const state = this.#db.prepare(
+        `UPDATE branch_working_state SET journal_sequence = ?, working_digest = ?, history_sequence = ?,
+           total_graphemes = total_graphemes + ?
          WHERE branch_id = ? AND journal_sequence = ? AND working_digest = ?`,
-      ).run(sequence, workingDigest, ordinal, binding.branchId, binding.journalSequence, binding.workingDigest);
-      this.#db.prepare("UPDATE manuscript_replacement_previews SET state = 'committed', committed_at = ? WHERE preview_id = ? AND state = 'frozen'").run(now, previewId);
+      ).run(sequence, workingDigest, ordinal, totalDelta, binding.branchId, binding.journalSequence, binding.workingDigest);
+      requireBounded(state.changes === 1, 'REPLACEMENT_STALE', '替换提交时稿件状态已变化。');
+      requireBounded(
+        this.#db.prepare("UPDATE manuscript_replacement_previews SET state = 'committed', committed_at = ? WHERE preview_id = ? AND state = 'frozen'").run(now, previewId).changes === 1,
+        'REPLACEMENT_STATE_CHANGED',
+        '替换预览状态已变化。',
+      );
       this.#pruneReplacementRecords(0);
       return {
         previewId,
@@ -2652,12 +3315,7 @@ export class BoundedManuscriptStore {
              source_version_id, revision_digest, created_at
            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         ).run(revisionId, manuscriptId, branchId, ordinal, revisionLabel, binding.revisionId, asString(previous.source_version_id), binding.workingDigest, now);
-        this.#db.prepare(
-          `INSERT INTO manuscript_block_versions(
-             revision_id, block_id, position, kind, level, text, digest, start_offset, grapheme_length
-           ) SELECT ?, block_id, position, kind, level, text, digest, start_offset, grapheme_length
-             FROM working_blocks WHERE branch_id = ? ORDER BY position`,
-        ).run(revisionId, branchId);
+        snapshotWorkingRevision(this.#db, branchId, revisionId, binding.totalCharacters);
         this.#db.prepare(
           `UPDATE branch_working_state SET base_revision_id = ?, last_checkpoint_sequence = ?
            WHERE branch_id = ? AND base_revision_id = ? AND journal_sequence = ?`,
@@ -2721,7 +3379,9 @@ export class BoundedManuscriptStore {
           : "SELECT * FROM manuscript_command_groups WHERE branch_id = ? AND status = 'undone' ORDER BY ordinal ASC LIMIT 1",
       ).all(branchId) as SqlRow[], action === 'undo' ? 'NOTHING_TO_UNDO' : 'NOTHING_TO_REDO', action === 'undo' ? '没有可撤销的编辑。' : '没有可重做的编辑。');
       const groupId = asString(group.command_group_id);
+      validateCommandHistoryGroup(this.#db, groupId);
       let cursor = 0;
+      let totalDelta = 0;
       while (true) {
         const rows = this.#db.prepare(
           `SELECT position, block_id, before_text, before_digest, after_text, after_digest
@@ -2733,15 +3393,31 @@ export class BoundedManuscriptStore {
           const expectedDigest = action === 'undo' ? asString(row.after_digest) : asString(row.before_digest);
           const targetText = action === 'undo' ? asString(row.before_text) : asString(row.after_text);
           const targetDigest = action === 'undo' ? asString(row.before_digest) : asString(row.after_digest);
-          const update = this.#db.prepare('UPDATE working_blocks SET text = ?, digest = ? WHERE branch_id = ? AND block_id = ? AND digest = ?').run(targetText, targetDigest, branchId, asString(row.block_id), expectedDigest);
+          const current = one(this.#db.prepare(
+            'SELECT position, kind, level, grapheme_length FROM working_blocks WHERE branch_id = ? AND block_id = ?',
+          ).all(branchId, asString(row.block_id)) as SqlRow[], 'HISTORY_STALE', '稿件历史内容块缺失。');
+          const kind = asString(current.kind) as ManuscriptBlockProjection['kind'];
+          const level = current.level === null ? null : asNumber(current.level);
+          const targetLength = graphemes(targetText).length;
+          const delta = targetLength - asNumber(current.grapheme_length);
+          const update = this.#db.prepare(
+            'UPDATE working_blocks SET text = ?, digest = ?, grapheme_length = ? WHERE branch_id = ? AND block_id = ? AND digest = ?',
+          ).run(targetText, targetDigest, targetLength, branchId, asString(row.block_id), expectedDigest);
           requireBounded(update.changes === 1, 'HISTORY_STALE', '稿件历史无法在当前状态精确重放。');
+          updateWorkingOffsetNodes(this.#db, branchId, asNumber(current.position), delta);
+          this.#refreshBlockIndexes(branchId, asString(row.block_id), asNumber(current.position), kind, level, targetText, targetDigest);
+          totalDelta += delta;
+          requireBounded(Number.isSafeInteger(totalDelta), 'HISTORY_CORRUPT', '历史命令字符变化无效。');
         }
       }
-      rebuildBranchDerived(this.#db, branchId);
       const sequence = binding.journalSequence + 1;
       const nextDigest = sha256(canonicalJson({ previous: binding.workingDigest, sequence, action, groupId }));
       const now = new Date().toISOString();
-      this.#db.prepare('UPDATE manuscript_command_groups SET status = ? WHERE command_group_id = ? AND status = ?').run(action === 'undo' ? 'undone' : 'applied', groupId, action === 'undo' ? 'applied' : 'undone');
+      requireBounded(
+        this.#db.prepare('UPDATE manuscript_command_groups SET status = ? WHERE command_group_id = ? AND status = ?').run(action === 'undo' ? 'undone' : 'applied', groupId, action === 'undo' ? 'applied' : 'undone').changes === 1,
+        'HISTORY_STALE',
+        '稿件历史状态已变化。',
+      );
       const representative = one(this.#db.prepare('SELECT block_id, before_digest, after_digest FROM manuscript_command_edits WHERE command_group_id = ? ORDER BY position LIMIT 1').all(groupId) as SqlRow[], 'HISTORY_CORRUPT', '历史命令内容缺失。');
       this.#db.prepare(
         `INSERT INTO edit_journal_entries(
@@ -2752,9 +3428,12 @@ export class BoundedManuscriptStore {
       ).run(randomUUID(), randomUUID(), sha256(canonicalJson({ action, groupId, sequence })), manuscriptId, branchId,
         binding.revisionId, sequence, asString(representative.block_id), action === 'undo' ? asString(representative.before_digest) : asString(representative.after_digest),
         nextDigest, now, groupId, action);
-      this.#db.prepare(
-        'UPDATE branch_working_state SET journal_sequence = ?, working_digest = ? WHERE branch_id = ? AND journal_sequence = ? AND working_digest = ?',
-      ).run(sequence, nextDigest, branchId, binding.journalSequence, binding.workingDigest);
+      const state = this.#db.prepare(
+        `UPDATE branch_working_state SET journal_sequence = ?, working_digest = ?,
+           total_graphemes = total_graphemes + ?
+         WHERE branch_id = ? AND journal_sequence = ? AND working_digest = ?`,
+      ).run(sequence, nextDigest, totalDelta, branchId, binding.journalSequence, binding.workingDigest);
+      requireBounded(state.changes === 1, 'HISTORY_STALE', '稿件历史提交时工作状态已变化。');
       const refreshed = this.#binding(manuscriptId, branchId);
       return {
         action, branchId, revisionId: refreshed.revisionId, revisionLabel: refreshed.revisionLabel,
@@ -2787,20 +3466,13 @@ export class BoundedManuscriptStore {
     this.#db.prepare('DELETE FROM working_block_search WHERE branch_id = ? AND block_id = ?').run(branchId, blockId);
     this.#db.prepare('INSERT INTO working_block_search(branch_id, block_id, text) VALUES (?, ?, ?)').run(branchId, blockId, text);
     if (kind === 'title' || kind === 'heading') {
-      const start = asNumber(one(this.#db.prepare('SELECT start_offset FROM working_blocks WHERE branch_id = ? AND block_id = ?').all(branchId, blockId) as SqlRow[], 'EDIT_BLOCK_CHANGED', '内容块索引缺失。').start_offset);
       this.#db.prepare(
-        `INSERT INTO manuscript_outline(branch_id, block_id, position, start_offset, kind, level, text, digest)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT(branch_id, block_id) DO UPDATE SET position=excluded.position, start_offset=excluded.start_offset,
+        `INSERT INTO manuscript_outline(branch_id, block_id, position, kind, level, text, digest)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(branch_id, block_id) DO UPDATE SET position=excluded.position,
            kind=excluded.kind, level=excluded.level, text=excluded.text, digest=excluded.digest`,
-      ).run(branchId, blockId, position, start, kind, level ?? 1, text, digest);
+      ).run(branchId, blockId, position, kind, level ?? 1, text, digest);
     }
-    this.#db.prepare(
-      `UPDATE manuscript_outline SET start_offset = (
-         SELECT start_offset FROM working_blocks WHERE working_blocks.branch_id = manuscript_outline.branch_id
-           AND working_blocks.block_id = manuscript_outline.block_id
-       ) WHERE branch_id = ? AND position > ?`,
-    ).run(branchId, position);
   }
 
   #searchSummary(row: SqlRow): SearchSummaryProjection {
@@ -2816,7 +3488,9 @@ export class BoundedManuscriptStore {
     return {
       matchId: asString(row.match_id), blockId: asString(row.block_id), fromGrapheme: asNumber(row.from_grapheme),
       toGrapheme: asNumber(row.to_grapheme), globalCharacter: asNumber(row.global_character),
-      headingLabel: asString(row.heading_label), context: asString(row.context), rangeDigest: asString(row.range_digest),
+      headingLabel: boundedProtocolDisplay(asString(row.heading_label)).text,
+      context: boundedProtocolDisplay(asString(row.context)).text,
+      rangeDigest: asString(row.range_digest),
     };
   }
 
