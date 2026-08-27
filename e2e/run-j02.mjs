@@ -86,7 +86,16 @@ function blockText(position) {
 async function createSyntheticDocx(path) {
   requireJourney(Number.isSafeInteger(BLOCK_LENGTH) && BLOCK_COUNT >= 50_000 && BLOCK_COUNT <= 100_000, 'fixture-shape');
   const output = createWriteStream(path, { flags: 'wx' });
-  let pendingDrain = Promise.resolve();
+  let pendingDrain;
+  const waitForPendingDrain = async () => {
+    const drain = pendingDrain;
+    if (!drain) return;
+    try {
+      await drain;
+    } finally {
+      if (pendingDrain === drain) pendingDrain = undefined;
+    }
+  };
   const completion = new Promise((resolveCompletion, rejectCompletion) => {
     output.once('finish', resolveCompletion);
     output.once('error', rejectCompletion);
@@ -96,14 +105,16 @@ async function createSyntheticDocx(path) {
       output.destroy(error);
       return;
     }
-    if (!output.write(data)) pendingDrain = once(output, 'drain').then(() => undefined);
+    if (!output.write(data) && pendingDrain === undefined) {
+      pendingDrain = once(output, 'drain').then(() => undefined);
+    }
     if (final) output.end();
   });
   const pushEntry = async (name, value) => {
     const entry = new ZipPassThrough(name);
     zip.add(entry);
     entry.push(strToU8(value), true);
-    await pendingDrain;
+    await waitForPendingDrain();
   };
   await pushEntry(
     '[Content_Types].xml',
@@ -116,7 +127,7 @@ async function createSyntheticDocx(path) {
   const document = new ZipPassThrough('word/document.xml');
   zip.add(document);
   document.push(strToU8('<?xml version="1.0" encoding="UTF-8"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>'), false);
-  await pendingDrain;
+  await waitForPendingDrain();
   let generatedCharacters = 0;
   for (let position = 1; position <= BLOCK_COUNT; position += 1) {
     const text = blockText(position);
@@ -127,11 +138,11 @@ async function createSyntheticDocx(path) {
         ? '<w:pPr><w:pStyle w:val="Heading1"/></w:pPr>'
         : '';
     document.push(strToU8(`<w:p>${style}<w:r><w:t>${text}</w:t></w:r></w:p>`), false);
-    if (position % 128 === 0) await pendingDrain;
+    if (position % 128 === 0) await waitForPendingDrain();
   }
   requireJourney(generatedCharacters === CHARACTER_COUNT, 'fixture-character-count');
   document.push(strToU8('</w:body></w:document>'), true);
-  await pendingDrain;
+  await waitForPendingDrain();
   zip.end();
   await completion;
   const metadata = await lstat(path);
@@ -303,7 +314,7 @@ async function runWorkspaceJourney(renderer) {
   await renderer.evaluate(`globalThis.__ai7BeforeForward = document.querySelector('[data-testid="manuscript-editor"] > [data-block-id]')?.dataset.blockId`);
   await assertRenderer(
     renderer,
-    `(() => { const editor = document.querySelector('[data-testid="manuscript-editor"]'); const surface = document.querySelector('.editor-window'); const blocks = Array.from(document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]')); const block = blocks[4]; const text = block?.firstChild; if (!(editor instanceof HTMLElement) || !(surface instanceof HTMLElement) || !(block instanceof HTMLElement) || !(text instanceof Text) || text.length < 4) return false; editor.focus(); block.scrollIntoView({ block: 'center' }); const containerTop = surface.getBoundingClientRect().top; const visible = blocks.find((candidate) => candidate.getBoundingClientRect().bottom >= containerTop); const selection = window.getSelection(); selection.setBaseAndExtent(text, 3, text, 1); globalThis.__ai7WindowContinuity = { blockId: block.dataset.blockId, text: selection.toString(), anchor: 3, head: 1, scrollBlockId: visible?.dataset.blockId, scrollOffset: visible?.getBoundingClientRect().top - containerTop }; return document.activeElement === editor && selection.anchorOffset === 3 && selection.headOffset === 1; })()`,
+    `(() => { const editor = document.querySelector('[data-testid="manuscript-editor"]'); const surface = document.querySelector('.editor-window'); const blocks = Array.from(document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]')); const block = blocks[4]; const text = block?.firstChild; if (!(editor instanceof HTMLElement) || !(surface instanceof HTMLElement) || !(block instanceof HTMLElement) || !(text instanceof Text) || text.length < 4) return false; editor.focus(); block.scrollIntoView({ block: 'center' }); const containerTop = surface.getBoundingClientRect().top; const visible = blocks.find((candidate) => candidate.getBoundingClientRect().bottom >= containerTop); const selection = window.getSelection(); selection.setBaseAndExtent(text, 3, text, 1); globalThis.__ai7WindowContinuity = { blockId: block.dataset.blockId, text: selection.toString(), anchor: 3, head: 1, scrollBlockId: visible?.dataset.blockId, scrollOffset: visible?.getBoundingClientRect().top - containerTop }; return document.activeElement === editor && selection.anchorOffset === 3 && selection.focusOffset === 1; })()`,
     'window-continuity-prepare',
   );
   await press(renderer, 'PageDown');
