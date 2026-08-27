@@ -97,26 +97,28 @@ export class RecoveryObjectStore {
     let totalGraphemes = 0;
     let promotedPath: string | undefined;
     let promotedByThisCall = false;
-    const append = async (line: string): Promise<void> => {
-      const bytes = Buffer.from(line, 'utf8');
-      const written = await handle.write(bytes);
-      if (written.bytesWritten !== bytes.byteLength) throw new Error('RECOVERY_OBJECT_INCOMPLETE');
-      objectHash.update(bytes);
-      byteLength += bytes.byteLength;
+    const append = async (lines: ReadonlyArray<string>): Promise<void> => {
+      const buffers = lines.map((line) => Buffer.from(line, 'utf8'));
+      const expectedBytes = buffers.reduce((total, bytes) => total + bytes.byteLength, 0);
+      const written = await handle.writev(buffers);
+      if (written.bytesWritten !== expectedBytes) throw new Error('RECOVERY_OBJECT_INCOMPLETE');
+      for (const bytes of buffers) objectHash.update(bytes);
+      byteLength += expectedBytes;
     };
     try {
-      await append(objectLine({
+      await append([objectLine({
         type: 'header', schema: FORMAT, snapshotId: plan.snapshotId, bookId: plan.bookId,
         manuscriptId: plan.manuscriptId, branchId: plan.branchId, revisionId: plan.revisionId,
         revisionLabel: plan.revisionLabel, revisionDigest: plan.expectedWorkingDigest,
         journalSequence: plan.expectedJournalSequence, expectedBlockCount: plan.blockCount,
         expectedTotalGraphemes: plan.totalGraphemes, createdAt: plan.createdAt,
-      }));
+      })]);
       let afterPosition = 0;
       while (true) {
         const blocks = load(afterPosition);
         if (blocks.length === 0) break;
         if (blocks.length > WRITE_BATCH) throw new Error('RECOVERY_OBJECT_UNBOUNDED');
+        const lines: string[] = [];
         for (const block of blocks) {
           if (block.position !== afterPosition + 1 || block.text.length > MAX_BLOCK_CODE_UNITS ||
               block.graphemeLength > MAX_BLOCK_GRAPHEMES || blockDigest(block) !== block.digest) {
@@ -124,18 +126,19 @@ export class RecoveryObjectStore {
           }
           const manifest = manifestLine(block);
           manifestHash.update(manifest);
-          await append(objectLine({ type: 'block', ...block }));
+          lines.push(objectLine({ type: 'block', ...block }));
           afterPosition = block.position;
           blockCount += 1;
           totalGraphemes += block.graphemeLength;
         }
+        await append(lines);
         if (blocks.length < WRITE_BATCH) break;
       }
       if (blockCount !== plan.blockCount || totalGraphemes !== plan.totalGraphemes) {
         throw new Error('RECOVERY_OBJECT_INCOMPLETE');
       }
       const manifestDigest = manifestHash.digest('hex');
-      await append(objectLine({ type: 'footer', manifestDigest, blockCount, totalGraphemes }));
+      await append([objectLine({ type: 'footer', manifestDigest, blockCount, totalGraphemes })]);
       await handle.sync();
       await handle.close();
       const objectDigest = objectHash.digest('hex');

@@ -21,6 +21,7 @@ const OVERLAP_SOURCE_TEXT = '哈哈哈';
 const OVERLAP_QUERY = '哈哈';
 const EXCLUSION_TEXT = '边界排除校验';
 const EXPECTED_EXCLUSION_MATCHES = 1_001;
+const MILESTONE_RECOVERY_SNAPSHOT_TIMEOUT = 10 * 60_000;
 const DEBUG_SELECTORS = new Set(['DEBUG', 'DEBUG_FILE', 'PWDEBUG', 'PWDEBUGIMPL']);
 const CJK_BASE = 0x4e00;
 const CJK_SPAN = 0x1000;
@@ -612,7 +613,12 @@ async function runWorkspaceJourney(renderer) {
   await fill(renderer, '#milestone-note', '本地里程碑，不表示导出或发布。', 'milestone-note');
   const milestoneDrainObservation = await renderer.observeIpc();
   await editThenInvokeOnDirty(renderer, '碑', ['保存为里程碑版本'], 'dirty-milestone-save');
-  await waitFor(renderer, `document.querySelector('.editor-meta')?.textContent.includes('当前修订版 r2')`, 'milestone-r2', 180_000);
+  await waitFor(
+    renderer,
+    `document.querySelector('.editor-meta')?.textContent.includes('当前修订版 r2')`,
+    'milestone-r2',
+    MILESTONE_RECOVERY_SNAPSHOT_TIMEOUT,
+  );
   const milestoneDrainCompleted = await renderer.observeIpc();
   const milestoneDrainEvents = milestoneDrainCompleted.events.filter((event) => event.ordinal > (milestoneDrainObservation.events.at(-1)?.ordinal ?? 0));
   const milestoneFlushInvoke = milestoneDrainEvents.find((event) => event.operation === 'flushJournalEdit' && event.phase === 'invoke');

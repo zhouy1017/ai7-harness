@@ -292,12 +292,18 @@ async function main() {
     let renderer = await launch({ picker: bookA });
     await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady === 'true'`, 'ready-a');
     await renderer.send('Network.enable');
-    const deniedRequest = renderer.waitForEvent(
-      'Network.loadingFailed',
-      (params) => params?.errorText === 'net::ERR_BLOCKED_BY_CLIENT',
-    );
-    await renderer.evaluate(`(async()=>{try{await fetch('https://ai7.invalid/j08-network-probe');return false}catch{return true}})()`);
-    requireJourney((await deniedRequest).errorText === 'net::ERR_BLOCKED_BY_CLIENT', 'renderer-network-denial');
+    await renderer.send('Page.setBypassCSP', { enabled: true });
+    try {
+      const deniedRequest = renderer.waitForEvent(
+        'Network.loadingFailed',
+        (params) => params?.errorText === 'net::ERR_BLOCKED_BY_CLIENT',
+      );
+      const fetchRejected = await renderer.evaluate(`(async()=>{try{await fetch('https://ai7.invalid/j08-network-probe');return false}catch{return true}})()`);
+      const denial = await deniedRequest;
+      requireJourney(fetchRejected === true && denial.errorText === 'net::ERR_BLOCKED_BY_CLIENT', 'renderer-network-denial');
+    } finally {
+      await renderer.send('Page.setBypassCSP', { enabled: false });
+    }
     await importBook(renderer, '恢复边界甲', 'book-a', true);
     await saveMilestone(renderer, '中断前检查点', 'checkpoint-one');
     await saveMilestone(renderer, '中断前复核快照', 'checkpoint-two');
