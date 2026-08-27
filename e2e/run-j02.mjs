@@ -641,7 +641,12 @@ async function runRestartJourney(renderer) {
   await waitFor(renderer, `document.querySelector('[data-screen="editor"]') && document.querySelector('.editor-meta')?.textContent.includes('当前修订版 r2')`, 'reopened-r2');
   await assertRenderer(renderer, `document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]').length <= 32`, 'restart-window-bounded');
   await clickButton(renderer, '重做', 'restart-redo');
-  await waitFor(renderer, `document.querySelector('.editor-meta')?.textContent.includes('修订日志序号 10')`, 'restart-redo-durable', 120_000);
+  await waitForChecks(
+    renderer,
+    `(() => { const editor = document.querySelector('[data-testid="manuscript-editor"]'); const host = editor?.parentElement; const journal = Array.from(document.querySelectorAll('.editor-meta > span')).find((item) => item.textContent?.startsWith('修订日志序号 ')); const searchInput = document.querySelector('#manuscript-search'); const search = Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '查找全稿'); const retry = Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '重试权威刷新'); return { journalSequence10: journal?.textContent === '修订日志序号 10', authoritativeMutationCleared: host?.dataset.authoritativeMutation === 'false', operationUnlocked: editor?.dataset.operationLocked === 'false', editorWritable: editor?.getAttribute('contenteditable') === 'true', ariaWritable: editor?.getAttribute('aria-readonly') === 'false', searchInputReady: searchInput instanceof HTMLInputElement && !searchInput.disabled, searchStartReady: search instanceof HTMLButtonElement && !search.disabled, recoveryNotRequired: retry instanceof HTMLButtonElement && retry.hidden }; })()`,
+    'restart-redo-durable',
+    120_000,
+  );
   await fill(renderer, '#manuscript-search', REPLACEMENT_TEXT, 'redo-search-fill');
   await clickButton(renderer, '查找全稿', 'redo-search');
   await waitFor(renderer, `document.querySelector('.search-section .field-note')?.textContent.includes('共 24 处')`, 'redo-state-exact', 120_000);
