@@ -1,20 +1,24 @@
 import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { constants, createReadStream } from 'node:fs';
-import { copyFile, open, realpath, rename, rm } from 'node:fs/promises';
+import { copyFile, lstat, open, realpath, rename, rm } from 'node:fs/promises';
 import { basename, isAbsolute, posix, relative, resolve, sep } from 'node:path';
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
 import type {
-  ImportIdentityFindingProjection,
+  ExactImportMatchProjection,
   FidelityCategoryProjection,
   ImportCommitProjection,
   ImportDegradationDecisionReviewProjection,
+  ImportDraftRecoveryProjection,
+  ImportStartupProjection,
   JournalAcknowledgement,
   JournalEditInput,
   ManuscriptBlockProjection,
   ManuscriptWindowProjection,
   NewBookImportTargetChoiceId,
+  OriginalFileAccessProjection,
   ReviewBeforeImportProjection,
   StagedImportProjection,
+  ContinueImportProjection,
 } from '../shared/protocol.js';
 import {
   MAX_BLOCK_CODE_UNITS,
@@ -27,6 +31,7 @@ import {
   deriveImportFidelityPlan,
   parseDocx,
   type ImportFidelityPlan,
+  type ParsedDocx,
   type ParsedDocxBlock,
 } from './docx.js';
 import {
@@ -37,7 +42,7 @@ import {
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const TOKEN_PATTERN = UUID_PATTERN;
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 const WORKFLOW_PROFILE = {
   id: 'ai7.manuscript.editorial.zh-CN',
   name: '基础书稿编辑流程',
@@ -269,13 +274,77 @@ function migrateSchemaV1ToV2(db: DatabaseSync): void {
   if (migrationError) throw migrationError;
 }
 
+function migrateSchemaV2ToV3(db: DatabaseSync): void {
+  try {
+    db.exec(`
+      BEGIN IMMEDIATE;
+
+      ALTER TABLE import_drafts ADD COLUMN selected_path TEXT;
+      ALTER TABLE import_drafts ADD COLUMN reviewed_target_choice_id TEXT
+        CHECK(reviewed_target_choice_id IS NULL OR reviewed_target_choice_id IN ('new-book', 'new-book-distinct-intended-work'));
+
+      CREATE TABLE import_commit_attempts (
+        attempt_id TEXT PRIMARY KEY,
+        draft_id TEXT NOT NULL UNIQUE REFERENCES import_drafts(draft_id) ON DELETE CASCADE,
+        request_fingerprint TEXT NOT NULL,
+        expected_draft_version INTEGER NOT NULL CHECK(expected_draft_version >= 1),
+        review_digest TEXT NOT NULL CHECK(length(review_digest) = 64),
+        state TEXT NOT NULL CHECK(state IN ('prepared', 'uncertain', 'committed')),
+        prepared_at TEXT NOT NULL,
+        committed_at TEXT,
+        uncertain_at TEXT,
+        uncertainty_code TEXT,
+        completion_acknowledged_at TEXT,
+        CHECK(
+          (state = 'prepared' AND committed_at IS NULL AND uncertain_at IS NULL
+            AND uncertainty_code IS NULL AND completion_acknowledged_at IS NULL)
+          OR (state = 'uncertain' AND committed_at IS NULL AND uncertain_at IS NOT NULL
+            AND uncertainty_code = 'COMMIT_PROOF_INCONCLUSIVE' AND completion_acknowledged_at IS NULL)
+          OR (state = 'committed' AND committed_at IS NOT NULL AND uncertain_at IS NULL
+            AND uncertainty_code IS NULL)
+        )
+      ) STRICT;
+
+      INSERT INTO import_commit_attempts(
+        attempt_id, draft_id, request_fingerprint, expected_draft_version, review_digest,
+        state, prepared_at, committed_at, completion_acknowledged_at
+      )
+      SELECT commit_id, draft_id, request_fingerprint, expected_draft_version, review_digest,
+             'committed', committed_at, committed_at, committed_at
+      FROM import_commits;
+
+      CREATE INDEX import_attempts_recovery_order
+        ON import_commit_attempts(state, completion_acknowledged_at, prepared_at);
+
+      PRAGMA user_version = 3;
+      COMMIT;
+    `);
+  } catch (error) {
+    try {
+      db.exec('ROLLBACK');
+    } catch (rollbackError) {
+      throw new AggregateError([error, rollbackError], 'SQLite schema v3 migration rollback failed.');
+    }
+    throw error;
+  }
+}
+
 function initializeSchema(db: DatabaseSync): void {
   const versionRow = one(db.prepare('PRAGMA user_version').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取数据库版本。');
   const currentVersion = asNumber(versionRow.user_version);
-  requireStore(currentVersion === 0 || currentVersion === 1 || currentVersion === SCHEMA_VERSION, 'SCHEMA_UNSUPPORTED', '数据库版本不受支持。');
+  requireStore(
+    currentVersion === 0 || currentVersion === 1 || currentVersion === 2 || currentVersion === SCHEMA_VERSION,
+    'SCHEMA_UNSUPPORTED',
+    '数据库版本不受支持。',
+  );
   if (currentVersion === SCHEMA_VERSION) return;
   if (currentVersion === 1) {
     migrateSchemaV1ToV2(db);
+    migrateSchemaV2ToV3(db);
+    return;
+  }
+  if (currentVersion === 2) {
+    migrateSchemaV2ToV3(db);
     return;
   }
 
@@ -296,7 +365,10 @@ function initializeSchema(db: DatabaseSync): void {
       draft_version INTEGER NOT NULL CHECK(draft_version >= 1),
       display_name TEXT NOT NULL,
       object_digest TEXT NOT NULL REFERENCES content_objects(object_digest),
+      selected_path TEXT,
       reviewed_title TEXT,
+      reviewed_target_choice_id TEXT
+        CHECK(reviewed_target_choice_id IS NULL OR reviewed_target_choice_id IN ('new-book', 'new-book-distinct-intended-work')),
       review_digest TEXT UNIQUE,
       committed_commit_id TEXT UNIQUE,
       staged_at TEXT NOT NULL,
@@ -502,6 +574,28 @@ function initializeSchema(db: DatabaseSync): void {
       committed_at TEXT NOT NULL
     ) STRICT;
 
+    CREATE TABLE import_commit_attempts (
+      attempt_id TEXT PRIMARY KEY,
+      draft_id TEXT NOT NULL UNIQUE REFERENCES import_drafts(draft_id) ON DELETE CASCADE,
+      request_fingerprint TEXT NOT NULL,
+      expected_draft_version INTEGER NOT NULL CHECK(expected_draft_version >= 1),
+      review_digest TEXT NOT NULL CHECK(length(review_digest) = 64),
+      state TEXT NOT NULL CHECK(state IN ('prepared', 'uncertain', 'committed')),
+      prepared_at TEXT NOT NULL,
+      committed_at TEXT,
+      uncertain_at TEXT,
+      uncertainty_code TEXT,
+      completion_acknowledged_at TEXT,
+      CHECK(
+        (state = 'prepared' AND committed_at IS NULL AND uncertain_at IS NULL
+          AND uncertainty_code IS NULL AND completion_acknowledged_at IS NULL)
+        OR (state = 'uncertain' AND committed_at IS NULL AND uncertain_at IS NOT NULL
+          AND uncertainty_code = 'COMMIT_PROOF_INCONCLUSIVE' AND completion_acknowledged_at IS NULL)
+        OR (state = 'committed' AND committed_at IS NOT NULL AND uncertain_at IS NULL
+          AND uncertainty_code IS NULL)
+      )
+    ) STRICT;
+
     CREATE TABLE branch_working_state (
       branch_id TEXT PRIMARY KEY REFERENCES manuscript_branches(branch_id),
       manuscript_id TEXT NOT NULL REFERENCES manuscripts(manuscript_id),
@@ -542,8 +636,10 @@ function initializeSchema(db: DatabaseSync): void {
 
     CREATE INDEX working_blocks_window ON working_blocks(branch_id, position);
     CREATE INDEX journal_branch_order ON edit_journal_entries(branch_id, sequence);
+    CREATE INDEX import_attempts_recovery_order
+      ON import_commit_attempts(state, completion_acknowledged_at, prepared_at);
 
-    PRAGMA user_version = 2;
+    PRAGMA user_version = 3;
     COMMIT;
   `);
 }
@@ -554,8 +650,11 @@ interface DraftSnapshot {
   version: number;
   displayName: string;
   objectDigest: string;
+  selectedPath: string | null;
   reviewedTitle: string | null;
+  reviewedTargetChoiceId: NewBookImportTargetChoiceId | null;
   reviewDigest: string | null;
+  stagedAt: string;
   parserIdentity: string;
   sourceDigest: string;
   sourceBytes: number;
@@ -565,6 +664,26 @@ interface DraftSnapshot {
   fidelity: FidelityCategoryProjection[];
   titleSuggestion: string;
   titleSource: StagedImportProjection['titleSuggestion']['sourceLabel'];
+}
+
+interface CommitAttempt {
+  attemptId: string;
+  draftId: string;
+  requestFingerprint: string;
+  expectedDraftVersion: number;
+  reviewDigest: string;
+  state: 'prepared' | 'uncertain' | 'committed';
+  preparedAt: string;
+  completionAcknowledgedAt: string | null;
+}
+
+interface StoreControl {
+  induceUnprovableReconciliation: boolean;
+}
+
+function continuationNotice(access: OriginalFileAccessProjection): string {
+  if (access.state === 'available-exact') return '已重新校验完整暂存快照；原始所选文件仍可访问且身份一致。';
+  return `${access.label}。已重新校验完整暂存快照，不会从原路径读取或替换暂存内容。`;
 }
 
 function recordsToCreate(plan: ImportFidelityPlan): ReadonlyArray<string> {
@@ -577,9 +696,9 @@ function nonEffects(plan: ImportFidelityPlan): ReadonlyArray<string> {
 }
 
 function newBookTargetChoice(
-  identityFindings: ReadonlyArray<ImportIdentityFindingProjection>,
+  exactMatches: ReadonlyArray<ExactImportMatchProjection>,
 ): StagedImportProjection['targetChoices'][number] {
-  return identityFindings.length > 0
+  return exactMatches.length > 0
     ? { id: 'new-book-distinct-intended-work', label: '新建图书（作为不同作品）', selected: false }
     : { id: 'new-book', label: '新建图书', selected: false };
 }
@@ -613,17 +732,61 @@ function parseStoredJson(value: string, message: string): unknown {
   }
 }
 
-function createNewBookReviewDigestV4(
+function createLegacyNewBookReviewDigestV2(
+  snapshot: DraftSnapshot,
+  confirmedTitle: string,
+  draftVersion: number,
+  plan: ImportFidelityPlan,
+): string {
+  return sha256(
+    canonicalJson({
+      schema: 'ai7.new-book-import-review/2',
+      draftId: snapshot.draftId,
+      draftVersion,
+      target: 'new-book',
+      confirmedTitle,
+      source: {
+        displayName: snapshot.displayName,
+        provenance: 'native-file-picker/local-provider-free',
+        objectDigest: snapshot.objectDigest,
+        parserIdentity: snapshot.parserIdentity,
+        sourceDigest: snapshot.sourceDigest,
+        sourceBytes: snapshot.sourceBytes,
+        contentDigest: snapshot.contentDigest,
+        structureDigest: snapshot.structureDigest,
+      },
+      fidelity: snapshot.fidelity,
+      degradationDecision:
+        plan.degradations.length === 0
+          ? null
+          : {
+              schema: DEGRADATION_DECISION_SCHEMA,
+              scope: 'this-import-only',
+              state: 'accepted-complete-set',
+              items: plan.degradations,
+            },
+      recordsToCreate: recordsToCreate(plan),
+      nonEffects: nonEffects(plan),
+      workflowProfile: { ...WORKFLOW_PROFILE, digest: WORKFLOW_PROFILE_DIGEST },
+      editorialDimensionSet: {
+        ...BASELINE_EDITORIAL_DIMENSION_SET,
+        digest: BASELINE_EDITORIAL_DIMENSION_SET_DIGEST,
+      },
+    }),
+  );
+}
+
+function createNewBookReviewDigestV3(
   snapshot: DraftSnapshot,
   confirmedTitle: string,
   draftVersion: number,
   plan: ImportFidelityPlan,
   targetChoiceId: NewBookImportTargetChoiceId,
-  identityFindings: ReadonlyArray<ImportIdentityFindingProjection>,
+  exactMatches: ReadonlyArray<ExactImportMatchProjection>,
 ): string {
   return sha256(
     canonicalJson({
-      schema: 'ai7.new-book-import-review/4',
+      schema: 'ai7.new-book-import-review/3',
       draftId: snapshot.draftId,
       draftVersion,
       target:
@@ -641,7 +804,7 @@ function createNewBookReviewDigestV4(
         contentDigest: snapshot.contentDigest,
         structureDigest: snapshot.structureDigest,
       },
-      identityFindings,
+      exactMatches,
       fidelity: snapshot.fidelity,
       degradationDecision:
         plan.degradations.length === 0
@@ -668,17 +831,29 @@ export class EditorialStore {
   readonly #objectsRoot: string;
   readonly #authority: DatabaseSync;
   readonly #journal: DatabaseSync;
+  readonly #control: StoreControl;
   readonly #cursorSecret = randomBytes(32);
   #poisoned = false;
 
-  private constructor(dataRoot: string, objectsRoot: string, authority: DatabaseSync, journal: DatabaseSync) {
+  private constructor(
+    dataRoot: string,
+    objectsRoot: string,
+    authority: DatabaseSync,
+    journal: DatabaseSync,
+    control: StoreControl,
+  ) {
     this.#dataRoot = dataRoot;
     this.#objectsRoot = objectsRoot;
     this.#authority = authority;
     this.#journal = journal;
+    this.#control = control;
   }
 
-  static async open(dataRootInput: string, codeRoot: string): Promise<EditorialStore> {
+  static async open(
+    dataRootInput: string,
+    codeRoot: string,
+    control: StoreControl = { induceUnprovableReconciliation: false },
+  ): Promise<EditorialStore> {
     requireStore(isAbsolute(dataRootInput), 'DATA_ROOT_INVALID', 'Agent Data Root 必须是绝对路径。');
     const dataRoot = await createCanonicalExternalDataRoot(dataRootInput, codeRoot);
     const objectsRoot = await ensureCanonicalDataDirectory(dataRoot, 'objects');
@@ -692,7 +867,9 @@ export class EditorialStore {
     initializeSchema(authority);
     const journal = new DatabaseSync(databasePath);
     configureDatabase(journal);
-    return new EditorialStore(dataRoot, objectsRoot, authority, journal);
+    const store = new EditorialStore(dataRoot, objectsRoot, authority, journal, control);
+    await store.#sweepUnreferencedContentObjects();
+    return store;
   }
 
   close(): void {
@@ -712,51 +889,7 @@ export class EditorialStore {
       const selectedPath = await realpath(selectedPathInput);
       const displayName = safeDisplayName(basename(selectedPath));
       const parsed = await parseDocx(selectedPath, displayName);
-      const relativeKey = posix.join('sha256', parsed.sourceDigest.slice(0, 2), `${parsed.sourceDigest}.docx`);
-      const objectDirectory = await ensureCanonicalDataDirectory(
-        this.#dataRoot,
-        'objects',
-        'sha256',
-        parsed.sourceDigest.slice(0, 2),
-      );
-      const objectFileName = `${parsed.sourceDigest}.docx`;
-      const inspectedObject = await inspectCanonicalDataFile(this.#dataRoot, objectDirectory, objectFileName);
-      const objectPath = inspectedObject.path;
-      requireStore(isInside(this.#objectsRoot, objectPath), 'OBJECT_PATH_INVALID', '对象路径越界。');
-      if (!inspectedObject.exists || (await digestFile(objectPath)) !== parsed.sourceDigest) {
-        if (inspectedObject.exists) await rm(objectPath, { force: true });
-        const temporary = `${objectPath}.${process.pid}.${randomUUID()}.partial`;
-        const temporaryName = basename(temporary);
-        requireStore(
-          !(await inspectCanonicalDataFile(this.#dataRoot, objectDirectory, temporaryName)).exists,
-          'OBJECT_PATH_INVALID',
-          '暂存对象路径已存在。',
-        );
-        try {
-          await copyFile(selectedPath, temporary, constants.COPYFILE_EXCL);
-          const inspectedTemporary = await inspectCanonicalDataFile(this.#dataRoot, objectDirectory, temporaryName);
-          requireStore(inspectedTemporary.exists && inspectedTemporary.path === temporary, 'OBJECT_PATH_INVALID', '暂存对象路径无效。');
-          const handle = await open(temporary, 'r+');
-          try {
-            await handle.sync();
-          } finally {
-            await handle.close();
-          }
-          requireStore((await digestFile(temporary)) === parsed.sourceDigest, 'OBJECT_VERIFY_FAILED', '暂存对象校验失败。');
-          requireStore(
-            !(await inspectCanonicalDataFile(this.#dataRoot, objectDirectory, objectFileName)).exists,
-            'OBJECT_PATH_INVALID',
-            '对象路径在提交前发生变化。',
-          );
-          await rename(temporary, objectPath);
-          const activated = await inspectCanonicalDataFile(this.#dataRoot, objectDirectory, objectFileName);
-          requireStore(activated.exists && activated.path === objectPath, 'OBJECT_PATH_INVALID', '暂存对象激活无效。');
-        } catch (error) {
-          const cleanup = await inspectCanonicalDataFile(this.#dataRoot, objectDirectory, temporaryName);
-          if (cleanup.exists) await rm(cleanup.path, { force: true });
-          throw error;
-        }
-      }
+      const relativeKey = await this.#persistContentObject(selectedPath, parsed);
 
       const draftId = randomUUID();
       const now = new Date().toISOString();
@@ -777,37 +910,11 @@ export class EditorialStore {
         this.#authority
           .prepare(
             `INSERT INTO import_drafts(
-               draft_id, selection_token, state, draft_version, display_name, object_digest, staged_at
-             ) VALUES (?, ?, 'staged', 1, ?, ?, ?)`,
+               draft_id, selection_token, state, draft_version, display_name, object_digest, selected_path, staged_at
+             ) VALUES (?, ?, 'staged', 1, ?, ?, ?, ?)`,
           )
-          .run(draftId, selectionToken, displayName, parsed.sourceDigest, now);
-        this.#authority
-          .prepare(
-            `INSERT INTO staged_import_snapshots(
-               draft_id, parser_identity, source_digest, content_digest, structure_digest, block_count,
-               fidelity_json, title_suggestion, title_source, snapshot_created_at
-             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          )
-          .run(
-            draftId,
-            parsed.parserIdentity,
-            parsed.sourceDigest,
-            parsed.contentDigest,
-            parsed.structureDigest,
-            parsed.blocks.length,
-            canonicalJson(parsed.fidelity),
-            parsed.titleSuggestion.value,
-            parsed.titleSuggestion.sourceLabel,
-            now,
-          );
-        const insertBlock = this.#authority.prepare(
-          `INSERT INTO staged_import_blocks(
-             draft_id, staged_block_id, position, kind, level, text, digest
-           ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        );
-        for (const block of parsed.blocks) {
-          insertBlock.run(draftId, block.blockId, block.position, block.kind, block.level, block.text, block.digest);
-        }
+          .run(draftId, selectionToken, displayName, parsed.sourceDigest, selectedPath, now);
+        this.#insertSnapshot(draftId, parsed, now);
         this.#assertForeignKeys(this.#authority);
       });
 
@@ -817,8 +924,11 @@ export class EditorialStore {
         version: 1,
         displayName,
         objectDigest: parsed.sourceDigest,
+        selectedPath,
         reviewedTitle: null,
+        reviewedTargetChoiceId: null,
         reviewDigest: null,
+        stagedAt: now,
         parserIdentity: parsed.parserIdentity,
         sourceDigest: parsed.sourceDigest,
         sourceBytes: parsed.archiveBytes,
@@ -838,6 +948,328 @@ export class EditorialStore {
     }
   }
 
+  async getImportStartup(): Promise<ImportStartupProjection> {
+    this.#assertAvailable();
+    const attempts = this.#authority
+      .prepare(
+        `SELECT attempt_id
+         FROM import_commit_attempts
+         WHERE state != 'committed' OR completion_acknowledged_at IS NULL
+         ORDER BY CASE state WHEN 'uncertain' THEN 0 WHEN 'prepared' THEN 1 ELSE 2 END, prepared_at, attempt_id`,
+      )
+      .all() as SqlRow[];
+    let committed: ImportCommitProjection | undefined;
+    for (const row of attempts) {
+      const attempt = this.#loadCommitAttempt(asString(row.attempt_id));
+      const reconciliation = await this.#reconcileCommitAttempt(attempt);
+      if (reconciliation.state === 'uncertain') {
+        return {
+          state: 'outcome-uncertain',
+          recovery: await this.#recoveryProjection(attempt.draftId, 'outcome-uncertain'),
+        };
+      }
+      if (reconciliation.state === 'committed' && attempt.completionAcknowledgedAt === null && !committed) {
+        committed = reconciliation.result;
+      }
+    }
+    if (committed) return { state: 'committed-recovered', result: committed };
+
+    const drafts = this.#authority
+      .prepare(
+        `SELECT draft_id
+         FROM import_drafts
+         WHERE state IN ('staged', 'reviewed')
+         ORDER BY staged_at, draft_id`,
+      )
+      .all() as SqlRow[];
+    if (drafts.length === 0) return { state: 'none' };
+    return {
+      state: 'draft-recovery',
+      recovery: await this.#recoveryProjection(asString(drafts[0]!.draft_id), 'ordinary-draft'),
+    };
+  }
+
+  async continueImportDraft(draftId: string, expectedDraftVersion: number): Promise<ContinueImportProjection> {
+    this.#assertAvailable();
+    requireStore(UUID_PATTERN.test(draftId), 'DRAFT_INVALID', '导入草稿标识无效。');
+    const attempt = this.#loadCommitAttemptForDraft(draftId);
+    if (attempt) {
+      const reconciliation = await this.#reconcileCommitAttempt(attempt);
+      if (reconciliation.state === 'committed') {
+        return { state: 'committed-recovered', result: reconciliation.result };
+      }
+      if (reconciliation.state === 'uncertain') {
+        return {
+          state: 'outcome-uncertain',
+          recovery: await this.#recoveryProjection(draftId, 'outcome-uncertain'),
+        };
+      }
+    }
+
+    let snapshot: DraftSnapshot;
+    try {
+      snapshot = this.#loadDraftSnapshot(draftId);
+      requireStore(snapshot.version === expectedDraftVersion, 'DRAFT_VERSION_CHANGED', '导入草稿版本已变化。');
+      const revalidated = await this.#revalidateSnapshot(snapshot);
+      snapshot = revalidated.snapshot;
+      if (revalidated.parserDrift) {
+        const access = await this.#originalFileAccess(snapshot);
+        return {
+          state: 'target-review-required',
+          staged: this.#stagedProjection(snapshot),
+          originalFileAccess: access,
+          reviewInvalidated: true,
+          notice: '解析器版本已变化；已从精确暂存字节重新形成预检，旧复核已失效，请重新检查变化后的决定。',
+        };
+      }
+    } catch (error) {
+      if (error instanceof StoreError && error.code === 'DRAFT_VERSION_CHANGED') throw error;
+      return {
+        state: 'reselection-required',
+        recovery: await this.#recoveryProjection(draftId, 'ordinary-draft'),
+      };
+    }
+
+    const access = await this.#originalFileAccess(snapshot);
+    if (snapshot.state === 'staged') {
+      return {
+        state: 'target-review-required',
+        staged: this.#stagedProjection(snapshot),
+        originalFileAccess: access,
+        reviewInvalidated: false,
+        notice: continuationNotice(access),
+      };
+    }
+
+    requireStore(snapshot.state === 'reviewed', 'DRAFT_STATE_CHANGED', '导入草稿状态已变化。');
+    const plan = this.#requireFidelityPlan(snapshot);
+    const exactMatches = this.#exactImportMatches(snapshot);
+    const currentTarget = newBookTargetChoice(exactMatches);
+    let title: string | null = null;
+    try {
+      title = snapshot.reviewedTitle === null ? null : safeTitle(snapshot.reviewedTitle);
+    } catch {
+      title = null;
+    }
+    const currentDigest =
+      title && snapshot.reviewedTargetChoiceId === currentTarget.id
+        ? createNewBookReviewDigestV3(snapshot, title, snapshot.version, plan, currentTarget.id, exactMatches)
+        : null;
+    if (currentDigest === null || currentDigest !== snapshot.reviewDigest) {
+      snapshot = this.#invalidateReview(snapshot);
+      return {
+        state: 'target-review-required',
+        staged: this.#stagedProjection(snapshot),
+        originalFileAccess: access,
+        reviewInvalidated: true,
+        notice: '导入目标、书名、保真状态或最终记录后果已变化；旧复核已失效，请从变化后的选择重新确认。',
+      };
+    }
+    requireStore(title !== null, 'REVIEW_CHANGED', '导入前复核书名已变化。');
+
+    return {
+      state: 'review-ready',
+      review: this.#reviewProjection(
+        snapshot,
+        title,
+        currentDigest,
+        plan,
+        plan.degradations.length > 0,
+        currentTarget.id,
+        exactMatches,
+        attempt?.attemptId ?? null,
+      ),
+      originalFileAccess: access,
+      notice: continuationNotice(access),
+    };
+  }
+
+  async reselectImportDraft(
+    draftId: string,
+    expectedDraftVersion: number,
+    selectionToken: string,
+    selectedPathInput: string,
+  ): Promise<ContinueImportProjection> {
+    this.#assertAvailable();
+    requireStore(UUID_PATTERN.test(draftId) && TOKEN_PATTERN.test(selectionToken), 'SELECTION_INVALID', '文件重选参数无效。');
+    requireStore(isAbsolute(selectedPathInput), 'SELECTION_INVALID', '文件选择结果无效。');
+    const attempt = this.#loadCommitAttemptForDraft(draftId);
+    if (attempt) {
+      const reconciliation = await this.#reconcileCommitAttempt(attempt);
+      if (reconciliation.state === 'committed') {
+        return { state: 'committed-recovered', result: reconciliation.result };
+      }
+      if (reconciliation.state === 'uncertain') {
+        return {
+          state: 'outcome-uncertain',
+          recovery: await this.#recoveryProjection(draftId, 'outcome-uncertain'),
+        };
+      }
+    }
+
+    const draft = one(
+      this.#authority
+        .prepare('SELECT state, draft_version, object_digest FROM import_drafts WHERE draft_id = ?')
+        .all(draftId) as SqlRow[],
+      'DRAFT_NOT_FOUND',
+      '导入草稿不存在。',
+    );
+    const previousState = asString(draft.state);
+    requireStore(previousState === 'staged' || previousState === 'reviewed', 'DRAFT_STATE_CHANGED', '导入草稿状态已变化。');
+    requireStore(asNumber(draft.draft_version) === expectedDraftVersion, 'DRAFT_VERSION_CHANGED', '导入草稿版本已变化。');
+    const expectedDigest = asString(draft.object_digest);
+
+    let selectedPath: string;
+    let displayName: string;
+    let parsed: ParsedDocx;
+    try {
+      selectedPath = await realpath(selectedPathInput);
+      displayName = safeDisplayName(basename(selectedPath));
+      parsed = await parseDocx(selectedPath, displayName);
+    } catch {
+      throw new StoreError('SNAPSHOT_RESELECTION_REQUIRED', '重选文件无法形成完整的本地暂存快照。');
+    }
+    requireStore(parsed.sourceDigest === expectedDigest, 'RESELECTION_MISMATCH', '重选文件与原暂存来源身份不一致。');
+    const relativeKey = await this.#persistContentObject(selectedPath, parsed);
+    const nextVersion = expectedDraftVersion + 1;
+    const now = new Date().toISOString();
+    this.#transaction(this.#authority, () => {
+      this.#authority
+        .prepare(
+          `INSERT INTO content_objects(object_digest, relative_key, byte_length, verified_at)
+           VALUES (?, ?, ?, ?)
+           ON CONFLICT(object_digest) DO UPDATE SET
+             relative_key = excluded.relative_key,
+             byte_length = excluded.byte_length,
+             verified_at = excluded.verified_at`,
+        )
+        .run(parsed.sourceDigest, relativeKey, parsed.archiveBytes, now);
+      this.#authority.prepare('DELETE FROM staged_import_snapshots WHERE draft_id = ?').run(draftId);
+      this.#insertSnapshot(draftId, parsed, now);
+      const draftUpdate = this.#authority
+        .prepare(
+          `UPDATE import_drafts
+           SET selection_token = ?, state = 'staged', draft_version = ?, display_name = ?, object_digest = ?,
+               selected_path = ?, reviewed_title = NULL, reviewed_target_choice_id = NULL,
+               review_digest = NULL, reviewed_at = NULL
+           WHERE draft_id = ? AND draft_version = ? AND state IN ('staged', 'reviewed')`,
+        )
+        .run(selectionToken, nextVersion, displayName, parsed.sourceDigest, selectedPath, draftId, expectedDraftVersion);
+      requireStore(draftUpdate.changes === 1, 'DRAFT_VERSION_CHANGED', '导入草稿在重选时已变化。');
+      this.#authority.prepare("DELETE FROM import_commit_attempts WHERE draft_id = ? AND state = 'prepared'").run(draftId);
+      this.#assertForeignKeys(this.#authority);
+    });
+    const snapshot = this.#loadDraftSnapshot(draftId);
+    return {
+      state: 'target-review-required',
+      staged: this.#stagedProjection(snapshot),
+      originalFileAccess: { state: 'available-exact', label: '原始所选文件仍可访问且身份一致' },
+      reviewInvalidated: previousState === 'reviewed' || attempt !== null,
+      notice: '已通过原来源摘要精确匹配完成重选，并重新形成完整暂存与预检；请重新确认全部决定。',
+    };
+  }
+
+  async abandonImportDraft(draftId: string, expectedDraftVersion: number): Promise<ImportStartupProjection> {
+    this.#assertAvailable();
+    requireStore(UUID_PATTERN.test(draftId), 'DRAFT_INVALID', '导入草稿标识无效。');
+    const attempt = this.#loadCommitAttemptForDraft(draftId);
+    if (attempt) {
+      const reconciliation = await this.#reconcileCommitAttempt(attempt);
+      if (reconciliation.state === 'committed') {
+        return { state: 'committed-recovered', result: reconciliation.result };
+      }
+      if (reconciliation.state === 'uncertain') {
+        return {
+          state: 'outcome-uncertain',
+          recovery: await this.#recoveryProjection(draftId, 'outcome-uncertain'),
+        };
+      }
+    }
+    const draft = one(
+      this.#authority
+        .prepare(
+          `SELECT d.state, d.draft_version, d.object_digest, co.relative_key
+           FROM import_drafts d
+           JOIN content_objects co ON co.object_digest = d.object_digest
+           WHERE d.draft_id = ?`,
+        )
+        .all(draftId) as SqlRow[],
+      'DRAFT_NOT_FOUND',
+      '导入草稿不存在。',
+    );
+    requireStore(asString(draft.state) !== 'committed', 'DRAFT_STATE_CHANGED', '该导入已经提交，不能放弃。');
+    requireStore(asNumber(draft.draft_version) === expectedDraftVersion, 'DRAFT_VERSION_CHANGED', '导入草稿版本已变化。');
+    const commitEvidence = one(
+      this.#authority.prepare('SELECT count(*) commits FROM import_commits WHERE draft_id = ?').all(draftId) as SqlRow[],
+      'STORE_CORRUPT',
+      '无法核对导入提交证据。',
+    );
+    requireStore(asNumber(commitEvidence.commits) === 0, 'COMMIT_EVIDENCE_PRESENT', '存在导入提交证据，不能放弃或清理。');
+    const objectDigest = asString(draft.object_digest);
+    const relativeKey = asString(draft.relative_key);
+    let garbageCollect = false;
+    this.#transaction(this.#authority, () => {
+      const deletion = this.#authority
+        .prepare("DELETE FROM import_drafts WHERE draft_id = ? AND draft_version = ? AND state IN ('staged', 'reviewed')")
+        .run(draftId, expectedDraftVersion);
+      requireStore(deletion.changes === 1, 'DRAFT_VERSION_CHANGED', '导入草稿在放弃时已变化。');
+      const references = one(
+        this.#authority
+          .prepare(
+            `SELECT
+               (SELECT count(*) FROM source_versions WHERE object_digest = ?) source_refs,
+               (SELECT count(*) FROM import_drafts WHERE object_digest = ?) draft_refs`,
+          )
+          .all(objectDigest, objectDigest) as SqlRow[],
+        'STORE_CORRUPT',
+        '无法核对暂存对象引用。',
+      );
+      garbageCollect = asNumber(references.source_refs) === 0 && asNumber(references.draft_refs) === 0;
+      this.#assertForeignKeys(this.#authority);
+    });
+    if (garbageCollect) {
+      const objectPath = this.#contentObjectPath(objectDigest, relativeKey);
+      try {
+        await rm(objectPath, { force: true });
+      } catch {
+        return this.getImportStartup();
+      }
+      this.#transaction(this.#authority, () => {
+        const references = one(
+          this.#authority
+            .prepare(
+              `SELECT
+                 (SELECT count(*) FROM source_versions WHERE object_digest = ?) source_refs,
+                 (SELECT count(*) FROM import_drafts WHERE object_digest = ?) draft_refs`,
+            )
+            .all(objectDigest, objectDigest) as SqlRow[],
+          'STORE_CORRUPT',
+          '无法复核暂存对象引用。',
+        );
+        if (asNumber(references.source_refs) === 0 && asNumber(references.draft_refs) === 0) {
+          this.#authority.prepare('DELETE FROM content_objects WHERE object_digest = ?').run(objectDigest);
+        }
+      });
+    }
+    return this.getImportStartup();
+  }
+
+  async acknowledgeImportCompletion(commitId: string): Promise<{ state: 'acknowledged' }> {
+    this.#assertAvailable();
+    requireStore(UUID_PATTERN.test(commitId), 'COMMIT_INVALID', '导入提交标识无效。');
+    const attempt = this.#loadCommitAttempt(commitId);
+    const reconciliation = await this.#reconcileCommitAttempt(attempt);
+    requireStore(reconciliation.state === 'committed', 'COMMIT_NOT_PROVEN', '导入提交尚未获得完整证明。');
+    this.#authority
+      .prepare(
+        `UPDATE import_commit_attempts
+         SET completion_acknowledged_at = COALESCE(completion_acknowledged_at, ?)
+         WHERE attempt_id = ? AND state = 'committed'`,
+      )
+      .run(new Date().toISOString(), commitId);
+    return { state: 'acknowledged' };
+  }
+
   prepareNewBookReview(
     draftId: string,
     expectedDraftVersion: number,
@@ -851,12 +1283,12 @@ export class EditorialStore {
     const snapshot = this.#loadDraftSnapshot(draftId);
     requireStore(snapshot.state === 'staged', 'DRAFT_STATE_CHANGED', '导入草稿状态已变化。');
     requireStore(snapshot.version === expectedDraftVersion, 'DRAFT_VERSION_CHANGED', '导入草稿版本已变化。');
-    const identityFindings = this.#identityFindings(snapshot);
-    const targetChoice = newBookTargetChoice(identityFindings);
+    const exactMatches = this.#exactImportMatches(snapshot);
+    const targetChoice = newBookTargetChoice(exactMatches);
     requireStore(targetChoiceId === targetChoice.id, 'TARGET_CHOICE_CHANGED', '导入目标选择已变化，请重新选择。');
     const plan = this.#requireFidelityPlan(snapshot);
     if (plan.degradations.length > 0 && !acceptDegradation) {
-      return this.#reviewProjection(snapshot, confirmedTitle, null, plan, false, targetChoiceId, identityFindings);
+      return this.#reviewProjection(snapshot, confirmedTitle, null, plan, false, targetChoiceId, exactMatches, null);
     }
     requireStore(
       plan.degradations.length > 0 || !acceptDegradation,
@@ -864,46 +1296,102 @@ export class EditorialStore {
       '本次导入不需要降级接受。',
     );
     const nextVersion = expectedDraftVersion + 1;
-    const reviewDigest = createNewBookReviewDigestV4(
+    const reviewDigest = createNewBookReviewDigestV3(
       snapshot,
       confirmedTitle,
       nextVersion,
       plan,
       targetChoiceId,
-      identityFindings,
+      exactMatches,
     );
     const reviewedAt = new Date().toISOString();
     this.#transaction(this.#authority, () => {
       const update = this.#authority
         .prepare(
           `UPDATE import_drafts
-           SET state = 'reviewed', draft_version = ?, reviewed_title = ?, review_digest = ?, reviewed_at = ?
+           SET state = 'reviewed', draft_version = ?, reviewed_title = ?, reviewed_target_choice_id = ?,
+               review_digest = ?, reviewed_at = ?
            WHERE draft_id = ? AND state = 'staged' AND draft_version = ?`,
         )
-        .run(nextVersion, confirmedTitle, reviewDigest, reviewedAt, draftId, expectedDraftVersion);
+        .run(nextVersion, confirmedTitle, targetChoiceId, reviewDigest, reviewedAt, draftId, expectedDraftVersion);
       requireStore(update.changes === 1, 'DRAFT_VERSION_CHANGED', '导入草稿在复核时已变化。');
     });
     return this.#reviewProjection(
-      { ...snapshot, state: 'reviewed', version: nextVersion, reviewedTitle: confirmedTitle, reviewDigest },
+      {
+        ...snapshot,
+        state: 'reviewed',
+        version: nextVersion,
+        reviewedTitle: confirmedTitle,
+        reviewedTargetChoiceId: targetChoiceId,
+        reviewDigest,
+      },
       confirmedTitle,
       reviewDigest,
       plan,
       plan.degradations.length > 0,
       targetChoiceId,
-      identityFindings,
+      exactMatches,
+      null,
     );
   }
 
-  commitNewBookImport(input: {
-    draftId: string;
-    expectedDraftVersion: number;
-    reviewDigest: string;
-    commitId: string;
-  }): ImportCommitProjection {
+  async commitNewBookImport(
+    input: {
+      draftId: string;
+      expectedDraftVersion: number;
+      reviewDigest: string;
+      commitId: string;
+    },
+    options: { interruptAfterAttempt?: boolean } = {},
+  ): Promise<ImportCommitProjection> {
     this.#assertAvailable();
     requireStore(UUID_PATTERN.test(input.draftId) && UUID_PATTERN.test(input.commitId), 'COMMIT_INVALID', '导入提交标识无效。');
     requireStore(/^[0-9a-f]{64}$/.test(input.reviewDigest), 'COMMIT_INVALID', '导入复核摘要无效。');
     const requestFingerprint = sha256(canonicalJson(input));
+    const existingAttempt = this.#loadCommitAttemptForDraft(input.draftId);
+    if (existingAttempt) {
+      requireStore(
+        existingAttempt.attemptId === input.commitId &&
+          existingAttempt.requestFingerprint === requestFingerprint &&
+          existingAttempt.expectedDraftVersion === input.expectedDraftVersion &&
+          existingAttempt.reviewDigest === input.reviewDigest,
+        'IDEMPOTENCY_CONFLICT',
+        '该导入草稿已绑定另一项持久提交尝试。',
+      );
+      const reconciliation = await this.#reconcileCommitAttempt(existingAttempt);
+      if (reconciliation.state === 'committed') return reconciliation.result;
+      requireStore(reconciliation.state === 'uncommitted', 'IMPORT_COMMIT_OUTCOME_UNCERTAIN', '导入提交结果待确认。');
+    }
+
+    const snapshotBeforeAttempt = this.#loadDraftSnapshot(input.draftId);
+    requireStore(snapshotBeforeAttempt.state === 'reviewed', 'DRAFT_NOT_REVIEWED', '导入草稿尚未完成复核。');
+    requireStore(snapshotBeforeAttempt.version === input.expectedDraftVersion, 'DRAFT_VERSION_CHANGED', '导入草稿版本已变化。');
+    requireStore(snapshotBeforeAttempt.reviewDigest === input.reviewDigest, 'REVIEW_CHANGED', '导入前复核摘要已变化。');
+    const revalidated = await this.#revalidateSnapshot(snapshotBeforeAttempt);
+    requireStore(!revalidated.parserDrift, 'REVIEW_CHANGED', '解析器状态已变化，请重新复核导入。');
+    if (!existingAttempt) {
+      const preparedAt = new Date().toISOString();
+      this.#transaction(this.#authority, () => {
+        this.#authority
+          .prepare(
+            `INSERT INTO import_commit_attempts(
+               attempt_id, draft_id, request_fingerprint, expected_draft_version, review_digest,
+               state, prepared_at
+             ) VALUES (?, ?, ?, ?, ?, 'prepared', ?)`,
+          )
+          .run(
+            input.commitId,
+            input.draftId,
+            requestFingerprint,
+            input.expectedDraftVersion,
+            input.reviewDigest,
+            preparedAt,
+          );
+      });
+    }
+    if (options.interruptAfterAttempt) {
+      throw new StoreFatalError(new Error('E2E interruption after durable import attempt preparation.'));
+    }
     let result: Omit<ImportCommitProjection, 'firstWindow'> | undefined;
 
     this.#transaction(this.#authority, () => {
@@ -922,18 +1410,22 @@ export class EditorialStore {
       requireStore(snapshot.reviewDigest === input.reviewDigest, 'REVIEW_CHANGED', '导入前复核摘要已变化。');
       requireStore(snapshot.reviewedTitle, 'REVIEW_CHANGED', '确认书名缺失。');
       const plan = this.#requireFidelityPlan(snapshot);
-      const identityFindings = this.#identityFindings(snapshot);
-      const targetChoice = newBookTargetChoice(identityFindings);
-      const currentReviewDigest = createNewBookReviewDigestV4(
+      const exactMatches = this.#exactImportMatches(snapshot);
+      const targetChoice = newBookTargetChoice(exactMatches);
+      const currentReviewDigest = createNewBookReviewDigestV3(
         snapshot,
         snapshot.reviewedTitle,
         snapshot.version,
         plan,
         targetChoice.id,
-        identityFindings,
+        exactMatches,
       );
+      const legacyReviewDigest =
+        exactMatches.length === 0
+          ? createLegacyNewBookReviewDigestV2(snapshot, snapshot.reviewedTitle, snapshot.version, plan)
+          : null;
       requireStore(
-        currentReviewDigest === input.reviewDigest,
+        currentReviewDigest === input.reviewDigest || legacyReviewDigest === input.reviewDigest,
         'REVIEW_CHANGED',
         '导入前复核摘要无法由当前权威快照重建。',
       );
@@ -1189,6 +1681,22 @@ export class EditorialStore {
         )
         .run(input.commitId, now, input.draftId, input.expectedDraftVersion, input.reviewDigest);
       requireStore(draftUpdate.changes === 1, 'DRAFT_VERSION_CHANGED', '导入草稿在提交时已变化。');
+      const attemptUpdate = this.#authority
+        .prepare(
+          `UPDATE import_commit_attempts
+           SET state = 'committed', committed_at = ?, uncertain_at = NULL, uncertainty_code = NULL
+           WHERE attempt_id = ? AND draft_id = ? AND state = 'prepared'
+             AND request_fingerprint = ? AND expected_draft_version = ? AND review_digest = ?`,
+        )
+        .run(
+          now,
+          input.commitId,
+          input.draftId,
+          requestFingerprint,
+          input.expectedDraftVersion,
+          input.reviewDigest,
+        );
+      requireStore(attemptUpdate.changes === 1, 'COMMIT_ATTEMPT_CHANGED', '持久提交尝试状态已变化。');
 
       this.#assertImportPostconditions({
         bookId,
@@ -1433,9 +1941,611 @@ export class EditorialStore {
     return this.#journalAck(committed);
   }
 
+  #loadCommitAttempt(attemptId: string): CommitAttempt {
+    const row = one(
+      this.#authority
+        .prepare(
+          `SELECT attempt_id, draft_id, request_fingerprint, expected_draft_version, review_digest,
+                  state, prepared_at, completion_acknowledged_at
+           FROM import_commit_attempts WHERE attempt_id = ?`,
+        )
+        .all(attemptId) as SqlRow[],
+      'COMMIT_ATTEMPT_NOT_FOUND',
+      '导入提交尝试不存在。',
+    );
+    const state = asString(row.state);
+    requireStore(state === 'prepared' || state === 'uncertain' || state === 'committed', 'STORE_CORRUPT', '导入提交尝试状态无效。');
+    return {
+      attemptId: asString(row.attempt_id),
+      draftId: asString(row.draft_id),
+      requestFingerprint: asString(row.request_fingerprint),
+      expectedDraftVersion: asNumber(row.expected_draft_version),
+      reviewDigest: asString(row.review_digest),
+      state,
+      preparedAt: asString(row.prepared_at),
+      completionAcknowledgedAt:
+        row.completion_acknowledged_at === null ? null : asString(row.completion_acknowledged_at),
+    };
+  }
+
+  #loadCommitAttemptForDraft(draftId: string): CommitAttempt | null {
+    const rows = this.#authority
+      .prepare('SELECT attempt_id FROM import_commit_attempts WHERE draft_id = ?')
+      .all(draftId) as SqlRow[];
+    requireStore(rows.length <= 1, 'STORE_CORRUPT', '导入草稿关联了多个提交尝试。');
+    return rows.length === 0 ? null : this.#loadCommitAttempt(asString(rows[0]!.attempt_id));
+  }
+
+  async #reconcileCommitAttempt(
+    attemptInput: CommitAttempt,
+  ): Promise<
+    | { state: 'uncommitted' }
+    | { state: 'uncertain' }
+    | { state: 'committed'; result: ImportCommitProjection }
+  > {
+    const attempt = this.#loadCommitAttempt(attemptInput.attemptId);
+    try {
+      if (this.#control.induceUnprovableReconciliation && attempt.state !== 'committed') {
+        throw new Error('E2E induced failure at the production reconciliation proof boundary.');
+      }
+      requireStore(
+        attempt.requestFingerprint ===
+          sha256(
+            canonicalJson({
+              draftId: attempt.draftId,
+              expectedDraftVersion: attempt.expectedDraftVersion,
+              reviewDigest: attempt.reviewDigest,
+              commitId: attempt.attemptId,
+            }),
+          ),
+        'COMMIT_PROOF_INCONCLUSIVE',
+        '导入提交尝试绑定无法重建。',
+      );
+      const counts = one(
+        this.#authority
+          .prepare(
+            `SELECT
+               (SELECT count(*) FROM import_commits WHERE commit_id = ?) commits,
+               (SELECT count(*) FROM manuscript_import_records WHERE commit_id = ?) import_records`,
+          )
+          .all(attempt.attemptId, attempt.attemptId) as SqlRow[],
+        'STORE_CORRUPT',
+        '无法读取导入提交证据。',
+      );
+      const commitCount = asNumber(counts.commits);
+      const importRecordCount = asNumber(counts.import_records);
+      const draft = one(
+        this.#authority
+          .prepare(
+            'SELECT state, draft_version, review_digest, committed_commit_id FROM import_drafts WHERE draft_id = ?',
+          )
+          .all(attempt.draftId) as SqlRow[],
+        'STORE_CORRUPT',
+        '导入提交尝试缺少草稿。',
+      );
+      const draftState = asString(draft.state);
+      const draftReviewDigest = draft.review_digest === null ? null : asString(draft.review_digest);
+      const committedCommitId = draft.committed_commit_id === null ? null : asString(draft.committed_commit_id);
+      requireStore(
+        asNumber(draft.draft_version) === attempt.expectedDraftVersion && draftReviewDigest === attempt.reviewDigest,
+        'COMMIT_PROOF_INCONCLUSIVE',
+        '导入提交尝试与当前复核版本不一致。',
+      );
+      if (commitCount === 0 && importRecordCount === 0) {
+        requireStore(
+          draftState === 'reviewed' && committedCommitId === null && attempt.state !== 'committed',
+          'COMMIT_PROOF_INCONCLUSIVE',
+          '无法证明导入尚未提交。',
+        );
+        if (attempt.state === 'uncertain') {
+          this.#authority
+            .prepare(
+              `UPDATE import_commit_attempts
+               SET state = 'prepared', uncertain_at = NULL, uncertainty_code = NULL
+               WHERE attempt_id = ? AND state = 'uncertain'`,
+            )
+            .run(attempt.attemptId);
+        }
+        return { state: 'uncommitted' };
+      }
+      requireStore(commitCount === 1 && importRecordCount === 1, 'COMMIT_PROOF_INCONCLUSIVE', '导入提交证据不完整。');
+      const commit = one(
+        this.#authority
+          .prepare(
+            `SELECT draft_id, request_fingerprint, expected_draft_version, review_digest, result_json, committed_at
+             FROM import_commits WHERE commit_id = ?`,
+          )
+          .all(attempt.attemptId) as SqlRow[],
+        'COMMIT_PROOF_INCONCLUSIVE',
+        '导入提交证据缺失。',
+      );
+      requireStore(
+        asString(commit.draft_id) === attempt.draftId &&
+          asString(commit.request_fingerprint) === attempt.requestFingerprint &&
+          asNumber(commit.expected_draft_version) === attempt.expectedDraftVersion &&
+          asString(commit.review_digest) === attempt.reviewDigest &&
+          draftState === 'committed' &&
+          committedCommitId === attempt.attemptId,
+        'COMMIT_PROOF_INCONCLUSIVE',
+        '导入提交证据无法与持久尝试精确对应。',
+      );
+      const stored = this.#loadStoredCommitResult(attempt.attemptId);
+      requireStore(
+        asString(commit.result_json) === canonicalJson(stored),
+        'COMMIT_PROOF_INCONCLUSIVE',
+        '导入提交结果与权威记录图不一致。',
+      );
+      this.#assertRecoveredCommitGraph(stored);
+      await this.#verifyCommittedContentObject(stored);
+      this.#authority
+        .prepare(
+          `UPDATE import_commit_attempts
+           SET state = 'committed', committed_at = ?, uncertain_at = NULL, uncertainty_code = NULL
+           WHERE attempt_id = ?`,
+        )
+        .run(asString(commit.committed_at), attempt.attemptId);
+      return {
+        state: 'committed',
+        result: { ...stored, firstWindow: this.getManuscriptWindow(stored.manuscriptId, stored.branchId, null) },
+      };
+    } catch {
+      const now = new Date().toISOString();
+      this.#authority
+        .prepare(
+          `UPDATE import_commit_attempts
+           SET state = 'uncertain', committed_at = NULL, uncertain_at = COALESCE(uncertain_at, ?),
+                uncertainty_code = 'COMMIT_PROOF_INCONCLUSIVE', completion_acknowledged_at = NULL
+           WHERE attempt_id = ?`,
+        )
+        .run(now, attempt.attemptId);
+      return { state: 'uncertain' };
+    }
+  }
+
+  async #recoveryProjection(
+    draftId: string,
+    kind: ImportDraftRecoveryProjection['kind'],
+  ): Promise<ImportDraftRecoveryProjection> {
+    let snapshot: DraftSnapshot | null = null;
+    let staged: StagedImportProjection | null = null;
+    let originalFileAccess: OriginalFileAccessProjection = {
+      state: 'unknown',
+      label: '旧版草稿未保留原始路径，将从完整暂存快照继续',
+    };
+    try {
+      snapshot = this.#loadDraftSnapshot(draftId);
+      await this.#inspectSnapshotCompleteness(snapshot);
+      originalFileAccess = await this.#originalFileAccess(snapshot);
+      staged = this.#stagedProjection(snapshot);
+    } catch {
+      snapshot = null;
+      staged = null;
+    }
+    const row = one(
+      this.#authority
+        .prepare(
+          `SELECT d.draft_version, d.staged_at, d.display_name, d.state, d.reviewed_title,
+                  d.reviewed_target_choice_id, a.attempt_id
+           FROM import_drafts d
+           LEFT JOIN import_commit_attempts a ON a.draft_id = d.draft_id
+           WHERE d.draft_id = ?`,
+        )
+        .all(draftId) as SqlRow[],
+      'DRAFT_NOT_FOUND',
+      '导入草稿不存在。',
+    );
+    const reviewedTarget = row.reviewed_target_choice_id === null ? null : asString(row.reviewed_target_choice_id);
+    requireStore(
+      reviewedTarget === null || reviewedTarget === 'new-book' || reviewedTarget === 'new-book-distinct-intended-work',
+      'STORE_CORRUPT',
+      '导入复核目标无效。',
+    );
+    const targetLabel =
+      reviewedTarget === 'new-book'
+        ? '新建图书'
+        : reviewedTarget === 'new-book-distinct-intended-work'
+          ? '新建图书（作为不同作品）'
+          : null;
+    const attemptId = row.attempt_id === null ? null : asString(row.attempt_id);
+    const draftState = asString(row.state);
+    return {
+      kind,
+      draftId,
+      draftVersion: asNumber(row.draft_version),
+      stagedAt: asString(row.staged_at),
+      sourceDisplayName: asString(row.display_name),
+      snapshotState: staged === null ? 'reselection-required' : 'complete',
+      lastCompletedStep:
+        kind === 'outcome-uncertain'
+          ? 'commit-outcome-uncertain'
+          : attemptId
+            ? 'commit-attempt'
+            : draftState === 'reviewed'
+              ? 'review'
+              : 'staging',
+      reviewedTitle: row.reviewed_title === null ? null : asString(row.reviewed_title),
+      targetLabel,
+      originalFileAccess,
+      staged,
+      commitAttemptId: attemptId,
+      supportCode:
+        kind === 'outcome-uncertain'
+          ? 'COMMIT_PROOF_INCONCLUSIVE'
+          : staged === null
+            ? 'SNAPSHOT_RESELECTION_REQUIRED'
+            : null,
+    };
+  }
+
+  #assertRecoveredCommitGraph(result: Omit<ImportCommitProjection, 'firstWindow'>): void {
+    this.#assertForeignKeys(this.#authority);
+    const counts = one(
+      this.#authority
+        .prepare(
+          `SELECT
+             (SELECT count(*) FROM books WHERE book_id = ?) books,
+             (SELECT count(*) FROM book_dimension_sets WHERE book_id = ?) dimension_sets,
+             (SELECT count(*) FROM book_dimensions bd
+                JOIN book_dimension_sets bds ON bds.dimension_set_id = bd.dimension_set_id
+                WHERE bds.book_id = ?) dimensions,
+             (SELECT count(*) FROM manuscripts WHERE manuscript_id = ? AND book_id = ? AND role = 'primary') manuscripts,
+             (SELECT count(*) FROM manuscript_branches
+                WHERE branch_id = ? AND manuscript_id = ? AND base_revision_id = ?) branches,
+             (SELECT count(*) FROM manuscript_revisions
+                WHERE revision_id = ? AND manuscript_id = ? AND branch_id = ?
+                  AND ordinal = 1 AND revision_label = 'r1' AND parent_revision_id IS NULL) revisions,
+             (SELECT count(*) FROM manuscript_block_versions WHERE revision_id = ?) revision_blocks,
+             (SELECT count(*) FROM working_blocks WHERE branch_id = ?) working_blocks,
+             (SELECT count(*) FROM workflow_instances
+                WHERE book_id = ? AND manuscript_id = ? AND state = 'active') workflows,
+             (SELECT count(*) FROM manuscript_import_records
+                WHERE import_record_id = ? AND commit_id = ? AND book_id = ? AND manuscript_id = ?
+                  AND resulting_revision_id = ?) import_records,
+             (SELECT count(*) FROM source_provenance sp
+                JOIN manuscript_import_records ir ON ir.source_version_id = sp.source_version_id
+                WHERE ir.import_record_id = ?) provenance`,
+        )
+        .all(
+          result.bookId,
+          result.bookId,
+          result.bookId,
+          result.manuscriptId,
+          result.bookId,
+          result.branchId,
+          result.manuscriptId,
+          result.revisionId,
+          result.revisionId,
+          result.manuscriptId,
+          result.branchId,
+          result.revisionId,
+          result.branchId,
+          result.bookId,
+          result.manuscriptId,
+          result.importRecordId,
+          result.commitId,
+          result.bookId,
+          result.manuscriptId,
+          result.revisionId,
+          result.importRecordId,
+        ) as SqlRow[],
+      'COMMIT_PROOF_INCONCLUSIVE',
+      '无法核对完整导入记录图。',
+    );
+    const revisionBlocks = asNumber(counts.revision_blocks);
+    requireStore(
+      asNumber(counts.books) === 1 &&
+        asNumber(counts.dimension_sets) === 1 &&
+        asNumber(counts.dimensions) === 8 &&
+        asNumber(counts.manuscripts) === 1 &&
+        asNumber(counts.branches) === 1 &&
+        asNumber(counts.revisions) === 1 &&
+        revisionBlocks > 0 &&
+        asNumber(counts.working_blocks) === revisionBlocks &&
+        asNumber(counts.workflows) === 1 &&
+        asNumber(counts.import_records) === 1 &&
+        asNumber(counts.provenance) === 1,
+      'COMMIT_PROOF_INCONCLUSIVE',
+      '导入提交未形成完整权威记录图。',
+    );
+  }
+
+  async #verifyCommittedContentObject(result: Omit<ImportCommitProjection, 'firstWindow'>): Promise<void> {
+    const row = one(
+      this.#authority
+        .prepare(
+          `SELECT co.object_digest, co.relative_key, co.byte_length
+           FROM manuscript_import_records ir
+           JOIN source_versions sv ON sv.source_version_id = ir.source_version_id
+           JOIN content_objects co ON co.object_digest = sv.object_digest
+           WHERE ir.import_record_id = ? AND ir.commit_id = ?`,
+        )
+        .all(result.importRecordId, result.commitId) as SqlRow[],
+      'COMMIT_PROOF_INCONCLUSIVE',
+      '导入提交来源对象记录缺失。',
+    );
+    const digest = asString(row.object_digest);
+    requireStore(
+      digest === result.source.sourceSha256 && asNumber(row.byte_length) === result.source.sourceBytes,
+      'COMMIT_PROOF_INCONCLUSIVE',
+      '导入提交来源对象身份不一致。',
+    );
+    const path = this.#contentObjectPath(digest, asString(row.relative_key));
+    const info = await lstat(path);
+    requireStore(
+      info.isFile() && !info.isSymbolicLink() && info.size === result.source.sourceBytes,
+      'COMMIT_PROOF_INCONCLUSIVE',
+      '导入提交来源对象长度无效。',
+    );
+    requireStore(
+      (await digestFile(path)) === digest,
+      'COMMIT_PROOF_INCONCLUSIVE',
+      '导入提交来源对象摘要无效。',
+    );
+  }
+
+  async #originalFileAccess(snapshot: DraftSnapshot): Promise<OriginalFileAccessProjection> {
+    if (snapshot.selectedPath === null) {
+      return { state: 'unknown', label: '旧版草稿未保留原始路径，将从完整暂存快照继续' };
+    }
+    try {
+      const info = await lstat(snapshot.selectedPath);
+      if (!info.isFile() || info.isSymbolicLink() || info.size !== snapshot.sourceBytes) {
+        return { state: 'changed', label: '原始所选路径的文件已变化，将从完整暂存快照继续' };
+      }
+      const currentPath = await realpath(snapshot.selectedPath);
+      if (currentPath !== snapshot.selectedPath || (await digestFile(currentPath)) !== snapshot.sourceDigest) {
+        return { state: 'changed', label: '原始所选路径的文件已变化，将从完整暂存快照继续' };
+      }
+      return { state: 'available-exact', label: '原始所选文件仍可访问且身份一致' };
+    } catch {
+      return { state: 'unavailable', label: '原始所选文件已无法访问，将从完整暂存快照继续' };
+    }
+  }
+
+  async #inspectSnapshotCompleteness(snapshot: DraftSnapshot): Promise<void> {
+    const object = one(
+      this.#authority
+        .prepare('SELECT relative_key, byte_length FROM content_objects WHERE object_digest = ?')
+        .all(snapshot.objectDigest) as SqlRow[],
+      'SNAPSHOT_RESELECTION_REQUIRED',
+      '暂存对象记录缺失。',
+    );
+    requireStore(
+      snapshot.objectDigest === snapshot.sourceDigest && asNumber(object.byte_length) === snapshot.sourceBytes,
+      'SNAPSHOT_RESELECTION_REQUIRED',
+      '暂存对象身份记录不一致。',
+    );
+    const path = this.#contentObjectPath(snapshot.objectDigest, asString(object.relative_key));
+    const info = await lstat(path);
+    requireStore(
+      info.isFile() && !info.isSymbolicLink() && info.size === snapshot.sourceBytes,
+      'SNAPSHOT_RESELECTION_REQUIRED',
+      '暂存对象长度无效。',
+    );
+    requireStore(
+      (await digestFile(path)) === snapshot.sourceDigest && this.#loadStagedBlocks(snapshot.draftId).length === snapshot.blockCount,
+      'SNAPSHOT_RESELECTION_REQUIRED',
+      '暂存对象或内容块不完整。',
+    );
+  }
+
+  async #revalidateSnapshot(snapshot: DraftSnapshot): Promise<{ snapshot: DraftSnapshot; parserDrift: boolean }> {
+    try {
+      const object = one(
+        this.#authority
+          .prepare('SELECT relative_key, byte_length FROM content_objects WHERE object_digest = ?')
+          .all(snapshot.objectDigest) as SqlRow[],
+        'SNAPSHOT_RESELECTION_REQUIRED',
+        '暂存对象记录缺失。',
+      );
+      const relativeKey = asString(object.relative_key);
+      const byteLength = asNumber(object.byte_length);
+      requireStore(
+        snapshot.objectDigest === snapshot.sourceDigest && byteLength === snapshot.sourceBytes,
+        'SNAPSHOT_RESELECTION_REQUIRED',
+        '暂存对象身份记录不一致。',
+      );
+      const objectPath = this.#contentObjectPath(snapshot.objectDigest, relativeKey);
+      const info = await lstat(objectPath);
+      requireStore(
+        info.isFile() && !info.isSymbolicLink() && info.size === snapshot.sourceBytes,
+        'SNAPSHOT_RESELECTION_REQUIRED',
+        '暂存对象长度无效。',
+      );
+      requireStore(
+        (await digestFile(objectPath)) === snapshot.sourceDigest,
+        'SNAPSHOT_RESELECTION_REQUIRED',
+        '暂存对象摘要无效。',
+      );
+      const parsed = await parseDocx(objectPath, snapshot.displayName);
+      requireStore(
+        parsed.sourceDigest === snapshot.sourceDigest && parsed.archiveBytes === snapshot.sourceBytes,
+        'SNAPSHOT_RESELECTION_REQUIRED',
+        '暂存来源身份无法重建。',
+      );
+      if (parsed.parserIdentity !== snapshot.parserIdentity) {
+        return { snapshot: this.#refreshSnapshotForParserDrift(snapshot, parsed), parserDrift: true };
+      }
+      const stagedBlocks = this.#loadStagedBlocks(snapshot.draftId);
+      requireStore(
+        parsed.contentDigest === snapshot.contentDigest &&
+          parsed.structureDigest === snapshot.structureDigest &&
+          parsed.blocks.length === snapshot.blockCount &&
+          canonicalJson(parsed.fidelity) === canonicalJson(snapshot.fidelity) &&
+          parsed.titleSuggestion.value === snapshot.titleSuggestion &&
+          parsed.titleSuggestion.sourceLabel === snapshot.titleSource &&
+          canonicalJson(parsed.blocks) === canonicalJson(stagedBlocks),
+        'SNAPSHOT_RESELECTION_REQUIRED',
+        '暂存解析或预检状态不完整。',
+      );
+      return { snapshot, parserDrift: false };
+    } catch (error) {
+      if (error instanceof StoreError && error.code === 'DRAFT_VERSION_CHANGED') throw error;
+      throw new StoreError('SNAPSHOT_RESELECTION_REQUIRED', '暂存快照不完整或已损坏，需要精确重选原文件。');
+    }
+  }
+
+  #refreshSnapshotForParserDrift(snapshot: DraftSnapshot, parsed: ParsedDocx): DraftSnapshot {
+    const nextVersion = snapshot.version + 1;
+    const now = new Date().toISOString();
+    this.#transaction(this.#authority, () => {
+      this.#authority.prepare('DELETE FROM staged_import_snapshots WHERE draft_id = ?').run(snapshot.draftId);
+      this.#insertSnapshot(snapshot.draftId, parsed, now);
+      const update = this.#authority
+        .prepare(
+          `UPDATE import_drafts
+           SET state = 'staged', draft_version = ?, reviewed_title = NULL, reviewed_target_choice_id = NULL,
+               review_digest = NULL, reviewed_at = NULL
+           WHERE draft_id = ? AND draft_version = ? AND state IN ('staged', 'reviewed')`,
+        )
+        .run(nextVersion, snapshot.draftId, snapshot.version);
+      requireStore(update.changes === 1, 'DRAFT_VERSION_CHANGED', '导入草稿在重新预检时已变化。');
+      this.#authority.prepare("DELETE FROM import_commit_attempts WHERE draft_id = ? AND state = 'prepared'").run(snapshot.draftId);
+    });
+    return this.#loadDraftSnapshot(snapshot.draftId);
+  }
+
+  #invalidateReview(snapshot: DraftSnapshot): DraftSnapshot {
+    requireStore(snapshot.state === 'reviewed', 'DRAFT_STATE_CHANGED', '只有已复核草稿可以失效旧复核。');
+    const nextVersion = snapshot.version + 1;
+    this.#transaction(this.#authority, () => {
+      const update = this.#authority
+        .prepare(
+          `UPDATE import_drafts
+           SET state = 'staged', draft_version = ?, reviewed_title = NULL, reviewed_target_choice_id = NULL,
+               review_digest = NULL, reviewed_at = NULL
+           WHERE draft_id = ? AND draft_version = ? AND state = 'reviewed'`,
+        )
+        .run(nextVersion, snapshot.draftId, snapshot.version);
+      requireStore(update.changes === 1, 'DRAFT_VERSION_CHANGED', '导入草稿在复核失效时已变化。');
+      this.#authority.prepare("DELETE FROM import_commit_attempts WHERE draft_id = ? AND state = 'prepared'").run(snapshot.draftId);
+    });
+    return this.#loadDraftSnapshot(snapshot.draftId);
+  }
+
+  async #persistContentObject(selectedPath: string, parsed: ParsedDocx): Promise<string> {
+    const relativeKey = posix.join('sha256', parsed.sourceDigest.slice(0, 2), `${parsed.sourceDigest}.docx`);
+    const objectDirectory = await ensureCanonicalDataDirectory(
+      this.#dataRoot,
+      'objects',
+      'sha256',
+      parsed.sourceDigest.slice(0, 2),
+    );
+    const objectFileName = `${parsed.sourceDigest}.docx`;
+    const inspectedObject = await inspectCanonicalDataFile(this.#dataRoot, objectDirectory, objectFileName);
+    const objectPath = inspectedObject.path;
+    requireStore(isInside(this.#objectsRoot, objectPath), 'OBJECT_PATH_INVALID', '对象路径越界。');
+    if (!inspectedObject.exists || (await digestFile(objectPath)) !== parsed.sourceDigest) {
+      const temporary = `${objectPath}.${process.pid}.${randomUUID()}.partial`;
+      const temporaryName = basename(temporary);
+      requireStore(
+        !(await inspectCanonicalDataFile(this.#dataRoot, objectDirectory, temporaryName)).exists,
+        'OBJECT_PATH_INVALID',
+        '暂存对象路径已存在。',
+      );
+      try {
+        await copyFile(selectedPath, temporary, constants.COPYFILE_EXCL);
+        const inspectedTemporary = await inspectCanonicalDataFile(this.#dataRoot, objectDirectory, temporaryName);
+        requireStore(
+          inspectedTemporary.exists && inspectedTemporary.path === temporary,
+          'OBJECT_PATH_INVALID',
+          '暂存对象路径无效。',
+        );
+        const handle = await open(temporary, 'r+');
+        try {
+          await handle.sync();
+        } finally {
+          await handle.close();
+        }
+        requireStore((await digestFile(temporary)) === parsed.sourceDigest, 'OBJECT_VERIFY_FAILED', '暂存对象校验失败。');
+        await rename(temporary, objectPath);
+        const activated = await inspectCanonicalDataFile(this.#dataRoot, objectDirectory, objectFileName);
+        requireStore(
+          activated.exists && activated.path === objectPath && (await digestFile(objectPath)) === parsed.sourceDigest,
+          'OBJECT_PATH_INVALID',
+          '暂存对象激活无效。',
+        );
+      } catch (error) {
+        const cleanup = await inspectCanonicalDataFile(this.#dataRoot, objectDirectory, temporaryName);
+        if (cleanup.exists) await rm(cleanup.path, { force: true });
+        throw error;
+      }
+    }
+    return relativeKey;
+  }
+
+  #insertSnapshot(draftId: string, parsed: ParsedDocx, createdAt: string): void {
+    this.#authority
+      .prepare(
+        `INSERT INTO staged_import_snapshots(
+           draft_id, parser_identity, source_digest, content_digest, structure_digest, block_count,
+           fidelity_json, title_suggestion, title_source, snapshot_created_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        draftId,
+        parsed.parserIdentity,
+        parsed.sourceDigest,
+        parsed.contentDigest,
+        parsed.structureDigest,
+        parsed.blocks.length,
+        canonicalJson(parsed.fidelity),
+        parsed.titleSuggestion.value,
+        parsed.titleSuggestion.sourceLabel,
+        createdAt,
+      );
+    const insertBlock = this.#authority.prepare(
+      `INSERT INTO staged_import_blocks(
+         draft_id, staged_block_id, position, kind, level, text, digest
+       ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    );
+    for (const block of parsed.blocks) {
+      insertBlock.run(draftId, block.blockId, block.position, block.kind, block.level, block.text, block.digest);
+    }
+  }
+
+  #contentObjectPath(objectDigest: string, relativeKey: string): string {
+    requireStore(/^[0-9a-f]{64}$/.test(objectDigest), 'OBJECT_PATH_INVALID', '对象摘要无效。');
+    const expectedKey = posix.join('sha256', objectDigest.slice(0, 2), `${objectDigest}.docx`);
+    requireStore(relativeKey === expectedKey, 'OBJECT_PATH_INVALID', '对象相对路径无效。');
+    const path = resolve(this.#objectsRoot, ...relativeKey.split('/'));
+    requireStore(isInside(this.#objectsRoot, path), 'OBJECT_PATH_INVALID', '对象路径越界。');
+    return path;
+  }
+
+  async #sweepUnreferencedContentObjects(): Promise<void> {
+    const rows = this.#authority
+      .prepare(
+        `SELECT co.object_digest, co.relative_key
+         FROM content_objects co
+         WHERE NOT EXISTS (SELECT 1 FROM source_versions sv WHERE sv.object_digest = co.object_digest)
+           AND NOT EXISTS (SELECT 1 FROM import_drafts d WHERE d.object_digest = co.object_digest)
+         ORDER BY co.object_digest`,
+      )
+      .all() as SqlRow[];
+    for (const row of rows) {
+      const digest = asString(row.object_digest);
+      try {
+        await rm(this.#contentObjectPath(digest, asString(row.relative_key)), { force: true });
+      } catch {
+        continue;
+      }
+      this.#transaction(this.#authority, () => {
+        this.#authority
+          .prepare(
+            `DELETE FROM content_objects
+             WHERE object_digest = ?
+               AND NOT EXISTS (SELECT 1 FROM source_versions sv WHERE sv.object_digest = content_objects.object_digest)
+               AND NOT EXISTS (SELECT 1 FROM import_drafts d WHERE d.object_digest = content_objects.object_digest)`,
+          )
+          .run(digest);
+      });
+    }
+  }
+
   #stagedProjection(snapshot: DraftSnapshot): StagedImportProjection {
-    const identityFindings = this.#identityFindings(snapshot);
-    const targetChoice = newBookTargetChoice(identityFindings);
+    const exactMatches = this.#exactImportMatches(snapshot);
+    const targetChoice = newBookTargetChoice(exactMatches);
     return {
       draftId: snapshot.draftId,
       draftVersion: snapshot.version,
@@ -1447,7 +2557,7 @@ export class EditorialStore {
         provenanceLabel: '本机文件选择器 · 本地解析 · 未联网',
       },
       titleSuggestion: { value: snapshot.titleSuggestion, sourceLabel: snapshot.titleSource },
-      identityFindings,
+      exactMatches,
       targetChoices: [targetChoice],
       fidelity: snapshot.fidelity,
       detectedBlockCount: snapshot.blockCount,
@@ -1461,14 +2571,16 @@ export class EditorialStore {
     plan: ImportFidelityPlan,
     accepted: boolean,
     targetChoiceId: NewBookImportTargetChoiceId,
-    identityFindings: ReadonlyArray<ImportIdentityFindingProjection>,
+    exactMatches: ReadonlyArray<ExactImportMatchProjection>,
+    commitAttemptId: string | null,
   ): ReviewBeforeImportProjection {
-    const targetChoice = newBookTargetChoice(identityFindings);
+    const targetChoice = newBookTargetChoice(exactMatches);
     requireStore(targetChoiceId === targetChoice.id, 'TARGET_CHOICE_CHANGED', '导入目标选择已变化，请重新选择。');
     return {
       draftId: snapshot.draftId,
       draftVersion: snapshot.version,
       reviewDigest,
+      commitAttemptId,
       target: {
         choiceId: targetChoiceId,
         kind: 'new-book',
@@ -1476,7 +2588,7 @@ export class EditorialStore {
         confirmedTitle,
       },
       source: this.#stagedProjection(snapshot).source,
-      identityFindings,
+      exactMatches,
       fidelity: snapshot.fidelity,
       recordsToCreate: recordsToCreate(plan),
       nonEffects: nonEffects(plan),
@@ -1494,51 +2606,34 @@ export class EditorialStore {
     };
   }
 
-  #identityFindings(snapshot: DraftSnapshot): ImportIdentityFindingProjection[] {
-    const rows = this.#authority
-      .prepare(
-        `SELECT b.book_id, b.title, sv.source_version_id, sv.source_digest, sv.content_digest,
-                sv.structure_digest, sv.parser_identity, sv.display_name, ir.import_record_id
-         FROM source_versions sv
-         JOIN books b ON b.book_id = sv.book_id
-         JOIN manuscript_import_records ir
-           ON ir.book_id = sv.book_id
-          AND ir.source_version_id = sv.source_version_id
-         ORDER BY b.title COLLATE BINARY, b.book_id, sv.source_version_id, ir.import_record_id`,
-      )
-      .all() as SqlRow[];
-    const findings = new Map<string, ImportIdentityFindingProjection>();
-    for (const row of rows) {
-      const sourceDigest = asString(row.source_digest);
-      const contentDigest = asString(row.content_digest);
-      const structureDigest = asString(row.structure_digest);
-      const parserIdentity = asString(row.parser_identity);
-      const displayName = asString(row.display_name);
-      const identityClass =
-        sourceDigest === snapshot.sourceDigest
-          ? ({ kind: 'immutable-original', label: '精确原始文件身份' } as const)
-          : parserIdentity === snapshot.parserIdentity &&
-              contentDigest === snapshot.contentDigest &&
-              structureDigest === snapshot.structureDigest
-            ? ({ kind: 'parsed-content-structure', label: '发现相同内容' } as const)
-            : displayName === snapshot.displayName &&
-                (sourceDigest !== snapshot.sourceDigest ||
-                  contentDigest !== snapshot.contentDigest ||
-                  structureDigest !== snapshot.structureDigest)
-              ? ({ kind: 'filename-collision', label: '名称相同，内容不同' } as const)
-              : undefined;
-      if (!identityClass) continue;
-      const finding = {
-        bookId: asString(row.book_id),
-        bookTitle: asString(row.title),
-        sourceVersionId: asString(row.source_version_id),
-        importRecordId: asString(row.import_record_id),
-        identityClass,
-      } satisfies ImportIdentityFindingProjection;
-      const key = `${finding.bookId}\u0000${finding.sourceVersionId}\u0000${finding.importRecordId}`;
-      if (!findings.has(key)) findings.set(key, finding);
-    }
-    return [...findings.values()];
+  #exactImportMatches(snapshot: DraftSnapshot): ExactImportMatchProjection[] {
+    if (snapshot.sourceBytes !== SAMPLE1_SOURCE_BYTES || snapshot.sourceDigest !== SAMPLE1_SOURCE_SHA256) return [];
+    return (
+      this.#authority
+        .prepare(
+          `SELECT b.book_id, b.title, sv.source_version_id, sv.content_digest, sv.structure_digest,
+                  ir.import_record_id
+           FROM source_versions sv
+           JOIN books b ON b.book_id = sv.book_id
+           JOIN manuscript_import_records ir
+             ON ir.book_id = sv.book_id
+            AND ir.source_version_id = sv.source_version_id
+           WHERE sv.source_digest = ?
+           ORDER BY ir.imported_at, b.book_id, sv.source_version_id`,
+        )
+        .all(snapshot.sourceDigest) as SqlRow[]
+    ).map((row) => ({
+      bookId: asString(row.book_id),
+      bookTitle: asString(row.title),
+      sourceVersionId: asString(row.source_version_id),
+      importRecordId: asString(row.import_record_id),
+      identityClasses: [
+        { kind: 'immutable-original', label: '精确原始文件身份' } as const,
+        ...(asString(row.content_digest) === snapshot.contentDigest && asString(row.structure_digest) === snapshot.structureDigest
+          ? ([{ kind: 'parsed-content-structure', label: '精确解析内容与结构身份' }] as const)
+          : []),
+      ],
+    }));
   }
 
   #loadDraftSnapshot(draftId: string): DraftSnapshot {
@@ -1546,7 +2641,8 @@ export class EditorialStore {
       this.#authority
         .prepare(
           `SELECT d.draft_id, d.state, d.draft_version, d.display_name, d.object_digest,
-                  d.reviewed_title, d.review_digest, s.parser_identity, s.source_digest,
+                  d.selected_path, d.reviewed_title, d.reviewed_target_choice_id, d.review_digest,
+                  d.staged_at, s.parser_identity, s.source_digest,
                   s.content_digest, s.structure_digest, s.block_count, s.fidelity_json,
                   s.title_suggestion, s.title_source, co.byte_length
            FROM import_drafts d
@@ -1566,14 +2662,28 @@ export class EditorialStore {
     requireStore(plan, 'FIDELITY_OUTSIDE_TRACER', '持久化导入保真快照不符合当前受限边界。');
     const titleSource = asString(row.title_source);
     requireStore(titleSource === 'DOCX 标题元数据' || titleSource === '文件名', 'STORE_CORRUPT', '书名建议来源无效。');
+    const reviewedTargetChoiceId =
+      row.reviewed_target_choice_id === null ? null : asString(row.reviewed_target_choice_id);
+    requireStore(
+      reviewedTargetChoiceId === null ||
+        reviewedTargetChoiceId === 'new-book' ||
+        reviewedTargetChoiceId === 'new-book-distinct-intended-work',
+      'STORE_CORRUPT',
+      '导入复核目标无效。',
+    );
+    const selectedPath = row.selected_path === null ? null : asString(row.selected_path);
+    requireStore(selectedPath === null || isAbsolute(selectedPath), 'STORE_CORRUPT', '原始所选路径无效。');
     return {
       draftId: asString(row.draft_id),
       state: asString(row.state),
       version: asNumber(row.draft_version),
       displayName: asString(row.display_name),
       objectDigest: asString(row.object_digest),
+      selectedPath,
       reviewedTitle: row.reviewed_title === null ? null : asString(row.reviewed_title),
+      reviewedTargetChoiceId,
       reviewDigest: row.review_digest === null ? null : asString(row.review_digest),
+      stagedAt: asString(row.staged_at),
       parserIdentity: asString(row.parser_identity),
       sourceDigest,
       sourceBytes,

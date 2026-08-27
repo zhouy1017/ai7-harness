@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url';
 import {
   MAX_EDIT_CODE_UNITS,
   MAX_FRAME_BYTES,
+  type J01ImportControl,
   type ServiceFailureResponse,
   type ServiceRequest,
   type ServiceResponse,
@@ -64,6 +65,7 @@ function decodeRequest(frame: Uint8Array): ServiceRequest {
 
   switch (op) {
     case 'ready':
+    case 'getImportStartup':
     case 'shutdown': {
       requireInput(value.input, [], tentativeId);
       break;
@@ -71,6 +73,37 @@ function decodeRequest(frame: Uint8Array): ServiceRequest {
     case 'stageSelectedDocx': {
       const input = requireInput(value.input, ['selectionToken', 'selectedPath'], tentativeId);
       if (
+        !isBoundedString(input.selectionToken, 36) ||
+        !UUID_PATTERN.test(input.selectionToken) ||
+        !isBoundedString(input.selectedPath, 32_767) ||
+        !isAbsolute(input.selectedPath)
+      ) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
+    case 'continueImportDraft':
+    case 'abandonImportDraft': {
+      const input = requireInput(value.input, ['draftId', 'expectedDraftVersion'], tentativeId);
+      if (
+        !isBoundedString(input.draftId, 36) ||
+        !UUID_PATTERN.test(input.draftId) ||
+        !isSafeInteger(input.expectedDraftVersion, 1)
+      ) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
+    case 'reselectImportDraft': {
+      const input = requireInput(
+        value.input,
+        ['draftId', 'expectedDraftVersion', 'selectionToken', 'selectedPath'],
+        tentativeId,
+      );
+      if (
+        !isBoundedString(input.draftId, 36) ||
+        !UUID_PATTERN.test(input.draftId) ||
+        !isSafeInteger(input.expectedDraftVersion, 1) ||
         !isBoundedString(input.selectionToken, 36) ||
         !UUID_PATTERN.test(input.selectionToken) ||
         !isBoundedString(input.selectedPath, 32_767) ||
@@ -109,6 +142,13 @@ function decodeRequest(frame: Uint8Array): ServiceRequest {
         !isBoundedString(input.commitId, 36) ||
         !UUID_PATTERN.test(input.commitId)
       ) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
+    case 'acknowledgeImportCompletion': {
+      const input = requireInput(value.input, ['commitId'], tentativeId);
+      if (!isBoundedString(input.commitId, 36) || !UUID_PATTERN.test(input.commitId)) {
         throw new ProtocolError(tentativeId);
       }
       break;
@@ -245,16 +285,45 @@ async function dispatch(
   store: EditorialStore,
   harness: DormantHarnessRuntime,
   request: ServiceRequest,
+  importControl: J01ImportControl | undefined,
 ): Promise<ServiceSuccessResponse> {
   switch (request.op) {
     case 'ready':
       return { id: request.id, ok: true, op: request.op, result: harness.readiness };
+    case 'getImportStartup':
+      return { id: request.id, ok: true, op: request.op, result: await store.getImportStartup() };
     case 'stageSelectedDocx':
       return {
         id: request.id,
         ok: true,
         op: request.op,
         result: await store.stageSelectedDocx(request.input.selectionToken, request.input.selectedPath),
+      };
+    case 'continueImportDraft':
+      return {
+        id: request.id,
+        ok: true,
+        op: request.op,
+        result: await store.continueImportDraft(request.input.draftId, request.input.expectedDraftVersion),
+      };
+    case 'reselectImportDraft':
+      return {
+        id: request.id,
+        ok: true,
+        op: request.op,
+        result: await store.reselectImportDraft(
+          request.input.draftId,
+          request.input.expectedDraftVersion,
+          request.input.selectionToken,
+          request.input.selectedPath,
+        ),
+      };
+    case 'abandonImportDraft':
+      return {
+        id: request.id,
+        ok: true,
+        op: request.op,
+        result: await store.abandonImportDraft(request.input.draftId, request.input.expectedDraftVersion),
       };
     case 'prepareNewBookReview':
       return {
@@ -270,7 +339,21 @@ async function dispatch(
         ),
       };
     case 'commitNewBookImport':
-      return { id: request.id, ok: true, op: request.op, result: store.commitNewBookImport(request.input) };
+      return {
+        id: request.id,
+        ok: true,
+        op: request.op,
+        result: await store.commitNewBookImport(request.input, {
+          interruptAfterAttempt: importControl === 'before-commit' || importControl === 'uncertain-reconciliation',
+        }),
+      };
+    case 'acknowledgeImportCompletion':
+      return {
+        id: request.id,
+        ok: true,
+        op: request.op,
+        result: await store.acknowledgeImportCompletion(request.input.commitId),
+      };
     case 'getManuscriptWindow':
       return {
         id: request.id,
@@ -285,21 +368,47 @@ async function dispatch(
   }
 }
 
-function parseArguments(argv: string[]): { dataRoot: string; parentPid: number } {
+function parseArguments(argv: string[]): {
+  dataRoot: string;
+  parentPid: number;
+  importControl: J01ImportControl | undefined;
+} {
   const values = new Map<string, string>();
   for (let index = 0; index < argv.length; index += 2) {
     const key = argv[index];
     const value = argv[index + 1];
-    if (!key || !value || values.has(key) || (key !== '--data-root' && key !== '--parent-pid')) throw new ProtocolError();
+    if (
+      !key ||
+      !value ||
+      values.has(key) ||
+      (key !== '--data-root' && key !== '--parent-pid' && key !== '--j01-import-control')
+    ) {
+      throw new ProtocolError();
+    }
     values.set(key, value);
   }
   const dataRoot = values.get('--data-root');
   const parentPidValue = values.get('--parent-pid');
   const parentPid = Number(parentPidValue);
-  if (!dataRoot || !isAbsolute(dataRoot) || !Number.isSafeInteger(parentPid) || parentPid <= 0 || process.ppid !== parentPid) {
+  const importControlValue = values.get('--j01-import-control');
+  const importControl =
+    importControlValue === 'before-commit' ||
+    importControlValue === 'after-commit-before-response' ||
+    importControlValue === 'uncertain-reconciliation'
+      ? importControlValue
+      : undefined;
+  if (
+    !dataRoot ||
+    !isAbsolute(dataRoot) ||
+    !Number.isSafeInteger(parentPid) ||
+    parentPid <= 0 ||
+    process.ppid !== parentPid ||
+    (importControlValue !== undefined &&
+      (importControl === undefined || process.env.AI7_E2E_JOURNEY !== 'J-01'))
+  ) {
     throw new ProtocolError();
   }
-  return { dataRoot, parentPid };
+  return { dataRoot, parentPid, importControl };
 }
 
 function parentIsAlive(parentPid: number): boolean {
@@ -314,7 +423,7 @@ function parentIsAlive(parentPid: number): boolean {
 
 async function run(): Promise<void> {
   installNodeNetworkDenial();
-  const { dataRoot, parentPid } = parseArguments(process.argv.slice(2));
+  const { dataRoot, parentPid, importControl } = parseArguments(process.argv.slice(2));
   const [{ EditorialStore, StoreError, StoreFatalError }, { mountDormantHarness }] = await Promise.all([
     import('./store.js'),
     import('./runtime.js'),
@@ -336,7 +445,9 @@ async function run(): Promise<void> {
   let harness: DormantHarnessRuntime | undefined;
   try {
     const codeRoot = fileURLToPath(new URL('../../', import.meta.url));
-    store = await EditorialStore.open(dataRoot, codeRoot);
+    store = await EditorialStore.open(dataRoot, codeRoot, {
+      induceUnprovableReconciliation: importControl === 'uncertain-reconciliation',
+    });
     harness = await mountDormantHarness();
     for await (const frame of readFrames()) {
       let request: ServiceRequest;
@@ -349,13 +460,17 @@ async function run(): Promise<void> {
       }
       let response: ServiceResponse;
       try {
-        response = await dispatch(store, harness, request);
+        response = await dispatch(store, harness, request, importControl);
       } catch (error) {
         if (error instanceof StoreFatalError) {
           stop();
           throw error;
         }
         response = failureResponse(request.id, error, StoreError);
+      }
+      if (request.op === 'commitNewBookImport' && importControl === 'after-commit-before-response') {
+        stop();
+        throw new Error('E2E interruption after committed import and before response.');
       }
       await writeResponse(response);
       if (request.op === 'shutdown') break;

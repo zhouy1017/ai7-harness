@@ -1,4 +1,4 @@
-export const SERVICE_PROTOCOL_VERSION = 2 as const;
+export const SERVICE_PROTOCOL_VERSION = 3 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -6,10 +6,17 @@ export const MAX_BLOCK_CODE_UNITS = 4_096;
 export const MAX_EDIT_GRAPHEMES = 256;
 export const MAX_EDIT_CODE_UNITS = 1_024;
 
+export type J01ImportControl = 'before-commit' | 'after-commit-before-response' | 'uncertain-reconciliation';
+
 export const IPC_CHANNELS = {
+  getImportStartup: 'ai7:j01:get-import-startup',
   selectAndStageDocx: 'ai7:j01:select-and-stage-docx',
+  continueImportDraft: 'ai7:j01:continue-import-draft',
+  reselectImportDraft: 'ai7:j01:reselect-import-draft',
+  abandonImportDraft: 'ai7:j01:abandon-import-draft',
   prepareNewBookReview: 'ai7:j01:prepare-new-book-review',
   commitNewBookImport: 'ai7:j01:commit-new-book-import',
+  acknowledgeImportCompletion: 'ai7:j01:acknowledge-import-completion',
   getManuscriptWindow: 'ai7:j01:get-manuscript-window',
   flushJournalEdit: 'ai7:j01:flush-journal-edit',
 } as const;
@@ -100,6 +107,7 @@ export interface ReviewBeforeImportProjection {
   draftId: string;
   draftVersion: number;
   reviewDigest: string | null;
+  commitAttemptId: string | null;
   target: {
     choiceId: NewBookImportTargetChoiceId;
     kind: 'new-book';
@@ -188,6 +196,52 @@ export interface ImportCommitProjection {
   firstWindow: ManuscriptWindowProjection;
 }
 
+export type OriginalFileAccessProjection =
+  | { state: 'available-exact'; label: '原始所选文件仍可访问且身份一致' }
+  | { state: 'unavailable'; label: '原始所选文件已无法访问，将从完整暂存快照继续' }
+  | { state: 'changed'; label: '原始所选路径的文件已变化，将从完整暂存快照继续' }
+  | { state: 'unknown'; label: '旧版草稿未保留原始路径，将从完整暂存快照继续' };
+
+export interface ImportDraftRecoveryProjection {
+  kind: 'ordinary-draft' | 'outcome-uncertain';
+  draftId: string;
+  draftVersion: number;
+  stagedAt: string;
+  sourceDisplayName: string;
+  snapshotState: 'complete' | 'reselection-required';
+  lastCompletedStep: 'staging' | 'review' | 'commit-attempt' | 'commit-outcome-uncertain';
+  reviewedTitle: string | null;
+  targetLabel: '新建图书' | '新建图书（作为不同作品）' | null;
+  originalFileAccess: OriginalFileAccessProjection;
+  staged: StagedImportProjection | null;
+  commitAttemptId: string | null;
+  supportCode: 'SNAPSHOT_RESELECTION_REQUIRED' | 'COMMIT_PROOF_INCONCLUSIVE' | null;
+}
+
+export type ImportStartupProjection =
+  | { state: 'none' }
+  | { state: 'draft-recovery'; recovery: ImportDraftRecoveryProjection }
+  | { state: 'outcome-uncertain'; recovery: ImportDraftRecoveryProjection }
+  | { state: 'committed-recovered'; result: ImportCommitProjection };
+
+export type ContinueImportProjection =
+  | {
+      state: 'target-review-required';
+      staged: StagedImportProjection;
+      originalFileAccess: OriginalFileAccessProjection;
+      reviewInvalidated: boolean;
+      notice: string;
+    }
+  | {
+      state: 'review-ready';
+      review: ReviewBeforeImportProjection;
+      originalFileAccess: OriginalFileAccessProjection;
+      notice: string;
+    }
+  | { state: 'reselection-required'; recovery: ImportDraftRecoveryProjection }
+  | { state: 'outcome-uncertain'; recovery: ImportDraftRecoveryProjection }
+  | { state: 'committed-recovered'; result: ImportCommitProjection };
+
 export interface JournalEditInput {
   clientEditId: string;
   manuscriptId: string;
@@ -213,7 +267,9 @@ export interface JournalAcknowledgement {
   completionLabel: '已写入修订日志';
 }
 
-export type CommitNewBookRendererInput = Omit<ServiceOperationMap['commitNewBookImport']['input'], 'commitId'>;
+export type CommitNewBookRendererInput = Omit<ServiceOperationMap['commitNewBookImport']['input'], 'commitId'> & {
+  commitAttemptId: string | null;
+};
 
 export interface ServiceReadiness {
   protocolVersion: typeof SERVICE_PROTOCOL_VERSION;
@@ -243,9 +299,22 @@ export interface ServiceReadiness {
 
 export interface ServiceOperationMap {
   ready: { input: Record<string, never>; output: ServiceReadiness };
+  getImportStartup: { input: Record<string, never>; output: ImportStartupProjection };
   stageSelectedDocx: {
     input: { selectionToken: string; selectedPath: string };
     output: StagedImportProjection;
+  };
+  continueImportDraft: {
+    input: { draftId: string; expectedDraftVersion: number };
+    output: ContinueImportProjection;
+  };
+  reselectImportDraft: {
+    input: { draftId: string; expectedDraftVersion: number; selectionToken: string; selectedPath: string };
+    output: ContinueImportProjection;
+  };
+  abandonImportDraft: {
+    input: { draftId: string; expectedDraftVersion: number };
+    output: ImportStartupProjection;
   };
   prepareNewBookReview: {
     input: {
@@ -260,6 +329,10 @@ export interface ServiceOperationMap {
   commitNewBookImport: {
     input: { draftId: string; expectedDraftVersion: number; reviewDigest: string; commitId: string };
     output: ImportCommitProjection;
+  };
+  acknowledgeImportCompletion: {
+    input: { commitId: string };
+    output: { state: 'acknowledged' };
   };
   getManuscriptWindow: {
     input: { manuscriptId: string; branchId: string; cursor: string | null };
@@ -303,11 +376,23 @@ export type PickerStageResult =
   | { status: 'cancelled' }
   | { status: 'staged'; staged: StagedImportProjection };
 
+export type PickerReselectResult =
+  | { status: 'cancelled' }
+  | { status: 'reselected'; continuation: ContinueImportProjection };
+
 export interface RendererApi {
   readonly platform: 'win32' | 'darwin';
+  getImportStartup(): Promise<ImportStartupProjection>;
   selectAndStageDocx(): Promise<PickerStageResult>;
+  continueImportDraft(input: ServiceOperationMap['continueImportDraft']['input']): Promise<ContinueImportProjection>;
+  reselectImportDraft(input: {
+    draftId: string;
+    expectedDraftVersion: number;
+  }): Promise<PickerReselectResult>;
+  abandonImportDraft(input: ServiceOperationMap['abandonImportDraft']['input']): Promise<ImportStartupProjection>;
   prepareNewBookReview(input: ServiceOperationMap['prepareNewBookReview']['input']): Promise<ReviewBeforeImportProjection>;
   commitNewBookImport(input: CommitNewBookRendererInput): Promise<ImportCommitProjection>;
+  acknowledgeImportCompletion(input: ServiceOperationMap['acknowledgeImportCompletion']['input']): Promise<{ state: 'acknowledged' }>;
   getManuscriptWindow(input: ServiceOperationMap['getManuscriptWindow']['input']): Promise<ManuscriptWindowProjection>;
   flushJournalEdit(input: JournalEditInput): Promise<JournalAcknowledgement>;
 }
