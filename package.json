@@ -15,7 +15,7 @@
     "bootstrap": "node tools/bootstrap.mjs",
     "build": "node tools/build.mjs",
     "start-built": "node tools/start-built.mjs",
-    "e2e": "node e2e/run-j01.mjs"
+    "e2e": "node e2e/run.mjs"
   },
   "dependencies": {
     "@deepseek-ai/cordis": "4.0.1",

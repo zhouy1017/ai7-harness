@@ -1,28 +1,28 @@
 # Current handoff
 
-[Issue #41](https://github.com/zhouy1017/ai7-harness/issues/41), **[S06] J-01: Complete import continuity and commit reconciliation**, is the active sole-writer integration on `feat/41-import-continuity` from exact `dev@0dcc2265610fb908cae8e41cb326d1bc01b33f84`.
+[Issue #43](https://github.com/zhouy1017/ai7-harness/issues/43), **[S08] J-02: Complete the 10M-character bounded editing module**, is the active sole-writer integration on `feat/43-bounded-editor` from exact `origin/dev@0fef4d8321b86db07742de5a9c927e0b8741b75b`.
 
-Resolve this file from the exact tree being read. The bounded result combines the already-integrated deterministic import identity disclosure with restart-safe J-01 continuity: review schema v4, service protocol v3, and SQLite schema v5 are distinct namespaces and all remain intentional.
+Resolve this file from the exact tree being read. The original candidate tip `84885a46ab754be3f9c6d411053b00ba92d4d9cc` was rebased only as evidence; its conflicted import owners and raw SQLite v3-v7 states are not canonical authority.
 
 ## Current outcome and authority route
 
-- Complete content-addressed staged snapshots survive restart and original-path loss. Startup makes no automatic selection or commit; it distinguishes ordinary recovery, cleanup-pending, proven committed completion, and outcome uncertainty.
-- Ordered one-class-per-record `identityFindings` retain immutable-original, parsed-content-and-structure, and same-name/different-content disclosure. They remain non-authorizing and are re-derived into the v4 digest before durable attempt preparation and again inside the atomic commit.
-- Schema-v2/v3 data and complete drafts remain recoverable, but every non-v4 review loses commit authority and returns to explicit target selection and v4 re-review. Ordinary production generates and accepts only v4.
-- `import_commit_attempts` is only the durable idempotency/reconciliation envelope. `import_commits` plus the authoritative Book/Source/Manuscript graph remain completion proof; inconclusive proof fails closed without a second ledger.
-- Abandonment keeps its committed cleanup intent, shared-object protection, cumulative schema-v4 insert guards, schema-v5 OLD/NEW update guards, serialized object lifecycle, and deterministic restart cleanup.
-- The existing provider-free J-01 gate now composes identity A/B cases with path loss, an identity-bearing review restart, legacy-review invalidation, pre/post-commit interruption, uncertain reconciliation, visible completion acknowledgement, cleanup failure, and post-removal recovery. Synthetic inputs remain runtime-only under the disposable external root.
+- Owner-approved scheme 1 preserves canonical SQLite v5 as the only direct predecessor and upgrades it once to final v6. Import review v4 and service protocol v4 are separate namespaces. Every #37/#41 identity, recovery, path-loss, attempt, reconciliation, completion-acknowledgement, uncertainty, and abandonment-cleanup rule remains authoritative.
+- DOCX parsing uses one inert `import_ingest_blocks` relation in the existing `store/ai7.sqlite`, a dedicated connection, and synchronous batches of at most 256 rows. A short authority transaction validates and promotes the complete snapshot; startup sweeps inert rows before import recovery. There is no second database, store owner, process, recovery surface, or manuscript payload log.
+- The initial import transaction now establishes r1 plus exact bounded working blocks, outline, FTS, private Fenwick offsets, and durable history root without materializing the whole manuscript. Renderer windows remain capped at 32 blocks.
+- The canonical import UI remains the startup authority. Only after it returns `none` may prior work load. Newly committed completion must be painted and durably acknowledged before “打开稿件” becomes available.
+- J-02 adds exact position and outline navigation, off-window read-only continuity, CJK search, Search Return Position, reviewed/frozen atomic replacement, cooperative cancellation, Milestone r2, persisted reopen, restart-safe undo/redo, and applicable J-14 keyboard/IME/focus/reflow/forced-colors behavior.
+- The one provider-free E2E Functional Gate keeps the full current J-01 lifecycle and adds J-02 on the same Windows/macOS jobs. No new standing gate is created.
 
-Stable Issue #86 authority, Provider non-authorization, inert imported updates until adoption or an Artifact Update Rule, active Background Analysis Enrollment for background Provider work, and the exact single-use AI7 Apply boundary remain unchanged. No Provider call, dependency/plugin installation, tracked manuscript/derivative, new gate, release, or `main` action is authorized.
+Stable Issue #86 authority, Provider setup/install non-authorization, active Background Analysis Enrollment for background Provider work, inert imported updates until adoption or an Artifact Update Rule, and the exact single-use AI7 Apply boundary remain unchanged. No Provider call, dependency/plugin installation, manuscript/derivative addition, adjacent Issue decomposition, release, `main` action, or PR integration is authorized by this handoff.
 
 ## Safe next action
 
-Run the remaining bounded no-install validation, checkpoint the normalized result, push only `feat/41-import-continuity`, open the Issue #41 pull request, and wait for the existing Route plus Windows/macOS J-01 checks. Their results inform Commander integration; no independent review becomes an exact-head, zero-finding, iterative re-review, PR, or CI gate.
+Finish source/E2E consistency checks and update `PROGRESS.md`. Exact local Node 24.18.1, pnpm 11.24.0, and installed dependencies are absent; do not substitute or install them. After bounded static checks, commit and push only `feat/43-bounded-editor`, open its single PR to `dev`, and use only the existing Route plus Windows/macOS J-01+J-02 checks. Advisory review is not an exact-head, zero-finding, iterative re-review, PR, or CI gate.
 
-After Issue #41 is merged and `dev` is re-resolved, Issue #43 is the next candidate for a separate semantic replay. Do not mix it into this branch: its editor schema must be renumbered above SQLite schema v5 while preserving review v4, protocol v3, continuity triggers, attempts, and identity evidence.
+Stop if the Issue #43 Change Brief or structural budget must expand, target-qualified authority drifts, or remaining usage falls below 15%.
 
 ## Resume prompt
 
 ```text
-Finish only Issue #41 on feat/41-import-continuity from exact dev@0dcc2265610fb908cae8e41cb326d1bc01b33f84. Preserve review schema v4 with ordered identityFindings, service protocol v3, SQLite schema v5, strict non-v4 review invalidation, and every bounded recovery/reconciliation/cleanup case. Run no-install validation, then create and integrate only its PR through the existing checks. Do not start Issue #43 on this branch, install, call Providers, add manuscripts or derivatives, add gates, release, or touch main.
+Continue only Issue #43 on feat/43-bounded-editor above exact origin/dev@0fef4d8321b86db07742de5a9c927e0b8741b75b. Preserve direct SQLite v5→v6, import review v4, service protocol v4, all #37/#41 continuity and cleanup semantics, inert 256-row same-database ingest, one SQLite/service owner, 32-block windows, the accepted exact-navigation/read-only-continuity fixes, and the single existing E2E Functional Gate. Finish J-01/J-02 and documentation normalization, run non-substituting checks, then create and integrate only the Issue #43 PR through existing checks. Do not enter docs/archive, install dependencies/plugins, call Providers, add manuscripts or derivatives, decompose adjacent Issues, add gates, release, or touch main.
 ```

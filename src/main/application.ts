@@ -54,6 +54,7 @@ function parseArguments(argv: string[]): LaunchArguments {
         !values.has(key) &&
         (key === '--data-root' ||
           key === '--j01-picker-path' ||
+          key === '--j02-picker-path' ||
           key === '--j01-import-control' ||
           key === '--launcher-pid'),
     );
@@ -61,7 +62,22 @@ function parseArguments(argv: string[]): LaunchArguments {
   }
   const dataRoot = values.get('--data-root');
   requireDesktop(dataRoot !== undefined && isAbsolute(dataRoot));
-  const injectedPickerPath = values.get('--j01-picker-path');
+  const j01PickerPath = values.get('--j01-picker-path');
+  const j02PickerPath = values.get('--j02-picker-path');
+  requireDesktop(!(j01PickerPath && j02PickerPath));
+  requireDesktop(
+    j01PickerPath === undefined ||
+      (process.env.AI7_E2E_JOURNEY === 'J-01' &&
+        isAbsolute(j01PickerPath) &&
+        extname(j01PickerPath).toLocaleLowerCase('en-US') === '.docx'),
+  );
+  requireDesktop(
+    j02PickerPath === undefined ||
+      (process.env.AI7_E2E_JOURNEY === 'J-02' &&
+        isAbsolute(j02PickerPath) &&
+        extname(j02PickerPath).toLocaleLowerCase('en-US') === '.docx'),
+  );
+  const injectedPickerPath = j01PickerPath ?? j02PickerPath;
   const importControlValue = values.get('--j01-import-control');
   const importControl =
     importControlValue === 'before-commit' ||
@@ -73,12 +89,6 @@ function parseArguments(argv: string[]): LaunchArguments {
       ? importControlValue
       : undefined;
   const launcherPid = Number(values.get('--launcher-pid'));
-  requireDesktop(
-    injectedPickerPath === undefined ||
-      (process.env.AI7_E2E_JOURNEY === 'J-01' &&
-        isAbsolute(injectedPickerPath) &&
-        extname(injectedPickerPath).toLocaleLowerCase('en-US') === '.docx'),
-  );
   requireDesktop(
     importControlValue === undefined || (process.env.AI7_E2E_JOURNEY === 'J-01' && importControl !== undefined),
   );
@@ -311,6 +321,32 @@ function registerRendererHandlers(
       return service.call('flushJournalEdit', input);
     }),
   );
+  const serviceHandlers = [
+    ['listPriorWork', IPC_CHANNELS.listPriorWork],
+    ['getManuscriptWindowAt', IPC_CHANNELS.getManuscriptWindowAt],
+    ['getOutline', IPC_CHANNELS.getOutline],
+    ['startSearch', IPC_CHANNELS.startSearch],
+    ['pollServiceJob', IPC_CHANNELS.pollServiceJob],
+    ['cancelServiceJob', IPC_CHANNELS.cancelServiceJob],
+    ['getSearchResults', IPC_CHANNELS.getSearchResults],
+    ['prepareReplacement', IPC_CHANNELS.prepareReplacement],
+    ['freezeReplacement', IPC_CHANNELS.freezeReplacement],
+    ['dismissReplacementPreview', IPC_CHANNELS.dismissReplacementPreview],
+    ['startReplacementCommit', IPC_CHANNELS.startReplacementCommit],
+    ['commitReplacement', IPC_CHANNELS.commitReplacement],
+    ['saveMilestone', IPC_CHANNELS.saveMilestone],
+    ['undoManuscript', IPC_CHANNELS.undoManuscript],
+    ['redoManuscript', IPC_CHANNELS.redoManuscript],
+  ] as const;
+  for (const [operation, channel] of serviceHandlers) {
+    ipcMain.handle(channel, (event, input: ServiceOperationMap[typeof operation]['input']) =>
+      envelope(async () => {
+        requireSender(event);
+        requireAuthority();
+        return service.call(operation, input);
+      }),
+    );
+  }
 
   return () => {
     for (const channel of Object.values(IPC_CHANNELS)) ipcMain.removeHandler(channel);

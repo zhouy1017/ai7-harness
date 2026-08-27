@@ -1,0 +1,3653 @@
+import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
+import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
+import {
+  MAX_BLOCK_CODE_UNITS,
+  MAX_BLOCK_GRAPHEMES,
+  MAX_EDIT_CODE_UNITS,
+  MAX_EDIT_GRAPHEMES,
+  MAX_FRAME_BYTES,
+  MAX_OUTLINE_DISPLAY_UTF8_BYTES,
+  MAX_OUTLINE_RESULTS,
+  MAX_REPLACEMENT_EXCLUSIONS,
+  MAX_REPLACEMENT_GRAPHEMES,
+  MAX_SEARCH_QUERY_GRAPHEMES,
+  MAX_SEARCH_RESULTS,
+  MAX_WINDOW_BLOCKS,
+  type DurableHistoryProjection,
+  type JournalAcknowledgement,
+  type JournalEditInput,
+  type ManuscriptBlockProjection,
+  type ManuscriptWindowProjection,
+  type ManuscriptWindowTarget,
+  type MilestoneProjection,
+  type OutlineProjection,
+  type PriorWorkItemProjection,
+  type ReplacementCommitProjection,
+  type ReplacementPreviewProjection,
+  type SearchMatchProjection,
+  type SearchResultsProjection,
+  type SearchSummaryProjection,
+} from '../shared/protocol.js';
+
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const DIGEST_PATTERN = /^[0-9a-f]{64}$/;
+const BLOCK_PATTERN = /^blk_[0-9a-f]{24}$/;
+const CONTINUITY_SCHEMA_VERSION = 5;
+const SCHEMA_VERSION = 6;
+const MIGRATION_BATCH = 256;
+const SEARCH_BATCH = 128;
+const HISTORY_BATCH = 128;
+const WINDOW_STRIDE = Math.floor(MAX_WINDOW_BLOCKS / 2);
+const MAX_RETAINED_TRANSIENT_SEARCHES = 32;
+const MAX_RETAINED_REPLACEMENT_PREVIEWS = 8;
+const MAX_RETAINED_TERMINAL_REPLACEMENTS = 4;
+const REPLACEMENT_MATCHING_RULE = '精确字素匹配；从左向右；重叠时保留最早匹配' as const;
+const REPLACEMENT_INCLUSION_RULE = '仅提交冻结时明确纳入的非重叠精确匹配' as const;
+
+type SqlRow = Record<string, SQLOutputValue>;
+
+const COMMON_SCHEMA_SQL = {
+  content_objects: `CREATE TABLE content_objects (
+    object_digest TEXT PRIMARY KEY CHECK(length(object_digest) = 64),
+    relative_key TEXT NOT NULL UNIQUE,
+    byte_length INTEGER NOT NULL CHECK(byte_length > 0),
+    verified_at TEXT NOT NULL
+  ) STRICT`,
+  import_drafts: `CREATE TABLE import_drafts (
+    draft_id TEXT PRIMARY KEY,
+    selection_token TEXT NOT NULL UNIQUE,
+    state TEXT NOT NULL CHECK(state IN ('staged', 'reviewed', 'committed')),
+    draft_version INTEGER NOT NULL CHECK(draft_version >= 1),
+    display_name TEXT NOT NULL,
+    object_digest TEXT NOT NULL REFERENCES content_objects(object_digest),
+    selected_path TEXT,
+    reviewed_title TEXT,
+    reviewed_target_choice_id TEXT
+      CHECK(reviewed_target_choice_id IS NULL OR reviewed_target_choice_id IN ('new-book', 'new-book-distinct-intended-work')),
+    review_digest TEXT UNIQUE,
+    committed_commit_id TEXT UNIQUE,
+    staged_at TEXT NOT NULL,
+    reviewed_at TEXT,
+    committed_at TEXT
+  ) STRICT`,
+  books: `CREATE TABLE books (
+    book_id TEXT PRIMARY KEY,
+    stable_identity TEXT NOT NULL UNIQUE,
+    title TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  ) STRICT`,
+  book_dimension_sets: `CREATE TABLE book_dimension_sets (
+    dimension_set_id TEXT PRIMARY KEY,
+    book_id TEXT NOT NULL UNIQUE REFERENCES books(book_id),
+    version INTEGER NOT NULL CHECK(version = 1),
+    profile_id TEXT NOT NULL,
+    profile_version TEXT NOT NULL,
+    definition_digest TEXT NOT NULL CHECK(length(definition_digest) = 64),
+    weight_semantics TEXT NOT NULL CHECK(weight_semantics = '中性起始权重；非穷尽评分量表'),
+    created_at TEXT NOT NULL
+  ) STRICT`,
+  book_dimensions: `CREATE TABLE book_dimensions (
+    dimension_set_id TEXT NOT NULL REFERENCES book_dimension_sets(dimension_set_id),
+    dimension_id TEXT NOT NULL,
+    display_label TEXT NOT NULL,
+    weight REAL NOT NULL CHECK(weight > 0),
+    position INTEGER NOT NULL CHECK(position BETWEEN 1 AND 8),
+    PRIMARY KEY(dimension_set_id, dimension_id),
+    UNIQUE(dimension_set_id, position)
+  ) STRICT`,
+  source_versions: `CREATE TABLE source_versions (
+    source_version_id TEXT PRIMARY KEY,
+    book_id TEXT NOT NULL REFERENCES books(book_id),
+    object_digest TEXT NOT NULL REFERENCES content_objects(object_digest),
+    source_digest TEXT NOT NULL CHECK(length(source_digest) = 64),
+    content_digest TEXT NOT NULL CHECK(length(content_digest) = 64),
+    structure_digest TEXT NOT NULL CHECK(length(structure_digest) = 64),
+    parser_identity TEXT NOT NULL,
+    format TEXT NOT NULL CHECK(format = 'DOCX'),
+    display_name TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE(book_id, source_digest)
+  ) STRICT`,
+  source_provenance: `CREATE TABLE source_provenance (
+    provenance_id TEXT PRIMARY KEY,
+    source_version_id TEXT NOT NULL UNIQUE REFERENCES source_versions(source_version_id),
+    acquisition_path TEXT NOT NULL CHECK(acquisition_path = 'native-file-picker'),
+    locality TEXT NOT NULL CHECK(locality = 'local-provider-free'),
+    sanitized_identity TEXT NOT NULL,
+    parser_identity TEXT NOT NULL,
+    recorded_at TEXT NOT NULL
+  ) STRICT`,
+  import_fidelity_reviews: `CREATE TABLE import_fidelity_reviews (
+    fidelity_review_id TEXT PRIMARY KEY,
+    book_id TEXT NOT NULL REFERENCES books(book_id),
+    source_version_id TEXT NOT NULL UNIQUE REFERENCES source_versions(source_version_id),
+    review_digest TEXT NOT NULL UNIQUE,
+    outcome TEXT NOT NULL CHECK(outcome IN ('clean-import-no-round-trip', 'degraded-import-no-round-trip')),
+    round_trip_guaranteed INTEGER NOT NULL CHECK(round_trip_guaranteed = 0),
+    created_at TEXT NOT NULL
+  ) STRICT`,
+  import_fidelity_categories: `CREATE TABLE import_fidelity_categories (
+    fidelity_review_id TEXT NOT NULL REFERENCES import_fidelity_reviews(fidelity_review_id),
+    category_key TEXT NOT NULL,
+    display_label TEXT NOT NULL,
+    item_count INTEGER NOT NULL CHECK(item_count >= 0),
+    status TEXT NOT NULL CHECK(status IN ('preserved', 'degraded', 'unsupported')),
+    detail TEXT NOT NULL,
+    position INTEGER NOT NULL CHECK(position BETWEEN 1 AND 8),
+    PRIMARY KEY(fidelity_review_id, category_key),
+    UNIQUE(fidelity_review_id, position)
+  ) STRICT`,
+  import_degradation_decisions: `CREATE TABLE import_degradation_decisions (
+    degradation_decision_id TEXT PRIMARY KEY,
+    fidelity_review_id TEXT NOT NULL UNIQUE REFERENCES import_fidelity_reviews(fidelity_review_id),
+    decision TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  ) STRICT`,
+  manuscripts: `CREATE TABLE manuscripts (
+    manuscript_id TEXT PRIMARY KEY,
+    book_id TEXT NOT NULL UNIQUE REFERENCES books(book_id),
+    role TEXT NOT NULL CHECK(role = 'primary'),
+    created_at TEXT NOT NULL
+  ) STRICT`,
+  manuscript_branches: `CREATE TABLE manuscript_branches (
+    branch_id TEXT PRIMARY KEY,
+    manuscript_id TEXT NOT NULL REFERENCES manuscripts(manuscript_id),
+    name TEXT NOT NULL,
+    base_revision_id TEXT REFERENCES manuscript_revisions(revision_id),
+    created_at TEXT NOT NULL,
+    UNIQUE(manuscript_id, name)
+  ) STRICT`,
+  manuscript_blocks: `CREATE TABLE manuscript_blocks (
+    block_id TEXT PRIMARY KEY,
+    manuscript_id TEXT NOT NULL REFERENCES manuscripts(manuscript_id),
+    created_revision_id TEXT NOT NULL REFERENCES manuscript_revisions(revision_id)
+  ) STRICT`,
+  workflow_profiles: `CREATE TABLE workflow_profiles (
+    profile_id TEXT NOT NULL,
+    profile_version TEXT NOT NULL,
+    profile_name TEXT NOT NULL,
+    profile_digest TEXT NOT NULL CHECK(length(profile_digest) = 64),
+    definition_json TEXT NOT NULL,
+    PRIMARY KEY(profile_id, profile_version)
+  ) STRICT`,
+  workflow_instances: `CREATE TABLE workflow_instances (
+    workflow_instance_id TEXT PRIMARY KEY,
+    book_id TEXT NOT NULL REFERENCES books(book_id),
+    manuscript_id TEXT NOT NULL UNIQUE REFERENCES manuscripts(manuscript_id),
+    profile_id TEXT NOT NULL,
+    profile_version TEXT NOT NULL,
+    current_phase TEXT NOT NULL,
+    state TEXT NOT NULL CHECK(state = 'active'),
+    created_at TEXT NOT NULL,
+    FOREIGN KEY(profile_id, profile_version) REFERENCES workflow_profiles(profile_id, profile_version)
+  ) STRICT`,
+  manuscript_import_records: `CREATE TABLE manuscript_import_records (
+    import_record_id TEXT PRIMARY KEY,
+    commit_id TEXT NOT NULL UNIQUE,
+    book_id TEXT NOT NULL UNIQUE REFERENCES books(book_id),
+    manuscript_id TEXT NOT NULL UNIQUE REFERENCES manuscripts(manuscript_id),
+    source_version_id TEXT NOT NULL UNIQUE REFERENCES source_versions(source_version_id),
+    fidelity_review_id TEXT NOT NULL UNIQUE REFERENCES import_fidelity_reviews(fidelity_review_id),
+    degradation_decision_id TEXT REFERENCES import_degradation_decisions(degradation_decision_id),
+    resulting_revision_id TEXT NOT NULL UNIQUE REFERENCES manuscript_revisions(revision_id),
+    provenance_id TEXT NOT NULL UNIQUE REFERENCES source_provenance(provenance_id),
+    imported_at TEXT NOT NULL
+  ) STRICT`,
+  import_commits: `CREATE TABLE import_commits (
+    commit_id TEXT PRIMARY KEY,
+    draft_id TEXT NOT NULL UNIQUE REFERENCES import_drafts(draft_id),
+    request_fingerprint TEXT NOT NULL,
+    expected_draft_version INTEGER NOT NULL,
+    review_digest TEXT NOT NULL,
+    result_json TEXT NOT NULL,
+    committed_at TEXT NOT NULL
+  ) STRICT`,
+  import_commit_attempts: `CREATE TABLE import_commit_attempts (
+    attempt_id TEXT PRIMARY KEY,
+    draft_id TEXT NOT NULL UNIQUE REFERENCES import_drafts(draft_id) ON DELETE CASCADE,
+    request_fingerprint TEXT NOT NULL,
+    expected_draft_version INTEGER NOT NULL CHECK(expected_draft_version >= 1),
+    review_digest TEXT NOT NULL CHECK(length(review_digest) = 64),
+    state TEXT NOT NULL CHECK(state IN ('prepared', 'uncertain', 'committed')),
+    prepared_at TEXT NOT NULL,
+    committed_at TEXT,
+    uncertain_at TEXT,
+    uncertainty_code TEXT,
+    completion_acknowledged_at TEXT,
+    CHECK(
+      (state = 'prepared' AND committed_at IS NULL AND uncertain_at IS NULL
+        AND uncertainty_code IS NULL AND completion_acknowledged_at IS NULL)
+      OR (state = 'uncertain' AND committed_at IS NULL AND uncertain_at IS NOT NULL
+        AND uncertainty_code = 'COMMIT_PROOF_INCONCLUSIVE' AND completion_acknowledged_at IS NULL)
+      OR (state = 'committed' AND committed_at IS NOT NULL AND uncertain_at IS NULL
+        AND uncertainty_code IS NULL)
+    )
+  ) STRICT`,
+  import_abandonment_cleanup_intents: `CREATE TABLE import_abandonment_cleanup_intents (
+    draft_id TEXT PRIMARY KEY REFERENCES import_drafts(draft_id),
+    object_digest TEXT NOT NULL UNIQUE REFERENCES content_objects(object_digest),
+    expected_draft_version INTEGER NOT NULL CHECK(expected_draft_version >= 1),
+    relative_key TEXT NOT NULL,
+    state TEXT NOT NULL CHECK(state IN ('prepared', 'bytes-removed')),
+    requested_at TEXT NOT NULL,
+    bytes_removed_at TEXT,
+    CHECK(
+      (state = 'prepared' AND bytes_removed_at IS NULL)
+      OR (state = 'bytes-removed' AND bytes_removed_at IS NOT NULL)
+    )
+  ) STRICT`,
+} as const;
+
+const MIGRATED_CONTINUITY_IMPORT_DRAFT_SQL = `CREATE TABLE import_drafts (
+  draft_id TEXT PRIMARY KEY,
+  selection_token TEXT NOT NULL UNIQUE,
+  state TEXT NOT NULL CHECK(state IN ('staged', 'reviewed', 'committed')),
+  draft_version INTEGER NOT NULL CHECK(draft_version >= 1),
+  display_name TEXT NOT NULL,
+  object_digest TEXT NOT NULL REFERENCES content_objects(object_digest),
+  reviewed_title TEXT,
+  review_digest TEXT UNIQUE,
+  committed_commit_id TEXT UNIQUE,
+  staged_at TEXT NOT NULL,
+  reviewed_at TEXT,
+  committed_at TEXT,
+  selected_path TEXT,
+  reviewed_target_choice_id TEXT
+    CHECK(reviewed_target_choice_id IS NULL OR reviewed_target_choice_id IN ('new-book', 'new-book-distinct-intended-work'))
+) STRICT`;
+
+const CONTINUITY_SCHEMA_SQL = {
+  staged_import_snapshots: `CREATE TABLE staged_import_snapshots (
+    draft_id TEXT PRIMARY KEY REFERENCES import_drafts(draft_id) ON DELETE CASCADE,
+    parser_identity TEXT NOT NULL,
+    source_digest TEXT NOT NULL CHECK(length(source_digest) = 64),
+    content_digest TEXT NOT NULL CHECK(length(content_digest) = 64),
+    structure_digest TEXT NOT NULL CHECK(length(structure_digest) = 64),
+    block_count INTEGER NOT NULL CHECK(block_count > 0),
+    fidelity_json TEXT NOT NULL,
+    title_suggestion TEXT NOT NULL,
+    title_source TEXT NOT NULL,
+    snapshot_created_at TEXT NOT NULL
+  ) STRICT`,
+  staged_import_blocks: `CREATE TABLE staged_import_blocks (
+    draft_id TEXT NOT NULL REFERENCES staged_import_snapshots(draft_id) ON DELETE CASCADE,
+    staged_block_id TEXT NOT NULL,
+    position INTEGER NOT NULL CHECK(position > 0),
+    kind TEXT NOT NULL CHECK(kind IN ('title', 'heading', 'paragraph')),
+    level INTEGER,
+    text TEXT NOT NULL,
+    digest TEXT NOT NULL CHECK(length(digest) = 64),
+    PRIMARY KEY(draft_id, position),
+    UNIQUE(draft_id, staged_block_id)
+  ) STRICT`,
+  manuscript_revisions: `CREATE TABLE manuscript_revisions (
+    revision_id TEXT PRIMARY KEY,
+    manuscript_id TEXT NOT NULL REFERENCES manuscripts(manuscript_id),
+    branch_id TEXT NOT NULL REFERENCES manuscript_branches(branch_id),
+    ordinal INTEGER NOT NULL CHECK(ordinal = 1),
+    revision_label TEXT NOT NULL CHECK(revision_label = 'r1'),
+    parent_revision_id TEXT REFERENCES manuscript_revisions(revision_id),
+    source_version_id TEXT NOT NULL REFERENCES source_versions(source_version_id),
+    revision_digest TEXT NOT NULL CHECK(length(revision_digest) = 64),
+    created_at TEXT NOT NULL,
+    UNIQUE(manuscript_id, ordinal),
+    UNIQUE(manuscript_id, revision_label)
+  ) STRICT`,
+  manuscript_block_versions: `CREATE TABLE manuscript_block_versions (
+    revision_id TEXT NOT NULL REFERENCES manuscript_revisions(revision_id),
+    block_id TEXT NOT NULL REFERENCES manuscript_blocks(block_id),
+    position INTEGER NOT NULL CHECK(position > 0),
+    kind TEXT NOT NULL CHECK(kind IN ('title', 'heading', 'paragraph')),
+    level INTEGER,
+    text TEXT NOT NULL,
+    digest TEXT NOT NULL CHECK(length(digest) = 64),
+    PRIMARY KEY(revision_id, block_id),
+    UNIQUE(revision_id, position)
+  ) STRICT`,
+  branch_working_state: `CREATE TABLE branch_working_state (
+    branch_id TEXT PRIMARY KEY REFERENCES manuscript_branches(branch_id),
+    manuscript_id TEXT NOT NULL REFERENCES manuscripts(manuscript_id),
+    base_revision_id TEXT NOT NULL REFERENCES manuscript_revisions(revision_id),
+    journal_sequence INTEGER NOT NULL CHECK(journal_sequence >= 0),
+    working_digest TEXT NOT NULL CHECK(length(working_digest) = 64)
+  ) STRICT`,
+  working_blocks: `CREATE TABLE working_blocks (
+    branch_id TEXT NOT NULL REFERENCES manuscript_branches(branch_id),
+    block_id TEXT NOT NULL REFERENCES manuscript_blocks(block_id),
+    position INTEGER NOT NULL CHECK(position > 0),
+    kind TEXT NOT NULL CHECK(kind IN ('title', 'heading', 'paragraph')),
+    level INTEGER,
+    text TEXT NOT NULL,
+    digest TEXT NOT NULL CHECK(length(digest) = 64),
+    PRIMARY KEY(branch_id, block_id),
+    UNIQUE(branch_id, position)
+  ) STRICT`,
+  edit_journal_entries: `CREATE TABLE edit_journal_entries (
+    journal_entry_id TEXT PRIMARY KEY,
+    client_edit_id TEXT NOT NULL UNIQUE,
+    request_fingerprint TEXT NOT NULL,
+    manuscript_id TEXT NOT NULL REFERENCES manuscripts(manuscript_id),
+    branch_id TEXT NOT NULL REFERENCES manuscript_branches(branch_id),
+    base_revision_id TEXT NOT NULL REFERENCES manuscript_revisions(revision_id),
+    sequence INTEGER NOT NULL CHECK(sequence > 0),
+    block_id TEXT NOT NULL REFERENCES manuscript_blocks(block_id),
+    from_grapheme INTEGER NOT NULL CHECK(from_grapheme >= 0),
+    to_grapheme INTEGER NOT NULL CHECK(to_grapheme >= from_grapheme),
+    insert_text TEXT NOT NULL,
+    resulting_block_digest TEXT NOT NULL CHECK(length(resulting_block_digest) = 64),
+    resulting_working_digest TEXT NOT NULL CHECK(length(resulting_working_digest) = 64),
+    durable_at TEXT NOT NULL,
+    UNIQUE(branch_id, sequence)
+  ) STRICT`,
+} as const;
+
+const TARGET_BASE_SCHEMA_SQL = {
+  import_ingest_blocks: `CREATE TABLE import_ingest_blocks (
+    ingest_id TEXT NOT NULL,
+    draft_id TEXT NOT NULL,
+    staged_block_id TEXT NOT NULL,
+    position INTEGER NOT NULL CHECK(position > 0),
+    kind TEXT NOT NULL CHECK(kind IN ('title', 'heading', 'paragraph')),
+    level INTEGER,
+    text TEXT NOT NULL,
+    digest TEXT NOT NULL CHECK(length(digest) = 64),
+    start_offset INTEGER NOT NULL CHECK(start_offset >= 0),
+    grapheme_length INTEGER NOT NULL CHECK(grapheme_length >= 0),
+    PRIMARY KEY(ingest_id, position),
+    UNIQUE(ingest_id, staged_block_id)
+  ) STRICT`,
+  staged_import_snapshots: `CREATE TABLE staged_import_snapshots (
+    draft_id TEXT PRIMARY KEY REFERENCES import_drafts(draft_id) ON DELETE CASCADE,
+    parser_identity TEXT NOT NULL,
+    source_digest TEXT NOT NULL CHECK(length(source_digest) = 64),
+    content_digest TEXT NOT NULL CHECK(length(content_digest) = 64),
+    structure_digest TEXT NOT NULL CHECK(length(structure_digest) = 64),
+    block_count INTEGER NOT NULL CHECK(block_count > 0),
+    fidelity_json TEXT NOT NULL,
+    title_suggestion TEXT NOT NULL,
+    title_source TEXT NOT NULL,
+    snapshot_created_at TEXT NOT NULL,
+    character_count INTEGER NOT NULL DEFAULT 0 CHECK(character_count >= 0)
+  ) STRICT`,
+  staged_import_blocks: `CREATE TABLE staged_import_blocks (
+    draft_id TEXT NOT NULL REFERENCES staged_import_snapshots(draft_id) ON DELETE CASCADE,
+    staged_block_id TEXT NOT NULL,
+    position INTEGER NOT NULL CHECK(position > 0),
+    kind TEXT NOT NULL CHECK(kind IN ('title', 'heading', 'paragraph')),
+    level INTEGER,
+    text TEXT NOT NULL,
+    digest TEXT NOT NULL CHECK(length(digest) = 64),
+    start_offset INTEGER NOT NULL DEFAULT 0 CHECK(start_offset >= 0),
+    grapheme_length INTEGER NOT NULL DEFAULT 0 CHECK(grapheme_length >= 0),
+    PRIMARY KEY(draft_id, position),
+    UNIQUE(draft_id, staged_block_id)
+  ) STRICT`,
+  manuscript_revisions: `CREATE TABLE manuscript_revisions (
+    revision_id TEXT PRIMARY KEY,
+    manuscript_id TEXT NOT NULL REFERENCES manuscripts(manuscript_id),
+    branch_id TEXT NOT NULL REFERENCES manuscript_branches(branch_id),
+    ordinal INTEGER NOT NULL CHECK(ordinal > 0),
+    revision_label TEXT NOT NULL,
+    parent_revision_id TEXT REFERENCES manuscript_revisions(revision_id),
+    source_version_id TEXT NOT NULL REFERENCES source_versions(source_version_id),
+    revision_digest TEXT NOT NULL CHECK(length(revision_digest) = 64),
+    created_at TEXT NOT NULL,
+    UNIQUE(manuscript_id, ordinal),
+    UNIQUE(manuscript_id, revision_label)
+  ) STRICT`,
+  manuscript_block_versions: `CREATE TABLE manuscript_block_versions (
+    revision_id TEXT NOT NULL REFERENCES manuscript_revisions(revision_id),
+    block_id TEXT NOT NULL REFERENCES manuscript_blocks(block_id),
+    position INTEGER NOT NULL CHECK(position > 0),
+    kind TEXT NOT NULL CHECK(kind IN ('title', 'heading', 'paragraph')),
+    level INTEGER,
+    text TEXT NOT NULL,
+    digest TEXT NOT NULL CHECK(length(digest) = 64),
+    start_offset INTEGER NOT NULL DEFAULT 0 CHECK(start_offset >= 0),
+    grapheme_length INTEGER NOT NULL DEFAULT 0 CHECK(grapheme_length >= 0),
+    PRIMARY KEY(revision_id, block_id),
+    UNIQUE(revision_id, position)
+  ) STRICT`,
+  branch_working_state: `CREATE TABLE branch_working_state (
+    branch_id TEXT PRIMARY KEY REFERENCES manuscript_branches(branch_id),
+    manuscript_id TEXT NOT NULL REFERENCES manuscripts(manuscript_id),
+    base_revision_id TEXT NOT NULL REFERENCES manuscript_revisions(revision_id),
+    journal_sequence INTEGER NOT NULL CHECK(journal_sequence >= 0),
+    working_digest TEXT NOT NULL CHECK(length(working_digest) = 64),
+    total_graphemes INTEGER NOT NULL DEFAULT 0 CHECK(total_graphemes >= 0),
+    history_sequence INTEGER NOT NULL DEFAULT 0 CHECK(history_sequence >= 0),
+    last_checkpoint_sequence INTEGER NOT NULL DEFAULT 0 CHECK(last_checkpoint_sequence >= 0)
+  ) STRICT`,
+  working_blocks: `CREATE TABLE working_blocks (
+    branch_id TEXT NOT NULL REFERENCES manuscript_branches(branch_id),
+    block_id TEXT NOT NULL REFERENCES manuscript_blocks(block_id),
+    position INTEGER NOT NULL CHECK(position > 0),
+    kind TEXT NOT NULL CHECK(kind IN ('title', 'heading', 'paragraph')),
+    level INTEGER,
+    text TEXT NOT NULL,
+    digest TEXT NOT NULL CHECK(length(digest) = 64),
+    start_offset INTEGER NOT NULL DEFAULT 0 CHECK(start_offset >= 0),
+    grapheme_length INTEGER NOT NULL DEFAULT 0 CHECK(grapheme_length >= 0),
+    PRIMARY KEY(branch_id, block_id),
+    UNIQUE(branch_id, position)
+  ) STRICT`,
+  edit_journal_entries: `CREATE TABLE edit_journal_entries (
+    journal_entry_id TEXT PRIMARY KEY,
+    client_edit_id TEXT NOT NULL UNIQUE,
+    request_fingerprint TEXT NOT NULL,
+    manuscript_id TEXT NOT NULL REFERENCES manuscripts(manuscript_id),
+    branch_id TEXT NOT NULL REFERENCES manuscript_branches(branch_id),
+    base_revision_id TEXT NOT NULL REFERENCES manuscript_revisions(revision_id),
+    sequence INTEGER NOT NULL CHECK(sequence > 0),
+    block_id TEXT NOT NULL REFERENCES manuscript_blocks(block_id),
+    from_grapheme INTEGER NOT NULL CHECK(from_grapheme >= 0),
+    to_grapheme INTEGER NOT NULL CHECK(to_grapheme >= from_grapheme),
+    insert_text TEXT NOT NULL,
+    resulting_block_digest TEXT NOT NULL CHECK(length(resulting_block_digest) = 64),
+    resulting_working_digest TEXT NOT NULL CHECK(length(resulting_working_digest) = 64),
+    durable_at TEXT NOT NULL,
+    command_group_id TEXT,
+    command_kind TEXT NOT NULL DEFAULT 'edit',
+    UNIQUE(branch_id, sequence)
+  ) STRICT`,
+  manuscript_outline: `CREATE TABLE manuscript_outline (
+    branch_id TEXT NOT NULL REFERENCES manuscript_branches(branch_id),
+    block_id TEXT NOT NULL REFERENCES manuscript_blocks(block_id),
+    position INTEGER NOT NULL CHECK(position > 0),
+    start_offset INTEGER NOT NULL CHECK(start_offset >= 0),
+    kind TEXT NOT NULL CHECK(kind IN ('title', 'heading')),
+    level INTEGER NOT NULL CHECK(level BETWEEN 1 AND 6),
+    text TEXT NOT NULL,
+    digest TEXT NOT NULL CHECK(length(digest) = 64),
+    PRIMARY KEY(branch_id, block_id),
+    UNIQUE(branch_id, position)
+  ) STRICT`,
+  manuscript_command_groups: `CREATE TABLE manuscript_command_groups (
+    command_group_id TEXT PRIMARY KEY,
+    branch_id TEXT NOT NULL REFERENCES manuscript_branches(branch_id),
+    ordinal INTEGER NOT NULL CHECK(ordinal > 0),
+    kind TEXT NOT NULL CHECK(kind IN ('edit', 'replacement')),
+    status TEXT NOT NULL CHECK(status IN ('applied', 'undone', 'superseded')),
+    source_group_id TEXT,
+    before_working_digest TEXT NOT NULL CHECK(length(before_working_digest) = 64),
+    after_working_digest TEXT NOT NULL CHECK(length(after_working_digest) = 64),
+    created_at TEXT NOT NULL,
+    UNIQUE(branch_id, ordinal)
+  ) STRICT`,
+  manuscript_command_edits: `CREATE TABLE manuscript_command_edits (
+    command_group_id TEXT NOT NULL REFERENCES manuscript_command_groups(command_group_id),
+    position INTEGER NOT NULL CHECK(position > 0),
+    block_id TEXT NOT NULL REFERENCES manuscript_blocks(block_id),
+    before_text TEXT NOT NULL,
+    before_digest TEXT NOT NULL CHECK(length(before_digest) = 64),
+    after_text TEXT NOT NULL,
+    after_digest TEXT NOT NULL CHECK(length(after_digest) = 64),
+    PRIMARY KEY(command_group_id, position),
+    UNIQUE(command_group_id, block_id)
+  ) STRICT`,
+  milestone_versions: `CREATE TABLE milestone_versions (
+    milestone_id TEXT PRIMARY KEY,
+    manuscript_id TEXT NOT NULL REFERENCES manuscripts(manuscript_id),
+    branch_id TEXT NOT NULL REFERENCES manuscript_branches(branch_id),
+    revision_id TEXT NOT NULL REFERENCES manuscript_revisions(revision_id),
+    label TEXT NOT NULL,
+    purpose TEXT NOT NULL,
+    note TEXT,
+    actor TEXT NOT NULL CHECK(actor = '本机编辑'),
+    created_at TEXT NOT NULL,
+    UNIQUE(branch_id, label)
+  ) STRICT`,
+  manuscript_search_sessions: `CREATE TABLE manuscript_search_sessions (
+    search_id TEXT PRIMARY KEY,
+    manuscript_id TEXT NOT NULL REFERENCES manuscripts(manuscript_id),
+    branch_id TEXT NOT NULL REFERENCES manuscript_branches(branch_id),
+    revision_id TEXT NOT NULL REFERENCES manuscript_revisions(revision_id),
+    journal_sequence INTEGER NOT NULL CHECK(journal_sequence >= 0),
+    working_digest TEXT NOT NULL CHECK(length(working_digest) = 64),
+    query TEXT NOT NULL,
+    state TEXT NOT NULL CHECK(state IN ('running', 'completed', 'cancelled', 'failed')),
+    scanned_position INTEGER NOT NULL DEFAULT 0 CHECK(scanned_position >= 0),
+    total_blocks INTEGER NOT NULL CHECK(total_blocks > 0),
+    total_matches INTEGER NOT NULL DEFAULT 0 CHECK(total_matches >= 0),
+    created_at TEXT NOT NULL,
+    completed_at TEXT
+  ) STRICT`,
+  manuscript_search_results: `CREATE TABLE manuscript_search_results (
+    search_id TEXT NOT NULL REFERENCES manuscript_search_sessions(search_id) ON DELETE CASCADE,
+    ordinal INTEGER NOT NULL CHECK(ordinal > 0),
+    match_id TEXT NOT NULL,
+    block_id TEXT NOT NULL REFERENCES manuscript_blocks(block_id),
+    from_grapheme INTEGER NOT NULL CHECK(from_grapheme >= 0),
+    to_grapheme INTEGER NOT NULL CHECK(to_grapheme > from_grapheme),
+    global_character INTEGER NOT NULL CHECK(global_character >= 0),
+    heading_label TEXT NOT NULL,
+    context TEXT NOT NULL,
+    range_digest TEXT NOT NULL CHECK(length(range_digest) = 64),
+    PRIMARY KEY(search_id, ordinal),
+    UNIQUE(search_id, match_id)
+  ) STRICT`,
+  manuscript_replacement_previews: `CREATE TABLE manuscript_replacement_previews (
+    preview_id TEXT PRIMARY KEY,
+    search_id TEXT NOT NULL REFERENCES manuscript_search_sessions(search_id),
+    manuscript_id TEXT NOT NULL REFERENCES manuscripts(manuscript_id),
+    branch_id TEXT NOT NULL REFERENCES manuscript_branches(branch_id),
+    revision_id TEXT NOT NULL REFERENCES manuscript_revisions(revision_id),
+    journal_sequence INTEGER NOT NULL CHECK(journal_sequence >= 0),
+    working_digest TEXT NOT NULL CHECK(length(working_digest) = 64),
+    query TEXT NOT NULL,
+    replacement TEXT NOT NULL,
+    state TEXT NOT NULL CHECK(state IN ('reviewing', 'frozen', 'committed', 'cancelled', 'failed')),
+    total_matches INTEGER NOT NULL CHECK(total_matches > 0),
+    included_matches INTEGER NOT NULL CHECK(included_matches >= 0),
+    validated_ordinal INTEGER NOT NULL DEFAULT 0 CHECK(validated_ordinal >= 0),
+    created_at TEXT NOT NULL,
+    committed_at TEXT
+  ) STRICT`,
+  manuscript_replacement_matches: `CREATE TABLE manuscript_replacement_matches (
+    preview_id TEXT NOT NULL REFERENCES manuscript_replacement_previews(preview_id) ON DELETE CASCADE,
+    ordinal INTEGER NOT NULL CHECK(ordinal > 0),
+    match_id TEXT NOT NULL,
+    block_id TEXT NOT NULL REFERENCES manuscript_blocks(block_id),
+    from_grapheme INTEGER NOT NULL CHECK(from_grapheme >= 0),
+    to_grapheme INTEGER NOT NULL CHECK(to_grapheme > from_grapheme),
+    range_digest TEXT NOT NULL CHECK(length(range_digest) = 64),
+    included INTEGER NOT NULL CHECK(included IN (0, 1)),
+    PRIMARY KEY(preview_id, ordinal),
+    UNIQUE(preview_id, match_id)
+  ) STRICT`,
+  milestone_signoff_records: `CREATE TABLE milestone_signoff_records (
+    signoff_record_id TEXT PRIMARY KEY,
+    milestone_id TEXT NOT NULL UNIQUE REFERENCES milestone_versions(milestone_id),
+    manuscript_id TEXT NOT NULL REFERENCES manuscripts(manuscript_id),
+    branch_id TEXT NOT NULL REFERENCES manuscript_branches(branch_id),
+    revision_id TEXT NOT NULL REFERENCES manuscript_revisions(revision_id),
+    workflow_instance_id TEXT NOT NULL REFERENCES workflow_instances(workflow_instance_id),
+    workflow_evidence_digest TEXT NOT NULL CHECK(length(workflow_evidence_digest) = 64),
+    actor TEXT NOT NULL CHECK(actor = '本机编辑'),
+    signed_at TEXT NOT NULL,
+    label TEXT NOT NULL,
+    stated_next_use TEXT NOT NULL
+  ) STRICT`,
+} as const;
+
+const TARGET_SCHEMA_SQL = {
+  ...TARGET_BASE_SCHEMA_SQL,
+  working_blocks: `CREATE TABLE working_blocks (
+    branch_id TEXT NOT NULL REFERENCES manuscript_branches(branch_id),
+    block_id TEXT NOT NULL REFERENCES manuscript_blocks(block_id),
+    position INTEGER NOT NULL CHECK(position > 0),
+    kind TEXT NOT NULL CHECK(kind IN ('title', 'heading', 'paragraph')),
+    level INTEGER,
+    text TEXT NOT NULL,
+    digest TEXT NOT NULL CHECK(length(digest) = 64),
+    grapheme_length INTEGER NOT NULL DEFAULT 0 CHECK(grapheme_length >= 0),
+    PRIMARY KEY(branch_id, block_id),
+    UNIQUE(branch_id, position)
+  ) STRICT`,
+  manuscript_outline: `CREATE TABLE manuscript_outline (
+    branch_id TEXT NOT NULL REFERENCES manuscript_branches(branch_id),
+    block_id TEXT NOT NULL REFERENCES manuscript_blocks(block_id),
+    position INTEGER NOT NULL CHECK(position > 0),
+    kind TEXT NOT NULL CHECK(kind IN ('title', 'heading')),
+    level INTEGER NOT NULL CHECK(level BETWEEN 1 AND 6),
+    text TEXT NOT NULL,
+    digest TEXT NOT NULL CHECK(length(digest) = 64),
+    PRIMARY KEY(branch_id, block_id),
+    UNIQUE(branch_id, position)
+  ) STRICT`,
+  working_offset_nodes: `CREATE TABLE working_offset_nodes (
+    branch_id TEXT NOT NULL,
+    position INTEGER NOT NULL CHECK(position > 0),
+    span_graphemes INTEGER NOT NULL CHECK(span_graphemes >= 0),
+    PRIMARY KEY(branch_id, position),
+    FOREIGN KEY(branch_id, position) REFERENCES working_blocks(branch_id, position) ON DELETE CASCADE
+  ) STRICT`,
+} as const;
+
+const FULL_CONTINUITY_SCHEMA_SQL = { ...COMMON_SCHEMA_SQL, ...CONTINUITY_SCHEMA_SQL } as const;
+const FULL_TARGET_SCHEMA_SQL = { ...COMMON_SCHEMA_SQL, ...TARGET_SCHEMA_SQL } as const;
+
+const TARGET_VIRTUAL_TABLE_SQL = `CREATE VIRTUAL TABLE working_block_search USING fts5(
+  branch_id UNINDEXED,
+  block_id UNINDEXED,
+  text,
+  tokenize='trigram'
+)`;
+
+const SEARCH_SHADOW_SCHEMA_SQL = {
+  working_block_search_config: "CREATE TABLE 'working_block_search_config'(k PRIMARY KEY, v) WITHOUT ROWID",
+  working_block_search_content: "CREATE TABLE 'working_block_search_content'(id INTEGER PRIMARY KEY, c0, c1, c2)",
+  working_block_search_data: "CREATE TABLE 'working_block_search_data'(id INTEGER PRIMARY KEY, block BLOB)",
+  working_block_search_docsize: "CREATE TABLE 'working_block_search_docsize'(id INTEGER PRIMARY KEY, sz BLOB)",
+  working_block_search_idx: "CREATE TABLE 'working_block_search_idx'(segid, term, pgno, PRIMARY KEY(segid, term)) WITHOUT ROWID",
+} as const;
+
+const SEARCH_SCHEMA_TABLES = [
+  'working_block_search',
+  ...Object.keys(SEARCH_SHADOW_SCHEMA_SQL),
+] as const;
+
+const CONTINUITY_INDEX_SQL = {
+  working_blocks_window: 'CREATE INDEX working_blocks_window ON working_blocks(branch_id, position)',
+  journal_branch_order: 'CREATE INDEX journal_branch_order ON edit_journal_entries(branch_id, sequence)',
+  import_attempts_recovery_order:
+    'CREATE INDEX import_attempts_recovery_order ON import_commit_attempts(state, completion_acknowledged_at, prepared_at)',
+} as const;
+
+const TARGET_INDEX_SQL = {
+  ...CONTINUITY_INDEX_SQL,
+  manuscript_outline_order: 'CREATE INDEX manuscript_outline_order ON manuscript_outline(branch_id, position)',
+  command_history_state: 'CREATE INDEX command_history_state ON manuscript_command_groups(branch_id, status, ordinal)',
+  replacement_matches_block: 'CREATE INDEX replacement_matches_block ON manuscript_replacement_matches(preview_id, included, block_id, from_grapheme)',
+} as const;
+
+const CONTINUITY_TRIGGER_DIGESTS = {
+  abandonment_cleanup_validate_insert: '09ce8b29e4d81f26b3dd2ed03169da835d2d72ed1db17953a3a4554730943890',
+  abandonment_cleanup_block_content_object_update: 'ebc8c2b457914325ee725b9007c29e7a25b69d104eea87b19ec752c77a9d374d',
+  abandonment_cleanup_block_draft_insert: '423f4b8e6b9160beae522eb9daee757844f8defb97db028607709110015f2950',
+  abandonment_cleanup_block_draft_update: 'c86550fb12ca0d1abf17c70ba790d595a34a3922ad98efdc95d8c2facfcafabd',
+  abandonment_cleanup_block_source_insert: '6ce76e47b7adfd2ebdb8d4085fb0e5a1be42cc160d374bc8cb167dff6d98fa8c',
+  abandonment_cleanup_block_source_update: 'aaaaa619f3ba2986675f30673ab5d1f65ac62d2a60118d1c78ae4b20cdf11b2f',
+  abandonment_cleanup_block_commit_insert: '0e153594899bf6873b3880a78ae90439a664ff4b3841617f466ef81ab45c23b5',
+  abandonment_cleanup_block_attempt_insert: '5b1f6a4f887a3ebf1aa51e963ea3f8e7ed60034294115a186c7af44f3af0be4f',
+  abandonment_cleanup_validate_intent_update_v5: 'aa3d9f6e2659fcc53bc1b7cf2ad4c06eb6d9f913c5d2e00d4436c399bcc04f42',
+  abandonment_cleanup_block_content_object_update_v5: 'f86f9c3174539f074d9e7ec78da5bd0b35f8ce801d9ed7ee04c8b19908364fc9',
+  abandonment_cleanup_block_draft_update_v5: '829704af602ccf10c73592b2f0c2a54c8aba1b76abe3d526de498c7ee2f62b0f',
+  abandonment_cleanup_block_source_update_v5: 'f79586f62a34dc1aa03ea6ea0561b1b7e2a3a0865878b9e04fb32f4eb0505e99',
+  abandonment_cleanup_block_commit_update_v5: '1c8c1058feb0665e13be45fc0771fb85de2ce40408b91b616045cf71ba2fac2c',
+  abandonment_cleanup_block_attempt_update_v5: '136f9eafe5078c8131bf6178ceda3302aedc8263962a83a2e2ccd50918d9303e',
+} as const;
+
+const IMPORT_DRAFT_TRIGGER_SQL = {
+  abandonment_cleanup_block_draft_insert: `CREATE TRIGGER abandonment_cleanup_block_draft_insert
+    BEFORE INSERT ON import_drafts
+    WHEN EXISTS (
+      SELECT 1 FROM import_abandonment_cleanup_intents i
+      WHERE i.object_digest = NEW.object_digest
+    )
+    BEGIN
+      SELECT RAISE(ABORT, 'ABANDONMENT_CLEANUP_PENDING');
+    END`,
+  abandonment_cleanup_block_draft_update: `CREATE TRIGGER abandonment_cleanup_block_draft_update
+    BEFORE UPDATE ON import_drafts
+    WHEN EXISTS (
+        SELECT 1 FROM import_abandonment_cleanup_intents i
+        WHERE i.draft_id = OLD.draft_id
+      )
+      OR EXISTS (
+        SELECT 1 FROM import_abandonment_cleanup_intents i
+        WHERE i.object_digest = NEW.object_digest
+      )
+    BEGIN
+      SELECT RAISE(ABORT, 'ABANDONMENT_CLEANUP_PENDING');
+    END`,
+  abandonment_cleanup_block_draft_update_v5: `CREATE TRIGGER abandonment_cleanup_block_draft_update_v5
+    BEFORE UPDATE ON import_drafts
+    WHEN EXISTS (
+      SELECT 1 FROM import_abandonment_cleanup_intents i
+      WHERE i.draft_id = OLD.draft_id OR i.draft_id = NEW.draft_id
+        OR i.object_digest = OLD.object_digest OR i.object_digest = NEW.object_digest
+    )
+    BEGIN
+      SELECT RAISE(ABORT, 'ABANDONMENT_CLEANUP_PENDING');
+    END`,
+} as const;
+
+const SCHEMA_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
+  import_drafts: ['object_digest>content_objects.object_digest:NO ACTION/NO ACTION/NONE'],
+  book_dimension_sets: ['book_id>books.book_id:NO ACTION/NO ACTION/NONE'],
+  book_dimensions: ['dimension_set_id>book_dimension_sets.dimension_set_id:NO ACTION/NO ACTION/NONE'],
+  source_versions: [
+    'book_id>books.book_id:NO ACTION/NO ACTION/NONE',
+    'object_digest>content_objects.object_digest:NO ACTION/NO ACTION/NONE',
+  ],
+  source_provenance: ['source_version_id>source_versions.source_version_id:NO ACTION/NO ACTION/NONE'],
+  import_fidelity_reviews: [
+    'book_id>books.book_id:NO ACTION/NO ACTION/NONE',
+    'source_version_id>source_versions.source_version_id:NO ACTION/NO ACTION/NONE',
+  ],
+  import_fidelity_categories: ['fidelity_review_id>import_fidelity_reviews.fidelity_review_id:NO ACTION/NO ACTION/NONE'],
+  import_degradation_decisions: ['fidelity_review_id>import_fidelity_reviews.fidelity_review_id:NO ACTION/NO ACTION/NONE'],
+  manuscripts: ['book_id>books.book_id:NO ACTION/NO ACTION/NONE'],
+  manuscript_branches: [
+    'base_revision_id>manuscript_revisions.revision_id:NO ACTION/NO ACTION/NONE',
+    'manuscript_id>manuscripts.manuscript_id:NO ACTION/NO ACTION/NONE',
+  ],
+  manuscript_blocks: [
+    'created_revision_id>manuscript_revisions.revision_id:NO ACTION/NO ACTION/NONE',
+    'manuscript_id>manuscripts.manuscript_id:NO ACTION/NO ACTION/NONE',
+  ],
+  workflow_instances: [
+    'book_id>books.book_id:NO ACTION/NO ACTION/NONE',
+    'manuscript_id>manuscripts.manuscript_id:NO ACTION/NO ACTION/NONE',
+    'profile_id>workflow_profiles.profile_id:NO ACTION/NO ACTION/NONE',
+    'profile_version>workflow_profiles.profile_version:NO ACTION/NO ACTION/NONE',
+  ],
+  manuscript_import_records: [
+    'book_id>books.book_id:NO ACTION/NO ACTION/NONE',
+    'degradation_decision_id>import_degradation_decisions.degradation_decision_id:NO ACTION/NO ACTION/NONE',
+    'fidelity_review_id>import_fidelity_reviews.fidelity_review_id:NO ACTION/NO ACTION/NONE',
+    'manuscript_id>manuscripts.manuscript_id:NO ACTION/NO ACTION/NONE',
+    'provenance_id>source_provenance.provenance_id:NO ACTION/NO ACTION/NONE',
+    'resulting_revision_id>manuscript_revisions.revision_id:NO ACTION/NO ACTION/NONE',
+    'source_version_id>source_versions.source_version_id:NO ACTION/NO ACTION/NONE',
+  ],
+  import_commits: ['draft_id>import_drafts.draft_id:NO ACTION/NO ACTION/NONE'],
+  import_commit_attempts: ['draft_id>import_drafts.draft_id:NO ACTION/CASCADE/NONE'],
+  import_abandonment_cleanup_intents: [
+    'draft_id>import_drafts.draft_id:NO ACTION/NO ACTION/NONE',
+    'object_digest>content_objects.object_digest:NO ACTION/NO ACTION/NONE',
+  ],
+  staged_import_snapshots: ['draft_id>import_drafts.draft_id:NO ACTION/CASCADE/NONE'],
+  staged_import_blocks: ['draft_id>staged_import_snapshots.draft_id:NO ACTION/CASCADE/NONE'],
+  manuscript_revisions: [
+    'branch_id>manuscript_branches.branch_id:NO ACTION/NO ACTION/NONE',
+    'manuscript_id>manuscripts.manuscript_id:NO ACTION/NO ACTION/NONE',
+    'parent_revision_id>manuscript_revisions.revision_id:NO ACTION/NO ACTION/NONE',
+    'source_version_id>source_versions.source_version_id:NO ACTION/NO ACTION/NONE',
+  ],
+  manuscript_block_versions: [
+    'block_id>manuscript_blocks.block_id:NO ACTION/NO ACTION/NONE',
+    'revision_id>manuscript_revisions.revision_id:NO ACTION/NO ACTION/NONE',
+  ],
+  branch_working_state: [
+    'base_revision_id>manuscript_revisions.revision_id:NO ACTION/NO ACTION/NONE',
+    'branch_id>manuscript_branches.branch_id:NO ACTION/NO ACTION/NONE',
+    'manuscript_id>manuscripts.manuscript_id:NO ACTION/NO ACTION/NONE',
+  ],
+  working_blocks: [
+    'block_id>manuscript_blocks.block_id:NO ACTION/NO ACTION/NONE',
+    'branch_id>manuscript_branches.branch_id:NO ACTION/NO ACTION/NONE',
+  ],
+  edit_journal_entries: [
+    'base_revision_id>manuscript_revisions.revision_id:NO ACTION/NO ACTION/NONE',
+    'block_id>manuscript_blocks.block_id:NO ACTION/NO ACTION/NONE',
+    'branch_id>manuscript_branches.branch_id:NO ACTION/NO ACTION/NONE',
+    'manuscript_id>manuscripts.manuscript_id:NO ACTION/NO ACTION/NONE',
+  ],
+  manuscript_outline: [
+    'block_id>manuscript_blocks.block_id:NO ACTION/NO ACTION/NONE',
+    'branch_id>manuscript_branches.branch_id:NO ACTION/NO ACTION/NONE',
+  ],
+  manuscript_command_groups: ['branch_id>manuscript_branches.branch_id:NO ACTION/NO ACTION/NONE'],
+  manuscript_command_edits: [
+    'block_id>manuscript_blocks.block_id:NO ACTION/NO ACTION/NONE',
+    'command_group_id>manuscript_command_groups.command_group_id:NO ACTION/NO ACTION/NONE',
+  ],
+  milestone_versions: [
+    'branch_id>manuscript_branches.branch_id:NO ACTION/NO ACTION/NONE',
+    'manuscript_id>manuscripts.manuscript_id:NO ACTION/NO ACTION/NONE',
+    'revision_id>manuscript_revisions.revision_id:NO ACTION/NO ACTION/NONE',
+  ],
+  manuscript_search_sessions: [
+    'branch_id>manuscript_branches.branch_id:NO ACTION/NO ACTION/NONE',
+    'manuscript_id>manuscripts.manuscript_id:NO ACTION/NO ACTION/NONE',
+    'revision_id>manuscript_revisions.revision_id:NO ACTION/NO ACTION/NONE',
+  ],
+  manuscript_search_results: [
+    'block_id>manuscript_blocks.block_id:NO ACTION/NO ACTION/NONE',
+    'search_id>manuscript_search_sessions.search_id:NO ACTION/CASCADE/NONE',
+  ],
+  manuscript_replacement_previews: [
+    'branch_id>manuscript_branches.branch_id:NO ACTION/NO ACTION/NONE',
+    'manuscript_id>manuscripts.manuscript_id:NO ACTION/NO ACTION/NONE',
+    'revision_id>manuscript_revisions.revision_id:NO ACTION/NO ACTION/NONE',
+    'search_id>manuscript_search_sessions.search_id:NO ACTION/NO ACTION/NONE',
+  ],
+  manuscript_replacement_matches: [
+    'block_id>manuscript_blocks.block_id:NO ACTION/NO ACTION/NONE',
+    'preview_id>manuscript_replacement_previews.preview_id:NO ACTION/CASCADE/NONE',
+  ],
+  milestone_signoff_records: [
+    'branch_id>manuscript_branches.branch_id:NO ACTION/NO ACTION/NONE',
+    'manuscript_id>manuscripts.manuscript_id:NO ACTION/NO ACTION/NONE',
+    'milestone_id>milestone_versions.milestone_id:NO ACTION/NO ACTION/NONE',
+    'revision_id>manuscript_revisions.revision_id:NO ACTION/NO ACTION/NONE',
+    'workflow_instance_id>workflow_instances.workflow_instance_id:NO ACTION/NO ACTION/NONE',
+  ],
+  working_offset_nodes: [
+    'branch_id>working_blocks.branch_id:NO ACTION/CASCADE/NONE',
+    'position>working_blocks.position:NO ACTION/CASCADE/NONE',
+  ],
+};
+
+export class BoundedStoreError extends Error {
+  constructor(readonly code: string, message: string) {
+    super(message);
+    this.name = 'BoundedStoreError';
+  }
+}
+
+export class BoundedStoreFatalError extends Error {
+  constructor(cause: unknown) {
+    super('Bounded SQLite transaction rollback failed.', { cause });
+    this.name = 'BoundedStoreFatalError';
+  }
+}
+
+function requireBounded(condition: unknown, code: string, message: string): asserts condition {
+  if (!condition) throw new BoundedStoreError(code, message);
+}
+
+function one(rows: SqlRow[], code: string, message: string): SqlRow {
+  requireBounded(rows.length === 1, code, message);
+  return rows[0]!;
+}
+
+function asString(value: SQLOutputValue | undefined): string {
+  requireBounded(typeof value === 'string' && value.isWellFormed(), 'STORE_CORRUPT', '持久化记录类型无效。');
+  return value;
+}
+
+function asNumber(value: SQLOutputValue | undefined): number {
+  requireBounded(typeof value === 'number' && Number.isSafeInteger(value), 'STORE_CORRUPT', '持久化数字无效。');
+  return value;
+}
+
+function canonicalSchemaSql(sql: string): string {
+  let result = '';
+  let quoted: "'" | '"' | '`' | ']' | undefined;
+  let identifierValue = '';
+  for (let index = 0; index < sql.length; index += 1) {
+    const character = sql[index]!;
+    if (quoted !== undefined) {
+      if (quoted === "'") {
+        result += character;
+        if (character === "'" && sql[index + 1] === "'") {
+          result += sql[index + 1]!;
+          index += 1;
+        } else if (character === "'") {
+          quoted = undefined;
+        }
+        continue;
+      }
+      const closing = quoted === ']' ? ']' : quoted;
+      if (character === closing && quoted !== ']' && sql[index + 1] === closing) {
+        identifierValue += closing;
+        index += 1;
+      } else if (character === closing) {
+        const normalized = identifierValue.toLocaleLowerCase('en-US');
+        result += /^[a-z_][a-z0-9_]*$/u.test(normalized) ? normalized : `⟦${normalized}⟧`;
+        identifierValue = '';
+        quoted = undefined;
+      } else {
+        identifierValue += character;
+      }
+      continue;
+    }
+    if (character === "'") {
+      quoted = "'";
+      result += character;
+    } else if (character === '"' || character === '`') {
+      quoted = character;
+      identifierValue = '';
+    } else if (character === '[') {
+      quoted = ']';
+      identifierValue = '';
+    } else if (!/\s/.test(character) && character !== ';') {
+      result += character.toLocaleLowerCase('en-US');
+    }
+  }
+  requireBounded(quoted === undefined && identifierValue.length === 0, 'SCHEMA_MIGRATION_FAILED', '数据库结构 SQL 引号无效。');
+  return result.replace(/^createtableifnotexists/, 'createtable');
+}
+
+function tableColumnSignature(row: SqlRow): string {
+  requireBounded(
+    typeof row.cid === 'number' && Number.isSafeInteger(row.cid) && typeof row.name === 'string' &&
+      typeof row.type === 'string' && typeof row.notnull === 'number' && Number.isSafeInteger(row.notnull) &&
+      (row.dflt_value === null || typeof row.dflt_value === 'string') &&
+      typeof row.pk === 'number' && Number.isSafeInteger(row.pk) &&
+      typeof row.hidden === 'number' && Number.isSafeInteger(row.hidden),
+    'SCHEMA_MIGRATION_FAILED',
+    '数据库列结构无效。',
+  );
+  return JSON.stringify([
+    row.cid,
+    row.name,
+    row.type.toLocaleUpperCase('en-US'),
+    row.notnull,
+    row.dflt_value,
+    row.pk,
+    row.hidden,
+  ]);
+}
+
+const expectedColumnSignatures = new Map<string, ReadonlyArray<string>>();
+
+function expectedTableColumnSignatures(name: string, expectedSql: string): ReadonlyArray<string> {
+  const key = `${name}\u0000${expectedSql}`;
+  const cached = expectedColumnSignatures.get(key);
+  if (cached) return cached;
+  const expected = new DatabaseSync(':memory:');
+  try {
+    expected.exec(expectedSql);
+    const signatures = (expected.prepare(`PRAGMA table_xinfo(${quotedIdentifier(name)})`).all() as SqlRow[])
+      .map(tableColumnSignature);
+    requireBounded(signatures.length > 0, 'SCHEMA_MIGRATION_FAILED', `目标数据库表 ${name} 缺少列定义。`);
+    expectedColumnSignatures.set(key, signatures);
+    return signatures;
+  } finally {
+    expected.close();
+  }
+}
+
+function quotedIdentifier(identifier: string): string {
+  return `"${identifier.replaceAll('"', '""')}"`;
+}
+
+function schemaObjectSql(db: DatabaseSync, type: 'table' | 'index' | 'trigger', name: string): string | undefined {
+  const row = db.prepare('SELECT sql FROM sqlite_schema WHERE type = ? AND name = ?').get(type, name) as SqlRow | undefined;
+  if (row === undefined) return undefined;
+  requireBounded(typeof row.sql === 'string', 'SCHEMA_MIGRATION_FAILED', `数据库结构对象 ${name} 无有效 SQL。`);
+  return row.sql;
+}
+
+function foreignKeySignature(row: SqlRow): string {
+  requireBounded(
+    typeof row.from === 'string' && typeof row.table === 'string' && typeof row.to === 'string' &&
+      typeof row.on_update === 'string' && typeof row.on_delete === 'string' && typeof row.match === 'string',
+    'SCHEMA_MIGRATION_FAILED',
+    '数据库引用结构无效。',
+  );
+  return `${row.from}>${row.table}.${row.to}:${row.on_update}/${row.on_delete}/${row.match}`;
+}
+
+function requireExactTableSchema(db: DatabaseSync, name: string, expectedSql: string | ReadonlyArray<string>): void {
+  const actualSql = schemaObjectSql(db, 'table', name);
+  const expectedCandidates = typeof expectedSql === 'string' ? [expectedSql] : expectedSql;
+  const matchedExpectedSql = actualSql === undefined
+    ? undefined
+    : expectedCandidates.find((candidate) => canonicalSchemaSql(actualSql) === canonicalSchemaSql(candidate));
+  requireBounded(
+    matchedExpectedSql !== undefined,
+    'SCHEMA_MIGRATION_FAILED',
+    `数据库表 ${name} 的类型、空值、键、唯一性、检查约束或 SQL 不兼容。`,
+  );
+  const table = one(
+    db.prepare("SELECT type, strict, wr FROM pragma_table_list WHERE schema = 'main' AND name = ?").all(name) as SqlRow[],
+    'SCHEMA_MIGRATION_FAILED',
+    `数据库表 ${name} 缺失。`,
+  );
+  requireBounded(
+    table.type === 'table' && asNumber(table.strict) === 1 && asNumber(table.wr) === 0,
+    'SCHEMA_MIGRATION_FAILED',
+    `数据库表 ${name} 必须是有行标识的 STRICT 表。`,
+  );
+  const actualColumns = (db.prepare(`PRAGMA table_xinfo(${quotedIdentifier(name)})`).all() as SqlRow[])
+    .map(tableColumnSignature);
+  const expectedColumns = expectedTableColumnSignatures(name, matchedExpectedSql);
+  requireBounded(
+    actualColumns.length === expectedColumns.length &&
+      actualColumns.every((signature, index) => signature === expectedColumns[index]),
+    'SCHEMA_MIGRATION_FAILED',
+    `数据库表 ${name} 的列名、类型、空值、默认值、主键顺序或隐藏状态不兼容。`,
+  );
+  const actualForeignKeys = (db.prepare(`PRAGMA foreign_key_list(${quotedIdentifier(name)})`).all() as SqlRow[])
+    .map(foreignKeySignature)
+    .sort();
+  const expectedForeignKeys = [...(SCHEMA_FOREIGN_KEYS[name] ?? [])].sort();
+  requireBounded(
+    actualForeignKeys.join('\n') === expectedForeignKeys.join('\n'),
+    'SCHEMA_MIGRATION_FAILED',
+    `数据库表 ${name} 的引用列、目标或动作不兼容。`,
+  );
+}
+
+function requireExactIndexSchema(
+  db: DatabaseSync,
+  expectedIndexes: Readonly<Record<string, string>>,
+): void {
+  const expectedNames = new Set(Object.keys(expectedIndexes));
+  for (const [name, expectedSql] of Object.entries(expectedIndexes)) {
+    const actualSql = schemaObjectSql(db, 'index', name);
+    requireBounded(
+      actualSql !== undefined && canonicalSchemaSql(actualSql) === canonicalSchemaSql(expectedSql),
+      'SCHEMA_MIGRATION_FAILED',
+      `数据库索引 ${name} 不兼容。`,
+    );
+  }
+  const explicit = db.prepare(
+    "SELECT name FROM sqlite_schema WHERE type = 'index' AND sql IS NOT NULL",
+  ).all() as SqlRow[];
+  requireBounded(
+    explicit.every((row) => typeof row.name === 'string' && expectedNames.has(row.name)) && explicit.length === expectedNames.size,
+    'SCHEMA_MIGRATION_FAILED',
+    '数据库显式索引集合不兼容。',
+  );
+  const views = db.prepare("SELECT name FROM sqlite_schema WHERE type = 'view'").all() as SqlRow[];
+  requireBounded(views.length === 0, 'SCHEMA_MIGRATION_FAILED', '数据库包含未授权视图。');
+}
+
+function requireExactTriggerSchema(db: DatabaseSync): void {
+  const expectedNames = new Set(Object.keys(CONTINUITY_TRIGGER_DIGESTS));
+  const actual = db.prepare("SELECT name, sql FROM sqlite_schema WHERE type = 'trigger'").all() as SqlRow[];
+  requireBounded(
+    actual.length === expectedNames.size &&
+      actual.every((row) => typeof row.name === 'string' && expectedNames.has(row.name)),
+    'SCHEMA_MIGRATION_FAILED',
+    '数据库触发器集合不兼容。',
+  );
+  for (const [name, expectedDigest] of Object.entries(CONTINUITY_TRIGGER_DIGESTS)) {
+    const actualSql = schemaObjectSql(db, 'trigger', name);
+    requireBounded(
+      actualSql !== undefined && sha256(canonicalSchemaSql(actualSql)) === expectedDigest,
+      'SCHEMA_MIGRATION_FAILED',
+      `数据库触发器 ${name} 不兼容。`,
+    );
+  }
+}
+
+function requireExactSearchSchema(db: DatabaseSync): void {
+  const searchSql = schemaObjectSql(db, 'table', 'working_block_search');
+  requireBounded(
+    searchSql !== undefined && canonicalSchemaSql(searchSql) === canonicalSchemaSql(TARGET_VIRTUAL_TABLE_SQL),
+    'SCHEMA_MIGRATION_FAILED',
+    '数据库 CJK 字符串检索结构不兼容。',
+  );
+  const virtualTable = one(
+    db.prepare("SELECT type, strict, wr FROM pragma_table_list WHERE schema = 'main' AND name = 'working_block_search'").all() as SqlRow[],
+    'SCHEMA_MIGRATION_FAILED',
+    '数据库 CJK 字符串检索结构缺失。',
+  );
+  requireBounded(
+    virtualTable.type === 'virtual' && asNumber(virtualTable.strict) === 0 && asNumber(virtualTable.wr) === 0,
+    'SCHEMA_MIGRATION_FAILED',
+    '数据库 CJK 字符串检索表类型不兼容。',
+  );
+  for (const [name, expectedSql] of Object.entries(SEARCH_SHADOW_SCHEMA_SQL)) {
+    const actualSql = schemaObjectSql(db, 'table', name);
+    requireBounded(
+      actualSql !== undefined && canonicalSchemaSql(actualSql) === canonicalSchemaSql(expectedSql),
+      'SCHEMA_MIGRATION_FAILED',
+      `数据库 CJK 字符串检索派生表 ${name} 不兼容。`,
+    );
+    const table = one(
+      db.prepare("SELECT type, strict, wr FROM pragma_table_list WHERE schema = 'main' AND name = ?").all(name) as SqlRow[],
+      'SCHEMA_MIGRATION_FAILED',
+      `数据库 CJK 字符串检索派生表 ${name} 缺失。`,
+    );
+    const withoutRowId = name === 'working_block_search_config' || name === 'working_block_search_idx';
+    requireBounded(
+      table.type === 'shadow' && asNumber(table.strict) === 0 && asNumber(table.wr) === (withoutRowId ? 1 : 0),
+      'SCHEMA_MIGRATION_FAILED',
+      `数据库 CJK 字符串检索派生表 ${name} 类型不兼容。`,
+    );
+  }
+}
+
+function requireExactSchema(
+  db: DatabaseSync,
+  expectedTables: Readonly<Record<string, string | ReadonlyArray<string>>>,
+  expectedIndexes: Readonly<Record<string, string>>,
+  includeSearch: boolean,
+): void {
+  for (const [name, expectedSql] of Object.entries(expectedTables)) requireExactTableSchema(db, name, expectedSql);
+  requireExactIndexSchema(db, expectedIndexes);
+  requireExactTriggerSchema(db);
+  const expectedNames = new Set([
+    ...Object.keys(expectedTables),
+    ...(includeSearch ? SEARCH_SCHEMA_TABLES : []),
+  ]);
+  const actualTables = db.prepare("SELECT name FROM sqlite_schema WHERE type = 'table'").all() as SqlRow[];
+  requireBounded(
+    actualTables.length === expectedNames.size &&
+      actualTables.every((row) => typeof row.name === 'string' && expectedNames.has(row.name)),
+    'SCHEMA_MIGRATION_FAILED',
+    '数据库表集合与精确版本结构不兼容。',
+  );
+  if (includeSearch) requireExactSearchSchema(db);
+}
+
+function requireContinuitySchema(db: DatabaseSync): void {
+  requireExactSchema(
+    db,
+    {
+      ...FULL_CONTINUITY_SCHEMA_SQL,
+      import_drafts: [COMMON_SCHEMA_SQL.import_drafts, MIGRATED_CONTINUITY_IMPORT_DRAFT_SQL],
+    },
+    CONTINUITY_INDEX_SQL,
+    false,
+  );
+}
+
+function requireTargetSchema(db: DatabaseSync): void {
+  requireExactSchema(db, FULL_TARGET_SCHEMA_SQL, TARGET_INDEX_SQL, true);
+}
+
+function canonicalJson(value: unknown): string {
+  if (typeof value === 'string') requireBounded(value.isWellFormed(), 'CANONICAL_VALUE_INVALID', '无法形成规范摘要。');
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
+  if (value !== null && typeof value === 'object') {
+    return `{${Object.entries(value as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b))
+      .map(([key, item]) => `${JSON.stringify(key)}:${canonicalJson(item)}`).join(',')}}`;
+  }
+  const encoded = JSON.stringify(value);
+  requireBounded(encoded !== undefined, 'CANONICAL_VALUE_INVALID', '无法形成规范摘要。');
+  return encoded;
+}
+
+function sha256(value: string): string {
+  return createHash('sha256').update(value).digest('hex');
+}
+
+const segmenter = new Intl.Segmenter('zh-CN', { granularity: 'grapheme' });
+
+function graphemes(text: string): string[] {
+  return Array.from(segmenter.segment(text), ({ segment }) => segment);
+}
+
+interface OffsetSegment {
+  size: number;
+  total: number;
+}
+
+function fenwickSpan(position: number): number {
+  requireBounded(Number.isSafeInteger(position) && position > 0, 'OFFSET_INDEX_INVALID', '稿件偏移索引位置无效。');
+  let remainder = position;
+  let span = 1;
+  while (remainder % 2 === 0) {
+    remainder /= 2;
+    span *= 2;
+  }
+  return span;
+}
+
+function appendOffsetSegment(stack: OffsetSegment[], position: number, length: number): number {
+  requireBounded(Number.isSafeInteger(length) && length >= 0, 'OFFSET_INDEX_INVALID', '稿件偏移索引长度无效。');
+  let segment: OffsetSegment = { size: 1, total: length };
+  while (stack.at(-1)?.size === segment.size) {
+    const previous = stack.pop()!;
+    const total = previous.total + segment.total;
+    requireBounded(Number.isSafeInteger(total), 'OFFSET_INDEX_INVALID', '稿件偏移索引总量无效。');
+    segment = { size: segment.size * 2, total };
+  }
+  requireBounded(segment.size === fenwickSpan(position), 'OFFSET_INDEX_INVALID', '稿件偏移索引范围无效。');
+  stack.push(segment);
+  return segment.total;
+}
+
+function lastWorkingPosition(db: DatabaseSync, branchId: string): number {
+  const row = db.prepare(
+    'SELECT position FROM working_blocks WHERE branch_id = ? ORDER BY position DESC LIMIT 1',
+  ).get(branchId) as SqlRow | undefined;
+  requireBounded(row !== undefined, 'WINDOW_NOT_FOUND', '稿件窗口为空。');
+  return asNumber(row.position);
+}
+
+function workingOffsetPrefix(db: DatabaseSync, branchId: string, throughPosition: number): number {
+  requireBounded(Number.isSafeInteger(throughPosition) && throughPosition >= 0, 'OFFSET_INDEX_INVALID', '稿件偏移查询位置无效。');
+  let position = throughPosition;
+  let total = 0;
+  const read = db.prepare('SELECT span_graphemes FROM working_offset_nodes WHERE branch_id = ? AND position = ?');
+  while (position > 0) {
+    const row = read.get(branchId, position) as SqlRow | undefined;
+    requireBounded(row !== undefined, 'OFFSET_INDEX_INVALID', '稿件偏移索引节点缺失。');
+    total += asNumber(row.span_graphemes);
+    requireBounded(Number.isSafeInteger(total), 'OFFSET_INDEX_INVALID', '稿件偏移查询总量无效。');
+    position -= fenwickSpan(position);
+  }
+  return total;
+}
+
+function workingOffsetBefore(db: DatabaseSync, branchId: string, position: number): number {
+  requireBounded(Number.isSafeInteger(position) && position > 0, 'OFFSET_INDEX_INVALID', '稿件偏移查询位置无效。');
+  return workingOffsetPrefix(db, branchId, position - 1);
+}
+
+function resolveWorkingCharacter(
+  db: DatabaseSync,
+  branchId: string,
+  character: number,
+  totalCharacters: number,
+): { position: number; startCharacter: number } {
+  const totalBlocks = lastWorkingPosition(db, branchId);
+  if (totalCharacters === 0) return { position: 1, startCharacter: 0 };
+  requireBounded(
+    Number.isSafeInteger(character) && character >= 0 && character < totalCharacters,
+    'OFFSET_INDEX_INVALID',
+    '全稿字符位置超出偏移索引范围。',
+  );
+  let step = 1;
+  while (step <= Math.floor(totalBlocks / 2)) step *= 2;
+  let position = 0;
+  let prefix = 0;
+  const read = db.prepare('SELECT span_graphemes FROM working_offset_nodes WHERE branch_id = ? AND position = ?');
+  while (step >= 1) {
+    const next = position + step;
+    if (next <= totalBlocks) {
+      const row = read.get(branchId, next) as SqlRow | undefined;
+      requireBounded(row !== undefined, 'OFFSET_INDEX_INVALID', '稿件偏移索引节点缺失。');
+      const candidate = prefix + asNumber(row.span_graphemes);
+      requireBounded(Number.isSafeInteger(candidate), 'OFFSET_INDEX_INVALID', '稿件偏移查询总量无效。');
+      if (candidate <= character) {
+        position = next;
+        prefix = candidate;
+      }
+    }
+    step /= 2;
+  }
+  requireBounded(position < totalBlocks, 'OFFSET_INDEX_INVALID', '全稿字符位置无法解析。');
+  return { position: position + 1, startCharacter: prefix };
+}
+
+function updateWorkingOffsetNodes(db: DatabaseSync, branchId: string, position: number, delta: number): number {
+  requireBounded(Number.isSafeInteger(delta), 'OFFSET_INDEX_INVALID', '稿件偏移变化无效。');
+  if (delta === 0) return 0;
+  const totalBlocks = lastWorkingPosition(db, branchId);
+  requireBounded(position <= totalBlocks, 'OFFSET_INDEX_INVALID', '稿件偏移更新位置无效。');
+  const update = db.prepare(
+    'UPDATE working_offset_nodes SET span_graphemes = span_graphemes + ? WHERE branch_id = ? AND position = ?',
+  );
+  let nodePosition = position;
+  let changes = 0;
+  while (nodePosition <= totalBlocks) {
+    requireBounded(
+      update.run(delta, branchId, nodePosition).changes === 1,
+      'OFFSET_INDEX_INVALID',
+      '稿件偏移索引节点无法更新。',
+    );
+    changes += 1;
+    nodePosition += fenwickSpan(nodePosition);
+  }
+  requireBounded(
+    changes <= Math.ceil(Math.log2(totalBlocks)) + 1,
+    'OFFSET_INDEX_INVALID',
+    '稿件偏移索引更新超出对数边界。',
+  );
+  return changes;
+}
+
+function encodedJsonStringBytes(text: string): number {
+  return Buffer.byteLength(JSON.stringify(text), 'utf8');
+}
+
+function encodedJsonContentBytes(text: string): number {
+  return encodedJsonStringBytes(text) - 2;
+}
+
+function boundedProtocolDisplay(text: string): { text: string; truncated: boolean } {
+  if (encodedJsonStringBytes(text) <= MAX_OUTLINE_DISPLAY_UTF8_BYTES) return { text, truncated: false };
+  const suffix = '…';
+  const budget = MAX_OUTLINE_DISPLAY_UTF8_BYTES - 2 - encodedJsonContentBytes(suffix);
+  const parts: string[] = [];
+  let bytes = 0;
+  for (const part of graphemes(text)) {
+    const partBytes = encodedJsonContentBytes(part);
+    if (bytes + partBytes > budget) break;
+    parts.push(part);
+    bytes += partBytes;
+  }
+  const display = `${parts.join('')}${suffix}`;
+  requireBounded(encodedJsonStringBytes(display) <= MAX_OUTLINE_DISPLAY_UTF8_BYTES, 'OUTLINE_FRAME_INVALID', '显示文字超出协议范围。');
+  return { text: display, truncated: true };
+}
+
+function boundedOutlineDisplay(text: string): { text: string; truncated: boolean } {
+  return boundedProtocolDisplay(text);
+}
+
+function boundedSearchContext(text: ReadonlyArray<string>, from: number, to: number): string {
+  requireBounded(
+    Number.isSafeInteger(from) && Number.isSafeInteger(to) && from >= 0 && to > from && to <= text.length,
+    'SEARCH_FRAME_INVALID',
+    '搜索上下文范围无效。',
+  );
+  const ellipsis = '…';
+  const ellipsisBytes = encodedJsonContentBytes(ellipsis);
+  let left = from;
+  let right = to;
+  let contentBytes = text.slice(from, to).reduce((total, part) => total + encodedJsonContentBytes(part), 0);
+  requireBounded(contentBytes + 2 <= MAX_OUTLINE_DISPLAY_UTF8_BYTES, 'SEARCH_FRAME_INVALID', '精确搜索文字超出显示范围。');
+  let preferLeft = true;
+  while (left > 0 || right < text.length) {
+    const tryLeft = preferLeft ? left > 0 : right >= text.length && left > 0;
+    const nextLeft = tryLeft ? left - 1 : left;
+    const nextRight = tryLeft ? right : right + 1;
+    const part = tryLeft ? text[nextLeft]! : text[right]!;
+    const projected = 2 + contentBytes + encodedJsonContentBytes(part) +
+      (nextLeft > 0 ? ellipsisBytes : 0) + (nextRight < text.length ? ellipsisBytes : 0);
+    if (projected <= MAX_OUTLINE_DISPLAY_UTF8_BYTES) {
+      left = nextLeft;
+      right = nextRight;
+      contentBytes += encodedJsonContentBytes(part);
+    } else if ((tryLeft && right < text.length) || (!tryLeft && left > 0)) {
+      preferLeft = !preferLeft;
+      const alternateLeft = preferLeft;
+      const alternateNextLeft = alternateLeft ? left - 1 : left;
+      const alternateNextRight = alternateLeft ? right : right + 1;
+      const alternatePart = alternateLeft ? text[alternateNextLeft]! : text[right]!;
+      const alternateProjected = 2 + contentBytes + encodedJsonContentBytes(alternatePart) +
+        (alternateNextLeft > 0 ? ellipsisBytes : 0) + (alternateNextRight < text.length ? ellipsisBytes : 0);
+      if (alternateProjected > MAX_OUTLINE_DISPLAY_UTF8_BYTES) break;
+      left = alternateNextLeft;
+      right = alternateNextRight;
+      contentBytes += encodedJsonContentBytes(alternatePart);
+    } else {
+      break;
+    }
+    preferLeft = !preferLeft;
+  }
+  const context = `${left > 0 ? ellipsis : ''}${text.slice(left, right).join('')}${right < text.length ? ellipsis : ''}`;
+  requireBounded(
+    encodedJsonStringBytes(context) <= MAX_OUTLINE_DISPLAY_UTF8_BYTES &&
+      context.includes(text.slice(from, to).join('')),
+    'SEARCH_FRAME_INVALID',
+    '搜索上下文显示无法保留精确匹配。',
+  );
+  return context;
+}
+
+function blockDigest(kind: ManuscriptBlockProjection['kind'], level: number | null, text: string): string {
+  return sha256(canonicalJson({ kind, level, text }));
+}
+
+function stagedBlockId(draftId: string, position: number, digest: string): string {
+  return `blk_${sha256(`${draftId}\u0000${position}\u0000${digest}`).slice(0, 24)}`;
+}
+
+function parsedBlockId(position: number, digest: string): string {
+  return `blk_${sha256(`${position}\u0000${digest}`).slice(0, 24)}`;
+}
+
+function stableRevisionWorkingDigest(db: DatabaseSync, revisionId: string): string {
+  requirePersistedBlockTextBounds(db, 'manuscript_block_versions', revisionId, 'SCHEMA_MIGRATION_FAILED', '旧版基础修订版文字超出有界校验范围。');
+  const digest = createHash('sha256');
+  digest.update('[');
+  let position = 0;
+  let expectedPosition = 1;
+  let first = true;
+  while (true) {
+    const rows = db.prepare(
+      `SELECT block_id, position, digest FROM manuscript_block_versions
+       WHERE revision_id = ? AND position > ? ORDER BY position LIMIT ?`,
+    ).all(revisionId, position, MIGRATION_BATCH) as SqlRow[];
+    if (rows.length === 0) break;
+    for (const row of rows) {
+      const blockId = asString(row.block_id);
+      position = asNumber(row.position);
+      const blockDigestValue = asString(row.digest);
+      requireBounded(
+        position === expectedPosition && BLOCK_PATTERN.test(blockId) && DIGEST_PATTERN.test(blockDigestValue),
+        'SCHEMA_MIGRATION_FAILED',
+        '旧版工作稿摘要无法从基础修订版内容块精确重建。',
+      );
+      if (!first) digest.update(',');
+      digest.update(canonicalJson({ blockId, position, digest: blockDigestValue }));
+      first = false;
+      expectedPosition += 1;
+    }
+  }
+  requireBounded(!first, 'SCHEMA_MIGRATION_FAILED', '旧版工作稿基础修订版没有内容块。');
+  digest.update(']');
+  return digest.digest('hex');
+}
+
+function validateIdentity(manuscriptId: string, branchId: string): void {
+  requireBounded(UUID_PATTERN.test(manuscriptId) && UUID_PATTERN.test(branchId), 'MANUSCRIPT_INVALID', '稿件绑定无效。');
+}
+
+function validateShortText(value: string, maximum: number, code: string, message: string, allowEmpty = false): string {
+  requireBounded(value.isWellFormed(), code, message);
+  const normalized = value.normalize('NFC').trim();
+  requireBounded((allowEmpty || normalized.length > 0) && normalized.length <= maximum, code, message);
+  return normalized;
+}
+
+function transact<T>(db: DatabaseSync, operation: () => T): T {
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    const result = operation();
+    db.exec('COMMIT');
+    return result;
+  } catch (error) {
+    try {
+      db.exec('ROLLBACK');
+    } catch (rollbackError) {
+      throw new BoundedStoreFatalError(new AggregateError([error, rollbackError], 'SQLite rollback failed.'));
+    }
+    throw error;
+  }
+}
+
+function recreateImportDraftTable(db: DatabaseSync): void {
+  const replacementSql = COMMON_SCHEMA_SQL.import_drafts.replace(
+    'CREATE TABLE import_drafts (',
+    'CREATE TABLE import_drafts_v6 (',
+  );
+  requireBounded(replacementSql !== COMMON_SCHEMA_SQL.import_drafts, 'SCHEMA_MIGRATION_FAILED', '导入草稿目标结构无法建立。');
+  db.exec(`
+    PRAGMA legacy_alter_table = ON;
+    DROP TRIGGER abandonment_cleanup_block_draft_insert;
+    DROP TRIGGER abandonment_cleanup_block_draft_update;
+    DROP TRIGGER abandonment_cleanup_block_draft_update_v5;
+    ${replacementSql};
+    INSERT INTO import_drafts_v6(
+      draft_id, selection_token, state, draft_version, display_name, object_digest, selected_path,
+      reviewed_title, reviewed_target_choice_id, review_digest, committed_commit_id,
+      staged_at, reviewed_at, committed_at
+    )
+    SELECT draft_id, selection_token, state, draft_version, display_name, object_digest, selected_path,
+           reviewed_title, reviewed_target_choice_id, review_digest, committed_commit_id,
+           staged_at, reviewed_at, committed_at
+    FROM import_drafts;
+    DROP TABLE import_drafts;
+    ALTER TABLE import_drafts_v6 RENAME TO import_drafts;
+    ${IMPORT_DRAFT_TRIGGER_SQL.abandonment_cleanup_block_draft_insert};
+    ${IMPORT_DRAFT_TRIGGER_SQL.abandonment_cleanup_block_draft_update};
+    ${IMPORT_DRAFT_TRIGGER_SQL.abandonment_cleanup_block_draft_update_v5};
+    PRAGMA legacy_alter_table = OFF;
+  `);
+}
+
+function recreateRevisionTable(db: DatabaseSync): void {
+  db.exec(`
+    PRAGMA legacy_alter_table = ON;
+    CREATE TABLE manuscript_revisions_v3 (
+      revision_id TEXT PRIMARY KEY,
+      manuscript_id TEXT NOT NULL REFERENCES manuscripts(manuscript_id),
+      branch_id TEXT NOT NULL REFERENCES manuscript_branches(branch_id),
+      ordinal INTEGER NOT NULL CHECK(ordinal > 0),
+      revision_label TEXT NOT NULL,
+      parent_revision_id TEXT REFERENCES manuscript_revisions(revision_id),
+      source_version_id TEXT NOT NULL REFERENCES source_versions(source_version_id),
+      revision_digest TEXT NOT NULL CHECK(length(revision_digest) = 64),
+      created_at TEXT NOT NULL,
+      UNIQUE(manuscript_id, ordinal),
+      UNIQUE(manuscript_id, revision_label)
+    ) STRICT;
+    INSERT INTO manuscript_revisions_v3 SELECT * FROM manuscript_revisions;
+    DROP TABLE manuscript_revisions;
+    ALTER TABLE manuscript_revisions_v3 RENAME TO manuscript_revisions;
+    PRAGMA legacy_alter_table = OFF;
+  `);
+}
+
+function stagedBlockLength(
+  text: string,
+  code = 'SCHEMA_MIGRATION_FAILED',
+  message = '暂存稿件包含无法按内容块有界校验的文字。',
+): number {
+  requireBounded(
+    text.isWellFormed() && text.length <= MAX_BLOCK_CODE_UNITS,
+    code,
+    message,
+  );
+  const length = graphemes(text).length;
+  requireBounded(length <= MAX_BLOCK_GRAPHEMES, code, message);
+  return length;
+}
+
+function requirePersistedBlockTextBounds(
+  db: DatabaseSync,
+  table: 'manuscript_block_versions' | 'working_blocks',
+  ownerId: string,
+  code: string,
+  message: string,
+): void {
+  const ownerColumn = table === 'manuscript_block_versions' ? 'revision_id' : 'branch_id';
+  const oversized = db.prepare(
+    `SELECT position FROM ${table}
+     WHERE ${ownerColumn} = ? AND (typeof(text) <> 'text' OR length(CAST(text AS BLOB)) > ?)
+     ORDER BY position LIMIT 1`,
+  ).get(ownerId, MAX_BLOCK_CODE_UNITS * 3) as SqlRow | undefined;
+  requireBounded(oversized === undefined, code, message);
+}
+
+function validateStagedDraftContentTruth(db: DatabaseSync, draftId: string, requireCharacterCount = true): void {
+  const snapshot = one(
+    db.prepare(
+      `SELECT content_digest, structure_digest, block_count, character_count
+       FROM staged_import_snapshots WHERE draft_id = ?`,
+    ).all(draftId) as SqlRow[],
+    'SCHEMA_MIGRATION_FAILED',
+    '暂存稿件快照缺失。',
+  );
+  const oversized = db.prepare(
+    `SELECT position FROM staged_import_blocks
+     WHERE draft_id = ? AND (typeof(text) <> 'text' OR length(CAST(text AS BLOB)) > ?)
+     ORDER BY position LIMIT 1`,
+  ).get(draftId, MAX_BLOCK_CODE_UNITS * 3) as SqlRow | undefined;
+  requireBounded(oversized === undefined, 'SCHEMA_MIGRATION_FAILED', '暂存稿件文字超出有界校验范围。');
+  const contentHash = createHash('sha256');
+  const structureHash = createHash('sha256');
+  structureHash.update('[');
+  let position = 0;
+  let expectedPosition = 1;
+  let characters = 0;
+  while (true) {
+    const rows = db.prepare(
+      `SELECT position, kind, level, text, digest FROM staged_import_blocks
+       WHERE draft_id = ? AND position > ? ORDER BY position LIMIT ?`,
+    ).all(draftId, position, MIGRATION_BATCH) as SqlRow[];
+    if (rows.length === 0) break;
+    for (const row of rows) {
+      position = asNumber(row.position);
+      const kind = asString(row.kind) as ManuscriptBlockProjection['kind'];
+      const level = row.level === null ? null : asNumber(row.level);
+      const text = asString(row.text);
+      const digest = asString(row.digest);
+      const shapeValid =
+        (kind === 'title' && level === 1) ||
+        (kind === 'heading' && level !== null && Number.isSafeInteger(level) && level >= 1 && level <= 6) ||
+        (kind === 'paragraph' && level === null);
+      const length = stagedBlockLength(text);
+      requireBounded(
+        position === expectedPosition && shapeValid && DIGEST_PATTERN.test(digest) &&
+          blockDigest(kind, level, text) === digest,
+        'SCHEMA_MIGRATION_FAILED',
+        '暂存稿件内容块的结构、文字或摘要无法证明。',
+      );
+      if (expectedPosition > 1) {
+        contentHash.update('\u001e');
+        structureHash.update(',');
+      }
+      contentHash.update(text);
+      structureHash.update(canonicalJson({
+        blockId: parsedBlockId(position, digest),
+        position,
+        kind,
+        level,
+        digest,
+      }));
+      characters += length;
+      requireBounded(Number.isSafeInteger(characters), 'SCHEMA_MIGRATION_FAILED', '暂存稿件字符总数无效。');
+      expectedPosition += 1;
+    }
+  }
+  const blockCount = expectedPosition - 1;
+  requireBounded(
+    blockCount > 0 && blockCount === asNumber(snapshot.block_count) &&
+      (!requireCharacterCount || characters === asNumber(snapshot.character_count)) &&
+      contentHash.digest('hex') === asString(snapshot.content_digest) &&
+      structureHash.update(']').digest('hex') === asString(snapshot.structure_digest),
+    'SCHEMA_MIGRATION_FAILED',
+    '暂存稿件完整内容或结构身份与权威快照不一致。',
+  );
+}
+
+function rekeyStagedDraftBlocks(db: DatabaseSync, draftId: string): void {
+  requireBounded(UUID_PATTERN.test(draftId), 'SCHEMA_MIGRATION_FAILED', '暂存稿件草稿标识无效。');
+  let position = 0;
+  let expectedPosition = 1;
+  while (true) {
+    const rows = db.prepare(
+      `SELECT staged_block_id, position, digest FROM staged_import_blocks
+       WHERE draft_id = ? AND position > ? ORDER BY position LIMIT ?`,
+    ).all(draftId, position, MIGRATION_BATCH) as SqlRow[];
+    if (rows.length === 0) break;
+    for (const row of rows) {
+      position = asNumber(row.position);
+      requireBounded(
+        position === expectedPosition && BLOCK_PATTERN.test(asString(row.staged_block_id)) && DIGEST_PATTERN.test(asString(row.digest)),
+        'SCHEMA_MIGRATION_FAILED',
+        '旧暂存稿件内容块身份、顺序或摘要无效。',
+      );
+      expectedPosition += 1;
+    }
+  }
+  requireBounded(expectedPosition > 1, 'SCHEMA_MIGRATION_FAILED', '暂存稿件没有内容块。');
+  db.prepare(
+    `UPDATE staged_import_blocks SET staged_block_id = '_ai7_migration_' || staged_block_id
+     WHERE draft_id = ?`,
+  ).run(draftId);
+  position = 0;
+  const update = db.prepare(
+    'UPDATE staged_import_blocks SET staged_block_id = ? WHERE draft_id = ? AND position = ?',
+  );
+  while (true) {
+    const rows = db.prepare(
+      `SELECT position, digest FROM staged_import_blocks
+       WHERE draft_id = ? AND position > ? ORDER BY position LIMIT ?`,
+    ).all(draftId, position, MIGRATION_BATCH) as SqlRow[];
+    if (rows.length === 0) break;
+    for (const row of rows) {
+      position = asNumber(row.position);
+      const expected = stagedBlockId(draftId, position, asString(row.digest));
+      requireBounded(
+        update.run(expected, draftId, position).changes === 1,
+        'SCHEMA_MIGRATION_FAILED',
+        '暂存稿件稳定内容块身份无法重建。',
+      );
+    }
+  }
+}
+
+function rebuildStagedDraftDerived(db: DatabaseSync, draftId: string): void {
+  rekeyStagedDraftBlocks(db, draftId);
+  const updateBlock = db.prepare(
+    `UPDATE staged_import_blocks SET start_offset = ?, grapheme_length = ?
+     WHERE draft_id = ? AND position = ?`,
+  );
+  let position = 0;
+  let expectedPosition = 1;
+  let offset = 0;
+  while (true) {
+    const rows = db.prepare(
+      `SELECT position, text FROM staged_import_blocks
+       WHERE draft_id = ? AND position > ? ORDER BY position LIMIT ?`,
+    ).all(draftId, position, MIGRATION_BATCH) as SqlRow[];
+    if (rows.length === 0) break;
+    for (const row of rows) {
+      position = asNumber(row.position);
+      requireBounded(position === expectedPosition, 'SCHEMA_MIGRATION_FAILED', '暂存稿件内容块顺序不连续。');
+      const length = stagedBlockLength(asString(row.text));
+      requireBounded(Number.isSafeInteger(offset + length), 'SCHEMA_MIGRATION_FAILED', '暂存稿件字符总数无效。');
+      requireBounded(
+        updateBlock.run(offset, length, draftId, position).changes === 1,
+        'SCHEMA_MIGRATION_FAILED',
+        '暂存稿件派生偏移无法重建。',
+      );
+      offset += length;
+      expectedPosition += 1;
+    }
+  }
+  const snapshot = one(
+    db.prepare(
+      `SELECT s.block_count, d.state FROM staged_import_snapshots s
+       JOIN import_drafts d ON d.draft_id = s.draft_id WHERE s.draft_id = ?`,
+    ).all(draftId) as SqlRow[],
+    'SCHEMA_MIGRATION_FAILED',
+    '暂存稿件快照或草稿状态缺失。',
+  );
+  requireBounded(
+    asString(snapshot.state) === 'staged' || asString(snapshot.state) === 'reviewed',
+    'SCHEMA_MIGRATION_FAILED',
+    '已提交导入草稿仍保留不可达暂存内容。',
+  );
+  requireBounded(expectedPosition - 1 === asNumber(snapshot.block_count), 'SCHEMA_MIGRATION_FAILED', '暂存稿件内容块计数不一致。');
+  requireBounded(
+    db.prepare('UPDATE staged_import_snapshots SET character_count = ? WHERE draft_id = ?').run(offset, draftId).changes === 1,
+    'SCHEMA_MIGRATION_FAILED',
+    '暂存稿件字符总数无法重建。',
+  );
+}
+
+function validateStagedDraftDerived(db: DatabaseSync, draftId: string): void {
+  validateStagedDraftContentTruth(db, draftId);
+  const snapshot = one(
+    db.prepare(
+      `SELECT s.block_count, s.character_count, d.state FROM staged_import_snapshots s
+       JOIN import_drafts d ON d.draft_id = s.draft_id WHERE s.draft_id = ?`,
+    ).all(draftId) as SqlRow[],
+    'SCHEMA_MIGRATION_FAILED',
+    '暂存稿件快照或草稿状态缺失。',
+  );
+  const state = asString(snapshot.state);
+  requireBounded(state === 'staged' || state === 'reviewed', 'SCHEMA_MIGRATION_FAILED', '暂存稿件状态与持久化内容不兼容。');
+  let position = 0;
+  let expectedPosition = 1;
+  let offset = 0;
+  while (true) {
+    const rows = db.prepare(
+      `SELECT staged_block_id, position, text, digest, start_offset, grapheme_length FROM staged_import_blocks
+       WHERE draft_id = ? AND position > ? ORDER BY position LIMIT ?`,
+    ).all(draftId, position, MIGRATION_BATCH) as SqlRow[];
+    if (rows.length === 0) break;
+    for (const row of rows) {
+      position = asNumber(row.position);
+      const length = stagedBlockLength(asString(row.text));
+      requireBounded(
+        position === expectedPosition && asString(row.staged_block_id) === stagedBlockId(draftId, position, asString(row.digest)) &&
+          asNumber(row.start_offset) === offset && asNumber(row.grapheme_length) === length,
+        'SCHEMA_MIGRATION_FAILED',
+        '暂存稿件的稳定身份、内容块顺序、偏移或字素长度校验失败。',
+      );
+      offset += length;
+      expectedPosition += 1;
+    }
+  }
+  requireBounded(
+    expectedPosition - 1 === asNumber(snapshot.block_count) && offset === asNumber(snapshot.character_count),
+    'SCHEMA_MIGRATION_FAILED',
+    '暂存稿件快照的内容块或字符总数校验失败。',
+  );
+}
+
+function validateStagedDraftInventory(db: DatabaseSync): void {
+  const missingSnapshots = asNumber(one(
+    db.prepare(
+      `SELECT count(*) total FROM import_drafts d
+       WHERE d.state IN ('staged', 'reviewed')
+         AND NOT EXISTS (SELECT 1 FROM staged_import_snapshots s WHERE s.draft_id = d.draft_id)`,
+    ).all() as SqlRow[],
+    'SCHEMA_MIGRATION_FAILED',
+    '无法校验暂存稿件快照清单。',
+  ).total);
+  requireBounded(missingSnapshots === 0, 'SCHEMA_MIGRATION_FAILED', '暂存或已复核草稿缺少权威快照。');
+}
+
+function rebuildRevisionOffsets(db: DatabaseSync, revisionId: string): number {
+  requirePersistedBlockTextBounds(db, 'manuscript_block_versions', revisionId, 'SCHEMA_MIGRATION_FAILED', '不可变修订版文字超出有界校验范围。');
+  const updateVersion = db.prepare(
+    `UPDATE manuscript_block_versions SET start_offset = ?, grapheme_length = ?
+     WHERE revision_id = ? AND block_id = ?`,
+  );
+  let position = 0;
+  let offset = 0;
+  while (true) {
+    const rows = db.prepare(
+      `SELECT block_id, position, text FROM manuscript_block_versions
+       WHERE revision_id = ? AND position > ? ORDER BY position LIMIT ?`,
+    ).all(revisionId, position, MIGRATION_BATCH) as SqlRow[];
+    if (rows.length === 0) break;
+    for (const row of rows) {
+      const blockId = asString(row.block_id);
+      position = asNumber(row.position);
+      const length = stagedBlockLength(asString(row.text));
+      updateVersion.run(offset, length, revisionId, blockId);
+      offset += length;
+    }
+  }
+  return offset;
+}
+
+function validateRevisionOffsets(db: DatabaseSync, revisionId: string): void {
+  requirePersistedBlockTextBounds(db, 'manuscript_block_versions', revisionId, 'SCHEMA_MIGRATION_FAILED', '不可变修订版文字超出有界校验范围。');
+  let position = 0;
+  let offset = 0;
+  let blocks = 0;
+  while (true) {
+    const rows = db.prepare(
+      `SELECT position, text, start_offset, grapheme_length FROM manuscript_block_versions
+       WHERE revision_id = ? AND position > ? ORDER BY position LIMIT ?`,
+    ).all(revisionId, position, MIGRATION_BATCH) as SqlRow[];
+    if (rows.length === 0) break;
+    for (const row of rows) {
+      position = asNumber(row.position);
+      const length = stagedBlockLength(asString(row.text));
+      requireBounded(
+        asNumber(row.start_offset) === offset && asNumber(row.grapheme_length) === length,
+        'SCHEMA_MIGRATION_FAILED',
+        '不可变修订版的派生偏移校验失败。',
+      );
+      offset += length;
+      blocks += 1;
+    }
+  }
+  requireBounded(blocks > 0, 'SCHEMA_MIGRATION_FAILED', '不可变修订版缺少内容块。');
+}
+
+function rebuildWorkingOffsetIndex(db: DatabaseSync, branchId: string): number {
+  requirePersistedBlockTextBounds(db, 'working_blocks', branchId, 'SCHEMA_MIGRATION_FAILED', '工作稿文字超出有界索引范围。');
+  db.prepare('DELETE FROM working_offset_nodes WHERE branch_id = ?').run(branchId);
+  const insert = db.prepare(
+    'INSERT INTO working_offset_nodes(branch_id, position, span_graphemes) VALUES (?, ?, ?)',
+  );
+  const stack: OffsetSegment[] = [];
+  let position = 0;
+  let expectedPosition = 1;
+  let total = 0;
+  while (true) {
+    const rows = db.prepare(
+      `SELECT position, text, grapheme_length FROM working_blocks
+       WHERE branch_id = ? AND position > ? ORDER BY position LIMIT ?`,
+    ).all(branchId, position, MIGRATION_BATCH) as SqlRow[];
+    if (rows.length === 0) break;
+    for (const row of rows) {
+      position = asNumber(row.position);
+      const length = stagedBlockLength(asString(row.text));
+      requireBounded(
+        position === expectedPosition && asNumber(row.grapheme_length) === length,
+        'SCHEMA_MIGRATION_FAILED',
+        '工作稿内容块顺序或字素长度无法建立偏移索引。',
+      );
+      insert.run(branchId, position, appendOffsetSegment(stack, position, length));
+      total += length;
+      requireBounded(Number.isSafeInteger(total), 'SCHEMA_MIGRATION_FAILED', '工作稿字符总数无效。');
+      expectedPosition += 1;
+    }
+  }
+  const state = one(
+    db.prepare('SELECT total_graphemes FROM branch_working_state WHERE branch_id = ?').all(branchId) as SqlRow[],
+    'SCHEMA_MIGRATION_FAILED',
+    '工作稿状态缺失。',
+  );
+  requireBounded(
+    expectedPosition > 1 && asNumber(state.total_graphemes) === total,
+    'SCHEMA_MIGRATION_FAILED',
+    '工作稿总量无法建立偏移索引。',
+  );
+  return total;
+}
+
+function validateBranchOffsets(db: DatabaseSync, branchId: string): void {
+  requirePersistedBlockTextBounds(db, 'working_blocks', branchId, 'SCHEMA_MIGRATION_FAILED', '工作稿文字超出有界校验范围。');
+  const stack: OffsetSegment[] = [];
+  let position = 0;
+  let expectedPosition = 1;
+  let total = 0;
+  while (true) {
+    const rows = db.prepare(
+      `SELECT wb.position, wb.text, wb.grapheme_length, oi.span_graphemes
+       FROM working_blocks wb
+       LEFT JOIN working_offset_nodes oi ON oi.branch_id = wb.branch_id AND oi.position = wb.position
+       WHERE wb.branch_id = ? AND wb.position > ? ORDER BY wb.position LIMIT ?`,
+    ).all(branchId, position, MIGRATION_BATCH) as SqlRow[];
+    if (rows.length === 0) break;
+    for (const row of rows) {
+      position = asNumber(row.position);
+      const length = stagedBlockLength(asString(row.text));
+      requireBounded(
+        position === expectedPosition && asNumber(row.grapheme_length) === length &&
+          asNumber(row.span_graphemes) === appendOffsetSegment(stack, position, length),
+        'SCHEMA_MIGRATION_FAILED',
+        '工作稿的内容块顺序、字素长度或偏移索引校验失败。',
+      );
+      total += length;
+      requireBounded(Number.isSafeInteger(total), 'SCHEMA_MIGRATION_FAILED', '工作稿字符总数无效。');
+      expectedPosition += 1;
+    }
+  }
+  const state = one(
+    db.prepare('SELECT total_graphemes FROM branch_working_state WHERE branch_id = ?').all(branchId) as SqlRow[],
+    'SCHEMA_MIGRATION_FAILED',
+    '工作稿状态缺失。',
+  );
+  requireBounded(
+    expectedPosition > 1 && asNumber(state.total_graphemes) === total &&
+      workingOffsetPrefix(db, branchId, expectedPosition - 1) === total,
+    'SCHEMA_MIGRATION_FAILED',
+    '工作稿总量或偏移索引根校验失败。',
+  );
+}
+
+function forEachSchemaId(
+  db: DatabaseSync,
+  table: 'staged_import_snapshots' | 'manuscript_revisions' | 'branch_working_state',
+  column: 'draft_id' | 'revision_id' | 'branch_id',
+  visit: (id: string) => void,
+): void {
+  let cursor: string | undefined;
+  while (true) {
+    const rows = cursor === undefined
+      ? db.prepare(`SELECT ${column} item_id FROM ${table} ORDER BY ${column} LIMIT ?`).all(MIGRATION_BATCH) as SqlRow[]
+      : db.prepare(
+        `SELECT ${column} item_id FROM ${table} WHERE ${column} > ? ORDER BY ${column} LIMIT ?`,
+      ).all(cursor, MIGRATION_BATCH) as SqlRow[];
+    if (rows.length === 0) break;
+    for (const row of rows) {
+      const itemId = asString(row.item_id);
+      requireBounded(UUID_PATTERN.test(itemId), 'SCHEMA_MIGRATION_FAILED', '持久化稿件权威标识无效。');
+      visit(itemId);
+      cursor = itemId;
+    }
+  }
+}
+
+function validateSchemaAuthorityIds(db: DatabaseSync): void {
+  forEachSchemaId(db, 'staged_import_snapshots', 'draft_id', () => undefined);
+  forEachSchemaId(db, 'manuscript_revisions', 'revision_id', () => undefined);
+  forEachSchemaId(db, 'branch_working_state', 'branch_id', () => undefined);
+}
+
+function validateAllDerivedOffsets(db: DatabaseSync): void {
+  validateStagedDraftInventory(db);
+  forEachSchemaId(db, 'staged_import_snapshots', 'draft_id', (draftId) => validateStagedDraftDerived(db, draftId));
+  forEachSchemaId(db, 'manuscript_revisions', 'revision_id', (revisionId) => validateRevisionOffsets(db, revisionId));
+  forEachSchemaId(db, 'branch_working_state', 'branch_id', (branchId) => validateBranchOffsets(db, branchId));
+}
+
+function validateMilestoneSignoffTruth(db: DatabaseSync): void {
+  const unsigned = asNumber(one(db.prepare(
+    `SELECT count(*) total FROM milestone_versions mv
+     WHERE NOT EXISTS (
+       SELECT 1 FROM milestone_signoff_records sr WHERE sr.milestone_id = mv.milestone_id
+     )`,
+  ).all() as SqlRow[], 'SCHEMA_MIGRATION_FAILED', '无法读取里程碑签核覆盖。').total);
+  requireBounded(unsigned === 0, 'SCHEMA_MIGRATION_FAILED', '候选数据库含有无法证明签核事实的里程碑。');
+  const selectSignoffs = `SELECT sr.signoff_record_id, sr.milestone_id, sr.manuscript_id, sr.branch_id, sr.revision_id,
+                                 sr.workflow_instance_id, sr.workflow_evidence_digest, sr.actor, sr.signed_at,
+                                 sr.label, sr.stated_next_use,
+                                 mv.manuscript_id milestone_manuscript_id, mv.branch_id milestone_branch_id,
+                                 mv.revision_id milestone_revision_id, mv.label milestone_label, mv.purpose milestone_purpose,
+                                 mv.actor milestone_actor, mv.created_at milestone_created_at,
+                                 wi.manuscript_id workflow_manuscript_id,
+                                 mr.manuscript_id revision_manuscript_id, mr.branch_id revision_branch_id,
+                                 mb.manuscript_id branch_manuscript_id
+                          FROM milestone_signoff_records sr
+                          LEFT JOIN milestone_versions mv ON mv.milestone_id = sr.milestone_id
+                          LEFT JOIN workflow_instances wi ON wi.workflow_instance_id = sr.workflow_instance_id
+                          LEFT JOIN manuscript_revisions mr ON mr.revision_id = sr.revision_id
+                          LEFT JOIN manuscript_branches mb ON mb.branch_id = sr.branch_id`;
+  let cursor: string | undefined;
+  while (true) {
+    const rows = cursor === undefined
+      ? db.prepare(`${selectSignoffs} ORDER BY sr.signoff_record_id LIMIT ?`).all(MIGRATION_BATCH) as SqlRow[]
+      : db.prepare(
+        `${selectSignoffs} WHERE sr.signoff_record_id > ? ORDER BY sr.signoff_record_id LIMIT ?`,
+      ).all(cursor, MIGRATION_BATCH) as SqlRow[];
+    if (rows.length === 0) break;
+    for (const row of rows) {
+      const signoffRecordId = asString(row.signoff_record_id);
+      const milestoneId = asString(row.milestone_id);
+      const manuscriptId = asString(row.manuscript_id);
+      const branchId = asString(row.branch_id);
+      const revisionId = asString(row.revision_id);
+      const workflowInstanceId = asString(row.workflow_instance_id);
+      const evidenceDigest = asString(row.workflow_evidence_digest);
+      const signedAt = asString(row.signed_at);
+      const signedTime = Date.parse(signedAt);
+      const label = asString(row.label);
+      const statedNextUse = asString(row.stated_next_use);
+      requireBounded(
+        UUID_PATTERN.test(signoffRecordId) && UUID_PATTERN.test(milestoneId) && UUID_PATTERN.test(manuscriptId) &&
+          UUID_PATTERN.test(branchId) && UUID_PATTERN.test(revisionId) && UUID_PATTERN.test(workflowInstanceId) &&
+          DIGEST_PATTERN.test(evidenceDigest) && Number.isFinite(signedTime) && new Date(signedTime).toISOString() === signedAt &&
+          asString(row.actor) === '本机编辑' && asString(row.milestone_actor) === '本机编辑' &&
+          manuscriptId === asString(row.milestone_manuscript_id) && manuscriptId === asString(row.workflow_manuscript_id) &&
+          manuscriptId === asString(row.revision_manuscript_id) && manuscriptId === asString(row.branch_manuscript_id) &&
+          branchId === asString(row.milestone_branch_id) && branchId === asString(row.revision_branch_id) &&
+          revisionId === asString(row.milestone_revision_id) && label === asString(row.milestone_label) &&
+          statedNextUse === asString(row.milestone_purpose) && signedAt === asString(row.milestone_created_at) &&
+          label === label.normalize('NFC').trim() && label.length > 0 && label.length <= 80 &&
+          statedNextUse === statedNextUse.normalize('NFC').trim() && statedNextUse.length > 0 && statedNextUse.length <= 120,
+        'SCHEMA_MIGRATION_FAILED',
+        '里程碑签核记录无法证明精确的修订版、流程、参与者、时间、标签或后续用途。',
+      );
+      cursor = signoffRecordId;
+    }
+  }
+}
+
+function prunePersistedReplacementRecords(db: DatabaseSync, reserve: number): void {
+  requireBounded(Number.isSafeInteger(reserve) && reserve >= 0 && reserve <= 1, 'REPLACEMENT_INVALID', '替换保留参数无效。');
+  const active = asNumber(one(db.prepare(
+    "SELECT count(*) total FROM manuscript_replacement_previews WHERE state IN ('reviewing', 'frozen')",
+  ).all() as SqlRow[], 'REPLACEMENT_INVALID', '无法读取替换保留状态。').total);
+  const terminalBudget = Math.max(0, Math.min(
+    MAX_RETAINED_TERMINAL_REPLACEMENTS,
+    MAX_RETAINED_REPLACEMENT_PREVIEWS - active - reserve,
+  ));
+  db.prepare(
+    `DELETE FROM manuscript_replacement_previews
+     WHERE state IN ('cancelled', 'failed', 'committed')
+       AND preview_id NOT IN (
+         SELECT preview_id FROM manuscript_replacement_previews retained
+         WHERE retained.state IN ('cancelled', 'failed', 'committed')
+         ORDER BY COALESCE(committed_at, created_at) DESC, preview_id DESC
+         LIMIT ?
+       )`,
+  ).run(terminalBudget);
+  const retained = asNumber(one(db.prepare('SELECT count(*) total FROM manuscript_replacement_previews').all() as SqlRow[], 'REPLACEMENT_INVALID', '无法读取替换保留状态。').total);
+  requireBounded(
+    retained + reserve <= MAX_RETAINED_REPLACEMENT_PREVIEWS,
+    'REPLACEMENT_RETENTION_FULL',
+    '活动替换复核记录超过安全保留上限。',
+  );
+}
+
+function terminalizeOrphanedReplacementPreviews(db: DatabaseSync): void {
+  db.prepare(
+    "UPDATE manuscript_replacement_previews SET state = 'cancelled' WHERE state IN ('reviewing', 'frozen')",
+  ).run();
+  prunePersistedReplacementRecords(db, 0);
+}
+
+function prunePersistedSearchSessions(db: DatabaseSync): void {
+  db.prepare(
+    `DELETE FROM manuscript_search_sessions
+     WHERE state IN ('completed', 'cancelled', 'failed')
+       AND NOT EXISTS (
+         SELECT 1 FROM manuscript_replacement_previews rp
+         WHERE rp.search_id = manuscript_search_sessions.search_id
+       )
+       AND search_id NOT IN (
+         SELECT search_id FROM manuscript_search_sessions retained
+         WHERE retained.state IN ('completed', 'cancelled', 'failed')
+           AND NOT EXISTS (
+             SELECT 1 FROM manuscript_replacement_previews rp
+             WHERE rp.search_id = retained.search_id
+           )
+         ORDER BY COALESCE(completed_at, created_at) DESC, search_id DESC
+         LIMIT ?
+       )`,
+  ).run(MAX_RETAINED_TRANSIENT_SEARCHES);
+}
+
+function reclaimOrphanedSearchSessions(db: DatabaseSync): void {
+  db.prepare(
+    "UPDATE manuscript_search_sessions SET state = 'failed', completed_at = ? WHERE state = 'running'",
+  ).run(new Date().toISOString());
+  prunePersistedSearchSessions(db);
+}
+
+function rebuildBranchDerived(db: DatabaseSync, branchId: string): number {
+  requirePersistedBlockTextBounds(db, 'working_blocks', branchId, 'SCHEMA_MIGRATION_FAILED', '工作稿文字超出有界重建范围。');
+  db.prepare('DELETE FROM manuscript_outline WHERE branch_id = ?').run(branchId);
+  db.prepare('DELETE FROM working_block_search WHERE branch_id = ?').run(branchId);
+  db.prepare('DELETE FROM working_offset_nodes WHERE branch_id = ?').run(branchId);
+  const updateBlock = db.prepare(
+    'UPDATE working_blocks SET grapheme_length = ? WHERE branch_id = ? AND block_id = ?',
+  );
+  const insertOutline = db.prepare(
+    `INSERT INTO manuscript_outline(branch_id, block_id, position, kind, level, text, digest)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+  );
+  const insertSearch = db.prepare('INSERT INTO working_block_search(branch_id, block_id, text) VALUES (?, ?, ?)');
+  const insertOffset = db.prepare(
+    'INSERT INTO working_offset_nodes(branch_id, position, span_graphemes) VALUES (?, ?, ?)',
+  );
+  const offsetSegments: OffsetSegment[] = [];
+  let position = 0;
+  let expectedPosition = 1;
+  let offset = 0;
+  while (true) {
+    const rows = db.prepare(
+      `SELECT block_id, position, kind, level, text, digest FROM working_blocks
+       WHERE branch_id = ? AND position > ? ORDER BY position LIMIT ?`,
+    ).all(branchId, position, MIGRATION_BATCH) as SqlRow[];
+    if (rows.length === 0) break;
+    for (const row of rows) {
+      const blockId = asString(row.block_id);
+      position = asNumber(row.position);
+      const kind = asString(row.kind) as ManuscriptBlockProjection['kind'];
+      const level = row.level === null ? null : asNumber(row.level);
+      const text = asString(row.text);
+      const digest = asString(row.digest);
+      const length = stagedBlockLength(text);
+      requireBounded(position === expectedPosition, 'SCHEMA_MIGRATION_FAILED', '工作稿内容块顺序不连续。');
+      updateBlock.run(length, branchId, blockId);
+      insertOffset.run(branchId, position, appendOffsetSegment(offsetSegments, position, length));
+      if (kind === 'title' || kind === 'heading') insertOutline.run(branchId, blockId, position, kind, level ?? 1, text, digest);
+      insertSearch.run(branchId, blockId, text);
+      offset += length;
+      requireBounded(Number.isSafeInteger(offset), 'SCHEMA_MIGRATION_FAILED', '工作稿字符总数无效。');
+      expectedPosition += 1;
+    }
+  }
+  db.prepare('UPDATE branch_working_state SET total_graphemes = ? WHERE branch_id = ?').run(offset, branchId);
+  requireBounded(expectedPosition > 1, 'SCHEMA_MIGRATION_FAILED', '工作稿缺少内容块。');
+  return offset;
+}
+
+function snapshotWorkingRevision(
+  db: DatabaseSync,
+  branchId: string,
+  revisionId: string,
+  expectedTotal: number,
+): void {
+  requirePersistedBlockTextBounds(db, 'working_blocks', branchId, 'MILESTONE_INVALID', '工作稿文字超出里程碑快照边界。');
+  const insert = db.prepare(
+    `INSERT INTO manuscript_block_versions(
+       revision_id, block_id, position, kind, level, text, digest, start_offset, grapheme_length
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  );
+  let cursor = 0;
+  let expectedPosition = 1;
+  let offset = 0;
+  while (true) {
+    const rows = db.prepare(
+      `SELECT block_id, position, kind, level, text, digest, grapheme_length
+       FROM working_blocks WHERE branch_id = ? AND position > ? ORDER BY position LIMIT ?`,
+    ).all(branchId, cursor, MIGRATION_BATCH) as SqlRow[];
+    if (rows.length === 0) break;
+    for (const row of rows) {
+      cursor = asNumber(row.position);
+      const kind = asString(row.kind) as ManuscriptBlockProjection['kind'];
+      const level = row.level === null ? null : asNumber(row.level);
+      const text = asString(row.text);
+      const length = stagedBlockLength(text, 'MILESTONE_INVALID', '工作稿文字超出里程碑快照边界。');
+      requireBounded(
+        cursor === expectedPosition && asNumber(row.grapheme_length) === length &&
+          blockDigest(kind, level, text) === asString(row.digest),
+        'MILESTONE_INVALID',
+        '工作稿内容无法建立精确里程碑修订版。',
+      );
+      insert.run(revisionId, asString(row.block_id), cursor, kind, level, text, asString(row.digest), offset, length);
+      offset += length;
+      requireBounded(Number.isSafeInteger(offset), 'MILESTONE_INVALID', '工作稿字符总数无效。');
+      expectedPosition += 1;
+    }
+  }
+  requireBounded(
+    expectedPosition > 1 && offset === expectedTotal && workingOffsetPrefix(db, branchId, expectedPosition - 1) === offset,
+    'MILESTONE_INVALID',
+    '工作稿偏移索引与里程碑修订版不一致。',
+  );
+}
+
+function migrateLegacyJournal(db: DatabaseSync, branchId: string): number {
+  const state = one(
+    db.prepare('SELECT base_revision_id FROM branch_working_state WHERE branch_id = ?').all(branchId) as SqlRow[],
+    'SCHEMA_MIGRATION_FAILED',
+    '稿件工作状态缺失。',
+  );
+  db.exec(`
+    CREATE TEMP TABLE IF NOT EXISTS migration_block_state (
+      branch_id TEXT NOT NULL,
+      block_id TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      level INTEGER,
+      text TEXT NOT NULL,
+      digest TEXT NOT NULL,
+      PRIMARY KEY(branch_id, block_id)
+    ) STRICT;
+  `);
+  db.prepare('DELETE FROM migration_block_state WHERE branch_id = ?').run(branchId);
+  db.prepare(
+    `INSERT INTO migration_block_state(branch_id, block_id, kind, level, text, digest)
+     SELECT ?, block_id, kind, level, text, digest FROM manuscript_block_versions WHERE revision_id = ?`,
+  ).run(branchId, asString(state.base_revision_id));
+  let sequence = 0;
+  let previousWorkingDigest = stableRevisionWorkingDigest(db, asString(state.base_revision_id));
+  while (true) {
+    const rows = db.prepare(
+      `SELECT journal_entry_id, sequence, block_id, from_grapheme, to_grapheme, insert_text,
+              resulting_block_digest, resulting_working_digest, durable_at
+       FROM edit_journal_entries WHERE branch_id = ? AND sequence > ? ORDER BY sequence LIMIT ?`,
+    ).all(branchId, sequence, MIGRATION_BATCH) as SqlRow[];
+    if (rows.length === 0) break;
+    for (const row of rows) {
+      const groupId = asString(row.journal_entry_id);
+      sequence = asNumber(row.sequence);
+      const blockId = asString(row.block_id);
+      const block = one(db.prepare('SELECT kind, level, text, digest FROM migration_block_state WHERE branch_id = ? AND block_id = ?').all(branchId, blockId) as SqlRow[], 'SCHEMA_MIGRATION_FAILED', '旧修订日志内容块缺失。');
+      const beforeText = asString(block.text);
+      const parts = graphemes(beforeText);
+      const from = asNumber(row.from_grapheme);
+      const to = asNumber(row.to_grapheme);
+      const afterText = [...parts.slice(0, from), asString(row.insert_text), ...parts.slice(to)].join('');
+      const afterDigest = blockDigest(asString(block.kind) as ManuscriptBlockProjection['kind'], block.level === null ? null : asNumber(block.level), afterText);
+      requireBounded(afterDigest === asString(row.resulting_block_digest), 'SCHEMA_MIGRATION_FAILED', '旧修订日志无法精确重建。');
+      const afterWorkingDigest = asString(row.resulting_working_digest);
+      db.prepare(
+        `INSERT INTO manuscript_command_groups(
+           command_group_id, branch_id, ordinal, kind, status, source_group_id,
+           before_working_digest, after_working_digest, created_at
+         ) VALUES (?, ?, ?, 'edit', 'applied', NULL, ?, ?, ?)`,
+      ).run(groupId, branchId, sequence, previousWorkingDigest, afterWorkingDigest, asString(row.durable_at));
+      db.prepare(
+        `INSERT INTO manuscript_command_edits(
+           command_group_id, position, block_id, before_text, before_digest, after_text, after_digest
+         ) VALUES (?, 1, ?, ?, ?, ?, ?)`,
+      ).run(groupId, blockId, beforeText, asString(block.digest), afterText, afterDigest);
+      db.prepare('UPDATE edit_journal_entries SET command_group_id = ?, command_kind = ? WHERE journal_entry_id = ?').run(groupId, 'edit', groupId);
+      db.prepare('UPDATE migration_block_state SET text = ?, digest = ? WHERE branch_id = ? AND block_id = ?').run(afterText, afterDigest, branchId, blockId);
+      previousWorkingDigest = afterWorkingDigest;
+    }
+  }
+  db.prepare('DELETE FROM migration_block_state WHERE branch_id = ?').run(branchId);
+  return sequence;
+}
+
+function legacyHistoryRoot(db: DatabaseSync, branchId: string): { groupId: string; baseRevisionId: string } | undefined {
+  const rows = db.prepare(
+    `SELECT cg.command_group_id, cg.ordinal, je.base_revision_id
+     FROM manuscript_command_groups cg
+     JOIN edit_journal_entries je
+       ON je.journal_entry_id = cg.command_group_id
+      AND je.command_group_id = cg.command_group_id
+      AND je.command_kind = 'edit'
+     WHERE cg.branch_id = ?
+     ORDER BY cg.ordinal
+     LIMIT 2`,
+  ).all(branchId) as SqlRow[];
+  if (rows.length === 0) return undefined;
+  const root = rows[0]!;
+  requireBounded(asNumber(root.ordinal) === 1, 'SCHEMA_MIGRATION_FAILED', '旧版修订日志首组顺序无效。');
+  return { groupId: asString(root.command_group_id), baseRevisionId: asString(root.base_revision_id) };
+}
+
+function repairLegacyHistoryRoot(db: DatabaseSync, branchId: string): void {
+  const root = legacyHistoryRoot(db, branchId);
+  if (!root) return;
+  const expected = stableRevisionWorkingDigest(db, root.baseRevisionId);
+  requireBounded(
+    db.prepare(
+      'UPDATE manuscript_command_groups SET before_working_digest = ? WHERE command_group_id = ? AND branch_id = ?',
+    ).run(expected, root.groupId, branchId).changes === 1,
+    'SCHEMA_MIGRATION_FAILED',
+    '旧版修订日志首组摘要无法修复。',
+  );
+}
+
+function validateLegacyHistoryRoot(db: DatabaseSync, branchId: string): void {
+  const root = legacyHistoryRoot(db, branchId);
+  if (!root) return;
+  const row = one(
+    db.prepare('SELECT before_working_digest FROM manuscript_command_groups WHERE command_group_id = ?').all(root.groupId) as SqlRow[],
+    'SCHEMA_MIGRATION_FAILED',
+    '旧版修订日志首组缺失。',
+  );
+  requireBounded(
+    asString(row.before_working_digest) === stableRevisionWorkingDigest(db, root.baseRevisionId),
+    'SCHEMA_MIGRATION_FAILED',
+    '旧版修订日志首组工作稿摘要校验失败。',
+  );
+}
+
+function repairLegacyHistoryRoots(db: DatabaseSync): void {
+  forEachSchemaId(db, 'branch_working_state', 'branch_id', (branchId) => repairLegacyHistoryRoot(db, branchId));
+}
+
+function validateLegacyHistoryRoots(db: DatabaseSync): void {
+  forEachSchemaId(db, 'branch_working_state', 'branch_id', (branchId) => validateLegacyHistoryRoot(db, branchId));
+}
+
+function validateCommandHistoryGroup(db: DatabaseSync, groupId: string): void {
+  requireBounded(UUID_PATTERN.test(groupId), 'HISTORY_CORRUPT', '历史命令组标识无效。');
+  const group = one(
+    db.prepare(
+      'SELECT branch_id, before_working_digest, after_working_digest FROM manuscript_command_groups WHERE command_group_id = ?',
+    ).all(groupId) as SqlRow[],
+    'HISTORY_CORRUPT',
+    '历史命令组缺失。',
+  );
+  requireBounded(
+    UUID_PATTERN.test(asString(group.branch_id)) && DIGEST_PATTERN.test(asString(group.before_working_digest)) &&
+      DIGEST_PATTERN.test(asString(group.after_working_digest)),
+    'HISTORY_CORRUPT',
+    '历史命令组绑定摘要无效。',
+  );
+  const oversized = db.prepare(
+    `SELECT position FROM manuscript_command_edits
+     WHERE command_group_id = ? AND (
+       typeof(before_text) <> 'text' OR typeof(after_text) <> 'text' OR
+       length(CAST(before_text AS BLOB)) > ? OR length(CAST(after_text AS BLOB)) > ?
+     ) ORDER BY position LIMIT 1`,
+  ).get(groupId, MAX_BLOCK_CODE_UNITS * 3, MAX_BLOCK_CODE_UNITS * 3) as SqlRow | undefined;
+  requireBounded(oversized === undefined, 'HISTORY_CORRUPT', '历史命令文字超出有界校验范围。');
+  let position = 0;
+  let expectedPosition = 1;
+  while (true) {
+    const rows = db.prepare(
+      `SELECT ce.position, ce.block_id, ce.before_text, ce.before_digest, ce.after_text, ce.after_digest,
+              wb.kind, wb.level, wb.block_id working_block_id
+       FROM manuscript_command_edits ce
+       JOIN manuscript_command_groups cg ON cg.command_group_id = ce.command_group_id
+       LEFT JOIN working_blocks wb ON wb.branch_id = cg.branch_id AND wb.block_id = ce.block_id
+       WHERE ce.command_group_id = ? AND ce.position > ? ORDER BY ce.position LIMIT ?`,
+    ).all(groupId, position, HISTORY_BATCH) as SqlRow[];
+    if (rows.length === 0) break;
+    for (const row of rows) {
+      position = asNumber(row.position);
+      requireBounded(
+        position === expectedPosition && typeof row.working_block_id === 'string' &&
+          typeof row.kind === 'string',
+        'HISTORY_CORRUPT',
+        '历史命令内容块顺序或绑定无效。',
+      );
+      const kind = asString(row.kind) as ManuscriptBlockProjection['kind'];
+      const level = row.level === null ? null : asNumber(row.level);
+      const shapeValid =
+        (kind === 'title' && level === 1) ||
+        (kind === 'heading' && level !== null && Number.isSafeInteger(level) && level >= 1 && level <= 6) ||
+        (kind === 'paragraph' && level === null);
+      const beforeText = asString(row.before_text);
+      const afterText = asString(row.after_text);
+      const beforeLength = stagedBlockLength(beforeText, 'HISTORY_CORRUPT', '历史命令文字超出内容块边界。');
+      const afterLength = stagedBlockLength(afterText, 'HISTORY_CORRUPT', '历史命令文字超出内容块边界。');
+      requireBounded(
+        shapeValid && beforeLength <= MAX_BLOCK_GRAPHEMES && afterLength <= MAX_BLOCK_GRAPHEMES &&
+          blockDigest(kind, level, beforeText) === asString(row.before_digest) &&
+          blockDigest(kind, level, afterText) === asString(row.after_digest),
+        'HISTORY_CORRUPT',
+        '历史命令的前后文字与摘要不一致。',
+      );
+      expectedPosition += 1;
+    }
+  }
+  requireBounded(expectedPosition > 1, 'HISTORY_CORRUPT', '历史命令组没有可重放内容。');
+}
+
+function validateAllCommandHistory(db: DatabaseSync): void {
+  let cursor: string | undefined;
+  while (true) {
+    const rows = cursor === undefined
+      ? db.prepare(
+        'SELECT command_group_id FROM manuscript_command_groups ORDER BY command_group_id LIMIT ?',
+      ).all(MIGRATION_BATCH) as SqlRow[]
+      : db.prepare(
+        `SELECT command_group_id FROM manuscript_command_groups
+         WHERE command_group_id > ? ORDER BY command_group_id LIMIT ?`,
+      ).all(cursor, MIGRATION_BATCH) as SqlRow[];
+    if (rows.length === 0) break;
+    for (const row of rows) {
+      const groupId = asString(row.command_group_id);
+      requireBounded(UUID_PATTERN.test(groupId), 'HISTORY_CORRUPT', '历史命令组标识无效。');
+      validateCommandHistoryGroup(db, groupId);
+      cursor = groupId;
+    }
+  }
+}
+
+function createMilestoneSignoffTable(db: DatabaseSync): void {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS milestone_signoff_records (
+      signoff_record_id TEXT PRIMARY KEY,
+      milestone_id TEXT NOT NULL UNIQUE REFERENCES milestone_versions(milestone_id),
+      manuscript_id TEXT NOT NULL REFERENCES manuscripts(manuscript_id),
+      branch_id TEXT NOT NULL REFERENCES manuscript_branches(branch_id),
+      revision_id TEXT NOT NULL REFERENCES manuscript_revisions(revision_id),
+      workflow_instance_id TEXT NOT NULL REFERENCES workflow_instances(workflow_instance_id),
+      workflow_evidence_digest TEXT NOT NULL CHECK(length(workflow_evidence_digest) = 64),
+      actor TEXT NOT NULL CHECK(actor = '本机编辑'),
+      signed_at TEXT NOT NULL,
+      label TEXT NOT NULL,
+      stated_next_use TEXT NOT NULL
+    ) STRICT;
+  `);
+}
+
+function createWorkingOffsetTable(db: DatabaseSync): void {
+  db.exec(TARGET_SCHEMA_SQL.working_offset_nodes);
+}
+
+export function initializeBoundedSchema(db: DatabaseSync): void {
+  const version = asNumber(one(db.prepare('PRAGMA user_version').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取数据库版本。').user_version);
+  requireBounded(
+    version === CONTINUITY_SCHEMA_VERSION || version === SCHEMA_VERSION,
+    'SCHEMA_UNSUPPORTED',
+    '数据库版本不受支持。',
+  );
+  if (version === SCHEMA_VERSION) {
+    requireTargetSchema(db);
+    transact(db, () => {
+      validateSchemaAuthorityIds(db);
+      validateAllDerivedOffsets(db);
+      validateLegacyHistoryRoots(db);
+      validateAllCommandHistory(db);
+      validateMilestoneSignoffTruth(db);
+      const violations = db.prepare('PRAGMA foreign_key_check').all();
+      requireBounded(violations.length === 0, 'SCHEMA_MIGRATION_FAILED', '数据库引用校验失败。');
+      terminalizeOrphanedReplacementPreviews(db);
+      reclaimOrphanedSearchSessions(db);
+    });
+    return;
+  }
+  requireContinuitySchema(db);
+  const legacyAlterTable = asNumber(one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table);
+  db.exec('PRAGMA foreign_keys = OFF');
+  let migrationError: unknown;
+  try {
+    db.exec('BEGIN IMMEDIATE');
+    const disabledForeignKeys = one(db.prepare('PRAGMA foreign_keys').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取引用校验状态。');
+    requireBounded(asNumber(disabledForeignKeys.foreign_keys) === 0, 'SCHEMA_INVALID', '无法暂时停用引用校验以迁移数据库。');
+    validateSchemaAuthorityIds(db);
+    recreateImportDraftTable(db);
+    recreateRevisionTable(db);
+    db.exec(`
+      ${TARGET_BASE_SCHEMA_SQL.import_ingest_blocks};
+
+      ALTER TABLE staged_import_snapshots ADD COLUMN character_count INTEGER NOT NULL DEFAULT 0 CHECK(character_count >= 0);
+      ALTER TABLE staged_import_blocks ADD COLUMN start_offset INTEGER NOT NULL DEFAULT 0 CHECK(start_offset >= 0);
+      ALTER TABLE staged_import_blocks ADD COLUMN grapheme_length INTEGER NOT NULL DEFAULT 0 CHECK(grapheme_length >= 0);
+      ALTER TABLE manuscript_block_versions ADD COLUMN start_offset INTEGER NOT NULL DEFAULT 0 CHECK(start_offset >= 0);
+      ALTER TABLE manuscript_block_versions ADD COLUMN grapheme_length INTEGER NOT NULL DEFAULT 0 CHECK(grapheme_length >= 0);
+      ALTER TABLE working_blocks ADD COLUMN grapheme_length INTEGER NOT NULL DEFAULT 0 CHECK(grapheme_length >= 0);
+      ALTER TABLE branch_working_state ADD COLUMN total_graphemes INTEGER NOT NULL DEFAULT 0 CHECK(total_graphemes >= 0);
+      ALTER TABLE branch_working_state ADD COLUMN history_sequence INTEGER NOT NULL DEFAULT 0 CHECK(history_sequence >= 0);
+      ALTER TABLE branch_working_state ADD COLUMN last_checkpoint_sequence INTEGER NOT NULL DEFAULT 0 CHECK(last_checkpoint_sequence >= 0);
+      ALTER TABLE edit_journal_entries ADD COLUMN command_group_id TEXT;
+      ALTER TABLE edit_journal_entries ADD COLUMN command_kind TEXT NOT NULL DEFAULT 'edit';
+
+      CREATE TABLE manuscript_outline (
+        branch_id TEXT NOT NULL REFERENCES manuscript_branches(branch_id),
+        block_id TEXT NOT NULL REFERENCES manuscript_blocks(block_id),
+        position INTEGER NOT NULL CHECK(position > 0),
+        kind TEXT NOT NULL CHECK(kind IN ('title', 'heading')),
+        level INTEGER NOT NULL CHECK(level BETWEEN 1 AND 6),
+        text TEXT NOT NULL,
+        digest TEXT NOT NULL CHECK(length(digest) = 64),
+        PRIMARY KEY(branch_id, block_id),
+        UNIQUE(branch_id, position)
+      ) STRICT;
+      CREATE INDEX manuscript_outline_order ON manuscript_outline(branch_id, position);
+
+      CREATE VIRTUAL TABLE working_block_search USING fts5(
+        branch_id UNINDEXED,
+        block_id UNINDEXED,
+        text,
+        tokenize='trigram'
+      );
+
+      CREATE TABLE manuscript_command_groups (
+        command_group_id TEXT PRIMARY KEY,
+        branch_id TEXT NOT NULL REFERENCES manuscript_branches(branch_id),
+        ordinal INTEGER NOT NULL CHECK(ordinal > 0),
+        kind TEXT NOT NULL CHECK(kind IN ('edit', 'replacement')),
+        status TEXT NOT NULL CHECK(status IN ('applied', 'undone', 'superseded')),
+        source_group_id TEXT,
+        before_working_digest TEXT NOT NULL CHECK(length(before_working_digest) = 64),
+        after_working_digest TEXT NOT NULL CHECK(length(after_working_digest) = 64),
+        created_at TEXT NOT NULL,
+        UNIQUE(branch_id, ordinal)
+      ) STRICT;
+      CREATE TABLE manuscript_command_edits (
+        command_group_id TEXT NOT NULL REFERENCES manuscript_command_groups(command_group_id),
+        position INTEGER NOT NULL CHECK(position > 0),
+        block_id TEXT NOT NULL REFERENCES manuscript_blocks(block_id),
+        before_text TEXT NOT NULL,
+        before_digest TEXT NOT NULL CHECK(length(before_digest) = 64),
+        after_text TEXT NOT NULL,
+        after_digest TEXT NOT NULL CHECK(length(after_digest) = 64),
+        PRIMARY KEY(command_group_id, position),
+        UNIQUE(command_group_id, block_id)
+      ) STRICT;
+      CREATE INDEX command_history_state ON manuscript_command_groups(branch_id, status, ordinal);
+
+      CREATE TABLE milestone_versions (
+        milestone_id TEXT PRIMARY KEY,
+        manuscript_id TEXT NOT NULL REFERENCES manuscripts(manuscript_id),
+        branch_id TEXT NOT NULL REFERENCES manuscript_branches(branch_id),
+        revision_id TEXT NOT NULL REFERENCES manuscript_revisions(revision_id),
+        label TEXT NOT NULL,
+        purpose TEXT NOT NULL,
+        note TEXT,
+        actor TEXT NOT NULL CHECK(actor = '本机编辑'),
+        created_at TEXT NOT NULL,
+        UNIQUE(branch_id, label)
+      ) STRICT;
+
+      CREATE TABLE manuscript_search_sessions (
+        search_id TEXT PRIMARY KEY,
+        manuscript_id TEXT NOT NULL REFERENCES manuscripts(manuscript_id),
+        branch_id TEXT NOT NULL REFERENCES manuscript_branches(branch_id),
+        revision_id TEXT NOT NULL REFERENCES manuscript_revisions(revision_id),
+        journal_sequence INTEGER NOT NULL CHECK(journal_sequence >= 0),
+        working_digest TEXT NOT NULL CHECK(length(working_digest) = 64),
+        query TEXT NOT NULL,
+        state TEXT NOT NULL CHECK(state IN ('running', 'completed', 'cancelled', 'failed')),
+        scanned_position INTEGER NOT NULL DEFAULT 0 CHECK(scanned_position >= 0),
+        total_blocks INTEGER NOT NULL CHECK(total_blocks > 0),
+        total_matches INTEGER NOT NULL DEFAULT 0 CHECK(total_matches >= 0),
+        created_at TEXT NOT NULL,
+        completed_at TEXT
+      ) STRICT;
+      CREATE TABLE manuscript_search_results (
+        search_id TEXT NOT NULL REFERENCES manuscript_search_sessions(search_id) ON DELETE CASCADE,
+        ordinal INTEGER NOT NULL CHECK(ordinal > 0),
+        match_id TEXT NOT NULL,
+        block_id TEXT NOT NULL REFERENCES manuscript_blocks(block_id),
+        from_grapheme INTEGER NOT NULL CHECK(from_grapheme >= 0),
+        to_grapheme INTEGER NOT NULL CHECK(to_grapheme > from_grapheme),
+        global_character INTEGER NOT NULL CHECK(global_character >= 0),
+        heading_label TEXT NOT NULL,
+        context TEXT NOT NULL,
+        range_digest TEXT NOT NULL CHECK(length(range_digest) = 64),
+        PRIMARY KEY(search_id, ordinal),
+        UNIQUE(search_id, match_id)
+      ) STRICT;
+
+      CREATE TABLE manuscript_replacement_previews (
+        preview_id TEXT PRIMARY KEY,
+        search_id TEXT NOT NULL REFERENCES manuscript_search_sessions(search_id),
+        manuscript_id TEXT NOT NULL REFERENCES manuscripts(manuscript_id),
+        branch_id TEXT NOT NULL REFERENCES manuscript_branches(branch_id),
+        revision_id TEXT NOT NULL REFERENCES manuscript_revisions(revision_id),
+        journal_sequence INTEGER NOT NULL CHECK(journal_sequence >= 0),
+        working_digest TEXT NOT NULL CHECK(length(working_digest) = 64),
+        query TEXT NOT NULL,
+        replacement TEXT NOT NULL,
+        state TEXT NOT NULL CHECK(state IN ('reviewing', 'frozen', 'committed', 'cancelled', 'failed')),
+        total_matches INTEGER NOT NULL CHECK(total_matches > 0),
+        included_matches INTEGER NOT NULL CHECK(included_matches >= 0),
+        validated_ordinal INTEGER NOT NULL DEFAULT 0 CHECK(validated_ordinal >= 0),
+        created_at TEXT NOT NULL,
+        committed_at TEXT
+      ) STRICT;
+      CREATE TABLE manuscript_replacement_matches (
+        preview_id TEXT NOT NULL REFERENCES manuscript_replacement_previews(preview_id) ON DELETE CASCADE,
+        ordinal INTEGER NOT NULL CHECK(ordinal > 0),
+        match_id TEXT NOT NULL,
+        block_id TEXT NOT NULL REFERENCES manuscript_blocks(block_id),
+        from_grapheme INTEGER NOT NULL CHECK(from_grapheme >= 0),
+        to_grapheme INTEGER NOT NULL CHECK(to_grapheme > from_grapheme),
+        range_digest TEXT NOT NULL CHECK(length(range_digest) = 64),
+        included INTEGER NOT NULL CHECK(included IN (0, 1)),
+        PRIMARY KEY(preview_id, ordinal),
+        UNIQUE(preview_id, match_id)
+      ) STRICT;
+      CREATE INDEX replacement_matches_block ON manuscript_replacement_matches(preview_id, included, block_id, from_grapheme);
+    `);
+    createMilestoneSignoffTable(db);
+    createWorkingOffsetTable(db);
+    requireTargetSchema(db);
+    reclaimOrphanedSearchSessions(db);
+
+    validateStagedDraftInventory(db);
+    forEachSchemaId(db, 'staged_import_snapshots', 'draft_id', (draftId) => {
+      validateStagedDraftContentTruth(db, draftId, false);
+      rebuildStagedDraftDerived(db, draftId);
+    });
+
+    forEachSchemaId(db, 'manuscript_revisions', 'revision_id', (revisionId) => rebuildRevisionOffsets(db, revisionId));
+
+    forEachSchemaId(db, 'branch_working_state', 'branch_id', (branchId) => {
+      const history = migrateLegacyJournal(db, branchId);
+      db.prepare('UPDATE branch_working_state SET history_sequence = ? WHERE branch_id = ?').run(history, branchId);
+      rebuildBranchDerived(db, branchId);
+    });
+    db.exec('DROP TABLE IF EXISTS temp.migration_block_state');
+    validateAllDerivedOffsets(db);
+    validateLegacyHistoryRoots(db);
+    validateAllCommandHistory(db);
+    validateMilestoneSignoffTruth(db);
+    const violations = db.prepare('PRAGMA foreign_key_check').all();
+    requireBounded(violations.length === 0, 'SCHEMA_MIGRATION_FAILED', '数据库迁移后的引用校验失败。');
+    db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}; COMMIT;`);
+  } catch (error) {
+    migrationError = error;
+    try {
+      db.exec('ROLLBACK');
+    } catch (rollbackError) {
+      migrationError = new AggregateError([error, rollbackError], 'SQLite bounded schema migration rollback failed.');
+    }
+  } finally {
+    try {
+      db.exec(`PRAGMA legacy_alter_table = ${legacyAlterTable}`);
+      const restoredLegacyAlterTable = one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。');
+      requireBounded(asNumber(restoredLegacyAlterTable.legacy_alter_table) === legacyAlterTable, 'SCHEMA_INVALID', '无法恢复旧式改表状态。');
+      db.exec('PRAGMA foreign_keys = ON');
+      const restoredForeignKeys = one(db.prepare('PRAGMA foreign_keys').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取引用校验状态。');
+      requireBounded(asNumber(restoredForeignKeys.foreign_keys) === 1, 'SCHEMA_INVALID', '无法恢复引用校验。');
+    } catch (restoreError) {
+      migrationError = migrationError
+        ? new AggregateError([migrationError, restoreError], 'SQLite bounded schema migration and foreign-key restoration failed.')
+        : restoreError;
+    }
+  }
+  if (migrationError) throw migrationError;
+}
+
+interface BranchBinding {
+  bookId: string;
+  manuscriptId: string;
+  branchId: string;
+  revisionId: string;
+  revisionLabel: string;
+  journalSequence: number;
+  workingDigest: string;
+  totalCharacters: number;
+  historySequence: number;
+}
+
+export class BoundedManuscriptStore {
+  readonly #db: DatabaseSync;
+  readonly #cursorSecret = randomBytes(32);
+
+  constructor(db: DatabaseSync) {
+    this.#db = db;
+    transact(this.#db, () => {
+      terminalizeOrphanedReplacementPreviews(this.#db);
+      reclaimOrphanedSearchSessions(this.#db);
+    });
+  }
+
+  assertStagedDraftIntegrity(draftId: string): void {
+    requireBounded(UUID_PATTERN.test(draftId), 'DRAFT_INVALID', '暂存稿件草稿标识无效。');
+    validateStagedDraftDerived(this.#db, draftId);
+  }
+
+  initializeImportedBranch(branchId: string): number {
+    return rebuildBranchDerived(this.#db, branchId);
+  }
+
+  listPriorWork(): ReadonlyArray<PriorWorkItemProjection> {
+    const rows = this.#db.prepare(
+      `SELECT b.book_id, b.title, m.manuscript_id, mb.branch_id, mb.name branch_name,
+              mr.revision_id, mr.revision_label, bws.journal_sequence, bws.working_digest, bws.total_graphemes,
+              mv.milestone_id, mv.label milestone_label, mv.purpose milestone_purpose, mvr.revision_label milestone_revision_label
+       FROM branch_working_state bws
+       JOIN manuscript_branches mb ON mb.branch_id = bws.branch_id
+       JOIN manuscripts m ON m.manuscript_id = bws.manuscript_id
+       JOIN books b ON b.book_id = m.book_id
+       JOIN manuscript_revisions mr ON mr.revision_id = bws.base_revision_id
+       LEFT JOIN milestone_versions mv ON mv.milestone_id = (
+         SELECT milestone_id FROM milestone_versions WHERE branch_id = mb.branch_id ORDER BY created_at DESC, milestone_id DESC LIMIT 1
+       )
+       LEFT JOIN manuscript_revisions mvr ON mvr.revision_id = mv.revision_id
+       ORDER BY b.created_at DESC, b.book_id DESC LIMIT 20`,
+    ).all() as SqlRow[];
+    return rows.map((row) => ({
+      bookId: asString(row.book_id),
+      bookTitle: asString(row.title),
+      manuscriptId: asString(row.manuscript_id),
+      branchId: asString(row.branch_id),
+      branchName: asString(row.branch_name),
+      revisionId: asString(row.revision_id),
+      revisionLabel: asString(row.revision_label),
+      journalSequence: asNumber(row.journal_sequence),
+      workingDigest: asString(row.working_digest),
+      totalCharacters: asNumber(row.total_graphemes),
+      latestMilestone: row.milestone_id === null ? null : {
+        milestoneId: asString(row.milestone_id),
+        label: asString(row.milestone_label),
+        purpose: asString(row.milestone_purpose),
+        revisionLabel: asString(row.milestone_revision_label),
+      },
+    }));
+  }
+
+  getWindow(manuscriptId: string, branchId: string, target: ManuscriptWindowTarget): ManuscriptWindowProjection {
+    const binding = this.#binding(manuscriptId, branchId);
+    let targetPosition = 1;
+    let focusBlockId: string | null = null;
+    let focusGrapheme: number | null = null;
+    let focusCharacter: number | null = null;
+    if (target.kind === 'cursor') {
+      targetPosition = this.#decodeCursor(target.cursor, 'window', binding).position;
+    } else if (target.kind === 'block' || target.kind === 'window-start') {
+      requireBounded(BLOCK_PATTERN.test(target.blockId), 'WINDOW_INVALID', '稿件位置无效。');
+      const row = one(this.#db.prepare('SELECT position FROM working_blocks WHERE branch_id = ? AND block_id = ?').all(branchId, target.blockId) as SqlRow[], 'WINDOW_NOT_FOUND', '稿件位置不存在。');
+      targetPosition = asNumber(row.position);
+      if (target.kind === 'block') {
+        focusBlockId = target.blockId;
+        focusGrapheme = 0;
+      }
+    } else if (target.kind === 'character') {
+      requireBounded(
+        Number.isSafeInteger(target.character) && target.character >= 0 && target.character < binding.totalCharacters,
+        'WINDOW_INVALID',
+        '全稿位置超出稿件范围。',
+      );
+      const character = target.character;
+      const resolved = resolveWorkingCharacter(this.#db, branchId, character, binding.totalCharacters);
+      const row = one(this.#db.prepare(
+        'SELECT block_id, grapheme_length FROM working_blocks WHERE branch_id = ? AND position = ?',
+      ).all(branchId, resolved.position) as SqlRow[], 'WINDOW_NOT_FOUND', '全稿位置不存在。');
+      targetPosition = resolved.position;
+      focusBlockId = asString(row.block_id);
+      focusGrapheme = character - resolved.startCharacter;
+      requireBounded(focusGrapheme >= 0 && focusGrapheme < asNumber(row.grapheme_length), 'WINDOW_INVALID', '全稿位置无法精确解析到内容块。');
+      focusCharacter = character;
+    } else if (target.kind === 'proportion') {
+      requireBounded(Number.isFinite(target.proportion) && target.proportion >= 0 && target.proportion <= 1, 'WINDOW_INVALID', '全稿比例无效。');
+      if (binding.totalCharacters > 0) {
+        const character = Math.min(binding.totalCharacters - 1, Math.floor(binding.totalCharacters * target.proportion));
+        const resolved = resolveWorkingCharacter(this.#db, branchId, character, binding.totalCharacters);
+        const row = one(this.#db.prepare(
+          'SELECT block_id, grapheme_length FROM working_blocks WHERE branch_id = ? AND position = ?',
+        ).all(branchId, resolved.position) as SqlRow[], 'WINDOW_NOT_FOUND', '全稿位置不存在。');
+        targetPosition = resolved.position;
+        focusBlockId = asString(row.block_id);
+        focusGrapheme = character - resolved.startCharacter;
+        requireBounded(focusGrapheme >= 0 && focusGrapheme < asNumber(row.grapheme_length), 'WINDOW_INVALID', '全稿比例无法精确解析到内容块。');
+        focusCharacter = character;
+      }
+    }
+    const totalBlocks = lastWorkingPosition(this.#db, branchId);
+    const startPosition = Math.min(Math.max(1, targetPosition - (focusBlockId ? Math.floor(MAX_WINDOW_BLOCKS / 2) : 0)), Math.max(1, totalBlocks - MAX_WINDOW_BLOCKS + 1));
+    const rows = this.#db.prepare(
+      `SELECT block_id, position, kind, level, text, digest, grapheme_length
+       FROM working_blocks WHERE branch_id = ? AND position >= ? ORDER BY position LIMIT ?`,
+    ).all(branchId, startPosition, MAX_WINDOW_BLOCKS + 1) as SqlRow[];
+    const visible = rows.slice(0, MAX_WINDOW_BLOCKS);
+    const blocks = visible.map((row) => ({
+      blockId: asString(row.block_id),
+      position: asNumber(row.position),
+      kind: asString(row.kind) as ManuscriptBlockProjection['kind'],
+      level: row.level === null ? null : asNumber(row.level),
+      text: asString(row.text),
+      digest: asString(row.digest),
+    }));
+    requireBounded(blocks.length > 0 && blocks.length <= MAX_WINDOW_BLOCKS, 'WINDOW_NOT_FOUND', '稿件窗口为空。');
+    const first = visible[0]!;
+    const last = visible.at(-1)!;
+    const startCharacter = workingOffsetBefore(this.#db, branchId, asNumber(first.position));
+    const endCharacter = workingOffsetPrefix(this.#db, branchId, asNumber(last.position));
+    const resolvedPosition = focusBlockId === null ? asNumber(first.position) : targetPosition;
+    const resolvedCharacter = focusCharacter ?? (focusBlockId === null
+      ? startCharacter
+      : workingOffsetBefore(this.#db, branchId, resolvedPosition));
+    const structure = this.#db.prepare(
+      'SELECT text FROM manuscript_outline WHERE branch_id = ? AND position <= ? ORDER BY position DESC LIMIT 1',
+    ).get(branchId, resolvedPosition) as SqlRow | undefined;
+    const proportion = binding.totalCharacters === 0 ? 0 : resolvedCharacter / binding.totalCharacters;
+    const cursorBinding = { ...binding };
+    const projection: ManuscriptWindowProjection = {
+      bookId: binding.bookId,
+      manuscriptId,
+      branchId,
+      revisionId: binding.revisionId,
+      revisionLabel: binding.revisionLabel,
+      journalSequence: binding.journalSequence,
+      workingDigest: binding.workingDigest,
+      focusBlockId,
+      focusGrapheme,
+      previousCursor: startPosition > 1 ? this.#encodeCursor('window', cursorBinding, { position: Math.max(1, startPosition - WINDOW_STRIDE) }) : null,
+      nextCursor: rows.length > MAX_WINDOW_BLOCKS ? this.#encodeCursor('window', cursorBinding, { position: startPosition + WINDOW_STRIDE }) : null,
+      position: {
+        startBlock: asNumber(first.position),
+        endBlock: asNumber(last.position),
+        totalBlocks,
+        startCharacter,
+        endCharacter,
+        totalCharacters: binding.totalCharacters,
+        proportion,
+        structureLabel: structure ? asString(structure.text) : null,
+        label: `${structure ? `${asString(structure.text)} · ` : ''}全稿 ${(proportion * 100).toFixed(3)}%`,
+      },
+      blocks,
+    };
+    return projection;
+  }
+
+  getOutline(manuscriptId: string, branchId: string, cursor: string | null): OutlineProjection {
+    const binding = this.#binding(manuscriptId, branchId);
+    const position = cursor === null ? 0 : this.#decodeCursor(cursor, 'outline', binding).position;
+    const rows = this.#db.prepare(
+      `SELECT block_id, position, kind, level, text FROM manuscript_outline
+       WHERE branch_id = ? AND position > ? ORDER BY position LIMIT ?`,
+    ).all(branchId, position, MAX_OUTLINE_RESULTS + 1) as SqlRow[];
+    const visible = rows.slice(0, MAX_OUTLINE_RESULTS);
+    const projection: OutlineProjection = {
+      manuscriptId,
+      branchId,
+      revisionId: binding.revisionId,
+      workingDigest: binding.workingDigest,
+      entries: visible.map((row) => {
+        const display = boundedOutlineDisplay(asString(row.text));
+        const character = workingOffsetBefore(this.#db, branchId, asNumber(row.position));
+        return {
+          outlineId: `${branchId}:${asString(row.block_id)}`,
+          blockId: asString(row.block_id),
+          kind: asString(row.kind) as 'title' | 'heading',
+          level: asNumber(row.level),
+          text: display.text,
+          displayTextTruncated: display.truncated,
+          character,
+          proportion: binding.totalCharacters === 0 ? 0 : character / binding.totalCharacters,
+        };
+      }),
+      previousCursor: position === 0
+        ? null
+        : this.#encodeCursor('outline', binding, {
+            position: asNumber((this.#db.prepare(
+              `SELECT COALESCE((
+                 SELECT position FROM manuscript_outline
+                 WHERE branch_id = ? AND position <= ?
+                 ORDER BY position DESC LIMIT 1 OFFSET ?
+               ), 0) position`,
+            ).get(branchId, position, MAX_OUTLINE_RESULTS) as SqlRow).position),
+          }),
+      nextCursor: rows.length > MAX_OUTLINE_RESULTS
+        ? this.#encodeCursor('outline', binding, { position: asNumber(visible.at(-1)!.position) })
+        : null,
+    };
+    requireBounded(
+      Buffer.byteLength(JSON.stringify(projection), 'utf8') < MAX_FRAME_BYTES - 4_096,
+      'OUTLINE_FRAME_INVALID',
+      '结构导航响应超出协议范围。',
+    );
+    return projection;
+  }
+
+  flushJournalEdit(input: JournalEditInput): JournalAcknowledgement {
+    validateIdentity(input.manuscriptId, input.branchId);
+    requireBounded(UUID_PATTERN.test(input.clientEditId) && UUID_PATTERN.test(input.baseRevisionId) && BLOCK_PATTERN.test(input.blockId) && BLOCK_PATTERN.test(input.windowStartBlockId) && DIGEST_PATTERN.test(input.baseBlockDigest), 'EDIT_INVALID', '编辑标识无效。');
+    requireBounded(input.insertText.isWellFormed() && input.insertText.length <= MAX_EDIT_CODE_UNITS, 'EDIT_TOO_LARGE', '单次编辑超出安全范围。');
+    const inserted = graphemes(input.insertText);
+    requireBounded(inserted.length <= MAX_EDIT_GRAPHEMES, 'EDIT_TOO_LARGE', '单次编辑超出安全范围。');
+    const fingerprint = sha256(canonicalJson(input));
+    const prior = this.#db.prepare(
+      `SELECT client_edit_id, request_fingerprint, branch_id, base_revision_id, block_id, sequence,
+              resulting_block_digest, resulting_working_digest, durable_at
+       FROM edit_journal_entries WHERE client_edit_id = ?`,
+    ).all(input.clientEditId) as SqlRow[];
+    if (prior.length === 1) {
+      requireBounded(asString(prior[0]!.request_fingerprint) === fingerprint, 'IDEMPOTENCY_CONFLICT', '编辑标识已用于另一项修改。');
+      return this.#journalAck(prior[0]!, input);
+    }
+    transact(this.#db, () => {
+      const binding = this.#binding(input.manuscriptId, input.branchId);
+      requireBounded(binding.revisionId === input.baseRevisionId, 'EDIT_BINDING_CHANGED', '编辑绑定已变化。');
+      requireBounded(binding.journalSequence === input.expectedJournalSequence, 'EDIT_SEQUENCE_CHANGED', '修订日志已前进，请刷新窗口。');
+      requireBounded(
+        this.#db.prepare('SELECT 1 FROM working_blocks WHERE branch_id = ? AND block_id = ?').get(input.branchId, input.windowStartBlockId) !== undefined,
+        'EDIT_BLOCK_CHANGED',
+        '编辑窗口已变化，请刷新窗口。',
+      );
+      const block = one(this.#db.prepare(
+        'SELECT position, kind, level, text, digest, grapheme_length FROM working_blocks WHERE branch_id = ? AND block_id = ?',
+      ).all(input.branchId, input.blockId) as SqlRow[], 'EDIT_BLOCK_CHANGED', '稳定内容块不存在。');
+      requireBounded(asString(block.digest) === input.baseBlockDigest, 'EDIT_BLOCK_CHANGED', '内容块已变化，请刷新窗口。');
+      const beforeText = asString(block.text);
+      const before = graphemes(beforeText);
+      requireBounded(Number.isSafeInteger(input.fromGrapheme) && Number.isSafeInteger(input.toGrapheme) && input.fromGrapheme >= 0 && input.toGrapheme >= input.fromGrapheme && input.toGrapheme <= before.length && input.toGrapheme - input.fromGrapheme <= MAX_EDIT_GRAPHEMES, 'EDIT_RANGE_INVALID', '编辑字素范围无效。');
+      const afterText = [...before.slice(0, input.fromGrapheme), ...inserted, ...before.slice(input.toGrapheme)].join('');
+      const after = graphemes(afterText);
+      requireBounded(afterText.length <= MAX_BLOCK_CODE_UNITS && after.length <= MAX_BLOCK_GRAPHEMES, 'EDIT_TOO_LARGE', '编辑后内容块超出安全范围。');
+      const kind = asString(block.kind) as ManuscriptBlockProjection['kind'];
+      const level = block.level === null ? null : asNumber(block.level);
+      const afterDigest = blockDigest(kind, level, afterText);
+      const sequence = binding.journalSequence + 1;
+      const groupId = randomUUID();
+      const historyOrdinal = binding.historySequence + 1;
+      const workingDigest = sha256(canonicalJson({ previous: binding.workingDigest, sequence, groupId, blockId: input.blockId, afterDigest }));
+      const durableAt = new Date().toISOString();
+      this.#db.prepare("UPDATE manuscript_command_groups SET status = 'superseded' WHERE branch_id = ? AND status = 'undone'").run(input.branchId);
+      this.#db.prepare(
+        `INSERT INTO manuscript_command_groups(
+           command_group_id, branch_id, ordinal, kind, status, source_group_id,
+           before_working_digest, after_working_digest, created_at
+         ) VALUES (?, ?, ?, 'edit', 'applied', NULL, ?, ?, ?)`,
+      ).run(groupId, input.branchId, historyOrdinal, binding.workingDigest, workingDigest, durableAt);
+      this.#db.prepare(
+        `INSERT INTO manuscript_command_edits(
+           command_group_id, position, block_id, before_text, before_digest, after_text, after_digest
+         ) VALUES (?, 1, ?, ?, ?, ?, ?)`,
+      ).run(groupId, input.blockId, beforeText, input.baseBlockDigest, afterText, afterDigest);
+      const delta = after.length - before.length;
+      const updated = this.#db.prepare(
+        `UPDATE working_blocks SET text = ?, digest = ?, grapheme_length = ?
+         WHERE branch_id = ? AND block_id = ? AND digest = ?`,
+      ).run(afterText, afterDigest, after.length, input.branchId, input.blockId, input.baseBlockDigest);
+      requireBounded(updated.changes === 1, 'EDIT_BLOCK_CHANGED', '内容块在保存时已变化。');
+      updateWorkingOffsetNodes(this.#db, input.branchId, asNumber(block.position), delta);
+      this.#refreshBlockIndexes(input.branchId, input.blockId, asNumber(block.position), kind, level, afterText, afterDigest);
+      this.#db.prepare(
+        `INSERT INTO edit_journal_entries(
+           journal_entry_id, client_edit_id, request_fingerprint, manuscript_id, branch_id, base_revision_id,
+           sequence, block_id, from_grapheme, to_grapheme, insert_text, resulting_block_digest,
+           resulting_working_digest, durable_at, command_group_id, command_kind
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'edit')`,
+      ).run(randomUUID(), input.clientEditId, fingerprint, input.manuscriptId, input.branchId, input.baseRevisionId,
+        sequence, input.blockId, input.fromGrapheme, input.toGrapheme, input.insertText, afterDigest,
+        workingDigest, durableAt, groupId);
+      const state = this.#db.prepare(
+        `UPDATE branch_working_state SET journal_sequence = ?, working_digest = ?, total_graphemes = total_graphemes + ?, history_sequence = ?
+         WHERE branch_id = ? AND journal_sequence = ? AND working_digest = ?`,
+      ).run(sequence, workingDigest, delta, historyOrdinal, input.branchId, binding.journalSequence, binding.workingDigest);
+      requireBounded(state.changes === 1, 'EDIT_SEQUENCE_CHANGED', '修订日志在保存时已前进。');
+    });
+    const committed = one(this.#db.prepare(
+      `SELECT client_edit_id, request_fingerprint, branch_id, base_revision_id, block_id, sequence,
+              resulting_block_digest, resulting_working_digest, durable_at
+       FROM edit_journal_entries WHERE client_edit_id = ?`,
+    ).all(input.clientEditId) as SqlRow[], 'JOURNAL_ACK_FAILED', '修订日志已提交但无法读取确认。');
+    return this.#journalAck(committed, input);
+  }
+
+  createSearch(manuscriptId: string, branchId: string, queryInput: string): SearchSummaryProjection & { scannedPosition: number; totalBlocks: number } {
+    const query = validateShortText(queryInput, 256, 'SEARCH_INVALID', '搜索文字必须为有效的短文本。');
+    requireBounded(graphemes(query).length <= MAX_SEARCH_QUERY_GRAPHEMES, 'SEARCH_INVALID', '搜索文字过长。');
+    const binding = this.#binding(manuscriptId, branchId);
+    this.#pruneTransientSearches();
+    const totalBlocks = lastWorkingPosition(this.#db, branchId);
+    const searchId = randomUUID();
+    this.#db.prepare(
+      `INSERT INTO manuscript_search_sessions(
+         search_id, manuscript_id, branch_id, revision_id, journal_sequence, working_digest, query, state,
+         scanned_position, total_blocks, total_matches, created_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, 'running', 0, ?, 0, ?)`,
+    ).run(searchId, manuscriptId, branchId, binding.revisionId, binding.journalSequence, binding.workingDigest, query, totalBlocks, new Date().toISOString());
+    return {
+      searchId, manuscriptId, branchId, revisionId: binding.revisionId, journalSequence: binding.journalSequence,
+      workingDigest: binding.workingDigest, query, scopeLabel: '全稿', totalMatches: 0, scannedPosition: 0, totalBlocks,
+    };
+  }
+
+  advanceSearch(searchId: string): { done: boolean; summary: SearchSummaryProjection; scannedPosition: number; totalBlocks: number } {
+    requireBounded(UUID_PATTERN.test(searchId), 'SEARCH_INVALID', '搜索标识无效。');
+    const session = one(this.#db.prepare('SELECT * FROM manuscript_search_sessions WHERE search_id = ?').all(searchId) as SqlRow[], 'SEARCH_NOT_FOUND', '搜索不存在。');
+    const state = asString(session.state);
+    requireBounded(state === 'running' || state === 'completed', state === 'cancelled' ? 'JOB_CANCELLED' : 'SEARCH_FAILED', state === 'cancelled' ? '搜索已取消。' : '搜索已失效。');
+    const summary = this.#searchSummary(session);
+    if (state === 'completed') return { done: true, summary, scannedPosition: asNumber(session.total_blocks), totalBlocks: asNumber(session.total_blocks) };
+    const binding = this.#binding(asString(session.manuscript_id), asString(session.branch_id));
+    if (
+      binding.revisionId !== asString(session.revision_id) ||
+      binding.journalSequence !== asNumber(session.journal_sequence) ||
+      binding.workingDigest !== asString(session.working_digest)
+    ) {
+      this.#db.prepare("UPDATE manuscript_search_sessions SET state = 'failed', completed_at = ? WHERE search_id = ?").run(new Date().toISOString(), searchId);
+      this.#pruneTransientSearches();
+      throw new BoundedStoreError('SEARCH_STALE', '稿件已变化，请刷新搜索。');
+    }
+    const afterPosition = asNumber(session.scanned_position);
+    const query = asString(session.query);
+    const useTrigram = graphemes(query).length >= 3;
+    const ftsQuery = `"${query.replace(/"/g, '""')}"`;
+    const rows = (useTrigram
+      ? this.#db.prepare(
+          `SELECT wb.block_id, wb.position, wb.text, wb.digest
+           FROM working_block_search
+           JOIN working_blocks wb ON wb.branch_id = working_block_search.branch_id
+             AND wb.block_id = working_block_search.block_id
+           WHERE working_block_search.branch_id = ? AND working_block_search MATCH ? AND wb.position > ?
+           ORDER BY wb.position LIMIT ?`,
+        ).all(binding.branchId, ftsQuery, afterPosition, SEARCH_BATCH)
+      : this.#db.prepare(
+          `SELECT block_id, position, text, digest FROM working_blocks
+           WHERE branch_id = ? AND position > ? ORDER BY position LIMIT ?`,
+        ).all(binding.branchId, afterPosition, SEARCH_BATCH)) as SqlRow[];
+    let scannedPosition = afterPosition;
+    let nextOrdinal = asNumber(session.total_matches);
+    const needle = graphemes(query);
+    const insert = this.#db.prepare(
+      `INSERT INTO manuscript_search_results(
+         search_id, ordinal, match_id, block_id, from_grapheme, to_grapheme,
+         global_character, heading_label, context, range_digest
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    );
+    transact(this.#db, () => {
+      for (const row of rows) {
+        const blockId = asString(row.block_id);
+        const blockPosition = asNumber(row.position);
+        scannedPosition = Math.max(scannedPosition, blockPosition);
+        const text = graphemes(asString(row.text));
+        const heading = this.#db.prepare(
+          'SELECT text FROM manuscript_outline WHERE branch_id = ? AND position <= ? ORDER BY position DESC LIMIT 1',
+        ).get(binding.branchId, blockPosition) as SqlRow | undefined;
+        const headingLabel = boundedProtocolDisplay(heading ? asString(heading.text) : '正文').text;
+        const blockStart = workingOffsetBefore(this.#db, binding.branchId, blockPosition);
+        for (let start = 0; start <= text.length - needle.length; start += 1) {
+          if (!needle.every((part, index) => text[start + index] === part)) continue;
+          nextOrdinal += 1;
+          const to = start + needle.length;
+          const rangeDigest = sha256(canonicalJson({ blockDigest: asString(row.digest), from: start, to, query }));
+          const matchId = `hit_${sha256(`${searchId}\u0000${blockId}\u0000${start}`).slice(0, 24)}`;
+          insert.run(
+            searchId,
+            nextOrdinal,
+            matchId,
+            blockId,
+            start,
+            to,
+            blockStart + start,
+            headingLabel,
+            boundedSearchContext(text, start, to),
+            rangeDigest,
+          );
+          start = to - 1;
+        }
+      }
+      const done = useTrigram ? rows.length < SEARCH_BATCH : rows.length < SEARCH_BATCH;
+      if (done) {
+        this.#db.prepare(
+          "UPDATE manuscript_search_sessions SET state = 'completed', scanned_position = total_blocks, total_matches = ?, completed_at = ? WHERE search_id = ?",
+        ).run(nextOrdinal, new Date().toISOString(), searchId);
+      } else {
+        this.#db.prepare('UPDATE manuscript_search_sessions SET scanned_position = ?, total_matches = ? WHERE search_id = ?').run(scannedPosition, nextOrdinal, searchId);
+      }
+    });
+    const updated = one(this.#db.prepare('SELECT * FROM manuscript_search_sessions WHERE search_id = ?').all(searchId) as SqlRow[], 'SEARCH_NOT_FOUND', '搜索不存在。');
+    if (asString(updated.state) === 'completed') this.#pruneTransientSearches();
+    return { done: asString(updated.state) === 'completed', summary: this.#searchSummary(updated), scannedPosition: asNumber(updated.scanned_position), totalBlocks: asNumber(updated.total_blocks) };
+  }
+
+  cancelSearch(searchId: string): void {
+    this.#db.prepare("UPDATE manuscript_search_sessions SET state = 'cancelled', completed_at = ? WHERE search_id = ? AND state = 'running'").run(new Date().toISOString(), searchId);
+    this.#pruneTransientSearches();
+  }
+
+  getSearchResults(searchId: string, cursor: string | null): SearchResultsProjection {
+    const session = one(this.#db.prepare('SELECT * FROM manuscript_search_sessions WHERE search_id = ?').all(searchId) as SqlRow[], 'SEARCH_NOT_FOUND', '搜索不存在。');
+    requireBounded(asString(session.state) === 'completed', 'SEARCH_NOT_READY', '搜索仍在进行。');
+    const binding = this.#binding(asString(session.manuscript_id), asString(session.branch_id));
+    if (
+      binding.revisionId !== asString(session.revision_id) ||
+      binding.journalSequence !== asNumber(session.journal_sequence) ||
+      binding.workingDigest !== asString(session.working_digest)
+    ) {
+      this.#db.prepare("UPDATE manuscript_search_sessions SET state = 'failed', completed_at = ? WHERE search_id = ? AND state = 'completed'")
+        .run(new Date().toISOString(), searchId);
+      this.#pruneTransientSearches();
+      throw new BoundedStoreError('SEARCH_STALE', '稿件已变化，请刷新搜索。');
+    }
+    const offset = cursor === null ? 0 : this.#decodeSimpleCursor(cursor, `search:${searchId}`);
+    const rows = this.#db.prepare(
+      `SELECT ordinal, match_id, block_id, from_grapheme, to_grapheme, global_character,
+              heading_label, context, range_digest
+       FROM manuscript_search_results WHERE search_id = ? AND ordinal > ? ORDER BY ordinal LIMIT ?`,
+    ).all(searchId, offset, MAX_SEARCH_RESULTS + 1) as SqlRow[];
+    const visible = rows.slice(0, MAX_SEARCH_RESULTS);
+    const results = visible.map((row) => this.#searchMatch(row));
+    const projection: SearchResultsProjection = {
+      ...this.#searchSummary(session),
+      results,
+      previousCursor: offset > 0 ? this.#encodeSimpleCursor(`search:${searchId}`, Math.max(0, offset - MAX_SEARCH_RESULTS)) : null,
+      nextCursor: rows.length > MAX_SEARCH_RESULTS ? this.#encodeSimpleCursor(`search:${searchId}`, asNumber(visible.at(-1)!.ordinal)) : null,
+    };
+    requireBounded(
+      Buffer.byteLength(JSON.stringify(projection), 'utf8') < MAX_FRAME_BYTES,
+      'SEARCH_FRAME_INVALID',
+      '搜索结果响应超出协议范围。',
+    );
+    return projection;
+  }
+
+  prepareReplacement(searchId: string, replacementInput: string, excludedMatchIds: ReadonlyArray<string>): ReplacementPreviewProjection {
+    requireBounded(replacementInput.isWellFormed() && replacementInput.length <= 1_024, 'REPLACEMENT_INVALID', '替换文字无效。');
+    const replacement = replacementInput.normalize('NFC');
+    requireBounded(graphemes(replacement).length <= MAX_REPLACEMENT_GRAPHEMES, 'REPLACEMENT_INVALID', '替换文字过长。');
+    requireBounded(
+      excludedMatchIds.length <= MAX_REPLACEMENT_EXCLUSIONS && new Set(excludedMatchIds).size === excludedMatchIds.length &&
+        excludedMatchIds.every((id) => /^hit_[0-9a-f]{24}$/.test(id)),
+      'REPLACEMENT_INVALID',
+      '替换排除项无效。',
+    );
+    const search = one(this.#db.prepare('SELECT * FROM manuscript_search_sessions WHERE search_id = ?').all(searchId) as SqlRow[], 'SEARCH_NOT_FOUND', '搜索不存在。');
+    requireBounded(asString(search.state) === 'completed' && asNumber(search.total_matches) > 0, 'REPLACEMENT_INVALID', '没有可供替换的精确匹配。');
+    const binding = this.#binding(asString(search.manuscript_id), asString(search.branch_id));
+    requireBounded(
+      binding.revisionId === asString(search.revision_id) &&
+        binding.journalSequence === asNumber(search.journal_sequence) &&
+        binding.workingDigest === asString(search.working_digest),
+      'SEARCH_STALE',
+      '稿件已变化，请刷新搜索。',
+    );
+    const totalMatches = asNumber(search.total_matches);
+    requireBounded(excludedMatchIds.length < totalMatches, 'REPLACEMENT_INVALID', '至少保留一项替换。');
+    const previewId = randomUUID();
+    transact(this.#db, () => {
+      this.#pruneReplacementRecords(1);
+      const retained = asNumber(one(this.#db.prepare('SELECT count(*) total FROM manuscript_replacement_previews').all() as SqlRow[], 'REPLACEMENT_INVALID', '无法读取替换保留状态。').total);
+      requireBounded(retained < MAX_RETAINED_REPLACEMENT_PREVIEWS, 'SERVICE_BUSY', '替换复核记录已达到安全上限；请先完成或取消现有替换。');
+      this.#db.prepare(
+        `INSERT INTO manuscript_replacement_previews(
+           preview_id, search_id, manuscript_id, branch_id, revision_id, journal_sequence, working_digest,
+           query, replacement, state, total_matches, included_matches, validated_ordinal, created_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'reviewing', ?, ?, 0, ?)`,
+      ).run(previewId, searchId, binding.manuscriptId, binding.branchId, binding.revisionId, binding.journalSequence, binding.workingDigest,
+        asString(search.query), replacement, totalMatches, totalMatches - excludedMatchIds.length, new Date().toISOString());
+      const insertExcluded = this.#db.prepare(
+        `INSERT INTO manuscript_replacement_matches(
+           preview_id, ordinal, match_id, block_id, from_grapheme, to_grapheme, range_digest, included
+         ) SELECT ?, ordinal, match_id, block_id, from_grapheme, to_grapheme, range_digest, 0
+           FROM manuscript_search_results WHERE search_id = ? AND match_id = ?`,
+      );
+      for (const matchId of excludedMatchIds) {
+        requireBounded(insertExcluded.run(previewId, searchId, matchId).changes === 1, 'REPLACEMENT_INVALID', '替换排除项不属于当前搜索。');
+      }
+      const initialOrdinal = Math.min(totalMatches, SEARCH_BATCH);
+      this.#db.prepare(
+        `INSERT OR IGNORE INTO manuscript_replacement_matches(
+           preview_id, ordinal, match_id, block_id, from_grapheme, to_grapheme, range_digest, included
+         ) SELECT ?, ordinal, match_id, block_id, from_grapheme, to_grapheme, range_digest, 1
+           FROM manuscript_search_results WHERE search_id = ? AND ordinal <= ? ORDER BY ordinal`,
+      ).run(previewId, searchId, initialOrdinal);
+      this.#validatePreparedReplacementRange(previewId, 0, initialOrdinal);
+      this.#db.prepare('UPDATE manuscript_replacement_previews SET validated_ordinal = ? WHERE preview_id = ?').run(initialOrdinal, previewId);
+    });
+    return this.#replacementProjection(previewId);
+  }
+
+  freezeReplacement(previewId: string, excludedMatchIds: ReadonlyArray<string>): ReplacementPreviewProjection {
+    requireBounded(UUID_PATTERN.test(previewId) && excludedMatchIds.length <= MAX_REPLACEMENT_EXCLUSIONS && new Set(excludedMatchIds).size === excludedMatchIds.length && excludedMatchIds.every((id) => /^hit_[0-9a-f]{24}$/.test(id)), 'REPLACEMENT_INVALID', '替换排除项无效。');
+    transact(this.#db, () => {
+      const preview = one(this.#db.prepare('SELECT * FROM manuscript_replacement_previews WHERE preview_id = ?').all(previewId) as SqlRow[], 'REPLACEMENT_NOT_FOUND', '替换预览不存在。');
+      requireBounded(asString(preview.state) === 'reviewing', 'REPLACEMENT_STATE_CHANGED', '替换预览状态已变化。');
+      const binding = this.#binding(asString(preview.manuscript_id), asString(preview.branch_id));
+      requireBounded(
+        binding.revisionId === asString(preview.revision_id) &&
+          binding.journalSequence === asNumber(preview.journal_sequence) &&
+          binding.workingDigest === asString(preview.working_digest),
+        'REPLACEMENT_STALE',
+        '稿件已变化，替换未冻结，请刷新预览。',
+      );
+      const total = asNumber(preview.total_matches);
+      requireBounded(asNumber(preview.validated_ordinal) === total, 'REPLACEMENT_NOT_READY', '替换预览仍在有界准备中。');
+      const copied = asNumber(one(this.#db.prepare('SELECT count(*) total FROM manuscript_replacement_matches WHERE preview_id = ?').all(previewId) as SqlRow[], 'REPLACEMENT_NOT_FOUND', '替换匹配缺失。').total);
+      requireBounded(copied === total, 'REPLACEMENT_NOT_READY', '替换预览尚未完整准备。');
+      const reviewedExcluded = (this.#db.prepare(
+        'SELECT match_id FROM manuscript_replacement_matches WHERE preview_id = ? AND included = 0 ORDER BY match_id',
+      ).all(previewId) as SqlRow[]).map((row) => asString(row.match_id));
+      const requestedExcluded = [...excludedMatchIds].sort();
+      requireBounded(
+        reviewedExcluded.join('\n') === requestedExcluded.join('\n'),
+        'REPLACEMENT_INCLUSION_CHANGED',
+        '排除清单与已审阅预览不一致，请重新准备替换。',
+      );
+      const included = asNumber(one(this.#db.prepare('SELECT count(*) total FROM manuscript_replacement_matches WHERE preview_id = ? AND included = 1').all(previewId) as SqlRow[], 'REPLACEMENT_NOT_FOUND', '替换匹配缺失。').total);
+      requireBounded(included > 0 && included === asNumber(preview.included_matches), 'REPLACEMENT_INVALID', '已审阅纳入集合不完整。');
+      requireBounded(
+        this.#db.prepare("UPDATE manuscript_replacement_previews SET state = 'frozen', validated_ordinal = 0 WHERE preview_id = ? AND state = 'reviewing'").run(previewId).changes === 1,
+        'REPLACEMENT_STATE_CHANGED',
+        '替换预览状态已变化。',
+      );
+    });
+    return this.#replacementProjection(previewId);
+  }
+
+  advanceReplacementWork(previewId: string): {
+    phase: 'preparing' | 'validating';
+    done: boolean;
+    completed: number;
+    total: number;
+    preview: ReplacementPreviewProjection | null;
+  } {
+    const preview = one(this.#db.prepare('SELECT * FROM manuscript_replacement_previews WHERE preview_id = ?').all(previewId) as SqlRow[], 'REPLACEMENT_NOT_FOUND', '替换预览不存在。');
+    const state = asString(preview.state);
+    requireBounded(state === 'reviewing' || state === 'frozen', 'REPLACEMENT_STATE_CHANGED', '替换预览状态已变化。');
+    const binding = this.#binding(asString(preview.manuscript_id), asString(preview.branch_id));
+    requireBounded(
+      binding.revisionId === asString(preview.revision_id) &&
+        binding.journalSequence === asNumber(preview.journal_sequence) &&
+        binding.workingDigest === asString(preview.working_digest),
+      'REPLACEMENT_STALE',
+      '稿件已变化，替换未提交，请刷新预览。',
+    );
+    if (state === 'reviewing') {
+      const total = asNumber(preview.total_matches);
+      const after = asNumber(preview.validated_ordinal);
+      requireBounded(after <= total, 'REPLACEMENT_INVALID', '替换准备游标无效。');
+      if (after < total) {
+        const rows = this.#db.prepare(
+          `SELECT ordinal, match_id, block_id, from_grapheme, to_grapheme, range_digest
+           FROM manuscript_search_results WHERE search_id = ? AND ordinal > ? ORDER BY ordinal LIMIT ?`,
+        ).all(asString(preview.search_id), after, SEARCH_BATCH) as SqlRow[];
+        requireBounded(rows.length > 0, 'REPLACEMENT_INVALID', '替换搜索结果不完整。');
+        const next = asNumber(rows.at(-1)!.ordinal);
+        transact(this.#db, () => {
+          const insert = this.#db.prepare(
+            `INSERT OR IGNORE INTO manuscript_replacement_matches(
+               preview_id, ordinal, match_id, block_id, from_grapheme, to_grapheme, range_digest, included
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, 1)`,
+          );
+          for (const row of rows) {
+            insert.run(previewId, asNumber(row.ordinal), asString(row.match_id), asString(row.block_id), asNumber(row.from_grapheme), asNumber(row.to_grapheme), asString(row.range_digest));
+          }
+          this.#validatePreparedReplacementRange(previewId, after, next);
+          requireBounded(
+            this.#db.prepare("UPDATE manuscript_replacement_previews SET validated_ordinal = ? WHERE preview_id = ? AND state = 'reviewing' AND validated_ordinal = ?").run(next, previewId, after).changes === 1,
+            'REPLACEMENT_STATE_CHANGED',
+            '替换准备状态已变化。',
+          );
+        });
+      }
+      const refreshed = one(this.#db.prepare('SELECT validated_ordinal, total_matches, included_matches FROM manuscript_replacement_previews WHERE preview_id = ?').all(previewId) as SqlRow[], 'REPLACEMENT_NOT_FOUND', '替换预览不存在。');
+      const completed = asNumber(refreshed.validated_ordinal);
+      const done = completed === asNumber(refreshed.total_matches);
+      if (done) {
+        const counts = one(this.#db.prepare(
+          'SELECT count(*) total, sum(included) included FROM manuscript_replacement_matches WHERE preview_id = ?',
+        ).all(previewId) as SqlRow[], 'REPLACEMENT_INVALID', '替换准备计数缺失。');
+        requireBounded(asNumber(counts.total) === asNumber(refreshed.total_matches) && asNumber(counts.included) === asNumber(refreshed.included_matches), 'REPLACEMENT_INVALID', '替换准备集合不完整。');
+      }
+      return { phase: 'preparing', done, completed, total, preview: done ? this.#replacementProjection(previewId) : null };
+    }
+    const after = asNumber(preview.validated_ordinal);
+    const rows = this.#db.prepare(
+      `SELECT rm.ordinal, rm.block_id, rm.from_grapheme, rm.to_grapheme, rm.range_digest,
+              wb.text, wb.digest
+       FROM manuscript_replacement_matches rm
+       JOIN working_blocks wb ON wb.branch_id = ? AND wb.block_id = rm.block_id
+       WHERE rm.preview_id = ? AND rm.included = 1 AND rm.ordinal > ? ORDER BY rm.ordinal LIMIT ?`,
+    ).all(binding.branchId, previewId, after, SEARCH_BATCH) as SqlRow[];
+    let validated = after;
+    const query = graphemes(asString(preview.query));
+    for (const row of rows) {
+      const text = graphemes(asString(row.text));
+      const from = asNumber(row.from_grapheme);
+      const to = asNumber(row.to_grapheme);
+      const digest = sha256(canonicalJson({ blockDigest: asString(row.digest), from, to, query: asString(preview.query) }));
+      requireBounded(digest === asString(row.range_digest) && to - from === query.length && query.every((part, index) => text[from + index] === part), 'REPLACEMENT_STALE', '匹配范围已变化，替换未提交，请刷新预览。');
+      this.#requirePriorIncludedRangeDoesNotOverlap(previewId, asString(row.block_id), asNumber(row.ordinal), from);
+      validated = asNumber(row.ordinal);
+    }
+    this.#db.prepare('UPDATE manuscript_replacement_previews SET validated_ordinal = ? WHERE preview_id = ? AND state = ?').run(validated, previewId, 'frozen');
+    const remaining = asNumber(one(this.#db.prepare('SELECT count(*) total FROM manuscript_replacement_matches WHERE preview_id = ? AND included = 1 AND ordinal > ?').all(previewId, validated) as SqlRow[], 'REPLACEMENT_NOT_FOUND', '替换匹配缺失。').total);
+    return {
+      phase: 'validating',
+      done: remaining === 0,
+      completed: asNumber(preview.included_matches) - remaining,
+      total: asNumber(preview.included_matches),
+      preview: null,
+    };
+  }
+
+  commitReplacement(previewId: string): ReplacementCommitProjection {
+    const result = transact(this.#db, () => {
+      const preview = one(this.#db.prepare('SELECT * FROM manuscript_replacement_previews WHERE preview_id = ?').all(previewId) as SqlRow[], 'REPLACEMENT_NOT_FOUND', '替换预览不存在。');
+      requireBounded(asString(preview.state) === 'frozen' && asNumber(preview.validated_ordinal) > 0, 'REPLACEMENT_NOT_READY', '替换尚未完成复核。');
+      const unvalidated = asNumber(one(this.#db.prepare(
+        'SELECT count(*) total FROM manuscript_replacement_matches WHERE preview_id = ? AND included = 1 AND ordinal > ?',
+      ).all(previewId, asNumber(preview.validated_ordinal)) as SqlRow[], 'REPLACEMENT_NOT_READY', '替换匹配缺失。').total);
+      requireBounded(unvalidated === 0, 'REPLACEMENT_NOT_READY', '替换尚未完成全部精确范围复核。');
+      const binding = this.#binding(asString(preview.manuscript_id), asString(preview.branch_id));
+      requireBounded(
+        binding.revisionId === asString(preview.revision_id) &&
+          binding.journalSequence === asNumber(preview.journal_sequence) &&
+          binding.workingDigest === asString(preview.working_digest),
+        'REPLACEMENT_STALE',
+        '稿件已变化，替换未提交，请刷新预览。',
+      );
+      const groupId = randomUUID();
+      const ordinal = binding.historySequence + 1;
+      const now = new Date().toISOString();
+      const sequence = binding.journalSequence + 1;
+      const workingDigest = sha256(canonicalJson({ previous: binding.workingDigest, sequence, groupId, previewId, count: asNumber(preview.included_matches) }));
+      this.#db.prepare("UPDATE manuscript_command_groups SET status = 'superseded' WHERE branch_id = ? AND status = 'undone'").run(binding.branchId);
+      this.#db.prepare(
+        `INSERT INTO manuscript_command_groups(
+           command_group_id, branch_id, ordinal, kind, status, source_group_id,
+           before_working_digest, after_working_digest, created_at
+         ) VALUES (?, ?, ?, 'replacement', 'applied', NULL, ?, ?, ?)`,
+      ).run(groupId, binding.branchId, ordinal, binding.workingDigest, workingDigest, now);
+      const insertEdit = this.#db.prepare(
+        `INSERT INTO manuscript_command_edits(
+           command_group_id, position, block_id, before_text, before_digest, after_text, after_digest
+         ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      );
+      let blockCursor = 0;
+      let editPosition = 0;
+      let firstBlockId: string | undefined;
+      let firstDigest: string | undefined;
+      let totalDelta = 0;
+      while (true) {
+        const page = this.#db.prepare(
+          `SELECT DISTINCT rm.block_id, wb.position, wb.kind, wb.level, wb.text, wb.digest
+           FROM manuscript_replacement_matches rm
+           JOIN working_blocks wb ON wb.branch_id = ? AND wb.block_id = rm.block_id
+           WHERE rm.preview_id = ? AND rm.included = 1 AND wb.position > ?
+           ORDER BY wb.position LIMIT ?`,
+        ).all(binding.branchId, previewId, blockCursor, HISTORY_BATCH) as SqlRow[];
+        if (page.length === 0) break;
+        for (const row of page) {
+          blockCursor = asNumber(row.position);
+          editPosition += 1;
+          const blockId = asString(row.block_id);
+          const beforeText = asString(row.text);
+          const before = graphemes(beforeText);
+          const text = [...before];
+          const matches = this.#db.prepare(
+            `SELECT from_grapheme, to_grapheme FROM manuscript_replacement_matches
+             WHERE preview_id = ? AND included = 1 AND block_id = ? ORDER BY from_grapheme DESC`,
+          ).all(previewId, blockId) as SqlRow[];
+          const replacement = graphemes(asString(preview.replacement));
+          for (const match of matches) text.splice(asNumber(match.from_grapheme), asNumber(match.to_grapheme) - asNumber(match.from_grapheme), ...replacement);
+          const afterText = text.join('');
+          const after = graphemes(afterText);
+          requireBounded(afterText.length <= MAX_BLOCK_CODE_UNITS && after.length <= MAX_BLOCK_GRAPHEMES, 'REPLACEMENT_TOO_LARGE', '替换后内容块超出安全范围。');
+          const kind = asString(row.kind) as ManuscriptBlockProjection['kind'];
+          const level = row.level === null ? null : asNumber(row.level);
+          const afterDigest = blockDigest(kind, level, afterText);
+          insertEdit.run(groupId, editPosition, blockId, beforeText, asString(row.digest), afterText, afterDigest);
+          const delta = after.length - before.length;
+          const update = this.#db.prepare(
+            'UPDATE working_blocks SET text = ?, digest = ?, grapheme_length = ? WHERE branch_id = ? AND block_id = ? AND digest = ?',
+          ).run(afterText, afterDigest, after.length, binding.branchId, blockId, asString(row.digest));
+          requireBounded(update.changes === 1, 'REPLACEMENT_STALE', '匹配范围在提交时已变化。');
+          updateWorkingOffsetNodes(this.#db, binding.branchId, blockCursor, delta);
+          this.#refreshBlockIndexes(binding.branchId, blockId, blockCursor, kind, level, afterText, afterDigest);
+          totalDelta += delta;
+          requireBounded(Number.isSafeInteger(totalDelta), 'REPLACEMENT_TOO_LARGE', '替换后的全稿字符总数无效。');
+          firstBlockId ??= blockId;
+          firstDigest ??= afterDigest;
+        }
+        if (page.length < HISTORY_BATCH) break;
+      }
+      requireBounded(firstBlockId && firstDigest, 'REPLACEMENT_NOT_READY', '替换匹配缺失。');
+      this.#db.prepare(
+        `INSERT INTO edit_journal_entries(
+           journal_entry_id, client_edit_id, request_fingerprint, manuscript_id, branch_id, base_revision_id,
+           sequence, block_id, from_grapheme, to_grapheme, insert_text, resulting_block_digest,
+           resulting_working_digest, durable_at, command_group_id, command_kind
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?, ?, 'replacement')`,
+      ).run(randomUUID(), randomUUID(), sha256(canonicalJson({ previewId })), binding.manuscriptId, binding.branchId,
+        binding.revisionId, sequence, firstBlockId, asString(preview.replacement), firstDigest, workingDigest, now, groupId);
+      const state = this.#db.prepare(
+        `UPDATE branch_working_state SET journal_sequence = ?, working_digest = ?, history_sequence = ?,
+           total_graphemes = total_graphemes + ?
+         WHERE branch_id = ? AND journal_sequence = ? AND working_digest = ?`,
+      ).run(sequence, workingDigest, ordinal, totalDelta, binding.branchId, binding.journalSequence, binding.workingDigest);
+      requireBounded(state.changes === 1, 'REPLACEMENT_STALE', '替换提交时稿件状态已变化。');
+      requireBounded(
+        this.#db.prepare("UPDATE manuscript_replacement_previews SET state = 'committed', committed_at = ? WHERE preview_id = ? AND state = 'frozen'").run(now, previewId).changes === 1,
+        'REPLACEMENT_STATE_CHANGED',
+        '替换预览状态已变化。',
+      );
+      this.#pruneReplacementRecords(0);
+      return {
+        previewId,
+        branchId: binding.branchId,
+        revisionId: binding.revisionId,
+        journalSequence: sequence,
+        workingDigest,
+        committedCount: asNumber(preview.included_matches),
+        completionLabel: `已原子替换 ${asNumber(preview.included_matches)} 处并写入修订日志`,
+      };
+    });
+    return result;
+  }
+
+  cancelReplacement(previewId: string): boolean {
+    requireBounded(UUID_PATTERN.test(previewId), 'REPLACEMENT_INVALID', '替换预览标识无效。');
+    return transact(this.#db, () => {
+      const row = this.#db.prepare('SELECT state FROM manuscript_replacement_previews WHERE preview_id = ?').get(previewId) as SqlRow | undefined;
+      if (row === undefined) return false;
+      const state = asString(row.state);
+      let cancelled = state === 'cancelled';
+      if (state === 'reviewing' || state === 'frozen') {
+        cancelled = this.#db.prepare(
+          "UPDATE manuscript_replacement_previews SET state = 'cancelled' WHERE preview_id = ? AND state = ?",
+        ).run(previewId, state).changes === 1;
+      }
+      this.#pruneReplacementRecords(0);
+      return cancelled;
+    });
+  }
+
+  saveMilestone(manuscriptId: string, branchId: string, labelInput: string, purposeInput: string, noteInput: string): MilestoneProjection {
+    const label = validateShortText(labelInput, 80, 'MILESTONE_INVALID', '里程碑标签必须为 1–80 个字符。');
+    const purpose = validateShortText(purposeInput, 120, 'MILESTONE_INVALID', '里程碑用途必须为 1–120 个字符。');
+    const note = validateShortText(noteInput, 500, 'MILESTONE_INVALID', '里程碑备注过长。', true) || null;
+    return transact(this.#db, () => {
+      let binding = this.#binding(manuscriptId, branchId);
+      let revisionId = binding.revisionId;
+      let revisionLabel = binding.revisionLabel;
+      const now = new Date().toISOString();
+      const state = one(this.#db.prepare('SELECT last_checkpoint_sequence FROM branch_working_state WHERE branch_id = ?').all(branchId) as SqlRow[], 'MILESTONE_INVALID', '稿件工作状态缺失。');
+      if (binding.journalSequence > asNumber(state.last_checkpoint_sequence)) {
+        const previous = one(this.#db.prepare('SELECT source_version_id, ordinal FROM manuscript_revisions WHERE revision_id = ?').all(binding.revisionId) as SqlRow[], 'MILESTONE_INVALID', '当前修订版缺失。');
+        const ordinal = asNumber(previous.ordinal) + 1;
+        revisionId = randomUUID();
+        revisionLabel = `r${ordinal}`;
+        this.#db.prepare(
+          `INSERT INTO manuscript_revisions(
+             revision_id, manuscript_id, branch_id, ordinal, revision_label, parent_revision_id,
+             source_version_id, revision_digest, created_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ).run(revisionId, manuscriptId, branchId, ordinal, revisionLabel, binding.revisionId, asString(previous.source_version_id), binding.workingDigest, now);
+        snapshotWorkingRevision(this.#db, branchId, revisionId, binding.totalCharacters);
+        this.#db.prepare(
+          `UPDATE branch_working_state SET base_revision_id = ?, last_checkpoint_sequence = ?
+           WHERE branch_id = ? AND base_revision_id = ? AND journal_sequence = ?`,
+        ).run(revisionId, binding.journalSequence, branchId, binding.revisionId, binding.journalSequence);
+        this.#db.prepare('UPDATE manuscript_branches SET base_revision_id = ? WHERE branch_id = ?').run(revisionId, branchId);
+        binding = this.#binding(manuscriptId, branchId);
+      }
+      const milestoneId = randomUUID();
+      const signoffRecordId = randomUUID();
+      const workflow = one(this.#db.prepare(
+        `SELECT workflow_instance_id, profile_id, profile_version, current_phase, state
+         FROM workflow_instances WHERE manuscript_id = ?`,
+      ).all(manuscriptId) as SqlRow[], 'MILESTONE_INVALID', '稿件工作流程证据缺失。');
+      const workflowEvidenceDigest = sha256(canonicalJson({
+        workflowInstanceId: asString(workflow.workflow_instance_id),
+        profileId: asString(workflow.profile_id),
+        profileVersion: asString(workflow.profile_version),
+        phase: asString(workflow.current_phase),
+        state: asString(workflow.state),
+        revisionId,
+        revisionDigest: binding.workingDigest,
+        journalSequence: binding.journalSequence,
+      }));
+      this.#db.prepare(
+        `INSERT INTO milestone_versions(
+           milestone_id, manuscript_id, branch_id, revision_id, label, purpose, note, actor, created_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, '本机编辑', ?)`,
+      ).run(milestoneId, manuscriptId, branchId, revisionId, label, purpose, note, now);
+      this.#db.prepare(
+        `INSERT INTO milestone_signoff_records(
+           signoff_record_id, milestone_id, manuscript_id, branch_id, revision_id,
+           workflow_instance_id, workflow_evidence_digest, actor, signed_at, label, stated_next_use
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, '本机编辑', ?, ?, ?)`,
+      ).run(signoffRecordId, milestoneId, manuscriptId, branchId, revisionId,
+        asString(workflow.workflow_instance_id), workflowEvidenceDigest, now, label, purpose);
+      return {
+        milestoneId, manuscriptId, branchId, revisionId, revisionLabel, label, purpose, note, createdAt: now,
+        journalSequence: binding.journalSequence, workingDigest: binding.workingDigest,
+        signoffRecordId, workflowEvidenceDigest, actor: '本机编辑', signedAt: now, statedNextUse: purpose,
+        completionLabel: `已保存里程碑版本「${label}」 · ${revisionLabel}`,
+      };
+    });
+  }
+
+  undo(manuscriptId: string, branchId: string, expectedWorkingDigest: string): DurableHistoryProjection {
+    return this.#applyHistory('undo', manuscriptId, branchId, expectedWorkingDigest);
+  }
+
+  redo(manuscriptId: string, branchId: string, expectedWorkingDigest: string): DurableHistoryProjection {
+    return this.#applyHistory('redo', manuscriptId, branchId, expectedWorkingDigest);
+  }
+
+  #applyHistory(action: 'undo' | 'redo', manuscriptId: string, branchId: string, expectedWorkingDigest: string): DurableHistoryProjection {
+    requireBounded(DIGEST_PATTERN.test(expectedWorkingDigest), 'HISTORY_INVALID', '历史状态绑定无效。');
+    return transact(this.#db, () => {
+      const binding = this.#binding(manuscriptId, branchId);
+      requireBounded(binding.workingDigest === expectedWorkingDigest, 'HISTORY_STALE', '稿件已变化，请刷新历史状态。');
+      const group = one(this.#db.prepare(
+        action === 'undo'
+          ? "SELECT * FROM manuscript_command_groups WHERE branch_id = ? AND status = 'applied' ORDER BY ordinal DESC LIMIT 1"
+          : "SELECT * FROM manuscript_command_groups WHERE branch_id = ? AND status = 'undone' ORDER BY ordinal ASC LIMIT 1",
+      ).all(branchId) as SqlRow[], action === 'undo' ? 'NOTHING_TO_UNDO' : 'NOTHING_TO_REDO', action === 'undo' ? '没有可撤销的编辑。' : '没有可重做的编辑。');
+      const groupId = asString(group.command_group_id);
+      validateCommandHistoryGroup(this.#db, groupId);
+      let cursor = 0;
+      let totalDelta = 0;
+      while (true) {
+        const rows = this.#db.prepare(
+          `SELECT position, block_id, before_text, before_digest, after_text, after_digest
+           FROM manuscript_command_edits WHERE command_group_id = ? AND position > ? ORDER BY position LIMIT ?`,
+        ).all(groupId, cursor, HISTORY_BATCH) as SqlRow[];
+        if (rows.length === 0) break;
+        for (const row of rows) {
+          cursor = asNumber(row.position);
+          const expectedDigest = action === 'undo' ? asString(row.after_digest) : asString(row.before_digest);
+          const targetText = action === 'undo' ? asString(row.before_text) : asString(row.after_text);
+          const targetDigest = action === 'undo' ? asString(row.before_digest) : asString(row.after_digest);
+          const current = one(this.#db.prepare(
+            'SELECT position, kind, level, grapheme_length FROM working_blocks WHERE branch_id = ? AND block_id = ?',
+          ).all(branchId, asString(row.block_id)) as SqlRow[], 'HISTORY_STALE', '稿件历史内容块缺失。');
+          const kind = asString(current.kind) as ManuscriptBlockProjection['kind'];
+          const level = current.level === null ? null : asNumber(current.level);
+          const targetLength = graphemes(targetText).length;
+          const delta = targetLength - asNumber(current.grapheme_length);
+          const update = this.#db.prepare(
+            'UPDATE working_blocks SET text = ?, digest = ?, grapheme_length = ? WHERE branch_id = ? AND block_id = ? AND digest = ?',
+          ).run(targetText, targetDigest, targetLength, branchId, asString(row.block_id), expectedDigest);
+          requireBounded(update.changes === 1, 'HISTORY_STALE', '稿件历史无法在当前状态精确重放。');
+          updateWorkingOffsetNodes(this.#db, branchId, asNumber(current.position), delta);
+          this.#refreshBlockIndexes(branchId, asString(row.block_id), asNumber(current.position), kind, level, targetText, targetDigest);
+          totalDelta += delta;
+          requireBounded(Number.isSafeInteger(totalDelta), 'HISTORY_CORRUPT', '历史命令字符变化无效。');
+        }
+      }
+      const sequence = binding.journalSequence + 1;
+      const nextDigest = sha256(canonicalJson({ previous: binding.workingDigest, sequence, action, groupId }));
+      const now = new Date().toISOString();
+      requireBounded(
+        this.#db.prepare('UPDATE manuscript_command_groups SET status = ? WHERE command_group_id = ? AND status = ?').run(action === 'undo' ? 'undone' : 'applied', groupId, action === 'undo' ? 'applied' : 'undone').changes === 1,
+        'HISTORY_STALE',
+        '稿件历史状态已变化。',
+      );
+      const representative = one(this.#db.prepare('SELECT block_id, before_digest, after_digest FROM manuscript_command_edits WHERE command_group_id = ? ORDER BY position LIMIT 1').all(groupId) as SqlRow[], 'HISTORY_CORRUPT', '历史命令内容缺失。');
+      this.#db.prepare(
+        `INSERT INTO edit_journal_entries(
+           journal_entry_id, client_edit_id, request_fingerprint, manuscript_id, branch_id, base_revision_id,
+           sequence, block_id, from_grapheme, to_grapheme, insert_text, resulting_block_digest,
+           resulting_working_digest, durable_at, command_group_id, command_kind
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, '', ?, ?, ?, ?, ?)`,
+      ).run(randomUUID(), randomUUID(), sha256(canonicalJson({ action, groupId, sequence })), manuscriptId, branchId,
+        binding.revisionId, sequence, asString(representative.block_id), action === 'undo' ? asString(representative.before_digest) : asString(representative.after_digest),
+        nextDigest, now, groupId, action);
+      const state = this.#db.prepare(
+        `UPDATE branch_working_state SET journal_sequence = ?, working_digest = ?,
+           total_graphemes = total_graphemes + ?
+         WHERE branch_id = ? AND journal_sequence = ? AND working_digest = ?`,
+      ).run(sequence, nextDigest, totalDelta, branchId, binding.journalSequence, binding.workingDigest);
+      requireBounded(state.changes === 1, 'HISTORY_STALE', '稿件历史提交时工作状态已变化。');
+      const refreshed = this.#binding(manuscriptId, branchId);
+      return {
+        action, branchId, revisionId: refreshed.revisionId, revisionLabel: refreshed.revisionLabel,
+        journalSequence: sequence, workingDigest: nextDigest, commandGroupId: groupId,
+        completionLabel: action === 'undo' ? '已撤销并写入修订日志' : '已重做并写入修订日志',
+        canUndo: this.#hasHistory(branchId, 'applied'), canRedo: this.#hasHistory(branchId, 'undone'),
+      };
+    });
+  }
+
+  #binding(manuscriptId: string, branchId: string): BranchBinding {
+    validateIdentity(manuscriptId, branchId);
+    const row = one(this.#db.prepare(
+      `SELECT m.book_id, bws.manuscript_id, bws.branch_id, bws.base_revision_id, mr.revision_label,
+              bws.journal_sequence, bws.working_digest, bws.total_graphemes, bws.history_sequence
+       FROM branch_working_state bws
+       JOIN manuscripts m ON m.manuscript_id = bws.manuscript_id
+       JOIN manuscript_revisions mr ON mr.revision_id = bws.base_revision_id
+       WHERE bws.manuscript_id = ? AND bws.branch_id = ?`,
+    ).all(manuscriptId, branchId) as SqlRow[], 'MANUSCRIPT_NOT_FOUND', '稿件工作状态不存在。');
+    return {
+      bookId: asString(row.book_id), manuscriptId, branchId, revisionId: asString(row.base_revision_id),
+      revisionLabel: asString(row.revision_label), journalSequence: asNumber(row.journal_sequence),
+      workingDigest: asString(row.working_digest), totalCharacters: asNumber(row.total_graphemes),
+      historySequence: asNumber(row.history_sequence),
+    };
+  }
+
+  #refreshBlockIndexes(branchId: string, blockId: string, position: number, kind: ManuscriptBlockProjection['kind'], level: number | null, text: string, digest: string): void {
+    this.#db.prepare('DELETE FROM working_block_search WHERE branch_id = ? AND block_id = ?').run(branchId, blockId);
+    this.#db.prepare('INSERT INTO working_block_search(branch_id, block_id, text) VALUES (?, ?, ?)').run(branchId, blockId, text);
+    if (kind === 'title' || kind === 'heading') {
+      this.#db.prepare(
+        `INSERT INTO manuscript_outline(branch_id, block_id, position, kind, level, text, digest)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(branch_id, block_id) DO UPDATE SET position=excluded.position,
+           kind=excluded.kind, level=excluded.level, text=excluded.text, digest=excluded.digest`,
+      ).run(branchId, blockId, position, kind, level ?? 1, text, digest);
+    }
+  }
+
+  #searchSummary(row: SqlRow): SearchSummaryProjection {
+    return {
+      searchId: asString(row.search_id), manuscriptId: asString(row.manuscript_id), branchId: asString(row.branch_id),
+      revisionId: asString(row.revision_id), journalSequence: asNumber(row.journal_sequence),
+      workingDigest: asString(row.working_digest), query: asString(row.query),
+      scopeLabel: '全稿', totalMatches: asNumber(row.total_matches),
+    };
+  }
+
+  #searchMatch(row: SqlRow): SearchMatchProjection {
+    return {
+      matchId: asString(row.match_id), blockId: asString(row.block_id), fromGrapheme: asNumber(row.from_grapheme),
+      toGrapheme: asNumber(row.to_grapheme), globalCharacter: asNumber(row.global_character),
+      headingLabel: boundedProtocolDisplay(asString(row.heading_label)).text,
+      context: boundedProtocolDisplay(asString(row.context)).text,
+      rangeDigest: asString(row.range_digest),
+    };
+  }
+
+  #replacementProjection(previewId: string): ReplacementPreviewProjection {
+    const row = one(this.#db.prepare('SELECT * FROM manuscript_replacement_previews WHERE preview_id = ?').all(previewId) as SqlRow[], 'REPLACEMENT_NOT_FOUND', '替换预览不存在。');
+    const contexts = this.#db.prepare(
+      `SELECT sr.match_id, sr.block_id, sr.from_grapheme, sr.to_grapheme, sr.global_character,
+               sr.heading_label, sr.context, sr.range_digest
+       FROM manuscript_replacement_matches rm
+       JOIN manuscript_search_results sr ON sr.search_id = ? AND sr.match_id = rm.match_id
+       WHERE rm.preview_id = ? AND rm.included = 1 ORDER BY rm.ordinal LIMIT 6`,
+    ).all(asString(row.search_id), previewId) as SqlRow[];
+    const revision = one(this.#db.prepare('SELECT revision_label FROM manuscript_revisions WHERE revision_id = ?').all(asString(row.revision_id)) as SqlRow[], 'REPLACEMENT_NOT_FOUND', '替换绑定的修订版不存在。');
+    const state = asString(row.state);
+    requireBounded(state === 'reviewing' || state === 'frozen', 'REPLACEMENT_STATE_CHANGED', '替换预览状态已变化。');
+    const excludedMatchIds = (this.#db.prepare(
+      'SELECT match_id FROM manuscript_replacement_matches WHERE preview_id = ? AND included = 0 ORDER BY match_id',
+    ).all(previewId) as SqlRow[]).map((match) => asString(match.match_id));
+    requireBounded(excludedMatchIds.length <= MAX_REPLACEMENT_EXCLUSIONS, 'REPLACEMENT_INVALID', '替换排除清单超出安全范围。');
+    return {
+      previewId, searchId: asString(row.search_id), manuscriptId: asString(row.manuscript_id), branchId: asString(row.branch_id),
+      revisionId: asString(row.revision_id), journalSequence: asNumber(row.journal_sequence),
+      workingDigest: asString(row.working_digest), query: asString(row.query),
+      replacement: asString(row.replacement), scopeLabel: '全稿', matchingRule: REPLACEMENT_MATCHING_RULE,
+      inclusionRule: REPLACEMENT_INCLUSION_RULE, revisionLabel: asString(revision.revision_label),
+      totalMatches: asNumber(row.total_matches), includedMatches: asNumber(row.included_matches),
+      excludedMatches: asNumber(row.total_matches) - asNumber(row.included_matches), state,
+      excludedMatchIds,
+      representativeContexts: contexts.map((context) => this.#searchMatch(context)),
+    };
+  }
+
+  #validatePreparedReplacementRange(previewId: string, after: number, through: number): void {
+    const rows = this.#db.prepare(
+      `SELECT rm.ordinal, rm.match_id, rm.block_id, rm.from_grapheme, rm.to_grapheme, rm.range_digest, rm.included,
+              sr.match_id source_match_id, sr.block_id source_block_id, sr.from_grapheme source_from,
+              sr.to_grapheme source_to, sr.range_digest source_digest
+       FROM manuscript_replacement_matches rm
+       JOIN manuscript_replacement_previews rp ON rp.preview_id = rm.preview_id
+       JOIN manuscript_search_results sr ON sr.search_id = rp.search_id AND sr.ordinal = rm.ordinal
+       WHERE rm.preview_id = ? AND rm.ordinal > ? AND rm.ordinal <= ? ORDER BY rm.ordinal`,
+    ).all(previewId, after, through) as SqlRow[];
+    requireBounded(rows.length === through - after, 'REPLACEMENT_INVALID', '替换准备批次不完整。');
+    for (const row of rows) {
+      requireBounded(
+        asString(row.match_id) === asString(row.source_match_id) && asString(row.block_id) === asString(row.source_block_id) &&
+          asNumber(row.from_grapheme) === asNumber(row.source_from) && asNumber(row.to_grapheme) === asNumber(row.source_to) &&
+          asString(row.range_digest) === asString(row.source_digest),
+        'REPLACEMENT_INVALID',
+        '替换准备批次与搜索结果不一致。',
+      );
+      if (asNumber(row.included) === 1) {
+        this.#requirePriorIncludedRangeDoesNotOverlap(previewId, asString(row.block_id), asNumber(row.ordinal), asNumber(row.from_grapheme));
+      }
+    }
+  }
+
+  #requirePriorIncludedRangeDoesNotOverlap(previewId: string, blockId: string, ordinal: number, from: number): void {
+    const prior = this.#db.prepare(
+      `SELECT to_grapheme FROM manuscript_replacement_matches
+       WHERE preview_id = ? AND included = 1 AND block_id = ? AND ordinal < ?
+       ORDER BY from_grapheme DESC LIMIT 1`,
+    ).get(previewId, blockId, ordinal) as SqlRow | undefined;
+    requireBounded(prior === undefined || asNumber(prior.to_grapheme) <= from, 'REPLACEMENT_INVALID', '替换集合包含重叠范围。');
+  }
+
+  #pruneReplacementRecords(reserve: number): void {
+    prunePersistedReplacementRecords(this.#db, reserve);
+    this.#pruneTransientSearches();
+  }
+
+  #pruneTransientSearches(): void {
+    prunePersistedSearchSessions(this.#db);
+  }
+
+  #hasHistory(branchId: string, state: 'applied' | 'undone'): boolean {
+    return this.#db.prepare('SELECT 1 ok FROM manuscript_command_groups WHERE branch_id = ? AND status = ? LIMIT 1').get(branchId, state) !== undefined;
+  }
+
+  #journalAck(row: SqlRow, input: JournalEditInput): JournalAcknowledgement {
+    const acknowledgement = {
+      clientEditId: asString(row.client_edit_id), branchId: asString(row.branch_id), baseRevisionId: asString(row.base_revision_id),
+      blockId: asString(row.block_id), sequence: asNumber(row.sequence), resultingBlockDigest: asString(row.resulting_block_digest),
+      resultingWorkingDigest: asString(row.resulting_working_digest), durableAt: asString(row.durable_at), completionLabel: '已写入修订日志',
+    } satisfies Omit<JournalAcknowledgement, 'window'>;
+    const window = this.getWindow(input.manuscriptId, input.branchId, { kind: 'window-start', blockId: input.windowStartBlockId });
+    requireBounded(
+      window.journalSequence === acknowledgement.sequence && window.workingDigest === acknowledgement.resultingWorkingDigest,
+      'JOURNAL_ACK_FAILED',
+      '修订日志已提交但窗口确认已变化。',
+    );
+    return { ...acknowledgement, window };
+  }
+
+  #encodeCursor(kind: string, binding: BranchBinding, value: { position: number }): string {
+    const payload = Buffer.from(JSON.stringify({ kind, manuscriptId: binding.manuscriptId, branchId: binding.branchId, revisionId: binding.revisionId, workingDigest: binding.workingDigest, position: value.position }), 'utf8').toString('base64url');
+    const signature = createHmac('sha256', this.#cursorSecret).update(payload).digest('base64url');
+    return `${payload}.${signature}`;
+  }
+
+  #decodeCursor(cursor: string, kind: string, binding: BranchBinding): { position: number } {
+    const [payload, signature, extra] = cursor.split('.');
+    requireBounded(payload && signature && extra === undefined, 'CURSOR_INVALID', '稿件位置已失效。');
+    const expected = createHmac('sha256', this.#cursorSecret).update(payload).digest();
+    const supplied = Buffer.from(signature, 'base64url');
+    requireBounded(expected.length === supplied.length && timingSafeEqual(expected, supplied), 'CURSOR_INVALID', '稿件位置已失效。');
+    let value: unknown;
+    try { value = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')); } catch { throw new BoundedStoreError('CURSOR_INVALID', '稿件位置已失效。'); }
+    requireBounded(value !== null && typeof value === 'object' && !Array.isArray(value), 'CURSOR_INVALID', '稿件位置已失效。');
+    const row = value as Record<string, unknown>;
+    requireBounded(row.kind === kind && row.manuscriptId === binding.manuscriptId && row.branchId === binding.branchId && row.revisionId === binding.revisionId && row.workingDigest === binding.workingDigest && typeof row.position === 'number' && Number.isSafeInteger(row.position) && row.position >= 0, 'CURSOR_INVALID', '稿件位置已失效。');
+    return { position: Number(row.position) };
+  }
+
+  #encodeSimpleCursor(kind: string, position: number): string {
+    const payload = Buffer.from(JSON.stringify({ kind, position }), 'utf8').toString('base64url');
+    return `${payload}.${createHmac('sha256', this.#cursorSecret).update(payload).digest('base64url')}`;
+  }
+
+  #decodeSimpleCursor(cursor: string, kind: string): number {
+    const [payload, signature, extra] = cursor.split('.');
+    requireBounded(payload && signature && extra === undefined, 'CURSOR_INVALID', '结果位置已失效。');
+    const expected = createHmac('sha256', this.#cursorSecret).update(payload).digest();
+    const supplied = Buffer.from(signature, 'base64url');
+    requireBounded(expected.length === supplied.length && timingSafeEqual(expected, supplied), 'CURSOR_INVALID', '结果位置已失效。');
+    let value: unknown;
+    try { value = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')); } catch { throw new BoundedStoreError('CURSOR_INVALID', '结果位置已失效。'); }
+    requireBounded(value !== null && typeof value === 'object' && !Array.isArray(value), 'CURSOR_INVALID', '结果位置已失效。');
+    const row = value as Record<string, unknown>;
+    requireBounded(row.kind === kind && typeof row.position === 'number' && Number.isSafeInteger(row.position) && row.position >= 0, 'CURSOR_INVALID', '结果位置已失效。');
+    return Number(row.position);
+  }
+}

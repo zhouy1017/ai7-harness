@@ -13,6 +13,7 @@ import {
 
 const MAX_PENDING_REQUESTS = 16;
 const REQUEST_TIMEOUT_MS = 30_000;
+const LONG_REQUEST_TIMEOUT_MS = 10 * 60_000;
 
 interface PendingRequest {
   readonly operation: ServiceOperation;
@@ -54,7 +55,7 @@ function serviceEnvironment(executable: string, importControl: J01ImportControl 
 
 function readinessIsExact(value: ServiceReadiness): boolean {
   return (
-    value.protocolVersion === 3 &&
+    value.protocolVersion === 4 &&
     value.state === 'ready' &&
     value.runtime.electron === '43.4.1' &&
     value.runtime.node === '24.18.1' &&
@@ -158,7 +159,7 @@ export class ServiceClient {
         this.#pending.delete(id);
         reject(new ServiceCallError('SERVICE_TIMEOUT', '本地业务服务响应超时。'));
         this.#fault();
-      }, REQUEST_TIMEOUT_MS);
+      }, operation === 'stageSelectedDocx' || operation === 'commitNewBookImport' || operation === 'commitReplacement' || operation === 'saveMilestone' ? LONG_REQUEST_TIMEOUT_MS : REQUEST_TIMEOUT_MS);
       timeout.unref();
       this.#pending.set(id, {
         operation,

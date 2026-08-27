@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url';
 import {
   MAX_EDIT_CODE_UNITS,
   MAX_FRAME_BYTES,
+  MAX_REPLACEMENT_EXCLUSIONS,
   type J01ImportControl,
   type ServiceFailureResponse,
   type ServiceRequest,
@@ -12,6 +13,7 @@ import {
 import { installNodeNetworkDenial } from '../shared/network-denial.js';
 import type { DormantHarnessRuntime } from './runtime.js';
 import type { EditorialStore } from './store.js';
+import type { CooperativeJobOwner } from './cooperative-jobs.js';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const HEX_DIGEST_PATTERN = /^[0-9a-f]{64}$/;
@@ -66,6 +68,7 @@ function decodeRequest(frame: Uint8Array): ServiceRequest {
   switch (op) {
     case 'ready':
     case 'getImportStartup':
+    case 'listPriorWork':
     case 'shutdown': {
       requireInput(value.input, [], tentativeId);
       break;
@@ -175,6 +178,7 @@ function decodeRequest(frame: Uint8Array): ServiceRequest {
           'branchId',
           'baseRevisionId',
           'blockId',
+          'windowStartBlockId',
           'baseBlockDigest',
           'expectedJournalSequence',
           'fromGrapheme',
@@ -194,6 +198,8 @@ function decodeRequest(frame: Uint8Array): ServiceRequest {
         !UUID_PATTERN.test(input.baseRevisionId) ||
         !isBoundedString(input.blockId, 28) ||
         !/^blk_[0-9a-f]{24}$/.test(input.blockId) ||
+        !isBoundedString(input.windowStartBlockId, 28) ||
+        !/^blk_[0-9a-f]{24}$/.test(input.windowStartBlockId) ||
         !isBoundedString(input.baseBlockDigest, 64) ||
         !HEX_DIGEST_PATTERN.test(input.baseBlockDigest) ||
         !isSafeInteger(input.expectedJournalSequence) ||
@@ -201,6 +207,154 @@ function decodeRequest(frame: Uint8Array): ServiceRequest {
         !isSafeInteger(input.toGrapheme) ||
         input.toGrapheme < input.fromGrapheme ||
         !isBoundedString(input.insertText, MAX_EDIT_CODE_UNITS, true)
+      ) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
+    case 'getManuscriptWindowAt': {
+      const input = requireInput(value.input, ['manuscriptId', 'branchId', 'target'], tentativeId);
+      if (
+        !isBoundedString(input.manuscriptId, 36) ||
+        !UUID_PATTERN.test(input.manuscriptId) ||
+        !isBoundedString(input.branchId, 36) ||
+        !UUID_PATTERN.test(input.branchId) ||
+        !isRecord(input.target)
+      ) {
+        throw new ProtocolError(tentativeId);
+      }
+      const target = input.target;
+      if (
+        (target.kind === 'start' && hasExactKeys(target, ['kind'])) ||
+        (target.kind === 'cursor' &&
+          hasExactKeys(target, ['kind', 'cursor']) &&
+          isBoundedString(target.cursor, 1_024)) ||
+        (target.kind === 'block' &&
+          hasExactKeys(target, ['kind', 'blockId']) &&
+          isBoundedString(target.blockId, 28) &&
+          /^blk_[0-9a-f]{24}$/.test(target.blockId)) ||
+        (target.kind === 'window-start' &&
+          hasExactKeys(target, ['kind', 'blockId']) &&
+          isBoundedString(target.blockId, 28) &&
+          /^blk_[0-9a-f]{24}$/.test(target.blockId)) ||
+        (target.kind === 'character' &&
+          hasExactKeys(target, ['kind', 'character']) &&
+          isSafeInteger(target.character)) ||
+        (target.kind === 'proportion' &&
+          hasExactKeys(target, ['kind', 'proportion']) &&
+          typeof target.proportion === 'number' &&
+          Number.isFinite(target.proportion) &&
+          target.proportion >= 0 &&
+          target.proportion <= 1)
+      ) {
+        break;
+      }
+      throw new ProtocolError(tentativeId);
+    }
+    case 'getOutline': {
+      const input = requireInput(value.input, ['manuscriptId', 'branchId', 'cursor'], tentativeId);
+      if (
+        !isBoundedString(input.manuscriptId, 36) ||
+        !UUID_PATTERN.test(input.manuscriptId) ||
+        !isBoundedString(input.branchId, 36) ||
+        !UUID_PATTERN.test(input.branchId) ||
+        !(input.cursor === null || isBoundedString(input.cursor, 1_024))
+      ) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
+    case 'startSearch': {
+      const input = requireInput(value.input, ['manuscriptId', 'branchId', 'query'], tentativeId);
+      if (
+        !isBoundedString(input.manuscriptId, 36) ||
+        !UUID_PATTERN.test(input.manuscriptId) ||
+        !isBoundedString(input.branchId, 36) ||
+        !UUID_PATTERN.test(input.branchId) ||
+        !isBoundedString(input.query, 256)
+      ) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
+    case 'pollServiceJob':
+    case 'cancelServiceJob': {
+      const input = requireInput(value.input, ['jobId'], tentativeId);
+      if (!isBoundedString(input.jobId, 36) || !UUID_PATTERN.test(input.jobId)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'getSearchResults': {
+      const input = requireInput(value.input, ['searchId', 'cursor'], tentativeId);
+      if (
+        !isBoundedString(input.searchId, 36) ||
+        !UUID_PATTERN.test(input.searchId) ||
+        !(input.cursor === null || isBoundedString(input.cursor, 1_024))
+      ) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
+    case 'prepareReplacement': {
+      const input = requireInput(value.input, ['searchId', 'replacement', 'excludedMatchIds'], tentativeId);
+      if (
+        !isBoundedString(input.searchId, 36) ||
+        !UUID_PATTERN.test(input.searchId) ||
+        !isBoundedString(input.replacement, 1_024, true) ||
+        !Array.isArray(input.excludedMatchIds) ||
+        input.excludedMatchIds.length > MAX_REPLACEMENT_EXCLUSIONS ||
+        !input.excludedMatchIds.every((id) => isBoundedString(id, 28) && /^hit_[0-9a-f]{24}$/.test(id))
+      ) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
+    case 'freezeReplacement': {
+      const input = requireInput(value.input, ['previewId', 'excludedMatchIds'], tentativeId);
+      if (
+        !isBoundedString(input.previewId, 36) ||
+        !UUID_PATTERN.test(input.previewId) ||
+        !Array.isArray(input.excludedMatchIds) ||
+        input.excludedMatchIds.length > MAX_REPLACEMENT_EXCLUSIONS ||
+        !input.excludedMatchIds.every((id) => isBoundedString(id, 28) && /^hit_[0-9a-f]{24}$/.test(id))
+      ) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
+    case 'dismissReplacementPreview':
+    case 'startReplacementCommit':
+    case 'commitReplacement': {
+      const input = requireInput(value.input, ['previewId'], tentativeId);
+      if (!isBoundedString(input.previewId, 36) || !UUID_PATTERN.test(input.previewId)) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
+    case 'saveMilestone': {
+      const input = requireInput(value.input, ['manuscriptId', 'branchId', 'label', 'purpose', 'note'], tentativeId);
+      if (
+        !isBoundedString(input.manuscriptId, 36) ||
+        !UUID_PATTERN.test(input.manuscriptId) ||
+        !isBoundedString(input.branchId, 36) ||
+        !UUID_PATTERN.test(input.branchId) ||
+        !isBoundedString(input.label, 80) ||
+        !isBoundedString(input.purpose, 120) ||
+        !isBoundedString(input.note, 500, true)
+      ) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
+    case 'undoManuscript':
+    case 'redoManuscript': {
+      const input = requireInput(value.input, ['manuscriptId', 'branchId', 'expectedWorkingDigest'], tentativeId);
+      if (
+        !isBoundedString(input.manuscriptId, 36) ||
+        !UUID_PATTERN.test(input.manuscriptId) ||
+        !isBoundedString(input.branchId, 36) ||
+        !UUID_PATTERN.test(input.branchId) ||
+        !isBoundedString(input.expectedWorkingDigest, 64) ||
+        !HEX_DIGEST_PATTERN.test(input.expectedWorkingDigest)
       ) {
         throw new ProtocolError(tentativeId);
       }
@@ -284,6 +438,7 @@ async function writeResponse(response: ServiceResponse): Promise<void> {
 async function dispatch(
   store: EditorialStore,
   harness: DormantHarnessRuntime,
+  jobs: CooperativeJobOwner,
   request: ServiceRequest,
   importControl: J01ImportControl | undefined,
 ): Promise<ServiceSuccessResponse> {
@@ -363,6 +518,109 @@ async function dispatch(
       };
     case 'flushJournalEdit':
       return { id: request.id, ok: true, op: request.op, result: store.flushJournalEdit(request.input) };
+    case 'listPriorWork':
+      return { id: request.id, ok: true, op: request.op, result: store.listPriorWork() };
+    case 'getManuscriptWindowAt':
+      return {
+        id: request.id,
+        ok: true,
+        op: request.op,
+        result: store.getManuscriptWindowAt(request.input.manuscriptId, request.input.branchId, request.input.target),
+      };
+    case 'getOutline':
+      return {
+        id: request.id,
+        ok: true,
+        op: request.op,
+        result: store.getOutline(request.input.manuscriptId, request.input.branchId, request.input.cursor),
+      };
+    case 'startSearch':
+      return {
+        id: request.id,
+        ok: true,
+        op: request.op,
+        result: jobs.startSearch(request.input.manuscriptId, request.input.branchId, request.input.query),
+      };
+    case 'pollServiceJob':
+      return { id: request.id, ok: true, op: request.op, result: jobs.poll(request.input.jobId) };
+    case 'cancelServiceJob':
+      return { id: request.id, ok: true, op: request.op, result: jobs.cancel(request.input.jobId) };
+    case 'getSearchResults':
+      return {
+        id: request.id,
+        ok: true,
+        op: request.op,
+        result: store.getSearchResults(request.input.searchId, request.input.cursor),
+      };
+    case 'prepareReplacement':
+      return {
+        id: request.id,
+        ok: true,
+        op: request.op,
+        result: store.prepareReplacement(
+          request.input.searchId,
+          request.input.replacement,
+          request.input.excludedMatchIds,
+        ),
+      };
+    case 'freezeReplacement':
+      return {
+        id: request.id,
+        ok: true,
+        op: request.op,
+        result: store.freezeReplacement(request.input.previewId, request.input.excludedMatchIds),
+      };
+    case 'dismissReplacementPreview':
+      return {
+        id: request.id,
+        ok: true,
+        op: request.op,
+        result: store.dismissReplacementPreview(request.input.previewId),
+      };
+    case 'startReplacementCommit':
+      return { id: request.id, ok: true, op: request.op, result: jobs.startReplacement(request.input.previewId) };
+    case 'commitReplacement':
+      return {
+        id: request.id,
+        ok: true,
+        op: request.op,
+        result: store.commitReplacement(request.input.previewId),
+      };
+    case 'saveMilestone':
+      return {
+        id: request.id,
+        ok: true,
+        op: request.op,
+        result: store.saveMilestone(
+          request.input.manuscriptId,
+          request.input.branchId,
+          request.input.label,
+          request.input.purpose,
+          request.input.note,
+        ),
+      };
+    case 'undoManuscript':
+      return {
+        id: request.id,
+        ok: true,
+        op: request.op,
+        result: store.undoManuscript(
+          request.input.manuscriptId,
+          request.input.branchId,
+          request.input.expectedWorkingDigest,
+        ),
+      };
+    case 'redoManuscript':
+      return {
+        id: request.id,
+        ok: true,
+        op: request.op,
+        result: store.redoManuscript(
+          request.input.manuscriptId,
+          request.input.branchId,
+          request.input.expectedWorkingDigest,
+        ),
+      };
     case 'shutdown':
       return { id: request.id, ok: true, op: request.op, result: { state: 'stopping' } };
   }
@@ -427,10 +685,12 @@ function parentIsAlive(parentPid: number): boolean {
 async function run(): Promise<void> {
   installNodeNetworkDenial();
   const { dataRoot, parentPid, importControl } = parseArguments(process.argv.slice(2));
-  const [{ EditorialStore, StoreError, StoreFatalError }, { mountDormantHarness }] = await Promise.all([
-    import('./store.js'),
-    import('./runtime.js'),
-  ]);
+  const [{ EditorialStore, StoreError, StoreFatalError }, { mountDormantHarness }, { CooperativeJobOwner }] =
+    await Promise.all([
+      import('./store.js'),
+      import('./runtime.js'),
+      import('./cooperative-jobs.js'),
+    ]);
   let stopping = false;
   const stop = (): void => {
     if (stopping) return;
@@ -446,6 +706,7 @@ async function run(): Promise<void> {
 
   let store: EditorialStore | undefined;
   let harness: DormantHarnessRuntime | undefined;
+  let jobs: CooperativeJobOwner | undefined;
   try {
     const codeRoot = fileURLToPath(new URL('../../', import.meta.url));
     store = await EditorialStore.open(dataRoot, codeRoot, {
@@ -455,6 +716,7 @@ async function run(): Promise<void> {
       interruptAfterAbandonObjectRemoval: importControl === 'after-abandon-object-delete-before-finalize',
     });
     harness = await mountDormantHarness();
+    jobs = new CooperativeJobOwner(store);
     for await (const frame of readFrames()) {
       let request: ServiceRequest;
       try {
@@ -466,7 +728,7 @@ async function run(): Promise<void> {
       }
       let response: ServiceResponse;
       try {
-        response = await dispatch(store, harness, request, importControl);
+        response = await dispatch(store, harness, jobs, request, importControl);
       } catch (error) {
         if (error instanceof StoreFatalError) {
           stop();
@@ -486,6 +748,7 @@ async function run(): Promise<void> {
     process.removeListener('SIGTERM', stop);
     process.removeListener('SIGINT', stop);
     try {
+      jobs?.dispose();
       await harness?.dispose();
     } finally {
       store?.close();

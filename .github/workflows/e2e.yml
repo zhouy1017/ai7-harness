@@ -47,9 +47,9 @@ jobs:
   j01:
     needs: route
     if: ${{ needs.route.outputs.run_j01 == 'true' }}
-    name: J-01 (${{ matrix.label }})
+    name: J-01 + J-02 (${{ matrix.label }})
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 30
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -94,5 +94,8 @@ jobs:
       - name: Build the production-shaped subject
         run: pnpm run build
 
-      - name: Run the admitted product journey
+      - name: Run the J-01 product journey
         run: pnpm run e2e -- --journey J-01
+
+      - name: Run the J-02 product journey with applicable J-14 behavior
+        run: pnpm run e2e -- --journey J-02

@@ -1,4 +1,4 @@
-import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { constants, createReadStream, lstatSync } from 'node:fs';
 import { copyFile, lstat, open, realpath, rename, rm } from 'node:fs/promises';
 import { basename, isAbsolute, posix, relative, resolve, sep } from 'node:path';
@@ -12,20 +12,22 @@ import type {
   ImportStartupProjection,
   JournalAcknowledgement,
   JournalEditInput,
-  ManuscriptBlockProjection,
   ManuscriptWindowProjection,
   NewBookImportTargetChoiceId,
   OriginalFileAccessProjection,
   ReviewBeforeImportProjection,
   StagedImportProjection,
   ContinueImportProjection,
-} from '../shared/protocol.js';
-import {
-  MAX_BLOCK_CODE_UNITS,
-  MAX_BLOCK_GRAPHEMES,
-  MAX_EDIT_CODE_UNITS,
-  MAX_EDIT_GRAPHEMES,
-  MAX_WINDOW_BLOCKS,
+  DurableHistoryProjection,
+  ManuscriptWindowTarget,
+  MilestoneProjection,
+  OutlineProjection,
+  PriorWorkItemProjection,
+  ReplacementCommitProjection,
+  ReplacementDismissalProjection,
+  ReplacementPreviewProjection,
+  SearchResultsProjection,
+  SearchSummaryProjection,
 } from '../shared/protocol.js';
 import {
   deriveImportFidelityPlan,
@@ -35,6 +37,12 @@ import {
   type ParsedDocxBlock,
 } from './docx.js';
 import {
+  BoundedManuscriptStore,
+  BoundedStoreError,
+  BoundedStoreFatalError,
+  initializeBoundedSchema,
+} from './bounded-manuscript.js';
+import {
   createCanonicalExternalDataRoot,
   ensureCanonicalDataDirectory,
   inspectCanonicalDataFile,
@@ -42,7 +50,9 @@ import {
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const TOKEN_PATTERN = UUID_PATTERN;
-const SCHEMA_VERSION = 5;
+const CORE_SCHEMA_VERSION = 5;
+const SCHEMA_VERSION = 6;
+const INGEST_BATCH_SIZE = 256;
 const WORKFLOW_PROFILE = {
   id: 'ai7.manuscript.editorial.zh-CN',
   name: '基础书稿编辑流程',
@@ -163,14 +173,6 @@ function safeDisplayName(input: string): string {
   requireStore(name.length > 0 && name.length <= 180 && !/[\\/]/.test(name), 'SOURCE_IDENTITY_INVALID', '来源标识无效。');
   requireStore(name.toLowerCase().endsWith('.docx'), 'SOURCE_IDENTITY_INVALID', '来源必须是 DOCX。');
   return name;
-}
-
-function stableWorkingDigest(rows: Array<{ blockId: string; position: number; digest: string }>): string {
-  return sha256(canonicalJson(rows));
-}
-
-function segmentGraphemes(text: string): string[] {
-  return Array.from(new Intl.Segmenter('zh-CN', { granularity: 'grapheme' }).segment(text), (part) => part.segment);
 }
 
 async function digestFile(path: string): Promise<string> {
@@ -559,11 +561,12 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === 2 ||
       currentVersion === 3 ||
       currentVersion === 4 ||
+      currentVersion === CORE_SCHEMA_VERSION ||
       currentVersion === SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
-  if (currentVersion === SCHEMA_VERSION) return;
+  if (currentVersion === CORE_SCHEMA_VERSION || currentVersion === SCHEMA_VERSION) return;
   if (currentVersion === 1) {
     migrateSchemaV1ToV2(db);
     migrateSchemaV2ToV3(db);
@@ -903,9 +906,15 @@ interface DraftSnapshot {
   contentDigest: string;
   structureDigest: string;
   blockCount: number;
+  characterCount: number;
   fidelity: FidelityCategoryProjection[];
   titleSuggestion: string;
   titleSource: StagedImportProjection['titleSuggestion']['sourceLabel'];
+}
+
+interface IngestedDocx {
+  ingestId: string;
+  parsed: ParsedDocx;
 }
 
 interface CommitAttempt {
@@ -1106,8 +1115,10 @@ export class EditorialStore {
   readonly #objectsRoot: string;
   readonly #authority: DatabaseSync;
   readonly #journal: DatabaseSync;
+  readonly #ingest: DatabaseSync;
+  readonly #boundedAuthority: BoundedManuscriptStore;
+  readonly #bounded: BoundedManuscriptStore;
   readonly #control: StoreControl;
-  readonly #cursorSecret = randomBytes(32);
   #contentObjectLifecycleTail: Promise<void> = Promise.resolve();
   #poisoned = false;
 
@@ -1116,12 +1127,18 @@ export class EditorialStore {
     objectsRoot: string,
     authority: DatabaseSync,
     journal: DatabaseSync,
+    ingest: DatabaseSync,
+    boundedAuthority: BoundedManuscriptStore,
+    bounded: BoundedManuscriptStore,
     control: StoreControl,
   ) {
     this.#dataRoot = dataRoot;
     this.#objectsRoot = objectsRoot;
     this.#authority = authority;
     this.#journal = journal;
+    this.#ingest = ingest;
+    this.#boundedAuthority = boundedAuthority;
+    this.#bounded = bounded;
     this.#control = control;
   }
 
@@ -1146,9 +1163,24 @@ export class EditorialStore {
     const authority = new DatabaseSync(databasePath);
     configureDatabase(authority);
     initializeSchema(authority);
+    initializeBoundedSchema(authority);
     const journal = new DatabaseSync(databasePath);
     configureDatabase(journal);
-    const store = new EditorialStore(dataRoot, objectsRoot, authority, journal, control);
+    const ingest = new DatabaseSync(databasePath);
+    configureDatabase(ingest);
+    const store = new EditorialStore(
+      dataRoot,
+      objectsRoot,
+      authority,
+      journal,
+      ingest,
+      new BoundedManuscriptStore(authority),
+      new BoundedManuscriptStore(journal),
+      control,
+    );
+    store.#transaction(authority, () => {
+      authority.prepare('DELETE FROM import_ingest_blocks').run();
+    });
     await store.#resumeAbandonmentCleanupIntents();
     store.#normalizeMigratedReviewedTargets();
     await store.#sweepUnreferencedContentObjects();
@@ -1157,9 +1189,13 @@ export class EditorialStore {
 
   close(): void {
     try {
-      this.#journal.close();
+      this.#ingest.close();
     } finally {
-      this.#authority.close();
+      try {
+        this.#journal.close();
+      } finally {
+        this.#authority.close();
+      }
     }
   }
 
@@ -1171,58 +1207,65 @@ export class EditorialStore {
     try {
       const selectedPath = await realpath(selectedPathInput);
       const displayName = safeDisplayName(basename(selectedPath));
-      const parsed = await parseDocx(selectedPath, displayName);
-      return await this.#withContentObjectLifecycle(async () => {
-        const relativeKey = await this.#persistContentObject(selectedPath, parsed);
-        const draftId = randomUUID();
-        const now = new Date().toISOString();
-        this.#transaction(this.#authority, () => {
-          this.#authority
-            .prepare(
-              `INSERT INTO content_objects(object_digest, relative_key, byte_length, verified_at)
-               VALUES (?, ?, ?, ?)
-               ON CONFLICT(object_digest) DO NOTHING`,
-            )
-            .run(parsed.sourceDigest, relativeKey, parsed.archiveBytes, now);
-          const object = one(
-            this.#authority.prepare('SELECT relative_key, byte_length FROM content_objects WHERE object_digest = ?').all(parsed.sourceDigest) as SqlRow[],
-            'OBJECT_VERIFY_FAILED',
-            '暂存对象记录缺失。',
-          );
-          requireStore(asString(object.relative_key) === relativeKey && asNumber(object.byte_length) === parsed.archiveBytes, 'OBJECT_VERIFY_FAILED', '暂存对象记录冲突。');
-          this.#authority
-            .prepare(
-              `INSERT INTO import_drafts(
-                 draft_id, selection_token, state, draft_version, display_name, object_digest, selected_path, staged_at
-               ) VALUES (?, ?, 'staged', 1, ?, ?, ?, ?)`,
-            )
-            .run(draftId, selectionToken, displayName, parsed.sourceDigest, selectedPath, now);
-          this.#insertSnapshot(draftId, parsed, now);
-          this.#assertForeignKeys(this.#authority);
-        });
+      const draftId = randomUUID();
+      const ingested = await this.#parseIntoIngest(draftId, selectedPath, displayName);
+      try {
+        return await this.#withContentObjectLifecycle(async () => {
+          const { parsed } = ingested;
+          const relativeKey = await this.#persistContentObject(selectedPath, parsed);
+          const now = new Date().toISOString();
+          this.#transaction(this.#authority, () => {
+            this.#authority
+              .prepare(
+                `INSERT INTO content_objects(object_digest, relative_key, byte_length, verified_at)
+                 VALUES (?, ?, ?, ?)
+                 ON CONFLICT(object_digest) DO NOTHING`,
+              )
+              .run(parsed.sourceDigest, relativeKey, parsed.archiveBytes, now);
+            const object = one(
+              this.#authority.prepare('SELECT relative_key, byte_length FROM content_objects WHERE object_digest = ?').all(parsed.sourceDigest) as SqlRow[],
+              'OBJECT_VERIFY_FAILED',
+              '暂存对象记录缺失。',
+            );
+            requireStore(asString(object.relative_key) === relativeKey && asNumber(object.byte_length) === parsed.archiveBytes, 'OBJECT_VERIFY_FAILED', '暂存对象记录冲突。');
+            this.#authority
+              .prepare(
+                `INSERT INTO import_drafts(
+                   draft_id, selection_token, state, draft_version, display_name, object_digest, selected_path, staged_at
+                 ) VALUES (?, ?, 'staged', 1, ?, ?, ?, ?)`,
+              )
+              .run(draftId, selectionToken, displayName, parsed.sourceDigest, selectedPath, now);
+            this.#promoteIngestSnapshot(draftId, ingested, now);
+            this.#boundedCall(() => this.#boundedAuthority.assertStagedDraftIntegrity(draftId));
+            this.#assertForeignKeys(this.#authority);
+          });
 
-        return this.#stagedProjection({
-          draftId,
-          state: 'staged',
-          version: 1,
-          displayName,
-          objectDigest: parsed.sourceDigest,
-          selectedPath,
-          reviewedTitle: null,
-          reviewedTargetChoiceId: null,
-          reviewDigest: null,
-          stagedAt: now,
-          parserIdentity: parsed.parserIdentity,
-          sourceDigest: parsed.sourceDigest,
-          sourceBytes: parsed.archiveBytes,
-          contentDigest: parsed.contentDigest,
-          structureDigest: parsed.structureDigest,
-          blockCount: parsed.blocks.length,
-          fidelity: parsed.fidelity,
-          titleSuggestion: parsed.titleSuggestion.value,
-          titleSource: parsed.titleSuggestion.sourceLabel,
+          return this.#stagedProjection({
+            draftId,
+            state: 'staged',
+            version: 1,
+            displayName,
+            objectDigest: parsed.sourceDigest,
+            selectedPath,
+            reviewedTitle: null,
+            reviewedTargetChoiceId: null,
+            reviewDigest: null,
+            stagedAt: now,
+            parserIdentity: parsed.parserIdentity,
+            sourceDigest: parsed.sourceDigest,
+            sourceBytes: parsed.archiveBytes,
+            contentDigest: parsed.contentDigest,
+            structureDigest: parsed.structureDigest,
+            blockCount: parsed.blockCount,
+            characterCount: parsed.characterCount,
+            fidelity: parsed.fidelity,
+            titleSuggestion: parsed.titleSuggestion.value,
+            titleSource: parsed.titleSuggestion.sourceLabel,
+          });
         });
-      });
+      } finally {
+        this.#discardIngest(ingested.ingestId);
+      }
     } catch (error) {
       if (error instanceof StoreError) throw error;
       if (error instanceof Error && error.message.startsWith('DOCX_REJECTED:')) {
@@ -1423,69 +1466,76 @@ export class EditorialStore {
 
     let selectedPath: string;
     let displayName: string;
-    let parsed: ParsedDocx;
+    let ingested: IngestedDocx;
     try {
       selectedPath = await realpath(selectedPathInput);
       displayName = safeDisplayName(basename(selectedPath));
-      parsed = await parseDocx(selectedPath, displayName);
-    } catch {
+      ingested = await this.#parseIntoIngest(draftId, selectedPath, displayName);
+    } catch (error) {
+      if (error instanceof StoreFatalError) throw error;
       throw new StoreError('SNAPSHOT_RESELECTION_REQUIRED', '重选文件无法形成完整的本地暂存快照。');
     }
-    requireStore(parsed.sourceDigest === expectedDigest, 'RESELECTION_MISMATCH', '重选文件与原暂存来源身份不一致。');
-    return await this.#withContentObjectLifecycle(async () => {
-      this.#requireNoAbandonmentCleanupIntent(draftId);
-      const currentDraft = one(
-        this.#authority
-          .prepare('SELECT state, draft_version, object_digest FROM import_drafts WHERE draft_id = ?')
-          .all(draftId) as SqlRow[],
-        'DRAFT_NOT_FOUND',
-        '导入草稿不存在。',
-      );
-      requireStore(
-        (asString(currentDraft.state) === 'staged' || asString(currentDraft.state) === 'reviewed') &&
-          asNumber(currentDraft.draft_version) === expectedDraftVersion &&
-          asString(currentDraft.object_digest) === expectedDigest,
-        'DRAFT_VERSION_CHANGED',
-        '导入草稿在重选持久化前已变化。',
-      );
-      const relativeKey = await this.#persistContentObject(selectedPath, parsed);
-      const nextVersion = expectedDraftVersion + 1;
-      const now = new Date().toISOString();
-      this.#transaction(this.#authority, () => {
-        this.#authority
-          .prepare(
-            `INSERT INTO content_objects(object_digest, relative_key, byte_length, verified_at)
-             VALUES (?, ?, ?, ?)
-             ON CONFLICT(object_digest) DO UPDATE SET
-               relative_key = excluded.relative_key,
-               byte_length = excluded.byte_length,
-               verified_at = excluded.verified_at`,
-          )
-          .run(parsed.sourceDigest, relativeKey, parsed.archiveBytes, now);
-        this.#authority.prepare('DELETE FROM staged_import_snapshots WHERE draft_id = ?').run(draftId);
-        this.#insertSnapshot(draftId, parsed, now);
-        const draftUpdate = this.#authority
-          .prepare(
-            `UPDATE import_drafts
-             SET selection_token = ?, state = 'staged', draft_version = ?, display_name = ?, object_digest = ?,
-                 selected_path = ?, reviewed_title = NULL, reviewed_target_choice_id = NULL,
-                 review_digest = NULL, reviewed_at = NULL
-             WHERE draft_id = ? AND draft_version = ? AND state IN ('staged', 'reviewed')`,
-          )
-          .run(selectionToken, nextVersion, displayName, parsed.sourceDigest, selectedPath, draftId, expectedDraftVersion);
-        requireStore(draftUpdate.changes === 1, 'DRAFT_VERSION_CHANGED', '导入草稿在重选时已变化。');
-        this.#authority.prepare("DELETE FROM import_commit_attempts WHERE draft_id = ? AND state = 'prepared'").run(draftId);
-        this.#assertForeignKeys(this.#authority);
+    try {
+      const { parsed } = ingested;
+      requireStore(parsed.sourceDigest === expectedDigest, 'RESELECTION_MISMATCH', '重选文件与原暂存来源身份不一致。');
+      return await this.#withContentObjectLifecycle(async () => {
+        this.#requireNoAbandonmentCleanupIntent(draftId);
+        const currentDraft = one(
+          this.#authority
+            .prepare('SELECT state, draft_version, object_digest FROM import_drafts WHERE draft_id = ?')
+            .all(draftId) as SqlRow[],
+          'DRAFT_NOT_FOUND',
+          '导入草稿不存在。',
+        );
+        requireStore(
+          (asString(currentDraft.state) === 'staged' || asString(currentDraft.state) === 'reviewed') &&
+            asNumber(currentDraft.draft_version) === expectedDraftVersion &&
+            asString(currentDraft.object_digest) === expectedDigest,
+          'DRAFT_VERSION_CHANGED',
+          '导入草稿在重选持久化前已变化。',
+        );
+        const relativeKey = await this.#persistContentObject(selectedPath, parsed);
+        const nextVersion = expectedDraftVersion + 1;
+        const now = new Date().toISOString();
+        this.#transaction(this.#authority, () => {
+          this.#authority
+            .prepare(
+              `INSERT INTO content_objects(object_digest, relative_key, byte_length, verified_at)
+               VALUES (?, ?, ?, ?)
+               ON CONFLICT(object_digest) DO UPDATE SET
+                 relative_key = excluded.relative_key,
+                 byte_length = excluded.byte_length,
+                 verified_at = excluded.verified_at`,
+            )
+            .run(parsed.sourceDigest, relativeKey, parsed.archiveBytes, now);
+          this.#authority.prepare('DELETE FROM staged_import_snapshots WHERE draft_id = ?').run(draftId);
+          this.#promoteIngestSnapshot(draftId, ingested, now);
+          const draftUpdate = this.#authority
+            .prepare(
+              `UPDATE import_drafts
+               SET selection_token = ?, state = 'staged', draft_version = ?, display_name = ?, object_digest = ?,
+                   selected_path = ?, reviewed_title = NULL, reviewed_target_choice_id = NULL,
+                   review_digest = NULL, reviewed_at = NULL
+               WHERE draft_id = ? AND draft_version = ? AND state IN ('staged', 'reviewed')`,
+            )
+            .run(selectionToken, nextVersion, displayName, parsed.sourceDigest, selectedPath, draftId, expectedDraftVersion);
+          requireStore(draftUpdate.changes === 1, 'DRAFT_VERSION_CHANGED', '导入草稿在重选时已变化。');
+          this.#authority.prepare("DELETE FROM import_commit_attempts WHERE draft_id = ? AND state = 'prepared'").run(draftId);
+          this.#boundedCall(() => this.#boundedAuthority.assertStagedDraftIntegrity(draftId));
+          this.#assertForeignKeys(this.#authority);
+        });
+        const snapshot = this.#loadDraftSnapshot(draftId);
+        return {
+          state: 'target-review-required',
+          staged: this.#stagedProjection(snapshot),
+          originalFileAccess: { state: 'available-exact', label: '原始所选文件仍可访问且身份一致' },
+          reviewInvalidated: previousState === 'reviewed' || attempt !== null,
+          notice: '已通过原来源摘要精确匹配完成重选，并重新形成完整暂存与预检；请重新确认全部决定。',
+        };
       });
-      const snapshot = this.#loadDraftSnapshot(draftId);
-      return {
-        state: 'target-review-required',
-        staged: this.#stagedProjection(snapshot),
-        originalFileAccess: { state: 'available-exact', label: '原始所选文件仍可访问且身份一致' },
-        reviewInvalidated: previousState === 'reviewed' || attempt !== null,
-        notice: '已通过原来源摘要精确匹配完成重选，并重新形成完整暂存与预检；请重新确认全部决定。',
-      };
-    });
+    } finally {
+      this.#discardIngest(ingested.ingestId);
+    }
   }
 
   async abandonImportDraft(draftId: string, expectedDraftVersion: number): Promise<ImportStartupProjection> {
@@ -1829,8 +1879,7 @@ export class EditorialStore {
         'REVIEW_CHANGED',
         '导入前复核摘要无法由当前权威快照重建。',
       );
-      const stagedBlocks = this.#loadStagedBlocks(input.draftId);
-      requireStore(stagedBlocks.length === snapshot.blockCount, 'SNAPSHOT_INCOMPLETE', '暂存快照不完整。');
+      this.#boundedCall(() => this.#boundedAuthority.assertStagedDraftIntegrity(input.draftId));
 
       const now = new Date().toISOString();
       const bookId = randomUUID();
@@ -1844,16 +1893,18 @@ export class EditorialStore {
       const revisionId = randomUUID();
       const workflowInstanceId = randomUUID();
       const importRecordId = randomUUID();
-      const authoritativeBlocks = stagedBlocks.map((block) => ({
-        ...block,
-        blockId: `blk_${sha256(`${manuscriptId}\u0000${block.position}\u0000${block.digest}`).slice(0, 24)}`,
-      }));
       const revisionDigest = sha256(
-        canonicalJson(authoritativeBlocks.map(({ blockId, position, kind, level, digest }) => ({ blockId, position, kind, level, digest }))),
+        canonicalJson({
+          schema: 'ai7.manuscript-revision/2',
+          manuscriptId,
+          parserIdentity: snapshot.parserIdentity,
+          contentDigest: snapshot.contentDigest,
+          structureDigest: snapshot.structureDigest,
+          blockCount: snapshot.blockCount,
+          characterCount: snapshot.characterCount,
+        }),
       );
-      const workingDigest = stableWorkingDigest(
-        authoritativeBlocks.map(({ blockId, position, digest }) => ({ blockId, position, digest })),
-      );
+      const workingDigest = revisionDigest;
 
       this.#authority.prepare('INSERT INTO books(book_id, stable_identity, title, created_at) VALUES (?, ?, ?, ?)').run(bookId, `book:${bookId}`, snapshot.reviewedTitle, now);
       this.#authority
@@ -1948,22 +1999,22 @@ export class EditorialStore {
         )
         .run(revisionId, manuscriptId, branchId, sourceVersionId, revisionDigest, now);
       this.#authority.prepare('UPDATE manuscript_branches SET base_revision_id = ? WHERE branch_id = ?').run(revisionId, branchId);
-      const insertBlockIdentity = this.#authority.prepare(
-        'INSERT INTO manuscript_blocks(block_id, manuscript_id, created_revision_id) VALUES (?, ?, ?)',
-      );
-      const insertBlockVersion = this.#authority.prepare(
-        `INSERT INTO manuscript_block_versions(revision_id, block_id, position, kind, level, text, digest)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      );
-      const insertWorkingBlock = this.#authority.prepare(
-        `INSERT INTO working_blocks(branch_id, block_id, position, kind, level, text, digest)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      );
-      for (const block of authoritativeBlocks) {
-        insertBlockIdentity.run(block.blockId, manuscriptId, revisionId);
-        insertBlockVersion.run(revisionId, block.blockId, block.position, block.kind, block.level, block.text, block.digest);
-        insertWorkingBlock.run(branchId, block.blockId, block.position, block.kind, block.level, block.text, block.digest);
-      }
+      this.#authority.prepare(
+        `INSERT INTO manuscript_blocks(block_id, manuscript_id, created_revision_id)
+         SELECT staged_block_id, ?, ? FROM staged_import_blocks WHERE draft_id = ? ORDER BY position`,
+      ).run(manuscriptId, revisionId, input.draftId);
+      this.#authority.prepare(
+        `INSERT INTO manuscript_block_versions(
+           revision_id, block_id, position, kind, level, text, digest, start_offset, grapheme_length
+         ) SELECT ?, staged_block_id, position, kind, level, text, digest, start_offset, grapheme_length
+           FROM staged_import_blocks WHERE draft_id = ? ORDER BY position`,
+      ).run(revisionId, input.draftId);
+      this.#authority.prepare(
+        `INSERT INTO working_blocks(
+           branch_id, block_id, position, kind, level, text, digest, grapheme_length
+         ) SELECT ?, staged_block_id, position, kind, level, text, digest, grapheme_length
+           FROM staged_import_blocks WHERE draft_id = ? ORDER BY position`,
+      ).run(branchId, input.draftId);
       this.#authority
         .prepare(
           `INSERT INTO workflow_profiles(profile_id, profile_version, profile_name, profile_digest, definition_json)
@@ -2026,10 +2077,16 @@ export class EditorialStore {
       this.#authority
         .prepare(
           `INSERT INTO branch_working_state(
-             branch_id, manuscript_id, base_revision_id, journal_sequence, working_digest
-           ) VALUES (?, ?, ?, 0, ?)`,
+             branch_id, manuscript_id, base_revision_id, journal_sequence, working_digest,
+             total_graphemes, history_sequence, last_checkpoint_sequence
+           ) VALUES (?, ?, ?, 0, ?, ?, 0, 0)`,
         )
-        .run(branchId, manuscriptId, revisionId, workingDigest);
+        .run(branchId, manuscriptId, revisionId, workingDigest, snapshot.characterCount);
+      requireStore(
+        this.#boundedCall(() => this.#boundedAuthority.initializeImportedBranch(branchId)) === snapshot.characterCount,
+        'IMPORT_POSTCONDITION_FAILED',
+        '稿件索引无法由暂存快照精确建立。',
+      );
 
       result = {
         commitId: input.commitId,
@@ -2109,7 +2166,8 @@ export class EditorialStore {
         degradationDecisionId,
         workflowInstanceId,
         importRecordId,
-        blockCount: authoritativeBlocks.length,
+        blockCount: snapshot.blockCount,
+        characterCount: snapshot.characterCount,
         reviewDigest: input.reviewDigest,
         fidelityPlan: plan,
         sourceDigest: snapshot.sourceDigest,
@@ -2125,220 +2183,114 @@ export class EditorialStore {
   }
 
   getManuscriptWindow(manuscriptId: string, branchId: string, cursor: string | null): ManuscriptWindowProjection {
-    this.#assertAvailable();
-    requireStore(UUID_PATTERN.test(manuscriptId) && UUID_PATTERN.test(branchId), 'WINDOW_INVALID', '稿件窗口标识无效。');
-    const binding = one(
-      this.#authority
-        .prepare(
-          `SELECT m.book_id, bws.base_revision_id, bws.journal_sequence
-           FROM manuscripts m
-           JOIN manuscript_branches mb ON mb.manuscript_id = m.manuscript_id
-           JOIN branch_working_state bws ON bws.branch_id = mb.branch_id
-           WHERE m.manuscript_id = ? AND mb.branch_id = ?`,
-        )
-        .all(manuscriptId, branchId) as SqlRow[],
-      'WINDOW_NOT_FOUND',
-      '稿件窗口不存在。',
+    return this.#boundedCall(() =>
+      this.#bounded.getWindow(
+        manuscriptId,
+        branchId,
+        cursor === null ? { kind: 'start' } : { kind: 'cursor', cursor },
+      ),
     );
-    const revisionId = asString(binding.base_revision_id);
-    const journalSequence = asNumber(binding.journal_sequence);
-    const offset = cursor === null ? 0 : this.#decodeCursor(cursor, { manuscriptId, branchId, revisionId, journalSequence });
-    requireStore(offset >= 0 && Number.isSafeInteger(offset), 'CURSOR_INVALID', '稿件窗口游标无效。');
-    const totalRow = one(
-      this.#authority.prepare('SELECT count(*) total FROM working_blocks WHERE branch_id = ?').all(branchId) as SqlRow[],
-      'WINDOW_NOT_FOUND',
-      '稿件窗口计数缺失。',
-    );
-    const totalBlocks = asNumber(totalRow.total);
-    requireStore(offset < totalBlocks, 'CURSOR_INVALID', '稿件窗口游标越界。');
-    const rows = this.#authority
-      .prepare(
-        `SELECT block_id, position, kind, level, text, digest
-         FROM working_blocks WHERE branch_id = ? ORDER BY position LIMIT ? OFFSET ?`,
-      )
-      .all(branchId, MAX_WINDOW_BLOCKS + 1, offset) as SqlRow[];
-    const visibleRows = rows.slice(0, MAX_WINDOW_BLOCKS);
-    const blocks: ManuscriptBlockProjection[] = visibleRows.map((row) => ({
-      blockId: asString(row.block_id),
-      position: asNumber(row.position),
-      kind: asString(row.kind) as ManuscriptBlockProjection['kind'],
-      level: row.level === null ? null : asNumber(row.level),
-      text: asString(row.text),
-      digest: asString(row.digest),
-    }));
-    requireStore(blocks.length > 0 && blocks.length <= MAX_WINDOW_BLOCKS, 'WINDOW_NOT_FOUND', '稿件窗口为空。');
-    const startBlock = blocks[0]!.position;
-    const endBlock = blocks.at(-1)!.position;
-    const cursorBinding = { manuscriptId, branchId, revisionId, journalSequence };
-    return {
-      bookId: asString(binding.book_id),
-      manuscriptId,
-      branchId,
-      revisionId,
-      revisionLabel: 'r1',
-      journalSequence,
-      previousCursor: offset > 0 ? this.#encodeCursor({ ...cursorBinding, offset: Math.max(0, offset - MAX_WINDOW_BLOCKS) }) : null,
-      nextCursor: rows.length > MAX_WINDOW_BLOCKS ? this.#encodeCursor({ ...cursorBinding, offset: offset + MAX_WINDOW_BLOCKS }) : null,
-      position: {
-        startBlock,
-        endBlock,
-        totalBlocks,
-        label: `第 ${startBlock}–${endBlock} 段，共 ${totalBlocks} 段`,
-      },
-      blocks,
-    };
   }
 
   flushJournalEdit(input: JournalEditInput): JournalAcknowledgement {
-    this.#assertAvailable();
-    requireStore(
-      UUID_PATTERN.test(input.clientEditId) &&
-        UUID_PATTERN.test(input.manuscriptId) &&
-        UUID_PATTERN.test(input.branchId) &&
-        UUID_PATTERN.test(input.baseRevisionId),
-      'EDIT_INVALID',
-      '编辑标识无效。',
-    );
-    requireStore(/^blk_[0-9a-f]{24}$/.test(input.blockId), 'EDIT_INVALID', '稳定内容块标识无效。');
-    requireStore(/^[0-9a-f]{64}$/.test(input.baseBlockDigest), 'EDIT_INVALID', '内容块摘要无效。');
-    requireStore(input.insertText.isWellFormed(), 'EDIT_INVALID', '编辑文本无效。');
-    requireStore(
-      Number.isSafeInteger(input.expectedJournalSequence) && input.expectedJournalSequence >= 0,
-      'EDIT_INVALID',
-      '修订日志序号无效。',
-    );
-    const insertedGraphemes = segmentGraphemes(input.insertText);
-    requireStore(
-      input.insertText.length <= MAX_EDIT_CODE_UNITS && insertedGraphemes.length <= MAX_EDIT_GRAPHEMES,
-      'EDIT_TOO_LARGE',
-      '单次编辑超出安全范围。',
-    );
-    const requestFingerprint = sha256(canonicalJson(input));
-    const prior = this.#journal
-      .prepare(
-        `SELECT client_edit_id, request_fingerprint, branch_id, base_revision_id, block_id, sequence,
-                resulting_block_digest, resulting_working_digest, durable_at
-         FROM edit_journal_entries WHERE client_edit_id = ?`,
-      )
-      .all(input.clientEditId) as SqlRow[];
-    if (prior.length === 1) {
-      requireStore(asString(prior[0]!.request_fingerprint) === requestFingerprint, 'IDEMPOTENCY_CONFLICT', '编辑标识已用于另一项修改。');
-      return this.#journalAck(prior[0]!);
-    }
+    return this.#boundedCall(() => this.#bounded.flushJournalEdit(input));
+  }
 
-    this.#transaction(this.#journal, () => {
-      const state = one(
-        this.#journal
-          .prepare(
-            `SELECT manuscript_id, base_revision_id, journal_sequence
-             FROM branch_working_state WHERE branch_id = ?`,
-          )
-          .all(input.branchId) as SqlRow[],
-        'EDIT_BINDING_CHANGED',
-        '稿件分支状态已变化。',
-      );
-      requireStore(
-        asString(state.manuscript_id) === input.manuscriptId && asString(state.base_revision_id) === input.baseRevisionId,
-        'EDIT_BINDING_CHANGED',
-        '编辑绑定已变化。',
-      );
-      const currentSequence = asNumber(state.journal_sequence);
-      requireStore(currentSequence === input.expectedJournalSequence, 'EDIT_SEQUENCE_CHANGED', '修订日志已前进，请刷新窗口。');
-      const block = one(
-        this.#journal
-          .prepare('SELECT position, kind, level, text, digest FROM working_blocks WHERE branch_id = ? AND block_id = ?')
-          .all(input.branchId, input.blockId) as SqlRow[],
-        'EDIT_BLOCK_CHANGED',
-        '稳定内容块不存在。',
-      );
-      requireStore(asString(block.digest) === input.baseBlockDigest, 'EDIT_BLOCK_CHANGED', '内容块已变化，请刷新窗口。');
-      const originalGraphemes = segmentGraphemes(asString(block.text));
-      requireStore(
-        Number.isSafeInteger(input.fromGrapheme) &&
-          Number.isSafeInteger(input.toGrapheme) &&
-          input.fromGrapheme >= 0 &&
-          input.toGrapheme >= input.fromGrapheme &&
-          input.toGrapheme <= originalGraphemes.length &&
-          input.toGrapheme - input.fromGrapheme <= MAX_EDIT_GRAPHEMES,
-        'EDIT_RANGE_INVALID',
-        '编辑字素范围无效。',
-      );
-      const resultingText = [
-        ...originalGraphemes.slice(0, input.fromGrapheme),
-        ...insertedGraphemes,
-        ...originalGraphemes.slice(input.toGrapheme),
-      ].join('');
-      requireStore(
-        resultingText.length <= MAX_BLOCK_CODE_UNITS && segmentGraphemes(resultingText).length <= MAX_BLOCK_GRAPHEMES,
-        'EDIT_TOO_LARGE',
-        '编辑后内容块超出安全范围。',
-      );
-      const kind = asString(block.kind) as ManuscriptBlockProjection['kind'];
-      const level = block.level === null ? null : asNumber(block.level);
-      const resultingBlockDigest = sha256(canonicalJson({ kind, level, text: resultingText }));
-      const update = this.#journal
-        .prepare('UPDATE working_blocks SET text = ?, digest = ? WHERE branch_id = ? AND block_id = ? AND digest = ?')
-        .run(resultingText, resultingBlockDigest, input.branchId, input.blockId, input.baseBlockDigest);
-      requireStore(update.changes === 1, 'EDIT_BLOCK_CHANGED', '内容块在保存时已变化。');
-      const digestRows = this.#journal
-        .prepare('SELECT block_id, position, digest FROM working_blocks WHERE branch_id = ? ORDER BY position')
-        .all(input.branchId) as SqlRow[];
-      const resultingWorkingDigest = stableWorkingDigest(
-        digestRows.map((row) => ({
-          blockId: asString(row.block_id),
-          position: asNumber(row.position),
-          digest: asString(row.digest),
-        })),
-      );
-      const sequence = currentSequence + 1;
-      const durableAt = new Date().toISOString();
-      this.#journal
-        .prepare(
-          `INSERT INTO edit_journal_entries(
-             journal_entry_id, client_edit_id, request_fingerprint, manuscript_id, branch_id, base_revision_id,
-             sequence, block_id, from_grapheme, to_grapheme, insert_text, resulting_block_digest,
-             resulting_working_digest, durable_at
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        )
-        .run(
-          randomUUID(),
-          input.clientEditId,
-          requestFingerprint,
-          input.manuscriptId,
-          input.branchId,
-          input.baseRevisionId,
-          sequence,
-          input.blockId,
-          input.fromGrapheme,
-          input.toGrapheme,
-          input.insertText,
-          resultingBlockDigest,
-          resultingWorkingDigest,
-          durableAt,
-        );
-      const stateUpdate = this.#journal
-        .prepare(
-          `UPDATE branch_working_state SET journal_sequence = ?, working_digest = ?
-           WHERE branch_id = ? AND journal_sequence = ?`,
-        )
-        .run(sequence, resultingWorkingDigest, input.branchId, currentSequence);
-      requireStore(stateUpdate.changes === 1, 'EDIT_SEQUENCE_CHANGED', '修订日志在保存时已前进。');
-      this.#assertForeignKeys(this.#journal);
-    });
+  listPriorWork(): ReadonlyArray<PriorWorkItemProjection> {
+    return this.#boundedCall(() => this.#bounded.listPriorWork());
+  }
 
-    const committed = one(
-      this.#journal
-        .prepare(
-          `SELECT client_edit_id, request_fingerprint, branch_id, base_revision_id, block_id, sequence,
-                  resulting_block_digest, resulting_working_digest, durable_at
-           FROM edit_journal_entries WHERE client_edit_id = ?`,
-        )
-        .all(input.clientEditId) as SqlRow[],
-      'JOURNAL_ACK_FAILED',
-      '修订日志已提交但无法读取确认。',
-    );
-    requireStore(asString(committed.request_fingerprint) === requestFingerprint, 'JOURNAL_ACK_FAILED', '修订日志确认不匹配。');
-    return this.#journalAck(committed);
+  getManuscriptWindowAt(
+    manuscriptId: string,
+    branchId: string,
+    target: ManuscriptWindowTarget,
+  ): ManuscriptWindowProjection {
+    return this.#boundedCall(() => this.#bounded.getWindow(manuscriptId, branchId, target));
+  }
+
+  getOutline(manuscriptId: string, branchId: string, cursor: string | null): OutlineProjection {
+    return this.#boundedCall(() => this.#bounded.getOutline(manuscriptId, branchId, cursor));
+  }
+
+  createSearch(manuscriptId: string, branchId: string, query: string): SearchSummaryProjection & {
+    scannedPosition: number;
+    totalBlocks: number;
+  } {
+    return this.#boundedCall(() => this.#bounded.createSearch(manuscriptId, branchId, query));
+  }
+
+  advanceSearch(searchId: string): {
+    done: boolean;
+    summary: SearchSummaryProjection;
+    scannedPosition: number;
+    totalBlocks: number;
+  } {
+    return this.#boundedCall(() => this.#bounded.advanceSearch(searchId));
+  }
+
+  cancelSearch(searchId: string): void {
+    this.#boundedCall(() => this.#bounded.cancelSearch(searchId));
+  }
+
+  getSearchResults(searchId: string, cursor: string | null): SearchResultsProjection {
+    return this.#boundedCall(() => this.#bounded.getSearchResults(searchId, cursor));
+  }
+
+  prepareReplacement(
+    searchId: string,
+    replacement: string,
+    excludedMatchIds: ReadonlyArray<string>,
+  ): ReplacementPreviewProjection {
+    return this.#boundedCall(() => this.#bounded.prepareReplacement(searchId, replacement, excludedMatchIds));
+  }
+
+  freezeReplacement(
+    previewId: string,
+    excludedMatchIds: ReadonlyArray<string>,
+  ): ReplacementPreviewProjection {
+    return this.#boundedCall(() => this.#bounded.freezeReplacement(previewId, excludedMatchIds));
+  }
+
+  advanceReplacementWork(previewId: string): {
+    phase: 'preparing' | 'validating';
+    done: boolean;
+    completed: number;
+    total: number;
+    preview: ReplacementPreviewProjection | null;
+  } {
+    return this.#boundedCall(() => this.#bounded.advanceReplacementWork(previewId));
+  }
+
+  commitReplacement(previewId: string): ReplacementCommitProjection {
+    return this.#boundedCall(() => this.#bounded.commitReplacement(previewId));
+  }
+
+  cancelReplacement(previewId: string): boolean {
+    return this.#boundedCall(() => this.#bounded.cancelReplacement(previewId));
+  }
+
+  dismissReplacementPreview(previewId: string): ReplacementDismissalProjection {
+    const cancelled = this.cancelReplacement(previewId);
+    requireStore(cancelled, 'REPLACEMENT_STATE_CHANGED', '替换预览已提交、失败或不再可取消。');
+    return { previewId, state: 'cancelled' };
+  }
+
+  saveMilestone(
+    manuscriptId: string,
+    branchId: string,
+    label: string,
+    purpose: string,
+    note: string,
+  ): MilestoneProjection {
+    return this.#boundedCall(() => this.#bounded.saveMilestone(manuscriptId, branchId, label, purpose, note));
+  }
+
+  undoManuscript(manuscriptId: string, branchId: string, expectedWorkingDigest: string): DurableHistoryProjection {
+    return this.#boundedCall(() => this.#bounded.undo(manuscriptId, branchId, expectedWorkingDigest));
+  }
+
+  redoManuscript(manuscriptId: string, branchId: string, expectedWorkingDigest: string): DurableHistoryProjection {
+    return this.#boundedCall(() => this.#bounded.redo(manuscriptId, branchId, expectedWorkingDigest));
   }
 
   #loadCommitAttempt(attemptId: string): CommitAttempt {
@@ -2727,10 +2679,11 @@ export class EditorialStore {
       '暂存对象长度无效。',
     );
     requireStore(
-      (await digestFile(path)) === snapshot.sourceDigest && this.#loadStagedBlocks(snapshot.draftId).length === snapshot.blockCount,
+      (await digestFile(path)) === snapshot.sourceDigest,
       'SNAPSHOT_RESELECTION_REQUIRED',
-      '暂存对象或内容块不完整。',
+      '暂存对象摘要无效。',
     );
+    this.#boundedCall(() => this.#boundedAuthority.assertStagedDraftIntegrity(snapshot.draftId));
   }
 
   async #revalidateSnapshot(snapshot: DraftSnapshot): Promise<{ snapshot: DraftSnapshot; parserDrift: boolean }> {
@@ -2761,40 +2714,47 @@ export class EditorialStore {
         'SNAPSHOT_RESELECTION_REQUIRED',
         '暂存对象摘要无效。',
       );
-      const parsed = await parseDocx(objectPath, snapshot.displayName);
-      requireStore(
-        parsed.sourceDigest === snapshot.sourceDigest && parsed.archiveBytes === snapshot.sourceBytes,
-        'SNAPSHOT_RESELECTION_REQUIRED',
-        '暂存来源身份无法重建。',
-      );
-      if (parsed.parserIdentity !== snapshot.parserIdentity) {
-        return { snapshot: this.#refreshSnapshotForParserDrift(snapshot, parsed), parserDrift: true };
+      const ingested = await this.#parseIntoIngest(snapshot.draftId, objectPath, snapshot.displayName);
+      try {
+        const { parsed } = ingested;
+        requireStore(
+          parsed.sourceDigest === snapshot.sourceDigest && parsed.archiveBytes === snapshot.sourceBytes,
+          'SNAPSHOT_RESELECTION_REQUIRED',
+          '暂存来源身份无法重建。',
+        );
+        if (parsed.parserIdentity !== snapshot.parserIdentity) {
+          return { snapshot: this.#refreshSnapshotForParserDrift(snapshot, ingested), parserDrift: true };
+        }
+        requireStore(
+          parsed.contentDigest === snapshot.contentDigest &&
+            parsed.structureDigest === snapshot.structureDigest &&
+            parsed.blockCount === snapshot.blockCount &&
+            parsed.characterCount === snapshot.characterCount &&
+            canonicalJson(parsed.fidelity) === canonicalJson(snapshot.fidelity) &&
+            parsed.titleSuggestion.value === snapshot.titleSuggestion &&
+            parsed.titleSuggestion.sourceLabel === snapshot.titleSource &&
+            this.#ingestMatchesSnapshot(ingested.ingestId, snapshot.draftId),
+          'SNAPSHOT_RESELECTION_REQUIRED',
+          '暂存解析或预检状态不完整。',
+        );
+        this.#boundedCall(() => this.#boundedAuthority.assertStagedDraftIntegrity(snapshot.draftId));
+        return { snapshot, parserDrift: false };
+      } finally {
+        this.#discardIngest(ingested.ingestId);
       }
-      const stagedBlocks = this.#loadStagedBlocks(snapshot.draftId);
-      requireStore(
-        parsed.contentDigest === snapshot.contentDigest &&
-          parsed.structureDigest === snapshot.structureDigest &&
-          parsed.blocks.length === snapshot.blockCount &&
-          canonicalJson(parsed.fidelity) === canonicalJson(snapshot.fidelity) &&
-          parsed.titleSuggestion.value === snapshot.titleSuggestion &&
-          parsed.titleSuggestion.sourceLabel === snapshot.titleSource &&
-          canonicalJson(parsed.blocks) === canonicalJson(stagedBlocks),
-        'SNAPSHOT_RESELECTION_REQUIRED',
-        '暂存解析或预检状态不完整。',
-      );
-      return { snapshot, parserDrift: false };
     } catch (error) {
+      if (error instanceof StoreFatalError) throw error;
       if (error instanceof StoreError && error.code === 'DRAFT_VERSION_CHANGED') throw error;
       throw new StoreError('SNAPSHOT_RESELECTION_REQUIRED', '暂存快照不完整或已损坏，需要精确重选原文件。');
     }
   }
 
-  #refreshSnapshotForParserDrift(snapshot: DraftSnapshot, parsed: ParsedDocx): DraftSnapshot {
+  #refreshSnapshotForParserDrift(snapshot: DraftSnapshot, ingested: IngestedDocx): DraftSnapshot {
     const nextVersion = snapshot.version + 1;
     const now = new Date().toISOString();
     this.#transaction(this.#authority, () => {
       this.#authority.prepare('DELETE FROM staged_import_snapshots WHERE draft_id = ?').run(snapshot.draftId);
-      this.#insertSnapshot(snapshot.draftId, parsed, now);
+      this.#promoteIngestSnapshot(snapshot.draftId, ingested, now);
       const update = this.#authority
         .prepare(
           `UPDATE import_drafts
@@ -2805,6 +2765,7 @@ export class EditorialStore {
         .run(nextVersion, snapshot.draftId, snapshot.version);
       requireStore(update.changes === 1, 'DRAFT_VERSION_CHANGED', '导入草稿在重新预检时已变化。');
       this.#authority.prepare("DELETE FROM import_commit_attempts WHERE draft_id = ? AND state = 'prepared'").run(snapshot.draftId);
+      this.#boundedCall(() => this.#boundedAuthority.assertStagedDraftIntegrity(snapshot.draftId));
     });
     return this.#loadDraftSnapshot(snapshot.draftId);
   }
@@ -2879,13 +2840,108 @@ export class EditorialStore {
     return relativeKey;
   }
 
-  #insertSnapshot(draftId: string, parsed: ParsedDocx, createdAt: string): void {
+  async #parseIntoIngest(draftId: string, path: string, displayName: string): Promise<IngestedDocx> {
+    requireStore(UUID_PATTERN.test(draftId), 'DRAFT_INVALID', '导入草稿标识无效。');
+    const ingestId = randomUUID();
+    let inserted = 0;
+    let startOffset = 0;
+    const batch: Array<{
+      stagedBlockId: string;
+      position: number;
+      kind: ParsedDocxBlock['kind'];
+      level: ParsedDocxBlock['level'];
+      text: string;
+      digest: string;
+      startOffset: number;
+      graphemeLength: number;
+    }> = [];
+    const insert = this.#ingest.prepare(
+      `INSERT INTO import_ingest_blocks(
+         ingest_id, draft_id, staged_block_id, position, kind, level, text, digest, start_offset, grapheme_length
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    );
+    const flushBatch = (): void => {
+      if (batch.length === 0) return;
+      this.#ingest.exec('BEGIN IMMEDIATE');
+      try {
+        for (const row of batch) {
+          insert.run(
+            ingestId,
+            draftId,
+            row.stagedBlockId,
+            row.position,
+            row.kind,
+            row.level,
+            row.text,
+            row.digest,
+            row.startOffset,
+            row.graphemeLength,
+          );
+        }
+        this.#ingest.exec('COMMIT');
+        inserted += batch.length;
+        batch.length = 0;
+      } catch (error) {
+        try {
+          this.#ingest.exec('ROLLBACK');
+        } catch (rollbackError) {
+          this.#poisoned = true;
+          throw new StoreFatalError(new AggregateError([error, rollbackError], 'SQLite ingest rollback failed.'));
+        }
+        throw error;
+      }
+    };
+    try {
+      const parsed = await parseDocx(path, displayName, (block: ParsedDocxBlock) => {
+        const stagedBlockId = `blk_${sha256(`${draftId}\u0000${block.position}\u0000${block.digest}`).slice(0, 24)}`;
+        batch.push({
+          stagedBlockId,
+          position: block.position,
+          kind: block.kind,
+          level: block.level,
+          text: block.text,
+          digest: block.digest,
+          startOffset,
+          graphemeLength: block.graphemeLength,
+        });
+        startOffset += block.graphemeLength;
+        if (batch.length === INGEST_BATCH_SIZE) flushBatch();
+      });
+      flushBatch();
+      requireStore(
+        parsed.blockCount === inserted && parsed.characterCount === startOffset && inserted > 0,
+        'SNAPSHOT_INCOMPLETE',
+        '暂存解析未形成完整有界摄入。',
+      );
+      return { ingestId, parsed };
+    } catch (error) {
+      this.#discardIngest(ingestId);
+      throw error;
+    }
+  }
+
+  #discardIngest(ingestId: string): void {
+    requireStore(UUID_PATTERN.test(ingestId), 'SNAPSHOT_INCOMPLETE', '暂存摄入标识无效。');
+    try {
+      this.#ingest.prepare('DELETE FROM import_ingest_blocks WHERE ingest_id = ?').run(ingestId);
+      const remaining = this.#ingest
+        .prepare('SELECT count(*) total FROM import_ingest_blocks WHERE ingest_id = ?')
+        .get(ingestId) as SqlRow | undefined;
+      requireStore(remaining !== undefined && asNumber(remaining.total) === 0, 'SNAPSHOT_INCOMPLETE', '暂存摄入清理无法确认。');
+    } catch (error) {
+      this.#poisoned = true;
+      throw new StoreFatalError(error);
+    }
+  }
+
+  #promoteIngestSnapshot(draftId: string, ingested: IngestedDocx, createdAt: string): void {
+    const { parsed } = ingested;
     this.#authority
       .prepare(
         `INSERT INTO staged_import_snapshots(
            draft_id, parser_identity, source_digest, content_digest, structure_digest, block_count,
-           fidelity_json, title_suggestion, title_source, snapshot_created_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           fidelity_json, title_suggestion, title_source, snapshot_created_at, character_count
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         draftId,
@@ -2893,20 +2949,45 @@ export class EditorialStore {
         parsed.sourceDigest,
         parsed.contentDigest,
         parsed.structureDigest,
-        parsed.blocks.length,
+        parsed.blockCount,
         canonicalJson(parsed.fidelity),
         parsed.titleSuggestion.value,
         parsed.titleSuggestion.sourceLabel,
         createdAt,
+        parsed.characterCount,
       );
-    const insertBlock = this.#authority.prepare(
+    const inserted = this.#authority.prepare(
       `INSERT INTO staged_import_blocks(
-         draft_id, staged_block_id, position, kind, level, text, digest
-       ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    );
-    for (const block of parsed.blocks) {
-      insertBlock.run(draftId, block.blockId, block.position, block.kind, block.level, block.text, block.digest);
-    }
+         draft_id, staged_block_id, position, kind, level, text, digest, start_offset, grapheme_length
+       ) SELECT ?, staged_block_id, position, kind, level, text, digest, start_offset, grapheme_length
+         FROM import_ingest_blocks WHERE ingest_id = ? AND draft_id = ? ORDER BY position`,
+    ).run(draftId, ingested.ingestId, draftId);
+    requireStore(inserted.changes === parsed.blockCount, 'SNAPSHOT_INCOMPLETE', '暂存摄入无法完整提升为权威快照。');
+    const removed = this.#authority
+      .prepare('DELETE FROM import_ingest_blocks WHERE ingest_id = ? AND draft_id = ?')
+      .run(ingested.ingestId, draftId);
+    requireStore(removed.changes === parsed.blockCount, 'SNAPSHOT_INCOMPLETE', '暂存摄入无法完成原子清理。');
+  }
+
+  #ingestMatchesSnapshot(ingestId: string, draftId: string): boolean {
+    const difference = this.#authority.prepare(
+      `SELECT
+         (SELECT count(*) FROM (
+           SELECT staged_block_id, position, kind, level, text, digest, start_offset, grapheme_length
+           FROM import_ingest_blocks WHERE ingest_id = ? AND draft_id = ?
+           EXCEPT
+           SELECT staged_block_id, position, kind, level, text, digest, start_offset, grapheme_length
+           FROM staged_import_blocks WHERE draft_id = ?
+         )) +
+         (SELECT count(*) FROM (
+           SELECT staged_block_id, position, kind, level, text, digest, start_offset, grapheme_length
+           FROM staged_import_blocks WHERE draft_id = ?
+           EXCEPT
+           SELECT staged_block_id, position, kind, level, text, digest, start_offset, grapheme_length
+           FROM import_ingest_blocks WHERE ingest_id = ? AND draft_id = ?
+         )) total`,
+    ).get(ingestId, draftId, draftId, draftId, ingestId, draftId) as SqlRow | undefined;
+    return difference !== undefined && asNumber(difference.total) === 0;
   }
 
   #contentObjectPath(objectDigest: string, relativeKey: string): string {
@@ -3343,7 +3424,7 @@ export class EditorialStore {
           `SELECT d.draft_id, d.state, d.draft_version, d.display_name, d.object_digest,
                   d.selected_path, d.reviewed_title, d.reviewed_target_choice_id, d.review_digest,
                   d.staged_at, s.parser_identity, s.source_digest,
-                  s.content_digest, s.structure_digest, s.block_count, s.fidelity_json,
+                  s.content_digest, s.structure_digest, s.block_count, s.character_count, s.fidelity_json,
                   s.title_suggestion, s.title_source, co.byte_length
            FROM import_drafts d
            JOIN staged_import_snapshots s ON s.draft_id = d.draft_id
@@ -3390,6 +3471,7 @@ export class EditorialStore {
       contentDigest: asString(row.content_digest),
       structureDigest: asString(row.structure_digest),
       blockCount: asNumber(row.block_count),
+      characterCount: asNumber(row.character_count),
       fidelity: fidelityValue as FidelityCategoryProjection[],
       titleSuggestion: asString(row.title_suggestion),
       titleSource,
@@ -3508,24 +3590,6 @@ export class EditorialStore {
     };
   }
 
-  #loadStagedBlocks(draftId: string): ParsedDocxBlock[] {
-    return (
-      this.#authority
-        .prepare(
-          `SELECT staged_block_id, position, kind, level, text, digest
-           FROM staged_import_blocks WHERE draft_id = ? ORDER BY position`,
-        )
-        .all(draftId) as SqlRow[]
-    ).map((row) => ({
-      blockId: asString(row.staged_block_id),
-      position: asNumber(row.position),
-      kind: asString(row.kind) as ParsedDocxBlock['kind'],
-      level: row.level === null ? null : asNumber(row.level),
-      text: asString(row.text),
-      digest: asString(row.digest),
-    }));
-  }
-
   #assertImportPostconditions(input: {
     bookId: string;
     dimensionSetId: string;
@@ -3538,6 +3602,7 @@ export class EditorialStore {
     workflowInstanceId: string;
     importRecordId: string;
     blockCount: number;
+    characterCount: number;
     reviewDigest: string;
     fidelityPlan: ImportFidelityPlan;
     sourceDigest: string;
@@ -3553,6 +3618,10 @@ export class EditorialStore {
              (SELECT count(*) FROM manuscript_branches WHERE branch_id = ? AND base_revision_id = ?) branches,
              (SELECT count(*) FROM manuscript_revisions WHERE revision_id = ? AND revision_label = 'r1' AND parent_revision_id IS NULL) revisions,
              (SELECT count(*) FROM manuscript_block_versions WHERE revision_id = ?) blocks,
+             (SELECT count(*) FROM working_blocks WHERE branch_id = ?) working_blocks,
+             (SELECT count(*) FROM working_offset_nodes WHERE branch_id = ?) offset_nodes,
+             (SELECT count(*) FROM branch_working_state
+                WHERE branch_id = ? AND total_graphemes = ?) working_state,
              (SELECT count(*) FROM source_versions
                 WHERE source_version_id = ? AND object_digest = ? AND source_digest = ?) sources,
              (SELECT count(*) FROM import_fidelity_reviews
@@ -3575,6 +3644,10 @@ export class EditorialStore {
           input.revisionId,
           input.revisionId,
           input.revisionId,
+          input.branchId,
+          input.branchId,
+          input.branchId,
+          input.characterCount,
           input.sourceVersionId,
           input.sourceDigest,
           input.sourceDigest,
@@ -3604,6 +3677,9 @@ export class EditorialStore {
         asNumber(counts.branches) === 1 &&
         asNumber(counts.revisions) === 1 &&
         asNumber(counts.blocks) === input.blockCount &&
+        asNumber(counts.working_blocks) === input.blockCount &&
+        asNumber(counts.offset_nodes) === input.blockCount &&
+        asNumber(counts.working_state) === 1 &&
         asNumber(counts.sources) === 1 &&
         asNumber(counts.fidelity_reviews) === 1 &&
         asNumber(counts.fidelity_categories) === 8 &&
@@ -3659,6 +3735,20 @@ export class EditorialStore {
     }
   }
 
+  #boundedCall<T>(operation: () => T): T {
+    this.#assertAvailable();
+    try {
+      return operation();
+    } catch (error) {
+      if (error instanceof BoundedStoreFatalError) {
+        this.#poisoned = true;
+        throw new StoreFatalError(error);
+      }
+      if (error instanceof BoundedStoreError) throw new StoreError(error.code, error.message);
+      throw error;
+    }
+  }
+
   #transaction<T>(db: DatabaseSync, operation: () => T): T {
     this.#assertAvailable();
     db.exec('BEGIN IMMEDIATE');
@@ -3681,53 +3771,4 @@ export class EditorialStore {
     if (this.#poisoned) throw new StoreFatalError(new Error('Authority store is poisoned.'));
   }
 
-  #encodeCursor(value: {
-    manuscriptId: string;
-    branchId: string;
-    revisionId: string;
-    journalSequence: number;
-    offset: number;
-  }): string {
-    const payload = Buffer.from(canonicalJson({ version: 1, ...value }), 'utf8').toString('base64url');
-    const signature = createHmac('sha256', this.#cursorSecret).update(payload).digest('base64url');
-    return `${payload}.${signature}`;
-  }
-
-  #decodeCursor(
-    cursor: string,
-    expected: { manuscriptId: string; branchId: string; revisionId: string; journalSequence: number },
-  ): number {
-    const [payload, signature, extra] = cursor.split('.');
-    requireStore(payload && signature && extra === undefined, 'CURSOR_INVALID', '稿件窗口游标无效。');
-    const actual = createHmac('sha256', this.#cursorSecret).update(payload).digest();
-    const supplied = Buffer.from(signature, 'base64url');
-    requireStore(actual.length === supplied.length && timingSafeEqual(actual, supplied), 'CURSOR_INVALID', '稿件窗口游标无效。');
-    const value = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as Record<string, unknown>;
-    requireStore(
-      value.version === 1 &&
-        value.manuscriptId === expected.manuscriptId &&
-        value.branchId === expected.branchId &&
-        value.revisionId === expected.revisionId &&
-        value.journalSequence === expected.journalSequence &&
-        typeof value.offset === 'number' &&
-        Number.isSafeInteger(value.offset),
-      'CURSOR_CHANGED',
-      '稿件窗口绑定已变化。',
-    );
-    return value.offset;
-  }
-
-  #journalAck(row: SqlRow): JournalAcknowledgement {
-    return {
-      clientEditId: asString(row.client_edit_id),
-      branchId: asString(row.branch_id),
-      baseRevisionId: asString(row.base_revision_id),
-      blockId: asString(row.block_id),
-      sequence: asNumber(row.sequence),
-      resultingBlockDigest: asString(row.resulting_block_digest),
-      resultingWorkingDigest: asString(row.resulting_working_digest),
-      durableAt: asString(row.durable_at),
-      completionLabel: '已写入修订日志',
-    };
-  }
 }

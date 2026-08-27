@@ -1,6 +1,6 @@
 # AI7 Harness
 
-This checkout carries the first provider-free AI7 vertical tracer: select a local DOCX, review a new-Book import before creating records, commit the exact initial Book graph atomically, edit one bounded manuscript window, and explicitly save to the durable Edit Journal. It is intentionally not full J-01.
+This checkout carries the provider-free AI7 new-Book tracer plus the complete J-02 long-manuscript editing module. A local DOCX is reviewed before the initial Book graph is created atomically; the resulting Manuscript can then be edited through bounded windows, outline and whole-manuscript navigation, CJK search, frozen atomic replacement, Milestone Versions, durable undo/redo, and persisted restart/reopen. It is intentionally not full J-01 or the broader Book Workspace.
 
 ## Supported development hosts
 
@@ -28,13 +28,16 @@ pnpm run start-built -- --data-root <absolute-path-outside-this-checkout>
 
 `start-built` creates and canonicalizes the selected Agent Data Root and its `shell` directory before Electron starts, passes that exact shell through Chromium's standard user-data switch, preserves it if present, prints only `AI7_READY` after the database, dormant six-service Harness composition, renderer load, and first paint are ready, and remains attached until AI7 exits. The data root must be absolute and must not contain or be contained by the checkout.
 
-Run the one admitted provider-free journey with:
+Run either admitted journey through the one logical provider-free E2E surface with:
 
 ```text
 pnpm run e2e -- --journey J-01
+pnpm run e2e -- --journey J-02
 ```
 
-The current J-01 scenario uses exact [`SampleBooks/sample1.docx`](SampleBooks/sample1.docx), 29,550 bytes with SHA-256 `b8a3dbde0aa8a1ec7265f9ae3fe47877759e7947c5ab69682cd0a8f424a8d483`, as its provider-free public input under [ADR 0044](docs/adr/0044-use-sample1-as-compatibility-and-recording-baseline.md). It verifies the server-derived eight-category fidelity review, initially-unselected acceptance of the complete `inline-styles:266` and `sections:1` degradation set, the linked degradation decision/import record, a bounded 32-of-97 manuscript window, and durable journal acknowledgement without reading the product database or retaining, uploading, or logging manuscript payloads or derivatives. Runtime state remains inside the disposable external test data root and is deleted after the journey.
+The current J-01 scenario uses exact [`SampleBooks/sample1.docx`](SampleBooks/sample1.docx), 29,550 bytes with SHA-256 `b8a3dbde0aa8a1ec7265f9ae3fe47877759e7947c5ab69682cd0a8f424a8d483`, as its provider-free public input under [ADR 0044](docs/adr/0044-use-sample1-as-compatibility-and-recording-baseline.md). It verifies the server-derived eight-category fidelity review, all three import-identity finding classes and their initially-unselected target consequences, exact review-v4 rebinding, source-path loss/change recovery, prepared-attempt reconciliation, completion paint and acknowledgement, inconclusive-outcome containment, durable abandonment cleanup, the linked degradation decision/import record, a bounded 32-of-97 manuscript window, and durable journal acknowledgement. The controller never reads the product database or retains, uploads, or logs manuscript payloads or derivatives; runtime state remains inside the disposable external test data root and is deleted after the journey.
+
+J-02 generates its deterministic clean 10,000,000-character, 50,000-block Chinese DOCX only under the disposable external E2E root. It drives that file through the same native picker and production-shaped product, verifies every renderer window remains at most 32 blocks, exercises navigation/search/replacement while journal editing remains available, persists a Milestone Version and restart-safe history, and includes the applicable keyboard, real composition-event, visible-focus, 200% reflow, and forced-colors behavior. The generated DOCX and all runtime state are deleted during cleanup and never become tracked fixtures or uploaded evidence.
 
 Under [ADR 0043](docs/adr/0043-allow-public-samplebooks-in-repository-and-ci.md), only exact-root `SampleBooks/` material explicitly designated by the Owner through an authorized Issue and pull request may be tracked and used as provider-free local/hosted-CI test input. Directory placement alone grants no admission. ADR 0044 also establishes a future separately authorized local manual recording path for exact `sample1`, but no call, credential setup, fixture or live-provider CI path exists now. Do not place any other manuscript or derivative, private sample Book, credential, raw recording, screenshot, trace, video, product database, or manuscript payload in logs, uploaded artifacts, or a distribution.
 
