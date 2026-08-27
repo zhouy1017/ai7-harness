@@ -1,6 +1,6 @@
 # Current handoff
 
-[Issue #41](https://github.com/zhouy1017/ai7-harness/issues/41), **[S02] J-01: Preserve interrupted import continuity and reconcile commit outcome**, is the active sole-writer integration on `feat/41-import-continuity` from exact `dev@0dcc2265610fb908cae8e41cb326d1bc01b33f84`.
+[Issue #41](https://github.com/zhouy1017/ai7-harness/issues/41), **[S06] J-01: Complete import continuity and commit reconciliation**, is the active sole-writer integration on `feat/41-import-continuity` from exact `dev@0dcc2265610fb908cae8e41cb326d1bc01b33f84`.
 
 Resolve this file from the exact tree being read. The bounded result combines the already-integrated deterministic import identity disclosure with restart-safe J-01 continuity: review schema v4, service protocol v3, and SQLite schema v5 are distinct namespaces and all remain intentional.
 
