@@ -619,6 +619,11 @@ async function runWorkspaceJourney(renderer) {
     'dirty-milestone-authoritative-ipc-order',
   );
   await waitFor(renderer, `document.querySelector('.search-results')?.childElementCount === 0 && document.querySelector('.replacement-review')?.hidden && document.querySelector('.search-results')?.dataset.inclusionLocked === 'false' && Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '返回查找前位置')?.hidden && document.querySelector('.search-section .field-note')?.textContent.includes('稿件修订版已变化')`, 'milestone-revision-stales-all-search-state');
+  await waitForChecks(
+    renderer,
+    `(() => { const editor = document.querySelector('[data-testid="manuscript-editor"]'); const host = editor?.parentElement; const undo = Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '撤销'); return { authoritativeMutationCleared: host?.dataset.authoritativeMutation === 'false', operationUnlocked: editor?.dataset.operationLocked === 'false', undoReady: undo instanceof HTMLButtonElement && !undo.disabled }; })()`,
+    'milestone-authoritative-ready',
+  );
   await clickButton(renderer, '撤销', 'undo');
   await waitFor(renderer, `document.querySelector('.editor-meta')?.textContent.includes('修订日志序号 9')`, 'undo-durable', 120_000);
 }
@@ -640,7 +645,7 @@ async function runRestartJourney(renderer) {
 async function runAccessibilityJourney(renderer) {
   at('j14-behavior');
   const modifier = process.platform === 'darwin' ? 4 : 2;
-  await assertRenderer(renderer, `(() => { const block = document.querySelector('[data-testid="manuscript-editor"] > [data-block-id]'); block?.focus(); return document.activeElement?.closest('[data-testid="manuscript-editor"]') !== null; })()`, 'composition-focus');
+  await assertRenderer(renderer, `(() => { const editor = document.querySelector('[data-testid="manuscript-editor"]'); if (!(editor instanceof HTMLElement)) return false; editor.focus(); return document.activeElement === editor; })()`, 'composition-focus');
   await renderer.send('Input.imeSetComposition', { text: '编', selectionStart: 1, selectionEnd: 1, replacementStart: 0, replacementEnd: 0 });
   await press(renderer, 'f', modifier);
   await assertRenderer(renderer, `document.activeElement?.id !== 'manuscript-search' && document.querySelector('#persistence-status')?.textContent.includes('输入法组合尚未结束')`, 'ime-command-guard');
