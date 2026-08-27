@@ -1402,7 +1402,9 @@ export class EditorialStore {
       if (verified.state === 'eligible') {
         return { verified, record, comparisonSnapshotId: record.snapshotId };
       }
-      newestUnavailable ??= verified;
+      if (verified.state === 'unavailable') {
+        newestUnavailable ??= verified;
+      }
       cursor = { createdAt: record.createdAt, snapshotId: record.snapshotId };
     }
   }
