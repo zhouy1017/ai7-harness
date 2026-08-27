@@ -202,6 +202,7 @@ export type ManuscriptWindowTarget =
   | { kind: 'start' }
   | { kind: 'cursor'; cursor: string }
   | { kind: 'block'; blockId: string }
+  | { kind: 'window-start'; blockId: string }
   | { kind: 'character'; character: number }
   | { kind: 'proportion'; proportion: number };
 
@@ -221,6 +222,7 @@ export interface OutlineProjection {
   revisionId: string;
   workingDigest: string;
   entries: ReadonlyArray<OutlineEntryProjection>;
+  previousCursor: string | null;
   nextCursor: string | null;
 }
 
@@ -276,8 +278,12 @@ export interface ReplacementPreviewProjection {
   query: string;
   replacement: string;
   scopeLabel: '全稿';
+  matchingRule: '精确字素匹配；从左向右；重叠时保留最早匹配';
+  inclusionRule: '仅提交冻结时明确纳入的非重叠精确匹配';
+  revisionLabel: string;
   totalMatches: number;
   includedMatches: number;
+  excludedMatches: number;
   state: 'reviewing' | 'frozen';
   representativeContexts: ReadonlyArray<SearchMatchProjection>;
 }
@@ -304,6 +310,11 @@ export interface MilestoneProjection {
   createdAt: string;
   journalSequence: number;
   workingDigest: string;
+  signoffRecordId: string;
+  workflowEvidenceDigest: string;
+  actor: '本机编辑';
+  signedAt: string;
+  statedNextUse: string;
   completionLabel: string;
 }
 
@@ -410,6 +421,7 @@ export interface JournalEditInput {
   branchId: string;
   baseRevisionId: string;
   blockId: string;
+  windowStartBlockId: string;
   baseBlockDigest: string;
   expectedJournalSequence: number;
   fromGrapheme: number;
@@ -427,6 +439,7 @@ export interface JournalAcknowledgement {
   resultingWorkingDigest: string;
   durableAt: string;
   completionLabel: '已写入修订日志';
+  window: ManuscriptWindowProjection;
 }
 
 export type CommitNewBookRendererInput = Omit<ServiceOperationMap['commitNewBookImport']['input'], 'commitId'> & {

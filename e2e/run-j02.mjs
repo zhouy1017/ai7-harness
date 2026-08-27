@@ -12,6 +12,8 @@ const BLOCK_LENGTH = CHARACTER_COUNT / BLOCK_COUNT;
 const SEARCH_TEXT = '星河校准';
 const REPLACEMENT_TEXT = '星海校准';
 const EXPECTED_MATCHES = 25;
+const OVERLAP_SOURCE_TEXT = '哈哈哈';
+const OVERLAP_QUERY = '哈哈';
 const DEBUG_SELECTORS = new Set(['DEBUG', 'DEBUG_FILE', 'PWDEBUG', 'PWDEBUGIMPL']);
 const CJK_BASE = 0x4e00;
 const CJK_SPAN = 0x1000;
@@ -69,6 +71,7 @@ function blockText(position) {
     (_, index) => String.fromCodePoint(CJK_BASE + ((position * 17 + index) % CJK_SPAN)),
   );
   if (position % 2_000 === 0) characters.splice(97, SEARCH_TEXT.length, ...SEARCH_TEXT);
+  if (position === 1_000) characters.splice(41, OVERLAP_SOURCE_TEXT.length, ...OVERLAP_SOURCE_TEXT);
   return characters.join('');
 }
 
@@ -112,7 +115,7 @@ async function createSyntheticDocx(path) {
     generatedCharacters += Array.from(text).length;
     const style = position === 1
       ? '<w:pPr><w:pStyle w:val="Title"/></w:pPr>'
-      : position % 5_000 === 0
+      : position % 500 === 0
         ? '<w:pPr><w:pStyle w:val="Heading1"/></w:pPr>'
         : '';
     document.push(strToU8(`<w:p>${style}<w:r><w:t>${text}</w:t></w:r></w:p>`), false);
@@ -246,10 +249,23 @@ async function runWorkspaceJourney(renderer) {
   await waitFor(renderer, `document.querySelector('.editor-meta')?.textContent.includes('75.000%')`, 'position-jump-resolved');
   await assertRenderer(renderer, `document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]').length <= 32`, 'position-window-bounded');
   await renderer.evaluate(`globalThis.__ai7BeforeForward = document.querySelector('[data-testid="manuscript-editor"] > [data-block-id]')?.dataset.blockId`);
+  await assertRenderer(
+    renderer,
+    `(() => { const surface = document.querySelector('.editor-window'); const blocks = Array.from(document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]')); const block = blocks[20]; const text = block?.firstChild; if (!(surface instanceof HTMLElement) || !(block instanceof HTMLElement) || !(text instanceof Text) || text.length < 4) return false; block.scrollIntoView({ block: 'center' }); const containerTop = surface.getBoundingClientRect().top; const visible = blocks.find((candidate) => candidate.getBoundingClientRect().bottom >= containerTop); const selection = window.getSelection(); selection.setBaseAndExtent(text, 3, text, 1); globalThis.__ai7WindowContinuity = { blockId: block.dataset.blockId, text: selection.toString(), anchor: 3, head: 1, scrollBlockId: visible?.dataset.blockId, scrollOffset: visible?.getBoundingClientRect().top - containerTop }; return selection.anchorOffset === 3 && selection.headOffset === 1; })()`,
+    'window-continuity-prepare',
+  );
   await clickButton(renderer, '向后浏览', 'forward-window');
   await waitFor(renderer, `document.querySelector('[data-testid="manuscript-editor"] > [data-block-id]')?.dataset.blockId !== globalThis.__ai7BeforeForward`, 'forward-window-resolved');
+  await waitFor(renderer, `(() => { const expected = globalThis.__ai7WindowContinuity; const selection = window.getSelection(); const anchorBlock = selection?.anchorNode?.parentElement?.closest('[data-block-id]'); const headBlock = selection?.focusNode?.parentElement?.closest('[data-block-id]'); const surface = document.querySelector('.editor-window'); const scrollBlock = document.querySelector('[data-block-id="' + expected.scrollBlockId + '"]'); return anchorBlock?.dataset.blockId === expected.blockId && headBlock?.dataset.blockId === expected.blockId && selection.anchorOffset === expected.anchor && selection.focusOffset === expected.head && selection.toString() === expected.text && surface instanceof HTMLElement && scrollBlock instanceof HTMLElement && Math.abs((scrollBlock.getBoundingClientRect().top - surface.getBoundingClientRect().top) - expected.scrollOffset) <= 3; })()`, 'forward-selection-continuity');
   await clickButton(renderer, '向前浏览', 'back-window');
-  await assertRenderer(renderer, `document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]').length <= 32`, 'cross-window-bounded');
+  await waitFor(renderer, `(() => { const expected = globalThis.__ai7WindowContinuity; const selection = window.getSelection(); return document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]').length <= 32 && selection?.anchorNode?.parentElement?.closest('[data-block-id]')?.dataset.blockId === expected.blockId && selection.anchorOffset === expected.anchor && selection.focusOffset === expected.head; })()`, 'back-selection-continuity');
+  await assertRenderer(renderer, `document.querySelectorAll('.outline-list button').length === 64 && !Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '下一组结构')?.hidden`, 'outline-first-page-bounded');
+  await clickButton(renderer, '下一组结构', 'outline-next-page');
+  await waitFor(renderer, `document.querySelectorAll('.outline-list button').length > 0 && document.querySelectorAll('.outline-list button').length <= 64 && !Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '上一组结构')?.hidden`, 'outline-next-page-bounded');
+  await clickButton(renderer, '上一组结构', 'outline-previous-page');
+  await waitFor(renderer, `document.querySelectorAll('.outline-list button').length === 64`, 'outline-previous-page-bounded');
+  await clickButton(renderer, '下一组结构', 'outline-last-page');
+  await waitFor(renderer, `document.querySelectorAll('.outline-list button').length > 0 && document.querySelectorAll('.outline-list button').length <= 64`, 'outline-last-page-bounded');
   await assertRenderer(renderer, `(() => { const items = document.querySelectorAll('.outline-list button'); const target = items[items.length - 1]; if (!target) return false; target.click(); return true; })()`, 'outline-jump');
   await waitFor(renderer, `document.querySelector('.editor-meta')?.textContent.includes('99.998%')`, 'outline-exact-resolve');
 
@@ -259,12 +275,15 @@ async function runWorkspaceJourney(renderer) {
   await waitFor(renderer, `!Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '取消当前操作')?.hidden`, 'common-search-running');
   await assertRenderer(
     renderer,
-    `(() => { const block = document.querySelector('[data-testid="manuscript-editor"] > [data-block-id]'); if (!block) return false; block.focus(); const range = document.createRange(); range.selectNodeContents(block); range.collapse(false); const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range); return document.execCommand('insertText', false, '协作'); })()`,
-    'edit-during-search',
+    `(() => { const blocks = document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]'); const edit = (block, text) => { if (!block) return false; block.focus(); const range = document.createRange(); range.selectNodeContents(block); range.collapse(false); const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range); return document.execCommand('insertText', false, text); }; return edit(blocks[0], '协作'.repeat(150)) && edit(blocks[1], '续写'); })()`,
+    'sustained-multiblock-edit-during-search',
   );
   await waitFor(renderer, `!Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '保存当前编辑')?.disabled`, 'concurrent-edit-dirty');
-  await clickButton(renderer, '保存当前编辑', 'concurrent-save');
-  await waitFor(renderer, `document.querySelector('.editor-meta')?.textContent.includes('修订日志序号 1')`, 'concurrent-durable-ack');
+  await waitFor(renderer, `document.querySelector('.editor-meta')?.textContent.includes('修订日志序号 3') && Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '保存当前编辑')?.disabled`, 'automatic-serialized-durable-ack', 120_000);
+  await renderer.evaluate(`globalThis.__ai7AfterAckFirst = document.querySelector('[data-testid="manuscript-editor"] > [data-block-id]')?.dataset.blockId`);
+  await clickButton(renderer, '向前浏览', 'fresh-cursor-after-ack');
+  await waitFor(renderer, `document.querySelector('[data-testid="manuscript-editor"] > [data-block-id]')?.dataset.blockId !== globalThis.__ai7AfterAckFirst`, 'fresh-cursor-after-ack-resolved');
+  await clickButton(renderer, '向后浏览', 'fresh-return-cursor-after-ack');
   await waitFor(renderer, `Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '取消当前操作')?.hidden`, 'stale-search-closed');
   await fill(renderer, '#manuscript-search', '地', 'cancel-search-fill');
   await clickButton(renderer, '查找全稿', 'cancel-search-start');
@@ -272,30 +291,34 @@ async function runWorkspaceJourney(renderer) {
   await clickButton(renderer, '取消当前操作', 'cancel-search');
   await waitFor(renderer, `document.querySelector('.search-section .field-note')?.textContent.includes('已取消')`, 'cancel-business-readable');
 
+  await fill(renderer, '#manuscript-search', OVERLAP_QUERY, 'overlap-search-fill');
+  await clickButton(renderer, '查找全稿', 'overlap-search-start');
+  await waitFor(renderer, `document.querySelector('.search-section .field-note')?.textContent.includes('共 1 处')`, 'overlap-leftmost-nonoverlap', 120_000);
+
   at('search-replace');
   await fill(renderer, '#manuscript-search', SEARCH_TEXT, 'search-fill');
   await clickButton(renderer, '查找全稿', 'search-start');
   await waitFor(renderer, `document.querySelector('.search-section .field-note')?.textContent.includes('共 ${EXPECTED_MATCHES} 处')`, 'search-results', 120_000);
   await assertRenderer(renderer, `document.querySelectorAll('.search-result').length === 24 && !Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '下一组结果')?.hidden`, 'search-virtualized');
-  await renderer.evaluate(`globalThis.__ai7SearchReturn = document.querySelector('.editor-meta')?.textContent`);
+  await assertRenderer(renderer, `(() => { const surface = document.querySelector('.editor-window'); const blocks = Array.from(document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]')); const block = blocks[5]; const text = block?.firstChild; if (!(surface instanceof HTMLElement) || !(block instanceof HTMLElement) || !(text instanceof Text) || text.length < 5) return false; block.scrollIntoView({ block: 'center' }); const containerTop = surface.getBoundingClientRect().top; const visible = blocks.find((candidate) => candidate.getBoundingClientRect().bottom >= containerTop); const selection = window.getSelection(); selection.setBaseAndExtent(text, 4, text, 1); globalThis.__ai7SearchReturn = { meta: document.querySelector('.editor-meta')?.textContent, blockId: block.dataset.blockId, text: selection.toString(), anchor: 4, head: 1, scrollBlockId: visible?.dataset.blockId, scrollOffset: visible?.getBoundingClientRect().top - containerTop }; return true; })()`, 'search-return-prepare');
   await assertRenderer(renderer, `(() => { const open = document.querySelector('.search-result button'); if (!open) return false; open.click(); return true; })()`, 'search-jump');
-  await waitFor(renderer, `document.querySelector('.editor-meta')?.textContent !== globalThis.__ai7SearchReturn`, 'search-jump-resolved');
+  await waitFor(renderer, `document.querySelector('.editor-meta')?.textContent !== globalThis.__ai7SearchReturn.meta`, 'search-jump-resolved');
   await waitFor(renderer, `window.getSelection()?.toString() === ${JSON.stringify(SEARCH_TEXT)}`, 'search-exact-range');
   await clickButton(renderer, '返回查找前位置', 'search-return');
-  await waitFor(renderer, `document.querySelector('.editor-meta')?.textContent === globalThis.__ai7SearchReturn`, 'search-return-resolved');
+  await waitFor(renderer, `(() => { const expected = globalThis.__ai7SearchReturn; const selection = window.getSelection(); const surface = document.querySelector('.editor-window'); const scrollBlock = document.querySelector('[data-block-id="' + expected.scrollBlockId + '"]'); return document.querySelector('.editor-meta')?.textContent === expected.meta && selection?.anchorNode?.parentElement?.closest('[data-block-id]')?.dataset.blockId === expected.blockId && selection.anchorOffset === expected.anchor && selection.focusOffset === expected.head && selection.toString() === expected.text && surface instanceof HTMLElement && scrollBlock instanceof HTMLElement && Math.abs((scrollBlock.getBoundingClientRect().top - surface.getBoundingClientRect().top) - expected.scrollOffset) <= 3; })()`, 'search-return-exact-selection-scroll');
   await clickButton(renderer, '下一组结果', 'search-next');
   await waitFor(renderer, `document.querySelectorAll('.search-result').length === 1`, 'search-next-results');
   await clickButton(renderer, '上一组结果', 'search-previous');
   await waitFor(renderer, `document.querySelectorAll('.search-result').length === 24`, 'search-previous-results');
-  await assertRenderer(renderer, `(() => { const include = document.querySelector('.search-result input[type="checkbox"]'); if (!include) return false; include.click(); return !include.checked; })()`, 'replacement-exclusion');
+  await assertRenderer(renderer, `(() => { const result = document.querySelector('.search-result'); const include = result?.querySelector('input[type="checkbox"]'); const context = result?.querySelector('button')?.textContent; if (!include || !context) return false; globalThis.__ai7ExcludedContext = context; include.click(); return !include.checked; })()`, 'replacement-exclusion');
   await fill(renderer, '#manuscript-replacement', REPLACEMENT_TEXT, 'replacement-fill');
   await clickButton(renderer, '预览替换', 'replacement-preview');
-  await waitFor(renderer, `!document.querySelector('.replacement-review')?.hidden && document.querySelector('.replacement-review')?.textContent.includes('纳入 25 / 25 处')`, 'replacement-preview-bound');
+  await waitFor(renderer, `!document.querySelector('.replacement-review')?.hidden && document.querySelector('.replacement-review')?.textContent.includes('纳入 25 处') && document.querySelector('.replacement-review')?.textContent.includes('排除 0 处') && document.querySelector('.replacement-review')?.textContent.includes('绑定修订版 r1') && document.querySelector('.replacement-review')?.textContent.includes('重叠时保留最早匹配')`, 'replacement-preview-bound');
   await clickButton(renderer, '冻结并重新验证', 'replacement-freeze');
-  await waitFor(renderer, `document.querySelector('.replacement-review')?.textContent.includes('已冻结替换集') && document.querySelector('.replacement-review')?.textContent.includes('纳入 24 / 25 处')`, 'replacement-frozen');
+  await waitFor(renderer, `document.querySelector('.replacement-review')?.textContent.includes('已冻结替换集') && document.querySelector('.replacement-review')?.textContent.includes('纳入 24 处') && document.querySelector('.replacement-review')?.textContent.includes('排除 1 处') && !document.querySelector('.replacement-review')?.textContent.includes(globalThis.__ai7ExcludedContext)`, 'replacement-frozen-included-contexts');
   await clickButton(renderer, '原子提交替换', 'replacement-commit');
   await waitFor(renderer, `document.querySelector('#persistence-status')?.textContent.includes('已原子替换 24 处')`, 'replacement-atomic', 120_000);
-  await assertRenderer(renderer, `document.querySelector('.editor-meta')?.textContent.includes('修订日志序号 2')`, 'replacement-journal');
+  await assertRenderer(renderer, `document.querySelector('.editor-meta')?.textContent.includes('修订日志序号 4')`, 'replacement-journal');
 
   at('milestone-history');
   await assertRenderer(renderer, `(() => { const details = document.querySelector('.milestone-section'); details.open = true; return true; })()`, 'milestone-open');
@@ -305,18 +328,18 @@ async function runWorkspaceJourney(renderer) {
   await clickButton(renderer, '保存为里程碑版本', 'milestone-save');
   await waitFor(renderer, `document.querySelector('.editor-meta')?.textContent.includes('当前修订版 r2')`, 'milestone-r2', 180_000);
   await clickButton(renderer, '撤销', 'undo');
-  await waitFor(renderer, `document.querySelector('.editor-meta')?.textContent.includes('修订日志序号 3')`, 'undo-durable', 120_000);
+  await waitFor(renderer, `document.querySelector('.editor-meta')?.textContent.includes('修订日志序号 5')`, 'undo-durable', 120_000);
 }
 
 async function runRestartJourney(renderer) {
   at('restart-reopen');
   await waitFor(renderer, `document.querySelector('[data-screen="landing"]') && document.querySelector('.recent-work-item')`, 'prior-work');
-  await assertRenderer(renderer, `document.querySelector('.recent-work-item')?.textContent.includes('10,000,002 字符') && document.querySelector('.recent-work-item')?.textContent.includes('结构复核完成')`, 'prior-work-exact');
+  await assertRenderer(renderer, `document.querySelector('.recent-work-item')?.textContent.includes('10,000,302 字符') && document.querySelector('.recent-work-item')?.textContent.includes('结构复核完成')`, 'prior-work-exact');
   await assertRenderer(renderer, `(() => { const open = document.querySelector('.recent-work-item button'); if (!open) return false; open.click(); return true; })()`, 'prior-work-open');
   await waitFor(renderer, `document.querySelector('[data-screen="editor"]') && document.querySelector('.editor-meta')?.textContent.includes('当前修订版 r2')`, 'reopened-r2');
   await assertRenderer(renderer, `document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]').length <= 32`, 'restart-window-bounded');
   await clickButton(renderer, '重做', 'restart-redo');
-  await waitFor(renderer, `document.querySelector('.editor-meta')?.textContent.includes('修订日志序号 4')`, 'restart-redo-durable', 120_000);
+  await waitFor(renderer, `document.querySelector('.editor-meta')?.textContent.includes('修订日志序号 6')`, 'restart-redo-durable', 120_000);
   await fill(renderer, '#manuscript-search', REPLACEMENT_TEXT, 'redo-search-fill');
   await clickButton(renderer, '查找全稿', 'redo-search');
   await waitFor(renderer, `document.querySelector('.search-section .field-note')?.textContent.includes('共 24 处')`, 'redo-state-exact', 120_000);

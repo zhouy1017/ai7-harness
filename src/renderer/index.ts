@@ -10,7 +10,7 @@ import type {
   ServiceJobProjection,
   StagedImportProjection,
 } from '../shared/protocol.js';
-import { mountBoundedEditor, type BoundedEditor } from './editor.js';
+import { mountBoundedEditor, type BoundedEditor, type EditorContinuity } from './editor.js';
 
 function requiredElement(selector: string): HTMLElement {
   const node = document.querySelector<HTMLElement>(selector);
@@ -605,9 +605,13 @@ function renderEditorWindow(initialWindow: ManuscriptWindowProjection, bookTitle
   outlineSection.append(element('h3', undefined, '结构导航'));
   const outlineList = element('div', 'outline-list');
   outlineList.setAttribute('role', 'list');
-  const moreOutline = button('继续查看结构', 'quiet', () => void loadOutline(outlinePage?.nextCursor ?? null, true));
-  moreOutline.hidden = true;
-  outlineSection.append(outlineList, moreOutline);
+  const previousOutline = button('上一组结构', 'quiet', () => void loadOutline(outlinePage?.previousCursor ?? null));
+  const nextOutline = button('下一组结构', 'quiet', () => void loadOutline(outlinePage?.nextCursor ?? null));
+  previousOutline.hidden = true;
+  nextOutline.hidden = true;
+  const outlinePaging = element('div', 'button-row');
+  outlinePaging.append(previousOutline, nextOutline);
+  outlineSection.append(outlineList, outlinePaging);
 
   const searchSection = element('section', 'navigator-section search-section');
   searchSection.append(element('h3', undefined, '全稿查找与替换'));
@@ -724,8 +728,7 @@ function renderEditorWindow(initialWindow: ManuscriptWindowProjection, bookTitle
   let searchPage: SearchResultsProjection | undefined;
   let replacementPreview: ReplacementPreviewProjection | undefined;
   let activeJob: ServiceJobProjection | undefined;
-  let searchReturnCharacter = initialWindow.position.startCharacter;
-  let searchReturnWindow = initialWindow;
+  let searchReturn: { window: ManuscriptWindowProjection; continuity: EditorContinuity } | undefined;
   let edgeNavigation = false;
   let lastJournalSequence = initialWindow.journalSequence;
   const excludedMatchIds = new Set<string>();
@@ -749,8 +752,11 @@ function renderEditorWindow(initialWindow: ManuscriptWindowProjection, bookTitle
     return !dirty && !saving && !retryRequired;
   }
 
-  async function navigate(target: Parameters<typeof window.ai7.getManuscriptWindowAt>[0]['target']): Promise<void> {
-    if (!(await settleLocalEdit()) || !editor) return;
+  async function navigate(
+    target: Parameters<typeof window.ai7.getManuscriptWindowAt>[0]['target'],
+    continuity?: EditorContinuity,
+  ): Promise<boolean> {
+    if (!(await settleLocalEdit()) || !editor) return false;
     try {
       const binding = editor.currentWindow();
       const next = await window.ai7.getManuscriptWindowAt({
@@ -758,28 +764,37 @@ function renderEditorWindow(initialWindow: ManuscriptWindowProjection, bookTitle
         branchId: binding.branchId,
         target,
       });
-      if (!editor.loadWindow(next)) return;
+      if (!editor.loadWindow(next, continuity)) return false;
       currentWindow = next;
       updateWindowChrome();
       setStatus(`已到达${next.position.structureLabel ? `“${next.position.structureLabel}”附近，` : ''}${next.position.label}。`, 'success');
+      return true;
     } catch (error) {
       setStatus(error instanceof Error ? error.message : '无法移动到该稿件位置。', 'error');
+      return false;
     }
   }
 
   async function navigateCursor(direction: 'previous' | 'next'): Promise<void> {
-    const cursor = direction === 'previous' ? currentWindow.previousCursor : currentWindow.nextCursor;
+    if (edgeNavigation || !(await settleLocalEdit()) || !editor) return;
+    const cursor = direction === 'previous' ? editor.currentWindow().previousCursor : editor.currentWindow().nextCursor;
     if (!cursor) return;
-    await navigate({ kind: 'cursor', cursor });
-    editorWindow.scrollTop = direction === 'previous' ? Math.max(0, editorWindow.scrollHeight - editorWindow.clientHeight - 1) : 1;
+    edgeNavigation = true;
+    try {
+      const continuity = editor.captureContinuity();
+      await navigate({ kind: 'cursor', cursor }, continuity);
+      await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+    } finally {
+      edgeNavigation = false;
+    }
   }
 
-  async function loadOutline(cursor: string | null, append: boolean): Promise<void> {
+  async function loadOutline(cursor: string | null): Promise<void> {
     try {
       const binding = editor?.currentWindow() ?? currentWindow;
       const page = await window.ai7.getOutline({ manuscriptId: binding.manuscriptId, branchId: binding.branchId, cursor });
       outlinePage = page;
-      if (!append) outlineList.replaceChildren();
+      outlineList.replaceChildren();
       for (const entry of page.entries) {
         const open = button(`${entry.kind === 'title' ? '标题' : `层级 ${entry.level}`} · ${entry.text}`, 'quiet', () =>
           navigate({ kind: 'block', blockId: entry.blockId }),
@@ -788,7 +803,8 @@ function renderEditorWindow(initialWindow: ManuscriptWindowProjection, bookTitle
         open.setAttribute('role', 'listitem');
         outlineList.append(open);
       }
-      moreOutline.hidden = page.nextCursor === null;
+      previousOutline.hidden = page.previousCursor === null;
+      nextOutline.hidden = page.nextCursor === null;
     } catch (error) {
       setStatus(error instanceof Error ? error.message : '无法读取稿件结构。', 'error');
     }
@@ -809,8 +825,7 @@ function renderEditorWindow(initialWindow: ManuscriptWindowProjection, bookTitle
       return;
     }
     const binding = editor?.currentWindow() ?? currentWindow;
-    searchReturnWindow = binding;
-    searchReturnCharacter = binding.position.startCharacter;
+    searchReturn = undefined;
     excludedMatchIds.clear();
     replacementReview.hidden = true;
     replacementPreview = undefined;
@@ -827,7 +842,6 @@ function renderEditorWindow(initialWindow: ManuscriptWindowProjection, bookTitle
       if (!completed.result || !('searchId' in completed.result)) throw new Error('查找结果绑定无效。');
       await loadSearchResults(null, completed.result.searchId);
       prepareReplacementButton.disabled = completed.result.totalMatches === 0;
-      returnFromSearch.hidden = false;
     } catch (error) {
       setStatus(error instanceof Error ? error.message : '全稿查找未完成。', 'error');
     } finally {
@@ -839,16 +853,16 @@ function renderEditorWindow(initialWindow: ManuscriptWindowProjection, bookTitle
 
   async function returnToSearchPosition(): Promise<void> {
     if (!(await settleLocalEdit()) || !editor) return;
-    if (
-      editor.currentWindow().workingDigest === searchReturnWindow.workingDigest &&
-      editor.loadWindow(searchReturnWindow)
-    ) {
-      currentWindow = searchReturnWindow;
-      updateWindowChrome();
-      setStatus(`已返回查找前位置；${currentWindow.position.label}。`, 'success');
+    if (!searchReturn) return;
+    if (editor.currentWindow().workingDigest !== searchReturn.window.workingDigest) {
+      setStatus('稿件已变化；查找前的精确选择与滚动锚点无法按原绑定恢复。', 'error');
       return;
     }
-    await navigate({ kind: 'character', character: searchReturnCharacter });
+    const restored = await navigate(
+      { kind: 'window-start', blockId: searchReturn.window.blocks[0]!.blockId },
+      searchReturn.continuity,
+    );
+    if (restored) setStatus(`已返回查找前的精确选择与滚动位置；${currentWindow.position.label}。`, 'success');
   }
 
   async function loadSearchResults(cursor: string | null, searchId?: string): Promise<void> {
@@ -884,6 +898,10 @@ function renderEditorWindow(initialWindow: ManuscriptWindowProjection, bookTitle
       setStatus('稿件已变化；请重新查找后再跳转到精确范围。', 'error');
       return;
     }
+    if (!searchReturn) {
+      searchReturn = { window: editor.currentWindow(), continuity: editor.captureContinuity() };
+      returnFromSearch.hidden = false;
+    }
     await navigate({ kind: 'block', blockId: match.blockId });
     if (!editor?.selectRange(match.blockId, match.fromGrapheme, match.toGrapheme)) {
       setStatus('无法在当前稿件状态中精确定位该匹配。', 'error');
@@ -908,7 +926,9 @@ function renderEditorWindow(initialWindow: ManuscriptWindowProjection, bookTitle
     replacementReview.replaceChildren(
       element('h4', undefined, preview.state === 'frozen' ? '已冻结替换集' : '替换预览'),
       element('p', undefined, `查找“${preview.query}”，替换为“${preview.replacement}”`),
-      element('p', 'field-note', `范围：${preview.scopeLabel} · 纳入 ${preview.includedMatches} / ${preview.totalMatches} 处`),
+      element('p', 'field-note', `范围：${preview.scopeLabel} · 绑定修订版 ${preview.revisionLabel}`),
+      element('p', 'field-note', `匹配规则：${preview.matchingRule}`),
+      element('p', 'field-note', `纳入 ${preview.includedMatches} 处 · 排除 ${preview.excludedMatches} 处 · ${preview.inclusionRule}`),
     );
     const contexts = element('ul');
     for (const match of preview.representativeContexts) contexts.append(element('li', undefined, `${match.headingLabel}：${match.context}`));
@@ -950,7 +970,7 @@ function renderEditorWindow(initialWindow: ManuscriptWindowProjection, bookTitle
       searchResults.replaceChildren();
       searchPage = undefined;
       prepareReplacementButton.disabled = true;
-      await loadOutline(null, false);
+      await loadOutline(null);
     } catch (error) {
       setStatus(error instanceof Error ? error.message : '替换提交未完成。', 'error');
     } finally {
@@ -995,7 +1015,7 @@ function renderEditorWindow(initialWindow: ManuscriptWindowProjection, bookTitle
       const result = action === 'undo' ? await window.ai7.undoManuscript(input) : await window.ai7.redoManuscript(input);
       setStatus(result.completionLabel, 'success');
       await navigate({ kind: 'character', character: currentWindow.position.startCharacter });
-      await loadOutline(null, false);
+      await loadOutline(null);
     } catch (error) {
       setStatus(error instanceof Error ? error.message : `${action === 'undo' ? '撤销' : '重做'}未完成。`, 'error');
     }
@@ -1007,10 +1027,7 @@ function renderEditorWindow(initialWindow: ManuscriptWindowProjection, bookTitle
     const atStart = editorWindow.scrollTop <= 0 && currentWindow.previousCursor !== null;
     const atEnd = editorWindow.scrollTop + editorWindow.clientHeight >= editorWindow.scrollHeight - 1 && currentWindow.nextCursor !== null;
     if (!atStart && !atEnd) return;
-    edgeNavigation = true;
-    void navigateCursor(atStart ? 'previous' : 'next').finally(() => {
-      edgeNavigation = false;
-    });
+    void navigateCursor(atStart ? 'previous' : 'next');
   });
   searchInput.addEventListener('keydown', (event) => {
     if (event.key === 'Enter' && !event.isComposing) {
@@ -1021,6 +1038,7 @@ function renderEditorWindow(initialWindow: ManuscriptWindowProjection, bookTitle
 
   editor = mountBoundedEditor({
     host: editorHost,
+    scrollContainer: editorWindow,
     platform: window.ai7.platform,
     initialWindow,
     flushJournalEdit: (input) => window.ai7.flushJournalEdit(input),
@@ -1035,7 +1053,7 @@ function renderEditorWindow(initialWindow: ManuscriptWindowProjection, bookTitle
         lastJournalSequence = state.journalSequence;
         currentWindow = editor.currentWindow();
         updateWindowChrome();
-        void loadOutline(null, false);
+        void loadOutline(null);
       }
     },
     onAnnouncement: setStatus,
@@ -1047,7 +1065,7 @@ function renderEditorWindow(initialWindow: ManuscriptWindowProjection, bookTitle
     },
   });
   updateWindowChrome();
-  void loadOutline(null, false);
+  void loadOutline(null);
   editor.focus();
   setStatus(`稿件窗口已打开；${initialWindow.position.label}。`);
 }

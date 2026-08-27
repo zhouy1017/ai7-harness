@@ -34,6 +34,10 @@ const MIGRATION_BATCH = 256;
 const SEARCH_BATCH = 128;
 const HISTORY_BATCH = 128;
 const CONTEXT_GRAPHEMES = 36;
+const WINDOW_STRIDE = Math.floor(MAX_WINDOW_BLOCKS / 2);
+const MAX_RETAINED_TRANSIENT_SEARCHES = 32;
+const REPLACEMENT_MATCHING_RULE = '精确字素匹配；从左向右；重叠时保留最早匹配' as const;
+const REPLACEMENT_INCLUSION_RULE = '仅提交冻结时明确纳入的非重叠精确匹配' as const;
 
 type SqlRow = Record<string, SQLOutputValue>;
 
@@ -139,15 +143,35 @@ function recreateRevisionTable(db: DatabaseSync): void {
   `);
 }
 
-function rebuildBranchDerived(db: DatabaseSync, branchId: string, updateBaseRevision = false): number {
+function rebuildRevisionOffsets(db: DatabaseSync, revisionId: string): number {
+  const updateVersion = db.prepare(
+    `UPDATE manuscript_block_versions SET start_offset = ?, grapheme_length = ?
+     WHERE revision_id = ? AND block_id = ?`,
+  );
+  let position = 0;
+  let offset = 0;
+  while (true) {
+    const rows = db.prepare(
+      `SELECT block_id, position, text FROM manuscript_block_versions
+       WHERE revision_id = ? AND position > ? ORDER BY position LIMIT ?`,
+    ).all(revisionId, position, MIGRATION_BATCH) as SqlRow[];
+    if (rows.length === 0) break;
+    for (const row of rows) {
+      const blockId = asString(row.block_id);
+      position = asNumber(row.position);
+      const length = graphemes(asString(row.text)).length;
+      updateVersion.run(offset, length, revisionId, blockId);
+      offset += length;
+    }
+  }
+  return offset;
+}
+
+function rebuildBranchDerived(db: DatabaseSync, branchId: string): number {
   db.prepare('DELETE FROM manuscript_outline WHERE branch_id = ?').run(branchId);
   db.prepare('DELETE FROM working_block_search WHERE branch_id = ?').run(branchId);
   const updateBlock = db.prepare(
     'UPDATE working_blocks SET start_offset = ?, grapheme_length = ? WHERE branch_id = ? AND block_id = ?',
-  );
-  const updateVersion = db.prepare(
-    `UPDATE manuscript_block_versions SET start_offset = ?, grapheme_length = ?
-     WHERE block_id = ? AND revision_id = (SELECT base_revision_id FROM branch_working_state WHERE branch_id = ?)`,
   );
   const insertOutline = db.prepare(
     `INSERT INTO manuscript_outline(branch_id, block_id, position, start_offset, kind, level, text, digest)
@@ -171,7 +195,6 @@ function rebuildBranchDerived(db: DatabaseSync, branchId: string, updateBaseRevi
       const digest = asString(row.digest);
       const length = graphemes(text).length;
       updateBlock.run(offset, length, branchId, blockId);
-      if (updateBaseRevision) updateVersion.run(offset, length, blockId, branchId);
       if (kind === 'title' || kind === 'heading') insertOutline.run(branchId, blockId, position, offset, kind, level ?? 1, text, digest);
       insertSearch.run(branchId, blockId, text);
       offset += length;
@@ -328,6 +351,19 @@ export function initializeBoundedSchema(db: DatabaseSync): void {
         created_at TEXT NOT NULL,
         UNIQUE(branch_id, label)
       ) STRICT;
+      CREATE TABLE milestone_signoff_records (
+        signoff_record_id TEXT PRIMARY KEY,
+        milestone_id TEXT NOT NULL UNIQUE REFERENCES milestone_versions(milestone_id),
+        manuscript_id TEXT NOT NULL REFERENCES manuscripts(manuscript_id),
+        branch_id TEXT NOT NULL REFERENCES manuscript_branches(branch_id),
+        revision_id TEXT NOT NULL REFERENCES manuscript_revisions(revision_id),
+        workflow_instance_id TEXT NOT NULL REFERENCES workflow_instances(workflow_instance_id),
+        workflow_evidence_digest TEXT NOT NULL CHECK(length(workflow_evidence_digest) = 64),
+        actor TEXT NOT NULL CHECK(actor = '本机编辑'),
+        signed_at TEXT NOT NULL,
+        label TEXT NOT NULL,
+        stated_next_use TEXT NOT NULL
+      ) STRICT;
 
       CREATE TABLE manuscript_search_sessions (
         search_id TEXT PRIMARY KEY,
@@ -395,9 +431,15 @@ export function initializeBoundedSchema(db: DatabaseSync): void {
       if (branches.length === 0) break;
       for (const branch of branches) {
         branchCursor = asString(branch.branch_id);
+        const baseRevisionId = asString(one(
+          db.prepare('SELECT base_revision_id FROM branch_working_state WHERE branch_id = ?').all(branchCursor) as SqlRow[],
+          'SCHEMA_MIGRATION_FAILED',
+          '稿件工作状态缺失。',
+        ).base_revision_id);
+        rebuildRevisionOffsets(db, baseRevisionId);
         const history = migrateLegacyJournal(db, branchCursor);
         db.prepare('UPDATE branch_working_state SET history_sequence = ? WHERE branch_id = ?').run(history, branchCursor);
-        rebuildBranchDerived(db, branchCursor, true);
+        rebuildBranchDerived(db, branchCursor);
       }
     }
     db.exec('DROP TABLE IF EXISTS temp.migration_block_state');
@@ -478,11 +520,11 @@ export class BoundedManuscriptStore {
     let focusBlockId: string | null = null;
     if (target.kind === 'cursor') {
       targetPosition = this.#decodeCursor(target.cursor, 'window', binding).position;
-    } else if (target.kind === 'block') {
+    } else if (target.kind === 'block' || target.kind === 'window-start') {
       requireBounded(BLOCK_PATTERN.test(target.blockId), 'WINDOW_INVALID', '稿件位置无效。');
       const row = one(this.#db.prepare('SELECT position FROM working_blocks WHERE branch_id = ? AND block_id = ?').all(branchId, target.blockId) as SqlRow[], 'WINDOW_NOT_FOUND', '稿件位置不存在。');
       targetPosition = asNumber(row.position);
-      focusBlockId = target.blockId;
+      if (target.kind === 'block') focusBlockId = target.blockId;
     } else if (target.kind === 'character') {
       requireBounded(Number.isSafeInteger(target.character) && target.character >= 0, 'WINDOW_INVALID', '全稿位置无效。');
       const character = Math.min(target.character, Math.max(0, binding.totalCharacters - 1));
@@ -543,8 +585,8 @@ export class BoundedManuscriptStore {
       journalSequence: binding.journalSequence,
       workingDigest: binding.workingDigest,
       focusBlockId,
-      previousCursor: startPosition > 1 ? this.#encodeCursor('window', cursorBinding, { position: Math.max(1, startPosition - MAX_WINDOW_BLOCKS) }) : null,
-      nextCursor: rows.length > MAX_WINDOW_BLOCKS ? this.#encodeCursor('window', cursorBinding, { position: startPosition + MAX_WINDOW_BLOCKS }) : null,
+      previousCursor: startPosition > 1 ? this.#encodeCursor('window', cursorBinding, { position: Math.max(1, startPosition - WINDOW_STRIDE) }) : null,
+      nextCursor: rows.length > MAX_WINDOW_BLOCKS ? this.#encodeCursor('window', cursorBinding, { position: startPosition + WINDOW_STRIDE }) : null,
       position: {
         startBlock: asNumber(first.position),
         endBlock: asNumber(last.position),
@@ -582,6 +624,17 @@ export class BoundedManuscriptStore {
         character: asNumber(row.start_offset),
         proportion: binding.totalCharacters === 0 ? 0 : asNumber(row.start_offset) / binding.totalCharacters,
       })),
+      previousCursor: position === 0
+        ? null
+        : this.#encodeCursor('outline', binding, {
+            position: asNumber(this.#db.prepare(
+              `SELECT COALESCE((
+                 SELECT position FROM manuscript_outline
+                 WHERE branch_id = ? AND position <= ?
+                 ORDER BY position DESC LIMIT 1 OFFSET ?
+               ), 0) position`,
+            ).get(branchId, position, MAX_OUTLINE_RESULTS) as SqlRow).position,
+          }),
       nextCursor: rows.length > MAX_OUTLINE_RESULTS
         ? this.#encodeCursor('outline', binding, { position: asNumber(visible.at(-1)!.position) })
         : null,
@@ -590,7 +643,7 @@ export class BoundedManuscriptStore {
 
   flushJournalEdit(input: JournalEditInput): JournalAcknowledgement {
     validateIdentity(input.manuscriptId, input.branchId);
-    requireBounded(UUID_PATTERN.test(input.clientEditId) && UUID_PATTERN.test(input.baseRevisionId) && BLOCK_PATTERN.test(input.blockId) && DIGEST_PATTERN.test(input.baseBlockDigest), 'EDIT_INVALID', '编辑标识无效。');
+    requireBounded(UUID_PATTERN.test(input.clientEditId) && UUID_PATTERN.test(input.baseRevisionId) && BLOCK_PATTERN.test(input.blockId) && BLOCK_PATTERN.test(input.windowStartBlockId) && DIGEST_PATTERN.test(input.baseBlockDigest), 'EDIT_INVALID', '编辑标识无效。');
     requireBounded(input.insertText.isWellFormed() && input.insertText.length <= MAX_EDIT_CODE_UNITS, 'EDIT_TOO_LARGE', '单次编辑超出安全范围。');
     const inserted = graphemes(input.insertText);
     requireBounded(inserted.length <= MAX_EDIT_GRAPHEMES, 'EDIT_TOO_LARGE', '单次编辑超出安全范围。');
@@ -602,12 +655,17 @@ export class BoundedManuscriptStore {
     ).all(input.clientEditId) as SqlRow[];
     if (prior.length === 1) {
       requireBounded(asString(prior[0]!.request_fingerprint) === fingerprint, 'IDEMPOTENCY_CONFLICT', '编辑标识已用于另一项修改。');
-      return this.#journalAck(prior[0]!);
+      return this.#journalAck(prior[0]!, input);
     }
     transact(this.#db, () => {
       const binding = this.#binding(input.manuscriptId, input.branchId);
       requireBounded(binding.revisionId === input.baseRevisionId, 'EDIT_BINDING_CHANGED', '编辑绑定已变化。');
       requireBounded(binding.journalSequence === input.expectedJournalSequence, 'EDIT_SEQUENCE_CHANGED', '修订日志已前进，请刷新窗口。');
+      requireBounded(
+        this.#db.prepare('SELECT 1 FROM working_blocks WHERE branch_id = ? AND block_id = ?').get(input.branchId, input.windowStartBlockId) !== undefined,
+        'EDIT_BLOCK_CHANGED',
+        '编辑窗口已变化，请刷新窗口。',
+      );
       const block = one(this.#db.prepare(
         'SELECT position, kind, level, text, digest, grapheme_length FROM working_blocks WHERE branch_id = ? AND block_id = ?',
       ).all(input.branchId, input.blockId) as SqlRow[], 'EDIT_BLOCK_CHANGED', '稳定内容块不存在。');
@@ -666,13 +724,14 @@ export class BoundedManuscriptStore {
               resulting_block_digest, resulting_working_digest, durable_at
        FROM edit_journal_entries WHERE client_edit_id = ?`,
     ).all(input.clientEditId) as SqlRow[], 'JOURNAL_ACK_FAILED', '修订日志已提交但无法读取确认。');
-    return this.#journalAck(committed);
+    return this.#journalAck(committed, input);
   }
 
   createSearch(manuscriptId: string, branchId: string, queryInput: string): SearchSummaryProjection & { scannedPosition: number; totalBlocks: number } {
     const query = validateShortText(queryInput, 256, 'SEARCH_INVALID', '搜索文字必须为有效的短文本。');
     requireBounded(graphemes(query).length <= MAX_SEARCH_QUERY_GRAPHEMES, 'SEARCH_INVALID', '搜索文字过长。');
     const binding = this.#binding(manuscriptId, branchId);
+    this.#pruneTransientSearches();
     const totalBlocks = asNumber(one(this.#db.prepare('SELECT count(*) total FROM working_blocks WHERE branch_id = ?').all(branchId) as SqlRow[], 'SEARCH_INVALID', '稿件内容缺失。').total);
     const searchId = randomUUID();
     this.#db.prepare(
@@ -694,6 +753,7 @@ export class BoundedManuscriptStore {
     const binding = this.#binding(asString(session.manuscript_id), asString(session.branch_id));
     if (binding.workingDigest !== asString(session.working_digest)) {
       this.#db.prepare("UPDATE manuscript_search_sessions SET state = 'failed', completed_at = ? WHERE search_id = ?").run(new Date().toISOString(), searchId);
+      this.#pruneTransientSearches();
       throw new BoundedStoreError('SEARCH_STALE', '稿件已变化，请刷新搜索。');
     }
     const afterPosition = asNumber(session.scanned_position);
@@ -740,6 +800,7 @@ export class BoundedManuscriptStore {
           const matchId = `hit_${sha256(`${searchId}\u0000${blockId}\u0000${start}`).slice(0, 24)}`;
           insert.run(searchId, nextOrdinal, matchId, blockId, start, to, asNumber(row.start_offset) + start,
             heading ? asString(heading.text) : '正文', text.slice(contextStart, contextEnd).join(''), rangeDigest);
+          start = to - 1;
         }
       }
       const done = useTrigram ? rows.length < SEARCH_BATCH : rows.length < SEARCH_BATCH;
@@ -752,11 +813,13 @@ export class BoundedManuscriptStore {
       }
     });
     const updated = one(this.#db.prepare('SELECT * FROM manuscript_search_sessions WHERE search_id = ?').all(searchId) as SqlRow[], 'SEARCH_NOT_FOUND', '搜索不存在。');
+    if (asString(updated.state) === 'completed') this.#pruneTransientSearches();
     return { done: asString(updated.state) === 'completed', summary: this.#searchSummary(updated), scannedPosition: asNumber(updated.scanned_position), totalBlocks: asNumber(updated.total_blocks) };
   }
 
   cancelSearch(searchId: string): void {
     this.#db.prepare("UPDATE manuscript_search_sessions SET state = 'cancelled', completed_at = ? WHERE search_id = ? AND state = 'running'").run(new Date().toISOString(), searchId);
+    this.#pruneTransientSearches();
   }
 
   getSearchResults(searchId: string, cursor: string | null): SearchResultsProjection {
@@ -801,6 +864,7 @@ export class BoundedManuscriptStore {
          ) SELECT ?, ordinal, match_id, block_id, from_grapheme, to_grapheme, range_digest, 1
            FROM manuscript_search_results WHERE search_id = ? ORDER BY ordinal`,
       ).run(previewId, searchId);
+      this.#requireNonOverlappingReplacement(previewId);
     });
     return this.#replacementProjection(previewId);
   }
@@ -814,6 +878,7 @@ export class BoundedManuscriptStore {
       for (const id of excludedMatchIds) requireBounded(exclude.run(previewId, id).changes === 1, 'REPLACEMENT_INVALID', '替换排除项不属于当前预览。');
       const included = asNumber(one(this.#db.prepare('SELECT count(*) total FROM manuscript_replacement_matches WHERE preview_id = ? AND included = 1').all(previewId) as SqlRow[], 'REPLACEMENT_NOT_FOUND', '替换匹配缺失。').total);
       requireBounded(included > 0, 'REPLACEMENT_INVALID', '至少保留一项替换。');
+      this.#requireNonOverlappingReplacement(previewId);
       this.#db.prepare("UPDATE manuscript_replacement_previews SET state = 'frozen', included_matches = ? WHERE preview_id = ? AND state = 'reviewing'").run(included, previewId);
     });
     return this.#replacementProjection(previewId);
@@ -824,6 +889,7 @@ export class BoundedManuscriptStore {
     requireBounded(asString(preview.state) === 'frozen', 'REPLACEMENT_STATE_CHANGED', '替换预览状态已变化。');
     const binding = this.#binding(asString(preview.manuscript_id), asString(preview.branch_id));
     requireBounded(binding.workingDigest === asString(preview.working_digest), 'REPLACEMENT_STALE', '稿件已变化，替换未提交，请刷新预览。');
+    this.#requireNonOverlappingReplacement(previewId);
     const after = asNumber(preview.validated_ordinal);
     const rows = this.#db.prepare(
       `SELECT rm.ordinal, rm.block_id, rm.from_grapheme, rm.to_grapheme, rm.range_digest,
@@ -857,6 +923,7 @@ export class BoundedManuscriptStore {
       requireBounded(unvalidated === 0, 'REPLACEMENT_NOT_READY', '替换尚未完成全部精确范围复核。');
       const binding = this.#binding(asString(preview.manuscript_id), asString(preview.branch_id));
       requireBounded(binding.workingDigest === asString(preview.working_digest), 'REPLACEMENT_STALE', '稿件已变化，替换未提交，请刷新预览。');
+      this.#requireNonOverlappingReplacement(previewId);
       const groupId = randomUUID();
       const ordinal = binding.historySequence + 1;
       const now = new Date().toISOString();
@@ -978,14 +1045,37 @@ export class BoundedManuscriptStore {
         binding = this.#binding(manuscriptId, branchId);
       }
       const milestoneId = randomUUID();
+      const signoffRecordId = randomUUID();
+      const workflow = one(this.#db.prepare(
+        `SELECT workflow_instance_id, profile_id, profile_version, current_phase, state
+         FROM workflow_instances WHERE manuscript_id = ?`,
+      ).all(manuscriptId) as SqlRow[], 'MILESTONE_INVALID', '稿件工作流程证据缺失。');
+      const workflowEvidenceDigest = sha256(canonicalJson({
+        workflowInstanceId: asString(workflow.workflow_instance_id),
+        profileId: asString(workflow.profile_id),
+        profileVersion: asString(workflow.profile_version),
+        phase: asString(workflow.current_phase),
+        state: asString(workflow.state),
+        revisionId,
+        revisionDigest: binding.workingDigest,
+        journalSequence: binding.journalSequence,
+      }));
       this.#db.prepare(
         `INSERT INTO milestone_versions(
            milestone_id, manuscript_id, branch_id, revision_id, label, purpose, note, actor, created_at
          ) VALUES (?, ?, ?, ?, ?, ?, ?, '本机编辑', ?)`,
       ).run(milestoneId, manuscriptId, branchId, revisionId, label, purpose, note, now);
+      this.#db.prepare(
+        `INSERT INTO milestone_signoff_records(
+           signoff_record_id, milestone_id, manuscript_id, branch_id, revision_id,
+           workflow_instance_id, workflow_evidence_digest, actor, signed_at, label, stated_next_use
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, '本机编辑', ?, ?, ?)`,
+      ).run(signoffRecordId, milestoneId, manuscriptId, branchId, revisionId,
+        asString(workflow.workflow_instance_id), workflowEvidenceDigest, now, label, purpose);
       return {
         milestoneId, manuscriptId, branchId, revisionId, revisionLabel, label, purpose, note, createdAt: now,
         journalSequence: binding.journalSequence, workingDigest: binding.workingDigest,
+        signoffRecordId, workflowEvidenceDigest, actor: '本机编辑', signedAt: now, statedNextUse: purpose,
         completionLabel: `已保存里程碑版本「${label}」 · ${revisionLabel}`,
       };
     });
@@ -1112,29 +1202,79 @@ export class BoundedManuscriptStore {
     const row = one(this.#db.prepare('SELECT * FROM manuscript_replacement_previews WHERE preview_id = ?').all(previewId) as SqlRow[], 'REPLACEMENT_NOT_FOUND', '替换预览不存在。');
     const contexts = this.#db.prepare(
       `SELECT sr.match_id, sr.block_id, sr.from_grapheme, sr.to_grapheme, sr.global_character,
-              sr.heading_label, sr.context, sr.range_digest
-       FROM manuscript_search_results sr WHERE sr.search_id = ? ORDER BY sr.ordinal LIMIT 6`,
-    ).all(asString(row.search_id)) as SqlRow[];
+               sr.heading_label, sr.context, sr.range_digest
+       FROM manuscript_replacement_matches rm
+       JOIN manuscript_search_results sr ON sr.search_id = ? AND sr.match_id = rm.match_id
+       WHERE rm.preview_id = ? AND rm.included = 1 ORDER BY rm.ordinal LIMIT 6`,
+    ).all(asString(row.search_id), previewId) as SqlRow[];
+    const revision = one(this.#db.prepare('SELECT revision_label FROM manuscript_revisions WHERE revision_id = ?').all(asString(row.revision_id)) as SqlRow[], 'REPLACEMENT_NOT_FOUND', '替换绑定的修订版不存在。');
     const state = asString(row.state);
     requireBounded(state === 'reviewing' || state === 'frozen', 'REPLACEMENT_STATE_CHANGED', '替换预览状态已变化。');
     return {
       previewId, searchId: asString(row.search_id), manuscriptId: asString(row.manuscript_id), branchId: asString(row.branch_id),
       revisionId: asString(row.revision_id), workingDigest: asString(row.working_digest), query: asString(row.query),
-      replacement: asString(row.replacement), scopeLabel: '全稿', totalMatches: asNumber(row.total_matches),
-      includedMatches: asNumber(row.included_matches), state, representativeContexts: contexts.map((context) => this.#searchMatch(context)),
+      replacement: asString(row.replacement), scopeLabel: '全稿', matchingRule: REPLACEMENT_MATCHING_RULE,
+      inclusionRule: REPLACEMENT_INCLUSION_RULE, revisionLabel: asString(revision.revision_label),
+      totalMatches: asNumber(row.total_matches), includedMatches: asNumber(row.included_matches),
+      excludedMatches: asNumber(row.total_matches) - asNumber(row.included_matches), state,
+      representativeContexts: contexts.map((context) => this.#searchMatch(context)),
     };
+  }
+
+  #requireNonOverlappingReplacement(previewId: string): void {
+    const overlap = this.#db.prepare(
+      `SELECT 1 overlap_found
+       FROM manuscript_replacement_matches earlier
+       JOIN manuscript_replacement_matches later
+         ON later.preview_id = earlier.preview_id
+        AND later.block_id = earlier.block_id
+        AND later.ordinal > earlier.ordinal
+        AND later.from_grapheme < earlier.to_grapheme
+        AND earlier.from_grapheme < later.to_grapheme
+       WHERE earlier.preview_id = ? AND earlier.included = 1 AND later.included = 1
+       LIMIT 1`,
+    ).get(previewId);
+    requireBounded(overlap === undefined, 'REPLACEMENT_INVALID', '冻结匹配包含重叠范围，请刷新预览。');
+  }
+
+  #pruneTransientSearches(): void {
+    this.#db.prepare(
+      `DELETE FROM manuscript_search_sessions
+       WHERE state IN ('completed', 'cancelled', 'failed')
+         AND NOT EXISTS (
+           SELECT 1 FROM manuscript_replacement_previews rp
+           WHERE rp.search_id = manuscript_search_sessions.search_id
+         )
+         AND search_id NOT IN (
+           SELECT search_id FROM manuscript_search_sessions retained
+           WHERE retained.state IN ('completed', 'cancelled', 'failed')
+             AND NOT EXISTS (
+               SELECT 1 FROM manuscript_replacement_previews rp
+               WHERE rp.search_id = retained.search_id
+             )
+           ORDER BY COALESCE(completed_at, created_at) DESC, search_id DESC
+           LIMIT ?
+         )`,
+    ).run(MAX_RETAINED_TRANSIENT_SEARCHES);
   }
 
   #hasHistory(branchId: string, state: 'applied' | 'undone'): boolean {
     return this.#db.prepare('SELECT 1 ok FROM manuscript_command_groups WHERE branch_id = ? AND status = ? LIMIT 1').get(branchId, state) !== undefined;
   }
 
-  #journalAck(row: SqlRow): JournalAcknowledgement {
-    return {
+  #journalAck(row: SqlRow, input: JournalEditInput): JournalAcknowledgement {
+    const acknowledgement = {
       clientEditId: asString(row.client_edit_id), branchId: asString(row.branch_id), baseRevisionId: asString(row.base_revision_id),
       blockId: asString(row.block_id), sequence: asNumber(row.sequence), resultingBlockDigest: asString(row.resulting_block_digest),
       resultingWorkingDigest: asString(row.resulting_working_digest), durableAt: asString(row.durable_at), completionLabel: '已写入修订日志',
-    };
+    } satisfies Omit<JournalAcknowledgement, 'window'>;
+    const window = this.getWindow(input.manuscriptId, input.branchId, { kind: 'window-start', blockId: input.windowStartBlockId });
+    requireBounded(
+      window.journalSequence === acknowledgement.sequence && window.workingDigest === acknowledgement.resultingWorkingDigest,
+      'JOURNAL_ACK_FAILED',
+      '修订日志已提交但窗口确认已变化。',
+    );
+    return { ...acknowledgement, window };
   }
 
   #encodeCursor(kind: string, binding: BranchBinding, value: { position: number }): string {

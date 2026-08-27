@@ -3,6 +3,7 @@ import type { ServiceJobProjection } from '../shared/protocol.js';
 import { StoreError, type EditorialStore } from './store.js';
 
 const MAX_ACTIVE_JOBS = 4;
+const MAX_RETAINED_JOBS = 32;
 
 interface JobRecord {
   projection: ServiceJobProjection;
@@ -65,7 +66,11 @@ export class CooperativeJobOwner {
 
   poll(jobId: string): ServiceJobProjection {
     const job = this.#requireJob(jobId);
-    return structuredClone(job.projection);
+    const projection = structuredClone(job.projection);
+    if (projection.state === 'completed' || projection.state === 'cancelled' || projection.state === 'failed') {
+      this.#jobs.delete(jobId);
+    }
+    return projection;
   }
 
   cancel(jobId: string): ServiceJobProjection {
@@ -93,6 +98,7 @@ export class CooperativeJobOwner {
         job.projection = { ...job.projection, state: 'cancelled' };
       }
     }
+    this.#jobs.clear();
   }
 
   #schedule(job: JobRecord): void {
@@ -143,6 +149,8 @@ export class CooperativeJobOwner {
         result: null,
       };
     } catch (error) {
+      if (job.projection.kind === 'search') this.#store.cancelSearch(job.subjectId);
+      else this.#store.cancelReplacement(job.subjectId);
       const failure = error instanceof StoreError
         ? { code: error.code, message: error.message }
         : { code: 'SERVICE_JOB_FAILED', message: '本地协作处理未完成。' };
@@ -157,6 +165,9 @@ export class CooperativeJobOwner {
 
   #requireCapacity(): void {
     if (this.#disposed) throw new StoreError('SERVICE_STOPPING', '本地业务服务正在停止。');
+    if (this.#jobs.size >= MAX_RETAINED_JOBS) {
+      throw new StoreError('SERVICE_BUSY', '本地处理记录已达到安全上限；请先读取已完成操作。');
+    }
     const active = Array.from(this.#jobs.values()).filter((job) => job.projection.state === 'queued' || job.projection.state === 'running').length;
     if (active >= MAX_ACTIVE_JOBS) throw new StoreError('SERVICE_BUSY', '当前已有多项本地处理，请稍后再试。');
   }

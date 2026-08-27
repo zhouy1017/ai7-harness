@@ -18,6 +18,9 @@ const MAX_METADATA_XML_BYTES = 1024 * 1024;
 const MAX_BLOCK_COUNT = 100_000;
 const MAX_TEXT_CODE_UNITS = 10_000_000;
 const MAX_ZIP_RATIO = 2_000;
+const MAX_XML_FEED_BYTES = MAX_BLOCK_CODE_UNITS;
+const MAX_XML_TEXT_TOKEN_CODE_UNITS = MAX_BLOCK_CODE_UNITS;
+const MAX_XML_MARKUP_TOKEN_CODE_UNITS = MAX_BLOCK_CODE_UNITS * 8;
 const PARSER_IDENTITY = 'ai7-docx-fflate-saxes/1';
 const SAMPLE1_SOURCE_BYTES = 29_550;
 const SAMPLE1_SOURCE_SHA256 = 'b8a3dbde0aa8a1ec7265f9ae3fe47877759e7947c5ab69682cd0a8f424a8d483';
@@ -191,6 +194,47 @@ function createDocumentParser(
   let terminalSectionSeen = false;
   let terminalSection: { depth: number; kind: 'default' | 'sample1'; children: string[] } | undefined;
   let paragraph: { text: string; style: string | undefined } | undefined;
+  let xmlTokenCodeUnits = 0;
+  let inXmlMarkup = false;
+  let xmlMarkupQuote: '"' | "'" | undefined;
+
+  const guardXmlTokenBounds = (text: string): void => {
+    for (const character of text) {
+      if (!inXmlMarkup && character === '<') {
+        inXmlMarkup = true;
+        xmlMarkupQuote = undefined;
+        xmlTokenCodeUnits = 1;
+      } else if (inXmlMarkup) {
+        xmlTokenCodeUnits += character.length;
+        requireDocx(xmlTokenCodeUnits <= MAX_XML_MARKUP_TOKEN_CODE_UNITS, 'document XML markup token exceeds its bound');
+        if (xmlMarkupQuote) {
+          if (character === xmlMarkupQuote) xmlMarkupQuote = undefined;
+        } else if (character === '"' || character === "'") {
+          xmlMarkupQuote = character;
+        } else if (character === '>') {
+          inXmlMarkup = false;
+          xmlTokenCodeUnits = 0;
+        }
+      } else {
+        xmlTokenCodeUnits += character.length;
+        requireDocx(xmlTokenCodeUnits <= MAX_XML_TEXT_TOKEN_CODE_UNITS, 'document XML text token exceeds its block bound');
+      }
+    }
+  };
+
+  const appendParagraphText = (addition: string): void => {
+    if (!paragraph || addition.length === 0) return;
+    requireDocx(addition.length <= MAX_BLOCK_CODE_UNITS, 'paragraph text chunk exceeds the bounded block size');
+    requireDocx(
+      paragraph.text.length <= MAX_BLOCK_CODE_UNITS - addition.length,
+      'paragraph exceeds the bounded block size',
+    );
+    requireDocx(textCodeUnits <= MAX_TEXT_CODE_UNITS - addition.length, 'document text is too large');
+    const nextText = paragraph.text + addition;
+    requireDocx(graphemeCount(nextText) <= MAX_BLOCK_GRAPHEMES, 'paragraph exceeds the bounded block size');
+    paragraph.text = nextText;
+    textCodeUnits += addition.length;
+  };
 
   const parser = new SaxesParser({ xmlns: true });
   parser.on('doctype', () => requireDocx(false, 'DOCTYPE in document XML'));
@@ -223,11 +267,11 @@ function createDocumentParser(
         runProperties = { depth: ancestors.length, styled: false };
         break;
       case 'tab':
-        if (paragraph) paragraph.text += '\t';
+        appendParagraphText('\t');
         break;
       case 'br':
       case 'cr':
-        if (paragraph) paragraph.text += '\n';
+        appendParagraphText('\n');
         break;
       case 'b':
       case 'i':
@@ -272,11 +316,7 @@ function createDocumentParser(
     ancestors.push(tag.local);
   });
   parser.on('text', (text) => {
-    if (paragraph && textDepth > 0) {
-      textCodeUnits += text.length;
-      requireDocx(textCodeUnits <= MAX_TEXT_CODE_UNITS, 'document text is too large');
-      paragraph.text += text;
-    }
+    if (paragraph && textDepth > 0) appendParagraphText(text);
   });
   parser.on('closetag', (tag) => {
     requireDocx(ancestors.pop() === tag.local, 'document element stack mismatch');
@@ -332,9 +372,20 @@ function createDocumentParser(
   return {
     write(chunk, final) {
       requireDocx(!closed, 'document XML stream repeated');
-      const text = decoder.decode(chunk, { stream: !final });
-      if (text.length > 0) parser.write(text);
+      for (let offset = 0; offset < chunk.byteLength; offset += MAX_XML_FEED_BYTES) {
+        const part = chunk.subarray(offset, Math.min(offset + MAX_XML_FEED_BYTES, chunk.byteLength));
+        const text = decoder.decode(part, { stream: true });
+        if (text.length > 0) {
+          guardXmlTokenBounds(text);
+          parser.write(text);
+        }
+      }
       if (final) {
+        const tail = decoder.decode();
+        if (tail.length > 0) {
+          guardXmlTokenBounds(tail);
+          parser.write(tail);
+        }
         parser.close();
         closed = true;
       }

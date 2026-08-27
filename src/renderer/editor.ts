@@ -9,6 +9,7 @@ import {
   MAX_EDIT_CODE_UNITS,
   MAX_EDIT_GRAPHEMES,
   MAX_WINDOW_BLOCKS,
+  type JournalAcknowledgement,
   type JournalEditInput,
   type ManuscriptBlockProjection,
   type ManuscriptWindowProjection,
@@ -28,7 +29,8 @@ interface EditorUiState {
 export interface BoundedEditor {
   focus(): void;
   flush(): Promise<void>;
-  loadWindow(windowProjection: ManuscriptWindowProjection): boolean;
+  captureContinuity(): EditorContinuity;
+  loadWindow(windowProjection: ManuscriptWindowProjection, continuity?: EditorContinuity): boolean;
   selectRange(blockId: string, fromGrapheme: number, toGrapheme: number): boolean;
   currentWindow(): ManuscriptWindowProjection;
   isComposing(): boolean;
@@ -36,8 +38,22 @@ export interface BoundedEditor {
   destroy(): void;
 }
 
+export interface EditorPoint {
+  blockId: string;
+  grapheme: number;
+}
+
+export interface EditorContinuity {
+  anchor: EditorPoint;
+  head: EditorPoint;
+  direction: 'forward' | 'backward';
+  scrollAnchor: { blockId: string; offset: number };
+  focused: boolean;
+}
+
 interface MountOptions {
   host: HTMLElement;
+  scrollContainer: HTMLElement;
   platform: RendererApi['platform'];
   initialWindow: ManuscriptWindowProjection;
   flushJournalEdit: RendererApi['flushJournalEdit'];
@@ -127,14 +143,25 @@ function deriveEdit(baseText: string, nextText: string): Pick<JournalEditInput, 
   ) {
     suffix += 1;
   }
-  const insertText = next.slice(prefix, next.length - suffix).join('');
-  requireEditor(
-    base.length - suffix - prefix <= MAX_EDIT_GRAPHEMES &&
-      graphemes(insertText).length <= MAX_EDIT_GRAPHEMES &&
-      insertText.length <= MAX_EDIT_CODE_UNITS,
-    '本次修改超出单次保存范围，请缩小修改。',
-  );
-  return { fromGrapheme: prefix, toGrapheme: base.length - suffix, insertText };
+  const changedBase = base.length - suffix - prefix;
+  const changedNext = next.slice(prefix, next.length - suffix);
+  let insertCodeUnits = 0;
+  let insertCount = 0;
+  while (
+    insertCount < changedNext.length &&
+    insertCount < MAX_EDIT_GRAPHEMES &&
+    insertCodeUnits + changedNext[insertCount]!.length <= MAX_EDIT_CODE_UNITS
+  ) {
+    insertCodeUnits += changedNext[insertCount]!.length;
+    insertCount += 1;
+  }
+  const removed = Math.min(changedBase, MAX_EDIT_GRAPHEMES);
+  requireEditor(removed > 0 || insertCount > 0, '本次修改无法形成安全的增量写入。');
+  return {
+    fromGrapheme: prefix,
+    toGrapheme: prefix + removed,
+    insertText: changedNext.slice(0, insertCount).join(''),
+  };
 }
 
 function baselineMap(windowProjection: ManuscriptWindowProjection): Map<string, BaselineBlock> {
@@ -198,13 +225,46 @@ function findBlockPosition(document: ProseMirrorNode, blockId: string): { node: 
   return found;
 }
 
+function pointAtPosition(document: ProseMirrorNode, position: number): EditorPoint {
+  let fallback: EditorPoint | undefined;
+  let found: EditorPoint | undefined;
+  document.forEach((node, offset) => {
+    const blockId = String(node.attrs['blockId']);
+    const segments = graphemes(node.textContent);
+    const contentStart = offset + 1;
+    const contentEnd = contentStart + node.textContent.length;
+    fallback = { blockId, grapheme: segments.length };
+    if (found || position < contentStart || position > contentEnd) return;
+    const codeUnits = Math.max(0, Math.min(node.textContent.length, position - contentStart));
+    let consumed = 0;
+    let grapheme = 0;
+    while (grapheme < segments.length && consumed + segments[grapheme]!.length <= codeUnits) {
+      consumed += segments[grapheme]!.length;
+      grapheme += 1;
+    }
+    found = { blockId, grapheme };
+  });
+  requireEditor(found ?? fallback, '稿件选择位置无法解析。');
+  return found ?? fallback!;
+}
+
+function positionAtPoint(document: ProseMirrorNode, point: EditorPoint): number | undefined {
+  const found = findBlockPosition(document, point.blockId);
+  if (!found) return undefined;
+  const parts = graphemes(found.node.textContent);
+  if (!Number.isSafeInteger(point.grapheme) || point.grapheme < 0 || point.grapheme > parts.length) return undefined;
+  return found.position + 1 + parts.slice(0, point.grapheme).join('').length;
+}
+
 export function mountBoundedEditor(options: MountOptions): BoundedEditor {
   let windowProjection = options.initialWindow;
   let baselines = baselineMap(windowProjection);
-  let dirtyBlockId: string | undefined;
   let saving = false;
   let retryRequired = false;
-  let prepared: { input: JournalEditInput; submittedText: string } | undefined;
+  let retryPrepared: { input: JournalEditInput } | undefined;
+  let flushPromise: Promise<void> | undefined;
+  let autoFlushTimer: number | undefined;
+  let compositionWaiters: Array<() => void> = [];
   let destroyed = false;
   let interrupted = false;
   let composing = false;
@@ -239,37 +299,89 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
         graphemes(node.textContent).length > MAX_BLOCK_GRAPHEMES
       ) {
         valid = false;
+      } else if (node.textContent !== baseline.text) {
+        try {
+          deriveEdit(baseline.text, node.textContent);
+        } catch {
+          valid = false;
+        }
       }
     });
     if (!valid) return false;
-    const changed = changedBlocks(candidate);
-    if (changed.length > 1 || (dirtyBlockId !== undefined && changed.some((id) => id !== dirtyBlockId))) return false;
-    if (changed.length === 1) {
-      const block = baselines.get(changed[0]!);
-      const current = findBlock(candidate, changed[0]!);
-      if (!block || !current) return false;
-      try {
-        deriveEdit(block.text, current.textContent);
-      } catch {
-        return false;
-      }
-    }
-    return !saving && !retryRequired && !interrupted;
+    return !retryRequired && !interrupted;
   };
 
   const transactionFilter = new Plugin({ filterTransaction: candidateIsBounded });
-  const makeState = (): EditorState =>
+  const makeState = (blocks: ReadonlyArray<ManuscriptBlockProjection> = windowProjection.blocks): EditorState =>
     EditorState.create({
       schema: ai7Schema,
-      doc: createDocument(windowProjection.blocks),
+      doc: createDocument(blocks),
       plugins: [transactionFilter, keymap(baseKeymap)],
     });
 
   let view: EditorView;
 
+  const captureContinuity = (): EditorContinuity => {
+    const selection = view.state.selection;
+    const containerRect = options.scrollContainer.getBoundingClientRect();
+    const rendered = Array.from(view.dom.querySelectorAll<HTMLElement>('[data-block-id]'));
+    const visible = rendered.find((candidate) => candidate.getBoundingClientRect().bottom >= containerRect.top) ?? rendered[0];
+    requireEditor(visible, '稿件滚动锚点无法解析。');
+    const anchor = pointAtPosition(view.state.doc, selection.anchor);
+    const head = pointAtPosition(view.state.doc, selection.head);
+    return {
+      anchor,
+      head,
+      direction: selection.anchor <= selection.head ? 'forward' : 'backward',
+      scrollAnchor: {
+        blockId: visible.dataset['blockId']!,
+        offset: visible.getBoundingClientRect().top - containerRect.top,
+      },
+      focused: view.hasFocus(),
+    };
+  };
+
+  const restoreContinuity = (
+    state: EditorState,
+    continuity: EditorContinuity | undefined,
+    focusBlockId: string | null,
+  ): void => {
+    let nextState = state;
+    let selectionRestored = false;
+    if (continuity) {
+      const anchor = positionAtPoint(state.doc, continuity.anchor);
+      const head = positionAtPoint(state.doc, continuity.head);
+      if (anchor !== undefined && head !== undefined) {
+        nextState = state.apply(state.tr.setSelection(TextSelection.create(state.doc, anchor, head)));
+        selectionRestored = true;
+      }
+    }
+    if (!selectionRestored && focusBlockId) {
+      const target = findBlockPosition(state.doc, focusBlockId);
+      if (target) nextState = state.apply(state.tr.setSelection(TextSelection.near(state.doc.resolve(target.position + 1))));
+    }
+    view.updateState(nextState);
+    requestAnimationFrame(() => {
+      const scrollId = continuity?.scrollAnchor.blockId ?? focusBlockId;
+      const target = scrollId ? view.dom.querySelector<HTMLElement>(`[data-block-id="${scrollId}"]`) : undefined;
+      if (target && continuity) {
+        const containerTop = options.scrollContainer.getBoundingClientRect().top;
+        options.scrollContainer.scrollTop += target.getBoundingClientRect().top - containerTop - continuity.scrollAnchor.offset;
+      } else if (target) {
+        target.scrollIntoView({ block: 'center' });
+      }
+      if (continuity?.focused || (!continuity && focusBlockId)) view.focus();
+    });
+  };
+
+  const waitForComposition = async (): Promise<void> => {
+    if (!composing && !view.composing) return;
+    await new Promise<void>((resolve) => compositionWaiters.push(resolve));
+  };
+
   const announceState = (): void =>
     options.onStateChange({
-      dirty: dirtyBlockId !== undefined,
+      dirty: changedBlocks(view.state.doc).length > 0,
       interrupted,
       retryRequired,
       saving,
@@ -278,91 +390,123 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
       composing,
     });
 
-  const flush = async (): Promise<void> => {
-    if (destroyed || interrupted || saving || dirtyBlockId === undefined) return;
-    const baseline = baselines.get(dirtyBlockId);
-    const current = findBlock(view.state.doc, dirtyBlockId);
-    requireEditor(baseline && current, '待保存内容块不存在。');
-    if (!prepared || prepared.submittedText !== current.textContent) {
-      requireEditor(!retryRequired, '请先重试上一项保存。');
-      prepared = {
-        input: {
-          clientEditId: crypto.randomUUID(),
-          manuscriptId: windowProjection.manuscriptId,
-          branchId: windowProjection.branchId,
-          baseRevisionId: windowProjection.revisionId,
-          blockId: baseline.blockId,
-          baseBlockDigest: baseline.digest,
-          expectedJournalSequence: windowProjection.journalSequence,
-          ...deriveEdit(baseline.text, current.textContent),
-        },
-        submittedText: current.textContent,
-      };
+  const flush = (): Promise<void> => {
+    if (destroyed || interrupted) return Promise.resolve();
+    if (autoFlushTimer !== undefined) {
+      window.clearTimeout(autoFlushTimer);
+      autoFlushTimer = undefined;
     }
-    saving = true;
-    view.setProps({ editable: () => false });
-    announceState();
-    options.onAnnouncement('正在写入修订日志…', 'busy');
-    try {
-      const ack = await options.flushJournalEdit(prepared.input);
-      requireEditor(
-        ack.clientEditId === prepared.input.clientEditId &&
-          ack.branchId === windowProjection.branchId &&
-          ack.baseRevisionId === windowProjection.revisionId &&
-          ack.blockId === baseline.blockId &&
-          ack.sequence === windowProjection.journalSequence + 1,
-        '修订日志确认与当前编辑不匹配。',
-      );
-      const updatedBlocks = windowProjection.blocks.map((block) =>
-        block.blockId === baseline.blockId
-          ? { ...block, text: prepared!.submittedText, digest: ack.resultingBlockDigest }
-          : block,
-      );
-      windowProjection = {
-        ...windowProjection,
-        journalSequence: ack.sequence,
-        workingDigest: ack.resultingWorkingDigest,
-        blocks: updatedBlocks,
-      };
-      baselines = baselineMap(windowProjection);
-      dirtyBlockId = undefined;
-      prepared = undefined;
-      retryRequired = false;
+    if (flushPromise) return flushPromise;
+    flushPromise = (async () => {
+      let lastCompletion: JournalAcknowledgement['completionLabel'] | undefined;
+      while (!destroyed && !interrupted) {
+        if (composing || view.composing) break;
+        const changed = changedBlocks(view.state.doc);
+        if (changed.length === 0) break;
+        const blockId = retryPrepared?.input.blockId ?? changed[0]!;
+        const baseline = baselines.get(blockId);
+        const current = findBlock(view.state.doc, blockId);
+        requireEditor(baseline && current, '待保存内容块不存在。');
+        const prepared = retryPrepared ?? (() => {
+          const edit = deriveEdit(baseline.text, current.textContent);
+          return {
+            input: {
+              clientEditId: crypto.randomUUID(),
+              manuscriptId: windowProjection.manuscriptId,
+              branchId: windowProjection.branchId,
+              baseRevisionId: windowProjection.revisionId,
+              blockId: baseline.blockId,
+              windowStartBlockId: windowProjection.blocks[0]!.blockId,
+              baseBlockDigest: baseline.digest,
+              expectedJournalSequence: windowProjection.journalSequence,
+              ...edit,
+            },
+          };
+        })();
+        saving = true;
+        announceState();
+        options.onAnnouncement('正在自动写入修订日志；可继续编辑当前窗口。', 'busy');
+        try {
+          const ack = await options.flushJournalEdit(prepared.input);
+          requireEditor(
+            ack.clientEditId === prepared.input.clientEditId &&
+              ack.branchId === windowProjection.branchId &&
+              ack.baseRevisionId === windowProjection.revisionId &&
+              ack.blockId === baseline.blockId &&
+              ack.sequence === windowProjection.journalSequence + 1 &&
+              ack.resultingBlockDigest === ack.window.blocks.find((block) => block.blockId === baseline.blockId)?.digest &&
+              ack.resultingWorkingDigest === ack.window.workingDigest &&
+              ack.window.journalSequence === ack.sequence &&
+              ack.window.blocks[0]?.blockId === prepared.input.windowStartBlockId,
+            '修订日志确认与当前编辑不匹配。',
+          );
+          await waitForComposition();
+          const continuity = captureContinuity();
+          const localText = new Map<string, string>();
+          view.state.doc.forEach((node) => localText.set(String(node.attrs['blockId']), node.textContent));
+          windowProjection = ack.window;
+          baselines = baselineMap(windowProjection);
+          const visibleBlocks = windowProjection.blocks.map((block) => ({ ...block, text: localText.get(block.blockId) ?? block.text }));
+          restoreContinuity(makeState(visibleBlocks), continuity, null);
+          retryPrepared = undefined;
+          retryRequired = false;
+          view.setProps({ editable: () => !retryRequired && !interrupted });
+          lastCompletion = ack.completionLabel;
+          announceState();
+        } catch (error) {
+          retryPrepared = prepared;
+          retryRequired = true;
+          view.setProps({ editable: () => false });
+          options.onAnnouncement(
+            interrupted
+              ? '本地业务服务已中断；未保存文字仍保留在编辑区，但尚未获得持久写入确认。'
+              : error instanceof Error
+                ? `本地写入中断；未确认修改仍保留。${error.message}`
+                : '本地写入中断；未确认修改仍保留，请重试。',
+            'error',
+          );
+          break;
+        }
+      }
       saving = false;
-      const previousAnchor = view.state.selection.anchor;
-      const acknowledgedState = makeState();
-      const anchor = Math.min(previousAnchor, acknowledgedState.doc.content.size);
-      view.updateState(acknowledgedState.apply(acknowledgedState.tr.setSelection(TextSelection.near(acknowledgedState.doc.resolve(anchor)))));
-      view.setProps({ editable: () => true });
       announceState();
-      options.onAnnouncement(ack.completionLabel, 'success');
-    } catch (error) {
+      if (lastCompletion && !retryRequired && changedBlocks(view.state.doc).length === 0) {
+        options.onAnnouncement(lastCompletion, 'success');
+      }
+    })().catch((error: unknown) => {
       saving = false;
       retryRequired = true;
       view.setProps({ editable: () => false });
       announceState();
       options.onAnnouncement(
-        interrupted
-          ? '本地业务服务已中断；未保存文字仍保留在编辑区，但尚未获得持久写入确认。'
-          : error instanceof Error
-            ? error.message
-            : '修订日志写入失败，请重试。',
+        error instanceof Error
+          ? `本地写入中断；未确认修改仍保留。${error.message}`
+          : '本地写入中断；未确认修改仍保留，请重试。',
         'error',
       );
-    }
+    }).finally(() => {
+      flushPromise = undefined;
+    });
+    return flushPromise;
+  };
+
+  const scheduleAutomaticFlush = (): void => {
+    if (autoFlushTimer !== undefined) window.clearTimeout(autoFlushTimer);
+    autoFlushTimer = window.setTimeout(() => {
+      autoFlushTimer = undefined;
+      void flush();
+    }, 500);
   };
 
   view = new EditorView(options.host, {
     state: makeState(),
-    editable: () => !saving && !retryRequired && !interrupted,
+    editable: () => !retryRequired && !interrupted,
     dispatchTransaction(transaction) {
       const nextState = view.state.apply(transaction);
       if (nextState === view.state) return;
       view.updateState(nextState);
-      const changed = changedBlocks(nextState.doc);
-      dirtyBlockId = changed[0];
-      prepared = undefined;
       announceState();
+      if (transaction.docChanged) scheduleAutomaticFlush();
     },
     handleDOMEvents: {
       keydown(currentView, event) {
@@ -411,6 +555,10 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
       },
       compositionend() {
         composing = false;
+        const waiting = compositionWaiters;
+        compositionWaiters = [];
+        for (const resolve of waiting) resolve();
+        scheduleAutomaticFlush();
         queueMicrotask(announceState);
         return false;
       },
@@ -425,25 +573,18 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
   return {
     focus: () => view.focus(),
     flush,
-    loadWindow: (nextWindow) => {
-      if (destroyed || interrupted || saving || retryRequired || dirtyBlockId !== undefined || composing) return false;
+    captureContinuity,
+    loadWindow: (nextWindow, continuity) => {
+      if (destroyed || interrupted || saving || retryRequired || changedBlocks(view.state.doc).length > 0 || composing) return false;
       windowProjection = nextWindow;
       baselines = baselineMap(nextWindow);
-      prepared = undefined;
-      view.updateState(makeState());
-      const focusId = nextWindow.focusBlockId;
-      if (focusId) {
-        requestAnimationFrame(() => {
-          const target = view.dom.querySelector<HTMLElement>(`[data-block-id="${focusId}"]`);
-          target?.scrollIntoView({ block: 'center' });
-          view.focus();
-        });
-      }
+      retryPrepared = undefined;
+      restoreContinuity(makeState(), continuity, nextWindow.focusBlockId);
       announceState();
       return true;
     },
     selectRange: (blockId, fromGrapheme, toGrapheme) => {
-      if (destroyed || interrupted || saving || retryRequired || dirtyBlockId !== undefined || composing) return false;
+      if (destroyed || interrupted || saving || retryRequired || changedBlocks(view.state.doc).length > 0 || composing) return false;
       const found = findBlockPosition(view.state.doc, blockId);
       if (!found) return false;
       const text = graphemes(found.node.textContent);
@@ -465,12 +606,19 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
     interrupt: () => {
       interrupted = true;
       saving = false;
+      const waiting = compositionWaiters;
+      compositionWaiters = [];
+      for (const resolve of waiting) resolve();
       view.setProps({ editable: () => false });
       announceState();
       options.onAnnouncement('本地业务服务已中断；未保存文字仍保留在编辑区，但尚未获得持久写入确认。', 'error');
     },
     destroy: () => {
       destroyed = true;
+      if (autoFlushTimer !== undefined) window.clearTimeout(autoFlushTimer);
+      const waiting = compositionWaiters;
+      compositionWaiters = [];
+      for (const resolve of waiting) resolve();
       view.destroy();
     },
   };

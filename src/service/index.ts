@@ -137,6 +137,7 @@ function decodeRequest(frame: Uint8Array): ServiceRequest {
           'branchId',
           'baseRevisionId',
           'blockId',
+          'windowStartBlockId',
           'baseBlockDigest',
           'expectedJournalSequence',
           'fromGrapheme',
@@ -156,6 +157,8 @@ function decodeRequest(frame: Uint8Array): ServiceRequest {
         !UUID_PATTERN.test(input.baseRevisionId) ||
         !isBoundedString(input.blockId, 28) ||
         !/^blk_[0-9a-f]{24}$/.test(input.blockId) ||
+        !isBoundedString(input.windowStartBlockId, 28) ||
+        !/^blk_[0-9a-f]{24}$/.test(input.windowStartBlockId) ||
         !isBoundedString(input.baseBlockDigest, 64) ||
         !HEX_DIGEST_PATTERN.test(input.baseBlockDigest) ||
         !isSafeInteger(input.expectedJournalSequence) ||
@@ -178,6 +181,7 @@ function decodeRequest(frame: Uint8Array): ServiceRequest {
       if ((target.kind === 'start' && hasExactKeys(target, ['kind'])) ||
           (target.kind === 'cursor' && hasExactKeys(target, ['kind', 'cursor']) && isBoundedString(target.cursor, 1_024)) ||
           (target.kind === 'block' && hasExactKeys(target, ['kind', 'blockId']) && isBoundedString(target.blockId, 28) && /^blk_[0-9a-f]{24}$/.test(target.blockId)) ||
+          (target.kind === 'window-start' && hasExactKeys(target, ['kind', 'blockId']) && isBoundedString(target.blockId, 28) && /^blk_[0-9a-f]{24}$/.test(target.blockId)) ||
           (target.kind === 'character' && hasExactKeys(target, ['kind', 'character']) && isSafeInteger(target.character)) ||
           (target.kind === 'proportion' && hasExactKeys(target, ['kind', 'proportion']) && typeof target.proportion === 'number' && Number.isFinite(target.proportion) && target.proportion >= 0 && target.proportion <= 1)) {
         break;
