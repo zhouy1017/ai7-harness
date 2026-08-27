@@ -1,34 +1,32 @@
 # Current handoff
 
-[Issue #86](https://github.com/zhouy1017/ai7-harness/issues/86) owns the bounded documentation normalization on `codex/docs/86-design-handoff`, based on exact `dev@2f8471f0d80ffa79f3cbdf1d79b0f0491697ca63`. On 2026-08-27 the Owner accepted the completed result and separately authorized the Commander to integrate it through a pull request to `dev`, then update PRD Issue #28 and the affected implementation Issues and define one next-stage development target.
+[Issue #96](https://github.com/zhouy1017/ai7-harness/issues/96) owns the Markdown-only lifecycle closure for [Issue #86](https://github.com/zhouy1017/ai7-harness/issues/86) / [PR #87](https://github.com/zhouy1017/ai7-harness/pull/87). Issue #86 integrated into exact `dev@ec623a6ae3d411c36eb64d02b7c527fd3f883cc5` on 2026-08-27 after Route E2E and the existing Windows/macOS J-01 jobs passed.
 
-Resolve authority from the exact tree being read. The Issue #86 successor is repository-current only in an exact integrated `dev` commit containing this revision; elsewhere it remains accepted-but-unintegrated. It is design/documentation authority only and is not evidence of product implementation or permission for Provider calls, dependency/plugin installation, manuscript or derivative handling, release, `main`, or any other external action.
+Resolve this file from the exact tree being read. If an integrated `dev` commit contains the Issue #96 replacement, the lifecycle node is complete; elsewhere it remains a lifecycle candidate. Verify live Issue/PR state rather than inferring integration from a worktree.
 
-## Completed normalization
+## Current authority and tracker route
 
-- Added root ADRs 0045–0048 and UI ADRs 0015–0017 while preserving superseded ADR history and exact full/partial successor relations.
-- Added Provider Processing v3 and active-policy-set v3. Trusted launch authority maps development/CI→immutable v1, fixture recording→immutable v2, and ordinary production→v3; External Export remains immutable v1.
-- Reconciled domain, architecture, UI/UX, glossary, constraints and routing around native DSH artifacts, covered analysis, Background Analysis Enrollment and exact single-use AI7 Apply.
-- Preserved native DSH definition/technical ownership and AI7 selection, authority-sidecar and durable Workflow business-state ownership.
-- Kept setup, installation and enablement non-authorizing; imported updates inert until adoption or the narrow Artifact Update Rule; new autonomous Provider-backed manuscript analysis dependent on active matching Enrollment.
-- Recorded implementation truth without changing code: the repository remains the provider-free J-01 tracer, and its seeded AI7 `WORKFLOW_PROFILE` / `workflow_profiles.definition_json` is legacy future-migration work rather than successor implementation evidence.
-- Replaced branch-static status text with target-qualified, merge-safe wording. Immutable Provider v1/v2, active-set v1/v2 and External Export v1 owners remain byte-identical.
+- Stable Issue #86 authority now lives in root ADRs 0045–0048, UI ADRs 0015–0017, Provider Processing/active-policy-set v3 and the updated domain, architecture, UI/UX, glossary and constraint owners.
+- Native DSH artifacts retain identity, versioned Workflow definitions and technical logic. AI7 owns exact selection/pins, compatibility/authority sidecars and durable Workflow business state.
+- Provider setup and artifact acquisition/install/enablement remain non-authorizing. Imported updates remain inert until explicit adoption or the narrow eligible Artifact Update Rule.
+- New autonomous Provider-backed manuscript analysis requires active matching Background Analysis Enrollment. Every formal agent-originated Manuscript mutation still crosses one exact, editor-confirmed, single-use AI7 Apply boundary.
+- [PRD #28](https://github.com/zhouy1017/ai7-harness/issues/28) is refreshed against exact `dev@ec623a6...` with stable stories 1–141 plus successor stories 142–148. It remains a requirements index, not implementation authority.
+- Existing Issues #38, #46–#49, #51–#59 and #61–#66 carry explicit post-#86 non-dispatch markers and required successor deltas. #65/#66 retain their identities but their historical Task Skill/standalone Workflow-definition assumptions require in-place replacement before dispatch.
+- New enhancement-only Issues #88–#95 own the native artifact lifecycle, foreign Skill updates, Agent Workspace, ordinary-production Provider Run, covered analysis, Result Set history, analysis metrics and Background Analysis Enrollment. None is `ready-for-agent`; #88 and #91 additionally require named Owner selections.
+- [Issue #37](https://github.com/zhouy1017/ai7-harness/issues/37), titled **[S02b] J-01: Disclose a same-name different-content import collision**, is the only next `ready-for-agent` development target. Its exact filename-collision-only Change Brief excludes fuzzy matching, other SampleBooks, parser/schema/dependency changes, native Workflow migration, Providers and new gates.
 
-## Validation and review
+## Lifecycle archive
 
-- `origin/dev` was re-fetched at the final pre-integration checkpoint and still resolved to `2f8471f0d80ffa79f3cbdf1d79b0f0491697ca63`; no target drift had occurred.
-- Seven policy JSON/schema pairs and every active-set v3 digest validate; changed Markdown links resolve; `git diff --check` passes.
-- UI structure remains 888 unique requirement IDs, exactly J-01–J-16 and 17 UI ADRs; all changed paths are documentation/routing only.
-- Three bounded same-provider, read-only reviews found no ADR/policy, domain/architecture/implementation or UI/routing contradiction. Independence is reduced because no cross-provider review was used.
+The consumed exact Issue #86 root checkpoint and handoff are preserved byte-for-byte in one indexed historical archive node. Archive discovery remains in the archive router; ordinary current-state reading does not enter it.
 
-## Integration and lifecycle route
+No product code, dependency/plugin installation, Provider call, new manuscript/derivative, release or `main` action was performed during PRD/Issue routing or this lifecycle sweep. No Worker has started Issue #37.
 
-Verify the live GitHub Issue/PR and exact `origin/dev` state rather than inferring merge state from this file. If Issue #86 is not integrated, the authorized next action is commit, push, pull request validation and squash merge to `dev`. After verified integration, update PRD Issue #28 and only the affected implementation Issues, choose one bounded next-stage outcome, and perform the Issue #86 lifecycle sweep through its own scoped Issue/Change Brief: archive the consumed outgoing root `PROGRESS.md` and `HANDOFF.md`, index that one archive node, and replace the root routes. Do not enter `docs/archive/` before that lifecycle trigger is confirmed.
+## Safe next action
 
-No product implementation begins until an exact next Issue/Change Brief is selected and target-qualified against the integrated `dev` commit. Do not install dependencies/plugins, call Providers, add manuscripts/derivatives, release, or touch `main` without separate authorization.
+If Issue #96 is not integrated, finish only its authorized Markdown checks, one pull request to `dev`, CI routing observation and squash merge. After verified integration, the next product action is a separately initiated one-Issue/one-branch/one-PR dispatch of exact Issue #37. Do not start any other backlog Issue or broaden S02b without new authority.
 
 ## Resume prompt
 
 ```text
-Resolve Issue #86, its pull request, exact branch HEAD, origin/dev and worktree status. If the Owner-approved documentation successor is not yet integrated, finish only its authorized commit/push/PR checks and squash merge to dev. If it is integrated, update PRD Issue #28 and only the affected implementation Issues, define one bounded next-stage development target, then complete the separately scoped Issue #86 root-document lifecycle sweep. Preserve immutable Provider v1/v2 and External Export v1 history, superseded ADR history, native DSH definition ownership with AI7 durable-state authority, non-authorizing setup/install, active Enrollment for new autonomous Provider analysis, inert imported updates, and exact single-use AI7 Apply. Do not implement product code, install dependencies/plugins, call Providers, add manuscripts/derivatives, release or touch main.
+Resolve exact HEAD, worktree, origin/dev and Issue #96/PR state. If the Issue #86 lifecycle replacement is not integrated, finish only its Markdown-only validation, pull request and squash merge to dev. If it is integrated, treat Issue #37 “[S02b] J-01: Disclose a same-name different-content import collision” as the single next ready development target, but start it only through a separate explicit dispatch. Preserve exact sample1 identity, the runtime-only unrelated public-synthetic clean collision input, the current initial/exact-match J-01 outcomes, provider-free/network-denied execution, immutable policy/ADR history, native DSH definition ownership, non-authorizing setup/install, inert updates, active Enrollment for autonomous background Provider analysis and exact single-use AI7 Apply. Do not install dependencies/plugins, call Providers, add tracked manuscripts/derivatives, release or touch main.
 ```
