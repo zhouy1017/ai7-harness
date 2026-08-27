@@ -264,6 +264,57 @@ async function assertRenderer(renderer, expression, location) {
   requireJourney(await renderer.evaluate(`Boolean(${expression})`), location);
 }
 
+async function editThenInvokeOnDirty(renderer, suffix, actionLabels, location) {
+  const started = await renderer.evaluate(
+    `(async () => {
+      const editor = document.querySelector('[data-testid="manuscript-editor"]');
+      const block = editor?.lastElementChild;
+      const save = Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '保存当前编辑');
+      const actionLabels = ${JSON.stringify(actionLabels)};
+      const actions = actionLabels.map((label) => Array.from(document.querySelectorAll('button')).find((button) => button.textContent === label));
+      if (!(editor instanceof HTMLElement) || !(block instanceof HTMLElement) || !(save instanceof HTMLButtonElement) ||
+          actions.some((action) => !(action instanceof HTMLButtonElement)) || !save.disabled ||
+          actions.some((action) => action !== save && action.disabled)) return false;
+      const blockId = block.dataset.blockId;
+      const before = block.textContent;
+      if (!blockId || before === null) return false;
+      const dirtyReady = new Promise((resolve) => {
+        let settled = false;
+        let timeout;
+        const finish = (dirty) => {
+          if (settled) return;
+          settled = true;
+          observer.disconnect();
+          clearTimeout(timeout);
+          resolve(dirty);
+        };
+        const observer = new MutationObserver(() => {
+          if (!save.disabled) finish(true);
+        });
+        observer.observe(save, { attributes: true, attributeFilter: ['disabled'] });
+        timeout = setTimeout(() => finish(false), 250);
+        if (!save.disabled) finish(true);
+      });
+      block.focus();
+      const range = document.createRange();
+      range.selectNodeContents(block);
+      range.collapse(false);
+      const selection = window.getSelection();
+      if (!selection) return false;
+      selection.removeAllRanges();
+      selection.addRange(range);
+      if (!document.execCommand('insertText', false, ${JSON.stringify(suffix)})) return false;
+      const dirty = await dirtyReady;
+      const liveBlock = Array.from(editor.children).find((item) => item.getAttribute('data-block-id') === blockId);
+      if (!dirty || save.disabled || !(liveBlock instanceof HTMLElement) || liveBlock.textContent !== before + ${JSON.stringify(suffix)} ||
+          actions.some((action) => action.disabled)) return false;
+      for (const action of actions) action.click();
+      return true;
+    })()`,
+  );
+  requireJourney(started === true, location);
+}
+
 async function clickButton(renderer, label, location) {
   await assertRenderer(
     renderer,
@@ -430,11 +481,7 @@ async function runWorkspaceJourney(renderer) {
 
   at('authoritative-mutation-drain');
   const dirtyHistoryObservation = await renderer.observeIpc();
-  await assertRenderer(
-    renderer,
-    `(() => { const editor = document.querySelector('[data-testid="manuscript-editor"]'); const block = editor?.lastElementChild; const save = Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '保存当前编辑'); const undo = Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '撤销'); if (!(block instanceof HTMLElement) || !save || !undo) return false; block.focus(); const range = document.createRange(); range.selectNodeContents(block); range.collapse(false); const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range); if (!document.execCommand('insertText', false, '稳')) return false; save.click(); undo.click(); return true; })()`,
-    'dirty-saving-undo-start',
-  );
+  await editThenInvokeOnDirty(renderer, '稳', ['保存当前编辑', '撤销'], 'dirty-saving-undo-start');
   await waitFor(renderer, `document.querySelector('.editor-meta')?.textContent.includes('修订日志序号 5') && document.querySelector('[data-testid="manuscript-editor"]')?.dataset.operationLocked === 'false' && document.querySelector('[data-testid="manuscript-editor"]')?.getAttribute('contenteditable') === 'true' && document.querySelector('[data-testid="manuscript-editor"]')?.dataset.authoritativeMutation !== 'true'`, 'dirty-saving-undo-drained-and-unlocked', 120_000);
   const dirtyHistoryCompleted = await renderer.observeIpc();
   const dirtyHistoryEvents = dirtyHistoryCompleted.events.filter((event) => event.ordinal > (dirtyHistoryObservation.events.at(-1)?.ordinal ?? 0));
@@ -554,11 +601,7 @@ async function runWorkspaceJourney(renderer) {
   await fill(renderer, '#milestone-purpose', '确认千万字编辑与替换状态', 'milestone-purpose');
   await fill(renderer, '#milestone-note', '本地里程碑，不表示导出或发布。', 'milestone-note');
   const milestoneDrainObservation = await renderer.observeIpc();
-  await assertRenderer(
-    renderer,
-    `(() => { const editor = document.querySelector('[data-testid="manuscript-editor"]'); const block = editor?.lastElementChild; const milestone = Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '保存为里程碑版本'); if (!(block instanceof HTMLElement) || !milestone || milestone.disabled) return false; block.focus(); const range = document.createRange(); range.selectNodeContents(block); range.collapse(false); const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range); if (!document.execCommand('insertText', false, '碑')) return false; milestone.click(); return true; })()`,
-    'dirty-milestone-save',
-  );
+  await editThenInvokeOnDirty(renderer, '碑', ['保存为里程碑版本'], 'dirty-milestone-save');
   await waitFor(renderer, `document.querySelector('.editor-meta')?.textContent.includes('当前修订版 r2')`, 'milestone-r2', 180_000);
   const milestoneDrainCompleted = await renderer.observeIpc();
   const milestoneDrainEvents = milestoneDrainCompleted.events.filter((event) => event.ordinal > (milestoneDrainObservation.events.at(-1)?.ordinal ?? 0));
