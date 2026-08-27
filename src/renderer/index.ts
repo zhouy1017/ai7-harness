@@ -1,6 +1,9 @@
 import type {
   FidelityCategoryProjection,
+  ContinueImportProjection,
   ImportCommitProjection,
+  ImportDraftRecoveryProjection,
+  ImportStartupProjection,
   ManuscriptWindowProjection,
   OutlineProjection,
   PriorWorkItemProjection,
@@ -25,6 +28,14 @@ if (!window.ai7) throw new Error('AI7_RENDERER_BOOTSTRAP_INVALID');
 
 let editor: BoundedEditor | undefined;
 let authorityInterrupted = false;
+
+function recoveryTone(access: ImportDraftRecoveryProjection['originalFileAccess']['state']): string {
+  return access === 'available-exact' ? 'success-note' : 'attention-note';
+}
+
+function hasErrorCode(error: unknown, code: string): boolean {
+  return error instanceof Error && 'code' in error && (error as Error & { code?: unknown }).code === code;
+}
 
 function element<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string): HTMLElementTagNameMap[K] {
   const node = document.createElement(tag);
@@ -102,40 +113,38 @@ function sourceCard(staged: StagedImportProjection): HTMLElement {
   return card;
 }
 
-function exactMatchDisclosure(
-  matches: StagedImportProjection['exactMatches'],
+function identityFindingDisclosure(
+  findings: StagedImportProjection['identityFindings'],
   reviewTarget?: ReviewBeforeImportProjection['target']['label'],
 ): HTMLElement {
-  const disclosure = element('section', 'source-card exact-match-disclosure');
-  if (reviewTarget) disclosure.classList.add('review-exact-match-summary');
+  const disclosure = element('section', 'source-card identity-finding-disclosure');
+  if (reviewTarget) disclosure.classList.add('review-identity-finding-summary');
   disclosure.append(
-    element('p', 'section-label', reviewTarget ? '精确匹配与本次关系' : '发现精确导入匹配'),
-    element('h3', undefined, reviewTarget ? '复核匹配记录与不同作品后果' : '已有导入与当前文件精确匹配'),
+    element('p', 'section-label', reviewTarget ? '导入身份提示与本次关系' : '发现已有导入身份提示'),
+    element('h3', undefined, reviewTarget ? '复核身份提示记录与不同作品后果' : '已有导入与当前文件的身份提示'),
     ...(reviewTarget ? [element('p', undefined, `本次选择：${reviewTarget}`)] : []),
     element(
       'p',
       'field-note',
       reviewTarget
-        ? '匹配不授予目标、关系、去重、覆盖或重新导入权限；现有匹配记录保持不变，本次提交将创建另一图书的完整新记录。'
-        : '匹配仅用于披露，不会选择目标或关系，也不授予去重、覆盖或重新导入权限。',
+        ? '身份提示不授予目标、关系、去重、覆盖或重新导入权限；现有记录保持不变，本次提交将创建另一图书的完整新记录。'
+        : '身份提示仅用于披露，不会选择目标或关系，也不授予去重、覆盖或重新导入权限。',
     ),
   );
-  for (const match of matches) {
+  for (const finding of findings) {
     const item = element('section', 'review-section');
     const classes = element('ul', 'degradation-list');
-    for (const identityClass of match.identityClasses) {
-      const row = element('li', undefined, identityClass.label);
-      row.dataset['exactMatchClass'] = identityClass.kind;
-      classes.append(row);
-    }
+    const row = element('li', undefined, finding.identityClass.label);
+    row.dataset['importIdentityClass'] = finding.identityClass.kind;
+    classes.append(row);
     const details = element('dl');
     details.append(
       element('dt', undefined, '匹配图书'),
-      element('dd', undefined, `${match.bookTitle} · ${match.bookId}`),
+      element('dd', undefined, `${finding.bookTitle} · ${finding.bookId}`),
       element('dt', undefined, '来源材料版本'),
-      element('dd', 'technical-identity', match.sourceVersionId),
+      element('dd', 'technical-identity', finding.sourceVersionId),
       element('dt', undefined, '稿件导入记录'),
-      element('dd', 'technical-identity', match.importRecordId),
+      element('dd', 'technical-identity', finding.importRecordId),
     );
     item.append(classes, details);
     disclosure.append(item);
@@ -175,6 +184,246 @@ function fidelityTable(fidelity: ReadonlyArray<FidelityCategoryProjection>): HTM
     table.append(row);
   }
   return table;
+}
+
+function productIsVisibleAndReady(): boolean {
+  return document.visibilityState === 'visible' && document.documentElement.dataset['ai7ProductReady'] === 'true';
+}
+
+function waitForVisibleProductReady(): Promise<void> {
+  if (productIsVisibleAndReady()) return Promise.resolve();
+  return new Promise((resolve) => {
+    const finish = (): void => {
+      if (!productIsVisibleAndReady()) return;
+      observer.disconnect();
+      document.removeEventListener('visibilitychange', finish);
+      resolve();
+    };
+    const observer = new MutationObserver(finish);
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['data-ai7-product-ready'],
+    });
+    document.addEventListener('visibilitychange', finish);
+    finish();
+  });
+}
+
+function nextVisibleFrame(): Promise<void> {
+  return new Promise((resolve) => requestAnimationFrame(() => resolve()));
+}
+
+async function acknowledgeCompletionAfterPaint(result: ImportCommitProjection): Promise<boolean> {
+  await waitForVisibleProductReady();
+  await nextVisibleFrame();
+  await nextVisibleFrame();
+  const presentedCommitId = screen.querySelector<HTMLElement>('[data-import-commit-id]')?.dataset['importCommitId'];
+  if (
+    !productIsVisibleAndReady() ||
+    screen.dataset['screen'] !== 'imported' ||
+    presentedCommitId !== result.commitId
+  ) {
+    return false;
+  }
+  document.documentElement.dataset['ai7ImportCompletionPainted'] = 'true';
+  try {
+    await window.ai7.acknowledgeImportCompletion({ commitId: result.commitId });
+    document.documentElement.dataset['ai7ImportCompletionAcknowledged'] = 'true';
+    return true;
+  } catch {
+    setStatus('导入已由权威记录证明；完成提示将在下次启动时再次显示。', 'error');
+    return false;
+  }
+}
+
+async function renderStartupProjection(startup: ImportStartupProjection): Promise<void> {
+  if (startup.state === 'none') {
+    try {
+      renderLanding(await window.ai7.listPriorWork());
+    } catch {
+      renderLanding();
+    }
+    return;
+  }
+  if (startup.state === 'committed-recovered') {
+    setStatus('已核对中断前的原子提交结果', 'success');
+    renderImported(startup.result);
+    return;
+  }
+  renderImportRecovery(startup.recovery);
+}
+
+function renderContinuation(continuation: ContinueImportProjection): void {
+  if (continuation.state === 'target-review-required') {
+    setStatus(continuation.reviewInvalidated ? '旧复核已失效，需要重新确认' : '暂存快照已重新校验', 'success');
+    renderTargetChoice(continuation.staged, null, continuation.notice);
+    return;
+  }
+  if (continuation.state === 'review-ready') {
+    setStatus('暂存快照与导入前复核已重新校验', 'success');
+    renderReview(continuation.review, continuation.notice);
+    return;
+  }
+  if (continuation.state === 'committed-recovered') {
+    setStatus('已核对中断前的原子提交结果', 'success');
+    renderImported(continuation.result);
+    return;
+  }
+  renderImportRecovery(continuation.recovery);
+}
+
+async function abandonAndContinue(recovery: Pick<ImportDraftRecoveryProjection, 'draftId' | 'draftVersion'>): Promise<void> {
+  setStatus('正在核对提交证据并放弃非权威草稿…', 'busy');
+  try {
+    const startup = await window.ai7.abandonImportDraft({
+      draftId: recovery.draftId,
+      expectedDraftVersion: recovery.draftVersion,
+    });
+    setStatus(startup.state === 'none' ? '已放弃导入草稿并安全清理暂存引用' : '已核对导入状态', 'success');
+    await renderStartupProjection(startup);
+  } catch (error) {
+    renderError(error, () => void initializeStartup());
+  }
+}
+
+function renderImportRecovery(recovery: ImportDraftRecoveryProjection): void {
+  const uncertain = recovery.kind === 'outcome-uncertain';
+  const cleanup = recovery.kind === 'abandonment-cleanup';
+  const content = panel();
+  content.classList.add('recovery-panel');
+  content.append(
+    element(
+      'p',
+      'section-label',
+      cleanup ? '启动恢复 · 持久放弃清理' : uncertain ? '启动恢复 · 原子结果待确认' : '启动恢复 · 非权威导入草稿',
+    ),
+    element('h2', undefined, cleanup ? '放弃清理尚未完成' : uncertain ? '导入提交结果待确认' : '发现未完成的导入'),
+    element(
+      'p',
+      'lede',
+      cleanup
+        ? '放弃意图已经持久化。系统已阻止继续导入和任何新的权威引用；只有在暂存字节与权威记录都完成安全清理后才会报告成功。'
+        : uncertain
+        ? '本地证据目前无法证明这次原子提交已经完成或确定未提交。为避免重复图书或误删来源，系统已阻止重试、放弃和暂存清理。'
+        : '启动不会替你继续、选择目标或提交。请明确选择继续导入或放弃。',
+    ),
+  );
+  const summary = element('section', 'source-card recovery-summary');
+  summary.append(element('h3', undefined, recovery.sourceDisplayName));
+  const details = element('dl');
+  details.append(
+    element('dt', undefined, '状态'),
+    element(
+      'dd',
+      undefined,
+      cleanup
+        ? '持久放弃清理 · 阻止继续与新权威引用'
+        : uncertain
+        ? '非权威草稿 · 提交结果待确认'
+        : recovery.snapshotState === 'complete'
+          ? '完整暂存快照 · 尚未形成导入权威'
+          : '暂存不完整或损坏 · 需要精确重选',
+    ),
+    element('dt', undefined, '上次完成位置'),
+    element(
+      'dd',
+      undefined,
+      recovery.lastCompletedStep === 'abandonment-cleanup'
+        ? '已持久化放弃与安全清理意图'
+        : recovery.lastCompletedStep === 'review'
+        ? '导入前复核'
+        : recovery.lastCompletedStep === 'commit-attempt'
+          ? '已持久化提交尝试，尚未证明提交'
+          : recovery.lastCompletedStep === 'commit-outcome-uncertain'
+            ? '原子提交边界'
+            : '本地暂存与预检',
+    ),
+    ...(recovery.reviewedTitle
+      ? [element('dt', undefined, '已复核书名'), element('dd', undefined, recovery.reviewedTitle)]
+      : []),
+    ...(recovery.targetLabel
+      ? [element('dt', undefined, '已复核目标'), element('dd', undefined, recovery.targetLabel)]
+      : []),
+  );
+  summary.append(details);
+  if (!cleanup) summary.append(element('p', recoveryTone(recovery.originalFileAccess.state), recovery.originalFileAccess.label));
+  content.append(summary);
+  if (cleanup) {
+    const support = element('section', 'uncertain-support');
+    support.append(
+      element('h3', undefined, '安全清理状态'),
+      element('p', undefined, `状态代码：${recovery.supportCode ?? 'ABANDON_CLEANUP_PENDING'}`),
+      element('p', 'field-note', '此状态不包含暂存正文或原始文件路径。请保留 Agent Data Root；重试会继续同一个持久清理意图，不会创建第二次放弃或导入。'),
+    );
+    const actions = element('div', 'button-row recovery-actions');
+    actions.append(button('重试放弃清理', 'primary', () => abandonAndContinue(recovery)));
+    content.append(support, actions);
+    replaceScreen('import-cleanup', content);
+    setStatus('放弃清理尚未完成；已阻止继续导入和新权威引用', 'error');
+    return;
+  }
+  if (recovery.staged) content.append(sourceCard(recovery.staged));
+
+  if (uncertain) {
+    const support = element('section', 'uncertain-support');
+    support.append(
+      element('h3', undefined, '本地恢复与支持信息'),
+      element('p', undefined, `草稿标识：${recovery.draftId}`),
+      element('p', undefined, `提交尝试：${recovery.commitAttemptId ?? '未读取'}`),
+      element('p', undefined, `状态代码：${recovery.supportCode ?? 'COMMIT_PROOF_INCONCLUSIVE'}`),
+      element('p', 'field-note', '这些信息不包含暂存正文、数据库内容、截图、跟踪或网络请求。请保留 Agent Data Root，等待本地核对；不要重复导入或手动删除暂存文件。'),
+    );
+    content.append(support);
+    replaceScreen('import-uncertain', content);
+    setStatus('导入提交结果待确认；已阻止重试、放弃和清理', 'error');
+    return;
+  }
+
+  const actions = element('div', 'button-row recovery-actions');
+  if (recovery.snapshotState === 'complete') {
+    const abandonButton = button('放弃', 'secondary', () => abandonAndContinue(recovery));
+    const continueButton = button('继续导入', 'primary', async () => {
+      continueButton.disabled = true;
+      abandonButton.disabled = true;
+      setStatus('正在重新校验暂存字节、解析器、目标与复核…', 'busy');
+      try {
+        renderContinuation(
+          await window.ai7.continueImportDraft({
+            draftId: recovery.draftId,
+            expectedDraftVersion: recovery.draftVersion,
+          }),
+        );
+      } catch (error) {
+        renderError(error, () => void initializeStartup());
+      }
+    });
+    actions.append(continueButton, abandonButton);
+  } else {
+    const abandonButton = button('放弃', 'secondary', () => abandonAndContinue(recovery));
+    const reselect = button('重新选择原文件', 'primary', async () => {
+      reselect.disabled = true;
+      abandonButton.disabled = true;
+      setStatus('请选择与原暂存来源摘要精确一致的 DOCX…', 'busy');
+      try {
+        const result = await window.ai7.reselectImportDraft({
+          draftId: recovery.draftId,
+          expectedDraftVersion: recovery.draftVersion,
+        });
+        if (result.status === 'cancelled') {
+          renderImportRecovery(recovery);
+          setStatus('已取消文件重选');
+          return;
+        }
+        renderContinuation(result.continuation);
+      } catch (error) {
+        renderError(error, () => void initializeStartup());
+      }
+    });
+    actions.append(reselect, abandonButton);
+  }
+  content.append(actions);
+  replaceScreen('import-recovery', content);
+  setStatus('等待你选择继续导入或放弃');
 }
 
 function renderLanding(priorWork: ReadonlyArray<PriorWorkItemProjection> = []): void {
@@ -253,6 +502,7 @@ function renderLanding(priorWork: ReadonlyArray<PriorWorkItemProjection> = []): 
 function renderTargetChoice(
   staged: StagedImportProjection,
   selectedChoiceId: StagedImportProjection['targetChoices'][number]['id'] | null,
+  recoveryNotice?: string,
 ): void {
   const content = panel();
   content.append(
@@ -261,7 +511,8 @@ function renderTargetChoice(
     element('p', 'lede', '系统不会替你选择。先明确这份来源要建立什么关系。'),
     sourceCard(staged),
   );
-  if (staged.exactMatches.length > 0) content.append(exactMatchDisclosure(staged.exactMatches));
+  if (recoveryNotice) content.append(element('p', 'recovery-notice', recoveryNotice));
+  if (staged.identityFindings.length > 0) content.append(identityFindingDisclosure(staged.identityFindings));
   const targetChoice = staged.targetChoices[0];
   if (!targetChoice) throw new Error('AI7_IMPORT_TARGET_INVALID');
   const choices = element('fieldset');
@@ -281,7 +532,7 @@ function renderTargetChoice(
     element(
       'small',
       undefined,
-      staged.exactMatches.length > 0
+      staged.identityFindings.length > 0
         ? '将当前文件作为不同作品，建立新的图书、主稿件、r1 和工作流程实例'
         : '以这份来源建立图书、主稿件、r1 和工作流程实例',
     ),
@@ -289,7 +540,11 @@ function renderTargetChoice(
   choice.append(radio, copy);
   choices.append(legend, choice);
   content.append(choices);
-  radio.addEventListener('change', () => renderTargetChoice(staged, targetChoice.id));
+  radio.addEventListener('change', () => renderTargetChoice(staged, targetChoice.id, recoveryNotice));
+
+  const cancelImport = button('取消导入', 'quiet', () =>
+    abandonAndContinue({ draftId: staged.draftId, draftVersion: staged.draftVersion }),
+  );
 
   if (selectedChoiceId !== null) {
     const form = element('section', 'form-row');
@@ -327,9 +582,13 @@ function renderTargetChoice(
       }
     });
     form.append(label, title, note, fidelityTable(staged.fidelity), element('div', 'button-row'));
-    form.lastElementChild?.append(confirm);
+    form.lastElementChild?.append(confirm, cancelImport);
     content.append(form);
     queueMicrotask(() => title.focus());
+  } else {
+    const actions = element('div', 'button-row');
+    actions.append(cancelImport);
+    content.append(actions);
   }
 
   replaceScreen(selectedChoiceId === null ? 'target' : 'title', content);
@@ -355,13 +614,14 @@ function degradationItems(review: ReviewBeforeImportProjection): HTMLElement {
   return list;
 }
 
-function renderReview(review: ReviewBeforeImportProjection): void {
+function renderReview(review: ReviewBeforeImportProjection, recoveryNotice?: string): void {
   const content = panel();
   content.append(
     element('p', 'section-label', '步骤 2 / 3 · 导入前复核'),
     element('h2', undefined, '导入前复核'),
     element('p', 'lede', '最后一次确认：下面的记录会在一个事务中一起创建；列出的非影响不会随导入发生。'),
   );
+  if (recoveryNotice) content.append(element('p', 'recovery-notice', recoveryNotice));
   const identity = element('section', 'source-card');
   identity.append(element('h3', undefined, `${review.target.label} · ${review.target.confirmedTitle}`));
   const identityDetails = element('dl');
@@ -384,7 +644,9 @@ function renderReview(review: ReviewBeforeImportProjection): void {
   );
   identity.append(identityDetails);
   content.append(identity);
-  if (review.exactMatches.length > 0) content.append(exactMatchDisclosure(review.exactMatches, review.target.label));
+  if (review.identityFindings.length > 0) {
+    content.append(identityFindingDisclosure(review.identityFindings, review.target.label));
+  }
 
   const fidelity = element('section', 'review-section');
   fidelity.append(element('h3', undefined, '导入保真审阅 · 8 类'), fidelityTable(review.fidelity));
@@ -424,7 +686,7 @@ function renderReview(review: ReviewBeforeImportProjection): void {
             acceptDegradation: true,
           });
           setStatus('已接受本次导入的完整降级集合', 'success');
-          renderReview(acceptedReview);
+          renderReview(acceptedReview, recoveryNotice);
         } catch (error) {
           renderError(error, renderLanding);
         }
@@ -485,23 +747,51 @@ function renderReview(review: ReviewBeforeImportProjection): void {
           draftId: review.draftId,
           expectedDraftVersion: review.draftVersion,
           reviewDigest: review.reviewDigest!,
+          commitAttemptId: review.commitAttemptId,
         });
         setStatus(result.completionLabel, 'success');
         renderImported(result);
       } catch (error) {
+        if (
+          hasErrorCode(error, 'IMPORT_COMMIT_OUTCOME_UNCERTAIN') ||
+          hasErrorCode(error, 'REVIEW_CHANGED') ||
+          hasErrorCode(error, 'SNAPSHOT_RESELECTION_REQUIRED') ||
+          hasErrorCode(error, 'DRAFT_VERSION_CHANGED')
+        ) {
+          await initializeStartup();
+          return;
+        }
         commitButton.disabled = false;
         setStatus(error instanceof Error ? error.message : '导入未完成，请重试。', 'error');
       }
     });
-    commitBar.append(explanation, commitButton);
+    const actions = element('div', 'button-row compact-actions');
+    actions.append(
+      commitButton,
+      button('取消导入', 'quiet', () =>
+        abandonAndContinue({ draftId: review.draftId, draftVersion: review.draftVersion }),
+      ),
+    );
+    commitBar.append(explanation, actions);
     content.append(commitBar);
+  } else {
+    const actions = element('div', 'button-row');
+    actions.append(
+      button('取消导入', 'quiet', () =>
+        abandonAndContinue({ draftId: review.draftId, draftVersion: review.draftVersion }),
+      ),
+    );
+    content.append(actions);
   }
   replaceScreen('review', content);
 }
 
 function renderImported(result: ImportCommitProjection): void {
+  delete document.documentElement.dataset['ai7ImportCompletionPainted'];
+  delete document.documentElement.dataset['ai7ImportCompletionAcknowledged'];
   const content = panel();
   content.classList.add('completion');
+  content.dataset['importCommitId'] = result.commitId;
   const degradation = result.importRecord.degradationDecision;
   content.append(
     element('div', 'completion-mark', '✓'),
@@ -517,6 +807,7 @@ function renderImported(result: ImportCommitProjection): void {
   );
   const actions = element('div', 'button-row');
   const open = button('打开稿件', 'primary', () => renderEditorWindow(result.firstWindow, '主稿件'));
+  open.disabled = true;
   const record = button('查看导入记录', 'secondary', () => {
     if (content.querySelector('.record-detail')) return;
     const detail = element('section', 'source-card record-detail');
@@ -556,6 +847,16 @@ function renderImported(result: ImportCommitProjection): void {
   actions.append(open, record);
   content.append(actions);
   replaceScreen('imported', content);
+  void acknowledgeCompletionAfterPaint(result).then((acknowledged) => {
+    if (
+      acknowledged &&
+      !authorityInterrupted &&
+      screen.dataset['screen'] === 'imported' &&
+      content.isConnected
+    ) {
+      open.disabled = false;
+    }
+  });
 }
 
 function delay(milliseconds: number): Promise<void> {
@@ -1548,6 +1849,15 @@ function renderError(error: unknown, retry: () => void): void {
   setStatus('操作未完成', 'error');
 }
 
+async function initializeStartup(): Promise<void> {
+  setStatus('正在核对本地恢复状态…', 'busy');
+  try {
+    await renderStartupProjection(await window.ai7.getImportStartup());
+  } catch (error) {
+    renderError(error, () => void initializeStartup());
+  }
+}
+
 new MutationObserver(() => {
   if (document.documentElement.dataset['ai7ServiceState'] === 'interrupted') applyAuthorityInterruption();
   if (document.documentElement.dataset['ai7CloseState'] === 'blocked') {
@@ -1560,8 +1870,5 @@ new MutationObserver(() => {
 });
 
 setCloseRisk(false);
-void window.ai7
-  .listPriorWork()
-  .then((items) => renderLanding(items))
-  .catch(() => renderLanding());
+void initializeStartup();
 if (document.documentElement.dataset['ai7ServiceState'] === 'interrupted') applyAuthorityInterruption();

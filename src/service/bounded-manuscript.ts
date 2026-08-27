@@ -32,12 +32,8 @@ import {
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const DIGEST_PATTERN = /^[0-9a-f]{64}$/;
 const BLOCK_PATTERN = /^blk_[0-9a-f]{24}$/;
-const LEGACY_BOUNDED_SCHEMA_VERSION = 2;
-const SIGNOFF_MIGRATION_SOURCE_VERSION = 3;
-const OFFSET_REPAIR_SOURCE_VERSION = 4;
-const SEARCH_BINDING_SOURCE_VERSION = 5;
-const OFFSET_INDEX_SOURCE_VERSION = 6;
-const SCHEMA_VERSION = 7;
+const CONTINUITY_SCHEMA_VERSION = 5;
+const SCHEMA_VERSION = 6;
 const MIGRATION_BATCH = 256;
 const SEARCH_BATCH = 128;
 const HISTORY_BATCH = 128;
@@ -64,7 +60,10 @@ const COMMON_SCHEMA_SQL = {
     draft_version INTEGER NOT NULL CHECK(draft_version >= 1),
     display_name TEXT NOT NULL,
     object_digest TEXT NOT NULL REFERENCES content_objects(object_digest),
+    selected_path TEXT,
     reviewed_title TEXT,
+    reviewed_target_choice_id TEXT
+      CHECK(reviewed_target_choice_id IS NULL OR reviewed_target_choice_id IN ('new-book', 'new-book-distinct-intended-work')),
     review_digest TEXT UNIQUE,
     committed_commit_id TEXT UNIQUE,
     staged_at TEXT NOT NULL,
@@ -203,9 +202,61 @@ const COMMON_SCHEMA_SQL = {
     result_json TEXT NOT NULL,
     committed_at TEXT NOT NULL
   ) STRICT`,
+  import_commit_attempts: `CREATE TABLE import_commit_attempts (
+    attempt_id TEXT PRIMARY KEY,
+    draft_id TEXT NOT NULL UNIQUE REFERENCES import_drafts(draft_id) ON DELETE CASCADE,
+    request_fingerprint TEXT NOT NULL,
+    expected_draft_version INTEGER NOT NULL CHECK(expected_draft_version >= 1),
+    review_digest TEXT NOT NULL CHECK(length(review_digest) = 64),
+    state TEXT NOT NULL CHECK(state IN ('prepared', 'uncertain', 'committed')),
+    prepared_at TEXT NOT NULL,
+    committed_at TEXT,
+    uncertain_at TEXT,
+    uncertainty_code TEXT,
+    completion_acknowledged_at TEXT,
+    CHECK(
+      (state = 'prepared' AND committed_at IS NULL AND uncertain_at IS NULL
+        AND uncertainty_code IS NULL AND completion_acknowledged_at IS NULL)
+      OR (state = 'uncertain' AND committed_at IS NULL AND uncertain_at IS NOT NULL
+        AND uncertainty_code = 'COMMIT_PROOF_INCONCLUSIVE' AND completion_acknowledged_at IS NULL)
+      OR (state = 'committed' AND committed_at IS NOT NULL AND uncertain_at IS NULL
+        AND uncertainty_code IS NULL)
+    )
+  ) STRICT`,
+  import_abandonment_cleanup_intents: `CREATE TABLE import_abandonment_cleanup_intents (
+    draft_id TEXT PRIMARY KEY REFERENCES import_drafts(draft_id),
+    object_digest TEXT NOT NULL UNIQUE REFERENCES content_objects(object_digest),
+    expected_draft_version INTEGER NOT NULL CHECK(expected_draft_version >= 1),
+    relative_key TEXT NOT NULL,
+    state TEXT NOT NULL CHECK(state IN ('prepared', 'bytes-removed')),
+    requested_at TEXT NOT NULL,
+    bytes_removed_at TEXT,
+    CHECK(
+      (state = 'prepared' AND bytes_removed_at IS NULL)
+      OR (state = 'bytes-removed' AND bytes_removed_at IS NOT NULL)
+    )
+  ) STRICT`,
 } as const;
 
-const SOURCE_V2_SCHEMA_SQL = {
+const MIGRATED_CONTINUITY_IMPORT_DRAFT_SQL = `CREATE TABLE import_drafts (
+  draft_id TEXT PRIMARY KEY,
+  selection_token TEXT NOT NULL UNIQUE,
+  state TEXT NOT NULL CHECK(state IN ('staged', 'reviewed', 'committed')),
+  draft_version INTEGER NOT NULL CHECK(draft_version >= 1),
+  display_name TEXT NOT NULL,
+  object_digest TEXT NOT NULL REFERENCES content_objects(object_digest),
+  reviewed_title TEXT,
+  review_digest TEXT UNIQUE,
+  committed_commit_id TEXT UNIQUE,
+  staged_at TEXT NOT NULL,
+  reviewed_at TEXT,
+  committed_at TEXT,
+  selected_path TEXT,
+  reviewed_target_choice_id TEXT
+    CHECK(reviewed_target_choice_id IS NULL OR reviewed_target_choice_id IN ('new-book', 'new-book-distinct-intended-work'))
+) STRICT`;
+
+const CONTINUITY_SCHEMA_SQL = {
   staged_import_snapshots: `CREATE TABLE staged_import_snapshots (
     draft_id TEXT PRIMARY KEY REFERENCES import_drafts(draft_id) ON DELETE CASCADE,
     parser_identity TEXT NOT NULL,
@@ -290,7 +341,21 @@ const SOURCE_V2_SCHEMA_SQL = {
   ) STRICT`,
 } as const;
 
-const SOURCE_V6_SCHEMA_SQL = {
+const TARGET_BASE_SCHEMA_SQL = {
+  import_ingest_blocks: `CREATE TABLE import_ingest_blocks (
+    ingest_id TEXT NOT NULL,
+    draft_id TEXT NOT NULL,
+    staged_block_id TEXT NOT NULL,
+    position INTEGER NOT NULL CHECK(position > 0),
+    kind TEXT NOT NULL CHECK(kind IN ('title', 'heading', 'paragraph')),
+    level INTEGER,
+    text TEXT NOT NULL,
+    digest TEXT NOT NULL CHECK(length(digest) = 64),
+    start_offset INTEGER NOT NULL CHECK(start_offset >= 0),
+    grapheme_length INTEGER NOT NULL CHECK(grapheme_length >= 0),
+    PRIMARY KEY(ingest_id, position),
+    UNIQUE(ingest_id, staged_block_id)
+  ) STRICT`,
   staged_import_snapshots: `CREATE TABLE staged_import_snapshots (
     draft_id TEXT PRIMARY KEY REFERENCES import_drafts(draft_id) ON DELETE CASCADE,
     parser_identity TEXT NOT NULL,
@@ -506,7 +571,7 @@ const SOURCE_V6_SCHEMA_SQL = {
 } as const;
 
 const TARGET_SCHEMA_SQL = {
-  ...SOURCE_V6_SCHEMA_SQL,
+  ...TARGET_BASE_SCHEMA_SQL,
   working_blocks: `CREATE TABLE working_blocks (
     branch_id TEXT NOT NULL REFERENCES manuscript_branches(branch_id),
     block_id TEXT NOT NULL REFERENCES manuscript_blocks(block_id),
@@ -539,43 +604,7 @@ const TARGET_SCHEMA_SQL = {
   ) STRICT`,
 } as const;
 
-const SOURCE_V3_TO_V5_SCHEMA_SQL = {
-  ...SOURCE_V6_SCHEMA_SQL,
-  manuscript_search_sessions: `CREATE TABLE manuscript_search_sessions (
-    search_id TEXT PRIMARY KEY,
-    manuscript_id TEXT NOT NULL REFERENCES manuscripts(manuscript_id),
-    branch_id TEXT NOT NULL REFERENCES manuscript_branches(branch_id),
-    revision_id TEXT NOT NULL REFERENCES manuscript_revisions(revision_id),
-    working_digest TEXT NOT NULL CHECK(length(working_digest) = 64),
-    query TEXT NOT NULL,
-    state TEXT NOT NULL CHECK(state IN ('running', 'completed', 'cancelled', 'failed')),
-    scanned_position INTEGER NOT NULL DEFAULT 0 CHECK(scanned_position >= 0),
-    total_blocks INTEGER NOT NULL CHECK(total_blocks > 0),
-    total_matches INTEGER NOT NULL DEFAULT 0 CHECK(total_matches >= 0),
-    created_at TEXT NOT NULL,
-    completed_at TEXT
-  ) STRICT`,
-  manuscript_replacement_previews: `CREATE TABLE manuscript_replacement_previews (
-    preview_id TEXT PRIMARY KEY,
-    search_id TEXT NOT NULL REFERENCES manuscript_search_sessions(search_id),
-    manuscript_id TEXT NOT NULL REFERENCES manuscripts(manuscript_id),
-    branch_id TEXT NOT NULL REFERENCES manuscript_branches(branch_id),
-    revision_id TEXT NOT NULL REFERENCES manuscript_revisions(revision_id),
-    working_digest TEXT NOT NULL CHECK(length(working_digest) = 64),
-    query TEXT NOT NULL,
-    replacement TEXT NOT NULL,
-    state TEXT NOT NULL CHECK(state IN ('reviewing', 'frozen', 'committed', 'cancelled', 'failed')),
-    total_matches INTEGER NOT NULL CHECK(total_matches > 0),
-    included_matches INTEGER NOT NULL CHECK(included_matches >= 0),
-    validated_ordinal INTEGER NOT NULL DEFAULT 0 CHECK(validated_ordinal >= 0),
-    created_at TEXT NOT NULL,
-    committed_at TEXT
-  ) STRICT`,
-} as const;
-
-const FULL_SOURCE_V2_SCHEMA_SQL = { ...COMMON_SCHEMA_SQL, ...SOURCE_V2_SCHEMA_SQL } as const;
-const FULL_SOURCE_V3_TO_V5_SCHEMA_SQL = { ...COMMON_SCHEMA_SQL, ...SOURCE_V3_TO_V5_SCHEMA_SQL } as const;
-const FULL_SOURCE_V6_SCHEMA_SQL = { ...COMMON_SCHEMA_SQL, ...SOURCE_V6_SCHEMA_SQL } as const;
+const FULL_CONTINUITY_SCHEMA_SQL = { ...COMMON_SCHEMA_SQL, ...CONTINUITY_SCHEMA_SQL } as const;
 const FULL_TARGET_SCHEMA_SQL = { ...COMMON_SCHEMA_SQL, ...TARGET_SCHEMA_SQL } as const;
 
 const TARGET_VIRTUAL_TABLE_SQL = `CREATE VIRTUAL TABLE working_block_search USING fts5(
@@ -598,24 +627,70 @@ const SEARCH_SCHEMA_TABLES = [
   ...Object.keys(SEARCH_SHADOW_SCHEMA_SQL),
 ] as const;
 
-const SOURCE_V2_INDEX_SQL = {
+const CONTINUITY_INDEX_SQL = {
   working_blocks_window: 'CREATE INDEX working_blocks_window ON working_blocks(branch_id, position)',
   journal_branch_order: 'CREATE INDEX journal_branch_order ON edit_journal_entries(branch_id, sequence)',
-} as const;
-
-const SOURCE_V6_INDEX_SQL = {
-  ...SOURCE_V2_INDEX_SQL,
-  manuscript_outline_order: 'CREATE INDEX manuscript_outline_order ON manuscript_outline(branch_id, position)',
-  working_blocks_global_offset: 'CREATE INDEX working_blocks_global_offset ON working_blocks(branch_id, start_offset)',
-  command_history_state: 'CREATE INDEX command_history_state ON manuscript_command_groups(branch_id, status, ordinal)',
-  replacement_matches_block: 'CREATE INDEX replacement_matches_block ON manuscript_replacement_matches(preview_id, included, block_id, from_grapheme)',
+  import_attempts_recovery_order:
+    'CREATE INDEX import_attempts_recovery_order ON import_commit_attempts(state, completion_acknowledged_at, prepared_at)',
 } as const;
 
 const TARGET_INDEX_SQL = {
-  ...SOURCE_V2_INDEX_SQL,
+  ...CONTINUITY_INDEX_SQL,
   manuscript_outline_order: 'CREATE INDEX manuscript_outline_order ON manuscript_outline(branch_id, position)',
   command_history_state: 'CREATE INDEX command_history_state ON manuscript_command_groups(branch_id, status, ordinal)',
   replacement_matches_block: 'CREATE INDEX replacement_matches_block ON manuscript_replacement_matches(preview_id, included, block_id, from_grapheme)',
+} as const;
+
+const CONTINUITY_TRIGGER_DIGESTS = {
+  abandonment_cleanup_validate_insert: '09ce8b29e4d81f26b3dd2ed03169da835d2d72ed1db17953a3a4554730943890',
+  abandonment_cleanup_block_content_object_update: 'ebc8c2b457914325ee725b9007c29e7a25b69d104eea87b19ec752c77a9d374d',
+  abandonment_cleanup_block_draft_insert: '423f4b8e6b9160beae522eb9daee757844f8defb97db028607709110015f2950',
+  abandonment_cleanup_block_draft_update: 'c86550fb12ca0d1abf17c70ba790d595a34a3922ad98efdc95d8c2facfcafabd',
+  abandonment_cleanup_block_source_insert: '6ce76e47b7adfd2ebdb8d4085fb0e5a1be42cc160d374bc8cb167dff6d98fa8c',
+  abandonment_cleanup_block_source_update: 'aaaaa619f3ba2986675f30673ab5d1f65ac62d2a60118d1c78ae4b20cdf11b2f',
+  abandonment_cleanup_block_commit_insert: '0e153594899bf6873b3880a78ae90439a664ff4b3841617f466ef81ab45c23b5',
+  abandonment_cleanup_block_attempt_insert: '5b1f6a4f887a3ebf1aa51e963ea3f8e7ed60034294115a186c7af44f3af0be4f',
+  abandonment_cleanup_validate_intent_update_v5: 'aa3d9f6e2659fcc53bc1b7cf2ad4c06eb6d9f913c5d2e00d4436c399bcc04f42',
+  abandonment_cleanup_block_content_object_update_v5: 'f86f9c3174539f074d9e7ec78da5bd0b35f8ce801d9ed7ee04c8b19908364fc9',
+  abandonment_cleanup_block_draft_update_v5: '829704af602ccf10c73592b2f0c2a54c8aba1b76abe3d526de498c7ee2f62b0f',
+  abandonment_cleanup_block_source_update_v5: 'f79586f62a34dc1aa03ea6ea0561b1b7e2a3a0865878b9e04fb32f4eb0505e99',
+  abandonment_cleanup_block_commit_update_v5: '1c8c1058feb0665e13be45fc0771fb85de2ce40408b91b616045cf71ba2fac2c',
+  abandonment_cleanup_block_attempt_update_v5: '136f9eafe5078c8131bf6178ceda3302aedc8263962a83a2e2ccd50918d9303e',
+} as const;
+
+const IMPORT_DRAFT_TRIGGER_SQL = {
+  abandonment_cleanup_block_draft_insert: `CREATE TRIGGER abandonment_cleanup_block_draft_insert
+    BEFORE INSERT ON import_drafts
+    WHEN EXISTS (
+      SELECT 1 FROM import_abandonment_cleanup_intents i
+      WHERE i.object_digest = NEW.object_digest
+    )
+    BEGIN
+      SELECT RAISE(ABORT, 'ABANDONMENT_CLEANUP_PENDING');
+    END`,
+  abandonment_cleanup_block_draft_update: `CREATE TRIGGER abandonment_cleanup_block_draft_update
+    BEFORE UPDATE ON import_drafts
+    WHEN EXISTS (
+        SELECT 1 FROM import_abandonment_cleanup_intents i
+        WHERE i.draft_id = OLD.draft_id
+      )
+      OR EXISTS (
+        SELECT 1 FROM import_abandonment_cleanup_intents i
+        WHERE i.object_digest = NEW.object_digest
+      )
+    BEGIN
+      SELECT RAISE(ABORT, 'ABANDONMENT_CLEANUP_PENDING');
+    END`,
+  abandonment_cleanup_block_draft_update_v5: `CREATE TRIGGER abandonment_cleanup_block_draft_update_v5
+    BEFORE UPDATE ON import_drafts
+    WHEN EXISTS (
+      SELECT 1 FROM import_abandonment_cleanup_intents i
+      WHERE i.draft_id = OLD.draft_id OR i.draft_id = NEW.draft_id
+        OR i.object_digest = OLD.object_digest OR i.object_digest = NEW.object_digest
+    )
+    BEGIN
+      SELECT RAISE(ABORT, 'ABANDONMENT_CLEANUP_PENDING');
+    END`,
 } as const;
 
 const SCHEMA_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
@@ -658,6 +733,11 @@ const SCHEMA_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
     'source_version_id>source_versions.source_version_id:NO ACTION/NO ACTION/NONE',
   ],
   import_commits: ['draft_id>import_drafts.draft_id:NO ACTION/NO ACTION/NONE'],
+  import_commit_attempts: ['draft_id>import_drafts.draft_id:NO ACTION/CASCADE/NONE'],
+  import_abandonment_cleanup_intents: [
+    'draft_id>import_drafts.draft_id:NO ACTION/NO ACTION/NONE',
+    'object_digest>content_objects.object_digest:NO ACTION/NO ACTION/NONE',
+  ],
   staged_import_snapshots: ['draft_id>import_drafts.draft_id:NO ACTION/CASCADE/NONE'],
   staged_import_blocks: ['draft_id>staged_import_snapshots.draft_id:NO ACTION/CASCADE/NONE'],
   manuscript_revisions: [
@@ -735,6 +815,13 @@ export class BoundedStoreError extends Error {
   constructor(readonly code: string, message: string) {
     super(message);
     this.name = 'BoundedStoreError';
+  }
+}
+
+export class BoundedStoreFatalError extends Error {
+  constructor(cause: unknown) {
+    super('Bounded SQLite transaction rollback failed.', { cause });
+    this.name = 'BoundedStoreFatalError';
   }
 }
 
@@ -849,7 +936,7 @@ function quotedIdentifier(identifier: string): string {
   return `"${identifier.replaceAll('"', '""')}"`;
 }
 
-function schemaObjectSql(db: DatabaseSync, type: 'table' | 'index', name: string): string | undefined {
+function schemaObjectSql(db: DatabaseSync, type: 'table' | 'index' | 'trigger', name: string): string | undefined {
   const row = db.prepare('SELECT sql FROM sqlite_schema WHERE type = ? AND name = ?').get(type, name) as SqlRow | undefined;
   if (row === undefined) return undefined;
   requireBounded(typeof row.sql === 'string', 'SCHEMA_MIGRATION_FAILED', `数据库结构对象 ${name} 无有效 SQL。`);
@@ -866,10 +953,14 @@ function foreignKeySignature(row: SqlRow): string {
   return `${row.from}>${row.table}.${row.to}:${row.on_update}/${row.on_delete}/${row.match}`;
 }
 
-function requireExactTableSchema(db: DatabaseSync, name: string, expectedSql: string): void {
+function requireExactTableSchema(db: DatabaseSync, name: string, expectedSql: string | ReadonlyArray<string>): void {
   const actualSql = schemaObjectSql(db, 'table', name);
+  const expectedCandidates = typeof expectedSql === 'string' ? [expectedSql] : expectedSql;
+  const matchedExpectedSql = actualSql === undefined
+    ? undefined
+    : expectedCandidates.find((candidate) => canonicalSchemaSql(actualSql) === canonicalSchemaSql(candidate));
   requireBounded(
-    actualSql !== undefined && canonicalSchemaSql(actualSql) === canonicalSchemaSql(expectedSql),
+    matchedExpectedSql !== undefined,
     'SCHEMA_MIGRATION_FAILED',
     `数据库表 ${name} 的类型、空值、键、唯一性、检查约束或 SQL 不兼容。`,
   );
@@ -885,7 +976,7 @@ function requireExactTableSchema(db: DatabaseSync, name: string, expectedSql: st
   );
   const actualColumns = (db.prepare(`PRAGMA table_xinfo(${quotedIdentifier(name)})`).all() as SqlRow[])
     .map(tableColumnSignature);
-  const expectedColumns = expectedTableColumnSignatures(name, expectedSql);
+  const expectedColumns = expectedTableColumnSignatures(name, matchedExpectedSql);
   requireBounded(
     actualColumns.length === expectedColumns.length &&
       actualColumns.every((signature, index) => signature === expectedColumns[index]),
@@ -924,10 +1015,27 @@ function requireExactIndexSchema(
     'SCHEMA_MIGRATION_FAILED',
     '数据库显式索引集合不兼容。',
   );
-  const triggers = db.prepare("SELECT name FROM sqlite_schema WHERE type = 'trigger'").all() as SqlRow[];
-  requireBounded(triggers.length === 0, 'SCHEMA_MIGRATION_FAILED', '数据库表包含未授权触发器。');
   const views = db.prepare("SELECT name FROM sqlite_schema WHERE type = 'view'").all() as SqlRow[];
   requireBounded(views.length === 0, 'SCHEMA_MIGRATION_FAILED', '数据库包含未授权视图。');
+}
+
+function requireExactTriggerSchema(db: DatabaseSync): void {
+  const expectedNames = new Set(Object.keys(CONTINUITY_TRIGGER_DIGESTS));
+  const actual = db.prepare("SELECT name, sql FROM sqlite_schema WHERE type = 'trigger'").all() as SqlRow[];
+  requireBounded(
+    actual.length === expectedNames.size &&
+      actual.every((row) => typeof row.name === 'string' && expectedNames.has(row.name)),
+    'SCHEMA_MIGRATION_FAILED',
+    '数据库触发器集合不兼容。',
+  );
+  for (const [name, expectedDigest] of Object.entries(CONTINUITY_TRIGGER_DIGESTS)) {
+    const actualSql = schemaObjectSql(db, 'trigger', name);
+    requireBounded(
+      actualSql !== undefined && sha256(canonicalSchemaSql(actualSql)) === expectedDigest,
+      'SCHEMA_MIGRATION_FAILED',
+      `数据库触发器 ${name} 不兼容。`,
+    );
+  }
 }
 
 function requireExactSearchSchema(db: DatabaseSync): void {
@@ -970,12 +1078,13 @@ function requireExactSearchSchema(db: DatabaseSync): void {
 
 function requireExactSchema(
   db: DatabaseSync,
-  expectedTables: Readonly<Record<string, string>>,
+  expectedTables: Readonly<Record<string, string | ReadonlyArray<string>>>,
   expectedIndexes: Readonly<Record<string, string>>,
   includeSearch: boolean,
 ): void {
   for (const [name, expectedSql] of Object.entries(expectedTables)) requireExactTableSchema(db, name, expectedSql);
   requireExactIndexSchema(db, expectedIndexes);
+  requireExactTriggerSchema(db);
   const expectedNames = new Set([
     ...Object.keys(expectedTables),
     ...(includeSearch ? SEARCH_SCHEMA_TABLES : []),
@@ -990,24 +1099,16 @@ function requireExactSchema(
   if (includeSearch) requireExactSearchSchema(db);
 }
 
-function hasSchemaObject(db: DatabaseSync, name: string): boolean {
-  return db.prepare('SELECT 1 present FROM sqlite_schema WHERE name = ? LIMIT 1').get(name) !== undefined;
-}
-
-function requireSourceSchema(db: DatabaseSync, version: number): void {
-  if (version === LEGACY_BOUNDED_SCHEMA_VERSION) {
-    requireExactSchema(db, FULL_SOURCE_V2_SCHEMA_SQL, SOURCE_V2_INDEX_SQL, false);
-    return;
-  }
-  if (version === OFFSET_INDEX_SOURCE_VERSION) {
-    requireExactSchema(db, FULL_SOURCE_V6_SCHEMA_SQL, SOURCE_V6_INDEX_SQL, true);
-    return;
-  }
-  const includeSignoff = version !== SIGNOFF_MIGRATION_SOURCE_VERSION || hasSchemaObject(db, 'milestone_signoff_records');
-  const expectedTables = Object.fromEntries(
-    Object.entries(FULL_SOURCE_V3_TO_V5_SCHEMA_SQL).filter(([name]) => includeSignoff || name !== 'milestone_signoff_records'),
+function requireContinuitySchema(db: DatabaseSync): void {
+  requireExactSchema(
+    db,
+    {
+      ...FULL_CONTINUITY_SCHEMA_SQL,
+      import_drafts: [COMMON_SCHEMA_SQL.import_drafts, MIGRATED_CONTINUITY_IMPORT_DRAFT_SQL],
+    },
+    CONTINUITY_INDEX_SQL,
+    false,
   );
-  requireExactSchema(db, expectedTables, SOURCE_V6_INDEX_SQL, true);
 }
 
 function requireTargetSchema(db: DatabaseSync): void {
@@ -1303,10 +1404,40 @@ function transact<T>(db: DatabaseSync, operation: () => T): T {
     try {
       db.exec('ROLLBACK');
     } catch (rollbackError) {
-      throw new AggregateError([error, rollbackError], 'SQLite rollback failed.');
+      throw new BoundedStoreFatalError(new AggregateError([error, rollbackError], 'SQLite rollback failed.'));
     }
     throw error;
   }
+}
+
+function recreateImportDraftTable(db: DatabaseSync): void {
+  const replacementSql = COMMON_SCHEMA_SQL.import_drafts.replace(
+    'CREATE TABLE import_drafts (',
+    'CREATE TABLE import_drafts_v6 (',
+  );
+  requireBounded(replacementSql !== COMMON_SCHEMA_SQL.import_drafts, 'SCHEMA_MIGRATION_FAILED', '导入草稿目标结构无法建立。');
+  db.exec(`
+    PRAGMA legacy_alter_table = ON;
+    DROP TRIGGER abandonment_cleanup_block_draft_insert;
+    DROP TRIGGER abandonment_cleanup_block_draft_update;
+    DROP TRIGGER abandonment_cleanup_block_draft_update_v5;
+    ${replacementSql};
+    INSERT INTO import_drafts_v6(
+      draft_id, selection_token, state, draft_version, display_name, object_digest, selected_path,
+      reviewed_title, reviewed_target_choice_id, review_digest, committed_commit_id,
+      staged_at, reviewed_at, committed_at
+    )
+    SELECT draft_id, selection_token, state, draft_version, display_name, object_digest, selected_path,
+           reviewed_title, reviewed_target_choice_id, review_digest, committed_commit_id,
+           staged_at, reviewed_at, committed_at
+    FROM import_drafts;
+    DROP TABLE import_drafts;
+    ALTER TABLE import_drafts_v6 RENAME TO import_drafts;
+    ${IMPORT_DRAFT_TRIGGER_SQL.abandonment_cleanup_block_draft_insert};
+    ${IMPORT_DRAFT_TRIGGER_SQL.abandonment_cleanup_block_draft_update};
+    ${IMPORT_DRAFT_TRIGGER_SQL.abandonment_cleanup_block_draft_update_v5};
+    PRAGMA legacy_alter_table = OFF;
+  `);
 }
 
 function recreateRevisionTable(db: DatabaseSync): void {
@@ -1637,37 +1768,6 @@ function validateRevisionOffsets(db: DatabaseSync, revisionId: string): void {
   requireBounded(blocks > 0, 'SCHEMA_MIGRATION_FAILED', '不可变修订版缺少内容块。');
 }
 
-function validateLegacyBranchOffsets(db: DatabaseSync, branchId: string): void {
-  requirePersistedBlockTextBounds(db, 'working_blocks', branchId, 'SCHEMA_MIGRATION_FAILED', '工作稿文字超出有界校验范围。');
-  let position = 0;
-  let offset = 0;
-  let blocks = 0;
-  while (true) {
-    const rows = db.prepare(
-      `SELECT position, text, start_offset, grapheme_length FROM working_blocks
-       WHERE branch_id = ? AND position > ? ORDER BY position LIMIT ?`,
-    ).all(branchId, position, MIGRATION_BATCH) as SqlRow[];
-    if (rows.length === 0) break;
-    for (const row of rows) {
-      position = asNumber(row.position);
-      const length = stagedBlockLength(asString(row.text));
-      requireBounded(
-        asNumber(row.start_offset) === offset && asNumber(row.grapheme_length) === length,
-        'SCHEMA_MIGRATION_FAILED',
-        '工作稿的派生偏移校验失败。',
-      );
-      offset += length;
-      blocks += 1;
-    }
-  }
-  const state = one(
-    db.prepare('SELECT total_graphemes FROM branch_working_state WHERE branch_id = ?').all(branchId) as SqlRow[],
-    'SCHEMA_MIGRATION_FAILED',
-    '工作稿状态缺失。',
-  );
-  requireBounded(blocks > 0 && asNumber(state.total_graphemes) === offset, 'SCHEMA_MIGRATION_FAILED', '工作稿总偏移校验失败。');
-}
-
 function rebuildWorkingOffsetIndex(db: DatabaseSync, branchId: string): number {
   requirePersistedBlockTextBounds(db, 'working_blocks', branchId, 'SCHEMA_MIGRATION_FAILED', '工作稿文字超出有界索引范围。');
   db.prepare('DELETE FROM working_offset_nodes WHERE branch_id = ?').run(branchId);
@@ -1781,28 +1881,11 @@ function validateSchemaAuthorityIds(db: DatabaseSync): void {
   forEachSchemaId(db, 'branch_working_state', 'branch_id', () => undefined);
 }
 
-function repairAllDerivedOffsets(db: DatabaseSync): void {
-  validateStagedDraftInventory(db);
-  forEachSchemaId(db, 'staged_import_snapshots', 'draft_id', (draftId) => {
-    validateStagedDraftContentTruth(db, draftId, false);
-    rebuildStagedDraftDerived(db, draftId);
-  });
-  forEachSchemaId(db, 'manuscript_revisions', 'revision_id', (revisionId) => rebuildRevisionOffsets(db, revisionId));
-  forEachSchemaId(db, 'branch_working_state', 'branch_id', (branchId) => rebuildBranchDerived(db, branchId));
-}
-
 function validateAllDerivedOffsets(db: DatabaseSync): void {
   validateStagedDraftInventory(db);
   forEachSchemaId(db, 'staged_import_snapshots', 'draft_id', (draftId) => validateStagedDraftDerived(db, draftId));
   forEachSchemaId(db, 'manuscript_revisions', 'revision_id', (revisionId) => validateRevisionOffsets(db, revisionId));
   forEachSchemaId(db, 'branch_working_state', 'branch_id', (branchId) => validateBranchOffsets(db, branchId));
-}
-
-function validateAllLegacyDerivedOffsets(db: DatabaseSync): void {
-  validateStagedDraftInventory(db);
-  forEachSchemaId(db, 'staged_import_snapshots', 'draft_id', (draftId) => validateStagedDraftDerived(db, draftId));
-  forEachSchemaId(db, 'manuscript_revisions', 'revision_id', (revisionId) => validateRevisionOffsets(db, revisionId));
-  forEachSchemaId(db, 'branch_working_state', 'branch_id', (branchId) => validateLegacyBranchOffsets(db, branchId));
 }
 
 function validateMilestoneSignoffTruth(db: DatabaseSync): void {
@@ -2251,95 +2334,10 @@ function createWorkingOffsetTable(db: DatabaseSync): void {
   db.exec(TARGET_SCHEMA_SQL.working_offset_nodes);
 }
 
-function retireMutableOffsetColumns(db: DatabaseSync): void {
-  db.exec(`
-    DROP INDEX working_blocks_global_offset;
-    ALTER TABLE working_blocks DROP COLUMN start_offset;
-    ALTER TABLE manuscript_outline DROP COLUMN start_offset;
-  `);
-}
-
-function recreateTransientSearchBindingTables(db: DatabaseSync): void {
-  db.exec(`
-    DELETE FROM manuscript_replacement_previews;
-    DELETE FROM manuscript_search_sessions;
-    DROP TABLE manuscript_replacement_matches;
-    DROP TABLE manuscript_replacement_previews;
-    DROP TABLE manuscript_search_results;
-    DROP TABLE manuscript_search_sessions;
-    ${TARGET_SCHEMA_SQL.manuscript_search_sessions};
-    ${TARGET_SCHEMA_SQL.manuscript_search_results};
-    ${TARGET_SCHEMA_SQL.manuscript_replacement_previews};
-    ${TARGET_SCHEMA_SQL.manuscript_replacement_matches};
-    ${TARGET_INDEX_SQL.replacement_matches_block};
-  `);
-}
-
-function migrateCandidateSchemaToCurrent(db: DatabaseSync, sourceVersion: number): void {
-  const foreignKeys = one(db.prepare('PRAGMA foreign_keys').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取引用校验状态。');
-  requireBounded(asNumber(foreignKeys.foreign_keys) === 1, 'SCHEMA_INVALID', '数据库引用校验未启用。');
-  transact(db, () => {
-    validateSchemaAuthorityIds(db);
-    validateAllCommandHistory(db);
-    if (sourceVersion === SIGNOFF_MIGRATION_SOURCE_VERSION && !hasSchemaObject(db, 'milestone_signoff_records')) {
-      const milestones = asNumber(one(db.prepare('SELECT count(*) total FROM milestone_versions').all() as SqlRow[], 'SCHEMA_MIGRATION_FAILED', '无法读取候选里程碑。').total);
-      requireBounded(milestones === 0, 'SCHEMA_MIGRATION_FAILED', '候选 v3 数据库含有无法证明签核事实的里程碑。');
-      createMilestoneSignoffTable(db);
-    } else {
-      validateMilestoneSignoffTruth(db);
-    }
-    createWorkingOffsetTable(db);
-    recreateTransientSearchBindingTables(db);
-    retireMutableOffsetColumns(db);
-    reclaimOrphanedSearchSessions(db);
-    repairAllDerivedOffsets(db);
-    repairLegacyHistoryRoots(db);
-    requireTargetSchema(db);
-    validateAllDerivedOffsets(db);
-    validateLegacyHistoryRoots(db);
-    validateAllCommandHistory(db);
-    validateMilestoneSignoffTruth(db);
-    const violations = db.prepare('PRAGMA foreign_key_check').all();
-    requireBounded(violations.length === 0, 'SCHEMA_MIGRATION_FAILED', '数据库迁移后的引用校验失败。');
-    db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
-  });
-  const migratedVersion = one(db.prepare('PRAGMA user_version').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取数据库版本。');
-  requireBounded(asNumber(migratedVersion.user_version) === SCHEMA_VERSION, 'SCHEMA_MIGRATION_FAILED', '数据库版本迁移未完成。');
-  const restoredForeignKeys = one(db.prepare('PRAGMA foreign_keys').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取引用校验状态。');
-  requireBounded(asNumber(restoredForeignKeys.foreign_keys) === 1, 'SCHEMA_INVALID', '数据库引用校验未保持启用。');
-}
-
-function migrateOffsetIndexSchemaToCurrent(db: DatabaseSync): void {
-  const foreignKeys = one(db.prepare('PRAGMA foreign_keys').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取引用校验状态。');
-  requireBounded(asNumber(foreignKeys.foreign_keys) === 1, 'SCHEMA_INVALID', '数据库引用校验未启用。');
-  transact(db, () => {
-    validateSchemaAuthorityIds(db);
-    validateAllLegacyDerivedOffsets(db);
-    validateLegacyHistoryRoots(db);
-    validateAllCommandHistory(db);
-    validateMilestoneSignoffTruth(db);
-    createWorkingOffsetTable(db);
-    forEachSchemaId(db, 'branch_working_state', 'branch_id', (branchId) => rebuildWorkingOffsetIndex(db, branchId));
-    retireMutableOffsetColumns(db);
-    requireTargetSchema(db);
-    validateAllDerivedOffsets(db);
-    validateLegacyHistoryRoots(db);
-    validateAllCommandHistory(db);
-    validateMilestoneSignoffTruth(db);
-    const violations = db.prepare('PRAGMA foreign_key_check').all();
-    requireBounded(violations.length === 0, 'SCHEMA_MIGRATION_FAILED', '偏移索引迁移后的引用校验失败。');
-    db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
-  });
-  const migratedVersion = one(db.prepare('PRAGMA user_version').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取数据库版本。');
-  requireBounded(asNumber(migratedVersion.user_version) === SCHEMA_VERSION, 'SCHEMA_MIGRATION_FAILED', '偏移索引迁移未完成。');
-}
-
 export function initializeBoundedSchema(db: DatabaseSync): void {
   const version = asNumber(one(db.prepare('PRAGMA user_version').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取数据库版本。').user_version);
   requireBounded(
-    version === LEGACY_BOUNDED_SCHEMA_VERSION || version === SIGNOFF_MIGRATION_SOURCE_VERSION ||
-      version === OFFSET_REPAIR_SOURCE_VERSION || version === SEARCH_BINDING_SOURCE_VERSION ||
-      version === OFFSET_INDEX_SOURCE_VERSION || version === SCHEMA_VERSION,
+    version === CONTINUITY_SCHEMA_VERSION || version === SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2358,18 +2356,7 @@ export function initializeBoundedSchema(db: DatabaseSync): void {
     });
     return;
   }
-  requireSourceSchema(db, version);
-  if (version === OFFSET_INDEX_SOURCE_VERSION) {
-    migrateOffsetIndexSchemaToCurrent(db);
-    return;
-  }
-  if (
-    version === SIGNOFF_MIGRATION_SOURCE_VERSION || version === OFFSET_REPAIR_SOURCE_VERSION ||
-    version === SEARCH_BINDING_SOURCE_VERSION
-  ) {
-    migrateCandidateSchemaToCurrent(db, version);
-    return;
-  }
+  requireContinuitySchema(db);
   const legacyAlterTable = asNumber(one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table);
   db.exec('PRAGMA foreign_keys = OFF');
   let migrationError: unknown;
@@ -2378,8 +2365,11 @@ export function initializeBoundedSchema(db: DatabaseSync): void {
     const disabledForeignKeys = one(db.prepare('PRAGMA foreign_keys').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取引用校验状态。');
     requireBounded(asNumber(disabledForeignKeys.foreign_keys) === 0, 'SCHEMA_INVALID', '无法暂时停用引用校验以迁移数据库。');
     validateSchemaAuthorityIds(db);
+    recreateImportDraftTable(db);
     recreateRevisionTable(db);
     db.exec(`
+      ${TARGET_BASE_SCHEMA_SQL.import_ingest_blocks};
+
       ALTER TABLE staged_import_snapshots ADD COLUMN character_count INTEGER NOT NULL DEFAULT 0 CHECK(character_count >= 0);
       ALTER TABLE staged_import_blocks ADD COLUMN start_offset INTEGER NOT NULL DEFAULT 0 CHECK(start_offset >= 0);
       ALTER TABLE staged_import_blocks ADD COLUMN grapheme_length INTEGER NOT NULL DEFAULT 0 CHECK(grapheme_length >= 0);

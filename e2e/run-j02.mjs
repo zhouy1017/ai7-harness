@@ -273,6 +273,12 @@ async function importAndOpen(renderer) {
   await assertRenderer(renderer, `!document.querySelector('#accept-import-degradation') && Array.from(document.querySelectorAll('[data-fidelity-category]')).every((row) => row.dataset.fidelityCategory === 'round-trip-export' || row.querySelector('.status-preserved'))`, 'clean-fidelity');
   await clickButton(renderer, '新建图书并导入稿件', 'commit-click');
   await waitFor(renderer, `document.querySelector('[data-screen="imported"]')`, 'imported', 300_000);
+  await waitFor(
+    renderer,
+    `document.documentElement.dataset.ai7ImportCompletionAcknowledged === 'true' && !Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '打开稿件')?.disabled`,
+    'completion-acknowledged-before-open',
+    300_000,
+  );
   await clickButton(renderer, '打开稿件', 'editor-open');
   await waitFor(renderer, `document.querySelector('[data-screen="editor"]')`, 'editor');
 }
