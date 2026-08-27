@@ -56,9 +56,9 @@ Design truth precedence above does not grant action. Apply this matrix after res
 | Role | May authorize or execute | May not do |
 | --- | --- | --- |
 | **Owner** | Grant or expand product and design scope; authorize architecture or semantic change, implementation planning/start, Foundation Replacement, software/repository release or repository-publication scope, and other owner-reserved decisions | A decision is not integrated merely because it was stated; durable changes still enter their authority-owning record and normal integration path |
-| **Commander** | Within owner-authorized scope, shape Change Briefs, dispatch Workers, authorize a bounded internal replacement that preserves every listed boundary, integrate through pull requests, and execute approved repository external actions | Expand product/design/implementation scope; authorize Foundation Replacement; convert candidate material into canonical truth; transfer Commander authority through provider fallback |
+| **Commander** | Within owner-authorized scope, shape Change Briefs, dispatch Workers and Reviewers, authorize a bounded internal replacement that preserves every listed boundary, integrate through pull requests, and execute approved repository external actions | Expand product/design/implementation scope; authorize Foundation Replacement; convert candidate material into canonical truth; transfer Commander authority through provider fallback |
 | **Worker** | Execute the exact brief in its own worktree and branch; stop and report when the envelope is insufficient | Expand scope, self-authorize replacement, integrate, push, publish, or take external actions |
-| **Independent Reviewer** | Perform bounded read-only advisory review when dispatched | Author the reviewed change, turn advice into a gate, integrate, or take external actions |
+| **Independent Reviewer** | Perform bounded fresh-context, strictly read-only, non-author advisory review when directly dispatched by the Commander | Author the reviewed change; dispatch, delegate to, or spawn another agent; turn advice into a gate; integrate; or take external actions |
 
 Owner authorization defines the allowed purpose and outer scope. Commander authority controls repository dispatch, integration, and external execution inside that scope. Neither substitutes for the other.
 
