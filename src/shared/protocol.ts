@@ -61,15 +61,15 @@ export type ImportFidelityOutcome = 'clean-import-no-round-trip' | 'degraded-imp
 
 export type NewBookImportTargetChoiceId = 'new-book' | 'new-book-distinct-intended-work';
 
-export interface ExactImportMatchProjection {
+export interface ImportIdentityFindingProjection {
   bookId: string;
   bookTitle: string;
   sourceVersionId: string;
   importRecordId: string;
-  identityClasses: ReadonlyArray<{
-    kind: 'immutable-original' | 'parsed-content-structure';
-    label: '精确原始文件身份' | '精确解析内容与结构身份';
-  }>;
+  identityClass: {
+    kind: 'immutable-original' | 'parsed-content-structure' | 'filename-collision';
+    label: '精确原始文件身份' | '发现相同内容' | '名称相同，内容不同';
+  };
 }
 
 export interface StagedImportProjection {
@@ -86,7 +86,7 @@ export interface StagedImportProjection {
     value: string;
     sourceLabel: 'DOCX 标题元数据' | '文件名';
   };
-  exactMatches: ReadonlyArray<ExactImportMatchProjection>;
+  identityFindings: ReadonlyArray<ImportIdentityFindingProjection>;
   targetChoices: ReadonlyArray<{
     id: NewBookImportTargetChoiceId;
     label: '新建图书' | '新建图书（作为不同作品）';
@@ -107,7 +107,7 @@ export interface ReviewBeforeImportProjection {
     confirmedTitle: string;
   };
   source: StagedImportProjection['source'];
-  exactMatches: ReadonlyArray<ExactImportMatchProjection>;
+  identityFindings: ReadonlyArray<ImportIdentityFindingProjection>;
   fidelity: ReadonlyArray<FidelityCategoryProjection>;
   recordsToCreate: ReadonlyArray<string>;
   nonEffects: ReadonlyArray<string>;
