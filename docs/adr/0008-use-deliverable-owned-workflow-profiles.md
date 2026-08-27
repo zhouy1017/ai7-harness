@@ -5,3 +5,5 @@ AI7 keeps the Book as the source, privacy, and mutation authority, but assigns e
 ## Later refinements
 
 [ADR 0038](./0038-separate-delivery-package-identity-from-local-export.md) keeps Delivery Package content identity separate from format/path-bound local exports. [ADR 0040](./0040-preserve-post-designation-maintenance-as-versioned-cases.md) gives the maintenance phase stable versioned cases without rewriting Publication Versions or claiming external recall.
+
+[ADR 0045](./0045-preserve-native-dsh-artifacts-behind-ai7-authority-sidecars.md) partially supersedes only the Workflow definition and technical-logic carrier: it moves those concerns to exact DSH-native artifacts without selecting a Profile/Bundle/Plugin mapping. Deliverable ownership, the durable AI7 Workflow Instance, phases, gates, artifacts, signoff and deterministic Effect-safe transitions remain unchanged.

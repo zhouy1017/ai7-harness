@@ -1,32 +1,34 @@
 # Current handoff
 
-Issue [#86](https://github.com/zhouy1017/ai7-harness/issues/86) owns the accepted-but-unintegrated documentation normalization for the completed 23-question design interview. The published remote handoff branch is `codex/docs/86-design-handoff`, created from exact `dev@2f8471f0d80ffa79f3cbdf1d79b0f0491697ca63`; the Issue's latest handoff comment records its exact remote head.
+[Issue #86](https://github.com/zhouy1017/ai7-harness/issues/86) owns the bounded documentation normalization on `codex/docs/86-design-handoff`, based on exact `dev@2f8471f0d80ffa79f3cbdf1d79b0f0491697ca63`. On 2026-08-27 the Owner accepted the completed result and separately authorized the Commander to integrate it through a pull request to `dev`, then update PRD Issue #28 and the affected implementation Issues and define one next-stage development target.
 
-The full accepted decision checkpoint, consistency repairs, domain-object closure, current-document impact audit, proposed successor ADR set, unresolved details, and exact safety invariants are in [`PROGRESS.md`](PROGRESS.md). Treat that record and the working UI context/glossary diffs as candidate inputs under Issue #86, not as target-qualified canonical authority. Do not read `docs/archive/` unless a current authority record names an exact blocking artifact.
+Resolve authority from the exact tree being read. The Issue #86 successor is repository-current only in an exact integrated `dev` commit containing this revision; elsewhere it remains accepted-but-unintegrated. It is design/documentation authority only and is not evidence of product implementation or permission for Provider calls, dependency/plugin installation, manuscript or derivative handling, release, `main`, or any other external action.
 
-## Current branch contents
+## Completed normalization
 
-- `PROGRESS.md`: the complete current checkpoint and proposed normalization map.
-- `docs/ui-ux-v2/CONTEXT.md`: an unintegrated working definition of the Book-bound DSH-composed Agent Workspace.
-- `docs/ui-ux-v2/GLOSSARY.md`: the corresponding package-local index/collision entry.
-- `HANDOFF.md`: this one-time cold-start router.
+- Added root ADRs 0045–0048 and UI ADRs 0015–0017 while preserving superseded ADR history and exact full/partial successor relations.
+- Added Provider Processing v3 and active-policy-set v3. Trusted launch authority maps development/CI→immutable v1, fixture recording→immutable v2, and ordinary production→v3; External Export remains immutable v1.
+- Reconciled domain, architecture, UI/UX, glossary, constraints and routing around native DSH artifacts, covered analysis, Background Analysis Enrollment and exact single-use AI7 Apply.
+- Preserved native DSH definition/technical ownership and AI7 selection, authority-sidecar and durable Workflow business-state ownership.
+- Kept setup, installation and enablement non-authorizing; imported updates inert until adoption or the narrow Artifact Update Rule; new autonomous Provider-backed manuscript analysis dependent on active matching Enrollment.
+- Recorded implementation truth without changing code: the repository remains the provider-free J-01 tracer, and its seeded AI7 `WORKFLOW_PROFILE` / `workflow_profiles.definition_json` is legacy future-migration work rather than successor implementation evidence.
+- Replaced branch-static status text with target-qualified, merge-safe wording. Immutable Provider v1/v2, active-set v1/v2 and External Export v1 owners remain byte-identical.
 
-No product code, dependency, schema implementation, Provider call, plugin installation, manuscript/derivative, implementation Issue decomposition, pull request, merge, release, or `main` change is included or authorized.
+## Validation and review
 
-## Safe next action
+- `origin/dev` was re-fetched at the final pre-integration checkpoint and still resolved to `2f8471f0d80ffa79f3cbdf1d79b0f0491697ca63`; no target drift had occurred.
+- Seven policy JSON/schema pairs and every active-set v3 digest validate; changed Markdown links resolve; `git diff --check` passes.
+- UI structure remains 888 unique requirement IDs, exactly J-01–J-16 and 17 UI ADRs; all changed paths are documentation/routing only.
+- Three bounded same-provider, read-only reviews found no ADR/policy, domain/architecture/implementation or UI/routing contradiction. Independence is reduced because no cross-provider review was used.
 
-One successor writer may continue Issue #86 on this exact branch. Read `AGENTS.md`, this file, `PROGRESS.md`, and the Issue Change Brief; then use `docs/agents/README.md` to load only the named current authority owners. Recheck current `origin/dev` before preparing any pull request and stop for re-scoping if target-qualified authority has drifted. Normalize documentation only within the Issue's structural budget, preserve immutable ADR/Policy history, and update `PROGRESS.md` after every sub-task.
+## Integration and lifecycle route
 
-## Suggested skills
+Verify the live GitHub Issue/PR and exact `origin/dev` state rather than inferring merge state from this file. If Issue #86 is not integrated, the authorized next action is commit, push, pull request validation and squash merge to `dev`. After verified integration, update PRD Issue #28 and only the affected implementation Issues, choose one bounded next-stage outcome, and perform the Issue #86 lifecycle sweep through its own scoped Issue/Change Brief: archive the consumed outgoing root `PROGRESS.md` and `HANDOFF.md`, index that one archive node, and replace the root routes. Do not enter `docs/archive/` before that lifecycle trigger is confirmed.
 
-- `domain-modeling`: place each new or migrated object under one exact context owner and guard naming collisions.
-- `codebase-design`: keep the DSH-native carrier / AI7 authority-sidecar seam deep and avoid parallel runtime models.
-- `review`: perform an optional read-only Standards and Spec review after the bounded documentation normalization is complete.
-- `openai-docs`: use only if current Codex Skill/plugin behavior must be reverified; pair it with current primary DSH and Claude documentation rather than community summaries.
-- `grill-with-docs`: use only if the Owner reopens a material decision; the existing 23-question interview is complete and must not be restarted by default.
+No product implementation begins until an exact next Issue/Change Brief is selected and target-qualified against the integrated `dev` commit. Do not install dependencies/plugins, call Providers, add manuscripts/derivatives, release, or touch `main` without separate authorization.
 
 ## Resume prompt
 
 ```text
-Continue GitHub Issue #86 on branch codex/docs/86-design-handoff as the single successor writer. Start from AGENTS.md, HANDOFF.md, PROGRESS.md, and the Issue's full Change Brief; use docs/agents/README.md to load only the exact current authority owners and do not enter docs/archive/. Treat the 23-question decisions and current UI diffs as accepted-but-unintegrated candidate inputs, not canonical dev authority. First verify branch HEAD, current origin/dev, worktree status, and target-qualified authority. Then perform only the bounded documentation normalization: explicit successor ADRs, new immutable production Provider Processing/active-set version, execution/editorial domain ownership, architecture/UI routing, and glossary/context updates described by Issue #86. Preserve v1/v2 policies and superseded ADR history; do not implement product code, install dependencies or plugins, call Providers, add manuscripts/derivatives, decompose implementation Issues, create/merge a PR, release, or touch main without separate authorization. Keep Provider setup and artifact install non-authorizing, require active Background Analysis Enrollment for background Provider work, keep imported updates inert until adoption or an Artifact Update Rule, and preserve the single-use exact AI7 Apply boundary. Update PROGRESS.md after each sub-task and stop if the Change Brief must expand or target authority has drifted.
+Resolve Issue #86, its pull request, exact branch HEAD, origin/dev and worktree status. If the Owner-approved documentation successor is not yet integrated, finish only its authorized commit/push/PR checks and squash merge to dev. If it is integrated, update PRD Issue #28 and only the affected implementation Issues, define one bounded next-stage development target, then complete the separately scoped Issue #86 root-document lifecycle sweep. Preserve immutable Provider v1/v2 and External Export v1 history, superseded ADR history, native DSH definition ownership with AI7 durable-state authority, non-authorizing setup/install, active Enrollment for new autonomous Provider analysis, inert imported updates, and exact single-use AI7 Apply. Do not implement product code, install dependencies/plugins, call Providers, add manuscripts/derivatives, release or touch main.
 ```

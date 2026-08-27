@@ -1,6 +1,8 @@
 # AI7 V2 UI/UX glossary
 
-Status: **accepted V2 package-local bilingual index; root contexts and `GLOSSARY.md` retain shared definition ownership**
+Status: **Owner-approved Issue #86 V2 package-local bilingual successor index; repository-current only in an exact integrated `dev` commit containing this revision; accepted-but-unintegrated elsewhere; root contexts and `GLOSSARY.md` retain shared definition ownership**
+
+Shared artifact, analysis, Enrollment and Apply meanings route to root contexts; this index names only their UI projections. The revision is repository-current only in an exact integrated `dev` commit containing it and accepted-but-unintegrated elsewhere.
 
 | English term | Preferred Simplified Chinese | Definition owner |
 | --- | --- | --- |
@@ -77,19 +79,19 @@ Status: **accepted V2 package-local bilingual index; root contexts and `GLOSSARY
 | Task Input (Manuscript Checkpoint purpose) | 任务输入 | [AI7 Editorial](../domain/editorial/CONTEXT.md) |
 | Task Input Revision Preparation | 为任务保存修订版 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Prepare Task Action | 准备任务 | [AI7 V2 UI/UX](./CONTEXT.md) |
-| Task Skill Recommendation | 任务技能建议 | [AI7 V2 UI/UX](./CONTEXT.md) |
+| Native DSH Artifact Recommendation | 原生 DSH 构件建议 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Reusable Procedure Capture | 保存为可复用工序 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Reusable Procedure Classification Preview | 可复用工序分类预览 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Procedure Capture Source Set | 工序捕获来源集合 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Reusable Procedure Extraction Preview | 可复用工序提取预览 | [AI7 V2 UI/UX](./CONTEXT.md) |
-| Automation Center | 自动化中心 | [AI7 V2 UI/UX](./CONTEXT.md) |
-| Automation Version Group | 自动化版本组 | [AI7 V2 UI/UX](./CONTEXT.md) |
+| Artifact and Automation Management Projection | 构件与自动化管理视图 | [AI7 V2 UI/UX](./CONTEXT.md) |
+| Artifact or Automation Revision Group | 构件或自动化修订组 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Version-linked Work and Delivery View | 版本关联工作与交付视图 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Latest Eligible Version Resolution | 最新可用版本解析 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Version Removal Preview | 版本删除影响预览 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Historical Version Stub | 历史版本存根 | [AI7 V2 UI/UX](./CONTEXT.md) |
-| Task Skill Catalog Availability | 任务技能目录可见范围 | [AI7 V2 UI/UX](./CONTEXT.md) |
-| Task Skill Recommendation Applicability | 任务技能推荐适用范围 | [AI7 V2 UI/UX](./CONTEXT.md) |
+| Native DSH Artifact Catalog Availability | 原生 DSH 构件目录可见范围 | [AI7 V2 UI/UX](./CONTEXT.md) |
+| Native DSH Artifact Recommendation Applicability | 原生 DSH 构件建议适用范围 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Workflow Profile Draft | 工作流程方案草案 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Developer Capability Proposal | 开发能力建议 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Progressive Task Fields | 渐进任务字段 | [AI7 V2 UI/UX](./CONTEXT.md) |
@@ -230,6 +232,18 @@ Status: **accepted V2 package-local bilingual index; root contexts and `GLOSSARY
 | Apply Outcome Recovery | 正在确认应用结果 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Unresolved Apply Outcome | 应用结果待确认 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Reverse Apply Effect | 反向稿件应用动作 | [AI7 V2 UI/UX](./CONTEXT.md) |
+| AI7 Apply | AI7 正式应用 | [AI7 Execution](../domain/execution/CONTEXT.md) |
+| Background Analysis Enrollment | 后台分析登记 | [AI7 Execution](../domain/execution/CONTEXT.md) |
+| Manuscript Analysis Overview | 稿件分析概览 | [AI7 V2 UI/UX](./CONTEXT.md) |
+| Analysis Coverage and Gap View | 分析覆盖与缺口视图 | [AI7 V2 UI/UX](./CONTEXT.md) |
+| Analysis Result Revision History | 分析结果修订历史 | [AI7 V2 UI/UX](./CONTEXT.md) |
+| Analysis Update Controls | 分析更新操作 | [AI7 V2 UI/UX](./CONTEXT.md) |
+| Analysis Feedback Card | 分析反馈卡 | [AI7 V2 UI/UX](./CONTEXT.md) |
+| Coverage Manifest | 覆盖清单 | [AI7 Editorial](../domain/editorial/CONTEXT.md) |
+| Analysis Unit | 分析单元 | [AI7 Editorial](../domain/editorial/CONTEXT.md) |
+| Manuscript Analysis Result Set | 稿件分析结果集 | [AI7 Editorial](../domain/editorial/CONTEXT.md) |
+| Manuscript Analysis Result Set Revision | 稿件分析结果集修订版 | [AI7 Editorial](../domain/editorial/CONTEXT.md) |
+| Analysis Quality Metric | 分析质量度量 | [AI7 Editorial](../domain/editorial/CONTEXT.md) |
 | Fact-check Lens | 事实核查工作入口 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Manuscript Assertion Marker | 稿件声明标记 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Factual Review Result Item | 事实核查结果项 | [AI7 V2 UI/UX](./CONTEXT.md) |
@@ -369,24 +383,24 @@ Status: **accepted V2 package-local bilingual index; root contexts and `GLOSSARY
 | Task Input (Manuscript Checkpoint purpose) | Context-bound Task Composer, Task Input Revision Preparation, Task Intent, or a new checkpoint type. |
 | Task Input Revision Preparation | A new checkpoint type, Journal Save, Milestone Version, Signoff, or Run dispatch. |
 | Prepare Task Action | Model send, Run Authorization, Task dispatch, or Effect Approval. |
-| Task Skill Recommendation | Task Skill Activation, installed code, Capability Grant, Model Role selection, or authority. |
-| Reusable Procedure Capture | Macro recorder, saved generic automation, Plugin installation, or Task execution. |
+| Native DSH Artifact Recommendation | Scoped enablement, per-Run activation, installed code, Capability Grant, Model Role selection, or authority. |
+| Reusable Procedure Capture | Macro recorder, saved generic automation, DSH Plugin installation, or Task execution. |
 | Reusable Procedure Classification Preview | Persisted asset, authority grant, one interchangeable skill/workflow/plugin type, or validation result. |
 | Procedure Capture Source Set | Transcript, recent activity, whole Book history, hidden Harness event set, or ambient learning scope. |
 | Reusable Procedure Extraction Preview | Saved asset, replay, copied Task Outcome, Run Authorization, or validation result. |
-| Automation Center | Generic automation runtime, persisted superclass, Plugin marketplace, or authority owner. |
-| Automation Version Group | Book Series, mutable latest asset, merged version history, or one cross-type lifecycle. |
+| Artifact and Automation Management Projection | Generic automation runtime, persisted superclass, ungoverned Plugin marketplace, final screen label, or authority owner. |
+| Artifact or Automation Revision Group | Book Series, mutable latest asset, merged native/AI7 records, or one cross-type lifecycle. |
 | Version-linked Work and Delivery View | Copied output archive, retrieval scope, data ownership, or inherited Run authority. |
 | Latest Eligible Version Resolution | Highest candidate version, silent migration, authorized fallback, or mutation of an exact pin. |
 | Version Removal Preview | Cascade delete, history erasure, uninstall receipt, or generic destructive confirmation. |
 | Historical Version Stub | Executable package, enabled version, restored content, or replacement for linked authoritative records. |
-| Task Skill Catalog Availability | Run Source Scope, Provider availability, Capability Grant, or Task Skill Activation. |
-| Task Skill Recommendation Applicability | Read permission, enablement, mandatory compatibility, or prohibition on manual selection. |
-| Workflow Profile Draft | Workflow Instance, installed profile version, Task Skill Candidate, or Harness Workflow. |
-| Developer Capability Proposal | Plugin, Capability Implementation, development approval, install action, or user capability grant. |
+| Native DSH Artifact Catalog Availability | Run Source Scope, Provider availability, trust, compatibility, Capability Grant, or per-Run activation. |
+| Native DSH Artifact Recommendation Applicability | Read permission, scoped enablement, mandatory compatibility, or prohibition on manual selection. |
+| Workflow Profile Draft | Workflow Instance, DSH Profile as business state, native artifact revision alone, or DSH workflow. |
+| Developer Capability Proposal | DSH Plugin, Capability Implementation, development approval, install action, or user capability grant. |
 | Progressive Task Fields | A mandatory multi-page wizard, Plan Preview, or hidden prompt content. |
 | Quick Start | Missing Task Intent/Plan records, automatic Effect authority, generic send, or bypass of Run Authorization. |
-| Default Execution Rule | A standing Run Authorization, Task Skill Enablement, capability expansion, auto-apply, or Public Release Permission. |
+| Default Execution Rule | Background Analysis Enrollment, a standing Run Authorization, artifact enablement, capability expansion, auto-apply, or Public Release Permission. |
 | Task Pattern Confidence | Factual Verification, model confidence score, Proposal Decision, or Effect Approval. |
 | Default-executed Run | A scheduled background job, Run without authorization, or automatically accepted/applied result. |
 | Task Target Card | Run Source Scope, provider-bound data, current tab, or permission to mutate every displayed object. |
@@ -417,7 +431,7 @@ Status: **accepted V2 package-local bilingual index; root contexts and `GLOSSARY
 | Usable Candidate Stream | A default provider stream for ordinary Runs, authoritative Editorial Artifact, accepted Proposal, factual evidence, or applied mutation. |
 | Measured Run Progress | Model confidence, elapsed-time estimate, fake percentage, Workflow completion, or delivery readiness. |
 | Book-grouped Run Overview | A new global ledger, a generic thread list, Working Corpus, or authority across Books. |
-| Current Book Run Switcher | Execution priority, pause/resume control, Task Skill selector, or conversation navigation. |
+| Current Book Run Switcher | Execution priority, pause/resume control, native-artifact selector, or conversation navigation. |
 | Foreground Run Projection | OS foreground execution, scheduler priority, exclusive provider use, or manuscript authority. |
 | Background Answer Wait | Network disconnection, capacity queue, pause, cancellation, provider inactivity, or permission to show streamed content outside the active dialogue. |
 | Run Capacity Wait | A running provider call, a paused/cancelled Run, guaranteed queue order, or completion estimate. |
@@ -473,7 +487,7 @@ Status: **accepted V2 package-local bilingual index; root contexts and `GLOSSARY
 | Data and Storage Summary | Agent Data Root authority, local export location, filesystem manager, backup status, or data migration command. |
 | Data Location Exception State | Editing persistence failure, Provider outage, generic low-disk warning, recovery attention, or export error. |
 | Data Location Remediation Guidance | Arbitrary data-root selection, external export, credential migration, proof of completed move, or filesystem permission escalation. |
-| Limited Shortcut Remapping | Full macro/keybinding system, text-editor key override, authority grant, accessibility toggle, or Task Skill. |
+| Limited Shortcut Remapping | Full macro/keybinding system, text-editor key override, authority grant, accessibility toggle, or native DSH artifact. |
 | IME-safe Command Guard | Configurable shortcut, visual composition underline, focus trap, read-only state, or optional accessibility mode. |
 | Discoverable Action Entry | Permanent toolbar button, shortcut-only command, icon without label/tooltip, hover-only control, or authority record. |
 | Workspace Density Mode | Manuscript font size, operating-system display scaling, application zoom, hidden content, or responsive breakpoint. |
@@ -522,6 +536,18 @@ Status: **accepted V2 package-local bilingual index; root contexts and `GLOSSARY
 | Apply Outcome Recovery | Retry, repeated dispatch, provider fallback, generic spinner, or an external-outcome classification. |
 | Unresolved Apply Outcome | Confirmed failure, safe non-commit, ordinary delay, or permission to repeat the Effect. |
 | Reverse Apply Effect | Cancellation, history deletion, ordinary undo stack entry, receipt mutation, or automatic rollback. |
+| AI7 Apply | Proposal Decision, Effect Approval alone, Run Authorization, artifact/rule/Enrollment authority, generic file write, or reusable mutation permission. |
+| Background Analysis Enrollment | Model Service setup, import, artifact enablement, Default Execution Rule, general scheduler/learning permission, or an exact Run by itself. |
+| Manuscript Analysis Overview | Retrieval results, one complete flag, factual truth dashboard, Workflow phase, or generic task history. |
+| Analysis Coverage and Gap View | Top-K retrieval list, editor window, scalar progress, semantic-completeness proof, or factual assurance. |
+| Analysis Result Revision History | Mutable cache, Task Outcome history, DSH Session transcript, Editorial Artifact history, or automatic promotion. |
+| Analysis Update Controls | Generic refresh, retrieval reranking, implicit checkpoint dispatch, or permission to reuse stale results silently. |
+| Analysis Feedback Card | Generic rating, silence-as-approval, Factual Verification decision, Learning Eligibility, or artifact mutation. |
+| Coverage Manifest | Table of contents, retrieval ranking, editor window, or semantic/factual completeness proof. |
+| Analysis Unit | Manuscript Block, Manuscript Retrieval Chunk, editor window, Exact Fetch range, or fixed 32-block page. |
+| Manuscript Analysis Result Set | Task Outcome, Editorial Artifact, retrieval index/cache, Workflow Instance, or current manuscript truth. |
+| Manuscript Analysis Result Set Revision | Mutable cache record, model transcript, current Manuscript Revision, or automatic Editorial Artifact. |
+| Analysis Quality Metric | Delivery Quality Metric, factual-verification disposition, learning authority, or cross-Book retrieval permission. |
 | Fact-check Lens | A truth dashboard, global source scope, generic search, model confidence panel, or Correction Proposal list. |
 | Manuscript Assertion Marker | A factual verdict, current text authority, comment, Proposal marker, or decorative underline. |
 | Factual Review Result Item | The authoritative Editorial Error Finding, a correction, Effect, Review Decision, or truth score. |
@@ -547,7 +573,7 @@ Status: **accepted V2 package-local bilingual index; root contexts and `GLOSSARY
 | Deliverable Workflow Lens | Harness Workflow, global task board, Book-wide Workflow Instance, or a new authoritative ledger. |
 | Action-first Workflow Summary | Progress score, generic notification inbox, auto-advancement, or Signoff readiness alone. |
 | Parallel Phase View | Run concurrency, arbitrary phase order, one phase's internal checklist, or a linear stepper. |
-| Workflow Profile Pin Display | Silent migration control, Task Skill version, Harness profile, or mutable current default. |
+| Workflow Profile Pin Display | Silent migration control, DSH Profile as business state, native artifact revision alone, or mutable current default. |
 | Workflow Gate Card | Generic approval, Signoff card, phase completion, or a checklist whose display mutates state. |
 | Gate Readiness | Gate passage/failure, Review Decision, Signoff readiness, or automatic transition authority. |
 | Workflow Gate Disposition | Readiness status, Review Decision, phase status, Signoff, or Delivery permission. |

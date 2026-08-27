@@ -1,6 +1,8 @@
 # AI7 Execution
 
-The AI7 product language for Task Intents, Task Skills, Task Ledger records, authority, Effects, and their exact bindings to Harness execution, kept distinct from Harness runtime primitives.
+Status: **Issue #86 Owner-approved Execution successor context; repository-current only in an exact integrated `dev` commit containing this revision; accepted-but-unintegrated elsewhere**
+
+The AI7 product language for Task Intents, native DSH artifacts, Task Ledger records, authority, Effects, and their exact bindings to Harness execution, kept distinct from Harness runtime primitives.
 
 ## Language
 
@@ -64,11 +66,13 @@ A new, non-destructive Policy Document version or diff authored by a user or AI 
 _Avoid_: In-place policy edit, active policy
 
 **Policy Revision Activation**:
-The audited transition that makes one Proposed Policy Revision the active Policy Document version, either through explicit user acceptance or through non-expansive automatic calibration inside a user-approved envelope.
+The audited developer-reviewed transition that makes one Proposed Policy Revision the active Policy Document version. Under current authority, explicit user acceptance or non-expansive automatic calibration is insufficient without the developer review required by ADR 0018.
 _Avoid_: File save, agent self-authorization
 
+The existing ADRs disagree about whether even non-expansive Policy revisions may auto-activate. Until a separately authorized supersession resolves that conflict, the stricter developer-review rule in ADR 0018 governs every Policy revision; no native artifact, Artifact Update Rule, Default Execution Rule, or Background Analysis Enrollment can activate one.
+
 **Task Intent**:
-The exact goal, Task Skill, inputs, Book or deliverable context, document/revision/selection pins, and expected Task Outcome of one requested task.
+The exact goal, selected native DSH artifacts and revisions where applicable, inputs, Book or deliverable context, document/revision/selection pins, and expected Task Outcome of one requested task.
 _中文_: 任务意图
 _Avoid_: Prompt, Run, Execution Plan
 
@@ -162,48 +166,55 @@ The exact persisted Harness Session sequence through which one Event Projection 
 _中文_: 持久会话水位线
 _Avoid_: Run Continuation Checkpoint, completion proof, progress
 
-**Task Skill**:
-An immutable declarative workflow package defining editorial purpose, instructions, contracts, requested AI7 Capabilities, eligible scopes, Model Roles, Effect gates, and validation requirements.
-_中文_: 任务技能
-_Avoid_: Harness Skill, Cordis Plugin, prompt fragment
+**Native DSH Artifact**:
+A DSH-defined Skill, Plugin, Bundle, Profile, or Agent Preset preserved in its native carrier and identity while AI7 separately records provenance, compatibility, scope, authority ceilings, audit, rollback, and exact use. The AI7 records do not form a parallel artifact package or second runtime.
+_中文_: 原生 DSH 构件
+_Avoid_: AI7 Task Skill Package, authority grant, flattened extension file
 
-**Task Skill Manifest**:
-The machine-validatable authority-request and compatibility contract of one Task Skill Package; it grants nothing by itself.
-_中文_: 任务技能清单文件
-_Avoid_: Skill catalog, Capability Grant, editable trust claim
+**DSH Skill**:
+A native declarative DSH instructional artifact containing its own supported instructions, resources, contracts, examples, or validation material. Its presence, acquisition, validation, enablement, or Session visibility grants no AI7 authority.
+_中文_: DSH 技能
+_Avoid_: Task Skill Package, DSH Plugin, Capability Grant
 
-**Task Skill Package**:
-The immutable manifest, instructions, resources, examples, and validation material distributed as one content-addressed unit.
-_中文_: 任务技能包
-_Avoid_: Capability Implementation, mutable skill folder
+**DSH Plugin**:
+A native DSH packaging, extension, or composition carrier that may distribute Skills and composition with optional code. AI7 may pin it as a technical dependency or, where applicable, a Capability Implementation, but it is never itself a Skill semantic unit, Policy Document, Model Provider, credential, authority source, or user-facing product brand. A Plugin carrying lifecycle hooks, dependency scripts, native code, or other executable behavior remains restricted until the applicable separate executable-admission and sandbox authority exists.
+_中文_: DSH 插件
+_Avoid_: DSH Skill, extension marketplace authority, product feature brand
 
-**Task Skill Candidate**:
-A complete non-executing proposed Task Skill Package awaiting independent admission, installation, validation, and enablement.
-_中文_: 候选任务技能
-_Avoid_: Installed Task Skill Version, enabled skill
+**DSH Bundle**:
+A native DSH packaging or composition carrier that groups exact compatible artifacts for technical reuse and may include optional code without merging artifact identities or conferring enablement, Run, Provider, Effect, background, or Apply authority. Any hooks, scripts, dependencies, native code, or other executable behavior remains subject to separate executable-admission and sandbox authority.
+_中文_: DSH 构件包
+_Avoid_: Delivery Package, authority bundle, AI7 workflow instance
 
-**Task Skill Trust Tier**:
-A provenance-derived class such as bundled or local-user that limits admission and maximum capability without asserting lifecycle state or current authority.
-_中文_: 任务技能信任等级
-_Avoid_: Admission State, Task Skill Enablement, manifest trustLevel
+**DSH Profile**:
+A native DSH configuration artifact that selects or configures behavior-shaping components and may own or select an exact native Workflow definition and technical logic. It does not own AI7's durable Workflow Instance, phase/gate state, signoff, scheduling, or business transitions.
+_中文_: DSH 配置档案
+_Avoid_: Editorial Workflow Profile, Capability Profile, authority profile
 
-**Admission State**:
-The lifecycle state recording whether exact Task Skill bytes are rejected, installed-disabled, validated, enabled, disabled, or retired.
-_中文_: 技能准入状态
-_Avoid_: Task Skill Trust Tier, runtime status
+**DSH Agent Preset**:
+A native DSH artifact selecting an agent's technical behavior composition, prompts, tools, Profiles, Bundles, or defaults. It cannot create AI7 scope or authority and is not an AI7 Agent identity.
+_中文_: DSH 代理预设
+_Avoid_: AI7 Agent, Run Authorization, standing permission
 
-**Installed Task Skill Version**:
-An immutable app-managed version identified by Task Skill identity, semantic version, and content digest.
-_中文_: 已安装任务技能版本
-_Avoid_: Source folder, latest version, Task Skill Activation
+AI7 preserves the exact native identity, revision, and carrier bytes of each acquired artifact. Separate AI7-owned metadata supplies provenance, compatibility/conversion findings, scope, authority ceilings, audit, and rollback. The final names and schemas for that metadata, catalog sources, conversion/reconciliation records, scoped enablement, and per-Run activation remain implementation decisions. Discovery, acquisition and pinning, compatibility/conversion validation, scoped enablement, exact per-Run activation, and formal Manuscript Apply are distinct stages: acquisition and validation execute no artifact code; installation or enablement grants no Run, manuscript, Provider, credential, network, Effect, background, or Apply authority.
 
-**Task Skill Enablement**:
-The explicit state allowing one validated Installed Task Skill Version to request authority up to an exact Authority Ceiling in future tasks.
-_中文_: 任务技能启用状态
-_Avoid_: Run Authorization, Task Skill Activation, Effect Approval
+**Source Skill Snapshot**:
+The immutable exact source bytes and provenance captured when a foreign Skill is imported, retained independently from every AI7-compatible working revision.
+_中文_: 源技能快照
+_Avoid_: executable working copy, latest upstream Skill, mutable import
+
+**Imported Skill Working Revision**:
+One versioned, minimally derived DSH-valid working revision produced from a Source Skill Snapshot for AI7 compatibility, with transformation provenance and no authority beyond what AI7 separately grants.
+_中文_: 导入技能工作修订
+_Avoid_: Source Skill Snapshot, silent conversion, upstream replacement
+
+**Artifact Update Rule**:
+An explicit revocable rule that may adopt a reconciled Imported Skill Working Revision only when the candidate is trusted, conflict-free, validator-clean, and non-expansive relative to the currently executable revision. Reconciliation output is otherwise inert; expansive changes return to explicit review. The rule cannot update a code-bearing DSH Plugin or core DSH package, grant new authority, or restore authority revoked after the predecessor revision.
+_中文_: 构件更新规则
+_Avoid_: automatic upstream update, Plugin update channel, standing expansion authority
 
 **Authority Ceiling**:
-The maximum capabilities, eligible scope kinds, Model Role needs, and Effect classes one Installed Task Skill Version may ever request.
+The maximum capabilities, eligible scope kinds, Model Role needs, and Effect classes AI7 permits one exact native DSH artifact revision to request; it is AI7-owned metadata, not a native-artifact claim or current Run authority.
 _中文_: 权限上限
 _Avoid_: Capability Grant, Run Authorization, standing permission
 
@@ -213,9 +224,9 @@ _中文_: AI7 能力
 _Avoid_: Harness Tool, Capability Implementation, feature screen
 
 **Capability Implementation**:
-One pinned installed implementation of an AI7 Capability, kept separate from Task Skill packages and runtime authority.
+One pinned installed implementation of an AI7 Capability, kept separate from native DSH instructional artifacts and runtime authority.
 _中文_: 能力实现
-_Avoid_: Task Skill, Model Provider, Harness Skill Provider
+_Avoid_: DSH Skill, Model Provider, Harness Skill Provider
 
 **Harness Tool**:
 A model-visible invocation adapter in the Harness tool pipeline; its visibility or successful call does not establish AI7 product authority or outcome proof.
@@ -223,34 +234,16 @@ _中文_: Harness 工具
 _Avoid_: AI7 Capability, Capability Grant, Effect Receipt
 
 **Capability Grant**:
-Exact authority for one Task Skill Activation to invoke an AI7 Capability under stated operation and scope constraints.
+Exact authority in one immutable per-Run activation binding to invoke an AI7 Capability under stated operation and scope constraints.
 _中文_: 能力使用许可
 _Avoid_: Authority Ceiling, Execution Grant, Effect Approval
 
-**Task Skill Activation**:
-The immutable per-Run intersection of Task Skill identity, trust and enablement ceilings, Plan Envelope, Run Source Scope, Provider Resolution Plan, policies, Capability Grants, and credential references.
-_中文_: 任务技能运行激活
-_Avoid_: Task Skill Enablement, Harness Skill Projection, Harness Session
+The per-Run activation binding intersects exact native artifact revisions, their AI7-managed provenance/compatibility/scope/ceiling data, the Plan Envelope, Run Source Scope, Provider Resolution Plan, applicable policies, Capability Grants, and credential references. DSH Session or Plugin membership is not such a binding. Its final record name and schema remain deferred.
 
-**Harness Skill Projection**:
-The non-authoritative instructional and catalog representation of an admitted AI7 Task Skill in the Harness Skill registry.
-_中文_: Harness 技能投影
-_Avoid_: Task Skill Package, Capability Implementation, authority grant
-
-**Third-Party DSH Plugin**:
-An externally authored open-source DSH plugin admitted into AI7's composition for an identified capability or composition need. It is a code-bearing Capability Implementation or composition dependency, never a Task Skill, Policy Document, Model Provider, credential, Authority Ceiling, Capability Grant, or user-facing brand. It supplies mechanism only; capability expansion never self-activates.
-_中文_: 第三方 DSH 插件
-_Avoid_: Task Skill, extension marketplace item, Capability Grant, product feature brand
-
-**Plugin Admission Snapshot**:
-The dated immutable record of a Third-Party DSH Plugin's repository identity, open-source license, GitHub stars, qualifying update commits, latest qualifying update date, selected version/commit, artifact identity, and notice obligations when AI7 selects that version. These are admission facts, not continuing runtime inputs or scheduled re-measurements; another upstream version requires another snapshot.
-_中文_: 插件准入快照
-_Avoid_: Health check, quality score, evaluation report, monitoring signal
-
-**Local Plugin Pin**:
-The immutable AI7-controlled binding from one admitted plugin identity/version to its exact upstream commit, local artifact digest, manifest entry, lockfile entry, provenance, and rollback predecessor. Ranges, branches, mutable tags, and `latest` are forbidden; AI7 performs no automatic upstream update.
-_中文_: 本地插件版本锁定
-_Avoid_: Dependency range, update channel, automatic update policy
+**DSH Analysis Contract**:
+A versioned DSH-native declaration of an analysis kind's purpose, coverage and Analysis Unit requirements, Model Roles, reducer composition, typed outputs, evidence, and validation expectations. AI7 separately authorizes each Run, enforces Book/source/provider boundaries, and persists result provenance; the contract itself grants no dispatch, background, Provider, manuscript, Effect, or Apply authority.
+_中文_: DSH 分析契约
+_Avoid_: Background Analysis Enrollment, Manuscript Analysis Result Set, Workflow Instance
 
 **Implementation Assumption**:
 A design-stage expectation about DSH or platform behavior paired with the bounded response if implementation finds otherwise. It records uncertainty without creating an evidence task, validation gate, authority, or product promise.
@@ -263,7 +256,7 @@ _中文_: 任务运行来源范围
 _Avoid_: Working Corpus, Outbound Data Category, mutation authority
 
 **Model Role**:
-A provider-independent function actually needed by a Task Skill, such as planner, writer, reviewer, embedder, or reranker.
+A provider-independent function actually needed by a Task Intent, native DSH artifact, or DSH Analysis Contract, such as planner, writer, reviewer, embedder, or reranker.
 _中文_: 模型角色
 _Avoid_: Model Provider, model name, Provider Binding
 
@@ -287,7 +280,7 @@ The Model Role for challenge or explicitly authorized high-consequence work. Its
 _中文_: 前沿模型角色
 _Avoid_: Second harness, silent fallback, escape hatch, truth oracle
 
-These four named roles remain Model Roles: Task Skills declare hard requirements and soft preferences, never a provider, model, endpoint, or credential. A default binding is a configuration fact, never factual authority; output remains a proposal or research lead.
+These four named roles remain Model Roles: Task Intents, native DSH artifacts, and DSH Analysis Contracts may declare hard requirements and soft preferences, never a provider, model, endpoint, or credential. A default binding is a configuration fact, never factual authority; output remains a proposal or research lead.
 
 **Model-role Requirement**:
 A non-negotiable capability, context, policy, or compatibility condition for one used Model Role.
@@ -345,12 +338,12 @@ _中文_: 凭据引用
 _Avoid_: API key, secret value, environment variable
 
 **Credential Broker**:
-The AI7 authority that maps a Task Skill Activation, AI7 Capability, Run or Domain Command, and logical credential slot to an approved Credential Reference and releases the value only to the final consumer.
+The AI7 authority that maps an exact per-Run activation binding, AI7 Capability, Run or Domain Command, and logical credential slot to an approved Credential Reference and releases the value only to the final consumer.
 _中文_: 凭据代理服务
 _Avoid_: Protected Secret Store, credential catalog, prompt injection
 
 **Protected Secret Store**:
-The operating-system-protected store holding secret values behind Credential References without exposing them to Task Skills or model-visible state.
+The operating-system-protected store holding secret values behind Credential References without exposing them to native DSH artifacts or model-visible state.
 _中文_: 安全凭据库
 _Avoid_: Credential Broker, ordinary configuration, project data
 
@@ -364,14 +357,14 @@ A Policy Document deciding which Outbound Data Categories and scopes may be sent
 _中文_: 模型服务数据处理策略
 _Avoid_: External Export Policy, Public Release Permission
 
-_Target-qualified current route_: [`provider-processing-policy.v2.json`](../../policies/provider-processing-policy.v2.json), with its [policy-specific schema](../../policies/provider-processing-policy.v2.schema.json), [own human projection](../../policies/provider-processing-policy.v2.md), and exact [active-set v2 pin](../../policies/active-policy-set.v2.json). Immutable [`v1`](../../policies/provider-processing-policy.v1.json) remains predecessor history with its unchanged [schema](../../policies/provider-processing-policy.v1.schema.json) and [projection](../../policies/provider-processing-policy.md). V2's internal `lifecycleStatus: "active"` becomes repository-current/canonical only at an exact integrated `dev` commit where that same-tree v2 pin matches identity, version, path, and SHA-256; on any unintegrated task branch it is `accepted-but-unintegrated`.
+_Target-qualified accepted route_: [`active-policy-set.v3.json`](../../policies/active-policy-set.v3.json) binds exactly one trusted operational scope per launch: development/CI to immutable Provider Processing [`v1`](../../policies/provider-processing-policy.v1.json), fixture recording to immutable [`v2`](../../policies/provider-processing-policy.v2.json), and ordinary production to [`v3`](../../policies/provider-processing-policy.v3.json). Their schemas and human projections remain beside each immutable JSON record. The closed scope map is repository-current/canonical only at an exact integrated `dev` commit where every same-tree pin matches scope, identity, version, path, and SHA-256; elsewhere it is `accepted-but-unintegrated`. Scope is bound only by trusted build/launch authority, with no ordinary setting, environment, Provider, artifact/Plugin, or cross-scope fallback selector. The selection contract claims no executable selector or Provider path.
 
 **External Export Policy**:
 A Policy Document governing transfer of an exact deliverable revision, source, or package across AI7-controlled storage to a named non-provider destination, including a user-chosen local filesystem destination. It is evaluated for each export Effect and is never a Delivery Package field, standing overwrite grant, Public Release Permission, or outcome proof.
 _中文_: 对外导出策略
 _Avoid_: Provider Processing Policy, Delivery Package authority, Effect Approval, Effect Receipt, Public Release Permission
 
-_Target-qualified current route_: [`external-export-policy.v1.json`](../../policies/external-export-policy.v1.json), with its [policy-specific schema](../../policies/external-export-policy.v1.schema.json), [human projection](../../policies/external-export-policy.md), and exact [active-set v2 pin](../../policies/active-policy-set.v2.json). Its internal `lifecycleStatus: "active"` becomes repository-current/canonical only at an exact integrated `dev` commit where that same-tree v2 pin matches identity, version, path, and SHA-256; on any unintegrated task branch it is `accepted-but-unintegrated`.
+_Target-qualified accepted route_: [`external-export-policy.v1.json`](../../policies/external-export-policy.v1.json), with its [policy-specific schema](../../policies/external-export-policy.v1.schema.json), [human projection](../../policies/external-export-policy.md), and exact unchanged [active-set v3 pin](../../policies/active-policy-set.v3.json). Its internal `lifecycleStatus: "active"` is repository-current/canonical only at an exact integrated `dev` commit where that same-tree pin matches identity, version, path, and SHA-256; elsewhere it is `accepted-but-unintegrated`.
 
 <a id="local-export-preparation"></a>
 **Local Export Preparation**:
@@ -380,19 +373,36 @@ _中文_: 本地导出准备
 _Avoid_: Delivery Package, mutable file-dialog state, standing overwrite permission, Effect Approval, Effect Receipt, exported file
 
 **Bundled Promotion Gate**:
-The repository and release process that alone may assign bundled provenance to a validated Task Skill.
+The repository and release process that alone may assign bundled provenance to a validated native DSH artifact revision.
 _中文_: 内置技能晋级关口
-_Avoid_: Task Skill Enablement, in-product trust escalation, self-promotion
+_Avoid_: scoped artifact enablement, in-product trust escalation, self-promotion
 
 **Run Authorization**:
-The user's decision to start one exact Task Intent under one exact Plan Envelope digest, including its provider, data, source scope, exact Run Budget Ceiling state, adaptation, and other reviewed bindings.
+The exact authority record permitting one Run for one Task Intent and Plan Envelope digest, including its provider, data, source scope, exact Run Budget Ceiling state, adaptation, and other reviewed bindings. A newly user-initiated Task may receive it through the user's direct decision or a matching active Default Execution Rule. A new autonomous background manuscript-analysis dispatch instead requires a matching active Background Analysis Enrollment and creates its own exact Run. Moving the same authorized Run into the background changes presentation only and does not create a new origin.
 _中文_: 任务运行授权
 _Avoid_: Execution Grant, Effect Approval, standing permission
+
+Provider setup, credential configuration, manuscript import, artifact acquisition or enablement, DSH Session/Plugin membership, a Default Execution Rule without a newly user-initiated matching Task, and a Background Analysis Enrollment without a matching exact dispatch each remain non-authorizing. Every new idle, scheduled, post-checkpoint, import-triggered, or cross-Run Provider dispatch without a newly user-initiated Task requires a still-active matching Enrollment.
+
+**Default Execution Rule**:
+An explicit revocable rule that may issue the exact Run Authorization for a newly user-initiated matching Task without a second start decision, inside the rule's frozen task, artifact, scope, provider/data, budget, and capability constraints. It never originates, schedules, or expands work by itself.
+_中文_: 默认执行规则
+_Avoid_: scheduler, background authority, standing Provider permission
+
+**Background Analysis Enrollment**:
+An explicit revocable authority allowing new background Runs for named manuscript-analysis kinds within exact Book/source, Provider/data, budget, cadence or trigger, and DSH Analysis Contract bounds. Each dispatch remains separately recorded and policy-gated. Enrollment grants no formal manuscript mutation, external Effect, general background learning, background Policy work, or AI7 Apply, and setup, import, acquisition, installation, or enablement never creates or activates it.
+_中文_: 后台分析登记
+_Avoid_: Provider setup, artifact enablement, Default Execution Rule, general scheduler permission
 
 **Execution Grant**:
 One-shot authority for an agent to execute one frozen guarded step within an authorized Run and unchanged Plan Envelope.
 _中文_: 单次执行许可
 _Avoid_: Run Authorization, durable Effect Approval, editorial acceptance
+
+**AI7 Apply**:
+The only AI7 boundary through which a formal agent-originated manuscript diff may commit to authoritative Manuscript state. One explicitly confirmed single-use Apply binds an exact Book, base Manuscript Revision pin, diff digest, and targets; immediately rechecks drift, requires explicit editor reconciliation or renewal when the base changed, and records the exact outcome. No native artifact, Artifact Update Rule, Default Execution Rule, Background Analysis Enrollment, Run, DSH Session, Plugin, or prior confirmation can contain, inherit, reuse, or broaden Apply authority.
+_中文_: AI7 正式应用
+_Avoid_: Proposal Decision, generic file write, reusable mutation permission, Effect Approval alone
 
 **Effect**:
 One declared authoritative or externally visible action whose identity, authority, outcome, and replay safety are tracked independently from other actions in a Run, workflow, or Domain Command.
@@ -425,7 +435,7 @@ _中文_: 人工结果确认
 _Avoid_: Effect Receipt without qualification, arbitrary override
 
 **Domain Command**:
-An exact request to change AI7 business state through its owning domain boundary; a direct deterministic Domain Command need not create a Task Skill Run.
+An exact request to change AI7 business state through its owning domain boundary; a direct deterministic Domain Command need not create a model-driven Run.
 _中文_: 领域命令
 _Avoid_: Prompt, Harness tool call, Task Intent
 
@@ -485,7 +495,7 @@ _中文_: 智能体数据根目录
 _Avoid_: Run Source Scope, a general filesystem grant, a proven whole-process OS sandbox, a repository working tree
 
 **Agent Behavior Asset**:
-A versioned prompt, instructional text, task guidance, or bounded ranking parameter that shapes output quality and never grants authority. Agent-proposable, with auto-activation limited to non-expansive calibration inside a user-approved envelope.
+A versioned prompt, instructional text, task guidance, or bounded ranking parameter—possibly carried by a native DSH Skill, Bundle, Profile, or Agent Preset—that shapes output quality and never grants authority. An agent may propose a revision, but imported Skill reconciliation remains inert until explicit adoption or a matching Artifact Update Rule, and authority-expanding change always returns to review.
 _中文_: 智能体行为资产
 _Avoid_: Policy Document, House Editorial Memory, model weights, hidden runtime configuration
 

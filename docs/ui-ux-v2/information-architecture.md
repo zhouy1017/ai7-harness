@@ -1,14 +1,16 @@
 # AI7 V2 information architecture
 
-Status: **Owner-accepted V2 information architecture on `dev`; not implementation evidence**
+Status: **Owner-approved Issue #86 successor; repository-current only in an exact integrated `dev` commit containing this revision; accepted-but-unintegrated elsewhere; not implementation evidence**
 
 ## Accepted organizing model
 
 AI7 uses a **Book-anchored Workbench** with three levels:
 
 1. **Book anchor** — the stable source, privacy, mutation, and editorial context visible in navigation and work context.
-2. **Active Work Object** — one manuscript, related Editorial Deliverable, proposal comparison, evidence review, workflow record, or other authoritative object in the central surface.
-3. **Task Context Layer** — task capture, Plan Preview, Run activity, clarification, proposals, and outcomes attached to the exact work object rather than organized as peer conversations.
+2. **Active Work Object** — one manuscript, related Editorial Deliverable, proposal comparison, evidence review, analysis Result Set, workflow record, or other authoritative object in the central surface.
+3. **Task Context Layer** — task capture, Plan Preview, Run activity, clarification, covered-analysis status, proposals, and outcomes attached to the exact work object rather than organized as peer conversations.
+
+An explicitly entered **Book-bound Agent Workspace** may temporarily occupy the primary central presentation slot while preserving the prior Active Work Object. It is a DSH-composed presentation inside the AI7 shell, not another authority object or a generic chat root.
 
 ```text
 AI7 desktop shell
@@ -17,8 +19,7 @@ AI7 desktop shell
 │  │  ├─ 待我处理
 │  │  ├─ 书库
 │  │  ├─ 书系
-│  │  ├─ 质量与学习
-│  │  └─ 自动化中心
+│  │  └─ 质量与学习
 │  ├─ Book Convenience View
 │  │  ├─ pinned Books
 │  │  └─ recent Books
@@ -26,8 +27,13 @@ AI7 desktop shell
 │  └─ bottom application/account area
 │     └─ 设置
 ├─ central Active Work Object
+│  └─ or explicit Book-bound Agent Workspace presentation
 ├─ contextual supporting surface
-└─ context-bound task entry
+├─ context-bound task entry
+├─ reachable native-artifact / Rule management projection
+│  └─ final global label and placement deferred
+└─ separately disclosed Background Analysis Enrollment presentation
+   └─ final entry point, label and compact controls deferred
 ```
 
 This is a relationship map, not accepted screen geometry. The Codex-referential direction permits a compact collapsible left surface, dominant center, optional contextual right surface, and bottom task entry, but exact proportions and behavior remain open.
@@ -39,10 +45,25 @@ This is a relationship map, not accepted screen geometry. The Codex-referential 
 - A Task may be reached from its Book or the Global Attention View, but opening it restores its exact authoritative context.
 - The Global Attention View is a projection. Dismissing, grouping, or filtering an item cannot mutate the underlying Task, decision, Effect, or Workflow Instance.
 - Contextual surfaces may summarize a record, but consequential actions resolve against the authoritative record and exact pins.
+- Entering, leaving, expanding, or rendering a DSH-composed Agent Workspace creates no Book, Task, Run, Provider permission, background authority, source scope, Proposal Decision, Effect, or manuscript mutation.
+- AI7 retains the exact Book and safety state around a DSH UI Plugin; the Plugin cannot replace the shell or bypass AI7 Capability, Effect, or Apply boundaries.
+
+## Book-bound Agent Workspace
+
+```text
+exact Book + preserved Active Work Object
+└─ explicit Agent Workspace entry
+   ├─ AI7 shell / Book / safety state remain visible and reachable
+   ├─ eligible exact DSH composition supplies the inner agent experience
+   ├─ compatible DSH UI Plugin may render inside the contained host
+   └─ return to preserved Active Work Object
+```
+
+The workspace may host task preparation, dialogue, artifact-supported work and links to authoritative Book records, but none of those relations turns the workspace or DSH Session into a source-of-record owner. Agent-originated manuscript changes still leave the workspace for the exact AI7 Apply boundary.
 
 ## Accepted documentation-completion boundary
 
-The earlier interview-completion statement is historical. Issue #8 reopened only the dependency-ordered branches in [`MISSING-DESIGN-DECISION-MAP.md`](./MISSING-DESIGN-DECISION-MAP.md); all five batches now close Book/import identity and restart safety, exact journal-newer `Task Input / 任务输入`, budget/Resume lifecycle, Book-targeted Source Version acquisition, Series Knowledge/exclusions, and post-milestone Delivery Package/export/maintenance without granting implementation authority.
+The earlier interview-completion statement is historical. Issue #8 closed the dependency-ordered branches in [`MISSING-DESIGN-DECISION-MAP.md`](./MISSING-DESIGN-DECISION-MAP.md). Issue #86 supplies the target-qualified successor for Book-bound Agent Workspace, native DSH artifact lifecycle, operational-scope Provider policy selection, covered manuscript analysis, Background Analysis Enrollment and universal single-use AI7 Apply. These additions are repository-current only in an exact integrated `dev` commit containing this revision, remain accepted-but-unintegrated elsewhere, and grant no implementation authority.
 
 ## Semantic state presentation hierarchy
 
@@ -127,7 +148,7 @@ Multiple affected Books remain separate `恢复待确认状态` items rather tha
 
 AI7 uses one Two-level Contextual Sidebar rather than a global sidebar plus a second Book sidebar:
 
-- the stable global layer contains `待我处理`, `书库`, `书系`, `质量与学习`, and `自动化中心`;
+- the stable global layer contains `待我处理`, `书库`, `书系`, and `质量与学习`; Issue #86 does not place the native-artifact/Rule management projection or the separately disclosed Background Analysis Enrollment presentation in this layer and fixes neither final label nor entry point;
 - the Book layer contains pinned Books, recent Books, and navigation scoped to the current Book;
 - the searchable library provides the complete Book collection;
 - the bottom application/account area contains Settings; and
@@ -286,7 +307,7 @@ bottom application area
 └─ 用量 → aggregate history → exact Run detail
 ```
 
-The Task surface remains role/capability-first. Model Service Settings configure persistent connections; they never become an alternate Task planner, source-scope editor, authorization surface or hidden provider dashboard in the manuscript workspace.
+The Task surface remains role/capability-first. Model Service Settings configure persistent connections; they never become an alternate Task planner, source-scope editor, authorization surface, Background Analysis Enrollment, or hidden provider dashboard in the manuscript workspace. Provider setup may explain or offer a separate unselected Enrollment decision but cannot prefill or activate it; Issue #86 does not place or name that presentation. The trusted development/CI, fixture-recording or ordinary-production Provider-policy scope is launch authority, not a product setting, and missing/unknown scope fails closed rather than falling back across scopes.
 
 ## Data and storage settings
 
@@ -649,7 +670,7 @@ An import-bound draft cannot use that empty-Book commit. Every staged file impor
    │        → 导入前确认 · new-Book path
    │           ├─ target/title + original-file identity/provenance
    │           ├─ primary Manuscript + initial branch/revision
-   │           ├─ exact Workflow Profile/Instance
+   │           ├─ exact AI7 Workflow Profile projection / native definition pin / Workflow Instance
    │           ├─ effective Book Editorial Dimension Set
    │           ├─ final fidelity/degradation consequence
    │           └─ named non-effects
@@ -718,6 +739,19 @@ Reimport follows exact manuscript history rather than file replacement:
 
 Complete staging persists under the Agent Data Root until completion or explicit abandonment. Restart opens Import Draft Recovery with `继续导入` and `放弃`, then revalidates snapshot, target/relationship, lineage, fidelity and review; it never auto-resumes or commits. Target drift returns to the changed choice. A complete snapshot can continue after the original file becomes unreadable with disclosure, while incomplete staging requires exact native-picker reselection and parse failure retains only payload-free diagnostics. Cancellation deletes the draft/snapshot only when no uncertain atomic boundary exists. Successful completion deletes it only after the durable Source Version/link and completion record verify. Atomic-boundary interruption reconciles exact commit identity; if neither commit nor non-commit can be proven, `导入提交结果待确认` preserves staged evidence and blocks retry/cancellation cleanup rather than guessing.
 
+Import completion and analysis scheduling remain separate branches:
+
+```text
+durable editable-import commit
+├─ matching active Background Analysis Enrollment
+│  └─ queue one or more exact Task / Plan / Run records
+│     └─ compatible kinds may share one authorized batch Run; per-kind Result Sets/status remain independent
+└─ no matching active Enrollment
+   └─ analysis stays 待分析 · no Provider call, transmission or cost
+```
+
+The import record never becomes Enrollment, Provider permission, artifact enablement, Run authority, analysis success, or AI7 Apply. A queued analysis outcome remains independently reachable and cannot delay or replace `稿件已导入`.
+
 ## Source Version acquisition workspace
 
 Source retention is always explicit and Book-targeted, regardless of where material was first seen:
@@ -750,6 +784,54 @@ Source retention is always explicit and Book-targeted, regardless of where mater
 
 Search snippets, incomplete retrievals, model answers, attachments and mere Task use do not create Source Versions automatically; their own Task/evidence history may remain durable. Same-Book exact identity can be reused only after explicit selection, while a cross-Book source becomes a new target-owned Source Version with its own provenance. Acquisition creates no Manuscript, Workflow Instance, Run Source Scope, provider permission, factual status, Learning Eligibility or publication authority. `Exact Fetch / 精确获取` is reserved for resolving an already-authorized stable Manuscript Revision or Source Version, not the initial external-research retrieval.
 
+## Coverage-aware manuscript analysis
+
+Analysis is a Book/revision-bound product-record surface, separate from candidate retrieval and factual verification:
+
+```text
+exact Book + Manuscript Revision
+└─ Manuscript Analysis Overview
+   ├─ Baseline Manuscript Analysis · exact contract/version
+   ├─ selected Editorial Dimension analyses · independent
+   ├─ Plugin/user-defined analyses · independent
+   └─ each analysis kind
+      ├─ latest Manuscript Analysis Result Set Revision
+      ├─ Analysis Coverage and Gap View
+      │  ├─ Coverage Manifest / Analysis Units
+      │  ├─ coverage
+      │  ├─ reducer / synthesis closure
+      │  ├─ exact-revision freshness
+      │  └─ semantic / evidence assurance
+      ├─ explicit gaps / conflicts / known limitations
+      ├─ Analysis Result Revision History
+      ├─ Analysis Update Controls
+      │  ├─ 同步到当前稿件
+      │  ├─ 重新分析所选范围
+      │  └─ 重新分析全书
+      └─ Analysis Feedback Card
+         └─ exact immutable Quality Signal
+```
+
+Targeted retrieval continues to expose ranked candidates and canonical Exact Fetch ranges; it cannot satisfy the Coverage Manifest branch. Result Set Revisions are durable and immutable, keep unit/reducer/provenance/reuse lineage and do not become Manuscript text, a generic Task Outcome, an Editorial Artifact, DSH scratch state or factual truth.
+
+`同步到当前稿件` may reuse compatible unchanged units through an explicit invalidation/reduction closure. `重新分析所选范围` bypasses prior model results for the selected range and necessary closure. `重新分析全书` bypasses all prior model results for a new full manifest. Each creates a successor Result Set Revision and keeps older revisions reachable.
+
+Background authority remains separately disclosed from Provider setup, import and artifact lifecycle. Its final route, label and compact controls are deferred:
+
+```text
+editor considering a Background Analysis Enrollment
+├─ exact Book / Series / all-Books scope
+├─ selected analysis kinds
+├─ Provider / outbound categories / budget
+├─ prospective / backfill consequence
+└─ separate explicit editor decision
+   └─ Background Analysis Enrollment
+      └─ each dispatch → one or more exact Task / Plan Envelope / Run records / provenance
+         └─ compatible kinds may share an authorized batch Run without merging per-kind results
+```
+
+Baseline is preselected only within the separately disclosed Enrollment decision; the eight Editorial Dimensions and Plugin/user-defined kinds remain independent. Enrollment is revocable, but Issue #86 does not settle pause/disable mechanics. Model Service setup, import, artifact lifecycle, Workflow Profile activation, Default Execution Rule and DSH Session membership never create this authority. Moving the same already-authorized Run out of the foreground changes presentation only; a new idle, scheduled, import-triggered, post-checkpoint or cross-Run Provider dispatch requires a matching active Enrollment.
+
 ## Task capture entry
 
 The bottom composer is a Context-bound Task Composer, not a chat transcript:
@@ -777,24 +859,25 @@ The composer may be seeded from a selection, finding, evidence, Proposal, or Boo
 
 One unfinished draft remains durably bound to its original Book context when the editor switches Books. It collapses rather than following the switch, and the UI exposes a deliberate return route.
 
-### Task Skill resolution
+### Native DSH artifact resolution
 
-Natural language remains the primary layer. The right Task surface then adds transparent structure:
+Natural language remains the primary layer. The right Task surface then adds transparent native-artifact structure without exposing a parallel AI7 Task Skill runtime:
 
 ```text
 natural-language goal
-→ Task Skill Recommendation
+→ Native DSH Artifact Recommendation
    ├─ one clear recommendation
    └─ two or three unselected candidates when ambiguous
+→ exact native kind / identity / revision + AI7 compatibility-authority summary
 → Progressive Task Fields
-→ source/preflight/plan/authorization
+→ source / preflight / plan / authorization
 ```
 
-Starting from the Task Skill catalog joins the same Task Intent Draft path. Skill recommendations expose professional purpose and expected outcome rather than implementation identity. A skill change is visible and editable and never activates capabilities by itself.
+Starting from any available artifact-discovery route joins the same Task Intent Draft path. Recommendation, discovery, acquisition, validation, installation and scoped enablement remain distinct; none creates a Task, source grant, Provider permission, Background Analysis Enrollment, per-Run activation or Effect authority.
 
 ### Reusable procedure capture
 
-One professional-language entry classifies reuse before it asks the editor to understand implementation objects:
+One professional-language entry classifies reuse before it asks the editor to understand native packaging:
 
 ```text
 将以上工序保存为可复用工序
@@ -806,94 +889,99 @@ One professional-language entry classifies reuse before it asks the editor to un
             ├─ 将提取什么
             ├─ 不会保存什么
             └─ Reusable Procedure Classification Preview
-               ├─ existing exact Task Skill pattern → Default Execution Rule
-               ├─ reusable model-assisted procedure → Task Skill Candidate
-               ├─ phases / gates / responsibilities / lifecycle → Workflow Profile Draft
+               ├─ existing exact artifact pattern → Default Execution Rule draft
+               ├─ reusable model-assisted procedure → native DSH Skill draft
+               ├─ phases / gates / responsibilities / lifecycle → Workflow-definition draft
+               │  └─ AI7 Workflow Profile projection; exact native carrier mapping deferred
                └─ new code / tool / external capability → Developer Capability Proposal
                   └─ may recommend Plugin evaluation; never creates or installs one
 ```
 
-The extraction preview preserves reusable business structure while excluding manuscript instance content, Book identity, concrete sources, credentials, provider/model bindings, historical conclusions and decisions, prior authority, receipts, hidden Harness activity and unsuccessful steps. Local capture provenance remains separate from the resulting asset. The classification preview then recommends one result and explains the professional consequence. The editor may correct Task Skill versus Workflow Profile classification, but the shared entry never creates an interchangeable persisted asset and cannot route code-bearing work into a declarative skill merely because that route looks easier.
+The extraction preview preserves reusable business structure while excluding manuscript instance content, Book identity, concrete sources, credentials, provider/model bindings, historical conclusions and decisions, prior authority, receipts, hidden Harness activity and unsuccessful steps. Local capture provenance remains separate. Classification never creates an interchangeable generic asset and cannot relabel code-bearing work as a declarative Skill to avoid the developer path.
 
-For a Task Skill Candidate, save and runtime authority remain a visible lifecycle rather than one `生成并使用` action:
+### Native artifact lifecycle and management projection
+
+The consolidated management projection has a deferred final label and placement. It exposes native artifact identity while preserving AI7-side compatibility and authority separately:
 
 ```text
-Task Skill Candidate preview
-├─ 仅保存候选版本
-│  └─ immutable local-user candidate
-└─ 保存并送交检查
-   ├─ immutable local-user candidate
-   ├─ AI7 admission → installed disabled when admitted
-   └─ independent provider-free check
-      ├─ rejected/failed → exact reason; repair as new version
-      └─ checked → still disabled
-         └─ 查看权限上限并启用
-            └─ Task Skill Enablement for future Tasks only
+artifact discovery / local capture / import
+├─ exact DSH Skill · semantic procedure unit
+├─ Plugin / Bundle · packaging and distribution
+├─ DSH Profile / Agent Preset · native composition carrier
+└─ exact identity / version / digest / provenance / license-notices
+   └─ acquire exact bytes · non-executing
+      ├─ imported Skill
+      │  ├─ immutable Source Skill Snapshot
+      │  └─ minimally derived versioned Imported Skill Working Revision
+      └─ provider-free validation / required conversion
+         ├─ failed / incompatible → exact reasons; repair as successor revision
+         └─ eligible → review AI7 compatibility / authority ceiling
+            ├─ compatible → compact visible install-and-scoped-enable may be offered
+            ├─ or install disabled → later scoped enablement
+            ├─ any scoped-enabled compatible revision → exact Task selection / Plan / Run authorization remain later
+            └─ hooks / dependency scripts / native code → restricted pending separate executable admission
 ```
 
-The authoring Run cannot perform any later box in this sequence. Enablement displays the exact admitted Authority Ceiling but creates no per-Run Task Skill Activation or other task/effect authority.
-
-### Automation Center
-
-The global center is one management projection with typed sections, not one universal automation object:
+Install and scoped enablement remain distinct, auditable internal boundaries even when one compact visible action performs both for a compatible artifact. The source, importer, converter, validator and authoring Run cannot approve, install, enable, activate or authorize themselves. Exact catalog sources, adapter shape, sidecar/schema names, trust tiers, executable sandbox mechanics and Profile/Bundle mapping remain unresolved and are not represented as product authority.
 
 ```text
-自动化中心
-├─ 任务技能
-│  └─ stable Task Skill identity
-│     └─ exact versions · newest first
-├─ 工作流程方案
-│  └─ stable Workflow Profile identity
-│     └─ exact versions · newest first
-├─ 默认直接运行规则
-│  └─ stable rule identity
-│     └─ exact versions · newest first
-└─ 开发能力建议
-   └─ proposal identity and versions/status
-
-exact version detail
-├─ lifecycle / eligibility / current default state
-├─ exact content and change from prior version
+stable typed identity
+├─ exact native revisions · newest first
+├─ type-specific lifecycle and scope state
 ├─ Version-linked Work and Delivery View
 │  ├─ Runs and Task Outcomes
-│  ├─ Workflow Instances
+│  ├─ Workflow Instances / Manuscript Analysis Result Sets
 │  ├─ Editorial Deliverables / Editorial Artifacts
 │  └─ Delivery Packages
-└─ type-valid actions
-   ├─ enable / disable / activate-default / update where applicable
+├─ source / working / update lineage where applicable
+└─ type-valid actions only
+   ├─ validate / install / scoped-enable / disable / update / rollback
    └─ 删除版本 → Version Removal Preview
 ```
 
-For a new unpinned Task Skill use, the center and Task composer identify the newest enabled compatible version as `最新可用`. Before authorization, that resolution becomes an exact pin. Default Execution Rules and existing Workflow Instances never follow the label automatically: rules remain exact-version-bound, while new Workflow Instances use the current explicitly activated Workflow Profile default and existing instances migrate only through their own explicit flow.
+For new unpinned use, Latest Eligible Version Resolution identifies the newest scoped-enabled compatible exact native revision and freezes it with current AI7 pins before authorization. A discoverable, newer, disabled, failed, retired or incompatible revision is not eligible. Existing Runs, rules and Workflow Instances never follow a label or restored revision silently.
 
-Deletion is version-aware. A never-admitted wholly unreferenced candidate/draft may be permanently deleted. Any version with historical authority or delivery links can only be retired from future use and stripped of safely removable package bytes while a Historical Version Stub preserves exact identity and navigation. Active Runs, enabled rule dependencies and current Workflow Instance pins block removal and name the required completion, disablement or migration action. Whole-entry deletion previews these consequences for every version and never cascades into authoritative work or delivery records.
+Deletion remains version-aware. A wholly unreferenced never-validated draft/candidate may be deleted; an authority-bearing or referenced revision becomes unavailable for future use while a Historical Version Stub preserves exact identity, provenance and links. Active Runs, enabled rule dependencies and current Workflow Instance pins block destructive removal. No deletion cascades into authoritative Book work, Result Sets or deliveries.
 
-Enabled Task Skill discovery and task data authority remain separate paths:
+Discovery and Task data authority remain separate:
 
 ```text
-enabled local-user Task Skill
-├─ Task Skill Catalog Availability · local AI7 instance by default
-│  ├─ 自动化中心
-│  └─ manual Task Skill selector
-├─ Task Skill Recommendation Applicability · optional suggestion filter
+scoped-enabled compatible native artifact
+├─ management / manual-selection availability
+├─ Native DSH Artifact Recommendation Applicability · optional suggestion filter
 │  ├─ named Book / Series
 │  ├─ Editorial Deliverable type
 │  └─ Workflow phase
 └─ new Task selection
-   ├─ no original Book/content/result carried forward
-   ├─ newest eligible exact version shown
+   ├─ no original Book / content / result carried forward
+   ├─ exact eligible revision shown and frozen before authorization
    └─ new Run Source Scope · current Book default
       └─ Series / Cross-project / House memory only by explicit selection
 ```
 
-An applicability mismatch suppresses proactive recommendation but not compatible manual selection; a selected mismatch receives a concise explanation. Catalog presence, recommendation and manual selection remain projections before the exact Plan Envelope, per-Run activation and source grants.
+An applicability mismatch suppresses proactive recommendation but not compatible manual selection. Discovery, recommendation and manual selection are projections before exact Plan, per-Run activation and source grants.
 
-The other classified results keep their own save and activation paths:
+### Imported-Skill updates and type-specific activation
 
 ```text
-Workflow Profile Draft
-├─ 仅保存草案 → new inactive draft version
-└─ 发布为新版本 → new immutable available version
+new upstream Imported Skill source
+└─ inert reconciliation candidate
+   ├─ prior immutable Source Skill Snapshot
+   ├─ current Imported Skill Working Revision
+   └─ new source candidate
+      ├─ conflicts / validator or authority expansion → blocked for adoption
+      ├─ explicit reviewed adoption
+      └─ Artifact Update Rule only when trusted, conflict-free,
+         validator-clean, semantically and operationally non-expansive
+         └─ Imported Skill only; never Plugin, core DSH dependency or Policy
+```
+
+Rollback chooses another exact current compatible revision without rewriting history or restoring revoked authority. Running work retains its exact pin. Upstream checks and candidates remain metadata-only until an allowed adoption creates a new working revision/current selection.
+
+```text
+Workflow-definition draft
+├─ 仅保存草案 → inactive successor draft
+└─ 发布为新版本 → exact native carrier + immutable AI7 Workflow Profile projection
    └─ 设为新建交付成果的默认方案 · separate
       └─ future Workflow Instances only
          └─ existing-instance migration · separate impact preview
@@ -901,27 +989,20 @@ Workflow Profile Draft
 Default Execution Rule proposal
 ├─ 仅保存规则草稿 → inactive rule draft version
 └─ 审阅并启用规则
-   ├─ exact Task Skill/version and allowed variation
+   ├─ exact native artifact revision and allowed variation
    ├─ applicability and source rule
-   ├─ provider/egress and exact Run Budget Ceiling state
-   └─ result/Effect envelope
-      └─ future user-submitted exact matches only
+   ├─ Provider / egress and exact Run Budget Ceiling state
+   └─ result / Effect envelope
+      └─ future newly user-submitted exact matches only
 
 Developer Capability Proposal
 └─ 保存开发建议
    ├─ missing capability and affected procedure
    ├─ suggested implementation direction
-   └─ possible Plugin route · developer process only
-      ├─ GitHub >5 stars · at least 6
-      ├─ >3 qualifying plugin-related non-merge commits · at least 4
-      │  ├─ standalone repo · relevant default-branch commits only
-      │  └─ monorepo · plugin-directory or manifest-affecting commits only
-      ├─ newest qualifying commit · no earlier than 30 days before selection
-      └─ immutable Local Plugin Pin · exact commit and artifact
-         └─ mutable branch / tag / `latest` prohibited
+   └─ possible Plugin route · separate repository-development process only
 ```
 
-No shared `save and activate` action crosses these branches. Profile default designation, rule enablement and future developer implementation remain exact type-specific acts, and every edit creates a new version rather than mutating the version already linked to work or deliveries.
+No shared `save and activate` action crosses these branches. Profile default designation, rule enablement, the separate Enrollment decision, artifact scoped enablement, per-Run authorization and future developer implementation remain exact type-specific boundaries; every accepted update creates a successor version rather than mutating a version already linked to work or deliveries. This does not prohibit the lifecycle's one compatible-artifact install-and-enable presentation described above.
 
 ### Quick Start and default execution addition
 
@@ -973,7 +1054,7 @@ Task preparation
    └─ Potential Provider Data Summary
 ```
 
-The Task Skill proposes a minimum readable set suited to the requested outcome. The editor can adjust it through named Books, Series, source records, versions, and memory records without filesystem literacy. The builder resolves current Series membership and exclusions before authorization; later membership changes leave the frozen scope intact, while a later effective exclusion immediately stops any further affected read and requires Plan Revision plus renewed authorization or cancellation. Task applicability, readable scope, mutation target, and provider-bound data remain independent.
+The selected exact native DSH artifact proposes a minimum readable set suited to the requested outcome. The editor can adjust it through named Books, Series, source records, versions, and memory records without filesystem literacy. The builder resolves current Series membership and exclusions before authorization; later membership changes leave the frozen scope intact, while a later effective exclusion immediately stops any further affected read and requires Plan Revision plus renewed authorization or cancellation. Artifact applicability, readable scope, mutation target, and provider-bound data remain independent.
 
 Provider-bound summary is a maximum category/scope disclosure, not a claim that every readable item will be sent or that dynamic retrieval can be predicted byte-for-byte. The final payload is assembled and checked later against the exact frozen bounds, and actual transmissions remain traceable.
 
@@ -998,7 +1079,7 @@ Plan Preview
    └─ 变化后必须暂停并重新授权
 ```
 
-Exact source versions, Task Skill/version, policies, capability grants, plan fields, and digests remain available in expandable detail without becoming the default reading burden. The Plan Preview is the human projection of exact machine records and never replaces them or acts as Run Authorization.
+Exact source versions, native artifact revision plus AI7 compatibility/authority pins, policies, capability grants, plan fields, and digests remain available in expandable detail without becoming the default reading burden. The Plan Preview is the human projection of exact machine records and never replaces them or acts as Run Authorization.
 
 Quick/default execution retains the same frozen preview and exact Plan Envelope in Run detail even though it does not require the editor to open the preview before dispatch.
 
@@ -1301,13 +1382,13 @@ The draft and its view state belong to the Proposal review workspace. The record
 
 ## Apply Preparation surface
 
-Accepted changes enter a separate local Effect preparation route:
+Every formal agent-originated Manuscript mutation—whether it originates in Agent Workspace, dialogue, a native Skill/Plugin, foreground/background Run or imported-Skill path—enters this one separate local AI7 Apply preparation route. Direct editor typing and separately governed deterministic import/domain commands remain distinct:
 
 ```text
 recorded Proposal Decision
 └─ 准备应用
    └─ Apply Preparation
-      ├─ target Book / branch / current Manuscript Revision
+      ├─ exact target Book / branch / base Manuscript Revision
       ├─ Proposal version / Proposal Decision
       ├─ Apply Change Set
       │  ├─ included accepted exact changes
@@ -1315,7 +1396,7 @@ recorded Proposal Decision
       ├─ virtualized Apply Result Preview
       ├─ 会发生什么 / 不会发生什么
       ├─ current-state + structure + policy preflight
-      └─ frozen Effect identity / target / payload / atomic scope / replay policy
+      └─ frozen Effect identity / exact Book / base pin / diff / targets / atomic scope / replay policy
          └─ separate Effect Approval interaction
 ```
 
@@ -1323,7 +1404,7 @@ Apply Preparation remains inside the Proposal/Dedicated Work Workspace context b
 
 ## Apply Effect Approval
 
-The prepared exact Effect retains one inline final authority boundary:
+The prepared exact Effect retains one inline final, single-use AI7 Apply authority boundary:
 
 ```text
 frozen Apply Preparation
@@ -1331,7 +1412,7 @@ frozen Apply Preparation
    ├─ target Book / branch / current revision
    ├─ Apply Change Set count + atomic scope
    ├─ expected new revision
-   ├─ exact single-Effect authority statement
+   ├─ exact single-use Book / base / diff / targets authority statement
    └─ 批准并应用到稿件
       ├─ append exact Effect Approval
       ├─ dispatch same bound Effect
@@ -1339,7 +1420,7 @@ frozen Apply Preparation
          └─ wait for Effect Receipt / classified outcome
 ```
 
-Any exact drift routes backward to Apply Preparation instead of weakening the bar's binding. The approval bar disappears after activation and cannot be reused. Effect status remains linked from Proposal review, the active Book, and Global Attention without taking manuscript focus.
+Any exact drift routes backward to Apply Preparation instead of weakening the bar's binding. The approval bar disappears after one semantic activation and cannot be reused. No artifact, acquisition/install/scoped enablement, update rule, Default Execution Rule, Background Analysis Enrollment, DSH Session, Plugin/Agent membership or Run authorization contains or inherits Apply. Effect status remains linked from Proposal review, the active Book, and Global Attention without taking manuscript focus.
 
 ## Apply Effect Receipt and reversal
 
@@ -1508,7 +1589,7 @@ Book → Editorial Deliverable
 each phase → state/reason + related authoritative records
 ```
 
-Multiple phase cards may be active and are ordered by actionable attention or stable profile order, never implied as one blocking sequence. Profile migration is reached from version detail, not the normal phase-state control. Workflow percentages remain absent.
+The Workflow Profile Pin Display names the AI7-facing profile projection and its exact native definition carrier pin without treating DSH Profile state as the durable business Workflow Instance. Multiple phase cards may be active and are ordered by actionable attention or stable profile order, never implied as one blocking sequence. Profile migration is reached from version detail, not the normal phase-state control. Workflow percentages remain absent.
 
 ## Workflow Gate card
 

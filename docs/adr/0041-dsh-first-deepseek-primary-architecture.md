@@ -6,6 +6,8 @@ status: accepted
 
 This ADR is accepted as root ADR 0041 in the `dev` development baseline. It records the Owner's DSH-first direction; action authority remains bounded by the applicable Issue and Change Brief, and promotion to `main` requires a separate Owner authorization. It replaces the historical Codex-first candidate.
 
+[ADR 0045](./0045-preserve-native-dsh-artifacts-behind-ai7-authority-sidecars.md) partially supersedes this ADR only for native DSH artifact/workflow-definition carriers and the product artifact lifecycle previously routed through ADR 0042. DSH remains the sole generic loop; AI7 retains every Book, durable Workflow Instance, Run, authority and Effect owner, the narrow Capability Facade and the exact core DSH package-subset pin. No DSH scheduler/workflow package or second authority is admitted.
+
 ## Decision
 
 AI7 V2 uses **DeepSeek Harness (DSH)** as its sole production **Primary Agent Harness**. DSH supplies the one generic agent loop—model conversation, context assembly, turn progression, model invocation, technical tool dispatch, streamed technical events, compaction, subagent mechanics where used, and in-turn recovery—composed inside the AI7 Node service behind the AI7-owned `PrimaryAgentHarness` containment boundary.

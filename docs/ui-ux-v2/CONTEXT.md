@@ -1,8 +1,10 @@
 # AI7 V2 UI/UX
 
-Status: **Owner-accepted `dev` V2 presentation context; root domain contexts retain semantic authority**
+Status: **Owner-approved Issue #86 V2 presentation successor context; repository-current only in an exact integrated `dev` commit containing this revision; accepted-but-unintegrated elsewhere; root domain contexts retain semantic authority**
 
-The accepted presentation language for how professional editors perceive and operate AI7 in the current `dev` baseline. It owns presentation concepts only and does not redefine editorial or execution authority.
+The target-qualified presentation language for how professional editors perceive and operate AI7. The predecessor baseline remains historical context; Issue #86 additions are repository-current only in an exact integrated `dev` commit containing this revision and remain accepted-but-unintegrated elsewhere. This file owns presentation concepts only and does not redefine editorial or execution authority.
+
+Shared `Native DSH Artifact`, `DSH Skill/Plugin/Bundle/Profile/Agent Preset`, `Source Skill Snapshot`, `Imported Skill Working Revision`, `Artifact Update Rule`, `Default Execution Rule`, `Background Analysis Enrollment`, `DSH Analysis Contract`, `AI7 Apply`, `Coverage Manifest`, `Analysis Unit`, `Baseline Manuscript Analysis Contract`, `Manuscript Analysis Result Set/Revision`, and `Analysis Quality Metric` meanings remain owned by the root [contexts](../../CONTEXT-MAP.md); the presentation terms below only project them.
 
 ## Language
 
@@ -19,7 +21,7 @@ The AI7 workspace model in which a Book is the stable editorial context, one Boo
 _Avoid_: folder workspace, conversation list, task-first shell
 
 **Book-bound DSH-composed Agent Workspace** (`图书绑定的 DSH 组合式智能体工作区`):
-The explicitly selected agent-primary work surface inside one exact Book where AI7 retains the desktop shell, Book and Active Work Object bindings, product records, capability and authority boundaries, while an admitted DSH composition supplies the inner agent experience and may host compatible admitted DSH UI plugins. Explicit entry temporarily gives this workspace the primary central presentation slot while preserving the prior Active Work Object, visible Book and safety state, and a direct return route; entering, leaving, or projecting it creates no second Book, generic chat root, Harness-owned product authority, Run, grant, or manuscript mutation.
+The explicitly selected agent-primary work surface inside one exact Book where AI7 retains the desktop shell, Book and Active Work Object bindings, product records, capability and authority boundaries, while an eligible exact DSH composition supplies the inner agent experience and may host compatible AI7-governed DSH UI Plugins. Explicit entry temporarily gives this workspace the primary central presentation slot while preserving the prior Active Work Object, visible Book and safety state, and a direct return route; entering, leaving, or projecting it creates no second Book, generic chat root, DSH-owned product authority, Run, grant, Provider permission, background authority, or manuscript mutation. A Plugin cannot hide the Book/safety state or bypass typed AI7 capability, Effect, or Apply boundaries.
 _Avoid_: raw DSH Web console, instance-wide agent home, ungoverned plugin surface, Developer Capability Profile
 
 **Book Library** (`书库`):
@@ -278,16 +280,16 @@ _Avoid_: a new checkpoint type, Journal Save, Milestone Version, Signoff, model 
 The transition from compact task text to the editable right-side Task Intent Draft, which invokes no model and grants no Run or Effect authority.
 _Avoid_: send, run, authorize, submit to provider
 
-**Task Skill Recommendation** (`任务技能建议`):
-An AI7-proposed fit between the visible Task Intent Draft and one or more available Task Skills, including rationale, required inputs, expected outcome, and possible Proposal/Effect classes without selecting runtime authority.
-_Avoid_: Task Skill Activation, Capability Grant, automatic skill choice
+**Native DSH Artifact Recommendation** (`原生 DSH 构件建议`):
+An AI7-proposed fit between the visible Task Intent Draft and one or more eligible exact native DSH Skill or composition revisions, including professional purpose, rationale, required inputs, expected outcome, and possible Proposal/Effect classes without selecting runtime authority.
+_Avoid_: scoped enablement, per-Run activation, Capability Grant, automatic artifact choice
 
 **Reusable Procedure Capture** (`保存为可复用工序`):
 The user-invoked presentation flow that turns selected prior editorial work into one classified reusable-asset draft or rule proposal without persisting a generic object or granting runtime authority.
-_Avoid_: macro recording, Plugin installation, automatic skill activation
+_Avoid_: macro recording, DSH Plugin installation, automatic artifact activation
 
 **Reusable Procedure Classification Preview** (`可复用工序分类预览`):
-The compact pre-save explanation that recommends exactly one of Default Execution Rule, Task Skill Candidate, Workflow Profile Draft or Developer Capability Proposal and permits correction where the underlying object boundary remains valid.
+The compact pre-save explanation that recommends exactly one of Default Execution Rule, native DSH Skill draft/revision, Workflow Profile Draft or Developer Capability Proposal and permits correction where the underlying object boundary remains valid.
 _Avoid_: saved asset, generic template type, authority decision
 
 **Procedure Capture Source Set** (`工序捕获来源集合`):
@@ -298,12 +300,12 @@ _Avoid_: recent-activity feed, transcript, whole Book history
 The editable pre-save projection of reusable purpose, steps, branches, parameters and declared requirements together with an explicit account of instance data and authority that will not enter the resulting asset.
 _Avoid_: saved candidate, Run replay, copied Task Outcome
 
-**Automation Center** (`自动化中心`):
-The global cross-type management projection for Task Skills, Workflow Profiles, Default Execution Rules and Developer Capability Proposals, preserving each object's own lifecycle and authority rather than persisting one generic automation type.
-_Avoid_: automation runtime, generic asset, Plugin marketplace
+**Artifact and Automation Management Projection** (`构件与自动化管理视图`):
+The global cross-type management projection for native DSH artifacts, AI7 Workflow Profile projections, Default Execution Rules and Developer Capability Proposals, preserving each object's lifecycle/authority rather than persisting one generic type. This is a descriptive presentation concept; the final compact product label, grouping and catalog-source set remain deferred.
+_Avoid_: automation runtime, generic asset, ungoverned Plugin marketplace, final screen label
 
-**Automation Version Group** (`自动化版本组`):
-The management grouping of all exact versions belonging to one stable typed automation identity, including status, default eligibility and version-specific actions without merging their records.
+**Artifact or Automation Revision Group** (`构件或自动化修订组`):
+The management grouping of all exact revisions/versions belonging to one stable typed identity, including provenance, compatibility, lifecycle, default eligibility and revision-specific actions without merging native and AI7 records.
 _Avoid_: mutable latest object, Book Series, interchangeable asset family
 
 **Version-linked Work and Delivery View** (`版本关联工作与交付视图`):
@@ -311,35 +313,35 @@ The read/navigation projection from one exact automation version to the Runs, Wo
 _Avoid_: copied deliverable archive, source scope, authority inheritance
 
 **Latest Eligible Version Resolution** (`最新可用版本解析`):
-The deterministic selection of the newest enabled and compatible version within one stable Task Skill identity for a new use that has not yet been pinned; resolution freezes an exact version before authorization.
+The deterministic selection of the newest scoped-enabled compatible native artifact revision within one stable identity for a new use that has not yet been pinned; resolution freezes the exact carrier/working revision and applicable AI7 binding state before authorization.
 _Avoid_: latest candidate, silent upgrade of pinned work, compatibility fallback after authorization
 
 **Version Removal Preview** (`版本删除影响预览`):
-The exact pre-deletion explanation of current/future availability, active blockers, removable package bytes, retained historical identity and affected version links.
+The exact pre-removal explanation of current/future availability, active blockers, removable carrier bytes, retained source/revision identity and affected historical links; removal never rolls authority back.
 _Avoid_: generic confirmation dialog, history erasure, cascade delete
 
 **Historical Version Stub** (`历史版本存根`):
-The minimal immutable identity, type, version, digest/provenance and retired/removal state retained after a referenced automation version is removed from future availability, so authoritative history and deliveries remain explainable.
-_Avoid_: installed package, executable fallback, copied historical content
+The minimal immutable identity, type, native/source/working revision, digest/provenance and retired/removal state retained after a referenced artifact or automation revision is removed from future availability, so authoritative history and deliveries remain explainable.
+_Avoid_: installed carrier, executable fallback, copied historical content, restored authority
 
-**Task Skill Catalog Availability** (`任务技能目录可见范围`):
-The local-instance visibility of an enabled Task Skill in Automation Center and manual selection, independent of whether AI7 recommends it or a Run may read any source.
-_Avoid_: Run Source Scope, Task Skill Activation, provider availability
+**Native DSH Artifact Catalog Availability** (`原生 DSH 构件目录可见范围`):
+The local-instance visibility of a discovered/acquired or scoped-enabled native artifact revision in configured catalog/management/manual-selection surfaces, independent of recommendation, compatibility, execution or readable source scope.
+_Avoid_: Run Source Scope, per-Run activation, Provider availability, trust or install authority
 
-**Task Skill Recommendation Applicability** (`任务技能推荐适用范围`):
-The optional Book, Series, Editorial Deliverable-type or Workflow-phase filter controlling where AI7 proactively recommends an enabled Task Skill, without preventing compatible manual selection or granting source access.
+**Native DSH Artifact Recommendation Applicability** (`原生 DSH 构件建议适用范围`):
+The optional Book, Series, Editorial Deliverable-type or Workflow-phase filter controlling where AI7 proactively recommends an eligible exact artifact revision, without preventing compatible manual selection or granting source access.
 _Avoid_: capability scope, source scope, enablement, mandatory eligibility
 
 **Workflow Profile Draft** (`工作流程方案草案`):
-An editable non-active proposal for a reusable Workflow Profile definition, distinct from every installed profile version and every Deliverable's current Workflow Instance.
-_Avoid_: Workflow Instance, active profile version, Task Skill Candidate
+An editable non-active proposal for one versioned native DSH Workflow definition and technical logic together with its AI7-facing Workflow Profile draft projection, distinct from every current Workflow Instance. The native artifact owns the definition if published; AI7 owns the projection and durable business state. The final carrier mapping remains deferred.
+_Avoid_: Workflow Instance, active profile version, DSH Profile, DSH Skill draft
 
 **Developer Capability Proposal** (`开发能力建议`):
-A non-executing developer-track record describing a missing code-bearing capability and possible implementation path, which may mention a Plugin without creating, installing, enabling or authorizing one.
-_Avoid_: Plugin, Capability Implementation, user-enabled extension
+A non-executing developer-track record describing a missing code-bearing capability and possible implementation path, which may mention a DSH Plugin without acquiring, executing, installing, enabling or authorizing one.
+_Avoid_: DSH Plugin, Capability Implementation, user-enabled extension
 
 **Progressive Task Fields** (`渐进任务字段`):
-The required structured inputs revealed inside the Task surface only when the current Task Skill and intent need them, while optional detail remains collapsed and the original natural-language goal stays visible.
+The required structured inputs revealed inside the Task surface only when the current intent and selected native DSH artifact revision need them, while optional detail remains collapsed and the original natural-language goal stays visible.
 _Avoid_: mandatory wizard, hidden prompt fields, Plan Preview
 
 **Quick Start** (`快速开始`):
@@ -347,8 +349,8 @@ A user-invoked Task shortcut that skips the separate Task Intent review surface 
 _Avoid_: send without authorization, generic chat, Effect Approval shortcut
 
 **Default Execution Rule** (`默认直接运行规则`):
-A versioned user-approved rule that permits a future user-initiated Task matching its exact Task Skill, intent pattern, applicability scope, provider/egress, Run Budget Ceiling state, outcome, and Effect-class envelope to receive an exact per-Run Run Authorization and start without separate Task Intent review.
-_Avoid_: standing Run Authorization, auto-apply rule, model confidence
+A versioned user-approved rule that permits a future newly user-initiated Task matching its exact native artifact revision, intent pattern, applicability scope, Provider/egress, Run Budget Ceiling state, outcome, and Effect-class envelope to receive an exact per-Run Run Authorization and start without separate Task Intent review. It never originates or schedules work and cannot stand in for Background Analysis Enrollment.
+_Avoid_: standing Run Authorization, background scheduler, Background Analysis Enrollment, auto-apply rule
 
 **Task Pattern Confidence** (`任务模式信心`):
 The editor's practical confidence that a repeatable task pattern normally produces useful reviewable results, sufficient to reduce repeated Run-review interaction but never to establish factual truth or approve later Effects.
@@ -363,7 +365,7 @@ The exact visible Book, manuscript or Editorial Deliverable, branch/revision, an
 _Avoid_: source scope, current editor tab, provider context
 
 **Source Scope Builder** (`来源范围选择器`):
-The product-record interface for reviewing a Task Skill's minimum readable-source recommendation and explicitly adding or removing exact current-Book, Series, Cross-project, and approved-memory sources before Run Source Scope freezes, while applying the current effective Series Retrieval Exclusions both before authorization and again at later read/payload guards.
+The product-record interface for reviewing a selected native artifact's minimum readable-source recommendation and explicitly adding or removing exact current-Book, Series, Cross-project, and approved-memory sources before Run Source Scope freezes, while applying current Series Retrieval Exclusions before authorization and again at later read/payload guards.
 _Avoid_: filesystem picker, whole workspace, mutation scope
 
 **Potential Provider Data Summary** (`模型可能接收内容摘要`):
@@ -668,7 +670,7 @@ _Avoid_: automatic migration receipt, file picker, local export, credential tran
 
 **Limited Shortcut Remapping** (`有限快捷键重映射`):
 The local preference capability for changing only eligible navigation, search and view command shortcuts with conflict detection and reset, while preserving the current platform's text-editing, system, IME and authority-bearing command safety.
-_Avoid_: arbitrary keybinding editor, macro system, Task Skill, command authority
+_Avoid_: arbitrary keybinding editor, macro system, native artifact invocation, command authority
 
 **IME-safe Command Guard** (`输入法安全命令保护`):
 The unconditional interaction guard that prevents AI7 navigation, search, Task, Proposal, decision or other application commands from interpreting keystrokes while a Chinese IME composition is active.
@@ -779,11 +781,11 @@ The pre-command comparison for adding, superseding or ending one Series Retrieva
 _Avoid_: Series Membership Impact Preview, Learning Remediation Impact Preview, deletion confirmation, Plan Revision
 
 **Apply Preparation** (`稿件应用准备`):
-The local pre-Effect surface that selects accepted exact Proposal changes, revalidates current authority and merge safety, previews the bounded result, and freezes an Effect target/payload without authorizing or committing it.
+The local pre-Effect surface that selects accepted exact Proposal changes, revalidates current authority and merge safety, previews the bounded result, and freezes the exact Book/base pin/diff/targets for one single-use AI7 Apply without authorizing or committing it.
 _Avoid_: Proposal Decision, Effect Approval, Apply execution
 
 **Apply Change Set** (`稿件应用修改集合`):
-The frozen exact set of accepted Proposal changes included in one atomic manuscript Apply Effect, with explicit exclusions and bindings to Proposal Decision, target revision, Effect identity, payload, and replay policy.
+The frozen exact set of accepted Proposal changes included in one atomic manuscript Apply Effect, with explicit exclusions and bindings to Proposal Decision, exact Book/base Manuscript Pin/diff/targets, Effect identity, payload, and replay policy.
 _Avoid_: all accepted changes forever, Proposal version, mutable selection
 
 **Apply Result Preview** (`应用结果预览`):
@@ -795,11 +797,11 @@ The current exact preflight condition that target revision, selected ranges, str
 _Avoid_: Proposal accepted, Effect approved, Apply committed
 
 **Inline Apply Approval Bar** (`内联稿件应用批准栏`):
-The sticky exact-Effect action region in a current frozen Apply Preparation that summarizes the bound target/payload and offers one `批准并应用到稿件` interaction without a duplicate modal.
+The sticky exact-Effect action region in a current frozen Apply Preparation that summarizes the bound Book/base/diff/targets and offers one `批准并应用到稿件` interaction that explicitly confirms and consumes the single-use AI7 Apply without a duplicate modal.
 _Avoid_: generic approval bar, Proposal Decision, Apply Receipt
 
 **Apply Approval Readiness** (`稿件应用批准就绪状态`):
-The final validity state confirming that the frozen Effect target, payload, Proposal Decision, target Manuscript Revision, policies, and expected result remain unchanged enough to present the exact Apply Effect Approval action.
+The final validity state confirming that the frozen exact Book/base/diff/targets, Effect payload, Proposal Decision, policies, and expected result remain unchanged enough to present the exact single-use AI7 Apply confirmation and Effect Approval action.
 _Avoid_: Apply Readiness alone, Effect committed, manuscript saved
 
 **Applying Manuscript State** (`正在应用稿件状态`):
@@ -821,6 +823,26 @@ _Avoid_: ordinary failure, safe retry, Effect Receipt success
 **Reverse Apply Effect** (`反向稿件应用动作`):
 A new exact prepared, approved, and receipted Effect that counteracts one prior committed Apply against current authoritative manuscript state while leaving the original Effect and Receipt immutable.
 _Avoid_: deleting history, cancellation, ordinary manuscript undo, receipt reversal
+
+**Manuscript Analysis Overview** (`稿件分析概览`):
+The Book-bound projection of every enrolled or available analysis kind, its current exact Manuscript Analysis Result Set Revision, pending/running/blocked status, update action, feedback state, and four independently labeled coverage, reducer/synthesis closure, exact-revision freshness, and semantic/evidence assurance axes.
+_Avoid_: retrieval results, one complete flag, factual truth dashboard, Workflow phase
+
+**Analysis Coverage and Gap View** (`分析覆盖与缺口视图`):
+The bounded drill-in over one exact Coverage Manifest that shows completely enumerated structural Analysis Units, processed/reused/failed/skipped/uncovered ranges, required reducer/reconciliation nodes, conflicts and exact source/evidence lineage without presenting model attention or semantic correctness as guaranteed.
+_Avoid_: top-K retrieval list, editor window, progress percentage, semantic completeness proof
+
+**Analysis Result Revision History** (`分析结果修订历史`):
+The immutable chronological projection of one Manuscript Analysis Result Set's revisions, exact Manuscript Pins, contract/artifact versions, reuse-or-bypass lineage, producing Runs/cost, gaps/conflicts and currentness. It never rewrites an older result or turns it into an Editorial Artifact automatically.
+_Avoid_: mutable cache, Task Outcome history, DSH Session transcript, automatic promotion
+
+**Analysis Update Controls** (`分析更新操作`):
+The exact three-action presentation distinguishing `同步到当前稿件`, `重新分析所选范围`, and `重新分析全书`, including affected range/dependency closure, reuse or bypass consequence, expected Provider/cost scope, and requirement for a newly eligible exact Run.
+_Avoid_: refresh icon with hidden semantics, retrieval re-ranking, implicit checkpoint dispatch
+
+**Analysis Feedback Card** (`分析反馈卡`):
+The optional exact-result-bound editor feedback surface for a whole set, analysis kind/dimension, synthesis node, item or omitted range, using unselected typed dispositions plus free text. It creates an immutable Quality Signal or explicit successor-correction/reanalysis route, not factual proof, Learning Eligibility, Policy activation or artifact mutation.
+_Avoid_: generic rating, silence-as-approval, factual-verification decision, automatic learning
 
 **Fact-check Lens** (`事实核查工作入口`):
 The right contextual Manuscript surface that virtualizes revision-bound assertions/findings, separate integrity/support/verification states, filters, whole-manuscript markers, and routes into exact evidence comparison.
@@ -923,8 +945,8 @@ The non-linear presentation in which multiple Workflow phases may independently 
 _Avoid_: mandatory stepper, Run concurrency, one current phase
 
 **Workflow Profile Pin Display** (`工作流配置版本标识`):
-The always-reachable identification of the exact Workflow Profile and version governing one Deliverable's Workflow Instance, with migration treated as a separate explicit flow.
-_Avoid_: profile selector that silently migrates, Task Skill version, Harness profile
+The always-reachable identification of the exact AI7 Workflow Profile/version governing one Deliverable's Workflow Instance and, where useful, its exact native DSH carrier revision, with migration treated as a separate explicit flow. The native carrier never appears to own durable workflow state.
+_Avoid_: profile selector that silently migrates, DSH Profile as business state, native artifact revision alone
 
 **Workflow Gate Card** (`工作流关口卡`):
 The exact Deliverable/phase/profile-bound surface presenting one Workflow Gate's mandatory/advisory criteria, evidence, missing items, consequences, computed readiness, and separately recordable disposition.

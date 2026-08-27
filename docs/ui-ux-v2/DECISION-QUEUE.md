@@ -1,6 +1,6 @@
 # AI7 V2 UI/UX decision queue
 
-Status: **61-question base, Issue #5 9-question feature delta, Issue #8 Batches 1–5 with all 18 decisions resolved, and response-presentation 7-question delta complete**
+Status: **Historical decision sets complete; Owner-approved Issue #86 23-question successor delta is repository-current only in an exact integrated `dev` commit containing this revision and accepted-but-unintegrated elsewhere**
 
 Question 16 originally expanded the interview to 59 questions and resolved the Default Execution Rule envelope. Question 35 expanded it to 60, and Question 54 exposed a new Detached Manuscript Reader authority branch, producing the current 61-question tree. Choices enter this file only when an answer exposes a material unresolved branch or a recorded decision needs a durable pointer.
 
@@ -153,3 +153,45 @@ Response Question 6/7 defined stop/interruption behavior. AI7 preserves only com
 Response Question 7/7 placed completed and incomplete answers in recoverable Dialogue Answer History under the exact Book/work-object/Task context across navigation and restart. It is a non-authoritative join through exact Execution Bindings/Spans to messages and attempt history owned only by the Harness Session Ledger, not a third ledger or Task Ledger transcript copy. Live Reasoning Summary is excluded from visible history. Later dialogue turns may use prior answers without widening source or Provider-egress scope, and an explicit named action is required to create a governed Proposal, Task Intent Draft, or other object from selected answer content; the draft does not itself create the `Task Input / 任务输入` Manuscript Checkpoint purpose.
 
 The response-presentation decision tree is closed. The hard-to-reverse default/exception, foreground/background, persistence, attempt, and authority tradeoff is recorded in [ADR 0014](./adr/0014-wait-by-default-and-stream-only-interactive-dialogue.md). The delta is mapped into D-084, requirements, information architecture, interaction behavior, visual direction, migration semantics, J-16, bilingual terms, and this queue. It is part of the accepted `dev` package; design acceptance grants no action authority by itself.
+
+## Issue #86 23-question successor delta
+
+These answers are repository-current only when read from an exact integrated `dev` commit containing this revision; elsewhere they remain accepted-but-unintegrated. They supersede only the named earlier V2 presentation/runtime assumptions and preserve the historical questions above. Root [ADRs 0045–0048](../adr/) own the cross-domain decisions; UI [ADRs 0015–0017](./adr/) own their presentation consequences.
+
+| Question | Accepted successor decision | Primary route |
+| --- | --- | --- |
+| 1 | Agent Workspace is explicitly Book-bound inside the AI7 shell and preserves exact Book, safety and prior Active Work Object context. | UI ADR 0015 |
+| 2 | An eligible DSH composition may occupy the primary central presentation slot, with a direct return route and no new Book/Run/authority/mutation. | UI ADR 0015 |
+| 3 | Retire parallel AI7 Task Skill/Workflow definition runtime ownership; use native DSH artifact carriers with separate AI7 governance. | Root ADR 0045; UI ADR 0016 |
+| 4 | DSH owns Workflow definitions/technical logic; AI7 owns durable Workflow Instances, phases, Gates, Signoffs and business transitions. | Root ADR 0045; UI ADR 0016 |
+| 5 | DSH may own self-contained local behavior, while every AI7 state/text/credential/egress/Effect crossing remains inside typed AI7 boundaries. | Root ADR 0045; UI ADRs 0015–0016 |
+| 6 | DSH Skill is the semantic procedure unit; Plugin/Bundle is packaging/distribution, while Profile/Agent Preset remains a native carrier. | Root ADR 0045; UI ADR 0016 |
+| 7 | Ordinary-production Provider work receives exact Run-level authority without extra per-call/per-chunk prompts; setup still grants nothing. | Root ADR 0046; Provider Processing v3 |
+| 8 | Development/CI, exact fixture recording and ordinary production use separate trusted operational-scope policy selections with no product-setting or cross-scope fallback. | Root ADR 0046; active policy set v3 |
+| 9 | Declared model-driven suboperations inherit one frozen Plan/Run envelope and its final payload/egress checks; they do not mint new authority. | Root ADR 0046 |
+| 10 | A Default Execution Rule can match only a newly user-initiated Task and never schedules/invents work, creates background authority or grants Apply. | Root ADR 0046; UI ADR 0016 |
+| 11 | Ranked targeted retrieval plus Exact Fetch and comprehensive whole-revision analysis are separate contracts. | Root ADR 0047; UI ADR 0017 |
+| 12 | Comprehensive analysis uses a deterministic pinned-revision Coverage Manifest and complete structure-aware bounded-overlap Analysis Units. | Root ADR 0047; UI ADR 0017 |
+| 13 | Typed hierarchical reduction preserves provenance and exposes gaps/conflicts instead of hiding them behind synthesis. | Root ADR 0047; UI ADR 0017 |
+| 14 | Manuscript Analysis Result Sets/Revisions are durable and immutable; synchronize/current, selected-range forced reanalysis and full-Book forced reanalysis retain distinct reuse/bypass meanings. | Root ADR 0047; UI ADR 0017 |
+| 15 | Local deterministic invalidation creates no Provider authority; synchronization requires a newly user-started Task or matching active Enrollment. | Root ADRs 0047–0048; UI ADR 0017 |
+| 16 | Coverage, reducer/synthesis closure, exact-revision freshness and semantic/evidence assurance are four independent axes, not one `complete` flag. | Root ADR 0047; UI ADR 0017 |
+| 17 | Baseline Manuscript Analysis is exact-versioned; the eight Editorial Dimensions and Plugin/user-defined kinds remain separately selectable and independently reported. | Root ADRs 0047–0048; UI ADR 0017 |
+| 18 | New autonomous Provider-backed manuscript analysis requires an active exact Background Analysis Enrollment; import/setup/enablement never create it. | Root ADR 0048; UI ADR 0017 |
+| 19 | Analysis feedback creates exact immutable Quality Signals and a separate Analysis Quality Metric family; neither is factual proof or automatic learning. | Root ADR 0048; UI ADR 0017 |
+| 20 | Present native DSH ecosystem discovery/acquisition/install/update/rollback while keeping AI7 compatibility/authority side information and every later authority stage separate. | Root ADR 0045; UI ADR 0016 |
+| 21 | Imported DSH Skills retain immutable Source Skill Snapshots plus minimally derived versioned DSH-native working revisions. | Root ADR 0045; UI ADR 0016 |
+| 22 | Upstream reconciliation is three-way and inert; adoption is explicit except for a trusted, conflict-free, validator-clean, semantically/operationally non-expansive Imported-Skill Artifact Update Rule. Plugins, core DSH and Policies are excluded. | Root ADR 0045; UI ADR 0016 |
+| 23 | Acquisition/validation, install, scoped enablement, exact Run selection/authorization and single-use exact AI7 Apply remain staged boundaries; no earlier stage contains a later authority. | Root ADR 0045; UI ADR 0016 |
+
+### Preserved invariants
+
+- Provider/Model Service setup, credentials, import and artifact discovery/acquisition/validation/install/scoped enablement are non-authorizing.
+- A foreground exact Run originates from a newly user-initiated Task, directly or through a matching active Default Execution Rule. Moving that same Run to the background is presentation-only; every new idle/scheduled/import-triggered/post-checkpoint/cross-Run Provider analysis dispatch requires active matching Enrollment.
+- Imported updates remain inert until explicit adoption or the narrow allowed Artifact Update Rule; rollback never restores revoked authority.
+- Every formal agent-originated Manuscript mutation uses exactly one single-use AI7 Apply bound to exact Book/base pin/diff/targets with drift recheck, explicit editor confirmation and verified receipt. Direct editor typing and deterministic import/domain commands remain separate.
+- Provider Processing v1/v2 and their active-set history remain immutable predecessors; production v3 selection is a trusted launch contract, not an implemented selector claim.
+
+### Deferred implementation and presentation details
+
+The following are not open Owner product questions for this bounded normalization, but this Issue must not invent them: authoritative catalog sources/adapters; closed-source admission; trust tiers; executable sandbox mechanics; final sidecar/catalog/conversion/reconciliation/scoped-enablement/per-Run record names or schemas; exact DSH Profile/Bundle/Plugin mapping for Workflow definitions; code-bearing Plugin/core-DSH automatic updates; trusted launch-selector implementation; retrieval/index technology, concrete Analysis Unit sizes, Result Set storage/reducer mechanics or metric-snapshot schema; semantic-completeness guarantees; final management-projection label/placement; and resolution of the pre-existing Policy activation conflict. Any need to decide or widen one of these stops Issue #86 rather than silently expanding its Change Brief.
