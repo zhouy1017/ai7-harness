@@ -18,7 +18,7 @@ These are provider-neutral invariants. They are stated without reference to any 
 | --- | --- | --- |
 | **Commander** | Decide dispatch, review returned work, integrate: merge, push, release. Sole external-action authority. Holds the owner's foreground session | — |
 | **Worker** | Read the repository, write only its own worktree and branch, report; run the E2E Functional Gate only when its implementation change affects a supported journey or observed-bug regression | Merge, push any branch, publish, take external actions, or read/write credentials, real manuscripts, or private sample Books |
-| **Reviewer** | Read the branch under review and its brief with fresh context; produce a review report and verdict | Write to the branch, merge, or dispatch |
+| **Reviewer** | Read the branch under review and its brief from fresh, strictly read-only context; produce a review report and advisory verdict | Author the reviewed change; write to the branch; dispatch, delegate to, or spawn another agent; integrate; or take external actions |
 
 The reviewer's verdict is **advisory**. The commander decides and integrates.
 
@@ -33,13 +33,17 @@ The reviewer's verdict is **advisory**. The commander decides and integrates.
 
 ### Review
 
-- Independent review is optional and advisory, not a branch or exact-head gate. Use it for hostile architecture feedback or when the owner requests it.
-- When a Reviewer is used, it is not the author, its task class remains greater than or equal to the reviewed work, and cross-provider review is preferred with the existing disclosure when unavailable.
-- A review finding informs the Commander; it does not automatically trigger iterative proof or re-review cycles.
+- Independent review is optional and advisory. A verdict must not become a pull-request (PR), CI, branch, exact-head, zero-finding, iterative re-review, or other proof gate. Use review for hostile architecture feedback or when the owner requests it.
+- A Reviewer is never the author and starts from fresh, strictly read-only context rather than the authoring task transcript.
+- Record the reviewed task class. The Reviewer binding must meet or exceed that class under the Layer B table.
+- A Reviewer may not dispatch, delegate to, or spawn another agent. The Commander directly dispatches every Reviewer, including every parallel review.
+- A review finding informs the Commander; it does not itself require proof work or another review.
 
 ### Reporting
 
-Every returned Worker unit carries one line with role, requested binding, actual provider/model/effort, task class, fallback status, and exact reason. Record reviewer independence only when a review was actually requested.
+Every returned Worker unit carries one line with role, requested binding, actual provider/model/effort, task class, fallback status, and exact reason.
+
+Every Reviewer report carries one line with the reviewed task class; requested and actual provider/model/effort; confirmation that the actual binding meets the class floor; fresh-context, read-only, non-author independence; fallback status; and the exact fallback or same-provider reason when applicable. This record is required only when review is requested and is not a proof receipt or gate.
 
 ### Usage discipline
 
@@ -62,13 +66,15 @@ This whole layer is **the only provider-specific policy surface in this design**
 | **T3** — high-stakes | `gpt-5.6-sol` @ xhigh | `claude-opus-5` @ high | 5× |
 | **T3-par** — high-stakes and genuinely splittable | `gpt-5.6-sol` @ `ultra` | — dispatch parallel workers instead | 5× plus subagents |
 
-Task class is the provider-neutral unit. The reviewer floor is evaluated **in task classes**, then bound — so a T3 branch written by `claude-opus-5` requires a reviewer at `gpt-5.6-sol` @ xhigh or above.
+Task class is the provider-neutral unit. The Reviewer floor is evaluated **in task classes**, then bound: a T3 branch requires a T3-or-higher Reviewer binding, regardless of which provider authored it.
+
+Cross-provider review is preferred, but Reviewer assignment is not subject to the Worker Claude-first order. The Commander selects the Reviewer binding independently, records requested and actual provider/model/effort and independence, and records the exact fallback or same-provider reason when cross-provider review is unavailable.
 
 ### Worker provider order
 
 Effective with the owner's 2026-08-22 revision, every task that is both suitable for parallel dispatch and bounded enough to be a Worker brief uses the matching **Claude Code** binding first. Continue assigning eligible Worker work to Claude Code while its current quota is available; do not load-balance away from it merely to conserve that quota.
 
-When a real dispatch reports that Claude Code is unavailable or its usable quota is exhausted, record the attempted binding, observed condition, time, actual fallback binding, and exact downgrade reason. Then use the same task-class Codex binding from the table. Do not repeatedly spend attempts against a known exhausted quota window; retry Claude only after availability or quota reset is evidenced. This provider order does not apply to the Commander seat, final integration, or Reviewer assignment, whose role authority, task-class floor, and independence rules remain unchanged.
+When a real dispatch reports that Claude Code is unavailable or its usable quota is exhausted, record the attempted binding, observed condition, time, actual fallback binding, and exact downgrade reason. Then use the same task-class Codex binding from the table. Do not repeatedly spend attempts against a known exhausted quota window; retry Claude only after availability or quota reset is evidenced. This provider order does not apply to the Commander seat, final integration, or Reviewer assignment, whose role authority, task-class floor, independent binding selection, and independence rules remain unchanged.
 
 `T3-par` is a Commander coordination mode, not a missing Claude Worker model row. The Commander decomposes genuinely separable work into bounded T1, T2, or T3 Worker briefs; each brief applies the Claude-first order at its own class, while architecture decisions and synthesis stay with the Commander.
 
@@ -85,7 +91,7 @@ The T1 test is whether correctness can be checked without judgment. Running a li
 
 ### Effort scales are not comparable across providers
 
-Codex exposes `none → low → medium → high → xhigh → max → ultra` on Sol; Claude exposes a shorter ladder. Bindings map **task outcome to setting**, never label to matching label. `max` extends Sol's chain-of-thought budget; `ultra` spawns internal subagents that decompose and parallelize work, then reassemble it.
+Codex exposes `none → low → medium → high → xhigh → max → ultra` on Sol; Claude exposes a shorter ladder. Bindings map **task outcome to setting**, never label to matching label. `max` extends Sol's chain-of-thought budget; `ultra` can use internal subagents to decompose, parallelize, and reassemble work when the assigned repository role permits it. Role authority overrides that capability: an `ultra` Reviewer still may not dispatch, delegate to, or spawn another agent.
 
 Tier selection is roughly a five-fold cost swing and is the primary lever; effort is the fine dial. Sol is $5/$30 per million tokens, Terra $2.50/$15, Luna $1/$6.
 
@@ -122,10 +128,10 @@ At merge, closure, abandonment, accepted integration, supersession, confirmed ha
 
 Accepted with owner revisions:
 
-- three roles — Commander, Worker, Reviewer — with the reviewer an independent agent;
+- three roles — Commander, Worker, Reviewer — with the Reviewer a fresh-context, strictly read-only, non-author agent that the Commander directly dispatches and that may not dispatch or spawn another agent;
 - Codex is the main entry and normally holds the commander seat, at top capability;
 - dispatch-eligible, bounded parallel Worker tasks use Claude Code first while its quota is available, then fall back at the same task class under the existing table; every actual binding and downgrade reason is recorded;
-- independent review is optional and advisory; when requested, its existing task-class and independence boundaries remain;
+- independent review is optional and advisory; the reviewed class, Reviewer binding floor, requested and actual provider/model/effort, independence, and any fallback or same-provider reason are recorded; cross-provider review is preferred without inheriting Worker Claude-first order; and no verdict becomes a pull-request (PR), CI, branch, exact-head, zero-finding, iterative re-review, or other proof gate;
 - operating rules stay identical across providers and models, with Layer B as the only provider-specific policy surface; and
 - the legacy orchestration pilot and its host connector are rejected as baselines.
 

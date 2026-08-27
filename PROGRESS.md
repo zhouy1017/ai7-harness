@@ -2,39 +2,34 @@
 
 ## What's done
 
-- [Issue #86](https://github.com/zhouy1017/ai7-harness/issues/86) / [PR #87](https://github.com/zhouy1017/ai7-harness/pull/87) squash-merged the Owner-approved DSH, Provider-scope and covered-analysis normalization into exact `dev@ec623a6ae3d411c36eb64d02b7c527fd3f883cc5`.
-- PR #87 passed Route E2E plus the existing Windows Server 2025 x64 and macOS 15 arm64 J-01 jobs. The change remained 47 Markdown/JSON authority and routing paths with no product implementation.
-- Refreshed [PRD #28](https://github.com/zhouy1017/ai7-harness/issues/28) in place against the exact merge commit: 44 exact body replacements, stable stories 1–141 retained, successor stories 142–148 added, original publication Change Brief preserved as historical, and one successor refresh brief plus review/routing comments recorded.
-- Updated existing Issues #38, #46–#49, #51–#59 and #61–#66 with exact post-#86 non-dispatch markers and their required successor deltas. #65/#66 are explicitly substantively superseded in their old Task Skill and standalone Workflow-definition assumptions.
-- Created enhancement-only Issues #88–#95 for the missing native artifact lifecycle, foreign Skill lineage/update, Book-bound Agent Workspace, ordinary-production Provider Run, covered baseline analysis, Result Set update/history, analysis feedback/metrics and Background Analysis Enrollment. None has `ready-for-agent`; #88 and #91 preserve their unresolved Owner-choice prerequisites.
-- Audited current source and narrowed the broad former Issue #37. [Issue #37](https://github.com/zhouy1017/ai7-harness/issues/37) is now **[S02b] J-01: Disclose a same-name different-content import collision**, exact-base refreshed, filename-collision-only, and the single next `ready-for-agent` development target. No Worker or implementation has started.
-- Created [Issue #96](https://github.com/zhouy1017/ai7-harness/issues/96) for the integration-triggered lifecycle sweep on branch `codex/docs/96-close-issue86-lifecycle` from exact `dev@ec623a6...`.
-- Preserved outgoing `ec623a6...:PROGRESS.md` and `:HANDOFF.md` byte-for-byte in one indexed historical archive node and replaced root routing with the integrated/tracker/next-target state without routing ordinary reading into archive content.
-- Validated the exact Issue #96 six-path lowercase-`.md` boundary: both archived Git blobs match `ec623a6...`, the archive index/router and changed local links resolve, and `git diff --check` is clean.
-- One bounded same-provider read-only advisory review found two root-routing wording defects; both were repaired by removing direct root-to-archive links and naming #37 only as the next `ready-for-agent` development target. No other finding remained.
-- Submitted [PR #97](https://github.com/zhouy1017/ai7-harness/pull/97) to `dev` for this exact lifecycle tree. Its live merge/check state must be verified rather than inferred from a branch checkout.
-- PR #97's Markdown route passed: Route E2E succeeded and the J-01 matrix job was skipped before expansion, so neither Windows nor macOS product J-01 ran.
-- No product/source/test code, dependency/plugin, Provider, new manuscript/derivative, export, release, Issue implementation dispatch or `main` action was performed in the tracker/lifecycle stage.
+- Verified Issue #98's dedicated worktree is clean on `docs/98-reviewer-dispatch-rules` at exact `HEAD 6b4ef18d2c4b2a212ec34a24ec3a25b3bc3be5b5`; fetched live `origin/dev`, which resolves to the same commit.
+- Read Issue #98's full Change Brief and the exact current-`dev` governance owners and direct projections routed by `AGENTS.md`, without entering `docs/archive/`.
+- Confirmed the task is documentation-only T3 repository-governance work, with the six Owner-directed Reviewer clauses accepted intent but accepted-but-unintegrated candidate authority until later integration into `dev`.
+- Dispatch binding: requested Worker `Claude Code claude-opus-5 @ high`; at `2026-08-27T09:14:09.9650366Z` the Commander observed `claude` unavailable because the command was not found; actual same-class fallback Worker is `OpenAI Codex gpt-5.6-sol @ xhigh`.
+- Mapped Reviewer wording with a targeted Markdown search excluding `docs/archive/`. The smallest directly inconsistent authority/projection set is `kick-in/27-repository-development-dispatch.md`, `docs/adr/0015-provider-neutral-development-dispatch.md`, `docs/agents/design-authority.md`, and `docs/agents/git-conventions.md`; no broader projection change is needed.
+- Received a fresh, strictly read-only, non-author advisory audit of this T3 repository-governance task. Requested Reviewer binding was `OpenAI Codex gpt-5.6-sol @ ultra`; actual was the same, exceeding the T3 `gpt-5.6-sol @ xhigh` floor, with no binding fallback. Independence disclosure is `same-provider review — independence reduced`; exact reason: cross-provider review was preferred but Claude was unavailable in this environment. The Reviewer did not dispatch or spawn. The audit identified the `ultra` capability wording conflict and recommended one consolidated no-gate rule; it is not a completion or re-review gate.
+- Normalized all six Reviewer clauses in `kick-in/27-repository-development-dispatch.md`, including the explicit role-authority override for `ultra`, and synchronized the accepted decision in `docs/adr/0015-provider-neutral-development-dispatch.md`.
+- Updated only the two directly inconsistent concise projections: the Reviewer row in `docs/agents/design-authority.md` and the optional-review pull-request rules in `docs/agents/git-conventions.md`.
+- Validated the exact five-path boundary, all relative Markdown links in the four changed authority/projection documents, six-clause wording consistency, compatible unchanged projections, absence of the targeted stale Reviewer formulations, and clean `git diff --check` output.
+- No product/source/test/config/workflow file, dependency/plugin, Provider, manuscript/derivative, external action, Issue/PR decomposition, or automated proof task was created. Issue #98 triggers no documentation archive sweep before later integration/closure.
 
 ## What's next
 
-- If this exact lifecycle tree is not integrated, commit and push the branch, create its one pull request to `dev`, confirm the existing route job succeeds while both product J-01 jobs are skipped, then squash merge if `origin/dev` has not drifted.
-- After verified lifecycle integration, stop. Issue #37 is the sole next development target, but its Worker/branch/implementation requires a separate explicit dispatch.
+- The Worker has no further authorized repository change after the one local docs commit containing this checkpoint. The Commander may inspect that commit and later re-resolve `origin/dev` for separately authorized integration; no push, pull request, merge, release, or `main` action is authorized here.
 
 ## Key decisions
 
-- Issue #86 authority is current only from exact integrated `dev` trees containing its successor revision; its archive snapshots are historical evidence, not routing authority.
-- PRD #28 and `ready-for-agent` labels remain tracker metadata. Only an exact active Issue/Change Brief plus Commander dispatch authorizes a Worker.
-- The accepted implementation order is not leapfrogged: filename-collision-only Issue #37 comes before updated #38 and the later Book/Task/Provider/artifact/analysis branches.
-- Issue #37 uses exact tracked `sample1` for the existing initial and exact-match launches and one deterministic unrelated public-synthetic clean DOCX generated/deleted only inside the disposable E2E root for the middle collision launch.
-- Provider v1/v2 and External Export v1 history remain immutable; native DSH owns definitions/technical logic; setup/install is non-authorizing; imported updates are inert; autonomous background Provider analysis needs active Enrollment; formal agent manuscript mutation needs exact single-use Apply.
+- Preserve the existing three-role contract, Layer B task classes, Claude-first Worker order, same-class fallback, Commander-only dispatch/integration/external action, and one-Issue/one-branch/one-writer rule.
+- Review remains optional and advisory under ADR 0027. This work may not create a pull-request, CI, exact-head, zero-finding, iterative re-review, formal-review, or other proof gate.
+- The Reviewer clauses apply operationally during this task but do not become canonical `dev` authority merely by existing on this branch.
+- Role authority overrides provider/model/effort capability: even an `ultra`-bound Reviewer may not dispatch, delegate to, or spawn another agent; the Commander directly dispatches every parallel review.
+- `docs/agents/multi-session-design-workflow.md` and the repository-development projection in `docs/agents/project-constraints.md` remain consistent and need no edit; broad synchronization would exceed the smallest adequate change.
+- Planned versus actual structure is unchanged: the existing Reviewer owner and ADR were extended in place, two direct concise projections were synchronized, and no new owner, role, process, dependency, interface, schema, workflow, or proof surface was introduced.
 
 ## Unresolved matters or blockers
 
-- No blocker remains for the bounded Issue #96 lifecycle diff. Stop if the exact archived blobs, allowed paths, lowercase-Markdown classification or `origin/dev@ec623a6...` target changes before pull request creation.
-- Issue #88 remains blocked on an Owner-selected native source/carrier/adapter. Issue #91 remains blocked on an Owner-selected trusted production-scope selector and Provider/model/credential-reference binding.
-- Fuzzy similarity, existing-Book relationships, other Public SampleBooks and broader fidelity outcomes remain outside Issue #37 and require later exact Issues; no scope was silently discarded or authorized.
+- No blocker remains for the bounded local documentation commit. The six clauses remain accepted-but-unintegrated candidate authority until Commander integration into the intended `dev` line; re-resolve that line and all target-qualified authority before any later integration.
 
 ## Resume Prompt
 
-Resolve exact HEAD, worktree, `origin/dev` and Issue #96/PR state. Finish only the Markdown lifecycle diff and squash integration if its exact target remains valid. After integration, stop unless separately instructed to dispatch Issue #37. Preserve the exact S02b boundary and every authority invariant above; do not implement another Issue, install dependencies/plugins, call Providers, add tracked manuscripts/derivatives, release or touch `main`.
+Inspect the local Issue #98 docs commit on `docs/98-reviewer-dispatch-rules`, confirm its five-path candidate boundary and clean worktree, then re-resolve live `origin/dev` and target-qualified authority before any separately authorized integration; do not add proof gates, expand scope, push, open a pull request, merge, release, or touch `main` from this checkpoint.
