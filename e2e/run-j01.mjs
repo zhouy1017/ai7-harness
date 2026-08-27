@@ -416,11 +416,72 @@ async function runJourney(
     `(() => { const forward = Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '向后浏览'); return document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]').length === 32 && document.querySelector('.editor-meta')?.textContent.includes('全稿 0.000%') && forward && !forward.disabled; })()`,
     'bounded-window',
   );
-  await assertRenderer(
-    renderer,
-    `(() => { const status = document.querySelector('#persistence-status'); const editor = document.querySelector('[data-testid="manuscript-editor"]'); const block = editor?.children[3]; const save = Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '保存当前编辑'); if (!(status instanceof HTMLElement) || !(editor instanceof HTMLElement) || !(block instanceof HTMLElement) || !(save instanceof HTMLButtonElement)) return false; globalThis.__ai7JournalProbe = new Promise((resolve) => { let busy = status.textContent.includes('正在写入修订日志'); const observer = new MutationObserver(() => { busy ||= status.textContent.includes('正在写入修订日志'); if (status.textContent.includes('已写入修订日志')) { observer.disconnect(); resolve({ busy, durable: true }); } }); observer.observe(status, { childList: true, subtree: true, characterData: true }); setTimeout(() => { observer.disconnect(); resolve({ busy, durable: false }); }, 30000); }); block.focus(); const range = document.createRange(); range.selectNodeContents(block); range.collapse(false); const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range); const inserted = document.execCommand('insertText', false, '，新增编辑'); const dirty = !save.disabled; const event = new KeyboardEvent('keydown', { key: 's', ctrlKey: ${process.platform === 'darwin' ? 'false' : 'true'}, metaKey: ${process.platform === 'darwin' ? 'true' : 'false'}, bubbles: true, cancelable: true }); editor.dispatchEvent(event); return inserted && dirty && event.defaultPrevented; })()`,
-    'bounded-edit-and-save-shortcut',
+  const editAndShortcut = await renderer.evaluate(
+    `(async () => {
+      const status = document.querySelector('#persistence-status');
+      const editor = document.querySelector('[data-testid="manuscript-editor"]');
+      const block = editor?.children[3];
+      const save = Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '保存当前编辑');
+      if (!(status instanceof HTMLElement) || !(editor instanceof HTMLElement) || !(block instanceof HTMLElement) || !(save instanceof HTMLButtonElement)) return false;
+      const blockId = block.dataset.blockId;
+      const before = block.textContent;
+      if (!blockId || before === null) return false;
+      const isBusy = () => status.dataset.tone === 'busy' && status.textContent.includes('写入修订日志');
+      const isDurable = () => status.dataset.tone === 'success' && status.textContent.includes('已写入修订日志');
+      let busy = isBusy();
+      globalThis.__ai7JournalProbe = new Promise((resolve) => {
+        let settled = false;
+        let timeout;
+        const finish = (durable) => {
+          if (settled) return;
+          settled = true;
+          observer.disconnect();
+          clearTimeout(timeout);
+          resolve({ busy, durable });
+        };
+        const observer = new MutationObserver(() => {
+          busy ||= isBusy();
+          if (isDurable()) finish(true);
+        });
+        observer.observe(status, { attributes: true, attributeFilter: ['data-tone'], childList: true, subtree: true, characterData: true });
+        timeout = setTimeout(() => finish(false), 30000);
+      });
+      const dirtyReady = new Promise((resolve) => {
+        let settled = false;
+        let timeout;
+        const finish = (dirty) => {
+          if (settled) return;
+          settled = true;
+          observer.disconnect();
+          clearTimeout(timeout);
+          resolve(dirty);
+        };
+        const observer = new MutationObserver(() => {
+          if (!save.disabled) finish(true);
+        });
+        observer.observe(save, { attributes: true, attributeFilter: ['disabled'] });
+        timeout = setTimeout(() => finish(false), 250);
+        if (!save.disabled) finish(true);
+      });
+      const suffix = '，新增编辑';
+      block.focus();
+      const range = document.createRange();
+      range.selectNodeContents(block);
+      range.collapse(false);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+      document.execCommand('insertText', false, suffix);
+      const dirty = await dirtyReady;
+      const liveBlock = Array.from(editor.children).find((item) => item.getAttribute('data-block-id') === blockId);
+      if (!dirty || !(liveBlock instanceof HTMLElement) || liveBlock.textContent !== before + suffix) return false;
+      const event = new KeyboardEvent('keydown', { key: 's', ctrlKey: ${process.platform === 'darwin' ? 'false' : 'true'}, metaKey: ${process.platform === 'darwin' ? 'true' : 'false'}, bubbles: true, cancelable: true });
+      editor.dispatchEvent(event);
+      busy ||= isBusy();
+      return event.defaultPrevented && busy;
+    })()`,
   );
+  requireJourney(editAndShortcut === true, 'bounded-edit-and-save-shortcut');
   const persisted = await renderer.evaluate('globalThis.__ai7JournalProbe');
   requireJourney(persisted?.busy === true && persisted?.durable === true, 'durable-journal-ack');
   await assertRenderer(
