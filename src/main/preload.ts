@@ -84,6 +84,33 @@ const api: RendererApi = Object.freeze({
     invoke<ServiceOperationMap['getManuscriptWindow']['output']>(IPC_CHANNELS.getManuscriptWindow, input),
   flushJournalEdit: (input: ServiceOperationMap['flushJournalEdit']['input']) =>
     invoke<ServiceOperationMap['flushJournalEdit']['output']>(IPC_CHANNELS.flushJournalEdit, input),
+  listPriorWork: () => invoke<ServiceOperationMap['listPriorWork']['output']>(IPC_CHANNELS.listPriorWork, {}),
+  getManuscriptWindowAt: (input: ServiceOperationMap['getManuscriptWindowAt']['input']) =>
+    invoke<ServiceOperationMap['getManuscriptWindowAt']['output']>(IPC_CHANNELS.getManuscriptWindowAt, input),
+  getOutline: (input: ServiceOperationMap['getOutline']['input']) =>
+    invoke<ServiceOperationMap['getOutline']['output']>(IPC_CHANNELS.getOutline, input),
+  startSearch: (input: ServiceOperationMap['startSearch']['input']) =>
+    invoke<ServiceOperationMap['startSearch']['output']>(IPC_CHANNELS.startSearch, input),
+  pollServiceJob: (input: ServiceOperationMap['pollServiceJob']['input']) =>
+    invoke<ServiceOperationMap['pollServiceJob']['output']>(IPC_CHANNELS.pollServiceJob, input),
+  cancelServiceJob: (input: ServiceOperationMap['cancelServiceJob']['input']) =>
+    invoke<ServiceOperationMap['cancelServiceJob']['output']>(IPC_CHANNELS.cancelServiceJob, input),
+  getSearchResults: (input: ServiceOperationMap['getSearchResults']['input']) =>
+    invoke<ServiceOperationMap['getSearchResults']['output']>(IPC_CHANNELS.getSearchResults, input),
+  prepareReplacement: (input: ServiceOperationMap['prepareReplacement']['input']) =>
+    invoke<ServiceOperationMap['prepareReplacement']['output']>(IPC_CHANNELS.prepareReplacement, input),
+  freezeReplacement: (input: ServiceOperationMap['freezeReplacement']['input']) =>
+    invoke<ServiceOperationMap['freezeReplacement']['output']>(IPC_CHANNELS.freezeReplacement, input),
+  startReplacementCommit: (input: ServiceOperationMap['startReplacementCommit']['input']) =>
+    invoke<ServiceOperationMap['startReplacementCommit']['output']>(IPC_CHANNELS.startReplacementCommit, input),
+  commitReplacement: (input: ServiceOperationMap['commitReplacement']['input']) =>
+    invoke<ServiceOperationMap['commitReplacement']['output']>(IPC_CHANNELS.commitReplacement, input),
+  saveMilestone: (input: ServiceOperationMap['saveMilestone']['input']) =>
+    invoke<ServiceOperationMap['saveMilestone']['output']>(IPC_CHANNELS.saveMilestone, input),
+  undoManuscript: (input: ServiceOperationMap['undoManuscript']['input']) =>
+    invoke<ServiceOperationMap['undoManuscript']['output']>(IPC_CHANNELS.undoManuscript, input),
+  redoManuscript: (input: ServiceOperationMap['redoManuscript']['input']) =>
+    invoke<ServiceOperationMap['redoManuscript']['output']>(IPC_CHANNELS.redoManuscript, input),
 });
 
 contextBridge.exposeInMainWorld('ai7', api);

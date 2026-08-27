@@ -5,6 +5,10 @@ export const MAX_BLOCK_GRAPHEMES = 2_048;
 export const MAX_BLOCK_CODE_UNITS = 4_096;
 export const MAX_EDIT_GRAPHEMES = 256;
 export const MAX_EDIT_CODE_UNITS = 1_024;
+export const MAX_SEARCH_QUERY_GRAPHEMES = 64;
+export const MAX_REPLACEMENT_GRAPHEMES = 256;
+export const MAX_SEARCH_RESULTS = 24;
+export const MAX_OUTLINE_RESULTS = 64;
 
 export type J01ImportControl =
   | 'before-commit'
@@ -25,6 +29,20 @@ export const IPC_CHANNELS = {
   acknowledgeImportCompletion: 'ai7:j01:acknowledge-import-completion',
   getManuscriptWindow: 'ai7:j01:get-manuscript-window',
   flushJournalEdit: 'ai7:j01:flush-journal-edit',
+  listPriorWork: 'ai7:j02:list-prior-work',
+  getManuscriptWindowAt: 'ai7:j02:get-manuscript-window-at',
+  getOutline: 'ai7:j02:get-outline',
+  startSearch: 'ai7:j02:start-search',
+  pollServiceJob: 'ai7:j02:poll-service-job',
+  cancelServiceJob: 'ai7:j02:cancel-service-job',
+  getSearchResults: 'ai7:j02:get-search-results',
+  prepareReplacement: 'ai7:j02:prepare-replacement',
+  freezeReplacement: 'ai7:j02:freeze-replacement',
+  startReplacementCommit: 'ai7:j02:start-replacement-commit',
+  commitReplacement: 'ai7:j02:commit-replacement',
+  saveMilestone: 'ai7:j02:save-milestone',
+  undoManuscript: 'ai7:j02:undo-manuscript',
+  redoManuscript: 'ai7:j02:redo-manuscript',
 } as const;
 
 export const MAIN_EVENTS = {
@@ -160,17 +178,155 @@ export interface ManuscriptWindowProjection {
   manuscriptId: string;
   branchId: string;
   revisionId: string;
-  revisionLabel: 'r1';
+  revisionLabel: string;
   journalSequence: number;
+  workingDigest: string;
+  focusBlockId: string | null;
   previousCursor: string | null;
   nextCursor: string | null;
   position: {
     startBlock: number;
     endBlock: number;
     totalBlocks: number;
+    startCharacter: number;
+    endCharacter: number;
+    totalCharacters: number;
+    proportion: number;
+    structureLabel: string | null;
     label: string;
   };
   blocks: ReadonlyArray<ManuscriptBlockProjection>;
+}
+
+export type ManuscriptWindowTarget =
+  | { kind: 'start' }
+  | { kind: 'cursor'; cursor: string }
+  | { kind: 'block'; blockId: string }
+  | { kind: 'character'; character: number }
+  | { kind: 'proportion'; proportion: number };
+
+export interface OutlineEntryProjection {
+  outlineId: string;
+  blockId: string;
+  kind: 'title' | 'heading';
+  level: number;
+  text: string;
+  character: number;
+  proportion: number;
+}
+
+export interface OutlineProjection {
+  manuscriptId: string;
+  branchId: string;
+  revisionId: string;
+  workingDigest: string;
+  entries: ReadonlyArray<OutlineEntryProjection>;
+  nextCursor: string | null;
+}
+
+export interface PriorWorkItemProjection {
+  bookId: string;
+  bookTitle: string;
+  manuscriptId: string;
+  branchId: string;
+  branchName: string;
+  revisionId: string;
+  revisionLabel: string;
+  journalSequence: number;
+  workingDigest: string;
+  totalCharacters: number;
+  latestMilestone: null | { milestoneId: string; label: string; purpose: string; revisionLabel: string };
+}
+
+export interface SearchMatchProjection {
+  matchId: string;
+  blockId: string;
+  fromGrapheme: number;
+  toGrapheme: number;
+  globalCharacter: number;
+  headingLabel: string;
+  context: string;
+  rangeDigest: string;
+}
+
+export interface SearchSummaryProjection {
+  searchId: string;
+  manuscriptId: string;
+  branchId: string;
+  revisionId: string;
+  workingDigest: string;
+  query: string;
+  scopeLabel: '全稿';
+  totalMatches: number;
+}
+
+export interface SearchResultsProjection extends SearchSummaryProjection {
+  results: ReadonlyArray<SearchMatchProjection>;
+  previousCursor: string | null;
+  nextCursor: string | null;
+}
+
+export interface ReplacementPreviewProjection {
+  previewId: string;
+  searchId: string;
+  manuscriptId: string;
+  branchId: string;
+  revisionId: string;
+  workingDigest: string;
+  query: string;
+  replacement: string;
+  scopeLabel: '全稿';
+  totalMatches: number;
+  includedMatches: number;
+  state: 'reviewing' | 'frozen';
+  representativeContexts: ReadonlyArray<SearchMatchProjection>;
+}
+
+export interface ReplacementCommitProjection {
+  previewId: string;
+  branchId: string;
+  revisionId: string;
+  journalSequence: number;
+  workingDigest: string;
+  committedCount: number;
+  completionLabel: string;
+}
+
+export interface MilestoneProjection {
+  milestoneId: string;
+  manuscriptId: string;
+  branchId: string;
+  revisionId: string;
+  revisionLabel: string;
+  label: string;
+  purpose: string;
+  note: string | null;
+  createdAt: string;
+  journalSequence: number;
+  workingDigest: string;
+  completionLabel: string;
+}
+
+export interface DurableHistoryProjection {
+  action: 'undo' | 'redo';
+  branchId: string;
+  revisionId: string;
+  revisionLabel: string;
+  journalSequence: number;
+  workingDigest: string;
+  commandGroupId: string;
+  completionLabel: string;
+  canUndo: boolean;
+  canRedo: boolean;
+}
+
+export interface ServiceJobProjection {
+  jobId: string;
+  kind: 'search' | 'replacement';
+  state: 'queued' | 'running' | 'completed' | 'cancelled' | 'failed';
+  progress: { completed: number; total: number; label: string };
+  result: SearchSummaryProjection | null;
+  failure: null | { code: string; message: string };
 }
 
 export interface ImportCommitProjection {
@@ -345,6 +501,47 @@ export interface ServiceOperationMap {
     output: ManuscriptWindowProjection;
   };
   flushJournalEdit: { input: JournalEditInput; output: JournalAcknowledgement };
+  listPriorWork: { input: Record<string, never>; output: ReadonlyArray<PriorWorkItemProjection> };
+  getManuscriptWindowAt: {
+    input: { manuscriptId: string; branchId: string; target: ManuscriptWindowTarget };
+    output: ManuscriptWindowProjection;
+  };
+  getOutline: {
+    input: { manuscriptId: string; branchId: string; cursor: string | null };
+    output: OutlineProjection;
+  };
+  startSearch: {
+    input: { manuscriptId: string; branchId: string; query: string };
+    output: ServiceJobProjection;
+  };
+  pollServiceJob: { input: { jobId: string }; output: ServiceJobProjection };
+  cancelServiceJob: { input: { jobId: string }; output: ServiceJobProjection };
+  getSearchResults: {
+    input: { searchId: string; cursor: string | null };
+    output: SearchResultsProjection;
+  };
+  prepareReplacement: {
+    input: { searchId: string; replacement: string };
+    output: ReplacementPreviewProjection;
+  };
+  freezeReplacement: {
+    input: { previewId: string; excludedMatchIds: ReadonlyArray<string> };
+    output: ReplacementPreviewProjection;
+  };
+  startReplacementCommit: { input: { previewId: string }; output: ServiceJobProjection };
+  commitReplacement: { input: { previewId: string }; output: ReplacementCommitProjection };
+  saveMilestone: {
+    input: { manuscriptId: string; branchId: string; label: string; purpose: string; note: string };
+    output: MilestoneProjection;
+  };
+  undoManuscript: {
+    input: { manuscriptId: string; branchId: string; expectedWorkingDigest: string };
+    output: DurableHistoryProjection;
+  };
+  redoManuscript: {
+    input: { manuscriptId: string; branchId: string; expectedWorkingDigest: string };
+    output: DurableHistoryProjection;
+  };
   shutdown: { input: Record<string, never>; output: { state: 'stopping' } };
 }
 
@@ -401,4 +598,18 @@ export interface RendererApi {
   acknowledgeImportCompletion(input: ServiceOperationMap['acknowledgeImportCompletion']['input']): Promise<{ state: 'acknowledged' }>;
   getManuscriptWindow(input: ServiceOperationMap['getManuscriptWindow']['input']): Promise<ManuscriptWindowProjection>;
   flushJournalEdit(input: JournalEditInput): Promise<JournalAcknowledgement>;
+  listPriorWork(): Promise<ReadonlyArray<PriorWorkItemProjection>>;
+  getManuscriptWindowAt(input: ServiceOperationMap['getManuscriptWindowAt']['input']): Promise<ManuscriptWindowProjection>;
+  getOutline(input: ServiceOperationMap['getOutline']['input']): Promise<OutlineProjection>;
+  startSearch(input: ServiceOperationMap['startSearch']['input']): Promise<ServiceJobProjection>;
+  pollServiceJob(input: ServiceOperationMap['pollServiceJob']['input']): Promise<ServiceJobProjection>;
+  cancelServiceJob(input: ServiceOperationMap['cancelServiceJob']['input']): Promise<ServiceJobProjection>;
+  getSearchResults(input: ServiceOperationMap['getSearchResults']['input']): Promise<SearchResultsProjection>;
+  prepareReplacement(input: ServiceOperationMap['prepareReplacement']['input']): Promise<ReplacementPreviewProjection>;
+  freezeReplacement(input: ServiceOperationMap['freezeReplacement']['input']): Promise<ReplacementPreviewProjection>;
+  startReplacementCommit(input: ServiceOperationMap['startReplacementCommit']['input']): Promise<ServiceJobProjection>;
+  commitReplacement(input: ServiceOperationMap['commitReplacement']['input']): Promise<ReplacementCommitProjection>;
+  saveMilestone(input: ServiceOperationMap['saveMilestone']['input']): Promise<MilestoneProjection>;
+  undoManuscript(input: ServiceOperationMap['undoManuscript']['input']): Promise<DurableHistoryProjection>;
+  redoManuscript(input: ServiceOperationMap['redoManuscript']['input']): Promise<DurableHistoryProjection>;
 }

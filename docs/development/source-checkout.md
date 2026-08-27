@@ -1,6 +1,6 @@
-# J-01 source-checkout build and launch
+# Provider-free source-checkout build and launch
 
-This is the operational routing document for Issue #24's first provider-free vertical tracer. The governing contract remains [`docs/agents/source-checkout-buildability.md`](../agents/source-checkout-buildability.md); this file records its concrete implementation.
+This is the operational routing document for the provider-free new-Book tracer and complete J-02 long-manuscript module. The governing contract remains [`docs/agents/source-checkout-buildability.md`](../agents/source-checkout-buildability.md); this file records their concrete implementation.
 
 ## Declared host matrix
 
@@ -20,6 +20,7 @@ pnpm run bootstrap
 pnpm run build
 pnpm run start-built -- --data-root <absolute-path>
 pnpm run e2e -- --journey J-01
+pnpm run e2e -- --journey J-02
 ```
 
 The pnpm SRI-bearing `packageManager` declaration is the pnpm selection authority. `doctor` reports the OS/CPU, exact runtime pins, canonical native adapter, official npm registry, host Node distribution identity/URL/SHA-256, lock/config hashes, and host Electron artifact identity/URL/SHA-256. The Node runtime executing the command must itself be exactly 24.18.1; CI selects it with the full-SHA-pinned `actions/setup-node` action and the repository records the official distribution digest.
@@ -34,7 +35,9 @@ The Electron runtime is not an npm dependency. Bootstrap downloads or reuses onl
 
 `start-built` accepts exactly one data-root option after at most one pnpm literal separator. Before Electron exists, it loads the built shared data-root owner, creates and canonicalizes the external root plus its exact `shell` child, and places `--user-data-dir=<canonical-shell>` before the built main entry. Main independently requires Chromium's early switch and Electron's `userData` path to resolve to that same canonical directory before setting the path or opening authority. The launcher binds the main process to its exact parent PID and remains attached. The fixed payload-free `AI7_READY` line is forwarded only after canonical Agent Data Root setup, the single-instance lock, SQLite authority, awaited dormant six-service Cordis composition, renderer load, and first paint. Pre-readiness failure tears down owned processes and exits nonzero. Parent loss terminates main and service leases. A clean existing data root is preserved; pre-existing linked or redirected shell/store/object paths fail closed.
 
-`e2e` accepts only journey `J-01` and preflights exact `SampleBooks/sample1.docx` as a regular non-symlink file of 29,550 bytes with SHA-256 `b8a3dbde0aa8a1ec7265f9ae3fe47877759e7947c5ab69682cd0a8f424a8d483`. It installs the built Node egress guard before third-party controller imports, preflights its disposable Agent Data Root and shell with the same built owner, and launches the same exact Electron carrier directly with that shell selected before the main entry. Playwright control travels only over inherited Chromium `--remote-debugging-pipe` file descriptors: no debug port, inspector, WebSocket endpoint, TCP listener, or dev server exists. The main-owned picker hook supplies that one selected result but cannot expose a path to the renderer or skip parse, server-derived fidelity review, initially-unselected complete-set degradation acceptance, atomic linked decision/import commit, bounded 32-of-97 editor projection, or durable journal flow. The controller reads no product database or manuscript text and retains, uploads, and logs no manuscript payload, screenshot, trace, video, artifact, or SampleBook derivative; disposable runtime state remains under the external data root and is deleted after the journey.
+`e2e` accepts only `J-01` or `J-02`. J-01 preflights exact `SampleBooks/sample1.docx` as a regular non-symlink file of 29,550 bytes with SHA-256 `b8a3dbde0aa8a1ec7265f9ae3fe47877759e7947c5ab69682cd0a8f424a8d483`. J-02 streams a deterministic exact 10,000,000-character/50,000-block clean Chinese DOCX into the disposable external run root and removes it at cleanup. Both install the built Node egress guard before third-party controller imports, preflight their disposable Agent Data Root and shell with the same built owner, and launch the same exact Electron carrier directly with that shell selected before the main entry. Playwright control travels only over inherited Chromium `--remote-debugging-pipe` file descriptors: no debug port, inspector, WebSocket endpoint, TCP listener, or dev server exists.
+
+The main-owned picker hook supplies the selected result but cannot expose a path to the renderer or skip local streaming parse, server-derived review, atomic import, SQLite paging/indexing, bounded 32-block projections, or durable journal flow. J-02 also drives outline/position navigation, CJK search and Search Return Position, reviewed frozen atomic replacement, editing during cooperative service work, cancellation, Milestone Version, restart/reopen, durable undo/redo, and applicable J-14 keyboard/composition/focus/zoom/forced-colors behavior. Controllers read no product database or manuscript payload and retain, upload, and log no manuscript text, screenshot, trace, video, artifact, or SampleBook derivative; disposable runtime state is deleted after each journey.
 
 ## Closed product interval
 

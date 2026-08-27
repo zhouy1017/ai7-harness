@@ -17,8 +17,6 @@ import {
   IPC_CHANNELS,
   MAIN_EVENTS,
   type CommitNewBookRendererInput,
-  type J01ImportControl,
-  type PickerReselectResult,
   type PickerStageResult,
   type RendererCallResult,
   type ServiceOperationMap,
@@ -33,11 +31,8 @@ import {
 interface LaunchArguments {
   dataRoot: string;
   injectedPickerPath: string | undefined;
-  importControl: J01ImportControl | undefined;
   launcherPid: number;
 }
-
-const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function requireDesktop(condition: unknown, message = 'AI7_DESKTOP_STARTUP_INVALID'): asserts condition {
   if (!condition) throw new Error(message);
@@ -52,38 +47,23 @@ function parseArguments(argv: string[]): LaunchArguments {
       key !== undefined &&
         value !== undefined &&
         !values.has(key) &&
-        (key === '--data-root' ||
-          key === '--j01-picker-path' ||
-          key === '--j01-import-control' ||
-          key === '--launcher-pid'),
+        (key === '--data-root' || key === '--j01-picker-path' || key === '--j02-picker-path' || key === '--launcher-pid'),
     );
     values.set(key, value);
   }
   const dataRoot = values.get('--data-root');
   requireDesktop(dataRoot !== undefined && isAbsolute(dataRoot));
-  const injectedPickerPath = values.get('--j01-picker-path');
-  const importControlValue = values.get('--j01-import-control');
-  const importControl =
-    importControlValue === 'before-commit' ||
-    importControlValue === 'after-commit-before-response' ||
-    importControlValue === 'uncertain-reconciliation' ||
-    importControlValue === 'legacy-reviewed-v2' ||
-    importControlValue === 'abandon-object-delete-failure' ||
-    importControlValue === 'after-abandon-object-delete-before-finalize'
-      ? importControlValue
-      : undefined;
+  requireDesktop(!(values.has('--j01-picker-path') && values.has('--j02-picker-path')));
+  const injectedPickerPath = values.get('--j01-picker-path') ?? values.get('--j02-picker-path');
   const launcherPid = Number(values.get('--launcher-pid'));
   requireDesktop(
     injectedPickerPath === undefined ||
-      (process.env.AI7_E2E_JOURNEY === 'J-01' &&
+      ((process.env.AI7_E2E_JOURNEY === 'J-01' || process.env.AI7_E2E_JOURNEY === 'J-02') &&
         isAbsolute(injectedPickerPath) &&
         extname(injectedPickerPath).toLocaleLowerCase('en-US') === '.docx'),
   );
-  requireDesktop(
-    importControlValue === undefined || (process.env.AI7_E2E_JOURNEY === 'J-01' && importControl !== undefined),
-  );
   requireDesktop(Number.isSafeInteger(launcherPid) && launcherPid > 0 && launcherPid === process.ppid);
-  return { dataRoot, injectedPickerPath, importControl, launcherPid };
+  return { dataRoot, injectedPickerPath, launcherPid };
 }
 
 function processIsAlive(pid: number): boolean {
@@ -144,10 +124,9 @@ function registerRendererHandlers(
   onCloseRiskChanged: (risk: boolean) => void,
 ): () => void {
   let injectedPickerPath = injectedPickerPathInput;
-  const commitBindings = new Map<
-    string,
-    { draftId: string; expectedDraftVersion: number; reviewDigest: string; commitId: string }
-  >();
+  let commitBinding:
+    | { draftId: string; expectedDraftVersion: number; reviewDigest: string; commitId: string }
+    | undefined;
   const requireSender = (event: IpcMainInvokeEvent): void => {
     requireDesktop(
       !window.isDestroyed() &&
@@ -166,95 +145,38 @@ function registerRendererHandlers(
     requireDesktop(typeof input === 'boolean', 'AI7_RENDERER_BOUNDARY_INVALID');
     onCloseRiskChanged(input);
   };
-  const chooseDocx = async (): Promise<string | undefined> => {
-    let selectedPath = injectedPickerPath;
-    injectedPickerPath = undefined;
-    if (!selectedPath) {
-      const selected = await dialog.showOpenDialog(window, {
-        title: '选择要导入的 DOCX 稿件',
-        buttonLabel: '选择稿件',
-        properties: ['openFile'],
-        filters: [{ name: 'Word 文档', extensions: ['docx'] }],
-      });
-      if (selected.canceled || selected.filePaths.length !== 1) return undefined;
-      selectedPath = selected.filePaths[0];
-    }
-    requireDesktop(
-      selectedPath !== undefined &&
-        isAbsolute(selectedPath) &&
-        extname(basename(selectedPath)).toLocaleLowerCase('en-US') === '.docx',
-    );
-    return selectedPath;
-  };
 
   ipcMain.on(MAIN_EVENTS.closeRiskChanged, closeRiskListener);
-
-  ipcMain.handle(IPC_CHANNELS.getImportStartup, (event) =>
-    envelope(async () => {
-      requireSender(event);
-      requireAuthority();
-      return service.call('getImportStartup', {});
-    }),
-  );
 
   ipcMain.handle(IPC_CHANNELS.selectAndStageDocx, (event) =>
     envelope<PickerStageResult>(async () => {
       requireSender(event);
       requireAuthority();
-      const selectedPath = await chooseDocx();
-      if (!selectedPath) return { status: 'cancelled' };
+      let selectedPath = injectedPickerPath;
+      injectedPickerPath = undefined;
+      if (!selectedPath) {
+        const selected = await dialog.showOpenDialog(window, {
+          title: '选择要导入的 DOCX 稿件',
+          buttonLabel: '选择稿件',
+          properties: ['openFile'],
+          filters: [{ name: 'Word 文档', extensions: ['docx'] }],
+        });
+        if (selected.canceled || selected.filePaths.length !== 1) return { status: 'cancelled' };
+        selectedPath = selected.filePaths[0];
+      }
+      requireDesktop(
+        selectedPath !== undefined &&
+          isAbsolute(selectedPath) &&
+          extname(basename(selectedPath)).toLocaleLowerCase('en-US') === '.docx',
+      );
       const staged = await service.call('stageSelectedDocx', { selectionToken: randomUUID(), selectedPath });
       return { status: 'staged', staged };
-    }),
-  );
-  ipcMain.handle(IPC_CHANNELS.continueImportDraft, (event, input: ServiceOperationMap['continueImportDraft']['input']) =>
-    envelope(async () => {
-      requireSender(event);
-      requireAuthority();
-      return service.call('continueImportDraft', input);
-    }),
-  );
-  ipcMain.handle(
-    IPC_CHANNELS.reselectImportDraft,
-    (event, input: { draftId: string; expectedDraftVersion: number }) =>
-      envelope<PickerReselectResult>(async () => {
-        requireSender(event);
-        requireAuthority();
-        requireDesktop(
-          input !== null &&
-            typeof input === 'object' &&
-            UUID_PATTERN.test(input.draftId) &&
-            Number.isSafeInteger(input.expectedDraftVersion) &&
-            input.expectedDraftVersion >= 1,
-          'AI7_RENDERER_BOUNDARY_INVALID',
-        );
-        const selectedPath = await chooseDocx();
-        if (!selectedPath) return { status: 'cancelled' };
-        commitBindings.delete(input.draftId);
-        return {
-          status: 'reselected',
-          continuation: await service.call('reselectImportDraft', {
-            ...input,
-            selectionToken: randomUUID(),
-            selectedPath,
-          }),
-        };
-      }),
-  );
-  ipcMain.handle(IPC_CHANNELS.abandonImportDraft, (event, input: ServiceOperationMap['abandonImportDraft']['input']) =>
-    envelope(async () => {
-      requireSender(event);
-      requireAuthority();
-      const result = await service.call('abandonImportDraft', input);
-      commitBindings.delete(input.draftId);
-      return result;
     }),
   );
   ipcMain.handle(IPC_CHANNELS.prepareNewBookReview, (event, input: ServiceOperationMap['prepareNewBookReview']['input']) =>
     envelope(async () => {
       requireSender(event);
       requireAuthority();
-      commitBindings.delete(input.draftId);
       return service.call('prepareNewBookReview', input);
     }),
   );
@@ -262,40 +184,14 @@ function registerRendererHandlers(
     envelope(async () => {
       requireSender(event);
       requireAuthority();
-      requireDesktop(
-        input.commitAttemptId === null ||
-          (typeof input.commitAttemptId === 'string' && UUID_PATTERN.test(input.commitAttemptId)),
-        'AI7_RENDERER_BOUNDARY_INVALID',
-      );
-      let commitBinding = commitBindings.get(input.draftId);
-      if (!commitBinding) {
-        commitBinding = {
-          draftId: input.draftId,
-          expectedDraftVersion: input.expectedDraftVersion,
-          reviewDigest: input.reviewDigest,
-          commitId: input.commitAttemptId ?? randomUUID(),
-        };
-        commitBindings.set(input.draftId, commitBinding);
-      }
+      if (!commitBinding) commitBinding = { ...input, commitId: randomUUID() };
       requireDesktop(
         commitBinding.draftId === input.draftId &&
           commitBinding.expectedDraftVersion === input.expectedDraftVersion &&
-          commitBinding.reviewDigest === input.reviewDigest &&
-          (input.commitAttemptId === null || commitBinding.commitId === input.commitAttemptId),
+          commitBinding.reviewDigest === input.reviewDigest,
       );
       return service.call('commitNewBookImport', commitBinding);
     }),
-  );
-  ipcMain.handle(
-    IPC_CHANNELS.acknowledgeImportCompletion,
-    (event, input: ServiceOperationMap['acknowledgeImportCompletion']['input']) =>
-      envelope(async () => {
-        requireSender(event);
-        requireAuthority();
-        const result = await service.call('acknowledgeImportCompletion', input);
-        commitBindings.clear();
-        return result;
-      }),
   );
   ipcMain.handle(IPC_CHANNELS.getManuscriptWindow, (event, input: ServiceOperationMap['getManuscriptWindow']['input']) =>
     envelope(async () => {
@@ -311,6 +207,31 @@ function registerRendererHandlers(
       return service.call('flushJournalEdit', input);
     }),
   );
+  const serviceHandlers = [
+    ['listPriorWork', IPC_CHANNELS.listPriorWork],
+    ['getManuscriptWindowAt', IPC_CHANNELS.getManuscriptWindowAt],
+    ['getOutline', IPC_CHANNELS.getOutline],
+    ['startSearch', IPC_CHANNELS.startSearch],
+    ['pollServiceJob', IPC_CHANNELS.pollServiceJob],
+    ['cancelServiceJob', IPC_CHANNELS.cancelServiceJob],
+    ['getSearchResults', IPC_CHANNELS.getSearchResults],
+    ['prepareReplacement', IPC_CHANNELS.prepareReplacement],
+    ['freezeReplacement', IPC_CHANNELS.freezeReplacement],
+    ['startReplacementCommit', IPC_CHANNELS.startReplacementCommit],
+    ['commitReplacement', IPC_CHANNELS.commitReplacement],
+    ['saveMilestone', IPC_CHANNELS.saveMilestone],
+    ['undoManuscript', IPC_CHANNELS.undoManuscript],
+    ['redoManuscript', IPC_CHANNELS.redoManuscript],
+  ] as const;
+  for (const [operation, channel] of serviceHandlers) {
+    ipcMain.handle(channel, (event, input: ServiceOperationMap[typeof operation]['input']) =>
+      envelope(async () => {
+        requireSender(event);
+        requireAuthority();
+        return service.call(operation, input);
+      }),
+    );
+  }
 
   return () => {
     for (const channel of Object.values(IPC_CHANNELS)) ipcMain.removeHandler(channel);
@@ -397,7 +318,7 @@ export async function runApplication(): Promise<void> {
     installChromiumDenial(productSession);
     startupLocation = 'service-ready';
     const serviceEntry = resolve(__dirname, '..', 'service', 'index.mjs');
-    service = await ServiceClient.start(process.execPath, serviceEntry, dataRoot, launch.importControl);
+    service = await ServiceClient.start(process.execPath, serviceEntry, dataRoot);
     service.onUnexpectedExit(() => {
       serviceInterrupted = true;
       if (!productReady) {

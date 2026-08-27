@@ -3,7 +3,6 @@ import { fileURLToPath } from 'node:url';
 import {
   MAX_EDIT_CODE_UNITS,
   MAX_FRAME_BYTES,
-  type J01ImportControl,
   type ServiceFailureResponse,
   type ServiceRequest,
   type ServiceResponse,
@@ -12,6 +11,7 @@ import {
 import { installNodeNetworkDenial } from '../shared/network-denial.js';
 import type { DormantHarnessRuntime } from './runtime.js';
 import type { EditorialStore } from './store.js';
+import type { CooperativeJobOwner } from './cooperative-jobs.js';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const HEX_DIGEST_PATTERN = /^[0-9a-f]{64}$/;
@@ -65,7 +65,7 @@ function decodeRequest(frame: Uint8Array): ServiceRequest {
 
   switch (op) {
     case 'ready':
-    case 'getImportStartup':
+    case 'listPriorWork':
     case 'shutdown': {
       requireInput(value.input, [], tentativeId);
       break;
@@ -73,37 +73,6 @@ function decodeRequest(frame: Uint8Array): ServiceRequest {
     case 'stageSelectedDocx': {
       const input = requireInput(value.input, ['selectionToken', 'selectedPath'], tentativeId);
       if (
-        !isBoundedString(input.selectionToken, 36) ||
-        !UUID_PATTERN.test(input.selectionToken) ||
-        !isBoundedString(input.selectedPath, 32_767) ||
-        !isAbsolute(input.selectedPath)
-      ) {
-        throw new ProtocolError(tentativeId);
-      }
-      break;
-    }
-    case 'continueImportDraft':
-    case 'abandonImportDraft': {
-      const input = requireInput(value.input, ['draftId', 'expectedDraftVersion'], tentativeId);
-      if (
-        !isBoundedString(input.draftId, 36) ||
-        !UUID_PATTERN.test(input.draftId) ||
-        !isSafeInteger(input.expectedDraftVersion, 1)
-      ) {
-        throw new ProtocolError(tentativeId);
-      }
-      break;
-    }
-    case 'reselectImportDraft': {
-      const input = requireInput(
-        value.input,
-        ['draftId', 'expectedDraftVersion', 'selectionToken', 'selectedPath'],
-        tentativeId,
-      );
-      if (
-        !isBoundedString(input.draftId, 36) ||
-        !UUID_PATTERN.test(input.draftId) ||
-        !isSafeInteger(input.expectedDraftVersion, 1) ||
         !isBoundedString(input.selectionToken, 36) ||
         !UUID_PATTERN.test(input.selectionToken) ||
         !isBoundedString(input.selectedPath, 32_767) ||
@@ -142,13 +111,6 @@ function decodeRequest(frame: Uint8Array): ServiceRequest {
         !isBoundedString(input.commitId, 36) ||
         !UUID_PATTERN.test(input.commitId)
       ) {
-        throw new ProtocolError(tentativeId);
-      }
-      break;
-    }
-    case 'acknowledgeImportCompletion': {
-      const input = requireInput(value.input, ['commitId'], tentativeId);
-      if (!isBoundedString(input.commitId, 36) || !UUID_PATTERN.test(input.commitId)) {
         throw new ProtocolError(tentativeId);
       }
       break;
@@ -202,6 +164,90 @@ function decodeRequest(frame: Uint8Array): ServiceRequest {
         input.toGrapheme < input.fromGrapheme ||
         !isBoundedString(input.insertText, MAX_EDIT_CODE_UNITS, true)
       ) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
+    case 'getManuscriptWindowAt': {
+      const input = requireInput(value.input, ['manuscriptId', 'branchId', 'target'], tentativeId);
+      if (!isBoundedString(input.manuscriptId, 36) || !UUID_PATTERN.test(input.manuscriptId) ||
+          !isBoundedString(input.branchId, 36) || !UUID_PATTERN.test(input.branchId) || !isRecord(input.target)) {
+        throw new ProtocolError(tentativeId);
+      }
+      const target = input.target;
+      if ((target.kind === 'start' && hasExactKeys(target, ['kind'])) ||
+          (target.kind === 'cursor' && hasExactKeys(target, ['kind', 'cursor']) && isBoundedString(target.cursor, 1_024)) ||
+          (target.kind === 'block' && hasExactKeys(target, ['kind', 'blockId']) && isBoundedString(target.blockId, 28) && /^blk_[0-9a-f]{24}$/.test(target.blockId)) ||
+          (target.kind === 'character' && hasExactKeys(target, ['kind', 'character']) && isSafeInteger(target.character)) ||
+          (target.kind === 'proportion' && hasExactKeys(target, ['kind', 'proportion']) && typeof target.proportion === 'number' && Number.isFinite(target.proportion) && target.proportion >= 0 && target.proportion <= 1)) {
+        break;
+      }
+      throw new ProtocolError(tentativeId);
+    }
+    case 'getOutline': {
+      const input = requireInput(value.input, ['manuscriptId', 'branchId', 'cursor'], tentativeId);
+      if (!isBoundedString(input.manuscriptId, 36) || !UUID_PATTERN.test(input.manuscriptId) ||
+          !isBoundedString(input.branchId, 36) || !UUID_PATTERN.test(input.branchId) ||
+          !(input.cursor === null || isBoundedString(input.cursor, 1_024))) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'startSearch': {
+      const input = requireInput(value.input, ['manuscriptId', 'branchId', 'query'], tentativeId);
+      if (!isBoundedString(input.manuscriptId, 36) || !UUID_PATTERN.test(input.manuscriptId) ||
+          !isBoundedString(input.branchId, 36) || !UUID_PATTERN.test(input.branchId) ||
+          !isBoundedString(input.query, 256)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'pollServiceJob':
+    case 'cancelServiceJob': {
+      const input = requireInput(value.input, ['jobId'], tentativeId);
+      if (!isBoundedString(input.jobId, 36) || !UUID_PATTERN.test(input.jobId)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'getSearchResults': {
+      const input = requireInput(value.input, ['searchId', 'cursor'], tentativeId);
+      if (!isBoundedString(input.searchId, 36) || !UUID_PATTERN.test(input.searchId) ||
+          !(input.cursor === null || isBoundedString(input.cursor, 1_024))) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'prepareReplacement': {
+      const input = requireInput(value.input, ['searchId', 'replacement'], tentativeId);
+      if (!isBoundedString(input.searchId, 36) || !UUID_PATTERN.test(input.searchId) ||
+          !isBoundedString(input.replacement, 1_024, true)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'freezeReplacement': {
+      const input = requireInput(value.input, ['previewId', 'excludedMatchIds'], tentativeId);
+      if (!isBoundedString(input.previewId, 36) || !UUID_PATTERN.test(input.previewId) || !Array.isArray(input.excludedMatchIds) ||
+          input.excludedMatchIds.length > 1_000 || !input.excludedMatchIds.every((id) => isBoundedString(id, 28) && /^hit_[0-9a-f]{24}$/.test(id))) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
+    case 'startReplacementCommit': {
+      const input = requireInput(value.input, ['previewId'], tentativeId);
+      if (!isBoundedString(input.previewId, 36) || !UUID_PATTERN.test(input.previewId)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'commitReplacement': {
+      const input = requireInput(value.input, ['previewId'], tentativeId);
+      if (!isBoundedString(input.previewId, 36) || !UUID_PATTERN.test(input.previewId)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'saveMilestone': {
+      const input = requireInput(value.input, ['manuscriptId', 'branchId', 'label', 'purpose', 'note'], tentativeId);
+      if (!isBoundedString(input.manuscriptId, 36) || !UUID_PATTERN.test(input.manuscriptId) ||
+          !isBoundedString(input.branchId, 36) || !UUID_PATTERN.test(input.branchId) ||
+          !isBoundedString(input.label, 80) || !isBoundedString(input.purpose, 120) ||
+          !isBoundedString(input.note, 500, true)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'undoManuscript':
+    case 'redoManuscript': {
+      const input = requireInput(value.input, ['manuscriptId', 'branchId', 'expectedWorkingDigest'], tentativeId);
+      if (!isBoundedString(input.manuscriptId, 36) || !UUID_PATTERN.test(input.manuscriptId) ||
+          !isBoundedString(input.branchId, 36) || !UUID_PATTERN.test(input.branchId) ||
+          !isBoundedString(input.expectedWorkingDigest, 64) || !HEX_DIGEST_PATTERN.test(input.expectedWorkingDigest)) {
         throw new ProtocolError(tentativeId);
       }
       break;
@@ -284,46 +330,18 @@ async function writeResponse(response: ServiceResponse): Promise<void> {
 async function dispatch(
   store: EditorialStore,
   harness: DormantHarnessRuntime,
+  jobs: CooperativeJobOwner,
   request: ServiceRequest,
-  importControl: J01ImportControl | undefined,
 ): Promise<ServiceSuccessResponse> {
   switch (request.op) {
     case 'ready':
       return { id: request.id, ok: true, op: request.op, result: harness.readiness };
-    case 'getImportStartup':
-      return { id: request.id, ok: true, op: request.op, result: await store.getImportStartup() };
     case 'stageSelectedDocx':
       return {
         id: request.id,
         ok: true,
         op: request.op,
         result: await store.stageSelectedDocx(request.input.selectionToken, request.input.selectedPath),
-      };
-    case 'continueImportDraft':
-      return {
-        id: request.id,
-        ok: true,
-        op: request.op,
-        result: await store.continueImportDraft(request.input.draftId, request.input.expectedDraftVersion),
-      };
-    case 'reselectImportDraft':
-      return {
-        id: request.id,
-        ok: true,
-        op: request.op,
-        result: await store.reselectImportDraft(
-          request.input.draftId,
-          request.input.expectedDraftVersion,
-          request.input.selectionToken,
-          request.input.selectedPath,
-        ),
-      };
-    case 'abandonImportDraft':
-      return {
-        id: request.id,
-        ok: true,
-        op: request.op,
-        result: await store.abandonImportDraft(request.input.draftId, request.input.expectedDraftVersion),
       };
     case 'prepareNewBookReview':
       return {
@@ -339,21 +357,7 @@ async function dispatch(
         ),
       };
     case 'commitNewBookImport':
-      return {
-        id: request.id,
-        ok: true,
-        op: request.op,
-        result: await store.commitNewBookImport(request.input, {
-          interruptAfterAttempt: importControl === 'before-commit' || importControl === 'uncertain-reconciliation',
-        }),
-      };
-    case 'acknowledgeImportCompletion':
-      return {
-        id: request.id,
-        ok: true,
-        op: request.op,
-        result: await store.acknowledgeImportCompletion(request.input.commitId),
-      };
+      return { id: request.id, ok: true, op: request.op, result: store.commitNewBookImport(request.input) };
     case 'getManuscriptWindow':
       return {
         id: request.id,
@@ -363,55 +367,54 @@ async function dispatch(
       };
     case 'flushJournalEdit':
       return { id: request.id, ok: true, op: request.op, result: store.flushJournalEdit(request.input) };
+    case 'listPriorWork':
+      return { id: request.id, ok: true, op: request.op, result: store.listPriorWork() };
+    case 'getManuscriptWindowAt':
+      return { id: request.id, ok: true, op: request.op, result: store.getManuscriptWindowAt(request.input.manuscriptId, request.input.branchId, request.input.target) };
+    case 'getOutline':
+      return { id: request.id, ok: true, op: request.op, result: store.getOutline(request.input.manuscriptId, request.input.branchId, request.input.cursor) };
+    case 'startSearch':
+      return { id: request.id, ok: true, op: request.op, result: jobs.startSearch(request.input.manuscriptId, request.input.branchId, request.input.query) };
+    case 'pollServiceJob':
+      return { id: request.id, ok: true, op: request.op, result: jobs.poll(request.input.jobId) };
+    case 'cancelServiceJob':
+      return { id: request.id, ok: true, op: request.op, result: jobs.cancel(request.input.jobId) };
+    case 'getSearchResults':
+      return { id: request.id, ok: true, op: request.op, result: store.getSearchResults(request.input.searchId, request.input.cursor) };
+    case 'prepareReplacement':
+      return { id: request.id, ok: true, op: request.op, result: store.prepareReplacement(request.input.searchId, request.input.replacement) };
+    case 'freezeReplacement':
+      return { id: request.id, ok: true, op: request.op, result: store.freezeReplacement(request.input.previewId, request.input.excludedMatchIds) };
+    case 'startReplacementCommit':
+      return { id: request.id, ok: true, op: request.op, result: jobs.startReplacement(request.input.previewId) };
+    case 'commitReplacement':
+      return { id: request.id, ok: true, op: request.op, result: store.commitReplacement(request.input.previewId) };
+    case 'saveMilestone':
+      return { id: request.id, ok: true, op: request.op, result: store.saveMilestone(request.input.manuscriptId, request.input.branchId, request.input.label, request.input.purpose, request.input.note) };
+    case 'undoManuscript':
+      return { id: request.id, ok: true, op: request.op, result: store.undoManuscript(request.input.manuscriptId, request.input.branchId, request.input.expectedWorkingDigest) };
+    case 'redoManuscript':
+      return { id: request.id, ok: true, op: request.op, result: store.redoManuscript(request.input.manuscriptId, request.input.branchId, request.input.expectedWorkingDigest) };
     case 'shutdown':
       return { id: request.id, ok: true, op: request.op, result: { state: 'stopping' } };
   }
 }
 
-function parseArguments(argv: string[]): {
-  dataRoot: string;
-  parentPid: number;
-  importControl: J01ImportControl | undefined;
-} {
+function parseArguments(argv: string[]): { dataRoot: string; parentPid: number } {
   const values = new Map<string, string>();
   for (let index = 0; index < argv.length; index += 2) {
     const key = argv[index];
     const value = argv[index + 1];
-    if (
-      !key ||
-      !value ||
-      values.has(key) ||
-      (key !== '--data-root' && key !== '--parent-pid' && key !== '--j01-import-control')
-    ) {
-      throw new ProtocolError();
-    }
+    if (!key || !value || values.has(key) || (key !== '--data-root' && key !== '--parent-pid')) throw new ProtocolError();
     values.set(key, value);
   }
   const dataRoot = values.get('--data-root');
   const parentPidValue = values.get('--parent-pid');
   const parentPid = Number(parentPidValue);
-  const importControlValue = values.get('--j01-import-control');
-  const importControl =
-    importControlValue === 'before-commit' ||
-    importControlValue === 'after-commit-before-response' ||
-    importControlValue === 'uncertain-reconciliation' ||
-    importControlValue === 'legacy-reviewed-v2' ||
-    importControlValue === 'abandon-object-delete-failure' ||
-    importControlValue === 'after-abandon-object-delete-before-finalize'
-      ? importControlValue
-      : undefined;
-  if (
-    !dataRoot ||
-    !isAbsolute(dataRoot) ||
-    !Number.isSafeInteger(parentPid) ||
-    parentPid <= 0 ||
-    process.ppid !== parentPid ||
-    (importControlValue !== undefined &&
-      (importControl === undefined || process.env.AI7_E2E_JOURNEY !== 'J-01'))
-  ) {
+  if (!dataRoot || !isAbsolute(dataRoot) || !Number.isSafeInteger(parentPid) || parentPid <= 0 || process.ppid !== parentPid) {
     throw new ProtocolError();
   }
-  return { dataRoot, parentPid, importControl };
+  return { dataRoot, parentPid };
 }
 
 function parentIsAlive(parentPid: number): boolean {
@@ -426,10 +429,11 @@ function parentIsAlive(parentPid: number): boolean {
 
 async function run(): Promise<void> {
   installNodeNetworkDenial();
-  const { dataRoot, parentPid, importControl } = parseArguments(process.argv.slice(2));
-  const [{ EditorialStore, StoreError, StoreFatalError }, { mountDormantHarness }] = await Promise.all([
+  const { dataRoot, parentPid } = parseArguments(process.argv.slice(2));
+  const [{ EditorialStore, StoreError, StoreFatalError }, { mountDormantHarness }, { CooperativeJobOwner }] = await Promise.all([
     import('./store.js'),
     import('./runtime.js'),
+    import('./cooperative-jobs.js'),
   ]);
   let stopping = false;
   const stop = (): void => {
@@ -446,15 +450,12 @@ async function run(): Promise<void> {
 
   let store: EditorialStore | undefined;
   let harness: DormantHarnessRuntime | undefined;
+  let jobs: CooperativeJobOwner | undefined;
   try {
     const codeRoot = fileURLToPath(new URL('../../', import.meta.url));
-    store = await EditorialStore.open(dataRoot, codeRoot, {
-      induceUnprovableReconciliation: importControl === 'uncertain-reconciliation',
-      persistLegacyReviewedDraft: importControl === 'legacy-reviewed-v2',
-      induceAbandonObjectRemovalFailure: importControl === 'abandon-object-delete-failure',
-      interruptAfterAbandonObjectRemoval: importControl === 'after-abandon-object-delete-before-finalize',
-    });
+    store = await EditorialStore.open(dataRoot, codeRoot);
     harness = await mountDormantHarness();
+    jobs = new CooperativeJobOwner(store);
     for await (const frame of readFrames()) {
       let request: ServiceRequest;
       try {
@@ -466,17 +467,13 @@ async function run(): Promise<void> {
       }
       let response: ServiceResponse;
       try {
-        response = await dispatch(store, harness, request, importControl);
+        response = await dispatch(store, harness, jobs, request);
       } catch (error) {
         if (error instanceof StoreFatalError) {
           stop();
           throw error;
         }
         response = failureResponse(request.id, error, StoreError);
-      }
-      if (request.op === 'commitNewBookImport' && importControl === 'after-commit-before-response') {
-        stop();
-        throw new Error('E2E interruption after committed import and before response.');
       }
       await writeResponse(response);
       if (request.op === 'shutdown') break;
@@ -486,6 +483,7 @@ async function run(): Promise<void> {
     process.removeListener('SIGTERM', stop);
     process.removeListener('SIGINT', stop);
     try {
+      jobs?.dispose();
       await harness?.dispose();
     } finally {
       store?.close();

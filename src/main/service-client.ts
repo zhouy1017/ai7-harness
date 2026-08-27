@@ -13,6 +13,7 @@ import {
 
 const MAX_PENDING_REQUESTS = 16;
 const REQUEST_TIMEOUT_MS = 30_000;
+const LONG_REQUEST_TIMEOUT_MS = 10 * 60_000;
 
 interface PendingRequest {
   readonly operation: ServiceOperation;
@@ -158,7 +159,7 @@ export class ServiceClient {
         this.#pending.delete(id);
         reject(new ServiceCallError('SERVICE_TIMEOUT', '本地业务服务响应超时。'));
         this.#fault();
-      }, REQUEST_TIMEOUT_MS);
+      }, operation === 'stageSelectedDocx' || operation === 'commitNewBookImport' || operation === 'commitReplacement' ? LONG_REQUEST_TIMEOUT_MS : REQUEST_TIMEOUT_MS);
       timeout.unref();
       this.#pending.set(id, {
         operation,

@@ -2,31 +2,37 @@
 
 ## What's done
 
-- Re-resolved the intended integration target after Issue #37: `origin/dev@0dcc2265610fb908cae8e41cb326d1bc01b33f84` is the canonical implementation baseline, and Issue #41 remains the sole writable branch on `feat/41-import-continuity`.
-- Rebased all five bounded Issue #41 commits onto that exact target. The replay is structurally complete and clean; no Issue #41 commit or non-overlapping owner was dropped.
-- Confirmed the expected semantic overlap in `src/service/store.ts`, `src/renderer/index.ts`, and `e2e/run-j01.mjs`: the mechanical replay retains Issue #41 continuity but temporarily regresses Issue #37's three-class `identityFindings` model to the old exact-match model. That mechanical result is not accepted as the final integration state.
-- The Owner selected the strict compatibility rule for normalization: schema-v2/v3 data and complete drafts remain recoverable, but every non-v4 review digest is invalidated and requires an explicit v4 re-review. Ordinary production creates and accepts only review schema v4.
-- Completed the semantic normalization in the existing owners. `src/service/store.ts` now binds ordered one-class-per-record `identityFindings` into review schema v4 before both durable attempt preparation and the atomic commit; `src/renderer/index.ts` composes recovery notices with all three identity classes; and `e2e/run-j01.mjs` composes the identity sequence with restart, path-loss, legacy invalidation, attempt reconciliation, acknowledgement, uncertainty, and abandonment cases.
-- The composed J-01 sequence now restarts an accepted identity-bearing clean review and proves its two filename-collision findings survive before commit. The old-v2 control instead proves recovery without authority, invalidation to target selection, and an explicit new v4 review before commit.
-- Two directly Commander-dispatched, fresh, read-only, non-author T3 Reviewers independently examined the schema/replay and renderer/J-01 seams. Requested and actual binding was OpenAI Codex `gpt-5.6-sol` at `xhigh` for both, meeting the reviewed T3 class; neither Reviewer dispatched or spawned. No fallback occurred. Cross-provider independence was unavailable because Claude was unavailable at `2026-08-27T09:14:09.9650366Z`, so same-provider independence was explicitly reduced. Their verdicts were advisory inputs only and did not create an exact-head, zero-finding, iterative re-review, PR, or CI gate.
-- Replaced the stale Issue #37 root handoff with exact current Issue #41 routing and an explicit stop before the separate Issue #43 replay.
-- Passed bounded no-install validation: all changed paths are within the closed Issue #41 owner set; Node source syntax and `git diff --check` pass; review v3 and the obsolete exact-match surface are absent; review v2 occurs only in the E2E-controlled legacy builder; protocol v3, review v4, SQLite v5, all four forward migration steps, cumulative cleanup triggers, and every composed J-01 scenario marker are present. The five non-overlapping Issue #41 implementation files remain byte-identical to original candidate head `482856375e999c2893012a53444e65a85f455d26`.
+- Verified the sole writable Worker boundary for Issue #43: clean `feat/43-bounded-editor` at exact `HEAD`/`origin/dev` `6b4ef18d2c4b2a212ec34a24ec3a25b3bc3be5b5`.
+- Fetched the full live Issue #43 body through the GitHub REST API and resolved the exact `dev@6b4ef18...` authority owners named by its Change Brief without entering `docs/archive/`.
+- Mapped the existing DOCX parser, SQLite authority, service dispatcher/private IPC, 32-block ProseMirror renderer, Electron picker/launch boundary, and J-01 E2E controller.
+- Confirmed the current SQLite build exposes FTS5 and its trigram tokenizer, so bounded disk-backed CJK substring search can remain dependency-free in the existing store.
+- Selected an extension-first implementation: callback-stream DOCX blocks into existing staging, add forward SQLite migration/index owners, deepen the existing private protocol, and add one cooperative service-internal job owner while keeping authoritative writes serialized.
+- Implemented callback-stream DOCX parsing into SQLite staging with bounded archive/XML/block limits, incremental source/content/structure digests, and no whole-manuscript block array.
+- Added the forward SQLite authority for block order and global offsets, outline, trigram-backed CJK search, chained working digest, cooperative search/replacement jobs, frozen revalidation and atomic replacement, milestones, and durable undo/redo.
+- Deepened the existing framed service protocol, Electron IPC, and preload bridge for restart/reopen, window/outline/global navigation, search/return, replacement, milestone, and history operations.
+- Reworked the existing ProseMirror surface into a bounded 32-block workspace with structure and position navigation, global search/replacement review, serialized journal save, milestone/history controls, IME command guards, responsive 200% zoom layout, and forced-colors semantics.
+- Removed the superseded unbounded v2 window/digest implementation and second SQLite connection; all authoritative edits now pass through the one serialized bounded authority.
+- Added the J-02 controller: it streams a disposable exact 10,000,000-character/50,000-block clean synthetic DOCX, drives the native picker and full editor journey, restarts/reopens persisted work, and exercises keyboard, real CDP composition, visible focus, 200% reflow, and forced colors.
+- Routed J-01 and J-02 through the existing single Windows/macOS E2E job; no additional standing gate, dependency, provider path, tracked fixture, screenshot, trace, video, or database artifact was added.
+- Preserved the v1 parser identity and exact content/structure digest semantics while changing its implementation to streaming, so existing sample1 parsed identities remain compatible across the forward migration.
+- Corrected and exercised the forward revision-table self-reference; disposable probes passed fresh v3 creation, legacy v2 Book/journal migration, disk-backed FTS5 CJK search, frozen replacement, Milestone revision creation, and durable undo/redo.
+- Updated `README.md` and `docs/development/source-checkout.md` to route both admitted journeys and describe the runtime-only J-02 input/cleanup boundary.
 
 ## What's next
 
-- Checkpoint and push the normalized branch, create the Issue #41 pull request, wait for the existing Route and Windows/macOS J-01 checks, and merge only if those standing surfaces pass.
+- Commit the complete local Issue #43 module, then hand the clean branch back for Commander target re-resolution and exact Windows/macOS gate execution.
 
 ## Key decisions
 
-- Review schema, service protocol, and SQLite schema are separate namespaces: the normalized result is review schema v4, service protocol v3, and SQLite schema v5.
-- Legacy v2/v3 reviews do not retain commit authority. Their exact staged bytes and draft state may survive migration/restart, but continuation returns to target/review so current identity evidence is explicitly reviewed under v4.
-- Issue #37 identity disclosure and Issue #41 continuity are cumulative requirements; neither branch tree may replace the other wholesale.
+- Preserve the existing SQLite file as the only authority and use its built-in FTS5 trigram tokenizer; no dependency, second store, process, editor foundation, public API, or standing gate is introduced.
+- Preserve the renderer maximum of 32 Manuscript Blocks and move all whole-manuscript enumeration, offsets, outline, search, replacement preparation, revision materialization, and durable history into the service/store.
+- Keep J-01 compatibility while adding the complete provider-free J-02 route; the runtime-generated synthetic DOCX and Agent Data Root remain disposable external E2E data and never tracked payload.
 
 ## Unresolved matters or blockers
 
-- Exact pinned local Node/pnpm carriers remain absent; no dependency or carrier installation is authorized. The existing hosted checks remain the official execution surface.
-- Stop if normalization requires a second ledger/store, a new public fault API, another Journey/gate, Provider work, protected input, dependency/process expansion, or any Change Brief expansion.
+- No named implementation stop condition was reached. All changed TypeScript and E2E files pass available syntax checks; JSON parsing and `git diff --check` pass; fresh-schema, v2-migration, FTS5/search/replacement/Milestone/history probes pass.
+- Exact `doctor`, TypeScript/build, and Electron J-01/J-02 execution could not start in this worktree: the only available launcher is Node 24.19.0 with pnpm 11.19.0, while the repository requires Node 24.18.1 with pnpm 11.24.0, and no dependency/runtime tree is present. The Issue forbids installing dependencies, so the Worker did not bootstrap or alter that environment.
 
 ## Resume Prompt
 
-Validate and integrate only Issue #41 on `feat/41-import-continuity` atop exact `origin/dev@0dcc2265610fb908cae8e41cb326d1bc01b33f84`. Preserve review schema v4 with ordered `identityFindings`, service protocol v3, SQLite continuity schema v5, all attempt/recovery/cleanup behavior, and explicit invalidation of every non-v4 review. Update current routing, run only no-install validation, then create the Issue #41 PR and wait for the existing Route and Windows/macOS J-01 checks. Do not install dependencies/plugins, call Providers, add manuscripts/derivatives, add gates, broaden the Change Brief, release, or touch `main`.
+On the Commander side, re-resolve `dev` against Issue #43, inspect the Worker commit and clean `feat/43-bounded-editor`, restore only the repository-pinned toolchain through the authorized integration environment, and run the one logical E2E gate with J-01 and J-02 on Windows and macOS. Do not infer push, PR, merge, release, Provider, export, or `main` authority from this checkpoint.

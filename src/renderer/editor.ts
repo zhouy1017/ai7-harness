@@ -1,8 +1,7 @@
 import { baseKeymap } from 'prosemirror-commands';
-import { history } from 'prosemirror-history';
 import { keymap } from 'prosemirror-keymap';
 import { Schema, type DOMOutputSpec, type Node as ProseMirrorNode } from 'prosemirror-model';
-import { EditorState, Plugin, type Transaction } from 'prosemirror-state';
+import { EditorState, Plugin, TextSelection, type Transaction } from 'prosemirror-state';
 import { EditorView } from 'prosemirror-view';
 import {
   MAX_BLOCK_CODE_UNITS,
@@ -22,11 +21,17 @@ interface EditorUiState {
   retryRequired: boolean;
   saving: boolean;
   journalSequence: number;
+  workingDigest: string;
+  composing: boolean;
 }
 
 export interface BoundedEditor {
   focus(): void;
   flush(): Promise<void>;
+  loadWindow(windowProjection: ManuscriptWindowProjection): boolean;
+  selectRange(blockId: string, fromGrapheme: number, toGrapheme: number): boolean;
+  currentWindow(): ManuscriptWindowProjection;
+  isComposing(): boolean;
   interrupt(): void;
   destroy(): void;
 }
@@ -38,6 +43,7 @@ interface MountOptions {
   flushJournalEdit: RendererApi['flushJournalEdit'];
   onStateChange(state: EditorUiState): void;
   onAnnouncement(message: string, tone: 'busy' | 'success' | 'error'): void;
+  onCommand(command: 'search' | 'replace' | 'undo' | 'redo' | 'previous-window' | 'next-window'): void;
 }
 
 interface BaselineBlock {
@@ -180,6 +186,18 @@ function findBlock(document: ProseMirrorNode, blockId: string): ProseMirrorNode 
   return found;
 }
 
+function findBlockPosition(document: ProseMirrorNode, blockId: string): { node: ProseMirrorNode; position: number } | undefined {
+  let found: { node: ProseMirrorNode; position: number } | undefined;
+  document.descendants((node, position) => {
+    if (node.attrs['blockId'] === blockId) {
+      found = { node, position };
+      return false;
+    }
+    return found === undefined;
+  });
+  return found;
+}
+
 export function mountBoundedEditor(options: MountOptions): BoundedEditor {
   let windowProjection = options.initialWindow;
   let baselines = baselineMap(windowProjection);
@@ -189,6 +207,7 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
   let prepared: { input: JournalEditInput; submittedText: string } | undefined;
   let destroyed = false;
   let interrupted = false;
+  let composing = false;
 
   const changedBlocks = (document: ProseMirrorNode): string[] => {
     const changed: string[] = [];
@@ -243,7 +262,7 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
     EditorState.create({
       schema: ai7Schema,
       doc: createDocument(windowProjection.blocks),
-      plugins: [transactionFilter, history(), keymap(baseKeymap)],
+      plugins: [transactionFilter, keymap(baseKeymap)],
     });
 
   let view: EditorView;
@@ -255,6 +274,8 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
       retryRequired,
       saving,
       journalSequence: windowProjection.journalSequence,
+      workingDigest: windowProjection.workingDigest,
+      composing,
     });
 
   const flush = async (): Promise<void> => {
@@ -297,13 +318,21 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
           ? { ...block, text: prepared!.submittedText, digest: ack.resultingBlockDigest }
           : block,
       );
-      windowProjection = { ...windowProjection, journalSequence: ack.sequence, blocks: updatedBlocks };
+      windowProjection = {
+        ...windowProjection,
+        journalSequence: ack.sequence,
+        workingDigest: ack.resultingWorkingDigest,
+        blocks: updatedBlocks,
+      };
       baselines = baselineMap(windowProjection);
       dirtyBlockId = undefined;
       prepared = undefined;
       retryRequired = false;
       saving = false;
-      view.updateState(makeState());
+      const previousAnchor = view.state.selection.anchor;
+      const acknowledgedState = makeState();
+      const anchor = Math.min(previousAnchor, acknowledgedState.doc.content.size);
+      view.updateState(acknowledgedState.apply(acknowledgedState.tr.setSelection(TextSelection.near(acknowledgedState.doc.resolve(anchor)))));
       view.setProps({ editable: () => true });
       announceState();
       options.onAnnouncement(ack.completionLabel, 'success');
@@ -341,14 +370,49 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
           options.platform === 'darwin'
             ? event.metaKey && !event.ctrlKey
             : event.ctrlKey && !event.metaKey;
-        if (event.key.toLocaleLowerCase('en-US') !== 's' || !modifier || event.altKey || event.shiftKey) return false;
-        event.preventDefault();
-        if (currentView.composing || event.isComposing) {
-          options.onAnnouncement('输入法组合尚未结束，完成输入后再保存。', 'busy');
+        const key = event.key.toLocaleLowerCase('en-US');
+        if ((currentView.composing || event.isComposing) && (modifier || key === 'pageup' || key === 'pagedown')) {
+          event.preventDefault();
+          options.onAnnouncement('输入法组合尚未结束，命令已暂缓。', 'busy');
+          announceState();
           return true;
         }
-        void flush();
-        return true;
+        if (modifier && !event.altKey && key === 's' && !event.shiftKey) {
+          event.preventDefault();
+          void flush();
+          return true;
+        }
+        if (modifier && !event.altKey && key === 'z') {
+          event.preventDefault();
+          options.onCommand(event.shiftKey ? 'redo' : 'undo');
+          return true;
+        }
+        if (modifier && !event.altKey && key === 'f') {
+          event.preventDefault();
+          options.onCommand('search');
+          return true;
+        }
+        if (modifier && !event.altKey && key === 'h') {
+          event.preventDefault();
+          options.onCommand('replace');
+          return true;
+        }
+        if (!modifier && !event.altKey && !event.shiftKey && (key === 'pageup' || key === 'pagedown')) {
+          event.preventDefault();
+          options.onCommand(key === 'pageup' ? 'previous-window' : 'next-window');
+          return true;
+        }
+        return false;
+      },
+      compositionstart() {
+        composing = true;
+        queueMicrotask(announceState);
+        return false;
+      },
+      compositionend() {
+        composing = false;
+        queueMicrotask(announceState);
+        return false;
       },
     },
   });
@@ -361,6 +425,43 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
   return {
     focus: () => view.focus(),
     flush,
+    loadWindow: (nextWindow) => {
+      if (destroyed || interrupted || saving || retryRequired || dirtyBlockId !== undefined || composing) return false;
+      windowProjection = nextWindow;
+      baselines = baselineMap(nextWindow);
+      prepared = undefined;
+      view.updateState(makeState());
+      const focusId = nextWindow.focusBlockId;
+      if (focusId) {
+        requestAnimationFrame(() => {
+          const target = view.dom.querySelector<HTMLElement>(`[data-block-id="${focusId}"]`);
+          target?.scrollIntoView({ block: 'center' });
+          view.focus();
+        });
+      }
+      announceState();
+      return true;
+    },
+    selectRange: (blockId, fromGrapheme, toGrapheme) => {
+      if (destroyed || interrupted || saving || retryRequired || dirtyBlockId !== undefined || composing) return false;
+      const found = findBlockPosition(view.state.doc, blockId);
+      if (!found) return false;
+      const text = graphemes(found.node.textContent);
+      if (
+        !Number.isSafeInteger(fromGrapheme) ||
+        !Number.isSafeInteger(toGrapheme) ||
+        fromGrapheme < 0 ||
+        toGrapheme <= fromGrapheme ||
+        toGrapheme > text.length
+      ) return false;
+      const from = found.position + 1 + text.slice(0, fromGrapheme).join('').length;
+      const to = found.position + 1 + text.slice(0, toGrapheme).join('').length;
+      view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, from, to)).scrollIntoView());
+      view.focus();
+      return true;
+    },
+    currentWindow: () => windowProjection,
+    isComposing: () => composing,
     interrupt: () => {
       interrupted = true;
       saving = false;

@@ -1,10 +1,13 @@
 import type {
   FidelityCategoryProjection,
-  ContinueImportProjection,
   ImportCommitProjection,
-  ImportDraftRecoveryProjection,
-  ImportStartupProjection,
+  ManuscriptWindowProjection,
+  OutlineProjection,
+  PriorWorkItemProjection,
+  ReplacementPreviewProjection,
   ReviewBeforeImportProjection,
+  SearchResultsProjection,
+  ServiceJobProjection,
   StagedImportProjection,
 } from '../shared/protocol.js';
 import { mountBoundedEditor, type BoundedEditor } from './editor.js';
@@ -21,14 +24,6 @@ if (!window.ai7) throw new Error('AI7_RENDERER_BOOTSTRAP_INVALID');
 
 let editor: BoundedEditor | undefined;
 let authorityInterrupted = false;
-
-function recoveryTone(access: ImportDraftRecoveryProjection['originalFileAccess']['state']): string {
-  return access === 'available-exact' ? 'success-note' : 'attention-note';
-}
-
-function hasErrorCode(error: unknown, code: string): boolean {
-  return error instanceof Error && 'code' in error && (error as Error & { code?: unknown }).code === code;
-}
 
 function element<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string): HTMLElementTagNameMap[K] {
   const node = document.createElement(tag);
@@ -106,38 +101,40 @@ function sourceCard(staged: StagedImportProjection): HTMLElement {
   return card;
 }
 
-function identityFindingDisclosure(
-  findings: StagedImportProjection['identityFindings'],
+function exactMatchDisclosure(
+  matches: StagedImportProjection['exactMatches'],
   reviewTarget?: ReviewBeforeImportProjection['target']['label'],
 ): HTMLElement {
-  const disclosure = element('section', 'source-card identity-finding-disclosure');
-  if (reviewTarget) disclosure.classList.add('review-identity-finding-summary');
+  const disclosure = element('section', 'source-card exact-match-disclosure');
+  if (reviewTarget) disclosure.classList.add('review-exact-match-summary');
   disclosure.append(
-    element('p', 'section-label', reviewTarget ? '导入身份提示与本次关系' : '发现已有导入身份提示'),
-    element('h3', undefined, reviewTarget ? '复核身份提示记录与不同作品后果' : '已有导入与当前文件的身份提示'),
+    element('p', 'section-label', reviewTarget ? '精确匹配与本次关系' : '发现精确导入匹配'),
+    element('h3', undefined, reviewTarget ? '复核匹配记录与不同作品后果' : '已有导入与当前文件精确匹配'),
     ...(reviewTarget ? [element('p', undefined, `本次选择：${reviewTarget}`)] : []),
     element(
       'p',
       'field-note',
       reviewTarget
-        ? '身份提示不授予目标、关系、去重、覆盖或重新导入权限；现有记录保持不变，本次提交将创建另一图书的完整新记录。'
-        : '身份提示仅用于披露，不会选择目标或关系，也不授予去重、覆盖或重新导入权限。',
+        ? '匹配不授予目标、关系、去重、覆盖或重新导入权限；现有匹配记录保持不变，本次提交将创建另一图书的完整新记录。'
+        : '匹配仅用于披露，不会选择目标或关系，也不授予去重、覆盖或重新导入权限。',
     ),
   );
-  for (const finding of findings) {
+  for (const match of matches) {
     const item = element('section', 'review-section');
     const classes = element('ul', 'degradation-list');
-    const row = element('li', undefined, finding.identityClass.label);
-    row.dataset['importIdentityClass'] = finding.identityClass.kind;
-    classes.append(row);
+    for (const identityClass of match.identityClasses) {
+      const row = element('li', undefined, identityClass.label);
+      row.dataset['exactMatchClass'] = identityClass.kind;
+      classes.append(row);
+    }
     const details = element('dl');
     details.append(
       element('dt', undefined, '匹配图书'),
-      element('dd', undefined, `${finding.bookTitle} · ${finding.bookId}`),
+      element('dd', undefined, `${match.bookTitle} · ${match.bookId}`),
       element('dt', undefined, '来源材料版本'),
-      element('dd', 'technical-identity', finding.sourceVersionId),
+      element('dd', 'technical-identity', match.sourceVersionId),
       element('dt', undefined, '稿件导入记录'),
-      element('dd', 'technical-identity', finding.importRecordId),
+      element('dd', 'technical-identity', match.importRecordId),
     );
     item.append(classes, details);
     disclosure.append(item);
@@ -179,241 +176,7 @@ function fidelityTable(fidelity: ReadonlyArray<FidelityCategoryProjection>): HTM
   return table;
 }
 
-function productIsVisibleAndReady(): boolean {
-  return document.visibilityState === 'visible' && document.documentElement.dataset['ai7ProductReady'] === 'true';
-}
-
-function waitForVisibleProductReady(): Promise<void> {
-  if (productIsVisibleAndReady()) return Promise.resolve();
-  return new Promise((resolve) => {
-    const finish = (): void => {
-      if (!productIsVisibleAndReady()) return;
-      observer.disconnect();
-      document.removeEventListener('visibilitychange', finish);
-      resolve();
-    };
-    const observer = new MutationObserver(finish);
-    observer.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ['data-ai7-product-ready'],
-    });
-    document.addEventListener('visibilitychange', finish);
-    finish();
-  });
-}
-
-function nextVisibleFrame(): Promise<void> {
-  return new Promise((resolve) => requestAnimationFrame(() => resolve()));
-}
-
-async function acknowledgeCompletionAfterPaint(result: ImportCommitProjection): Promise<void> {
-  await waitForVisibleProductReady();
-  await nextVisibleFrame();
-  await nextVisibleFrame();
-  const presentedCommitId = screen.querySelector<HTMLElement>('[data-import-commit-id]')?.dataset['importCommitId'];
-  if (
-    !productIsVisibleAndReady() ||
-    screen.dataset['screen'] !== 'imported' ||
-    presentedCommitId !== result.commitId
-  ) {
-    return;
-  }
-  document.documentElement.dataset['ai7ImportCompletionPainted'] = 'true';
-  try {
-    await window.ai7.acknowledgeImportCompletion({ commitId: result.commitId });
-    document.documentElement.dataset['ai7ImportCompletionAcknowledged'] = 'true';
-  } catch {
-    setStatus('导入已由权威记录证明；完成提示将在下次启动时再次显示。', 'error');
-  }
-}
-
-function renderStartupProjection(startup: ImportStartupProjection): void {
-  if (startup.state === 'none') {
-    renderLanding();
-    return;
-  }
-  if (startup.state === 'committed-recovered') {
-    setStatus('已核对中断前的原子提交结果', 'success');
-    renderImported(startup.result);
-    return;
-  }
-  renderImportRecovery(startup.recovery);
-}
-
-function renderContinuation(continuation: ContinueImportProjection): void {
-  if (continuation.state === 'target-review-required') {
-    setStatus(continuation.reviewInvalidated ? '旧复核已失效，需要重新确认' : '暂存快照已重新校验', 'success');
-    renderTargetChoice(continuation.staged, null, continuation.notice);
-    return;
-  }
-  if (continuation.state === 'review-ready') {
-    setStatus('暂存快照与导入前复核已重新校验', 'success');
-    renderReview(continuation.review, continuation.notice);
-    return;
-  }
-  if (continuation.state === 'committed-recovered') {
-    setStatus('已核对中断前的原子提交结果', 'success');
-    renderImported(continuation.result);
-    return;
-  }
-  renderImportRecovery(continuation.recovery);
-}
-
-async function abandonAndContinue(recovery: Pick<ImportDraftRecoveryProjection, 'draftId' | 'draftVersion'>): Promise<void> {
-  setStatus('正在核对提交证据并放弃非权威草稿…', 'busy');
-  try {
-    const startup = await window.ai7.abandonImportDraft({
-      draftId: recovery.draftId,
-      expectedDraftVersion: recovery.draftVersion,
-    });
-    setStatus(startup.state === 'none' ? '已放弃导入草稿并安全清理暂存引用' : '已核对导入状态', 'success');
-    renderStartupProjection(startup);
-  } catch (error) {
-    renderError(error, () => void initializeStartup());
-  }
-}
-
-function renderImportRecovery(recovery: ImportDraftRecoveryProjection): void {
-  const uncertain = recovery.kind === 'outcome-uncertain';
-  const cleanup = recovery.kind === 'abandonment-cleanup';
-  const content = panel();
-  content.classList.add('recovery-panel');
-  content.append(
-    element(
-      'p',
-      'section-label',
-      cleanup ? '启动恢复 · 持久放弃清理' : uncertain ? '启动恢复 · 原子结果待确认' : '启动恢复 · 非权威导入草稿',
-    ),
-    element('h2', undefined, cleanup ? '放弃清理尚未完成' : uncertain ? '导入提交结果待确认' : '发现未完成的导入'),
-    element(
-      'p',
-      'lede',
-      cleanup
-        ? '放弃意图已经持久化。系统已阻止继续导入和任何新的权威引用；只有在暂存字节与权威记录都完成安全清理后才会报告成功。'
-        : uncertain
-        ? '本地证据目前无法证明这次原子提交已经完成或确定未提交。为避免重复图书或误删来源，系统已阻止重试、放弃和暂存清理。'
-        : '启动不会替你继续、选择目标或提交。请明确选择继续导入或放弃。',
-    ),
-  );
-  const summary = element('section', 'source-card recovery-summary');
-  summary.append(element('h3', undefined, recovery.sourceDisplayName));
-  const details = element('dl');
-  details.append(
-    element('dt', undefined, '状态'),
-    element(
-      'dd',
-      undefined,
-      cleanup
-        ? '持久放弃清理 · 阻止继续与新权威引用'
-        : uncertain
-        ? '非权威草稿 · 提交结果待确认'
-        : recovery.snapshotState === 'complete'
-          ? '完整暂存快照 · 尚未形成导入权威'
-          : '暂存不完整或损坏 · 需要精确重选',
-    ),
-    element('dt', undefined, '上次完成位置'),
-    element(
-      'dd',
-      undefined,
-      recovery.lastCompletedStep === 'abandonment-cleanup'
-        ? '已持久化放弃与安全清理意图'
-        : recovery.lastCompletedStep === 'review'
-        ? '导入前复核'
-        : recovery.lastCompletedStep === 'commit-attempt'
-          ? '已持久化提交尝试，尚未证明提交'
-          : recovery.lastCompletedStep === 'commit-outcome-uncertain'
-            ? '原子提交边界'
-            : '本地暂存与预检',
-    ),
-    ...(recovery.reviewedTitle
-      ? [element('dt', undefined, '已复核书名'), element('dd', undefined, recovery.reviewedTitle)]
-      : []),
-    ...(recovery.targetLabel
-      ? [element('dt', undefined, '已复核目标'), element('dd', undefined, recovery.targetLabel)]
-      : []),
-  );
-  summary.append(details);
-  if (!cleanup) summary.append(element('p', recoveryTone(recovery.originalFileAccess.state), recovery.originalFileAccess.label));
-  content.append(summary);
-  if (cleanup) {
-    const support = element('section', 'uncertain-support');
-    support.append(
-      element('h3', undefined, '安全清理状态'),
-      element('p', undefined, `状态代码：${recovery.supportCode ?? 'ABANDON_CLEANUP_PENDING'}`),
-      element('p', 'field-note', '此状态不包含暂存正文或原始文件路径。请保留 Agent Data Root；重试会继续同一个持久清理意图，不会创建第二次放弃或导入。'),
-    );
-    const actions = element('div', 'button-row recovery-actions');
-    actions.append(button('重试放弃清理', 'primary', () => abandonAndContinue(recovery)));
-    content.append(support, actions);
-    replaceScreen('import-cleanup', content);
-    setStatus('放弃清理尚未完成；已阻止继续导入和新权威引用', 'error');
-    return;
-  }
-  if (recovery.staged) content.append(sourceCard(recovery.staged));
-
-  if (uncertain) {
-    const support = element('section', 'uncertain-support');
-    support.append(
-      element('h3', undefined, '本地恢复与支持信息'),
-      element('p', undefined, `草稿标识：${recovery.draftId}`),
-      element('p', undefined, `提交尝试：${recovery.commitAttemptId ?? '未读取'}`),
-      element('p', undefined, `状态代码：${recovery.supportCode ?? 'COMMIT_PROOF_INCONCLUSIVE'}`),
-      element('p', 'field-note', '这些信息不包含暂存正文、数据库内容、截图、跟踪或网络请求。请保留 Agent Data Root，等待本地核对；不要重复导入或手动删除暂存文件。'),
-    );
-    content.append(support);
-    replaceScreen('import-uncertain', content);
-    setStatus('导入提交结果待确认；已阻止重试、放弃和清理', 'error');
-    return;
-  }
-
-  const actions = element('div', 'button-row recovery-actions');
-  if (recovery.snapshotState === 'complete') {
-    const abandonButton = button('放弃', 'secondary', () => abandonAndContinue(recovery));
-    const continueButton = button('继续导入', 'primary', async () => {
-      continueButton.disabled = true;
-      abandonButton.disabled = true;
-      setStatus('正在重新校验暂存字节、解析器、目标与复核…', 'busy');
-      try {
-        renderContinuation(
-          await window.ai7.continueImportDraft({
-            draftId: recovery.draftId,
-            expectedDraftVersion: recovery.draftVersion,
-          }),
-        );
-      } catch (error) {
-        renderError(error, () => void initializeStartup());
-      }
-    });
-    actions.append(continueButton, abandonButton);
-  } else {
-    const abandonButton = button('放弃', 'secondary', () => abandonAndContinue(recovery));
-    const reselect = button('重新选择原文件', 'primary', async () => {
-      reselect.disabled = true;
-      abandonButton.disabled = true;
-      setStatus('请选择与原暂存来源摘要精确一致的 DOCX…', 'busy');
-      try {
-        const result = await window.ai7.reselectImportDraft({
-          draftId: recovery.draftId,
-          expectedDraftVersion: recovery.draftVersion,
-        });
-        if (result.status === 'cancelled') {
-          renderImportRecovery(recovery);
-          setStatus('已取消文件重选');
-          return;
-        }
-        renderContinuation(result.continuation);
-      } catch (error) {
-        renderError(error, () => void initializeStartup());
-      }
-    });
-    actions.append(reselect, abandonButton);
-  }
-  content.append(actions);
-  replaceScreen('import-recovery', content);
-  setStatus('等待你选择继续导入或放弃');
-}
-
-function renderLanding(): void {
+function renderLanding(priorWork: ReadonlyArray<PriorWorkItemProjection> = []): void {
   const content = panel();
   content.classList.add('hero');
   const copy = element('div');
@@ -445,6 +208,43 @@ function renderLanding(): void {
   copy.append(steps, importButton);
   const note = element('aside', 'hero-note', '不会先创建空图书。只有最后的“新建图书并导入稿件”会提交业务记录。');
   content.append(copy, note);
+  if (priorWork.length > 0) {
+    const recent = element('section', 'recent-work');
+    recent.append(element('p', 'section-label', '继续已有工作'), element('h3', undefined, '最近稿件'));
+    const list = element('div', 'recent-work-list');
+    for (const item of priorWork) {
+      const open = button(`${item.bookTitle} · ${item.revisionLabel}`, 'secondary', async () => {
+        open.disabled = true;
+        setStatus('正在重新打开本地稿件…', 'busy');
+        try {
+          const windowProjection = await window.ai7.getManuscriptWindowAt({
+            manuscriptId: item.manuscriptId,
+            branchId: item.branchId,
+            target: { kind: 'start' },
+          });
+          renderEditorWindow(windowProjection, item.bookTitle);
+        } catch (error) {
+          open.disabled = false;
+          setStatus(error instanceof Error ? error.message : '无法重新打开稿件。', 'error');
+        }
+      });
+      open.dataset['manuscriptId'] = item.manuscriptId;
+      const row = element('article', 'recent-work-item');
+      row.append(
+        open,
+        element(
+          'p',
+          'field-note',
+          `${item.totalCharacters.toLocaleString('zh-CN')} 字符 · 修订日志 ${item.journalSequence}${
+            item.latestMilestone ? ` · 最近里程碑 ${item.latestMilestone.label}` : ''
+          }`,
+        ),
+      );
+      list.append(row);
+    }
+    recent.append(list);
+    content.append(recent);
+  }
   replaceScreen('landing', content);
   setStatus('准备就绪');
 }
@@ -452,7 +252,6 @@ function renderLanding(): void {
 function renderTargetChoice(
   staged: StagedImportProjection,
   selectedChoiceId: StagedImportProjection['targetChoices'][number]['id'] | null,
-  recoveryNotice?: string,
 ): void {
   const content = panel();
   content.append(
@@ -461,8 +260,7 @@ function renderTargetChoice(
     element('p', 'lede', '系统不会替你选择。先明确这份来源要建立什么关系。'),
     sourceCard(staged),
   );
-  if (recoveryNotice) content.append(element('p', 'recovery-notice', recoveryNotice));
-  if (staged.identityFindings.length > 0) content.append(identityFindingDisclosure(staged.identityFindings));
+  if (staged.exactMatches.length > 0) content.append(exactMatchDisclosure(staged.exactMatches));
   const targetChoice = staged.targetChoices[0];
   if (!targetChoice) throw new Error('AI7_IMPORT_TARGET_INVALID');
   const choices = element('fieldset');
@@ -482,7 +280,7 @@ function renderTargetChoice(
     element(
       'small',
       undefined,
-      staged.identityFindings.length > 0
+      staged.exactMatches.length > 0
         ? '将当前文件作为不同作品，建立新的图书、主稿件、r1 和工作流程实例'
         : '以这份来源建立图书、主稿件、r1 和工作流程实例',
     ),
@@ -490,11 +288,7 @@ function renderTargetChoice(
   choice.append(radio, copy);
   choices.append(legend, choice);
   content.append(choices);
-  radio.addEventListener('change', () => renderTargetChoice(staged, targetChoice.id, recoveryNotice));
-
-  const cancelImport = button('取消导入', 'quiet', () =>
-    abandonAndContinue({ draftId: staged.draftId, draftVersion: staged.draftVersion }),
-  );
+  radio.addEventListener('change', () => renderTargetChoice(staged, targetChoice.id));
 
   if (selectedChoiceId !== null) {
     const form = element('section', 'form-row');
@@ -532,13 +326,9 @@ function renderTargetChoice(
       }
     });
     form.append(label, title, note, fidelityTable(staged.fidelity), element('div', 'button-row'));
-    form.lastElementChild?.append(confirm, cancelImport);
+    form.lastElementChild?.append(confirm);
     content.append(form);
     queueMicrotask(() => title.focus());
-  } else {
-    const actions = element('div', 'button-row');
-    actions.append(cancelImport);
-    content.append(actions);
   }
 
   replaceScreen(selectedChoiceId === null ? 'target' : 'title', content);
@@ -564,14 +354,13 @@ function degradationItems(review: ReviewBeforeImportProjection): HTMLElement {
   return list;
 }
 
-function renderReview(review: ReviewBeforeImportProjection, recoveryNotice?: string): void {
+function renderReview(review: ReviewBeforeImportProjection): void {
   const content = panel();
   content.append(
     element('p', 'section-label', '步骤 2 / 3 · 导入前复核'),
     element('h2', undefined, '导入前复核'),
     element('p', 'lede', '最后一次确认：下面的记录会在一个事务中一起创建；列出的非影响不会随导入发生。'),
   );
-  if (recoveryNotice) content.append(element('p', 'recovery-notice', recoveryNotice));
   const identity = element('section', 'source-card');
   identity.append(element('h3', undefined, `${review.target.label} · ${review.target.confirmedTitle}`));
   const identityDetails = element('dl');
@@ -594,9 +383,7 @@ function renderReview(review: ReviewBeforeImportProjection, recoveryNotice?: str
   );
   identity.append(identityDetails);
   content.append(identity);
-  if (review.identityFindings.length > 0) {
-    content.append(identityFindingDisclosure(review.identityFindings, review.target.label));
-  }
+  if (review.exactMatches.length > 0) content.append(exactMatchDisclosure(review.exactMatches, review.target.label));
 
   const fidelity = element('section', 'review-section');
   fidelity.append(element('h3', undefined, '导入保真审阅 · 8 类'), fidelityTable(review.fidelity));
@@ -636,7 +423,7 @@ function renderReview(review: ReviewBeforeImportProjection, recoveryNotice?: str
             acceptDegradation: true,
           });
           setStatus('已接受本次导入的完整降级集合', 'success');
-          renderReview(acceptedReview, recoveryNotice);
+          renderReview(acceptedReview);
         } catch (error) {
           renderError(error, renderLanding);
         }
@@ -697,51 +484,23 @@ function renderReview(review: ReviewBeforeImportProjection, recoveryNotice?: str
           draftId: review.draftId,
           expectedDraftVersion: review.draftVersion,
           reviewDigest: review.reviewDigest!,
-          commitAttemptId: review.commitAttemptId,
         });
         setStatus(result.completionLabel, 'success');
         renderImported(result);
       } catch (error) {
-        if (
-          hasErrorCode(error, 'IMPORT_COMMIT_OUTCOME_UNCERTAIN') ||
-          hasErrorCode(error, 'REVIEW_CHANGED') ||
-          hasErrorCode(error, 'SNAPSHOT_RESELECTION_REQUIRED') ||
-          hasErrorCode(error, 'DRAFT_VERSION_CHANGED')
-        ) {
-          await initializeStartup();
-          return;
-        }
         commitButton.disabled = false;
         setStatus(error instanceof Error ? error.message : '导入未完成，请重试。', 'error');
       }
     });
-    const actions = element('div', 'button-row compact-actions');
-    actions.append(
-      commitButton,
-      button('取消导入', 'quiet', () =>
-        abandonAndContinue({ draftId: review.draftId, draftVersion: review.draftVersion }),
-      ),
-    );
-    commitBar.append(explanation, actions);
+    commitBar.append(explanation, commitButton);
     content.append(commitBar);
-  } else {
-    const actions = element('div', 'button-row');
-    actions.append(
-      button('取消导入', 'quiet', () =>
-        abandonAndContinue({ draftId: review.draftId, draftVersion: review.draftVersion }),
-      ),
-    );
-    content.append(actions);
   }
   replaceScreen('review', content);
 }
 
 function renderImported(result: ImportCommitProjection): void {
-  delete document.documentElement.dataset['ai7ImportCompletionPainted'];
-  delete document.documentElement.dataset['ai7ImportCompletionAcknowledged'];
   const content = panel();
   content.classList.add('completion');
-  content.dataset['importCommitId'] = result.commitId;
   const degradation = result.importRecord.degradationDecision;
   content.append(
     element('div', 'completion-mark', '✓'),
@@ -756,7 +515,7 @@ function renderImported(result: ImportCommitProjection): void {
     ),
   );
   const actions = element('div', 'button-row');
-  const open = button('打开稿件', 'primary', () => renderEditor(result));
+  const open = button('打开稿件', 'primary', () => renderEditorWindow(result.firstWindow, '主稿件'));
   const record = button('查看导入记录', 'secondary', () => {
     if (content.querySelector('.record-detail')) return;
     const detail = element('section', 'source-card record-detail');
@@ -796,28 +555,150 @@ function renderImported(result: ImportCommitProjection): void {
   actions.append(open, record);
   content.append(actions);
   replaceScreen('imported', content);
-  void acknowledgeCompletionAfterPaint(result);
 }
 
-function renderEditor(result: ImportCommitProjection): void {
+function delay(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
+}
+
+async function awaitServiceJob(
+  initial: ServiceJobProjection,
+  onProgress: (job: ServiceJobProjection) => void,
+): Promise<ServiceJobProjection> {
+  let job = initial;
+  onProgress(job);
+  while (job.state === 'queued' || job.state === 'running') {
+    await delay(25);
+    job = await window.ai7.pollServiceJob({ jobId: job.jobId });
+    onProgress(job);
+  }
+  if (job.state === 'failed') throw new Error(job.failure?.message ?? '后台业务操作未完成。');
+  return job;
+}
+
+function renderEditorWindow(initialWindow: ManuscriptWindowProjection, bookTitle: string): void {
   const content = panel();
   content.classList.add('editor-shell');
   const toolbar = element('header', 'editor-toolbar');
   const title = element('div');
-  title.append(element('p', 'section-label', '主稿件 · 主分支'), element('h2', undefined, `稿件修订版 ${result.firstWindow.revisionLabel}`));
+  title.append(element('p', 'section-label', `${bookTitle} · 主分支`), element('h2', undefined, `稿件修订版 ${initialWindow.revisionLabel}`));
   const meta = element('div', 'editor-meta');
-  const position = element('span', undefined, result.firstWindow.position.label);
-  const revision = element('span', undefined, `当前修订版 ${result.firstWindow.revisionLabel}`);
-  const journal = element('span', undefined, `修订日志序号 ${result.firstWindow.journalSequence}`);
+  const position = element('span', undefined, initialWindow.position.label);
+  const revision = element('span', undefined, `当前修订版 ${initialWindow.revisionLabel}`);
+  const journal = element('span', undefined, `修订日志序号 ${initialWindow.journalSequence}`);
   meta.append(position, revision, journal);
   title.append(meta);
   const save = button('保存当前编辑', 'primary', () => editor?.flush());
   save.disabled = true;
   save.title = window.ai7.platform === 'darwin' ? '快捷键 Command+S' : '快捷键 Ctrl+S';
-  toolbar.append(title, save);
+  const undo = button('撤销', 'quiet', () => void runHistory('undo'));
+  const redo = button('重做', 'quiet', () => void runHistory('redo'));
+  const toolbarActions = element('div', 'button-row');
+  toolbarActions.append(undo, redo, save);
+  toolbar.append(title, toolbarActions);
+
+  const workspace = element('div', 'editor-workspace');
+  const navigator = element('aside', 'manuscript-navigator');
+  navigator.setAttribute('aria-label', '稿件导航与查找');
+
+  const outlineSection = element('section', 'navigator-section');
+  outlineSection.append(element('h3', undefined, '结构导航'));
+  const outlineList = element('div', 'outline-list');
+  outlineList.setAttribute('role', 'list');
+  const moreOutline = button('继续查看结构', 'quiet', () => void loadOutline(outlinePage?.nextCursor ?? null, true));
+  moreOutline.hidden = true;
+  outlineSection.append(outlineList, moreOutline);
+
+  const searchSection = element('section', 'navigator-section search-section');
+  searchSection.append(element('h3', undefined, '全稿查找与替换'));
+  const searchLabel = element('label', undefined, '查找文字');
+  searchLabel.htmlFor = 'manuscript-search';
+  const searchInput = element('input');
+  searchInput.id = 'manuscript-search';
+  searchInput.maxLength = 256;
+  const replacementLabel = element('label', undefined, '替换为');
+  replacementLabel.htmlFor = 'manuscript-replacement';
+  const replacementInput = element('input');
+  replacementInput.id = 'manuscript-replacement';
+  replacementInput.maxLength = 2048;
+  const searchButton = button('查找全稿', 'secondary', () => void runSearch());
+  const cancelJob = button('取消当前操作', 'quiet', async () => {
+    if (!activeJob) return;
+    await window.ai7.cancelServiceJob({ jobId: activeJob.jobId });
+    setStatus('已请求取消当前业务操作。', 'success');
+  });
+  cancelJob.hidden = true;
+  const prepareReplacementButton = button('预览替换', 'secondary', () => void prepareReplacement());
+  prepareReplacementButton.disabled = true;
+  const searchActions = element('div', 'button-row');
+  searchActions.append(searchButton, prepareReplacementButton, cancelJob);
+  const searchSummary = element('p', 'field-note', '范围：全稿。结果会记录查找时的稿件版本。');
+  searchSummary.setAttribute('aria-live', 'polite');
+  const searchResults = element('div', 'search-results');
+  const resultPaging = element('div', 'button-row');
+  const previousResults = button('上一组结果', 'quiet', () => void loadSearchResults(searchPage?.previousCursor ?? null));
+  const nextResults = button('下一组结果', 'quiet', () => void loadSearchResults(searchPage?.nextCursor ?? null));
+  const returnFromSearch = button('返回查找前位置', 'quiet', () => void returnToSearchPosition());
+  previousResults.hidden = true;
+  nextResults.hidden = true;
+  returnFromSearch.hidden = true;
+  resultPaging.append(previousResults, nextResults, returnFromSearch);
+  const replacementReview = element('section', 'replacement-review');
+  replacementReview.hidden = true;
+  searchSection.append(
+    searchLabel,
+    searchInput,
+    replacementLabel,
+    replacementInput,
+    searchActions,
+    searchSummary,
+    searchResults,
+    resultPaging,
+    replacementReview,
+  );
+
+  const milestoneSection = element('details', 'navigator-section milestone-section');
+  const milestoneSummary = element('summary', undefined, '保存为里程碑版本');
+  const milestoneLabel = element('label', undefined, '里程碑名称');
+  milestoneLabel.htmlFor = 'milestone-label';
+  const milestoneName = element('input');
+  milestoneName.id = 'milestone-label';
+  milestoneName.maxLength = 120;
+  const purposeLabel = element('label', undefined, '保存目的');
+  purposeLabel.htmlFor = 'milestone-purpose';
+  const purpose = element('input');
+  purpose.id = 'milestone-purpose';
+  purpose.maxLength = 240;
+  const noteLabel = element('label', undefined, '说明（可选）');
+  noteLabel.htmlFor = 'milestone-note';
+  const note = element('input');
+  note.id = 'milestone-note';
+  note.maxLength = 500;
+  const milestoneButton = button('保存为里程碑版本', 'secondary', () => void saveMilestone());
+  milestoneSection.append(milestoneSummary, milestoneLabel, milestoneName, purposeLabel, purpose, noteLabel, note, milestoneButton);
+  navigator.append(outlineSection, searchSection, milestoneSection);
+
+  const manuscript = element('main', 'manuscript-surface');
   const editorWindow = element('section', 'editor-window');
   const editorHost = element('div');
   editorWindow.append(editorHost);
+  const positionRailLabel = element('label', 'position-rail-label', '全稿位置');
+  positionRailLabel.htmlFor = 'manuscript-position';
+  const positionRail = element('input', 'position-rail');
+  positionRail.id = 'manuscript-position';
+  positionRail.type = 'range';
+  positionRail.min = '0';
+  positionRail.max = '1000000';
+  positionRail.step = '1';
+  positionRail.value = String(Math.round(initialWindow.position.proportion * 1_000_000));
+  const previousWindow = button('向前浏览', 'quiet', () => void navigateCursor('previous'));
+  const nextWindow = button('向后浏览', 'quiet', () => void navigateCursor('next'));
+  const windowActions = element('nav', 'window-actions');
+  windowActions.setAttribute('aria-label', '稿件窗口');
+  windowActions.append(previousWindow, positionRailLabel, positionRail, nextWindow);
+  manuscript.append(editorWindow, windowActions);
+  workspace.append(navigator, manuscript);
+
   const identities = element('details', 'editor-identities');
   identities.append(element('summary', undefined, '当前业务绑定'));
   const identityGrid = element('dl', 'identity-grid');
@@ -829,25 +710,346 @@ function renderEditor(result: ImportCommitProjection): void {
     element('dt', undefined, '分支'),
     element('dd', undefined, '主分支'),
     element('dt', undefined, '修订版'),
-    element('dd', undefined, result.firstWindow.revisionLabel),
+    element('dd', undefined, initialWindow.revisionLabel),
   );
   identities.append(identityGrid);
-  content.append(toolbar, editorWindow, identities);
+  content.append(toolbar, workspace, identities);
   replaceScreen('editor', content);
+
+  let currentWindow = initialWindow;
+  let dirty = false;
+  let saving = false;
+  let retryRequired = false;
+  let outlinePage: OutlineProjection | undefined;
+  let searchPage: SearchResultsProjection | undefined;
+  let replacementPreview: ReplacementPreviewProjection | undefined;
+  let activeJob: ServiceJobProjection | undefined;
+  let searchReturnCharacter = initialWindow.position.startCharacter;
+  let searchReturnWindow = initialWindow;
+  let edgeNavigation = false;
+  let lastJournalSequence = initialWindow.journalSequence;
+  const excludedMatchIds = new Set<string>();
+
+  const updateWindowChrome = (): void => {
+    position.textContent = currentWindow.position.label;
+    revision.textContent = `当前修订版 ${currentWindow.revisionLabel}`;
+    journal.textContent = `修订日志序号 ${currentWindow.journalSequence}`;
+    positionRail.value = String(Math.round(currentWindow.position.proportion * 1_000_000));
+    positionRail.setAttribute('aria-valuetext', `全稿 ${(currentWindow.position.proportion * 100).toFixed(3)}%`);
+    previousWindow.disabled = currentWindow.previousCursor === null;
+    nextWindow.disabled = currentWindow.nextCursor === null;
+  };
+
+  async function settleLocalEdit(): Promise<boolean> {
+    if (editor?.isComposing()) {
+      setStatus('请先完成当前输入法组合。', 'busy');
+      return false;
+    }
+    if (dirty) await editor?.flush();
+    return !dirty && !saving && !retryRequired;
+  }
+
+  async function navigate(target: Parameters<typeof window.ai7.getManuscriptWindowAt>[0]['target']): Promise<void> {
+    if (!(await settleLocalEdit()) || !editor) return;
+    try {
+      const binding = editor.currentWindow();
+      const next = await window.ai7.getManuscriptWindowAt({
+        manuscriptId: binding.manuscriptId,
+        branchId: binding.branchId,
+        target,
+      });
+      if (!editor.loadWindow(next)) return;
+      currentWindow = next;
+      updateWindowChrome();
+      setStatus(`已到达${next.position.structureLabel ? `“${next.position.structureLabel}”附近，` : ''}${next.position.label}。`, 'success');
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : '无法移动到该稿件位置。', 'error');
+    }
+  }
+
+  async function navigateCursor(direction: 'previous' | 'next'): Promise<void> {
+    const cursor = direction === 'previous' ? currentWindow.previousCursor : currentWindow.nextCursor;
+    if (!cursor) return;
+    await navigate({ kind: 'cursor', cursor });
+    editorWindow.scrollTop = direction === 'previous' ? Math.max(0, editorWindow.scrollHeight - editorWindow.clientHeight - 1) : 1;
+  }
+
+  async function loadOutline(cursor: string | null, append: boolean): Promise<void> {
+    try {
+      const binding = editor?.currentWindow() ?? currentWindow;
+      const page = await window.ai7.getOutline({ manuscriptId: binding.manuscriptId, branchId: binding.branchId, cursor });
+      outlinePage = page;
+      if (!append) outlineList.replaceChildren();
+      for (const entry of page.entries) {
+        const open = button(`${entry.kind === 'title' ? '标题' : `层级 ${entry.level}`} · ${entry.text}`, 'quiet', () =>
+          navigate({ kind: 'block', blockId: entry.blockId }),
+        );
+        open.style.setProperty('--outline-depth', String(Math.max(0, entry.level - 1)));
+        open.setAttribute('role', 'listitem');
+        outlineList.append(open);
+      }
+      moreOutline.hidden = page.nextCursor === null;
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : '无法读取稿件结构。', 'error');
+    }
+  }
+
+  const showJobProgress = (job: ServiceJobProjection): void => {
+    activeJob = job.state === 'queued' || job.state === 'running' ? job : undefined;
+    cancelJob.hidden = activeJob === undefined;
+    const progress = job.progress.total > 0 ? ` ${job.progress.completed.toLocaleString('zh-CN')} / ${job.progress.total.toLocaleString('zh-CN')}` : '';
+    searchSummary.textContent = `${job.progress.label}${progress}`;
+  };
+
+  async function runSearch(): Promise<void> {
+    const query = searchInput.value.normalize('NFC');
+    if (!query || query.length > 256) {
+      setStatus('请输入 1–256 个字符的查找文字。', 'error');
+      searchInput.focus();
+      return;
+    }
+    const binding = editor?.currentWindow() ?? currentWindow;
+    searchReturnWindow = binding;
+    searchReturnCharacter = binding.position.startCharacter;
+    excludedMatchIds.clear();
+    replacementReview.hidden = true;
+    replacementPreview = undefined;
+    searchButton.disabled = true;
+    try {
+      const completed = await awaitServiceJob(
+        await window.ai7.startSearch({ manuscriptId: binding.manuscriptId, branchId: binding.branchId, query }),
+        showJobProgress,
+      );
+      if (completed.state === 'cancelled') {
+        searchSummary.textContent = '查找已取消；当前本地编辑不受影响。';
+        return;
+      }
+      if (!completed.result || !('searchId' in completed.result)) throw new Error('查找结果绑定无效。');
+      await loadSearchResults(null, completed.result.searchId);
+      prepareReplacementButton.disabled = completed.result.totalMatches === 0;
+      returnFromSearch.hidden = false;
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : '全稿查找未完成。', 'error');
+    } finally {
+      activeJob = undefined;
+      cancelJob.hidden = true;
+      searchButton.disabled = false;
+    }
+  }
+
+  async function returnToSearchPosition(): Promise<void> {
+    if (!(await settleLocalEdit()) || !editor) return;
+    if (
+      editor.currentWindow().workingDigest === searchReturnWindow.workingDigest &&
+      editor.loadWindow(searchReturnWindow)
+    ) {
+      currentWindow = searchReturnWindow;
+      updateWindowChrome();
+      setStatus(`已返回查找前位置；${currentWindow.position.label}。`, 'success');
+      return;
+    }
+    await navigate({ kind: 'character', character: searchReturnCharacter });
+  }
+
+  async function loadSearchResults(cursor: string | null, searchId?: string): Promise<void> {
+    const id = searchId ?? searchPage?.searchId;
+    if (!id) return;
+    const page = await window.ai7.getSearchResults({ searchId: id, cursor });
+    searchPage = page;
+    searchResults.replaceChildren();
+    searchSummary.textContent = `“${page.query}” · 范围：${page.scopeLabel} · 共 ${page.totalMatches.toLocaleString('zh-CN')} 处`;
+    for (const match of page.results) {
+      const row = element('article', 'search-result');
+      const open = button(match.context, 'quiet', () => void jumpToSearchMatch(match));
+      open.setAttribute('aria-label', `${match.headingLabel}：${match.context}`);
+      const includeLabel = element('label', 'match-inclusion');
+      const include = element('input');
+      include.type = 'checkbox';
+      include.checked = !excludedMatchIds.has(match.matchId);
+      include.addEventListener('change', () => {
+        if (include.checked) excludedMatchIds.delete(match.matchId);
+        else excludedMatchIds.add(match.matchId);
+      });
+      includeLabel.append(include, document.createTextNode(' 纳入替换'));
+      row.append(element('p', 'field-note', match.headingLabel), open, includeLabel);
+      searchResults.append(row);
+    }
+    previousResults.hidden = page.previousCursor === null;
+    nextResults.hidden = page.nextCursor === null;
+  }
+
+  async function jumpToSearchMatch(match: SearchResultsProjection['results'][number]): Promise<void> {
+    if (!(await settleLocalEdit()) || !editor) return;
+    if (!searchPage || editor.currentWindow().workingDigest !== searchPage.workingDigest) {
+      setStatus('稿件已变化；请重新查找后再跳转到精确范围。', 'error');
+      return;
+    }
+    await navigate({ kind: 'block', blockId: match.blockId });
+    if (!editor?.selectRange(match.blockId, match.fromGrapheme, match.toGrapheme)) {
+      setStatus('无法在当前稿件状态中精确定位该匹配。', 'error');
+    }
+  }
+
+  async function prepareReplacement(): Promise<void> {
+    if (!searchPage) return;
+    try {
+      replacementPreview = await window.ai7.prepareReplacement({
+        searchId: searchPage.searchId,
+        replacement: replacementInput.value.normalize('NFC'),
+      });
+      renderReplacementReview(replacementPreview);
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : '无法准备替换预览。', 'error');
+    }
+  }
+
+  function renderReplacementReview(preview: ReplacementPreviewProjection): void {
+    replacementReview.hidden = false;
+    replacementReview.replaceChildren(
+      element('h4', undefined, preview.state === 'frozen' ? '已冻结替换集' : '替换预览'),
+      element('p', undefined, `查找“${preview.query}”，替换为“${preview.replacement}”`),
+      element('p', 'field-note', `范围：${preview.scopeLabel} · 纳入 ${preview.includedMatches} / ${preview.totalMatches} 处`),
+    );
+    const contexts = element('ul');
+    for (const match of preview.representativeContexts) contexts.append(element('li', undefined, `${match.headingLabel}：${match.context}`));
+    replacementReview.append(contexts);
+    if (preview.state === 'reviewing') {
+      replacementReview.append(
+        button('冻结并重新验证', 'primary', async () => {
+          try {
+            replacementPreview = await window.ai7.freezeReplacement({
+              previewId: preview.previewId,
+              excludedMatchIds: [...excludedMatchIds],
+            });
+            renderReplacementReview(replacementPreview);
+          } catch (error) {
+            setStatus(error instanceof Error ? error.message : '替换集无法冻结。', 'error');
+          }
+        }),
+      );
+    } else {
+      replacementReview.append(button('原子提交替换', 'primary', () => void commitReplacement(preview.previewId)));
+    }
+  }
+
+  async function commitReplacement(previewId: string): Promise<void> {
+    try {
+      const completed = await awaitServiceJob(await window.ai7.startReplacementCommit({ previewId }), showJobProgress);
+      if (completed.state === 'cancelled') {
+        setStatus('替换提交已在写入前取消。', 'success');
+        return;
+      }
+      if (!(await settleLocalEdit())) {
+        setStatus('请先完成当前本地编辑，再提交已复核的替换。', 'busy');
+        return;
+      }
+      const replacement = await window.ai7.commitReplacement({ previewId });
+      setStatus(replacement.completionLabel, 'success');
+      await navigate({ kind: 'character', character: currentWindow.position.startCharacter });
+      replacementReview.hidden = true;
+      searchResults.replaceChildren();
+      searchPage = undefined;
+      prepareReplacementButton.disabled = true;
+      await loadOutline(null, false);
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : '替换提交未完成。', 'error');
+    } finally {
+      activeJob = undefined;
+      cancelJob.hidden = true;
+    }
+  }
+
+  async function saveMilestone(): Promise<void> {
+    if (!(await settleLocalEdit()) || !editor) return;
+    if (!milestoneName.value.trim() || !purpose.value.trim()) {
+      setStatus('请填写里程碑名称和保存目的。', 'error');
+      (!milestoneName.value.trim() ? milestoneName : purpose).focus();
+      return;
+    }
+    try {
+      const binding = editor.currentWindow();
+      const saved = await window.ai7.saveMilestone({
+        manuscriptId: binding.manuscriptId,
+        branchId: binding.branchId,
+        label: milestoneName.value,
+        purpose: purpose.value,
+        note: note.value,
+      });
+      setStatus(saved.completionLabel, 'success');
+      await navigate({ kind: 'character', character: currentWindow.position.startCharacter });
+      milestoneSection.open = false;
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : '里程碑未保存。', 'error');
+    }
+  }
+
+  async function runHistory(action: 'undo' | 'redo'): Promise<void> {
+    if (!(await settleLocalEdit()) || !editor) return;
+    try {
+      const binding = editor.currentWindow();
+      const input = {
+        manuscriptId: binding.manuscriptId,
+        branchId: binding.branchId,
+        expectedWorkingDigest: binding.workingDigest,
+      };
+      const result = action === 'undo' ? await window.ai7.undoManuscript(input) : await window.ai7.redoManuscript(input);
+      setStatus(result.completionLabel, 'success');
+      await navigate({ kind: 'character', character: currentWindow.position.startCharacter });
+      await loadOutline(null, false);
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : `${action === 'undo' ? '撤销' : '重做'}未完成。`, 'error');
+    }
+  }
+
+  positionRail.addEventListener('change', () => void navigate({ kind: 'proportion', proportion: Number(positionRail.value) / 1_000_000 }));
+  editorWindow.addEventListener('scroll', () => {
+    if (edgeNavigation || editor?.isComposing()) return;
+    const atStart = editorWindow.scrollTop <= 0 && currentWindow.previousCursor !== null;
+    const atEnd = editorWindow.scrollTop + editorWindow.clientHeight >= editorWindow.scrollHeight - 1 && currentWindow.nextCursor !== null;
+    if (!atStart && !atEnd) return;
+    edgeNavigation = true;
+    void navigateCursor(atStart ? 'previous' : 'next').finally(() => {
+      edgeNavigation = false;
+    });
+  });
+  searchInput.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter' && !event.isComposing) {
+      event.preventDefault();
+      void runSearch();
+    }
+  });
+
   editor = mountBoundedEditor({
     host: editorHost,
     platform: window.ai7.platform,
-    initialWindow: result.firstWindow,
+    initialWindow,
     flushJournalEdit: (input) => window.ai7.flushJournalEdit(input),
     onStateChange: (state) => {
+      dirty = state.dirty;
+      saving = state.saving;
+      retryRequired = state.retryRequired;
       save.disabled = !state.dirty || state.saving || state.interrupted;
       journal.textContent = `修订日志序号 ${state.journalSequence}`;
       setCloseRisk(state.dirty || state.saving || state.retryRequired || (state.interrupted && state.dirty));
+      if (editor && state.journalSequence !== lastJournalSequence) {
+        lastJournalSequence = state.journalSequence;
+        currentWindow = editor.currentWindow();
+        updateWindowChrome();
+        void loadOutline(null, false);
+      }
     },
     onAnnouncement: setStatus,
+    onCommand: (command) => {
+      if (command === 'search') searchInput.focus();
+      else if (command === 'replace') replacementInput.focus();
+      else if (command === 'undo' || command === 'redo') void runHistory(command);
+      else void navigateCursor(command === 'previous-window' ? 'previous' : 'next');
+    },
   });
+  updateWindowChrome();
+  void loadOutline(null, false);
   editor.focus();
-  setStatus(`稿件窗口已打开；${result.firstWindow.position.label}。`);
+  setStatus(`稿件窗口已打开；${initialWindow.position.label}。`);
 }
 
 function renderError(error: unknown, retry: () => void): void {
@@ -863,15 +1065,6 @@ function renderError(error: unknown, retry: () => void): void {
   setStatus('操作未完成', 'error');
 }
 
-async function initializeStartup(): Promise<void> {
-  setStatus('正在核对本地恢复状态…', 'busy');
-  try {
-    renderStartupProjection(await window.ai7.getImportStartup());
-  } catch (error) {
-    renderError(error, () => void initializeStartup());
-  }
-}
-
 new MutationObserver(() => {
   if (document.documentElement.dataset['ai7ServiceState'] === 'interrupted') applyAuthorityInterruption();
   if (document.documentElement.dataset['ai7CloseState'] === 'blocked') {
@@ -884,5 +1077,8 @@ new MutationObserver(() => {
 });
 
 setCloseRisk(false);
-void initializeStartup();
+void window.ai7
+  .listPriorWork()
+  .then((items) => renderLanding(items))
+  .catch(() => renderLanding());
 if (document.documentElement.dataset['ai7ServiceState'] === 'interrupted') applyAuthorityInterruption();
