@@ -2221,9 +2221,9 @@ export class EditorialStore {
 
   advanceSearch(searchId: string): {
     done: boolean;
-    completed: number;
-    total: number;
-    result: SearchSummaryProjection | null;
+    summary: SearchSummaryProjection;
+    scannedPosition: number;
+    totalBlocks: number;
   } {
     return this.#boundedCall(() => this.#bounded.advanceSearch(searchId));
   }
@@ -2252,10 +2252,11 @@ export class EditorialStore {
   }
 
   advanceReplacementWork(previewId: string): {
+    phase: 'preparing' | 'validating';
     done: boolean;
     completed: number;
     total: number;
-    result: ReplacementPreviewProjection | null;
+    preview: ReplacementPreviewProjection | null;
   } {
     return this.#boundedCall(() => this.#bounded.advanceReplacementWork(previewId));
   }
@@ -2270,7 +2271,8 @@ export class EditorialStore {
 
   dismissReplacementPreview(previewId: string): ReplacementDismissalProjection {
     const cancelled = this.cancelReplacement(previewId);
-    return this.#boundedCall(() => this.#bounded.dismissReplacementPreview(previewId, cancelled));
+    requireStore(cancelled, 'REPLACEMENT_STATE_CHANGED', '替换预览已提交、失败或不再可取消。');
+    return { previewId, state: 'cancelled' };
   }
 
   saveMilestone(
