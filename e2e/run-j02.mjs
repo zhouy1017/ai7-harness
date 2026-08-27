@@ -417,9 +417,9 @@ async function runWorkspaceJourney(renderer) {
   await waitFor(renderer, `!Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '保存当前编辑')?.disabled`, 'concurrent-edit-dirty');
   await waitFor(renderer, `document.querySelector('.editor-meta')?.textContent.includes('修订日志序号 3') && Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '保存当前编辑')?.disabled`, 'automatic-serialized-durable-ack', 120_000);
   await renderer.evaluate(`globalThis.__ai7AfterAckFirst = document.querySelector('[data-testid="manuscript-editor"] > [data-block-id]')?.dataset.blockId`);
-  await clickButton(renderer, '向前浏览', 'fresh-cursor-after-ack');
+  await clickButton(renderer, '向后浏览', 'fresh-cursor-after-ack');
   await waitFor(renderer, `document.querySelector('[data-testid="manuscript-editor"] > [data-block-id]')?.dataset.blockId !== globalThis.__ai7AfterAckFirst`, 'fresh-cursor-after-ack-resolved');
-  await clickButton(renderer, '向后浏览', 'fresh-return-cursor-after-ack');
+  await clickButton(renderer, '向前浏览', 'fresh-return-cursor-after-ack');
   await waitFor(renderer, `Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '取消当前操作')?.hidden`, 'stale-search-closed');
 
   at('authoritative-mutation-drain');
