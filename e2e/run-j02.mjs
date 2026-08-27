@@ -371,7 +371,11 @@ async function runWorkspaceJourney(renderer) {
   await clickButton(renderer, '上一组结构', 'outline-previous-page');
   await waitFor(renderer, `document.querySelectorAll('.outline-list button').length === 64`, 'outline-previous-page-bounded');
   await clickButton(renderer, '下一组结构', 'outline-last-page');
-  await waitFor(renderer, `document.querySelectorAll('.outline-list button').length > 0 && document.querySelectorAll('.outline-list button').length <= 64`, 'outline-last-page-bounded');
+  await waitFor(
+    renderer,
+    `(() => { const items = document.querySelectorAll('.outline-list button'); const buttons = Array.from(document.querySelectorAll('button')); const previous = buttons.find((button) => button.textContent === '上一组结构'); const next = buttons.find((button) => button.textContent === '下一组结构'); return items.length > 0 && items.length <= 64 && previous instanceof HTMLButtonElement && !previous.hidden && next instanceof HTMLButtonElement && next.hidden; })()`,
+    'outline-last-page-bounded',
+  );
   await assertRenderer(renderer, `(() => { const items = document.querySelectorAll('.outline-list button'); const target = items[items.length - 1]; if (!target) return false; target.click(); return true; })()`, 'outline-jump');
   await waitFor(renderer, `document.querySelector('.editor-meta')?.textContent.includes('99.998%')`, 'outline-exact-resolve');
 
