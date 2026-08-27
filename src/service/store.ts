@@ -4,7 +4,7 @@ import { copyFile, open, realpath, rename, rm } from 'node:fs/promises';
 import { basename, isAbsolute, posix, relative, resolve, sep } from 'node:path';
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
 import type {
-  ExactImportMatchProjection,
+  ImportIdentityFindingProjection,
   FidelityCategoryProjection,
   ImportCommitProjection,
   ImportDegradationDecisionReviewProjection,
@@ -577,9 +577,9 @@ function nonEffects(plan: ImportFidelityPlan): ReadonlyArray<string> {
 }
 
 function newBookTargetChoice(
-  exactMatches: ReadonlyArray<ExactImportMatchProjection>,
+  identityFindings: ReadonlyArray<ImportIdentityFindingProjection>,
 ): StagedImportProjection['targetChoices'][number] {
-  return exactMatches.length > 0
+  return identityFindings.length > 0
     ? { id: 'new-book-distinct-intended-work', label: '新建图书（作为不同作品）', selected: false }
     : { id: 'new-book', label: '新建图书', selected: false };
 }
@@ -613,61 +613,17 @@ function parseStoredJson(value: string, message: string): unknown {
   }
 }
 
-function createLegacyNewBookReviewDigestV2(
-  snapshot: DraftSnapshot,
-  confirmedTitle: string,
-  draftVersion: number,
-  plan: ImportFidelityPlan,
-): string {
-  return sha256(
-    canonicalJson({
-      schema: 'ai7.new-book-import-review/2',
-      draftId: snapshot.draftId,
-      draftVersion,
-      target: 'new-book',
-      confirmedTitle,
-      source: {
-        displayName: snapshot.displayName,
-        provenance: 'native-file-picker/local-provider-free',
-        objectDigest: snapshot.objectDigest,
-        parserIdentity: snapshot.parserIdentity,
-        sourceDigest: snapshot.sourceDigest,
-        sourceBytes: snapshot.sourceBytes,
-        contentDigest: snapshot.contentDigest,
-        structureDigest: snapshot.structureDigest,
-      },
-      fidelity: snapshot.fidelity,
-      degradationDecision:
-        plan.degradations.length === 0
-          ? null
-          : {
-              schema: DEGRADATION_DECISION_SCHEMA,
-              scope: 'this-import-only',
-              state: 'accepted-complete-set',
-              items: plan.degradations,
-            },
-      recordsToCreate: recordsToCreate(plan),
-      nonEffects: nonEffects(plan),
-      workflowProfile: { ...WORKFLOW_PROFILE, digest: WORKFLOW_PROFILE_DIGEST },
-      editorialDimensionSet: {
-        ...BASELINE_EDITORIAL_DIMENSION_SET,
-        digest: BASELINE_EDITORIAL_DIMENSION_SET_DIGEST,
-      },
-    }),
-  );
-}
-
-function createNewBookReviewDigestV3(
+function createNewBookReviewDigestV4(
   snapshot: DraftSnapshot,
   confirmedTitle: string,
   draftVersion: number,
   plan: ImportFidelityPlan,
   targetChoiceId: NewBookImportTargetChoiceId,
-  exactMatches: ReadonlyArray<ExactImportMatchProjection>,
+  identityFindings: ReadonlyArray<ImportIdentityFindingProjection>,
 ): string {
   return sha256(
     canonicalJson({
-      schema: 'ai7.new-book-import-review/3',
+      schema: 'ai7.new-book-import-review/4',
       draftId: snapshot.draftId,
       draftVersion,
       target:
@@ -685,7 +641,7 @@ function createNewBookReviewDigestV3(
         contentDigest: snapshot.contentDigest,
         structureDigest: snapshot.structureDigest,
       },
-      exactMatches,
+      identityFindings,
       fidelity: snapshot.fidelity,
       degradationDecision:
         plan.degradations.length === 0
@@ -895,12 +851,12 @@ export class EditorialStore {
     const snapshot = this.#loadDraftSnapshot(draftId);
     requireStore(snapshot.state === 'staged', 'DRAFT_STATE_CHANGED', '导入草稿状态已变化。');
     requireStore(snapshot.version === expectedDraftVersion, 'DRAFT_VERSION_CHANGED', '导入草稿版本已变化。');
-    const exactMatches = this.#exactImportMatches(snapshot);
-    const targetChoice = newBookTargetChoice(exactMatches);
+    const identityFindings = this.#identityFindings(snapshot);
+    const targetChoice = newBookTargetChoice(identityFindings);
     requireStore(targetChoiceId === targetChoice.id, 'TARGET_CHOICE_CHANGED', '导入目标选择已变化，请重新选择。');
     const plan = this.#requireFidelityPlan(snapshot);
     if (plan.degradations.length > 0 && !acceptDegradation) {
-      return this.#reviewProjection(snapshot, confirmedTitle, null, plan, false, targetChoiceId, exactMatches);
+      return this.#reviewProjection(snapshot, confirmedTitle, null, plan, false, targetChoiceId, identityFindings);
     }
     requireStore(
       plan.degradations.length > 0 || !acceptDegradation,
@@ -908,13 +864,13 @@ export class EditorialStore {
       '本次导入不需要降级接受。',
     );
     const nextVersion = expectedDraftVersion + 1;
-    const reviewDigest = createNewBookReviewDigestV3(
+    const reviewDigest = createNewBookReviewDigestV4(
       snapshot,
       confirmedTitle,
       nextVersion,
       plan,
       targetChoiceId,
-      exactMatches,
+      identityFindings,
     );
     const reviewedAt = new Date().toISOString();
     this.#transaction(this.#authority, () => {
@@ -934,7 +890,7 @@ export class EditorialStore {
       plan,
       plan.degradations.length > 0,
       targetChoiceId,
-      exactMatches,
+      identityFindings,
     );
   }
 
@@ -966,22 +922,18 @@ export class EditorialStore {
       requireStore(snapshot.reviewDigest === input.reviewDigest, 'REVIEW_CHANGED', '导入前复核摘要已变化。');
       requireStore(snapshot.reviewedTitle, 'REVIEW_CHANGED', '确认书名缺失。');
       const plan = this.#requireFidelityPlan(snapshot);
-      const exactMatches = this.#exactImportMatches(snapshot);
-      const targetChoice = newBookTargetChoice(exactMatches);
-      const currentReviewDigest = createNewBookReviewDigestV3(
+      const identityFindings = this.#identityFindings(snapshot);
+      const targetChoice = newBookTargetChoice(identityFindings);
+      const currentReviewDigest = createNewBookReviewDigestV4(
         snapshot,
         snapshot.reviewedTitle,
         snapshot.version,
         plan,
         targetChoice.id,
-        exactMatches,
+        identityFindings,
       );
-      const legacyReviewDigest =
-        exactMatches.length === 0
-          ? createLegacyNewBookReviewDigestV2(snapshot, snapshot.reviewedTitle, snapshot.version, plan)
-          : null;
       requireStore(
-        currentReviewDigest === input.reviewDigest || legacyReviewDigest === input.reviewDigest,
+        currentReviewDigest === input.reviewDigest,
         'REVIEW_CHANGED',
         '导入前复核摘要无法由当前权威快照重建。',
       );
@@ -1482,8 +1434,8 @@ export class EditorialStore {
   }
 
   #stagedProjection(snapshot: DraftSnapshot): StagedImportProjection {
-    const exactMatches = this.#exactImportMatches(snapshot);
-    const targetChoice = newBookTargetChoice(exactMatches);
+    const identityFindings = this.#identityFindings(snapshot);
+    const targetChoice = newBookTargetChoice(identityFindings);
     return {
       draftId: snapshot.draftId,
       draftVersion: snapshot.version,
@@ -1495,7 +1447,7 @@ export class EditorialStore {
         provenanceLabel: '本机文件选择器 · 本地解析 · 未联网',
       },
       titleSuggestion: { value: snapshot.titleSuggestion, sourceLabel: snapshot.titleSource },
-      exactMatches,
+      identityFindings,
       targetChoices: [targetChoice],
       fidelity: snapshot.fidelity,
       detectedBlockCount: snapshot.blockCount,
@@ -1509,9 +1461,9 @@ export class EditorialStore {
     plan: ImportFidelityPlan,
     accepted: boolean,
     targetChoiceId: NewBookImportTargetChoiceId,
-    exactMatches: ReadonlyArray<ExactImportMatchProjection>,
+    identityFindings: ReadonlyArray<ImportIdentityFindingProjection>,
   ): ReviewBeforeImportProjection {
-    const targetChoice = newBookTargetChoice(exactMatches);
+    const targetChoice = newBookTargetChoice(identityFindings);
     requireStore(targetChoiceId === targetChoice.id, 'TARGET_CHOICE_CHANGED', '导入目标选择已变化，请重新选择。');
     return {
       draftId: snapshot.draftId,
@@ -1524,7 +1476,7 @@ export class EditorialStore {
         confirmedTitle,
       },
       source: this.#stagedProjection(snapshot).source,
-      exactMatches,
+      identityFindings,
       fidelity: snapshot.fidelity,
       recordsToCreate: recordsToCreate(plan),
       nonEffects: nonEffects(plan),
@@ -1542,34 +1494,51 @@ export class EditorialStore {
     };
   }
 
-  #exactImportMatches(snapshot: DraftSnapshot): ExactImportMatchProjection[] {
-    if (snapshot.sourceBytes !== SAMPLE1_SOURCE_BYTES || snapshot.sourceDigest !== SAMPLE1_SOURCE_SHA256) return [];
-    return (
-      this.#authority
-        .prepare(
-          `SELECT b.book_id, b.title, sv.source_version_id, sv.content_digest, sv.structure_digest,
-                  ir.import_record_id
-           FROM source_versions sv
-           JOIN books b ON b.book_id = sv.book_id
-           JOIN manuscript_import_records ir
-             ON ir.book_id = sv.book_id
-            AND ir.source_version_id = sv.source_version_id
-           WHERE sv.source_digest = ?
-           ORDER BY ir.imported_at, b.book_id, sv.source_version_id`,
-        )
-        .all(snapshot.sourceDigest) as SqlRow[]
-    ).map((row) => ({
-      bookId: asString(row.book_id),
-      bookTitle: asString(row.title),
-      sourceVersionId: asString(row.source_version_id),
-      importRecordId: asString(row.import_record_id),
-      identityClasses: [
-        { kind: 'immutable-original', label: '精确原始文件身份' } as const,
-        ...(asString(row.content_digest) === snapshot.contentDigest && asString(row.structure_digest) === snapshot.structureDigest
-          ? ([{ kind: 'parsed-content-structure', label: '精确解析内容与结构身份' }] as const)
-          : []),
-      ],
-    }));
+  #identityFindings(snapshot: DraftSnapshot): ImportIdentityFindingProjection[] {
+    const rows = this.#authority
+      .prepare(
+        `SELECT b.book_id, b.title, sv.source_version_id, sv.source_digest, sv.content_digest,
+                sv.structure_digest, sv.parser_identity, sv.display_name, ir.import_record_id
+         FROM source_versions sv
+         JOIN books b ON b.book_id = sv.book_id
+         JOIN manuscript_import_records ir
+           ON ir.book_id = sv.book_id
+          AND ir.source_version_id = sv.source_version_id
+         ORDER BY b.title COLLATE BINARY, b.book_id, sv.source_version_id, ir.import_record_id`,
+      )
+      .all() as SqlRow[];
+    const findings = new Map<string, ImportIdentityFindingProjection>();
+    for (const row of rows) {
+      const sourceDigest = asString(row.source_digest);
+      const contentDigest = asString(row.content_digest);
+      const structureDigest = asString(row.structure_digest);
+      const parserIdentity = asString(row.parser_identity);
+      const displayName = asString(row.display_name);
+      const identityClass =
+        sourceDigest === snapshot.sourceDigest
+          ? ({ kind: 'immutable-original', label: '精确原始文件身份' } as const)
+          : parserIdentity === snapshot.parserIdentity &&
+              contentDigest === snapshot.contentDigest &&
+              structureDigest === snapshot.structureDigest
+            ? ({ kind: 'parsed-content-structure', label: '发现相同内容' } as const)
+            : displayName === snapshot.displayName &&
+                (sourceDigest !== snapshot.sourceDigest ||
+                  contentDigest !== snapshot.contentDigest ||
+                  structureDigest !== snapshot.structureDigest)
+              ? ({ kind: 'filename-collision', label: '名称相同，内容不同' } as const)
+              : undefined;
+      if (!identityClass) continue;
+      const finding = {
+        bookId: asString(row.book_id),
+        bookTitle: asString(row.title),
+        sourceVersionId: asString(row.source_version_id),
+        importRecordId: asString(row.import_record_id),
+        identityClass,
+      } satisfies ImportIdentityFindingProjection;
+      const key = `${finding.bookId}\u0000${finding.sourceVersionId}\u0000${finding.importRecordId}`;
+      if (!findings.has(key)) findings.set(key, finding);
+    }
+    return [...findings.values()];
   }
 
   #loadDraftSnapshot(draftId: string): DraftSnapshot {
