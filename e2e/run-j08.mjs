@@ -358,7 +358,7 @@ async function main() {
     await renderer.send('Emulation.setPageScaleFactor', { pageScaleFactor: 1 });
     await renderer.send('Emulation.clearDeviceMetricsOverride');
     await assertRenderer(renderer, `(() => { const journal=document.querySelector('[data-recovery-candidate="journal"] input'); journal.click(); return journal.checked; })()`, 'journal-select');
-    await assertRenderer(renderer, `!document.querySelector('.recovery-selection-consequence')?.hidden && document.querySelector('.recovery-selection-consequence')?.textContent.includes('新的后代修订版') && document.querySelector('.recovery-selection-consequence')?.textContent.includes('既有历史与稿件固定点保持原位') && !Array.from(document.querySelectorAll('button')).find((item)=>item.textContent==='恢复为新版本')?.disabled`, 'selection-consequence');
+    await assertRenderer(renderer, `!document.querySelector('.recovery-selection-consequence')?.hidden && document.querySelector('.recovery-selection-consequence')?.textContent.includes('形成当前分支的新后代修订版') && document.querySelector('.recovery-selection-consequence')?.textContent.includes('既有历史与稿件固定点保持原位') && !Array.from(document.querySelectorAll('button')).find((item)=>item.textContent==='恢复为新版本')?.disabled`, 'selection-consequence');
     await click(renderer, '仅查看', 'readonly-view');
     await waitFor(renderer, `document.querySelector('[data-screen="recovery-viewer"]')`, 'readonly-view-ready');
     await assertRenderer(renderer, `document.querySelector('.recovery-readonly-blocks') && document.querySelectorAll('.recovery-readonly-blocks > *').length<=32 && !document.querySelector('[contenteditable="true"]') && !document.querySelector('[data-testid="manuscript-editor"]')`, 'permanent-readonly-view');
