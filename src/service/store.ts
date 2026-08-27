@@ -42,7 +42,7 @@ import {
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const TOKEN_PATTERN = UUID_PATTERN;
-const SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = 4;
 const WORKFLOW_PROFILE = {
   id: 'ai7.manuscript.editorial.zh-CN',
   name: '基础书稿编辑流程',
@@ -198,6 +198,119 @@ function configureDatabase(db: DatabaseSync): void {
   `);
 }
 
+const ABANDONMENT_CLEANUP_SCHEMA = `
+  CREATE TABLE import_abandonment_cleanup_intents (
+    draft_id TEXT PRIMARY KEY REFERENCES import_drafts(draft_id),
+    object_digest TEXT NOT NULL UNIQUE REFERENCES content_objects(object_digest),
+    expected_draft_version INTEGER NOT NULL CHECK(expected_draft_version >= 1),
+    relative_key TEXT NOT NULL,
+    state TEXT NOT NULL CHECK(state IN ('prepared', 'bytes-removed')),
+    requested_at TEXT NOT NULL,
+    bytes_removed_at TEXT,
+    CHECK(
+      (state = 'prepared' AND bytes_removed_at IS NULL)
+      OR (state = 'bytes-removed' AND bytes_removed_at IS NOT NULL)
+    )
+  ) STRICT;
+
+  CREATE TRIGGER abandonment_cleanup_validate_insert
+  BEFORE INSERT ON import_abandonment_cleanup_intents
+  WHEN NOT EXISTS (
+      SELECT 1
+      FROM import_drafts d
+      JOIN content_objects co ON co.object_digest = d.object_digest
+      WHERE d.draft_id = NEW.draft_id
+        AND d.state IN ('staged', 'reviewed')
+        AND d.draft_version = NEW.expected_draft_version
+        AND d.object_digest = NEW.object_digest
+        AND co.relative_key = NEW.relative_key
+    )
+    OR EXISTS (SELECT 1 FROM source_versions sv WHERE sv.object_digest = NEW.object_digest)
+    OR (SELECT count(*) FROM import_drafts d WHERE d.object_digest = NEW.object_digest) != 1
+    OR EXISTS (SELECT 1 FROM import_commits c WHERE c.draft_id = NEW.draft_id)
+    OR EXISTS (
+      SELECT 1 FROM import_commit_attempts a
+      WHERE a.draft_id = NEW.draft_id AND a.state != 'prepared'
+    )
+  BEGIN
+    SELECT RAISE(ABORT, 'ABANDONMENT_CLEANUP_INVALID');
+  END;
+
+  CREATE TRIGGER abandonment_cleanup_block_content_object_update
+  BEFORE UPDATE ON content_objects
+  WHEN EXISTS (
+    SELECT 1 FROM import_abandonment_cleanup_intents i
+    WHERE i.object_digest = OLD.object_digest
+  )
+  BEGIN
+    SELECT RAISE(ABORT, 'ABANDONMENT_CLEANUP_PENDING');
+  END;
+
+  CREATE TRIGGER abandonment_cleanup_block_draft_insert
+  BEFORE INSERT ON import_drafts
+  WHEN EXISTS (
+    SELECT 1 FROM import_abandonment_cleanup_intents i
+    WHERE i.object_digest = NEW.object_digest
+  )
+  BEGIN
+    SELECT RAISE(ABORT, 'ABANDONMENT_CLEANUP_PENDING');
+  END;
+
+  CREATE TRIGGER abandonment_cleanup_block_draft_update
+  BEFORE UPDATE ON import_drafts
+  WHEN EXISTS (
+      SELECT 1 FROM import_abandonment_cleanup_intents i
+      WHERE i.draft_id = OLD.draft_id
+    )
+    OR EXISTS (
+      SELECT 1 FROM import_abandonment_cleanup_intents i
+      WHERE i.object_digest = NEW.object_digest
+    )
+  BEGIN
+    SELECT RAISE(ABORT, 'ABANDONMENT_CLEANUP_PENDING');
+  END;
+
+  CREATE TRIGGER abandonment_cleanup_block_source_insert
+  BEFORE INSERT ON source_versions
+  WHEN EXISTS (
+    SELECT 1 FROM import_abandonment_cleanup_intents i
+    WHERE i.object_digest = NEW.object_digest
+  )
+  BEGIN
+    SELECT RAISE(ABORT, 'ABANDONMENT_CLEANUP_PENDING');
+  END;
+
+  CREATE TRIGGER abandonment_cleanup_block_source_update
+  BEFORE UPDATE OF object_digest ON source_versions
+  WHEN EXISTS (
+    SELECT 1 FROM import_abandonment_cleanup_intents i
+    WHERE i.object_digest = NEW.object_digest
+  )
+  BEGIN
+    SELECT RAISE(ABORT, 'ABANDONMENT_CLEANUP_PENDING');
+  END;
+
+  CREATE TRIGGER abandonment_cleanup_block_commit_insert
+  BEFORE INSERT ON import_commits
+  WHEN EXISTS (
+    SELECT 1 FROM import_abandonment_cleanup_intents i
+    WHERE i.draft_id = NEW.draft_id
+  )
+  BEGIN
+    SELECT RAISE(ABORT, 'ABANDONMENT_CLEANUP_PENDING');
+  END;
+
+  CREATE TRIGGER abandonment_cleanup_block_attempt_insert
+  BEFORE INSERT ON import_commit_attempts
+  WHEN EXISTS (
+    SELECT 1 FROM import_abandonment_cleanup_intents i
+    WHERE i.draft_id = NEW.draft_id
+  )
+  BEGIN
+    SELECT RAISE(ABORT, 'ABANDONMENT_CLEANUP_PENDING');
+  END;
+`;
+
 function migrateSchemaV1ToV2(db: DatabaseSync): void {
   db.exec('PRAGMA foreign_keys = OFF');
   let migrationError: unknown;
@@ -329,11 +442,33 @@ function migrateSchemaV2ToV3(db: DatabaseSync): void {
   }
 }
 
+function migrateSchemaV3ToV4(db: DatabaseSync): void {
+  try {
+    db.exec(`
+      BEGIN IMMEDIATE;
+      ${ABANDONMENT_CLEANUP_SCHEMA}
+      PRAGMA user_version = 4;
+      COMMIT;
+    `);
+  } catch (error) {
+    try {
+      db.exec('ROLLBACK');
+    } catch (rollbackError) {
+      throw new AggregateError([error, rollbackError], 'SQLite schema v4 migration rollback failed.');
+    }
+    throw error;
+  }
+}
+
 function initializeSchema(db: DatabaseSync): void {
   const versionRow = one(db.prepare('PRAGMA user_version').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取数据库版本。');
   const currentVersion = asNumber(versionRow.user_version);
   requireStore(
-    currentVersion === 0 || currentVersion === 1 || currentVersion === 2 || currentVersion === SCHEMA_VERSION,
+    currentVersion === 0 ||
+      currentVersion === 1 ||
+      currentVersion === 2 ||
+      currentVersion === 3 ||
+      currentVersion === SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -341,10 +476,16 @@ function initializeSchema(db: DatabaseSync): void {
   if (currentVersion === 1) {
     migrateSchemaV1ToV2(db);
     migrateSchemaV2ToV3(db);
+    migrateSchemaV3ToV4(db);
     return;
   }
   if (currentVersion === 2) {
     migrateSchemaV2ToV3(db);
+    migrateSchemaV3ToV4(db);
+    return;
+  }
+  if (currentVersion === 3) {
+    migrateSchemaV3ToV4(db);
     return;
   }
 
@@ -634,12 +775,14 @@ function initializeSchema(db: DatabaseSync): void {
       UNIQUE(branch_id, sequence)
     ) STRICT;
 
+    ${ABANDONMENT_CLEANUP_SCHEMA}
+
     CREATE INDEX working_blocks_window ON working_blocks(branch_id, position);
     CREATE INDEX journal_branch_order ON edit_journal_entries(branch_id, sequence);
     CREATE INDEX import_attempts_recovery_order
       ON import_commit_attempts(state, completion_acknowledged_at, prepared_at);
 
-    PRAGMA user_version = 3;
+    PRAGMA user_version = 4;
     COMMIT;
   `);
 }
@@ -677,10 +820,19 @@ interface CommitAttempt {
   completionAcknowledgedAt: string | null;
 }
 
+interface AbandonmentCleanupIntent {
+  draftId: string;
+  objectDigest: string;
+  expectedDraftVersion: number;
+  relativeKey: string;
+  state: 'prepared' | 'bytes-removed';
+}
+
 interface StoreControl {
   induceUnprovableReconciliation: boolean;
   persistLegacyReviewedDraft: boolean;
   induceAbandonObjectRemovalFailure: boolean;
+  interruptAfterAbandonObjectRemoval: boolean;
 }
 
 function continuationNotice(access: OriginalFileAccessProjection): string {
@@ -887,6 +1039,7 @@ export class EditorialStore {
       induceUnprovableReconciliation: false,
       persistLegacyReviewedDraft: false,
       induceAbandonObjectRemovalFailure: false,
+      interruptAfterAbandonObjectRemoval: false,
     },
   ): Promise<EditorialStore> {
     requireStore(isAbsolute(dataRootInput), 'DATA_ROOT_INVALID', 'Agent Data Root 必须是绝对路径。');
@@ -903,6 +1056,7 @@ export class EditorialStore {
     const journal = new DatabaseSync(databasePath);
     configureDatabase(journal);
     const store = new EditorialStore(dataRoot, objectsRoot, authority, journal, control);
+    await store.#resumeAbandonmentCleanupIntents();
     store.#normalizeMigratedReviewedTargets();
     await store.#sweepUnreferencedContentObjects();
     return store;
@@ -1010,6 +1164,19 @@ export class EditorialStore {
     }
     if (committed) return { state: 'committed-recovered', result: committed };
 
+    const cleanupIntents = this.#authority
+      .prepare('SELECT draft_id FROM import_abandonment_cleanup_intents ORDER BY requested_at, draft_id')
+      .all() as SqlRow[];
+    if (cleanupIntents.length > 0) {
+      return {
+        state: 'draft-recovery',
+        recovery: await this.#recoveryProjection(
+          asString(cleanupIntents[0]!.draft_id),
+          'abandonment-cleanup',
+        ),
+      };
+    }
+
     const drafts = this.#authority
       .prepare(
         `SELECT draft_id
@@ -1028,6 +1195,7 @@ export class EditorialStore {
   async continueImportDraft(draftId: string, expectedDraftVersion: number): Promise<ContinueImportProjection> {
     this.#assertAvailable();
     requireStore(UUID_PATTERN.test(draftId), 'DRAFT_INVALID', '导入草稿标识无效。');
+    this.#requireNoAbandonmentCleanupIntent(draftId);
     const attempt = this.#loadCommitAttemptForDraft(draftId);
     if (attempt) {
       const reconciliation = await this.#reconcileCommitAttempt(attempt);
@@ -1131,6 +1299,7 @@ export class EditorialStore {
   ): Promise<ContinueImportProjection> {
     this.#assertAvailable();
     requireStore(UUID_PATTERN.test(draftId) && TOKEN_PATTERN.test(selectionToken), 'SELECTION_INVALID', '文件重选参数无效。');
+    this.#requireNoAbandonmentCleanupIntent(draftId);
     requireStore(isAbsolute(selectedPathInput), 'SELECTION_INVALID', '文件选择结果无效。');
     const attempt = this.#loadCommitAttemptForDraft(draftId);
     if (attempt) {
@@ -1211,6 +1380,16 @@ export class EditorialStore {
   async abandonImportDraft(draftId: string, expectedDraftVersion: number): Promise<ImportStartupProjection> {
     this.#assertAvailable();
     requireStore(UUID_PATTERN.test(draftId), 'DRAFT_INVALID', '导入草稿标识无效。');
+    const pendingCleanup = this.#loadAbandonmentCleanupIntent(draftId);
+    if (pendingCleanup) {
+      requireStore(
+        pendingCleanup.expectedDraftVersion === expectedDraftVersion,
+        'DRAFT_VERSION_CHANGED',
+        '导入草稿版本已变化。',
+      );
+      await this.#resumeAbandonmentCleanupIntent(pendingCleanup);
+      return this.getImportStartup();
+    }
     const attempt = this.#loadCommitAttemptForDraft(draftId);
     if (attempt) {
       const reconciliation = await this.#reconcileCommitAttempt(attempt);
@@ -1224,54 +1403,75 @@ export class EditorialStore {
         };
       }
     }
-    const draft = one(
-      this.#authority
-        .prepare(
-          `SELECT d.state, d.draft_version, d.object_digest, co.relative_key
-           FROM import_drafts d
-           JOIN content_objects co ON co.object_digest = d.object_digest
-           WHERE d.draft_id = ?`,
-        )
-        .all(draftId) as SqlRow[],
-      'DRAFT_NOT_FOUND',
-      '导入草稿不存在。',
-    );
-    requireStore(asString(draft.state) !== 'committed', 'DRAFT_STATE_CHANGED', '该导入已经提交，不能放弃。');
-    requireStore(asNumber(draft.draft_version) === expectedDraftVersion, 'DRAFT_VERSION_CHANGED', '导入草稿版本已变化。');
-    const commitEvidence = one(
-      this.#authority.prepare('SELECT count(*) commits FROM import_commits WHERE draft_id = ?').all(draftId) as SqlRow[],
-      'STORE_CORRUPT',
-      '无法核对导入提交证据。',
-    );
-    requireStore(asNumber(commitEvidence.commits) === 0, 'COMMIT_EVIDENCE_PRESENT', '存在导入提交证据，不能放弃或清理。');
-    const objectDigest = asString(draft.object_digest);
-    const relativeKey = asString(draft.relative_key);
-    const referencesBefore = one(
-      this.#authority
-        .prepare(
-          `SELECT
-             (SELECT count(*) FROM source_versions WHERE object_digest = ?) source_refs,
-             (SELECT count(*) FROM import_drafts WHERE object_digest = ?) draft_refs`,
-        )
-        .all(objectDigest, objectDigest) as SqlRow[],
-      'STORE_CORRUPT',
-      '无法核对放弃前的暂存对象引用。',
-    );
-    const sourceReferences = asNumber(referencesBefore.source_refs);
-    const draftReferences = asNumber(referencesBefore.draft_refs);
-    requireStore(draftReferences >= 1, 'STORE_CORRUPT', '导入草稿未引用其暂存对象。');
-    const removeUnsharedObject = sourceReferences === 0 && draftReferences === 1;
-    if (removeUnsharedObject) {
-      try {
-        if (this.#control.induceAbandonObjectRemovalFailure) {
-          throw new Error('E2E induced failure at the production unshared-object removal boundary.');
-        }
-        await rm(this.#contentObjectPath(objectDigest, relativeKey), { force: true });
-      } catch {
-        throw new StoreError('ABANDON_CLEANUP_FAILED', '无法安全删除未共享的暂存对象；导入草稿仍保留，请重试放弃。');
+    const cleanupIntent = this.#transaction<AbandonmentCleanupIntent | null>(this.#authority, () => {
+      const draft = one(
+        this.#authority
+          .prepare(
+            `SELECT d.state, d.draft_version, d.object_digest, co.relative_key
+             FROM import_drafts d
+             JOIN content_objects co ON co.object_digest = d.object_digest
+             WHERE d.draft_id = ?`,
+          )
+          .all(draftId) as SqlRow[],
+        'DRAFT_NOT_FOUND',
+        '导入草稿不存在。',
+      );
+      const draftState = asString(draft.state);
+      requireStore(
+        draftState === 'staged' || draftState === 'reviewed',
+        'DRAFT_STATE_CHANGED',
+        '该导入已经提交，不能放弃。',
+      );
+      requireStore(
+        asNumber(draft.draft_version) === expectedDraftVersion,
+        'DRAFT_VERSION_CHANGED',
+        '导入草稿版本已变化。',
+      );
+      const commitEvidence = one(
+        this.#authority.prepare('SELECT count(*) commits FROM import_commits WHERE draft_id = ?').all(draftId) as SqlRow[],
+        'STORE_CORRUPT',
+        '无法核对导入提交证据。',
+      );
+      requireStore(
+        asNumber(commitEvidence.commits) === 0,
+        'COMMIT_EVIDENCE_PRESENT',
+        '存在导入提交证据，不能放弃或清理。',
+      );
+      const objectDigest = asString(draft.object_digest);
+      const relativeKey = asString(draft.relative_key);
+      const referencesBefore = one(
+        this.#authority
+          .prepare(
+            `SELECT
+               (SELECT count(*) FROM source_versions WHERE object_digest = ?) source_refs,
+               (SELECT count(*) FROM import_drafts WHERE object_digest = ?) draft_refs`,
+          )
+          .all(objectDigest, objectDigest) as SqlRow[],
+        'STORE_CORRUPT',
+        '无法核对放弃前的暂存对象引用。',
+      );
+      const sourceReferences = asNumber(referencesBefore.source_refs);
+      const draftReferences = asNumber(referencesBefore.draft_refs);
+      requireStore(draftReferences >= 1, 'STORE_CORRUPT', '导入草稿未引用其暂存对象。');
+      if (sourceReferences === 0 && draftReferences === 1) {
+        const requestedAt = new Date().toISOString();
+        this.#authority
+          .prepare(
+            `INSERT INTO import_abandonment_cleanup_intents(
+               draft_id, object_digest, expected_draft_version, relative_key, state, requested_at
+             ) VALUES (?, ?, ?, ?, 'prepared', ?)`,
+          )
+          .run(draftId, objectDigest, expectedDraftVersion, relativeKey, requestedAt);
+        const intent: AbandonmentCleanupIntent = {
+          draftId,
+          objectDigest,
+          expectedDraftVersion,
+          relativeKey,
+          state: 'prepared',
+        };
+        this.#assertForeignKeys(this.#authority);
+        return intent;
       }
-    }
-    this.#transaction(this.#authority, () => {
       const deletion = this.#authority
         .prepare("DELETE FROM import_drafts WHERE draft_id = ? AND draft_version = ? AND state IN ('staged', 'reviewed')")
         .run(draftId, expectedDraftVersion);
@@ -1287,19 +1487,15 @@ export class EditorialStore {
         'STORE_CORRUPT',
         '无法核对暂存对象引用。',
       );
-      if (removeUnsharedObject) {
-        requireStore(
-          asNumber(references.source_refs) === 0 && asNumber(references.draft_refs) === 0,
-          'ABANDON_REFERENCE_CHANGED',
-          '暂存对象在放弃时出现新引用；已中止权威清理。',
-        );
-        const objectDeletion = this.#authority
-          .prepare('DELETE FROM content_objects WHERE object_digest = ?')
-          .run(objectDigest);
-        requireStore(objectDeletion.changes === 1, 'STORE_CORRUPT', '未共享暂存对象记录未能删除。');
-      }
+      requireStore(
+        asNumber(references.source_refs) + asNumber(references.draft_refs) > 0,
+        'ABANDON_REFERENCE_CHANGED',
+        '共享暂存对象在放弃时失去权威引用；已中止清理。',
+      );
       this.#assertForeignKeys(this.#authority);
+      return null;
     });
+    if (cleanupIntent) await this.#resumeAbandonmentCleanupIntent(cleanupIntent);
     return this.getImportStartup();
   }
 
@@ -1328,6 +1524,7 @@ export class EditorialStore {
   ): ReviewBeforeImportProjection {
     this.#assertAvailable();
     requireStore(UUID_PATTERN.test(draftId), 'DRAFT_INVALID', '导入草稿标识无效。');
+    this.#requireNoAbandonmentCleanupIntent(draftId);
     const confirmedTitle = safeTitle(confirmedTitleInput);
     const snapshot = this.#loadDraftSnapshot(draftId);
     requireStore(snapshot.state === 'staged', 'DRAFT_STATE_CHANGED', '导入草稿状态已变化。');
@@ -1406,6 +1603,7 @@ export class EditorialStore {
     this.#assertAvailable();
     requireStore(UUID_PATTERN.test(input.draftId) && UUID_PATTERN.test(input.commitId), 'COMMIT_INVALID', '导入提交标识无效。');
     requireStore(/^[0-9a-f]{64}$/.test(input.reviewDigest), 'COMMIT_INVALID', '导入复核摘要无效。');
+    this.#requireNoAbandonmentCleanupIntent(input.draftId);
     const requestFingerprint = sha256(canonicalJson(input));
     const existingAttempt = this.#loadCommitAttemptForDraft(input.draftId);
     if (existingAttempt) {
@@ -2220,7 +2418,9 @@ export class EditorialStore {
       sourceDisplayName: asString(row.display_name),
       snapshotState: staged === null ? 'reselection-required' : 'complete',
       lastCompletedStep:
-        kind === 'outcome-uncertain'
+        kind === 'abandonment-cleanup'
+          ? 'abandonment-cleanup'
+          : kind === 'outcome-uncertain'
           ? 'commit-outcome-uncertain'
           : attemptId
             ? 'commit-attempt'
@@ -2233,7 +2433,9 @@ export class EditorialStore {
       staged,
       commitAttemptId: attemptId,
       supportCode:
-        kind === 'outcome-uncertain'
+        kind === 'abandonment-cleanup'
+          ? 'ABANDON_CLEANUP_PENDING'
+          : kind === 'outcome-uncertain'
           ? 'COMMIT_PROOF_INCONCLUSIVE'
           : staged === null
             ? 'SNAPSHOT_RESELECTION_REQUIRED'
@@ -2577,6 +2779,210 @@ export class EditorialStore {
     return path;
   }
 
+  #loadAbandonmentCleanupIntent(draftId: string): AbandonmentCleanupIntent | null {
+    const rows = this.#authority
+      .prepare(
+        `SELECT draft_id, object_digest, expected_draft_version, relative_key, state
+         FROM import_abandonment_cleanup_intents
+         WHERE draft_id = ?`,
+      )
+      .all(draftId) as SqlRow[];
+    requireStore(rows.length <= 1, 'STORE_CORRUPT', '导入草稿关联了多个放弃清理意图。');
+    if (rows.length === 0) return null;
+    const row = rows[0]!;
+    const state = asString(row.state);
+    requireStore(state === 'prepared' || state === 'bytes-removed', 'STORE_CORRUPT', '放弃清理意图状态无效。');
+    return {
+      draftId: asString(row.draft_id),
+      objectDigest: asString(row.object_digest),
+      expectedDraftVersion: asNumber(row.expected_draft_version),
+      relativeKey: asString(row.relative_key),
+      state,
+    };
+  }
+
+  #requireNoAbandonmentCleanupIntent(draftId: string): void {
+    requireStore(
+      this.#loadAbandonmentCleanupIntent(draftId) === null,
+      'ABANDON_CLEANUP_PENDING',
+      '该导入已进入持久放弃清理；只能重试清理，不能继续、重选或提交。',
+    );
+  }
+
+  #assertAbandonmentCleanupAuthority(intent: AbandonmentCleanupIntent): void {
+    const proof = one(
+      this.#authority
+        .prepare(
+          `SELECT
+             (SELECT count(*)
+                FROM import_abandonment_cleanup_intents i
+                WHERE i.draft_id = ? AND i.object_digest = ? AND i.expected_draft_version = ?
+                  AND i.relative_key = ?) intents,
+             (SELECT count(*)
+                FROM import_drafts d
+                WHERE d.draft_id = ? AND d.state IN ('staged', 'reviewed')
+                  AND d.draft_version = ? AND d.object_digest = ?) exact_drafts,
+             (SELECT count(*) FROM import_drafts d WHERE d.object_digest = ?) draft_refs,
+             (SELECT count(*) FROM source_versions sv WHERE sv.object_digest = ?) source_refs,
+             (SELECT count(*) FROM import_commits c WHERE c.draft_id = ?) commits,
+             (SELECT count(*) FROM import_commit_attempts a
+                WHERE a.draft_id = ? AND a.state != 'prepared') unsafe_attempts,
+             (SELECT count(*) FROM content_objects co
+                WHERE co.object_digest = ? AND co.relative_key = ?) objects`,
+        )
+        .all(
+          intent.draftId,
+          intent.objectDigest,
+          intent.expectedDraftVersion,
+          intent.relativeKey,
+          intent.draftId,
+          intent.expectedDraftVersion,
+          intent.objectDigest,
+          intent.objectDigest,
+          intent.objectDigest,
+          intent.draftId,
+          intent.draftId,
+          intent.objectDigest,
+          intent.relativeKey,
+        ) as SqlRow[],
+      'STORE_CORRUPT',
+      '无法核对持久放弃清理意图。',
+    );
+    requireStore(
+      asNumber(proof.intents) === 1 &&
+        asNumber(proof.exact_drafts) === 1 &&
+        asNumber(proof.draft_refs) === 1 &&
+        asNumber(proof.source_refs) === 0 &&
+        asNumber(proof.commits) === 0 &&
+        asNumber(proof.unsafe_attempts) === 0 &&
+        asNumber(proof.objects) === 1,
+      'ABANDON_CLEANUP_INCONCLUSIVE',
+      '持久放弃清理证据不再完整；已阻止删除、继续和新权威引用。',
+    );
+  }
+
+  async #contentObjectIsAbsent(intent: AbandonmentCleanupIntent): Promise<boolean> {
+    try {
+      await lstat(this.#contentObjectPath(intent.objectDigest, intent.relativeKey));
+      return false;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return true;
+      throw new StoreError('ABANDON_CLEANUP_FAILED', '无法证明未共享暂存对象已经删除；放弃清理意图仍保留。');
+    }
+  }
+
+  async #resumeAbandonmentCleanupIntent(intentInput: AbandonmentCleanupIntent): Promise<void> {
+    this.#assertAvailable();
+    let intent = this.#loadAbandonmentCleanupIntent(intentInput.draftId);
+    requireStore(intent !== null, 'ABANDON_CLEANUP_INCONCLUSIVE', '持久放弃清理意图缺失。');
+    requireStore(
+      intent.objectDigest === intentInput.objectDigest &&
+        intent.expectedDraftVersion === intentInput.expectedDraftVersion &&
+        intent.relativeKey === intentInput.relativeKey,
+      'ABANDON_CLEANUP_INCONCLUSIVE',
+      '持久放弃清理意图绑定已变化。',
+    );
+    this.#assertAbandonmentCleanupAuthority(intent);
+    try {
+      if (this.#control.induceAbandonObjectRemovalFailure) {
+        throw new Error('E2E induced failure at the production unshared-object removal boundary.');
+      }
+      await rm(this.#contentObjectPath(intent.objectDigest, intent.relativeKey), { force: true });
+      requireStore(
+        await this.#contentObjectIsAbsent(intent),
+        'ABANDON_CLEANUP_FAILED',
+        '无法证明未共享暂存对象已经删除；放弃清理意图仍保留。',
+      );
+    } catch (error) {
+      if (error instanceof StoreFatalError) throw error;
+      throw new StoreError('ABANDON_CLEANUP_FAILED', '无法安全删除未共享的暂存对象；持久放弃清理意图与导入草稿仍保留。');
+    }
+    if (this.#control.interruptAfterAbandonObjectRemoval) {
+      throw new StoreFatalError(new Error('E2E interruption after object removal and before authority cleanup finalization.'));
+    }
+    const removedAt = new Date().toISOString();
+    this.#transaction(this.#authority, () => {
+      const update = this.#authority
+        .prepare(
+          `UPDATE import_abandonment_cleanup_intents
+           SET state = 'bytes-removed', bytes_removed_at = COALESCE(bytes_removed_at, ?)
+           WHERE draft_id = ? AND object_digest = ? AND expected_draft_version = ?
+             AND relative_key = ? AND state IN ('prepared', 'bytes-removed')`,
+        )
+        .run(
+          removedAt,
+          intent!.draftId,
+          intent!.objectDigest,
+          intent!.expectedDraftVersion,
+          intent!.relativeKey,
+        );
+      requireStore(update.changes === 1, 'ABANDON_CLEANUP_INCONCLUSIVE', '无法持久确认暂存对象删除结果。');
+      this.#assertForeignKeys(this.#authority);
+    });
+    intent = this.#loadAbandonmentCleanupIntent(intent.draftId);
+    requireStore(intent?.state === 'bytes-removed', 'ABANDON_CLEANUP_INCONCLUSIVE', '暂存对象删除确认缺失。');
+    requireStore(
+      await this.#contentObjectIsAbsent(intent),
+      'ABANDON_CLEANUP_INCONCLUSIVE',
+      '暂存对象在权威清理前再次出现；已阻止最终清理。',
+    );
+    this.#transaction(this.#authority, () => {
+      this.#assertAbandonmentCleanupAuthority(intent!);
+      const intentDeletion = this.#authority
+        .prepare(
+          `DELETE FROM import_abandonment_cleanup_intents
+           WHERE draft_id = ? AND object_digest = ? AND expected_draft_version = ?
+             AND relative_key = ? AND state = 'bytes-removed'`,
+        )
+        .run(intent!.draftId, intent!.objectDigest, intent!.expectedDraftVersion, intent!.relativeKey);
+      requireStore(intentDeletion.changes === 1, 'ABANDON_CLEANUP_INCONCLUSIVE', '放弃清理意图无法完成。');
+      const draftDeletion = this.#authority
+        .prepare(
+          `DELETE FROM import_drafts
+           WHERE draft_id = ? AND draft_version = ? AND object_digest = ?
+             AND state IN ('staged', 'reviewed')`,
+        )
+        .run(intent!.draftId, intent!.expectedDraftVersion, intent!.objectDigest);
+      requireStore(draftDeletion.changes === 1, 'ABANDON_CLEANUP_INCONCLUSIVE', '放弃清理草稿无法完成。');
+      const references = one(
+        this.#authority
+          .prepare(
+            `SELECT
+               (SELECT count(*) FROM source_versions WHERE object_digest = ?) source_refs,
+               (SELECT count(*) FROM import_drafts WHERE object_digest = ?) draft_refs`,
+          )
+          .all(intent!.objectDigest, intent!.objectDigest) as SqlRow[],
+        'STORE_CORRUPT',
+        '无法核对最终放弃清理引用。',
+      );
+      requireStore(
+        asNumber(references.source_refs) === 0 && asNumber(references.draft_refs) === 0,
+        'ABANDON_REFERENCE_CHANGED',
+        '暂存对象在最终放弃清理时出现权威引用。',
+      );
+      const objectDeletion = this.#authority
+        .prepare('DELETE FROM content_objects WHERE object_digest = ? AND relative_key = ?')
+        .run(intent!.objectDigest, intent!.relativeKey);
+      requireStore(objectDeletion.changes === 1, 'ABANDON_CLEANUP_INCONCLUSIVE', '暂存对象权威记录无法完成清理。');
+      this.#assertForeignKeys(this.#authority);
+    });
+  }
+
+  async #resumeAbandonmentCleanupIntents(): Promise<void> {
+    const rows = this.#authority
+      .prepare('SELECT draft_id FROM import_abandonment_cleanup_intents ORDER BY requested_at, draft_id')
+      .all() as SqlRow[];
+    for (const row of rows) {
+      const intent = this.#loadAbandonmentCleanupIntent(asString(row.draft_id));
+      if (!intent) continue;
+      try {
+        await this.#resumeAbandonmentCleanupIntent(intent);
+      } catch (error) {
+        if (error instanceof StoreFatalError) throw error;
+      }
+    }
+  }
+
   async #sweepUnreferencedContentObjects(): Promise<void> {
     const rows = this.#authority
       .prepare(
@@ -2613,6 +3019,10 @@ export class EditorialStore {
         `SELECT draft_id
          FROM import_drafts
          WHERE state = 'reviewed' AND reviewed_target_choice_id IS NULL
+           AND NOT EXISTS (
+             SELECT 1 FROM import_abandonment_cleanup_intents i
+             WHERE i.draft_id = import_drafts.draft_id
+           )
          ORDER BY staged_at, draft_id`,
       )
       .all() as SqlRow[];

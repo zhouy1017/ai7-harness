@@ -11,7 +11,8 @@ export type J01ImportControl =
   | 'after-commit-before-response'
   | 'uncertain-reconciliation'
   | 'legacy-reviewed-v2'
-  | 'abandon-object-delete-failure';
+  | 'abandon-object-delete-failure'
+  | 'after-abandon-object-delete-before-finalize';
 
 export const IPC_CHANNELS = {
   getImportStartup: 'ai7:j01:get-import-startup',
@@ -208,19 +209,19 @@ export type OriginalFileAccessProjection =
   | { state: 'unknown'; label: '旧版草稿未保留原始路径，将从完整暂存快照继续' };
 
 export interface ImportDraftRecoveryProjection {
-  kind: 'ordinary-draft' | 'outcome-uncertain';
+  kind: 'ordinary-draft' | 'outcome-uncertain' | 'abandonment-cleanup';
   draftId: string;
   draftVersion: number;
   stagedAt: string;
   sourceDisplayName: string;
   snapshotState: 'complete' | 'reselection-required';
-  lastCompletedStep: 'staging' | 'review' | 'commit-attempt' | 'commit-outcome-uncertain';
+  lastCompletedStep: 'staging' | 'review' | 'commit-attempt' | 'commit-outcome-uncertain' | 'abandonment-cleanup';
   reviewedTitle: string | null;
   targetLabel: '新建图书' | '新建图书（作为不同作品）' | null;
   originalFileAccess: OriginalFileAccessProjection;
   staged: StagedImportProjection | null;
   commitAttemptId: string | null;
-  supportCode: 'SNAPSHOT_RESELECTION_REQUIRED' | 'COMMIT_PROOF_INCONCLUSIVE' | null;
+  supportCode: 'SNAPSHOT_RESELECTION_REQUIRED' | 'COMMIT_PROOF_INCONCLUSIVE' | 'ABANDON_CLEANUP_PENDING' | null;
 }
 
 export type ImportStartupProjection =

@@ -571,6 +571,13 @@ async function main() {
     await clickExactButton(renderer, '导入稿件', 'abandon-failure-stage-click');
     await waitFor(renderer, `document.querySelector('[data-screen="target"]')`, 'abandon-failure-stage-target');
     await closeProduct();
+    const abandonFailureObject = resolve(
+      abandonFailureRoot,
+      'objects',
+      'sha256',
+      SAMPLE1_SHA256.slice(0, 2),
+      `${SAMPLE1_SHA256}.docx`,
+    );
     renderer = await launchProduct({
       dataRoot: abandonFailureRoot,
       importControl: 'abandon-object-delete-failure',
@@ -580,29 +587,78 @@ async function main() {
     await waitFor(renderer, `document.querySelector('[data-screen="error"]')`, 'abandon-failure-error');
     await assertRenderer(
       renderer,
-      `document.querySelector('.error-panel')?.textContent.includes('导入草稿仍保留，请重试放弃') && !document.querySelector('[data-screen="landing"]')`,
+      `document.querySelector('.error-panel')?.textContent.includes('持久放弃清理意图与导入草稿仍保留') && !document.querySelector('[data-screen="landing"]')`,
       'abandon-failure-no-false-success',
     );
+    requireJourney(existsSync(abandonFailureObject), 'abandon-failure-object-preserved');
     await clickExactButton(renderer, '重新开始', 'abandon-failure-retry-startup');
-    await waitFor(renderer, `document.querySelector('[data-screen="import-recovery"]')`, 'abandon-failure-authority-recovered');
+    await waitFor(renderer, `document.querySelector('[data-screen="import-cleanup"]')`, 'abandon-failure-authority-recovered');
     await assertRenderer(
       renderer,
-      `document.querySelector('[data-screen="import-recovery"]')?.textContent.includes('完整暂存快照') && Array.from(document.querySelectorAll('button')).some((button) => button.textContent === '放弃')`,
-      'abandon-failure-draft-preserved',
+      `(() => { const screen = document.querySelector('[data-screen="import-cleanup"]'); const buttons = Array.from(screen?.querySelectorAll('button') ?? [], (button) => button.textContent); return screen?.textContent.includes('放弃意图已经持久化') && screen.textContent.includes('ABANDON_CLEANUP_PENDING') && buttons.includes('重试放弃清理') && !buttons.some((label) => ['继续导入','重新选择原文件','放弃'].includes(label)); })()`,
+      'abandon-failure-intent-preserved',
+    );
+    await clickExactButton(renderer, '重试放弃清理', 'abandon-failure-repeat');
+    await waitFor(renderer, `document.querySelector('[data-screen="error"]')`, 'abandon-failure-repeat-error');
+    await assertRenderer(
+      renderer,
+      `document.querySelector('.error-panel')?.textContent.includes('持久放弃清理意图与导入草稿仍保留') && !document.querySelector('[data-screen="landing"]')`,
+      'abandon-failure-repeat-no-false-success',
     );
     await closeProduct();
     renderer = await launchProduct({ dataRoot: abandonFailureRoot });
-    await waitFor(renderer, `document.querySelector('[data-screen="import-recovery"]')`, 'abandon-retry-recovery');
-    await clickExactButton(renderer, '放弃', 'abandon-retry-explicit');
-    await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'abandon-retry-landing');
-    const abandonedObject = resolve(
-      abandonFailureRoot,
+    await waitFor(
+      renderer,
+      `document.documentElement.dataset.ai7ProductReady === 'true' && document.querySelector('[data-screen="landing"]')`,
+      'abandon-retry-finalized',
+    );
+    requireJourney(!existsSync(abandonFailureObject), 'abandon-retry-unshared-object-removed');
+    await closeProduct();
+
+    const abandonInterruptionRoot = await createCanonicalExternalDataRoot(resolve(runRoot, 'abandon-interruption-data'), checkoutRoot);
+    renderer = await launchProduct({ dataRoot: abandonInterruptionRoot, pickerPath: docx });
+    await waitFor(
+      renderer,
+      `document.documentElement.dataset.ai7ProductReady === 'true' && document.querySelector('[data-screen="landing"]')`,
+      'abandon-interruption-stage-landing',
+    );
+    await clickExactButton(renderer, '导入稿件', 'abandon-interruption-stage-click');
+    await waitFor(renderer, `document.querySelector('[data-screen="target"]')`, 'abandon-interruption-stage-target');
+    await closeProduct();
+    const interruptedAbandonObject = resolve(
+      abandonInterruptionRoot,
       'objects',
       'sha256',
       SAMPLE1_SHA256.slice(0, 2),
       `${SAMPLE1_SHA256}.docx`,
     );
-    requireJourney(!existsSync(abandonedObject), 'abandon-retry-unshared-object-removed');
+    renderer = await launchProduct({
+      dataRoot: abandonInterruptionRoot,
+      importControl: 'after-abandon-object-delete-before-finalize',
+    });
+    await waitFor(renderer, `document.querySelector('[data-screen="import-recovery"]')`, 'abandon-interruption-recovery');
+    await clickExactButton(renderer, '放弃', 'abandon-interruption-explicit');
+    await waitFor(
+      renderer,
+      `document.documentElement.dataset.ai7ServiceState === 'interrupted'`,
+      'abandon-interruption-visible',
+    );
+    await assertRenderer(renderer, `!document.querySelector('[data-screen="landing"]')`, 'abandon-interruption-no-success');
+    requireJourney(!existsSync(interruptedAbandonObject), 'abandon-interruption-object-removed');
+    await closeProduct();
+    renderer = await launchProduct({ dataRoot: abandonInterruptionRoot, pickerPath: docx });
+    await waitFor(
+      renderer,
+      `document.documentElement.dataset.ai7ProductReady === 'true' && document.querySelector('[data-screen="landing"]')`,
+      'abandon-interruption-finalized-on-restart',
+    );
+    requireJourney(!existsSync(interruptedAbandonObject), 'abandon-interruption-authority-finalized');
+    await clickExactButton(renderer, '导入稿件', 'abandon-interruption-restage');
+    await waitFor(renderer, `document.querySelector('[data-screen="target"]')`, 'abandon-interruption-reference-unblocked');
+    requireJourney(existsSync(interruptedAbandonObject), 'abandon-interruption-object-reactivated');
+    await clickExactButton(renderer, '取消导入', 'abandon-interruption-restage-cancel');
+    await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'abandon-interruption-restage-cleaned');
+    requireJourney(!existsSync(interruptedAbandonObject), 'abandon-interruption-restage-object-cleaned');
     await closeProduct();
 
     const beforeCommitRoot = await createCanonicalExternalDataRoot(resolve(runRoot, 'before-commit-data'), checkoutRoot);

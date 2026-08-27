@@ -277,15 +277,22 @@ async function abandonAndContinue(recovery: Pick<ImportDraftRecoveryProjection, 
 
 function renderImportRecovery(recovery: ImportDraftRecoveryProjection): void {
   const uncertain = recovery.kind === 'outcome-uncertain';
+  const cleanup = recovery.kind === 'abandonment-cleanup';
   const content = panel();
   content.classList.add('recovery-panel');
   content.append(
-    element('p', 'section-label', uncertain ? '启动恢复 · 原子结果待确认' : '启动恢复 · 非权威导入草稿'),
-    element('h2', undefined, uncertain ? '导入提交结果待确认' : '发现未完成的导入'),
+    element(
+      'p',
+      'section-label',
+      cleanup ? '启动恢复 · 持久放弃清理' : uncertain ? '启动恢复 · 原子结果待确认' : '启动恢复 · 非权威导入草稿',
+    ),
+    element('h2', undefined, cleanup ? '放弃清理尚未完成' : uncertain ? '导入提交结果待确认' : '发现未完成的导入'),
     element(
       'p',
       'lede',
-      uncertain
+      cleanup
+        ? '放弃意图已经持久化。系统已阻止继续导入和任何新的权威引用；只有在暂存字节与权威记录都完成安全清理后才会报告成功。'
+        : uncertain
         ? '本地证据目前无法证明这次原子提交已经完成或确定未提交。为避免重复图书或误删来源，系统已阻止重试、放弃和暂存清理。'
         : '启动不会替你继续、选择目标或提交。请明确选择继续导入或放弃。',
     ),
@@ -298,7 +305,9 @@ function renderImportRecovery(recovery: ImportDraftRecoveryProjection): void {
     element(
       'dd',
       undefined,
-      uncertain
+      cleanup
+        ? '持久放弃清理 · 阻止继续与新权威引用'
+        : uncertain
         ? '非权威草稿 · 提交结果待确认'
         : recovery.snapshotState === 'complete'
           ? '完整暂存快照 · 尚未形成导入权威'
@@ -308,7 +317,9 @@ function renderImportRecovery(recovery: ImportDraftRecoveryProjection): void {
     element(
       'dd',
       undefined,
-      recovery.lastCompletedStep === 'review'
+      recovery.lastCompletedStep === 'abandonment-cleanup'
+        ? '已持久化放弃与安全清理意图'
+        : recovery.lastCompletedStep === 'review'
         ? '导入前复核'
         : recovery.lastCompletedStep === 'commit-attempt'
           ? '已持久化提交尝试，尚未证明提交'
@@ -323,8 +334,23 @@ function renderImportRecovery(recovery: ImportDraftRecoveryProjection): void {
       ? [element('dt', undefined, '已复核目标'), element('dd', undefined, recovery.targetLabel)]
       : []),
   );
-  summary.append(details, element('p', recoveryTone(recovery.originalFileAccess.state), recovery.originalFileAccess.label));
+  summary.append(details);
+  if (!cleanup) summary.append(element('p', recoveryTone(recovery.originalFileAccess.state), recovery.originalFileAccess.label));
   content.append(summary);
+  if (cleanup) {
+    const support = element('section', 'uncertain-support');
+    support.append(
+      element('h3', undefined, '安全清理状态'),
+      element('p', undefined, `状态代码：${recovery.supportCode ?? 'ABANDON_CLEANUP_PENDING'}`),
+      element('p', 'field-note', '此状态不包含暂存正文或原始文件路径。请保留 Agent Data Root；重试会继续同一个持久清理意图，不会创建第二次放弃或导入。'),
+    );
+    const actions = element('div', 'button-row recovery-actions');
+    actions.append(button('重试放弃清理', 'primary', () => abandonAndContinue(recovery)));
+    content.append(support, actions);
+    replaceScreen('import-cleanup', content);
+    setStatus('放弃清理尚未完成；已阻止继续导入和新权威引用', 'error');
+    return;
+  }
   if (recovery.staged) content.append(sourceCard(recovery.staged));
 
   if (uncertain) {

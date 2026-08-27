@@ -396,7 +396,8 @@ function parseArguments(argv: string[]): {
     importControlValue === 'after-commit-before-response' ||
     importControlValue === 'uncertain-reconciliation' ||
     importControlValue === 'legacy-reviewed-v2' ||
-    importControlValue === 'abandon-object-delete-failure'
+    importControlValue === 'abandon-object-delete-failure' ||
+    importControlValue === 'after-abandon-object-delete-before-finalize'
       ? importControlValue
       : undefined;
   if (
@@ -451,6 +452,7 @@ async function run(): Promise<void> {
       induceUnprovableReconciliation: importControl === 'uncertain-reconciliation',
       persistLegacyReviewedDraft: importControl === 'legacy-reviewed-v2',
       induceAbandonObjectRemovalFailure: importControl === 'abandon-object-delete-failure',
+      interruptAfterAbandonObjectRemoval: importControl === 'after-abandon-object-delete-before-finalize',
     });
     harness = await mountDormantHarness();
     for await (const frame of readFrames()) {
