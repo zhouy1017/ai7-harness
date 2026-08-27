@@ -1758,17 +1758,27 @@ function forEachSchemaId(
   column: 'draft_id' | 'revision_id' | 'branch_id',
   visit: (id: string) => void,
 ): void {
-  let cursor = '';
+  let cursor: string | undefined;
   while (true) {
-    const rows = db.prepare(
-      `SELECT ${column} item_id FROM ${table} WHERE ${column} > ? ORDER BY ${column} LIMIT ?`,
-    ).all(cursor, MIGRATION_BATCH) as SqlRow[];
+    const rows = cursor === undefined
+      ? db.prepare(`SELECT ${column} item_id FROM ${table} ORDER BY ${column} LIMIT ?`).all(MIGRATION_BATCH) as SqlRow[]
+      : db.prepare(
+        `SELECT ${column} item_id FROM ${table} WHERE ${column} > ? ORDER BY ${column} LIMIT ?`,
+      ).all(cursor, MIGRATION_BATCH) as SqlRow[];
     if (rows.length === 0) break;
     for (const row of rows) {
-      cursor = asString(row.item_id);
-      visit(cursor);
+      const itemId = asString(row.item_id);
+      requireBounded(UUID_PATTERN.test(itemId), 'SCHEMA_MIGRATION_FAILED', '持久化稿件权威标识无效。');
+      visit(itemId);
+      cursor = itemId;
     }
   }
+}
+
+function validateSchemaAuthorityIds(db: DatabaseSync): void {
+  forEachSchemaId(db, 'staged_import_snapshots', 'draft_id', () => undefined);
+  forEachSchemaId(db, 'manuscript_revisions', 'revision_id', () => undefined);
+  forEachSchemaId(db, 'branch_working_state', 'branch_id', () => undefined);
 }
 
 function repairAllDerivedOffsets(db: DatabaseSync): void {
@@ -1803,28 +1813,30 @@ function validateMilestoneSignoffTruth(db: DatabaseSync): void {
      )`,
   ).all() as SqlRow[], 'SCHEMA_MIGRATION_FAILED', '无法读取里程碑签核覆盖。').total);
   requireBounded(unsigned === 0, 'SCHEMA_MIGRATION_FAILED', '候选数据库含有无法证明签核事实的里程碑。');
-  let cursor = '';
+  const selectSignoffs = `SELECT sr.signoff_record_id, sr.milestone_id, sr.manuscript_id, sr.branch_id, sr.revision_id,
+                                 sr.workflow_instance_id, sr.workflow_evidence_digest, sr.actor, sr.signed_at,
+                                 sr.label, sr.stated_next_use,
+                                 mv.manuscript_id milestone_manuscript_id, mv.branch_id milestone_branch_id,
+                                 mv.revision_id milestone_revision_id, mv.label milestone_label, mv.purpose milestone_purpose,
+                                 mv.actor milestone_actor, mv.created_at milestone_created_at,
+                                 wi.manuscript_id workflow_manuscript_id,
+                                 mr.manuscript_id revision_manuscript_id, mr.branch_id revision_branch_id,
+                                 mb.manuscript_id branch_manuscript_id
+                          FROM milestone_signoff_records sr
+                          LEFT JOIN milestone_versions mv ON mv.milestone_id = sr.milestone_id
+                          LEFT JOIN workflow_instances wi ON wi.workflow_instance_id = sr.workflow_instance_id
+                          LEFT JOIN manuscript_revisions mr ON mr.revision_id = sr.revision_id
+                          LEFT JOIN manuscript_branches mb ON mb.branch_id = sr.branch_id`;
+  let cursor: string | undefined;
   while (true) {
-    const rows = db.prepare(
-      `SELECT sr.signoff_record_id, sr.milestone_id, sr.manuscript_id, sr.branch_id, sr.revision_id,
-              sr.workflow_instance_id, sr.workflow_evidence_digest, sr.actor, sr.signed_at,
-              sr.label, sr.stated_next_use,
-              mv.manuscript_id milestone_manuscript_id, mv.branch_id milestone_branch_id,
-              mv.revision_id milestone_revision_id, mv.label milestone_label, mv.purpose milestone_purpose,
-              mv.actor milestone_actor, mv.created_at milestone_created_at,
-              wi.manuscript_id workflow_manuscript_id,
-              mr.manuscript_id revision_manuscript_id, mr.branch_id revision_branch_id,
-              mb.manuscript_id branch_manuscript_id
-       FROM milestone_signoff_records sr
-       LEFT JOIN milestone_versions mv ON mv.milestone_id = sr.milestone_id
-       LEFT JOIN workflow_instances wi ON wi.workflow_instance_id = sr.workflow_instance_id
-       LEFT JOIN manuscript_revisions mr ON mr.revision_id = sr.revision_id
-       LEFT JOIN manuscript_branches mb ON mb.branch_id = sr.branch_id
-       WHERE sr.signoff_record_id > ? ORDER BY sr.signoff_record_id LIMIT ?`,
-    ).all(cursor, MIGRATION_BATCH) as SqlRow[];
+    const rows = cursor === undefined
+      ? db.prepare(`${selectSignoffs} ORDER BY sr.signoff_record_id LIMIT ?`).all(MIGRATION_BATCH) as SqlRow[]
+      : db.prepare(
+        `${selectSignoffs} WHERE sr.signoff_record_id > ? ORDER BY sr.signoff_record_id LIMIT ?`,
+      ).all(cursor, MIGRATION_BATCH) as SqlRow[];
     if (rows.length === 0) break;
     for (const row of rows) {
-      cursor = asString(row.signoff_record_id);
+      const signoffRecordId = asString(row.signoff_record_id);
       const milestoneId = asString(row.milestone_id);
       const manuscriptId = asString(row.manuscript_id);
       const branchId = asString(row.branch_id);
@@ -1836,7 +1848,8 @@ function validateMilestoneSignoffTruth(db: DatabaseSync): void {
       const label = asString(row.label);
       const statedNextUse = asString(row.stated_next_use);
       requireBounded(
-        UUID_PATTERN.test(cursor) && UUID_PATTERN.test(milestoneId) && UUID_PATTERN.test(workflowInstanceId) &&
+        UUID_PATTERN.test(signoffRecordId) && UUID_PATTERN.test(milestoneId) && UUID_PATTERN.test(manuscriptId) &&
+          UUID_PATTERN.test(branchId) && UUID_PATTERN.test(revisionId) && UUID_PATTERN.test(workflowInstanceId) &&
           DIGEST_PATTERN.test(evidenceDigest) && Number.isFinite(signedTime) && new Date(signedTime).toISOString() === signedAt &&
           asString(row.actor) === '本机编辑' && asString(row.milestone_actor) === '本机编辑' &&
           manuscriptId === asString(row.milestone_manuscript_id) && manuscriptId === asString(row.workflow_manuscript_id) &&
@@ -1849,6 +1862,7 @@ function validateMilestoneSignoffTruth(db: DatabaseSync): void {
         'SCHEMA_MIGRATION_FAILED',
         '里程碑签核记录无法证明精确的修订版、流程、参与者、时间、标签或后续用途。',
       );
+      cursor = signoffRecordId;
     }
   }
 }
@@ -2195,16 +2209,22 @@ function validateCommandHistoryGroup(db: DatabaseSync, groupId: string): void {
 }
 
 function validateAllCommandHistory(db: DatabaseSync): void {
-  let cursor = '';
+  let cursor: string | undefined;
   while (true) {
-    const rows = db.prepare(
-      `SELECT command_group_id FROM manuscript_command_groups
-       WHERE command_group_id > ? ORDER BY command_group_id LIMIT ?`,
-    ).all(cursor, MIGRATION_BATCH) as SqlRow[];
+    const rows = cursor === undefined
+      ? db.prepare(
+        'SELECT command_group_id FROM manuscript_command_groups ORDER BY command_group_id LIMIT ?',
+      ).all(MIGRATION_BATCH) as SqlRow[]
+      : db.prepare(
+        `SELECT command_group_id FROM manuscript_command_groups
+         WHERE command_group_id > ? ORDER BY command_group_id LIMIT ?`,
+      ).all(cursor, MIGRATION_BATCH) as SqlRow[];
     if (rows.length === 0) break;
     for (const row of rows) {
-      cursor = asString(row.command_group_id);
-      validateCommandHistoryGroup(db, cursor);
+      const groupId = asString(row.command_group_id);
+      requireBounded(UUID_PATTERN.test(groupId), 'HISTORY_CORRUPT', '历史命令组标识无效。');
+      validateCommandHistoryGroup(db, groupId);
+      cursor = groupId;
     }
   }
 }
@@ -2259,6 +2279,8 @@ function migrateCandidateSchemaToCurrent(db: DatabaseSync, sourceVersion: number
   const foreignKeys = one(db.prepare('PRAGMA foreign_keys').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取引用校验状态。');
   requireBounded(asNumber(foreignKeys.foreign_keys) === 1, 'SCHEMA_INVALID', '数据库引用校验未启用。');
   transact(db, () => {
+    validateSchemaAuthorityIds(db);
+    validateAllCommandHistory(db);
     if (sourceVersion === SIGNOFF_MIGRATION_SOURCE_VERSION && !hasSchemaObject(db, 'milestone_signoff_records')) {
       const milestones = asNumber(one(db.prepare('SELECT count(*) total FROM milestone_versions').all() as SqlRow[], 'SCHEMA_MIGRATION_FAILED', '无法读取候选里程碑。').total);
       requireBounded(milestones === 0, 'SCHEMA_MIGRATION_FAILED', '候选 v3 数据库含有无法证明签核事实的里程碑。');
@@ -2291,6 +2313,7 @@ function migrateOffsetIndexSchemaToCurrent(db: DatabaseSync): void {
   const foreignKeys = one(db.prepare('PRAGMA foreign_keys').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取引用校验状态。');
   requireBounded(asNumber(foreignKeys.foreign_keys) === 1, 'SCHEMA_INVALID', '数据库引用校验未启用。');
   transact(db, () => {
+    validateSchemaAuthorityIds(db);
     validateAllLegacyDerivedOffsets(db);
     validateLegacyHistoryRoots(db);
     validateAllCommandHistory(db);
@@ -2323,14 +2346,15 @@ export function initializeBoundedSchema(db: DatabaseSync): void {
   if (version === SCHEMA_VERSION) {
     requireTargetSchema(db);
     transact(db, () => {
-      terminalizeOrphanedReplacementPreviews(db);
-      reclaimOrphanedSearchSessions(db);
+      validateSchemaAuthorityIds(db);
       validateAllDerivedOffsets(db);
       validateLegacyHistoryRoots(db);
       validateAllCommandHistory(db);
       validateMilestoneSignoffTruth(db);
       const violations = db.prepare('PRAGMA foreign_key_check').all();
       requireBounded(violations.length === 0, 'SCHEMA_MIGRATION_FAILED', '数据库引用校验失败。');
+      terminalizeOrphanedReplacementPreviews(db);
+      reclaimOrphanedSearchSessions(db);
     });
     return;
   }
@@ -2353,6 +2377,7 @@ export function initializeBoundedSchema(db: DatabaseSync): void {
     db.exec('BEGIN IMMEDIATE');
     const disabledForeignKeys = one(db.prepare('PRAGMA foreign_keys').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取引用校验状态。');
     requireBounded(asNumber(disabledForeignKeys.foreign_keys) === 0, 'SCHEMA_INVALID', '无法暂时停用引用校验以迁移数据库。');
+    validateSchemaAuthorityIds(db);
     recreateRevisionTable(db);
     db.exec(`
       ALTER TABLE staged_import_snapshots ADD COLUMN character_count INTEGER NOT NULL DEFAULT 0 CHECK(character_count >= 0);
@@ -2499,17 +2524,11 @@ export function initializeBoundedSchema(db: DatabaseSync): void {
 
     forEachSchemaId(db, 'manuscript_revisions', 'revision_id', (revisionId) => rebuildRevisionOffsets(db, revisionId));
 
-    let branchCursor = '';
-    while (true) {
-      const branches = db.prepare('SELECT branch_id FROM branch_working_state WHERE branch_id > ? ORDER BY branch_id LIMIT ?').all(branchCursor, MIGRATION_BATCH) as SqlRow[];
-      if (branches.length === 0) break;
-      for (const branch of branches) {
-        branchCursor = asString(branch.branch_id);
-        const history = migrateLegacyJournal(db, branchCursor);
-        db.prepare('UPDATE branch_working_state SET history_sequence = ? WHERE branch_id = ?').run(history, branchCursor);
-        rebuildBranchDerived(db, branchCursor);
-      }
-    }
+    forEachSchemaId(db, 'branch_working_state', 'branch_id', (branchId) => {
+      const history = migrateLegacyJournal(db, branchId);
+      db.prepare('UPDATE branch_working_state SET history_sequence = ? WHERE branch_id = ?').run(history, branchId);
+      rebuildBranchDerived(db, branchId);
+    });
     db.exec('DROP TABLE IF EXISTS temp.migration_block_state');
     validateAllDerivedOffsets(db);
     validateLegacyHistoryRoots(db);
@@ -2615,31 +2634,48 @@ export class BoundedManuscriptStore {
     const binding = this.#binding(manuscriptId, branchId);
     let targetPosition = 1;
     let focusBlockId: string | null = null;
+    let focusGrapheme: number | null = null;
+    let focusCharacter: number | null = null;
     if (target.kind === 'cursor') {
       targetPosition = this.#decodeCursor(target.cursor, 'window', binding).position;
     } else if (target.kind === 'block' || target.kind === 'window-start') {
       requireBounded(BLOCK_PATTERN.test(target.blockId), 'WINDOW_INVALID', '稿件位置无效。');
       const row = one(this.#db.prepare('SELECT position FROM working_blocks WHERE branch_id = ? AND block_id = ?').all(branchId, target.blockId) as SqlRow[], 'WINDOW_NOT_FOUND', '稿件位置不存在。');
       targetPosition = asNumber(row.position);
-      if (target.kind === 'block') focusBlockId = target.blockId;
+      if (target.kind === 'block') {
+        focusBlockId = target.blockId;
+        focusGrapheme = 0;
+      }
     } else if (target.kind === 'character') {
-      requireBounded(Number.isSafeInteger(target.character) && target.character >= 0, 'WINDOW_INVALID', '全稿位置无效。');
-      const character = Math.min(target.character, Math.max(0, binding.totalCharacters - 1));
+      requireBounded(
+        Number.isSafeInteger(target.character) && target.character >= 0 && target.character < binding.totalCharacters,
+        'WINDOW_INVALID',
+        '全稿位置超出稿件范围。',
+      );
+      const character = target.character;
       const resolved = resolveWorkingCharacter(this.#db, branchId, character, binding.totalCharacters);
       const row = one(this.#db.prepare(
-        'SELECT block_id FROM working_blocks WHERE branch_id = ? AND position = ?',
+        'SELECT block_id, grapheme_length FROM working_blocks WHERE branch_id = ? AND position = ?',
       ).all(branchId, resolved.position) as SqlRow[], 'WINDOW_NOT_FOUND', '全稿位置不存在。');
       targetPosition = resolved.position;
       focusBlockId = asString(row.block_id);
+      focusGrapheme = character - resolved.startCharacter;
+      requireBounded(focusGrapheme >= 0 && focusGrapheme < asNumber(row.grapheme_length), 'WINDOW_INVALID', '全稿位置无法精确解析到内容块。');
+      focusCharacter = character;
     } else if (target.kind === 'proportion') {
       requireBounded(Number.isFinite(target.proportion) && target.proportion >= 0 && target.proportion <= 1, 'WINDOW_INVALID', '全稿比例无效。');
-      const character = Math.min(Math.max(0, binding.totalCharacters - 1), Math.floor(binding.totalCharacters * target.proportion));
-      const resolved = resolveWorkingCharacter(this.#db, branchId, character, binding.totalCharacters);
-      const row = one(this.#db.prepare(
-        'SELECT block_id FROM working_blocks WHERE branch_id = ? AND position = ?',
-      ).all(branchId, resolved.position) as SqlRow[], 'WINDOW_NOT_FOUND', '全稿位置不存在。');
-      targetPosition = resolved.position;
-      focusBlockId = asString(row.block_id);
+      if (binding.totalCharacters > 0) {
+        const character = Math.min(binding.totalCharacters - 1, Math.floor(binding.totalCharacters * target.proportion));
+        const resolved = resolveWorkingCharacter(this.#db, branchId, character, binding.totalCharacters);
+        const row = one(this.#db.prepare(
+          'SELECT block_id, grapheme_length FROM working_blocks WHERE branch_id = ? AND position = ?',
+        ).all(branchId, resolved.position) as SqlRow[], 'WINDOW_NOT_FOUND', '全稿位置不存在。');
+        targetPosition = resolved.position;
+        focusBlockId = asString(row.block_id);
+        focusGrapheme = character - resolved.startCharacter;
+        requireBounded(focusGrapheme >= 0 && focusGrapheme < asNumber(row.grapheme_length), 'WINDOW_INVALID', '全稿比例无法精确解析到内容块。');
+        focusCharacter = character;
+      }
     }
     const totalBlocks = lastWorkingPosition(this.#db, branchId);
     const startPosition = Math.min(Math.max(1, targetPosition - (focusBlockId ? Math.floor(MAX_WINDOW_BLOCKS / 2) : 0)), Math.max(1, totalBlocks - MAX_WINDOW_BLOCKS + 1));
@@ -2662,9 +2698,9 @@ export class BoundedManuscriptStore {
     const startCharacter = workingOffsetBefore(this.#db, branchId, asNumber(first.position));
     const endCharacter = workingOffsetPrefix(this.#db, branchId, asNumber(last.position));
     const resolvedPosition = focusBlockId === null ? asNumber(first.position) : targetPosition;
-    const resolvedCharacter = focusBlockId === null
+    const resolvedCharacter = focusCharacter ?? (focusBlockId === null
       ? startCharacter
-      : workingOffsetBefore(this.#db, branchId, resolvedPosition);
+      : workingOffsetBefore(this.#db, branchId, resolvedPosition));
     const structure = this.#db.prepare(
       'SELECT text FROM manuscript_outline WHERE branch_id = ? AND position <= ? ORDER BY position DESC LIMIT 1',
     ).get(branchId, resolvedPosition) as SqlRow | undefined;
@@ -2679,6 +2715,7 @@ export class BoundedManuscriptStore {
       journalSequence: binding.journalSequence,
       workingDigest: binding.workingDigest,
       focusBlockId,
+      focusGrapheme,
       previousCursor: startPosition > 1 ? this.#encodeCursor('window', cursorBinding, { position: Math.max(1, startPosition - WINDOW_STRIDE) }) : null,
       nextCursor: rows.length > MAX_WINDOW_BLOCKS ? this.#encodeCursor('window', cursorBinding, { position: startPosition + WINDOW_STRIDE }) : null,
       position: {

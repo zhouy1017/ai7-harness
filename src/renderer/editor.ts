@@ -76,6 +76,7 @@ interface BaselineBlock {
 }
 
 const segmenter = new Intl.Segmenter('zh-CN', { granularity: 'grapheme' });
+const CARET_NAVIGATION_KEYS = new Set(['arrowleft', 'arrowright', 'arrowup', 'arrowdown', 'home', 'end']);
 
 function graphemes(text: string): string[] {
   return Array.from(segmenter.segment(text), ({ segment }) => segment);
@@ -275,7 +276,8 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
   let operationLocked = false;
   let deferredNavigationContinuity: EditorContinuity | undefined;
 
-  const isEditable = (): boolean => !retryRequired && !interrupted && !operationLocked;
+  const isEditable = (): boolean =>
+    !retryRequired && !interrupted && !operationLocked && deferredNavigationContinuity === undefined;
 
   const changedBlocks = (document: ProseMirrorNode): string[] => {
     const changed: string[] = [];
@@ -333,6 +335,8 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
     view.setProps({ editable: isEditable });
     view.dom.setAttribute('aria-readonly', isEditable() ? 'false' : 'true');
     view.dom.dataset['operationLocked'] = operationLocked ? 'true' : 'false';
+    if (deferredNavigationContinuity) view.dom.setAttribute('tabindex', '0');
+    else view.dom.removeAttribute('tabindex');
   };
 
   const captureRenderedContinuity = (): EditorContinuity => {
@@ -359,6 +363,7 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
     state: EditorState,
     continuity: EditorContinuity | undefined,
     focusBlockId: string | null,
+    focusGrapheme: number | null,
     deferMissing: boolean,
   ): void => {
     let nextState = state;
@@ -379,11 +384,14 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
     } else {
       deferredNavigationContinuity = undefined;
     }
-    if (!selectionRestored && focusBlockId) {
-      const target = findBlockPosition(state.doc, focusBlockId);
-      if (target) nextState = state.apply(state.tr.setSelection(TextSelection.near(state.doc.resolve(target.position + 1))));
+    if (!selectionRestored && focusBlockId !== null) {
+      requireEditor(focusGrapheme !== null, '稿件焦点缺少精确字素位置。');
+      const target = positionAtPoint(state.doc, { blockId: focusBlockId, grapheme: focusGrapheme });
+      requireEditor(target !== undefined, '稿件焦点无法精确解析。');
+      nextState = state.apply(state.tr.setSelection(TextSelection.create(state.doc, target)));
     }
     view.updateState(nextState);
+    applyEditableState();
     requestAnimationFrame(() => {
       const scrollId = selectionRestored ? continuity?.scrollAnchor.blockId : focusBlockId;
       const target = scrollId ? view.dom.querySelector<HTMLElement>(`[data-block-id="${scrollId}"]`) : undefined;
@@ -393,7 +401,7 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
       } else if (target) {
         target.scrollIntoView({ block: 'center' });
       }
-      if (continuity?.focused || (!continuity && focusBlockId)) view.focus();
+      if (continuity?.focused || (!continuity && focusBlockId !== null)) view.focus();
     });
   };
 
@@ -471,7 +479,7 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
           windowProjection = ack.window;
           baselines = baselineMap(windowProjection);
           const visibleBlocks = windowProjection.blocks.map((block) => ({ ...block, text: localText.get(block.blockId) ?? block.text }));
-          restoreContinuity(makeState(visibleBlocks), continuity, null, false);
+          restoreContinuity(makeState(visibleBlocks), continuity, null, null, false);
           retryPrepared = undefined;
           retryRequired = false;
           applyEditableState();
@@ -526,7 +534,6 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
     state: makeState(),
     editable: isEditable,
     dispatchTransaction(transaction) {
-      if (transaction.docChanged || transaction.selectionSet) deferredNavigationContinuity = undefined;
       const nextState = view.state.apply(transaction);
       if (nextState === view.state) return;
       view.updateState(nextState);
@@ -571,7 +578,30 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
           options.onCommand(key === 'pageup' ? 'previous-window' : 'next-window');
           return true;
         }
+        if (deferredNavigationContinuity && !event.altKey && CARET_NAVIGATION_KEYS.has(key)) {
+          deferredNavigationContinuity = undefined;
+          applyEditableState();
+          announceState();
+          return false;
+        }
         return false;
+      },
+      mousedown(currentView, event) {
+        if (!deferredNavigationContinuity) return false;
+        const hit = currentView.posAtCoords({ left: event.clientX, top: event.clientY });
+        if (!hit) {
+          event.preventDefault();
+          return true;
+        }
+        deferredNavigationContinuity = undefined;
+        applyEditableState();
+        currentView.dispatch(
+          currentView.state.tr.setSelection(TextSelection.near(currentView.state.doc.resolve(hit.pos))).scrollIntoView(),
+        );
+        currentView.focus();
+        announceState();
+        event.preventDefault();
+        return true;
       },
       compositionstart() {
         composing = true;
@@ -599,14 +629,20 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
   return {
     focus: () => view.focus(),
     flush,
-    captureContinuity: captureRenderedContinuity,
+    captureContinuity: () => deferredNavigationContinuity ?? captureRenderedContinuity(),
     captureNavigationContinuity: () => deferredNavigationContinuity ?? captureRenderedContinuity(),
     loadWindow: (nextWindow, continuity) => {
       if (destroyed || interrupted || saving || retryRequired || changedBlocks(view.state.doc).length > 0 || composing) return false;
       windowProjection = nextWindow;
       baselines = baselineMap(nextWindow);
       retryPrepared = undefined;
-      restoreContinuity(makeState(), continuity, nextWindow.focusBlockId, false);
+      restoreContinuity(
+        makeState(),
+        continuity,
+        nextWindow.focusBlockId,
+        nextWindow.focusGrapheme,
+        continuity !== undefined,
+      );
       announceState();
       return true;
     },
@@ -615,7 +651,7 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
       windowProjection = nextWindow;
       baselines = baselineMap(nextWindow);
       retryPrepared = undefined;
-      restoreContinuity(makeState(), continuity, nextWindow.focusBlockId, true);
+      restoreContinuity(makeState(), continuity, nextWindow.focusBlockId, nextWindow.focusGrapheme, true);
       announceState();
       return true;
     },
@@ -631,6 +667,8 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
         toGrapheme <= fromGrapheme ||
         toGrapheme > text.length
       ) return false;
+      deferredNavigationContinuity = undefined;
+      applyEditableState();
       const from = found.position + 1 + text.slice(0, fromGrapheme).join('').length;
       const to = found.position + 1 + text.slice(0, toGrapheme).join('').length;
       view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, from, to)).scrollIntoView());

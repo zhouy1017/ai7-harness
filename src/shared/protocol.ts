@@ -185,6 +185,7 @@ export interface ManuscriptWindowProjection {
   journalSequence: number;
   workingDigest: string;
   focusBlockId: string | null;
+  focusGrapheme: number | null;
   previousCursor: string | null;
   nextCursor: string | null;
   position: {
