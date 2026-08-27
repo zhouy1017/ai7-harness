@@ -35,7 +35,8 @@ const BLOCK_PATTERN = /^blk_[0-9a-f]{24}$/;
 const LEGACY_BOUNDED_SCHEMA_VERSION = 2;
 const SIGNOFF_MIGRATION_SOURCE_VERSION = 3;
 const OFFSET_REPAIR_SOURCE_VERSION = 4;
-const SCHEMA_VERSION = 5;
+const SEARCH_BINDING_SOURCE_VERSION = 5;
+const SCHEMA_VERSION = 6;
 const MIGRATION_BATCH = 256;
 const SEARCH_BATCH = 128;
 const HISTORY_BATCH = 128;
@@ -436,6 +437,7 @@ const TARGET_SCHEMA_SQL = {
     manuscript_id TEXT NOT NULL REFERENCES manuscripts(manuscript_id),
     branch_id TEXT NOT NULL REFERENCES manuscript_branches(branch_id),
     revision_id TEXT NOT NULL REFERENCES manuscript_revisions(revision_id),
+    journal_sequence INTEGER NOT NULL CHECK(journal_sequence >= 0),
     working_digest TEXT NOT NULL CHECK(length(working_digest) = 64),
     query TEXT NOT NULL,
     state TEXT NOT NULL CHECK(state IN ('running', 'completed', 'cancelled', 'failed')),
@@ -465,6 +467,7 @@ const TARGET_SCHEMA_SQL = {
     manuscript_id TEXT NOT NULL REFERENCES manuscripts(manuscript_id),
     branch_id TEXT NOT NULL REFERENCES manuscript_branches(branch_id),
     revision_id TEXT NOT NULL REFERENCES manuscript_revisions(revision_id),
+    journal_sequence INTEGER NOT NULL CHECK(journal_sequence >= 0),
     working_digest TEXT NOT NULL CHECK(length(working_digest) = 64),
     query TEXT NOT NULL,
     replacement TEXT NOT NULL,
@@ -502,7 +505,42 @@ const TARGET_SCHEMA_SQL = {
   ) STRICT`,
 } as const;
 
+const SOURCE_V3_TO_V5_SCHEMA_SQL = {
+  ...TARGET_SCHEMA_SQL,
+  manuscript_search_sessions: `CREATE TABLE manuscript_search_sessions (
+    search_id TEXT PRIMARY KEY,
+    manuscript_id TEXT NOT NULL REFERENCES manuscripts(manuscript_id),
+    branch_id TEXT NOT NULL REFERENCES manuscript_branches(branch_id),
+    revision_id TEXT NOT NULL REFERENCES manuscript_revisions(revision_id),
+    working_digest TEXT NOT NULL CHECK(length(working_digest) = 64),
+    query TEXT NOT NULL,
+    state TEXT NOT NULL CHECK(state IN ('running', 'completed', 'cancelled', 'failed')),
+    scanned_position INTEGER NOT NULL DEFAULT 0 CHECK(scanned_position >= 0),
+    total_blocks INTEGER NOT NULL CHECK(total_blocks > 0),
+    total_matches INTEGER NOT NULL DEFAULT 0 CHECK(total_matches >= 0),
+    created_at TEXT NOT NULL,
+    completed_at TEXT
+  ) STRICT`,
+  manuscript_replacement_previews: `CREATE TABLE manuscript_replacement_previews (
+    preview_id TEXT PRIMARY KEY,
+    search_id TEXT NOT NULL REFERENCES manuscript_search_sessions(search_id),
+    manuscript_id TEXT NOT NULL REFERENCES manuscripts(manuscript_id),
+    branch_id TEXT NOT NULL REFERENCES manuscript_branches(branch_id),
+    revision_id TEXT NOT NULL REFERENCES manuscript_revisions(revision_id),
+    working_digest TEXT NOT NULL CHECK(length(working_digest) = 64),
+    query TEXT NOT NULL,
+    replacement TEXT NOT NULL,
+    state TEXT NOT NULL CHECK(state IN ('reviewing', 'frozen', 'committed', 'cancelled', 'failed')),
+    total_matches INTEGER NOT NULL CHECK(total_matches > 0),
+    included_matches INTEGER NOT NULL CHECK(included_matches >= 0),
+    validated_ordinal INTEGER NOT NULL DEFAULT 0 CHECK(validated_ordinal >= 0),
+    created_at TEXT NOT NULL,
+    committed_at TEXT
+  ) STRICT`,
+} as const;
+
 const FULL_SOURCE_V2_SCHEMA_SQL = { ...COMMON_SCHEMA_SQL, ...SOURCE_V2_SCHEMA_SQL } as const;
+const FULL_SOURCE_V3_TO_V5_SCHEMA_SQL = { ...COMMON_SCHEMA_SQL, ...SOURCE_V3_TO_V5_SCHEMA_SQL } as const;
 const FULL_TARGET_SCHEMA_SQL = { ...COMMON_SCHEMA_SQL, ...TARGET_SCHEMA_SQL } as const;
 
 const TARGET_VIRTUAL_TABLE_SQL = `CREATE VIRTUAL TABLE working_block_search USING fts5(
@@ -675,30 +713,90 @@ function asNumber(value: SQLOutputValue | undefined): number {
 
 function canonicalSchemaSql(sql: string): string {
   let result = '';
-  let stringLiteral = false;
+  let quoted: "'" | '"' | '`' | ']' | undefined;
+  let identifierValue = '';
   for (let index = 0; index < sql.length; index += 1) {
     const character = sql[index]!;
-    if (stringLiteral) {
-      result += character;
-      if (character === "'" && sql[index + 1] === "'") {
-        result += sql[index + 1]!;
+    if (quoted !== undefined) {
+      if (quoted === "'") {
+        result += character;
+        if (character === "'" && sql[index + 1] === "'") {
+          result += sql[index + 1]!;
+          index += 1;
+        } else if (character === "'") {
+          quoted = undefined;
+        }
+        continue;
+      }
+      const closing = quoted === ']' ? ']' : quoted;
+      if (character === closing && quoted !== ']' && sql[index + 1] === closing) {
+        identifierValue += closing;
         index += 1;
-      } else if (character === "'") {
-        stringLiteral = false;
+      } else if (character === closing) {
+        const normalized = identifierValue.toLocaleLowerCase('en-US');
+        result += /^[a-z_][a-z0-9_]*$/u.test(normalized) ? normalized : `⟦${normalized}⟧`;
+        identifierValue = '';
+        quoted = undefined;
+      } else {
+        identifierValue += character;
       }
       continue;
     }
     if (character === "'") {
-      stringLiteral = true;
+      quoted = "'";
       result += character;
-    } else if (character === '"' || character === '`' || character === '[' || character === ']') {
-      continue;
+    } else if (character === '"' || character === '`') {
+      quoted = character;
+      identifierValue = '';
+    } else if (character === '[') {
+      quoted = ']';
+      identifierValue = '';
     } else if (!/\s/.test(character) && character !== ';') {
       result += character.toLocaleLowerCase('en-US');
     }
   }
-  requireBounded(!stringLiteral, 'SCHEMA_MIGRATION_FAILED', '数据库结构 SQL 字符串无效。');
+  requireBounded(quoted === undefined && identifierValue.length === 0, 'SCHEMA_MIGRATION_FAILED', '数据库结构 SQL 引号无效。');
   return result.replace(/^createtableifnotexists/, 'createtable');
+}
+
+function tableColumnSignature(row: SqlRow): string {
+  requireBounded(
+    typeof row.cid === 'number' && Number.isSafeInteger(row.cid) && typeof row.name === 'string' &&
+      typeof row.type === 'string' && typeof row.notnull === 'number' && Number.isSafeInteger(row.notnull) &&
+      (row.dflt_value === null || typeof row.dflt_value === 'string') &&
+      typeof row.pk === 'number' && Number.isSafeInteger(row.pk) &&
+      typeof row.hidden === 'number' && Number.isSafeInteger(row.hidden),
+    'SCHEMA_MIGRATION_FAILED',
+    '数据库列结构无效。',
+  );
+  return JSON.stringify([
+    row.cid,
+    row.name,
+    row.type.toLocaleUpperCase('en-US'),
+    row.notnull,
+    row.dflt_value,
+    row.pk,
+    row.hidden,
+  ]);
+}
+
+const expectedColumnSignatures = new Map<string, ReadonlyArray<string>>();
+
+function expectedTableColumnSignatures(name: string, expectedSql: string): ReadonlyArray<string> {
+  const key = `${name}\u0000${expectedSql}`;
+  const cached = expectedColumnSignatures.get(key);
+  if (cached) return cached;
+  const expected = new DatabaseSync(':memory:');
+  try {
+    expected.exec(expectedSql);
+    const signatures = (expected.prepare(`PRAGMA table_xinfo(${quotedIdentifier(name)})`).all() as SqlRow[])
+      .map(tableColumnSignature);
+    requireBounded(signatures.length > 0, 'SCHEMA_MIGRATION_FAILED', `目标数据库表 ${name} 缺少列定义。`);
+    expectedColumnSignatures.set(key, signatures);
+    return signatures;
+  } finally {
+    expected.close();
+  }
 }
 
 function quotedIdentifier(identifier: string): string {
@@ -738,6 +836,15 @@ function requireExactTableSchema(db: DatabaseSync, name: string, expectedSql: st
     table.type === 'table' && asNumber(table.strict) === 1 && asNumber(table.wr) === 0,
     'SCHEMA_MIGRATION_FAILED',
     `数据库表 ${name} 必须是有行标识的 STRICT 表。`,
+  );
+  const actualColumns = (db.prepare(`PRAGMA table_xinfo(${quotedIdentifier(name)})`).all() as SqlRow[])
+    .map(tableColumnSignature);
+  const expectedColumns = expectedTableColumnSignatures(name, expectedSql);
+  requireBounded(
+    actualColumns.length === expectedColumns.length &&
+      actualColumns.every((signature, index) => signature === expectedColumns[index]),
+    'SCHEMA_MIGRATION_FAILED',
+    `数据库表 ${name} 的列名、类型、空值、默认值、主键顺序或隐藏状态不兼容。`,
   );
   const actualForeignKeys = (db.prepare(`PRAGMA foreign_key_list(${quotedIdentifier(name)})`).all() as SqlRow[])
     .map(foreignKeySignature)
@@ -848,7 +955,7 @@ function requireSourceSchema(db: DatabaseSync, version: number): void {
   }
   const includeSignoff = version !== SIGNOFF_MIGRATION_SOURCE_VERSION || hasSchemaObject(db, 'milestone_signoff_records');
   const expectedTables = Object.fromEntries(
-    Object.entries(FULL_TARGET_SCHEMA_SQL).filter(([name]) => includeSignoff || name !== 'milestone_signoff_records'),
+    Object.entries(FULL_SOURCE_V3_TO_V5_SCHEMA_SQL).filter(([name]) => includeSignoff || name !== 'milestone_signoff_records'),
   );
   requireExactSchema(db, expectedTables, TARGET_INDEX_SQL, true);
 }
@@ -950,6 +1057,118 @@ function recreateRevisionTable(db: DatabaseSync): void {
   `);
 }
 
+function stagedBlockLength(text: string): number {
+  requireBounded(
+    text.isWellFormed() && text.length <= MAX_BLOCK_CODE_UNITS,
+    'SCHEMA_MIGRATION_FAILED',
+    '暂存稿件包含无法按内容块有界迁移的文字。',
+  );
+  const length = graphemes(text).length;
+  requireBounded(length <= MAX_BLOCK_GRAPHEMES, 'SCHEMA_MIGRATION_FAILED', '暂存稿件内容块超过字素上限。');
+  return length;
+}
+
+function rebuildStagedDraftDerived(db: DatabaseSync, draftId: string): void {
+  const updateBlock = db.prepare(
+    `UPDATE staged_import_blocks SET start_offset = ?, grapheme_length = ?
+     WHERE draft_id = ? AND position = ?`,
+  );
+  let position = 0;
+  let expectedPosition = 1;
+  let offset = 0;
+  while (true) {
+    const rows = db.prepare(
+      `SELECT position, text FROM staged_import_blocks
+       WHERE draft_id = ? AND position > ? ORDER BY position LIMIT ?`,
+    ).all(draftId, position, MIGRATION_BATCH) as SqlRow[];
+    if (rows.length === 0) break;
+    for (const row of rows) {
+      position = asNumber(row.position);
+      requireBounded(position === expectedPosition, 'SCHEMA_MIGRATION_FAILED', '暂存稿件内容块顺序不连续。');
+      const length = stagedBlockLength(asString(row.text));
+      requireBounded(Number.isSafeInteger(offset + length), 'SCHEMA_MIGRATION_FAILED', '暂存稿件字符总数无效。');
+      requireBounded(
+        updateBlock.run(offset, length, draftId, position).changes === 1,
+        'SCHEMA_MIGRATION_FAILED',
+        '暂存稿件派生偏移无法重建。',
+      );
+      offset += length;
+      expectedPosition += 1;
+    }
+  }
+  const snapshot = one(
+    db.prepare(
+      `SELECT s.block_count, d.state FROM staged_import_snapshots s
+       JOIN import_drafts d ON d.draft_id = s.draft_id WHERE s.draft_id = ?`,
+    ).all(draftId) as SqlRow[],
+    'SCHEMA_MIGRATION_FAILED',
+    '暂存稿件快照或草稿状态缺失。',
+  );
+  requireBounded(
+    asString(snapshot.state) === 'staged' || asString(snapshot.state) === 'reviewed',
+    'SCHEMA_MIGRATION_FAILED',
+    '已提交导入草稿仍保留不可达暂存内容。',
+  );
+  requireBounded(expectedPosition - 1 === asNumber(snapshot.block_count), 'SCHEMA_MIGRATION_FAILED', '暂存稿件内容块计数不一致。');
+  requireBounded(
+    db.prepare('UPDATE staged_import_snapshots SET character_count = ? WHERE draft_id = ?').run(offset, draftId).changes === 1,
+    'SCHEMA_MIGRATION_FAILED',
+    '暂存稿件字符总数无法重建。',
+  );
+}
+
+function validateStagedDraftDerived(db: DatabaseSync, draftId: string): void {
+  const snapshot = one(
+    db.prepare(
+      `SELECT s.block_count, s.character_count, d.state FROM staged_import_snapshots s
+       JOIN import_drafts d ON d.draft_id = s.draft_id WHERE s.draft_id = ?`,
+    ).all(draftId) as SqlRow[],
+    'SCHEMA_MIGRATION_FAILED',
+    '暂存稿件快照或草稿状态缺失。',
+  );
+  const state = asString(snapshot.state);
+  requireBounded(state === 'staged' || state === 'reviewed', 'SCHEMA_MIGRATION_FAILED', '暂存稿件状态与持久化内容不兼容。');
+  let position = 0;
+  let expectedPosition = 1;
+  let offset = 0;
+  while (true) {
+    const rows = db.prepare(
+      `SELECT position, text, start_offset, grapheme_length FROM staged_import_blocks
+       WHERE draft_id = ? AND position > ? ORDER BY position LIMIT ?`,
+    ).all(draftId, position, MIGRATION_BATCH) as SqlRow[];
+    if (rows.length === 0) break;
+    for (const row of rows) {
+      position = asNumber(row.position);
+      const length = stagedBlockLength(asString(row.text));
+      requireBounded(
+        position === expectedPosition && asNumber(row.start_offset) === offset && asNumber(row.grapheme_length) === length,
+        'SCHEMA_MIGRATION_FAILED',
+        '暂存稿件的内容块顺序、偏移或字素长度校验失败。',
+      );
+      offset += length;
+      expectedPosition += 1;
+    }
+  }
+  requireBounded(
+    expectedPosition - 1 === asNumber(snapshot.block_count) && offset === asNumber(snapshot.character_count),
+    'SCHEMA_MIGRATION_FAILED',
+    '暂存稿件快照的内容块或字符总数校验失败。',
+  );
+}
+
+function validateStagedDraftInventory(db: DatabaseSync): void {
+  const missingSnapshots = asNumber(one(
+    db.prepare(
+      `SELECT count(*) total FROM import_drafts d
+       WHERE d.state IN ('staged', 'reviewed')
+         AND NOT EXISTS (SELECT 1 FROM staged_import_snapshots s WHERE s.draft_id = d.draft_id)`,
+    ).all() as SqlRow[],
+    'SCHEMA_MIGRATION_FAILED',
+    '无法校验暂存稿件快照清单。',
+  ).total);
+  requireBounded(missingSnapshots === 0, 'SCHEMA_MIGRATION_FAILED', '暂存或已复核草稿缺少权威快照。');
+}
+
 function rebuildRevisionOffsets(db: DatabaseSync, revisionId: string): number {
   const updateVersion = db.prepare(
     `UPDATE manuscript_block_versions SET start_offset = ?, grapheme_length = ?
@@ -1029,7 +1248,12 @@ function validateBranchOffsets(db: DatabaseSync, branchId: string): void {
   requireBounded(blocks > 0 && asNumber(state.total_graphemes) === offset, 'SCHEMA_MIGRATION_FAILED', '工作稿总偏移校验失败。');
 }
 
-function forEachSchemaId(db: DatabaseSync, table: 'manuscript_revisions' | 'branch_working_state', column: 'revision_id' | 'branch_id', visit: (id: string) => void): void {
+function forEachSchemaId(
+  db: DatabaseSync,
+  table: 'staged_import_snapshots' | 'manuscript_revisions' | 'branch_working_state',
+  column: 'draft_id' | 'revision_id' | 'branch_id',
+  visit: (id: string) => void,
+): void {
   let cursor = '';
   while (true) {
     const rows = db.prepare(
@@ -1044,11 +1268,15 @@ function forEachSchemaId(db: DatabaseSync, table: 'manuscript_revisions' | 'bran
 }
 
 function repairAllDerivedOffsets(db: DatabaseSync): void {
+  validateStagedDraftInventory(db);
+  forEachSchemaId(db, 'staged_import_snapshots', 'draft_id', (draftId) => rebuildStagedDraftDerived(db, draftId));
   forEachSchemaId(db, 'manuscript_revisions', 'revision_id', (revisionId) => rebuildRevisionOffsets(db, revisionId));
   forEachSchemaId(db, 'branch_working_state', 'branch_id', (branchId) => rebuildBranchDerived(db, branchId));
 }
 
 function validateAllDerivedOffsets(db: DatabaseSync): void {
+  validateStagedDraftInventory(db);
+  forEachSchemaId(db, 'staged_import_snapshots', 'draft_id', (draftId) => validateStagedDraftDerived(db, draftId));
   forEachSchemaId(db, 'manuscript_revisions', 'revision_id', (revisionId) => validateRevisionOffsets(db, revisionId));
   forEachSchemaId(db, 'branch_working_state', 'branch_id', (branchId) => validateBranchOffsets(db, branchId));
 }
@@ -1129,6 +1357,13 @@ function prunePersistedReplacementRecords(db: DatabaseSync, reserve: number): vo
     'REPLACEMENT_RETENTION_FULL',
     '活动替换复核记录超过安全保留上限。',
   );
+}
+
+function terminalizeOrphanedReplacementPreviews(db: DatabaseSync): void {
+  db.prepare(
+    "UPDATE manuscript_replacement_previews SET state = 'cancelled' WHERE state IN ('reviewing', 'frozen')",
+  ).run();
+  prunePersistedReplacementRecords(db, 0);
 }
 
 function prunePersistedSearchSessions(db: DatabaseSync): void {
@@ -1280,13 +1515,29 @@ function createMilestoneSignoffTable(db: DatabaseSync): void {
   `);
 }
 
+function recreateTransientSearchBindingTables(db: DatabaseSync): void {
+  db.exec(`
+    DELETE FROM manuscript_replacement_previews;
+    DELETE FROM manuscript_search_sessions;
+    DROP TABLE manuscript_replacement_matches;
+    DROP TABLE manuscript_replacement_previews;
+    DROP TABLE manuscript_search_results;
+    DROP TABLE manuscript_search_sessions;
+    ${TARGET_SCHEMA_SQL.manuscript_search_sessions};
+    ${TARGET_SCHEMA_SQL.manuscript_search_results};
+    ${TARGET_SCHEMA_SQL.manuscript_replacement_previews};
+    ${TARGET_SCHEMA_SQL.manuscript_replacement_matches};
+    ${TARGET_INDEX_SQL.replacement_matches_block};
+  `);
+}
+
 function migrateCandidateSchemaToCurrent(db: DatabaseSync, sourceVersion: number): void {
   const foreignKeys = one(db.prepare('PRAGMA foreign_keys').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取引用校验状态。');
   requireBounded(asNumber(foreignKeys.foreign_keys) === 1, 'SCHEMA_INVALID', '数据库引用校验未启用。');
   transact(db, () => {
     if (sourceVersion === SIGNOFF_MIGRATION_SOURCE_VERSION) createMilestoneSignoffTable(db);
+    recreateTransientSearchBindingTables(db);
     requireTargetSchema(db);
-    prunePersistedReplacementRecords(db, 0);
     reclaimOrphanedSearchSessions(db);
     repairAllDerivedOffsets(db);
     validateAllDerivedOffsets(db);
@@ -1305,14 +1556,14 @@ export function initializeBoundedSchema(db: DatabaseSync): void {
   const version = asNumber(one(db.prepare('PRAGMA user_version').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取数据库版本。').user_version);
   requireBounded(
     version === LEGACY_BOUNDED_SCHEMA_VERSION || version === SIGNOFF_MIGRATION_SOURCE_VERSION ||
-      version === OFFSET_REPAIR_SOURCE_VERSION || version === SCHEMA_VERSION,
+      version === OFFSET_REPAIR_SOURCE_VERSION || version === SEARCH_BINDING_SOURCE_VERSION || version === SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
   if (version === SCHEMA_VERSION) {
     requireTargetSchema(db);
     transact(db, () => {
-      prunePersistedReplacementRecords(db, 0);
+      terminalizeOrphanedReplacementPreviews(db);
       reclaimOrphanedSearchSessions(db);
       validateAllDerivedOffsets(db);
       validateMilestoneSignoffTruth(db);
@@ -1322,7 +1573,10 @@ export function initializeBoundedSchema(db: DatabaseSync): void {
     return;
   }
   requireSourceSchema(db, version);
-  if (version === SIGNOFF_MIGRATION_SOURCE_VERSION || version === OFFSET_REPAIR_SOURCE_VERSION) {
+  if (
+    version === SIGNOFF_MIGRATION_SOURCE_VERSION || version === OFFSET_REPAIR_SOURCE_VERSION ||
+    version === SEARCH_BINDING_SOURCE_VERSION
+  ) {
     migrateCandidateSchemaToCurrent(db, version);
     return;
   }
@@ -1413,6 +1667,7 @@ export function initializeBoundedSchema(db: DatabaseSync): void {
         manuscript_id TEXT NOT NULL REFERENCES manuscripts(manuscript_id),
         branch_id TEXT NOT NULL REFERENCES manuscript_branches(branch_id),
         revision_id TEXT NOT NULL REFERENCES manuscript_revisions(revision_id),
+        journal_sequence INTEGER NOT NULL CHECK(journal_sequence >= 0),
         working_digest TEXT NOT NULL CHECK(length(working_digest) = 64),
         query TEXT NOT NULL,
         state TEXT NOT NULL CHECK(state IN ('running', 'completed', 'cancelled', 'failed')),
@@ -1443,6 +1698,7 @@ export function initializeBoundedSchema(db: DatabaseSync): void {
         manuscript_id TEXT NOT NULL REFERENCES manuscripts(manuscript_id),
         branch_id TEXT NOT NULL REFERENCES manuscript_branches(branch_id),
         revision_id TEXT NOT NULL REFERENCES manuscript_revisions(revision_id),
+        journal_sequence INTEGER NOT NULL CHECK(journal_sequence >= 0),
         working_digest TEXT NOT NULL CHECK(length(working_digest) = 64),
         query TEXT NOT NULL,
         replacement TEXT NOT NULL,
@@ -1469,8 +1725,10 @@ export function initializeBoundedSchema(db: DatabaseSync): void {
     `);
     createMilestoneSignoffTable(db);
     requireTargetSchema(db);
-    prunePersistedReplacementRecords(db, 0);
     reclaimOrphanedSearchSessions(db);
+
+    validateStagedDraftInventory(db);
+    forEachSchemaId(db, 'staged_import_snapshots', 'draft_id', (draftId) => rebuildStagedDraftDerived(db, draftId));
 
     forEachSchemaId(db, 'manuscript_revisions', 'revision_id', (revisionId) => rebuildRevisionOffsets(db, revisionId));
 
@@ -1534,7 +1792,7 @@ export class BoundedManuscriptStore {
   constructor(db: DatabaseSync) {
     this.#db = db;
     transact(this.#db, () => {
-      prunePersistedReplacementRecords(this.#db, 0);
+      terminalizeOrphanedReplacementPreviews(this.#db);
       reclaimOrphanedSearchSessions(this.#db);
     });
   }
@@ -1812,11 +2070,14 @@ export class BoundedManuscriptStore {
     const searchId = randomUUID();
     this.#db.prepare(
       `INSERT INTO manuscript_search_sessions(
-         search_id, manuscript_id, branch_id, revision_id, working_digest, query, state,
+         search_id, manuscript_id, branch_id, revision_id, journal_sequence, working_digest, query, state,
          scanned_position, total_blocks, total_matches, created_at
-       ) VALUES (?, ?, ?, ?, ?, ?, 'running', 0, ?, 0, ?)`,
-    ).run(searchId, manuscriptId, branchId, binding.revisionId, binding.workingDigest, query, totalBlocks, new Date().toISOString());
-    return { searchId, manuscriptId, branchId, revisionId: binding.revisionId, workingDigest: binding.workingDigest, query, scopeLabel: '全稿', totalMatches: 0, scannedPosition: 0, totalBlocks };
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, 'running', 0, ?, 0, ?)`,
+    ).run(searchId, manuscriptId, branchId, binding.revisionId, binding.journalSequence, binding.workingDigest, query, totalBlocks, new Date().toISOString());
+    return {
+      searchId, manuscriptId, branchId, revisionId: binding.revisionId, journalSequence: binding.journalSequence,
+      workingDigest: binding.workingDigest, query, scopeLabel: '全稿', totalMatches: 0, scannedPosition: 0, totalBlocks,
+    };
   }
 
   advanceSearch(searchId: string): { done: boolean; summary: SearchSummaryProjection; scannedPosition: number; totalBlocks: number } {
@@ -1827,7 +2088,11 @@ export class BoundedManuscriptStore {
     const summary = this.#searchSummary(session);
     if (state === 'completed') return { done: true, summary, scannedPosition: asNumber(session.total_blocks), totalBlocks: asNumber(session.total_blocks) };
     const binding = this.#binding(asString(session.manuscript_id), asString(session.branch_id));
-    if (binding.workingDigest !== asString(session.working_digest)) {
+    if (
+      binding.revisionId !== asString(session.revision_id) ||
+      binding.journalSequence !== asNumber(session.journal_sequence) ||
+      binding.workingDigest !== asString(session.working_digest)
+    ) {
       this.#db.prepare("UPDATE manuscript_search_sessions SET state = 'failed', completed_at = ? WHERE search_id = ?").run(new Date().toISOString(), searchId);
       this.#pruneTransientSearches();
       throw new BoundedStoreError('SEARCH_STALE', '稿件已变化，请刷新搜索。');
@@ -1901,6 +2166,17 @@ export class BoundedManuscriptStore {
   getSearchResults(searchId: string, cursor: string | null): SearchResultsProjection {
     const session = one(this.#db.prepare('SELECT * FROM manuscript_search_sessions WHERE search_id = ?').all(searchId) as SqlRow[], 'SEARCH_NOT_FOUND', '搜索不存在。');
     requireBounded(asString(session.state) === 'completed', 'SEARCH_NOT_READY', '搜索仍在进行。');
+    const binding = this.#binding(asString(session.manuscript_id), asString(session.branch_id));
+    if (
+      binding.revisionId !== asString(session.revision_id) ||
+      binding.journalSequence !== asNumber(session.journal_sequence) ||
+      binding.workingDigest !== asString(session.working_digest)
+    ) {
+      this.#db.prepare("UPDATE manuscript_search_sessions SET state = 'failed', completed_at = ? WHERE search_id = ? AND state = 'completed'")
+        .run(new Date().toISOString(), searchId);
+      this.#pruneTransientSearches();
+      throw new BoundedStoreError('SEARCH_STALE', '稿件已变化，请刷新搜索。');
+    }
     const offset = cursor === null ? 0 : this.#decodeSimpleCursor(cursor, `search:${searchId}`);
     const rows = this.#db.prepare(
       `SELECT ordinal, match_id, block_id, from_grapheme, to_grapheme, global_character,
@@ -1930,7 +2206,13 @@ export class BoundedManuscriptStore {
     const search = one(this.#db.prepare('SELECT * FROM manuscript_search_sessions WHERE search_id = ?').all(searchId) as SqlRow[], 'SEARCH_NOT_FOUND', '搜索不存在。');
     requireBounded(asString(search.state) === 'completed' && asNumber(search.total_matches) > 0, 'REPLACEMENT_INVALID', '没有可供替换的精确匹配。');
     const binding = this.#binding(asString(search.manuscript_id), asString(search.branch_id));
-    requireBounded(binding.workingDigest === asString(search.working_digest), 'SEARCH_STALE', '稿件已变化，请刷新搜索。');
+    requireBounded(
+      binding.revisionId === asString(search.revision_id) &&
+        binding.journalSequence === asNumber(search.journal_sequence) &&
+        binding.workingDigest === asString(search.working_digest),
+      'SEARCH_STALE',
+      '稿件已变化，请刷新搜索。',
+    );
     const totalMatches = asNumber(search.total_matches);
     requireBounded(excludedMatchIds.length < totalMatches, 'REPLACEMENT_INVALID', '至少保留一项替换。');
     const previewId = randomUUID();
@@ -1940,10 +2222,10 @@ export class BoundedManuscriptStore {
       requireBounded(retained < MAX_RETAINED_REPLACEMENT_PREVIEWS, 'SERVICE_BUSY', '替换复核记录已达到安全上限；请先完成或取消现有替换。');
       this.#db.prepare(
         `INSERT INTO manuscript_replacement_previews(
-           preview_id, search_id, manuscript_id, branch_id, revision_id, working_digest,
+           preview_id, search_id, manuscript_id, branch_id, revision_id, journal_sequence, working_digest,
            query, replacement, state, total_matches, included_matches, validated_ordinal, created_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'reviewing', ?, ?, 0, ?)`,
-      ).run(previewId, searchId, binding.manuscriptId, binding.branchId, binding.revisionId, binding.workingDigest,
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'reviewing', ?, ?, 0, ?)`,
+      ).run(previewId, searchId, binding.manuscriptId, binding.branchId, binding.revisionId, binding.journalSequence, binding.workingDigest,
         asString(search.query), replacement, totalMatches, totalMatches - excludedMatchIds.length, new Date().toISOString());
       const insertExcluded = this.#db.prepare(
         `INSERT INTO manuscript_replacement_matches(
@@ -1970,8 +2252,16 @@ export class BoundedManuscriptStore {
   freezeReplacement(previewId: string, excludedMatchIds: ReadonlyArray<string>): ReplacementPreviewProjection {
     requireBounded(UUID_PATTERN.test(previewId) && excludedMatchIds.length <= MAX_REPLACEMENT_EXCLUSIONS && new Set(excludedMatchIds).size === excludedMatchIds.length && excludedMatchIds.every((id) => /^hit_[0-9a-f]{24}$/.test(id)), 'REPLACEMENT_INVALID', '替换排除项无效。');
     transact(this.#db, () => {
-      const preview = one(this.#db.prepare('SELECT state, total_matches, included_matches, validated_ordinal FROM manuscript_replacement_previews WHERE preview_id = ?').all(previewId) as SqlRow[], 'REPLACEMENT_NOT_FOUND', '替换预览不存在。');
+      const preview = one(this.#db.prepare('SELECT * FROM manuscript_replacement_previews WHERE preview_id = ?').all(previewId) as SqlRow[], 'REPLACEMENT_NOT_FOUND', '替换预览不存在。');
       requireBounded(asString(preview.state) === 'reviewing', 'REPLACEMENT_STATE_CHANGED', '替换预览状态已变化。');
+      const binding = this.#binding(asString(preview.manuscript_id), asString(preview.branch_id));
+      requireBounded(
+        binding.revisionId === asString(preview.revision_id) &&
+          binding.journalSequence === asNumber(preview.journal_sequence) &&
+          binding.workingDigest === asString(preview.working_digest),
+        'REPLACEMENT_STALE',
+        '稿件已变化，替换未冻结，请刷新预览。',
+      );
       const total = asNumber(preview.total_matches);
       requireBounded(asNumber(preview.validated_ordinal) === total, 'REPLACEMENT_NOT_READY', '替换预览仍在有界准备中。');
       const copied = asNumber(one(this.#db.prepare('SELECT count(*) total FROM manuscript_replacement_matches WHERE preview_id = ?').all(previewId) as SqlRow[], 'REPLACEMENT_NOT_FOUND', '替换匹配缺失。').total);
@@ -2007,7 +2297,13 @@ export class BoundedManuscriptStore {
     const state = asString(preview.state);
     requireBounded(state === 'reviewing' || state === 'frozen', 'REPLACEMENT_STATE_CHANGED', '替换预览状态已变化。');
     const binding = this.#binding(asString(preview.manuscript_id), asString(preview.branch_id));
-    requireBounded(binding.workingDigest === asString(preview.working_digest), 'REPLACEMENT_STALE', '稿件已变化，替换未提交，请刷新预览。');
+    requireBounded(
+      binding.revisionId === asString(preview.revision_id) &&
+        binding.journalSequence === asNumber(preview.journal_sequence) &&
+        binding.workingDigest === asString(preview.working_digest),
+      'REPLACEMENT_STALE',
+      '稿件已变化，替换未提交，请刷新预览。',
+    );
     if (state === 'reviewing') {
       const total = asNumber(preview.total_matches);
       const after = asNumber(preview.validated_ordinal);
@@ -2086,7 +2382,13 @@ export class BoundedManuscriptStore {
       ).all(previewId, asNumber(preview.validated_ordinal)) as SqlRow[], 'REPLACEMENT_NOT_READY', '替换匹配缺失。').total);
       requireBounded(unvalidated === 0, 'REPLACEMENT_NOT_READY', '替换尚未完成全部精确范围复核。');
       const binding = this.#binding(asString(preview.manuscript_id), asString(preview.branch_id));
-      requireBounded(binding.workingDigest === asString(preview.working_digest), 'REPLACEMENT_STALE', '稿件已变化，替换未提交，请刷新预览。');
+      requireBounded(
+        binding.revisionId === asString(preview.revision_id) &&
+          binding.journalSequence === asNumber(preview.journal_sequence) &&
+          binding.workingDigest === asString(preview.working_digest),
+        'REPLACEMENT_STALE',
+        '稿件已变化，替换未提交，请刷新预览。',
+      );
       const groupId = randomUUID();
       const ordinal = binding.historySequence + 1;
       const now = new Date().toISOString();
@@ -2171,10 +2473,20 @@ export class BoundedManuscriptStore {
     return result;
   }
 
-  cancelReplacement(previewId: string): void {
-    transact(this.#db, () => {
-      this.#db.prepare("UPDATE manuscript_replacement_previews SET state = 'cancelled' WHERE preview_id = ? AND state IN ('reviewing', 'frozen')").run(previewId);
+  cancelReplacement(previewId: string): boolean {
+    requireBounded(UUID_PATTERN.test(previewId), 'REPLACEMENT_INVALID', '替换预览标识无效。');
+    return transact(this.#db, () => {
+      const row = this.#db.prepare('SELECT state FROM manuscript_replacement_previews WHERE preview_id = ?').get(previewId) as SqlRow | undefined;
+      if (row === undefined) return false;
+      const state = asString(row.state);
+      let cancelled = state === 'cancelled';
+      if (state === 'reviewing' || state === 'frozen') {
+        cancelled = this.#db.prepare(
+          "UPDATE manuscript_replacement_previews SET state = 'cancelled' WHERE preview_id = ? AND state = ?",
+        ).run(previewId, state).changes === 1;
+      }
       this.#pruneReplacementRecords(0);
+      return cancelled;
     });
   }
 
@@ -2353,7 +2665,8 @@ export class BoundedManuscriptStore {
   #searchSummary(row: SqlRow): SearchSummaryProjection {
     return {
       searchId: asString(row.search_id), manuscriptId: asString(row.manuscript_id), branchId: asString(row.branch_id),
-      revisionId: asString(row.revision_id), workingDigest: asString(row.working_digest), query: asString(row.query),
+      revisionId: asString(row.revision_id), journalSequence: asNumber(row.journal_sequence),
+      workingDigest: asString(row.working_digest), query: asString(row.query),
       scopeLabel: '全稿', totalMatches: asNumber(row.total_matches),
     };
   }
@@ -2384,7 +2697,8 @@ export class BoundedManuscriptStore {
     requireBounded(excludedMatchIds.length <= MAX_REPLACEMENT_EXCLUSIONS, 'REPLACEMENT_INVALID', '替换排除清单超出安全范围。');
     return {
       previewId, searchId: asString(row.search_id), manuscriptId: asString(row.manuscript_id), branchId: asString(row.branch_id),
-      revisionId: asString(row.revision_id), workingDigest: asString(row.working_digest), query: asString(row.query),
+      revisionId: asString(row.revision_id), journalSequence: asNumber(row.journal_sequence),
+      workingDigest: asString(row.working_digest), query: asString(row.query),
       replacement: asString(row.replacement), scopeLabel: '全稿', matchingRule: REPLACEMENT_MATCHING_RULE,
       inclusionRule: REPLACEMENT_INCLUSION_RULE, revisionLabel: asString(revision.revision_label),
       totalMatches: asNumber(row.total_matches), includedMatches: asNumber(row.included_matches),

@@ -628,11 +628,7 @@ function renderEditorWindow(initialWindow: ManuscriptWindowProjection, bookTitle
   replacementInput.id = 'manuscript-replacement';
   replacementInput.maxLength = 2048;
   const searchButton = button('查找全稿', 'secondary', () => void runSearch());
-  const cancelJob = button('取消当前操作', 'quiet', async () => {
-    if (!activeJob) return;
-    await window.ai7.cancelServiceJob({ jobId: activeJob.jobId });
-    setStatus('已请求取消当前业务操作。', 'success');
-  });
+  const cancelJob = button('取消当前操作', 'quiet', () => void cancelActiveServiceJob());
   cancelJob.hidden = true;
   const prepareReplacementButton = button('预览替换', 'secondary', () => void prepareReplacement());
   prepareReplacementButton.disabled = true;
@@ -730,11 +726,33 @@ function renderEditorWindow(initialWindow: ManuscriptWindowProjection, bookTitle
   let searchPage: SearchResultsProjection | undefined;
   let replacementPreview: ReplacementPreviewProjection | undefined;
   let activeJob: ServiceJobProjection | undefined;
+  let serviceJobStarting = false;
+  let cancellationRequestedJobId: string | undefined;
+  let cancellationRequest: Promise<ServiceJobProjection> | undefined;
   let searchReturn: { window: ManuscriptWindowProjection; continuity: EditorContinuity } | undefined;
   let edgeNavigation = false;
   let authoritativeMutation = false;
-  let lastJournalSequence = initialWindow.journalSequence;
+  let searchInvalidation: Promise<void> | undefined;
+  let searchPresentationStale = false;
   const excludedMatchIds = new Set<string>();
+
+  const serviceJobBusy = (): boolean => serviceJobStarting || activeJob !== undefined;
+
+  const updateServiceControls = (): void => {
+    const busy = serviceJobBusy();
+    searchButton.disabled = authoritativeMutation || busy;
+    prepareReplacementButton.disabled = authoritativeMutation || busy || searchPresentationStale ||
+      searchPage === undefined || searchPage.totalMatches === 0;
+    searchInput.disabled = authoritativeMutation || busy;
+    replacementInput.disabled = authoritativeMutation || busy;
+    cancelJob.hidden = activeJob === undefined || (activeJob.state !== 'queued' && activeJob.state !== 'running');
+    cancelJob.disabled = activeJob === undefined || (activeJob.state !== 'queued' && activeJob.state !== 'running');
+    cancelJob.dataset['serviceJobId'] = activeJob?.jobId ?? '';
+    for (const control of replacementReview.querySelectorAll<HTMLButtonElement>('button[data-replacement-action]')) {
+      const dismiss = control.dataset['replacementAction'] === 'dismiss';
+      control.disabled = authoritativeMutation || busy || (searchPresentationStale && !dismiss);
+    }
+  };
 
   const updateWindowChrome = (): void => {
     position.textContent = currentWindow.position.label;
@@ -753,16 +771,13 @@ function renderEditorWindow(initialWindow: ManuscriptWindowProjection, bookTitle
     undo.disabled = locked;
     redo.disabled = locked;
     milestoneButton.disabled = locked;
-    searchButton.disabled = locked;
-    prepareReplacementButton.disabled = locked || searchPage === undefined || searchPage.totalMatches === 0;
     positionRail.disabled = locked;
     previousOutline.disabled = locked;
     nextOutline.disabled = locked;
-    searchInput.disabled = locked;
-    replacementInput.disabled = locked;
     milestoneName.disabled = locked;
     purpose.disabled = locked;
     note.disabled = locked;
+    updateServiceControls();
     updateWindowChrome();
   };
 
@@ -786,6 +801,7 @@ function renderEditorWindow(initialWindow: ManuscriptWindowProjection, bookTitle
     target: Parameters<typeof window.ai7.getManuscriptWindowAt>[0]['target'];
     continuity: EditorContinuity;
     expected?: AuthoritativeResult;
+    reconcile?: (result: AuthoritativeResult) => Promise<void>;
   };
 
   let pendingAuthoritativeRecovery: AuthoritativeRecovery | undefined;
@@ -814,25 +830,44 @@ function renderEditorWindow(initialWindow: ManuscriptWindowProjection, bookTitle
     )) throw new Error('权威写入确认与刷新窗口不一致。');
     if (!editor.loadWindow(next, continuity)) throw new Error('权威窗口已返回，但编辑器未能安全装载。');
     currentWindow = next;
-    lastJournalSequence = next.journalSequence;
     updateWindowChrome();
   }
 
-  async function runAuthoritativeMutation<T extends AuthoritativeResult>(operation: () => Promise<T>): Promise<T | undefined> {
-    if (authoritativeMutation || !(await settleLocalEdit()) || !editor) return undefined;
-    const continuity = editor.captureContinuity();
-    const target = { kind: 'window-start', blockId: editor.currentWindow().blocks[0]!.blockId } as const;
+  async function runAuthoritativeMutation<T extends AuthoritativeResult>(
+    operation: () => Promise<T>,
+    reconcile: (result: T) => Promise<void>,
+  ): Promise<T | undefined> {
+    if (authoritativeMutation || !editor) return undefined;
+    if (editor.isComposing()) {
+      setStatus('请先完成当前输入法组合。', 'busy');
+      return undefined;
+    }
+    setAuthoritativeMutation(true);
+    let continuity: EditorContinuity | undefined;
+    let target: Parameters<typeof window.ai7.getManuscriptWindowAt>[0]['target'] | undefined;
     let result: T | undefined;
     try {
-      setAuthoritativeMutation(true);
+      if (!(await settleLocalEdit())) {
+        setAuthoritativeMutation(false);
+        return undefined;
+      }
+      continuity = editor.captureContinuity();
+      target = { kind: 'window-start', blockId: editor.currentWindow().blocks[0]!.blockId };
       result = await operation();
       await refreshAuthoritativeEditor(target, continuity, result);
+      await reconcile(result);
       clearAuthoritativeRecovery();
       setAuthoritativeMutation(false);
       return result;
     } catch (error) {
+      if (!target || !continuity) {
+        setAuthoritativeMutation(false);
+        setStatus(error instanceof Error ? error.message : '待保存编辑未能排空；权威操作未开始。', 'error');
+        return undefined;
+      }
       try {
         await refreshAuthoritativeEditor(target, continuity, result);
+        if (result) await reconcile(result);
         clearAuthoritativeRecovery();
         setAuthoritativeMutation(false);
         if (result) {
@@ -842,7 +877,7 @@ function renderEditorWindow(initialWindow: ManuscriptWindowProjection, bookTitle
         setStatus(error instanceof Error ? error.message : '权威操作未完成；编辑器已恢复到当前持久状态。', 'error');
       } catch (refreshError) {
         pendingAuthoritativeRecovery = result
-          ? { target, continuity, expected: result }
+          ? { target, continuity, expected: result, reconcile: (value) => reconcile(value as T) }
           : { target, continuity };
         retryAuthoritativeRefreshButton.hidden = false;
         setStatus(
@@ -860,6 +895,7 @@ function renderEditorWindow(initialWindow: ManuscriptWindowProjection, bookTitle
     retryAuthoritativeRefreshButton.disabled = true;
     try {
       await refreshAuthoritativeEditor(recovery.target, recovery.continuity, recovery.expected);
+      if (recovery.expected && recovery.reconcile) await recovery.reconcile(recovery.expected);
       clearAuthoritativeRecovery();
       setAuthoritativeMutation(false);
       setStatus(
@@ -911,7 +947,7 @@ function renderEditorWindow(initialWindow: ManuscriptWindowProjection, bookTitle
     }
   }
 
-  async function loadOutline(cursor: string | null): Promise<void> {
+  async function loadOutline(cursor: string | null, propagateFailure = false): Promise<void> {
     try {
       const binding = editor?.currentWindow() ?? currentWindow;
       const page = await window.ai7.getOutline({ manuscriptId: binding.manuscriptId, branchId: binding.branchId, cursor });
@@ -929,55 +965,196 @@ function renderEditorWindow(initialWindow: ManuscriptWindowProjection, bookTitle
       nextOutline.hidden = page.nextCursor === null;
     } catch (error) {
       setStatus(error instanceof Error ? error.message : '无法读取稿件结构。', 'error');
+      if (propagateFailure) throw error;
     }
   }
 
   const showJobProgress = (job: ServiceJobProjection): void => {
-    activeJob = job.state === 'queued' || job.state === 'running' ? job : undefined;
-    cancelJob.hidden = activeJob === undefined;
+    activeJob = job;
+    updateServiceControls();
     const progress = job.progress.total > 0 ? ` ${job.progress.completed.toLocaleString('zh-CN')} / ${job.progress.total.toLocaleString('zh-CN')}` : '';
     searchSummary.textContent = `${job.progress.label}${progress}`;
   };
 
+  async function runOwnedServiceJob(start: () => Promise<ServiceJobProjection>): Promise<ServiceJobProjection> {
+    if (serviceJobBusy()) throw new Error('已有一项全稿本地操作正在处理；请等待或取消当前操作。');
+    serviceJobStarting = true;
+    delete cancelJob.dataset['cancellationTargetJobId'];
+    updateServiceControls();
+    try {
+      const initial = await start();
+      serviceJobStarting = false;
+      activeJob = initial;
+      updateServiceControls();
+      let completed = await awaitServiceJob(initial, showJobProgress);
+      if (cancellationRequestedJobId === initial.jobId && cancellationRequest) {
+        completed = await cancellationRequest;
+      }
+      return completed;
+    } finally {
+      if (activeJob && cancellationRequestedJobId === activeJob.jobId) {
+        cancellationRequestedJobId = undefined;
+        cancellationRequest = undefined;
+      }
+      serviceJobStarting = false;
+      activeJob = undefined;
+      updateServiceControls();
+    }
+  }
+
+  async function cancelActiveServiceJob(): Promise<void> {
+    const target = activeJob;
+    if (!target || (target.state !== 'queued' && target.state !== 'running')) return;
+    cancelJob.disabled = true;
+    cancelJob.dataset['cancellationTargetJobId'] = target.jobId;
+    cancellationRequestedJobId = target.jobId;
+    const request = (async (): Promise<ServiceJobProjection> => {
+      try {
+        return await window.ai7.cancelServiceJob({ jobId: target.jobId });
+      } catch (error) {
+        const preview = replacementPreview;
+        if (target.kind !== 'replacement' || !preview) throw error;
+        const dismissal = await window.ai7.dismissReplacementPreview({ previewId: preview.previewId });
+        if (dismissal.state !== 'cancelled') throw error;
+        return {
+          ...target,
+          state: 'cancelled',
+          result: null,
+          failure: null,
+          progress: { ...target.progress, label: '替换准备已取消' },
+        };
+      }
+    })();
+    cancellationRequest = request;
+    try {
+      const result = await request;
+      if (activeJob?.jobId === target.jobId) showJobProgress(result);
+      if (result.state === 'cancelled') {
+        setStatus(result.progress.label, 'success');
+      } else if (result.state === 'completed') {
+        setStatus('本地操作已在取消请求到达前完成；未记录取消。', 'busy');
+      } else if (result.state === 'failed') {
+        setStatus(result.failure?.message ?? '本地操作已失败，未记录取消。', 'error');
+      } else {
+        setStatus('取消请求尚未成为终态；当前操作仍在处理。', 'busy');
+      }
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : '无法确认当前本地操作的取消状态。', 'error');
+    } finally {
+      updateServiceControls();
+    }
+  }
+
+  const setInclusionControlsLocked = (locked: boolean): void => {
+    for (const control of searchResults.querySelectorAll<HTMLInputElement>('.match-inclusion input[type="checkbox"]')) {
+      control.disabled = locked;
+      control.setAttribute('aria-disabled', locked ? 'true' : 'false');
+    }
+    searchResults.dataset['inclusionLocked'] = locked ? 'true' : 'false';
+  };
+
+  const clearReplacementPresentation = (): void => {
+    replacementPreview = undefined;
+    replacementReview.hidden = true;
+    replacementReview.replaceChildren();
+    setInclusionControlsLocked(false);
+    updateServiceControls();
+  };
+
+  async function dismissVisibleReplacementPreview(): Promise<void> {
+    const preview = replacementPreview;
+    if (!preview) return;
+    const dismissal = await window.ai7.dismissReplacementPreview({ previewId: preview.previewId });
+    if (dismissal.previewId !== preview.previewId || dismissal.state !== 'cancelled') {
+      throw new Error('替换预览取消确认无效。');
+    }
+    if (replacementPreview?.previewId === preview.previewId) clearReplacementPresentation();
+  }
+
+  const clearSearchPresentation = (message: string): void => {
+    searchPresentationStale = false;
+    searchPage = undefined;
+    searchReturn = undefined;
+    excludedMatchIds.clear();
+    clearReplacementPresentation();
+    searchResults.replaceChildren();
+    previousResults.hidden = true;
+    nextResults.hidden = true;
+    returnFromSearch.hidden = true;
+    searchSummary.textContent = message;
+    updateServiceControls();
+  };
+
+  async function invalidateSearchState(reason: string, terminalPreviewId?: string): Promise<void> {
+    if (searchInvalidation) return searchInvalidation;
+    searchPresentationStale = true;
+    updateServiceControls();
+    const pending = (async () => {
+      previousResults.hidden = true;
+      nextResults.hidden = true;
+      returnFromSearch.hidden = true;
+      setInclusionControlsLocked(true);
+      searchSummary.textContent = reason;
+      const preview = replacementPreview;
+      if (preview && preview.previewId !== terminalPreviewId) await dismissVisibleReplacementPreview();
+      clearSearchPresentation(reason);
+    })();
+    searchInvalidation = pending;
+    try {
+      await pending;
+    } finally {
+      if (searchInvalidation === pending) searchInvalidation = undefined;
+    }
+  }
+
+  const searchStateIsStale = (): boolean => {
+    if (!editor) return false;
+    const persisted = searchPage ?? replacementPreview ?? searchReturn?.window;
+    if (!persisted) return false;
+    const binding = editor.currentWindow();
+    return binding.revisionId !== persisted.revisionId ||
+      binding.journalSequence !== persisted.journalSequence || binding.workingDigest !== persisted.workingDigest;
+  };
+
+  async function invalidateSearchIfStale(reason: string): Promise<void> {
+    if (searchStateIsStale()) await invalidateSearchState(reason);
+  }
+
   async function runSearch(): Promise<void> {
-    if (authoritativeMutation) return;
+    if (authoritativeMutation || serviceJobBusy()) return;
     const query = searchInput.value.normalize('NFC');
     if (!query || query.length > 256) {
       setStatus('请输入 1–256 个字符的查找文字。', 'error');
       searchInput.focus();
       return;
     }
-    const binding = editor?.currentWindow() ?? currentWindow;
-    searchReturn = undefined;
-    excludedMatchIds.clear();
-    replacementReview.hidden = true;
-    replacementPreview = undefined;
-    searchButton.disabled = true;
     try {
-      const completed = await awaitServiceJob(
-        await window.ai7.startSearch({ manuscriptId: binding.manuscriptId, branchId: binding.branchId, query }),
-        showJobProgress,
-      );
+      const completed = await runOwnedServiceJob(async () => {
+        await dismissVisibleReplacementPreview();
+        clearSearchPresentation('正在开始新的全稿查找…');
+        const binding = editor?.currentWindow() ?? currentWindow;
+        return window.ai7.startSearch({ manuscriptId: binding.manuscriptId, branchId: binding.branchId, query });
+      });
       if (completed.state === 'cancelled') {
         searchSummary.textContent = '查找已取消；当前本地编辑不受影响。';
         return;
       }
       if (completed.kind !== 'search' || !completed.result || 'replacement' in completed.result) throw new Error('查找结果绑定无效。');
       await loadSearchResults(null, completed.result.searchId);
-      prepareReplacementButton.disabled = completed.result.totalMatches === 0;
     } catch (error) {
       setStatus(error instanceof Error ? error.message : '全稿查找未完成。', 'error');
-    } finally {
-      activeJob = undefined;
-      cancelJob.hidden = true;
-      searchButton.disabled = false;
     }
   }
 
   async function returnToSearchPosition(): Promise<void> {
     if (authoritativeMutation || !(await settleLocalEdit()) || !editor) return;
     if (!searchReturn) return;
-    if (editor.currentWindow().workingDigest !== searchReturn.window.workingDigest) {
+    const binding = editor.currentWindow();
+    if (
+      binding.revisionId !== searchReturn.window.revisionId ||
+      binding.journalSequence !== searchReturn.window.journalSequence ||
+      binding.workingDigest !== searchReturn.window.workingDigest
+    ) {
       setStatus('稿件已变化；查找前的精确选择与滚动锚点无法按原绑定恢复。', 'error');
       return;
     }
@@ -992,7 +1169,13 @@ function renderEditorWindow(initialWindow: ManuscriptWindowProjection, bookTitle
     const id = searchId ?? searchPage?.searchId;
     if (!id) return;
     const page = await window.ai7.getSearchResults({ searchId: id, cursor });
+    const binding = editor?.currentWindow() ?? currentWindow;
+    if (
+      page.revisionId !== binding.revisionId || page.journalSequence !== binding.journalSequence ||
+      page.workingDigest !== binding.workingDigest
+    ) throw new Error('搜索结果已绑定到旧稿件状态，请重新查找。');
     searchPage = page;
+    searchPresentationStale = false;
     searchResults.replaceChildren();
     searchSummary.textContent = `“${page.query}” · 范围：${page.scopeLabel} · 共 ${page.totalMatches.toLocaleString('zh-CN')} 处`;
     for (const match of page.results) {
@@ -1005,6 +1188,10 @@ function renderEditorWindow(initialWindow: ManuscriptWindowProjection, bookTitle
       include.dataset['matchId'] = match.matchId;
       include.checked = !excludedMatchIds.has(match.matchId);
       include.addEventListener('change', () => {
+        if (replacementPreview) {
+          include.checked = !excludedMatchIds.has(match.matchId);
+          return;
+        }
         if (include.checked) excludedMatchIds.delete(match.matchId);
         else excludedMatchIds.add(match.matchId);
       });
@@ -1014,11 +1201,15 @@ function renderEditorWindow(initialWindow: ManuscriptWindowProjection, bookTitle
     }
     previousResults.hidden = page.previousCursor === null;
     nextResults.hidden = page.nextCursor === null;
+    setInclusionControlsLocked(replacementPreview !== undefined);
+    updateServiceControls();
   }
 
   async function jumpToSearchMatch(match: SearchResultsProjection['results'][number]): Promise<void> {
     if (authoritativeMutation || !(await settleLocalEdit()) || !editor) return;
-    if (!searchPage || editor.currentWindow().workingDigest !== searchPage.workingDigest) {
+    const binding = editor.currentWindow();
+    if (!searchPage || binding.revisionId !== searchPage.revisionId ||
+        binding.journalSequence !== searchPage.journalSequence || binding.workingDigest !== searchPage.workingDigest) {
       setStatus('稿件已变化；请重新查找后再跳转到精确范围。', 'error');
       return;
     }
@@ -1033,19 +1224,26 @@ function renderEditorWindow(initialWindow: ManuscriptWindowProjection, bookTitle
   }
 
   async function prepareReplacement(): Promise<void> {
-    if (authoritativeMutation || !searchPage) return;
-    prepareReplacementButton.disabled = true;
+    if (authoritativeMutation || serviceJobBusy() || !searchPage) return;
+    const searchId = searchPage.searchId;
+    const replacement = replacementInput.value.normalize('NFC');
+    const exclusions = [...excludedMatchIds];
+    let preparedPreviewId: string | undefined;
     try {
-      const prepared = await window.ai7.prepareReplacement({
-        searchId: searchPage.searchId,
-        replacement: replacementInput.value.normalize('NFC'),
-        excludedMatchIds: [...excludedMatchIds],
+      const completed = await runOwnedServiceJob(async () => {
+        await dismissVisibleReplacementPreview();
+        const prepared = await window.ai7.prepareReplacement({
+          searchId,
+          replacement,
+          excludedMatchIds: exclusions,
+        });
+        preparedPreviewId = prepared.previewId;
+        replacementPreview = prepared;
+        setInclusionControlsLocked(true);
+        return window.ai7.startReplacementCommit({ previewId: prepared.previewId });
       });
-      const completed = await awaitServiceJob(
-        await window.ai7.startReplacementCommit({ previewId: prepared.previewId }),
-        showJobProgress,
-      );
       if (completed.state === 'cancelled') {
+        clearReplacementPresentation();
         setStatus('替换预览准备已取消；当前本地编辑不受影响。', 'success');
         return;
       }
@@ -1053,23 +1251,31 @@ function renderEditorWindow(initialWindow: ManuscriptWindowProjection, bookTitle
       replacementPreview = completed.result;
       renderReplacementReview(replacementPreview);
     } catch (error) {
+      if (preparedPreviewId) {
+        try {
+          await window.ai7.dismissReplacementPreview({ previewId: preparedPreviewId });
+          if (replacementPreview?.previewId === preparedPreviewId) clearReplacementPresentation();
+        } catch {
+          if (replacementPreview?.previewId === preparedPreviewId) setInclusionControlsLocked(true);
+        }
+      }
       setStatus(error instanceof Error ? error.message : '无法准备替换预览。', 'error');
-    } finally {
-      activeJob = undefined;
-      cancelJob.hidden = true;
-      prepareReplacementButton.disabled = searchPage === undefined || searchPage.totalMatches === 0;
     }
   }
 
   function renderReplacementReview(preview: ReplacementPreviewProjection): void {
+    excludedMatchIds.clear();
+    for (const matchId of preview.excludedMatchIds) excludedMatchIds.add(matchId);
+    setInclusionControlsLocked(true);
     replacementReview.hidden = false;
     replacementReview.replaceChildren(
       element('h4', undefined, preview.state === 'frozen' ? '已冻结替换集' : '替换预览'),
       element('p', undefined, `查找“${preview.query}”，替换为“${preview.replacement}”`),
-      element('p', 'field-note', `范围：${preview.scopeLabel} · 绑定修订版 ${preview.revisionLabel}`),
+      element('p', 'field-note', `范围：${preview.scopeLabel} · 绑定修订版 ${preview.revisionLabel} · 修订日志序号 ${preview.journalSequence}`),
       element('p', 'field-note', `匹配规则：${preview.matchingRule}`),
       element('p', 'field-note', `纳入 ${preview.includedMatches} 处 · 排除 ${preview.excludedMatches} 处 · ${preview.inclusionRule}`),
       element('p', 'field-note', '精确纳入清单：本次有序搜索结果中，除下列匹配标识外的全部匹配。'),
+      element('p', 'field-note inclusion-lock-truth', preview.state === 'frozen' ? '匹配集已冻结；纳入控件保持锁定。' : '当前预览的纳入控件已锁定；取消预览后可重新选择。'),
     );
     const exclusions = element('pre', 'replacement-exclusions', preview.excludedMatchIds.length > 0 ? preview.excludedMatchIds.join('\n') : '（无排除项）');
     exclusions.setAttribute('aria-label', '精确排除匹配标识清单');
@@ -1078,44 +1284,69 @@ function renderEditorWindow(initialWindow: ManuscriptWindowProjection, bookTitle
     for (const match of preview.representativeContexts) contexts.append(element('li', undefined, `${match.headingLabel}：${match.context}`));
     replacementReview.append(contexts);
     if (preview.state === 'reviewing') {
-      replacementReview.append(
-        button('冻结并重新验证', 'primary', async () => {
-          try {
-            replacementPreview = await window.ai7.freezeReplacement({
-              previewId: preview.previewId,
-              excludedMatchIds: [...excludedMatchIds],
-            });
-            renderReplacementReview(replacementPreview);
-          } catch (error) {
-            setStatus(error instanceof Error ? error.message : '替换集无法冻结。', 'error');
-          }
-        }),
-      );
+      const freeze = button('冻结并重新验证', 'primary', async () => {
+        try {
+          replacementPreview = await window.ai7.freezeReplacement({
+            previewId: preview.previewId,
+            excludedMatchIds: [...excludedMatchIds],
+          });
+          renderReplacementReview(replacementPreview);
+        } catch (error) {
+          setStatus(error instanceof Error ? error.message : '替换集无法冻结。', 'error');
+        }
+      });
+      freeze.dataset['replacementAction'] = 'freeze';
+      replacementReview.append(freeze);
     } else {
-      replacementReview.append(button('原子提交替换', 'primary', () => void commitReplacement(preview.previewId)));
+      const commit = button('原子提交替换', 'primary', () => void commitReplacement(preview.previewId));
+      commit.dataset['replacementAction'] = 'commit';
+      replacementReview.append(commit);
+    }
+    const dismiss = button('取消并关闭替换预览', 'quiet', () => void dismissReplacementFromReview(preview.previewId));
+    dismiss.dataset['replacementAction'] = 'dismiss';
+    replacementReview.append(dismiss);
+    updateServiceControls();
+  }
+
+  async function dismissReplacementFromReview(previewId: string): Promise<void> {
+    if (authoritativeMutation || serviceJobBusy() || replacementPreview?.previewId !== previewId) return;
+    try {
+      const dismissal = await window.ai7.dismissReplacementPreview({ previewId });
+      if (dismissal.state !== 'cancelled') throw new Error('替换预览取消确认无效。');
+      clearReplacementPresentation();
+      setStatus('替换预览已取消并关闭；稿件未发生替换。', 'success');
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : '替换预览无法取消。', 'error');
     }
   }
 
   async function commitReplacement(previewId: string): Promise<void> {
     try {
       const replacement = await runAuthoritativeMutation(async () => {
-        const completed = await awaitServiceJob(await window.ai7.startReplacementCommit({ previewId }), showJobProgress);
-        if (completed.state === 'cancelled') throw new Error('替换提交已在写入前取消。');
+        const completed = await runOwnedServiceJob(() => window.ai7.startReplacementCommit({ previewId }));
+        if (completed.state === 'cancelled') {
+          clearReplacementPresentation();
+          throw new Error('替换提交已在写入前取消；稿件未发生替换。');
+        }
         if (completed.kind !== 'replacement' || completed.result !== null) throw new Error('冻结匹配复核结果绑定无效。');
         return window.ai7.commitReplacement({ previewId });
+      }, async (result) => {
+        await invalidateSearchState('稿件已替换；先前搜索结果和返回位置已失效。', result.previewId);
+        await loadOutline(null, true);
       });
-      if (!replacement) return;
+      if (!replacement) {
+        if (!authoritativeMutation) {
+          try {
+            await invalidateSearchState('替换未提交；先前预览已关闭，请重新查找后再试。');
+          } catch (error) {
+            setStatus(error instanceof Error ? error.message : '无法关闭未提交的替换预览。', 'error');
+          }
+        }
+        return;
+      }
       setStatus(replacement.completionLabel, 'success');
-      replacementReview.hidden = true;
-      searchResults.replaceChildren();
-      searchPage = undefined;
-      prepareReplacementButton.disabled = true;
-      await loadOutline(null);
     } catch (error) {
       setStatus(error instanceof Error ? error.message : '替换提交未完成。', 'error');
-    } finally {
-      activeJob = undefined;
-      cancelJob.hidden = true;
     }
   }
 
@@ -1136,10 +1367,13 @@ function renderEditorWindow(initialWindow: ManuscriptWindowProjection, bookTitle
           purpose: purpose.value,
           note: note.value,
         });
+      }, async () => {
+        milestoneSection.open = false;
+        await invalidateSearchIfStale('稿件修订版已变化；先前搜索结果和返回位置已失效。');
+        await loadOutline(null, true);
       });
       if (!saved) return;
       setStatus(saved.completionLabel, 'success');
-      milestoneSection.open = false;
     } catch (error) {
       setStatus(error instanceof Error ? error.message : '里程碑未保存。', 'error');
     }
@@ -1156,10 +1390,12 @@ function renderEditorWindow(initialWindow: ManuscriptWindowProjection, bookTitle
           expectedWorkingDigest: binding.workingDigest,
         };
         return action === 'undo' ? window.ai7.undoManuscript(input) : window.ai7.redoManuscript(input);
+      }, async () => {
+        await invalidateSearchIfStale('稿件历史状态已变化；先前搜索结果和返回位置已失效。');
+        await loadOutline(null, true);
       });
       if (!result) return;
       setStatus(result.completionLabel, 'success');
-      await loadOutline(null);
     } catch (error) {
       setStatus(error instanceof Error ? error.message : `${action === 'undo' ? '撤销' : '重做'}未完成。`, 'error');
     }
@@ -1174,7 +1410,7 @@ function renderEditorWindow(initialWindow: ManuscriptWindowProjection, bookTitle
     void navigateCursor(atStart ? 'previous' : 'next');
   });
   searchInput.addEventListener('keydown', (event) => {
-    if (event.key === 'Enter' && !event.isComposing) {
+    if (event.key === 'Enter' && !event.isComposing && !authoritativeMutation && !serviceJobBusy()) {
       event.preventDefault();
       void runSearch();
     }
@@ -1193,11 +1429,21 @@ function renderEditorWindow(initialWindow: ManuscriptWindowProjection, bookTitle
       save.disabled = authoritativeMutation || !state.dirty || state.saving || state.interrupted;
       journal.textContent = `修订日志序号 ${state.journalSequence}`;
       setCloseRisk(authoritativeMutation || state.dirty || state.saving || state.retryRequired || (state.interrupted && state.dirty));
-      if (editor && state.journalSequence !== lastJournalSequence) {
-        lastJournalSequence = state.journalSequence;
-        currentWindow = editor.currentWindow();
-        updateWindowChrome();
-        void loadOutline(null);
+      if (editor) {
+        const editorWindowProjection = editor.currentWindow();
+        const bindingChanged = editorWindowProjection.revisionId !== currentWindow.revisionId ||
+          editorWindowProjection.journalSequence !== currentWindow.journalSequence ||
+          editorWindowProjection.workingDigest !== currentWindow.workingDigest;
+        if (bindingChanged) {
+          currentWindow = editorWindowProjection;
+          updateWindowChrome();
+          void loadOutline(null);
+        }
+        if (!authoritativeMutation && searchStateIsStale()) {
+          void invalidateSearchState('稿件状态已变化；先前搜索结果、替换预览和查找返回位置已失效。').catch((error) => {
+            setStatus(error instanceof Error ? error.message : '无法取消已失效的替换预览。', 'error');
+          });
+        }
       }
     },
     onAnnouncement: setStatus,

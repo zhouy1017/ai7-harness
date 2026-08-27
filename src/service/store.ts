@@ -16,6 +16,7 @@ import type {
   OutlineProjection,
   PriorWorkItemProjection,
   ReplacementCommitProjection,
+  ReplacementDismissalProjection,
   ReplacementPreviewProjection,
   SearchResultsProjection,
   SearchSummaryProjection,
@@ -45,7 +46,8 @@ const TOKEN_PATTERN = UUID_PATTERN;
 const BASE_SCHEMA_VERSION = 2;
 const PRE_SIGNOFF_SCHEMA_VERSION = 3;
 const OFFSET_REPAIR_SCHEMA_VERSION = 4;
-const SCHEMA_VERSION = 5;
+const SEARCH_BINDING_SCHEMA_VERSION = 5;
+const SCHEMA_VERSION = 6;
 const WORKFLOW_PROFILE = {
   id: 'ai7.manuscript.editorial.zh-CN',
   name: '基础书稿编辑流程',
@@ -275,12 +277,13 @@ function initializeSchema(db: DatabaseSync): void {
   requireStore(
     currentVersion === 0 || currentVersion === 1 || currentVersion === BASE_SCHEMA_VERSION ||
       currentVersion === PRE_SIGNOFF_SCHEMA_VERSION || currentVersion === OFFSET_REPAIR_SCHEMA_VERSION ||
-      currentVersion === SCHEMA_VERSION,
+      currentVersion === SEARCH_BINDING_SCHEMA_VERSION || currentVersion === SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
   if (currentVersion === BASE_SCHEMA_VERSION || currentVersion === PRE_SIGNOFF_SCHEMA_VERSION ||
-      currentVersion === OFFSET_REPAIR_SCHEMA_VERSION || currentVersion === SCHEMA_VERSION) return;
+      currentVersion === OFFSET_REPAIR_SCHEMA_VERSION || currentVersion === SEARCH_BINDING_SCHEMA_VERSION ||
+      currentVersion === SCHEMA_VERSION) return;
   if (currentVersion === 1) {
     migrateSchemaV1ToV2(db);
     return;
@@ -1409,8 +1412,14 @@ export class EditorialStore {
     return this.#boundedCall(() => this.#bounded.commitReplacement(previewId));
   }
 
-  cancelReplacement(previewId: string): void {
-    this.#boundedCall(() => this.#bounded.cancelReplacement(previewId));
+  cancelReplacement(previewId: string): boolean {
+    return this.#boundedCall(() => this.#bounded.cancelReplacement(previewId));
+  }
+
+  dismissReplacementPreview(previewId: string): ReplacementDismissalProjection {
+    const cancelled = this.cancelReplacement(previewId);
+    requireStore(cancelled, 'REPLACEMENT_STATE_CHANGED', '替换预览已提交、失败或不再可取消。');
+    return { previewId, state: 'cancelled' };
   }
 
   saveMilestone(

@@ -101,6 +101,8 @@ const api: RendererApi = Object.freeze({
     invoke<ServiceOperationMap['prepareReplacement']['output']>(IPC_CHANNELS.prepareReplacement, input),
   freezeReplacement: (input: ServiceOperationMap['freezeReplacement']['input']) =>
     invoke<ServiceOperationMap['freezeReplacement']['output']>(IPC_CHANNELS.freezeReplacement, input),
+  dismissReplacementPreview: (input: ServiceOperationMap['dismissReplacementPreview']['input']) =>
+    invoke<ServiceOperationMap['dismissReplacementPreview']['output']>(IPC_CHANNELS.dismissReplacementPreview, input),
   startReplacementCommit: (input: ServiceOperationMap['startReplacementCommit']['input']) =>
     invoke<ServiceOperationMap['startReplacementCommit']['output']>(IPC_CHANNELS.startReplacementCommit, input),
   commitReplacement: (input: ServiceOperationMap['commitReplacement']['input']) =>

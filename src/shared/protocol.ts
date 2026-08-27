@@ -40,6 +40,7 @@ export const IPC_CHANNELS = {
   getSearchResults: 'ai7:j02:get-search-results',
   prepareReplacement: 'ai7:j02:prepare-replacement',
   freezeReplacement: 'ai7:j02:freeze-replacement',
+  dismissReplacementPreview: 'ai7:j02:dismiss-replacement-preview',
   startReplacementCommit: 'ai7:j02:start-replacement-commit',
   commitReplacement: 'ai7:j02:commit-replacement',
   saveMilestone: 'ai7:j02:save-milestone',
@@ -259,6 +260,7 @@ export interface SearchSummaryProjection {
   manuscriptId: string;
   branchId: string;
   revisionId: string;
+  journalSequence: number;
   workingDigest: string;
   query: string;
   scopeLabel: '全稿';
@@ -277,6 +279,7 @@ export interface ReplacementPreviewProjection {
   manuscriptId: string;
   branchId: string;
   revisionId: string;
+  journalSequence: number;
   workingDigest: string;
   query: string;
   replacement: string;
@@ -290,6 +293,11 @@ export interface ReplacementPreviewProjection {
   state: 'reviewing' | 'frozen';
   excludedMatchIds: ReadonlyArray<string>;
   representativeContexts: ReadonlyArray<SearchMatchProjection>;
+}
+
+export interface ReplacementDismissalProjection {
+  previewId: string;
+  state: 'cancelled';
 }
 
 export interface ReplacementCommitProjection {
@@ -545,6 +553,10 @@ export interface ServiceOperationMap {
     input: { previewId: string; excludedMatchIds: ReadonlyArray<string> };
     output: ReplacementPreviewProjection;
   };
+  dismissReplacementPreview: {
+    input: { previewId: string };
+    output: ReplacementDismissalProjection;
+  };
   startReplacementCommit: { input: { previewId: string }; output: ServiceJobProjection };
   commitReplacement: { input: { previewId: string }; output: ReplacementCommitProjection };
   saveMilestone: {
@@ -624,6 +636,7 @@ export interface RendererApi {
   getSearchResults(input: ServiceOperationMap['getSearchResults']['input']): Promise<SearchResultsProjection>;
   prepareReplacement(input: ServiceOperationMap['prepareReplacement']['input']): Promise<ReplacementPreviewProjection>;
   freezeReplacement(input: ServiceOperationMap['freezeReplacement']['input']): Promise<ReplacementPreviewProjection>;
+  dismissReplacementPreview(input: ServiceOperationMap['dismissReplacementPreview']['input']): Promise<ReplacementDismissalProjection>;
   startReplacementCommit(input: ServiceOperationMap['startReplacementCommit']['input']): Promise<ServiceJobProjection>;
   commitReplacement(input: ServiceOperationMap['commitReplacement']['input']): Promise<ReplacementCommitProjection>;
   saveMilestone(input: ServiceOperationMap['saveMilestone']['input']): Promise<MilestoneProjection>;

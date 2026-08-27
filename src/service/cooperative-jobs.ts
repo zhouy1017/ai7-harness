@@ -75,14 +75,25 @@ export class CooperativeJobOwner {
 
   cancel(jobId: string): ServiceJobProjection {
     const job = this.#requireJob(jobId);
-    if (job.projection.state === 'queued' || job.projection.state === 'running') {
+    if (job.projection.kind === 'replacement' && job.projection.state !== 'cancelled' && job.projection.state !== 'failed') {
+      const cancelled = this.#store.cancelReplacement(job.subjectId);
+      if (cancelled) {
+        job.cancelRequested = true;
+        job.projection = {
+          ...job.projection,
+          state: 'cancelled',
+          result: null,
+          failure: null,
+          progress: { ...job.projection.progress, label: '替换准备已取消' },
+        };
+      }
+    } else if (job.projection.state === 'queued' || job.projection.state === 'running') {
       job.cancelRequested = true;
-      if (job.projection.kind === 'search') this.#store.cancelSearch(job.subjectId);
-      else this.#store.cancelReplacement(job.subjectId);
+      this.#store.cancelSearch(job.subjectId);
       job.projection = {
         ...job.projection,
         state: 'cancelled',
-        progress: { ...job.projection.progress, label: job.projection.kind === 'search' ? '搜索已取消' : '替换准备已取消' },
+        progress: { ...job.projection.progress, label: '搜索已取消' },
       };
     }
     return structuredClone(job.projection);

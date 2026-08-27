@@ -233,6 +233,11 @@ function decodeRequest(frame: Uint8Array): ServiceRequest {
       }
       break;
     }
+    case 'dismissReplacementPreview': {
+      const input = requireInput(value.input, ['previewId'], tentativeId);
+      if (!isBoundedString(input.previewId, 36) || !UUID_PATTERN.test(input.previewId)) throw new ProtocolError(tentativeId);
+      break;
+    }
     case 'startReplacementCommit': {
       const input = requireInput(value.input, ['previewId'], tentativeId);
       if (!isBoundedString(input.previewId, 36) || !UUID_PATTERN.test(input.previewId)) throw new ProtocolError(tentativeId);
@@ -394,6 +399,8 @@ async function dispatch(
       return { id: request.id, ok: true, op: request.op, result: store.prepareReplacement(request.input.searchId, request.input.replacement, request.input.excludedMatchIds) };
     case 'freezeReplacement':
       return { id: request.id, ok: true, op: request.op, result: store.freezeReplacement(request.input.previewId, request.input.excludedMatchIds) };
+    case 'dismissReplacementPreview':
+      return { id: request.id, ok: true, op: request.op, result: store.dismissReplacementPreview(request.input.previewId) };
     case 'startReplacementCommit':
       return { id: request.id, ok: true, op: request.op, result: jobs.startReplacement(request.input.previewId) };
     case 'commitReplacement':

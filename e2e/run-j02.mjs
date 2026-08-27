@@ -273,6 +273,7 @@ async function runWorkspaceJourney(renderer) {
   await fill(renderer, '#manuscript-search', '天', 'common-search-fill');
   await clickButton(renderer, '查找全稿', 'common-search-start');
   await waitFor(renderer, `!Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '取消当前操作')?.hidden`, 'common-search-running');
+  await assertRenderer(renderer, `(() => { const cancel = Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '取消当前操作'); const search = document.querySelector('#manuscript-search'); if (!cancel?.dataset.serviceJobId || !(search instanceof HTMLInputElement)) return false; globalThis.__ai7ServiceJobId = cancel.dataset.serviceJobId; search.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '查找全稿')?.click(); return cancel.dataset.serviceJobId === globalThis.__ai7ServiceJobId && document.querySelectorAll('button[data-service-job-id="' + globalThis.__ai7ServiceJobId + '"]').length === 1; })()`, 'single-service-job-reentry');
   await assertRenderer(
     renderer,
     `(() => { const blocks = document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]'); const edit = (block, text) => { if (!block) return false; block.focus(); const range = document.createRange(); range.selectNodeContents(block); range.collapse(false); const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range); return document.execCommand('insertText', false, text); }; return edit(blocks[0], '协作'.repeat(150)) && edit(blocks[1], '续写'); })()`,
@@ -288,12 +289,19 @@ async function runWorkspaceJourney(renderer) {
   await fill(renderer, '#manuscript-search', '地', 'cancel-search-fill');
   await clickButton(renderer, '查找全稿', 'cancel-search-start');
   await waitFor(renderer, `!Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '取消当前操作')?.hidden`, 'cancel-search-running');
+  await assertRenderer(renderer, `(() => { const cancel = Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '取消当前操作'); if (!cancel?.dataset.serviceJobId) return false; globalThis.__ai7CancelTargetJobId = cancel.dataset.serviceJobId; return true; })()`, 'cancel-search-target-captured');
   await clickButton(renderer, '取消当前操作', 'cancel-search');
   await waitFor(renderer, `document.querySelector('.search-section .field-note')?.textContent.includes('已取消')`, 'cancel-business-readable');
+  await assertRenderer(renderer, `Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '取消当前操作')?.dataset.cancellationTargetJobId === globalThis.__ai7CancelTargetJobId`, 'cancel-search-target-stable');
 
   await fill(renderer, '#manuscript-search', OVERLAP_QUERY, 'overlap-search-fill');
   await clickButton(renderer, '查找全稿', 'overlap-search-start');
   await waitFor(renderer, `document.querySelector('.search-section .field-note')?.textContent.includes('共 1 处')`, 'overlap-leftmost-nonoverlap', 120_000);
+  await fill(renderer, '#manuscript-replacement', '界', 'dismiss-preview-fill');
+  await clickButton(renderer, '预览替换', 'dismiss-preview-start');
+  await waitFor(renderer, `!document.querySelector('.replacement-review')?.hidden && document.querySelector('.search-results')?.dataset.inclusionLocked === 'true'`, 'dismiss-preview-reviewing');
+  await clickButton(renderer, '取消并关闭替换预览', 'dismiss-preview');
+  await waitFor(renderer, `document.querySelector('.replacement-review')?.hidden && document.querySelector('.search-results')?.dataset.inclusionLocked === 'false' && document.querySelector('#persistence-status')?.textContent.includes('稿件未发生替换')`, 'dismiss-preview-reclaimed');
 
   at('search-replace');
   await fill(renderer, '#manuscript-search', SEARCH_TEXT, 'search-fill');
@@ -316,12 +324,23 @@ async function runWorkspaceJourney(renderer) {
   await waitFor(renderer, `!document.querySelector('.replacement-review')?.hidden && document.querySelector('.replacement-review')?.textContent.includes('纳入 24 处') && document.querySelector('.replacement-review')?.textContent.includes('排除 1 处') && document.querySelector('.replacement-review')?.textContent.includes(globalThis.__ai7ExcludedMatchId) && !document.querySelector('.replacement-review ul')?.textContent.includes(globalThis.__ai7ExcludedContext) && document.querySelector('.replacement-review')?.textContent.includes('绑定修订版 r1') && document.querySelector('.replacement-review')?.textContent.includes('重叠时保留最早匹配')`, 'replacement-preview-exact-inclusion');
   await clickButton(renderer, '冻结并重新验证', 'replacement-freeze');
   await waitFor(renderer, `document.querySelector('.replacement-review')?.textContent.includes('已冻结替换集') && document.querySelector('.replacement-review')?.textContent.includes('纳入 24 处') && document.querySelector('.replacement-review')?.textContent.includes('排除 1 处') && !document.querySelector('.replacement-review')?.textContent.includes(globalThis.__ai7ExcludedContext)`, 'replacement-frozen-included-contexts');
+  await assertRenderer(renderer, `(() => { const controls = Array.from(document.querySelectorAll('.match-inclusion input[type="checkbox"]')); const before = controls.map((control) => control.checked); controls[0]?.click(); return document.querySelector('.search-results')?.dataset.inclusionLocked === 'true' && controls.length === 24 && controls.every((control, index) => control.disabled && control.checked === before[index]) && document.querySelector('.replacement-review')?.textContent.includes('匹配集已冻结；纳入控件保持锁定'); })()`, 'replacement-frozen-visible-inclusion-lock');
   await clickButton(renderer, '原子提交替换', 'replacement-commit');
   await waitFor(renderer, `document.querySelector('[data-testid="manuscript-editor"]')?.dataset.operationLocked === 'true' && document.querySelector('[data-testid="manuscript-editor"]')?.getAttribute('contenteditable') === 'false'`, 'replacement-editor-locked');
   await assertRenderer(renderer, `(() => { const block = document.querySelector('[data-testid="manuscript-editor"] > [data-block-id]'); if (!block) return false; const before = block.textContent; block.focus(); document.execCommand('insertText', false, '竞态'); return block.textContent === before; })()`, 'replacement-typing-blocked');
   await waitFor(renderer, `document.querySelector('#persistence-status')?.textContent.includes('已原子替换 24 处')`, 'replacement-atomic', 120_000);
   await assertRenderer(renderer, `document.querySelector('[data-testid="manuscript-editor"]')?.dataset.operationLocked === 'false' && document.querySelector('[data-testid="manuscript-editor"]')?.getAttribute('contenteditable') === 'true'`, 'replacement-editor-unlocked-after-refresh');
   await assertRenderer(renderer, `document.querySelector('.editor-meta')?.textContent.includes('修订日志序号 4')`, 'replacement-journal');
+
+  await fill(renderer, '#manuscript-search', REPLACEMENT_TEXT, 'milestone-stale-search-fill');
+  await clickButton(renderer, '查找全稿', 'milestone-stale-search-start');
+  await waitFor(renderer, `document.querySelector('.search-section .field-note')?.textContent.includes('共 24 处')`, 'milestone-stale-search-ready', 120_000);
+  await assertRenderer(renderer, `(() => { const row = document.querySelector('.search-result'); const include = row?.querySelector('input[type="checkbox"]'); const open = row?.querySelector('button'); if (!include || !open) return false; include.click(); open.click(); return !include.checked; })()`, 'milestone-stale-search-state');
+  await waitFor(renderer, `!Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '返回查找前位置')?.hidden`, 'milestone-stale-return-visible');
+  await waitFor(renderer, `window.getSelection()?.toString() === ${JSON.stringify(REPLACEMENT_TEXT)}`, 'milestone-stale-search-jump');
+  await fill(renderer, '#manuscript-replacement', '临时预览', 'milestone-stale-preview-fill');
+  await clickButton(renderer, '预览替换', 'milestone-stale-preview-start');
+  await waitFor(renderer, `!document.querySelector('.replacement-review')?.hidden && document.querySelector('.search-results')?.dataset.inclusionLocked === 'true'`, 'milestone-stale-preview-ready');
 
   at('milestone-history');
   await assertRenderer(renderer, `(() => { const details = document.querySelector('.milestone-section'); details.open = true; return true; })()`, 'milestone-open');
@@ -330,6 +349,7 @@ async function runWorkspaceJourney(renderer) {
   await fill(renderer, '#milestone-note', '本地里程碑，不表示导出或发布。', 'milestone-note');
   await clickButton(renderer, '保存为里程碑版本', 'milestone-save');
   await waitFor(renderer, `document.querySelector('.editor-meta')?.textContent.includes('当前修订版 r2')`, 'milestone-r2', 180_000);
+  await waitFor(renderer, `document.querySelector('.search-results')?.childElementCount === 0 && document.querySelector('.replacement-review')?.hidden && document.querySelector('.search-results')?.dataset.inclusionLocked === 'false' && Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '返回查找前位置')?.hidden && document.querySelector('.search-section .field-note')?.textContent.includes('稿件修订版已变化')`, 'milestone-revision-stales-all-search-state');
   await clickButton(renderer, '撤销', 'undo');
   await waitFor(renderer, `document.querySelector('.editor-meta')?.textContent.includes('修订日志序号 5')`, 'undo-durable', 120_000);
 }

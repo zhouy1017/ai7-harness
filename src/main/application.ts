@@ -217,6 +217,7 @@ function registerRendererHandlers(
     ['getSearchResults', IPC_CHANNELS.getSearchResults],
     ['prepareReplacement', IPC_CHANNELS.prepareReplacement],
     ['freezeReplacement', IPC_CHANNELS.freezeReplacement],
+    ['dismissReplacementPreview', IPC_CHANNELS.dismissReplacementPreview],
     ['startReplacementCommit', IPC_CHANNELS.startReplacementCommit],
     ['commitReplacement', IPC_CHANNELS.commitReplacement],
     ['saveMilestone', IPC_CHANNELS.saveMilestone],
