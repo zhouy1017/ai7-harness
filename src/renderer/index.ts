@@ -665,12 +665,12 @@ function renderEditorWindow(initialWindow: ManuscriptWindowProjection, bookTitle
   milestoneLabel.htmlFor = 'milestone-label';
   const milestoneName = element('input');
   milestoneName.id = 'milestone-label';
-  milestoneName.maxLength = 120;
+  milestoneName.maxLength = 80;
   const purposeLabel = element('label', undefined, '保存目的');
   purposeLabel.htmlFor = 'milestone-purpose';
   const purpose = element('input');
   purpose.id = 'milestone-purpose';
-  purpose.maxLength = 240;
+  purpose.maxLength = 120;
   const noteLabel = element('label', undefined, '说明（可选）');
   noteLabel.htmlFor = 'milestone-note';
   const note = element('input');
@@ -731,26 +731,28 @@ function renderEditorWindow(initialWindow: ManuscriptWindowProjection, bookTitle
   let cancellationRequest: Promise<ServiceJobProjection> | undefined;
   let searchReturn: { window: ManuscriptWindowProjection; continuity: EditorContinuity } | undefined;
   let edgeNavigation = false;
+  let authoritativeMutationStarting = false;
   let authoritativeMutation = false;
   let searchInvalidation: Promise<void> | undefined;
   let searchPresentationStale = false;
   const excludedMatchIds = new Set<string>();
 
   const serviceJobBusy = (): boolean => serviceJobStarting || activeJob !== undefined;
+  const authoritativeMutationBusy = (): boolean => authoritativeMutationStarting || authoritativeMutation;
 
   const updateServiceControls = (): void => {
     const busy = serviceJobBusy();
-    searchButton.disabled = authoritativeMutation || busy;
-    prepareReplacementButton.disabled = authoritativeMutation || busy || searchPresentationStale ||
+    searchButton.disabled = authoritativeMutationBusy() || busy;
+    prepareReplacementButton.disabled = authoritativeMutationBusy() || busy || searchPresentationStale ||
       searchPage === undefined || searchPage.totalMatches === 0;
-    searchInput.disabled = authoritativeMutation || busy;
-    replacementInput.disabled = authoritativeMutation || busy;
+    searchInput.disabled = authoritativeMutationBusy() || busy;
+    replacementInput.disabled = authoritativeMutationBusy() || busy;
     cancelJob.hidden = activeJob === undefined || (activeJob.state !== 'queued' && activeJob.state !== 'running');
     cancelJob.disabled = activeJob === undefined || (activeJob.state !== 'queued' && activeJob.state !== 'running');
     cancelJob.dataset['serviceJobId'] = activeJob?.jobId ?? '';
     for (const control of replacementReview.querySelectorAll<HTMLButtonElement>('button[data-replacement-action]')) {
       const dismiss = control.dataset['replacementAction'] === 'dismiss';
-      control.disabled = authoritativeMutation || busy || (searchPresentationStale && !dismiss);
+      control.disabled = authoritativeMutationBusy() || busy || (searchPresentationStale && !dismiss);
     }
   };
 
@@ -760,25 +762,48 @@ function renderEditorWindow(initialWindow: ManuscriptWindowProjection, bookTitle
     journal.textContent = `修订日志序号 ${currentWindow.journalSequence}`;
     positionRail.value = String(Math.round(currentWindow.position.proportion * 1_000_000));
     positionRail.setAttribute('aria-valuetext', `全稿 ${(currentWindow.position.proportion * 100).toFixed(3)}%`);
-    previousWindow.disabled = authoritativeMutation || currentWindow.previousCursor === null;
-    nextWindow.disabled = authoritativeMutation || currentWindow.nextCursor === null;
+    previousWindow.disabled = authoritativeMutationBusy() || currentWindow.previousCursor === null;
+    nextWindow.disabled = authoritativeMutationBusy() || currentWindow.nextCursor === null;
+  };
+
+  const syncAuthoritativeMutationControls = (): void => {
+    const busy = authoritativeMutationBusy();
+    editorHost.dataset['authoritativeMutation'] = authoritativeMutation ? 'true' : 'false';
+    undo.disabled = busy;
+    redo.disabled = busy;
+    milestoneButton.disabled = busy;
+    positionRail.disabled = busy;
+    previousOutline.disabled = busy;
+    nextOutline.disabled = busy;
+    milestoneName.disabled = busy;
+    purpose.disabled = busy;
+    note.disabled = busy;
+    setCloseRisk(busy || dirty || saving || retryRequired);
+    updateServiceControls();
+    updateWindowChrome();
   };
 
   const setAuthoritativeMutation = (locked: boolean): void => {
-    authoritativeMutation = locked;
-    editor?.setOperationLocked(locked);
-    editorHost.dataset['authoritativeMutation'] = locked ? 'true' : 'false';
-    undo.disabled = locked;
-    redo.disabled = locked;
-    milestoneButton.disabled = locked;
-    positionRail.disabled = locked;
-    previousOutline.disabled = locked;
-    nextOutline.disabled = locked;
-    milestoneName.disabled = locked;
-    purpose.disabled = locked;
-    note.disabled = locked;
-    updateServiceControls();
-    updateWindowChrome();
+    const previous = authoritativeMutation;
+    try {
+      editor?.setOperationLocked(locked);
+      authoritativeMutation = locked;
+      syncAuthoritativeMutationControls();
+    } catch (error) {
+      authoritativeMutation = previous;
+      try {
+        editor?.setOperationLocked(previous);
+        syncAuthoritativeMutationControls();
+      } catch (rollbackError) {
+        throw new AggregateError([error, rollbackError], '稿件权威操作锁无法安全回滚。');
+      }
+      throw error;
+    }
+  };
+
+  const publishAuthoritativeMutationStarting = (starting: boolean): void => {
+    authoritativeMutationStarting = starting;
+    syncAuthoritativeMutationControls();
   };
 
   async function settleLocalEdit(): Promise<boolean> {
@@ -786,7 +811,7 @@ function renderEditorWindow(initialWindow: ManuscriptWindowProjection, bookTitle
       setStatus('请先完成当前输入法组合。', 'busy');
       return false;
     }
-    if (dirty) await editor?.flush();
+    if (dirty || saving || retryRequired) await editor?.flush();
     return !dirty && !saving && !retryRequired;
   }
 
@@ -837,22 +862,23 @@ function renderEditorWindow(initialWindow: ManuscriptWindowProjection, bookTitle
     operation: () => Promise<T>,
     reconcile: (result: T) => Promise<void>,
   ): Promise<T | undefined> {
-    if (authoritativeMutation || !editor) return undefined;
+    if (authoritativeMutationBusy() || !editor) return undefined;
+    publishAuthoritativeMutationStarting(true);
     if (editor.isComposing()) {
       setStatus('请先完成当前输入法组合。', 'busy');
+      publishAuthoritativeMutationStarting(false);
       return undefined;
     }
-    setAuthoritativeMutation(true);
     let continuity: EditorContinuity | undefined;
     let target: Parameters<typeof window.ai7.getManuscriptWindowAt>[0]['target'] | undefined;
     let result: T | undefined;
     try {
       if (!(await settleLocalEdit())) {
-        setAuthoritativeMutation(false);
         return undefined;
       }
       continuity = editor.captureContinuity();
       target = { kind: 'window-start', blockId: editor.currentWindow().blocks[0]!.blockId };
+      setAuthoritativeMutation(true);
       result = await operation();
       await refreshAuthoritativeEditor(target, continuity, result);
       await reconcile(result);
@@ -860,8 +886,8 @@ function renderEditorWindow(initialWindow: ManuscriptWindowProjection, bookTitle
       setAuthoritativeMutation(false);
       return result;
     } catch (error) {
-      if (!target || !continuity) {
-        setAuthoritativeMutation(false);
+      if (!authoritativeMutation || !target || !continuity) {
+        if (authoritativeMutation) setAuthoritativeMutation(false);
         setStatus(error instanceof Error ? error.message : '待保存编辑未能排空；权威操作未开始。', 'error');
         return undefined;
       }
@@ -886,6 +912,15 @@ function renderEditorWindow(initialWindow: ManuscriptWindowProjection, bookTitle
         );
       }
       return undefined;
+    } finally {
+      publishAuthoritativeMutationStarting(false);
+      if (!authoritativeMutation && searchStateIsStale()) {
+        try {
+          await invalidateSearchState('待保存编辑已写入；先前搜索结果、替换预览和查找返回位置已失效。');
+        } catch (error) {
+          setStatus(error instanceof Error ? error.message : '无法取消已失效的替换预览。', 'error');
+        }
+      }
     }
   }
 
@@ -914,7 +949,7 @@ function renderEditorWindow(initialWindow: ManuscriptWindowProjection, bookTitle
     target: Parameters<typeof window.ai7.getManuscriptWindowAt>[0]['target'],
     continuity?: EditorContinuity,
   ): Promise<boolean> {
-    if (authoritativeMutation || !(await settleLocalEdit()) || !editor) return false;
+    if (authoritativeMutationBusy() || !(await settleLocalEdit()) || !editor) return false;
     try {
       const binding = editor.currentWindow();
       const next = await window.ai7.getManuscriptWindowAt({
@@ -934,7 +969,7 @@ function renderEditorWindow(initialWindow: ManuscriptWindowProjection, bookTitle
   }
 
   async function navigateCursor(direction: 'previous' | 'next'): Promise<void> {
-    if (authoritativeMutation || edgeNavigation || !(await settleLocalEdit()) || !editor) return;
+    if (authoritativeMutationBusy() || edgeNavigation || !(await settleLocalEdit()) || !editor) return;
     const cursor = direction === 'previous' ? editor.currentWindow().previousCursor : editor.currentWindow().nextCursor;
     if (!cursor) return;
     edgeNavigation = true;
@@ -1121,7 +1156,7 @@ function renderEditorWindow(initialWindow: ManuscriptWindowProjection, bookTitle
   }
 
   async function runSearch(): Promise<void> {
-    if (authoritativeMutation || serviceJobBusy()) return;
+    if (authoritativeMutationBusy() || serviceJobBusy()) return;
     const query = searchInput.value.normalize('NFC');
     if (!query || query.length > 256) {
       setStatus('请输入 1–256 个字符的查找文字。', 'error');
@@ -1147,7 +1182,7 @@ function renderEditorWindow(initialWindow: ManuscriptWindowProjection, bookTitle
   }
 
   async function returnToSearchPosition(): Promise<void> {
-    if (authoritativeMutation || !(await settleLocalEdit()) || !editor) return;
+    if (authoritativeMutationBusy() || !(await settleLocalEdit()) || !editor) return;
     if (!searchReturn) return;
     const binding = editor.currentWindow();
     if (
@@ -1206,7 +1241,7 @@ function renderEditorWindow(initialWindow: ManuscriptWindowProjection, bookTitle
   }
 
   async function jumpToSearchMatch(match: SearchResultsProjection['results'][number]): Promise<void> {
-    if (authoritativeMutation || !(await settleLocalEdit()) || !editor) return;
+    if (authoritativeMutationBusy() || !(await settleLocalEdit()) || !editor) return;
     const binding = editor.currentWindow();
     if (!searchPage || binding.revisionId !== searchPage.revisionId ||
         binding.journalSequence !== searchPage.journalSequence || binding.workingDigest !== searchPage.workingDigest) {
@@ -1224,7 +1259,7 @@ function renderEditorWindow(initialWindow: ManuscriptWindowProjection, bookTitle
   }
 
   async function prepareReplacement(): Promise<void> {
-    if (authoritativeMutation || serviceJobBusy() || !searchPage) return;
+    if (authoritativeMutationBusy() || serviceJobBusy() || !searchPage) return;
     const searchId = searchPage.searchId;
     const replacement = replacementInput.value.normalize('NFC');
     const exclusions = [...excludedMatchIds];
@@ -1309,7 +1344,7 @@ function renderEditorWindow(initialWindow: ManuscriptWindowProjection, bookTitle
   }
 
   async function dismissReplacementFromReview(previewId: string): Promise<void> {
-    if (authoritativeMutation || serviceJobBusy() || replacementPreview?.previewId !== previewId) return;
+    if (authoritativeMutationBusy() || serviceJobBusy() || replacementPreview?.previewId !== previewId) return;
     try {
       const dismissal = await window.ai7.dismissReplacementPreview({ previewId });
       if (dismissal.state !== 'cancelled') throw new Error('替换预览取消确认无效。');
@@ -1351,7 +1386,7 @@ function renderEditorWindow(initialWindow: ManuscriptWindowProjection, bookTitle
   }
 
   async function saveMilestone(): Promise<void> {
-    if (authoritativeMutation || !editor) return;
+    if (authoritativeMutationBusy() || !editor) return;
     if (!milestoneName.value.trim() || !purpose.value.trim()) {
       setStatus('请填写里程碑名称和保存目的。', 'error');
       (!milestoneName.value.trim() ? milestoneName : purpose).focus();
@@ -1380,7 +1415,7 @@ function renderEditorWindow(initialWindow: ManuscriptWindowProjection, bookTitle
   }
 
   async function runHistory(action: 'undo' | 'redo'): Promise<void> {
-    if (authoritativeMutation || !editor) return;
+    if (authoritativeMutationBusy() || !editor) return;
     try {
       const result = await runAuthoritativeMutation(() => {
         const binding = editor!.currentWindow();
@@ -1403,14 +1438,14 @@ function renderEditorWindow(initialWindow: ManuscriptWindowProjection, bookTitle
 
   positionRail.addEventListener('change', () => void navigate({ kind: 'proportion', proportion: Number(positionRail.value) / 1_000_000 }));
   editorWindow.addEventListener('scroll', () => {
-    if (authoritativeMutation || edgeNavigation || editor?.isComposing()) return;
+    if (authoritativeMutationBusy() || edgeNavigation || editor?.isComposing()) return;
     const atStart = editorWindow.scrollTop <= 0 && currentWindow.previousCursor !== null;
     const atEnd = editorWindow.scrollTop + editorWindow.clientHeight >= editorWindow.scrollHeight - 1 && currentWindow.nextCursor !== null;
     if (!atStart && !atEnd) return;
     void navigateCursor(atStart ? 'previous' : 'next');
   });
   searchInput.addEventListener('keydown', (event) => {
-    if (event.key === 'Enter' && !event.isComposing && !authoritativeMutation && !serviceJobBusy()) {
+    if (event.key === 'Enter' && !event.isComposing && !authoritativeMutationBusy() && !serviceJobBusy()) {
       event.preventDefault();
       void runSearch();
     }
@@ -1426,9 +1461,9 @@ function renderEditorWindow(initialWindow: ManuscriptWindowProjection, bookTitle
       dirty = state.dirty;
       saving = state.saving;
       retryRequired = state.retryRequired;
-      save.disabled = authoritativeMutation || !state.dirty || state.saving || state.interrupted;
+      save.disabled = authoritativeMutationBusy() || !state.dirty || state.saving || state.interrupted;
       journal.textContent = `修订日志序号 ${state.journalSequence}`;
-      setCloseRisk(authoritativeMutation || state.dirty || state.saving || state.retryRequired || (state.interrupted && state.dirty));
+      setCloseRisk(authoritativeMutationBusy() || state.dirty || state.saving || state.retryRequired || (state.interrupted && state.dirty));
       if (editor) {
         const editorWindowProjection = editor.currentWindow();
         const bindingChanged = editorWindowProjection.revisionId !== currentWindow.revisionId ||
@@ -1439,7 +1474,7 @@ function renderEditorWindow(initialWindow: ManuscriptWindowProjection, bookTitle
           updateWindowChrome();
           void loadOutline(null);
         }
-        if (!authoritativeMutation && searchStateIsStale()) {
+        if (!authoritativeMutationBusy() && searchStateIsStale()) {
           void invalidateSearchState('稿件状态已变化；先前搜索结果、替换预览和查找返回位置已失效。').catch((error) => {
             setStatus(error instanceof Error ? error.message : '无法取消已失效的替换预览。', 'error');
           });

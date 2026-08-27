@@ -12,9 +12,15 @@ interface JobRecord {
   scheduled: boolean;
 }
 
+interface TerminalReceipt {
+  projection: ServiceJobProjection;
+  subjectId: string;
+}
+
 export class CooperativeJobOwner {
   readonly #store: EditorialStore;
   readonly #jobs = new Map<string, JobRecord>();
+  readonly #polledTerminalReceipts = new Map<string, TerminalReceipt>();
   #disposed = false;
 
   constructor(store: EditorialStore) {
@@ -68,13 +74,32 @@ export class CooperativeJobOwner {
     const job = this.#requireJob(jobId);
     const projection = structuredClone(job.projection);
     if (projection.state === 'completed' || projection.state === 'cancelled' || projection.state === 'failed') {
+      this.#rememberPolledTerminal(jobId, job);
       this.#jobs.delete(jobId);
     }
     return projection;
   }
 
   cancel(jobId: string): ServiceJobProjection {
-    const job = this.#requireJob(jobId);
+    this.#validateJobId(jobId);
+    const job = this.#jobs.get(jobId);
+    if (!job) {
+      const receipt = this.#polledTerminalReceipts.get(jobId);
+      if (!receipt) throw new StoreError('JOB_NOT_FOUND', '本地处理不存在或已结束。');
+      if (receipt.projection.kind === 'replacement' && receipt.projection.state === 'completed') {
+        const cancelled = this.#store.cancelReplacement(receipt.subjectId);
+        if (cancelled) {
+          receipt.projection = {
+            ...receipt.projection,
+            state: 'cancelled',
+            result: null,
+            failure: null,
+            progress: { ...receipt.projection.progress, label: '替换准备已取消' },
+          };
+        }
+      }
+      return structuredClone(receipt.projection);
+    }
     if (job.projection.kind === 'replacement' && job.projection.state !== 'cancelled' && job.projection.state !== 'failed') {
       const cancelled = this.#store.cancelReplacement(job.subjectId);
       if (cancelled) {
@@ -110,6 +135,7 @@ export class CooperativeJobOwner {
       }
     }
     this.#jobs.clear();
+    this.#polledTerminalReceipts.clear();
   }
 
   #schedule(job: JobRecord): void {
@@ -187,9 +213,26 @@ export class CooperativeJobOwner {
   }
 
   #requireJob(jobId: string): JobRecord {
-    if (!/^[0-9a-f-]{36}$/i.test(jobId)) throw new StoreError('JOB_INVALID', '本地处理标识无效。');
+    this.#validateJobId(jobId);
     const job = this.#jobs.get(jobId);
     if (!job) throw new StoreError('JOB_NOT_FOUND', '本地处理不存在或已结束。');
     return job;
+  }
+
+  #validateJobId(jobId: string): void {
+    if (!/^[0-9a-f-]{36}$/i.test(jobId)) throw new StoreError('JOB_INVALID', '本地处理标识无效。');
+  }
+
+  #rememberPolledTerminal(jobId: string, job: JobRecord): void {
+    this.#polledTerminalReceipts.delete(jobId);
+    this.#polledTerminalReceipts.set(jobId, {
+      projection: structuredClone(job.projection),
+      subjectId: job.subjectId,
+    });
+    while (this.#polledTerminalReceipts.size > MAX_RETAINED_JOBS) {
+      const oldest = this.#polledTerminalReceipts.keys().next().value as string | undefined;
+      if (oldest === undefined) break;
+      this.#polledTerminalReceipts.delete(oldest);
+    }
   }
 }

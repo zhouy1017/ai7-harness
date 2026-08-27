@@ -168,7 +168,7 @@ async function runJourney(renderer, expectExactMatch) {
   );
   await assertRenderer(
     renderer,
-    `typeof globalThis.process === 'undefined' && typeof globalThis.require === 'undefined' && Object.keys(window.ai7).sort().join(',') === 'cancelServiceJob,commitNewBookImport,commitReplacement,flushJournalEdit,freezeReplacement,getManuscriptWindow,getManuscriptWindowAt,getOutline,getSearchResults,listPriorWork,platform,pollServiceJob,prepareNewBookReview,prepareReplacement,redoManuscript,saveMilestone,selectAndStageDocx,startReplacementCommit,startSearch,undoManuscript'`,
+    `typeof globalThis.process === 'undefined' && typeof globalThis.require === 'undefined' && Object.keys(window.ai7).sort().join(',') === 'cancelServiceJob,commitNewBookImport,commitReplacement,dismissReplacementPreview,flushJournalEdit,freezeReplacement,getManuscriptWindow,getManuscriptWindowAt,getOutline,getSearchResults,listPriorWork,platform,pollServiceJob,prepareNewBookReview,prepareReplacement,redoManuscript,saveMilestone,selectAndStageDocx,startReplacementCommit,startSearch,undoManuscript'`,
     'renderer-isolation',
   );
   await assertRenderer(

@@ -38,6 +38,85 @@ function reportCloseRisk(): void {
   ipcRenderer.send(MAIN_EVENTS.closeRiskChanged, document.documentElement.dataset['ai7CloseRisk'] === 'true');
 }
 
+type J02ObservedOperation =
+  | 'startSearch'
+  | 'startReplacementCommit'
+  | 'cancelServiceJob'
+  | 'flushJournalEdit'
+  | 'commitReplacement'
+  | 'saveMilestone'
+  | 'undoManuscript'
+  | 'redoManuscript';
+
+interface J02IpcEvent {
+  ordinal: number;
+  operation: J02ObservedOperation;
+  phase: 'invoke' | 'result' | 'error';
+  jobId?: string;
+  kind?: string;
+  state?: string;
+}
+
+const J02_OBSERVED_CHANNELS = new Map<string, J02ObservedOperation>([
+  [IPC_CHANNELS.startSearch, 'startSearch'],
+  [IPC_CHANNELS.startReplacementCommit, 'startReplacementCommit'],
+  [IPC_CHANNELS.cancelServiceJob, 'cancelServiceJob'],
+  [IPC_CHANNELS.flushJournalEdit, 'flushJournalEdit'],
+  [IPC_CHANNELS.commitReplacement, 'commitReplacement'],
+  [IPC_CHANNELS.saveMilestone, 'saveMilestone'],
+  [IPC_CHANNELS.undoManuscript, 'undoManuscript'],
+  [IPC_CHANNELS.redoManuscript, 'redoManuscript'],
+]);
+const j02IpcEvents: J02IpcEvent[] = [];
+const j02IpcCounts = new Map<J02ObservedOperation, number>();
+let j02IpcOrdinal = 0;
+const j02ObservationEnabled = process.env['AI7_E2E_JOURNEY'] === 'J-02';
+
+function jobTruth(value: unknown): Pick<J02IpcEvent, 'jobId' | 'kind' | 'state'> {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return {};
+  const record = value as Record<string, unknown>;
+  return {
+    ...(typeof record['jobId'] === 'string' ? { jobId: record['jobId'] } : {}),
+    ...(typeof record['kind'] === 'string' ? { kind: record['kind'] } : {}),
+    ...(typeof record['state'] === 'string' ? { state: record['state'] } : {}),
+  };
+}
+
+function observeJ02Ipc(
+  operation: J02ObservedOperation,
+  phase: J02IpcEvent['phase'],
+  value: unknown,
+): void {
+  if (!j02ObservationEnabled) return;
+  const inputJobId = value !== null && typeof value === 'object' && !Array.isArray(value) &&
+      typeof (value as Record<string, unknown>)['jobId'] === 'string'
+    ? String((value as Record<string, unknown>)['jobId'])
+    : undefined;
+  j02IpcEvents.push({
+    ordinal: ++j02IpcOrdinal,
+    operation,
+    phase,
+    ...(inputJobId === undefined ? {} : { jobId: inputJobId }),
+    ...jobTruth(value),
+  });
+  if (j02IpcEvents.length > 128) j02IpcEvents.splice(0, j02IpcEvents.length - 128);
+}
+
+if (j02ObservationEnabled) {
+  const observation = Object.freeze({
+    snapshot: () => ({
+      counts: Object.fromEntries(j02IpcCounts),
+      events: structuredClone(j02IpcEvents),
+    }),
+  });
+  Object.defineProperty(globalThis, '__ai7J02IpcObservation', {
+    value: observation,
+    configurable: false,
+    enumerable: false,
+    writable: false,
+  });
+}
+
 ipcRenderer.on(MAIN_EVENTS.serviceInterrupted, markServiceInterrupted);
 ipcRenderer.on(MAIN_EVENTS.closeBlocked, markCloseBlocked);
 ipcRenderer.on(MAIN_EVENTS.productReady, markProductReady);
@@ -54,11 +133,25 @@ if (document.documentElement) observeCloseRisk();
 else window.addEventListener('DOMContentLoaded', observeCloseRisk, { once: true });
 
 async function invoke<Result>(channel: string, input?: unknown): Promise<Result> {
-  const envelope = (await ipcRenderer.invoke(channel, input)) as RendererCallResult<Result>;
-  if (envelope.ok) return envelope.result;
-  const error = new Error(envelope.error.message) as Error & { code: string };
-  error.code = envelope.error.code;
-  throw error;
+  const observedOperation = J02_OBSERVED_CHANNELS.get(channel);
+  if (observedOperation && j02ObservationEnabled) {
+    j02IpcCounts.set(observedOperation, (j02IpcCounts.get(observedOperation) ?? 0) + 1);
+    observeJ02Ipc(observedOperation, 'invoke', input);
+  }
+  try {
+    const envelope = (await ipcRenderer.invoke(channel, input)) as RendererCallResult<Result>;
+    if (envelope.ok) {
+      if (observedOperation) observeJ02Ipc(observedOperation, 'result', envelope.result);
+      return envelope.result;
+    }
+    if (observedOperation) observeJ02Ipc(observedOperation, 'error', input);
+    const error = new Error(envelope.error.message) as Error & { code: string };
+    error.code = envelope.error.code;
+    throw error;
+  } catch (error) {
+    if (observedOperation && !(error instanceof Error && 'code' in error)) observeJ02Ipc(observedOperation, 'error', input);
+    throw error;
+  }
 }
 
 if (process.platform !== 'win32' && process.platform !== 'darwin') throw new Error('Unsupported renderer platform.');

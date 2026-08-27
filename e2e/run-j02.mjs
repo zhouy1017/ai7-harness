@@ -148,10 +148,23 @@ async function attachRendererTarget(browser) {
   const { sessionId } = await rootSession.send('Target.attachToTarget', { targetId: pageTarget.targetId, flatten: false });
   let nextId = 1;
   const pending = new Map();
+  const executionContexts = new Set();
   rootSession.on('Target.receivedMessageFromTarget', ({ sessionId: incoming, message }) => {
     if (incoming !== sessionId) return;
     let response;
     try { response = JSON.parse(message); } catch { return; }
+    if (response.method === 'Runtime.executionContextCreated' && Number.isSafeInteger(response.params?.context?.id)) {
+      executionContexts.add(response.params.context.id);
+      return;
+    }
+    if (response.method === 'Runtime.executionContextDestroyed' && Number.isSafeInteger(response.params?.executionContextId)) {
+      executionContexts.delete(response.params.executionContextId);
+      return;
+    }
+    if (response.method === 'Runtime.executionContextsCleared') {
+      executionContexts.clear();
+      return;
+    }
     if (typeof response.id !== 'number') return;
     const completion = pending.get(response.id);
     if (!completion) return;
@@ -180,8 +193,26 @@ async function attachRendererTarget(browser) {
     requireJourney(!response.exceptionDetails, 'renderer-evaluate');
     return response.result.value;
   };
+  const observeIpc = async () => {
+    for (const contextId of executionContexts) {
+      try {
+        const response = await send('Runtime.evaluate', {
+          expression: `globalThis.__ai7J02IpcObservation?.snapshot?.()`,
+          contextId,
+          awaitPromise: true,
+          returnByValue: true,
+        });
+        if (!response.exceptionDetails && response.result?.value?.counts && Array.isArray(response.result.value.events)) {
+          return response.result.value;
+        }
+      } catch {
+        executionContexts.delete(contextId);
+      }
+    }
+    throw new Error('J-02/preload-ipc-observation');
+  };
   await send('Runtime.enable');
-  return { evaluate, send };
+  return { evaluate, observeIpc, send };
 }
 
 async function waitFor(renderer, expression, location, timeout = 60_000) {
@@ -242,6 +273,7 @@ async function runWorkspaceJourney(renderer) {
   at('bounded-workspace');
   await assertRenderer(renderer, `document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]').length === 32`, 'renderer-block-ceiling');
   await assertRenderer(renderer, `document.querySelector('#manuscript-position')?.max === '1000000' && document.querySelector('.editor-meta')?.textContent.includes('全稿 0.000%')`, 'whole-manuscript-position');
+  await assertRenderer(renderer, `document.querySelector('#milestone-label')?.maxLength === 80 && document.querySelector('#milestone-purpose')?.maxLength === 120 && document.querySelector('#milestone-note')?.maxLength === 500`, 'milestone-ui-service-bounds');
   await renderer.evaluate(`globalThis.__ai7FirstBlock = document.querySelector('[data-testid="manuscript-editor"] > [data-block-id]')?.dataset.blockId`);
 
   const positionJump = `(() => { const rail = document.querySelector('#manuscript-position'); rail.value = '750000'; rail.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`;
@@ -270,10 +302,16 @@ async function runWorkspaceJourney(renderer) {
   await waitFor(renderer, `document.querySelector('.editor-meta')?.textContent.includes('99.998%')`, 'outline-exact-resolve');
 
   at('cooperative-edit');
+  const commonSearchObservation = await renderer.observeIpc();
   await fill(renderer, '#manuscript-search', '天', 'common-search-fill');
   await clickButton(renderer, '查找全稿', 'common-search-start');
   await waitFor(renderer, `!Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '取消当前操作')?.hidden`, 'common-search-running');
   await assertRenderer(renderer, `(() => { const cancel = Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '取消当前操作'); const search = document.querySelector('#manuscript-search'); if (!cancel?.dataset.serviceJobId || !(search instanceof HTMLInputElement)) return false; globalThis.__ai7ServiceJobId = cancel.dataset.serviceJobId; search.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '查找全稿')?.click(); return cancel.dataset.serviceJobId === globalThis.__ai7ServiceJobId && document.querySelectorAll('button[data-service-job-id="' + globalThis.__ai7ServiceJobId + '"]').length === 1; })()`, 'single-service-job-reentry');
+  const afterSearchReentryObservation = await renderer.observeIpc();
+  requireJourney(
+    (afterSearchReentryObservation.counts.startSearch ?? 0) - (commonSearchObservation.counts.startSearch ?? 0) === 1,
+    'single-service-job-actual-start-ipc',
+  );
   await assertRenderer(
     renderer,
     `(() => { const blocks = document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]'); const edit = (block, text) => { if (!block) return false; block.focus(); const range = document.createRange(); range.selectNodeContents(block); range.collapse(false); const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range); return document.execCommand('insertText', false, text); }; return edit(blocks[0], '协作'.repeat(150)) && edit(blocks[1], '续写'); })()`,
@@ -286,13 +324,47 @@ async function runWorkspaceJourney(renderer) {
   await waitFor(renderer, `document.querySelector('[data-testid="manuscript-editor"] > [data-block-id]')?.dataset.blockId !== globalThis.__ai7AfterAckFirst`, 'fresh-cursor-after-ack-resolved');
   await clickButton(renderer, '向后浏览', 'fresh-return-cursor-after-ack');
   await waitFor(renderer, `Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '取消当前操作')?.hidden`, 'stale-search-closed');
+
+  at('authoritative-mutation-drain');
+  const dirtyHistoryObservation = await renderer.observeIpc();
+  await assertRenderer(
+    renderer,
+    `(() => { const editor = document.querySelector('[data-testid="manuscript-editor"]'); const block = editor?.lastElementChild; const save = Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '保存当前编辑'); const undo = Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '撤销'); if (!(block instanceof HTMLElement) || !save || !undo) return false; block.focus(); const range = document.createRange(); range.selectNodeContents(block); range.collapse(false); const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range); if (!document.execCommand('insertText', false, '稳')) return false; save.click(); undo.click(); return true; })()`,
+    'dirty-saving-undo-start',
+  );
+  await waitFor(renderer, `document.querySelector('.editor-meta')?.textContent.includes('修订日志序号 5') && document.querySelector('[data-testid="manuscript-editor"]')?.dataset.operationLocked === 'false' && document.querySelector('[data-testid="manuscript-editor"]')?.getAttribute('contenteditable') === 'true' && document.querySelector('[data-testid="manuscript-editor"]')?.dataset.authoritativeMutation !== 'true'`, 'dirty-saving-undo-drained-and-unlocked', 120_000);
+  const dirtyHistoryCompleted = await renderer.observeIpc();
+  const dirtyHistoryEvents = dirtyHistoryCompleted.events.filter((event) => event.ordinal > (dirtyHistoryObservation.events.at(-1)?.ordinal ?? 0));
+  const dirtyFlushInvoke = dirtyHistoryEvents.find((event) => event.operation === 'flushJournalEdit' && event.phase === 'invoke');
+  const dirtyUndoInvoke = dirtyHistoryEvents.find((event) => event.operation === 'undoManuscript' && event.phase === 'invoke');
+  requireJourney(
+    (dirtyHistoryCompleted.counts.flushJournalEdit ?? 0) - (dirtyHistoryObservation.counts.flushJournalEdit ?? 0) === 1 &&
+      (dirtyHistoryCompleted.counts.undoManuscript ?? 0) - (dirtyHistoryObservation.counts.undoManuscript ?? 0) === 1 &&
+      dirtyFlushInvoke?.ordinal < dirtyUndoInvoke?.ordinal,
+    'dirty-saving-authoritative-ipc-order',
+  );
+  const redoObservation = await renderer.observeIpc();
+  await clickButton(renderer, '重做', 'dirty-history-redo');
+  await waitFor(renderer, `document.querySelector('.editor-meta')?.textContent.includes('修订日志序号 6')`, 'dirty-history-redo-durable', 120_000);
+  const redoCompleted = await renderer.observeIpc();
+  requireJourney((redoCompleted.counts.redoManuscript ?? 0) - (redoObservation.counts.redoManuscript ?? 0) === 1, 'dirty-history-redo-actual-ipc');
+
   await fill(renderer, '#manuscript-search', '地', 'cancel-search-fill');
   await clickButton(renderer, '查找全稿', 'cancel-search-start');
   await waitFor(renderer, `!Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '取消当前操作')?.hidden`, 'cancel-search-running');
-  await assertRenderer(renderer, `(() => { const cancel = Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '取消当前操作'); if (!cancel?.dataset.serviceJobId) return false; globalThis.__ai7CancelTargetJobId = cancel.dataset.serviceJobId; return true; })()`, 'cancel-search-target-captured');
+  const cancelTargetJobId = await renderer.evaluate(`(() => { const cancel = Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '取消当前操作'); if (!cancel?.dataset.serviceJobId) return null; globalThis.__ai7CancelTargetJobId = cancel.dataset.serviceJobId; return cancel.dataset.serviceJobId; })()`);
+  requireJourney(typeof cancelTargetJobId === 'string' && /^[0-9a-f-]{36}$/i.test(cancelTargetJobId), 'cancel-search-target-captured');
   await clickButton(renderer, '取消当前操作', 'cancel-search');
   await waitFor(renderer, `document.querySelector('.search-section .field-note')?.textContent.includes('已取消')`, 'cancel-business-readable');
   await assertRenderer(renderer, `Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '取消当前操作')?.dataset.cancellationTargetJobId === globalThis.__ai7CancelTargetJobId`, 'cancel-search-target-stable');
+  const cancelObservation = await renderer.observeIpc();
+  const cancelInvoke = cancelObservation.events.findLast((event) => event.operation === 'cancelServiceJob' && event.phase === 'invoke');
+  const cancelResult = cancelObservation.events.findLast((event) => event.operation === 'cancelServiceJob' && event.phase === 'result');
+  requireJourney(
+    cancelInvoke?.jobId === cancelTargetJobId && cancelResult?.jobId === cancelTargetJobId &&
+      cancelResult.kind === 'search' && cancelResult.state === 'cancelled',
+    'cancel-search-exact-ipc-terminal',
+  );
 
   await fill(renderer, '#manuscript-search', OVERLAP_QUERY, 'overlap-search-fill');
   await clickButton(renderer, '查找全稿', 'overlap-search-start');
@@ -330,7 +402,7 @@ async function runWorkspaceJourney(renderer) {
   await assertRenderer(renderer, `(() => { const block = document.querySelector('[data-testid="manuscript-editor"] > [data-block-id]'); if (!block) return false; const before = block.textContent; block.focus(); document.execCommand('insertText', false, '竞态'); return block.textContent === before; })()`, 'replacement-typing-blocked');
   await waitFor(renderer, `document.querySelector('#persistence-status')?.textContent.includes('已原子替换 24 处')`, 'replacement-atomic', 120_000);
   await assertRenderer(renderer, `document.querySelector('[data-testid="manuscript-editor"]')?.dataset.operationLocked === 'false' && document.querySelector('[data-testid="manuscript-editor"]')?.getAttribute('contenteditable') === 'true'`, 'replacement-editor-unlocked-after-refresh');
-  await assertRenderer(renderer, `document.querySelector('.editor-meta')?.textContent.includes('修订日志序号 4')`, 'replacement-journal');
+  await assertRenderer(renderer, `document.querySelector('.editor-meta')?.textContent.includes('修订日志序号 7')`, 'replacement-journal');
 
   await fill(renderer, '#manuscript-search', REPLACEMENT_TEXT, 'milestone-stale-search-fill');
   await clickButton(renderer, '查找全稿', 'milestone-stale-search-start');
@@ -347,22 +419,37 @@ async function runWorkspaceJourney(renderer) {
   await fill(renderer, '#milestone-label', '结构复核完成', 'milestone-label');
   await fill(renderer, '#milestone-purpose', '确认千万字编辑与替换状态', 'milestone-purpose');
   await fill(renderer, '#milestone-note', '本地里程碑，不表示导出或发布。', 'milestone-note');
-  await clickButton(renderer, '保存为里程碑版本', 'milestone-save');
+  const milestoneDrainObservation = await renderer.observeIpc();
+  await assertRenderer(
+    renderer,
+    `(() => { const editor = document.querySelector('[data-testid="manuscript-editor"]'); const block = editor?.lastElementChild; const milestone = Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '保存为里程碑版本'); if (!(block instanceof HTMLElement) || !milestone || milestone.disabled) return false; block.focus(); const range = document.createRange(); range.selectNodeContents(block); range.collapse(false); const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range); if (!document.execCommand('insertText', false, '碑')) return false; milestone.click(); return true; })()`,
+    'dirty-milestone-save',
+  );
   await waitFor(renderer, `document.querySelector('.editor-meta')?.textContent.includes('当前修订版 r2')`, 'milestone-r2', 180_000);
+  const milestoneDrainCompleted = await renderer.observeIpc();
+  const milestoneDrainEvents = milestoneDrainCompleted.events.filter((event) => event.ordinal > (milestoneDrainObservation.events.at(-1)?.ordinal ?? 0));
+  const milestoneFlushInvoke = milestoneDrainEvents.find((event) => event.operation === 'flushJournalEdit' && event.phase === 'invoke');
+  const milestoneSaveInvoke = milestoneDrainEvents.find((event) => event.operation === 'saveMilestone' && event.phase === 'invoke');
+  requireJourney(
+    (milestoneDrainCompleted.counts.flushJournalEdit ?? 0) - (milestoneDrainObservation.counts.flushJournalEdit ?? 0) === 1 &&
+      (milestoneDrainCompleted.counts.saveMilestone ?? 0) - (milestoneDrainObservation.counts.saveMilestone ?? 0) === 1 &&
+      milestoneFlushInvoke?.ordinal < milestoneSaveInvoke?.ordinal,
+    'dirty-milestone-authoritative-ipc-order',
+  );
   await waitFor(renderer, `document.querySelector('.search-results')?.childElementCount === 0 && document.querySelector('.replacement-review')?.hidden && document.querySelector('.search-results')?.dataset.inclusionLocked === 'false' && Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '返回查找前位置')?.hidden && document.querySelector('.search-section .field-note')?.textContent.includes('稿件修订版已变化')`, 'milestone-revision-stales-all-search-state');
   await clickButton(renderer, '撤销', 'undo');
-  await waitFor(renderer, `document.querySelector('.editor-meta')?.textContent.includes('修订日志序号 5')`, 'undo-durable', 120_000);
+  await waitFor(renderer, `document.querySelector('.editor-meta')?.textContent.includes('修订日志序号 9')`, 'undo-durable', 120_000);
 }
 
 async function runRestartJourney(renderer) {
   at('restart-reopen');
   await waitFor(renderer, `document.querySelector('[data-screen="landing"]') && document.querySelector('.recent-work-item')`, 'prior-work');
-  await assertRenderer(renderer, `document.querySelector('.recent-work-item')?.textContent.includes('10,000,302 字符') && document.querySelector('.recent-work-item')?.textContent.includes('结构复核完成')`, 'prior-work-exact');
+  await assertRenderer(renderer, `document.querySelector('.recent-work-item')?.textContent.includes('10,000,303 字符') && document.querySelector('.recent-work-item')?.textContent.includes('结构复核完成')`, 'prior-work-exact');
   await assertRenderer(renderer, `(() => { const open = document.querySelector('.recent-work-item button'); if (!open) return false; open.click(); return true; })()`, 'prior-work-open');
   await waitFor(renderer, `document.querySelector('[data-screen="editor"]') && document.querySelector('.editor-meta')?.textContent.includes('当前修订版 r2')`, 'reopened-r2');
   await assertRenderer(renderer, `document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]').length <= 32`, 'restart-window-bounded');
   await clickButton(renderer, '重做', 'restart-redo');
-  await waitFor(renderer, `document.querySelector('.editor-meta')?.textContent.includes('修订日志序号 6')`, 'restart-redo-durable', 120_000);
+  await waitFor(renderer, `document.querySelector('.editor-meta')?.textContent.includes('修订日志序号 10')`, 'restart-redo-durable', 120_000);
   await fill(renderer, '#manuscript-search', REPLACEMENT_TEXT, 'redo-search-fill');
   await clickButton(renderer, '查找全稿', 'redo-search');
   await waitFor(renderer, `document.querySelector('.search-section .field-note')?.textContent.includes('共 24 处')`, 'redo-state-exact', 120_000);

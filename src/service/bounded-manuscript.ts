@@ -1007,6 +1007,42 @@ function blockDigest(kind: ManuscriptBlockProjection['kind'], level: number | nu
   return sha256(canonicalJson({ kind, level, text }));
 }
 
+function stagedBlockId(draftId: string, position: number, digest: string): string {
+  return `blk_${sha256(`${draftId}\u0000${position}\u0000${digest}`).slice(0, 24)}`;
+}
+
+function stableRevisionWorkingDigest(db: DatabaseSync, revisionId: string): string {
+  const digest = createHash('sha256');
+  digest.update('[');
+  let position = 0;
+  let expectedPosition = 1;
+  let first = true;
+  while (true) {
+    const rows = db.prepare(
+      `SELECT block_id, position, digest FROM manuscript_block_versions
+       WHERE revision_id = ? AND position > ? ORDER BY position LIMIT ?`,
+    ).all(revisionId, position, MIGRATION_BATCH) as SqlRow[];
+    if (rows.length === 0) break;
+    for (const row of rows) {
+      const blockId = asString(row.block_id);
+      position = asNumber(row.position);
+      const blockDigestValue = asString(row.digest);
+      requireBounded(
+        position === expectedPosition && BLOCK_PATTERN.test(blockId) && DIGEST_PATTERN.test(blockDigestValue),
+        'SCHEMA_MIGRATION_FAILED',
+        '旧版工作稿摘要无法从基础修订版内容块精确重建。',
+      );
+      if (!first) digest.update(',');
+      digest.update(canonicalJson({ blockId, position, digest: blockDigestValue }));
+      first = false;
+      expectedPosition += 1;
+    }
+  }
+  requireBounded(!first, 'SCHEMA_MIGRATION_FAILED', '旧版工作稿基础修订版没有内容块。');
+  digest.update(']');
+  return digest.digest('hex');
+}
+
 function validateIdentity(manuscriptId: string, branchId: string): void {
   requireBounded(UUID_PATTERN.test(manuscriptId) && UUID_PATTERN.test(branchId), 'MANUSCRIPT_INVALID', '稿件绑定无效。');
 }
@@ -1068,7 +1104,55 @@ function stagedBlockLength(text: string): number {
   return length;
 }
 
+function rekeyStagedDraftBlocks(db: DatabaseSync, draftId: string): void {
+  requireBounded(UUID_PATTERN.test(draftId), 'SCHEMA_MIGRATION_FAILED', '暂存稿件草稿标识无效。');
+  let position = 0;
+  let expectedPosition = 1;
+  while (true) {
+    const rows = db.prepare(
+      `SELECT staged_block_id, position, digest FROM staged_import_blocks
+       WHERE draft_id = ? AND position > ? ORDER BY position LIMIT ?`,
+    ).all(draftId, position, MIGRATION_BATCH) as SqlRow[];
+    if (rows.length === 0) break;
+    for (const row of rows) {
+      position = asNumber(row.position);
+      requireBounded(
+        position === expectedPosition && BLOCK_PATTERN.test(asString(row.staged_block_id)) && DIGEST_PATTERN.test(asString(row.digest)),
+        'SCHEMA_MIGRATION_FAILED',
+        '旧暂存稿件内容块身份、顺序或摘要无效。',
+      );
+      expectedPosition += 1;
+    }
+  }
+  requireBounded(expectedPosition > 1, 'SCHEMA_MIGRATION_FAILED', '暂存稿件没有内容块。');
+  db.prepare(
+    `UPDATE staged_import_blocks SET staged_block_id = '_ai7_migration_' || staged_block_id
+     WHERE draft_id = ?`,
+  ).run(draftId);
+  position = 0;
+  const update = db.prepare(
+    'UPDATE staged_import_blocks SET staged_block_id = ? WHERE draft_id = ? AND position = ?',
+  );
+  while (true) {
+    const rows = db.prepare(
+      `SELECT position, digest FROM staged_import_blocks
+       WHERE draft_id = ? AND position > ? ORDER BY position LIMIT ?`,
+    ).all(draftId, position, MIGRATION_BATCH) as SqlRow[];
+    if (rows.length === 0) break;
+    for (const row of rows) {
+      position = asNumber(row.position);
+      const expected = stagedBlockId(draftId, position, asString(row.digest));
+      requireBounded(
+        update.run(expected, draftId, position).changes === 1,
+        'SCHEMA_MIGRATION_FAILED',
+        '暂存稿件稳定内容块身份无法重建。',
+      );
+    }
+  }
+}
+
 function rebuildStagedDraftDerived(db: DatabaseSync, draftId: string): void {
+  rekeyStagedDraftBlocks(db, draftId);
   const updateBlock = db.prepare(
     `UPDATE staged_import_blocks SET start_offset = ?, grapheme_length = ?
      WHERE draft_id = ? AND position = ?`,
@@ -1133,7 +1217,7 @@ function validateStagedDraftDerived(db: DatabaseSync, draftId: string): void {
   let offset = 0;
   while (true) {
     const rows = db.prepare(
-      `SELECT position, text, start_offset, grapheme_length FROM staged_import_blocks
+      `SELECT staged_block_id, position, text, digest, start_offset, grapheme_length FROM staged_import_blocks
        WHERE draft_id = ? AND position > ? ORDER BY position LIMIT ?`,
     ).all(draftId, position, MIGRATION_BATCH) as SqlRow[];
     if (rows.length === 0) break;
@@ -1141,9 +1225,10 @@ function validateStagedDraftDerived(db: DatabaseSync, draftId: string): void {
       position = asNumber(row.position);
       const length = stagedBlockLength(asString(row.text));
       requireBounded(
-        position === expectedPosition && asNumber(row.start_offset) === offset && asNumber(row.grapheme_length) === length,
+        position === expectedPosition && asString(row.staged_block_id) === stagedBlockId(draftId, position, asString(row.digest)) &&
+          asNumber(row.start_offset) === offset && asNumber(row.grapheme_length) === length,
         'SCHEMA_MIGRATION_FAILED',
-        '暂存稿件的内容块顺序、偏移或字素长度校验失败。',
+        '暂存稿件的稳定身份、内容块顺序、偏移或字素长度校验失败。',
       );
       offset += length;
       expectedPosition += 1;
@@ -1454,9 +1539,7 @@ function migrateLegacyJournal(db: DatabaseSync, branchId: string): number {
      SELECT ?, block_id, kind, level, text, digest FROM manuscript_block_versions WHERE revision_id = ?`,
   ).run(branchId, asString(state.base_revision_id));
   let sequence = 0;
-  let previousWorkingDigest = asString(
-    one(db.prepare('SELECT revision_digest FROM manuscript_revisions WHERE revision_id = ?').all(asString(state.base_revision_id)) as SqlRow[], 'SCHEMA_MIGRATION_FAILED', '基础修订版缺失。').revision_digest,
-  );
+  let previousWorkingDigest = stableRevisionWorkingDigest(db, asString(state.base_revision_id));
   while (true) {
     const rows = db.prepare(
       `SELECT journal_entry_id, sequence, block_id, from_grapheme, to_grapheme, insert_text,
@@ -1495,6 +1578,60 @@ function migrateLegacyJournal(db: DatabaseSync, branchId: string): number {
   }
   db.prepare('DELETE FROM migration_block_state WHERE branch_id = ?').run(branchId);
   return sequence;
+}
+
+function legacyHistoryRoot(db: DatabaseSync, branchId: string): { groupId: string; baseRevisionId: string } | undefined {
+  const rows = db.prepare(
+    `SELECT cg.command_group_id, cg.ordinal, je.base_revision_id
+     FROM manuscript_command_groups cg
+     JOIN edit_journal_entries je
+       ON je.journal_entry_id = cg.command_group_id
+      AND je.command_group_id = cg.command_group_id
+      AND je.command_kind = 'edit'
+     WHERE cg.branch_id = ?
+     ORDER BY cg.ordinal
+     LIMIT 2`,
+  ).all(branchId) as SqlRow[];
+  if (rows.length === 0) return undefined;
+  const root = rows[0]!;
+  requireBounded(asNumber(root.ordinal) === 1, 'SCHEMA_MIGRATION_FAILED', '旧版修订日志首组顺序无效。');
+  return { groupId: asString(root.command_group_id), baseRevisionId: asString(root.base_revision_id) };
+}
+
+function repairLegacyHistoryRoot(db: DatabaseSync, branchId: string): void {
+  const root = legacyHistoryRoot(db, branchId);
+  if (!root) return;
+  const expected = stableRevisionWorkingDigest(db, root.baseRevisionId);
+  requireBounded(
+    db.prepare(
+      'UPDATE manuscript_command_groups SET before_working_digest = ? WHERE command_group_id = ? AND branch_id = ?',
+    ).run(expected, root.groupId, branchId).changes === 1,
+    'SCHEMA_MIGRATION_FAILED',
+    '旧版修订日志首组摘要无法修复。',
+  );
+}
+
+function validateLegacyHistoryRoot(db: DatabaseSync, branchId: string): void {
+  const root = legacyHistoryRoot(db, branchId);
+  if (!root) return;
+  const row = one(
+    db.prepare('SELECT before_working_digest FROM manuscript_command_groups WHERE command_group_id = ?').all(root.groupId) as SqlRow[],
+    'SCHEMA_MIGRATION_FAILED',
+    '旧版修订日志首组缺失。',
+  );
+  requireBounded(
+    asString(row.before_working_digest) === stableRevisionWorkingDigest(db, root.baseRevisionId),
+    'SCHEMA_MIGRATION_FAILED',
+    '旧版修订日志首组工作稿摘要校验失败。',
+  );
+}
+
+function repairLegacyHistoryRoots(db: DatabaseSync): void {
+  forEachSchemaId(db, 'branch_working_state', 'branch_id', (branchId) => repairLegacyHistoryRoot(db, branchId));
+}
+
+function validateLegacyHistoryRoots(db: DatabaseSync): void {
+  forEachSchemaId(db, 'branch_working_state', 'branch_id', (branchId) => validateLegacyHistoryRoot(db, branchId));
 }
 
 function createMilestoneSignoffTable(db: DatabaseSync): void {
@@ -1540,7 +1677,9 @@ function migrateCandidateSchemaToCurrent(db: DatabaseSync, sourceVersion: number
     requireTargetSchema(db);
     reclaimOrphanedSearchSessions(db);
     repairAllDerivedOffsets(db);
+    repairLegacyHistoryRoots(db);
     validateAllDerivedOffsets(db);
+    validateLegacyHistoryRoots(db);
     validateMilestoneSignoffTruth(db);
     const violations = db.prepare('PRAGMA foreign_key_check').all();
     requireBounded(violations.length === 0, 'SCHEMA_MIGRATION_FAILED', '数据库迁移后的引用校验失败。');
@@ -1566,6 +1705,7 @@ export function initializeBoundedSchema(db: DatabaseSync): void {
       terminalizeOrphanedReplacementPreviews(db);
       reclaimOrphanedSearchSessions(db);
       validateAllDerivedOffsets(db);
+      validateLegacyHistoryRoots(db);
       validateMilestoneSignoffTruth(db);
       const violations = db.prepare('PRAGMA foreign_key_check').all();
       requireBounded(violations.length === 0, 'SCHEMA_MIGRATION_FAILED', '数据库引用校验失败。');
@@ -1745,6 +1885,7 @@ export function initializeBoundedSchema(db: DatabaseSync): void {
     }
     db.exec('DROP TABLE IF EXISTS temp.migration_block_state');
     validateAllDerivedOffsets(db);
+    validateLegacyHistoryRoots(db);
     validateMilestoneSignoffTruth(db);
     const violations = db.prepare('PRAGMA foreign_key_check').all();
     requireBounded(violations.length === 0, 'SCHEMA_MIGRATION_FAILED', '数据库迁移后的引用校验失败。');
