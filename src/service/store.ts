@@ -2213,7 +2213,7 @@ export class EditorialStore {
   }
 
   createSearch(manuscriptId: string, branchId: string, query: string): SearchSummaryProjection & {
-    searchId: string;
+    scannedPosition: number;
     totalBlocks: number;
   } {
     return this.#boundedCall(() => this.#bounded.createSearch(manuscriptId, branchId, query));

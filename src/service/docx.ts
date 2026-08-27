@@ -77,6 +77,7 @@ interface DocumentParseResult {
   contentDigest: string;
   structureDigest: string;
   signals: DocumentSignals;
+  sample1TerminalSectionSeen: boolean;
 }
 
 function requireDocx(condition: unknown, message: string): asserts condition {
@@ -176,7 +177,6 @@ function parseCoreTitle(xml: string | undefined): string | undefined {
 }
 
 function createDocumentParser(
-  exactSample1: boolean,
   onBlock: (block: ParsedDocxBlock) => void,
 ): { write(chunk: Uint8Array, final: boolean): void; finish(): DocumentParseResult } {
   const signals: DocumentSignals = {
@@ -199,6 +199,7 @@ function createDocumentParser(
   const ancestors: string[] = [];
   let runProperties: { depth: number; styled: boolean } | undefined;
   let terminalSectionSeen = false;
+  let sample1TerminalSectionSeen = false;
   let terminalSection: { depth: number; kind: 'default' | 'sample1'; children: string[] } | undefined;
   let paragraph: { text: string; style: string | undefined } | undefined;
   let xmlTokenCodeUnits = 0;
@@ -312,7 +313,7 @@ function createDocumentParser(
           const attributes = attributeLocalNames(tag);
           if (attributes.length === 0) terminalSection = { depth: ancestors.length, kind: 'default', children: [] };
           else {
-            requireDocx(exactSample1 && hasExactStrings(attributes, ['rsidR', 'rsidRPr']), 'non-default terminal section properties');
+            requireDocx(hasExactStrings(attributes, ['rsidR', 'rsidRPr']), 'non-default terminal section properties');
             terminalSection = { depth: ancestors.length, kind: 'sample1', children: [] };
           }
         } else if (parent === 'pPr' && grandparent === 'p') signals.sections += 1;
@@ -338,6 +339,7 @@ function createDocumentParser(
       if (terminalSection.kind === 'default') requireDocx(terminalSection.children.length === 0, 'non-default terminal section properties');
       else {
         requireDocx(hasExactStrings(terminalSection.children, ['pgSz', 'pgMar', 'cols', 'docGrid']), 'non-default terminal section properties');
+        sample1TerminalSectionSeen = true;
         signals.sections += 1;
       }
       terminalSectionSeen = true;
@@ -411,6 +413,7 @@ function createDocumentParser(
         contentDigest: contentHash.digest('hex'),
         structureDigest: structureHash.update(']').digest('hex'),
         signals,
+        sample1TerminalSectionSeen,
       };
     },
   };
@@ -418,7 +421,6 @@ function createDocumentParser(
 
 async function readStreamingArchive(
   path: string,
-  exactSample1: boolean,
   onBlock: (block: ParsedDocxBlock) => void,
 ): Promise<{
   sourceDigest: string;
@@ -432,7 +434,7 @@ async function readStreamingArchive(
   const entryNames: string[] = [];
   const seen = new Set<string>();
   const sourceHash = createHash('sha256');
-  const documentParser = createDocumentParser(exactSample1, onBlock);
+  const documentParser = createDocumentParser(onBlock);
   let archiveBytes = 0;
   let expandedBytes = 0;
   let documentSeen = false;
@@ -634,11 +636,15 @@ export async function parseDocx(
   expectedSource?: { digest: string; bytes: number },
 ): Promise<ParsedDocx> {
   const displayName = safeDisplayName(displayNameInput);
-  const exactSample1 = expectedSource?.digest === SAMPLE1_SOURCE_SHA256 && expectedSource.bytes === SAMPLE1_SOURCE_BYTES;
-  const archive = await readStreamingArchive(path, exactSample1, onBlock);
+  const archive = await readStreamingArchive(path, onBlock);
   if (expectedSource) {
     requireDocx(archive.sourceDigest === expectedSource.digest && archive.archiveBytes === expectedSource.bytes, 'selected file changed during staging');
   }
+  const exactSample1 = archive.sourceDigest === SAMPLE1_SOURCE_SHA256 && archive.archiveBytes === SAMPLE1_SOURCE_BYTES;
+  requireDocx(
+    !archive.document.sample1TerminalSectionSeen || exactSample1,
+    'non-default terminal section properties',
+  );
   const contentTypes = decodeMetadataXml(archive.metadata.get('[Content_Types].xml')!);
   requireDocx(contentTypes.includes('wordprocessingml.document.main+xml'), 'package does not declare a WordprocessingML document');
   const coreTitle = archive.metadata.get('docProps/core.xml');
