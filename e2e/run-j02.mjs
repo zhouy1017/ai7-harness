@@ -1,5 +1,5 @@
 import { createWriteStream, existsSync } from 'node:fs';
-import { lstat, mkdtemp, realpath, rm, stat } from 'node:fs/promises';
+import { lstat, mkdtemp, opendir, realpath, rm, stat } from 'node:fs/promises';
 import { once } from 'node:events';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { arch, platform, release, tmpdir } from 'node:os';
@@ -22,6 +22,8 @@ const OVERLAP_QUERY = '哈哈';
 const EXCLUSION_TEXT = '边界排除校验';
 const EXPECTED_EXCLUSION_MATCHES = 1_001;
 const MILESTONE_RECOVERY_SNAPSHOT_TIMEOUT = 10 * 60_000;
+const RECOVERY_PARTIAL_PATTERN = /^\.partial-[0-9a-f-]{36}$/i;
+const RECOVERY_OBJECT_PATTERN = /^[0-9a-f]{64}\.snapshot$/;
 const DEBUG_SELECTORS = new Set(['DEBUG', 'DEBUG_FILE', 'PWDEBUG', 'PWDEBUGIMPL']);
 const CJK_BASE = 0x4e00;
 const CJK_SPAN = 0x1000;
@@ -363,7 +365,24 @@ async function importAndOpen(renderer) {
   await waitFor(renderer, `document.querySelector('[data-screen="editor"]')`, 'editor');
 }
 
-async function runWorkspaceJourney(renderer) {
+async function milestoneTimeoutCategory(dataRoot) {
+  let directory;
+  try {
+    directory = await opendir(join(dataRoot, 'recovery-objects', 'v1'));
+  } catch (error) {
+    if (error?.code === 'ENOENT') return 'milestone-r2-recovery-object-absent';
+    throw new Error('J-02/milestone-r2-object-inspection');
+  }
+  let promoted = false;
+  for await (const entry of directory) {
+    if (!entry.isFile()) continue;
+    if (RECOVERY_PARTIAL_PATTERN.test(entry.name)) return 'milestone-r2-partial-object-present';
+    if (RECOVERY_OBJECT_PATTERN.test(entry.name)) promoted = true;
+  }
+  return promoted ? 'milestone-r2-promoted-object-present' : 'milestone-r2-recovery-object-absent';
+}
+
+async function runWorkspaceJourney(renderer, dataRoot) {
   at('bounded-workspace');
   await assertRenderer(renderer, `document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]').length === 32`, 'renderer-block-ceiling');
   await assertRenderer(renderer, `document.querySelector('#manuscript-position')?.max === '1000000' && document.querySelector('.editor-meta')?.textContent.includes('全稿 0.000%')`, 'whole-manuscript-position');
@@ -613,12 +632,17 @@ async function runWorkspaceJourney(renderer) {
   await fill(renderer, '#milestone-note', '本地里程碑，不表示导出或发布。', 'milestone-note');
   const milestoneDrainObservation = await renderer.observeIpc();
   await editThenInvokeOnDirty(renderer, '碑', ['保存为里程碑版本'], 'dirty-milestone-save');
-  await waitFor(
-    renderer,
-    `document.querySelector('.editor-meta')?.textContent.includes('当前修订版 r2')`,
-    'milestone-r2',
-    MILESTONE_RECOVERY_SNAPSHOT_TIMEOUT,
-  );
+  try {
+    await waitFor(
+      renderer,
+      `document.querySelector('.editor-meta')?.textContent.includes('当前修订版 r2')`,
+      'milestone-r2',
+      MILESTONE_RECOVERY_SNAPSHOT_TIMEOUT,
+    );
+  } catch (error) {
+    if (!(error instanceof Error) || error.message !== 'J-02/milestone-r2') throw error;
+    throw new Error(`J-02/${await milestoneTimeoutCategory(dataRoot)}`);
+  }
   const milestoneDrainCompleted = await renderer.observeIpc();
   const milestoneDrainEvents = milestoneDrainCompleted.events.filter((event) => event.ordinal > (milestoneDrainObservation.events.at(-1)?.ordinal ?? 0));
   const milestoneFlushInvoke = milestoneDrainEvents.find((event) => event.operation === 'flushJournalEdit' && event.phase === 'invoke');
@@ -719,7 +743,7 @@ async function main() {
     };
     let renderer = await launch();
     await importAndOpen(renderer);
-    await runWorkspaceJourney(renderer);
+    await runWorkspaceJourney(renderer, dataRoot);
     await browser.close();
     browser = undefined;
     renderer = await launch();

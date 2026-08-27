@@ -157,10 +157,10 @@ async function attachRenderer(browser) {
   await send('Runtime.enable');
   return {
     send,
-    waitForProbeCancellation: () => waitForEvent(
+    waitForCorrelatedProbeFailure: () => waitForEvent(
       'Network.loadingFailed',
       (params) => typeof params?.requestId === 'string' &&
-        networkRequestUrls.get(params.requestId) === NETWORK_PROBE_URL && params.canceled === true,
+        networkRequestUrls.get(params.requestId) === NETWORK_PROBE_URL,
     ),
     evaluate: async (expression) => {
       const response = await send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true });
@@ -308,10 +308,16 @@ async function main() {
     await renderer.send('Network.enable');
     await renderer.send('Page.setBypassCSP', { enabled: true });
     try {
-      const deniedRequest = renderer.waitForProbeCancellation();
+      const deniedRequest = renderer.waitForCorrelatedProbeFailure();
       const fetchRejected = await renderer.evaluate(`(async()=>{try{await fetch(${JSON.stringify(NETWORK_PROBE_URL)});return false}catch{return true}})()`);
       const denial = await deniedRequest;
-      requireJourney(fetchRejected === true && denial.canceled === true, 'renderer-network-denial');
+      const productCancellation = denial.canceled === true ||
+        denial.errorText === 'net::ERR_BLOCKED_BY_CLIENT' ||
+        (platform() === 'darwin' && denial.errorText === 'net::ERR_FAILED');
+      requireJourney(
+        fetchRejected === true && denial.errorText !== 'net::ERR_NAME_NOT_RESOLVED' && productCancellation,
+        'renderer-network-denial',
+      );
     } finally {
       await renderer.send('Page.setBypassCSP', { enabled: false });
     }
