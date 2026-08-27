@@ -500,7 +500,12 @@ async function runWorkspaceJourney(renderer) {
   );
   const redoObservation = await renderer.observeIpc();
   await clickButton(renderer, '重做', 'dirty-history-redo');
-  await waitFor(renderer, `document.querySelector('.editor-meta')?.textContent.includes('修订日志序号 6')`, 'dirty-history-redo-durable', 120_000);
+  await waitForChecks(
+    renderer,
+    `(() => { const editor = document.querySelector('[data-testid="manuscript-editor"]'); const host = editor?.parentElement; const journal = Array.from(document.querySelectorAll('.editor-meta > span')).find((item) => item.textContent?.startsWith('修订日志序号 ')); const searchInput = document.querySelector('#manuscript-search'); const search = Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '查找全稿'); const retry = Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '重试权威刷新'); return { journalSequence6: journal?.textContent === '修订日志序号 6', authoritativeMutationCleared: host?.dataset.authoritativeMutation === 'false', operationUnlocked: editor?.dataset.operationLocked === 'false', editorWritable: editor?.getAttribute('contenteditable') === 'true', ariaWritable: editor?.getAttribute('aria-readonly') === 'false', searchInputReady: searchInput instanceof HTMLInputElement && !searchInput.disabled, searchStartReady: search instanceof HTMLButtonElement && !search.disabled, recoveryNotRequired: retry instanceof HTMLButtonElement && retry.hidden }; })()`,
+    'dirty-history-redo-durable',
+    120_000,
+  );
   const redoCompleted = await renderer.observeIpc();
   requireJourney((redoCompleted.counts.redoManuscript ?? 0) - (redoObservation.counts.redoManuscript ?? 0) === 1, 'dirty-history-redo-actual-ipc');
 
