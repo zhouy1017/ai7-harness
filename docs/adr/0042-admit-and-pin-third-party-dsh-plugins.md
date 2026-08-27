@@ -1,8 +1,10 @@
 ---
-status: accepted
+status: superseded
 ---
 
 # Admit and locally pin third-party DSH plugins
+
+This historical development-only plugin-admission model is fully superseded by [ADR 0045](./0045-preserve-native-dsh-artifacts-behind-ai7-authority-sidecars.md). The body remains unchanged as decision history. Immutable identity/version/digest pins, license and notice obligations, rollback and AI7 authority gates remain applicable; GitHub activity thresholds as the universal product admission owner, release-only activation, no shipped catalog and the absolute no-update posture are not current after the successor is integrated.
 
 This ADR is accepted as root ADR 0042 in the `dev` development baseline. It records the Owner's dependency-governance direction but does not select a plugin or independently authorize search, download, installation, implementation, or promotion to `main`.
 

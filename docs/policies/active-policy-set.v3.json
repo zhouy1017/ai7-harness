@@ -1,0 +1,54 @@
+{
+  "schemaDialect": "http://json-schema.org/draft-07/schema#",
+  "schemaPath": "docs/policies/active-policy-set.v3.schema.json",
+  "manifestType": "ai7-active-policy-set",
+  "version": "v3",
+  "predecessorVersion": "v2",
+  "predecessorCanonicalPath": "docs/policies/active-policy-set.v2.json",
+  "digestAlgorithm": "sha256",
+  "trustedOperationalScopeSelection": {
+    "exactlyOneProviderProcessingScopeBoundPerLaunch": true,
+    "selectionAuthorityClass": "trusted-build-or-launch-authority",
+    "ordinaryProductSettingAllowed": false,
+    "environmentVariableSelectorAllowed": false,
+    "providerSelectorAllowed": false,
+    "artifactOrPluginSelectorAllowed": false,
+    "crossScopeFallbackAllowed": false,
+    "missingOrUnknownScopeResult": "deny-provider-processing"
+  },
+  "activePolicies": {
+    "provider-processing-policy": {
+      "selectionType": "trusted-operational-scope-map",
+      "scopePins": {
+        "development-ci": {
+          "policyId": "provider-processing-policy",
+          "policyType": "provider-processing",
+          "version": "v1",
+          "canonicalPath": "docs/policies/provider-processing-policy.v1.json",
+          "sha256": "d9dfe8c13a58649d8d9f607364030468ae71832b94c9436291d29000795d725a"
+        },
+        "fixture-recording": {
+          "policyId": "provider-processing-policy",
+          "policyType": "provider-processing",
+          "version": "v2",
+          "canonicalPath": "docs/policies/provider-processing-policy.v2.json",
+          "sha256": "d0e3996ce7ba091200d83178b48fb578090bf73b509406182a2d5403ab2a4ebc"
+        },
+        "ordinary-production": {
+          "policyId": "provider-processing-policy",
+          "policyType": "provider-processing",
+          "version": "v3",
+          "canonicalPath": "docs/policies/provider-processing-policy.v3.json",
+          "sha256": "e8d05a669519a6c4018c96783919fcb944559d9dd8e9245e9e69fb992919d706"
+        }
+      }
+    },
+    "external-export-policy": {
+      "policyId": "external-export-policy",
+      "policyType": "external-export",
+      "version": "v1",
+      "canonicalPath": "docs/policies/external-export-policy.v1.json",
+      "sha256": "b66fa0f2ad7d721f879c91e3cbb8e84f6a7bb08b107424d87871ab07937242de"
+    }
+  }
+}

@@ -1,6 +1,6 @@
 # Ubiquitous Language
 
-Status: **accepted bilingual language guide**
+Status: **Issue #86 Owner-approved bilingual successor guide; repository-current only in an exact integrated `dev` commit containing this revision; accepted-but-unintegrated elsewhere**
 
 This is a concise bilingual reading view of AI7's ambiguity-sensitive domain language. The complete English-to-Simplified-Chinese label catalog is in [GLOSSARY.md](./GLOSSARY.md); canonical definitions remain owned by the context files linked there, so this guide must not create competing meanings.
 
@@ -28,6 +28,21 @@ This is a concise bilingual reading view of AI7's ambiguity-sensitive domain lan
 | **Recovery Snapshot** | 恢复快照 | Independently stored and verified state sufficient to reconstruct protected manuscript history after failure. | 稿件修订检查点、普通备份声明 |
 | **Manuscript Pin** | 稿件精确绑定 | The exact Book, branch, revision, and digest identity governing a dependent record or decision. | 当前稿、最新版本、置顶 |
 
+## Retrieval and covered manuscript analysis
+
+| English term | 推荐简体中文 | Definition | Aliases to avoid |
+| --- | --- | --- | --- |
+| **Manuscript Retrieval Chunk** | 稿件检索片段 | A revision-stamped approximate unit that returns ranked candidates; authoritative text still requires Exact Fetch. | 分析单元、原文证据、真相路径 |
+| **Exact Fetch** | 精确获取 | Deterministic resolution of an already-authorized stable reference against one exact pinned revision. | 模糊检索、事实核验、读取或外发权限 |
+| **Coverage Manifest** | 覆盖清单 | The deterministic planned enumeration of exact ranges, digests, bounded overlaps, Analysis Units, and dependencies for one declared manuscript-analysis scope; failures, skips, uncovered units, and outcome gaps belong to its immutable Result Set Revision. | 检索排名、执行结果、目录、语义完整证明 |
+| **Analysis Unit** | 分析单元 | One structure-aware, completely enumerated bounded member of a Coverage Manifest; its size is an execution budget, not a fixed editor page or retrieval chunk. | 稿件结构块、编辑窗口、稿件检索片段、固定 32 块 |
+| **Baseline Manuscript Analysis Contract** | 基线稿件分析契约 | The product-built exact-versioned DSH contract for structure, unit synopsis, entities/aliases/terms, events/chronology, relationships, internal-setting claims, exact ranges, confidence, conflicts, and unresolved items. | 事实核验、八维强制审读、导入权限 |
+| **Manuscript Analysis Result Set** | 稿件分析结果集 | One stable Book-bound identity for a reusable analysis kind across immutable revisions. | 任务结果、编辑工作资料、检索缓存 |
+| **Manuscript Analysis Result Set Revision** | 稿件分析结果集修订版 | One immutable analysis generation bound to exact manuscript, coverage, contract/artifact, schema/reducer, unit/synthesis/gap, execution, reuse, and cost provenance. | 可变缓存、模型对话、当前稿件真相 |
+| **Analysis Quality Metric** | 分析质量度量 | A separate versioned metric family for analysis usefulness, corrections, omissions, closure, conflicts/gaps, repair, reuse, cost, and latency. | 交付质量度量、事实证明、学习权限 |
+
+`同步到当前稿件` reuses compatible unchanged units and closes the deterministic invalidation graph; `重新分析所选范围` bypasses model-result reuse for that range and its local dependency closure; `重新分析全书` bypasses all prior model results and covers the complete current manifest. Each appends a Result Set Revision. Coverage, reducer/synthesis closure, exact-revision freshness, and semantic/evidence assurance are four independent visible states; no single `complete` flag or top-K retrieval claim substitutes for them.
+
 ## Deliverables and workflows
 
 | English term | 推荐简体中文 | Definition | Aliases to avoid |
@@ -37,9 +52,9 @@ This is a concise bilingual reading view of AI7's ambiguity-sensitive domain lan
 | **Promotion Article** | 宣传文章 | A Book-related deliverable written for an identified promotional audience or channel. | 公开发布许可、通用生产文案 |
 | **News Report** | 新闻报道 | A Book-related factual deliverable with explicit source, quotation, chronology, signoff, and correction requirements. | 未核实宣传稿 |
 | **Review Article** | 评论文章 | A publishable deliverable discussing a work under evidence, quotation, disclosure, and signoff requirements. | 编辑审读、编辑评审决定 |
-| **Deliverable Workflow** | 交付成果工作流程 | The durable editorial process governing one deliverable independently of its Book's other deliverables. | 整本书单一阶段、Harness Workflow |
-| **Workflow Profile** | 工作流程方案 | A versioned reusable definition of phases, gates, required artifact types, and default responsibilities for a deliverable family. | 编辑维度方案、Harness Profile |
-| **Workflow Instance** | 工作流程实例 | One deliverable's durable application of an exact Workflow Profile version. | Harness Session、Harness Workflow |
+| **Deliverable Workflow** | 交付成果工作流程 | The durable editorial process governing one deliverable independently of its Book's other deliverables. | 整本书单一阶段、DSH Workflow |
+| **Workflow Profile** | 工作流程方案 | An AI7-facing versioned projection or selector over one exact DSH-native Workflow definition and technical logic for a deliverable family; the native artifact owns the definition while AI7 owns durable instance state and business transitions. | 编辑维度方案、DSH Profile、平行可执行包 |
+| **Workflow Instance** | 工作流程实例 | One deliverable's durable AI7-owned application of an exact Workflow Profile projection and pinned native definition. | Harness Session、DSH Workflow |
 | **Workflow Phase** | 工作阶段 | A named area of work with durable status, evidence, responsibility, and next action. | 进度百分比、统一出版阶段 |
 | **Workflow Gate** | 工作关口 | A profile-defined evidence and human-decision requirement before a specified transition or delivery. | 受控动作批准、通用审批 |
 | **Editorial Artifact** | 编辑工作资料 | A versioned, typed, provenance-bearing supporting record around a deliverable. | 编辑交付成果、任意运行输出 |
@@ -66,7 +81,7 @@ This is a concise bilingual reading view of AI7's ambiguity-sensitive domain lan
 
 | English term | 推荐简体中文 | Definition | Aliases to avoid |
 | --- | --- | --- | --- |
-| **Task Intent** | 任务意图 | The exact requested goal, Task Skill, inputs, editorial context and pins, and expected Task Outcome. | 提示词、Run、执行计划 |
+| **Task Intent** | 任务意图 | The exact requested goal, selected native DSH artifacts/revisions where applicable, inputs, editorial context and pins, and expected Task Outcome. | 提示词、Run、执行计划 |
 | **Execution Plan** | 执行计划 | A versioned statement of intended capabilities, steps, artifacts, Effects/gates, stop conditions, and provider needs. | 计划预览、计划权限边界、Harness plan mode |
 | **Plan Preview** | 计划预览 | The human-readable projection of an Execution Plan and its uncertainty, authority, and expected outcomes. | 任务运行授权、计划权限边界 |
 | **Plan Envelope** | 计划权限边界 | The machine-authoritative capabilities, sources, providers, privacy, budget, limits, adaptation rules, and Effect gates permitted by Run Authorization. | 计划预览、受控动作批准、长期权限 |
@@ -75,32 +90,34 @@ This is a concise bilingual reading view of AI7's ambiguity-sensitive domain lan
 | **Clarification Request** | 澄清请求 | A durable typed wait for user information needed to resolve intent, evidence, authority, or the next safe action. | 临时聊天问题、通用审批 |
 | **Task Outcome** | 任务结果 | A durable typed result carrying actual-versus-planned work, evidence, proposals/artifacts, decisions, Effects/receipts, unresolved matters, and next action. | 原始模型回答、编辑工作资料、受控动作回执 |
 
-## Task Skills, capabilities, and trust
+## Native DSH artifacts, capabilities, and trust
 
 | English term | 推荐简体中文 | Definition | Aliases to avoid |
 | --- | --- | --- | --- |
-| **Task Skill** | 任务技能 | An immutable declarative editorial-workflow package that may request governed capabilities but carries no authority by itself. | Harness Skill、Cordis Plugin、提示词 |
-| **Task Skill Manifest** | 任务技能清单文件 | The machine-validatable authority-request and compatibility contract inside a Task Skill Package. | 技能目录、权限许可、信任决定 |
-| **Task Skill Package** | 任务技能包 | One immutable content-addressed unit of manifest, instructions, resources, examples, and validation material. | 可变技能目录、能力实现 |
-| **Task Skill Candidate** | 候选任务技能 | A complete non-executing proposed package awaiting independent admission. | 已安装任务技能版本、已启用技能 |
-| **Task Skill Trust Tier** | 任务技能信任等级 | A provenance-derived class limiting admission and maximum capability. | 技能准入状态、当前权限 |
-| **Admission State** | 技能准入状态 | The lifecycle state of exact skill bytes from rejection through installation, validation, enablement, disablement, or retirement. | 信任等级、运行状态 |
-| **Installed Task Skill Version** | 已安装任务技能版本 | An immutable app-managed skill identity, semantic version, and content digest. | 最新文件、任务技能运行激活 |
-| **Task Skill Enablement** | 任务技能启用状态 | The state allowing a validated version to request authority up to its exact Authority Ceiling. | 任务运行授权、运行激活 |
-| **Authority Ceiling** | 权限上限 | The maximum authority one installed Task Skill version can ever request. | 能力使用许可、单次执行许可、受控动作批准 |
+| **Native DSH Artifact** | 原生 DSH 构件 | A DSH-defined Skill, Plugin, Bundle, Profile, or Agent Preset kept in its native carrier while AI7 separately records provenance, compatibility, scope, authority, audit, and rollback. | AI7 Task Skill 包、权限许可、扁平扩展文件 |
+| **DSH Skill** | DSH 技能 | A native declarative instructional artifact whose presence or visibility grants no AI7 authority. | DSH 插件、AI7 能力、长期权限 |
+| **DSH Plugin** | DSH 插件 | A native packaging, extension, or composition carrier that may distribute Skills/composition with optional code and grants no product authority; executable hooks/scripts/dependencies/code require separate admission and sandbox authority. | DSH 技能、模型服务提供方、产品功能品牌 |
+| **DSH Bundle** | DSH 构件包 | A native packaging or composition carrier that groups exact artifacts and may include optional code without merging identity or authority; executable content remains separately restricted. | 交付包、权限包、工作流程实例 |
+| **DSH Profile** | DSH 配置档案 | A native technical configuration artifact that may own or select an exact native Workflow definition/logic but never owns AI7 durable Workflow Instance state, scheduling, or business transitions. | 工作流程方案、编辑维度方案、权限档案 |
+| **DSH Agent Preset** | DSH 代理预设 | A native technical behavior composition, not an AI7 Agent identity or authority record. | AI7 智能体、任务运行授权 |
+| **Source Skill Snapshot** | 源技能快照 | The immutable exact source bytes and provenance captured for an imported foreign Skill. | 可执行工作修订、上游最新版本 |
+| **Imported Skill Working Revision** | 导入技能工作修订 | One versioned minimally derived DSH-valid working revision with transformation provenance. | 源技能快照、静默转换、上游替换 |
+| **Artifact Update Rule** | 构件更新规则 | A revocable rule that may adopt only a trusted, conflict-free, validator-clean, non-expansive imported-Skill candidate; it cannot auto-update Plugins/core DSH or restore revoked authority. | 默认执行规则、自动升级通道、权限扩张 |
+| **Authority Ceiling** | 权限上限 | The maximum authority AI7 allows one exact native artifact revision to request, never current Run authority. | 能力使用许可、单次执行许可、受控动作批准 |
 | **AI7 Capability** | AI7 能力 | A stable governed product operation independent of its Harness invocation adapter or implementation. | Harness 工具、能力实现、功能界面 |
-| **Capability Implementation** | 能力实现 | One pinned installed implementation of an AI7 Capability. | 任务技能、模型服务提供方 |
+| **Capability Implementation** | 能力实现 | One pinned installed implementation of an AI7 Capability. | DSH 技能、模型服务提供方 |
 | **Harness Tool** | Harness 工具 | A model-visible invocation adapter whose visibility is not product authority. | AI7 能力、能力使用许可 |
-| **Capability Grant** | 能力使用许可 | The exact AI7 Capabilities one Task Skill Activation may use under stated constraints. | 权限上限、单次执行许可 |
-| **Task Skill Activation** | 任务技能运行激活 | The immutable per-Run intersection of skill identity, ceilings, plan, scope, provider plan, policies, capabilities, and credential references. | 启用状态、Harness Session |
-| **Harness Skill Projection** | Harness 技能投影 | The non-authoritative instructional/catalog representation of an admitted Task Skill inside Harness. | 源技能包、权限来源 |
+| **Capability Grant** | 能力使用许可 | The exact AI7 Capabilities one immutable per-Run activation binding may use under stated constraints. | 权限上限、单次执行许可 |
+| **DSH Analysis Contract** | DSH 分析契约 | A native versioned declaration of analysis coverage/unit requirements, Model Roles, reducers, typed outputs, evidence, and validation; AI7 separately owns authority and persistence. | 后台分析登记、稿件分析结果集、工作流程实例 |
 | **Run Source Scope** | 任务运行来源范围 | The exact Book, Series, Cross-project, source, and revision read boundary authorized for one Run. | 工作语料库、外发数据类别、修改权限 |
+
+AI7 keeps discovery, acquisition/pinning, compatibility/conversion validation, scoped enablement, exact per-Run activation, and formal Manuscript Apply as distinct boundaries. Acquisition and validation execute no artifact code; install or enablement grants no manuscript, Provider, credential, network, Effect, background, or Apply authority. Final sidecar, catalog, compatibility, enablement, and activation record names/schemas remain implementation decisions.
 
 ## Model services, credentials, and outbound data
 
 | English term | 推荐简体中文 | Definition | Aliases to avoid |
 | --- | --- | --- | --- |
-| **Model Role** | 模型角色 | A provider-independent function actually required by a Task Skill. | 模型名、模型服务提供方 |
+| **Model Role** | 模型角色 | A provider-independent function actually required by a Task Intent, native DSH artifact, or DSH Analysis Contract. | 模型名、模型服务提供方 |
 | **Model-role Requirement** | 模型角色硬性要求 | A condition a concrete model binding must satisfy before it is eligible. | 模型角色偏好 |
 | **Model-role Preference** | 模型角色偏好 | A soft quality, cost, or speed ranking applied only after hard constraints pass. | 模型角色硬性要求、提供方选择 |
 | **Model Provider** | 模型服务提供方 | An external or local service offering concrete models through an adapter. | 能力实现、Harness Skill Provider |
@@ -115,7 +132,7 @@ This is a concise bilingual reading view of AI7's ambiguity-sensitive domain lan
 | **Provider Processing Policy** | 模型服务数据处理策略 | The rule governing which content categories and scopes may be sent to which configured model services. | 对外导出策略、公开发布许可 |
 | **External Export Policy** | 对外导出策略 | The rule governing transfer of an exact deliverable revision, source, or package across AI7-controlled storage to a named non-provider destination; it is neither package authority nor outcome proof. | 模型服务数据处理策略、交付包权限、公开发布许可 |
 | **Local Export Preparation** | 本地导出准备 | A frozen per-file pre-Effect record of exact package/revision, format, final local path, fidelity, payload digest, create/replace disposition, and applicable export policy after native collision resolution. | 交付包、文件对话框状态、受控动作批准、受控动作回执 |
-| **Bundled Promotion Gate** | 内置技能晋级关口 | The repository/release gate that alone assigns bundled Task Skill provenance. | 技能启用、应用内信任升级 |
+| **Bundled Promotion Gate** | 内置技能晋级关口 | The repository/release gate that alone assigns bundled provenance to a native DSH artifact revision. | 构件启用、应用内信任升级 |
 
 ## Task and Harness execution records
 
@@ -143,8 +160,11 @@ This is a concise bilingual reading view of AI7's ambiguity-sensitive domain lan
 
 | English term | 推荐简体中文 | Definition | Aliases to avoid |
 | --- | --- | --- | --- |
-| **Run Authorization** | 任务运行授权 | The user's decision to start one exact task/provider/data/scope/budget envelope. | 单次执行许可、受控动作批准 |
+| **Run Authorization** | 任务运行授权 | The exact authority for one task/provider/data/scope/budget envelope, originating from a direct user decision, a matching Default Execution Rule after a newly user-started Task, or a matching active Background Analysis Enrollment for a new background manuscript-analysis dispatch. | 单次执行许可、受控动作批准、长期权限 |
+| **Default Execution Rule** | 默认执行规则 | A revocable rule that may authorize an exact newly user-initiated matching Task without a second start decision; it never originates or schedules work. | 后台任务、调度器、后台分析登记 |
+| **Background Analysis Enrollment** | 后台分析登记 | Explicit revocable authority for new background manuscript-analysis Runs within exact scope/kind/provider/data/budget/trigger bounds; setup, import, install, and enablement never create it. | 模型设置、构件启用、默认执行规则、通用后台权限 |
 | **Execution Grant** | 单次执行许可 | One-shot authority for an agent to execute one frozen Plan or guarded step. | 长期授权、提案处理决定 |
+| **AI7 Apply** | AI7 正式应用 | The only single-use boundary for committing one exact formal agent-originated manuscript diff after base-pin drift recheck and explicit editor confirmation. | 提案处理决定、普通写文件、可复用修改权限 |
 | **Proposal Decision** | 提案处理决定 | The editor's content decision about one generated proposal without proof that integration completed. | 受控动作批准、实施结果 |
 | **Review Decision** | 编辑评审决定 | A professional editorial judgment at a review gate. | 事实证明、受控动作批准 |
 | **Effect** | 受控动作 | One authoritative or externally visible action tracked independently for authority, outcome, and replay. | 效果、副作用、整个操作 |
@@ -157,15 +177,17 @@ This is a concise bilingual reading view of AI7's ambiguity-sensitive domain lan
 
 ## Relationships
 
-- A **Run Authorization** may permit an agent to request one or more **Execution Grants**, but neither grants an unplanned **Effect Approval**.
-- A **Task Skill Package** becomes an **Installed Task Skill Version** only through admission; **Task Skill Enablement** sets its **Authority Ceiling**, while **Task Skill Activation** computes the narrower exact authority for one Run.
-- A **Capability Grant** identifies which **AI7 Capabilities** an activation may use; an **Execution Grant** permits one guarded step now, and neither is an **Effect Approval**.
-- A **Harness Skill Projection** and visible **Harness Tools** help the model act, but AI7 service boundaries enforce the Task Skill Activation independently.
+- A **Run Authorization** may originate directly from a user, from a matching **Default Execution Rule** only after a newly user-initiated Task, or from a matching active **Background Analysis Enrollment** for a new background manuscript-analysis dispatch. It may permit one or more **Execution Grants**, but neither grants an unplanned **Effect Approval** or **AI7 Apply**.
+- One exact **Native DSH Artifact** revision may be acquired, validated, scoped-enabled, and bound into a Run only through distinct AI7 stages. Its **Authority Ceiling** limits what it may request; the exact per-Run activation binding computes the narrower current authority. A DSH Session, Plugin, installed artifact, or visible tool grants nothing by itself.
+- A **Capability Grant** identifies which **AI7 Capabilities** the per-Run binding may use; an **Execution Grant** permits one guarded step now, and neither is an **Effect Approval**.
+- A **Source Skill Snapshot** remains immutable while an **Imported Skill Working Revision** evolves through explicit adoption or an eligible **Artifact Update Rule**. Reconciliation output is inert, and rollback never restores revoked authority.
 - **Run Source Scope** governs what may be read; **Outbound Data Category** and **Provider Processing Policy** separately govern what may be sent to a model service.
 - A **Credential Reference** is a non-secret handle, the **Credential Broker** authorizes resolution, and the **Protected Secret Store** holds the value.
 - A **Plan Preview** explains one **Execution Plan**, while the **Plan Envelope** is the exact machine-authoritative boundary bound by **Run Authorization**.
 - A **Plan Adaptation** stays inside an unchanged Plan Envelope; a **Plan Revision** suspends execution until renewed Run Authorization binds its new digest.
 - A **Task Outcome** reports what happened and what remains unresolved; it does not by itself become an Editorial Artifact, applied manuscript revision, Effect Receipt, or factual resolution.
+- Ranked **Manuscript Retrieval Chunks** find candidates and **Exact Fetch** supplies revision-correct text; whole-manuscript analysis instead requires a **Coverage Manifest**, all declared **Analysis Units**, typed provenance-preserving reduction, explicit gaps, and an immutable **Manuscript Analysis Result Set Revision**.
+- Coverage, reducer/synthesis closure, exact-revision freshness, and semantic/evidence assurance are independent. A current whole-Book claim needs all applicable closures; user feedback remains a **Quality Signal**, not factual proof or learning authority.
 - The **Task Ledger** and **Harness Session Ledger** form one causal graph but own different facts; an **Execution Binding** references exact **Harness Execution Spans** without copying their events.
 - One **Run Record** may bind several Harness Sessions or Spans, and one **Harness Session** may contain activity for several Runs; only an explicit **Execution Binding**, never timestamp or adjacency, establishes causality.
 - A **Harness Session Event**, **Event Projection**, or **Durable Session Watermark** never proves a Run outcome, business mutation, or Effect result.
@@ -175,6 +197,7 @@ This is a concise bilingual reading view of AI7's ambiguity-sensitive domain lan
 - A single editor interaction may create both a **Proposal Decision** and an **Effect Approval**; the two records retain separate identities and meanings.
 - An **Effect Approval** applies to exactly one unchanged **Effect Intent**; material drift requires a new intent and fresh authority.
 - An **Effect Receipt** proves only its own **Effect**. A receipt for persisting a **Proposal Branch** cannot prove manuscript application.
+- A **Proposal Decision**, Run, artifact, **Artifact Update Rule**, **Default Execution Rule**, Enrollment, Session, Plugin, or Effect Approval alone never commits a formal agent-originated manuscript diff. Only one exact, explicitly confirmed, single-use **AI7 Apply** may cross that mutation boundary after drift reconciliation.
 - A **Manuscript Checkpoint** creates a **Manuscript Revision**; a **Run Continuation Checkpoint** safely continues unchanged task semantics; a **Recovery Snapshot** reconstructs protected manuscript state. Harness owns its own technical checkpoints.
 - A **Book** owns related **Editorial Deliverables**, but each deliverable follows its own **Workflow Instance** pinned to a versioned **Workflow Profile**; one Book may therefore have a Manuscript in finalization and a Promotion Article in drafting at the same time.
 - A completed **Workflow Gate** or **Signoff Record** establishes readiness for its stated next use only; it never establishes factual truth, Public Release Permission, or Learning Eligibility.
@@ -205,9 +228,9 @@ This is a concise bilingual reading view of AI7's ambiguity-sensitive domain lan
 
 > **领域专家：**“不可以。扩大来源范围会越过原来的**计划权限边界**，必须暂停并提出**计划修订**；用户对新版本重新作出**任务运行授权**后才能继续。”
 
-> **开发者：**“本地任务技能已经启用，是不是可以直接调用写稿能力并把结果导出？”
+> **开发者：**“本地 DSH 技能已经安装并启用，是不是可以直接读取书稿、调用模型并把修改应用进去？”
 
-> **领域专家：**“不是。**任务技能启用状态**只确定这个版本的**权限上限**；本次任务还要形成**任务技能运行激活**和具体的**能力使用许可**，导出仍需单独的受控动作权限。”
+> **领域专家：**“不是。原生构件仍要经过 AI7 的来源、兼容、范围和**权限上限**约束，本次任务还要形成精确的运行授权与**能力使用许可**；后台工作另需**后台分析登记**，正式修改稿件只能使用一次性的 **AI7 正式应用**。”
 
 > **开发者：**“它能读取当前书稿，是否就能把全文发送给已经配置的模型？”
 
@@ -231,12 +254,15 @@ This is a concise bilingual reading view of AI7's ambiguity-sensitive domain lan
 - “Version / 版本” must be qualified as **源材料版本**, **稿件修订版**, **编辑交付成果修订版**, **里程碑版本**, **发稿版本**, or another exact accepted record type.
 - “Series” uses **书系**, not the narrower **丛书**, because it also covers sequels and shared-world works.
 - **文本原文基准** establishes wording, never factual truth.
-- **工作流程方案** is an editorial-business definition, not an **编辑维度方案**, Harness Profile, or Harness Workflow.
+- **工作流程方案** is an AI7-facing projection/selector over one exact native DSH Workflow definition and technical logic, not a second executable definition, **编辑维度方案**, or **DSH 配置档案**. The native artifact owns its definition; AI7 owns the durable **工作流程实例**, phase/gate state, signoff, scheduling, and business transitions.
 - **编辑审读** is an assessment activity; **评论文章** is a public-facing deliverable. Never abbreviate both to an unqualified “Review / 评审”.
 - Unqualified “Plan / 计划” previously mixed intended behavior, its human-readable view, and execution authority. Use **执行计划**, **计划预览**, or **计划权限边界** explicitly.
 - **计划内调整** never includes expanded scope, provider, budget, goal, output, or Effect authority; those changes are **计划修订**.
-- Installation, enablement, and activation are not one generic “启用”: use **已安装任务技能版本**, **任务技能启用状态**, and **任务技能运行激活**.
-- **任务技能**, **AI7 能力**, **能力实现**, **Harness 工具**, and **Harness 技能投影** are five distinct concepts; none gains authority by being visible or loaded.
+- Native-artifact acquisition/install, compatibility/conversion validation, scoped enablement, exact per-Run activation, and **AI7 正式应用** are not one generic “启用”. Final sidecar/enablement/activation record names remain deferred, so describe the stage rather than inventing a schema.
+- **原生 DSH 构件**, **AI7 能力**, **能力实现**, and **Harness 工具** are distinct concepts; none gains authority by being visible, installed, loaded, or Session-bound.
+- **默认执行规则**, **后台分析登记**, and **构件更新规则** govern three different events—newly user-started Task authorization, new background manuscript-analysis dispatch, and imported-Skill revision adoption. None authorizes the others or grants **AI7 正式应用**.
+- **编辑窗口**, **稿件检索片段**, **分析单元**, and **精确获取范围** are distinct bounded projections/contracts. The current tracer's 32-block first window is not a retrieval or exhaustive-analysis invariant.
 - Never use unqualified “Provider / 提供方”: distinguish **模型服务提供方**, Capability Implementation, Harness Skill Provider, credential backend, and MCP endpoint.
 - **权限上限**, **能力使用许可**, **单次执行许可**, and **受控动作批准** answer four different authority questions.
 - Model processing, external export, and public release cannot imply one another; **公开发布许可** remains the only public-release term.
+- Provider Processing v1/v2/v3 are immutable records selected respectively for development/CI, exact fixture recording, and ordinary production by trusted launch authority. Operational scope is not a user, environment, Provider, artifact, or Plugin toggle, and selection implements no Provider call.

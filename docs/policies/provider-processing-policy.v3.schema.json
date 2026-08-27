@@ -1,0 +1,318 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "AI7 Provider Processing Policy v3",
+  "description": "Validates the exact ordinary-production Provider Processing v3 authority contract.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaDialect",
+    "schemaPath",
+    "documentType",
+    "policyId",
+    "policyType",
+    "version",
+    "lifecycleStatus",
+    "predecessorVersion",
+    "predecessorCanonicalPath",
+    "canonicalPath",
+    "humanProjectionPath",
+    "operationalScope",
+    "authorityBasis",
+    "trustedSelection",
+    "decision",
+    "outboundDataCategories",
+    "credentialBoundary",
+    "authoritySeparations"
+  ],
+  "properties": {
+    "schemaDialect": {
+      "const": "http://json-schema.org/draft-07/schema#"
+    },
+    "schemaPath": {
+      "const": "docs/policies/provider-processing-policy.v3.schema.json"
+    },
+    "documentType": {
+      "const": "ai7-policy-document"
+    },
+    "policyId": {
+      "const": "provider-processing-policy"
+    },
+    "policyType": {
+      "const": "provider-processing"
+    },
+    "version": {
+      "const": "v3"
+    },
+    "lifecycleStatus": {
+      "const": "active"
+    },
+    "predecessorVersion": {
+      "const": "v2"
+    },
+    "predecessorCanonicalPath": {
+      "const": "docs/policies/provider-processing-policy.v2.json"
+    },
+    "canonicalPath": {
+      "const": "docs/policies/provider-processing-policy.v3.json"
+    },
+    "humanProjectionPath": {
+      "const": "docs/policies/provider-processing-policy.v3.md"
+    },
+    "operationalScope": {
+      "const": "ordinary-production"
+    },
+    "authorityBasis": {
+      "const": [
+        "docs/domain/execution/CONTEXT.md",
+        "docs/adr/0007-separate-decisions-authority-and-effect-proof.md",
+        "docs/adr/0016-proprietary-license-and-local-only-sample-manuscripts.md",
+        "docs/adr/0046-separate-provider-processing-by-operational-scope.md",
+        "docs/adr/0048-enroll-and-evaluate-background-manuscript-analysis.md",
+        "docs/architecture-v2/HARNESS-INTEGRATION.md"
+      ]
+    },
+    "trustedSelection": {
+      "const": {
+        "selectionAuthorityClass": "trusted-build-or-launch-authority",
+        "ordinaryProductSettingAllowed": false,
+        "environmentVariableSelectorAllowed": false,
+        "providerSelectorAllowed": false,
+        "artifactOrPluginSelectorAllowed": false,
+        "crossScopeFallbackAllowed": false,
+        "selectionConfiguresProvider": false,
+        "selectionDispatchesRun": false
+      }
+    },
+    "decision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "default",
+        "providerAllowRules"
+      ],
+      "properties": {
+        "default": {
+          "const": "deny"
+        },
+        "providerAllowRules": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "additionalItems": false,
+          "items": [
+            {
+              "$ref": "#/definitions/foregroundRule"
+            },
+            {
+              "$ref": "#/definitions/backgroundRule"
+            }
+          ]
+        }
+      }
+    },
+    "outboundDataCategories": {
+      "const": {
+        "public-or-synthetic": {
+          "labelZh": "公开或合成内容"
+        },
+        "unpublished-metadata": {
+          "labelZh": "未公开材料元数据"
+        },
+        "unpublished-excerpts": {
+          "labelZh": "未公开材料选段"
+        },
+        "unpublished-full-content": {
+          "labelZh": "未公开材料全文"
+        }
+      }
+    },
+    "credentialBoundary": {
+      "const": {
+        "isOutboundDataCategory": false,
+        "permittedInModelVisibleMaterial": false,
+        "permittedInGeneralOutboundMaterial": false,
+        "opaqueReferenceOnlyOutsideFinalConsumer": true,
+        "credentialBrokerResolutionRequired": true,
+        "finalAdapterOnly": true,
+        "policyEligibilityConfiguresCredential": false
+      }
+    },
+    "authoritySeparations": {
+      "const": {
+        "policyEligibilityDispatchesProviderCall": false,
+        "policyEligibilityCreatesProviderImplementation": false,
+        "runSourceScopeAloneAuthorizesTransmission": false,
+        "runAuthorizationAloneOverridesThisPolicy": false,
+        "configuredProviderAloneAuthorizesTransmission": false,
+        "providerSetupAloneAuthorizesTransmission": false,
+        "configuredCredentialAloneAuthorizesTransmission": false,
+        "artifactInstallOrEnablementAuthorizesTransmission": false,
+        "dshSessionOrPluginMembershipAuthorizesTransmission": false,
+        "defaultExecutionRuleWithoutUserInitiatedTaskAuthorizesTransmission": false,
+        "backgroundAnalysisEnrollmentWithoutExactRunAuthorizesTransmission": false,
+        "externalExportPolicyAuthorizesProviderTransmission": false,
+        "effectApprovalAuthorizesProviderTransmission": false,
+        "providerProcessingAuthorizesManuscriptApply": false,
+        "providerProcessingAuthorizesLearning": false,
+        "providerProcessingAuthorizesPublication": false,
+        "providerProcessingGrantsPublicReleasePermission": false
+      }
+    }
+  },
+  "definitions": {
+    "allowedCategories": {
+      "const": [
+        "public-or-synthetic",
+        "unpublished-metadata",
+        "unpublished-excerpts",
+        "unpublished-full-content"
+      ]
+    },
+    "authorizationPreconditions": {
+      "const": {
+        "eligibleConfiguredProviderRequired": true,
+        "providerPreflightRequired": true,
+        "exactProviderBindingRequired": true,
+        "approvedFallbackChainRequired": true,
+        "planEnvelopeRequired": true,
+        "runAuthorizationRequired": true,
+        "runSourceScopeRequired": true,
+        "declaredOperationClassesRequired": true,
+        "exactRunBudgetCeilingStateRequired": true,
+        "unsetRunBudgetCeilingAllowed": true,
+        "finalProviderPayloadEgressGateRequired": true,
+        "frozenBeforeTransmission": true
+      }
+    },
+    "additionalPrivacyPrompts": {
+      "const": {
+        "perBookRequired": false,
+        "firstUseRequired": false,
+        "perCallRequired": false,
+        "perChunkRequired": false
+      }
+    },
+    "foregroundRule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ruleId",
+        "policyResult",
+        "purpose",
+        "authorityOrigin",
+        "allowedOutboundDataCategories",
+        "authorizationPreconditions",
+        "runInheritance",
+        "additionalPrivacyPrompts"
+      ],
+      "properties": {
+        "ruleId": {
+          "const": "user-initiated-production-run-processing"
+        },
+        "policyResult": {
+          "const": "eligible-only"
+        },
+        "purpose": {
+          "const": "ordinary-production-model-processing"
+        },
+        "authorityOrigin": {
+          "const": {
+            "newlyUserInitiatedTaskRequired": true,
+            "directRunAuthorizationAllowed": true,
+            "matchingActiveDefaultExecutionRuleAllowed": true,
+            "defaultExecutionRuleWithoutUserInitiatedTaskAllowed": false,
+            "backgroundAnalysisEnrollmentRequired": false
+          }
+        },
+        "allowedOutboundDataCategories": {
+          "$ref": "#/definitions/allowedCategories"
+        },
+        "authorizationPreconditions": {
+          "$ref": "#/definitions/authorizationPreconditions"
+        },
+        "runInheritance": {
+          "const": {
+            "declaredGenerationAllowed": true,
+            "declaredRemoteEmbeddingAllowed": true,
+            "declaredRerankingAllowed": true,
+            "declaredSubagentWorkAllowed": true,
+            "declaredCoveredAnalysisAllowed": true,
+            "declaredReducerStagesAllowed": true,
+            "asynchronousContinuationInsideSameEnvelopeAllowed": true,
+            "presentationStateChangesAuthority": false,
+            "undeclaredOperationRequiresPlanRevisionAndRenewedAuthorization": true
+          }
+        },
+        "additionalPrivacyPrompts": {
+          "$ref": "#/definitions/additionalPrivacyPrompts"
+        }
+      }
+    },
+    "backgroundRule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ruleId",
+        "policyResult",
+        "purpose",
+        "authorityOrigin",
+        "scopeLimits",
+        "allowedOutboundDataCategories",
+        "authorizationPreconditions",
+        "runInheritance",
+        "additionalPrivacyPrompts"
+      ],
+      "properties": {
+        "ruleId": {
+          "const": "enrolled-background-manuscript-analysis-processing"
+        },
+        "policyResult": {
+          "const": "eligible-only"
+        },
+        "purpose": {
+          "const": "background-manuscript-analysis"
+        },
+        "authorityOrigin": {
+          "const": {
+            "activeMatchingBackgroundAnalysisEnrollmentRequired": true,
+            "newUserInitiatedTaskRequired": false,
+            "providerSetupCreatesEnrollment": false,
+            "manuscriptImportCreatesEnrollment": false,
+            "artifactInstallOrEnablementCreatesEnrollment": false,
+            "eachDispatchCreatesExactRun": true
+          }
+        },
+        "scopeLimits": {
+          "const": {
+            "manuscriptAnalysisOnly": true,
+            "formalManuscriptMutationAllowed": false,
+            "externalEffectAllowed": false,
+            "generalBackgroundLearningAllowed": false,
+            "backgroundPolicyWorkAllowed": false
+          }
+        },
+        "allowedOutboundDataCategories": {
+          "$ref": "#/definitions/allowedCategories"
+        },
+        "authorizationPreconditions": {
+          "$ref": "#/definitions/authorizationPreconditions"
+        },
+        "runInheritance": {
+          "const": {
+            "declaredRemoteEmbeddingAllowed": true,
+            "declaredRerankingAllowed": true,
+            "declaredSubagentWorkAllowed": true,
+            "declaredCoveredAnalysisAllowed": true,
+            "declaredReducerStagesAllowed": true,
+            "asynchronousContinuationInsideSameEnvelopeAllowed": true,
+            "newCrossRunDispatchRequiresActiveMatchingEnrollment": true,
+            "undeclaredOperationRequiresPlanRevisionAndRenewedAuthorization": true
+          }
+        },
+        "additionalPrivacyPrompts": {
+          "$ref": "#/definitions/additionalPrivacyPrompts"
+        }
+      }
+    }
+  }
+}

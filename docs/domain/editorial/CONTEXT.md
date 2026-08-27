@@ -1,5 +1,7 @@
 # AI7 Editorial
 
+Status: **Issue #86 Owner-approved Editorial successor context; repository-current only in an exact integrated `dev` commit containing this revision; accepted-but-unintegrated elsewhere**
+
 The domain language for Chinese literary-publishing work across Books, manuscripts, sources, revisions, editorial proposals, and related publication texts.
 
 ## Language
@@ -60,14 +62,14 @@ _中文_: 交付成果工作流程
 _Avoid_: Book-wide scalar stage, Harness Workflow
 
 **Workflow Profile**:
-A versioned reusable definition of Workflow Phases, Workflow Gates, required Editorial Artifact types, and default responsibilities for one deliverable family.
+An AI7-facing versioned projection or selector over one exact DSH-native Workflow definition and its technical logic, exposing the applicable Workflow Phases, Workflow Gates, required Editorial Artifact types, and default responsibilities for one deliverable family. The native artifact owns the definition; AI7 owns every durable Workflow Instance, phase/gate state, signoff, scheduling decision, and deterministic business transition. The projection is not a parallel executable package, and the exact carrier-field mapping remains an implementation decision.
 _中文_: 工作流程方案
-_Avoid_: Editorial Profile, Harness Profile, agent workflow
+_Avoid_: Editorial Profile, DSH Profile, native DSH workflow state
 
 **Workflow Instance**:
-One Editorial Deliverable's durable application of an exact Workflow Profile version, including phase history, evidence, gates, and signoff.
+One Editorial Deliverable's durable AI7-owned application of an exact Workflow Profile projection and pinned native definition, including phase history, evidence, gates, and signoff.
 _中文_: 工作流程实例
-_Avoid_: Harness Session, Harness Workflow, Book lifecycle
+_Avoid_: Harness Session, DSH workflow, Book lifecycle
 
 **Workflow Phase**:
 A named area of editorial work whose status, evidence, responsible actor, and next action are recorded without imposing one universal linear transition sequence.
@@ -349,7 +351,7 @@ The durable ordered record of continuous changes to one Manuscript Branch since 
 _Avoid_: Manuscript history, Operation journal
 
 **Manuscript Checkpoint**:
-The validated transition that commits complete journal-reconstructed working state as a new Manuscript Revision. A checkpoint used to materialize journal-newer task input carries the exact purpose value `Task Input / 任务输入`; the purpose does not create another checkpoint type, Milestone Version, or Signoff.
+The validated transition that commits complete journal-reconstructed working state as a new Manuscript Revision. It may deterministically mark dependent analysis units and reducers stale or invalidated, but it dispatches no model work by itself. A checkpoint used to materialize journal-newer task input carries the exact purpose value `Task Input / 任务输入`; the purpose does not create another checkpoint type, Milestone Version, or Signoff.
 _Avoid_: Edit Journal entry, Run Continuation Checkpoint, Recovery Snapshot
 
 **Task Input (Manuscript Checkpoint purpose)**:
@@ -378,20 +380,77 @@ The editor's exact content decision to accept, modify, selectively use, retain a
 _中文_: 提案处理决定
 _Avoid_: Approval, Effect Approval, publication receipt
 
+A Proposal Decision never commits a formal agent-originated Manuscript diff. That mutation must cross one separately and explicitly confirmed single-use AI7 Apply bound to the exact Book, base Manuscript Pin, diff, and targets after drift revalidation. Direct human typing remains a separate human edit action.
+
 **Review Decision**:
 A professional editorial judgment at a review gate, such as accept, accept with conditions, revise, defer, or reject.
 _中文_: 编辑评审决定
 _Avoid_: Effect Approval, factual proof
 
 **Quality Signal**:
-A captured, attributable feedback event from explicit editor feedback, editor-authored content, or a proposal decision/version difference. Captured globally on the local instance by default and attributed for per-Book, per-editor, or per-house aggregation.
+A captured, attributable feedback event from explicit editor feedback, editor-authored content, or a proposal decision/version difference. When it concerns persisted manuscript analysis, it binds the exact Book, Manuscript Pin, Result Set Revision, analysis kind/dimension, native DSH artifact and effective execution/model provenance, and may target the whole set, a synthesis node, item, or omitted range. It is captured globally on the local instance by default and attributed for permitted per-Book, per-editor, or per-house aggregation.
 _中文_: 质量信号
-_Avoid_: Learning Material, Memory Candidate, a rating alone, task authority
+_Avoid_: Learning Material, Memory Candidate, a rating alone, factual proof, task authority
 
 **Delivery Quality Metric**:
 A versioned measure derived from Quality Signals over a defined window and scope, covering verbatim acceptance, revision distance, survival to delivery, dissatisfaction by Editorial Dimension, and phase-weighted workload displacement. Aggregating it globally never grants global retrieval access.
 _中文_: 交付质量度量
 _Avoid_: Editor-comparable Delivery Quality as a goal statement, factual correctness, acceptance rate alone
+
+**Coverage Manifest**:
+A deterministic, versioned plan enumerating the complete declared analysis coverage for one exact Manuscript Pin. It records the structure-aware ordered Analysis Units, exact ranges and digests, bounded overlaps, and coverage dependencies. Processing outcomes—including failed, skipped, cancelled, invalid, or uncovered units and the resulting gaps—belong to the immutable Manuscript Analysis Result Set Revision, not the Manifest. A native DSH analysis contract may set budgets and schema needs but cannot omit revision ranges from a whole-manuscript claim.
+_中文_: 覆盖清单
+_Avoid_: retrieval ranking, table of contents, semantic-completeness proof
+
+**Analysis Unit**:
+One completely enumerated bounded input unit in a Coverage Manifest. It prefers structural boundaries such as chapters, scenes, headings, and Manuscript Blocks, splits structures that exceed the attention budget, and may carry bounded overlap. Its size is an execution budget, not the editor-window limit, Retrieval Chunk size, or Exact Fetch range.
+_中文_: 分析单元
+_Avoid_: Manuscript Block, Manuscript Retrieval Chunk, editor window, fixed 32-block page
+
+**Baseline Manuscript Analysis Contract**:
+The product-built exact-versioned DSH Analysis Contract for manuscript-internal structure and coverage, structural-unit synopsis, entities/aliases/terms, events and chronology, relationships, internal-setting claims, exact ranges, confidence, conflicts, and unresolved items. It performs no external truth adjudication, interpretive Editorial Review, correction, Manuscript mutation, Series Knowledge promotion, or learning. It is the default selected analysis kind inside an already active matching Background Analysis Enrollment; the contract, Provider setup, and successful import never create Enrollment or dispatch authority.
+_中文_: 基线稿件分析契约
+_Avoid_: Factual Verification, mandatory eight-dimension review, import authority
+
+The eight built-in Editorial Dimensions remain independently selectable optional background-analysis kinds, with a one-action all-eight selection. They are not forced into the Baseline Manuscript Analysis Contract. Plugin-provided and user-defined kinds likewise require explicit selection in a matching active Background Analysis Enrollment; artifact installation or enablement selects none.
+
+**Manuscript Analysis Result Set**:
+A stable Book-bound identity for one reusable manuscript-analysis kind across its immutable Result Set Revisions. It is neither a Task Outcome, Editorial Artifact, retrieval cache, Workflow Instance, nor authority source.
+_中文_: 稿件分析结果集
+_Avoid_: Task Outcome, Editorial Artifact, retrieval index, current manuscript truth
+
+**Manuscript Analysis Result Set Revision**:
+An immutable write-on-update revision binding an exact Manuscript Pin, Coverage Manifest, exact native DSH artifact and DSH Analysis Contract revisions, schema/reducer digests, unit results, synthesis/conflict/gap state, producing execution provenance, reuse-or-bypass lineage, and cost. A producing Task Outcome links it; only a separate explicit promotion may create an Editorial Artifact. Historical revisions are never rewritten or presented as current after manuscript drift.
+_中文_: 稿件分析结果集修订版
+_Avoid_: mutable cache entry, model transcript, automatic Editorial Artifact
+
+Analysis updates have three distinct meanings and always append a Result Set Revision:
+
+| User action | Exact update meaning |
+| --- | --- |
+| `同步到当前稿件` | Reuse dependency-compatible unchanged units and recompute the deterministic invalidation/dependency closure against the current Manuscript Pin. |
+| `重新分析所选范围` | Bypass cached model results for the selected range and its local dependency closure while retaining explicit reuse lineage elsewhere. |
+| `重新分析全书` | Bypass all prior model results and cover the complete current Coverage Manifest. |
+
+A user-started Task may include synchronization in its exact authorized Run. Post-checkpoint, idle, scheduled, import-triggered, or cross-Run synchronization requires a matching active Background Analysis Enrollment. Successful import remains committed and visible with analysis pending when no Enrollment exists or when later analysis is offline, blocked, cancelled, or failed.
+
+No generic `complete` flag is sufficient. Each Result Set Revision exposes four independent states:
+
+| State axis | Meaning |
+| --- | --- |
+| Coverage | Whether every declared Coverage Manifest unit has an exact closed result or recorded gap. |
+| Reducer/synthesis closure | Whether every required reducer, reconciliation, contradiction, and continuity node has closed. |
+| Exact-revision freshness | Whether the completed analysis binds the current Manuscript Pin and dependency closure. |
+| Semantic/evidence assurance | The qualified confidence and grounding claim supported by the analysis; never a guarantee of model attention, semantic correctness, or factual truth. |
+
+Failures, skips, cancellation, invalid outputs, conflicts, and gaps persist exactly and support missing-only continuation without repeating successful work. A whole-revision coverage claim requires closed manifest coverage and required reducers; a current whole-Book claim additionally requires exact-revision freshness.
+
+An exact analysis-bound Quality Signal may record a typed disposition or free text, but silence is never approval and feedback never overwrites historical model output, establishes factual truth, automatically enters learning, or changes a native DSH artifact. An explicit structured correction creates a provenance-marked successor Result Set Revision and recomputes affected synthesis; requested local or full reanalysis requires a new authorized Run.
+
+**Analysis Quality Metric**:
+A versioned measure family for persisted analysis, distinct from proposal-centric Delivery Quality Metrics. It may aggregate reviewed usefulness/correction/rejection, discovered omissions, entity merge/split, relationship/chronology and range/evidence corrections, schema/coverage/reducer/freshness closure, conflict/gap preservation, repair after rerun, reuse, cost, and latency by exact analysis contract, native artifact, model/provider, and permitted Book/editor/house scope. Its final snapshot record name and schema remain deferred; aggregation grants no cross-Book retrieval, learning, policy activation, behavior mutation, or factual authority.
+_中文_: 分析质量度量
+_Avoid_: Delivery Quality Metric, factual-verification disposition, automatic learning, cross-Book authority
 
 **Manuscript Retrieval Chunk**:
 A ranked, approximate retrieval unit over manuscript text used to assemble model context beyond the editing window. It may span or subdivide Manuscript Blocks, returns candidates rather than authoritative text, and is stamped with the Manuscript Revision it was built from so a stale hit is detectable. Authoritative text comes only from Exact Fetch against the current pin.

@@ -1,0 +1,184 @@
+{
+  "schemaDialect": "http://json-schema.org/draft-07/schema#",
+  "schemaPath": "docs/policies/provider-processing-policy.v3.schema.json",
+  "documentType": "ai7-policy-document",
+  "policyId": "provider-processing-policy",
+  "policyType": "provider-processing",
+  "version": "v3",
+  "lifecycleStatus": "active",
+  "predecessorVersion": "v2",
+  "predecessorCanonicalPath": "docs/policies/provider-processing-policy.v2.json",
+  "canonicalPath": "docs/policies/provider-processing-policy.v3.json",
+  "humanProjectionPath": "docs/policies/provider-processing-policy.v3.md",
+  "operationalScope": "ordinary-production",
+  "authorityBasis": [
+    "docs/domain/execution/CONTEXT.md",
+    "docs/adr/0007-separate-decisions-authority-and-effect-proof.md",
+    "docs/adr/0016-proprietary-license-and-local-only-sample-manuscripts.md",
+    "docs/adr/0046-separate-provider-processing-by-operational-scope.md",
+    "docs/adr/0048-enroll-and-evaluate-background-manuscript-analysis.md",
+    "docs/architecture-v2/HARNESS-INTEGRATION.md"
+  ],
+  "trustedSelection": {
+    "selectionAuthorityClass": "trusted-build-or-launch-authority",
+    "ordinaryProductSettingAllowed": false,
+    "environmentVariableSelectorAllowed": false,
+    "providerSelectorAllowed": false,
+    "artifactOrPluginSelectorAllowed": false,
+    "crossScopeFallbackAllowed": false,
+    "selectionConfiguresProvider": false,
+    "selectionDispatchesRun": false
+  },
+  "decision": {
+    "default": "deny",
+    "providerAllowRules": [
+      {
+        "ruleId": "user-initiated-production-run-processing",
+        "policyResult": "eligible-only",
+        "purpose": "ordinary-production-model-processing",
+        "authorityOrigin": {
+          "newlyUserInitiatedTaskRequired": true,
+          "directRunAuthorizationAllowed": true,
+          "matchingActiveDefaultExecutionRuleAllowed": true,
+          "defaultExecutionRuleWithoutUserInitiatedTaskAllowed": false,
+          "backgroundAnalysisEnrollmentRequired": false
+        },
+        "allowedOutboundDataCategories": [
+          "public-or-synthetic",
+          "unpublished-metadata",
+          "unpublished-excerpts",
+          "unpublished-full-content"
+        ],
+        "authorizationPreconditions": {
+          "eligibleConfiguredProviderRequired": true,
+          "providerPreflightRequired": true,
+          "exactProviderBindingRequired": true,
+          "approvedFallbackChainRequired": true,
+          "planEnvelopeRequired": true,
+          "runAuthorizationRequired": true,
+          "runSourceScopeRequired": true,
+          "declaredOperationClassesRequired": true,
+          "exactRunBudgetCeilingStateRequired": true,
+          "unsetRunBudgetCeilingAllowed": true,
+          "finalProviderPayloadEgressGateRequired": true,
+          "frozenBeforeTransmission": true
+        },
+        "runInheritance": {
+          "declaredGenerationAllowed": true,
+          "declaredRemoteEmbeddingAllowed": true,
+          "declaredRerankingAllowed": true,
+          "declaredSubagentWorkAllowed": true,
+          "declaredCoveredAnalysisAllowed": true,
+          "declaredReducerStagesAllowed": true,
+          "asynchronousContinuationInsideSameEnvelopeAllowed": true,
+          "presentationStateChangesAuthority": false,
+          "undeclaredOperationRequiresPlanRevisionAndRenewedAuthorization": true
+        },
+        "additionalPrivacyPrompts": {
+          "perBookRequired": false,
+          "firstUseRequired": false,
+          "perCallRequired": false,
+          "perChunkRequired": false
+        }
+      },
+      {
+        "ruleId": "enrolled-background-manuscript-analysis-processing",
+        "policyResult": "eligible-only",
+        "purpose": "background-manuscript-analysis",
+        "authorityOrigin": {
+          "activeMatchingBackgroundAnalysisEnrollmentRequired": true,
+          "newUserInitiatedTaskRequired": false,
+          "providerSetupCreatesEnrollment": false,
+          "manuscriptImportCreatesEnrollment": false,
+          "artifactInstallOrEnablementCreatesEnrollment": false,
+          "eachDispatchCreatesExactRun": true
+        },
+        "scopeLimits": {
+          "manuscriptAnalysisOnly": true,
+          "formalManuscriptMutationAllowed": false,
+          "externalEffectAllowed": false,
+          "generalBackgroundLearningAllowed": false,
+          "backgroundPolicyWorkAllowed": false
+        },
+        "allowedOutboundDataCategories": [
+          "public-or-synthetic",
+          "unpublished-metadata",
+          "unpublished-excerpts",
+          "unpublished-full-content"
+        ],
+        "authorizationPreconditions": {
+          "eligibleConfiguredProviderRequired": true,
+          "providerPreflightRequired": true,
+          "exactProviderBindingRequired": true,
+          "approvedFallbackChainRequired": true,
+          "planEnvelopeRequired": true,
+          "runAuthorizationRequired": true,
+          "runSourceScopeRequired": true,
+          "declaredOperationClassesRequired": true,
+          "exactRunBudgetCeilingStateRequired": true,
+          "unsetRunBudgetCeilingAllowed": true,
+          "finalProviderPayloadEgressGateRequired": true,
+          "frozenBeforeTransmission": true
+        },
+        "runInheritance": {
+          "declaredRemoteEmbeddingAllowed": true,
+          "declaredRerankingAllowed": true,
+          "declaredSubagentWorkAllowed": true,
+          "declaredCoveredAnalysisAllowed": true,
+          "declaredReducerStagesAllowed": true,
+          "asynchronousContinuationInsideSameEnvelopeAllowed": true,
+          "newCrossRunDispatchRequiresActiveMatchingEnrollment": true,
+          "undeclaredOperationRequiresPlanRevisionAndRenewedAuthorization": true
+        },
+        "additionalPrivacyPrompts": {
+          "perBookRequired": false,
+          "firstUseRequired": false,
+          "perCallRequired": false,
+          "perChunkRequired": false
+        }
+      }
+    ]
+  },
+  "outboundDataCategories": {
+    "public-or-synthetic": {
+      "labelZh": "公开或合成内容"
+    },
+    "unpublished-metadata": {
+      "labelZh": "未公开材料元数据"
+    },
+    "unpublished-excerpts": {
+      "labelZh": "未公开材料选段"
+    },
+    "unpublished-full-content": {
+      "labelZh": "未公开材料全文"
+    }
+  },
+  "credentialBoundary": {
+    "isOutboundDataCategory": false,
+    "permittedInModelVisibleMaterial": false,
+    "permittedInGeneralOutboundMaterial": false,
+    "opaqueReferenceOnlyOutsideFinalConsumer": true,
+    "credentialBrokerResolutionRequired": true,
+    "finalAdapterOnly": true,
+    "policyEligibilityConfiguresCredential": false
+  },
+  "authoritySeparations": {
+    "policyEligibilityDispatchesProviderCall": false,
+    "policyEligibilityCreatesProviderImplementation": false,
+    "runSourceScopeAloneAuthorizesTransmission": false,
+    "runAuthorizationAloneOverridesThisPolicy": false,
+    "configuredProviderAloneAuthorizesTransmission": false,
+    "providerSetupAloneAuthorizesTransmission": false,
+    "configuredCredentialAloneAuthorizesTransmission": false,
+    "artifactInstallOrEnablementAuthorizesTransmission": false,
+    "dshSessionOrPluginMembershipAuthorizesTransmission": false,
+    "defaultExecutionRuleWithoutUserInitiatedTaskAuthorizesTransmission": false,
+    "backgroundAnalysisEnrollmentWithoutExactRunAuthorizesTransmission": false,
+    "externalExportPolicyAuthorizesProviderTransmission": false,
+    "effectApprovalAuthorizesProviderTransmission": false,
+    "providerProcessingAuthorizesManuscriptApply": false,
+    "providerProcessingAuthorizesLearning": false,
+    "providerProcessingAuthorizesPublication": false,
+    "providerProcessingGrantsPublicReleasePermission": false
+  }
+}

@@ -1,6 +1,6 @@
 # Glossary Reference
 
-This maintained bilingual reference routes readers to canonical definitions and warns about cross-context name collisions. English terms are stable architecture/record identifiers; the Simplified Chinese column is the preferred Chinese-first product and discussion label. It does not duplicate definitions; edit the relevant context `CONTEXT.md` instead.
+This maintained bilingual reference routes readers to target-qualified definition owners and warns about cross-context name collisions. English terms are stable architecture/record identifiers within their stated target; the Simplified Chinese column is the preferred Chinese-first product and discussion label. It does not duplicate definitions; edit the relevant context `CONTEXT.md` instead. Issue #86 additions are repository-current only when read from an exact integrated `dev` commit containing this revision; elsewhere they remain accepted-but-unintegrated and do not become current authority merely because they appear in a worktree.
 
 ## Context indexes
 
@@ -9,7 +9,7 @@ This maintained bilingual reference routes readers to canonical definitions and 
 - [Deferred Word Integration](./docs/domain/word-integration/CONTEXT.md) — empty V1 contingency context; no active Word terms
 - [Bilingual ubiquitous-language guide](./UBIQUITOUS_LANGUAGE.md) — relationships, dialogue, and high-risk ambiguity examples; context files remain definition authority.
 
-## Accepted term index
+## Target-qualified term index
 
 | English canonical term | Preferred Simplified Chinese | Canonical owner |
 | --- | --- | --- |
@@ -129,24 +129,21 @@ This maintained bilingual reference routes readers to canonical definitions and 
 | Harness Execution Span | Harness 执行区段 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |
 | Event Projection | 事件投影视图 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |
 | Durable Session Watermark | 持久会话水位线 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |
-| Task Skill | 任务技能 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |
-| Task Skill Manifest | 任务技能清单文件 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |
-| Task Skill Package | 任务技能包 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |
-| Task Skill Candidate | 候选任务技能 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |
-| Task Skill Trust Tier | 任务技能信任等级 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |
-| Admission State | 技能准入状态 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |
-| Installed Task Skill Version | 已安装任务技能版本 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |
-| Task Skill Enablement | 任务技能启用状态 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |
+| Native DSH Artifact | 原生 DSH 构件 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |
+| DSH Skill | DSH 技能 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |
+| DSH Plugin | DSH 插件 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |
+| DSH Bundle | DSH 构件包 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |
+| DSH Profile | DSH 配置档案 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |
+| DSH Agent Preset | DSH 代理预设 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |
+| Source Skill Snapshot | 源技能快照 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |
+| Imported Skill Working Revision | 导入技能工作修订 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |
+| Artifact Update Rule | 构件更新规则 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |
 | Authority Ceiling | 权限上限 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |
 | AI7 Capability | AI7 能力 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |
 | Capability Implementation | 能力实现 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |
 | Harness Tool | Harness 工具 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |
 | Capability Grant | 能力使用许可 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |
-| Task Skill Activation | 任务技能运行激活 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |
-| Harness Skill Projection | Harness 技能投影 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |
-| Third-Party DSH Plugin | 第三方 DSH 插件 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |
-| Plugin Admission Snapshot | 插件准入快照 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |
-| Local Plugin Pin | 本地插件版本锁定 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |
+| DSH Analysis Contract | DSH 分析契约 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |
 | Implementation Assumption | 实现假设 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |
 | Run Source Scope | 任务运行来源范围 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |
 | Model Role | 模型角色 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |
@@ -179,9 +176,18 @@ This maintained bilingual reference routes readers to canonical definitions and 
 | E2E Functional Gate | 端到端功能关口 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |
 | Quality Signal | 质量信号 | [AI7 Editorial](./docs/domain/editorial/CONTEXT.md) |
 | Delivery Quality Metric | 交付质量度量 | [AI7 Editorial](./docs/domain/editorial/CONTEXT.md) |
+| Coverage Manifest | 覆盖清单 | [AI7 Editorial](./docs/domain/editorial/CONTEXT.md) |
+| Analysis Unit | 分析单元 | [AI7 Editorial](./docs/domain/editorial/CONTEXT.md) |
+| Baseline Manuscript Analysis Contract | 基线稿件分析契约 | [AI7 Editorial](./docs/domain/editorial/CONTEXT.md) |
+| Manuscript Analysis Result Set | 稿件分析结果集 | [AI7 Editorial](./docs/domain/editorial/CONTEXT.md) |
+| Manuscript Analysis Result Set Revision | 稿件分析结果集修订版 | [AI7 Editorial](./docs/domain/editorial/CONTEXT.md) |
+| Analysis Quality Metric | 分析质量度量 | [AI7 Editorial](./docs/domain/editorial/CONTEXT.md) |
 | Manuscript Retrieval Chunk | 稿件检索片段 | [AI7 Editorial](./docs/domain/editorial/CONTEXT.md) |
 | Run Authorization | 任务运行授权 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |
+| Default Execution Rule | 默认执行规则 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |
+| Background Analysis Enrollment | 后台分析登记 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |
 | Execution Grant | 单次执行许可 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |
+| AI7 Apply | AI7 正式应用 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |
 | Effect | 受控动作 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |
 | Effect Intent | 受控动作意图 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |
 | Effect Approval | 受控动作批准 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |
@@ -210,11 +216,16 @@ The inheritance audit resolved the definition owners for these terms. They remai
 | Codex Interaction Model Reference | Runtime dependency / process / provider / fallback / source baseline / UI layout or brand |
 | Fast / Main / Difficult / Frontier Model Role | Provider name / model identifier / credential / price tier / authority level |
 | Frontier Model Role | Second harness / silent fallback path / factual authority |
-| Third-Party DSH Plugin | Task Skill / Policy Document / Model Provider / credential / Capability Grant / user-facing brand |
-| Plugin Admission Snapshot | Runtime health check / quality score / recurring measurement / CI gate |
-| Local Plugin Pin | Version range / update channel / automatic update policy |
+| Native DSH Artifact | AI7 authority record / flattened Task Skill package / current Run activation / product authority |
+| DSH Skill | DSH Plugin / AI7 Capability / Capability Grant / standing permission |
+| DSH Plugin | DSH Skill / Policy Document / Model Provider / credential / Capability Grant / user-facing brand |
+| DSH Bundle | Delivery Package / authority bundle / Workflow Instance |
+| DSH Profile | Workflow Profile / Editorial Profile / Capability Profile / authority profile |
+| DSH Agent Preset | AI7 Agent identity / Run Authorization / standing permission |
+| Source Skill Snapshot | Imported Skill Working Revision / latest upstream artifact / executable copy |
+| Imported Skill Working Revision | Source Skill Snapshot / silent conversion / upstream replacement |
+| Artifact Update Rule | Default Execution Rule / Background Analysis Enrollment / Plugin or core-DSH auto-update / authority expansion |
 | Implementation Assumption | Verified capability / acceptance evidence / test gate / permission to weaken a requirement |
-| Task Skill | Harness Skill / Cordis Plugin / AI7 Capability |
 | Task Ledger | Harness Session Ledger / manuscript or learning stores |
 | Harness Session Ledger | Task Ledger / editorial workflow state |
 | Run Record | Harness Session / Harness Execution Span / transcript |
@@ -245,13 +256,16 @@ The inheritance audit resolved the definition owners for these terms. They remai
 | Manuscript Checkpoint | Run Continuation Checkpoint / Harness technical checkpoint / Recovery Snapshot |
 | Task Input (Manuscript Checkpoint purpose) | Context-bound Task Composer / Task Input Revision Preparation / Task Intent / a new checkpoint type |
 | Proposal Branch | Correction Proposal / active draft |
-| Run Authorization | Execution Grant / Effect Approval |
+| Run Authorization | Default Execution Rule / Background Analysis Enrollment / Execution Grant / Effect Approval |
+| Default Execution Rule | Background automation / scheduler / Background Analysis Enrollment / Artifact Update Rule |
+| Background Analysis Enrollment | Provider setup / artifact enablement / Default Execution Rule / general scheduler or learning permission |
+| AI7 Apply | Proposal Decision / Effect Approval alone / generic file write / reusable mutation permission |
 | Proposal Decision | Review Decision / Effect Approval / Effect Receipt |
 | Effect | Tool call / whole Run or Domain Command / generated proposal |
 | Effect Approval | Execution Grant / Public Release Permission / proof of completion |
 | Effect Receipt | Approval / tool result / success message |
-| Workflow Profile | Editorial Profile / Harness Profile / Harness Workflow |
-| Workflow Instance | Harness Session / Harness Workflow / Book-wide stage |
+| Workflow Profile | Editorial Profile / DSH Profile / DSH workflow composition |
+| Workflow Instance | Harness Session / DSH workflow / Book-wide stage |
 | Editorial Artifact | Editorial Deliverable / arbitrary Run output |
 | Editorial Deliverable Revision | Editorial Deliverable identity / latest working state / Source Version / Delivery Package |
 | Milestone Version | Manuscript Checkpoint / latest draft / Signoff Record / Delivery Package / Publication Version |
@@ -284,14 +298,11 @@ The inheritance audit resolved the definition owners for these terms. They remai
 | Resume | Retry / Redo / process restoration / continuation after a material source restriction |
 | Retry | Resume / Redo / ambiguous-Effect repetition |
 | Replay | Retry / re-execution / regeneration |
-| Task Skill Manifest | Skill catalog / Capability Grant / trust decision |
-| Task Skill Trust Tier | Admission State / Task Skill Enablement / current authority |
-| Installed Task Skill Version | Task Skill Enablement / Task Skill Activation |
 | Authority Ceiling | Capability Grant / Execution Grant / Effect Approval |
 | AI7 Capability | Harness Tool / Capability Implementation / feature screen |
-| Capability Implementation | Task Skill / Model Provider / Harness Skill Provider |
+| Capability Implementation | DSH Skill / Model Provider / Harness Skill Provider |
 | Harness Tool | AI7 Capability / authority boundary / Effect Receipt |
-| Task Skill Activation | Task Skill Enablement / Harness Skill Projection / Harness Session |
+| DSH Analysis Contract | Coverage Manifest / Manuscript Analysis Result Set / Background Analysis Enrollment / Workflow Instance |
 | Run Source Scope | Working Corpus / Outbound Data Category / mutation authority |
 | Model Role | Model Provider / model name / Provider Binding / Repository Development Dispatch Layer B binding policy |
 | Provider Resolution Plan | Plan Envelope / dynamic provider choice / skill preference |
@@ -303,16 +314,24 @@ The inheritance audit resolved the definition owners for these terms. They remai
 | Credential Broker | Protected Secret Store / prompt-accessible credential catalog |
 | Outbound Data Category | Run Source Scope / Public Release Permission |
 | Provider Processing Policy | External Export Policy / Public Release Permission |
-| Bundled Promotion Gate | Task Skill Enablement / in-product trust elevation |
+| Bundled Promotion Gate | scoped artifact enablement / in-product trust elevation |
 | Editorial Capability Profile | Editorial Profile (dimension defaults) / Harness Profile / a user-facing setting |
 | Agent Data Root | Run Source Scope / a general filesystem grant / a proven whole-process OS sandbox / a repository working tree |
 | Agent Behavior Asset | Policy Document / House Editorial Memory / model weights |
 | E2E Functional Gate | Factual Verification / Workflow Gate / Effect Receipt / architecture proof |
 | Harness agent loop | AI7 business scheduling / a limit on parallel Runs / AI7-owned workflow continuation |
-| Quality Signal | Learning Material / Memory Candidate / a rating alone |
-| Delivery Quality Metric | Factual correctness / acceptance rate alone / task authority |
-| Manuscript Retrieval Chunk | Manuscript Block / Source Index Chunk / a quotation source |
+| Quality Signal | Learning Material / Memory Candidate / a rating alone / factual proof |
+| Delivery Quality Metric | Analysis Quality Metric / factual correctness / acceptance rate alone / task authority |
+| Analysis Quality Metric | Delivery Quality Metric / factual-verification disposition / learning authority / cross-Book retrieval grant |
+| Coverage Manifest | Retrieval ranking / table of contents / semantic-completeness or factual proof |
+| Analysis Unit | editor window / Manuscript Block / Manuscript Retrieval Chunk / Exact Fetch range / fixed 32-block page |
+| Baseline Manuscript Analysis Contract | Factual Verification / eight-dimension review / import or Provider authority |
+| Manuscript Analysis Result Set | Task Outcome / Editorial Artifact / retrieval index or cache / Workflow Instance / current manuscript truth |
+| Manuscript Analysis Result Set Revision | mutable cache entry / model transcript / automatically promoted Editorial Artifact |
+| Manuscript Retrieval Chunk | Manuscript Block / Analysis Unit / editor window / Exact Fetch range / a quotation source |
 | Review Decision | Proposal Decision / Effect Approval / a Repository Development Dispatch reviewer report |
+
+`Task Skill`, `Task Skill Manifest/Package/Candidate`, `Installed Task Skill Version`, `Task Skill Enablement/Activation`, `Harness Skill Projection`, `Third-Party DSH Plugin`, `Plugin Admission Snapshot`, and `Local Plugin Pin` are legacy-only language preserved in superseded ADRs 0010/0042 and historical target commits. Do not use them as current AI7 object names. Their responsibilities now route to native DSH artifact identities plus separate AI7-owned provenance, compatibility, scope, authority, audit, rollback, update, enablement, per-Run activation, and Apply seams; exact implementation-facing sidecar and activation record names remain deliberately unresolved.
 
 Two collisions come from repository tooling rather than from Harness, and are recorded here because the words are nearly identical:
 
@@ -327,8 +346,10 @@ Two collisions come from repository tooling rather than from Harness, and are re
 - Qualify versions as `源材料版本` or `稿件修订版`.
 - Use `书系` for `Series`; do not narrow the concept to conventional `丛书`.
 - Use `文本原文基准` for `Textual Source of Record` so textual authority is not mistaken for factual authority.
-- Do not translate installation, enablement, and activation as one generic `启用`: use `已安装任务技能版本`, `任务技能启用状态`, and `任务技能运行激活`.
+- Do not translate native-artifact acquisition/install, scoped enablement, exact per-Run activation, and AI7 Apply as one generic `启用`; keep the four stages explicit even though the final sidecar/enablement/activation record names remain deferred.
 - Do not use unqualified `提供方`; distinguish `模型服务提供方`, `能力实现`, Harness Skill Provider, credential backend, and MCP endpoint.
 - Keep `权限上限`, `能力使用许可`, `单次执行许可`, and `受控动作批准` visibly distinct.
+- Keep `编辑窗口`, `稿件检索片段`, `分析单元`, and `精确获取范围` distinct: bounded display, ranked candidate retrieval, deterministic exhaustive coverage, and authoritative exact text are different contracts.
+- Keep `默认执行规则`, `后台分析登记`, and `构件更新规则` distinct: they govern newly user-initiated Task authorization, new background analysis dispatches, and imported-Skill revision adoption respectively; none grants AI7 Apply.
 
-See the accepted semantic mapping in `kick-in/02-target-architecture.md`; root contexts remain the definition owners.
+Use the target-qualified root contexts above as the definition owners; Issue #86's native-artifact and Workflow-definition successor relationship is recorded in [ADR 0045](./docs/adr/0045-preserve-native-dsh-artifacts-behind-ai7-authority-sidecars.md). The older `kick-in/02-target-architecture.md` Task Skill mapping is not current successor authority.
