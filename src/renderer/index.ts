@@ -1041,7 +1041,6 @@ function renderEditorWindow(initialWindow: ManuscriptWindowProjection, bookTitle
   let cancellationRequest: Promise<ServiceJobProjection> | undefined;
   let searchReturn: { window: ManuscriptWindowProjection; continuity: EditorContinuity } | undefined;
   let edgeNavigation = false;
-  let queuedKeyboardCursor: 'previous' | 'next' | undefined;
   let authoritativeMutationStarting = false;
   let authoritativeMutation = false;
   let searchInvalidation: Promise<void> | undefined;
@@ -1289,31 +1288,16 @@ function renderEditorWindow(initialWindow: ManuscriptWindowProjection, bookTitle
     }
   }
 
-  function navigateCursor(direction: 'previous' | 'next', queueIfBusy = false): void {
-    if (authoritativeMutationBusy() || !editor) return;
-    if (edgeNavigation) {
-      if (queueIfBusy) queuedKeyboardCursor = direction;
-      return;
-    }
+  async function navigateCursor(direction: 'previous' | 'next'): Promise<void> {
+    if (authoritativeMutationBusy() || edgeNavigation || !(await settleLocalEdit()) || !editor) return;
+    const cursor = direction === 'previous' ? editor.currentWindow().previousCursor : editor.currentWindow().nextCursor;
+    if (!cursor) return;
     edgeNavigation = true;
-    void runCursorNavigation(direction);
-  }
-
-  async function runCursorNavigation(initialDirection: 'previous' | 'next'): Promise<void> {
-    let direction: 'previous' | 'next' | undefined = initialDirection;
     try {
-      while (direction) {
-        if (authoritativeMutationBusy() || !(await settleLocalEdit()) || !editor) break;
-        const cursor = direction === 'previous' ? editor.currentWindow().previousCursor : editor.currentWindow().nextCursor;
-        if (!cursor) break;
-        const continuity = editor.captureNavigationContinuity();
-        if (!(await navigate({ kind: 'cursor', cursor }, continuity, true))) break;
-        await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
-        direction = queuedKeyboardCursor;
-        queuedKeyboardCursor = undefined;
-      }
+      const continuity = editor.captureNavigationContinuity();
+      await navigate({ kind: 'cursor', cursor }, continuity, true);
+      await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
     } finally {
-      queuedKeyboardCursor = undefined;
       edgeNavigation = false;
     }
   }
@@ -1843,7 +1827,7 @@ function renderEditorWindow(initialWindow: ManuscriptWindowProjection, bookTitle
       if (command === 'search') searchInput.focus();
       else if (command === 'replace') replacementInput.focus();
       else if (command === 'undo' || command === 'redo') void runHistory(command);
-      else navigateCursor(command === 'previous-window' ? 'previous' : 'next', true);
+      else void navigateCursor(command === 'previous-window' ? 'previous' : 'next');
     },
   });
   updateWindowChrome();

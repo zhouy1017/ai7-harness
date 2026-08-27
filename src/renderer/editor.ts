@@ -401,7 +401,10 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
       } else if (target) {
         target.scrollIntoView({ block: 'center' });
       }
-      if (continuity?.focused || (!continuity && focusBlockId !== null)) view.focus();
+      if (continuity?.focused || (!continuity && focusBlockId !== null)) {
+        if (deferredNavigationContinuity) view.dom.focus({ preventScroll: true });
+        else view.focus();
+      }
     });
   };
 
