@@ -235,7 +235,7 @@ async function runJourney(
   );
   await assertRenderer(
     renderer,
-    `typeof globalThis.process === 'undefined' && typeof globalThis.require === 'undefined' && Object.keys(window.ai7).sort().join(',') === 'abandonImportDraft,acknowledgeImportCompletion,cancelServiceJob,commitNewBookImport,commitReplacement,continueImportDraft,dismissReplacementPreview,flushJournalEdit,freezeReplacement,getImportStartup,getManuscriptWindow,getManuscriptWindowAt,getOutline,getSearchResults,listPriorWork,platform,pollServiceJob,prepareNewBookReview,prepareReplacement,redoManuscript,reselectImportDraft,saveMilestone,selectAndStageDocx,startReplacementCommit,startSearch,undoManuscript'`,
+    `typeof globalThis.process === 'undefined' && typeof globalThis.require === 'undefined' && Object.keys(window.ai7).sort().join(',') === 'abandonImportDraft,acknowledgeImportCompletion,cancelServiceJob,commitNewBookImport,commitReplacement,continueImportDraft,deferRecovery,dismissReplacementPreview,flushJournalEdit,freezeReplacement,getImportStartup,getManuscriptWindow,getManuscriptWindowAt,getOutline,getRecoveryComparison,getSearchResults,getStartup,listPriorWork,platform,pollServiceJob,prepareNewBookReview,prepareReplacement,redoManuscript,reselectImportDraft,restoreRecovery,saveMilestone,selectAndStageDocx,startReplacementCommit,startSearch,undoManuscript,viewRecoveryCandidate'`,
     'renderer-isolation',
   );
   await assertRenderer(

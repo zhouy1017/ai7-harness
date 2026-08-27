@@ -5,6 +5,7 @@ import {
   MAX_FRAME_BYTES,
   MAX_REPLACEMENT_EXCLUSIONS,
   type J01ImportControl,
+  type J08RecoveryControl,
   type ServiceFailureResponse,
   type ServiceRequest,
   type ServiceResponse,
@@ -51,6 +52,21 @@ function requireInput(value: unknown, keys: readonly string[], requestId: string
   return value;
 }
 
+function validRecoverySelection(value: unknown): boolean {
+  if (!isRecord(value)) return false;
+  return (value.kind === 'journal' && hasExactKeys(value, ['kind'])) ||
+    (value.kind === 'checkpoint' && hasExactKeys(value, ['kind'])) ||
+    (value.kind === 'snapshot' && hasExactKeys(value, ['kind', 'snapshotId']) &&
+      isBoundedString(value.snapshotId, 36) && UUID_PATTERN.test(value.snapshotId));
+}
+
+function validRecoveryWindowTarget(value: unknown): boolean {
+  return isRecord(value) && (
+    (value.kind === 'start' && hasExactKeys(value, ['kind'])) ||
+    (value.kind === 'after' && hasExactKeys(value, ['kind', 'position']) && isSafeInteger(value.position, 1))
+  );
+}
+
 function decodeRequest(frame: Uint8Array): ServiceRequest {
   let value: unknown;
   try {
@@ -67,10 +83,38 @@ function decodeRequest(frame: Uint8Array): ServiceRequest {
 
   switch (op) {
     case 'ready':
+    case 'getStartup':
     case 'getImportStartup':
     case 'listPriorWork':
     case 'shutdown': {
       requireInput(value.input, [], tentativeId);
+      break;
+    }
+    case 'getRecoveryComparison': {
+      const input = requireInput(value.input, ['attentionId'], tentativeId);
+      if (!isBoundedString(input.attentionId, 36) || !UUID_PATTERN.test(input.attentionId)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'viewRecoveryCandidate': {
+      const input = requireInput(value.input, ['attentionId', 'expectedAttentionVersion', 'selection', 'target'], tentativeId);
+      if (!isBoundedString(input.attentionId, 36) || !UUID_PATTERN.test(input.attentionId) ||
+          !isSafeInteger(input.expectedAttentionVersion, 1) || !validRecoverySelection(input.selection) ||
+          !validRecoveryWindowTarget(input.target)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'deferRecovery': {
+      const input = requireInput(value.input, ['attentionId', 'expectedAttentionVersion'], tentativeId);
+      if (!isBoundedString(input.attentionId, 36) || !UUID_PATTERN.test(input.attentionId) ||
+          !isSafeInteger(input.expectedAttentionVersion, 1)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'restoreRecovery': {
+      const input = requireInput(value.input, ['restorationId', 'attentionId', 'expectedAttentionVersion', 'selection'], tentativeId);
+      if (!isBoundedString(input.restorationId, 36) || !UUID_PATTERN.test(input.restorationId) ||
+          !isBoundedString(input.attentionId, 36) || !UUID_PATTERN.test(input.attentionId) ||
+          !isSafeInteger(input.expectedAttentionVersion, 1) || !validRecoverySelection(input.selection)) {
+        throw new ProtocolError(tentativeId);
+      }
       break;
     }
     case 'stageSelectedDocx': {
@@ -445,6 +489,31 @@ async function dispatch(
   switch (request.op) {
     case 'ready':
       return { id: request.id, ok: true, op: request.op, result: harness.readiness };
+    case 'getStartup':
+      return { id: request.id, ok: true, op: request.op, result: await store.getStartup() };
+    case 'getRecoveryComparison':
+      return { id: request.id, ok: true, op: request.op, result: await store.getRecoveryComparison(request.input.attentionId) };
+    case 'viewRecoveryCandidate':
+      return {
+        id: request.id, ok: true, op: request.op,
+        result: await store.viewRecoveryCandidate(
+          request.input.attentionId, request.input.expectedAttentionVersion,
+          request.input.selection, request.input.target,
+        ),
+      };
+    case 'deferRecovery':
+      return {
+        id: request.id, ok: true, op: request.op,
+        result: await store.deferRecovery(request.input.attentionId, request.input.expectedAttentionVersion),
+      };
+    case 'restoreRecovery':
+      return {
+        id: request.id, ok: true, op: request.op,
+        result: await store.restoreRecovery(
+          request.input.restorationId, request.input.attentionId,
+          request.input.expectedAttentionVersion, request.input.selection,
+        ),
+      };
     case 'getImportStartup':
       return { id: request.id, ok: true, op: request.op, result: await store.getImportStartup() };
     case 'stageSelectedDocx':
@@ -591,7 +660,7 @@ async function dispatch(
         id: request.id,
         ok: true,
         op: request.op,
-        result: store.saveMilestone(
+        result: await store.saveMilestone(
           request.input.manuscriptId,
           request.input.branchId,
           request.input.label,
@@ -622,6 +691,7 @@ async function dispatch(
         ),
       };
     case 'shutdown':
+      store.markCleanShutdown();
       return { id: request.id, ok: true, op: request.op, result: { state: 'stopping' } };
   }
 }
@@ -630,6 +700,7 @@ function parseArguments(argv: string[]): {
   dataRoot: string;
   parentPid: number;
   importControl: J01ImportControl | undefined;
+  recoveryControl: J08RecoveryControl | undefined;
 } {
   const values = new Map<string, string>();
   for (let index = 0; index < argv.length; index += 2) {
@@ -639,7 +710,8 @@ function parseArguments(argv: string[]): {
       !key ||
       !value ||
       values.has(key) ||
-      (key !== '--data-root' && key !== '--parent-pid' && key !== '--j01-import-control')
+      (key !== '--data-root' && key !== '--parent-pid' && key !== '--j01-import-control' &&
+        key !== '--j08-recovery-control')
     ) {
       throw new ProtocolError();
     }
@@ -658,6 +730,10 @@ function parseArguments(argv: string[]): {
     importControlValue === 'after-abandon-object-delete-before-finalize'
       ? importControlValue
       : undefined;
+  const recoveryControlValue = values.get('--j08-recovery-control');
+  const recoveryControl = recoveryControlValue === 'interrupt-after-journal-ack'
+    ? recoveryControlValue
+    : undefined;
   if (
     !dataRoot ||
     !isAbsolute(dataRoot) ||
@@ -665,11 +741,14 @@ function parseArguments(argv: string[]): {
     parentPid <= 0 ||
     process.ppid !== parentPid ||
     (importControlValue !== undefined &&
-      (importControl === undefined || process.env.AI7_E2E_JOURNEY !== 'J-01'))
+      (importControl === undefined || process.env.AI7_E2E_JOURNEY !== 'J-01')) ||
+    (recoveryControlValue !== undefined &&
+      (recoveryControl === undefined || process.env.AI7_E2E_JOURNEY !== 'J-08')) ||
+    (importControl !== undefined && recoveryControl !== undefined)
   ) {
     throw new ProtocolError();
   }
-  return { dataRoot, parentPid, importControl };
+  return { dataRoot, parentPid, importControl, recoveryControl };
 }
 
 function parentIsAlive(parentPid: number): boolean {
@@ -684,7 +763,7 @@ function parentIsAlive(parentPid: number): boolean {
 
 async function run(): Promise<void> {
   installNodeNetworkDenial();
-  const { dataRoot, parentPid, importControl } = parseArguments(process.argv.slice(2));
+  const { dataRoot, parentPid, importControl, recoveryControl } = parseArguments(process.argv.slice(2));
   const [{ EditorialStore, StoreError, StoreFatalError }, { mountDormantHarness }, { CooperativeJobOwner }] =
     await Promise.all([
       import('./store.js'),
@@ -741,6 +820,10 @@ async function run(): Promise<void> {
         throw new Error('E2E interruption after committed import and before response.');
       }
       await writeResponse(response);
+      if (request.op === 'flushJournalEdit' && response.ok && recoveryControl === 'interrupt-after-journal-ack') {
+        stop();
+        throw new Error('E2E interruption after acknowledged journal edit.');
+      }
       if (request.op === 'shutdown') break;
     }
   } finally {

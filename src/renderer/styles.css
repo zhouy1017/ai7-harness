@@ -111,6 +111,22 @@ legend { margin-bottom: .7rem; font-weight: 800; }
 .uncertain-support h3 { margin-top: 0; }
 .uncertain-support p { overflow-wrap: anywhere; }
 .recovery-actions { margin-top: 1.5rem; }
+.manuscript-recovery-panel { max-width: 1120px; margin: 0 auto; }
+.recovery-identity .uncertain-support { margin-bottom: 0; }
+.recovery-comparison legend { font-size: 1.05rem; }
+.recovery-candidate-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); gap: 1rem; }
+.recovery-candidate { min-width: 0; align-items: flex-start; }
+.recovery-candidate > span { min-width: 0; }
+.recovery-candidate-details { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: .45rem .65rem; margin: .75rem 0 0; }
+.recovery-snapshot-disclosure { margin-top: 1rem; padding: 1rem; border: 1px dashed #9b8170; border-radius: 10px; background: #faf5ee; }
+.recovery-snapshot-disclosure p { margin: .6rem 0 0; }
+.recovery-selection-consequence { margin: 1rem 0 0; padding: .9rem 1rem; border-left: 4px solid #866b35; background: #f7f0df; overflow-wrap: anywhere; }
+.recovery-decision-actions { justify-content: flex-end; }
+.recovery-return-actions { justify-content: flex-end; margin-top: 1rem; }
+.recovery-viewer { max-width: 920px; margin: 0 auto; }
+.recovery-readonly-blocks { max-height: min(65vh, 720px); overflow: auto; padding: 1.5rem clamp(1rem, 5vw, 4rem); border: 1px solid #ded9cd; border-radius: 12px; background: #fffefb; font-family: "Noto Serif CJK SC", "Songti SC", serif; line-height: 1.9; }
+.recovery-readonly-blocks h1 { font-size: 2rem; }
+.recovered-state-marker { padding: .2rem .55rem; border: 1px solid #9b711d; border-radius: 999px; background: #fff1c9; color: #67480e; }
 
 .completion { text-align: center; padding: 3.5rem 2rem; }
 .completion-mark { display: grid; place-items: center; width: 58px; height: 58px; margin: 0 auto 1rem; border-radius: 50%; background: #dfeee1; color: #28523a; font-size: 1.8rem; font-weight: 900; }
@@ -162,7 +178,7 @@ legend { margin-bottom: .7rem; font-weight: 800; }
 .error-panel { border-color: #ddb7b1; background: #fff7f5; }
 
 @media (max-width: 960px) {
-  .hero, .review-grid { grid-template-columns: 1fr; }
+  .hero, .review-grid, .recovery-candidate-grid { grid-template-columns: 1fr; }
   .fidelity-row { grid-template-columns: 1fr; }
   .screen { width: min(100% - 1.25rem, 900px); margin-top: .75rem; }
   .app-header { align-items: flex-start; padding: 1rem; }
@@ -187,7 +203,8 @@ legend { margin-bottom: .7rem; font-weight: 800; }
 @media (forced-colors: active) {
   :root, body, .panel, .hero-note, .source-card, .review-section, .choice, .commit-bar,
   .editor-toolbar, .manuscript-navigator, .manuscript-surface, .editor-window, .editor-identities,
-  .search-result, .replacement-review, .recent-work-item, .status-bar {
+  .search-result, .replacement-review, .recent-work-item, .status-bar, .recovery-snapshot-disclosure,
+  .recovery-readonly-blocks, .recovered-state-marker {
     color: CanvasText;
     background: Canvas;
     border-color: CanvasText;
