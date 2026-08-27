@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url';
 import {
   MAX_EDIT_CODE_UNITS,
   MAX_FRAME_BYTES,
+  MAX_REPLACEMENT_EXCLUSIONS,
   type ServiceFailureResponse,
   type ServiceRequest,
   type ServiceResponse,
@@ -215,15 +216,19 @@ function decodeRequest(frame: Uint8Array): ServiceRequest {
       break;
     }
     case 'prepareReplacement': {
-      const input = requireInput(value.input, ['searchId', 'replacement'], tentativeId);
+      const input = requireInput(value.input, ['searchId', 'replacement', 'excludedMatchIds'], tentativeId);
       if (!isBoundedString(input.searchId, 36) || !UUID_PATTERN.test(input.searchId) ||
-          !isBoundedString(input.replacement, 1_024, true)) throw new ProtocolError(tentativeId);
+          !isBoundedString(input.replacement, 1_024, true) || !Array.isArray(input.excludedMatchIds) ||
+          input.excludedMatchIds.length > MAX_REPLACEMENT_EXCLUSIONS ||
+          !input.excludedMatchIds.every((id) => isBoundedString(id, 28) && /^hit_[0-9a-f]{24}$/.test(id))) {
+        throw new ProtocolError(tentativeId);
+      }
       break;
     }
     case 'freezeReplacement': {
       const input = requireInput(value.input, ['previewId', 'excludedMatchIds'], tentativeId);
       if (!isBoundedString(input.previewId, 36) || !UUID_PATTERN.test(input.previewId) || !Array.isArray(input.excludedMatchIds) ||
-          input.excludedMatchIds.length > 1_000 || !input.excludedMatchIds.every((id) => isBoundedString(id, 28) && /^hit_[0-9a-f]{24}$/.test(id))) {
+          input.excludedMatchIds.length > MAX_REPLACEMENT_EXCLUSIONS || !input.excludedMatchIds.every((id) => isBoundedString(id, 28) && /^hit_[0-9a-f]{24}$/.test(id))) {
         throw new ProtocolError(tentativeId);
       }
       break;
@@ -386,7 +391,7 @@ async function dispatch(
     case 'getSearchResults':
       return { id: request.id, ok: true, op: request.op, result: store.getSearchResults(request.input.searchId, request.input.cursor) };
     case 'prepareReplacement':
-      return { id: request.id, ok: true, op: request.op, result: store.prepareReplacement(request.input.searchId, request.input.replacement) };
+      return { id: request.id, ok: true, op: request.op, result: store.prepareReplacement(request.input.searchId, request.input.replacement, request.input.excludedMatchIds) };
     case 'freezeReplacement':
       return { id: request.id, ok: true, op: request.op, result: store.freezeReplacement(request.input.previewId, request.input.excludedMatchIds) };
     case 'startReplacementCommit':

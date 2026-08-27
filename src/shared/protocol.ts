@@ -9,6 +9,8 @@ export const MAX_SEARCH_QUERY_GRAPHEMES = 64;
 export const MAX_REPLACEMENT_GRAPHEMES = 256;
 export const MAX_SEARCH_RESULTS = 24;
 export const MAX_OUTLINE_RESULTS = 64;
+export const MAX_OUTLINE_DISPLAY_UTF8_BYTES = 2 * 1024;
+export const MAX_REPLACEMENT_EXCLUSIONS = 1_000;
 
 export type J01ImportControl =
   | 'before-commit'
@@ -212,6 +214,7 @@ export interface OutlineEntryProjection {
   kind: 'title' | 'heading';
   level: number;
   text: string;
+  displayTextTruncated: boolean;
   character: number;
   proportion: number;
 }
@@ -285,6 +288,7 @@ export interface ReplacementPreviewProjection {
   includedMatches: number;
   excludedMatches: number;
   state: 'reviewing' | 'frozen';
+  excludedMatchIds: ReadonlyArray<string>;
   representativeContexts: ReadonlyArray<SearchMatchProjection>;
 }
 
@@ -336,7 +340,7 @@ export interface ServiceJobProjection {
   kind: 'search' | 'replacement';
   state: 'queued' | 'running' | 'completed' | 'cancelled' | 'failed';
   progress: { completed: number; total: number; label: string };
-  result: SearchSummaryProjection | null;
+  result: SearchSummaryProjection | ReplacementPreviewProjection | null;
   failure: null | { code: string; message: string };
 }
 
@@ -534,7 +538,7 @@ export interface ServiceOperationMap {
     output: SearchResultsProjection;
   };
   prepareReplacement: {
-    input: { searchId: string; replacement: string };
+    input: { searchId: string; replacement: string; excludedMatchIds: ReadonlyArray<string> };
     output: ReplacementPreviewProjection;
   };
   freezeReplacement: {

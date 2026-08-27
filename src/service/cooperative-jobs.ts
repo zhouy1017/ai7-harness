@@ -54,7 +54,7 @@ export class CooperativeJobOwner {
         jobId,
         kind: 'replacement',
         state: 'queued',
-        progress: { completed: 0, total: 1, label: '正在复核冻结匹配…' },
+        progress: { completed: 0, total: 1, label: '正在有界准备替换集…' },
         result: null,
         failure: null,
       },
@@ -129,13 +129,16 @@ export class CooperativeJobOwner {
         if (!progress.done) this.#schedule(job);
         return;
       }
-      const progress = this.#store.advanceReplacementValidation(job.subjectId);
+      const progress = this.#store.advanceReplacementWork(job.subjectId);
+      const preparing = progress.phase === 'preparing';
       job.projection = {
         ...job.projection,
         progress: {
           completed: progress.completed,
           total: progress.total,
-          label: progress.done ? '正在原子提交替换…' : '正在复核冻结匹配…',
+          label: progress.done
+            ? preparing ? '替换预览准备完成' : '冻结匹配复核完成'
+            : preparing ? '正在有界准备替换预览…' : '正在复核冻结匹配…',
         },
       };
       if (!progress.done) {
@@ -145,8 +148,8 @@ export class CooperativeJobOwner {
       job.projection = {
         ...job.projection,
         state: 'completed',
-        progress: { completed: progress.total, total: progress.total, label: '冻结匹配复核完成' },
-        result: null,
+        progress: { completed: progress.total, total: progress.total, label: preparing ? '替换预览准备完成' : '冻结匹配复核完成' },
+        result: progress.preview,
       };
     } catch (error) {
       if (job.projection.kind === 'search') this.#store.cancelSearch(job.subjectId);

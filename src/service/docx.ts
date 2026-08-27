@@ -21,6 +21,7 @@ const MAX_ZIP_RATIO = 2_000;
 const MAX_XML_FEED_BYTES = MAX_BLOCK_CODE_UNITS;
 const MAX_XML_TEXT_TOKEN_CODE_UNITS = MAX_BLOCK_CODE_UNITS;
 const MAX_XML_MARKUP_TOKEN_CODE_UNITS = MAX_BLOCK_CODE_UNITS * 8;
+const MAX_XML_NESTING_DEPTH = 128;
 const PARSER_IDENTITY = 'ai7-docx-fflate-saxes/1';
 const SAMPLE1_SOURCE_BYTES = 29_550;
 const SAMPLE1_SOURCE_SHA256 = 'b8a3dbde0aa8a1ec7265f9ae3fe47877759e7947c5ab69682cd0a8f424a8d483';
@@ -149,11 +150,14 @@ function hasExactStrings(actual: readonly string[], expected: readonly string[])
 function parseCoreTitle(xml: string | undefined): string | undefined {
   if (!xml) return undefined;
   let inTitle = 0;
+  let depth = 0;
   let value = '';
   const parser = new SaxesParser({ xmlns: true });
   parser.on('doctype', () => requireDocx(false, 'DOCTYPE in core properties'));
   parser.on('processinginstruction', () => requireDocx(false, 'processing instruction in core properties'));
   parser.on('opentag', (tag) => {
+    requireDocx(depth < MAX_XML_NESTING_DEPTH, 'core properties XML nesting exceeds its safe bound');
+    depth += 1;
     if (tag.local === 'title') inTitle += 1;
   });
   parser.on('text', (text) => {
@@ -161,8 +165,11 @@ function parseCoreTitle(xml: string | undefined): string | undefined {
   });
   parser.on('closetag', (tag) => {
     if (tag.local === 'title') inTitle -= 1;
+    requireDocx(depth > 0, 'core properties element stack mismatch');
+    depth -= 1;
   });
   parser.write(xml).close();
+  requireDocx(depth === 0, 'core properties element stack mismatch');
   requireDocx(value.isWellFormed(), 'invalid title text');
   const normalized = value.normalize('NFC').replace(/\s+/g, ' ').trim();
   return normalized.length > 0 && normalized.length <= 180 ? normalized : undefined;
@@ -240,6 +247,7 @@ function createDocumentParser(
   parser.on('doctype', () => requireDocx(false, 'DOCTYPE in document XML'));
   parser.on('processinginstruction', () => requireDocx(false, 'processing instruction in document XML'));
   parser.on('opentag', (tag) => {
+    requireDocx(ancestors.length < MAX_XML_NESTING_DEPTH, 'document XML nesting exceeds its safe bound');
     const parent = ancestors.at(-1);
     const grandparent = ancestors.at(-2);
     if (terminalSectionSeen && parent === 'body') requireDocx(false, 'terminal section properties are not terminal');

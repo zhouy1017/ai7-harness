@@ -24,6 +24,7 @@ interface EditorUiState {
   journalSequence: number;
   workingDigest: string;
   composing: boolean;
+  operationLocked: boolean;
 }
 
 export interface BoundedEditor {
@@ -34,6 +35,7 @@ export interface BoundedEditor {
   selectRange(blockId: string, fromGrapheme: number, toGrapheme: number): boolean;
   currentWindow(): ManuscriptWindowProjection;
   isComposing(): boolean;
+  setOperationLocked(locked: boolean): void;
   interrupt(): void;
   destroy(): void;
 }
@@ -268,6 +270,9 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
   let destroyed = false;
   let interrupted = false;
   let composing = false;
+  let operationLocked = false;
+
+  const isEditable = (): boolean => !retryRequired && !interrupted && !operationLocked;
 
   const changedBlocks = (document: ProseMirrorNode): string[] => {
     const changed: string[] = [];
@@ -308,7 +313,7 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
       }
     });
     if (!valid) return false;
-    return !retryRequired && !interrupted;
+    return isEditable();
   };
 
   const transactionFilter = new Plugin({ filterTransaction: candidateIsBounded });
@@ -320,6 +325,12 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
     });
 
   let view: EditorView;
+
+  const applyEditableState = (): void => {
+    view.setProps({ editable: isEditable });
+    view.dom.setAttribute('aria-readonly', isEditable() ? 'false' : 'true');
+    view.dom.dataset['operationLocked'] = operationLocked ? 'true' : 'false';
+  };
 
   const captureContinuity = (): EditorContinuity => {
     const selection = view.state.selection;
@@ -388,6 +399,7 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
       journalSequence: windowProjection.journalSequence,
       workingDigest: windowProjection.workingDigest,
       composing,
+      operationLocked,
     });
 
   const flush = (): Promise<void> => {
@@ -450,13 +462,13 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
           restoreContinuity(makeState(visibleBlocks), continuity, null);
           retryPrepared = undefined;
           retryRequired = false;
-          view.setProps({ editable: () => !retryRequired && !interrupted });
+          applyEditableState();
           lastCompletion = ack.completionLabel;
           announceState();
         } catch (error) {
           retryPrepared = prepared;
           retryRequired = true;
-          view.setProps({ editable: () => false });
+          applyEditableState();
           options.onAnnouncement(
             interrupted
               ? '本地业务服务已中断；未保存文字仍保留在编辑区，但尚未获得持久写入确认。'
@@ -476,7 +488,7 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
     })().catch((error: unknown) => {
       saving = false;
       retryRequired = true;
-      view.setProps({ editable: () => false });
+      applyEditableState();
       announceState();
       options.onAnnouncement(
         error instanceof Error
@@ -500,7 +512,7 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
 
   view = new EditorView(options.host, {
     state: makeState(),
-    editable: () => !retryRequired && !interrupted,
+    editable: isEditable,
     dispatchTransaction(transaction) {
       const nextState = view.state.apply(transaction);
       if (nextState === view.state) return;
@@ -568,6 +580,7 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
   view.dom.setAttribute('aria-label', '稿件编辑区');
   view.dom.setAttribute('aria-multiline', 'true');
   view.dom.setAttribute('data-testid', 'manuscript-editor');
+  applyEditableState();
   announceState();
 
   return {
@@ -603,13 +616,21 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
     },
     currentWindow: () => windowProjection,
     isComposing: () => composing,
+    setOperationLocked: (locked) => {
+      if (locked) {
+        requireEditor(!saving && !retryRequired && !composing && changedBlocks(view.state.doc).length === 0, '无法在未确认本地编辑时锁定稿件。');
+      }
+      operationLocked = locked;
+      applyEditableState();
+      announceState();
+    },
     interrupt: () => {
       interrupted = true;
       saving = false;
       const waiting = compositionWaiters;
       compositionWaiters = [];
       for (const resolve of waiting) resolve();
-      view.setProps({ editable: () => false });
+      applyEditableState();
       announceState();
       options.onAnnouncement('本地业务服务已中断；未保存文字仍保留在编辑区，但尚未获得持久写入确认。', 'error');
     },

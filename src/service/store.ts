@@ -44,7 +44,8 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3
 const TOKEN_PATTERN = UUID_PATTERN;
 const BASE_SCHEMA_VERSION = 2;
 const PRE_SIGNOFF_SCHEMA_VERSION = 3;
-const SCHEMA_VERSION = 4;
+const OFFSET_REPAIR_SCHEMA_VERSION = 4;
+const SCHEMA_VERSION = 5;
 const WORKFLOW_PROFILE = {
   id: 'ai7.manuscript.editorial.zh-CN',
   name: '基础书稿编辑流程',
@@ -273,11 +274,13 @@ function initializeSchema(db: DatabaseSync): void {
   const currentVersion = asNumber(versionRow.user_version);
   requireStore(
     currentVersion === 0 || currentVersion === 1 || currentVersion === BASE_SCHEMA_VERSION ||
-      currentVersion === PRE_SIGNOFF_SCHEMA_VERSION || currentVersion === SCHEMA_VERSION,
+      currentVersion === PRE_SIGNOFF_SCHEMA_VERSION || currentVersion === OFFSET_REPAIR_SCHEMA_VERSION ||
+      currentVersion === SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
-  if (currentVersion === BASE_SCHEMA_VERSION || currentVersion === PRE_SIGNOFF_SCHEMA_VERSION || currentVersion === SCHEMA_VERSION) return;
+  if (currentVersion === BASE_SCHEMA_VERSION || currentVersion === PRE_SIGNOFF_SCHEMA_VERSION ||
+      currentVersion === OFFSET_REPAIR_SCHEMA_VERSION || currentVersion === SCHEMA_VERSION) return;
   if (currentVersion === 1) {
     migrateSchemaV1ToV2(db);
     return;
@@ -920,6 +923,7 @@ export class EditorialStore {
         contentDigest: parsed.contentDigest,
         structureDigest: parsed.structureDigest,
         blockCount: parsed.blockCount,
+        characterCount: parsed.characterCount,
         fidelity: parsed.fidelity,
         titleSuggestion: parsed.titleSuggestion.value,
         titleSource: parsed.titleSuggestion.sourceLabel,
@@ -1383,16 +1387,22 @@ export class EditorialStore {
     return this.#boundedCall(() => this.#bounded.getSearchResults(searchId, cursor));
   }
 
-  prepareReplacement(searchId: string, replacement: string): ReplacementPreviewProjection {
-    return this.#boundedCall(() => this.#bounded.prepareReplacement(searchId, replacement));
+  prepareReplacement(searchId: string, replacement: string, excludedMatchIds: ReadonlyArray<string>): ReplacementPreviewProjection {
+    return this.#boundedCall(() => this.#bounded.prepareReplacement(searchId, replacement, excludedMatchIds));
   }
 
   freezeReplacement(previewId: string, excludedMatchIds: ReadonlyArray<string>): ReplacementPreviewProjection {
     return this.#boundedCall(() => this.#bounded.freezeReplacement(previewId, excludedMatchIds));
   }
 
-  advanceReplacementValidation(previewId: string): { done: boolean; completed: number; total: number } {
-    return this.#boundedCall(() => this.#bounded.advanceReplacementValidation(previewId));
+  advanceReplacementWork(previewId: string): {
+    phase: 'preparing' | 'validating';
+    done: boolean;
+    completed: number;
+    total: number;
+    preview: ReplacementPreviewProjection | null;
+  } {
+    return this.#boundedCall(() => this.#bounded.advanceReplacementWork(previewId));
   }
 
   commitReplacement(previewId: string): ReplacementCommitProjection {
