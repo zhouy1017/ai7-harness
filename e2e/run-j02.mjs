@@ -302,15 +302,24 @@ async function runWorkspaceJourney(renderer) {
   await waitFor(renderer, `document.querySelector('.editor-meta')?.textContent.includes('99.998%')`, 'outline-exact-resolve');
 
   at('cooperative-edit');
-  const commonSearchObservation = await renderer.observeIpc();
   await fill(renderer, '#manuscript-search', '天', 'common-search-fill');
-  await clickButton(renderer, '查找全稿', 'common-search-start');
+  const commonSearchObservation = await renderer.observeIpc();
+  await assertRenderer(
+    renderer,
+    `(() => { const search = document.querySelector('#manuscript-search'); const start = Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '查找全稿'); const cancel = Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '取消当前操作'); if (!(search instanceof HTMLInputElement) || !start || !cancel || search.disabled || start.disabled || !cancel.hidden || cancel.dataset.serviceJobId) return false; start.click(); const pendingGap = search.disabled && start.disabled && cancel.hidden && cancel.dataset.serviceJobId === ''; search.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })); return pendingGap && cancel.hidden && cancel.dataset.serviceJobId === ''; })()`,
+    'single-service-job-start-promise-gap-reentry',
+  );
   await waitFor(renderer, `!Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '取消当前操作')?.hidden`, 'common-search-running');
   await assertRenderer(renderer, `(() => { const cancel = Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '取消当前操作'); const search = document.querySelector('#manuscript-search'); if (!cancel?.dataset.serviceJobId || !(search instanceof HTMLInputElement)) return false; globalThis.__ai7ServiceJobId = cancel.dataset.serviceJobId; search.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '查找全稿')?.click(); return cancel.dataset.serviceJobId === globalThis.__ai7ServiceJobId && document.querySelectorAll('button[data-service-job-id="' + globalThis.__ai7ServiceJobId + '"]').length === 1; })()`, 'single-service-job-reentry');
   const afterSearchReentryObservation = await renderer.observeIpc();
+  const commonSearchEvents = afterSearchReentryObservation.events.filter(
+    (event) => event.ordinal > (commonSearchObservation.events.at(-1)?.ordinal ?? 0) &&
+      event.operation === 'startSearch' && event.phase === 'invoke',
+  );
   requireJourney(
-    (afterSearchReentryObservation.counts.startSearch ?? 0) - (commonSearchObservation.counts.startSearch ?? 0) === 1,
-    'single-service-job-actual-start-ipc',
+    (afterSearchReentryObservation.counts.startSearch ?? 0) - (commonSearchObservation.counts.startSearch ?? 0) === 1 &&
+      commonSearchEvents.length === 1,
+    'single-service-job-gap-actual-start-ipc',
   );
   await assertRenderer(
     renderer,
