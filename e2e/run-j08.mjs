@@ -1,6 +1,7 @@
 import { createWriteStream, existsSync } from 'node:fs';
 import { appendFile, lstat, mkdir, mkdtemp, open as openFile, readdir, realpath, rename, rm, stat, truncate, writeFile } from 'node:fs/promises';
 import { once } from 'node:events';
+import { createServer } from 'node:http';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { arch, platform, release, tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -8,7 +9,6 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const DEBUG_SELECTORS = new Set(['DEBUG', 'DEBUG_FILE', 'PWDEBUG', 'PWDEBUGIMPL']);
 const OBJECT_PATTERN = /^[0-9a-f]{64}\.snapshot$/;
-const NETWORK_PROBE_URL = 'https://ai7.invalid/j08-network-probe';
 let location = 'entry';
 let electronExecutable;
 let Zip;
@@ -47,6 +47,46 @@ function productEnvironment(executable) {
     selected.PATH = [dirname(executable), resolve(systemRoot, 'System32'), resolve(systemRoot)].join(delimiter);
   } else selected.PATH = [dirname(executable), '/usr/bin', '/bin', '/usr/sbin', '/sbin'].join(delimiter);
   return selected;
+}
+
+async function createLoopbackSentinel() {
+  let observedRequests = 0;
+  let runtimeFault = false;
+  let closed = false;
+  const server = createServer((_request, response) => {
+    observedRequests += 1;
+    response.writeHead(200, {
+      'Cache-Control': 'no-store',
+      'Content-Length': '21',
+      'Content-Type': 'text/plain; charset=utf-8',
+    });
+    response.end('AI7_LOOPBACK_SENTINEL');
+  });
+  server.on('error', () => { runtimeFault = true; });
+  await new Promise((resolveListen, rejectListen) => {
+    server.once('error', () => rejectListen(new Error('J-08/loopback-listen')));
+    server.listen(0, '127.0.0.1', resolveListen);
+  });
+  const address = server.address();
+  if (!(address !== null && typeof address === 'object' && address.address === '127.0.0.1' &&
+      Number.isSafeInteger(address.port) && address.port > 0)) {
+    await new Promise((resolveClose) => server.close(() => resolveClose()));
+    throw new Error('J-08/loopback-address');
+  }
+  server.unref();
+  return {
+    url: `http://127.0.0.1:${address.port}/j08-network-probe`,
+    healthy: () => server.listening && !runtimeFault,
+    observedRequests: () => observedRequests,
+    close: async () => {
+      if (closed) return;
+      closed = true;
+      await new Promise((resolveClose, rejectClose) => {
+        server.close((error) => error ? rejectClose(new Error('J-08/loopback-close')) : resolveClose());
+      });
+      requireJourney(!runtimeFault, 'loopback-runtime');
+    },
+  };
 }
 
 async function createSyntheticDocx(path, title, seed) {
@@ -97,30 +137,11 @@ async function attachRenderer(browser) {
   const { sessionId } = await root.send('Target.attachToTarget', { targetId: target.targetId, flatten: false });
   let nextId = 1;
   const pending = new Map();
-  const eventWaiters = new Map();
-  const networkRequestUrls = new Map();
   root.on('Target.receivedMessageFromTarget', ({ sessionId: incoming, message }) => {
     if (incoming !== sessionId) return;
     let response;
     try { response = JSON.parse(message); } catch { return; }
-    if (typeof response.id !== 'number') {
-      if (typeof response.method !== 'string') return;
-      if (response.method === 'Network.requestWillBeSent' &&
-          typeof response.params?.requestId === 'string' && typeof response.params?.request?.url === 'string') {
-        networkRequestUrls.set(response.params.requestId, response.params.request.url);
-      }
-      for (const waiter of eventWaiters.get(response.method) ?? []) {
-        if (!waiter.predicate(response.params)) continue;
-        clearTimeout(waiter.timeout);
-        eventWaiters.get(response.method)?.delete(waiter);
-        waiter.resolve(response.params);
-      }
-      if ((response.method === 'Network.loadingFailed' || response.method === 'Network.loadingFinished') &&
-          typeof response.params?.requestId === 'string') {
-        networkRequestUrls.delete(response.params.requestId);
-      }
-      return;
-    }
+    if (typeof response.id !== 'number') return;
     const completion = pending.get(response.id);
     if (!completion) return;
     pending.delete(response.id);
@@ -140,28 +161,9 @@ async function attachRenderer(browser) {
     await root.send('Target.sendMessageToTarget', { sessionId, message: JSON.stringify({ id, method, params }) });
     return response;
   };
-  const waitForEvent = (method, predicate, timeoutMs = 60_000) => new Promise((resolveEvent, rejectEvent) => {
-    const waiters = eventWaiters.get(method) ?? new Set();
-    const waiter = {
-      predicate,
-      resolve: resolveEvent,
-      timeout: setTimeout(() => {
-        waiters.delete(waiter);
-        rejectEvent(new Error('J-08/renderer-cdp-event-timeout'));
-      }, timeoutMs),
-    };
-    waiter.timeout.unref();
-    waiters.add(waiter);
-    eventWaiters.set(method, waiters);
-  });
   await send('Runtime.enable');
   return {
     send,
-    waitForCorrelatedProbeFailure: () => waitForEvent(
-      'Network.loadingFailed',
-      (params) => typeof params?.requestId === 'string' &&
-        networkRequestUrls.get(params.requestId) === NETWORK_PROBE_URL,
-    ),
     evaluate: async (expression) => {
       const response = await send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true });
       requireJourney(!response.exceptionDetails, 'renderer-evaluate');
@@ -261,20 +263,24 @@ async function overwriteFinalByte(path, size, value) {
 
 async function main() {
   parseJourney();
-  at('controller-imports');
-  const denial = resolve(ROOT, 'dist', 'shared', 'network-denial.mjs');
-  requireJourney(existsSync(denial), 'controller-network-denial-carrier');
-  (await import(pathToFileURL(denial).href)).installNodeNetworkDenial();
-  ({ Zip, ZipPassThrough, strToU8 } = await import('fflate'));
-  ({ electronExecutable } = await import('../tools/electron-runtime.mjs'));
-  const { createCanonicalExternalDataRoot, ensureCanonicalDataDirectory } = await import(pathToFileURL(resolve(ROOT, 'dist', 'shared', 'data-root.mjs')).href);
-  const { chromium } = await import('playwright-core');
-  const tempParent = await realpath(tmpdir());
-  const checkout = await realpath(ROOT);
-  requireJourney(!inside(checkout, tempParent) && !inside(tempParent, checkout), 'temp-boundary');
+  let loopback;
   let runRoot;
   let browser;
+  let tempParent;
   try {
+    at('controller-loopback-sentinel');
+    loopback = await createLoopbackSentinel();
+    at('controller-imports');
+    const denial = resolve(ROOT, 'dist', 'shared', 'network-denial.mjs');
+    requireJourney(existsSync(denial), 'controller-network-denial-carrier');
+    (await import(pathToFileURL(denial).href)).installNodeNetworkDenial();
+    ({ Zip, ZipPassThrough, strToU8 } = await import('fflate'));
+    ({ electronExecutable } = await import('../tools/electron-runtime.mjs'));
+    const { createCanonicalExternalDataRoot, ensureCanonicalDataDirectory } = await import(pathToFileURL(resolve(ROOT, 'dist', 'shared', 'data-root.mjs')).href);
+    const { chromium } = await import('playwright-core');
+    tempParent = await realpath(tmpdir());
+    const checkout = await realpath(ROOT);
+    requireJourney(!inside(checkout, tempParent) && !inside(tempParent, checkout), 'temp-boundary');
     runRoot = await mkdtemp(join(tempParent, 'ai7-j08-e2e-'));
     requireJourney(dirname(runRoot) === tempParent && basename(runRoot).startsWith('ai7-j08-e2e-'), 'temp-root');
     const inputs = resolve(runRoot, 'synthetic-inputs');
@@ -305,22 +311,17 @@ async function main() {
     at('baseline-import-and-snapshot');
     let renderer = await launch({ picker: bookA });
     await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady === 'true'`, 'ready-a');
-    await renderer.send('Network.enable');
     await renderer.send('Page.setBypassCSP', { enabled: true });
     try {
-      const deniedRequest = renderer.waitForCorrelatedProbeFailure();
-      const fetchRejected = await renderer.evaluate(`(async()=>{try{await fetch(${JSON.stringify(NETWORK_PROBE_URL)});return false}catch{return true}})()`);
-      const denial = await deniedRequest;
-      const productCancellation = denial.canceled === true ||
-        denial.errorText === 'net::ERR_BLOCKED_BY_CLIENT' ||
-        (platform() === 'darwin' && denial.errorText === 'net::ERR_FAILED');
+      const fetchRejected = await renderer.evaluate(`(async()=>{try{await fetch(${JSON.stringify(loopback.url)});return false}catch{return true}})()`);
       requireJourney(
-        fetchRejected === true && denial.errorText !== 'net::ERR_NAME_NOT_RESOLVED' && productCancellation,
+        fetchRejected === true && loopback.healthy() && loopback.observedRequests() === 0,
         'renderer-network-denial',
       );
     } finally {
       await renderer.send('Page.setBypassCSP', { enabled: false });
     }
+    await loopback.close();
     await importBook(renderer, '恢复边界甲', 'book-a', true);
     await saveMilestone(renderer, '中断前检查点', 'checkpoint-one');
     await saveMilestone(renderer, '中断前复核快照', 'checkpoint-two');
@@ -502,9 +503,10 @@ async function main() {
   } finally {
     await browser?.close().catch(() => undefined);
     if (runRoot !== undefined) {
-      requireJourney(dirname(runRoot) === tempParent && basename(runRoot).startsWith('ai7-j08-e2e-') && (await realpath(runRoot)) === runRoot, 'cleanup-target');
+      requireJourney(tempParent !== undefined && dirname(runRoot) === tempParent && basename(runRoot).startsWith('ai7-j08-e2e-') && (await realpath(runRoot)) === runRoot, 'cleanup-target');
       await rm(runRoot, { recursive: true, force: true });
     }
+    await loopback?.close();
   }
 }
 

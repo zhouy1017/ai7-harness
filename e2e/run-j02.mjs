@@ -365,21 +365,87 @@ async function importAndOpen(renderer) {
   await waitFor(renderer, `document.querySelector('[data-screen="editor"]')`, 'editor');
 }
 
-async function milestoneTimeoutCategory(dataRoot) {
+async function milestoneObjectTimeoutCategory(dataRoot) {
   let directory;
   try {
     directory = await opendir(join(dataRoot, 'recovery-objects', 'v1'));
   } catch (error) {
-    if (error?.code === 'ENOENT') return 'milestone-r2-recovery-object-absent';
+    if (error?.code === 'ENOENT') return 'recovery-object-absent';
     throw new Error('J-02/milestone-r2-object-inspection');
   }
   let promoted = false;
   for await (const entry of directory) {
     if (!entry.isFile()) continue;
-    if (RECOVERY_PARTIAL_PATTERN.test(entry.name)) return 'milestone-r2-partial-object-present';
+    if (RECOVERY_PARTIAL_PATTERN.test(entry.name)) return 'partial-object-present';
     if (RECOVERY_OBJECT_PATTERN.test(entry.name)) promoted = true;
   }
-  return promoted ? 'milestone-r2-promoted-object-present' : 'milestone-r2-recovery-object-absent';
+  return promoted ? 'promoted-object-present' : 'recovery-object-absent';
+}
+
+async function milestoneIpcTimeoutCategory(renderer, beforeObservation) {
+  let afterObservation;
+  try {
+    afterObservation = await renderer.observeIpc();
+  } catch {
+    return 'ipc-diagnostic-unavailable';
+  }
+
+  if (!Array.isArray(beforeObservation?.events) || !Array.isArray(afterObservation?.events)) {
+    return 'ipc-diagnostic-unavailable';
+  }
+
+  const boundaryOrdinal = beforeObservation.events.at(-1)?.ordinal ?? 0;
+  if (!Number.isSafeInteger(boundaryOrdinal)) {
+    return 'ipc-diagnostic-unavailable';
+  }
+
+  const events = [];
+  for (const event of afterObservation.events) {
+    if (event === null || typeof event !== 'object') continue;
+    const { operation, ordinal, phase } = event;
+    if (
+      !Number.isSafeInteger(ordinal) ||
+      ordinal <= boundaryOrdinal ||
+      (operation !== 'flushJournalEdit' && operation !== 'saveMilestone') ||
+      (phase !== 'invoke' && phase !== 'result' && phase !== 'error')
+    ) {
+      continue;
+    }
+    events.push({ operation, ordinal, phase });
+  }
+  events.sort((left, right) => left.ordinal - right.ordinal);
+
+  const flushInvoke = events.find(
+    (event) => event.operation === 'flushJournalEdit' && event.phase === 'invoke',
+  );
+  if (!flushInvoke) return 'no-flush-invoke';
+
+  const flushTerminal = events.find(
+    (event) =>
+      event.ordinal > flushInvoke.ordinal &&
+      event.operation === 'flushJournalEdit' &&
+      (event.phase === 'result' || event.phase === 'error'),
+  );
+  if (!flushTerminal) return 'flush-pending';
+  if (flushTerminal.phase === 'error') return 'flush-error';
+
+  const saveInvoke = events.find(
+    (event) =>
+      event.ordinal > flushTerminal.ordinal &&
+      event.operation === 'saveMilestone' &&
+      event.phase === 'invoke',
+  );
+  if (!saveInvoke) return 'flush-result-no-save-invoke';
+
+  const saveTerminal = events.find(
+    (event) =>
+      event.ordinal > saveInvoke.ordinal &&
+      event.operation === 'saveMilestone' &&
+      (event.phase === 'result' || event.phase === 'error'),
+  );
+  if (!saveTerminal) return 'save-pending';
+  if (saveTerminal.phase === 'error') return 'save-error';
+  return 'save-result-renderer-not-r2';
 }
 
 async function runWorkspaceJourney(renderer, dataRoot) {
@@ -641,7 +707,9 @@ async function runWorkspaceJourney(renderer, dataRoot) {
     );
   } catch (error) {
     if (!(error instanceof Error) || error.message !== 'J-02/milestone-r2') throw error;
-    throw new Error(`J-02/${await milestoneTimeoutCategory(dataRoot)}`);
+    const ipcCategory = await milestoneIpcTimeoutCategory(renderer, milestoneDrainObservation);
+    const objectCategory = await milestoneObjectTimeoutCategory(dataRoot);
+    throw new Error(`J-02/milestone-r2-${ipcCategory}-${objectCategory}`);
   }
   const milestoneDrainCompleted = await renderer.observeIpc();
   const milestoneDrainEvents = milestoneDrainCompleted.events.filter((event) => event.ordinal > (milestoneDrainObservation.events.at(-1)?.ordinal ?? 0));
