@@ -1,32 +1,28 @@
 # Current handoff
 
-[Issue #37](https://github.com/zhouy1017/ai7-harness/issues/37), **[S02] J-01: Complete deterministic import identity disclosure**, is the active sole-Worker implementation on `feat/37-import-identity` from exact `dev@6b4ef18d2c4b2a212ec34a24ec3a25b3bc3be5b5`.
+[Issue #41](https://github.com/zhouy1017/ai7-harness/issues/41), **[S02] J-01: Preserve interrupted import continuity and reconcile commit outcome**, is the active sole-writer integration on `feat/41-import-continuity` from exact `dev@0dcc2265610fb908cae8e41cb326d1bc01b33f84`.
 
-Resolve this file from the exact tree being read. The bounded change extends the existing provider-free J-01 path only: immutable-original, parsed-content-and-structure, and same-display-name/different-content findings are deterministic, non-authorizing disclosures bound into review digest v4 and re-derived before the existing atomic separate-new-Book commit.
+Resolve this file from the exact tree being read. The bounded result combines the already-integrated deterministic import identity disclosure with restart-safe J-01 continuity: review schema v4, service protocol v3, and SQLite schema v5 are distinct namespaces and all remain intentional.
 
-## Current authority and tracker route
+## Current outcome and authority route
 
-- Stable Issue #86 authority now lives in root ADRs 0045–0048, UI ADRs 0015–0017, Provider Processing/active-policy-set v3 and the updated domain, architecture, UI/UX, glossary and constraint owners.
-- Native DSH artifacts retain identity, versioned Workflow definitions and technical logic. AI7 owns exact selection/pins, compatibility/authority sidecars and durable Workflow business state.
-- Provider setup and artifact acquisition/install/enablement remain non-authorizing. Imported updates remain inert until explicit adoption or the narrow eligible Artifact Update Rule.
-- New autonomous Provider-backed manuscript analysis requires active matching Background Analysis Enrollment. Every formal agent-originated Manuscript mutation still crosses one exact, editor-confirmed, single-use AI7 Apply boundary.
-- [PRD #28](https://github.com/zhouy1017/ai7-harness/issues/28) is refreshed against exact `dev@ec623a6...` with stable stories 1–141 plus successor stories 142–148. It remains a requirements index, not implementation authority.
-- Existing Issues #38, #46–#49, #51–#59 and #61–#66 carry explicit post-#86 non-dispatch markers and required successor deltas. #65/#66 retain their identities but their historical Task Skill/standalone Workflow-definition assumptions require in-place replacement before dispatch.
-- New enhancement-only Issues #88–#95 own the native artifact lifecycle, foreign Skill updates, Agent Workspace, ordinary-production Provider Run, covered analysis, Result Set history, analysis metrics and Background Analysis Enrollment. None is `ready-for-agent`; #88 and #91 additionally require named Owner selections.
-- Issue #37 uses exact `sample1` plus two unrelated runtime-only public-synthetic clean DOCX inputs created and deleted in its disposable external root: synthetic A shares `sample1.docx`'s name with different content, and synthetic B has a different container/name but A's parsed blocks and structure. No finding selects a target or relationship, deduplicates, overwrites, reimports, infers lineage, creates a cross-Book relationship, or exposes manuscript payload. Fuzzy matching and all other J-01 branches remain outside scope.
+- Complete content-addressed staged snapshots survive restart and original-path loss. Startup makes no automatic selection or commit; it distinguishes ordinary recovery, cleanup-pending, proven committed completion, and outcome uncertainty.
+- Ordered one-class-per-record `identityFindings` retain immutable-original, parsed-content-and-structure, and same-name/different-content disclosure. They remain non-authorizing and are re-derived into the v4 digest before durable attempt preparation and again inside the atomic commit.
+- Schema-v2/v3 data and complete drafts remain recoverable, but every non-v4 review loses commit authority and returns to explicit target selection and v4 re-review. Ordinary production generates and accepts only v4.
+- `import_commit_attempts` is only the durable idempotency/reconciliation envelope. `import_commits` plus the authoritative Book/Source/Manuscript graph remain completion proof; inconclusive proof fails closed without a second ledger.
+- Abandonment keeps its committed cleanup intent, shared-object protection, cumulative schema-v4 insert guards, schema-v5 OLD/NEW update guards, serialized object lifecycle, and deterministic restart cleanup.
+- The existing provider-free J-01 gate now composes identity A/B cases with path loss, an identity-bearing review restart, legacy-review invalidation, pre/post-commit interruption, uncertain reconciliation, visible completion acknowledgement, cleanup failure, and post-removal recovery. Synthetic inputs remain runtime-only under the disposable external root.
 
-## Lifecycle archive
-
-The consumed exact Issue #86 root checkpoint and handoff are preserved byte-for-byte in one indexed historical archive node. Archive discovery remains in the archive router; ordinary current-state reading does not enter it.
-
-The existing `sample1` compatibility baseline, provider-free/network-denied execution, durable initial import and journal acknowledgement, immutable policy/ADR history, non-authorizing setup/install, active Enrollment requirement, and single-use AI7 Apply boundary remain unchanged. No dependency/plugin installation, Provider call, tracked manuscript/derivative, release, or `main` action is authorized.
+Stable Issue #86 authority, Provider non-authorization, inert imported updates until adoption or an Artifact Update Rule, active Background Analysis Enrollment for background Provider work, and the exact single-use AI7 Apply boundary remain unchanged. No Provider call, dependency/plugin installation, tracked manuscript/derivative, new gate, release, or `main` action is authorized.
 
 ## Safe next action
 
-Run the existing no-install validation surface if the declared local toolchain is materialized; otherwise report that exact environment blocker without bootstrapping or installing dependencies. Re-resolve target authority before Commander integration. Do not start another Issue, push, merge, release, or touch `main`.
+Run the remaining bounded no-install validation, checkpoint the normalized result, push only `feat/41-import-continuity`, open the Issue #41 pull request, and wait for the existing Route plus Windows/macOS J-01 checks. Their results inform Commander integration; no independent review becomes an exact-head, zero-finding, iterative re-review, PR, or CI gate.
+
+After Issue #41 is merged and `dev` is re-resolved, Issue #43 is the next candidate for a separate semantic replay. Do not mix it into this branch: its editor schema must be renumbered above SQLite schema v5 while preserving review v4, protocol v3, continuity triggers, attempts, and identity evidence.
 
 ## Resume prompt
 
 ```text
-Finish only Issue #37 on feat/37-import-identity. Preserve exact base 6b4ef18d2c4b2a212ec34a24ec3a25b3bc3be5b5, the v4 fail-closed review binding, deterministic ordered one-class-per-record disclosure, runtime-only synthetic A/B cleanup, and complete provider-free J-01 sequence. Do not install dependencies/plugins, call Providers, add tracked manuscripts/derivatives, add gates, push, merge, release, or touch main.
+Finish only Issue #41 on feat/41-import-continuity from exact dev@0dcc2265610fb908cae8e41cb326d1bc01b33f84. Preserve review schema v4 with ordered identityFindings, service protocol v3, SQLite schema v5, strict non-v4 review invalidation, and every bounded recovery/reconciliation/cleanup case. Run no-install validation, then create and integrate only its PR through the existing checks. Do not start Issue #43 on this branch, install, call Providers, add manuscripts or derivatives, add gates, release, or touch main.
 ```

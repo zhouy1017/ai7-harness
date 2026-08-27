@@ -106,40 +106,38 @@ function sourceCard(staged: StagedImportProjection): HTMLElement {
   return card;
 }
 
-function exactMatchDisclosure(
-  matches: StagedImportProjection['exactMatches'],
+function identityFindingDisclosure(
+  findings: StagedImportProjection['identityFindings'],
   reviewTarget?: ReviewBeforeImportProjection['target']['label'],
 ): HTMLElement {
-  const disclosure = element('section', 'source-card exact-match-disclosure');
-  if (reviewTarget) disclosure.classList.add('review-exact-match-summary');
+  const disclosure = element('section', 'source-card identity-finding-disclosure');
+  if (reviewTarget) disclosure.classList.add('review-identity-finding-summary');
   disclosure.append(
-    element('p', 'section-label', reviewTarget ? '精确匹配与本次关系' : '发现精确导入匹配'),
-    element('h3', undefined, reviewTarget ? '复核匹配记录与不同作品后果' : '已有导入与当前文件精确匹配'),
+    element('p', 'section-label', reviewTarget ? '导入身份提示与本次关系' : '发现已有导入身份提示'),
+    element('h3', undefined, reviewTarget ? '复核身份提示记录与不同作品后果' : '已有导入与当前文件的身份提示'),
     ...(reviewTarget ? [element('p', undefined, `本次选择：${reviewTarget}`)] : []),
     element(
       'p',
       'field-note',
       reviewTarget
-        ? '匹配不授予目标、关系、去重、覆盖或重新导入权限；现有匹配记录保持不变，本次提交将创建另一图书的完整新记录。'
-        : '匹配仅用于披露，不会选择目标或关系，也不授予去重、覆盖或重新导入权限。',
+        ? '身份提示不授予目标、关系、去重、覆盖或重新导入权限；现有记录保持不变，本次提交将创建另一图书的完整新记录。'
+        : '身份提示仅用于披露，不会选择目标或关系，也不授予去重、覆盖或重新导入权限。',
     ),
   );
-  for (const match of matches) {
+  for (const finding of findings) {
     const item = element('section', 'review-section');
     const classes = element('ul', 'degradation-list');
-    for (const identityClass of match.identityClasses) {
-      const row = element('li', undefined, identityClass.label);
-      row.dataset['exactMatchClass'] = identityClass.kind;
-      classes.append(row);
-    }
+    const row = element('li', undefined, finding.identityClass.label);
+    row.dataset['importIdentityClass'] = finding.identityClass.kind;
+    classes.append(row);
     const details = element('dl');
     details.append(
       element('dt', undefined, '匹配图书'),
-      element('dd', undefined, `${match.bookTitle} · ${match.bookId}`),
+      element('dd', undefined, `${finding.bookTitle} · ${finding.bookId}`),
       element('dt', undefined, '来源材料版本'),
-      element('dd', 'technical-identity', match.sourceVersionId),
+      element('dd', 'technical-identity', finding.sourceVersionId),
       element('dt', undefined, '稿件导入记录'),
-      element('dd', 'technical-identity', match.importRecordId),
+      element('dd', 'technical-identity', finding.importRecordId),
     );
     item.append(classes, details);
     disclosure.append(item);
@@ -464,7 +462,7 @@ function renderTargetChoice(
     sourceCard(staged),
   );
   if (recoveryNotice) content.append(element('p', 'recovery-notice', recoveryNotice));
-  if (staged.exactMatches.length > 0) content.append(exactMatchDisclosure(staged.exactMatches));
+  if (staged.identityFindings.length > 0) content.append(identityFindingDisclosure(staged.identityFindings));
   const targetChoice = staged.targetChoices[0];
   if (!targetChoice) throw new Error('AI7_IMPORT_TARGET_INVALID');
   const choices = element('fieldset');
@@ -484,7 +482,7 @@ function renderTargetChoice(
     element(
       'small',
       undefined,
-      staged.exactMatches.length > 0
+      staged.identityFindings.length > 0
         ? '将当前文件作为不同作品，建立新的图书、主稿件、r1 和工作流程实例'
         : '以这份来源建立图书、主稿件、r1 和工作流程实例',
     ),
@@ -596,7 +594,9 @@ function renderReview(review: ReviewBeforeImportProjection, recoveryNotice?: str
   );
   identity.append(identityDetails);
   content.append(identity);
-  if (review.exactMatches.length > 0) content.append(exactMatchDisclosure(review.exactMatches, review.target.label));
+  if (review.identityFindings.length > 0) {
+    content.append(identityFindingDisclosure(review.identityFindings, review.target.label));
+  }
 
   const fidelity = element('section', 'review-section');
   fidelity.append(element('h3', undefined, '导入保真审阅 · 8 类'), fidelityTable(review.fidelity));

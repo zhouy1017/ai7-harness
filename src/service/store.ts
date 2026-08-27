@@ -4,11 +4,11 @@ import { copyFile, lstat, open, realpath, rename, rm } from 'node:fs/promises';
 import { basename, isAbsolute, posix, relative, resolve, sep } from 'node:path';
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
 import type {
-  ExactImportMatchProjection,
   FidelityCategoryProjection,
   ImportCommitProjection,
   ImportDegradationDecisionReviewProjection,
   ImportDraftRecoveryProjection,
+  ImportIdentityFindingProjection,
   ImportStartupProjection,
   JournalAcknowledgement,
   JournalEditInput,
@@ -87,8 +87,6 @@ const NON_EFFECTS = [
 ] as const;
 const CLEAN_IMPORT_NON_EFFECT = '符合当前范围的导入不创建导入降级决定';
 const DEGRADATION_DECISION_SCHEMA = 'ai7.import-degradation-decision/1';
-const SAMPLE1_SOURCE_BYTES = 29_550;
-const SAMPLE1_SOURCE_SHA256 = 'b8a3dbde0aa8a1ec7265f9ae3fe47877759e7947c5ab69682cd0a8f424a8d483';
 
 type SqlRow = Record<string, SQLOutputValue>;
 
@@ -951,9 +949,9 @@ function nonEffects(plan: ImportFidelityPlan): ReadonlyArray<string> {
 }
 
 function newBookTargetChoice(
-  exactMatches: ReadonlyArray<ExactImportMatchProjection>,
+  identityFindings: ReadonlyArray<ImportIdentityFindingProjection>,
 ): StagedImportProjection['targetChoices'][number] {
-  return exactMatches.length > 0
+  return identityFindings.length > 0
     ? { id: 'new-book-distinct-intended-work', label: '新建图书（作为不同作品）', selected: false }
     : { id: 'new-book', label: '新建图书', selected: false };
 }
@@ -1031,17 +1029,17 @@ function createLegacyNewBookReviewDigestV2(
   );
 }
 
-function createNewBookReviewDigestV3(
+function createNewBookReviewDigestV4(
   snapshot: DraftSnapshot,
   confirmedTitle: string,
   draftVersion: number,
   plan: ImportFidelityPlan,
   targetChoiceId: NewBookImportTargetChoiceId,
-  exactMatches: ReadonlyArray<ExactImportMatchProjection>,
+  identityFindings: ReadonlyArray<ImportIdentityFindingProjection>,
 ): string {
   return sha256(
     canonicalJson({
-      schema: 'ai7.new-book-import-review/3',
+      schema: 'ai7.new-book-import-review/4',
       draftId: snapshot.draftId,
       draftVersion,
       target:
@@ -1059,7 +1057,7 @@ function createNewBookReviewDigestV3(
         contentDigest: snapshot.contentDigest,
         structureDigest: snapshot.structureDigest,
       },
-      exactMatches,
+      identityFindings,
       fidelity: snapshot.fidelity,
       degradationDecision:
         plan.degradations.length === 0
@@ -1085,27 +1083,20 @@ function reconstructReviewedTargetChoice(
   snapshot: DraftSnapshot,
   confirmedTitle: string,
   plan: ImportFidelityPlan,
-  exactMatches: ReadonlyArray<ExactImportMatchProjection>,
+  identityFindings: ReadonlyArray<ImportIdentityFindingProjection>,
 ): NewBookImportTargetChoiceId | null {
-  const targetChoice = newBookTargetChoice(exactMatches);
+  const targetChoice = newBookTargetChoice(identityFindings);
   if (
-    createNewBookReviewDigestV3(
+    createNewBookReviewDigestV4(
       snapshot,
       confirmedTitle,
       snapshot.version,
       plan,
       targetChoice.id,
-      exactMatches,
+      identityFindings,
     ) === snapshot.reviewDigest
   ) {
     return targetChoice.id;
-  }
-  if (
-    exactMatches.length === 0 &&
-    targetChoice.id === 'new-book' &&
-    createLegacyNewBookReviewDigestV2(snapshot, confirmedTitle, snapshot.version, plan) === snapshot.reviewDigest
-  ) {
-    return 'new-book';
   }
   return null;
 }
@@ -1350,8 +1341,8 @@ export class EditorialStore {
 
     requireStore(snapshot.state === 'reviewed', 'DRAFT_STATE_CHANGED', '导入草稿状态已变化。');
     const plan = this.#requireFidelityPlan(snapshot);
-    const exactMatches = this.#exactImportMatches(snapshot);
-    const currentTarget = newBookTargetChoice(exactMatches);
+    const identityFindings = this.#identityFindings(snapshot);
+    const currentTarget = newBookTargetChoice(identityFindings);
     let title: string | null = null;
     try {
       title = snapshot.reviewedTitle === null ? null : safeTitle(snapshot.reviewedTitle);
@@ -1359,7 +1350,7 @@ export class EditorialStore {
       title = null;
     }
     const reconstructedTarget =
-      title === null ? null : reconstructReviewedTargetChoice(snapshot, title, plan, exactMatches);
+      title === null ? null : reconstructReviewedTargetChoice(snapshot, title, plan, identityFindings);
     if (
       reconstructedTarget === null ||
       reconstructedTarget !== currentTarget.id ||
@@ -1386,7 +1377,7 @@ export class EditorialStore {
         plan,
         plan.degradations.length > 0,
         currentTarget.id,
-        exactMatches,
+        identityFindings,
         attempt?.attemptId ?? null,
       ),
       originalFileAccess: access,
@@ -1658,12 +1649,12 @@ export class EditorialStore {
     const snapshot = this.#loadDraftSnapshot(draftId);
     requireStore(snapshot.state === 'staged', 'DRAFT_STATE_CHANGED', '导入草稿状态已变化。');
     requireStore(snapshot.version === expectedDraftVersion, 'DRAFT_VERSION_CHANGED', '导入草稿版本已变化。');
-    const exactMatches = this.#exactImportMatches(snapshot);
-    const targetChoice = newBookTargetChoice(exactMatches);
+    const identityFindings = this.#identityFindings(snapshot);
+    const targetChoice = newBookTargetChoice(identityFindings);
     requireStore(targetChoiceId === targetChoice.id, 'TARGET_CHOICE_CHANGED', '导入目标选择已变化，请重新选择。');
     const plan = this.#requireFidelityPlan(snapshot);
     if (plan.degradations.length > 0 && !acceptDegradation) {
-      return this.#reviewProjection(snapshot, confirmedTitle, null, plan, false, targetChoiceId, exactMatches, null);
+      return this.#reviewProjection(snapshot, confirmedTitle, null, plan, false, targetChoiceId, identityFindings, null);
     }
     requireStore(
       plan.degradations.length > 0 || !acceptDegradation,
@@ -1673,20 +1664,20 @@ export class EditorialStore {
     const nextVersion = expectedDraftVersion + 1;
     requireStore(
       !this.#control.persistLegacyReviewedDraft ||
-        (targetChoiceId === 'new-book' && exactMatches.length === 0),
+        (targetChoiceId === 'new-book' && identityFindings.length === 0),
       'E2E_CONTROL_INVALID',
-      '旧版复核边界仅适用于无精确匹配的新建图书。',
+      '旧版复核边界仅适用于无身份提示的新建图书。',
     );
     const reviewSnapshot = { ...snapshot, version: nextVersion };
     const reviewDigest = this.#control.persistLegacyReviewedDraft
       ? createLegacyNewBookReviewDigestV2(reviewSnapshot, confirmedTitle, nextVersion, plan)
-      : createNewBookReviewDigestV3(
+      : createNewBookReviewDigestV4(
           reviewSnapshot,
           confirmedTitle,
           nextVersion,
           plan,
           targetChoiceId,
-          exactMatches,
+          identityFindings,
         );
     const persistedTargetChoiceId = this.#control.persistLegacyReviewedDraft ? null : targetChoiceId;
     const reviewedAt = new Date().toISOString();
@@ -1715,7 +1706,7 @@ export class EditorialStore {
       plan,
       plan.degradations.length > 0,
       targetChoiceId,
-      exactMatches,
+      identityFindings,
       null,
     );
   }
@@ -1755,6 +1746,28 @@ export class EditorialStore {
     requireStore(snapshotBeforeAttempt.reviewDigest === input.reviewDigest, 'REVIEW_CHANGED', '导入前复核摘要已变化。');
     const revalidated = await this.#revalidateSnapshot(snapshotBeforeAttempt);
     requireStore(!revalidated.parserDrift, 'REVIEW_CHANGED', '解析器状态已变化，请重新复核导入。');
+    const snapshotForAttempt = revalidated.snapshot;
+    requireStore(snapshotForAttempt.reviewedTitle, 'REVIEW_CHANGED', '确认书名缺失。');
+    const planForAttempt = this.#requireFidelityPlan(snapshotForAttempt);
+    const identityFindingsForAttempt = this.#identityFindings(snapshotForAttempt);
+    const targetChoiceForAttempt = newBookTargetChoice(identityFindingsForAttempt);
+    requireStore(
+      snapshotForAttempt.reviewedTargetChoiceId === targetChoiceForAttempt.id,
+      'REVIEW_CHANGED',
+      '导入目标无法与当前复核证据精确对应。',
+    );
+    requireStore(
+      createNewBookReviewDigestV4(
+        snapshotForAttempt,
+        snapshotForAttempt.reviewedTitle,
+        snapshotForAttempt.version,
+        planForAttempt,
+        targetChoiceForAttempt.id,
+        identityFindingsForAttempt,
+      ) === input.reviewDigest,
+      'REVIEW_CHANGED',
+      '导入前复核摘要无法由当前权威快照重建。',
+    );
     if (!existingAttempt) {
       const preparedAt = new Date().toISOString();
       this.#transaction(this.#authority, () => {
@@ -1796,27 +1809,23 @@ export class EditorialStore {
       requireStore(snapshot.reviewDigest === input.reviewDigest, 'REVIEW_CHANGED', '导入前复核摘要已变化。');
       requireStore(snapshot.reviewedTitle, 'REVIEW_CHANGED', '确认书名缺失。');
       const plan = this.#requireFidelityPlan(snapshot);
-      const exactMatches = this.#exactImportMatches(snapshot);
-      const targetChoice = newBookTargetChoice(exactMatches);
+      const identityFindings = this.#identityFindings(snapshot);
+      const targetChoice = newBookTargetChoice(identityFindings);
       requireStore(
         snapshot.reviewedTargetChoiceId === targetChoice.id,
         'REVIEW_CHANGED',
         '导入目标无法与当前复核证据精确对应。',
       );
-      const currentReviewDigest = createNewBookReviewDigestV3(
+      const currentReviewDigest = createNewBookReviewDigestV4(
         snapshot,
         snapshot.reviewedTitle,
         snapshot.version,
         plan,
         targetChoice.id,
-        exactMatches,
+        identityFindings,
       );
-      const legacyReviewDigest =
-        exactMatches.length === 0
-          ? createLegacyNewBookReviewDigestV2(snapshot, snapshot.reviewedTitle, snapshot.version, plan)
-          : null;
       requireStore(
-        currentReviewDigest === input.reviewDigest || legacyReviewDigest === input.reviewDigest,
+        currentReviewDigest === input.reviewDigest,
         'REVIEW_CHANGED',
         '导入前复核摘要无法由当前权威快照重建。',
       );
@@ -3198,8 +3207,8 @@ export class EditorialStore {
         requireStore(snapshot.reviewedTitle !== null && snapshot.reviewDigest !== null, 'REVIEW_CHANGED', '旧版导入复核证据不完整。');
         confirmedTitle = safeTitle(snapshot.reviewedTitle);
         const plan = this.#requireFidelityPlan(snapshot);
-        const exactMatches = this.#exactImportMatches(snapshot);
-        targetChoiceId = reconstructReviewedTargetChoice(snapshot, confirmedTitle, plan, exactMatches);
+        const identityFindings = this.#identityFindings(snapshot);
+        targetChoiceId = reconstructReviewedTargetChoice(snapshot, confirmedTitle, plan, identityFindings);
       } catch {
         continue;
       }
@@ -3218,8 +3227,8 @@ export class EditorialStore {
   }
 
   #stagedProjection(snapshot: DraftSnapshot): StagedImportProjection {
-    const exactMatches = this.#exactImportMatches(snapshot);
-    const targetChoice = newBookTargetChoice(exactMatches);
+    const identityFindings = this.#identityFindings(snapshot);
+    const targetChoice = newBookTargetChoice(identityFindings);
     return {
       draftId: snapshot.draftId,
       draftVersion: snapshot.version,
@@ -3231,7 +3240,7 @@ export class EditorialStore {
         provenanceLabel: '本机文件选择器 · 本地解析 · 未联网',
       },
       titleSuggestion: { value: snapshot.titleSuggestion, sourceLabel: snapshot.titleSource },
-      exactMatches,
+      identityFindings,
       targetChoices: [targetChoice],
       fidelity: snapshot.fidelity,
       detectedBlockCount: snapshot.blockCount,
@@ -3245,10 +3254,10 @@ export class EditorialStore {
     plan: ImportFidelityPlan,
     accepted: boolean,
     targetChoiceId: NewBookImportTargetChoiceId,
-    exactMatches: ReadonlyArray<ExactImportMatchProjection>,
+    identityFindings: ReadonlyArray<ImportIdentityFindingProjection>,
     commitAttemptId: string | null,
   ): ReviewBeforeImportProjection {
-    const targetChoice = newBookTargetChoice(exactMatches);
+    const targetChoice = newBookTargetChoice(identityFindings);
     requireStore(targetChoiceId === targetChoice.id, 'TARGET_CHOICE_CHANGED', '导入目标选择已变化，请重新选择。');
     return {
       draftId: snapshot.draftId,
@@ -3262,7 +3271,7 @@ export class EditorialStore {
         confirmedTitle,
       },
       source: this.#stagedProjection(snapshot).source,
-      exactMatches,
+      identityFindings,
       fidelity: snapshot.fidelity,
       recordsToCreate: recordsToCreate(plan),
       nonEffects: nonEffects(plan),
@@ -3280,34 +3289,51 @@ export class EditorialStore {
     };
   }
 
-  #exactImportMatches(snapshot: DraftSnapshot): ExactImportMatchProjection[] {
-    if (snapshot.sourceBytes !== SAMPLE1_SOURCE_BYTES || snapshot.sourceDigest !== SAMPLE1_SOURCE_SHA256) return [];
-    return (
-      this.#authority
-        .prepare(
-          `SELECT b.book_id, b.title, sv.source_version_id, sv.content_digest, sv.structure_digest,
-                  ir.import_record_id
-           FROM source_versions sv
-           JOIN books b ON b.book_id = sv.book_id
-           JOIN manuscript_import_records ir
-             ON ir.book_id = sv.book_id
-            AND ir.source_version_id = sv.source_version_id
-           WHERE sv.source_digest = ?
-           ORDER BY ir.imported_at, b.book_id, sv.source_version_id`,
-        )
-        .all(snapshot.sourceDigest) as SqlRow[]
-    ).map((row) => ({
-      bookId: asString(row.book_id),
-      bookTitle: asString(row.title),
-      sourceVersionId: asString(row.source_version_id),
-      importRecordId: asString(row.import_record_id),
-      identityClasses: [
-        { kind: 'immutable-original', label: '精确原始文件身份' } as const,
-        ...(asString(row.content_digest) === snapshot.contentDigest && asString(row.structure_digest) === snapshot.structureDigest
-          ? ([{ kind: 'parsed-content-structure', label: '精确解析内容与结构身份' }] as const)
-          : []),
-      ],
-    }));
+  #identityFindings(snapshot: DraftSnapshot): ImportIdentityFindingProjection[] {
+    const rows = this.#authority
+      .prepare(
+        `SELECT b.book_id, b.title, sv.source_version_id, sv.source_digest, sv.content_digest,
+                sv.structure_digest, sv.parser_identity, sv.display_name, ir.import_record_id
+         FROM source_versions sv
+         JOIN books b ON b.book_id = sv.book_id
+         JOIN manuscript_import_records ir
+           ON ir.book_id = sv.book_id
+          AND ir.source_version_id = sv.source_version_id
+         ORDER BY b.title COLLATE BINARY, b.book_id, sv.source_version_id, ir.import_record_id`,
+      )
+      .all() as SqlRow[];
+    const findings = new Map<string, ImportIdentityFindingProjection>();
+    for (const row of rows) {
+      const sourceDigest = asString(row.source_digest);
+      const contentDigest = asString(row.content_digest);
+      const structureDigest = asString(row.structure_digest);
+      const parserIdentity = asString(row.parser_identity);
+      const displayName = asString(row.display_name);
+      const identityClass =
+        sourceDigest === snapshot.sourceDigest
+          ? ({ kind: 'immutable-original', label: '精确原始文件身份' } as const)
+          : parserIdentity === snapshot.parserIdentity &&
+              contentDigest === snapshot.contentDigest &&
+              structureDigest === snapshot.structureDigest
+            ? ({ kind: 'parsed-content-structure', label: '发现相同内容' } as const)
+            : displayName === snapshot.displayName &&
+                (sourceDigest !== snapshot.sourceDigest ||
+                  contentDigest !== snapshot.contentDigest ||
+                  structureDigest !== snapshot.structureDigest)
+              ? ({ kind: 'filename-collision', label: '名称相同，内容不同' } as const)
+              : undefined;
+      if (!identityClass) continue;
+      const finding = {
+        bookId: asString(row.book_id),
+        bookTitle: asString(row.title),
+        sourceVersionId: asString(row.source_version_id),
+        importRecordId: asString(row.import_record_id),
+        identityClass,
+      } satisfies ImportIdentityFindingProjection;
+      const key = `${finding.bookId}\u0000${finding.sourceVersionId}\u0000${finding.importRecordId}`;
+      if (!findings.has(key)) findings.set(key, finding);
+    }
+    return [...findings.values()];
   }
 
   #loadDraftSnapshot(draftId: string): DraftSnapshot {
