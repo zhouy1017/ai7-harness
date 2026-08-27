@@ -29,7 +29,9 @@ import {
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const DIGEST_PATTERN = /^[0-9a-f]{64}$/;
 const BLOCK_PATTERN = /^blk_[0-9a-f]{24}$/;
-const SCHEMA_VERSION = 3;
+const LEGACY_BOUNDED_SCHEMA_VERSION = 2;
+const SIGNOFF_MIGRATION_SOURCE_VERSION = 3;
+const SCHEMA_VERSION = 4;
 const MIGRATION_BATCH = 256;
 const SEARCH_BATCH = 128;
 const HISTORY_BATCH = 128;
@@ -270,13 +272,104 @@ function migrateLegacyJournal(db: DatabaseSync, branchId: string): number {
   return sequence;
 }
 
+function createMilestoneSignoffTable(db: DatabaseSync): void {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS milestone_signoff_records (
+      signoff_record_id TEXT PRIMARY KEY,
+      milestone_id TEXT NOT NULL UNIQUE REFERENCES milestone_versions(milestone_id),
+      manuscript_id TEXT NOT NULL REFERENCES manuscripts(manuscript_id),
+      branch_id TEXT NOT NULL REFERENCES manuscript_branches(branch_id),
+      revision_id TEXT NOT NULL REFERENCES manuscript_revisions(revision_id),
+      workflow_instance_id TEXT NOT NULL REFERENCES workflow_instances(workflow_instance_id),
+      workflow_evidence_digest TEXT NOT NULL CHECK(length(workflow_evidence_digest) = 64),
+      actor TEXT NOT NULL CHECK(actor = '本机编辑'),
+      signed_at TEXT NOT NULL,
+      label TEXT NOT NULL,
+      stated_next_use TEXT NOT NULL
+    ) STRICT;
+  `);
+}
+
+function requireMilestoneSignoffSchema(db: DatabaseSync): void {
+  const columns = (db.prepare('PRAGMA table_info(milestone_signoff_records)').all() as SqlRow[])
+    .map((row) => asString(row.name));
+  requireBounded(
+    columns.join(',') === [
+      'signoff_record_id',
+      'milestone_id',
+      'manuscript_id',
+      'branch_id',
+      'revision_id',
+      'workflow_instance_id',
+      'workflow_evidence_digest',
+      'actor',
+      'signed_at',
+      'label',
+      'stated_next_use',
+    ].join(','),
+    'SCHEMA_MIGRATION_FAILED',
+    '里程碑签核记录结构不兼容。',
+  );
+  const table = one(
+    db.prepare("SELECT strict FROM pragma_table_list WHERE schema = 'main' AND name = 'milestone_signoff_records'").all() as SqlRow[],
+    'SCHEMA_MIGRATION_FAILED',
+    '里程碑签核记录表缺失。',
+  );
+  requireBounded(asNumber(table.strict) === 1, 'SCHEMA_MIGRATION_FAILED', '里程碑签核记录表必须使用严格模式。');
+  const foreignKeys = (db.prepare('PRAGMA foreign_key_list(milestone_signoff_records)').all() as SqlRow[])
+    .map((row) => `${asString(row.from)}:${asString(row.table)}:${asString(row.to)}`)
+    .sort();
+  const expectedForeignKeys = [
+    'branch_id:manuscript_branches:branch_id',
+    'manuscript_id:manuscripts:manuscript_id',
+    'milestone_id:milestone_versions:milestone_id',
+    'revision_id:manuscript_revisions:revision_id',
+    'workflow_instance_id:workflow_instances:workflow_instance_id',
+  ].sort();
+  requireBounded(
+    foreignKeys.join(',') === expectedForeignKeys.join(','),
+    'SCHEMA_MIGRATION_FAILED',
+    '里程碑签核记录引用结构不兼容。',
+  );
+}
+
+function migrateSignoffSchemaV3ToV4(db: DatabaseSync): void {
+  const foreignKeys = one(db.prepare('PRAGMA foreign_keys').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取引用校验状态。');
+  requireBounded(asNumber(foreignKeys.foreign_keys) === 1, 'SCHEMA_INVALID', '数据库引用校验未启用。');
+  transact(db, () => {
+    createMilestoneSignoffTable(db);
+    requireMilestoneSignoffSchema(db);
+    const violations = db.prepare('PRAGMA foreign_key_check').all();
+    requireBounded(violations.length === 0, 'SCHEMA_MIGRATION_FAILED', '数据库迁移后的引用校验失败。');
+    db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
+  });
+  const migratedVersion = one(db.prepare('PRAGMA user_version').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取数据库版本。');
+  requireBounded(asNumber(migratedVersion.user_version) === SCHEMA_VERSION, 'SCHEMA_MIGRATION_FAILED', '数据库版本迁移未完成。');
+  const restoredForeignKeys = one(db.prepare('PRAGMA foreign_keys').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取引用校验状态。');
+  requireBounded(asNumber(restoredForeignKeys.foreign_keys) === 1, 'SCHEMA_INVALID', '数据库引用校验未保持启用。');
+}
+
 export function initializeBoundedSchema(db: DatabaseSync): void {
   const version = asNumber(one(db.prepare('PRAGMA user_version').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取数据库版本。').user_version);
-  requireBounded(version === 2 || version === SCHEMA_VERSION, 'SCHEMA_UNSUPPORTED', '数据库版本不受支持。');
-  if (version === SCHEMA_VERSION) return;
+  requireBounded(
+    version === LEGACY_BOUNDED_SCHEMA_VERSION || version === SIGNOFF_MIGRATION_SOURCE_VERSION || version === SCHEMA_VERSION,
+    'SCHEMA_UNSUPPORTED',
+    '数据库版本不受支持。',
+  );
+  if (version === SCHEMA_VERSION) {
+    requireMilestoneSignoffSchema(db);
+    return;
+  }
+  if (version === SIGNOFF_MIGRATION_SOURCE_VERSION) {
+    migrateSignoffSchemaV3ToV4(db);
+    return;
+  }
   db.exec('PRAGMA foreign_keys = OFF');
+  let migrationError: unknown;
   try {
     db.exec('BEGIN IMMEDIATE');
+    const disabledForeignKeys = one(db.prepare('PRAGMA foreign_keys').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取引用校验状态。');
+    requireBounded(asNumber(disabledForeignKeys.foreign_keys) === 0, 'SCHEMA_INVALID', '无法暂时停用引用校验以迁移数据库。');
     recreateRevisionTable(db);
     db.exec(`
       ALTER TABLE staged_import_snapshots ADD COLUMN character_count INTEGER NOT NULL DEFAULT 0 CHECK(character_count >= 0);
@@ -351,19 +444,6 @@ export function initializeBoundedSchema(db: DatabaseSync): void {
         created_at TEXT NOT NULL,
         UNIQUE(branch_id, label)
       ) STRICT;
-      CREATE TABLE milestone_signoff_records (
-        signoff_record_id TEXT PRIMARY KEY,
-        milestone_id TEXT NOT NULL UNIQUE REFERENCES milestone_versions(milestone_id),
-        manuscript_id TEXT NOT NULL REFERENCES manuscripts(manuscript_id),
-        branch_id TEXT NOT NULL REFERENCES manuscript_branches(branch_id),
-        revision_id TEXT NOT NULL REFERENCES manuscript_revisions(revision_id),
-        workflow_instance_id TEXT NOT NULL REFERENCES workflow_instances(workflow_instance_id),
-        workflow_evidence_digest TEXT NOT NULL CHECK(length(workflow_evidence_digest) = 64),
-        actor TEXT NOT NULL CHECK(actor = '本机编辑'),
-        signed_at TEXT NOT NULL,
-        label TEXT NOT NULL,
-        stated_next_use TEXT NOT NULL
-      ) STRICT;
 
       CREATE TABLE manuscript_search_sessions (
         search_id TEXT PRIMARY KEY,
@@ -424,6 +504,8 @@ export function initializeBoundedSchema(db: DatabaseSync): void {
       ) STRICT;
       CREATE INDEX replacement_matches_block ON manuscript_replacement_matches(preview_id, included, block_id, from_grapheme);
     `);
+    createMilestoneSignoffTable(db);
+    requireMilestoneSignoffSchema(db);
 
     let branchCursor = '';
     while (true) {
@@ -447,11 +529,24 @@ export function initializeBoundedSchema(db: DatabaseSync): void {
     requireBounded(violations.length === 0, 'SCHEMA_MIGRATION_FAILED', '数据库迁移后的引用校验失败。');
     db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}; COMMIT;`);
   } catch (error) {
-    try { db.exec('ROLLBACK'); } catch { /* terminal migration failure is reported by the caller */ }
-    throw error;
+    migrationError = error;
+    try {
+      db.exec('ROLLBACK');
+    } catch (rollbackError) {
+      migrationError = new AggregateError([error, rollbackError], 'SQLite bounded schema migration rollback failed.');
+    }
   } finally {
-    db.exec('PRAGMA foreign_keys = ON');
+    try {
+      db.exec('PRAGMA foreign_keys = ON');
+      const restoredForeignKeys = one(db.prepare('PRAGMA foreign_keys').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取引用校验状态。');
+      requireBounded(asNumber(restoredForeignKeys.foreign_keys) === 1, 'SCHEMA_INVALID', '无法恢复引用校验。');
+    } catch (restoreError) {
+      migrationError = migrationError
+        ? new AggregateError([migrationError, restoreError], 'SQLite bounded schema migration and foreign-key restoration failed.')
+        : restoreError;
+    }
   }
+  if (migrationError) throw migrationError;
 }
 
 interface BranchBinding {

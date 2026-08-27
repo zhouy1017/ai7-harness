@@ -42,7 +42,9 @@ import {
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const TOKEN_PATTERN = UUID_PATTERN;
-const SCHEMA_VERSION = 3;
+const BASE_SCHEMA_VERSION = 2;
+const PRE_SIGNOFF_SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = 4;
 const WORKFLOW_PROFILE = {
   id: 'ai7.manuscript.editorial.zh-CN',
   name: '基础书稿编辑流程',
@@ -269,8 +271,13 @@ function migrateSchemaV1ToV2(db: DatabaseSync): void {
 function initializeSchema(db: DatabaseSync): void {
   const versionRow = one(db.prepare('PRAGMA user_version').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取数据库版本。');
   const currentVersion = asNumber(versionRow.user_version);
-  requireStore(currentVersion === 0 || currentVersion === 1 || currentVersion === 2 || currentVersion === SCHEMA_VERSION, 'SCHEMA_UNSUPPORTED', '数据库版本不受支持。');
-  if (currentVersion === 2 || currentVersion === SCHEMA_VERSION) return;
+  requireStore(
+    currentVersion === 0 || currentVersion === 1 || currentVersion === BASE_SCHEMA_VERSION ||
+      currentVersion === PRE_SIGNOFF_SCHEMA_VERSION || currentVersion === SCHEMA_VERSION,
+    'SCHEMA_UNSUPPORTED',
+    '数据库版本不受支持。',
+  );
+  if (currentVersion === BASE_SCHEMA_VERSION || currentVersion === PRE_SIGNOFF_SCHEMA_VERSION || currentVersion === SCHEMA_VERSION) return;
   if (currentVersion === 1) {
     migrateSchemaV1ToV2(db);
     return;
