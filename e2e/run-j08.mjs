@@ -8,6 +8,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const DEBUG_SELECTORS = new Set(['DEBUG', 'DEBUG_FILE', 'PWDEBUG', 'PWDEBUGIMPL']);
 const OBJECT_PATTERN = /^[0-9a-f]{64}\.snapshot$/;
+const NETWORK_PROBE_URL = 'https://ai7.invalid/j08-network-probe';
 let location = 'entry';
 let electronExecutable;
 let Zip;
@@ -97,17 +98,26 @@ async function attachRenderer(browser) {
   let nextId = 1;
   const pending = new Map();
   const eventWaiters = new Map();
+  const networkRequestUrls = new Map();
   root.on('Target.receivedMessageFromTarget', ({ sessionId: incoming, message }) => {
     if (incoming !== sessionId) return;
     let response;
     try { response = JSON.parse(message); } catch { return; }
     if (typeof response.id !== 'number') {
       if (typeof response.method !== 'string') return;
+      if (response.method === 'Network.requestWillBeSent' &&
+          typeof response.params?.requestId === 'string' && typeof response.params?.request?.url === 'string') {
+        networkRequestUrls.set(response.params.requestId, response.params.request.url);
+      }
       for (const waiter of eventWaiters.get(response.method) ?? []) {
         if (!waiter.predicate(response.params)) continue;
         clearTimeout(waiter.timeout);
         eventWaiters.get(response.method)?.delete(waiter);
         waiter.resolve(response.params);
+      }
+      if ((response.method === 'Network.loadingFailed' || response.method === 'Network.loadingFinished') &&
+          typeof response.params?.requestId === 'string') {
+        networkRequestUrls.delete(response.params.requestId);
       }
       return;
     }
@@ -147,7 +157,11 @@ async function attachRenderer(browser) {
   await send('Runtime.enable');
   return {
     send,
-    waitForEvent,
+    waitForProbeCancellation: () => waitForEvent(
+      'Network.loadingFailed',
+      (params) => typeof params?.requestId === 'string' &&
+        networkRequestUrls.get(params.requestId) === NETWORK_PROBE_URL && params.canceled === true,
+    ),
     evaluate: async (expression) => {
       const response = await send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true });
       requireJourney(!response.exceptionDetails, 'renderer-evaluate');
@@ -294,13 +308,10 @@ async function main() {
     await renderer.send('Network.enable');
     await renderer.send('Page.setBypassCSP', { enabled: true });
     try {
-      const deniedRequest = renderer.waitForEvent(
-        'Network.loadingFailed',
-        (params) => params?.errorText === 'net::ERR_BLOCKED_BY_CLIENT',
-      );
-      const fetchRejected = await renderer.evaluate(`(async()=>{try{await fetch('https://ai7.invalid/j08-network-probe');return false}catch{return true}})()`);
+      const deniedRequest = renderer.waitForProbeCancellation();
+      const fetchRejected = await renderer.evaluate(`(async()=>{try{await fetch(${JSON.stringify(NETWORK_PROBE_URL)});return false}catch{return true}})()`);
       const denial = await deniedRequest;
-      requireJourney(fetchRejected === true && denial.errorText === 'net::ERR_BLOCKED_BY_CLIENT', 'renderer-network-denial');
+      requireJourney(fetchRejected === true && denial.canceled === true, 'renderer-network-denial');
     } finally {
       await renderer.send('Page.setBypassCSP', { enabled: false });
     }

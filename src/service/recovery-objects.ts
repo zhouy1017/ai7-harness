@@ -25,6 +25,10 @@ const PARTIAL_NAME_PATTERN = /^\.partial-[0-9a-f-]{36}$/i;
 const WRITE_BATCH = 256;
 const MAX_OBJECT_LINE_BYTES = MAX_BLOCK_CODE_UNITS * 6 + 2_048;
 
+function compareCanonicalKeys(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
 function canonicalJson(value: unknown): string {
   if (typeof value === 'string') {
     if (!value.isWellFormed()) throw new Error('RECOVERY_OBJECT_INVALID');
@@ -32,7 +36,7 @@ function canonicalJson(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
   if (value !== null && typeof value === 'object') {
     return `{${Object.entries(value as Record<string, unknown>)
-      .sort(([left], [right]) => left.localeCompare(right))
+      .sort(([left], [right]) => compareCanonicalKeys(left, right))
       .map(([key, item]) => `${JSON.stringify(key)}:${canonicalJson(item)}`)
       .join(',')}}`;
   }
@@ -98,12 +102,11 @@ export class RecoveryObjectStore {
     let promotedPath: string | undefined;
     let promotedByThisCall = false;
     const append = async (lines: ReadonlyArray<string>): Promise<void> => {
-      const buffers = lines.map((line) => Buffer.from(line, 'utf8'));
-      const expectedBytes = buffers.reduce((total, bytes) => total + bytes.byteLength, 0);
-      const written = await handle.writev(buffers);
-      if (written.bytesWritten !== expectedBytes) throw new Error('RECOVERY_OBJECT_INCOMPLETE');
-      for (const bytes of buffers) objectHash.update(bytes);
-      byteLength += expectedBytes;
+      const bytes = Buffer.concat(lines.map((line) => Buffer.from(line, 'utf8')));
+      const written = await handle.write(bytes);
+      if (written.bytesWritten !== bytes.byteLength) throw new Error('RECOVERY_OBJECT_INCOMPLETE');
+      objectHash.update(bytes);
+      byteLength += bytes.byteLength;
     };
     try {
       await append([objectLine({
