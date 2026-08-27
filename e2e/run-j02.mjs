@@ -243,6 +243,23 @@ async function waitFor(renderer, expression, location, timeout = 60_000) {
   throw new Error(`J-02/${location}`);
 }
 
+async function waitForChecks(renderer, expression, location, timeout = 60_000) {
+  const deadline = Date.now() + timeout;
+  let failed = ['diagnostic-unavailable'];
+  while (Date.now() < deadline) {
+    const checks = await renderer.evaluate(expression);
+    if (checks && typeof checks === 'object' && !Array.isArray(checks)) {
+      const entries = Object.entries(checks);
+      if (entries.length > 0) {
+        failed = entries.filter(([, passed]) => passed !== true).map(([name]) => name);
+        if (failed.length === 0) return;
+      }
+    }
+    await new Promise((resolveWait) => setTimeout(resolveWait, 50));
+  }
+  throw new Error(`J-02/${location}:${failed.join(',')}`);
+}
+
 async function assertRenderer(renderer, expression, location) {
   requireJourney(await renderer.evaluate(`Boolean(${expression})`), location);
 }
@@ -326,6 +343,7 @@ async function runWorkspaceJourney(renderer) {
       const selection = window.getSelection();
       if (!selection) return false;
       selection.setBaseAndExtent(text, 3, text, 1);
+      document.dispatchEvent(new Event('selectionchange'));
       await new Promise((resolve) => requestAnimationFrame(resolve));
       const containerTop = surface.getBoundingClientRect().top;
       const visible = blocks.find((candidate) => candidate.getBoundingClientRect().bottom >= containerTop);
@@ -341,7 +359,11 @@ async function runWorkspaceJourney(renderer) {
   await assertRenderer(renderer, `(() => { const editor = document.querySelector('[data-testid="manuscript-editor"]'); return editor?.getAttribute('contenteditable') === 'false' && editor.getAttribute('aria-readonly') === 'true' && editor.textContent === globalThis.__ai7DeferredWindowText && document.querySelector('.editor-meta')?.textContent === globalThis.__ai7DeferredJournal; })()`, 'forward-non-overlap-insert-blocked');
   await renderer.evaluate(`new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
   await press(renderer, 'PageUp');
-  await waitFor(renderer, `(() => { const expected = globalThis.__ai7WindowContinuity; const editor = document.querySelector('[data-testid="manuscript-editor"]'); const selection = window.getSelection(); const surface = document.querySelector('.editor-window'); const anchorBlock = selection?.anchorNode?.parentElement?.closest('[data-block-id]'); const headBlock = selection?.focusNode?.parentElement?.closest('[data-block-id]'); const scrollBlock = document.querySelector('[data-block-id="' + expected.scrollBlockId + '"]'); return editor?.getAttribute('contenteditable') === 'true' && editor.getAttribute('aria-readonly') === 'false' && document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]').length <= 32 && anchorBlock?.dataset.blockId === expected.blockId && headBlock?.dataset.blockId === expected.blockId && selection.anchorOffset === expected.anchor && selection.focusOffset === expected.head && selection.anchorOffset > selection.focusOffset && selection.toString() === expected.text && surface instanceof HTMLElement && scrollBlock instanceof HTMLElement && Math.abs((scrollBlock.getBoundingClientRect().top - surface.getBoundingClientRect().top) - expected.scrollOffset) <= 3; })()`, 'back-non-overlap-selection-continuity');
+  await waitForChecks(
+    renderer,
+    `(() => { const expected = globalThis.__ai7WindowContinuity; if (!expected) return { expected: false }; const editor = document.querySelector('[data-testid="manuscript-editor"]'); const selection = window.getSelection(); const surface = document.querySelector('.editor-window'); const anchorBlock = selection?.anchorNode?.parentElement?.closest('[data-block-id]'); const headBlock = selection?.focusNode?.parentElement?.closest('[data-block-id]'); const scrollBlock = document.querySelector('[data-block-id="' + expected.scrollBlockId + '"]'); return { contenteditable: editor?.getAttribute('contenteditable') === 'true', ariaReadonly: editor?.getAttribute('aria-readonly') === 'false', windowBounded: document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]').length <= 32, anchorBlock: anchorBlock?.dataset.blockId === expected.blockId, headBlock: headBlock?.dataset.blockId === expected.blockId, anchorOffset: selection?.anchorOffset === expected.anchor, focusOffset: selection?.focusOffset === expected.head, backward: Boolean(selection && selection.anchorOffset > selection.focusOffset), selectedText: selection?.toString() === expected.text, surface: surface instanceof HTMLElement, scrollBlock: scrollBlock instanceof HTMLElement, scrollOffset: surface instanceof HTMLElement && scrollBlock instanceof HTMLElement && Math.abs((scrollBlock.getBoundingClientRect().top - surface.getBoundingClientRect().top) - expected.scrollOffset) <= 3 }; })()`,
+    'back-non-overlap-selection-continuity',
+  );
   await assertRenderer(renderer, `document.querySelectorAll('.outline-list button').length === 64 && !Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '下一组结构')?.hidden`, 'outline-first-page-bounded');
   await clickButton(renderer, '下一组结构', 'outline-next-page');
   await waitFor(renderer, `document.querySelectorAll('.outline-list button').length > 0 && document.querySelectorAll('.outline-list button').length <= 64 && !Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '上一组结构')?.hidden`, 'outline-next-page-bounded');
