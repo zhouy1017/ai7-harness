@@ -482,7 +482,12 @@ async function runWorkspaceJourney(renderer) {
   at('authoritative-mutation-drain');
   const dirtyHistoryObservation = await renderer.observeIpc();
   await editThenInvokeOnDirty(renderer, '稳', ['保存当前编辑', '撤销'], 'dirty-saving-undo-start');
-  await waitFor(renderer, `document.querySelector('.editor-meta')?.textContent.includes('修订日志序号 5') && document.querySelector('[data-testid="manuscript-editor"]')?.dataset.operationLocked === 'false' && document.querySelector('[data-testid="manuscript-editor"]')?.getAttribute('contenteditable') === 'true' && document.querySelector('[data-testid="manuscript-editor"]')?.dataset.authoritativeMutation !== 'true'`, 'dirty-saving-undo-drained-and-unlocked', 120_000);
+  await waitForChecks(
+    renderer,
+    `(() => { const editor = document.querySelector('[data-testid="manuscript-editor"]'); const host = editor?.parentElement; const undo = Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '撤销'); const retry = Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '重试权威刷新'); return { journalSequence5: document.querySelector('.editor-meta')?.textContent === '修订日志序号 5', operationUnlocked: editor?.dataset.operationLocked === 'false', editorWritable: editor?.getAttribute('contenteditable') === 'true', ariaWritable: editor?.getAttribute('aria-readonly') === 'false', continuityResolved: editor instanceof HTMLElement && !editor.hasAttribute('tabindex'), authoritativeMutationCleared: host?.dataset.authoritativeMutation === 'false', authoritativeStartCleared: undo instanceof HTMLButtonElement && !undo.disabled, recoveryNotRequired: retry instanceof HTMLButtonElement && retry.hidden }; })()`,
+    'dirty-saving-undo-drained-and-unlocked',
+    120_000,
+  );
   const dirtyHistoryCompleted = await renderer.observeIpc();
   const dirtyHistoryEvents = dirtyHistoryCompleted.events.filter((event) => event.ordinal > (dirtyHistoryObservation.events.at(-1)?.ordinal ?? 0));
   const dirtyFlushInvoke = dirtyHistoryEvents.find((event) => event.operation === 'flushJournalEdit' && event.phase === 'invoke');

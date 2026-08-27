@@ -261,6 +261,13 @@ function positionAtPoint(document: ProseMirrorNode, point: EditorPoint): number 
   return found.position + 1 + parts.slice(0, point.grapheme).join('').length;
 }
 
+function positionAtPointClampedToBlockEnd(document: ProseMirrorNode, point: EditorPoint): number | undefined {
+  const found = findBlockPosition(document, point.blockId);
+  if (!found || !Number.isSafeInteger(point.grapheme) || point.grapheme < 0) return undefined;
+  const parts = graphemes(found.node.textContent);
+  return found.position + 1 + parts.slice(0, Math.min(point.grapheme, parts.length)).join('').length;
+}
+
 export function mountBoundedEditor(options: MountOptions): BoundedEditor {
   let windowProjection = options.initialWindow;
   let baselines = baselineMap(windowProjection);
@@ -365,6 +372,7 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
     focusBlockId: string | null,
     focusGrapheme: number | null,
     deferMissing: boolean,
+    clampPresentPoints = false,
   ): void => {
     let nextState = state;
     let selectionRestored = false;
@@ -376,6 +384,18 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
         nextState = state.apply(state.tr.setSelection(TextSelection.create(state.doc, anchor, head)));
         selectionRestored = true;
         deferredNavigationContinuity = undefined;
+      } else if (clampPresentPoints && scrollAnchor !== undefined) {
+        const clampedAnchor = positionAtPointClampedToBlockEnd(state.doc, continuity.anchor);
+        const clampedHead = positionAtPointClampedToBlockEnd(state.doc, continuity.head);
+        if (clampedAnchor !== undefined && clampedHead !== undefined) {
+          nextState = state.apply(state.tr.setSelection(TextSelection.create(state.doc, clampedAnchor, clampedHead)));
+          selectionRestored = true;
+          deferredNavigationContinuity = undefined;
+        } else if (deferMissing) {
+          deferredNavigationContinuity = continuity;
+        } else {
+          deferredNavigationContinuity = undefined;
+        }
       } else if (deferMissing) {
         deferredNavigationContinuity = continuity;
       } else {
@@ -645,6 +665,7 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
         nextWindow.focusBlockId,
         nextWindow.focusGrapheme,
         continuity !== undefined,
+        true,
       );
       announceState();
       return true;
