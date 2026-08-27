@@ -6,7 +6,12 @@ export const MAX_BLOCK_CODE_UNITS = 4_096;
 export const MAX_EDIT_GRAPHEMES = 256;
 export const MAX_EDIT_CODE_UNITS = 1_024;
 
-export type J01ImportControl = 'before-commit' | 'after-commit-before-response' | 'uncertain-reconciliation';
+export type J01ImportControl =
+  | 'before-commit'
+  | 'after-commit-before-response'
+  | 'uncertain-reconciliation'
+  | 'legacy-reviewed-v2'
+  | 'abandon-object-delete-failure';
 
 export const IPC_CHANNELS = {
   getImportStartup: 'ai7:j01:get-import-startup',

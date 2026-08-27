@@ -66,7 +66,9 @@ function parseArguments(argv: string[]): LaunchArguments {
   const importControl =
     importControlValue === 'before-commit' ||
     importControlValue === 'after-commit-before-response' ||
-    importControlValue === 'uncertain-reconciliation'
+    importControlValue === 'uncertain-reconciliation' ||
+    importControlValue === 'legacy-reviewed-v2' ||
+    importControlValue === 'abandon-object-delete-failure'
       ? importControlValue
       : undefined;
   const launcherPid = Number(values.get('--launcher-pid'));

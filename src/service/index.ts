@@ -394,7 +394,9 @@ function parseArguments(argv: string[]): {
   const importControl =
     importControlValue === 'before-commit' ||
     importControlValue === 'after-commit-before-response' ||
-    importControlValue === 'uncertain-reconciliation'
+    importControlValue === 'uncertain-reconciliation' ||
+    importControlValue === 'legacy-reviewed-v2' ||
+    importControlValue === 'abandon-object-delete-failure'
       ? importControlValue
       : undefined;
   if (
@@ -447,6 +449,8 @@ async function run(): Promise<void> {
     const codeRoot = fileURLToPath(new URL('../../', import.meta.url));
     store = await EditorialStore.open(dataRoot, codeRoot, {
       induceUnprovableReconciliation: importControl === 'uncertain-reconciliation',
+      persistLegacyReviewedDraft: importControl === 'legacy-reviewed-v2',
+      induceAbandonObjectRemovalFailure: importControl === 'abandon-object-delete-failure',
     });
     harness = await mountDormantHarness();
     for await (const frame of readFrames()) {

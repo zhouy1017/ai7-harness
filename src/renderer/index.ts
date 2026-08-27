@@ -181,7 +181,46 @@ function fidelityTable(fidelity: ReadonlyArray<FidelityCategoryProjection>): HTM
   return table;
 }
 
-async function acknowledgeCompletion(result: ImportCommitProjection): Promise<void> {
+function productIsVisibleAndReady(): boolean {
+  return document.visibilityState === 'visible' && document.documentElement.dataset['ai7ProductReady'] === 'true';
+}
+
+function waitForVisibleProductReady(): Promise<void> {
+  if (productIsVisibleAndReady()) return Promise.resolve();
+  return new Promise((resolve) => {
+    const finish = (): void => {
+      if (!productIsVisibleAndReady()) return;
+      observer.disconnect();
+      document.removeEventListener('visibilitychange', finish);
+      resolve();
+    };
+    const observer = new MutationObserver(finish);
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['data-ai7-product-ready'],
+    });
+    document.addEventListener('visibilitychange', finish);
+    finish();
+  });
+}
+
+function nextVisibleFrame(): Promise<void> {
+  return new Promise((resolve) => requestAnimationFrame(() => resolve()));
+}
+
+async function acknowledgeCompletionAfterPaint(result: ImportCommitProjection): Promise<void> {
+  await waitForVisibleProductReady();
+  await nextVisibleFrame();
+  await nextVisibleFrame();
+  const presentedCommitId = screen.querySelector<HTMLElement>('[data-import-commit-id]')?.dataset['importCommitId'];
+  if (
+    !productIsVisibleAndReady() ||
+    screen.dataset['screen'] !== 'imported' ||
+    presentedCommitId !== result.commitId
+  ) {
+    return;
+  }
+  document.documentElement.dataset['ai7ImportCompletionPainted'] = 'true';
   try {
     await window.ai7.acknowledgeImportCompletion({ commitId: result.commitId });
     document.documentElement.dataset['ai7ImportCompletionAcknowledged'] = 'true';
@@ -672,8 +711,11 @@ function renderReview(review: ReviewBeforeImportProjection, recoveryNotice?: str
 }
 
 function renderImported(result: ImportCommitProjection): void {
+  delete document.documentElement.dataset['ai7ImportCompletionPainted'];
+  delete document.documentElement.dataset['ai7ImportCompletionAcknowledged'];
   const content = panel();
   content.classList.add('completion');
+  content.dataset['importCommitId'] = result.commitId;
   const degradation = result.importRecord.degradationDecision;
   content.append(
     element('div', 'completion-mark', '✓'),
@@ -728,7 +770,7 @@ function renderImported(result: ImportCommitProjection): void {
   actions.append(open, record);
   content.append(actions);
   replaceScreen('imported', content);
-  void acknowledgeCompletion(result);
+  void acknowledgeCompletionAfterPaint(result);
 }
 
 function renderEditor(result: ImportCommitProjection): void {

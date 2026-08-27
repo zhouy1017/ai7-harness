@@ -307,10 +307,10 @@ function migrateSchemaV2ToV3(db: DatabaseSync): void {
 
       INSERT INTO import_commit_attempts(
         attempt_id, draft_id, request_fingerprint, expected_draft_version, review_digest,
-        state, prepared_at, committed_at, completion_acknowledged_at
+        state, prepared_at, committed_at
       )
       SELECT commit_id, draft_id, request_fingerprint, expected_draft_version, review_digest,
-             'committed', committed_at, committed_at, committed_at
+             'committed', committed_at, committed_at
       FROM import_commits;
 
       CREATE INDEX import_attempts_recovery_order
@@ -679,6 +679,8 @@ interface CommitAttempt {
 
 interface StoreControl {
   induceUnprovableReconciliation: boolean;
+  persistLegacyReviewedDraft: boolean;
+  induceAbandonObjectRemovalFailure: boolean;
 }
 
 function continuationNotice(access: OriginalFileAccessProjection): string {
@@ -826,6 +828,35 @@ function createNewBookReviewDigestV3(
   );
 }
 
+function reconstructReviewedTargetChoice(
+  snapshot: DraftSnapshot,
+  confirmedTitle: string,
+  plan: ImportFidelityPlan,
+  exactMatches: ReadonlyArray<ExactImportMatchProjection>,
+): NewBookImportTargetChoiceId | null {
+  const targetChoice = newBookTargetChoice(exactMatches);
+  if (
+    createNewBookReviewDigestV3(
+      snapshot,
+      confirmedTitle,
+      snapshot.version,
+      plan,
+      targetChoice.id,
+      exactMatches,
+    ) === snapshot.reviewDigest
+  ) {
+    return targetChoice.id;
+  }
+  if (
+    exactMatches.length === 0 &&
+    targetChoice.id === 'new-book' &&
+    createLegacyNewBookReviewDigestV2(snapshot, confirmedTitle, snapshot.version, plan) === snapshot.reviewDigest
+  ) {
+    return 'new-book';
+  }
+  return null;
+}
+
 export class EditorialStore {
   readonly #dataRoot: string;
   readonly #objectsRoot: string;
@@ -852,7 +883,11 @@ export class EditorialStore {
   static async open(
     dataRootInput: string,
     codeRoot: string,
-    control: StoreControl = { induceUnprovableReconciliation: false },
+    control: StoreControl = {
+      induceUnprovableReconciliation: false,
+      persistLegacyReviewedDraft: false,
+      induceAbandonObjectRemovalFailure: false,
+    },
   ): Promise<EditorialStore> {
     requireStore(isAbsolute(dataRootInput), 'DATA_ROOT_INVALID', 'Agent Data Root 必须是绝对路径。');
     const dataRoot = await createCanonicalExternalDataRoot(dataRootInput, codeRoot);
@@ -868,6 +903,7 @@ export class EditorialStore {
     const journal = new DatabaseSync(databasePath);
     configureDatabase(journal);
     const store = new EditorialStore(dataRoot, objectsRoot, authority, journal, control);
+    store.#normalizeMigratedReviewedTargets();
     await store.#sweepUnreferencedContentObjects();
     return store;
   }
@@ -1051,11 +1087,13 @@ export class EditorialStore {
     } catch {
       title = null;
     }
-    const currentDigest =
-      title && snapshot.reviewedTargetChoiceId === currentTarget.id
-        ? createNewBookReviewDigestV3(snapshot, title, snapshot.version, plan, currentTarget.id, exactMatches)
-        : null;
-    if (currentDigest === null || currentDigest !== snapshot.reviewDigest) {
+    const reconstructedTarget =
+      title === null ? null : reconstructReviewedTargetChoice(snapshot, title, plan, exactMatches);
+    if (
+      reconstructedTarget === null ||
+      reconstructedTarget !== currentTarget.id ||
+      snapshot.reviewedTargetChoiceId !== reconstructedTarget
+    ) {
       snapshot = this.#invalidateReview(snapshot);
       return {
         state: 'target-review-required',
@@ -1066,13 +1104,14 @@ export class EditorialStore {
       };
     }
     requireStore(title !== null, 'REVIEW_CHANGED', '导入前复核书名已变化。');
+    requireStore(snapshot.reviewDigest !== null, 'REVIEW_CHANGED', '导入前复核摘要已变化。');
 
     return {
       state: 'review-ready',
       review: this.#reviewProjection(
         snapshot,
         title,
-        currentDigest,
+        snapshot.reviewDigest,
         plan,
         plan.degradations.length > 0,
         currentTarget.id,
@@ -1207,7 +1246,31 @@ export class EditorialStore {
     requireStore(asNumber(commitEvidence.commits) === 0, 'COMMIT_EVIDENCE_PRESENT', '存在导入提交证据，不能放弃或清理。');
     const objectDigest = asString(draft.object_digest);
     const relativeKey = asString(draft.relative_key);
-    let garbageCollect = false;
+    const referencesBefore = one(
+      this.#authority
+        .prepare(
+          `SELECT
+             (SELECT count(*) FROM source_versions WHERE object_digest = ?) source_refs,
+             (SELECT count(*) FROM import_drafts WHERE object_digest = ?) draft_refs`,
+        )
+        .all(objectDigest, objectDigest) as SqlRow[],
+      'STORE_CORRUPT',
+      '无法核对放弃前的暂存对象引用。',
+    );
+    const sourceReferences = asNumber(referencesBefore.source_refs);
+    const draftReferences = asNumber(referencesBefore.draft_refs);
+    requireStore(draftReferences >= 1, 'STORE_CORRUPT', '导入草稿未引用其暂存对象。');
+    const removeUnsharedObject = sourceReferences === 0 && draftReferences === 1;
+    if (removeUnsharedObject) {
+      try {
+        if (this.#control.induceAbandonObjectRemovalFailure) {
+          throw new Error('E2E induced failure at the production unshared-object removal boundary.');
+        }
+        await rm(this.#contentObjectPath(objectDigest, relativeKey), { force: true });
+      } catch {
+        throw new StoreError('ABANDON_CLEANUP_FAILED', '无法安全删除未共享的暂存对象；导入草稿仍保留，请重试放弃。');
+      }
+    }
     this.#transaction(this.#authority, () => {
       const deletion = this.#authority
         .prepare("DELETE FROM import_drafts WHERE draft_id = ? AND draft_version = ? AND state IN ('staged', 'reviewed')")
@@ -1224,33 +1287,19 @@ export class EditorialStore {
         'STORE_CORRUPT',
         '无法核对暂存对象引用。',
       );
-      garbageCollect = asNumber(references.source_refs) === 0 && asNumber(references.draft_refs) === 0;
+      if (removeUnsharedObject) {
+        requireStore(
+          asNumber(references.source_refs) === 0 && asNumber(references.draft_refs) === 0,
+          'ABANDON_REFERENCE_CHANGED',
+          '暂存对象在放弃时出现新引用；已中止权威清理。',
+        );
+        const objectDeletion = this.#authority
+          .prepare('DELETE FROM content_objects WHERE object_digest = ?')
+          .run(objectDigest);
+        requireStore(objectDeletion.changes === 1, 'STORE_CORRUPT', '未共享暂存对象记录未能删除。');
+      }
       this.#assertForeignKeys(this.#authority);
     });
-    if (garbageCollect) {
-      const objectPath = this.#contentObjectPath(objectDigest, relativeKey);
-      try {
-        await rm(objectPath, { force: true });
-      } catch {
-        return this.getImportStartup();
-      }
-      this.#transaction(this.#authority, () => {
-        const references = one(
-          this.#authority
-            .prepare(
-              `SELECT
-                 (SELECT count(*) FROM source_versions WHERE object_digest = ?) source_refs,
-                 (SELECT count(*) FROM import_drafts WHERE object_digest = ?) draft_refs`,
-            )
-            .all(objectDigest, objectDigest) as SqlRow[],
-          'STORE_CORRUPT',
-          '无法复核暂存对象引用。',
-        );
-        if (asNumber(references.source_refs) === 0 && asNumber(references.draft_refs) === 0) {
-          this.#authority.prepare('DELETE FROM content_objects WHERE object_digest = ?').run(objectDigest);
-        }
-      });
-    }
     return this.getImportStartup();
   }
 
@@ -1296,14 +1345,24 @@ export class EditorialStore {
       '本次导入不需要降级接受。',
     );
     const nextVersion = expectedDraftVersion + 1;
-    const reviewDigest = createNewBookReviewDigestV3(
-      snapshot,
-      confirmedTitle,
-      nextVersion,
-      plan,
-      targetChoiceId,
-      exactMatches,
+    requireStore(
+      !this.#control.persistLegacyReviewedDraft ||
+        (targetChoiceId === 'new-book' && exactMatches.length === 0),
+      'E2E_CONTROL_INVALID',
+      '旧版复核边界仅适用于无精确匹配的新建图书。',
     );
+    const reviewSnapshot = { ...snapshot, version: nextVersion };
+    const reviewDigest = this.#control.persistLegacyReviewedDraft
+      ? createLegacyNewBookReviewDigestV2(reviewSnapshot, confirmedTitle, nextVersion, plan)
+      : createNewBookReviewDigestV3(
+          reviewSnapshot,
+          confirmedTitle,
+          nextVersion,
+          plan,
+          targetChoiceId,
+          exactMatches,
+        );
+    const persistedTargetChoiceId = this.#control.persistLegacyReviewedDraft ? null : targetChoiceId;
     const reviewedAt = new Date().toISOString();
     this.#transaction(this.#authority, () => {
       const update = this.#authority
@@ -1313,7 +1372,7 @@ export class EditorialStore {
                review_digest = ?, reviewed_at = ?
            WHERE draft_id = ? AND state = 'staged' AND draft_version = ?`,
         )
-        .run(nextVersion, confirmedTitle, targetChoiceId, reviewDigest, reviewedAt, draftId, expectedDraftVersion);
+        .run(nextVersion, confirmedTitle, persistedTargetChoiceId, reviewDigest, reviewedAt, draftId, expectedDraftVersion);
       requireStore(update.changes === 1, 'DRAFT_VERSION_CHANGED', '导入草稿在复核时已变化。');
     });
     return this.#reviewProjection(
@@ -1322,7 +1381,7 @@ export class EditorialStore {
         state: 'reviewed',
         version: nextVersion,
         reviewedTitle: confirmedTitle,
-        reviewedTargetChoiceId: targetChoiceId,
+        reviewedTargetChoiceId: persistedTargetChoiceId,
         reviewDigest,
       },
       confirmedTitle,
@@ -1412,6 +1471,11 @@ export class EditorialStore {
       const plan = this.#requireFidelityPlan(snapshot);
       const exactMatches = this.#exactImportMatches(snapshot);
       const targetChoice = newBookTargetChoice(exactMatches);
+      requireStore(
+        snapshot.reviewedTargetChoiceId === targetChoice.id,
+        'REVIEW_CHANGED',
+        '导入目标无法与当前复核证据精确对应。',
+      );
       const currentReviewDigest = createNewBookReviewDigestV3(
         snapshot,
         snapshot.reviewedTitle,
@@ -2539,6 +2603,44 @@ export class EditorialStore {
                AND NOT EXISTS (SELECT 1 FROM import_drafts d WHERE d.object_digest = content_objects.object_digest)`,
           )
           .run(digest);
+      });
+    }
+  }
+
+  #normalizeMigratedReviewedTargets(): void {
+    const rows = this.#authority
+      .prepare(
+        `SELECT draft_id
+         FROM import_drafts
+         WHERE state = 'reviewed' AND reviewed_target_choice_id IS NULL
+         ORDER BY staged_at, draft_id`,
+      )
+      .all() as SqlRow[];
+    for (const row of rows) {
+      const draftId = asString(row.draft_id);
+      let snapshot: DraftSnapshot;
+      let confirmedTitle: string;
+      let targetChoiceId: NewBookImportTargetChoiceId | null;
+      try {
+        snapshot = this.#loadDraftSnapshot(draftId);
+        requireStore(snapshot.reviewedTitle !== null && snapshot.reviewDigest !== null, 'REVIEW_CHANGED', '旧版导入复核证据不完整。');
+        confirmedTitle = safeTitle(snapshot.reviewedTitle);
+        const plan = this.#requireFidelityPlan(snapshot);
+        const exactMatches = this.#exactImportMatches(snapshot);
+        targetChoiceId = reconstructReviewedTargetChoice(snapshot, confirmedTitle, plan, exactMatches);
+      } catch {
+        continue;
+      }
+      if (targetChoiceId === null) continue;
+      this.#transaction(this.#authority, () => {
+        this.#authority
+          .prepare(
+            `UPDATE import_drafts
+             SET reviewed_target_choice_id = ?
+             WHERE draft_id = ? AND state = 'reviewed' AND draft_version = ?
+               AND review_digest = ? AND reviewed_target_choice_id IS NULL`,
+          )
+          .run(targetChoiceId, draftId, snapshot.version, snapshot.reviewDigest);
       });
     }
   }
