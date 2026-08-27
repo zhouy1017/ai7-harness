@@ -728,7 +728,14 @@ async function runWorkspaceJourney(renderer, dataRoot) {
     'milestone-authoritative-ready',
   );
   await clickButton(renderer, '撤销', 'undo');
-  await waitFor(renderer, `document.querySelector('.editor-meta')?.textContent.includes('修订日志序号 9')`, 'undo-durable', 120_000);
+  await waitForChecks(
+    renderer,
+    `(() => { const editor = document.querySelector('[data-testid="manuscript-editor"]'); const host = editor?.parentElement; const journal = Array.from(document.querySelectorAll('.editor-meta > span')).find((item) => item.textContent?.startsWith('修订日志序号 ')); const retry = Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '重试权威刷新'); return { journalSequence9: journal?.textContent === '修订日志序号 9', authoritativeMutationCleared: host?.dataset.authoritativeMutation === 'false', operationUnlocked: editor?.dataset.operationLocked === 'false', editorWritable: editor?.getAttribute('contenteditable') === 'true', ariaWritable: editor?.getAttribute('aria-readonly') === 'false', recoveryNotRequired: retry instanceof HTMLButtonElement && retry.hidden, closeRiskCleared: document.documentElement.dataset.ai7CloseRisk === 'false' }; })()`,
+    'undo-drained-before-close',
+    120_000,
+  );
+  await renderer.evaluate(`new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
+  await assertRenderer(renderer, `document.documentElement.dataset.ai7CloseRisk === 'false'`, 'undo-close-risk-stable');
 }
 
 async function runRestartJourney(renderer) {

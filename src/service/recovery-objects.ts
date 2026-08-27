@@ -155,7 +155,7 @@ export class RecoveryObjectStore {
         if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
       }
       await rm(inspected.path, { force: true });
-      const finalHandle = await open(final.path, 'r');
+      const finalHandle = await open(final.path, 'r+');
       try { await finalHandle.sync(); } finally { await finalHandle.close(); }
       const metadata = {
         objectDigest, manifestDigest, objectRelativeKey: posix.join('v1', finalName),
