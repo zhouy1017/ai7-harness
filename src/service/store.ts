@@ -1,5 +1,5 @@
 import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
-import { constants, createReadStream } from 'node:fs';
+import { constants, createReadStream, lstatSync } from 'node:fs';
 import { copyFile, lstat, open, realpath, rename, rm } from 'node:fs/promises';
 import { basename, isAbsolute, posix, relative, resolve, sep } from 'node:path';
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
@@ -42,7 +42,7 @@ import {
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const TOKEN_PATTERN = UUID_PATTERN;
-const SCHEMA_VERSION = 4;
+const SCHEMA_VERSION = 5;
 const WORKFLOW_PROFILE = {
   id: 'ai7.manuscript.editorial.zh-CN',
   name: '基础书稿编辑流程',
@@ -311,6 +311,80 @@ const ABANDONMENT_CLEANUP_SCHEMA = `
   END;
 `;
 
+const ABANDONMENT_CLEANUP_UPDATE_GUARDS_SCHEMA = `
+  CREATE TRIGGER abandonment_cleanup_validate_intent_update_v5
+  BEFORE UPDATE ON import_abandonment_cleanup_intents
+  WHEN NEW.draft_id != OLD.draft_id
+    OR NEW.object_digest != OLD.object_digest
+    OR NEW.expected_draft_version != OLD.expected_draft_version
+    OR NEW.relative_key != OLD.relative_key
+    OR NEW.requested_at != OLD.requested_at
+    OR NOT (
+      (
+        OLD.state = 'prepared' AND OLD.bytes_removed_at IS NULL
+        AND NEW.state = 'bytes-removed' AND NEW.bytes_removed_at IS NOT NULL
+      )
+      OR (
+        OLD.state = 'bytes-removed' AND NEW.state = 'bytes-removed'
+        AND NEW.bytes_removed_at = OLD.bytes_removed_at
+      )
+    )
+  BEGIN
+    SELECT RAISE(ABORT, 'ABANDONMENT_CLEANUP_INTENT_IMMUTABLE');
+  END;
+
+  CREATE TRIGGER abandonment_cleanup_block_content_object_update_v5
+  BEFORE UPDATE ON content_objects
+  WHEN EXISTS (
+    SELECT 1 FROM import_abandonment_cleanup_intents i
+    WHERE i.object_digest = OLD.object_digest OR i.object_digest = NEW.object_digest
+  )
+  BEGIN
+    SELECT RAISE(ABORT, 'ABANDONMENT_CLEANUP_PENDING');
+  END;
+
+  CREATE TRIGGER abandonment_cleanup_block_draft_update_v5
+  BEFORE UPDATE ON import_drafts
+  WHEN EXISTS (
+    SELECT 1 FROM import_abandonment_cleanup_intents i
+    WHERE i.draft_id = OLD.draft_id OR i.draft_id = NEW.draft_id
+      OR i.object_digest = OLD.object_digest OR i.object_digest = NEW.object_digest
+  )
+  BEGIN
+    SELECT RAISE(ABORT, 'ABANDONMENT_CLEANUP_PENDING');
+  END;
+
+  CREATE TRIGGER abandonment_cleanup_block_source_update_v5
+  BEFORE UPDATE ON source_versions
+  WHEN EXISTS (
+    SELECT 1 FROM import_abandonment_cleanup_intents i
+    WHERE i.object_digest = OLD.object_digest OR i.object_digest = NEW.object_digest
+  )
+  BEGIN
+    SELECT RAISE(ABORT, 'ABANDONMENT_CLEANUP_PENDING');
+  END;
+
+  CREATE TRIGGER abandonment_cleanup_block_commit_update_v5
+  BEFORE UPDATE ON import_commits
+  WHEN EXISTS (
+    SELECT 1 FROM import_abandonment_cleanup_intents i
+    WHERE i.draft_id = OLD.draft_id OR i.draft_id = NEW.draft_id
+  )
+  BEGIN
+    SELECT RAISE(ABORT, 'ABANDONMENT_CLEANUP_PENDING');
+  END;
+
+  CREATE TRIGGER abandonment_cleanup_block_attempt_update_v5
+  BEFORE UPDATE ON import_commit_attempts
+  WHEN EXISTS (
+    SELECT 1 FROM import_abandonment_cleanup_intents i
+    WHERE i.draft_id = OLD.draft_id OR i.draft_id = NEW.draft_id
+  )
+  BEGIN
+    SELECT RAISE(ABORT, 'ABANDONMENT_CLEANUP_PENDING');
+  END;
+`;
+
 function migrateSchemaV1ToV2(db: DatabaseSync): void {
   db.exec('PRAGMA foreign_keys = OFF');
   let migrationError: unknown;
@@ -460,6 +534,24 @@ function migrateSchemaV3ToV4(db: DatabaseSync): void {
   }
 }
 
+function migrateSchemaV4ToV5(db: DatabaseSync): void {
+  try {
+    db.exec(`
+      BEGIN IMMEDIATE;
+      ${ABANDONMENT_CLEANUP_UPDATE_GUARDS_SCHEMA}
+      PRAGMA user_version = 5;
+      COMMIT;
+    `);
+  } catch (error) {
+    try {
+      db.exec('ROLLBACK');
+    } catch (rollbackError) {
+      throw new AggregateError([error, rollbackError], 'SQLite schema v5 migration rollback failed.');
+    }
+    throw error;
+  }
+}
+
 function initializeSchema(db: DatabaseSync): void {
   const versionRow = one(db.prepare('PRAGMA user_version').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取数据库版本。');
   const currentVersion = asNumber(versionRow.user_version);
@@ -468,6 +560,7 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === 1 ||
       currentVersion === 2 ||
       currentVersion === 3 ||
+      currentVersion === 4 ||
       currentVersion === SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
@@ -477,15 +570,22 @@ function initializeSchema(db: DatabaseSync): void {
     migrateSchemaV1ToV2(db);
     migrateSchemaV2ToV3(db);
     migrateSchemaV3ToV4(db);
+    migrateSchemaV4ToV5(db);
     return;
   }
   if (currentVersion === 2) {
     migrateSchemaV2ToV3(db);
     migrateSchemaV3ToV4(db);
+    migrateSchemaV4ToV5(db);
     return;
   }
   if (currentVersion === 3) {
     migrateSchemaV3ToV4(db);
+    migrateSchemaV4ToV5(db);
+    return;
+  }
+  if (currentVersion === 4) {
+    migrateSchemaV4ToV5(db);
     return;
   }
 
@@ -776,13 +876,14 @@ function initializeSchema(db: DatabaseSync): void {
     ) STRICT;
 
     ${ABANDONMENT_CLEANUP_SCHEMA}
+    ${ABANDONMENT_CLEANUP_UPDATE_GUARDS_SCHEMA}
 
     CREATE INDEX working_blocks_window ON working_blocks(branch_id, position);
     CREATE INDEX journal_branch_order ON edit_journal_entries(branch_id, sequence);
     CREATE INDEX import_attempts_recovery_order
       ON import_commit_attempts(state, completion_acknowledged_at, prepared_at);
 
-    PRAGMA user_version = 4;
+    PRAGMA user_version = 5;
     COMMIT;
   `);
 }
@@ -1016,6 +1117,7 @@ export class EditorialStore {
   readonly #journal: DatabaseSync;
   readonly #control: StoreControl;
   readonly #cursorSecret = randomBytes(32);
+  #contentObjectLifecycleTail: Promise<void> = Promise.resolve();
   #poisoned = false;
 
   private constructor(
@@ -1079,55 +1181,56 @@ export class EditorialStore {
       const selectedPath = await realpath(selectedPathInput);
       const displayName = safeDisplayName(basename(selectedPath));
       const parsed = await parseDocx(selectedPath, displayName);
-      const relativeKey = await this.#persistContentObject(selectedPath, parsed);
+      return await this.#withContentObjectLifecycle(async () => {
+        const relativeKey = await this.#persistContentObject(selectedPath, parsed);
+        const draftId = randomUUID();
+        const now = new Date().toISOString();
+        this.#transaction(this.#authority, () => {
+          this.#authority
+            .prepare(
+              `INSERT INTO content_objects(object_digest, relative_key, byte_length, verified_at)
+               VALUES (?, ?, ?, ?)
+               ON CONFLICT(object_digest) DO NOTHING`,
+            )
+            .run(parsed.sourceDigest, relativeKey, parsed.archiveBytes, now);
+          const object = one(
+            this.#authority.prepare('SELECT relative_key, byte_length FROM content_objects WHERE object_digest = ?').all(parsed.sourceDigest) as SqlRow[],
+            'OBJECT_VERIFY_FAILED',
+            '暂存对象记录缺失。',
+          );
+          requireStore(asString(object.relative_key) === relativeKey && asNumber(object.byte_length) === parsed.archiveBytes, 'OBJECT_VERIFY_FAILED', '暂存对象记录冲突。');
+          this.#authority
+            .prepare(
+              `INSERT INTO import_drafts(
+                 draft_id, selection_token, state, draft_version, display_name, object_digest, selected_path, staged_at
+               ) VALUES (?, ?, 'staged', 1, ?, ?, ?, ?)`,
+            )
+            .run(draftId, selectionToken, displayName, parsed.sourceDigest, selectedPath, now);
+          this.#insertSnapshot(draftId, parsed, now);
+          this.#assertForeignKeys(this.#authority);
+        });
 
-      const draftId = randomUUID();
-      const now = new Date().toISOString();
-      this.#transaction(this.#authority, () => {
-        this.#authority
-          .prepare(
-            `INSERT INTO content_objects(object_digest, relative_key, byte_length, verified_at)
-             VALUES (?, ?, ?, ?)
-             ON CONFLICT(object_digest) DO NOTHING`,
-          )
-          .run(parsed.sourceDigest, relativeKey, parsed.archiveBytes, now);
-        const object = one(
-          this.#authority.prepare('SELECT relative_key, byte_length FROM content_objects WHERE object_digest = ?').all(parsed.sourceDigest) as SqlRow[],
-          'OBJECT_VERIFY_FAILED',
-          '暂存对象记录缺失。',
-        );
-        requireStore(asString(object.relative_key) === relativeKey && asNumber(object.byte_length) === parsed.archiveBytes, 'OBJECT_VERIFY_FAILED', '暂存对象记录冲突。');
-        this.#authority
-          .prepare(
-            `INSERT INTO import_drafts(
-               draft_id, selection_token, state, draft_version, display_name, object_digest, selected_path, staged_at
-             ) VALUES (?, ?, 'staged', 1, ?, ?, ?, ?)`,
-          )
-          .run(draftId, selectionToken, displayName, parsed.sourceDigest, selectedPath, now);
-        this.#insertSnapshot(draftId, parsed, now);
-        this.#assertForeignKeys(this.#authority);
-      });
-
-      return this.#stagedProjection({
-        draftId,
-        state: 'staged',
-        version: 1,
-        displayName,
-        objectDigest: parsed.sourceDigest,
-        selectedPath,
-        reviewedTitle: null,
-        reviewedTargetChoiceId: null,
-        reviewDigest: null,
-        stagedAt: now,
-        parserIdentity: parsed.parserIdentity,
-        sourceDigest: parsed.sourceDigest,
-        sourceBytes: parsed.archiveBytes,
-        contentDigest: parsed.contentDigest,
-        structureDigest: parsed.structureDigest,
-        blockCount: parsed.blocks.length,
-        fidelity: parsed.fidelity,
-        titleSuggestion: parsed.titleSuggestion.value,
-        titleSource: parsed.titleSuggestion.sourceLabel,
+        return this.#stagedProjection({
+          draftId,
+          state: 'staged',
+          version: 1,
+          displayName,
+          objectDigest: parsed.sourceDigest,
+          selectedPath,
+          reviewedTitle: null,
+          reviewedTargetChoiceId: null,
+          reviewDigest: null,
+          stagedAt: now,
+          parserIdentity: parsed.parserIdentity,
+          sourceDigest: parsed.sourceDigest,
+          sourceBytes: parsed.archiveBytes,
+          contentDigest: parsed.contentDigest,
+          structureDigest: parsed.structureDigest,
+          blockCount: parsed.blocks.length,
+          fidelity: parsed.fidelity,
+          titleSuggestion: parsed.titleSuggestion.value,
+          titleSource: parsed.titleSuggestion.sourceLabel,
+        });
       });
     } catch (error) {
       if (error instanceof StoreError) throw error;
@@ -1338,48 +1441,74 @@ export class EditorialStore {
       throw new StoreError('SNAPSHOT_RESELECTION_REQUIRED', '重选文件无法形成完整的本地暂存快照。');
     }
     requireStore(parsed.sourceDigest === expectedDigest, 'RESELECTION_MISMATCH', '重选文件与原暂存来源身份不一致。');
-    const relativeKey = await this.#persistContentObject(selectedPath, parsed);
-    const nextVersion = expectedDraftVersion + 1;
-    const now = new Date().toISOString();
-    this.#transaction(this.#authority, () => {
-      this.#authority
-        .prepare(
-          `INSERT INTO content_objects(object_digest, relative_key, byte_length, verified_at)
-           VALUES (?, ?, ?, ?)
-           ON CONFLICT(object_digest) DO UPDATE SET
-             relative_key = excluded.relative_key,
-             byte_length = excluded.byte_length,
-             verified_at = excluded.verified_at`,
-        )
-        .run(parsed.sourceDigest, relativeKey, parsed.archiveBytes, now);
-      this.#authority.prepare('DELETE FROM staged_import_snapshots WHERE draft_id = ?').run(draftId);
-      this.#insertSnapshot(draftId, parsed, now);
-      const draftUpdate = this.#authority
-        .prepare(
-          `UPDATE import_drafts
-           SET selection_token = ?, state = 'staged', draft_version = ?, display_name = ?, object_digest = ?,
-               selected_path = ?, reviewed_title = NULL, reviewed_target_choice_id = NULL,
-               review_digest = NULL, reviewed_at = NULL
-           WHERE draft_id = ? AND draft_version = ? AND state IN ('staged', 'reviewed')`,
-        )
-        .run(selectionToken, nextVersion, displayName, parsed.sourceDigest, selectedPath, draftId, expectedDraftVersion);
-      requireStore(draftUpdate.changes === 1, 'DRAFT_VERSION_CHANGED', '导入草稿在重选时已变化。');
-      this.#authority.prepare("DELETE FROM import_commit_attempts WHERE draft_id = ? AND state = 'prepared'").run(draftId);
-      this.#assertForeignKeys(this.#authority);
+    return await this.#withContentObjectLifecycle(async () => {
+      this.#requireNoAbandonmentCleanupIntent(draftId);
+      const currentDraft = one(
+        this.#authority
+          .prepare('SELECT state, draft_version, object_digest FROM import_drafts WHERE draft_id = ?')
+          .all(draftId) as SqlRow[],
+        'DRAFT_NOT_FOUND',
+        '导入草稿不存在。',
+      );
+      requireStore(
+        (asString(currentDraft.state) === 'staged' || asString(currentDraft.state) === 'reviewed') &&
+          asNumber(currentDraft.draft_version) === expectedDraftVersion &&
+          asString(currentDraft.object_digest) === expectedDigest,
+        'DRAFT_VERSION_CHANGED',
+        '导入草稿在重选持久化前已变化。',
+      );
+      const relativeKey = await this.#persistContentObject(selectedPath, parsed);
+      const nextVersion = expectedDraftVersion + 1;
+      const now = new Date().toISOString();
+      this.#transaction(this.#authority, () => {
+        this.#authority
+          .prepare(
+            `INSERT INTO content_objects(object_digest, relative_key, byte_length, verified_at)
+             VALUES (?, ?, ?, ?)
+             ON CONFLICT(object_digest) DO UPDATE SET
+               relative_key = excluded.relative_key,
+               byte_length = excluded.byte_length,
+               verified_at = excluded.verified_at`,
+          )
+          .run(parsed.sourceDigest, relativeKey, parsed.archiveBytes, now);
+        this.#authority.prepare('DELETE FROM staged_import_snapshots WHERE draft_id = ?').run(draftId);
+        this.#insertSnapshot(draftId, parsed, now);
+        const draftUpdate = this.#authority
+          .prepare(
+            `UPDATE import_drafts
+             SET selection_token = ?, state = 'staged', draft_version = ?, display_name = ?, object_digest = ?,
+                 selected_path = ?, reviewed_title = NULL, reviewed_target_choice_id = NULL,
+                 review_digest = NULL, reviewed_at = NULL
+             WHERE draft_id = ? AND draft_version = ? AND state IN ('staged', 'reviewed')`,
+          )
+          .run(selectionToken, nextVersion, displayName, parsed.sourceDigest, selectedPath, draftId, expectedDraftVersion);
+        requireStore(draftUpdate.changes === 1, 'DRAFT_VERSION_CHANGED', '导入草稿在重选时已变化。');
+        this.#authority.prepare("DELETE FROM import_commit_attempts WHERE draft_id = ? AND state = 'prepared'").run(draftId);
+        this.#assertForeignKeys(this.#authority);
+      });
+      const snapshot = this.#loadDraftSnapshot(draftId);
+      return {
+        state: 'target-review-required',
+        staged: this.#stagedProjection(snapshot),
+        originalFileAccess: { state: 'available-exact', label: '原始所选文件仍可访问且身份一致' },
+        reviewInvalidated: previousState === 'reviewed' || attempt !== null,
+        notice: '已通过原来源摘要精确匹配完成重选，并重新形成完整暂存与预检；请重新确认全部决定。',
+      };
     });
-    const snapshot = this.#loadDraftSnapshot(draftId);
-    return {
-      state: 'target-review-required',
-      staged: this.#stagedProjection(snapshot),
-      originalFileAccess: { state: 'available-exact', label: '原始所选文件仍可访问且身份一致' },
-      reviewInvalidated: previousState === 'reviewed' || attempt !== null,
-      notice: '已通过原来源摘要精确匹配完成重选，并重新形成完整暂存与预检；请重新确认全部决定。',
-    };
   }
 
   async abandonImportDraft(draftId: string, expectedDraftVersion: number): Promise<ImportStartupProjection> {
     this.#assertAvailable();
     requireStore(UUID_PATTERN.test(draftId), 'DRAFT_INVALID', '导入草稿标识无效。');
+    return this.#withContentObjectLifecycle(() =>
+      this.#abandonImportDraftWithinContentObjectLifecycle(draftId, expectedDraftVersion),
+    );
+  }
+
+  async #abandonImportDraftWithinContentObjectLifecycle(
+    draftId: string,
+    expectedDraftVersion: number,
+  ): Promise<ImportStartupProjection> {
     const pendingCleanup = this.#loadAbandonmentCleanupIntent(draftId);
     if (pendingCleanup) {
       requireStore(
@@ -2690,6 +2819,7 @@ export class EditorialStore {
   }
 
   async #persistContentObject(selectedPath: string, parsed: ParsedDocx): Promise<string> {
+    this.#requireNoAbandonmentCleanupForObject(parsed.sourceDigest);
     const relativeKey = posix.join('sha256', parsed.sourceDigest.slice(0, 2), `${parsed.sourceDigest}.docx`);
     const objectDirectory = await ensureCanonicalDataDirectory(
       this.#dataRoot,
@@ -2809,6 +2939,21 @@ export class EditorialStore {
     );
   }
 
+  #requireNoAbandonmentCleanupForObject(objectDigest: string): void {
+    const pending = one(
+      this.#authority
+        .prepare('SELECT count(*) pending FROM import_abandonment_cleanup_intents WHERE object_digest = ?')
+        .all(objectDigest) as SqlRow[],
+      'STORE_CORRUPT',
+      '无法核对暂存对象清理状态。',
+    );
+    requireStore(
+      asNumber(pending.pending) === 0,
+      'ABANDON_CLEANUP_PENDING',
+      '该暂存对象已进入持久放弃清理；清理完成前不能重新持久化或创建权威引用。',
+    );
+  }
+
   #assertAbandonmentCleanupAuthority(intent: AbandonmentCleanupIntent): void {
     const proof = one(
       this.#authority
@@ -2871,6 +3016,22 @@ export class EditorialStore {
     }
   }
 
+  #requireContentObjectAbsentForFinalization(intent: AbandonmentCleanupIntent): void {
+    try {
+      lstatSync(this.#contentObjectPath(intent.objectDigest, intent.relativeKey));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
+      throw new StoreError(
+        'ABANDON_CLEANUP_INCONCLUSIVE',
+        '无法在权威清理事务内证明暂存对象仍然缺失；持久放弃清理意图与导入草稿仍保留。',
+      );
+    }
+    throw new StoreError(
+      'ABANDON_CLEANUP_INCONCLUSIVE',
+      '暂存对象在权威清理事务前再次出现；持久放弃清理意图与导入草稿仍保留。',
+    );
+  }
+
   async #resumeAbandonmentCleanupIntent(intentInput: AbandonmentCleanupIntent): Promise<void> {
     this.#assertAvailable();
     let intent = this.#loadAbandonmentCleanupIntent(intentInput.draftId);
@@ -2928,6 +3089,7 @@ export class EditorialStore {
     );
     this.#transaction(this.#authority, () => {
       this.#assertAbandonmentCleanupAuthority(intent!);
+      this.#requireContentObjectAbsentForFinalization(intent!);
       const intentDeletion = this.#authority
         .prepare(
           `DELETE FROM import_abandonment_cleanup_intents
@@ -3454,6 +3616,21 @@ export class EditorialStore {
   #assertForeignKeys(db: DatabaseSync): void {
     const violations = db.prepare('PRAGMA foreign_key_check').all();
     requireStore(violations.length === 0, 'FOREIGN_KEY_FAILED', '持久化引用校验失败。');
+  }
+
+  async #withContentObjectLifecycle<T>(operation: () => Promise<T>): Promise<T> {
+    const previous = this.#contentObjectLifecycleTail;
+    let release = (): void => {};
+    this.#contentObjectLifecycleTail = new Promise<void>((resolve) => {
+      release = () => resolve();
+    });
+    await previous;
+    try {
+      this.#assertAvailable();
+      return await operation();
+    } finally {
+      release();
+    }
   }
 
   #transaction<T>(db: DatabaseSync, operation: () => T): T {
