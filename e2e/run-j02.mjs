@@ -419,7 +419,13 @@ async function runWorkspaceJourney(renderer) {
   await renderer.evaluate(`globalThis.__ai7AfterAckFirst = document.querySelector('[data-testid="manuscript-editor"] > [data-block-id]')?.dataset.blockId`);
   await clickButton(renderer, '向后浏览', 'fresh-cursor-after-ack');
   await waitFor(renderer, `document.querySelector('[data-testid="manuscript-editor"] > [data-block-id]')?.dataset.blockId !== globalThis.__ai7AfterAckFirst`, 'fresh-cursor-after-ack-resolved');
+  await renderer.evaluate(`new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
   await clickButton(renderer, '向前浏览', 'fresh-return-cursor-after-ack');
+  await waitFor(
+    renderer,
+    `(() => { const editor = document.querySelector('[data-testid="manuscript-editor"]'); return editor?.firstElementChild?.getAttribute('data-block-id') === globalThis.__ai7AfterAckFirst && editor.getAttribute('contenteditable') === 'true' && editor.getAttribute('aria-readonly') === 'false'; })()`,
+    'fresh-return-cursor-after-ack-resolved',
+  );
   await waitFor(renderer, `Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '取消当前操作')?.hidden`, 'stale-search-closed');
 
   at('authoritative-mutation-drain');
