@@ -193,6 +193,26 @@ async function runJourney(renderer, expectation) {
     exerciseEditor = false,
   } = expectation;
   const hasIdentityFinding = identityClass !== null;
+  const expectedNonEffects = degraded
+    ? [
+        '不创建书系或书系成员关系',
+        '不创建编辑学习准入决定',
+        '不授予或执行模型提供方传输',
+        '不创建发稿版本',
+        '不创建公开发布许可或公开发布事实',
+        '不导出、不发送、不交付、不发布',
+        '不承诺 DOCX 往返或版式复原',
+      ]
+    : [
+        '不创建书系或书系成员关系',
+        '不创建编辑学习准入决定',
+        '不授予或执行模型提供方传输',
+        '不创建发稿版本',
+        '不创建公开发布许可或公开发布事实',
+        '不导出、不发送、不交付、不发布',
+        '不承诺 DOCX 往返或版式复原',
+        '符合当前范围的导入不创建导入降级决定',
+      ];
   at('renderer-ready');
   await waitFor(
     renderer,
@@ -261,6 +281,7 @@ async function runJourney(renderer, expectation) {
   if (degraded) {
     await assertRenderer(renderer, `(() => { const rows = Array.from(document.querySelectorAll('[data-fidelity-category]')); const expected = [['inline-styles',266,'status-degraded'],['comments-revisions',0,'status-preserved'],['notes',0,'status-preserved'],['tables',0,'status-preserved'],['images-captions',0,'status-preserved'],['sections',1,'status-degraded'],['headers-footers',0,'status-preserved'],['round-trip-export',0,'status-unsupported']]; return rows.length === expected.length && rows.every((row, index) => row.dataset.fidelityCategory === expected[index][0] && row.querySelector('.count')?.textContent.includes('· ' + expected[index][1] + ' 项') && row.querySelector('.status-pill')?.classList.contains(expected[index][2])); })()`, 'review-fidelity-degraded');
     await assertRenderer(renderer, `(() => { const acceptance = document.querySelector('#accept-import-degradation'); const commit = Array.from(document.querySelectorAll('button')).find((button) => button.textContent.includes('新建图书并导入稿件')); return acceptance && !acceptance.checked && (!commit || commit.disabled); })()`, 'degradation-initially-unselected');
+    await assertRenderer(renderer, `(() => { const items = Array.from(document.querySelectorAll('[data-degradation-category]')); const expected = [['inline-styles','266'],['sections','1']]; return items.length === expected.length && items.every((item, index) => item.dataset.degradationCategory === expected[index][0] && item.dataset.degradationCount === expected[index][1]); })()`, 'degradation-complete-server-set');
     await assertRenderer(renderer, `(() => { const acceptance = document.querySelector('#accept-import-degradation'); if (!acceptance) return false; acceptance.click(); return true; })()`, 'degradation-accept');
     await waitFor(renderer, `document.querySelector('#accept-import-degradation')?.checked && Array.from(document.querySelectorAll('button')).some((button) => button.textContent === '按上述降级方式新建图书并导入稿件' && !button.disabled)`, 'degradation-accepted-review');
   } else {
@@ -268,7 +289,7 @@ async function runJourney(renderer, expectation) {
   }
   await assertRenderer(
     renderer,
-    `(() => { const sections = Array.from(document.querySelectorAll('.review-section')); const exact = (heading, expected) => { const section = sections.find((item) => item.querySelector('h3')?.textContent === heading); const actual = Array.from(section?.querySelectorAll('li') ?? [], (item) => item.textContent); return actual.length === expected.length && actual.every((item, index) => item === expected[index]); }; return exact('将创建的记录', ${JSON.stringify(degraded ? ['图书与稳定标识','图书编辑维度集（8 项）','源材料版本与来源记录','导入保真审阅','导入降级决定','主稿件','稿件分支','稿件修订版 r1 与有序稳定内容块','工作流程实例与精确方案版本绑定','稿件导入记录'] : ['图书与稳定标识','图书编辑维度集（8 项）','源材料版本与来源记录','导入保真审阅','主稿件','稿件分支','稿件修订版 r1 与有序稳定内容块','工作流程实例与精确方案版本绑定','稿件导入记录'])}) && exact('明确不会发生', ['不创建书系或书系成员关系','不创建编辑学习准入决定','不授予或执行模型提供方传输','不创建发稿版本','不创建公开发布许可或公开发布事实','不导出、不发送、不交付、不发布','不承诺 DOCX 往返或版式复原']); })()`,
+    `(() => { const sections = Array.from(document.querySelectorAll('.review-section')); const exact = (heading, expected) => { const section = sections.find((item) => item.querySelector('h3')?.textContent === heading); const actual = Array.from(section?.querySelectorAll('li') ?? [], (item) => item.textContent); return actual.length === expected.length && actual.every((item, index) => item === expected[index]); }; return exact('将创建的记录', ${JSON.stringify(degraded ? ['图书与稳定标识','图书编辑维度集（8 项）','源材料版本与来源记录','导入保真审阅','导入降级决定','主稿件','稿件分支','稿件修订版 r1 与有序稳定内容块','工作流程实例与精确方案版本绑定','稿件导入记录'] : ['图书与稳定标识','图书编辑维度集（8 项）','源材料版本与来源记录','导入保真审阅','主稿件','稿件分支','稿件修订版 r1 与有序稳定内容块','工作流程实例与精确方案版本绑定','稿件导入记录'])}) && exact('明确不会发生', ${JSON.stringify(expectedNonEffects)}); })()`,
     'review-exact-effects',
   );
   await assertRenderer(

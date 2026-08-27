@@ -8,10 +8,11 @@
 - Mapped the existing implementation owners and direct consumers. `src/service/docx.ts` already supplies the immutable source, parser, parsed-content, and structure identities plus clean synthetic fidelity. `src/service/store.ts` already persists those identities and prior Book/Source Version/Manuscript Import Record links, but its query is sample1-hard-coded and its review digest is v3. `src/shared/protocol.ts`, `src/renderer/index.ts`, and `e2e/run-j01.mjs` are the existing projection, disclosure, and complete-journey seams.
 - Implemented the bounded module in those existing owners. Protocol projections now carry one exact class per identity finding. The Store queries every prior manuscript-import record in required deterministic order, classifies with immutable-original → parsed-content-and-structure → filename-collision precedence, includes the ordered disclosure in `ai7.new-book-import-review/4`, re-derives it immediately before commit, and rejects every non-v4/changed digest.
 - Updated renderer disclosure and review binding without adding a target/relationship/duplicate authority or payload surface. Expanded the one J-01 runner to initial `sample1`, exact `sample1`, synthetic A same-name/different-content, and synthetic B parsed-only content identity; A/B are deterministic clean DOCX files generated and removed only inside the disposable external E2E root. Updated current `HANDOFF.md` routing to the active Issue #37 scope.
+- Received a read-only same-provider review of `f6ea440386d2dc86912ccb820b2e99acac06d5e4`. It found exactly two E2E assertion defects and no boundary issue: the clean review must include its eighth ordered non-effect, and the degraded review must assert the complete server-derived degradation set before acceptance. The review-fix diff changes only `e2e/run-j01.mjs` to address both.
 
 ## What's next
 
-- Commander: in an environment with the already materialized declared Node 24.18.1 toolchain/dependencies, run the existing doctor/build/J-01 surface before integration and re-resolve the moving `dev` target.
+- Create the separate review-fix commit for the staged-ready `PROGRESS.md` and `e2e/run-j01.mjs` diff when the linked worktree's Git administrative directory is writable. Then, in an environment with the already materialized declared Node 24.18.1 toolchain/dependencies, run the existing doctor/build/J-01 surface before integration and re-resolve the moving `dev` target.
 
 ## Key decisions
 
@@ -21,8 +22,8 @@
 
 ## Unresolved matters or blockers
 
-- The worktree has neither a `node` executable nor `node_modules`; `pnpm exec tsc` cannot locate TypeScript. The no-install instruction prevents bootstrap or dependency materialization, so build and J-01 E2E cannot run in this environment. `git diff --check` remains clean.
+- The review-fix diff passed `git diff --check`. The worktree has neither a `node` executable nor `node_modules`; the no-install instruction prevents bootstrap or dependency materialization, so syntax/type/build and J-01 E2E checks cannot run in this environment. This sandbox also denies creation of `C:/Users/Chooo/Playground/ai7-harness/.git/worktrees/issue-37-import-identity/index.lock`, so the required separate local commit cannot be made here.
 
 ## Resume Prompt
 
-Use this committed Issue #37 branch only. With a materialized declared Node 24.18.1 toolchain, run the existing doctor/build/J-01 validation surface; otherwise do not install dependencies. Before any Commander integration, re-resolve `origin/dev` and target-qualified authority. Preserve the exact v4 fail-closed identity boundary and disposable synthetic cleanup.
+Use this Issue #37 branch only. Commit the narrow `PROGRESS.md` and `e2e/run-j01.mjs` reviewer repair after `f6ea440` without amending it, once the linked-worktree Git directory is writable. With a materialized declared Node 24.18.1 toolchain, run the existing doctor/build/J-01 validation surface; otherwise do not install dependencies. Before any Commander integration, re-resolve `origin/dev` and target-qualified authority. Preserve the exact v4 fail-closed identity boundary and disposable synthetic cleanup.
