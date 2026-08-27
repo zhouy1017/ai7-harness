@@ -158,6 +158,15 @@ if (process.platform !== 'win32' && process.platform !== 'darwin') throw new Err
 
 const api: RendererApi = Object.freeze({
   platform: process.platform,
+  getStartup: () => invoke<ServiceOperationMap['getStartup']['output']>(IPC_CHANNELS.getStartup),
+  getRecoveryComparison: (input: ServiceOperationMap['getRecoveryComparison']['input']) =>
+    invoke<ServiceOperationMap['getRecoveryComparison']['output']>(IPC_CHANNELS.getRecoveryComparison, input),
+  viewRecoveryCandidate: (input: ServiceOperationMap['viewRecoveryCandidate']['input']) =>
+    invoke<ServiceOperationMap['viewRecoveryCandidate']['output']>(IPC_CHANNELS.viewRecoveryCandidate, input),
+  deferRecovery: (input: ServiceOperationMap['deferRecovery']['input']) =>
+    invoke<ServiceOperationMap['deferRecovery']['output']>(IPC_CHANNELS.deferRecovery, input),
+  restoreRecovery: (input: Omit<ServiceOperationMap['restoreRecovery']['input'], 'restorationId'>) =>
+    invoke<ServiceOperationMap['restoreRecovery']['output']>(IPC_CHANNELS.restoreRecovery, input),
   getImportStartup: () =>
     invoke<ServiceOperationMap['getImportStartup']['output']>(IPC_CHANNELS.getImportStartup),
   selectAndStageDocx: () => invoke<PickerStageResult>(IPC_CHANNELS.selectAndStageDocx),

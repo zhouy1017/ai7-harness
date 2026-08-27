@@ -18,6 +18,7 @@ import {
   MAIN_EVENTS,
   type CommitNewBookRendererInput,
   type J01ImportControl,
+  type J08RecoveryControl,
   type PickerReselectResult,
   type PickerStageResult,
   type RendererCallResult,
@@ -34,6 +35,7 @@ interface LaunchArguments {
   dataRoot: string;
   injectedPickerPath: string | undefined;
   importControl: J01ImportControl | undefined;
+  recoveryControl: J08RecoveryControl | undefined;
   launcherPid: number;
 }
 
@@ -55,7 +57,9 @@ function parseArguments(argv: string[]): LaunchArguments {
         (key === '--data-root' ||
           key === '--j01-picker-path' ||
           key === '--j02-picker-path' ||
+          key === '--j08-picker-path' ||
           key === '--j01-import-control' ||
+          key === '--j08-recovery-control' ||
           key === '--launcher-pid'),
     );
     values.set(key, value);
@@ -64,7 +68,8 @@ function parseArguments(argv: string[]): LaunchArguments {
   requireDesktop(dataRoot !== undefined && isAbsolute(dataRoot));
   const j01PickerPath = values.get('--j01-picker-path');
   const j02PickerPath = values.get('--j02-picker-path');
-  requireDesktop(!(j01PickerPath && j02PickerPath));
+  const j08PickerPath = values.get('--j08-picker-path');
+  requireDesktop([j01PickerPath, j02PickerPath, j08PickerPath].filter(Boolean).length <= 1);
   requireDesktop(
     j01PickerPath === undefined ||
       (process.env.AI7_E2E_JOURNEY === 'J-01' &&
@@ -77,7 +82,13 @@ function parseArguments(argv: string[]): LaunchArguments {
         isAbsolute(j02PickerPath) &&
         extname(j02PickerPath).toLocaleLowerCase('en-US') === '.docx'),
   );
-  const injectedPickerPath = j01PickerPath ?? j02PickerPath;
+  requireDesktop(
+    j08PickerPath === undefined ||
+      (process.env.AI7_E2E_JOURNEY === 'J-08' &&
+        isAbsolute(j08PickerPath) &&
+        extname(j08PickerPath).toLocaleLowerCase('en-US') === '.docx'),
+  );
+  const injectedPickerPath = j01PickerPath ?? j02PickerPath ?? j08PickerPath;
   const importControlValue = values.get('--j01-import-control');
   const importControl =
     importControlValue === 'before-commit' ||
@@ -88,12 +99,20 @@ function parseArguments(argv: string[]): LaunchArguments {
     importControlValue === 'after-abandon-object-delete-before-finalize'
       ? importControlValue
       : undefined;
+  const recoveryControlValue = values.get('--j08-recovery-control');
+  const recoveryControl = recoveryControlValue === 'interrupt-after-journal-ack'
+    ? recoveryControlValue
+    : undefined;
   const launcherPid = Number(values.get('--launcher-pid'));
   requireDesktop(
     importControlValue === undefined || (process.env.AI7_E2E_JOURNEY === 'J-01' && importControl !== undefined),
   );
+  requireDesktop(
+    recoveryControlValue === undefined || (process.env.AI7_E2E_JOURNEY === 'J-08' && recoveryControl !== undefined),
+  );
+  requireDesktop(!(importControl && recoveryControl));
   requireDesktop(Number.isSafeInteger(launcherPid) && launcherPid > 0 && launcherPid === process.ppid);
-  return { dataRoot, injectedPickerPath, importControl, launcherPid };
+  return { dataRoot, injectedPickerPath, importControl, recoveryControl, launcherPid };
 }
 
 function processIsAlive(pid: number): boolean {
@@ -158,6 +177,8 @@ function registerRendererHandlers(
     string,
     { draftId: string; expectedDraftVersion: number; reviewDigest: string; commitId: string }
   >();
+  const restorationBindings = new Map<string, Map<string, string>>();
+  let restorationBindingCount = 0;
   const requireSender = (event: IpcMainInvokeEvent): void => {
     requireDesktop(
       !window.isDestroyed() &&
@@ -198,6 +219,38 @@ function registerRendererHandlers(
   };
 
   ipcMain.on(MAIN_EVENTS.closeRiskChanged, closeRiskListener);
+
+  ipcMain.handle(IPC_CHANNELS.getStartup, (event) =>
+    envelope(async () => {
+      requireSender(event);
+      requireAuthority();
+      return service.call('getStartup', {});
+    }),
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.restoreRecovery,
+    (event, input: Omit<ServiceOperationMap['restoreRecovery']['input'], 'restorationId'>) =>
+      envelope(async () => {
+        requireSender(event);
+        requireAuthority();
+        const fingerprint = JSON.stringify(input);
+        let bindings = restorationBindings.get(input.attentionId);
+        if (!bindings) {
+          requireDesktop(restorationBindings.size < 32, 'AI7_RENDERER_BOUNDARY_INVALID');
+          bindings = new Map<string, string>();
+          restorationBindings.set(input.attentionId, bindings);
+        }
+        let restorationId = bindings.get(fingerprint);
+        if (!restorationId) {
+          requireDesktop(bindings.size < 16 && restorationBindingCount < 64, 'AI7_RENDERER_BOUNDARY_INVALID');
+          restorationId = randomUUID();
+          bindings.set(fingerprint, restorationId);
+          restorationBindingCount += 1;
+        }
+        return service.call('restoreRecovery', { ...input, restorationId });
+      }),
+  );
 
   ipcMain.handle(IPC_CHANNELS.getImportStartup, (event) =>
     envelope(async () => {
@@ -322,6 +375,9 @@ function registerRendererHandlers(
     }),
   );
   const serviceHandlers = [
+    ['getRecoveryComparison', IPC_CHANNELS.getRecoveryComparison],
+    ['viewRecoveryCandidate', IPC_CHANNELS.viewRecoveryCandidate],
+    ['deferRecovery', IPC_CHANNELS.deferRecovery],
     ['listPriorWork', IPC_CHANNELS.listPriorWork],
     ['getManuscriptWindowAt', IPC_CHANNELS.getManuscriptWindowAt],
     ['getOutline', IPC_CHANNELS.getOutline],
@@ -433,7 +489,9 @@ export async function runApplication(): Promise<void> {
     installChromiumDenial(productSession);
     startupLocation = 'service-ready';
     const serviceEntry = resolve(__dirname, '..', 'service', 'index.mjs');
-    service = await ServiceClient.start(process.execPath, serviceEntry, dataRoot, launch.importControl);
+    service = await ServiceClient.start(
+      process.execPath, serviceEntry, dataRoot, launch.importControl, launch.recoveryControl,
+    );
     service.onUnexpectedExit(() => {
       serviceInterrupted = true;
       if (!productReady) {

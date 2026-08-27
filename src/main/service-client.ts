@@ -5,6 +5,7 @@ import { delimiter, dirname, isAbsolute, resolve } from 'node:path';
 import {
   MAX_FRAME_BYTES,
   type J01ImportControl,
+  type J08RecoveryControl,
   type ServiceOperation,
   type ServiceOperationMap,
   type ServiceReadiness,
@@ -32,9 +33,14 @@ export class ServiceCallError extends Error {
   }
 }
 
-function serviceEnvironment(executable: string, importControl: J01ImportControl | undefined): NodeJS.ProcessEnv {
+function serviceEnvironment(
+  executable: string,
+  importControl: J01ImportControl | undefined,
+  recoveryControl: J08RecoveryControl | undefined,
+): NodeJS.ProcessEnv {
   const selected: NodeJS.ProcessEnv = { ELECTRON_RUN_AS_NODE: '1' };
   if (importControl) selected.AI7_E2E_JOURNEY = 'J-01';
+  if (recoveryControl) selected.AI7_E2E_JOURNEY = 'J-08';
   const names =
     process.platform === 'win32'
       ? ['SystemRoot', 'WINDIR', 'TEMP', 'TMP', 'PATHEXT', 'ComSpec', 'APPDATA', 'LOCALAPPDATA', 'USERPROFILE']
@@ -55,7 +61,7 @@ function serviceEnvironment(executable: string, importControl: J01ImportControl 
 
 function readinessIsExact(value: ServiceReadiness): boolean {
   return (
-    value.protocolVersion === 4 &&
+    value.protocolVersion === 5 &&
     value.state === 'ready' &&
     value.runtime.electron === '43.4.1' &&
     value.runtime.node === '24.18.1' &&
@@ -107,18 +113,20 @@ export class ServiceClient {
     serviceEntry: string,
     dataRoot: string,
     importControl?: J01ImportControl,
+    recoveryControl?: J08RecoveryControl,
   ): Promise<ServiceClient> {
     if (!isAbsolute(executable) || !isAbsolute(serviceEntry) || !isAbsolute(dataRoot)) {
       throw new ServiceCallError('SERVICE_LAUNCH_INVALID', '本地业务服务启动参数无效。');
     }
     const args = [serviceEntry, '--data-root', dataRoot, '--parent-pid', String(process.pid)];
     if (importControl) args.push('--j01-import-control', importControl);
+    if (recoveryControl) args.push('--j08-recovery-control', recoveryControl);
     const child = spawn(
       executable,
       args,
       {
         cwd: dirname(serviceEntry),
-        env: serviceEnvironment(executable, importControl),
+        env: serviceEnvironment(executable, importControl, recoveryControl),
         stdio: ['pipe', 'pipe', 'pipe'],
         windowsHide: true,
       },
@@ -159,7 +167,11 @@ export class ServiceClient {
         this.#pending.delete(id);
         reject(new ServiceCallError('SERVICE_TIMEOUT', '本地业务服务响应超时。'));
         this.#fault();
-      }, operation === 'stageSelectedDocx' || operation === 'commitNewBookImport' || operation === 'commitReplacement' || operation === 'saveMilestone' ? LONG_REQUEST_TIMEOUT_MS : REQUEST_TIMEOUT_MS);
+      }, operation === 'stageSelectedDocx' || operation === 'commitNewBookImport' || operation === 'commitReplacement' ||
+          operation === 'saveMilestone' || operation === 'getStartup' || operation === 'getRecoveryComparison' ||
+          operation === 'viewRecoveryCandidate' || operation === 'restoreRecovery'
+        ? LONG_REQUEST_TIMEOUT_MS
+        : REQUEST_TIMEOUT_MS);
       timeout.unref();
       this.#pending.set(id, {
         operation,

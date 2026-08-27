@@ -1,5 +1,5 @@
 import { createWriteStream, existsSync } from 'node:fs';
-import { lstat, mkdtemp, realpath, rm, stat } from 'node:fs/promises';
+import { lstat, mkdtemp, opendir, realpath, rm, stat } from 'node:fs/promises';
 import { once } from 'node:events';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { arch, platform, release, tmpdir } from 'node:os';
@@ -21,6 +21,9 @@ const OVERLAP_SOURCE_TEXT = '哈哈哈';
 const OVERLAP_QUERY = '哈哈';
 const EXCLUSION_TEXT = '边界排除校验';
 const EXPECTED_EXCLUSION_MATCHES = 1_001;
+const MILESTONE_RECOVERY_SNAPSHOT_TIMEOUT = 10 * 60_000;
+const RECOVERY_PARTIAL_PATTERN = /^\.partial-[0-9a-f-]{36}$/i;
+const RECOVERY_OBJECT_PATTERN = /^[0-9a-f]{64}\.snapshot$/;
 const DEBUG_SELECTORS = new Set(['DEBUG', 'DEBUG_FILE', 'PWDEBUG', 'PWDEBUGIMPL']);
 const CJK_BASE = 0x4e00;
 const CJK_SPAN = 0x1000;
@@ -362,7 +365,90 @@ async function importAndOpen(renderer) {
   await waitFor(renderer, `document.querySelector('[data-screen="editor"]')`, 'editor');
 }
 
-async function runWorkspaceJourney(renderer) {
+async function milestoneObjectTimeoutCategory(dataRoot) {
+  let directory;
+  try {
+    directory = await opendir(join(dataRoot, 'recovery-objects', 'v1'));
+  } catch (error) {
+    if (error?.code === 'ENOENT') return 'recovery-object-absent';
+    throw new Error('J-02/milestone-r2-object-inspection');
+  }
+  let promoted = false;
+  for await (const entry of directory) {
+    if (!entry.isFile()) continue;
+    if (RECOVERY_PARTIAL_PATTERN.test(entry.name)) return 'partial-object-present';
+    if (RECOVERY_OBJECT_PATTERN.test(entry.name)) promoted = true;
+  }
+  return promoted ? 'promoted-object-present' : 'recovery-object-absent';
+}
+
+async function milestoneIpcTimeoutCategory(renderer, beforeObservation) {
+  let afterObservation;
+  try {
+    afterObservation = await renderer.observeIpc();
+  } catch {
+    return 'ipc-diagnostic-unavailable';
+  }
+
+  if (!Array.isArray(beforeObservation?.events) || !Array.isArray(afterObservation?.events)) {
+    return 'ipc-diagnostic-unavailable';
+  }
+
+  const boundaryOrdinal = beforeObservation.events.at(-1)?.ordinal ?? 0;
+  if (!Number.isSafeInteger(boundaryOrdinal)) {
+    return 'ipc-diagnostic-unavailable';
+  }
+
+  const events = [];
+  for (const event of afterObservation.events) {
+    if (event === null || typeof event !== 'object') continue;
+    const { operation, ordinal, phase } = event;
+    if (
+      !Number.isSafeInteger(ordinal) ||
+      ordinal <= boundaryOrdinal ||
+      (operation !== 'flushJournalEdit' && operation !== 'saveMilestone') ||
+      (phase !== 'invoke' && phase !== 'result' && phase !== 'error')
+    ) {
+      continue;
+    }
+    events.push({ operation, ordinal, phase });
+  }
+  events.sort((left, right) => left.ordinal - right.ordinal);
+
+  const flushInvoke = events.find(
+    (event) => event.operation === 'flushJournalEdit' && event.phase === 'invoke',
+  );
+  if (!flushInvoke) return 'no-flush-invoke';
+
+  const flushTerminal = events.find(
+    (event) =>
+      event.ordinal > flushInvoke.ordinal &&
+      event.operation === 'flushJournalEdit' &&
+      (event.phase === 'result' || event.phase === 'error'),
+  );
+  if (!flushTerminal) return 'flush-pending';
+  if (flushTerminal.phase === 'error') return 'flush-error';
+
+  const saveInvoke = events.find(
+    (event) =>
+      event.ordinal > flushTerminal.ordinal &&
+      event.operation === 'saveMilestone' &&
+      event.phase === 'invoke',
+  );
+  if (!saveInvoke) return 'flush-result-no-save-invoke';
+
+  const saveTerminal = events.find(
+    (event) =>
+      event.ordinal > saveInvoke.ordinal &&
+      event.operation === 'saveMilestone' &&
+      (event.phase === 'result' || event.phase === 'error'),
+  );
+  if (!saveTerminal) return 'save-pending';
+  if (saveTerminal.phase === 'error') return 'save-error';
+  return 'save-result-renderer-not-r2';
+}
+
+async function runWorkspaceJourney(renderer, dataRoot) {
   at('bounded-workspace');
   await assertRenderer(renderer, `document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]').length === 32`, 'renderer-block-ceiling');
   await assertRenderer(renderer, `document.querySelector('#manuscript-position')?.max === '1000000' && document.querySelector('.editor-meta')?.textContent.includes('全稿 0.000%')`, 'whole-manuscript-position');
@@ -612,7 +698,19 @@ async function runWorkspaceJourney(renderer) {
   await fill(renderer, '#milestone-note', '本地里程碑，不表示导出或发布。', 'milestone-note');
   const milestoneDrainObservation = await renderer.observeIpc();
   await editThenInvokeOnDirty(renderer, '碑', ['保存为里程碑版本'], 'dirty-milestone-save');
-  await waitFor(renderer, `document.querySelector('.editor-meta')?.textContent.includes('当前修订版 r2')`, 'milestone-r2', 180_000);
+  try {
+    await waitFor(
+      renderer,
+      `document.querySelector('.editor-meta')?.textContent.includes('当前修订版 r2')`,
+      'milestone-r2',
+      MILESTONE_RECOVERY_SNAPSHOT_TIMEOUT,
+    );
+  } catch (error) {
+    if (!(error instanceof Error) || error.message !== 'J-02/milestone-r2') throw error;
+    const ipcCategory = await milestoneIpcTimeoutCategory(renderer, milestoneDrainObservation);
+    const objectCategory = await milestoneObjectTimeoutCategory(dataRoot);
+    throw new Error(`J-02/milestone-r2-${ipcCategory}-${objectCategory}`);
+  }
   const milestoneDrainCompleted = await renderer.observeIpc();
   const milestoneDrainEvents = milestoneDrainCompleted.events.filter((event) => event.ordinal > (milestoneDrainObservation.events.at(-1)?.ordinal ?? 0));
   const milestoneFlushInvoke = milestoneDrainEvents.find((event) => event.operation === 'flushJournalEdit' && event.phase === 'invoke');
@@ -630,7 +728,14 @@ async function runWorkspaceJourney(renderer) {
     'milestone-authoritative-ready',
   );
   await clickButton(renderer, '撤销', 'undo');
-  await waitFor(renderer, `document.querySelector('.editor-meta')?.textContent.includes('修订日志序号 9')`, 'undo-durable', 120_000);
+  await waitForChecks(
+    renderer,
+    `(() => { const editor = document.querySelector('[data-testid="manuscript-editor"]'); const host = editor?.parentElement; const journal = Array.from(document.querySelectorAll('.editor-meta > span')).find((item) => item.textContent?.startsWith('修订日志序号 ')); const retry = Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '重试权威刷新'); return { journalSequence9: journal?.textContent === '修订日志序号 9', authoritativeMutationCleared: host?.dataset.authoritativeMutation === 'false', operationUnlocked: editor?.dataset.operationLocked === 'false', editorWritable: editor?.getAttribute('contenteditable') === 'true', ariaWritable: editor?.getAttribute('aria-readonly') === 'false', recoveryNotRequired: retry instanceof HTMLButtonElement && retry.hidden, closeRiskCleared: document.documentElement.dataset.ai7CloseRisk === 'false' }; })()`,
+    'undo-drained-before-close',
+    120_000,
+  );
+  await renderer.evaluate(`new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
+  await assertRenderer(renderer, `document.documentElement.dataset.ai7CloseRisk === 'false'`, 'undo-close-risk-stable');
 }
 
 async function runRestartJourney(renderer) {
@@ -713,7 +818,7 @@ async function main() {
     };
     let renderer = await launch();
     await importAndOpen(renderer);
-    await runWorkspaceJourney(renderer);
+    await runWorkspaceJourney(renderer, dataRoot);
     await browser.close();
     browser = undefined;
     renderer = await launch();

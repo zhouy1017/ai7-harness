@@ -26,8 +26,15 @@ import type {
   ReplacementCommitProjection,
   ReplacementDismissalProjection,
   ReplacementPreviewProjection,
+  RecoveryComparisonProjection,
+  RecoveryDeferralProjection,
+  RecoveryRestorationProjection,
+  RecoverySelection,
+  RecoveryWindowProjection,
+  RecoveryWindowTarget,
   SearchResultsProjection,
   SearchSummaryProjection,
+  StartupProjection,
 } from '../shared/protocol.js';
 import {
   deriveImportFidelityPlan,
@@ -41,7 +48,11 @@ import {
   BoundedStoreError,
   BoundedStoreFatalError,
   initializeBoundedSchema,
+  type RecoverySnapshotCursor,
+  type RecoverySnapshotRecord,
+  type VerifiedRecoverySnapshot,
 } from './bounded-manuscript.js';
+import { RecoveryObjectStore } from './recovery-objects.js';
 import {
   createCanonicalExternalDataRoot,
   ensureCanonicalDataDirectory,
@@ -51,7 +62,8 @@ import {
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const TOKEN_PATTERN = UUID_PATTERN;
 const CORE_SCHEMA_VERSION = 5;
-const SCHEMA_VERSION = 6;
+const EDITOR_SCHEMA_VERSION = 6;
+const SCHEMA_VERSION = 7;
 const INGEST_BATCH_SIZE = 256;
 const WORKFLOW_PROFILE = {
   id: 'ai7.manuscript.editorial.zh-CN',
@@ -562,11 +574,16 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === 3 ||
       currentVersion === 4 ||
       currentVersion === CORE_SCHEMA_VERSION ||
+      currentVersion === EDITOR_SCHEMA_VERSION ||
       currentVersion === SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
-  if (currentVersion === CORE_SCHEMA_VERSION || currentVersion === SCHEMA_VERSION) return;
+  if (
+    currentVersion === CORE_SCHEMA_VERSION ||
+    currentVersion === EDITOR_SCHEMA_VERSION ||
+    currentVersion === SCHEMA_VERSION
+  ) return;
   if (currentVersion === 1) {
     migrateSchemaV1ToV2(db);
     migrateSchemaV2ToV3(db);
@@ -1118,8 +1135,12 @@ export class EditorialStore {
   readonly #ingest: DatabaseSync;
   readonly #boundedAuthority: BoundedManuscriptStore;
   readonly #bounded: BoundedManuscriptStore;
+  readonly #recoveryObjects: RecoveryObjectStore;
+  readonly #lifetimeId: string;
   readonly #control: StoreControl;
   #contentObjectLifecycleTail: Promise<void> = Promise.resolve();
+  #recoveryObjectLifecycleTail: Promise<void> = Promise.resolve();
+  #cleanShutdownMarked = false;
   #poisoned = false;
 
   private constructor(
@@ -1130,6 +1151,8 @@ export class EditorialStore {
     ingest: DatabaseSync,
     boundedAuthority: BoundedManuscriptStore,
     bounded: BoundedManuscriptStore,
+    recoveryObjects: RecoveryObjectStore,
+    lifetimeId: string,
     control: StoreControl,
   ) {
     this.#dataRoot = dataRoot;
@@ -1139,6 +1162,8 @@ export class EditorialStore {
     this.#ingest = ingest;
     this.#boundedAuthority = boundedAuthority;
     this.#bounded = bounded;
+    this.#recoveryObjects = recoveryObjects;
+    this.#lifetimeId = lifetimeId;
     this.#control = control;
   }
 
@@ -1155,6 +1180,7 @@ export class EditorialStore {
     requireStore(isAbsolute(dataRootInput), 'DATA_ROOT_INVALID', 'Agent Data Root 必须是绝对路径。');
     const dataRoot = await createCanonicalExternalDataRoot(dataRootInput, codeRoot);
     const objectsRoot = await ensureCanonicalDataDirectory(dataRoot, 'objects');
+    const recoveryObjects = await RecoveryObjectStore.open(dataRoot);
     const storeRoot = await ensureCanonicalDataDirectory(dataRoot, 'store');
     const { path: databasePath } = await inspectCanonicalDataFile(dataRoot, storeRoot, 'ai7.sqlite');
     for (const sidecar of ['ai7.sqlite-journal', 'ai7.sqlite-shm', 'ai7.sqlite-wal']) {
@@ -1168,6 +1194,7 @@ export class EditorialStore {
     configureDatabase(journal);
     const ingest = new DatabaseSync(databasePath);
     configureDatabase(ingest);
+    const lifetimeId = randomUUID();
     const store = new EditorialStore(
       dataRoot,
       objectsRoot,
@@ -1176,6 +1203,8 @@ export class EditorialStore {
       ingest,
       new BoundedManuscriptStore(authority),
       new BoundedManuscriptStore(journal),
+      recoveryObjects,
+      lifetimeId,
       control,
     );
     store.#transaction(authority, () => {
@@ -1184,7 +1213,17 @@ export class EditorialStore {
     await store.#resumeAbandonmentCleanupIntents();
     store.#normalizeMigratedReviewedTargets();
     await store.#sweepUnreferencedContentObjects();
+    await recoveryObjects.cleanup((relativeKey) =>
+      store.#boundedCall(() => store.#boundedAuthority.isRecoveryObjectReferenced(relativeKey)));
+    store.#boundedCall(() => store.#boundedAuthority.startServiceLifetime(lifetimeId, new Date().toISOString()));
     return store;
+  }
+
+  markCleanShutdown(): void {
+    this.#assertAvailable();
+    requireStore(!this.#cleanShutdownMarked, 'LIFETIME_STATE_CHANGED', '本地服务生命周期无法重复结束。');
+    this.#boundedCall(() => this.#boundedAuthority.markServiceLifetimeClean(this.#lifetimeId, new Date().toISOString()));
+    this.#cleanShutdownMarked = true;
   }
 
   close(): void {
@@ -1327,6 +1366,139 @@ export class EditorialStore {
       state: 'draft-recovery',
       recovery: await this.#recoveryProjection(asString(drafts[0]!.draft_id), 'ordinary-draft'),
     };
+  }
+
+  async getStartup(): Promise<StartupProjection> {
+    this.#assertAvailable();
+    const attentionId = this.#boundedCall(() => this.#boundedAuthority.firstRecoveryAttentionId());
+    if (attentionId !== null) {
+      return { state: 'manuscript-recovery', recovery: await this.getRecoveryComparison(attentionId) };
+    }
+    const startup = await this.getImportStartup();
+    if (startup.state !== 'none') return { state: 'import', startup };
+    return { state: 'prior-work', priorWork: this.listPriorWork() };
+  }
+
+  async #preferredRecoverySnapshot(attentionId: string): Promise<{
+    verified: VerifiedRecoverySnapshot;
+    record: RecoverySnapshotRecord | null;
+    comparisonSnapshotId: string | null;
+  }> {
+    let cursor: RecoverySnapshotCursor | null = null;
+    let newestUnavailable: Extract<VerifiedRecoverySnapshot, { state: 'unavailable' }> | null = null;
+    let newestSnapshotId: string | null = null;
+    while (true) {
+      const record = this.#boundedCall(() =>
+        this.#boundedAuthority.nextRecoverySnapshotForAttention(attentionId, cursor));
+      if (record === null) {
+        return {
+          verified: newestUnavailable ?? { state: 'none' },
+          record: null,
+          comparisonSnapshotId: newestSnapshotId,
+        };
+      }
+      newestSnapshotId ??= record.snapshotId;
+      const verified = await this.#recoveryObjects.verify(record);
+      if (verified.state === 'eligible') {
+        return { verified, record, comparisonSnapshotId: record.snapshotId };
+      }
+      if (verified.state === 'unavailable') {
+        newestUnavailable ??= verified;
+      }
+      cursor = { createdAt: record.createdAt, snapshotId: record.snapshotId };
+    }
+  }
+
+  async getRecoveryComparison(attentionId: string): Promise<RecoveryComparisonProjection> {
+    this.#assertAvailable();
+    const { verified } = await this.#preferredRecoverySnapshot(attentionId);
+    return this.#boundedCall(() => this.#boundedAuthority.getRecoveryComparison(attentionId, verified));
+  }
+
+  async viewRecoveryCandidate(
+    attentionId: string,
+    expectedAttentionVersion: number,
+    selection: RecoverySelection,
+    target: RecoveryWindowTarget,
+  ): Promise<RecoveryWindowProjection> {
+    this.#assertAvailable();
+    if (selection.kind !== 'snapshot') {
+      const projection = this.#boundedCall(() =>
+        this.#boundedAuthority.getRecoveryDatabaseWindow(attentionId, selection, target));
+      this.#boundedCall(() =>
+        this.#boundedAuthority.recordRecoveryView(attentionId, expectedAttentionVersion, selection));
+      return projection;
+    }
+    const record = this.#boundedCall(() =>
+      this.#boundedAuthority.recoverySnapshotByIdForAttention(attentionId, selection.snapshotId));
+    let window: Awaited<ReturnType<RecoveryObjectStore['readWindow']>>;
+    try {
+      // readWindow performs the complete digest-bound scan while retaining only the requested bounded window.
+      window = await this.#recoveryObjects.readWindow(record, target);
+    } catch {
+      throw new StoreError('RECOVERY_SNAPSHOT_INELIGIBLE', '恢复快照未通过独立校验。');
+    }
+    this.#boundedCall(() =>
+      this.#boundedAuthority.recordRecoveryView(attentionId, expectedAttentionVersion, selection));
+    return {
+      attentionId, selection, title: '已验证恢复快照', revisionId: record.revisionId,
+      revisionLabel: record.revisionLabel, readonly: true, blocks: window.blocks, nextTarget: window.nextTarget,
+    };
+  }
+
+  async deferRecovery(attentionId: string, expectedAttentionVersion: number): Promise<RecoveryDeferralProjection> {
+    this.#assertAvailable();
+    const deferred = this.#boundedCall(() =>
+      this.#boundedAuthority.deferRecovery(attentionId, expectedAttentionVersion));
+    const startup = await this.getImportStartup();
+    return {
+      ...deferred,
+      next: startup.state === 'none'
+        ? { state: 'prior-work', priorWork: this.listPriorWork() }
+        : { state: 'import', startup },
+    };
+  }
+
+  async restoreRecovery(
+    restorationId: string,
+    attentionId: string,
+    expectedAttentionVersion: number,
+    selection: RecoverySelection,
+  ): Promise<RecoveryRestorationProjection> {
+    this.#assertAvailable();
+    const existing = this.#boundedCall(() => this.#boundedAuthority.existingRecoveryRestoration(
+      restorationId, attentionId, expectedAttentionVersion, selection,
+    ));
+    if (existing !== null) return existing;
+    let snapshotStageStarted = false;
+    try {
+      let comparisonSnapshotId: string | null;
+      if (selection.kind === 'snapshot') {
+        const record = this.#boundedCall(() =>
+          this.#boundedAuthority.recoverySnapshotByIdForAttention(attentionId, selection.snapshotId));
+        comparisonSnapshotId = record.snapshotId;
+        this.#boundedCall(() =>
+          this.#boundedAuthority.beginRecoverySnapshotStage(attentionId, expectedAttentionVersion, record.snapshotId));
+        snapshotStageStarted = true;
+        try {
+          // forEachBatch verifies the complete object and leaves only bounded batches in process memory.
+          await this.#recoveryObjects.forEachBatch(record, (blocks) => {
+            this.#boundedCall(() => this.#boundedAuthority.stageRecoverySnapshotBlocks(attentionId, blocks));
+          });
+        } catch {
+          throw new StoreError('RECOVERY_SNAPSHOT_INELIGIBLE', '恢复快照未通过独立校验。');
+        }
+      } else {
+        ({ comparisonSnapshotId } = await this.#preferredRecoverySnapshot(attentionId));
+      }
+      return this.#boundedCall(() => this.#boundedAuthority.restoreRecovery(
+        restorationId, attentionId, expectedAttentionVersion, selection, comparisonSnapshotId,
+      ));
+    } finally {
+      if (snapshotStageStarted) {
+        this.#boundedCall(() => this.#boundedAuthority.clearRecoveryStage(attentionId));
+      }
+    }
   }
 
   async continueImportDraft(draftId: string, expectedDraftVersion: number): Promise<ContinueImportProjection> {
@@ -2193,7 +2365,7 @@ export class EditorialStore {
   }
 
   flushJournalEdit(input: JournalEditInput): JournalAcknowledgement {
-    return this.#boundedCall(() => this.#bounded.flushJournalEdit(input));
+    return this.#boundedCall(() => this.#bounded.flushJournalEdit(input, this.#lifetimeId));
   }
 
   listPriorWork(): ReadonlyArray<PriorWorkItemProjection> {
@@ -2262,7 +2434,7 @@ export class EditorialStore {
   }
 
   commitReplacement(previewId: string): ReplacementCommitProjection {
-    return this.#boundedCall(() => this.#bounded.commitReplacement(previewId));
+    return this.#boundedCall(() => this.#bounded.commitReplacement(previewId, this.#lifetimeId));
   }
 
   cancelReplacement(previewId: string): boolean {
@@ -2275,22 +2447,42 @@ export class EditorialStore {
     return { previewId, state: 'cancelled' };
   }
 
-  saveMilestone(
+  async saveMilestone(
     manuscriptId: string,
     branchId: string,
     label: string,
     purpose: string,
     note: string,
-  ): MilestoneProjection {
-    return this.#boundedCall(() => this.#bounded.saveMilestone(manuscriptId, branchId, label, purpose, note));
+  ): Promise<MilestoneProjection> {
+    this.#assertAvailable();
+    let result: MilestoneProjection | undefined;
+    await this.#withRecoveryObjectLifecycle(async () => {
+      const plan = this.#boundedCall(() =>
+        this.#boundedAuthority.prepareMilestoneRecoverySnapshot(manuscriptId, branchId, label, purpose, note));
+      const object = await this.#recoveryObjects.form(
+        plan,
+        (afterPosition) => this.#boundedCall(() =>
+          this.#boundedAuthority.getRecoverySnapshotBlocks(plan, afterPosition)),
+      );
+      try {
+        result = this.#boundedCall(() => this.#boundedAuthority.saveMilestone(plan, object));
+      } catch (error) {
+        const referenced = this.#boundedCall(() =>
+          this.#boundedAuthority.isRecoveryObjectReferenced(object.objectRelativeKey));
+        await this.#recoveryObjects.removeUnreferenced(object, referenced);
+        throw error;
+      }
+    });
+    requireStore(result !== undefined, 'MILESTONE_INVALID', '里程碑与恢复快照未产生结果。');
+    return result;
   }
 
   undoManuscript(manuscriptId: string, branchId: string, expectedWorkingDigest: string): DurableHistoryProjection {
-    return this.#boundedCall(() => this.#bounded.undo(manuscriptId, branchId, expectedWorkingDigest));
+    return this.#boundedCall(() => this.#bounded.undo(manuscriptId, branchId, expectedWorkingDigest, this.#lifetimeId));
   }
 
   redoManuscript(manuscriptId: string, branchId: string, expectedWorkingDigest: string): DurableHistoryProjection {
-    return this.#boundedCall(() => this.#bounded.redo(manuscriptId, branchId, expectedWorkingDigest));
+    return this.#boundedCall(() => this.#bounded.redo(manuscriptId, branchId, expectedWorkingDigest, this.#lifetimeId));
   }
 
   #loadCommitAttempt(attemptId: string): CommitAttempt {
@@ -3724,6 +3916,21 @@ export class EditorialStore {
     const previous = this.#contentObjectLifecycleTail;
     let release = (): void => {};
     this.#contentObjectLifecycleTail = new Promise<void>((resolve) => {
+      release = () => resolve();
+    });
+    await previous;
+    try {
+      this.#assertAvailable();
+      return await operation();
+    } finally {
+      release();
+    }
+  }
+
+  async #withRecoveryObjectLifecycle<T>(operation: () => Promise<T>): Promise<T> {
+    const previous = this.#recoveryObjectLifecycleTail;
+    let release = (): void => {};
+    this.#recoveryObjectLifecycleTail = new Promise<void>((resolve) => {
       release = () => resolve();
     });
     await previous;

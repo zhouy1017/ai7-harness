@@ -8,10 +8,14 @@ import type {
   OutlineProjection,
   PriorWorkItemProjection,
   ReplacementPreviewProjection,
+  RecoveryComparisonProjection,
+  RecoverySelection,
+  RecoveryWindowProjection,
   ReviewBeforeImportProjection,
   SearchResultsProjection,
   ServiceJobProjection,
   StagedImportProjection,
+  StartupProjection,
 } from '../shared/protocol.js';
 import { MAX_REPLACEMENT_EXCLUSIONS } from '../shared/protocol.js';
 import { mountBoundedEditor, type BoundedEditor, type EditorContinuity } from './editor.js';
@@ -28,6 +32,12 @@ if (!window.ai7) throw new Error('AI7_RENDERER_BOOTSTRAP_INVALID');
 
 let editor: BoundedEditor | undefined;
 let authorityInterrupted = false;
+
+interface RecoveryReturnContext {
+  attentionId: string;
+  attentionVersion: number;
+  bookTitle: string;
+}
 
 function recoveryTone(access: ImportDraftRecoveryProjection['originalFileAccess']['state']): string {
   return access === 'available-exact' ? 'success-note' : 'attention-note';
@@ -85,6 +95,25 @@ function replaceScreen(state: string, content: HTMLElement): void {
 
 function panel(): HTMLElement {
   return element('section', 'panel');
+}
+
+function appendRecoveryReturnAction(content: HTMLElement, context: RecoveryReturnContext | undefined): void {
+  if (!context) return;
+  const actions = element('div', 'button-row recovery-return-actions');
+  const returnButton = button(`返回 ${context.bookTitle} 的恢复待确认`, 'secondary', async () => {
+    returnButton.disabled = true;
+    setStatus('正在返回稿件恢复比较…', 'busy');
+    try {
+      renderManuscriptRecovery(await window.ai7.getRecoveryComparison({ attentionId: context.attentionId }));
+    } catch (error) {
+      returnButton.disabled = false;
+      setStatus(error instanceof Error ? error.message : '无法返回恢复比较。', 'error');
+    }
+  });
+  returnButton.dataset['recoveryReturn'] = context.attentionId;
+  returnButton.dataset['recoveryReturnVersion'] = String(context.attentionVersion);
+  actions.append(returnButton);
+  content.append(actions);
 }
 
 function sourceCard(staged: StagedImportProjection): HTMLElement {
@@ -236,43 +265,284 @@ async function acknowledgeCompletionAfterPaint(result: ImportCommitProjection): 
   }
 }
 
-async function renderStartupProjection(startup: ImportStartupProjection): Promise<void> {
+async function renderStartupProjection(
+  startup: ImportStartupProjection,
+  recoveryReturn?: RecoveryReturnContext,
+): Promise<void> {
   if (startup.state === 'none') {
     try {
-      renderLanding(await window.ai7.listPriorWork());
+      renderLanding(await window.ai7.listPriorWork(), recoveryReturn);
     } catch {
-      renderLanding();
+      renderLanding([], recoveryReturn);
     }
     return;
   }
   if (startup.state === 'committed-recovered') {
     setStatus('已核对中断前的原子提交结果', 'success');
-    renderImported(startup.result);
+    renderImported(startup.result, recoveryReturn);
     return;
   }
-  renderImportRecovery(startup.recovery);
+  renderImportRecovery(startup.recovery, recoveryReturn);
 }
 
-function renderContinuation(continuation: ContinueImportProjection): void {
+async function renderApplicationStartup(startup: StartupProjection): Promise<void> {
+  if (startup.state === 'manuscript-recovery') {
+    renderManuscriptRecovery(startup.recovery);
+  } else if (startup.state === 'import') {
+    await renderStartupProjection(startup.startup);
+  } else {
+    renderLanding(startup.priorWork);
+  }
+}
+
+function recoveryCandidateCard(
+  candidate: RecoveryComparisonProjection['journal'] | RecoveryComparisonProjection['checkpoint'] |
+    Extract<RecoveryComparisonProjection['snapshot'], { state: 'eligible' }>['candidate'],
+  onSelect: (selection: RecoverySelection, candidate: RecoveryComparisonProjection['journal'] |
+    RecoveryComparisonProjection['checkpoint'] |
+    Extract<RecoveryComparisonProjection['snapshot'], { state: 'eligible' }>['candidate']) => void,
+): HTMLElement {
+  const label = element('label', 'recovery-candidate choice');
+  label.dataset['recoveryCandidate'] = candidate.kind;
+  const radio = element('input');
+  radio.type = 'radio';
+  radio.name = 'recovery-source';
+  radio.value = candidate.candidateId;
+  radio.checked = false;
+  radio.setAttribute('aria-label', candidate.title);
+  const copy = element('span');
+  copy.append(element('strong', undefined, candidate.title));
+  const details = element('dl', 'recovery-candidate-details');
+  const revisionIdentity = element('dd', 'technical-identity', candidate.revisionId);
+  revisionIdentity.dataset['candidateRevisionId'] = candidate.revisionId;
+  const revisionDigest = element('dd', 'technical-identity', candidate.revisionDigest);
+  revisionDigest.dataset['candidateRevisionDigest'] = candidate.revisionDigest;
+  details.append(
+    element('dt', undefined, '修订版'), element('dd', undefined, candidate.revisionLabel),
+    element('dt', undefined, '修订版身份'), revisionIdentity,
+    element('dt', undefined, '修订摘要'), revisionDigest,
+    element('dt', undefined, '持久边界'), element('dd', undefined, `修订日志序号 ${candidate.journalSequence} · ${candidate.durableAt}`),
+    element('dt', undefined, '覆盖范围'), element('dd', undefined, candidate.coveredChangeExtent),
+    element('dt', undefined, '校验'), element('dd', undefined, candidate.verification),
+    element('dt', undefined, '限制'), element('dd', undefined, candidate.limitation),
+  );
+  if (candidate.snapshotId !== null) {
+    const snapshotIdentity = element('dd', 'technical-identity', candidate.snapshotId);
+    snapshotIdentity.dataset['snapshotId'] = candidate.snapshotId;
+    details.append(element('dt', undefined, '快照身份'), snapshotIdentity);
+  }
+  copy.append(details);
+  radio.addEventListener('change', () => {
+    if (!radio.checked) return;
+    onSelect(candidate.kind === 'snapshot'
+      ? { kind: 'snapshot', snapshotId: candidate.snapshotId }
+      : { kind: candidate.kind }, candidate);
+  });
+  label.append(radio, copy);
+  return label;
+}
+
+function focusRecoveryHeading(content: HTMLElement): void {
+  const heading = content.querySelector<HTMLElement>('h2');
+  if (!heading) return;
+  heading.tabIndex = -1;
+  requestAnimationFrame(() => heading.focus());
+}
+
+function renderManuscriptRecovery(recovery: RecoveryComparisonProjection): void {
+  let selection: RecoverySelection | undefined;
+  const content = panel();
+  content.classList.add('manuscript-recovery-panel');
+  content.append(
+    element('p', 'section-label', `稿件恢复优先 · ${recovery.unresolvedCount} 项待确认`),
+    element('h2', undefined, '先确认中断后的稿件状态'),
+    element('p', 'lede', recovery.snapshot.state === 'eligible'
+      ? '系统不会替你选择恢复来源。三个已校验证据保持并列，恢复只会形成新的后代修订版。'
+      : '系统不会替你选择恢复来源。当前两个可选证据保持并列；快照状态另行披露，恢复只会形成新的后代修订版。'),
+  );
+  const identity = element('section', 'source-card recovery-identity');
+  const identityDetails = element('dl');
+  identityDetails.append(
+    element('dt', undefined, '图书'), element('dd', undefined, `${recovery.bookTitle} · ${recovery.bookId}`),
+    element('dt', undefined, '稿件'), element('dd', 'technical-identity', recovery.manuscriptId),
+    element('dt', undefined, '分支'), element('dd', undefined, `${recovery.branchName} · ${recovery.branchId}`),
+    element('dt', undefined, '最后持久写入边界'),
+    element('dd', undefined, `修订日志序号 ${recovery.lastDurableEditBoundary.journalSequence} · ${recovery.lastDurableEditBoundary.durableAt}`),
+    element('dt', undefined, '覆盖范围'), element('dd', undefined, recovery.lastDurableEditBoundary.coveredChangeExtent),
+  );
+  identity.append(element('h3', undefined, '精确受影响稿件'), identityDetails,
+    element('p', 'uncertain-support', recovery.lastDurableEditBoundary.uncertainty));
+  content.append(identity);
+
+  const choices = element('fieldset', 'recovery-comparison');
+  choices.setAttribute('role', 'radiogroup');
+  choices.setAttribute('aria-label', '恢复来源比较');
+  choices.append(element('legend', undefined, '选择一个证据来源（默认不选择）'));
+  const cards = element('div', 'recovery-candidate-grid');
+  cards.dataset['eligibleCandidateCount'] = recovery.snapshot.state === 'eligible' ? '3' : '2';
+  const consequence = element('p', 'recovery-selection-consequence');
+  consequence.hidden = true;
+  consequence.setAttribute('aria-live', 'polite');
+  const view = button('仅查看', 'secondary', () => {
+    if (selection) void openRecoveryViewer(recovery, selection, { kind: 'start' });
+  });
+  const restore = button('恢复为新版本', 'primary', async () => {
+    if (!selection) return;
+    view.disabled = true;
+    restore.disabled = true;
+    defer.disabled = true;
+    setStatus('正在原子创建恢复后代修订版…', 'busy');
+    try {
+      const restored = await window.ai7.restoreRecovery({
+        attentionId: recovery.attentionId,
+        expectedAttentionVersion: recovery.attentionVersion,
+        selection,
+      });
+      setStatus(`已恢复为新版本 ${restored.descendantRevisionLabel}`, 'success');
+      renderEditorWindow(restored.window, recovery.bookTitle);
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : '恢复未完成。', 'error');
+      view.disabled = false;
+      restore.disabled = false;
+      defer.disabled = false;
+    }
+  });
+  const selected = (
+    next: RecoverySelection,
+    candidate: RecoveryComparisonProjection['journal'] | RecoveryComparisonProjection['checkpoint'] |
+      Extract<RecoveryComparisonProjection['snapshot'], { state: 'eligible' }>['candidate'],
+  ): void => {
+    selection = next;
+    consequence.textContent = `将以“${candidate.title}”形成当前分支的新后代修订版；来源修订身份 ${candidate.revisionId}，摘要 ${candidate.revisionDigest}。既有历史与稿件固定点保持原位，且不会自动创建里程碑。`;
+    consequence.dataset['selectedCandidate'] = candidate.kind;
+    consequence.hidden = false;
+    view.disabled = false;
+    restore.disabled = false;
+  };
+  cards.append(recoveryCandidateCard(recovery.journal, selected), recoveryCandidateCard(recovery.checkpoint, selected));
+  if (recovery.snapshot.state === 'eligible') {
+    cards.append(recoveryCandidateCard(recovery.snapshot.candidate, selected));
+  }
+  choices.append(cards);
+  content.append(choices);
+  if (recovery.snapshot.state !== 'eligible') {
+    const unavailable = element('section', 'recovery-snapshot-disclosure');
+    unavailable.dataset['snapshotState'] = recovery.snapshot.state;
+    unavailable.append(
+      element('strong', undefined, '独立恢复快照不可作为本次选择'),
+      element('p', undefined, recovery.snapshot.state === 'none' ? recovery.snapshot.limitation : recovery.snapshot.verification),
+      element('p', 'field-note', recovery.snapshot.limitation),
+    );
+    content.append(unavailable);
+  }
+  content.append(consequence);
+  view.disabled = true;
+  restore.disabled = true;
+  const defer = button('稍后处理', 'quiet', async () => {
+    view.disabled = true;
+    restore.disabled = true;
+    defer.disabled = true;
+    setStatus('正在保留恢复待确认状态…', 'busy');
+    try {
+      const deferred = await window.ai7.deferRecovery({
+        attentionId: recovery.attentionId,
+        expectedAttentionVersion: recovery.attentionVersion,
+      });
+      setStatus(deferred.completionLabel, 'success');
+      const recoveryReturn = {
+        attentionId: deferred.attentionId,
+        attentionVersion: deferred.attentionVersion,
+        bookTitle: recovery.bookTitle,
+      } satisfies RecoveryReturnContext;
+      if (deferred.next.state === 'import') await renderStartupProjection(deferred.next.startup, recoveryReturn);
+      else renderLanding(deferred.next.priorWork, recoveryReturn);
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : '恢复待确认状态未能保留。', 'error');
+      view.disabled = selection === undefined;
+      restore.disabled = selection === undefined;
+      defer.disabled = false;
+    }
+  });
+  const actions = element('div', 'button-row recovery-decision-actions');
+  actions.append(view, defer, restore);
+  content.append(actions,
+    element('p', 'field-note', '恢复不会改写、删除或移动既有修订版、修订日志、里程碑、恢复快照或稿件固定点。'));
+  replaceScreen('manuscript-recovery', content);
+  focusRecoveryHeading(content);
+  setStatus(recovery.status === 'deferred' ? '恢复待确认状态仍然有效' : '等待你比较并明确选择恢复来源');
+}
+
+async function openRecoveryViewer(
+  recovery: RecoveryComparisonProjection,
+  selection: RecoverySelection,
+  target: { kind: 'start' } | { kind: 'after'; position: number },
+): Promise<void> {
+  setStatus('正在读取有界只读恢复窗口…', 'busy');
+  try {
+    const projection = await window.ai7.viewRecoveryCandidate({
+      attentionId: recovery.attentionId, expectedAttentionVersion: recovery.attentionVersion,
+      selection, target,
+    });
+    renderRecoveryViewer(recovery, projection);
+  } catch (error) {
+    setStatus(error instanceof Error ? error.message : '无法读取恢复证据。', 'error');
+  }
+}
+
+function renderRecoveryViewer(recovery: RecoveryComparisonProjection, projection: RecoveryWindowProjection): void {
+  const content = panel();
+  content.classList.add('recovery-viewer');
+  content.append(
+    element('p', 'section-label', '仅查看 · 永久只读'),
+    element('h2', undefined, projection.title),
+    element('p', 'lede', `${projection.revisionLabel} · 此窗口不装载编辑器，也不提供任何写入操作。`),
+  );
+  const blocks = element('article', 'recovery-readonly-blocks');
+  blocks.setAttribute('aria-label', '恢复证据只读内容窗口');
+  for (const block of projection.blocks) {
+    const node = element(block.kind === 'paragraph' ? 'p' : block.kind === 'title' ? 'h1' : 'h2', undefined, block.text);
+    node.dataset['blockId'] = block.blockId;
+    blocks.append(node);
+  }
+  content.append(blocks);
+  const actions = element('div', 'button-row');
+  actions.append(button('返回比较', 'secondary', () => renderManuscriptRecovery(recovery)));
+  if (projection.nextTarget !== null) {
+    actions.append(button('查看下一窗口', 'quiet', () =>
+      openRecoveryViewer(recovery, projection.selection, projection.nextTarget!)));
+  }
+  content.append(actions);
+  replaceScreen('recovery-viewer', content);
+  focusRecoveryHeading(content);
+  setStatus('正在仅查看已选择的恢复证据；普通编辑保持关闭');
+}
+
+function renderContinuation(
+  continuation: ContinueImportProjection,
+  recoveryReturn?: RecoveryReturnContext,
+): void {
   if (continuation.state === 'target-review-required') {
     setStatus(continuation.reviewInvalidated ? '旧复核已失效，需要重新确认' : '暂存快照已重新校验', 'success');
-    renderTargetChoice(continuation.staged, null, continuation.notice);
+    renderTargetChoice(continuation.staged, null, continuation.notice, recoveryReturn);
     return;
   }
   if (continuation.state === 'review-ready') {
     setStatus('暂存快照与导入前复核已重新校验', 'success');
-    renderReview(continuation.review, continuation.notice);
+    renderReview(continuation.review, continuation.notice, recoveryReturn);
     return;
   }
   if (continuation.state === 'committed-recovered') {
     setStatus('已核对中断前的原子提交结果', 'success');
-    renderImported(continuation.result);
+    renderImported(continuation.result, recoveryReturn);
     return;
   }
-  renderImportRecovery(continuation.recovery);
+  renderImportRecovery(continuation.recovery, recoveryReturn);
 }
 
-async function abandonAndContinue(recovery: Pick<ImportDraftRecoveryProjection, 'draftId' | 'draftVersion'>): Promise<void> {
+async function abandonAndContinue(
+  recovery: Pick<ImportDraftRecoveryProjection, 'draftId' | 'draftVersion'>,
+  recoveryReturn?: RecoveryReturnContext,
+): Promise<void> {
   setStatus('正在核对提交证据并放弃非权威草稿…', 'busy');
   try {
     const startup = await window.ai7.abandonImportDraft({
@@ -280,13 +550,16 @@ async function abandonAndContinue(recovery: Pick<ImportDraftRecoveryProjection, 
       expectedDraftVersion: recovery.draftVersion,
     });
     setStatus(startup.state === 'none' ? '已放弃导入草稿并安全清理暂存引用' : '已核对导入状态', 'success');
-    await renderStartupProjection(startup);
+    await renderStartupProjection(startup, recoveryReturn);
   } catch (error) {
     renderError(error, () => void initializeStartup());
   }
 }
 
-function renderImportRecovery(recovery: ImportDraftRecoveryProjection): void {
+function renderImportRecovery(
+  recovery: ImportDraftRecoveryProjection,
+  recoveryReturn?: RecoveryReturnContext,
+): void {
   const uncertain = recovery.kind === 'outcome-uncertain';
   const cleanup = recovery.kind === 'abandonment-cleanup';
   const content = panel();
@@ -356,8 +629,9 @@ function renderImportRecovery(recovery: ImportDraftRecoveryProjection): void {
       element('p', 'field-note', '此状态不包含暂存正文或原始文件路径。请保留 Agent Data Root；重试会继续同一个持久清理意图，不会创建第二次放弃或导入。'),
     );
     const actions = element('div', 'button-row recovery-actions');
-    actions.append(button('重试放弃清理', 'primary', () => abandonAndContinue(recovery)));
+    actions.append(button('重试放弃清理', 'primary', () => abandonAndContinue(recovery, recoveryReturn)));
     content.append(support, actions);
+    appendRecoveryReturnAction(content, recoveryReturn);
     replaceScreen('import-cleanup', content);
     setStatus('放弃清理尚未完成；已阻止继续导入和新权威引用', 'error');
     return;
@@ -374,6 +648,7 @@ function renderImportRecovery(recovery: ImportDraftRecoveryProjection): void {
       element('p', 'field-note', '这些信息不包含暂存正文、数据库内容、截图、跟踪或网络请求。请保留 Agent Data Root，等待本地核对；不要重复导入或手动删除暂存文件。'),
     );
     content.append(support);
+    appendRecoveryReturnAction(content, recoveryReturn);
     replaceScreen('import-uncertain', content);
     setStatus('导入提交结果待确认；已阻止重试、放弃和清理', 'error');
     return;
@@ -381,7 +656,7 @@ function renderImportRecovery(recovery: ImportDraftRecoveryProjection): void {
 
   const actions = element('div', 'button-row recovery-actions');
   if (recovery.snapshotState === 'complete') {
-    const abandonButton = button('放弃', 'secondary', () => abandonAndContinue(recovery));
+    const abandonButton = button('放弃', 'secondary', () => abandonAndContinue(recovery, recoveryReturn));
     const continueButton = button('继续导入', 'primary', async () => {
       continueButton.disabled = true;
       abandonButton.disabled = true;
@@ -392,6 +667,7 @@ function renderImportRecovery(recovery: ImportDraftRecoveryProjection): void {
             draftId: recovery.draftId,
             expectedDraftVersion: recovery.draftVersion,
           }),
+          recoveryReturn,
         );
       } catch (error) {
         renderError(error, () => void initializeStartup());
@@ -399,7 +675,7 @@ function renderImportRecovery(recovery: ImportDraftRecoveryProjection): void {
     });
     actions.append(continueButton, abandonButton);
   } else {
-    const abandonButton = button('放弃', 'secondary', () => abandonAndContinue(recovery));
+    const abandonButton = button('放弃', 'secondary', () => abandonAndContinue(recovery, recoveryReturn));
     const reselect = button('重新选择原文件', 'primary', async () => {
       reselect.disabled = true;
       abandonButton.disabled = true;
@@ -410,11 +686,11 @@ function renderImportRecovery(recovery: ImportDraftRecoveryProjection): void {
           expectedDraftVersion: recovery.draftVersion,
         });
         if (result.status === 'cancelled') {
-          renderImportRecovery(recovery);
+          renderImportRecovery(recovery, recoveryReturn);
           setStatus('已取消文件重选');
           return;
         }
-        renderContinuation(result.continuation);
+        renderContinuation(result.continuation, recoveryReturn);
       } catch (error) {
         renderError(error, () => void initializeStartup());
       }
@@ -422,11 +698,25 @@ function renderImportRecovery(recovery: ImportDraftRecoveryProjection): void {
     actions.append(reselect, abandonButton);
   }
   content.append(actions);
+  appendRecoveryReturnAction(content, recoveryReturn);
   replaceScreen('import-recovery', content);
   setStatus('等待你选择继续导入或放弃');
 }
 
-function renderLanding(priorWork: ReadonlyArray<PriorWorkItemProjection> = []): void {
+function renderLanding(
+  priorWork: ReadonlyArray<PriorWorkItemProjection> = [],
+  recoveryReturn?: RecoveryReturnContext,
+): void {
+  const recoveryWork = priorWork.find((item) => item.recoveryAttention !== null);
+  const recoveryAttention = recoveryWork?.recoveryAttention;
+  const inferredRecoveryReturn = recoveryWork && recoveryAttention
+    ? {
+        attentionId: recoveryAttention.attentionId,
+        attentionVersion: recoveryAttention.attentionVersion,
+        bookTitle: recoveryWork.bookTitle,
+      } satisfies RecoveryReturnContext
+    : undefined;
+  const activeRecoveryReturn = recoveryReturn ?? inferredRecoveryReturn;
   const content = panel();
   content.classList.add('hero');
   const copy = element('div');
@@ -450,9 +740,9 @@ function renderLanding(priorWork: ReadonlyArray<PriorWorkItemProjection> = []): 
         return;
       }
       setStatus('DOCX 已完成本地暂存', 'success');
-      renderTargetChoice(result.staged, null);
+      renderTargetChoice(result.staged, null, undefined, activeRecoveryReturn);
     } catch (error) {
-      renderError(error, renderLanding);
+      renderError(error, () => renderLanding(priorWork, activeRecoveryReturn));
     }
   });
   copy.append(steps, importButton);
@@ -463,16 +753,24 @@ function renderLanding(priorWork: ReadonlyArray<PriorWorkItemProjection> = []): 
     recent.append(element('p', 'section-label', '继续已有工作'), element('h3', undefined, '最近稿件'));
     const list = element('div', 'recent-work-list');
     for (const item of priorWork) {
-      const open = button(`${item.bookTitle} · ${item.revisionLabel}`, 'secondary', async () => {
+      const open = button(
+        item.recoveryAttention
+          ? `${item.bookTitle} · 恢复待确认状态`
+          : `${item.bookTitle} · ${item.revisionLabel}`,
+        'secondary', async () => {
         open.disabled = true;
-        setStatus('正在重新打开本地稿件…', 'busy');
+        setStatus(item.recoveryAttention ? '正在打开稿件恢复比较…' : '正在重新打开本地稿件…', 'busy');
         try {
+          if (item.recoveryAttention) {
+            renderManuscriptRecovery(await window.ai7.getRecoveryComparison({ attentionId: item.recoveryAttention.attentionId }));
+            return;
+          }
           const windowProjection = await window.ai7.getManuscriptWindowAt({
             manuscriptId: item.manuscriptId,
             branchId: item.branchId,
             target: { kind: 'start' },
           });
-          renderEditorWindow(windowProjection, item.bookTitle);
+          renderEditorWindow(windowProjection, item.bookTitle, activeRecoveryReturn?.attentionId);
         } catch (error) {
           open.disabled = false;
           setStatus(error instanceof Error ? error.message : '无法重新打开稿件。', 'error');
@@ -482,6 +780,7 @@ function renderLanding(priorWork: ReadonlyArray<PriorWorkItemProjection> = []): 
       const row = element('article', 'recent-work-item');
       row.append(
         open,
+        ...(item.recoveryAttention ? [element('p', 'attention-note', '该分支已稍后处理，普通编辑保持只读；请返回恢复比较作出决定。')] : []),
         element(
           'p',
           'field-note',
@@ -495,6 +794,7 @@ function renderLanding(priorWork: ReadonlyArray<PriorWorkItemProjection> = []): 
     recent.append(list);
     content.append(recent);
   }
+  appendRecoveryReturnAction(content, activeRecoveryReturn);
   replaceScreen('landing', content);
   setStatus('准备就绪');
 }
@@ -503,6 +803,7 @@ function renderTargetChoice(
   staged: StagedImportProjection,
   selectedChoiceId: StagedImportProjection['targetChoices'][number]['id'] | null,
   recoveryNotice?: string,
+  recoveryReturn?: RecoveryReturnContext,
 ): void {
   const content = panel();
   content.append(
@@ -540,10 +841,11 @@ function renderTargetChoice(
   choice.append(radio, copy);
   choices.append(legend, choice);
   content.append(choices);
-  radio.addEventListener('change', () => renderTargetChoice(staged, targetChoice.id, recoveryNotice));
+  radio.addEventListener('change', () =>
+    renderTargetChoice(staged, targetChoice.id, recoveryNotice, recoveryReturn));
 
   const cancelImport = button('取消导入', 'quiet', () =>
-    abandonAndContinue({ draftId: staged.draftId, draftVersion: staged.draftVersion }),
+    abandonAndContinue({ draftId: staged.draftId, draftVersion: staged.draftVersion }, recoveryReturn),
   );
 
   if (selectedChoiceId !== null) {
@@ -576,9 +878,9 @@ function renderTargetChoice(
           acceptDegradation: false,
         });
         setStatus('导入前复核已准备', 'success');
-        renderReview(review);
+        renderReview(review, recoveryNotice, recoveryReturn);
       } catch (error) {
-        renderError(error, renderLanding);
+        renderError(error, () => renderLanding([], recoveryReturn));
       }
     });
     form.append(label, title, note, fidelityTable(staged.fidelity), element('div', 'button-row'));
@@ -591,6 +893,7 @@ function renderTargetChoice(
     content.append(actions);
   }
 
+  appendRecoveryReturnAction(content, recoveryReturn);
   replaceScreen(selectedChoiceId === null ? 'target' : 'title', content);
 }
 
@@ -614,7 +917,11 @@ function degradationItems(review: ReviewBeforeImportProjection): HTMLElement {
   return list;
 }
 
-function renderReview(review: ReviewBeforeImportProjection, recoveryNotice?: string): void {
+function renderReview(
+  review: ReviewBeforeImportProjection,
+  recoveryNotice?: string,
+  recoveryReturn?: RecoveryReturnContext,
+): void {
   const content = panel();
   content.append(
     element('p', 'section-label', '步骤 2 / 3 · 导入前复核'),
@@ -686,9 +993,9 @@ function renderReview(review: ReviewBeforeImportProjection, recoveryNotice?: str
             acceptDegradation: true,
           });
           setStatus('已接受本次导入的完整降级集合', 'success');
-          renderReview(acceptedReview, recoveryNotice);
+          renderReview(acceptedReview, recoveryNotice, recoveryReturn);
         } catch (error) {
-          renderError(error, renderLanding);
+          renderError(error, () => renderLanding([], recoveryReturn));
         }
       });
     }
@@ -750,7 +1057,7 @@ function renderReview(review: ReviewBeforeImportProjection, recoveryNotice?: str
           commitAttemptId: review.commitAttemptId,
         });
         setStatus(result.completionLabel, 'success');
-        renderImported(result);
+        renderImported(result, recoveryReturn);
       } catch (error) {
         if (
           hasErrorCode(error, 'IMPORT_COMMIT_OUTCOME_UNCERTAIN') ||
@@ -769,7 +1076,7 @@ function renderReview(review: ReviewBeforeImportProjection, recoveryNotice?: str
     actions.append(
       commitButton,
       button('取消导入', 'quiet', () =>
-        abandonAndContinue({ draftId: review.draftId, draftVersion: review.draftVersion }),
+        abandonAndContinue({ draftId: review.draftId, draftVersion: review.draftVersion }, recoveryReturn),
       ),
     );
     commitBar.append(explanation, actions);
@@ -778,15 +1085,16 @@ function renderReview(review: ReviewBeforeImportProjection, recoveryNotice?: str
     const actions = element('div', 'button-row');
     actions.append(
       button('取消导入', 'quiet', () =>
-        abandonAndContinue({ draftId: review.draftId, draftVersion: review.draftVersion }),
+        abandonAndContinue({ draftId: review.draftId, draftVersion: review.draftVersion }, recoveryReturn),
       ),
     );
     content.append(actions);
   }
+  appendRecoveryReturnAction(content, recoveryReturn);
   replaceScreen('review', content);
 }
 
-function renderImported(result: ImportCommitProjection): void {
+function renderImported(result: ImportCommitProjection, recoveryReturn?: RecoveryReturnContext): void {
   delete document.documentElement.dataset['ai7ImportCompletionPainted'];
   delete document.documentElement.dataset['ai7ImportCompletionAcknowledged'];
   const content = panel();
@@ -806,7 +1114,8 @@ function renderImported(result: ImportCommitProjection): void {
     ),
   );
   const actions = element('div', 'button-row');
-  const open = button('打开稿件', 'primary', () => renderEditorWindow(result.firstWindow, '主稿件'));
+  const open = button('打开稿件', 'primary', () =>
+    renderEditorWindow(result.firstWindow, '主稿件', recoveryReturn?.attentionId));
   open.disabled = true;
   const record = button('查看导入记录', 'secondary', () => {
     if (content.querySelector('.record-detail')) return;
@@ -846,6 +1155,7 @@ function renderImported(result: ImportCommitProjection): void {
   });
   actions.append(open, record);
   content.append(actions);
+  appendRecoveryReturnAction(content, recoveryReturn);
   replaceScreen('imported', content);
   void acknowledgeCompletionAfterPaint(result).then((acknowledged) => {
     if (
@@ -878,7 +1188,11 @@ async function awaitServiceJob(
   return job;
 }
 
-function renderEditorWindow(initialWindow: ManuscriptWindowProjection, bookTitle: string): void {
+function renderEditorWindow(
+  initialWindow: ManuscriptWindowProjection,
+  bookTitle: string,
+  recoveryAttentionId?: string,
+): void {
   const content = panel();
   content.classList.add('editor-shell');
   const toolbar = element('header', 'editor-toolbar');
@@ -888,7 +1202,9 @@ function renderEditorWindow(initialWindow: ManuscriptWindowProjection, bookTitle
   const position = element('span', undefined, initialWindow.position.label);
   const revision = element('span', undefined, `当前修订版 ${initialWindow.revisionLabel}`);
   const journal = element('span', undefined, `修订日志序号 ${initialWindow.journalSequence}`);
-  meta.append(position, revision, journal);
+  const recoveredState = element('strong', 'recovered-state-marker', '当前为恢复的工作状态');
+  recoveredState.hidden = initialWindow.recoveredStateReview === null;
+  meta.append(position, revision, journal, recoveredState);
   title.append(meta);
   const save = button('保存当前编辑', 'primary', () => editor?.flush());
   save.disabled = true;
@@ -898,6 +1214,16 @@ function renderEditorWindow(initialWindow: ManuscriptWindowProjection, bookTitle
   const retryAuthoritativeRefreshButton = button('重试权威刷新', 'quiet', () => void retryAuthoritativeRefresh());
   retryAuthoritativeRefreshButton.hidden = true;
   const toolbarActions = element('div', 'button-row');
+  if (recoveryAttentionId) {
+    toolbarActions.append(button('返回恢复待确认', 'secondary', async () => {
+      setStatus('正在返回稿件恢复比较…', 'busy');
+      try {
+        renderManuscriptRecovery(await window.ai7.getRecoveryComparison({ attentionId: recoveryAttentionId }));
+      } catch (error) {
+        setStatus(error instanceof Error ? error.message : '无法返回恢复比较。', 'error');
+      }
+    }));
+  }
   toolbarActions.append(undo, redo, save, retryAuthoritativeRefreshButton);
   toolbar.append(title, toolbarActions);
 
@@ -1076,6 +1402,7 @@ function renderEditorWindow(initialWindow: ManuscriptWindowProjection, bookTitle
     position.textContent = currentWindow.position.label;
     revision.textContent = `当前修订版 ${currentWindow.revisionLabel}`;
     journal.textContent = `修订日志序号 ${currentWindow.journalSequence}`;
+    recoveredState.hidden = currentWindow.recoveredStateReview === null;
     positionRail.value = String(Math.round(currentWindow.position.proportion * 1_000_000));
     positionRail.setAttribute('aria-valuetext', `全稿 ${(currentWindow.position.proportion * 100).toFixed(3)}%`);
     previousWindow.disabled = authoritativeMutationBusy() || currentWindow.previousCursor === null;
@@ -1841,7 +2168,7 @@ function renderError(error: unknown, retry: () => void): void {
   content.classList.add('error-panel');
   content.append(
     element('p', 'section-label', '操作未完成'),
-    element('h2', undefined, '无法继续本次导入'),
+    element('h2', undefined, '无法继续当前操作'),
     element('p', 'lede', error instanceof Error ? error.message : '桌面操作未完成，请重试。'),
     button('重新开始', 'primary', retry),
   );
@@ -1852,7 +2179,7 @@ function renderError(error: unknown, retry: () => void): void {
 async function initializeStartup(): Promise<void> {
   setStatus('正在核对本地恢复状态…', 'busy');
   try {
-    await renderStartupProjection(await window.ai7.getImportStartup());
+    await renderApplicationStartup(await window.ai7.getStartup());
   } catch (error) {
     renderError(error, () => void initializeStartup());
   }

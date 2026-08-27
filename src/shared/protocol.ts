@@ -1,4 +1,4 @@
-export const SERVICE_PROTOCOL_VERSION = 4 as const;
+export const SERVICE_PROTOCOL_VERSION = 5 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -20,7 +20,14 @@ export type J01ImportControl =
   | 'abandon-object-delete-failure'
   | 'after-abandon-object-delete-before-finalize';
 
+export type J08RecoveryControl = 'interrupt-after-journal-ack';
+
 export const IPC_CHANNELS = {
+  getStartup: 'ai7:j08:get-startup',
+  getRecoveryComparison: 'ai7:j08:get-recovery-comparison',
+  viewRecoveryCandidate: 'ai7:j08:view-recovery-candidate',
+  deferRecovery: 'ai7:j08:defer-recovery',
+  restoreRecovery: 'ai7:j08:restore-recovery',
   getImportStartup: 'ai7:j01:get-import-startup',
   selectAndStageDocx: 'ai7:j01:select-and-stage-docx',
   continueImportDraft: 'ai7:j01:continue-import-draft',
@@ -184,6 +191,11 @@ export interface ManuscriptWindowProjection {
   revisionLabel: string;
   journalSequence: number;
   workingDigest: string;
+  recoveredStateReview: null | {
+    restorationId: string;
+    recoveredRevisionId: string;
+    label: '当前为恢复的工作状态';
+  };
   focusBlockId: string | null;
   focusGrapheme: number | null;
   previousCursor: string | null;
@@ -243,7 +255,108 @@ export interface PriorWorkItemProjection {
   workingDigest: string;
   totalCharacters: number;
   latestMilestone: null | { milestoneId: string; label: string; purpose: string; revisionLabel: string };
+  recoveryAttention: null | {
+    attentionId: string;
+    attentionVersion: number;
+    status: 'pending' | 'deferred';
+    label: '恢复待确认状态';
+  };
 }
+
+export type RecoverySelection =
+  | { kind: 'journal' }
+  | { kind: 'checkpoint' }
+  | { kind: 'snapshot'; snapshotId: string };
+
+export interface RecoveryCandidateProjection {
+  kind: 'journal' | 'checkpoint' | 'snapshot';
+  candidateId: string;
+  title: string;
+  revisionId: string;
+  revisionLabel: string;
+  revisionDigest: string;
+  journalSequence: number;
+  durableAt: string;
+  coveredChangeExtent: string;
+  verification:
+    | '已由 SQLite 权威记录核对'
+    | '已从检查点有界重放并与 SQLite 持久工作状态核对'
+    | '已独立校验快照对象';
+  limitation: string;
+  snapshotId: string | null;
+}
+
+export type RecoverySnapshotComparisonProjection =
+  | { state: 'eligible'; candidate: RecoveryCandidateProjection & { kind: 'snapshot'; snapshotId: string } }
+  | {
+      state: 'unavailable';
+      snapshotId: string;
+      verification: '对象缺失' | '摘要不匹配' | '对象不完整';
+      limitation: string;
+    }
+  | { state: 'none'; limitation: '没有适用的恢复快照' };
+
+export interface RecoveryComparisonProjection {
+  attentionId: string;
+  attentionVersion: number;
+  status: 'pending' | 'deferred';
+  unresolvedCount: number;
+  bookId: string;
+  bookTitle: string;
+  manuscriptId: string;
+  branchId: string;
+  branchName: string;
+  lastDurableEditBoundary: {
+    journalSequence: number;
+    durableAt: string;
+    coveredChangeExtent: string;
+    uncertainty: string;
+  };
+  journal: RecoveryCandidateProjection & { kind: 'journal'; snapshotId: null };
+  checkpoint: RecoveryCandidateProjection & { kind: 'checkpoint'; snapshotId: null };
+  snapshot: RecoverySnapshotComparisonProjection;
+  otherPriorWork: ReadonlyArray<PriorWorkItemProjection>;
+}
+
+export type RecoveryWindowTarget = { kind: 'start' } | { kind: 'after'; position: number };
+
+export interface RecoveryWindowProjection {
+  attentionId: string;
+  selection: RecoverySelection;
+  title: string;
+  revisionId: string;
+  revisionLabel: string;
+  readonly: true;
+  blocks: ReadonlyArray<ManuscriptBlockProjection>;
+  nextTarget: RecoveryWindowTarget | null;
+}
+
+export interface RecoveryDeferralProjection {
+  attentionId: string;
+  attentionVersion: number;
+  status: 'deferred';
+  completionLabel: '已保留恢复待确认状态';
+  next:
+    | { state: 'import'; startup: ImportStartupProjection }
+    | { state: 'prior-work'; priorWork: ReadonlyArray<PriorWorkItemProjection> };
+}
+
+export interface RecoveryRestorationProjection {
+  restorationId: string;
+  attentionId: string;
+  selected: RecoverySelection;
+  sourceRevisionId: string;
+  descendantRevisionId: string;
+  descendantRevisionLabel: string;
+  reviewStatus: '当前为恢复的工作状态';
+  preservedHistoryLabel: string;
+  window: ManuscriptWindowProjection;
+}
+
+export type StartupProjection =
+  | { state: 'manuscript-recovery'; recovery: RecoveryComparisonProjection }
+  | { state: 'import'; startup: ImportStartupProjection }
+  | { state: 'prior-work'; priorWork: ReadonlyArray<PriorWorkItemProjection> };
 
 export interface SearchMatchProjection {
   matchId: string;
@@ -329,6 +442,11 @@ export interface MilestoneProjection {
   signedAt: string;
   statedNextUse: string;
   completionLabel: string;
+  recoverySnapshot: {
+    snapshotId: string;
+    blockCount: number;
+    verification: '已独立校验快照对象';
+  };
 }
 
 export interface DurableHistoryProjection {
@@ -487,6 +605,33 @@ export interface ServiceReadiness {
 
 export interface ServiceOperationMap {
   ready: { input: Record<string, never>; output: ServiceReadiness };
+  getStartup: { input: Record<string, never>; output: StartupProjection };
+  getRecoveryComparison: {
+    input: { attentionId: string };
+    output: RecoveryComparisonProjection;
+  };
+  viewRecoveryCandidate: {
+    input: {
+      attentionId: string;
+      expectedAttentionVersion: number;
+      selection: RecoverySelection;
+      target: RecoveryWindowTarget;
+    };
+    output: RecoveryWindowProjection;
+  };
+  deferRecovery: {
+    input: { attentionId: string; expectedAttentionVersion: number };
+    output: RecoveryDeferralProjection;
+  };
+  restoreRecovery: {
+    input: {
+      restorationId: string;
+      attentionId: string;
+      expectedAttentionVersion: number;
+      selection: RecoverySelection;
+    };
+    output: RecoveryRestorationProjection;
+  };
   getImportStartup: { input: Record<string, never>; output: ImportStartupProjection };
   stageSelectedDocx: {
     input: { selectionToken: string; selectedPath: string };
@@ -615,6 +760,11 @@ export type PickerReselectResult =
 
 export interface RendererApi {
   readonly platform: 'win32' | 'darwin';
+  getStartup(): Promise<StartupProjection>;
+  getRecoveryComparison(input: ServiceOperationMap['getRecoveryComparison']['input']): Promise<RecoveryComparisonProjection>;
+  viewRecoveryCandidate(input: ServiceOperationMap['viewRecoveryCandidate']['input']): Promise<RecoveryWindowProjection>;
+  deferRecovery(input: ServiceOperationMap['deferRecovery']['input']): Promise<RecoveryDeferralProjection>;
+  restoreRecovery(input: Omit<ServiceOperationMap['restoreRecovery']['input'], 'restorationId'>): Promise<RecoveryRestorationProjection>;
   getImportStartup(): Promise<ImportStartupProjection>;
   selectAndStageDocx(): Promise<PickerStageResult>;
   continueImportDraft(input: ServiceOperationMap['continueImportDraft']['input']): Promise<ContinueImportProjection>;

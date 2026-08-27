@@ -24,6 +24,13 @@ import {
   type PriorWorkItemProjection,
   type ReplacementCommitProjection,
   type ReplacementPreviewProjection,
+  type RecoveryComparisonProjection,
+  type RecoveryDeferralProjection,
+  type RecoveryRestorationProjection,
+  type RecoverySelection,
+  type RecoverySnapshotComparisonProjection,
+  type RecoveryWindowProjection,
+  type RecoveryWindowTarget,
   type SearchMatchProjection,
   type SearchResultsProjection,
   type SearchSummaryProjection,
@@ -33,7 +40,8 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3
 const DIGEST_PATTERN = /^[0-9a-f]{64}$/;
 const BLOCK_PATTERN = /^blk_[0-9a-f]{24}$/;
 const CONTINUITY_SCHEMA_VERSION = 5;
-const SCHEMA_VERSION = 6;
+const EDITOR_SCHEMA_VERSION = 6;
+const SCHEMA_VERSION = 7;
 const MIGRATION_BATCH = 256;
 const SEARCH_BATCH = 128;
 const HISTORY_BATCH = 128;
@@ -570,7 +578,7 @@ const TARGET_BASE_SCHEMA_SQL = {
   ) STRICT`,
 } as const;
 
-const TARGET_SCHEMA_SQL = {
+const V6_TARGET_SCHEMA_SQL = {
   ...TARGET_BASE_SCHEMA_SQL,
   working_blocks: `CREATE TABLE working_blocks (
     branch_id TEXT NOT NULL REFERENCES manuscript_branches(branch_id),
@@ -604,7 +612,187 @@ const TARGET_SCHEMA_SQL = {
   ) STRICT`,
 } as const;
 
+const RECOVERY_SCHEMA_SQL = {
+  service_lifetimes: `CREATE TABLE service_lifetimes (
+    lifetime_id TEXT PRIMARY KEY,
+    started_at TEXT NOT NULL,
+    ended_at TEXT,
+    outcome TEXT NOT NULL CHECK(outcome IN ('running', 'clean', 'interrupted')),
+    CHECK(
+      (outcome = 'running' AND ended_at IS NULL)
+      OR (outcome IN ('clean', 'interrupted') AND ended_at IS NOT NULL)
+    )
+  ) STRICT`,
+  service_lifetime_branch_writes: `CREATE TABLE service_lifetime_branch_writes (
+    lifetime_id TEXT NOT NULL REFERENCES service_lifetimes(lifetime_id),
+    branch_id TEXT NOT NULL REFERENCES manuscript_branches(branch_id),
+    manuscript_id TEXT NOT NULL REFERENCES manuscripts(manuscript_id),
+    checkpoint_revision_id TEXT NOT NULL REFERENCES manuscript_revisions(revision_id),
+    checkpoint_sequence INTEGER NOT NULL CHECK(checkpoint_sequence >= 0),
+    reconstruction_base_sequence INTEGER NOT NULL CHECK(reconstruction_base_sequence >= checkpoint_sequence),
+    reconstruction_base_digest TEXT NOT NULL CHECK(length(reconstruction_base_digest) = 64),
+    high_water_sequence INTEGER NOT NULL CHECK(high_water_sequence > reconstruction_base_sequence),
+    high_water_digest TEXT NOT NULL CHECK(length(high_water_digest) = 64),
+    last_durable_at TEXT NOT NULL,
+    entry_count INTEGER NOT NULL CHECK(entry_count > 0),
+    CHECK(entry_count = high_water_sequence - reconstruction_base_sequence),
+    PRIMARY KEY(lifetime_id, branch_id)
+  ) STRICT`,
+  recovery_snapshots: `CREATE TABLE recovery_snapshots (
+    snapshot_id TEXT PRIMARY KEY,
+    milestone_id TEXT NOT NULL UNIQUE REFERENCES milestone_versions(milestone_id),
+    book_id TEXT NOT NULL REFERENCES books(book_id),
+    manuscript_id TEXT NOT NULL REFERENCES manuscripts(manuscript_id),
+    branch_id TEXT NOT NULL REFERENCES manuscript_branches(branch_id),
+    revision_id TEXT NOT NULL REFERENCES manuscript_revisions(revision_id),
+    revision_label TEXT NOT NULL,
+    revision_digest TEXT NOT NULL CHECK(length(revision_digest) = 64),
+    journal_sequence INTEGER NOT NULL CHECK(journal_sequence >= 0),
+    object_digest TEXT NOT NULL CHECK(length(object_digest) = 64),
+    manifest_digest TEXT NOT NULL CHECK(length(manifest_digest) = 64),
+    object_relative_key TEXT NOT NULL UNIQUE,
+    byte_length INTEGER NOT NULL CHECK(byte_length > 0),
+    block_count INTEGER NOT NULL CHECK(block_count > 0),
+    total_graphemes INTEGER NOT NULL CHECK(total_graphemes >= 0),
+    created_at TEXT NOT NULL,
+    verified_at TEXT NOT NULL
+  ) STRICT`,
+  recovery_attention: `CREATE TABLE recovery_attention (
+    attention_id TEXT PRIMARY KEY,
+    interrupted_lifetime_id TEXT NOT NULL REFERENCES service_lifetimes(lifetime_id),
+    book_id TEXT NOT NULL REFERENCES books(book_id),
+    manuscript_id TEXT NOT NULL REFERENCES manuscripts(manuscript_id),
+    branch_id TEXT NOT NULL REFERENCES manuscript_branches(branch_id),
+    checkpoint_revision_id TEXT NOT NULL REFERENCES manuscript_revisions(revision_id),
+    checkpoint_sequence INTEGER NOT NULL CHECK(checkpoint_sequence >= 0),
+    journal_sequence INTEGER NOT NULL CHECK(journal_sequence > checkpoint_sequence),
+    journal_working_digest TEXT NOT NULL CHECK(length(journal_working_digest) = 64),
+    last_durable_at TEXT NOT NULL,
+    journal_entry_count INTEGER NOT NULL CHECK(journal_entry_count > 0),
+    journal_reconstruction_verified_at TEXT NOT NULL,
+    status TEXT NOT NULL CHECK(status IN ('pending', 'deferred', 'resolved')),
+    attention_version INTEGER NOT NULL CHECK(attention_version >= 1),
+    created_at TEXT NOT NULL,
+    deferred_at TEXT,
+    resolved_at TEXT,
+    CHECK(
+      (status = 'pending' AND deferred_at IS NULL AND resolved_at IS NULL)
+      OR (status = 'deferred' AND deferred_at IS NOT NULL AND resolved_at IS NULL)
+      OR (status = 'resolved' AND resolved_at IS NOT NULL)
+    )
+  ) STRICT`,
+  recovery_restore_stages: `CREATE TABLE recovery_restore_stages (
+    attention_id TEXT PRIMARY KEY REFERENCES recovery_attention(attention_id) ON DELETE CASCADE,
+    selected_snapshot_id TEXT NOT NULL REFERENCES recovery_snapshots(snapshot_id),
+    expected_attention_version INTEGER NOT NULL CHECK(expected_attention_version >= 1),
+    expected_block_count INTEGER NOT NULL CHECK(expected_block_count > 0),
+    expected_total_graphemes INTEGER NOT NULL CHECK(expected_total_graphemes >= 0),
+    started_at TEXT NOT NULL
+  ) STRICT`,
+  recovery_restore_stage_blocks: `CREATE TABLE recovery_restore_stage_blocks (
+    attention_id TEXT NOT NULL REFERENCES recovery_restore_stages(attention_id) ON DELETE CASCADE,
+    block_id TEXT NOT NULL REFERENCES manuscript_blocks(block_id),
+    position INTEGER NOT NULL CHECK(position > 0),
+    kind TEXT NOT NULL CHECK(kind IN ('title', 'heading', 'paragraph')),
+    level INTEGER,
+    text TEXT NOT NULL,
+    digest TEXT NOT NULL CHECK(length(digest) = 64),
+    grapheme_length INTEGER NOT NULL CHECK(grapheme_length >= 0),
+    PRIMARY KEY(attention_id, position),
+    UNIQUE(attention_id, block_id)
+  ) STRICT`,
+  recovery_decisions: `CREATE TABLE recovery_decisions (
+    decision_id TEXT PRIMARY KEY,
+    attention_id TEXT NOT NULL REFERENCES recovery_attention(attention_id),
+    attention_version INTEGER NOT NULL CHECK(attention_version >= 1),
+    kind TEXT NOT NULL CHECK(kind IN ('view', 'defer', 'restore')),
+    selected_kind TEXT CHECK(selected_kind IS NULL OR selected_kind IN ('journal', 'checkpoint', 'snapshot')),
+    selected_snapshot_id TEXT REFERENCES recovery_snapshots(snapshot_id),
+    request_fingerprint TEXT NOT NULL CHECK(length(request_fingerprint) = 64),
+    decided_at TEXT NOT NULL,
+    CHECK(
+      (kind = 'defer' AND selected_kind IS NULL AND selected_snapshot_id IS NULL)
+      OR (kind IN ('view', 'restore') AND selected_kind IS NOT NULL)
+    ),
+    CHECK(
+      (selected_kind = 'snapshot' AND selected_snapshot_id IS NOT NULL)
+      OR (selected_kind IS NULL OR selected_kind != 'snapshot') AND selected_snapshot_id IS NULL
+    )
+  ) STRICT`,
+  recovery_restorations: `CREATE TABLE recovery_restorations (
+    restoration_id TEXT PRIMARY KEY,
+    decision_id TEXT NOT NULL UNIQUE REFERENCES recovery_decisions(decision_id),
+    attention_id TEXT NOT NULL UNIQUE REFERENCES recovery_attention(attention_id),
+    selected_kind TEXT NOT NULL CHECK(selected_kind IN ('journal', 'checkpoint', 'snapshot')),
+    selected_snapshot_id TEXT REFERENCES recovery_snapshots(snapshot_id),
+    source_revision_id TEXT NOT NULL REFERENCES manuscript_revisions(revision_id),
+    source_working_digest TEXT NOT NULL CHECK(length(source_working_digest) = 64),
+    pre_restore_revision_id TEXT NOT NULL REFERENCES manuscript_revisions(revision_id),
+    pre_restore_journal_sequence INTEGER NOT NULL CHECK(pre_restore_journal_sequence >= 0),
+    pre_restore_working_digest TEXT NOT NULL CHECK(length(pre_restore_working_digest) = 64),
+    journal_candidate_digest TEXT NOT NULL CHECK(length(journal_candidate_digest) = 64),
+    checkpoint_candidate_revision_id TEXT NOT NULL REFERENCES manuscript_revisions(revision_id),
+    snapshot_candidate_id TEXT REFERENCES recovery_snapshots(snapshot_id),
+    descendant_revision_id TEXT NOT NULL UNIQUE REFERENCES manuscript_revisions(revision_id),
+    created_at TEXT NOT NULL,
+    CHECK(
+      (selected_kind = 'snapshot' AND selected_snapshot_id IS NOT NULL)
+      OR (selected_kind != 'snapshot' AND selected_snapshot_id IS NULL)
+    )
+  ) STRICT`,
+  manuscript_recovery_review_status: `CREATE TABLE manuscript_recovery_review_status (
+    branch_id TEXT PRIMARY KEY REFERENCES manuscript_branches(branch_id),
+    restoration_id TEXT NOT NULL UNIQUE REFERENCES recovery_restorations(restoration_id),
+    recovered_revision_id TEXT NOT NULL REFERENCES manuscript_revisions(revision_id),
+    state TEXT NOT NULL CHECK(state IN ('awaiting-milestone-review', 'cleared-by-milestone')),
+    created_at TEXT NOT NULL,
+    cleared_at TEXT,
+    cleared_by_milestone_id TEXT REFERENCES milestone_versions(milestone_id),
+    CHECK(
+      (state = 'awaiting-milestone-review' AND cleared_at IS NULL AND cleared_by_milestone_id IS NULL)
+      OR (state = 'cleared-by-milestone' AND cleared_at IS NOT NULL AND cleared_by_milestone_id IS NOT NULL)
+    )
+  ) STRICT`,
+} as const;
+
+const TARGET_SCHEMA_SQL = {
+  ...V6_TARGET_SCHEMA_SQL,
+  branch_working_state: `CREATE TABLE branch_working_state (
+    branch_id TEXT PRIMARY KEY REFERENCES manuscript_branches(branch_id),
+    manuscript_id TEXT NOT NULL REFERENCES manuscripts(manuscript_id),
+    base_revision_id TEXT NOT NULL REFERENCES manuscript_revisions(revision_id),
+    journal_sequence INTEGER NOT NULL CHECK(journal_sequence >= 0),
+    working_digest TEXT NOT NULL CHECK(length(working_digest) = 64),
+    total_graphemes INTEGER NOT NULL DEFAULT 0 CHECK(total_graphemes >= 0),
+    history_sequence INTEGER NOT NULL DEFAULT 0 CHECK(history_sequence >= 0),
+    last_checkpoint_sequence INTEGER NOT NULL DEFAULT 0 CHECK(last_checkpoint_sequence >= 0),
+    history_boundary_sequence INTEGER NOT NULL DEFAULT 0 CHECK(history_boundary_sequence >= 0)
+  ) STRICT`,
+  edit_journal_entries: `CREATE TABLE edit_journal_entries (
+    journal_entry_id TEXT PRIMARY KEY,
+    client_edit_id TEXT NOT NULL UNIQUE,
+    request_fingerprint TEXT NOT NULL,
+    manuscript_id TEXT NOT NULL REFERENCES manuscripts(manuscript_id),
+    branch_id TEXT NOT NULL REFERENCES manuscript_branches(branch_id),
+    base_revision_id TEXT NOT NULL REFERENCES manuscript_revisions(revision_id),
+    sequence INTEGER NOT NULL CHECK(sequence > 0),
+    block_id TEXT NOT NULL REFERENCES manuscript_blocks(block_id),
+    from_grapheme INTEGER NOT NULL CHECK(from_grapheme >= 0),
+    to_grapheme INTEGER NOT NULL CHECK(to_grapheme >= from_grapheme),
+    insert_text TEXT NOT NULL,
+    resulting_block_digest TEXT NOT NULL CHECK(length(resulting_block_digest) = 64),
+    resulting_working_digest TEXT NOT NULL CHECK(length(resulting_working_digest) = 64),
+    durable_at TEXT NOT NULL,
+    command_group_id TEXT,
+    command_kind TEXT NOT NULL DEFAULT 'edit',
+    service_lifetime_id TEXT,
+    UNIQUE(branch_id, sequence)
+  ) STRICT`,
+  ...RECOVERY_SCHEMA_SQL,
+} as const;
+
 const FULL_CONTINUITY_SCHEMA_SQL = { ...COMMON_SCHEMA_SQL, ...CONTINUITY_SCHEMA_SQL } as const;
+const FULL_V6_TARGET_SCHEMA_SQL = { ...COMMON_SCHEMA_SQL, ...V6_TARGET_SCHEMA_SQL } as const;
 const FULL_TARGET_SCHEMA_SQL = { ...COMMON_SCHEMA_SQL, ...TARGET_SCHEMA_SQL } as const;
 
 const TARGET_VIRTUAL_TABLE_SQL = `CREATE VIRTUAL TABLE working_block_search USING fts5(
@@ -634,11 +822,18 @@ const CONTINUITY_INDEX_SQL = {
     'CREATE INDEX import_attempts_recovery_order ON import_commit_attempts(state, completion_acknowledged_at, prepared_at)',
 } as const;
 
-const TARGET_INDEX_SQL = {
+const V6_TARGET_INDEX_SQL = {
   ...CONTINUITY_INDEX_SQL,
   manuscript_outline_order: 'CREATE INDEX manuscript_outline_order ON manuscript_outline(branch_id, position)',
   command_history_state: 'CREATE INDEX command_history_state ON manuscript_command_groups(branch_id, status, ordinal)',
   replacement_matches_block: 'CREATE INDEX replacement_matches_block ON manuscript_replacement_matches(preview_id, included, block_id, from_grapheme)',
+} as const;
+
+const TARGET_INDEX_SQL = {
+  ...V6_TARGET_INDEX_SQL,
+  lifetime_outcome_order: 'CREATE INDEX lifetime_outcome_order ON service_lifetimes(outcome, started_at)',
+  recovery_attention_startup: 'CREATE INDEX recovery_attention_startup ON recovery_attention(status, created_at, attention_id)',
+  recovery_snapshot_branch: 'CREATE INDEX recovery_snapshot_branch ON recovery_snapshots(branch_id, revision_id, created_at DESC, snapshot_id DESC)',
 } as const;
 
 const CONTINUITY_TRIGGER_DIGESTS = {
@@ -808,6 +1003,54 @@ const SCHEMA_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
   working_offset_nodes: [
     'branch_id>working_blocks.branch_id:NO ACTION/CASCADE/NONE',
     'position>working_blocks.position:NO ACTION/CASCADE/NONE',
+  ],
+  service_lifetime_branch_writes: [
+    'branch_id>manuscript_branches.branch_id:NO ACTION/NO ACTION/NONE',
+    'checkpoint_revision_id>manuscript_revisions.revision_id:NO ACTION/NO ACTION/NONE',
+    'lifetime_id>service_lifetimes.lifetime_id:NO ACTION/NO ACTION/NONE',
+    'manuscript_id>manuscripts.manuscript_id:NO ACTION/NO ACTION/NONE',
+  ],
+  recovery_snapshots: [
+    'book_id>books.book_id:NO ACTION/NO ACTION/NONE',
+    'branch_id>manuscript_branches.branch_id:NO ACTION/NO ACTION/NONE',
+    'manuscript_id>manuscripts.manuscript_id:NO ACTION/NO ACTION/NONE',
+    'milestone_id>milestone_versions.milestone_id:NO ACTION/NO ACTION/NONE',
+    'revision_id>manuscript_revisions.revision_id:NO ACTION/NO ACTION/NONE',
+  ],
+  recovery_attention: [
+    'book_id>books.book_id:NO ACTION/NO ACTION/NONE',
+    'branch_id>manuscript_branches.branch_id:NO ACTION/NO ACTION/NONE',
+    'checkpoint_revision_id>manuscript_revisions.revision_id:NO ACTION/NO ACTION/NONE',
+    'interrupted_lifetime_id>service_lifetimes.lifetime_id:NO ACTION/NO ACTION/NONE',
+    'manuscript_id>manuscripts.manuscript_id:NO ACTION/NO ACTION/NONE',
+  ],
+  recovery_restore_stages: [
+    'attention_id>recovery_attention.attention_id:NO ACTION/CASCADE/NONE',
+    'selected_snapshot_id>recovery_snapshots.snapshot_id:NO ACTION/NO ACTION/NONE',
+  ],
+  recovery_restore_stage_blocks: [
+    'attention_id>recovery_restore_stages.attention_id:NO ACTION/CASCADE/NONE',
+    'block_id>manuscript_blocks.block_id:NO ACTION/NO ACTION/NONE',
+  ],
+  recovery_decisions: [
+    'attention_id>recovery_attention.attention_id:NO ACTION/NO ACTION/NONE',
+    'selected_snapshot_id>recovery_snapshots.snapshot_id:NO ACTION/NO ACTION/NONE',
+  ],
+  recovery_restorations: [
+    'attention_id>recovery_attention.attention_id:NO ACTION/NO ACTION/NONE',
+    'checkpoint_candidate_revision_id>manuscript_revisions.revision_id:NO ACTION/NO ACTION/NONE',
+    'decision_id>recovery_decisions.decision_id:NO ACTION/NO ACTION/NONE',
+    'descendant_revision_id>manuscript_revisions.revision_id:NO ACTION/NO ACTION/NONE',
+    'pre_restore_revision_id>manuscript_revisions.revision_id:NO ACTION/NO ACTION/NONE',
+    'selected_snapshot_id>recovery_snapshots.snapshot_id:NO ACTION/NO ACTION/NONE',
+    'snapshot_candidate_id>recovery_snapshots.snapshot_id:NO ACTION/NO ACTION/NONE',
+    'source_revision_id>manuscript_revisions.revision_id:NO ACTION/NO ACTION/NONE',
+  ],
+  manuscript_recovery_review_status: [
+    'branch_id>manuscript_branches.branch_id:NO ACTION/NO ACTION/NONE',
+    'cleared_by_milestone_id>milestone_versions.milestone_id:NO ACTION/NO ACTION/NONE',
+    'recovered_revision_id>manuscript_revisions.revision_id:NO ACTION/NO ACTION/NONE',
+    'restoration_id>recovery_restorations.restoration_id:NO ACTION/NO ACTION/NONE',
   ],
 };
 
@@ -1115,6 +1358,10 @@ function requireTargetSchema(db: DatabaseSync): void {
   requireExactSchema(db, FULL_TARGET_SCHEMA_SQL, TARGET_INDEX_SQL, true);
 }
 
+function requireV6TargetSchema(db: DatabaseSync): void {
+  requireExactSchema(db, FULL_V6_TARGET_SCHEMA_SQL, V6_TARGET_INDEX_SQL, true);
+}
+
 function canonicalJson(value: unknown): string {
   if (typeof value === 'string') requireBounded(value.isWellFormed(), 'CANONICAL_VALUE_INVALID', '无法形成规范摘要。');
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
@@ -1340,6 +1587,57 @@ function boundedSearchContext(text: ReadonlyArray<string>, from: number, to: num
 
 function blockDigest(kind: ManuscriptBlockProjection['kind'], level: number | null, text: string): string {
   return sha256(canonicalJson({ kind, level, text }));
+}
+
+function recoveryCommandEvidenceDigest(db: DatabaseSync, groupId: string): string {
+  validateCommandHistoryGroup(db, groupId);
+  const group = one(db.prepare(
+    `SELECT branch_id, ordinal, kind, source_group_id
+     FROM manuscript_command_groups WHERE command_group_id = ?`,
+  ).all(groupId) as SqlRow[], 'HISTORY_CORRUPT', '恢复命令证据缺失。');
+  const digest = createHash('sha256');
+  digest.update(canonicalJson({
+    schema: 'ai7.recovery-command-evidence/1',
+    groupId,
+    branchId: asString(group.branch_id),
+    ordinal: asNumber(group.ordinal),
+    kind: asString(group.kind),
+    sourceGroupId: group.source_group_id === null ? null : asString(group.source_group_id),
+  }));
+  let position = 0;
+  while (true) {
+    const edits = db.prepare(
+      `SELECT position, block_id, before_text, before_digest, after_text, after_digest
+       FROM manuscript_command_edits
+       WHERE command_group_id = ? AND position > ? ORDER BY position LIMIT ?`,
+    ).all(groupId, position, HISTORY_BATCH) as SqlRow[];
+    if (edits.length === 0) break;
+    for (const edit of edits) {
+      position = asNumber(edit.position);
+      digest.update(canonicalJson({
+        position,
+        blockId: asString(edit.block_id),
+        beforeText: asString(edit.before_text),
+        beforeDigest: asString(edit.before_digest),
+        afterText: asString(edit.after_text),
+        afterDigest: asString(edit.after_digest),
+      }));
+    }
+  }
+  requireBounded(position > 0, 'HISTORY_CORRUPT', '恢复命令证据为空。');
+  return digest.digest('hex');
+}
+
+function recoveryWorkingDigest(
+  previous: string,
+  sequence: number,
+  action: 'edit' | 'replacement' | 'undo' | 'redo',
+  groupId: string,
+  evidenceDigest: string,
+): string {
+  return sha256(canonicalJson({
+    schema: 'ai7.recovery-working-digest/1', previous, sequence, action, groupId, evidenceDigest,
+  }));
 }
 
 function stagedBlockId(draftId: string, position: number, digest: string): string {
@@ -1854,8 +2152,8 @@ function validateBranchOffsets(db: DatabaseSync, branchId: string): void {
 
 function forEachSchemaId(
   db: DatabaseSync,
-  table: 'staged_import_snapshots' | 'manuscript_revisions' | 'branch_working_state',
-  column: 'draft_id' | 'revision_id' | 'branch_id',
+  table: string,
+  column: string,
   visit: (id: string) => void,
 ): void {
   let cursor: string | undefined;
@@ -1879,6 +2177,14 @@ function validateSchemaAuthorityIds(db: DatabaseSync): void {
   forEachSchemaId(db, 'staged_import_snapshots', 'draft_id', () => undefined);
   forEachSchemaId(db, 'manuscript_revisions', 'revision_id', () => undefined);
   forEachSchemaId(db, 'branch_working_state', 'branch_id', () => undefined);
+  const version = asNumber(one(db.prepare('PRAGMA user_version').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取数据库版本。').user_version);
+  if (version >= SCHEMA_VERSION) {
+    forEachSchemaId(db, 'service_lifetimes', 'lifetime_id', () => undefined);
+    forEachSchemaId(db, 'recovery_snapshots', 'snapshot_id', () => undefined);
+    forEachSchemaId(db, 'recovery_attention', 'attention_id', () => undefined);
+    forEachSchemaId(db, 'recovery_decisions', 'decision_id', () => undefined);
+    forEachSchemaId(db, 'recovery_restorations', 'restoration_id', () => undefined);
+  }
 }
 
 function validateAllDerivedOffsets(db: DatabaseSync): void {
@@ -2312,6 +2618,230 @@ function validateAllCommandHistory(db: DatabaseSync): void {
   }
 }
 
+function verifyRecoveryJournalReconstruction(
+  db: DatabaseSync,
+  branchId: string,
+  manuscriptId: string,
+  checkpointRevisionId: string,
+  checkpointSequence: number,
+  interruptedLifetimeId: string,
+  reconstructionBaseSequence: number,
+  reconstructionBaseDigest: string,
+  journalSequence: number,
+): void {
+  requireBounded(
+    UUID_PATTERN.test(branchId) && UUID_PATTERN.test(manuscriptId) && UUID_PATTERN.test(checkpointRevisionId) &&
+      UUID_PATTERN.test(interruptedLifetimeId) && DIGEST_PATTERN.test(reconstructionBaseDigest) &&
+      Number.isSafeInteger(checkpointSequence) && Number.isSafeInteger(reconstructionBaseSequence) &&
+      Number.isSafeInteger(journalSequence) && checkpointSequence >= 0 &&
+      reconstructionBaseSequence >= checkpointSequence && journalSequence > reconstructionBaseSequence,
+    'RECOVERY_CLASSIFICATION_UNCERTAIN',
+    '修订日志重建边界无效。',
+  );
+  const revision = one(db.prepare(
+    `SELECT manuscript_id, branch_id, revision_digest FROM manuscript_revisions
+     WHERE revision_id = ?`,
+  ).all(checkpointRevisionId) as SqlRow[], 'RECOVERY_CLASSIFICATION_UNCERTAIN', '恢复检查点修订版缺失。');
+  requireBounded(
+    asString(revision.manuscript_id) === manuscriptId && asString(revision.branch_id) === branchId &&
+      (reconstructionBaseSequence > checkpointSequence || asString(revision.revision_digest) === reconstructionBaseDigest),
+    'RECOVERY_CLASSIFICATION_UNCERTAIN',
+    '恢复检查点修订版绑定不一致。',
+  );
+
+  let journalCursor = checkpointSequence;
+  let chainDigest = reconstructionBaseDigest;
+  while (journalCursor < journalSequence) {
+    const entries = db.prepare(
+      `SELECT sequence, base_revision_id, block_id, resulting_block_digest,
+              resulting_working_digest, command_group_id, command_kind, service_lifetime_id
+       FROM edit_journal_entries
+       WHERE branch_id = ? AND sequence > ? AND sequence <= ?
+       ORDER BY sequence LIMIT ?`,
+    ).all(branchId, journalCursor, journalSequence, HISTORY_BATCH) as SqlRow[];
+    requireBounded(entries.length > 0, 'RECOVERY_CLASSIFICATION_UNCERTAIN', '修订日志序列无法连续重建。');
+    for (const entry of entries) {
+      const sequence = asNumber(entry.sequence);
+      const groupId = asString(entry.command_group_id);
+      const action = asString(entry.command_kind) as 'edit' | 'replacement' | 'undo' | 'redo';
+      requireBounded(
+        sequence === journalCursor + 1 && asString(entry.base_revision_id) === checkpointRevisionId &&
+          UUID_PATTERN.test(groupId) && ['edit', 'replacement', 'undo', 'redo'].includes(action),
+        'RECOVERY_CLASSIFICATION_UNCERTAIN',
+        '修订日志的顺序或命令绑定无法精确重建。',
+      );
+      const evidenceDigest = recoveryCommandEvidenceDigest(db, groupId);
+      const group = one(db.prepare(
+        `SELECT branch_id, before_working_digest, after_working_digest
+         FROM manuscript_command_groups WHERE command_group_id = ?`,
+      ).all(groupId) as SqlRow[], 'RECOVERY_CLASSIFICATION_UNCERTAIN', '修订日志命令组缺失。');
+      const representative = one(db.prepare(
+        `SELECT block_id, before_digest, after_digest FROM manuscript_command_edits
+         WHERE command_group_id = ? ORDER BY position LIMIT 1`,
+      ).all(groupId) as SqlRow[], 'RECOVERY_CLASSIFICATION_UNCERTAIN', '修订日志命令证据为空。');
+      const representativeDigest = action === 'undo'
+        ? asString(representative.before_digest)
+        : asString(representative.after_digest);
+      requireBounded(
+        asString(group.branch_id) === branchId && asString(representative.block_id) === asString(entry.block_id) &&
+          representativeDigest === asString(entry.resulting_block_digest),
+        'RECOVERY_CLASSIFICATION_UNCERTAIN',
+        '修订日志代表内容块证据不一致。',
+      );
+      if (sequence === reconstructionBaseSequence) {
+        requireBounded(
+          asString(entry.resulting_working_digest) === reconstructionBaseDigest,
+          'RECOVERY_CLASSIFICATION_UNCERTAIN',
+          '恢复重建起点摘要不一致。',
+        );
+      } else if (sequence > reconstructionBaseSequence) {
+        requireBounded(
+          entry.service_lifetime_id !== null && asString(entry.service_lifetime_id) === interruptedLifetimeId,
+          'RECOVERY_CLASSIFICATION_UNCERTAIN',
+          '恢复修订日志不属于精确中断生命周期。',
+        );
+        const recomputed = recoveryWorkingDigest(chainDigest, sequence, action, groupId, evidenceDigest);
+        requireBounded(
+          recomputed === asString(entry.resulting_working_digest) &&
+            ((action === 'edit' || action === 'replacement')
+              ? asString(group.before_working_digest) === chainDigest && asString(group.after_working_digest) === recomputed
+              : true),
+          'RECOVERY_CLASSIFICATION_UNCERTAIN',
+          '修订日志的工作状态链无法从不可变命令证据独立重算。',
+        );
+        chainDigest = recomputed;
+      }
+      journalCursor = sequence;
+    }
+  }
+  requireBounded(
+    journalCursor === journalSequence && chainDigest === asString(one(db.prepare(
+      'SELECT working_digest FROM branch_working_state WHERE branch_id = ?',
+    ).all(branchId) as SqlRow[], 'RECOVERY_CLASSIFICATION_UNCERTAIN', '恢复工作状态缺失。').working_digest),
+    'RECOVERY_CLASSIFICATION_UNCERTAIN',
+    '修订日志链与最近持久工作状态不一致。',
+  );
+
+  const checkpointInventory = one(db.prepare(
+    'SELECT count(*) total, coalesce(max(position), 0) maximum FROM manuscript_block_versions WHERE revision_id = ?',
+  ).all(checkpointRevisionId) as SqlRow[], 'RECOVERY_CLASSIFICATION_UNCERTAIN', '恢复检查点清单缺失。');
+  const workingInventory = one(db.prepare(
+    'SELECT count(*) total, coalesce(max(position), 0) maximum FROM working_blocks WHERE branch_id = ?',
+  ).all(branchId) as SqlRow[], 'RECOVERY_CLASSIFICATION_UNCERTAIN', '恢复工作状态清单缺失。');
+  requireBounded(
+    asNumber(checkpointInventory.total) > 0 &&
+      asNumber(checkpointInventory.total) === asNumber(checkpointInventory.maximum) &&
+      asNumber(checkpointInventory.total) === asNumber(workingInventory.total) &&
+      asNumber(workingInventory.total) === asNumber(workingInventory.maximum),
+    'RECOVERY_CLASSIFICATION_UNCERTAIN',
+    '恢复检查点与工作状态的内容块清单不一致。',
+  );
+  let blockCursor = 0;
+  while (true) {
+    const blocks = db.prepare(
+      `SELECT block_id, position, kind, level, text, digest, grapheme_length
+       FROM manuscript_block_versions
+       WHERE revision_id = ? AND position > ? ORDER BY position LIMIT ?`,
+    ).all(checkpointRevisionId, blockCursor, MIGRATION_BATCH) as SqlRow[];
+    if (blocks.length === 0) break;
+    for (const block of blocks) {
+      blockCursor = asNumber(block.position);
+      const blockId = asString(block.block_id);
+      const kind = asString(block.kind) as ManuscriptBlockProjection['kind'];
+      const level = block.level === null ? null : asNumber(block.level);
+      let content = asString(block.text);
+      let digest = asString(block.digest);
+      requireBounded(
+        blockCursor > 0 && stagedBlockLength(content, 'RECOVERY_CLASSIFICATION_UNCERTAIN', '恢复检查点文字超出有界范围。') === asNumber(block.grapheme_length) &&
+          blockDigest(kind, level, content) === digest,
+        'RECOVERY_CLASSIFICATION_UNCERTAIN',
+        '恢复检查点内容块无效。',
+      );
+      let editSequence = checkpointSequence;
+      while (editSequence < journalSequence) {
+        const edits = db.prepare(
+          `SELECT e.sequence, e.command_kind, ce.before_text, ce.before_digest, ce.after_text, ce.after_digest
+           FROM edit_journal_entries e
+           JOIN manuscript_command_edits ce ON ce.command_group_id = e.command_group_id AND ce.block_id = ?
+           WHERE e.branch_id = ? AND e.sequence > ? AND e.sequence <= ?
+           ORDER BY e.sequence LIMIT ?`,
+        ).all(blockId, branchId, editSequence, journalSequence, HISTORY_BATCH) as SqlRow[];
+        if (edits.length === 0) break;
+        for (const edit of edits) {
+          editSequence = asNumber(edit.sequence);
+          const action = asString(edit.command_kind);
+          const expectedText = action === 'undo' ? asString(edit.after_text) : asString(edit.before_text);
+          const expectedDigest = action === 'undo' ? asString(edit.after_digest) : asString(edit.before_digest);
+          const targetText = action === 'undo' ? asString(edit.before_text) : asString(edit.after_text);
+          const targetDigest = action === 'undo' ? asString(edit.before_digest) : asString(edit.after_digest);
+          requireBounded(
+            content === expectedText && digest === expectedDigest && blockDigest(kind, level, targetText) === targetDigest,
+            'RECOVERY_CLASSIFICATION_UNCERTAIN',
+            '修订日志内容块无法从检查点精确重放。',
+          );
+          content = targetText;
+          digest = targetDigest;
+        }
+      }
+      const current = one(db.prepare(
+        `SELECT block_id, kind, level, text, digest, grapheme_length
+         FROM working_blocks WHERE branch_id = ? AND position = ?`,
+      ).all(branchId, blockCursor) as SqlRow[], 'RECOVERY_CLASSIFICATION_UNCERTAIN', '持久工作内容块缺失。');
+      requireBounded(
+        asString(current.block_id) === blockId && asString(current.kind) === kind &&
+          (current.level === null ? null : asNumber(current.level)) === level &&
+          asString(current.text) === content && asString(current.digest) === digest &&
+          asNumber(current.grapheme_length) === stagedBlockLength(content, 'RECOVERY_CLASSIFICATION_UNCERTAIN', '恢复工作文字超出有界范围。'),
+        'RECOVERY_CLASSIFICATION_UNCERTAIN',
+        '修订日志重建结果与持久工作状态不一致。',
+      );
+    }
+  }
+}
+
+function validateRecoveryTruth(db: DatabaseSync): void {
+  const invalidLifetime = db.prepare(
+    `SELECT lifetime_id FROM service_lifetimes
+     WHERE (outcome = 'running' AND ended_at IS NOT NULL)
+        OR (outcome IN ('clean', 'interrupted') AND ended_at IS NULL)
+     LIMIT 1`,
+  ).get() as SqlRow | undefined;
+  requireBounded(invalidLifetime === undefined, 'SCHEMA_MIGRATION_FAILED', '服务生命周期事实不完整。');
+  const invalidWrite = db.prepare(
+    `SELECT lw.lifetime_id FROM service_lifetime_branch_writes lw
+     LEFT JOIN edit_journal_entries e ON e.branch_id = lw.branch_id
+       AND e.service_lifetime_id = lw.lifetime_id AND e.sequence = lw.high_water_sequence
+     WHERE e.journal_entry_id IS NULL OR e.resulting_working_digest != lw.high_water_digest
+       OR lw.reconstruction_base_sequence < lw.checkpoint_sequence
+       OR lw.high_water_sequence <= lw.reconstruction_base_sequence
+       OR lw.entry_count != lw.high_water_sequence - lw.reconstruction_base_sequence
+       OR (SELECT count(*) FROM edit_journal_entries counted
+           WHERE counted.branch_id = lw.branch_id AND counted.service_lifetime_id = lw.lifetime_id
+             AND counted.sequence > lw.reconstruction_base_sequence) != lw.entry_count
+     LIMIT 1`,
+  ).get() as SqlRow | undefined;
+  requireBounded(invalidWrite === undefined, 'SCHEMA_MIGRATION_FAILED', '服务生命周期修订日志高水位事实不完整。');
+  const orphanJournal = db.prepare(
+    `SELECT e.journal_entry_id FROM edit_journal_entries e
+     LEFT JOIN service_lifetimes sl ON sl.lifetime_id = e.service_lifetime_id
+     LEFT JOIN service_lifetime_branch_writes lw ON lw.lifetime_id = e.service_lifetime_id
+       AND lw.branch_id = e.branch_id
+     WHERE e.service_lifetime_id IS NOT NULL
+       AND (sl.lifetime_id IS NULL OR lw.lifetime_id IS NULL OR e.sequence > lw.high_water_sequence)
+     LIMIT 1`,
+  ).get() as SqlRow | undefined;
+  requireBounded(orphanJournal === undefined, 'SCHEMA_MIGRATION_FAILED', '修订日志生命周期绑定不完整。');
+  const invalidAttention = db.prepare(
+    `SELECT ra.attention_id FROM recovery_attention ra
+     JOIN branch_working_state bws ON bws.branch_id = ra.branch_id
+     WHERE ra.status IN ('pending', 'deferred') AND (
+       ra.manuscript_id != bws.manuscript_id OR ra.journal_sequence != bws.journal_sequence
+       OR ra.journal_working_digest != bws.working_digest
+     ) LIMIT 1`,
+  ).get() as SqlRow | undefined;
+  requireBounded(invalidAttention === undefined, 'SCHEMA_MIGRATION_FAILED', '恢复待确认状态与稿件工作状态不一致。');
+}
+
 function createMilestoneSignoffTable(db: DatabaseSync): void {
   db.exec(`
     CREATE TABLE IF NOT EXISTS milestone_signoff_records (
@@ -2331,13 +2861,40 @@ function createMilestoneSignoffTable(db: DatabaseSync): void {
 }
 
 function createWorkingOffsetTable(db: DatabaseSync): void {
-  db.exec(TARGET_SCHEMA_SQL.working_offset_nodes);
+  db.exec(V6_TARGET_SCHEMA_SQL.working_offset_nodes);
+}
+
+function migrateEditorSchemaV6ToV7(db: DatabaseSync): void {
+  requireV6TargetSchema(db);
+  transact(db, () => {
+    db.exec(`
+      ALTER TABLE branch_working_state
+        ADD COLUMN history_boundary_sequence INTEGER NOT NULL DEFAULT 0 CHECK(history_boundary_sequence >= 0);
+      ALTER TABLE edit_journal_entries ADD COLUMN service_lifetime_id TEXT;
+
+      ${RECOVERY_SCHEMA_SQL.service_lifetimes};
+      ${RECOVERY_SCHEMA_SQL.service_lifetime_branch_writes};
+      ${RECOVERY_SCHEMA_SQL.recovery_snapshots};
+      ${RECOVERY_SCHEMA_SQL.recovery_attention};
+      ${RECOVERY_SCHEMA_SQL.recovery_restore_stages};
+      ${RECOVERY_SCHEMA_SQL.recovery_restore_stage_blocks};
+      ${RECOVERY_SCHEMA_SQL.recovery_decisions};
+      ${RECOVERY_SCHEMA_SQL.recovery_restorations};
+      ${RECOVERY_SCHEMA_SQL.manuscript_recovery_review_status};
+
+      ${TARGET_INDEX_SQL.lifetime_outcome_order};
+      ${TARGET_INDEX_SQL.recovery_attention_startup};
+      ${TARGET_INDEX_SQL.recovery_snapshot_branch};
+      PRAGMA user_version = ${SCHEMA_VERSION};
+    `);
+  });
+  requireTargetSchema(db);
 }
 
 export function initializeBoundedSchema(db: DatabaseSync): void {
   const version = asNumber(one(db.prepare('PRAGMA user_version').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取数据库版本。').user_version);
   requireBounded(
-    version === CONTINUITY_SCHEMA_VERSION || version === SCHEMA_VERSION,
+    version === CONTINUITY_SCHEMA_VERSION || version === EDITOR_SCHEMA_VERSION || version === SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2349,12 +2906,17 @@ export function initializeBoundedSchema(db: DatabaseSync): void {
       validateLegacyHistoryRoots(db);
       validateAllCommandHistory(db);
       validateMilestoneSignoffTruth(db);
+      validateRecoveryTruth(db);
       const violations = db.prepare('PRAGMA foreign_key_check').all();
       requireBounded(violations.length === 0, 'SCHEMA_MIGRATION_FAILED', '数据库引用校验失败。');
       terminalizeOrphanedReplacementPreviews(db);
       reclaimOrphanedSearchSessions(db);
     });
     return;
+  }
+  if (version === EDITOR_SCHEMA_VERSION) {
+    migrateEditorSchemaV6ToV7(db);
+    return initializeBoundedSchema(db);
   }
   requireContinuitySchema(db);
   const legacyAlterTable = asNumber(one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table);
@@ -2503,7 +3065,7 @@ export function initializeBoundedSchema(db: DatabaseSync): void {
     `);
     createMilestoneSignoffTable(db);
     createWorkingOffsetTable(db);
-    requireTargetSchema(db);
+    requireV6TargetSchema(db);
     reclaimOrphanedSearchSessions(db);
 
     validateStagedDraftInventory(db);
@@ -2526,7 +3088,7 @@ export function initializeBoundedSchema(db: DatabaseSync): void {
     validateMilestoneSignoffTruth(db);
     const violations = db.prepare('PRAGMA foreign_key_check').all();
     requireBounded(violations.length === 0, 'SCHEMA_MIGRATION_FAILED', '数据库迁移后的引用校验失败。');
-    db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}; COMMIT;`);
+    db.exec(`PRAGMA user_version = ${EDITOR_SCHEMA_VERSION}; COMMIT;`);
   } catch (error) {
     migrationError = error;
     try {
@@ -2549,6 +3111,7 @@ export function initializeBoundedSchema(db: DatabaseSync): void {
     }
   }
   if (migrationError) throw migrationError;
+  migrateEditorSchemaV6ToV7(db);
 }
 
 interface BranchBinding {
@@ -2561,7 +3124,78 @@ interface BranchBinding {
   workingDigest: string;
   totalCharacters: number;
   historySequence: number;
+  historyBoundarySequence: number;
+  lastCheckpointSequence: number;
 }
+
+export interface RecoverySnapshotPlan {
+  snapshotId: string;
+  milestoneId: string;
+  signoffRecordId: string;
+  bookId: string;
+  manuscriptId: string;
+  branchId: string;
+  expectedBaseRevisionId: string;
+  expectedJournalSequence: number;
+  expectedWorkingDigest: string;
+  revisionId: string;
+  revisionLabel: string;
+  sourceVersionId: string;
+  blockCount: number;
+  totalGraphemes: number;
+  label: string;
+  purpose: string;
+  note: string | null;
+  createdAt: string;
+}
+
+export interface RecoverySnapshotObjectMetadata {
+  objectDigest: string;
+  manifestDigest: string;
+  objectRelativeKey: string;
+  byteLength: number;
+  blockCount: number;
+  verifiedAt: string;
+  newlyPromoted?: boolean;
+}
+
+export interface RecoverySnapshotBlock {
+  blockId: string;
+  position: number;
+  kind: ManuscriptBlockProjection['kind'];
+  level: number | null;
+  text: string;
+  digest: string;
+  graphemeLength: number;
+}
+
+export interface RecoverySnapshotRecord extends RecoverySnapshotObjectMetadata {
+  snapshotId: string;
+  bookId: string;
+  manuscriptId: string;
+  branchId: string;
+  revisionId: string;
+  revisionLabel: string;
+  revisionDigest: string;
+  journalSequence: number;
+  totalGraphemes: number;
+  createdAt: string;
+}
+
+export interface RecoverySnapshotCursor {
+  createdAt: string;
+  snapshotId: string;
+}
+
+export type VerifiedRecoverySnapshot =
+  | { state: 'eligible'; record: RecoverySnapshotRecord }
+  | {
+      state: 'unavailable';
+      snapshotId: string;
+      verification: '对象缺失' | '摘要不匹配' | '对象不完整';
+      limitation: string;
+    }
+  | { state: 'none' };
 
 export class BoundedManuscriptStore {
   readonly #db: DatabaseSync;
@@ -2572,6 +3206,7 @@ export class BoundedManuscriptStore {
     transact(this.#db, () => {
       terminalizeOrphanedReplacementPreviews(this.#db);
       reclaimOrphanedSearchSessions(this.#db);
+      this.#db.prepare('DELETE FROM recovery_restore_stages').run();
     });
   }
 
@@ -2584,11 +3219,180 @@ export class BoundedManuscriptStore {
     return rebuildBranchDerived(this.#db, branchId);
   }
 
+  startServiceLifetime(lifetimeId: string, startedAt: string): void {
+    requireBounded(UUID_PATTERN.test(lifetimeId) && startedAt.isWellFormed(), 'LIFETIME_INVALID', '本地服务生命周期标识无效。');
+    transact(this.#db, () => {
+      const interrupted = this.#db.prepare(
+        "SELECT lifetime_id FROM service_lifetimes WHERE outcome = 'running' ORDER BY started_at, lifetime_id",
+      ).all() as SqlRow[];
+      for (const row of interrupted) {
+        const interruptedLifetimeId = asString(row.lifetime_id);
+        requireBounded(
+          this.#db.prepare(
+            "UPDATE service_lifetimes SET outcome = 'interrupted', ended_at = ? WHERE lifetime_id = ? AND outcome = 'running'",
+          ).run(startedAt, interruptedLifetimeId).changes === 1,
+          'LIFETIME_STATE_CHANGED',
+          '本地服务生命周期状态已变化。',
+        );
+        const branches = this.#db.prepare(
+          `SELECT b.book_id, lw.manuscript_id, lw.branch_id, lw.checkpoint_revision_id,
+                  lw.checkpoint_sequence, lw.reconstruction_base_sequence, lw.reconstruction_base_digest,
+                  lw.high_water_sequence, lw.high_water_digest,
+                  lw.last_durable_at, lw.entry_count,
+                  bws.base_revision_id, bws.last_checkpoint_sequence, bws.journal_sequence, bws.working_digest
+           FROM service_lifetime_branch_writes lw
+           JOIN branch_working_state bws ON bws.branch_id = lw.branch_id
+           JOIN manuscripts m ON m.manuscript_id = bws.manuscript_id
+           JOIN books b ON b.book_id = m.book_id
+           WHERE lw.lifetime_id = ? AND lw.high_water_sequence > bws.last_checkpoint_sequence
+           ORDER BY lw.branch_id`,
+        ).all(interruptedLifetimeId) as SqlRow[];
+        for (const branch of branches) {
+          requireBounded(
+            asString(branch.checkpoint_revision_id) === asString(branch.base_revision_id) &&
+              asNumber(branch.checkpoint_sequence) === asNumber(branch.last_checkpoint_sequence) &&
+              asNumber(branch.reconstruction_base_sequence) >= asNumber(branch.checkpoint_sequence) &&
+              asNumber(branch.reconstruction_base_sequence) < asNumber(branch.high_water_sequence) &&
+              asNumber(branch.high_water_sequence) === asNumber(branch.journal_sequence) &&
+              asString(branch.high_water_digest) === asString(branch.working_digest),
+            'RECOVERY_CLASSIFICATION_UNCERTAIN',
+            '无法精确判定中断生命周期的最近持久写入边界。',
+          );
+          const evidence = one(this.#db.prepare(
+            `SELECT count(*) total, max(sequence) high_water
+             FROM edit_journal_entries
+             WHERE branch_id = ? AND service_lifetime_id = ? AND sequence > ?`,
+          ).all(asString(branch.branch_id), interruptedLifetimeId, asNumber(branch.reconstruction_base_sequence)) as SqlRow[],
+          'RECOVERY_CLASSIFICATION_UNCERTAIN', '无法读取中断生命周期的修订日志证据。');
+          requireBounded(
+            asNumber(evidence.total) === asNumber(branch.entry_count) &&
+              asNumber(evidence.high_water) === asNumber(branch.high_water_sequence),
+            'RECOVERY_CLASSIFICATION_UNCERTAIN',
+            '中断生命周期高水位与修订日志证据不一致。',
+          );
+          const finalEntry = one(this.#db.prepare(
+            `SELECT resulting_working_digest, durable_at FROM edit_journal_entries
+             WHERE branch_id = ? AND sequence = ? AND service_lifetime_id = ?`,
+          ).all(asString(branch.branch_id), asNumber(branch.high_water_sequence), interruptedLifetimeId) as SqlRow[],
+          'RECOVERY_CLASSIFICATION_UNCERTAIN', '无法精确读取中断生命周期的最近持久写入记录。');
+          requireBounded(
+            asString(finalEntry.resulting_working_digest) === asString(branch.working_digest),
+            'RECOVERY_CLASSIFICATION_UNCERTAIN',
+            '中断生命周期的工作状态摘要不一致。',
+          );
+          verifyRecoveryJournalReconstruction(
+            this.#db,
+            asString(branch.branch_id),
+            asString(branch.manuscript_id),
+            asString(branch.checkpoint_revision_id),
+            asNumber(branch.checkpoint_sequence),
+            interruptedLifetimeId,
+            asNumber(branch.reconstruction_base_sequence),
+            asString(branch.reconstruction_base_digest),
+            asNumber(branch.journal_sequence),
+          );
+          const unresolved = this.#db.prepare(
+            "SELECT 1 ok FROM recovery_attention WHERE branch_id = ? AND status IN ('pending', 'deferred') LIMIT 1",
+          ).get(asString(branch.branch_id));
+          if (unresolved !== undefined) continue;
+          this.#db.prepare(
+            `INSERT INTO recovery_attention(
+               attention_id, interrupted_lifetime_id, book_id, manuscript_id, branch_id,
+               checkpoint_revision_id, checkpoint_sequence, journal_sequence, journal_working_digest,
+               last_durable_at, journal_entry_count, journal_reconstruction_verified_at,
+               status, attention_version, created_at
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 1, ?)`,
+          ).run(
+            randomUUID(), interruptedLifetimeId, asString(branch.book_id), asString(branch.manuscript_id),
+            asString(branch.branch_id), asString(branch.checkpoint_revision_id), asNumber(branch.checkpoint_sequence),
+            asNumber(branch.journal_sequence), asString(branch.working_digest), asString(finalEntry.durable_at),
+            asNumber(branch.journal_sequence) - asNumber(branch.checkpoint_sequence), startedAt, startedAt,
+          );
+        }
+      }
+      this.#db.prepare(
+        "INSERT INTO service_lifetimes(lifetime_id, started_at, outcome) VALUES (?, ?, 'running')",
+      ).run(lifetimeId, startedAt);
+    });
+  }
+
+  markServiceLifetimeClean(lifetimeId: string, endedAt: string): void {
+    requireBounded(UUID_PATTERN.test(lifetimeId) && endedAt.isWellFormed(), 'LIFETIME_INVALID', '本地服务生命周期标识无效。');
+    transact(this.#db, () => {
+      requireBounded(
+        this.#db.prepare(
+          "UPDATE service_lifetimes SET outcome = 'clean', ended_at = ? WHERE lifetime_id = ? AND outcome = 'running'",
+        ).run(endedAt, lifetimeId).changes === 1,
+        'LIFETIME_STATE_CHANGED',
+        '本地服务生命周期无法重复结束。',
+      );
+    });
+  }
+
+  prepareMilestoneRecoverySnapshot(
+    manuscriptId: string,
+    branchId: string,
+    labelInput: string,
+    purposeInput: string,
+    noteInput: string,
+  ): RecoverySnapshotPlan {
+    const label = validateShortText(labelInput, 80, 'MILESTONE_INVALID', '里程碑标签必须为 1–80 个字符。');
+    const purpose = validateShortText(purposeInput, 120, 'MILESTONE_INVALID', '里程碑用途必须为 1–120 个字符。');
+    const note = validateShortText(noteInput, 500, 'MILESTONE_INVALID', '里程碑备注过长。', true) || null;
+    const binding = this.#binding(manuscriptId, branchId);
+    this.#requireBranchEditable(branchId);
+    requireBounded(
+      this.#db.prepare('SELECT 1 ok FROM milestone_versions WHERE branch_id = ? AND label = ?').get(branchId, label) === undefined,
+      'MILESTONE_LABEL_EXISTS',
+      '该分支已存在同名里程碑。',
+    );
+    const previous = one(this.#db.prepare(
+      'SELECT source_version_id, ordinal FROM manuscript_revisions WHERE revision_id = ?',
+    ).all(binding.revisionId) as SqlRow[], 'MILESTONE_INVALID', '当前修订版缺失。');
+    const dirty = binding.journalSequence > binding.lastCheckpointSequence;
+    const revisionId = dirty ? randomUUID() : binding.revisionId;
+    const revisionLabel = dirty ? `r${asNumber(previous.ordinal) + 1}` : binding.revisionLabel;
+    const count = one(this.#db.prepare(
+      'SELECT count(*) block_count FROM working_blocks WHERE branch_id = ?',
+    ).all(branchId) as SqlRow[], 'MILESTONE_INVALID', '工作稿内容块无法读取。');
+    const blockCount = asNumber(count.block_count);
+    requireBounded(blockCount > 0, 'MILESTONE_INVALID', '工作稿没有可保存内容。');
+    return {
+      snapshotId: randomUUID(), milestoneId: randomUUID(), signoffRecordId: randomUUID(),
+      bookId: binding.bookId, manuscriptId, branchId, expectedBaseRevisionId: binding.revisionId,
+      expectedJournalSequence: binding.journalSequence, expectedWorkingDigest: binding.workingDigest,
+      revisionId, revisionLabel, sourceVersionId: asString(previous.source_version_id), blockCount,
+      totalGraphemes: binding.totalCharacters, label, purpose, note, createdAt: new Date().toISOString(),
+    };
+  }
+
+  getRecoverySnapshotBlocks(plan: RecoverySnapshotPlan, afterPosition: number): ReadonlyArray<RecoverySnapshotBlock> {
+    requireBounded(Number.isSafeInteger(afterPosition) && afterPosition >= 0, 'SNAPSHOT_INVALID', '恢复快照批次位置无效。');
+    const binding = this.#binding(plan.manuscriptId, plan.branchId);
+    requireBounded(
+      binding.revisionId === plan.expectedBaseRevisionId &&
+        binding.journalSequence === plan.expectedJournalSequence &&
+        binding.workingDigest === plan.expectedWorkingDigest,
+      'MILESTONE_STALE',
+      '稿件已变化，里程碑与恢复快照未提交。',
+    );
+    return (this.#db.prepare(
+      `SELECT block_id, position, kind, level, text, digest, grapheme_length
+       FROM working_blocks WHERE branch_id = ? AND position > ? ORDER BY position LIMIT ?`,
+    ).all(plan.branchId, afterPosition, MIGRATION_BATCH) as SqlRow[]).map((row) => ({
+      blockId: asString(row.block_id), position: asNumber(row.position),
+      kind: asString(row.kind) as ManuscriptBlockProjection['kind'],
+      level: row.level === null ? null : asNumber(row.level), text: asString(row.text),
+      digest: asString(row.digest), graphemeLength: asNumber(row.grapheme_length),
+    }));
+  }
+
   listPriorWork(): ReadonlyArray<PriorWorkItemProjection> {
     const rows = this.#db.prepare(
       `SELECT b.book_id, b.title, m.manuscript_id, mb.branch_id, mb.name branch_name,
               mr.revision_id, mr.revision_label, bws.journal_sequence, bws.working_digest, bws.total_graphemes,
-              mv.milestone_id, mv.label milestone_label, mv.purpose milestone_purpose, mvr.revision_label milestone_revision_label
+              mv.milestone_id, mv.label milestone_label, mv.purpose milestone_purpose, mvr.revision_label milestone_revision_label,
+              ra.attention_id, ra.attention_version, ra.status attention_status
        FROM branch_working_state bws
        JOIN manuscript_branches mb ON mb.branch_id = bws.branch_id
        JOIN manuscripts m ON m.manuscript_id = bws.manuscript_id
@@ -2598,6 +3402,11 @@ export class BoundedManuscriptStore {
          SELECT milestone_id FROM milestone_versions WHERE branch_id = mb.branch_id ORDER BY created_at DESC, milestone_id DESC LIMIT 1
        )
        LEFT JOIN manuscript_revisions mvr ON mvr.revision_id = mv.revision_id
+       LEFT JOIN recovery_attention ra ON ra.attention_id = (
+         SELECT attention_id FROM recovery_attention
+         WHERE branch_id = mb.branch_id AND status IN ('pending', 'deferred')
+         ORDER BY created_at, attention_id LIMIT 1
+       )
        ORDER BY b.created_at DESC, b.book_id DESC LIMIT 20`,
     ).all() as SqlRow[];
     return rows.map((row) => ({
@@ -2617,7 +3426,466 @@ export class BoundedManuscriptStore {
         purpose: asString(row.milestone_purpose),
         revisionLabel: asString(row.milestone_revision_label),
       },
+      recoveryAttention: row.attention_id === null ? null : {
+        attentionId: asString(row.attention_id),
+        attentionVersion: asNumber(row.attention_version),
+        status: asString(row.attention_status) as 'pending' | 'deferred',
+        label: '恢复待确认状态',
+      },
     }));
+  }
+
+  firstRecoveryAttentionId(): string | null {
+    const row = this.#db.prepare(
+      `SELECT attention_id FROM recovery_attention WHERE status IN ('pending', 'deferred')
+       ORDER BY created_at, attention_id LIMIT 1`,
+    ).get() as SqlRow | undefined;
+    return row === undefined ? null : asString(row.attention_id);
+  }
+
+  nextRecoverySnapshotForAttention(
+    attentionId: string,
+    before: RecoverySnapshotCursor | null,
+  ): RecoverySnapshotRecord | null {
+    requireBounded(UUID_PATTERN.test(attentionId), 'RECOVERY_INVALID', '恢复待确认标识无效。');
+    if (before !== null) {
+      requireBounded(
+        before.createdAt.isWellFormed() && UUID_PATTERN.test(before.snapshotId),
+        'RECOVERY_SNAPSHOT_INELIGIBLE',
+        '恢复快照遍历边界无效。',
+      );
+    }
+    const row = this.#db.prepare(
+      `SELECT rs.* FROM recovery_attention ra
+       JOIN recovery_snapshots rs ON rs.branch_id = ra.branch_id
+         AND rs.revision_id = ra.checkpoint_revision_id
+       WHERE ra.attention_id = ? AND ra.status IN ('pending', 'deferred')
+         AND (? IS NULL OR rs.created_at < ? OR (rs.created_at = ? AND rs.snapshot_id < ?))
+       ORDER BY rs.created_at DESC, rs.snapshot_id DESC LIMIT 1`,
+    ).get(attentionId, before?.createdAt ?? null, before?.createdAt ?? null,
+      before?.createdAt ?? null, before?.snapshotId ?? null) as SqlRow | undefined;
+    return row === undefined ? null : this.#snapshotRecord(row);
+  }
+
+  recoverySnapshotByIdForAttention(attentionId: string, snapshotId: string): RecoverySnapshotRecord {
+    return this.#snapshotRecord(this.#requireAttentionSnapshot(attentionId, snapshotId));
+  }
+
+  getRecoveryComparison(attentionId: string, snapshot: VerifiedRecoverySnapshot): RecoveryComparisonProjection {
+    requireBounded(UUID_PATTERN.test(attentionId), 'RECOVERY_INVALID', '恢复待确认标识无效。');
+    const row = one(this.#db.prepare(
+      `SELECT ra.*, b.title book_title, mb.name branch_name,
+              mr.revision_label checkpoint_revision_label, mr.revision_digest checkpoint_revision_digest,
+              mr.created_at checkpoint_created_at,
+              mv.milestone_id, mv.label milestone_label, mv.created_at milestone_created_at
+       FROM recovery_attention ra
+       JOIN books b ON b.book_id = ra.book_id
+       JOIN manuscript_branches mb ON mb.branch_id = ra.branch_id
+       JOIN manuscript_revisions mr ON mr.revision_id = ra.checkpoint_revision_id
+       LEFT JOIN milestone_versions mv ON mv.milestone_id = (
+         SELECT milestone_id FROM milestone_versions WHERE revision_id = ra.checkpoint_revision_id
+         ORDER BY created_at DESC, milestone_id DESC LIMIT 1
+       )
+       WHERE ra.attention_id = ? AND ra.status IN ('pending', 'deferred')`,
+    ).all(attentionId) as SqlRow[], 'RECOVERY_NOT_FOUND', '恢复待确认状态不存在或已经处理。');
+    const checkpointSequence = asNumber(row.checkpoint_sequence);
+    const journalSequence = asNumber(row.journal_sequence);
+    const journalEntryCount = asNumber(row.journal_entry_count);
+    const checkpointLabel = asString(row.checkpoint_revision_label);
+    const extent = `从检查点日志序号 ${checkpointSequence} 到最近持久序号 ${journalSequence}，覆盖 ${journalEntryCount} 条已确认修订日志`;
+    const journal = {
+      kind: 'journal', candidateId: `${attentionId}:journal`, title: '恢复的工作状态',
+      revisionId: asString(row.checkpoint_revision_id), revisionLabel: `${checkpointLabel} + 修订日志`,
+      revisionDigest: asString(row.journal_working_digest), journalSequence,
+      durableAt: asString(row.last_durable_at), coveredChangeExtent: extent,
+      verification: '已从检查点有界重放并与 SQLite 持久工作状态核对',
+      limitation: '仅保证最近持久写入边界以内的已确认修订日志；未确认的进程内输入不属于恢复证据。',
+      snapshotId: null,
+    } satisfies RecoveryComparisonProjection['journal'];
+    const checkpointTitle = row.milestone_id === null
+      ? '相关稿件检查点'
+      : `相关里程碑版本「${asString(row.milestone_label)}」`;
+    const checkpoint = {
+      kind: 'checkpoint', candidateId: `${attentionId}:checkpoint`, title: checkpointTitle,
+      revisionId: asString(row.checkpoint_revision_id), revisionLabel: checkpointLabel,
+      revisionDigest: asString(row.checkpoint_revision_digest), journalSequence: checkpointSequence,
+      durableAt: row.milestone_created_at === null ? asString(row.checkpoint_created_at) : asString(row.milestone_created_at),
+      coveredChangeExtent: `不可变修订版 ${checkpointLabel}，不含其后 ${journalEntryCount} 条已确认修订日志`,
+      verification: '已由 SQLite 权威记录核对',
+      limitation: '选择此状态不会删除更新的修订日志恢复材料。', snapshotId: null,
+    } satisfies RecoveryComparisonProjection['checkpoint'];
+    let snapshotProjection: RecoverySnapshotComparisonProjection;
+    if (snapshot.state === 'none') {
+      snapshotProjection = { state: 'none', limitation: '没有适用的恢复快照' };
+    } else if (snapshot.state === 'unavailable') {
+      snapshotProjection = {
+        state: 'unavailable', snapshotId: snapshot.snapshotId, verification: snapshot.verification,
+        limitation: snapshot.limitation,
+      };
+    } else {
+      const record = snapshot.record;
+      snapshotProjection = {
+        state: 'eligible',
+        candidate: {
+          kind: 'snapshot', candidateId: `${attentionId}:snapshot:${record.snapshotId}`,
+          title: '已验证恢复快照', revisionId: record.revisionId, revisionLabel: record.revisionLabel,
+          revisionDigest: record.revisionDigest, journalSequence: record.journalSequence,
+          durableAt: record.verifiedAt,
+          coveredChangeExtent: `${record.blockCount} 个内容块 · ${record.totalGraphemes.toLocaleString('zh-CN')} 个字素`,
+          verification: '已独立校验快照对象',
+          limitation: '快照只覆盖其成功里程碑边界，不包含其后的修订日志。', snapshotId: record.snapshotId,
+        },
+      };
+    }
+    const unresolved = one(this.#db.prepare(
+      "SELECT count(*) total FROM recovery_attention WHERE status IN ('pending', 'deferred')",
+    ).all() as SqlRow[], 'RECOVERY_INVALID', '无法读取恢复待确认数量。');
+    return {
+      attentionId, attentionVersion: asNumber(row.attention_version),
+      status: asString(row.status) as 'pending' | 'deferred', unresolvedCount: asNumber(unresolved.total),
+      bookId: asString(row.book_id), bookTitle: asString(row.book_title),
+      manuscriptId: asString(row.manuscript_id), branchId: asString(row.branch_id), branchName: asString(row.branch_name),
+      lastDurableEditBoundary: {
+        journalSequence, durableAt: asString(row.last_durable_at), coveredChangeExtent: extent,
+        uncertainty: '最近持久写入边界之后、未获得修订日志确认的输入可能不存在；AI7 不把渲染器或进程内缓冲描述为可恢复。',
+      },
+      journal, checkpoint, snapshot: snapshotProjection,
+      otherPriorWork: this.listPriorWork().filter((item) => item.branchId !== asString(row.branch_id)),
+    };
+  }
+
+  recordRecoveryView(
+    attentionId: string,
+    expectedAttentionVersion: number,
+    selection: RecoverySelection,
+  ): void {
+    const attention = this.#requireRecoveryAttention(attentionId, expectedAttentionVersion);
+    const snapshotId = selection.kind === 'snapshot' ? selection.snapshotId : null;
+    if (snapshotId !== null) this.#requireAttentionSnapshot(attentionId, snapshotId);
+    const decidedAt = new Date().toISOString();
+    this.#db.prepare(
+      `INSERT INTO recovery_decisions(
+         decision_id, attention_id, attention_version, kind, selected_kind, selected_snapshot_id,
+         request_fingerprint, decided_at
+       ) VALUES (?, ?, ?, 'view', ?, ?, ?, ?)`,
+    ).run(randomUUID(), attentionId, asNumber(attention.attention_version), selection.kind, snapshotId,
+      sha256(canonicalJson({ attentionId, expectedAttentionVersion, selection })), decidedAt);
+  }
+
+  getRecoveryDatabaseWindow(
+    attentionId: string,
+    selection: Exclude<RecoverySelection, { kind: 'snapshot' }>,
+    target: RecoveryWindowTarget,
+  ): RecoveryWindowProjection {
+    const attention = this.#requireRecoveryAttention(attentionId);
+    const start = target.kind === 'start' ? 1 : target.position + 1;
+    requireBounded(Number.isSafeInteger(start) && start > 0, 'RECOVERY_WINDOW_INVALID', '恢复只读窗口位置无效。');
+    const journal = selection.kind === 'journal';
+    if (journal) {
+      const binding = this.#binding(asString(attention.manuscript_id), asString(attention.branch_id));
+      requireBounded(
+        binding.journalSequence === asNumber(attention.journal_sequence) &&
+          binding.workingDigest === asString(attention.journal_working_digest),
+        'RECOVERY_STATE_CHANGED',
+        '恢复的工作状态已变化，无法继续只读查看。',
+      );
+    }
+    const source = journal ? 'working_blocks' : 'manuscript_block_versions';
+    const ownerColumn = journal ? 'branch_id' : 'revision_id';
+    const ownerId = journal ? asString(attention.branch_id) : asString(attention.checkpoint_revision_id);
+    const rows = this.#db.prepare(
+      `SELECT block_id, position, kind, level, text, digest FROM ${source}
+       WHERE ${ownerColumn} = ? AND position >= ? ORDER BY position LIMIT ?`,
+    ).all(ownerId, start, MAX_WINDOW_BLOCKS + 1) as SqlRow[];
+    const visible = rows.slice(0, MAX_WINDOW_BLOCKS);
+    requireBounded(visible.length > 0, 'RECOVERY_WINDOW_NOT_FOUND', '恢复只读内容窗口为空。');
+    const revision = one(this.#db.prepare(
+      'SELECT revision_label FROM manuscript_revisions WHERE revision_id = ?',
+    ).all(asString(attention.checkpoint_revision_id)) as SqlRow[], 'RECOVERY_INVALID', '恢复检查点修订版缺失。');
+    return {
+      attentionId, selection, title: journal ? '恢复的工作状态' : '相关稿件检查点',
+      revisionId: asString(attention.checkpoint_revision_id),
+      revisionLabel: journal ? `${asString(revision.revision_label)} + 修订日志` : asString(revision.revision_label),
+      readonly: true,
+      blocks: visible.map((item) => ({
+        blockId: asString(item.block_id), position: asNumber(item.position),
+        kind: asString(item.kind) as ManuscriptBlockProjection['kind'],
+        level: item.level === null ? null : asNumber(item.level), text: asString(item.text), digest: asString(item.digest),
+      })),
+      nextTarget: rows.length > MAX_WINDOW_BLOCKS
+        ? { kind: 'after', position: asNumber(visible.at(-1)!.position) }
+        : null,
+    };
+  }
+
+  deferRecovery(
+    attentionId: string,
+    expectedAttentionVersion: number,
+  ): Omit<RecoveryDeferralProjection, 'next'> {
+    return transact(this.#db, () => {
+      const attention = this.#requireRecoveryAttention(attentionId, expectedAttentionVersion);
+      const decidedAt = new Date().toISOString();
+      const nextVersion = asNumber(attention.attention_version) + 1;
+      requireBounded(
+        this.#db.prepare(
+          `UPDATE recovery_attention SET status = 'deferred', attention_version = ?, deferred_at = ?
+           WHERE attention_id = ? AND attention_version = ? AND status IN ('pending', 'deferred')`,
+        ).run(nextVersion, decidedAt, attentionId, expectedAttentionVersion).changes === 1,
+        'RECOVERY_STATE_CHANGED',
+        '恢复待确认状态已变化。',
+      );
+      this.#db.prepare(
+        `INSERT INTO recovery_decisions(
+           decision_id, attention_id, attention_version, kind, selected_kind, selected_snapshot_id,
+           request_fingerprint, decided_at
+         ) VALUES (?, ?, ?, 'defer', NULL, NULL, ?, ?)`,
+      ).run(randomUUID(), attentionId, expectedAttentionVersion,
+        sha256(canonicalJson({ attentionId, expectedAttentionVersion, kind: 'defer' })), decidedAt);
+      return {
+        attentionId, attentionVersion: nextVersion, status: 'deferred',
+        completionLabel: '已保留恢复待确认状态',
+      };
+    });
+  }
+
+  isRecoveryObjectReferenced(objectRelativeKey: string): boolean {
+    return this.#db.prepare(
+      'SELECT 1 ok FROM recovery_snapshots WHERE object_relative_key = ? LIMIT 1',
+    ).get(objectRelativeKey) !== undefined;
+  }
+
+  beginRecoverySnapshotStage(attentionId: string, expectedAttentionVersion: number, snapshotId: string): void {
+    const attention = this.#requireRecoveryAttention(attentionId);
+    const snapshot = this.#requireAttentionSnapshot(attentionId, snapshotId);
+    requireBounded(
+      asNumber(attention.attention_version) === expectedAttentionVersion &&
+      asString(snapshot.branch_id) === asString(attention.branch_id) &&
+        asString(snapshot.revision_id) === asString(attention.checkpoint_revision_id),
+      'RECOVERY_SNAPSHOT_INELIGIBLE',
+      '恢复快照不适用于当前待确认状态。',
+    );
+    transact(this.#db, () => {
+      this.#db.prepare('DELETE FROM recovery_restore_stages WHERE attention_id = ?').run(attentionId);
+      this.#db.prepare(
+        `INSERT INTO recovery_restore_stages(
+           attention_id, selected_snapshot_id, expected_attention_version,
+           expected_block_count, expected_total_graphemes, started_at
+         ) VALUES (?, ?, ?, ?, ?, ?)`,
+      ).run(attentionId, snapshotId, expectedAttentionVersion, asNumber(snapshot.block_count),
+        asNumber(snapshot.total_graphemes), new Date().toISOString());
+    });
+  }
+
+  stageRecoverySnapshotBlocks(attentionId: string, blocks: ReadonlyArray<RecoverySnapshotBlock>): void {
+    requireBounded(UUID_PATTERN.test(attentionId), 'RECOVERY_SNAPSHOT_INELIGIBLE', '恢复快照暂存标识无效。');
+    requireBounded(blocks.length > 0 && blocks.length <= MIGRATION_BATCH, 'RECOVERY_SNAPSHOT_INELIGIBLE', '恢复快照批次无效。');
+    this.#recoveryStageBinding(attentionId);
+    const current = asNumber(one(this.#db.prepare(
+      'SELECT count(*) total FROM recovery_restore_stage_blocks WHERE attention_id = ?',
+    ).all(attentionId) as SqlRow[], 'RECOVERY_SNAPSHOT_INELIGIBLE', '恢复快照暂存计数缺失。').total);
+    const insert = this.#db.prepare(
+      `INSERT INTO recovery_restore_stage_blocks(
+         attention_id, block_id, position, kind, level, text, digest, grapheme_length
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    );
+    transact(this.#db, () => {
+      for (const [index, block] of blocks.entries()) {
+        requireBounded(
+          block.position === current + index + 1 && BLOCK_PATTERN.test(block.blockId) &&
+            DIGEST_PATTERN.test(block.digest) && block.text.isWellFormed() &&
+            block.text.length <= MAX_BLOCK_CODE_UNITS && stagedBlockLength(block.text, 'RECOVERY_SNAPSHOT_INELIGIBLE', '恢复快照文字超出有界范围。') === block.graphemeLength &&
+            blockDigest(block.kind, block.level, block.text) === block.digest,
+          'RECOVERY_SNAPSHOT_INELIGIBLE',
+          '恢复快照批次无法精确校验。',
+        );
+        insert.run(attentionId, block.blockId, block.position, block.kind, block.level,
+          block.text, block.digest, block.graphemeLength);
+      }
+    });
+  }
+
+  clearRecoveryStage(attentionId: string): void {
+    requireBounded(UUID_PATTERN.test(attentionId), 'RECOVERY_SOURCE_INVALID', '恢复来源暂存标识无效。');
+    this.#db.prepare('DELETE FROM recovery_restore_stages WHERE attention_id = ?').run(attentionId);
+  }
+
+  existingRecoveryRestoration(
+    restorationId: string,
+    attentionId: string,
+    expectedAttentionVersion: number,
+    selection: RecoverySelection,
+  ): RecoveryRestorationProjection | null {
+    requireBounded(UUID_PATTERN.test(restorationId), 'RECOVERY_INVALID', '恢复决定标识无效。');
+    const row = this.#db.prepare(
+      `SELECT rr.*, rd.request_fingerprint
+       FROM recovery_restorations rr
+       JOIN recovery_decisions rd ON rd.decision_id = rr.decision_id
+       WHERE rr.restoration_id = ?`,
+    ).get(restorationId) as SqlRow | undefined;
+    if (row === undefined) return null;
+    const fingerprint = sha256(canonicalJson({ restorationId, attentionId, expectedAttentionVersion, selection }));
+    requireBounded(
+      asString(row.attention_id) === attentionId && asString(row.request_fingerprint) === fingerprint,
+      'RECOVERY_DECISION_CONFLICT',
+      '恢复决定标识已绑定到其他请求。',
+    );
+    return this.#restorationProjection(row, selection);
+  }
+
+  restoreRecovery(
+    restorationId: string,
+    attentionId: string,
+    expectedAttentionVersion: number,
+    selection: RecoverySelection,
+    comparisonSnapshotId: string | null,
+  ): RecoveryRestorationProjection {
+    requireBounded(UUID_PATTERN.test(restorationId), 'RECOVERY_INVALID', '恢复决定标识无效。');
+    const fingerprint = sha256(canonicalJson({ restorationId, attentionId, expectedAttentionVersion, selection }));
+    const existing = this.existingRecoveryRestoration(restorationId, attentionId, expectedAttentionVersion, selection);
+    if (existing !== null) return existing;
+    let result: RecoveryRestorationProjection | undefined;
+    transact(this.#db, () => {
+      const attention = this.#requireRecoveryAttention(attentionId, expectedAttentionVersion);
+      const selectedSnapshotId = selection.kind === 'snapshot' ? selection.snapshotId : null;
+      let snapshot: SqlRow | null = null;
+      if (selectedSnapshotId !== null) {
+        snapshot = this.#requireAttentionSnapshot(attentionId, selectedSnapshotId);
+        const stage = this.#recoveryStageBinding(attentionId);
+        requireBounded(
+          asString(stage.selected_snapshot_id) === selectedSnapshotId &&
+            asNumber(stage.expected_attention_version) === expectedAttentionVersion,
+          'RECOVERY_STATE_CHANGED',
+          '恢复快照暂存与决定不一致。',
+        );
+      }
+      if (comparisonSnapshotId !== null) this.#requireAttentionSnapshot(attentionId, comparisonSnapshotId);
+      const binding = this.#binding(asString(attention.manuscript_id), asString(attention.branch_id));
+      requireBounded(
+        binding.journalSequence === asNumber(attention.journal_sequence) &&
+          binding.workingDigest === asString(attention.journal_working_digest),
+        'RECOVERY_STATE_CHANGED',
+        '恢复待确认工作状态已变化。',
+      );
+      const revision = one(this.#db.prepare(
+        'SELECT max(ordinal) maximum, source_version_id FROM manuscript_revisions WHERE manuscript_id = ?',
+      ).all(binding.manuscriptId) as SqlRow[], 'RECOVERY_SOURCE_INVALID', '稿件修订版序列缺失。');
+      const descendantRevisionId = randomUUID();
+      const descendantOrdinal = asNumber(revision.maximum) + 1;
+      const descendantRevisionLabel = `r${descendantOrdinal}`;
+      const sourceRevisionId = selection.kind === 'snapshot' ? asString(snapshot!.revision_id) : asString(attention.checkpoint_revision_id);
+      const sourceWorkingDigest = selection.kind === 'journal'
+        ? asString(attention.journal_working_digest)
+        : selection.kind === 'snapshot' ? asString(snapshot!.revision_digest) : asString(one(this.#db.prepare(
+            'SELECT revision_digest FROM manuscript_revisions WHERE revision_id = ?',
+          ).all(sourceRevisionId) as SqlRow[], 'RECOVERY_SOURCE_INVALID', '恢复来源修订版缺失。').revision_digest);
+      const now = new Date().toISOString();
+      let rebuiltTotal = binding.totalCharacters;
+      if (selection.kind !== 'journal') {
+        let expectedBlocks: number;
+        let expectedGraphemes: number;
+        if (selection.kind === 'snapshot') {
+          const staged = this.#validateRecoveryStageBlocks(attentionId, binding.manuscriptId);
+          expectedBlocks = asNumber(snapshot!.block_count);
+          expectedGraphemes = asNumber(snapshot!.total_graphemes);
+          requireBounded(
+            staged.blockCount === expectedBlocks && staged.totalGraphemes === expectedGraphemes,
+            'RECOVERY_SOURCE_INVALID',
+            '恢复快照暂存不完整。',
+          );
+        } else {
+          const inventory = one(this.#db.prepare(
+            `SELECT count(*) total, coalesce(sum(grapheme_length), 0) graphemes
+             FROM manuscript_block_versions WHERE revision_id = ?`,
+          ).all(asString(attention.checkpoint_revision_id)) as SqlRow[], 'RECOVERY_SOURCE_INVALID', '恢复检查点清单缺失。');
+          expectedBlocks = asNumber(inventory.total);
+          expectedGraphemes = asNumber(inventory.graphemes);
+        }
+        requireBounded(expectedBlocks > 0, 'RECOVERY_SOURCE_INVALID', '恢复来源没有内容块。');
+        this.#db.prepare('DELETE FROM working_blocks WHERE branch_id = ?').run(binding.branchId);
+        if (selection.kind === 'snapshot') {
+          this.#db.prepare(
+            `INSERT INTO working_blocks(branch_id, block_id, position, kind, level, text, digest, grapheme_length)
+             SELECT ?, block_id, position, kind, level, text, digest, grapheme_length
+             FROM recovery_restore_stage_blocks WHERE attention_id = ? ORDER BY position`,
+          ).run(binding.branchId, attentionId);
+        } else {
+          this.#db.prepare(
+            `INSERT INTO working_blocks(branch_id, block_id, position, kind, level, text, digest, grapheme_length)
+             SELECT ?, block_id, position, kind, level, text, digest, grapheme_length
+             FROM manuscript_block_versions WHERE revision_id = ? ORDER BY position`,
+          ).run(binding.branchId, asString(attention.checkpoint_revision_id));
+        }
+        rebuiltTotal = rebuildBranchDerived(this.#db, binding.branchId);
+        requireBounded(rebuiltTotal === expectedGraphemes, 'RECOVERY_SOURCE_INVALID', '恢复来源字符总数不一致。');
+      }
+      this.#db.prepare(
+        `INSERT INTO manuscript_revisions(
+           revision_id, manuscript_id, branch_id, ordinal, revision_label, parent_revision_id,
+           source_version_id, revision_digest, created_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(descendantRevisionId, binding.manuscriptId, binding.branchId, descendantOrdinal, descendantRevisionLabel,
+        binding.revisionId, asString(revision.source_version_id), sourceWorkingDigest, now);
+      snapshotWorkingRevision(this.#db, binding.branchId, descendantRevisionId, rebuiltTotal);
+      this.#db.prepare(
+        `UPDATE manuscript_command_groups SET status = 'superseded'
+         WHERE branch_id = ? AND ordinal <= ? AND status IN ('applied', 'undone')`,
+      ).run(binding.branchId, binding.historySequence);
+      requireBounded(
+        this.#db.prepare(
+          `UPDATE branch_working_state SET base_revision_id = ?, working_digest = ?, total_graphemes = ?,
+             last_checkpoint_sequence = journal_sequence, history_boundary_sequence = history_sequence
+           WHERE branch_id = ? AND base_revision_id = ? AND journal_sequence = ? AND working_digest = ?`,
+        ).run(descendantRevisionId, sourceWorkingDigest, rebuiltTotal, binding.branchId, binding.revisionId,
+          binding.journalSequence, binding.workingDigest).changes === 1,
+        'RECOVERY_STATE_CHANGED',
+        '恢复提交时稿件状态已变化。',
+      );
+      this.#db.prepare('UPDATE manuscript_branches SET base_revision_id = ? WHERE branch_id = ?')
+        .run(descendantRevisionId, binding.branchId);
+      const decisionId = randomUUID();
+      this.#db.prepare(
+        `INSERT INTO recovery_decisions(
+           decision_id, attention_id, attention_version, kind, selected_kind, selected_snapshot_id,
+           request_fingerprint, decided_at
+         ) VALUES (?, ?, ?, 'restore', ?, ?, ?, ?)`,
+      ).run(decisionId, attentionId, expectedAttentionVersion, selection.kind, selectedSnapshotId, fingerprint, now);
+      this.#db.prepare(
+        `INSERT INTO recovery_restorations(
+           restoration_id, decision_id, attention_id, selected_kind, selected_snapshot_id,
+           source_revision_id, source_working_digest, pre_restore_revision_id, pre_restore_journal_sequence,
+           pre_restore_working_digest, journal_candidate_digest, checkpoint_candidate_revision_id,
+           snapshot_candidate_id, descendant_revision_id, created_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(restorationId, decisionId, attentionId, selection.kind, selectedSnapshotId, sourceRevisionId,
+        sourceWorkingDigest, binding.revisionId, binding.journalSequence, binding.workingDigest,
+        asString(attention.journal_working_digest), asString(attention.checkpoint_revision_id),
+        comparisonSnapshotId, descendantRevisionId, now);
+      this.#db.prepare(
+        `INSERT INTO manuscript_recovery_review_status(
+           branch_id, restoration_id, recovered_revision_id, state, created_at
+         ) VALUES (?, ?, ?, 'awaiting-milestone-review', ?)
+         ON CONFLICT(branch_id) DO UPDATE SET restoration_id=excluded.restoration_id,
+           recovered_revision_id=excluded.recovered_revision_id, state='awaiting-milestone-review',
+           created_at=excluded.created_at, cleared_at=NULL, cleared_by_milestone_id=NULL`,
+      ).run(binding.branchId, restorationId, descendantRevisionId, now);
+      requireBounded(
+        this.#db.prepare(
+          `UPDATE recovery_attention SET status='resolved', attention_version=attention_version+1, resolved_at=?
+           WHERE attention_id=? AND attention_version=? AND status IN ('pending', 'deferred')`,
+        ).run(now, attentionId, expectedAttentionVersion).changes === 1,
+        'RECOVERY_STATE_CHANGED',
+        '恢复待确认状态已变化。',
+      );
+      this.#db.prepare('DELETE FROM recovery_restore_stages WHERE attention_id = ?').run(attentionId);
+      result = {
+        restorationId, attentionId, selected: selection, sourceRevisionId,
+        descendantRevisionId, descendantRevisionLabel, reviewStatus: '当前为恢复的工作状态',
+        preservedHistoryLabel: '既有修订版、修订日志、命令记录、里程碑、恢复快照与稿件固定点均保持原位',
+        window: this.getWindow(binding.manuscriptId, binding.branchId, { kind: 'start' }),
+      };
+    });
+    requireBounded(result !== undefined, 'RECOVERY_RESTORE_FAILED', '恢复决定未产生结果。');
+    return result;
   }
 
   getWindow(manuscriptId: string, branchId: string, target: ManuscriptWindowTarget): ManuscriptWindowProjection {
@@ -2704,6 +3972,7 @@ export class BoundedManuscriptStore {
       revisionLabel: binding.revisionLabel,
       journalSequence: binding.journalSequence,
       workingDigest: binding.workingDigest,
+      recoveredStateReview: this.#recoveredStateReview(branchId),
       focusBlockId,
       focusGrapheme,
       previousCursor: startPosition > 1 ? this.#encodeCursor('window', cursorBinding, { position: Math.max(1, startPosition - WINDOW_STRIDE) }) : null,
@@ -2774,8 +4043,9 @@ export class BoundedManuscriptStore {
     return projection;
   }
 
-  flushJournalEdit(input: JournalEditInput): JournalAcknowledgement {
+  flushJournalEdit(input: JournalEditInput, serviceLifetimeId: string): JournalAcknowledgement {
     validateIdentity(input.manuscriptId, input.branchId);
+    requireBounded(UUID_PATTERN.test(serviceLifetimeId), 'LIFETIME_INVALID', '本地服务生命周期标识无效。');
     requireBounded(UUID_PATTERN.test(input.clientEditId) && UUID_PATTERN.test(input.baseRevisionId) && BLOCK_PATTERN.test(input.blockId) && BLOCK_PATTERN.test(input.windowStartBlockId) && DIGEST_PATTERN.test(input.baseBlockDigest), 'EDIT_INVALID', '编辑标识无效。');
     requireBounded(input.insertText.isWellFormed() && input.insertText.length <= MAX_EDIT_CODE_UNITS, 'EDIT_TOO_LARGE', '单次编辑超出安全范围。');
     const inserted = graphemes(input.insertText);
@@ -2792,6 +4062,7 @@ export class BoundedManuscriptStore {
     }
     transact(this.#db, () => {
       const binding = this.#binding(input.manuscriptId, input.branchId);
+      this.#requireBranchEditable(input.branchId);
       requireBounded(binding.revisionId === input.baseRevisionId, 'EDIT_BINDING_CHANGED', '编辑绑定已变化。');
       requireBounded(binding.journalSequence === input.expectedJournalSequence, 'EDIT_SEQUENCE_CHANGED', '修订日志已前进，请刷新窗口。');
       requireBounded(
@@ -2815,7 +4086,6 @@ export class BoundedManuscriptStore {
       const sequence = binding.journalSequence + 1;
       const groupId = randomUUID();
       const historyOrdinal = binding.historySequence + 1;
-      const workingDigest = sha256(canonicalJson({ previous: binding.workingDigest, sequence, groupId, blockId: input.blockId, afterDigest }));
       const durableAt = new Date().toISOString();
       this.#db.prepare("UPDATE manuscript_command_groups SET status = 'superseded' WHERE branch_id = ? AND status = 'undone'").run(input.branchId);
       this.#db.prepare(
@@ -2823,12 +4093,23 @@ export class BoundedManuscriptStore {
            command_group_id, branch_id, ordinal, kind, status, source_group_id,
            before_working_digest, after_working_digest, created_at
          ) VALUES (?, ?, ?, 'edit', 'applied', NULL, ?, ?, ?)`,
-      ).run(groupId, input.branchId, historyOrdinal, binding.workingDigest, workingDigest, durableAt);
+      ).run(groupId, input.branchId, historyOrdinal, binding.workingDigest, '0'.repeat(64), durableAt);
       this.#db.prepare(
         `INSERT INTO manuscript_command_edits(
            command_group_id, position, block_id, before_text, before_digest, after_text, after_digest
          ) VALUES (?, 1, ?, ?, ?, ?, ?)`,
       ).run(groupId, input.blockId, beforeText, input.baseBlockDigest, afterText, afterDigest);
+      const workingDigest = recoveryWorkingDigest(
+        binding.workingDigest, sequence, 'edit', groupId, recoveryCommandEvidenceDigest(this.#db, groupId),
+      );
+      requireBounded(
+        this.#db.prepare(
+          `UPDATE manuscript_command_groups SET after_working_digest = ?
+           WHERE command_group_id = ? AND after_working_digest = ?`,
+        ).run(workingDigest, groupId, '0'.repeat(64)).changes === 1,
+        'HISTORY_CORRUPT',
+        '编辑命令证据无法绑定工作状态链。',
+      );
       const delta = after.length - before.length;
       const updated = this.#db.prepare(
         `UPDATE working_blocks SET text = ?, digest = ?, grapheme_length = ?
@@ -2841,16 +4122,17 @@ export class BoundedManuscriptStore {
         `INSERT INTO edit_journal_entries(
            journal_entry_id, client_edit_id, request_fingerprint, manuscript_id, branch_id, base_revision_id,
            sequence, block_id, from_grapheme, to_grapheme, insert_text, resulting_block_digest,
-           resulting_working_digest, durable_at, command_group_id, command_kind
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'edit')`,
+           resulting_working_digest, durable_at, command_group_id, command_kind, service_lifetime_id
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'edit', ?)`,
       ).run(randomUUID(), input.clientEditId, fingerprint, input.manuscriptId, input.branchId, input.baseRevisionId,
         sequence, input.blockId, input.fromGrapheme, input.toGrapheme, input.insertText, afterDigest,
-        workingDigest, durableAt, groupId);
+        workingDigest, durableAt, groupId, serviceLifetimeId);
       const state = this.#db.prepare(
         `UPDATE branch_working_state SET journal_sequence = ?, working_digest = ?, total_graphemes = total_graphemes + ?, history_sequence = ?
          WHERE branch_id = ? AND journal_sequence = ? AND working_digest = ?`,
       ).run(sequence, workingDigest, delta, historyOrdinal, input.branchId, binding.journalSequence, binding.workingDigest);
       requireBounded(state.changes === 1, 'EDIT_SEQUENCE_CHANGED', '修订日志在保存时已前进。');
+      this.#recordLifetimeJournalWrite(serviceLifetimeId, binding, sequence, workingDigest, durableAt);
     });
     const committed = one(this.#db.prepare(
       `SELECT client_edit_id, request_fingerprint, branch_id, base_revision_id, block_id, sequence,
@@ -3189,7 +4471,8 @@ export class BoundedManuscriptStore {
     };
   }
 
-  commitReplacement(previewId: string): ReplacementCommitProjection {
+  commitReplacement(previewId: string, serviceLifetimeId: string): ReplacementCommitProjection {
+    requireBounded(UUID_PATTERN.test(serviceLifetimeId), 'LIFETIME_INVALID', '本地服务生命周期标识无效。');
     const result = transact(this.#db, () => {
       const preview = one(this.#db.prepare('SELECT * FROM manuscript_replacement_previews WHERE preview_id = ?').all(previewId) as SqlRow[], 'REPLACEMENT_NOT_FOUND', '替换预览不存在。');
       requireBounded(asString(preview.state) === 'frozen' && asNumber(preview.validated_ordinal) > 0, 'REPLACEMENT_NOT_READY', '替换尚未完成复核。');
@@ -3198,6 +4481,7 @@ export class BoundedManuscriptStore {
       ).all(previewId, asNumber(preview.validated_ordinal)) as SqlRow[], 'REPLACEMENT_NOT_READY', '替换匹配缺失。').total);
       requireBounded(unvalidated === 0, 'REPLACEMENT_NOT_READY', '替换尚未完成全部精确范围复核。');
       const binding = this.#binding(asString(preview.manuscript_id), asString(preview.branch_id));
+      this.#requireBranchEditable(binding.branchId);
       requireBounded(
         binding.revisionId === asString(preview.revision_id) &&
           binding.journalSequence === asNumber(preview.journal_sequence) &&
@@ -3209,14 +4493,13 @@ export class BoundedManuscriptStore {
       const ordinal = binding.historySequence + 1;
       const now = new Date().toISOString();
       const sequence = binding.journalSequence + 1;
-      const workingDigest = sha256(canonicalJson({ previous: binding.workingDigest, sequence, groupId, previewId, count: asNumber(preview.included_matches) }));
       this.#db.prepare("UPDATE manuscript_command_groups SET status = 'superseded' WHERE branch_id = ? AND status = 'undone'").run(binding.branchId);
       this.#db.prepare(
         `INSERT INTO manuscript_command_groups(
            command_group_id, branch_id, ordinal, kind, status, source_group_id,
            before_working_digest, after_working_digest, created_at
          ) VALUES (?, ?, ?, 'replacement', 'applied', NULL, ?, ?, ?)`,
-      ).run(groupId, binding.branchId, ordinal, binding.workingDigest, workingDigest, now);
+      ).run(groupId, binding.branchId, ordinal, binding.workingDigest, '0'.repeat(64), now);
       const insertEdit = this.#db.prepare(
         `INSERT INTO manuscript_command_edits(
            command_group_id, position, block_id, before_text, before_digest, after_text, after_digest
@@ -3271,20 +4554,33 @@ export class BoundedManuscriptStore {
         if (page.length < HISTORY_BATCH) break;
       }
       requireBounded(firstBlockId && firstDigest, 'REPLACEMENT_NOT_READY', '替换匹配缺失。');
+      const workingDigest = recoveryWorkingDigest(
+        binding.workingDigest, sequence, 'replacement', groupId, recoveryCommandEvidenceDigest(this.#db, groupId),
+      );
+      requireBounded(
+        this.#db.prepare(
+          `UPDATE manuscript_command_groups SET after_working_digest = ?
+           WHERE command_group_id = ? AND after_working_digest = ?`,
+        ).run(workingDigest, groupId, '0'.repeat(64)).changes === 1,
+        'HISTORY_CORRUPT',
+        '替换命令证据无法绑定工作状态链。',
+      );
       this.#db.prepare(
         `INSERT INTO edit_journal_entries(
            journal_entry_id, client_edit_id, request_fingerprint, manuscript_id, branch_id, base_revision_id,
            sequence, block_id, from_grapheme, to_grapheme, insert_text, resulting_block_digest,
-           resulting_working_digest, durable_at, command_group_id, command_kind
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?, ?, 'replacement')`,
+           resulting_working_digest, durable_at, command_group_id, command_kind, service_lifetime_id
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?, ?, 'replacement', ?)`,
       ).run(randomUUID(), randomUUID(), sha256(canonicalJson({ previewId })), binding.manuscriptId, binding.branchId,
-        binding.revisionId, sequence, firstBlockId, asString(preview.replacement), firstDigest, workingDigest, now, groupId);
+        binding.revisionId, sequence, firstBlockId, asString(preview.replacement), firstDigest, workingDigest, now, groupId,
+        serviceLifetimeId);
       const state = this.#db.prepare(
         `UPDATE branch_working_state SET journal_sequence = ?, working_digest = ?, history_sequence = ?,
            total_graphemes = total_graphemes + ?
          WHERE branch_id = ? AND journal_sequence = ? AND working_digest = ?`,
       ).run(sequence, workingDigest, ordinal, totalDelta, binding.branchId, binding.journalSequence, binding.workingDigest);
       requireBounded(state.changes === 1, 'REPLACEMENT_STALE', '替换提交时稿件状态已变化。');
+      this.#recordLifetimeJournalWrite(serviceLifetimeId, binding, sequence, workingDigest, now);
       requireBounded(
         this.#db.prepare("UPDATE manuscript_replacement_previews SET state = 'committed', committed_at = ? WHERE preview_id = ? AND state = 'frozen'").run(now, previewId).changes === 1,
         'REPLACEMENT_STATE_CHANGED',
@@ -3321,48 +4617,59 @@ export class BoundedManuscriptStore {
     });
   }
 
-  saveMilestone(manuscriptId: string, branchId: string, labelInput: string, purposeInput: string, noteInput: string): MilestoneProjection {
-    const label = validateShortText(labelInput, 80, 'MILESTONE_INVALID', '里程碑标签必须为 1–80 个字符。');
-    const purpose = validateShortText(purposeInput, 120, 'MILESTONE_INVALID', '里程碑用途必须为 1–120 个字符。');
-    const note = validateShortText(noteInput, 500, 'MILESTONE_INVALID', '里程碑备注过长。', true) || null;
+  saveMilestone(plan: RecoverySnapshotPlan, object: RecoverySnapshotObjectMetadata): MilestoneProjection {
+    requireBounded(
+      DIGEST_PATTERN.test(object.objectDigest) &&
+        DIGEST_PATTERN.test(object.manifestDigest) &&
+        object.objectRelativeKey.isWellFormed() &&
+        object.objectRelativeKey.length > 0 &&
+        Number.isSafeInteger(object.byteLength) && object.byteLength > 0 &&
+        object.blockCount === plan.blockCount,
+      'SNAPSHOT_INVALID',
+      '恢复快照对象元数据无效。',
+    );
     return transact(this.#db, () => {
-      let binding = this.#binding(manuscriptId, branchId);
-      let revisionId = binding.revisionId;
-      let revisionLabel = binding.revisionLabel;
-      const now = new Date().toISOString();
-      const state = one(this.#db.prepare('SELECT last_checkpoint_sequence FROM branch_working_state WHERE branch_id = ?').all(branchId) as SqlRow[], 'MILESTONE_INVALID', '稿件工作状态缺失。');
-      if (binding.journalSequence > asNumber(state.last_checkpoint_sequence)) {
-        const previous = one(this.#db.prepare('SELECT source_version_id, ordinal FROM manuscript_revisions WHERE revision_id = ?').all(binding.revisionId) as SqlRow[], 'MILESTONE_INVALID', '当前修订版缺失。');
-        const ordinal = asNumber(previous.ordinal) + 1;
-        revisionId = randomUUID();
-        revisionLabel = `r${ordinal}`;
+      let binding = this.#binding(plan.manuscriptId, plan.branchId);
+      this.#requireBranchEditable(plan.branchId);
+      requireBounded(
+        binding.revisionId === plan.expectedBaseRevisionId &&
+          binding.journalSequence === plan.expectedJournalSequence &&
+          binding.workingDigest === plan.expectedWorkingDigest &&
+          binding.totalCharacters === plan.totalGraphemes,
+        'MILESTONE_STALE',
+        '稿件已变化，里程碑与恢复快照未提交。',
+      );
+      if (plan.revisionId !== binding.revisionId) {
+        const previous = one(this.#db.prepare(
+          'SELECT ordinal FROM manuscript_revisions WHERE revision_id = ?',
+        ).all(binding.revisionId) as SqlRow[], 'MILESTONE_INVALID', '当前修订版缺失。');
+        requireBounded(plan.revisionLabel === `r${asNumber(previous.ordinal) + 1}`, 'MILESTONE_INVALID', '里程碑修订版计划无效。');
         this.#db.prepare(
           `INSERT INTO manuscript_revisions(
              revision_id, manuscript_id, branch_id, ordinal, revision_label, parent_revision_id,
              source_version_id, revision_digest, created_at
            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        ).run(revisionId, manuscriptId, branchId, ordinal, revisionLabel, binding.revisionId, asString(previous.source_version_id), binding.workingDigest, now);
-        snapshotWorkingRevision(this.#db, branchId, revisionId, binding.totalCharacters);
+        ).run(plan.revisionId, plan.manuscriptId, plan.branchId, asNumber(previous.ordinal) + 1, plan.revisionLabel,
+          binding.revisionId, plan.sourceVersionId, binding.workingDigest, plan.createdAt);
+        snapshotWorkingRevision(this.#db, plan.branchId, plan.revisionId, binding.totalCharacters);
         this.#db.prepare(
           `UPDATE branch_working_state SET base_revision_id = ?, last_checkpoint_sequence = ?
            WHERE branch_id = ? AND base_revision_id = ? AND journal_sequence = ?`,
-        ).run(revisionId, binding.journalSequence, branchId, binding.revisionId, binding.journalSequence);
-        this.#db.prepare('UPDATE manuscript_branches SET base_revision_id = ? WHERE branch_id = ?').run(revisionId, branchId);
-        binding = this.#binding(manuscriptId, branchId);
+        ).run(plan.revisionId, binding.journalSequence, plan.branchId, binding.revisionId, binding.journalSequence);
+        this.#db.prepare('UPDATE manuscript_branches SET base_revision_id = ? WHERE branch_id = ?').run(plan.revisionId, plan.branchId);
+        binding = this.#binding(plan.manuscriptId, plan.branchId);
       }
-      const milestoneId = randomUUID();
-      const signoffRecordId = randomUUID();
       const workflow = one(this.#db.prepare(
         `SELECT workflow_instance_id, profile_id, profile_version, current_phase, state
          FROM workflow_instances WHERE manuscript_id = ?`,
-      ).all(manuscriptId) as SqlRow[], 'MILESTONE_INVALID', '稿件工作流程证据缺失。');
+      ).all(plan.manuscriptId) as SqlRow[], 'MILESTONE_INVALID', '稿件工作流程证据缺失。');
       const workflowEvidenceDigest = sha256(canonicalJson({
         workflowInstanceId: asString(workflow.workflow_instance_id),
         profileId: asString(workflow.profile_id),
         profileVersion: asString(workflow.profile_version),
         phase: asString(workflow.current_phase),
         state: asString(workflow.state),
-        revisionId,
+        revisionId: plan.revisionId,
         revisionDigest: binding.workingDigest,
         journalSequence: binding.journalSequence,
       }));
@@ -3370,41 +4677,74 @@ export class BoundedManuscriptStore {
         `INSERT INTO milestone_versions(
            milestone_id, manuscript_id, branch_id, revision_id, label, purpose, note, actor, created_at
          ) VALUES (?, ?, ?, ?, ?, ?, ?, '本机编辑', ?)`,
-      ).run(milestoneId, manuscriptId, branchId, revisionId, label, purpose, note, now);
+      ).run(plan.milestoneId, plan.manuscriptId, plan.branchId, plan.revisionId,
+        plan.label, plan.purpose, plan.note, plan.createdAt);
       this.#db.prepare(
         `INSERT INTO milestone_signoff_records(
            signoff_record_id, milestone_id, manuscript_id, branch_id, revision_id,
            workflow_instance_id, workflow_evidence_digest, actor, signed_at, label, stated_next_use
          ) VALUES (?, ?, ?, ?, ?, ?, ?, '本机编辑', ?, ?, ?)`,
-      ).run(signoffRecordId, milestoneId, manuscriptId, branchId, revisionId,
-        asString(workflow.workflow_instance_id), workflowEvidenceDigest, now, label, purpose);
+      ).run(plan.signoffRecordId, plan.milestoneId, plan.manuscriptId, plan.branchId, plan.revisionId,
+        asString(workflow.workflow_instance_id), workflowEvidenceDigest, plan.createdAt, plan.label, plan.purpose);
+      this.#db.prepare(
+        `INSERT INTO recovery_snapshots(
+           snapshot_id, milestone_id, book_id, manuscript_id, branch_id, revision_id, revision_label,
+           revision_digest, journal_sequence, object_digest, manifest_digest, object_relative_key, byte_length,
+           block_count, total_graphemes, created_at, verified_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        plan.snapshotId, plan.milestoneId, plan.bookId, plan.manuscriptId, plan.branchId, plan.revisionId,
+        plan.revisionLabel, binding.workingDigest, binding.journalSequence, object.objectDigest,
+        object.manifestDigest, object.objectRelativeKey, object.byteLength, object.blockCount, plan.totalGraphemes,
+        plan.createdAt, object.verifiedAt,
+      );
+      this.#db.prepare(
+        `UPDATE manuscript_recovery_review_status
+         SET state = 'cleared-by-milestone', cleared_at = ?, cleared_by_milestone_id = ?
+         WHERE branch_id = ? AND state = 'awaiting-milestone-review'`,
+      ).run(plan.createdAt, plan.milestoneId, plan.branchId);
       return {
-        milestoneId, manuscriptId, branchId, revisionId, revisionLabel, label, purpose, note, createdAt: now,
+        milestoneId: plan.milestoneId, manuscriptId: plan.manuscriptId, branchId: plan.branchId,
+        revisionId: plan.revisionId, revisionLabel: plan.revisionLabel, label: plan.label,
+        purpose: plan.purpose, note: plan.note, createdAt: plan.createdAt,
         journalSequence: binding.journalSequence, workingDigest: binding.workingDigest,
-        signoffRecordId, workflowEvidenceDigest, actor: '本机编辑', signedAt: now, statedNextUse: purpose,
-        completionLabel: `已保存里程碑版本「${label}」 · ${revisionLabel}`,
+        signoffRecordId: plan.signoffRecordId, workflowEvidenceDigest, actor: '本机编辑',
+        signedAt: plan.createdAt, statedNextUse: plan.purpose,
+        completionLabel: `已保存里程碑版本「${plan.label}」 · ${plan.revisionLabel}`,
+        recoverySnapshot: {
+          snapshotId: plan.snapshotId, blockCount: object.blockCount,
+          verification: '已独立校验快照对象',
+        },
       };
     });
   }
 
-  undo(manuscriptId: string, branchId: string, expectedWorkingDigest: string): DurableHistoryProjection {
-    return this.#applyHistory('undo', manuscriptId, branchId, expectedWorkingDigest);
+  undo(manuscriptId: string, branchId: string, expectedWorkingDigest: string, serviceLifetimeId: string): DurableHistoryProjection {
+    return this.#applyHistory('undo', manuscriptId, branchId, expectedWorkingDigest, serviceLifetimeId);
   }
 
-  redo(manuscriptId: string, branchId: string, expectedWorkingDigest: string): DurableHistoryProjection {
-    return this.#applyHistory('redo', manuscriptId, branchId, expectedWorkingDigest);
+  redo(manuscriptId: string, branchId: string, expectedWorkingDigest: string, serviceLifetimeId: string): DurableHistoryProjection {
+    return this.#applyHistory('redo', manuscriptId, branchId, expectedWorkingDigest, serviceLifetimeId);
   }
 
-  #applyHistory(action: 'undo' | 'redo', manuscriptId: string, branchId: string, expectedWorkingDigest: string): DurableHistoryProjection {
+  #applyHistory(
+    action: 'undo' | 'redo',
+    manuscriptId: string,
+    branchId: string,
+    expectedWorkingDigest: string,
+    serviceLifetimeId: string,
+  ): DurableHistoryProjection {
     requireBounded(DIGEST_PATTERN.test(expectedWorkingDigest), 'HISTORY_INVALID', '历史状态绑定无效。');
+    requireBounded(UUID_PATTERN.test(serviceLifetimeId), 'LIFETIME_INVALID', '本地服务生命周期标识无效。');
     return transact(this.#db, () => {
       const binding = this.#binding(manuscriptId, branchId);
+      this.#requireBranchEditable(branchId);
       requireBounded(binding.workingDigest === expectedWorkingDigest, 'HISTORY_STALE', '稿件已变化，请刷新历史状态。');
       const group = one(this.#db.prepare(
         action === 'undo'
-          ? "SELECT * FROM manuscript_command_groups WHERE branch_id = ? AND status = 'applied' ORDER BY ordinal DESC LIMIT 1"
-          : "SELECT * FROM manuscript_command_groups WHERE branch_id = ? AND status = 'undone' ORDER BY ordinal ASC LIMIT 1",
-      ).all(branchId) as SqlRow[], action === 'undo' ? 'NOTHING_TO_UNDO' : 'NOTHING_TO_REDO', action === 'undo' ? '没有可撤销的编辑。' : '没有可重做的编辑。');
+          ? "SELECT * FROM manuscript_command_groups WHERE branch_id = ? AND status = 'applied' AND ordinal > ? ORDER BY ordinal DESC LIMIT 1"
+          : "SELECT * FROM manuscript_command_groups WHERE branch_id = ? AND status = 'undone' AND ordinal > ? ORDER BY ordinal ASC LIMIT 1",
+      ).all(branchId, binding.historyBoundarySequence) as SqlRow[], action === 'undo' ? 'NOTHING_TO_UNDO' : 'NOTHING_TO_REDO', action === 'undo' ? '没有可撤销的编辑。' : '没有可重做的编辑。');
       const groupId = asString(group.command_group_id);
       validateCommandHistoryGroup(this.#db, groupId);
       let cursor = 0;
@@ -3438,7 +4778,9 @@ export class BoundedManuscriptStore {
         }
       }
       const sequence = binding.journalSequence + 1;
-      const nextDigest = sha256(canonicalJson({ previous: binding.workingDigest, sequence, action, groupId }));
+      const nextDigest = recoveryWorkingDigest(
+        binding.workingDigest, sequence, action, groupId, recoveryCommandEvidenceDigest(this.#db, groupId),
+      );
       const now = new Date().toISOString();
       requireBounded(
         this.#db.prepare('UPDATE manuscript_command_groups SET status = ? WHERE command_group_id = ? AND status = ?').run(action === 'undo' ? 'undone' : 'applied', groupId, action === 'undo' ? 'applied' : 'undone').changes === 1,
@@ -3450,17 +4792,18 @@ export class BoundedManuscriptStore {
         `INSERT INTO edit_journal_entries(
            journal_entry_id, client_edit_id, request_fingerprint, manuscript_id, branch_id, base_revision_id,
            sequence, block_id, from_grapheme, to_grapheme, insert_text, resulting_block_digest,
-           resulting_working_digest, durable_at, command_group_id, command_kind
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, '', ?, ?, ?, ?, ?)`,
+           resulting_working_digest, durable_at, command_group_id, command_kind, service_lifetime_id
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, '', ?, ?, ?, ?, ?, ?)`,
       ).run(randomUUID(), randomUUID(), sha256(canonicalJson({ action, groupId, sequence })), manuscriptId, branchId,
         binding.revisionId, sequence, asString(representative.block_id), action === 'undo' ? asString(representative.before_digest) : asString(representative.after_digest),
-        nextDigest, now, groupId, action);
+        nextDigest, now, groupId, action, serviceLifetimeId);
       const state = this.#db.prepare(
         `UPDATE branch_working_state SET journal_sequence = ?, working_digest = ?,
            total_graphemes = total_graphemes + ?
          WHERE branch_id = ? AND journal_sequence = ? AND working_digest = ?`,
       ).run(sequence, nextDigest, totalDelta, branchId, binding.journalSequence, binding.workingDigest);
       requireBounded(state.changes === 1, 'HISTORY_STALE', '稿件历史提交时工作状态已变化。');
+      this.#recordLifetimeJournalWrite(serviceLifetimeId, binding, sequence, nextDigest, now);
       const refreshed = this.#binding(manuscriptId, branchId);
       return {
         action, branchId, revisionId: refreshed.revisionId, revisionLabel: refreshed.revisionLabel,
@@ -3475,7 +4818,8 @@ export class BoundedManuscriptStore {
     validateIdentity(manuscriptId, branchId);
     const row = one(this.#db.prepare(
       `SELECT m.book_id, bws.manuscript_id, bws.branch_id, bws.base_revision_id, mr.revision_label,
-              bws.journal_sequence, bws.working_digest, bws.total_graphemes, bws.history_sequence
+              bws.journal_sequence, bws.working_digest, bws.total_graphemes, bws.history_sequence,
+              bws.history_boundary_sequence, bws.last_checkpoint_sequence
        FROM branch_working_state bws
        JOIN manuscripts m ON m.manuscript_id = bws.manuscript_id
        JOIN manuscript_revisions mr ON mr.revision_id = bws.base_revision_id
@@ -3486,6 +4830,20 @@ export class BoundedManuscriptStore {
       revisionLabel: asString(row.revision_label), journalSequence: asNumber(row.journal_sequence),
       workingDigest: asString(row.working_digest), totalCharacters: asNumber(row.total_graphemes),
       historySequence: asNumber(row.history_sequence),
+      historyBoundarySequence: asNumber(row.history_boundary_sequence),
+      lastCheckpointSequence: asNumber(row.last_checkpoint_sequence),
+    };
+  }
+
+  #recoveredStateReview(branchId: string): ManuscriptWindowProjection['recoveredStateReview'] {
+    const row = this.#db.prepare(
+      `SELECT restoration_id, recovered_revision_id FROM manuscript_recovery_review_status
+       WHERE branch_id = ? AND state = 'awaiting-milestone-review'`,
+    ).get(branchId) as SqlRow | undefined;
+    return row === undefined ? null : {
+      restorationId: asString(row.restoration_id),
+      recoveredRevisionId: asString(row.recovered_revision_id),
+      label: '当前为恢复的工作状态',
     };
   }
 
@@ -3593,8 +4951,192 @@ export class BoundedManuscriptStore {
     prunePersistedSearchSessions(this.#db);
   }
 
+  #requireBranchEditable(branchId: string): void {
+    requireBounded(
+      this.#db.prepare(
+        "SELECT 1 ok FROM recovery_attention WHERE branch_id = ? AND status IN ('pending', 'deferred') LIMIT 1",
+      ).get(branchId) === undefined,
+      'RECOVERY_ATTENTION_REQUIRED',
+      '该稿件分支仍有恢复待确认状态；普通编辑保持只读。',
+    );
+  }
+
+  #recordLifetimeJournalWrite(
+    serviceLifetimeId: string,
+    binding: BranchBinding,
+    sequence: number,
+    workingDigest: string,
+    durableAt: string,
+  ): void {
+    const lifetime = one(this.#db.prepare(
+      'SELECT outcome FROM service_lifetimes WHERE lifetime_id = ?',
+    ).all(serviceLifetimeId) as SqlRow[], 'LIFETIME_INVALID', '本地服务生命周期记录缺失。');
+    requireBounded(asString(lifetime.outcome) === 'running', 'LIFETIME_STATE_CHANGED', '本地服务生命周期已经结束。');
+    const prior = this.#db.prepare(
+      `SELECT manuscript_id, checkpoint_revision_id, checkpoint_sequence,
+              reconstruction_base_sequence, reconstruction_base_digest,
+              high_water_sequence, high_water_digest, entry_count
+       FROM service_lifetime_branch_writes WHERE lifetime_id = ? AND branch_id = ?`,
+    ).get(serviceLifetimeId, binding.branchId) as SqlRow | undefined;
+    if (prior === undefined || asNumber(prior.checkpoint_sequence) < binding.lastCheckpointSequence) {
+      requireBounded(sequence === binding.journalSequence + 1 && sequence > binding.lastCheckpointSequence,
+        'LIFETIME_STATE_CHANGED', '修订日志高水位无法从当前检查点开始。');
+      this.#db.prepare(
+        `INSERT INTO service_lifetime_branch_writes(
+           lifetime_id, branch_id, manuscript_id, checkpoint_revision_id, checkpoint_sequence,
+           reconstruction_base_sequence, reconstruction_base_digest,
+           high_water_sequence, high_water_digest, last_durable_at, entry_count
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+         ON CONFLICT(lifetime_id, branch_id) DO UPDATE SET
+           manuscript_id=excluded.manuscript_id,
+           checkpoint_revision_id=excluded.checkpoint_revision_id,
+           checkpoint_sequence=excluded.checkpoint_sequence,
+           reconstruction_base_sequence=excluded.reconstruction_base_sequence,
+           reconstruction_base_digest=excluded.reconstruction_base_digest,
+           high_water_sequence=excluded.high_water_sequence,
+           high_water_digest=excluded.high_water_digest,
+           last_durable_at=excluded.last_durable_at,
+           entry_count=1`,
+      ).run(serviceLifetimeId, binding.branchId, binding.manuscriptId, binding.revisionId,
+        binding.lastCheckpointSequence, binding.journalSequence, binding.workingDigest,
+        sequence, workingDigest, durableAt);
+      return;
+    }
+    requireBounded(
+      asString(prior.manuscript_id) === binding.manuscriptId &&
+        asString(prior.checkpoint_revision_id) === binding.revisionId &&
+        asNumber(prior.checkpoint_sequence) === binding.lastCheckpointSequence &&
+        asNumber(prior.reconstruction_base_sequence) <= binding.journalSequence &&
+        DIGEST_PATTERN.test(asString(prior.reconstruction_base_digest)) &&
+        asNumber(prior.high_water_sequence) === binding.journalSequence &&
+        asString(prior.high_water_digest) === binding.workingDigest &&
+        asNumber(prior.entry_count) === binding.journalSequence - asNumber(prior.reconstruction_base_sequence) &&
+        sequence === binding.journalSequence + 1,
+      'LIFETIME_STATE_CHANGED',
+      '修订日志高水位与当前生命周期不连续。',
+    );
+    requireBounded(
+      this.#db.prepare(
+        `UPDATE service_lifetime_branch_writes
+         SET high_water_sequence = ?, high_water_digest = ?, last_durable_at = ?, entry_count = entry_count + 1
+         WHERE lifetime_id = ? AND branch_id = ? AND high_water_sequence = ?`,
+      ).run(sequence, workingDigest, durableAt, serviceLifetimeId, binding.branchId,
+        binding.journalSequence).changes === 1,
+      'LIFETIME_STATE_CHANGED',
+      '修订日志高水位在提交时已变化。',
+    );
+  }
+
+  #requireRecoveryAttention(attentionId: string, expectedAttentionVersion?: number): SqlRow {
+    requireBounded(UUID_PATTERN.test(attentionId), 'RECOVERY_INVALID', '恢复待确认标识无效。');
+    const row = one(this.#db.prepare(
+      `SELECT * FROM recovery_attention
+       WHERE attention_id = ? AND status IN ('pending', 'deferred')`,
+    ).all(attentionId) as SqlRow[], 'RECOVERY_NOT_FOUND', '恢复待确认状态不存在或已经处理。');
+    if (expectedAttentionVersion !== undefined) {
+      requireBounded(
+        Number.isSafeInteger(expectedAttentionVersion) && expectedAttentionVersion >= 1 &&
+          asNumber(row.attention_version) === expectedAttentionVersion,
+        'RECOVERY_STATE_CHANGED',
+        '恢复待确认状态已变化。',
+      );
+    }
+    return row;
+  }
+
+  #requireAttentionSnapshot(attentionId: string, snapshotId: string): SqlRow {
+    requireBounded(UUID_PATTERN.test(snapshotId), 'RECOVERY_SNAPSHOT_INELIGIBLE', '恢复快照标识无效。');
+    return one(this.#db.prepare(
+      `SELECT rs.* FROM recovery_attention ra
+       JOIN recovery_snapshots rs ON rs.snapshot_id = ? AND rs.branch_id = ra.branch_id
+         AND rs.revision_id = ra.checkpoint_revision_id
+       WHERE ra.attention_id = ? AND ra.status IN ('pending', 'deferred')`,
+    ).all(snapshotId, attentionId) as SqlRow[], 'RECOVERY_SNAPSHOT_INELIGIBLE', '恢复快照不适用于当前待确认状态。');
+  }
+
+  #snapshotRecord(row: SqlRow): RecoverySnapshotRecord {
+    return {
+      snapshotId: asString(row.snapshot_id), bookId: asString(row.book_id),
+      manuscriptId: asString(row.manuscript_id), branchId: asString(row.branch_id),
+      revisionId: asString(row.revision_id), revisionLabel: asString(row.revision_label),
+      revisionDigest: asString(row.revision_digest), journalSequence: asNumber(row.journal_sequence),
+      objectDigest: asString(row.object_digest), manifestDigest: asString(row.manifest_digest),
+      objectRelativeKey: asString(row.object_relative_key),
+      byteLength: asNumber(row.byte_length), blockCount: asNumber(row.block_count),
+      totalGraphemes: asNumber(row.total_graphemes), createdAt: asString(row.created_at),
+      verifiedAt: asString(row.verified_at),
+    };
+  }
+
+  #recoveryStageBinding(attentionId: string): SqlRow {
+    return one(this.#db.prepare(
+      `SELECT attention_id, selected_snapshot_id, expected_attention_version,
+              expected_block_count, expected_total_graphemes
+       FROM recovery_restore_stages WHERE attention_id = ?`,
+    ).all(attentionId) as SqlRow[], 'RECOVERY_SOURCE_INVALID', '恢复来源暂存不存在。');
+  }
+
+  #validateRecoveryStageBlocks(
+    attentionId: string,
+    manuscriptId: string,
+  ): { blockCount: number; totalGraphemes: number } {
+    const stage = this.#recoveryStageBinding(attentionId);
+    let position = 0;
+    let totalGraphemes = 0;
+    while (true) {
+      const blocks = this.#db.prepare(
+        `SELECT s.block_id, s.position, s.kind, s.level, s.text, s.digest, s.grapheme_length,
+                mb.manuscript_id
+         FROM recovery_restore_stage_blocks s
+         LEFT JOIN manuscript_blocks mb ON mb.block_id = s.block_id
+         WHERE s.attention_id = ? AND s.position > ? ORDER BY s.position LIMIT ?`,
+      ).all(attentionId, position, MIGRATION_BATCH) as SqlRow[];
+      if (blocks.length === 0) break;
+      for (const block of blocks) {
+        position += 1;
+        const kind = asString(block.kind) as ManuscriptBlockProjection['kind'];
+        const level = block.level === null ? null : asNumber(block.level);
+        const content = asString(block.text);
+        const length = stagedBlockLength(content, 'RECOVERY_SOURCE_INVALID', '恢复快照暂存文字超出有界范围。');
+        requireBounded(
+          asNumber(block.position) === position && asString(block.manuscript_id) === manuscriptId &&
+            length === asNumber(block.grapheme_length) && blockDigest(kind, level, content) === asString(block.digest),
+          'RECOVERY_SOURCE_INVALID',
+          '恢复快照暂存内容无法精确校验。',
+        );
+        totalGraphemes += length;
+        requireBounded(Number.isSafeInteger(totalGraphemes), 'RECOVERY_SOURCE_INVALID', '恢复快照暂存字符计数无效。');
+      }
+    }
+    requireBounded(
+      position === asNumber(stage.expected_block_count) &&
+        totalGraphemes === asNumber(stage.expected_total_graphemes),
+      'RECOVERY_SOURCE_INVALID',
+      '恢复快照暂存未完成全部有界批次。',
+    );
+    return { blockCount: position, totalGraphemes };
+  }
+
+  #restorationProjection(row: SqlRow, selection: RecoverySelection): RecoveryRestorationProjection {
+    const descendantRevisionId = asString(row.descendant_revision_id);
+    const revision = one(this.#db.prepare(
+      'SELECT manuscript_id, branch_id, revision_label FROM manuscript_revisions WHERE revision_id = ?',
+    ).all(descendantRevisionId) as SqlRow[], 'RECOVERY_RESTORE_FAILED', '恢复后代修订版缺失。');
+    return {
+      restorationId: asString(row.restoration_id), attentionId: asString(row.attention_id), selected: selection,
+      sourceRevisionId: asString(row.source_revision_id), descendantRevisionId,
+      descendantRevisionLabel: asString(revision.revision_label), reviewStatus: '当前为恢复的工作状态',
+      preservedHistoryLabel: '既有修订版、修订日志、命令记录、里程碑、恢复快照与稿件固定点均保持原位',
+      window: this.getWindow(asString(revision.manuscript_id), asString(revision.branch_id), { kind: 'start' }),
+    };
+  }
+
   #hasHistory(branchId: string, state: 'applied' | 'undone'): boolean {
-    return this.#db.prepare('SELECT 1 ok FROM manuscript_command_groups WHERE branch_id = ? AND status = ? LIMIT 1').get(branchId, state) !== undefined;
+    return this.#db.prepare(
+      `SELECT 1 ok FROM manuscript_command_groups g
+       JOIN branch_working_state bws ON bws.branch_id = g.branch_id
+       WHERE g.branch_id = ? AND g.status = ? AND g.ordinal > bws.history_boundary_sequence LIMIT 1`,
+    ).get(branchId, state) !== undefined;
   }
 
   #journalAck(row: SqlRow, input: JournalEditInput): JournalAcknowledgement {
