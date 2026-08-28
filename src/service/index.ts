@@ -90,6 +90,15 @@ function decodeRequest(frame: Uint8Array): ServiceRequest {
       requireInput(value.input, [], tentativeId);
       break;
     }
+    case 'listBooks': {
+      const input = requireInput(value.input, ['after'], tentativeId);
+      const after = input.after;
+      if (
+        !(after === null || (isRecord(after) && hasExactKeys(after, ['title', 'bookId']) &&
+          isBoundedString(after.title, 180) && isBoundedString(after.bookId, 36) && UUID_PATTERN.test(after.bookId)))
+      ) throw new ProtocolError(tentativeId);
+      break;
+    }
     case 'getRecoveryComparison': {
       const input = requireInput(value.input, ['attentionId'], tentativeId);
       if (!isBoundedString(input.attentionId, 36) || !UUID_PATTERN.test(input.attentionId)) throw new ProtocolError(tentativeId);
@@ -160,18 +169,54 @@ function decodeRequest(frame: Uint8Array): ServiceRequest {
       }
       break;
     }
+    case 'prepareBookCreation': {
+      const input = requireInput(value.input, ['title', 'internalNumber'], tentativeId);
+      if (
+        !isBoundedString(input.title, 180) ||
+        !(input.internalNumber === null || isBoundedString(input.internalNumber, 80))
+      ) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'commitBookCreation': {
+      const input = requireInput(
+        value.input,
+        ['bookId', 'stableIdentity', 'title', 'internalNumber', 'reviewDigest'],
+        tentativeId,
+      );
+      if (
+        !isBoundedString(input.bookId, 36) || !UUID_PATTERN.test(input.bookId) ||
+        input.stableIdentity !== `book:${input.bookId}` ||
+        !isBoundedString(input.title, 180) ||
+        !(input.internalNumber === null || isBoundedString(input.internalNumber, 80)) ||
+        !isBoundedString(input.reviewDigest, 64) || !HEX_DIGEST_PATTERN.test(input.reviewDigest)
+      ) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'getBookOverview': {
+      const input = requireInput(value.input, ['bookId'], tentativeId);
+      if (!isBoundedString(input.bookId, 36) || !UUID_PATTERN.test(input.bookId)) throw new ProtocolError(tentativeId);
+      break;
+    }
     case 'prepareNewBookReview': {
       const input = requireInput(
         value.input,
-        ['draftId', 'expectedDraftVersion', 'targetChoiceId', 'confirmedTitle', 'acceptDegradation'],
+        ['draftId', 'expectedDraftVersion', 'target', 'acceptDegradation'],
         tentativeId,
+      );
+      const target = input.target;
+      const validTarget = isRecord(target) && (
+        (target.kind === 'new-book' && hasExactKeys(target, ['kind', 'choiceId', 'confirmedTitle']) &&
+          (target.choiceId === 'new-book' || target.choiceId === 'new-book-distinct-intended-work') &&
+          isBoundedString(target.confirmedTitle, 180)) ||
+        (target.kind === 'existing-book' && hasExactKeys(target, ['kind', 'bookId', 'relationship']) &&
+          isBoundedString(target.bookId, 36) && UUID_PATTERN.test(target.bookId) &&
+          target.relationship === 'first-manuscript')
       );
       if (
         !isBoundedString(input.draftId, 36) ||
         !UUID_PATTERN.test(input.draftId) ||
         !isSafeInteger(input.expectedDraftVersion, 1) ||
-        (input.targetChoiceId !== 'new-book' && input.targetChoiceId !== 'new-book-distinct-intended-work') ||
-        !isBoundedString(input.confirmedTitle, 180) ||
+        !validTarget ||
         typeof input.acceptDegradation !== 'boolean'
       ) {
         throw new ProtocolError(tentativeId);
@@ -549,6 +594,17 @@ async function dispatch(
         op: request.op,
         result: await store.abandonImportDraft(request.input.draftId, request.input.expectedDraftVersion),
       };
+    case 'prepareBookCreation':
+      return {
+        id: request.id, ok: true, op: request.op,
+        result: store.prepareBookCreation(request.input.title, request.input.internalNumber),
+      };
+    case 'commitBookCreation':
+      return { id: request.id, ok: true, op: request.op, result: store.commitBookCreation(request.input) };
+    case 'getBookOverview':
+      return { id: request.id, ok: true, op: request.op, result: store.getBookOverview(request.input.bookId) };
+    case 'listBooks':
+      return { id: request.id, ok: true, op: request.op, result: store.listBooks(request.input.after) };
     case 'prepareNewBookReview':
       return {
         id: request.id,
@@ -557,8 +613,7 @@ async function dispatch(
         result: store.prepareNewBookReview(
           request.input.draftId,
           request.input.expectedDraftVersion,
-          request.input.targetChoiceId,
-          request.input.confirmedTitle,
+          request.input.target,
           request.input.acceptDegradation,
         ),
       };
@@ -787,7 +842,7 @@ async function run(): Promise<void> {
   let harness: DormantHarnessRuntime | undefined;
   let jobs: CooperativeJobOwner | undefined;
   try {
-    const codeRoot = fileURLToPath(new URL('../../', import.meta.url));
+    const codeRoot = fileURLToPath(new URL('../', import.meta.url));
     store = await EditorialStore.open(dataRoot, codeRoot, {
       induceUnprovableReconciliation: importControl === 'uncertain-reconciliation',
       persistLegacyReviewedDraft: importControl === 'legacy-reviewed-v2',

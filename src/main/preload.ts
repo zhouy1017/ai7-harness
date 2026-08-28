@@ -145,11 +145,12 @@ async function invoke<Result>(channel: string, input?: unknown): Promise<Result>
       return envelope.result;
     }
     if (observedOperation) observeJ02Ipc(observedOperation, 'error', input);
-    const error = new Error(envelope.error.message) as Error & { code: string };
-    error.code = envelope.error.code;
-    throw error;
+    throw Object.freeze({ code: envelope.error.code, message: envelope.error.message });
   } catch (error) {
-    if (observedOperation && !(error instanceof Error && 'code' in error)) observeJ02Ipc(observedOperation, 'error', input);
+    const bridgedFailure = typeof error === 'object' && error !== null &&
+      'code' in error && typeof error.code === 'string' &&
+      'message' in error && typeof error.message === 'string';
+    if (observedOperation && !bridgedFailure) observeJ02Ipc(observedOperation, 'error', input);
     throw error;
   }
 }
@@ -176,6 +177,14 @@ const api: RendererApi = Object.freeze({
     invoke<PickerReselectResult>(IPC_CHANNELS.reselectImportDraft, input),
   abandonImportDraft: (input: ServiceOperationMap['abandonImportDraft']['input']) =>
     invoke<ServiceOperationMap['abandonImportDraft']['output']>(IPC_CHANNELS.abandonImportDraft, input),
+  prepareBookCreation: (input: ServiceOperationMap['prepareBookCreation']['input']) =>
+    invoke<ServiceOperationMap['prepareBookCreation']['output']>(IPC_CHANNELS.prepareBookCreation, input),
+  commitBookCreation: (input: ServiceOperationMap['commitBookCreation']['input']) =>
+    invoke<ServiceOperationMap['commitBookCreation']['output']>(IPC_CHANNELS.commitBookCreation, input),
+  getBookOverview: (input: ServiceOperationMap['getBookOverview']['input']) =>
+    invoke<ServiceOperationMap['getBookOverview']['output']>(IPC_CHANNELS.getBookOverview, input),
+  listBooks: (input: ServiceOperationMap['listBooks']['input']) =>
+    invoke<ServiceOperationMap['listBooks']['output']>(IPC_CHANNELS.listBooks, input),
   prepareNewBookReview: (input: ServiceOperationMap['prepareNewBookReview']['input']) =>
     invoke<ServiceOperationMap['prepareNewBookReview']['output']>(IPC_CHANNELS.prepareNewBookReview, input),
   commitNewBookImport: (input: CommitNewBookRendererInput) =>

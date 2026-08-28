@@ -18,7 +18,9 @@ Self-contained presentation, in-memory or artifact-local behavior may remain nat
 
 DSH-native artifacts own versioned Workflow definitions and technical execution logic. AI7 remains the sole owner of every durable Workflow Instance, Workflow Phase/Gate state, Signoff Record, scheduling decision and deterministic business transition. An AI7-facing Workflow Profile label, if retained, is only a projection or selector over one exact native definition; it is not a parallel executable package or a second workflow authority.
 
-This decision selects no exact DSH Profile/Bundle/Plugin carrier mapping and does not admit DSH `schedule`, `jobs` or workflow packages into the product subset. Those packages remain excluded; AI7 continues to schedule Runs and own durable editorial workflow state.
+Issue #38 narrows this carrier decision for the built-in Manuscript baseline only: the exact carrier is the read-only declarative native DSH Profile `manuscript-editorial@1.0.0`, whose native identity is derived from its directory basename, with exact raw-carrier digest, explicit empty `dsh.profile.bundles`, and no dependency/script/executable behavior. Its npm manifest metadata remains separately named `@ai7/manuscript-editorial-profile`; that package metadata is not the native Profile identity. AI7 separately pins the projection `ai7.manuscript.editorial.zh-CN@2.0.0`. Every resulting Workflow Instance pins both exact identities and digests while AI7 retains all durable workflow state and transitions.
+
+This decision still selects no exact carrier mapping for external or user-authored Workflow definitions and does not admit DSH `schedule`, `jobs` or workflow packages into the product subset. Those packages remain excluded; AI7 continues to schedule Runs and own durable editorial workflow state.
 
 ## Foreign Skill import
 
@@ -68,4 +70,4 @@ Every formal agent-originated Manuscript mutation—whether requested by a nativ
 
 ## Deferred details and stop boundary
 
-This decision does not choose catalog sources or adapters, closed-source admission, trust tiers, executable sandboxing, compatibility tests, state schemas, compact UI, exact Profile/Bundle mapping, core-package update policy, code-bearing automatic update, or any final sidecar/conversion/reconciliation/enablement/activation record name. Requiring one of those choices stops Issue #86 for the applicable Owner or later implementation brief.
+Except for the exact built-in Manuscript Profile mapping recorded above, this decision does not choose catalog sources or adapters, closed-source admission, trust tiers, executable sandboxing, compatibility tests, state schemas, compact UI, external/user-authored Profile/Bundle mapping, core-package update policy, code-bearing automatic update, or any final sidecar/conversion/reconciliation/enablement/activation record name. Requiring one of those choices stops Issue #86 for the applicable Owner or later implementation brief.

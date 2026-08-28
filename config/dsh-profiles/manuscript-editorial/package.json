@@ -1,0 +1,48 @@
+{
+  "name": "@ai7/manuscript-editorial-profile",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Built-in declarative DSH Profile for the AI7 Manuscript editorial workflow.",
+  "dsh": {
+    "profile": {
+      "bundles": []
+    }
+  },
+  "ai7": {
+    "workflowDefinition": {
+      "schema": "ai7.native-manuscript-workflow-definition/1",
+      "deliverableFamily": "manuscript",
+      "phases": [
+        {
+          "id": "intake",
+          "label": "接收与准备"
+        },
+        {
+          "id": "source-development",
+          "label": "来源建设"
+        },
+        {
+          "id": "drafting",
+          "label": "起草"
+        },
+        {
+          "id": "review-verification",
+          "label": "审阅与核查"
+        },
+        {
+          "id": "finalization",
+          "label": "定稿"
+        },
+        {
+          "id": "delivery",
+          "label": "交付"
+        },
+        {
+          "id": "maintenance",
+          "label": "维护"
+        }
+      ],
+      "gates": []
+    }
+  }
+}

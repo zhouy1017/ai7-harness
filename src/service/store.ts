@@ -4,12 +4,18 @@ import { copyFile, lstat, open, realpath, rename, rm } from 'node:fs/promises';
 import { basename, isAbsolute, posix, relative, resolve, sep } from 'node:path';
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
 import type {
+  BookCreationCommitProjection,
+  BookCreationReviewProjection,
+  BookSummaryCursor,
+  BookSummaryPageProjection,
+  BookWorkOverviewProjection,
   FidelityCategoryProjection,
   ImportCommitProjection,
   ImportDegradationDecisionReviewProjection,
   ImportDraftRecoveryProjection,
   ImportIdentityFindingProjection,
   ImportStartupProjection,
+  ImportTargetSelection,
   JournalAcknowledgement,
   JournalEditInput,
   ManuscriptWindowProjection,
@@ -58,14 +64,21 @@ import {
   ensureCanonicalDataDirectory,
   inspectCanonicalDataFile,
 } from '../shared/data-root.js';
+import {
+  loadBuiltInManuscriptProfile,
+  type BuiltInWorkflowProfile,
+} from './native-workflow-profile.js';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const TOKEN_PATTERN = UUID_PATTERN;
+const DIGEST_PATTERN = /^[0-9a-f]{64}$/;
 const CORE_SCHEMA_VERSION = 5;
 const EDITOR_SCHEMA_VERSION = 6;
-const SCHEMA_VERSION = 7;
+const RECOVERY_SCHEMA_VERSION = 7;
+const SCHEMA_VERSION = 8;
+const BOOK_SUMMARY_PAGE_SIZE = 20;
 const INGEST_BATCH_SIZE = 256;
-const WORKFLOW_PROFILE = {
+const LEGACY_WORKFLOW_PROFILE = {
   id: 'ai7.manuscript.editorial.zh-CN',
   name: '基础书稿编辑流程',
   version: '1.0.0',
@@ -108,6 +121,15 @@ const NON_EFFECTS = [
   '不承诺 DOCX 往返或版式复原',
 ] as const;
 const CLEAN_IMPORT_NON_EFFECT = '符合当前范围的导入不创建导入降级决定';
+const EMPTY_BOOK_NON_EFFECTS = [
+  '不创建稿件、来源、修订版、工作流实例或导入记录',
+  '不创建书系或书系成员关系',
+  '不创建编辑学习准入决定',
+  '不授予或执行模型提供方传输',
+  '不创建发稿版本',
+  '不创建公开发布许可或公开发布事实',
+  '不导出、不发送、不交付、不发布',
+] as const;
 const DEGRADATION_DECISION_SCHEMA = 'ai7.import-degradation-decision/1';
 
 type SqlRow = Record<string, SQLOutputValue>;
@@ -153,9 +175,20 @@ function sha256(value: string | Uint8Array): string {
   return createHash('sha256').update(value).digest('hex');
 }
 
-const WORKFLOW_PROFILE_DIGEST = sha256(canonicalJson(WORKFLOW_PROFILE));
+const LEGACY_WORKFLOW_PROFILE_DIGEST = sha256(canonicalJson(LEGACY_WORKFLOW_PROFILE));
 const BASELINE_EDITORIAL_DIMENSION_SET_DIGEST = sha256(canonicalJson(BASELINE_EDITORIAL_DIMENSION_SET));
 const EDITORIAL_DIMENSIONS = BASELINE_EDITORIAL_DIMENSION_SET.dimensions;
+
+function workflowProjectionJson(profile: BuiltInWorkflowProfile): string {
+  return canonicalJson({
+    schema: profile.projection.schema,
+    id: profile.projection.id,
+    name: profile.projection.name,
+    version: profile.projection.version,
+    phases: profile.projection.phases,
+    gates: profile.projection.gates,
+  });
+}
 
 function one<T extends SqlRow>(rows: T[], code: string, message: string): T {
   requireStore(rows.length === 1, code, message);
@@ -177,6 +210,22 @@ function safeTitle(input: string): string {
   const title = input.normalize('NFC').replace(/[\u0000-\u001f\u007f]/g, '').replace(/\s+/g, ' ').trim();
   requireStore(title.length > 0 && title.length <= 180, 'TITLE_INVALID', '书名必须为 1–180 个字符。');
   return title;
+}
+
+function safeInternalNumber(input: string | null): string | null {
+  if (input === null) return null;
+  requireStore(input.isWellFormed(), 'INTERNAL_NUMBER_INVALID', '内部编号必须是有效文本。');
+  const internalNumber = input.normalize('NFC').replace(/[\u0000-\u001f\u007f]/g, '').trim();
+  requireStore(
+    internalNumber.length > 0 && internalNumber.length <= 80,
+    'INTERNAL_NUMBER_INVALID',
+    '内部编号必须为 1–80 个字符，或留空。',
+  );
+  return internalNumber;
+}
+
+function exactBookChoiceLabel(title: string, bookId: string, internalNumber: string | null): string {
+  return `${title} · ${internalNumber === null ? '' : `内部编号 ${internalNumber} · `}图书 ID ${bookId}`;
 }
 
 function safeDisplayName(input: string): string {
@@ -575,6 +624,7 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === 4 ||
       currentVersion === CORE_SCHEMA_VERSION ||
       currentVersion === EDITOR_SCHEMA_VERSION ||
+      currentVersion === RECOVERY_SCHEMA_VERSION ||
       currentVersion === SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
@@ -582,6 +632,7 @@ function initializeSchema(db: DatabaseSync): void {
   if (
     currentVersion === CORE_SCHEMA_VERSION ||
     currentVersion === EDITOR_SCHEMA_VERSION ||
+    currentVersion === RECOVERY_SCHEMA_VERSION ||
     currentVersion === SCHEMA_VERSION
   ) return;
   if (currentVersion === 1) {
@@ -915,6 +966,10 @@ interface DraftSnapshot {
   selectedPath: string | null;
   reviewedTitle: string | null;
   reviewedTargetChoiceId: NewBookImportTargetChoiceId | null;
+  reviewedTargetKind: 'new-book' | 'existing-book' | null;
+  reviewedExistingBookId: string | null;
+  reviewedRelationship: 'new-book-first-manuscript' | 'first-manuscript' | null;
+  reviewedBookStateDigest: string | null;
   reviewDigest: string | null;
   stagedAt: string;
   parserIdentity: string;
@@ -965,9 +1020,14 @@ function continuationNotice(access: OriginalFileAccessProjection): string {
   return `${access.label}。已重新校验完整暂存快照，不会从原路径读取或替换暂存内容。`;
 }
 
-function recordsToCreate(plan: ImportFidelityPlan): ReadonlyArray<string> {
-  if (plan.degradations.length === 0) return BASE_RECORDS_TO_CREATE;
-  return [...BASE_RECORDS_TO_CREATE.slice(0, 4), '导入降级决定', ...BASE_RECORDS_TO_CREATE.slice(4)];
+function recordsToCreate(
+  plan: ImportFidelityPlan,
+  targetKind: 'new-book' | 'existing-book' = 'new-book',
+): ReadonlyArray<string> {
+  const records = targetKind === 'existing-book' ? BASE_RECORDS_TO_CREATE.slice(2) : BASE_RECORDS_TO_CREATE;
+  if (plan.degradations.length === 0) return records;
+  const fidelityIndex = records.indexOf('导入保真审阅');
+  return [...records.slice(0, fidelityIndex + 1), '导入降级决定', ...records.slice(fidelityIndex + 1)];
 }
 
 function nonEffects(plan: ImportFidelityPlan): ReadonlyArray<string> {
@@ -976,10 +1036,10 @@ function nonEffects(plan: ImportFidelityPlan): ReadonlyArray<string> {
 
 function newBookTargetChoice(
   identityFindings: ReadonlyArray<ImportIdentityFindingProjection>,
-): StagedImportProjection['targetChoices'][number] {
+): Extract<StagedImportProjection['targetChoices'][number], { kind: 'new-book' }> {
   return identityFindings.length > 0
-    ? { id: 'new-book-distinct-intended-work', label: '新建图书（作为不同作品）', selected: false }
-    : { id: 'new-book', label: '新建图书', selected: false };
+    ? { kind: 'new-book', id: 'new-book-distinct-intended-work', label: '新建图书（作为不同作品）', selected: false }
+    : { kind: 'new-book', id: 'new-book', label: '新建图书', selected: false };
 }
 
 function degradationReview(
@@ -1046,7 +1106,7 @@ function createLegacyNewBookReviewDigestV2(
             },
       recordsToCreate: recordsToCreate(plan),
       nonEffects: nonEffects(plan),
-      workflowProfile: { ...WORKFLOW_PROFILE, digest: WORKFLOW_PROFILE_DIGEST },
+      workflowProfile: { ...LEGACY_WORKFLOW_PROFILE, digest: LEGACY_WORKFLOW_PROFILE_DIGEST },
       editorialDimensionSet: {
         ...BASELINE_EDITORIAL_DIMENSION_SET,
         digest: BASELINE_EDITORIAL_DIMENSION_SET_DIGEST,
@@ -1096,13 +1156,92 @@ function createNewBookReviewDigestV4(
             },
       recordsToCreate: recordsToCreate(plan),
       nonEffects: nonEffects(plan),
-      workflowProfile: { ...WORKFLOW_PROFILE, digest: WORKFLOW_PROFILE_DIGEST },
+      workflowProfile: { ...LEGACY_WORKFLOW_PROFILE, digest: LEGACY_WORKFLOW_PROFILE_DIGEST },
       editorialDimensionSet: {
         ...BASELINE_EDITORIAL_DIMENSION_SET,
         digest: BASELINE_EDITORIAL_DIMENSION_SET_DIGEST,
       },
     }),
   );
+}
+
+type ResolvedImportTarget =
+  | {
+      kind: 'new-book';
+      choiceId: NewBookImportTargetChoiceId;
+      confirmedTitle: string;
+      label: '新建图书' | '新建图书（作为不同作品）';
+    }
+  | {
+      kind: 'existing-book';
+      choiceId: string;
+      bookId: string;
+      stableIdentity: string;
+      title: string;
+      internalNumber: string | null;
+      dimensionSetId: string;
+      label: string;
+      relationship: 'first-manuscript';
+      bookStateDigest: string;
+    };
+
+function createImportReviewDigestV5(
+  snapshot: DraftSnapshot,
+  draftVersion: number,
+  plan: ImportFidelityPlan,
+  target: ResolvedImportTarget,
+  identityFindings: ReadonlyArray<ImportIdentityFindingProjection>,
+  profile: BuiltInWorkflowProfile,
+): string {
+  return sha256(canonicalJson({
+    schema: 'ai7.manuscript-import-review/5',
+    draftId: snapshot.draftId,
+    draftVersion,
+    target: target.kind === 'new-book'
+      ? {
+          kind: 'new-book',
+          choiceId: target.choiceId,
+          confirmedTitle: target.confirmedTitle,
+        }
+      : {
+          kind: 'existing-book',
+          bookId: target.bookId,
+          stableIdentity: target.stableIdentity,
+          title: target.title,
+          internalNumber: target.internalNumber,
+          relationship: target.relationship,
+          bookStateDigest: target.bookStateDigest,
+        },
+    source: {
+      displayName: snapshot.displayName,
+      provenance: 'native-file-picker/local-provider-free',
+      objectDigest: snapshot.objectDigest,
+      parserIdentity: snapshot.parserIdentity,
+      sourceDigest: snapshot.sourceDigest,
+      sourceBytes: snapshot.sourceBytes,
+      contentDigest: snapshot.contentDigest,
+      structureDigest: snapshot.structureDigest,
+    },
+    identityFindings,
+    fidelity: snapshot.fidelity,
+    degradationDecision: plan.degradations.length === 0
+      ? null
+      : {
+          schema: DEGRADATION_DECISION_SCHEMA,
+          scope: 'this-import-only',
+          state: 'accepted-complete-set',
+          items: plan.degradations,
+        },
+    recordsToCreate: recordsToCreate(plan, target.kind),
+    nonEffects: nonEffects(plan),
+    workflowProfile: {
+      projection: profile.projection,
+      native: profile.native,
+    },
+    editorialDimensionSet: target.kind === 'new-book'
+      ? { ...BASELINE_EDITORIAL_DIMENSION_SET, digest: BASELINE_EDITORIAL_DIMENSION_SET_DIGEST }
+      : { preservedBookStateDigest: target.bookStateDigest },
+  }));
 }
 
 function reconstructReviewedTargetChoice(
@@ -1136,6 +1275,7 @@ export class EditorialStore {
   readonly #boundedAuthority: BoundedManuscriptStore;
   readonly #bounded: BoundedManuscriptStore;
   readonly #recoveryObjects: RecoveryObjectStore;
+  readonly #workflowProfile: BuiltInWorkflowProfile;
   readonly #lifetimeId: string;
   readonly #control: StoreControl;
   #contentObjectLifecycleTail: Promise<void> = Promise.resolve();
@@ -1152,6 +1292,7 @@ export class EditorialStore {
     boundedAuthority: BoundedManuscriptStore,
     bounded: BoundedManuscriptStore,
     recoveryObjects: RecoveryObjectStore,
+    workflowProfile: BuiltInWorkflowProfile,
     lifetimeId: string,
     control: StoreControl,
   ) {
@@ -1163,6 +1304,7 @@ export class EditorialStore {
     this.#boundedAuthority = boundedAuthority;
     this.#bounded = bounded;
     this.#recoveryObjects = recoveryObjects;
+    this.#workflowProfile = workflowProfile;
     this.#lifetimeId = lifetimeId;
     this.#control = control;
   }
@@ -1178,6 +1320,7 @@ export class EditorialStore {
     },
   ): Promise<EditorialStore> {
     requireStore(isAbsolute(dataRootInput), 'DATA_ROOT_INVALID', 'Agent Data Root 必须是绝对路径。');
+    const workflowProfile = await loadBuiltInManuscriptProfile(codeRoot);
     const dataRoot = await createCanonicalExternalDataRoot(dataRootInput, codeRoot);
     const objectsRoot = await ensureCanonicalDataDirectory(dataRoot, 'objects');
     const recoveryObjects = await RecoveryObjectStore.open(dataRoot);
@@ -1189,7 +1332,7 @@ export class EditorialStore {
     const authority = new DatabaseSync(databasePath);
     configureDatabase(authority);
     initializeSchema(authority);
-    initializeBoundedSchema(authority);
+    initializeBoundedSchema(authority, workflowProfile);
     const journal = new DatabaseSync(databasePath);
     configureDatabase(journal);
     const ingest = new DatabaseSync(databasePath);
@@ -1204,6 +1347,7 @@ export class EditorialStore {
       new BoundedManuscriptStore(authority),
       new BoundedManuscriptStore(journal),
       recoveryObjects,
+      workflowProfile,
       lifetimeId,
       control,
     );
@@ -1236,6 +1380,420 @@ export class EditorialStore {
         this.#authority.close();
       }
     }
+  }
+
+  prepareBookCreation(titleInput: string, internalNumberInput: string | null): BookCreationReviewProjection {
+    this.#assertAvailable();
+    const title = safeTitle(titleInput);
+    const internalNumber = safeInternalNumber(internalNumberInput);
+    if (internalNumber !== null) {
+      requireStore(
+        this.#authority.prepare('SELECT 1 FROM books WHERE internal_number = ?').get(internalNumber) === undefined,
+        'INTERNAL_NUMBER_CONFLICT',
+        '内部编号已被另一图书使用。',
+      );
+    }
+    const bookId = randomUUID();
+    const proposed = { bookId, stableIdentity: `book:${bookId}`, title, internalNumber };
+    const reviewDigest = sha256(canonicalJson({
+      schema: 'ai7.empty-book-creation-review/1',
+      proposed,
+      editorialDimensionSet: {
+        ...BASELINE_EDITORIAL_DIMENSION_SET,
+        digest: BASELINE_EDITORIAL_DIMENSION_SET_DIGEST,
+      },
+      recordsToCreate: ['图书与稳定标识', '图书编辑维度集（8 项）'],
+      nonEffects: EMPTY_BOOK_NON_EFFECTS,
+    }));
+    return {
+      reviewDigest,
+      proposed,
+      recordsToCreate: ['图书与稳定标识', '图书编辑维度集（8 项）'],
+      nonEffects: EMPTY_BOOK_NON_EFFECTS,
+      editorialDimensionSet: {
+        ...BASELINE_EDITORIAL_DIMENSION_SET,
+        digest: BASELINE_EDITORIAL_DIMENSION_SET_DIGEST,
+      },
+    };
+  }
+
+  commitBookCreation(input: {
+    bookId: string;
+    stableIdentity: string;
+    title: string;
+    internalNumber: string | null;
+    reviewDigest: string;
+  }): BookCreationCommitProjection {
+    this.#assertAvailable();
+    requireStore(UUID_PATTERN.test(input.bookId), 'BOOK_CREATION_INVALID', '拟创建图书标识无效。');
+    requireStore(input.stableIdentity === `book:${input.bookId}`, 'BOOK_CREATION_INVALID', '拟创建图书稳定标识无效。');
+    requireStore(DIGEST_PATTERN.test(input.reviewDigest), 'BOOK_CREATION_INVALID', '图书创建复核摘要无效。');
+    const title = safeTitle(input.title);
+    const internalNumber = safeInternalNumber(input.internalNumber);
+    const expected = this.prepareBookCreationReviewForExactIdentity(
+      input.bookId,
+      input.stableIdentity,
+      title,
+      internalNumber,
+    );
+    requireStore(expected.reviewDigest === input.reviewDigest, 'REVIEW_CHANGED', '图书创建复核已变化。');
+    const now = new Date().toISOString();
+    const dimensionSetId = randomUUID();
+    let committedOverview: BookWorkOverviewProjection | undefined;
+    this.#transaction(this.#authority, () => {
+      const existing = this.#authority.prepare(
+        `SELECT book_id, stable_identity, title, internal_number
+         FROM books WHERE book_id = ? OR stable_identity = ? ORDER BY book_id`,
+      ).all(input.bookId, input.stableIdentity) as SqlRow[];
+      if (existing.length > 0) {
+        const row = existing[0]!;
+        const exactIdentity = existing.length === 1 && asString(row.book_id) === input.bookId &&
+          asString(row.stable_identity) === input.stableIdentity && asString(row.title) === title &&
+          (row.internal_number === null ? internalNumber === null : asString(row.internal_number) === internalNumber);
+        requireStore(exactIdentity, 'BOOK_IDENTITY_CONFLICT', '拟创建图书身份或字段与已存在记录冲突。');
+        const forbidden = one(
+          this.#authority.prepare(
+            `SELECT
+               (SELECT count(*) FROM manuscripts WHERE book_id = ?) manuscripts,
+               (SELECT count(*) FROM source_versions WHERE book_id = ?) sources,
+               (SELECT count(*) FROM import_fidelity_reviews WHERE book_id = ?) fidelity_reviews,
+               (SELECT count(*) FROM workflow_instances WHERE book_id = ?) workflows,
+               (SELECT count(*) FROM manuscript_import_records WHERE book_id = ?) imports,
+               (SELECT count(*) FROM import_drafts WHERE reviewed_existing_book_id = ?) reviewed_drafts`,
+          ).all(input.bookId, input.bookId, input.bookId, input.bookId, input.bookId, input.bookId) as SqlRow[],
+          'BOOK_IDENTITY_CONFLICT',
+          '无法核对已存在图书的空状态。',
+        );
+        requireStore(
+          asNumber(forbidden.manuscripts) === 0 && asNumber(forbidden.sources) === 0 &&
+            asNumber(forbidden.fidelity_reviews) === 0 && asNumber(forbidden.workflows) === 0 &&
+            asNumber(forbidden.imports) === 0 && asNumber(forbidden.reviewed_drafts) === 0,
+          'BOOK_IDENTITY_CONFLICT',
+          '已存在图书不再是创建响应丢失后的精确空图书。',
+        );
+        try {
+          const overview = this.getBookOverview(input.bookId);
+          requireStore(
+            overview.manuscriptState.state === 'empty' && overview.records.length === 1 &&
+              overview.records[0]?.kind === 'book',
+            'BOOK_IDENTITY_CONFLICT',
+            '已存在图书不再是创建响应丢失后的精确空图书。',
+          );
+          committedOverview = overview;
+        } catch (error) {
+          if (error instanceof StoreError && error.code === 'BOOK_IDENTITY_CONFLICT') throw error;
+          throw new StoreError('BOOK_IDENTITY_CONFLICT', '已存在图书的编辑维度记录与已复核创建不一致。');
+        }
+        return;
+      }
+      if (internalNumber !== null) {
+        requireStore(
+          this.#authority.prepare('SELECT 1 FROM books WHERE internal_number = ?').get(internalNumber) === undefined,
+          'INTERNAL_NUMBER_CONFLICT',
+          '内部编号已被另一图书使用。',
+        );
+      }
+      this.#authority.prepare(
+        'INSERT INTO books(book_id, stable_identity, title, created_at, internal_number) VALUES (?, ?, ?, ?, ?)',
+      ).run(input.bookId, input.stableIdentity, title, now, internalNumber);
+      this.#insertBookDimensionSet(dimensionSetId, input.bookId, now);
+      const forbidden = one(
+        this.#authority.prepare(
+          `SELECT
+             (SELECT count(*) FROM manuscripts WHERE book_id = ?) manuscripts,
+             (SELECT count(*) FROM source_versions WHERE book_id = ?) sources,
+             (SELECT count(*) FROM workflow_instances WHERE book_id = ?) workflows,
+             (SELECT count(*) FROM manuscript_import_records WHERE book_id = ?) imports`,
+        ).all(input.bookId, input.bookId, input.bookId, input.bookId) as SqlRow[],
+        'BOOK_CREATION_FAILED',
+        '无法核对空图书创建结果。',
+      );
+      requireStore(
+        asNumber(forbidden.manuscripts) === 0 && asNumber(forbidden.sources) === 0 &&
+          asNumber(forbidden.workflows) === 0 && asNumber(forbidden.imports) === 0,
+        'BOOK_CREATION_FAILED',
+        '空图书创建意外形成了稿件或导入记录。',
+      );
+      this.#assertForeignKeys(this.#authority);
+    });
+    return { completionLabel: '图书已创建', overview: committedOverview ?? this.getBookOverview(input.bookId) };
+  }
+
+  getBookOverview(bookId: string): BookWorkOverviewProjection {
+    this.#assertAvailable();
+    requireStore(UUID_PATTERN.test(bookId), 'BOOK_INVALID', '图书标识无效。');
+    const book = one(
+      this.#authority.prepare(
+        `SELECT b.book_id, b.stable_identity, b.title, b.internal_number, b.created_at,
+                ds.dimension_set_id, ds.definition_digest, ds.profile_id, ds.profile_version,
+                ds.weight_semantics
+         FROM books b
+         JOIN book_dimension_sets ds ON ds.book_id = b.book_id
+         WHERE b.book_id = ?`,
+      ).all(bookId) as SqlRow[],
+      'BOOK_NOT_FOUND',
+      '图书不存在或维度集不完整。',
+    );
+    const dimensions = (this.#authority.prepare(
+      `SELECT dimension_id, display_label, weight
+       FROM book_dimensions WHERE dimension_set_id = ? ORDER BY position`,
+    ).all(asString(book.dimension_set_id)) as SqlRow[]).map((row) => ({
+      id: asString(row.dimension_id),
+      label: asString(row.display_label),
+      weight: asNumber(row.weight),
+    }));
+    requireStore(
+      asString(book.profile_id) === BASELINE_EDITORIAL_DIMENSION_SET.profileId &&
+        asString(book.profile_version) === BASELINE_EDITORIAL_DIMENSION_SET.profileVersion &&
+        asString(book.definition_digest) === BASELINE_EDITORIAL_DIMENSION_SET_DIGEST &&
+        asString(book.weight_semantics) === BASELINE_EDITORIAL_DIMENSION_SET.weightSemantics &&
+        canonicalJson(dimensions) === canonicalJson(EDITORIAL_DIMENSIONS),
+      'BOOK_DIMENSIONS_INVALID',
+      '图书编辑维度集不完整或已漂移。',
+    );
+    const bookProjection = {
+      bookId: asString(book.book_id),
+      stableIdentity: asString(book.stable_identity),
+      title: asString(book.title),
+      internalNumber: book.internal_number === null ? null : asString(book.internal_number),
+      createdAt: asString(book.created_at),
+    };
+    const bookRecord = {
+      kind: 'book' as const,
+      label: '图书' as const,
+      ...bookProjection,
+      dimensionSetId: asString(book.dimension_set_id),
+      dimensionSetDigest: asString(book.definition_digest),
+    };
+    const manuscripts = this.#authority.prepare(
+      `SELECT m.manuscript_id, m.created_at, mb.branch_id, mr.revision_id, mr.revision_label,
+              mr.revision_digest, mr.source_version_id, mr.created_at revision_created_at,
+              sv.display_name, sv.source_digest, sv.content_digest, sv.structure_digest, sv.parser_identity,
+              co.byte_length source_bytes,
+              sp.provenance_id, sp.acquisition_path, sp.locality,
+              wi.workflow_instance_id, wi.current_phase, wi.state, wi.profile_id, wi.profile_version,
+              wi.profile_digest, wi.native_profile_id, wi.native_profile_version, wi.native_profile_digest,
+              wp.projection_json,
+              ir.import_record_id, ir.commit_id, ir.fidelity_review_id, ir.degradation_decision_id,
+              ir.provenance_id import_provenance_id, ir.imported_at, fr.outcome fidelity_outcome
+       FROM manuscripts m
+       JOIN manuscript_branches mb ON mb.manuscript_id = m.manuscript_id
+       JOIN manuscript_revisions mr
+         ON mr.manuscript_id = m.manuscript_id AND mr.branch_id = mb.branch_id AND mr.ordinal = 1
+       JOIN source_versions sv ON sv.source_version_id = mr.source_version_id
+       JOIN content_objects co ON co.object_digest = sv.object_digest
+       JOIN source_provenance sp ON sp.source_version_id = sv.source_version_id
+       JOIN workflow_instances wi ON wi.manuscript_id = m.manuscript_id AND wi.book_id = m.book_id
+       JOIN workflow_profiles wp ON wp.profile_id = wi.profile_id AND wp.profile_version = wi.profile_version
+       JOIN manuscript_import_records ir
+         ON ir.manuscript_id = m.manuscript_id AND ir.book_id = m.book_id
+        AND ir.source_version_id = sv.source_version_id AND ir.resulting_revision_id = mr.revision_id
+       JOIN import_fidelity_reviews fr
+         ON fr.fidelity_review_id = ir.fidelity_review_id
+        AND fr.book_id = m.book_id AND fr.source_version_id = sv.source_version_id
+       WHERE m.book_id = ? AND m.role = 'primary'
+       ORDER BY m.created_at, m.manuscript_id`,
+    ).all(bookId) as SqlRow[];
+    const manuscriptAuthority = one(
+      this.#authority.prepare('SELECT count(*) manuscript_count FROM manuscripts WHERE book_id = ?').all(bookId) as SqlRow[],
+      'BOOK_MANUSCRIPT_STATE_INVALID',
+      '无法核对图书主稿件关系。',
+    );
+    requireStore(
+      asNumber(manuscriptAuthority.manuscript_count) === manuscripts.length && manuscripts.length <= 1,
+      'BOOK_MANUSCRIPT_STATE_INVALID',
+      '图书主稿件关系或记录图不完整。',
+    );
+    if (manuscripts.length === 0) {
+      return {
+        book: bookProjection,
+        manuscriptState: { state: 'empty', label: '尚无稿件' },
+        primaryAction: { kind: 'import-first-manuscript', label: '导入首份稿件', bookId },
+        records: [bookRecord],
+      };
+    }
+    const row = manuscripts[0]!;
+    requireStore(
+      asString(row.revision_label) === 'r1' && asString(row.state) === 'active' &&
+        asString(row.acquisition_path) === 'native-file-picker' && asString(row.locality) === 'local-provider-free' &&
+        asString(row.provenance_id) === asString(row.import_provenance_id) &&
+        asString(row.profile_id) === this.#workflowProfile.projection.id &&
+        asString(row.profile_version) === this.#workflowProfile.projection.version &&
+        asString(row.profile_digest) === this.#workflowProfile.projection.digest &&
+        asString(row.projection_json) === workflowProjectionJson(this.#workflowProfile) &&
+        asString(row.native_profile_id) === this.#workflowProfile.native.id &&
+        asString(row.native_profile_version) === this.#workflowProfile.native.version &&
+        asString(row.native_profile_digest) === this.#workflowProfile.native.digest,
+      'BOOK_RECORD_GRAPH_INVALID',
+      '图书稿件记录图不完整。',
+    );
+    const manuscriptId = asString(row.manuscript_id);
+    const branchId = asString(row.branch_id);
+    const revisionId = asString(row.revision_id);
+    const sourceVersionId = asString(row.source_version_id);
+    const fidelityReviewId = asString(row.fidelity_review_id);
+    const fidelityCategories = this.#loadPersistedFidelity(fidelityReviewId);
+    const fidelityPlan = deriveImportFidelityPlan(
+      fidelityCategories,
+      asString(row.source_digest),
+      asNumber(row.source_bytes),
+    );
+    const fidelityOutcome = asString(row.fidelity_outcome);
+    requireStore(
+      fidelityPlan !== undefined && fidelityOutcome === fidelityPlan.outcome &&
+        ((fidelityPlan.degradations.length === 0 && row.degradation_decision_id === null) ||
+          (fidelityPlan.degradations.length > 0 && row.degradation_decision_id !== null)),
+      'BOOK_RECORD_GRAPH_INVALID',
+      '稿件导入记录的保真结果不完整。',
+    );
+    return {
+      book: bookProjection,
+      manuscriptState: { state: 'populated', label: '已有主稿件', manuscriptId },
+      primaryAction: { kind: 'open-manuscript', label: '打开稿件', manuscriptId, branchId },
+      records: [
+        bookRecord,
+        { kind: 'manuscript', label: '主稿件', manuscriptId, bookId, role: 'primary', createdAt: asString(row.created_at) },
+        {
+          kind: 'revision', label: '修订版 r1', revisionId, manuscriptId, branchId, revisionLabel: 'r1',
+          revisionDigest: asString(row.revision_digest), sourceVersionId, createdAt: asString(row.revision_created_at),
+        },
+        {
+          kind: 'source', label: '来源版本与来源记录', sourceVersionId,
+          provenanceId: asString(row.provenance_id), bookId, displayName: asString(row.display_name),
+          sourceDigest: asString(row.source_digest), contentDigest: asString(row.content_digest),
+          structureDigest: asString(row.structure_digest), parserIdentity: asString(row.parser_identity),
+          acquisitionPath: 'native-file-picker', locality: 'local-provider-free',
+        },
+        {
+          kind: 'workflow', label: '工作流实例与精确 Profile 绑定',
+          workflowInstanceId: asString(row.workflow_instance_id), bookId, manuscriptId,
+          currentPhase: asString(row.current_phase), state: 'active',
+          projection: {
+            id: asString(row.profile_id), version: asString(row.profile_version), digest: asString(row.profile_digest),
+          },
+          nativeProfile: {
+            id: asString(row.native_profile_id), version: asString(row.native_profile_version),
+            digest: asString(row.native_profile_digest),
+          },
+        },
+        {
+          kind: 'import-record', label: '稿件导入记录', importRecordId: asString(row.import_record_id),
+          commitId: asString(row.commit_id), bookId, manuscriptId, sourceVersionId,
+          fidelityReviewId,
+          fidelityOutcome: fidelityOutcome as 'clean-import-no-round-trip' | 'degraded-import-no-round-trip',
+          fidelityCategories,
+          degradationDecisionId: row.degradation_decision_id === null ? null : asString(row.degradation_decision_id),
+          degradationDecision: row.degradation_decision_id === null
+            ? null
+            : { summaryLabel: '含已接受的降级', acceptedItems: fidelityPlan.degradations },
+          resultingRevisionId: revisionId, provenanceId: asString(row.provenance_id), importedAt: asString(row.imported_at),
+        },
+      ],
+    };
+  }
+
+  listBooks(after: BookSummaryCursor | null): BookSummaryPageProjection {
+    this.#assertAvailable();
+    if (after !== null) {
+      requireStore(
+        UUID_PATTERN.test(after.bookId) && after.title === safeTitle(after.title),
+        'BOOK_SUMMARY_CURSOR_INVALID',
+        '图书列表位置无效。',
+      );
+    }
+    const sql = `SELECT b.book_id, b.stable_identity, b.title, b.internal_number,
+                        CASE WHEN EXISTS (SELECT 1 FROM manuscripts m WHERE m.book_id = b.book_id)
+                          THEN 'populated' ELSE 'empty' END manuscript_state
+                 FROM books b
+                 ${after === null ? '' : 'WHERE b.title COLLATE BINARY > ? COLLATE BINARY OR (b.title = ? COLLATE BINARY AND b.book_id > ?)'}
+                 ORDER BY b.title COLLATE BINARY, b.book_id
+                 LIMIT ${BOOK_SUMMARY_PAGE_SIZE + 1}`;
+    const rows = (after === null
+      ? this.#authority.prepare(sql).all()
+      : this.#authority.prepare(sql).all(after.title, after.title, after.bookId)) as SqlRow[];
+    const summaries = rows.map((row) => {
+      const bookId = asString(row.book_id);
+      const stableIdentity = asString(row.stable_identity);
+      const title = asString(row.title);
+      const internalNumber = row.internal_number === null ? null : asString(row.internal_number);
+      const manuscriptState = asString(row.manuscript_state);
+      requireStore(
+        UUID_PATTERN.test(bookId) && stableIdentity === `book:${bookId}` && title === safeTitle(title) &&
+          (internalNumber === null || internalNumber === safeInternalNumber(internalNumber)) &&
+          (manuscriptState === 'empty' || manuscriptState === 'populated'),
+        'BOOK_SUMMARY_INVALID',
+        '图书列表记录无法安全呈现。',
+      );
+      const projectedManuscriptState: 'empty' | 'populated' =
+        manuscriptState === 'empty' ? 'empty' : 'populated';
+      return {
+        bookId,
+        stableIdentity,
+        title,
+        internalNumber,
+        manuscriptState: projectedManuscriptState,
+        manuscriptStateLabel: projectedManuscriptState === 'empty' ? '尚无稿件' as const : '已有主稿件' as const,
+      };
+    });
+    const items = summaries.slice(0, BOOK_SUMMARY_PAGE_SIZE);
+    const last = items.at(-1);
+    return {
+      items,
+      nextCursor: summaries.length > BOOK_SUMMARY_PAGE_SIZE && last
+        ? { title: last.title, bookId: last.bookId }
+        : null,
+    };
+  }
+
+  private prepareBookCreationReviewForExactIdentity(
+    bookId: string,
+    stableIdentity: string,
+    title: string,
+    internalNumber: string | null,
+  ): BookCreationReviewProjection {
+    const proposed = { bookId, stableIdentity, title, internalNumber };
+    return {
+      reviewDigest: sha256(canonicalJson({
+        schema: 'ai7.empty-book-creation-review/1',
+        proposed,
+        editorialDimensionSet: {
+          ...BASELINE_EDITORIAL_DIMENSION_SET,
+          digest: BASELINE_EDITORIAL_DIMENSION_SET_DIGEST,
+        },
+        recordsToCreate: ['图书与稳定标识', '图书编辑维度集（8 项）'],
+        nonEffects: EMPTY_BOOK_NON_EFFECTS,
+      })),
+      proposed,
+      recordsToCreate: ['图书与稳定标识', '图书编辑维度集（8 项）'],
+      nonEffects: EMPTY_BOOK_NON_EFFECTS,
+      editorialDimensionSet: {
+        ...BASELINE_EDITORIAL_DIMENSION_SET,
+        digest: BASELINE_EDITORIAL_DIMENSION_SET_DIGEST,
+      },
+    };
+  }
+
+  #insertBookDimensionSet(dimensionSetId: string, bookId: string, createdAt: string): void {
+    this.#authority.prepare(
+      `INSERT INTO book_dimension_sets(
+         dimension_set_id, book_id, version, profile_id, profile_version, definition_digest,
+         weight_semantics, created_at
+       ) VALUES (?, ?, 1, ?, ?, ?, ?, ?)`,
+    ).run(
+      dimensionSetId,
+      bookId,
+      BASELINE_EDITORIAL_DIMENSION_SET.profileId,
+      BASELINE_EDITORIAL_DIMENSION_SET.profileVersion,
+      BASELINE_EDITORIAL_DIMENSION_SET_DIGEST,
+      BASELINE_EDITORIAL_DIMENSION_SET.weightSemantics,
+      createdAt,
+    );
+    const insertDimension = this.#authority.prepare(
+      'INSERT INTO book_dimensions(dimension_set_id, dimension_id, display_label, weight, position) VALUES (?, ?, ?, ?, ?)',
+    );
+    EDITORIAL_DIMENSIONS.forEach((dimension, index) =>
+      insertDimension.run(dimensionSetId, dimension.id, dimension.label, dimension.weight, index + 1),
+    );
   }
 
   async stageSelectedDocx(selectionToken: string, selectedPathInput: string): Promise<StagedImportProjection> {
@@ -1288,6 +1846,10 @@ export class EditorialStore {
             selectedPath,
             reviewedTitle: null,
             reviewedTargetChoiceId: null,
+            reviewedTargetKind: null,
+            reviewedExistingBookId: null,
+            reviewedRelationship: null,
+            reviewedBookStateDigest: null,
             reviewDigest: null,
             stagedAt: now,
             parserIdentity: parsed.parserIdentity,
@@ -1557,20 +2119,8 @@ export class EditorialStore {
     requireStore(snapshot.state === 'reviewed', 'DRAFT_STATE_CHANGED', '导入草稿状态已变化。');
     const plan = this.#requireFidelityPlan(snapshot);
     const identityFindings = this.#identityFindings(snapshot);
-    const currentTarget = newBookTargetChoice(identityFindings);
-    let title: string | null = null;
-    try {
-      title = snapshot.reviewedTitle === null ? null : safeTitle(snapshot.reviewedTitle);
-    } catch {
-      title = null;
-    }
-    const reconstructedTarget =
-      title === null ? null : reconstructReviewedTargetChoice(snapshot, title, plan, identityFindings);
-    if (
-      reconstructedTarget === null ||
-      reconstructedTarget !== currentTarget.id ||
-      snapshot.reviewedTargetChoiceId !== reconstructedTarget
-    ) {
+    const reconstructedTarget = this.#reconstructReviewedImportTarget(snapshot, plan, identityFindings);
+    if (reconstructedTarget === null) {
       snapshot = this.#invalidateReview(snapshot);
       return {
         state: 'target-review-required',
@@ -1580,18 +2130,16 @@ export class EditorialStore {
         notice: '导入目标、书名、保真状态或最终记录后果已变化；旧复核已失效，请从变化后的选择重新确认。',
       };
     }
-    requireStore(title !== null, 'REVIEW_CHANGED', '导入前复核书名已变化。');
     requireStore(snapshot.reviewDigest !== null, 'REVIEW_CHANGED', '导入前复核摘要已变化。');
 
     return {
       state: 'review-ready',
       review: this.#reviewProjection(
         snapshot,
-        title,
         snapshot.reviewDigest,
         plan,
         plan.degradations.length > 0,
-        currentTarget.id,
+        reconstructedTarget,
         identityFindings,
         attempt?.attemptId ?? null,
       ),
@@ -1687,6 +2235,8 @@ export class EditorialStore {
               `UPDATE import_drafts
                SET selection_token = ?, state = 'staged', draft_version = ?, display_name = ?, object_digest = ?,
                    selected_path = ?, reviewed_title = NULL, reviewed_target_choice_id = NULL,
+                   reviewed_target_kind = NULL, reviewed_existing_book_id = NULL,
+                   reviewed_relationship = NULL, reviewed_book_state_digest = NULL,
                    review_digest = NULL, reviewed_at = NULL
                WHERE draft_id = ? AND draft_version = ? AND state IN ('staged', 'reviewed')`,
             )
@@ -1860,23 +2410,20 @@ export class EditorialStore {
   prepareNewBookReview(
     draftId: string,
     expectedDraftVersion: number,
-    targetChoiceId: NewBookImportTargetChoiceId,
-    confirmedTitleInput: string,
+    targetSelection: ImportTargetSelection,
     acceptDegradation: boolean,
   ): ReviewBeforeImportProjection {
     this.#assertAvailable();
     requireStore(UUID_PATTERN.test(draftId), 'DRAFT_INVALID', '导入草稿标识无效。');
     this.#requireNoAbandonmentCleanupIntent(draftId);
-    const confirmedTitle = safeTitle(confirmedTitleInput);
     const snapshot = this.#loadDraftSnapshot(draftId);
     requireStore(snapshot.state === 'staged', 'DRAFT_STATE_CHANGED', '导入草稿状态已变化。');
     requireStore(snapshot.version === expectedDraftVersion, 'DRAFT_VERSION_CHANGED', '导入草稿版本已变化。');
     const identityFindings = this.#identityFindings(snapshot);
-    const targetChoice = newBookTargetChoice(identityFindings);
-    requireStore(targetChoiceId === targetChoice.id, 'TARGET_CHOICE_CHANGED', '导入目标选择已变化，请重新选择。');
+    const target = this.#resolveImportTarget(targetSelection, identityFindings);
     const plan = this.#requireFidelityPlan(snapshot);
     if (plan.degradations.length > 0 && !acceptDegradation) {
-      return this.#reviewProjection(snapshot, confirmedTitle, null, plan, false, targetChoiceId, identityFindings, null);
+      return this.#reviewProjection(snapshot, null, plan, false, target, identityFindings, null);
     }
     requireStore(
       plan.degradations.length > 0 || !acceptDegradation,
@@ -1886,32 +2433,40 @@ export class EditorialStore {
     const nextVersion = expectedDraftVersion + 1;
     requireStore(
       !this.#control.persistLegacyReviewedDraft ||
-        (targetChoiceId === 'new-book' && identityFindings.length === 0),
+        (target.kind === 'new-book' && target.choiceId === 'new-book' && identityFindings.length === 0),
       'E2E_CONTROL_INVALID',
       '旧版复核边界仅适用于无身份提示的新建图书。',
     );
     const reviewSnapshot = { ...snapshot, version: nextVersion };
     const reviewDigest = this.#control.persistLegacyReviewedDraft
-      ? createLegacyNewBookReviewDigestV2(reviewSnapshot, confirmedTitle, nextVersion, plan)
-      : createNewBookReviewDigestV4(
-          reviewSnapshot,
-          confirmedTitle,
-          nextVersion,
-          plan,
-          targetChoiceId,
-          identityFindings,
-        );
-    const persistedTargetChoiceId = this.#control.persistLegacyReviewedDraft ? null : targetChoiceId;
+      ? createLegacyNewBookReviewDigestV2(reviewSnapshot, target.kind === 'new-book' ? target.confirmedTitle : '', nextVersion, plan)
+      : createImportReviewDigestV5(reviewSnapshot, nextVersion, plan, target, identityFindings, this.#workflowProfile);
+    const persistedTargetChoiceId = this.#control.persistLegacyReviewedDraft
+      ? null
+      : target.kind === 'new-book' ? target.choiceId : null;
     const reviewedAt = new Date().toISOString();
     this.#transaction(this.#authority, () => {
       const update = this.#authority
         .prepare(
           `UPDATE import_drafts
            SET state = 'reviewed', draft_version = ?, reviewed_title = ?, reviewed_target_choice_id = ?,
-               review_digest = ?, reviewed_at = ?
+               reviewed_target_kind = ?, reviewed_existing_book_id = ?, reviewed_relationship = ?,
+               reviewed_book_state_digest = ?, review_digest = ?, reviewed_at = ?
            WHERE draft_id = ? AND state = 'staged' AND draft_version = ?`,
         )
-        .run(nextVersion, confirmedTitle, persistedTargetChoiceId, reviewDigest, reviewedAt, draftId, expectedDraftVersion);
+        .run(
+          nextVersion,
+          target.kind === 'new-book' ? target.confirmedTitle : null,
+          persistedTargetChoiceId,
+          target.kind,
+          target.kind === 'existing-book' ? target.bookId : null,
+          target.kind === 'existing-book' ? 'first-manuscript' : 'new-book-first-manuscript',
+          target.kind === 'existing-book' ? target.bookStateDigest : null,
+          reviewDigest,
+          reviewedAt,
+          draftId,
+          expectedDraftVersion,
+        );
       requireStore(update.changes === 1, 'DRAFT_VERSION_CHANGED', '导入草稿在复核时已变化。');
     });
     return this.#reviewProjection(
@@ -1919,15 +2474,18 @@ export class EditorialStore {
         ...snapshot,
         state: 'reviewed',
         version: nextVersion,
-        reviewedTitle: confirmedTitle,
+        reviewedTitle: target.kind === 'new-book' ? target.confirmedTitle : null,
         reviewedTargetChoiceId: persistedTargetChoiceId,
+        reviewedTargetKind: target.kind,
+        reviewedExistingBookId: target.kind === 'existing-book' ? target.bookId : null,
+        reviewedRelationship: target.kind === 'existing-book' ? 'first-manuscript' : 'new-book-first-manuscript',
+        reviewedBookStateDigest: target.kind === 'existing-book' ? target.bookStateDigest : null,
         reviewDigest,
       },
-      confirmedTitle,
       reviewDigest,
       plan,
       plan.degradations.length > 0,
-      targetChoiceId,
+      target,
       identityFindings,
       null,
     );
@@ -1969,27 +2527,14 @@ export class EditorialStore {
     const revalidated = await this.#revalidateSnapshot(snapshotBeforeAttempt);
     requireStore(!revalidated.parserDrift, 'REVIEW_CHANGED', '解析器状态已变化，请重新复核导入。');
     const snapshotForAttempt = revalidated.snapshot;
-    requireStore(snapshotForAttempt.reviewedTitle, 'REVIEW_CHANGED', '确认书名缺失。');
     const planForAttempt = this.#requireFidelityPlan(snapshotForAttempt);
     const identityFindingsForAttempt = this.#identityFindings(snapshotForAttempt);
-    const targetChoiceForAttempt = newBookTargetChoice(identityFindingsForAttempt);
-    requireStore(
-      snapshotForAttempt.reviewedTargetChoiceId === targetChoiceForAttempt.id,
-      'REVIEW_CHANGED',
-      '导入目标无法与当前复核证据精确对应。',
+    const targetForAttempt = this.#reconstructReviewedImportTarget(
+      snapshotForAttempt,
+      planForAttempt,
+      identityFindingsForAttempt,
     );
-    requireStore(
-      createNewBookReviewDigestV4(
-        snapshotForAttempt,
-        snapshotForAttempt.reviewedTitle,
-        snapshotForAttempt.version,
-        planForAttempt,
-        targetChoiceForAttempt.id,
-        identityFindingsForAttempt,
-      ) === input.reviewDigest,
-      'REVIEW_CHANGED',
-      '导入前复核摘要无法由当前权威快照重建。',
-    );
+    requireStore(targetForAttempt !== null, 'REVIEW_CHANGED', '导入前复核摘要无法由当前权威状态重建。');
     if (!existingAttempt) {
       const preparedAt = new Date().toISOString();
       this.#transaction(this.#authority, () => {
@@ -2029,33 +2574,15 @@ export class EditorialStore {
       requireStore(snapshot.state === 'reviewed', 'DRAFT_NOT_REVIEWED', '导入草稿尚未完成复核。');
       requireStore(snapshot.version === input.expectedDraftVersion, 'DRAFT_VERSION_CHANGED', '导入草稿版本已变化。');
       requireStore(snapshot.reviewDigest === input.reviewDigest, 'REVIEW_CHANGED', '导入前复核摘要已变化。');
-      requireStore(snapshot.reviewedTitle, 'REVIEW_CHANGED', '确认书名缺失。');
       const plan = this.#requireFidelityPlan(snapshot);
       const identityFindings = this.#identityFindings(snapshot);
-      const targetChoice = newBookTargetChoice(identityFindings);
-      requireStore(
-        snapshot.reviewedTargetChoiceId === targetChoice.id,
-        'REVIEW_CHANGED',
-        '导入目标无法与当前复核证据精确对应。',
-      );
-      const currentReviewDigest = createNewBookReviewDigestV4(
-        snapshot,
-        snapshot.reviewedTitle,
-        snapshot.version,
-        plan,
-        targetChoice.id,
-        identityFindings,
-      );
-      requireStore(
-        currentReviewDigest === input.reviewDigest,
-        'REVIEW_CHANGED',
-        '导入前复核摘要无法由当前权威快照重建。',
-      );
+      const target = this.#reconstructReviewedImportTarget(snapshot, plan, identityFindings);
+      requireStore(target !== null, 'REVIEW_CHANGED', '导入前复核摘要无法由当前权威状态重建。');
       this.#boundedCall(() => this.#boundedAuthority.assertStagedDraftIntegrity(input.draftId));
 
       const now = new Date().toISOString();
-      const bookId = randomUUID();
-      const dimensionSetId = randomUUID();
+      const bookId = target.kind === 'existing-book' ? target.bookId : randomUUID();
+      const dimensionSetId = target.kind === 'existing-book' ? target.dimensionSetId : randomUUID();
       const sourceVersionId = randomUUID();
       const provenanceId = randomUUID();
       const fidelityReviewId = randomUUID();
@@ -2078,29 +2605,20 @@ export class EditorialStore {
       );
       const workingDigest = revisionDigest;
 
-      this.#authority.prepare('INSERT INTO books(book_id, stable_identity, title, created_at) VALUES (?, ?, ?, ?)').run(bookId, `book:${bookId}`, snapshot.reviewedTitle, now);
-      this.#authority
-        .prepare(
-          `INSERT INTO book_dimension_sets(
-             dimension_set_id, book_id, version, profile_id, profile_version, definition_digest,
-             weight_semantics, created_at
-           ) VALUES (?, ?, 1, ?, ?, ?, ?, ?)`,
-        )
-        .run(
-          dimensionSetId,
-          bookId,
-          BASELINE_EDITORIAL_DIMENSION_SET.profileId,
-          BASELINE_EDITORIAL_DIMENSION_SET.profileVersion,
-          BASELINE_EDITORIAL_DIMENSION_SET_DIGEST,
-          BASELINE_EDITORIAL_DIMENSION_SET.weightSemantics,
-          now,
+      if (target.kind === 'new-book') {
+        this.#authority.prepare(
+          'INSERT INTO books(book_id, stable_identity, title, created_at, internal_number) VALUES (?, ?, ?, ?, NULL)',
+        ).run(bookId, `book:${bookId}`, target.confirmedTitle, now);
+        this.#insertBookDimensionSet(dimensionSetId, bookId, now);
+      } else {
+        const revalidatedTarget = this.#emptyBookImportTarget(target.bookId);
+        requireStore(
+          revalidatedTarget.bookStateDigest === target.bookStateDigest &&
+            revalidatedTarget.dimensionSetId === target.dimensionSetId,
+          'REVIEW_CHANGED',
+          '所选图书身份、维度集或稿件状态已变化。',
         );
-      const insertDimension = this.#authority.prepare(
-        'INSERT INTO book_dimensions(dimension_set_id, dimension_id, display_label, weight, position) VALUES (?, ?, ?, ?, ?)',
-      );
-      EDITORIAL_DIMENSIONS.forEach((dimension, index) =>
-        insertDimension.run(dimensionSetId, dimension.id, dimension.label, dimension.weight, index + 1),
-      );
+      }
       this.#authority
         .prepare(
           `INSERT INTO source_versions(
@@ -2189,42 +2707,63 @@ export class EditorialStore {
       ).run(branchId, input.draftId);
       this.#authority
         .prepare(
-          `INSERT INTO workflow_profiles(profile_id, profile_version, profile_name, profile_digest, definition_json)
-           VALUES (?, ?, ?, ?, ?)
+          `INSERT INTO workflow_profiles(
+             profile_id, profile_version, profile_name, profile_digest, projection_schema, projection_json,
+             native_profile_id, native_profile_version, native_profile_digest
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(profile_id, profile_version) DO NOTHING`,
         )
         .run(
-          WORKFLOW_PROFILE.id,
-          WORKFLOW_PROFILE.version,
-          WORKFLOW_PROFILE.name,
-          WORKFLOW_PROFILE_DIGEST,
-          canonicalJson(WORKFLOW_PROFILE),
+          this.#workflowProfile.projection.id,
+          this.#workflowProfile.projection.version,
+          this.#workflowProfile.projection.name,
+          this.#workflowProfile.projection.digest,
+          this.#workflowProfile.projection.schema,
+          workflowProjectionJson(this.#workflowProfile),
+          this.#workflowProfile.native.id,
+          this.#workflowProfile.native.version,
+          this.#workflowProfile.native.digest,
         );
       const profile = one(
         this.#authority
-          .prepare('SELECT profile_digest, definition_json FROM workflow_profiles WHERE profile_id = ? AND profile_version = ?')
-          .all(WORKFLOW_PROFILE.id, WORKFLOW_PROFILE.version) as SqlRow[],
+          .prepare(
+            `SELECT profile_name, profile_digest, projection_schema, projection_json,
+                    native_profile_id, native_profile_version, native_profile_digest
+             FROM workflow_profiles WHERE profile_id = ? AND profile_version = ?`,
+          )
+          .all(this.#workflowProfile.projection.id, this.#workflowProfile.projection.version) as SqlRow[],
         'PROFILE_CONFLICT',
         '工作流程方案版本缺失。',
       );
       requireStore(
-        asString(profile.profile_digest) === WORKFLOW_PROFILE_DIGEST && asString(profile.definition_json) === canonicalJson(WORKFLOW_PROFILE),
+        asString(profile.profile_name) === this.#workflowProfile.projection.name &&
+          asString(profile.profile_digest) === this.#workflowProfile.projection.digest &&
+          asString(profile.projection_schema) === this.#workflowProfile.projection.schema &&
+          asString(profile.projection_json) === workflowProjectionJson(this.#workflowProfile) &&
+          asString(profile.native_profile_id) === this.#workflowProfile.native.id &&
+          asString(profile.native_profile_version) === this.#workflowProfile.native.version &&
+          asString(profile.native_profile_digest) === this.#workflowProfile.native.digest,
         'PROFILE_CONFLICT',
         '工作流程方案版本冲突。',
       );
       this.#authority
         .prepare(
           `INSERT INTO workflow_instances(
-             workflow_instance_id, book_id, manuscript_id, profile_id, profile_version, current_phase, state, created_at
-           ) VALUES (?, ?, ?, ?, ?, ?, 'active', ?)`,
+             workflow_instance_id, book_id, manuscript_id, profile_id, profile_version, profile_digest,
+             native_profile_id, native_profile_version, native_profile_digest, current_phase, state, created_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)`,
         )
         .run(
           workflowInstanceId,
           bookId,
           manuscriptId,
-          WORKFLOW_PROFILE.id,
-          WORKFLOW_PROFILE.version,
-          WORKFLOW_PROFILE.phases[0],
+          this.#workflowProfile.projection.id,
+          this.#workflowProfile.projection.version,
+          this.#workflowProfile.projection.digest,
+          this.#workflowProfile.native.id,
+          this.#workflowProfile.native.version,
+          this.#workflowProfile.native.digest,
+          this.#workflowProfile.projection.phases[0].label,
           now,
         );
       this.#authority
@@ -2286,6 +2825,7 @@ export class EditorialStore {
               }
             : null,
         },
+        overview: this.getBookOverview(bookId),
       };
       this.#authority
         .prepare(
@@ -2614,11 +3154,19 @@ export class EditorialStore {
         '导入提交证据无法与持久尝试精确对应。',
       );
       const stored = this.#loadStoredCommitResult(attempt.attemptId);
+      const currentResultJson = canonicalJson(stored);
+      const { overview: _legacyOmittedOverview, ...legacyStored } = stored;
+      const persistedResultJson = asString(commit.result_json);
       requireStore(
-        asString(commit.result_json) === canonicalJson(stored),
+        persistedResultJson === currentResultJson || persistedResultJson === canonicalJson(legacyStored),
         'COMMIT_PROOF_INCONCLUSIVE',
         '导入提交结果与权威记录图不一致。',
       );
+      if (persistedResultJson !== currentResultJson) {
+        this.#authority.prepare(
+          'UPDATE import_commits SET result_json = ? WHERE commit_id = ? AND result_json = ?',
+        ).run(currentResultJson, attempt.attemptId, persistedResultJson);
+      }
       this.#assertRecoveredCommitGraph(stored);
       await this.#verifyCommittedContentObject(stored);
       this.#authority
@@ -2669,7 +3217,8 @@ export class EditorialStore {
       this.#authority
         .prepare(
           `SELECT d.draft_version, d.staged_at, d.display_name, d.state, d.reviewed_title,
-                  d.reviewed_target_choice_id, a.attempt_id
+                  d.reviewed_target_choice_id, d.reviewed_target_kind, d.reviewed_existing_book_id,
+                  d.reviewed_relationship, a.attempt_id
            FROM import_drafts d
            LEFT JOIN import_commit_attempts a ON a.draft_id = d.draft_id
            WHERE d.draft_id = ?`,
@@ -2684,12 +3233,20 @@ export class EditorialStore {
       'STORE_CORRUPT',
       '导入复核目标无效。',
     );
-    const targetLabel =
-      reviewedTarget === 'new-book'
+    const reviewedTargetKind = row.reviewed_target_kind === null ? null : asString(row.reviewed_target_kind);
+    const targetBookId = row.reviewed_existing_book_id === null ? null : asString(row.reviewed_existing_book_id);
+    const relationship = row.reviewed_relationship === null ? null : asString(row.reviewed_relationship);
+    let targetLabel: string | null = null;
+    if (reviewedTargetKind === 'existing-book' && targetBookId !== null) {
+      const target = this.#authority.prepare('SELECT title FROM books WHERE book_id = ?').get(targetBookId) as SqlRow | undefined;
+      targetLabel = target === undefined ? null : asString(target.title);
+    } else {
+      targetLabel = reviewedTarget === 'new-book'
         ? '新建图书'
         : reviewedTarget === 'new-book-distinct-intended-work'
           ? '新建图书（作为不同作品）'
           : null;
+    }
     const attemptId = row.attempt_id === null ? null : asString(row.attempt_id);
     const draftState = asString(row.state);
     return {
@@ -2711,6 +3268,8 @@ export class EditorialStore {
               : 'staging',
       reviewedTitle: row.reviewed_title === null ? null : asString(row.reviewed_title),
       targetLabel,
+      targetBookId,
+      relationshipLabel: relationship === 'first-manuscript' ? '作为首份稿件导入' : null,
       originalFileAccess,
       staged,
       commitAttemptId: attemptId,
@@ -2745,7 +3304,9 @@ export class EditorialStore {
              (SELECT count(*) FROM manuscript_block_versions WHERE revision_id = ?) revision_blocks,
              (SELECT count(*) FROM working_blocks WHERE branch_id = ?) working_blocks,
              (SELECT count(*) FROM workflow_instances
-                WHERE book_id = ? AND manuscript_id = ? AND state = 'active') workflows,
+                WHERE book_id = ? AND manuscript_id = ? AND state = 'active'
+                  AND profile_id = ? AND profile_version = ? AND profile_digest = ?
+                  AND native_profile_id = ? AND native_profile_version = ? AND native_profile_digest = ?) workflows,
              (SELECT count(*) FROM manuscript_import_records
                 WHERE import_record_id = ? AND commit_id = ? AND book_id = ? AND manuscript_id = ?
                   AND resulting_revision_id = ?) import_records,
@@ -2769,6 +3330,12 @@ export class EditorialStore {
           result.branchId,
           result.bookId,
           result.manuscriptId,
+          this.#workflowProfile.projection.id,
+          this.#workflowProfile.projection.version,
+          this.#workflowProfile.projection.digest,
+          this.#workflowProfile.native.id,
+          this.#workflowProfile.native.version,
+          this.#workflowProfile.native.digest,
           result.importRecordId,
           result.commitId,
           result.bookId,
@@ -2951,6 +3518,8 @@ export class EditorialStore {
         .prepare(
           `UPDATE import_drafts
            SET state = 'staged', draft_version = ?, reviewed_title = NULL, reviewed_target_choice_id = NULL,
+               reviewed_target_kind = NULL, reviewed_existing_book_id = NULL,
+               reviewed_relationship = NULL, reviewed_book_state_digest = NULL,
                review_digest = NULL, reviewed_at = NULL
            WHERE draft_id = ? AND draft_version = ? AND state IN ('staged', 'reviewed')`,
         )
@@ -2970,6 +3539,8 @@ export class EditorialStore {
         .prepare(
           `UPDATE import_drafts
            SET state = 'staged', draft_version = ?, reviewed_title = NULL, reviewed_target_choice_id = NULL,
+               reviewed_target_kind = NULL, reviewed_existing_book_id = NULL,
+               reviewed_relationship = NULL, reviewed_book_state_digest = NULL,
                review_digest = NULL, reviewed_at = NULL
            WHERE draft_id = ? AND draft_version = ? AND state = 'reviewed'`,
         )
@@ -3502,6 +4073,18 @@ export class EditorialStore {
   #stagedProjection(snapshot: DraftSnapshot): StagedImportProjection {
     const identityFindings = this.#identityFindings(snapshot);
     const targetChoice = newBookTargetChoice(identityFindings);
+    const bookPage = this.listBooks(null);
+    const existingBooks = bookPage.items.map((book) => {
+      return {
+        kind: 'existing-book' as const,
+        id: `existing-book:${book.bookId}`,
+        bookId: book.bookId,
+        label: exactBookChoiceLabel(book.title, book.bookId, book.internalNumber),
+        internalNumber: book.internalNumber,
+        manuscriptState: book.manuscriptState,
+        selected: false as const,
+      };
+    });
     return {
       draftId: snapshot.draftId,
       draftVersion: snapshot.version,
@@ -3514,45 +4097,184 @@ export class EditorialStore {
       },
       titleSuggestion: { value: snapshot.titleSuggestion, sourceLabel: snapshot.titleSource },
       identityFindings,
-      targetChoices: [targetChoice],
+      targetChoices: [targetChoice, ...existingBooks],
+      nextBookCursor: bookPage.nextCursor,
       fidelity: snapshot.fidelity,
       detectedBlockCount: snapshot.blockCount,
     };
   }
 
+  #emptyBookImportTarget(bookId: string): {
+    bookId: string;
+    stableIdentity: string;
+    title: string;
+    internalNumber: string | null;
+    dimensionSetId: string;
+    label: string;
+    bookStateDigest: string;
+  } {
+    const overview = this.getBookOverview(bookId);
+    requireStore(overview.manuscriptState.state === 'empty', 'BOOK_ALREADY_POPULATED', '所选图书已有稿件，不能导入首份稿件。');
+    const bookRecord = overview.records[0];
+    requireStore(bookRecord?.kind === 'book', 'BOOK_RECORD_GRAPH_INVALID', '所选图书记录不完整。');
+    const bookStateDigest = sha256(canonicalJson({
+      schema: 'ai7.empty-book-import-target/1',
+      book: overview.book,
+      dimensionSet: {
+        dimensionSetId: bookRecord.dimensionSetId,
+        definitionDigest: bookRecord.dimensionSetDigest,
+        profileId: BASELINE_EDITORIAL_DIMENSION_SET.profileId,
+        profileVersion: BASELINE_EDITORIAL_DIMENSION_SET.profileVersion,
+        weightSemantics: BASELINE_EDITORIAL_DIMENSION_SET.weightSemantics,
+        dimensions: EDITORIAL_DIMENSIONS,
+      },
+      manuscriptState: 'empty',
+    }));
+    return {
+      bookId,
+      stableIdentity: overview.book.stableIdentity,
+      title: overview.book.title,
+      internalNumber: overview.book.internalNumber,
+      dimensionSetId: bookRecord.dimensionSetId,
+      label: exactBookChoiceLabel(overview.book.title, bookId, overview.book.internalNumber),
+      bookStateDigest,
+    };
+  }
+
+  #resolveImportTarget(
+    selection: ImportTargetSelection,
+    identityFindings: ReadonlyArray<ImportIdentityFindingProjection>,
+  ): ResolvedImportTarget {
+    if (selection.kind === 'new-book') {
+      const targetChoice = newBookTargetChoice(identityFindings);
+      requireStore(selection.choiceId === targetChoice.id, 'TARGET_CHOICE_CHANGED', '导入目标选择已变化，请重新选择。');
+      return {
+        kind: 'new-book',
+        choiceId: selection.choiceId,
+        confirmedTitle: safeTitle(selection.confirmedTitle),
+        label: targetChoice.label,
+      };
+    }
+    requireStore(
+      UUID_PATTERN.test(selection.bookId) && selection.relationship === 'first-manuscript',
+      'TARGET_CHOICE_INVALID',
+      '导入目标或稿件关系选择无效。',
+    );
+    const target = this.#emptyBookImportTarget(selection.bookId);
+    return {
+      kind: 'existing-book',
+      choiceId: `existing-book:${target.bookId}`,
+      ...target,
+      relationship: 'first-manuscript',
+    };
+  }
+
+  #reconstructReviewedImportTarget(
+    snapshot: DraftSnapshot,
+    plan: ImportFidelityPlan,
+    identityFindings: ReadonlyArray<ImportIdentityFindingProjection>,
+  ): ResolvedImportTarget | null {
+    if (snapshot.reviewDigest === null) return null;
+    if (snapshot.reviewedTargetKind === 'existing-book') {
+      if (
+        snapshot.reviewedExistingBookId === null ||
+        snapshot.reviewedRelationship !== 'first-manuscript' ||
+        snapshot.reviewedBookStateDigest === null
+      ) return null;
+      let target: ResolvedImportTarget;
+      try {
+        target = this.#resolveImportTarget(
+          { kind: 'existing-book', bookId: snapshot.reviewedExistingBookId, relationship: 'first-manuscript' },
+          identityFindings,
+        );
+      } catch {
+        return null;
+      }
+      if (target.kind !== 'existing-book' || target.bookStateDigest !== snapshot.reviewedBookStateDigest) return null;
+      return createImportReviewDigestV5(
+        snapshot,
+        snapshot.version,
+        plan,
+        target,
+        identityFindings,
+        this.#workflowProfile,
+      ) === snapshot.reviewDigest ? target : null;
+    }
+    if (snapshot.reviewedTargetKind !== 'new-book' || snapshot.reviewedTitle === null) return null;
+    let confirmedTitle: string;
+    try {
+      confirmedTitle = safeTitle(snapshot.reviewedTitle);
+    } catch {
+      return null;
+    }
+    const currentChoice = newBookTargetChoice(identityFindings);
+    if (snapshot.reviewedTargetChoiceId !== currentChoice.id) return null;
+    const target: ResolvedImportTarget = {
+      kind: 'new-book',
+      choiceId: currentChoice.id,
+      confirmedTitle,
+      label: currentChoice.label,
+    };
+    if (createImportReviewDigestV5(
+      snapshot,
+      snapshot.version,
+      plan,
+      target,
+      identityFindings,
+      this.#workflowProfile,
+    ) === snapshot.reviewDigest) return target;
+    return reconstructReviewedTargetChoice(snapshot, confirmedTitle, plan, identityFindings) === currentChoice.id
+      ? target
+      : null;
+  }
+
   #reviewProjection(
     snapshot: DraftSnapshot,
-    confirmedTitle: string,
     reviewDigest: string | null,
     plan: ImportFidelityPlan,
     accepted: boolean,
-    targetChoiceId: NewBookImportTargetChoiceId,
+    target: ResolvedImportTarget,
     identityFindings: ReadonlyArray<ImportIdentityFindingProjection>,
     commitAttemptId: string | null,
   ): ReviewBeforeImportProjection {
-    const targetChoice = newBookTargetChoice(identityFindings);
-    requireStore(targetChoiceId === targetChoice.id, 'TARGET_CHOICE_CHANGED', '导入目标选择已变化，请重新选择。');
     return {
       draftId: snapshot.draftId,
       draftVersion: snapshot.version,
       reviewDigest,
       commitAttemptId,
-      target: {
-        choiceId: targetChoiceId,
-        kind: 'new-book',
-        label: targetChoice.label,
-        confirmedTitle,
-      },
+      target: target.kind === 'new-book'
+        ? {
+            choiceId: target.choiceId,
+            kind: 'new-book',
+            label: target.label,
+            confirmedTitle: target.confirmedTitle,
+          }
+        : {
+            choiceId: target.choiceId,
+            kind: 'existing-book',
+            label: target.label,
+            bookId: target.bookId,
+            stableIdentity: target.stableIdentity,
+            internalNumber: target.internalNumber,
+            relationship: target.relationship,
+            relationshipLabel: '作为首份稿件导入',
+            bookStateDigest: target.bookStateDigest,
+          },
       source: this.#stagedProjection(snapshot).source,
       identityFindings,
       fidelity: snapshot.fidelity,
-      recordsToCreate: recordsToCreate(plan),
+      recordsToCreate: recordsToCreate(plan, target.kind),
       nonEffects: nonEffects(plan),
       workflowProfile: {
-        id: WORKFLOW_PROFILE.id,
-        name: WORKFLOW_PROFILE.name,
-        version: WORKFLOW_PROFILE.version,
-        digest: WORKFLOW_PROFILE_DIGEST,
+        id: this.#workflowProfile.projection.id,
+        name: this.#workflowProfile.projection.name,
+        version: this.#workflowProfile.projection.version,
+        digest: this.#workflowProfile.projection.digest,
+        nativeProfile: {
+          id: this.#workflowProfile.native.id,
+          version: this.#workflowProfile.native.version,
+          digest: this.#workflowProfile.native.digest,
+        },
       },
       editorialDimensionSet: {
         ...BASELINE_EDITORIAL_DIMENSION_SET,
@@ -3615,6 +4337,8 @@ export class EditorialStore {
         .prepare(
           `SELECT d.draft_id, d.state, d.draft_version, d.display_name, d.object_digest,
                   d.selected_path, d.reviewed_title, d.reviewed_target_choice_id, d.review_digest,
+                  d.reviewed_target_kind, d.reviewed_existing_book_id, d.reviewed_relationship,
+                  d.reviewed_book_state_digest,
                   d.staged_at, s.parser_identity, s.source_digest,
                   s.content_digest, s.structure_digest, s.block_count, s.character_count, s.fidelity_json,
                   s.title_suggestion, s.title_source, co.byte_length
@@ -3646,6 +4370,18 @@ export class EditorialStore {
     );
     const selectedPath = row.selected_path === null ? null : asString(row.selected_path);
     requireStore(selectedPath === null || isAbsolute(selectedPath), 'STORE_CORRUPT', '原始所选路径无效。');
+    const reviewedTargetKind = row.reviewed_target_kind === null ? null : asString(row.reviewed_target_kind);
+    const reviewedExistingBookId = row.reviewed_existing_book_id === null ? null : asString(row.reviewed_existing_book_id);
+    const reviewedRelationship = row.reviewed_relationship === null ? null : asString(row.reviewed_relationship);
+    const reviewedBookStateDigest = row.reviewed_book_state_digest === null ? null : asString(row.reviewed_book_state_digest);
+    requireStore(
+      (reviewedTargetKind === null || reviewedTargetKind === 'new-book' || reviewedTargetKind === 'existing-book') &&
+        (reviewedExistingBookId === null || UUID_PATTERN.test(reviewedExistingBookId)) &&
+        (reviewedRelationship === null || reviewedRelationship === 'new-book-first-manuscript' || reviewedRelationship === 'first-manuscript') &&
+        (reviewedBookStateDigest === null || DIGEST_PATTERN.test(reviewedBookStateDigest)),
+      'STORE_CORRUPT',
+      '导入复核目标记录无效。',
+    );
     return {
       draftId: asString(row.draft_id),
       state: asString(row.state),
@@ -3655,6 +4391,10 @@ export class EditorialStore {
       selectedPath,
       reviewedTitle: row.reviewed_title === null ? null : asString(row.reviewed_title),
       reviewedTargetChoiceId,
+      reviewedTargetKind: reviewedTargetKind as DraftSnapshot['reviewedTargetKind'],
+      reviewedExistingBookId,
+      reviewedRelationship: reviewedRelationship as DraftSnapshot['reviewedRelationship'],
+      reviewedBookStateDigest,
       reviewDigest: row.review_digest === null ? null : asString(row.review_digest),
       stagedAt: asString(row.staged_at),
       parserIdentity: asString(row.parser_identity),
@@ -3779,6 +4519,7 @@ export class EditorialStore {
             }
           : null,
       },
+      overview: this.getBookOverview(asString(row.book_id)),
     };
   }
 
@@ -3822,7 +4563,10 @@ export class EditorialStore {
                   AND round_trip_guaranteed = 0) fidelity_reviews,
              (SELECT count(*) FROM import_fidelity_categories WHERE fidelity_review_id = ?) fidelity_categories,
              (SELECT count(*) FROM import_degradation_decisions WHERE fidelity_review_id = ?) degradation_decisions,
-             (SELECT count(*) FROM workflow_instances WHERE workflow_instance_id = ?) workflows,
+             (SELECT count(*) FROM workflow_instances
+                WHERE workflow_instance_id = ?
+                  AND profile_id = ? AND profile_version = ? AND profile_digest = ?
+                  AND native_profile_id = ? AND native_profile_version = ? AND native_profile_digest = ?) workflows,
              (SELECT count(*) FROM manuscript_import_records
                 WHERE import_record_id = ? AND book_id = ? AND manuscript_id = ?
                   AND source_version_id = ? AND fidelity_review_id = ? AND resulting_revision_id = ?
@@ -3851,6 +4595,12 @@ export class EditorialStore {
           input.fidelityReviewId,
           input.fidelityReviewId,
           input.workflowInstanceId,
+          this.#workflowProfile.projection.id,
+          this.#workflowProfile.projection.version,
+          this.#workflowProfile.projection.digest,
+          this.#workflowProfile.native.id,
+          this.#workflowProfile.native.version,
+          this.#workflowProfile.native.digest,
           input.importRecordId,
           input.bookId,
           input.manuscriptId,
