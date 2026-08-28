@@ -8,3 +8,4 @@ Archived lifecycle nodes are historical records excluded from ordinary current-s
 - [Issue #86 design normalization — 2026-08-27](issue-86-design-normalization-2026-08-27/INDEX.md): integrated Issue #86 / PR #87 closure snapshots and consumed successor handoff.
 - [Issue #43 bounded editor — 2026-08-27](issue-43-bounded-editor-2026-08-27/INDEX.md): merged Issue #43 / PR #102 closure snapshots and consumed root routing.
 - [Issue #45 manuscript recovery — 2026-08-28](issue-45-manuscript-recovery-2026-08-28/INDEX.md): merged Issue #45 / PR #105 closure snapshots and consumed root routing.
+- [Issue #38 book intake — 2026-08-28](issue-38-book-intake-2026-08-28/INDEX.md): merged Issue #38 / PR #110 closure snapshots and consumed root routing.
