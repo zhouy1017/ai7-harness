@@ -6,10 +6,11 @@
 - Workflow `E2E Functional Gate` (`342459594`) is `disabled_manually`, no run is in progress, and PR #110 is an open Draft. GitHub-hosted Actions usage remains suspended until an exact later Owner restoration statement.
 - The branch drafts [ADR 0049](docs/adr/0049-bound-hosted-actions-consumption-inside-the-e2e-gate.md), its ADR 0027 pointer, the CI/incremental/Git/dispatch rules, exact non-archive historical bridge wording, and the next-Commander workflow-implementation handoff. `.github/workflows/e2e.yml` is unchanged.
 - Local Markdown-link and `git diff --check` validation pass. Two fresh T3, read-only, non-author Reviewers reported two Standards and three Spec findings; the overlapping optional-review, trigger-scope, bootstrap, and current-checkpoint contradictions are resolved once without iterative re-review. Review remains advisory and non-gating.
+- [PR #112](https://github.com/zhouy1017/ai7-harness/pull/112) is an open Draft. It has no checks because the workflow remains disabled; that absence is not a passing Gate.
 
 ## What's next
 
-- Re-resolve current `origin/dev`, then push, open, and integrate only the #111 documentation while the workflow remains disabled. Leave actual workflow implementation to the next Commander through the exact `HANDOFF.md` route.
+- Re-resolve current `origin/dev`, make the pure-documentation PR Ready, and integrate it under the exact disabled-workflow exception. Leave actual workflow implementation to the next Commander through the exact `HANDOFF.md` route.
 
 ## Key decisions
 
@@ -27,5 +28,5 @@
 ## Safe Resume Prompt
 
 ```text
-Continue Issue #111 on branch docs/111-bound-actions-consumption from exact dev@1d7c56b. Re-resolve origin/dev and the target-qualified owners. Do not edit .github/workflows/e2e.yml or trigger/re-enable Actions. If authority remains stable, commit the single review-informed correction, push and integrate only #111 while the workflow is disabled, then follow HANDOFF.md to give the next Commander a separate CI-governance workflow-implementation Issue.
+Continue Issue #111 / PR #112 on branch docs/111-bound-actions-consumption. Re-resolve origin/dev and the target-qualified owners. Do not edit .github/workflows/e2e.yml or trigger/re-enable Actions. If authority remains stable, make this pure-documentation PR Ready and integrate it while the workflow is disabled, then follow HANDOFF.md to give the next Commander a separate CI-governance workflow-implementation Issue.
 ```

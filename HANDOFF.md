@@ -4,7 +4,7 @@ GitHub-hosted Actions execution remains suspended by exact Owner instruction bec
 
 ## Current routing
 
-- [Issue #111](https://github.com/zhouy1017/ai7-harness/issues/111) records the accepted hosted-consumption design. [ADR 0049](docs/adr/0049-bound-hosted-actions-consumption-inside-the-e2e-gate.md) amends only ADR 0027 invocation, local feedback, and current routing defaults; it preserves the one provider-free Gate, Windows/macOS parity, and all superseded tier/ADR history.
+- [Issue #111](https://github.com/zhouy1017/ai7-harness/issues/111) and [PR #112](https://github.com/zhouy1017/ai7-harness/pull/112) record the accepted hosted-consumption design. [ADR 0049](docs/adr/0049-bound-hosted-actions-consumption-inside-the-e2e-gate.md) amends only ADR 0027 invocation, local feedback, and current routing defaults; it preserves the one provider-free Gate, Windows/macOS parity, and all superseded tier/ADR history.
 - The current workflow implementation still predates ADR 0049. Its only authorized successor outcome is one separate CI-governance Issue, branch, writable Worker, and pull request from then-current `dev`, changing exact `.github/workflows/e2e.yml` only as the accepted design requires.
 - PR #110 remains an open Draft. Local product work may continue, but product changes requiring the Gate do not merge and no product pull request becomes Ready while hosted usage is suspended.
 - Pure documentation, design, and CI-governance work may integrate while the workflow is disabled within an exact Change Brief after local validation. The Commander may request optional advisory read-only review; it is never a prerequisite. Such integration claims no green Gate and adds no required branch-protection status check.
