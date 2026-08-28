@@ -2,29 +2,31 @@
 
 ## What's done
 
-- [Issue #111](https://github.com/zhouy1017/ai7-harness/issues/111) / [PR #112](https://github.com/zhouy1017/ai7-harness/pull/112) is integrated at `dev@d3a02954df0e9747339df793b5d1330a60d2ec6f`. [ADR 0049](docs/adr/0049-bound-hosted-actions-consumption-inside-the-e2e-gate.md) and its current runbook projections now own the accepted hosted-consumption boundary.
-- Workflow `E2E Functional Gate` (`342459594`) remains `disabled_manually`, no run is in progress, and PR #110 remains an open Draft. GitHub-hosted Actions usage stays suspended until an exact later Owner restoration statement.
-- `.github/workflows/e2e.yml` still predates ADR 0049. The exact next outcome is a separate CI-governance Issue/branch/PR organized by the next Commander; no workflow implementation, product code, dependency, Provider, policy, manuscript, release, or `main` path changed in the design normalization.
-- Scoped lifecycle sweep: no archive move under the explicit no-archive task boundary; the superseded pre-merge checkpoint remains recoverable in `dev` Git history and PR #112, and no disposable artifact exists.
+- [Issue #115](https://github.com/zhouy1017/ai7-harness/issues/115) / [PR #116](https://github.com/zhouy1017/ai7-harness/pull/116) is squash-integrated at `dev@a2c8f2979f982fa819fb9d5963397e115f19fb54`. The existing `.github/workflows/e2e.yml` now implements the ADR 0049 hosted-invocation boundary.
+- The workflow subscribes only to `ready_for_review` and `synchronize`, guards the route job against Draft pull requests, and uses pull-request-number-scoped `cancel-in-progress`. The complete-diff Markdown router and unchanged J-01/J-02/J-08 Windows Server 2025 x64 / macOS 15 arm64 matrix remain in the one logical Gate.
+- Local validation confirmed the exact single-path, eight-line additive diff, retained router/matrix/journey commands, and clean whitespace. No dependency was installed, no advisory review was required, and no hosted workflow ran.
+- Workflow `E2E Functional Gate` (`342459594`) remains `disabled_manually` with no active or queued run. PR #110 remains an open Draft. Integration claims no green Gate and does not restore Actions authority.
+- Scoped lifecycle sweep: the stable workflow, ADR, and runbooks remain current; the consumed root routing remains recoverable in `dev` Git history and PR #116, and no archive move or disposable artifact is needed.
 
 ## What's next
 
-- The next Commander follows `HANDOFF.md`: create the exact CI-governance Issue and full Change Brief from then-current `dev`, dispatch one writable Worker for existing `.github/workflows/e2e.yml`, validate locally, and integrate while the workflow remains disabled.
+- Await an exact Owner statement restoring GitHub Actions usage. Until then, do not run, rerun, dispatch, or re-enable the workflow; do not make PR #110 or another product pull request Ready; and do not merge product work that requires the Gate.
+- After exact restoration, process queued product branches one at a time in dependency order under ADR 0049: re-resolve current `dev` authority, rebase, locally revalidate, make Ready, obtain one paired-platform Gate occurrence, merge, then advance.
 
 ## Key decisions
 
-- This is a fresh Owner amendment, not restoration of surviving tier authority. Superseded ADR and Question 24 history remain intact.
-- The accepted model keeps one provider-free logical Gate: Draft PRs run nothing; a Commander makes an integration-ready PR Ready; newer Ready-PR pushes cancel a superseded same-PR run and start the newest occurrence; one external-infrastructure transient may be rerun once by Commander, while product/bootstrap/build/journey failures return the PR to Draft for local diagnosis.
-- Every formal hosted occurrence keeps Windows/macOS parity and initially runs all currently admitted J-01/J-02/J-08 journeys. Admission of a fourth journey must reevaluate routing; shared or unknown changes fail closed to every admitted journey.
-- Local development continues during the suspension, but product merges pause. Pure documentation, design, and CI-governance changes may integrate while the workflow is disabled after local validation; advisory read-only review remains optional. No required branch-protection check is added.
+- A quota reset, elapsed billing period, available minutes, or the integrated workflow change does not restore authority.
+- Draft activity starts no hosted job. The Commander-controlled Ready transition and later synchronization while Ready are the only workflow activity types; same-PR concurrency cancels a superseded occurrence.
+- The complete pull-request-diff router remains authoritative inside the workflow. Markdown-only Ready changes stop after routing; product-affecting changes retain all currently admitted J-01/J-02/J-08 journeys on both supported CI hosts.
+- No label, component catalog, direct push, manual dispatch, schedule, nightly, release, package, exact-head rule, required check, second gate, dependency, or new routing authority was introduced.
 
 ## Unresolved matters or blockers
 
-- GitHub Actions usage remains suspended. Only an exact future Owner statement restores authority; neither a quota reset nor integration of the workflow implementation does so.
-- The next workflow Change Brief must stop rather than add another path, gate, dependency, routing authority, journey-selection rule, required check, or hosted test run.
+- GitHub-hosted Actions usage remains suspended until an exact future Owner restoration statement.
+- PR #110 remains queued as a Draft product change. Its target authority, local validation, and integration order must be re-resolved after restoration; this checkpoint grants it no merge authority.
 
 ## Safe Resume Prompt
 
 ```text
-Commander: continue from current origin/dev after consuming Issue #111 and ADR 0049. Verify exact HEAD/target authority, confirm E2E Functional Gate 342459594 remains disabled_manually with no run in progress, and confirm PR #110 remains Draft. Create one separate CI-governance Issue and Change Brief for the existing .github/workflows/e2e.yml, then dispatch one writable Worker under kick-in/27. Implement only Draft suppression, integration-ready pull-request execution, PR-scoped cancel-in-progress, the retained complete-diff Markdown router, and the unchanged J-01/J-02/J-08 Windows/macOS matrix. Validate locally; advisory read-only review remains optional. Integrate while disabled, but do not run or re-enable Actions until the Owner explicitly restores usage.
+Commander: resolve exact HEAD and current origin/dev, then consume ADR 0049 and integrated Issue #115 / PR #116. Verify E2E Functional Gate 342459594 remains disabled_manually with no active or queued run and confirm PR #110 remains Draft. Unless the Owner has supplied an exact new restoration statement, do not run, rerun, dispatch, or re-enable Actions; do not make a product PR Ready or merge product work; report the verified suspension and stop. If an exact restoration statement is present, follow its bounded authority, re-resolve queued branches against current dev, locally revalidate, and process them one at a time through the paired Windows/macOS J-01/J-02/J-08 Gate.
 ```
