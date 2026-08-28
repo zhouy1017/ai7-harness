@@ -44,6 +44,7 @@ const CONTINUITY_SCHEMA_VERSION = 5;
 const EDITOR_SCHEMA_VERSION = 6;
 const RECOVERY_SCHEMA_VERSION = 7;
 const SCHEMA_VERSION = 8;
+const SOURCE_IMPORT_SCHEMA_VERSION = 9;
 const MIGRATION_BATCH = 256;
 const SEARCH_BATCH = 128;
 const HISTORY_BATCH = 128;
@@ -858,6 +859,92 @@ const FULL_V6_TARGET_SCHEMA_SQL = { ...COMMON_SCHEMA_SQL, ...V6_TARGET_SCHEMA_SQ
 const FULL_V7_TARGET_SCHEMA_SQL = { ...COMMON_SCHEMA_SQL, ...TARGET_SCHEMA_SQL } as const;
 const FULL_TARGET_SCHEMA_SQL = { ...COMMON_SCHEMA_SQL, ...TARGET_SCHEMA_SQL, ...PROFILE_SCHEMA_SQL } as const;
 
+const SOURCE_IMPORT_SCHEMA_SQL = {
+  import_drafts: `CREATE TABLE import_drafts (
+    draft_id TEXT PRIMARY KEY,
+    selection_token TEXT NOT NULL UNIQUE,
+    state TEXT NOT NULL CHECK(state IN ('staged', 'reviewed', 'committed')),
+    draft_version INTEGER NOT NULL CHECK(draft_version >= 1),
+    display_name TEXT NOT NULL,
+    object_digest TEXT NOT NULL REFERENCES content_objects(object_digest),
+    selected_path TEXT,
+    reviewed_title TEXT,
+    reviewed_target_choice_id TEXT
+      CHECK(reviewed_target_choice_id IS NULL OR reviewed_target_choice_id IN ('new-book', 'new-book-distinct-intended-work')),
+    review_digest TEXT UNIQUE,
+    committed_commit_id TEXT UNIQUE,
+    staged_at TEXT NOT NULL,
+    reviewed_at TEXT,
+    committed_at TEXT,
+    reviewed_target_kind TEXT CHECK(reviewed_target_kind IS NULL OR reviewed_target_kind IN ('new-book', 'existing-book')),
+    reviewed_existing_book_id TEXT REFERENCES books(book_id),
+    reviewed_relationship TEXT
+      CHECK(reviewed_relationship IS NULL OR reviewed_relationship IN ('new-book-first-manuscript', 'first-manuscript', 'source-only')),
+    reviewed_book_state_digest TEXT
+      CHECK(reviewed_book_state_digest IS NULL OR length(reviewed_book_state_digest) = 64),
+    reviewed_reuse_source_version_id TEXT REFERENCES source_versions(source_version_id)
+  ) STRICT`,
+  import_commits: `CREATE TABLE import_commits (
+    commit_id TEXT PRIMARY KEY,
+    draft_id TEXT NOT NULL UNIQUE REFERENCES import_drafts(draft_id),
+    request_fingerprint TEXT NOT NULL,
+    expected_draft_version INTEGER NOT NULL,
+    review_digest TEXT NOT NULL,
+    operation_kind TEXT NOT NULL CHECK(operation_kind IN ('manuscript-import', 'source-import')),
+    result_json TEXT NOT NULL,
+    committed_at TEXT NOT NULL
+  ) STRICT`,
+  import_commit_attempts: `CREATE TABLE import_commit_attempts (
+    attempt_id TEXT PRIMARY KEY,
+    draft_id TEXT NOT NULL UNIQUE REFERENCES import_drafts(draft_id) ON DELETE CASCADE,
+    request_fingerprint TEXT NOT NULL,
+    expected_draft_version INTEGER NOT NULL CHECK(expected_draft_version >= 1),
+    review_digest TEXT NOT NULL CHECK(length(review_digest) = 64),
+    operation_kind TEXT NOT NULL CHECK(operation_kind IN ('manuscript-import', 'source-import')),
+    state TEXT NOT NULL CHECK(state IN ('prepared', 'uncertain', 'committed')),
+    prepared_at TEXT NOT NULL,
+    committed_at TEXT,
+    uncertain_at TEXT,
+    uncertainty_code TEXT,
+    completion_acknowledged_at TEXT,
+    CHECK(
+      (state = 'prepared' AND committed_at IS NULL AND uncertain_at IS NULL
+        AND uncertainty_code IS NULL AND completion_acknowledged_at IS NULL)
+      OR (state = 'uncertain' AND committed_at IS NULL AND uncertain_at IS NOT NULL
+        AND uncertainty_code = 'COMMIT_PROOF_INCONCLUSIVE' AND completion_acknowledged_at IS NULL)
+      OR (state = 'committed' AND committed_at IS NOT NULL AND uncertain_at IS NULL
+        AND uncertainty_code IS NULL)
+    )
+  ) STRICT`,
+  source_provenance: `CREATE TABLE source_provenance (
+    provenance_id TEXT PRIMARY KEY,
+    source_version_id TEXT NOT NULL REFERENCES source_versions(source_version_id),
+    acquisition_path TEXT NOT NULL CHECK(acquisition_path = 'native-file-picker'),
+    locality TEXT NOT NULL CHECK(locality = 'local-provider-free'),
+    sanitized_identity TEXT NOT NULL,
+    parser_identity TEXT NOT NULL,
+    recorded_at TEXT NOT NULL
+  ) STRICT`,
+  source_import_records: `CREATE TABLE source_import_records (
+    source_import_record_id TEXT PRIMARY KEY,
+    commit_id TEXT NOT NULL UNIQUE,
+    book_id TEXT NOT NULL REFERENCES books(book_id),
+    source_version_id TEXT NOT NULL REFERENCES source_versions(source_version_id),
+    provenance_id TEXT NOT NULL UNIQUE REFERENCES source_provenance(provenance_id),
+    target_kind TEXT NOT NULL CHECK(target_kind IN ('new-book', 'existing-book')),
+    source_version_disposition TEXT NOT NULL CHECK(source_version_disposition IN ('created', 'reused-same-book')),
+    retained_boundary_json TEXT NOT NULL,
+    named_non_effects_json TEXT NOT NULL,
+    record_digest TEXT NOT NULL UNIQUE CHECK(length(record_digest) = 64),
+    imported_at TEXT NOT NULL
+  ) STRICT`,
+} as const;
+
+const FULL_SOURCE_IMPORT_TARGET_SCHEMA_SQL = {
+  ...FULL_TARGET_SCHEMA_SQL,
+  ...SOURCE_IMPORT_SCHEMA_SQL,
+} as const;
+
 const TARGET_VIRTUAL_TABLE_SQL = `CREATE VIRTUAL TABLE working_block_search USING fts5(
   branch_id UNINDEXED,
   block_id UNINDEXED,
@@ -925,6 +1012,21 @@ const CONTINUITY_TRIGGER_DIGESTS = {
   abandonment_cleanup_block_attempt_update_v5: '136f9eafe5078c8131bf6178ceda3302aedc8263962a83a2e2ccd50918d9303e',
 } as const;
 
+const SOURCE_IMPORT_TRIGGER_SQL = {
+  source_import_record_excludes_manuscript_result: `CREATE TRIGGER source_import_record_excludes_manuscript_result
+    BEFORE INSERT ON source_import_records
+    WHEN EXISTS (SELECT 1 FROM manuscript_import_records WHERE commit_id = NEW.commit_id)
+    BEGIN
+      SELECT RAISE(ABORT, 'IMPORT_RESULT_KIND_CONFLICT');
+    END`,
+  manuscript_import_record_excludes_source_result: `CREATE TRIGGER manuscript_import_record_excludes_source_result
+    BEFORE INSERT ON manuscript_import_records
+    WHEN EXISTS (SELECT 1 FROM source_import_records WHERE commit_id = NEW.commit_id)
+    BEGIN
+      SELECT RAISE(ABORT, 'IMPORT_RESULT_KIND_CONFLICT');
+    END`,
+} as const;
+
 const IMPORT_DRAFT_TRIGGER_SQL = {
   abandonment_cleanup_block_draft_insert: `CREATE TRIGGER abandonment_cleanup_block_draft_insert
     BEFORE INSERT ON import_drafts
@@ -969,6 +1071,11 @@ const SCHEMA_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
     'object_digest>content_objects.object_digest:NO ACTION/NO ACTION/NONE',
   ],
   source_provenance: ['source_version_id>source_versions.source_version_id:NO ACTION/NO ACTION/NONE'],
+  source_import_records: [
+    'book_id>books.book_id:NO ACTION/NO ACTION/NONE',
+    'provenance_id>source_provenance.provenance_id:NO ACTION/NO ACTION/NONE',
+    'source_version_id>source_versions.source_version_id:NO ACTION/NO ACTION/NONE',
+  ],
   import_fidelity_reviews: [
     'book_id>books.book_id:NO ACTION/NO ACTION/NONE',
     'source_version_id>source_versions.source_version_id:NO ACTION/NO ACTION/NONE',
@@ -1306,6 +1413,12 @@ function requireExactTableSchema(db: DatabaseSync, name: string, expectedSql: st
     ...(name === 'import_drafts' && canonicalSchemaSql(matchedExpectedSql) === canonicalSchemaSql(PROFILE_SCHEMA_SQL.import_drafts)
       ? ['reviewed_existing_book_id>books.book_id:NO ACTION/NO ACTION/NONE']
       : []),
+    ...(name === 'import_drafts' && canonicalSchemaSql(matchedExpectedSql) === canonicalSchemaSql(SOURCE_IMPORT_SCHEMA_SQL.import_drafts)
+      ? [
+          'reviewed_existing_book_id>books.book_id:NO ACTION/NO ACTION/NONE',
+          'reviewed_reuse_source_version_id>source_versions.source_version_id:NO ACTION/NO ACTION/NONE',
+        ]
+      : []),
   ].sort();
   requireBounded(
     actualForeignKeys.join('\n') === expectedForeignKeys.join('\n'),
@@ -1339,8 +1452,15 @@ function requireExactIndexSchema(
   requireBounded(views.length === 0, 'SCHEMA_MIGRATION_FAILED', '数据库包含未授权视图。');
 }
 
-function requireExactTriggerSchema(db: DatabaseSync): void {
-  const expectedNames = new Set(Object.keys(CONTINUITY_TRIGGER_DIGESTS));
+function requireExactTriggerSchema(
+  db: DatabaseSync,
+  additional: Readonly<Record<string, string>> = {},
+): void {
+  const expectedDigests = {
+    ...CONTINUITY_TRIGGER_DIGESTS,
+    ...Object.fromEntries(Object.entries(additional).map(([name, sql]) => [name, sha256(canonicalSchemaSql(sql))])),
+  };
+  const expectedNames = new Set(Object.keys(expectedDigests));
   const actual = db.prepare("SELECT name, sql FROM sqlite_schema WHERE type = 'trigger'").all() as SqlRow[];
   requireBounded(
     actual.length === expectedNames.size &&
@@ -1348,7 +1468,7 @@ function requireExactTriggerSchema(db: DatabaseSync): void {
     'SCHEMA_MIGRATION_FAILED',
     '数据库触发器集合不兼容。',
   );
-  for (const [name, expectedDigest] of Object.entries(CONTINUITY_TRIGGER_DIGESTS)) {
+  for (const [name, expectedDigest] of Object.entries(expectedDigests)) {
     const actualSql = schemaObjectSql(db, 'trigger', name);
     requireBounded(
       actualSql !== undefined && sha256(canonicalSchemaSql(actualSql)) === expectedDigest,
@@ -1401,10 +1521,11 @@ function requireExactSchema(
   expectedTables: Readonly<Record<string, string | ReadonlyArray<string>>>,
   expectedIndexes: Readonly<Record<string, string>>,
   includeSearch: boolean,
+  additionalTriggers: Readonly<Record<string, string>> = {},
 ): void {
   for (const [name, expectedSql] of Object.entries(expectedTables)) requireExactTableSchema(db, name, expectedSql);
   requireExactIndexSchema(db, expectedIndexes);
-  requireExactTriggerSchema(db);
+  requireExactTriggerSchema(db, additionalTriggers);
   const expectedNames = new Set([
     ...Object.keys(expectedTables),
     ...(includeSearch ? SEARCH_SCHEMA_TABLES : []),
@@ -1433,6 +1554,10 @@ function requireContinuitySchema(db: DatabaseSync): void {
 
 function requireTargetSchema(db: DatabaseSync): void {
   requireExactSchema(db, FULL_TARGET_SCHEMA_SQL, TARGET_INDEX_SQL, true);
+}
+
+function requireSourceImportTargetSchema(db: DatabaseSync): void {
+  requireExactSchema(db, FULL_SOURCE_IMPORT_TARGET_SCHEMA_SQL, TARGET_INDEX_SQL, true, SOURCE_IMPORT_TRIGGER_SQL);
 }
 
 function requireV7TargetSchema(db: DatabaseSync): void {
@@ -1538,6 +1663,211 @@ function validateImportDraftTargetTruth(db: DatabaseSync): void {
     'SCHEMA_INVALID',
     '导入草稿的目标、关系与复核证据组合矛盾。',
   );
+}
+
+function validateSourceImportDraftTargetTruth(db: DatabaseSync): void {
+  const rows = db.prepare(
+    `SELECT draft_id, state, reviewed_title, reviewed_target_choice_id, review_digest,
+            reviewed_target_kind, reviewed_existing_book_id, reviewed_relationship,
+            reviewed_book_state_digest, reviewed_reuse_source_version_id
+     FROM import_drafts ORDER BY draft_id`,
+  ).all() as SqlRow[];
+  requireBounded(
+    rows.every((row) => {
+      const state = asString(row.state);
+      const isNull = (value: SQLOutputValue | undefined): boolean => value === null;
+      if (state === 'staged') {
+        return isNull(row.reviewed_title) && isNull(row.reviewed_target_choice_id) && isNull(row.review_digest) &&
+          isNull(row.reviewed_target_kind) && isNull(row.reviewed_existing_book_id) &&
+          isNull(row.reviewed_relationship) && isNull(row.reviewed_book_state_digest) &&
+          isNull(row.reviewed_reuse_source_version_id);
+      }
+      if (state !== 'reviewed' && state !== 'committed') return false;
+      if (typeof row.review_digest !== 'string' || !DIGEST_PATTERN.test(row.review_digest)) return false;
+      if (row.reviewed_relationship !== 'source-only') {
+        if (row.reviewed_target_kind === 'new-book') {
+          return typeof row.reviewed_title === 'string' && row.reviewed_title.length > 0 &&
+            (row.reviewed_target_choice_id === null || row.reviewed_target_choice_id === 'new-book' ||
+              row.reviewed_target_choice_id === 'new-book-distinct-intended-work') &&
+            row.reviewed_existing_book_id === null && row.reviewed_relationship === 'new-book-first-manuscript' &&
+            row.reviewed_book_state_digest === null && row.reviewed_reuse_source_version_id === null;
+        }
+        return row.reviewed_target_kind === 'existing-book' && row.reviewed_title === null &&
+          row.reviewed_target_choice_id === null && typeof row.reviewed_existing_book_id === 'string' &&
+          UUID_PATTERN.test(row.reviewed_existing_book_id) && row.reviewed_relationship === 'first-manuscript' &&
+          typeof row.reviewed_book_state_digest === 'string' && DIGEST_PATTERN.test(row.reviewed_book_state_digest) &&
+          row.reviewed_reuse_source_version_id === null;
+      }
+      if (row.reviewed_target_kind === 'new-book') {
+        return typeof row.reviewed_title === 'string' && row.reviewed_title.length > 0 &&
+          (row.reviewed_target_choice_id === 'new-book' ||
+            row.reviewed_target_choice_id === 'new-book-distinct-intended-work') &&
+          row.reviewed_existing_book_id === null && row.reviewed_book_state_digest === null &&
+          row.reviewed_reuse_source_version_id === null;
+      }
+      if (!(row.reviewed_target_kind === 'existing-book' && row.reviewed_title === null &&
+        row.reviewed_target_choice_id === null && typeof row.reviewed_existing_book_id === 'string' &&
+        UUID_PATTERN.test(row.reviewed_existing_book_id) &&
+        typeof row.reviewed_book_state_digest === 'string' && DIGEST_PATTERN.test(row.reviewed_book_state_digest) &&
+        (row.reviewed_reuse_source_version_id === null ||
+          (typeof row.reviewed_reuse_source_version_id === 'string' &&
+            UUID_PATTERN.test(row.reviewed_reuse_source_version_id))))) return false;
+      if (row.reviewed_reuse_source_version_id === null) return true;
+      if (state === 'committed') {
+        const committedReuse = db.prepare(
+          `SELECT count(*) matches
+           FROM import_commits ic
+           JOIN source_import_records sir ON sir.commit_id = ic.commit_id
+           WHERE ic.draft_id = ? AND ic.operation_kind = 'source-import'
+             AND sir.book_id = ? AND sir.source_version_id = ?
+             AND sir.source_version_disposition = 'reused-same-book'`,
+        ).get(
+          asString(row.draft_id),
+          asString(row.reviewed_existing_book_id),
+          asString(row.reviewed_reuse_source_version_id),
+        ) as SqlRow | undefined;
+        return committedReuse !== undefined && asNumber(committedReuse.matches) === 1;
+      }
+      const reuse = db.prepare(
+        `SELECT count(*) matches
+         FROM source_versions sv
+         JOIN import_drafts d ON d.draft_id = ?
+         JOIN staged_import_snapshots sis ON sis.draft_id = d.draft_id
+         WHERE sv.source_version_id = ? AND sv.book_id = d.reviewed_existing_book_id
+           AND sv.object_digest = d.object_digest AND sv.source_digest = sis.source_digest
+           AND sv.content_digest = sis.content_digest AND sv.structure_digest = sis.structure_digest
+           AND sv.parser_identity = sis.parser_identity`,
+      ).get(asString(row.draft_id), asString(row.reviewed_reuse_source_version_id)) as SqlRow | undefined;
+      return reuse !== undefined && asNumber(reuse.matches) === 1;
+    }),
+    'SCHEMA_INVALID',
+    '导入草稿的目标、关系与复核证据组合矛盾。',
+  );
+}
+
+function validateSourceImportRecordTruth(db: DatabaseSync): void {
+  const namedNonEffects = [
+    '不创建稿件',
+    '不创建稿件修订版',
+    '不创建工作流实例',
+    '不创建运行来源范围',
+    '不创建事实状态或事实核查结论',
+    '不创建书系或书系成员关系',
+    '不创建编辑学习准入决定',
+    '不授予或执行模型提供方传输',
+    '不创建发稿版本、公开发布许可或公开发布事实',
+    '不导出、不发送、不交付、不发布',
+  ] as const;
+  const rows = db.prepare(
+    `SELECT sir.source_import_record_id, sir.commit_id, sir.book_id, sir.source_version_id,
+            sir.provenance_id, sir.target_kind, sir.source_version_disposition,
+            sir.retained_boundary_json, sir.named_non_effects_json, sir.record_digest, sir.imported_at,
+            sv.object_digest, sv.source_digest, sv.content_digest, sv.structure_digest,
+            sv.parser_identity, sv.format, co.byte_length,
+            sp.acquisition_path, sp.locality, sp.sanitized_identity,
+            sp.parser_identity provenance_parser_identity, sp.recorded_at,
+            ic.operation_kind, ic.committed_at, d.state draft_state,
+            d.committed_commit_id, d.reviewed_target_kind, d.reviewed_existing_book_id,
+            d.reviewed_relationship, d.reviewed_reuse_source_version_id
+     FROM source_import_records sir
+     JOIN books b ON b.book_id = sir.book_id
+     JOIN source_versions sv
+       ON sv.source_version_id = sir.source_version_id AND sv.book_id = sir.book_id
+     JOIN content_objects co ON co.object_digest = sv.object_digest
+     JOIN source_provenance sp
+       ON sp.provenance_id = sir.provenance_id AND sp.source_version_id = sir.source_version_id
+     JOIN import_commits ic ON ic.commit_id = sir.commit_id
+     JOIN import_drafts d ON d.draft_id = ic.draft_id
+     ORDER BY sir.source_import_record_id`,
+  ).all() as SqlRow[];
+  const sourceRecordCount = asNumber(one(
+    db.prepare('SELECT count(*) records FROM source_import_records').all() as SqlRow[],
+    'SCHEMA_INVALID',
+    '无法核对来源导入记录。',
+  ).records);
+  requireBounded(rows.length === sourceRecordCount, 'SCHEMA_INVALID', '来源导入记录图不完整。');
+  for (const row of rows) {
+    let retainedBoundary: unknown;
+    let persistedNonEffects: unknown;
+    try {
+      retainedBoundary = JSON.parse(asString(row.retained_boundary_json)) as unknown;
+      persistedNonEffects = JSON.parse(asString(row.named_non_effects_json)) as unknown;
+    } catch {
+      throw new BoundedStoreError('SCHEMA_INVALID', '来源导入记录的规范 JSON 无效。');
+    }
+    requireBounded(
+      retainedBoundary !== null && typeof retainedBoundary === 'object' && !Array.isArray(retainedBoundary) &&
+        Array.isArray(persistedNonEffects) && canonicalJson(persistedNonEffects) === canonicalJson(namedNonEffects),
+      'SCHEMA_INVALID',
+      '来源导入记录的保留边界或具名非影响无效。',
+    );
+    const boundary = retainedBoundary as Record<string, unknown>;
+    const targetKind = asString(row.target_kind);
+    const disposition = asString(row.source_version_disposition);
+    const sourceVersionId = asString(row.source_version_id);
+    const recordDigest = sha256(canonicalJson({
+      schema: 'ai7.source-import-record/1',
+      sourceImportRecordId: asString(row.source_import_record_id),
+      commitId: asString(row.commit_id),
+      bookId: asString(row.book_id),
+      sourceVersionId,
+      provenanceId: asString(row.provenance_id),
+      targetKind,
+      sourceVersionDisposition: disposition,
+      retainedBoundary,
+      namedNonEffects: persistedNonEffects,
+      importedAt: asString(row.imported_at),
+    }));
+    requireBounded(
+      (targetKind === 'new-book' || targetKind === 'existing-book') &&
+        (disposition === 'created' || disposition === 'reused-same-book') &&
+        asString(row.object_digest) === asString(row.source_digest) && asString(row.format) === 'DOCX' &&
+        boundary.kind === 'complete-local-file' &&
+        boundary.label === '保留完整所选 DOCX 文件及本地解析出的完整内容与结构身份' &&
+        boundary.format === 'DOCX' && boundary.displayName === asString(row.sanitized_identity) &&
+        boundary.sourceSha256 === asString(row.source_digest) &&
+        boundary.sourceBytes === asNumber(row.byte_length) &&
+        boundary.contentDigest === asString(row.content_digest) &&
+        boundary.structureDigest === asString(row.structure_digest) &&
+        asString(row.acquisition_path) === 'native-file-picker' && asString(row.locality) === 'local-provider-free' &&
+        asString(row.provenance_parser_identity) === asString(row.parser_identity) &&
+        typeof row.recorded_at === 'string' &&
+        asString(row.operation_kind) === 'source-import' && asString(row.draft_state) === 'committed' &&
+        asString(row.committed_commit_id) === asString(row.commit_id) &&
+        asString(row.committed_at) === asString(row.imported_at) &&
+        asString(row.reviewed_relationship) === 'source-only' &&
+        asString(row.reviewed_target_kind) === targetKind &&
+        (targetKind === 'new-book' ? row.reviewed_existing_book_id === null : row.reviewed_existing_book_id === row.book_id) &&
+        (disposition === 'reused-same-book'
+          ? row.reviewed_reuse_source_version_id === sourceVersionId
+          : row.reviewed_reuse_source_version_id === null) &&
+        asString(row.record_digest) === recordDigest,
+      'SCHEMA_INVALID',
+      '来源导入记录的图书、来源版本、来源、保留边界、结果类型或摘要无效。',
+    );
+    requireBounded(targetKind !== 'new-book' || disposition === 'created', 'SCHEMA_INVALID', '来源绑定新图书不能复用既有来源版本。');
+  }
+  const invalidCommits = db.prepare(
+    `SELECT ic.commit_id
+     FROM import_commits ic
+     WHERE (ic.operation_kind = 'manuscript-import') !=
+             EXISTS (SELECT 1 FROM manuscript_import_records mir WHERE mir.commit_id = ic.commit_id)
+        OR (ic.operation_kind = 'source-import') !=
+             EXISTS (SELECT 1 FROM source_import_records sir WHERE sir.commit_id = ic.commit_id)
+        OR (SELECT count(*) FROM manuscript_import_records mir WHERE mir.commit_id = ic.commit_id) +
+           (SELECT count(*) FROM source_import_records sir WHERE sir.commit_id = ic.commit_id) != 1`,
+  ).all() as SqlRow[];
+  requireBounded(invalidCommits.length === 0, 'SCHEMA_INVALID', '导入提交类型与结果记录不一致。');
+  const invalidAttempts = db.prepare(
+    `SELECT a.attempt_id
+     FROM import_commit_attempts a
+     JOIN import_drafts d ON d.draft_id = a.draft_id
+     LEFT JOIN import_commits ic ON ic.commit_id = a.attempt_id
+     WHERE a.operation_kind != CASE WHEN d.reviewed_relationship = 'source-only'
+       THEN 'source-import' ELSE 'manuscript-import' END
+       OR (ic.commit_id IS NOT NULL AND ic.operation_kind != a.operation_kind)`,
+  ).all() as SqlRow[];
+  requireBounded(invalidAttempts.length === 0, 'SCHEMA_INVALID', '导入提交尝试类型与草稿或提交不一致。');
 }
 
 function sha256(value: string): string {
@@ -3249,14 +3579,37 @@ function migrateRecoverySchemaV7ToV8(db: DatabaseSync, profile: BuiltInWorkflowP
   requireTargetSchema(db);
 }
 
+export function validateSourceImportSchemaTruth(db: DatabaseSync, profile: BuiltInWorkflowProfile): void {
+  requireSourceImportTargetSchema(db);
+  validateSchemaAuthorityIds(db);
+  validateWorkflowSemanticTruth(db, profile);
+  validateSourceImportDraftTargetTruth(db);
+  validateSourceImportRecordTruth(db);
+  validateAllDerivedOffsets(db);
+  validateLegacyHistoryRoots(db);
+  validateAllCommandHistory(db);
+  validateMilestoneSignoffTruth(db);
+  validateRecoveryTruth(db);
+  const violations = db.prepare('PRAGMA foreign_key_check').all();
+  requireBounded(violations.length === 0, 'SCHEMA_MIGRATION_FAILED', '数据库引用校验失败。');
+}
+
 export function initializeBoundedSchema(db: DatabaseSync, profile: BuiltInWorkflowProfile): void {
   const version = asNumber(one(db.prepare('PRAGMA user_version').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取数据库版本。').user_version);
   requireBounded(
     version === CONTINUITY_SCHEMA_VERSION || version === EDITOR_SCHEMA_VERSION ||
-      version === RECOVERY_SCHEMA_VERSION || version === SCHEMA_VERSION,
+      version === RECOVERY_SCHEMA_VERSION || version === SCHEMA_VERSION || version === SOURCE_IMPORT_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
+  if (version === SOURCE_IMPORT_SCHEMA_VERSION) {
+    transact(db, () => {
+      validateSourceImportSchemaTruth(db, profile);
+      terminalizeOrphanedReplacementPreviews(db);
+      reclaimOrphanedSearchSessions(db);
+    });
+    return;
+  }
   if (version === SCHEMA_VERSION) {
     requireTargetSchema(db);
     transact(db, () => {

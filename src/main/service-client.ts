@@ -61,7 +61,7 @@ function serviceEnvironment(
 
 function readinessIsExact(value: ServiceReadiness): boolean {
   return (
-    value.protocolVersion === 6 &&
+    value.protocolVersion === 7 &&
     value.state === 'ready' &&
     value.runtime.electron === '43.4.1' &&
     value.runtime.node === '24.18.1' &&
@@ -167,7 +167,7 @@ export class ServiceClient {
         this.#pending.delete(id);
         reject(new ServiceCallError('SERVICE_TIMEOUT', '本地业务服务响应超时。'));
         this.#fault();
-      }, operation === 'stageSelectedDocx' || operation === 'commitNewBookImport' || operation === 'commitReplacement' ||
+      }, operation === 'stageSelectedDocx' || operation === 'commitNewBookImport' || operation === 'commitSourceImport' || operation === 'commitReplacement' ||
           operation === 'saveMilestone' || operation === 'getStartup' || operation === 'getRecoveryComparison' ||
           operation === 'viewRecoveryCandidate' || operation === 'restoreRecovery'
         ? LONG_REQUEST_TIMEOUT_MS

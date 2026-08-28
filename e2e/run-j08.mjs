@@ -189,6 +189,9 @@ async function click(renderer, label, name) {
 async function fill(renderer, selector, value, name) {
   await assertRenderer(renderer, `(() => { const input = document.querySelector(${JSON.stringify(selector)}); if (!(input instanceof HTMLInputElement)) return false; input.value=${JSON.stringify(value)}; input.dispatchEvent(new Event('input',{bubbles:true})); return true; })()`, name);
 }
+async function selectFirstManuscriptRelationship(renderer, name) {
+  await assertRenderer(renderer, `(() => { const radio=document.querySelector('input[aria-label="作为首份稿件导入"]'); if (!(radio instanceof HTMLInputElement) || radio.checked) return false; radio.click(); return radio.checked; })()`, name);
+}
 async function press(renderer, key) {
   await renderer.send('Input.dispatchKeyEvent', { type: 'keyDown', key });
   await renderer.send('Input.dispatchKeyEvent', { type: 'keyUp', key });
@@ -199,6 +202,7 @@ async function importBook(renderer, title, token, openEditor = false) {
   await click(renderer, '导入稿件', `${token}-import`);
   await waitFor(renderer, `document.querySelector('[data-screen="target"]')`, `${token}-target`);
   await assertRenderer(renderer, `(() => { const radio=document.querySelector('input[aria-label="新建图书"]'); if (!(radio instanceof HTMLInputElement)) return false; radio.click(); return radio.checked; })()`, `${token}-target-select`);
+  await selectFirstManuscriptRelationship(renderer, `${token}-relationship-select`);
   await fill(renderer, '#book-title', title, `${token}-title`);
   await click(renderer, '确认书名并复核', `${token}-review`);
   await waitFor(renderer, `document.querySelector('[data-screen="review"]')`, `${token}-review-ready`);
@@ -371,6 +375,7 @@ async function main() {
     await waitFor(renderer, `document.querySelector('[data-screen="target"]')`, 'lower-import-target');
     await assertRenderer(renderer, `document.querySelector('[data-recovery-return]')`, 'return-route-target');
     await assertRenderer(renderer, `(() => { const radio=document.querySelector('input[aria-label="新建图书"]'); if (!(radio instanceof HTMLInputElement)) return false; radio.click(); return radio.checked; })()`, 'lower-import-target-select');
+    await selectFirstManuscriptRelationship(renderer, 'lower-import-relationship-select');
     await waitFor(renderer, `document.querySelector('[data-screen="title"]')`, 'lower-import-title');
     await assertRenderer(renderer, `document.querySelector('[data-recovery-return]')`, 'return-route-title');
     await fill(renderer, '#book-title', '待处理导入丙', 'lower-import-title-fill');

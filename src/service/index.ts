@@ -238,6 +238,37 @@ function decodeRequest(frame: Uint8Array): ServiceRequest {
       }
       break;
     }
+    case 'prepareSourceImportReview': {
+      const input = requireInput(value.input, ['draftId', 'expectedDraftVersion', 'target'], tentativeId);
+      const target = input.target;
+      const validTarget = isRecord(target) && (
+        (target.kind === 'new-book' &&
+          hasExactKeys(target, ['kind', 'choiceId', 'confirmedTitle', 'relationship']) &&
+          (target.choiceId === 'new-book' || target.choiceId === 'new-book-distinct-intended-work') &&
+          isBoundedString(target.confirmedTitle, 180) && target.relationship === 'source-only') ||
+        (target.kind === 'existing-book' &&
+          hasExactKeys(target, ['kind', 'bookId', 'relationship', 'reuseSourceVersionId']) &&
+          isBoundedString(target.bookId, 36) && UUID_PATTERN.test(target.bookId) &&
+          target.relationship === 'source-only' &&
+          (target.reuseSourceVersionId === null ||
+            (isBoundedString(target.reuseSourceVersionId, 36) && UUID_PATTERN.test(target.reuseSourceVersionId))))
+      );
+      if (!isBoundedString(input.draftId, 36) || !UUID_PATTERN.test(input.draftId) ||
+          !isSafeInteger(input.expectedDraftVersion, 1) || !validTarget) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
+    case 'commitSourceImport': {
+      const input = requireInput(value.input, ['draftId', 'expectedDraftVersion', 'reviewDigest', 'commitId'], tentativeId);
+      if (!isBoundedString(input.draftId, 36) || !UUID_PATTERN.test(input.draftId) ||
+          !isSafeInteger(input.expectedDraftVersion, 1) ||
+          !isBoundedString(input.reviewDigest, 64) || !HEX_DIGEST_PATTERN.test(input.reviewDigest) ||
+          !isBoundedString(input.commitId, 36) || !UUID_PATTERN.test(input.commitId)) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
     case 'acknowledgeImportCompletion': {
       const input = requireInput(value.input, ['commitId'], tentativeId);
       if (!isBoundedString(input.commitId, 36) || !UUID_PATTERN.test(input.commitId)) {
@@ -626,6 +657,26 @@ async function dispatch(
           interruptAfterAttempt: importControl === 'before-commit' || importControl === 'uncertain-reconciliation',
         }),
       };
+    case 'prepareSourceImportReview':
+      return {
+        id: request.id,
+        ok: true,
+        op: request.op,
+        result: store.prepareSourceImportReview(
+          request.input.draftId,
+          request.input.expectedDraftVersion,
+          request.input.target,
+        ),
+      };
+    case 'commitSourceImport':
+      return {
+        id: request.id,
+        ok: true,
+        op: request.op,
+        result: await store.commitSourceImport(request.input, {
+          interruptAfterAttempt: importControl === 'before-commit' || importControl === 'uncertain-reconciliation',
+        }),
+      };
     case 'acknowledgeImportCompletion':
       return {
         id: request.id,
@@ -870,7 +921,8 @@ async function run(): Promise<void> {
         }
         response = failureResponse(request.id, error, StoreError);
       }
-      if (request.op === 'commitNewBookImport' && importControl === 'after-commit-before-response') {
+      if ((request.op === 'commitNewBookImport' || request.op === 'commitSourceImport') &&
+          importControl === 'after-commit-before-response') {
         stop();
         throw new Error('E2E interruption after committed import and before response.');
       }
