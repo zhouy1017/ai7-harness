@@ -93,7 +93,7 @@ Questions 1–36 are closed or explicitly deferred, and later accepted supersess
 
 > The ubuntu setup is just for github actions. The target platform is just windows-only. We do not need a production for ubuntu at this stage. And the tiered verification/build/test should be concise and quick
 
-It was historically re-proposed under those constraints and accepted as two Windows-only workflows. That answer is now superseded by ADR 0027's one logical provider-free E2E Functional Gate on Windows and macOS and ADR 0028's one-product platform scope. The quoted owner statement remains decision-history evidence, not current scope.
+It was historically re-proposed under those constraints and accepted as two Windows-only workflows. That answer is now superseded by ADR 0027's one logical provider-free E2E Functional Gate on Windows and macOS and ADR 0028's one-product platform scope. ADR 0049 newly bounds hosted invocation through Draft suppression, local debugging, integration-ready execution and same-PR cancellation without restoring the old tiers. The quoted owner statement remains decision-history evidence, not current scope.
 
 **Question 25 is closed.** Repository Development Dispatch is three roles with provider-neutral operating rules and one provider-specific Layer B binding policy, recorded in [27-repository-development-dispatch.md](./27-repository-development-dispatch.md) and [ADR 0015](../docs/adr/0015-provider-neutral-development-dispatch.md). The legacy orchestration pilot and its host connector are rejected as baselines and remain old-repository evidence.
 

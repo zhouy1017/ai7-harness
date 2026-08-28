@@ -1,6 +1,6 @@
 # Retained Original-AI7 Development Workflows
 
-Status: **historical workflow inventory; current engineering validation is ADR 0027 on Windows and macOS**
+Status: **historical workflow inventory; current engineering validation is ADR 0027 on Windows and macOS with hosted invocation bounded by ADR 0049**
 
 ## Source and status vocabulary
 
@@ -32,7 +32,7 @@ Nightly  broad portable suite + independent Windows suites
 RC       exact-SHA admission + catalog-selected release evidence
 ```
 
-Current rule: one logical provider-free E2E Functional Gate executes complete supported journeys and observed-bug regressions on Windows and macOS under ADR 0027. The older two-workflow/tier/release-proof design below is retained only as source inventory and does not create active gates.
+Current rule: one logical provider-free E2E Functional Gate executes complete supported journeys and observed-bug regressions on Windows and macOS under ADR 0027. ADR 0049 suppresses Draft execution, makes local work the debugging loop, and normally spends one paired-platform occurrence when the Commander makes a product pull request integration-ready. The older two-workflow/tier/release-proof design below is retained only as source inventory and does not create active gates.
 
 ## Generated mock-LLM-provider evidence
 

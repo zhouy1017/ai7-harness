@@ -75,6 +75,8 @@ Code unfamiliarity, personal style, a newer framework, easier generation, hypoth
 
 Stop and report when the brief is wrong, the structural budget must expand, an accepted record conflicts with the implementation, an authority/dependency/process/schema not explicitly authorized by the brief is needed, an external outcome is ambiguous, protected material would be exposed, or the applicable E2E journey fails for reasons outside the authorized change.
 
+When hosted Actions execution is suspended under [ADR 0049](../adr/0049-bound-hosted-actions-consumption-inside-the-e2e-gate.md), local implementation may continue. Independent modules may proceed in parallel only when they consume stable owners and interfaces on current `dev`. Do not silently stack downstream work on unintegrated candidate code; a genuinely necessary stacked dependency must be explicit in both Change Briefs, separately authorized, and assigned an integration order.
+
 ## 7. Research, spikes, and diagnostics
 
 Research answers one named question blocking the current Issue. Inspect current code and accepted documents first, then exact upstream or predecessor evidence only as needed. Do not revalidate accepted design or build an evidence programme “just in case.”
@@ -92,7 +94,11 @@ Follow [CI and test boundaries](./ci-test-boundaries.md):
 - Windows and macOS execute the same applicable journey IDs; and
 - documentation/design-only changes create no automated proof task.
 
-Do not turn local checks, temporary diagnostics, or component tests into new standing gates.
+Development and debugging complete locally before a pull request becomes Ready. On the actual supported development host, run the repository-root `doctor` → `bootstrap` → `build` → applicable journey sequence. Restore only existing accepted pins. Declared caches may accelerate iteration but never become correctness inputs. Before reporting local completion, clear the change's build outputs and rerun `build` plus the applicable journey.
+
+The Worker reports the host, commands, and outcomes. Do not retain logs, receipts, proof artifacts, credentials, Provider payloads, private material, untracked application inputs, or personal dependency state. Do not turn local checks, temporary diagnostics, component tests, or advisory review into new standing gates.
+
+The hosted E2E occurrence is integration evidence rather than a debugger. A locally reproducible hosted failure returns the pull request to Draft for local repair. Only the Commander may rerun one clearly external runner/network/infrastructure transient without a code change. During the exact hosted-execution suspension, product work continues on local branches but does not merge; documentation, design, and CI-governance work follows the narrow exception in the CI boundary.
 
 ## 9. Return a finished unit
 
@@ -104,6 +110,7 @@ The Worker/PR reports:
 - data/migration/authority impact;
 - applicable journey or bug outcome exercised;
 - cleanup performed, including any replaced path removed;
+- local validation host, commands, and outcomes, without logs or proof artifacts;
 - unresolved matters; and
 - one safe next action.
 

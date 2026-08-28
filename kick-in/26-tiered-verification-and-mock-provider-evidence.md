@@ -1,8 +1,8 @@
 # Tiered Verification and Mock-provider Evidence
 
-Status: **superseded for engineering validation by ADR 0027 and `35-minimal-e2e-validation.md`; retained only as historical design context**
+Status: **superseded for engineering validation by ADR 0027 and `35-minimal-e2e-validation.md`; current hosted invocation is separately bounded by ADR 0049; retained only as historical design context**
 
-The active rule is one logical provider-free E2E Functional Gate, executed on Windows and macOS, for complete user-facing journeys and observed-bug regressions. None of the additional tiers, evidence machinery, receipts, fingerprints, provider rehearsals, or deferred triggers below is active.
+The active rule is one logical provider-free E2E Functional Gate, executed on Windows and macOS, for complete user-facing journeys and observed-bug regressions. ADR 0049 bounds when that Gate consumes hosted Actions without reviving a tier. None of the additional tiers, evidence machinery, receipts, fingerprints, provider rehearsals, or deferred triggers below is active.
 
 ## Superseded historical decision
 
@@ -126,4 +126,4 @@ Historically accepted with Owner revision, then superseded by ADR 0027/0028:
 - the historical plan retained a request-fingerprint guard, regenerated corpus, and five-field release receipt; none is a current standing gate except that repository evidence remains public-synthetic; and
 - the stated time budgets are calibration to revise once a measurable suite exists.
 
-See superseded [ADR 0014](../docs/adr/0014-verify-on-one-windows-gate.md). Current implementation follows [ADR 0027](../docs/adr/0027-concentrate-ci-on-e2e-functionality.md), [ADR 0028](../docs/adr/0028-support-windows-and-macos-as-one-product.md), and the active [CI/test boundary](../docs/agents/ci-test-boundaries.md).
+See superseded [ADR 0014](../docs/adr/0014-verify-on-one-windows-gate.md). Current implementation follows [ADR 0027](../docs/adr/0027-concentrate-ci-on-e2e-functionality.md), [ADR 0028](../docs/adr/0028-support-windows-and-macos-as-one-product.md), [ADR 0049](../docs/adr/0049-bound-hosted-actions-consumption-inside-the-e2e-gate.md), and the active [CI/test boundary](../docs/agents/ci-test-boundaries.md).

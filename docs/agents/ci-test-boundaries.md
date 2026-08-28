@@ -1,6 +1,6 @@
 # CI and test boundaries
 
-Status: **Owner-accepted `dev` implementation boundary under [ADR 0027](../adr/0027-concentrate-ci-on-e2e-functionality.md); one logical provider-free E2E surface, not an independent action or `main`-promotion authorization**
+Status: **Owner-accepted `dev` implementation boundary under [ADR 0027](../adr/0027-concentrate-ci-on-e2e-functionality.md), with hosted invocation amended by [ADR 0049](../adr/0049-bound-hosted-actions-consumption-inside-the-e2e-gate.md); one logical provider-free E2E surface, not an independent action or `main`-promotion authorization**
 
 On `dev`, this file is the concise authority for implementation-time CI and test admission. ADR 0027 remains the decision authority; the current bounded implementation authorization is recorded separately in the applicable Issue and Change Brief.
 
@@ -14,6 +14,16 @@ The gate exists to answer only two questions:
 2. Does an observed user-visible bug remain fixed inside the smallest complete journey that reproduces it?
 
 It does not prove individual layers, packages, providers, platforms, quality attributes, or a release as separate subjects.
+
+## Usage-bounded pull-request invocation
+
+A pull request remains Draft during authoring, debugging, review, rebase, and local validation. Draft activity runs no hosted workflow. Once the change is locally complete and target authority has been re-resolved, only the Commander changes it to Ready for review. That transition starts the one logical Gate. A later push while it remains Ready starts the newest occurrence and cancels any superseded in-progress occurrence for that same pull request; cancellation is a consumption control, not exact-head or same-SHA proof.
+
+The existing complete-pull-request-diff router remains inside the workflow. A Markdown-only Ready pull request may therefore consume its small route job, rather than relying on GitHub trigger-level path filters that can omit part of a large diff. There is no author-selected label, component catalog, manual dispatch, direct `push` event, schedule, nightly, release, package, or exact-head activation path.
+
+Every product-affecting Ready pull request initially runs all currently admitted J-01, J-02, and J-08 journeys on both Windows and macOS. Admission of a fourth supported journey must explicitly reevaluate routing; it does not silently add that journey to every change. Until a later accepted routing authority exists, shared, infrastructure, toolchain, lockfile, bootstrap, build, launch, Gate, and unclassified changes fail closed to every admitted journey.
+
+The qualitative resource objective is normally one completed paired-platform Gate occurrence per integration-ready product change. Do not create a numeric budget, secondary fast lane, or weaker single-platform substitute without another Owner decision.
 
 ## Scenario admission
 
@@ -52,9 +62,13 @@ There is no separate headless, packaging, signing, notarization, platform-certif
 
 An admitted scenario has no quarantine, flaky registry, tolerated-failure status, or platform waiver. Fix the product or the scenario. Remove or replace a scenario only when the supported journey or recorded bug outcome has explicitly changed; do not hide a failure behind standing exception machinery.
 
+Hosted CI is not the development debugger. A product, bootstrap, build, or journey failure returns the pull request to Draft for local reproduction and repair. Only a clearly external GitHub runner, network, or infrastructure transient may be rerun once without a code change, and only by the Commander. A second occurrence or an ambiguous failure returns to Draft.
+
 Temporary diagnostics may be created while diagnosing or implementing a concrete change. They are local or otherwise non-gating and must be deleted before integration unless their user-visible behavior is admitted into the E2E Functional Gate under the rules above.
 
 Lint, type-check, format, and build commands may exist as developer commands. The Buildability Contract requires the root build and launch semantics only because the E2E subject must be constructed from the fresh checkout; they have no independent scenario, success record, CI gate, merge evidence, coverage programme, or authority and never substitute for the E2E Functional Gate.
+
+On the actual supported development host, implementation uses the repository-root sequence `doctor` → `bootstrap` → `build` → applicable journey. Existing accepted pins and declared caches may be restored, but caches never supply correctness and a new dependency still requires exact Issue authority. Before reporting local completion, clear the change's build outputs and rerun `build` plus the applicable journey. Report only the host, commands, and outcomes; do not commit logs, receipts, proof artifacts, credentials, Provider payloads, private material, personal inputs, or ambient generated output.
 
 ## Explicitly excluded standing gates
 
@@ -73,6 +87,14 @@ This exclusion removes separate engineering proof machinery. It does not remove 
 
 ## Pull-request application
 
-Normal pull-request flow and Commander-only integration remain in force. An implementation change that affects a supported journey or an observed-bug outcome updates the applicable E2E scenario and runs the one logical gate on both platforms. Documentation-only and design-only changes do not invent an automated proof task. Independent Reviewer work is optional and advisory under [Repository Development Dispatch](../../kick-in/27-repository-development-dispatch.md), not a prerequisite for the pull request or the gate.
+Normal pull-request flow and Commander-only external action/integration remain in force. An implementation change that affects a supported journey or an observed-bug outcome updates the applicable E2E scenario, completes the local loop, and receives one integration-ready occurrence of the logical Gate on both platforms. Documentation-only and design-only changes do not invent an automated proof task. Independent Reviewer work is optional and advisory under [Repository Development Dispatch](../../kick-in/27-repository-development-dispatch.md), not a prerequisite for the pull request or the Gate.
 
 The active Issue's [Change Brief](change-brief.md) names the applicable journey or observed bug before implementation. Verification follows that bounded outcome; it does not expand the Issue's structural budget or create adjacent scenarios.
+
+## Current hosted-execution suspension
+
+The Owner suspended all GitHub-hosted Actions testing on 2026-08-28 after confirming that the account's minutes were exhausted, and the exact `E2E Functional Gate` workflow is disabled. A quota reset, elapsed billing period, available minutes, or integrated workflow edit does not restore authority; only a later exact Owner statement does.
+
+During the suspension, local branch development and Commander-maintained Draft pull requests may continue, but product implementation that requires this Gate does not merge. Pure documentation, design, and CI-governance work may integrate while the workflow remains disabled only within an exact Change Brief after local validation and one Commander-dispatched advisory read-only review; the verdict informs rather than gates integration. This path does not claim a green Gate or create a required branch-protection check. The workflow implementation for ADR 0049 is a separate CI-governance Issue and remains disabled after integration until exact restoration.
+
+After restoration, queued product branches integrate one at a time in dependency order: re-resolve target authority, rebase to current `dev`, locally revalidate, make Ready, run one paired-platform Gate occurrence, merge, then advance to the next. Do not dispatch a synthetic run merely to test CI.

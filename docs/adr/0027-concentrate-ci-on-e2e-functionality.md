@@ -22,4 +22,6 @@ This decision removes separate proof machinery, not user-facing product behavior
 
 This ADR supersedes the mandatory verification and review-gate clauses of ADRs 0015, 0018, 0019, 0020, 0023, and 0025, and replaces the active verification plan in `kick-in/26-tiered-verification-and-mock-provider-evidence.md`. It does not change Commander integration or external-action authority, Worker isolation, or the optional Reviewer's read-only authority.
 
+[ADR 0049](./0049-bound-hosted-actions-consumption-inside-the-e2e-gate.md) amends only this Gate's hosted invocation cadence, local feedback loop, and current all-admitted-journeys routing default. It keeps one logical Gate, Windows/macOS parity, failure semantics, provider-free inputs, scenario admission, and every excluded proof surface in this decision unchanged; it does not revive the superseded tiered-verification plan.
+
 The concise implementation rules live in [`docs/agents/ci-test-boundaries.md`](../agents/ci-test-boundaries.md).

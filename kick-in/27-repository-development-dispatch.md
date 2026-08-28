@@ -16,8 +16,8 @@ These are provider-neutral invariants. They are stated without reference to any 
 
 | Role | May | Never |
 | --- | --- | --- |
-| **Commander** | Decide dispatch, review returned work, integrate: merge, push, release. Sole external-action authority. Holds the owner's foreground session | — |
-| **Worker** | Read the repository, write only its own worktree and branch, report; run the E2E Functional Gate only when its implementation change affects a supported journey or observed-bug regression | Merge, push any branch, publish, take external actions, or read/write credentials, real manuscripts, or private sample Books |
+| **Commander** | Decide dispatch, review returned work, push task branches, maintain Draft/Ready pull-request state, and integrate: merge, release. Sole external-action authority. Holds the owner's foreground session | — |
+| **Worker** | Read the repository, write only its own worktree and branch, run the local Issue-applicable development sequence, and report | Merge, push any branch, change pull-request state, dispatch hosted workflows, publish, take external actions, or read/write credentials, real manuscripts, or private sample Books |
 | **Reviewer** | Read the branch under review and its brief from fresh, strictly read-only context; produce a review report and advisory verdict | Author the reviewed change; write to the branch; dispatch, delegate to, or spawn another agent; integrate; or take external actions |
 
 The reviewer's verdict is **advisory**. The commander decides and integrates.
@@ -28,8 +28,16 @@ The reviewer's verdict is **advisory**. The commander decides and integrates.
 - Soft cap of three concurrent workers. The binding constraint is commander review capacity, not dispatch capacity.
 - **T0 work is never dispatched**: ambiguous scope, a brief that is itself in doubt, or anything requiring the owner's decision. A worker starts cold and re-derives context the commander already holds; that is the most expensive path.
 - A worker whose brief turns out to be wrong **stops and reports**. It never self-escalates to a higher class.
-- Before Commander integration, rebase onto the current intended integration target (`dev` for ordinary development work). Record the new exact target commit and re-resolve every `<target-commit>:<path>` authority in the Change Brief. If authority or semantics drifted, stop for re-scoping; this integration maintenance is not a new review or proof gate. `main` is the stable/release-promotion line and needs a separate exact Owner authorization; frozen `design-doc` is an allowlist source, never an integration target. Implementation uses only the applicable E2E Functional Gate.
+- Before Commander integration, rebase onto the current intended integration target (`dev` for ordinary development work). Record the new exact target commit and re-resolve every `<target-commit>:<path>` authority in the Change Brief. If authority or semantics drifted, stop for re-scoping; this integration maintenance is not a new review or proof gate. `main` is the stable/release-promotion line and needs a separate exact Owner authorization; frozen `design-doc` is an allowlist source, never an integration target. Implementation uses only the applicable E2E Functional Gate under the Draft/Ready and suspension rules below.
 - Every dispatched unit is extracted from the applicable [`Change Brief`](../docs/agents/change-brief.md): exact base/target-qualified authority, one outcome, current reuse anchor, structural budget, non-goals, stop conditions, implementation journey/bug or non-behavior `N/A`, and reporting boundary. Do not send full transcripts, archive trees, or unrelated design packages.
+
+### Local completion and hosted integration
+
+A Worker develops and debugs on its actual supported host. It restores only existing accepted pins, runs the repository-root `doctor` → `bootstrap` → `build` → applicable journey sequence, solves every locally reproducible failure, clears the change's build outputs, and reruns `build` plus the applicable journey before reporting completion. Declared caches may accelerate iteration but never supply correctness. The report records host, commands, and outcomes without logs, proof artifacts, Provider payloads, private inputs, credentials, or personal dependency state.
+
+Pull requests remain Draft during authoring, review, rebase, and local validation. The Commander makes an integration-ready pull request Ready, which arms the one hosted occurrence. Newer pushes while Ready cancel a superseded in-progress same-PR occurrence and start the newest occurrence. A product/build/journey failure returns the pull request to Draft; only the Commander may rerun one clearly external runner/network/infrastructure transient without a code change. This lifecycle bounds usage and does not create an exact-head, same-SHA, formal-review, or zero-finding gate.
+
+During an exact Owner suspension of hosted Actions, Workers may continue local branch work and Commanders may push branches or maintain Draft pull requests, but product changes requiring the Gate do not merge. Pure documentation, design, and CI-governance work may use only the exception recorded in the current [CI boundary](../docs/agents/ci-test-boundaries.md). Independent branches consume stable owners/interfaces on current `dev`; any necessary stacked dependency and integration order must be explicit and separately authorized.
 
 ### Review
 
@@ -42,6 +50,8 @@ The reviewer's verdict is **advisory**. The commander decides and integrates.
 ### Reporting
 
 Every returned Worker unit carries one line with role, requested binding, actual provider/model/effort, task class, fallback status, and exact reason.
+
+For product work, the returned unit also records the local validation host, exact commands, and outcomes. This is a concise development report, not a proof receipt or substitute for the applicable hosted Gate.
 
 Every Reviewer report carries one line with the reviewed task class; requested and actual provider/model/effort; confirmation that the actual binding meets the class floor; fresh-context, read-only, non-author independence; fallback status; and the exact fallback or same-provider reason when applicable. This record is required only when review is requested and is not a proof receipt or gate.
 
