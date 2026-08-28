@@ -184,6 +184,191 @@ async function clickExactButton(renderer, label, location) {
   );
 }
 
+async function prepareSourceImportReview(renderer, expectation) {
+  const {
+    sourceSha256,
+    sourceBytes,
+    targetBookId = null,
+    targetManuscriptState = 'empty',
+    expectedReuseSourceVersionId = null,
+    scenario = 'source',
+  } = expectation;
+  await waitFor(
+    renderer,
+    `document.documentElement.dataset.ai7ProductReady === 'true' && document.querySelector('[data-screen="landing"]')`,
+    'source-landing',
+  );
+  await assertRenderer(
+    renderer,
+    `typeof window.ai7.prepareSourceImportReview === 'function' && typeof window.ai7.commitSourceImport === 'function'`,
+    'source-renderer-api',
+  );
+  await clickExactButton(renderer, '导入稿件', 'source-stage');
+  await waitFor(renderer, `document.querySelector('[data-screen="target"]')`, `${scenario}-target`);
+  await assertRenderer(
+    renderer,
+    `document.querySelectorAll('input[name="import-target"]:checked').length === 0 && !document.querySelector('input[name="import-relationship"]:checked')`,
+    'source-target-unselected',
+  );
+  await assertRenderer(
+    renderer,
+    targetBookId === null
+      ? `(() => { const target = document.querySelector('[data-import-target-choice="new-book"]'); if (!target) return false; target.click(); return true; })()`
+      : `(() => { const target = document.querySelector('[data-import-target-choice="existing-book"][data-book-id=${JSON.stringify(targetBookId)}]'); if (!target) return false; target.click(); return true; })()`,
+    'source-target-select',
+  );
+  await waitFor(renderer, `document.querySelector('[data-screen="relationship"]')`, 'source-relationship');
+  await assertRenderer(
+    renderer,
+    `(() => { const source = document.querySelector('[data-import-relationship="source-only"]'); const manuscript = document.querySelector('[data-import-relationship="first-manuscript"]'); return source && !source.checked && ${targetBookId !== null && targetManuscriptState === 'populated' ? '!manuscript' : 'manuscript && !manuscript.checked'}; })()`,
+    'source-relationship-unselected',
+  );
+  await assertRenderer(
+    renderer,
+    `(() => { const source = document.querySelector('[data-import-relationship="source-only"]'); if (!source) return false; source.click(); return true; })()`,
+    'source-relationship-select',
+  );
+  if (targetBookId === null) {
+    await waitFor(renderer, `document.querySelector('[data-screen="title"] #book-title')`, 'source-new-book-title');
+    await assertRenderer(
+      renderer,
+      `!document.querySelector('[data-fidelity-category]') && document.querySelector('#book-title')?.value.length > 0`,
+      'source-new-book-no-fidelity',
+    );
+    await clickExactButton(renderer, '确认书名并复核', 'source-new-book-review');
+  } else if (expectedReuseSourceVersionId !== null) {
+    await waitFor(renderer, `document.querySelector('[data-source-version-reuse-choices]')`, 'source-reuse-required');
+    await assertRenderer(
+      renderer,
+      `(() => { const reuse = document.querySelector('[data-reuse-source-version-id=${JSON.stringify(expectedReuseSourceVersionId)}]'); return reuse && !reuse.checked && !document.querySelector('[data-prepare-source-import-review]'); })()`,
+      'source-reuse-unselected',
+    );
+    await assertRenderer(
+      renderer,
+      `(() => { const reuse = document.querySelector('[data-reuse-source-version-id=${JSON.stringify(expectedReuseSourceVersionId)}]'); if (!reuse) return false; reuse.click(); return true; })()`,
+      'source-reuse-select',
+    );
+    await waitFor(renderer, `document.querySelector('[data-prepare-source-import-review=${JSON.stringify(targetBookId)}]')`, 'source-reuse-review-action');
+    await clickExactButton(renderer, '复核来源材料导入', 'source-reuse-review');
+  } else {
+    await waitFor(renderer, `document.querySelector('[data-prepare-source-import-review=${JSON.stringify(targetBookId)}]')`, 'source-existing-review-action');
+    await assertRenderer(
+      renderer,
+      `!document.querySelector('[data-source-version-reuse-choices]')`,
+      'source-cross-book-no-reuse',
+    );
+    await clickExactButton(renderer, '复核来源材料导入', 'source-existing-review');
+  }
+  await waitFor(renderer, `document.querySelector('[data-screen="review"] [data-import-review-kind="source-only"]')`, 'source-review');
+  await assertRenderer(
+    renderer,
+    `(() => { const review = document.querySelector('[data-import-review-kind="source-only"]'); const target = review?.querySelector('[data-source-review-target]'); return target?.dataset.bookId && target.dataset.stableIdentity === 'book:' + target.dataset.bookId && review.querySelector('[data-source-sha256]')?.textContent === ${JSON.stringify(sourceSha256)} && review.querySelector('[data-source-bytes]')?.textContent === ${JSON.stringify(String(sourceBytes))}; })()`,
+    'source-review-target-boundary',
+  );
+  await assertRenderer(
+    renderer,
+    `(() => { const review = document.querySelector('[data-import-review-kind="source-only"]'); const contentDigest = review?.querySelector('[data-content-digest]')?.textContent ?? ''; const structureDigest = review?.querySelector('[data-structure-digest]')?.textContent ?? ''; const acquiredAt = review?.querySelector('[data-acquired-at]')?.dataset.acquiredAt ?? ''; return /^[0-9a-f]{64}$/.test(contentDigest) && /^[0-9a-f]{64}$/.test(structureDigest) && acquiredAt.length >= 20 && acquiredAt.includes('T') && acquiredAt.endsWith('Z'); })()`,
+    'source-review-digests-acquisition',
+  );
+  await assertRenderer(
+    renderer,
+    `(() => { const review = document.querySelector('[data-import-review-kind="source-only"]'); const effects = Array.from(review?.querySelectorAll('.review-section') ?? []).find((section) => section.querySelector('h3')?.textContent === '明确不会发生')?.textContent ?? ''; return review?.textContent.includes('来源导入记录') && effects.includes('不创建稿件') && effects.includes('不创建稿件修订版') && effects.includes('不创建工作流实例') && effects.includes('不创建运行来源范围') && effects.includes('不创建事实状态或事实核查结论') && effects.includes('不创建书系或书系成员关系') && effects.includes('不创建编辑学习准入决定') && effects.includes('不授予或执行模型提供方传输') && effects.includes('不创建发稿版本、公开发布许可或公开发布事实') && effects.includes('不导出、不发送、不交付、不发布'); })()`,
+    'source-review-effects',
+  );
+  await assertRenderer(
+    renderer,
+    `(() => { const review = document.querySelector('[data-import-review-kind="source-only"]'); return !review?.querySelector('[data-fidelity-category]') && !review?.textContent.includes('固定工作流程方案') && !review?.textContent.includes('原生 Profile'); })()`,
+    'source-review-no-manuscript-objects',
+  );
+  if (targetBookId !== null) {
+    await assertRenderer(
+      renderer,
+      `document.querySelector('[data-source-review-target]')?.dataset.bookId === ${JSON.stringify(targetBookId)}`,
+      'source-review-exact-existing-target',
+    );
+  }
+  return renderer.evaluate(`(() => { const target = document.querySelector('[data-source-review-target]'); return { bookId: target?.dataset.bookId, stableIdentity: target?.dataset.stableIdentity, disposition: document.querySelector('[data-source-version-disposition]')?.dataset.sourceVersionDisposition }; })()`);
+}
+
+async function commitPreparedSourceImport(renderer, expectation = {}) {
+  const { expectInterruption = false, holdCompletionPaint = false } = expectation;
+  if (holdCompletionPaint) {
+    await assertRenderer(
+      renderer,
+      `(() => { let frameId = 0; globalThis.__ai7HeldCompletionFrames = []; globalThis.requestAnimationFrame = (callback) => { globalThis.__ai7HeldCompletionFrames.push(callback); frameId += 1; return frameId; }; return true; })()`,
+      'source-completion-paint-held',
+    );
+  }
+  await assertRenderer(
+    renderer,
+    `(() => { const commit = document.querySelector('[data-commit-source-import]'); if (!commit) return false; commit.click(); return true; })()`,
+    'source-commit',
+  );
+  if (expectInterruption) {
+    await waitFor(renderer, `document.documentElement.dataset.ai7ServiceState === 'interrupted'`, 'source-commit-interrupted');
+    await assertRenderer(renderer, `!document.querySelector('[data-screen="imported"]')`, 'source-no-optimistic-completion');
+    return null;
+  }
+  await waitFor(renderer, `document.querySelector('[data-screen="imported"]')`, 'source-imported');
+  if (holdCompletionPaint) {
+    await waitFor(renderer, `globalThis.__ai7HeldCompletionFrames?.length === 1`, 'source-completion-awaits-paint');
+    return null;
+  }
+  await waitFor(
+    renderer,
+    `document.documentElement.dataset.ai7ImportCompletionAcknowledged === 'true'`,
+    'source-completion-acknowledged',
+  );
+  await assertRenderer(
+    renderer,
+    `(() => { const screen = document.querySelector('[data-screen="imported"]'); const actions = Array.from(screen?.querySelectorAll(':scope > .book-overview > .button-row:first-of-type button') ?? [], (button) => button.textContent); const source = screen?.querySelector('[data-view-source-version-id]'); const record = screen?.querySelector('[data-view-source-import-record-id]'); return screen?.textContent.includes('来源材料已导入') && source && !source.disabled && record && !record.disabled && actions[0] === '查看来源材料' && actions[1] === '查看来源导入记录'; })()`,
+    'source-completion-actions',
+  );
+  const identities = await renderer.evaluate(`(() => {
+    const overview = document.querySelector('[data-screen="imported"] .book-overview');
+    const source = document.querySelector('[data-view-source-version-id]');
+    const record = document.querySelector('[data-view-source-import-record-id]');
+    return { bookId: overview?.dataset.bookId, commitId: overview?.dataset.importCommitId, sourceVersionId: source?.dataset.viewSourceVersionId, sourceImportRecordId: record?.dataset.viewSourceImportRecordId };
+  })()`);
+  requireJourney(
+    /^[0-9a-f-]{36}$/i.test(identities?.bookId ?? '') &&
+      /^[0-9a-f-]{36}$/i.test(identities?.commitId ?? '') &&
+      /^[0-9a-f-]{36}$/i.test(identities?.sourceVersionId ?? '') &&
+      /^[0-9a-f-]{36}$/i.test(identities?.sourceImportRecordId ?? ''),
+    'source-completion-identities',
+  );
+  await assertRenderer(
+    renderer,
+    `(() => { const button = document.querySelector('[data-view-source-version-id]'); if (!button) return false; button.click(); return true; })()`,
+    'source-view-source',
+  );
+  await assertRenderer(
+    renderer,
+    `document.querySelector('.record-detail[data-record-kind="source"]')?.textContent.includes(${JSON.stringify(identities.sourceVersionId)})`,
+    'source-version-inspection',
+  );
+  await assertRenderer(
+    renderer,
+    `(() => { const button = document.querySelector('[data-view-source-import-record-id]'); if (!button) return false; button.click(); return true; })()`,
+    'source-view-import-record',
+  );
+  const record = await renderer.evaluate(`(() => { const detail = document.querySelector('.record-detail[data-record-kind="source-import-record"]'); const values = {}; for (const label of detail?.querySelectorAll('dt') ?? []) values[label.textContent] = label.nextElementSibling?.textContent; return values; })()`);
+  requireJourney(
+    record?.['来源导入记录 ID'] === identities.sourceImportRecordId &&
+      record?.['原子提交 ID'] === identities.commitId &&
+      record?.['所属图书 ID'] === identities.bookId &&
+      record?.['来源版本 ID'] === identities.sourceVersionId &&
+      /^[0-9a-f-]{36}$/i.test(record?.['来源记录 ID'] ?? '') &&
+      record?.['保留字节数'] === String(SAMPLE1_BYTES) &&
+      record?.['保留文件 SHA-256'] === SAMPLE1_SHA256 &&
+      /^[0-9a-f]{64}$/.test(record?.['保留内容摘要'] ?? '') &&
+      /^[0-9a-f]{64}$/.test(record?.['保留结构摘要'] ?? '') &&
+      /^[0-9a-f]{64}$/.test(record?.['记录摘要'] ?? ''),
+    'source-import-record-inspection',
+  );
+  return { ...identities, provenanceId: record['来源记录 ID'] };
+}
+
 async function runJourney(
   renderer,
   expectation,
@@ -235,7 +420,7 @@ async function runJourney(
   );
   await assertRenderer(
     renderer,
-    `typeof globalThis.process === 'undefined' && typeof globalThis.require === 'undefined' && Object.keys(window.ai7).sort().join(',') === 'abandonImportDraft,acknowledgeImportCompletion,cancelServiceJob,commitBookCreation,commitNewBookImport,commitReplacement,continueImportDraft,deferRecovery,dismissReplacementPreview,flushJournalEdit,freezeReplacement,getBookOverview,getImportStartup,getManuscriptWindow,getManuscriptWindowAt,getOutline,getRecoveryComparison,getSearchResults,getStartup,listBooks,listPriorWork,platform,pollServiceJob,prepareBookCreation,prepareNewBookReview,prepareReplacement,redoManuscript,reselectImportDraft,restoreRecovery,saveMilestone,selectAndStageDocx,startReplacementCommit,startSearch,undoManuscript,viewRecoveryCandidate'`,
+    `typeof globalThis.process === 'undefined' && typeof globalThis.require === 'undefined' && Object.keys(window.ai7).sort().join(',') === 'abandonImportDraft,acknowledgeImportCompletion,cancelServiceJob,commitBookCreation,commitNewBookImport,commitReplacement,commitSourceImport,continueImportDraft,deferRecovery,dismissReplacementPreview,flushJournalEdit,freezeReplacement,getBookOverview,getImportStartup,getManuscriptWindow,getManuscriptWindowAt,getOutline,getRecoveryComparison,getSearchResults,getStartup,listBooks,listPriorWork,platform,pollServiceJob,prepareBookCreation,prepareNewBookReview,prepareReplacement,prepareSourceImportReview,redoManuscript,reselectImportDraft,restoreRecovery,saveMilestone,selectAndStageDocx,startReplacementCommit,startSearch,undoManuscript,viewRecoveryCandidate'`,
     'renderer-isolation',
   );
   await assertRenderer(
@@ -266,6 +451,12 @@ async function runJourney(
     renderer,
     `(() => { const radio = document.querySelector('input[aria-label=${JSON.stringify(targetLabel)}]'); if (!radio) return false; radio.click(); return true; })()`,
     'target-select',
+  );
+  await waitFor(renderer, `document.querySelector('[data-screen="relationship"]')`, 'target-relationship');
+  await assertRenderer(
+    renderer,
+    `(() => { const relationship = document.querySelector('input[aria-label="作为首份稿件导入"]'); const source = document.querySelector('input[aria-label="作为来源材料导入"]'); if (!relationship || !source || relationship.checked || source.checked) return false; relationship.click(); return true; })()`,
+    'relationship-select',
   );
   await waitFor(renderer, `document.querySelector('[data-screen="title"]')`, 'target-title');
   await assertRenderer(
@@ -821,24 +1012,217 @@ async function main() {
     });
     await closeProduct();
     renderer = await launchProduct({ dataRoot: emptyBookRoot, pickerPath: docx });
-    await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'populated-book-rejection-landing');
+    await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'populated-book-source-landing');
     await assertRenderer(
       renderer,
-      `(() => { const button = document.querySelector('[data-screen="landing"] [data-book-id=${JSON.stringify(populatedBookId)}]'); const row = button?.closest('.book-summary-item'); return button?.textContent.includes('sample1 空图书首稿路径') && button.textContent.includes('已有主稿件') && row?.textContent.includes(${JSON.stringify(populatedBookId)}); })()`,
-      'empty-book-persisted-overview',
+      `(() => { const button = document.querySelector('[data-screen="landing"] [data-book-id=${JSON.stringify(populatedBookId)}]'); if (!button) return false; button.click(); return true; })()`,
+      'populated-book-open-before-source',
     );
-    await clickExactButton(renderer, '导入稿件', 'populated-book-rejection-stage');
-    await waitFor(renderer, `document.querySelector('[data-screen="target"]')`, 'populated-book-rejection-target');
-    await assertRenderer(
-      renderer,
-      `(() => { const targets = Array.from(document.querySelectorAll('input[name="import-target"]')); const target = targets.find((input) => { const label = input.getAttribute('aria-label') ?? ''; return label.includes('sample1 空图书首稿路径') && label.includes(${JSON.stringify(populatedBookId)}); }); if (!target || targets.some((input) => input.checked)) return false; target.click(); return true; })()`,
-      'populated-book-explicit-selection',
+    await waitFor(renderer, `document.querySelector('[data-screen="book-overview"]')`, 'populated-book-overview-before-source');
+    const populatedBefore = await renderer.evaluate(`Array.from(document.querySelectorAll('.record-navigation button[data-record-kind]'), (button) => ({ kind: button.dataset.recordKind, id: button.dataset.recordId }))`);
+    const populatedSourceVersionId = populatedBefore.find((record) => record.kind === 'source')?.id;
+    requireJourney(
+      populatedBefore.length === 6 && /^[0-9a-f-]{36}$/i.test(populatedSourceVersionId ?? ''),
+      'populated-book-before-source-records',
     );
-    await waitFor(renderer, `document.querySelector('[data-screen="relationship"]')`, 'populated-book-relationship');
     await assertRenderer(
       renderer,
-      `(() => { const selected = document.querySelector('input[name="import-target"]:checked'); return document.querySelector('#persistence-status')?.dataset.tone === 'error' && document.querySelector('#persistence-status')?.textContent.includes('已有主稿件') && document.body.textContent.includes('不能再导入第二份主稿件') && selected?.value === ${JSON.stringify(`existing-book:${populatedBookId}`)} && document.activeElement === selected && !document.querySelector('input[aria-label="作为首份稿件导入"]') && !Array.from(document.querySelectorAll('button')).some((button) => button.textContent === '复核导入到所选图书') && !document.querySelector('[data-screen="review"]'); })()`,
-      'populated-book-unavailable-relationship-rejected',
+      `(() => { const source = document.querySelector('[data-record-kind="source"]'); if (!source) return false; source.click(); return true; })()`,
+      'populated-source-record-before',
+    );
+    const populatedProvenanceBefore = await renderer.evaluate(`(() => { const labels = Array.from(document.querySelectorAll('.record-detail dt')); return labels.find((item) => item.textContent === '来源记录 ID')?.nextElementSibling?.textContent; })()`);
+    await clickExactButton(renderer, '返回图书列表', 'populated-book-return-before-source');
+    const populatedReview = await prepareSourceImportReview(renderer, {
+      ...sample1Expectation,
+      targetBookId: populatedBookId,
+      targetManuscriptState: 'populated',
+      expectedReuseSourceVersionId: populatedSourceVersionId,
+      scenario: 'source-populated-reuse',
+    });
+    requireJourney(populatedReview.disposition === 'reused-same-book', 'populated-source-reuse-review');
+    const populatedSourceResult = await commitPreparedSourceImport(renderer);
+    requireJourney(
+      populatedSourceResult.bookId === populatedBookId &&
+        populatedSourceResult.sourceVersionId === populatedSourceVersionId &&
+        populatedSourceResult.provenanceId !== populatedProvenanceBefore,
+      'populated-source-reuse-result',
+    );
+    const populatedAfter = await renderer.evaluate(`Array.from(document.querySelectorAll('.record-navigation button[data-record-kind]'), (button) => ({ kind: button.dataset.recordKind, id: button.dataset.recordId }))`);
+    await assertRenderer(
+      renderer,
+      `document.querySelector('[data-screen="imported"] .book-overview')?.dataset.manuscriptState === 'populated' && !document.body.textContent.includes('创建主稿件、r1、稿件导入记录与工作流程实例。')`,
+      'populated-source-completion-state',
+    );
+    requireJourney(
+      populatedAfter.length === 7 &&
+        populatedBefore.every((before) => populatedAfter.some((after) => after.kind === before.kind && after.id === before.id)) &&
+        populatedAfter.filter((record) => record.kind === 'manuscript').length === 1 &&
+        populatedAfter.filter((record) => record.kind === 'revision').length === 1 &&
+        populatedAfter.filter((record) => record.kind === 'workflow').length === 1 &&
+        populatedAfter.filter((record) => record.kind === 'source-import-record').length === 1,
+      'populated-source-preserves-manuscript-graph',
+    );
+    await closeProduct();
+
+    const sourceRoot = await createCanonicalExternalDataRoot(resolve(runRoot, 'source-import-data'), checkoutRoot);
+    renderer = await launchProduct({ dataRoot: sourceRoot, pickerPath: docx });
+    const sourceBoundReview = await prepareSourceImportReview(renderer, { ...sample1Expectation, scenario: 'source-bound-new' });
+    requireJourney(
+      sourceBoundReview.disposition === 'created' && sourceBoundReview.stableIdentity === `book:${sourceBoundReview.bookId}`,
+      'source-bound-new-book-review-identity',
+    );
+    const sourceBoundResult = await commitPreparedSourceImport(renderer);
+    requireJourney(sourceBoundResult.bookId === sourceBoundReview.bookId, 'source-bound-new-book-result');
+    const sourceBoundRecords = await renderer.evaluate(`Array.from(document.querySelectorAll('.record-navigation button[data-record-kind]'), (button) => button.dataset.recordKind)`);
+    requireJourney(
+      JSON.stringify(sourceBoundRecords) === JSON.stringify(['book', 'source', 'source-import-record']) &&
+        (await renderer.evaluate(`document.querySelector('[data-screen="imported"] .book-overview')?.dataset.manuscriptState`)) === 'empty',
+      'source-bound-zero-manuscript-book',
+    );
+    await closeProduct();
+
+    renderer = await launchProduct({ dataRoot: sourceRoot, pickerPath: docx });
+    const sameBookReview = await prepareSourceImportReview(renderer, {
+      ...sample1Expectation,
+      targetBookId: sourceBoundResult.bookId,
+      expectedReuseSourceVersionId: sourceBoundResult.sourceVersionId,
+      scenario: 'source-same-book-reuse',
+    });
+    requireJourney(sameBookReview.disposition === 'reused-same-book', 'source-same-book-reuse-review');
+    const sameBookResult = await commitPreparedSourceImport(renderer);
+    requireJourney(
+      sameBookResult.bookId === sourceBoundResult.bookId &&
+        sameBookResult.sourceVersionId === sourceBoundResult.sourceVersionId &&
+        sameBookResult.sourceImportRecordId !== sourceBoundResult.sourceImportRecordId &&
+        sameBookResult.provenanceId !== sourceBoundResult.provenanceId,
+      'source-same-book-reuse-result',
+    );
+    const sameBookKinds = await renderer.evaluate(`Array.from(document.querySelectorAll('.record-navigation button[data-record-kind]'), (button) => button.dataset.recordKind)`);
+    requireJourney(
+      sameBookKinds.filter((kind) => kind === 'source').length === 1 &&
+        sameBookKinds.filter((kind) => kind === 'source-import-record').length === 2,
+      'source-same-book-record-counts',
+    );
+    await clickExactButton(renderer, '返回图书列表', 'source-return-for-empty-book');
+    await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'source-returned-for-empty-book');
+    await clickExactButton(renderer, '新建图书', 'source-create-empty-book');
+    await waitFor(renderer, `document.querySelector('[data-screen="book-create"]')`, 'source-empty-book-form');
+    await assertRenderer(
+      renderer,
+      `(() => { const title = document.querySelector('#empty-book-title'); const number = document.querySelector('#empty-book-number'); if (!title || !number) return false; title.value = '来源材料现有空图书'; title.dispatchEvent(new Event('input')); number.value = 'SRC-EMPTY-39'; number.dispatchEvent(new Event('input')); return true; })()`,
+      'source-empty-book-fields',
+    );
+    await clickExactButton(renderer, '复核创建', 'source-empty-book-review');
+    await waitFor(renderer, `document.querySelector('[data-screen="book-create-review"]')`, 'source-empty-book-review-screen');
+    await clickExactButton(renderer, '新建图书', 'source-empty-book-commit');
+    await waitFor(renderer, `document.querySelector('[data-screen="book-overview"]')`, 'source-empty-book-overview');
+    const sourceEmptyBookId = await renderer.evaluate(`document.querySelector('[data-screen="book-overview"] .book-overview')?.dataset.bookId`);
+    requireJourney(/^[0-9a-f-]{36}$/i.test(sourceEmptyBookId ?? ''), 'source-empty-book-id');
+    await closeProduct();
+    renderer = await launchProduct({ dataRoot: sourceRoot, pickerPath: docx });
+    const crossBookEmptyReview = await prepareSourceImportReview(renderer, {
+      ...sample1Expectation,
+      targetBookId: sourceEmptyBookId,
+      scenario: 'source-empty-cross-book',
+    });
+    requireJourney(crossBookEmptyReview.disposition === 'created', 'source-empty-cross-book-review');
+    await closeProduct();
+    renderer = await launchProduct({ dataRoot: sourceRoot });
+    await waitFor(renderer, `document.querySelector('[data-screen="import-recovery"]')`, 'source-reviewed-restart');
+    await assertRenderer(
+      renderer,
+      `(() => { const recovery = document.querySelector('[data-screen="import-recovery"]'); return recovery?.textContent.includes('导入前复核') && recovery.textContent.includes('作为来源材料导入') && recovery.textContent.includes(${JSON.stringify(sourceEmptyBookId)}) && Array.from(recovery.querySelectorAll('button')).some((button) => button.textContent === '继续导入'); })()`,
+      'source-reviewed-restart-summary',
+    );
+    await clickExactButton(renderer, '继续导入', 'source-reviewed-restart-continue');
+    await waitFor(renderer, `document.querySelector('[data-screen="review"] [data-import-review-kind="source-only"]')`, 'source-reviewed-restart-review');
+    const crossBookEmptyResult = await commitPreparedSourceImport(renderer);
+    requireJourney(
+      crossBookEmptyResult.bookId === sourceEmptyBookId &&
+        crossBookEmptyResult.sourceVersionId !== sourceBoundResult.sourceVersionId,
+      'source-empty-cross-book-result',
+    );
+    const crossBookEmptyKinds = await renderer.evaluate(`Array.from(document.querySelectorAll('.record-navigation button[data-record-kind]'), (button) => button.dataset.recordKind)`);
+    requireJourney(
+      JSON.stringify(crossBookEmptyKinds) === JSON.stringify(['book', 'source', 'source-import-record']),
+      'source-empty-cross-book-zero-manuscript',
+    );
+    await closeProduct();
+
+    renderer = await launchProduct({ dataRoot: sourceRoot, pickerPath: syntheticBPath });
+    await runJourney(renderer, { sourceSha256: syntheticBSha256, sourceBytes: syntheticBInfo.size, degraded: false });
+    const crossBookPopulatedId = await renderer.evaluate(`document.querySelector('[data-screen="imported"] .book-overview')?.dataset.bookId`);
+    const crossBookPopulatedBefore = await renderer.evaluate(`Array.from(document.querySelectorAll('.record-navigation button[data-record-kind]'), (button) => ({ kind: button.dataset.recordKind, id: button.dataset.recordId }))`);
+    requireJourney(
+      /^[0-9a-f-]{36}$/i.test(crossBookPopulatedId ?? '') && crossBookPopulatedBefore.length === 6,
+      'source-populated-cross-book-before',
+    );
+    await closeProduct();
+    renderer = await launchProduct({ dataRoot: sourceRoot, pickerPath: docx });
+    const crossBookPopulatedReview = await prepareSourceImportReview(renderer, {
+      ...sample1Expectation,
+      targetBookId: crossBookPopulatedId,
+      targetManuscriptState: 'populated',
+      scenario: 'source-populated-cross-book',
+    });
+    requireJourney(crossBookPopulatedReview.disposition === 'created', 'source-populated-cross-book-review');
+    const crossBookPopulatedResult = await commitPreparedSourceImport(renderer);
+    requireJourney(
+      crossBookPopulatedResult.bookId === crossBookPopulatedId &&
+        crossBookPopulatedResult.sourceVersionId !== sourceBoundResult.sourceVersionId,
+      'source-populated-cross-book-result',
+    );
+    const crossBookPopulatedAfter = await renderer.evaluate(`Array.from(document.querySelectorAll('.record-navigation button[data-record-kind]'), (button) => ({ kind: button.dataset.recordKind, id: button.dataset.recordId }))`);
+    requireJourney(
+      crossBookPopulatedAfter.length === 8 &&
+        crossBookPopulatedBefore.every((before) => crossBookPopulatedAfter.some((after) => after.kind === before.kind && after.id === before.id)) &&
+        crossBookPopulatedAfter.filter((record) => record.kind === 'manuscript').length === 1 &&
+        crossBookPopulatedAfter.filter((record) => record.kind === 'revision').length === 1 &&
+        crossBookPopulatedAfter.filter((record) => record.kind === 'workflow').length === 1 &&
+        crossBookPopulatedAfter.filter((record) => record.kind === 'source').length === 2 &&
+        crossBookPopulatedAfter.filter((record) => record.kind === 'source-import-record').length === 1,
+      'source-populated-cross-book-preserves-manuscript-graph',
+    );
+    await closeProduct();
+
+    const sourceAfterCommitRoot = await createCanonicalExternalDataRoot(resolve(runRoot, 'source-after-commit-data'), checkoutRoot);
+    renderer = await launchProduct({
+      dataRoot: sourceAfterCommitRoot,
+      pickerPath: docx,
+      importControl: 'after-commit-before-response',
+    });
+    await prepareSourceImportReview(renderer, { ...sample1Expectation, scenario: 'source-after-commit' });
+    await commitPreparedSourceImport(renderer, { expectInterruption: true });
+    await closeProduct();
+    renderer = await launchProduct({ dataRoot: sourceAfterCommitRoot });
+    await waitFor(renderer, `document.querySelector('[data-screen="imported"]')`, 'source-after-commit-recovered');
+    await waitFor(
+      renderer,
+      `document.documentElement.dataset.ai7ImportCompletionAcknowledged === 'true'`,
+      'source-after-commit-recovered-acknowledged',
+    );
+    await assertRenderer(
+      renderer,
+      `(() => { const screen = document.querySelector('[data-screen="imported"]'); const kinds = Array.from(screen?.querySelectorAll('.record-navigation button[data-record-kind]') ?? [], (button) => button.dataset.recordKind); return screen?.textContent.includes('来源材料已导入') && screen.querySelector('[data-view-source-version-id]') && screen.querySelector('[data-view-source-import-record-id]') && JSON.stringify(kinds) === JSON.stringify(['book','source','source-import-record']); })()`,
+      'source-after-commit-exact-completion',
+    );
+    await closeProduct();
+
+    const sourceUncertainRoot = await createCanonicalExternalDataRoot(resolve(runRoot, 'source-uncertain-data'), checkoutRoot);
+    renderer = await launchProduct({
+      dataRoot: sourceUncertainRoot,
+      pickerPath: docx,
+      importControl: 'uncertain-reconciliation',
+    });
+    await prepareSourceImportReview(renderer, { ...sample1Expectation, scenario: 'source-uncertain' });
+    await commitPreparedSourceImport(renderer, { expectInterruption: true });
+    await closeProduct();
+    renderer = await launchProduct({ dataRoot: sourceUncertainRoot, importControl: 'uncertain-reconciliation' });
+    await waitFor(renderer, `document.querySelector('[data-screen="import-uncertain"]')`, 'source-uncertain-recovered');
+    await assertRenderer(
+      renderer,
+      `(() => { const screen = document.querySelector('[data-screen="import-uncertain"]'); const labels = Array.from(screen?.querySelectorAll('button') ?? [], (button) => button.textContent); return screen?.textContent.includes('导入提交结果待确认') && screen.textContent.includes('COMMIT_PROOF_INCONCLUSIVE') && !labels.some((label) => ['继续导入','放弃','复核来源材料导入','新建图书并导入来源材料','导入来源材料到所选图书','取消导入'].includes(label)); })()`,
+      'source-uncertain-no-retry-cancel-commit',
     );
     await closeProduct();
 

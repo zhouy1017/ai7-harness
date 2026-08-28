@@ -3,6 +3,7 @@ import {
   IPC_CHANNELS,
   MAIN_EVENTS,
   type CommitNewBookRendererInput,
+  type CommitSourceImportRendererInput,
   type PickerReselectResult,
   type PickerStageResult,
   type RendererApi,
@@ -189,6 +190,10 @@ const api: RendererApi = Object.freeze({
     invoke<ServiceOperationMap['prepareNewBookReview']['output']>(IPC_CHANNELS.prepareNewBookReview, input),
   commitNewBookImport: (input: CommitNewBookRendererInput) =>
     invoke<ServiceOperationMap['commitNewBookImport']['output']>(IPC_CHANNELS.commitNewBookImport, input),
+  prepareSourceImportReview: (input: ServiceOperationMap['prepareSourceImportReview']['input']) =>
+    invoke<ServiceOperationMap['prepareSourceImportReview']['output']>(IPC_CHANNELS.prepareSourceImportReview, input),
+  commitSourceImport: (input: CommitSourceImportRendererInput) =>
+    invoke<ServiceOperationMap['commitSourceImport']['output']>(IPC_CHANNELS.commitSourceImport, input),
   acknowledgeImportCompletion: (input: ServiceOperationMap['acknowledgeImportCompletion']['input']) =>
     invoke<ServiceOperationMap['acknowledgeImportCompletion']['output']>(IPC_CHANNELS.acknowledgeImportCompletion, input),
   getManuscriptWindow: (input: ServiceOperationMap['getManuscriptWindow']['input']) =>

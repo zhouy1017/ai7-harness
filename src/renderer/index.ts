@@ -16,8 +16,10 @@ import type {
   RecoverySelection,
   RecoveryWindowProjection,
   ReviewBeforeImportProjection,
+  ReviewBeforeSourceImportProjection,
   SearchResultsProjection,
   ServiceJobProjection,
+  SourceImportCommitProjection,
   StagedImportProjection,
   StartupProjection,
 } from '../shared/protocol.js';
@@ -165,7 +167,7 @@ function sourceCard(staged: StagedImportProjection): HTMLElement {
 
 function identityFindingDisclosure(
   findings: StagedImportProjection['identityFindings'],
-  reviewTarget?: ReviewBeforeImportProjection['target']['label'],
+  reviewTarget?: ReviewBeforeImportProjection['target']['label'] | ReviewBeforeSourceImportProjection['target']['label'],
 ): HTMLElement {
   const disclosure = element('section', 'source-card identity-finding-disclosure');
   if (reviewTarget) disclosure.classList.add('review-identity-finding-summary');
@@ -193,7 +195,7 @@ function identityFindingDisclosure(
       element('dd', undefined, `${finding.bookTitle} · ${finding.bookId}`),
       element('dt', undefined, '来源材料版本'),
       element('dd', 'technical-identity', finding.sourceVersionId),
-      element('dt', undefined, '稿件导入记录'),
+      element('dt', undefined, finding.recordLabel),
       element('dd', 'technical-identity', finding.importRecordId),
     );
     item.append(classes, details);
@@ -556,7 +558,11 @@ function renderContinuation(
   }
   if (continuation.state === 'review-ready') {
     setStatus('暂存快照与导入前复核已重新校验', 'success');
-    renderReview(continuation.review, continuation.notice, recoveryReturn);
+    if ('retainedBoundary' in continuation.review) {
+      renderSourceImportReview(continuation.review, continuation.notice, recoveryReturn);
+    } else {
+      renderReview(continuation.review, continuation.notice, recoveryReturn);
+    }
     return;
   }
   if (continuation.state === 'committed-recovered') {
@@ -649,7 +655,7 @@ function renderImportRecovery(
       ? [element('dt', undefined, '已复核图书 ID'), element('dd', 'technical-identity', recovery.targetBookId)]
       : []),
     ...(recovery.relationshipLabel
-      ? [element('dt', undefined, '已复核稿件关系'), element('dd', undefined, recovery.relationshipLabel)]
+      ? [element('dt', undefined, '已复核关系'), element('dd', undefined, recovery.relationshipLabel)]
       : []),
   );
   summary.append(details);
@@ -814,6 +820,27 @@ function recordPresentation(record: BookRecordPresentation): HTMLElement {
       appendRecordField(values, '来源记录 ID', record.provenanceId, true);
       appendRecordField(values, '导入时间', record.importedAt);
       break;
+    case 'source-import-record':
+      appendRecordField(values, '来源导入记录 ID', record.sourceImportRecordId, true);
+      appendRecordField(values, '原子提交 ID', record.commitId, true);
+      appendRecordField(values, '所属图书 ID', record.bookId, true);
+      appendRecordField(values, '来源版本 ID', record.sourceVersionId, true);
+      appendRecordField(values, '来源记录 ID', record.provenanceId, true);
+      appendRecordField(values, '目标类型', record.targetKind === 'new-book' ? '新建图书' : '现有图书');
+      appendRecordField(
+        values,
+        '来源版本结果',
+        record.sourceVersionDisposition === 'reused-same-book' ? '复用已明确选择的同图书来源版本' : '创建图书拥有的新来源版本',
+      );
+      appendRecordField(values, '保留边界', '完整所选 DOCX 文件及本地解析出的完整内容与结构身份');
+      appendRecordField(values, '保留文件名', record.retainedBoundary.displayName);
+      appendRecordField(values, '保留字节数', String(record.retainedBoundary.sourceBytes));
+      appendRecordField(values, '保留文件 SHA-256', record.retainedBoundary.sourceSha256, true);
+      appendRecordField(values, '保留内容摘要', record.retainedBoundary.contentDigest, true);
+      appendRecordField(values, '保留结构摘要', record.retainedBoundary.structureDigest, true);
+      appendRecordField(values, '记录摘要', record.recordDigest, true);
+      appendRecordField(values, '导入时间', record.importedAt);
+      break;
   }
   detail.append(values);
   if (record.kind === 'import-record') {
@@ -846,6 +873,9 @@ function recordPresentation(record: BookRecordPresentation): HTMLElement {
       detail.append(acceptedDisclosure);
     }
   }
+  if (record.kind === 'source-import-record') {
+    detail.append(listSection('明确不会发生', record.namedNonEffects));
+  }
   return detail;
 }
 
@@ -855,6 +885,8 @@ function renderBookOverview(
   recoveryReturn?: RecoveryReturnContext,
   emptyBookCreated = false,
 ): void {
+  const sourceCompletion: SourceImportCommitProjection | undefined =
+    completion && 'sourceImportRecordId' in completion ? completion : undefined;
   const content = panel();
   content.classList.add('book-overview');
   content.dataset['bookId'] = overview.book.bookId;
@@ -871,7 +903,11 @@ function renderBookOverview(
     element('h2', undefined, overview.book.title),
     element('p', 'lede', overview.manuscriptState.label),
   );
-  if (completion) content.append(element('p', 'success-note', '稿件已导入；以下为这本图书的精确结果记录。'));
+  if (sourceCompletion) {
+    content.append(element('p', 'success-note', '来源材料已导入；以下可精确查看图书拥有的来源版本与本次文件专属来源导入记录。'));
+  } else if (completion) {
+    content.append(element('p', 'success-note', '稿件已导入；以下为这本图书的精确结果记录。'));
+  }
   else if (emptyBookCreated) content.append(element('p', 'success-note', '图书已创建；尚未创建任何稿件或导入记录。'));
   const identity = element('section', 'source-card');
   const identityValues = element('dl');
@@ -884,9 +920,25 @@ function renderBookOverview(
   identity.append(element('h3', undefined, '图书'), identityValues);
   content.append(identity);
 
+  const detailHost = element('div');
   const actions = element('div', 'button-row');
-  let primaryActionButton: HTMLButtonElement;
-  if (overview.primaryAction.kind === 'import-first-manuscript') {
+  const completionActionButtons: HTMLButtonElement[] = [];
+  if (sourceCompletion) {
+    const sourceRecord = overview.records.find((record) =>
+      record.kind === 'source' && record.sourceVersionId === sourceCompletion.sourceVersionId);
+    const sourceImportRecord = overview.records.find((record) =>
+      record.kind === 'source-import-record' && record.sourceImportRecordId === sourceCompletion.sourceImportRecordId);
+    if (!sourceRecord || !sourceImportRecord) throw new Error('AI7_SOURCE_IMPORT_RESULT_INVALID');
+    const viewSource = button('查看来源材料', 'primary', () => detailHost.replaceChildren(recordPresentation(sourceRecord)));
+    viewSource.dataset['viewSourceVersionId'] = sourceCompletion.sourceVersionId;
+    const viewImportRecord = button('查看来源导入记录', 'secondary', () =>
+      detailHost.replaceChildren(recordPresentation(sourceImportRecord)));
+    viewImportRecord.dataset['viewSourceImportRecordId'] = sourceCompletion.sourceImportRecordId;
+    viewSource.disabled = true;
+    viewImportRecord.disabled = true;
+    completionActionButtons.push(viewSource, viewImportRecord);
+    actions.append(viewSource, viewImportRecord);
+  } else if (overview.primaryAction.kind === 'import-first-manuscript') {
     const importFirst = button('导入首份稿件', 'primary', async () => {
       importFirst.disabled = true;
       setStatus('正在本地解析 DOCX…', 'busy');
@@ -919,11 +971,14 @@ function renderBookOverview(
         setStatus(rendererErrorMessage(error, '无法开始首份稿件导入。'), 'error');
       }
     });
-    primaryActionButton = importFirst;
     actions.append(importFirst);
+    if (completion) {
+      importFirst.disabled = true;
+      completionActionButtons.push(importFirst);
+    }
   } else {
     const manuscriptAction = overview.primaryAction;
-    primaryActionButton = button('打开稿件', 'primary', async () => {
+    const primaryActionButton = button('打开稿件', 'primary', async () => {
       setStatus('正在打开稿件…', 'busy');
       try {
         renderEditorWindow(await window.ai7.getManuscriptWindow({
@@ -936,18 +991,27 @@ function renderBookOverview(
       }
     });
     actions.append(primaryActionButton);
+    if (completion) {
+      primaryActionButton.disabled = true;
+      completionActionButtons.push(primaryActionButton);
+    }
   }
-  if (completion) primaryActionButton.disabled = true;
   actions.append(button('返回图书列表', 'secondary', () => void initializeStartup()));
   content.append(actions);
 
   const records = element('section', 'review-section record-navigation');
   records.append(element('h3', undefined, '精确记录'));
   const recordButtons = element('div', 'button-row');
-  const detailHost = element('div');
   for (const record of overview.records) {
     const open = button(record.label, 'secondary', () => detailHost.replaceChildren(recordPresentation(record)));
     open.dataset['recordKind'] = record.kind;
+    if (record.kind === 'book') open.dataset['recordId'] = record.bookId;
+    else if (record.kind === 'manuscript') open.dataset['recordId'] = record.manuscriptId;
+    else if (record.kind === 'revision') open.dataset['recordId'] = record.revisionId;
+    else if (record.kind === 'source') open.dataset['recordId'] = record.sourceVersionId;
+    else if (record.kind === 'workflow') open.dataset['recordId'] = record.workflowInstanceId;
+    else if (record.kind === 'import-record') open.dataset['recordId'] = record.importRecordId;
+    else open.dataset['recordId'] = record.sourceImportRecordId;
     recordButtons.append(open);
   }
   records.append(recordButtons, detailHost);
@@ -957,7 +1021,7 @@ function renderBookOverview(
   if (completion) {
     void acknowledgeCompletionAfterPaint(completion).then((acknowledged) => {
       if (acknowledged && !authorityInterrupted && content.isConnected) {
-        primaryActionButton.disabled = false;
+        for (const action of completionActionButtons) action.disabled = false;
         setStatus(completion.completionLabel, 'success');
       }
     });
@@ -1247,60 +1311,57 @@ function renderLanding(
   setStatus('准备就绪');
 }
 
+type ImportRelationshipChoice = 'first-manuscript' | 'source-only';
+
 function renderTargetChoice(
   staged: StagedImportProjection,
   selectedChoiceId: StagedImportProjection['targetChoices'][number]['id'] | null,
   recoveryNotice?: string,
   recoveryReturn?: RecoveryReturnContext,
-  relationshipSelected = false,
+  relationshipSelection: ImportRelationshipChoice | null = null,
+  reuseSourceVersionId: string | null | undefined = undefined,
 ): void {
   const content = panel();
   content.append(
     element('p', 'section-label', '步骤 1 / 3'),
-    element('h2', undefined, '选择稿件导入目标'),
-    element('p', 'lede', '系统不会替你选择。先明确这份来源要建立什么关系。'),
+    element('h2', undefined, '选择本地文件导入目标'),
+    element('p', 'lede', '系统不会替你选择图书目标、导入关系或同图书来源版本复用。'),
     sourceCard(staged),
   );
   if (recoveryNotice) content.append(element('p', 'recovery-notice', recoveryNotice));
   if (staged.identityFindings.length > 0) content.append(identityFindingDisclosure(staged.identityFindings));
   const choices = element('fieldset');
-  const legend = element('legend', undefined, '稿件导入目标');
   choices.setAttribute('role', 'radiogroup');
-  choices.setAttribute('aria-label', '稿件导入目标');
-  choices.append(legend);
-  let selectedTargetRadio: HTMLInputElement | undefined;
+  choices.setAttribute('aria-label', '本地文件导入目标');
+  choices.dataset['importTargetChoices'] = 'unselected-by-default';
+  choices.append(element('legend', undefined, '图书目标（默认不选择）'));
   for (const targetChoice of staged.targetChoices) {
     const choice = element('label', 'choice');
     const radio = element('input');
     radio.type = 'radio';
     radio.name = 'import-target';
     radio.value = targetChoice.id;
+    radio.dataset['importTargetChoice'] = targetChoice.kind;
+    if (targetChoice.kind === 'existing-book') radio.dataset['bookId'] = targetChoice.bookId;
     radio.setAttribute('aria-label', targetChoice.label);
     radio.checked = selectedChoiceId === targetChoice.id;
-    if (radio.checked) selectedTargetRadio = radio;
     const copy = element('span');
     copy.append(element('strong', undefined, targetChoice.label));
     if (targetChoice.kind === 'new-book') {
-      copy.append(element(
-        'small',
-        undefined,
-        staged.identityFindings.length > 0
-          ? '将当前文件作为不同作品，建立新的图书、主稿件、r1 和工作流程实例'
-          : '以这份来源建立图书、主稿件、r1 和工作流程实例',
-      ));
+      copy.append(element('small', undefined, '选择后仍须另行选择“首份稿件”或“来源材料”关系。'));
     } else {
       copy.append(element(
         'small',
         undefined,
         `${targetChoice.internalNumber ? `内部编号 ${targetChoice.internalNumber} · ` : ''}${
-          targetChoice.manuscriptState === 'empty' ? '尚无稿件' : '已有稿件（提交将被拒绝）'
+          targetChoice.manuscriptState === 'empty' ? '尚无稿件' : '已有主稿件；仍可导入来源材料'
         }`,
       ));
     }
     choice.append(radio, copy);
     choices.append(choice);
     radio.addEventListener('change', () =>
-      renderTargetChoice(staged, targetChoice.id, recoveryNotice, recoveryReturn, false));
+      renderTargetChoice(staged, targetChoice.id, recoveryNotice, recoveryReturn));
   }
   content.append(choices);
   if (selectedChoiceId === null && staged.nextBookCursor) {
@@ -1345,9 +1406,50 @@ function renderTargetChoice(
     abandonAndContinue({ draftId: staged.draftId, draftVersion: staged.draftVersion }, recoveryReturn),
   );
   let revealedControl: HTMLElement | undefined;
+  if (selectedChoice) {
+    const relationship = element('fieldset');
+    relationship.setAttribute('role', 'radiogroup');
+    relationship.setAttribute('aria-label', '本地文件与所选图书的关系');
+    relationship.dataset['importRelationshipChoices'] = 'unselected-by-default';
+    relationship.append(element('legend', undefined, '导入关系（默认不选择）'));
+    const allowedRelationships: ReadonlyArray<ImportRelationshipChoice> =
+      selectedChoice.kind === 'existing-book' && selectedChoice.manuscriptState === 'populated'
+        ? ['source-only']
+        : ['first-manuscript', 'source-only'];
+    for (const relationshipKind of allowedRelationships) {
+      const relationshipChoice = element('label', 'choice');
+      const radio = element('input');
+      radio.type = 'radio';
+      radio.name = 'import-relationship';
+      radio.value = relationshipKind;
+      radio.dataset['importRelationship'] = relationshipKind;
+      radio.checked = relationshipSelection === relationshipKind;
+      const copy = element('span');
+      if (relationshipKind === 'first-manuscript') {
+        radio.setAttribute('aria-label', '作为首份稿件导入');
+        copy.append(
+          element('strong', undefined, '作为首份稿件导入'),
+          element('small', undefined, '创建主稿件、r1、稿件导入记录与工作流程实例。'),
+        );
+      } else {
+        radio.setAttribute('aria-label', '作为来源材料导入');
+        copy.append(
+          element('strong', undefined, '作为来源材料导入'),
+          element('small', undefined, '只形成图书拥有的来源版本、来源记录与来源导入记录；不创建或改变稿件。'),
+        );
+      }
+      relationshipChoice.append(radio, copy);
+      relationship.append(relationshipChoice);
+      radio.addEventListener('change', () =>
+        renderTargetChoice(staged, selectedChoice.id, recoveryNotice, recoveryReturn, relationshipKind));
+      if (!revealedControl) revealedControl = radio;
+    }
+    content.append(relationship);
+  }
 
-  if (selectedChoice?.kind === 'new-book') {
+  if (selectedChoice?.kind === 'new-book' && relationshipSelection !== null) {
     const form = element('section', 'form-row');
+    form.dataset['importTitleForRelationship'] = relationshipSelection;
     const label = element('label', undefined, '书名');
     label.htmlFor = 'book-title';
     const title = element('input');
@@ -1368,84 +1470,119 @@ function renderTargetChoice(
       title.disabled = true;
       setStatus('正在准备导入前复核…', 'busy');
       try {
-        const review = await window.ai7.prepareNewBookReview({
-          draftId: staged.draftId,
-          expectedDraftVersion: staged.draftVersion,
-          target: { kind: 'new-book', choiceId: selectedChoice.id, confirmedTitle },
-          acceptDegradation: false,
-        });
+        if (relationshipSelection === 'source-only') {
+          const review = await window.ai7.prepareSourceImportReview({
+            draftId: staged.draftId,
+            expectedDraftVersion: staged.draftVersion,
+            target: {
+              kind: 'new-book',
+              choiceId: selectedChoice.id,
+              confirmedTitle,
+              relationship: 'source-only',
+            },
+          });
+          renderSourceImportReview(review, recoveryNotice, recoveryReturn);
+        } else {
+          const review = await window.ai7.prepareNewBookReview({
+            draftId: staged.draftId,
+            expectedDraftVersion: staged.draftVersion,
+            target: { kind: 'new-book', choiceId: selectedChoice.id, confirmedTitle },
+            acceptDegradation: false,
+          });
+          renderReview(review, recoveryNotice, recoveryReturn);
+        }
         setStatus('导入前复核已准备', 'success');
-        renderReview(review, recoveryNotice, recoveryReturn);
       } catch (error) {
         renderError(error, () => void initializeStartup());
       }
     });
-    form.append(label, title, note, fidelityTable(staged.fidelity), element('div', 'button-row'));
-    form.lastElementChild?.append(confirm, cancelImport);
-    content.append(form);
-    queueMicrotask(() => {
-      title.focus();
-      setStatus(`已选择${selectedChoice.label}；请确认书名。`);
-    });
-  } else if (selectedChoice?.kind === 'existing-book') {
-    if (selectedChoice.manuscriptState === 'populated') {
-      content.append(
-        element(
-          'p',
-          'recovery-notice',
-          '所选图书已有主稿件，不能再导入第二份主稿件。请选择新建图书；本模块不会提供或替代其他稿件关系。',
-        ),
-      );
-      const actions = element('div', 'button-row');
-      actions.append(cancelImport);
-      content.append(actions);
-      appendRecoveryReturnAction(content, recoveryReturn);
-      replaceScreen('relationship', content);
-      queueMicrotask(() => selectedTargetRadio?.focus());
-      setStatus('所选图书已有主稿件，无法使用“作为首份稿件导入”。', 'error');
-      return;
-    }
-    const relationship = element('fieldset');
-    relationship.setAttribute('role', 'radiogroup');
-    relationship.setAttribute('aria-label', '稿件与所选图书的关系');
-    relationship.append(element('legend', undefined, '稿件关系（默认不选择）'));
-    const choice = element('label', 'choice');
-    const radio = element('input');
-    radio.type = 'radio';
-    radio.name = 'import-relationship';
-    radio.value = 'first-manuscript';
-    radio.checked = relationshipSelected;
-    radio.setAttribute('aria-label', '作为首份稿件导入');
-    const copy = element('span');
-    copy.append(
-      element('strong', undefined, '作为首份稿件导入'),
-      element('small', undefined, '保留所选图书的稳定身份与编辑维度集，只创建首份主稿件及其导入记录。'),
-    );
-    choice.append(radio, copy);
-    relationship.append(choice);
-    radio.addEventListener('change', () =>
-      renderTargetChoice(staged, selectedChoice.id, recoveryNotice, recoveryReturn, true));
-    content.append(relationship, fidelityTable(staged.fidelity));
     const actions = element('div', 'button-row');
-    revealedControl = radio;
-    if (relationshipSelected) {
-      const confirm = button('复核导入到所选图书', 'primary', async () => {
+    actions.append(confirm, cancelImport);
+    form.append(label, title, note);
+    if (relationshipSelection === 'first-manuscript') form.append(fidelityTable(staged.fidelity));
+    form.append(actions);
+    content.append(form);
+    revealedControl = title;
+  } else if (selectedChoice?.kind === 'existing-book' && relationshipSelection === 'first-manuscript') {
+    if (selectedChoice.manuscriptState !== 'empty') throw new Error('AI7_IMPORT_RELATIONSHIP_INVALID');
+    content.append(fidelityTable(staged.fidelity));
+    const actions = element('div', 'button-row');
+    const confirm = button('复核导入到所选图书', 'primary', async () => {
+      confirm.disabled = true;
+      setStatus('正在重新校验所选图书并准备导入前复核…', 'busy');
+      try {
+        const review = await window.ai7.prepareNewBookReview({
+          draftId: staged.draftId,
+          expectedDraftVersion: staged.draftVersion,
+          target: { kind: 'existing-book', bookId: selectedChoice.bookId, relationship: 'first-manuscript' },
+          acceptDegradation: false,
+        });
+        renderReview(review, recoveryNotice, recoveryReturn);
+        setStatus('导入前复核已准备', 'success');
+      } catch (error) {
+        confirm.disabled = false;
+        setStatus(rendererErrorMessage(error, '无法复核所选图书。'), 'error');
+      }
+    });
+    actions.append(confirm, cancelImport);
+    content.append(actions);
+    revealedControl = confirm;
+  } else if (selectedChoice?.kind === 'existing-book' && relationshipSelection === 'source-only') {
+    const sameBookMatches = [...new Set(staged.identityFindings
+      .filter((finding) => finding.bookId === selectedChoice.bookId && finding.identityClass.kind === 'immutable-original')
+      .map((finding) => finding.sourceVersionId))];
+    if (sameBookMatches.length > 0) {
+      const reuseChoices = element('fieldset');
+      reuseChoices.setAttribute('role', 'radiogroup');
+      reuseChoices.setAttribute('aria-label', '同图书精确来源版本复用');
+      reuseChoices.dataset['sourceVersionReuseChoices'] = 'unselected-by-default';
+      reuseChoices.append(element('legend', undefined, '同图书精确来源版本（必须明确选择复用）'));
+      for (const sourceVersionId of sameBookMatches) {
+        const reuseChoice = element('label', 'choice');
+        const radio = element('input');
+        radio.type = 'radio';
+        radio.name = 'source-version-reuse';
+        radio.value = sourceVersionId;
+        radio.dataset['reuseSourceVersionId'] = sourceVersionId;
+        radio.checked = reuseSourceVersionId === sourceVersionId;
+        radio.setAttribute('aria-label', `复用来源版本 ${sourceVersionId}`);
+        const copy = element('span');
+        copy.append(
+          element('strong', undefined, '复用这个同图书精确来源版本'),
+          element('small', 'technical-identity', sourceVersionId),
+        );
+        reuseChoice.append(radio, copy);
+        reuseChoices.append(reuseChoice);
+        radio.addEventListener('change', () =>
+          renderTargetChoice(staged, selectedChoice.id, recoveryNotice, recoveryReturn, 'source-only', sourceVersionId));
+        if (reuseSourceVersionId === undefined) revealedControl = radio;
+      }
+      content.append(reuseChoices);
+    }
+    const actions = element('div', 'button-row');
+    if (sameBookMatches.length === 0 || reuseSourceVersionId !== undefined) {
+      const confirm = button('复核来源材料导入', 'primary', async () => {
         confirm.disabled = true;
-        setStatus('正在重新校验所选图书并准备导入前复核…', 'busy');
+        setStatus('正在重新校验图书与来源身份并准备复核…', 'busy');
         try {
-          const review = await window.ai7.prepareNewBookReview({
+          const review = await window.ai7.prepareSourceImportReview({
             draftId: staged.draftId,
             expectedDraftVersion: staged.draftVersion,
-            target: { kind: 'existing-book', bookId: selectedChoice.bookId, relationship: 'first-manuscript' },
-            acceptDegradation: false,
+            target: {
+              kind: 'existing-book',
+              bookId: selectedChoice.bookId,
+              relationship: 'source-only',
+              reuseSourceVersionId: reuseSourceVersionId ?? null,
+            },
           });
-          renderReview(review, recoveryNotice, recoveryReturn);
-          setStatus('导入前复核已准备', 'success');
+          renderSourceImportReview(review, recoveryNotice, recoveryReturn);
+          setStatus('来源材料导入前复核已准备', 'success');
         } catch (error) {
           confirm.disabled = false;
-          setStatus(rendererErrorMessage(error, '无法复核所选图书。'), 'error');
+          setStatus(rendererErrorMessage(error, '无法复核来源材料导入。'), 'error');
         }
       });
+      confirm.dataset['prepareSourceImportReview'] = selectedChoice.bookId;
       actions.append(confirm);
       revealedControl = confirm;
     }
@@ -1458,15 +1595,23 @@ function renderTargetChoice(
   }
 
   appendRecoveryReturnAction(content, recoveryReturn);
-  replaceScreen(selectedChoiceId === null ? 'target' : selectedChoice?.kind === 'new-book' ? 'title' : 'relationship', content);
-  if (selectedChoice?.kind === 'existing-book') {
-    queueMicrotask(() => {
-      revealedControl?.focus();
-      setStatus(relationshipSelected
-        ? `已选择“作为首份稿件导入”；可以复核目标图书 ${selectedChoice.bookId}。`
-        : `已选择目标图书 ${selectedChoice.bookId}；请另行选择稿件关系。`);
-    });
-  }
+  replaceScreen(selectedChoiceId === null ? 'target' : relationshipSelection === null ? 'relationship' : 'title', content);
+  queueMicrotask(() => {
+    revealedControl?.focus();
+    if (!selectedChoice) setStatus('请选择精确图书目标。');
+    else if (relationshipSelection === null) setStatus('图书目标已选择；请另行选择导入关系。');
+    else if (relationshipSelection === 'source-only' && reuseSourceVersionId === undefined &&
+      selectedChoice.kind === 'existing-book' && staged.identityFindings.some((finding) =>
+        finding.bookId === selectedChoice.bookId && finding.identityClass.kind === 'immutable-original')) {
+      setStatus('发现同图书精确来源版本；必须明确选择复用。');
+    } else if (selectedChoice.kind === 'existing-book') {
+      setStatus(
+        relationshipSelection === 'first-manuscript'
+          ? `已选择“作为首份稿件导入”；可以复核目标图书 ${selectedChoice.bookId}。`
+          : `已选择“作为来源材料导入”；可以复核目标图书 ${selectedChoice.bookId}。`,
+      );
+    }
+  });
 }
 
 function listSection(title: string, items: ReadonlyArray<string>): HTMLElement {
@@ -1487,6 +1632,148 @@ function degradationItems(review: ReviewBeforeImportProjection): HTMLElement {
     list.append(row);
   }
   return list;
+}
+
+function renderSourceImportReview(
+  review: ReviewBeforeSourceImportProjection,
+  recoveryNotice?: string,
+  recoveryReturn?: RecoveryReturnContext,
+): void {
+  const content = panel();
+  content.dataset['importReviewKind'] = 'source-only';
+  content.append(
+    element('p', 'section-label', '步骤 2 / 3 · 来源材料导入前复核'),
+    element('h2', undefined, '复核来源材料导入'),
+    element('p', 'lede', '本次提交只形成图书拥有的来源材料记录；不会创建或改变稿件及其工作状态。'),
+  );
+  if (recoveryNotice) content.append(element('p', 'recovery-notice', recoveryNotice));
+
+  const target = element('section', 'source-card');
+  target.dataset['sourceReviewTarget'] = review.target.kind;
+  target.dataset['bookId'] = review.target.bookId;
+  target.dataset['stableIdentity'] = review.target.stableIdentity;
+  const targetValues = element('dl');
+  targetValues.append(
+    element('dt', undefined, '精确目标'), element('dd', undefined, review.target.label),
+    element('dt', undefined, '目标图书 ID'), element('dd', 'technical-identity', review.target.bookId),
+    element('dt', undefined, '目标稳定标识'), element('dd', 'technical-identity', review.target.stableIdentity),
+    ...(review.target.kind === 'new-book'
+      ? [element('dt', undefined, '确认书名'), element('dd', undefined, review.target.confirmedTitle)]
+      : [element('dt', undefined, '内部编号'), element('dd', undefined, review.target.internalNumber ?? '未设置')]),
+    element('dt', undefined, '导入关系'), element('dd', undefined, review.target.relationshipLabel),
+  );
+  target.append(element('h3', undefined, '目标与关系'), targetValues);
+  content.append(target);
+  if (review.identityFindings.length > 0) {
+    content.append(identityFindingDisclosure(review.identityFindings, review.target.label));
+  }
+
+  const boundary = element('section', 'review-section');
+  boundary.dataset['sourceRetainedBoundary'] = review.retainedBoundary.kind;
+  const boundaryValues = element('dl');
+  boundaryValues.append(
+    element('dt', undefined, '保留边界'), element('dd', undefined, review.retainedBoundary.label),
+    element('dt', undefined, '文件名'), element('dd', undefined, review.retainedBoundary.displayName),
+    element('dt', undefined, '格式'), element('dd', undefined, review.retainedBoundary.format),
+    element('dt', undefined, '来源字节数'), element('dd', undefined, String(review.retainedBoundary.sourceBytes)),
+    element('dt', undefined, '来源 SHA-256'), element('dd', 'technical-identity', review.retainedBoundary.sourceSha256),
+    element('dt', undefined, '内容摘要'), element('dd', 'technical-identity', review.retainedBoundary.contentDigest),
+    element('dt', undefined, '结构摘要'), element('dd', 'technical-identity', review.retainedBoundary.structureDigest),
+  );
+  const boundaryValuesList = boundaryValues.querySelectorAll('dd');
+  boundaryValuesList[3]?.setAttribute('data-source-bytes', '');
+  boundaryValuesList[4]?.setAttribute('data-source-sha256', '');
+  boundaryValuesList[5]?.setAttribute('data-content-digest', '');
+  boundaryValuesList[6]?.setAttribute('data-structure-digest', '');
+  boundary.append(element('h3', undefined, '完整本地文件与内容边界'), boundaryValues);
+
+  const provenance = element('section', 'review-section');
+  provenance.dataset['sourceReviewProvenance'] = review.provenance.acquisitionPath;
+  const provenanceValues = element('dl');
+  provenanceValues.append(
+    element('dt', undefined, '取得方式'), element('dd', undefined, review.provenance.label),
+    element('dt', undefined, '处理范围'), element('dd', undefined, review.provenance.locality === 'local-provider-free' ? '本地 · 未调用 Provider' : review.provenance.locality),
+    element('dt', undefined, '取得时间'), element('dd', undefined, review.provenance.acquiredAt),
+  );
+  provenanceValues.querySelectorAll('dd')[2]?.setAttribute('data-acquired-at', review.provenance.acquiredAt);
+  provenance.append(element('h3', undefined, '来源记录'), provenanceValues);
+
+  const sourceResult = element('section', 'review-section');
+  sourceResult.dataset['sourceVersionDisposition'] = review.sourceVersionResult.disposition;
+  const sourceResultValues = element('dl');
+  sourceResultValues.append(
+    element('dt', undefined, '结果'), element('dd', undefined, review.sourceVersionResult.label),
+    element('dt', undefined, '来源版本 ID'),
+    element('dd', 'technical-identity', review.sourceVersionResult.sourceVersionId ?? '提交时在所选图书内创建'),
+  );
+  sourceResult.append(element('h3', undefined, '图书拥有的来源版本'), sourceResultValues);
+  content.append(boundary, provenance, sourceResult);
+
+  const dimensions = element('section', 'review-section');
+  dimensions.append(
+    element('h3', undefined, '图书编辑维度集 · 8 项'),
+    element(
+      'p',
+      'field-note',
+      `${review.editorialDimensionSet.createdWithBook ? '随新图书创建' : '保留现有集合'} · ${review.editorialDimensionSet.name} · 版本 ${review.editorialDimensionSet.profileVersion} · ${review.editorialDimensionSet.weightSemantics}`,
+    ),
+  );
+  const dimensionList = element('ul', 'dimension-list');
+  for (const dimension of review.editorialDimensionSet.dimensions) {
+    dimensionList.append(element('li', undefined, `${dimension.label} · 中性起始权重 ${dimension.weight}`));
+  }
+  dimensions.append(dimensionList);
+  const grid = element('div', 'review-grid');
+  grid.append(dimensions, listSection('将创建的记录', review.recordsToCreate), listSection('明确不会发生', review.namedNonEffects));
+  content.append(grid);
+
+  const commitBar = element('section', 'commit-bar');
+  const explanation = element('div');
+  explanation.append(
+    element('strong', undefined, '一次提交，不能部分创建'),
+    element('div', 'field-note', '来源版本结果、当前取得的来源记录与文件专属来源导入记录会原子关联。'),
+  );
+  const commitButton = button(
+    review.target.kind === 'new-book' ? '新建图书并导入来源材料' : '导入来源材料到所选图书',
+    'primary',
+    async () => {
+      commitButton.disabled = true;
+      setStatus('正在原子提交来源材料记录…', 'busy');
+      try {
+        const result = await window.ai7.commitSourceImport({
+          draftId: review.draftId,
+          expectedDraftVersion: review.draftVersion,
+          reviewDigest: review.reviewDigest,
+          commitAttemptId: review.commitAttemptId,
+        });
+        setStatus(result.completionLabel, 'success');
+        renderImported(result, recoveryReturn);
+      } catch (error) {
+        if (
+          hasErrorCode(error, 'IMPORT_COMMIT_OUTCOME_UNCERTAIN') ||
+          hasErrorCode(error, 'REVIEW_CHANGED') ||
+          hasErrorCode(error, 'SNAPSHOT_RESELECTION_REQUIRED') ||
+          hasErrorCode(error, 'DRAFT_VERSION_CHANGED')
+        ) {
+          await initializeStartup();
+          return;
+        }
+        commitButton.disabled = false;
+        setStatus(rendererErrorMessage(error, '来源材料导入未完成，请重试。'), 'error');
+      }
+    },
+  );
+  commitButton.dataset['commitSourceImport'] = review.target.bookId;
+  const actions = element('div', 'button-row compact-actions');
+  actions.append(
+    commitButton,
+    button('取消导入', 'quiet', () =>
+      abandonAndContinue({ draftId: review.draftId, draftVersion: review.draftVersion }, recoveryReturn)),
+  );
+  commitBar.append(explanation, actions);
+  content.append(commitBar);
+  appendRecoveryReturnAction(content, recoveryReturn);
+  replaceScreen('review', content);
 }
 
 function renderReview(
