@@ -679,8 +679,11 @@ An import-bound draft cannot use that empty-Book commit. Every staged file impor
    │        → service progress / pre-commit cancellation
    │        → one atomic Book / Source Version / Manuscript / initialization / import-record commit
    │        → 稿件已导入
-   │           ├─ 打开稿件
-   │           └─ 查看导入记录
+   │           └─ exact resulting 图书工作概览
+   │              ├─ 打开稿件
+   │              ├─ Book / primary Manuscript / Revision
+   │              ├─ Source Version / provenance
+   │              ├─ Workflow Instance / native Profile + AI7 projection pins
    │              └─ Manuscript Import Record
    └─ eligible exact existing 图书
       → 既有图书导入关系 · unselected
@@ -892,7 +895,7 @@ One professional-language entry classifies reuse before it asks the editor to un
                ├─ existing exact artifact pattern → Default Execution Rule draft
                ├─ reusable model-assisted procedure → native DSH Skill draft
                ├─ phases / gates / responsibilities / lifecycle → Workflow-definition draft
-               │  └─ AI7 Workflow Profile projection; exact native carrier mapping deferred
+               │  └─ AI7 Workflow Profile projection; built-in Manuscript pins `manuscript-editorial@1.0.0`, while other native carrier mappings remain deferred
                └─ new code / tool / external capability → Developer Capability Proposal
                   └─ may recommend Plugin evaluation; never creates or installs one
 ```
@@ -922,7 +925,7 @@ artifact discovery / local capture / import
             └─ hooks / dependency scripts / native code → restricted pending separate executable admission
 ```
 
-Install and scoped enablement remain distinct, auditable internal boundaries even when one compact visible action performs both for a compatible artifact. The source, importer, converter, validator and authoring Run cannot approve, install, enable, activate or authorize themselves. Exact catalog sources, adapter shape, sidecar/schema names, trust tiers, executable sandbox mechanics and Profile/Bundle mapping remain unresolved and are not represented as product authority.
+Install and scoped enablement remain distinct, auditable internal boundaries even when one compact visible action performs both for a compatible artifact. The source, importer, converter, validator and authoring Run cannot approve, install, enable, activate or authorize themselves. Exact catalog sources, adapter shape, sidecar/schema names, trust tiers, executable sandbox mechanics and Profile/Bundle mapping for external or user-authored artifacts remain unresolved and are not represented as product authority; the built-in Manuscript Profile's exact mapping is separately fixed by root ADR 0045.
 
 ```text
 stable typed identity

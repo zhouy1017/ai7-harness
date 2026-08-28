@@ -1,4 +1,8 @@
 import type {
+  BookCreationReviewProjection,
+  BookRecordPresentation,
+  BookSummaryPageProjection,
+  BookWorkOverviewProjection,
   FidelityCategoryProjection,
   ContinueImportProjection,
   ImportCommitProjection,
@@ -43,8 +47,25 @@ function recoveryTone(access: ImportDraftRecoveryProjection['originalFileAccess'
   return access === 'available-exact' ? 'success-note' : 'attention-note';
 }
 
+interface RendererErrorData {
+  readonly code: string;
+  readonly message: string;
+}
+
+function rendererErrorData(error: unknown): RendererErrorData | null {
+  if (typeof error !== 'object' || error === null) return null;
+  const candidate = error as { code?: unknown; message?: unknown };
+  return typeof candidate.code === 'string' && typeof candidate.message === 'string'
+    ? { code: candidate.code, message: candidate.message }
+    : null;
+}
+
 function hasErrorCode(error: unknown, code: string): boolean {
-  return error instanceof Error && 'code' in error && (error as Error & { code?: unknown }).code === code;
+  return rendererErrorData(error)?.code === code;
+}
+
+function rendererErrorMessage(error: unknown, fallback: string): string {
+  return rendererErrorData(error)?.message ?? (error instanceof Error ? error.message : fallback);
 }
 
 function element<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string): HTMLElementTagNameMap[K] {
@@ -107,7 +128,7 @@ function appendRecoveryReturnAction(content: HTMLElement, context: RecoveryRetur
       renderManuscriptRecovery(await window.ai7.getRecoveryComparison({ attentionId: context.attentionId }));
     } catch (error) {
       returnButton.disabled = false;
-      setStatus(error instanceof Error ? error.message : '无法返回恢复比较。', 'error');
+      setStatus(rendererErrorMessage(error, '无法返回恢复比较。'), 'error');
     }
   });
   returnButton.dataset['recoveryReturn'] = context.attentionId;
@@ -270,11 +291,11 @@ async function renderStartupProjection(
   recoveryReturn?: RecoveryReturnContext,
 ): Promise<void> {
   if (startup.state === 'none') {
-    try {
-      renderLanding(await window.ai7.listPriorWork(), recoveryReturn);
-    } catch {
-      renderLanding([], recoveryReturn);
-    }
+    const [priorWork, books] = await Promise.all([
+      window.ai7.listPriorWork(),
+      window.ai7.listBooks({ after: null }),
+    ]);
+    renderLanding(priorWork, recoveryReturn, books);
     return;
   }
   if (startup.state === 'committed-recovered') {
@@ -291,8 +312,15 @@ async function renderApplicationStartup(startup: StartupProjection): Promise<voi
   } else if (startup.state === 'import') {
     await renderStartupProjection(startup.startup);
   } else {
-    renderLanding(startup.priorWork);
+    renderLanding(startup.priorWork, undefined, await window.ai7.listBooks({ after: null }));
   }
+}
+
+async function renderLandingFromAuthority(
+  priorWork: ReadonlyArray<PriorWorkItemProjection>,
+  recoveryReturn?: RecoveryReturnContext,
+): Promise<void> {
+  renderLanding(priorWork, recoveryReturn, await window.ai7.listBooks({ after: null }));
 }
 
 function recoveryCandidateCard(
@@ -401,7 +429,7 @@ function renderManuscriptRecovery(recovery: RecoveryComparisonProjection): void 
       setStatus(`已恢复为新版本 ${restored.descendantRevisionLabel}`, 'success');
       renderEditorWindow(restored.window, recovery.bookTitle);
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : '恢复未完成。', 'error');
+      setStatus(rendererErrorMessage(error, '恢复未完成。'), 'error');
       view.disabled = false;
       restore.disabled = false;
       defer.disabled = false;
@@ -455,9 +483,9 @@ function renderManuscriptRecovery(recovery: RecoveryComparisonProjection): void 
         bookTitle: recovery.bookTitle,
       } satisfies RecoveryReturnContext;
       if (deferred.next.state === 'import') await renderStartupProjection(deferred.next.startup, recoveryReturn);
-      else renderLanding(deferred.next.priorWork, recoveryReturn);
+      else await renderLandingFromAuthority(deferred.next.priorWork, recoveryReturn);
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : '恢复待确认状态未能保留。', 'error');
+      setStatus(rendererErrorMessage(error, '恢复待确认状态未能保留。'), 'error');
       view.disabled = selection === undefined;
       restore.disabled = selection === undefined;
       defer.disabled = false;
@@ -485,7 +513,7 @@ async function openRecoveryViewer(
     });
     renderRecoveryViewer(recovery, projection);
   } catch (error) {
-    setStatus(error instanceof Error ? error.message : '无法读取恢复证据。', 'error');
+    setStatus(rendererErrorMessage(error, '无法读取恢复证据。'), 'error');
   }
 }
 
@@ -617,6 +645,12 @@ function renderImportRecovery(
     ...(recovery.targetLabel
       ? [element('dt', undefined, '已复核目标'), element('dd', undefined, recovery.targetLabel)]
       : []),
+    ...(recovery.targetBookId
+      ? [element('dt', undefined, '已复核图书 ID'), element('dd', 'technical-identity', recovery.targetBookId)]
+      : []),
+    ...(recovery.relationshipLabel
+      ? [element('dt', undefined, '已复核稿件关系'), element('dd', undefined, recovery.relationshipLabel)]
+      : []),
   );
   summary.append(details);
   if (!cleanup) summary.append(element('p', recoveryTone(recovery.originalFileAccess.state), recovery.originalFileAccess.label));
@@ -703,9 +737,369 @@ function renderImportRecovery(
   setStatus('等待你选择继续导入或放弃');
 }
 
-function renderLanding(
-  priorWork: ReadonlyArray<PriorWorkItemProjection> = [],
+function appendRecordField(values: HTMLElement, label: string, value: string | null, technical = false): void {
+  values.append(
+    element('dt', undefined, label),
+    element('dd', technical ? 'technical-identity' : undefined, value ?? '—'),
+  );
+}
+
+function recordPresentation(record: BookRecordPresentation): HTMLElement {
+  const detail = element('section', 'source-card record-detail');
+  detail.dataset['recordKind'] = record.kind;
+  detail.append(element('h3', undefined, record.label));
+  const values = element('dl');
+  switch (record.kind) {
+    case 'book':
+      appendRecordField(values, '图书 ID', record.bookId, true);
+      appendRecordField(values, '稳定标识', record.stableIdentity, true);
+      appendRecordField(values, '书名', record.title);
+      appendRecordField(values, '内部编号', record.internalNumber);
+      appendRecordField(values, '创建时间', record.createdAt);
+      appendRecordField(values, '编辑维度集 ID', record.dimensionSetId, true);
+      appendRecordField(values, '编辑维度集摘要', record.dimensionSetDigest, true);
+      break;
+    case 'manuscript':
+      appendRecordField(values, '稿件 ID', record.manuscriptId, true);
+      appendRecordField(values, '所属图书 ID', record.bookId, true);
+      appendRecordField(values, '关系', '主稿件');
+      appendRecordField(values, '创建时间', record.createdAt);
+      break;
+    case 'revision':
+      appendRecordField(values, '修订版 ID', record.revisionId, true);
+      appendRecordField(values, '稿件 ID', record.manuscriptId, true);
+      appendRecordField(values, '分支 ID', record.branchId, true);
+      appendRecordField(values, '版本标签', record.revisionLabel);
+      appendRecordField(values, '修订摘要', record.revisionDigest, true);
+      appendRecordField(values, '来源版本 ID', record.sourceVersionId, true);
+      appendRecordField(values, '创建时间', record.createdAt);
+      break;
+    case 'source':
+      appendRecordField(values, '来源版本 ID', record.sourceVersionId, true);
+      appendRecordField(values, '来源记录 ID', record.provenanceId, true);
+      appendRecordField(values, '所属图书 ID', record.bookId, true);
+      appendRecordField(values, '原文件名', record.displayName);
+      appendRecordField(values, '原文件 SHA-256', record.sourceDigest, true);
+      appendRecordField(values, '内容摘要', record.contentDigest, true);
+      appendRecordField(values, '结构摘要', record.structureDigest, true);
+      appendRecordField(values, '解析器', record.parserIdentity);
+      appendRecordField(values, '取得方式', '本机文件选择器');
+      appendRecordField(values, '处理边界', '本地 · 未调用 Provider');
+      break;
+    case 'workflow':
+      appendRecordField(values, '工作流实例 ID', record.workflowInstanceId, true);
+      appendRecordField(values, '所属图书 ID', record.bookId, true);
+      appendRecordField(values, '稿件 ID', record.manuscriptId, true);
+      appendRecordField(values, '当前阶段', record.currentPhase);
+      appendRecordField(values, '实例状态', record.state);
+      appendRecordField(values, 'AI7 投影', `${record.projection.id}@${record.projection.version}`);
+      appendRecordField(values, 'AI7 投影摘要', record.projection.digest, true);
+      appendRecordField(values, '原生 Profile', `${record.nativeProfile.id}@${record.nativeProfile.version}`);
+      appendRecordField(values, '原生 Profile 摘要', record.nativeProfile.digest, true);
+      break;
+    case 'import-record':
+      appendRecordField(values, '稿件导入记录 ID', record.importRecordId, true);
+      appendRecordField(values, '原子提交 ID', record.commitId, true);
+      appendRecordField(values, '所属图书 ID', record.bookId, true);
+      appendRecordField(values, '稿件 ID', record.manuscriptId, true);
+      appendRecordField(values, '来源版本 ID', record.sourceVersionId, true);
+      appendRecordField(values, '导入保真审阅 ID', record.fidelityReviewId, true);
+      appendRecordField(
+        values,
+        '保真结果',
+        record.fidelityOutcome === 'degraded-import-no-round-trip' ? '含已接受的降级 · 不提供 DOCX 往返保证' : '完整保留 · 不提供 DOCX 往返保证',
+      );
+      appendRecordField(values, '导入降级决定 ID', record.degradationDecisionId, true);
+      appendRecordField(values, '结果修订版 ID', record.resultingRevisionId, true);
+      appendRecordField(values, '来源记录 ID', record.provenanceId, true);
+      appendRecordField(values, '导入时间', record.importedAt);
+      break;
+  }
+  detail.append(values);
+  if (record.kind === 'import-record') {
+    const fidelity = element('details', 'degradation-disclosure');
+    fidelity.append(element('summary', undefined, '查看导入保真审阅 · 8 类'));
+    const categories = element('ul', 'degradation-list');
+    for (const category of record.fidelityCategories) {
+      categories.append(element(
+        'li',
+        undefined,
+        `${category.label} · ${category.statusLabel} · ${category.count} 项 · ${category.detail}`,
+      ));
+    }
+    fidelity.append(categories);
+    detail.append(fidelity);
+    if (record.degradationDecision) {
+      detail.append(element('p', 'field-note', record.degradationDecision.summaryLabel));
+      const acceptedDisclosure = element('details', 'degradation-disclosure');
+      acceptedDisclosure.append(element('summary', undefined, '查看受影响类别、示例与导出后果'));
+      const accepted = element('ul', 'degradation-list');
+      for (const item of record.degradationDecision.acceptedItems) {
+        const category = record.fidelityCategories.find((candidate) => candidate.key === item.categoryKey);
+        if (!category) throw new Error('AI7_IMPORT_RESULT_INVALID');
+        const row = element('li', undefined, `${item.label} · ${item.count} 项 · ${category.detail}`);
+        row.dataset['degradationCategory'] = item.categoryKey;
+        row.dataset['degradationCount'] = String(item.count);
+        accepted.append(row);
+      }
+      acceptedDisclosure.append(accepted);
+      detail.append(acceptedDisclosure);
+    }
+  }
+  return detail;
+}
+
+function renderBookOverview(
+  overview: BookWorkOverviewProjection,
+  completion?: ImportCommitProjection,
   recoveryReturn?: RecoveryReturnContext,
+  emptyBookCreated = false,
+): void {
+  const content = panel();
+  content.classList.add('book-overview');
+  content.dataset['bookId'] = overview.book.bookId;
+  content.dataset['manuscriptState'] = overview.manuscriptState.state;
+  if (completion) content.dataset['importCommitId'] = completion.commitId;
+  content.append(
+    element(
+      'p',
+      'section-label',
+      completion
+        ? `${completion.completionLabel} · 图书工作概览`
+        : emptyBookCreated ? '图书已创建 · 图书工作概览' : '图书工作概览',
+    ),
+    element('h2', undefined, overview.book.title),
+    element('p', 'lede', overview.manuscriptState.label),
+  );
+  if (completion) content.append(element('p', 'success-note', '稿件已导入；以下为这本图书的精确结果记录。'));
+  else if (emptyBookCreated) content.append(element('p', 'success-note', '图书已创建；尚未创建任何稿件或导入记录。'));
+  const identity = element('section', 'source-card');
+  const identityValues = element('dl');
+  identityValues.append(
+    element('dt', undefined, '图书 ID'), element('dd', 'technical-identity', overview.book.bookId),
+    element('dt', undefined, '稳定标识'), element('dd', 'technical-identity', overview.book.stableIdentity),
+    element('dt', undefined, '内部编号'), element('dd', undefined, overview.book.internalNumber ?? '未设置'),
+    element('dt', undefined, '稿件状态'), element('dd', undefined, overview.manuscriptState.label),
+  );
+  identity.append(element('h3', undefined, '图书'), identityValues);
+  content.append(identity);
+
+  const actions = element('div', 'button-row');
+  let primaryActionButton: HTMLButtonElement;
+  if (overview.primaryAction.kind === 'import-first-manuscript') {
+    const importFirst = button('导入首份稿件', 'primary', async () => {
+      importFirst.disabled = true;
+      setStatus('正在本地解析 DOCX…', 'busy');
+      try {
+        const result = await window.ai7.selectAndStageDocx();
+        if (result.status === 'cancelled') {
+          importFirst.disabled = false;
+          setStatus('已取消文件选择');
+          return;
+        }
+        let staged = result.staged;
+        let exactChoice = staged.targetChoices.find(
+          (choice) => choice.kind === 'existing-book' && choice.bookId === overview.book.bookId,
+        );
+        if (!exactChoice) {
+          exactChoice = {
+            kind: 'existing-book',
+            id: `existing-book:${overview.book.bookId}`,
+            bookId: overview.book.bookId,
+            label: `${overview.book.title} · ${overview.book.internalNumber === null ? '' : `内部编号 ${overview.book.internalNumber} · `}图书 ID ${overview.book.bookId}`,
+            internalNumber: overview.book.internalNumber,
+            manuscriptState: 'empty',
+            selected: false,
+          };
+          staged = { ...staged, targetChoices: [...staged.targetChoices, exactChoice] };
+        }
+        renderTargetChoice(staged, exactChoice.id, undefined, recoveryReturn);
+      } catch (error) {
+        importFirst.disabled = false;
+        setStatus(rendererErrorMessage(error, '无法开始首份稿件导入。'), 'error');
+      }
+    });
+    primaryActionButton = importFirst;
+    actions.append(importFirst);
+  } else {
+    const manuscriptAction = overview.primaryAction;
+    primaryActionButton = button('打开稿件', 'primary', async () => {
+      setStatus('正在打开稿件…', 'busy');
+      try {
+        renderEditorWindow(await window.ai7.getManuscriptWindow({
+          manuscriptId: manuscriptAction.manuscriptId,
+          branchId: manuscriptAction.branchId,
+          cursor: null,
+        }), overview.book.title, recoveryReturn?.attentionId);
+      } catch (error) {
+        setStatus(rendererErrorMessage(error, '无法打开稿件。'), 'error');
+      }
+    });
+    actions.append(primaryActionButton);
+  }
+  if (completion) primaryActionButton.disabled = true;
+  actions.append(button('返回图书列表', 'secondary', () => void initializeStartup()));
+  content.append(actions);
+
+  const records = element('section', 'review-section record-navigation');
+  records.append(element('h3', undefined, '精确记录'));
+  const recordButtons = element('div', 'button-row');
+  const detailHost = element('div');
+  for (const record of overview.records) {
+    const open = button(record.label, 'secondary', () => detailHost.replaceChildren(recordPresentation(record)));
+    open.dataset['recordKind'] = record.kind;
+    recordButtons.append(open);
+  }
+  records.append(recordButtons, detailHost);
+  content.append(records);
+  appendRecoveryReturnAction(content, recoveryReturn);
+  replaceScreen(completion ? 'imported' : 'book-overview', content);
+  if (completion) {
+    void acknowledgeCompletionAfterPaint(completion).then((acknowledged) => {
+      if (acknowledged && !authorityInterrupted && content.isConnected) {
+        primaryActionButton.disabled = false;
+        setStatus(completion.completionLabel, 'success');
+      }
+    });
+  } else {
+    setStatus('图书工作概览已打开');
+  }
+}
+
+function renderBookCreationReview(review: BookCreationReviewProjection): void {
+  const content = panel();
+  content.append(
+    element('p', 'section-label', '新建图书 · 复核'),
+    element('h2', undefined, '复核空图书创建'),
+    element('p', 'lede', '本次提交只创建图书身份与编辑维度集。'),
+  );
+  const identity = element('section', 'source-card');
+  const values = element('dl');
+  values.append(
+    element('dt', undefined, '书名'), element('dd', undefined, review.proposed.title),
+    element('dt', undefined, '拟用图书 ID'), element('dd', 'technical-identity', review.proposed.bookId),
+    element('dt', undefined, '拟用稳定标识'), element('dd', 'technical-identity', review.proposed.stableIdentity),
+    element('dt', undefined, '内部编号'), element('dd', undefined, review.proposed.internalNumber ?? '未设置'),
+  );
+  identity.append(element('h3', undefined, '拟创建图书'), values);
+  content.append(
+    identity,
+    listSection('将创建的记录', review.recordsToCreate),
+    listSection('明确不会发生', review.nonEffects),
+  );
+  const dimensions = element('section', 'review-section');
+  dimensions.append(
+    element('h3', undefined, '图书编辑维度集 · 8 项'),
+    element('p', 'field-note', `${review.editorialDimensionSet.name} · ${review.editorialDimensionSet.weightSemantics}`),
+  );
+  const list = element('ul', 'dimension-list');
+  for (const item of review.editorialDimensionSet.dimensions) {
+    list.append(element('li', undefined, `${item.label} · 中性起始权重 ${item.weight}`));
+  }
+  dimensions.append(list);
+  content.append(dimensions);
+  const actions = element('div', 'button-row');
+  const commit = button('新建图书', 'primary', async () => {
+    commit.disabled = true;
+    setStatus('正在原子创建空图书…', 'busy');
+    try {
+      const result = await window.ai7.commitBookCreation({ ...review.proposed, reviewDigest: review.reviewDigest });
+      setStatus(result.completionLabel, 'success');
+      renderBookOverview(result.overview, undefined, undefined, true);
+    } catch (error) {
+      commit.disabled = false;
+      setStatus(rendererErrorMessage(error, '图书未创建。'), 'error');
+    }
+  });
+  actions.append(commit, button('取消', 'quiet', () => void initializeStartup()));
+  content.append(actions);
+  replaceScreen('book-create-review', content);
+}
+
+function renderBookCreationForm(): void {
+  const content = panel();
+  content.append(
+    element('p', 'section-label', '独立创建'),
+    element('h2', undefined, '新建图书'),
+    element('p', 'lede', '先建立空图书；不会同时创建稿件、来源或工作流实例。'),
+  );
+  const form = element('section', 'form-row');
+  const titleLabel = element('label', undefined, '书名');
+  titleLabel.htmlFor = 'empty-book-title';
+  const title = element('input');
+  title.id = 'empty-book-title';
+  title.maxLength = 180;
+  const titleError = element('p', 'field-error');
+  titleError.id = 'empty-book-title-error';
+  titleError.hidden = true;
+  const numberLabel = element('label', undefined, '内部编号（可选）');
+  numberLabel.htmlFor = 'empty-book-number';
+  const internalNumber = element('input');
+  internalNumber.id = 'empty-book-number';
+  internalNumber.maxLength = 80;
+  const numberError = element('p', 'field-error');
+  numberError.id = 'empty-book-number-error';
+  numberError.hidden = true;
+  const clearFieldError = (input: HTMLInputElement, error: HTMLElement): void => {
+    input.removeAttribute('aria-invalid');
+    input.removeAttribute('aria-describedby');
+    error.hidden = true;
+    error.textContent = '';
+  };
+  const showFieldError = (input: HTMLInputElement, error: HTMLElement, message: string): void => {
+    error.textContent = message;
+    error.hidden = false;
+    input.setAttribute('aria-invalid', 'true');
+    input.setAttribute('aria-describedby', error.id);
+    setStatus('');
+    input.focus();
+  };
+  title.addEventListener('input', () => clearFieldError(title, titleError));
+  internalNumber.addEventListener('input', () => clearFieldError(internalNumber, numberError));
+  const review = button('复核创建', 'primary', async () => {
+    clearFieldError(title, titleError);
+    clearFieldError(internalNumber, numberError);
+    const normalizedTitle = title.value.normalize('NFC').replace(/\s+/g, ' ').trim();
+    const normalizedNumber = internalNumber.value.normalize('NFC').trim();
+    if (!normalizedTitle) {
+      showFieldError(title, titleError, '请输入书名；书名不能只包含空白。');
+      return;
+    }
+    if (normalizedNumber.length > 80 || /[\u0000-\u001f\u007f]/.test(normalizedNumber)) {
+      showFieldError(internalNumber, numberError, '内部编号不得包含控制字符，且最多 80 个字符；也可以留空。');
+      return;
+    }
+    review.disabled = true;
+    setStatus('正在准备空图书创建复核…', 'busy');
+    try {
+      renderBookCreationReview(await window.ai7.prepareBookCreation({
+        title: normalizedTitle,
+        internalNumber: normalizedNumber || null,
+      }));
+      setStatus('图书创建复核已准备', 'success');
+    } catch (error) {
+      review.disabled = false;
+      if (hasErrorCode(error, 'TITLE_INVALID')) {
+        showFieldError(title, titleError, rendererErrorMessage(error, '请修正书名。'));
+      } else if (hasErrorCode(error, 'INTERNAL_NUMBER_INVALID') || hasErrorCode(error, 'INTERNAL_NUMBER_CONFLICT')) {
+        showFieldError(internalNumber, numberError, rendererErrorMessage(error, '请修正内部编号。'));
+      } else {
+        setStatus(rendererErrorMessage(error, '无法准备图书创建复核。'), 'error');
+      }
+    }
+  });
+  const actions = element('div', 'button-row');
+  actions.append(review, button('取消', 'quiet', () => void initializeStartup()));
+  form.append(titleLabel, title, titleError, numberLabel, internalNumber, numberError, actions);
+  content.append(form);
+  replaceScreen('book-create', content);
+  queueMicrotask(() => title.focus());
+}
+
+function renderLanding(
+  priorWork: ReadonlyArray<PriorWorkItemProjection>,
+  recoveryReturn: RecoveryReturnContext | undefined,
+  books: BookSummaryPageProjection,
 ): void {
   const recoveryWork = priorWork.find((item) => item.recoveryAttention !== null);
   const recoveryAttention = recoveryWork?.recoveryAttention;
@@ -721,14 +1115,11 @@ function renderLanding(
   content.classList.add('hero');
   const copy = element('div');
   copy.append(
-    element('p', 'section-label', '本地 DOCX · 新图书起稿'),
-    element('h2', undefined, '新建图书'),
-    element('p', 'lede', '从一份本地 DOCX 开始，在创建任何图书记录之前先看清来源、保真结果和最终影响。'),
+    element('p', 'section-label', '图书与稿件'),
+    element('h2', undefined, '开始工作'),
+    element('p', 'lede', '可以先创建空图书，也可以从本地 DOCX 开始一次导入。两项操作彼此独立。'),
   );
-  const steps = element('ol', 'hero-steps');
-  for (const item of ['选择本地 DOCX', '明确选择“新建图书”并确认书名', '复核全部记录与非影响后一次提交']) {
-    steps.append(element('li', undefined, item));
-  }
+  const createBook = button('新建图书', 'secondary', renderBookCreationForm);
   const importButton = button('导入稿件', 'primary', async () => {
     importButton.disabled = true;
     setStatus('正在本地解析 DOCX…', 'busy');
@@ -742,12 +1133,69 @@ function renderLanding(
       setStatus('DOCX 已完成本地暂存', 'success');
       renderTargetChoice(result.staged, null, undefined, activeRecoveryReturn);
     } catch (error) {
-      renderError(error, () => renderLanding(priorWork, activeRecoveryReturn));
+      renderError(error, () => renderLanding(priorWork, activeRecoveryReturn, books));
     }
   });
-  copy.append(steps, importButton);
-  const note = element('aside', 'hero-note', '不会先创建空图书。只有最后的“新建图书并导入稿件”会提交业务记录。');
+  const landingActions = element('div', 'button-row');
+  landingActions.append(importButton, createBook);
+  copy.append(landingActions);
+  const note = element('aside', 'hero-note', '所有导入都要求先明确选择图书目标；系统不会自动选择已有图书或稿件关系。');
   content.append(copy, note);
+  if (books.items.length > 0) {
+    const library = element('section', 'recent-work');
+    library.append(element('p', 'section-label', '图书'), element('h3', undefined, '图书工作概览'));
+    const list = element('div', 'recent-work-list');
+    for (const summary of books.items) {
+      const open = button(`${summary.title} · ${summary.manuscriptStateLabel}`, 'secondary', async () => {
+        open.disabled = true;
+        setStatus('正在读取精确图书工作概览…', 'busy');
+        try {
+          renderBookOverview(
+            await window.ai7.getBookOverview({ bookId: summary.bookId }),
+            undefined,
+            activeRecoveryReturn,
+          );
+        } catch (error) {
+          open.disabled = false;
+          setStatus(rendererErrorMessage(error, '无法读取精确图书工作概览。'), 'error');
+        }
+      });
+      open.dataset['bookId'] = summary.bookId;
+      const row = element('article', 'book-summary-item');
+      row.append(
+        open,
+        element(
+          'p',
+          'field-note',
+          `${summary.internalNumber === null ? '' : `内部编号 ${summary.internalNumber} · `}图书 ID ${summary.bookId} · 稳定标识 ${summary.stableIdentity}`,
+        ),
+      );
+      list.append(row);
+    }
+    library.append(list);
+    if (books.nextCursor) {
+      const loadMore = button('加载更多图书', 'secondary', async () => {
+        loadMore.disabled = true;
+        setStatus('正在读取下一页图书摘要…', 'busy');
+        try {
+          const page = await window.ai7.listBooks({ after: books.nextCursor });
+          renderLanding(
+            priorWork,
+            activeRecoveryReturn,
+            { items: [...books.items, ...page.items], nextCursor: page.nextCursor },
+          );
+          setStatus('已加载更多图书摘要', 'success');
+        } catch (error) {
+          loadMore.disabled = false;
+          setStatus(rendererErrorMessage(error, '无法读取下一页图书摘要。'), 'error');
+        }
+      });
+      const loadMoreActions = element('div', 'button-row');
+      loadMoreActions.append(loadMore);
+      library.append(loadMoreActions);
+    }
+    content.append(library);
+  }
   if (priorWork.length > 0) {
     const recent = element('section', 'recent-work');
     recent.append(element('p', 'section-label', '继续已有工作'), element('h3', undefined, '最近稿件'));
@@ -773,7 +1221,7 @@ function renderLanding(
           renderEditorWindow(windowProjection, item.bookTitle, activeRecoveryReturn?.attentionId);
         } catch (error) {
           open.disabled = false;
-          setStatus(error instanceof Error ? error.message : '无法重新打开稿件。', 'error');
+          setStatus(rendererErrorMessage(error, '无法重新打开稿件。'), 'error');
         }
       });
       open.dataset['manuscriptId'] = item.manuscriptId;
@@ -804,6 +1252,7 @@ function renderTargetChoice(
   selectedChoiceId: StagedImportProjection['targetChoices'][number]['id'] | null,
   recoveryNotice?: string,
   recoveryReturn?: RecoveryReturnContext,
+  relationshipSelected = false,
 ): void {
   const content = panel();
   content.append(
@@ -814,41 +1263,90 @@ function renderTargetChoice(
   );
   if (recoveryNotice) content.append(element('p', 'recovery-notice', recoveryNotice));
   if (staged.identityFindings.length > 0) content.append(identityFindingDisclosure(staged.identityFindings));
-  const targetChoice = staged.targetChoices[0];
-  if (!targetChoice) throw new Error('AI7_IMPORT_TARGET_INVALID');
   const choices = element('fieldset');
   const legend = element('legend', undefined, '稿件导入目标');
   choices.setAttribute('role', 'radiogroup');
   choices.setAttribute('aria-label', '稿件导入目标');
-  const choice = element('label', 'choice');
-  const radio = element('input');
-  radio.type = 'radio';
-  radio.name = 'import-target';
-  radio.value = targetChoice.id;
-  radio.setAttribute('aria-label', targetChoice.label);
-  radio.checked = selectedChoiceId === targetChoice.id;
-  const copy = element('span');
-  copy.append(
-    element('strong', undefined, targetChoice.label),
-    element(
-      'small',
-      undefined,
-      staged.identityFindings.length > 0
-        ? '将当前文件作为不同作品，建立新的图书、主稿件、r1 和工作流程实例'
-        : '以这份来源建立图书、主稿件、r1 和工作流程实例',
-    ),
-  );
-  choice.append(radio, copy);
-  choices.append(legend, choice);
+  choices.append(legend);
+  let selectedTargetRadio: HTMLInputElement | undefined;
+  for (const targetChoice of staged.targetChoices) {
+    const choice = element('label', 'choice');
+    const radio = element('input');
+    radio.type = 'radio';
+    radio.name = 'import-target';
+    radio.value = targetChoice.id;
+    radio.setAttribute('aria-label', targetChoice.label);
+    radio.checked = selectedChoiceId === targetChoice.id;
+    if (radio.checked) selectedTargetRadio = radio;
+    const copy = element('span');
+    copy.append(element('strong', undefined, targetChoice.label));
+    if (targetChoice.kind === 'new-book') {
+      copy.append(element(
+        'small',
+        undefined,
+        staged.identityFindings.length > 0
+          ? '将当前文件作为不同作品，建立新的图书、主稿件、r1 和工作流程实例'
+          : '以这份来源建立图书、主稿件、r1 和工作流程实例',
+      ));
+    } else {
+      copy.append(element(
+        'small',
+        undefined,
+        `${targetChoice.internalNumber ? `内部编号 ${targetChoice.internalNumber} · ` : ''}${
+          targetChoice.manuscriptState === 'empty' ? '尚无稿件' : '已有稿件（提交将被拒绝）'
+        }`,
+      ));
+    }
+    choice.append(radio, copy);
+    choices.append(choice);
+    radio.addEventListener('change', () =>
+      renderTargetChoice(staged, targetChoice.id, recoveryNotice, recoveryReturn, false));
+  }
   content.append(choices);
-  radio.addEventListener('change', () =>
-    renderTargetChoice(staged, targetChoice.id, recoveryNotice, recoveryReturn));
+  if (selectedChoiceId === null && staged.nextBookCursor) {
+    const moreTargets = button('加载更多图书目标', 'secondary', async () => {
+      moreTargets.disabled = true;
+      setStatus('正在读取下一页图书目标…', 'busy');
+      try {
+        const page = await window.ai7.listBooks({ after: staged.nextBookCursor });
+        const knownBookIds = new Set(staged.targetChoices.flatMap((choice) =>
+          choice.kind === 'existing-book' ? [choice.bookId] : []));
+        const additional = page.items.filter((book) => !knownBookIds.has(book.bookId)).map((book) => ({
+          kind: 'existing-book' as const,
+          id: `existing-book:${book.bookId}`,
+          bookId: book.bookId,
+          label: `${book.title} · ${book.internalNumber === null ? '' : `内部编号 ${book.internalNumber} · `}图书 ID ${book.bookId}`,
+          internalNumber: book.internalNumber,
+          manuscriptState: book.manuscriptState,
+          selected: false as const,
+        }));
+        renderTargetChoice(
+          { ...staged, targetChoices: [...staged.targetChoices, ...additional], nextBookCursor: page.nextCursor },
+          null,
+          recoveryNotice,
+          recoveryReturn,
+        );
+        setStatus('已加载更多图书目标', 'success');
+      } catch (error) {
+        moreTargets.disabled = false;
+        setStatus(rendererErrorMessage(error, '无法读取下一页图书目标。'), 'error');
+      }
+    });
+    const moreTargetActions = element('div', 'button-row');
+    moreTargetActions.append(moreTargets);
+    content.append(moreTargetActions);
+  }
+  const selectedChoice = selectedChoiceId === null
+    ? undefined
+    : staged.targetChoices.find((choice) => choice.id === selectedChoiceId);
+  if (selectedChoiceId !== null && !selectedChoice) throw new Error('AI7_IMPORT_TARGET_INVALID');
 
   const cancelImport = button('取消导入', 'quiet', () =>
     abandonAndContinue({ draftId: staged.draftId, draftVersion: staged.draftVersion }, recoveryReturn),
   );
+  let revealedControl: HTMLElement | undefined;
 
-  if (selectedChoiceId !== null) {
+  if (selectedChoice?.kind === 'new-book') {
     const form = element('section', 'form-row');
     const label = element('label', undefined, '书名');
     label.htmlFor = 'book-title';
@@ -873,20 +1371,86 @@ function renderTargetChoice(
         const review = await window.ai7.prepareNewBookReview({
           draftId: staged.draftId,
           expectedDraftVersion: staged.draftVersion,
-          targetChoiceId: selectedChoiceId,
-          confirmedTitle,
+          target: { kind: 'new-book', choiceId: selectedChoice.id, confirmedTitle },
           acceptDegradation: false,
         });
         setStatus('导入前复核已准备', 'success');
         renderReview(review, recoveryNotice, recoveryReturn);
       } catch (error) {
-        renderError(error, () => renderLanding([], recoveryReturn));
+        renderError(error, () => void initializeStartup());
       }
     });
     form.append(label, title, note, fidelityTable(staged.fidelity), element('div', 'button-row'));
     form.lastElementChild?.append(confirm, cancelImport);
     content.append(form);
-    queueMicrotask(() => title.focus());
+    queueMicrotask(() => {
+      title.focus();
+      setStatus(`已选择${selectedChoice.label}；请确认书名。`);
+    });
+  } else if (selectedChoice?.kind === 'existing-book') {
+    if (selectedChoice.manuscriptState === 'populated') {
+      content.append(
+        element(
+          'p',
+          'recovery-notice',
+          '所选图书已有主稿件，不能再导入第二份主稿件。请选择新建图书；本模块不会提供或替代其他稿件关系。',
+        ),
+      );
+      const actions = element('div', 'button-row');
+      actions.append(cancelImport);
+      content.append(actions);
+      appendRecoveryReturnAction(content, recoveryReturn);
+      replaceScreen('relationship', content);
+      queueMicrotask(() => selectedTargetRadio?.focus());
+      setStatus('所选图书已有主稿件，无法使用“作为首份稿件导入”。', 'error');
+      return;
+    }
+    const relationship = element('fieldset');
+    relationship.setAttribute('role', 'radiogroup');
+    relationship.setAttribute('aria-label', '稿件与所选图书的关系');
+    relationship.append(element('legend', undefined, '稿件关系（默认不选择）'));
+    const choice = element('label', 'choice');
+    const radio = element('input');
+    radio.type = 'radio';
+    radio.name = 'import-relationship';
+    radio.value = 'first-manuscript';
+    radio.checked = relationshipSelected;
+    radio.setAttribute('aria-label', '作为首份稿件导入');
+    const copy = element('span');
+    copy.append(
+      element('strong', undefined, '作为首份稿件导入'),
+      element('small', undefined, '保留所选图书的稳定身份与编辑维度集，只创建首份主稿件及其导入记录。'),
+    );
+    choice.append(radio, copy);
+    relationship.append(choice);
+    radio.addEventListener('change', () =>
+      renderTargetChoice(staged, selectedChoice.id, recoveryNotice, recoveryReturn, true));
+    content.append(relationship, fidelityTable(staged.fidelity));
+    const actions = element('div', 'button-row');
+    revealedControl = radio;
+    if (relationshipSelected) {
+      const confirm = button('复核导入到所选图书', 'primary', async () => {
+        confirm.disabled = true;
+        setStatus('正在重新校验所选图书并准备导入前复核…', 'busy');
+        try {
+          const review = await window.ai7.prepareNewBookReview({
+            draftId: staged.draftId,
+            expectedDraftVersion: staged.draftVersion,
+            target: { kind: 'existing-book', bookId: selectedChoice.bookId, relationship: 'first-manuscript' },
+            acceptDegradation: false,
+          });
+          renderReview(review, recoveryNotice, recoveryReturn);
+          setStatus('导入前复核已准备', 'success');
+        } catch (error) {
+          confirm.disabled = false;
+          setStatus(rendererErrorMessage(error, '无法复核所选图书。'), 'error');
+        }
+      });
+      actions.append(confirm);
+      revealedControl = confirm;
+    }
+    actions.append(cancelImport);
+    content.append(actions);
   } else {
     const actions = element('div', 'button-row');
     actions.append(cancelImport);
@@ -894,7 +1458,15 @@ function renderTargetChoice(
   }
 
   appendRecoveryReturnAction(content, recoveryReturn);
-  replaceScreen(selectedChoiceId === null ? 'target' : 'title', content);
+  replaceScreen(selectedChoiceId === null ? 'target' : selectedChoice?.kind === 'new-book' ? 'title' : 'relationship', content);
+  if (selectedChoice?.kind === 'existing-book') {
+    queueMicrotask(() => {
+      revealedControl?.focus();
+      setStatus(relationshipSelected
+        ? `已选择“作为首份稿件导入”；可以复核目标图书 ${selectedChoice.bookId}。`
+        : `已选择目标图书 ${selectedChoice.bookId}；请另行选择稿件关系。`);
+    });
+  }
 }
 
 function listSection(title: string, items: ReadonlyArray<string>): HTMLElement {
@@ -930,13 +1502,34 @@ function renderReview(
   );
   if (recoveryNotice) content.append(element('p', 'recovery-notice', recoveryNotice));
   const identity = element('section', 'source-card');
-  identity.append(element('h3', undefined, `${review.target.label} · ${review.target.confirmedTitle}`));
+  identity.append(element('h3', undefined, review.target.kind === 'new-book'
+    ? `${review.target.label} · ${review.target.confirmedTitle}`
+    : `${review.target.label} · ${review.target.relationshipLabel}`));
   const identityDetails = element('dl');
   const sourceBytes = element('dd', undefined, String(review.source.sourceBytes));
   sourceBytes.setAttribute('data-source-bytes', '');
   const sourceDigest = element('dd', 'technical-identity', review.source.sourceSha256);
   sourceDigest.setAttribute('data-source-sha256', '');
   const degraded = review.degradationDecision.state !== 'not-required-clean-import';
+  const finalActionLabel = review.target.kind === 'existing-book'
+    ? degraded ? '按上述降级方式导入为首份稿件' : '导入为首份稿件'
+    : degraded ? '按上述降级方式新建图书并导入稿件' : '新建图书并导入稿件';
+  if (review.target.kind === 'existing-book') {
+    const reviewedBookId = element('dd', 'technical-identity', review.target.bookId);
+    reviewedBookId.dataset['reviewedBookId'] = review.target.bookId;
+    identityDetails.append(
+      element('dt', undefined, '目标图书'),
+      element('dd', undefined, review.target.label),
+      element('dt', undefined, '目标图书 ID'),
+      reviewedBookId,
+      element('dt', undefined, '目标稳定标识'),
+      element('dd', 'technical-identity', review.target.stableIdentity),
+      element('dt', undefined, '目标内部编号'),
+      element('dd', undefined, review.target.internalNumber ?? '未设置'),
+      element('dt', undefined, '稿件关系'),
+      element('dd', undefined, review.target.relationshipLabel),
+    );
+  }
   identityDetails.append(
     element('dt', undefined, '本地来源'),
     element('dd', undefined, review.source.displayName),
@@ -947,7 +1540,7 @@ function renderReview(
     element('dt', undefined, '来源 SHA-256'),
     sourceDigest,
     element('dt', undefined, '最终动作'),
-    element('dd', undefined, degraded ? '按上述降级方式新建图书并导入稿件' : '新建图书并导入稿件'),
+    element('dd', undefined, finalActionLabel),
   );
   identity.append(identityDetails);
   content.append(identity);
@@ -988,14 +1581,23 @@ function renderReview(
           const acceptedReview = await window.ai7.prepareNewBookReview({
             draftId: review.draftId,
             expectedDraftVersion: review.draftVersion,
-            targetChoiceId: review.target.choiceId,
-            confirmedTitle: review.target.confirmedTitle,
+            target: review.target.kind === 'new-book'
+              ? {
+                  kind: 'new-book',
+                  choiceId: review.target.choiceId,
+                  confirmedTitle: review.target.confirmedTitle,
+                }
+              : {
+                  kind: 'existing-book',
+                  bookId: review.target.bookId,
+                  relationship: review.target.relationship,
+                },
             acceptDegradation: true,
           });
           setStatus('已接受本次导入的完整降级集合', 'success');
           renderReview(acceptedReview, recoveryNotice, recoveryReturn);
         } catch (error) {
-          renderError(error, () => renderLanding([], recoveryReturn));
+          renderError(error, () => void initializeStartup());
         }
       });
     }
@@ -1007,7 +1609,9 @@ function renderReview(
   workflow.append(
     element('h3', undefined, '固定工作流程方案'),
     element('p', undefined, `${review.workflowProfile.name} · 版本 ${review.workflowProfile.version}`),
-    element('p', 'field-note', '将创建一个绑定该精确方案版本的工作流程实例。'),
+    element('p', 'field-note', `AI7 投影 ${review.workflowProfile.id}@${review.workflowProfile.version} · ${review.workflowProfile.digest}`),
+    element('p', 'field-note', `原生 Profile ${review.workflowProfile.nativeProfile.id}@${review.workflowProfile.nativeProfile.version} · ${review.workflowProfile.nativeProfile.digest}`),
+    element('p', 'field-note', '将创建一个同时绑定上述精确 AI7 投影与原生 Profile 的工作流程实例。'),
   );
   const dimensions = element('section', 'review-section');
   dimensions.append(
@@ -1045,10 +1649,9 @@ function renderReview(
           : '本次符合范围的导入不创建导入降级决定，也不提供 DOCX 往返保证。',
       ),
     );
-    const commitLabel = acceptedDegradation ? '按上述降级方式新建图书并导入稿件' : '新建图书并导入稿件';
-    const commitButton = button(commitLabel, 'primary', async () => {
+    const commitButton = button(finalActionLabel, 'primary', async () => {
       commitButton.disabled = true;
-      setStatus('正在原子提交图书与稿件记录…', 'busy');
+      setStatus(review.target.kind === 'existing-book' ? '正在原子导入首份稿件…' : '正在原子提交图书与稿件记录…', 'busy');
       try {
         const result = await window.ai7.commitNewBookImport({
           draftId: review.draftId,
@@ -1069,7 +1672,7 @@ function renderReview(
           return;
         }
         commitButton.disabled = false;
-        setStatus(error instanceof Error ? error.message : '导入未完成，请重试。', 'error');
+        setStatus(rendererErrorMessage(error, '导入未完成，请重试。'), 'error');
       }
     });
     const actions = element('div', 'button-row compact-actions');
@@ -1097,76 +1700,7 @@ function renderReview(
 function renderImported(result: ImportCommitProjection, recoveryReturn?: RecoveryReturnContext): void {
   delete document.documentElement.dataset['ai7ImportCompletionPainted'];
   delete document.documentElement.dataset['ai7ImportCompletionAcknowledged'];
-  const content = panel();
-  content.classList.add('completion');
-  content.dataset['importCommitId'] = result.commitId;
-  const degradation = result.importRecord.degradationDecision;
-  content.append(
-    element('div', 'completion-mark', '✓'),
-    element('p', 'section-label', '步骤 3 / 3'),
-    element('h2', undefined, result.completionLabel),
-    element(
-      'p',
-      'lede',
-      degradation
-        ? '图书、维度集、来源、导入保真审阅、导入降级决定、主稿件、主分支、r1、工作流程实例和稿件导入记录已一起创建。'
-        : '图书、维度集、来源与保真记录、主稿件、主分支、r1、工作流程实例和稿件导入记录已一起创建。',
-    ),
-  );
-  const actions = element('div', 'button-row');
-  const open = button('打开稿件', 'primary', () =>
-    renderEditorWindow(result.firstWindow, '主稿件', recoveryReturn?.attentionId));
-  open.disabled = true;
-  const record = button('查看导入记录', 'secondary', () => {
-    if (content.querySelector('.record-detail')) return;
-    const detail = element('section', 'source-card record-detail');
-    detail.append(
-      element('h3', undefined, '稿件导入记录'),
-      element('p', undefined, `完成时间：${new Date(result.importedAt).toLocaleString('zh-CN')}`),
-      element('p', undefined, '结果：主稿件 · 主分支 · 稿件修订版 r1'),
-      element('p', undefined, `来源：${result.source.displayName} · ${result.source.sourceBytes} 字节 · SHA-256 ${result.source.sourceSha256}`),
-      element('p', undefined, `导入保真审阅：${result.fidelityReview.fidelityReviewId} · 8 类`),
-      element('p', undefined, `稿件导入记录：${result.importRecord.importRecordId} · 已链接导入保真审阅`),
-      element('p', 'field-note', '这不是稿件检查点、里程碑版本、导出回执、往返保证或发布事实。'),
-    );
-    if (degradation) {
-      detail.append(
-        element(
-          'p',
-          undefined,
-          `导入降级决定：${degradation.degradationDecisionId} · ${degradation.summaryLabel} · 已链接稿件导入记录`,
-        ),
-      );
-      const disclosure = element('details', 'degradation-disclosure');
-      disclosure.append(element('summary', undefined, '查看受影响类别、示例与导出后果'));
-      const accepted = element('ul', 'degradation-list');
-      for (const item of degradation.acceptedItems) {
-        const category = result.fidelityReview.categories.find((candidate) => candidate.key === item.categoryKey);
-        if (!category) throw new Error('AI7_IMPORT_RESULT_INVALID');
-        const row = element('li', undefined, `${item.label} · ${item.count} 项 · ${category.detail}`);
-        row.dataset['degradationCategory'] = item.categoryKey;
-        row.dataset['degradationCount'] = String(item.count);
-        accepted.append(row);
-      }
-      disclosure.append(accepted);
-      detail.append(disclosure);
-    }
-    content.append(detail);
-  });
-  actions.append(open, record);
-  content.append(actions);
-  appendRecoveryReturnAction(content, recoveryReturn);
-  replaceScreen('imported', content);
-  void acknowledgeCompletionAfterPaint(result).then((acknowledged) => {
-    if (
-      acknowledged &&
-      !authorityInterrupted &&
-      screen.dataset['screen'] === 'imported' &&
-      content.isConnected
-    ) {
-      open.disabled = false;
-    }
-  });
+  renderBookOverview(result.overview, result, recoveryReturn);
 }
 
 function delay(milliseconds: number): Promise<void> {
@@ -1220,7 +1754,7 @@ function renderEditorWindow(
       try {
         renderManuscriptRecovery(await window.ai7.getRecoveryComparison({ attentionId: recoveryAttentionId }));
       } catch (error) {
-        setStatus(error instanceof Error ? error.message : '无法返回恢复比较。', 'error');
+        setStatus(rendererErrorMessage(error, '无法返回恢复比较。'), 'error');
       }
     }));
   }
@@ -1531,7 +2065,7 @@ function renderEditorWindow(
     } catch (error) {
       if (!authoritativeMutation || !target || !continuity) {
         if (authoritativeMutation) setAuthoritativeMutation(false);
-        setStatus(error instanceof Error ? error.message : '待保存编辑未能排空；权威操作未开始。', 'error');
+        setStatus(rendererErrorMessage(error, '待保存编辑未能排空；权威操作未开始。'), 'error');
         return undefined;
       }
       try {
@@ -1543,7 +2077,7 @@ function renderEditorWindow(
           setStatus(`${result.completionLabel}；编辑器已从刷新中断中恢复。`, 'success');
           return result;
         }
-        setStatus(error instanceof Error ? error.message : '权威操作未完成；编辑器已恢复到当前持久状态。', 'error');
+        setStatus(rendererErrorMessage(error, '权威操作未完成；编辑器已恢复到当前持久状态。'), 'error');
       } catch (refreshError) {
         pendingAuthoritativeRecovery = result
           ? { target, continuity, expected: result, reconcile: (value) => reconcile(value as T) }
@@ -1561,7 +2095,7 @@ function renderEditorWindow(
         try {
           await invalidateSearchState('待保存编辑已写入；先前搜索结果、替换预览和查找返回位置已失效。');
         } catch (error) {
-          setStatus(error instanceof Error ? error.message : '无法取消已失效的替换预览。', 'error');
+          setStatus(rendererErrorMessage(error, '无法取消已失效的替换预览。'), 'error');
         }
       }
     }
@@ -1584,7 +2118,7 @@ function renderEditorWindow(
       );
     } catch (error) {
       retryAuthoritativeRefreshButton.disabled = false;
-      setStatus(`权威窗口仍无法刷新；编辑区继续保持只读，请再次重试。${error instanceof Error ? error.message : ''}`, 'error');
+      setStatus(`权威窗口仍无法刷新；编辑区继续保持只读，请再次重试。${rendererErrorMessage(error, '')}`, 'error');
     }
   }
 
@@ -1610,7 +2144,7 @@ function renderEditorWindow(
       setStatus(`已到达${next.position.structureLabel ? `“${next.position.structureLabel}”附近，` : ''}${next.position.label}。`, 'success');
       return true;
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : '无法移动到该稿件位置。', 'error');
+      setStatus(rendererErrorMessage(error, '无法移动到该稿件位置。'), 'error');
       return false;
     }
   }
@@ -1646,7 +2180,7 @@ function renderEditorWindow(
       previousOutline.hidden = page.previousCursor === null;
       nextOutline.hidden = page.nextCursor === null;
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : '无法读取稿件结构。', 'error');
+      setStatus(rendererErrorMessage(error, '无法读取稿件结构。'), 'error');
       if (propagateFailure) throw error;
     }
   }
@@ -1721,7 +2255,7 @@ function renderEditorWindow(
         setStatus('取消请求尚未成为终态；当前操作仍在处理。', 'busy');
       }
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : '无法确认当前本地操作的取消状态。', 'error');
+      setStatus(rendererErrorMessage(error, '无法确认当前本地操作的取消状态。'), 'error');
     } finally {
       updateServiceControls();
     }
@@ -1825,7 +2359,7 @@ function renderEditorWindow(
       if (completed.kind !== 'search' || !completed.result || 'replacement' in completed.result) throw new Error('查找结果绑定无效。');
       await loadSearchResults(null, completed.result.searchId);
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : '全稿查找未完成。', 'error');
+      setStatus(rendererErrorMessage(error, '全稿查找未完成。'), 'error');
     }
   }
 
@@ -1958,7 +2492,7 @@ function renderEditorWindow(
           if (replacementPreview?.previewId === preparedPreviewId) setInclusionControlsLocked(true);
         }
       }
-      setStatus(error instanceof Error ? error.message : '无法准备替换预览。', 'error');
+      setStatus(rendererErrorMessage(error, '无法准备替换预览。'), 'error');
     }
   }
 
@@ -1995,7 +2529,7 @@ function renderEditorWindow(
           });
           renderReplacementReview(replacementPreview);
         } catch (error) {
-          setStatus(error instanceof Error ? error.message : '替换集无法冻结。', 'error');
+          setStatus(rendererErrorMessage(error, '替换集无法冻结。'), 'error');
         }
       });
       freeze.dataset['replacementAction'] = 'freeze';
@@ -2019,7 +2553,7 @@ function renderEditorWindow(
       clearReplacementPresentation();
       setStatus('替换预览已取消并关闭；稿件未发生替换。', 'success');
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : '替换预览无法取消。', 'error');
+      setStatus(rendererErrorMessage(error, '替换预览无法取消。'), 'error');
     }
   }
 
@@ -2042,14 +2576,14 @@ function renderEditorWindow(
           try {
             await invalidateSearchState('替换未提交；先前预览已关闭，请重新查找后再试。');
           } catch (error) {
-            setStatus(error instanceof Error ? error.message : '无法关闭未提交的替换预览。', 'error');
+            setStatus(rendererErrorMessage(error, '无法关闭未提交的替换预览。'), 'error');
           }
         }
         return;
       }
       setStatus(replacement.completionLabel, 'success');
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : '替换提交未完成。', 'error');
+      setStatus(rendererErrorMessage(error, '替换提交未完成。'), 'error');
     }
   }
 
@@ -2078,7 +2612,7 @@ function renderEditorWindow(
       if (!saved) return;
       setStatus(saved.completionLabel, 'success');
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : '里程碑未保存。', 'error');
+      setStatus(rendererErrorMessage(error, '里程碑未保存。'), 'error');
     }
   }
 
@@ -2100,7 +2634,7 @@ function renderEditorWindow(
       if (!result) return;
       setStatus(result.completionLabel, 'success');
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : `${action === 'undo' ? '撤销' : '重做'}未完成。`, 'error');
+      setStatus(rendererErrorMessage(error, `${action === 'undo' ? '撤销' : '重做'}未完成。`), 'error');
     }
   }
 
@@ -2144,7 +2678,7 @@ function renderEditorWindow(
         }
         if (!authoritativeMutationBusy() && searchStateIsStale()) {
           void invalidateSearchState('稿件状态已变化；先前搜索结果、替换预览和查找返回位置已失效。').catch((error) => {
-            setStatus(error instanceof Error ? error.message : '无法取消已失效的替换预览。', 'error');
+            setStatus(rendererErrorMessage(error, '无法取消已失效的替换预览。'), 'error');
           });
         }
       }
@@ -2169,7 +2703,7 @@ function renderError(error: unknown, retry: () => void): void {
   content.append(
     element('p', 'section-label', '操作未完成'),
     element('h2', undefined, '无法继续当前操作'),
-    element('p', 'lede', error instanceof Error ? error.message : '桌面操作未完成，请重试。'),
+    element('p', 'lede', rendererErrorMessage(error, '桌面操作未完成，请重试。')),
     button('重新开始', 'primary', retry),
   );
   replaceScreen('error', content);

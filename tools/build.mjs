@@ -50,6 +50,7 @@ async function ensureClosedOutputs() {
   const expected = new Set([
     'main/index.cjs',
     'main/preload.cjs',
+    'config/dsh-profiles/manuscript-editorial/package.json',
     'notices/ELECTRON_LICENSE',
     'notices/ELECTRON_LICENSES.chromium.html',
     'notices/THIRD_PARTY_NOTICES.md',
@@ -76,6 +77,23 @@ async function ensureClosedOutputs() {
   const service = await readFile(outputPath('service', 'index.mjs'), 'utf8');
   const dataRoot = await readFile(outputPath('shared', 'data-root.mjs'), 'utf8');
   const renderer = await readFile(outputPath('renderer', 'renderer.js'), 'utf8');
+  const builtProfile = await readFile(outputPath('config', 'dsh-profiles', 'manuscript-editorial', 'package.json'));
+  const sourceProfile = await readFile(
+    resolve(ROOT, 'config', 'dsh-profiles', 'manuscript-editorial', 'package.json'),
+  );
+  requireBuild(builtProfile.equals(sourceProfile), 'Built native DSH Profile bytes drifted.');
+  const profileManifest = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(builtProfile));
+  requireBuild(
+    profileManifest?.name === '@ai7/manuscript-editorial-profile' &&
+      profileManifest?.version === '1.0.0' &&
+      profileManifest?.private === true &&
+      Array.isArray(profileManifest?.dsh?.profile?.bundles) &&
+      profileManifest.dsh.profile.bundles.length === 0 &&
+      !('scripts' in profileManifest) &&
+      !('dependencies' in profileManifest) &&
+      !('devDependencies' in profileManifest),
+    'Built native DSH Profile gained identity, dependency, script, or bundle drift.',
+  );
   for (const [name, source] of Object.entries({ main, service })) {
     requireBuild(source.includes('installNodeNetworkDenial();'), `${name} omitted the synchronous Node network guard.`);
     requireBuild(source.includes('syncBuiltinESMExports'), `${name} omitted named built-in synchronization.`);
@@ -145,6 +163,7 @@ async function main() {
   await mkdir(outputPath('service'), { recursive: true });
   await mkdir(outputPath('shared'), { recursive: true });
   await mkdir(outputPath('notices'), { recursive: true });
+  await mkdir(outputPath('config', 'dsh-profiles', 'manuscript-editorial'), { recursive: true });
 
   await runEsbuild({
     ...nodeBuild,
@@ -193,6 +212,10 @@ async function main() {
   });
   await copyFile(resolve(ROOT, 'src', 'renderer', 'index.html'), outputPath('renderer', 'index.html'));
   await copyFile(resolve(ROOT, 'src', 'renderer', 'styles.css'), outputPath('renderer', 'styles.css'));
+  await copyFile(
+    resolve(ROOT, 'config', 'dsh-profiles', 'manuscript-editorial', 'package.json'),
+    outputPath('config', 'dsh-profiles', 'manuscript-editorial', 'package.json'),
+  );
   const electronNotices = electronLicenseCarriers(diagnosis.inputs.secondaryArtifact);
   const electronLicense = electronNotices.find((notice) => notice.id === 'electron-license');
   const electronChromium = electronNotices.find((notice) => notice.id === 'electron-chromium-notices');

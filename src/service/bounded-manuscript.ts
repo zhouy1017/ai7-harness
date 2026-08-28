@@ -35,13 +35,15 @@ import {
   type SearchResultsProjection,
   type SearchSummaryProjection,
 } from '../shared/protocol.js';
+import type { BuiltInWorkflowProfile } from './native-workflow-profile.js';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const DIGEST_PATTERN = /^[0-9a-f]{64}$/;
 const BLOCK_PATTERN = /^blk_[0-9a-f]{24}$/;
 const CONTINUITY_SCHEMA_VERSION = 5;
 const EDITOR_SCHEMA_VERSION = 6;
-const SCHEMA_VERSION = 7;
+const RECOVERY_SCHEMA_VERSION = 7;
+const SCHEMA_VERSION = 8;
 const MIGRATION_BATCH = 256;
 const SEARCH_BATCH = 128;
 const HISTORY_BATCH = 128;
@@ -791,9 +793,70 @@ const TARGET_SCHEMA_SQL = {
   ...RECOVERY_SCHEMA_SQL,
 } as const;
 
+const PROFILE_SCHEMA_SQL = {
+  import_drafts: `CREATE TABLE import_drafts (
+    draft_id TEXT PRIMARY KEY,
+    selection_token TEXT NOT NULL UNIQUE,
+    state TEXT NOT NULL CHECK(state IN ('staged', 'reviewed', 'committed')),
+    draft_version INTEGER NOT NULL CHECK(draft_version >= 1),
+    display_name TEXT NOT NULL,
+    object_digest TEXT NOT NULL REFERENCES content_objects(object_digest),
+    selected_path TEXT,
+    reviewed_title TEXT,
+    reviewed_target_choice_id TEXT
+      CHECK(reviewed_target_choice_id IS NULL OR reviewed_target_choice_id IN ('new-book', 'new-book-distinct-intended-work')),
+    review_digest TEXT UNIQUE,
+    committed_commit_id TEXT UNIQUE,
+    staged_at TEXT NOT NULL,
+    reviewed_at TEXT,
+    committed_at TEXT,
+    reviewed_target_kind TEXT CHECK(reviewed_target_kind IS NULL OR reviewed_target_kind IN ('new-book', 'existing-book')),
+    reviewed_existing_book_id TEXT REFERENCES books(book_id),
+    reviewed_relationship TEXT
+      CHECK(reviewed_relationship IS NULL OR reviewed_relationship IN ('new-book-first-manuscript', 'first-manuscript')),
+    reviewed_book_state_digest TEXT
+      CHECK(reviewed_book_state_digest IS NULL OR length(reviewed_book_state_digest) = 64)
+  ) STRICT`,
+  books: `CREATE TABLE books (
+    book_id TEXT PRIMARY KEY,
+    stable_identity TEXT NOT NULL UNIQUE,
+    title TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    internal_number TEXT
+  ) STRICT`,
+  workflow_profiles: `CREATE TABLE workflow_profiles (
+    profile_id TEXT NOT NULL,
+    profile_version TEXT NOT NULL,
+    profile_name TEXT NOT NULL,
+    profile_digest TEXT NOT NULL CHECK(length(profile_digest) = 64),
+    projection_schema TEXT NOT NULL CHECK(projection_schema = 'ai7.workflow-profile-projection/1'),
+    projection_json TEXT NOT NULL,
+    native_profile_id TEXT NOT NULL,
+    native_profile_version TEXT NOT NULL,
+    native_profile_digest TEXT NOT NULL CHECK(length(native_profile_digest) = 64),
+    PRIMARY KEY(profile_id, profile_version)
+  ) STRICT`,
+  workflow_instances: `CREATE TABLE workflow_instances (
+    workflow_instance_id TEXT PRIMARY KEY,
+    book_id TEXT NOT NULL REFERENCES books(book_id),
+    manuscript_id TEXT NOT NULL UNIQUE REFERENCES manuscripts(manuscript_id),
+    profile_id TEXT NOT NULL,
+    profile_version TEXT NOT NULL,
+    profile_digest TEXT NOT NULL CHECK(length(profile_digest) = 64),
+    native_profile_id TEXT NOT NULL,
+    native_profile_version TEXT NOT NULL,
+    native_profile_digest TEXT NOT NULL CHECK(length(native_profile_digest) = 64),
+    current_phase TEXT NOT NULL,
+    state TEXT NOT NULL CHECK(state = 'active'),
+    created_at TEXT NOT NULL,
+    FOREIGN KEY(profile_id, profile_version) REFERENCES workflow_profiles(profile_id, profile_version)
+  ) STRICT`,
+} as const;
+
 const FULL_CONTINUITY_SCHEMA_SQL = { ...COMMON_SCHEMA_SQL, ...CONTINUITY_SCHEMA_SQL } as const;
 const FULL_V6_TARGET_SCHEMA_SQL = { ...COMMON_SCHEMA_SQL, ...V6_TARGET_SCHEMA_SQL } as const;
-const FULL_TARGET_SCHEMA_SQL = { ...COMMON_SCHEMA_SQL, ...TARGET_SCHEMA_SQL } as const;
+const FULL_V7_TARGET_SCHEMA_SQL = { ...COMMON_SCHEMA_SQL, ...TARGET_SCHEMA_SQL } as const;
+const FULL_TARGET_SCHEMA_SQL = { ...COMMON_SCHEMA_SQL, ...TARGET_SCHEMA_SQL, ...PROFILE_SCHEMA_SQL } as const;
 
 const TARGET_VIRTUAL_TABLE_SQL = `CREATE VIRTUAL TABLE working_block_search USING fts5(
   branch_id UNINDEXED,
@@ -834,6 +897,15 @@ const TARGET_INDEX_SQL = {
   lifetime_outcome_order: 'CREATE INDEX lifetime_outcome_order ON service_lifetimes(outcome, started_at)',
   recovery_attention_startup: 'CREATE INDEX recovery_attention_startup ON recovery_attention(status, created_at, attention_id)',
   recovery_snapshot_branch: 'CREATE INDEX recovery_snapshot_branch ON recovery_snapshots(branch_id, revision_id, created_at DESC, snapshot_id DESC)',
+  book_internal_number_unique:
+    'CREATE UNIQUE INDEX book_internal_number_unique ON books(internal_number) WHERE internal_number IS NOT NULL',
+} as const;
+
+const V7_TARGET_INDEX_SQL = {
+  ...V6_TARGET_INDEX_SQL,
+  lifetime_outcome_order: TARGET_INDEX_SQL.lifetime_outcome_order,
+  recovery_attention_startup: TARGET_INDEX_SQL.recovery_attention_startup,
+  recovery_snapshot_branch: TARGET_INDEX_SQL.recovery_snapshot_branch,
 } as const;
 
 const CONTINUITY_TRIGGER_DIGESTS = {
@@ -1229,7 +1301,12 @@ function requireExactTableSchema(db: DatabaseSync, name: string, expectedSql: st
   const actualForeignKeys = (db.prepare(`PRAGMA foreign_key_list(${quotedIdentifier(name)})`).all() as SqlRow[])
     .map(foreignKeySignature)
     .sort();
-  const expectedForeignKeys = [...(SCHEMA_FOREIGN_KEYS[name] ?? [])].sort();
+  const expectedForeignKeys = [
+    ...(SCHEMA_FOREIGN_KEYS[name] ?? []),
+    ...(name === 'import_drafts' && canonicalSchemaSql(matchedExpectedSql) === canonicalSchemaSql(PROFILE_SCHEMA_SQL.import_drafts)
+      ? ['reviewed_existing_book_id>books.book_id:NO ACTION/NO ACTION/NONE']
+      : []),
+  ].sort();
   requireBounded(
     actualForeignKeys.join('\n') === expectedForeignKeys.join('\n'),
     'SCHEMA_MIGRATION_FAILED',
@@ -1358,6 +1435,10 @@ function requireTargetSchema(db: DatabaseSync): void {
   requireExactSchema(db, FULL_TARGET_SCHEMA_SQL, TARGET_INDEX_SQL, true);
 }
 
+function requireV7TargetSchema(db: DatabaseSync): void {
+  requireExactSchema(db, FULL_V7_TARGET_SCHEMA_SQL, V7_TARGET_INDEX_SQL, true);
+}
+
 function requireV6TargetSchema(db: DatabaseSync): void {
   requireExactSchema(db, FULL_V6_TARGET_SCHEMA_SQL, V6_TARGET_INDEX_SQL, true);
 }
@@ -1372,6 +1453,91 @@ function canonicalJson(value: unknown): string {
   const encoded = JSON.stringify(value);
   requireBounded(encoded !== undefined, 'CANONICAL_VALUE_INVALID', '无法形成规范摘要。');
   return encoded;
+}
+
+function validateWorkflowSemanticTruth(db: DatabaseSync, profile: BuiltInWorkflowProfile): void {
+  const projectionJson = canonicalJson({
+    schema: profile.projection.schema,
+    id: profile.projection.id,
+    name: profile.projection.name,
+    version: profile.projection.version,
+    phases: profile.projection.phases,
+    gates: profile.projection.gates,
+  });
+  const profiles = db.prepare(
+    `SELECT profile_id, profile_version, profile_name, profile_digest, projection_schema, projection_json,
+            native_profile_id, native_profile_version, native_profile_digest
+     FROM workflow_profiles ORDER BY profile_id, profile_version`,
+  ).all() as SqlRow[];
+  requireBounded(
+    profiles.length <= 1 && profiles.every((row) =>
+      asString(row.profile_id) === profile.projection.id &&
+      asString(row.profile_version) === profile.projection.version &&
+      asString(row.profile_name) === profile.projection.name &&
+      asString(row.profile_digest) === profile.projection.digest &&
+      asString(row.projection_schema) === profile.projection.schema &&
+      asString(row.projection_json) === projectionJson &&
+      asString(row.native_profile_id) === profile.native.id &&
+      asString(row.native_profile_version) === profile.native.version &&
+      asString(row.native_profile_digest) === profile.native.digest),
+    'SCHEMA_INVALID',
+    '工作流程方案无法由内置原生 DSH Profile 精确解释。',
+  );
+  const phaseLabels = new Set<string>(profile.projection.phases.map((phase) => phase.label));
+  const instances = db.prepare(
+    `SELECT profile_id, profile_version, profile_digest,
+            native_profile_id, native_profile_version, native_profile_digest, current_phase, state
+     FROM workflow_instances ORDER BY workflow_instance_id`,
+  ).all() as SqlRow[];
+  requireBounded(
+    instances.every((row) =>
+      profiles.length === 1 &&
+      asString(row.profile_id) === profile.projection.id &&
+      asString(row.profile_version) === profile.projection.version &&
+      asString(row.profile_digest) === profile.projection.digest &&
+      asString(row.native_profile_id) === profile.native.id &&
+      asString(row.native_profile_version) === profile.native.version &&
+      asString(row.native_profile_digest) === profile.native.digest &&
+      phaseLabels.has(asString(row.current_phase)) &&
+      asString(row.state) === 'active'),
+    'SCHEMA_INVALID',
+    '工作流程实例的精确 Profile 绑定或当前阶段无法解释。',
+  );
+}
+
+function validateImportDraftTargetTruth(db: DatabaseSync): void {
+  const rows = db.prepare(
+    `SELECT state, reviewed_title, reviewed_target_choice_id, review_digest,
+            reviewed_target_kind, reviewed_existing_book_id, reviewed_relationship,
+            reviewed_book_state_digest
+     FROM import_drafts ORDER BY draft_id`,
+  ).all() as SqlRow[];
+  requireBounded(
+    rows.every((row) => {
+      const state = asString(row.state);
+      const isNull = (value: SQLOutputValue | undefined): boolean => value === null;
+      if (state === 'staged') {
+        return isNull(row.reviewed_title) && isNull(row.reviewed_target_choice_id) && isNull(row.review_digest) &&
+          isNull(row.reviewed_target_kind) && isNull(row.reviewed_existing_book_id) &&
+          isNull(row.reviewed_relationship) && isNull(row.reviewed_book_state_digest);
+      }
+      if (state !== 'reviewed' && state !== 'committed') return false;
+      if (typeof row.review_digest !== 'string' || !/^[0-9a-f]{64}$/.test(row.review_digest)) return false;
+      if (row.reviewed_target_kind === 'new-book') {
+        return typeof row.reviewed_title === 'string' && row.reviewed_title.length > 0 &&
+          (row.reviewed_target_choice_id === null || row.reviewed_target_choice_id === 'new-book' ||
+            row.reviewed_target_choice_id === 'new-book-distinct-intended-work') &&
+          row.reviewed_existing_book_id === null && row.reviewed_relationship === 'new-book-first-manuscript' &&
+          row.reviewed_book_state_digest === null;
+      }
+      return row.reviewed_target_kind === 'existing-book' && row.reviewed_title === null &&
+        row.reviewed_target_choice_id === null && typeof row.reviewed_existing_book_id === 'string' &&
+        UUID_PATTERN.test(row.reviewed_existing_book_id) && row.reviewed_relationship === 'first-manuscript' &&
+        typeof row.reviewed_book_state_digest === 'string' && /^[0-9a-f]{64}$/.test(row.reviewed_book_state_digest);
+    }),
+    'SCHEMA_INVALID',
+    '导入草稿的目标、关系与复核证据组合矛盾。',
+  );
 }
 
 function sha256(value: string): string {
@@ -2178,7 +2344,7 @@ function validateSchemaAuthorityIds(db: DatabaseSync): void {
   forEachSchemaId(db, 'manuscript_revisions', 'revision_id', () => undefined);
   forEachSchemaId(db, 'branch_working_state', 'branch_id', () => undefined);
   const version = asNumber(one(db.prepare('PRAGMA user_version').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取数据库版本。').user_version);
-  if (version >= SCHEMA_VERSION) {
+  if (version >= RECOVERY_SCHEMA_VERSION) {
     forEachSchemaId(db, 'service_lifetimes', 'lifetime_id', () => undefined);
     forEachSchemaId(db, 'recovery_snapshots', 'snapshot_id', () => undefined);
     forEachSchemaId(db, 'recovery_attention', 'attention_id', () => undefined);
@@ -2885,16 +3051,209 @@ function migrateEditorSchemaV6ToV7(db: DatabaseSync): void {
       ${TARGET_INDEX_SQL.lifetime_outcome_order};
       ${TARGET_INDEX_SQL.recovery_attention_startup};
       ${TARGET_INDEX_SQL.recovery_snapshot_branch};
-      PRAGMA user_version = ${SCHEMA_VERSION};
+      PRAGMA user_version = ${RECOVERY_SCHEMA_VERSION};
     `);
   });
+  requireV7TargetSchema(db);
+}
+
+function migrateRecoverySchemaV7ToV8(db: DatabaseSync, profile: BuiltInWorkflowProfile): void {
+  requireV7TargetSchema(db);
+  const legacyProfiles = db.prepare(
+    `SELECT profile_id, profile_version, profile_name, profile_digest, definition_json
+     FROM workflow_profiles ORDER BY profile_id, profile_version`,
+  ).all() as SqlRow[];
+  requireBounded(
+    legacyProfiles.length <= 1 && legacyProfiles.every((row) =>
+      asString(row.profile_id) === profile.legacy.id &&
+      asString(row.profile_version) === profile.legacy.version &&
+      asString(row.profile_name) === profile.legacy.name &&
+      asString(row.profile_digest) === profile.legacy.digest &&
+      asString(row.definition_json) === profile.legacy.definitionJson),
+    'SCHEMA_MIGRATION_FAILED',
+    '旧版工作流配置无法精确映射到内置原生 DSH Profile。',
+  );
+  const legacyInstances = db.prepare(
+    `SELECT workflow_instance_id, profile_id, profile_version, current_phase, state
+     FROM workflow_instances ORDER BY workflow_instance_id`,
+  ).all() as SqlRow[];
+  const legacyPhaseLabels = new Set<string>(profile.projection.phases.map((phase) => phase.label));
+  requireBounded(
+    legacyInstances.every((row) =>
+      legacyProfiles.length === 1 &&
+      asString(row.profile_id) === profile.legacy.id &&
+      asString(row.profile_version) === profile.legacy.version &&
+      legacyPhaseLabels.has(asString(row.current_phase)) &&
+      asString(row.state) === 'active'),
+    'SCHEMA_MIGRATION_FAILED',
+    '旧版工作流实例无法精确映射到内置原生 DSH Profile。',
+  );
+
+  const legacyAlterTable = asNumber(one(
+    db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[],
+    'SCHEMA_INVALID',
+    '无法读取旧式改表状态。',
+  ).legacy_alter_table);
+  db.exec('PRAGMA foreign_keys = OFF; PRAGMA legacy_alter_table = OFF');
+  let migrationError: unknown;
+  try {
+    db.exec('BEGIN IMMEDIATE');
+    const disabledForeignKeys = one(
+      db.prepare('PRAGMA foreign_keys').all() as SqlRow[],
+      'SCHEMA_INVALID',
+      '无法读取引用校验状态。',
+    );
+    requireBounded(
+      asNumber(disabledForeignKeys.foreign_keys) === 0,
+      'SCHEMA_INVALID',
+      '无法暂时停用引用校验以迁移数据库。',
+    );
+    const modernAlterTable = one(
+      db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[],
+      'SCHEMA_INVALID',
+      '无法读取改表语义。',
+    );
+    requireBounded(
+      asNumber(modernAlterTable.legacy_alter_table) === 0,
+      'SCHEMA_INVALID',
+      '无法启用可校验的改表语义。',
+    );
+    db.exec(`
+      ALTER TABLE books ADD COLUMN internal_number TEXT;
+      ALTER TABLE import_drafts ADD COLUMN reviewed_target_kind TEXT
+        CHECK(reviewed_target_kind IS NULL OR reviewed_target_kind IN ('new-book', 'existing-book'));
+      ALTER TABLE import_drafts ADD COLUMN reviewed_existing_book_id TEXT REFERENCES books(book_id);
+      ALTER TABLE import_drafts ADD COLUMN reviewed_relationship TEXT
+        CHECK(reviewed_relationship IS NULL OR reviewed_relationship IN ('new-book-first-manuscript', 'first-manuscript'));
+      ALTER TABLE import_drafts ADD COLUMN reviewed_book_state_digest TEXT
+        CHECK(reviewed_book_state_digest IS NULL OR length(reviewed_book_state_digest) = 64);
+      UPDATE import_drafts
+      SET reviewed_target_kind = 'new-book', reviewed_relationship = 'new-book-first-manuscript'
+      WHERE state IN ('reviewed', 'committed');
+      ${TARGET_INDEX_SQL.book_internal_number_unique};
+
+      CREATE TABLE workflow_profiles_v8 (
+        profile_id TEXT NOT NULL,
+        profile_version TEXT NOT NULL,
+        profile_name TEXT NOT NULL,
+        profile_digest TEXT NOT NULL CHECK(length(profile_digest) = 64),
+        projection_schema TEXT NOT NULL CHECK(projection_schema = 'ai7.workflow-profile-projection/1'),
+        projection_json TEXT NOT NULL,
+        native_profile_id TEXT NOT NULL,
+        native_profile_version TEXT NOT NULL,
+        native_profile_digest TEXT NOT NULL CHECK(length(native_profile_digest) = 64),
+        PRIMARY KEY(profile_id, profile_version)
+      ) STRICT;
+      CREATE TABLE workflow_instances_v8 (
+        workflow_instance_id TEXT PRIMARY KEY,
+        book_id TEXT NOT NULL REFERENCES books(book_id),
+        manuscript_id TEXT NOT NULL UNIQUE REFERENCES manuscripts(manuscript_id),
+        profile_id TEXT NOT NULL,
+        profile_version TEXT NOT NULL,
+        profile_digest TEXT NOT NULL CHECK(length(profile_digest) = 64),
+        native_profile_id TEXT NOT NULL,
+        native_profile_version TEXT NOT NULL,
+        native_profile_digest TEXT NOT NULL CHECK(length(native_profile_digest) = 64),
+        current_phase TEXT NOT NULL,
+        state TEXT NOT NULL CHECK(state = 'active'),
+        created_at TEXT NOT NULL,
+        FOREIGN KEY(profile_id, profile_version) REFERENCES workflow_profiles_v8(profile_id, profile_version)
+      ) STRICT;
+    `);
+    if (legacyProfiles.length === 1) {
+      db.prepare(
+        `INSERT INTO workflow_profiles_v8(
+          profile_id, profile_version, profile_name, profile_digest, projection_schema, projection_json,
+          native_profile_id, native_profile_version, native_profile_digest
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        profile.projection.id,
+        profile.projection.version,
+        profile.projection.name,
+        profile.projection.digest,
+        profile.projection.schema,
+        canonicalJson({
+          schema: profile.projection.schema,
+          id: profile.projection.id,
+          name: profile.projection.name,
+          version: profile.projection.version,
+          phases: profile.projection.phases,
+          gates: profile.projection.gates,
+        }),
+        profile.native.id,
+        profile.native.version,
+        profile.native.digest,
+      );
+      db.prepare(
+        `INSERT INTO workflow_instances_v8(
+          workflow_instance_id, book_id, manuscript_id, profile_id, profile_version, profile_digest,
+          native_profile_id, native_profile_version, native_profile_digest, current_phase, state, created_at
+        )
+        SELECT workflow_instance_id, book_id, manuscript_id, ?, ?, ?, ?, ?, ?, current_phase, state, created_at
+        FROM workflow_instances`,
+      ).run(
+        profile.projection.id,
+        profile.projection.version,
+        profile.projection.digest,
+        profile.native.id,
+        profile.native.version,
+        profile.native.digest,
+      );
+    }
+    db.exec(`
+      DROP TABLE workflow_instances;
+      DROP TABLE workflow_profiles;
+      ALTER TABLE workflow_profiles_v8 RENAME TO workflow_profiles;
+      ALTER TABLE workflow_instances_v8 RENAME TO workflow_instances;
+      PRAGMA user_version = ${SCHEMA_VERSION};
+    `);
+    const violations = db.prepare('PRAGMA foreign_key_check').all();
+    requireBounded(violations.length === 0, 'SCHEMA_MIGRATION_FAILED', '数据库迁移后的引用校验失败。');
+    validateWorkflowSemanticTruth(db, profile);
+    validateImportDraftTargetTruth(db);
+    db.exec('COMMIT');
+  } catch (error) {
+    migrationError = error;
+    try {
+      db.exec('ROLLBACK');
+    } catch (rollbackError) {
+      migrationError = new AggregateError([error, rollbackError], 'SQLite workflow profile migration rollback failed.');
+    }
+  } finally {
+    try {
+      db.exec(`PRAGMA legacy_alter_table = ${legacyAlterTable}`);
+      const restoredLegacyAlterTable = one(
+        db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[],
+        'SCHEMA_INVALID',
+        '无法读取旧式改表状态。',
+      );
+      requireBounded(
+        asNumber(restoredLegacyAlterTable.legacy_alter_table) === legacyAlterTable,
+        'SCHEMA_INVALID',
+        '无法恢复旧式改表状态。',
+      );
+      db.exec('PRAGMA foreign_keys = ON');
+      const restoredForeignKeys = one(
+        db.prepare('PRAGMA foreign_keys').all() as SqlRow[],
+        'SCHEMA_INVALID',
+        '无法读取引用校验状态。',
+      );
+      requireBounded(asNumber(restoredForeignKeys.foreign_keys) === 1, 'SCHEMA_INVALID', '无法恢复引用校验。');
+    } catch (restoreError) {
+      migrationError = migrationError
+        ? new AggregateError([migrationError, restoreError], 'SQLite workflow profile migration and foreign-key restoration failed.')
+        : restoreError;
+    }
+  }
+  if (migrationError) throw migrationError;
   requireTargetSchema(db);
 }
 
-export function initializeBoundedSchema(db: DatabaseSync): void {
+export function initializeBoundedSchema(db: DatabaseSync, profile: BuiltInWorkflowProfile): void {
   const version = asNumber(one(db.prepare('PRAGMA user_version').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取数据库版本。').user_version);
   requireBounded(
-    version === CONTINUITY_SCHEMA_VERSION || version === EDITOR_SCHEMA_VERSION || version === SCHEMA_VERSION,
+    version === CONTINUITY_SCHEMA_VERSION || version === EDITOR_SCHEMA_VERSION ||
+      version === RECOVERY_SCHEMA_VERSION || version === SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2902,6 +3261,8 @@ export function initializeBoundedSchema(db: DatabaseSync): void {
     requireTargetSchema(db);
     transact(db, () => {
       validateSchemaAuthorityIds(db);
+      validateWorkflowSemanticTruth(db, profile);
+      validateImportDraftTargetTruth(db);
       validateAllDerivedOffsets(db);
       validateLegacyHistoryRoots(db);
       validateAllCommandHistory(db);
@@ -2914,9 +3275,13 @@ export function initializeBoundedSchema(db: DatabaseSync): void {
     });
     return;
   }
+  if (version === RECOVERY_SCHEMA_VERSION) {
+    migrateRecoverySchemaV7ToV8(db, profile);
+    return initializeBoundedSchema(db, profile);
+  }
   if (version === EDITOR_SCHEMA_VERSION) {
     migrateEditorSchemaV6ToV7(db);
-    return initializeBoundedSchema(db);
+    return initializeBoundedSchema(db, profile);
   }
   requireContinuitySchema(db);
   const legacyAlterTable = asNumber(one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table);
@@ -3112,6 +3477,7 @@ export function initializeBoundedSchema(db: DatabaseSync): void {
   }
   if (migrationError) throw migrationError;
   migrateEditorSchemaV6ToV7(db);
+  initializeBoundedSchema(db, profile);
 }
 
 interface BranchBinding {

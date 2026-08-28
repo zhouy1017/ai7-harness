@@ -329,8 +329,8 @@ The overview may use visually prominent cards and quiet state summaries in the C
 | New-Book Review Before Import ready | Exact new-Book target/title, file/provenance, initial Manuscript/branch/revision, AI7 Workflow Profile projection/native definition pin/Workflow Instance, effective Book Editorial Dimension Set, fidelity outcome, created records, and named non-effects | `新建图书并导入稿件`; degraded path uses `按上述降级方式新建图书并导入稿件`; change an applicable input or cancel |
 | First-Manuscript Review Before Import ready | Exact existing Book, source/provenance, proposed primary Manuscript/branch/revision, AI7 Workflow Profile projection/native definition pin/Workflow Instance, effective existing dimension set, fidelity outcome, created records and named non-effects | `导入为首份稿件`; degraded path uses `按上述降级方式导入为首份稿件`; change an applicable input or cancel |
 | Initial editable import running | Business-readable progress and exact relationship | `取消导入` before atomic commit |
-| New-Book atomic commit completed and all records persisted | `稿件已导入` with exact new Book/manuscript/revision and degradation summary | `打开稿件` or `查看导入记录` |
-| First-Manuscript atomic commit completed | `稿件已导入` with exact existing Book, new primary Manuscript/revision and degradation summary | `打开稿件` or `查看导入记录` |
+| New-Book atomic commit completed and all records persisted | `稿件已导入` plus the exact resulting Book Work Overview, direct Book/primary Manuscript/Revision/Source Version-provenance/Workflow Instance-native Profile and AI7 projection pins/Manuscript Import Record presentations, and degradation summary | `打开稿件` or open any exact record |
+| First-Manuscript atomic commit completed | `稿件已导入` plus that exact existing Book Work Overview, direct new primary Manuscript/Revision/source/workflow/import-record presentations, and degradation summary | `打开稿件` or open any exact record |
 | Import committed and matching active Background Analysis Enrollment exists | Import completion remains primary; a separate analysis row names each queued kind and the one or more exact Task/Plan/Run records, including any shared authorized batch Run | Open analysis status; every kind keeps independent Result Set/status/failure/feedback, and queued does not mean analyzed |
 | Import committed without matching active Enrollment | Import completion remains primary; analysis shows `待分析` or another exact non-error state | Open analysis setup or start an explicit Task later; no Provider call, transmission or cost |
 
@@ -509,7 +509,7 @@ Selecting a recommendation changes only the Task Intent Draft. It does not disco
 | Revision needs lifecycle hooks, dependency scripts or native code | Show `受限` plus the blocked executable requirement | No compact install-and-enable path and no executable availability until separate executable-admission and sandbox authority exists |
 
 - Source artifact, catalog result, importer, converter, validator and authoring Run cannot approve, install, enable, activate or authorize themselves.
-- No surface uses `允许全部`, `始终批准`, `立即运行`, or treats Plugin/Bundle packaging as the DSH Skill semantic unit. Exact catalog sources, adapters, sidecar record/schema, trust tiers, sandbox mechanics and Profile/Bundle mapping remain unresolved.
+- No surface uses `允许全部`, `始终批准`, `立即运行`, or treats Plugin/Bundle packaging as the DSH Skill semantic unit. Exact catalog sources, adapters, sidecar record/schema, trust tiers, sandbox mechanics and Profile/Bundle mapping for external or user-authored artifacts remain unresolved; the built-in Manuscript Profile's exact mapping is separately fixed by root ADR 0045.
 - Editing, repair, conversion and accepted update always create successor revisions; prior sources, working revisions, validation outcomes and Run pins remain immutable.
 
 ### Artifact and automation management projection

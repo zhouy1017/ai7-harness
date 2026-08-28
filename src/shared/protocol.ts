@@ -1,4 +1,4 @@
-export const SERVICE_PROTOCOL_VERSION = 5 as const;
+export const SERVICE_PROTOCOL_VERSION = 6 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -33,6 +33,10 @@ export const IPC_CHANNELS = {
   continueImportDraft: 'ai7:j01:continue-import-draft',
   reselectImportDraft: 'ai7:j01:reselect-import-draft',
   abandonImportDraft: 'ai7:j01:abandon-import-draft',
+  prepareBookCreation: 'ai7:j01:prepare-book-creation',
+  commitBookCreation: 'ai7:j01:commit-book-creation',
+  getBookOverview: 'ai7:j01:get-book-overview',
+  listBooks: 'ai7:j01:list-books',
   prepareNewBookReview: 'ai7:j01:prepare-new-book-review',
   commitNewBookImport: 'ai7:j01:commit-new-book-import',
   acknowledgeImportCompletion: 'ai7:j01:acknowledge-import-completion',
@@ -102,6 +106,166 @@ export type ImportFidelityOutcome = 'clean-import-no-round-trip' | 'degraded-imp
 
 export type NewBookImportTargetChoiceId = 'new-book' | 'new-book-distinct-intended-work';
 
+export type ImportTargetSelection =
+  | {
+      kind: 'new-book';
+      choiceId: NewBookImportTargetChoiceId;
+      confirmedTitle: string;
+    }
+  | {
+      kind: 'existing-book';
+      bookId: string;
+      relationship: 'first-manuscript';
+    };
+
+export interface BookCreationReviewProjection {
+  reviewDigest: string;
+  proposed: {
+    bookId: string;
+    stableIdentity: string;
+    title: string;
+    internalNumber: string | null;
+  };
+  recordsToCreate: readonly ['图书与稳定标识', '图书编辑维度集（8 项）'];
+  nonEffects: readonly [
+    '不创建稿件、来源、修订版、工作流实例或导入记录',
+    '不创建书系或书系成员关系',
+    '不创建编辑学习准入决定',
+    '不授予或执行模型提供方传输',
+    '不创建发稿版本',
+    '不创建公开发布许可或公开发布事实',
+    '不导出、不发送、不交付、不发布',
+  ];
+  editorialDimensionSet: {
+    profileId: string;
+    name: string;
+    profileVersion: string;
+    digest: string;
+    weightSemantics: '中性起始权重；非穷尽评分量表';
+    dimensions: ReadonlyArray<{ id: string; label: string; weight: number }>;
+  };
+}
+
+export type BookRecordPresentation =
+  | {
+      kind: 'book';
+      label: '图书';
+      bookId: string;
+      stableIdentity: string;
+      title: string;
+      internalNumber: string | null;
+      createdAt: string;
+      dimensionSetId: string;
+      dimensionSetDigest: string;
+    }
+  | {
+      kind: 'manuscript';
+      label: '主稿件';
+      manuscriptId: string;
+      bookId: string;
+      role: 'primary';
+      createdAt: string;
+    }
+  | {
+      kind: 'revision';
+      label: '修订版 r1';
+      revisionId: string;
+      manuscriptId: string;
+      branchId: string;
+      revisionLabel: 'r1';
+      revisionDigest: string;
+      sourceVersionId: string;
+      createdAt: string;
+    }
+  | {
+      kind: 'source';
+      label: '来源版本与来源记录';
+      sourceVersionId: string;
+      provenanceId: string;
+      bookId: string;
+      displayName: string;
+      sourceDigest: string;
+      contentDigest: string;
+      structureDigest: string;
+      parserIdentity: string;
+      acquisitionPath: 'native-file-picker';
+      locality: 'local-provider-free';
+    }
+  | {
+      kind: 'workflow';
+      label: '工作流实例与精确 Profile 绑定';
+      workflowInstanceId: string;
+      bookId: string;
+      manuscriptId: string;
+      currentPhase: string;
+      state: 'active';
+      projection: { id: string; version: string; digest: string };
+      nativeProfile: { id: string; version: string; digest: string };
+    }
+  | {
+      kind: 'import-record';
+      label: '稿件导入记录';
+      importRecordId: string;
+      commitId: string;
+      bookId: string;
+      manuscriptId: string;
+      sourceVersionId: string;
+      fidelityReviewId: string;
+      fidelityOutcome: ImportFidelityOutcome;
+      fidelityCategories: ReadonlyArray<FidelityCategoryProjection>;
+      degradationDecisionId: string | null;
+      degradationDecision:
+        | {
+            summaryLabel: '含已接受的降级';
+            acceptedItems: ReadonlyArray<ImportDegradationItemProjection>;
+          }
+        | null;
+      resultingRevisionId: string;
+      provenanceId: string;
+      importedAt: string;
+    };
+
+export interface BookWorkOverviewProjection {
+  book: {
+    bookId: string;
+    stableIdentity: string;
+    title: string;
+    internalNumber: string | null;
+    createdAt: string;
+  };
+  manuscriptState:
+    | { state: 'empty'; label: '尚无稿件' }
+    | { state: 'populated'; label: '已有主稿件'; manuscriptId: string };
+  primaryAction:
+    | { kind: 'import-first-manuscript'; label: '导入首份稿件'; bookId: string }
+    | { kind: 'open-manuscript'; label: '打开稿件'; manuscriptId: string; branchId: string };
+  records: ReadonlyArray<BookRecordPresentation>;
+}
+
+export interface BookSummaryProjection {
+  bookId: string;
+  stableIdentity: string;
+  title: string;
+  internalNumber: string | null;
+  manuscriptState: 'empty' | 'populated';
+  manuscriptStateLabel: '尚无稿件' | '已有主稿件';
+}
+
+export interface BookSummaryCursor {
+  title: string;
+  bookId: string;
+}
+
+export interface BookSummaryPageProjection {
+  items: ReadonlyArray<BookSummaryProjection>;
+  nextCursor: BookSummaryCursor | null;
+}
+
+export interface BookCreationCommitProjection {
+  completionLabel: '图书已创建';
+  overview: BookWorkOverviewProjection;
+}
+
 export interface ImportIdentityFindingProjection {
   bookId: string;
   bookTitle: string;
@@ -128,11 +292,24 @@ export interface StagedImportProjection {
     sourceLabel: 'DOCX 标题元数据' | '文件名';
   };
   identityFindings: ReadonlyArray<ImportIdentityFindingProjection>;
-  targetChoices: ReadonlyArray<{
-    id: NewBookImportTargetChoiceId;
-    label: '新建图书' | '新建图书（作为不同作品）';
-    selected: false;
-  }>;
+  targetChoices: ReadonlyArray<
+    | {
+        kind: 'new-book';
+        id: NewBookImportTargetChoiceId;
+        label: '新建图书' | '新建图书（作为不同作品）';
+        selected: false;
+      }
+    | {
+        kind: 'existing-book';
+        id: string;
+        bookId: string;
+        label: string;
+        internalNumber: string | null;
+        manuscriptState: 'empty' | 'populated';
+        selected: false;
+      }
+  >;
+  nextBookCursor: BookSummaryCursor | null;
   fidelity: ReadonlyArray<FidelityCategoryProjection>;
   detectedBlockCount: number;
 }
@@ -142,12 +319,24 @@ export interface ReviewBeforeImportProjection {
   draftVersion: number;
   reviewDigest: string | null;
   commitAttemptId: string | null;
-  target: {
-    choiceId: NewBookImportTargetChoiceId;
-    kind: 'new-book';
-    label: '新建图书' | '新建图书（作为不同作品）';
-    confirmedTitle: string;
-  };
+  target:
+    | {
+        choiceId: NewBookImportTargetChoiceId;
+        kind: 'new-book';
+        label: '新建图书' | '新建图书（作为不同作品）';
+        confirmedTitle: string;
+      }
+    | {
+        choiceId: string;
+        kind: 'existing-book';
+        label: string;
+        bookId: string;
+        stableIdentity: string;
+        internalNumber: string | null;
+        relationship: 'first-manuscript';
+        relationshipLabel: '作为首份稿件导入';
+        bookStateDigest: string;
+      };
   source: StagedImportProjection['source'];
   identityFindings: ReadonlyArray<ImportIdentityFindingProjection>;
   fidelity: ReadonlyArray<FidelityCategoryProjection>;
@@ -158,6 +347,7 @@ export interface ReviewBeforeImportProjection {
     name: string;
     version: string;
     digest: string;
+    nativeProfile: { id: string; version: string; digest: string };
   };
   editorialDimensionSet: {
     profileId: string;
@@ -497,6 +687,7 @@ export interface ImportCommitProjection {
           acceptedItems: ReadonlyArray<ImportDegradationItemProjection>;
         };
   };
+  overview: BookWorkOverviewProjection;
   firstWindow: ManuscriptWindowProjection;
 }
 
@@ -515,7 +706,9 @@ export interface ImportDraftRecoveryProjection {
   snapshotState: 'complete' | 'reselection-required';
   lastCompletedStep: 'staging' | 'review' | 'commit-attempt' | 'commit-outcome-uncertain' | 'abandonment-cleanup';
   reviewedTitle: string | null;
-  targetLabel: '新建图书' | '新建图书（作为不同作品）' | null;
+  targetLabel: string | null;
+  targetBookId: string | null;
+  relationshipLabel: '作为首份稿件导入' | null;
   originalFileAccess: OriginalFileAccessProjection;
   staged: StagedImportProjection | null;
   commitAttemptId: string | null;
@@ -649,12 +842,33 @@ export interface ServiceOperationMap {
     input: { draftId: string; expectedDraftVersion: number };
     output: ImportStartupProjection;
   };
+  prepareBookCreation: {
+    input: { title: string; internalNumber: string | null };
+    output: BookCreationReviewProjection;
+  };
+  commitBookCreation: {
+    input: {
+      bookId: string;
+      stableIdentity: string;
+      title: string;
+      internalNumber: string | null;
+      reviewDigest: string;
+    };
+    output: BookCreationCommitProjection;
+  };
+  getBookOverview: {
+    input: { bookId: string };
+    output: BookWorkOverviewProjection;
+  };
+  listBooks: {
+    input: { after: BookSummaryCursor | null };
+    output: BookSummaryPageProjection;
+  };
   prepareNewBookReview: {
     input: {
       draftId: string;
       expectedDraftVersion: number;
-      targetChoiceId: NewBookImportTargetChoiceId;
-      confirmedTitle: string;
+      target: ImportTargetSelection;
       acceptDegradation: boolean;
     };
     output: ReviewBeforeImportProjection;
@@ -773,6 +987,10 @@ export interface RendererApi {
     expectedDraftVersion: number;
   }): Promise<PickerReselectResult>;
   abandonImportDraft(input: ServiceOperationMap['abandonImportDraft']['input']): Promise<ImportStartupProjection>;
+  prepareBookCreation(input: ServiceOperationMap['prepareBookCreation']['input']): Promise<BookCreationReviewProjection>;
+  commitBookCreation(input: ServiceOperationMap['commitBookCreation']['input']): Promise<BookCreationCommitProjection>;
+  getBookOverview(input: ServiceOperationMap['getBookOverview']['input']): Promise<BookWorkOverviewProjection>;
+  listBooks(input: ServiceOperationMap['listBooks']['input']): Promise<BookSummaryPageProjection>;
   prepareNewBookReview(input: ServiceOperationMap['prepareNewBookReview']['input']): Promise<ReviewBeforeImportProjection>;
   commitNewBookImport(input: CommitNewBookRendererInput): Promise<ImportCommitProjection>;
   acknowledgeImportCompletion(input: ServiceOperationMap['acknowledgeImportCompletion']['input']): Promise<{ state: 'acknowledged' }>;
