@@ -1,26 +1,24 @@
 # Current handoff
 
-GitHub-hosted Actions execution remains suspended by exact Owner instruction because the account's minutes were exhausted. Workflow `E2E Functional Gate` (ID `342459594`) is `disabled_manually`; no run is active or queued. Only a later exact Owner restoration statement ends the suspension. A quota reset, elapsed billing period, available minutes, or integrated workflow edit does not.
+Issue #119 now has one locally validated, bounded accepted-but-unintegrated governance candidate on branch `docs/119-waive-hosted-gate`: [ADR 0050](docs/adr/0050-waive-hosted-e2e-integration-evidence-during-actions-exhaustion.md) and exact predecessor/runbook projections. It becomes current only after Commander integration into `dev`. No workflow or GitHub state changed while authoring or validating it.
 
 ## Current routing
 
-- [Issue #115](https://github.com/zhouy1017/ai7-harness/issues/115) and [PR #116](https://github.com/zhouy1017/ai7-harness/pull/116) are integrated at `dev@a2c8f2979f982fa819fb9d5963397e115f19fb54`. The existing `.github/workflows/e2e.yml` now implements [ADR 0049](docs/adr/0049-bound-hosted-actions-consumption-inside-the-e2e-gate.md) without changing ADR 0027's one-Gate evidence or platform boundary.
-- The workflow accepts `ready_for_review` and `synchronize`, suppresses its route job while the pull request is Draft, and cancels a superseded in-progress occurrence only within the same pull request. Its complete-diff Markdown router and J-01/J-02/J-08 Windows/macOS matrix are unchanged.
-- The workflow remains dormant: no hosted run occurred during implementation or integration, no required branch-protection check was added, and re-enablement remains a separate exact Owner action.
-- PR #110 remains an open Draft. Local product work may continue, but no product pull request becomes Ready or merges while hosted usage is suspended.
-- Provider setup/install remains non-authorizing; imported updates remain inert until adoption or an eligible Artifact Update Rule; background Provider work requires active Background Analysis Enrollment; formal agent manuscript mutation retains the single-use exact AI7 Apply boundary.
+- The candidate temporarily waives only hosted paired-platform E2E integration evidence while exact workflow `E2E Functional Gate` (`342459594`) is `disabled_manually`, no run is queued or in progress, and no fresh usable Actions allocation after reset has been authoritatively confirmed.
+- Local `doctor` → `bootstrap` → `build` → applicable journey completion and the final cleared-output `build` plus journey rerun remain mandatory. Authority, privacy, credential, dependency, integration-order, one-Issue/branch/pull-request/Worker, and Commander-only Ready/merge/external-action boundaries are unchanged.
+- Immediately before Ready and again before merge, the Commander records the exact disabled/no-run state. Each waived pull request carries ADR 0050's exact disclosure and claims no hosted run, green Gate, substitute Gate, or single-platform Gate.
+- Authoritative confirmation of a fresh usable Actions allocation after reset expires the waiver immediately. Only then does the Owner prospectively authorize the Commander to re-enable exact workflow `342459594` as a separate explicit action and resume ADR 0049. No probe, manual dispatch, automatic enablement, or retrospective run is authorized.
+- A Ready but unmerged pull request returns to the normal Gate lifecycle at expiry. Already merged waived pull requests receive no synthetic backfill; the next normal product Gate exercises then-current integrated `dev`.
+- Worker validation passed for the exact nine-path allowlist, Markdown links, ADR/disclosure consistency, whitespace/EOF hygiene, legacy-conflict search, and unchanged workflow blob `cc4397ab85d1441175fe2bb1db17fe865582dbe8`. Scoped archive sweep: none.
 
 ## Next Commander outcome
 
-No new implementation or hosted action is authorized by this handoff. Resolve current `origin/dev` and live GitHub state, then:
+Re-resolve current `dev` and inspect the returned Issue #119 diff and validation. Before making the documentation pull request Ready and before merging it, record workflow `342459594` as `disabled_manually` with no queued or active run. If authoritative reset confirmation has arrived, the workflow state differs, a run exists, or target authority has materially drifted, stop for re-scoping. Otherwise integrate this documentation/governance change through the existing disabled-workflow path, claiming no green Gate and recording `archive sweep: none` unless a concrete consumed artifact is found.
 
-- if no exact Owner restoration statement exists, preserve the disabled workflow and Draft product PR state, report the suspension, and stop;
-- if the Owner has supplied exact restoration authority, follow that statement and current target-qualified runbooks rather than inferring scope from available minutes;
-- after restoration, process queued product branches one at a time in dependency order: re-resolve authority, rebase to current `dev`, locally revalidate, make Ready, obtain one paired-platform J-01/J-02/J-08 Gate occurrence, merge, then advance; and
-- never dispatch a synthetic workflow run merely to test CI.
+After integration, process otherwise-ready product pull requests one at a time in authorized dependency order under ADR 0050 only while all activation conditions still hold. At confirmed reset, stop using the waiver immediately; re-enable only exact workflow `342459594` as a separate Commander action, then return every unmerged product pull request to ADR 0049's normal paired Windows/macOS lifecycle.
 
 ## Safe Resume Prompt
 
 ```text
-Commander: resolve exact HEAD and current origin/dev, then consume ADR 0049 and integrated Issue #115 / PR #116. Verify E2E Functional Gate 342459594 remains disabled_manually with no active or queued run and confirm PR #110 remains Draft. Unless the Owner has supplied an exact new restoration statement, do not run, rerun, dispatch, or re-enable Actions; do not make a product PR Ready or merge product work; report the verified suspension and stop. If an exact restoration statement is present, follow its bounded authority, re-resolve queued branches against current dev, locally revalidate, and process them one at a time through the paired Windows/macOS J-01/J-02/J-08 Gate.
+Commander: resume Issue #119 on docs/119-waive-hosted-gate from exact base c87137b32baab4dcb08ef38ab714be3261cfdfda. Confirm the returned diff is limited to the authorized ADR/runbook/router paths, validate links and whitespace, and prove .github/workflows/e2e.yml is unchanged. Re-resolve current dev and record workflow 342459594 as disabled_manually with no queued or active run before Ready and merge. Stop if reset is authoritatively confirmed or any activation condition fails. Otherwise integrate the documentation change through the disabled-workflow governance path with no green Gate claim. Treat ADR 0050 as current only after integration, and never probe, dispatch, or automatically enable Actions.
 ```
