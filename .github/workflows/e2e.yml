@@ -4,13 +4,21 @@ on:
   pull_request:
     branches:
       - dev
+    types:
+      - ready_for_review
+      - synchronize
 
 permissions:
   contents: read
 
+concurrency:
+  group: e2e-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 jobs:
   route:
     name: Route E2E
+    if: ${{ !github.event.pull_request.draft }}
     runs-on: ubuntu-24.04
     outputs:
       run_j01: ${{ steps.route.outputs.run_j01 }}
