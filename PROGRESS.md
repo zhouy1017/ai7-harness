@@ -2,15 +2,14 @@
 
 ## What's done
 
-- [Issue #111](https://github.com/zhouy1017/ai7-harness/issues/111) is an Owner-accepted, `ready-for-agent` T3 documentation normalization on branch `docs/111-bound-actions-consumption` from exact `dev@1d7c56bbbf4479074b76c99c9e64fec856a61a20`.
-- Workflow `E2E Functional Gate` (`342459594`) is `disabled_manually`, no run is in progress, and PR #110 is an open Draft. GitHub-hosted Actions usage remains suspended until an exact later Owner restoration statement.
-- The branch drafts [ADR 0049](docs/adr/0049-bound-hosted-actions-consumption-inside-the-e2e-gate.md), its ADR 0027 pointer, the CI/incremental/Git/dispatch rules, exact non-archive historical bridge wording, and the next-Commander workflow-implementation handoff. `.github/workflows/e2e.yml` is unchanged.
-- Local Markdown-link and `git diff --check` validation pass. Two fresh T3, read-only, non-author Reviewers reported two Standards and three Spec findings; the overlapping optional-review, trigger-scope, bootstrap, and current-checkpoint contradictions are resolved once without iterative re-review. Review remains advisory and non-gating.
-- [PR #112](https://github.com/zhouy1017/ai7-harness/pull/112) is an open Draft. It has no checks because the workflow remains disabled; that absence is not a passing Gate.
+- [Issue #111](https://github.com/zhouy1017/ai7-harness/issues/111) / [PR #112](https://github.com/zhouy1017/ai7-harness/pull/112) is integrated at `dev@d3a02954df0e9747339df793b5d1330a60d2ec6f`. [ADR 0049](docs/adr/0049-bound-hosted-actions-consumption-inside-the-e2e-gate.md) and its current runbook projections now own the accepted hosted-consumption boundary.
+- Workflow `E2E Functional Gate` (`342459594`) remains `disabled_manually`, no run is in progress, and PR #110 remains an open Draft. GitHub-hosted Actions usage stays suspended until an exact later Owner restoration statement.
+- `.github/workflows/e2e.yml` still predates ADR 0049. The exact next outcome is a separate CI-governance Issue/branch/PR organized by the next Commander; no workflow implementation, product code, dependency, Provider, policy, manuscript, release, or `main` path changed in the design normalization.
+- Scoped lifecycle sweep: no archive move under the explicit no-archive task boundary; the superseded pre-merge checkpoint remains recoverable in `dev` Git history and PR #112, and no disposable artifact exists.
 
 ## What's next
 
-- Re-resolve current `origin/dev`, make the pure-documentation PR Ready, and integrate it under the exact disabled-workflow exception. Leave actual workflow implementation to the next Commander through the exact `HANDOFF.md` route.
+- The next Commander follows `HANDOFF.md`: create the exact CI-governance Issue and full Change Brief from then-current `dev`, dispatch one writable Worker for existing `.github/workflows/e2e.yml`, validate locally, and integrate while the workflow remains disabled.
 
 ## Key decisions
 
@@ -22,11 +21,10 @@
 ## Unresolved matters or blockers
 
 - GitHub Actions usage remains suspended. Only an exact future Owner statement restores authority; neither a quota reset nor integration of the workflow implementation does so.
-- `.github/workflows/e2e.yml` implementation is outside Issue #111 and must use a separate exact CI-governance Issue, branch, Worker, and pull request from then-current `dev`.
-- The drafted documentation is accepted-but-unintegrated candidate authority until the #111 pull request lands on `dev`; review remains advisory and cannot become a merge gate.
+- The next workflow Change Brief must stop rather than add another path, gate, dependency, routing authority, journey-selection rule, required check, or hosted test run.
 
 ## Safe Resume Prompt
 
 ```text
-Continue Issue #111 / PR #112 on branch docs/111-bound-actions-consumption. Re-resolve origin/dev and the target-qualified owners. Do not edit .github/workflows/e2e.yml or trigger/re-enable Actions. If authority remains stable, make this pure-documentation PR Ready and integrate it while the workflow is disabled, then follow HANDOFF.md to give the next Commander a separate CI-governance workflow-implementation Issue.
+Commander: continue from current origin/dev after consuming Issue #111 and ADR 0049. Verify exact HEAD/target authority, confirm E2E Functional Gate 342459594 remains disabled_manually with no run in progress, and confirm PR #110 remains Draft. Create one separate CI-governance Issue and Change Brief for the existing .github/workflows/e2e.yml, then dispatch one writable Worker under kick-in/27. Implement only Draft suppression, integration-ready pull-request execution, PR-scoped cancel-in-progress, the retained complete-diff Markdown router, and the unchanged J-01/J-02/J-08 Windows/macOS matrix. Validate locally; advisory read-only review remains optional. Integrate while disabled, but do not run or re-enable Actions until the Owner explicitly restores usage.
 ```
