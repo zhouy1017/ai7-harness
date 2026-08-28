@@ -47,16 +47,20 @@ Agent-authored commits carry the co-authorship trailer for the model that wrote 
 
 ## Pull requests
 
+Pull requests open as Draft and remain Draft during authoring, debugging, review, rebase, and local validation. Workers never push or change pull-request state. Once the change is locally complete and target authority has been re-resolved, the Commander pushes the branch and changes the pull request to Ready. That transition starts the one hosted E2E occurrence when applicable. A later push while Ready starts the newest occurrence and cancels its superseded in-progress same-PR occurrence; avoid such pushes by returning failed or changing work to Draft first.
+
 - Title matches the primary commit subject.
 - Body links the Issue and states the user-visible outcome or exact non-product outcome.
 - Body records only the Change Brief closure delta: planned versus actual structure, existing implementation reused, any new owner/dependency and why, journey/bug outcome or `N/A` for non-behavior work, migration/cleanup, unresolved matters, and archive-sweep result when a lifecycle node was triggered.
-- For an implementation change affecting a supported journey or observed-bug outcome, the one logical E2E Functional Gate must pass the same applicable journey IDs on Windows and macOS. A failure on either platform is not merged around.
+- For an implementation change affecting a supported journey or observed-bug outcome, local completion precedes Ready and the one logical E2E Functional Gate must then pass the same applicable journey IDs on Windows and macOS. A product/bootstrap/build/journey failure returns the pull request to Draft for local repair; only one clearly external infrastructure transient may be rerun once by the Commander. A failure on either platform is not merged around.
 - Documentation-only and design-only changes do not create automated proof work. Lint, type-check, format, build, package, signing, release, same-SHA, or formal-review checks are not additional required pull-request gates.
 - Independent review is optional and advisory. When review is requested, the Commander directly dispatches a fresh-context, strictly read-only, non-author Reviewer; a Reviewer may not dispatch, delegate to, or spawn another agent. Record the reviewed task class and bind the Reviewer at that class or higher.
 - Record requested and actual Reviewer provider/model/effort, class-floor confirmation, independence, fallback status, and any exact fallback or same-provider reason. Cross-provider review is preferred, but Reviewer assignment does not inherit the Worker Claude-first order. A verdict must not become a pull-request (PR), CI, branch, exact-head, zero-finding, iterative re-review, or other proof gate.
 - **Only the Commander merges.** Workers and Reviewers never do.
 
 The E2E scenario admission, data, subject, and platform rules live in [`ci-test-boundaries.md`](ci-test-boundaries.md).
+
+While the exact hosted-execution suspension in that boundary is active, Commanders may push task branches and maintain Draft pull requests, but no product pull request becomes Ready or merges. Pure documentation, design, and CI-governance work may use its expressly authorized disabled-workflow integration path after local validation; the Commander may request optional advisory read-only review, whose verdict remains non-gating, and the integration claims no green Gate. No quota reset or workflow edit ends the suspension without an exact Owner restoration statement.
 
 **Squash merge.** Each task merge to `dev` is one complete task, so history reads as a sequence of finished outcomes rather than agent scratch work. The pull-request body becomes the squashed commit body. A `dev` to `main` promotion remains subject to its separate Owner authorization.
 
