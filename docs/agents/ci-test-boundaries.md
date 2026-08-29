@@ -1,6 +1,6 @@
 # CI and test boundaries
 
-Status: **Owner-accepted `dev` implementation boundary under [ADR 0027](../adr/0027-concentrate-ci-on-e2e-functionality.md), with hosted invocation amended by [ADR 0049](../adr/0049-bound-hosted-actions-consumption-inside-the-e2e-gate.md) and its temporary exhausted-usage integration-evidence waiver in [ADR 0050](../adr/0050-waive-hosted-e2e-integration-evidence-during-actions-exhaustion.md); one logical provider-free E2E surface, not an independent action or `main`-promotion authorization**
+Status: **Owner-accepted `dev` implementation boundary under [ADR 0027](../adr/0027-concentrate-ci-on-e2e-functionality.md), with hosted invocation amended by [ADR 0049](../adr/0049-bound-hosted-actions-consumption-inside-the-e2e-gate.md), fourth-journey routing resolved by [ADR 0051](../adr/0051-admit-j-12-as-the-fourth-supported-e2e-journey.md), and the temporary exhausted-usage integration-evidence waiver in [ADR 0050](../adr/0050-waive-hosted-e2e-integration-evidence-during-actions-exhaustion.md); one logical provider-free E2E surface, not an independent action or `main`-promotion authorization**
 
 On `dev`, this file is the concise authority for implementation-time CI and test admission. ADR 0027 remains the decision authority; the current bounded implementation authorization is recorded separately in the applicable Issue and Change Brief.
 
@@ -21,7 +21,7 @@ A pull request remains Draft during authoring, debugging, review, rebase, and lo
 
 The existing complete-pull-request-diff router remains inside the workflow. A Markdown-only Ready pull request may therefore consume its small route job, rather than relying on GitHub trigger-level path filters that can omit part of a large diff. There is no author-selected label, component catalog, manual dispatch, direct `push` event, schedule, nightly, release, package, or exact-head activation path.
 
-Every product-affecting Ready pull request initially runs all currently admitted J-01, J-02, and J-08 journeys on both Windows and macOS. Admission of a fourth supported journey must explicitly reevaluate routing; it does not silently add that journey to every change. Until a later accepted routing authority exists, shared, infrastructure, toolchain, lockfile, bootstrap, build, launch, Gate, and unclassified changes fail closed to every admitted journey.
+Under ADR 0051, every product-affecting Ready pull request runs all currently admitted J-01, J-02, J-08, and J-12 journeys on both Windows and macOS. Shared and unclassified changes also fail closed to all four journeys. Admission of any later supported journey requires another explicit Owner routing decision and separate CI-governance integration; it never silently changes this set.
 
 The qualitative resource objective is normally one completed paired-platform Gate occurrence per integration-ready product change. Do not create a numeric budget, secondary fast lane, or weaker single-platform substitute without another Owner decision.
 

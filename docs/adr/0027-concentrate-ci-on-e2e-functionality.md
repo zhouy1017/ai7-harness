@@ -24,6 +24,8 @@ This ADR supersedes the mandatory verification and review-gate clauses of ADRs 0
 
 [ADR 0049](./0049-bound-hosted-actions-consumption-inside-the-e2e-gate.md) amends only this Gate's hosted invocation cadence, local feedback loop, and current all-admitted-journeys routing default. It keeps one logical Gate, Windows/macOS parity, failure semantics, provider-free inputs, scenario admission, and every excluded proof surface in this decision unchanged; it does not revive the superseded tiered-verification plan.
 
+[ADR 0051](./0051-admit-j-12-as-the-fourth-supported-e2e-journey.md) resolves ADR 0049's reserved fourth-journey decision by admitting Issue #42's bounded J-12 path and routing every product-affecting Ready occurrence, including shared and unclassified changes, through J-01, J-02, J-08, and J-12 on both platforms. It changes no Gate identity, scenario meaning, platform contract, or proof boundary in this decision.
+
 [ADR 0050](./0050-waive-hosted-e2e-integration-evidence-during-actions-exhaustion.md) temporarily amends only ADR 0049's hosted-occurrence-before-merge and suspension clauses while its exact Actions-exhaustion conditions hold. It waives hosted integration evidence, not local completion or this decision's Gate identity, scenario/data/platform meanings, failure semantics, or excluded proof surfaces; it creates no fake green, substitute Gate, or single-platform Gate.
 
 The concise implementation rules live in [`docs/agents/ci-test-boundaries.md`](../agents/ci-test-boundaries.md).
