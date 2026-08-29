@@ -269,6 +269,56 @@ function decodeRequest(frame: Uint8Array): ServiceRequest {
       }
       break;
     }
+    case 'prepareManuscriptReimport': {
+      const input = requireInput(value.input, ['draftId', 'expectedDraftVersion', 'target'], tentativeId);
+      if (!isBoundedString(input.draftId, 36) || !UUID_PATTERN.test(input.draftId) ||
+          !isSafeInteger(input.expectedDraftVersion, 1) || !isRecord(input.target) ||
+          !hasExactKeys(input.target, ['kind', 'bookId', 'relationship', 'lineage', 'reuseSourceVersionId'])) {
+        throw new ProtocolError(tentativeId);
+      }
+      const target = input.target;
+      if (target.kind !== 'existing-book' || target.relationship !== 'reimport' ||
+          !isBoundedString(target.bookId, 36) || !UUID_PATTERN.test(target.bookId) ||
+          !(target.reuseSourceVersionId === null ||
+            (isBoundedString(target.reuseSourceVersionId, 36) && UUID_PATTERN.test(target.reuseSourceVersionId))) ||
+          !isRecord(target.lineage)) throw new ProtocolError(tentativeId);
+      const lineage = target.lineage;
+      const validLineage =
+        (lineage.kind === 'unconfirmed' && hasExactKeys(lineage, ['kind'])) ||
+        (lineage.kind === 'verified-source-version' && hasExactKeys(lineage, ['kind', 'sourceVersionId']) &&
+          isBoundedString(lineage.sourceVersionId, 36) && UUID_PATTERN.test(lineage.sourceVersionId));
+      if (!validLineage) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'getReimportMappingPage': {
+      const input = requireInput(value.input, ['draftId', 'expectedDraftVersion', 'after'], tentativeId);
+      if (!isBoundedString(input.draftId, 36) || !UUID_PATTERN.test(input.draftId) ||
+          !isSafeInteger(input.expectedDraftVersion, 1) ||
+          !(input.after === null || isSafeInteger(input.after))) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'resolveReimportMapping': {
+      const input = requireInput(
+        value.input,
+        ['draftId', 'expectedDraftVersion', 'mappingId', 'resolution'],
+        tentativeId,
+      );
+      if (!isBoundedString(input.draftId, 36) || !UUID_PATTERN.test(input.draftId) ||
+          !isSafeInteger(input.expectedDraftVersion, 1) ||
+          !isBoundedString(input.mappingId, 36) || !UUID_PATTERN.test(input.mappingId) ||
+          input.resolution !== 'accept-staged') throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'commitManuscriptReimport': {
+      const input = requireInput(value.input, ['draftId', 'expectedDraftVersion', 'reviewDigest', 'commitId'], tentativeId);
+      if (!isBoundedString(input.draftId, 36) || !UUID_PATTERN.test(input.draftId) ||
+          !isSafeInteger(input.expectedDraftVersion, 1) ||
+          !isBoundedString(input.reviewDigest, 64) || !HEX_DIGEST_PATTERN.test(input.reviewDigest) ||
+          !isBoundedString(input.commitId, 36) || !UUID_PATTERN.test(input.commitId)) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
     case 'acknowledgeImportCompletion': {
       const input = requireInput(value.input, ['commitId'], tentativeId);
       if (!isBoundedString(input.commitId, 36) || !UUID_PATTERN.test(input.commitId)) {
@@ -677,6 +727,49 @@ async function dispatch(
           interruptAfterAttempt: importControl === 'before-commit' || importControl === 'uncertain-reconciliation',
         }),
       };
+    case 'prepareManuscriptReimport':
+      return {
+        id: request.id,
+        ok: true,
+        op: request.op,
+        result: store.prepareManuscriptReimport(
+          request.input.draftId,
+          request.input.expectedDraftVersion,
+          request.input.target,
+        ),
+      };
+    case 'getReimportMappingPage':
+      return {
+        id: request.id,
+        ok: true,
+        op: request.op,
+        result: store.getReimportMappingPage(
+          request.input.draftId,
+          request.input.expectedDraftVersion,
+          request.input.after,
+        ),
+      };
+    case 'resolveReimportMapping':
+      return {
+        id: request.id,
+        ok: true,
+        op: request.op,
+        result: store.resolveReimportMapping(
+          request.input.draftId,
+          request.input.expectedDraftVersion,
+          request.input.mappingId,
+          request.input.resolution,
+        ),
+      };
+    case 'commitManuscriptReimport':
+      return {
+        id: request.id,
+        ok: true,
+        op: request.op,
+        result: await store.commitManuscriptReimport(request.input, {
+          interruptAfterAttempt: importControl === 'before-commit' || importControl === 'uncertain-reconciliation',
+        }),
+      };
     case 'acknowledgeImportCompletion':
       return {
         id: request.id,
@@ -921,7 +1014,8 @@ async function run(): Promise<void> {
         }
         response = failureResponse(request.id, error, StoreError);
       }
-      if ((request.op === 'commitNewBookImport' || request.op === 'commitSourceImport') &&
+      if ((request.op === 'commitNewBookImport' || request.op === 'commitSourceImport' ||
+           request.op === 'commitManuscriptReimport') &&
           importControl === 'after-commit-before-response') {
         stop();
         throw new Error('E2E interruption after committed import and before response.');

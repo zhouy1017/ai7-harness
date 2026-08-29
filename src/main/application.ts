@@ -17,6 +17,7 @@ import {
   IPC_CHANNELS,
   MAIN_EVENTS,
   type CommitNewBookRendererInput,
+  type CommitManuscriptReimportRendererInput,
   type CommitSourceImportRendererInput,
   type J01ImportControl,
   type J08RecoveryControl,
@@ -386,6 +387,63 @@ function registerRendererHandlers(
           (input.commitAttemptId === null || commitBinding.commitId === input.commitAttemptId),
       );
       return service.call('commitSourceImport', commitBinding);
+    }),
+  );
+  ipcMain.handle(
+    IPC_CHANNELS.prepareManuscriptReimport,
+    (event, input: ServiceOperationMap['prepareManuscriptReimport']['input']) =>
+      envelope(async () => {
+        requireSender(event);
+        requireAuthority();
+        commitBindings.delete(input.draftId);
+        return service.call('prepareManuscriptReimport', input);
+      }),
+  );
+  ipcMain.handle(
+    IPC_CHANNELS.getReimportMappingPage,
+    (event, input: ServiceOperationMap['getReimportMappingPage']['input']) =>
+      envelope(async () => {
+        requireSender(event);
+        requireAuthority();
+        return service.call('getReimportMappingPage', input);
+      }),
+  );
+  ipcMain.handle(
+    IPC_CHANNELS.resolveReimportMapping,
+    (event, input: ServiceOperationMap['resolveReimportMapping']['input']) =>
+      envelope(async () => {
+        requireSender(event);
+        requireAuthority();
+        commitBindings.delete(input.draftId);
+        return service.call('resolveReimportMapping', input);
+      }),
+  );
+  ipcMain.handle(IPC_CHANNELS.commitManuscriptReimport, (event, input: CommitManuscriptReimportRendererInput) =>
+    envelope(async () => {
+      requireSender(event);
+      requireAuthority();
+      requireDesktop(
+        input.commitAttemptId === null ||
+          (typeof input.commitAttemptId === 'string' && UUID_PATTERN.test(input.commitAttemptId)),
+        'AI7_RENDERER_BOUNDARY_INVALID',
+      );
+      let commitBinding = commitBindings.get(input.draftId);
+      if (!commitBinding) {
+        commitBinding = {
+          draftId: input.draftId,
+          expectedDraftVersion: input.expectedDraftVersion,
+          reviewDigest: input.reviewDigest,
+          commitId: input.commitAttemptId ?? randomUUID(),
+        };
+        commitBindings.set(input.draftId, commitBinding);
+      }
+      requireDesktop(
+        commitBinding.draftId === input.draftId &&
+          commitBinding.expectedDraftVersion === input.expectedDraftVersion &&
+          commitBinding.reviewDigest === input.reviewDigest &&
+          (input.commitAttemptId === null || commitBinding.commitId === input.commitAttemptId),
+      );
+      return service.call('commitManuscriptReimport', commitBinding);
     }),
   );
   ipcMain.handle(

@@ -18,6 +18,9 @@ import type {
   ImportStartupProjection,
   ImportTargetSelection,
   ManuscriptImportCommitProjection,
+  ManuscriptBlockProjection,
+  ManuscriptReimportCommitProjection,
+  ManuscriptReimportTargetSelection,
   JournalAcknowledgement,
   JournalEditInput,
   ManuscriptWindowProjection,
@@ -25,6 +28,8 @@ import type {
   OriginalFileAccessProjection,
   ReviewBeforeImportProjection,
   ReviewBeforeSourceImportProjection,
+  ReviewBeforeManuscriptReimportProjection,
+  ReimportMappingPageProjection,
   SourceImportCommitProjection,
   SourceImportTargetSelection,
   StagedImportProjection,
@@ -59,9 +64,11 @@ import {
   BoundedStoreError,
   BoundedStoreFatalError,
   initializeBoundedSchema,
+  validateManuscriptReimportSchemaTruth,
   validateSourceImportSchemaTruth,
   type RecoverySnapshotCursor,
   type RecoverySnapshotRecord,
+  type ReimportCheckpointBinding,
   type VerifiedRecoverySnapshot,
 } from './bounded-manuscript.js';
 import { RecoveryObjectStore } from './recovery-objects.js';
@@ -83,6 +90,7 @@ const EDITOR_SCHEMA_VERSION = 6;
 const RECOVERY_SCHEMA_VERSION = 7;
 const SCHEMA_VERSION = 8;
 const SOURCE_IMPORT_SCHEMA_VERSION = 9;
+const MANUSCRIPT_REIMPORT_SCHEMA_VERSION = 10;
 const BOOK_SUMMARY_PAGE_SIZE = 20;
 const INGEST_BATCH_SIZE = 256;
 const LEGACY_WORKFLOW_PROFILE = {
@@ -147,6 +155,20 @@ const SOURCE_IMPORT_NON_EFFECTS = [
   '不创建工作流实例',
   '不创建运行来源范围',
   '不创建事实状态或事实核查结论',
+  '不创建书系或书系成员关系',
+  '不创建编辑学习准入决定',
+  '不授予或执行模型提供方传输',
+  '不创建发稿版本、公开发布许可或公开发布事实',
+  '不导出、不发送、不交付、不发布',
+] as const;
+const MANUSCRIPT_REIMPORT_RECORD_SCHEMA = 'ai7.manuscript-reimport-record/1';
+const MANUSCRIPT_REIMPORT_NON_EFFECTS = [
+  '不创建第二份主稿件或并行稿件分支',
+  '不把来源关系未确认解释为导入阻断、来源确认或血缘证明',
+  '不执行模糊匹配或通用合并',
+  '不创建里程碑、恢复快照、恢复决定或恢复注意事项',
+  '不改变图书稳定标识、内部编号、编辑维度集或工作流程实例',
+  '不创建运行来源范围、事实状态或事实核查结论',
   '不创建书系或书系成员关系',
   '不创建编辑学习准入决定',
   '不授予或执行模型提供方传输',
@@ -232,6 +254,160 @@ const SOURCE_IMPORT_ATTEMPT_V9_SCHEMA_SQL = `CREATE TABLE import_commit_attempts
       AND uncertainty_code IS NULL)
   )
 ) STRICT`;
+const REIMPORT_DRAFT_V10_SCHEMA_SQL = `CREATE TABLE import_drafts (
+  draft_id TEXT PRIMARY KEY,
+  selection_token TEXT NOT NULL UNIQUE,
+  state TEXT NOT NULL CHECK(state IN ('staged', 'reviewed', 'committed')),
+  draft_version INTEGER NOT NULL CHECK(draft_version >= 1),
+  display_name TEXT NOT NULL,
+  object_digest TEXT NOT NULL REFERENCES content_objects(object_digest),
+  selected_path TEXT,
+  reviewed_title TEXT,
+  reviewed_target_choice_id TEXT
+    CHECK(reviewed_target_choice_id IS NULL OR reviewed_target_choice_id IN ('new-book', 'new-book-distinct-intended-work')),
+  review_digest TEXT UNIQUE,
+  committed_commit_id TEXT UNIQUE,
+  staged_at TEXT NOT NULL,
+  reviewed_at TEXT,
+  committed_at TEXT,
+  reviewed_target_kind TEXT CHECK(reviewed_target_kind IS NULL OR reviewed_target_kind IN ('new-book', 'existing-book')),
+  reviewed_existing_book_id TEXT REFERENCES books(book_id),
+  reviewed_relationship TEXT
+    CHECK(reviewed_relationship IS NULL OR reviewed_relationship IN ('new-book-first-manuscript', 'first-manuscript', 'source-only', 'reimport')),
+  reviewed_book_state_digest TEXT
+    CHECK(reviewed_book_state_digest IS NULL OR length(reviewed_book_state_digest) = 64),
+  reviewed_reuse_source_version_id TEXT REFERENCES source_versions(source_version_id),
+  reviewed_lineage_status TEXT CHECK(reviewed_lineage_status IS NULL OR reviewed_lineage_status IN ('verified', 'unconfirmed')),
+  reviewed_lineage_source_version_id TEXT REFERENCES source_versions(source_version_id),
+  reviewed_checkpoint_revision_id TEXT REFERENCES manuscript_revisions(revision_id),
+  reviewed_manuscript_id TEXT REFERENCES manuscripts(manuscript_id),
+  reviewed_branch_id TEXT REFERENCES manuscript_branches(branch_id)
+) STRICT`;
+const REIMPORT_COMMIT_V10_SCHEMA_SQL = `CREATE TABLE import_commits (
+  commit_id TEXT PRIMARY KEY,
+  draft_id TEXT NOT NULL UNIQUE REFERENCES import_drafts(draft_id),
+  request_fingerprint TEXT NOT NULL,
+  expected_draft_version INTEGER NOT NULL,
+  review_digest TEXT NOT NULL,
+  operation_kind TEXT NOT NULL CHECK(operation_kind IN ('manuscript-import', 'source-import', 'manuscript-reimport')),
+  result_json TEXT NOT NULL,
+  committed_at TEXT NOT NULL
+) STRICT`;
+const REIMPORT_ATTEMPT_V10_SCHEMA_SQL = `CREATE TABLE import_commit_attempts (
+  attempt_id TEXT PRIMARY KEY,
+  draft_id TEXT NOT NULL UNIQUE REFERENCES import_drafts(draft_id) ON DELETE CASCADE,
+  request_fingerprint TEXT NOT NULL,
+  expected_draft_version INTEGER NOT NULL CHECK(expected_draft_version >= 1),
+  review_digest TEXT NOT NULL CHECK(length(review_digest) = 64),
+  operation_kind TEXT NOT NULL CHECK(operation_kind IN ('manuscript-import', 'source-import', 'manuscript-reimport')),
+  state TEXT NOT NULL CHECK(state IN ('prepared', 'uncertain', 'committed')),
+  prepared_at TEXT NOT NULL,
+  committed_at TEXT,
+  uncertain_at TEXT,
+  uncertainty_code TEXT,
+  completion_acknowledged_at TEXT,
+  CHECK(
+    (state = 'prepared' AND committed_at IS NULL AND uncertain_at IS NULL
+      AND uncertainty_code IS NULL AND completion_acknowledged_at IS NULL)
+    OR (state = 'uncertain' AND committed_at IS NULL AND uncertain_at IS NOT NULL
+      AND uncertainty_code = 'COMMIT_PROOF_INCONCLUSIVE' AND completion_acknowledged_at IS NULL)
+    OR (state = 'committed' AND committed_at IS NOT NULL AND uncertain_at IS NULL
+      AND uncertainty_code IS NULL)
+  )
+) STRICT`;
+const REIMPORT_FACT_SCHEMA_SQL = `
+  CREATE TABLE manuscript_reimport_comparisons (
+    comparison_id TEXT PRIMARY KEY,
+    draft_id TEXT NOT NULL UNIQUE REFERENCES import_drafts(draft_id) ON DELETE CASCADE,
+    manuscript_id TEXT NOT NULL REFERENCES manuscripts(manuscript_id),
+    branch_id TEXT NOT NULL REFERENCES manuscript_branches(branch_id),
+    checkpoint_revision_id TEXT NOT NULL REFERENCES manuscript_revisions(revision_id),
+    checkpoint_created_for_dirty_journal INTEGER NOT NULL CHECK(checkpoint_created_for_dirty_journal IN (0, 1)),
+    lineage_status TEXT NOT NULL CHECK(lineage_status IN ('verified', 'unconfirmed')),
+    lineage_source_version_id TEXT REFERENCES source_versions(source_version_id),
+    lineage_revision_id TEXT REFERENCES manuscript_revisions(revision_id),
+    comparison_kind TEXT NOT NULL CHECK(comparison_kind IN ('three-way', 'two-way')),
+    comparison_digest TEXT NOT NULL UNIQUE CHECK(length(comparison_digest) = 64),
+    created_at TEXT NOT NULL,
+    CHECK(
+      (lineage_status = 'verified' AND lineage_source_version_id IS NOT NULL
+        AND lineage_revision_id IS NOT NULL AND comparison_kind = 'three-way')
+      OR (lineage_status = 'unconfirmed' AND lineage_source_version_id IS NULL
+        AND lineage_revision_id IS NULL AND comparison_kind = 'two-way')
+    )
+  ) STRICT;
+  CREATE TABLE manuscript_reimport_mappings (
+    mapping_id TEXT PRIMARY KEY,
+    comparison_id TEXT NOT NULL REFERENCES manuscript_reimport_comparisons(comparison_id) ON DELETE CASCADE,
+    position INTEGER NOT NULL CHECK(position > 0),
+    change_kind TEXT NOT NULL CHECK(change_kind IN ('unchanged', 'replace', 'insert', 'delete')),
+    current_block_id TEXT REFERENCES manuscript_blocks(block_id),
+    lineage_block_id TEXT REFERENCES manuscript_blocks(block_id),
+    staged_block_id TEXT,
+    current_kind TEXT CHECK(current_kind IS NULL OR current_kind IN ('title', 'heading', 'paragraph')),
+    current_level INTEGER,
+    current_text TEXT,
+    current_digest TEXT CHECK(current_digest IS NULL OR length(current_digest) = 64),
+    lineage_kind TEXT CHECK(lineage_kind IS NULL OR lineage_kind IN ('title', 'heading', 'paragraph')),
+    lineage_level INTEGER,
+    lineage_text TEXT,
+    lineage_digest TEXT CHECK(lineage_digest IS NULL OR length(lineage_digest) = 64),
+    staged_kind TEXT CHECK(staged_kind IS NULL OR staged_kind IN ('title', 'heading', 'paragraph')),
+    staged_level INTEGER,
+    staged_text TEXT,
+    staged_digest TEXT CHECK(staged_digest IS NULL OR length(staged_digest) = 64),
+    UNIQUE(comparison_id, position),
+    CHECK(current_block_id IS NOT NULL OR staged_block_id IS NOT NULL),
+    CHECK((current_block_id IS NULL) = (current_kind IS NULL)),
+    CHECK((current_block_id IS NULL) = (current_text IS NULL)),
+    CHECK((current_block_id IS NULL) = (current_digest IS NULL)),
+    CHECK((lineage_block_id IS NULL) = (lineage_kind IS NULL)),
+    CHECK((lineage_block_id IS NULL) = (lineage_text IS NULL)),
+    CHECK((lineage_block_id IS NULL) = (lineage_digest IS NULL)),
+    CHECK((staged_block_id IS NULL) = (staged_kind IS NULL)),
+    CHECK((staged_block_id IS NULL) = (staged_text IS NULL)),
+    CHECK((staged_block_id IS NULL) = (staged_digest IS NULL)),
+    CHECK(
+      (change_kind = 'unchanged' AND current_block_id IS NOT NULL AND staged_block_id IS NOT NULL)
+      OR (change_kind = 'replace' AND current_block_id IS NOT NULL AND staged_block_id IS NOT NULL)
+      OR (change_kind = 'insert' AND current_block_id IS NULL AND staged_block_id IS NOT NULL)
+      OR (change_kind = 'delete' AND current_block_id IS NOT NULL AND staged_block_id IS NULL)
+    )
+  ) STRICT;
+  CREATE TABLE manuscript_reimport_mapping_resolutions (
+    mapping_id TEXT PRIMARY KEY REFERENCES manuscript_reimport_mappings(mapping_id) ON DELETE CASCADE,
+    resolution TEXT NOT NULL CHECK(resolution = 'accept-staged'),
+    resolved_at TEXT NOT NULL
+  ) STRICT;
+  CREATE TABLE manuscript_reimport_records (
+    reimport_record_id TEXT PRIMARY KEY,
+    commit_id TEXT NOT NULL UNIQUE,
+    book_id TEXT NOT NULL REFERENCES books(book_id),
+    manuscript_id TEXT NOT NULL REFERENCES manuscripts(manuscript_id),
+    branch_id TEXT NOT NULL REFERENCES manuscript_branches(branch_id),
+    source_version_id TEXT NOT NULL REFERENCES source_versions(source_version_id),
+    provenance_id TEXT NOT NULL UNIQUE REFERENCES source_provenance(provenance_id),
+    previous_revision_id TEXT NOT NULL REFERENCES manuscript_revisions(revision_id),
+    resulting_revision_id TEXT REFERENCES manuscript_revisions(revision_id),
+    result_kind TEXT NOT NULL CHECK(result_kind IN ('changed', 'no-change')),
+    result_label TEXT NOT NULL CHECK(result_label IN ('稿件已重新导入', '未发现稿件变化')),
+    lineage_status TEXT NOT NULL CHECK(lineage_status IN ('verified', 'unconfirmed')),
+    lineage_source_version_id TEXT REFERENCES source_versions(source_version_id),
+    comparison_kind TEXT NOT NULL CHECK(comparison_kind IN ('three-way', 'two-way')),
+    comparison_digest TEXT NOT NULL CHECK(length(comparison_digest) = 64),
+    resolution_digest TEXT NOT NULL CHECK(length(resolution_digest) = 64),
+    record_digest TEXT NOT NULL UNIQUE CHECK(length(record_digest) = 64),
+    imported_at TEXT NOT NULL,
+    CHECK(
+      (result_kind = 'changed' AND result_label = '稿件已重新导入' AND resulting_revision_id IS NOT NULL)
+      OR (result_kind = 'no-change' AND result_label = '未发现稿件变化' AND resulting_revision_id IS NULL)
+    ),
+    CHECK(
+      (lineage_status = 'verified' AND lineage_source_version_id IS NOT NULL AND comparison_kind = 'three-way')
+      OR (lineage_status = 'unconfirmed' AND lineage_source_version_id IS NULL AND comparison_kind = 'two-way')
+    )
+  ) STRICT;
+`;
 const SOURCE_IMPORT_REBUILT_TRIGGER_SQL = `
   CREATE TRIGGER abandonment_cleanup_block_draft_insert
   BEFORE INSERT ON import_drafts
@@ -306,7 +482,8 @@ const SOURCE_IMPORT_REBUILT_TRIGGER_SQL = `
 type SqlRow = Record<string, SQLOutputValue>;
 type StoredImportCommitProjection =
   | Omit<ManuscriptImportCommitProjection, 'firstWindow'>
-  | SourceImportCommitProjection;
+  | SourceImportCommitProjection
+  | ManuscriptReimportCommitProjection;
 
 export class StoreError extends Error {
   constructor(
@@ -357,13 +534,17 @@ function stableUuid(value: string): string {
 }
 
 function commitRequestFingerprint(
-  operationKind: 'manuscript-import' | 'source-import',
+  operationKind: 'manuscript-import' | 'source-import' | 'manuscript-reimport',
   input: { draftId: string; expectedDraftVersion: number; reviewDigest: string; commitId: string },
 ): string {
   return sha256(canonicalJson({ schema: 'ai7.import-commit-request/1', operationKind, input }));
 }
 
-function immutableCommitResult(result: StoredImportCommitProjection): Omit<StoredImportCommitProjection, 'overview'> {
+function immutableCommitResult(result: StoredImportCommitProjection): Record<string, unknown> {
+  if ('reimportRecordId' in result) {
+    const { overview: _freshOverview, window: _freshWindow, ...immutable } = result;
+    return immutable;
+  }
   const { overview: _freshProjection, ...immutable } = result;
   return immutable;
 }
@@ -819,7 +1000,8 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === EDITOR_SCHEMA_VERSION ||
       currentVersion === RECOVERY_SCHEMA_VERSION ||
       currentVersion === SCHEMA_VERSION ||
-      currentVersion === SOURCE_IMPORT_SCHEMA_VERSION,
+      currentVersion === SOURCE_IMPORT_SCHEMA_VERSION ||
+      currentVersion === MANUSCRIPT_REIMPORT_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -828,7 +1010,8 @@ function initializeSchema(db: DatabaseSync): void {
     currentVersion === EDITOR_SCHEMA_VERSION ||
     currentVersion === RECOVERY_SCHEMA_VERSION ||
     currentVersion === SCHEMA_VERSION ||
-    currentVersion === SOURCE_IMPORT_SCHEMA_VERSION
+    currentVersion === SOURCE_IMPORT_SCHEMA_VERSION ||
+    currentVersion === MANUSCRIPT_REIMPORT_SCHEMA_VERSION
   ) return;
   if (currentVersion === 1) {
     migrateSchemaV1ToV2(db);
@@ -1157,11 +1340,11 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
     one(db.prepare('PRAGMA user_version').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取数据库版本。').user_version,
   );
   requireStore(
-    version === SCHEMA_VERSION || version === SOURCE_IMPORT_SCHEMA_VERSION,
+    version === SCHEMA_VERSION || version === SOURCE_IMPORT_SCHEMA_VERSION || version === MANUSCRIPT_REIMPORT_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
-  if (version === SOURCE_IMPORT_SCHEMA_VERSION) return;
+  if (version === SOURCE_IMPORT_SCHEMA_VERSION || version === MANUSCRIPT_REIMPORT_SCHEMA_VERSION) return;
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
   );
@@ -1252,6 +1435,123 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
   requireStore(violations.length === 0, 'SCHEMA_MIGRATION_FAILED', '数据库引用校验失败。');
 }
 
+function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWorkflowProfile): void {
+  const version = asNumber(
+    one(db.prepare('PRAGMA user_version').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取数据库版本。').user_version,
+  );
+  requireStore(
+    version === SOURCE_IMPORT_SCHEMA_VERSION || version === MANUSCRIPT_REIMPORT_SCHEMA_VERSION,
+    'SCHEMA_UNSUPPORTED',
+    '数据库版本不受支持。',
+  );
+  if (version === MANUSCRIPT_REIMPORT_SCHEMA_VERSION) return;
+  validateSourceImportSchemaTruth(db, profile);
+  const legacyAlterTable = asNumber(
+    one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
+  );
+  db.exec('PRAGMA foreign_keys = OFF; PRAGMA legacy_alter_table = ON;');
+  let migrationError: unknown;
+  try {
+    db.exec(`
+      BEGIN IMMEDIATE;
+      DROP TRIGGER abandonment_cleanup_block_draft_insert;
+      DROP TRIGGER abandonment_cleanup_block_draft_update;
+      DROP TRIGGER abandonment_cleanup_block_draft_update_v5;
+      DROP TRIGGER abandonment_cleanup_block_commit_insert;
+      DROP TRIGGER abandonment_cleanup_block_commit_update_v5;
+      DROP TRIGGER abandonment_cleanup_block_attempt_insert;
+      DROP TRIGGER abandonment_cleanup_block_attempt_update_v5;
+      DROP TRIGGER source_import_record_excludes_manuscript_result;
+      DROP TRIGGER manuscript_import_record_excludes_source_result;
+      ALTER TABLE import_commit_attempts RENAME TO import_commit_attempts_v9;
+      ALTER TABLE import_commits RENAME TO import_commits_v9;
+      ALTER TABLE import_drafts RENAME TO import_drafts_v9;
+      ${REIMPORT_DRAFT_V10_SCHEMA_SQL};
+      INSERT INTO import_drafts(
+        draft_id, selection_token, state, draft_version, display_name, object_digest, selected_path,
+        reviewed_title, reviewed_target_choice_id, review_digest, committed_commit_id, staged_at,
+        reviewed_at, committed_at, reviewed_target_kind, reviewed_existing_book_id,
+        reviewed_relationship, reviewed_book_state_digest, reviewed_reuse_source_version_id,
+        reviewed_lineage_status, reviewed_lineage_source_version_id, reviewed_checkpoint_revision_id,
+        reviewed_manuscript_id, reviewed_branch_id
+      )
+      SELECT draft_id, selection_token, state, draft_version, display_name, object_digest, selected_path,
+             reviewed_title, reviewed_target_choice_id, review_digest, committed_commit_id, staged_at,
+             reviewed_at, committed_at, reviewed_target_kind, reviewed_existing_book_id,
+             reviewed_relationship, reviewed_book_state_digest, reviewed_reuse_source_version_id,
+             NULL, NULL, NULL, NULL, NULL
+      FROM import_drafts_v9 ORDER BY draft_id;
+      ${REIMPORT_COMMIT_V10_SCHEMA_SQL};
+      INSERT INTO import_commits(
+        commit_id, draft_id, request_fingerprint, expected_draft_version, review_digest,
+        operation_kind, result_json, committed_at
+      )
+      SELECT commit_id, draft_id, request_fingerprint, expected_draft_version, review_digest,
+             operation_kind, result_json, committed_at
+      FROM import_commits_v9 ORDER BY commit_id;
+      ${REIMPORT_ATTEMPT_V10_SCHEMA_SQL};
+      INSERT INTO import_commit_attempts(
+        attempt_id, draft_id, request_fingerprint, expected_draft_version, review_digest,
+        operation_kind, state, prepared_at, committed_at, uncertain_at, uncertainty_code,
+        completion_acknowledged_at
+      )
+      SELECT attempt_id, draft_id, request_fingerprint, expected_draft_version, review_digest,
+             operation_kind, state, prepared_at, committed_at, uncertain_at, uncertainty_code,
+             completion_acknowledged_at
+      FROM import_commit_attempts_v9 ORDER BY attempt_id;
+      DROP TABLE import_commit_attempts_v9;
+      DROP TABLE import_commits_v9;
+      DROP TABLE import_drafts_v9;
+      ${REIMPORT_FACT_SCHEMA_SQL}
+      CREATE INDEX import_attempts_recovery_order
+        ON import_commit_attempts(state, completion_acknowledged_at, prepared_at);
+      CREATE INDEX reimport_mappings_page
+        ON manuscript_reimport_mappings(comparison_id, position);
+      ${SOURCE_IMPORT_REBUILT_TRIGGER_SQL}
+      CREATE TRIGGER reimport_record_excludes_other_results
+      BEFORE INSERT ON manuscript_reimport_records
+      WHEN EXISTS (SELECT 1 FROM manuscript_import_records WHERE commit_id = NEW.commit_id)
+        OR EXISTS (SELECT 1 FROM source_import_records WHERE commit_id = NEW.commit_id)
+      BEGIN
+        SELECT RAISE(ABORT, 'IMPORT_RESULT_KIND_CONFLICT');
+      END;
+      CREATE TRIGGER manuscript_import_record_excludes_reimport_result
+      BEFORE INSERT ON manuscript_import_records
+      WHEN EXISTS (SELECT 1 FROM manuscript_reimport_records WHERE commit_id = NEW.commit_id)
+      BEGIN
+        SELECT RAISE(ABORT, 'IMPORT_RESULT_KIND_CONFLICT');
+      END;
+      CREATE TRIGGER source_import_record_excludes_reimport_result
+      BEFORE INSERT ON source_import_records
+      WHEN EXISTS (SELECT 1 FROM manuscript_reimport_records WHERE commit_id = NEW.commit_id)
+      BEGIN
+        SELECT RAISE(ABORT, 'IMPORT_RESULT_KIND_CONFLICT');
+      END;
+      PRAGMA user_version = ${MANUSCRIPT_REIMPORT_SCHEMA_VERSION};
+    `);
+    validateManuscriptReimportSchemaTruth(db, profile);
+    db.exec('COMMIT;');
+  } catch (error) {
+    migrationError = error;
+    try {
+      db.exec('ROLLBACK');
+    } catch (rollbackError) {
+      migrationError = new AggregateError([error, rollbackError], 'SQLite manuscript reimport migration rollback failed.');
+    }
+  } finally {
+    try {
+      db.exec(`PRAGMA legacy_alter_table = ${legacyAlterTable}; PRAGMA foreign_keys = ON;`);
+    } catch (restoreError) {
+      migrationError = migrationError
+        ? new AggregateError([migrationError, restoreError], 'SQLite manuscript reimport migration and pragma restoration failed.')
+        : restoreError;
+    }
+  }
+  if (migrationError) throw migrationError;
+  const violations = db.prepare('PRAGMA foreign_key_check').all();
+  requireStore(violations.length === 0, 'SCHEMA_MIGRATION_FAILED', '数据库引用校验失败。');
+}
+
 interface DraftSnapshot {
   draftId: string;
   state: string;
@@ -1263,9 +1563,14 @@ interface DraftSnapshot {
   reviewedTargetChoiceId: NewBookImportTargetChoiceId | null;
   reviewedTargetKind: 'new-book' | 'existing-book' | null;
   reviewedExistingBookId: string | null;
-  reviewedRelationship: 'new-book-first-manuscript' | 'first-manuscript' | 'source-only' | null;
+  reviewedRelationship: 'new-book-first-manuscript' | 'first-manuscript' | 'source-only' | 'reimport' | null;
   reviewedBookStateDigest: string | null;
   reviewedReuseSourceVersionId: string | null;
+  reviewedLineageStatus: 'verified' | 'unconfirmed' | null;
+  reviewedLineageSourceVersionId: string | null;
+  reviewedCheckpointRevisionId: string | null;
+  reviewedManuscriptId: string | null;
+  reviewedBranchId: string | null;
   reviewDigest: string | null;
   stagedAt: string;
   parserIdentity: string;
@@ -1291,7 +1596,7 @@ interface CommitAttempt {
   requestFingerprint: string;
   expectedDraftVersion: number;
   reviewDigest: string;
-  operationKind: 'manuscript-import' | 'source-import';
+  operationKind: 'manuscript-import' | 'source-import' | 'manuscript-reimport';
   state: 'prepared' | 'uncertain' | 'committed';
   preparedAt: string;
   completionAcknowledgedAt: string | null;
@@ -1506,6 +1811,104 @@ type ResolvedSourceImportTarget =
       sourceVersionDisposition: 'created' | 'reused-same-book';
       reuseSourceVersionId: string | null;
     };
+
+type ResolvedReimportTarget = {
+  kind: 'existing-book';
+  choiceId: string;
+  bookId: string;
+  stableIdentity: string;
+  title: string;
+  internalNumber: string | null;
+  label: string;
+  manuscriptId: string;
+  branchId: string;
+  bookStateDigest: string;
+  sourceVersionDisposition: 'created' | 'reused-same-book';
+  reuseSourceVersionId: string | null;
+  checkpoint: ReimportCheckpointBinding;
+  lineage:
+    | { status: 'verified'; sourceVersionId: string; revisionId: string; comparisonKind: 'three-way' }
+    | { status: 'unconfirmed'; sourceVersionId: null; revisionId: null; comparisonKind: 'two-way' };
+};
+
+interface ReimportBlockFact {
+  blockId: string;
+  position: number;
+  kind: ManuscriptBlockProjection['kind'];
+  level: number | null;
+  text: string;
+  digest: string;
+}
+
+interface ReimportMappingFact {
+  mappingId: string;
+  position: number;
+  changeKind: 'unchanged' | 'replace' | 'insert' | 'delete';
+  current: ReimportBlockFact | null;
+  lineage: ReimportBlockFact | null;
+  staged: ReimportBlockFact | null;
+}
+
+function manuscriptBlockDigest(kind: ManuscriptBlockProjection['kind'], level: number | null, text: string): string {
+  return sha256(canonicalJson({ kind, level, text }));
+}
+
+function createReimportComparisonDigest(
+  draftId: string,
+  target: ResolvedReimportTarget,
+  mappings: ReadonlyArray<ReimportMappingFact>,
+): string {
+  return sha256(canonicalJson({
+    schema: 'ai7.manuscript-reimport-comparison/1',
+    draftId,
+    manuscriptId: target.manuscriptId,
+    branchId: target.branchId,
+    checkpoint: target.checkpoint,
+    lineage: target.lineage,
+    mappings,
+  }));
+}
+
+function createReimportResolutionDigest(
+  resolutions: ReadonlyArray<{ mappingId: string; resolution: 'accept-staged' }>,
+): string {
+  return sha256(canonicalJson({ schema: 'ai7.manuscript-reimport-resolutions/1', resolutions }));
+}
+
+function createReimportReviewDigest(
+  snapshot: DraftSnapshot,
+  target: ResolvedReimportTarget,
+  comparisonDigest: string,
+  resolutionDigest: string,
+): string {
+  return sha256(canonicalJson({
+    schema: 'ai7.manuscript-reimport-review/1',
+    draftId: snapshot.draftId,
+    draftVersion: snapshot.version,
+    target: {
+      bookId: target.bookId,
+      stableIdentity: target.stableIdentity,
+      manuscriptId: target.manuscriptId,
+      branchId: target.branchId,
+      relationship: 'reimport',
+      bookStateDigest: target.bookStateDigest,
+    },
+    checkpoint: target.checkpoint,
+    lineage: target.lineage,
+    sourceVersionDisposition: target.sourceVersionDisposition,
+    reuseSourceVersionId: target.reuseSourceVersionId,
+    source: {
+      objectDigest: snapshot.objectDigest,
+      sourceDigest: snapshot.sourceDigest,
+      contentDigest: snapshot.contentDigest,
+      structureDigest: snapshot.structureDigest,
+      parserIdentity: snapshot.parserIdentity,
+    },
+    comparisonDigest,
+    resolutionDigest,
+    namedNonEffects: MANUSCRIPT_REIMPORT_NON_EFFECTS,
+  }));
+}
 
 function sourceImportRecordsToCreate(
   target: ResolvedSourceImportTarget,
@@ -1725,6 +2128,7 @@ export class EditorialStore {
     initializeSchema(authority);
     initializeBoundedSchema(authority, workflowProfile);
     initializeSourceImportSchema(authority, workflowProfile);
+    initializeManuscriptReimportSchema(authority, workflowProfile);
     initializeBoundedSchema(authority, workflowProfile);
     const journal = new DatabaseSync(databasePath);
     configureDatabase(journal);
@@ -1963,6 +2367,7 @@ export class EditorialStore {
       dimensionSetDigest: asString(book.definition_digest),
     };
     const sourceImportRecords = this.#sourceImportRecordPresentations(bookId);
+    const reimportRecords = this.#reimportRecordPresentations(bookId);
     const manuscripts = this.#authority.prepare(
       `SELECT m.manuscript_id, m.created_at, mb.branch_id, mr.revision_id, mr.revision_label,
               mr.revision_digest, mr.source_version_id, mr.created_at revision_created_at,
@@ -2045,6 +2450,27 @@ export class EditorialStore {
       'BOOK_RECORD_GRAPH_INVALID',
       '稿件导入记录的保真结果不完整。',
     );
+    const revisionRecords = (this.#authority.prepare(
+      `SELECT revision_id, revision_label, revision_digest, source_version_id, created_at
+       FROM manuscript_revisions WHERE manuscript_id = ? AND branch_id = ? ORDER BY ordinal`,
+    ).all(manuscriptId, branchId) as SqlRow[]).map((revision) => ({
+      kind: 'revision' as const,
+      label: `修订版 ${asString(revision.revision_label)}`,
+      revisionId: asString(revision.revision_id),
+      manuscriptId,
+      branchId,
+      revisionLabel: asString(revision.revision_label),
+      revisionDigest: asString(revision.revision_digest),
+      sourceVersionId: asString(revision.source_version_id),
+      createdAt: asString(revision.created_at),
+    }));
+    const presentedSourceIds = new Set([sourceVersionId]);
+    const additionalRecords = [...sourceImportRecords, ...reimportRecords].filter((record) => {
+      if (record.kind !== 'source') return true;
+      if (presentedSourceIds.has(record.sourceVersionId)) return false;
+      presentedSourceIds.add(record.sourceVersionId);
+      return true;
+    });
     return {
       book: bookProjection,
       manuscriptState: { state: 'populated', label: '已有主稿件', manuscriptId },
@@ -2052,10 +2478,7 @@ export class EditorialStore {
       records: [
         bookRecord,
         { kind: 'manuscript', label: '主稿件', manuscriptId, bookId, role: 'primary', createdAt: asString(row.created_at) },
-        {
-          kind: 'revision', label: '修订版 r1', revisionId, manuscriptId, branchId, revisionLabel: 'r1',
-          revisionDigest: asString(row.revision_digest), sourceVersionId, createdAt: asString(row.revision_created_at),
-        },
+        ...revisionRecords,
         {
           kind: 'source', label: '来源版本与来源记录', sourceVersionId,
           provenanceId: asString(row.provenance_id), bookId, displayName: asString(row.display_name),
@@ -2087,10 +2510,102 @@ export class EditorialStore {
             : { summaryLabel: '含已接受的降级', acceptedItems: fidelityPlan.degradations },
           resultingRevisionId: revisionId, provenanceId: asString(row.provenance_id), importedAt: asString(row.imported_at),
         },
-        ...sourceImportRecords.filter((record) =>
-          record.kind !== 'source' || record.sourceVersionId !== sourceVersionId),
+        ...additionalRecords,
       ],
     };
+  }
+
+  #reimportRecordPresentations(bookId: string): BookRecordPresentation[] {
+    const rows = this.#authority.prepare(
+      `SELECT rr.*, sv.display_name, sv.source_digest, sv.content_digest, sv.structure_digest,
+              sv.parser_identity, sp.acquisition_path, sp.locality
+       FROM manuscript_reimport_records rr
+       JOIN source_versions sv ON sv.source_version_id = rr.source_version_id AND sv.book_id = rr.book_id
+       JOIN source_provenance sp ON sp.provenance_id = rr.provenance_id AND sp.source_version_id = rr.source_version_id
+       WHERE rr.book_id = ? ORDER BY rr.imported_at, rr.reimport_record_id`,
+    ).all(bookId) as SqlRow[];
+    const records: BookRecordPresentation[] = [];
+    const presentedSources = new Set<string>();
+    for (const row of rows) {
+      const sourceVersionId = asString(row.source_version_id);
+      const provenanceId = asString(row.provenance_id);
+      const resultKind = asString(row.result_kind) as 'changed' | 'no-change';
+      const resultLabel = asString(row.result_label) as '稿件已重新导入' | '未发现稿件变化';
+      const lineageStatus = asString(row.lineage_status) as 'verified' | 'unconfirmed';
+      const lineageSourceVersionId = row.lineage_source_version_id === null
+        ? null
+        : asString(row.lineage_source_version_id);
+      const comparisonKind = asString(row.comparison_kind) as 'three-way' | 'two-way';
+      const recordDigest = sha256(canonicalJson({
+        schema: MANUSCRIPT_REIMPORT_RECORD_SCHEMA,
+        reimportRecordId: asString(row.reimport_record_id),
+        commitId: asString(row.commit_id),
+        bookId: asString(row.book_id),
+        manuscriptId: asString(row.manuscript_id),
+        branchId: asString(row.branch_id),
+        sourceVersionId,
+        provenanceId,
+        previousRevisionId: asString(row.previous_revision_id),
+        resultingRevisionId: row.resulting_revision_id === null ? null : asString(row.resulting_revision_id),
+        resultKind,
+        resultLabel,
+        lineageStatus,
+        lineageSourceVersionId,
+        comparisonKind,
+        comparisonDigest: asString(row.comparison_digest),
+        resolutionDigest: asString(row.resolution_digest),
+        importedAt: asString(row.imported_at),
+      }));
+      requireStore(
+        (resultKind === 'changed' || resultKind === 'no-change') &&
+          (lineageStatus === 'verified' || lineageStatus === 'unconfirmed') &&
+          (comparisonKind === 'three-way' || comparisonKind === 'two-way') &&
+          asString(row.acquisition_path) === 'native-file-picker' && asString(row.locality) === 'local-provider-free' &&
+          recordDigest === asString(row.record_digest),
+        'BOOK_RECORD_GRAPH_INVALID',
+        '稿件重新导入记录图或摘要无效。',
+      );
+      if (!presentedSources.has(sourceVersionId)) {
+        records.push({
+          kind: 'source',
+          label: '来源版本与来源记录',
+          sourceVersionId,
+          provenanceId,
+          bookId,
+          displayName: asString(row.display_name),
+          sourceDigest: asString(row.source_digest),
+          contentDigest: asString(row.content_digest),
+          structureDigest: asString(row.structure_digest),
+          parserIdentity: asString(row.parser_identity),
+          acquisitionPath: 'native-file-picker',
+          locality: 'local-provider-free',
+        });
+        presentedSources.add(sourceVersionId);
+      }
+      records.push({
+        kind: 'manuscript-reimport-record',
+        label: '稿件重新导入记录',
+        reimportRecordId: asString(row.reimport_record_id),
+        commitId: asString(row.commit_id),
+        bookId,
+        manuscriptId: asString(row.manuscript_id),
+        sourceVersionId,
+        provenanceId,
+        previousRevisionId: asString(row.previous_revision_id),
+        resultingRevisionId: row.resulting_revision_id === null ? null : asString(row.resulting_revision_id),
+        resultKind,
+        resultLabel,
+        lineageStatus,
+        lineageLabel: lineageStatus === 'verified' ? '来源关系已确认' : '来源关系未确认',
+        lineageSourceVersionId,
+        comparisonKind,
+        comparisonDigest: asString(row.comparison_digest),
+        resolutionDigest: asString(row.resolution_digest),
+        recordDigest,
+        importedAt: asString(row.imported_at),
+      });
+    }
+    return records;
   }
 
   #sourceImportRecordPresentations(bookId: string): BookRecordPresentation[] {
@@ -2244,6 +2759,9 @@ export class EditorialStore {
         internalNumber,
         manuscriptState: projectedManuscriptState,
         manuscriptStateLabel: projectedManuscriptState === 'empty' ? '尚无稿件' as const : '已有主稿件' as const,
+        reimportLineageSourceVersionIds: projectedManuscriptState === 'empty'
+          ? []
+          : this.#reimportLineageSourceVersionIds(bookId),
       };
     });
     const items = summaries.slice(0, BOOK_SUMMARY_PAGE_SIZE);
@@ -2254,6 +2772,20 @@ export class EditorialStore {
         ? { title: last.title, bookId: last.bookId }
         : null,
     };
+  }
+
+  #reimportLineageSourceVersionIds(bookId: string): string[] {
+    return (this.#authority.prepare(
+      `SELECT source_version_id FROM (
+         SELECT mir.source_version_id
+         FROM manuscript_import_records mir
+         WHERE mir.book_id = ?
+         UNION
+         SELECT rr.source_version_id
+         FROM manuscript_reimport_records rr
+         WHERE rr.book_id = ? AND rr.result_kind = 'changed' AND rr.resulting_revision_id IS NOT NULL
+       ) ORDER BY source_version_id`,
+    ).all(bookId, bookId) as SqlRow[]).map((row) => asString(row.source_version_id));
   }
 
   private prepareBookCreationReviewForExactIdentity(
@@ -2362,6 +2894,11 @@ export class EditorialStore {
             reviewedRelationship: null,
             reviewedBookStateDigest: null,
             reviewedReuseSourceVersionId: null,
+            reviewedLineageStatus: null,
+            reviewedLineageSourceVersionId: null,
+            reviewedCheckpointRevisionId: null,
+            reviewedManuscriptId: null,
+            reviewedBranchId: null,
             reviewDigest: null,
             stagedAt: now,
             parserIdentity: parsed.parserIdentity,
@@ -2630,6 +3167,25 @@ export class EditorialStore {
 
     requireStore(snapshot.state === 'reviewed', 'DRAFT_STATE_CHANGED', '导入草稿状态已变化。');
     const identityFindings = this.#identityFindings(snapshot);
+    if (snapshot.reviewedRelationship === 'reimport') {
+      const reimportTarget = this.#reconstructReviewedReimportTarget(snapshot);
+      if (reimportTarget === null) {
+        snapshot = this.#invalidateReview(snapshot);
+        return {
+          state: 'target-review-required',
+          staged: this.#stagedProjection(snapshot),
+          originalFileAccess: access,
+          reviewInvalidated: true,
+          notice: '重新导入目标、固定点、来源关系、来源版本结果或逐块比较已变化；旧复核已失效。',
+        };
+      }
+      return {
+        state: 'review-ready',
+        review: this.#reimportReviewProjection(snapshot, reimportTarget, attempt?.attemptId ?? null),
+        originalFileAccess: access,
+        notice: continuationNotice(access),
+      };
+    }
     if (snapshot.reviewedRelationship === 'source-only') {
       const sourceTarget = this.#reconstructReviewedSourceImportTarget(snapshot, identityFindings);
       if (sourceTarget === null) {
@@ -2759,6 +3315,7 @@ export class EditorialStore {
                  verified_at = excluded.verified_at`,
             )
             .run(parsed.sourceDigest, relativeKey, parsed.archiveBytes, now);
+          this.#authority.prepare('DELETE FROM manuscript_reimport_comparisons WHERE draft_id = ?').run(draftId);
           this.#authority.prepare('DELETE FROM staged_import_snapshots WHERE draft_id = ?').run(draftId);
           this.#promoteIngestSnapshot(draftId, ingested, now);
           const draftUpdate = this.#authority
@@ -2769,6 +3326,8 @@ export class EditorialStore {
                    reviewed_target_kind = NULL, reviewed_existing_book_id = NULL,
                    reviewed_relationship = NULL, reviewed_book_state_digest = NULL,
                    reviewed_reuse_source_version_id = NULL,
+                   reviewed_lineage_status = NULL, reviewed_lineage_source_version_id = NULL,
+                   reviewed_checkpoint_revision_id = NULL, reviewed_manuscript_id = NULL, reviewed_branch_id = NULL,
                    review_digest = NULL, reviewed_at = NULL
                WHERE draft_id = ? AND draft_version = ? AND state IN ('staged', 'reviewed')`,
             )
@@ -3081,6 +3640,192 @@ export class EditorialStore {
       identityFindings,
       null,
     );
+  }
+
+  prepareManuscriptReimport(
+    draftId: string,
+    expectedDraftVersion: number,
+    targetSelection: ManuscriptReimportTargetSelection,
+  ): ReviewBeforeManuscriptReimportProjection {
+    this.#assertAvailable();
+    requireStore(UUID_PATTERN.test(draftId), 'DRAFT_INVALID', '导入草稿标识无效。');
+    this.#requireNoAbandonmentCleanupIntent(draftId);
+    const snapshot = this.#loadDraftSnapshot(draftId);
+    requireStore(snapshot.state === 'staged', 'DRAFT_STATE_CHANGED', '导入草稿状态已变化。');
+    requireStore(snapshot.version === expectedDraftVersion, 'DRAFT_VERSION_CHANGED', '导入草稿版本已变化。');
+    const binding = this.#reimportManuscriptBinding(targetSelection.bookId);
+    const checkpoint = this.#boundedCall(() =>
+      this.#boundedAuthority.checkpointForReimport(binding.manuscriptId, binding.branchId));
+    const identityFindings = this.#identityFindings(snapshot);
+    const target = this.#resolveReimportTarget(targetSelection, snapshot, checkpoint, identityFindings);
+    const mappings = this.#buildReimportMappings(draftId, target);
+    const comparisonId = stableUuid(`ai7.reimport-comparison/1\u0000${draftId}`);
+    const comparisonDigest = createReimportComparisonDigest(draftId, target, mappings);
+    const nextVersion = expectedDraftVersion + 1;
+    const reviewedSnapshot = { ...snapshot, version: nextVersion };
+    const resolutionDigest = createReimportResolutionDigest([]);
+    const reviewDigest = createReimportReviewDigest(reviewedSnapshot, target, comparisonDigest, resolutionDigest);
+    const reviewedAt = new Date().toISOString();
+    this.#transaction(this.#authority, () => {
+      this.#authority.prepare(
+        `INSERT INTO manuscript_reimport_comparisons(
+           comparison_id, draft_id, manuscript_id, branch_id, checkpoint_revision_id,
+           checkpoint_created_for_dirty_journal, lineage_status, lineage_source_version_id,
+           lineage_revision_id, comparison_kind, comparison_digest, created_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        comparisonId,
+        draftId,
+        target.manuscriptId,
+        target.branchId,
+        target.checkpoint.revisionId,
+        target.checkpoint.createdForDirtyJournal ? 1 : 0,
+        target.lineage.status,
+        target.lineage.sourceVersionId,
+        target.lineage.revisionId,
+        target.lineage.comparisonKind,
+        comparisonDigest,
+        reviewedAt,
+      );
+      const insertMapping = this.#authority.prepare(
+        `INSERT INTO manuscript_reimport_mappings(
+           mapping_id, comparison_id, position, change_kind,
+           current_block_id, lineage_block_id, staged_block_id,
+           current_kind, current_level, current_text, current_digest,
+           lineage_kind, lineage_level, lineage_text, lineage_digest,
+           staged_kind, staged_level, staged_text, staged_digest
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      );
+      for (const mapping of mappings) {
+        insertMapping.run(
+          mapping.mappingId, comparisonId, mapping.position, mapping.changeKind,
+          mapping.current?.blockId ?? null, mapping.lineage?.blockId ?? null, mapping.staged?.blockId ?? null,
+          mapping.current?.kind ?? null, mapping.current?.level ?? null, mapping.current?.text ?? null,
+          mapping.current?.digest ?? null,
+          mapping.lineage?.kind ?? null, mapping.lineage?.level ?? null, mapping.lineage?.text ?? null,
+          mapping.lineage?.digest ?? null,
+          mapping.staged?.kind ?? null, mapping.staged?.level ?? null, mapping.staged?.text ?? null,
+          mapping.staged?.digest ?? null,
+        );
+      }
+      const update = this.#authority.prepare(
+        `UPDATE import_drafts
+         SET state = 'reviewed', draft_version = ?, reviewed_title = NULL,
+             reviewed_target_choice_id = NULL, reviewed_target_kind = 'existing-book',
+             reviewed_existing_book_id = ?, reviewed_relationship = 'reimport',
+             reviewed_book_state_digest = ?, reviewed_reuse_source_version_id = ?,
+             reviewed_lineage_status = ?, reviewed_lineage_source_version_id = ?,
+             reviewed_checkpoint_revision_id = ?, reviewed_manuscript_id = ?, reviewed_branch_id = ?,
+             review_digest = ?, reviewed_at = ?
+         WHERE draft_id = ? AND state = 'staged' AND draft_version = ?`,
+      ).run(
+        nextVersion,
+        target.bookId,
+        target.bookStateDigest,
+        target.reuseSourceVersionId,
+        target.lineage.status,
+        target.lineage.sourceVersionId,
+        target.checkpoint.revisionId,
+        target.manuscriptId,
+        target.branchId,
+        reviewDigest,
+        reviewedAt,
+        draftId,
+        expectedDraftVersion,
+      );
+      requireStore(update.changes === 1, 'DRAFT_VERSION_CHANGED', '导入草稿在重新导入复核时已变化。');
+      this.#assertForeignKeys(this.#authority);
+    });
+    return this.#reimportReviewProjection(this.#loadDraftSnapshot(draftId), target, null);
+  }
+
+  getReimportMappingPage(
+    draftId: string,
+    expectedDraftVersion: number,
+    after: number | null,
+  ): ReimportMappingPageProjection {
+    this.#assertAvailable();
+    requireStore(UUID_PATTERN.test(draftId) && (after === null || (Number.isSafeInteger(after) && after >= 0)),
+      'REIMPORT_MAPPING_INVALID', '重新导入映射分页参数无效。');
+    const snapshot = this.#loadDraftSnapshot(draftId);
+    requireStore(snapshot.state === 'reviewed' && snapshot.reviewedRelationship === 'reimport' &&
+      snapshot.version === expectedDraftVersion && snapshot.reviewDigest !== null,
+    'DRAFT_VERSION_CHANGED', '重新导入复核已变化。');
+    const comparison = one(this.#authority.prepare(
+      'SELECT comparison_id FROM manuscript_reimport_comparisons WHERE draft_id = ?',
+    ).all(draftId) as SqlRow[], 'REIMPORT_COMPARISON_INVALID', '重新导入比较不存在。');
+    const rows = this.#authority.prepare(
+      `SELECT m.*, r.resolution
+       FROM manuscript_reimport_mappings m
+       LEFT JOIN manuscript_reimport_mapping_resolutions r ON r.mapping_id = m.mapping_id
+       WHERE m.comparison_id = ? AND m.position > ? ORDER BY m.position LIMIT 33`,
+    ).all(asString(comparison.comparison_id), after ?? 0) as SqlRow[];
+    const page = rows.slice(0, 32);
+    return {
+      draftId,
+      draftVersion: snapshot.version,
+      reviewDigest: snapshot.reviewDigest,
+      items: page.map((row) => ({
+        mappingId: asString(row.mapping_id),
+        position: asNumber(row.position),
+        changeKind: asString(row.change_kind) as 'unchanged' | 'replace' | 'insert' | 'delete',
+        currentBlockId: row.current_block_id === null ? null : asString(row.current_block_id),
+        lineageBlockId: row.lineage_block_id === null ? null : asString(row.lineage_block_id),
+        stagedBlockId: row.staged_block_id === null ? null : asString(row.staged_block_id),
+        currentText: row.current_text === null ? null : asString(row.current_text),
+        lineageText: row.lineage_text === null ? null : asString(row.lineage_text),
+        stagedText: row.staged_text === null ? null : asString(row.staged_text),
+        state: row.change_kind === 'unchanged' || row.resolution === 'accept-staged' ? 'resolved' : 'unresolved',
+        resolution: row.resolution === null ? null : 'accept-staged',
+      })),
+      nextCursor: rows.length > 32 ? asNumber(page.at(-1)!.position) : null,
+    };
+  }
+
+  resolveReimportMapping(
+    draftId: string,
+    expectedDraftVersion: number,
+    mappingId: string,
+    resolution: 'accept-staged',
+  ): ReviewBeforeManuscriptReimportProjection {
+    this.#assertAvailable();
+    requireStore(UUID_PATTERN.test(draftId) && UUID_PATTERN.test(mappingId) && resolution === 'accept-staged',
+      'REIMPORT_MAPPING_INVALID', '重新导入映射解决参数无效。');
+    const snapshot = this.#loadDraftSnapshot(draftId);
+    requireStore(snapshot.state === 'reviewed' && snapshot.reviewedRelationship === 'reimport' &&
+      snapshot.version === expectedDraftVersion, 'DRAFT_VERSION_CHANGED', '重新导入复核已变化。');
+    const target = this.#reconstructReviewedReimportTarget(snapshot);
+    requireStore(target !== null, 'REVIEW_CHANGED', '重新导入复核无法由当前权威状态重建。');
+    const mapping = one(this.#authority.prepare(
+      `SELECT m.change_kind
+       FROM manuscript_reimport_mappings m
+       JOIN manuscript_reimport_comparisons c ON c.comparison_id = m.comparison_id
+       WHERE c.draft_id = ? AND m.mapping_id = ?`,
+    ).all(draftId, mappingId) as SqlRow[], 'REIMPORT_MAPPING_INVALID', '重新导入映射不存在。');
+    requireStore(asString(mapping.change_kind) !== 'unchanged', 'REIMPORT_MAPPING_INVALID', '未变化映射不需要解决。');
+    const nextVersion = expectedDraftVersion + 1;
+    this.#transaction(this.#authority, () => {
+      this.#authority.prepare(
+        `INSERT INTO manuscript_reimport_mapping_resolutions(mapping_id, resolution, resolved_at)
+         VALUES (?, 'accept-staged', ?)
+         ON CONFLICT(mapping_id) DO NOTHING`,
+      ).run(mappingId, new Date().toISOString());
+      const reviewedSnapshot = { ...snapshot, version: nextVersion };
+      const evidence = this.#reimportEvidence(draftId);
+      const reviewDigest = createReimportReviewDigest(
+        reviewedSnapshot, target, evidence.comparisonDigest, evidence.resolutionDigest,
+      );
+      const update = this.#authority.prepare(
+        `UPDATE import_drafts SET draft_version = ?, review_digest = ?, reviewed_at = ?
+         WHERE draft_id = ? AND state = 'reviewed' AND reviewed_relationship = 'reimport' AND draft_version = ?`,
+      ).run(nextVersion, reviewDigest, new Date().toISOString(), draftId, expectedDraftVersion);
+      requireStore(update.changes === 1, 'DRAFT_VERSION_CHANGED', '重新导入映射解决期间复核已变化。');
+      this.#authority.prepare("DELETE FROM import_commit_attempts WHERE draft_id = ? AND state = 'prepared'").run(draftId);
+    });
+    const refreshed = this.#loadDraftSnapshot(draftId);
+    const refreshedTarget = this.#reconstructReviewedReimportTarget(refreshed);
+    requireStore(refreshedTarget !== null, 'REVIEW_CHANGED', '重新导入复核无法重建。');
+    return this.#reimportReviewProjection(refreshed, refreshedTarget, null);
   }
 
   async commitNewBookImport(
@@ -3786,6 +4531,334 @@ export class EditorialStore {
     return result;
   }
 
+  async commitManuscriptReimport(
+    input: { draftId: string; expectedDraftVersion: number; reviewDigest: string; commitId: string },
+    options: { interruptAfterAttempt?: boolean } = {},
+  ): Promise<ManuscriptReimportCommitProjection> {
+    this.#assertAvailable();
+    requireStore(
+      UUID_PATTERN.test(input.draftId) && UUID_PATTERN.test(input.commitId) && DIGEST_PATTERN.test(input.reviewDigest),
+      'COMMIT_INVALID',
+      '稿件重新导入提交参数无效。',
+    );
+    this.#requireNoAbandonmentCleanupIntent(input.draftId);
+    const requestFingerprint = commitRequestFingerprint('manuscript-reimport', input);
+    const existingAttempt = this.#loadCommitAttemptForDraft(input.draftId);
+    if (existingAttempt) {
+      requireStore(
+        existingAttempt.attemptId === input.commitId && existingAttempt.operationKind === 'manuscript-reimport' &&
+          existingAttempt.requestFingerprint === requestFingerprint &&
+          existingAttempt.expectedDraftVersion === input.expectedDraftVersion &&
+          existingAttempt.reviewDigest === input.reviewDigest,
+        'IDEMPOTENCY_CONFLICT',
+        '该重新导入草稿已绑定另一项持久提交尝试。',
+      );
+      const reconciliation = await this.#reconcileCommitAttempt(existingAttempt);
+      if (reconciliation.state === 'committed') {
+        requireStore(
+          reconciliation.result.completionLabel === '稿件已重新导入' ||
+            reconciliation.result.completionLabel === '未发现稿件变化',
+          'IDEMPOTENCY_CONFLICT',
+          '提交类型与稿件重新导入不一致。',
+        );
+        return reconciliation.result;
+      }
+      requireStore(reconciliation.state === 'uncommitted', 'IMPORT_COMMIT_OUTCOME_UNCERTAIN', '稿件重新导入提交结果待确认。');
+    }
+    const snapshotBeforeAttempt = this.#loadDraftSnapshot(input.draftId);
+    requireStore(snapshotBeforeAttempt.state === 'reviewed' && snapshotBeforeAttempt.reviewedRelationship === 'reimport',
+      'DRAFT_NOT_REVIEWED', '稿件重新导入草稿尚未完成复核。');
+    requireStore(snapshotBeforeAttempt.version === input.expectedDraftVersion, 'DRAFT_VERSION_CHANGED', '导入草稿版本已变化。');
+    requireStore(snapshotBeforeAttempt.reviewDigest === input.reviewDigest, 'REVIEW_CHANGED', '稿件重新导入复核摘要已变化。');
+    const revalidated = await this.#revalidateSnapshot(snapshotBeforeAttempt);
+    requireStore(!revalidated.parserDrift, 'REVIEW_CHANGED', '解析器状态已变化，请重新复核稿件重新导入。');
+    const targetBeforeAttempt = this.#reconstructReviewedReimportTarget(revalidated.snapshot);
+    requireStore(targetBeforeAttempt !== null, 'REVIEW_CHANGED', '稿件重新导入复核无法由当前权威状态重建。');
+    requireStore(this.#reimportEvidence(input.draftId).unresolvedMappings === 0,
+      'REIMPORT_MAPPING_UNRESOLVED', '仍有逐块映射未明确解决。');
+    if (!existingAttempt) {
+      this.#transaction(this.#authority, () => {
+        this.#authority.prepare(
+          `INSERT INTO import_commit_attempts(
+             attempt_id, draft_id, request_fingerprint, expected_draft_version, review_digest,
+             operation_kind, state, prepared_at
+           ) VALUES (?, ?, ?, ?, ?, 'manuscript-reimport', 'prepared', ?)`,
+        ).run(input.commitId, input.draftId, requestFingerprint, input.expectedDraftVersion,
+          input.reviewDigest, new Date().toISOString());
+      });
+    }
+    if (options.interruptAfterAttempt) {
+      throw new StoreFatalError(new Error('E2E interruption after durable manuscript reimport attempt preparation.'));
+    }
+
+    let result: ManuscriptReimportCommitProjection | undefined;
+    this.#transaction(this.#authority, () => {
+      const existing = this.#authority.prepare(
+        'SELECT request_fingerprint, operation_kind FROM import_commits WHERE commit_id = ?',
+      ).all(input.commitId) as SqlRow[];
+      if (existing.length === 1) {
+        requireStore(asString(existing[0]!.request_fingerprint) === requestFingerprint &&
+          asString(existing[0]!.operation_kind) === 'manuscript-reimport',
+        'IDEMPOTENCY_CONFLICT', '提交标识已用于另一项导入。');
+        const stored = this.#loadStoredCommitResult(input.commitId);
+        requireStore(stored.completionLabel === '稿件已重新导入' || stored.completionLabel === '未发现稿件变化',
+          'IDEMPOTENCY_CONFLICT', '提交类型与稿件重新导入不一致。');
+        result = stored;
+        return;
+      }
+      requireStore(existing.length === 0, 'STORE_CORRUPT', '提交标识记录不唯一。');
+
+      const snapshot = this.#loadDraftSnapshot(input.draftId);
+      requireStore(snapshot.state === 'reviewed' && snapshot.version === input.expectedDraftVersion &&
+        snapshot.reviewDigest === input.reviewDigest && snapshot.reviewedRelationship === 'reimport',
+      'REVIEW_CHANGED', '稿件重新导入复核已变化。');
+      const target = this.#reconstructReviewedReimportTarget(snapshot);
+      requireStore(target !== null, 'REVIEW_CHANGED', '稿件重新导入复核无法由当前权威状态重建。');
+      const evidence = this.#reimportEvidence(input.draftId);
+      requireStore(evidence.unresolvedMappings === 0, 'REIMPORT_MAPPING_UNRESOLVED', '仍有逐块映射未明确解决。');
+      this.#boundedCall(() => this.#boundedAuthority.assertStagedDraftIntegrity(input.draftId));
+
+      const now = new Date().toISOString();
+      const before = this.#reimportAuthorityCounts(target.bookId);
+      const sourceVersionId = target.sourceVersionDisposition === 'reused-same-book'
+        ? target.reuseSourceVersionId!
+        : randomUUID();
+      const provenanceId = randomUUID();
+      const reimportRecordId = randomUUID();
+      if (target.sourceVersionDisposition === 'created') {
+        this.#authority.prepare(
+          `INSERT INTO source_versions(
+             source_version_id, book_id, object_digest, source_digest, content_digest, structure_digest,
+             parser_identity, format, display_name, created_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, 'DOCX', ?, ?)`,
+        ).run(sourceVersionId, target.bookId, snapshot.objectDigest, snapshot.sourceDigest,
+          snapshot.contentDigest, snapshot.structureDigest, snapshot.parserIdentity, snapshot.displayName, now);
+      } else {
+        const source = one(this.#authority.prepare(
+          `SELECT book_id, object_digest, source_digest, content_digest, structure_digest, parser_identity, format
+           FROM source_versions WHERE source_version_id = ?`,
+        ).all(sourceVersionId) as SqlRow[], 'SOURCE_VERSION_REUSE_INVALID', '明确选择的来源版本不存在。');
+        requireStore(asString(source.book_id) === target.bookId && asString(source.object_digest) === snapshot.objectDigest &&
+          asString(source.source_digest) === snapshot.sourceDigest && asString(source.content_digest) === snapshot.contentDigest &&
+          asString(source.structure_digest) === snapshot.structureDigest && asString(source.parser_identity) === snapshot.parserIdentity &&
+          asString(source.format) === 'DOCX', 'SOURCE_VERSION_REUSE_INCOMPATIBLE', '明确选择的同图书来源版本与暂存快照不一致。');
+      }
+      this.#authority.prepare(
+        `INSERT INTO source_provenance(
+           provenance_id, source_version_id, acquisition_path, locality, sanitized_identity, parser_identity, recorded_at
+         ) VALUES (?, ?, 'native-file-picker', 'local-provider-free', ?, ?, ?)`,
+      ).run(provenanceId, sourceVersionId, snapshot.displayName, snapshot.parserIdentity, snapshot.stagedAt);
+
+      const resultKind = evidence.changed ? 'changed' as const : 'no-change' as const;
+      const completionLabel = evidence.changed ? '稿件已重新导入' as const : '未发现稿件变化' as const;
+      let resultingRevisionId: string | null = null;
+      if (evidence.changed) {
+        resultingRevisionId = randomUUID();
+        const previous = one(this.#authority.prepare(
+          'SELECT ordinal FROM manuscript_revisions WHERE revision_id = ?',
+        ).all(target.checkpoint.revisionId) as SqlRow[], 'REIMPORT_CHECKPOINT_INVALID', '重新导入安全固定点缺失。');
+        const ordinal = asNumber(previous.ordinal) + 1;
+        const revisionDigest = sha256(canonicalJson({
+          schema: 'ai7.manuscript-reimport-revision/1',
+          manuscriptId: target.manuscriptId,
+          parentRevisionId: target.checkpoint.revisionId,
+          sourceVersionId,
+          contentDigest: snapshot.contentDigest,
+          structureDigest: snapshot.structureDigest,
+          comparisonDigest: evidence.comparisonDigest,
+          resolutionDigest: evidence.resolutionDigest,
+        }));
+        this.#authority.prepare(
+          `INSERT INTO manuscript_revisions(
+             revision_id, manuscript_id, branch_id, ordinal, revision_label, parent_revision_id,
+             source_version_id, revision_digest, created_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ).run(resultingRevisionId, target.manuscriptId, target.branchId, ordinal, `r${ordinal}`,
+          target.checkpoint.revisionId, sourceVersionId, revisionDigest, now);
+        const mappings = this.#authority.prepare(
+          `SELECT m.position, m.current_block_id, m.staged_block_id, m.staged_kind, m.staged_level,
+                  m.staged_text, m.staged_digest, sib.start_offset, sib.grapheme_length
+           FROM manuscript_reimport_mappings m
+           JOIN manuscript_reimport_comparisons c ON c.comparison_id = m.comparison_id
+           JOIN staged_import_blocks sib ON sib.draft_id = c.draft_id AND sib.staged_block_id = m.staged_block_id
+           WHERE c.draft_id = ? AND m.staged_block_id IS NOT NULL ORDER BY m.position`,
+        ).all(input.draftId) as SqlRow[];
+        requireStore(mappings.length === snapshot.blockCount, 'REIMPORT_COMPARISON_INVALID', '重新导入结果块不完整。');
+        const insertVersion = this.#authority.prepare(
+          `INSERT INTO manuscript_block_versions(
+             revision_id, block_id, position, kind, level, text, digest, start_offset, grapheme_length
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        );
+        const resultBlocks: Array<{ blockId: string; row: SqlRow }> = [];
+        for (const row of mappings) {
+          const blockId = row.current_block_id === null
+            ? `blk_${sha256(`${resultingRevisionId}\u0000${asNumber(row.position)}\u0000${asString(row.staged_digest)}`).slice(0, 24)}`
+            : asString(row.current_block_id);
+          if (row.current_block_id === null) {
+            this.#authority.prepare(
+              'INSERT INTO manuscript_blocks(block_id, manuscript_id, created_revision_id) VALUES (?, ?, ?)',
+            ).run(blockId, target.manuscriptId, resultingRevisionId);
+          }
+          insertVersion.run(resultingRevisionId, blockId, asNumber(row.position), asString(row.staged_kind),
+            row.staged_level === null ? null : asNumber(row.staged_level), asString(row.staged_text),
+            asString(row.staged_digest), asNumber(row.start_offset), asNumber(row.grapheme_length));
+          resultBlocks.push({ blockId, row });
+        }
+        this.#authority.prepare('DELETE FROM manuscript_outline WHERE branch_id = ?').run(target.branchId);
+        this.#authority.prepare('DELETE FROM working_block_search WHERE branch_id = ?').run(target.branchId);
+        this.#authority.prepare('DELETE FROM working_offset_nodes WHERE branch_id = ?').run(target.branchId);
+        this.#authority.prepare('DELETE FROM working_blocks WHERE branch_id = ?').run(target.branchId);
+        const insertWorking = this.#authority.prepare(
+          `INSERT INTO working_blocks(branch_id, block_id, position, kind, level, text, digest, grapheme_length)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        );
+        for (const { blockId, row } of resultBlocks) {
+          insertWorking.run(target.branchId, blockId, asNumber(row.position), asString(row.staged_kind),
+            row.staged_level === null ? null : asNumber(row.staged_level), asString(row.staged_text),
+            asString(row.staged_digest), asNumber(row.grapheme_length));
+        }
+        this.#boundedCall(() => this.#boundedAuthority.initializeImportedBranch(target.branchId));
+        const stateUpdate = this.#authority.prepare(
+          `UPDATE branch_working_state
+           SET base_revision_id = ?, working_digest = ?, last_checkpoint_sequence = journal_sequence,
+               history_boundary_sequence = history_sequence
+           WHERE manuscript_id = ? AND branch_id = ? AND base_revision_id = ? AND working_digest = ?`,
+        ).run(resultingRevisionId, revisionDigest, target.manuscriptId, target.branchId,
+          target.checkpoint.revisionId, target.checkpoint.revisionDigest);
+        requireStore(stateUpdate.changes === 1, 'REIMPORT_TARGET_CHANGED', '重新导入提交时主稿件已变化。');
+        requireStore(this.#authority.prepare(
+          'UPDATE manuscript_branches SET base_revision_id = ? WHERE branch_id = ? AND base_revision_id = ?',
+        ).run(resultingRevisionId, target.branchId, target.checkpoint.revisionId).changes === 1,
+        'REIMPORT_TARGET_CHANGED', '重新导入提交时分支已变化。');
+      }
+
+      const recordDigest = sha256(canonicalJson({
+        schema: MANUSCRIPT_REIMPORT_RECORD_SCHEMA,
+        reimportRecordId,
+        commitId: input.commitId,
+        bookId: target.bookId,
+        manuscriptId: target.manuscriptId,
+        branchId: target.branchId,
+        sourceVersionId,
+        provenanceId,
+        previousRevisionId: target.checkpoint.revisionId,
+        resultingRevisionId,
+        resultKind,
+        resultLabel: completionLabel,
+        lineageStatus: target.lineage.status,
+        lineageSourceVersionId: target.lineage.sourceVersionId,
+        comparisonKind: target.lineage.comparisonKind,
+        comparisonDigest: evidence.comparisonDigest,
+        resolutionDigest: evidence.resolutionDigest,
+        importedAt: now,
+      }));
+      this.#authority.prepare(
+        `INSERT INTO manuscript_reimport_records(
+           reimport_record_id, commit_id, book_id, manuscript_id, branch_id, source_version_id,
+           provenance_id, previous_revision_id, resulting_revision_id, result_kind, result_label,
+           lineage_status, lineage_source_version_id, comparison_kind, comparison_digest,
+           resolution_digest, record_digest, imported_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(reimportRecordId, input.commitId, target.bookId, target.manuscriptId, target.branchId,
+        sourceVersionId, provenanceId, target.checkpoint.revisionId, resultingRevisionId, resultKind,
+        completionLabel, target.lineage.status, target.lineage.sourceVersionId, target.lineage.comparisonKind,
+        evidence.comparisonDigest, evidence.resolutionDigest, recordDigest, now);
+
+      result = {
+        commitId: input.commitId,
+        importedAt: now,
+        completionLabel,
+        resultKind,
+        bookId: target.bookId,
+        manuscriptId: target.manuscriptId,
+        branchId: target.branchId,
+        previousRevisionId: target.checkpoint.revisionId,
+        resultingRevisionId,
+        reimportRecordId,
+        sourceVersionId,
+        sourceVersionDisposition: target.sourceVersionDisposition,
+        provenanceId,
+        lineageStatus: target.lineage.status,
+        lineageLabel: target.lineage.status === 'verified' ? '来源关系已确认' : '来源关系未确认',
+        comparisonKind: target.lineage.comparisonKind,
+        comparisonDigest: evidence.comparisonDigest,
+        resolutionDigest: evidence.resolutionDigest,
+        source: this.#stagedProjection(snapshot).source,
+        overview: this.getBookOverview(target.bookId),
+        window: this.#boundedCall(() => this.#boundedAuthority.getWindow(
+          target.manuscriptId,
+          target.branchId,
+          { kind: 'start' },
+        )),
+      };
+      this.#authority.prepare(
+        `INSERT INTO import_commits(
+           commit_id, draft_id, request_fingerprint, expected_draft_version, review_digest,
+           operation_kind, result_json, committed_at
+         ) VALUES (?, ?, ?, ?, ?, 'manuscript-reimport', ?, ?)`,
+      ).run(input.commitId, input.draftId, requestFingerprint, input.expectedDraftVersion,
+        input.reviewDigest, canonicalJson(immutableCommitResult(result)), now);
+      requireStore(this.#authority.prepare(
+        `UPDATE import_drafts SET state = 'committed', committed_commit_id = ?, committed_at = ?
+         WHERE draft_id = ? AND state = 'reviewed' AND draft_version = ? AND review_digest = ?`,
+      ).run(input.commitId, now, input.draftId, input.expectedDraftVersion, input.reviewDigest).changes === 1,
+      'DRAFT_VERSION_CHANGED', '重新导入草稿在提交时已变化。');
+      requireStore(this.#authority.prepare(
+        `UPDATE import_commit_attempts
+         SET state = 'committed', committed_at = ?, uncertain_at = NULL, uncertainty_code = NULL
+         WHERE attempt_id = ? AND draft_id = ? AND state = 'prepared'
+           AND operation_kind = 'manuscript-reimport' AND request_fingerprint = ?
+           AND expected_draft_version = ? AND review_digest = ?`,
+      ).run(now, input.commitId, input.draftId, requestFingerprint,
+        input.expectedDraftVersion, input.reviewDigest).changes === 1,
+      'COMMIT_ATTEMPT_CHANGED', '稿件重新导入持久提交尝试状态已变化。');
+      const after = this.#reimportAuthorityCounts(target.bookId);
+      requireStore(
+        after.manuscripts === before.manuscripts &&
+          after.revisions === before.revisions + (evidence.changed ? 1 : 0) &&
+          after.sourceVersions === before.sourceVersions + (target.sourceVersionDisposition === 'created' ? 1 : 0) &&
+          after.provenance === before.provenance + 1 && after.reimports === before.reimports + 1,
+        'IMPORT_POSTCONDITION_FAILED',
+        '稿件重新导入的原子记录图或无变化边界不成立。',
+      );
+      this.#authority.prepare('DELETE FROM staged_import_snapshots WHERE draft_id = ?').run(input.draftId);
+      this.#assertForeignKeys(this.#authority);
+    });
+    requireStore(result !== undefined, 'COMMIT_FAILED', '稿件重新导入提交未产生结果。');
+    return {
+      ...result,
+      overview: this.getBookOverview(result.bookId),
+      window: this.getManuscriptWindow(result.manuscriptId, result.branchId, null),
+    };
+  }
+
+  #reimportAuthorityCounts(bookId: string): {
+    manuscripts: number;
+    revisions: number;
+    sourceVersions: number;
+    provenance: number;
+    reimports: number;
+  } {
+    const row = one(this.#authority.prepare(
+      `SELECT
+         (SELECT count(*) FROM manuscripts WHERE book_id = ?) manuscripts,
+         (SELECT count(*) FROM manuscript_revisions mr JOIN manuscripts m ON m.manuscript_id = mr.manuscript_id
+          WHERE m.book_id = ?) revisions,
+         (SELECT count(*) FROM source_versions WHERE book_id = ?) source_versions,
+         (SELECT count(*) FROM source_provenance sp JOIN source_versions sv ON sv.source_version_id = sp.source_version_id
+          WHERE sv.book_id = ?) provenance,
+         (SELECT count(*) FROM manuscript_reimport_records WHERE book_id = ?) reimports`,
+    ).all(bookId, bookId, bookId, bookId, bookId) as SqlRow[],
+    'STORE_CORRUPT', '无法核对稿件重新导入权威记录。');
+    return {
+      manuscripts: asNumber(row.manuscripts),
+      revisions: asNumber(row.revisions),
+      sourceVersions: asNumber(row.source_versions),
+      provenance: asNumber(row.provenance),
+      reimports: asNumber(row.reimports),
+    };
+  }
+
   #sourceImportAuthorityCounts(bookId: string): {
     manuscripts: number;
     revisions: number;
@@ -3968,7 +5041,11 @@ export class EditorialStore {
     const state = asString(row.state);
     const operationKind = asString(row.operation_kind);
     requireStore(state === 'prepared' || state === 'uncertain' || state === 'committed', 'STORE_CORRUPT', '导入提交尝试状态无效。');
-    requireStore(operationKind === 'manuscript-import' || operationKind === 'source-import', 'STORE_CORRUPT', '导入提交尝试类型无效。');
+    requireStore(
+      operationKind === 'manuscript-import' || operationKind === 'source-import' || operationKind === 'manuscript-reimport',
+      'STORE_CORRUPT',
+      '导入提交尝试类型无效。',
+    );
     return {
       attemptId: asString(row.attempt_id),
       draftId: asString(row.draft_id),
@@ -4027,16 +5104,18 @@ export class EditorialStore {
             `SELECT
                (SELECT count(*) FROM import_commits WHERE commit_id = ?) commits,
                (SELECT count(*) FROM manuscript_import_records WHERE commit_id = ?) manuscript_import_records,
-               (SELECT count(*) FROM source_import_records WHERE commit_id = ?) source_import_records`,
+               (SELECT count(*) FROM source_import_records WHERE commit_id = ?) source_import_records,
+               (SELECT count(*) FROM manuscript_reimport_records WHERE commit_id = ?) reimport_records`,
           )
-          .all(attempt.attemptId, attempt.attemptId, attempt.attemptId) as SqlRow[],
+          .all(attempt.attemptId, attempt.attemptId, attempt.attemptId, attempt.attemptId) as SqlRow[],
         'STORE_CORRUPT',
         '无法读取导入提交证据。',
       );
       const commitCount = asNumber(counts.commits);
       const manuscriptImportRecordCount = asNumber(counts.manuscript_import_records);
       const sourceImportRecordCount = asNumber(counts.source_import_records);
-      const importRecordCount = manuscriptImportRecordCount + sourceImportRecordCount;
+      const reimportRecordCount = asNumber(counts.reimport_records);
+      const importRecordCount = manuscriptImportRecordCount + sourceImportRecordCount + reimportRecordCount;
       const draft = one(
         this.#authority
           .prepare(
@@ -4097,7 +5176,9 @@ export class EditorialStore {
       const stored = this.#loadStoredCommitResult(attempt.attemptId);
       requireStore(
         (attempt.operationKind === 'manuscript-import' && stored.completionLabel === '稿件已导入') ||
-          (attempt.operationKind === 'source-import' && stored.completionLabel === '来源材料已导入'),
+          (attempt.operationKind === 'source-import' && stored.completionLabel === '来源材料已导入') ||
+          (attempt.operationKind === 'manuscript-reimport' &&
+            (stored.completionLabel === '稿件已重新导入' || stored.completionLabel === '未发现稿件变化')),
         'COMMIT_PROOF_INCONCLUSIVE',
         '导入提交类型与权威结果记录不一致。',
       );
@@ -4220,7 +5301,9 @@ export class EditorialStore {
       targetBookId,
       relationshipLabel: relationship === 'first-manuscript' || relationship === 'new-book-first-manuscript'
         ? '作为首份稿件导入'
-        : relationship === 'source-only' ? '作为来源材料导入' : null,
+        : relationship === 'source-only'
+          ? '作为来源材料导入'
+          : relationship === 'reimport' ? '重新导入主稿件' : null,
       originalFileAccess,
       staged,
       commitAttemptId: attemptId,
@@ -4236,8 +5319,12 @@ export class EditorialStore {
   }
 
   #assertRecoveredCommitGraph(result: StoredImportCommitProjection): void {
-    if (result.completionLabel === '来源材料已导入') {
+    if ('sourceImportRecordId' in result) {
       this.#assertRecoveredSourceImportGraph(result);
+      return;
+    }
+    if ('reimportRecordId' in result) {
+      this.#assertRecoveredReimportGraph(result);
       return;
     }
     this.#assertForeignKeys(this.#authority);
@@ -4320,6 +5407,26 @@ export class EditorialStore {
     );
   }
 
+  #assertRecoveredReimportGraph(result: ManuscriptReimportCommitProjection): void {
+    this.#assertForeignKeys(this.#authority);
+    const row = one(this.#authority.prepare(
+      `SELECT
+         (SELECT count(*) FROM manuscript_reimport_records
+          WHERE reimport_record_id = ? AND commit_id = ? AND book_id = ? AND manuscript_id = ?
+            AND branch_id = ? AND source_version_id = ? AND provenance_id = ?
+            AND previous_revision_id = ? AND result_kind = ?
+            AND resulting_revision_id IS ?) records,
+         (SELECT count(*) FROM source_versions WHERE source_version_id = ? AND book_id = ?) sources,
+         (SELECT count(*) FROM source_provenance WHERE provenance_id = ? AND source_version_id = ?) provenance`,
+    ).all(
+      result.reimportRecordId, result.commitId, result.bookId, result.manuscriptId, result.branchId,
+      result.sourceVersionId, result.provenanceId, result.previousRevisionId, result.resultKind,
+      result.resultingRevisionId, result.sourceVersionId, result.bookId, result.provenanceId, result.sourceVersionId,
+    ) as SqlRow[], 'COMMIT_PROOF_INCONCLUSIVE', '无法核对稿件重新导入记录图。');
+    requireStore(asNumber(row.records) === 1 && asNumber(row.sources) === 1 && asNumber(row.provenance) === 1,
+      'COMMIT_PROOF_INCONCLUSIVE', '稿件重新导入提交未形成完整权威记录图。');
+  }
+
   #assertRecoveredSourceImportGraph(result: SourceImportCommitProjection): void {
     this.#assertForeignKeys(this.#authority);
     const row = one(this.#authority.prepare(
@@ -4360,23 +5467,36 @@ export class EditorialStore {
   }
 
   async #verifyCommittedContentObject(result: StoredImportCommitProjection): Promise<void> {
+    const recordQuery = result.completionLabel === '稿件已导入'
+      ? {
+          sql: `SELECT co.object_digest, co.relative_key, co.byte_length
+                FROM manuscript_import_records ir
+                JOIN source_versions sv ON sv.source_version_id = ir.source_version_id
+                JOIN content_objects co ON co.object_digest = sv.object_digest
+                WHERE ir.import_record_id = ? AND ir.commit_id = ?`,
+          recordId: result.importRecordId,
+        }
+      : result.completionLabel === '来源材料已导入'
+        ? {
+            sql: `SELECT co.object_digest, co.relative_key, co.byte_length
+                  FROM source_import_records sir
+                  JOIN source_versions sv ON sv.source_version_id = sir.source_version_id
+                  JOIN content_objects co ON co.object_digest = sv.object_digest
+                  WHERE sir.source_import_record_id = ? AND sir.commit_id = ?`,
+            recordId: result.sourceImportRecordId,
+          }
+        : {
+            sql: `SELECT co.object_digest, co.relative_key, co.byte_length
+                  FROM manuscript_reimport_records rr
+                  JOIN source_versions sv ON sv.source_version_id = rr.source_version_id
+                  JOIN content_objects co ON co.object_digest = sv.object_digest
+                  WHERE rr.reimport_record_id = ? AND rr.commit_id = ?`,
+            recordId: result.reimportRecordId,
+          };
     const row = one(
       this.#authority
-        .prepare(result.completionLabel === '稿件已导入'
-          ? `SELECT co.object_digest, co.relative_key, co.byte_length
-             FROM manuscript_import_records ir
-             JOIN source_versions sv ON sv.source_version_id = ir.source_version_id
-             JOIN content_objects co ON co.object_digest = sv.object_digest
-             WHERE ir.import_record_id = ? AND ir.commit_id = ?`
-          : `SELECT co.object_digest, co.relative_key, co.byte_length
-             FROM source_import_records sir
-             JOIN source_versions sv ON sv.source_version_id = sir.source_version_id
-             JOIN content_objects co ON co.object_digest = sv.object_digest
-             WHERE sir.source_import_record_id = ? AND sir.commit_id = ?`)
-        .all(
-          result.completionLabel === '稿件已导入' ? result.importRecordId : result.sourceImportRecordId,
-          result.commitId,
-        ) as SqlRow[],
+        .prepare(recordQuery.sql)
+        .all(recordQuery.recordId, result.commitId) as SqlRow[],
       'COMMIT_PROOF_INCONCLUSIVE',
       '导入提交来源对象记录缺失。',
     );
@@ -4514,6 +5634,7 @@ export class EditorialStore {
     const nextVersion = snapshot.version + 1;
     const now = new Date().toISOString();
     this.#transaction(this.#authority, () => {
+      this.#authority.prepare('DELETE FROM manuscript_reimport_comparisons WHERE draft_id = ?').run(snapshot.draftId);
       this.#authority.prepare('DELETE FROM staged_import_snapshots WHERE draft_id = ?').run(snapshot.draftId);
       this.#promoteIngestSnapshot(snapshot.draftId, ingested, now);
       const update = this.#authority
@@ -4523,6 +5644,8 @@ export class EditorialStore {
                reviewed_target_kind = NULL, reviewed_existing_book_id = NULL,
                reviewed_relationship = NULL, reviewed_book_state_digest = NULL,
                reviewed_reuse_source_version_id = NULL,
+               reviewed_lineage_status = NULL, reviewed_lineage_source_version_id = NULL,
+               reviewed_checkpoint_revision_id = NULL, reviewed_manuscript_id = NULL, reviewed_branch_id = NULL,
                review_digest = NULL, reviewed_at = NULL
            WHERE draft_id = ? AND draft_version = ? AND state IN ('staged', 'reviewed')`,
         )
@@ -4538,6 +5661,7 @@ export class EditorialStore {
     requireStore(snapshot.state === 'reviewed', 'DRAFT_STATE_CHANGED', '只有已复核草稿可以失效旧复核。');
     const nextVersion = snapshot.version + 1;
     this.#transaction(this.#authority, () => {
+      this.#authority.prepare('DELETE FROM manuscript_reimport_comparisons WHERE draft_id = ?').run(snapshot.draftId);
       const update = this.#authority
         .prepare(
           `UPDATE import_drafts
@@ -4545,6 +5669,8 @@ export class EditorialStore {
                reviewed_target_kind = NULL, reviewed_existing_book_id = NULL,
                reviewed_relationship = NULL, reviewed_book_state_digest = NULL,
                reviewed_reuse_source_version_id = NULL,
+               reviewed_lineage_status = NULL, reviewed_lineage_source_version_id = NULL,
+               reviewed_checkpoint_revision_id = NULL, reviewed_manuscript_id = NULL, reviewed_branch_id = NULL,
                review_digest = NULL, reviewed_at = NULL
            WHERE draft_id = ? AND draft_version = ? AND state = 'reviewed'`,
         )
@@ -5087,6 +6213,7 @@ export class EditorialStore {
         label: exactBookChoiceLabel(book.title, book.bookId, book.internalNumber),
         internalNumber: book.internalNumber,
         manuscriptState: book.manuscriptState,
+        reimportLineageSourceVersionIds: book.reimportLineageSourceVersionIds,
         selected: false as const,
       };
     });
@@ -5183,6 +6310,195 @@ export class EditorialStore {
       bookStateDigest,
       exactSourceVersionId: matches.length === 0 ? null : asString(matches[0]!.source_version_id),
     };
+  }
+
+  #reimportManuscriptBinding(bookId: string): { manuscriptId: string; branchId: string } {
+    requireStore(UUID_PATTERN.test(bookId), 'TARGET_CHOICE_INVALID', '稿件重新导入目标无效。');
+    const rows = this.#authority.prepare(
+      `SELECT m.manuscript_id, mb.branch_id
+       FROM manuscripts m
+       JOIN manuscript_branches mb ON mb.manuscript_id = m.manuscript_id
+       WHERE m.book_id = ? AND m.role = 'primary'
+       ORDER BY m.manuscript_id, mb.branch_id`,
+    ).all(bookId) as SqlRow[];
+    requireStore(rows.length === 1, 'REIMPORT_TARGET_INVALID', '所选图书必须有且仅有一份主稿件及其现行分支。');
+    return { manuscriptId: asString(rows[0]!.manuscript_id), branchId: asString(rows[0]!.branch_id) };
+  }
+
+  #populatedBookReimportTarget(
+    bookId: string,
+    sourceDigest: string,
+    checkpoint: ReimportCheckpointBinding,
+  ): Omit<ResolvedReimportTarget, 'sourceVersionDisposition' | 'reuseSourceVersionId' | 'lineage'> & {
+    exactSourceVersionId: string | null;
+  } {
+    const overview = this.getBookOverview(bookId);
+    requireStore(overview.manuscriptState.state === 'populated', 'REIMPORT_TARGET_INVALID', '所选图书尚无可重新导入的主稿件。');
+    const binding = this.#reimportManuscriptBinding(bookId);
+    requireStore(
+      binding.manuscriptId === checkpoint.manuscriptId && binding.branchId === checkpoint.branchId &&
+        checkpoint.bookId === bookId,
+      'REIMPORT_TARGET_CHANGED',
+      '所选图书的主稿件或分支已变化。',
+    );
+    const current = one(this.#authority.prepare(
+      `SELECT base_revision_id, journal_sequence, working_digest
+       FROM branch_working_state WHERE manuscript_id = ? AND branch_id = ?`,
+    ).all(binding.manuscriptId, binding.branchId) as SqlRow[], 'REIMPORT_TARGET_INVALID', '主稿件工作状态缺失。');
+    requireStore(
+      asString(current.base_revision_id) === checkpoint.revisionId &&
+        asNumber(current.journal_sequence) === checkpoint.journalSequence &&
+        asString(current.working_digest) === checkpoint.revisionDigest,
+      'REIMPORT_TARGET_CHANGED',
+      '主稿件在重新导入复核期间已变化。',
+    );
+    const matches = this.#authority.prepare(
+      'SELECT source_version_id FROM source_versions WHERE book_id = ? AND source_digest = ? ORDER BY source_version_id',
+    ).all(bookId, sourceDigest) as SqlRow[];
+    requireStore(matches.length <= 1, 'BOOK_RECORD_GRAPH_INVALID', '所选图书的精确来源版本身份不唯一。');
+    const bookStateDigest = sha256(canonicalJson({
+      schema: 'ai7.manuscript-reimport-target/1',
+      book: overview.book,
+      manuscriptId: binding.manuscriptId,
+      branchId: binding.branchId,
+      checkpoint,
+    }));
+    return {
+      kind: 'existing-book',
+      choiceId: `existing-book:${bookId}`,
+      bookId,
+      stableIdentity: overview.book.stableIdentity,
+      title: overview.book.title,
+      internalNumber: overview.book.internalNumber,
+      label: exactBookChoiceLabel(overview.book.title, bookId, overview.book.internalNumber),
+      manuscriptId: binding.manuscriptId,
+      branchId: binding.branchId,
+      bookStateDigest,
+      checkpoint,
+      exactSourceVersionId: matches.length === 0 ? null : asString(matches[0]!.source_version_id),
+    };
+  }
+
+  #resolveReimportTarget(
+    selection: ManuscriptReimportTargetSelection,
+    snapshot: DraftSnapshot,
+    checkpoint: ReimportCheckpointBinding,
+    identityFindings: ReadonlyArray<ImportIdentityFindingProjection>,
+  ): ResolvedReimportTarget {
+    requireStore(
+      selection.kind === 'existing-book' && UUID_PATTERN.test(selection.bookId) && selection.relationship === 'reimport' &&
+        (selection.reuseSourceVersionId === null || UUID_PATTERN.test(selection.reuseSourceVersionId)),
+      'TARGET_CHOICE_INVALID',
+      '稿件重新导入目标、关系或来源版本选择无效。',
+    );
+    const current = this.#populatedBookReimportTarget(selection.bookId, snapshot.sourceDigest, checkpoint);
+    if (current.exactSourceVersionId === null) {
+      requireStore(selection.reuseSourceVersionId === null, 'SOURCE_VERSION_REUSE_INVALID', '所选来源版本不能在该图书中复用。');
+    } else {
+      requireStore(
+        selection.reuseSourceVersionId === current.exactSourceVersionId && identityFindings.some((finding) =>
+          finding.bookId === current.bookId && finding.sourceVersionId === current.exactSourceVersionId &&
+          finding.identityClass.kind === 'immutable-original'),
+        'SOURCE_VERSION_REUSE_REQUIRED',
+        '同图书已有精确来源版本；必须明确选择后才能复用。',
+      );
+    }
+    let lineage: ResolvedReimportTarget['lineage'];
+    if (selection.lineage.kind === 'unconfirmed') {
+      lineage = { status: 'unconfirmed', sourceVersionId: null, revisionId: null, comparisonKind: 'two-way' };
+    } else {
+      const lineageSourceVersionId = selection.lineage.sourceVersionId;
+      requireStore(UUID_PATTERN.test(lineageSourceVersionId), 'REIMPORT_LINEAGE_INVALID', '来源关系选择无效。');
+      requireStore(
+        this.#reimportLineageSourceVersionIds(current.bookId).includes(lineageSourceVersionId),
+        'REIMPORT_LINEAGE_UNVERIFIED',
+        '所选来源版本不能证明当前图书主稿件的精确来源关系。',
+      );
+      const revisions = this.#authority.prepare(
+        `SELECT revision_id, imported_at, record_id
+         FROM (
+           SELECT mir.resulting_revision_id revision_id, mir.imported_at, mir.import_record_id record_id
+           FROM manuscript_import_records mir
+           WHERE mir.book_id = ? AND mir.manuscript_id = ? AND mir.source_version_id = ?
+           UNION ALL
+           SELECT rr.resulting_revision_id revision_id, rr.imported_at, rr.reimport_record_id record_id
+           FROM manuscript_reimport_records rr
+           WHERE rr.book_id = ? AND rr.manuscript_id = ? AND rr.source_version_id = ?
+             AND rr.result_kind = 'changed' AND rr.resulting_revision_id IS NOT NULL
+         ) ORDER BY imported_at, record_id`,
+      ).all(
+        current.bookId, current.manuscriptId, lineageSourceVersionId,
+        current.bookId, current.manuscriptId, lineageSourceVersionId,
+      ) as SqlRow[];
+      requireStore(revisions.length > 0, 'REIMPORT_LINEAGE_UNVERIFIED', '所选来源版本没有主稿件修订版血缘证明。');
+      lineage = {
+        status: 'verified',
+        sourceVersionId: lineageSourceVersionId,
+        revisionId: asString(revisions[0]!.revision_id),
+        comparisonKind: 'three-way',
+      };
+    }
+    const { exactSourceVersionId, ...target } = current;
+    return {
+      ...target,
+      sourceVersionDisposition: exactSourceVersionId === null ? 'created' : 'reused-same-book',
+      reuseSourceVersionId: exactSourceVersionId,
+      lineage,
+    };
+  }
+
+  #revisionBlockFacts(revisionId: string): ReimportBlockFact[] {
+    return (this.#authority.prepare(
+      `SELECT block_id, position, kind, level, text, digest
+       FROM manuscript_block_versions WHERE revision_id = ? ORDER BY position`,
+    ).all(revisionId) as SqlRow[]).map((row) => ({
+      blockId: asString(row.block_id),
+      position: asNumber(row.position),
+      kind: asString(row.kind) as ManuscriptBlockProjection['kind'],
+      level: row.level === null ? null : asNumber(row.level),
+      text: asString(row.text),
+      digest: asString(row.digest),
+    }));
+  }
+
+  #stagedBlockFacts(draftId: string): ReimportBlockFact[] {
+    return (this.#authority.prepare(
+      `SELECT staged_block_id block_id, position, kind, level, text, digest
+       FROM staged_import_blocks WHERE draft_id = ? ORDER BY position`,
+    ).all(draftId) as SqlRow[]).map((row) => ({
+      blockId: asString(row.block_id),
+      position: asNumber(row.position),
+      kind: asString(row.kind) as ManuscriptBlockProjection['kind'],
+      level: row.level === null ? null : asNumber(row.level),
+      text: asString(row.text),
+      digest: asString(row.digest),
+    }));
+  }
+
+  #buildReimportMappings(draftId: string, target: ResolvedReimportTarget): ReimportMappingFact[] {
+    const current = this.#revisionBlockFacts(target.checkpoint.revisionId);
+    const staged = this.#stagedBlockFacts(draftId);
+    const lineage = target.lineage.status === 'verified' ? this.#revisionBlockFacts(target.lineage.revisionId) : [];
+    const count = Math.max(current.length, staged.length);
+    requireStore(count > 0, 'REIMPORT_COMPARISON_INVALID', '重新导入比较没有内容块。');
+    return Array.from({ length: count }, (_, index) => {
+      const position = index + 1;
+      const currentBlock = current[index] ?? null;
+      const stagedBlock = staged[index] ?? null;
+      const lineageBlock = lineage[index] ?? null;
+      const equal = currentBlock !== null && stagedBlock !== null &&
+        currentBlock.kind === stagedBlock.kind && currentBlock.level === stagedBlock.level &&
+        currentBlock.text === stagedBlock.text && currentBlock.digest === stagedBlock.digest;
+      const changeKind = equal ? 'unchanged' : currentBlock === null ? 'insert' : stagedBlock === null ? 'delete' : 'replace';
+      return {
+        mappingId: stableUuid(`ai7.reimport-mapping/1\u0000${draftId}\u0000${position}`),
+        position,
+        changeKind,
+        current: currentBlock,
+        lineage: lineageBlock,
+        staged: stagedBlock,
+      };
+    });
   }
 
   #resolveSourceImportTarget(
@@ -5322,6 +6638,178 @@ export class EditorialStore {
         ...BASELINE_EDITORIAL_DIMENSION_SET,
         digest: BASELINE_EDITORIAL_DIMENSION_SET_DIGEST,
       },
+    };
+  }
+
+  #reimportEvidence(draftId: string): {
+    comparisonDigest: string;
+    resolutionDigest: string;
+    totalMappings: number;
+    unresolvedMappings: number;
+    changed: boolean;
+  } {
+    const comparison = one(this.#authority.prepare(
+      'SELECT comparison_id, comparison_digest FROM manuscript_reimport_comparisons WHERE draft_id = ?',
+    ).all(draftId) as SqlRow[], 'REIMPORT_COMPARISON_INVALID', '重新导入比较不存在。');
+    const rows = this.#authority.prepare(
+      `SELECT m.mapping_id, m.change_kind, r.resolution
+       FROM manuscript_reimport_mappings m
+       LEFT JOIN manuscript_reimport_mapping_resolutions r ON r.mapping_id = m.mapping_id
+       WHERE m.comparison_id = ? ORDER BY m.position`,
+    ).all(asString(comparison.comparison_id)) as SqlRow[];
+    requireStore(rows.length > 0, 'REIMPORT_COMPARISON_INVALID', '重新导入比较缺少映射。');
+    const resolutions = rows.flatMap((row) => row.resolution === 'accept-staged'
+      ? [{ mappingId: asString(row.mapping_id), resolution: 'accept-staged' as const }]
+      : []);
+    const changed = rows.some((row) => asString(row.change_kind) !== 'unchanged');
+    const unresolvedMappings = rows.filter((row) =>
+      asString(row.change_kind) !== 'unchanged' && row.resolution === null).length;
+    return {
+      comparisonDigest: asString(comparison.comparison_digest),
+      resolutionDigest: createReimportResolutionDigest(resolutions),
+      totalMappings: rows.length,
+      unresolvedMappings,
+      changed,
+    };
+  }
+
+  #reconstructReviewedReimportTarget(snapshot: DraftSnapshot): ResolvedReimportTarget | null {
+    if (snapshot.reviewDigest === null || snapshot.reviewedRelationship !== 'reimport' ||
+      snapshot.reviewedExistingBookId === null || snapshot.reviewedBookStateDigest === null ||
+      snapshot.reviewedLineageStatus === null || snapshot.reviewedCheckpointRevisionId === null ||
+      snapshot.reviewedManuscriptId === null || snapshot.reviewedBranchId === null) return null;
+    try {
+      const comparison = one(this.#authority.prepare(
+        `SELECT lineage_status, lineage_source_version_id, lineage_revision_id, comparison_kind,
+                checkpoint_created_for_dirty_journal
+         FROM manuscript_reimport_comparisons WHERE draft_id = ?`,
+      ).all(snapshot.draftId) as SqlRow[], 'REIMPORT_COMPARISON_INVALID', '重新导入比较不存在。');
+      const revision = one(this.#authority.prepare(
+        `SELECT revision_label, revision_digest
+         FROM manuscript_revisions WHERE revision_id = ? AND manuscript_id = ? AND branch_id = ?`,
+      ).all(
+        snapshot.reviewedCheckpointRevisionId,
+        snapshot.reviewedManuscriptId,
+        snapshot.reviewedBranchId,
+      ) as SqlRow[], 'REIMPORT_CHECKPOINT_INVALID', '重新导入安全固定点不存在。');
+      const state = one(this.#authority.prepare(
+        `SELECT journal_sequence, working_digest, base_revision_id
+         FROM branch_working_state WHERE manuscript_id = ? AND branch_id = ?`,
+      ).all(snapshot.reviewedManuscriptId, snapshot.reviewedBranchId) as SqlRow[],
+      'REIMPORT_CHECKPOINT_INVALID', '重新导入主稿件状态不存在。');
+      if (asString(state.base_revision_id) !== snapshot.reviewedCheckpointRevisionId ||
+        asString(state.working_digest) !== asString(revision.revision_digest)) return null;
+      const checkpoint: ReimportCheckpointBinding = {
+        bookId: snapshot.reviewedExistingBookId,
+        manuscriptId: snapshot.reviewedManuscriptId,
+        branchId: snapshot.reviewedBranchId,
+        revisionId: snapshot.reviewedCheckpointRevisionId,
+        revisionLabel: asString(revision.revision_label),
+        revisionDigest: asString(revision.revision_digest),
+        journalSequence: asNumber(state.journal_sequence),
+        createdForDirtyJournal: asNumber(comparison.checkpoint_created_for_dirty_journal) === 1,
+      };
+      const current = this.#populatedBookReimportTarget(snapshot.reviewedExistingBookId, snapshot.sourceDigest, checkpoint);
+      if (current.bookStateDigest !== snapshot.reviewedBookStateDigest ||
+        current.manuscriptId !== snapshot.reviewedManuscriptId || current.branchId !== snapshot.reviewedBranchId ||
+        current.exactSourceVersionId !== snapshot.reviewedReuseSourceVersionId) return null;
+      const lineage = comparison.lineage_status === 'verified'
+        ? {
+            status: 'verified' as const,
+            sourceVersionId: asString(comparison.lineage_source_version_id),
+            revisionId: asString(comparison.lineage_revision_id),
+            comparisonKind: 'three-way' as const,
+          }
+        : {
+            status: 'unconfirmed' as const,
+            sourceVersionId: null,
+            revisionId: null,
+            comparisonKind: 'two-way' as const,
+          };
+      if (lineage.status !== snapshot.reviewedLineageStatus ||
+        lineage.sourceVersionId !== snapshot.reviewedLineageSourceVersionId ||
+        comparison.comparison_kind !== lineage.comparisonKind) return null;
+      const { exactSourceVersionId, ...base } = current;
+      const target: ResolvedReimportTarget = {
+        ...base,
+        sourceVersionDisposition: exactSourceVersionId === null ? 'created' : 'reused-same-book',
+        reuseSourceVersionId: exactSourceVersionId,
+        lineage,
+      };
+      const evidence = this.#reimportEvidence(snapshot.draftId);
+      const mappings = this.#buildReimportMappings(snapshot.draftId, target);
+      if (createReimportComparisonDigest(snapshot.draftId, target, mappings) !== evidence.comparisonDigest) return null;
+      return createReimportReviewDigest(snapshot, target, evidence.comparisonDigest, evidence.resolutionDigest) === snapshot.reviewDigest
+        ? target
+        : null;
+    } catch {
+      return null;
+    }
+  }
+
+  #reimportReviewProjection(
+    snapshot: DraftSnapshot,
+    target: ResolvedReimportTarget,
+    commitAttemptId: string | null,
+  ): ReviewBeforeManuscriptReimportProjection {
+    const evidence = this.#reimportEvidence(snapshot.draftId);
+    requireStore(snapshot.reviewDigest !== null, 'REVIEW_CHANGED', '重新导入复核摘要缺失。');
+    return {
+      draftId: snapshot.draftId,
+      draftVersion: snapshot.version,
+      reviewDigest: snapshot.reviewDigest,
+      commitAttemptId,
+      target: {
+        kind: 'existing-book',
+        bookId: target.bookId,
+        stableIdentity: target.stableIdentity,
+        label: target.label,
+        internalNumber: target.internalNumber,
+        manuscriptId: target.manuscriptId,
+        branchId: target.branchId,
+        relationship: 'reimport',
+        relationshipLabel: '重新导入主稿件',
+        bookStateDigest: target.bookStateDigest,
+      },
+      checkpoint: target.checkpoint,
+      lineage: target.lineage.status === 'verified'
+        ? {
+            status: 'verified',
+            label: '来源关系已确认',
+            comparisonKind: 'three-way',
+            sourceVersionId: target.lineage.sourceVersionId,
+            revisionId: target.lineage.revisionId,
+          }
+        : {
+            status: 'unconfirmed',
+            label: '来源关系未确认',
+            comparisonKind: 'two-way',
+            sourceVersionId: null,
+            revisionId: null,
+          },
+      source: this.#stagedProjection(snapshot).source,
+      sourceVersionResult: target.sourceVersionDisposition === 'created'
+        ? { disposition: 'created', label: '创建所选图书拥有的新来源版本', sourceVersionId: null }
+        : {
+            disposition: 'reused-same-book',
+            label: '复用已明确选择的同图书来源版本',
+            sourceVersionId: target.reuseSourceVersionId!,
+          },
+      comparison: {
+        comparisonDigest: evidence.comparisonDigest,
+        totalMappings: evidence.totalMappings,
+        unresolvedMappings: evidence.unresolvedMappings,
+        changed: evidence.changed,
+        resultPreviewLabel: evidence.changed ? '稿件将重新导入' : '未发现稿件变化',
+      },
+      commitReady: evidence.unresolvedMappings === 0,
+      recordsToCreate: [
+        ...(target.sourceVersionDisposition === 'created' ? ['图书拥有的来源版本'] : ['复用已明确选择的同图书来源版本']),
+        '来源记录',
+        '稿件重新导入记录',
+        ...(evidence.changed ? ['一份后代稿件修订版'] : ['未发现稿件变化证据；不创建空修订版']),
+      ],
+      namedNonEffects: MANUSCRIPT_REIMPORT_NON_EFFECTS,
     };
   }
 
@@ -5482,6 +6970,9 @@ export class EditorialStore {
            UNION ALL
            SELECT book_id, source_version_id, source_import_record_id, 'source-import' record_kind
            FROM source_import_records
+           UNION ALL
+           SELECT book_id, source_version_id, reimport_record_id, 'manuscript-reimport' record_kind
+           FROM manuscript_reimport_records
          ) records
            ON records.book_id = sv.book_id
           AND records.source_version_id = sv.source_version_id
@@ -5516,7 +7007,11 @@ export class EditorialStore {
         sourceVersionId: asString(row.source_version_id),
         importRecordId: asString(row.import_record_id),
         recordKind: asString(row.record_kind) as ImportIdentityFindingProjection['recordKind'],
-        recordLabel: asString(row.record_kind) === 'manuscript-import' ? '稿件导入记录' : '来源导入记录',
+        recordLabel: asString(row.record_kind) === 'manuscript-import'
+          ? '稿件导入记录'
+          : asString(row.record_kind) === 'source-import'
+            ? '来源导入记录'
+            : '稿件重新导入记录',
         identityClass,
       } satisfies ImportIdentityFindingProjection;
       const key = `${finding.bookId}\u0000${finding.sourceVersionId}\u0000${finding.importRecordId}`;
@@ -5533,6 +7028,8 @@ export class EditorialStore {
                   d.selected_path, d.reviewed_title, d.reviewed_target_choice_id, d.review_digest,
                   d.reviewed_target_kind, d.reviewed_existing_book_id, d.reviewed_relationship,
                   d.reviewed_book_state_digest, d.reviewed_reuse_source_version_id,
+                  d.reviewed_lineage_status, d.reviewed_lineage_source_version_id,
+                  d.reviewed_checkpoint_revision_id, d.reviewed_manuscript_id, d.reviewed_branch_id,
                   d.staged_at, s.parser_identity, s.source_digest,
                   s.content_digest, s.structure_digest, s.block_count, s.character_count, s.fidelity_json,
                   s.title_suggestion, s.title_source, co.byte_length
@@ -5571,13 +7068,28 @@ export class EditorialStore {
     const reviewedReuseSourceVersionId = row.reviewed_reuse_source_version_id === null
       ? null
       : asString(row.reviewed_reuse_source_version_id);
+    const reviewedLineageStatus = row.reviewed_lineage_status === null ? null : asString(row.reviewed_lineage_status);
+    const reviewedLineageSourceVersionId = row.reviewed_lineage_source_version_id === null
+      ? null
+      : asString(row.reviewed_lineage_source_version_id);
+    const reviewedCheckpointRevisionId = row.reviewed_checkpoint_revision_id === null
+      ? null
+      : asString(row.reviewed_checkpoint_revision_id);
+    const reviewedManuscriptId = row.reviewed_manuscript_id === null ? null : asString(row.reviewed_manuscript_id);
+    const reviewedBranchId = row.reviewed_branch_id === null ? null : asString(row.reviewed_branch_id);
     requireStore(
       (reviewedTargetKind === null || reviewedTargetKind === 'new-book' || reviewedTargetKind === 'existing-book') &&
         (reviewedExistingBookId === null || UUID_PATTERN.test(reviewedExistingBookId)) &&
         (reviewedRelationship === null || reviewedRelationship === 'new-book-first-manuscript' ||
-          reviewedRelationship === 'first-manuscript' || reviewedRelationship === 'source-only') &&
+          reviewedRelationship === 'first-manuscript' || reviewedRelationship === 'source-only' ||
+          reviewedRelationship === 'reimport') &&
         (reviewedBookStateDigest === null || DIGEST_PATTERN.test(reviewedBookStateDigest)) &&
-        (reviewedReuseSourceVersionId === null || UUID_PATTERN.test(reviewedReuseSourceVersionId)),
+        (reviewedReuseSourceVersionId === null || UUID_PATTERN.test(reviewedReuseSourceVersionId)) &&
+        (reviewedLineageStatus === null || reviewedLineageStatus === 'verified' || reviewedLineageStatus === 'unconfirmed') &&
+        (reviewedLineageSourceVersionId === null || UUID_PATTERN.test(reviewedLineageSourceVersionId)) &&
+        (reviewedCheckpointRevisionId === null || UUID_PATTERN.test(reviewedCheckpointRevisionId)) &&
+        (reviewedManuscriptId === null || UUID_PATTERN.test(reviewedManuscriptId)) &&
+        (reviewedBranchId === null || UUID_PATTERN.test(reviewedBranchId)),
       'STORE_CORRUPT',
       '导入复核目标记录无效。',
     );
@@ -5595,6 +7107,11 @@ export class EditorialStore {
       reviewedRelationship: reviewedRelationship as DraftSnapshot['reviewedRelationship'],
       reviewedBookStateDigest,
       reviewedReuseSourceVersionId,
+      reviewedLineageStatus: reviewedLineageStatus as DraftSnapshot['reviewedLineageStatus'],
+      reviewedLineageSourceVersionId,
+      reviewedCheckpointRevisionId,
+      reviewedManuscriptId,
+      reviewedBranchId,
       reviewDigest: row.review_digest === null ? null : asString(row.review_digest),
       stagedAt: asString(row.staged_at),
       parserIdentity: asString(row.parser_identity),
@@ -5642,14 +7159,66 @@ export class EditorialStore {
     const counts = one(this.#authority.prepare(
       `SELECT
          (SELECT count(*) FROM manuscript_import_records WHERE commit_id = ?) manuscript_imports,
-         (SELECT count(*) FROM source_import_records WHERE commit_id = ?) source_imports`,
-    ).all(commitId, commitId) as SqlRow[], 'STORE_CORRUPT', '无法判定导入提交记录类型。');
+         (SELECT count(*) FROM source_import_records WHERE commit_id = ?) source_imports,
+         (SELECT count(*) FROM manuscript_reimport_records WHERE commit_id = ?) reimports`,
+    ).all(commitId, commitId, commitId) as SqlRow[], 'STORE_CORRUPT', '无法判定导入提交记录类型。');
     const manuscriptImports = asNumber(counts.manuscript_imports);
     const sourceImports = asNumber(counts.source_imports);
-    requireStore(manuscriptImports + sourceImports === 1, 'STORE_CORRUPT', '导入提交记录类型不唯一。');
-    return sourceImports === 1
+    const reimports = asNumber(counts.reimports);
+    requireStore(manuscriptImports + sourceImports + reimports === 1, 'STORE_CORRUPT', '导入提交记录类型不唯一。');
+    return reimports === 1
+      ? this.#loadStoredReimportResult(commitId)
+      : sourceImports === 1
       ? this.#loadStoredSourceImportResult(commitId)
       : this.#loadStoredManuscriptImportResult(commitId);
+  }
+
+  #loadStoredReimportResult(commitId: string): ManuscriptReimportCommitProjection {
+    const row = one(this.#authority.prepare(
+      `SELECT ic.commit_id, ic.committed_at, rr.*, sv.display_name, sv.source_digest,
+              co.byte_length, d.reviewed_reuse_source_version_id
+       FROM import_commits ic
+       JOIN manuscript_reimport_records rr ON rr.commit_id = ic.commit_id
+       JOIN source_versions sv ON sv.source_version_id = rr.source_version_id AND sv.book_id = rr.book_id
+       JOIN content_objects co ON co.object_digest = sv.object_digest
+       JOIN import_drafts d ON d.draft_id = ic.draft_id
+       WHERE ic.commit_id = ? AND ic.operation_kind = 'manuscript-reimport'`,
+    ).all(commitId) as SqlRow[], 'STORE_CORRUPT', '稿件重新导入提交记录图不完整。');
+    const resultKind = asString(row.result_kind) as 'changed' | 'no-change';
+    const completionLabel = asString(row.result_label) as '稿件已重新导入' | '未发现稿件变化';
+    const lineageStatus = asString(row.lineage_status) as 'verified' | 'unconfirmed';
+    const comparisonKind = asString(row.comparison_kind) as 'three-way' | 'two-way';
+    const manuscriptId = asString(row.manuscript_id);
+    const branchId = asString(row.branch_id);
+    return {
+      commitId: asString(row.commit_id),
+      importedAt: asString(row.committed_at),
+      completionLabel,
+      resultKind,
+      bookId: asString(row.book_id),
+      manuscriptId,
+      branchId,
+      previousRevisionId: asString(row.previous_revision_id),
+      resultingRevisionId: row.resulting_revision_id === null ? null : asString(row.resulting_revision_id),
+      reimportRecordId: asString(row.reimport_record_id),
+      sourceVersionId: asString(row.source_version_id),
+      sourceVersionDisposition: row.reviewed_reuse_source_version_id === null ? 'created' : 'reused-same-book',
+      provenanceId: asString(row.provenance_id),
+      lineageStatus,
+      lineageLabel: lineageStatus === 'verified' ? '来源关系已确认' : '来源关系未确认',
+      comparisonKind,
+      comparisonDigest: asString(row.comparison_digest),
+      resolutionDigest: asString(row.resolution_digest),
+      source: {
+        displayName: asString(row.display_name),
+        format: 'DOCX',
+        sourceSha256: asString(row.source_digest),
+        sourceBytes: asNumber(row.byte_length),
+        provenanceLabel: '本机文件选择器 · 本地解析 · 未联网',
+      },
+      overview: this.getBookOverview(asString(row.book_id)),
+      window: this.getManuscriptWindow(manuscriptId, branchId, null),
+    };
   }
 
   #loadStoredManuscriptImportResult(commitId: string): Omit<ManuscriptImportCommitProjection, 'firstWindow'> {

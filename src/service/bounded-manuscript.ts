@@ -45,6 +45,7 @@ const EDITOR_SCHEMA_VERSION = 6;
 const RECOVERY_SCHEMA_VERSION = 7;
 const SCHEMA_VERSION = 8;
 const SOURCE_IMPORT_SCHEMA_VERSION = 9;
+const MANUSCRIPT_REIMPORT_SCHEMA_VERSION = 10;
 const MIGRATION_BATCH = 256;
 const SEARCH_BATCH = 128;
 const HISTORY_BATCH = 128;
@@ -667,6 +668,7 @@ const RECOVERY_SCHEMA_SQL = {
     manuscript_id TEXT NOT NULL REFERENCES manuscripts(manuscript_id),
     branch_id TEXT NOT NULL REFERENCES manuscript_branches(branch_id),
     checkpoint_revision_id TEXT NOT NULL REFERENCES manuscript_revisions(revision_id),
+    checkpoint_created_for_dirty_journal INTEGER NOT NULL CHECK(checkpoint_created_for_dirty_journal IN (0, 1)),
     checkpoint_sequence INTEGER NOT NULL CHECK(checkpoint_sequence >= 0),
     journal_sequence INTEGER NOT NULL CHECK(journal_sequence > checkpoint_sequence),
     journal_working_digest TEXT NOT NULL CHECK(length(journal_working_digest) = 64),
@@ -945,6 +947,166 @@ const FULL_SOURCE_IMPORT_TARGET_SCHEMA_SQL = {
   ...SOURCE_IMPORT_SCHEMA_SQL,
 } as const;
 
+const MANUSCRIPT_REIMPORT_SCHEMA_SQL = {
+  import_drafts: `CREATE TABLE import_drafts (
+    draft_id TEXT PRIMARY KEY,
+    selection_token TEXT NOT NULL UNIQUE,
+    state TEXT NOT NULL CHECK(state IN ('staged', 'reviewed', 'committed')),
+    draft_version INTEGER NOT NULL CHECK(draft_version >= 1),
+    display_name TEXT NOT NULL,
+    object_digest TEXT NOT NULL REFERENCES content_objects(object_digest),
+    selected_path TEXT,
+    reviewed_title TEXT,
+    reviewed_target_choice_id TEXT
+      CHECK(reviewed_target_choice_id IS NULL OR reviewed_target_choice_id IN ('new-book', 'new-book-distinct-intended-work')),
+    review_digest TEXT UNIQUE,
+    committed_commit_id TEXT UNIQUE,
+    staged_at TEXT NOT NULL,
+    reviewed_at TEXT,
+    committed_at TEXT,
+    reviewed_target_kind TEXT CHECK(reviewed_target_kind IS NULL OR reviewed_target_kind IN ('new-book', 'existing-book')),
+    reviewed_existing_book_id TEXT REFERENCES books(book_id),
+    reviewed_relationship TEXT
+      CHECK(reviewed_relationship IS NULL OR reviewed_relationship IN ('new-book-first-manuscript', 'first-manuscript', 'source-only', 'reimport')),
+    reviewed_book_state_digest TEXT
+      CHECK(reviewed_book_state_digest IS NULL OR length(reviewed_book_state_digest) = 64),
+    reviewed_reuse_source_version_id TEXT REFERENCES source_versions(source_version_id),
+    reviewed_lineage_status TEXT CHECK(reviewed_lineage_status IS NULL OR reviewed_lineage_status IN ('verified', 'unconfirmed')),
+    reviewed_lineage_source_version_id TEXT REFERENCES source_versions(source_version_id),
+    reviewed_checkpoint_revision_id TEXT REFERENCES manuscript_revisions(revision_id),
+    reviewed_manuscript_id TEXT REFERENCES manuscripts(manuscript_id),
+    reviewed_branch_id TEXT REFERENCES manuscript_branches(branch_id)
+  ) STRICT`,
+  import_commits: `CREATE TABLE import_commits (
+    commit_id TEXT PRIMARY KEY,
+    draft_id TEXT NOT NULL UNIQUE REFERENCES import_drafts(draft_id),
+    request_fingerprint TEXT NOT NULL,
+    expected_draft_version INTEGER NOT NULL,
+    review_digest TEXT NOT NULL,
+    operation_kind TEXT NOT NULL CHECK(operation_kind IN ('manuscript-import', 'source-import', 'manuscript-reimport')),
+    result_json TEXT NOT NULL,
+    committed_at TEXT NOT NULL
+  ) STRICT`,
+  import_commit_attempts: `CREATE TABLE import_commit_attempts (
+    attempt_id TEXT PRIMARY KEY,
+    draft_id TEXT NOT NULL UNIQUE REFERENCES import_drafts(draft_id) ON DELETE CASCADE,
+    request_fingerprint TEXT NOT NULL,
+    expected_draft_version INTEGER NOT NULL CHECK(expected_draft_version >= 1),
+    review_digest TEXT NOT NULL CHECK(length(review_digest) = 64),
+    operation_kind TEXT NOT NULL CHECK(operation_kind IN ('manuscript-import', 'source-import', 'manuscript-reimport')),
+    state TEXT NOT NULL CHECK(state IN ('prepared', 'uncertain', 'committed')),
+    prepared_at TEXT NOT NULL,
+    committed_at TEXT,
+    uncertain_at TEXT,
+    uncertainty_code TEXT,
+    completion_acknowledged_at TEXT,
+    CHECK(
+      (state = 'prepared' AND committed_at IS NULL AND uncertain_at IS NULL
+        AND uncertainty_code IS NULL AND completion_acknowledged_at IS NULL)
+      OR (state = 'uncertain' AND committed_at IS NULL AND uncertain_at IS NOT NULL
+        AND uncertainty_code = 'COMMIT_PROOF_INCONCLUSIVE' AND completion_acknowledged_at IS NULL)
+      OR (state = 'committed' AND committed_at IS NOT NULL AND uncertain_at IS NULL
+        AND uncertainty_code IS NULL)
+    )
+  ) STRICT`,
+  manuscript_reimport_comparisons: `CREATE TABLE manuscript_reimport_comparisons (
+    comparison_id TEXT PRIMARY KEY,
+    draft_id TEXT NOT NULL UNIQUE REFERENCES import_drafts(draft_id) ON DELETE CASCADE,
+    manuscript_id TEXT NOT NULL REFERENCES manuscripts(manuscript_id),
+    branch_id TEXT NOT NULL REFERENCES manuscript_branches(branch_id),
+    checkpoint_revision_id TEXT NOT NULL REFERENCES manuscript_revisions(revision_id),
+    checkpoint_created_for_dirty_journal INTEGER NOT NULL CHECK(checkpoint_created_for_dirty_journal IN (0, 1)),
+    lineage_status TEXT NOT NULL CHECK(lineage_status IN ('verified', 'unconfirmed')),
+    lineage_source_version_id TEXT REFERENCES source_versions(source_version_id),
+    lineage_revision_id TEXT REFERENCES manuscript_revisions(revision_id),
+    comparison_kind TEXT NOT NULL CHECK(comparison_kind IN ('three-way', 'two-way')),
+    comparison_digest TEXT NOT NULL UNIQUE CHECK(length(comparison_digest) = 64),
+    created_at TEXT NOT NULL,
+    CHECK(
+      (lineage_status = 'verified' AND lineage_source_version_id IS NOT NULL
+        AND lineage_revision_id IS NOT NULL AND comparison_kind = 'three-way')
+      OR (lineage_status = 'unconfirmed' AND lineage_source_version_id IS NULL
+        AND lineage_revision_id IS NULL AND comparison_kind = 'two-way')
+    )
+  ) STRICT`,
+  manuscript_reimport_mappings: `CREATE TABLE manuscript_reimport_mappings (
+    mapping_id TEXT PRIMARY KEY,
+    comparison_id TEXT NOT NULL REFERENCES manuscript_reimport_comparisons(comparison_id) ON DELETE CASCADE,
+    position INTEGER NOT NULL CHECK(position > 0),
+    change_kind TEXT NOT NULL CHECK(change_kind IN ('unchanged', 'replace', 'insert', 'delete')),
+    current_block_id TEXT REFERENCES manuscript_blocks(block_id),
+    lineage_block_id TEXT REFERENCES manuscript_blocks(block_id),
+    staged_block_id TEXT,
+    current_kind TEXT CHECK(current_kind IS NULL OR current_kind IN ('title', 'heading', 'paragraph')),
+    current_level INTEGER,
+    current_text TEXT,
+    current_digest TEXT CHECK(current_digest IS NULL OR length(current_digest) = 64),
+    lineage_kind TEXT CHECK(lineage_kind IS NULL OR lineage_kind IN ('title', 'heading', 'paragraph')),
+    lineage_level INTEGER,
+    lineage_text TEXT,
+    lineage_digest TEXT CHECK(lineage_digest IS NULL OR length(lineage_digest) = 64),
+    staged_kind TEXT CHECK(staged_kind IS NULL OR staged_kind IN ('title', 'heading', 'paragraph')),
+    staged_level INTEGER,
+    staged_text TEXT,
+    staged_digest TEXT CHECK(staged_digest IS NULL OR length(staged_digest) = 64),
+    UNIQUE(comparison_id, position),
+    CHECK(current_block_id IS NOT NULL OR staged_block_id IS NOT NULL),
+    CHECK((current_block_id IS NULL) = (current_kind IS NULL)),
+    CHECK((current_block_id IS NULL) = (current_text IS NULL)),
+    CHECK((current_block_id IS NULL) = (current_digest IS NULL)),
+    CHECK((lineage_block_id IS NULL) = (lineage_kind IS NULL)),
+    CHECK((lineage_block_id IS NULL) = (lineage_text IS NULL)),
+    CHECK((lineage_block_id IS NULL) = (lineage_digest IS NULL)),
+    CHECK((staged_block_id IS NULL) = (staged_kind IS NULL)),
+    CHECK((staged_block_id IS NULL) = (staged_text IS NULL)),
+    CHECK((staged_block_id IS NULL) = (staged_digest IS NULL)),
+    CHECK(
+      (change_kind = 'unchanged' AND current_block_id IS NOT NULL AND staged_block_id IS NOT NULL)
+      OR (change_kind = 'replace' AND current_block_id IS NOT NULL AND staged_block_id IS NOT NULL)
+      OR (change_kind = 'insert' AND current_block_id IS NULL AND staged_block_id IS NOT NULL)
+      OR (change_kind = 'delete' AND current_block_id IS NOT NULL AND staged_block_id IS NULL)
+    )
+  ) STRICT`,
+  manuscript_reimport_mapping_resolutions: `CREATE TABLE manuscript_reimport_mapping_resolutions (
+    mapping_id TEXT PRIMARY KEY REFERENCES manuscript_reimport_mappings(mapping_id) ON DELETE CASCADE,
+    resolution TEXT NOT NULL CHECK(resolution = 'accept-staged'),
+    resolved_at TEXT NOT NULL
+  ) STRICT`,
+  manuscript_reimport_records: `CREATE TABLE manuscript_reimport_records (
+    reimport_record_id TEXT PRIMARY KEY,
+    commit_id TEXT NOT NULL UNIQUE,
+    book_id TEXT NOT NULL REFERENCES books(book_id),
+    manuscript_id TEXT NOT NULL REFERENCES manuscripts(manuscript_id),
+    branch_id TEXT NOT NULL REFERENCES manuscript_branches(branch_id),
+    source_version_id TEXT NOT NULL REFERENCES source_versions(source_version_id),
+    provenance_id TEXT NOT NULL UNIQUE REFERENCES source_provenance(provenance_id),
+    previous_revision_id TEXT NOT NULL REFERENCES manuscript_revisions(revision_id),
+    resulting_revision_id TEXT REFERENCES manuscript_revisions(revision_id),
+    result_kind TEXT NOT NULL CHECK(result_kind IN ('changed', 'no-change')),
+    result_label TEXT NOT NULL CHECK(result_label IN ('稿件已重新导入', '未发现稿件变化')),
+    lineage_status TEXT NOT NULL CHECK(lineage_status IN ('verified', 'unconfirmed')),
+    lineage_source_version_id TEXT REFERENCES source_versions(source_version_id),
+    comparison_kind TEXT NOT NULL CHECK(comparison_kind IN ('three-way', 'two-way')),
+    comparison_digest TEXT NOT NULL CHECK(length(comparison_digest) = 64),
+    resolution_digest TEXT NOT NULL CHECK(length(resolution_digest) = 64),
+    record_digest TEXT NOT NULL UNIQUE CHECK(length(record_digest) = 64),
+    imported_at TEXT NOT NULL,
+    CHECK(
+      (result_kind = 'changed' AND result_label = '稿件已重新导入' AND resulting_revision_id IS NOT NULL)
+      OR (result_kind = 'no-change' AND result_label = '未发现稿件变化' AND resulting_revision_id IS NULL)
+    ),
+    CHECK(
+      (lineage_status = 'verified' AND lineage_source_version_id IS NOT NULL AND comparison_kind = 'three-way')
+      OR (lineage_status = 'unconfirmed' AND lineage_source_version_id IS NULL AND comparison_kind = 'two-way')
+    )
+  ) STRICT`,
+} as const;
+
+const FULL_MANUSCRIPT_REIMPORT_TARGET_SCHEMA_SQL = {
+  ...FULL_SOURCE_IMPORT_TARGET_SCHEMA_SQL,
+  ...MANUSCRIPT_REIMPORT_SCHEMA_SQL,
+} as const;
+
 const TARGET_VIRTUAL_TABLE_SQL = `CREATE VIRTUAL TABLE working_block_search USING fts5(
   branch_id UNINDEXED,
   block_id UNINDEXED,
@@ -988,6 +1150,12 @@ const TARGET_INDEX_SQL = {
     'CREATE UNIQUE INDEX book_internal_number_unique ON books(internal_number) WHERE internal_number IS NOT NULL',
 } as const;
 
+const MANUSCRIPT_REIMPORT_INDEX_SQL = {
+  ...TARGET_INDEX_SQL,
+  reimport_mappings_page:
+    'CREATE INDEX reimport_mappings_page ON manuscript_reimport_mappings(comparison_id, position)',
+} as const;
+
 const V7_TARGET_INDEX_SQL = {
   ...V6_TARGET_INDEX_SQL,
   lifetime_outcome_order: TARGET_INDEX_SQL.lifetime_outcome_order,
@@ -1022,6 +1190,29 @@ const SOURCE_IMPORT_TRIGGER_SQL = {
   manuscript_import_record_excludes_source_result: `CREATE TRIGGER manuscript_import_record_excludes_source_result
     BEFORE INSERT ON manuscript_import_records
     WHEN EXISTS (SELECT 1 FROM source_import_records WHERE commit_id = NEW.commit_id)
+    BEGIN
+      SELECT RAISE(ABORT, 'IMPORT_RESULT_KIND_CONFLICT');
+    END`,
+} as const;
+
+const MANUSCRIPT_REIMPORT_TRIGGER_SQL = {
+  ...SOURCE_IMPORT_TRIGGER_SQL,
+  reimport_record_excludes_other_results: `CREATE TRIGGER reimport_record_excludes_other_results
+    BEFORE INSERT ON manuscript_reimport_records
+    WHEN EXISTS (SELECT 1 FROM manuscript_import_records WHERE commit_id = NEW.commit_id)
+      OR EXISTS (SELECT 1 FROM source_import_records WHERE commit_id = NEW.commit_id)
+    BEGIN
+      SELECT RAISE(ABORT, 'IMPORT_RESULT_KIND_CONFLICT');
+    END`,
+  manuscript_import_record_excludes_reimport_result: `CREATE TRIGGER manuscript_import_record_excludes_reimport_result
+    BEFORE INSERT ON manuscript_import_records
+    WHEN EXISTS (SELECT 1 FROM manuscript_reimport_records WHERE commit_id = NEW.commit_id)
+    BEGIN
+      SELECT RAISE(ABORT, 'IMPORT_RESULT_KIND_CONFLICT');
+    END`,
+  source_import_record_excludes_reimport_result: `CREATE TRIGGER source_import_record_excludes_reimport_result
+    BEFORE INSERT ON source_import_records
+    WHEN EXISTS (SELECT 1 FROM manuscript_reimport_records WHERE commit_id = NEW.commit_id)
     BEGIN
       SELECT RAISE(ABORT, 'IMPORT_RESULT_KIND_CONFLICT');
     END`,
@@ -1074,6 +1265,32 @@ const SCHEMA_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
   source_import_records: [
     'book_id>books.book_id:NO ACTION/NO ACTION/NONE',
     'provenance_id>source_provenance.provenance_id:NO ACTION/NO ACTION/NONE',
+    'source_version_id>source_versions.source_version_id:NO ACTION/NO ACTION/NONE',
+  ],
+  manuscript_reimport_comparisons: [
+    'branch_id>manuscript_branches.branch_id:NO ACTION/NO ACTION/NONE',
+    'checkpoint_revision_id>manuscript_revisions.revision_id:NO ACTION/NO ACTION/NONE',
+    'draft_id>import_drafts.draft_id:NO ACTION/CASCADE/NONE',
+    'lineage_revision_id>manuscript_revisions.revision_id:NO ACTION/NO ACTION/NONE',
+    'lineage_source_version_id>source_versions.source_version_id:NO ACTION/NO ACTION/NONE',
+    'manuscript_id>manuscripts.manuscript_id:NO ACTION/NO ACTION/NONE',
+  ],
+  manuscript_reimport_mappings: [
+    'comparison_id>manuscript_reimport_comparisons.comparison_id:NO ACTION/CASCADE/NONE',
+    'current_block_id>manuscript_blocks.block_id:NO ACTION/NO ACTION/NONE',
+    'lineage_block_id>manuscript_blocks.block_id:NO ACTION/NO ACTION/NONE',
+  ],
+  manuscript_reimport_mapping_resolutions: [
+    'mapping_id>manuscript_reimport_mappings.mapping_id:NO ACTION/CASCADE/NONE',
+  ],
+  manuscript_reimport_records: [
+    'book_id>books.book_id:NO ACTION/NO ACTION/NONE',
+    'branch_id>manuscript_branches.branch_id:NO ACTION/NO ACTION/NONE',
+    'lineage_source_version_id>source_versions.source_version_id:NO ACTION/NO ACTION/NONE',
+    'manuscript_id>manuscripts.manuscript_id:NO ACTION/NO ACTION/NONE',
+    'previous_revision_id>manuscript_revisions.revision_id:NO ACTION/NO ACTION/NONE',
+    'provenance_id>source_provenance.provenance_id:NO ACTION/NO ACTION/NONE',
+    'resulting_revision_id>manuscript_revisions.revision_id:NO ACTION/NO ACTION/NONE',
     'source_version_id>source_versions.source_version_id:NO ACTION/NO ACTION/NONE',
   ],
   import_fidelity_reviews: [
@@ -1419,6 +1636,16 @@ function requireExactTableSchema(db: DatabaseSync, name: string, expectedSql: st
           'reviewed_reuse_source_version_id>source_versions.source_version_id:NO ACTION/NO ACTION/NONE',
         ]
       : []),
+    ...(name === 'import_drafts' && canonicalSchemaSql(matchedExpectedSql) === canonicalSchemaSql(MANUSCRIPT_REIMPORT_SCHEMA_SQL.import_drafts)
+      ? [
+          'reviewed_branch_id>manuscript_branches.branch_id:NO ACTION/NO ACTION/NONE',
+          'reviewed_checkpoint_revision_id>manuscript_revisions.revision_id:NO ACTION/NO ACTION/NONE',
+          'reviewed_existing_book_id>books.book_id:NO ACTION/NO ACTION/NONE',
+          'reviewed_lineage_source_version_id>source_versions.source_version_id:NO ACTION/NO ACTION/NONE',
+          'reviewed_manuscript_id>manuscripts.manuscript_id:NO ACTION/NO ACTION/NONE',
+          'reviewed_reuse_source_version_id>source_versions.source_version_id:NO ACTION/NO ACTION/NONE',
+        ]
+      : []),
   ].sort();
   requireBounded(
     actualForeignKeys.join('\n') === expectedForeignKeys.join('\n'),
@@ -1560,6 +1787,16 @@ function requireSourceImportTargetSchema(db: DatabaseSync): void {
   requireExactSchema(db, FULL_SOURCE_IMPORT_TARGET_SCHEMA_SQL, TARGET_INDEX_SQL, true, SOURCE_IMPORT_TRIGGER_SQL);
 }
 
+function requireManuscriptReimportTargetSchema(db: DatabaseSync): void {
+  requireExactSchema(
+    db,
+    FULL_MANUSCRIPT_REIMPORT_TARGET_SCHEMA_SQL,
+    MANUSCRIPT_REIMPORT_INDEX_SQL,
+    true,
+    MANUSCRIPT_REIMPORT_TRIGGER_SQL,
+  );
+}
+
 function requireV7TargetSchema(db: DatabaseSync): void {
   requireExactSchema(db, FULL_V7_TARGET_SCHEMA_SQL, V7_TARGET_INDEX_SQL, true);
 }
@@ -1684,6 +1921,14 @@ function validateSourceImportDraftTargetTruth(db: DatabaseSync): void {
       }
       if (state !== 'reviewed' && state !== 'committed') return false;
       if (typeof row.review_digest !== 'string' || !DIGEST_PATTERN.test(row.review_digest)) return false;
+      if (row.reviewed_relationship === 'reimport') {
+        return row.reviewed_target_kind === 'existing-book' && row.reviewed_title === null &&
+          row.reviewed_target_choice_id === null && typeof row.reviewed_existing_book_id === 'string' &&
+          UUID_PATTERN.test(row.reviewed_existing_book_id) &&
+          typeof row.reviewed_book_state_digest === 'string' && DIGEST_PATTERN.test(row.reviewed_book_state_digest) &&
+          (row.reviewed_reuse_source_version_id === null ||
+            (typeof row.reviewed_reuse_source_version_id === 'string' && UUID_PATTERN.test(row.reviewed_reuse_source_version_id)));
+      }
       if (row.reviewed_relationship !== 'source-only') {
         if (row.reviewed_target_kind === 'new-book') {
           return typeof row.reviewed_title === 'string' && row.reviewed_title.length > 0 &&
@@ -1847,6 +2092,7 @@ function validateSourceImportRecordTruth(db: DatabaseSync): void {
     );
     requireBounded(targetKind !== 'new-book' || disposition === 'created', 'SCHEMA_INVALID', '来源绑定新图书不能复用既有来源版本。');
   }
+  const hasReimport = schemaObjectSql(db, 'table', 'manuscript_reimport_records') !== undefined;
   const invalidCommits = db.prepare(
     `SELECT ic.commit_id
      FROM import_commits ic
@@ -1854,8 +2100,11 @@ function validateSourceImportRecordTruth(db: DatabaseSync): void {
              EXISTS (SELECT 1 FROM manuscript_import_records mir WHERE mir.commit_id = ic.commit_id)
         OR (ic.operation_kind = 'source-import') !=
              EXISTS (SELECT 1 FROM source_import_records sir WHERE sir.commit_id = ic.commit_id)
+        ${hasReimport ? `OR (ic.operation_kind = 'manuscript-reimport') !=
+             EXISTS (SELECT 1 FROM manuscript_reimport_records mrr WHERE mrr.commit_id = ic.commit_id)` : ''}
         OR (SELECT count(*) FROM manuscript_import_records mir WHERE mir.commit_id = ic.commit_id) +
-           (SELECT count(*) FROM source_import_records sir WHERE sir.commit_id = ic.commit_id) != 1`,
+           (SELECT count(*) FROM source_import_records sir WHERE sir.commit_id = ic.commit_id)
+           ${hasReimport ? `+ (SELECT count(*) FROM manuscript_reimport_records mrr WHERE mrr.commit_id = ic.commit_id)` : ''} != 1`,
   ).all() as SqlRow[];
   requireBounded(invalidCommits.length === 0, 'SCHEMA_INVALID', '导入提交类型与结果记录不一致。');
   const invalidAttempts = db.prepare(
@@ -1863,8 +2112,10 @@ function validateSourceImportRecordTruth(db: DatabaseSync): void {
      FROM import_commit_attempts a
      JOIN import_drafts d ON d.draft_id = a.draft_id
      LEFT JOIN import_commits ic ON ic.commit_id = a.attempt_id
-     WHERE a.operation_kind != CASE WHEN d.reviewed_relationship = 'source-only'
-       THEN 'source-import' ELSE 'manuscript-import' END
+     WHERE a.operation_kind != CASE d.reviewed_relationship
+       WHEN 'source-only' THEN 'source-import'
+       ${hasReimport ? "WHEN 'reimport' THEN 'manuscript-reimport'" : ''}
+       ELSE 'manuscript-import' END
        OR (ic.commit_id IS NOT NULL AND ic.operation_kind != a.operation_kind)`,
   ).all() as SqlRow[];
   requireBounded(invalidAttempts.length === 0, 'SCHEMA_INVALID', '导入提交尝试类型与草稿或提交不一致。');
@@ -3594,14 +3845,148 @@ export function validateSourceImportSchemaTruth(db: DatabaseSync, profile: Built
   requireBounded(violations.length === 0, 'SCHEMA_MIGRATION_FAILED', '数据库引用校验失败。');
 }
 
+function validateManuscriptReimportTruth(db: DatabaseSync): void {
+  const invalidDraft = db.prepare(
+    `SELECT d.draft_id
+     FROM import_drafts d
+     LEFT JOIN manuscript_reimport_comparisons c ON c.draft_id = d.draft_id
+     WHERE (d.reviewed_relationship = 'reimport' AND (
+       d.state NOT IN ('reviewed', 'committed') OR d.reviewed_target_kind != 'existing-book'
+       OR d.reviewed_existing_book_id IS NULL OR d.reviewed_book_state_digest IS NULL
+       OR d.reviewed_lineage_status NOT IN ('verified', 'unconfirmed')
+       OR d.reviewed_checkpoint_revision_id IS NULL OR d.reviewed_manuscript_id IS NULL
+       OR d.reviewed_branch_id IS NULL OR c.comparison_id IS NULL
+       OR c.manuscript_id != d.reviewed_manuscript_id OR c.branch_id != d.reviewed_branch_id
+       OR c.checkpoint_revision_id != d.reviewed_checkpoint_revision_id
+       OR c.lineage_status != d.reviewed_lineage_status
+       OR NOT (c.lineage_source_version_id IS d.reviewed_lineage_source_version_id)
+     )) OR (d.reviewed_relationship IS NOT 'reimport' AND (
+       d.reviewed_lineage_status IS NOT NULL OR d.reviewed_lineage_source_version_id IS NOT NULL
+       OR d.reviewed_checkpoint_revision_id IS NOT NULL OR d.reviewed_manuscript_id IS NOT NULL
+       OR d.reviewed_branch_id IS NOT NULL OR c.comparison_id IS NOT NULL
+     ))
+     LIMIT 1`,
+  ).get() as SqlRow | undefined;
+  requireBounded(invalidDraft === undefined, 'SCHEMA_INVALID', '稿件重新导入草稿事实不完整。');
+
+  const invalidComparison = db.prepare(
+    `SELECT c.comparison_id
+     FROM manuscript_reimport_comparisons c
+     JOIN manuscripts m ON m.manuscript_id = c.manuscript_id
+     JOIN manuscript_branches mb ON mb.branch_id = c.branch_id
+     JOIN manuscript_revisions checkpoint ON checkpoint.revision_id = c.checkpoint_revision_id
+     LEFT JOIN manuscript_revisions lineage ON lineage.revision_id = c.lineage_revision_id
+     LEFT JOIN source_versions lsv ON lsv.source_version_id = c.lineage_source_version_id
+     WHERE mb.manuscript_id != c.manuscript_id OR checkpoint.manuscript_id != c.manuscript_id
+       OR checkpoint.branch_id != c.branch_id OR m.book_id != lsv.book_id
+       OR (c.lineage_status = 'verified' AND (
+         lineage.manuscript_id != c.manuscript_id OR lineage.source_version_id != c.lineage_source_version_id
+       ))
+     LIMIT 1`,
+  ).get() as SqlRow | undefined;
+  requireBounded(invalidComparison === undefined, 'SCHEMA_INVALID', '稿件重新导入比较绑定无效。');
+
+  const comparisons = db.prepare(
+    'SELECT comparison_id, lineage_status, lineage_revision_id FROM manuscript_reimport_comparisons ORDER BY comparison_id',
+  ).all() as SqlRow[];
+  for (const comparison of comparisons) {
+    const comparisonId = asString(comparison.comparison_id);
+    const mappings = db.prepare(
+      `SELECT m.*, r.resolution
+       FROM manuscript_reimport_mappings m
+       LEFT JOIN manuscript_reimport_mapping_resolutions r ON r.mapping_id = m.mapping_id
+       WHERE m.comparison_id = ? ORDER BY m.position`,
+    ).all(comparisonId) as SqlRow[];
+    requireBounded(mappings.length > 0, 'SCHEMA_INVALID', '稿件重新导入比较缺少映射事实。');
+    mappings.forEach((mapping, index) => {
+      const currentKind = mapping.current_kind === null ? null : asString(mapping.current_kind);
+      const currentLevel = mapping.current_level === null ? null : asNumber(mapping.current_level);
+      const currentText = mapping.current_text === null ? null : asString(mapping.current_text);
+      const stagedKind = mapping.staged_kind === null ? null : asString(mapping.staged_kind);
+      const stagedLevel = mapping.staged_level === null ? null : asNumber(mapping.staged_level);
+      const stagedText = mapping.staged_text === null ? null : asString(mapping.staged_text);
+      const changeKind = asString(mapping.change_kind);
+      requireBounded(asNumber(mapping.position) === index + 1, 'SCHEMA_INVALID', '稿件重新导入映射顺序不连续。');
+      if (currentText !== null) {
+        requireBounded(blockDigest(currentKind as ManuscriptBlockProjection['kind'], currentLevel, currentText) === asString(mapping.current_digest),
+          'SCHEMA_INVALID', '稿件重新导入当前内容摘要无效。');
+      }
+      if (stagedText !== null) {
+        requireBounded(blockDigest(stagedKind as ManuscriptBlockProjection['kind'], stagedLevel, stagedText) === asString(mapping.staged_digest),
+          'SCHEMA_INVALID', '稿件重新导入暂存内容摘要无效。');
+      }
+      const equal = currentText !== null && stagedText !== null && currentKind === stagedKind &&
+        currentLevel === stagedLevel && currentText === stagedText && mapping.current_digest === mapping.staged_digest;
+      requireBounded(
+        (changeKind === 'unchanged' && equal && mapping.resolution === null) ||
+          (changeKind !== 'unchanged' && !equal && (mapping.resolution === null || mapping.resolution === 'accept-staged')),
+        'SCHEMA_INVALID',
+        '稿件重新导入映射变化或解决事实无效。',
+      );
+    });
+  }
+
+  const invalidRecords = db.prepare(
+    `SELECT rr.reimport_record_id
+     FROM manuscript_reimport_records rr
+     JOIN import_commits ic ON ic.commit_id = rr.commit_id
+     JOIN import_drafts d ON d.draft_id = ic.draft_id
+     JOIN manuscript_reimport_comparisons c ON c.draft_id = d.draft_id
+     JOIN manuscripts m ON m.manuscript_id = rr.manuscript_id
+     JOIN source_versions sv ON sv.source_version_id = rr.source_version_id
+     JOIN source_provenance sp ON sp.provenance_id = rr.provenance_id
+     JOIN manuscript_revisions previous ON previous.revision_id = rr.previous_revision_id
+     LEFT JOIN manuscript_revisions resulting ON resulting.revision_id = rr.resulting_revision_id
+     WHERE ic.operation_kind != 'manuscript-reimport' OR d.reviewed_relationship != 'reimport'
+       OR d.state != 'committed' OR d.committed_commit_id != rr.commit_id
+       OR rr.book_id != m.book_id OR sv.book_id != rr.book_id OR sp.source_version_id != rr.source_version_id
+       OR previous.manuscript_id != rr.manuscript_id OR previous.branch_id != rr.branch_id
+       OR rr.comparison_digest != c.comparison_digest
+       OR rr.lineage_status != c.lineage_status
+       OR NOT (rr.lineage_source_version_id IS c.lineage_source_version_id)
+       OR rr.comparison_kind != c.comparison_kind
+       OR (rr.result_kind = 'changed' AND (
+         resulting.parent_revision_id != rr.previous_revision_id OR resulting.manuscript_id != rr.manuscript_id
+         OR resulting.branch_id != rr.branch_id OR resulting.source_version_id != rr.source_version_id
+       ))
+     LIMIT 1`,
+  ).get() as SqlRow | undefined;
+  requireBounded(invalidRecords === undefined, 'SCHEMA_INVALID', '稿件重新导入记录图无效。');
+}
+
+export function validateManuscriptReimportSchemaTruth(db: DatabaseSync, profile: BuiltInWorkflowProfile): void {
+  requireManuscriptReimportTargetSchema(db);
+  validateSchemaAuthorityIds(db);
+  validateWorkflowSemanticTruth(db, profile);
+  validateSourceImportDraftTargetTruth(db);
+  validateSourceImportRecordTruth(db);
+  validateManuscriptReimportTruth(db);
+  validateAllDerivedOffsets(db);
+  validateLegacyHistoryRoots(db);
+  validateAllCommandHistory(db);
+  validateMilestoneSignoffTruth(db);
+  validateRecoveryTruth(db);
+  const violations = db.prepare('PRAGMA foreign_key_check').all();
+  requireBounded(violations.length === 0, 'SCHEMA_MIGRATION_FAILED', '数据库引用校验失败。');
+}
+
 export function initializeBoundedSchema(db: DatabaseSync, profile: BuiltInWorkflowProfile): void {
   const version = asNumber(one(db.prepare('PRAGMA user_version').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取数据库版本。').user_version);
   requireBounded(
     version === CONTINUITY_SCHEMA_VERSION || version === EDITOR_SCHEMA_VERSION ||
-      version === RECOVERY_SCHEMA_VERSION || version === SCHEMA_VERSION || version === SOURCE_IMPORT_SCHEMA_VERSION,
+      version === RECOVERY_SCHEMA_VERSION || version === SCHEMA_VERSION ||
+      version === SOURCE_IMPORT_SCHEMA_VERSION || version === MANUSCRIPT_REIMPORT_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
+  if (version === MANUSCRIPT_REIMPORT_SCHEMA_VERSION) {
+    transact(db, () => {
+      validateManuscriptReimportSchemaTruth(db, profile);
+      terminalizeOrphanedReplacementPreviews(db);
+      reclaimOrphanedSearchSessions(db);
+    });
+    return;
+  }
   if (version === SOURCE_IMPORT_SCHEMA_VERSION) {
     transact(db, () => {
       validateSourceImportSchemaTruth(db, profile);
@@ -3847,6 +4232,17 @@ interface BranchBinding {
   lastCheckpointSequence: number;
 }
 
+export interface ReimportCheckpointBinding {
+  bookId: string;
+  manuscriptId: string;
+  branchId: string;
+  revisionId: string;
+  revisionLabel: string;
+  revisionDigest: string;
+  journalSequence: number;
+  createdForDirtyJournal: boolean;
+}
+
 export interface RecoverySnapshotPlan {
   snapshotId: string;
   milestoneId: string;
@@ -3936,6 +4332,57 @@ export class BoundedManuscriptStore {
 
   initializeImportedBranch(branchId: string): number {
     return rebuildBranchDerived(this.#db, branchId);
+  }
+
+  checkpointForReimport(manuscriptId: string, branchId: string): ReimportCheckpointBinding {
+    return transact(this.#db, () => {
+      let binding = this.#binding(manuscriptId, branchId);
+      this.#requireBranchEditable(branchId);
+      const createdForDirtyJournal = binding.journalSequence > binding.lastCheckpointSequence;
+      if (createdForDirtyJournal) {
+        const previous = one(this.#db.prepare(
+          'SELECT ordinal, source_version_id FROM manuscript_revisions WHERE revision_id = ?',
+        ).all(binding.revisionId) as SqlRow[], 'REIMPORT_CHECKPOINT_INVALID', '当前稿件修订版缺失。');
+        const revisionId = randomUUID();
+        const ordinal = asNumber(previous.ordinal) + 1;
+        const revisionLabel = `r${ordinal}`;
+        const createdAt = new Date().toISOString();
+        this.#db.prepare(
+          `INSERT INTO manuscript_revisions(
+             revision_id, manuscript_id, branch_id, ordinal, revision_label, parent_revision_id,
+             source_version_id, revision_digest, created_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ).run(revisionId, manuscriptId, branchId, ordinal, revisionLabel, binding.revisionId,
+          asString(previous.source_version_id), binding.workingDigest, createdAt);
+        snapshotWorkingRevision(this.#db, branchId, revisionId, binding.totalCharacters);
+        requireBounded(
+          this.#db.prepare(
+            `UPDATE branch_working_state SET base_revision_id = ?, last_checkpoint_sequence = ?
+             WHERE branch_id = ? AND base_revision_id = ? AND journal_sequence = ? AND working_digest = ?`,
+          ).run(revisionId, binding.journalSequence, branchId, binding.revisionId,
+            binding.journalSequence, binding.workingDigest).changes === 1,
+          'REIMPORT_CHECKPOINT_STALE',
+          '建立重新导入安全固定点时稿件已变化。',
+        );
+        requireBounded(
+          this.#db.prepare('UPDATE manuscript_branches SET base_revision_id = ? WHERE branch_id = ? AND base_revision_id = ?')
+            .run(revisionId, branchId, binding.revisionId).changes === 1,
+          'REIMPORT_CHECKPOINT_STALE',
+          '建立重新导入安全固定点时分支已变化。',
+        );
+        binding = this.#binding(manuscriptId, branchId);
+      }
+      return {
+        bookId: binding.bookId,
+        manuscriptId,
+        branchId,
+        revisionId: binding.revisionId,
+        revisionLabel: binding.revisionLabel,
+        revisionDigest: binding.workingDigest,
+        journalSequence: binding.journalSequence,
+        createdForDirtyJournal,
+      };
+    });
   }
 
   startServiceLifetime(lifetimeId: string, startedAt: string): void {

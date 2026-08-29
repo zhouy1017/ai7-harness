@@ -167,7 +167,8 @@ export class ServiceClient {
         this.#pending.delete(id);
         reject(new ServiceCallError('SERVICE_TIMEOUT', '本地业务服务响应超时。'));
         this.#fault();
-      }, operation === 'stageSelectedDocx' || operation === 'commitNewBookImport' || operation === 'commitSourceImport' || operation === 'commitReplacement' ||
+      }, operation === 'stageSelectedDocx' || operation === 'commitNewBookImport' || operation === 'commitSourceImport' ||
+          operation === 'commitManuscriptReimport' || operation === 'commitReplacement' ||
           operation === 'saveMilestone' || operation === 'getStartup' || operation === 'getRecoveryComparison' ||
           operation === 'viewRecoveryCandidate' || operation === 'restoreRecovery'
         ? LONG_REQUEST_TIMEOUT_MS

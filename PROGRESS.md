@@ -2,28 +2,34 @@
 
 ## What's done
 
-- Issue #40's Change Brief is refreshed against exact current `dev@39ca3ce4a93ffa1571cc57dcfdd1fdfc1f5d8905`, is labeled `ready-for-agent`, and is the next code dispatch.
-- The Owner selected Issue #88's exact declarative Profile/carrier/adapter and reconciled its Authority Ceiling to require Main Editorial Role rather than Fast Interaction Role. Issue #128 now records that exact narrowing in [`docs/adr/0045-preserve-native-dsh-artifacts-behind-ai7-authority-sidecars.md`](docs/adr/0045-preserve-native-dsh-artifacts-behind-ai7-authority-sidecars.md).
-- Root [`PROGRESS.md`](PROGRESS.md) and [`HANDOFF.md`](HANDOFF.md) now carry the current #40/#88/#42 and disabled-workflow route; the exact three-path diff, Owner wording, local links, root wrapper and `git diff --check` validate locally.
+- Issue #40's bounded sole-primary-Manuscript reimport outcome is implemented in the existing protocol, main/preload/client, renderer, SQLite/store, and J-01 owners against exact base `dev@46357022800eb5ce233ca57061b03e1a7f2c8aeb`.
+- Exact same-Book owned lineage produces a three-way comparison; absent verified lineage remains available as the conservative two-way `来源关系未确认` path. Target, relationship, source-version result, mappings, and final commit remain explicit choices.
+- Changed completion atomically creates one Source Version/provenance result, one Manuscript Reimport Record, and one descendant Manuscript Revision. No-change records exact `未发现稿件变化` evidence without an empty Revision.
+- SQLite v9 advances only through additive fail-closed v10 in the same authority, with relationship/operation rebuilds, persisted comparison/resolution/reimport facts, exact three-result-kind exclusivity, semantic validation, and foreign-key validation.
+- J-01 covers verified and unconfirmed changed/no-change results, dirty-journal checkpointing, restart, mapping resolution, before-commit recovery, after-commit-before-response recovery, and uncertain fail-closed handling with immutable direct-record proof and no-duplicate counts.
 
 ## What's next
 
-- The Commander integrates Issue #128 before refreshing Issue #88 against the resulting exact `dev`; that refresh may then replace `ready-for-human` with `ready-for-agent` and authorize its bounded dispatch if the integrated authority and Brief remain unchanged.
-- Issue #40 remains the next code dispatch.
+- Commander: inspect the exact Issue #40 diff and local validation evidence, then take the authorized integration path if it remains acceptable.
+- After Issue #40 integrates, run its separately scoped documentation lifecycle sweep before selecting another implementation Issue.
+- Issue #42 and Issue #88 remain `ready-for-human` on the one unresolved new-journey Gate routing policy. That policy decision is separate from Actions usage reset and must not operate the disabled workflow.
 
 ## Key decisions
 
-- Issue #88's selected carrier is exact `config/native-artifact-sources/editorial-workspace-profile/package.json` at `@ai7/editorial-workspace-profile@1.0.0`, pinned to the exact 263-byte manifest and SHA-256 recorded in ADR 0045; its one-revision adapter and disabled-first, exact Book-scoped enablement grant no adjacent authority.
-- Issue #42 remains `ready-for-human` because the J-12 Gate routing policy is not decided.
-- Actions usage has not reset. Workflow `342459594` remains `disabled_manually` under ADR 0050 and must not be operated.
+- Lack of verified lineage does not block reimport. Verified lineage is accepted only from an exact Source Version owned by the selected Book and already bound to that Manuscript's accepted revision history.
+- Reimport reuses the existing import draft, commit-attempt, commit-result, manuscript, source/provenance, recovery, and direct-record owners; it creates no generic diff engine, merge owner, parallel ledger, store, or commit path.
+- The dirty-journal safety fixed point is a narrow bounded-store checkpoint, not a Milestone or recovery decision.
+- Source-only and first-Manuscript semantics remain unchanged. Provider/network/credential/export/release/publication authority remains absent.
 
 ## Unresolved matters or blockers
 
-- Issue #88 cannot be refreshed or dispatched from this unintegrated ADR normalization; the Commander must first integrate Issue #128.
-- Issue #42 remains blocked on the separate Owner decision for J-12 Gate routing. No hosted Gate evidence exists while the workflow remains disabled.
+- No Issue #40 implementation blocker is known.
+- The next product frontier is blocked on the Owner's exact new-journey Gate routing policy: J-12 for Issue #42 and J-15 for Issue #88 cannot be admitted under ADR 0049 by inference. Actions reset neither supplies nor postpones that policy decision.
+- Hosted Actions remain disabled and were not operated. `Hosted E2E Functional Gate: temporarily waived under ADR 0050 because Actions usage remained exhausted; workflow 342459594 was disabled_manually with no queued or active run; no hosted run, green Gate, or substitute Gate is claimed.`
+- J-02 and J-08 remain optional diagnostics and were not promoted to gates.
 
 ## Safe Resume Prompt
 
 ```text
-Commander: integrate Issue #128 into exact current dev, then refresh Issue #88 against the resulting exact dev and integrated ADR 0045 semantics before changing its dispatch state. Issue #40 is already ready-for-agent and remains the next code dispatch. Keep Issue #42 ready-for-human until the Owner decides J-12 Gate routing. Actions usage has not reset; do not operate workflow 342459594.
+Commander: inspect the uncommitted Issue #40 Worker diff against exact base dev@46357022800eb5ce233ca57061b03e1a7f2c8aeb and its pinned Windows doctor/bootstrap/tsc/build/J-01 evidence. If the bounded reimport semantics and exact v9→v10 authority remain acceptable, continue through the normal integration path, then run the separate lifecycle sweep. Keep Issue #42 and Issue #88 ready-for-human until the Owner explicitly decides new-journey Gate routing. Do not operate Actions or widen the standing gate surface.
 ```
