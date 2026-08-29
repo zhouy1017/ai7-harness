@@ -22,7 +22,7 @@ const MAX_XML_FEED_BYTES = MAX_BLOCK_CODE_UNITS;
 const MAX_XML_TEXT_TOKEN_CODE_UNITS = MAX_BLOCK_CODE_UNITS;
 const MAX_XML_MARKUP_TOKEN_CODE_UNITS = MAX_BLOCK_CODE_UNITS * 8;
 const MAX_XML_NESTING_DEPTH = 128;
-const PARSER_IDENTITY = 'ai7-docx-fflate-saxes/1';
+export const DOCX_PARSER_IDENTITY = 'ai7-docx-fflate-saxes/1';
 const SAMPLE1_SOURCE_BYTES = 29_550;
 const SAMPLE1_SOURCE_SHA256 = 'b8a3dbde0aa8a1ec7265f9ae3fe47877759e7947c5ab69682cd0a8f424a8d483';
 
@@ -48,7 +48,7 @@ export interface ParsedDocxBlock {
 }
 
 export interface ParsedDocx {
-  parserIdentity: typeof PARSER_IDENTITY;
+  parserIdentity: typeof DOCX_PARSER_IDENTITY;
   sourceDigest: string;
   contentDigest: string;
   structureDigest: string;
@@ -422,6 +422,7 @@ function createDocumentParser(
 async function readStreamingArchive(
   path: string,
   onBlock: (block: ParsedDocxBlock) => void,
+  options: { signal?: AbortSignal; onArchiveProgress?: (bytes: number) => void } = {},
 ): Promise<{
   sourceDigest: string;
   archiveBytes: number;
@@ -518,8 +519,9 @@ async function readStreamingArchive(
   unzip.register(UnzipInflate);
   unzip.register(UnzipPassThrough);
 
-  for await (const chunk of createReadStream(path, { highWaterMark: 64 * 1024 })) {
+  for await (const chunk of createReadStream(path, { highWaterMark: 64 * 1024, signal: options.signal })) {
     archiveBytes += chunk.byteLength;
+    options.onArchiveProgress?.(archiveBytes);
     requireDocx(archiveBytes <= MAX_ARCHIVE_BYTES, 'DOCX archive is too large');
     sourceHash.update(chunk);
     unzip.push(chunk, false);
@@ -634,9 +636,10 @@ export async function parseDocx(
   displayNameInput: string,
   onBlock: (block: ParsedDocxBlock) => void,
   expectedSource?: { digest: string; bytes: number },
+  options: { signal?: AbortSignal; onArchiveProgress?: (bytes: number) => void } = {},
 ): Promise<ParsedDocx> {
   const displayName = safeDisplayName(displayNameInput);
-  const archive = await readStreamingArchive(path, onBlock);
+  const archive = await readStreamingArchive(path, onBlock, options);
   if (expectedSource) {
     requireDocx(archive.sourceDigest === expectedSource.digest && archive.archiveBytes === expectedSource.bytes, 'selected file changed during staging');
   }
@@ -657,7 +660,7 @@ export async function parseDocx(
   const fidelity = fidelityReport(archive.document.signals, archive.entryNames);
   requireDocx(deriveImportFidelityPlan(fidelity, archive.sourceDigest, archive.archiveBytes) !== undefined, 'document uses a fidelity branch outside the bounded import');
   return {
-    parserIdentity: PARSER_IDENTITY,
+    parserIdentity: DOCX_PARSER_IDENTITY,
     sourceDigest: archive.sourceDigest,
     contentDigest: archive.document.contentDigest,
     structureDigest: archive.document.structureDigest,

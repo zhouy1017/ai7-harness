@@ -95,6 +95,7 @@ function parseArguments(argv: string[]): LaunchArguments {
   const importControl =
     importControlValue === 'before-commit' ||
     importControlValue === 'after-commit-before-response' ||
+    importControlValue === 'legacy-result-json-without-receipt' ||
     importControlValue === 'uncertain-reconciliation' ||
     importControlValue === 'legacy-reviewed-v2' ||
     importControlValue === 'tamper-reimport-proof-before-validation' ||

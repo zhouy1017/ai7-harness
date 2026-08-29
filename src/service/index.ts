@@ -193,8 +193,14 @@ function decodeRequest(frame: Uint8Array): ServiceRequest {
       break;
     }
     case 'getBookOverview': {
-      const input = requireInput(value.input, ['bookId'], tentativeId);
-      if (!isBoundedString(input.bookId, 36) || !UUID_PATTERN.test(input.bookId)) throw new ProtocolError(tentativeId);
+      const input = requireInput(value.input, ['bookId', 'historyCursor'], tentativeId);
+      const cursor = input.historyCursor;
+      if (!isBoundedString(input.bookId, 36) || !UUID_PATTERN.test(input.bookId) ||
+        !(cursor === null || (isRecord(cursor) &&
+          hasExactKeys(cursor, ['occurredAt', 'kindRank', 'stableId', 'direction']) &&
+          isBoundedString(cursor.occurredAt, 64) && isSafeInteger(cursor.kindRank, 1) && cursor.kindRank <= 3 &&
+          isBoundedString(cursor.stableId, 36) && UUID_PATTERN.test(cursor.stableId) &&
+          (cursor.direction === 'forward' || cursor.direction === 'backward')))) throw new ProtocolError(tentativeId);
       break;
     }
     case 'prepareNewBookReview': {
@@ -708,7 +714,10 @@ async function dispatch(
     case 'commitBookCreation':
       return { id: request.id, ok: true, op: request.op, result: store.commitBookCreation(request.input) };
     case 'getBookOverview':
-      return { id: request.id, ok: true, op: request.op, result: store.getBookOverview(request.input.bookId) };
+      return {
+        id: request.id, ok: true, op: request.op,
+        result: store.getBookOverview(request.input.bookId, request.input.historyCursor),
+      };
     case 'listBooks':
       return { id: request.id, ok: true, op: request.op, result: store.listBooks(request.input.after) };
     case 'prepareNewBookReview':
@@ -757,7 +766,7 @@ async function dispatch(
         id: request.id,
         ok: true,
         op: request.op,
-        result: store.prepareManuscriptReimport(
+        result: jobs.startReimportPreparation(
           request.input.draftId,
           request.input.expectedDraftVersion,
           request.input.target,
@@ -805,7 +814,7 @@ async function dispatch(
         id: request.id,
         ok: true,
         op: request.op,
-        result: store.resolveReimportMapping(
+        result: jobs.startReimportResolution(
           request.input.draftId,
           request.input.expectedDraftVersion,
           request.input.mappingId,
@@ -818,8 +827,10 @@ async function dispatch(
         id: request.id,
         ok: true,
         op: request.op,
-        result: await store.commitManuscriptReimport(request.input, {
+        result: await jobs.startReimportCommit(request.input, {
           interruptAfterAttempt: importControl === 'before-commit' || importControl === 'uncertain-reconciliation',
+          interruptAfterCommit: importControl === 'after-commit-before-response',
+          legacyResultWithoutPresentation: importControl === 'legacy-result-json-without-receipt',
         }),
       };
     case 'acknowledgeImportCompletion':
@@ -976,6 +987,7 @@ function parseArguments(argv: string[]): {
     importControlValue === 'before-commit' ||
     importControlValue === 'after-commit-before-response' ||
     importControlValue === 'uncertain-reconciliation' ||
+    importControlValue === 'legacy-result-json-without-receipt' ||
     importControlValue === 'legacy-reviewed-v2' ||
     importControlValue === 'tamper-reimport-proof-before-validation' ||
     importControlValue === 'abandon-object-delete-failure' ||
@@ -1068,11 +1080,16 @@ async function run(): Promise<void> {
         }
         response = failureResponse(request.id, error, StoreError);
       }
-      if ((request.op === 'commitNewBookImport' || request.op === 'commitSourceImport' ||
-           request.op === 'commitManuscriptReimport') &&
+      if ((request.op === 'commitNewBookImport' || request.op === 'commitSourceImport') &&
           importControl === 'after-commit-before-response') {
         stop();
         throw new Error('E2E interruption after committed import and before response.');
+      }
+      if (request.op === 'commitSourceImport' && response.ok &&
+          importControl === 'legacy-result-json-without-receipt') {
+        store.rewriteCommittedResultWithoutPresentationForTest(request.input.commitId);
+        stop();
+        throw new Error('E2E interruption after legacy source result_json rewrite.');
       }
       await writeResponse(response);
       if (request.op === 'flushJournalEdit' && response.ok && recoveryControl === 'interrupt-after-journal-ack') {

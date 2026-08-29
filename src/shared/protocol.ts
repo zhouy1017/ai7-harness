@@ -1,4 +1,4 @@
-export const SERVICE_PROTOCOL_VERSION = 8 as const;
+export const SERVICE_PROTOCOL_VERSION = 10 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -16,6 +16,7 @@ export type J01ImportControl =
   | 'before-commit'
   | 'after-commit-before-response'
   | 'uncertain-reconciliation'
+  | 'legacy-result-json-without-receipt'
   | 'legacy-reviewed-v2'
   | 'tamper-reimport-proof-before-validation'
   | 'abandon-object-delete-failure'
@@ -313,6 +314,13 @@ export type BookRecordPresentation =
       importedAt: string;
     };
 
+export interface BookHistoryCursor {
+  occurredAt: string;
+  kindRank: number;
+  stableId: string;
+  direction: 'forward' | 'backward';
+}
+
 export interface BookWorkOverviewProjection {
   book: {
     bookId: string;
@@ -328,6 +336,10 @@ export interface BookWorkOverviewProjection {
     | { kind: 'import-first-manuscript'; label: '导入首份稿件'; bookId: string }
     | { kind: 'open-manuscript'; label: '打开稿件'; manuscriptId: string; branchId: string };
   records: ReadonlyArray<BookRecordPresentation>;
+  historyPage: {
+    previousCursor: BookHistoryCursor | null;
+    nextCursor: BookHistoryCursor | null;
+  };
 }
 
 export interface BookSummaryProjection {
@@ -921,10 +933,11 @@ export interface DurableHistoryProjection {
 
 export interface ServiceJobProjection {
   jobId: string;
-  kind: 'search' | 'replacement';
+  kind: 'search' | 'replacement' | 'reimport-preparation' | 'reimport-resolution' | 'reimport-commit';
   state: 'queued' | 'running' | 'completed' | 'cancelled' | 'failed';
   progress: { completed: number; total: number; label: string };
-  result: SearchSummaryProjection | ReplacementPreviewProjection | null;
+  result: SearchSummaryProjection | ReplacementPreviewProjection | ReviewBeforeManuscriptReimportProjection |
+    ManuscriptReimportCommitProjection | null;
   failure: null | { code: string; message: string };
 }
 
@@ -972,6 +985,10 @@ export interface SourceImportCommitProjection {
   retainedBoundary: ReviewBeforeSourceImportProjection['retainedBoundary'];
   provenance: ReviewBeforeSourceImportProjection['provenance'] & { provenanceId: string };
   namedNonEffects: ReadonlyArray<string>;
+  receipt: {
+    source: Extract<BookRecordPresentation, { kind: 'source' }>;
+    record: Extract<BookRecordPresentation, { kind: 'source-import-record' }>;
+  };
   overview: BookWorkOverviewProjection;
 }
 
@@ -995,6 +1012,7 @@ export interface ManuscriptReimportCommitProjection {
   comparisonDigest: string;
   resolutionDigest: string;
   source: StagedImportProjection['source'];
+  receipt: Extract<BookRecordPresentation, { kind: 'manuscript-reimport-record' }>;
   overview: BookWorkOverviewProjection;
   window: ManuscriptWindowProjection;
 }
@@ -1178,7 +1196,7 @@ export interface ServiceOperationMap {
     output: BookCreationCommitProjection;
   };
   getBookOverview: {
-    input: { bookId: string };
+    input: { bookId: string; historyCursor: BookHistoryCursor | null };
     output: BookWorkOverviewProjection;
   };
   listBooks: {
@@ -1216,7 +1234,7 @@ export interface ServiceOperationMap {
       expectedDraftVersion: number;
       target: ManuscriptReimportTargetSelection;
     };
-    output: ReviewBeforeManuscriptReimportProjection;
+    output: ServiceJobProjection;
   };
   getReimportMappingPage: {
     input: { draftId: string; expectedDraftVersion: number; after: number | null };
@@ -1242,11 +1260,11 @@ export interface ServiceOperationMap {
       resolution: 'preserve-current-identity' | 'create-new-identity' | 'retire-current-identity';
       currentBlockId: string | null;
     };
-    output: ReviewBeforeManuscriptReimportProjection;
+    output: ServiceJobProjection;
   };
   commitManuscriptReimport: {
     input: { draftId: string; expectedDraftVersion: number; reviewDigest: string; commitId: string };
-    output: ManuscriptReimportCommitProjection;
+    output: ServiceJobProjection;
   };
   acknowledgeImportCompletion: {
     input: { commitId: string };
@@ -1366,13 +1384,13 @@ export interface RendererApi {
   commitNewBookImport(input: CommitNewBookRendererInput): Promise<ManuscriptImportCommitProjection>;
   prepareSourceImportReview(input: ServiceOperationMap['prepareSourceImportReview']['input']): Promise<ReviewBeforeSourceImportProjection>;
   commitSourceImport(input: CommitSourceImportRendererInput): Promise<SourceImportCommitProjection>;
-  prepareManuscriptReimport(input: ServiceOperationMap['prepareManuscriptReimport']['input']): Promise<ReviewBeforeManuscriptReimportProjection>;
+  prepareManuscriptReimport(input: ServiceOperationMap['prepareManuscriptReimport']['input']): Promise<ServiceJobProjection>;
   getReimportMappingPage(input: ServiceOperationMap['getReimportMappingPage']['input']): Promise<ReimportMappingPageProjection>;
   getReimportIdentityCandidatePage(input: ServiceOperationMap['getReimportIdentityCandidatePage']['input']): Promise<ReimportIdentityCandidatePageProjection>;
   getReimportLineageSourceVersionPage(input: ServiceOperationMap['getReimportLineageSourceVersionPage']['input']): Promise<ReimportLineageSourceVersionPageProjection>;
   acceptReimportDegradation(input: ServiceOperationMap['acceptReimportDegradation']['input']): Promise<ReviewBeforeManuscriptReimportProjection>;
-  resolveReimportMapping(input: ServiceOperationMap['resolveReimportMapping']['input']): Promise<ReviewBeforeManuscriptReimportProjection>;
-  commitManuscriptReimport(input: CommitManuscriptReimportRendererInput): Promise<ManuscriptReimportCommitProjection>;
+  resolveReimportMapping(input: ServiceOperationMap['resolveReimportMapping']['input']): Promise<ServiceJobProjection>;
+  commitManuscriptReimport(input: CommitManuscriptReimportRendererInput): Promise<ServiceJobProjection>;
   acknowledgeImportCompletion(input: ServiceOperationMap['acknowledgeImportCompletion']['input']): Promise<{ state: 'acknowledged' }>;
   getManuscriptWindow(input: ServiceOperationMap['getManuscriptWindow']['input']): Promise<ManuscriptWindowProjection>;
   flushJournalEdit(input: JournalEditInput): Promise<JournalAcknowledgement>;

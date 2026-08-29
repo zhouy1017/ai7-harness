@@ -1,9 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import type { ServiceJobProjection } from '../shared/protocol.js';
-import { StoreError, type EditorialStore } from './store.js';
+import { StoreError, StoreFatalError, type EditorialStore } from './store.js';
 
 const MAX_ACTIVE_JOBS = 4;
 const MAX_RETAINED_JOBS = 32;
+const REIMPORT_BATCH_YIELD_MS = 20;
 
 interface JobRecord {
   projection: ServiceJobProjection;
@@ -70,6 +71,95 @@ export class CooperativeJobOwner {
     return structuredClone(job.projection);
   }
 
+  startReimportPreparation(
+    draftId: string,
+    expectedDraftVersion: number,
+    target: Parameters<EditorialStore['createManuscriptReimportPreparationWork']>[2],
+  ): ServiceJobProjection {
+    this.#requireCapacity();
+    const work = this.#store.createManuscriptReimportPreparationWork(draftId, expectedDraftVersion, target);
+    const jobId = randomUUID();
+    const job: JobRecord = {
+      subjectId: work.workId,
+      cancelRequested: false,
+      scheduled: false,
+      projection: {
+        jobId,
+        kind: 'reimport-preparation',
+        state: 'queued',
+        progress: { completed: 0, total: work.total, label: '正在有界准备重新导入比较…' },
+        result: null,
+        failure: null,
+      },
+    };
+    this.#jobs.set(jobId, job);
+    this.#schedule(job);
+    return structuredClone(job.projection);
+  }
+
+  startReimportResolution(
+    draftId: string,
+    expectedDraftVersion: number,
+    mappingId: string,
+    resolution: Parameters<EditorialStore['createReimportResolutionWork']>[3],
+    currentBlockId: string | null,
+  ): ServiceJobProjection {
+    this.#requireCapacity();
+    const work = this.#store.createReimportResolutionWork(
+      draftId, expectedDraftVersion, mappingId, resolution, currentBlockId);
+    const jobId = randomUUID();
+    const job: JobRecord = {
+      subjectId: work.workId,
+      cancelRequested: false,
+      scheduled: false,
+      projection: {
+        jobId,
+        kind: 'reimport-resolution',
+        state: 'queued',
+        progress: { completed: 0, total: work.total, label: '正在有界核对结构身份解决…' },
+        result: null,
+        failure: null,
+      },
+    };
+    this.#jobs.set(jobId, job);
+    this.#schedule(job);
+    return structuredClone(job.projection);
+  }
+
+  async startReimportCommit(
+    input: Parameters<EditorialStore['createManuscriptReimportCommitWork']>[0],
+    options: Parameters<EditorialStore['createManuscriptReimportCommitWork']>[1] = {},
+  ): Promise<ServiceJobProjection> {
+    this.#requireCapacity();
+    const work = await this.#store.createManuscriptReimportCommitWork(input, options);
+    const jobId = randomUUID();
+    const total = work.result === null ? work.total : 1;
+    const job: JobRecord = {
+      subjectId: work.workId ?? input.commitId,
+      cancelRequested: false,
+      scheduled: false,
+      projection: {
+        jobId,
+        kind: 'reimport-commit',
+        state: work.result === null ? 'queued' : 'completed',
+        progress: {
+          completed: work.result === null ? 0 : total,
+          total,
+          label: work.result === null ? '正在有界核对并提交重新导入…' : '稿件重新导入提交完成',
+        },
+        result: work.result,
+        failure: null,
+      },
+    };
+    if (work.result === null) {
+      this.#jobs.set(jobId, job);
+      this.#schedule(job);
+    } else {
+      this.#rememberPolledTerminal(jobId, job);
+    }
+    return structuredClone(job.projection);
+  }
+
   poll(jobId: string): ServiceJobProjection {
     const job = this.#requireJob(jobId);
     const projection = structuredClone(job.projection);
@@ -112,7 +202,33 @@ export class CooperativeJobOwner {
           progress: { ...job.projection.progress, label: '替换准备已取消' },
         };
       }
-    } else if (job.projection.state === 'queued' || job.projection.state === 'running') {
+    } else if ((job.projection.kind === 'reimport-preparation' || job.projection.kind === 'reimport-resolution' ||
+      job.projection.kind === 'reimport-commit') &&
+      (job.projection.state === 'queued' || job.projection.state === 'running')) {
+      job.cancelRequested = true;
+      if (job.projection.kind === 'reimport-preparation') {
+        this.#store.cancelManuscriptReimportPreparationWork(job.subjectId);
+      } else if (job.projection.kind === 'reimport-resolution') {
+        this.#store.cancelReimportResolutionWork(job.subjectId);
+      } else {
+        this.#store.cancelManuscriptReimportCommitWork(job.subjectId);
+      }
+      job.projection = {
+        ...job.projection,
+        state: 'cancelled',
+        result: null,
+        failure: null,
+        progress: {
+          ...job.projection.progress,
+          label: job.projection.kind === 'reimport-preparation'
+            ? '重新导入比较准备已取消'
+            : job.projection.kind === 'reimport-resolution'
+              ? '结构身份解决已取消'
+              : '重新导入提交已取消',
+        },
+      };
+    } else if (job.projection.kind === 'search' &&
+      (job.projection.state === 'queued' || job.projection.state === 'running')) {
       job.cancelRequested = true;
       this.#store.cancelSearch(job.subjectId);
       job.projection = {
@@ -130,7 +246,14 @@ export class CooperativeJobOwner {
       if (job.projection.state === 'queued' || job.projection.state === 'running') {
         job.cancelRequested = true;
         if (job.projection.kind === 'search') this.#store.cancelSearch(job.subjectId);
-        else this.#store.cancelReplacement(job.subjectId);
+        else if (job.projection.kind === 'replacement') this.#store.cancelReplacement(job.subjectId);
+        else if (job.projection.kind === 'reimport-preparation') {
+          this.#store.cancelManuscriptReimportPreparationWork(job.subjectId);
+        } else if (job.projection.kind === 'reimport-resolution') {
+          this.#store.cancelReimportResolutionWork(job.subjectId);
+        } else {
+          this.#store.cancelManuscriptReimportCommitWork(job.subjectId);
+        }
         job.projection = { ...job.projection, state: 'cancelled' };
       }
     }
@@ -138,16 +261,20 @@ export class CooperativeJobOwner {
     this.#polledTerminalReceipts.clear();
   }
 
-  #schedule(job: JobRecord): void {
+  #schedule(job: JobRecord, delayMilliseconds = 0): void {
     if (this.#disposed || job.scheduled || job.cancelRequested) return;
     job.scheduled = true;
-    setImmediate(() => {
+    const advance = (): void => {
       job.scheduled = false;
-      this.#advance(job);
-    });
+      void this.#advance(job).catch((error: unknown) => {
+        setImmediate(() => { throw error; });
+      });
+    };
+    if (delayMilliseconds > 0) setTimeout(advance, delayMilliseconds);
+    else setImmediate(advance);
   }
 
-  #advance(job: JobRecord): void {
+  async #advance(job: JobRecord): Promise<void> {
     if (this.#disposed || job.cancelRequested || (job.projection.state !== 'queued' && job.projection.state !== 'running')) return;
     job.projection = { ...job.projection, state: 'running' };
     try {
@@ -164,6 +291,51 @@ export class CooperativeJobOwner {
           result: progress.done ? progress.summary : null,
         };
         if (!progress.done) this.#schedule(job);
+        return;
+      }
+      if (job.projection.kind === 'reimport-preparation') {
+        const progress = this.#store.advanceManuscriptReimportPreparationWork(job.subjectId);
+        job.projection = {
+          ...job.projection,
+          state: progress.done ? 'completed' : 'running',
+          progress: {
+            completed: progress.completed,
+            total: progress.total,
+            label: progress.done ? '重新导入比较准备完成' : '正在有界准备重新导入比较…',
+          },
+          result: progress.review,
+        };
+        if (!progress.done) this.#schedule(job, REIMPORT_BATCH_YIELD_MS);
+        return;
+      }
+      if (job.projection.kind === 'reimport-resolution') {
+        const progress = this.#store.advanceReimportResolutionWork(job.subjectId);
+        job.projection = {
+          ...job.projection,
+          state: progress.done ? 'completed' : 'running',
+          progress: {
+            completed: progress.completed,
+            total: progress.total,
+            label: progress.done ? '结构身份解决完成' : '正在有界核对结构身份解决…',
+          },
+          result: progress.review,
+        };
+        if (!progress.done) this.#schedule(job, REIMPORT_BATCH_YIELD_MS);
+        return;
+      }
+      if (job.projection.kind === 'reimport-commit') {
+        const progress = await this.#store.advanceManuscriptReimportCommitWork(job.subjectId);
+        job.projection = {
+          ...job.projection,
+          state: progress.done ? 'completed' : 'running',
+          progress: {
+            completed: progress.completed,
+            total: progress.total,
+            label: progress.done ? '稿件重新导入提交完成' : '正在有界核对并提交重新导入…',
+          },
+          result: progress.result,
+        };
+        if (!progress.done) this.#schedule(job, REIMPORT_BATCH_YIELD_MS);
         return;
       }
       const progress = this.#store.advanceReplacementWork(job.subjectId);
@@ -189,8 +361,16 @@ export class CooperativeJobOwner {
         result: progress.preview,
       };
     } catch (error) {
+      if (error instanceof StoreFatalError) throw error;
       if (job.projection.kind === 'search') this.#store.cancelSearch(job.subjectId);
-      else this.#store.cancelReplacement(job.subjectId);
+      else if (job.projection.kind === 'replacement') this.#store.cancelReplacement(job.subjectId);
+      else if (job.projection.kind === 'reimport-preparation') {
+        this.#store.cancelManuscriptReimportPreparationWork(job.subjectId);
+      } else if (job.projection.kind === 'reimport-resolution') {
+        this.#store.cancelReimportResolutionWork(job.subjectId);
+      } else {
+        this.#store.cancelManuscriptReimportCommitWork(job.subjectId);
+      }
       const failure = error instanceof StoreError
         ? { code: error.code, message: error.message }
         : { code: 'SERVICE_JOB_FAILED', message: '本地协作处理未完成。' };

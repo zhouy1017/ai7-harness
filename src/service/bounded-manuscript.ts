@@ -683,7 +683,6 @@ const RECOVERY_SCHEMA_SQL = {
     manuscript_id TEXT NOT NULL REFERENCES manuscripts(manuscript_id),
     branch_id TEXT NOT NULL REFERENCES manuscript_branches(branch_id),
     checkpoint_revision_id TEXT NOT NULL REFERENCES manuscript_revisions(revision_id),
-    checkpoint_created_for_dirty_journal INTEGER NOT NULL CHECK(checkpoint_created_for_dirty_journal IN (0, 1)),
     checkpoint_sequence INTEGER NOT NULL CHECK(checkpoint_sequence >= 0),
     journal_sequence INTEGER NOT NULL CHECK(journal_sequence > checkpoint_sequence),
     journal_working_digest TEXT NOT NULL CHECK(length(journal_working_digest) = 64),
@@ -1053,6 +1052,10 @@ const MANUSCRIPT_REIMPORT_SCHEMA_SQL = {
     staged_structure_digest TEXT NOT NULL CHECK(length(staged_structure_digest) = 64),
     staged_parser_identity TEXT NOT NULL,
     staged_block_count INTEGER NOT NULL CHECK(staged_block_count > 0),
+    checkpoint_block_count INTEGER NOT NULL CHECK(checkpoint_block_count > 0),
+    total_mappings INTEGER NOT NULL CHECK(total_mappings > 0),
+    unresolved_mappings INTEGER NOT NULL CHECK(unresolved_mappings >= 0 AND unresolved_mappings <= total_mappings),
+    changed_mappings INTEGER NOT NULL CHECK(changed_mappings >= 0 AND changed_mappings <= total_mappings),
     comparison_digest TEXT NOT NULL UNIQUE CHECK(length(comparison_digest) = 64),
     resolution_digest TEXT NOT NULL CHECK(length(resolution_digest) = 64),
     degradation_accepted INTEGER NOT NULL CHECK(degradation_accepted IN (0, 1)),
@@ -1092,6 +1095,7 @@ const MANUSCRIPT_REIMPORT_SCHEMA_SQL = {
     staged_level INTEGER,
     staged_text TEXT,
     staged_digest TEXT CHECK(staged_digest IS NULL OR length(staged_digest) = 64),
+    resolved_changed INTEGER CHECK(resolved_changed IS NULL OR resolved_changed IN (0, 1)),
     UNIQUE(comparison_id, position),
     CHECK(current_block_id IS NOT NULL OR staged_block_id IS NOT NULL),
     CHECK((current_block_id IS NULL) = (current_kind IS NULL)),
@@ -4063,6 +4067,8 @@ function validateManuscriptReimportTruth(db: DatabaseSync): void {
       let stagedCount = 0;
       let currentCount = 0;
       let finalBlockCount = 0;
+      let unresolvedCount = 0;
+      let resolvedChangedCount = 0;
       const duplicateAuthorityFact = db.prepare(
         `SELECT 1 invalid FROM manuscript_reimport_mappings
          WHERE comparison_id = ? AND (
@@ -4119,6 +4125,7 @@ function validateManuscriptReimportTruth(db: DatabaseSync): void {
           const staged = fact('staged');
           const changeKind = asString(mapping.change_kind);
           const exact = mapping.identity_consequence === 'preserve-current-identity';
+          let resolvedChanged: number | null = null;
           if (current !== null) currentCount += 1;
           requireBounded(
             (current === null) === (mapping.current_revision_id === null) &&
@@ -4203,6 +4210,14 @@ function validateManuscriptReimportTruth(db: DatabaseSync): void {
               asString(priorFinal.kind) !== staged.kind ||
               (priorFinal.level === null ? null : asNumber(priorFinal.level)) !== staged.level ||
               asString(priorFinal.text) !== staged.text || asString(priorFinal.digest) !== staged.digest;
+            if (exact || resolution === 'preserve-current-identity') {
+              resolvedChanged = Number(priorFinal === undefined || asNumber(priorFinal.position) !== staged.position ||
+                asString(priorFinal.kind) !== staged.kind ||
+                (priorFinal.level === null ? null : asNumber(priorFinal.level)) !== staged.level ||
+                asString(priorFinal.text) !== staged.text || asString(priorFinal.digest) !== staged.digest);
+            } else if (resolution === 'create-new-identity') {
+              resolvedChanged = 1;
+            }
             const actualStaged = db.prepare(
               `SELECT position, kind, level, text, digest FROM staged_import_blocks
                WHERE draft_id = ? AND staged_block_id = ?`,
@@ -4231,6 +4246,18 @@ function validateManuscriptReimportTruth(db: DatabaseSync): void {
           }
           const unresolved = !exact && mapping.resolution === null &&
             !(changeKind === 'delete' && mapping.claimed_mapping_id !== null);
+          if (changeKind === 'delete') {
+            resolvedChanged = resolution === 'retire-current-identity' ? 1
+              : mapping.claimed_mapping_id !== null ? 0 : null;
+          }
+          requireBounded(
+            (resolvedChanged === null && mapping.resolved_changed === null) ||
+              (resolvedChanged !== null && asNumber(mapping.resolved_changed) === resolvedChanged),
+            'SCHEMA_INVALID',
+            '稿件重新导入映射的最终变化聚合事实无效。',
+          );
+          if (unresolved) unresolvedCount += 1;
+          else resolvedChangedCount += resolvedChanged ?? 0;
           const draftState = db.prepare('SELECT state FROM import_drafts WHERE draft_id = ?').get(draftId) as SqlRow;
           requireBounded(draftState.state !== 'committed' || !unresolved,
             'SCHEMA_INVALID', '已提交的稿件重新导入仍有未解决结构身份。');
@@ -4265,7 +4292,11 @@ function validateManuscriptReimportTruth(db: DatabaseSync): void {
       changed ||= finalBlockCount !== currentAuthorityCount;
       requireBounded(expectedPosition > 1 && stagedCount === asNumber(comparison.staged_block_count) &&
         currentCount === currentAuthorityCount && stagedCount === stagedAuthorityCount &&
-        comparisonHash.digest('hex') === asString(comparison.comparison_digest),
+        comparisonHash.digest('hex') === asString(comparison.comparison_digest) &&
+        asNumber(comparison.total_mappings) === expectedPosition - 1 &&
+        asNumber(comparison.unresolved_mappings) === unresolvedCount &&
+        asNumber(comparison.changed_mappings) === resolvedChangedCount &&
+        asNumber(comparison.checkpoint_block_count) === currentAuthorityCount,
       'SCHEMA_INVALID', '稿件重新导入比较摘要或当前、暂存、结果块覆盖无效。');
       const resolutionDigest = resolutionHash.digest('hex');
       requireBounded(resolutionDigest === asString(comparison.resolution_digest),
@@ -4750,6 +4781,27 @@ export interface ReimportCheckpointBinding {
   createdForDirtyJournal: boolean;
 }
 
+interface ReimportCheckpointWork {
+  workId: string;
+  binding: BranchBinding;
+  revisionId: string;
+  revisionLabel: string;
+  sourceVersionId: string;
+  totalBlocks: number;
+  cursor: number;
+  expectedPosition: number;
+  offset: number;
+  createdAt: string;
+  state: 'copying' | 'prepared';
+}
+
+export interface ReimportCheckpointProgress {
+  done: boolean;
+  completed: number;
+  total: number;
+  checkpoint: ReimportCheckpointBinding | null;
+}
+
 export interface RecoverySnapshotPlan {
   snapshotId: string;
   milestoneId: string;
@@ -4822,6 +4874,7 @@ export type VerifiedRecoverySnapshot =
 export class BoundedManuscriptStore {
   readonly #db: DatabaseSync;
   readonly #cursorSecret = randomBytes(32);
+  readonly #reimportCheckpointWork = new Map<string, ReimportCheckpointWork>();
 
   constructor(db: DatabaseSync) {
     this.#db = db;
@@ -4839,6 +4892,216 @@ export class BoundedManuscriptStore {
 
   initializeImportedBranch(branchId: string): number {
     return rebuildBranchDerived(this.#db, branchId);
+  }
+
+  createReimportCheckpointWork(
+    manuscriptId: string,
+    branchId: string,
+  ): { workId: string | null; total: number; checkpoint: ReimportCheckpointBinding | null } {
+    const binding = this.#binding(manuscriptId, branchId);
+    this.#requireBranchEditable(branchId);
+    if (binding.journalSequence === binding.lastCheckpointSequence) {
+      return {
+        workId: null,
+        total: 0,
+        checkpoint: {
+          bookId: binding.bookId,
+          manuscriptId,
+          branchId,
+          revisionId: binding.revisionId,
+          revisionLabel: binding.revisionLabel,
+          revisionDigest: binding.workingDigest,
+          journalSequence: binding.journalSequence,
+          createdForDirtyJournal: false,
+        },
+      };
+    }
+    requireBounded(!Array.from(this.#reimportCheckpointWork.values()).some((work) => work.binding.branchId === branchId),
+      'SERVICE_BUSY', '该稿件已有重新导入固定点任务。');
+    const previous = one(this.#db.prepare(
+      'SELECT ordinal, source_version_id FROM manuscript_revisions WHERE revision_id = ?',
+    ).all(binding.revisionId) as SqlRow[], 'REIMPORT_CHECKPOINT_INVALID', '当前稿件修订版缺失。');
+    const totalBlocks = lastWorkingPosition(this.#db, branchId);
+    requireBounded(totalBlocks > 0, 'REIMPORT_CHECKPOINT_INVALID', '工作稿没有内容块。');
+    this.#db.exec(
+      `CREATE TEMP TABLE IF NOT EXISTS reimport_checkpoint_rows(
+         work_id TEXT NOT NULL,
+         revision_id TEXT NOT NULL,
+         block_id TEXT NOT NULL,
+         position INTEGER NOT NULL,
+         kind TEXT NOT NULL,
+         level INTEGER,
+         text TEXT NOT NULL,
+         digest TEXT NOT NULL,
+         start_offset INTEGER NOT NULL,
+         grapheme_length INTEGER NOT NULL,
+         PRIMARY KEY(work_id, position)
+       ) WITHOUT ROWID`,
+    );
+    const workId = randomUUID();
+    this.#reimportCheckpointWork.set(workId, {
+      workId,
+      binding,
+      revisionId: randomUUID(),
+      revisionLabel: `r${asNumber(previous.ordinal) + 1}`,
+      sourceVersionId: asString(previous.source_version_id),
+      totalBlocks,
+      cursor: 0,
+      expectedPosition: 1,
+      offset: 0,
+      createdAt: new Date().toISOString(),
+      state: 'copying',
+    });
+    return { workId, total: totalBlocks, checkpoint: null };
+  }
+
+  advanceReimportCheckpointWork(workId: string): ReimportCheckpointProgress {
+    requireBounded(UUID_PATTERN.test(workId), 'JOB_INVALID', '重新导入固定点任务标识无效。');
+    const work = this.#reimportCheckpointWork.get(workId);
+    requireBounded(work !== undefined, 'JOB_NOT_FOUND', '重新导入固定点任务不存在或已结束。');
+    if (work.state === 'prepared') {
+      return {
+        done: true,
+        completed: work.totalBlocks,
+        total: work.totalBlocks,
+        checkpoint: {
+          bookId: work.binding.bookId,
+          manuscriptId: work.binding.manuscriptId,
+          branchId: work.binding.branchId,
+          revisionId: work.revisionId,
+          revisionLabel: work.revisionLabel,
+          revisionDigest: work.binding.workingDigest,
+          journalSequence: work.binding.journalSequence,
+          createdForDirtyJournal: true,
+        },
+      };
+    }
+    const current = this.#binding(work.binding.manuscriptId, work.binding.branchId);
+    requireBounded(
+      current.revisionId === work.binding.revisionId &&
+        current.journalSequence === work.binding.journalSequence &&
+        current.workingDigest === work.binding.workingDigest &&
+        current.totalCharacters === work.binding.totalCharacters,
+      'REIMPORT_CHECKPOINT_STALE',
+      '建立重新导入安全固定点时稿件已变化。',
+    );
+    const rows = this.#db.prepare(
+      `SELECT block_id, position, kind, level, text, digest, grapheme_length
+       FROM working_blocks WHERE branch_id = ? AND position > ? ORDER BY position LIMIT ?`,
+    ).all(work.binding.branchId, work.cursor, MIGRATION_BATCH) as SqlRow[];
+    if (rows.length > 0) {
+      const insert = this.#db.prepare(
+        `INSERT INTO temp.reimport_checkpoint_rows(
+           work_id, revision_id, block_id, position, kind, level, text, digest, start_offset, grapheme_length
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      );
+      transact(this.#db, () => {
+        for (const row of rows) {
+          const position = asNumber(row.position);
+          const kind = asString(row.kind) as ManuscriptBlockProjection['kind'];
+          const level = row.level === null ? null : asNumber(row.level);
+          const text = asString(row.text);
+          const length = stagedBlockLength(text, 'REIMPORT_CHECKPOINT_INVALID', '工作稿文字超出重新导入固定点边界。');
+          requireBounded(
+            position === work.expectedPosition && asNumber(row.grapheme_length) === length &&
+              blockDigest(kind, level, text) === asString(row.digest),
+            'REIMPORT_CHECKPOINT_INVALID',
+            '工作稿内容无法建立精确重新导入固定点。',
+          );
+          insert.run(workId, work.revisionId, asString(row.block_id), position, kind, level, text,
+            asString(row.digest), work.offset, length);
+          work.cursor = position;
+          work.expectedPosition += 1;
+          work.offset += length;
+        }
+      });
+      return { done: false, completed: work.cursor, total: work.totalBlocks, checkpoint: null };
+    }
+    requireBounded(
+      work.cursor === work.totalBlocks && work.offset === work.binding.totalCharacters &&
+        workingOffsetPrefix(this.#db, work.binding.branchId, work.totalBlocks) === work.offset,
+      'REIMPORT_CHECKPOINT_INVALID',
+      '工作稿偏移索引与重新导入固定点不一致。',
+    );
+    work.state = 'prepared';
+    return {
+      done: true,
+      completed: work.totalBlocks,
+      total: work.totalBlocks,
+      checkpoint: {
+        bookId: work.binding.bookId,
+        manuscriptId: work.binding.manuscriptId,
+        branchId: work.binding.branchId,
+        revisionId: work.revisionId,
+        revisionLabel: work.revisionLabel,
+        revisionDigest: work.binding.workingDigest,
+        journalSequence: work.binding.journalSequence,
+        createdForDirtyJournal: true,
+      },
+    };
+  }
+
+  finalizeReimportCheckpointWork(workId: string, persistComparison: () => void): ReimportCheckpointBinding {
+    requireBounded(UUID_PATTERN.test(workId), 'JOB_INVALID', '重新导入固定点任务标识无效。');
+    const work = this.#reimportCheckpointWork.get(workId);
+    requireBounded(work !== undefined && work.state === 'prepared', 'REIMPORT_CHECKPOINT_INVALID',
+      '重新导入固定点尚未完成有界准备。');
+    const checkpoint = transact(this.#db, () => {
+      const exact = this.#binding(work.binding.manuscriptId, work.binding.branchId);
+      requireBounded(
+        exact.revisionId === work.binding.revisionId && exact.journalSequence === work.binding.journalSequence &&
+          exact.workingDigest === work.binding.workingDigest && exact.totalCharacters === work.binding.totalCharacters,
+        'REIMPORT_CHECKPOINT_STALE', '建立重新导入安全固定点时稿件已变化。',
+      );
+      this.#db.prepare(
+        `INSERT INTO manuscript_revisions(
+           revision_id, manuscript_id, branch_id, ordinal, revision_label, parent_revision_id,
+           source_version_id, revision_digest, created_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(work.revisionId, work.binding.manuscriptId, work.binding.branchId,
+        Number(work.revisionLabel.slice(1)), work.revisionLabel, work.binding.revisionId,
+        work.sourceVersionId, work.binding.workingDigest, work.createdAt);
+      const copied = this.#db.prepare(
+        `INSERT INTO manuscript_block_versions(
+           revision_id, block_id, position, kind, level, text, digest, start_offset, grapheme_length
+         ) SELECT ?, block_id, position, kind, level, text, digest, start_offset, grapheme_length
+           FROM temp.reimport_checkpoint_rows WHERE work_id = ? ORDER BY position`,
+      ).run(work.revisionId, workId);
+      requireBounded(copied.changes === work.totalBlocks, 'REIMPORT_CHECKPOINT_INVALID',
+        '重新导入固定点内容块不完整。');
+      requireBounded(this.#db.prepare(
+        `UPDATE branch_working_state SET base_revision_id = ?, last_checkpoint_sequence = ?
+         WHERE branch_id = ? AND base_revision_id = ? AND journal_sequence = ? AND working_digest = ?`,
+      ).run(work.revisionId, work.binding.journalSequence, work.binding.branchId, work.binding.revisionId,
+        work.binding.journalSequence, work.binding.workingDigest).changes === 1,
+      'REIMPORT_CHECKPOINT_STALE', '建立重新导入安全固定点时稿件已变化。');
+      requireBounded(this.#db.prepare(
+        'UPDATE manuscript_branches SET base_revision_id = ? WHERE branch_id = ? AND base_revision_id = ?',
+      ).run(work.revisionId, work.binding.branchId, work.binding.revisionId).changes === 1,
+      'REIMPORT_CHECKPOINT_STALE', '建立重新导入安全固定点时分支已变化。');
+      persistComparison();
+      this.#db.prepare('DELETE FROM temp.reimport_checkpoint_rows WHERE work_id = ?').run(workId);
+      const completed = this.#binding(work.binding.manuscriptId, work.binding.branchId);
+      return {
+        bookId: completed.bookId,
+        manuscriptId: completed.manuscriptId,
+        branchId: completed.branchId,
+        revisionId: completed.revisionId,
+        revisionLabel: completed.revisionLabel,
+        revisionDigest: completed.workingDigest,
+        journalSequence: completed.journalSequence,
+        createdForDirtyJournal: true,
+      };
+    });
+    this.#reimportCheckpointWork.delete(workId);
+    return checkpoint;
+  }
+
+  cancelReimportCheckpointWork(workId: string): boolean {
+    requireBounded(UUID_PATTERN.test(workId), 'JOB_INVALID', '重新导入固定点任务标识无效。');
+    if (!this.#reimportCheckpointWork.delete(workId)) return false;
+    this.#db.prepare('DELETE FROM temp.reimport_checkpoint_rows WHERE work_id = ?').run(workId);
+    return true;
   }
 
   checkpointForReimport(manuscriptId: string, branchId: string): ReimportCheckpointBinding {

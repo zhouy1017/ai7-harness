@@ -955,11 +955,12 @@ function renderBookOverview(
   const actions = element('div', 'button-row');
   const completionActionButtons: HTMLButtonElement[] = [];
   if (sourceCompletion) {
-    const sourceRecord = overview.records.find((record) =>
-      record.kind === 'source' && record.sourceVersionId === sourceCompletion.sourceVersionId);
-    const sourceImportRecord = overview.records.find((record) =>
-      record.kind === 'source-import-record' && record.sourceImportRecordId === sourceCompletion.sourceImportRecordId);
-    if (!sourceRecord || !sourceImportRecord) throw new Error('AI7_SOURCE_IMPORT_RESULT_INVALID');
+    const sourceRecord = sourceCompletion.receipt.source;
+    const sourceImportRecord = sourceCompletion.receipt.record;
+    if (sourceRecord.sourceVersionId !== sourceCompletion.sourceVersionId ||
+      sourceImportRecord.sourceImportRecordId !== sourceCompletion.sourceImportRecordId) {
+      throw new Error('AI7_SOURCE_IMPORT_RESULT_INVALID');
+    }
     const viewSource = button('查看来源材料', 'primary', () => detailHost.replaceChildren(recordPresentation(sourceRecord)));
     viewSource.dataset['viewSourceVersionId'] = sourceCompletion.sourceVersionId;
     const viewImportRecord = button('查看来源导入记录', 'secondary', () =>
@@ -970,9 +971,10 @@ function renderBookOverview(
     completionActionButtons.push(viewSource, viewImportRecord);
     actions.append(viewSource, viewImportRecord);
   } else if (reimportCompletion) {
-    const reimportRecord = overview.records.find((record) =>
-      record.kind === 'manuscript-reimport-record' && record.reimportRecordId === reimportCompletion.reimportRecordId);
-    if (!reimportRecord) throw new Error('AI7_REIMPORT_RESULT_INVALID');
+    const reimportRecord = reimportCompletion.receipt;
+    if (reimportRecord.reimportRecordId !== reimportCompletion.reimportRecordId) {
+      throw new Error('AI7_REIMPORT_RESULT_INVALID');
+    }
     const viewRecord = button('查看稿件重新导入记录', 'primary', () =>
       detailHost.replaceChildren(recordPresentation(reimportRecord)));
     viewRecord.dataset['viewReimportRecordId'] = reimportCompletion.reimportRecordId;
@@ -1064,6 +1066,27 @@ function renderBookOverview(
     recordButtons.append(open);
   }
   records.append(recordButtons, detailHost);
+  const historyNavigation = element('div', 'button-row compact-actions');
+  const replaceHistoryPage = async (historyCursor: NonNullable<BookWorkOverviewProjection['historyPage']['nextCursor']>) => {
+    setStatus('正在读取图书历史页…', 'busy');
+    try {
+      renderBookOverview(await window.ai7.getBookOverview({ bookId: overview.book.bookId, historyCursor }),
+        undefined, recoveryReturn);
+    } catch (error) {
+      setStatus(rendererErrorMessage(error, '无法读取图书历史页。'), 'error');
+    }
+  };
+  if (overview.historyPage.previousCursor !== null) {
+    const previous = button('较早记录', 'quiet', () => void replaceHistoryPage(overview.historyPage.previousCursor!));
+    previous.dataset['bookHistoryPrevious'] = overview.historyPage.previousCursor.stableId;
+    historyNavigation.append(previous);
+  }
+  if (overview.historyPage.nextCursor !== null) {
+    const next = button('较新记录', 'quiet', () => void replaceHistoryPage(overview.historyPage.nextCursor!));
+    next.dataset['bookHistoryNext'] = overview.historyPage.nextCursor.stableId;
+    historyNavigation.append(next);
+  }
+  records.append(historyNavigation);
   content.append(records);
   appendRecoveryReturnAction(content, recoveryReturn);
   replaceScreen(completion ? 'imported' : 'book-overview', content);
@@ -1264,7 +1287,7 @@ function renderLanding(
         setStatus('正在读取精确图书工作概览…', 'busy');
         try {
           renderBookOverview(
-            await window.ai7.getBookOverview({ bookId: summary.bookId }),
+            await window.ai7.getBookOverview({ bookId: summary.bookId, historyCursor: null }),
             undefined,
             activeRecoveryReturn,
           );
@@ -1766,11 +1789,24 @@ function renderTargetChoice(
 
     const actions = element('div', 'button-row');
     if (reimportLineageChoice !== undefined && reuseSourceVersionId !== undefined) {
+      let activePreparationJob: ServiceJobProjection | null = null;
+      const cancelPreparation = button('取消当前操作', 'secondary', async () => {
+        if (activePreparationJob === null) return;
+        cancelPreparation.disabled = true;
+        try {
+          activePreparationJob = await window.ai7.cancelServiceJob({ jobId: activePreparationJob.jobId });
+          setStatus(activePreparationJob.progress.label, 'success');
+        } catch (error) {
+          setStatus(rendererErrorMessage(error, '无法取消重新导入比较准备。'), 'error');
+        }
+      });
+      cancelPreparation.dataset['cancelReimportPreparation'] = 'true';
+      cancelPreparation.hidden = true;
       const prepare = button('准备稿件重新导入比较', 'primary', async () => {
         prepare.disabled = true;
         setStatus('正在建立安全固定点并准备逐块比较…', 'busy');
         try {
-          const review = await window.ai7.prepareManuscriptReimport({
+          activePreparationJob = await window.ai7.prepareManuscriptReimport({
             draftId: staged.draftId,
             expectedDraftVersion: staged.draftVersion,
             target: {
@@ -1783,15 +1819,39 @@ function renderTargetChoice(
               reuseSourceVersionId,
             },
           });
+          cancelPreparation.dataset['jobProgressCompleted'] = String(activePreparationJob.progress.completed);
+          cancelPreparation.dataset['jobProgressTotal'] = String(activePreparationJob.progress.total);
+          cancelPreparation.hidden = false;
+          cancelPreparation.disabled = false;
+          const completed = await awaitServiceJob(activePreparationJob, (job) => {
+            activePreparationJob = job;
+            cancelPreparation.dataset['jobProgressCompleted'] = String(job.progress.completed);
+            cancelPreparation.dataset['jobProgressTotal'] = String(job.progress.total);
+            const progress = `${job.progress.completed.toLocaleString('zh-CN')} / ${job.progress.total.toLocaleString('zh-CN')}`;
+            setStatus(`${job.progress.label} ${progress}`, job.state === 'failed' ? 'error' : 'busy');
+          });
+          if (completed.state === 'cancelled') {
+            activePreparationJob = null;
+            cancelPreparation.hidden = true;
+            prepare.disabled = false;
+            setStatus('重新导入比较准备已取消；暂存草稿未变化。', 'success');
+            return;
+          }
+          const review = completed.result;
+          if (completed.kind !== 'reimport-preparation' || review === null || !('checkpoint' in review)) {
+            throw new Error('重新导入比较任务未返回复核结果。');
+          }
           renderManuscriptReimportReview(review, recoveryNotice, recoveryReturn);
           setStatus('稿件重新导入比较已准备', 'success');
         } catch (error) {
+          activePreparationJob = null;
+          cancelPreparation.hidden = true;
           prepare.disabled = false;
           setStatus(rendererErrorMessage(error, '无法准备稿件重新导入比较。'), 'error');
         }
       });
       prepare.dataset['prepareManuscriptReimport'] = selectedChoice.bookId;
-      actions.append(prepare);
+      actions.append(prepare, cancelPreparation);
       revealedControl = prepare;
     }
     actions.append(cancelImport);
@@ -1999,9 +2059,12 @@ function renderManuscriptReimportReview(
   const content = panel();
   content.dataset['importReviewKind'] = 'reimport';
   content.dataset['reimportLineageStatus'] = review.lineage.status;
+  content.dataset['reimportDraftId'] = review.draftId;
   content.dataset['reimportComparisonKind'] = review.lineage.comparisonKind;
   content.dataset['reimportCommitReady'] = String(review.commitReady);
   content.dataset['reimportDraftVersion'] = String(review.draftVersion);
+  content.dataset['reimportReviewDigest'] = review.reviewDigest;
+  content.dataset['reimportCommitAttemptId'] = review.commitAttemptId ?? '';
   content.append(
     element('p', 'section-label', '步骤 2 / 3 · 稿件重新导入复核'),
     element('h2', undefined, '逐块复核稿件重新导入'),
@@ -2112,13 +2175,38 @@ function renderManuscriptReimportReview(
       ) => {
         control.disabled = true;
         try {
-          const refreshed = await window.ai7.resolveReimportMapping({
+          const initial = await window.ai7.resolveReimportMapping({
             draftId: review.draftId,
             expectedDraftVersion: review.draftVersion,
             mappingId,
             resolution,
             currentBlockId,
           });
+          const cancelResolution = button('取消当前操作', 'quiet', async () => {
+            cancelResolution.disabled = true;
+            await window.ai7.cancelServiceJob({ jobId: initial.jobId });
+          });
+          cancelResolution.dataset['cancelReimportResolution'] = initial.jobId;
+          cancelResolution.dataset['jobProgressCompleted'] = String(initial.progress.completed);
+          cancelResolution.dataset['jobProgressTotal'] = String(initial.progress.total);
+          control.after(cancelResolution);
+          const completed = await awaitServiceJob(initial, (job) => {
+            cancelResolution.dataset['jobProgressCompleted'] = String(job.progress.completed);
+            cancelResolution.dataset['jobProgressTotal'] = String(job.progress.total);
+            const progress = `${job.progress.completed.toLocaleString('zh-CN')} / ${job.progress.total.toLocaleString('zh-CN')}`;
+            setStatus(`${job.progress.label} ${progress}`, job.state === 'failed' ? 'error' : 'busy');
+          });
+          if (completed.state === 'cancelled') {
+            cancelResolution.remove();
+            control.disabled = false;
+            setStatus('结构身份解决已取消；复核权威未变化。', 'success');
+            return;
+          }
+          const refreshed = completed.result;
+          if (completed.kind !== 'reimport-resolution' || refreshed === null || !('checkpoint' in refreshed)) {
+            throw new Error('结构身份解决任务未返回复核结果。');
+          }
+          cancelResolution.remove();
           renderManuscriptReimportReview(refreshed, recoveryNotice, recoveryReturn, mappingAfter);
           setStatus('结构身份后果已持久化；复核摘要已更新', 'success');
         } catch (error) {
@@ -2233,17 +2321,56 @@ function renderManuscriptReimportReview(
   grid.append(listSection('将创建的记录', review.recordsToCreate), listSection('明确不会发生', review.namedNonEffects));
   content.append(grid);
   const actions = element('div', 'button-row compact-actions');
+  const abandon = button('取消导入', 'quiet', () =>
+    abandonAndContinue({ draftId: review.draftId, draftVersion: review.draftVersion }, recoveryReturn));
   if (review.commitReady) {
+    let activeCommitJob: ServiceJobProjection | null = null;
+    const cancelCommit = button('取消当前提交', 'secondary', async () => {
+      if (activeCommitJob === null) return;
+      cancelCommit.disabled = true;
+      try {
+        activeCommitJob = await window.ai7.cancelServiceJob({ jobId: activeCommitJob.jobId });
+        setStatus(activeCommitJob.progress.label, 'success');
+      } catch (error) {
+        setStatus(rendererErrorMessage(error, '无法取消重新导入提交。'), 'error');
+      }
+    });
+    cancelCommit.dataset['cancelReimportCommit'] = 'true';
+    cancelCommit.hidden = true;
     const commit = button(review.comparison.changed ? '提交稿件重新导入' : '记录未发现稿件变化', 'primary', async () => {
       commit.disabled = true;
-      setStatus('正在原子提交稿件重新导入结果…', 'busy');
+      abandon.disabled = true;
+      setStatus('正在有界核对并提交稿件重新导入结果…', 'busy');
       try {
-        const result = await window.ai7.commitManuscriptReimport({
+        activeCommitJob = await window.ai7.commitManuscriptReimport({
           draftId: review.draftId,
           expectedDraftVersion: review.draftVersion,
           reviewDigest: review.reviewDigest,
           commitAttemptId: review.commitAttemptId,
         });
+        cancelCommit.dataset['jobProgressCompleted'] = String(activeCommitJob.progress.completed);
+        cancelCommit.dataset['jobProgressTotal'] = String(activeCommitJob.progress.total);
+        cancelCommit.hidden = false;
+        cancelCommit.disabled = false;
+        const completed = await awaitServiceJob(activeCommitJob, (job) => {
+          activeCommitJob = job;
+          cancelCommit.dataset['jobProgressCompleted'] = String(job.progress.completed);
+          cancelCommit.dataset['jobProgressTotal'] = String(job.progress.total);
+          const progress = `${job.progress.completed.toLocaleString('zh-CN')} / ${job.progress.total.toLocaleString('zh-CN')}`;
+          setStatus(`${job.progress.label} ${progress}`, job.state === 'failed' ? 'error' : 'busy');
+        });
+        if (completed.state === 'cancelled') {
+          activeCommitJob = null;
+          cancelCommit.hidden = true;
+          commit.disabled = false;
+          abandon.disabled = false;
+          setStatus('重新导入提交已取消；复核与稿件权威未变化。', 'success');
+          return;
+        }
+        const result = completed.result;
+        if (completed.kind !== 'reimport-commit' || result === null || !('reimportRecordId' in result)) {
+          throw new Error('重新导入提交任务未返回完成凭据。');
+        }
         renderImported(result, recoveryReturn);
         setStatus(result.completionLabel, 'success');
       } catch (error) {
@@ -2253,14 +2380,14 @@ function renderManuscriptReimportReview(
           return;
         }
         commit.disabled = false;
+        abandon.disabled = false;
         setStatus(rendererErrorMessage(error, '稿件重新导入未完成。'), 'error');
       }
     });
     commit.dataset['commitManuscriptReimport'] = review.target.bookId;
-    actions.append(commit);
+    actions.append(commit, cancelCommit);
   }
-  actions.append(button('取消导入', 'quiet', () =>
-    abandonAndContinue({ draftId: review.draftId, draftVersion: review.draftVersion }, recoveryReturn)));
+  actions.append(abandon);
   content.append(actions);
   appendRecoveryReturnAction(content, recoveryReturn);
   replaceScreen('review', content);
@@ -2489,13 +2616,29 @@ async function awaitServiceJob(
   onProgress: (job: ServiceJobProjection) => void,
 ): Promise<ServiceJobProjection> {
   let job = initial;
+  let previousReimportProgress = initial.progress.completed;
+  const requireMonotonicReimportProgress = (next: ServiceJobProjection): void => {
+    if (next.kind !== 'reimport-preparation' && next.kind !== 'reimport-resolution' && next.kind !== 'reimport-commit') return;
+    if (!Number.isSafeInteger(next.progress.completed) || !Number.isSafeInteger(next.progress.total) ||
+      next.progress.completed < previousReimportProgress || next.progress.completed > next.progress.total ||
+      next.progress.total <= 0 ||
+      (next.state === 'completed' && next.progress.completed !== next.progress.total)) {
+      throw new Error('重新导入协作任务进度无效或发生倒退。');
+    }
+    previousReimportProgress = next.progress.completed;
+  };
+  requireMonotonicReimportProgress(job);
   onProgress(job);
   while (job.state === 'queued' || job.state === 'running') {
     await delay(25);
     job = await window.ai7.pollServiceJob({ jobId: job.jobId });
+    requireMonotonicReimportProgress(job);
     onProgress(job);
   }
-  if (job.state === 'failed') throw new Error(job.failure?.message ?? '后台业务操作未完成。');
+  if (job.state === 'failed') {
+    const failure = job.failure ?? { code: 'SERVICE_JOB_FAILED', message: '后台业务操作未完成。' };
+    throw Object.assign(new Error(failure.message), failure);
+  }
   return job;
 }
 
@@ -3133,7 +3276,9 @@ function renderEditorWindow(
         searchSummary.textContent = '查找已取消；当前本地编辑不受影响。';
         return;
       }
-      if (completed.kind !== 'search' || !completed.result || 'replacement' in completed.result) throw new Error('查找结果绑定无效。');
+      if (completed.kind !== 'search' || !completed.result || !('searchId' in completed.result)) {
+        throw new Error('查找结果绑定无效。');
+      }
       await loadSearchResults(null, completed.result.searchId);
     } catch (error) {
       setStatus(rendererErrorMessage(error, '全稿查找未完成。'), 'error');
