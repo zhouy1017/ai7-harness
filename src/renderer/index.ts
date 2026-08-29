@@ -859,12 +859,17 @@ function recordPresentation(record: BookRecordPresentation): HTMLElement {
       appendRecordField(values, '比较方式', record.comparisonKind === 'three-way' ? '三方比较' : '两方比较');
       appendRecordField(values, '比较摘要', record.comparisonDigest, true);
       appendRecordField(values, '解决摘要', record.resolutionDigest, true);
+      appendRecordField(values, '导入保真审阅 ID', record.fidelityReviewId, true);
+      appendRecordField(values, '保真结果', record.fidelityOutcome === 'degraded-import-no-round-trip'
+        ? '含已接受的降级 · 不提供 DOCX 往返保证'
+        : '完整保留 · 不提供 DOCX 往返保证');
+      appendRecordField(values, '导入降级决定 ID', record.degradationDecisionId, true);
       appendRecordField(values, '记录摘要', record.recordDigest, true);
       appendRecordField(values, '导入时间', record.importedAt);
       break;
   }
   detail.append(values);
-  if (record.kind === 'import-record') {
+  if (record.kind === 'import-record' || record.kind === 'manuscript-reimport-record') {
     const fidelity = element('details', 'degradation-disclosure');
     fidelity.append(element('summary', undefined, '查看导入保真审阅 · 8 类'));
     const categories = element('ul', 'degradation-list');
@@ -1001,6 +1006,9 @@ function renderBookOverview(
             internalNumber: overview.book.internalNumber,
             manuscriptState: 'empty',
             reimportLineageSourceVersionIds: [],
+            reimportLineagePageAfter: null,
+            reimportLineagePreviousCursor: null,
+            reimportLineageNextCursor: null,
             selected: false,
           };
           staged = { ...staged, targetChoices: [...staged.targetChoices, exactChoice] };
@@ -1423,6 +1431,9 @@ function renderTargetChoice(
           internalNumber: book.internalNumber,
           manuscriptState: book.manuscriptState,
           reimportLineageSourceVersionIds: book.reimportLineageSourceVersionIds,
+          reimportLineagePageAfter: null,
+          reimportLineagePreviousCursor: null,
+          reimportLineageNextCursor: book.reimportLineageNextCursor,
           selected: false as const,
         }));
         renderTargetChoice(
@@ -1673,6 +1684,49 @@ function renderTargetChoice(
     addLineageChoice('unconfirmed', '来源关系未确认', '继续保守的两方比较；这不会被解释为来源确认或阻断导入。');
     for (const sourceVersionId of verifiedLineageSources) {
       addLineageChoice(sourceVersionId, `确认来源版本 ${sourceVersionId}`, '使用该图书拥有且已关联主稿件结果修订版的精确来源，执行三方比较。');
+    }
+    const loadLineagePage = async (after: string | null, control: HTMLButtonElement): Promise<void> => {
+      control.disabled = true;
+      setStatus('正在读取来源关系版本页…', 'busy');
+      try {
+        const page = await window.ai7.getReimportLineageSourceVersionPage({
+          bookId: selectedChoice.bookId,
+          after,
+        });
+        const pageItems = [...page.items];
+        if (reimportLineageChoice !== undefined && reimportLineageChoice !== 'unconfirmed' &&
+          !pageItems.includes(reimportLineageChoice)) pageItems.push(reimportLineageChoice);
+        const targetChoices = staged.targetChoices.map((choice) =>
+          choice.kind !== 'existing-book' || choice.id !== selectedChoice.id
+          ? choice
+          : {
+              ...choice,
+              reimportLineageSourceVersionIds: pageItems,
+              reimportLineagePageAfter: page.after,
+              reimportLineagePreviousCursor: page.previousCursor,
+              reimportLineageNextCursor: page.nextCursor,
+            });
+        renderTargetChoice(
+          { ...staged, targetChoices }, selectedChoice.id, recoveryNotice, recoveryReturn,
+          'reimport', reuseSourceVersionId, reimportLineageChoice,
+        );
+        setStatus('来源关系版本页已替换', 'success');
+      } catch (error) {
+        control.disabled = false;
+        setStatus(rendererErrorMessage(error, '无法读取来源关系版本页。'), 'error');
+      }
+    };
+    if (selectedChoice.reimportLineagePageAfter !== null) {
+      const previousLineage = button('上一页来源关系版本', 'quiet', () =>
+        void loadLineagePage(selectedChoice.reimportLineagePreviousCursor, previousLineage));
+      previousLineage.dataset['previousReimportLineage'] = selectedChoice.reimportLineagePreviousCursor ?? 'first';
+      lineageChoices.append(previousLineage);
+    }
+    if (selectedChoice.reimportLineageNextCursor !== null) {
+      const moreLineage = button('下一页来源关系版本', 'quiet', () =>
+        void loadLineagePage(selectedChoice.reimportLineageNextCursor, moreLineage));
+      moreLineage.dataset['loadMoreReimportLineage'] = selectedChoice.reimportLineageNextCursor;
+      lineageChoices.append(moreLineage);
     }
     content.append(lineageChoices);
 
@@ -1940,6 +1994,7 @@ function renderManuscriptReimportReview(
   review: ReviewBeforeManuscriptReimportProjection,
   recoveryNotice?: string,
   recoveryReturn?: RecoveryReturnContext,
+  mappingAfter: number | null = null,
 ): void {
   const content = panel();
   content.dataset['importReviewKind'] = 'reimport';
@@ -1964,13 +2019,30 @@ function renderManuscriptReimportReview(
     element('dt', undefined, '稿件分支 ID'), element('dd', 'technical-identity', review.target.branchId),
     element('dt', undefined, '导入关系'), element('dd', undefined, review.target.relationshipLabel),
     element('dt', undefined, '安全固定点'), element('dd', undefined, `${review.checkpoint.revisionLabel} · 修订日志 ${review.checkpoint.journalSequence}`),
+    element('dt', undefined, '当前固定点修订版 ID'), element('dd', 'technical-identity', review.checkpoint.revisionId),
+    element('dt', undefined, '当前固定点修订版摘要'), element('dd', 'technical-identity', review.checkpoint.revisionDigest),
     element('dt', undefined, '固定点来源'), element('dd', undefined,
       review.checkpoint.createdForDirtyJournal ? '已为未固定修订日志创建专用安全固定点' : '当前稿件已经位于持久固定点'),
     element('dt', undefined, '来源关系'), element('dd', undefined, review.lineage.label),
+    ...(review.lineage.status === 'verified'
+      ? [
+          element('dt', undefined, '来源关系版本 ID'),
+          element('dd', 'technical-identity', review.lineage.sourceVersionId),
+          element('dt', undefined, '来源关系修订版 ID'),
+          element('dd', 'technical-identity', review.lineage.revisionId),
+        ]
+      : []),
     element('dt', undefined, '比较方式'), element('dd', undefined,
       review.lineage.comparisonKind === 'three-way' ? '三方比较' : '两方比较'),
     element('dt', undefined, '来源版本结果'), element('dd', undefined, review.sourceVersionResult.label),
+    element('dt', undefined, '暂存文件名'), element('dd', undefined, review.source.displayName),
+    element('dt', undefined, '暂存格式'), element('dd', undefined, review.source.format),
+    element('dt', undefined, '暂存来源字节数'), element('dd', undefined, String(review.source.sourceBytes)),
+    element('dt', undefined, '暂存来源 SHA-256'), element('dd', 'technical-identity', review.source.sourceSha256),
+    element('dt', undefined, '暂存来源范围'), element('dd', undefined, review.source.provenanceLabel),
   );
+  target.dataset['reimportSourceSha256'] = review.source.sourceSha256;
+  target.dataset['reimportSourceBytes'] = String(review.source.sourceBytes);
   target.append(element('h3', undefined, '目标、固定点与来源关系'), values);
   content.append(target);
 
@@ -1985,30 +2057,89 @@ function renderManuscriptReimportReview(
   );
   content.append(summary);
 
+  const fidelity = element('section', 'review-section');
+  fidelity.append(element('h3', undefined, '重新导入保真审阅 · 8 类'));
+  const fidelityList = element('ul', 'degradation-list');
+  for (const category of review.fidelity) {
+    fidelityList.append(element('li', undefined,
+      `${category.label} · ${category.statusLabel} · ${category.count} 项 · ${category.detail}`));
+  }
+  fidelity.append(fidelityList);
+  if (review.degradationDecision.state === 'required-unselected') {
+    fidelity.append(element('p', 'attention-note', '必须明确接受完整降级集合后才能提交本次重新导入。'));
+    const accept = button('明确接受完整降级集合', 'secondary', async () => {
+      accept.disabled = true;
+      setStatus('正在持久化重新导入降级接受…', 'busy');
+      try {
+        const refreshed = await window.ai7.acceptReimportDegradation({
+          draftId: review.draftId,
+          expectedDraftVersion: review.draftVersion,
+        });
+        renderManuscriptReimportReview(refreshed, recoveryNotice, recoveryReturn, mappingAfter);
+        setStatus('完整降级集合已明确接受', 'success');
+      } catch (error) {
+        accept.disabled = false;
+        setStatus(rendererErrorMessage(error, '无法接受重新导入降级集合。'), 'error');
+      }
+    });
+    accept.dataset['acceptReimportDegradation'] = review.draftId;
+    fidelity.append(accept);
+  } else if (review.degradationDecision.state === 'accepted-complete-set') {
+    fidelity.append(element('p', 'success-note', '已明确接受完整降级集合'));
+  } else {
+    fidelity.append(element('p', 'success-note', '未发现需要接受的降级'));
+  }
+  content.append(fidelity);
+
   const mappingsHost = element('section', 'review-section');
   mappingsHost.dataset['reimportMappings'] = 'loading';
   mappingsHost.append(element('h3', undefined, '逐块映射'), element('p', 'field-note', '正在读取持久比较事实…'));
   content.append(mappingsHost);
   void Promise.resolve().then(async () => {
     try {
-      const items = [];
-      let after: number | null = null;
-      do {
-        const page = await window.ai7.getReimportMappingPage({
-          draftId: review.draftId,
-          expectedDraftVersion: review.draftVersion,
-          after,
-        });
-        items.push(...page.items);
-        after = page.nextCursor;
-      } while (after !== null);
+      const page = await window.ai7.getReimportMappingPage({
+        draftId: review.draftId,
+        expectedDraftVersion: review.draftVersion,
+        after: mappingAfter,
+      });
       if (!mappingsHost.isConnected) return;
       const list = element('div', 'comparison-list');
-      for (const mapping of items) {
+      const resolve = async (
+        mappingId: string,
+        resolution: 'preserve-current-identity' | 'create-new-identity' | 'retire-current-identity',
+        currentBlockId: string | null,
+        control: HTMLButtonElement,
+      ) => {
+        control.disabled = true;
+        try {
+          const refreshed = await window.ai7.resolveReimportMapping({
+            draftId: review.draftId,
+            expectedDraftVersion: review.draftVersion,
+            mappingId,
+            resolution,
+            currentBlockId,
+          });
+          renderManuscriptReimportReview(refreshed, recoveryNotice, recoveryReturn, mappingAfter);
+          setStatus('结构身份后果已持久化；复核摘要已更新', 'success');
+        } catch (error) {
+          if (hasErrorCode(error, 'DRAFT_VERSION_CHANGED') || hasErrorCode(error, 'REVIEW_CHANGED')) {
+            await initializeStartup();
+            return;
+          }
+          control.disabled = false;
+          setStatus(rendererErrorMessage(error, '无法持久化结构身份后果。'), 'error');
+        }
+      };
+      for (const mapping of page.items) {
         const row = element('article', 'comparison-item');
         row.dataset['reimportMappingId'] = mapping.mappingId;
         row.dataset['reimportChangeKind'] = mapping.changeKind;
         row.dataset['reimportMappingState'] = mapping.state;
+        row.dataset['currentBlockId'] = mapping.currentBlockId ?? '';
+        row.dataset['stagedBlockId'] = mapping.stagedBlockId ?? '';
+        row.dataset['resolvedCurrentBlockId'] = mapping.resolvedCurrentBlockId ?? '';
+        row.dataset['currentText'] = mapping.currentText ?? '';
+        row.dataset['stagedText'] = mapping.stagedText ?? '';
         row.append(
           element('strong', undefined, `位置 ${mapping.position} · ${mapping.changeKind}`),
           element('p', 'field-note', `当前：${mapping.currentText ?? '—'}`),
@@ -2018,36 +2149,77 @@ function renderManuscriptReimportReview(
           element('p', 'field-note', `暂存：${mapping.stagedText ?? '—'}`),
         );
         if (mapping.state === 'unresolved') {
-          const accept = button('接受此位置的暂存内容', 'secondary', async () => {
-            accept.disabled = true;
-            setStatus(`正在解决位置 ${mapping.position}…`, 'busy');
-            try {
-              const refreshed = await window.ai7.resolveReimportMapping({
+          if (mapping.changeKind === 'delete') {
+            const retire = button('退役当前结构身份', 'secondary', async () => {
+              setStatus(`正在记录位置 ${mapping.position} 的退役后果…`, 'busy');
+              await resolve(mapping.mappingId, 'retire-current-identity', null, retire);
+            });
+            retire.dataset['resolveReimportMapping'] = mapping.mappingId;
+            retire.dataset['identityResolution'] = 'retire-current-identity';
+            row.append(retire);
+          } else {
+            const create = button('创建新的结构身份', 'secondary', async () => {
+              setStatus(`正在记录位置 ${mapping.position} 的新身份后果…`, 'busy');
+              await resolve(mapping.mappingId, 'create-new-identity', null, create);
+            });
+            create.dataset['resolveReimportMapping'] = mapping.mappingId;
+            create.dataset['identityResolution'] = 'create-new-identity';
+            const candidatesHost = element('div', 'comparison-list');
+            const showCandidates = async (candidateAfter: number | null): Promise<void> => {
+              const candidates = await window.ai7.getReimportIdentityCandidatePage({
                 draftId: review.draftId,
                 expectedDraftVersion: review.draftVersion,
                 mappingId: mapping.mappingId,
-                resolution: 'accept-staged',
+                after: candidateAfter,
               });
-              renderManuscriptReimportReview(refreshed, recoveryNotice, recoveryReturn);
-              setStatus('逐块映射解决已持久化；复核摘要已更新', 'success');
-            } catch (error) {
-              if (hasErrorCode(error, 'DRAFT_VERSION_CHANGED') || hasErrorCode(error, 'REVIEW_CHANGED')) {
-                await initializeStartup();
-                return;
+              const candidateItems = element('div', 'comparison-list');
+              for (const candidate of candidates.items) {
+                const preserve = button(`保留当前身份 · 位置 ${candidate.position}`, 'quiet', async () => {
+                  setStatus(`正在把当前结构身份绑定到位置 ${mapping.position}…`, 'busy');
+                  await resolve(mapping.mappingId, 'preserve-current-identity', candidate.currentBlockId, preserve);
+                });
+                preserve.dataset['resolveReimportMapping'] = mapping.mappingId;
+                preserve.dataset['identityResolution'] = 'preserve-current-identity';
+                preserve.dataset['currentBlockId'] = candidate.currentBlockId;
+                candidateItems.append(element('p', 'field-note', candidate.text), preserve);
               }
-              accept.disabled = false;
-              setStatus(rendererErrorMessage(error, '无法解决逐块映射。'), 'error');
-            }
-          });
-          accept.dataset['resolveReimportMapping'] = mapping.mappingId;
-          row.append(accept);
-        } else if (mapping.resolution === 'accept-staged') {
-          row.append(element('p', 'success-note', '已明确接受暂存内容'));
+              const navigation = element('div', 'button-row compact-actions');
+              if (candidateAfter !== null) {
+                navigation.append(element('span', 'field-note', '候选使用向前分页；重新打开可从第一页开始。'));
+              }
+              if (candidates.nextCursor !== null) {
+                navigation.append(button('下一页候选', 'quiet', () => void showCandidates(candidates.nextCursor)));
+              }
+              candidatesHost.replaceChildren(candidateItems, navigation);
+            };
+            const choose = button('选择要保留的当前结构身份', 'quiet', () => void showCandidates(null));
+            row.append(create, choose, candidatesHost);
+          }
+        } else {
+          row.append(element('p', 'success-note', mapping.identityConsequence === 'preserve-current-identity'
+            ? '已明确保留当前结构身份'
+            : mapping.identityConsequence === 'create-new-identity'
+              ? '已明确创建新的结构身份'
+              : '已明确退役当前结构身份'));
         }
         list.append(row);
       }
+      const navigation = element('div', 'button-row compact-actions');
+      if (page.previousCursor !== null || mappingAfter !== null) {
+        const previous = button('上一页', 'quiet', () =>
+          renderManuscriptReimportReview(review, recoveryNotice, recoveryReturn, page.previousCursor));
+        previous.dataset['reimportPreviousPage'] = String(page.previousCursor ?? 0);
+        navigation.append(previous);
+      }
+      if (page.nextCursor !== null) {
+        const next = button('下一页', 'quiet', () =>
+          renderManuscriptReimportReview(review, recoveryNotice, recoveryReturn, page.nextCursor));
+        next.dataset['reimportNextPage'] = String(page.nextCursor);
+        navigation.append(next);
+      }
       mappingsHost.dataset['reimportMappings'] = 'ready';
-      mappingsHost.replaceChildren(element('h3', undefined, '逐块映射'), list);
+      mappingsHost.dataset['reimportPageItemCount'] = String(page.items.length);
+      mappingsHost.replaceChildren(element('h3', undefined, '逐块映射'), list, navigation);
     } catch (error) {
       mappingsHost.dataset['reimportMappings'] = 'failed';
       mappingsHost.replaceChildren(

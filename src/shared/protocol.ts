@@ -1,4 +1,4 @@
-export const SERVICE_PROTOCOL_VERSION = 7 as const;
+export const SERVICE_PROTOCOL_VERSION = 8 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -17,6 +17,7 @@ export type J01ImportControl =
   | 'after-commit-before-response'
   | 'uncertain-reconciliation'
   | 'legacy-reviewed-v2'
+  | 'tamper-reimport-proof-before-validation'
   | 'abandon-object-delete-failure'
   | 'after-abandon-object-delete-before-finalize';
 
@@ -43,6 +44,9 @@ export const IPC_CHANNELS = {
   commitSourceImport: 'ai7:j01:commit-source-import',
   prepareManuscriptReimport: 'ai7:j01:prepare-manuscript-reimport',
   getReimportMappingPage: 'ai7:j01:get-reimport-mapping-page',
+  getReimportIdentityCandidatePage: 'ai7:j01:get-reimport-identity-candidate-page',
+  getReimportLineageSourceVersionPage: 'ai7:j01:get-reimport-lineage-source-version-page',
+  acceptReimportDegradation: 'ai7:j01:accept-reimport-degradation',
   resolveReimportMapping: 'ai7:j01:resolve-reimport-mapping',
   commitManuscriptReimport: 'ai7:j01:commit-manuscript-reimport',
   acknowledgeImportCompletion: 'ai7:j01:acknowledge-import-completion',
@@ -298,6 +302,13 @@ export type BookRecordPresentation =
       comparisonKind: 'three-way' | 'two-way';
       comparisonDigest: string;
       resolutionDigest: string;
+      fidelityReviewId: string;
+      fidelityOutcome: ImportFidelityOutcome;
+      fidelityCategories: ReadonlyArray<FidelityCategoryProjection>;
+      degradationDecisionId: string | null;
+      degradationDecision:
+        | { summaryLabel: '含已接受的降级'; acceptedItems: ReadonlyArray<ImportDegradationItemProjection> }
+        | null;
       recordDigest: string;
       importedAt: string;
     };
@@ -327,6 +338,7 @@ export interface BookSummaryProjection {
   manuscriptState: 'empty' | 'populated';
   manuscriptStateLabel: '尚无稿件' | '已有主稿件';
   reimportLineageSourceVersionIds: ReadonlyArray<string>;
+  reimportLineageNextCursor: string | null;
 }
 
 export interface BookSummaryCursor {
@@ -387,6 +399,9 @@ export interface StagedImportProjection {
         internalNumber: string | null;
         manuscriptState: 'empty' | 'populated';
         reimportLineageSourceVersionIds: ReadonlyArray<string>;
+        reimportLineagePageAfter: string | null;
+        reimportLineagePreviousCursor: string | null;
+        reimportLineageNextCursor: string | null;
         selected: false;
       }
   >;
@@ -513,7 +528,7 @@ export interface ReviewBeforeSourceImportProjection {
 export interface ReimportMappingProjection {
   mappingId: string;
   position: number;
-  changeKind: 'unchanged' | 'replace' | 'insert' | 'delete';
+  changeKind: 'unchanged' | 'move' | 'edit' | 'insert' | 'delete';
   currentBlockId: string | null;
   lineageBlockId: string | null;
   stagedBlockId: string | null;
@@ -521,7 +536,9 @@ export interface ReimportMappingProjection {
   lineageText: string | null;
   stagedText: string | null;
   state: 'resolved' | 'unresolved';
-  resolution: 'accept-staged' | null;
+  identityConsequence: 'preserve-current-identity' | 'create-new-identity' | 'retire-current-identity' | null;
+  resolution: 'preserve-current-identity' | 'create-new-identity' | 'retire-current-identity' | null;
+  resolvedCurrentBlockId: string | null;
 }
 
 export interface ReviewBeforeManuscriptReimportProjection {
@@ -574,6 +591,8 @@ export interface ReviewBeforeManuscriptReimportProjection {
     changed: boolean;
     resultPreviewLabel: '稿件将重新导入' | '未发现稿件变化';
   };
+  fidelity: ReadonlyArray<FidelityCategoryProjection>;
+  degradationDecision: ImportDegradationDecisionReviewProjection;
   commitReady: boolean;
   recordsToCreate: ReadonlyArray<string>;
   namedNonEffects: ReadonlyArray<string>;
@@ -584,7 +603,32 @@ export interface ReimportMappingPageProjection {
   draftVersion: number;
   reviewDigest: string;
   items: ReadonlyArray<ReimportMappingProjection>;
+  previousCursor: number | null;
   nextCursor: number | null;
+}
+
+export interface ReimportIdentityCandidatePageProjection {
+  draftId: string;
+  draftVersion: number;
+  mappingId: string;
+  items: ReadonlyArray<{
+    currentBlockId: string;
+    position: number;
+    kind: 'title' | 'heading' | 'paragraph';
+    level: number | null;
+    text: string;
+    digest: string;
+  }>;
+  previousCursor: number | null;
+  nextCursor: number | null;
+}
+
+export interface ReimportLineageSourceVersionPageProjection {
+  bookId: string;
+  after: string | null;
+  items: ReadonlyArray<string>;
+  previousCursor: string | null;
+  nextCursor: string | null;
 }
 
 export interface ManuscriptBlockProjection {
@@ -1178,12 +1222,25 @@ export interface ServiceOperationMap {
     input: { draftId: string; expectedDraftVersion: number; after: number | null };
     output: ReimportMappingPageProjection;
   };
+  getReimportIdentityCandidatePage: {
+    input: { draftId: string; expectedDraftVersion: number; mappingId: string; after: number | null };
+    output: ReimportIdentityCandidatePageProjection;
+  };
+  getReimportLineageSourceVersionPage: {
+    input: { bookId: string; after: string | null };
+    output: ReimportLineageSourceVersionPageProjection;
+  };
+  acceptReimportDegradation: {
+    input: { draftId: string; expectedDraftVersion: number };
+    output: ReviewBeforeManuscriptReimportProjection;
+  };
   resolveReimportMapping: {
     input: {
       draftId: string;
       expectedDraftVersion: number;
       mappingId: string;
-      resolution: 'accept-staged';
+      resolution: 'preserve-current-identity' | 'create-new-identity' | 'retire-current-identity';
+      currentBlockId: string | null;
     };
     output: ReviewBeforeManuscriptReimportProjection;
   };
@@ -1311,6 +1368,9 @@ export interface RendererApi {
   commitSourceImport(input: CommitSourceImportRendererInput): Promise<SourceImportCommitProjection>;
   prepareManuscriptReimport(input: ServiceOperationMap['prepareManuscriptReimport']['input']): Promise<ReviewBeforeManuscriptReimportProjection>;
   getReimportMappingPage(input: ServiceOperationMap['getReimportMappingPage']['input']): Promise<ReimportMappingPageProjection>;
+  getReimportIdentityCandidatePage(input: ServiceOperationMap['getReimportIdentityCandidatePage']['input']): Promise<ReimportIdentityCandidatePageProjection>;
+  getReimportLineageSourceVersionPage(input: ServiceOperationMap['getReimportLineageSourceVersionPage']['input']): Promise<ReimportLineageSourceVersionPageProjection>;
+  acceptReimportDegradation(input: ServiceOperationMap['acceptReimportDegradation']['input']): Promise<ReviewBeforeManuscriptReimportProjection>;
   resolveReimportMapping(input: ServiceOperationMap['resolveReimportMapping']['input']): Promise<ReviewBeforeManuscriptReimportProjection>;
   commitManuscriptReimport(input: CommitManuscriptReimportRendererInput): Promise<ManuscriptReimportCommitProjection>;
   acknowledgeImportCompletion(input: ServiceOperationMap['acknowledgeImportCompletion']['input']): Promise<{ state: 'acknowledged' }>;

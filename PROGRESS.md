@@ -2,11 +2,13 @@
 
 ## What's done
 
-- Issue #40's bounded sole-primary-Manuscript reimport outcome is implemented in the existing protocol, main/preload/client, renderer, SQLite/store, and J-01 owners against exact base `dev@46357022800eb5ce233ca57061b03e1a7f2c8aeb`.
+- Issue #40's post-repair local candidate implements the bounded sole-primary-Manuscript reimport outcome in the existing protocol, main/preload/client, renderer, SQLite/store, and J-01 owners against exact base `dev@46357022800eb5ce233ca57061b03e1a7f2c8aeb`; it is pending Commander review and commit.
 - Exact same-Book owned lineage produces a three-way comparison; absent verified lineage remains available as the conservative two-way `来源关系未确认` path. Target, relationship, source-version result, mappings, and final commit remain explicit choices.
 - Changed completion atomically creates one Source Version/provenance result, one Manuscript Reimport Record, and one descendant Manuscript Revision. No-change records exact `未发现稿件变化` evidence without an empty Revision.
-- SQLite v9 advances only through additive fail-closed v10 in the same authority, with relationship/operation rebuilds, persisted comparison/resolution/reimport facts, exact three-result-kind exclusivity, semantic validation, and foreign-key validation.
-- J-01 covers verified and unconfirmed changed/no-change results, dirty-journal checkpointing, restart, mapping resolution, before-commit recovery, after-commit-before-response recovery, and uncertain fail-closed handling with immutable direct-record proof and no-duplicate counts.
+- SQLite v9 advances only through additive fail-closed v10 in the same authority, with relationship/operation rebuilds, persisted comparison/resolution/fidelity/reimport facts, exact three-result-kind exclusivity, bounded digest-indexed scans, semantic/startup tamper validation, and foreign-key validation.
+- Comparison and identity selection use full-text bounded page replacement rather than whole-Manuscript materialization. Only globally unambiguous exact matches preserve identity automatically; ambiguous edits, moves, insertions, deletions, and competing identities require one persisted explicit consequence.
+- J-01 covers verified and unconfirmed changed/no-change results, no-change lineage restart, duplicate-identity resolution that returns to no-change without an empty Revision, 260-block bounded page behavior, degraded fidelity acceptance/restart, dirty-journal checkpointing, exact reviewed-reimport recovery after original source-path loss, staged-object loss with mismatch rejection and all-choice-reset exact reselection, prepared-attempt recovery, after-commit recovery, uncertain fail-closed handling, tamper rejection, and immutable direct-record proof.
+- The exact pinned Windows TypeScript/build boundary and full provider-free J-01 pass after the generated `dist` output was cleared by the repository's closed-output build owner.
 
 ## What's next
 
@@ -31,5 +33,5 @@
 ## Safe Resume Prompt
 
 ```text
-Commander: inspect the uncommitted Issue #40 Worker diff against exact base dev@46357022800eb5ce233ca57061b03e1a7f2c8aeb and its pinned Windows doctor/bootstrap/tsc/build/J-01 evidence. If the bounded reimport semantics and exact v9→v10 authority remain acceptable, continue through the normal integration path, then run the separate lifecycle sweep. Keep Issue #42 and Issue #88 ready-for-human until the Owner explicitly decides new-journey Gate routing. Do not operate Actions or widen the standing gate surface.
+Commander: inspect the post-repair Issue #40 local candidate pending review and commit against exact base dev@46357022800eb5ce233ca57061b03e1a7f2c8aeb and its pinned Windows doctor/bootstrap/tsc/build/J-01 evidence. If the bounded reimport semantics and exact v9→v10 authority remain acceptable, commit and continue through the normal integration path, then run the separate lifecycle sweep. Keep Issue #42 and Issue #88 ready-for-human until the Owner explicitly decides new-journey Gate routing. Do not operate Actions or widen the standing gate surface.
 ```

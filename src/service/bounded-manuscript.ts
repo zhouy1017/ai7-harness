@@ -14,6 +14,7 @@ import {
   MAX_SEARCH_RESULTS,
   MAX_WINDOW_BLOCKS,
   type DurableHistoryProjection,
+  type FidelityCategoryProjection,
   type JournalAcknowledgement,
   type JournalEditInput,
   type ManuscriptBlockProjection,
@@ -35,6 +36,7 @@ import {
   type SearchResultsProjection,
   type SearchSummaryProjection,
 } from '../shared/protocol.js';
+import { deriveImportFidelityPlan } from './docx.js';
 import type { BuiltInWorkflowProfile } from './native-workflow-profile.js';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -53,6 +55,19 @@ const WINDOW_STRIDE = Math.floor(MAX_WINDOW_BLOCKS / 2);
 const MAX_RETAINED_TRANSIENT_SEARCHES = 32;
 const MAX_RETAINED_REPLACEMENT_PREVIEWS = 8;
 const MAX_RETAINED_TERMINAL_REPLACEMENTS = 4;
+const MANUSCRIPT_REIMPORT_NON_EFFECTS = [
+  '不创建第二份主稿件或并行稿件分支',
+  '不把来源关系未确认解释为导入阻断、来源确认或血缘证明',
+  '不执行模糊匹配或通用合并',
+  '不创建里程碑、恢复快照、恢复决定或恢复注意事项',
+  '不改变图书稳定标识、内部编号、编辑维度集或工作流程实例',
+  '不创建运行来源范围、事实状态或事实核查结论',
+  '不创建书系或书系成员关系',
+  '不创建编辑学习准入决定',
+  '不授予或执行模型提供方传输',
+  '不创建发稿版本、公开发布许可或公开发布事实',
+  '不导出、不发送、不交付、不发布',
+] as const;
 const REPLACEMENT_MATCHING_RULE = '精确字素匹配；从左向右；重叠时保留最早匹配' as const;
 const REPLACEMENT_INCLUSION_RULE = '仅提交冻结时明确纳入的非重叠精确匹配' as const;
 
@@ -948,6 +963,15 @@ const FULL_SOURCE_IMPORT_TARGET_SCHEMA_SQL = {
 } as const;
 
 const MANUSCRIPT_REIMPORT_SCHEMA_SQL = {
+  import_fidelity_reviews: `CREATE TABLE import_fidelity_reviews (
+    fidelity_review_id TEXT PRIMARY KEY,
+    book_id TEXT NOT NULL REFERENCES books(book_id),
+    source_version_id TEXT NOT NULL REFERENCES source_versions(source_version_id),
+    review_digest TEXT NOT NULL UNIQUE,
+    outcome TEXT NOT NULL CHECK(outcome IN ('clean-import-no-round-trip', 'degraded-import-no-round-trip')),
+    round_trip_guaranteed INTEGER NOT NULL CHECK(round_trip_guaranteed = 0),
+    created_at TEXT NOT NULL
+  ) STRICT`,
   import_drafts: `CREATE TABLE import_drafts (
     draft_id TEXT PRIMARY KEY,
     selection_token TEXT NOT NULL UNIQUE,
@@ -1015,12 +1039,23 @@ const MANUSCRIPT_REIMPORT_SCHEMA_SQL = {
     manuscript_id TEXT NOT NULL REFERENCES manuscripts(manuscript_id),
     branch_id TEXT NOT NULL REFERENCES manuscript_branches(branch_id),
     checkpoint_revision_id TEXT NOT NULL REFERENCES manuscript_revisions(revision_id),
+    checkpoint_revision_label TEXT NOT NULL,
+    checkpoint_revision_digest TEXT NOT NULL CHECK(length(checkpoint_revision_digest) = 64),
+    checkpoint_journal_sequence INTEGER NOT NULL CHECK(checkpoint_journal_sequence >= 0),
     checkpoint_created_for_dirty_journal INTEGER NOT NULL CHECK(checkpoint_created_for_dirty_journal IN (0, 1)),
     lineage_status TEXT NOT NULL CHECK(lineage_status IN ('verified', 'unconfirmed')),
     lineage_source_version_id TEXT REFERENCES source_versions(source_version_id),
     lineage_revision_id TEXT REFERENCES manuscript_revisions(revision_id),
+    lineage_revision_digest TEXT CHECK(lineage_revision_digest IS NULL OR length(lineage_revision_digest) = 64),
     comparison_kind TEXT NOT NULL CHECK(comparison_kind IN ('three-way', 'two-way')),
+    staged_source_digest TEXT NOT NULL CHECK(length(staged_source_digest) = 64),
+    staged_content_digest TEXT NOT NULL CHECK(length(staged_content_digest) = 64),
+    staged_structure_digest TEXT NOT NULL CHECK(length(staged_structure_digest) = 64),
+    staged_parser_identity TEXT NOT NULL,
+    staged_block_count INTEGER NOT NULL CHECK(staged_block_count > 0),
     comparison_digest TEXT NOT NULL UNIQUE CHECK(length(comparison_digest) = 64),
+    resolution_digest TEXT NOT NULL CHECK(length(resolution_digest) = 64),
+    degradation_accepted INTEGER NOT NULL CHECK(degradation_accepted IN (0, 1)),
     created_at TEXT NOT NULL,
     CHECK(
       (lineage_status = 'verified' AND lineage_source_version_id IS NOT NULL
@@ -1033,10 +1068,18 @@ const MANUSCRIPT_REIMPORT_SCHEMA_SQL = {
     mapping_id TEXT PRIMARY KEY,
     comparison_id TEXT NOT NULL REFERENCES manuscript_reimport_comparisons(comparison_id) ON DELETE CASCADE,
     position INTEGER NOT NULL CHECK(position > 0),
-    change_kind TEXT NOT NULL CHECK(change_kind IN ('unchanged', 'replace', 'insert', 'delete')),
+    change_kind TEXT NOT NULL CHECK(change_kind IN ('unchanged', 'move', 'edit', 'insert', 'delete')),
     current_block_id TEXT REFERENCES manuscript_blocks(block_id),
+    current_revision_id TEXT REFERENCES manuscript_revisions(revision_id),
+    current_position INTEGER CHECK(current_position IS NULL OR current_position > 0),
     lineage_block_id TEXT REFERENCES manuscript_blocks(block_id),
+    lineage_revision_id TEXT REFERENCES manuscript_revisions(revision_id),
+    lineage_position INTEGER CHECK(lineage_position IS NULL OR lineage_position > 0),
     staged_block_id TEXT,
+    staged_draft_id TEXT,
+    staged_position INTEGER CHECK(staged_position IS NULL OR staged_position > 0),
+    identity_consequence TEXT CHECK(identity_consequence IS NULL OR identity_consequence IN
+      ('preserve-current-identity', 'create-new-identity', 'retire-current-identity')),
     current_kind TEXT CHECK(current_kind IS NULL OR current_kind IN ('title', 'heading', 'paragraph')),
     current_level INTEGER,
     current_text TEXT,
@@ -1061,19 +1104,31 @@ const MANUSCRIPT_REIMPORT_SCHEMA_SQL = {
     CHECK((staged_block_id IS NULL) = (staged_text IS NULL)),
     CHECK((staged_block_id IS NULL) = (staged_digest IS NULL)),
     CHECK(
-      (change_kind = 'unchanged' AND current_block_id IS NOT NULL AND staged_block_id IS NOT NULL)
-      OR (change_kind = 'replace' AND current_block_id IS NOT NULL AND staged_block_id IS NOT NULL)
-      OR (change_kind = 'insert' AND current_block_id IS NULL AND staged_block_id IS NOT NULL)
-      OR (change_kind = 'delete' AND current_block_id IS NOT NULL AND staged_block_id IS NULL)
+      (change_kind = 'unchanged' AND current_block_id IS NOT NULL AND staged_block_id IS NOT NULL
+        AND current_position = staged_position AND identity_consequence = 'preserve-current-identity')
+      OR (change_kind = 'move' AND current_block_id IS NOT NULL AND staged_block_id IS NOT NULL
+        AND current_position != staged_position AND identity_consequence = 'preserve-current-identity')
+      OR (change_kind = 'edit' AND current_block_id IS NOT NULL AND staged_block_id IS NOT NULL
+        AND identity_consequence IS NULL)
+      OR (change_kind = 'insert' AND current_block_id IS NULL AND staged_block_id IS NOT NULL
+        AND identity_consequence IS NULL)
+      OR (change_kind = 'delete' AND current_block_id IS NOT NULL AND staged_block_id IS NULL
+        AND identity_consequence IS NULL)
     )
   ) STRICT`,
   manuscript_reimport_mapping_resolutions: `CREATE TABLE manuscript_reimport_mapping_resolutions (
     mapping_id TEXT PRIMARY KEY REFERENCES manuscript_reimport_mappings(mapping_id) ON DELETE CASCADE,
-    resolution TEXT NOT NULL CHECK(resolution = 'accept-staged'),
-    resolved_at TEXT NOT NULL
+    comparison_id TEXT NOT NULL REFERENCES manuscript_reimport_comparisons(comparison_id) ON DELETE CASCADE,
+    resolution TEXT NOT NULL CHECK(resolution IN
+      ('preserve-current-identity', 'create-new-identity', 'retire-current-identity')),
+    resolved_current_block_id TEXT REFERENCES manuscript_blocks(block_id),
+    resolved_at TEXT NOT NULL,
+    UNIQUE(comparison_id, resolved_current_block_id),
+    CHECK((resolution = 'preserve-current-identity') = (resolved_current_block_id IS NOT NULL))
   ) STRICT`,
   manuscript_reimport_records: `CREATE TABLE manuscript_reimport_records (
     reimport_record_id TEXT PRIMARY KEY,
+    comparison_id TEXT NOT NULL UNIQUE REFERENCES manuscript_reimport_comparisons(comparison_id),
     commit_id TEXT NOT NULL UNIQUE,
     book_id TEXT NOT NULL REFERENCES books(book_id),
     manuscript_id TEXT NOT NULL REFERENCES manuscripts(manuscript_id),
@@ -1089,6 +1144,8 @@ const MANUSCRIPT_REIMPORT_SCHEMA_SQL = {
     comparison_kind TEXT NOT NULL CHECK(comparison_kind IN ('three-way', 'two-way')),
     comparison_digest TEXT NOT NULL CHECK(length(comparison_digest) = 64),
     resolution_digest TEXT NOT NULL CHECK(length(resolution_digest) = 64),
+    fidelity_review_id TEXT NOT NULL UNIQUE REFERENCES import_fidelity_reviews(fidelity_review_id),
+    degradation_decision_id TEXT REFERENCES import_degradation_decisions(degradation_decision_id),
     record_digest TEXT NOT NULL UNIQUE CHECK(length(record_digest) = 64),
     imported_at TEXT NOT NULL,
     CHECK(
@@ -1154,6 +1211,10 @@ const MANUSCRIPT_REIMPORT_INDEX_SQL = {
   ...TARGET_INDEX_SQL,
   reimport_mappings_page:
     'CREATE INDEX reimport_mappings_page ON manuscript_reimport_mappings(comparison_id, position)',
+  staged_reimport_identity:
+    'CREATE INDEX staged_reimport_identity ON staged_import_blocks(draft_id, digest, kind, level)',
+  revision_reimport_identity:
+    'CREATE INDEX revision_reimport_identity ON manuscript_block_versions(revision_id, digest, kind, level)',
 } as const;
 
 const V7_TARGET_INDEX_SQL = {
@@ -1278,14 +1339,21 @@ const SCHEMA_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
   manuscript_reimport_mappings: [
     'comparison_id>manuscript_reimport_comparisons.comparison_id:NO ACTION/CASCADE/NONE',
     'current_block_id>manuscript_blocks.block_id:NO ACTION/NO ACTION/NONE',
+    'current_revision_id>manuscript_revisions.revision_id:NO ACTION/NO ACTION/NONE',
     'lineage_block_id>manuscript_blocks.block_id:NO ACTION/NO ACTION/NONE',
+    'lineage_revision_id>manuscript_revisions.revision_id:NO ACTION/NO ACTION/NONE',
   ],
   manuscript_reimport_mapping_resolutions: [
+    'comparison_id>manuscript_reimport_comparisons.comparison_id:NO ACTION/CASCADE/NONE',
     'mapping_id>manuscript_reimport_mappings.mapping_id:NO ACTION/CASCADE/NONE',
+    'resolved_current_block_id>manuscript_blocks.block_id:NO ACTION/NO ACTION/NONE',
   ],
   manuscript_reimport_records: [
     'book_id>books.book_id:NO ACTION/NO ACTION/NONE',
     'branch_id>manuscript_branches.branch_id:NO ACTION/NO ACTION/NONE',
+    'comparison_id>manuscript_reimport_comparisons.comparison_id:NO ACTION/NO ACTION/NONE',
+    'degradation_decision_id>import_degradation_decisions.degradation_decision_id:NO ACTION/NO ACTION/NONE',
+    'fidelity_review_id>import_fidelity_reviews.fidelity_review_id:NO ACTION/NO ACTION/NONE',
     'lineage_source_version_id>source_versions.source_version_id:NO ACTION/NO ACTION/NONE',
     'manuscript_id>manuscripts.manuscript_id:NO ACTION/NO ACTION/NONE',
     'previous_revision_id>manuscript_revisions.revision_id:NO ACTION/NO ACTION/NONE',
@@ -3282,7 +3350,7 @@ function validateCommandHistoryGroup(db: DatabaseSync, groupId: string): void {
   requireBounded(UUID_PATTERN.test(groupId), 'HISTORY_CORRUPT', '历史命令组标识无效。');
   const group = one(
     db.prepare(
-      'SELECT branch_id, before_working_digest, after_working_digest FROM manuscript_command_groups WHERE command_group_id = ?',
+      'SELECT branch_id, status, before_working_digest, after_working_digest FROM manuscript_command_groups WHERE command_group_id = ?',
     ).all(groupId) as SqlRow[],
     'HISTORY_CORRUPT',
     '历史命令组缺失。',
@@ -3315,14 +3383,22 @@ function validateCommandHistoryGroup(db: DatabaseSync, groupId: string): void {
     if (rows.length === 0) break;
     for (const row of rows) {
       position = asNumber(row.position);
-      requireBounded(
-        position === expectedPosition && typeof row.working_block_id === 'string' &&
-          typeof row.kind === 'string',
-        'HISTORY_CORRUPT',
-        '历史命令内容块顺序或绑定无效。',
-      );
-      const kind = asString(row.kind) as ManuscriptBlockProjection['kind'];
-      const level = row.level === null ? null : asNumber(row.level);
+      requireBounded(position === expectedPosition, 'HISTORY_CORRUPT', '历史命令内容块顺序或绑定无效。');
+      let kind: ManuscriptBlockProjection['kind'];
+      let level: number | null;
+      if (typeof row.working_block_id === 'string' && typeof row.kind === 'string') {
+        kind = asString(row.kind) as ManuscriptBlockProjection['kind'];
+        level = row.level === null ? null : asNumber(row.level);
+      } else {
+        requireBounded(asString(group.status) === 'superseded', 'HISTORY_CORRUPT', '历史命令内容块顺序或绑定无效。');
+        const shapes = db.prepare(
+          `SELECT kind, level FROM manuscript_block_versions WHERE block_id = ?
+           GROUP BY kind, level ORDER BY kind, level LIMIT 2`,
+        ).all(asString(row.block_id)) as SqlRow[];
+        requireBounded(shapes.length === 1, 'HISTORY_CORRUPT', '已归档历史命令的内容块结构证据无效。');
+        kind = asString(shapes[0]!.kind) as ManuscriptBlockProjection['kind'];
+        level = shapes[0]!.level === null ? null : asNumber(shapes[0]!.level);
+      }
       const shapeValid =
         (kind === 'title' && level === 1) ||
         (kind === 'heading' && level !== null && Number.isSafeInteger(level) && level >= 1 && level <= 6) ||
@@ -3875,55 +3951,478 @@ function validateManuscriptReimportTruth(db: DatabaseSync): void {
      JOIN manuscripts m ON m.manuscript_id = c.manuscript_id
      JOIN manuscript_branches mb ON mb.branch_id = c.branch_id
      JOIN manuscript_revisions checkpoint ON checkpoint.revision_id = c.checkpoint_revision_id
-     LEFT JOIN manuscript_revisions lineage ON lineage.revision_id = c.lineage_revision_id
-     LEFT JOIN source_versions lsv ON lsv.source_version_id = c.lineage_source_version_id
+    LEFT JOIN manuscript_revisions lineage ON lineage.revision_id = c.lineage_revision_id
+    LEFT JOIN source_versions lsv ON lsv.source_version_id = c.lineage_source_version_id
+    LEFT JOIN staged_import_snapshots ss ON ss.draft_id = c.draft_id
+    LEFT JOIN manuscript_reimport_records rr ON rr.comparison_id = c.comparison_id
+    LEFT JOIN source_versions rsv ON rsv.source_version_id = rr.source_version_id
      WHERE mb.manuscript_id != c.manuscript_id OR checkpoint.manuscript_id != c.manuscript_id
        OR checkpoint.branch_id != c.branch_id OR m.book_id != lsv.book_id
        OR (c.lineage_status = 'verified' AND (
-         lineage.manuscript_id != c.manuscript_id OR lineage.source_version_id != c.lineage_source_version_id
-       ))
+         lineage.manuscript_id != c.manuscript_id
+       )) OR COALESCE(ss.source_digest, rsv.source_digest) != c.staged_source_digest
+       OR COALESCE(ss.content_digest, rsv.content_digest) != c.staged_content_digest
+       OR COALESCE(ss.structure_digest, rsv.structure_digest) != c.staged_structure_digest
+       OR COALESCE(ss.parser_identity, rsv.parser_identity) != c.staged_parser_identity
      LIMIT 1`,
   ).get() as SqlRow | undefined;
   requireBounded(invalidComparison === undefined, 'SCHEMA_INVALID', '稿件重新导入比较绑定无效。');
 
-  const comparisons = db.prepare(
-    'SELECT comparison_id, lineage_status, lineage_revision_id FROM manuscript_reimport_comparisons ORDER BY comparison_id',
-  ).all() as SqlRow[];
-  for (const comparison of comparisons) {
-    const comparisonId = asString(comparison.comparison_id);
-    const mappings = db.prepare(
-      `SELECT m.*, r.resolution
-       FROM manuscript_reimport_mappings m
-       LEFT JOIN manuscript_reimport_mapping_resolutions r ON r.mapping_id = m.mapping_id
-       WHERE m.comparison_id = ? ORDER BY m.position`,
-    ).all(comparisonId) as SqlRow[];
-    requireBounded(mappings.length > 0, 'SCHEMA_INVALID', '稿件重新导入比较缺少映射事实。');
-    mappings.forEach((mapping, index) => {
-      const currentKind = mapping.current_kind === null ? null : asString(mapping.current_kind);
-      const currentLevel = mapping.current_level === null ? null : asNumber(mapping.current_level);
-      const currentText = mapping.current_text === null ? null : asString(mapping.current_text);
-      const stagedKind = mapping.staged_kind === null ? null : asString(mapping.staged_kind);
-      const stagedLevel = mapping.staged_level === null ? null : asNumber(mapping.staged_level);
-      const stagedText = mapping.staged_text === null ? null : asString(mapping.staged_text);
-      const changeKind = asString(mapping.change_kind);
-      requireBounded(asNumber(mapping.position) === index + 1, 'SCHEMA_INVALID', '稿件重新导入映射顺序不连续。');
-      if (currentText !== null) {
-        requireBounded(blockDigest(currentKind as ManuscriptBlockProjection['kind'], currentLevel, currentText) === asString(mapping.current_digest),
-          'SCHEMA_INVALID', '稿件重新导入当前内容摘要无效。');
-      }
-      if (stagedText !== null) {
-        requireBounded(blockDigest(stagedKind as ManuscriptBlockProjection['kind'], stagedLevel, stagedText) === asString(mapping.staged_digest),
-          'SCHEMA_INVALID', '稿件重新导入暂存内容摘要无效。');
-      }
-      const equal = currentText !== null && stagedText !== null && currentKind === stagedKind &&
-        currentLevel === stagedLevel && currentText === stagedText && mapping.current_digest === mapping.staged_digest;
+  let comparisonCursor: string | undefined;
+  while (true) {
+    const comparisons = comparisonCursor === undefined
+      ? db.prepare(
+        `SELECT c.*, m.book_id, checkpoint.revision_label actual_checkpoint_label,
+                checkpoint.revision_digest actual_checkpoint_digest,
+                lineage.revision_digest actual_lineage_digest
+         FROM manuscript_reimport_comparisons c
+         JOIN manuscripts m ON m.manuscript_id = c.manuscript_id
+         JOIN manuscript_revisions checkpoint ON checkpoint.revision_id = c.checkpoint_revision_id
+         LEFT JOIN manuscript_revisions lineage ON lineage.revision_id = c.lineage_revision_id
+         ORDER BY c.comparison_id LIMIT 64`,
+      ).all() as SqlRow[]
+      : db.prepare(
+        `SELECT c.*, m.book_id, checkpoint.revision_label actual_checkpoint_label,
+                checkpoint.revision_digest actual_checkpoint_digest,
+                lineage.revision_digest actual_lineage_digest
+         FROM manuscript_reimport_comparisons c
+         JOIN manuscripts m ON m.manuscript_id = c.manuscript_id
+         JOIN manuscript_revisions checkpoint ON checkpoint.revision_id = c.checkpoint_revision_id
+         LEFT JOIN manuscript_revisions lineage ON lineage.revision_id = c.lineage_revision_id
+         WHERE c.comparison_id > ? ORDER BY c.comparison_id LIMIT 64`,
+      ).all(comparisonCursor) as SqlRow[];
+    if (comparisons.length === 0) break;
+    for (const comparison of comparisons) {
+      const comparisonId = asString(comparison.comparison_id);
+      const draftId = asString(comparison.draft_id);
       requireBounded(
-        (changeKind === 'unchanged' && equal && mapping.resolution === null) ||
-          (changeKind !== 'unchanged' && !equal && (mapping.resolution === null || mapping.resolution === 'accept-staged')),
+        asString(comparison.checkpoint_revision_label) === asString(comparison.actual_checkpoint_label) &&
+          asString(comparison.checkpoint_revision_digest) === asString(comparison.actual_checkpoint_digest) &&
+          (comparison.lineage_status === 'verified'
+            ? comparison.lineage_revision_digest !== null && comparison.actual_lineage_digest !== null &&
+              asString(comparison.lineage_revision_digest) === asString(comparison.actual_lineage_digest)
+            : comparison.lineage_revision_digest === null),
         'SCHEMA_INVALID',
-        '稿件重新导入映射变化或解决事实无效。',
+        '稿件重新导入固定点或来源修订版摘要绑定无效。',
       );
-    });
+      if (comparison.lineage_status === 'verified') {
+        const exactLineage = db.prepare(
+          `SELECT 1 valid FROM (
+             SELECT mir.resulting_revision_id revision_id, mir.imported_at, mir.import_record_id record_id
+             FROM manuscript_import_records mir
+             WHERE mir.book_id = ? AND mir.manuscript_id = ? AND mir.source_version_id = ?
+             UNION ALL
+             SELECT CASE rr.result_kind WHEN 'changed' THEN rr.resulting_revision_id ELSE rr.previous_revision_id END revision_id,
+                    rr.imported_at, rr.reimport_record_id record_id
+             FROM manuscript_reimport_records rr
+             WHERE rr.book_id = ? AND rr.manuscript_id = ? AND rr.source_version_id = ?
+               AND ((rr.result_kind = 'changed' AND rr.resulting_revision_id IS NOT NULL)
+                 OR rr.result_kind = 'no-change')
+           ) WHERE revision_id = ? LIMIT 1`,
+        ).get(
+          asString(comparison.book_id), asString(comparison.manuscript_id),
+          asString(comparison.lineage_source_version_id), asString(comparison.book_id),
+          asString(comparison.manuscript_id), asString(comparison.lineage_source_version_id),
+          asString(comparison.lineage_revision_id),
+        ) as SqlRow | undefined;
+        requireBounded(exactLineage !== undefined,
+        'SCHEMA_INVALID', '稿件重新导入来源修订版没有同图书主稿件记录证明。');
+      }
+      const checkpoint = {
+        bookId: asString(comparison.book_id),
+        manuscriptId: asString(comparison.manuscript_id),
+        branchId: asString(comparison.branch_id),
+        revisionId: asString(comparison.checkpoint_revision_id),
+        revisionLabel: asString(comparison.checkpoint_revision_label),
+        revisionDigest: asString(comparison.checkpoint_revision_digest),
+        journalSequence: asNumber(comparison.checkpoint_journal_sequence),
+        createdForDirtyJournal: asNumber(comparison.checkpoint_created_for_dirty_journal) === 1,
+      };
+      const lineage = comparison.lineage_status === 'verified'
+        ? {
+            status: 'verified',
+            sourceVersionId: asString(comparison.lineage_source_version_id),
+            revisionId: asString(comparison.lineage_revision_id),
+            comparisonKind: 'three-way',
+          }
+        : { status: 'unconfirmed', sourceVersionId: null, revisionId: null, comparisonKind: 'two-way' };
+      const comparisonHash = createHash('sha256');
+      comparisonHash.update(canonicalJson({
+        schema: 'ai7.manuscript-reimport-comparison/2',
+        draftId,
+        manuscriptId: asString(comparison.manuscript_id),
+        branchId: asString(comparison.branch_id),
+        checkpoint,
+        lineage,
+      }));
+      const resolutionHash = createHash('sha256');
+      resolutionHash.update(canonicalJson({ schema: 'ai7.manuscript-reimport-resolutions/2' }));
+      let mappingCursor = 0;
+      let expectedPosition = 1;
+      let changed = false;
+      let stagedCount = 0;
+      let currentCount = 0;
+      let finalBlockCount = 0;
+      const duplicateAuthorityFact = db.prepare(
+        `SELECT 1 invalid FROM manuscript_reimport_mappings
+         WHERE comparison_id = ? AND (
+           current_block_id IN (
+             SELECT current_block_id FROM manuscript_reimport_mappings
+             WHERE comparison_id = ? AND current_block_id IS NOT NULL
+             GROUP BY current_block_id HAVING count(*) != 1
+           ) OR staged_block_id IN (
+             SELECT staged_block_id FROM manuscript_reimport_mappings
+             WHERE comparison_id = ? AND staged_block_id IS NOT NULL
+             GROUP BY staged_block_id HAVING count(*) != 1
+           )
+         ) LIMIT 1`,
+      ).get(comparisonId, comparisonId, comparisonId) as SqlRow | undefined;
+      requireBounded(duplicateAuthorityFact === undefined, 'SCHEMA_INVALID',
+        '稿件重新导入当前或暂存块映射重复。');
+      const committedResult = db.prepare(
+        `SELECT result_kind, previous_revision_id, resulting_revision_id
+         FROM manuscript_reimport_records WHERE comparison_id = ?`,
+      ).get(comparisonId) as SqlRow | undefined;
+      const committedRevisionId = committedResult === undefined
+        ? null
+        : committedResult.result_kind === 'changed'
+          ? asString(committedResult.resulting_revision_id)
+          : asString(committedResult.previous_revision_id);
+      while (true) {
+        const mappings = db.prepare(
+          `SELECT m.*, r.resolution, r.resolved_current_block_id,
+                  r.comparison_id resolution_comparison_id,
+                  claimed.mapping_id claimed_mapping_id, claimed.resolution claimed_resolution
+           FROM manuscript_reimport_mappings m
+           LEFT JOIN manuscript_reimport_mapping_resolutions r ON r.mapping_id = m.mapping_id
+           LEFT JOIN manuscript_reimport_mapping_resolutions claimed
+             ON claimed.comparison_id = m.comparison_id
+            AND claimed.resolved_current_block_id = m.current_block_id
+           WHERE m.comparison_id = ? AND m.position > ? ORDER BY m.position LIMIT 64`,
+        ).all(comparisonId, mappingCursor) as SqlRow[];
+        if (mappings.length === 0) break;
+        for (const mapping of mappings) {
+          const position = asNumber(mapping.position);
+          requireBounded(position === expectedPosition, 'SCHEMA_INVALID', '稿件重新导入映射顺序不连续。');
+          const fact = (prefix: 'current' | 'lineage' | 'staged') => {
+            const blockId = mapping[`${prefix}_block_id`];
+            if (blockId === null) return null;
+            const kind = asString(mapping[`${prefix}_kind`]) as ManuscriptBlockProjection['kind'];
+            const level = mapping[`${prefix}_level`] === null ? null : asNumber(mapping[`${prefix}_level`]);
+            const text = asString(mapping[`${prefix}_text`]);
+            const digest = asString(mapping[`${prefix}_digest`]);
+            requireBounded(blockDigest(kind, level, text) === digest, 'SCHEMA_INVALID', '稿件重新导入块摘要无效。');
+            return { blockId: asString(blockId), position: asNumber(mapping[`${prefix}_position`]), kind, level, text, digest };
+          };
+          const current = fact('current');
+          const lineageFact = fact('lineage');
+          const staged = fact('staged');
+          const changeKind = asString(mapping.change_kind);
+          const exact = mapping.identity_consequence === 'preserve-current-identity';
+          if (current !== null) currentCount += 1;
+          requireBounded(
+            (current === null) === (mapping.current_revision_id === null) &&
+              (lineageFact === null) === (mapping.lineage_revision_id === null) &&
+              (staged === null) === (mapping.staged_draft_id === null) &&
+              (current === null || mapping.current_revision_id === comparison.checkpoint_revision_id) &&
+              (lineageFact === null || mapping.lineage_revision_id === comparison.lineage_revision_id) &&
+              (staged === null || mapping.staged_draft_id === draftId) &&
+              ((changeKind === 'unchanged' && exact && current !== null && staged !== null &&
+                current.position === staged.position) ||
+               (changeKind === 'move' && exact && current !== null && staged !== null &&
+                current.position !== staged.position) ||
+               (changeKind === 'edit' && !exact && current !== null && staged !== null) ||
+               (changeKind === 'insert' && !exact && current === null && staged !== null) ||
+               (changeKind === 'delete' && !exact && current !== null && staged === null)),
+            'SCHEMA_INVALID',
+            '稿件重新导入映射身份或权威绑定无效。',
+          );
+          const resolution = mapping.resolution === null ? null : asString(mapping.resolution);
+          const resolvedCurrentBlockId = mapping.resolved_current_block_id === null
+            ? null
+            : asString(mapping.resolved_current_block_id);
+          requireBounded(
+            exact
+              ? resolution === null && mapping.claimed_mapping_id === null
+              : resolution === null || (
+                  mapping.resolution_comparison_id === comparisonId && (
+                    (resolution === 'preserve-current-identity' && resolvedCurrentBlockId !== null &&
+                      ((changeKind === 'edit' && current?.blockId === resolvedCurrentBlockId) ||
+                       (changeKind === 'insert' && current === null && db.prepare(
+                         `SELECT 1 valid FROM manuscript_reimport_mappings
+                          WHERE comparison_id = ? AND change_kind = 'delete' AND current_block_id = ? LIMIT 1`,
+                       ).get(comparisonId, resolvedCurrentBlockId) !== undefined))) ||
+                    (resolution === 'create-new-identity' && resolvedCurrentBlockId === null &&
+                      (changeKind === 'insert' || changeKind === 'edit')) ||
+                    (resolution === 'retire-current-identity' && resolvedCurrentBlockId === null &&
+                      changeKind === 'delete')
+                  )
+                ),
+            'SCHEMA_INVALID',
+            '稿件重新导入解决类型、候选身份或映射种类无效。',
+          );
+          if (mapping.claimed_mapping_id !== null) {
+            requireBounded(
+              changeKind === 'delete' && resolution === null && mapping.claimed_resolution === 'preserve-current-identity' &&
+                current !== null && db.prepare(
+                  `SELECT 1 valid FROM manuscript_reimport_mappings claimant
+                   JOIN manuscript_reimport_mapping_resolutions r ON r.mapping_id = claimant.mapping_id
+                   WHERE claimant.comparison_id = ? AND claimant.mapping_id = ?
+                     AND claimant.change_kind = 'insert' AND claimant.current_block_id IS NULL
+                     AND r.resolution = 'preserve-current-identity' AND r.resolved_current_block_id = ? LIMIT 1`,
+                ).get(comparisonId, asString(mapping.claimed_mapping_id), current.blockId) !== undefined,
+              'SCHEMA_INVALID',
+              '被保留的当前结构身份没有合法插入映射解决。',
+            );
+          }
+          for (const [block, revisionId] of [[current, comparison.checkpoint_revision_id],
+            [lineageFact, comparison.lineage_revision_id]] as const) {
+            if (block === null || typeof revisionId !== 'string') continue;
+            const actual = db.prepare(
+              `SELECT position, kind, level, text, digest FROM manuscript_block_versions
+               WHERE revision_id = ? AND block_id = ?`,
+            ).get(revisionId, block.blockId) as SqlRow | undefined;
+            requireBounded(actual !== undefined && asNumber(actual.position) === block.position &&
+              asString(actual.kind) === block.kind && (actual.level === null ? null : asNumber(actual.level)) === block.level &&
+              asString(actual.text) === block.text && asString(actual.digest) === block.digest,
+            'SCHEMA_INVALID', '稿件重新导入映射未绑定精确修订版块。');
+          }
+          if (staged !== null) {
+            stagedCount += 1;
+            finalBlockCount += 1;
+            const finalBlockId = exact
+              ? current!.blockId
+              : resolution === 'preserve-current-identity'
+                ? resolvedCurrentBlockId
+                : null;
+            const priorFinal = finalBlockId === null ? undefined : db.prepare(
+              `SELECT position, kind, level, text, digest FROM manuscript_block_versions
+               WHERE revision_id = ? AND block_id = ?`,
+            ).get(asString(comparison.checkpoint_revision_id), finalBlockId) as SqlRow | undefined;
+            changed ||= priorFinal === undefined || asNumber(priorFinal.position) !== staged.position ||
+              asString(priorFinal.kind) !== staged.kind ||
+              (priorFinal.level === null ? null : asNumber(priorFinal.level)) !== staged.level ||
+              asString(priorFinal.text) !== staged.text || asString(priorFinal.digest) !== staged.digest;
+            const actualStaged = db.prepare(
+              `SELECT position, kind, level, text, digest FROM staged_import_blocks
+               WHERE draft_id = ? AND staged_block_id = ?`,
+            ).get(draftId, staged.blockId) as SqlRow | undefined;
+            const actual = actualStaged ?? (committedRevisionId === null
+              ? undefined
+              : db.prepare(
+                `SELECT block_id, position, kind, level, text, digest FROM manuscript_block_versions
+                 WHERE revision_id = ? AND position = ?`,
+              ).get(committedRevisionId, staged.position) as SqlRow | undefined);
+            const expectedResultBlockId = committedRevisionId === null || actualStaged !== undefined
+              ? null
+              : exact
+                ? current!.blockId
+                : resolution === 'preserve-current-identity'
+                  ? resolvedCurrentBlockId
+                  : resolution === 'create-new-identity'
+                    ? `blk_${sha256(`${committedRevisionId}\u0000${staged.position}\u0000${staged.digest}`).slice(0, 24)}`
+                    : null;
+            requireBounded(actual !== undefined && asNumber(actual.position) === staged.position &&
+              asString(actual.kind) === staged.kind &&
+              (actual.level === null ? null : asNumber(actual.level)) === staged.level &&
+              asString(actual.text) === staged.text && asString(actual.digest) === staged.digest &&
+              (expectedResultBlockId === null || asString(actual.block_id) === expectedResultBlockId),
+            'SCHEMA_INVALID', '稿件重新导入暂存或结果块绑定无效。');
+          }
+          const unresolved = !exact && mapping.resolution === null &&
+            !(changeKind === 'delete' && mapping.claimed_mapping_id !== null);
+          const draftState = db.prepare('SELECT state FROM import_drafts WHERE draft_id = ?').get(draftId) as SqlRow;
+          requireBounded(draftState.state !== 'committed' || !unresolved,
+            'SCHEMA_INVALID', '已提交的稿件重新导入仍有未解决结构身份。');
+          if (mapping.resolution !== null) {
+            resolutionHash.update(`\n${canonicalJson({
+              mappingId: asString(mapping.mapping_id),
+              resolution: asString(mapping.resolution),
+              resolvedCurrentBlockId: mapping.resolved_current_block_id === null
+                ? null : asString(mapping.resolved_current_block_id),
+            })}`);
+          }
+          comparisonHash.update(`\n${canonicalJson({
+            mappingId: asString(mapping.mapping_id), position, changeKind,
+            current, lineage: lineageFact, staged,
+            identityConsequence: exact ? 'preserve-current-identity' : null,
+          })}`);
+          mappingCursor = position;
+          expectedPosition += 1;
+        }
+      }
+      const currentAuthorityCount = asNumber(one(db.prepare(
+        'SELECT count(*) total FROM manuscript_block_versions WHERE revision_id = ?',
+      ).all(asString(comparison.checkpoint_revision_id)) as SqlRow[], 'SCHEMA_INVALID',
+      '无法核对重新导入当前修订版块覆盖。').total);
+      const stagedAuthorityCount = committedRevisionId === null
+        ? asNumber(one(db.prepare(
+          'SELECT count(*) total FROM staged_import_blocks WHERE draft_id = ?',
+        ).all(draftId) as SqlRow[], 'SCHEMA_INVALID', '无法核对重新导入暂存块覆盖。').total)
+        : asNumber(one(db.prepare(
+          'SELECT count(*) total FROM manuscript_block_versions WHERE revision_id = ?',
+        ).all(committedRevisionId) as SqlRow[], 'SCHEMA_INVALID', '无法核对重新导入结果块覆盖。').total);
+      changed ||= finalBlockCount !== currentAuthorityCount;
+      requireBounded(expectedPosition > 1 && stagedCount === asNumber(comparison.staged_block_count) &&
+        currentCount === currentAuthorityCount && stagedCount === stagedAuthorityCount &&
+        comparisonHash.digest('hex') === asString(comparison.comparison_digest),
+      'SCHEMA_INVALID', '稿件重新导入比较摘要或当前、暂存、结果块覆盖无效。');
+      const resolutionDigest = resolutionHash.digest('hex');
+      requireBounded(resolutionDigest === asString(comparison.resolution_digest),
+        'SCHEMA_INVALID', '稿件重新导入当前解决摘要无效。');
+      const reviewedDraft = one(db.prepare(
+        `SELECT d.draft_version, d.object_digest, d.review_digest, d.reviewed_book_state_digest,
+                d.reviewed_reuse_source_version_id, b.stable_identity, co.byte_length source_bytes,
+                ss.fidelity_json
+         FROM import_drafts d
+         JOIN books b ON b.book_id = ?
+         JOIN content_objects co ON co.object_digest = d.object_digest
+         LEFT JOIN staged_import_snapshots ss ON ss.draft_id = d.draft_id
+         WHERE d.draft_id = ?`,
+      ).all(asString(comparison.book_id), draftId) as SqlRow[], 'SCHEMA_INVALID', '稿件重新导入复核草稿无效。');
+      let reviewFidelity: FidelityCategoryProjection[];
+      if (reviewedDraft.fidelity_json !== null) {
+        try {
+          reviewFidelity = JSON.parse(asString(reviewedDraft.fidelity_json)) as FidelityCategoryProjection[];
+        } catch {
+          throw new BoundedStoreError('SCHEMA_INVALID', '稿件重新导入保真复核 JSON 无效。');
+        }
+      } else {
+        const fidelityRows = db.prepare(
+          `SELECT fc.category_key, fc.display_label, fc.item_count, fc.status, fc.detail
+           FROM manuscript_reimport_records rr
+           JOIN import_fidelity_categories fc ON fc.fidelity_review_id = rr.fidelity_review_id
+           WHERE rr.comparison_id = ? ORDER BY fc.position LIMIT 9`,
+        ).all(comparisonId) as SqlRow[];
+        reviewFidelity = fidelityRows.map((row) => {
+          const status = asString(row.status) as FidelityCategoryProjection['status'];
+          return {
+            key: asString(row.category_key) as FidelityCategoryProjection['key'],
+            label: asString(row.display_label), count: asNumber(row.item_count), status,
+            statusLabel: status === 'preserved' ? '完整保留' : status === 'degraded' ? '降级导入' : '不支持导入',
+            detail: asString(row.detail),
+          };
+        });
+      }
+      const reviewPlan = deriveImportFidelityPlan(
+        reviewFidelity,
+        asString(comparison.staged_source_digest),
+        asNumber(reviewedDraft.source_bytes),
+      );
+      requireBounded(reviewPlan !== undefined, 'SCHEMA_INVALID', '稿件重新导入保真复核不符合受限边界。');
+      const degradationDecisionState = reviewPlan.degradations.length === 0
+        ? 'not-required-clean-import'
+        : asNumber(comparison.degradation_accepted) === 1 ? 'accepted-complete-set' : 'required-unselected';
+      const reviewDigest = sha256(canonicalJson({
+        schema: 'ai7.manuscript-reimport-review/1',
+        draftId,
+        draftVersion: asNumber(reviewedDraft.draft_version),
+        target: {
+          bookId: asString(comparison.book_id),
+          stableIdentity: asString(reviewedDraft.stable_identity),
+          manuscriptId: asString(comparison.manuscript_id),
+          branchId: asString(comparison.branch_id),
+          relationship: 'reimport',
+          bookStateDigest: asString(reviewedDraft.reviewed_book_state_digest),
+        },
+        checkpoint,
+        lineage,
+        sourceVersionDisposition: reviewedDraft.reviewed_reuse_source_version_id === null
+          ? 'created' : 'reused-same-book',
+        reuseSourceVersionId: reviewedDraft.reviewed_reuse_source_version_id === null
+          ? null : asString(reviewedDraft.reviewed_reuse_source_version_id),
+        source: {
+          objectDigest: asString(reviewedDraft.object_digest),
+          sourceDigest: asString(comparison.staged_source_digest),
+          contentDigest: asString(comparison.staged_content_digest),
+          structureDigest: asString(comparison.staged_structure_digest),
+          parserIdentity: asString(comparison.staged_parser_identity),
+        },
+        comparisonDigest: asString(comparison.comparison_digest),
+        resolutionDigest,
+        degradationDecision: degradationDecisionState,
+        namedNonEffects: MANUSCRIPT_REIMPORT_NON_EFFECTS,
+      }));
+      requireBounded(reviewDigest === asString(reviewedDraft.review_digest),
+        'SCHEMA_INVALID', '稿件重新导入复核摘要无效。');
+      const record = db.prepare(
+        `SELECT rr.*, sv.source_digest, co.byte_length source_bytes,
+                fr.outcome fidelity_outcome, fr.review_digest fidelity_review_digest,
+                dd.decision degradation_decision
+         FROM manuscript_reimport_records rr
+         JOIN source_versions sv ON sv.source_version_id = rr.source_version_id
+         JOIN content_objects co ON co.object_digest = sv.object_digest
+         JOIN import_fidelity_reviews fr ON fr.fidelity_review_id = rr.fidelity_review_id
+         LEFT JOIN import_degradation_decisions dd
+           ON dd.degradation_decision_id = rr.degradation_decision_id
+         WHERE rr.comparison_id = ?`,
+      ).get(comparisonId) as SqlRow | undefined;
+      if (record !== undefined) {
+        requireBounded(resolutionDigest === asString(record.resolution_digest) &&
+          (changed ? record.result_kind === 'changed' : record.result_kind === 'no-change'),
+        'SCHEMA_INVALID', '稿件重新导入解决摘要或结果类型无效。');
+        const recordDigest = sha256(canonicalJson({
+          schema: 'ai7.manuscript-reimport-record/1',
+          reimportRecordId: asString(record.reimport_record_id), commitId: asString(record.commit_id),
+          bookId: asString(record.book_id), manuscriptId: asString(record.manuscript_id),
+          branchId: asString(record.branch_id), sourceVersionId: asString(record.source_version_id),
+          provenanceId: asString(record.provenance_id), previousRevisionId: asString(record.previous_revision_id),
+          resultingRevisionId: record.resulting_revision_id === null ? null : asString(record.resulting_revision_id),
+          resultKind: asString(record.result_kind), resultLabel: asString(record.result_label),
+          lineageStatus: asString(record.lineage_status),
+          lineageSourceVersionId: record.lineage_source_version_id === null ? null : asString(record.lineage_source_version_id),
+          comparisonKind: asString(record.comparison_kind), comparisonDigest: asString(record.comparison_digest),
+          resolutionDigest, fidelityReviewId: asString(record.fidelity_review_id),
+          degradationDecisionId: record.degradation_decision_id === null ? null : asString(record.degradation_decision_id),
+          importedAt: asString(record.imported_at),
+        }));
+        requireBounded(recordDigest === asString(record.record_digest), 'SCHEMA_INVALID', '稿件重新导入记录摘要无效。');
+        const categoryRows = db.prepare(
+          `SELECT category_key, display_label, item_count, status, detail, position
+           FROM import_fidelity_categories WHERE fidelity_review_id = ? ORDER BY position LIMIT 9`,
+        ).all(asString(record.fidelity_review_id)) as SqlRow[];
+        requireBounded(categoryRows.length === 8 && categoryRows.every((row, index) => asNumber(row.position) === index + 1),
+          'SCHEMA_INVALID', '稿件重新导入保真证据必须精确包含八类。');
+        const categories = categoryRows.map((row) => {
+          const status = asString(row.status) as FidelityCategoryProjection['status'];
+          return {
+            key: asString(row.category_key) as FidelityCategoryProjection['key'],
+            label: asString(row.display_label),
+            count: asNumber(row.item_count),
+            status,
+            statusLabel: status === 'preserved' ? '完整保留' as const
+              : status === 'degraded' ? '降级导入' as const : '不支持导入' as const,
+            detail: asString(row.detail),
+          };
+        });
+        const plan = deriveImportFidelityPlan(categories, asString(record.source_digest), asNumber(record.source_bytes));
+        const degradationDecision = plan && plan.degradations.length > 0
+          ? canonicalJson({
+              schema: 'ai7.import-degradation-decision/1',
+              scope: 'this-import-only',
+              state: 'accepted-complete-set',
+              items: plan.degradations,
+            })
+          : null;
+        const fidelityReviewDigest = plan === undefined ? null : sha256(canonicalJson({
+          schema: 'ai7.manuscript-reimport-fidelity-review/1',
+          reimportRecordId: asString(record.reimport_record_id),
+          sourceVersionId: asString(record.source_version_id),
+          sourceDigest: asString(record.source_digest),
+          sourceBytes: asNumber(record.source_bytes),
+          categories,
+          outcome: plan.outcome,
+        }));
+        requireBounded(plan !== undefined && plan.outcome === asString(record.fidelity_outcome) &&
+          fidelityReviewDigest === asString(record.fidelity_review_digest) &&
+          (asNumber(comparison.degradation_accepted) === (plan.degradations.length > 0 ? 1 : 0)) &&
+          ((degradationDecision === null && record.degradation_decision_id === null && record.degradation_decision === null) ||
+            (degradationDecision !== null && record.degradation_decision_id !== null &&
+              degradationDecision === asString(record.degradation_decision))),
+        'SCHEMA_INVALID', '稿件重新导入保真或降级决定证据无效。');
+      }
+      comparisonCursor = comparisonId;
+    }
   }
 
   const invalidRecords = db.prepare(
@@ -3931,12 +4430,18 @@ function validateManuscriptReimportTruth(db: DatabaseSync): void {
      FROM manuscript_reimport_records rr
      JOIN import_commits ic ON ic.commit_id = rr.commit_id
      JOIN import_drafts d ON d.draft_id = ic.draft_id
-     JOIN manuscript_reimport_comparisons c ON c.draft_id = d.draft_id
+     JOIN manuscript_reimport_comparisons c ON c.comparison_id = rr.comparison_id AND c.draft_id = d.draft_id
      JOIN manuscripts m ON m.manuscript_id = rr.manuscript_id
      JOIN source_versions sv ON sv.source_version_id = rr.source_version_id
      JOIN source_provenance sp ON sp.provenance_id = rr.provenance_id
      JOIN manuscript_revisions previous ON previous.revision_id = rr.previous_revision_id
      LEFT JOIN manuscript_revisions resulting ON resulting.revision_id = rr.resulting_revision_id
+     JOIN import_fidelity_reviews fr
+       ON fr.fidelity_review_id = rr.fidelity_review_id AND fr.book_id = rr.book_id
+      AND fr.source_version_id = rr.source_version_id
+     LEFT JOIN import_degradation_decisions dd
+       ON dd.degradation_decision_id = rr.degradation_decision_id
+      AND dd.fidelity_review_id = rr.fidelity_review_id
      WHERE ic.operation_kind != 'manuscript-reimport' OR d.reviewed_relationship != 'reimport'
        OR d.state != 'committed' OR d.committed_commit_id != rr.commit_id
        OR rr.book_id != m.book_id OR sv.book_id != rr.book_id OR sp.source_version_id != rr.source_version_id
@@ -3945,9 +4450,11 @@ function validateManuscriptReimportTruth(db: DatabaseSync): void {
        OR rr.lineage_status != c.lineage_status
        OR NOT (rr.lineage_source_version_id IS c.lineage_source_version_id)
        OR rr.comparison_kind != c.comparison_kind
+       OR (rr.degradation_decision_id IS NULL) != (dd.degradation_decision_id IS NULL)
        OR (rr.result_kind = 'changed' AND (
          resulting.parent_revision_id != rr.previous_revision_id OR resulting.manuscript_id != rr.manuscript_id
          OR resulting.branch_id != rr.branch_id OR resulting.source_version_id != rr.source_version_id
+         OR resulting.ordinal != previous.ordinal + 1
        ))
      LIMIT 1`,
   ).get() as SqlRow | undefined;

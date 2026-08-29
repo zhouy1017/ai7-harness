@@ -297,16 +297,41 @@ function decodeRequest(frame: Uint8Array): ServiceRequest {
           !(input.after === null || isSafeInteger(input.after))) throw new ProtocolError(tentativeId);
       break;
     }
+    case 'getReimportIdentityCandidatePage': {
+      const input = requireInput(value.input, ['draftId', 'expectedDraftVersion', 'mappingId', 'after'], tentativeId);
+      if (!isBoundedString(input.draftId, 36) || !UUID_PATTERN.test(input.draftId) ||
+          !isSafeInteger(input.expectedDraftVersion, 1) ||
+          !isBoundedString(input.mappingId, 36) || !UUID_PATTERN.test(input.mappingId) ||
+          !(input.after === null || isSafeInteger(input.after))) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'getReimportLineageSourceVersionPage': {
+      const input = requireInput(value.input, ['bookId', 'after'], tentativeId);
+      if (!isBoundedString(input.bookId, 36) || !UUID_PATTERN.test(input.bookId) ||
+          !(input.after === null ||
+            (isBoundedString(input.after, 36) && UUID_PATTERN.test(input.after)))) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'acceptReimportDegradation': {
+      const input = requireInput(value.input, ['draftId', 'expectedDraftVersion'], tentativeId);
+      if (!isBoundedString(input.draftId, 36) || !UUID_PATTERN.test(input.draftId) ||
+          !isSafeInteger(input.expectedDraftVersion, 1)) throw new ProtocolError(tentativeId);
+      break;
+    }
     case 'resolveReimportMapping': {
       const input = requireInput(
         value.input,
-        ['draftId', 'expectedDraftVersion', 'mappingId', 'resolution'],
+        ['draftId', 'expectedDraftVersion', 'mappingId', 'resolution', 'currentBlockId'],
         tentativeId,
       );
       if (!isBoundedString(input.draftId, 36) || !UUID_PATTERN.test(input.draftId) ||
           !isSafeInteger(input.expectedDraftVersion, 1) ||
           !isBoundedString(input.mappingId, 36) || !UUID_PATTERN.test(input.mappingId) ||
-          input.resolution !== 'accept-staged') throw new ProtocolError(tentativeId);
+          !['preserve-current-identity', 'create-new-identity', 'retire-current-identity'].includes(input.resolution as string) ||
+          !(input.currentBlockId === null ||
+            (isBoundedString(input.currentBlockId, 28) && /^blk_[0-9a-f]{24}$/.test(input.currentBlockId)))) {
+        throw new ProtocolError(tentativeId);
+      }
       break;
     }
     case 'commitManuscriptReimport': {
@@ -749,6 +774,32 @@ async function dispatch(
           request.input.after,
         ),
       };
+    case 'getReimportIdentityCandidatePage':
+      return {
+        id: request.id,
+        ok: true,
+        op: request.op,
+        result: store.getReimportIdentityCandidatePage(
+          request.input.draftId,
+          request.input.expectedDraftVersion,
+          request.input.mappingId,
+          request.input.after,
+        ),
+      };
+    case 'getReimportLineageSourceVersionPage':
+      return {
+        id: request.id,
+        ok: true,
+        op: request.op,
+        result: store.getReimportLineageSourceVersionPage(request.input.bookId, request.input.after),
+      };
+    case 'acceptReimportDegradation':
+      return {
+        id: request.id,
+        ok: true,
+        op: request.op,
+        result: store.acceptReimportDegradation(request.input.draftId, request.input.expectedDraftVersion),
+      };
     case 'resolveReimportMapping':
       return {
         id: request.id,
@@ -759,6 +810,7 @@ async function dispatch(
           request.input.expectedDraftVersion,
           request.input.mappingId,
           request.input.resolution,
+          request.input.currentBlockId,
         ),
       };
     case 'commitManuscriptReimport':
@@ -925,6 +977,7 @@ function parseArguments(argv: string[]): {
     importControlValue === 'after-commit-before-response' ||
     importControlValue === 'uncertain-reconciliation' ||
     importControlValue === 'legacy-reviewed-v2' ||
+    importControlValue === 'tamper-reimport-proof-before-validation' ||
     importControlValue === 'abandon-object-delete-failure' ||
     importControlValue === 'after-abandon-object-delete-before-finalize'
       ? importControlValue
@@ -990,6 +1043,7 @@ async function run(): Promise<void> {
     store = await EditorialStore.open(dataRoot, codeRoot, {
       induceUnprovableReconciliation: importControl === 'uncertain-reconciliation',
       persistLegacyReviewedDraft: importControl === 'legacy-reviewed-v2',
+      induceReimportProofTamper: importControl === 'tamper-reimport-proof-before-validation',
       induceAbandonObjectRemovalFailure: importControl === 'abandon-object-delete-failure',
       interruptAfterAbandonObjectRemoval: importControl === 'after-abandon-object-delete-before-finalize',
     });
