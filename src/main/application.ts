@@ -17,6 +17,7 @@ import {
   IPC_CHANNELS,
   MAIN_EVENTS,
   type CommitNewBookRendererInput,
+  type CommitManuscriptReimportRendererInput,
   type CommitSourceImportRendererInput,
   type J01ImportControl,
   type J08RecoveryControl,
@@ -94,8 +95,10 @@ function parseArguments(argv: string[]): LaunchArguments {
   const importControl =
     importControlValue === 'before-commit' ||
     importControlValue === 'after-commit-before-response' ||
+    importControlValue === 'legacy-result-json-without-receipt' ||
     importControlValue === 'uncertain-reconciliation' ||
     importControlValue === 'legacy-reviewed-v2' ||
+    importControlValue === 'tamper-reimport-proof-before-validation' ||
     importControlValue === 'abandon-object-delete-failure' ||
     importControlValue === 'after-abandon-object-delete-before-finalize'
       ? importControlValue
@@ -178,6 +181,32 @@ function registerRendererHandlers(
     string,
     { draftId: string; expectedDraftVersion: number; reviewDigest: string; commitId: string }
   >();
+  const bindImportCommit = (
+    input: CommitNewBookRendererInput | CommitSourceImportRendererInput | CommitManuscriptReimportRendererInput,
+  ): ServiceOperationMap['commitNewBookImport']['input'] => {
+    requireDesktop(
+      input.commitAttemptId === null ||
+        (typeof input.commitAttemptId === 'string' && UUID_PATTERN.test(input.commitAttemptId)),
+      'AI7_RENDERER_BOUNDARY_INVALID',
+    );
+    let binding = commitBindings.get(input.draftId);
+    if (!binding) {
+      binding = {
+        draftId: input.draftId,
+        expectedDraftVersion: input.expectedDraftVersion,
+        reviewDigest: input.reviewDigest,
+        commitId: input.commitAttemptId ?? randomUUID(),
+      };
+      commitBindings.set(input.draftId, binding);
+    }
+    requireDesktop(
+      binding.draftId === input.draftId &&
+        binding.expectedDraftVersion === input.expectedDraftVersion &&
+        binding.reviewDigest === input.reviewDigest &&
+        (input.commitAttemptId === null || binding.commitId === input.commitAttemptId),
+    );
+    return binding;
+  };
   const restorationBindings = new Map<string, Map<string, string>>();
   let restorationBindingCount = 0;
   const requireSender = (event: IpcMainInvokeEvent): void => {
@@ -326,28 +355,7 @@ function registerRendererHandlers(
     envelope(async () => {
       requireSender(event);
       requireAuthority();
-      requireDesktop(
-        input.commitAttemptId === null ||
-          (typeof input.commitAttemptId === 'string' && UUID_PATTERN.test(input.commitAttemptId)),
-        'AI7_RENDERER_BOUNDARY_INVALID',
-      );
-      let commitBinding = commitBindings.get(input.draftId);
-      if (!commitBinding) {
-        commitBinding = {
-          draftId: input.draftId,
-          expectedDraftVersion: input.expectedDraftVersion,
-          reviewDigest: input.reviewDigest,
-          commitId: input.commitAttemptId ?? randomUUID(),
-        };
-        commitBindings.set(input.draftId, commitBinding);
-      }
-      requireDesktop(
-        commitBinding.draftId === input.draftId &&
-          commitBinding.expectedDraftVersion === input.expectedDraftVersion &&
-          commitBinding.reviewDigest === input.reviewDigest &&
-          (input.commitAttemptId === null || commitBinding.commitId === input.commitAttemptId),
-      );
-      return service.call('commitNewBookImport', commitBinding);
+      return service.call('commitNewBookImport', bindImportCommit(input));
     }),
   );
   ipcMain.handle(
@@ -364,28 +372,71 @@ function registerRendererHandlers(
     envelope(async () => {
       requireSender(event);
       requireAuthority();
-      requireDesktop(
-        input.commitAttemptId === null ||
-          (typeof input.commitAttemptId === 'string' && UUID_PATTERN.test(input.commitAttemptId)),
-        'AI7_RENDERER_BOUNDARY_INVALID',
-      );
-      let commitBinding = commitBindings.get(input.draftId);
-      if (!commitBinding) {
-        commitBinding = {
-          draftId: input.draftId,
-          expectedDraftVersion: input.expectedDraftVersion,
-          reviewDigest: input.reviewDigest,
-          commitId: input.commitAttemptId ?? randomUUID(),
-        };
-        commitBindings.set(input.draftId, commitBinding);
-      }
-      requireDesktop(
-        commitBinding.draftId === input.draftId &&
-          commitBinding.expectedDraftVersion === input.expectedDraftVersion &&
-          commitBinding.reviewDigest === input.reviewDigest &&
-          (input.commitAttemptId === null || commitBinding.commitId === input.commitAttemptId),
-      );
-      return service.call('commitSourceImport', commitBinding);
+      return service.call('commitSourceImport', bindImportCommit(input));
+    }),
+  );
+  ipcMain.handle(
+    IPC_CHANNELS.prepareManuscriptReimport,
+    (event, input: ServiceOperationMap['prepareManuscriptReimport']['input']) =>
+      envelope(async () => {
+        requireSender(event);
+        requireAuthority();
+        commitBindings.delete(input.draftId);
+        return service.call('prepareManuscriptReimport', input);
+      }),
+  );
+  ipcMain.handle(
+    IPC_CHANNELS.getReimportMappingPage,
+    (event, input: ServiceOperationMap['getReimportMappingPage']['input']) =>
+      envelope(async () => {
+        requireSender(event);
+        requireAuthority();
+        return service.call('getReimportMappingPage', input);
+      }),
+  );
+  ipcMain.handle(
+    IPC_CHANNELS.getReimportIdentityCandidatePage,
+    (event, input: ServiceOperationMap['getReimportIdentityCandidatePage']['input']) =>
+      envelope(async () => {
+        requireSender(event);
+        requireAuthority();
+        return service.call('getReimportIdentityCandidatePage', input);
+      }),
+  );
+  ipcMain.handle(
+    IPC_CHANNELS.getReimportLineageSourceVersionPage,
+    (event, input: ServiceOperationMap['getReimportLineageSourceVersionPage']['input']) =>
+      envelope(async () => {
+        requireSender(event);
+        requireAuthority();
+        return service.call('getReimportLineageSourceVersionPage', input);
+      }),
+  );
+  ipcMain.handle(
+    IPC_CHANNELS.acceptReimportDegradation,
+    (event, input: ServiceOperationMap['acceptReimportDegradation']['input']) =>
+      envelope(async () => {
+        requireSender(event);
+        requireAuthority();
+        commitBindings.delete(input.draftId);
+        return service.call('acceptReimportDegradation', input);
+      }),
+  );
+  ipcMain.handle(
+    IPC_CHANNELS.resolveReimportMapping,
+    (event, input: ServiceOperationMap['resolveReimportMapping']['input']) =>
+      envelope(async () => {
+        requireSender(event);
+        requireAuthority();
+        commitBindings.delete(input.draftId);
+        return service.call('resolveReimportMapping', input);
+      }),
+  );
+  ipcMain.handle(IPC_CHANNELS.commitManuscriptReimport, (event, input: CommitManuscriptReimportRendererInput) =>
+    envelope(async () => {
+      requireSender(event);
+      requireAuthority();
+      return service.call('commitManuscriptReimport', bindImportCommit(input));
     }),
   );
   ipcMain.handle(

@@ -16,6 +16,7 @@ import type {
   RecoverySelection,
   RecoveryWindowProjection,
   ReviewBeforeImportProjection,
+  ReviewBeforeManuscriptReimportProjection,
   ReviewBeforeSourceImportProjection,
   SearchResultsProjection,
   ServiceJobProjection,
@@ -558,7 +559,9 @@ function renderContinuation(
   }
   if (continuation.state === 'review-ready') {
     setStatus('暂存快照与导入前复核已重新校验', 'success');
-    if ('retainedBoundary' in continuation.review) {
+    if ('comparison' in continuation.review) {
+      renderManuscriptReimportReview(continuation.review, continuation.notice, recoveryReturn);
+    } else if ('retainedBoundary' in continuation.review) {
       renderSourceImportReview(continuation.review, continuation.notice, recoveryReturn);
     } else {
       renderReview(continuation.review, continuation.notice, recoveryReturn);
@@ -841,9 +844,32 @@ function recordPresentation(record: BookRecordPresentation): HTMLElement {
       appendRecordField(values, '记录摘要', record.recordDigest, true);
       appendRecordField(values, '导入时间', record.importedAt);
       break;
+    case 'manuscript-reimport-record':
+      appendRecordField(values, '稿件重新导入记录 ID', record.reimportRecordId, true);
+      appendRecordField(values, '原子提交 ID', record.commitId, true);
+      appendRecordField(values, '所属图书 ID', record.bookId, true);
+      appendRecordField(values, '稿件 ID', record.manuscriptId, true);
+      appendRecordField(values, '来源版本 ID', record.sourceVersionId, true);
+      appendRecordField(values, '来源记录 ID', record.provenanceId, true);
+      appendRecordField(values, '前一修订版 ID', record.previousRevisionId, true);
+      appendRecordField(values, '结果修订版 ID', record.resultingRevisionId, true);
+      appendRecordField(values, '结果', record.resultLabel);
+      appendRecordField(values, '来源关系', record.lineageLabel);
+      appendRecordField(values, '来源关系版本 ID', record.lineageSourceVersionId, true);
+      appendRecordField(values, '比较方式', record.comparisonKind === 'three-way' ? '三方比较' : '两方比较');
+      appendRecordField(values, '比较摘要', record.comparisonDigest, true);
+      appendRecordField(values, '解决摘要', record.resolutionDigest, true);
+      appendRecordField(values, '导入保真审阅 ID', record.fidelityReviewId, true);
+      appendRecordField(values, '保真结果', record.fidelityOutcome === 'degraded-import-no-round-trip'
+        ? '含已接受的降级 · 不提供 DOCX 往返保证'
+        : '完整保留 · 不提供 DOCX 往返保证');
+      appendRecordField(values, '导入降级决定 ID', record.degradationDecisionId, true);
+      appendRecordField(values, '记录摘要', record.recordDigest, true);
+      appendRecordField(values, '导入时间', record.importedAt);
+      break;
   }
   detail.append(values);
-  if (record.kind === 'import-record') {
+  if (record.kind === 'import-record' || record.kind === 'manuscript-reimport-record') {
     const fidelity = element('details', 'degradation-disclosure');
     fidelity.append(element('summary', undefined, '查看导入保真审阅 · 8 类'));
     const categories = element('ul', 'degradation-list');
@@ -887,6 +913,7 @@ function renderBookOverview(
 ): void {
   const sourceCompletion: SourceImportCommitProjection | undefined =
     completion && 'sourceImportRecordId' in completion ? completion : undefined;
+  const reimportCompletion = completion && 'reimportRecordId' in completion ? completion : undefined;
   const content = panel();
   content.classList.add('book-overview');
   content.dataset['bookId'] = overview.book.bookId;
@@ -905,6 +932,10 @@ function renderBookOverview(
   );
   if (sourceCompletion) {
     content.append(element('p', 'success-note', '来源材料已导入；以下可精确查看图书拥有的来源版本与本次文件专属来源导入记录。'));
+  } else if (reimportCompletion) {
+    content.append(element('p', 'success-note', reimportCompletion.resultKind === 'changed'
+      ? '稿件已重新导入；已形成一份后代修订版和可直接查看的重新导入记录。'
+      : '未发现稿件变化；已保留精确证据并且没有创建空修订版。'));
   } else if (completion) {
     content.append(element('p', 'success-note', '稿件已导入；以下为这本图书的精确结果记录。'));
   }
@@ -924,11 +955,12 @@ function renderBookOverview(
   const actions = element('div', 'button-row');
   const completionActionButtons: HTMLButtonElement[] = [];
   if (sourceCompletion) {
-    const sourceRecord = overview.records.find((record) =>
-      record.kind === 'source' && record.sourceVersionId === sourceCompletion.sourceVersionId);
-    const sourceImportRecord = overview.records.find((record) =>
-      record.kind === 'source-import-record' && record.sourceImportRecordId === sourceCompletion.sourceImportRecordId);
-    if (!sourceRecord || !sourceImportRecord) throw new Error('AI7_SOURCE_IMPORT_RESULT_INVALID');
+    const sourceRecord = sourceCompletion.receipt.source;
+    const sourceImportRecord = sourceCompletion.receipt.record;
+    if (sourceRecord.sourceVersionId !== sourceCompletion.sourceVersionId ||
+      sourceImportRecord.sourceImportRecordId !== sourceCompletion.sourceImportRecordId) {
+      throw new Error('AI7_SOURCE_IMPORT_RESULT_INVALID');
+    }
     const viewSource = button('查看来源材料', 'primary', () => detailHost.replaceChildren(recordPresentation(sourceRecord)));
     viewSource.dataset['viewSourceVersionId'] = sourceCompletion.sourceVersionId;
     const viewImportRecord = button('查看来源导入记录', 'secondary', () =>
@@ -938,6 +970,20 @@ function renderBookOverview(
     viewImportRecord.disabled = true;
     completionActionButtons.push(viewSource, viewImportRecord);
     actions.append(viewSource, viewImportRecord);
+  } else if (reimportCompletion) {
+    const reimportRecord = reimportCompletion.receipt;
+    if (reimportRecord.reimportRecordId !== reimportCompletion.reimportRecordId) {
+      throw new Error('AI7_REIMPORT_RESULT_INVALID');
+    }
+    const viewRecord = button('查看稿件重新导入记录', 'primary', () =>
+      detailHost.replaceChildren(recordPresentation(reimportRecord)));
+    viewRecord.dataset['viewReimportRecordId'] = reimportCompletion.reimportRecordId;
+    const openManuscript = button('打开稿件', 'secondary', () =>
+      renderEditorWindow(reimportCompletion.window, overview.book.title, recoveryReturn?.attentionId));
+    viewRecord.disabled = true;
+    openManuscript.disabled = true;
+    completionActionButtons.push(viewRecord, openManuscript);
+    actions.append(viewRecord, openManuscript);
   } else if (overview.primaryAction.kind === 'import-first-manuscript') {
     const importFirst = button('导入首份稿件', 'primary', async () => {
       importFirst.disabled = true;
@@ -961,6 +1007,10 @@ function renderBookOverview(
             label: `${overview.book.title} · ${overview.book.internalNumber === null ? '' : `内部编号 ${overview.book.internalNumber} · `}图书 ID ${overview.book.bookId}`,
             internalNumber: overview.book.internalNumber,
             manuscriptState: 'empty',
+            reimportLineageSourceVersionIds: [],
+            reimportLineagePageAfter: null,
+            reimportLineagePreviousCursor: null,
+            reimportLineageNextCursor: null,
             selected: false,
           };
           staged = { ...staged, targetChoices: [...staged.targetChoices, exactChoice] };
@@ -1011,10 +1061,32 @@ function renderBookOverview(
     else if (record.kind === 'source') open.dataset['recordId'] = record.sourceVersionId;
     else if (record.kind === 'workflow') open.dataset['recordId'] = record.workflowInstanceId;
     else if (record.kind === 'import-record') open.dataset['recordId'] = record.importRecordId;
-    else open.dataset['recordId'] = record.sourceImportRecordId;
+    else if (record.kind === 'source-import-record') open.dataset['recordId'] = record.sourceImportRecordId;
+    else open.dataset['recordId'] = record.reimportRecordId;
     recordButtons.append(open);
   }
   records.append(recordButtons, detailHost);
+  const historyNavigation = element('div', 'button-row compact-actions');
+  const replaceHistoryPage = async (historyCursor: NonNullable<BookWorkOverviewProjection['historyPage']['nextCursor']>) => {
+    setStatus('正在读取图书历史页…', 'busy');
+    try {
+      renderBookOverview(await window.ai7.getBookOverview({ bookId: overview.book.bookId, historyCursor }),
+        undefined, recoveryReturn);
+    } catch (error) {
+      setStatus(rendererErrorMessage(error, '无法读取图书历史页。'), 'error');
+    }
+  };
+  if (overview.historyPage.previousCursor !== null) {
+    const previous = button('较早记录', 'quiet', () => void replaceHistoryPage(overview.historyPage.previousCursor!));
+    previous.dataset['bookHistoryPrevious'] = overview.historyPage.previousCursor.stableId;
+    historyNavigation.append(previous);
+  }
+  if (overview.historyPage.nextCursor !== null) {
+    const next = button('较新记录', 'quiet', () => void replaceHistoryPage(overview.historyPage.nextCursor!));
+    next.dataset['bookHistoryNext'] = overview.historyPage.nextCursor.stableId;
+    historyNavigation.append(next);
+  }
+  records.append(historyNavigation);
   content.append(records);
   appendRecoveryReturnAction(content, recoveryReturn);
   replaceScreen(completion ? 'imported' : 'book-overview', content);
@@ -1215,7 +1287,7 @@ function renderLanding(
         setStatus('正在读取精确图书工作概览…', 'busy');
         try {
           renderBookOverview(
-            await window.ai7.getBookOverview({ bookId: summary.bookId }),
+            await window.ai7.getBookOverview({ bookId: summary.bookId, historyCursor: null }),
             undefined,
             activeRecoveryReturn,
           );
@@ -1311,7 +1383,8 @@ function renderLanding(
   setStatus('准备就绪');
 }
 
-type ImportRelationshipChoice = 'first-manuscript' | 'source-only';
+type ImportRelationshipChoice = 'first-manuscript' | 'source-only' | 'reimport';
+type ReimportLineageChoice = 'unconfirmed' | string;
 
 function renderTargetChoice(
   staged: StagedImportProjection,
@@ -1320,6 +1393,7 @@ function renderTargetChoice(
   recoveryReturn?: RecoveryReturnContext,
   relationshipSelection: ImportRelationshipChoice | null = null,
   reuseSourceVersionId: string | null | undefined = undefined,
+  reimportLineageChoice: ReimportLineageChoice | undefined = undefined,
 ): void {
   const content = panel();
   content.append(
@@ -1379,6 +1453,10 @@ function renderTargetChoice(
           label: `${book.title} · ${book.internalNumber === null ? '' : `内部编号 ${book.internalNumber} · `}图书 ID ${book.bookId}`,
           internalNumber: book.internalNumber,
           manuscriptState: book.manuscriptState,
+          reimportLineageSourceVersionIds: book.reimportLineageSourceVersionIds,
+          reimportLineagePageAfter: null,
+          reimportLineagePreviousCursor: null,
+          reimportLineageNextCursor: book.reimportLineageNextCursor,
           selected: false as const,
         }));
         renderTargetChoice(
@@ -1414,7 +1492,7 @@ function renderTargetChoice(
     relationship.append(element('legend', undefined, '导入关系（默认不选择）'));
     const allowedRelationships: ReadonlyArray<ImportRelationshipChoice> =
       selectedChoice.kind === 'existing-book' && selectedChoice.manuscriptState === 'populated'
-        ? ['source-only']
+        ? ['source-only', 'reimport']
         : ['first-manuscript', 'source-only'];
     for (const relationshipKind of allowedRelationships) {
       const relationshipChoice = element('label', 'choice');
@@ -1431,11 +1509,17 @@ function renderTargetChoice(
           element('strong', undefined, '作为首份稿件导入'),
           element('small', undefined, '创建主稿件、r1、稿件导入记录与工作流程实例。'),
         );
-      } else {
+      } else if (relationshipKind === 'source-only') {
         radio.setAttribute('aria-label', '作为来源材料导入');
         copy.append(
           element('strong', undefined, '作为来源材料导入'),
           element('small', undefined, '只形成图书拥有的来源版本、来源记录与来源导入记录；不创建或改变稿件。'),
+        );
+      } else {
+        radio.setAttribute('aria-label', '重新导入主稿件');
+        copy.append(
+          element('strong', undefined, '重新导入主稿件'),
+          element('small', undefined, '先明确来源关系并复核逐块比较；没有已确认来源关系时仍可继续保守的两方比较。'),
         );
       }
       relationshipChoice.append(radio, copy);
@@ -1588,6 +1672,190 @@ function renderTargetChoice(
     }
     actions.append(cancelImport);
     content.append(actions);
+  } else if (selectedChoice?.kind === 'existing-book' && relationshipSelection === 'reimport') {
+    if (selectedChoice.manuscriptState !== 'populated') throw new Error('AI7_IMPORT_RELATIONSHIP_INVALID');
+    const exactSameBookSources = [...new Set(staged.identityFindings
+      .filter((finding) => finding.bookId === selectedChoice.bookId &&
+        finding.identityClass.kind === 'immutable-original')
+      .map((finding) => finding.sourceVersionId))];
+    const verifiedLineageSources = selectedChoice.reimportLineageSourceVersionIds;
+
+    const lineageChoices = element('fieldset');
+    lineageChoices.setAttribute('role', 'radiogroup');
+    lineageChoices.setAttribute('aria-label', '稿件重新导入来源关系');
+    lineageChoices.dataset['reimportLineageChoices'] = 'unselected-by-default';
+    lineageChoices.append(element('legend', undefined, '来源关系（必须明确选择）'));
+    const addLineageChoice = (value: ReimportLineageChoice, title: string, note: string): void => {
+      const choice = element('label', 'choice');
+      const radio = element('input');
+      radio.type = 'radio';
+      radio.name = 'reimport-lineage';
+      radio.value = value;
+      radio.dataset['reimportLineage'] = value === 'unconfirmed' ? 'unconfirmed' : 'verified-source-version';
+      if (value !== 'unconfirmed') radio.dataset['sourceVersionId'] = value;
+      radio.checked = reimportLineageChoice === value;
+      radio.setAttribute('aria-label', title);
+      const copy = element('span');
+      copy.append(element('strong', undefined, title), element('small', undefined, note));
+      choice.append(radio, copy);
+      lineageChoices.append(choice);
+      radio.addEventListener('change', () =>
+        renderTargetChoice(staged, selectedChoice.id, recoveryNotice, recoveryReturn, 'reimport',
+          reuseSourceVersionId, value));
+      if (reimportLineageChoice === undefined) revealedControl = radio;
+    };
+    addLineageChoice('unconfirmed', '来源关系未确认', '继续保守的两方比较；这不会被解释为来源确认或阻断导入。');
+    for (const sourceVersionId of verifiedLineageSources) {
+      addLineageChoice(sourceVersionId, `确认来源版本 ${sourceVersionId}`, '使用该图书拥有且已关联主稿件结果修订版的精确来源，执行三方比较。');
+    }
+    const loadLineagePage = async (after: string | null, control: HTMLButtonElement): Promise<void> => {
+      control.disabled = true;
+      setStatus('正在读取来源关系版本页…', 'busy');
+      try {
+        const page = await window.ai7.getReimportLineageSourceVersionPage({
+          bookId: selectedChoice.bookId,
+          after,
+        });
+        const pageItems = [...page.items];
+        if (reimportLineageChoice !== undefined && reimportLineageChoice !== 'unconfirmed' &&
+          !pageItems.includes(reimportLineageChoice)) pageItems.push(reimportLineageChoice);
+        const targetChoices = staged.targetChoices.map((choice) =>
+          choice.kind !== 'existing-book' || choice.id !== selectedChoice.id
+          ? choice
+          : {
+              ...choice,
+              reimportLineageSourceVersionIds: pageItems,
+              reimportLineagePageAfter: page.after,
+              reimportLineagePreviousCursor: page.previousCursor,
+              reimportLineageNextCursor: page.nextCursor,
+            });
+        renderTargetChoice(
+          { ...staged, targetChoices }, selectedChoice.id, recoveryNotice, recoveryReturn,
+          'reimport', reuseSourceVersionId, reimportLineageChoice,
+        );
+        setStatus('来源关系版本页已替换', 'success');
+      } catch (error) {
+        control.disabled = false;
+        setStatus(rendererErrorMessage(error, '无法读取来源关系版本页。'), 'error');
+      }
+    };
+    if (selectedChoice.reimportLineagePageAfter !== null) {
+      const previousLineage = button('上一页来源关系版本', 'quiet', () =>
+        void loadLineagePage(selectedChoice.reimportLineagePreviousCursor, previousLineage));
+      previousLineage.dataset['previousReimportLineage'] = selectedChoice.reimportLineagePreviousCursor ?? 'first';
+      lineageChoices.append(previousLineage);
+    }
+    if (selectedChoice.reimportLineageNextCursor !== null) {
+      const moreLineage = button('下一页来源关系版本', 'quiet', () =>
+        void loadLineagePage(selectedChoice.reimportLineageNextCursor, moreLineage));
+      moreLineage.dataset['loadMoreReimportLineage'] = selectedChoice.reimportLineageNextCursor;
+      lineageChoices.append(moreLineage);
+    }
+    content.append(lineageChoices);
+
+    const sourceChoices = element('fieldset');
+    sourceChoices.setAttribute('role', 'radiogroup');
+    sourceChoices.setAttribute('aria-label', '稿件重新导入来源版本结果');
+    sourceChoices.dataset['reimportSourceVersionChoices'] = 'unselected-by-default';
+    sourceChoices.append(element('legend', undefined, '来源版本结果（必须另行明确选择）'));
+    const sourceChoice = element('label', 'choice');
+    const sourceRadio = element('input');
+    sourceRadio.type = 'radio';
+    sourceRadio.name = 'reimport-source-version';
+    const exactSourceVersionId = exactSameBookSources.length === 1 ? exactSameBookSources[0]! : null;
+    if (exactSourceVersionId) {
+      sourceRadio.value = exactSourceVersionId;
+      sourceRadio.dataset['reuseSourceVersionId'] = exactSourceVersionId;
+      sourceRadio.checked = reuseSourceVersionId === exactSourceVersionId;
+      sourceRadio.setAttribute('aria-label', `复用来源版本 ${exactSourceVersionId}`);
+    } else {
+      sourceRadio.value = 'create-new';
+      sourceRadio.dataset['createSourceVersion'] = 'true';
+      sourceRadio.checked = reuseSourceVersionId === null;
+      sourceRadio.setAttribute('aria-label', '创建新的图书来源版本');
+    }
+    const sourceCopy = element('span');
+    sourceCopy.append(
+      element('strong', undefined, exactSourceVersionId ? '复用这个同图书精确来源版本' : '创建新的图书来源版本'),
+      element('small', 'technical-identity', exactSourceVersionId ?? staged.source.sourceSha256),
+    );
+    sourceChoice.append(sourceRadio, sourceCopy);
+    sourceChoices.append(sourceChoice);
+    sourceRadio.addEventListener('change', () =>
+      renderTargetChoice(staged, selectedChoice.id, recoveryNotice, recoveryReturn, 'reimport',
+        exactSourceVersionId, reimportLineageChoice));
+    if (reuseSourceVersionId === undefined && reimportLineageChoice !== undefined) revealedControl = sourceRadio;
+    content.append(sourceChoices);
+
+    const actions = element('div', 'button-row');
+    if (reimportLineageChoice !== undefined && reuseSourceVersionId !== undefined) {
+      let activePreparationJob: ServiceJobProjection | null = null;
+      const cancelPreparation = button('取消当前操作', 'secondary', async () => {
+        if (activePreparationJob === null) return;
+        cancelPreparation.disabled = true;
+        try {
+          activePreparationJob = await window.ai7.cancelServiceJob({ jobId: activePreparationJob.jobId });
+          setStatus(activePreparationJob.progress.label, 'success');
+        } catch (error) {
+          setStatus(rendererErrorMessage(error, '无法取消重新导入比较准备。'), 'error');
+        }
+      });
+      cancelPreparation.dataset['cancelReimportPreparation'] = 'true';
+      cancelPreparation.hidden = true;
+      const prepare = button('准备稿件重新导入比较', 'primary', async () => {
+        prepare.disabled = true;
+        setStatus('正在建立安全固定点并准备逐块比较…', 'busy');
+        try {
+          activePreparationJob = await window.ai7.prepareManuscriptReimport({
+            draftId: staged.draftId,
+            expectedDraftVersion: staged.draftVersion,
+            target: {
+              kind: 'existing-book',
+              bookId: selectedChoice.bookId,
+              relationship: 'reimport',
+              lineage: reimportLineageChoice === 'unconfirmed'
+                ? { kind: 'unconfirmed' }
+                : { kind: 'verified-source-version', sourceVersionId: reimportLineageChoice },
+              reuseSourceVersionId,
+            },
+          });
+          cancelPreparation.dataset['jobProgressCompleted'] = String(activePreparationJob.progress.completed);
+          cancelPreparation.dataset['jobProgressTotal'] = String(activePreparationJob.progress.total);
+          cancelPreparation.hidden = false;
+          cancelPreparation.disabled = false;
+          const completed = await awaitServiceJob(activePreparationJob, (job) => {
+            activePreparationJob = job;
+            cancelPreparation.dataset['jobProgressCompleted'] = String(job.progress.completed);
+            cancelPreparation.dataset['jobProgressTotal'] = String(job.progress.total);
+            const progress = `${job.progress.completed.toLocaleString('zh-CN')} / ${job.progress.total.toLocaleString('zh-CN')}`;
+            setStatus(`${job.progress.label} ${progress}`, job.state === 'failed' ? 'error' : 'busy');
+          });
+          if (completed.state === 'cancelled') {
+            activePreparationJob = null;
+            cancelPreparation.hidden = true;
+            prepare.disabled = false;
+            setStatus('重新导入比较准备已取消；暂存草稿未变化。', 'success');
+            return;
+          }
+          const review = completed.result;
+          if (completed.kind !== 'reimport-preparation' || review === null || !('checkpoint' in review)) {
+            throw new Error('重新导入比较任务未返回复核结果。');
+          }
+          renderManuscriptReimportReview(review, recoveryNotice, recoveryReturn);
+          setStatus('稿件重新导入比较已准备', 'success');
+        } catch (error) {
+          activePreparationJob = null;
+          cancelPreparation.hidden = true;
+          prepare.disabled = false;
+          setStatus(rendererErrorMessage(error, '无法准备稿件重新导入比较。'), 'error');
+        }
+      });
+      prepare.dataset['prepareManuscriptReimport'] = selectedChoice.bookId;
+      actions.append(prepare, cancelPreparation);
+      revealedControl = prepare;
+    }
+    actions.append(cancelImport);
+    content.append(actions);
   } else {
     const actions = element('div', 'button-row');
     actions.append(cancelImport);
@@ -1608,7 +1876,13 @@ function renderTargetChoice(
       setStatus(
         relationshipSelection === 'first-manuscript'
           ? `已选择“作为首份稿件导入”；可以复核目标图书 ${selectedChoice.bookId}。`
-          : `已选择“作为来源材料导入”；可以复核目标图书 ${selectedChoice.bookId}。`,
+          : relationshipSelection === 'source-only'
+            ? `已选择“作为来源材料导入”；可以复核目标图书 ${selectedChoice.bookId}。`
+            : reimportLineageChoice === undefined
+              ? '已选择“重新导入主稿件”；请明确来源关系。'
+              : reuseSourceVersionId === undefined
+                ? '来源关系已选择；请另行明确来源版本结果。'
+                : `重新导入决定已明确；可以准备目标图书 ${selectedChoice.bookId} 的逐块比较。`,
       );
     }
   });
@@ -1772,6 +2046,349 @@ function renderSourceImportReview(
   );
   commitBar.append(explanation, actions);
   content.append(commitBar);
+  appendRecoveryReturnAction(content, recoveryReturn);
+  replaceScreen('review', content);
+}
+
+function renderManuscriptReimportReview(
+  review: ReviewBeforeManuscriptReimportProjection,
+  recoveryNotice?: string,
+  recoveryReturn?: RecoveryReturnContext,
+  mappingAfter: number | null = null,
+): void {
+  const content = panel();
+  content.dataset['importReviewKind'] = 'reimport';
+  content.dataset['reimportLineageStatus'] = review.lineage.status;
+  content.dataset['reimportDraftId'] = review.draftId;
+  content.dataset['reimportComparisonKind'] = review.lineage.comparisonKind;
+  content.dataset['reimportCommitReady'] = String(review.commitReady);
+  content.dataset['reimportDraftVersion'] = String(review.draftVersion);
+  content.dataset['reimportReviewDigest'] = review.reviewDigest;
+  content.dataset['reimportCommitAttemptId'] = review.commitAttemptId ?? '';
+  content.append(
+    element('p', 'section-label', '步骤 2 / 3 · 稿件重新导入复核'),
+    element('h2', undefined, '逐块复核稿件重新导入'),
+    element('p', 'lede', review.lineage.status === 'verified'
+      ? '已由所选图书拥有的精确来源版本建立三方比较。'
+      : '来源关系未确认；本次使用保守的两方比较，但不会阻断重新导入。'),
+  );
+  if (recoveryNotice) content.append(element('p', 'recovery-notice', recoveryNotice));
+
+  const target = element('section', 'source-card');
+  const values = element('dl');
+  values.append(
+    element('dt', undefined, '目标图书'), element('dd', undefined, review.target.label),
+    element('dt', undefined, '主稿件 ID'), element('dd', 'technical-identity', review.target.manuscriptId),
+    element('dt', undefined, '稿件分支 ID'), element('dd', 'technical-identity', review.target.branchId),
+    element('dt', undefined, '导入关系'), element('dd', undefined, review.target.relationshipLabel),
+    element('dt', undefined, '安全固定点'), element('dd', undefined, `${review.checkpoint.revisionLabel} · 修订日志 ${review.checkpoint.journalSequence}`),
+    element('dt', undefined, '当前固定点修订版 ID'), element('dd', 'technical-identity', review.checkpoint.revisionId),
+    element('dt', undefined, '当前固定点修订版摘要'), element('dd', 'technical-identity', review.checkpoint.revisionDigest),
+    element('dt', undefined, '固定点来源'), element('dd', undefined,
+      review.checkpoint.createdForDirtyJournal ? '已为未固定修订日志创建专用安全固定点' : '当前稿件已经位于持久固定点'),
+    element('dt', undefined, '来源关系'), element('dd', undefined, review.lineage.label),
+    ...(review.lineage.status === 'verified'
+      ? [
+          element('dt', undefined, '来源关系版本 ID'),
+          element('dd', 'technical-identity', review.lineage.sourceVersionId),
+          element('dt', undefined, '来源关系修订版 ID'),
+          element('dd', 'technical-identity', review.lineage.revisionId),
+        ]
+      : []),
+    element('dt', undefined, '比较方式'), element('dd', undefined,
+      review.lineage.comparisonKind === 'three-way' ? '三方比较' : '两方比较'),
+    element('dt', undefined, '来源版本结果'), element('dd', undefined, review.sourceVersionResult.label),
+    element('dt', undefined, '暂存文件名'), element('dd', undefined, review.source.displayName),
+    element('dt', undefined, '暂存格式'), element('dd', undefined, review.source.format),
+    element('dt', undefined, '暂存来源字节数'), element('dd', undefined, String(review.source.sourceBytes)),
+    element('dt', undefined, '暂存来源 SHA-256'), element('dd', 'technical-identity', review.source.sourceSha256),
+    element('dt', undefined, '暂存来源范围'), element('dd', undefined, review.source.provenanceLabel),
+  );
+  target.dataset['reimportSourceSha256'] = review.source.sourceSha256;
+  target.dataset['reimportSourceBytes'] = String(review.source.sourceBytes);
+  target.append(element('h3', undefined, '目标、固定点与来源关系'), values);
+  content.append(target);
+
+  const summary = element('section', 'review-section');
+  summary.dataset['comparisonDigest'] = review.comparison.comparisonDigest;
+  summary.append(
+    element('h3', undefined, '比较摘要'),
+    element('p', undefined, `${review.comparison.resultPreviewLabel} · ${review.comparison.totalMappings} 个位置 · ${review.comparison.unresolvedMappings} 个未解决`),
+    element('p', 'field-note', review.comparison.changed
+      ? '每个变化位置都必须明确接受暂存内容；系统不执行模糊匹配或自动合并。'
+      : '当前主稿件与暂存稿件逐块完全一致；提交只记录“未发现稿件变化”，不会创建空修订版。'),
+  );
+  content.append(summary);
+
+  const fidelity = element('section', 'review-section');
+  fidelity.append(element('h3', undefined, '重新导入保真审阅 · 8 类'));
+  const fidelityList = element('ul', 'degradation-list');
+  for (const category of review.fidelity) {
+    fidelityList.append(element('li', undefined,
+      `${category.label} · ${category.statusLabel} · ${category.count} 项 · ${category.detail}`));
+  }
+  fidelity.append(fidelityList);
+  if (review.degradationDecision.state === 'required-unselected') {
+    fidelity.append(element('p', 'attention-note', '必须明确接受完整降级集合后才能提交本次重新导入。'));
+    const accept = button('明确接受完整降级集合', 'secondary', async () => {
+      accept.disabled = true;
+      setStatus('正在持久化重新导入降级接受…', 'busy');
+      try {
+        const refreshed = await window.ai7.acceptReimportDegradation({
+          draftId: review.draftId,
+          expectedDraftVersion: review.draftVersion,
+        });
+        renderManuscriptReimportReview(refreshed, recoveryNotice, recoveryReturn, mappingAfter);
+        setStatus('完整降级集合已明确接受', 'success');
+      } catch (error) {
+        accept.disabled = false;
+        setStatus(rendererErrorMessage(error, '无法接受重新导入降级集合。'), 'error');
+      }
+    });
+    accept.dataset['acceptReimportDegradation'] = review.draftId;
+    fidelity.append(accept);
+  } else if (review.degradationDecision.state === 'accepted-complete-set') {
+    fidelity.append(element('p', 'success-note', '已明确接受完整降级集合'));
+  } else {
+    fidelity.append(element('p', 'success-note', '未发现需要接受的降级'));
+  }
+  content.append(fidelity);
+
+  const mappingsHost = element('section', 'review-section');
+  mappingsHost.dataset['reimportMappings'] = 'loading';
+  mappingsHost.append(element('h3', undefined, '逐块映射'), element('p', 'field-note', '正在读取持久比较事实…'));
+  content.append(mappingsHost);
+  void Promise.resolve().then(async () => {
+    try {
+      const page = await window.ai7.getReimportMappingPage({
+        draftId: review.draftId,
+        expectedDraftVersion: review.draftVersion,
+        after: mappingAfter,
+      });
+      if (!mappingsHost.isConnected) return;
+      const list = element('div', 'comparison-list');
+      const resolve = async (
+        mappingId: string,
+        resolution: 'preserve-current-identity' | 'create-new-identity' | 'retire-current-identity',
+        currentBlockId: string | null,
+        control: HTMLButtonElement,
+      ) => {
+        control.disabled = true;
+        try {
+          const initial = await window.ai7.resolveReimportMapping({
+            draftId: review.draftId,
+            expectedDraftVersion: review.draftVersion,
+            mappingId,
+            resolution,
+            currentBlockId,
+          });
+          const cancelResolution = button('取消当前操作', 'quiet', async () => {
+            cancelResolution.disabled = true;
+            await window.ai7.cancelServiceJob({ jobId: initial.jobId });
+          });
+          cancelResolution.dataset['cancelReimportResolution'] = initial.jobId;
+          cancelResolution.dataset['jobProgressCompleted'] = String(initial.progress.completed);
+          cancelResolution.dataset['jobProgressTotal'] = String(initial.progress.total);
+          control.after(cancelResolution);
+          const completed = await awaitServiceJob(initial, (job) => {
+            cancelResolution.dataset['jobProgressCompleted'] = String(job.progress.completed);
+            cancelResolution.dataset['jobProgressTotal'] = String(job.progress.total);
+            const progress = `${job.progress.completed.toLocaleString('zh-CN')} / ${job.progress.total.toLocaleString('zh-CN')}`;
+            setStatus(`${job.progress.label} ${progress}`, job.state === 'failed' ? 'error' : 'busy');
+          });
+          if (completed.state === 'cancelled') {
+            cancelResolution.remove();
+            control.disabled = false;
+            setStatus('结构身份解决已取消；复核权威未变化。', 'success');
+            return;
+          }
+          const refreshed = completed.result;
+          if (completed.kind !== 'reimport-resolution' || refreshed === null || !('checkpoint' in refreshed)) {
+            throw new Error('结构身份解决任务未返回复核结果。');
+          }
+          cancelResolution.remove();
+          renderManuscriptReimportReview(refreshed, recoveryNotice, recoveryReturn, mappingAfter);
+          setStatus('结构身份后果已持久化；复核摘要已更新', 'success');
+        } catch (error) {
+          if (hasErrorCode(error, 'DRAFT_VERSION_CHANGED') || hasErrorCode(error, 'REVIEW_CHANGED')) {
+            await initializeStartup();
+            return;
+          }
+          control.disabled = false;
+          setStatus(rendererErrorMessage(error, '无法持久化结构身份后果。'), 'error');
+        }
+      };
+      for (const mapping of page.items) {
+        const row = element('article', 'comparison-item');
+        row.dataset['reimportMappingId'] = mapping.mappingId;
+        row.dataset['reimportChangeKind'] = mapping.changeKind;
+        row.dataset['reimportMappingState'] = mapping.state;
+        row.dataset['currentBlockId'] = mapping.currentBlockId ?? '';
+        row.dataset['stagedBlockId'] = mapping.stagedBlockId ?? '';
+        row.dataset['resolvedCurrentBlockId'] = mapping.resolvedCurrentBlockId ?? '';
+        row.dataset['currentText'] = mapping.currentText ?? '';
+        row.dataset['stagedText'] = mapping.stagedText ?? '';
+        row.append(
+          element('strong', undefined, `位置 ${mapping.position} · ${mapping.changeKind}`),
+          element('p', 'field-note', `当前：${mapping.currentText ?? '—'}`),
+          ...(review.lineage.status === 'verified'
+            ? [element('p', 'field-note', `来源基线：${mapping.lineageText ?? '—'}`)]
+            : []),
+          element('p', 'field-note', `暂存：${mapping.stagedText ?? '—'}`),
+        );
+        if (mapping.state === 'unresolved') {
+          if (mapping.changeKind === 'delete') {
+            const retire = button('退役当前结构身份', 'secondary', async () => {
+              setStatus(`正在记录位置 ${mapping.position} 的退役后果…`, 'busy');
+              await resolve(mapping.mappingId, 'retire-current-identity', null, retire);
+            });
+            retire.dataset['resolveReimportMapping'] = mapping.mappingId;
+            retire.dataset['identityResolution'] = 'retire-current-identity';
+            row.append(retire);
+          } else {
+            const create = button('创建新的结构身份', 'secondary', async () => {
+              setStatus(`正在记录位置 ${mapping.position} 的新身份后果…`, 'busy');
+              await resolve(mapping.mappingId, 'create-new-identity', null, create);
+            });
+            create.dataset['resolveReimportMapping'] = mapping.mappingId;
+            create.dataset['identityResolution'] = 'create-new-identity';
+            const candidatesHost = element('div', 'comparison-list');
+            const showCandidates = async (candidateAfter: number | null): Promise<void> => {
+              const candidates = await window.ai7.getReimportIdentityCandidatePage({
+                draftId: review.draftId,
+                expectedDraftVersion: review.draftVersion,
+                mappingId: mapping.mappingId,
+                after: candidateAfter,
+              });
+              const candidateItems = element('div', 'comparison-list');
+              for (const candidate of candidates.items) {
+                const preserve = button(`保留当前身份 · 位置 ${candidate.position}`, 'quiet', async () => {
+                  setStatus(`正在把当前结构身份绑定到位置 ${mapping.position}…`, 'busy');
+                  await resolve(mapping.mappingId, 'preserve-current-identity', candidate.currentBlockId, preserve);
+                });
+                preserve.dataset['resolveReimportMapping'] = mapping.mappingId;
+                preserve.dataset['identityResolution'] = 'preserve-current-identity';
+                preserve.dataset['currentBlockId'] = candidate.currentBlockId;
+                candidateItems.append(element('p', 'field-note', candidate.text), preserve);
+              }
+              const navigation = element('div', 'button-row compact-actions');
+              if (candidateAfter !== null) {
+                navigation.append(element('span', 'field-note', '候选使用向前分页；重新打开可从第一页开始。'));
+              }
+              if (candidates.nextCursor !== null) {
+                navigation.append(button('下一页候选', 'quiet', () => void showCandidates(candidates.nextCursor)));
+              }
+              candidatesHost.replaceChildren(candidateItems, navigation);
+            };
+            const choose = button('选择要保留的当前结构身份', 'quiet', () => void showCandidates(null));
+            row.append(create, choose, candidatesHost);
+          }
+        } else {
+          row.append(element('p', 'success-note', mapping.identityConsequence === 'preserve-current-identity'
+            ? '已明确保留当前结构身份'
+            : mapping.identityConsequence === 'create-new-identity'
+              ? '已明确创建新的结构身份'
+              : '已明确退役当前结构身份'));
+        }
+        list.append(row);
+      }
+      const navigation = element('div', 'button-row compact-actions');
+      if (page.previousCursor !== null || mappingAfter !== null) {
+        const previous = button('上一页', 'quiet', () =>
+          renderManuscriptReimportReview(review, recoveryNotice, recoveryReturn, page.previousCursor));
+        previous.dataset['reimportPreviousPage'] = String(page.previousCursor ?? 0);
+        navigation.append(previous);
+      }
+      if (page.nextCursor !== null) {
+        const next = button('下一页', 'quiet', () =>
+          renderManuscriptReimportReview(review, recoveryNotice, recoveryReturn, page.nextCursor));
+        next.dataset['reimportNextPage'] = String(page.nextCursor);
+        navigation.append(next);
+      }
+      mappingsHost.dataset['reimportMappings'] = 'ready';
+      mappingsHost.dataset['reimportPageItemCount'] = String(page.items.length);
+      mappingsHost.replaceChildren(element('h3', undefined, '逐块映射'), list, navigation);
+    } catch (error) {
+      mappingsHost.dataset['reimportMappings'] = 'failed';
+      mappingsHost.replaceChildren(
+        element('h3', undefined, '逐块映射'),
+        element('p', 'attention-note', rendererErrorMessage(error, '无法读取逐块映射。')),
+      );
+    }
+  });
+
+  const grid = element('div', 'review-grid');
+  grid.append(listSection('将创建的记录', review.recordsToCreate), listSection('明确不会发生', review.namedNonEffects));
+  content.append(grid);
+  const actions = element('div', 'button-row compact-actions');
+  const abandon = button('取消导入', 'quiet', () =>
+    abandonAndContinue({ draftId: review.draftId, draftVersion: review.draftVersion }, recoveryReturn));
+  if (review.commitReady) {
+    let activeCommitJob: ServiceJobProjection | null = null;
+    const cancelCommit = button('取消当前提交', 'secondary', async () => {
+      if (activeCommitJob === null) return;
+      cancelCommit.disabled = true;
+      try {
+        activeCommitJob = await window.ai7.cancelServiceJob({ jobId: activeCommitJob.jobId });
+        setStatus(activeCommitJob.progress.label, 'success');
+      } catch (error) {
+        setStatus(rendererErrorMessage(error, '无法取消重新导入提交。'), 'error');
+      }
+    });
+    cancelCommit.dataset['cancelReimportCommit'] = 'true';
+    cancelCommit.hidden = true;
+    const commit = button(review.comparison.changed ? '提交稿件重新导入' : '记录未发现稿件变化', 'primary', async () => {
+      commit.disabled = true;
+      abandon.disabled = true;
+      setStatus('正在有界核对并提交稿件重新导入结果…', 'busy');
+      try {
+        activeCommitJob = await window.ai7.commitManuscriptReimport({
+          draftId: review.draftId,
+          expectedDraftVersion: review.draftVersion,
+          reviewDigest: review.reviewDigest,
+          commitAttemptId: review.commitAttemptId,
+        });
+        cancelCommit.dataset['jobProgressCompleted'] = String(activeCommitJob.progress.completed);
+        cancelCommit.dataset['jobProgressTotal'] = String(activeCommitJob.progress.total);
+        cancelCommit.hidden = false;
+        cancelCommit.disabled = false;
+        const completed = await awaitServiceJob(activeCommitJob, (job) => {
+          activeCommitJob = job;
+          cancelCommit.dataset['jobProgressCompleted'] = String(job.progress.completed);
+          cancelCommit.dataset['jobProgressTotal'] = String(job.progress.total);
+          const progress = `${job.progress.completed.toLocaleString('zh-CN')} / ${job.progress.total.toLocaleString('zh-CN')}`;
+          setStatus(`${job.progress.label} ${progress}`, job.state === 'failed' ? 'error' : 'busy');
+        });
+        if (completed.state === 'cancelled') {
+          activeCommitJob = null;
+          cancelCommit.hidden = true;
+          commit.disabled = false;
+          abandon.disabled = false;
+          setStatus('重新导入提交已取消；复核与稿件权威未变化。', 'success');
+          return;
+        }
+        const result = completed.result;
+        if (completed.kind !== 'reimport-commit' || result === null || !('reimportRecordId' in result)) {
+          throw new Error('重新导入提交任务未返回完成凭据。');
+        }
+        renderImported(result, recoveryReturn);
+        setStatus(result.completionLabel, 'success');
+      } catch (error) {
+        if (hasErrorCode(error, 'IMPORT_COMMIT_OUTCOME_UNCERTAIN') || hasErrorCode(error, 'REVIEW_CHANGED') ||
+          hasErrorCode(error, 'SNAPSHOT_RESELECTION_REQUIRED') || hasErrorCode(error, 'DRAFT_VERSION_CHANGED')) {
+          await initializeStartup();
+          return;
+        }
+        commit.disabled = false;
+        abandon.disabled = false;
+        setStatus(rendererErrorMessage(error, '稿件重新导入未完成。'), 'error');
+      }
+    });
+    commit.dataset['commitManuscriptReimport'] = review.target.bookId;
+    actions.append(commit, cancelCommit);
+  }
+  actions.append(abandon);
+  content.append(actions);
   appendRecoveryReturnAction(content, recoveryReturn);
   replaceScreen('review', content);
 }
@@ -1999,13 +2616,29 @@ async function awaitServiceJob(
   onProgress: (job: ServiceJobProjection) => void,
 ): Promise<ServiceJobProjection> {
   let job = initial;
+  let previousReimportProgress = initial.progress.completed;
+  const requireMonotonicReimportProgress = (next: ServiceJobProjection): void => {
+    if (next.kind !== 'reimport-preparation' && next.kind !== 'reimport-resolution' && next.kind !== 'reimport-commit') return;
+    if (!Number.isSafeInteger(next.progress.completed) || !Number.isSafeInteger(next.progress.total) ||
+      next.progress.completed < previousReimportProgress || next.progress.completed > next.progress.total ||
+      next.progress.total <= 0 ||
+      (next.state === 'completed' && next.progress.completed !== next.progress.total)) {
+      throw new Error('重新导入协作任务进度无效或发生倒退。');
+    }
+    previousReimportProgress = next.progress.completed;
+  };
+  requireMonotonicReimportProgress(job);
   onProgress(job);
   while (job.state === 'queued' || job.state === 'running') {
     await delay(25);
     job = await window.ai7.pollServiceJob({ jobId: job.jobId });
+    requireMonotonicReimportProgress(job);
     onProgress(job);
   }
-  if (job.state === 'failed') throw new Error(job.failure?.message ?? '后台业务操作未完成。');
+  if (job.state === 'failed') {
+    const failure = job.failure ?? { code: 'SERVICE_JOB_FAILED', message: '后台业务操作未完成。' };
+    throw Object.assign(new Error(failure.message), failure);
+  }
   return job;
 }
 
@@ -2643,7 +3276,9 @@ function renderEditorWindow(
         searchSummary.textContent = '查找已取消；当前本地编辑不受影响。';
         return;
       }
-      if (completed.kind !== 'search' || !completed.result || 'replacement' in completed.result) throw new Error('查找结果绑定无效。');
+      if (completed.kind !== 'search' || !completed.result || !('searchId' in completed.result)) {
+        throw new Error('查找结果绑定无效。');
+      }
       await loadSearchResults(null, completed.result.searchId);
     } catch (error) {
       setStatus(rendererErrorMessage(error, '全稿查找未完成。'), 'error');

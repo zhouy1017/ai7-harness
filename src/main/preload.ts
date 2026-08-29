@@ -3,6 +3,7 @@ import {
   IPC_CHANNELS,
   MAIN_EVENTS,
   type CommitNewBookRendererInput,
+  type CommitManuscriptReimportRendererInput,
   type CommitSourceImportRendererInput,
   type PickerReselectResult,
   type PickerStageResult,
@@ -194,6 +195,20 @@ const api: RendererApi = Object.freeze({
     invoke<ServiceOperationMap['prepareSourceImportReview']['output']>(IPC_CHANNELS.prepareSourceImportReview, input),
   commitSourceImport: (input: CommitSourceImportRendererInput) =>
     invoke<ServiceOperationMap['commitSourceImport']['output']>(IPC_CHANNELS.commitSourceImport, input),
+  prepareManuscriptReimport: (input: ServiceOperationMap['prepareManuscriptReimport']['input']) =>
+    invoke<ServiceOperationMap['prepareManuscriptReimport']['output']>(IPC_CHANNELS.prepareManuscriptReimport, input),
+  getReimportMappingPage: (input: ServiceOperationMap['getReimportMappingPage']['input']) =>
+    invoke<ServiceOperationMap['getReimportMappingPage']['output']>(IPC_CHANNELS.getReimportMappingPage, input),
+  getReimportIdentityCandidatePage: (input: ServiceOperationMap['getReimportIdentityCandidatePage']['input']) =>
+    invoke<ServiceOperationMap['getReimportIdentityCandidatePage']['output']>(IPC_CHANNELS.getReimportIdentityCandidatePage, input),
+  getReimportLineageSourceVersionPage: (input: ServiceOperationMap['getReimportLineageSourceVersionPage']['input']) =>
+    invoke<ServiceOperationMap['getReimportLineageSourceVersionPage']['output']>(IPC_CHANNELS.getReimportLineageSourceVersionPage, input),
+  acceptReimportDegradation: (input: ServiceOperationMap['acceptReimportDegradation']['input']) =>
+    invoke<ServiceOperationMap['acceptReimportDegradation']['output']>(IPC_CHANNELS.acceptReimportDegradation, input),
+  resolveReimportMapping: (input: ServiceOperationMap['resolveReimportMapping']['input']) =>
+    invoke<ServiceOperationMap['resolveReimportMapping']['output']>(IPC_CHANNELS.resolveReimportMapping, input),
+  commitManuscriptReimport: (input: CommitManuscriptReimportRendererInput) =>
+    invoke<ServiceOperationMap['commitManuscriptReimport']['output']>(IPC_CHANNELS.commitManuscriptReimport, input),
   acknowledgeImportCompletion: (input: ServiceOperationMap['acknowledgeImportCompletion']['input']) =>
     invoke<ServiceOperationMap['acknowledgeImportCompletion']['output']>(IPC_CHANNELS.acknowledgeImportCompletion, input),
   getManuscriptWindow: (input: ServiceOperationMap['getManuscriptWindow']['input']) =>

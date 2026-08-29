@@ -34,12 +34,40 @@ async function digestFile(path) {
 }
 
 async function createSyntheticDocx(path, variant) {
+  let paragraphs;
+  if (variant === 'paged-base' || variant === 'paged-reimport') {
+    paragraphs = Array.from({ length: 260 }, (_, index) =>
+      `有界内容块 ${String(index + 1).padStart(3, '0')} ${'边界'.repeat(1_000)}`);
+    if (variant === 'paged-reimport') {
+      const moved = paragraphs.splice(34, 1)[0];
+      paragraphs.splice(1, 0, moved);
+      const edited = paragraphs.findIndex((text) => text.startsWith('有界内容块 002'));
+      paragraphs[edited] = paragraphs[edited].replace('有界内容块 002', '有界内容块 002（已编辑）');
+      paragraphs.splice(paragraphs.findIndex((text) => text.startsWith('有界内容块 030')), 1);
+      paragraphs.splice(2, 0, `明确新增内容块 ${'新增'.repeat(1_000)}`);
+    }
+  } else if (variant === 'repeated-base' || variant === 'repeated-reimport') {
+    paragraphs = Array.from({ length: 260 }, () => '重复内容最坏情况。');
+    if (variant === 'repeated-reimport') paragraphs.push('重复内容后的明确新增块。');
+  } else if (variant === 'ambiguous-base' || variant === 'ambiguous-reimport') {
+    paragraphs = ['重复结构身份内容。', '重复结构身份内容。'];
+  } else {
+    paragraphs = [
+      '公共合成导入身份测试',
+      variant === 'c'
+        ? '重新导入后的明确变化内容。'
+        : '相同内容和结构。',
+    ];
+  }
+  const paragraphXml = paragraphs.map((text) =>
+    `<w:p><w:r><w:t>${text}</w:t></w:r></w:p>`,
+  ).join('');
   const documentXml =
     '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
     '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>' +
-    '<w:p><w:r><w:t>公共合成导入身份测试</w:t></w:r></w:p>' +
-    '<w:p><w:r><w:t>相同内容和结构。</w:t></w:r></w:p>' +
-    '<w:sectPr/></w:body></w:document>';
+    paragraphXml +
+    '<w:sectPr/>' +
+    '</w:body></w:document>';
   const contentTypes =
     '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
     '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">' +
@@ -50,8 +78,8 @@ async function createSyntheticDocx(path, variant) {
   const entries = {
     '[Content_Types].xml': strToU8(contentTypes),
     'word/document.xml': strToU8(documentXml),
-    ...(variant === 'b'
-      ? { 'docProps/app.xml': strToU8('<Properties><Application>AI7 J-01 synthetic B</Application></Properties>') }
+    ...(variant === 'b' || variant === 'ambiguous-reimport'
+      ? { 'docProps/app.xml': strToU8(`<Properties><Application>AI7 J-01 ${variant}</Application></Properties>`) }
       : {}),
   };
   await writeFile(path, zipSync(entries, { level: 6, mtime: new Date('2026-01-01T00:00:00.000Z') }));
@@ -172,6 +200,15 @@ async function waitFor(renderer, expression, location) {
   throw new Error(`J-01/${location}`);
 }
 
+async function waitForTransientControl(renderer, expression, location) {
+  const deadline = Date.now() + 5_000;
+  while (Date.now() < deadline) {
+    if (await renderer.evaluate(`Boolean(${expression})`)) return;
+    await new Promise((resolveWait) => setTimeout(resolveWait, 2));
+  }
+  throw new Error(`J-01/${location}`);
+}
+
 async function assertRenderer(renderer, expression, location) {
   requireJourney(await renderer.evaluate(`Boolean(${expression})`), location);
 }
@@ -220,7 +257,7 @@ async function prepareSourceImportReview(renderer, expectation) {
   await waitFor(renderer, `document.querySelector('[data-screen="relationship"]')`, 'source-relationship');
   await assertRenderer(
     renderer,
-    `(() => { const source = document.querySelector('[data-import-relationship="source-only"]'); const manuscript = document.querySelector('[data-import-relationship="first-manuscript"]'); return source && !source.checked && ${targetBookId !== null && targetManuscriptState === 'populated' ? '!manuscript' : 'manuscript && !manuscript.checked'}; })()`,
+    `(() => { const source = document.querySelector('[data-import-relationship="source-only"]'); const manuscript = document.querySelector('[data-import-relationship="first-manuscript"]'); const reimport = document.querySelector('[data-import-relationship="reimport"]'); return source && !source.checked && ${targetBookId !== null && targetManuscriptState === 'populated' ? '!manuscript && reimport && !reimport.checked' : 'manuscript && !manuscript.checked && !reimport'}; })()`,
     'source-relationship-unselected',
   );
   await assertRenderer(
@@ -369,6 +406,486 @@ async function commitPreparedSourceImport(renderer, expectation = {}) {
   return { ...identities, provenanceId: record['来源记录 ID'] };
 }
 
+async function prepareManuscriptReimportReview(renderer, expectation) {
+  const {
+    targetBookId,
+    lineageStatus,
+    lineageSourceVersionId = null,
+    expectedReuseSourceVersionId = null,
+    changed,
+    degraded = false,
+    dirtyCheckpoint = false,
+    cancelPreparationOnce = false,
+    start = 'landing',
+    scenario,
+  } = expectation;
+  requireJourney(start === 'landing' || start === 'target', `${scenario}-start`);
+  if (start === 'landing') {
+    await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, `${scenario}-landing`);
+    await clickExactButton(renderer, '导入稿件', `${scenario}-stage`);
+    await waitFor(renderer, `document.querySelector('[data-screen="target"]')`, `${scenario}-target`);
+  } else {
+    await waitFor(renderer, `document.querySelector('[data-screen="target"]')`, `${scenario}-target`);
+  }
+  await assertRenderer(
+    renderer,
+    `(() => { const target = document.querySelector('[data-import-target-choice="existing-book"][data-book-id=${JSON.stringify(targetBookId)}]'); if (!target) return false; target.click(); return true; })()`,
+    `${scenario}-target-select`,
+  );
+  await waitFor(renderer, `document.querySelector('[data-screen="relationship"]')`, `${scenario}-relationship`);
+  await assertRenderer(
+    renderer,
+    `(() => { const source = document.querySelector('[data-import-relationship="source-only"]'); const reimport = document.querySelector('[data-import-relationship="reimport"]'); return source && !source.checked && reimport && !reimport.checked && !document.querySelector('[data-import-relationship="first-manuscript"]'); })()`,
+    `${scenario}-relationship-unselected`,
+  );
+  await assertRenderer(
+    renderer,
+    `(() => { const reimport = document.querySelector('[data-import-relationship="reimport"]'); if (!reimport) return false; reimport.click(); return true; })()`,
+    `${scenario}-relationship-select`,
+  );
+  await waitFor(renderer, `document.querySelector('[data-reimport-lineage-choices]') && document.querySelector('[data-reimport-source-version-choices]')`, `${scenario}-choices`);
+  await assertRenderer(
+    renderer,
+    `!document.querySelector('input[name="reimport-lineage"]:checked') && !document.querySelector('input[name="reimport-source-version"]:checked') && !document.querySelector('[data-prepare-manuscript-reimport]')`,
+    `${scenario}-choices-unselected`,
+  );
+  const lineageSelector = lineageStatus === 'verified'
+    ? `[data-reimport-lineage="verified-source-version"][data-source-version-id=${JSON.stringify(lineageSourceVersionId)}]`
+    : '[data-reimport-lineage="unconfirmed"]';
+  await assertRenderer(
+    renderer,
+    `(() => { const lineage = document.querySelector(${JSON.stringify(lineageSelector)}); if (!lineage) return false; lineage.click(); return true; })()`,
+    `${scenario}-lineage-select`,
+  );
+  const sourceSelector = expectedReuseSourceVersionId === null
+    ? '[data-create-source-version="true"]'
+    : `[data-reuse-source-version-id=${JSON.stringify(expectedReuseSourceVersionId)}]`;
+  await waitFor(renderer, `document.querySelector(${JSON.stringify(sourceSelector)})`, `${scenario}-source-choice`);
+  await assertRenderer(
+    renderer,
+    `(() => { const source = document.querySelector(${JSON.stringify(sourceSelector)}); if (!source || source.checked) return false; source.click(); return true; })()`,
+    `${scenario}-source-select`,
+  );
+  const stagedSourceIdentity = await renderer.evaluate(`(() => ({
+    sha256: document.querySelector('[data-source-sha256]')?.textContent,
+    bytes: document.querySelector('[data-source-bytes]')?.textContent,
+  }))()`);
+  await waitFor(renderer, `document.querySelector('[data-prepare-manuscript-reimport=${JSON.stringify(targetBookId)}]')`, `${scenario}-prepare-action`);
+  await clickExactButton(renderer, '准备稿件重新导入比较', `${scenario}-prepare`);
+  if (cancelPreparationOnce) {
+    await waitForTransientControl(
+      renderer,
+      `(() => { const cancel = document.querySelector('[data-cancel-reimport-preparation]:not([hidden])'); const completed = Number(cancel?.dataset.jobProgressCompleted); const total = Number(cancel?.dataset.jobProgressTotal); return Boolean(cancel) && completed > 0 && completed < total; })()`,
+      `${scenario}-prepare-progress`,
+    );
+    const progress = await renderer.evaluate(`(() => { const cancel = document.querySelector('[data-cancel-reimport-preparation]:not([hidden])'); return { completed: Number(cancel?.dataset.jobProgressCompleted), total: Number(cancel?.dataset.jobProgressTotal) }; })()`);
+    requireJourney(progress?.completed > 0 && progress.completed < progress.total, `${scenario}-prepare-progress-running`);
+    await waitForTransientControl(
+      renderer,
+      `(() => { const cancel = document.querySelector('[data-cancel-reimport-preparation]:not([hidden])'); const completed = Number(cancel?.dataset.jobProgressCompleted); const total = Number(cancel?.dataset.jobProgressTotal); return completed >= ${progress.completed} && completed < total; })()`,
+      `${scenario}-prepare-progress-monotonic`,
+    );
+    await assertRenderer(
+      renderer,
+      `(() => { const cancel = document.querySelector('[data-cancel-reimport-preparation]:not([hidden]):not(:disabled)'); if (!cancel) return false; cancel.click(); return true; })()`,
+      `${scenario}-prepare-cancel`,
+    );
+    await waitFor(
+      renderer,
+      `document.querySelector('#persistence-status')?.textContent.includes('准备已取消') && !document.querySelector('[data-import-review-kind="reimport"]') && !document.querySelector('[data-prepare-manuscript-reimport]')?.disabled`,
+      `${scenario}-prepare-cancelled`,
+    );
+    await assertRenderer(
+      renderer,
+      `document.querySelector(${JSON.stringify(lineageSelector)})?.checked && document.querySelector(${JSON.stringify(sourceSelector)})?.checked`,
+      `${scenario}-prepare-cancel-preserves-selection`,
+    );
+    await clickExactButton(renderer, '准备稿件重新导入比较', `${scenario}-prepare-retry`);
+  }
+  await waitFor(renderer, `document.querySelector('[data-screen="review"] [data-import-review-kind="reimport"]') || document.querySelector('#persistence-status')?.dataset.tone === 'error'`, `${scenario}-review`);
+  const preparationFailure = await renderer.evaluate(`document.querySelector('#persistence-status')?.dataset.tone === 'error' ? document.querySelector('#persistence-status')?.textContent : null`);
+  requireJourney(preparationFailure === null, `${scenario}-review-valid`);
+  await waitFor(renderer, `document.querySelector('[data-reimport-mappings="ready"]')`, `${scenario}-mappings`);
+  await assertRenderer(
+    renderer,
+    `(() => { const review = document.querySelector('[data-import-review-kind="reimport"]'); const text = review?.textContent ?? ''; const changedMappings = review?.querySelectorAll('[data-reimport-mapping-state="unresolved"]').length ?? 0; const values = Object.fromEntries(Array.from(review?.querySelectorAll('dt') ?? [], (label) => [label.textContent, label.nextElementSibling?.textContent])); const exactSource = review?.querySelector('[data-reimport-source-sha256]'); const lineageExact = ${lineageStatus === 'verified' ? `values['来源关系版本 ID'] === ${JSON.stringify(lineageSourceVersionId)} && /^[0-9a-f-]{36}$/i.test(values['来源关系修订版 ID'] ?? '')` : `values['来源关系版本 ID'] === undefined && values['来源关系修订版 ID'] === undefined`}; return review?.dataset.reimportLineageStatus === ${JSON.stringify(lineageStatus)} && review.dataset.reimportComparisonKind === ${JSON.stringify(lineageStatus === 'verified' ? 'three-way' : 'two-way')} && /^[0-9a-f-]{36}$/i.test(values['当前固定点修订版 ID'] ?? '') && /^[0-9a-f]{64}$/.test(values['当前固定点修订版摘要'] ?? '') && lineageExact && exactSource?.dataset.reimportSourceSha256 === ${JSON.stringify(stagedSourceIdentity.sha256)} && exactSource.dataset.reimportSourceBytes === ${JSON.stringify(stagedSourceIdentity.bytes)} && text.includes(${JSON.stringify(lineageStatus === 'verified' ? '来源关系已确认' : '来源关系未确认')}) && text.includes(${JSON.stringify(dirtyCheckpoint ? '已为未固定修订日志创建专用安全固定点' : '当前稿件已经位于持久固定点')}) && text.includes('不执行模糊匹配或通用合并') && text.includes('不创建第二份主稿件') && text.includes('工作流程实例') && text.includes('不授予或执行模型提供方传输') && text.includes('不导出、不发送、不交付、不发布') && ${changed ? 'changedMappings > 0 && review.dataset.reimportCommitReady === "false"' : `changedMappings === 0 && review.dataset.reimportCommitReady === "${degraded ? 'false' : 'true'}" && text.includes("未发现稿件变化")`} && ${degraded ? "Boolean(review.querySelector('[data-accept-reimport-degradation]')) && text.includes('必须明确接受完整降级集合')" : "!review.querySelector('[data-accept-reimport-degradation]')"}; })()`,
+    `${scenario}-review-contract`,
+  );
+}
+
+async function manuscriptReimportReviewProof(renderer, scenario) {
+  await waitFor(renderer, `document.querySelector('[data-reimport-mappings="ready"]')`, `${scenario}-proof-mappings`);
+  const proof = await renderer.evaluate(`(() => {
+    const review = document.querySelector('[data-import-review-kind="reimport"]');
+    const values = Object.fromEntries(Array.from(review?.querySelectorAll('dt') ?? [], (label) => [label.textContent, label.nextElementSibling?.textContent]));
+    return {
+      draftId: review?.dataset.reimportDraftId,
+      draftVersion: review?.dataset.reimportDraftVersion,
+      reviewDigest: review?.dataset.reimportReviewDigest,
+      commitAttemptId: review?.dataset.reimportCommitAttemptId,
+      lineageStatus: review?.dataset.reimportLineageStatus,
+      comparisonKind: review?.dataset.reimportComparisonKind,
+      commitReady: review?.dataset.reimportCommitReady,
+      comparisonDigest: review?.querySelector('[data-comparison-digest]')?.dataset.comparisonDigest,
+      checkpointRevisionId: values['当前固定点修订版 ID'],
+      checkpointRevisionDigest: values['当前固定点修订版摘要'],
+      lineageSourceVersionId: values['来源关系版本 ID'],
+      lineageRevisionId: values['来源关系修订版 ID'],
+      sourceSha256: review?.querySelector('[data-reimport-source-sha256]')?.dataset.reimportSourceSha256,
+      sourceBytes: review?.querySelector('[data-reimport-source-sha256]')?.dataset.reimportSourceBytes,
+      mappingIds: Array.from(review?.querySelectorAll('[data-reimport-mapping-id]') ?? [], (row) => row.dataset.reimportMappingId),
+    };
+  })()`);
+  requireJourney(
+    /^[0-9a-f-]{36}$/i.test(proof?.draftId ?? '') && /^\d+$/.test(proof?.draftVersion ?? '') &&
+      /^[0-9a-f]{64}$/.test(proof?.reviewDigest ?? '') &&
+      (proof?.commitAttemptId === '' || /^[0-9a-f-]{36}$/i.test(proof?.commitAttemptId ?? '')) &&
+      /^(verified|unconfirmed)$/.test(proof?.lineageStatus ?? '') &&
+      /^(three-way|two-way)$/.test(proof?.comparisonKind ?? '') &&
+      /^[0-9a-f]{64}$/.test(proof?.comparisonDigest ?? '') &&
+      /^[0-9a-f-]{36}$/i.test(proof?.checkpointRevisionId ?? '') &&
+      /^[0-9a-f]{64}$/.test(proof?.checkpointRevisionDigest ?? '') &&
+      /^[0-9a-f]{64}$/.test(proof?.sourceSha256 ?? '') &&
+      /^\d+$/.test(proof?.sourceBytes ?? '') &&
+      Array.isArray(proof?.mappingIds) && proof.mappingIds.length > 0 && proof.mappingIds.length <= 4,
+    `${scenario}-proof-valid`,
+  );
+  return proof;
+}
+
+async function assertBoundedHistoryGraph(renderer, expectedRevisionCount, expectedRecordCount, scenario) {
+  const page = async () => renderer.evaluate(`(() => ({
+    items: Array.from(document.querySelectorAll('.book-overview button[data-record-kind="revision"], .book-overview button[data-record-kind="source-import-record"], .book-overview button[data-record-kind="manuscript-reimport-record"]'), (button) => ({
+      id: button.dataset.recordId,
+      kind: button.dataset.recordKind,
+    })),
+    older: Boolean(document.querySelector('.book-overview [data-book-history-previous]')),
+    newer: Boolean(document.querySelector('.book-overview [data-book-history-next]')),
+  }))()`);
+  const latest = await page();
+  requireJourney(Array.isArray(latest?.items) && latest.items.length > 0 && latest.items.length <= 8,
+    `${scenario}-history-latest-bounded`);
+  const seen = new Map();
+  let current = latest;
+  while (true) {
+    for (const item of current.items) {
+      requireJourney(typeof item.id === 'string' && !seen.has(item.id), `${scenario}-history-no-duplicate`);
+      seen.set(item.id, item.kind);
+    }
+    if (!current.older) break;
+    const priorIds = current.items.map((item) => item.id);
+    await assertRenderer(renderer, `(() => { const older = document.querySelector('.book-overview [data-book-history-previous]:not(:disabled)'); if (!older) return false; older.click(); return true; })()`, `${scenario}-history-older`);
+    await waitFor(renderer, `JSON.stringify(Array.from(document.querySelectorAll('.book-overview button[data-record-kind="revision"], .book-overview button[data-record-kind="source-import-record"], .book-overview button[data-record-kind="manuscript-reimport-record"]'), (button) => button.dataset.recordId)) !== ${JSON.stringify(JSON.stringify(priorIds))}`, `${scenario}-history-older-ready`);
+    current = await page();
+    requireJourney(current.items.length > 0 && current.items.length <= 8, `${scenario}-history-page-bounded`);
+  }
+  requireJourney(
+    Array.from(seen.values()).filter((kind) => kind === 'revision').length === expectedRevisionCount &&
+      Array.from(seen.values()).filter((kind) => kind === 'manuscript-reimport-record').length === expectedRecordCount,
+    `${scenario}-history-exact-graph-counts`,
+  );
+  while (current.newer) {
+    const priorIds = current.items.map((item) => item.id);
+    await assertRenderer(renderer, `(() => { const newer = document.querySelector('.book-overview [data-book-history-next]:not(:disabled)'); if (!newer) return false; newer.click(); return true; })()`, `${scenario}-history-newer`);
+    await waitFor(renderer, `JSON.stringify(Array.from(document.querySelectorAll('.book-overview button[data-record-kind="revision"], .book-overview button[data-record-kind="source-import-record"], .book-overview button[data-record-kind="manuscript-reimport-record"]'), (button) => button.dataset.recordId)) !== ${JSON.stringify(JSON.stringify(priorIds))}`, `${scenario}-history-newer-ready`);
+    current = await page();
+  }
+  requireJourney(JSON.stringify(current.items.map((item) => item.id)) === JSON.stringify(latest.items.map((item) => item.id)),
+    `${scenario}-history-roundtrip-exact-latest`);
+}
+
+async function assertCommittedManuscriptReimport(renderer, expectation) {
+  const { changed, lineageStatus, degraded = false, expectedRevisionCount, expectedRecordCount, scenario } = expectation;
+  await waitFor(renderer, `document.querySelector('[data-screen="imported"]')`, `${scenario}-imported`);
+  await waitFor(renderer, `document.documentElement.dataset.ai7ImportCompletionAcknowledged === 'true'`, `${scenario}-acknowledged`);
+  await assertRenderer(
+    renderer,
+    `(() => { const screen = document.querySelector('[data-screen="imported"]'); const history = screen?.querySelectorAll('[data-record-kind="revision"], [data-record-kind="source-import-record"], [data-record-kind="manuscript-reimport-record"]') ?? []; return screen?.textContent.includes(${JSON.stringify(changed ? '稿件已重新导入' : '未发现稿件变化')}) && history.length > 0 && history.length <= 8 && Boolean(screen.querySelector('[data-view-reimport-record-id]')); })()`,
+    `${scenario}-result-counts`,
+  );
+  const identities = await renderer.evaluate(`(() => { const overview = document.querySelector('[data-screen="imported"] .book-overview'); const direct = document.querySelector('[data-view-reimport-record-id]'); return { bookId: overview?.dataset.bookId, commitId: overview?.dataset.importCommitId, reimportRecordId: direct?.dataset.viewReimportRecordId }; })()`);
+  requireJourney(
+    /^[0-9a-f-]{36}$/i.test(identities?.bookId ?? '') && /^[0-9a-f-]{36}$/i.test(identities?.commitId ?? '') &&
+      /^[0-9a-f-]{36}$/i.test(identities?.reimportRecordId ?? ''),
+    `${scenario}-identities`,
+  );
+  await assertRenderer(
+    renderer,
+    `(() => { const direct = document.querySelector('[data-view-reimport-record-id]'); if (!direct || direct.disabled) return false; direct.click(); const detail = document.querySelector('.record-detail[data-record-kind="manuscript-reimport-record"]'); const values = Object.fromEntries(Array.from(detail?.querySelectorAll('dt') ?? [], (label) => [label.textContent, label.nextElementSibling?.textContent])); const revisionIdentityValid = ${changed ? "/^[0-9a-f-]{36}$/i.test(values['结果修订版 ID'] ?? '')" : "values['结果修订版 ID'] === '—'"}; const fidelityItems = detail?.querySelectorAll('details.degradation-disclosure:first-of-type li').length ?? 0; const degradationValid = ${degraded ? "/^[0-9a-f-]{36}$/i.test(values['导入降级决定 ID'] ?? '') && values['保真结果']?.includes('含已接受的降级')" : "values['导入降级决定 ID'] === '—' && values['保真结果']?.includes('完整保留')"}; return values['稿件重新导入记录 ID'] === ${JSON.stringify(identities.reimportRecordId)} && values['原子提交 ID'] === ${JSON.stringify(identities.commitId)} && values['来源关系'] === ${JSON.stringify(lineageStatus === 'verified' ? '来源关系已确认' : '来源关系未确认')} && values['比较方式'] === ${JSON.stringify(lineageStatus === 'verified' ? '三方比较' : '两方比较')} && values['结果'] === ${JSON.stringify(changed ? '稿件已重新导入' : '未发现稿件变化')} && revisionIdentityValid && fidelityItems === 8 && degradationValid && /^[0-9a-f]{64}$/.test(values['比较摘要'] ?? '') && /^[0-9a-f]{64}$/.test(values['解决摘要'] ?? '') && /^[0-9a-f]{64}$/.test(values['记录摘要'] ?? ''); })()`,
+    `${scenario}-direct-record-inspection`,
+  );
+  const recordIdentity = await renderer.evaluate(`(() => { const values = Object.fromEntries(Array.from(document.querySelectorAll('.record-detail[data-record-kind="manuscript-reimport-record"] dt'), (label) => [label.textContent, label.nextElementSibling?.textContent])); return { sourceVersionId: values['来源版本 ID'], resultingRevisionId: values['结果修订版 ID'] }; })()`);
+  requireJourney(/^[0-9a-f-]{36}$/i.test(recordIdentity?.sourceVersionId ?? ''), `${scenario}-source-version`);
+  await assertBoundedHistoryGraph(renderer, expectedRevisionCount, expectedRecordCount, scenario);
+  return { ...identities, ...recordIdentity };
+}
+
+async function resolveAndCommitManuscriptReimport(renderer, expectation) {
+  const { changed, scenario, expectInterruption = false, cancelCommitOnce = false } = expectation;
+  while (true) {
+    await waitFor(
+      renderer,
+      `document.querySelector('[data-reimport-mappings="failed"]') || (document.querySelector('[data-reimport-mappings="ready"]') && (document.querySelector('[data-accept-reimport-degradation]:not(:disabled)') || document.querySelector('[data-resolve-reimport-mapping]:not(:disabled)') || document.querySelector('[data-reimport-next-page]:not(:disabled)') || document.querySelector('[data-import-review-kind="reimport"]')?.dataset.reimportCommitReady === 'true'))`,
+      `${scenario}-mapping-page`,
+    );
+    const mappingFailure = await renderer.evaluate(`document.querySelector('[data-reimport-mappings="failed"]')?.textContent ?? null`);
+    requireJourney(mappingFailure === null, `${scenario}-mapping-page-valid`);
+    const degradationRequired = await renderer.evaluate(`Boolean(document.querySelector('[data-accept-reimport-degradation]:not(:disabled)'))`);
+    if (degradationRequired) {
+      const acceptingVersion = await renderer.evaluate(`document.querySelector('[data-import-review-kind="reimport"]')?.dataset.reimportDraftVersion`);
+      await clickExactButton(renderer, '明确接受完整降级集合', `${scenario}-accept-degradation`);
+      await waitFor(
+        renderer,
+        `document.querySelector('[data-import-review-kind="reimport"]')?.dataset.reimportDraftVersion !== ${JSON.stringify(acceptingVersion)} || document.querySelector('#persistence-status')?.dataset.tone === 'error'`,
+        `${scenario}-degradation-persisted`,
+      );
+      continue;
+    }
+    const unresolved = await renderer.evaluate(`document.querySelectorAll('[data-resolve-reimport-mapping]').length`);
+    if (unresolved === 0) {
+      const nextPage = await renderer.evaluate(`document.querySelector('[data-reimport-next-page]')?.dataset.reimportNextPage ?? null`);
+      if (nextPage === null) break;
+      const firstMapping = await renderer.evaluate(`document.querySelector('[data-reimport-mapping-id]')?.dataset.reimportMappingId ?? null`);
+      await assertRenderer(renderer, `(() => { const next = document.querySelector('[data-reimport-next-page]:not(:disabled)'); if (!next) return false; next.click(); return true; })()`, `${scenario}-next-mapping-page`);
+      await waitFor(renderer, `document.querySelector('[data-reimport-mappings="ready"]') && document.querySelector('[data-reimport-mapping-id]')?.dataset.reimportMappingId !== ${JSON.stringify(firstMapping)}`, `${scenario}-next-mapping-page-ready`);
+      continue;
+    }
+    const resolvingVersion = await renderer.evaluate(`document.querySelector('[data-import-review-kind="reimport"]')?.dataset.reimportDraftVersion`);
+    await assertRenderer(
+      renderer,
+      `(() => { const resolve = document.querySelector('[data-resolve-reimport-mapping]:not(:disabled)'); if (!resolve) return false; resolve.click(); return true; })()`,
+      `${scenario}-resolve-mapping`,
+    );
+    await waitFor(
+      renderer,
+      `document.querySelector('[data-import-review-kind="reimport"]')?.dataset.reimportDraftVersion !== ${JSON.stringify(resolvingVersion)} || document.querySelector('#persistence-status')?.dataset.tone === 'error'`,
+      `${scenario}-resolution-persisted`,
+    );
+    const resolutionFailure = await renderer.evaluate(`document.querySelector('#persistence-status')?.dataset.tone === 'error' ? document.querySelector('#persistence-status')?.textContent : null`);
+    requireJourney(resolutionFailure === null, `${scenario}-resolution-valid`);
+  }
+  await assertRenderer(
+    renderer,
+    `document.querySelector('[data-import-review-kind="reimport"]')?.dataset.reimportCommitReady === 'true'`,
+    `${scenario}-commit-ready`,
+  );
+  const commitProof = await manuscriptReimportReviewProof(renderer, `${scenario}-commit-input`);
+  const beforeCommitCancellationProof = cancelCommitOnce
+    ? await manuscriptReimportReviewProof(renderer, `${scenario}-commit-cancel-before`)
+    : null;
+  await clickExactButton(renderer, changed ? '提交稿件重新导入' : '记录未发现稿件变化', `${scenario}-commit`);
+  if (cancelCommitOnce) {
+    await waitForTransientControl(
+      renderer,
+      `(() => { const cancel = document.querySelector('[data-cancel-reimport-commit]:not([hidden])'); const completed = Number(cancel?.dataset.jobProgressCompleted); const total = Number(cancel?.dataset.jobProgressTotal); return Boolean(cancel) && completed > 0 && completed < total; })()`,
+      `${scenario}-commit-progress-running`,
+    );
+    const progress = await renderer.evaluate(`(() => { const cancel = document.querySelector('[data-cancel-reimport-commit]:not([hidden])'); return { completed: Number(cancel?.dataset.jobProgressCompleted), total: Number(cancel?.dataset.jobProgressTotal) }; })()`);
+    requireJourney(progress?.completed > 0 && progress.completed < progress.total,
+      `${scenario}-commit-progress-valid`);
+    await assertRenderer(
+      renderer,
+      `(() => { const cancel = document.querySelector('[data-cancel-reimport-commit]:not(:disabled)'); if (!cancel) return false; cancel.click(); return true; })()`,
+      `${scenario}-commit-cancel`,
+    );
+    await waitFor(
+      renderer,
+      `document.querySelector('#persistence-status')?.textContent.includes('提交已取消') && !document.querySelector('[data-cancel-reimport-commit]:not([hidden])') && document.querySelector('[data-import-review-kind="reimport"]')?.dataset.reimportCommitReady === 'true'`,
+      `${scenario}-commit-cancelled`,
+    );
+    const afterCommitCancellationProof = await manuscriptReimportReviewProof(renderer, `${scenario}-commit-cancel-after`);
+    requireJourney(JSON.stringify(afterCommitCancellationProof) === JSON.stringify(beforeCommitCancellationProof),
+      `${scenario}-commit-cancel-preserves-review`);
+    await clickExactButton(renderer, changed ? '提交稿件重新导入' : '记录未发现稿件变化', `${scenario}-commit-retry`);
+  }
+  if (expectInterruption) {
+    await waitFor(renderer, `document.documentElement.dataset.ai7ServiceState === 'interrupted'`, `${scenario}-interrupted`);
+    await assertRenderer(renderer, `!document.querySelector('[data-screen="imported"]')`, `${scenario}-no-optimistic-success`);
+    return null;
+  }
+  const committed = await assertCommittedManuscriptReimport(renderer, expectation);
+  return {
+    ...committed,
+    replayInput: {
+      draftId: commitProof.draftId,
+      expectedDraftVersion: Number(commitProof.draftVersion),
+      reviewDigest: commitProof.reviewDigest,
+      commitAttemptId: committed.commitId,
+    },
+  };
+}
+
+async function createDurableJournalEdit(renderer) {
+  await clickExactButton(renderer, '打开稿件', 'reimport-dirty-open-editor');
+  await waitFor(renderer, `document.querySelector('[data-screen="editor"]')`, 'reimport-dirty-editor');
+  await assertRenderer(
+    renderer,
+    `(() => { const editor = document.querySelector('[data-testid="manuscript-editor"]'); const block = editor?.querySelector('[data-block-id]'); if (!(block instanceof HTMLElement)) return false; block.focus(); const range = document.createRange(); range.selectNodeContents(block); range.collapse(false); const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range); document.execCommand('insertText', false, '，重新导入前本地编辑'); return block.textContent?.endsWith('，重新导入前本地编辑'); })()`,
+    'reimport-dirty-edit',
+  );
+  await waitFor(renderer, `Array.from(document.querySelectorAll('button')).some((button) => button.textContent === '保存当前编辑' && !button.disabled)`, 'reimport-dirty-save-ready');
+  await clickExactButton(renderer, '保存当前编辑', 'reimport-dirty-save');
+  await waitFor(renderer, `document.querySelector('#persistence-status')?.textContent.includes('已写入修订日志')`, 'reimport-dirty-durable');
+  await assertRenderer(renderer, `document.querySelector('.editor-meta')?.textContent.includes('修订日志序号 1')`, 'reimport-dirty-sequence');
+}
+
+async function importInitialManuscriptForReimport(renderer, sourceSha256, sourceBytes, scenario) {
+  await runJourney(renderer, { sourceSha256, sourceBytes, degraded: false });
+  const bookId = await renderer.evaluate(`document.querySelector('[data-screen="imported"] .book-overview')?.dataset.bookId`);
+  const lineageSourceVersionId = await renderer.evaluate(`document.querySelector('[data-screen="imported"] [data-record-kind="source"]')?.dataset.recordId`);
+  requireJourney(
+    /^[0-9a-f-]{36}$/i.test(bookId ?? '') && /^[0-9a-f-]{36}$/i.test(lineageSourceVersionId ?? ''),
+    `${scenario}-initial-identities`,
+  );
+  return { bookId, lineageSourceVersionId };
+}
+
+async function collectEditorBlockIdentities(renderer, scenario, openEditor = true) {
+  if (openEditor) {
+    await clickExactButton(renderer, '打开稿件', `${scenario}-open-editor`);
+    await waitFor(renderer, `document.querySelector('[data-screen="editor"] [data-testid="manuscript-editor"]')`, `${scenario}-editor`);
+  } else {
+    await waitFor(renderer, `document.querySelector('[data-screen="editor"] [data-testid="manuscript-editor"]')`, `${scenario}-editor-already-open`);
+  }
+  const identities = {};
+  for (;;) {
+    const page = await renderer.evaluate(`Array.from(document.querySelectorAll('[data-testid="manuscript-editor"] [data-block-id]'), (block) => ({ id: block.dataset.blockId, text: block.textContent }))`);
+    requireJourney(Array.isArray(page) && page.length > 0 && page.length <= 32, `${scenario}-bounded-editor-page`);
+    for (const block of page) {
+      const label = /^(?:有界内容块 \d{3}(?:（已编辑）)?|明确新增内容块)/.exec(block.text)?.[0] ?? block.text;
+      identities[label] = block.id;
+    }
+    const nextDisabled = await renderer.evaluate(`Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '向后浏览')?.disabled !== false`);
+    if (nextDisabled) break;
+    const firstBlockId = page[0].id;
+    await clickExactButton(renderer, '向后浏览', `${scenario}-next-editor-page`);
+    await waitFor(renderer, `document.querySelector('[data-testid="manuscript-editor"] [data-block-id]')?.dataset.blockId !== ${JSON.stringify(firstBlockId)}`, `${scenario}-next-editor-page-ready`);
+  }
+  return identities;
+}
+
+async function collectEditorBlockIdentitySequence(renderer, scenario) {
+  await clickExactButton(renderer, '打开稿件', `${scenario}-open-editor`);
+  await waitFor(renderer, `document.querySelector('[data-screen="editor"] [data-testid="manuscript-editor"]')`, `${scenario}-editor`);
+  const identities = [];
+  for (;;) {
+    const page = await renderer.evaluate(`Array.from(document.querySelectorAll('[data-testid="manuscript-editor"] [data-block-id]'), (block) => ({ id: block.dataset.blockId, text: block.textContent }))`);
+    requireJourney(Array.isArray(page) && page.length > 0 && page.length <= 32, `${scenario}-bounded-editor-page`);
+    identities.push(...page);
+    const nextDisabled = await renderer.evaluate(`Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '向后浏览')?.disabled !== false`);
+    if (nextDisabled) break;
+    const firstBlockId = page[0].id;
+    await clickExactButton(renderer, '向后浏览', `${scenario}-next-editor-page`);
+    await waitFor(renderer, `document.querySelector('[data-testid="manuscript-editor"] [data-block-id]')?.dataset.blockId !== ${JSON.stringify(firstBlockId)}`, `${scenario}-next-editor-page-ready`);
+  }
+  return identities;
+}
+
+async function resolveAmbiguousIdentitiesAsNoChange(renderer, currentIdentities, scenario) {
+  requireJourney(
+    currentIdentities.length === 2 &&
+      currentIdentities.every(({ id, text }) => /^blk_[0-9a-f]{24}$/.test(id) && text === '重复结构身份内容。') &&
+      currentIdentities[0].id !== currentIdentities[1].id,
+    `${scenario}-initial-distinct-identities`,
+  );
+  for (const current of currentIdentities) {
+    const draftVersion = await renderer.evaluate(`document.querySelector('[data-import-review-kind="reimport"]')?.dataset.reimportDraftVersion`);
+    await assertRenderer(
+      renderer,
+      `(() => { const row = Array.from(document.querySelectorAll('[data-reimport-mapping-id]')).find((candidate) => candidate.dataset.reimportChangeKind === 'insert' && candidate.dataset.reimportMappingState === 'unresolved' && candidate.dataset.stagedText === '重复结构身份内容。'); const choose = Array.from(row?.querySelectorAll('button') ?? []).find((button) => button.textContent === '选择要保留的当前结构身份'); if (!choose) return false; choose.click(); return true; })()`,
+      `${scenario}-open-candidate-${current.id}`,
+    );
+    await waitFor(renderer, `Boolean(document.querySelector('button[data-current-block-id=${JSON.stringify(current.id)}]'))`, `${scenario}-candidate-${current.id}`);
+    await assertRenderer(
+      renderer,
+      `(() => { const preserve = document.querySelector('button[data-current-block-id=${JSON.stringify(current.id)}]'); if (!preserve) return false; preserve.click(); return true; })()`,
+      `${scenario}-preserve-${current.id}`,
+    );
+    await waitFor(
+      renderer,
+      `document.querySelector('[data-import-review-kind="reimport"]')?.dataset.reimportDraftVersion !== ${JSON.stringify(draftVersion)} || document.querySelector('#persistence-status')?.dataset.tone === 'error'`,
+      `${scenario}-preserve-persisted-${current.id}`,
+    );
+    const failure = await renderer.evaluate(`document.querySelector('#persistence-status')?.dataset.tone === 'error' ? document.querySelector('#persistence-status')?.textContent : null`);
+    requireJourney(failure === null, `${scenario}-preserve-valid-${current.id}:${failure}`);
+    await waitFor(renderer, `document.querySelector('[data-reimport-mappings="ready"]')`, `${scenario}-mapping-reloaded-${current.id}`);
+  }
+  await assertRenderer(
+    renderer,
+    `(() => { const review = document.querySelector('[data-import-review-kind="reimport"]'); return review?.dataset.reimportCommitReady === 'true' && review.textContent.includes('未发现稿件变化') && !review.querySelector('[data-resolve-reimport-mapping]') && Array.from(review.querySelectorAll('button')).some((button) => button.textContent === '记录未发现稿件变化'); })()`,
+    `${scenario}-resolved-final-state-no-change`,
+  );
+}
+
+async function assertBoundedReimportPageReplacement(renderer, scenario) {
+  const first = await renderer.evaluate(`(() => { const host = document.querySelector('[data-reimport-mappings="ready"]'); return { count: Number(host?.dataset.reimportPageItemCount), ids: Array.from(host?.querySelectorAll('[data-reimport-mapping-id]') ?? [], (row) => row.dataset.reimportMappingId), next: host?.querySelector('[data-reimport-next-page]')?.dataset.reimportNextPage ?? null }; })()`);
+  requireJourney(first?.count === 4 && first.ids?.length === 4 && first.next !== null, `${scenario}-first-page-bounded`);
+  await assertRenderer(renderer, `(() => { const next = document.querySelector('[data-reimport-next-page]:not(:disabled)'); if (!next) return false; next.click(); return true; })()`, `${scenario}-page-next`);
+  await waitFor(renderer, `document.querySelector('[data-reimport-mappings="ready"]') && !${JSON.stringify(first.ids)}.includes(document.querySelector('[data-reimport-mapping-id]')?.dataset.reimportMappingId)`, `${scenario}-page-next-ready`);
+  await assertRenderer(
+    renderer,
+    `(() => { const host = document.querySelector('[data-reimport-mappings="ready"]'); const rows = Array.from(host?.querySelectorAll('[data-reimport-mapping-id]') ?? []); return rows.length > 0 && rows.length <= 4 && rows.every((row) => !${JSON.stringify(first.ids)}.includes(row.dataset.reimportMappingId)) && Boolean(host?.querySelector('[data-reimport-previous-page]')); })()`,
+    `${scenario}-page-replaced-not-accumulated`,
+  );
+  await assertRenderer(renderer, `(() => { const previous = document.querySelector('[data-reimport-previous-page]:not(:disabled)'); if (!previous) return false; previous.click(); return true; })()`, `${scenario}-page-previous`);
+  await waitFor(renderer, `document.querySelector('[data-reimport-mappings="ready"] [data-reimport-mapping-id]')?.dataset.reimportMappingId === ${JSON.stringify(first.ids[0])}`, `${scenario}-page-previous-ready`);
+}
+
+async function resolvePagedIdentityConsequences(renderer, initialIdentities, scenario) {
+  await assertRenderer(
+    renderer,
+    `(() => { const moved = Array.from(document.querySelectorAll('[data-reimport-mapping-id]')).find((row) => row.dataset.stagedText?.startsWith('有界内容块 035')); const inserted = Array.from(document.querySelectorAll('[data-reimport-mapping-id]')).find((row) => row.dataset.stagedText?.startsWith('明确新增内容块')); const edited = Array.from(document.querySelectorAll('[data-reimport-mapping-id]')).find((row) => row.dataset.stagedText?.startsWith('有界内容块 002（已编辑）')); return moved?.dataset.reimportChangeKind === 'move' && moved.dataset.reimportMappingState === 'resolved' && moved.dataset.currentBlockId === ${JSON.stringify(initialIdentities['有界内容块 035'])} && inserted?.dataset.reimportChangeKind === 'insert' && inserted.dataset.reimportMappingState === 'unresolved' && inserted.dataset.currentBlockId === '' && edited?.dataset.reimportChangeKind === 'insert' && edited.dataset.reimportMappingState === 'unresolved' && edited.dataset.currentBlockId === ''; })()`,
+    `${scenario}-move-and-insert-not-positional`,
+  );
+  const editedVersion = await renderer.evaluate(`document.querySelector('[data-import-review-kind="reimport"]')?.dataset.reimportDraftVersion`);
+  const beforeCancellationProof = await manuscriptReimportReviewProof(renderer, `${scenario}-resolution-cancel-before`);
+  await assertRenderer(
+    renderer,
+    `(() => { const row = Array.from(document.querySelectorAll('[data-reimport-mapping-id]')).find((candidate) => candidate.dataset.stagedText?.startsWith('有界内容块 002（已编辑）')); const choose = Array.from(row?.querySelectorAll('button') ?? []).find((button) => button.textContent === '选择要保留的当前结构身份'); if (!choose) return false; choose.click(); return true; })()`,
+    `${scenario}-open-identity-candidates`,
+  );
+  await waitFor(renderer, `Boolean(document.querySelector('button[data-current-block-id=${JSON.stringify(initialIdentities['有界内容块 002'])}]'))`, `${scenario}-identity-candidate`);
+  await assertRenderer(renderer, `(() => { const preserve = document.querySelector('button[data-current-block-id=${JSON.stringify(initialIdentities['有界内容块 002'])}]'); if (!preserve) return false; preserve.click(); return true; })()`, `${scenario}-preserve-edited-identity`);
+  await waitForTransientControl(
+    renderer,
+    `(() => { const cancel = document.querySelector('[data-cancel-reimport-resolution]'); const completed = Number(cancel?.dataset.jobProgressCompleted); const total = Number(cancel?.dataset.jobProgressTotal); return Boolean(cancel) && completed > 0 && completed < total; })()`,
+    `${scenario}-resolution-progress`,
+  );
+  const resolutionProgress = await renderer.evaluate(`(() => { const cancel = document.querySelector('[data-cancel-reimport-resolution]'); return { completed: Number(cancel?.dataset.jobProgressCompleted), total: Number(cancel?.dataset.jobProgressTotal) }; })()`);
+  requireJourney(resolutionProgress?.completed > 0 && resolutionProgress.completed < resolutionProgress.total,
+    `${scenario}-resolution-progress-running`);
+  await waitForTransientControl(
+    renderer,
+    `(() => { const cancel = document.querySelector('[data-cancel-reimport-resolution]'); const completed = Number(cancel?.dataset.jobProgressCompleted); const total = Number(cancel?.dataset.jobProgressTotal); return completed >= ${resolutionProgress.completed} && completed < total; })()`,
+    `${scenario}-resolution-progress-monotonic`,
+  );
+  await assertRenderer(
+    renderer,
+    `(() => { const cancel = document.querySelector('[data-cancel-reimport-resolution]:not(:disabled)'); if (!cancel) return false; cancel.click(); return true; })()`,
+    `${scenario}-resolution-cancel`,
+  );
+  await waitFor(
+    renderer,
+    `document.querySelector('#persistence-status')?.textContent.includes('结构身份解决已取消') && !document.querySelector('[data-cancel-reimport-resolution]') && document.querySelector('[data-import-review-kind="reimport"]')?.dataset.reimportDraftVersion === ${JSON.stringify(editedVersion)}`,
+    `${scenario}-resolution-cancelled`,
+  );
+  const afterCancellationProof = await manuscriptReimportReviewProof(renderer, `${scenario}-resolution-cancel-after`);
+  requireJourney(JSON.stringify(afterCancellationProof) === JSON.stringify(beforeCancellationProof),
+    `${scenario}-resolution-cancel-preserves-review`);
+  await assertRenderer(renderer, `(() => { const preserve = document.querySelector('button[data-current-block-id=${JSON.stringify(initialIdentities['有界内容块 002'])}]:not(:disabled)'); if (!preserve) return false; preserve.click(); return true; })()`, `${scenario}-preserve-edited-identity-retry`);
+  await waitFor(renderer, `document.querySelector('[data-import-review-kind="reimport"]')?.dataset.reimportDraftVersion !== ${JSON.stringify(editedVersion)} || document.querySelector('#persistence-status')?.dataset.tone === 'error'`, `${scenario}-preserve-edited-identity-persisted`);
+  const preserveFailure = await renderer.evaluate(`document.querySelector('#persistence-status')?.dataset.tone === 'error' ? document.querySelector('#persistence-status')?.textContent : null`);
+  requireJourney(preserveFailure === null, `${scenario}-preserve-edited-identity-valid:${preserveFailure}`);
+  await waitFor(renderer, `document.querySelector('[data-reimport-mappings="ready"]')`, `${scenario}-preserve-edited-page`);
+  const insertedVersion = await renderer.evaluate(`document.querySelector('[data-import-review-kind="reimport"]')?.dataset.reimportDraftVersion`);
+  await assertRenderer(
+    renderer,
+    `(() => { const row = Array.from(document.querySelectorAll('[data-reimport-mapping-id]')).find((candidate) => candidate.dataset.stagedText?.startsWith('明确新增内容块')); const create = row?.querySelector('[data-identity-resolution="create-new-identity"]'); if (!create) return false; create.click(); return true; })()`,
+    `${scenario}-create-inserted-identity`,
+  );
+  await waitFor(renderer, `document.querySelector('[data-import-review-kind="reimport"]')?.dataset.reimportDraftVersion !== ${JSON.stringify(insertedVersion)}`, `${scenario}-create-inserted-identity-persisted`);
+}
+
 async function runJourney(
   renderer,
   expectation,
@@ -420,7 +937,7 @@ async function runJourney(
   );
   await assertRenderer(
     renderer,
-    `typeof globalThis.process === 'undefined' && typeof globalThis.require === 'undefined' && Object.keys(window.ai7).sort().join(',') === 'abandonImportDraft,acknowledgeImportCompletion,cancelServiceJob,commitBookCreation,commitNewBookImport,commitReplacement,commitSourceImport,continueImportDraft,deferRecovery,dismissReplacementPreview,flushJournalEdit,freezeReplacement,getBookOverview,getImportStartup,getManuscriptWindow,getManuscriptWindowAt,getOutline,getRecoveryComparison,getSearchResults,getStartup,listBooks,listPriorWork,platform,pollServiceJob,prepareBookCreation,prepareNewBookReview,prepareReplacement,prepareSourceImportReview,redoManuscript,reselectImportDraft,restoreRecovery,saveMilestone,selectAndStageDocx,startReplacementCommit,startSearch,undoManuscript,viewRecoveryCandidate'`,
+    `typeof globalThis.process === 'undefined' && typeof globalThis.require === 'undefined' && Object.keys(window.ai7).sort().join(',') === 'abandonImportDraft,acceptReimportDegradation,acknowledgeImportCompletion,cancelServiceJob,commitBookCreation,commitManuscriptReimport,commitNewBookImport,commitReplacement,commitSourceImport,continueImportDraft,deferRecovery,dismissReplacementPreview,flushJournalEdit,freezeReplacement,getBookOverview,getImportStartup,getManuscriptWindow,getManuscriptWindowAt,getOutline,getRecoveryComparison,getReimportIdentityCandidatePage,getReimportLineageSourceVersionPage,getReimportMappingPage,getSearchResults,getStartup,listBooks,listPriorWork,platform,pollServiceJob,prepareBookCreation,prepareManuscriptReimport,prepareNewBookReview,prepareReplacement,prepareSourceImportReview,redoManuscript,reselectImportDraft,resolveReimportMapping,restoreRecovery,saveMilestone,selectAndStageDocx,startReplacementCommit,startSearch,undoManuscript,viewRecoveryCandidate'`,
     'renderer-isolation',
   );
   await assertRenderer(
@@ -821,7 +1338,7 @@ async function runEmptyBookFirstImport(renderer, expectation, restartReviewedImp
   );
   await assertRenderer(
     renderer,
-    `(() => { const screen = document.querySelector('[data-screen="imported"]'); const overview = screen?.querySelector('.book-overview'); const buttons = Array.from(screen?.querySelectorAll('.record-navigation button') ?? [], (button) => button.textContent); const exact = ['图书','主稿件','修订版 r1','来源版本与来源记录','工作流实例与精确 Profile 绑定','稿件导入记录']; return overview?.dataset.bookId === ${JSON.stringify(bookId)} && screen.textContent.includes('稿件已导入') && screen.textContent.includes('已有主稿件') && buttons.length === exact.length && buttons.every((label, index) => label === exact[index]); })()`,
+    `(() => { const screen = document.querySelector('[data-screen="imported"]'); const overview = screen?.querySelector('.book-overview'); const buttons = Array.from(screen?.querySelectorAll('.record-navigation [data-record-kind]') ?? [], (button) => button.textContent); const exact = ['图书','主稿件','修订版 r1','来源版本与来源记录','工作流实例与精确 Profile 绑定','稿件导入记录']; return overview?.dataset.bookId === ${JSON.stringify(bookId)} && screen.textContent.includes('稿件已导入') && screen.textContent.includes('已有主稿件') && buttons.length === exact.length && buttons.every((label, index) => label === exact[index]); })()`,
     'existing-book-result-overview',
   );
   await clickExactButton(renderer, '图书', 'existing-book-result-book-record');
@@ -900,12 +1417,40 @@ async function main() {
     await mkdir(syntheticRoot);
     const syntheticAPath = resolve(syntheticRoot, 'sample1.docx');
     const syntheticBPath = resolve(syntheticRoot, 'same-content-other-container.docx');
+    const syntheticCPath = resolve(syntheticRoot, 'reimport-changed.docx');
+    const syntheticPagedBasePath = resolve(syntheticRoot, 'reimport-paged-base.docx');
+    const syntheticPagedChangedPath = resolve(syntheticRoot, 'reimport-paged-changed.docx');
+    const syntheticRepeatedBasePath = resolve(syntheticRoot, 'reimport-repeated-base.docx');
+    const syntheticRepeatedChangedPath = resolve(syntheticRoot, 'reimport-repeated-changed.docx');
+    const syntheticAmbiguousBasePath = resolve(syntheticRoot, 'reimport-ambiguous-base.docx');
+    const syntheticAmbiguousReimportPath = resolve(syntheticRoot, 'reimport-ambiguous-same-content.docx');
     await createSyntheticDocx(syntheticAPath, 'a');
     await createSyntheticDocx(syntheticBPath, 'b');
+    await createSyntheticDocx(syntheticCPath, 'c');
+    await createSyntheticDocx(syntheticPagedBasePath, 'paged-base');
+    await createSyntheticDocx(syntheticPagedChangedPath, 'paged-reimport');
+    await createSyntheticDocx(syntheticRepeatedBasePath, 'repeated-base');
+    await createSyntheticDocx(syntheticRepeatedChangedPath, 'repeated-reimport');
+    await createSyntheticDocx(syntheticAmbiguousBasePath, 'ambiguous-base');
+    await createSyntheticDocx(syntheticAmbiguousReimportPath, 'ambiguous-reimport');
     const syntheticAInfo = await lstat(syntheticAPath);
     const syntheticBInfo = await lstat(syntheticBPath);
+    const syntheticCInfo = await lstat(syntheticCPath);
+    const syntheticPagedBaseInfo = await lstat(syntheticPagedBasePath);
+    const syntheticPagedChangedInfo = await lstat(syntheticPagedChangedPath);
+    const syntheticRepeatedBaseInfo = await lstat(syntheticRepeatedBasePath);
+    const syntheticRepeatedChangedInfo = await lstat(syntheticRepeatedChangedPath);
+    const syntheticAmbiguousBaseInfo = await lstat(syntheticAmbiguousBasePath);
+    const syntheticAmbiguousReimportInfo = await lstat(syntheticAmbiguousReimportPath);
     const syntheticASha256 = await digestFile(syntheticAPath);
     const syntheticBSha256 = await digestFile(syntheticBPath);
+    const syntheticCSha256 = await digestFile(syntheticCPath);
+    const syntheticPagedBaseSha256 = await digestFile(syntheticPagedBasePath);
+    const syntheticPagedChangedSha256 = await digestFile(syntheticPagedChangedPath);
+    const syntheticRepeatedBaseSha256 = await digestFile(syntheticRepeatedBasePath);
+    const syntheticRepeatedChangedSha256 = await digestFile(syntheticRepeatedChangedPath);
+    const syntheticAmbiguousBaseSha256 = await digestFile(syntheticAmbiguousBasePath);
+    const syntheticAmbiguousReimportSha256 = await digestFile(syntheticAmbiguousReimportPath);
     requireJourney(
       syntheticAInfo.isFile() &&
         syntheticBInfo.isFile() &&
@@ -913,9 +1458,30 @@ async function main() {
         !syntheticBInfo.isSymbolicLink() &&
         (await realpath(syntheticAPath)) === syntheticAPath &&
         (await realpath(syntheticBPath)) === syntheticBPath &&
+        syntheticCInfo.isFile() && !syntheticCInfo.isSymbolicLink() &&
+        syntheticPagedBaseInfo.isFile() && syntheticPagedChangedInfo.isFile() &&
+        !syntheticPagedBaseInfo.isSymbolicLink() &&
+        !syntheticPagedChangedInfo.isSymbolicLink() &&
+        syntheticRepeatedBaseInfo.isFile() && syntheticRepeatedChangedInfo.isFile() &&
+        !syntheticRepeatedBaseInfo.isSymbolicLink() &&
+        !syntheticRepeatedChangedInfo.isSymbolicLink() &&
+        syntheticAmbiguousBaseInfo.isFile() && syntheticAmbiguousReimportInfo.isFile() &&
+        !syntheticAmbiguousBaseInfo.isSymbolicLink() &&
+        !syntheticAmbiguousReimportInfo.isSymbolicLink() &&
+        (await realpath(syntheticCPath)) === syntheticCPath &&
+        (await realpath(syntheticPagedBasePath)) === syntheticPagedBasePath &&
+        (await realpath(syntheticPagedChangedPath)) === syntheticPagedChangedPath &&
+        (await realpath(syntheticRepeatedBasePath)) === syntheticRepeatedBasePath &&
+        (await realpath(syntheticRepeatedChangedPath)) === syntheticRepeatedChangedPath &&
+        (await realpath(syntheticAmbiguousBasePath)) === syntheticAmbiguousBasePath &&
+        (await realpath(syntheticAmbiguousReimportPath)) === syntheticAmbiguousReimportPath &&
         syntheticASha256 !== SAMPLE1_SHA256 &&
         syntheticBSha256 !== SAMPLE1_SHA256 &&
-        syntheticASha256 !== syntheticBSha256,
+        syntheticCSha256 !== SAMPLE1_SHA256 && syntheticASha256 !== syntheticBSha256 &&
+        syntheticASha256 !== syntheticCSha256 && syntheticBSha256 !== syntheticCSha256 &&
+        syntheticPagedBaseSha256 !== syntheticPagedChangedSha256 &&
+        syntheticRepeatedBaseSha256 !== syntheticRepeatedChangedSha256 &&
+        syntheticAmbiguousBaseSha256 !== syntheticAmbiguousReimportSha256,
       'synthetic-input-identities',
     );
     const executable = electronExecutable();
@@ -987,6 +1553,11 @@ async function main() {
       identityClass: 'parsed-content-structure',
       identityLabel: '发现相同内容',
       identityFindingCount: 1,
+      degraded: false,
+    };
+    const syntheticCExpectation = {
+      sourceSha256: syntheticCSha256,
+      sourceBytes: syntheticCInfo.size,
       degraded: false,
     };
 
@@ -1189,7 +1760,7 @@ async function main() {
     renderer = await launchProduct({
       dataRoot: sourceAfterCommitRoot,
       pickerPath: docx,
-      importControl: 'after-commit-before-response',
+      importControl: 'legacy-result-json-without-receipt',
     });
     await prepareSourceImportReview(renderer, { ...sample1Expectation, scenario: 'source-after-commit' });
     await commitPreparedSourceImport(renderer, { expectInterruption: true });
@@ -1224,6 +1795,638 @@ async function main() {
       `(() => { const screen = document.querySelector('[data-screen="import-uncertain"]'); const labels = Array.from(screen?.querySelectorAll('button') ?? [], (button) => button.textContent); return screen?.textContent.includes('导入提交结果待确认') && screen.textContent.includes('COMMIT_PROOF_INCONCLUSIVE') && !labels.some((label) => ['继续导入','放弃','复核来源材料导入','新建图书并导入来源材料','导入来源材料到所选图书','取消导入'].includes(label)); })()`,
       'source-uncertain-no-retry-cancel-commit',
     );
+    await closeProduct();
+
+    const reimportRoot = await createCanonicalExternalDataRoot(resolve(runRoot, 'manuscript-reimport-data'), checkoutRoot);
+    renderer = await launchProduct({ dataRoot: reimportRoot, pickerPath: syntheticAPath });
+    const {
+      bookId: reimportBookId,
+      lineageSourceVersionId: initialLineageSourceVersionId,
+    } = await importInitialManuscriptForReimport(
+      renderer,
+      syntheticASha256,
+      syntheticAInfo.size,
+      'reimport',
+    );
+    await createDurableJournalEdit(renderer);
+    await closeProduct();
+
+    renderer = await launchProduct({ dataRoot: reimportRoot, pickerPath: syntheticCPath });
+    await prepareManuscriptReimportReview(renderer, {
+      targetBookId: reimportBookId,
+      lineageStatus: 'verified',
+      lineageSourceVersionId: initialLineageSourceVersionId,
+      expectedReuseSourceVersionId: null,
+      changed: true,
+      dirtyCheckpoint: true,
+      scenario: 'reimport-verified-changed',
+    });
+    await closeProduct();
+    renderer = await launchProduct({ dataRoot: reimportRoot });
+    await waitFor(renderer, `document.querySelector('[data-screen="import-recovery"]')`, 'reimport-reviewed-restart');
+    await assertRenderer(
+      renderer,
+      `(() => { const recovery = document.querySelector('[data-screen="import-recovery"]'); return recovery?.textContent.includes('重新导入主稿件') && recovery.textContent.includes(${JSON.stringify(reimportBookId)}) && Array.from(recovery.querySelectorAll('button')).some((button) => button.textContent === '继续导入'); })()`,
+      'reimport-reviewed-restart-summary',
+    );
+    await clickExactButton(renderer, '继续导入', 'reimport-reviewed-restart-continue');
+    await waitFor(renderer, `document.querySelector('[data-screen="review"] [data-import-review-kind="reimport"]')`, 'reimport-reviewed-restart-review');
+    const verifiedChanged = await resolveAndCommitManuscriptReimport(renderer, {
+      changed: true,
+      lineageStatus: 'verified',
+      expectedRevisionCount: 3,
+      expectedRecordCount: 1,
+      scenario: 'reimport-verified-changed',
+    });
+    await closeProduct();
+
+    renderer = await launchProduct({ dataRoot: reimportRoot, pickerPath: syntheticCPath });
+    await prepareManuscriptReimportReview(renderer, {
+      targetBookId: reimportBookId,
+      lineageStatus: 'verified',
+      lineageSourceVersionId: verifiedChanged.sourceVersionId,
+      expectedReuseSourceVersionId: verifiedChanged.sourceVersionId,
+      changed: false,
+      scenario: 'reimport-verified-no-change',
+    });
+    await resolveAndCommitManuscriptReimport(renderer, {
+      changed: false,
+      lineageStatus: 'verified',
+      expectedRevisionCount: 3,
+      expectedRecordCount: 2,
+      scenario: 'reimport-verified-no-change',
+    });
+    await closeProduct();
+
+    renderer = await launchProduct({ dataRoot: reimportRoot, pickerPath: syntheticAPath });
+    await prepareManuscriptReimportReview(renderer, {
+      targetBookId: reimportBookId,
+      lineageStatus: 'unconfirmed',
+      expectedReuseSourceVersionId: initialLineageSourceVersionId,
+      changed: true,
+      scenario: 'reimport-unconfirmed-changed',
+    });
+    await resolveAndCommitManuscriptReimport(renderer, {
+      changed: true,
+      lineageStatus: 'unconfirmed',
+      expectedRevisionCount: 4,
+      expectedRecordCount: 3,
+      scenario: 'reimport-unconfirmed-changed',
+    });
+    await closeProduct();
+
+    renderer = await launchProduct({ dataRoot: reimportRoot, pickerPath: syntheticBPath });
+    await prepareManuscriptReimportReview(renderer, {
+      targetBookId: reimportBookId,
+      lineageStatus: 'unconfirmed',
+      expectedReuseSourceVersionId: null,
+      changed: false,
+      scenario: 'reimport-unconfirmed-no-change',
+    });
+    const unconfirmedNoChange = await resolveAndCommitManuscriptReimport(renderer, {
+      changed: false,
+      lineageStatus: 'unconfirmed',
+      expectedRevisionCount: 4,
+      expectedRecordCount: 4,
+      scenario: 'reimport-unconfirmed-no-change',
+    });
+    await closeProduct();
+
+    renderer = await launchProduct({ dataRoot: reimportRoot, pickerPath: syntheticBPath });
+    await prepareManuscriptReimportReview(renderer, {
+      targetBookId: reimportBookId,
+      lineageStatus: 'verified',
+      lineageSourceVersionId: unconfirmedNoChange.sourceVersionId,
+      expectedReuseSourceVersionId: unconfirmedNoChange.sourceVersionId,
+      changed: false,
+      scenario: 'reimport-no-change-lineage',
+    });
+    await resolveAndCommitManuscriptReimport(renderer, {
+      changed: false,
+      lineageStatus: 'verified',
+      expectedRevisionCount: 4,
+      expectedRecordCount: 5,
+      scenario: 'reimport-no-change-lineage',
+    });
+    await closeProduct();
+    renderer = await launchProduct({ dataRoot: reimportRoot });
+    await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'reimport-no-change-lineage-restart');
+    await assertRenderer(
+      renderer,
+      `(() => { const book = document.querySelector('[data-screen="landing"] [data-book-id=${JSON.stringify(reimportBookId)}]'); if (!book) return false; book.click(); return true; })()`,
+      'reimport-no-change-lineage-restart-open',
+    );
+    await waitFor(renderer, `document.querySelector('[data-screen="book-overview"]')`, 'reimport-no-change-lineage-restart-overview');
+    await assertRenderer(
+      renderer,
+      `(() => { const overview = document.querySelector('[data-screen="book-overview"]'); const history = overview?.querySelectorAll('[data-record-kind="revision"], [data-record-kind="source-import-record"], [data-record-kind="manuscript-reimport-record"]') ?? []; return history.length === 8 && Boolean(overview.querySelector('[data-book-history-previous]')) && !overview.querySelector('[data-book-history-next]'); })()`,
+      'reimport-no-change-lineage-restart-records',
+    );
+    const latestHistoryIds = await renderer.evaluate(`Array.from(document.querySelectorAll('[data-screen="book-overview"] [data-record-kind="revision"], [data-screen="book-overview"] [data-record-kind="source-import-record"], [data-screen="book-overview"] [data-record-kind="manuscript-reimport-record"]'), (button) => button.dataset.recordId)`);
+    await assertRenderer(renderer, `(() => { const older = document.querySelector('[data-book-history-previous]'); if (!older) return false; older.click(); return true; })()`, 'reimport-history-older');
+    await waitFor(renderer, `document.querySelector('[data-screen="book-overview"] [data-book-history-next]')`, 'reimport-history-older-page');
+    await assertRenderer(
+      renderer,
+      `(() => { const history = Array.from(document.querySelectorAll('[data-screen="book-overview"] [data-record-kind="revision"], [data-screen="book-overview"] [data-record-kind="source-import-record"], [data-screen="book-overview"] [data-record-kind="manuscript-reimport-record"]')); const prior = new Set(${JSON.stringify(latestHistoryIds)}); return history.length > 0 && history.length <= 8 && history.every((button) => !prior.has(button.dataset.recordId)); })()`,
+      'reimport-history-page-replaces',
+    );
+    await assertRenderer(renderer, `(() => { const newer = document.querySelector('[data-book-history-next]'); if (!newer) return false; newer.click(); return true; })()`, 'reimport-history-newer');
+    await waitFor(renderer, `document.querySelector('[data-screen="book-overview"] [data-book-history-previous]') && !document.querySelector('[data-screen="book-overview"] [data-book-history-next]')`, 'reimport-history-roundtrip');
+    await assertRenderer(
+      renderer,
+      `JSON.stringify(Array.from(document.querySelectorAll('[data-screen="book-overview"] [data-record-kind="revision"], [data-screen="book-overview"] [data-record-kind="source-import-record"], [data-screen="book-overview"] [data-record-kind="manuscript-reimport-record"]'), (button) => button.dataset.recordId)) === ${JSON.stringify(JSON.stringify(latestHistoryIds))}`,
+      'reimport-history-roundtrip-exact-ids',
+    );
+    await closeProduct();
+
+    const reimportDegradedRoot = await createCanonicalExternalDataRoot(
+      resolve(runRoot, 'reimport-degraded-data'),
+      checkoutRoot,
+    );
+    renderer = await launchProduct({ dataRoot: reimportDegradedRoot, pickerPath: syntheticAPath });
+    const reimportDegradedInitial = await importInitialManuscriptForReimport(
+      renderer,
+      syntheticASha256,
+      syntheticAInfo.size,
+      'reimport-degraded',
+    );
+    await closeProduct();
+    renderer = await launchProduct({ dataRoot: reimportDegradedRoot, pickerPath: docx });
+    await prepareManuscriptReimportReview(renderer, {
+      targetBookId: reimportDegradedInitial.bookId,
+      lineageStatus: 'unconfirmed',
+      expectedReuseSourceVersionId: null,
+      changed: true,
+      degraded: true,
+      scenario: 'reimport-degraded',
+    });
+    await closeProduct();
+    renderer = await launchProduct({ dataRoot: reimportDegradedRoot });
+    await waitFor(renderer, `document.querySelector('[data-screen="import-recovery"]')`, 'reimport-degraded-restart-required');
+    await clickExactButton(renderer, '继续导入', 'reimport-degraded-restart-required-continue');
+    await waitFor(renderer, `document.querySelector('[data-accept-reimport-degradation]')`, 'reimport-degraded-required-restored');
+    await assertRenderer(renderer, `(() => { const review = document.querySelector('[data-import-review-kind="reimport"]'); const values = Object.fromEntries(Array.from(review?.querySelectorAll('dt') ?? [], (label) => [label.textContent, label.nextElementSibling?.textContent])); return /^[0-9a-f-]{36}$/i.test(values['当前固定点修订版 ID'] ?? '') && /^[0-9a-f]{64}$/.test(values['当前固定点修订版摘要'] ?? '') && review?.querySelector('[data-reimport-source-sha256]')?.dataset.reimportSourceSha256 === ${JSON.stringify(SAMPLE1_SHA256)} && review.querySelector('[data-reimport-source-sha256]').dataset.reimportSourceBytes === ${JSON.stringify(String(SAMPLE1_BYTES))}; })()`, 'reimport-degraded-restart-exact-authorities');
+    const degradationVersion = await renderer.evaluate(`document.querySelector('[data-import-review-kind="reimport"]')?.dataset.reimportDraftVersion`);
+    await clickExactButton(renderer, '明确接受完整降级集合', 'reimport-degraded-accept');
+    await waitFor(renderer, `document.querySelector('[data-import-review-kind="reimport"]')?.dataset.reimportDraftVersion !== ${JSON.stringify(degradationVersion)} && document.querySelector('[data-import-review-kind="reimport"]')?.textContent.includes('已明确接受完整降级集合')`, 'reimport-degraded-accept-persisted');
+    await closeProduct();
+    renderer = await launchProduct({ dataRoot: reimportDegradedRoot });
+    await waitFor(renderer, `document.querySelector('[data-screen="import-recovery"]')`, 'reimport-degraded-restart-accepted');
+    await clickExactButton(renderer, '继续导入', 'reimport-degraded-restart-accepted-continue');
+    await waitFor(renderer, `document.querySelector('[data-import-review-kind="reimport"]')?.textContent.includes('已明确接受完整降级集合') && !document.querySelector('[data-accept-reimport-degradation]')`, 'reimport-degraded-acceptance-restored');
+    await resolveAndCommitManuscriptReimport(renderer, {
+      changed: true,
+      lineageStatus: 'unconfirmed',
+      expectedRevisionCount: 2,
+      expectedRecordCount: 1,
+      degraded: true,
+      scenario: 'reimport-degraded',
+    });
+    await closeProduct();
+
+    const reimportPagedRoot = await createCanonicalExternalDataRoot(
+      resolve(runRoot, 'reimport-paged-data'),
+      checkoutRoot,
+    );
+    renderer = await launchProduct({ dataRoot: reimportPagedRoot, pickerPath: syntheticPagedBasePath });
+    const reimportPagedInitial = await importInitialManuscriptForReimport(
+      renderer,
+      syntheticPagedBaseSha256,
+      syntheticPagedBaseInfo.size,
+      'reimport-paged',
+    );
+    await createDurableJournalEdit(renderer);
+    const initialPagedIdentities = await collectEditorBlockIdentities(renderer, 'reimport-paged-initial', false);
+    requireJourney(Object.keys(initialPagedIdentities).length === 260, 'reimport-paged-initial-identities');
+    await closeProduct();
+    renderer = await launchProduct({ dataRoot: reimportPagedRoot, pickerPath: syntheticPagedChangedPath });
+    await prepareManuscriptReimportReview(renderer, {
+      targetBookId: reimportPagedInitial.bookId,
+      lineageStatus: 'unconfirmed',
+      expectedReuseSourceVersionId: null,
+      changed: true,
+      dirtyCheckpoint: true,
+      cancelPreparationOnce: true,
+      scenario: 'reimport-paged',
+    });
+    await assertBoundedReimportPageReplacement(renderer, 'reimport-paged');
+    await resolvePagedIdentityConsequences(renderer, initialPagedIdentities, 'reimport-paged');
+    const reimportPagedCommit = await resolveAndCommitManuscriptReimport(renderer, {
+      changed: true,
+      lineageStatus: 'unconfirmed',
+      expectedRevisionCount: 3,
+      expectedRecordCount: 1,
+      cancelCommitOnce: true,
+      scenario: 'reimport-paged',
+    });
+    const resultingPagedIdentities = await collectEditorBlockIdentities(renderer, 'reimport-paged-result');
+    requireJourney(
+      Object.keys(resultingPagedIdentities).length === 260 &&
+        resultingPagedIdentities['有界内容块 035'] === initialPagedIdentities['有界内容块 035'] &&
+        resultingPagedIdentities['有界内容块 002（已编辑）'] === initialPagedIdentities['有界内容块 002'] &&
+        !Object.values(initialPagedIdentities).includes(resultingPagedIdentities['明确新增内容块']) &&
+        resultingPagedIdentities['有界内容块 030'] === undefined,
+      'reimport-paged-identity-consequences',
+    );
+    await closeProduct();
+    renderer = await launchProduct({ dataRoot: reimportPagedRoot });
+    await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'reimport-paged-replay-restart');
+    let replayJob = await renderer.evaluate(`window.ai7.commitManuscriptReimport(${JSON.stringify(reimportPagedCommit.replayInput)})`);
+    requireJourney(replayJob?.kind === 'reimport-commit' && replayJob.state === 'queued' &&
+      replayJob.progress.completed === 0 && replayJob.progress.total > 0,
+    'reimport-paged-cache-miss-replay-queued');
+    let replayProgress = replayJob.progress.completed;
+    while (replayJob.state === 'queued' || replayJob.state === 'running') {
+      await new Promise((resolveDelay) => setTimeout(resolveDelay, 25));
+      replayJob = await renderer.evaluate(`window.ai7.pollServiceJob({ jobId: ${JSON.stringify(replayJob.jobId)} })`);
+      requireJourney(replayJob.progress.completed >= replayProgress &&
+        replayJob.progress.completed <= replayJob.progress.total,
+      'reimport-paged-cache-miss-replay-monotonic');
+      replayProgress = replayJob.progress.completed;
+    }
+    requireJourney(replayJob.state === 'completed' && replayJob.progress.completed === replayJob.progress.total &&
+      replayJob.result?.reimportRecordId === reimportPagedCommit.reimportRecordId,
+    'reimport-paged-cache-miss-replay-exact-receipt');
+    for (let replay = 0; replay < 35; replay += 1) {
+      const immediate = await renderer.evaluate(`window.ai7.commitManuscriptReimport(${JSON.stringify(reimportPagedCommit.replayInput)})`);
+      requireJourney(immediate?.kind === 'reimport-commit' && immediate.state === 'completed' &&
+        immediate.progress.completed === 1 && immediate.progress.total === 1 &&
+        immediate.result?.reimportRecordId === reimportPagedCommit.reimportRecordId,
+      `reimport-paged-cache-hit-replay-${replay}`);
+    }
+    await closeProduct();
+
+    const reimportRepeatedRoot = await createCanonicalExternalDataRoot(
+      resolve(runRoot, 'reimport-repeated-data'),
+      checkoutRoot,
+    );
+    renderer = await launchProduct({ dataRoot: reimportRepeatedRoot, pickerPath: syntheticRepeatedBasePath });
+    const reimportRepeatedInitial = await importInitialManuscriptForReimport(
+      renderer,
+      syntheticRepeatedBaseSha256,
+      syntheticRepeatedBaseInfo.size,
+      'reimport-repeated',
+    );
+    await createDurableJournalEdit(renderer);
+    await closeProduct();
+    renderer = await launchProduct({ dataRoot: reimportRepeatedRoot, pickerPath: syntheticRepeatedChangedPath });
+    await prepareManuscriptReimportReview(renderer, {
+      targetBookId: reimportRepeatedInitial.bookId,
+      lineageStatus: 'unconfirmed',
+      expectedReuseSourceVersionId: null,
+      changed: true,
+      dirtyCheckpoint: true,
+      cancelPreparationOnce: true,
+      scenario: 'reimport-repeated',
+    });
+    await assertRenderer(
+      renderer,
+      `(() => { const review = document.querySelector('[data-import-review-kind="reimport"]'); const page = review?.querySelector('[data-reimport-mappings="ready"]'); return review?.textContent.includes('521 个位置 · 521 个未解决') && Number(page?.dataset.reimportPageItemCount) === 4 && page.querySelectorAll('[data-reimport-mapping-id]').length === 4; })()`,
+      'reimport-repeated-cooperative-exact-mappings',
+    );
+    await closeProduct();
+
+    const reimportAmbiguousRoot = await createCanonicalExternalDataRoot(
+      resolve(runRoot, 'reimport-ambiguous-data'),
+      checkoutRoot,
+    );
+    renderer = await launchProduct({ dataRoot: reimportAmbiguousRoot, pickerPath: syntheticAmbiguousBasePath });
+    const reimportAmbiguousInitial = await importInitialManuscriptForReimport(
+      renderer,
+      syntheticAmbiguousBaseSha256,
+      syntheticAmbiguousBaseInfo.size,
+      'reimport-ambiguous',
+    );
+    const initialAmbiguousIdentities = await collectEditorBlockIdentitySequence(renderer, 'reimport-ambiguous-initial');
+    await closeProduct();
+    renderer = await launchProduct({ dataRoot: reimportAmbiguousRoot, pickerPath: syntheticAmbiguousReimportPath });
+    await prepareManuscriptReimportReview(renderer, {
+      targetBookId: reimportAmbiguousInitial.bookId,
+      lineageStatus: 'unconfirmed',
+      expectedReuseSourceVersionId: null,
+      changed: true,
+      scenario: 'reimport-ambiguous',
+    });
+    await resolveAmbiguousIdentitiesAsNoChange(renderer, initialAmbiguousIdentities, 'reimport-ambiguous');
+    await resolveAndCommitManuscriptReimport(renderer, {
+      changed: false,
+      lineageStatus: 'unconfirmed',
+      expectedRevisionCount: 1,
+      expectedRecordCount: 1,
+      scenario: 'reimport-ambiguous',
+    });
+    const resultingAmbiguousIdentities = await collectEditorBlockIdentitySequence(renderer, 'reimport-ambiguous-result');
+    requireJourney(
+      JSON.stringify(resultingAmbiguousIdentities) === JSON.stringify(initialAmbiguousIdentities),
+      'reimport-ambiguous-no-empty-revision-and-identities-preserved',
+    );
+    await closeProduct();
+
+    let reimportTamperRejected = false;
+    try {
+      renderer = await launchProduct({
+        dataRoot: reimportPagedRoot,
+        importControl: 'tamper-reimport-proof-before-validation',
+      });
+      await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady === 'true'`, 'reimport-tamper-must-not-start');
+    } catch {
+      reimportTamperRejected = true;
+    }
+    if (browser) {
+      try {
+        await browser.close();
+      } catch {
+        // The fail-closed startup may already have disconnected the product.
+      }
+      browser = undefined;
+    }
+    requireJourney(reimportTamperRejected, 'reimport-tamper-startup-fail-closed');
+
+    const reimportBeforeCommitRoot = await createCanonicalExternalDataRoot(
+      resolve(runRoot, 'reimport-before-commit-data'),
+      checkoutRoot,
+    );
+    renderer = await launchProduct({ dataRoot: reimportBeforeCommitRoot, pickerPath: syntheticAPath });
+    const reimportBeforeCommitInitial = await importInitialManuscriptForReimport(
+      renderer,
+      syntheticASha256,
+      syntheticAInfo.size,
+      'reimport-before-commit',
+    );
+    await closeProduct();
+    renderer = await launchProduct({
+      dataRoot: reimportBeforeCommitRoot,
+      pickerPath: syntheticCPath,
+      importControl: 'before-commit',
+    });
+    await prepareManuscriptReimportReview(renderer, {
+      targetBookId: reimportBeforeCommitInitial.bookId,
+      lineageStatus: 'unconfirmed',
+      expectedReuseSourceVersionId: null,
+      changed: true,
+      scenario: 'reimport-before-commit',
+    });
+    await resolveAndCommitManuscriptReimport(renderer, {
+      changed: true,
+      lineageStatus: 'unconfirmed',
+      expectedRevisionCount: 2,
+      expectedRecordCount: 1,
+      scenario: 'reimport-before-commit',
+      expectInterruption: true,
+    });
+    await closeProduct();
+    renderer = await launchProduct({ dataRoot: reimportBeforeCommitRoot });
+    await waitFor(renderer, `document.querySelector('[data-screen="import-recovery"]')`, 'reimport-before-commit-recovery');
+    await assertRenderer(
+      renderer,
+      `(() => { const recovery = document.querySelector('[data-screen="import-recovery"]'); const labels = Array.from(recovery?.querySelectorAll('button') ?? [], (button) => button.textContent); return recovery?.textContent.includes('重新导入主稿件') && recovery.textContent.includes('已持久化提交尝试，尚未证明提交') && labels.includes('继续导入'); })()`,
+      'reimport-before-commit-proven-uncommitted',
+    );
+    await clickExactButton(renderer, '继续导入', 'reimport-before-commit-continue');
+    await waitFor(renderer, `document.querySelector('[data-screen="review"] [data-import-review-kind="reimport"]')`, 'reimport-before-commit-review');
+    await resolveAndCommitManuscriptReimport(renderer, {
+      changed: true,
+      lineageStatus: 'unconfirmed',
+      expectedRevisionCount: 2,
+      expectedRecordCount: 1,
+      scenario: 'reimport-before-commit-retry',
+    });
+    await closeProduct();
+
+    const reimportAfterCommitRoot = await createCanonicalExternalDataRoot(
+      resolve(runRoot, 'reimport-after-commit-data'),
+      checkoutRoot,
+    );
+    renderer = await launchProduct({ dataRoot: reimportAfterCommitRoot, pickerPath: syntheticAPath });
+    const reimportAfterCommitInitial = await importInitialManuscriptForReimport(
+      renderer,
+      syntheticASha256,
+      syntheticAInfo.size,
+      'reimport-after-commit',
+    );
+    await closeProduct();
+    renderer = await launchProduct({
+      dataRoot: reimportAfterCommitRoot,
+      pickerPath: syntheticCPath,
+      importControl: 'legacy-result-json-without-receipt',
+    });
+    await prepareManuscriptReimportReview(renderer, {
+      targetBookId: reimportAfterCommitInitial.bookId,
+      lineageStatus: 'unconfirmed',
+      expectedReuseSourceVersionId: null,
+      changed: true,
+      scenario: 'reimport-after-commit',
+    });
+    await resolveAndCommitManuscriptReimport(renderer, {
+      changed: true,
+      lineageStatus: 'unconfirmed',
+      expectedRevisionCount: 2,
+      expectedRecordCount: 1,
+      scenario: 'reimport-after-commit',
+      expectInterruption: true,
+    });
+    await closeProduct();
+    renderer = await launchProduct({ dataRoot: reimportAfterCommitRoot });
+    await assertCommittedManuscriptReimport(renderer, {
+      changed: true,
+      lineageStatus: 'unconfirmed',
+      expectedRevisionCount: 2,
+      expectedRecordCount: 1,
+      scenario: 'reimport-after-commit-recovered',
+    });
+    await closeProduct();
+
+    const reimportUncertainRoot = await createCanonicalExternalDataRoot(
+      resolve(runRoot, 'reimport-uncertain-data'),
+      checkoutRoot,
+    );
+    renderer = await launchProduct({ dataRoot: reimportUncertainRoot, pickerPath: syntheticAPath });
+    const reimportUncertainInitial = await importInitialManuscriptForReimport(
+      renderer,
+      syntheticASha256,
+      syntheticAInfo.size,
+      'reimport-uncertain',
+    );
+    await closeProduct();
+    renderer = await launchProduct({
+      dataRoot: reimportUncertainRoot,
+      pickerPath: syntheticCPath,
+      importControl: 'uncertain-reconciliation',
+    });
+    await prepareManuscriptReimportReview(renderer, {
+      targetBookId: reimportUncertainInitial.bookId,
+      lineageStatus: 'unconfirmed',
+      expectedReuseSourceVersionId: null,
+      changed: true,
+      scenario: 'reimport-uncertain',
+    });
+    await resolveAndCommitManuscriptReimport(renderer, {
+      changed: true,
+      lineageStatus: 'unconfirmed',
+      expectedRevisionCount: 2,
+      expectedRecordCount: 1,
+      scenario: 'reimport-uncertain',
+      expectInterruption: true,
+    });
+    await closeProduct();
+    renderer = await launchProduct({ dataRoot: reimportUncertainRoot, importControl: 'uncertain-reconciliation' });
+    await waitFor(renderer, `document.querySelector('[data-screen="import-uncertain"]')`, 'reimport-uncertain-recovered');
+    await assertRenderer(
+      renderer,
+      `(() => { const screen = document.querySelector('[data-screen="import-uncertain"]'); const labels = Array.from(screen?.querySelectorAll('button') ?? [], (button) => button.textContent); return screen?.textContent.includes('导入提交结果待确认') && screen.textContent.includes('COMMIT_PROOF_INCONCLUSIVE') && !screen.querySelector('[data-record-kind="manuscript-reimport-record"]') && !labels.some((label) => ['继续导入','放弃','提交稿件重新导入','记录未发现稿件变化','取消导入'].includes(label)); })()`,
+      'reimport-uncertain-no-retry-cancel-commit',
+    );
+    await closeProduct();
+
+    const reimportPathLossRoot = await createCanonicalExternalDataRoot(
+      resolve(runRoot, 'reimport-source-path-loss-data'),
+      checkoutRoot,
+    );
+    renderer = await launchProduct({ dataRoot: reimportPathLossRoot, pickerPath: syntheticAPath });
+    const reimportPathLossInitial = await importInitialManuscriptForReimport(
+      renderer,
+      syntheticASha256,
+      syntheticAInfo.size,
+      'reimport-path-loss',
+    );
+    await closeProduct();
+    const reimportPathLossInputRoot = resolve(runRoot, 'reimport-path-loss-input');
+    await mkdir(reimportPathLossInputRoot);
+    const reimportPathLossInput = resolve(reimportPathLossInputRoot, 'one-time-reimport.docx');
+    await copyFile(syntheticCPath, reimportPathLossInput);
+    requireJourney(
+      (await realpath(reimportPathLossInput)) === reimportPathLossInput &&
+        (await digestFile(reimportPathLossInput)) === syntheticCSha256,
+      'reimport-path-loss-input-identity',
+    );
+    renderer = await launchProduct({ dataRoot: reimportPathLossRoot, pickerPath: reimportPathLossInput });
+    await prepareManuscriptReimportReview(renderer, {
+      targetBookId: reimportPathLossInitial.bookId,
+      lineageStatus: 'verified',
+      lineageSourceVersionId: reimportPathLossInitial.lineageSourceVersionId,
+      expectedReuseSourceVersionId: null,
+      changed: true,
+      scenario: 'reimport-path-loss',
+    });
+    const reimportPathLossProof = await manuscriptReimportReviewProof(renderer, 'reimport-path-loss');
+    await closeProduct();
+    await rm(reimportPathLossInput, { force: true });
+    requireJourney(!existsSync(reimportPathLossInput), 'reimport-path-loss-input-removed');
+    renderer = await launchProduct({ dataRoot: reimportPathLossRoot });
+    await waitFor(renderer, `document.querySelector('[data-screen="import-recovery"]')`, 'reimport-path-loss-recovery');
+    await assertRenderer(
+      renderer,
+      `(() => { const screen = document.querySelector('[data-screen="import-recovery"]'); const labels = Array.from(screen?.querySelectorAll('button') ?? [], (button) => button.textContent); return screen?.textContent.includes('完整暂存快照') && screen.textContent.includes('原始所选文件已无法访问') && screen.textContent.includes('重新导入主稿件') && labels.includes('继续导入') && labels.includes('放弃') && !labels.includes('重新选择原文件'); })()`,
+      'reimport-path-loss-complete-snapshot',
+    );
+    await clickExactButton(renderer, '继续导入', 'reimport-path-loss-continue');
+    await waitFor(renderer, `document.querySelector('[data-screen="review"] [data-import-review-kind="reimport"]')`, 'reimport-path-loss-review-restored');
+    const restoredReimportPathLossProof = await manuscriptReimportReviewProof(renderer, 'reimport-path-loss-restored');
+    requireJourney(
+      JSON.stringify(restoredReimportPathLossProof) === JSON.stringify(reimportPathLossProof),
+      'reimport-path-loss-exact-review-restored',
+    );
+    await assertRenderer(
+      renderer,
+      `document.querySelector('.recovery-notice')?.textContent.includes('不会从原路径读取或替换暂存内容')`,
+      'reimport-path-loss-staged-snapshot-authority',
+    );
+    await resolveAndCommitManuscriptReimport(renderer, {
+      changed: true,
+      lineageStatus: 'verified',
+      expectedRevisionCount: 2,
+      expectedRecordCount: 1,
+      scenario: 'reimport-path-loss',
+    });
+    await closeProduct();
+
+    const reimportReselectionRoot = await createCanonicalExternalDataRoot(
+      resolve(runRoot, 'reimport-staged-object-loss-data'),
+      checkoutRoot,
+    );
+    renderer = await launchProduct({ dataRoot: reimportReselectionRoot, pickerPath: syntheticAPath });
+    const reimportReselectionInitial = await importInitialManuscriptForReimport(
+      renderer,
+      syntheticASha256,
+      syntheticAInfo.size,
+      'reimport-reselection',
+    );
+    await closeProduct();
+    renderer = await launchProduct({
+      dataRoot: reimportReselectionRoot,
+      pickerPath: syntheticCPath,
+      importControl: 'before-commit',
+    });
+    await prepareManuscriptReimportReview(renderer, {
+      targetBookId: reimportReselectionInitial.bookId,
+      lineageStatus: 'unconfirmed',
+      expectedReuseSourceVersionId: null,
+      changed: true,
+      scenario: 'reimport-reselection',
+    });
+    await resolveAndCommitManuscriptReimport(renderer, {
+      changed: true,
+      lineageStatus: 'unconfirmed',
+      expectedRevisionCount: 2,
+      expectedRecordCount: 1,
+      scenario: 'reimport-reselection',
+      expectInterruption: true,
+    });
+    await closeProduct();
+    const lostReimportObject = resolve(
+      reimportReselectionRoot,
+      'objects',
+      'sha256',
+      syntheticCSha256.slice(0, 2),
+      `${syntheticCSha256}.docx`,
+    );
+    requireJourney((await lstat(lostReimportObject)).isFile(), 'reimport-reselection-object-before-loss');
+    await rm(lostReimportObject, { force: true });
+    requireJourney(!existsSync(lostReimportObject), 'reimport-reselection-object-removed');
+    renderer = await launchProduct({ dataRoot: reimportReselectionRoot, pickerPath: syntheticBPath });
+    await waitFor(renderer, `document.querySelector('[data-screen="import-recovery"]')`, 'reimport-reselection-required');
+    await assertRenderer(
+      renderer,
+      `(() => { const screen = document.querySelector('[data-screen="import-recovery"]'); const labels = Array.from(screen?.querySelectorAll('button') ?? [], (button) => button.textContent); return screen?.textContent.includes('暂存不完整或损坏') && screen.textContent.includes('已持久化提交尝试，尚未证明提交') && labels.includes('重新选择原文件') && labels.includes('放弃') && !labels.includes('继续导入'); })()`,
+      'reimport-reselection-only-safe-actions',
+    );
+    await clickExactButton(renderer, '重新选择原文件', 'reimport-reselection-mismatch');
+    await waitFor(renderer, `document.querySelector('[data-screen="error"]')`, 'reimport-reselection-mismatch-rejected');
+    await assertRenderer(
+      renderer,
+      `document.querySelector('.error-panel')?.textContent.includes('重选文件与原暂存来源身份不一致') && !document.querySelector('[data-screen="imported"]')`,
+      'reimport-reselection-mismatch-no-authority-change',
+    );
+    await closeProduct();
+    renderer = await launchProduct({ dataRoot: reimportReselectionRoot, pickerPath: syntheticCPath });
+    await waitFor(renderer, `document.querySelector('[data-screen="import-recovery"]')`, 'reimport-reselection-preserved');
+    await assertRenderer(
+      renderer,
+      `(() => { const screen = document.querySelector('[data-screen="import-recovery"]'); const labels = Array.from(screen?.querySelectorAll('button') ?? [], (button) => button.textContent); return screen?.textContent.includes('已持久化提交尝试，尚未证明提交') && labels.includes('重新选择原文件') && !labels.includes('继续导入'); })()`,
+      'reimport-reselection-mismatch-recovery-preserved',
+    );
+    await clickExactButton(renderer, '重新选择原文件', 'reimport-reselection-exact');
+    await waitFor(renderer, `document.querySelector('[data-screen="target"]')`, 'reimport-reselection-target-reset');
+    await assertRenderer(
+      renderer,
+      `(() => { const screen = document.querySelector('[data-screen="target"]'); const notice = screen?.querySelector('.recovery-notice')?.textContent ?? ''; return Boolean(screen) && !screen.querySelector('input:checked') && !screen.querySelector('[data-commit-manuscript-reimport]') && !screen.querySelector('[data-import-review-kind="reimport"]') && notice.includes('请重新确认全部决定'); })()`,
+      'reimport-reselection-old-authority-invalidated',
+    );
+    await prepareManuscriptReimportReview(renderer, {
+      targetBookId: reimportReselectionInitial.bookId,
+      lineageStatus: 'unconfirmed',
+      expectedReuseSourceVersionId: null,
+      changed: true,
+      start: 'target',
+      scenario: 'reimport-reselection-new-review',
+    });
+    await resolveAndCommitManuscriptReimport(renderer, {
+      changed: true,
+      lineageStatus: 'unconfirmed',
+      expectedRevisionCount: 2,
+      expectedRecordCount: 1,
+      scenario: 'reimport-reselection-new-review',
+    });
     await closeProduct();
 
     const continuityRoot = await createCanonicalExternalDataRoot(resolve(runRoot, 'continuity-data'), checkoutRoot);
