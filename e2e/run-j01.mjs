@@ -46,6 +46,9 @@ async function createSyntheticDocx(path, variant) {
       paragraphs.splice(paragraphs.findIndex((text) => text.startsWith('有界内容块 030')), 1);
       paragraphs.splice(2, 0, `明确新增内容块 ${'新增'.repeat(1_000)}`);
     }
+  } else if (variant === 'repeated-base' || variant === 'repeated-reimport') {
+    paragraphs = Array.from({ length: 260 }, () => '重复内容最坏情况。');
+    if (variant === 'repeated-reimport') paragraphs.push('重复内容后的明确新增块。');
   } else if (variant === 'ambiguous-base' || variant === 'ambiguous-reimport') {
     paragraphs = ['重复结构身份内容。', '重复结构身份内容。'];
   } else {
@@ -1417,6 +1420,8 @@ async function main() {
     const syntheticCPath = resolve(syntheticRoot, 'reimport-changed.docx');
     const syntheticPagedBasePath = resolve(syntheticRoot, 'reimport-paged-base.docx');
     const syntheticPagedChangedPath = resolve(syntheticRoot, 'reimport-paged-changed.docx');
+    const syntheticRepeatedBasePath = resolve(syntheticRoot, 'reimport-repeated-base.docx');
+    const syntheticRepeatedChangedPath = resolve(syntheticRoot, 'reimport-repeated-changed.docx');
     const syntheticAmbiguousBasePath = resolve(syntheticRoot, 'reimport-ambiguous-base.docx');
     const syntheticAmbiguousReimportPath = resolve(syntheticRoot, 'reimport-ambiguous-same-content.docx');
     await createSyntheticDocx(syntheticAPath, 'a');
@@ -1424,6 +1429,8 @@ async function main() {
     await createSyntheticDocx(syntheticCPath, 'c');
     await createSyntheticDocx(syntheticPagedBasePath, 'paged-base');
     await createSyntheticDocx(syntheticPagedChangedPath, 'paged-reimport');
+    await createSyntheticDocx(syntheticRepeatedBasePath, 'repeated-base');
+    await createSyntheticDocx(syntheticRepeatedChangedPath, 'repeated-reimport');
     await createSyntheticDocx(syntheticAmbiguousBasePath, 'ambiguous-base');
     await createSyntheticDocx(syntheticAmbiguousReimportPath, 'ambiguous-reimport');
     const syntheticAInfo = await lstat(syntheticAPath);
@@ -1431,6 +1438,8 @@ async function main() {
     const syntheticCInfo = await lstat(syntheticCPath);
     const syntheticPagedBaseInfo = await lstat(syntheticPagedBasePath);
     const syntheticPagedChangedInfo = await lstat(syntheticPagedChangedPath);
+    const syntheticRepeatedBaseInfo = await lstat(syntheticRepeatedBasePath);
+    const syntheticRepeatedChangedInfo = await lstat(syntheticRepeatedChangedPath);
     const syntheticAmbiguousBaseInfo = await lstat(syntheticAmbiguousBasePath);
     const syntheticAmbiguousReimportInfo = await lstat(syntheticAmbiguousReimportPath);
     const syntheticASha256 = await digestFile(syntheticAPath);
@@ -1438,6 +1447,8 @@ async function main() {
     const syntheticCSha256 = await digestFile(syntheticCPath);
     const syntheticPagedBaseSha256 = await digestFile(syntheticPagedBasePath);
     const syntheticPagedChangedSha256 = await digestFile(syntheticPagedChangedPath);
+    const syntheticRepeatedBaseSha256 = await digestFile(syntheticRepeatedBasePath);
+    const syntheticRepeatedChangedSha256 = await digestFile(syntheticRepeatedChangedPath);
     const syntheticAmbiguousBaseSha256 = await digestFile(syntheticAmbiguousBasePath);
     const syntheticAmbiguousReimportSha256 = await digestFile(syntheticAmbiguousReimportPath);
     requireJourney(
@@ -1451,12 +1462,17 @@ async function main() {
         syntheticPagedBaseInfo.isFile() && syntheticPagedChangedInfo.isFile() &&
         !syntheticPagedBaseInfo.isSymbolicLink() &&
         !syntheticPagedChangedInfo.isSymbolicLink() &&
+        syntheticRepeatedBaseInfo.isFile() && syntheticRepeatedChangedInfo.isFile() &&
+        !syntheticRepeatedBaseInfo.isSymbolicLink() &&
+        !syntheticRepeatedChangedInfo.isSymbolicLink() &&
         syntheticAmbiguousBaseInfo.isFile() && syntheticAmbiguousReimportInfo.isFile() &&
         !syntheticAmbiguousBaseInfo.isSymbolicLink() &&
         !syntheticAmbiguousReimportInfo.isSymbolicLink() &&
         (await realpath(syntheticCPath)) === syntheticCPath &&
         (await realpath(syntheticPagedBasePath)) === syntheticPagedBasePath &&
         (await realpath(syntheticPagedChangedPath)) === syntheticPagedChangedPath &&
+        (await realpath(syntheticRepeatedBasePath)) === syntheticRepeatedBasePath &&
+        (await realpath(syntheticRepeatedChangedPath)) === syntheticRepeatedChangedPath &&
         (await realpath(syntheticAmbiguousBasePath)) === syntheticAmbiguousBasePath &&
         (await realpath(syntheticAmbiguousReimportPath)) === syntheticAmbiguousReimportPath &&
         syntheticASha256 !== SAMPLE1_SHA256 &&
@@ -1464,6 +1480,7 @@ async function main() {
         syntheticCSha256 !== SAMPLE1_SHA256 && syntheticASha256 !== syntheticBSha256 &&
         syntheticASha256 !== syntheticCSha256 && syntheticBSha256 !== syntheticCSha256 &&
         syntheticPagedBaseSha256 !== syntheticPagedChangedSha256 &&
+        syntheticRepeatedBaseSha256 !== syntheticRepeatedChangedSha256 &&
         syntheticAmbiguousBaseSha256 !== syntheticAmbiguousReimportSha256,
       'synthetic-input-identities',
     );
@@ -2037,6 +2054,36 @@ async function main() {
         immediate.result?.reimportRecordId === reimportPagedCommit.reimportRecordId,
       `reimport-paged-cache-hit-replay-${replay}`);
     }
+    await closeProduct();
+
+    const reimportRepeatedRoot = await createCanonicalExternalDataRoot(
+      resolve(runRoot, 'reimport-repeated-data'),
+      checkoutRoot,
+    );
+    renderer = await launchProduct({ dataRoot: reimportRepeatedRoot, pickerPath: syntheticRepeatedBasePath });
+    const reimportRepeatedInitial = await importInitialManuscriptForReimport(
+      renderer,
+      syntheticRepeatedBaseSha256,
+      syntheticRepeatedBaseInfo.size,
+      'reimport-repeated',
+    );
+    await createDurableJournalEdit(renderer);
+    await closeProduct();
+    renderer = await launchProduct({ dataRoot: reimportRepeatedRoot, pickerPath: syntheticRepeatedChangedPath });
+    await prepareManuscriptReimportReview(renderer, {
+      targetBookId: reimportRepeatedInitial.bookId,
+      lineageStatus: 'unconfirmed',
+      expectedReuseSourceVersionId: null,
+      changed: true,
+      dirtyCheckpoint: true,
+      cancelPreparationOnce: true,
+      scenario: 'reimport-repeated',
+    });
+    await assertRenderer(
+      renderer,
+      `(() => { const review = document.querySelector('[data-import-review-kind="reimport"]'); const page = review?.querySelector('[data-reimport-mappings="ready"]'); return review?.textContent.includes('521 个位置 · 521 个未解决') && Number(page?.dataset.reimportPageItemCount) === 4 && page.querySelectorAll('[data-reimport-mapping-id]').length === 4; })()`,
+      'reimport-repeated-cooperative-exact-mappings',
+    );
     await closeProduct();
 
     const reimportAmbiguousRoot = await createCanonicalExternalDataRoot(

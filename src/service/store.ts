@@ -685,7 +685,7 @@ function isInside(parent: string, child: string): boolean {
   return relation === '' || (!relation.startsWith(`..${sep}`) && relation !== '..' && !isAbsolute(relation));
 }
 
-function configureDatabase(db: DatabaseSync): void {
+function configureDatabase(db: DatabaseSync, tempStore: 'MEMORY' | 'FILE' = 'MEMORY'): void {
   db.exec(`
     PRAGMA foreign_keys = ON;
     PRAGMA journal_mode = WAL;
@@ -693,7 +693,7 @@ function configureDatabase(db: DatabaseSync): void {
     PRAGMA busy_timeout = 5000;
     PRAGMA trusted_schema = OFF;
     PRAGMA secure_delete = ON;
-    PRAGMA temp_store = MEMORY;
+    PRAGMA temp_store = ${tempStore};
   `);
 }
 
@@ -1982,13 +1982,14 @@ interface ReimportPreparationWork {
   readonly expectedDraftVersion: number;
   readonly targetSelection: ManuscriptReimportTargetSelection;
   readonly snapshot: DraftSnapshot;
-  phase: 'checkpoint' | 'mapping';
+  phase: 'checkpoint' | 'staged-occurrences' | 'current-occurrences' | 'lineage-occurrences' | 'mapping';
   checkpointWorkId: string | null;
   checkpointCompleted: number;
   target: ResolvedReimportTarget | null;
   comparisonId: string | null;
   comparisonHasher: ReturnType<typeof createReimportComparisonHasher> | null;
   batches: Generator<ReimportMappingBatch> | null;
+  occurrenceCursor: number;
   checkpointBlockCount: number;
   totalUpperBound: number;
   completed: number;
@@ -2403,7 +2404,7 @@ export class EditorialStore {
       await inspectCanonicalDataFile(dataRoot, storeRoot, sidecar);
     }
     const authority = new DatabaseSync(databasePath);
-    configureDatabase(authority);
+    configureDatabase(authority, 'FILE');
     initializeSchema(authority);
     initializeBoundedSchema(authority, workflowProfile);
     initializeSourceImportSchema(authority, workflowProfile);
@@ -4120,8 +4121,26 @@ export class EditorialStore {
          lineage_kind TEXT, lineage_level INTEGER, lineage_text TEXT, lineage_digest TEXT,
          staged_kind TEXT, staged_level INTEGER, staged_text TEXT, staged_digest TEXT,
          PRIMARY KEY(work_id, position)
-       ) WITHOUT ROWID`,
+       ) WITHOUT ROWID;
+       CREATE TEMP TABLE IF NOT EXISTS reimport_preparation_occurrences(
+         work_id TEXT NOT NULL,
+         source_kind TEXT NOT NULL CHECK(source_kind IN ('staged', 'current', 'lineage')),
+         kind TEXT NOT NULL,
+         level_key INTEGER NOT NULL,
+         digest TEXT NOT NULL,
+         text TEXT NOT NULL,
+         occurrences INTEGER NOT NULL CHECK(occurrences > 0),
+         single_block_id TEXT NOT NULL,
+         single_position INTEGER NOT NULL CHECK(single_position > 0),
+         PRIMARY KEY(work_id, source_kind, kind, level_key, digest, text)
+       ) WITHOUT ROWID;`,
     );
+    if (checkpointStart.workId !== null) {
+      this.#authority.exec(
+        `CREATE UNIQUE INDEX IF NOT EXISTS temp.reimport_checkpoint_identity
+           ON reimport_checkpoint_rows(work_id, block_id)`,
+      );
+    }
     const workId = randomUUID();
     const work: ReimportPreparationWork = {
       workId,
@@ -4129,13 +4148,14 @@ export class EditorialStore {
       expectedDraftVersion,
       targetSelection: structuredClone(targetSelection),
       snapshot,
-      phase: checkpointStart.checkpoint === null ? 'checkpoint' : 'mapping',
+      phase: checkpointStart.checkpoint === null ? 'checkpoint' : 'staged-occurrences',
       checkpointWorkId: checkpointStart.workId,
       checkpointCompleted: 0,
       target: null,
       comparisonId: null,
       comparisonHasher: null,
       batches: null,
+      occurrenceCursor: 0,
       checkpointBlockCount: 0,
       totalUpperBound: snapshot.blockCount + checkpointStart.total,
       completed: 0,
@@ -4150,15 +4170,102 @@ export class EditorialStore {
         'SELECT count(*) total FROM manuscript_block_versions WHERE revision_id = ?',
       ).all(target.checkpoint.revisionId) as SqlRow[], 'REIMPORT_COMPARISON_INVALID', '无法核对当前固定点块数。').total);
       requireStore(checkpointBlockCount > 0, 'REIMPORT_COMPARISON_INVALID', '当前固定点没有稿件块。');
-      work.target = target;
-      work.comparisonId = stableUuid(`ai7.reimport-comparison/1\u0000${draftId}`);
-      work.comparisonHasher = createReimportComparisonHasher(draftId, target);
-      work.batches = this.#reimportMappingBatches(draftId, target, null);
-      work.checkpointBlockCount = checkpointBlockCount;
-      work.totalUpperBound = snapshot.blockCount + checkpointBlockCount;
+      this.#initializeReimportPreparationMapping(work, target, checkpointBlockCount);
     }
     this.#reimportPreparationWork.set(workId, work);
     return { workId, total: work.totalUpperBound };
+  }
+
+  #initializeReimportPreparationMapping(
+    work: ReimportPreparationWork,
+    target: ResolvedReimportTarget,
+    checkpointBlockCount: number,
+  ): void {
+    const lineageBlockCount = target.lineage.status === 'verified'
+      ? asNumber(one(this.#authority.prepare(
+        `SELECT position FROM manuscript_block_versions
+         WHERE revision_id = ? ORDER BY position DESC LIMIT 1`,
+      ).all(target.lineage.revisionId) as SqlRow[], 'REIMPORT_LINEAGE_UNVERIFIED', '无法核对来源关系修订版块数。').position)
+      : 0;
+    work.phase = 'staged-occurrences';
+    work.target = target;
+    work.comparisonId = stableUuid(`ai7.reimport-comparison/1\u0000${work.draftId}`);
+    work.comparisonHasher = createReimportComparisonHasher(work.draftId, target);
+    work.batches = null;
+    work.occurrenceCursor = 0;
+    work.checkpointBlockCount = checkpointBlockCount;
+    work.totalUpperBound = work.checkpointCompleted +
+      (work.snapshot.blockCount * 2) + (checkpointBlockCount * 2) + lineageBlockCount;
+  }
+
+  #advanceReimportOccurrenceFacts(work: ReimportPreparationWork): number {
+    requireStore(work.target !== null && work.phase !== 'checkpoint' && work.phase !== 'mapping',
+      'REIMPORT_COMPARISON_INVALID', '重新导入唯一性准备状态无效。');
+    const sourceKind = work.phase === 'staged-occurrences'
+      ? 'staged'
+      : work.phase === 'current-occurrences' ? 'current' : 'lineage';
+    let rows: SqlRow[];
+    if (sourceKind === 'staged') {
+      rows = this.#authority.prepare(
+        `SELECT staged_block_id block_id, position, kind, level, text, digest
+         FROM staged_import_blocks
+         WHERE draft_id = ? AND position > ? ORDER BY position LIMIT ${REIMPORT_MAPPING_BATCH_SIZE}`,
+      ).all(work.draftId, work.occurrenceCursor) as SqlRow[];
+    } else if (sourceKind === 'current' && work.checkpointWorkId !== null) {
+      rows = this.#authority.prepare(
+        `SELECT block_id, position, kind, level, text, digest
+         FROM temp.reimport_checkpoint_rows
+         WHERE work_id = ? AND position > ? ORDER BY position LIMIT ${REIMPORT_MAPPING_BATCH_SIZE}`,
+      ).all(work.checkpointWorkId, work.occurrenceCursor) as SqlRow[];
+    } else {
+      const revisionId = sourceKind === 'current'
+        ? work.target.checkpoint.revisionId
+        : work.target.lineage.revisionId;
+      if (revisionId === null) rows = [];
+      else {
+        rows = this.#authority.prepare(
+          `SELECT block_id, position, kind, level, text, digest
+           FROM manuscript_block_versions
+           WHERE revision_id = ? AND position > ? ORDER BY position LIMIT ${REIMPORT_MAPPING_BATCH_SIZE}`,
+        ).all(revisionId, work.occurrenceCursor) as SqlRow[];
+      }
+    }
+    if (rows.length === 0) {
+      work.occurrenceCursor = 0;
+      if (work.phase === 'staged-occurrences') work.phase = 'current-occurrences';
+      else if (work.phase === 'current-occurrences' && work.target.lineage.status === 'verified') {
+        work.phase = 'lineage-occurrences';
+      } else {
+        work.phase = 'mapping';
+        work.batches = this.#reimportMappingBatches(
+          work.workId, work.draftId, work.target, work.checkpointWorkId);
+      }
+      return 0;
+    }
+    this.#transaction(this.#authority, () => {
+      const upsert = this.#authority.prepare(
+        `INSERT INTO temp.reimport_preparation_occurrences(
+           work_id, source_kind, kind, level_key, digest, text,
+           occurrences, single_block_id, single_position
+         ) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)
+         ON CONFLICT(work_id, source_kind, kind, level_key, digest, text)
+         DO UPDATE SET occurrences = occurrences + 1`,
+      );
+      for (const row of rows) {
+        upsert.run(
+          work.workId,
+          sourceKind,
+          asString(row.kind),
+          row.level === null ? -1 : asNumber(row.level),
+          asString(row.digest),
+          asString(row.text),
+          asString(row.block_id),
+          asNumber(row.position),
+        );
+      }
+    });
+    work.occurrenceCursor = asNumber(rows.at(-1)!.position);
+    return rows.length;
   }
 
   advanceManuscriptReimportPreparationWork(workId: string): ReimportPreparationProgress {
@@ -4181,14 +4288,17 @@ export class EditorialStore {
         'SELECT count(*) total FROM temp.reimport_checkpoint_rows WHERE work_id = ?',
       ).all(work.checkpointWorkId) as SqlRow[], 'REIMPORT_COMPARISON_INVALID', '无法核对当前固定点块数。').total);
       requireStore(checkpointBlockCount > 0, 'REIMPORT_COMPARISON_INVALID', '当前固定点没有稿件块。');
-      work.phase = 'mapping';
-      work.target = target;
-      work.comparisonId = stableUuid(`ai7.reimport-comparison/1\u0000${work.draftId}`);
-      work.comparisonHasher = createReimportComparisonHasher(work.draftId, target);
-      work.batches = this.#reimportMappingBatches(work.draftId, target, work.checkpointWorkId);
-      work.checkpointBlockCount = checkpointBlockCount;
-      work.totalUpperBound = checkpoint.total + work.snapshot.blockCount + checkpointBlockCount;
+      this.#initializeReimportPreparationMapping(work, target, checkpointBlockCount);
       return { done: false, completed: checkpoint.total, total: work.totalUpperBound, review: null };
+    }
+    if (work.phase !== 'mapping') {
+      work.completed += this.#advanceReimportOccurrenceFacts(work);
+      return {
+        done: false,
+        completed: work.checkpointCompleted + work.completed,
+        total: work.totalUpperBound,
+        review: null,
+      };
     }
     requireStore(work.batches !== null && work.target !== null && work.comparisonHasher !== null &&
       work.comparisonId !== null, 'REIMPORT_COMPARISON_INVALID', '重新导入比较任务状态不完整。');
@@ -4332,6 +4442,7 @@ export class EditorialStore {
       );
       requireStore(update.changes === 1, 'DRAFT_VERSION_CHANGED', '导入草稿在重新导入复核时已变化。');
       this.#authority.prepare('DELETE FROM temp.reimport_preparation_rows WHERE work_id = ?').run(workId);
+      this.#authority.prepare('DELETE FROM temp.reimport_preparation_occurrences WHERE work_id = ?').run(workId);
       this.#assertForeignKeys(this.#authority);
     };
     if (work.checkpointWorkId === null) {
@@ -4355,6 +4466,7 @@ export class EditorialStore {
     }
     this.#reimportPreparationWork.delete(workId);
     this.#authority.prepare('DELETE FROM temp.reimport_preparation_rows WHERE work_id = ?').run(workId);
+    this.#authority.prepare('DELETE FROM temp.reimport_preparation_occurrences WHERE work_id = ?').run(workId);
     return true;
   }
 
@@ -7847,22 +7959,8 @@ export class EditorialStore {
     };
   }
 
-  #visitReimportMappings(
-    draftId: string,
-    target: ResolvedReimportTarget,
-    visitor: (mapping: ReimportMappingFact) => void,
-  ): number {
-    let total = 0;
-    for (const batch of this.#reimportMappingBatches(draftId, target)) {
-      for (const mapping of batch.mappings) {
-        visitor(mapping);
-        total += 1;
-      }
-    }
-    return total;
-  }
-
   *#reimportMappingBatches(
+    workId: string,
     draftId: string,
     target: ResolvedReimportTarget,
     checkpointWorkId: string | null = null,
@@ -7870,60 +7968,56 @@ export class EditorialStore {
     const checkpointTable = checkpointWorkId === null
       ? 'manuscript_block_versions'
       : 'temp.reimport_checkpoint_rows';
+    const checkpointScopeColumn = checkpointWorkId === null ? 'revision_id' : 'work_id';
+    const checkpointScopeId = checkpointWorkId ?? target.checkpoint.revisionId;
     const stagedCount = asNumber(one(this.#authority.prepare(
-      'SELECT count(*) block_count FROM staged_import_blocks WHERE draft_id = ?',
+      'SELECT block_count FROM staged_import_snapshots WHERE draft_id = ?',
     ).all(draftId) as SqlRow[], 'REIMPORT_COMPARISON_INVALID', '无法核对暂存块数量。').block_count);
     let after = 0;
     for (;;) {
       const rows = this.#authority.prepare(
         `SELECT sb.staged_block_id, sb.position staged_position, sb.kind staged_kind,
                 sb.level staged_level, sb.text staged_text, sb.digest staged_digest,
-                COALESCE(cb.block_id, lc.block_id) current_block_id,
-                COALESCE(cb.position, lc.position) current_position,
-                COALESCE(cb.kind, lc.kind) current_kind,
-                COALESCE(cb.level, lc.level) current_level,
-                COALESCE(cb.text, lc.text) current_text,
-                COALESCE(cb.digest, lc.digest) current_digest,
-                COALESCE(lb.block_id, li.block_id) lineage_block_id,
-                COALESCE(lb.position, li.position) lineage_position,
-                COALESCE(lb.kind, li.kind) lineage_kind,
-                COALESCE(lb.level, li.level) lineage_level,
-                COALESCE(lb.text, li.text) lineage_text,
-                COALESCE(lb.digest, li.digest) lineage_digest,
-                cb.block_id exact_current_block_id, lb.block_id exact_lineage_block_id
+                COALESCE(co.single_block_id, lc.block_id) current_block_id,
+                COALESCE(co.single_position, lc.position) current_position,
+                COALESCE(co.kind, lc.kind) current_kind,
+                CASE WHEN co.source_kind IS NULL THEN lc.level
+                     WHEN co.level_key = -1 THEN NULL ELSE co.level_key END current_level,
+                COALESCE(co.text, lc.text) current_text,
+                COALESCE(co.digest, lc.digest) current_digest,
+                COALESCE(lo.single_block_id, li.block_id) lineage_block_id,
+                COALESCE(lo.single_position, li.position) lineage_position,
+                COALESCE(lo.kind, li.kind) lineage_kind,
+                CASE WHEN lo.source_kind IS NULL THEN li.level
+                     WHEN lo.level_key = -1 THEN NULL ELSE lo.level_key END lineage_level,
+                COALESCE(lo.text, li.text) lineage_text,
+                COALESCE(lo.digest, li.digest) lineage_digest,
+                co.single_block_id exact_current_block_id,
+                lo.single_block_id exact_lineage_block_id
          FROM staged_import_blocks sb
-         LEFT JOIN ${checkpointTable} cb
-           ON cb.revision_id = ? AND cb.kind = sb.kind AND cb.level IS sb.level
-          AND cb.digest = sb.digest AND cb.text = sb.text
-          AND (SELECT count(*) FROM ${checkpointTable} cx
-               WHERE cx.revision_id = ? AND cx.kind = sb.kind AND cx.level IS sb.level
-                 AND cx.digest = sb.digest AND cx.text = sb.text) = 1
-          AND (SELECT count(*) FROM staged_import_blocks sx
-               WHERE sx.draft_id = sb.draft_id AND sx.kind = sb.kind AND sx.level IS sb.level
-                 AND sx.digest = sb.digest AND sx.text = sb.text) = 1
-         LEFT JOIN manuscript_block_versions lb
-           ON ? IS NOT NULL AND lb.revision_id = ? AND lb.kind = sb.kind AND lb.level IS sb.level
-          AND lb.digest = sb.digest AND lb.text = sb.text
-          AND (SELECT count(*) FROM manuscript_block_versions lx
-               WHERE lx.revision_id = ? AND lx.kind = sb.kind AND lx.level IS sb.level
-                 AND lx.digest = sb.digest AND lx.text = sb.text) = 1
-          AND (SELECT count(*) FROM staged_import_blocks sx
-               WHERE sx.draft_id = sb.draft_id AND sx.kind = sb.kind AND sx.level IS sb.level
-                 AND sx.digest = sb.digest AND sx.text = sb.text) = 1
+         LEFT JOIN temp.reimport_preparation_occurrences so
+           ON so.work_id = ? AND so.source_kind = 'staged' AND so.occurrences = 1
+          AND so.kind = sb.kind AND so.level_key = COALESCE(sb.level, -1)
+          AND so.digest = sb.digest AND so.text = sb.text
+         LEFT JOIN temp.reimport_preparation_occurrences co
+           ON so.work_id IS NOT NULL AND co.work_id = ? AND co.source_kind = 'current' AND co.occurrences = 1
+          AND co.kind = sb.kind AND co.level_key = COALESCE(sb.level, -1)
+          AND co.digest = sb.digest AND co.text = sb.text
+         LEFT JOIN temp.reimport_preparation_occurrences lo
+           ON so.work_id IS NOT NULL AND lo.work_id = ? AND lo.source_kind = 'lineage' AND lo.occurrences = 1
+          AND lo.kind = sb.kind AND lo.level_key = COALESCE(sb.level, -1)
+          AND lo.digest = sb.digest AND lo.text = sb.text
          LEFT JOIN ${checkpointTable} lc
-           ON lc.revision_id = ? AND lc.block_id = lb.block_id
+           ON lc.${checkpointScopeColumn} = ? AND lc.block_id = lo.single_block_id
          LEFT JOIN manuscript_block_versions li
-           ON ? IS NOT NULL AND li.revision_id = ? AND li.block_id = cb.block_id
+           ON li.revision_id = ? AND li.block_id = co.single_block_id
          WHERE sb.draft_id = ? AND sb.position > ?
          ORDER BY sb.position LIMIT ${REIMPORT_MAPPING_BATCH_SIZE}`,
       ).all(
-        target.checkpoint.revisionId,
-        target.checkpoint.revisionId,
-        target.lineage.revisionId,
-        target.lineage.revisionId,
-        target.lineage.revisionId,
-        target.checkpoint.revisionId,
-        target.lineage.revisionId,
+        workId,
+        workId,
+        workId,
+        checkpointScopeId,
         target.lineage.revisionId,
         draftId,
         after,
@@ -7963,16 +8057,38 @@ export class EditorialStore {
                 cb.level current_level, cb.text current_text, cb.digest current_digest,
                 lb.block_id lineage_block_id, lb.position lineage_position, lb.kind lineage_kind,
                 lb.level lineage_level, lb.text lineage_text, lb.digest lineage_digest,
-                NULL staged_block_id
+                NULL staged_block_id,
+                CASE WHEN cu.occurrences = 1 AND su.occurrences = 1 THEN 1
+                     WHEN lu.occurrences = 1 AND sl.occurrences = 1 THEN 1
+                     ELSE 0 END matched
          FROM ${checkpointTable} cb
          LEFT JOIN manuscript_block_versions lb
-           ON ? IS NOT NULL AND lb.revision_id = ? AND lb.block_id = cb.block_id
-         WHERE cb.revision_id = ? AND cb.position > ?
+           ON lb.revision_id = ? AND lb.block_id = cb.block_id
+         LEFT JOIN temp.reimport_preparation_occurrences cu
+           ON cu.work_id = ? AND cu.source_kind = 'current'
+          AND cu.kind = cb.kind AND cu.level_key = COALESCE(cb.level, -1)
+          AND cu.digest = cb.digest AND cu.text = cb.text
+         LEFT JOIN temp.reimport_preparation_occurrences su
+           ON su.work_id = ? AND su.source_kind = 'staged'
+          AND su.kind = cb.kind AND su.level_key = COALESCE(cb.level, -1)
+          AND su.digest = cb.digest AND su.text = cb.text
+         LEFT JOIN temp.reimport_preparation_occurrences lu
+           ON lu.work_id = ? AND lu.source_kind = 'lineage'
+          AND lu.kind = lb.kind AND lu.level_key = COALESCE(lb.level, -1)
+          AND lu.digest = lb.digest AND lu.text = lb.text
+         LEFT JOIN temp.reimport_preparation_occurrences sl
+           ON sl.work_id = ? AND sl.source_kind = 'staged'
+          AND sl.kind = lb.kind AND sl.level_key = COALESCE(lb.level, -1)
+          AND sl.digest = lb.digest AND sl.text = lb.text
+         WHERE cb.${checkpointScopeColumn} = ? AND cb.position > ?
          ORDER BY cb.position LIMIT ${REIMPORT_MAPPING_BATCH_SIZE}`,
       ).all(
         target.lineage.revisionId,
-        target.lineage.revisionId,
-        target.checkpoint.revisionId,
+        workId,
+        workId,
+        workId,
+        workId,
+        checkpointScopeId,
         after,
       ) as SqlRow[];
       if (rows.length === 0) break;
@@ -7980,37 +8096,7 @@ export class EditorialStore {
       for (const row of rows) {
         const current = this.#reimportBlockFact(row, 'current')!;
         after = current.position;
-        const matched = this.#authority.prepare(
-          `SELECT 1
-           FROM staged_import_blocks sb
-           WHERE sb.draft_id = ?
-             AND (SELECT count(*) FROM staged_import_blocks sx
-                  WHERE sx.draft_id = sb.draft_id AND sx.kind = sb.kind AND sx.level IS sb.level
-                    AND sx.digest = sb.digest AND sx.text = sb.text) = 1
-             AND (
-               (sb.kind = ? AND sb.level IS ? AND sb.digest = ? AND sb.text = ?
-                 AND (SELECT count(*) FROM ${checkpointTable} cx
-                      WHERE cx.revision_id = ? AND cx.kind = ? AND cx.level IS ?
-                        AND cx.digest = ? AND cx.text = ?) = 1)
-               OR (? IS NOT NULL AND EXISTS (
-                 SELECT 1 FROM manuscript_block_versions lx
-                 WHERE lx.revision_id = ? AND lx.block_id = ?
-                   AND lx.kind = sb.kind AND lx.level IS sb.level AND lx.digest = sb.digest AND lx.text = sb.text
-                   AND (SELECT count(*) FROM manuscript_block_versions ly
-                        WHERE ly.revision_id = lx.revision_id AND ly.kind = sb.kind AND ly.level IS sb.level
-                          AND ly.digest = sb.digest AND ly.text = sb.text) = 1
-               ))
-             ) LIMIT 1`,
-        ).get(
-          draftId,
-          current.kind, current.level, current.digest, current.text,
-          target.checkpoint.revisionId,
-          current.kind, current.level, current.digest, current.text,
-          target.lineage.revisionId,
-          target.lineage.revisionId,
-          current.blockId,
-        );
-        if (matched !== undefined) continue;
+        if (asNumber(row.matched) === 1) continue;
         const position = stagedCount + (++deleted);
         batch.push({
           mappingId: stableUuid(`ai7.reimport-mapping/2\u0000${draftId}\u0000${position}`),

@@ -5104,57 +5104,6 @@ export class BoundedManuscriptStore {
     return true;
   }
 
-  checkpointForReimport(manuscriptId: string, branchId: string): ReimportCheckpointBinding {
-    return transact(this.#db, () => {
-      let binding = this.#binding(manuscriptId, branchId);
-      this.#requireBranchEditable(branchId);
-      const createdForDirtyJournal = binding.journalSequence > binding.lastCheckpointSequence;
-      if (createdForDirtyJournal) {
-        const previous = one(this.#db.prepare(
-          'SELECT ordinal, source_version_id FROM manuscript_revisions WHERE revision_id = ?',
-        ).all(binding.revisionId) as SqlRow[], 'REIMPORT_CHECKPOINT_INVALID', '当前稿件修订版缺失。');
-        const revisionId = randomUUID();
-        const ordinal = asNumber(previous.ordinal) + 1;
-        const revisionLabel = `r${ordinal}`;
-        const createdAt = new Date().toISOString();
-        this.#db.prepare(
-          `INSERT INTO manuscript_revisions(
-             revision_id, manuscript_id, branch_id, ordinal, revision_label, parent_revision_id,
-             source_version_id, revision_digest, created_at
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        ).run(revisionId, manuscriptId, branchId, ordinal, revisionLabel, binding.revisionId,
-          asString(previous.source_version_id), binding.workingDigest, createdAt);
-        snapshotWorkingRevision(this.#db, branchId, revisionId, binding.totalCharacters);
-        requireBounded(
-          this.#db.prepare(
-            `UPDATE branch_working_state SET base_revision_id = ?, last_checkpoint_sequence = ?
-             WHERE branch_id = ? AND base_revision_id = ? AND journal_sequence = ? AND working_digest = ?`,
-          ).run(revisionId, binding.journalSequence, branchId, binding.revisionId,
-            binding.journalSequence, binding.workingDigest).changes === 1,
-          'REIMPORT_CHECKPOINT_STALE',
-          '建立重新导入安全固定点时稿件已变化。',
-        );
-        requireBounded(
-          this.#db.prepare('UPDATE manuscript_branches SET base_revision_id = ? WHERE branch_id = ? AND base_revision_id = ?')
-            .run(revisionId, branchId, binding.revisionId).changes === 1,
-          'REIMPORT_CHECKPOINT_STALE',
-          '建立重新导入安全固定点时分支已变化。',
-        );
-        binding = this.#binding(manuscriptId, branchId);
-      }
-      return {
-        bookId: binding.bookId,
-        manuscriptId,
-        branchId,
-        revisionId: binding.revisionId,
-        revisionLabel: binding.revisionLabel,
-        revisionDigest: binding.workingDigest,
-        journalSequence: binding.journalSequence,
-        createdForDirtyJournal,
-      };
-    });
-  }
-
   startServiceLifetime(lifetimeId: string, startedAt: string): void {
     requireBounded(UUID_PATTERN.test(lifetimeId) && startedAt.isWellFormed(), 'LIFETIME_INVALID', '本地服务生命周期标识无效。');
     transact(this.#db, () => {
