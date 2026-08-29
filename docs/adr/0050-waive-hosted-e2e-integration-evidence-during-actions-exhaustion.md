@@ -26,7 +26,7 @@ The workflow remains disabled, and no run starts during the waiver. No workflow 
 
 Only hosted integration evidence is waived. Every Worker still completes the unchanged repository-root `doctor` → `bootstrap` → `build` → applicable journey sequence on the actual supported development host, solves every locally reproducible failure, clears the change's build outputs, and reruns `build` plus the applicable journey before reporting. Existing dependency authority, provider-free/public-material boundaries, privacy and credential rules, Effect and release boundaries, one-Issue/branch/pull-request/Worker discipline, target-authority re-resolution, explicit dependency order, and Commander-only Ready/merge/external-action authority all remain in force.
 
-Waived product pull requests integrate one at a time in authorized dependency order. ADR 0027's one logical Gate identity, J-01/J-02/J-08 journey admission, complete-diff routing, Windows/macOS parity whenever the Gate runs, failure meaning, and excluded proof surfaces are unchanged. This waiver creates no platform waiver, substitute proof surface, branch-protection check, release authority, or `main`-promotion authority.
+Waived product pull requests integrate one at a time in authorized dependency order. ADR 0027's one logical Gate identity, J-01/J-02/J-08/J-12 journey admission, complete-diff routing, Windows/macOS parity whenever the Gate runs, failure meaning, and excluded proof surfaces are unchanged. This waiver creates no platform waiver, substitute proof surface, branch-protection check, release authority, or `main`-promotion authority.
 
 ## Immediate expiry and controlled restoration
 
