@@ -2,39 +2,33 @@
 
 ## What's done
 
-- The Owner made Issue #138 the highest-priority repository-development outcome and authorized implementation of the local-first, low-usage real-E2E testing framework from `dev@938af405cb4767276213c554185ae422d7a0d220`.
-- Issue #138 contains the full Change Brief and is active on `ci/138-local-first-e2e-framework`.
-- Draft pull request #139 targets `dev`; it remains Draft and has produced no Hosted Gate run or evidence.
-- Issue #46 was removed from `ready-for-agent` and explicitly paused until Issue #138 integrates; no other product work is authorized to proceed in parallel.
-- Workflow `342459594` was rechecked as `disabled_manually` with zero queued or in-progress runs. It remains disabled during this work.
-- The local command surface now includes fixed-order `e2e:all` orchestration and capture-only `e2e:diagnose`; diagnostics emit only allowlisted non-payload metadata. Root `build` enters through a fixed dynamic-import controller; TypeScript failures reduce to bounded file/config/code/count tuples, and all other implementation import or execution failures reduce to `BUILD/unclassified`.
-- The Hosted Gate draft keeps the same four Journeys on both platforms, adds only an integrity-reverified Electron download cache, and enables matrix failure early-stop.
-- ADR 0053 and its agent/runbook projections now define Local diagnostic, Local completion, Hosted Gate evidence, and the bounded CI-degraded path; ADR 0050 is marked superseded.
-- The Owner clarified that Issue #138 is a Journey `N/A` testing-framework outcome: it must validate orchestration, isolation, redaction, deterministic failure propagation, low-usage workflow behavior, and future-Agent routing, but must not implement unfinished product design or repair product defects to manufacture four green Journeys.
-- A J-02 driver race at the boundary between outline navigation and the next position action was isolated without product changes; the Journey now waits for its existing two-frame renderer stabilization. A current exact-toolchain real J-02 execution passes through the capture-only diagnostic path and remains explicitly `not-completion`.
-- Fresh T3 Standards and Spec reviews found two framework defects in the first Draft head: direct OS-signal termination could bypass runner `finally` cleanup, and the build top-level catch could reflect an arbitrary exception message. A public-boundary TDD probe reproduced the J-01 temp-root leak before the fix. Focused follow-up review additionally required direct macOS foreground-group signal handling, controller-disconnect parent leasing, truthful child-crash classification, and a closed dynamic-import build entry. The worktree now sends a fixed IPC cancellation request, handles direct runner signals and parent-channel loss, interrupts active browser ownership, prevents later resource acquisition, lets the runner unwind through its single cleanup owner, reports only a recorded controller interruption as `interrupted`, and encloses build implementation parsing/import/execution behind `BUILD/unclassified`.
-- Exact Node 24.18.1/pnpm 11.24.0 `doctor`, integrity-bound `bootstrap`, and clean `build` pass. The matching TDD signal probe, `e2e:all` interruption contract, direct-runner-signal probe, and real IPC parent-disconnect probe leave zero new J-01 roots and zero Node/Electron processes; closed first-failure, listener cleanup, child-output redaction, controlled exception-message redaction, and controlled implementation-parse redaction probes pass. Existing earlier temporary roots were not treated as this Issue's data and remain untouched.
-- Fresh-context T3 Standards and Spec closure reviews at the fully implemented head report no blocker. They are strictly read-only, non-author, advisory reviews; their verdict is not a Gate or product-completion claim.
-- Workflow `342459594` remains disabled; no Hosted Gate evidence, product Local completion, or four-Journey green claim is made.
+- Issue #138 / PR #139 integrated the local-first, low-usage real-E2E testing framework to `dev` as `28e541922cb14a8b0c92468b6092e30c2663c109`.
+- Developers and later Agents now use capture-only `pnpm --silent run e2e:diagnose -- --journey <admitted-id>` for iteration. `pnpm run e2e:all` is the fixed all-admitted-Journey runner inside ADR 0053's stricter CI-degraded Local-completion sequence; it does not replace the required `doctor`, `bootstrap`, or clean `build`. A diagnostic pass is never completion evidence; a real product, build, or Journey failure remains red and returns to its own authorized Issue.
+- ADR 0053 and the live agent runbooks distinguish Local diagnostic, Local completion, and Hosted Gate evidence. The bounded CI-degraded path permits one-at-a-time integration only after truthful local completion and explicit missing-hosted-evidence recording; it never manufactures paired-platform evidence.
+- Normal Hosted CI remains one provider-free E2E Functional Gate covering every admitted Journey on Windows and macOS. Draft suppression, concurrency cancellation, one build per platform, failure early-stop, and the narrow integrity-reverified Electron cache bound GitHub usage without reducing admitted coverage.
+- Workflow `342459594` remained `disabled_manually` throughout Ready and merge. Exact pre-Ready and pre-merge checks found zero queued or in-progress runs and no run for the framework head, so PR #139 produced no Hosted Gate evidence.
+- Issue #138 was a Journey `N/A` framework outcome. It changed no product source and made no product Local-completion or four-Journey-green claim; unfinished product behavior remains deliberately outside that Issue.
+- The mandatory Issue #140 lifecycle sweep archives exactly the consumed Issue #138 `PROGRESS.md` snapshot under `docs/archive/issue-138-local-first-e2e-framework-2026-08-30/`. The outgoing handoff remains in Git history only, and the stable root routers now point forward.
+- Issue #46 is the next product route after this lifecycle node is live. Its Change Brief and existing paused worktree must be refreshed against the then-current exact `dev` and ADR 0053 before dispatch; this checkpoint does not implement any part of Issue #46.
 
 ## What's next
 
-Re-resolve the newest `dev` and perform the required disabled-workflow/no-run check immediately before Ready. Then repeat that check immediately before merge and integrate the Journey `N/A` framework without enabling or dispatching Hosted CI. Complete the separate post-merge checkpoint archive node; only after the framework and lifecycle node are live on `dev` may the next product route be re-resolved under ADR 0053.
+After Issue #140 integrates, re-resolve Issue #46 against the newest exact `dev`, update its superseded ADR 0050 references and CI-degraded integration clauses to ADR 0053, preserve and deliberately reconcile its existing paused uncommitted candidate work, and restore `ready-for-agent`. Then one Worker may continue only Issue #46 under the new local diagnostic/completion contract; unrelated product failures remain separate work.
 
 ## Key decisions
 
-- Preserve one logical provider-free E2E Functional Gate. Local diagnostic and local completion are distinct states and never become hosted or paired-platform evidence.
-- Normal Hosted CI remains one integration-ready occurrence with all admitted Journeys on Windows and macOS; usage reduction comes from Draft suppression, cancellation, one build per platform, exact download caching, and failure early-stop rather than reduced coverage.
-- CI-degraded development must remain locally complete, one-at-a-time, explicit about missing hosted evidence, and unable to bypass a real product/build/journey failure.
-- Hosted caching is limited to `.cache/bootstrap/electron`; dependency stores, materialized runtime/build state, Agent Data Roots, payloads, logs, and test artifacts remain excluded.
-- Issue #138 is not a product Local-completion claim. Framework acceptance requires truthful control and reporting behavior, not current product completion or a synthetic green result.
+- Local iteration is cheap and informative. Normal Local completion uses the documented clean build plus applicable real Journey; CI-degraded Local completion uses exact `doctor` → `bootstrap` → `build` → `e2e:all`. Hosted Gate evidence is a third, non-substitutable state.
+- Low GitHub usage comes from fewer integration-ready occurrences and bounded execution, not from selective Journey/platform coverage or extra standing gates.
+- Testing-framework work proves truthful orchestration and cleanup. It does not authorize product implementation or require unfinished product Journeys to pass.
+- Future Agents must follow ADR 0053 and `docs/agents/ci-test-boundaries.md`; a red outcome may not be repaired outside the active Change Brief.
 
 ## Unresolved matters or blockers
 
-- The pre-Ready and pre-merge workflow-state checks remain. Workflow restoration is deliberately out of scope and remains prohibited until its separately governed availability condition is authoritatively met.
+- Workflow `342459594` remains deliberately disabled, so no Hosted Gate or paired-platform evidence exists. Its restoration requires the separately governed availability condition and is not implied by local success.
+- Issue #46 remains product work. Its existing `feat/46-model-service-credentials` worktree contains paused uncommitted candidate changes that must not be reset, discarded, or hidden by a parallel branch; a future Worker must inspect and reconcile them under the refreshed Change Brief.
 
 ## Safe Resume Prompt
 
 ```text
-Commander: perform the pre-Ready and pre-merge disabled-workflow/no-run checks, then integrate PR #139 for Issue #138 without repairing product behavior or claiming product Local completion, four-Journey green, or Hosted Gate evidence. Archive only this consumed checkpoint in the separate lifecycle node and re-resolve the next product route under live ADR 0053.
+Commander: confirm Issue #140 is live on the newest dev, then refresh Issue #46's exact authority target, ADR 0053 testing clauses, and existing paused-work routing before restoring ready-for-agent. Preserve its uncommitted candidate work and dispatch one Worker only in the existing Issue #46 worktree. Require capture-only local diagnostics during iteration and ADR 0053's exact doctor → bootstrap → build → e2e:all sequence for CI-degraded Local completion; record missing Hosted Gate evidence while workflow 342459594 remains disabled, and do not repair unrelated product failures.
 ```

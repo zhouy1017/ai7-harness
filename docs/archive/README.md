@@ -12,3 +12,4 @@ Archived lifecycle nodes are historical records excluded from ordinary current-s
 - [Issue #39 source-version import — 2026-08-29](issue-39-source-version-import-2026-08-29/INDEX.md): integrated Issue #39 / PR #125 closure snapshots and consumed root routing.
 - [Issue #40 manuscript reimport — 2026-08-29](issue-40-manuscript-reimport-2026-08-29/INDEX.md): integrated Issue #40 / PR #130 closure snapshots and consumed root routing.
 - [Issue #42 Book Workbench — 2026-08-30](issue-42-book-workbench-2026-08-30/INDEX.md): merged Issue #42 / PR #135 closure snapshots and consumed root routing.
+- [Issue #138 local-first E2E framework — 2026-08-30](issue-138-local-first-e2e-framework-2026-08-30/INDEX.md): merged Issue #138 / PR #139 consumed checkpoint and post-framework routing.
