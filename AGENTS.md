@@ -38,6 +38,8 @@ GitHub Issues are the canonical work-item tracker. One Issue owns one branch, on
 
 The only standing automated engineering test surface is the provider-free [E2E Functional Gate](docs/agents/ci-test-boundaries.md), executed with the same applicable supported journey IDs on Windows and macOS. Do not create additional standing test, proof, review, coverage, provider, performance, package, signing, release, or exact-head gates unless the owner explicitly reverses ADR 0027.
 
+The three verification states—Local diagnostic, Local completion, and Hosted Gate evidence—are distinct; the bounded CI-degraded integration path is governed by the [CI and test boundary](docs/agents/ci-test-boundaries.md). A local result never becomes paired-platform Gate evidence and never bypasses a product, bootstrap, build, or Journey failure.
+
 For domain work, start from the intended target's [`CONTEXT-MAP.md`](CONTEXT-MAP.md), then read the applicable target-qualified `CONTEXT.md`, root ADRs, and Policy Documents. `GLOSSARY.md` is a bilingual index and collision guide, not a definition owner. Follow [domain documentation rules](docs/agents/domain.md).
 
 ## Checkpoints and document lifecycle

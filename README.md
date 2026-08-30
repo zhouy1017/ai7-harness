@@ -37,6 +37,15 @@ pnpm run e2e -- --journey J-08
 pnpm run e2e -- --journey J-12
 ```
 
+For the fixed all-admitted local completion sequence, or a bounded single-Journey diagnostic, use:
+
+```text
+pnpm run e2e:all
+pnpm --silent run e2e:diagnose -- --journey J-01
+```
+
+`e2e:all` launches the same existing runners in J-01 → J-02 → J-08 → J-12 order from one build, captures their streams, emits only its own fixed completion markers, and stops at the first failure. `e2e:diagnose` captures child output and prints only a controller-owned Journey/stage/failure-class identity; `--silent` also prevents pnpm from reflecting a rejected argument. It is explicitly not completion. Local diagnostic, Local completion, and the paired Windows/macOS Hosted Gate are distinct states under [ADR 0053](docs/adr/0053-preserve-local-first-development-through-a-bounded-ci-degraded-mode.md). None is a second test suite, and local output never becomes Hosted Gate evidence.
+
 The current J-01 scenario uses exact [`SampleBooks/sample1.docx`](SampleBooks/sample1.docx), 29,550 bytes with SHA-256 `b8a3dbde0aa8a1ec7265f9ae3fe47877759e7947c5ab69682cd0a8f424a8d483`, as its provider-free public input under [ADR 0044](docs/adr/0044-use-sample1-as-compatibility-and-recording-baseline.md). It verifies the server-derived eight-category fidelity review, all three import-identity finding classes and their initially-unselected target consequences, exact review-v4 rebinding, source-path loss/change recovery, prepared-attempt reconciliation, completion paint and acknowledgement, inconclusive-outcome containment, durable abandonment cleanup, the linked degradation decision/import record, a bounded 32-of-97 manuscript window, and durable journal acknowledgement. The controller never reads the product database or retains, uploads, or logs manuscript payloads or derivatives; runtime state remains inside the disposable external test data root and is deleted after the journey.
 
 J-02 generates its deterministic clean 10,000,000-character, 50,000-block Chinese DOCX only under the disposable external E2E root. It drives that file through the same native picker and production-shaped product, verifies every renderer window remains at most 32 blocks, exercises navigation/search/replacement while journal editing remains available, persists a Milestone Version and restart-safe history, and includes the applicable keyboard, real composition-event, visible-focus, 200% reflow, and forced-colors behavior. Milestone recovery-object formation keeps the existing 256-block bound, concatenates each batch into one bounded Buffer/write, and still performs exact hashing, fsync, independent verification, promotion, and SQLite visibility-last commit. The generated DOCX and all runtime state are deleted during cleanup and never become tracked fixtures or uploaded evidence.

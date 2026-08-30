@@ -59,7 +59,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
     strategy:
-      fail-fast: false
+      fail-fast: true
       matrix:
         include:
           - label: Windows Server 2025 x64 CI
@@ -96,8 +96,22 @@ jobs:
       - name: Check supported host and closed inputs
         run: pnpm run doctor
 
+      - name: Restore optional verified Electron download cache
+        id: electron-cache
+        uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: .cache/bootstrap/electron
+          key: ai7-electron-v1-${{ runner.os }}-${{ matrix.architecture }}-${{ hashFiles('config/dependency-artifacts.json') }}
+
       - name: Restore exact declared inputs
         run: pnpm run bootstrap
+
+      - name: Save verified Electron download for this pull request
+        if: ${{ steps.electron-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: .cache/bootstrap/electron
+          key: ${{ steps.electron-cache.outputs.cache-primary-key }}
 
       - name: Build the production-shaped subject
         run: pnpm run build

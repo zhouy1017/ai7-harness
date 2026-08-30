@@ -5,6 +5,7 @@ import { createServer } from 'node:http';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { arch, platform, release, tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { reportJourneyFailure } from './controller.mjs';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const DEBUG_SELECTORS = new Set(['DEBUG', 'DEBUG_FILE', 'PWDEBUG', 'PWDEBUGIMPL']);
@@ -521,8 +522,4 @@ async function exists(path) {
   try { await lstat(path); return true; } catch (error) { if (error?.code === 'ENOENT') return false; throw error; }
 }
 
-main().catch((error) => {
-  const message = error instanceof Error && error.message.startsWith('J-08/') ? error.message : `J-08/${location}`;
-  console.error(message);
-  process.exitCode = 1;
-});
+main().catch(() => reportJourneyFailure('J-08', location));

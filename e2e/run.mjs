@@ -1,17 +1,20 @@
-const args = process.argv.slice(2);
-if (args[0] === '--') args.shift();
+import {
+  isAdmittedJourney,
+  journeyModuleUrl,
+  normalizePnpmArgs,
+  reportJourneyFailure,
+} from './controller.mjs';
 
-if (args.length !== 2 || args[0] !== '--journey' || !['J-01', 'J-02', 'J-08', 'J-12'].includes(args[1])) {
+const args = normalizePnpmArgs(process.argv.slice(2));
+
+if (args.length !== 2 || args[0] !== '--journey' || !isAdmittedJourney(args[1])) {
   console.error('E2E/cli');
   process.exitCode = 1;
 } else {
-  await import(
-    args[1] === 'J-01'
-      ? './run-j01.mjs'
-      : args[1] === 'J-02'
-        ? './run-j02.mjs'
-        : args[1] === 'J-08'
-          ? './run-j08.mjs'
-          : './run-j12.mjs'
-  );
+  process.argv = [process.argv[0], process.argv[1], '--journey', args[1]];
+  try {
+    await import(journeyModuleUrl(args[1]));
+  } catch {
+    reportJourneyFailure(args[1], 'controller');
+  }
 }
