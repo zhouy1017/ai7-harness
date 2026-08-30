@@ -1,0 +1,23 @@
+# Current handoff
+
+Issue #42's initial reviewed unit is commit `f34e3724e2eda6e5af6c9d710cd84037a132f3cb` (`feat(workbench): preserve exact book and revision routes`) on `feat/42-book-workbench-routes`. Accepted advisory findings are fixed in the subsequent current branch state; resolve the actual current `HEAD`, target, Issue, and workflow state before integration rather than treating the initial reviewed commit as final. The bounded implementation remains in its existing owners: service-derived exact Book/Revision routes; one main-owned Workbench per Book; one application arrival-order queue; bounded sender capabilities; immutable 32-block historical reads; sender-owned native DOCX selection; truthful Product Data Location/reveal; real J-12; and ADR 0052's selected macOS profile.
+
+Current evidence is green: strengthened J-12 proves stale editable reads cannot return after a newer exact Revision request, a second renderer cannot reacquire a globally pending import through `getImportStartup`, effect-before-route arrival order returns a classified durable success and applies the later exact Revision, and Book-A cannot read/write Book-B identities or reuse its opaque capabilities. J-08 preserves exact ineligible-snapshot typing and the recovery lifecycle; its controller now waits for the renderer's scheduled recovery-heading focus before sending Tab, while retaining the exact first-radio plus `:focus-visible` assertion. The Commander completed the uninterrupted Windows sequence `doctor -> bootstrap -> build -> J-01 -> J-02 -> J-08 -> J-12`, then used the existing canonical build owner to delete/regenerate only this worktree's exact `dist` and completed the clean `build -> J-01 -> J-02 -> J-08 -> J-12` rerun. All steps passed on Node 24.18.1/pnpm 11.24.0.
+
+The advisory follow-up adds consequence-first typed rejection when an existing exact-Book target has close risk. Main rejects before assignment, capability clearing, focus, or renderer route notification. Real J-12 covers same-window and cross-window Revision requests, preserved route/capability/content/focus, successful reuse after risk clears, and named background non-focus-steal evidence in which Book B is focused while nonfocused Book A performs and durably acknowledges a journal save. The final-source Windows sequence `doctor -> bootstrap -> build -> J-01 -> J-02 -> J-08 -> J-12` and the canonical clean `build -> J-01 -> J-02 -> J-08 -> J-12` rerun both pass on the pinned runtime.
+
+J-01 also permanently covers restart replay of an already acknowledged manuscript-reimport commit. Main uses a private read-only exact-proof preflight that cannot prime the verified-object cache; a wrong tuple is rejected without route/cache acquisition, a following valid replay remains queued, and deterministic failure unwinds only freshly reacquired authority while ambiguous outcomes retain it.
+
+The global queue intentionally includes the sender-owned modal DOCX picker: selection/staging or cancellation resolves before later queued routes/effects, which fits the Issue's explicit native-selection boundary. Direct/source/reimport commit IDs are reserved before service mutation; newly acquired reservations roll back on classified deterministic service failure and remain only for timeout/stop/write/protocol/response ambiguity so idempotent recovery is not weakened. Atomic multi-attention/import-state claiming prevents rejected startup responses from leaving partial authority.
+
+## Preserved boundaries
+
+- Historical content comes from immutable revision block versions; canonical joins validate Book/source/Manuscript/Branch/parent/block ownership. Mutable working/editor state is excluded.
+- Book Workbench routing is not Detached Manuscript Window transfer or Active Manuscript Surface Binding and never permits same-manuscript dual editing.
+- No schema/migration, package/lock/dependency, workflow, URL/file association, custom/network root, credential/provider/Keychain operation, unbounded inventory, signing/notarization/upload/release, or `main` action is in scope.
+- Workflow `342459594` remains `disabled_manually`; no hosted run or green paired-platform Gate is claimed.
+- This Windows task has no real macOS 15 arm64 host and will not claim macOS evidence.
+
+## Current route
+
+Resolve the actual current `HEAD` and clean worktree, then re-resolve exact `dev`, Issue #42, and workflow `342459594` as `disabled_manually` with zero queued/active run. Push the already-created Issue #42 branch, create its Draft PR, record ADR 0050 immediately before Ready and merge, integrate one-at-a-time, and run the scoped post-merge lifecycle sweep. Do not treat `f34e3724…` as final, enable Actions, dispatch a workflow, or claim hosted evidence.
