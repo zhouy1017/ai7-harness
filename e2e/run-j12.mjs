@@ -5,6 +5,7 @@ import { createServer } from 'node:http';
 import { arch, platform, release, tmpdir } from 'node:os';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { installJourneyCancellationCleanup, reportJourneyFailure } from './controller.mjs';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const DEBUG_SELECTORS = new Set(['DEBUG', 'DEBUG_FILE', 'PWDEBUG', 'PWDEBUGIMPL']);
@@ -277,12 +278,35 @@ async function saveMilestone(renderer) {
 async function main() {
   parseJourney();
   let loopback;
+  let loopbackAcquisition;
   let browser;
+  let browserAcquisition;
   let runRoot;
+  let runRootAcquisition;
   let tempParent;
+  const closeOwnedBrowser = async () => {
+    const ownedBrowser = browser ?? (browserAcquisition === undefined ? undefined : await browserAcquisition.catch(() => undefined));
+    await ownedBrowser?.close().catch(() => undefined);
+    browser = undefined;
+  };
+  const cancellation = installJourneyCancellationCleanup(async () => {
+    await closeOwnedBrowser();
+    const ownedLoopback = loopback ?? (loopbackAcquisition === undefined ? undefined : await loopbackAcquisition.catch(() => undefined));
+    await ownedLoopback?.close().catch(() => undefined);
+    loopback = undefined;
+    const ownedRoot = runRoot ?? (runRootAcquisition === undefined ? undefined : await runRootAcquisition.catch(() => undefined));
+    if (ownedRoot !== undefined) {
+      requireJourney(tempParent !== undefined && dirname(ownedRoot) === tempParent && basename(ownedRoot).startsWith('ai7-j12-e2e-') && (await realpath(ownedRoot)) === ownedRoot, 'cleanup-target');
+      await rm(ownedRoot, { recursive: true, force: true });
+      runRoot = undefined;
+    }
+  }, closeOwnedBrowser);
   try {
     at('controller-loopback');
-    loopback = await createLoopbackSentinel();
+    cancellation.throwIfRequested();
+    loopbackAcquisition = createLoopbackSentinel();
+    loopback = await loopbackAcquisition;
+    cancellation.throwIfRequested();
     at('controller-imports');
     const denial = resolve(ROOT, 'dist', 'shared', 'network-denial.mjs');
     (await import(pathToFileURL(denial).href)).installNodeNetworkDenial();
@@ -293,7 +317,10 @@ async function main() {
     tempParent = await realpath(tmpdir());
     const checkout = await realpath(ROOT);
     requireJourney(!inside(checkout, tempParent) && !inside(tempParent, checkout), 'temp-boundary');
-    runRoot = await mkdtemp(join(tempParent, 'ai7-j12-e2e-'));
+    cancellation.throwIfRequested();
+    runRootAcquisition = mkdtemp(join(tempParent, 'ai7-j12-e2e-'));
+    runRoot = await runRootAcquisition;
+    cancellation.throwIfRequested();
     requireJourney(dirname(runRoot) === tempParent && basename(runRoot).startsWith('ai7-j12-e2e-'), 'temp-root');
     const inputs = resolve(runRoot, 'synthetic-inputs');
     await mkdir(inputs);
@@ -311,7 +338,10 @@ async function main() {
       ];
       if (picker) args.splice(args.length - 4, 0, '--j12-picker-path', picker);
       requireJourney(!args.some((argument) => /--inspect|--remote-debugging-port|^https?:|^wss?:/i.test(argument)), 'pipe-only-product-transport');
-      browser = await chromium.launch({ executablePath: executable, headless: false, ignoreDefaultArgs: true, args, env: productEnvironment(executable), timeout: 60_000 });
+      cancellation.throwIfRequested();
+      browserAcquisition = chromium.launch({ executablePath: executable, headless: false, ignoreDefaultArgs: true, args, env: productEnvironment(executable), timeout: 60_000 });
+      browser = await browserAcquisition;
+      cancellation.throwIfRequested();
       return createRendererManager(browser);
     };
     const close = async () => { await browser.close(); browser = undefined; };
@@ -737,17 +767,12 @@ async function main() {
     await close();
     await loopback.close();
   } finally {
-    await browser?.close().catch(() => undefined);
-    await loopback?.close().catch(() => undefined);
-    if (runRoot !== undefined) {
-      requireJourney(tempParent !== undefined && dirname(runRoot) === tempParent && basename(runRoot).startsWith('ai7-j12-e2e-') && (await realpath(runRoot)) === runRoot, 'cleanup-target');
-      await rm(runRoot, { recursive: true, force: true });
+    try {
+      await cancellation.cleanup();
+    } finally {
+      cancellation.dispose();
     }
   }
 }
 
-main().catch((error) => {
-  const message = error instanceof Error && error.message.startsWith('J-12/') ? error.message : `J-12/${location}`;
-  console.error(message);
-  process.exitCode = 1;
-});
+main().catch(() => reportJourneyFailure('J-12', location));

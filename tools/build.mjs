@@ -8,7 +8,9 @@ import { electronLicenseCarriers } from './electron-runtime.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const DIST = resolve(ROOT, 'dist');
+const MAX_TYPESCRIPT_DIAGNOSTICS = 64;
 let runEsbuild;
+let typeScriptDiagnosticsReported = false;
 
 function requireBuild(condition, message) {
   if (!condition) throw new Error(message);
@@ -20,10 +22,50 @@ function outputPath(...parts) {
   return candidate;
 }
 
+function safeProjectPath(file) {
+  const candidate = resolve(ROOT, file);
+  const projectPath = relative(ROOT, candidate);
+  if (
+    projectPath.length === 0 ||
+    isAbsolute(projectPath) ||
+    projectPath === '..' ||
+    projectPath.startsWith(`..${sep}`)
+  ) {
+    return 'project-file';
+  }
+  const normalized = projectPath.split(sep).join('/');
+  return /^[A-Za-z0-9._/-]{1,240}$/u.test(normalized) ? normalized : 'project-file';
+}
+
+function reportTypeScriptDiagnostics(stdout, stderr) {
+  const diagnostics = [];
+  const seen = new Set();
+  const lines = `${stdout ?? ''}\n${stderr ?? ''}`.split(/\r?\n/u);
+  for (const line of lines) {
+    const fileMatch = /^(.*)\((\d+),(\d+)\):\s+error\s+(TS\d+):/u.exec(line);
+    const globalMatch = /^error\s+(TS\d+):/u.exec(line);
+    const diagnostic = fileMatch
+      ? `BUILD_TYPESCRIPT/${safeProjectPath(fileMatch[1])}/${fileMatch[2]}/${fileMatch[3]}/${fileMatch[4]}`
+      : globalMatch
+        ? `BUILD_TYPESCRIPT/config/${globalMatch[1]}`
+        : null;
+    if (diagnostic !== null && !seen.has(diagnostic)) {
+      seen.add(diagnostic);
+      diagnostics.push(diagnostic);
+    }
+  }
+  const admitted = diagnostics.slice(0, MAX_TYPESCRIPT_DIAGNOSTICS);
+  for (const diagnostic of admitted) console.error(diagnostic);
+  if (diagnostics.length > admitted.length) {
+    console.error(`BUILD_TYPESCRIPT/omitted/${diagnostics.length - admitted.length}`);
+  }
+  if (diagnostics.length === 0) console.error('BUILD_TYPESCRIPT/unclassified');
+}
+
 function typecheck() {
   const compiler = resolve(ROOT, 'node_modules', 'typescript', 'bin', 'tsc');
   requireBuild(existsSync(compiler), 'TypeScript is absent; run the frozen bootstrap first.');
-  const result = spawnSync(process.execPath, [compiler, '--noEmit'], {
+  const result = spawnSync(process.execPath, [compiler, '--noEmit', '--pretty', 'false'], {
     cwd: ROOT,
     env: { PATH: process.env.PATH, SystemRoot: process.env.SystemRoot, WINDIR: process.env.WINDIR },
     encoding: 'utf8',
@@ -31,6 +73,10 @@ function typecheck() {
     windowsHide: true,
     maxBuffer: 4 * 1024 * 1024,
   });
+  if (result.status !== 0) {
+    reportTypeScriptDiagnostics(result.stdout, result.stderr);
+    typeScriptDiagnosticsReported = true;
+  }
   requireBuild(result.status === 0, 'TypeScript validation failed.');
 }
 
@@ -226,7 +272,11 @@ async function main() {
   await ensureClosedOutputs();
 }
 
-main().catch((error) => {
-  console.error(`build failed: ${error instanceof Error ? error.message : 'unknown error'}`);
-  process.exitCode = 1;
-});
+export async function runBuild() {
+  try {
+    await main();
+  } catch {
+    if (!typeScriptDiagnosticsReported) console.error('BUILD/unclassified');
+    process.exitCode = 1;
+  }
+}

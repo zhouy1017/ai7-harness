@@ -14,10 +14,10 @@ J-12 admission does not move role or credential authority. Issue #46 continues t
 
 ## Staged cutover
 
-The existing workflow may project the admitted four-journey command sequence while exact workflow `E2E Functional Gate` (ID `342459594`) remains `disabled_manually` under [ADR 0050](./0050-waive-hosted-e2e-integration-evidence-during-actions-exhaustion.md). It must not be enabled, dispatched, or run before Issue #42 integrates the real J-12 dispatcher and runner, a fresh usable Actions allocation is authoritatively confirmed, and the Owner's existing controlled-restoration conditions are satisfied. No placeholder, alias, fake success, or retrospective run may stand in for that executable slice.
+The existing workflow may project the admitted four-Journey command sequence while exact workflow `E2E Functional Gate` (ID `342459594`) remains `disabled_manually` under [ADR 0053](./0053-preserve-local-first-development-through-a-bounded-ci-degraded-mode.md). Issue #138 does not authorize enablement, dispatch, or a probe; restoration remains a separate exact external action. No placeholder, alias, fake success, or retrospective run may stand in for the executable J-12 slice.
 
 Draft suppression, integration-ready pull-request invocation, pull-request-scoped cancellation, the complete-diff Markdown router, Markdown-only early exit, one logical Gate, and the unchanged Windows Server 2025 x64/macOS 15 arm64 matrix remain intact. Admission of any later supported journey requires another explicit routing decision and separate CI-governance integration; it is never added silently.
 
 ## Consequences
 
-This ADR amends only ADR 0049's initial three-journey routing default. [ADR 0027](./0027-concentrate-ci-on-e2e-functionality.md)'s Gate identity, provider-free boundary, scenario meaning, platform parity, failure semantics, and excluded proof surfaces remain unchanged. ADR 0050's waiver activation, expiry, restoration, and disclosure conditions also remain unchanged.
+This ADR amends only ADR 0049's initial three-Journey routing default. [ADR 0027](./0027-concentrate-ci-on-e2e-functionality.md)'s Gate identity, provider-free boundary, scenario meaning, platform parity, failure semantics, and excluded proof surfaces remain unchanged. ADR 0053 owns current CI-degraded activation, completion, integration, disclosure, and exit conditions without changing this Journey admission.

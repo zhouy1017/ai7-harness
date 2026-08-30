@@ -5,6 +5,7 @@ import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep 
 import { arch, platform, release, tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { strToU8, zipSync } from 'fflate';
+import { installJourneyCancellationCleanup, reportJourneyFailure } from './controller.mjs';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const SAMPLE1_PATH = resolve(ROOT, 'SampleBooks', 'sample1.docx');
@@ -1408,9 +1409,41 @@ async function main() {
     'temp-parent-boundary',
   );
   let runRoot;
+  let runRootAcquisition;
   let browser;
+  let browserAcquisition;
+  const closeOwnedBrowser = async () => {
+    const ownedBrowser =
+      browser ??
+      (browserAcquisition === undefined
+        ? undefined
+        : await browserAcquisition.catch(() => undefined));
+    await ownedBrowser?.close().catch(() => undefined);
+    browser = undefined;
+  };
+  const cancellation = installJourneyCancellationCleanup(async () => {
+    await closeOwnedBrowser();
+    const ownedRoot =
+      runRoot ??
+      (runRootAcquisition === undefined
+        ? undefined
+        : await runRootAcquisition.catch(() => undefined));
+    if (ownedRoot !== undefined) {
+      requireJourney(
+        dirname(ownedRoot) === tempParent &&
+          basename(ownedRoot).startsWith('ai7-j01-e2e-') &&
+          (await realpath(ownedRoot)) === ownedRoot,
+        'cleanup-target',
+      );
+      await rm(ownedRoot, { recursive: true, force: true });
+      runRoot = undefined;
+    }
+  }, closeOwnedBrowser);
   try {
-    runRoot = await mkdtemp(join(tempParent, 'ai7-j01-e2e-'));
+    cancellation.throwIfRequested();
+    runRootAcquisition = mkdtemp(join(tempParent, 'ai7-j01-e2e-'));
+    runRoot = await runRootAcquisition;
+    cancellation.throwIfRequested();
     requireJourney(dirname(runRoot) === tempParent && basename(runRoot).startsWith('ai7-j01-e2e-'), 'temp-root');
     requireJourney((await realpath(runRoot)) === runRoot, 'temp-root');
     const docx = SAMPLE1_PATH;
@@ -1524,7 +1557,8 @@ async function main() {
         'pipe-only-product-transport',
       );
       at('launch');
-      browser = await chromium.launch({
+      cancellation.throwIfRequested();
+      browserAcquisition = chromium.launch({
         executablePath: executable,
         headless: false,
         ignoreDefaultArgs: true,
@@ -1532,6 +1566,8 @@ async function main() {
         env: productEnvironment(executable),
         timeout: 30_000,
       });
+      browser = await browserAcquisition;
+      cancellation.throwIfRequested();
       return attachRendererTarget(browser);
     };
     const closeProduct = async () => {
@@ -2778,21 +2814,12 @@ async function main() {
     );
     await closeProduct();
   } finally {
-    await browser?.close().catch(() => undefined);
-    if (runRoot !== undefined) {
-      requireJourney(
-        dirname(runRoot) === tempParent &&
-          basename(runRoot).startsWith('ai7-j01-e2e-') &&
-          (await realpath(runRoot)) === runRoot,
-        'cleanup-target',
-      );
-      await rm(runRoot, { recursive: true, force: true });
+    try {
+      await cancellation.cleanup();
+    } finally {
+      cancellation.dispose();
     }
   }
 }
 
-main().catch((error) => {
-  const message = error instanceof Error && error.message.startsWith('J-01/') ? error.message : `J-01/${diagnosticLocation}`;
-  console.error(message);
-  process.exitCode = 1;
-});
+main().catch(() => reportJourneyFailure('J-01', diagnosticLocation));

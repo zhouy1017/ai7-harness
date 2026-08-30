@@ -1,8 +1,10 @@
 ---
-status: accepted
+status: superseded
 ---
 
 # Waive hosted E2E integration evidence during Actions exhaustion
+
+This decision is superseded in full by [ADR 0053](./0053-preserve-local-first-development-through-a-bounded-ci-degraded-mode.md). Its exhaustion-specific rules remain below as historical decision context and are no longer the current integration path.
 
 The Owner accepts a temporary loss of per-pull-request hosted Windows/macOS integration evidence while GitHub Actions usage is exhausted, rather than blocking every otherwise-ready product integration. This decision temporarily amends only [ADR 0049](./0049-bound-hosted-actions-consumption-inside-the-e2e-gate.md)'s hosted-occurrence-before-merge and suspension clauses. It becomes repository-current only from an exact integrated `dev` commit containing this ADR and its runbook projections.
 

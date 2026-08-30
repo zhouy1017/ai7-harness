@@ -4,6 +4,7 @@ import { once } from 'node:events';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { arch, platform, release, tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { installJourneyCancellationCleanup, reportJourneyFailure } from './controller.mjs';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const CHARACTER_COUNT = 10_000_000;
@@ -516,18 +517,38 @@ async function runWorkspaceJourney(renderer, dataRoot) {
   );
   await assertRenderer(renderer, `(() => { const items = document.querySelectorAll('.outline-list button'); const target = items[items.length - 1]; if (!target) return false; target.click(); return true; })()`, 'outline-jump');
   await waitFor(renderer, `document.querySelector('.editor-meta')?.textContent.includes('99.998%')`, 'outline-exact-resolve');
+  at('cooperative-position-stabilize');
+  await renderer.evaluate(`new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
+  await assertRenderer(renderer, `document.querySelector('.editor-meta')?.textContent.includes('99.998%')`, 'outline-exact-stable');
 
-  at('cooperative-edit');
+  at('cooperative-position-input');
   await assertRenderer(
     renderer,
     `(() => { const rail = document.querySelector('#manuscript-position'); if (!(rail instanceof HTMLInputElement)) return false; rail.value = '0'; rail.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`,
     'near-start-position-jump',
   );
-  await waitFor(
-    renderer,
-    `document.querySelector('.editor-meta')?.textContent.includes('0.000%') && document.querySelector('[data-testid="manuscript-editor"] > [data-block-id]')?.dataset.blockId === globalThis.__ai7FirstBlock && document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]').length <= 32`,
-    'near-start-position-resolved',
-  );
+  at('cooperative-position-resolve');
+  try {
+    await waitFor(
+      renderer,
+      `document.querySelector('.editor-meta')?.textContent.includes('0.000%') && document.querySelector('[data-testid="manuscript-editor"] > [data-block-id]')?.dataset.blockId === globalThis.__ai7FirstBlock && document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]').length <= 32`,
+      'near-start-position-resolved',
+    );
+  } catch (error) {
+    const checks = await renderer.evaluate(
+      `(() => ({
+        percent: document.querySelector('.editor-meta')?.textContent.includes('0.000%') === true,
+        firstBlock: document.querySelector('[data-testid="manuscript-editor"] > [data-block-id]')?.dataset.blockId === globalThis.__ai7FirstBlock,
+        windowBound: document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]').length <= 32,
+      }))()`,
+    );
+    if (checks?.percent !== true) at('cooperative-position-percent');
+    else if (checks?.firstBlock !== true) at('cooperative-position-first-block');
+    else if (checks?.windowBound !== true) at('cooperative-position-window-bound');
+    else at('cooperative-position-late');
+    throw error;
+  }
+  at('cooperative-search-start');
   await fill(renderer, '#manuscript-search', '天', 'common-search-fill');
   const commonSearchObservation = await renderer.observeIpc();
   await assertRenderer(
@@ -536,6 +557,7 @@ async function runWorkspaceJourney(renderer, dataRoot) {
     'single-service-job-start-promise-gap-reentry',
   );
   await waitFor(renderer, `!Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '取消当前操作')?.hidden`, 'common-search-running');
+  at('cooperative-search-reentry');
   await assertRenderer(renderer, `(() => { const cancel = Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '取消当前操作'); const search = document.querySelector('#manuscript-search'); if (!cancel?.dataset.serviceJobId || !(search instanceof HTMLInputElement)) return false; globalThis.__ai7ServiceJobId = cancel.dataset.serviceJobId; search.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '查找全稿')?.click(); return cancel.dataset.serviceJobId === globalThis.__ai7ServiceJobId && document.querySelectorAll('button[data-service-job-id="' + globalThis.__ai7ServiceJobId + '"]').length === 1; })()`, 'single-service-job-reentry');
   const afterSearchReentryObservation = await renderer.observeIpc();
   const commonSearchEvents = afterSearchReentryObservation.events.filter(
@@ -547,13 +569,16 @@ async function runWorkspaceJourney(renderer, dataRoot) {
       commonSearchEvents.length === 1,
     'single-service-job-gap-actual-start-ipc',
   );
+  at('cooperative-edit-during-search');
   await assertRenderer(
     renderer,
     `(() => { const blocks = document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]'); const edit = (block, text) => { if (!block) return false; block.focus(); const range = document.createRange(); range.selectNodeContents(block); range.collapse(false); const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range); return document.execCommand('insertText', false, text); }; return edit(blocks[0], '协作'.repeat(150)) && edit(blocks[1], '续写'); })()`,
     'sustained-multiblock-edit-during-search',
   );
   await waitFor(renderer, `!Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '保存当前编辑')?.disabled`, 'concurrent-edit-dirty');
+  at('cooperative-journal-ack');
   await waitFor(renderer, `document.querySelector('.editor-meta')?.textContent.includes('修订日志序号 3') && Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '保存当前编辑')?.disabled`, 'automatic-serialized-durable-ack', 120_000);
+  at('cooperative-cursor-continuity');
   await renderer.evaluate(`globalThis.__ai7AfterAckFirst = document.querySelector('[data-testid="manuscript-editor"] > [data-block-id]')?.dataset.blockId`);
   await clickButton(renderer, '向后浏览', 'fresh-cursor-after-ack');
   await waitFor(renderer, `document.querySelector('[data-testid="manuscript-editor"] > [data-block-id]')?.dataset.blockId !== globalThis.__ai7AfterAckFirst`, 'fresh-cursor-after-ack-resolved');
@@ -564,6 +589,7 @@ async function runWorkspaceJourney(renderer, dataRoot) {
     `(() => { const editor = document.querySelector('[data-testid="manuscript-editor"]'); return editor?.firstElementChild?.getAttribute('data-block-id') === globalThis.__ai7AfterAckFirst && editor.getAttribute('contenteditable') === 'true' && editor.getAttribute('aria-readonly') === 'false'; })()`,
     'fresh-return-cursor-after-ack-resolved',
   );
+  at('cooperative-search-close');
   await waitFor(renderer, `Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '取消当前操作')?.hidden`, 'stale-search-closed');
 
   at('authoritative-mutation-drain');
@@ -798,9 +824,28 @@ async function main() {
   const checkoutRoot = await realpath(ROOT);
   requireJourney(!pathIsInside(checkoutRoot, tempParent) && !pathIsInside(tempParent, checkoutRoot), 'temp-parent-boundary');
   let runRoot;
+  let runRootAcquisition;
   let browser;
+  let browserAcquisition;
+  const closeOwnedBrowser = async () => {
+    const ownedBrowser = browser ?? (browserAcquisition === undefined ? undefined : await browserAcquisition.catch(() => undefined));
+    await ownedBrowser?.close().catch(() => undefined);
+    browser = undefined;
+  };
+  const cancellation = installJourneyCancellationCleanup(async () => {
+    await closeOwnedBrowser();
+    const ownedRoot = runRoot ?? (runRootAcquisition === undefined ? undefined : await runRootAcquisition.catch(() => undefined));
+    if (ownedRoot !== undefined) {
+      requireJourney(dirname(ownedRoot) === tempParent && basename(ownedRoot).startsWith('ai7-j02-e2e-') && (await realpath(ownedRoot)) === ownedRoot, 'cleanup-target');
+      await rm(ownedRoot, { recursive: true, force: true });
+      runRoot = undefined;
+    }
+  }, closeOwnedBrowser);
   try {
-    runRoot = await mkdtemp(join(tempParent, 'ai7-j02-e2e-'));
+    cancellation.throwIfRequested();
+    runRootAcquisition = mkdtemp(join(tempParent, 'ai7-j02-e2e-'));
+    runRoot = await runRootAcquisition;
+    cancellation.throwIfRequested();
     requireJourney(dirname(runRoot) === tempParent && basename(runRoot).startsWith('ai7-j02-e2e-'), 'temp-root');
     const docx = resolve(runRoot, 'public-synthetic-10000000.docx');
     await createSyntheticDocx(docx);
@@ -814,7 +859,10 @@ async function main() {
     ];
     requireJourney(isAbsolute(dataRoot) && isAbsolute(docx) && !productArgs.some((argument) => /--inspect|--remote-debugging-port|^https?:|^wss?:/i.test(argument)), 'pipe-only-product-transport');
     const launch = async () => {
-      browser = await chromium.launch({ executablePath: executable, headless: false, ignoreDefaultArgs: true, args: productArgs, env: productEnvironment(executable), timeout: 60_000 });
+      cancellation.throwIfRequested();
+      browserAcquisition = chromium.launch({ executablePath: executable, headless: false, ignoreDefaultArgs: true, args: productArgs, env: productEnvironment(executable), timeout: 60_000 });
+      browser = await browserAcquisition;
+      cancellation.throwIfRequested();
       return attachRendererTarget(browser);
     };
     let renderer = await launch();
@@ -829,16 +877,12 @@ async function main() {
     browser = undefined;
     requireJourney((await stat(docx)).size > CHARACTER_COUNT, 'fixture-survived-until-completion');
   } finally {
-    await browser?.close().catch(() => undefined);
-    if (runRoot !== undefined) {
-      requireJourney(dirname(runRoot) === tempParent && basename(runRoot).startsWith('ai7-j02-e2e-') && (await realpath(runRoot)) === runRoot, 'cleanup-target');
-      await rm(runRoot, { recursive: true, force: true });
+    try {
+      await cancellation.cleanup();
+    } finally {
+      cancellation.dispose();
     }
   }
 }
 
-main().catch((error) => {
-  const message = error instanceof Error && error.message.startsWith('J-02/') ? error.message : `J-02/${diagnosticLocation}`;
-  console.error(message);
-  process.exitCode = 1;
-});
+main().catch(() => reportJourneyFailure('J-02', diagnosticLocation));
