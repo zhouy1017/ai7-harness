@@ -14,11 +14,12 @@
 - A J-02 driver race at the boundary between outline navigation and the next position action was isolated without product changes; the Journey now waits for its existing two-frame renderer stabilization. A current exact-toolchain real J-02 execution passes through the capture-only diagnostic path and remains explicitly `not-completion`.
 - Fresh T3 Standards and Spec reviews found two framework defects in the first Draft head: direct OS-signal termination could bypass runner `finally` cleanup, and the build top-level catch could reflect an arbitrary exception message. A public-boundary TDD probe reproduced the J-01 temp-root leak before the fix. Focused follow-up review additionally required direct macOS foreground-group signal handling, controller-disconnect parent leasing, truthful child-crash classification, and a closed dynamic-import build entry. The worktree now sends a fixed IPC cancellation request, handles direct runner signals and parent-channel loss, interrupts active browser ownership, prevents later resource acquisition, lets the runner unwind through its single cleanup owner, reports only a recorded controller interruption as `interrupted`, and encloses build implementation parsing/import/execution behind `BUILD/unclassified`.
 - Exact Node 24.18.1/pnpm 11.24.0 `doctor`, integrity-bound `bootstrap`, and clean `build` pass. The matching TDD signal probe, `e2e:all` interruption contract, direct-runner-signal probe, and real IPC parent-disconnect probe leave zero new J-01 roots and zero Node/Electron processes; closed first-failure, listener cleanup, child-output redaction, controlled exception-message redaction, and controlled implementation-parse redaction probes pass. Existing earlier temporary roots were not treated as this Issue's data and remain untouched.
+- Fresh-context T3 Standards and Spec closure reviews at the fully implemented head report no blocker. They are strictly read-only, non-author, advisory reviews; their verdict is not a Gate or product-completion claim.
 - Workflow `342459594` remains disabled; no Hosted Gate evidence, product Local completion, or four-Journey green claim is made.
 
 ## What's next
 
-Complete fresh read-only closure review at the pushed Draft pull request #139 head, re-resolve the newest `dev`, and perform the required disabled-workflow/no-run checks immediately before Ready and merge. Integrate the Journey `N/A` framework without enabling or dispatching Hosted CI, then complete the separate post-merge checkpoint archive node. Only after the framework and lifecycle node are live on `dev` may the next product route be re-resolved under ADR 0053.
+Re-resolve the newest `dev` and perform the required disabled-workflow/no-run check immediately before Ready. Then repeat that check immediately before merge and integrate the Journey `N/A` framework without enabling or dispatching Hosted CI. Complete the separate post-merge checkpoint archive node; only after the framework and lifecycle node are live on `dev` may the next product route be re-resolved under ADR 0053.
 
 ## Key decisions
 
@@ -30,10 +31,10 @@ Complete fresh read-only closure review at the pushed Draft pull request #139 he
 
 ## Unresolved matters or blockers
 
-- Fresh closure review of the current signal/build fixes and the pre-Ready/pre-merge workflow-state checks remain. Workflow restoration is deliberately out of scope and remains prohibited until its separately governed availability condition is authoritatively met.
+- The pre-Ready and pre-merge workflow-state checks remain. Workflow restoration is deliberately out of scope and remains prohibited until its separately governed availability condition is authoritatively met.
 
 ## Safe Resume Prompt
 
 ```text
-Commander: finish fresh closure review and integrate Draft PR #139 for Issue #138 while keeping workflow 342459594 disabled; do not repair product behavior or claim product Local completion, four-Journey green, or Hosted Gate evidence. Then archive only this consumed checkpoint in the separate lifecycle node and re-resolve the next product route under live ADR 0053.
+Commander: perform the pre-Ready and pre-merge disabled-workflow/no-run checks, then integrate PR #139 for Issue #138 without repairing product behavior or claiming product Local completion, four-Journey green, or Hosted Gate evidence. Archive only this consumed checkpoint in the separate lifecycle node and re-resolve the next product route under live ADR 0053.
 ```
