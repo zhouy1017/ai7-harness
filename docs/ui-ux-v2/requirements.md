@@ -14,6 +14,7 @@ Only owner-accepted decisions are requirements here. Future feature requirements
 - **V2-UX-PLAT-006**: System pickers, notifications, theme state, accessibility appearance and assistive technology use the current platform's native integration and never expose unpublished content or change business state merely through presentation.
 - **V2-UX-PLAT-007**: `设置 > 数据与存储` names the current platform, actual distribution channel, actual product-data location, and OS-protected credential separation without requiring filesystem literacy or implying that copied product data contains credentials.
 - **V2-UX-PLAT-008**: One logical provider-free E2E Functional Gate executes complete supported journeys and observed-bug regressions on Windows and macOS. Platform-native setup does not create separate UI, usability, accessibility, performance, package, or certification gates.
+- **V2-UX-PLAT-009**: macOS V1 is macOS 15+ on Apple Silicon arm64 with bundle identifier `io.github.zhouy1017.ai7`; its packaged channel is a direct-download Developer ID-signed, hardened-runtime, notarized DMG with manual application replacement preserving product data, not App Store, PKG, portable data or automatic update.
 
 ## Visual and interaction direction
 
@@ -998,6 +999,8 @@ Only owner-accepted decisions are requirements here. Future feature requirements
 - **V2-UX-DSTO-011**: Data-location notices use distinct plain-language states for fallback, sync/backup exposure and prohibited placement; they never reuse Editing Protection Mode, Recovery Attention, Provider offline or Local Export wording.
 - **V2-UX-DSTO-012**: A dismissed non-blocking sync warning remains reachable in Data and Storage Summary. A prohibited placement remains actionable until the supported-location condition is restored; hiding a notice never changes the underlying state.
 - **V2-UX-DSTO-013**: Any future arbitrary/custom/network data root, credential-carrying portable mode or automatic cross-channel migration protocol requires a new storage-authority decision rather than being introduced as a Settings toggle.
+- **V2-UX-DSTO-014**: On macOS the Product Data Location is the OS-resolved per-user Application Support location for `io.github.zhouy1017.ai7`, never beside the `.app`; an unavailable or noncanonical location fails closed with exact remediation and no silent fallback.
+- **V2-UX-DSTO-015**: Product Data Location projects the one canonical Agent Data Root shared by the application/service instance and every window. Application binaries, OS-disposable state, and the Protected Secret Store remain outside it; bounded footprint presentation creates no persistent inventory.
 
 ## Keyboard commands and action discoverability
 
@@ -1042,3 +1045,6 @@ Only owner-accepted decisions are requirements here. Future feature requirements
 - **V2-UX-VIEW-022**: Every embedded or detached Renderer receives only bounded projections from the authoritative service and never holds the whole Manuscript. Renderer crash recovery starts from acknowledged service state and makes no promise about a lost process-local buffer.
 - **V2-UX-VIEW-023**: Opening, closing, moving, resizing or transferring a window never by itself pauses/cancels a Run, closes a Book, changes manuscript authority, records a decision, approves an Effect, acknowledges attention or commits/undoes an edit.
 - **V2-UX-VIEW-024**: Native high-contrast/accessibility appearance, platform scaling, zoom/reflow, reduced motion, visible focus and non-color state meaning remain supported under both density modes, every typography preference and every region/window arrangement.
+- **V2-UX-VIEW-025**: At most one full Book Workbench Window exists for each exact Book; distinct Books may coexist in distinct windows, and explicit Book or historical Revision routes reuse the exact Book's existing Workbench.
+- **V2-UX-VIEW-026**: Only an explicit editor action may create, reveal or focus a Book Workbench Window. Background work, journal/service state, Run progress and attention changes update existing projections without opening, raising or focusing a Workbench.
+- **V2-UX-VIEW-027**: An exact historical Revision route carries only opaque revision identity; the service derives and validates Book/manuscript/branch ownership and reconstructs at most 32 immutable blocks. The historical surface is read-only and exposes no edit, journal, replace, undo/redo or milestone command.

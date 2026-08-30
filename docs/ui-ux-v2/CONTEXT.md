@@ -653,11 +653,11 @@ The durable local view state that returns an editor from Model Service Settings 
 _Avoid_: Run continuation checkpoint, browser history, Run Authorization, saved credential
 
 **Distribution Channel Status** (`运行方式状态`):
-The user-readable current platform and distribution mode together with any declared fallback that changes where product data actually lives, without implying a different AI7 authority model. Windows uses `便携版` or `安装版`; macOS uses the language selected by its package decision.
+The user-readable current platform and distribution mode together with any declared fallback that changes where product data actually lives, without implying a different AI7 authority model. Windows uses `便携版` or `安装版`; packaged macOS uses `直接下载版 · DMG` and source checkouts identify themselves as source checkouts rather than either packaged form.
 _Avoid_: release channel selector, update status, data path, product edition
 
 **Data and Storage Summary** (`数据与存储摘要`):
-The secondary Settings projection of current Distribution Channel Status, actual Product Data Location, local footprint, location-view action and Protected Secret Store separation in editor-understandable language.
+The secondary Settings projection of current Distribution Channel Status, actual Product Data Location, bounded local footprint, main-owned location-view action and Protected Secret Store separation in editor-understandable language. On macOS the location is the OS-resolved per-user Application Support root for `io.github.zhouy1017.ai7`; unavailable or noncanonical placement has exact remediation and no silent fallback.
 _Avoid_: Agent Data Root authority, filesystem browser, export destination, backup guarantee
 
 **Data Location Exception State** (`数据位置异常状态`):
@@ -699,6 +699,10 @@ _Avoid_: resizable manuscript block, arbitrary windowing unit, content scope, sa
 **Optional Surface Visibility** (`可选视图显隐`):
 The local collapsed/hidden/closed state allowed for a lower-importance supporting card or view, with a stable restore entry and no implication that its underlying item was dismissed, decided, deleted or resolved.
 _Avoid_: Global Attention dismissal, record deletion, decision, permission to hide safety state
+
+**Book Workbench Window** (`图书工作台窗口`):
+The full application window privately registered to one exact Book, able to coexist with Workbench windows for distinct Books while every explicit Book or historical Revision route for that Book reuses the same window. Only an explicit editor action may create, reveal, or focus it; background work and state changes never do.
+_Avoid_: Detached Manuscript Window, generic secondary window, URL/deep link, Book authority, background notification target
 
 **Detached Manuscript Window** (`独立稿件窗口`):
 A separate desktop application window on Windows or macOS that hosts the one active editable manuscript subpage after it is transferred from the Book Workbench, retaining its eligible manuscript operations while remaining a bounded service projection.

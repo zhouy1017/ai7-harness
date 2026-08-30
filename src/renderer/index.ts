@@ -2,12 +2,14 @@ import type {
   BookCreationReviewProjection,
   BookRecordPresentation,
   BookSummaryPageProjection,
+  BookWorkbenchRoute,
   BookWorkOverviewProjection,
   FidelityCategoryProjection,
   ContinueImportProjection,
   ImportCommitProjection,
   ImportDraftRecoveryProjection,
   ImportStartupProjection,
+  HistoricalRevisionProjection,
   ManuscriptWindowProjection,
   OutlineProjection,
   PriorWorkItemProjection,
@@ -15,6 +17,7 @@ import type {
   RecoveryComparisonProjection,
   RecoverySelection,
   RecoveryWindowProjection,
+  ResolvedBookWorkbenchRoute,
   ReviewBeforeImportProjection,
   ReviewBeforeManuscriptReimportProjection,
   ReviewBeforeSourceImportProjection,
@@ -121,6 +124,12 @@ function panel(): HTMLElement {
   return element('section', 'panel');
 }
 
+async function returnToRecoveryComparison(attentionId: string): Promise<void> {
+  const recovery = await window.ai7.getRecoveryComparison({ attentionId });
+  await window.ai7.leaveBookWorkbench();
+  renderManuscriptRecovery(recovery);
+}
+
 function appendRecoveryReturnAction(content: HTMLElement, context: RecoveryReturnContext | undefined): void {
   if (!context) return;
   const actions = element('div', 'button-row recovery-return-actions');
@@ -128,7 +137,7 @@ function appendRecoveryReturnAction(content: HTMLElement, context: RecoveryRetur
     returnButton.disabled = true;
     setStatus('正在返回稿件恢复比较…', 'busy');
     try {
-      renderManuscriptRecovery(await window.ai7.getRecoveryComparison({ attentionId: context.attentionId }));
+      await returnToRecoveryComparison(context.attentionId);
     } catch (error) {
       returnButton.disabled = false;
       setStatus(rendererErrorMessage(error, '无法返回恢复比较。'), 'error');
@@ -138,6 +147,61 @@ function appendRecoveryReturnAction(content: HTMLElement, context: RecoveryRetur
   returnButton.dataset['recoveryReturnVersion'] = String(context.attentionVersion);
   actions.append(returnButton);
   content.append(actions);
+}
+
+async function renderResolvedBookWorkbenchRoute(
+  route: ResolvedBookWorkbenchRoute,
+  recoveryReturn?: RecoveryReturnContext,
+): Promise<void> {
+  if (route.kind === 'book') {
+    renderBookOverview(
+      await window.ai7.getBookOverview({ bookId: route.bookId, historyCursor: null }),
+      undefined,
+      recoveryReturn,
+    );
+    return;
+  }
+  renderHistoricalRevision(await window.ai7.getHistoricalRevision({ revisionId: route.revisionId, cursor: null }));
+}
+
+async function requestBookWorkbenchRoute(
+  route: BookWorkbenchRoute,
+  onRequestingWindow?: (resolved: ResolvedBookWorkbenchRoute) => Promise<void>,
+  recoveryReturn?: RecoveryReturnContext,
+): Promise<void> {
+  const opened = await window.ai7.openBookWorkbench(route);
+  if (opened.target === 'requesting-window') {
+    if (onRequestingWindow) await onRequestingWindow(opened.route);
+    else await renderResolvedBookWorkbenchRoute(opened.route, recoveryReturn);
+    return;
+  }
+  setStatus(
+    opened.target === 'new-window'
+      ? `已在新的图书工作台打开《${opened.route.bookTitle}》。`
+      : `已切换到《${opened.route.bookTitle}》已有的图书工作台。`,
+    'success',
+  );
+}
+
+async function renderOwnedBookWorkbenchRoute(): Promise<void> {
+  const route = await window.ai7.getBookWorkbenchRoute();
+  if (!route) return;
+  setStatus('正在读取精确图书工作台路由…', 'busy');
+  try {
+    await renderResolvedBookWorkbenchRoute(route);
+  } catch (error) {
+    setStatus(rendererErrorMessage(error, '无法读取精确图书工作台路由。'), 'error');
+  }
+}
+
+async function returnToLibrary(): Promise<void> {
+  setStatus('正在返回图书列表…', 'busy');
+  try {
+    await window.ai7.leaveBookWorkbench();
+    await initializeStartup();
+  } catch (error) {
+    setStatus(rendererErrorMessage(error, '无法返回图书列表。'), 'error');
+  }
 }
 
 function sourceCard(staged: StagedImportProjection): HTMLElement {
@@ -479,6 +543,7 @@ function renderManuscriptRecovery(recovery: RecoveryComparisonProjection): void 
         attentionId: recovery.attentionId,
         expectedAttentionVersion: recovery.attentionVersion,
       });
+      await window.ai7.leaveBookWorkbench();
       setStatus(deferred.completionLabel, 'success');
       const recoveryReturn = {
         attentionId: deferred.attentionId,
@@ -546,6 +611,89 @@ function renderRecoveryViewer(recovery: RecoveryComparisonProjection, projection
   replaceScreen('recovery-viewer', content);
   focusRecoveryHeading(content);
   setStatus('正在仅查看已选择的恢复证据；普通编辑保持关闭');
+}
+
+function renderHistoricalRevision(projection: HistoricalRevisionProjection): void {
+  if (!projection.readOnly || projection.blocks.length === 0 || projection.blocks.length > 32) {
+    throw new Error('AI7_HISTORICAL_REVISION_INVALID');
+  }
+  const content = panel();
+  content.classList.add('recovery-viewer', 'historical-revision-viewer');
+  content.dataset['bookId'] = projection.bookId;
+  content.dataset['revisionId'] = projection.revisionId;
+  content.dataset['readOnly'] = 'true';
+  content.dataset['blockCount'] = String(projection.blocks.length);
+  content.append(
+    element('p', 'section-label', `${projection.bookTitle} · 历史修订版 · 永久只读`),
+    element('h2', undefined, `稿件修订版 ${projection.revisionLabel}`),
+    element('p', 'lede', `${projection.position.label}。此窗口不装载编辑器，也不提供写入、修订日志、替换、撤销/重做或里程碑操作。`),
+  );
+  const identity = element('section', 'source-card');
+  const values = element('dl');
+  values.append(
+    element('dt', undefined, '图书 ID'), element('dd', 'technical-identity', projection.bookId),
+    element('dt', undefined, '稿件 ID'), element('dd', 'technical-identity', projection.manuscriptId),
+    element('dt', undefined, '分支 ID'), element('dd', 'technical-identity', projection.branchId),
+    element('dt', undefined, '修订版 ID'), element('dd', 'technical-identity', projection.revisionId),
+    element('dt', undefined, '修订摘要'), element('dd', 'technical-identity', projection.revisionDigest),
+    element('dt', undefined, '来源版本 ID'), element('dd', 'technical-identity', projection.sourceVersionId),
+    element('dt', undefined, '创建时间'), element('dd', undefined, projection.createdAt),
+  );
+  identity.append(element('h3', undefined, '不可变修订身份'), values);
+  const blocks = element('article', 'recovery-readonly-blocks historical-revision-blocks');
+  blocks.setAttribute('aria-label', '历史修订版只读内容窗口');
+  for (const block of projection.blocks) {
+    const tag = block.kind === 'paragraph' ? 'p' : block.kind === 'title' ? 'h1' : 'h2';
+    const node = element(tag, undefined, block.text);
+    node.dataset['blockId'] = block.blockId;
+    node.dataset['blockPosition'] = String(block.position);
+    blocks.append(node);
+  }
+  content.append(identity, blocks);
+  const actions = element('div', 'button-row');
+  const returnToCurrent = button('返回当前工作状态', 'primary', async () => {
+    returnToCurrent.disabled = true;
+    setStatus('正在返回当前可编辑工作状态…', 'busy');
+    try {
+      await requestBookWorkbenchRoute(
+        { kind: 'book', bookId: projection.bookId },
+        async (route) => {
+          if (route.kind !== 'book' || route.bookId !== projection.bookId) {
+            throw new Error('AI7_WORKBENCH_ROUTE_INVALID');
+          }
+          const current = await window.ai7.getManuscriptWindow({
+            manuscriptId: projection.manuscriptId,
+            branchId: projection.branchId,
+            cursor: null,
+          });
+          if (current.bookId !== projection.bookId) throw new Error('AI7_WORKBENCH_ROUTE_INVALID');
+          renderEditorWindow(current, projection.bookTitle);
+        },
+      );
+    } catch (error) {
+      returnToCurrent.disabled = false;
+      setStatus(rendererErrorMessage(error, '无法返回当前工作状态。'), 'error');
+    }
+  });
+  returnToCurrent.dataset['returnToCurrentRevision'] = projection.revisionId;
+  actions.append(returnToCurrent);
+  const showPage = async (cursor: string): Promise<void> => {
+    setStatus('正在读取下一段只读修订内容…', 'busy');
+    try {
+      renderHistoricalRevision(await window.ai7.getHistoricalRevision({
+        revisionId: projection.revisionId,
+        cursor,
+      }));
+    } catch (error) {
+      setStatus(rendererErrorMessage(error, '无法读取只读修订内容。'), 'error');
+    }
+  };
+  if (projection.previousCursor) actions.append(button('上一窗口', 'quiet', () => showPage(projection.previousCursor!)));
+  if (projection.nextCursor) actions.append(button('下一窗口', 'quiet', () => showPage(projection.nextCursor!)));
+  content.append(actions);
+  replaceScreen('historical-revision', content);
+  focusRecoveryHeading(content);
+  setStatus(`只读历史修订版已打开；${projection.position.label}。`);
 }
 
 function renderContinuation(
@@ -902,7 +1050,79 @@ function recordPresentation(record: BookRecordPresentation): HTMLElement {
   if (record.kind === 'source-import-record') {
     detail.append(listSection('明确不会发生', record.namedNonEffects));
   }
+  if (record.kind === 'revision') {
+    const openRevision = button('打开此历史修订版', 'secondary', async () => {
+      openRevision.disabled = true;
+      setStatus('正在路由到精确历史修订版…', 'busy');
+      try {
+        await requestBookWorkbenchRoute({ kind: 'revision', revisionId: record.revisionId });
+      } catch (error) {
+        openRevision.disabled = false;
+        setStatus(rendererErrorMessage(error, '无法打开精确历史修订版。'), 'error');
+      }
+    });
+    openRevision.dataset['openRevisionId'] = record.revisionId;
+    const actions = element('div', 'button-row');
+    actions.append(openRevision);
+    detail.append(actions);
+  }
   return detail;
+}
+
+async function renderBookWorkbenchChooser(
+  currentOverview: BookWorkOverviewProjection,
+  accumulated: ReadonlyArray<BookSummaryPageProjection['items'][number]> = [],
+  after: BookSummaryPageProjection['nextCursor'] = null,
+): Promise<void> {
+  setStatus('正在读取其他图书…', 'busy');
+  try {
+    const page = await window.ai7.listBooks({ after });
+    const books = [...accumulated, ...page.items];
+    const content = panel();
+    content.classList.add('book-workbench-chooser');
+    content.dataset['currentBookId'] = currentOverview.book.bookId;
+    content.append(
+      element('p', 'section-label', `${currentOverview.book.title} · 图书工作台`),
+      element('h2', undefined, '在另一本图书工作台打开'),
+      element('p', 'lede', '选择会创建或显示目标图书已有的工作台；当前图书工作台保持打开。'),
+    );
+    const list = element('div', 'recent-work-list');
+    for (const summary of books) {
+      if (summary.bookId === currentOverview.book.bookId) continue;
+      const open = button(`${summary.title} · ${summary.manuscriptStateLabel}`, 'secondary', async () => {
+        open.disabled = true;
+        setStatus('正在打开精确图书工作台…', 'busy');
+        try {
+          await requestBookWorkbenchRoute({ kind: 'book', bookId: summary.bookId });
+        } catch (error) {
+          open.disabled = false;
+          setStatus(rendererErrorMessage(error, '无法打开精确图书工作台。'), 'error');
+        }
+      });
+      open.dataset['bookId'] = summary.bookId;
+      const row = element('article', 'book-summary-item');
+      row.append(
+        open,
+        element('p', 'field-note', `图书 ID ${summary.bookId} · 稳定标识 ${summary.stableIdentity}`),
+      );
+      list.append(row);
+    }
+    if (list.childElementCount === 0) {
+      list.append(element('p', 'field-note', '没有其他图书可打开。'));
+    }
+    content.append(list);
+    const actions = element('div', 'button-row');
+    if (page.nextCursor) {
+      actions.append(button('加载更多图书', 'secondary', () =>
+        renderBookWorkbenchChooser(currentOverview, books, page.nextCursor)));
+    }
+    actions.append(button('返回当前图书', 'quiet', () => renderBookOverview(currentOverview)));
+    content.append(actions);
+    replaceScreen('book-workbench-chooser', content);
+    setStatus('请选择另一图书工作台');
+  } catch (error) {
+    setStatus(rendererErrorMessage(error, '无法读取其他图书。'), 'error');
+  }
 }
 
 function renderBookOverview(
@@ -1046,7 +1266,10 @@ function renderBookOverview(
       completionActionButtons.push(primaryActionButton);
     }
   }
-  actions.append(button('返回图书列表', 'secondary', () => void initializeStartup()));
+  actions.append(
+    button('打开另一本图书', 'secondary', () => renderBookWorkbenchChooser(overview)),
+    button('返回图书列表', 'secondary', () => returnToLibrary()),
+  );
   content.append(actions);
 
   const records = element('section', 'review-section record-navigation');
@@ -1232,6 +1455,63 @@ function renderBookCreationForm(): void {
   queueMicrotask(() => title.focus());
 }
 
+async function renderDataAndStorage(): Promise<void> {
+  setStatus('正在读取本机数据位置…', 'busy');
+  try {
+    const projection = await window.ai7.getProductDataLocation();
+    const content = panel();
+    content.classList.add('data-storage-summary');
+    content.dataset['platform'] = projection.platform;
+    content.dataset['runtimeForm'] = projection.runtimeForm;
+    content.dataset['footprintComplete'] = String(projection.footprint.complete);
+    content.dataset['footprintMaximumEntries'] = String(projection.footprint.maximumEntries);
+    content.append(
+      element('p', 'section-label', '设置 · 数据与存储'),
+      element('h2', undefined, '数据与存储摘要'),
+      element('p', 'lede', '这里显示当前运行实例实际使用的本机产品数据位置。查看位置不会更改存储、导出内容或授予文件系统权限。'),
+    );
+    const summary = element('section', 'source-card');
+    const values = element('dl');
+    const root = element('dd', 'technical-identity', projection.canonicalRoot);
+    root.dataset['productDataRoot'] = projection.canonicalRoot;
+    values.append(
+      element('dt', undefined, '当前平台'), element('dd', undefined, projection.platformLabel),
+      element('dt', undefined, '运行方式'), element('dd', undefined, projection.runtimeFormLabel),
+      element('dt', undefined, '数据保存在'), element('dd', undefined, projection.locationLabel),
+      element('dt', undefined, '实际位置'), root,
+      element('dt', undefined, '本机占用'), element('dd', undefined, projection.footprint.label),
+    );
+    summary.append(element('h3', undefined, 'Product Data Location'), values);
+    const credentials = element('section', 'review-section');
+    credentials.append(
+      element('h3', undefined, '凭据与产品数据分开'),
+      element('p', undefined, projection.separationLabel),
+      element('p', 'field-note', `当前系统保护位置：${projection.protectedSecretStoreLabel}。复制产品数据不会复制模型服务凭据。`),
+    );
+    const reveal = button('查看数据位置', 'secondary', async () => {
+      reveal.disabled = true;
+      try {
+        const result = await window.ai7.revealProductDataLocation();
+        content.dataset['revealRequested'] = result.state;
+        content.dataset['nativeRevealSuppressedForE2e'] = String(result.nativeRevealSuppressedForE2e);
+        setStatus('已请求系统显示当前产品数据位置。', 'success');
+      } catch (error) {
+        setStatus(rendererErrorMessage(error, '系统无法显示当前产品数据位置。'), 'error');
+      } finally {
+        reveal.disabled = false;
+      }
+    });
+    reveal.dataset['action'] = 'reveal-product-data-location';
+    const actions = element('div', 'button-row');
+    actions.append(reveal, button('返回', 'quiet', () => void initializeStartup()));
+    content.append(summary, credentials, actions);
+    replaceScreen('data-storage', content);
+    setStatus('数据与存储摘要已打开');
+  } catch (error) {
+    setStatus(rendererErrorMessage(error, '无法读取本机数据位置。'), 'error');
+  }
+}
+
 function renderLanding(
   priorWork: ReadonlyArray<PriorWorkItemProjection>,
   recoveryReturn: RecoveryReturnContext | undefined,
@@ -1272,8 +1552,10 @@ function renderLanding(
       renderError(error, () => renderLanding(priorWork, activeRecoveryReturn, books));
     }
   });
+  const dataAndStorage = button('数据与存储', 'secondary', () => renderDataAndStorage());
+  dataAndStorage.dataset['settingsRoute'] = 'data-storage';
   const landingActions = element('div', 'button-row');
-  landingActions.append(importButton, createBook);
+  landingActions.append(importButton, createBook, dataAndStorage);
   copy.append(landingActions);
   const note = element('aside', 'hero-note', '所有导入都要求先明确选择图书目标；系统不会自动选择已有图书或稿件关系。');
   content.append(copy, note);
@@ -1284,16 +1566,12 @@ function renderLanding(
     for (const summary of books.items) {
       const open = button(`${summary.title} · ${summary.manuscriptStateLabel}`, 'secondary', async () => {
         open.disabled = true;
-        setStatus('正在读取精确图书工作概览…', 'busy');
+        setStatus('正在打开精确图书工作台…', 'busy');
         try {
-          renderBookOverview(
-            await window.ai7.getBookOverview({ bookId: summary.bookId, historyCursor: null }),
-            undefined,
-            activeRecoveryReturn,
-          );
+          await requestBookWorkbenchRoute({ kind: 'book', bookId: summary.bookId }, undefined, activeRecoveryReturn);
         } catch (error) {
           open.disabled = false;
-          setStatus(rendererErrorMessage(error, '无法读取精确图书工作概览。'), 'error');
+          setStatus(rendererErrorMessage(error, '无法打开精确图书工作台。'), 'error');
         }
       });
       open.dataset['bookId'] = summary.bookId;
@@ -1346,15 +1624,21 @@ function renderLanding(
         setStatus(item.recoveryAttention ? '正在打开稿件恢复比较…' : '正在重新打开本地稿件…', 'busy');
         try {
           if (item.recoveryAttention) {
-            renderManuscriptRecovery(await window.ai7.getRecoveryComparison({ attentionId: item.recoveryAttention.attentionId }));
+            await returnToRecoveryComparison(item.recoveryAttention.attentionId);
             return;
           }
-          const windowProjection = await window.ai7.getManuscriptWindowAt({
-            manuscriptId: item.manuscriptId,
-            branchId: item.branchId,
-            target: { kind: 'start' },
-          });
-          renderEditorWindow(windowProjection, item.bookTitle, activeRecoveryReturn?.attentionId);
+          await requestBookWorkbenchRoute(
+            { kind: 'book', bookId: item.bookId },
+            async () => {
+              const windowProjection = await window.ai7.getManuscriptWindowAt({
+                manuscriptId: item.manuscriptId,
+                branchId: item.branchId,
+                target: { kind: 'start' },
+              });
+              renderEditorWindow(windowProjection, item.bookTitle, activeRecoveryReturn?.attentionId);
+            },
+            activeRecoveryReturn,
+          );
         } catch (error) {
           open.disabled = false;
           setStatus(rendererErrorMessage(error, '无法重新打开稿件。'), 'error');
@@ -2667,18 +2951,32 @@ function renderEditorWindow(
   const redo = button('重做', 'quiet', () => void runHistory('redo'));
   const retryAuthoritativeRefreshButton = button('重试权威刷新', 'quiet', () => void retryAuthoritativeRefresh());
   retryAuthoritativeRefreshButton.hidden = true;
+  const backToOverview = button('返回图书工作概览', 'secondary', async () => {
+    backToOverview.disabled = true;
+    setStatus('正在保存并返回图书工作概览…', 'busy');
+    try {
+      if (!(await settleLocalEdit())) {
+        backToOverview.disabled = false;
+        return;
+      }
+      renderBookOverview(await window.ai7.getBookOverview({ bookId: currentWindow.bookId, historyCursor: null }));
+    } catch (error) {
+      backToOverview.disabled = false;
+      setStatus(rendererErrorMessage(error, '无法返回图书工作概览。'), 'error');
+    }
+  });
   const toolbarActions = element('div', 'button-row');
   if (recoveryAttentionId) {
     toolbarActions.append(button('返回恢复待确认', 'secondary', async () => {
       setStatus('正在返回稿件恢复比较…', 'busy');
       try {
-        renderManuscriptRecovery(await window.ai7.getRecoveryComparison({ attentionId: recoveryAttentionId }));
+        await returnToRecoveryComparison(recoveryAttentionId);
       } catch (error) {
         setStatus(rendererErrorMessage(error, '无法返回恢复比较。'), 'error');
       }
     }));
   }
-  toolbarActions.append(undo, redo, save, retryAuthoritativeRefreshButton);
+  toolbarActions.append(backToOverview, undo, redo, save, retryAuthoritativeRefreshButton);
   toolbar.append(title, toolbarActions);
 
   const workspace = element('div', 'editor-workspace');
@@ -2866,6 +3164,7 @@ function renderEditorWindow(
   const syncAuthoritativeMutationControls = (): void => {
     const busy = authoritativeMutationBusy();
     editorHost.dataset['authoritativeMutation'] = authoritativeMutation ? 'true' : 'false';
+    backToOverview.disabled = busy;
     undo.disabled = busy;
     redo.disabled = busy;
     milestoneButton.disabled = busy;
@@ -3641,17 +3940,39 @@ async function initializeStartup(): Promise<void> {
   }
 }
 
+async function initializeRenderer(): Promise<void> {
+  try {
+    const route = await window.ai7.getBookWorkbenchRoute();
+    if (route) {
+      await renderResolvedBookWorkbenchRoute(route);
+      return;
+    }
+  } catch (error) {
+    renderError(error, () => void initializeRenderer());
+    return;
+  }
+  await initializeStartup();
+}
+
 new MutationObserver(() => {
   if (document.documentElement.dataset['ai7ServiceState'] === 'interrupted') applyAuthorityInterruption();
   if (document.documentElement.dataset['ai7CloseState'] === 'blocked') {
     setStatus('当前编辑尚未获得持久写入确认，请先保存成功后再关闭窗口。', 'error');
     delete document.documentElement.dataset['ai7CloseState'];
   }
+  if (document.documentElement.dataset['ai7BookWorkbenchRouteGeneration']) {
+    delete document.documentElement.dataset['ai7BookWorkbenchRouteGeneration'];
+    void renderOwnedBookWorkbenchRoute();
+  }
 }).observe(document.documentElement, {
   attributes: true,
-  attributeFilter: ['data-ai7-service-state', 'data-ai7-close-state'],
+  attributeFilter: [
+    'data-ai7-service-state',
+    'data-ai7-close-state',
+    'data-ai7-book-workbench-route-generation',
+  ],
 });
 
 setCloseRisk(false);
-void initializeStartup();
+void initializeRenderer();
 if (document.documentElement.dataset['ai7ServiceState'] === 'interrupted') applyAuthorityInterruption();

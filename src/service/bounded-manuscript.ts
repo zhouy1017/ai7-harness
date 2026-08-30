@@ -15,6 +15,7 @@ import {
   MAX_WINDOW_BLOCKS,
   type DurableHistoryProjection,
   type FidelityCategoryProjection,
+  type HistoricalRevisionProjection,
   type JournalAcknowledgement,
   type JournalEditInput,
   type ManuscriptBlockProjection,
@@ -32,6 +33,8 @@ import {
   type RecoverySnapshotComparisonProjection,
   type RecoveryWindowProjection,
   type RecoveryWindowTarget,
+  type BookWorkbenchRoute,
+  type ResolvedBookWorkbenchRoute,
   type SearchMatchProjection,
   type SearchResultsProjection,
   type SearchSummaryProjection,
@@ -5318,6 +5321,135 @@ export class BoundedManuscriptStore {
         label: '恢复待确认状态',
       },
     }));
+  }
+
+  resolveBookWorkbenchRoute(route: BookWorkbenchRoute): ResolvedBookWorkbenchRoute {
+    if (route.kind === 'book') {
+      requireBounded(UUID_PATTERN.test(route.bookId), 'BOOK_INVALID', '图书标识无效。');
+      const book = one(this.#db.prepare(
+        'SELECT book_id, title FROM books WHERE book_id = ?',
+      ).all(route.bookId) as SqlRow[], 'BOOK_NOT_FOUND', '图书不存在。');
+      return {
+        kind: 'book',
+        bookId: asString(book.book_id),
+        bookTitle: asString(book.title),
+      };
+    }
+    requireBounded(UUID_PATTERN.test(route.revisionId), 'REVISION_INVALID', '稿件修订版标识无效。');
+    const revision = one(this.#db.prepare(
+      `SELECT b.book_id, b.title, mr.manuscript_id, mr.branch_id, mr.revision_id, mr.revision_label
+       FROM manuscript_revisions mr
+       JOIN manuscripts m ON m.manuscript_id = mr.manuscript_id
+       JOIN manuscript_branches branch ON branch.branch_id = mr.branch_id
+         AND branch.manuscript_id = mr.manuscript_id
+       JOIN books b ON b.book_id = m.book_id
+       JOIN source_versions source ON source.source_version_id = mr.source_version_id
+         AND source.book_id = m.book_id
+       LEFT JOIN manuscript_revisions parent ON parent.revision_id = mr.parent_revision_id
+         AND parent.manuscript_id = mr.manuscript_id AND parent.branch_id = mr.branch_id
+       WHERE mr.revision_id = ? AND (mr.parent_revision_id IS NULL OR parent.revision_id IS NOT NULL)`,
+    ).all(route.revisionId) as SqlRow[], 'REVISION_NOT_FOUND', '稿件修订版不存在。');
+    return {
+      kind: 'revision',
+      bookId: asString(revision.book_id),
+      bookTitle: asString(revision.title),
+      manuscriptId: asString(revision.manuscript_id),
+      branchId: asString(revision.branch_id),
+      revisionId: asString(revision.revision_id),
+      revisionLabel: asString(revision.revision_label),
+    };
+  }
+
+  getHistoricalRevision(revisionId: string, cursor: string | null): HistoricalRevisionProjection {
+    requireBounded(UUID_PATTERN.test(revisionId), 'REVISION_INVALID', '稿件修订版标识无效。');
+    const revision = one(this.#db.prepare(
+      `SELECT b.book_id, b.title, mr.manuscript_id, mr.branch_id, mr.revision_id, mr.revision_label,
+              mr.revision_digest, mr.parent_revision_id, mr.source_version_id, mr.created_at,
+              count(mbv.block_id) total_blocks,
+              COALESCE(sum(mbv.grapheme_length), 0) total_characters
+       FROM manuscript_revisions mr
+       JOIN manuscripts m ON m.manuscript_id = mr.manuscript_id
+       JOIN manuscript_branches branch ON branch.branch_id = mr.branch_id
+         AND branch.manuscript_id = mr.manuscript_id
+       JOIN books b ON b.book_id = m.book_id
+       JOIN source_versions source ON source.source_version_id = mr.source_version_id
+         AND source.book_id = m.book_id
+       LEFT JOIN manuscript_revisions parent ON parent.revision_id = mr.parent_revision_id
+         AND parent.manuscript_id = mr.manuscript_id AND parent.branch_id = mr.branch_id
+       JOIN manuscript_block_versions mbv ON mbv.revision_id = mr.revision_id
+       JOIN manuscript_blocks block ON block.block_id = mbv.block_id
+         AND block.manuscript_id = mr.manuscript_id
+       JOIN manuscript_revisions created ON created.revision_id = block.created_revision_id
+         AND created.manuscript_id = mr.manuscript_id
+       WHERE mr.revision_id = ? AND (mr.parent_revision_id IS NULL OR parent.revision_id IS NOT NULL)
+       GROUP BY b.book_id, b.title, mr.manuscript_id, mr.branch_id, mr.revision_id, mr.revision_label,
+                mr.revision_digest, mr.parent_revision_id, mr.source_version_id, mr.created_at`,
+    ).all(revisionId) as SqlRow[], 'REVISION_NOT_FOUND', '稿件修订版不存在或内容不完整。');
+    const totalBlocks = asNumber(revision.total_blocks);
+    const totalCharacters = asNumber(revision.total_characters);
+    requireBounded(totalBlocks > 0 && totalCharacters >= 0, 'REVISION_INVALID', '稿件修订版内容不完整。');
+    const startPosition = cursor === null
+      ? 1
+      : this.#decodeSimpleCursor(cursor, `historical-revision:${revisionId}`);
+    requireBounded(startPosition >= 1 && startPosition <= totalBlocks, 'CURSOR_INVALID', '稿件修订版位置已失效。');
+    const rows = this.#db.prepare(
+      `SELECT version.block_id, version.position, version.kind, version.level, version.text,
+              version.digest, version.start_offset, version.grapheme_length
+       FROM manuscript_block_versions version
+       JOIN manuscript_blocks block ON block.block_id = version.block_id AND block.manuscript_id = ?
+       WHERE version.revision_id = ? AND version.position >= ?
+       ORDER BY version.position LIMIT ?`,
+    ).all(asString(revision.manuscript_id), revisionId, startPosition, MAX_WINDOW_BLOCKS + 1) as SqlRow[];
+    const visible = rows.slice(0, MAX_WINDOW_BLOCKS);
+    requireBounded(visible.length > 0 && visible.length <= MAX_WINDOW_BLOCKS, 'REVISION_NOT_FOUND', '稿件修订版窗口为空。');
+    const first = visible[0]!;
+    const last = visible.at(-1)!;
+    const structure = this.#db.prepare(
+      `SELECT version.text FROM manuscript_block_versions version
+       JOIN manuscript_blocks block ON block.block_id = version.block_id AND block.manuscript_id = ?
+       WHERE version.revision_id = ? AND version.position <= ? AND version.kind IN ('title', 'heading')
+       ORDER BY version.position DESC LIMIT 1`,
+    ).get(asString(revision.manuscript_id), revisionId, asNumber(first.position)) as SqlRow | undefined;
+    const startCharacter = asNumber(first.start_offset);
+    const endCharacter = asNumber(last.start_offset) + asNumber(last.grapheme_length);
+    return {
+      mode: 'historical-revision',
+      readOnly: true,
+      bookId: asString(revision.book_id),
+      bookTitle: asString(revision.title),
+      manuscriptId: asString(revision.manuscript_id),
+      branchId: asString(revision.branch_id),
+      revisionId: asString(revision.revision_id),
+      revisionLabel: asString(revision.revision_label),
+      revisionDigest: asString(revision.revision_digest),
+      parentRevisionId: revision.parent_revision_id === null ? null : asString(revision.parent_revision_id),
+      sourceVersionId: asString(revision.source_version_id),
+      createdAt: asString(revision.created_at),
+      previousCursor: startPosition > 1
+        ? this.#encodeSimpleCursor(`historical-revision:${revisionId}`, Math.max(1, startPosition - WINDOW_STRIDE))
+        : null,
+      nextCursor: rows.length > MAX_WINDOW_BLOCKS
+        ? this.#encodeSimpleCursor(`historical-revision:${revisionId}`, startPosition + WINDOW_STRIDE)
+        : null,
+      position: {
+        startBlock: asNumber(first.position),
+        endBlock: asNumber(last.position),
+        totalBlocks,
+        startCharacter,
+        endCharacter,
+        totalCharacters,
+        structureLabel: structure ? asString(structure.text) : null,
+        label: `${structure ? `${asString(structure.text)} · ` : ''}只读修订版 ${asNumber(first.position)}–${asNumber(last.position)} / ${totalBlocks} 个内容块`,
+      },
+      blocks: visible.map((row) => ({
+        blockId: asString(row.block_id),
+        position: asNumber(row.position),
+        kind: asString(row.kind) as ManuscriptBlockProjection['kind'],
+        level: row.level === null ? null : asNumber(row.level),
+        text: asString(row.text),
+        digest: asString(row.digest),
+      })),
+    };
   }
 
   firstRecoveryAttentionId(): string | null {

@@ -490,7 +490,7 @@ _中文_: 开发端能力档案
 _Avoid_: Editorial Capability Profile, an in-product power-user mode, an escalation path
 
 **Agent Data Root**:
-The AI7-owned directory intended to be the platform filesystem boundary for governed Book stores and per-Run scratch; it excludes the Protected Secret Store and lives outside any repository working tree. Run Source Scope is the nested semantic read boundary. Until a concrete Windows or macOS confinement mechanism is selected and shown sufficient for a stronger claim, AI7 capability and service facades are the enforceable boundary and AI7 assumes no whole-process OS filesystem isolation.
+The one canonical AI7-owned directory shared by one running application/service instance and all its windows, intended as the platform filesystem boundary for AI7-controlled persistent business and technical state, governed Book stores and derivatives, and per-Run scratch. It excludes application binaries, OS-disposable state, and the Protected Secret Store and lives outside any repository working tree. Windows placement follows its portable/installed rules; macOS uses the OS-resolved per-user Application Support location for `io.github.zhouy1017.ai7` with no silent fallback. Run Source Scope is the nested semantic read boundary. Until a concrete Windows or macOS confinement mechanism is selected and shown sufficient for a stronger claim, AI7 capability and service facades are the enforceable boundary and AI7 assumes no whole-process OS filesystem isolation.
 _中文_: 智能体数据根目录
 _Avoid_: Run Source Scope, a general filesystem grant, a proven whole-process OS sandbox, a repository working tree
 

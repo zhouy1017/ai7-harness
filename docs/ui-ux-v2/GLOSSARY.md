@@ -191,6 +191,7 @@ Shared artifact, analysis, Enrollment and Apply meanings route to root contexts;
 | View-only Typography Preference | 仅视图排版偏好 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Resizable Workspace Region | 可调工作区区域 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Optional Surface Visibility | 可选视图显隐 | [AI7 V2 UI/UX](./CONTEXT.md) |
+| Book Workbench Window | 图书工作台窗口 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Detached Manuscript Window | 独立稿件窗口 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Manuscript Surface Transfer | 稿件页面转移 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Active Manuscript Surface Binding | 活动稿件页面绑定 | [AI7 V2 UI/UX](./CONTEXT.md) |
@@ -495,6 +496,7 @@ Shared artifact, analysis, Enrollment and Apply meanings route to root contexts;
 | View-only Typography Preference | Manuscript mutation, DOCX style, export formatting, factual annotation, or permission to override reflow/accessibility. |
 | Resizable Workspace Region | Manuscript Block/window size, content scope, document geometry, authority boundary, or unmanaged OS window. |
 | Optional Surface Visibility | Record dismissal/deletion, completed decision, ignored safety state, or removed Global Attention item. |
+| Book Workbench Window | Detached Manuscript Window, parallel editor, URL target, Book lock, or background attention surface. |
 | Detached Manuscript Window | Read-only export viewer, concurrent editor, second text authority, or separate manuscript store. |
 | Manuscript Surface Transfer | Export, duplicate window, manuscript merge, Run handoff, or synchronization between two editable surfaces. |
 | Active Manuscript Surface Binding | Manuscript authority, Book lock, Run lock, Effect Approval, or OS focus ownership. |

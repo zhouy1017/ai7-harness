@@ -26,10 +26,14 @@ declare module 'electron' {
       on(event: string, listener: (...args: any[]) => void): void;
     };
     destroy(): void;
+    focus(): void;
     isDestroyed(): boolean;
+    isMinimized(): boolean;
+    isVisible(): boolean;
     loadFile(path: string): Promise<void>;
     on(event: string, listener: (...args: any[]) => void): void;
     once(event: 'ready-to-show', listener: () => void): void;
+    restore(): void;
     show(): void;
   }
   export const app: {
@@ -64,4 +68,5 @@ declare module 'electron' {
   };
   export const Menu: { setApplicationMenu(menu: null): void };
   export const session: { defaultSession: Session };
+  export const shell: { showItemInFolder(path: string): void };
 }

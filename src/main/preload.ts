@@ -36,6 +36,16 @@ function markProductReady(): void {
   else window.addEventListener('DOMContentLoaded', mark, { once: true });
 }
 
+let bookWorkbenchRouteGeneration = 0;
+function markBookWorkbenchRouteChanged(): void {
+  const mark = (): void => {
+    bookWorkbenchRouteGeneration += 1;
+    document.documentElement.dataset['ai7BookWorkbenchRouteGeneration'] = String(bookWorkbenchRouteGeneration);
+  };
+  if (document.documentElement) mark();
+  else window.addEventListener('DOMContentLoaded', mark, { once: true });
+}
+
 function reportCloseRisk(): void {
   ipcRenderer.send(MAIN_EVENTS.closeRiskChanged, document.documentElement.dataset['ai7CloseRisk'] === 'true');
 }
@@ -122,6 +132,7 @@ if (j02ObservationEnabled) {
 ipcRenderer.on(MAIN_EVENTS.serviceInterrupted, markServiceInterrupted);
 ipcRenderer.on(MAIN_EVENTS.closeBlocked, markCloseBlocked);
 ipcRenderer.on(MAIN_EVENTS.productReady, markProductReady);
+ipcRenderer.on(MAIN_EVENTS.bookWorkbenchRouteChanged, markBookWorkbenchRouteChanged);
 
 const closeRiskObserver = new MutationObserver(reportCloseRisk);
 const observeCloseRisk = (): void => {
@@ -244,6 +255,18 @@ const api: RendererApi = Object.freeze({
     invoke<ServiceOperationMap['undoManuscript']['output']>(IPC_CHANNELS.undoManuscript, input),
   redoManuscript: (input: ServiceOperationMap['redoManuscript']['input']) =>
     invoke<ServiceOperationMap['redoManuscript']['output']>(IPC_CHANNELS.redoManuscript, input),
+  openBookWorkbench: (input: ServiceOperationMap['resolveBookWorkbenchRoute']['input']) =>
+    invoke<Awaited<ReturnType<RendererApi['openBookWorkbench']>>>(IPC_CHANNELS.openBookWorkbench, input),
+  getBookWorkbenchRoute: () =>
+    invoke<Awaited<ReturnType<RendererApi['getBookWorkbenchRoute']>>>(IPC_CHANNELS.getBookWorkbenchRoute),
+  leaveBookWorkbench: () =>
+    invoke<Awaited<ReturnType<RendererApi['leaveBookWorkbench']>>>(IPC_CHANNELS.leaveBookWorkbench),
+  getHistoricalRevision: (input: ServiceOperationMap['getHistoricalRevision']['input']) =>
+    invoke<ServiceOperationMap['getHistoricalRevision']['output']>(IPC_CHANNELS.getHistoricalRevision, input),
+  getProductDataLocation: () =>
+    invoke<Awaited<ReturnType<RendererApi['getProductDataLocation']>>>(IPC_CHANNELS.getProductDataLocation),
+  revealProductDataLocation: () =>
+    invoke<Awaited<ReturnType<RendererApi['revealProductDataLocation']>>>(IPC_CHANNELS.revealProductDataLocation),
 });
 
 contextBridge.exposeInMainWorld('ai7', api);
