@@ -3,6 +3,7 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
+const JOURNEY_RUNNER_ENTRY = resolve(ROOT, 'e2e', 'run.mjs');
 const MAX_CAPTURE_BYTES = 64 * 1024;
 const CANCELLATION_MESSAGE = 'ai7-e2e-cancel';
 const CANCELLATION_SIGNALS = new Set(['SIGINT', 'SIGTERM']);
@@ -64,12 +65,17 @@ function receiveDirectSigterm() {
   requestRunnerCancellation('SIGTERM');
 }
 
-if (typeof process.send === 'function') {
-  process.on('message', receiveControllerMessage);
-  process.on('disconnect', receiveControllerDisconnect);
+const isJourneyRunner =
+  typeof process.argv[1] === 'string' && resolve(process.argv[1]) === JOURNEY_RUNNER_ENTRY;
+
+if (isJourneyRunner) {
   process.on('SIGINT', receiveDirectSigint);
   process.on('SIGTERM', receiveDirectSigterm);
-  if (!process.connected) requestRunnerCancellation(CONTROLLER_DISCONNECT);
+  if (typeof process.send === 'function') {
+    process.on('message', receiveControllerMessage);
+    process.on('disconnect', receiveControllerDisconnect);
+    if (!process.connected) requestRunnerCancellation(CONTROLLER_DISCONNECT);
+  }
 }
 
 export const ADMITTED_JOURNEYS = Object.freeze(['J-01', 'J-02', 'J-08', 'J-12']);
