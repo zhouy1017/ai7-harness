@@ -1,4 +1,4 @@
-export const SERVICE_PROTOCOL_VERSION = 10 as const;
+export const SERVICE_PROTOCOL_VERSION = 11 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -68,6 +68,12 @@ export const IPC_CHANNELS = {
   saveMilestone: 'ai7:j02:save-milestone',
   undoManuscript: 'ai7:j02:undo-manuscript',
   redoManuscript: 'ai7:j02:redo-manuscript',
+  openBookWorkbench: 'ai7:j12:open-book-workbench',
+  getBookWorkbenchRoute: 'ai7:j12:get-book-workbench-route',
+  leaveBookWorkbench: 'ai7:j12:leave-book-workbench',
+  getHistoricalRevision: 'ai7:j12:get-historical-revision',
+  getProductDataLocation: 'ai7:j12:get-product-data-location',
+  revealProductDataLocation: 'ai7:j12:reveal-product-data-location',
 } as const;
 
 export const MAIN_EVENTS = {
@@ -75,6 +81,7 @@ export const MAIN_EVENTS = {
   closeRiskChanged: 'ai7:j01:close-risk-changed',
   productReady: 'ai7:j01:product-ready',
   serviceInterrupted: 'ai7:j01:service-interrupted',
+  bookWorkbenchRouteChanged: 'ai7:j12:book-workbench-route-changed',
 } as const;
 
 export type RendererCallResult<T> =
@@ -683,6 +690,84 @@ export interface ManuscriptWindowProjection {
   blocks: ReadonlyArray<ManuscriptBlockProjection>;
 }
 
+export type BookWorkbenchRoute =
+  | { kind: 'book'; bookId: string }
+  | { kind: 'revision'; revisionId: string };
+
+export type ResolvedBookWorkbenchRoute =
+  | {
+      kind: 'book';
+      bookId: string;
+      bookTitle: string;
+    }
+  | {
+      kind: 'revision';
+      bookId: string;
+      bookTitle: string;
+      manuscriptId: string;
+      branchId: string;
+      revisionId: string;
+      revisionLabel: string;
+    };
+
+export interface BookWorkbenchOpenProjection {
+  route: ResolvedBookWorkbenchRoute;
+  target: 'requesting-window' | 'existing-window' | 'new-window';
+}
+
+export interface ProductDataLocationProjection {
+  platform: 'windows' | 'macos';
+  platformLabel: 'Windows' | 'macOS';
+  runtimeForm: 'source-checkout';
+  runtimeFormLabel: '源码检出运行';
+  locationLabel: '本机产品数据位置';
+  canonicalRoot: string;
+  footprint: {
+    kind: 'bounded-measurement';
+    measuredBytes: number;
+    measuredEntries: number;
+    maximumEntries: 128;
+    complete: boolean;
+    label: string;
+  };
+  protectedSecretStore: 'windows-credential-manager' | 'macos-keychain';
+  protectedSecretStoreLabel: 'Windows 凭据管理器' | 'macOS 钥匙串';
+  separationLabel: '模型服务凭据由操作系统单独保护，不在产品数据中，也不随产品数据复制。';
+}
+
+export interface ProductDataLocationRevealProjection {
+  state: 'requested';
+  nativeRevealSuppressedForE2e: boolean;
+}
+
+export interface HistoricalRevisionProjection {
+  mode: 'historical-revision';
+  readOnly: true;
+  bookId: string;
+  bookTitle: string;
+  manuscriptId: string;
+  branchId: string;
+  revisionId: string;
+  revisionLabel: string;
+  revisionDigest: string;
+  parentRevisionId: string | null;
+  sourceVersionId: string;
+  createdAt: string;
+  previousCursor: string | null;
+  nextCursor: string | null;
+  position: {
+    startBlock: number;
+    endBlock: number;
+    totalBlocks: number;
+    startCharacter: number;
+    endCharacter: number;
+    totalCharacters: number;
+    structureLabel: string | null;
+    label: string;
+  };
+  blocks: ReadonlyArray<ManuscriptBlockProjection>;
+}
+
 export type ManuscriptWindowTarget =
   | { kind: 'start' }
   | { kind: 'cursor'; cursor: string }
@@ -1262,6 +1347,10 @@ export interface ServiceOperationMap {
     };
     output: ServiceJobProjection;
   };
+  resolveAcknowledgedManuscriptReimportReplay: {
+    input: { draftId: string; expectedDraftVersion: number; reviewDigest: string; commitId: string };
+    output: { draftId: string; commitId: string; bookId: string };
+  };
   commitManuscriptReimport: {
     input: { draftId: string; expectedDraftVersion: number; reviewDigest: string; commitId: string };
     output: ServiceJobProjection;
@@ -1319,6 +1408,14 @@ export interface ServiceOperationMap {
   redoManuscript: {
     input: { manuscriptId: string; branchId: string; expectedWorkingDigest: string };
     output: DurableHistoryProjection;
+  };
+  resolveBookWorkbenchRoute: {
+    input: BookWorkbenchRoute;
+    output: ResolvedBookWorkbenchRoute;
+  };
+  getHistoricalRevision: {
+    input: { revisionId: string; cursor: string | null };
+    output: HistoricalRevisionProjection;
   };
   shutdown: { input: Record<string, never>; output: { state: 'stopping' } };
 }
@@ -1409,4 +1506,12 @@ export interface RendererApi {
   saveMilestone(input: ServiceOperationMap['saveMilestone']['input']): Promise<MilestoneProjection>;
   undoManuscript(input: ServiceOperationMap['undoManuscript']['input']): Promise<DurableHistoryProjection>;
   redoManuscript(input: ServiceOperationMap['redoManuscript']['input']): Promise<DurableHistoryProjection>;
+  openBookWorkbench(input: BookWorkbenchRoute): Promise<BookWorkbenchOpenProjection>;
+  getBookWorkbenchRoute(): Promise<ResolvedBookWorkbenchRoute | null>;
+  leaveBookWorkbench(): Promise<{ state: 'library' }>;
+  getHistoricalRevision(
+    input: ServiceOperationMap['getHistoricalRevision']['input'],
+  ): Promise<HistoricalRevisionProjection>;
+  getProductDataLocation(): Promise<ProductDataLocationProjection>;
+  revealProductDataLocation(): Promise<ProductDataLocationRevealProjection>;
 }

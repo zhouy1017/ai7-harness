@@ -90,6 +90,26 @@ function decodeRequest(frame: Uint8Array): ServiceRequest {
       requireInput(value.input, [], tentativeId);
       break;
     }
+    case 'resolveBookWorkbenchRoute': {
+      if (!isRecord(value.input)) throw new ProtocolError(tentativeId);
+      const input = value.input;
+      const valid = input.kind === 'book'
+        ? hasExactKeys(input, ['kind', 'bookId']) &&
+          isBoundedString(input.bookId, 36) && UUID_PATTERN.test(input.bookId)
+        : input.kind === 'revision' &&
+          hasExactKeys(input, ['kind', 'revisionId']) &&
+          isBoundedString(input.revisionId, 36) && UUID_PATTERN.test(input.revisionId);
+      if (!valid) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'getHistoricalRevision': {
+      const input = requireInput(value.input, ['revisionId', 'cursor'], tentativeId);
+      if (!isBoundedString(input.revisionId, 36) || !UUID_PATTERN.test(input.revisionId) ||
+          !(input.cursor === null || isBoundedString(input.cursor, 1_024))) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
     case 'listBooks': {
       const input = requireInput(value.input, ['after'], tentativeId);
       const after = input.after;
@@ -340,6 +360,7 @@ function decodeRequest(frame: Uint8Array): ServiceRequest {
       }
       break;
     }
+    case 'resolveAcknowledgedManuscriptReimportReplay':
     case 'commitManuscriptReimport': {
       const input = requireInput(value.input, ['draftId', 'expectedDraftVersion', 'reviewDigest', 'commitId'], tentativeId);
       if (!isBoundedString(input.draftId, 36) || !UUID_PATTERN.test(input.draftId) ||
@@ -648,6 +669,20 @@ async function dispatch(
       return { id: request.id, ok: true, op: request.op, result: harness.readiness };
     case 'getStartup':
       return { id: request.id, ok: true, op: request.op, result: await store.getStartup() };
+    case 'resolveBookWorkbenchRoute':
+      return {
+        id: request.id,
+        ok: true,
+        op: request.op,
+        result: store.resolveBookWorkbenchRoute(request.input),
+      };
+    case 'getHistoricalRevision':
+      return {
+        id: request.id,
+        ok: true,
+        op: request.op,
+        result: store.getHistoricalRevision(request.input.revisionId, request.input.cursor),
+      };
     case 'getRecoveryComparison':
       return { id: request.id, ok: true, op: request.op, result: await store.getRecoveryComparison(request.input.attentionId) };
     case 'viewRecoveryCandidate':
@@ -821,6 +856,13 @@ async function dispatch(
           request.input.resolution,
           request.input.currentBlockId,
         ),
+      };
+    case 'resolveAcknowledgedManuscriptReimportReplay':
+      return {
+        id: request.id,
+        ok: true,
+        op: request.op,
+        result: store.resolveAcknowledgedManuscriptReimportReplay(request.input),
       };
     case 'commitManuscriptReimport':
       return {

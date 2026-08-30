@@ -316,7 +316,7 @@ The Task surface remains role/capability-first. Model Service Settings configure
 └─ 数据与存储
    └─ Data and Storage Summary
       ├─ 当前平台：Windows / macOS
-      ├─ 运行方式：actual platform channel（Windows: 便携版 / 安装版）
+      ├─ 运行方式：actual runtime/channel（Windows: 便携版 / 安装版；macOS package: 直接下载版 · DMG；source checkout: 源码检出运行）
       ├─ 数据保存在：user-readable location
       ├─ 本机占用
       ├─ 查看数据位置
@@ -327,7 +327,7 @@ The Task surface remains role/capability-first. Model Service Settings configure
          └─ 当前位置不受支持 · Data Location Remediation Guidance
 ```
 
-Normal state remains secondary and quiet. The exact technical path can expand for support, but the first layer uses the actual platform/channel plus `本机位置`, `可能被同步` and `当前位置不受支持`; `便携版` and `安装版` appear only for the Windows channels. No path field or arbitrary location picker appears. Data/storage navigation is distinct from Book import/export and from Settings `模型服务`; viewing a location changes no product record or permission.
+Normal state remains secondary and quiet. The exact technical path can expand for support, but the first layer uses the actual platform/runtime/channel plus `本机位置`, `可能被同步` and `当前位置不受支持`; `便携版` and `安装版` appear only for Windows, while packaged macOS uses `直接下载版 · DMG`. The macOS root is the OS-resolved per-user Application Support location for `io.github.zhouy1017.ai7`, never beside the `.app`, and has no silent fallback. No path field or arbitrary location picker appears. Data/storage navigation is distinct from Book import/export and from Settings `模型服务`; viewing a location changes no product record or permission.
 
 ## Appearance settings
 
@@ -423,6 +423,8 @@ Resizable Workspace Region
 ```
 
 Layout choices are local projections. A hidden card remains reachable from `视图`; a resized column changes no source/evidence scope; a detached window does not duplicate the Manuscript. Required identity, persistence/recovery danger and current consequential action preserve a named visible anchor even when surrounding surfaces collapse.
+
+One full Book Workbench Window is privately bound to one exact Book. Distinct Books may coexist; an explicit Book or historical Revision route reuses that Book's existing Workbench and derives Revision ownership through the service. Only an explicit editor action creates, reveals or focuses one. Background work/state may update an existing projection but never opens, raises or focuses a Workbench. Historical content is a bounded immutable read-only service projection, not a second editable manuscript surface or a Detached Manuscript Window.
 
 Detached Manuscript Window is a full host for the existing manuscript subpage, not a second product workspace or authority. The workbench does not keep a read-only body mirror: its quiet placeholder retains exact identity, durability/safety visibility and direct locate/reattach actions while the rest of the workbench remains usable. Manuscript Surface Transfer waits for IME completion and current Edit Journal acknowledgement; a durability-protection buffer stays in its originating Renderer and blocks a lifecycle step that would destroy it. Target readiness and the service-owned Active Manuscript Surface Binding switch precede source unload. Failure returns to the source-active state, and detached-window close normally means guarded `移回工作台并关闭窗口`. Background Runs and committed Effects remain governed by their own records.
 

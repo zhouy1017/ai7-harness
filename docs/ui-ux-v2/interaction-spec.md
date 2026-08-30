@@ -1426,7 +1426,8 @@ Here, incremental assurance means that independently completed check records bec
 | Windows writable portable folder | `Windows · 便携版 · 数据位于 AI7 文件夹内` | Normal; credentials stated separately |
 | Windows installer/default local location | `Windows · 安装版 · 数据位于本机` | Normal; exact path expandable |
 | Windows portable folder unwritable | `Windows · 已改用本机位置` plus actual location and reason | One ordinary notice; Settings retains exception state |
-| macOS selected native channel/location | `macOS · <actual channel> · 数据位于本机` | Exact wording follows the macOS package/data decision; never claims portable/NSIS behavior |
+| macOS direct-download package | `macOS · 直接下载版 · DMG · 数据位于本机` | Per-user Application Support for `io.github.zhouy1017.ai7`; manual app replacement preserves product data; never portable/NSIS |
+| Source checkout | `<actual platform> · 源码检出运行` plus actual canonical root | Never claims to be a portable/installed/DMG package |
 | Known sync/backup root | `此位置可能被同步或备份` plus unpublished-material consequence | Non-blocking acknowledge; warning remains reviewable |
 | Prohibited repository/development location | `当前位置不受支持` plus Data Location Remediation Guidance | Do not ask for technical risk judgment; guide to supported placement |
 | `查看数据位置` | Open/reveal actual location as secondary support action | No path edit, migration, export, scope or authority change |
@@ -1439,6 +1440,7 @@ Here, incremental assurance means that independently completed check records bec
 - Prohibited placement is stronger than a sync warning but uses guided plain language and a supported destination, not repository/worktree/shell terminology.
 - The exact path may be copied/revealed from secondary detail for support. It is never an editable text field and never becomes a source selector or Local Export Destination.
 - Credential separation remains visible in every platform/channel state and exception: copied product data is never described as carrying Provider credentials; Windows uses Credential Manager and macOS uses Keychain behind the same Credential Broker.
+- A noncanonical or unavailable macOS Application Support location fails closed with exact remediation; it never silently falls back beside the `.app` or to another root.
 - Viewing, acknowledging or hiding an informational notice changes no Product Data Location. Any future product-owned migration requires its own exact outcome and recovery semantics rather than being implied by this design.
 
 ## Keyboard commands and discoverable action entries
@@ -1477,6 +1479,8 @@ Here, incremental assurance means that independently completed check records bec
 | Attempt to hide required safety/authority surface | Collapse only to named persistent status/entry or refuse with reason | Urgency, consequence and return remain available |
 | `恢复默认布局` | Reset density/region visibility/sizes according to scope shown | No content, Task or Run change |
 | `在独立窗口打开稿件` | Guarded transfer of the active editable manuscript page to a Detached Manuscript Window | One Active Manuscript Surface Binding; no copy or authority expansion |
+| Explicitly open another exact Book | Create or reveal that Book's Workbench | At most one Workbench per Book; distinct Books may coexist |
+| Explicitly open an exact historical Revision | Reuse its Book Workbench and show immutable bounded content | Service-derived identity; no editor or mutation command |
 
 ### Flexible-surface rules
 
@@ -1487,6 +1491,7 @@ Here, incremental assurance means that independently completed check records bec
 - Optional visibility state is recorded by surface type/local workspace. A changed record may still create Global Attention even if its prior projection was hidden; hiding never suppresses underlying attention.
 - Required states that cannot be hidden include current Book/manuscript/revision identity, persistence/recovery danger, active blockers, exact consequences and the current named authority action. Compact projection may be used only if it remains unambiguous and directly reopenable.
 - A Detached Manuscript Window uses the same manuscript component and eligible operations as the embedded page. It does not create a second editing instance, branch, revision, Run scope or authority surface.
+- A Book Workbench Window is distinct from a Detached Manuscript Window. Its exact-Book registration serializes duplicate open requests; only an explicit editor route creates/reveals/focuses it, while background work and state changes never steal focus.
 - The main workbench replaces the detached body with `稿件已在独立窗口打开`, exact identity/persistence status, `显示独立窗口` and `移回工作台`. It renders no second read-only manuscript body.
 - Window transfer and close follow this state machine:
 

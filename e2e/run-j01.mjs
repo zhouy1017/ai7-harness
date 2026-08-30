@@ -210,7 +210,7 @@ async function waitForTransientControl(renderer, expression, location) {
 }
 
 async function assertRenderer(renderer, expression, location) {
-  requireJourney(await renderer.evaluate(`Boolean(${expression})`), location);
+  requireJourney(await renderer.evaluate(`Promise.resolve(${expression}).then((value)=>Boolean(value))`), location);
 }
 
 async function clickExactButton(renderer, label, location) {
@@ -609,6 +609,11 @@ async function assertCommittedManuscriptReimport(renderer, expectation) {
       /^[0-9a-f-]{36}$/i.test(identities?.reimportRecordId ?? ''),
     `${scenario}-identities`,
   );
+  const route = await renderer.evaluate(`window.ai7.getBookWorkbenchRoute()`);
+  requireJourney(
+    route?.kind === 'book' && route.bookId === identities.bookId,
+    `${scenario}-exact-book-route-owned`,
+  );
   await assertRenderer(
     renderer,
     `(() => { const direct = document.querySelector('[data-view-reimport-record-id]'); if (!direct || direct.disabled) return false; direct.click(); const detail = document.querySelector('.record-detail[data-record-kind="manuscript-reimport-record"]'); const values = Object.fromEntries(Array.from(detail?.querySelectorAll('dt') ?? [], (label) => [label.textContent, label.nextElementSibling?.textContent])); const revisionIdentityValid = ${changed ? "/^[0-9a-f-]{36}$/i.test(values['结果修订版 ID'] ?? '')" : "values['结果修订版 ID'] === '—'"}; const fidelityItems = detail?.querySelectorAll('details.degradation-disclosure:first-of-type li').length ?? 0; const degradationValid = ${degraded ? "/^[0-9a-f-]{36}$/i.test(values['导入降级决定 ID'] ?? '') && values['保真结果']?.includes('含已接受的降级')" : "values['导入降级决定 ID'] === '—' && values['保真结果']?.includes('完整保留')"}; return values['稿件重新导入记录 ID'] === ${JSON.stringify(identities.reimportRecordId)} && values['原子提交 ID'] === ${JSON.stringify(identities.commitId)} && values['来源关系'] === ${JSON.stringify(lineageStatus === 'verified' ? '来源关系已确认' : '来源关系未确认')} && values['比较方式'] === ${JSON.stringify(lineageStatus === 'verified' ? '三方比较' : '两方比较')} && values['结果'] === ${JSON.stringify(changed ? '稿件已重新导入' : '未发现稿件变化')} && revisionIdentityValid && fidelityItems === 8 && degradationValid && /^[0-9a-f]{64}$/.test(values['比较摘要'] ?? '') && /^[0-9a-f]{64}$/.test(values['解决摘要'] ?? '') && /^[0-9a-f]{64}$/.test(values['记录摘要'] ?? ''); })()`,
@@ -937,7 +942,7 @@ async function runJourney(
   );
   await assertRenderer(
     renderer,
-    `typeof globalThis.process === 'undefined' && typeof globalThis.require === 'undefined' && Object.keys(window.ai7).sort().join(',') === 'abandonImportDraft,acceptReimportDegradation,acknowledgeImportCompletion,cancelServiceJob,commitBookCreation,commitManuscriptReimport,commitNewBookImport,commitReplacement,commitSourceImport,continueImportDraft,deferRecovery,dismissReplacementPreview,flushJournalEdit,freezeReplacement,getBookOverview,getImportStartup,getManuscriptWindow,getManuscriptWindowAt,getOutline,getRecoveryComparison,getReimportIdentityCandidatePage,getReimportLineageSourceVersionPage,getReimportMappingPage,getSearchResults,getStartup,listBooks,listPriorWork,platform,pollServiceJob,prepareBookCreation,prepareManuscriptReimport,prepareNewBookReview,prepareReplacement,prepareSourceImportReview,redoManuscript,reselectImportDraft,resolveReimportMapping,restoreRecovery,saveMilestone,selectAndStageDocx,startReplacementCommit,startSearch,undoManuscript,viewRecoveryCandidate'`,
+    `typeof globalThis.process === 'undefined' && typeof globalThis.require === 'undefined' && Object.keys(window.ai7).sort().join(',') === 'abandonImportDraft,acceptReimportDegradation,acknowledgeImportCompletion,cancelServiceJob,commitBookCreation,commitManuscriptReimport,commitNewBookImport,commitReplacement,commitSourceImport,continueImportDraft,deferRecovery,dismissReplacementPreview,flushJournalEdit,freezeReplacement,getBookOverview,getBookWorkbenchRoute,getHistoricalRevision,getImportStartup,getManuscriptWindow,getManuscriptWindowAt,getOutline,getProductDataLocation,getRecoveryComparison,getReimportIdentityCandidatePage,getReimportLineageSourceVersionPage,getReimportMappingPage,getSearchResults,getStartup,leaveBookWorkbench,listBooks,listPriorWork,openBookWorkbench,platform,pollServiceJob,prepareBookCreation,prepareManuscriptReimport,prepareNewBookReview,prepareReplacement,prepareSourceImportReview,redoManuscript,reselectImportDraft,resolveReimportMapping,restoreRecovery,revealProductDataLocation,saveMilestone,selectAndStageDocx,startReplacementCommit,startSearch,undoManuscript,viewRecoveryCandidate'`,
     'renderer-isolation',
   );
   await assertRenderer(
@@ -1340,6 +1345,11 @@ async function runEmptyBookFirstImport(renderer, expectation, restartReviewedImp
     renderer,
     `(() => { const screen = document.querySelector('[data-screen="imported"]'); const overview = screen?.querySelector('.book-overview'); const buttons = Array.from(screen?.querySelectorAll('.record-navigation [data-record-kind]') ?? [], (button) => button.textContent); const exact = ['图书','主稿件','修订版 r1','来源版本与来源记录','工作流实例与精确 Profile 绑定','稿件导入记录']; return overview?.dataset.bookId === ${JSON.stringify(bookId)} && screen.textContent.includes('稿件已导入') && screen.textContent.includes('已有主稿件') && buttons.length === exact.length && buttons.every((label, index) => label === exact[index]); })()`,
     'existing-book-result-overview',
+  );
+  const importedRoute = await renderer.evaluate(`window.ai7.getBookWorkbenchRoute()`);
+  requireJourney(
+    importedRoute?.kind === 'book' && importedRoute.bookId === bookId,
+    'existing-book-imported-exact-route-owned',
   );
   await clickExactButton(renderer, '图书', 'existing-book-result-book-record');
   const afterIdentity = await renderer.evaluate(`(() => {
@@ -1777,6 +1787,14 @@ async function main() {
       `(() => { const screen = document.querySelector('[data-screen="imported"]'); const kinds = Array.from(screen?.querySelectorAll('.record-navigation button[data-record-kind]') ?? [], (button) => button.dataset.recordKind); return screen?.textContent.includes('来源材料已导入') && screen.querySelector('[data-view-source-version-id]') && screen.querySelector('[data-view-source-import-record-id]') && JSON.stringify(kinds) === JSON.stringify(['book','source','source-import-record']); })()`,
       'source-after-commit-exact-completion',
     );
+    const sourceRecoveredBookId = await renderer.evaluate(`document.querySelector('[data-screen="imported"] .book-overview')?.dataset.bookId`);
+    const sourceRecoveredRoute = await renderer.evaluate(`window.ai7.getBookWorkbenchRoute()`);
+    requireJourney(
+      /^[0-9a-f-]{36}$/i.test(sourceRecoveredBookId ?? '') &&
+        sourceRecoveredRoute?.kind === 'book' &&
+        sourceRecoveredRoute.bookId === sourceRecoveredBookId,
+      'source-after-commit-recovered-exact-route-owned',
+    );
     await closeProduct();
 
     const sourceUncertainRoot = await createCanonicalExternalDataRoot(resolve(runRoot, 'source-uncertain-data'), checkoutRoot);
@@ -2031,6 +2049,16 @@ async function main() {
     await closeProduct();
     renderer = await launchProduct({ dataRoot: reimportPagedRoot });
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'reimport-paged-replay-restart');
+    const invalidReplayInput = {
+      ...reimportPagedCommit.replayInput,
+      reviewDigest: `${reimportPagedCommit.replayInput.reviewDigest.startsWith('0') ? '1' : '0'}${reimportPagedCommit.replayInput.reviewDigest.slice(1)}`,
+    };
+    const invalidReplay = await renderer.evaluate(`window.ai7.commitManuscriptReimport(${JSON.stringify(invalidReplayInput)}).then(()=>({accepted:true}),error=>({accepted:false,code:error?.code}))`);
+    requireJourney(
+      invalidReplay?.accepted === false && invalidReplay.code === 'COMMIT_REPLAY_INVALID' &&
+        (await renderer.evaluate(`window.ai7.getBookWorkbenchRoute()`)) === null,
+      'reimport-paged-invalid-replay-left-route-and-cache-unchanged',
+    );
     let replayJob = await renderer.evaluate(`window.ai7.commitManuscriptReimport(${JSON.stringify(reimportPagedCommit.replayInput)})`);
     requireJourney(replayJob?.kind === 'reimport-commit' && replayJob.state === 'queued' &&
       replayJob.progress.completed === 0 && replayJob.progress.total > 0,

@@ -13,6 +13,7 @@ import type {
   BookRecordPresentation,
   BookWorkOverviewProjection,
   FidelityCategoryProjection,
+  HistoricalRevisionProjection,
   ImportCommitProjection,
   ImportDegradationDecisionReviewProjection,
   ImportDraftRecoveryProjection,
@@ -55,6 +56,8 @@ import type {
   SearchResultsProjection,
   SearchSummaryProjection,
   StartupProjection,
+  BookWorkbenchRoute,
+  ResolvedBookWorkbenchRoute,
 } from '../shared/protocol.js';
 import {
   deriveImportFidelityPlan,
@@ -5563,6 +5566,56 @@ export class EditorialStore {
     return result;
   }
 
+  resolveAcknowledgedManuscriptReimportReplay(
+    input: { draftId: string; expectedDraftVersion: number; reviewDigest: string; commitId: string },
+  ): { draftId: string; commitId: string; bookId: string } {
+    this.#assertAvailable();
+    requireStore(
+      UUID_PATTERN.test(input.draftId) && UUID_PATTERN.test(input.commitId) &&
+        Number.isSafeInteger(input.expectedDraftVersion) && input.expectedDraftVersion >= 1 &&
+        DIGEST_PATTERN.test(input.reviewDigest),
+      'COMMIT_REPLAY_INVALID',
+      '已确认的稿件重新导入提交重放证据不匹配。',
+    );
+    const requestFingerprint = commitRequestFingerprint('manuscript-reimport', input);
+    const attempt = this.#loadCommitAttemptForDraft(input.draftId);
+    requireStore(
+      attempt !== null &&
+        attempt.attemptId === input.commitId &&
+        attempt.operationKind === 'manuscript-reimport' &&
+        attempt.requestFingerprint === requestFingerprint &&
+        attempt.expectedDraftVersion === input.expectedDraftVersion &&
+        attempt.reviewDigest === input.reviewDigest &&
+        attempt.state === 'committed' &&
+        attempt.completionAcknowledgedAt !== null,
+      'COMMIT_REPLAY_INVALID',
+      '已确认的稿件重新导入提交重放证据不匹配。',
+    );
+    const record = one(
+      this.#authority.prepare(
+        `SELECT ic.draft_id, ic.request_fingerprint, ic.expected_draft_version, ic.review_digest,
+                ic.operation_kind, rr.book_id
+         FROM import_commits ic
+         JOIN manuscript_reimport_records rr ON rr.commit_id = ic.commit_id
+         WHERE ic.commit_id = ?`,
+      ).all(input.commitId) as SqlRow[],
+      'STORE_CORRUPT',
+      '已确认的稿件重新导入提交记录图不完整。',
+    );
+    const bookId = asString(record.book_id);
+    requireStore(
+      asString(record.draft_id) === input.draftId &&
+        asString(record.request_fingerprint) === requestFingerprint &&
+        asNumber(record.expected_draft_version) === input.expectedDraftVersion &&
+        asString(record.review_digest) === input.reviewDigest &&
+        asString(record.operation_kind) === 'manuscript-reimport' &&
+        UUID_PATTERN.test(bookId),
+      'STORE_CORRUPT',
+      '已确认的稿件重新导入提交记录图不一致。',
+    );
+    return { draftId: input.draftId, commitId: input.commitId, bookId };
+  }
+
   async createManuscriptReimportCommitWork(
     input: { draftId: string; expectedDraftVersion: number; reviewDigest: string; commitId: string },
     options: {
@@ -6374,6 +6427,14 @@ export class EditorialStore {
 
   listPriorWork(): ReadonlyArray<PriorWorkItemProjection> {
     return this.#boundedCall(() => this.#bounded.listPriorWork());
+  }
+
+  resolveBookWorkbenchRoute(route: BookWorkbenchRoute): ResolvedBookWorkbenchRoute {
+    return this.#boundedCall(() => this.#bounded.resolveBookWorkbenchRoute(route));
+  }
+
+  getHistoricalRevision(revisionId: string, cursor: string | null): HistoricalRevisionProjection {
+    return this.#boundedCall(() => this.#bounded.getHistoricalRevision(revisionId, cursor));
   }
 
   getManuscriptWindowAt(

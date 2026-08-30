@@ -1,4 +1,4 @@
-import { lstat, mkdir, realpath, stat } from 'node:fs/promises';
+import { lstat, mkdir, opendir, realpath, stat } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 
 function requireBoundary(condition: unknown): asserts condition {
@@ -99,6 +99,36 @@ export async function requireSameCanonicalDataDirectory(
     const candidateMetadata = await stat(candidate);
     requireBoundary(candidateMetadata.isDirectory() && samePath(candidate, expected));
   }
+}
+
+/** Measure a deliberately capped view of product-owned local data without creating an inventory. */
+export async function inspectBoundedDataFootprint(
+  dataRootInput: string,
+): Promise<{ measuredBytes: number; measuredEntries: number; maximumEntries: 128; complete: boolean }> {
+  const dataRoot = await canonicalDataRoot(dataRootInput);
+  const maximumEntries = 128 as const;
+  const pending = [dataRoot];
+  let measuredBytes = 0;
+  let measuredEntries = 0;
+  let complete = true;
+  while (pending.length > 0 && measuredEntries < maximumEntries) {
+    const directory = pending.shift()!;
+    const handle = await opendir(directory);
+    for await (const entry of handle) {
+      if (measuredEntries >= maximumEntries) {
+        complete = false;
+        break;
+      }
+      const candidate = resolve(directory, entry.name);
+      requireBoundary(isInside(dataRoot, candidate));
+      const metadata = await lstat(candidate);
+      measuredEntries += 1;
+      if (metadata.isDirectory()) pending.push(candidate);
+      else if (metadata.isFile()) measuredBytes = Math.min(Number.MAX_SAFE_INTEGER, measuredBytes + metadata.size);
+    }
+  }
+  if (pending.length > 0 || measuredEntries === maximumEntries) complete = false;
+  return { measuredBytes, measuredEntries, maximumEntries, complete };
 }
 
 /** Validate an existing file or prove its exact canonical parent before first creation. */

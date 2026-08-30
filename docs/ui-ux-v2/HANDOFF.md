@@ -6,14 +6,14 @@ Status: **Owner-approved Issue #86 implementation-facing successor; repository-c
 
 - Root ADRs, `docs/domain/*/CONTEXT.md`, and root `GLOSSARY.md` own shared architecture, authority, and domain language. This package owns V2 presentation and interaction only.
 - The normalized package comes from exact frozen source `design-doc@6895f02d2983865516d267809d8cdda77026f62c` through the Issue #20 allowlist. Git history preserves the earlier Issue #5, #8, and #12 design lineage; those old integration routes are complete and are not current work.
-- ADR 0028 governs one AI7 product on Windows and macOS with shared outcomes and explicit native variation. Exact macOS package, data location, Keychain adapter, IPC carrier, CPU policy, and signing/notarization mechanics remain deferred implementation decisions.
+- ADR 0028 governs one AI7 product on Windows and macOS with shared outcomes and explicit native variation. ADR 0052 selects macOS 15+ on arm64, bundle `io.github.zhouy1017.ai7`, direct-download Developer ID-signed/hardened/notarized DMG, manual application replacement, per-user Application Support data with no silent fallback, and Keychain separation. It grants no packaging, signing-secret, notarization-upload or release action.
 - Issue #86 normalization preserves the target baseline and records successor presentation for native DSH artifacts, Agent Workspace, covered analysis, Enrollment and Apply. It does not itself grant provider processing, external export, Public Release Permission, implementation, release, or promotion to `main`.
 
 ## Package map
 
 - [`README.md`](./README.md): accepted directions D-001–D-087 and the target-qualified presentation boundary.
 - [`CONTEXT.md`](./CONTEXT.md) and [`GLOSSARY.md`](./GLOSSARY.md): package-local presentation language and bilingual routing.
-- [`requirements.md`](./requirements.md): 888 unique V2 UI/UX requirements.
+- [`requirements.md`](./requirements.md): 894 unique V2 UI/UX requirements.
 - [`information-architecture.md`](./information-architecture.md), [`interaction-spec.md`](./interaction-spec.md), and [`visual-direction.md`](./visual-direction.md): the Book-anchored workbench, interaction contract, and AI7-owned visual language.
 - [`journeys.md`](./journeys.md): J-01–J-16 design journeys. A journey design is not evidence that its branches are implemented.
 - [`migration-from-v1.md`](./migration-from-v1.md): exact retain/reshape/drop provenance; the excluded V1 UI tree is not a baseline.
@@ -30,7 +30,7 @@ Artifact discovery/acquisition/validation/install/scoped enablement, Artifact Up
 
 The Issue #86 policy successor preserves Provider Processing v1 and v2 byte-for-byte and maps trusted operational scopes as development/CI → v1, exact fixture recording → v2, and ordinary production → new v3; External Export remains pinned to unchanged v1. This is a selection/policy contract only. It provides no trusted launch-selector implementation, credential, endpoint, live Provider call, runtime enforcement, external export, policy activation or cross-scope fallback authority.
 
-Current target implementation integrates the provider-free J-01 new-Book path with exact identity disclosure and interrupted-import continuity/reconciliation, complete provider-free J-02 10M bounded editing, and complete provider-free J-08 Recovery Workspace. It remains neither full J-01 nor the broader Book Workspace and has zero Providers, Agents and Sessions. It implements no native artifact lifecycle, Provider/credential/egress path, retrieval/Exact Fetch, covered analysis/Result Sets, Default Execution Rule execution, Background Analysis Enrollment, metrics, Proposal/Effect or AI7 Apply. Issue #86 changes documentation only and makes no source/schema/protocol/E2E/dependency change.
+Current target implementation integrates the provider-free J-01 new-Book path with exact identity disclosure and interrupted-import continuity/reconciliation, complete provider-free J-02 10M bounded editing, complete provider-free J-08 Recovery Workspace, and Issue #42's bounded provider-free J-12 Book/Revision Workbench and Data & Storage slice. J-12 provides at most one Workbench per exact Book, non-focus-stealing distinct-Book windows, immutable historical Revision viewing, native sender-owned selection, offline/restart persistence, and truthful Product Data Location meaning. It remains neither full J-01 nor the broader canonical J-12/Book Workspace and has zero Providers, Agents and Sessions. Detached Manuscript Window/Active Binding and #46 credential/Keychain operations remain unimplemented.
 
 ## Action boundary
 
