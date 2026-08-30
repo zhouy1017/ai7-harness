@@ -4,7 +4,7 @@ import { once } from 'node:events';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { arch, platform, release, tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { reportJourneyFailure } from './controller.mjs';
+import { installJourneyCancellationCleanup, reportJourneyFailure } from './controller.mjs';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const CHARACTER_COUNT = 10_000_000;
@@ -824,9 +824,28 @@ async function main() {
   const checkoutRoot = await realpath(ROOT);
   requireJourney(!pathIsInside(checkoutRoot, tempParent) && !pathIsInside(tempParent, checkoutRoot), 'temp-parent-boundary');
   let runRoot;
+  let runRootAcquisition;
   let browser;
+  let browserAcquisition;
+  const closeOwnedBrowser = async () => {
+    const ownedBrowser = browser ?? (browserAcquisition === undefined ? undefined : await browserAcquisition.catch(() => undefined));
+    await ownedBrowser?.close().catch(() => undefined);
+    browser = undefined;
+  };
+  const cancellation = installJourneyCancellationCleanup(async () => {
+    await closeOwnedBrowser();
+    const ownedRoot = runRoot ?? (runRootAcquisition === undefined ? undefined : await runRootAcquisition.catch(() => undefined));
+    if (ownedRoot !== undefined) {
+      requireJourney(dirname(ownedRoot) === tempParent && basename(ownedRoot).startsWith('ai7-j02-e2e-') && (await realpath(ownedRoot)) === ownedRoot, 'cleanup-target');
+      await rm(ownedRoot, { recursive: true, force: true });
+      runRoot = undefined;
+    }
+  }, closeOwnedBrowser);
   try {
-    runRoot = await mkdtemp(join(tempParent, 'ai7-j02-e2e-'));
+    cancellation.throwIfRequested();
+    runRootAcquisition = mkdtemp(join(tempParent, 'ai7-j02-e2e-'));
+    runRoot = await runRootAcquisition;
+    cancellation.throwIfRequested();
     requireJourney(dirname(runRoot) === tempParent && basename(runRoot).startsWith('ai7-j02-e2e-'), 'temp-root');
     const docx = resolve(runRoot, 'public-synthetic-10000000.docx');
     await createSyntheticDocx(docx);
@@ -840,7 +859,10 @@ async function main() {
     ];
     requireJourney(isAbsolute(dataRoot) && isAbsolute(docx) && !productArgs.some((argument) => /--inspect|--remote-debugging-port|^https?:|^wss?:/i.test(argument)), 'pipe-only-product-transport');
     const launch = async () => {
-      browser = await chromium.launch({ executablePath: executable, headless: false, ignoreDefaultArgs: true, args: productArgs, env: productEnvironment(executable), timeout: 60_000 });
+      cancellation.throwIfRequested();
+      browserAcquisition = chromium.launch({ executablePath: executable, headless: false, ignoreDefaultArgs: true, args: productArgs, env: productEnvironment(executable), timeout: 60_000 });
+      browser = await browserAcquisition;
+      cancellation.throwIfRequested();
       return attachRendererTarget(browser);
     };
     let renderer = await launch();
@@ -855,10 +877,10 @@ async function main() {
     browser = undefined;
     requireJourney((await stat(docx)).size > CHARACTER_COUNT, 'fixture-survived-until-completion');
   } finally {
-    await browser?.close().catch(() => undefined);
-    if (runRoot !== undefined) {
-      requireJourney(dirname(runRoot) === tempParent && basename(runRoot).startsWith('ai7-j02-e2e-') && (await realpath(runRoot)) === runRoot, 'cleanup-target');
-      await rm(runRoot, { recursive: true, force: true });
+    try {
+      await cancellation.cleanup();
+    } finally {
+      cancellation.dispose();
     }
   }
 }

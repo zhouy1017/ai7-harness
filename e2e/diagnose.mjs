@@ -7,9 +7,10 @@ import {
 
 function safeFailure(result, journey) {
   if (result.spawnError) return { location: 'controller', errorClass: 'controller-spawn' };
-  if (result.signal !== null || result.controllerSignal !== null) {
+  if (result.controllerSignal !== null) {
     return { location: 'controller', errorClass: 'controller-signal' };
   }
+  if (result.signal !== null) return { location: 'controller', errorClass: 'controller-child-signal' };
   if (result.outputOverflow) return { location: 'controller', errorClass: 'controller-output-ambiguous' };
 
   const locations = result.stderr

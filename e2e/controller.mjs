@@ -4,6 +4,73 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const MAX_CAPTURE_BYTES = 64 * 1024;
+const CANCELLATION_MESSAGE = 'ai7-e2e-cancel';
+const CANCELLATION_SIGNALS = new Set(['SIGINT', 'SIGTERM']);
+const CONTROLLER_DISCONNECT = 'controller-disconnect';
+const SIGNAL_CLEANUP_GRACE_MS = 90_000;
+const cancellationHandlers = new Set();
+let pendingCancellationSignal = null;
+let runnerForcedTermination;
+
+function disconnectControllerChannel() {
+  process.removeListener('message', receiveControllerMessage);
+  process.removeListener('disconnect', receiveControllerDisconnect);
+  process.removeListener('SIGINT', receiveDirectSigint);
+  process.removeListener('SIGTERM', receiveDirectSigterm);
+  if (runnerForcedTermination !== undefined) {
+    clearTimeout(runnerForcedTermination);
+    runnerForcedTermination = undefined;
+  }
+  if (typeof process.send === 'function' && process.connected) {
+    try {
+      process.disconnect();
+    } catch {
+      // Process exit remains the final fallback for an already-closing channel.
+    }
+  }
+}
+
+function requestRunnerCancellation(signal) {
+  if (pendingCancellationSignal !== null) return;
+  pendingCancellationSignal = signal;
+  runnerForcedTermination = setTimeout(() => process.exit(1), SIGNAL_CLEANUP_GRACE_MS);
+  runnerForcedTermination.unref();
+  for (const handler of cancellationHandlers) handler(pendingCancellationSignal);
+}
+
+function receiveControllerMessage(message) {
+  if (
+    message === null ||
+    typeof message !== 'object' ||
+    Array.isArray(message) ||
+    Object.keys(message).length !== 2 ||
+    message.type !== CANCELLATION_MESSAGE ||
+    !CANCELLATION_SIGNALS.has(message.signal)
+  ) {
+    return;
+  }
+  requestRunnerCancellation(message.signal);
+}
+
+function receiveControllerDisconnect() {
+  requestRunnerCancellation(CONTROLLER_DISCONNECT);
+}
+
+function receiveDirectSigint() {
+  requestRunnerCancellation('SIGINT');
+}
+
+function receiveDirectSigterm() {
+  requestRunnerCancellation('SIGTERM');
+}
+
+if (typeof process.send === 'function') {
+  process.on('message', receiveControllerMessage);
+  process.on('disconnect', receiveControllerDisconnect);
+  process.on('SIGINT', receiveDirectSigint);
+  process.on('SIGTERM', receiveDirectSigterm);
+  if (!process.connected) requestRunnerCancellation(CONTROLLER_DISCONNECT);
+}
 
 export const ADMITTED_JOURNEYS = Object.freeze(['J-01', 'J-02', 'J-08', 'J-12']);
 
@@ -121,8 +188,48 @@ export function isAdmittedLocation(journey, location) {
 
 export function reportJourneyFailure(journey, location) {
   const admitted = isAdmittedLocation(journey, location) ? location : 'controller';
+  disconnectControllerChannel();
   console.error(`${journey}/${admitted}`);
   process.exitCode = 1;
+}
+
+export function installJourneyCancellationCleanup(cleanup, interrupt = () => undefined) {
+  if (typeof cleanup !== 'function') throw new TypeError('Journey cleanup must be callable.');
+  if (typeof interrupt !== 'function') throw new TypeError('Journey interrupt must be callable.');
+  let cleanupPromise;
+  let interruptionPromise;
+  let interruptedSignal = null;
+  let disposed = false;
+  const runCleanup = () => {
+    cleanupPromise ??= Promise.resolve().then(async () => {
+      await interruptionPromise;
+      await cleanup();
+    });
+    return cleanupPromise;
+  };
+  const beginCancellation = (signal) => {
+    if (disposed || interruptedSignal !== null) return;
+    interruptedSignal = signal;
+    interruptionPromise ??= Promise.resolve().then(interrupt).catch(() => undefined);
+  };
+  cancellationHandlers.add(beginCancellation);
+  if (pendingCancellationSignal !== null) {
+    queueMicrotask(() => beginCancellation(pendingCancellationSignal));
+  }
+  return {
+    cleanup: runCleanup,
+    throwIfRequested: () => {
+      if (interruptedSignal !== null || pendingCancellationSignal !== null) {
+        throw new Error('Journey cancellation requested.');
+      }
+    },
+    dispose: () => {
+      if (disposed) return;
+      disposed = true;
+      cancellationHandlers.delete(beginCancellation);
+      disconnectControllerChannel();
+    },
+  };
 }
 
 function boundedCollector(stream) {
@@ -150,7 +257,7 @@ export async function runJourneyProcess(journey) {
   const child = spawn(process.execPath, args, {
     cwd: ROOT,
     env: process.env,
-    stdio: ['ignore', 'pipe', 'pipe'],
+    stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
     windowsHide: true,
   });
 
@@ -162,22 +269,25 @@ export async function runJourneyProcess(journey) {
     let controllerSignal = null;
     let forcedTermination;
     const forwardSignal = (signal) => {
-      if (controllerSignal === null) controllerSignal = signal;
+      if (controllerSignal !== null) return;
+      controllerSignal = signal;
       if (child.exitCode !== null || child.signalCode !== null) return;
-      try {
-        child.kill(signal);
-      } catch {
-        // The close/error event below remains the single completion owner.
+      if (child.connected) {
+        try {
+          child.send({ type: CANCELLATION_MESSAGE, signal }, () => undefined);
+        } catch {
+          // The bounded hard-stop below remains the final fallback.
+        }
       }
       forcedTermination ??= setTimeout(() => {
         if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
-      }, 5_000);
+      }, SIGNAL_CLEANUP_GRACE_MS);
       forcedTermination.unref();
     };
     const onSigint = () => forwardSignal('SIGINT');
     const onSigterm = () => forwardSignal('SIGTERM');
-    process.once('SIGINT', onSigint);
-    process.once('SIGTERM', onSigterm);
+    process.on('SIGINT', onSigint);
+    process.on('SIGTERM', onSigterm);
 
     const finish = (result) => {
       if (settled) return;

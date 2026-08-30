@@ -13,7 +13,7 @@
   "scripts": {
     "doctor": "node tools/doctor.mjs",
     "bootstrap": "node tools/bootstrap.mjs",
-    "build": "node tools/build.mjs",
+    "build": "node tools/build-controller.mjs",
     "start-built": "node tools/start-built.mjs",
     "e2e": "node e2e/run.mjs",
     "e2e:all": "node e2e/run-all.mjs",

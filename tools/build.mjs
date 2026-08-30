@@ -10,6 +10,7 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const DIST = resolve(ROOT, 'dist');
 const MAX_TYPESCRIPT_DIAGNOSTICS = 64;
 let runEsbuild;
+let typeScriptDiagnosticsReported = false;
 
 function requireBuild(condition, message) {
   if (!condition) throw new Error(message);
@@ -74,6 +75,7 @@ function typecheck() {
   });
   if (result.status !== 0) {
     reportTypeScriptDiagnostics(result.stdout, result.stderr);
+    typeScriptDiagnosticsReported = true;
   }
   requireBuild(result.status === 0, 'TypeScript validation failed.');
 }
@@ -270,7 +272,11 @@ async function main() {
   await ensureClosedOutputs();
 }
 
-main().catch((error) => {
-  console.error(`build failed: ${error instanceof Error ? error.message : 'unknown error'}`);
-  process.exitCode = 1;
-});
+export async function runBuild() {
+  try {
+    await main();
+  } catch {
+    if (!typeScriptDiagnosticsReported) console.error('BUILD/unclassified');
+    process.exitCode = 1;
+  }
+}

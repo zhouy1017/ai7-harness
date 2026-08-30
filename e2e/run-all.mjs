@@ -8,7 +8,12 @@ if (args.length !== 0) {
   for (const journey of ADMITTED_JOURNEYS) {
     console.log(`LOCAL_COMPLETION/${journey}/start`);
     const result = await runJourneyProcess(journey);
-    if (result.spawnError || result.code !== 0 || result.signal !== null || result.controllerSignal !== null) {
+    if (result.controllerSignal !== null) {
+      console.error(`LOCAL_COMPLETION/${journey}/interrupted`);
+      process.exitCode = result.controllerSignal === 'SIGINT' ? 130 : 143;
+      break;
+    }
+    if (result.spawnError || result.code !== 0 || result.signal !== null) {
       console.error(`LOCAL_COMPLETION/${journey}/fail`);
       process.exitCode = result.code || 1;
       break;

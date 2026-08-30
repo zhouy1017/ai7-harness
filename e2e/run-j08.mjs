@@ -5,7 +5,7 @@ import { createServer } from 'node:http';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { arch, platform, release, tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { reportJourneyFailure } from './controller.mjs';
+import { installJourneyCancellationCleanup, reportJourneyFailure } from './controller.mjs';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const DEBUG_SELECTORS = new Set(['DEBUG', 'DEBUG_FILE', 'PWDEBUG', 'PWDEBUGIMPL']);
@@ -269,12 +269,35 @@ async function overwriteFinalByte(path, size, value) {
 async function main() {
   parseJourney();
   let loopback;
+  let loopbackAcquisition;
   let runRoot;
+  let runRootAcquisition;
   let browser;
+  let browserAcquisition;
   let tempParent;
+  const closeOwnedBrowser = async () => {
+    const ownedBrowser = browser ?? (browserAcquisition === undefined ? undefined : await browserAcquisition.catch(() => undefined));
+    await ownedBrowser?.close().catch(() => undefined);
+    browser = undefined;
+  };
+  const cancellation = installJourneyCancellationCleanup(async () => {
+    await closeOwnedBrowser();
+    const ownedLoopback = loopback ?? (loopbackAcquisition === undefined ? undefined : await loopbackAcquisition.catch(() => undefined));
+    await ownedLoopback?.close().catch(() => undefined);
+    loopback = undefined;
+    const ownedRoot = runRoot ?? (runRootAcquisition === undefined ? undefined : await runRootAcquisition.catch(() => undefined));
+    if (ownedRoot !== undefined) {
+      requireJourney(tempParent !== undefined && dirname(ownedRoot) === tempParent && basename(ownedRoot).startsWith('ai7-j08-e2e-') && (await realpath(ownedRoot)) === ownedRoot, 'cleanup-target');
+      await rm(ownedRoot, { recursive: true, force: true });
+      runRoot = undefined;
+    }
+  }, closeOwnedBrowser);
   try {
     at('controller-loopback-sentinel');
-    loopback = await createLoopbackSentinel();
+    cancellation.throwIfRequested();
+    loopbackAcquisition = createLoopbackSentinel();
+    loopback = await loopbackAcquisition;
+    cancellation.throwIfRequested();
     at('controller-imports');
     const denial = resolve(ROOT, 'dist', 'shared', 'network-denial.mjs');
     requireJourney(existsSync(denial), 'controller-network-denial-carrier');
@@ -286,7 +309,10 @@ async function main() {
     tempParent = await realpath(tmpdir());
     const checkout = await realpath(ROOT);
     requireJourney(!inside(checkout, tempParent) && !inside(tempParent, checkout), 'temp-boundary');
-    runRoot = await mkdtemp(join(tempParent, 'ai7-j08-e2e-'));
+    cancellation.throwIfRequested();
+    runRootAcquisition = mkdtemp(join(tempParent, 'ai7-j08-e2e-'));
+    runRoot = await runRootAcquisition;
+    cancellation.throwIfRequested();
     requireJourney(dirname(runRoot) === tempParent && basename(runRoot).startsWith('ai7-j08-e2e-'), 'temp-root');
     const inputs = resolve(runRoot, 'synthetic-inputs');
     await mkdir(inputs);
@@ -308,7 +334,10 @@ async function main() {
       if (picker) args.push('--j08-picker-path', picker);
       if (interrupt) args.push('--j08-recovery-control', 'interrupt-after-journal-ack');
       requireJourney(!args.some((argument) => /--inspect|--remote-debugging-port|^https?:|^wss?:/i.test(argument)), 'pipe-only-product-transport');
-      browser = await chromium.launch({ executablePath: executable, headless: false, ignoreDefaultArgs: true, args, env: productEnvironment(executable), timeout: 60_000 });
+      cancellation.throwIfRequested();
+      browserAcquisition = chromium.launch({ executablePath: executable, headless: false, ignoreDefaultArgs: true, args, env: productEnvironment(executable), timeout: 60_000 });
+      browser = await browserAcquisition;
+      cancellation.throwIfRequested();
       return attachRenderer(browser);
     };
     const close = async () => { await browser.close(); browser = undefined; };
@@ -509,12 +538,11 @@ async function main() {
     await assertRenderer(renderer, `!document.querySelector('[data-screen="manuscript-recovery"]') && !document.body.textContent.includes('恢复待确认状态')`, 'final-no-recovery-attention');
     await close();
   } finally {
-    await browser?.close().catch(() => undefined);
-    if (runRoot !== undefined) {
-      requireJourney(tempParent !== undefined && dirname(runRoot) === tempParent && basename(runRoot).startsWith('ai7-j08-e2e-') && (await realpath(runRoot)) === runRoot, 'cleanup-target');
-      await rm(runRoot, { recursive: true, force: true });
+    try {
+      await cancellation.cleanup();
+    } finally {
+      cancellation.dispose();
     }
-    await loopback?.close();
   }
 }
 
