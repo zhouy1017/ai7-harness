@@ -48,6 +48,20 @@ button:focus-visible, input:focus-visible, .ProseMirror:focus-visible {
 .recent-work-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 270px), 1fr)); gap: .8rem; margin-top: .8rem; }
 .recent-work-item, .book-summary-item { padding: .8rem; border: 1px solid #ded9cd; border-radius: 10px; background: #fffdf8; }
 .recent-work-item .secondary, .book-summary-item .secondary { width: 100%; text-align: left; }
+.model-role-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
+.model-role-card { min-width: 0; padding: 1.15rem; border: 1px solid #ded9cd; border-radius: 12px; background: #fffdf8; }
+.model-role-heading { display: flex; align-items: center; justify-content: space-between; gap: .75rem; }
+.model-role-heading h3 { margin: 0; }
+.model-binding-details { margin-top: 1rem; }
+.model-binding-details summary { cursor: pointer; font-weight: 800; }
+.model-binding-details dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: .45rem .7rem; }
+.model-credential-form { display: grid; gap: .55rem; margin-top: 1rem; }
+.model-credential-form label { font-weight: 800; }
+.model-credential-form input { width: 100%; border: 1px solid #90998d; border-radius: 8px; padding: .72rem .8rem; background: white; color: #242720; }
+.model-status-available { background: #e5f1e7; color: #28533a; }
+.model-status-setup-required { background: #f1ede3; color: #50574e; }
+.model-status-needs-attention { background: #fff0cf; color: #76530f; }
+.model-status-unavailable { background: #f3e4e0; color: #753a31; }
 
 .primary, .secondary, .quiet {
   min-height: 44px;
@@ -181,7 +195,7 @@ legend { margin-bottom: .7rem; font-weight: 800; }
 .error-panel { border-color: #ddb7b1; background: #fff7f5; }
 
 @media (max-width: 960px) {
-  .hero, .review-grid, .recovery-candidate-grid { grid-template-columns: 1fr; }
+  .hero, .review-grid, .recovery-candidate-grid, .model-role-grid { grid-template-columns: 1fr; }
   .fidelity-row { grid-template-columns: 1fr; }
   .screen { width: min(100% - 1.25rem, 900px); margin-top: .75rem; }
   .app-header { align-items: flex-start; padding: 1rem; }
@@ -207,7 +221,7 @@ legend { margin-bottom: .7rem; font-weight: 800; }
   :root, body, .panel, .hero-note, .source-card, .review-section, .choice, .commit-bar,
   .editor-toolbar, .manuscript-navigator, .manuscript-surface, .editor-window, .editor-identities,
   .search-result, .replacement-review, .recent-work-item, .book-summary-item, .status-bar, .recovery-snapshot-disclosure,
-  .recovery-readonly-blocks, .recovered-state-marker {
+  .recovery-readonly-blocks, .recovered-state-marker, .model-role-card {
     color: CanvasText;
     background: Canvas;
     border-color: CanvasText;

@@ -1,5 +1,6 @@
 import { createWriteStream } from 'node:fs';
-import { lstat, mkdir, mkdtemp, realpath, rm } from 'node:fs/promises';
+import { randomBytes } from 'node:crypto';
+import { lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm } from 'node:fs/promises';
 import { once } from 'node:events';
 import { createServer } from 'node:http';
 import { arch, platform, release, tmpdir } from 'node:os';
@@ -204,6 +205,42 @@ async function assertRenderer(renderer, expression, name) {
   requireJourney(await renderer.evaluate(`Boolean(${expression})`), name);
 }
 
+async function assertSecretsAbsentFromDataRoot(root, secrets, name) {
+  const needles = secrets.flatMap((secret) => [Buffer.from(secret, 'utf8'), Buffer.from(secret, 'utf16le')]);
+  const visit = async (directory) => {
+    for (const entry of await readdir(directory, { withFileTypes: true })) {
+      const path = resolve(directory, entry.name);
+      const metadata = await lstat(path);
+      requireJourney(!metadata.isSymbolicLink(), `${name}-symlink`);
+      if (metadata.isDirectory()) await visit(path);
+      else if (metadata.isFile()) {
+        const bytes = await readFile(path);
+        requireJourney(!needles.some((needle) => bytes.includes(needle)), name);
+      }
+    }
+  };
+  await visit(root);
+}
+
+async function removeSyntheticCredentialDirect(credentialReference) {
+  requireJourney(UUID_PATTERN.test(credentialReference), 'credential-direct-cleanup-reference');
+  requireJourney(
+    process.env.NAPI_RS_NATIVE_LIBRARY_PATH === undefined && process.env.NAPI_RS_FORCE_WASI === undefined,
+    'credential-direct-cleanup-override',
+  );
+  requireJourney(
+    (process.platform === 'win32' && process.arch === 'x64') ||
+      (process.platform === 'darwin' && process.arch === 'arm64'),
+    'credential-direct-cleanup-platform',
+  );
+  const { AsyncEntry } = await import('@napi-rs/keyring');
+  const entry = new AsyncEntry(
+    'io.github.zhouy1017.ai7.model-service',
+    `credential-reference:${credentialReference}`,
+  );
+  await entry.deleteCredential();
+}
+
 async function click(renderer, label, name) {
   await assertRenderer(renderer, `(() => { const node=Array.from(document.querySelectorAll('button')).find((item)=>item.textContent===${JSON.stringify(label)}); if(!(node instanceof HTMLButtonElement)||node.disabled)return false; node.click(); return true; })()`, name);
 }
@@ -284,12 +321,76 @@ async function main() {
   let runRoot;
   let runRootAcquisition;
   let tempParent;
+  let launchForCleanup;
+  let managerForCleanup;
+  let credentialMutationReached = false;
+  let credentialReferenceForCleanup;
+  let productCredentialCleanupSucceeded = false;
+  let credentialCleanupFailure;
   const closeOwnedBrowser = async () => {
     const ownedBrowser = browser ?? (browserAcquisition === undefined ? undefined : await browserAcquisition.catch(() => undefined));
     await ownedBrowser?.close().catch(() => undefined);
     browser = undefined;
+    browserAcquisition = undefined;
+    managerForCleanup = undefined;
+  };
+  const removeSyntheticCredentialThroughProduct = async () => {
+    if (managerForCleanup === undefined) return false;
+    const renderers = await managerForCleanup.list();
+    const cleanupRenderer = renderers[0];
+    if (cleanupRenderer === undefined) return false;
+    const before = await cleanupRenderer.evaluate(`window.ai7.getModelServiceSettings().then((settings)=>settings.roles.find((role)=>role.roleId==='main-editorial')?.connection??null)`);
+    if (UUID_PATTERN.test(before?.credentialReference)) {
+      credentialReferenceForCleanup = before.credentialReference;
+    }
+    await cleanupRenderer.evaluate(`window.ai7.removeModelServiceCredential()`);
+    const after = await cleanupRenderer.evaluate(`window.ai7.getModelServiceSettings().then((settings)=>settings.roles.find((role)=>role.roleId==='main-editorial')?.connection??null)`);
+    if (UUID_PATTERN.test(after?.credentialReference)) {
+      credentialReferenceForCleanup = after.credentialReference;
+    }
+    requireJourney(
+      after === null || after.credentialOperationState === 'missing',
+      'credential-cleanup-state',
+    );
+    return true;
+  };
+  const removeSyntheticCredentialBeforeInterrupt = async () => {
+    if (credentialMutationReached && !productCredentialCleanupSucceeded) {
+      try {
+        productCredentialCleanupSucceeded = await removeSyntheticCredentialThroughProduct();
+      } catch (error) {
+        credentialCleanupFailure ??= error;
+      }
+    }
+    await closeOwnedBrowser();
   };
   const cancellation = installJourneyCancellationCleanup(async () => {
+    if (credentialMutationReached && !productCredentialCleanupSucceeded) {
+      try {
+        productCredentialCleanupSucceeded = await removeSyntheticCredentialThroughProduct();
+      } catch (error) {
+        credentialCleanupFailure ??= error;
+      }
+      if (!productCredentialCleanupSucceeded && launchForCleanup !== undefined && runRoot !== undefined) {
+        await closeOwnedBrowser();
+        try {
+          const cleanupManager = await launchForCleanup();
+          const [cleanupRenderer] = await waitForRendererCount(cleanupManager, 1, 'credential-cleanup-window');
+          await waitFor(cleanupRenderer, `document.querySelector('[data-screen="landing"]')`, 'credential-cleanup-ready');
+          productCredentialCleanupSucceeded = await removeSyntheticCredentialThroughProduct();
+        } catch (error) {
+          credentialCleanupFailure ??= error;
+        }
+      }
+    }
+    if (credentialReferenceForCleanup !== undefined) {
+      try {
+        await removeSyntheticCredentialDirect(credentialReferenceForCleanup);
+        productCredentialCleanupSucceeded = true;
+      } catch (error) {
+        credentialCleanupFailure ??= error;
+      }
+    }
     await closeOwnedBrowser();
     const ownedLoopback = loopback ?? (loopbackAcquisition === undefined ? undefined : await loopbackAcquisition.catch(() => undefined));
     await ownedLoopback?.close().catch(() => undefined);
@@ -300,7 +401,10 @@ async function main() {
       await rm(ownedRoot, { recursive: true, force: true });
       runRoot = undefined;
     }
-  }, closeOwnedBrowser);
+    if (credentialMutationReached && !productCredentialCleanupSucceeded) {
+      throw credentialCleanupFailure ?? new Error('J-12/credential-cleanup-failed');
+    }
+  }, removeSyntheticCredentialBeforeInterrupt);
   try {
     at('controller-loopback');
     cancellation.throwIfRequested();
@@ -342,9 +446,16 @@ async function main() {
       browserAcquisition = chromium.launch({ executablePath: executable, headless: false, ignoreDefaultArgs: true, args, env: productEnvironment(executable), timeout: 60_000 });
       browser = await browserAcquisition;
       cancellation.throwIfRequested();
-      return createRendererManager(browser);
+      managerForCleanup = await createRendererManager(browser);
+      return managerForCleanup;
     };
-    const close = async () => { await browser.close(); browser = undefined; };
+    launchForCleanup = launch;
+    const close = async () => {
+      await browser.close();
+      browser = undefined;
+      browserAcquisition = undefined;
+      managerForCleanup = undefined;
+    };
 
     at('offline-empty-and-import');
     let manager = await launch(syntheticDocx);
@@ -763,6 +874,129 @@ async function main() {
     await click(primary, '查看数据位置', 'reveal-data');
     await waitFor(primary, `document.querySelector('.data-storage-summary')?.dataset.revealRequested==='requested'`, 'reveal-requested');
     await assertRenderer(primary, `document.querySelector('.data-storage-summary')?.dataset.nativeRevealSuppressedForE2e==='true'`, 'main-owned-zero-argument-reveal');
+
+    at('model-service-first-save');
+    await click(primary, '返回', 'data-storage-return');
+    await waitFor(primary, `document.querySelector('[data-screen="landing"]')`, 'model-service-landing');
+    await click(primary, '模型服务', 'model-service-open');
+    await waitFor(primary, `document.querySelector('[data-screen="model-service"]')`, 'model-service-ready');
+    await assertRenderer(primary, `(() => {
+      const roles=Array.from(document.querySelectorAll('[data-model-role]'));
+      const ids=roles.map((node)=>node.dataset.modelRole);
+      const main=document.querySelector('[data-model-role="main-editorial"]');
+      const statuses=Array.from(document.querySelectorAll('[data-model-role] [role="status"]'));
+      return roles.length===4 &&
+        JSON.stringify(ids)===JSON.stringify(['fast-interaction','main-editorial','difficult-escalation','frontier']) &&
+        main?.dataset.modelRoleStatus==='setup-required' &&
+        main.textContent.includes('DeepSeek 开放平台（官方）') && main.textContent.includes('DeepSeek V4 Pro High') &&
+        main.textContent.includes('已批准备用链') && main.textContent.includes('无') &&
+        roles.filter((node)=>node.dataset.modelRole!=='main-editorial').every((node)=>node.dataset.modelRoleStatus==='setup-required'&&!node.textContent.includes('DeepSeek')) &&
+        statuses.length===4 && statuses.every((node)=>node.getAttribute('aria-label')?.includes(node.textContent??'')) &&
+        document.querySelector('.model-service-settings')?.dataset.policyIntegrity==='verified' &&
+        document.querySelector('.model-service-settings')?.dataset.providerTransmissionCount==='0' &&
+        document.body.textContent.includes('公开发布许可：不存在');
+    })()`, 'four-role-first-policy-semantics');
+    const secretOne = randomBytes(48).toString('base64url');
+    const secretTwo = randomBytes(48).toString('base64url');
+    await fill(primary, '#main-editorial-connection-name', 'J12 主编辑连接', 'model-connection-name');
+    await fill(primary, '#main-editorial-credential', secretOne, 'model-credential-first');
+    credentialMutationReached = true;
+    await click(primary, '保护并保存', 'model-credential-save');
+    await waitFor(primary, `document.querySelector('[data-model-role="main-editorial"]')?.dataset.modelRoleStatus==='available' && document.querySelector('[data-credential-state="ready"]')`, 'model-credential-ready');
+    await assertRenderer(primary, `(() => { const input=document.querySelector('#main-editorial-credential'); return input instanceof HTMLInputElement && input.type==='password' && input.autocomplete==='off' && input.value==='' && !document.body.textContent.includes(${JSON.stringify(secretOne)}); })()`, 'model-secret-not-redisplayed');
+    const firstConnection = await primary.evaluate(`window.ai7.getModelServiceSettings().then((settings)=>({
+      roles:settings.roles.length,
+      roleIds:settings.roles.map((role)=>role.roleId),
+      connection:settings.roles.find((role)=>role.roleId==='main-editorial')?.connection,
+      binding:settings.roles.find((role)=>role.roleId==='main-editorial')?.binding,
+      policy:settings.launchPolicy,
+    }))`);
+    requireJourney(
+      firstConnection?.roles === 4 &&
+        JSON.stringify(firstConnection.roleIds) === JSON.stringify(['fast-interaction','main-editorial','difficult-escalation','frontier']) &&
+        UUID_PATTERN.test(firstConnection.connection?.credentialReference) &&
+        firstConnection.connection?.connectionName === 'J12 主编辑连接' &&
+        firstConnection.connection?.credentialOperationState === 'ready' &&
+        firstConnection.binding?.providerId === 'deepseek-open-platform' &&
+        firstConnection.binding?.modelId === 'deepseek-v4-pro' &&
+        firstConnection.binding?.adapterRevision === 1 &&
+        firstConnection.binding?.configurationRevision === 1 &&
+        firstConnection.binding?.credentialSlot === 'deepseek-api-key' &&
+        firstConnection.binding?.approvedFallbackChain?.length === 0 &&
+        firstConnection.policy?.operationalScope === 'development-ci' &&
+        firstConnection.policy?.activePolicySetVersion === 'v3' &&
+        firstConnection.policy?.providerProcessing?.version === 'v1' &&
+        firstConnection.policy?.providerProcessing?.authorizedLiveTransmissionCount === 0 &&
+        firstConnection.policy?.externalExport?.version === 'v1' &&
+        firstConnection.policy?.externalExport?.policyEligibilityIsEffectApproval === false &&
+        firstConnection.policy?.publicReleasePermission?.present === false,
+      'model-first-nonsecret-projection',
+    );
+    credentialReferenceForCleanup = firstConnection.connection.credentialReference;
+    await primary.send('Emulation.setDeviceMetricsOverride', { width: 640, height: 800, deviceScaleFactor: 2, mobile: false });
+    await primary.send('Emulation.setPageScaleFactor', { pageScaleFactor: 2 });
+    await assertRenderer(primary, `document.documentElement.scrollWidth<=document.documentElement.clientWidth+2 && getComputedStyle(document.querySelector('.model-role-grid')).gridTemplateColumns.split(' ').length===1`, 'model-settings-zoom-reflow');
+    await primary.send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'active' }] });
+    await assertRenderer(primary, `matchMedia('(forced-colors: active)').matches && getComputedStyle(document.querySelector('.model-role-card')).boxShadow==='none' && getComputedStyle(document.querySelector('[data-model-role] [role="status"]')).borderStyle!=='none'`, 'model-settings-forced-colors');
+    await primary.send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'none' }] });
+    await primary.send('Emulation.setPageScaleFactor', { pageScaleFactor: 1 });
+    await primary.send('Emulation.clearDeviceMetricsOverride');
+    await close();
+    await assertSecretsAbsentFromDataRoot(dataRoot, [secretOne], 'model-first-secret-absent-from-data-root');
+
+    at('model-service-restart-and-replace');
+    manager = await launch();
+    [primary] = await waitForRendererCount(manager, 1, 'model-restart-window');
+    await waitFor(primary, `document.querySelector('[data-screen="landing"]')`, 'model-restart-landing');
+    const restartedConnection = await primary.evaluate(`window.ai7.getModelServiceSettings().then((settings)=>settings.roles.find((role)=>role.roleId==='main-editorial'))`);
+    requireJourney(
+      restartedConnection?.status === 'available' &&
+        restartedConnection.connection?.credentialReference === firstConnection.connection.credentialReference &&
+        restartedConnection.connection?.credentialOperationState === 'ready',
+      'model-credential-restart-ready-same-reference',
+    );
+    await click(primary, '模型服务', 'model-replace-open');
+    await waitFor(primary, `document.querySelector('[data-screen="model-service"]')`, 'model-replace-ready');
+    await assertRenderer(primary, `(() => { const input=document.querySelector('#main-editorial-credential'); return input instanceof HTMLInputElement && input.value==='' && !document.body.textContent.includes(${JSON.stringify(secretOne)}); })()`, 'model-restart-no-redisplay');
+    await fill(primary, '#main-editorial-credential', secretTwo, 'model-credential-replacement');
+    await click(primary, '重新输入', 'model-credential-replace');
+    await waitFor(primary, `document.querySelector('[data-model-role="main-editorial"]')?.dataset.modelRoleStatus==='available' && document.querySelector('#main-editorial-credential')?.value==='' && document.querySelector('#persistence-status')?.dataset.tone==='success' && document.querySelector('#persistence-status')?.textContent.includes('连接名称与凭据保护状态已更新')`, 'model-replacement-ready');
+    const replacedConnection = await primary.evaluate(`window.ai7.getModelServiceSettings().then((settings)=>settings.roles.find((role)=>role.roleId==='main-editorial')?.connection)`);
+    requireJourney(
+      replacedConnection?.credentialReference === firstConnection.connection.credentialReference &&
+        replacedConnection?.credentialOperationState === 'ready',
+      'model-replacement-stable-reference',
+    );
+    await close();
+    await assertSecretsAbsentFromDataRoot(dataRoot, [secretOne, secretTwo], 'model-replacement-secrets-absent-from-data-root');
+
+    at('model-service-remove-and-restart');
+    manager = await launch();
+    [primary] = await waitForRendererCount(manager, 1, 'model-remove-window');
+    await waitFor(primary, `document.querySelector('[data-screen="landing"]')`, 'model-remove-landing');
+    await click(primary, '模型服务', 'model-remove-open');
+    await waitFor(primary, `document.querySelector('[data-credential-state="ready"]')`, 'model-remove-ready');
+    await click(primary, '移除', 'model-remove');
+    await waitFor(primary, `document.querySelector('[data-model-role="main-editorial"]')?.dataset.modelRoleStatus==='setup-required' && document.querySelector('[data-credential-state="missing"]')`, 'model-removed');
+    const removedConnection = await primary.evaluate(`window.ai7.getModelServiceSettings().then((settings)=>settings.roles.find((role)=>role.roleId==='main-editorial')?.connection)`);
+    requireJourney(
+      removedConnection?.credentialReference === firstConnection.connection.credentialReference &&
+        removedConnection?.credentialOperationState === 'missing',
+      'model-removed-stable-reference',
+    );
+    await close();
+    await assertSecretsAbsentFromDataRoot(dataRoot, [secretOne, secretTwo], 'model-removed-secrets-absent-from-data-root');
+    manager = await launch();
+    [primary] = await waitForRendererCount(manager, 1, 'model-final-restart-window');
+    await waitFor(primary, `document.querySelector('[data-screen="landing"]')`, 'model-final-restart-landing');
+    const finalModelState = await primary.evaluate(`window.ai7.getModelServiceSettings().then((settings)=>settings.roles.find((role)=>role.roleId==='main-editorial'))`);
+    requireJourney(
+      finalModelState?.status === 'setup-required' &&
+        finalModelState.connection?.credentialReference === firstConnection.connection.credentialReference &&
+        finalModelState.connection?.credentialOperationState === 'missing',
+      'model-removal-survived-restart',
+    );
+    productCredentialCleanupSucceeded = true;
     requireJourney(loopback.observedRequests() === 0, 'zero-sentinel-requests');
     await close();
     await loopback.close();

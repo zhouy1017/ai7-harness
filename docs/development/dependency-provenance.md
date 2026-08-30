@@ -1,6 +1,6 @@
-# J-01 dependency and artifact provenance
+# Source-checkout dependency and artifact provenance
 
-This ledger is bounded to the Issue #24 tracer. Package identities and tarball integrity are owned by [`package.json`](../../package.json) and the frozen [`pnpm-lock.yaml`](../../pnpm-lock.yaml); non-registry carriers are owned by [`config/dependency-artifacts.json`](../../config/dependency-artifacts.json). [`THIRD_PARTY_NOTICES.md`](../../THIRD_PARTY_NOTICES.md) carries the license routing included in every build.
+This ledger covers the currently admitted source-checkout journeys. Package identities and tarball integrity are owned by [`package.json`](../../package.json) and the frozen [`pnpm-lock.yaml`](../../pnpm-lock.yaml); non-registry carriers are owned by [`config/dependency-artifacts.json`](../../config/dependency-artifacts.json). [`THIRD_PARTY_NOTICES.md`](../../THIRD_PARTY_NOTICES.md) carries the license routing included in every build.
 
 ## Registry boundary and selected closure
 
@@ -13,10 +13,11 @@ The admitted runtime owners are:
 - DSH/Cordis: `@deepseek-ai/cordis@4.0.1`; `@deepseek-ai/cosmokit@1.8.2`; `@deepseek-ai/schemastery@3.18.1`; `@standard-schema/spec@1.1.0`; and the exact `@deepseek-ai/` scoped `0.1.0-rc.6` set `dsh-agent`, `dsh-agent-loop`, `dsh-attachment`, `dsh-brand`, `dsh-code-runtime`, `dsh-invariants`, `dsh-llm`, `dsh-scope`, `dsh-session`, `dsh-session-persistence`, `dsh-settings`, `dsh-system-prompt`, `dsh-timeout`, `dsh-tools`, `dsh-typert-protocol`, and `dsh-user-approval`.
 - DOCX parsing: `fflate@0.8.3`, `saxes@6.0.0`, and transitive `xmlchars@2.2.0`.
 - Editor: `prosemirror-commands@1.7.2`, `prosemirror-history@1.5.0`, `prosemirror-keymap@1.2.3`, `prosemirror-model@1.25.11`, `prosemirror-state@1.4.4`, `prosemirror-transform@1.12.0`, `prosemirror-view@1.42.3`, with transitive `orderedmap@2.1.1`, `rope-sequence@1.3.4`, and `w3c-keyname@2.2.8`.
+- Protected Secret Store: `@napi-rs/keyring@1.3.0` plus the publisher-declared exact optional native-carrier set. Product support selects only `@napi-rs/keyring-win32-x64-msvc@1.3.0` on Windows x64 or `@napi-rs/keyring-darwin-arm64@1.3.0` on macOS arm64; no other carrier becomes a supported product route.
 
 Development-only owners are `@types/node@24.13.3` with `undici-types@7.18.2`, `typescript@6.0.3`, `esbuild@0.28.2` plus all 26 exact optional `@esbuild/*@0.28.2` lock carriers (only the current host carrier is materialized), and `playwright-core@1.62.1`.
 
-The aggregate `@deepseek-ai/dsh`, shell, web, filesystem, network, provider, schedule, jobs, workflow, replay, and testkit packages are absent. No native N-API/`.node` runtime dependency is installed. Some required DSH packages publish unused replay/fork, fixture, or Code Mode symbols; those bytes do not create a mounted service, tool, provider, renderer surface, or business authority.
+The aggregate `@deepseek-ai/dsh`, shell, web, filesystem, network, provider, schedule, jobs, workflow, replay, and testkit packages are absent. The keyring carrier is the sole native N-API/`.node` product dependency; it is main-private and exposes no Provider adapter, secret enumeration, service-protocol value, renderer value, shell command, file fallback, or business authority. Some required DSH packages publish unused replay/fork, fixture, or Code Mode symbols; those bytes do not create a mounted service, tool, provider, renderer surface, or business authority.
 
 ## Harness lineage
 
@@ -33,6 +34,8 @@ The dated source audit in [`kick-in/01-source-provenance.md`](../../kick-in/01-s
 
 This possible verified secondary fetch is why esbuild is not described as registry-only or lifecycle-free. `ESBUILD_BINARY_PATH` and npm/pnpm registry, config, store, cache, auth, and preload selectors fail closed before build or bootstrap can import or invoke it.
 
+`@napi-rs/keyring@1.3.0` has no install lifecycle or runtime JavaScript dependency. Its parent tarball SRI is `sha512-WrOw/bcXm0f9qHkumlT1QlArXSTWqaY9sunsDpOk+yCCorCKMxvWT/a3xko4EYHVdeZoh00yI2TydXn6eyICDA==`; the supported Windows x64 carrier SRI is `sha512-4DnCWXwDc0HRKwyRlG5y0VhKZW2tNRQfKKfyj6IX/KWfDNyq9hn4n+GL1auyDcOO/v8PwnhmYo2+rOOqCkvvOg==`, and the supported macOS arm64 carrier SRI is `sha512-pl76hJvdYUBn6I24bXiOBMA9nbDapo3I5B+f3OorjDU4dUMSypXeKbOVehJe8fhgTiH24flMyTS3aAIy43xegQ==`. Build verifies the exact current-host parent package, carrier package, version, and native binary under checkout `node_modules`; Node resolution from `dist/main/index.cjs` reaches that same checkout closure. Because the publisher loader recognizes `NAPI_RS_NATIVE_LIBRARY_PATH` and `NAPI_RS_FORCE_WASI`, the main-private owner rejects either variable before importing the package. No ambient native path, WASI module, alternate OS store, CLI, shell, `safeStorage`, or file carrier is accepted.
+
 ## Toolchain and non-registry carriers
 
 | Identity | Host | Immutable source | SHA-256 | Use and verification |
@@ -48,4 +51,4 @@ No mirror is admitted by this baseline: bootstrap hardcodes the official npm and
 
 ## License audit
 
-The runtime npm closure is MIT except `saxes@6.0.0` (ISC); that npm tarball omits a license file, so its exact two applicable ISC blocks are reproduced from the authoritative [`v6.0.0` tag license](https://github.com/lddubeau/saxes/blob/v6.0.0/LICENSE). Development tooling adds Apache-2.0 (`playwright-core@1.62.1` and `typescript@6.0.3`). Esbuild and its platform carriers are MIT. Electron brings its MIT license and its complete Chromium/third-party notice carrier. The package/version/copyright groups and license texts or carrier routes are maintained in [`THIRD_PARTY_NOTICES.md`](../../THIRD_PARTY_NOTICES.md).
+The runtime npm closure is MIT except `saxes@6.0.0` (ISC); `@napi-rs/keyring` and its native carriers use the MIT license with Copyright (c) 2020 N-API for Rust. The saxes npm tarball omits a license file, so its exact two applicable ISC blocks are reproduced from the authoritative [`v6.0.0` tag license](https://github.com/lddubeau/saxes/blob/v6.0.0/LICENSE). Development tooling adds Apache-2.0 (`playwright-core@1.62.1` and `typescript@6.0.3`). Esbuild and its platform carriers are MIT. Electron brings its MIT license and its complete Chromium/third-party notice carrier. The package/version/copyright groups and license texts or carrier routes are maintained in [`THIRD_PARTY_NOTICES.md`](../../THIRD_PARTY_NOTICES.md).

@@ -3,6 +3,7 @@ import { existsSync } from 'node:fs';
 import { copyFile, mkdir, readFile, readdir, realpath, rm } from 'node:fs/promises';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
 import { inspectDevelopmentInputs } from './doctor.mjs';
 import { electronLicenseCarriers } from './electron-runtime.mjs';
 
@@ -97,6 +98,12 @@ async function ensureClosedOutputs() {
     'main/index.cjs',
     'main/preload.cjs',
     'config/dsh-profiles/manuscript-editorial/package.json',
+    'config/source-checkout-launch-authority.json',
+    'docs/policies/active-policy-set.v3.json',
+    'docs/policies/external-export-policy.v1.json',
+    'docs/policies/provider-processing-policy.v1.json',
+    'docs/policies/provider-processing-policy.v2.json',
+    'docs/policies/provider-processing-policy.v3.json',
     'notices/ELECTRON_LICENSE',
     'notices/ELECTRON_LICENSES.chromium.html',
     'notices/THIRD_PARTY_NOTICES.md',
@@ -140,6 +147,19 @@ async function ensureClosedOutputs() {
       !('devDependencies' in profileManifest),
     'Built native DSH Profile gained identity, dependency, script, or bundle drift.',
   );
+  const exactPolicyCarriers = [
+    'config/source-checkout-launch-authority.json',
+    'docs/policies/active-policy-set.v3.json',
+    'docs/policies/external-export-policy.v1.json',
+    'docs/policies/provider-processing-policy.v1.json',
+    'docs/policies/provider-processing-policy.v2.json',
+    'docs/policies/provider-processing-policy.v3.json',
+  ];
+  for (const path of exactPolicyCarriers) {
+    const built = await readFile(outputPath(...path.split('/')));
+    const source = await readFile(resolve(ROOT, ...path.split('/')));
+    requireBuild(built.equals(source), `Built launch-policy carrier bytes drifted: ${path}`);
+  }
   for (const [name, source] of Object.entries({ main, service })) {
     requireBuild(source.includes('installNodeNetworkDenial();'), `${name} omitted the synchronous Node network guard.`);
     requireBuild(source.includes('syncBuiltinESMExports'), `${name} omitted named built-in synchronization.`);
@@ -159,6 +179,13 @@ async function ensureClosedOutputs() {
   );
   requireBuild(service.includes('@deepseek-ai/dsh-agent-loop'), 'Built service omitted the dormant six-service composition.');
   requireBuild(main.includes('AI7_READY\\n'), 'Built main omitted its payload-free readiness handshake.');
+  requireBuild(
+    main.includes('@napi-rs/keyring') &&
+      main.includes('NAPI_RS_NATIVE_LIBRARY_PATH') &&
+      main.includes('NAPI_RS_FORCE_WASI') &&
+      main.includes('PROTECTED_SECRET_NATIVE_OVERRIDE_DENIED'),
+    'Built main omitted the exact native protected-secret-store boundary.',
+  );
   requireBuild(main.includes('requestSingleInstanceLock'), 'Built main omitted its pre-store single-instance lock.');
   requireBuild(
     main.includes('getSwitchValue("user-data-dir")') &&
@@ -210,6 +237,27 @@ async function main() {
   await mkdir(outputPath('shared'), { recursive: true });
   await mkdir(outputPath('notices'), { recursive: true });
   await mkdir(outputPath('config', 'dsh-profiles', 'manuscript-editorial'), { recursive: true });
+  await mkdir(outputPath('docs', 'policies'), { recursive: true });
+
+  const keyringPackage = JSON.parse(await readFile(resolve(ROOT, 'node_modules', '@napi-rs', 'keyring', 'package.json'), 'utf8'));
+  requireBuild(keyringPackage.version === '1.3.0', 'Exact @napi-rs/keyring@1.3.0 is absent.');
+  const carrier = process.platform === 'win32' && process.arch === 'x64'
+    ? { packageName: 'keyring-win32-x64-msvc', binary: 'keyring.win32-x64-msvc.node' }
+    : process.platform === 'darwin' && process.arch === 'arm64'
+      ? { packageName: 'keyring-darwin-arm64', binary: 'keyring.darwin-arm64.node' }
+      : undefined;
+  requireBuild(carrier !== undefined, 'The exact protected-secret native carrier does not support this build platform.');
+  const keyringRoot = await realpath(resolve(ROOT, 'node_modules', '@napi-rs', 'keyring'));
+  const keyringRequire = createRequire(resolve(keyringRoot, 'index.js'));
+  const carrierBinary = keyringRequire.resolve(`@napi-rs/${carrier.packageName}`);
+  const carrierRoot = dirname(carrierBinary);
+  const carrierPackage = JSON.parse(await readFile(resolve(carrierRoot, 'package.json'), 'utf8'));
+  requireBuild(
+    carrierPackage.version === '1.3.0' &&
+      carrierBinary === resolve(carrierRoot, carrier.binary) &&
+      existsSync(carrierBinary),
+    'The exact protected-secret native carrier is absent.',
+  );
 
   await runEsbuild({
     ...nodeBuild,
@@ -262,6 +310,16 @@ async function main() {
     resolve(ROOT, 'config', 'dsh-profiles', 'manuscript-editorial', 'package.json'),
     outputPath('config', 'dsh-profiles', 'manuscript-editorial', 'package.json'),
   );
+  for (const path of [
+    'config/source-checkout-launch-authority.json',
+    'docs/policies/active-policy-set.v3.json',
+    'docs/policies/external-export-policy.v1.json',
+    'docs/policies/provider-processing-policy.v1.json',
+    'docs/policies/provider-processing-policy.v2.json',
+    'docs/policies/provider-processing-policy.v3.json',
+  ]) {
+    await copyFile(resolve(ROOT, ...path.split('/')), outputPath(...path.split('/')));
+  }
   const electronNotices = electronLicenseCarriers(diagnosis.inputs.secondaryArtifact);
   const electronLicense = electronNotices.find((notice) => notice.id === 'electron-license');
   const electronChromium = electronNotices.find((notice) => notice.id === 'electron-chromium-notices');

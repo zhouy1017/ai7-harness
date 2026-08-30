@@ -267,6 +267,12 @@ const api: RendererApi = Object.freeze({
     invoke<Awaited<ReturnType<RendererApi['getProductDataLocation']>>>(IPC_CHANNELS.getProductDataLocation),
   revealProductDataLocation: () =>
     invoke<Awaited<ReturnType<RendererApi['revealProductDataLocation']>>>(IPC_CHANNELS.revealProductDataLocation),
+  getModelServiceSettings: () =>
+    invoke<Awaited<ReturnType<RendererApi['getModelServiceSettings']>>>(IPC_CHANNELS.getModelServiceSettings),
+  saveModelServiceCredential: (input: { connectionName: string; secret: string }) =>
+    invoke<Awaited<ReturnType<RendererApi['saveModelServiceCredential']>>>(IPC_CHANNELS.saveModelServiceCredential, input),
+  removeModelServiceCredential: () =>
+    invoke<Awaited<ReturnType<RendererApi['removeModelServiceCredential']>>>(IPC_CHANNELS.removeModelServiceCredential),
 });
 
 contextBridge.exposeInMainWorld('ai7', api);

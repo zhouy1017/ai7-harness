@@ -11,6 +11,7 @@ import type {
   ImportStartupProjection,
   HistoricalRevisionProjection,
   ManuscriptWindowProjection,
+  ModelServiceSettingsProjection,
   OutlineProjection,
   PriorWorkItemProjection,
   ReplacementPreviewProjection,
@@ -1512,6 +1513,143 @@ async function renderDataAndStorage(): Promise<void> {
   }
 }
 
+function renderModelServiceSettingsProjection(projection: ModelServiceSettingsProjection): void {
+  const content = panel();
+  content.classList.add('model-service-settings');
+  content.dataset['policyIntegrity'] = projection.launchPolicy.integrityState;
+  content.dataset['providerTransmissionCount'] = String(
+    projection.launchPolicy.providerProcessing.authorizedLiveTransmissionCount,
+  );
+  content.append(
+    element('p', 'section-label', '设置 · 模型服务'),
+    element('h2', undefined, '模型服务'),
+    element('p', 'lede', '先按编辑工作所需角色查看状态；提供方、模型与凭据绑定属于下一层配置。'),
+  );
+  const roles = element('section', 'model-role-grid');
+  roles.setAttribute('aria-label', '模型角色连接状态');
+  for (const role of projection.roles) {
+    const card = element('article', 'model-role-card');
+    card.dataset['modelRole'] = role.roleId;
+    card.dataset['modelRoleStatus'] = role.status;
+    const heading = element('div', 'model-role-heading');
+    const title = element('h3', undefined, role.roleLabel);
+    const status = element('span', `status-pill model-status-${role.status}`, role.statusLabel);
+    status.setAttribute('role', 'status');
+    status.setAttribute('aria-label', `${role.roleLabel}：${role.statusLabel}`);
+    heading.append(title, status);
+    card.append(heading, element('p', 'field-note', role.purposeLabel), element('p', undefined, role.statusDetail));
+    if (role.binding !== null) {
+      const details = element('details', 'model-binding-details');
+      const summary = element('summary', undefined, '提供方与模型绑定');
+      const values = element('dl');
+      values.append(
+        element('dt', undefined, '提供方'), element('dd', undefined, role.binding.providerLabel),
+        element('dt', undefined, '模型'), element('dd', undefined, role.binding.modelLabel),
+        element('dt', undefined, '适配器修订'), element('dd', undefined, String(role.binding.adapterRevision)),
+        element('dt', undefined, '配置修订'), element('dd', undefined, String(role.binding.configurationRevision)),
+        element('dt', undefined, '已批准备用链'), element('dd', undefined, '无'),
+      );
+      details.append(summary, values);
+      card.append(details);
+      const form = element('form', 'model-credential-form');
+      const connectionNameId = 'main-editorial-connection-name';
+      const credentialId = 'main-editorial-credential';
+      const credentialHelpId = 'main-editorial-credential-help';
+      const nameLabel = element('label', undefined, '连接名称');
+      nameLabel.htmlFor = connectionNameId;
+      const connectionName = element('input');
+      connectionName.id = connectionNameId;
+      connectionName.name = 'connection-name';
+      connectionName.type = 'text';
+      connectionName.maxLength = 80;
+      connectionName.required = true;
+      connectionName.autocomplete = 'off';
+      connectionName.value = role.connection?.connectionName ?? '';
+      const credentialLabel = element('label', undefined, role.connection === null ? 'API 凭据' : '重新输入 API 凭据');
+      credentialLabel.htmlFor = credentialId;
+      const credential = element('input');
+      credential.id = credentialId;
+      credential.name = 'credential';
+      credential.type = 'password';
+      credential.required = true;
+      credential.autocomplete = 'off';
+      credential.setAttribute('aria-describedby', credentialHelpId);
+      const help = element(
+        'p',
+        'field-note',
+        '凭据只发送到本机主进程并写入操作系统安全凭据库；保存后不会显示、复制或导出。',
+      );
+      help.id = credentialHelpId;
+      const save = button(role.connection === null ? '保护并保存' : '重新输入', 'primary', () => undefined);
+      save.type = 'submit';
+      form.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        save.disabled = true;
+        const pending = window.ai7.saveModelServiceCredential({
+          connectionName: connectionName.value,
+          secret: credential.value,
+        });
+        credential.value = '';
+        setStatus('正在写入操作系统安全凭据库…', 'busy');
+        try {
+          renderModelServiceSettingsProjection(await pending);
+          setStatus('连接名称与凭据保护状态已更新', 'success');
+        } catch (error) {
+          save.disabled = false;
+          setStatus(rendererErrorMessage(error, '无法更新模型服务凭据。'), 'error');
+        }
+      });
+      form.append(nameLabel, connectionName, credentialLabel, credential, help, save);
+      card.append(form);
+      if (role.connection !== null) {
+        const stored = element('p', 'success-note', `连接名称：${role.connection.connectionName} · 凭据值不再显示`);
+        stored.dataset['credentialState'] = role.connection.credentialOperationState;
+        const remove = button('移除', 'secondary', async () => {
+          remove.disabled = true;
+          setStatus('正在从操作系统安全凭据库移除凭据…', 'busy');
+          try {
+            renderModelServiceSettingsProjection(await window.ai7.removeModelServiceCredential());
+            setStatus('凭据已移除；连接保留为需设置状态', 'success');
+          } catch (error) {
+            remove.disabled = false;
+            setStatus(rendererErrorMessage(error, '无法移除模型服务凭据。'), 'error');
+          }
+        });
+        remove.dataset['action'] = 'remove-model-service-credential';
+        card.append(stored, remove);
+      }
+    }
+    roles.append(card);
+  }
+  const policy = element('section', 'review-section model-policy-summary');
+  policy.append(
+    element('h3', undefined, '当前策略边界'),
+    element('p', undefined, projection.launchPolicy.providerProcessing.label),
+    element('p', undefined, projection.launchPolicy.externalExport.label),
+    element('p', undefined, projection.launchPolicy.publicReleasePermission.label),
+    element('p', 'attention-note', projection.authorityStatement),
+  );
+  const protectedStore = element(
+    'p',
+    'field-note',
+    `安全凭据库：${projection.protectedSecretStore.label} · ${projection.protectedSecretStore.availability === 'available' ? '可用' : '不可用'}。未启用文件或命令行替代存储。`,
+  );
+  const actions = element('div', 'button-row');
+  actions.append(button('返回', 'quiet', () => void initializeStartup()));
+  content.append(roles, policy, protectedStore, actions);
+  replaceScreen('model-service', content);
+}
+
+async function renderModelServiceSettings(): Promise<void> {
+  setStatus('正在读取模型服务状态…', 'busy');
+  try {
+    renderModelServiceSettingsProjection(await window.ai7.getModelServiceSettings());
+    setStatus('模型服务设置已打开');
+  } catch (error) {
+    setStatus(rendererErrorMessage(error, '无法读取模型服务设置。'), 'error');
+  }
+}
+
 function renderLanding(
   priorWork: ReadonlyArray<PriorWorkItemProjection>,
   recoveryReturn: RecoveryReturnContext | undefined,
@@ -1554,8 +1692,10 @@ function renderLanding(
   });
   const dataAndStorage = button('数据与存储', 'secondary', () => renderDataAndStorage());
   dataAndStorage.dataset['settingsRoute'] = 'data-storage';
+  const modelService = button('模型服务', 'secondary', () => renderModelServiceSettings());
+  modelService.dataset['settingsRoute'] = 'model-service';
   const landingActions = element('div', 'button-row');
-  landingActions.append(importButton, createBook, dataAndStorage);
+  landingActions.append(importButton, createBook, dataAndStorage, modelService);
   copy.append(landingActions);
   const note = element('aside', 'hero-note', '所有导入都要求先明确选择图书目标；系统不会自动选择已有图书或稿件关系。');
   content.append(copy, note);

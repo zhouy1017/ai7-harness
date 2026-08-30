@@ -171,6 +171,9 @@ const JOURNEY_LOCATIONS = Object.freeze({
     'effect-before-route-arrival-order',
     'existing-book-source-commit-preflight',
     'restart-and-data-location',
+    'model-service-first-save',
+    'model-service-restart-and-replace',
+    'model-service-remove-and-restart',
   ]),
 });
 

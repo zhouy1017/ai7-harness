@@ -1,4 +1,4 @@
-export const SERVICE_PROTOCOL_VERSION = 11 as const;
+export const SERVICE_PROTOCOL_VERSION = 12 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -74,6 +74,9 @@ export const IPC_CHANNELS = {
   getHistoricalRevision: 'ai7:j12:get-historical-revision',
   getProductDataLocation: 'ai7:j12:get-product-data-location',
   revealProductDataLocation: 'ai7:j12:reveal-product-data-location',
+  getModelServiceSettings: 'ai7:j12:get-model-service-settings',
+  saveModelServiceCredential: 'ai7:j12:save-model-service-credential',
+  removeModelServiceCredential: 'ai7:j12:remove-model-service-credential',
 } as const;
 
 export const MAIN_EVENTS = {
@@ -738,6 +741,90 @@ export interface ProductDataLocationProjection {
 export interface ProductDataLocationRevealProjection {
   state: 'requested';
   nativeRevealSuppressedForE2e: boolean;
+}
+
+export type ModelRoleId =
+  | 'fast-interaction'
+  | 'main-editorial'
+  | 'difficult-escalation'
+  | 'frontier';
+
+export type ModelRoleStatus = 'available' | 'setup-required' | 'needs-attention' | 'unavailable';
+export type ModelRoleStatusLabel = '可用' | '需设置' | '需处理' | '不可用';
+export type ModelCredentialOperationState = 'ready' | 'missing' | 'needs-attention';
+
+export interface ModelServiceBindingProjection {
+  providerId: 'deepseek-open-platform';
+  providerLabel: 'DeepSeek 开放平台（官方）';
+  modelId: 'deepseek-v4-pro';
+  modelLabel: 'DeepSeek V4 Pro High';
+  adapterRevision: 1;
+  configurationRevision: 1;
+  approvedFallbackChain: readonly [];
+  credentialSlot: 'deepseek-api-key';
+}
+
+export interface ModelServiceConnectionProjection {
+  connectionId: 'main-editorial-deepseek-v4-pro';
+  roleId: 'main-editorial';
+  connectionName: string;
+  binding: ModelServiceBindingProjection;
+  credentialReference: string;
+  credentialOperationState: ModelCredentialOperationState;
+  createdAt: string;
+  updatedAt: string;
+  credentialUpdatedAt: string;
+}
+
+export interface LaunchPolicyProjection {
+  integrityState: 'verified' | 'denied';
+  denialReason: string | null;
+  operationalScope: 'development-ci' | null;
+  activePolicySetVersion: 'v3' | null;
+  providerProcessing: {
+    version: 'v1' | null;
+    decision: 'deny';
+    authorizedLiveTransmissionCount: 0;
+    liveTransmissionAllowed: false;
+    label: '开发与持续集成：零次实时传输';
+  };
+  externalExport: {
+    version: 'v1' | null;
+    policyEligibilityIsEffectApproval: false;
+    currentExportEffectAvailable: false;
+    label: '对外导出策略独立；当前未提供导出受控动作';
+  };
+  publicReleasePermission: {
+    present: false;
+    label: '公开发布许可：不存在';
+  };
+}
+
+export interface ModelServiceStoredStateProjection {
+  connection: ModelServiceConnectionProjection | null;
+  launchPolicy: LaunchPolicyProjection;
+}
+
+export interface ModelRoleCardProjection {
+  roleId: ModelRoleId;
+  roleLabel: '快速交互角色' | '主编辑角色' | '疑难升级角色' | '前沿模型角色';
+  purposeLabel: string;
+  status: ModelRoleStatus;
+  statusLabel: ModelRoleStatusLabel;
+  statusDetail: string;
+  binding: ModelServiceBindingProjection | null;
+  connection: ModelServiceConnectionProjection | null;
+}
+
+export interface ModelServiceSettingsProjection {
+  roles: readonly ModelRoleCardProjection[];
+  protectedSecretStore: {
+    backend: 'windows-credential-manager' | 'macos-keychain';
+    label: 'Windows 凭据管理器' | 'macOS 钥匙串';
+    availability: 'available' | 'unavailable';
+  };
+  launchPolicy: LaunchPolicyProjection;
+  authorityStatement: '凭据就绪不授予模型处理、对外导出、运行、受控动作或公开发布权限。';
 }
 
 export interface HistoricalRevisionProjection {
@@ -1417,6 +1504,25 @@ export interface ServiceOperationMap {
     input: { revisionId: string; cursor: string | null };
     output: HistoricalRevisionProjection;
   };
+  getModelServiceStoredState: {
+    input: Record<string, never>;
+    output: ModelServiceStoredStateProjection;
+  };
+  saveModelServiceConnection: {
+    input: {
+      connectionName: string;
+      credentialReference: string;
+      credentialOperationState: 'ready' | 'needs-attention';
+    };
+    output: ModelServiceConnectionProjection;
+  };
+  setModelServiceCredentialState: {
+    input: {
+      credentialReference: string;
+      credentialOperationState: ModelCredentialOperationState;
+    };
+    output: ModelServiceConnectionProjection;
+  };
   shutdown: { input: Record<string, never>; output: { state: 'stopping' } };
 }
 
@@ -1514,4 +1620,7 @@ export interface RendererApi {
   ): Promise<HistoricalRevisionProjection>;
   getProductDataLocation(): Promise<ProductDataLocationProjection>;
   revealProductDataLocation(): Promise<ProductDataLocationRevealProjection>;
+  getModelServiceSettings(): Promise<ModelServiceSettingsProjection>;
+  saveModelServiceCredential(input: { connectionName: string; secret: string }): Promise<ModelServiceSettingsProjection>;
+  removeModelServiceCredential(): Promise<ModelServiceSettingsProjection>;
 }

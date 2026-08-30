@@ -9,6 +9,7 @@ AI7 is proprietary software. The following components remain under their own lic
 | the `@deepseek-ai/` scoped packages `dsh-agent`, `dsh-agent-loop`, `dsh-attachment`, `dsh-brand`, `dsh-code-runtime`, `dsh-invariants`, `dsh-llm`, `dsh-scope`, `dsh-session`, `dsh-session-persistence`, `dsh-settings`, `dsh-system-prompt`, `dsh-timeout`, `dsh-tools`, `dsh-typert-protocol`, `dsh-user-approval` | 0.1.0-rc.6 | MIT; Copyright (c) 2026 DeepSeek |
 | `@deepseek-ai/cordis`, `@deepseek-ai/cosmokit`, `@deepseek-ai/schemastery` | 4.0.1, 1.8.2, 3.18.1 | MIT; Copyright (c) 2021-present Shigma |
 | `@standard-schema/spec` | 1.1.0 | MIT; Copyright (c) 2024 Colin McDonnell |
+| `@napi-rs/keyring` and its exact optional `@napi-rs/keyring-*` native carriers | 1.3.0 | MIT; Copyright (c) 2020 N-API for Rust |
 | `fflate` | 0.8.3 | MIT; Copyright (c) 2026 Arjun Barrett |
 | `prosemirror-commands`, `prosemirror-history`, `prosemirror-keymap`, `prosemirror-model`, `prosemirror-state`, `prosemirror-transform`, `prosemirror-view` | exact versions in `pnpm-lock.yaml` | MIT; Copyright (C) 2015-2017 by Marijn Haverbeke `<marijn@haverbeke.berlin>` and others |
 | `orderedmap`, `w3c-keyname` | 2.1.1, 2.2.8 | MIT; Copyright (C) 2016 by Marijn Haverbeke `<marijn@haverbeke.berlin>` and others |
@@ -44,6 +45,8 @@ Copyright (c) 2026 DeepSeek
 Copyright (c) 2021-present Shigma
 
 Copyright (c) 2024 Colin McDonnell
+
+Copyright (c) 2020 N-API for Rust
 
 Copyright (c) 2026 Arjun Barrett
 

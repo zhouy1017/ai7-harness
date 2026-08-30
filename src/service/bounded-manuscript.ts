@@ -51,6 +51,7 @@ const RECOVERY_SCHEMA_VERSION = 7;
 const SCHEMA_VERSION = 8;
 const SOURCE_IMPORT_SCHEMA_VERSION = 9;
 const MANUSCRIPT_REIMPORT_SCHEMA_VERSION = 10;
+const MODEL_SERVICE_SCHEMA_VERSION = 11;
 const MIGRATION_BATCH = 256;
 const SEARCH_BATCH = 128;
 const HISTORY_BATCH = 128;
@@ -1824,6 +1825,7 @@ function requireExactSchema(
   expectedIndexes: Readonly<Record<string, string>>,
   includeSearch: boolean,
   additionalTriggers: Readonly<Record<string, string>> = {},
+  additionalTableNames: ReadonlyArray<string> = [],
 ): void {
   for (const [name, expectedSql] of Object.entries(expectedTables)) requireExactTableSchema(db, name, expectedSql);
   requireExactIndexSchema(db, expectedIndexes);
@@ -1831,6 +1833,7 @@ function requireExactSchema(
   const expectedNames = new Set([
     ...Object.keys(expectedTables),
     ...(includeSearch ? SEARCH_SCHEMA_TABLES : []),
+    ...additionalTableNames,
   ]);
   const actualTables = db.prepare("SELECT name FROM sqlite_schema WHERE type = 'table'").all() as SqlRow[];
   requireBounded(
@@ -1862,13 +1865,14 @@ function requireSourceImportTargetSchema(db: DatabaseSync): void {
   requireExactSchema(db, FULL_SOURCE_IMPORT_TARGET_SCHEMA_SQL, TARGET_INDEX_SQL, true, SOURCE_IMPORT_TRIGGER_SQL);
 }
 
-function requireManuscriptReimportTargetSchema(db: DatabaseSync): void {
+function requireManuscriptReimportTargetSchema(db: DatabaseSync, includeModelServiceTable = false): void {
   requireExactSchema(
     db,
     FULL_MANUSCRIPT_REIMPORT_TARGET_SCHEMA_SQL,
     MANUSCRIPT_REIMPORT_INDEX_SQL,
     true,
     MANUSCRIPT_REIMPORT_TRIGGER_SQL,
+    includeModelServiceTable ? ['model_service_connections'] : [],
   );
 }
 
@@ -4495,8 +4499,12 @@ function validateManuscriptReimportTruth(db: DatabaseSync): void {
   requireBounded(invalidRecords === undefined, 'SCHEMA_INVALID', '稿件重新导入记录图无效。');
 }
 
-export function validateManuscriptReimportSchemaTruth(db: DatabaseSync, profile: BuiltInWorkflowProfile): void {
-  requireManuscriptReimportTargetSchema(db);
+export function validateManuscriptReimportSchemaTruth(
+  db: DatabaseSync,
+  profile: BuiltInWorkflowProfile,
+  includeModelServiceTable = false,
+): void {
+  requireManuscriptReimportTargetSchema(db, includeModelServiceTable);
   validateSchemaAuthorityIds(db);
   validateWorkflowSemanticTruth(db, profile);
   validateSourceImportDraftTargetTruth(db);
@@ -4516,13 +4524,14 @@ export function initializeBoundedSchema(db: DatabaseSync, profile: BuiltInWorkfl
   requireBounded(
     version === CONTINUITY_SCHEMA_VERSION || version === EDITOR_SCHEMA_VERSION ||
       version === RECOVERY_SCHEMA_VERSION || version === SCHEMA_VERSION ||
-      version === SOURCE_IMPORT_SCHEMA_VERSION || version === MANUSCRIPT_REIMPORT_SCHEMA_VERSION,
+      version === SOURCE_IMPORT_SCHEMA_VERSION || version === MANUSCRIPT_REIMPORT_SCHEMA_VERSION ||
+      version === MODEL_SERVICE_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
-  if (version === MANUSCRIPT_REIMPORT_SCHEMA_VERSION) {
+  if (version === MANUSCRIPT_REIMPORT_SCHEMA_VERSION || version === MODEL_SERVICE_SCHEMA_VERSION) {
     transact(db, () => {
-      validateManuscriptReimportSchemaTruth(db, profile);
+      validateManuscriptReimportSchemaTruth(db, profile, version === MODEL_SERVICE_SCHEMA_VERSION);
       terminalizeOrphanedReplacementPreviews(db);
       reclaimOrphanedSearchSessions(db);
     });
