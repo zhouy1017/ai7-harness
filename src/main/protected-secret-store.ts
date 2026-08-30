@@ -39,7 +39,8 @@ abstract class KeyringProtectedSecretStore implements ProtectedSecretStore {
   }
 
   async remove(credentialReference: string): Promise<void> {
-    await this.#entry(credentialReference).deleteCredential();
+    const removed = await this.#entry(credentialReference).deleteCredential();
+    if (removed !== true) throw new Error('PROTECTED_SECRET_REMOVE_UNCONFIRMED');
   }
 }
 

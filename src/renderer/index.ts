@@ -1622,8 +1622,17 @@ function renderModelServiceSettingsProjection(projection: ModelServiceSettingsPr
     roles.append(card);
   }
   const policy = element('section', 'review-section model-policy-summary');
+  const policyIntegrity = element(
+    'p',
+    projection.launchPolicy.integrityState === 'verified' ? 'success-note' : 'attention-note',
+    projection.launchPolicy.integrityState === 'verified'
+      ? '策略完整性：已验证。当前开发与持续集成范围保持零次实时传输。'
+      : '策略完整性：验证未通过。Provider Processing 保持拒绝，不会进行模型传输。',
+  );
+  policyIntegrity.dataset['policyIntegrityState'] = projection.launchPolicy.integrityState;
   policy.append(
     element('h3', undefined, '当前策略边界'),
+    policyIntegrity,
     element('p', undefined, projection.launchPolicy.providerProcessing.label),
     element('p', undefined, projection.launchPolicy.externalExport.label),
     element('p', undefined, projection.launchPolicy.publicReleasePermission.label),

@@ -74,6 +74,7 @@ import {
   BoundedStoreError,
   BoundedStoreFatalError,
   initializeBoundedSchema,
+  MODEL_SERVICE_CONNECTION_SCHEMA_SQL,
   validateManuscriptReimportSchemaTruth,
   validateSourceImportSchemaTruth,
   type RecoverySnapshotCursor,
@@ -1683,17 +1684,8 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
   requireStore(violations.length === 0, 'SCHEMA_MIGRATION_FAILED', '数据库引用校验失败。');
 }
 
-function validateModelServiceSchema(db: DatabaseSync): void {
-  const row = one(
-    db.prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = 'model_service_connections'").all() as SqlRow[],
-    'SCHEMA_INVALID',
-    '模型服务连接表缺失。',
-  );
-  requireStore(
-    asString(row.sql).includes("credential_operation_state TEXT NOT NULL CHECK(credential_operation_state IN ('ready', 'missing', 'needs-attention'))"),
-    'SCHEMA_INVALID',
-    '模型服务连接表约束无效。',
-  );
+function validateModelServiceSchema(db: DatabaseSync, profile: BuiltInWorkflowProfile): void {
+  validateManuscriptReimportSchemaTruth(db, profile, true);
   const invalid = db.prepare(
     `SELECT 1 FROM model_service_connections
      WHERE connection_id != 'main-editorial-deepseek-v4-pro'
@@ -1708,7 +1700,7 @@ function validateModelServiceSchema(db: DatabaseSync): void {
   requireStore(invalid === undefined, 'SCHEMA_INVALID', '模型服务连接记录超出当前固定绑定。');
 }
 
-function initializeModelServiceSchema(db: DatabaseSync): void {
+function initializeModelServiceSchema(db: DatabaseSync, profile: BuiltInWorkflowProfile): void {
   const version = asNumber(
     one(db.prepare('PRAGMA user_version').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取数据库版本。').user_version,
   );
@@ -1718,31 +1710,16 @@ function initializeModelServiceSchema(db: DatabaseSync): void {
     '数据库版本不受支持。',
   );
   if (version === MODEL_SERVICE_SCHEMA_VERSION) {
-    validateModelServiceSchema(db);
+    validateModelServiceSchema(db, profile);
     return;
   }
   try {
     db.exec(`
       BEGIN IMMEDIATE;
-      CREATE TABLE model_service_connections (
-        connection_id TEXT PRIMARY KEY CHECK(connection_id = 'main-editorial-deepseek-v4-pro'),
-        role_id TEXT NOT NULL CHECK(role_id = 'main-editorial'),
-        connection_name TEXT NOT NULL CHECK(length(connection_name) BETWEEN 1 AND 80),
-        provider_id TEXT NOT NULL CHECK(provider_id = 'deepseek-open-platform'),
-        model_id TEXT NOT NULL CHECK(model_id = 'deepseek-v4-pro'),
-        adapter_revision INTEGER NOT NULL CHECK(adapter_revision = 1),
-        configuration_revision INTEGER NOT NULL CHECK(configuration_revision = 1),
-        approved_fallback_chain TEXT NOT NULL CHECK(approved_fallback_chain = '[]'),
-        credential_slot TEXT NOT NULL CHECK(credential_slot = 'deepseek-api-key'),
-        credential_reference TEXT NOT NULL UNIQUE CHECK(length(credential_reference) = 36),
-        credential_operation_state TEXT NOT NULL CHECK(credential_operation_state IN ('ready', 'missing', 'needs-attention')),
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL,
-        credential_updated_at TEXT NOT NULL
-      ) STRICT;
+      ${MODEL_SERVICE_CONNECTION_SCHEMA_SQL};
       PRAGMA user_version = ${MODEL_SERVICE_SCHEMA_VERSION};
     `);
-    validateModelServiceSchema(db);
+    validateModelServiceSchema(db, profile);
     db.exec('COMMIT;');
   } catch (error) {
     try {
@@ -2497,7 +2474,7 @@ export class EditorialStore {
       ).run().changes === 1, 'E2E_CONTROL_INVALID', '没有可用于启动校验的重新导入证明。');
     }
     initializeManuscriptReimportSchema(authority, workflowProfile);
-    initializeModelServiceSchema(authority);
+    initializeModelServiceSchema(authority, workflowProfile);
     initializeBoundedSchema(authority, workflowProfile);
     const journal = new DatabaseSync(databasePath);
     configureDatabase(journal);
@@ -6534,6 +6511,12 @@ export class EditorialStore {
       'STORE_CORRUPT',
       '模型服务凭据状态无效。',
     );
+    const credentialReference = asString(row.credential_reference);
+    requireStore(
+      UUID_PATTERN.test(credentialReference),
+      'STORE_CORRUPT',
+      '模型服务凭据引用无效。',
+    );
     return {
       connectionId: 'main-editorial-deepseek-v4-pro',
       roleId: 'main-editorial',
@@ -6548,7 +6531,7 @@ export class EditorialStore {
         approvedFallbackChain: [],
         credentialSlot: 'deepseek-api-key',
       },
-      credentialReference: asString(row.credential_reference),
+      credentialReference,
       credentialOperationState: state,
       createdAt: asString(row.created_at),
       updatedAt: asString(row.updated_at),

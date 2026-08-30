@@ -1,10 +1,11 @@
 import { createWriteStream } from 'node:fs';
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm } from 'node:fs/promises';
 import { once } from 'node:events';
 import { createServer } from 'node:http';
 import { arch, platform, release, tmpdir } from 'node:os';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { installJourneyCancellationCleanup, reportJourneyFailure } from './controller.mjs';
 
@@ -205,8 +206,37 @@ async function assertRenderer(renderer, expression, name) {
   requireJourney(await renderer.evaluate(`Boolean(${expression})`), name);
 }
 
+async function dispatchTab(renderer) {
+  await renderer.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Tab' });
+  await renderer.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Tab' });
+}
+
+async function tabUntil(renderer, expression, name, maximumTabs = 12) {
+  for (let count = 0; count < maximumTabs; count += 1) {
+    await dispatchTab(renderer);
+    if (await renderer.evaluate(`Boolean(${expression})`).catch(() => false)) return;
+  }
+  throw new Error(`J-12/${name}`);
+}
+
 async function assertSecretsAbsentFromDataRoot(root, secrets, name) {
-  const needles = secrets.flatMap((secret) => [Buffer.from(secret, 'utf8'), Buffer.from(secret, 'utf16le')]);
+  const needles = secrets.flatMap((secret) => {
+    const raw = Buffer.from(secret, 'utf8');
+    const digest = createHash('sha256').update(raw).digest();
+    const encoded = [
+      secret,
+      digest.toString('hex'),
+      digest.toString('hex').toUpperCase(),
+      digest.toString('base64'),
+      digest.toString('base64url'),
+    ];
+    return [
+      raw,
+      Buffer.from(secret, 'utf16le'),
+      digest,
+      ...encoded.flatMap((value) => [Buffer.from(value, 'utf8'), Buffer.from(value, 'utf16le')]),
+    ];
+  });
   const visit = async (directory) => {
     for (const entry of await readdir(directory, { withFileTypes: true })) {
       const path = resolve(directory, entry.name);
@@ -222,7 +252,7 @@ async function assertSecretsAbsentFromDataRoot(root, secrets, name) {
   await visit(root);
 }
 
-async function removeSyntheticCredentialDirect(credentialReference) {
+async function syntheticCredentialEntry(credentialReference) {
   requireJourney(UUID_PATTERN.test(credentialReference), 'credential-direct-cleanup-reference');
   requireJourney(
     process.env.NAPI_RS_NATIVE_LIBRARY_PATH === undefined && process.env.NAPI_RS_FORCE_WASI === undefined,
@@ -234,11 +264,83 @@ async function removeSyntheticCredentialDirect(credentialReference) {
     'credential-direct-cleanup-platform',
   );
   const { AsyncEntry } = await import('@napi-rs/keyring');
-  const entry = new AsyncEntry(
+  return new AsyncEntry(
     'io.github.zhouy1017.ai7.model-service',
     `credential-reference:${credentialReference}`,
   );
-  await entry.deleteCredential();
+}
+
+async function readSyntheticCredentialDirect(credentialReference) {
+  return (await syntheticCredentialEntry(credentialReference)).getPassword();
+}
+
+async function removeSyntheticCredentialDirect(credentialReference) {
+  const removed = await (await syntheticCredentialEntry(credentialReference)).deleteCredential();
+  requireJourney(removed === true, 'credential-direct-cleanup-unconfirmed');
+}
+
+function hasErrorCode(error, code) {
+  return error !== null && typeof error === 'object' && 'code' in error && error.code === code;
+}
+
+async function recoverSyntheticCredentialCleanupState(dataRoot, runRoot) {
+  requireJourney(
+    dataRoot === resolve(runRoot, 'data') && inside(runRoot, dataRoot),
+    'credential-cleanup-metadata-root',
+  );
+  const databasePath = resolve(dataRoot, 'store', 'ai7.sqlite');
+  let metadata;
+  try {
+    metadata = await lstat(databasePath);
+  } catch (error) {
+    if (hasErrorCode(error, 'ENOENT')) return { kind: 'not-started' };
+    throw new Error('J-12/credential-cleanup-metadata');
+  }
+  requireJourney(metadata.isFile() && !metadata.isSymbolicLink(), 'credential-cleanup-metadata-file');
+  requireJourney((await realpath(databasePath)) === databasePath, 'credential-cleanup-metadata-file');
+  let database;
+  try {
+    database = new DatabaseSync(databasePath, { readOnly: true });
+  } catch {
+    throw new Error('J-12/credential-cleanup-metadata');
+  }
+  try {
+    database.exec('PRAGMA query_only = ON;');
+    const version = database.prepare('PRAGMA user_version').get();
+    requireJourney(version?.user_version === 11, 'credential-cleanup-metadata-version');
+    const rows = database.prepare(
+      `SELECT connection_id, role_id, connection_name, provider_id, model_id,
+              adapter_revision, configuration_revision, approved_fallback_chain,
+              credential_slot, credential_reference, credential_operation_state
+       FROM model_service_connections
+       LIMIT 2`,
+    ).all();
+    requireJourney(rows.length <= 1, 'credential-cleanup-metadata-cardinality');
+    if (rows.length === 0) return { kind: 'not-started' };
+    const row = rows[0];
+    requireJourney(
+      row.connection_id === 'main-editorial-deepseek-v4-pro' &&
+        row.role_id === 'main-editorial' &&
+        typeof row.connection_name === 'string' && row.connection_name.isWellFormed() &&
+        row.connection_name.trim().length >= 1 && row.connection_name.trim().length <= 80 &&
+        row.provider_id === 'deepseek-open-platform' &&
+        row.model_id === 'deepseek-v4-pro' &&
+        row.adapter_revision === 1 && row.configuration_revision === 1 &&
+        row.approved_fallback_chain === '[]' &&
+        row.credential_slot === 'deepseek-api-key' &&
+        typeof row.credential_reference === 'string' && UUID_PATTERN.test(row.credential_reference) &&
+        ['ready', 'missing', 'needs-attention'].includes(row.credential_operation_state),
+      'credential-cleanup-metadata-binding',
+    );
+    return row.credential_operation_state === 'missing'
+      ? { kind: 'removed' }
+      : { kind: 'reference', credentialReference: row.credential_reference };
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith('J-12/')) throw error;
+    throw new Error('J-12/credential-cleanup-metadata');
+  } finally {
+    database.close();
+  }
 }
 
 async function click(renderer, label, name) {
@@ -321,12 +423,14 @@ async function main() {
   let runRoot;
   let runRootAcquisition;
   let tempParent;
+  let dataRootForCleanup;
   let launchForCleanup;
   let managerForCleanup;
   let credentialMutationReached = false;
   let credentialReferenceForCleanup;
   let productCredentialCleanupSucceeded = false;
   let credentialCleanupFailure;
+  let cleanupPromise;
   const closeOwnedBrowser = async () => {
     const ownedBrowser = browser ?? (browserAcquisition === undefined ? undefined : await browserAcquisition.catch(() => undefined));
     await ownedBrowser?.close().catch(() => undefined);
@@ -354,57 +458,66 @@ async function main() {
     );
     return true;
   };
-  const removeSyntheticCredentialBeforeInterrupt = async () => {
-    if (credentialMutationReached && !productCredentialCleanupSucceeded) {
-      try {
-        productCredentialCleanupSucceeded = await removeSyntheticCredentialThroughProduct();
-      } catch (error) {
-        credentialCleanupFailure ??= error;
-      }
-    }
-    await closeOwnedBrowser();
-  };
-  const cancellation = installJourneyCancellationCleanup(async () => {
-    if (credentialMutationReached && !productCredentialCleanupSucceeded) {
-      try {
-        productCredentialCleanupSucceeded = await removeSyntheticCredentialThroughProduct();
-      } catch (error) {
-        credentialCleanupFailure ??= error;
-      }
-      if (!productCredentialCleanupSucceeded && launchForCleanup !== undefined && runRoot !== undefined) {
-        await closeOwnedBrowser();
+  const runCleanupOnce = () => {
+    cleanupPromise ??= (async () => {
+      if (credentialMutationReached && !productCredentialCleanupSucceeded) {
         try {
-          const cleanupManager = await launchForCleanup();
-          const [cleanupRenderer] = await waitForRendererCount(cleanupManager, 1, 'credential-cleanup-window');
-          await waitFor(cleanupRenderer, `document.querySelector('[data-screen="landing"]')`, 'credential-cleanup-ready');
           productCredentialCleanupSucceeded = await removeSyntheticCredentialThroughProduct();
         } catch (error) {
           credentialCleanupFailure ??= error;
         }
+        if (!productCredentialCleanupSucceeded && launchForCleanup !== undefined && runRoot !== undefined) {
+          await closeOwnedBrowser();
+          try {
+            const cleanupManager = await launchForCleanup();
+            const [cleanupRenderer] = await waitForRendererCount(cleanupManager, 1, 'credential-cleanup-window');
+            await waitFor(cleanupRenderer, `document.querySelector('[data-screen="landing"]')`, 'credential-cleanup-ready');
+            productCredentialCleanupSucceeded = await removeSyntheticCredentialThroughProduct();
+          } catch (error) {
+            credentialCleanupFailure ??= error;
+          }
+        }
+        if (!productCredentialCleanupSucceeded) {
+          await closeOwnedBrowser();
+          if (credentialReferenceForCleanup === undefined && dataRootForCleanup !== undefined && runRoot !== undefined) {
+            try {
+              const recovered = await recoverSyntheticCredentialCleanupState(dataRootForCleanup, runRoot);
+              if (recovered.kind === 'not-started' || recovered.kind === 'removed') {
+                productCredentialCleanupSucceeded = true;
+              } else {
+                credentialReferenceForCleanup = recovered.credentialReference;
+              }
+            } catch (error) {
+              credentialCleanupFailure ??= error;
+            }
+          }
+          if (!productCredentialCleanupSucceeded && credentialReferenceForCleanup !== undefined) {
+            try {
+              await removeSyntheticCredentialDirect(credentialReferenceForCleanup);
+              productCredentialCleanupSucceeded = true;
+            } catch (error) {
+              credentialCleanupFailure ??= error;
+            }
+          }
+        }
       }
-    }
-    if (credentialReferenceForCleanup !== undefined) {
-      try {
-        await removeSyntheticCredentialDirect(credentialReferenceForCleanup);
-        productCredentialCleanupSucceeded = true;
-      } catch (error) {
-        credentialCleanupFailure ??= error;
+      await closeOwnedBrowser();
+      const ownedLoopback = loopback ?? (loopbackAcquisition === undefined ? undefined : await loopbackAcquisition.catch(() => undefined));
+      await ownedLoopback?.close().catch(() => undefined);
+      loopback = undefined;
+      const ownedRoot = runRoot ?? (runRootAcquisition === undefined ? undefined : await runRootAcquisition.catch(() => undefined));
+      if (ownedRoot !== undefined) {
+        requireJourney(tempParent !== undefined && dirname(ownedRoot) === tempParent && basename(ownedRoot).startsWith('ai7-j12-e2e-') && (await realpath(ownedRoot)) === ownedRoot, 'cleanup-target');
+        await rm(ownedRoot, { recursive: true, force: true });
+        runRoot = undefined;
       }
-    }
-    await closeOwnedBrowser();
-    const ownedLoopback = loopback ?? (loopbackAcquisition === undefined ? undefined : await loopbackAcquisition.catch(() => undefined));
-    await ownedLoopback?.close().catch(() => undefined);
-    loopback = undefined;
-    const ownedRoot = runRoot ?? (runRootAcquisition === undefined ? undefined : await runRootAcquisition.catch(() => undefined));
-    if (ownedRoot !== undefined) {
-      requireJourney(tempParent !== undefined && dirname(ownedRoot) === tempParent && basename(ownedRoot).startsWith('ai7-j12-e2e-') && (await realpath(ownedRoot)) === ownedRoot, 'cleanup-target');
-      await rm(ownedRoot, { recursive: true, force: true });
-      runRoot = undefined;
-    }
-    if (credentialMutationReached && !productCredentialCleanupSucceeded) {
-      throw credentialCleanupFailure ?? new Error('J-12/credential-cleanup-failed');
-    }
-  }, removeSyntheticCredentialBeforeInterrupt);
+      if (credentialMutationReached && !productCredentialCleanupSucceeded) {
+        throw credentialCleanupFailure ?? new Error('J-12/credential-cleanup-failed');
+      }
+    })();
+    return cleanupPromise;
+  };
+  const cancellation = installJourneyCancellationCleanup(runCleanupOnce, runCleanupOnce);
   try {
     at('controller-loopback');
     cancellation.throwIfRequested();
@@ -431,6 +544,7 @@ async function main() {
     const syntheticDocx = resolve(inputs, 'public-j12-workbench.docx');
     await createSyntheticDocx(syntheticDocx);
     const dataRoot = await createCanonicalExternalDataRoot(resolve(runRoot, 'data'), checkout);
+    dataRootForCleanup = dataRoot;
     const shellRoot = await ensureCanonicalDataDirectory(dataRoot, 'shell');
     const executable = electronExecutable();
     const launch = async (picker) => {
@@ -885,6 +999,7 @@ async function main() {
       const ids=roles.map((node)=>node.dataset.modelRole);
       const main=document.querySelector('[data-model-role="main-editorial"]');
       const statuses=Array.from(document.querySelectorAll('[data-model-role] [role="status"]'));
+      const integrity=document.querySelector('[data-policy-integrity-state="verified"]');
       return roles.length===4 &&
         JSON.stringify(ids)===JSON.stringify(['fast-interaction','main-editorial','difficult-escalation','frontier']) &&
         main?.dataset.modelRoleStatus==='setup-required' &&
@@ -894,8 +1009,15 @@ async function main() {
         statuses.length===4 && statuses.every((node)=>node.getAttribute('aria-label')?.includes(node.textContent??'')) &&
         document.querySelector('.model-service-settings')?.dataset.policyIntegrity==='verified' &&
         document.querySelector('.model-service-settings')?.dataset.providerTransmissionCount==='0' &&
+        integrity?.textContent.includes('策略完整性：已验证') &&
+        integrity.textContent.includes('零次实时传输') &&
         document.body.textContent.includes('公开发布许可：不存在');
     })()`, 'four-role-first-policy-semantics');
+    await tabUntil(primary, `document.activeElement?.id==='main-editorial-connection-name' && document.activeElement.matches(':focus-visible')`, 'model-settings-keyboard-connection');
+    await dispatchTab(primary);
+    await assertRenderer(primary, `document.activeElement?.id==='main-editorial-credential' && document.activeElement.matches(':focus-visible')`, 'model-settings-keyboard-credential');
+    await dispatchTab(primary);
+    await assertRenderer(primary, `document.activeElement instanceof HTMLButtonElement && document.activeElement.type==='submit' && document.activeElement.textContent==='保护并保存' && document.activeElement.matches(':focus-visible')`, 'model-settings-keyboard-action');
     const secretOne = randomBytes(48).toString('base64url');
     const secretTwo = randomBytes(48).toString('base64url');
     await fill(primary, '#main-editorial-connection-name', 'J12 主编辑连接', 'model-connection-name');
@@ -933,6 +1055,10 @@ async function main() {
       'model-first-nonsecret-projection',
     );
     credentialReferenceForCleanup = firstConnection.connection.credentialReference;
+    requireJourney(
+      (await readSyntheticCredentialDirect(credentialReferenceForCleanup)) === secretOne,
+      'model-first-os-store-value',
+    );
     await primary.send('Emulation.setDeviceMetricsOverride', { width: 640, height: 800, deviceScaleFactor: 2, mobile: false });
     await primary.send('Emulation.setPageScaleFactor', { pageScaleFactor: 2 });
     await assertRenderer(primary, `document.documentElement.scrollWidth<=document.documentElement.clientWidth+2 && getComputedStyle(document.querySelector('.model-role-grid')).gridTemplateColumns.split(' ').length===1`, 'model-settings-zoom-reflow');
@@ -967,6 +1093,10 @@ async function main() {
         replacedConnection?.credentialOperationState === 'ready',
       'model-replacement-stable-reference',
     );
+    requireJourney(
+      (await readSyntheticCredentialDirect(credentialReferenceForCleanup)) === secretTwo,
+      'model-replacement-os-store-value',
+    );
     await close();
     await assertSecretsAbsentFromDataRoot(dataRoot, [secretOne, secretTwo], 'model-replacement-secrets-absent-from-data-root');
 
@@ -984,6 +1114,11 @@ async function main() {
         removedConnection?.credentialOperationState === 'missing',
       'model-removed-stable-reference',
     );
+    requireJourney(
+      (await readSyntheticCredentialDirect(credentialReferenceForCleanup)) === undefined,
+      'model-removed-os-store-absence',
+    );
+    productCredentialCleanupSucceeded = true;
     await close();
     await assertSecretsAbsentFromDataRoot(dataRoot, [secretOne, secretTwo], 'model-removed-secrets-absent-from-data-root');
     manager = await launch();
@@ -996,7 +1131,6 @@ async function main() {
         finalModelState.connection?.credentialOperationState === 'missing',
       'model-removal-survived-restart',
     );
-    productCredentialCleanupSucceeded = true;
     requireJourney(loopback.observedRequests() === 0, 'zero-sentinel-requests');
     await close();
     await loopback.close();
