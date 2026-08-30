@@ -3,7 +3,7 @@ const REFERENCE_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a
 
 type KeyringEntry = {
   setPassword(password: string): Promise<void>;
-  getPassword(): Promise<string | undefined>;
+  getPassword(): Promise<string | null | undefined>;
   deleteCredential(): Promise<boolean>;
 };
 

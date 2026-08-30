@@ -271,7 +271,7 @@ async function syntheticCredentialEntry(credentialReference) {
 }
 
 async function readSyntheticCredentialDirect(credentialReference) {
-  return (await syntheticCredentialEntry(credentialReference)).getPassword();
+  return (await (await syntheticCredentialEntry(credentialReference)).getPassword()) ?? undefined;
 }
 
 async function removeSyntheticCredentialDirect(credentialReference) {
