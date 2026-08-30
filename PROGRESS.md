@@ -18,7 +18,7 @@
 
 ## What's next
 
-Commit and push the review fixes to Draft pull request #139, obtain fresh read-only closure reviews at that exact head, re-resolve the newest `dev`, and perform the required disabled-workflow/no-run checks immediately before Ready and merge. Integrate the Journey `N/A` framework without enabling or dispatching Hosted CI, then complete the separate post-merge checkpoint archive node. Only after the framework and lifecycle node are live on `dev` may the next product route be re-resolved under ADR 0053.
+Complete fresh read-only closure review at the pushed Draft pull request #139 head, re-resolve the newest `dev`, and perform the required disabled-workflow/no-run checks immediately before Ready and merge. Integrate the Journey `N/A` framework without enabling or dispatching Hosted CI, then complete the separate post-merge checkpoint archive node. Only after the framework and lifecycle node are live on `dev` may the next product route be re-resolved under ADR 0053.
 
 ## Key decisions
 

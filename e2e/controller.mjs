@@ -276,8 +276,8 @@ export async function runJourneyProcess(journey) {
     let forcedTermination;
     const forwardSignal = (signal) => {
       if (controllerSignal !== null) return;
-      controllerSignal = signal;
       if (child.exitCode !== null || child.signalCode !== null) return;
+      controllerSignal = signal;
       if (child.connected) {
         try {
           child.send({ type: CANCELLATION_MESSAGE, signal }, () => undefined);
