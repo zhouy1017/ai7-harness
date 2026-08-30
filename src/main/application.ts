@@ -2199,6 +2199,12 @@ export async function runApplication(): Promise<void> {
       }
       const existing = bookWindows.get(resolved.bookId);
       if (existing && !existing.window.isDestroyed()) {
+        if (existing.closeRisk) {
+          throw new ServiceCallError(
+            'AI7_WORKBENCH_CLOSE_RISK',
+            '未切换、未聚焦这本图书的工作台；目标窗口仍有未确认的本地编辑，请先完成或处理这些编辑。',
+          );
+        }
         assignRoute(existing, resolved);
         focusOwnedWindow(existing);
         if (existing === requester) return { route: resolved, target: 'requesting-window' };

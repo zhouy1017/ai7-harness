@@ -377,6 +377,72 @@ async function main() {
     await waitFor(primary, `document.querySelector('[data-screen="editor"] [data-testid="manuscript-editor"]')`, 'editor-ready');
     const bookAWork = await primary.evaluate(`(async()=>{ const item=(await window.ai7.listPriorWork()).find((entry)=>entry.bookId===${JSON.stringify(bookA)}); return item ? {manuscriptId:item.manuscriptId,branchId:item.branchId} : null; })()`);
     requireJourney(UUID_PATTERN.test(bookAWork?.manuscriptId) && UUID_PATTERN.test(bookAWork?.branchId), 'book-a-manuscript-route-identity');
+    at('close-risk-route-preservation');
+    const routeRiskSuffix = '，J12 路由风险保护';
+    const riskyEditInserted = await primary.evaluate(`(() => { const editor=document.querySelector('[data-testid="manuscript-editor"]'); const block=editor?.querySelector('[data-block-id]'); if(!(block instanceof HTMLElement))return false; block.focus(); const range=document.createRange(); range.selectNodeContents(block); range.collapse(false); const selection=getSelection(); selection.removeAllRanges(); selection.addRange(range); document.execCommand('insertText',false,${JSON.stringify(routeRiskSuffix)}); return block.textContent?.endsWith(${JSON.stringify(routeRiskSuffix)}); })()`);
+    requireJourney(riskyEditInserted === true, 'close-risk-edit-inserted');
+    await waitFor(primary, `document.documentElement.dataset.ai7CloseRisk==='true' && !Array.from(document.querySelectorAll('button')).find((item)=>item.textContent==='保存当前编辑')?.disabled`, 'close-risk-advertised');
+    at('close-risk-same-window-request');
+    const sameWindowRisk = await primary.evaluate(`(async()=>{ const active=document.activeElement; const result=await window.ai7.openBookWorkbench({kind:'revision',revisionId:${JSON.stringify(revisionOne)}}).then(value=>({accepted:true,value}),error=>({accepted:false,code:error?.code,message:error?.message})); return {result,route:await window.ai7.getBookWorkbenchRoute(),activePreserved:active===document.activeElement,dirty:document.documentElement.dataset.ai7CloseRisk==='true'&&document.querySelector('[data-testid="manuscript-editor"] [data-block-id]')?.textContent.endsWith(${JSON.stringify(routeRiskSuffix)})}; })()`);
+    requireJourney(
+      sameWindowRisk?.result?.accepted === false &&
+        sameWindowRisk.result.code === 'AI7_WORKBENCH_CLOSE_RISK' &&
+        sameWindowRisk.result.message?.startsWith('未切换、未聚焦') &&
+        sameWindowRisk.route?.kind === 'book' &&
+        sameWindowRisk.route.bookId === bookA &&
+        sameWindowRisk.activePreserved === true &&
+        sameWindowRisk.dirty === true,
+      'same-window-risk-route-rejected-without-mutation',
+    );
+    const routeEventBeforeRisk = await primary.evaluate(`document.documentElement.dataset.ai7BookWorkbenchRouteGeneration??null`);
+    at('close-risk-cross-window-focus');
+    await bookBRenderer.send('Page.bringToFront');
+    await waitFor(bookBRenderer, `document.hasFocus() && document.visibilityState==='visible'`, 'risk-book-b-focused');
+    await assertRenderer(primary, `!document.hasFocus()`, 'risk-book-a-not-focused');
+    await new Promise((resolveWait) => setTimeout(resolveWait, 100));
+    at('close-risk-cross-window-request');
+    const crossWindowRisk = await bookBRenderer.evaluate(`window.ai7.openBookWorkbench({kind:'revision',revisionId:${JSON.stringify(revisionOne)}}).then(value=>({accepted:true,value}),error=>({accepted:false,code:error?.code,message:error?.message}))`);
+    requireJourney(
+      crossWindowRisk?.accepted === false &&
+        crossWindowRisk.code === 'AI7_WORKBENCH_CLOSE_RISK' &&
+        crossWindowRisk.message?.startsWith('未切换、未聚焦'),
+      'cross-window-risk-route-rejected',
+    );
+    at('close-risk-capability-preservation');
+    const riskPreserved = await primary.evaluate(`(async()=>{ const outline=await window.ai7.getOutline({manuscriptId:${JSON.stringify(bookAWork.manuscriptId)},branchId:${JSON.stringify(bookAWork.branchId)},cursor:null}); return {route:await window.ai7.getBookWorkbenchRoute(),routeEvent:document.documentElement.dataset.ai7BookWorkbenchRouteGeneration??null,dirty:document.documentElement.dataset.ai7CloseRisk==='true'&&document.querySelector('[data-testid="manuscript-editor"] [data-block-id]')?.textContent.endsWith(${JSON.stringify(routeRiskSuffix)}),outlineIdentity:outline.manuscriptId===${JSON.stringify(bookAWork.manuscriptId)}&&outline.branchId===${JSON.stringify(bookAWork.branchId)}}; })()`);
+    const riskFocus = await Promise.all([
+      primary.evaluate(`document.hasFocus()`),
+      bookBRenderer.evaluate(`document.hasFocus()`),
+      bookBRenderer.evaluate(`window.ai7.getBookWorkbenchRoute()`),
+    ]);
+    requireJourney(
+      riskPreserved?.route?.kind === 'book' &&
+        riskPreserved.route.bookId === bookA &&
+        riskPreserved.routeEvent === routeEventBeforeRisk &&
+        riskPreserved.dirty === true &&
+        riskPreserved.outlineIdentity === true &&
+        riskFocus[0] === false &&
+        riskFocus[1] === true &&
+        riskFocus[2]?.kind === 'book' &&
+        riskFocus[2].bookId === bookB,
+      'cross-window-risk-preserved-route-capability-content-and-focus',
+    );
+    at('background-journal-non-focus-steal');
+    await click(primary, '保存当前编辑', 'background-risk-edit-save');
+    await waitFor(primary, `document.querySelector('#persistence-status')?.dataset.tone==='success' && document.querySelector('#persistence-status')?.textContent.includes('修订日志') && document.documentElement.dataset.ai7CloseRisk==='false'`, 'background-risk-edit-durable', 120_000);
+    await assertRenderer(bookBRenderer, `document.hasFocus() && document.visibilityState==='visible'`, 'background-journal-kept-book-b-focus');
+    await assertRenderer(primary, `!document.hasFocus()`, 'background-journal-did-not-focus-book-a');
+    await new Promise((resolveWait) => setTimeout(resolveWait, 100));
+    const clearedRiskReuse = await bookBRenderer.evaluate(`window.ai7.openBookWorkbench({kind:'revision',revisionId:${JSON.stringify(revisionOne)}})`);
+    requireJourney(
+      clearedRiskReuse?.target === 'existing-window' &&
+        clearedRiskReuse.route?.kind === 'revision' &&
+        clearedRiskReuse.route.revisionId === revisionOne,
+      'cleared-risk-existing-window-reused',
+    );
+    await waitFor(primary, `document.hasFocus() && document.querySelector('[data-screen="historical-revision"] [data-revision-id=${JSON.stringify(revisionOne)}]')`, 'cleared-risk-revision-focused');
+    await click(primary, '返回当前工作状态', 'cleared-risk-return-current');
+    await waitFor(primary, `document.querySelector('[data-screen="editor"] [data-testid="manuscript-editor"]')?.textContent.includes(${JSON.stringify(routeRiskSuffix)})`, 'cleared-risk-current-restored');
     const editableTextBeforeRace = await primary.evaluate(`document.querySelector('[data-testid="manuscript-editor"]')?.textContent`);
     const editableReadRace = await primary.evaluate(`Promise.allSettled([
       window.ai7.getManuscriptWindowAt({manuscriptId:${JSON.stringify(bookAWork.manuscriptId)},branchId:${JSON.stringify(bookAWork.branchId)},target:{kind:'start'}}),
