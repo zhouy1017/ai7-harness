@@ -431,9 +431,25 @@ async function main() {
   let productCredentialCleanupSucceeded = false;
   let credentialCleanupFailure;
   let cleanupPromise;
+  let finalCleanupRequested = false;
   const closeOwnedBrowser = async () => {
-    const ownedBrowser = browser ?? (browserAcquisition === undefined ? undefined : await browserAcquisition.catch(() => undefined));
-    await ownedBrowser?.close().catch(() => undefined);
+    let ownedBrowser = browser;
+    if (ownedBrowser === undefined && browserAcquisition !== undefined) {
+      try {
+        ownedBrowser = await browserAcquisition;
+      } catch {
+        browserAcquisition = undefined;
+        managerForCleanup = undefined;
+        return;
+      }
+    }
+    if (ownedBrowser === undefined) {
+      browserAcquisition = undefined;
+      managerForCleanup = undefined;
+      return;
+    }
+    browser = ownedBrowser;
+    await ownedBrowser.close();
     browser = undefined;
     browserAcquisition = undefined;
     managerForCleanup = undefined;
@@ -445,11 +461,20 @@ async function main() {
     if (cleanupRenderer === undefined) return false;
     const before = await cleanupRenderer.evaluate(`window.ai7.getModelServiceSettings().then((settings)=>settings.roles.find((role)=>role.roleId==='main-editorial')?.connection??null)`);
     if (UUID_PATTERN.test(before?.credentialReference)) {
+      requireJourney(
+        credentialReferenceForCleanup === undefined || credentialReferenceForCleanup === before.credentialReference,
+        'credential-cleanup-reference',
+      );
       credentialReferenceForCleanup = before.credentialReference;
+      if (before.credentialOperationState === 'missing') return true;
     }
     await cleanupRenderer.evaluate(`window.ai7.removeModelServiceCredential()`);
     const after = await cleanupRenderer.evaluate(`window.ai7.getModelServiceSettings().then((settings)=>settings.roles.find((role)=>role.roleId==='main-editorial')?.connection??null)`);
     if (UUID_PATTERN.test(after?.credentialReference)) {
+      requireJourney(
+        credentialReferenceForCleanup === undefined || credentialReferenceForCleanup === after.credentialReference,
+        'credential-cleanup-reference',
+      );
       credentialReferenceForCleanup = after.credentialReference;
     }
     requireJourney(
@@ -517,7 +542,11 @@ async function main() {
     })();
     return cleanupPromise;
   };
-  const cancellation = installJourneyCancellationCleanup(runCleanupOnce, runCleanupOnce);
+  const interruptOwnedBrowser = async () => {
+    if (finalCleanupRequested) return;
+    await closeOwnedBrowser();
+  };
+  const cancellation = installJourneyCancellationCleanup(runCleanupOnce, interruptOwnedBrowser);
   try {
     at('controller-loopback');
     cancellation.throwIfRequested();
@@ -1135,6 +1164,7 @@ async function main() {
     await close();
     await loopback.close();
   } finally {
+    finalCleanupRequested = true;
     try {
       await cancellation.cleanup();
     } finally {
