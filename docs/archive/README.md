@@ -16,3 +16,4 @@ Archived lifecycle nodes are historical records excluded from ordinary current-s
 - [Issue #144 defer macOS evidence — 2026-08-31](issue-144-defer-macos-evidence-2026-08-31/INDEX.md): Issue #144 / PR #145 closure checkpoint and consumed root routing.
 - [Issue #46 Model Service credentials — 2026-08-31](issue-46-model-service-credentials-2026-08-31/INDEX.md): merged Issue #46 / PR #143 consumed checkpoint and current dependency routing.
 - [Issue #153 J-03 governance — 2026-08-31](issue-153-j03-governance-2026-08-31/INDEX.md): integrated Issue #153 / PR #154 consumed checkpoint and current Issue #155 routing.
+- [Issue #158 J-15 governance — 2026-08-31](issue-158-j15-governance-2026-08-31/INDEX.md): integrated Issue #158 / PR #159 consumed checkpoint and current Issue #88 routing.
