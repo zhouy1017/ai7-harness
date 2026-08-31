@@ -246,6 +246,15 @@ function decodeRequest(frame: Uint8Array): ServiceRequest {
           (cursor.direction === 'forward' || cursor.direction === 'backward')))) throw new ProtocolError(tentativeId);
       break;
     }
+    case 'inspectEditorialWorkspaceProfile':
+    case 'installEditorialWorkspaceProfile':
+    case 'enableEditorialWorkspaceProfile': {
+      const input = requireInput(value.input, ['bookId'], tentativeId);
+      if (!isBoundedString(input.bookId, 36) || !UUID_PATTERN.test(input.bookId)) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
     case 'prepareNewBookReview': {
       const input = requireInput(
         value.input,
@@ -804,6 +813,27 @@ async function dispatch(
       return {
         id: request.id, ok: true, op: request.op,
         result: store.getBookOverview(request.input.bookId, request.input.historyCursor),
+      };
+    case 'inspectEditorialWorkspaceProfile':
+      return {
+        id: request.id,
+        ok: true,
+        op: request.op,
+        result: await store.inspectEditorialWorkspaceProfile(request.input.bookId),
+      };
+    case 'installEditorialWorkspaceProfile':
+      return {
+        id: request.id,
+        ok: true,
+        op: request.op,
+        result: await store.installEditorialWorkspaceProfile(request.input.bookId),
+      };
+    case 'enableEditorialWorkspaceProfile':
+      return {
+        id: request.id,
+        ok: true,
+        op: request.op,
+        result: await store.enableEditorialWorkspaceProfile(request.input.bookId),
       };
     case 'listBooks':
       return { id: request.id, ok: true, op: request.op, result: store.listBooks(request.input.after) };

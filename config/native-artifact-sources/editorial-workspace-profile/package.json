@@ -1,0 +1,11 @@
+{
+  "name": "@ai7/editorial-workspace-profile",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Declarative native DSH Profile for AI7 artifact lifecycle and Book-bound workspace admission.",
+  "dsh": {
+    "profile": {
+      "bundles": []
+    }
+  }
+}

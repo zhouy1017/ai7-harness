@@ -6,6 +6,7 @@ import type {
   BookWorkOverviewProjection,
   FidelityCategoryProjection,
   ContinueImportProjection,
+  EditorialWorkspaceProfileProjection,
   ImportCommitProjection,
   ImportDraftRecoveryProjection,
   ImportStartupProjection,
@@ -1172,6 +1173,27 @@ function renderBookOverview(
   identity.append(element('h3', undefined, '图书'), identityValues);
   content.append(identity);
 
+  const artifactHost = element('div');
+  artifactHost.dataset['nativeArtifactBookId'] = overview.book.bookId;
+  content.append(artifactHost);
+  void window.ai7.inspectEditorialWorkspaceProfile().then(
+    (projection) => {
+      if (artifactHost.isConnected && projection.bookId === artifactHost.dataset['nativeArtifactBookId']) {
+        renderEditorialWorkspaceProfile(artifactHost, projection);
+      }
+    },
+    (error) => {
+      if (!artifactHost.isConnected) return;
+      const unavailable = element('section', 'native-artifact-card attention-note');
+      unavailable.dataset['nativeArtifactState'] = 'unavailable-needs-attention';
+      unavailable.append(
+        element('h3', undefined, '编辑工作区方案'),
+        element('p', undefined, rendererErrorMessage(error, '无法读取本地声明式方案。')),
+      );
+      artifactHost.replaceChildren(unavailable);
+    },
+  );
+
   const detailHost = element('div');
   const actions = element('div', 'button-row');
   const completionActionButtons: HTMLButtonElement[] = [];
@@ -1324,6 +1346,99 @@ function renderBookOverview(
   } else {
     setStatus('图书工作概览已打开');
   }
+}
+
+function renderEditorialWorkspaceProfile(
+  host: HTMLElement,
+  projection: EditorialWorkspaceProfileProjection,
+): void {
+  const card = element('section', 'native-artifact-card');
+  card.dataset['nativeArtifactState'] = projection.lifecycle.state;
+  card.dataset['nativeArtifactIdentity'] = projection.identity;
+  const heading = element('div', 'native-artifact-heading');
+  heading.append(
+    element('h3', undefined, '编辑工作区方案'),
+    element(
+      'span',
+      `status-pill native-artifact-status native-artifact-status-${projection.lifecycle.state}`,
+      projection.lifecycle.label,
+    ),
+  );
+  const values = element('dl', 'native-artifact-facts');
+  values.append(
+    element('dt', undefined, '身份'), element('dd', 'technical-identity', projection.identity),
+    element('dt', undefined, '类型'), element('dd', undefined, projection.kind),
+    element('dt', undefined, '版本'), element('dd', 'technical-identity', projection.version),
+    element('dt', undefined, '来源'), element('dd', undefined, projection.provenance),
+    element('dt', undefined, '许可'), element('dd', undefined, projection.license),
+    element('dt', undefined, '内置载体'), element('dd', 'technical-identity', projection.source),
+    element('dt', undefined, '精确字节'), element('dd', undefined, `${projection.byteLength} bytes`),
+    element('dt', undefined, 'SHA-256'), element('dd', 'technical-identity', projection.sha256),
+    element('dt', undefined, '兼容性'), element('dd', undefined, projection.compatibility),
+  );
+  const authority = element('section', 'native-artifact-authority');
+  const authorityValues = element('dl', 'native-artifact-facts');
+  authorityValues.append(
+    element('dt', undefined, 'Model Role'), element('dd', undefined, projection.authorityCeiling.modelRoles.join('、')),
+    element('dt', undefined, 'Capability'), element('dd', undefined, projection.authorityCeiling.capabilities.length === 0 ? '空（无）' : projection.authorityCeiling.capabilities.join('、')),
+    element('dt', undefined, 'Readable Scope'), element('dd', undefined, projection.authorityCeiling.readableScopeKinds.length === 0 ? '空（无）' : projection.authorityCeiling.readableScopeKinds.join('、')),
+    element('dt', undefined, 'Provider Binding'), element('dd', undefined, projection.authorityCeiling.providerBindings.length === 0 ? '空（无）' : projection.authorityCeiling.providerBindings.join('、')),
+    element('dt', undefined, 'Credential'), element('dd', undefined, projection.authorityCeiling.credentialAccess ? '有' : '空（无）'),
+    element('dt', undefined, 'Network'), element('dd', undefined, projection.authorityCeiling.networkAccess ? '有' : '空（无）'),
+    element('dt', undefined, 'Effect'), element('dd', undefined, projection.authorityCeiling.effectClasses.length === 0 ? '空（无）' : projection.authorityCeiling.effectClasses.join('、')),
+    element('dt', undefined, 'Enrollment'), element('dd', undefined, projection.authorityCeiling.backgroundAnalysisEnrollment ? '有' : '空（无）'),
+    element('dt', undefined, 'Apply'), element('dd', undefined, projection.authorityCeiling.applyAuthority ? '有' : '空（无）'),
+  );
+  authority.append(element('h4', undefined, 'Authority Ceiling'), authorityValues);
+  const nonEffects = element('ul', 'native-artifact-non-effects');
+  for (const statement of projection.namedNonEffects) nonEffects.append(element('li', undefined, statement));
+  const actions = element('div', 'button-row native-artifact-actions');
+  if (projection.actions.canInstall) {
+    const install = button('获取并安装（保持停用）', 'primary', async () => {
+      install.disabled = true;
+      setStatus('正在保留并验证本地方案…', 'busy');
+      try {
+        const installed = await window.ai7.installEditorialWorkspaceProfile();
+        if (host.isConnected && installed.bookId === host.dataset['nativeArtifactBookId']) {
+          renderEditorialWorkspaceProfile(host, installed);
+          setStatus('方案已安装，本图书仍保持停用。', 'success');
+        }
+      } catch (error) {
+        install.disabled = false;
+        setStatus(rendererErrorMessage(error, '无法安装本地方案。'), 'error');
+      }
+    });
+    install.dataset['nativeArtifactAction'] = 'install-disabled';
+    actions.append(install);
+  }
+  if (projection.actions.canEnable) {
+    const enable = button('仅为本图书启用', 'primary', async () => {
+      enable.disabled = true;
+      setStatus('正在为当前图书启用方案…', 'busy');
+      try {
+        const enabled = await window.ai7.enableEditorialWorkspaceProfile();
+        if (host.isConnected && enabled.bookId === host.dataset['nativeArtifactBookId']) {
+          renderEditorialWorkspaceProfile(host, enabled);
+          setStatus('方案已仅为当前图书启用。', 'success');
+        }
+      } catch (error) {
+        enable.disabled = false;
+        setStatus(rendererErrorMessage(error, '无法为当前图书启用方案。'), 'error');
+      }
+    });
+    enable.dataset['nativeArtifactAction'] = 'enable-current-book';
+    actions.append(enable);
+  }
+  card.append(
+    heading,
+    element('p', 'field-note', '这是一份声明式、Provider-free 的本地方案；安装与为当前图书启用是两个独立动作。'),
+    values,
+    authority,
+    element('h4', undefined, '明确不会发生'),
+    nonEffects,
+    actions,
+  );
+  host.replaceChildren(card);
 }
 
 function renderBookCreationReview(review: BookCreationReviewProjection): void {

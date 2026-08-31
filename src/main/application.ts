@@ -1653,6 +1653,53 @@ function registerRendererHandlers(
       return serializeBinding ? serializeEffect(operation) : operation();
     }),
   );
+  ipcMain.handle(IPC_CHANNELS.inspectEditorialWorkspaceProfile, (event) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      requireAuthority();
+      const route = requireCurrentBookRoute(owned);
+      const routeGeneration = owned.routeGeneration;
+      const routeRequestSequence = owned.routeRequestSequence;
+      const result = await service.call('inspectEditorialWorkspaceProfile', { bookId: route.bookId });
+      requireCurrentRouteReadEpoch(owned, routeGeneration, routeRequestSequence);
+      if (result.bookId !== route.bookId) {
+        throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '原生构件状态不属于当前图书工作台。');
+      }
+      return result;
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.installEditorialWorkspaceProfile, (event) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      return serializeEffect(async () => {
+        requireAuthority();
+        const route = requireCurrentBookRoute(owned);
+        const routeGeneration = owned.routeGeneration;
+        const result = await service.call('installEditorialWorkspaceProfile', { bookId: route.bookId });
+        requireCurrentRouteGeneration(owned, routeGeneration);
+        if (result.bookId !== route.bookId) {
+          throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '原生构件安装结果不属于当前图书工作台。');
+        }
+        return result;
+      });
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.enableEditorialWorkspaceProfile, (event) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      return serializeEffect(async () => {
+        requireAuthority();
+        const route = requireCurrentBookRoute(owned);
+        const routeGeneration = owned.routeGeneration;
+        const result = await service.call('enableEditorialWorkspaceProfile', { bookId: route.bookId });
+        requireCurrentRouteGeneration(owned, routeGeneration);
+        if (result.bookId !== route.bookId) {
+          throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '原生构件启用结果不属于当前图书工作台。');
+        }
+        return result;
+      });
+    }),
+  );
   ipcMain.handle(IPC_CHANNELS.startSearch, (event, input: ServiceOperationMap['startSearch']['input']) =>
     envelope(async () => {
       const owned = requireSender(event);

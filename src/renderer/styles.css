@@ -81,6 +81,18 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .lede { margin: 0 0 1.5rem; color: #555d53; line-height: 1.65; }
 .source-card, .review-section { margin-top: 1.3rem; padding: 1.15rem 1.25rem; border: 1px solid #ded9cd; border-radius: 12px; background: #faf8f1; }
 .source-card dl, .identity-grid { display: grid; grid-template-columns: max-content 1fr; gap: .55rem 1rem; margin: .8rem 0 0; }
+.native-artifact-card { margin-top: 1.3rem; padding: 1.15rem 1.25rem; border: 1px solid #cbd4c7; border-radius: 12px; background: #f6f8f2; }
+.native-artifact-heading { display: flex; align-items: center; justify-content: space-between; gap: .8rem; }
+.native-artifact-heading h3, .native-artifact-card h4 { margin: 0; }
+.native-artifact-facts { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: .45rem .8rem; margin: .9rem 0 0; }
+.native-artifact-authority { margin-top: 1rem; padding-top: 1rem; border-top: 1px solid #d5dcd1; }
+.native-artifact-card > h4 { margin-top: 1rem; }
+.native-artifact-non-effects { margin: .55rem 0 0; padding-left: 1.2rem; line-height: 1.65; }
+.native-artifact-actions { margin-top: 1rem; }
+.native-artifact-status-available-to-install { background: #e8eee3; color: #3f5542; }
+.native-artifact-status-installed-disabled { background: #fff0cf; color: #76530f; }
+.native-artifact-status-enabled-for-book { background: #e5f1e7; color: #28533a; }
+.native-artifact-status-unavailable-needs-attention { background: #f3e4e0; color: #753a31; }
 dt { color: #6b7068; font-size: .86rem; }
 dd { margin: 0; overflow-wrap: anywhere; }
 code { font-family: ui-monospace, "SFMono-Regular", Consolas, monospace; font-size: .8rem; }
@@ -206,6 +218,8 @@ legend { margin-bottom: .7rem; font-weight: 800; }
   .editor-window { padding: 1.25rem; }
   .window-actions { grid-template-columns: auto 1fr auto; }
   .position-rail-label { grid-column: 1 / -1; }
+  .native-artifact-facts { grid-template-columns: 1fr; }
+  .native-artifact-facts dd + dt { margin-top: .35rem; }
 }
 
 @media (max-width: 560px) {
@@ -215,13 +229,15 @@ legend { margin-bottom: .7rem; font-weight: 800; }
   .editor-shell { padding: 0; }
   .editor-toolbar .button-row { width: 100%; }
   .editor-toolbar .button-row button { flex: 1; }
+  .native-artifact-heading { align-items: flex-start; flex-direction: column; }
 }
 
 @media (forced-colors: active) {
   :root, body, .panel, .hero-note, .source-card, .review-section, .choice, .commit-bar,
   .editor-toolbar, .manuscript-navigator, .manuscript-surface, .editor-window, .editor-identities,
   .search-result, .replacement-review, .recent-work-item, .book-summary-item, .status-bar, .recovery-snapshot-disclosure,
-  .recovery-readonly-blocks, .recovered-state-marker, .model-role-card {
+  .recovery-readonly-blocks, .recovered-state-marker, .model-role-card, .native-artifact-card,
+  .native-artifact-authority {
     color: CanvasText;
     background: Canvas;
     border-color: CanvasText;
