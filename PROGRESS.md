@@ -2,33 +2,36 @@
 
 ## What's done
 
-- Issue #138 / PR #139 integrated the local-first, low-usage real-E2E testing framework to `dev` as `28e541922cb14a8b0c92468b6092e30c2663c109`.
-- Developers and later Agents now use capture-only `pnpm --silent run e2e:diagnose -- --journey <admitted-id>` for iteration. `pnpm run e2e:all` is the fixed all-admitted-Journey runner inside ADR 0053's stricter CI-degraded Local-completion sequence; it does not replace the required `doctor`, `bootstrap`, or clean `build`. A diagnostic pass is never completion evidence; a real product, build, or Journey failure remains red and returns to its own authorized Issue.
-- ADR 0053 and the live agent runbooks distinguish Local diagnostic, Local completion, and Hosted Gate evidence. The bounded CI-degraded path permits one-at-a-time integration only after truthful local completion and explicit missing-hosted-evidence recording; it never manufactures paired-platform evidence.
-- Normal Hosted CI remains one provider-free E2E Functional Gate covering every admitted Journey on Windows and macOS. Draft suppression, concurrency cancellation, one build per platform, failure early-stop, and the narrow integrity-reverified Electron cache bound GitHub usage without reducing admitted coverage.
-- Workflow `342459594` remained `disabled_manually` throughout Ready and merge. Exact pre-Ready and pre-merge checks found zero queued or in-progress runs and no run for the framework head, so PR #139 produced no Hosted Gate evidence.
-- Issue #138 was a Journey `N/A` framework outcome. It changed no product source and made no product Local-completion or four-Journey-green claim; unfinished product behavior remains deliberately outside that Issue.
-- The mandatory Issue #140 lifecycle sweep archives exactly the consumed Issue #138 `PROGRESS.md` snapshot under `docs/archive/issue-138-local-first-e2e-framework-2026-08-30/`. The outgoing handoff remains in Git history only, and the stable root routers now point forward.
-- Issue #46 is the next product route after this lifecycle node is live. Its Change Brief and existing paused worktree must be refreshed against the then-current exact `dev` and ADR 0053 before dispatch; this checkpoint does not implement any part of Issue #46.
+- Issue #144 is the sole active governance-authoring route on branch `docs/144-defer-macos-evidence`, based exactly on `dev@681a79c1ceff278b6f2a1ecbe3984e18997c5a2a`. Its Change Brief declares Journey `N/A — documentation and repository-governance authority only`.
+- ADR 0054 records the Owner's 2026-08-31 timing decision: before the exact Initial v1.0.0 Development Milestone Boundary, fresh exact-head Windows `doctor` → `bootstrap` → `build` → `e2e:all` is the only required platform evidence for product integration. macOS evidence is deferred and disclosed, never represented as passing.
+- The live root, CI, project-constraint, incremental-development, Git, dispatch, and developer-facing routers project the same pre-boundary rule, exact disclosure, boundary expiry, consolidated Windows/macOS re-entry, no-backfill rule, and Ready-but-unmerged rebase requirement without duplicating the whole ADR.
+- The boundary can be crossed only by a separately authorized integrated stable record naming the exact `dev` commit containing the Owner-confirmed complete initial-v1.0.0 development scope. It is not a product Milestone Version, GitHub milestone, package version, tag, release, `main` promotion, elapsed time, Issue count, Draft pull request, or unintegrated declaration.
+- One Windows/macOS AI7 product, semantic parity, ADR 0028/0052 commitments, one logical provider-free Gate, J-01/J-02/J-08/J-12 admission, privacy/egress/credential/data boundaries, and Commander-only integration remain unchanged. ADR 0014's historical Windows-only Gate is not revived.
+- Workflow `342459594` remains `disabled_manually`, unrun, and structurally unchanged. No product, source-checkout, E2E, tool, config, package, dependency, Provider, credential, manuscript, workflow, release, or external action entered Issue #144.
+- Bounded documentation validation confirms the exact allowed-path set, required terms and exact disclosure, resolvable local links, unchanged workflow/product/source-checkout/prior-ADR surfaces, and a clean `git diff --check`. No `doctor`, bootstrap, build, or E2E command was run because this Issue's Journey is `N/A`.
+- Issue #142 is closed. Issue #46 retains its sole branch/worktree and Draft PR #143 targeting `dev`; its current branch head is `cebcd438144160e5c959ef41464dd7b9685efacf`. Its earlier Windows validation belongs to exact product source head `ed54e0030d7873884e648d780720bab71657e67a`, with later documentation checkpoints, and cannot follow a future rebase. That Windows run passed `doctor`, `bootstrap`, `build`, and J-01/J-02/J-08/J-12 through `e2e:all`, with post-run AI7 eligible credential count `0`; no Provider call occurred.
 
 ## What's next
 
-After Issue #140 integrates, re-resolve Issue #46 against the newest exact `dev`, update its superseded ADR 0050 references and CI-degraded integration clauses to ADR 0053, preserve and deliberately reconcile its existing paused uncommitted candidate work, and restore `ready-for-agent`. Then one Worker may continue only Issue #46 under the new local diagnostic/completion contract; unrelated product failures remain separate work.
+- Commander reviews Issue #144's bounded documentation diff, re-resolves the newest exact `dev`, and performs only authorized branch/PR/integration actions. This ADR is accepted-but-unintegrated until the governance pull request lands on `dev`.
+- At Issue #144's exact integration/closure node, perform the scoped documentation lifecycle sweep. Current authoring has no consumed artifact to archive or delete; do not create an empty archive.
+- After ADR 0054 is live on `dev`, rebase Issue #46 / Draft PR #143 onto that exact `dev`, re-resolve all target-qualified authority, and rerun the full Windows `doctor` → `bootstrap` → `build` → `e2e:all` sequence at the exact rebased head. Only that fresh result may support the ADR 0054 disclosure before Commander Ready/merge action.
 
 ## Key decisions
 
-- Local iteration is cheap and informative. Normal Local completion uses the documented clean build plus applicable real Journey; CI-degraded Local completion uses exact `doctor` → `bootstrap` → `build` → `e2e:all`. Hosted Gate evidence is a third, non-substitutable state.
-- Low GitHub usage comes from fewer integration-ready occurrences and bounded execution, not from selective Journey/platform coverage or extra standing gates.
-- Testing-framework work proves truthful orchestration and cleanup. It does not authorize product implementation or require unfinished product Journeys to pass.
-- Future Agents must follow ADR 0053 and `docs/agents/ci-test-boundaries.md`; a red outcome may not be repaired outside the active Change Brief.
+- ADR 0054 changes evidence timing only. It neither removes macOS support nor creates a Windows-only Gate, platform edition, test surface, evidence registry, workflow route, or milestone-control mechanism.
+- A Windows product/bootstrap/build/Journey failure or unknown blocks Ready and merge. A known macOS-only problem is recorded for mandatory re-entry rather than relabeled as passing or made a pre-boundary merge requirement.
+- At the exact boundary commit the exception expires. Before later product integration or any `dev` → `main`, `v1.0.0` tag, package, signing, notarization, publication, or release action, a separate authorized re-entry validates consolidated current `dev` on actual Windows and macOS or through the exact paired workflow if separately restored.
+- Re-entry validates consolidated `dev`; it never retrospectively relabels or backfills old pull requests. Ready but unmerged product work rebases after successful re-entry.
 
 ## Unresolved matters or blockers
 
-- Workflow `342459594` remains deliberately disabled, so no Hosted Gate or paired-platform evidence exists. Its restoration requires the separately governed availability condition and is not implied by local success.
-- Issue #46 remains product work. Its existing `feat/46-model-service-credentials` worktree contains paused uncommitted candidate changes that must not be reset, discarded, or hidden by a parallel branch; a future Worker must inspect and reconcile them under the refreshed Change Brief.
+- ADR 0054 is not repository-current until Issue #144 integrates to `dev`; Issue #46 may not rely on this branch-only authority.
+- The initial-v1.0.0 feature inventory and completion criteria, the future exact boundary record, workflow restoration, re-entry execution, macOS remediation discovered at re-entry, and every promotion/release action remain separately authorized future work.
+- Workflow `342459594` remains disabled and must not be enabled, dispatched, rerun, probed, or replaced under Issue #144.
 
 ## Safe Resume Prompt
 
 ```text
-Commander: confirm Issue #140 is live on the newest dev, then refresh Issue #46's exact authority target, ADR 0053 testing clauses, and existing paused-work routing before restoring ready-for-agent. Preserve its uncommitted candidate work and dispatch one Worker only in the existing Issue #46 worktree. Require capture-only local diagnostics during iteration and ADR 0053's exact doctor → bootstrap → build → e2e:all sequence for CI-degraded Local completion; record missing Hosted Gate evidence while workflow 342459594 remains disabled, and do not repair unrelated product failures.
+Commander: review and integrate only Issue #144's bounded ADR/runbook normalization after re-resolving newest dev; keep workflow 342459594 disabled and structurally unchanged, perform no product Journey or Provider action, and run the scoped lifecycle sweep only at the exact integration/closure node. After ADR 0054 is live, rebase the sole Issue #46 branch and Draft PR #143 onto that dev, re-resolve authority, and rerun exact-head Windows doctor → bootstrap → build → e2e:all. Do not carry forward the earlier ed54e003 Windows result, claim macOS passed, or mark Issue #46 Ready before the fresh rebased-head Windows completion and exact ADR 0054 disclosure.
 ```
