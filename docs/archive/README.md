@@ -14,3 +14,4 @@ Archived lifecycle nodes are historical records excluded from ordinary current-s
 - [Issue #42 Book Workbench — 2026-08-30](issue-42-book-workbench-2026-08-30/INDEX.md): merged Issue #42 / PR #135 closure snapshots and consumed root routing.
 - [Issue #138 local-first E2E framework — 2026-08-30](issue-138-local-first-e2e-framework-2026-08-30/INDEX.md): merged Issue #138 / PR #139 consumed checkpoint and post-framework routing.
 - [Issue #144 defer macOS evidence — 2026-08-31](issue-144-defer-macos-evidence-2026-08-31/INDEX.md): Issue #144 / PR #145 closure checkpoint and consumed root routing.
+- [Issue #46 Model Service credentials — 2026-08-31](issue-46-model-service-credentials-2026-08-31/INDEX.md): merged Issue #46 / PR #143 consumed checkpoint and current dependency routing.
