@@ -1,6 +1,6 @@
 # Repository Development Dispatch
 
-Status: **accepted in Question 25 with owner revisions**
+Status: **accepted in Question 25 with owner revisions through 2026-08-31**
 
 ## Scope
 
@@ -64,11 +64,12 @@ Every Reviewer report carries one line with the reviewed task class; requested a
 3. Keep briefs tight; cold-start cost scales with what the worker must rediscover.
 4. Urgency is not a task class and never changes the binding.
 5. Do not consume or probe Worker quota for T0 work, Commander decisions, final integration, or independent review merely to satisfy a provider preference; those remain in their existing roles.
-6. Map the current implementation narrowly before dispatch and use the earliest adequate rung in the [incremental development lifecycle](../docs/agents/incremental-development.md). Do not pay cold-start cost for a parallel design the existing owner can absorb.
+6. Use an accepted capacity lane only for an existing eligible unit; do not invent or fragment work merely to consume available capacity.
+7. Map the current implementation narrowly before dispatch and use the earliest adequate rung in the [incremental development lifecycle](../docs/agents/incremental-development.md). Do not pay cold-start cost for a parallel design the existing owner can absorb.
 
 ## Layer B — Bindings
 
-This whole layer is **the only provider-specific policy surface in this design**. It contains the class-to-model table, Worker provider order, and quota fallback. Replacing a provider changes this layer, never Layer A. Operational dispatch logs may name an actual binding as evidence; they do not create another policy surface.
+This whole layer is **the only provider-specific policy surface in this design**. It contains the class-to-model table, Worker provider order and accepted capacity lanes, and quota fallback. Replacing a provider changes this layer, never Layer A. Operational dispatch logs may name an actual binding as evidence; they do not create another policy surface.
 
 | Class | Codex | Claude | Relative cost |
 | --- | --- | --- | --- |
@@ -80,15 +81,28 @@ This whole layer is **the only provider-specific policy surface in this design**
 
 Task class is the provider-neutral unit. The Reviewer floor is evaluated **in task classes**, then bound: a T3 branch requires a T3-or-higher Reviewer binding, regardless of which provider authored it.
 
-Cross-provider review is preferred, but Reviewer assignment is not subject to the Worker Claude-first order. The Commander selects the Reviewer binding independently, records requested and actual provider/model/effort and independence, and records the exact fallback or same-provider reason when cross-provider review is unavailable.
+Cross-provider review is preferred, but Reviewer assignment is not subject to the Worker provider order. The Commander selects the Reviewer binding independently, records requested and actual provider/model/effort and independence, and records the exact fallback or same-provider reason when cross-provider review is unavailable. `gpt-5.3-codex-spark` @ `xhigh` is a Worker-only lane and never satisfies a Reviewer class floor.
 
 ### Worker provider order
 
-Effective with the owner's 2026-08-22 revision, every task that is both suitable for parallel dispatch and bounded enough to be a Worker brief uses the matching **Claude Code** binding first. Continue assigning eligible Worker work to Claude Code while its current quota is available; do not load-balance away from it merely to conserve that quota.
+The normal order follows the owner's 2026-08-22 revision: every dispatch-eligible, bounded Worker task outside the Spark lane uses the matching **Claude Code** binding first. Continue assigning those Worker units to Claude Code while its current quota is available; do not load-balance away from it merely to conserve that quota.
 
 When a real dispatch reports that Claude Code is unavailable or its usable quota is exhausted, record the attempted binding, observed condition, time, actual fallback binding, and exact downgrade reason. Then use the same task-class Codex binding from the table. Do not repeatedly spend attempts against a known exhausted quota window; retry Claude only after availability or quota reset is evidenced. This provider order does not apply to the Commander seat, final integration, or Reviewer assignment, whose role authority, task-class floor, independent binding selection, and independence rules remain unchanged.
 
-`T3-par` is a Commander coordination mode, not a missing Claude Worker model row. The Commander decomposes genuinely separable work into bounded T1, T2, or T3 Worker briefs; each brief applies the Claude-first order at its own class, while architecture decisions and synthesis stay with the Commander.
+`T3-par` is a Commander coordination mode, not a missing Claude Worker model row. The Commander decomposes genuinely separable work into bounded T1, T2, or T3 Worker briefs; each brief applies its eligible Worker provider order at its unchanged class, while architecture decisions and synthesis stay with the Commander.
+
+### Spark-eligible Worker lane
+
+The owner's 2026-08-31 revision permits direct `gpt-5.3-codex-spark` @ `xhigh` dispatch only for an existing T1 or T2 **coding** unit that has all of these properties:
+
+- an exact written brief;
+- an already identified existing owner or seam;
+- one focused code outcome and a bounded small edit; and
+- deterministic validation that establishes correctness without unresolved judgment.
+
+When the dispatching host exposes `gpt-5.3-codex-spark` @ `xhigh` and has capacity, prefer that direct binding for an eligible unit without first probing Claude Code. Record the requested and actual binding under the normal reporting rule. One model-unavailable or capacity result ends the Spark attempt for that unit and falls through to the normal same-class order: Claude Code first, then the same-class Codex table binding if Claude is unavailable or exhausted. Never downgrade or relabel the task class to reach Spark.
+
+The lane excludes T0 and T3; Commander and Reviewer work; architecture, domain, ADR, or authority decisions; security, privacy, egress, credential, or Effect work; schemas, migrations, dependencies, or native adapters; workflow or Gate changes; concurrency, recovery, or replay; new public interfaces or design-system primitives; non-trivial accessibility; broad refactors; and any unit whose correctness still requires judgment. Spark never changes Worker authority, one-Worker branch/worktree isolation, required validation, reporting, fallback recording, or Commander-only integration and external-action rules.
 
 ### Task classes
 
@@ -111,7 +125,9 @@ Tier selection is roughly a five-fold cost swing and is the primary lever; effor
 
 | Condition | Action |
 | --- | --- |
-| An eligible bounded Worker task and Claude Code quota is available | Use the same-class Claude binding first |
+| A Spark-eligible T1/T2 coding unit and Spark is exposed with capacity | Dispatch direct to `gpt-5.3-codex-spark` @ `xhigh` without a Claude probe |
+| One Spark attempt reports unavailable or no capacity | Record the exact result; continue with the normal same-class order |
+| Any other eligible bounded Worker task and Claude Code quota is available | Use the same-class Claude binding first |
 | Claude Code is unavailable or its usable Worker quota is exhausted | Record the observed failure and reason; use the same-class Codex binding for the current quota window |
 | One provider's quota is short | Same task class, other provider's binding |
 | The commander's provider is exhausted | The commander seat moves to the other provider; task classes are unchanged |
@@ -136,14 +152,14 @@ At merge, closure, abandonment, accepted integration, supersession, confirmed ha
 | A formal commander/worker/evaluator role taxonomy beyond the three roles above | A fourth role is actually needed |
 | Any host connector, enrollment, or DPAPI machinery | Never, absent a concrete host-authority problem |
 
-## Question 25 decision
+## Decision summary
 
-Accepted with owner revisions:
+Accepted in Question 25 and revised by the owner on 2026-08-22 and 2026-08-31:
 
 - three roles — Commander, Worker, Reviewer — with the Reviewer a fresh-context, strictly read-only, non-author agent that the Commander directly dispatches and that may not dispatch or spawn another agent;
 - Codex is the main entry and normally holds the commander seat, at top capability;
-- dispatch-eligible, bounded parallel Worker tasks use Claude Code first while its quota is available, then fall back at the same task class under the existing table; every actual binding and downgrade reason is recorded;
-- independent review is optional and advisory; the reviewed class, Reviewer binding floor, requested and actual provider/model/effort, independence, and any fallback or same-provider reason are recorded; cross-provider review is preferred without inheriting Worker Claude-first order; and no verdict becomes a pull-request (PR), CI, branch, exact-head, zero-finding, iterative re-review, or other proof gate;
+- Spark-eligible T1/T2 coding units prefer direct `gpt-5.3-codex-spark` @ `xhigh` dispatch while exposed with capacity, then fall through after one unavailable/capacity result; every other dispatch-eligible bounded Worker task uses Claude Code first while its quota is available, then falls back at the same class to Codex, and every actual binding and fallback reason is recorded;
+- independent review is optional and advisory; the reviewed class, Reviewer binding floor, requested and actual provider/model/effort, independence, and any fallback or same-provider reason are recorded; cross-provider review is preferred without inheriting Worker provider order, Spark is never a Reviewer binding, and no verdict becomes a pull-request (PR), CI, branch, exact-head, zero-finding, iterative re-review, or other proof gate;
 - operating rules stay identical across providers and models, with Layer B as the only provider-specific policy surface; and
 - the legacy orchestration pilot and its host connector are rejected as baselines.
 
