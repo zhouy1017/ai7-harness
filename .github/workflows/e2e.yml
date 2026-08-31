@@ -55,7 +55,7 @@ jobs:
   j01:
     needs: route
     if: ${{ needs.route.outputs.run_j01 == 'true' }}
-    name: J-01 + J-02 + J-08 + J-12 + J-03 (${{ matrix.label }})
+    name: J-01 + J-02 + J-08 + J-12 + J-15 + J-03 (${{ matrix.label }})
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
     strategy:
@@ -127,6 +127,9 @@ jobs:
 
       - name: Run the J-12 Book workspace journey with applicable J-14 behavior
         run: pnpm run e2e -- --journey J-12
+
+      - name: Run the J-15 declarative artifact lifecycle journey
+        run: pnpm run e2e -- --journey J-15
 
       - name: Run the J-03 authorization journey
         run: pnpm run e2e -- --journey J-03
