@@ -6,6 +6,7 @@ import {
   MAX_REPLACEMENT_EXCLUSIONS,
   type J01ImportControl,
   type J08RecoveryControl,
+  type LaunchPolicyProjection,
   type ServiceFailureResponse,
   type ServiceRequest,
   type ServiceResponse,
@@ -86,6 +87,7 @@ function decodeRequest(frame: Uint8Array): ServiceRequest {
     case 'getStartup':
     case 'getImportStartup':
     case 'listPriorWork':
+    case 'getModelServiceStoredState':
     case 'shutdown': {
       requireInput(value.input, [], tentativeId);
       break;
@@ -106,6 +108,27 @@ function decodeRequest(frame: Uint8Array): ServiceRequest {
       const input = requireInput(value.input, ['revisionId', 'cursor'], tentativeId);
       if (!isBoundedString(input.revisionId, 36) || !UUID_PATTERN.test(input.revisionId) ||
           !(input.cursor === null || isBoundedString(input.cursor, 1_024))) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
+    case 'saveModelServiceConnection': {
+      const input = requireInput(
+        value.input,
+        ['connectionName', 'credentialReference', 'credentialOperationState'],
+        tentativeId,
+      );
+      if (!isBoundedString(input.connectionName, 80) ||
+          !isBoundedString(input.credentialReference, 36) || !UUID_PATTERN.test(input.credentialReference) ||
+          (input.credentialOperationState !== 'ready' && input.credentialOperationState !== 'needs-attention')) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
+    case 'setModelServiceCredentialState': {
+      const input = requireInput(value.input, ['credentialReference', 'credentialOperationState'], tentativeId);
+      if (!isBoundedString(input.credentialReference, 36) || !UUID_PATTERN.test(input.credentialReference) ||
+          !['ready', 'missing', 'needs-attention'].includes(input.credentialOperationState as string)) {
         throw new ProtocolError(tentativeId);
       }
       break;
@@ -663,6 +686,7 @@ async function dispatch(
   jobs: CooperativeJobOwner,
   request: ServiceRequest,
   importControl: J01ImportControl | undefined,
+  launchPolicy: LaunchPolicyProjection,
 ): Promise<ServiceSuccessResponse> {
   switch (request.op) {
     case 'ready':
@@ -682,6 +706,34 @@ async function dispatch(
         ok: true,
         op: request.op,
         result: store.getHistoricalRevision(request.input.revisionId, request.input.cursor),
+      };
+    case 'getModelServiceStoredState':
+      return {
+        id: request.id,
+        ok: true,
+        op: request.op,
+        result: { connection: store.getModelServiceConnection(), launchPolicy },
+      };
+    case 'saveModelServiceConnection':
+      return {
+        id: request.id,
+        ok: true,
+        op: request.op,
+        result: store.saveModelServiceConnection(
+          request.input.connectionName,
+          request.input.credentialReference,
+          request.input.credentialOperationState,
+        ),
+      };
+    case 'setModelServiceCredentialState':
+      return {
+        id: request.id,
+        ok: true,
+        op: request.op,
+        result: store.setModelServiceCredentialState(
+          request.input.credentialReference,
+          request.input.credentialOperationState,
+        ),
       };
     case 'getRecoveryComparison':
       return { id: request.id, ok: true, op: request.op, result: await store.getRecoveryComparison(request.input.attentionId) };
@@ -1070,11 +1122,17 @@ function parentIsAlive(parentPid: number): boolean {
 async function run(): Promise<void> {
   installNodeNetworkDenial();
   const { dataRoot, parentPid, importControl, recoveryControl } = parseArguments(process.argv.slice(2));
-  const [{ EditorialStore, StoreError, StoreFatalError }, { mountDormantHarness }, { CooperativeJobOwner }] =
+  const [
+    { EditorialStore, StoreError, StoreFatalError },
+    { mountDormantHarness },
+    { CooperativeJobOwner },
+    { resolveSourceCheckoutLaunchPolicy },
+  ] =
     await Promise.all([
       import('./store.js'),
       import('./runtime.js'),
       import('./cooperative-jobs.js'),
+      import('./launch-policy.js'),
     ]);
   let stopping = false;
   const stop = (): void => {
@@ -1094,6 +1152,7 @@ async function run(): Promise<void> {
   let jobs: CooperativeJobOwner | undefined;
   try {
     const codeRoot = fileURLToPath(new URL('../', import.meta.url));
+    const launchPolicy = await resolveSourceCheckoutLaunchPolicy(codeRoot);
     store = await EditorialStore.open(dataRoot, codeRoot, {
       induceUnprovableReconciliation: importControl === 'uncertain-reconciliation',
       persistLegacyReviewedDraft: importControl === 'legacy-reviewed-v2',
@@ -1114,7 +1173,7 @@ async function run(): Promise<void> {
       }
       let response: ServiceResponse;
       try {
-        response = await dispatch(store, harness, jobs, request, importControl);
+        response = await dispatch(store, harness, jobs, request, importControl, launchPolicy);
       } catch (error) {
         if (error instanceof StoreFatalError) {
           stop();

@@ -27,6 +27,7 @@ import {
   type ImportCommitProjection,
   type J01ImportControl,
   type J08RecoveryControl,
+  type ModelServiceSettingsProjection,
   type PickerReselectResult,
   type PickerStageResult,
   type ProductDataLocationProjection,
@@ -38,6 +39,7 @@ import {
   type ServiceOperationMap,
 } from '../shared/protocol.js';
 import { ServiceCallError, ServiceClient } from './service-client.js';
+import { openProtectedSecretStore, type ProtectedSecretStore } from './protected-secret-store.js';
 import {
   createCanonicalExternalDataRoot,
   ensureCanonicalDataDirectory,
@@ -280,6 +282,9 @@ function registerRendererHandlers(
   leaveBookWorkbench: (owned: OwnedRendererWindow) => void,
   getProductDataLocation: () => Promise<ProductDataLocationProjection>,
   revealProductDataLocation: () => ProductDataLocationRevealProjection,
+  getModelServiceSettings: () => Promise<ModelServiceSettingsProjection>,
+  saveModelServiceCredential: (input: { connectionName: string; secret: string }) => Promise<ModelServiceSettingsProjection>,
+  removeModelServiceCredential: () => Promise<ModelServiceSettingsProjection>,
 ): () => void {
   const AMBIGUOUS_SERVICE_FAILURES = new Set([
     'COMMIT_PROOF_INCONCLUSIVE',
@@ -1578,6 +1583,29 @@ function registerRendererHandlers(
       return revealProductDataLocation();
     }),
   );
+  ipcMain.handle(IPC_CHANNELS.getModelServiceSettings, (event) =>
+    envelope(async () => {
+      requireSender(event);
+      requireAuthority();
+      return getModelServiceSettings();
+    }),
+  );
+  ipcMain.handle(
+    IPC_CHANNELS.saveModelServiceCredential,
+    (event, input: { connectionName: string; secret: string }) =>
+      envelope(async () => {
+        requireSender(event);
+        requireAuthority();
+        return serializeEffect(() => saveModelServiceCredential(input));
+      }),
+  );
+  ipcMain.handle(IPC_CHANNELS.removeModelServiceCredential, (event) =>
+    envelope(async () => {
+      requireSender(event);
+      requireAuthority();
+      return serializeEffect(removeModelServiceCredential);
+    }),
+  );
   ipcMain.handle(IPC_CHANNELS.commitBookCreation, (event, input: ServiceOperationMap['commitBookCreation']['input']) =>
     envelope(async () => {
       const owned = requireSender(event);
@@ -2273,6 +2301,158 @@ export async function runApplication(): Promise<void> {
       shell.showItemInFolder(dataRoot);
       return { state: 'requested', nativeRevealSuppressedForE2e: false };
     };
+    let protectedSecretStore: ProtectedSecretStore | undefined;
+    try {
+      protectedSecretStore = await openProtectedSecretStore();
+    } catch {
+      protectedSecretStore = undefined;
+    }
+    const settingsProjection = async (): Promise<ModelServiceSettingsProjection> => {
+      let state = await service!.call('getModelServiceStoredState', {});
+      let connection = state.connection;
+      if (connection?.credentialOperationState === 'ready') {
+        let present = false;
+        if (protectedSecretStore !== undefined) {
+          try {
+            present = await protectedSecretStore.has(connection.credentialReference);
+          } catch {
+            present = false;
+          }
+        }
+        if (!present) {
+          try {
+            connection = await service!.call('setModelServiceCredentialState', {
+              credentialReference: connection.credentialReference,
+              credentialOperationState: 'needs-attention',
+            });
+            state = { ...state, connection };
+          } catch {
+            connection = { ...connection, credentialOperationState: 'needs-attention' };
+          }
+        }
+      }
+      const mainStatus = protectedSecretStore === undefined
+        ? 'unavailable' as const
+        : connection === null || connection.credentialOperationState === 'missing'
+          ? 'setup-required' as const
+          : connection.credentialOperationState === 'ready'
+            ? 'available' as const
+            : 'needs-attention' as const;
+      const mainStatusLabel = mainStatus === 'available' ? '可用' as const
+        : mainStatus === 'setup-required' ? '需设置' as const
+          : mainStatus === 'needs-attention' ? '需处理' as const
+            : '不可用' as const;
+      const unconfigured = (
+        roleId: 'fast-interaction' | 'difficult-escalation' | 'frontier',
+        roleLabel: '快速交互角色' | '疑难升级角色' | '前沿模型角色',
+        purposeLabel: string,
+      ) => ({
+        roleId,
+        roleLabel,
+        purposeLabel,
+        status: 'setup-required' as const,
+        statusLabel: '需设置' as const,
+        statusDetail: '当前版本未配置此角色的模型服务绑定。',
+        binding: null,
+        connection: null,
+      });
+      return {
+        roles: [
+          unconfigured('fast-interaction', '快速交互角色', '快速交互与低风险候选生成'),
+          {
+            roleId: 'main-editorial',
+            roleLabel: '主编辑角色',
+            purposeLabel: '中文长篇写作、编辑建议与复杂指令处理',
+            status: mainStatus,
+            statusLabel: mainStatusLabel,
+            statusDetail: protectedSecretStore === undefined
+              ? '当前操作系统安全凭据库不可用；未启用替代存储。'
+              : mainStatus === 'available'
+                ? '连接名称与凭据已由操作系统安全凭据库保护。'
+                : mainStatus === 'needs-attention'
+                  ? '凭据状态无法确认；请重新输入或移除。'
+                  : '请输入连接名称与凭据。',
+            binding: {
+              providerId: 'deepseek-open-platform',
+              providerLabel: 'DeepSeek 开放平台（官方）',
+              modelId: 'deepseek-v4-pro',
+              modelLabel: 'DeepSeek V4 Pro High',
+              adapterRevision: 1,
+              configurationRevision: 1,
+              approvedFallbackChain: [],
+              credentialSlot: 'deepseek-api-key',
+            },
+            connection,
+          },
+          unconfigured('difficult-escalation', '疑难升级角色', '疑难或高后果工作升级'),
+          unconfigured('frontier', '前沿模型角色', '挑战性或明确授权的高后果工作'),
+        ],
+        protectedSecretStore: {
+          backend: process.platform === 'win32' ? 'windows-credential-manager' : 'macos-keychain',
+          label: process.platform === 'win32' ? 'Windows 凭据管理器' : 'macOS 钥匙串',
+          availability: protectedSecretStore === undefined ? 'unavailable' : 'available',
+        },
+        launchPolicy: state.launchPolicy,
+        authorityStatement: '凭据就绪不授予模型处理、对外导出、运行、受控动作或公开发布权限。',
+      };
+    };
+    const saveModelServiceCredential = async (input: {
+      connectionName: string;
+      secret: string;
+    }): Promise<ModelServiceSettingsProjection> => {
+      if (protectedSecretStore === undefined) {
+        throw new ServiceCallError('PROTECTED_SECRET_STORE_UNAVAILABLE', '操作系统安全凭据库当前不可用。');
+      }
+      if (input === null || typeof input !== 'object' || Object.keys(input).sort().join(',') !== 'connectionName,secret' ||
+          typeof input.connectionName !== 'string' || typeof input.secret !== 'string' ||
+          !input.connectionName.isWellFormed() || input.connectionName.trim().length < 1 || input.connectionName.trim().length > 80 ||
+          !input.secret.isWellFormed() || input.secret.length < 1 || input.secret.length > 16_384) {
+        throw new ServiceCallError('MODEL_SERVICE_CREDENTIAL_INVALID', '连接名称或凭据输入无效。');
+      }
+      const current = (await service!.call('getModelServiceStoredState', {})).connection;
+      const credentialReference = current?.credentialReference ?? randomUUID();
+      await service!.call('saveModelServiceConnection', {
+        connectionName: input.connectionName.trim(),
+        credentialReference,
+        credentialOperationState: 'needs-attention',
+      });
+      try {
+        await protectedSecretStore.set(credentialReference, input.secret);
+      } catch {
+        throw new ServiceCallError('PROTECTED_SECRET_WRITE_FAILED', '凭据未能写入操作系统安全凭据库。');
+      }
+      try {
+        await service!.call('saveModelServiceConnection', {
+          connectionName: input.connectionName.trim(),
+          credentialReference,
+          credentialOperationState: 'ready',
+        });
+      } catch {
+        throw new ServiceCallError('MODEL_SERVICE_STATE_UNCERTAIN', '凭据已受保护，但连接状态需要处理。');
+      }
+      return settingsProjection();
+    };
+    const removeModelServiceCredential = async (): Promise<ModelServiceSettingsProjection> => {
+      if (protectedSecretStore === undefined) {
+        throw new ServiceCallError('PROTECTED_SECRET_STORE_UNAVAILABLE', '操作系统安全凭据库当前不可用。');
+      }
+      const current = (await service!.call('getModelServiceStoredState', {})).connection;
+      if (current === null) return settingsProjection();
+      await service!.call('setModelServiceCredentialState', {
+        credentialReference: current.credentialReference,
+        credentialOperationState: 'needs-attention',
+      });
+      try {
+        await protectedSecretStore.remove(current.credentialReference);
+      } catch {
+        throw new ServiceCallError('PROTECTED_SECRET_REMOVE_FAILED', '凭据未能从操作系统安全凭据库移除。');
+      }
+      await service!.call('setModelServiceCredentialState', {
+        credentialReference: current.credentialReference,
+        credentialOperationState: 'missing',
+      });
+      return settingsProjection();
+    };
     unregisterHandlers = registerRendererHandlers(
       service,
       getOwnedWindow,
@@ -2285,6 +2465,9 @@ export async function runApplication(): Promise<void> {
       leaveBookWorkbench,
       getProductDataLocation,
       revealProductDataLocation,
+      settingsProjection,
+      saveModelServiceCredential,
+      removeModelServiceCredential,
     );
     startupLocation = 'renderer-first-paint';
     const initialWindow = await createOwnedWindow(null, launch.injectedPickerPath, true);

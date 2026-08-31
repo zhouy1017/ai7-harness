@@ -27,6 +27,8 @@ import type {
   JournalAcknowledgement,
   JournalEditInput,
   ManuscriptWindowProjection,
+  ModelCredentialOperationState,
+  ModelServiceConnectionProjection,
   NewBookImportTargetChoiceId,
   OriginalFileAccessProjection,
   ReviewBeforeImportProjection,
@@ -72,6 +74,7 @@ import {
   BoundedStoreError,
   BoundedStoreFatalError,
   initializeBoundedSchema,
+  MODEL_SERVICE_CONNECTION_SCHEMA_SQL,
   validateManuscriptReimportSchemaTruth,
   validateSourceImportSchemaTruth,
   type RecoverySnapshotCursor,
@@ -99,6 +102,7 @@ const RECOVERY_SCHEMA_VERSION = 7;
 const SCHEMA_VERSION = 8;
 const SOURCE_IMPORT_SCHEMA_VERSION = 9;
 const MANUSCRIPT_REIMPORT_SCHEMA_VERSION = 10;
+const MODEL_SERVICE_SCHEMA_VERSION = 11;
 const BOOK_SUMMARY_PAGE_SIZE = 20;
 const BOOK_HISTORY_PAGE_SIZE = 8;
 const INGEST_BATCH_SIZE = 256;
@@ -1068,7 +1072,8 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === RECOVERY_SCHEMA_VERSION ||
       currentVersion === SCHEMA_VERSION ||
       currentVersion === SOURCE_IMPORT_SCHEMA_VERSION ||
-      currentVersion === MANUSCRIPT_REIMPORT_SCHEMA_VERSION,
+      currentVersion === MANUSCRIPT_REIMPORT_SCHEMA_VERSION ||
+      currentVersion === MODEL_SERVICE_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -1078,7 +1083,8 @@ function initializeSchema(db: DatabaseSync): void {
     currentVersion === RECOVERY_SCHEMA_VERSION ||
     currentVersion === SCHEMA_VERSION ||
     currentVersion === SOURCE_IMPORT_SCHEMA_VERSION ||
-    currentVersion === MANUSCRIPT_REIMPORT_SCHEMA_VERSION
+    currentVersion === MANUSCRIPT_REIMPORT_SCHEMA_VERSION ||
+    currentVersion === MODEL_SERVICE_SCHEMA_VERSION
   ) return;
   if (currentVersion === 1) {
     migrateSchemaV1ToV2(db);
@@ -1407,11 +1413,13 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
     one(db.prepare('PRAGMA user_version').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取数据库版本。').user_version,
   );
   requireStore(
-    version === SCHEMA_VERSION || version === SOURCE_IMPORT_SCHEMA_VERSION || version === MANUSCRIPT_REIMPORT_SCHEMA_VERSION,
+    version === SCHEMA_VERSION || version === SOURCE_IMPORT_SCHEMA_VERSION ||
+      version === MANUSCRIPT_REIMPORT_SCHEMA_VERSION || version === MODEL_SERVICE_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
-  if (version === SOURCE_IMPORT_SCHEMA_VERSION || version === MANUSCRIPT_REIMPORT_SCHEMA_VERSION) return;
+  if (version === SOURCE_IMPORT_SCHEMA_VERSION || version === MANUSCRIPT_REIMPORT_SCHEMA_VERSION ||
+      version === MODEL_SERVICE_SCHEMA_VERSION) return;
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
   );
@@ -1507,11 +1515,12 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
     one(db.prepare('PRAGMA user_version').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取数据库版本。').user_version,
   );
   requireStore(
-    version === SOURCE_IMPORT_SCHEMA_VERSION || version === MANUSCRIPT_REIMPORT_SCHEMA_VERSION,
+    version === SOURCE_IMPORT_SCHEMA_VERSION || version === MANUSCRIPT_REIMPORT_SCHEMA_VERSION ||
+      version === MODEL_SERVICE_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
-  if (version === MANUSCRIPT_REIMPORT_SCHEMA_VERSION) return;
+  if (version === MANUSCRIPT_REIMPORT_SCHEMA_VERSION || version === MODEL_SERVICE_SCHEMA_VERSION) return;
   validateSourceImportSchemaTruth(db, profile);
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
@@ -1673,6 +1682,53 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
   if (migrationError) throw migrationError;
   const violations = db.prepare('PRAGMA foreign_key_check').all();
   requireStore(violations.length === 0, 'SCHEMA_MIGRATION_FAILED', '数据库引用校验失败。');
+}
+
+function validateModelServiceSchema(db: DatabaseSync, profile: BuiltInWorkflowProfile): void {
+  validateManuscriptReimportSchemaTruth(db, profile, true);
+  const invalid = db.prepare(
+    `SELECT 1 FROM model_service_connections
+     WHERE connection_id != 'main-editorial-deepseek-v4-pro'
+        OR role_id != 'main-editorial'
+        OR provider_id != 'deepseek-open-platform'
+        OR model_id != 'deepseek-v4-pro'
+        OR adapter_revision != 1 OR configuration_revision != 1
+        OR approved_fallback_chain != '[]'
+        OR credential_slot != 'deepseek-api-key'
+     LIMIT 1`,
+  ).get();
+  requireStore(invalid === undefined, 'SCHEMA_INVALID', '模型服务连接记录超出当前固定绑定。');
+}
+
+function initializeModelServiceSchema(db: DatabaseSync, profile: BuiltInWorkflowProfile): void {
+  const version = asNumber(
+    one(db.prepare('PRAGMA user_version').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取数据库版本。').user_version,
+  );
+  requireStore(
+    version === MANUSCRIPT_REIMPORT_SCHEMA_VERSION || version === MODEL_SERVICE_SCHEMA_VERSION,
+    'SCHEMA_UNSUPPORTED',
+    '数据库版本不受支持。',
+  );
+  if (version === MODEL_SERVICE_SCHEMA_VERSION) {
+    validateModelServiceSchema(db, profile);
+    return;
+  }
+  try {
+    db.exec(`
+      BEGIN IMMEDIATE;
+      ${MODEL_SERVICE_CONNECTION_SCHEMA_SQL};
+      PRAGMA user_version = ${MODEL_SERVICE_SCHEMA_VERSION};
+    `);
+    validateModelServiceSchema(db, profile);
+    db.exec('COMMIT;');
+  } catch (error) {
+    try {
+      db.exec('ROLLBACK;');
+    } catch (rollbackError) {
+      throw new AggregateError([error, rollbackError], 'SQLite model-service schema migration rollback failed.');
+    }
+    throw error;
+  }
 }
 
 interface DraftSnapshot {
@@ -2418,6 +2474,7 @@ export class EditorialStore {
       ).run().changes === 1, 'E2E_CONTROL_INVALID', '没有可用于启动校验的重新导入证明。');
     }
     initializeManuscriptReimportSchema(authority, workflowProfile);
+    initializeModelServiceSchema(authority, workflowProfile);
     initializeBoundedSchema(authority, workflowProfile);
     const journal = new DatabaseSync(databasePath);
     configureDatabase(journal);
@@ -6435,6 +6492,120 @@ export class EditorialStore {
 
   getHistoricalRevision(revisionId: string, cursor: string | null): HistoricalRevisionProjection {
     return this.#boundedCall(() => this.#bounded.getHistoricalRevision(revisionId, cursor));
+  }
+
+  getModelServiceConnection(): ModelServiceConnectionProjection | null {
+    this.#assertAvailable();
+    const row = this.#authority.prepare(
+      `SELECT connection_id, role_id, connection_name, provider_id, model_id,
+              adapter_revision, configuration_revision, approved_fallback_chain,
+              credential_slot, credential_reference, credential_operation_state,
+              created_at, updated_at, credential_updated_at
+       FROM model_service_connections
+       WHERE connection_id = 'main-editorial-deepseek-v4-pro'`,
+    ).get() as SqlRow | undefined;
+    if (row === undefined) return null;
+    const state = asString(row.credential_operation_state);
+    requireStore(
+      state === 'ready' || state === 'missing' || state === 'needs-attention',
+      'STORE_CORRUPT',
+      '模型服务凭据状态无效。',
+    );
+    const credentialReference = asString(row.credential_reference);
+    requireStore(
+      UUID_PATTERN.test(credentialReference),
+      'STORE_CORRUPT',
+      '模型服务凭据引用无效。',
+    );
+    return {
+      connectionId: 'main-editorial-deepseek-v4-pro',
+      roleId: 'main-editorial',
+      connectionName: asString(row.connection_name),
+      binding: {
+        providerId: 'deepseek-open-platform',
+        providerLabel: 'DeepSeek 开放平台（官方）',
+        modelId: 'deepseek-v4-pro',
+        modelLabel: 'DeepSeek V4 Pro High',
+        adapterRevision: 1,
+        configurationRevision: 1,
+        approvedFallbackChain: [],
+        credentialSlot: 'deepseek-api-key',
+      },
+      credentialReference,
+      credentialOperationState: state,
+      createdAt: asString(row.created_at),
+      updatedAt: asString(row.updated_at),
+      credentialUpdatedAt: asString(row.credential_updated_at),
+    };
+  }
+
+  saveModelServiceConnection(
+    connectionNameInput: string,
+    credentialReference: string,
+    credentialOperationState: 'ready' | 'needs-attention',
+  ): ModelServiceConnectionProjection {
+    this.#assertAvailable();
+    const connectionName = connectionNameInput.trim();
+    requireStore(
+      connectionName.length > 0 && connectionName.length <= 80 && connectionName.isWellFormed(),
+      'MODEL_SERVICE_CONNECTION_INVALID',
+      '连接名称必须为 1 至 80 个有效字符。',
+    );
+    requireStore(UUID_PATTERN.test(credentialReference), 'MODEL_SERVICE_CONNECTION_INVALID', '凭据引用无效。');
+    const current = this.getModelServiceConnection();
+    requireStore(
+      current === null || current.credentialReference === credentialReference,
+      'MODEL_SERVICE_CONNECTION_CONFLICT',
+      '已存连接的凭据引用不可替换。',
+    );
+    const now = new Date().toISOString();
+    this.#transaction(this.#authority, () => {
+      if (current === null) {
+        this.#authority.prepare(
+          `INSERT INTO model_service_connections(
+             connection_id, role_id, connection_name, provider_id, model_id,
+             adapter_revision, configuration_revision, approved_fallback_chain,
+             credential_slot, credential_reference, credential_operation_state,
+             created_at, updated_at, credential_updated_at
+           ) VALUES (
+             'main-editorial-deepseek-v4-pro', 'main-editorial', ?, 'deepseek-open-platform', 'deepseek-v4-pro',
+             1, 1, '[]', 'deepseek-api-key', ?, ?, ?, ?, ?
+           )`,
+        ).run(connectionName, credentialReference, credentialOperationState, now, now, now);
+      } else {
+        requireStore(
+          this.#authority.prepare(
+            `UPDATE model_service_connections
+             SET connection_name = ?, credential_operation_state = ?, updated_at = ?, credential_updated_at = ?
+             WHERE connection_id = 'main-editorial-deepseek-v4-pro' AND credential_reference = ?`,
+          ).run(connectionName, credentialOperationState, now, now, credentialReference).changes === 1,
+          'MODEL_SERVICE_CONNECTION_CONFLICT',
+          '模型服务连接状态已变化。',
+        );
+      }
+    });
+    return this.getModelServiceConnection()!;
+  }
+
+  setModelServiceCredentialState(
+    credentialReference: string,
+    credentialOperationState: ModelCredentialOperationState,
+  ): ModelServiceConnectionProjection {
+    this.#assertAvailable();
+    requireStore(UUID_PATTERN.test(credentialReference), 'MODEL_SERVICE_CONNECTION_INVALID', '凭据引用无效。');
+    const now = new Date().toISOString();
+    this.#transaction(this.#authority, () => {
+      requireStore(
+        this.#authority.prepare(
+          `UPDATE model_service_connections
+           SET credential_operation_state = ?, updated_at = ?, credential_updated_at = ?
+           WHERE connection_id = 'main-editorial-deepseek-v4-pro' AND credential_reference = ?`,
+        ).run(credentialOperationState, now, now, credentialReference).changes === 1,
+        'MODEL_SERVICE_CONNECTION_CONFLICT',
+        '模型服务连接状态已变化。',
+      );
+    });
+    return this.getModelServiceConnection()!;
   }
 
   getManuscriptWindowAt(

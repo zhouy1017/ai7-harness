@@ -1,0 +1,11 @@
+{
+  "manifestType": "ai7-source-checkout-launch-authority",
+  "version": 1,
+  "runtimeForm": "source-checkout",
+  "trustedOperationalScope": "development-ci",
+  "activePolicySet": {
+    "version": "v3",
+    "canonicalPath": "docs/policies/active-policy-set.v3.json",
+    "sha256": "fe6d9f169b8afb4d7b08daca99ee666f41e406d18916980e57106189a33e7dcc"
+  }
+}

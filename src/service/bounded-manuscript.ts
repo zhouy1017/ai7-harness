@@ -51,6 +51,7 @@ const RECOVERY_SCHEMA_VERSION = 7;
 const SCHEMA_VERSION = 8;
 const SOURCE_IMPORT_SCHEMA_VERSION = 9;
 const MANUSCRIPT_REIMPORT_SCHEMA_VERSION = 10;
+const MODEL_SERVICE_SCHEMA_VERSION = 11;
 const MIGRATION_BATCH = 256;
 const SEARCH_BATCH = 128;
 const HISTORY_BATCH = 128;
@@ -73,6 +74,23 @@ const MANUSCRIPT_REIMPORT_NON_EFFECTS = [
 ] as const;
 const REPLACEMENT_MATCHING_RULE = '精确字素匹配；从左向右；重叠时保留最早匹配' as const;
 const REPLACEMENT_INCLUSION_RULE = '仅提交冻结时明确纳入的非重叠精确匹配' as const;
+
+export const MODEL_SERVICE_CONNECTION_SCHEMA_SQL = `CREATE TABLE model_service_connections (
+  connection_id TEXT PRIMARY KEY CHECK(connection_id = 'main-editorial-deepseek-v4-pro'),
+  role_id TEXT NOT NULL CHECK(role_id = 'main-editorial'),
+  connection_name TEXT NOT NULL CHECK(length(connection_name) BETWEEN 1 AND 80),
+  provider_id TEXT NOT NULL CHECK(provider_id = 'deepseek-open-platform'),
+  model_id TEXT NOT NULL CHECK(model_id = 'deepseek-v4-pro'),
+  adapter_revision INTEGER NOT NULL CHECK(adapter_revision = 1),
+  configuration_revision INTEGER NOT NULL CHECK(configuration_revision = 1),
+  approved_fallback_chain TEXT NOT NULL CHECK(approved_fallback_chain = '[]'),
+  credential_slot TEXT NOT NULL CHECK(credential_slot = 'deepseek-api-key'),
+  credential_reference TEXT NOT NULL UNIQUE CHECK(length(credential_reference) = 36),
+  credential_operation_state TEXT NOT NULL CHECK(credential_operation_state IN ('ready', 'missing', 'needs-attention')),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  credential_updated_at TEXT NOT NULL
+) STRICT`;
 
 type SqlRow = Record<string, SQLOutputValue>;
 
@@ -1862,10 +1880,15 @@ function requireSourceImportTargetSchema(db: DatabaseSync): void {
   requireExactSchema(db, FULL_SOURCE_IMPORT_TARGET_SCHEMA_SQL, TARGET_INDEX_SQL, true, SOURCE_IMPORT_TRIGGER_SQL);
 }
 
-function requireManuscriptReimportTargetSchema(db: DatabaseSync): void {
+function requireManuscriptReimportTargetSchema(db: DatabaseSync, includeModelServiceTable = false): void {
   requireExactSchema(
     db,
-    FULL_MANUSCRIPT_REIMPORT_TARGET_SCHEMA_SQL,
+    includeModelServiceTable
+      ? {
+          ...FULL_MANUSCRIPT_REIMPORT_TARGET_SCHEMA_SQL,
+          model_service_connections: MODEL_SERVICE_CONNECTION_SCHEMA_SQL,
+        }
+      : FULL_MANUSCRIPT_REIMPORT_TARGET_SCHEMA_SQL,
     MANUSCRIPT_REIMPORT_INDEX_SQL,
     true,
     MANUSCRIPT_REIMPORT_TRIGGER_SQL,
@@ -4495,8 +4518,12 @@ function validateManuscriptReimportTruth(db: DatabaseSync): void {
   requireBounded(invalidRecords === undefined, 'SCHEMA_INVALID', '稿件重新导入记录图无效。');
 }
 
-export function validateManuscriptReimportSchemaTruth(db: DatabaseSync, profile: BuiltInWorkflowProfile): void {
-  requireManuscriptReimportTargetSchema(db);
+export function validateManuscriptReimportSchemaTruth(
+  db: DatabaseSync,
+  profile: BuiltInWorkflowProfile,
+  includeModelServiceTable = false,
+): void {
+  requireManuscriptReimportTargetSchema(db, includeModelServiceTable);
   validateSchemaAuthorityIds(db);
   validateWorkflowSemanticTruth(db, profile);
   validateSourceImportDraftTargetTruth(db);
@@ -4516,13 +4543,14 @@ export function initializeBoundedSchema(db: DatabaseSync, profile: BuiltInWorkfl
   requireBounded(
     version === CONTINUITY_SCHEMA_VERSION || version === EDITOR_SCHEMA_VERSION ||
       version === RECOVERY_SCHEMA_VERSION || version === SCHEMA_VERSION ||
-      version === SOURCE_IMPORT_SCHEMA_VERSION || version === MANUSCRIPT_REIMPORT_SCHEMA_VERSION,
+      version === SOURCE_IMPORT_SCHEMA_VERSION || version === MANUSCRIPT_REIMPORT_SCHEMA_VERSION ||
+      version === MODEL_SERVICE_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
-  if (version === MANUSCRIPT_REIMPORT_SCHEMA_VERSION) {
+  if (version === MANUSCRIPT_REIMPORT_SCHEMA_VERSION || version === MODEL_SERVICE_SCHEMA_VERSION) {
     transact(db, () => {
-      validateManuscriptReimportSchemaTruth(db, profile);
+      validateManuscriptReimportSchemaTruth(db, profile, version === MODEL_SERVICE_SCHEMA_VERSION);
       terminalizeOrphanedReplacementPreviews(db);
       reclaimOrphanedSearchSessions(db);
     });
