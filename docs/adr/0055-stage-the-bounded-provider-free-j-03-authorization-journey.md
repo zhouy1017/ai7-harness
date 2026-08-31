@@ -4,7 +4,7 @@ status: accepted
 
 # Stage the bounded provider-free J-03 authorization journey
 
-On 2026-08-31 the Owner selected Issue #47's first bounded standard-direct authorization slice as the next supported Journey decision in the one logical provider-free E2E Functional Gate. This decision satisfies [ADR 0051](./0051-admit-j-12-as-the-fourth-supported-e2e-journey.md)'s requirement for an explicit later-Journey routing decision. It records decision order, not a permanent Journey count: Issue #88 still requires a separate Owner decision about J-15 before Issue #47 may begin, and this ADR neither decides J-15 nor predicts the executable set that will exist when J-03 becomes runnable.
+On 2026-08-31 the Owner selected Issue #47's first bounded standard-direct authorization slice as a supported Journey decision in the one logical provider-free E2E Functional Gate. This decision satisfies [ADR 0051](./0051-admit-j-12-as-the-fourth-supported-e2e-journey.md)'s requirement for an explicit later-Journey routing decision. [ADR 0056](./0056-stage-the-bounded-provider-free-j-15-artifact-lifecycle-journey.md) subsequently admits Issue #88's bounded J-15 slice ahead of J-03. Together they record decision and dependency order, not a permanent Journey count.
 
 ## Bounded J-03 meaning
 
@@ -14,13 +14,13 @@ That slice then stops truthfully before scheduler dispatch, DSH Session creation
 
 ## Dependency order
 
-Issue #88 integrates before Issue #47. It may not proceed until the Owner separately decides whether and how its bounded J-15 product path enters the Gate and that decision is integrated through its own CI-governance change. J-15 remains unresolved here. Issue #47 then rebases onto the resulting `dev` and consumes Issue #88's exact artifact revision and sidecar state; it does not invent a substitute artifact, bypass scoped enablement, or absorb J-15 product work.
+Issue #88 integrates before Issue #47 under ADR 0056's accepted J-15 routing. Issue #47 then rebases onto the resulting `dev` and consumes Issue #88's exact artifact revision and sidecar state; it does not invent a substitute artifact, bypass scoped enablement, or absorb J-15 product work.
 
 ## Staged executable cutover
 
-The current executable admitted set and `e2e:all` remain J-01, J-02, J-08 and J-12 until another separately authorized Journey implementation changes them. If the required J-15 decision and implementation land before Issue #47, J-15 may enter that executable set while J-03 remains non-executable.
+The current executable admitted set and `e2e:all` remain J-01, J-02, J-08 and J-12. Issue #88 must atomically add real J-15 to that set while J-03 remains non-executable. Issue #47 later atomically adds real J-03 to the resulting set.
 
-Following Issue #133 / PR #134's staged J-12 precedent, the existing disabled workflow may display J-03 and append its command after J-12 before the runner exists. Exact workflow `E2E Functional Gate` (ID `342459594`) remains `disabled_manually` and may not be enabled, dispatched, run, rerun or probed under this decision. The dormant projection is not a placeholder runner, result, skip or completion claim.
+Following Issue #133 / PR #134's staged J-12 precedent, the existing disabled workflow displays dormant J-15 after J-12 and dormant J-03 after J-15 before their runners exist. Exact workflow `E2E Functional Gate` (ID `342459594`) remains `disabled_manually` and may not be enabled, dispatched, run, rerun or probed under this decision. Neither dormant projection is a placeholder runner, result, skip or completion claim.
 
 Issue #47 must add the real J-03 dispatcher and runner and atomically add J-03 to the then-current local `e2e:all` orchestration. From that cutover onward, Local completion, any applicable Hosted Gate occurrence and post-boundary re-entry execute every then-current real admitted Journey, including J-03. This ADR fixes no unconditional total count. No alias, fake success, retrospective result or skipped J-03 completion may bridge the cutover.
 
@@ -32,4 +32,4 @@ This ADR creates no product implementation, runner, dependency, schema, credenti
 
 ## Rollback and stop boundary
 
-Before Issue #47, rollback reverts this governance admission and dormant projection without data migration or product cleanup. Stop if J-03 cannot remain provider-free and standard-direct-only; if Issue #88 cannot precede Issue #47; if the slice cannot stop before every Issue #91-owned execution boundary under Provider Processing v1; if J-15 must be decided here; or if executable cutover would require a placeholder, skipped Journey or fixed total that is not true of then-current `dev`.
+Before Issue #47, rollback reverts this governance admission and dormant projection without data migration or product cleanup. Stop if J-03 cannot remain provider-free and standard-direct-only; if Issue #88 cannot precede Issue #47 under ADR 0056; if the slice cannot stop before every Issue #91-owned execution boundary under Provider Processing v1; or if executable cutover would require a placeholder, skipped Journey or fixed total that is not true of then-current `dev`.
