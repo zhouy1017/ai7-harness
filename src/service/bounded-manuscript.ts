@@ -41,6 +41,10 @@ import {
 } from '../shared/protocol.js';
 import { deriveImportFidelityPlan } from './docx.js';
 import type { BuiltInWorkflowProfile } from './native-workflow-profile.js';
+import {
+  NATIVE_ARTIFACT_BOOK_ENABLEMENTS_SCHEMA_SQL,
+  NATIVE_ARTIFACT_INSTALLATIONS_SCHEMA_SQL,
+} from './editorial-workspace-profile.js';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const DIGEST_PATTERN = /^[0-9a-f]{64}$/;
@@ -52,6 +56,7 @@ const SCHEMA_VERSION = 8;
 const SOURCE_IMPORT_SCHEMA_VERSION = 9;
 const MANUSCRIPT_REIMPORT_SCHEMA_VERSION = 10;
 const MODEL_SERVICE_SCHEMA_VERSION = 11;
+const NATIVE_ARTIFACT_SCHEMA_VERSION = 12;
 const MIGRATION_BATCH = 256;
 const SEARCH_BATCH = 128;
 const HISTORY_BATCH = 128;
@@ -1340,6 +1345,10 @@ const IMPORT_DRAFT_TRIGGER_SQL = {
 } as const;
 
 const SCHEMA_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
+  native_artifact_book_enablements: [
+    'artifact_id>native_artifact_installations.artifact_id:NO ACTION/NO ACTION/NONE',
+    'book_id>books.book_id:NO ACTION/NO ACTION/NONE',
+  ],
   import_drafts: ['object_digest>content_objects.object_digest:NO ACTION/NO ACTION/NONE'],
   book_dimension_sets: ['book_id>books.book_id:NO ACTION/NO ACTION/NONE'],
   book_dimensions: ['dimension_set_id>book_dimension_sets.dimension_set_id:NO ACTION/NO ACTION/NONE'],
@@ -1880,15 +1889,23 @@ function requireSourceImportTargetSchema(db: DatabaseSync): void {
   requireExactSchema(db, FULL_SOURCE_IMPORT_TARGET_SCHEMA_SQL, TARGET_INDEX_SQL, true, SOURCE_IMPORT_TRIGGER_SQL);
 }
 
-function requireManuscriptReimportTargetSchema(db: DatabaseSync, includeModelServiceTable = false): void {
+function requireManuscriptReimportTargetSchema(
+  db: DatabaseSync,
+  includeModelServiceTable = false,
+  includeNativeArtifactTables = false,
+): void {
   requireExactSchema(
     db,
-    includeModelServiceTable
-      ? {
-          ...FULL_MANUSCRIPT_REIMPORT_TARGET_SCHEMA_SQL,
-          model_service_connections: MODEL_SERVICE_CONNECTION_SCHEMA_SQL,
-        }
-      : FULL_MANUSCRIPT_REIMPORT_TARGET_SCHEMA_SQL,
+    {
+      ...FULL_MANUSCRIPT_REIMPORT_TARGET_SCHEMA_SQL,
+      ...(includeModelServiceTable ? { model_service_connections: MODEL_SERVICE_CONNECTION_SCHEMA_SQL } : {}),
+      ...(includeNativeArtifactTables
+        ? {
+            native_artifact_installations: NATIVE_ARTIFACT_INSTALLATIONS_SCHEMA_SQL,
+            native_artifact_book_enablements: NATIVE_ARTIFACT_BOOK_ENABLEMENTS_SCHEMA_SQL,
+          }
+        : {}),
+    },
     MANUSCRIPT_REIMPORT_INDEX_SQL,
     true,
     MANUSCRIPT_REIMPORT_TRIGGER_SQL,
@@ -4522,8 +4539,9 @@ export function validateManuscriptReimportSchemaTruth(
   db: DatabaseSync,
   profile: BuiltInWorkflowProfile,
   includeModelServiceTable = false,
+  includeNativeArtifactTables = false,
 ): void {
-  requireManuscriptReimportTargetSchema(db, includeModelServiceTable);
+  requireManuscriptReimportTargetSchema(db, includeModelServiceTable, includeNativeArtifactTables);
   validateSchemaAuthorityIds(db);
   validateWorkflowSemanticTruth(db, profile);
   validateSourceImportDraftTargetTruth(db);
@@ -4544,13 +4562,19 @@ export function initializeBoundedSchema(db: DatabaseSync, profile: BuiltInWorkfl
     version === CONTINUITY_SCHEMA_VERSION || version === EDITOR_SCHEMA_VERSION ||
       version === RECOVERY_SCHEMA_VERSION || version === SCHEMA_VERSION ||
       version === SOURCE_IMPORT_SCHEMA_VERSION || version === MANUSCRIPT_REIMPORT_SCHEMA_VERSION ||
-      version === MODEL_SERVICE_SCHEMA_VERSION,
+      version === MODEL_SERVICE_SCHEMA_VERSION || version === NATIVE_ARTIFACT_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
-  if (version === MANUSCRIPT_REIMPORT_SCHEMA_VERSION || version === MODEL_SERVICE_SCHEMA_VERSION) {
+  if (version === MANUSCRIPT_REIMPORT_SCHEMA_VERSION || version === MODEL_SERVICE_SCHEMA_VERSION ||
+      version === NATIVE_ARTIFACT_SCHEMA_VERSION) {
     transact(db, () => {
-      validateManuscriptReimportSchemaTruth(db, profile, version === MODEL_SERVICE_SCHEMA_VERSION);
+      validateManuscriptReimportSchemaTruth(
+        db,
+        profile,
+        version >= MODEL_SERVICE_SCHEMA_VERSION,
+        version === NATIVE_ARTIFACT_SCHEMA_VERSION,
+      );
       terminalizeOrphanedReplacementPreviews(db);
       reclaimOrphanedSearchSessions(db);
     });

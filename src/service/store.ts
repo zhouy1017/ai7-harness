@@ -12,6 +12,7 @@ import type {
   BookSummaryPageProjection,
   BookRecordPresentation,
   BookWorkOverviewProjection,
+  EditorialWorkspaceProfileProjection,
   FidelityCategoryProjection,
   HistoricalRevisionProjection,
   ImportCommitProjection,
@@ -92,6 +93,14 @@ import {
   loadBuiltInManuscriptProfile,
   type BuiltInWorkflowProfile,
 } from './native-workflow-profile.js';
+import {
+  EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION,
+  EditorialWorkspaceProfileError,
+  EditorialWorkspaceProfileFatalError,
+  EditorialWorkspaceProfileStore,
+  initializeEditorialWorkspaceProfileSchema,
+  validateEditorialWorkspaceProfileSchema,
+} from './editorial-workspace-profile.js';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const TOKEN_PATTERN = UUID_PATTERN;
@@ -1073,7 +1082,8 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === SCHEMA_VERSION ||
       currentVersion === SOURCE_IMPORT_SCHEMA_VERSION ||
       currentVersion === MANUSCRIPT_REIMPORT_SCHEMA_VERSION ||
-      currentVersion === MODEL_SERVICE_SCHEMA_VERSION,
+      currentVersion === MODEL_SERVICE_SCHEMA_VERSION ||
+      currentVersion === EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -1084,7 +1094,8 @@ function initializeSchema(db: DatabaseSync): void {
     currentVersion === SCHEMA_VERSION ||
     currentVersion === SOURCE_IMPORT_SCHEMA_VERSION ||
     currentVersion === MANUSCRIPT_REIMPORT_SCHEMA_VERSION ||
-    currentVersion === MODEL_SERVICE_SCHEMA_VERSION
+    currentVersion === MODEL_SERVICE_SCHEMA_VERSION ||
+    currentVersion === EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION
   ) return;
   if (currentVersion === 1) {
     migrateSchemaV1ToV2(db);
@@ -1414,12 +1425,13 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
   );
   requireStore(
     version === SCHEMA_VERSION || version === SOURCE_IMPORT_SCHEMA_VERSION ||
-      version === MANUSCRIPT_REIMPORT_SCHEMA_VERSION || version === MODEL_SERVICE_SCHEMA_VERSION,
+      version === MANUSCRIPT_REIMPORT_SCHEMA_VERSION || version === MODEL_SERVICE_SCHEMA_VERSION ||
+      version === EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
   if (version === SOURCE_IMPORT_SCHEMA_VERSION || version === MANUSCRIPT_REIMPORT_SCHEMA_VERSION ||
-      version === MODEL_SERVICE_SCHEMA_VERSION) return;
+      version === MODEL_SERVICE_SCHEMA_VERSION || version === EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION) return;
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
   );
@@ -1516,11 +1528,12 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
   );
   requireStore(
     version === SOURCE_IMPORT_SCHEMA_VERSION || version === MANUSCRIPT_REIMPORT_SCHEMA_VERSION ||
-      version === MODEL_SERVICE_SCHEMA_VERSION,
+      version === MODEL_SERVICE_SCHEMA_VERSION || version === EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
-  if (version === MANUSCRIPT_REIMPORT_SCHEMA_VERSION || version === MODEL_SERVICE_SCHEMA_VERSION) return;
+  if (version === MANUSCRIPT_REIMPORT_SCHEMA_VERSION || version === MODEL_SERVICE_SCHEMA_VERSION ||
+      version === EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION) return;
   validateSourceImportSchemaTruth(db, profile);
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
@@ -1685,7 +1698,15 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
 }
 
 function validateModelServiceSchema(db: DatabaseSync, profile: BuiltInWorkflowProfile): void {
-  validateManuscriptReimportSchemaTruth(db, profile, true);
+  const version = asNumber(
+    one(db.prepare('PRAGMA user_version').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取数据库版本。').user_version,
+  );
+  validateManuscriptReimportSchemaTruth(
+    db,
+    profile,
+    true,
+    version === EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION,
+  );
   const invalid = db.prepare(
     `SELECT 1 FROM model_service_connections
      WHERE connection_id != 'main-editorial-deepseek-v4-pro'
@@ -1705,12 +1726,14 @@ function initializeModelServiceSchema(db: DatabaseSync, profile: BuiltInWorkflow
     one(db.prepare('PRAGMA user_version').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取数据库版本。').user_version,
   );
   requireStore(
-    version === MANUSCRIPT_REIMPORT_SCHEMA_VERSION || version === MODEL_SERVICE_SCHEMA_VERSION,
+    version === MANUSCRIPT_REIMPORT_SCHEMA_VERSION || version === MODEL_SERVICE_SCHEMA_VERSION ||
+      version === EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
-  if (version === MODEL_SERVICE_SCHEMA_VERSION) {
+  if (version === MODEL_SERVICE_SCHEMA_VERSION || version === EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION) {
     validateModelServiceSchema(db, profile);
+    if (version === EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION) validateEditorialWorkspaceProfileSchema(db);
     return;
   }
   try {
@@ -2403,6 +2426,7 @@ export class EditorialStore {
   readonly #boundedAuthority: BoundedManuscriptStore;
   readonly #bounded: BoundedManuscriptStore;
   readonly #recoveryObjects: RecoveryObjectStore;
+  readonly #editorialWorkspaceProfile: EditorialWorkspaceProfileStore;
   readonly #workflowProfile: BuiltInWorkflowProfile;
   readonly #lifetimeId: string;
   readonly #control: StoreControl;
@@ -2424,6 +2448,7 @@ export class EditorialStore {
     boundedAuthority: BoundedManuscriptStore,
     bounded: BoundedManuscriptStore,
     recoveryObjects: RecoveryObjectStore,
+    editorialWorkspaceProfile: EditorialWorkspaceProfileStore,
     workflowProfile: BuiltInWorkflowProfile,
     lifetimeId: string,
     control: StoreControl,
@@ -2436,6 +2461,7 @@ export class EditorialStore {
     this.#boundedAuthority = boundedAuthority;
     this.#bounded = bounded;
     this.#recoveryObjects = recoveryObjects;
+    this.#editorialWorkspaceProfile = editorialWorkspaceProfile;
     this.#workflowProfile = workflowProfile;
     this.#lifetimeId = lifetimeId;
     this.#control = control;
@@ -2475,7 +2501,10 @@ export class EditorialStore {
     }
     initializeManuscriptReimportSchema(authority, workflowProfile);
     initializeModelServiceSchema(authority, workflowProfile);
+    initializeEditorialWorkspaceProfileSchema(authority);
     initializeBoundedSchema(authority, workflowProfile);
+    validateEditorialWorkspaceProfileSchema(authority);
+    const editorialWorkspaceProfile = await EditorialWorkspaceProfileStore.open(authority, dataRoot, codeRoot);
     const journal = new DatabaseSync(databasePath);
     configureDatabase(journal);
     const ingest = new DatabaseSync(databasePath);
@@ -2490,6 +2519,7 @@ export class EditorialStore {
       new BoundedManuscriptStore(authority),
       new BoundedManuscriptStore(journal),
       recoveryObjects,
+      editorialWorkspaceProfile,
       workflowProfile,
       lifetimeId,
       control,
@@ -2511,6 +2541,18 @@ export class EditorialStore {
     requireStore(!this.#cleanShutdownMarked, 'LIFETIME_STATE_CHANGED', '本地服务生命周期无法重复结束。');
     this.#boundedCall(() => this.#boundedAuthority.markServiceLifetimeClean(this.#lifetimeId, new Date().toISOString()));
     this.#cleanShutdownMarked = true;
+  }
+
+  async inspectEditorialWorkspaceProfile(bookId: string): Promise<EditorialWorkspaceProfileProjection> {
+    return this.#artifactCall(() => this.#editorialWorkspaceProfile.inspect(bookId));
+  }
+
+  async installEditorialWorkspaceProfile(bookId: string): Promise<EditorialWorkspaceProfileProjection> {
+    return this.#artifactCall(() => this.#editorialWorkspaceProfile.install(bookId));
+  }
+
+  async enableEditorialWorkspaceProfile(bookId: string): Promise<EditorialWorkspaceProfileProjection> {
+    return this.#artifactCall(() => this.#editorialWorkspaceProfile.enable(bookId));
   }
 
   close(): void {
@@ -2612,8 +2654,12 @@ export class EditorialStore {
                (SELECT count(*) FROM workflow_instances WHERE book_id = ?) workflows,
                (SELECT count(*) FROM manuscript_import_records WHERE book_id = ?) imports,
                (SELECT count(*) FROM source_import_records WHERE book_id = ?) source_imports,
+               (SELECT count(*) FROM native_artifact_book_enablements WHERE book_id = ?) artifact_enablements,
                (SELECT count(*) FROM import_drafts WHERE reviewed_existing_book_id = ?) reviewed_drafts`,
-          ).all(input.bookId, input.bookId, input.bookId, input.bookId, input.bookId, input.bookId, input.bookId) as SqlRow[],
+          ).all(
+            input.bookId, input.bookId, input.bookId, input.bookId,
+            input.bookId, input.bookId, input.bookId, input.bookId,
+          ) as SqlRow[],
           'BOOK_IDENTITY_CONFLICT',
           '无法核对已存在图书的空状态。',
         );
@@ -2621,6 +2667,7 @@ export class EditorialStore {
           asNumber(forbidden.manuscripts) === 0 && asNumber(forbidden.sources) === 0 &&
             asNumber(forbidden.fidelity_reviews) === 0 && asNumber(forbidden.workflows) === 0 &&
             asNumber(forbidden.imports) === 0 && asNumber(forbidden.source_imports) === 0 &&
+            asNumber(forbidden.artifact_enablements) === 0 &&
             asNumber(forbidden.reviewed_drafts) === 0,
           'BOOK_IDENTITY_CONFLICT',
           '已存在图书不再是创建响应丢失后的精确空图书。',
@@ -2658,15 +2705,16 @@ export class EditorialStore {
              (SELECT count(*) FROM source_versions WHERE book_id = ?) sources,
              (SELECT count(*) FROM workflow_instances WHERE book_id = ?) workflows,
              (SELECT count(*) FROM manuscript_import_records WHERE book_id = ?) imports,
-             (SELECT count(*) FROM source_import_records WHERE book_id = ?) source_imports`,
-        ).all(input.bookId, input.bookId, input.bookId, input.bookId, input.bookId) as SqlRow[],
+             (SELECT count(*) FROM source_import_records WHERE book_id = ?) source_imports,
+             (SELECT count(*) FROM native_artifact_book_enablements WHERE book_id = ?) artifact_enablements`,
+        ).all(input.bookId, input.bookId, input.bookId, input.bookId, input.bookId, input.bookId) as SqlRow[],
         'BOOK_CREATION_FAILED',
         '无法核对空图书创建结果。',
       );
       requireStore(
         asNumber(forbidden.manuscripts) === 0 && asNumber(forbidden.sources) === 0 &&
           asNumber(forbidden.workflows) === 0 && asNumber(forbidden.imports) === 0 &&
-          asNumber(forbidden.source_imports) === 0,
+          asNumber(forbidden.source_imports) === 0 && asNumber(forbidden.artifact_enablements) === 0,
         'BOOK_CREATION_FAILED',
         '空图书创建意外形成了稿件或导入记录。',
       );
@@ -9466,6 +9514,20 @@ export class EditorialStore {
         throw new StoreFatalError(error);
       }
       if (error instanceof BoundedStoreError) throw new StoreError(error.code, error.message);
+      throw error;
+    }
+  }
+
+  async #artifactCall<T>(operation: () => Promise<T>): Promise<T> {
+    this.#assertAvailable();
+    try {
+      return await operation();
+    } catch (error) {
+      if (error instanceof EditorialWorkspaceProfileFatalError) {
+        this.#poisoned = true;
+        throw new StoreFatalError(error);
+      }
+      if (error instanceof EditorialWorkspaceProfileError) throw new StoreError(error.code, error.message);
       throw error;
     }
   }

@@ -189,14 +189,25 @@ async function attachRendererTarget(browser) {
     return response.result.value;
   };
   await send('Runtime.enable');
+  at('renderer-ready');
   return { evaluate };
 }
 
 async function waitFor(renderer, expression, location) {
   const deadline = Date.now() + 30_000;
+  let latestEvaluationError;
   while (Date.now() < deadline) {
-    if (await renderer.evaluate(`Boolean(${expression})`)) return;
+    try {
+      const matched = await renderer.evaluate(`Boolean(${expression})`);
+      latestEvaluationError = undefined;
+      if (matched) return;
+    } catch (error) {
+      latestEvaluationError = error;
+    }
     await new Promise((resolveWait) => setTimeout(resolveWait, 50));
+  }
+  if (latestEvaluationError !== undefined) {
+    throw new Error(`J-01/${location}`, { cause: latestEvaluationError });
   }
   throw new Error(`J-01/${location}`);
 }
@@ -359,7 +370,7 @@ async function commitPreparedSourceImport(renderer, expectation = {}) {
   );
   await assertRenderer(
     renderer,
-    `(() => { const screen = document.querySelector('[data-screen="imported"]'); const actions = Array.from(screen?.querySelectorAll(':scope > .book-overview > .button-row:first-of-type button') ?? [], (button) => button.textContent); const source = screen?.querySelector('[data-view-source-version-id]'); const record = screen?.querySelector('[data-view-source-import-record-id]'); return screen?.textContent.includes('来源材料已导入') && source && !source.disabled && record && !record.disabled && actions[0] === '查看来源材料' && actions[1] === '查看来源导入记录'; })()`,
+    `(() => { const screen = document.querySelector('[data-screen="imported"]'); const source = screen?.querySelector('[data-view-source-version-id]'); const record = screen?.querySelector('[data-view-source-import-record-id]'); const actions = source?.closest('.button-row'); const labels = Array.from(actions?.querySelectorAll(':scope > button') ?? [], (button) => button.textContent); return screen?.textContent.includes('来源材料已导入') && source && !source.disabled && record && !record.disabled && actions === record.closest('.button-row') && labels[0] === '查看来源材料' && labels[1] === '查看来源导入记录'; })()`,
     'source-completion-actions',
   );
   const identities = await renderer.evaluate(`(() => {
@@ -934,7 +945,6 @@ async function runJourney(
         '不承诺 DOCX 往返或版式复原',
         '符合当前范围的导入不创建导入降级决定',
       ];
-  at('renderer-ready');
   const initialScreen = start === 'accepted-review' ? 'review' : start;
   await waitFor(
     renderer,
@@ -943,7 +953,7 @@ async function runJourney(
   );
   await assertRenderer(
     renderer,
-    `typeof globalThis.process === 'undefined' && typeof globalThis.require === 'undefined' && Object.keys(window.ai7).sort().join(',') === 'abandonImportDraft,acceptReimportDegradation,acknowledgeImportCompletion,cancelServiceJob,commitBookCreation,commitManuscriptReimport,commitNewBookImport,commitReplacement,commitSourceImport,continueImportDraft,deferRecovery,dismissReplacementPreview,flushJournalEdit,freezeReplacement,getBookOverview,getBookWorkbenchRoute,getHistoricalRevision,getImportStartup,getManuscriptWindow,getManuscriptWindowAt,getModelServiceSettings,getOutline,getProductDataLocation,getRecoveryComparison,getReimportIdentityCandidatePage,getReimportLineageSourceVersionPage,getReimportMappingPage,getSearchResults,getStartup,leaveBookWorkbench,listBooks,listPriorWork,openBookWorkbench,platform,pollServiceJob,prepareBookCreation,prepareManuscriptReimport,prepareNewBookReview,prepareReplacement,prepareSourceImportReview,redoManuscript,removeModelServiceCredential,reselectImportDraft,resolveReimportMapping,restoreRecovery,revealProductDataLocation,saveMilestone,saveModelServiceCredential,selectAndStageDocx,startReplacementCommit,startSearch,undoManuscript,viewRecoveryCandidate'`,
+    `typeof globalThis.process === 'undefined' && typeof globalThis.require === 'undefined' && Object.keys(window.ai7).sort().join(',') === 'abandonImportDraft,acceptReimportDegradation,acknowledgeImportCompletion,cancelServiceJob,commitBookCreation,commitManuscriptReimport,commitNewBookImport,commitReplacement,commitSourceImport,continueImportDraft,deferRecovery,dismissReplacementPreview,enableEditorialWorkspaceProfile,flushJournalEdit,freezeReplacement,getBookOverview,getBookWorkbenchRoute,getHistoricalRevision,getImportStartup,getManuscriptWindow,getManuscriptWindowAt,getModelServiceSettings,getOutline,getProductDataLocation,getRecoveryComparison,getReimportIdentityCandidatePage,getReimportLineageSourceVersionPage,getReimportMappingPage,getSearchResults,getStartup,inspectEditorialWorkspaceProfile,installEditorialWorkspaceProfile,leaveBookWorkbench,listBooks,listPriorWork,openBookWorkbench,platform,pollServiceJob,prepareBookCreation,prepareManuscriptReimport,prepareNewBookReview,prepareReplacement,prepareSourceImportReview,redoManuscript,removeModelServiceCredential,reselectImportDraft,resolveReimportMapping,restoreRecovery,revealProductDataLocation,saveMilestone,saveModelServiceCredential,selectAndStageDocx,startReplacementCommit,startSearch,undoManuscript,viewRecoveryCandidate'`,
     'renderer-isolation',
   );
   await assertRenderer(
@@ -1208,7 +1218,11 @@ async function runJourney(
 async function runEmptyBookFirstImport(renderer, expectation, restartReviewedImport) {
   const title = 'sample1 空图书首稿路径';
   const internalNumber = 'J01-EMPTY-BOOK-001';
-  await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'empty-book-landing');
+  await waitFor(
+    renderer,
+    `document.documentElement.dataset.ai7ProductReady === 'true' && document.querySelector('[data-screen="landing"]')`,
+    'empty-book-landing',
+  );
   await clickExactButton(renderer, '新建图书', 'empty-book-create-open');
   await waitFor(renderer, `document.querySelector('[data-screen="book-create"]')`, 'empty-book-form');
   await clickExactButton(renderer, '复核创建', 'empty-book-missing-title');

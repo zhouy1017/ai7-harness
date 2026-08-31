@@ -1,4 +1,4 @@
-export const SERVICE_PROTOCOL_VERSION = 12 as const;
+export const SERVICE_PROTOCOL_VERSION = 13 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -38,6 +38,9 @@ export const IPC_CHANNELS = {
   prepareBookCreation: 'ai7:j01:prepare-book-creation',
   commitBookCreation: 'ai7:j01:commit-book-creation',
   getBookOverview: 'ai7:j01:get-book-overview',
+  inspectEditorialWorkspaceProfile: 'ai7:j15:inspect-editorial-workspace-profile',
+  installEditorialWorkspaceProfile: 'ai7:j15:install-editorial-workspace-profile',
+  enableEditorialWorkspaceProfile: 'ai7:j15:enable-editorial-workspace-profile',
   listBooks: 'ai7:j01:list-books',
   prepareNewBookReview: 'ai7:j01:prepare-new-book-review',
   commitNewBookImport: 'ai7:j01:commit-new-book-import',
@@ -350,6 +353,45 @@ export interface BookWorkOverviewProjection {
     previousCursor: BookHistoryCursor | null;
     nextCursor: BookHistoryCursor | null;
   };
+}
+
+export interface EditorialWorkspaceProfileProjection {
+  bookId: string;
+  identity: '@ai7/editorial-workspace-profile';
+  kind: 'DSH Profile';
+  version: '1.0.0';
+  provenance: '仓库内置';
+  license: 'AI7 root license';
+  source: 'config/native-artifact-sources/editorial-workspace-profile/package.json';
+  byteLength: 263;
+  sha256: 'ae485040c8fa602ab2e98ec91dd122201d40a8be41d8a4f86f7cd55ddb1e434d';
+  compatibility: '声明式 · Provider-free · 兼容';
+  authorityCeiling: {
+    modelRoles: readonly ['Main Editorial Role'];
+    capabilities: readonly [];
+    readableScopeKinds: readonly [];
+    providerBindings: readonly [];
+    credentialAccess: false;
+    networkAccess: false;
+    effectClasses: readonly [];
+    backgroundAnalysisEnrollment: false;
+    applyAuthority: false;
+  };
+  lifecycle: {
+    state: 'available-to-install' | 'installed-disabled' | 'enabled-for-book' | 'unavailable-needs-attention';
+    label: '可获取 · 尚未安装' | '已安装 · 本图书停用' | '已安装 · 已为本图书启用' | '不可用 · 需要处理';
+    installed: boolean;
+    enabledForCurrentBook: boolean;
+  };
+  actions: {
+    canInstall: boolean;
+    canEnable: boolean;
+  };
+  namedNonEffects: readonly [
+    '不创建 Task、Plan、Run 或 Session',
+    '不读取图书、稿件或来源内容',
+    '不授予 Provider、凭据、网络、Effect、Enrollment 或 Apply 权限',
+  ];
 }
 
 export interface BookSummaryProjection {
@@ -1371,6 +1413,18 @@ export interface ServiceOperationMap {
     input: { bookId: string; historyCursor: BookHistoryCursor | null };
     output: BookWorkOverviewProjection;
   };
+  inspectEditorialWorkspaceProfile: {
+    input: { bookId: string };
+    output: EditorialWorkspaceProfileProjection;
+  };
+  installEditorialWorkspaceProfile: {
+    input: { bookId: string };
+    output: EditorialWorkspaceProfileProjection;
+  };
+  enableEditorialWorkspaceProfile: {
+    input: { bookId: string };
+    output: EditorialWorkspaceProfileProjection;
+  };
   listBooks: {
     input: { after: BookSummaryCursor | null };
     output: BookSummaryPageProjection;
@@ -1582,6 +1636,9 @@ export interface RendererApi {
   prepareBookCreation(input: ServiceOperationMap['prepareBookCreation']['input']): Promise<BookCreationReviewProjection>;
   commitBookCreation(input: ServiceOperationMap['commitBookCreation']['input']): Promise<BookCreationCommitProjection>;
   getBookOverview(input: ServiceOperationMap['getBookOverview']['input']): Promise<BookWorkOverviewProjection>;
+  inspectEditorialWorkspaceProfile(): Promise<EditorialWorkspaceProfileProjection>;
+  installEditorialWorkspaceProfile(): Promise<EditorialWorkspaceProfileProjection>;
+  enableEditorialWorkspaceProfile(): Promise<EditorialWorkspaceProfileProjection>;
   listBooks(input: ServiceOperationMap['listBooks']['input']): Promise<BookSummaryPageProjection>;
   prepareNewBookReview(input: ServiceOperationMap['prepareNewBookReview']['input']): Promise<ReviewBeforeImportProjection>;
   commitNewBookImport(input: CommitNewBookRendererInput): Promise<ManuscriptImportCommitProjection>;

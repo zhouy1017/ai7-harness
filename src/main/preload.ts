@@ -196,6 +196,12 @@ const api: RendererApi = Object.freeze({
     invoke<ServiceOperationMap['commitBookCreation']['output']>(IPC_CHANNELS.commitBookCreation, input),
   getBookOverview: (input: ServiceOperationMap['getBookOverview']['input']) =>
     invoke<ServiceOperationMap['getBookOverview']['output']>(IPC_CHANNELS.getBookOverview, input),
+  inspectEditorialWorkspaceProfile: () =>
+    invoke<ServiceOperationMap['inspectEditorialWorkspaceProfile']['output']>(IPC_CHANNELS.inspectEditorialWorkspaceProfile),
+  installEditorialWorkspaceProfile: () =>
+    invoke<ServiceOperationMap['installEditorialWorkspaceProfile']['output']>(IPC_CHANNELS.installEditorialWorkspaceProfile),
+  enableEditorialWorkspaceProfile: () =>
+    invoke<ServiceOperationMap['enableEditorialWorkspaceProfile']['output']>(IPC_CHANNELS.enableEditorialWorkspaceProfile),
   listBooks: (input: ServiceOperationMap['listBooks']['input']) =>
     invoke<ServiceOperationMap['listBooks']['output']>(IPC_CHANNELS.listBooks, input),
   prepareNewBookReview: (input: ServiceOperationMap['prepareNewBookReview']['input']) =>

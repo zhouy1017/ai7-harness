@@ -1,6 +1,7 @@
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { copyFile, mkdir, readFile, readdir, realpath, rm } from 'node:fs/promises';
+import { copyFile, lstat, mkdir, readFile, readdir, realpath, rm } from 'node:fs/promises';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
@@ -98,6 +99,7 @@ async function ensureClosedOutputs() {
     'main/index.cjs',
     'main/preload.cjs',
     'config/dsh-profiles/manuscript-editorial/package.json',
+    'config/native-artifact-sources/editorial-workspace-profile/package.json',
     'config/source-checkout-launch-authority.json',
     'docs/policies/active-policy-set.v3.json',
     'docs/policies/external-export-policy.v1.json',
@@ -146,6 +148,33 @@ async function ensureClosedOutputs() {
       !('dependencies' in profileManifest) &&
       !('devDependencies' in profileManifest),
     'Built native DSH Profile gained identity, dependency, script, or bundle drift.',
+  );
+  const builtEditorialWorkspaceProfile = await readFile(
+    outputPath('config', 'native-artifact-sources', 'editorial-workspace-profile', 'package.json'),
+  );
+  const sourceEditorialWorkspaceProfile = await readFile(
+    resolve(ROOT, 'config', 'native-artifact-sources', 'editorial-workspace-profile', 'package.json'),
+  );
+  requireBuild(
+    builtEditorialWorkspaceProfile.equals(sourceEditorialWorkspaceProfile) &&
+      builtEditorialWorkspaceProfile.length === 263 &&
+      createHash('sha256').update(builtEditorialWorkspaceProfile).digest('hex') ===
+        'ae485040c8fa602ab2e98ec91dd122201d40a8be41d8a4f86f7cd55ddb1e434d',
+    'Built editorial workspace Profile bytes drifted.',
+  );
+  const editorialWorkspaceManifest = JSON.parse(
+    new TextDecoder('utf-8', { fatal: true }).decode(builtEditorialWorkspaceProfile),
+  );
+  requireBuild(
+    editorialWorkspaceManifest?.name === '@ai7/editorial-workspace-profile' &&
+      editorialWorkspaceManifest?.version === '1.0.0' &&
+      editorialWorkspaceManifest?.private === true &&
+      Array.isArray(editorialWorkspaceManifest?.dsh?.profile?.bundles) &&
+      editorialWorkspaceManifest.dsh.profile.bundles.length === 0 &&
+      !('scripts' in editorialWorkspaceManifest) &&
+      !('dependencies' in editorialWorkspaceManifest) &&
+      !('devDependencies' in editorialWorkspaceManifest),
+    'Built editorial workspace Profile gained identity, dependency, script, or bundle drift.',
   );
   const exactPolicyCarriers = [
     'config/source-checkout-launch-authority.json',
@@ -237,7 +266,29 @@ async function main() {
   await mkdir(outputPath('shared'), { recursive: true });
   await mkdir(outputPath('notices'), { recursive: true });
   await mkdir(outputPath('config', 'dsh-profiles', 'manuscript-editorial'), { recursive: true });
+  await mkdir(outputPath('config', 'native-artifact-sources', 'editorial-workspace-profile'), { recursive: true });
   await mkdir(outputPath('docs', 'policies'), { recursive: true });
+
+  const editorialWorkspaceSourceDirectory = resolve(
+    ROOT,
+    'config',
+    'native-artifact-sources',
+    'editorial-workspace-profile',
+  );
+  const editorialWorkspaceEntries = await readdir(editorialWorkspaceSourceDirectory, { withFileTypes: true });
+  const editorialWorkspaceSourcePath = resolve(editorialWorkspaceSourceDirectory, 'package.json');
+  const editorialWorkspaceSourceMetadata = await lstat(editorialWorkspaceSourcePath);
+  requireBuild(
+    editorialWorkspaceEntries.length === 1 &&
+      editorialWorkspaceEntries[0]?.name === 'package.json' &&
+      editorialWorkspaceEntries[0].isFile() &&
+      !editorialWorkspaceEntries[0].isSymbolicLink() &&
+      editorialWorkspaceSourceMetadata.isFile() &&
+      !editorialWorkspaceSourceMetadata.isSymbolicLink() &&
+      (await realpath(editorialWorkspaceSourceDirectory)) === editorialWorkspaceSourceDirectory &&
+      (await realpath(editorialWorkspaceSourcePath)) === editorialWorkspaceSourcePath,
+    'Editorial workspace Profile source must be one exact regular non-symlink package.json.',
+  );
 
   const keyringPackage = JSON.parse(await readFile(resolve(ROOT, 'node_modules', '@napi-rs', 'keyring', 'package.json'), 'utf8'));
   requireBuild(keyringPackage.version === '1.3.0', 'Exact @napi-rs/keyring@1.3.0 is absent.');
@@ -309,6 +360,10 @@ async function main() {
   await copyFile(
     resolve(ROOT, 'config', 'dsh-profiles', 'manuscript-editorial', 'package.json'),
     outputPath('config', 'dsh-profiles', 'manuscript-editorial', 'package.json'),
+  );
+  await copyFile(
+    editorialWorkspaceSourcePath,
+    outputPath('config', 'native-artifact-sources', 'editorial-workspace-profile', 'package.json'),
   );
   for (const path of [
     'config/source-checkout-launch-authority.json',

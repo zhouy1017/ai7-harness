@@ -78,13 +78,14 @@ if (isJourneyRunner) {
   }
 }
 
-export const ADMITTED_JOURNEYS = Object.freeze(['J-01', 'J-02', 'J-08', 'J-12']);
+export const ADMITTED_JOURNEYS = Object.freeze(['J-01', 'J-02', 'J-08', 'J-12', 'J-15']);
 
 const JOURNEY_MODULES = Object.freeze({
   'J-01': new URL('./run-j01.mjs', import.meta.url),
   'J-02': new URL('./run-j02.mjs', import.meta.url),
   'J-08': new URL('./run-j08.mjs', import.meta.url),
   'J-12': new URL('./run-j12.mjs', import.meta.url),
+  'J-15': new URL('./run-j15.mjs', import.meta.url),
 });
 
 const JOURNEY_LOCATIONS = Object.freeze({
@@ -174,6 +175,25 @@ const JOURNEY_LOCATIONS = Object.freeze({
     'model-service-first-save',
     'model-service-restart-and-replace',
     'model-service-remove-and-restart',
+  ]),
+  'J-15': Object.freeze([
+    'entry',
+    'controller-loopback',
+    'controller-imports',
+    'initial-empty-book',
+    'install-disabled',
+    'install-effect',
+    'enable-current-book',
+    'enable-effect',
+    'restart-persistence',
+    'restart-open-book-a',
+    'restart-book-a-route-error',
+    'restart-enabled-book-a',
+    'restart-book-a-disabled',
+    'restart-book-a-unavailable',
+    'second-book-disabled',
+    'accessibility-reflow-forced-colors',
+    'zero-activity',
   ]),
 });
 
