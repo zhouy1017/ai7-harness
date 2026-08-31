@@ -28,4 +28,6 @@ This ADR supersedes the mandatory verification and review-gate clauses of ADRs 0
 
 [ADR 0053](./0053-preserve-local-first-development-through-a-bounded-ci-degraded-mode.md) amends ADR 0049's local-completion, hosted-consumption, and unavailable-hosted-integration clauses. It keeps Local diagnostic, Local completion, and Hosted Gate evidence distinct; preserves this decision's Gate identity, scenario/data/platform meanings, failure semantics, and excluded proof surfaces; and creates no fake green, substitute Gate, or single-platform Gate.
 
+[ADR 0055](./0055-stage-the-bounded-provider-free-j-03-authorization-journey.md) admits Issue #47's bounded standard-direct J-03 authorization slice as the next supported Journey decision and stages its dormant workflow projection. J-03 becomes executable only when Issue #47 adds its real runner/dispatcher and atomically joins the then-current local orchestration; ADR 0055 fixes no later total count and leaves Issue #88's J-15 routing decision unresolved. Gate identity, provider-free meaning, platform parity, evidence timing and every unrelated clause in this decision remain unchanged.
+
 The concise implementation rules live in [`docs/agents/ci-test-boundaries.md`](../agents/ci-test-boundaries.md).

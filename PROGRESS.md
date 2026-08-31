@@ -2,29 +2,30 @@
 
 ## What's done
 
-- Issue #46 / PR #143 and lifecycle Issue #148 / PR #149 are integrated as exact intended target `dev@78f8f2dd26087356cdc9da206c3037599c761f5a`.
-- The Owner accepted Issue #150's exact recommended sequence: persist its decisions in current authority owners; admit one bounded provider-free J-03 Journey through a separate CI-governance Issue/PR without enabling or running workflow `342459594`; integrate Issue #88 and its lifecycle node; then rewrite and dispatch Issue #47 against the resulting `dev`, stopping before every Issue #91-owned execution boundary.
-- Issue #151 is the sole active writable route. Its T3 documentation-only outcome adds the bounded T1/T2 coding Spark lane to Layer B without changing task classes, Layer A provider neutrality, validation, roles, isolation, reporting, integration, product behavior, or workflow state.
-- Worker binding: requested and actual fallback `Codex gpt-5.6-sol` / `xhigh`; task class T3; fallback used; exact reason `CLAUDE_CLI_UNAVAILABLE` from prior real attempts in the current dispatch window.
+- Issue #153 is the sole active writable route in `ci/153-admit-j03-gate` from exact `dev@4746bb15b96cc76afee2b450746c8fb069f3229e`.
+- The exact eleven-path T3 governance change is authored: accepted ADR 0055 records Issue #150's four decisions; current CI owners use a phase-resolved executable admitted set; and the existing disabled workflow displays and appends dormant J-03 after J-12.
+- The existing controller, runners, `e2e:all`, package, source-checkout, product, schema, dependency, job/matrix topology, triggers, action pins and platform contract remain unchanged. Workflow `342459594` was observed `disabled_manually` with no queued or in-progress run before authoring.
+- Authorized static validation passes: exact eleven-path scope, accepted ADR frontmatter, local Markdown links, phase/disclosure wording scan, unchanged workflow outside the one display and appended step, J-03 command count/order, root-router shape, and `git diff --check`.
+- Worker binding: requested and actual fallback `Codex gpt-5.6-sol` / `xhigh`; task class T3; fallback used; exact reason `CLAUDE_CLI_UNAVAILABLE` already established in this dispatch window.
 
 ## What's next
 
-- Complete Issue #151's exact four-path documentation validation and return the clean commit to the Commander. Commander alone may push, create or change pull-request state, merge, close, and route later work.
-- After Issue #151 integrates, resume Issue #150's accepted recommended sequence at its first step; do not skip directly to Issue #47 product work.
+- Return the validated uncommitted change to the Commander. Commander alone commits, pushes, manages the Draft pull request, re-resolves current `dev`, integrates, closes, and routes the separate J-15 Owner decision required before Issue #88.
 
 ## Key decisions
 
-- [ADR 0015](docs/adr/0015-provider-neutral-development-dispatch.md) and [Repository Development Dispatch](kick-in/27-repository-development-dispatch.md) remain the two existing owners; the Spark lane introduces no new task class or dispatch mechanism.
-- The `gpt-5.3-codex-spark` @ `xhigh` binding is eligible only for exact, existing-seam, focused T1/T2 coding units with bounded edits and deterministic validation. One unavailable/capacity result falls through to the normal same-class order; Spark never binds T0, T3, Commander, or Reviewer work.
-- Scoped Issue #151 archive sweep: none. Issue #148's durable Issue #46 checkpoint is already archived at `docs/archive/issue-46-model-service-credentials-2026-08-31/`; its transient root routing remains recoverable from Git history only.
+- J-03 is the next supported Journey decision, not a fixed fifth executable total. It becomes executable only when Issue #47 supplies the real runner/dispatcher and atomically adds it to whatever executable admitted set then exists.
+- Issue #88 remains before Issue #47 and requires a separate unresolved J-15 routing decision. This change neither admits nor implies J-15.
+- Issue #47 persists the bounded standard-direct authorization state and stops before every Issue #91-owned scheduler, DSH, Provider, credential, payload, network and Effect boundary under Provider Processing v1. Quick Start and Default Execution Rule remain deferred.
+- The workflow projection follows Issue #133 / PR #134 precedent and remains dormant; it is not a placeholder, skip, completion result or permission to operate Actions.
 
 ## Unresolved matters or blockers
 
-- Issue #151 is not yet integrated. Its documentation-only scope creates no build, E2E, Actions, Provider, or product work.
-- Issue #150's accepted sequence has not yet been persisted or executed. Issue #47 remains without a current work-ready brief; workflow `342459594` remains disabled and unrun.
+- J-15 admission remains an Owner decision outside Issue #153. Issue #88 stays blocked until that decision and its separate CI-governance route integrate.
+- Issue #47 remains undispatched and must be refreshed only after Issue #88 integrates. Issue #91 remains the sole execution owner.
 
 ## Safe Resume Prompt
 
 ```text
-Resume Issue #151 only in docs/151-spark-dispatch-lane from dev@78f8f2dd26087356cdc9da206c3037599c761f5a. Keep the change to kick-in/27-repository-development-dispatch.md, docs/adr/0015-provider-neutral-development-dispatch.md, PROGRESS.md, and HANDOFF.md; preserve provider-neutral task classes and Layer A, and validate links, headings/tables, contradictory binding/order wording, root router shape, exact four-path scope, and git diff --check. Run no build, E2E, Actions, Provider, workflow, or product work. Return a clean commit to the Commander, who alone pushes, manages the pull request, integrates, closes, and then resumes Issue #150's accepted recommended sequence.
+Commander: resume Issue #153 in ci/153-admit-j03-gate from the validated uncommitted eleven-path change at dev@4746bb15b96cc76afee2b450746c8fb069f3229e. Inspect the bounded diff, commit it, push one Draft pull request, and re-fetch/re-resolve then-current dev before Ready and merge. Keep workflow 342459594 disabled and unrun; take no product, Provider, package, dependency, schema, release or main action. After integration, route the separate unresolved J-15 Owner decision required before Issue #88; do not skip to Issue #47.
 ```
