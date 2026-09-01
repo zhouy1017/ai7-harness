@@ -2,17 +2,16 @@
 
 ## What's done
 
-- On 2026-09-01 the Owner required agents to keep workflow checks synchronized with new code implementation. Issue #170 contains the full documentation/process Change Brief from exact `origin/dev@244117bac73756f4269563a594f49f531b2d168f`.
-- Current exact-head inspection found no existing projection drift: `e2e/controller.mjs` admission/runner/location ownership and `.github/workflows/e2e.yml` both resolve J-01 → J-02 → J-08 → J-12 → J-15. The stable package entries derive local execution from the controller.
-- `docs/agents/incremental-development.md` now owns the implementation completion rule: every implementation Change Brief and PR closure records either `exact reuse — checked unchanged` or one synchronized projection delta. A required scenario/runner/controller/local `e2e:all`/Hosted workflow change must land atomically with the implementation in the same Issue and pull request.
-- `docs/agents/change-brief.md` now prompts for that disposition in both the full brief and PR closure. Root `AGENTS.md` remains concise because it already routes every code change through the lifecycle and Change Brief owners.
-- Exact four-path scope, required wording, two template prompts, documentation/design-only `N/A` limits, local Markdown links, and `git diff --check` pass. Independent read-only review found and then confirmed closure of the implementation-scope and `N/A` bypasses; final verdict is CLEAN.
-- Live read-only GitHub inspection confirms workflow `342459594` is active, with zero September runs and zero queued/in-progress runs before this branch is pushed. No workflow action occurred.
+- On 2026-09-01 the Owner required workflow checks to stay synchronized with new implementation. Issue #170 / PR #171 integrated the binding rule into exact `dev@c4add0dbd93e2937d4f0ded18d3634b2b6e296ff`.
+- Every implementation Change Brief and PR closure now records one Gate projection disposition: `exact reuse — checked unchanged`, naming why the existing scenario/runner/local/Hosted invocation already exercises the change; or `synchronized delta`, atomically updating every affected scenario/runner/controller/local `e2e:all`/Hosted workflow projection in the same Issue and pull request.
+- A missing Structural Budget for required projection work is a stop condition. Documentation/design-only work may use `N/A`; implementation work cannot. Unchanged invocation does not justify mechanical workflow YAML edits.
+- Issue #172 completed the scoped lifecycle sweep. The consumed Issue #170 checkpoint is archived byte-identically at `docs/archive/issue-170-gate-projection-sync-2026-09-01/`; its handoff remains in Git history only.
+- PR #171's normal Markdown occurrence was run `33470502060`: one Ubuntu route job succeeded, the product matrix was skipped, total run duration was 9 seconds, and GitHub's timing API reported billable Ubuntu time `0 ms`. There was no duplicate, dispatch, probe, or rerun.
 
 ## What's next
 
-- Commit and integrate the validated Issue #170 unit through a Draft pull request.
-- Immediately before Ready, re-read workflow/run/account usage state. Permit only the normal Markdown route occurrence, inspect its actual job usage afterward, and never dispatch, probe, or rerun it as a debugger. After merge, run the scoped lifecycle sweep.
+- The next repository authority boundary is the Owner response on Issue #165. Issue #47 remains blocked and must not be refreshed or dispatched before that decision.
+- For every later implementation, resolve the Gate projection disposition in its Change Brief before editing, keep debugging local while Draft, and observe actual Actions usage before Ready and after its one normal occurrence.
 
 ## Key decisions
 
@@ -22,12 +21,12 @@
 
 ## Unresolved matters or blockers
 
-- The current CLI credential still lacks GitHub Plan-read, so exact account-wide minutes require the Owner-visible Billing surface; do not expand permissions silently. The Owner-confirmed allowance is 3,000 included minutes per month, and repository attribution is currently zero September runs.
-- A pre-existing root `README.md` sentence still describes the paired workflow as dormant. It is outside Issue #170's four-path structural budget and must not be cleaned opportunistically; a separately scoped documentation fix is needed before that sentence is treated as current state.
+- The current CLI credential lacks GitHub Plan-read, so exact account-wide minutes require the Owner-visible Billing surface; do not expand permissions silently. The Owner-confirmed allowance remains 3,000 included minutes per month. Repository run/job timing remains independently observable.
+- A pre-existing root `README.md` sentence still describes the paired workflow as dormant. It was outside Issues #170/#172 and needs separate documentation scope before that sentence is treated as current state.
 - Issue #165 still requires the Owner's separate artifact-ceiling/provider-preflight decision; Issue #47 remains blocked. No Provider action is authorized.
 
 ## Safe Resume Prompt
 
 ```text
-Continue Issue #170 from exact origin/dev@244117b in docs/170-sync-gate-projection. Commit the exact four-path CLEAN diff and open a Draft PR. Before Ready, recheck live workflow/usage state; if available, allow only the normal Markdown route occurrence and inspect its actual job usage. Do not dispatch, rerun, change workflow configuration, fix README drift, or touch Issue #165/#47 scope. After merge, run the scoped lifecycle sweep.
+Resume from current origin/dev. The next authority boundary is the Owner response on Issue #165; keep Issue #47 blocked until that decision. For any later implementation, require its Change Brief and PR closure to record exact Gate reuse checked unchanged or the named synchronized local/Hosted projection delta in the same Issue/PR; stop if the Structural Budget omits required projection work. Keep debugging Draft/local, check Actions usage before Ready and after the one normal occurrence, and do not fix the stale README sentence without separate scope.
 ```
