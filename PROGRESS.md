@@ -12,10 +12,11 @@
 - Removed all temporary `[DEBUG-ISSUE178]` instrumentation, restored the one accidentally displaced baseline `closeProduct()`, and completed independent regression/spec re-review with no remaining blocker. The review withdrew its cleanup concern after verifying pinned Playwright 1.62.1's 30-second close-or-kill path and Windows process-tree kill behavior against the observed zero-residual runs.
 - The adjacent unchanged J-15 diagnostic passed. Fresh Windows Local completion then passed in exact order: `pnpm run doctor`, ordinary `pnpm run bootstrap`, `pnpm run build`, and `pnpm run e2e:all`; the orchestrator reported J-01, J-02, J-08, J-12, J-15, and final `LOCAL_COMPLETION/all/pass`. The post-completion Electron process count remained zero.
 - Checked the shared reuse surfaces rather than editing them: `e2e/run-all.mjs` and `.github/workflows/e2e.yml` are unchanged, all temporary issue diagnostics are absent, and `git diff --check` passes.
+- Final independent T2 review found zero Spec findings and zero hard Standards findings. The locally complete unit was committed and pushed, and Draft pull request #180 now targets `dev`; it remains Draft with no Hosted check occurrence.
 
 ## What's next
 
-- Complete final independent diff review, commit the locally complete Issue #178 unit, and let the Commander push/open its Draft pull request without making it Ready or triggering Hosted Gate.
+- Obtain the Owner's contemporaneous account-wide Actions-minute fact. If sufficient, re-resolve the exact target authority, make only PR #180 Ready for its one paired Hosted occurrence, inspect the actual usage delta, and integrate only after both platforms pass.
 
 ## Key decisions
 
@@ -24,10 +25,10 @@
 
 ## Unresolved matters or blockers
 
-- No external blocker remains for the bounded product repair. Hosted Gate evidence and integration still require the Owner's separately monitored Actions-minute fact before a Draft pull request may become Ready.
+- PR #180 cannot become Ready until the Owner supplies the separately monitored contemporaneous Actions-minute fact. Until #180 integrates, PR #177 cannot rebase onto the repaired `dev`, and no downstream product implementation may stack on either candidate.
 
 ## Safe Resume Prompt
 
 ```text
-Continue Issue #178 only in the isolated issue-178 worktree from completed Windows Local completion and zero-process cleanup. Resolve any blocking final-review finding, commit and open the Draft pull request, but do not make it Ready or trigger Hosted Gate until the Owner supplies the separately monitored Actions-minute fact.
+Resume with Draft PR #180 at its exact head. Do not make it Ready until the Owner supplies the contemporaneous account-wide Actions-minute fact. If sufficient, re-resolve `dev` authority, start exactly one normal paired Hosted occurrence through Ready, inspect the actual delta, and integrate only after Windows and macOS pass; then rebase and revalidate Draft PR #177 before any downstream Issue #47 or #91 implementation.
 ```
