@@ -37,3 +37,5 @@ Pure documentation, design, and CI-governance changes may integrate while the wo
 ## Consequences
 
 The Gate's admitted scenarios, provider-free execution interval, public-test-material rules, fresh subject construction, platform parity, failure semantics, and exclusions remain owned by ADR 0027 and the CI boundary. Normal Commander-only external action and integration authority is unchanged. Superseded ADR and Question 24 history remains intact as history; none of its old lanes, receipts, budgets, catalogs, or release gates becomes current again.
+
+[ADR 0057](./0057-restore-hosted-gate-under-observed-actions-usage.md) records the later authoritative capacity restoration, safe enablement sequence, actual-usage observation, current J-15 executable set, and removal of dormant J-03 from the active workflow. Its restored lifecycle resumes this ADR's Draft-first, integration-ready, normally one-occurrence operation without reviving any excluded lane.
