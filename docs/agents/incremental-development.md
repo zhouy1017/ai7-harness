@@ -26,6 +26,13 @@ Use the [tiered template](./change-brief.md) inside the Issue/Worker brief. The 
 
 Editing starts only after the brief is coherent. A Worker never expands it unilaterally.
 
+Treat the E2E/Hosted Gate projection as a direct consumer of implementation. Every implementation Change Brief and pull-request closure records one of two dispositions:
+
+- **Exact reuse — checked unchanged:** name the existing supported-Journey or observed-bug scenario and explain why its real runner plus the current local and Hosted invocation already exercise the changed behavior or contract.
+- **Synchronized delta:** when implementation changes a supported-Journey outcome, executable coverage, runner/dispatcher, root command or arguments, or bootstrap/build/cache/platform behavior represented by the Gate, the same implementation Issue and pull request atomically update every affected scenario/runner/controller, local `e2e:all` orchestration, and `.github/workflows/e2e.yml` projection.
+
+Do not edit workflow YAML merely to mark a check when its invocation projection is unchanged, and do not defer a required projection delta to a follow-up after the code. The Structural Budget names the affected responsibilities and paths. If it does not authorize the complete synchronized cutover, stop before editing or continuing and return the Issue to the Commander/applicable authority for a revised Change Brief. Follow the exact technical admission and execution rules in [CI and test boundaries](./ci-test-boundaries.md).
+
 ## 4. Choose the earliest adequate change
 
 Use this order and stop at the first safe option:
