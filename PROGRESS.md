@@ -2,31 +2,29 @@
 
 ## What's done
 
-- The Owner confirmed on 2026-09-01 that GitHub Actions capacity is again available at 3,000 included minutes per month and authorized restoring exact workflow `E2E Functional Gate` (ID `342459594`) under actual-usage observation, infrequent integration-ready execution, and the existing prohibition on using Hosted CI as a debugger.
-- Issue #166 contains the full CI-governance Change Brief. Branch `ci/166-restore-hosted-gate` and this worktree start from exact `origin/dev@12f66e229037b33d04c039ff9e3e679e00772b95`; the stale main `dev` checkout and its untracked `.agents/` and `skills-lock.json` remain untouched.
-- Read-only GitHub inspection confirmed one workflow, state `disabled_manually`, no open pull request, no queued or in-progress run, and no September run. No workflow was enabled, dispatched, rerun, or probed.
-- ADR 0057 now records the exact safe restoration sequence, normal paired-platform evidence lifecycle, outside-Actions usage observation, and future degraded fallback. The current AGENTS/CI/Git/incremental/dispatch runbooks route to it while preserving ADR 0054's milestone definition and degraded-interval Windows-only fallback.
-- `.github/workflows/e2e.yml` now invokes exactly J-01 → J-02 → J-08 → J-12 → J-15. Dormant J-03 is absent until Issue #47 supplies its real runner/dispatcher and atomically updates local and hosted orchestration. Triggers, Draft suppression, permissions, complete-diff router, concurrency, paired matrix, action pins, cache, bootstrap, build, and the five real Journey commands are unchanged.
-- Local static validation passed: the workflow command list equals `ADMITTED_JOURNEYS`; the workflow differs from the exact base only by the J-03 job-label/step removal; all nine `e2e/*.mjs` files pass `node --check`; changed Markdown links, final newlines and whitespace pass; and `git diff --check` passes. Two independent read-only review axes returned CLEAN. No product Journey or Actions occurrence was run.
+- The Owner confirmed on 2026-09-01 that GitHub Actions again has 3,000 included minutes per month and authorized a monitored restoration of exact workflow `E2E Functional Gate` (ID `342459594`). Hosted CI remains integration evidence and may not be used as a debugger.
+- Issue #166 / PR #167 integrated ADR 0057 and the truthful workflow configuration into exact `dev@3ea64490795a7a2b8b92930058c1c5766de69f8a`. The hosted command order is exactly J-01 → J-02 → J-08 → J-12 → J-15; dormant J-03 remains absent until Issue #47 supplies its real runner and dispatcher.
+- Issue #168 completed the scoped repository lifecycle sweep. The outgoing Issue #166 implementation checkpoint is preserved byte-identically at `docs/archive/issue-166-hosted-gate-restoration-2026-09-01/`; its handoff remains in Git history only.
+- The restoration and lifecycle pull requests were authored, reviewed, and integrated while the workflow was disabled. No dispatch, probe, rerun, backfill, product Journey, or September Actions occurrence was used to validate them.
 
 ## What's next
 
-- Re-resolve exact `dev`, commit the validated unit, and integrate Issue #166 through a Draft pull request while workflow `342459594` remains disabled.
-- After integration, perform the scoped lifecycle sweep and fresh live-state checks. Only then may the Commander enable the exact workflow without dispatch or backfill.
+- Resolve mutable GitHub state live rather than from this checkpoint. If Issue #166 is open and workflow `342459594` is still disabled, the Commander may enable it once only after confirming its exact identity/configuration, zero queued/in-progress runs, no open Ready pull request, and the authoritative usage baseline. If it is already active, do not repeat the action. Confirm enablement itself created no run, record the result on Issue #166, and close that Issue.
+- After the restoration closure, the next repository decision is the Owner response on Issue #165. Issue #47 remains blocked and must not be refreshed or dispatched before that authority conflict is resolved.
 
 ## Key decisions
 
-- Restoration reuses the existing Ready-only, Draft-suppressed, same-PR-cancelling paired Gate. It adds no workflow, trigger, fast lane, schedule, manual dispatch, or numeric engineering budget.
-- Usage observation remains outside Actions: GitHub's account/repository billing meter and run/job Usage are the source. The current CLI token lacks the account Plan-read scope, so it must not be silently expanded; the Owner's 3,000-minute confirmation and the repository's zero September runs are the truthful starting facts.
-- Hosted CI remains integration evidence. Product/build/Journey failures return the pull request to Draft for local repair; only one clearly external transient may be rerun by the Commander.
+- The Gate retains Ready-only `pull_request` cadence, Draft suppression, complete-diff routing, same-PR cancellation, and one paired Windows/macOS occurrence per integration-ready product change. Debugging and repair stay local; a changing PR returns to Draft before push.
+- Actual usage is observed outside Actions. Before Ready, read the Owner-visible account meter plus repository attribution; after the one normal occurrence, read its run/job usage and the account delta. If the authoritative meter is unavailable or capacity is insufficient, leave the PR Draft instead of probing with a run.
+- No monitoring workflow, schedule, manual dispatch, fast lane, usage ledger, uploaded artifact, additional proof gate, or numeric spend policy was introduced.
 
 ## Unresolved matters or blockers
 
-- No implementation blocker. Account-wide minute details require the Owner-visible GitHub billing surface or a separately granted read scope; Issue #166 creates no permission expansion. The CLI read failed for missing Plan-read and no signed-in external browser was available, so the Owner's current 3,000-minute confirmation remains the truthful account baseline and the repository's zero September runs remain the repository baseline.
-- Issue #47 remains independently blocked by Issue #165 and stays outside this change.
+- The current CLI credential lacks GitHub Plan-read, so exact account-wide minutes require the Owner-visible billing surface or a separately authorized read scope. Do not widen credentials silently. The truthful starting facts are the Owner-confirmed 3,000-minute monthly allowance and zero repository runs in September before restoration.
+- Issue #165 requires an exact Owner decision about the Issue #47 artifact ceiling and provider-denied preflight. No Provider action is authorized.
 
 ## Safe Resume Prompt
 
 ```text
-Continue Issue #166 from exact origin/dev@12f66e2 in ci/166-restore-hosted-gate. Re-resolve dev, commit the validated CLEAN diff, and integrate through a Draft PR while workflow 342459594 stays disabled and unrun. After the scoped lifecycle sweep and fresh state checks, enable only that workflow without dispatch or backfill. Do not probe, rerun, expand billing permissions, or touch Issue #47 product scope.
+From current origin/dev, first query Issue #166 and live workflow 342459594 state. If #166 remains open and the workflow is disabled, recheck exact identity/configuration, zero Ready pull requests, zero queued/in-progress runs, and the authoritative usage baseline, then enable once without dispatch, probe, rerun, or backfill; verify that no run was created, comment the facts on #166, and close it. If it is already active or #166 is closed, do not repeat enablement. Then stop at Issue #165 for the Owner's authority decision; keep Issue #47 blocked and do not expand billing permissions.
 ```
