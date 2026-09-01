@@ -19,3 +19,4 @@ Archived lifecycle nodes are historical records excluded from ordinary current-s
 - [Issue #158 J-15 governance — 2026-08-31](issue-158-j15-governance-2026-08-31/INDEX.md): integrated Issue #158 / PR #159 consumed checkpoint and current Issue #88 routing.
 - [Issue #88 native artifact — 2026-09-01](issue-88-native-artifact-2026-09-01/INDEX.md): integrated Issue #88 / PR #162 consumed checkpoint and current routing.
 - [Issue #166 Hosted Gate restoration — 2026-09-01](issue-166-hosted-gate-restoration-2026-09-01/INDEX.md): integrated PR #167 consumed implementation checkpoint and live-state-conditional external cutover routing.
+- [Issue #170 Gate projection synchronization — 2026-09-01](issue-170-gate-projection-sync-2026-09-01/INDEX.md): integrated Issue #170 / PR #171 consumed instruction checkpoint and current Owner-decision routing.
