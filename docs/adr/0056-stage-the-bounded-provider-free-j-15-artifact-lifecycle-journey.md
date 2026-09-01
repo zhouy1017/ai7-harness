@@ -29,3 +29,5 @@ This ADR adds no product implementation, runner, dependency, schema, credential 
 ## Rollback and stop boundary
 
 Before Issue #88's executable cutover, rollback reverts this governance admission and dormant workflow projection without data migration or product cleanup. Stop if J-15 cannot remain exactly ADR 0045's bounded provider-free declarative lifecycle; if it cannot enter `e2e:all` atomically with its real runner and dispatcher while J-03 remains dormant; or if the change requires a placeholder, skipped Journey, fixed total, workflow operation, or any adjacent authority.
+
+[ADR 0057](./0057-restore-hosted-gate-under-observed-actions-usage.md) follows Issue #88's completed executable cutover and separately authorizes workflow restoration. J-15 remains real in the active Gate; still-dormant J-03 is removed until Issue #47's atomic cutover. This changes no J-15 product meaning or authority.

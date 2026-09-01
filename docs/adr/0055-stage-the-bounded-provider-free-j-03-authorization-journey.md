@@ -33,3 +33,5 @@ This ADR creates no product implementation, runner, dependency, schema, credenti
 ## Rollback and stop boundary
 
 Before Issue #47, rollback reverts this governance admission and dormant projection without data migration or product cleanup. Stop if J-03 cannot remain provider-free and standard-direct-only; if Issue #88 cannot precede Issue #47 under ADR 0056; if the slice cannot stop before every Issue #91-owned execution boundary under Provider Processing v1; or if executable cutover would require a placeholder, skipped Journey or fixed total that is not true of then-current `dev`.
+
+[ADR 0057](./0057-restore-hosted-gate-under-observed-actions-usage.md) later restores the active workflow before Issue #47 and therefore removes dormant J-03 from its executable job. J-03 remains admitted but non-executable; Issue #47 still owns the one atomic runner, dispatcher, local-orchestration, and hosted-workflow cutover required by this ADR.

@@ -21,3 +21,5 @@ Draft suppression, integration-ready pull-request invocation, pull-request-scope
 ## Consequences
 
 This ADR amends only ADR 0049's initial three-Journey routing default. [ADR 0027](./0027-concentrate-ci-on-e2e-functionality.md)'s Gate identity, provider-free boundary, scenario meaning, platform parity, failure semantics, and excluded proof surfaces remain unchanged. ADR 0053 owns current CI-degraded activation, completion, integration, disclosure, and exit conditions without changing this Journey admission.
+
+[ADR 0057](./0057-restore-hosted-gate-under-observed-actions-usage.md) later restores the exact workflow after J-12 and J-15 are real. It changes no J-12 meaning and removes only still-dormant J-03 from the active command sequence until Issue #47's atomic cutover.
