@@ -8,13 +8,25 @@ On 2026-08-31 the Owner selected Issue #47's first bounded standard-direct autho
 
 ## Bounded J-03 meaning
 
-Issue #47 will implement only the first provider-free J-03 slice. It begins from the exact Book, primary Manuscript and Manuscript Revision lineage imported from the [`sample1` compatibility baseline](./0044-use-sample1-as-compatibility-and-recording-baseline.md), and it binds the exact Book-scoped enabled `@ai7/editorial-workspace-profile@1.0.0` revision plus its separately governed AI7 compatibility/authority sidecar state supplied by Issue #88. It persists the exact Task Intent; `Task Input / 任务输入` Manuscript Checkpoint and task-bound pins; current-Book source scope; Model Role and capability requirements; Provider/outbound-data and budget disclosure; explicit Run Budget Ceiling state; Execution Plan/Plan Envelope; and standard direct Run Authorization.
+Issue #47 will implement only the first provider-free J-03 slice. It begins from the exact Book, primary Manuscript and Manuscript Revision lineage imported from the [`sample1` compatibility baseline](./0044-use-sample1-as-compatibility-and-recording-baseline.md), and it binds the exact Book-scoped enabled `@ai7/editorial-workspace-profile@1.0.0` revision plus the explicitly reviewed Revision 2 pin of its separately governed AI7 compatibility/authority sidecar. It persists the exact Task Intent; `Task Input / 任务输入` Manuscript Checkpoint and task-bound pins; current-Book source scope; Model Role and capability requirements; Provider/outbound-data and budget disclosure; explicit Run Budget Ceiling state; Execution Plan/Plan Envelope; and standard direct Run Authorization.
 
 That slice then stops truthfully before scheduler dispatch, DSH Session creation, Provider adapter or Credential Broker resolution, Provider payload construction, network access, model execution, or any Effect. Provider Processing v1 remains selected and permits no live transmission. Durable authorization is neither Provider eligibility nor execution success; Issue #91 remains the sole owner of those execution boundaries. Quick Start and Default Execution Rule behavior remain deferred to a separately authorized successor.
 
 ## Dependency order
 
-Issue #88 integrates before Issue #47 under ADR 0056's accepted J-15 routing. Issue #47 then rebases onto the resulting `dev` and consumes Issue #88's exact artifact revision and sidecar state; it does not invent a substitute artifact, bypass scoped enablement, or absorb J-15 product work.
+Issue #88 integrated before Issue #47 under ADR 0056's accepted J-15 routing. Issue #165 then exposed the empty effective readable intersection and authorized one separately bounded sidecar predecessor. That predecessor must integrate after this authority refinement and before Issue #47; it preserves the native carrier and existing enablements, materializes Revision 1 history, and offers explicit per-Book review of Revision 2 under [ADR 0045](./0045-preserve-native-dsh-artifacts-behind-ai7-authority-sidecars.md). Its lifecycle routing then closes before Commander refreshes and dispatches Issue #47. Issue #47 consumes the resulting exact artifact and Revision 2 Book pin; it does not invent a substitute artifact, bypass scoped enablement, silently migrate a Book, or absorb predecessor J-15 product work.
+
+## Deterministic development-CI denied preflight
+
+Issue #47's Provider Preflight consumes only already-integrated local facts:
+
+- the Main Editorial Role binding configured by Issue #46: official DeepSeek Open Platform (`deepseek-open-platform`), model `deepseek-v4-pro`, adapter revision 1, configuration revision 1, an empty Approved Fallback Chain and logical credential slot `deepseek-api-key`;
+- the existing opaque Credential Reference and readiness metadata, without reading or resolving the secret value;
+- exact `sample1`'s Owner-designated `public-or-synthetic` Outbound Data Category;
+- exact Run Budget Ceiling state `unset`; and
+- trusted launch scope `development-ci`, which selects Provider Processing v1 with default deny, zero Provider allow rules and zero authorized live transmissions.
+
+The resulting Provider Resolution Plan and Plan Envelope freeze that exact locally known binding, empty fallback, opaque reference, outbound category, budget state and policy-denied status. Standard direct Run Authorization may then create the exact Run Record state and user-visible terminal label `已记录授权 · 未派发`. This is neither immediate readiness nor Connectivity Wait State, never enters the scheduler, never creates a DSH Session, and never resolves the credential, constructs a Provider payload, accesses the network or calls a Provider. Connectivity, credential readiness, configuration or policy change cannot auto-start it or change the immutable denied record into a runnable one. It represents neither Provider eligibility nor execution success. Any later executable production attempt under Issue #91 requires its own then-current Plan and authorization semantics.
 
 ## Staged executable cutover
 
@@ -32,6 +44,6 @@ This ADR creates no product implementation, runner, dependency, schema, credenti
 
 ## Rollback and stop boundary
 
-Before Issue #47, rollback reverts this governance admission and dormant projection without data migration or product cleanup. Stop if J-03 cannot remain provider-free and standard-direct-only; if Issue #88 cannot precede Issue #47 under ADR 0056; if the slice cannot stop before every Issue #91-owned execution boundary under Provider Processing v1; or if executable cutover would require a placeholder, skipped Journey or fixed total that is not true of then-current `dev`.
+Before Issue #47, rollback reverts this governance admission and dormant projection without data migration or product cleanup. Issue #165's in-place authority refinement may likewise be reverted without product cleanup only before its sidecar predecessor integrates; any later migration requires its own exact rollback authority. Stop if J-03 cannot remain provider-free and standard-direct-only; if Issue #88 and the sidecar predecessor cannot precede Issue #47 under ADR 0045 and ADR 0056; if denied preflight requires a non-local fact, secret resolution, Provider probe or policy change; if its immutable record could enter the scheduler, become Connectivity Wait State or auto-start; if the slice cannot stop before every Issue #91-owned execution boundary under Provider Processing v1; or if executable cutover would require a placeholder, skipped Journey or fixed total that is not true of then-current `dev`.
 
 [ADR 0057](./0057-restore-hosted-gate-under-observed-actions-usage.md) later restores the active workflow before Issue #47 and therefore removes dormant J-03 from its executable job. J-03 remains admitted but non-executable; Issue #47 still owns the one atomic runner, dispatcher, local-orchestration, and hosted-workflow cutover required by this ADR.
