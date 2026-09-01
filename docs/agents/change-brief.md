@@ -59,7 +59,7 @@ Use this only when correctness requires little judgment and no product behavior,
 - Data and migration:
 - Authority / privacy / egress / credential / Effect:
 - Windows/macOS native variation:
-- Applicable E2E journey or bug regression; otherwise `N/A — no automated proof`:
+- Applicable E2E journey or bug regression plus Gate projection disposition (`exact reuse — checked unchanged` or the named synchronized surfaces); documentation/design-only work uses `N/A — no automated proof`:
 - Cleanup, cutover, rollback, and obsolete-path removal:
 
 #### Stop Conditions
@@ -99,7 +99,7 @@ The PR body links the Issue and adds only:
 - Planned vs actual delta:
 - Existing structure reused:
 - New owner/dependency introduced and why:
-- Journey/bug outcome, or `N/A — no implementation behavior change`:
+- Journey/bug outcome and Gate projection disposition; documentation/design-only work uses `N/A — no implementation behavior change`:
 - Migration/cleanup completed:
 - Unresolved matters and safe next action:
 - Archive sweep result, if triggered:

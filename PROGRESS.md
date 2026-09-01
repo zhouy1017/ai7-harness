@@ -2,29 +2,32 @@
 
 ## What's done
 
-- The Owner confirmed on 2026-09-01 that GitHub Actions again has 3,000 included minutes per month and authorized a monitored restoration of exact workflow `E2E Functional Gate` (ID `342459594`). Hosted CI remains integration evidence and may not be used as a debugger.
-- Issue #166 / PR #167 integrated ADR 0057 and the truthful workflow configuration into exact `dev@3ea64490795a7a2b8b92930058c1c5766de69f8a`. The hosted command order is exactly J-01 → J-02 → J-08 → J-12 → J-15; dormant J-03 remains absent until Issue #47 supplies its real runner and dispatcher.
-- Issue #168 completed the scoped repository lifecycle sweep. The outgoing Issue #166 implementation checkpoint is preserved byte-identically at `docs/archive/issue-166-hosted-gate-restoration-2026-09-01/`; its handoff remains in Git history only.
-- The restoration and lifecycle pull requests were authored, reviewed, and integrated while the workflow was disabled. No dispatch, probe, rerun, backfill, product Journey, or September Actions occurrence was used to validate them.
+- On 2026-09-01 the Owner required agents to keep workflow checks synchronized with new code implementation. Issue #170 contains the full documentation/process Change Brief from exact `origin/dev@244117bac73756f4269563a594f49f531b2d168f`.
+- Current exact-head inspection found no existing projection drift: `e2e/controller.mjs` admission/runner/location ownership and `.github/workflows/e2e.yml` both resolve J-01 → J-02 → J-08 → J-12 → J-15. The stable package entries derive local execution from the controller.
+- `docs/agents/incremental-development.md` now owns the implementation completion rule: every implementation Change Brief and PR closure records either `exact reuse — checked unchanged` or one synchronized projection delta. A required scenario/runner/controller/local `e2e:all`/Hosted workflow change must land atomically with the implementation in the same Issue and pull request.
+- `docs/agents/change-brief.md` now prompts for that disposition in both the full brief and PR closure. Root `AGENTS.md` remains concise because it already routes every code change through the lifecycle and Change Brief owners.
+- Exact four-path scope, required wording, two template prompts, documentation/design-only `N/A` limits, local Markdown links, and `git diff --check` pass. Independent read-only review found and then confirmed closure of the implementation-scope and `N/A` bypasses; final verdict is CLEAN.
+- Live read-only GitHub inspection confirms workflow `342459594` is active, with zero September runs and zero queued/in-progress runs before this branch is pushed. No workflow action occurred.
 
 ## What's next
 
-- Resolve mutable GitHub state live rather than from this checkpoint. If Issue #166 is open and workflow `342459594` is still disabled, the Commander may enable it once only after confirming its exact identity/configuration, zero queued/in-progress runs, no open Ready pull request, and the authoritative usage baseline. If it is already active, do not repeat the action. Confirm enablement itself created no run, record the result on Issue #166, and close that Issue.
-- After the restoration closure, the next repository decision is the Owner response on Issue #165. Issue #47 remains blocked and must not be refreshed or dispatched before that authority conflict is resolved.
+- Commit and integrate the validated Issue #170 unit through a Draft pull request.
+- Immediately before Ready, re-read workflow/run/account usage state. Permit only the normal Markdown route occurrence, inspect its actual job usage afterward, and never dispatch, probe, or rerun it as a debugger. After merge, run the scoped lifecycle sweep.
 
 ## Key decisions
 
-- The Gate retains Ready-only `pull_request` cadence, Draft suppression, complete-diff routing, same-PR cancellation, and one paired Windows/macOS occurrence per integration-ready product change. Debugging and repair stay local; a changing PR returns to Draft before push.
-- Actual usage is observed outside Actions. Before Ready, read the Owner-visible account meter plus repository attribution; after the one normal occurrence, read its run/job usage and the account delta. If the authoritative meter is unavailable or capacity is insufficient, leave the PR Draft instead of probing with a run.
-- No monitoring workflow, schedule, manual dispatch, fast lane, usage ledger, uploaded artifact, additional proof gate, or numeric spend policy was introduced.
+- Synchronization is a reconciliation decision, not mandatory YAML churn. Existing Journey coverage may be reused only when the brief names the real scenario/runner and explains why local and Hosted invocation already exercise the change.
+- An implementation change that alters a represented outcome or invocation cannot merge while its required Gate projection is deferred. Missing Structural Budget is a stop condition and requires a revised Change Brief before work continues.
+- Detailed admission and execution rules remain in the existing CI boundary; the lifecycle owns when implementation must resolve them, and the template makes that decision visible to the next agent.
 
 ## Unresolved matters or blockers
 
-- The current CLI credential lacks GitHub Plan-read, so exact account-wide minutes require the Owner-visible billing surface or a separately authorized read scope. Do not widen credentials silently. The truthful starting facts are the Owner-confirmed 3,000-minute monthly allowance and zero repository runs in September before restoration.
-- Issue #165 requires an exact Owner decision about the Issue #47 artifact ceiling and provider-denied preflight. No Provider action is authorized.
+- The current CLI credential still lacks GitHub Plan-read, so exact account-wide minutes require the Owner-visible Billing surface; do not expand permissions silently. The Owner-confirmed allowance is 3,000 included minutes per month, and repository attribution is currently zero September runs.
+- A pre-existing root `README.md` sentence still describes the paired workflow as dormant. It is outside Issue #170's four-path structural budget and must not be cleaned opportunistically; a separately scoped documentation fix is needed before that sentence is treated as current state.
+- Issue #165 still requires the Owner's separate artifact-ceiling/provider-preflight decision; Issue #47 remains blocked. No Provider action is authorized.
 
 ## Safe Resume Prompt
 
 ```text
-From current origin/dev, first query Issue #166 and live workflow 342459594 state. If #166 remains open and the workflow is disabled, recheck exact identity/configuration, zero Ready pull requests, zero queued/in-progress runs, and the authoritative usage baseline, then enable once without dispatch, probe, rerun, or backfill; verify that no run was created, comment the facts on #166, and close it. If it is already active or #166 is closed, do not repeat enablement. Then stop at Issue #165 for the Owner's authority decision; keep Issue #47 blocked and do not expand billing permissions.
+Continue Issue #170 from exact origin/dev@244117b in docs/170-sync-gate-projection. Commit the exact four-path CLEAN diff and open a Draft PR. Before Ready, recheck live workflow/usage state; if available, allow only the normal Markdown route occurrence and inspect its actual job usage. Do not dispatch, rerun, change workflow configuration, fix README drift, or touch Issue #165/#47 scope. After merge, run the scoped lifecycle sweep.
 ```
