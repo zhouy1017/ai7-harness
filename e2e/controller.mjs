@@ -99,6 +99,7 @@ const JOURNEY_LOCATIONS = Object.freeze({
     'review',
     'editor',
     'launch',
+    'window-close',
   ]),
   'J-02': Object.freeze([
     'entry',

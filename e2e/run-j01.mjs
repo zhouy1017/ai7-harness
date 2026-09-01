@@ -193,6 +193,101 @@ async function attachRendererTarget(browser) {
   return { evaluate };
 }
 
+async function createRendererManager(browser) {
+  const root = await browser.newBrowserCDPSession();
+  const renderers = new Map();
+  const pending = new Map();
+  let nextId = 1;
+  const sendRoot = async (method, params = {}) => {
+    let timeout;
+    try {
+      return await Promise.race([
+        root.send(method, params),
+        new Promise((_, rejectSend) => {
+          timeout = setTimeout(() => rejectSend(new Error('J-01/renderer-cdp-timeout')), 30_000);
+          timeout.unref();
+        }),
+      ]);
+    } finally {
+      clearTimeout(timeout);
+    }
+  };
+  root.on('Target.receivedMessageFromTarget', ({ sessionId, message }) => {
+    let response;
+    try {
+      response = JSON.parse(message);
+    } catch {
+      return;
+    }
+    if (typeof response.id !== 'number') return;
+    const key = `${sessionId}:${response.id}`;
+    const completion = pending.get(key);
+    if (!completion) return;
+    pending.delete(key);
+    if (response.error) completion.reject(new Error('J-01/renderer-cdp-response'));
+    else completion.resolve(response.result);
+  });
+  const attach = async (target) => {
+    if (renderers.has(target.targetId)) return renderers.get(target.targetId);
+    const { sessionId } = await sendRoot('Target.attachToTarget', { targetId: target.targetId, flatten: false });
+    const send = async (method, params = {}) => {
+      const id = nextId++;
+      const key = `${sessionId}:${id}`;
+      const response = new Promise((resolveResponse, rejectResponse) => {
+        const timeout = setTimeout(() => {
+          pending.delete(key);
+          rejectResponse(new Error('J-01/renderer-cdp-timeout'));
+        }, 30_000);
+        timeout.unref();
+        pending.set(key, {
+          resolve: (value) => {
+            clearTimeout(timeout);
+            resolveResponse(value);
+          },
+          reject: (error) => {
+            clearTimeout(timeout);
+            rejectResponse(error);
+          },
+        });
+      });
+      const dispatch = sendRoot('Target.sendMessageToTarget', {
+        sessionId,
+        message: JSON.stringify({ id, method, params }),
+      });
+      const [, result] = await Promise.all([dispatch, response]);
+      return result;
+    };
+    const renderer = {
+      targetId: target.targetId,
+      evaluate: async (expression) => {
+        const response = await send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true });
+        requireJourney(!response.exceptionDetails, 'renderer-evaluate');
+        return response.result.value;
+      },
+    };
+    renderers.set(target.targetId, renderer);
+    await send('Runtime.enable');
+    return renderer;
+  };
+  return {
+    list: async () => {
+      const targets = (await sendRoot('Target.getTargets')).targetInfos.filter((target) => target.type === 'page');
+      return Promise.all(targets.map(attach));
+    },
+    close: (targetId) => sendRoot('Target.closeTarget', { targetId }),
+  };
+}
+
+async function waitForRendererCount(manager, count, location) {
+  const deadline = Date.now() + 30_000;
+  while (Date.now() < deadline) {
+    const renderers = await manager.list();
+    if (renderers.length === count) return renderers;
+    await new Promise((resolveWait) => setTimeout(resolveWait, 50));
+  }
+  throw new Error(`J-01/${location}`);
+}
+
 async function waitFor(renderer, expression, location) {
   const deadline = Date.now() + 30_000;
   let latestEvaluationError;
@@ -1621,8 +1716,132 @@ async function main() {
       degraded: false,
     };
 
+    // Issue #178 / nearest supported Journey J-01: closing one Book workspace must leave another
+    // workspace usable and let the closed Book reopen with unique routing, without a JavaScript Error.
+    at('window-close');
+    const windowCloseRoot = await createCanonicalExternalDataRoot(resolve(runRoot, 'window-close-data'), checkoutRoot);
+    let renderer = await launchProduct({ dataRoot: windowCloseRoot });
+    at('window-close');
+    await waitFor(
+      renderer,
+      `document.documentElement.dataset.ai7ProductReady === 'true' && document.querySelector('[data-screen="landing"]')`,
+      'issue-178-product-ready',
+    );
+    const windowCloseBooks = await renderer.evaluate(`(async()=>{
+      const createBook = async (title, internalNumber) => {
+        const review = await window.ai7.prepareBookCreation({title, internalNumber});
+        const committed = await window.ai7.commitBookCreation({...review.proposed, reviewDigest:review.reviewDigest});
+        await window.ai7.leaveBookWorkbench();
+        return committed.overview.book.bookId;
+      };
+      return {
+        survivingBookId: await createBook('窗口关闭存活图书', 'WINDOW-CLOSE-SURVIVOR'),
+        closedBookId: await createBook('窗口关闭目标图书', 'WINDOW-CLOSE-TARGET'),
+      };
+    })()`);
+    requireJourney(
+      /^[0-9a-f-]{36}$/i.test(windowCloseBooks?.survivingBookId ?? '') &&
+        /^[0-9a-f-]{36}$/i.test(windowCloseBooks?.closedBookId ?? '') &&
+        windowCloseBooks.survivingBookId !== windowCloseBooks.closedBookId,
+      'issue-178-two-book-identities',
+    );
+    const openedSurvivingBook = await renderer.evaluate(
+      `window.ai7.openBookWorkbench({kind:'book',bookId:${JSON.stringify(windowCloseBooks.survivingBookId)}})`,
+    );
+    requireJourney(
+      openedSurvivingBook?.target === 'requesting-window' &&
+        openedSurvivingBook.route?.kind === 'book' &&
+        openedSurvivingBook.route.bookId === windowCloseBooks.survivingBookId,
+      'issue-178-open-surviving-book-workspace',
+    );
+    const openedSecondBook = await renderer.evaluate(
+      `window.ai7.openBookWorkbench({kind:'book',bookId:${JSON.stringify(windowCloseBooks.closedBookId)}})`,
+    );
+    requireJourney(
+      openedSecondBook?.target === 'new-window' &&
+        openedSecondBook.route?.kind === 'book' &&
+        openedSecondBook.route.bookId === windowCloseBooks.closedBookId,
+      'issue-178-open-secondary-book-workspace',
+    );
+    const windowManager = await createRendererManager(browser);
+    const twoBookWindows = await waitForRendererCount(windowManager, 2, 'issue-178-two-book-windows');
+    const initialRoutes = await Promise.all(
+      twoBookWindows.map((item) => item.evaluate(`window.ai7.getBookWorkbenchRoute()`)),
+    );
+    requireJourney(
+      initialRoutes.filter((route) => route?.kind === 'book' && route.bookId === windowCloseBooks.survivingBookId).length === 1 &&
+        initialRoutes.filter((route) => route?.kind === 'book' && route.bookId === windowCloseBooks.closedBookId).length === 1,
+      'issue-178-initial-unique-routes',
+    );
+    const initialSurvivingRenderer = twoBookWindows[
+      initialRoutes.findIndex((route) => route?.kind === 'book' && route.bookId === windowCloseBooks.survivingBookId)
+    ];
+    const secondaryRenderer = twoBookWindows[
+      initialRoutes.findIndex((route) => route?.kind === 'book' && route.bookId === windowCloseBooks.closedBookId)
+    ];
+    requireJourney(
+      initialSurvivingRenderer !== undefined &&
+        secondaryRenderer !== undefined &&
+        initialSurvivingRenderer.targetId !== secondaryRenderer.targetId,
+      'issue-178-initial-unique-targets',
+    );
+    requireJourney((await windowManager.close(secondaryRenderer.targetId)).success === true, 'issue-178-close-secondary-target');
+    const [survivingRenderer] = await waitForRendererCount(windowManager, 1, 'issue-178-one-book-window');
+    requireJourney(
+      survivingRenderer.targetId === initialSurvivingRenderer.targetId,
+      'issue-178-surviving-target',
+    );
+    const survivingRoundTrip = await survivingRenderer.evaluate(
+      `(async()=>({books:await window.ai7.listBooks({after:null}),route:await window.ai7.getBookWorkbenchRoute()}))()`,
+    );
+    requireJourney(
+      Array.isArray(survivingRoundTrip?.books?.items) &&
+        survivingRoundTrip.books.items.some((book) => book.bookId === windowCloseBooks.survivingBookId) &&
+        survivingRoundTrip.books.items.some((book) => book.bookId === windowCloseBooks.closedBookId) &&
+        survivingRoundTrip.route?.kind === 'book' &&
+        survivingRoundTrip.route.bookId === windowCloseBooks.survivingBookId,
+      'issue-178-surviving-workspace-ipc',
+    );
+    const reopenedSecondBook = await survivingRenderer.evaluate(
+      `window.ai7.openBookWorkbench({kind:'book',bookId:${JSON.stringify(windowCloseBooks.closedBookId)}})`,
+    );
+    requireJourney(
+      reopenedSecondBook?.target === 'new-window' &&
+        reopenedSecondBook.route?.kind === 'book' &&
+        reopenedSecondBook.route.bookId === windowCloseBooks.closedBookId,
+      'issue-178-reopen-closed-book',
+    );
+    const reopenedBookWindows = await waitForRendererCount(windowManager, 2, 'issue-178-reopened-two-book-windows');
+    const reopenedRoutes = await Promise.all(
+      reopenedBookWindows.map((item) => item.evaluate(`window.ai7.getBookWorkbenchRoute()`)),
+    );
+    const retainedSurvivingRenderer = reopenedBookWindows[
+      reopenedRoutes.findIndex((route) => route?.kind === 'book' && route.bookId === windowCloseBooks.survivingBookId)
+    ];
+    const reopenedRenderer = reopenedBookWindows[
+      reopenedRoutes.findIndex((route) => route?.kind === 'book' && route.bookId === windowCloseBooks.closedBookId)
+    ];
+    requireJourney(
+      retainedSurvivingRenderer !== undefined &&
+        reopenedRenderer !== undefined &&
+        retainedSurvivingRenderer.targetId !== reopenedRenderer.targetId,
+      'issue-178-unique-reopened-targets',
+    );
+    const [retainedSurvivingRoute, reopenedRoute] = await Promise.all([
+      retainedSurvivingRenderer.evaluate(`window.ai7.getBookWorkbenchRoute()`),
+      reopenedRenderer.evaluate(`window.ai7.getBookWorkbenchRoute()`),
+    ]);
+    requireJourney(
+      retainedSurvivingRoute?.kind === 'book' &&
+        retainedSurvivingRoute.bookId === windowCloseBooks.survivingBookId &&
+        reopenedRoute?.kind === 'book' &&
+        reopenedRoute.bookId === windowCloseBooks.closedBookId,
+      'issue-178-unique-reopened-route',
+    );
+    await closeProduct();
+
     const emptyBookRoot = await createCanonicalExternalDataRoot(resolve(runRoot, 'empty-book-first-import-data'), checkoutRoot);
-    let renderer = await launchProduct({ dataRoot: emptyBookRoot, pickerPath: docx });
+    renderer = await launchProduct({ dataRoot: emptyBookRoot, pickerPath: docx });
     const populatedBookId = await runEmptyBookFirstImport(renderer, sample1Expectation, async ({ bookId, title }) => {
       await closeProduct();
       const relaunched = await launchProduct({ dataRoot: emptyBookRoot });
