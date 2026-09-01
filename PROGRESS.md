@@ -12,7 +12,7 @@
 - Removed all temporary `[DEBUG-ISSUE178]` instrumentation, restored the one accidentally displaced baseline `closeProduct()`, and completed independent regression/spec re-review with no remaining blocker. The review withdrew its cleanup concern after verifying pinned Playwright 1.62.1's 30-second close-or-kill path and Windows process-tree kill behavior against the observed zero-residual runs.
 - The adjacent unchanged J-15 diagnostic passed. Fresh Windows Local completion then passed in exact order: `pnpm run doctor`, ordinary `pnpm run bootstrap`, `pnpm run build`, and `pnpm run e2e:all`; the orchestrator reported J-01, J-02, J-08, J-12, J-15, and final `LOCAL_COMPLETION/all/pass`. The post-completion Electron process count remained zero.
 - Checked the shared reuse surfaces rather than editing them: `e2e/run-all.mjs` and `.github/workflows/e2e.yml` are unchanged, all temporary issue diagnostics are absent, and `git diff --check` passes.
-- Final independent T2 review found zero Spec findings and zero hard Standards findings. The locally complete unit was committed and pushed, and Draft pull request #180 now targets `dev`; it remains Draft with no Hosted check occurrence.
+- Final independent T2 review found zero Spec findings and zero hard Standards findings. The locally complete unit was committed and pushed, and Draft pull request #180 now targets `dev`; it remains Draft. Its pull-request check suite records only skipped Route and matrix jobs with zero steps, not a Hosted Journey execution or paired Gate occurrence.
 
 ## What's next
 
