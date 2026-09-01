@@ -6,12 +6,20 @@ import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
 import type { EditorialWorkspaceProfileProjection } from '../shared/protocol.js';
 import { ensureCanonicalDataDirectory, inspectCanonicalDataFile } from '../shared/data-root.js';
 
-export const EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION = 12;
+export const EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION = 12;
+export const EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION = 13;
 export const EDITORIAL_WORKSPACE_PROFILE_ID = '@ai7/editorial-workspace-profile';
 export const EDITORIAL_WORKSPACE_PROFILE_VERSION = '1.0.0';
 export const EDITORIAL_WORKSPACE_PROFILE_DIGEST =
   'ae485040c8fa602ab2e98ec91dd122201d40a8be41d8a4f86f7cd55ddb1e434d';
 export const EDITORIAL_WORKSPACE_PROFILE_BYTES = 263;
+export const EDITORIAL_WORKSPACE_PROFILE_SIDECAR_ID = 'ai7.editorial-workspace-profile.authority';
+export const EDITORIAL_WORKSPACE_PROFILE_SIDECAR_REVISION_1_DIGEST =
+  '887067fc716261fc5f41772a295faa326f6bf2818573daae29ffdb7388e9e48d';
+export const EDITORIAL_WORKSPACE_PROFILE_SIDECAR_REVISION_2_DIGEST =
+  '980b565f25bdff29e539365e17344346017b05146a45cfea35c8ed7d528a1bff';
+export const EDITORIAL_WORKSPACE_PROFILE_SIDECAR_REVISION_1_BYTES = 588;
+export const EDITORIAL_WORKSPACE_PROFILE_SIDECAR_REVISION_2_BYTES = 660;
 export const EDITORIAL_WORKSPACE_PROFILE_RETAINED_KEY = posix.join(
   'sha256',
   EDITORIAL_WORKSPACE_PROFILE_DIGEST.slice(0, 2),
@@ -50,7 +58,78 @@ export const NATIVE_ARTIFACT_BOOK_ENABLEMENTS_SCHEMA_SQL = `CREATE TABLE native_
   UNIQUE(artifact_id, book_id)
 ) STRICT`;
 
+export const EDITORIAL_WORKSPACE_PROFILE_SIDECAR_REVISIONS_SCHEMA_SQL =
+  `CREATE TABLE editorial_workspace_profile_sidecar_revisions (
+  sidecar_id TEXT NOT NULL CHECK(sidecar_id = 'ai7.editorial-workspace-profile.authority'),
+  revision INTEGER NOT NULL CHECK(revision IN (1, 2)),
+  native_artifact_id TEXT NOT NULL REFERENCES native_artifact_installations(artifact_id),
+  canonical_json TEXT NOT NULL,
+  byte_length INTEGER NOT NULL CHECK(byte_length IN (588, 660)),
+  sha256 TEXT NOT NULL UNIQUE CHECK(length(sha256) = 64),
+  PRIMARY KEY(sidecar_id, revision),
+  UNIQUE(sidecar_id, revision, sha256)
+) STRICT`;
+
+export const EDITORIAL_WORKSPACE_PROFILE_BOOK_PINS_SCHEMA_SQL =
+  `CREATE TABLE editorial_workspace_profile_book_pins (
+  book_id TEXT NOT NULL,
+  native_artifact_id TEXT NOT NULL CHECK(native_artifact_id = '@ai7/editorial-workspace-profile'),
+  sidecar_id TEXT NOT NULL CHECK(sidecar_id = 'ai7.editorial-workspace-profile.authority'),
+  sidecar_revision INTEGER NOT NULL CHECK(sidecar_revision IN (1, 2)),
+  sidecar_sha256 TEXT NOT NULL CHECK(length(sidecar_sha256) = 64),
+  pinned_at TEXT NOT NULL,
+  PRIMARY KEY(book_id, sidecar_id, sidecar_revision),
+  FOREIGN KEY(native_artifact_id, book_id)
+    REFERENCES native_artifact_book_enablements(artifact_id, book_id),
+  FOREIGN KEY(sidecar_id, sidecar_revision, sidecar_sha256)
+    REFERENCES editorial_workspace_profile_sidecar_revisions(sidecar_id, revision, sha256)
+) STRICT`;
+
+export const EDITORIAL_WORKSPACE_PROFILE_SIDECAR_TRIGGER_SQL = {
+  editorial_workspace_profile_sidecar_revisions_no_update:
+    `CREATE TRIGGER editorial_workspace_profile_sidecar_revisions_no_update
+    BEFORE UPDATE ON editorial_workspace_profile_sidecar_revisions
+    BEGIN
+      SELECT RAISE(ABORT, 'SIDECAR_REVISION_IMMUTABLE');
+    END`,
+  editorial_workspace_profile_sidecar_revisions_no_delete:
+    `CREATE TRIGGER editorial_workspace_profile_sidecar_revisions_no_delete
+    BEFORE DELETE ON editorial_workspace_profile_sidecar_revisions
+    BEGIN
+      SELECT RAISE(ABORT, 'SIDECAR_REVISION_IMMUTABLE');
+    END`,
+  editorial_workspace_profile_book_pins_no_update:
+    `CREATE TRIGGER editorial_workspace_profile_book_pins_no_update
+    BEFORE UPDATE ON editorial_workspace_profile_book_pins
+    BEGIN
+      SELECT RAISE(ABORT, 'SIDECAR_PIN_IMMUTABLE');
+    END`,
+  editorial_workspace_profile_book_pins_no_delete:
+    `CREATE TRIGGER editorial_workspace_profile_book_pins_no_delete
+    BEFORE DELETE ON editorial_workspace_profile_book_pins
+    BEGIN
+      SELECT RAISE(ABORT, 'SIDECAR_PIN_IMMUTABLE');
+    END`,
+  editorial_workspace_profile_book_pins_revision_order:
+    `CREATE TRIGGER editorial_workspace_profile_book_pins_revision_order
+    BEFORE INSERT ON editorial_workspace_profile_book_pins
+    WHEN NEW.sidecar_revision = 1 AND EXISTS (
+      SELECT 1 FROM editorial_workspace_profile_book_pins existing
+      WHERE existing.book_id = NEW.book_id
+        AND existing.sidecar_id = NEW.sidecar_id
+        AND existing.sidecar_revision = 2
+    )
+    BEGIN
+      SELECT RAISE(ABORT, 'SIDECAR_PIN_REVISION_ORDER_INVALID');
+    END`,
+} as const;
+
 const SOURCE_LABEL = 'config/native-artifact-sources/editorial-workspace-profile/package.json';
+const SIDECAR_SCHEMA = 'ai7.editorial-workspace-profile.authority/v1';
+const REVISION_2_READABLE_SCOPE_KINDS = [
+  'current-book-primary-manuscript-revision',
+  'current-book-source-version',
+] as const;
 const RETAINED_DIRECTORY_ENTRY_LIMIT = 8;
 const RETAINED_PARTIAL_NAME_PATTERN =
   /^package\.json\.[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.partial$/u;
@@ -78,6 +157,27 @@ const INSTALL_VALUES = [
 ] as const;
 
 type SqlRow = Record<string, SQLOutputValue>;
+type SidecarRevision = 1 | 2;
+
+interface MaterializedSidecarRevision {
+  readonly revision: SidecarRevision;
+  readonly canonicalJson: string;
+  readonly byteLength: 588 | 660;
+  readonly sha256:
+    | typeof EDITORIAL_WORKSPACE_PROFILE_SIDECAR_REVISION_1_DIGEST
+    | typeof EDITORIAL_WORKSPACE_PROFILE_SIDECAR_REVISION_2_DIGEST;
+  readonly authorityCeiling: {
+    readonly modelRoles: readonly ['Main Editorial Role'];
+    readonly capabilities: readonly [];
+    readonly readableScopeKinds: readonly [] | typeof REVISION_2_READABLE_SCOPE_KINDS;
+    readonly providerBindings: readonly [];
+    readonly credentialAccess: false;
+    readonly networkAccess: false;
+    readonly effectClasses: readonly [];
+    readonly backgroundAnalysisEnrollment: false;
+    readonly applyAuthority: false;
+  };
+}
 
 export class EditorialWorkspaceProfileError extends Error {
   constructor(readonly code: string, message: string) {
@@ -107,6 +207,11 @@ function asString(value: SQLOutputValue | undefined): string {
   return value;
 }
 
+function isCanonicalInstant(value: string): boolean {
+  const epoch = Date.parse(value);
+  return Number.isFinite(epoch) && new Date(epoch).toISOString() === value;
+}
+
 function inside(parent: string, child: string): boolean {
   const relation = relative(parent, child);
   return relation === '' || (!relation.startsWith(`..${sep}`) && relation !== '..' && !isAbsolute(relation));
@@ -114,6 +219,57 @@ function inside(parent: string, child: string): boolean {
 
 function digest(bytes: Uint8Array): string {
   return createHash('sha256').update(bytes).digest('hex');
+}
+
+function materializeSidecarRevision(revision: SidecarRevision): MaterializedSidecarRevision {
+  const readableScopeKinds = revision === 1 ? [] as const : REVISION_2_READABLE_SCOPE_KINDS;
+  const authorityCeiling = {
+    modelRoles: ['Main Editorial Role'],
+    capabilities: [],
+    readableScopeKinds,
+    providerBindings: [],
+    credentialAccess: false,
+    networkAccess: false,
+    effectClasses: [],
+    backgroundAnalysisEnrollment: false,
+    applyAuthority: false,
+  } as const;
+  const canonicalJson = JSON.stringify({
+    schema: SIDECAR_SCHEMA,
+    sidecarId: EDITORIAL_WORKSPACE_PROFILE_SIDECAR_ID,
+    revision,
+    nativeArtifact: {
+      identity: EDITORIAL_WORKSPACE_PROFILE_ID,
+      version: EDITORIAL_WORKSPACE_PROFILE_VERSION,
+      sha256: EDITORIAL_WORKSPACE_PROFILE_DIGEST,
+    },
+    compatibility: 'compatible-declarative-provider-free',
+    authorityCeiling,
+  });
+  const bytes = new TextEncoder().encode(canonicalJson);
+  const actualDigest = digest(bytes);
+  const expectedByteLength = revision === 1
+    ? EDITORIAL_WORKSPACE_PROFILE_SIDECAR_REVISION_1_BYTES
+    : EDITORIAL_WORKSPACE_PROFILE_SIDECAR_REVISION_2_BYTES;
+  const expectedDigest = revision === 1
+    ? EDITORIAL_WORKSPACE_PROFILE_SIDECAR_REVISION_1_DIGEST
+    : EDITORIAL_WORKSPACE_PROFILE_SIDECAR_REVISION_2_DIGEST;
+  requireProfile(
+    bytes.length === expectedByteLength && actualDigest === expectedDigest,
+    'NATIVE_ARTIFACT_SCHEMA_INVALID',
+    `权限侧车 Revision ${revision} 的规范字节或摘要与冻结值不一致。`,
+  );
+  return {
+    revision,
+    canonicalJson,
+    byteLength: expectedByteLength,
+    sha256: expectedDigest,
+    authorityCeiling,
+  };
+}
+
+function materializeSidecarRevisions(): readonly [MaterializedSidecarRevision, MaterializedSidecarRevision] {
+  return [materializeSidecarRevision(1), materializeSidecarRevision(2)];
 }
 
 function canonicalSchemaSql(sql: string): string {
@@ -126,7 +282,7 @@ function requireExactTable(db: DatabaseSync, name: string, expectedSql: string):
   requireProfile(
     row !== undefined && typeof row.sql === 'string' && canonicalSchemaSql(row.sql) === canonicalSchemaSql(expectedSql),
     'NATIVE_ARTIFACT_SCHEMA_INVALID',
-    `原生构件关系 ${name} 与 schema v12 不一致。`,
+    `原生构件关系 ${name} 与当前固定 schema 不一致。`,
   );
   const table = db.prepare("SELECT type, strict, wr FROM pragma_table_list WHERE schema = 'main' AND name = ?").get(name) as SqlRow | undefined;
   requireProfile(
@@ -136,7 +292,16 @@ function requireExactTable(db: DatabaseSync, name: string, expectedSql: string):
   );
 }
 
-export function validateEditorialWorkspaceProfileSchema(db: DatabaseSync): void {
+function requireExactTrigger(db: DatabaseSync, name: string, expectedSql: string): void {
+  const row = db.prepare("SELECT sql FROM sqlite_schema WHERE type = 'trigger' AND name = ?").get(name) as SqlRow | undefined;
+  requireProfile(
+    row !== undefined && typeof row.sql === 'string' && canonicalSchemaSql(row.sql) === canonicalSchemaSql(expectedSql),
+    'NATIVE_ARTIFACT_SCHEMA_INVALID',
+    `权限侧车触发器 ${name} 与 schema v13 不一致。`,
+  );
+}
+
+export function validateEditorialWorkspaceProfileNativeSchema(db: DatabaseSync): void {
   requireExactTable(db, 'native_artifact_installations', NATIVE_ARTIFACT_INSTALLATIONS_SCHEMA_SQL);
   requireExactTable(db, 'native_artifact_book_enablements', NATIVE_ARTIFACT_BOOK_ENABLEMENTS_SCHEMA_SQL);
   const invalidInstall = db.prepare(
@@ -166,11 +331,154 @@ export function validateEditorialWorkspaceProfileSchema(db: DatabaseSync): void 
   requireProfile(db.prepare('PRAGMA foreign_key_check').all().length === 0, 'NATIVE_ARTIFACT_SCHEMA_INVALID', '原生构件引用校验失败。');
 }
 
+export function validateEditorialWorkspaceProfileSchema(db: DatabaseSync): void {
+  const recursiveTriggers = db.prepare('PRAGMA recursive_triggers').get() as SqlRow;
+  requireProfile(
+    asNumber(recursiveTriggers.recursive_triggers) === 1,
+    'NATIVE_ARTIFACT_SCHEMA_INVALID',
+    '权限侧车不可变保护未启用。',
+  );
+  validateEditorialWorkspaceProfileNativeSchema(db);
+  requireExactTable(
+    db,
+    'editorial_workspace_profile_sidecar_revisions',
+    EDITORIAL_WORKSPACE_PROFILE_SIDECAR_REVISIONS_SCHEMA_SQL,
+  );
+  requireExactTable(
+    db,
+    'editorial_workspace_profile_book_pins',
+    EDITORIAL_WORKSPACE_PROFILE_BOOK_PINS_SCHEMA_SQL,
+  );
+  for (const [name, sql] of Object.entries(EDITORIAL_WORKSPACE_PROFILE_SIDECAR_TRIGGER_SQL)) {
+    requireExactTrigger(db, name, sql);
+  }
+  const installationCount = asNumber((db.prepare(
+    'SELECT count(*) total FROM native_artifact_installations',
+  ).get() as SqlRow).total);
+  const definitions = db.prepare(
+    `SELECT sidecar_id, revision, native_artifact_id, canonical_json, byte_length, sha256
+     FROM editorial_workspace_profile_sidecar_revisions ORDER BY revision`,
+  ).all() as SqlRow[];
+  const expectedDefinitions = materializeSidecarRevisions();
+  requireProfile(
+    definitions.length === (installationCount === 1 ? expectedDefinitions.length : 0),
+    'NATIVE_ARTIFACT_SCHEMA_INVALID',
+    '权限侧车定义与原生构件安装状态不一致。',
+  );
+  for (const [index, expected] of expectedDefinitions.entries()) {
+    if (installationCount === 0) break;
+    const actual = definitions[index];
+    requireProfile(
+      actual !== undefined && actual.sidecar_id === EDITORIAL_WORKSPACE_PROFILE_SIDECAR_ID &&
+        actual.revision === expected.revision && actual.native_artifact_id === EDITORIAL_WORKSPACE_PROFILE_ID &&
+        actual.canonical_json === expected.canonicalJson && actual.byte_length === expected.byteLength &&
+        actual.sha256 === expected.sha256,
+      'NATIVE_ARTIFACT_SCHEMA_INVALID',
+      `权限侧车 Revision ${expected.revision} 超出固定允许列表。`,
+    );
+  }
+  const pins = db.prepare(
+    `SELECT p.book_id, p.native_artifact_id, p.sidecar_id, p.sidecar_revision,
+            p.sidecar_sha256, p.pinned_at,
+            r.sha256 joined_revision_sha256, e.enabled_at joined_enabled_at
+     FROM editorial_workspace_profile_book_pins p
+     LEFT JOIN editorial_workspace_profile_sidecar_revisions r
+       ON r.sidecar_id = p.sidecar_id AND r.revision = p.sidecar_revision
+          AND r.sha256 = p.sidecar_sha256
+     LEFT JOIN native_artifact_book_enablements e
+       ON e.artifact_id = p.native_artifact_id AND e.book_id = p.book_id
+     ORDER BY p.book_id, p.sidecar_revision`,
+  ).all() as SqlRow[];
+  const pinHistories = new Map<string, {
+    readonly enabledAt: string;
+    revision1PinnedAt?: string;
+    revision2PinnedAt?: string;
+  }>();
+  for (const pin of pins) {
+    const revision = asNumber(pin.sidecar_revision);
+    const expected = expectedDefinitions[revision - 1];
+    requireProfile(
+      expected !== undefined && pin.native_artifact_id === EDITORIAL_WORKSPACE_PROFILE_ID &&
+        pin.sidecar_id === EDITORIAL_WORKSPACE_PROFILE_SIDECAR_ID && pin.sidecar_sha256 === expected.sha256 &&
+        pin.joined_revision_sha256 === expected.sha256 && typeof pin.joined_enabled_at === 'string' &&
+        isCanonicalInstant(pin.joined_enabled_at) && typeof pin.pinned_at === 'string' &&
+        isCanonicalInstant(pin.pinned_at),
+      'NATIVE_ARTIFACT_SCHEMA_INVALID',
+      '权限侧车图书 pin 无效或超出固定允许列表。',
+    );
+    const bookId = asString(pin.book_id);
+    const enabledAt = asString(pin.joined_enabled_at);
+    const pinnedAt = asString(pin.pinned_at);
+    const history = pinHistories.get(bookId) ?? { enabledAt };
+    requireProfile(
+      history.enabledAt === enabledAt,
+      'NATIVE_ARTIFACT_SCHEMA_INVALID',
+      '权限侧车图书 pin 与原生启用时间不一致。',
+    );
+    if (revision === 1) history.revision1PinnedAt = pinnedAt;
+    else history.revision2PinnedAt = pinnedAt;
+    pinHistories.set(bookId, history);
+  }
+  for (const history of pinHistories.values()) {
+    const revision1 = history.revision1PinnedAt;
+    const revision2 = history.revision2PinnedAt;
+    const legalHistory =
+      (revision1 !== undefined && revision2 === undefined && revision1 === history.enabledAt) ||
+      (revision1 === undefined && revision2 !== undefined && revision2 === history.enabledAt) ||
+      (revision1 !== undefined && revision2 !== undefined && revision1 === history.enabledAt);
+    requireProfile(
+      legalHistory,
+      'NATIVE_ARTIFACT_SCHEMA_INVALID',
+      '权限侧车图书 pin 历史不是允许的 Revision 1、Revision 1→2 或 Revision 2 路径。',
+    );
+  }
+  const unpinnedEnablement = db.prepare(
+    `SELECT 1 FROM native_artifact_book_enablements e
+     WHERE NOT EXISTS (
+       SELECT 1 FROM editorial_workspace_profile_book_pins p
+       WHERE p.native_artifact_id = e.artifact_id AND p.book_id = e.book_id
+     ) LIMIT 1`,
+  ).get();
+  requireProfile(
+    unpinnedEnablement === undefined,
+    'NATIVE_ARTIFACT_SCHEMA_INVALID',
+    '原生构件图书启用缺少权限侧车 pin。',
+  );
+  requireProfile(
+    db.prepare('PRAGMA foreign_key_check').all().length === 0,
+    'NATIVE_ARTIFACT_SCHEMA_INVALID',
+    '权限侧车引用校验失败。',
+  );
+}
+
+function insertSidecarDefinitions(db: DatabaseSync): void {
+  const installation = db.prepare(
+    'SELECT 1 FROM native_artifact_installations WHERE artifact_id = ?',
+  ).get(EDITORIAL_WORKSPACE_PROFILE_ID);
+  if (installation === undefined) return;
+  const insert = db.prepare(
+    `INSERT INTO editorial_workspace_profile_sidecar_revisions(
+       sidecar_id, revision, native_artifact_id, canonical_json, byte_length, sha256
+     ) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(sidecar_id, revision) DO NOTHING`,
+  );
+  for (const revision of materializeSidecarRevisions()) {
+    insert.run(
+      EDITORIAL_WORKSPACE_PROFILE_SIDECAR_ID,
+      revision.revision,
+      EDITORIAL_WORKSPACE_PROFILE_ID,
+      revision.canonicalJson,
+      revision.byteLength,
+      revision.sha256,
+    );
+  }
+}
+
 export function initializeEditorialWorkspaceProfileSchema(db: DatabaseSync): void {
   const row = db.prepare('PRAGMA user_version').get() as SqlRow;
-  const version = asNumber(row.user_version);
+  let version = asNumber(row.user_version);
   requireProfile(
-    version === 11 || version === EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION,
+    version === 11 || version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION ||
+      version === EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -178,20 +486,58 @@ export function initializeEditorialWorkspaceProfileSchema(db: DatabaseSync): voi
     validateEditorialWorkspaceProfileSchema(db);
     return;
   }
+  if (version === 11) {
+    try {
+      db.exec(`
+        BEGIN IMMEDIATE;
+        ${NATIVE_ARTIFACT_INSTALLATIONS_SCHEMA_SQL};
+        ${NATIVE_ARTIFACT_BOOK_ENABLEMENTS_SCHEMA_SQL};
+        PRAGMA user_version = ${EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION};
+      `);
+      validateEditorialWorkspaceProfileNativeSchema(db);
+      db.exec('COMMIT;');
+      version = EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION;
+    } catch (error) {
+      try {
+        db.exec('ROLLBACK;');
+      } catch (rollbackError) {
+        throw new AggregateError([error, rollbackError], 'SQLite native-artifact schema migration rollback failed.');
+      }
+      throw error;
+    }
+  }
+  requireProfile(
+    version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION,
+    'SCHEMA_UNSUPPORTED',
+    '数据库版本不受支持。',
+  );
+  validateEditorialWorkspaceProfileNativeSchema(db);
   try {
     db.exec(`
       BEGIN IMMEDIATE;
-      ${NATIVE_ARTIFACT_INSTALLATIONS_SCHEMA_SQL};
-      ${NATIVE_ARTIFACT_BOOK_ENABLEMENTS_SCHEMA_SQL};
-      PRAGMA user_version = ${EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION};
+      ${EDITORIAL_WORKSPACE_PROFILE_SIDECAR_REVISIONS_SCHEMA_SQL};
+      ${EDITORIAL_WORKSPACE_PROFILE_BOOK_PINS_SCHEMA_SQL};
+      ${Object.values(EDITORIAL_WORKSPACE_PROFILE_SIDECAR_TRIGGER_SQL).join(';\n')};
     `);
+    insertSidecarDefinitions(db);
+    db.prepare(
+      `INSERT INTO editorial_workspace_profile_book_pins(
+         book_id, native_artifact_id, sidecar_id, sidecar_revision, sidecar_sha256, pinned_at
+       )
+       SELECT book_id, artifact_id, ?, 1, ?, enabled_at
+       FROM native_artifact_book_enablements ORDER BY book_id`,
+    ).run(
+      EDITORIAL_WORKSPACE_PROFILE_SIDECAR_ID,
+      EDITORIAL_WORKSPACE_PROFILE_SIDECAR_REVISION_1_DIGEST,
+    );
+    db.exec(`PRAGMA user_version = ${EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION};`);
     validateEditorialWorkspaceProfileSchema(db);
     db.exec('COMMIT;');
   } catch (error) {
     try {
       db.exec('ROLLBACK;');
     } catch (rollbackError) {
-      throw new AggregateError([error, rollbackError], 'SQLite native-artifact schema migration rollback failed.');
+      throw new AggregateError([error, rollbackError], 'SQLite authority-sidecar schema migration rollback failed.');
     }
     throw error;
   }
@@ -299,6 +645,44 @@ export class EditorialWorkspaceProfileStore {
     const enabled = installation === undefined ? undefined : this.#db.prepare(
       'SELECT enabled_at FROM native_artifact_book_enablements WHERE artifact_id = ? AND book_id = ?',
     ).get(EDITORIAL_WORKSPACE_PROFILE_ID, bookId) as SqlRow | undefined;
+    const pinRows = installation === undefined ? [] : this.#db.prepare(
+      `SELECT sidecar_revision, sidecar_sha256, pinned_at
+       FROM editorial_workspace_profile_book_pins
+       WHERE book_id = ? AND sidecar_id = ? ORDER BY sidecar_revision`,
+    ).all(bookId, EDITORIAL_WORKSPACE_PROFILE_SIDECAR_ID) as SqlRow[];
+    const pinHistory: EditorialWorkspaceProfileProjection['sidecar']['pinHistory'][number][] = [];
+    for (const pin of pinRows) {
+      const revision = asNumber(pin.sidecar_revision);
+      const pinnedAt = asString(pin.pinned_at);
+      if (revision === 1) {
+        requireProfile(
+          pin.sidecar_sha256 === EDITORIAL_WORKSPACE_PROFILE_SIDECAR_REVISION_1_DIGEST,
+          'NATIVE_ARTIFACT_SCHEMA_INVALID',
+          'Revision 1 图书 pin 摘要无效。',
+        );
+        pinHistory.push({
+          revision: 1,
+          sha256: EDITORIAL_WORKSPACE_PROFILE_SIDECAR_REVISION_1_DIGEST,
+          pinnedAt,
+        });
+      } else {
+        requireProfile(
+          revision === 2 && pin.sidecar_sha256 === EDITORIAL_WORKSPACE_PROFILE_SIDECAR_REVISION_2_DIGEST,
+          'NATIVE_ARTIFACT_SCHEMA_INVALID',
+          'Revision 2 图书 pin 摘要无效。',
+        );
+        pinHistory.push({
+          revision: 2,
+          sha256: EDITORIAL_WORKSPACE_PROFILE_SIDECAR_REVISION_2_DIGEST,
+          pinnedAt,
+        });
+      }
+    }
+    const activeRevision: 1 | 2 | null = pinHistory.some((pin) => pin.revision === 2)
+      ? 2
+      : pinHistory.some((pin) => pin.revision === 1)
+        ? 1
+        : null;
     let retainedAvailable = false;
     try {
       const retained = await inspectCanonicalDataFile(this.#dataRoot, this.#retainedDirectory, 'package.json');
@@ -314,6 +698,8 @@ export class EditorialWorkspaceProfileStore {
         : enabled === undefined
           ? { state: 'installed-disabled' as const, label: '已安装 · 本图书停用', installed: true, enabledForCurrentBook: false }
           : { state: 'enabled-for-book' as const, label: '已安装 · 已为本图书启用', installed: true, enabledForCurrentBook: true };
+    const offeredRevision = !needsAttention && installation !== undefined && activeRevision !== 2 ? 2 as const : null;
+    materializeSidecarRevisions();
     return {
       bookId,
       identity: EDITORIAL_WORKSPACE_PROFILE_ID,
@@ -325,25 +711,57 @@ export class EditorialWorkspaceProfileStore {
       byteLength: EDITORIAL_WORKSPACE_PROFILE_BYTES,
       sha256: EDITORIAL_WORKSPACE_PROFILE_DIGEST,
       compatibility: '声明式 · Provider-free · 兼容',
-      authorityCeiling: {
-        modelRoles: ['Main Editorial Role'],
-        capabilities: [],
-        readableScopeKinds: [],
-        providerBindings: [],
-        credentialAccess: false,
-        networkAccess: false,
-        effectClasses: [],
-        backgroundAnalysisEnrollment: false,
-        applyAuthority: false,
+      sidecar: {
+        identity: EDITORIAL_WORKSPACE_PROFILE_SIDECAR_ID,
+        revisions: [
+          {
+            revision: 1,
+            byteLength: EDITORIAL_WORKSPACE_PROFILE_SIDECAR_REVISION_1_BYTES,
+            sha256: EDITORIAL_WORKSPACE_PROFILE_SIDECAR_REVISION_1_DIGEST,
+            compatibility: 'compatible-declarative-provider-free',
+            authorityCeiling: {
+              modelRoles: ['Main Editorial Role'],
+              capabilities: [],
+              readableScopeKinds: [],
+              providerBindings: [],
+              credentialAccess: false,
+              networkAccess: false,
+              effectClasses: [],
+              backgroundAnalysisEnrollment: false,
+              applyAuthority: false,
+            },
+          },
+          {
+            revision: 2,
+            byteLength: EDITORIAL_WORKSPACE_PROFILE_SIDECAR_REVISION_2_BYTES,
+            sha256: EDITORIAL_WORKSPACE_PROFILE_SIDECAR_REVISION_2_DIGEST,
+            compatibility: 'compatible-declarative-provider-free',
+            authorityCeiling: {
+              modelRoles: ['Main Editorial Role'],
+              capabilities: [],
+              readableScopeKinds: REVISION_2_READABLE_SCOPE_KINDS,
+              providerBindings: [],
+              credentialAccess: false,
+              networkAccess: false,
+              effectClasses: [],
+              backgroundAnalysisEnrollment: false,
+              applyAuthority: false,
+            },
+          },
+        ],
+        pinHistory,
+        activeRevision,
+        offeredRevision,
       },
       lifecycle,
       actions: {
         canInstall: lifecycle.state === 'available-to-install',
-        canEnable: lifecycle.state === 'installed-disabled',
+        canEnable: offeredRevision === 2,
       },
       namedNonEffects: [
         '不创建 Task、Plan、Run 或 Session',
         '不读取图书、稿件或来源内容',
+        'Revision 2 仅扩大可请求范围，不创建实际读取或运行权限',
         '不授予 Provider、凭据、网络、Effect、Enrollment 或 Apply 权限',
       ],
     };
@@ -393,6 +811,7 @@ export class EditorialWorkspaceProfileStore {
              network_access, effect_classes_json, background_analysis_enrollment, apply_authority, installed_at
            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         ).run(...INSTALL_VALUES, installedAt);
+        insertSidecarDefinitions(this.#db);
         validateEditorialWorkspaceProfileSchema(this.#db);
         this.#db.exec('COMMIT');
       } catch (error) {
@@ -422,10 +841,23 @@ export class EditorialWorkspaceProfileStore {
       requireProfile(await this.#retainedIsExact(), 'NATIVE_ARTIFACT_RETAINED_DRIFT', '已保留的原生构件字节缺失或发生变化。');
       this.#db.exec('BEGIN IMMEDIATE');
       try {
+        const pinnedAt = new Date().toISOString();
         this.#db.prepare(
           `INSERT INTO native_artifact_book_enablements(book_id, artifact_id, enabled_at)
            VALUES (?, ?, ?) ON CONFLICT(book_id) DO NOTHING`,
-        ).run(bookId, EDITORIAL_WORKSPACE_PROFILE_ID, new Date().toISOString());
+        ).run(bookId, EDITORIAL_WORKSPACE_PROFILE_ID, pinnedAt);
+        this.#db.prepare(
+          `INSERT INTO editorial_workspace_profile_book_pins(
+             book_id, native_artifact_id, sidecar_id, sidecar_revision, sidecar_sha256, pinned_at
+           ) VALUES (?, ?, ?, 2, ?, ?)
+           ON CONFLICT(book_id, sidecar_id, sidecar_revision) DO NOTHING`,
+        ).run(
+          bookId,
+          EDITORIAL_WORKSPACE_PROFILE_ID,
+          EDITORIAL_WORKSPACE_PROFILE_SIDECAR_ID,
+          EDITORIAL_WORKSPACE_PROFILE_SIDECAR_REVISION_2_DIGEST,
+          pinnedAt,
+        );
         validateEditorialWorkspaceProfileSchema(this.#db);
         this.#db.exec('COMMIT');
       } catch (error) {

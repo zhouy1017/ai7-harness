@@ -94,11 +94,13 @@ import {
   type BuiltInWorkflowProfile,
 } from './native-workflow-profile.js';
 import {
+  EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION,
   EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION,
   EditorialWorkspaceProfileError,
   EditorialWorkspaceProfileFatalError,
   EditorialWorkspaceProfileStore,
   initializeEditorialWorkspaceProfileSchema,
+  validateEditorialWorkspaceProfileNativeSchema,
   validateEditorialWorkspaceProfileSchema,
 } from './editorial-workspace-profile.js';
 
@@ -704,6 +706,7 @@ function isInside(parent: string, child: string): boolean {
 function configureDatabase(db: DatabaseSync, tempStore: 'MEMORY' | 'FILE' = 'MEMORY'): void {
   db.exec(`
     PRAGMA foreign_keys = ON;
+    PRAGMA recursive_triggers = ON;
     PRAGMA journal_mode = WAL;
     PRAGMA synchronous = FULL;
     PRAGMA busy_timeout = 5000;
@@ -711,6 +714,12 @@ function configureDatabase(db: DatabaseSync, tempStore: 'MEMORY' | 'FILE' = 'MEM
     PRAGMA secure_delete = ON;
     PRAGMA temp_store = ${tempStore};
   `);
+  const recursiveTriggers = db.prepare('PRAGMA recursive_triggers').get() as SqlRow;
+  requireStore(
+    asNumber(recursiveTriggers.recursive_triggers) === 1,
+    'SCHEMA_INVALID',
+    'SQLite 递归触发器未启用，无法保护不可变记录。',
+  );
 }
 
 const ABANDONMENT_CLEANUP_SCHEMA = `
@@ -1083,6 +1092,7 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === SOURCE_IMPORT_SCHEMA_VERSION ||
       currentVersion === MANUSCRIPT_REIMPORT_SCHEMA_VERSION ||
       currentVersion === MODEL_SERVICE_SCHEMA_VERSION ||
+      currentVersion === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION ||
       currentVersion === EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
@@ -1095,6 +1105,7 @@ function initializeSchema(db: DatabaseSync): void {
     currentVersion === SOURCE_IMPORT_SCHEMA_VERSION ||
     currentVersion === MANUSCRIPT_REIMPORT_SCHEMA_VERSION ||
     currentVersion === MODEL_SERVICE_SCHEMA_VERSION ||
+    currentVersion === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION ||
     currentVersion === EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION
   ) return;
   if (currentVersion === 1) {
@@ -1426,12 +1437,15 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
   requireStore(
     version === SCHEMA_VERSION || version === SOURCE_IMPORT_SCHEMA_VERSION ||
       version === MANUSCRIPT_REIMPORT_SCHEMA_VERSION || version === MODEL_SERVICE_SCHEMA_VERSION ||
+      version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION ||
       version === EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
   if (version === SOURCE_IMPORT_SCHEMA_VERSION || version === MANUSCRIPT_REIMPORT_SCHEMA_VERSION ||
-      version === MODEL_SERVICE_SCHEMA_VERSION || version === EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION) return;
+      version === MODEL_SERVICE_SCHEMA_VERSION ||
+      version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION ||
+      version === EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION) return;
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
   );
@@ -1528,11 +1542,14 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
   );
   requireStore(
     version === SOURCE_IMPORT_SCHEMA_VERSION || version === MANUSCRIPT_REIMPORT_SCHEMA_VERSION ||
-      version === MODEL_SERVICE_SCHEMA_VERSION || version === EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION,
+      version === MODEL_SERVICE_SCHEMA_VERSION ||
+      version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION ||
+      version === EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
   if (version === MANUSCRIPT_REIMPORT_SCHEMA_VERSION || version === MODEL_SERVICE_SCHEMA_VERSION ||
+      version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION ||
       version === EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION) return;
   validateSourceImportSchemaTruth(db, profile);
   const legacyAlterTable = asNumber(
@@ -1705,6 +1722,7 @@ function validateModelServiceSchema(db: DatabaseSync, profile: BuiltInWorkflowPr
     db,
     profile,
     true,
+    version >= EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION,
     version === EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION,
   );
   const invalid = db.prepare(
@@ -1727,13 +1745,20 @@ function initializeModelServiceSchema(db: DatabaseSync, profile: BuiltInWorkflow
   );
   requireStore(
     version === MANUSCRIPT_REIMPORT_SCHEMA_VERSION || version === MODEL_SERVICE_SCHEMA_VERSION ||
+      version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION ||
       version === EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
-  if (version === MODEL_SERVICE_SCHEMA_VERSION || version === EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION) {
+  if (version === MODEL_SERVICE_SCHEMA_VERSION ||
+      version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION ||
+      version === EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION) {
     validateModelServiceSchema(db, profile);
-    if (version === EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION) validateEditorialWorkspaceProfileSchema(db);
+    if (version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION) {
+      validateEditorialWorkspaceProfileNativeSchema(db);
+    } else if (version === EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION) {
+      validateEditorialWorkspaceProfileSchema(db);
+    }
     return;
   }
   try {

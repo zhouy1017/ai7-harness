@@ -1,9 +1,11 @@
 # Current handoff
 
-Issue #178's P0 repair and Issue #184's corrected nonsecret J-12 documentation are integrated and lifecycle-closed through Issue #186. The next unit is the already-authorized Issue #176 / Draft PR #177 sidecar predecessor: first record the scoped usage-precondition supersession, then rebase onto newest `dev`, preserve the integrated repair/documentation owners, complete fresh Windows validation, and require one paired Gate.
+Issue #176's bounded sidecar predecessor has been rebased onto `dev@012d9e330a66f46cc288b24b9ef7e16962c3d960` for Draft PR #177. The existing three-method `EditorialWorkspaceProfileStore` remains the sole owner of additive SQLite v13 sidecar definitions and append-only Book pins; protocol v14 and real J-15 are the synchronized consumer/evidence delta. Independent-review repairs make conflict replacement honor the immutable guards and make Revision 1→2 rely on revision-defined append order instead of wall-clock monotonicity. Issue #178's repair and Issue #184's nonsecret J-12 documentation are preserved. Owner amendment `5517169002` removes only obsolete Actions-usage reads as a precondition.
+
+Issue #47 remains blocked until #176 integrates and its lifecycle closes. No Provider call, execution-time secret resolution, recording, fixture admission, release, publication, or `main` action is authorized here.
 
 ## Safe Resume Prompt
 
 ```text
-Resume from current origin/dev after Issue #186 integrates. Post the scoped Owner usage-precondition amendment on Issue #176, verify PR #177 remains Draft at remote head 5865bbc, rebase onto exact newest dev, and semantically combine #184's nonsecret J-12 wording with #176's sidecar/schema/J-15 documentation. Preserve #178's product/E2E repairs, run fresh exact-head Windows doctor -> bootstrap -> build -> e2e:all, then force-push with explicit lease while Draft and permit one normal paired Gate. Keep Issue #47 blocked through #176 lifecycle. Do not query usage, call a Provider, resolve an execution secret, record sample1, admit a fixture, publish, release, or promote main.
+Continue from Issue #176's rebased local candidate on Draft PR #177. Verify the exact twelve-path invariants and review repairs, then run fresh exact-head Windows doctor -> bootstrap -> build -> e2e:all. Preserve #178's J-12/ServiceClient/renderer-completion/Electron-close owners and #184's nonsecret credential wording while applying only the sidecar/schema-v13/protocol-v14/J-15 delta. Force-push with explicit lease against 5865bbc only after local completion, update closure metadata, and permit one normal paired Gate. Do not query usage, call a Provider, resolve an execution secret, record sample1, admit a fixture, publish, release, or promote main.
 ```
