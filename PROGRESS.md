@@ -21,11 +21,12 @@
 - J-01 now treats every unexpected disconnected owned Browser as incomplete lifecycle and fixed `BROWSER_DISCONNECTED`, while only the existing pre-carrier tamper-startup catch accepts that exact error, releases the known terminal owner, and preserves its unchanged fail-closed assertion. A tagged synthetic disconnected Browser plus ref'ed interval made the old helper remain alive beyond ten seconds; the candidate returned fixed `J-01/window-close` with exit 1 in about 0.3 seconds. The probe ran before Electron/root acquisition and left neither process nor root.
 - J-12 now records a failed bounded Browser close, skips the unsafe second product launch, continues metadata and exact-Electron credential fallback plus loopback/root cleanup, then rethrows the retained cleanup failure. In the tagged combined probe the product first removed the real test credential, then a post-close injected error made the old cleanup stop before the helper and leave only its disposable root; that exact verified root was removed. The candidate reached the fixed helper marker, continued independent cleanup, returned exit 1, and left zero process/root. All probe markers are removed.
 - Final-source Node syntax checks, TypeScript no-emit, pinned `build`, and fresh normal J-01 and J-12 local diagnostics passed. Independent direct reviews report zero Ready-blocking hard findings at locked J-01 blob `a3516af83b1069e9474a9a81cd4ee701634160d8` and J-12 blob `02f12b02b62cb1e2f924d4681ca3dc830e2ad13f`; service client remains `bfe39340772ac0b5f44a268e673d42df4ce6f468`. The branch history now also carries the required model co-authorship trailers.
+- Fresh Windows Local completion passed on exact reviewed code/checkpoint head `cb4266f20ff337656b3291b4f64866d275f4db6c` with pinned Node 24.18.1, pnpm 11.24.0, and Electron 43.4.1: `doctor ->` ordinary `bootstrap -> build -> e2e:all`; J-01, J-02, J-08, J-12, J-15, and final `LOCAL_COMPLETION/all/pass` all passed. Postconditions found zero current-day `ai7-j*-e2e-*` root, zero matching issue-worktree/test-root Electron or Node process, and zero temporary/debug marker or removed setup-Node credential helper.
 
 ## What's next
 
-- Run fresh Windows `doctor ->` ordinary `bootstrap -> build -> e2e:all` against the current reviewed code/checkpoint and verify final process/root/marker postconditions.
-- Record that result without changing the locked code blobs, update and push Draft PR #180, then transition only the changed result-checkpoint head Ready exactly once for one new paired-platform Gate. Any Journey/platform failure returns the PR to Draft with no unchanged rerun; exact Windows and macOS success permits squash integration.
+- Perform a final read-only checkpoint review, then update and push Draft PR #180 without changing the locked code blobs.
+- Transition only that changed result-checkpoint head Ready exactly once for one new paired-platform Gate. Any Journey/platform failure returns the PR to Draft with no unchanged rerun; exact Windows and macOS success permits squash integration.
 - After #180 integration, execute its separately scoped documentation lifecycle Issue/PR, then rebase and fully revalidate Draft PR #177. Continue the authorized queue toward exact `sample1`'s local, human-attended recording handoff.
 
 ## Key decisions
@@ -40,11 +41,11 @@
 
 ## Unresolved matters or blockers
 
-- No known implementation defect remains for #178. Fresh all-Journey Windows Local completion is required because final review produced code corrections after the prior completion; paired Windows/macOS Hosted Gate evidence remains required after that.
+- No known local implementation blocker remains for #178. Final red/green, normal diagnostics, independent code review, fresh all-Journey Windows Local completion, and cleanup postconditions pass; paired Windows/macOS Hosted Gate evidence remains required before integration.
 - GitHub API reads/writes have intermittently returned EOF; continue verifying any uncertain external write before retrying so no duplicate comment or state transition is created.
 
 ## Safe Resume Prompt
 
 ```text
-PR #180 is Draft after Gate 33644499586 passed Windows but timed out in macOS J-12. Final reviewed code head 821acdcf5e3c765f2e9cd2307a5625d9d4748179 includes the bounded service/J-12 repair, strict J-01 disconnect cleanup, accepted exact tamper-startup consumption, and cleanup continuation after Browser failure. Tagged red/green is complete, probes are removed, normal J-01/J-12 diagnostics and independent reviews pass. Run fresh Windows doctor/bootstrap/build/e2e:all with postconditions, record the result without changing code blobs, update/push the Draft PR, then permit exactly one changed-head paired-platform Gate. Actions minutes are not a gate; do not autonomously call a Provider or record.
+PR #180 is Draft after Gate 33644499586 passed Windows but timed out in macOS J-12. Final reviewed code head 821acdcf5e3c765f2e9cd2307a5625d9d4748179 includes the bounded service/J-12 repair, strict J-01 disconnect cleanup, accepted exact tamper-startup consumption, and cleanup continuation after Browser failure. Exact checkpoint head cb4266f20ff337656b3291b4f64866d275f4db6c passed Windows doctor/bootstrap/build/e2e:all for J-01/J-02/J-08/J-12/J-15 with zero process/root/marker postconditions. Review the result checkpoint, update/push the Draft PR without changing code blobs, then permit exactly one changed-head paired-platform Gate. Actions minutes are not a gate; do not autonomously call a Provider or record.
 ```
