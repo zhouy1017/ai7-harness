@@ -9,19 +9,23 @@
 - The first regression run reached the real secondary-window close and exposed the native Electron `Error` window while product source remained untouched. The public CDP manager now bounds every root request at 30 seconds, so the observed modal cannot hold the diagnostic runner indefinitely.
 - The minimized public J-01 loop produced the required deterministic nonzero red in 8 seconds: `LOCAL_DIAGNOSTIC_ONLY/J-01/window-close/journey-failure/not-completion`. It returned without any human dismissing the native Error, and the post-run host check found zero Electron processes while product lifecycle code was still untouched.
 - Applied only the cached-live-`webContents.id` lifecycle repair in `src/main/application.ts`, rebuilt with the exact Node 24.18.1 / pnpm 11.24.0 toolchain, and obtained the formal green `LOCAL_DIAGNOSTIC_ONLY/J-01/pass/not-completion`; the post-run Electron process count remained zero.
-- Removed all temporary `[DEBUG-ISSUE178]` instrumentation, restored the one accidentally displaced baseline `closeProduct()`, and completed independent regression/spec re-review with no remaining blocker. The review withdrew its cleanup concern after verifying pinned Playwright 1.62.1's 30-second close-or-kill path and Windows process-tree kill behavior against the observed zero-residual runs.
+- Removed all temporary `[DEBUG-ISSUE178]` instrumentation and restored the one accidentally displaced baseline `closeProduct()`. A later fresh rerun then exposed a distinct low-probability controller race: Electron had exited and no native dialog remained, but J-01's Node runner could wait forever because the client-side Playwright `browser.close()` Promise can remain pending even after the bounded child close-or-kill path has finished.
+- Stabilized that runner defect without a new Journey or gate. A temporary injector first proved the old path stayed alive beyond 30 seconds after Electron closed; J-01 now atomically consumes Browser ownership, shares one active close, bounds a connected close at 10 seconds, always attempts isolated-root cleanup, and exits nonzero after flushing its fixed failure marker whenever close times out or rejects. The timeout injection returned `J-01/window-close` / exit 1 in 11.7 seconds, and the ordinary-rejection injection returned the same fixed failure / exit 1 in 1.84 seconds; both left zero AI7 Electron/Node processes and no new J-01 root. All injectors were deleted.
+- Re-ran the unmodified public diagnostics after the final close semantics: J-01 and adjacent J-15 both passed. Syntax, TypeScript, `git diff --check`, and independent lifecycle re-review also pass with no remaining blocker.
 - The adjacent unchanged J-15 diagnostic passed. Fresh Windows Local completion then passed in exact order: `pnpm run doctor`, ordinary `pnpm run bootstrap`, `pnpm run build`, and `pnpm run e2e:all`; the orchestrator reported J-01, J-02, J-08, J-12, J-15, and final `LOCAL_COMPLETION/all/pass`. The post-completion Electron process count remained zero.
-- Checked the shared reuse surfaces rather than editing them: `e2e/run-all.mjs` and `.github/workflows/e2e.yml` are unchanged, all temporary issue diagnostics are absent, and `git diff --check` passes.
-- Final independent T2 review found zero Spec findings and zero hard Standards findings. The locally complete unit was committed and pushed, and Draft pull request #180 now targets `dev`; it remains Draft. Its pull-request check suite records only skipped Route and matrix jobs with zero steps, not a Hosted Journey execution or paired Gate occurrence.
+- Checked the shared reuse surfaces rather than editing them: `e2e/run-all.mjs` and `.github/workflows/e2e.yml` are unchanged, no temporary issue diagnostic entered the repository, and `git diff --check` passes.
+- The original independent T2 review found zero Spec findings and zero hard Standards findings. The first locally complete unit was committed and pushed, and Draft pull request #180 now targets `dev`; it remains Draft. Its pull-request check suite records only skipped Route and matrix jobs with zero steps, not a Hosted Journey execution or paired Gate occurrence.
 
 ## What's next
 
-- Obtain the Owner's contemporaneous account-wide Actions-minute fact. If sufficient, re-resolve the exact target authority, make only PR #180 Ready for its one paired Hosted occurrence, inspect the actual usage delta, and integrate only after both platforms pass.
+- Commit the bounded-close follow-up, then run a fresh exact-head Windows `doctor → bootstrap → build → e2e:all`, verify zero residual process/root, push the same Draft PR, and record the local evidence.
+- After that, obtain the Owner's contemporaneous account-wide Actions-minute fact. If sufficient, re-resolve the exact target authority, make only PR #180 Ready for its one paired Hosted occurrence, inspect the actual usage delta, and integrate only after both platforms pass.
 
 ## Key decisions
 
 - Regression proves two real AI7 BrowserWindows, closes only the secondary public CDP target, verifies `2→1`, public IPC usability of the survivor, and unique-route reopening of the closed Book without recording protected output.
 - The product repair caches one live renderer `webContents.id` and uses it for both registry insertion and `closed` cleanup; it does not read `window.webContents` after `closed`.
+- J-01 treats every connected Browser close that does not complete successfully as a fixed-class Journey failure. Its 10-second local deadline is intentionally shorter than pinned Playwright's internal 30-second close-or-kill wait so the runner can clean its own root and then use Playwright's synchronous exit cleanup instead of waiting forever on a stale pipe.
 
 ## Unresolved matters or blockers
 
@@ -30,5 +34,5 @@
 ## Safe Resume Prompt
 
 ```text
-Resume with Draft PR #180 at its exact head. Do not make it Ready until the Owner supplies the contemporaneous account-wide Actions-minute fact. If sufficient, re-resolve `dev` authority, start exactly one normal paired Hosted occurrence through Ready, inspect the actual delta, and integrate only after Windows and macOS pass; then rebase and revalidate Draft PR #177 before any downstream Issue #47 or #91 implementation.
+Resume Issue #178 in its isolated worktree. Commit the bounded-close follow-up, run fresh exact-head Windows doctor, ordinary bootstrap, build, and e2e:all, then verify zero residual processes/root and push Draft PR #180. Do not make it Ready until the Owner supplies the contemporaneous account-wide Actions-minute fact. If sufficient, re-resolve `dev` authority and run exactly one normal paired Hosted occurrence.
 ```

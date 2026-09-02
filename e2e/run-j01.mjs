@@ -12,8 +12,11 @@ const SAMPLE1_PATH = resolve(ROOT, 'SampleBooks', 'sample1.docx');
 const SAMPLE1_BYTES = 29_550;
 const SAMPLE1_SHA256 = 'b8a3dbde0aa8a1ec7265f9ae3fe47877759e7947c5ab69682cd0a8f424a8d483';
 const DEBUG_SELECTORS = new Set(['DEBUG', 'DEBUG_FILE', 'PWDEBUG', 'PWDEBUGIMPL']);
+const BROWSER_CLOSE_TIMEOUT_MS = 10_000;
+const BROWSER_CLOSE_TIMEOUT = new Error('J-01/browser-close-timeout');
 let diagnosticLocation = 'entry';
 let electronExecutable;
+let browserCloseIncomplete = false;
 
 function at(location) {
   diagnosticLocation = location;
@@ -1521,31 +1524,63 @@ async function main() {
   let runRootAcquisition;
   let browser;
   let browserAcquisition;
+  let activeBrowserClose;
+  const closeBrowserBounded = async (ownedBrowser) => {
+    if (activeBrowserClose !== undefined) return activeBrowserClose;
+    if (ownedBrowser === undefined || !ownedBrowser.isConnected()) return;
+    const closePromise = ownedBrowser.close();
+    closePromise.catch(() => undefined);
+    let timeout;
+    const boundedClose = Promise.race([
+      closePromise,
+      new Promise((_, reject) => {
+        timeout = setTimeout(() => {
+          reject(BROWSER_CLOSE_TIMEOUT);
+        }, BROWSER_CLOSE_TIMEOUT_MS);
+      }),
+    ]);
+    activeBrowserClose = boundedClose;
+    try {
+      await boundedClose;
+    } catch (error) {
+      browserCloseIncomplete = true;
+      throw error;
+    } finally {
+      clearTimeout(timeout);
+      if (activeBrowserClose === boundedClose) activeBrowserClose = undefined;
+    }
+  };
   const closeOwnedBrowser = async () => {
-    const ownedBrowser =
-      browser ??
-      (browserAcquisition === undefined
-        ? undefined
-        : await browserAcquisition.catch(() => undefined));
-    await ownedBrowser?.close().catch(() => undefined);
+    const ownedBrowser = browser;
+    const ownedAcquisition = browserAcquisition;
     browser = undefined;
+    browserAcquisition = undefined;
+    const acquiredBrowser =
+      ownedBrowser ??
+      (ownedAcquisition === undefined
+        ? undefined
+        : await ownedAcquisition.catch(() => undefined));
+    await closeBrowserBounded(acquiredBrowser);
   };
   const cancellation = installJourneyCancellationCleanup(async () => {
-    await closeOwnedBrowser();
-    const ownedRoot =
-      runRoot ??
-      (runRootAcquisition === undefined
-        ? undefined
-        : await runRootAcquisition.catch(() => undefined));
-    if (ownedRoot !== undefined) {
-      requireJourney(
-        dirname(ownedRoot) === tempParent &&
-          basename(ownedRoot).startsWith('ai7-j01-e2e-') &&
-          (await realpath(ownedRoot)) === ownedRoot,
-        'cleanup-target',
-      );
-      await rm(ownedRoot, { recursive: true, force: true });
-      runRoot = undefined;
+    try {
+      await closeOwnedBrowser();
+    } finally {
+      const ownedRoot =
+        runRoot ??
+        (runRootAcquisition === undefined
+          ? undefined
+          : await runRootAcquisition.catch(() => undefined));
+      if (ownedRoot !== undefined) {
+        requireJourney(
+          dirname(ownedRoot) === tempParent &&
+            basename(ownedRoot).startsWith('ai7-j01-e2e-') &&
+            (await realpath(ownedRoot)) === ownedRoot,
+          'cleanup-target',
+        );
+        await rm(ownedRoot, { recursive: true, force: true });
+        runRoot = undefined;
+      }
     }
   }, closeOwnedBrowser);
   try {
@@ -1667,7 +1702,7 @@ async function main() {
       );
       at('launch');
       cancellation.throwIfRequested();
-      browserAcquisition = chromium.launch({
+      const acquisition = chromium.launch({
         executablePath: executable,
         headless: false,
         ignoreDefaultArgs: true,
@@ -1675,13 +1710,22 @@ async function main() {
         env: productEnvironment(executable),
         timeout: 30_000,
       });
-      browser = await browserAcquisition;
+      browserAcquisition = acquisition;
+      try {
+        browser = await acquisition;
+      } finally {
+        if (browserAcquisition === acquisition) browserAcquisition = undefined;
+      }
       cancellation.throwIfRequested();
       return attachRendererTarget(browser);
     };
     const closeProduct = async () => {
-      await browser.close();
+      const ownedBrowser = browser;
       browser = undefined;
+      browserAcquisition = undefined;
+      if (ownedBrowser?.isConnected() !== true) browserCloseIncomplete = true;
+      requireJourney(ownedBrowser?.isConnected() === true, 'browser-close-connection');
+      await closeBrowserBounded(ownedBrowser);
     };
     const sample1Expectation = {
       sourceSha256: SAMPLE1_SHA256,
@@ -2429,14 +2473,7 @@ async function main() {
     } catch {
       reimportTamperRejected = true;
     }
-    if (browser) {
-      try {
-        await browser.close();
-      } catch {
-        // The fail-closed startup may already have disconnected the product.
-      }
-      browser = undefined;
-    }
+    await closeOwnedBrowser();
     requireJourney(reimportTamperRejected, 'reimport-tamper-startup-fail-closed');
 
     const reimportBeforeCommitRoot = await createCanonicalExternalDataRoot(
@@ -3055,4 +3092,7 @@ async function main() {
   }
 }
 
-main().catch(() => reportJourneyFailure('J-01', diagnosticLocation));
+main().catch(() => {
+  reportJourneyFailure('J-01', diagnosticLocation);
+  if (browserCloseIncomplete) process.stderr.write('', () => process.exit(1));
+});
