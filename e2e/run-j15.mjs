@@ -3,12 +3,17 @@ import { lstat, mkdtemp, readFile, realpath, rm } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { arch, platform, release, tmpdir } from 'node:os';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { installJourneyCancellationCleanup, reportJourneyFailure } from './controller.mjs';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const PROFILE_DIGEST = 'ae485040c8fa602ab2e98ec91dd122201d40a8be41d8a4f86f7cd55ddb1e434d';
 const PROFILE_BYTES = 263;
+const SIDECAR_ID = 'ai7.editorial-workspace-profile.authority';
+const SIDECAR_REVISION_1_DIGEST = '887067fc716261fc5f41772a295faa326f6bf2818573daae29ffdb7388e9e48d';
+const SIDECAR_REVISION_2_DIGEST = '980b565f25bdff29e539365e17344346017b05146a45cfea35c8ed7d528a1bff';
+const FUTURE_SKEWED_ENABLED_AT = '9999-12-31T23:59:59.999Z';
 const DEBUG_SELECTORS = new Set(['DEBUG', 'DEBUG_FILE', 'PWDEBUG', 'PWDEBUGIMPL']);
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 let location = 'entry';
@@ -219,6 +224,36 @@ async function requireRetainedCarrier(dataRoot) {
   );
 }
 
+async function constructPredecessorV12(dataRoot, bookId) {
+  const databasePath = resolve(dataRoot, 'store', 'ai7.sqlite');
+  const metadata = await lstat(databasePath);
+  requireJourney(
+    metadata.isFile() && !metadata.isSymbolicLink() && (await realpath(databasePath)) === databasePath,
+    'predecessor-v12-database',
+  );
+  const database = new DatabaseSync(databasePath);
+  try {
+    database.exec(`
+      PRAGMA foreign_keys = OFF;
+      BEGIN IMMEDIATE;
+      DROP TABLE editorial_workspace_profile_book_pins;
+      DROP TABLE editorial_workspace_profile_sidecar_revisions;
+    `);
+    const skewed = database.prepare(
+      `UPDATE native_artifact_book_enablements SET enabled_at = ?
+       WHERE book_id = ? AND artifact_id = '@ai7/editorial-workspace-profile'`,
+    ).run(FUTURE_SKEWED_ENABLED_AT, bookId);
+    requireJourney(skewed.changes === 1, 'predecessor-v12-future-clock-skew');
+    database.exec(`
+      PRAGMA user_version = 12;
+      COMMIT;
+      PRAGMA foreign_keys = ON;
+    `);
+  } finally {
+    database.close();
+  }
+}
+
 async function main() {
   parseJourney();
   let loopback;
@@ -307,13 +342,37 @@ async function main() {
     await assertRenderer(renderer, `(() => {
       const card=document.querySelector('.native-artifact-card');
       const text=card?.textContent??'';
+      const facts=(root)=>{
+        const result={};
+        for(const term of root?.querySelector(':scope > dl.native-artifact-facts')?.querySelectorAll(':scope > dt')??[]){
+          result[term.textContent??'']=term.nextElementSibling?.textContent??'';
+        }
+        return result;
+      };
+      const sidecar=card?.querySelector(':scope > .native-artifact-authority');
+      const revision1=card?.querySelector('[data-authority-sidecar-revision="1"]');
+      const revision2=card?.querySelector('[data-authority-sidecar-revision="2"]');
+      const sidecarFacts=facts(sidecar);
+      const revision1Facts=facts(revision1);
+      const revision2Facts=facts(revision2);
+      const emptyLabels=['Capability','Provider Binding','Credential','Network','Effect','Enrollment','Apply'];
       return card?.dataset.nativeArtifactIdentity==='@ai7/editorial-workspace-profile' &&
+        card.dataset.authoritySidecarIdentity===${JSON.stringify(SIDECAR_ID)} &&
+        !card.dataset.authoritySidecarActiveRevision && !card.dataset.authoritySidecarOfferedRevision &&
         text.includes('DSH Profile') && text.includes('1.0.0') && text.includes('仓库内置') && text.includes('AI7 root license') &&
         text.includes('config/native-artifact-sources/editorial-workspace-profile/package.json') && text.includes('263 bytes') &&
         text.includes(${JSON.stringify(PROFILE_DIGEST)}) && text.includes('声明式 · Provider-free · 兼容') &&
-        text.includes('Main Editorial Role') && ['Capability','Readable Scope','Provider Binding','Credential','Network','Effect','Enrollment','Apply'].every((label)=>text.includes(label)) &&
-        (text.match(/空（无）/g)?.length??0)===8 &&
+        sidecarFacts['侧车身份']===${JSON.stringify(SIDECAR_ID)} && sidecarFacts['当前生效 Revision']==='空（本图书未启用）' &&
+        sidecarFacts['可审阅后继']==='空（无）' && sidecarFacts['本图书 pin 历史']==='空（无）' &&
+        revision1Facts['规范字节']==='588 bytes' && revision1Facts['SHA-256']===${JSON.stringify(SIDECAR_REVISION_1_DIGEST)} &&
+        revision1Facts['Model Role']==='Main Editorial Role' && revision1Facts['Readable Scope']==='空（无）' &&
+        emptyLabels.every((label)=>revision1Facts[label]==='空（无）') &&
+        revision2Facts['规范字节']==='660 bytes' && revision2Facts['SHA-256']===${JSON.stringify(SIDECAR_REVISION_2_DIGEST)} &&
+        revision2Facts['Model Role']==='Main Editorial Role' &&
+        revision2Facts['Readable Scope']==='current-book-primary-manuscript-revision、current-book-source-version' &&
+        emptyLabels.every((label)=>revision2Facts[label]==='空（无）') &&
         text.includes('不创建 Task、Plan、Run 或 Session') && text.includes('不读取图书、稿件或来源内容') &&
+        text.includes('Revision 2 仅扩大可请求范围，不创建实际读取或运行权限') &&
         text.includes('不授予 Provider、凭据、网络、Effect、Enrollment 或 Apply 权限') &&
         Boolean(card.querySelector('[data-native-artifact-action="install-disabled"]')) && !card.querySelector('[data-native-artifact-action="enable-current-book"]') &&
         window.ai7.inspectEditorialWorkspaceProfile.length===0 && window.ai7.installEditorialWorkspaceProfile.length===0 && window.ai7.enableEditorialWorkspaceProfile.length===0 &&
@@ -327,7 +386,12 @@ async function main() {
     at('install-effect');
     await waitFor(renderer, `document.querySelector('[data-native-artifact-state="installed-disabled"] [data-native-artifact-action="enable-current-book"]') || document.querySelector('#persistence-status')?.dataset.tone==='error'`, 'installed-disabled-settled', 120_000);
     await assertRenderer(renderer, `Boolean(document.querySelector('[data-native-artifact-state="installed-disabled"] [data-native-artifact-action="enable-current-book"]'))`, 'installed-disabled');
-    await assertRenderer(renderer, `!document.querySelector('[data-native-artifact-action="install-disabled"]')`, 'separate-enable-only-after-install');
+    await assertRenderer(renderer, `(() => {
+      const card=document.querySelector('[data-native-artifact-state="installed-disabled"]');
+      return !document.querySelector('[data-native-artifact-action="install-disabled"]') &&
+        !card?.dataset.authoritySidecarActiveRevision && card?.dataset.authoritySidecarOfferedRevision==='2' &&
+        card.querySelector('[data-native-artifact-action="enable-current-book"]')?.textContent==='审阅并为本图书启用 Revision 2';
+    })()`, 'separate-enable-only-after-install');
     await requireRetainedCarrier(dataRoot);
 
     at('enable-current-book');
@@ -337,7 +401,64 @@ async function main() {
     at('enable-effect');
     await waitFor(renderer, `document.querySelector('[data-native-artifact-state="enabled-for-book"]') || document.querySelector('#persistence-status')?.dataset.tone==='error'`, 'enabled-book-a-settled', 120_000);
     await assertRenderer(renderer, `Boolean(document.querySelector('[data-native-artifact-state="enabled-for-book"]'))`, 'enabled-book-a');
-    await assertRenderer(renderer, `!document.querySelector('.native-artifact-actions button') && document.querySelector('.native-artifact-card')?.textContent.includes('已安装 · 已为本图书启用')`, 'enabled-no-repeat-action');
+    await assertRenderer(renderer, `(() => {
+      const card=document.querySelector('.native-artifact-card');
+      const sidecar=card?.querySelector(':scope > .native-artifact-authority');
+      const pinTerm=Array.from(sidecar?.querySelectorAll(':scope > dl.native-artifact-facts > dt')??[])
+        .find((item)=>item.textContent==='本图书 pin 历史');
+      const pinHistory=pinTerm?.nextElementSibling?.textContent??'';
+      return !document.querySelector('.native-artifact-actions button') && card?.textContent.includes('已安装 · 已为本图书启用') &&
+        card.dataset.authoritySidecarActiveRevision==='2' && !card.dataset.authoritySidecarOfferedRevision &&
+        pinHistory.includes('Revision 2') && pinHistory.includes(${JSON.stringify(SIDECAR_REVISION_2_DIGEST)}) &&
+        !pinHistory.includes('Revision 1');
+    })()`, 'enabled-no-repeat-action');
+    await closeBrowser();
+
+    at('restart-persistence');
+    await constructPredecessorV12(dataRoot, bookA);
+    manager = await launch();
+    renderer = await waitForRenderer(manager, 'restart-window');
+    await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'restart-ready');
+    at('restart-open-book-a');
+    await clickBook(renderer, bookA, 'open-book-a-after-restart');
+    await waitFor(
+      renderer,
+      `document.querySelector('.book-overview[data-book-id=${JSON.stringify(bookA)}] [data-authority-sidecar-active-revision="1"]') || document.querySelector('#persistence-status')?.dataset.tone==='error'`,
+      'book-a-v12-migration',
+      120_000,
+    );
+    at('restart-enabled-book-a');
+    await assertRenderer(renderer, `(() => {
+      const card=document.querySelector('.book-overview[data-book-id=${JSON.stringify(bookA)}] .native-artifact-card');
+      const sidecar=card?.querySelector(':scope > .native-artifact-authority');
+      const pinTerm=Array.from(sidecar?.querySelectorAll(':scope > dl.native-artifact-facts > dt')??[])
+        .find((item)=>item.textContent==='本图书 pin 历史');
+      const pinHistory=pinTerm?.nextElementSibling?.textContent??'';
+      return card?.dataset.nativeArtifactState==='enabled-for-book' &&
+        card.dataset.authoritySidecarActiveRevision==='1' && card.dataset.authoritySidecarOfferedRevision==='2' &&
+        pinHistory.includes('Revision 1') && pinHistory.includes(${JSON.stringify(SIDECAR_REVISION_1_DIGEST)}) &&
+        !pinHistory.includes('Revision 2') &&
+        card.querySelector('[data-native-artifact-action="enable-current-book"]')?.textContent==='审阅并追加 Revision 2';
+    })()`, 'book-a-v12-migrated-revision-1');
+
+    at('enable-current-book');
+    await focusAction(renderer, 'enable-current-book', 'successor-keyboard-focus');
+    await activateFocused(renderer, 'Enter');
+    await waitFor(renderer, `document.querySelector('#persistence-status')?.dataset.tone==='busy' || document.querySelector('[data-authority-sidecar-active-revision="2"]') || document.querySelector('#persistence-status')?.dataset.tone==='error'`, 'successor-keyboard-activation', 5_000);
+    at('enable-effect');
+    await waitFor(renderer, `document.querySelector('[data-authority-sidecar-active-revision="2"]') || document.querySelector('#persistence-status')?.dataset.tone==='error'`, 'successor-settled', 120_000);
+    await assertRenderer(renderer, `(() => {
+      const card=document.querySelector('.native-artifact-card');
+      const sidecar=card?.querySelector(':scope > .native-artifact-authority');
+      const pinTerm=Array.from(sidecar?.querySelectorAll(':scope > dl.native-artifact-facts > dt')??[])
+        .find((item)=>item.textContent==='本图书 pin 历史');
+      const pinHistory=pinTerm?.nextElementSibling?.textContent??'';
+      return card?.dataset.authoritySidecarActiveRevision==='2' && !card.dataset.authoritySidecarOfferedRevision &&
+        !card.querySelector('.native-artifact-actions button') &&
+        pinHistory.includes(${JSON.stringify(SIDECAR_REVISION_1_DIGEST)}) &&
+        pinHistory.includes(${JSON.stringify(SIDECAR_REVISION_2_DIGEST)}) &&
+        pinHistory.indexOf('Revision 1') < pinHistory.indexOf('Revision 2');
+    })()`, 'successor-preserves-revision-1');
     await closeBrowser();
 
     at('restart-persistence');
@@ -360,6 +481,16 @@ async function main() {
       at(restartedLifecycle === 'installed-disabled' ? 'restart-book-a-disabled' : 'restart-book-a-unavailable');
       requireJourney(false, 'book-a-enabled-after-restart');
     }
+    await assertRenderer(renderer, `(() => {
+      const card=document.querySelector('.book-overview[data-book-id=${JSON.stringify(bookA)}] .native-artifact-card');
+      const sidecar=card?.querySelector(':scope > .native-artifact-authority');
+      const pinTerm=Array.from(sidecar?.querySelectorAll(':scope > dl.native-artifact-facts > dt')??[])
+        .find((item)=>item.textContent==='本图书 pin 历史');
+      const pinHistory=pinTerm?.nextElementSibling?.textContent??'';
+      return card?.dataset.authoritySidecarActiveRevision==='2' && !card.dataset.authoritySidecarOfferedRevision &&
+        pinHistory.includes(${JSON.stringify(SIDECAR_REVISION_1_DIGEST)}) &&
+        pinHistory.includes(${JSON.stringify(SIDECAR_REVISION_2_DIGEST)});
+    })()`, 'book-a-sidecar-history-after-restart');
     await click(renderer, '返回图书列表', 'return-after-book-a');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'landing-before-book-b');
 
@@ -367,7 +498,13 @@ async function main() {
     const bookB = await createEmptyBook(renderer, 'J15 空图书乙');
     requireJourney(bookB !== bookA, 'distinct-books');
     await waitFor(renderer, `document.querySelector('.book-overview[data-book-id=${JSON.stringify(bookB)}] [data-native-artifact-state="installed-disabled"]')`, 'book-b-disabled-after-restart');
-    await assertRenderer(renderer, `Boolean(document.querySelector('[data-native-artifact-action="enable-current-book"]')) && !document.querySelector('[data-native-artifact-action="install-disabled"]')`, 'book-b-separate-enablement');
+    await assertRenderer(renderer, `(() => {
+      const card=document.querySelector('.book-overview[data-book-id=${JSON.stringify(bookB)}] .native-artifact-card');
+      return Boolean(card?.querySelector('[data-native-artifact-action="enable-current-book"]')) &&
+        !card.querySelector('[data-native-artifact-action="install-disabled"]') &&
+        !card.dataset.authoritySidecarActiveRevision && card.dataset.authoritySidecarOfferedRevision==='2' &&
+        card.querySelector('[data-native-artifact-action="enable-current-book"]')?.textContent==='审阅并为本图书启用 Revision 2';
+    })()`, 'book-b-separate-enablement');
 
     at('accessibility-reflow-forced-colors');
     await focusAction(renderer, 'enable-current-book', 'book-b-keyboard-focus');

@@ -1414,6 +1414,13 @@ function renderEditorialWorkspaceProfile(
   const card = element('section', 'native-artifact-card');
   card.dataset['nativeArtifactState'] = projection.lifecycle.state;
   card.dataset['nativeArtifactIdentity'] = projection.identity;
+  card.dataset['authoritySidecarIdentity'] = projection.sidecar.identity;
+  if (projection.sidecar.activeRevision !== null) {
+    card.dataset['authoritySidecarActiveRevision'] = String(projection.sidecar.activeRevision);
+  }
+  if (projection.sidecar.offeredRevision !== null) {
+    card.dataset['authoritySidecarOfferedRevision'] = String(projection.sidecar.offeredRevision);
+  }
   const heading = element('div', 'native-artifact-heading');
   heading.append(
     element('h3', undefined, '编辑工作区方案'),
@@ -1425,9 +1432,9 @@ function renderEditorialWorkspaceProfile(
   );
   const values = element('dl', 'native-artifact-facts');
   values.append(
-    element('dt', undefined, '身份'), element('dd', 'technical-identity', projection.identity),
+    element('dt', undefined, '原生载体身份'), element('dd', 'technical-identity', projection.identity),
     element('dt', undefined, '类型'), element('dd', undefined, projection.kind),
-    element('dt', undefined, '版本'), element('dd', 'technical-identity', projection.version),
+    element('dt', undefined, '原生载体版本'), element('dd', 'technical-identity', projection.version),
     element('dt', undefined, '来源'), element('dd', undefined, projection.provenance),
     element('dt', undefined, '许可'), element('dd', undefined, projection.license),
     element('dt', undefined, '内置载体'), element('dd', 'technical-identity', projection.source),
@@ -1435,20 +1442,41 @@ function renderEditorialWorkspaceProfile(
     element('dt', undefined, 'SHA-256'), element('dd', 'technical-identity', projection.sha256),
     element('dt', undefined, '兼容性'), element('dd', undefined, projection.compatibility),
   );
-  const authority = element('section', 'native-artifact-authority');
-  const authorityValues = element('dl', 'native-artifact-facts');
-  authorityValues.append(
-    element('dt', undefined, 'Model Role'), element('dd', undefined, projection.authorityCeiling.modelRoles.join('、')),
-    element('dt', undefined, 'Capability'), element('dd', undefined, projection.authorityCeiling.capabilities.length === 0 ? '空（无）' : projection.authorityCeiling.capabilities.join('、')),
-    element('dt', undefined, 'Readable Scope'), element('dd', undefined, projection.authorityCeiling.readableScopeKinds.length === 0 ? '空（无）' : projection.authorityCeiling.readableScopeKinds.join('、')),
-    element('dt', undefined, 'Provider Binding'), element('dd', undefined, projection.authorityCeiling.providerBindings.length === 0 ? '空（无）' : projection.authorityCeiling.providerBindings.join('、')),
-    element('dt', undefined, 'Credential'), element('dd', undefined, projection.authorityCeiling.credentialAccess ? '有' : '空（无）'),
-    element('dt', undefined, 'Network'), element('dd', undefined, projection.authorityCeiling.networkAccess ? '有' : '空（无）'),
-    element('dt', undefined, 'Effect'), element('dd', undefined, projection.authorityCeiling.effectClasses.length === 0 ? '空（无）' : projection.authorityCeiling.effectClasses.join('、')),
-    element('dt', undefined, 'Enrollment'), element('dd', undefined, projection.authorityCeiling.backgroundAnalysisEnrollment ? '有' : '空（无）'),
-    element('dt', undefined, 'Apply'), element('dd', undefined, projection.authorityCeiling.applyAuthority ? '有' : '空（无）'),
+  const sidecar = element('section', 'native-artifact-authority');
+  const sidecarValues = element('dl', 'native-artifact-facts');
+  sidecarValues.append(
+    element('dt', undefined, '侧车身份'), element('dd', 'technical-identity', projection.sidecar.identity),
+    element('dt', undefined, '当前生效 Revision'), element('dd', undefined,
+      projection.sidecar.activeRevision === null ? '空（本图书未启用）' : `Revision ${projection.sidecar.activeRevision}`),
+    element('dt', undefined, '可审阅后继'), element('dd', undefined,
+      projection.sidecar.offeredRevision === null ? '空（无）' : `Revision ${projection.sidecar.offeredRevision}`),
+    element('dt', undefined, '本图书 pin 历史'), element('dd', undefined,
+      projection.sidecar.pinHistory.length === 0
+        ? '空（无）'
+        : projection.sidecar.pinHistory.map((pin) => `Revision ${pin.revision} · ${pin.sha256} · ${pin.pinnedAt}`).join('；')),
   );
-  authority.append(element('h4', undefined, 'Authority Ceiling'), authorityValues);
+  sidecar.append(element('h4', undefined, 'AI7 权限侧车'), sidecarValues);
+  for (const revision of projection.sidecar.revisions) {
+    const revisionSection = element('section', 'native-artifact-authority');
+    revisionSection.dataset['authoritySidecarRevision'] = String(revision.revision);
+    const authorityValues = element('dl', 'native-artifact-facts');
+    authorityValues.append(
+      element('dt', undefined, '规范字节'), element('dd', undefined, `${revision.byteLength} bytes`),
+      element('dt', undefined, 'SHA-256'), element('dd', 'technical-identity', revision.sha256),
+      element('dt', undefined, '兼容性'), element('dd', undefined, revision.compatibility),
+      element('dt', undefined, 'Model Role'), element('dd', undefined, revision.authorityCeiling.modelRoles.join('、')),
+      element('dt', undefined, 'Capability'), element('dd', undefined, revision.authorityCeiling.capabilities.length === 0 ? '空（无）' : revision.authorityCeiling.capabilities.join('、')),
+      element('dt', undefined, 'Readable Scope'), element('dd', undefined, revision.authorityCeiling.readableScopeKinds.length === 0 ? '空（无）' : revision.authorityCeiling.readableScopeKinds.join('、')),
+      element('dt', undefined, 'Provider Binding'), element('dd', undefined, revision.authorityCeiling.providerBindings.length === 0 ? '空（无）' : revision.authorityCeiling.providerBindings.join('、')),
+      element('dt', undefined, 'Credential'), element('dd', undefined, revision.authorityCeiling.credentialAccess ? '有' : '空（无）'),
+      element('dt', undefined, 'Network'), element('dd', undefined, revision.authorityCeiling.networkAccess ? '有' : '空（无）'),
+      element('dt', undefined, 'Effect'), element('dd', undefined, revision.authorityCeiling.effectClasses.length === 0 ? '空（无）' : revision.authorityCeiling.effectClasses.join('、')),
+      element('dt', undefined, 'Enrollment'), element('dd', undefined, revision.authorityCeiling.backgroundAnalysisEnrollment ? '有' : '空（无）'),
+      element('dt', undefined, 'Apply'), element('dd', undefined, revision.authorityCeiling.applyAuthority ? '有' : '空（无）'),
+    );
+    revisionSection.append(element('h4', undefined, `Authority Ceiling · Revision ${revision.revision}`), authorityValues);
+    sidecar.append(revisionSection);
+  }
   const nonEffects = element('ul', 'native-artifact-non-effects');
   for (const statement of projection.namedNonEffects) nonEffects.append(element('li', undefined, statement));
   const actions = element('div', 'button-row native-artifact-actions');
@@ -1471,14 +1499,15 @@ function renderEditorialWorkspaceProfile(
     actions.append(install);
   }
   if (projection.actions.canEnable) {
-    const enable = button('仅为本图书启用', 'primary', async () => {
+    const upgrading = projection.sidecar.activeRevision === 1;
+    const enable = button(upgrading ? '审阅并追加 Revision 2' : '审阅并为本图书启用 Revision 2', 'primary', async () => {
       enable.disabled = true;
-      setStatus('正在为当前图书启用方案…', 'busy');
+      setStatus(upgrading ? '正在为当前图书追加 Revision 2…' : '正在为当前图书启用 Revision 2…', 'busy');
       try {
         const enabled = await window.ai7.enableEditorialWorkspaceProfile();
         if (host.isConnected && enabled.bookId === host.dataset['nativeArtifactBookId']) {
           renderEditorialWorkspaceProfile(host, enabled);
-          setStatus('方案已仅为当前图书启用。', 'success');
+          setStatus(upgrading ? 'Revision 2 已追加；Revision 1 历史保持不变。' : 'Revision 2 已仅为当前图书启用。', 'success');
         }
       } catch (error) {
         enable.disabled = false;
@@ -1492,7 +1521,7 @@ function renderEditorialWorkspaceProfile(
     heading,
     element('p', 'field-note', '这是一份声明式、Provider-free 的本地方案；安装与为当前图书启用是两个独立动作。'),
     values,
-    authority,
+    sidecar,
     element('h4', undefined, '明确不会发生'),
     nonEffects,
     actions,

@@ -1,4 +1,4 @@
-export const SERVICE_PROTOCOL_VERSION = 13 as const;
+export const SERVICE_PROTOCOL_VERSION = 14 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -366,16 +366,61 @@ export interface EditorialWorkspaceProfileProjection {
   byteLength: 263;
   sha256: 'ae485040c8fa602ab2e98ec91dd122201d40a8be41d8a4f86f7cd55ddb1e434d';
   compatibility: '声明式 · Provider-free · 兼容';
-  authorityCeiling: {
-    modelRoles: readonly ['Main Editorial Role'];
-    capabilities: readonly [];
-    readableScopeKinds: readonly [];
-    providerBindings: readonly [];
-    credentialAccess: false;
-    networkAccess: false;
-    effectClasses: readonly [];
-    backgroundAnalysisEnrollment: false;
-    applyAuthority: false;
+  sidecar: {
+    identity: 'ai7.editorial-workspace-profile.authority';
+    revisions: readonly [
+      {
+        revision: 1;
+        byteLength: 588;
+        sha256: '887067fc716261fc5f41772a295faa326f6bf2818573daae29ffdb7388e9e48d';
+        compatibility: 'compatible-declarative-provider-free';
+        authorityCeiling: {
+          modelRoles: readonly ['Main Editorial Role'];
+          capabilities: readonly [];
+          readableScopeKinds: readonly [];
+          providerBindings: readonly [];
+          credentialAccess: false;
+          networkAccess: false;
+          effectClasses: readonly [];
+          backgroundAnalysisEnrollment: false;
+          applyAuthority: false;
+        };
+      },
+      {
+        revision: 2;
+        byteLength: 660;
+        sha256: '980b565f25bdff29e539365e17344346017b05146a45cfea35c8ed7d528a1bff';
+        compatibility: 'compatible-declarative-provider-free';
+        authorityCeiling: {
+          modelRoles: readonly ['Main Editorial Role'];
+          capabilities: readonly [];
+          readableScopeKinds: readonly [
+            'current-book-primary-manuscript-revision',
+            'current-book-source-version',
+          ];
+          providerBindings: readonly [];
+          credentialAccess: false;
+          networkAccess: false;
+          effectClasses: readonly [];
+          backgroundAnalysisEnrollment: false;
+          applyAuthority: false;
+        };
+      },
+    ];
+    pinHistory: ReadonlyArray<
+      | {
+          revision: 1;
+          sha256: '887067fc716261fc5f41772a295faa326f6bf2818573daae29ffdb7388e9e48d';
+          pinnedAt: string;
+        }
+      | {
+          revision: 2;
+          sha256: '980b565f25bdff29e539365e17344346017b05146a45cfea35c8ed7d528a1bff';
+          pinnedAt: string;
+        }
+    >;
+    activeRevision: 1 | 2 | null;
+    offeredRevision: 2 | null;
   };
   lifecycle: {
     state: 'available-to-install' | 'installed-disabled' | 'enabled-for-book' | 'unavailable-needs-attention';
@@ -390,6 +435,7 @@ export interface EditorialWorkspaceProfileProjection {
   namedNonEffects: readonly [
     '不创建 Task、Plan、Run 或 Session',
     '不读取图书、稿件或来源内容',
+    'Revision 2 仅扩大可请求范围，不创建实际读取或运行权限',
     '不授予 Provider、凭据、网络、Effect、Enrollment 或 Apply 权限',
   ];
 }
