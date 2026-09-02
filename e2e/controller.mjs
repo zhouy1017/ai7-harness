@@ -97,6 +97,7 @@ const JOURNEY_LOCATIONS = Object.freeze({
     'renderer-ready',
     'landing',
     'review',
+    'completion-visibility-transition',
     'continuity-review',
     'legacy-review',
     'before-paint-review',

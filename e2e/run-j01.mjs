@@ -1341,7 +1341,7 @@ async function runJourney(
   if (holdCompletionPaint) {
     await assertRenderer(
       renderer,
-      `(() => { let frameId = 0; globalThis.__ai7HeldCompletionFrames = []; globalThis.requestAnimationFrame = (callback) => { globalThis.__ai7HeldCompletionFrames.push(callback); frameId += 1; return frameId; }; return true; })()`,
+      `(() => { let frameId = 0; globalThis.__ai7HeldCompletionFrames = []; globalThis.__ai7HeldCompletionOriginalAnimationFrame = globalThis.requestAnimationFrame.bind(globalThis); globalThis.requestAnimationFrame = (callback) => { globalThis.__ai7HeldCompletionFrames.push(callback); frameId += 1; return frameId; }; return true; })()`,
       'completion-paint-held',
     );
   }
@@ -3126,6 +3126,77 @@ async function main() {
       holdCompletionPaint: true,
       diagnosticReviewLocation: 'before-paint-review',
     });
+    // Issue #178 / nearest supported Journey J-01: a visible imported result must reject a
+    // frame pair crossed by a hidden interval and must not acknowledge an obsolete screen/commit.
+    at('completion-visibility-transition');
+    await assertRenderer(
+      renderer,
+      `(() => { const frame = globalThis.__ai7HeldCompletionFrames?.shift(); if (typeof frame !== 'function') return false; frame(performance.now()); return true; })()`,
+      'completion-visibility-first-frame',
+    );
+    await waitFor(
+      renderer,
+      `globalThis.__ai7HeldCompletionFrames?.length === 1`,
+      'completion-visibility-second-frame-held',
+    );
+    await assertRenderer(
+      renderer,
+      `(async () => {
+        const descriptor = Object.getOwnPropertyDescriptor(Document.prototype, 'visibilityState');
+        if (descriptor?.configurable !== true || typeof descriptor.get !== 'function') return false;
+        Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
+        document.dispatchEvent(new Event('visibilitychange'));
+        await new Promise((resolveWait) => setTimeout(resolveWait, 50));
+        delete document.visibilityState;
+        document.dispatchEvent(new Event('visibilitychange'));
+        return document.visibilityState === 'visible' &&
+          document.documentElement.dataset.ai7ImportCompletionPainted === undefined &&
+          document.documentElement.dataset.ai7ImportCompletionAcknowledged === undefined;
+      })()`,
+      'completion-visibility-restored-before-second-frame',
+    );
+    await assertRenderer(
+      renderer,
+      `(async () => { const frame = globalThis.__ai7HeldCompletionFrames?.shift(); if (typeof frame !== 'function') return false; frame(performance.now()); await new Promise((resolveWait) => setTimeout(resolveWait, 0)); return globalThis.__ai7HeldCompletionFrames?.length === 1 && document.documentElement.dataset.ai7ImportCompletionPainted === undefined && document.documentElement.dataset.ai7ImportCompletionAcknowledged === undefined; })()`,
+      'completion-visibility-restarts-two-frame-proof',
+    );
+    await assertRenderer(
+      renderer,
+      `(() => { const frame = globalThis.__ai7HeldCompletionFrames?.shift(); if (typeof frame !== 'function') return false; frame(performance.now()); return true; })()`,
+      'completion-presentation-retry-first-frame',
+    );
+    await waitFor(
+      renderer,
+      `globalThis.__ai7HeldCompletionFrames?.length === 1`,
+      'completion-presentation-retry-second-frame-held',
+    );
+    await assertRenderer(
+      renderer,
+      `(async () => {
+        const frames = globalThis.__ai7HeldCompletionFrames;
+        const screen = document.querySelector('#screen');
+        const commit = screen?.querySelector('[data-import-commit-id]');
+        const commitId = commit?.dataset.importCommitId;
+        const frame = frames?.shift();
+        if (!screen || !commitId || typeof frame !== 'function') return false;
+        screen.dataset.screen = 'review';
+        screen.dataset.screen = 'imported';
+        commit.dataset.importCommitId = 'obsolete-completion-presentation';
+        commit.dataset.importCommitId = commitId;
+        frame(performance.now());
+        await new Promise((resolveWait) => setTimeout(resolveWait, 0));
+        const valid = screen.dataset.screen === 'imported' && commit.dataset.importCommitId === commitId &&
+          frames.length === 0 && document.documentElement.dataset.ai7ImportCompletionPainted === undefined &&
+          document.documentElement.dataset.ai7ImportCompletionAcknowledged === undefined;
+        if (globalThis.__ai7HeldCompletionOriginalAnimationFrame) {
+          globalThis.requestAnimationFrame = globalThis.__ai7HeldCompletionOriginalAnimationFrame;
+        }
+        delete globalThis.__ai7HeldCompletionOriginalAnimationFrame;
+        delete globalThis.__ai7HeldCompletionFrames;
+        return valid;
+      })()`,
+      'completion-obsolete-presentation-not-acknowledged',
+    );
     await closeProduct();
     renderer = await launchProduct({ dataRoot: beforePaintRoot });
     await waitFor(
