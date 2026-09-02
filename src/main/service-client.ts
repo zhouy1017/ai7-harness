@@ -15,6 +15,8 @@ import {
 const MAX_PENDING_REQUESTS = 16;
 const REQUEST_TIMEOUT_MS = 30_000;
 const LONG_REQUEST_TIMEOUT_MS = 10 * 60_000;
+const SERVICE_STOP_GRACE_MS = 5_000;
+const SERVICE_STOP_FORCE_MS = 5_000;
 
 interface PendingRequest {
   readonly operation: ServiceOperation;
@@ -30,6 +32,24 @@ export class ServiceCallError extends Error {
   ) {
     super(message);
     this.name = 'ServiceCallError';
+  }
+}
+
+async function exitsBefore(
+  exit: Promise<true>,
+  timeoutMs: number,
+): Promise<boolean> {
+  let timeout: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      exit,
+      new Promise<false>((resolveTimeout) => {
+        timeout = setTimeout(() => resolveTimeout(false), timeoutMs);
+        timeout.unref();
+      }),
+    ]);
+  } finally {
+    if (timeout !== undefined) clearTimeout(timeout);
   }
 }
 
@@ -201,18 +221,16 @@ export class ServiceClient {
       // The exact child remains scoped below and is terminated after its grace interval.
     }
     this.#child.stdin.end();
-    if (this.#child.exitCode !== null) {
+    if (this.#stopped || this.#child.exitCode !== null || this.#child.signalCode !== null) {
       this.#stopped = true;
       return;
     }
-    const exited = once(this.#child, 'exit').then(() => true);
-    const grace = new Promise<false>((resolve) => {
-      const timeout = setTimeout(() => resolve(false), 5_000);
-      timeout.unref();
-    });
-    if (!(await Promise.race([exited, grace]))) {
-      this.#child.kill();
-      await once(this.#child, 'exit').catch(() => undefined);
+    const exited = once(this.#child, 'exit').then(() => true as const);
+    if (!(await exitsBefore(exited, SERVICE_STOP_GRACE_MS))) {
+      this.#child.kill('SIGKILL');
+      if (!(await exitsBefore(exited, SERVICE_STOP_FORCE_MS))) {
+        throw new ServiceCallError('SERVICE_STOP_TIMEOUT', '本地业务服务未能在强制终止期限内停止。');
+      }
     }
     this.#stopped = true;
   }
