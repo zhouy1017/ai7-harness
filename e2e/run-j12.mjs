@@ -680,7 +680,13 @@ async function main() {
     );
     const routeEventBeforeRisk = await primary.evaluate(`document.documentElement.dataset.ai7BookWorkbenchRouteGeneration??null`);
     at('close-risk-cross-window-focus');
-    await bookBRenderer.send('Page.bringToFront');
+    const focusedBookB = await bookBRenderer.evaluate(`window.ai7.openBookWorkbench({kind:'book',bookId:${JSON.stringify(bookB)}})`);
+    requireJourney(
+      focusedBookB?.target === 'requesting-window' &&
+        focusedBookB.route?.kind === 'book' &&
+        focusedBookB.route.bookId === bookB,
+      'risk-book-b-public-focus-route',
+    );
     await waitFor(bookBRenderer, `document.hasFocus() && document.visibilityState==='visible'`, 'risk-book-b-focused');
     await assertRenderer(primary, `!document.hasFocus()`, 'risk-book-a-not-focused');
     await new Promise((resolveWait) => setTimeout(resolveWait, 100));
