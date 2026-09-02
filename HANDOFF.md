@@ -1,9 +1,9 @@
 # Current handoff
 
-Issue #184 is a documentation-only synchronization on `dev@082f0112ab79654340dcd0719fce0430e84b67b2`: setup Node observes only J-12's public ready/missing states and stable opaque Credential Reference, never a raw protected credential; the failure-only direct cleanup child receives only that reference under the pinned Electron Node-mode carrier and emits no output. Product code and PR #177 remain unchanged.
+Issue #178's P0 repair and Issue #184's corrected nonsecret J-12 documentation are integrated and lifecycle-closed through Issue #186. The next unit is the already-authorized Issue #176 / Draft PR #177 sidecar predecessor: first record the scoped usage-precondition supersession, then rebase onto newest `dev`, preserve the integrated repair/documentation owners, complete fresh Windows validation, and require one paired Gate.
 
 ## Safe Resume Prompt
 
 ```text
-Finish Issue #184's four-path documentation validation and route-only pull request integration, then create its separate five-path lifecycle closure. After that lifecycle integrates, record the Owner's usage-precondition supersession on Issue #176, rebase Draft PR #177 onto newest dev, preserve the integrated #178 repairs, run fresh exact-head Windows doctor -> bootstrap -> build -> e2e:all, and permit one normal paired Gate. Keep Issue #47 blocked through #176 lifecycle. Do not query usage, call a Provider, resolve an execution secret, record sample1, admit a fixture, publish, release, or promote main.
+Resume from current origin/dev after Issue #186 integrates. Post the scoped Owner usage-precondition amendment on Issue #176, verify PR #177 remains Draft at remote head 5865bbc, rebase onto exact newest dev, and semantically combine #184's nonsecret J-12 wording with #176's sidecar/schema/J-15 documentation. Preserve #178's product/E2E repairs, run fresh exact-head Windows doctor -> bootstrap -> build -> e2e:all, then force-push with explicit lease while Draft and permit one normal paired Gate. Keep Issue #47 blocked through #176 lifecycle. Do not query usage, call a Provider, resolve an execution secret, record sample1, admit a fixture, publish, release, or promote main.
 ```
