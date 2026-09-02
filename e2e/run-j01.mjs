@@ -1941,129 +1941,151 @@ async function main() {
       degraded: false,
     };
 
-    // Issue #178 / nearest supported Journey J-01: closing one Book workspace must leave another
-    // workspace usable and let the closed Book reopen with unique routing, without a JavaScript Error.
-    at('window-close');
-    const windowCloseRoot = await createCanonicalExternalDataRoot(resolve(runRoot, 'window-close-data'), checkoutRoot);
-    let renderer = await launchProduct({ dataRoot: windowCloseRoot });
-    at('window-close');
-    await waitFor(
-      renderer,
-      `document.documentElement.dataset.ai7ProductReady === 'true' && document.querySelector('[data-screen="landing"]')`,
-      'issue-178-product-ready',
-    );
-    const windowCloseBooks = await renderer.evaluate(`(async()=>{
-      const createBook = async (title, internalNumber) => {
-        const review = await window.ai7.prepareBookCreation({title, internalNumber});
-        const committed = await window.ai7.commitBookCreation({...review.proposed, reviewDigest:review.reviewDigest});
-        await window.ai7.leaveBookWorkbench();
-        return committed.overview.book.bookId;
-      };
-      return {
-        survivingBookId: await createBook('窗口关闭存活图书', 'WINDOW-CLOSE-SURVIVOR'),
-        closedBookId: await createBook('窗口关闭目标图书', 'WINDOW-CLOSE-TARGET'),
-      };
-    })()`);
-    requireJourney(
-      /^[0-9a-f-]{36}$/i.test(windowCloseBooks?.survivingBookId ?? '') &&
-        /^[0-9a-f-]{36}$/i.test(windowCloseBooks?.closedBookId ?? '') &&
-        windowCloseBooks.survivingBookId !== windowCloseBooks.closedBookId,
-      'issue-178-two-book-identities',
-    );
-    const openedSurvivingBook = await renderer.evaluate(
-      `window.ai7.openBookWorkbench({kind:'book',bookId:${JSON.stringify(windowCloseBooks.survivingBookId)}})`,
-    );
-    requireJourney(
-      openedSurvivingBook?.target === 'requesting-window' &&
-        openedSurvivingBook.route?.kind === 'book' &&
-        openedSurvivingBook.route.bookId === windowCloseBooks.survivingBookId,
-      'issue-178-open-surviving-book-workspace',
-    );
-    const openedSecondBook = await renderer.evaluate(
-      `window.ai7.openBookWorkbench({kind:'book',bookId:${JSON.stringify(windowCloseBooks.closedBookId)}})`,
-    );
-    requireJourney(
-      openedSecondBook?.target === 'new-window' &&
-        openedSecondBook.route?.kind === 'book' &&
-        openedSecondBook.route.bookId === windowCloseBooks.closedBookId,
-      'issue-178-open-secondary-book-workspace',
-    );
-    const windowManager = await createRendererManager(browser);
-    const twoBookWindows = await waitForRendererCount(windowManager, 2, 'issue-178-two-book-windows');
-    const initialRoutes = await Promise.all(
-      twoBookWindows.map((item) => item.evaluate(`window.ai7.getBookWorkbenchRoute()`)),
-    );
-    requireJourney(
-      initialRoutes.filter((route) => route?.kind === 'book' && route.bookId === windowCloseBooks.survivingBookId).length === 1 &&
-        initialRoutes.filter((route) => route?.kind === 'book' && route.bookId === windowCloseBooks.closedBookId).length === 1,
-      'issue-178-initial-unique-routes',
-    );
-    const initialSurvivingRenderer = twoBookWindows[
-      initialRoutes.findIndex((route) => route?.kind === 'book' && route.bookId === windowCloseBooks.survivingBookId)
-    ];
-    const secondaryRenderer = twoBookWindows[
-      initialRoutes.findIndex((route) => route?.kind === 'book' && route.bookId === windowCloseBooks.closedBookId)
-    ];
-    requireJourney(
-      initialSurvivingRenderer !== undefined &&
-        secondaryRenderer !== undefined &&
-        initialSurvivingRenderer.targetId !== secondaryRenderer.targetId,
-      'issue-178-initial-unique-targets',
-    );
-    requireJourney((await windowManager.close(secondaryRenderer.targetId)).success === true, 'issue-178-close-secondary-target');
-    const [survivingRenderer] = await waitForRendererCount(windowManager, 1, 'issue-178-one-book-window');
-    requireJourney(
-      survivingRenderer.targetId === initialSurvivingRenderer.targetId,
-      'issue-178-surviving-target',
-    );
-    const survivingRoundTrip = await survivingRenderer.evaluate(
-      `(async()=>({books:await window.ai7.listBooks({after:null}),route:await window.ai7.getBookWorkbenchRoute()}))()`,
-    );
-    requireJourney(
-      Array.isArray(survivingRoundTrip?.books?.items) &&
-        survivingRoundTrip.books.items.some((book) => book.bookId === windowCloseBooks.survivingBookId) &&
-        survivingRoundTrip.books.items.some((book) => book.bookId === windowCloseBooks.closedBookId) &&
-        survivingRoundTrip.route?.kind === 'book' &&
-        survivingRoundTrip.route.bookId === windowCloseBooks.survivingBookId,
-      'issue-178-surviving-workspace-ipc',
-    );
-    const reopenedSecondBook = await survivingRenderer.evaluate(
-      `window.ai7.openBookWorkbench({kind:'book',bookId:${JSON.stringify(windowCloseBooks.closedBookId)}})`,
-    );
-    requireJourney(
-      reopenedSecondBook?.target === 'new-window' &&
-        reopenedSecondBook.route?.kind === 'book' &&
-        reopenedSecondBook.route.bookId === windowCloseBooks.closedBookId,
-      'issue-178-reopen-closed-book',
-    );
-    const reopenedBookWindows = await waitForRendererCount(windowManager, 2, 'issue-178-reopened-two-book-windows');
-    const reopenedRoutes = await Promise.all(
-      reopenedBookWindows.map((item) => item.evaluate(`window.ai7.getBookWorkbenchRoute()`)),
-    );
-    const retainedSurvivingRenderer = reopenedBookWindows[
-      reopenedRoutes.findIndex((route) => route?.kind === 'book' && route.bookId === windowCloseBooks.survivingBookId)
-    ];
-    const reopenedRenderer = reopenedBookWindows[
-      reopenedRoutes.findIndex((route) => route?.kind === 'book' && route.bookId === windowCloseBooks.closedBookId)
-    ];
-    requireJourney(
-      retainedSurvivingRenderer !== undefined &&
-        reopenedRenderer !== undefined &&
-        retainedSurvivingRenderer.targetId !== reopenedRenderer.targetId,
-      'issue-178-unique-reopened-targets',
-    );
-    const [retainedSurvivingRoute, reopenedRoute] = await Promise.all([
-      retainedSurvivingRenderer.evaluate(`window.ai7.getBookWorkbenchRoute()`),
-      reopenedRenderer.evaluate(`window.ai7.getBookWorkbenchRoute()`),
-    ]);
-    requireJourney(
-      retainedSurvivingRoute?.kind === 'book' &&
-        retainedSurvivingRoute.bookId === windowCloseBooks.survivingBookId &&
-        reopenedRoute?.kind === 'book' &&
-        reopenedRoute.bookId === windowCloseBooks.closedBookId,
-      'issue-178-unique-reopened-route',
-    );
-    await closeProduct();
+    let renderer;
+    const runIssue178WindowCloseRegression = async () => {
+      // Issue #178 / nearest supported Journey J-01: closing one Book workspace must leave another
+      // workspace usable and let the closed Book reopen with unique routing, without a JavaScript Error.
+      at('window-close');
+      const windowCloseRoot = await createCanonicalExternalDataRoot(resolve(runRoot, 'window-close-data'), checkoutRoot);
+      renderer = await launchProduct({ dataRoot: windowCloseRoot });
+      at('window-close');
+      await waitFor(
+        renderer,
+        `document.documentElement.dataset.ai7ProductReady === 'true' && document.querySelector('[data-screen="landing"]')`,
+        'issue-178-product-ready',
+      );
+      const windowCloseBooks = await renderer.evaluate(`(async()=>{
+        const createBook = async (title, internalNumber) => {
+          const review = await window.ai7.prepareBookCreation({title, internalNumber});
+          const committed = await window.ai7.commitBookCreation({...review.proposed, reviewDigest:review.reviewDigest});
+          await window.ai7.leaveBookWorkbench();
+          return committed.overview.book.bookId;
+        };
+        return {
+          survivingBookId: await createBook('窗口关闭存活图书', 'WINDOW-CLOSE-SURVIVOR'),
+          closedBookId: await createBook('窗口关闭目标图书', 'WINDOW-CLOSE-TARGET'),
+        };
+      })()`);
+      requireJourney(
+        /^[0-9a-f-]{36}$/i.test(windowCloseBooks?.survivingBookId ?? '') &&
+          /^[0-9a-f-]{36}$/i.test(windowCloseBooks?.closedBookId ?? '') &&
+          windowCloseBooks.survivingBookId !== windowCloseBooks.closedBookId,
+        'issue-178-two-book-identities',
+      );
+      const openedSurvivingBook = await renderer.evaluate(
+        `window.ai7.openBookWorkbench({kind:'book',bookId:${JSON.stringify(windowCloseBooks.survivingBookId)}})`,
+      );
+      requireJourney(
+        openedSurvivingBook?.target === 'requesting-window' &&
+          openedSurvivingBook.route?.kind === 'book' &&
+          openedSurvivingBook.route.bookId === windowCloseBooks.survivingBookId,
+        'issue-178-open-surviving-book-workspace',
+      );
+      const openedSecondBook = await renderer.evaluate(
+        `window.ai7.openBookWorkbench({kind:'book',bookId:${JSON.stringify(windowCloseBooks.closedBookId)}})`,
+      );
+      requireJourney(
+        openedSecondBook?.target === 'new-window' &&
+          openedSecondBook.route?.kind === 'book' &&
+          openedSecondBook.route.bookId === windowCloseBooks.closedBookId,
+        'issue-178-open-secondary-book-workspace',
+      );
+      const windowManager = await createRendererManager(browser);
+      const twoBookWindows = await waitForRendererCount(windowManager, 2, 'issue-178-two-book-windows');
+      const initialRoutes = await Promise.all(
+        twoBookWindows.map((item) => item.evaluate(`window.ai7.getBookWorkbenchRoute()`)),
+      );
+      requireJourney(
+        initialRoutes.filter((route) => route?.kind === 'book' && route.bookId === windowCloseBooks.survivingBookId).length === 1 &&
+          initialRoutes.filter((route) => route?.kind === 'book' && route.bookId === windowCloseBooks.closedBookId).length === 1,
+        'issue-178-initial-unique-routes',
+      );
+      const initialSurvivingRenderer = twoBookWindows[
+        initialRoutes.findIndex((route) => route?.kind === 'book' && route.bookId === windowCloseBooks.survivingBookId)
+      ];
+      const secondaryRenderer = twoBookWindows[
+        initialRoutes.findIndex((route) => route?.kind === 'book' && route.bookId === windowCloseBooks.closedBookId)
+      ];
+      requireJourney(
+        initialSurvivingRenderer !== undefined &&
+          secondaryRenderer !== undefined &&
+          initialSurvivingRenderer.targetId !== secondaryRenderer.targetId,
+        'issue-178-initial-unique-targets',
+      );
+      requireJourney((await windowManager.close(secondaryRenderer.targetId)).success === true, 'issue-178-close-secondary-target');
+      const [survivingRenderer] = await waitForRendererCount(windowManager, 1, 'issue-178-one-book-window');
+      requireJourney(
+        survivingRenderer.targetId === initialSurvivingRenderer.targetId,
+        'issue-178-surviving-target',
+      );
+      const survivingRoundTrip = await survivingRenderer.evaluate(
+        `(async()=>({books:await window.ai7.listBooks({after:null}),route:await window.ai7.getBookWorkbenchRoute()}))()`,
+      );
+      requireJourney(
+        Array.isArray(survivingRoundTrip?.books?.items) &&
+          survivingRoundTrip.books.items.some((book) => book.bookId === windowCloseBooks.survivingBookId) &&
+          survivingRoundTrip.books.items.some((book) => book.bookId === windowCloseBooks.closedBookId) &&
+          survivingRoundTrip.route?.kind === 'book' &&
+          survivingRoundTrip.route.bookId === windowCloseBooks.survivingBookId,
+        'issue-178-surviving-workspace-ipc',
+      );
+      const reopenedSecondBook = await survivingRenderer.evaluate(
+        `window.ai7.openBookWorkbench({kind:'book',bookId:${JSON.stringify(windowCloseBooks.closedBookId)}})`,
+      );
+      requireJourney(
+        reopenedSecondBook?.target === 'new-window' &&
+          reopenedSecondBook.route?.kind === 'book' &&
+          reopenedSecondBook.route.bookId === windowCloseBooks.closedBookId,
+        'issue-178-reopen-closed-book',
+      );
+      const reopenedBookWindows = await waitForRendererCount(windowManager, 2, 'issue-178-reopened-two-book-windows');
+      const reopenedRoutes = await Promise.all(
+        reopenedBookWindows.map((item) => item.evaluate(`window.ai7.getBookWorkbenchRoute()`)),
+      );
+      const retainedSurvivingRenderer = reopenedBookWindows[
+        reopenedRoutes.findIndex((route) => route?.kind === 'book' && route.bookId === windowCloseBooks.survivingBookId)
+      ];
+      const reopenedRenderer = reopenedBookWindows[
+        reopenedRoutes.findIndex((route) => route?.kind === 'book' && route.bookId === windowCloseBooks.closedBookId)
+      ];
+      requireJourney(
+        retainedSurvivingRenderer !== undefined &&
+          reopenedRenderer !== undefined &&
+          retainedSurvivingRenderer.targetId !== reopenedRenderer.targetId,
+        'issue-178-unique-reopened-targets',
+      );
+      const [retainedSurvivingRoute, reopenedRoute] = await Promise.all([
+        retainedSurvivingRenderer.evaluate(`window.ai7.getBookWorkbenchRoute()`),
+        reopenedRenderer.evaluate(`window.ai7.getBookWorkbenchRoute()`),
+      ]);
+      requireJourney(
+        retainedSurvivingRoute?.kind === 'book' &&
+          retainedSurvivingRoute.bookId === windowCloseBooks.survivingBookId &&
+          reopenedRoute?.kind === 'book' &&
+          reopenedRoute.bookId === windowCloseBooks.closedBookId,
+        'issue-178-unique-reopened-route',
+      );
+      requireJourney(
+        (await windowManager.close(reopenedRenderer.targetId)).success === true,
+        'issue-178-close-reopened-secondary-target',
+      );
+      const [finalSurvivingRenderer] = await waitForRendererCount(
+        windowManager,
+        1,
+        'issue-178-final-one-book-window',
+      );
+      requireJourney(
+        finalSurvivingRenderer.targetId === retainedSurvivingRenderer.targetId,
+        'issue-178-final-surviving-target',
+      );
+      const finalSurvivingRoute = await finalSurvivingRenderer.evaluate(`window.ai7.getBookWorkbenchRoute()`);
+      requireJourney(
+        finalSurvivingRoute?.kind === 'book' &&
+          finalSurvivingRoute.bookId === windowCloseBooks.survivingBookId,
+        'issue-178-final-surviving-route',
+      );
+      await closeProduct();
+    };
 
     const emptyBookRoot = await createCanonicalExternalDataRoot(resolve(runRoot, 'empty-book-first-import-data'), checkoutRoot);
     renderer = await launchProduct({ dataRoot: emptyBookRoot, pickerPath: docx });
@@ -3304,6 +3326,10 @@ async function main() {
       'uncertain-fail-closed',
     );
     await closeProduct();
+
+    // Keep the observed-bug regression terminal so its deliberate multi-window lifecycle cannot
+    // influence unrelated J-01 import/recovery scenarios on either supported desktop platform.
+    await runIssue178WindowCloseRegression();
   } finally {
     try {
       await cancellation.cleanup();
