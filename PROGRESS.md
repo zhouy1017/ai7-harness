@@ -12,14 +12,13 @@
 - Removed all temporary `[DEBUG-ISSUE178]` instrumentation and restored the one accidentally displaced baseline `closeProduct()`. A later fresh rerun then exposed a distinct low-probability controller race: Electron had exited and no native dialog remained, but J-01's Node runner could wait forever because the client-side Playwright `browser.close()` Promise can remain pending even after the bounded child close-or-kill path has finished.
 - Stabilized that runner defect without a new Journey or gate. A temporary injector first proved the old path stayed alive beyond 30 seconds after Electron closed; J-01 now atomically consumes Browser ownership, shares one active close, bounds a connected close at 10 seconds, always attempts isolated-root cleanup, and exits nonzero after flushing its fixed failure marker whenever close times out or rejects. The timeout injection returned `J-01/window-close` / exit 1 in 11.7 seconds, and the ordinary-rejection injection returned the same fixed failure / exit 1 in 1.84 seconds; both left zero AI7 Electron/Node processes and no new J-01 root. All injectors were deleted.
 - Re-ran the unmodified public diagnostics after the final close semantics: J-01 and adjacent J-15 both passed. Syntax, TypeScript, `git diff --check`, and independent lifecycle re-review also pass with no remaining blocker.
-- The adjacent unchanged J-15 diagnostic passed. Fresh Windows Local completion then passed in exact order: `pnpm run doctor`, ordinary `pnpm run bootstrap`, `pnpm run build`, and `pnpm run e2e:all`; the orchestrator reported J-01, J-02, J-08, J-12, J-15, and final `LOCAL_COMPLETION/all/pass`. The post-completion Electron process count remained zero.
+- Committed the bounded-close follow-up as `e1f63291c941a82232de7631ebdaeb276cfdb88a`. Fresh Windows Local completion on that exact code-bearing commit passed in order: `pnpm run doctor`, ordinary `pnpm run bootstrap`, `pnpm run build`, and `pnpm run e2e:all`; the orchestrator reported J-01, J-02, J-08, J-12, J-15, and final `LOCAL_COMPLETION/all/pass`. Post-completion checks found zero AI7 Electron/Node processes, no new J-01 root, no remaining injector, and a clean worktree.
 - Checked the shared reuse surfaces rather than editing them: `e2e/run-all.mjs` and `.github/workflows/e2e.yml` are unchanged, no temporary issue diagnostic entered the repository, and `git diff --check` passes.
 - The original independent T2 review found zero Spec findings and zero hard Standards findings. The first locally complete unit was committed and pushed, and Draft pull request #180 now targets `dev`; it remains Draft. Its pull-request check suite records only skipped Route and matrix jobs with zero steps, not a Hosted Journey execution or paired Gate occurrence.
 
 ## What's next
 
-- Commit the bounded-close follow-up, then run a fresh exact-head Windows `doctor → bootstrap → build → e2e:all`, verify zero residual process/root, push the same Draft PR, and record the local evidence.
-- After that, obtain the Owner's contemporaneous account-wide Actions-minute fact. If sufficient, re-resolve the exact target authority, make only PR #180 Ready for its one paired Hosted occurrence, inspect the actual usage delta, and integrate only after both platforms pass.
+- Push the bounded-close follow-up and this checkpoint to the same Draft PR #180. Then obtain the Owner's contemporaneous account-wide Actions-minute fact; if sufficient, re-resolve the exact target authority, make only PR #180 Ready for its one paired Hosted occurrence, inspect the actual usage delta, and integrate only after both platforms pass.
 
 ## Key decisions
 
@@ -34,5 +33,5 @@
 ## Safe Resume Prompt
 
 ```text
-Resume Issue #178 in its isolated worktree. Commit the bounded-close follow-up, run fresh exact-head Windows doctor, ordinary bootstrap, build, and e2e:all, then verify zero residual processes/root and push Draft PR #180. Do not make it Ready until the Owner supplies the contemporaneous account-wide Actions-minute fact. If sufficient, re-resolve `dev` authority and run exactly one normal paired Hosted occurrence.
+Resume Issue #178 with Draft PR #180. Confirm the bounded-close follow-up and checkpoint are pushed, but do not make the PR Ready until the Owner supplies the contemporaneous account-wide Actions-minute fact. If sufficient, re-resolve `dev` authority and run exactly one normal paired Hosted occurrence; integrate only after both platforms pass.
 ```
