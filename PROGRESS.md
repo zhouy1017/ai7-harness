@@ -4,7 +4,7 @@
 
 - Issue #178 remains isolated in `C:\Users\Chooo\Playground\ai7-harness-worktrees\issue-178-main-crash` on `fix/178-electron-main-crash`, based on exact `dev@37347d6962984618732ca3aeb251dd100b430009`. Draft pull request #180 targets `dev`.
 - The accepted product repair remains the cached-live-`webContents.id` lifecycle change in `src/main/application.ts`. The public J-01 observed-bug regression names Issue #178, creates two production-shaped Book windows, closes only the secondary target, proves the surviving workspace completes public IPC, and reopens the closed Book with unique routing.
-- Pushed head `b9d41240e5e1dbd246b9c537493af92ff5b925e3` already contains the product repair, the public regression, fixed `window-close` failure classification, bounded Browser close/launch ownership, and prior Windows completion/review evidence.
+- Pushed implementation head `181ef6af0faa28f2b24718d3d8bde0be93badf0e` contains the product repair, public regression, fixed `window-close` failure classification, bounded Browser close/launch ownership, and exact product-carrier/CDP lifecycle repair. PR #180's body records the current evidence and remains Draft.
 - PR #180 transitioned Ready exactly once from that head. Hosted run `33606591737` attempt 1 had routing success (`100171881284`), macOS J-01 failure (`100171926813`), and Windows cancellation by matrix fail-fast (`100171926884`). macOS failed after about 106.43 seconds; Windows was making normal J-01 progress when cancelled. PR #180 was immediately returned to Draft and the failed occurrence was not rerun.
 - Fixed-only local timing diagnosis locked the macOS failure to launch 42: launch 41 had durably acknowledged the initial import, launch 42 attached, and the 30-second `reimport-uncertain-landing` wait began at the same boundary as the Hosted failure. The prior `renderer-ready` label was stale because target attachment accepted the first single page even when it was still `about:blank`, and later evaluation errors were retried without advancing the admitted location.
 - J-01 now admits a renderer only after the CDP target has the exact built product `file:` URL and the renderer exposes both the preload `window.ai7` carrier and `#screen`. The Issue #178 multi-window manager likewise ignores transient blank targets and returns only validated product renderers. A deterministic temporary probe first reproduced the old early blank-target attachment, then passed exact-product attachment and Browser-disconnect rejection; the probe is deleted.
@@ -13,13 +13,13 @@
 - The exact landing boundary now advances to the already admitted `landing` location before the reimport wait. No raw exception, stack, DOM, IPC/SQL/manuscript content, arbitrary child output, screenshot, trace, video, or artifact is retained or emitted.
 - The binding Change Brief amendment explicitly prohibits a new production `uncaughtException` policy. A temporary local exploration of that direction was rejected and fully removed; `src/main/application.ts` has no uncommitted delta beyond the already pushed stable-ID fix, and no new product interface, store, process, dependency, workflow, Journey, or global crash policy exists.
 - All issue-specific debug instrumentation and deterministic probes are deleted. `git diff --check`, Node syntax validation, and the pinned build pass. The final controller candidate source hash is `4aef52dd3c0fad38e1dd3bf1aaf95195fe00639c`; repeated complete J-01 runs pass after the transient carrier correction. Independent final review reports zero hard Spec/correctness findings and zero hard Standards findings.
-- Fresh Windows pre-commit completion on the final candidate passed in order with pinned Node 24.18.1 / pnpm 11.24.0: `doctor`, ordinary `bootstrap`, `build`, and `e2e:all`. J-01, J-02, J-08, J-12, J-15, and `LOCAL_COMPLETION/all/pass` completed. Post-run checks found no matching AI7 Electron/Node process and no newly retained J-01 root.
+- Fresh Windows exact-head completion on clean implementation commit `181ef6af0faa28f2b24718d3d8bde0be93badf0e` passed in order with pinned Node 24.18.1 / pnpm 11.24.0: `doctor`, ordinary `bootstrap`, `build`, and `e2e:all`. J-01, J-02, J-08, J-12, J-15, and `LOCAL_COMPLETION/all/pass` completed. Post-run checks found no matching AI7 Electron/Node process, no newly retained J-01 root, and a clean worktree.
 - The Owner's latest account-wide Actions usage observation is `40 / 3000` minutes. It records and is consumed by the already completed Ready/Gate occurrence; it is not authorization for another Ready transition.
 
 ## What's next
 
-- Commit the reviewed controller repair and this checkpoint, rerun the exact-head Windows completion sequence from a clean worktree, push while PR #180 remains Draft, and update the PR evidence.
-- Before any subsequent Ready transition, obtain a new contemporaneous Owner-observed account-wide Actions-minutes fact. Do not rerun Hosted CI unchanged.
+- Keep PR #180 Draft. Before any subsequent Ready transition, obtain a new contemporaneous Owner-observed account-wide Actions-minutes fact, refresh exact `origin/dev`, and confirm the clean reviewed head and absence of duplicate runs. Do not rerun Hosted CI unchanged.
+- If the next single paired Gate is green, inspect its exact jobs, post-run account meter delta, and duplicate count before integration; otherwise return Draft and diagnose the one fixed failure without iterative Hosted reruns.
 
 ## Key decisions
 
@@ -38,5 +38,5 @@
 ## Safe Resume Prompt
 
 ```text
-Resume Issue #178 on Draft PR #180. Commit the reviewed J-01 carrier/lifecycle repair, run fresh exact-head Windows doctor -> ordinary bootstrap -> build -> e2e:all, push and update evidence while Draft. Do not make Ready or rerun Hosted CI until the Owner supplies a new contemporaneous account-wide Actions-minutes fact after run 33606591737; 40/3000 is already consumed.
+Resume Issue #178 on Draft PR #180 after pushed implementation head 181ef6af0faa28f2b24718d3d8bde0be93badf0e passed exact-head Windows doctor -> ordinary bootstrap -> build -> e2e:all and independent review. Do not make Ready or rerun Hosted CI until the Owner supplies a new contemporaneous account-wide Actions-minutes fact after run 33606591737; 40/3000 is already consumed. Then refresh origin/dev and permit only one normal paired occurrence.
 ```
