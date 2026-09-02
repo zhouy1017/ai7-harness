@@ -592,6 +592,7 @@ async function main() {
   let credentialReferenceForCleanup;
   let productCredentialCleanupSucceeded = false;
   let credentialCleanupFailure;
+  let cleanupFailure;
   let cleanupPromise;
   let finalCleanupRequested = false;
   let activeBrowserClose;
@@ -635,6 +636,16 @@ async function main() {
         : await ownedAcquisition.catch(() => undefined));
     await closeBrowserBounded(acquiredBrowser);
   };
+  const closeOwnedBrowserForCleanup = async () => {
+    try {
+      await closeOwnedBrowser();
+      return true;
+    } catch (error) {
+      runnerLifecycleIncomplete = true;
+      cleanupFailure ??= error;
+      return false;
+    }
+  };
   const removeSyntheticCredentialThroughProduct = async () => {
     if (managerForCleanup === undefined) return false;
     const renderers = await managerForCleanup.list();
@@ -673,18 +684,20 @@ async function main() {
           credentialCleanupFailure ??= error;
         }
         if (!productCredentialCleanupSucceeded && launchForCleanup !== undefined && runRoot !== undefined) {
-          await closeOwnedBrowser();
-          try {
-            const cleanupManager = await launchForCleanup();
-            const [cleanupRenderer] = await waitForRendererCount(cleanupManager, 1, 'credential-cleanup-window');
-            await waitFor(cleanupRenderer, `document.querySelector('[data-screen="landing"]')`, 'credential-cleanup-ready');
-            productCredentialCleanupSucceeded = await removeSyntheticCredentialThroughProduct();
-          } catch (error) {
-            credentialCleanupFailure ??= error;
+          const closedForProductRetry = await closeOwnedBrowserForCleanup();
+          if (closedForProductRetry) {
+            try {
+              const cleanupManager = await launchForCleanup();
+              const [cleanupRenderer] = await waitForRendererCount(cleanupManager, 1, 'credential-cleanup-window');
+              await waitFor(cleanupRenderer, `document.querySelector('[data-screen="landing"]')`, 'credential-cleanup-ready');
+              productCredentialCleanupSucceeded = await removeSyntheticCredentialThroughProduct();
+            } catch (error) {
+              credentialCleanupFailure ??= error;
+            }
           }
         }
         if (!productCredentialCleanupSucceeded) {
-          await closeOwnedBrowser();
+          await closeOwnedBrowserForCleanup();
           if (credentialReferenceForCleanup === undefined && dataRootForCleanup !== undefined && runRoot !== undefined) {
             try {
               const recovered = await recoverSyntheticCredentialCleanupState(dataRootForCleanup, runRoot);
@@ -714,19 +727,28 @@ async function main() {
           }
         }
       }
-      await closeOwnedBrowser();
+      await closeOwnedBrowserForCleanup();
       const ownedLoopback = loopback ?? (loopbackAcquisition === undefined ? undefined : await loopbackAcquisition.catch(() => undefined));
-      await ownedLoopback?.close().catch(() => undefined);
+      try {
+        await ownedLoopback?.close();
+      } catch (error) {
+        cleanupFailure ??= error;
+      }
       loopback = undefined;
       const ownedRoot = runRoot ?? (runRootAcquisition === undefined ? undefined : await runRootAcquisition.catch(() => undefined));
       if (ownedRoot !== undefined) {
-        requireJourney(tempParent !== undefined && dirname(ownedRoot) === tempParent && basename(ownedRoot).startsWith('ai7-j12-e2e-') && (await realpath(ownedRoot)) === ownedRoot, 'cleanup-target');
-        await rm(ownedRoot, { recursive: true, force: true });
-        runRoot = undefined;
+        try {
+          requireJourney(tempParent !== undefined && dirname(ownedRoot) === tempParent && basename(ownedRoot).startsWith('ai7-j12-e2e-') && (await realpath(ownedRoot)) === ownedRoot, 'cleanup-target');
+          await rm(ownedRoot, { recursive: true, force: true });
+          runRoot = undefined;
+        } catch (error) {
+          cleanupFailure ??= error;
+        }
       }
       if (credentialMutationReached && !productCredentialCleanupSucceeded) {
         throw credentialCleanupFailure ?? new Error('J-12/credential-cleanup-failed');
       }
+      if (cleanupFailure !== undefined) throw cleanupFailure;
     })();
     return cleanupPromise;
   };

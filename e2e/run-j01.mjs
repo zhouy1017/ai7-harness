@@ -1688,7 +1688,11 @@ async function main() {
   let activeBrowserClose;
   const closeBrowserBounded = async (ownedBrowser) => {
     if (activeBrowserClose !== undefined) return activeBrowserClose;
-    if (ownedBrowser === undefined || !ownedBrowser.isConnected()) return;
+    if (ownedBrowser === undefined) return;
+    if (!ownedBrowser.isConnected()) {
+      browserLifecycleIncomplete = true;
+      throw BROWSER_DISCONNECTED;
+    }
     const closePromise = ownedBrowser.close();
     closePromise.catch(() => undefined);
     let timeout;
@@ -2679,10 +2683,11 @@ async function main() {
       if (
         isBrowserLaunchTimeout(error) ||
         reimportTamperProductCarrierAttached ||
-        (browser !== undefined && error !== BROWSER_DISCONNECTED)
+        error !== BROWSER_DISCONNECTED
       ) {
         throw error;
       }
+      browser = undefined;
       reimportTamperRejected = true;
     }
     await closeOwnedBrowser();
