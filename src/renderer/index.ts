@@ -309,14 +309,16 @@ function productIsVisibleAndReady(): boolean {
   return document.visibilityState === 'visible' && document.documentElement.dataset['ai7ProductReady'] === 'true';
 }
 
-function waitForVisibleProductReady(): Promise<void> {
-  if (productIsVisibleAndReady()) return Promise.resolve();
+function waitForVisibleProductReady(signal: AbortSignal): Promise<boolean> {
+  if (signal.aborted) return Promise.resolve(false);
+  if (productIsVisibleAndReady()) return Promise.resolve(true);
   return new Promise((resolve) => {
     const finish = (): void => {
-      if (!productIsVisibleAndReady()) return;
+      if (!signal.aborted && !productIsVisibleAndReady()) return;
       observer.disconnect();
       document.removeEventListener('visibilitychange', finish);
-      resolve();
+      signal.removeEventListener('abort', finish);
+      resolve(!signal.aborted);
     };
     const observer = new MutationObserver(finish);
     observer.observe(document.documentElement, {
@@ -324,25 +326,82 @@ function waitForVisibleProductReady(): Promise<void> {
       attributeFilter: ['data-ai7-product-ready'],
     });
     document.addEventListener('visibilitychange', finish);
+    signal.addEventListener('abort', finish, { once: true });
     finish();
   });
 }
 
-function nextVisibleFrame(): Promise<void> {
-  return new Promise((resolve) => requestAnimationFrame(() => resolve()));
+function nextVisibleFrame(signal: AbortSignal): Promise<boolean> {
+  if (signal.aborted) return Promise.resolve(false);
+  return new Promise((resolve) => {
+    let frameId = 0;
+    const finish = (presented: boolean): void => {
+      signal.removeEventListener('abort', abort);
+      if (!presented) cancelAnimationFrame(frameId);
+      resolve(presented);
+    };
+    const abort = (): void => finish(false);
+    signal.addEventListener('abort', abort, { once: true });
+    frameId = requestAnimationFrame(() => finish(true));
+    if (signal.aborted) abort();
+  });
 }
 
 async function acknowledgeCompletionAfterPaint(result: ImportCommitProjection): Promise<boolean> {
-  await waitForVisibleProductReady();
-  await nextVisibleFrame();
-  await nextVisibleFrame();
-  const presentedCommitId = screen.querySelector<HTMLElement>('[data-import-commit-id]')?.dataset['importCommitId'];
-  if (
-    !productIsVisibleAndReady() ||
-    screen.dataset['screen'] !== 'imported' ||
-    presentedCommitId !== result.commitId
-  ) {
+  const presentedCommit = screen.querySelector<HTMLElement>('[data-import-commit-id]');
+  if (screen.dataset['screen'] !== 'imported' || presentedCommit?.dataset['importCommitId'] !== result.commitId) {
     return false;
+  }
+  const presentation = new AbortController();
+  const presentationObserver = new MutationObserver(() => presentation.abort());
+  presentationObserver.observe(screen, {
+    attributes: true,
+    attributeFilter: ['data-screen'],
+    childList: true,
+  });
+  presentationObserver.observe(presentedCommit, {
+    attributes: true,
+    attributeFilter: ['data-import-commit-id'],
+  });
+  try {
+    while (true) {
+      if (!await waitForVisibleProductReady(presentation.signal)) return false;
+      let eligibilityChanged = false;
+      const framePair = new AbortController();
+      const recordEligibilityChange = (): void => {
+        eligibilityChanged = true;
+        framePair.abort();
+      };
+      const abortFramePair = (): void => framePair.abort();
+      const readinessObserver = new MutationObserver(recordEligibilityChange);
+      document.addEventListener('visibilitychange', recordEligibilityChange);
+      presentation.signal.addEventListener('abort', abortFramePair, { once: true });
+      readinessObserver.observe(document.documentElement, {
+        attributes: true,
+        attributeFilter: ['data-ai7-product-ready'],
+      });
+      if (presentation.signal.aborted) abortFramePair();
+      if (!productIsVisibleAndReady()) recordEligibilityChange();
+      let twoFramesPresented = false;
+      try {
+        twoFramesPresented = await nextVisibleFrame(framePair.signal) &&
+          await nextVisibleFrame(framePair.signal);
+      } finally {
+        if (readinessObserver.takeRecords().length > 0) recordEligibilityChange();
+        readinessObserver.disconnect();
+        document.removeEventListener('visibilitychange', recordEligibilityChange);
+        presentation.signal.removeEventListener('abort', abortFramePair);
+      }
+      if (presentationObserver.takeRecords().length > 0) presentation.abort();
+      if (presentation.signal.aborted) return false;
+      const currentCommit = screen.querySelector<HTMLElement>('[data-import-commit-id]');
+      if (screen.dataset['screen'] !== 'imported' || currentCommit !== presentedCommit ||
+        currentCommit.dataset['importCommitId'] !== result.commitId) return false;
+      if (eligibilityChanged || !twoFramesPresented || !productIsVisibleAndReady()) continue;
+      break;
+    }
+  } finally {
+    presentationObserver.disconnect();
   }
   document.documentElement.dataset['ai7ImportCompletionPainted'] = 'true';
   try {

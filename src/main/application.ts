@@ -2202,6 +2202,7 @@ export async function runApplication(): Promise<void> {
           preload: resolve(__dirname, 'preload.cjs'),
         },
       });
+      const webContentsId = window.webContents.id;
       const owned: OwnedRendererWindow = {
         window,
         bookId: null,
@@ -2220,7 +2221,7 @@ export async function runApplication(): Promise<void> {
         restorationBindings: new Map(),
         restorationBindingCount: 0,
       };
-      ownedWindows.set(window.webContents.id, owned);
+      ownedWindows.set(webContentsId, owned);
       if (route) {
         requireDesktop(!bookWindows.has(route.bookId), 'AI7_WORKBENCH_DUPLICATE_BOOK');
         assignRoute(owned, route);
@@ -2237,7 +2238,7 @@ export async function runApplication(): Promise<void> {
       });
       window.on('closed', () => {
         releaseOwnedClaims(owned);
-        ownedWindows.delete(window.webContents.id);
+        ownedWindows.delete(webContentsId);
         if (owned.bookId !== null && bookWindows.get(owned.bookId) === owned) bookWindows.delete(owned.bookId);
       });
       const firstPaint = new Promise<void>((resolvePaint, reject) => {

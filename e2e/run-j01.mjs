@@ -8,12 +8,22 @@ import { strToU8, zipSync } from 'fflate';
 import { installJourneyCancellationCleanup, reportJourneyFailure } from './controller.mjs';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
+const PRODUCT_RENDERER_URL = pathToFileURL(resolve(ROOT, 'dist', 'renderer', 'index.html')).href;
 const SAMPLE1_PATH = resolve(ROOT, 'SampleBooks', 'sample1.docx');
 const SAMPLE1_BYTES = 29_550;
 const SAMPLE1_SHA256 = 'b8a3dbde0aa8a1ec7265f9ae3fe47877759e7947c5ab69682cd0a8f424a8d483';
 const DEBUG_SELECTORS = new Set(['DEBUG', 'DEBUG_FILE', 'PWDEBUG', 'PWDEBUGIMPL']);
+const BROWSER_LAUNCH_TIMEOUT_MS = 35_000;
+const BROWSER_CLOSE_TIMEOUT_MS = 25_000;
+const BROWSER_LAUNCH_TIMEOUT = new Error('J-01/browser-launch-timeout');
+const BROWSER_CLOSE_TIMEOUT = new Error('J-01/browser-close-timeout');
+const BROWSER_DISCONNECTED = new Error('J-01/browser-disconnected');
+const RENDERER_CDP_FAILURE = new Error('J-01/renderer-cdp-response');
+const RENDERER_CDP_TIMEOUT = new Error('J-01/renderer-cdp-timeout');
+const RENDERER_SESSION_CLOSED = new Error('J-01/renderer-session-closed');
 let diagnosticLocation = 'entry';
 let electronExecutable;
+let browserLifecycleIncomplete = false;
 
 function at(location) {
   diagnosticLocation = location;
@@ -21,6 +31,47 @@ function at(location) {
 
 function requireJourney(condition, location) {
   if (!condition) throw new Error(`J-01/${location}`);
+}
+
+function createBrowserDisconnectBoundary(browser) {
+  let rejectDisconnected;
+  const disconnected = new Promise((_, reject) => {
+    rejectDisconnected = reject;
+  });
+  disconnected.catch(() => undefined);
+  const onDisconnected = () => rejectDisconnected(BROWSER_DISCONNECTED);
+  browser.once('disconnected', onDisconnected);
+  if (!browser.isConnected()) {
+    browser.off('disconnected', onDisconnected);
+    onDisconnected();
+  }
+  return async (operation) => {
+    operation.catch(() => undefined);
+    try {
+      return await Promise.race([operation, disconnected]);
+    } catch (error) {
+      if (!browser.isConnected()) throw BROWSER_DISCONNECTED;
+      throw error;
+    }
+  };
+}
+
+async function awaitCdpOperation(operation, deadline) {
+  operation.catch(() => undefined);
+  const remaining = deadline - Date.now();
+  requireJourney(remaining > 0, 'renderer-cdp-timeout');
+  let timeout;
+  try {
+    return await Promise.race([
+      operation,
+      new Promise((_, reject) => {
+        timeout = setTimeout(() => reject(RENDERER_CDP_TIMEOUT), remaining);
+        timeout.unref();
+      }),
+    ]);
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 function pathIsInside(parent, child) {
@@ -123,24 +174,39 @@ function productEnvironment(executable) {
 }
 
 async function attachRendererTarget(browser) {
-  const rootSession = await browser.newBrowserCDPSession();
   const deadline = Date.now() + 30_000;
+  const withBrowserConnection = createBrowserDisconnectBoundary(browser);
+  const rootSession = await awaitCdpOperation(
+    withBrowserConnection(browser.newBrowserCDPSession()),
+    deadline,
+  );
+  const sendRoot = (method, params = {}, operationDeadline = Date.now() + 30_000) =>
+    awaitCdpOperation(withBrowserConnection(rootSession.send(method, params)), operationDeadline);
   let pageTarget;
   while (Date.now() < deadline) {
-    const { targetInfos } = await rootSession.send('Target.getTargets');
+    const { targetInfos } = await sendRoot('Target.getTargets', {}, deadline);
     const pages = targetInfos.filter((target) => target.type === 'page');
-    if (pages.length === 1) {
+    requireJourney(pages.length <= 1, 'renderer-target-count');
+    const candidate = pages[0];
+    if (candidate?.url === PRODUCT_RENDERER_URL) {
       pageTarget = pages[0];
       break;
     }
-    requireJourney(pages.length === 0, 'renderer-target-count');
+    requireJourney(
+      candidate === undefined || candidate.url === '' || candidate.url === 'about:blank',
+      'renderer-target-url',
+    );
     await new Promise((resolveWait) => setTimeout(resolveWait, 50));
   }
   requireJourney(pageTarget, 'renderer-target-timeout');
-  const { sessionId } = await rootSession.send('Target.attachToTarget', {
-    targetId: pageTarget.targetId,
-    flatten: false,
-  });
+  const { sessionId } = await sendRoot(
+    'Target.attachToTarget',
+    {
+      targetId: pageTarget.targetId,
+      flatten: false,
+    },
+    deadline,
+  );
   let nextId = 1;
   const pending = new Map();
   rootSession.on('Target.receivedMessageFromTarget', ({ sessionId: incomingSessionId, message }) => {
@@ -155,16 +221,23 @@ async function attachRendererTarget(browser) {
     const completion = pending.get(response.id);
     if (!completion) return;
     pending.delete(response.id);
-    if (response.error) completion.reject(new Error('J-01/renderer-cdp-response'));
+    if (response.error) completion.reject(RENDERER_CDP_FAILURE);
     else completion.resolve(response.result);
   });
-  const send = async (method, params = {}) => {
+  rootSession.on('Target.detachedFromTarget', ({ sessionId: detachedSessionId }) => {
+    if (detachedSessionId !== sessionId) return;
+    for (const completion of pending.values()) completion.reject(RENDERER_SESSION_CLOSED);
+    pending.clear();
+  });
+  const send = async (method, params = {}, operationDeadline = Date.now() + 30_000) => {
     const id = nextId++;
+    const remaining = operationDeadline - Date.now();
+    requireJourney(remaining > 0, 'renderer-carrier-timeout');
     const response = new Promise((resolveResponse, rejectResponse) => {
       const timeout = setTimeout(() => {
         pending.delete(id);
-        rejectResponse(new Error('J-01/renderer-cdp-timeout'));
-      }, 30_000);
+        rejectResponse(RENDERER_CDP_TIMEOUT);
+      }, remaining);
       timeout.unref();
       pending.set(id, {
         resolve: (value) => {
@@ -177,20 +250,190 @@ async function attachRendererTarget(browser) {
         },
       });
     });
-    await rootSession.send('Target.sendMessageToTarget', {
+    const dispatch = sendRoot('Target.sendMessageToTarget', {
       sessionId,
       message: JSON.stringify({ id, method, params }),
-    });
-    return response;
+    }, operationDeadline);
+    const [, result] = await Promise.all([dispatch, withBrowserConnection(response)]);
+    return result;
   };
-  const evaluate = async (expression) => {
-    const response = await send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true });
+  const evaluate = async (expression, operationDeadline) => {
+    const response = await send(
+      'Runtime.evaluate',
+      { expression, awaitPromise: true, returnByValue: true },
+      operationDeadline,
+    );
     requireJourney(!response.exceptionDetails, 'renderer-evaluate');
     return response.result.value;
   };
-  await send('Runtime.enable');
-  at('renderer-ready');
-  return { evaluate };
+  await send('Runtime.enable', {}, deadline);
+  let latestCarrierError;
+  while (Date.now() < deadline) {
+    try {
+      if (await evaluate(
+        `location.href === ${JSON.stringify(PRODUCT_RENDERER_URL)} && typeof window.ai7 === 'object' && document.querySelector('#screen') !== null`,
+        deadline,
+      )) {
+        at('renderer-ready');
+        return { evaluate };
+      }
+      latestCarrierError = undefined;
+    } catch (error) {
+      if (
+        error === BROWSER_DISCONNECTED ||
+        error === RENDERER_CDP_TIMEOUT ||
+        error === RENDERER_SESSION_CLOSED
+      ) {
+        throw error;
+      }
+      latestCarrierError = error;
+    }
+    await new Promise((resolveWait) => setTimeout(resolveWait, 50));
+  }
+  if (latestCarrierError !== undefined) {
+    throw new Error('J-01/renderer-carrier-timeout', { cause: latestCarrierError });
+  }
+  throw new Error('J-01/renderer-carrier-timeout');
+}
+
+async function createRendererManager(browser) {
+  const rootDeadline = Date.now() + 30_000;
+  const withBrowserConnection = createBrowserDisconnectBoundary(browser);
+  const root = await awaitCdpOperation(
+    withBrowserConnection(browser.newBrowserCDPSession()),
+    rootDeadline,
+  );
+  const renderers = new Map();
+  const pending = new Map();
+  const detachedSessions = new Set();
+  let nextId = 1;
+  const sendRoot = (method, params = {}, deadline = Date.now() + 30_000) =>
+    awaitCdpOperation(withBrowserConnection(root.send(method, params)), deadline);
+  root.on('Target.receivedMessageFromTarget', ({ sessionId, message }) => {
+    let response;
+    try {
+      response = JSON.parse(message);
+    } catch {
+      return;
+    }
+    if (typeof response.id !== 'number') return;
+    const key = `${sessionId}:${response.id}`;
+    const completion = pending.get(key);
+    if (!completion) return;
+    pending.delete(key);
+    if (response.error) completion.reject(RENDERER_CDP_FAILURE);
+    else completion.resolve(response.result);
+  });
+  root.on('Target.detachedFromTarget', ({ sessionId }) => {
+    detachedSessions.add(sessionId);
+    for (const [key, completion] of pending) {
+      if (!key.startsWith(`${sessionId}:`)) continue;
+      pending.delete(key);
+      completion.reject(RENDERER_SESSION_CLOSED);
+    }
+  });
+  const attach = async (target) => {
+    if (renderers.has(target.targetId)) return renderers.get(target.targetId);
+    const attached = (async () => {
+      const carrierDeadline = Date.now() + 30_000;
+      const { sessionId } = await sendRoot('Target.attachToTarget', { targetId: target.targetId, flatten: false });
+      const send = async (method, params = {}, deadline = Date.now() + 30_000) => {
+        if (detachedSessions.has(sessionId)) throw RENDERER_SESSION_CLOSED;
+        const id = nextId++;
+        const key = `${sessionId}:${id}`;
+        const remaining = deadline - Date.now();
+        requireJourney(remaining > 0, 'renderer-carrier-timeout');
+        const response = new Promise((resolveResponse, rejectResponse) => {
+          const timeout = setTimeout(() => {
+            pending.delete(key);
+            rejectResponse(RENDERER_CDP_TIMEOUT);
+          }, remaining);
+          timeout.unref();
+          pending.set(key, {
+            resolve: (value) => {
+              clearTimeout(timeout);
+              resolveResponse(value);
+            },
+            reject: (error) => {
+              clearTimeout(timeout);
+              rejectResponse(error);
+            },
+          });
+        });
+        const dispatch = sendRoot('Target.sendMessageToTarget', {
+          sessionId,
+          message: JSON.stringify({ id, method, params }),
+        }, deadline);
+        const [, result] = await Promise.all([dispatch, withBrowserConnection(response)]);
+        return result;
+      };
+      const renderer = {
+        targetId: target.targetId,
+        evaluate: async (expression) => {
+          const response = await send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true });
+          requireJourney(!response.exceptionDetails, 'renderer-evaluate');
+          return response.result.value;
+        },
+      };
+      await send('Runtime.enable', {}, carrierDeadline);
+      let latestCarrierError;
+      while (Date.now() < carrierDeadline) {
+        try {
+          const response = await send('Runtime.evaluate', {
+            expression: `location.href === ${JSON.stringify(PRODUCT_RENDERER_URL)} && typeof window.ai7 === 'object' && document.querySelector('#screen') !== null`,
+            awaitPromise: true,
+            returnByValue: true,
+          }, carrierDeadline);
+          requireJourney(!response.exceptionDetails, 'renderer-evaluate');
+          if (response.result.value === true) return renderer;
+          latestCarrierError = undefined;
+        } catch (error) {
+          if (
+            error === BROWSER_DISCONNECTED ||
+            error === RENDERER_CDP_TIMEOUT ||
+            error === RENDERER_SESSION_CLOSED
+          ) {
+            throw error;
+          }
+          latestCarrierError = error;
+        }
+        await new Promise((resolveWait) => setTimeout(resolveWait, 50));
+      }
+      if (latestCarrierError !== undefined) {
+        throw new Error('J-01/renderer-carrier-timeout', { cause: latestCarrierError });
+      }
+      throw new Error('J-01/renderer-carrier-timeout');
+    })();
+    renderers.set(target.targetId, attached);
+    try {
+      return await attached;
+    } catch (error) {
+      renderers.delete(target.targetId);
+      throw error;
+    }
+  };
+  return {
+    list: async () => {
+      const pages = (await sendRoot('Target.getTargets')).targetInfos.filter((target) => target.type === 'page');
+      requireJourney(
+        pages.every((target) =>
+          target.url === PRODUCT_RENDERER_URL || target.url === '' || target.url === 'about:blank'),
+        'renderer-target-url',
+      );
+      return Promise.all(pages.filter((target) => target.url === PRODUCT_RENDERER_URL).map(attach));
+    },
+    close: (targetId) => sendRoot('Target.closeTarget', { targetId }),
+  };
+}
+
+async function waitForRendererCount(manager, count, location) {
+  const deadline = Date.now() + 30_000;
+  while (Date.now() < deadline) {
+    const renderers = await manager.list();
+    if (renderers.length === count) return renderers;
+    await new Promise((resolveWait) => setTimeout(resolveWait, 50));
+  }
+  throw new Error(`J-01/${location}`);
 }
 
 async function waitFor(renderer, expression, location) {
@@ -202,6 +445,15 @@ async function waitFor(renderer, expression, location) {
       latestEvaluationError = undefined;
       if (matched) return;
     } catch (error) {
+      if (
+        error === BROWSER_DISCONNECTED ||
+        error === RENDERER_CDP_FAILURE ||
+        error === RENDERER_CDP_TIMEOUT ||
+        error === RENDERER_SESSION_CLOSED
+      ) {
+        if (error === BROWSER_DISCONNECTED) browserLifecycleIncomplete = true;
+        throw error;
+      }
       latestEvaluationError = error;
     }
     await new Promise((resolveWait) => setTimeout(resolveWait, 50));
@@ -433,6 +685,7 @@ async function prepareManuscriptReimportReview(renderer, expectation) {
   } = expectation;
   requireJourney(start === 'landing' || start === 'target', `${scenario}-start`);
   if (start === 'landing') {
+    at('landing');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, `${scenario}-landing`);
     await clickExactButton(renderer, '导入稿件', `${scenario}-stage`);
     await waitFor(renderer, `document.querySelector('[data-screen="target"]')`, `${scenario}-target`);
@@ -923,6 +1176,7 @@ async function runJourney(
     editAfterCommit = exerciseEditor,
     stopAfterAcceptedReview = false,
     holdCompletionPaint = false,
+    diagnosticReviewLocation = 'review',
   } = options;
   const hasIdentityFinding = identityClass !== null;
   const expectedNonEffects = degraded
@@ -1006,7 +1260,7 @@ async function runJourney(
   }
   await clickExactButton(renderer, '确认书名并复核', 'review-click');
   await waitFor(renderer, `document.querySelector('[data-screen="review"]')`, 'review-screen');
-  at('review');
+  at(diagnosticReviewLocation);
   if (hasIdentityFinding) {
     await assertRenderer(
       renderer,
@@ -1069,7 +1323,7 @@ async function runJourney(
   );
   }
   if (start === 'accepted-review') {
-    at('review');
+    at(diagnosticReviewLocation);
     await assertRenderer(
       renderer,
       `document.querySelector('[data-screen="review"] [data-source-sha256]')?.textContent === ${JSON.stringify(sourceSha256)} && document.querySelector('[data-screen="review"] [data-source-bytes]')?.textContent === ${JSON.stringify(String(sourceBytes))} && Array.from(document.querySelectorAll('button')).some((button) => button.textContent === ${JSON.stringify(degraded ? '按上述降级方式新建图书并导入稿件' : '新建图书并导入稿件')} && !button.disabled)`,
@@ -1087,7 +1341,24 @@ async function runJourney(
   if (holdCompletionPaint) {
     await assertRenderer(
       renderer,
-      `(() => { let frameId = 0; globalThis.__ai7HeldCompletionFrames = []; globalThis.requestAnimationFrame = (callback) => { globalThis.__ai7HeldCompletionFrames.push(callback); frameId += 1; return frameId; }; return true; })()`,
+      `(() => {
+        let frameId = 0;
+        globalThis.__ai7HeldCompletionFrames = [];
+        globalThis.__ai7HeldCompletionOriginalAnimationFrame = globalThis.requestAnimationFrame.bind(globalThis);
+        globalThis.__ai7HeldCompletionOriginalCancelAnimationFrame = globalThis.cancelAnimationFrame.bind(globalThis);
+        globalThis.requestAnimationFrame = (callback) => {
+          frameId += 1;
+          globalThis.__ai7HeldCompletionFrames.push({ id: frameId, callback });
+          return frameId;
+        };
+        globalThis.cancelAnimationFrame = (cancelledId) => {
+          const frames = globalThis.__ai7HeldCompletionFrames;
+          const index = frames.findIndex((frame) => frame.id === cancelledId);
+          if (index >= 0) frames.splice(index, 1);
+          else globalThis.__ai7HeldCompletionOriginalCancelAnimationFrame(cancelledId);
+        };
+        return true;
+      })()`,
       'completion-paint-held',
     );
   }
@@ -1415,7 +1686,12 @@ async function main() {
   const { createCanonicalExternalDataRoot, ensureCanonicalDataDirectory } = await import(
     pathToFileURL(dataRootEntry).href
   );
-  const { chromium } = await import('playwright-core');
+  const {
+    chromium,
+    errors: { TimeoutError: PlaywrightTimeoutError },
+  } = await import('playwright-core');
+  const isBrowserLaunchTimeout = (error) =>
+    error === BROWSER_LAUNCH_TIMEOUT || error instanceof PlaywrightTimeoutError;
   const tempParent = await realpath(tmpdir());
   const checkoutRoot = await realpath(ROOT);
   requireJourney(
@@ -1426,31 +1702,67 @@ async function main() {
   let runRootAcquisition;
   let browser;
   let browserAcquisition;
+  let activeBrowserClose;
+  const closeBrowserBounded = async (ownedBrowser) => {
+    if (activeBrowserClose !== undefined) return activeBrowserClose;
+    if (ownedBrowser === undefined) return;
+    if (!ownedBrowser.isConnected()) {
+      browserLifecycleIncomplete = true;
+      throw BROWSER_DISCONNECTED;
+    }
+    const closePromise = ownedBrowser.close();
+    closePromise.catch(() => undefined);
+    let timeout;
+    const boundedClose = Promise.race([
+      closePromise,
+      new Promise((_, reject) => {
+        timeout = setTimeout(() => {
+          reject(BROWSER_CLOSE_TIMEOUT);
+        }, BROWSER_CLOSE_TIMEOUT_MS);
+      }),
+    ]);
+    activeBrowserClose = boundedClose;
+    try {
+      await boundedClose;
+    } catch (error) {
+      browserLifecycleIncomplete = true;
+      throw error;
+    } finally {
+      clearTimeout(timeout);
+      if (activeBrowserClose === boundedClose) activeBrowserClose = undefined;
+    }
+  };
   const closeOwnedBrowser = async () => {
-    const ownedBrowser =
-      browser ??
-      (browserAcquisition === undefined
-        ? undefined
-        : await browserAcquisition.catch(() => undefined));
-    await ownedBrowser?.close().catch(() => undefined);
+    const ownedBrowser = browser;
+    const ownedAcquisition = browserAcquisition;
     browser = undefined;
+    browserAcquisition = undefined;
+    const acquiredBrowser =
+      ownedBrowser ??
+      (ownedAcquisition === undefined
+        ? undefined
+        : await ownedAcquisition.catch(() => undefined));
+    await closeBrowserBounded(acquiredBrowser);
   };
   const cancellation = installJourneyCancellationCleanup(async () => {
-    await closeOwnedBrowser();
-    const ownedRoot =
-      runRoot ??
-      (runRootAcquisition === undefined
-        ? undefined
-        : await runRootAcquisition.catch(() => undefined));
-    if (ownedRoot !== undefined) {
-      requireJourney(
-        dirname(ownedRoot) === tempParent &&
-          basename(ownedRoot).startsWith('ai7-j01-e2e-') &&
-          (await realpath(ownedRoot)) === ownedRoot,
-        'cleanup-target',
-      );
-      await rm(ownedRoot, { recursive: true, force: true });
-      runRoot = undefined;
+    try {
+      await closeOwnedBrowser();
+    } finally {
+      const ownedRoot =
+        runRoot ??
+        (runRootAcquisition === undefined
+          ? undefined
+          : await runRootAcquisition.catch(() => undefined));
+      if (ownedRoot !== undefined) {
+        requireJourney(
+          dirname(ownedRoot) === tempParent &&
+            basename(ownedRoot).startsWith('ai7-j01-e2e-') &&
+            (await realpath(ownedRoot)) === ownedRoot,
+          'cleanup-target',
+        );
+        await rm(ownedRoot, { recursive: true, force: true });
+        runRoot = undefined;
+      }
     }
   }, closeOwnedBrowser);
   try {
@@ -1572,7 +1884,7 @@ async function main() {
       );
       at('launch');
       cancellation.throwIfRequested();
-      browserAcquisition = chromium.launch({
+      const launchPromise = chromium.launch({
         executablePath: executable,
         headless: false,
         ignoreDefaultArgs: true,
@@ -1580,13 +1892,42 @@ async function main() {
         env: productEnvironment(executable),
         timeout: 30_000,
       });
-      browser = await browserAcquisition;
+      launchPromise.catch(() => undefined);
+      let launchTimeout;
+      const acquisition = Promise.race([
+        launchPromise,
+        new Promise((_, reject) => {
+          launchTimeout = setTimeout(() => {
+            reject(BROWSER_LAUNCH_TIMEOUT);
+          }, BROWSER_LAUNCH_TIMEOUT_MS);
+        }),
+      ]);
+      browserAcquisition = acquisition;
+      try {
+        browser = await acquisition;
+      } catch (error) {
+        if (isBrowserLaunchTimeout(error)) browserLifecycleIncomplete = true;
+        throw error;
+      } finally {
+        clearTimeout(launchTimeout);
+        if (browserAcquisition === acquisition) browserAcquisition = undefined;
+      }
       cancellation.throwIfRequested();
       return attachRendererTarget(browser);
     };
     const closeProduct = async () => {
-      await browser.close();
+      at('window-close');
+      const ownedBrowser = browser;
       browser = undefined;
+      browserAcquisition = undefined;
+      if (ownedBrowser?.isConnected() !== true) browserLifecycleIncomplete = true;
+      requireJourney(ownedBrowser?.isConnected() === true, 'browser-close-connection');
+      try {
+        await closeBrowserBounded(ownedBrowser);
+      } catch (error) {
+        if (ownedBrowser.isConnected() && browser === undefined) browser = ownedBrowser;
+        throw error;
+      }
     };
     const sample1Expectation = {
       sourceSha256: SAMPLE1_SHA256,
@@ -1621,8 +1962,154 @@ async function main() {
       degraded: false,
     };
 
+    let renderer;
+    const runIssue178WindowCloseRegression = async () => {
+      // Issue #178 / nearest supported Journey J-01: closing one Book workspace must leave another
+      // workspace usable and let the closed Book reopen with unique routing, without a JavaScript Error.
+      at('window-close');
+      const windowCloseRoot = await createCanonicalExternalDataRoot(resolve(runRoot, 'window-close-data'), checkoutRoot);
+      renderer = await launchProduct({ dataRoot: windowCloseRoot });
+      at('window-close');
+      await waitFor(
+        renderer,
+        `document.documentElement.dataset.ai7ProductReady === 'true' && document.querySelector('[data-screen="landing"]')`,
+        'issue-178-product-ready',
+      );
+      const windowCloseBooks = await renderer.evaluate(`(async()=>{
+        const createBook = async (title, internalNumber) => {
+          const review = await window.ai7.prepareBookCreation({title, internalNumber});
+          const committed = await window.ai7.commitBookCreation({...review.proposed, reviewDigest:review.reviewDigest});
+          await window.ai7.leaveBookWorkbench();
+          return committed.overview.book.bookId;
+        };
+        return {
+          survivingBookId: await createBook('窗口关闭存活图书', 'WINDOW-CLOSE-SURVIVOR'),
+          closedBookId: await createBook('窗口关闭目标图书', 'WINDOW-CLOSE-TARGET'),
+        };
+      })()`);
+      requireJourney(
+        /^[0-9a-f-]{36}$/i.test(windowCloseBooks?.survivingBookId ?? '') &&
+          /^[0-9a-f-]{36}$/i.test(windowCloseBooks?.closedBookId ?? '') &&
+          windowCloseBooks.survivingBookId !== windowCloseBooks.closedBookId,
+        'issue-178-two-book-identities',
+      );
+      const openedSurvivingBook = await renderer.evaluate(
+        `window.ai7.openBookWorkbench({kind:'book',bookId:${JSON.stringify(windowCloseBooks.survivingBookId)}})`,
+      );
+      requireJourney(
+        openedSurvivingBook?.target === 'requesting-window' &&
+          openedSurvivingBook.route?.kind === 'book' &&
+          openedSurvivingBook.route.bookId === windowCloseBooks.survivingBookId,
+        'issue-178-open-surviving-book-workspace',
+      );
+      const openedSecondBook = await renderer.evaluate(
+        `window.ai7.openBookWorkbench({kind:'book',bookId:${JSON.stringify(windowCloseBooks.closedBookId)}})`,
+      );
+      requireJourney(
+        openedSecondBook?.target === 'new-window' &&
+          openedSecondBook.route?.kind === 'book' &&
+          openedSecondBook.route.bookId === windowCloseBooks.closedBookId,
+        'issue-178-open-secondary-book-workspace',
+      );
+      const windowManager = await createRendererManager(browser);
+      const twoBookWindows = await waitForRendererCount(windowManager, 2, 'issue-178-two-book-windows');
+      const initialRoutes = await Promise.all(
+        twoBookWindows.map((item) => item.evaluate(`window.ai7.getBookWorkbenchRoute()`)),
+      );
+      requireJourney(
+        initialRoutes.filter((route) => route?.kind === 'book' && route.bookId === windowCloseBooks.survivingBookId).length === 1 &&
+          initialRoutes.filter((route) => route?.kind === 'book' && route.bookId === windowCloseBooks.closedBookId).length === 1,
+        'issue-178-initial-unique-routes',
+      );
+      const initialSurvivingRenderer = twoBookWindows[
+        initialRoutes.findIndex((route) => route?.kind === 'book' && route.bookId === windowCloseBooks.survivingBookId)
+      ];
+      const secondaryRenderer = twoBookWindows[
+        initialRoutes.findIndex((route) => route?.kind === 'book' && route.bookId === windowCloseBooks.closedBookId)
+      ];
+      requireJourney(
+        initialSurvivingRenderer !== undefined &&
+          secondaryRenderer !== undefined &&
+          initialSurvivingRenderer.targetId !== secondaryRenderer.targetId,
+        'issue-178-initial-unique-targets',
+      );
+      requireJourney((await windowManager.close(secondaryRenderer.targetId)).success === true, 'issue-178-close-secondary-target');
+      const [survivingRenderer] = await waitForRendererCount(windowManager, 1, 'issue-178-one-book-window');
+      requireJourney(
+        survivingRenderer.targetId === initialSurvivingRenderer.targetId,
+        'issue-178-surviving-target',
+      );
+      const survivingRoundTrip = await survivingRenderer.evaluate(
+        `(async()=>({books:await window.ai7.listBooks({after:null}),route:await window.ai7.getBookWorkbenchRoute()}))()`,
+      );
+      requireJourney(
+        Array.isArray(survivingRoundTrip?.books?.items) &&
+          survivingRoundTrip.books.items.some((book) => book.bookId === windowCloseBooks.survivingBookId) &&
+          survivingRoundTrip.books.items.some((book) => book.bookId === windowCloseBooks.closedBookId) &&
+          survivingRoundTrip.route?.kind === 'book' &&
+          survivingRoundTrip.route.bookId === windowCloseBooks.survivingBookId,
+        'issue-178-surviving-workspace-ipc',
+      );
+      const reopenedSecondBook = await survivingRenderer.evaluate(
+        `window.ai7.openBookWorkbench({kind:'book',bookId:${JSON.stringify(windowCloseBooks.closedBookId)}})`,
+      );
+      requireJourney(
+        reopenedSecondBook?.target === 'new-window' &&
+          reopenedSecondBook.route?.kind === 'book' &&
+          reopenedSecondBook.route.bookId === windowCloseBooks.closedBookId,
+        'issue-178-reopen-closed-book',
+      );
+      const reopenedBookWindows = await waitForRendererCount(windowManager, 2, 'issue-178-reopened-two-book-windows');
+      const reopenedRoutes = await Promise.all(
+        reopenedBookWindows.map((item) => item.evaluate(`window.ai7.getBookWorkbenchRoute()`)),
+      );
+      const retainedSurvivingRenderer = reopenedBookWindows[
+        reopenedRoutes.findIndex((route) => route?.kind === 'book' && route.bookId === windowCloseBooks.survivingBookId)
+      ];
+      const reopenedRenderer = reopenedBookWindows[
+        reopenedRoutes.findIndex((route) => route?.kind === 'book' && route.bookId === windowCloseBooks.closedBookId)
+      ];
+      requireJourney(
+        retainedSurvivingRenderer !== undefined &&
+          reopenedRenderer !== undefined &&
+          retainedSurvivingRenderer.targetId !== reopenedRenderer.targetId,
+        'issue-178-unique-reopened-targets',
+      );
+      const [retainedSurvivingRoute, reopenedRoute] = await Promise.all([
+        retainedSurvivingRenderer.evaluate(`window.ai7.getBookWorkbenchRoute()`),
+        reopenedRenderer.evaluate(`window.ai7.getBookWorkbenchRoute()`),
+      ]);
+      requireJourney(
+        retainedSurvivingRoute?.kind === 'book' &&
+          retainedSurvivingRoute.bookId === windowCloseBooks.survivingBookId &&
+          reopenedRoute?.kind === 'book' &&
+          reopenedRoute.bookId === windowCloseBooks.closedBookId,
+        'issue-178-unique-reopened-route',
+      );
+      requireJourney(
+        (await windowManager.close(reopenedRenderer.targetId)).success === true,
+        'issue-178-close-reopened-secondary-target',
+      );
+      const [finalSurvivingRenderer] = await waitForRendererCount(
+        windowManager,
+        1,
+        'issue-178-final-one-book-window',
+      );
+      requireJourney(
+        finalSurvivingRenderer.targetId === retainedSurvivingRenderer.targetId,
+        'issue-178-final-surviving-target',
+      );
+      const finalSurvivingRoute = await finalSurvivingRenderer.evaluate(`window.ai7.getBookWorkbenchRoute()`);
+      requireJourney(
+        finalSurvivingRoute?.kind === 'book' &&
+          finalSurvivingRoute.bookId === windowCloseBooks.survivingBookId,
+        'issue-178-final-surviving-route',
+      );
+      await closeProduct();
+    };
+
     const emptyBookRoot = await createCanonicalExternalDataRoot(resolve(runRoot, 'empty-book-first-import-data'), checkoutRoot);
-    let renderer = await launchProduct({ dataRoot: emptyBookRoot, pickerPath: docx });
+    renderer = await launchProduct({ dataRoot: emptyBookRoot, pickerPath: docx });
     const populatedBookId = await runEmptyBookFirstImport(renderer, sample1Expectation, async ({ bookId, title }) => {
       await closeProduct();
       const relaunched = await launchProduct({ dataRoot: emptyBookRoot });
@@ -2201,23 +2688,26 @@ async function main() {
     await closeProduct();
 
     let reimportTamperRejected = false;
+    let reimportTamperProductCarrierAttached = false;
     try {
       renderer = await launchProduct({
         dataRoot: reimportPagedRoot,
         importControl: 'tamper-reimport-proof-before-validation',
       });
+      reimportTamperProductCarrierAttached = true;
       await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady === 'true'`, 'reimport-tamper-must-not-start');
-    } catch {
-      reimportTamperRejected = true;
-    }
-    if (browser) {
-      try {
-        await browser.close();
-      } catch {
-        // The fail-closed startup may already have disconnected the product.
+    } catch (error) {
+      if (
+        isBrowserLaunchTimeout(error) ||
+        reimportTamperProductCarrierAttached ||
+        error !== BROWSER_DISCONNECTED
+      ) {
+        throw error;
       }
       browser = undefined;
+      reimportTamperRejected = true;
     }
+    await closeOwnedBrowser();
     requireJourney(reimportTamperRejected, 'reimport-tamper-startup-fail-closed');
 
     const reimportBeforeCommitRoot = await createCanonicalExternalDataRoot(
@@ -2543,15 +3033,22 @@ async function main() {
       `document.querySelector('.recovery-notice')?.textContent.includes('不会从原路径读取或替换暂存内容')`,
       'path-loss-snapshot-disclosure',
     );
-    await runJourney(renderer, { ...sample1Expectation, exerciseEditor: true }, { start: 'target' });
+    await runJourney(
+      renderer,
+      { ...sample1Expectation, exerciseEditor: true },
+      { start: 'target', diagnosticReviewLocation: 'continuity-review' },
+    );
     await closeProduct();
 
     renderer = await launchProduct({ dataRoot: continuityRoot, pickerPath: docx });
-    await runJourney(renderer, exactSample1Expectation);
+    await runJourney(renderer, exactSample1Expectation, { diagnosticReviewLocation: 'continuity-review' });
     await closeProduct();
 
     renderer = await launchProduct({ dataRoot: continuityRoot, pickerPath: syntheticAPath });
-    await runJourney(renderer, syntheticAExpectation, { stopAfterAcceptedReview: true });
+    await runJourney(renderer, syntheticAExpectation, {
+      stopAfterAcceptedReview: true,
+      diagnosticReviewLocation: 'continuity-review',
+    });
     await closeProduct();
     renderer = await launchProduct({ dataRoot: continuityRoot });
     await waitFor(
@@ -2571,11 +3068,14 @@ async function main() {
       `document.querySelector('.recovery-notice')?.textContent.includes('已重新校验完整暂存快照')`,
       'identity-review-revalidated',
     );
-    await runJourney(renderer, syntheticAExpectation, { start: 'accepted-review' });
+    await runJourney(renderer, syntheticAExpectation, {
+      start: 'accepted-review',
+      diagnosticReviewLocation: 'continuity-review',
+    });
     await closeProduct();
 
     renderer = await launchProduct({ dataRoot: continuityRoot, pickerPath: syntheticBPath });
-    await runJourney(renderer, syntheticBExpectation);
+    await runJourney(renderer, syntheticBExpectation, { diagnosticReviewLocation: 'continuity-review' });
     await closeProduct();
 
     renderer = await launchProduct({ dataRoot: continuityRoot, pickerPath: docx });
@@ -2608,7 +3108,10 @@ async function main() {
       pickerPath: docx,
       importControl: 'legacy-reviewed-v2',
     });
-    await runJourney(renderer, sample1Expectation, { stopAfterAcceptedReview: true });
+    await runJourney(renderer, sample1Expectation, {
+      stopAfterAcceptedReview: true,
+      diagnosticReviewLocation: 'legacy-review',
+    });
     await closeProduct();
     renderer = await launchProduct({ dataRoot: legacyReviewRoot });
     await waitFor(
@@ -2628,12 +3131,97 @@ async function main() {
       `document.querySelector('.recovery-notice')?.textContent.includes('旧复核已失效') && !Array.from(document.querySelectorAll('button')).some((button) => button.textContent === '按上述降级方式新建图书并导入稿件')`,
       'legacy-review-requires-v4-rereview',
     );
-    await runJourney(renderer, sample1Expectation, { start: 'target' });
+    await runJourney(renderer, sample1Expectation, {
+      start: 'target',
+      diagnosticReviewLocation: 'legacy-review',
+    });
     await closeProduct();
 
     const beforePaintRoot = await createCanonicalExternalDataRoot(resolve(runRoot, 'before-paint-data'), checkoutRoot);
     renderer = await launchProduct({ dataRoot: beforePaintRoot, pickerPath: docx });
-    await runJourney(renderer, sample1Expectation, { holdCompletionPaint: true });
+    await runJourney(renderer, sample1Expectation, {
+      holdCompletionPaint: true,
+      diagnosticReviewLocation: 'before-paint-review',
+    });
+    // Issue #178 / nearest supported Journey J-01: a visible imported result must reject a
+    // frame pair crossed by a hidden interval and must not acknowledge an obsolete screen/commit.
+    at('completion-visibility-transition');
+    await assertRenderer(
+      renderer,
+      `(() => { const frame = globalThis.__ai7HeldCompletionFrames?.shift(); if (typeof frame?.callback !== 'function') return false; frame.callback(performance.now()); return true; })()`,
+      'completion-visibility-first-frame',
+    );
+    await waitFor(
+      renderer,
+      `globalThis.__ai7HeldCompletionFrames?.length === 1`,
+      'completion-visibility-second-frame-held',
+    );
+    await assertRenderer(
+      renderer,
+      `(async () => {
+        const descriptor = Object.getOwnPropertyDescriptor(Document.prototype, 'visibilityState');
+        if (descriptor?.configurable !== true || typeof descriptor.get !== 'function') return false;
+        const pendingFrameId = globalThis.__ai7HeldCompletionFrames?.[0]?.id;
+        if (typeof pendingFrameId !== 'number') return false;
+        Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
+        document.dispatchEvent(new Event('visibilitychange'));
+        await new Promise((resolveWait) => setTimeout(resolveWait, 0));
+        const pendingFrameCancelled = globalThis.__ai7HeldCompletionFrames?.length === 0;
+        globalThis.__ai7CancelledCompletionFrameId = pendingFrameId;
+        await new Promise((resolveWait) => setTimeout(resolveWait, 50));
+        delete document.visibilityState;
+        document.dispatchEvent(new Event('visibilitychange'));
+        return pendingFrameCancelled && document.visibilityState === 'visible' &&
+          document.documentElement.dataset.ai7ImportCompletionPainted === undefined &&
+          document.documentElement.dataset.ai7ImportCompletionAcknowledged === undefined;
+      })()`,
+      'completion-visibility-cancels-stalled-frame',
+    );
+    await waitFor(
+      renderer,
+      `globalThis.__ai7HeldCompletionFrames?.length === 1 && globalThis.__ai7HeldCompletionFrames[0].id !== globalThis.__ai7CancelledCompletionFrameId && document.documentElement.dataset.ai7ImportCompletionPainted === undefined && document.documentElement.dataset.ai7ImportCompletionAcknowledged === undefined`,
+      'completion-visibility-restarts-two-frame-proof',
+    );
+    await assertRenderer(
+      renderer,
+      `(() => { const frame = globalThis.__ai7HeldCompletionFrames?.shift(); if (typeof frame?.callback !== 'function') return false; frame.callback(performance.now()); return true; })()`,
+      'completion-presentation-retry-first-frame',
+    );
+    await waitFor(
+      renderer,
+      `globalThis.__ai7HeldCompletionFrames?.length === 1`,
+      'completion-presentation-retry-second-frame-held',
+    );
+    await assertRenderer(
+      renderer,
+      `(async () => {
+        const frames = globalThis.__ai7HeldCompletionFrames;
+        const screen = document.querySelector('#screen');
+        const commit = screen?.querySelector('[data-import-commit-id]');
+        const commitId = commit?.dataset.importCommitId;
+        if (!screen || !commitId || frames?.length !== 1) return false;
+        screen.dataset.screen = 'review';
+        screen.dataset.screen = 'imported';
+        commit.dataset.importCommitId = 'obsolete-completion-presentation';
+        commit.dataset.importCommitId = commitId;
+        await new Promise((resolveWait) => setTimeout(resolveWait, 0));
+        const valid = screen.dataset.screen === 'imported' && commit.dataset.importCommitId === commitId &&
+          frames.length === 0 && document.documentElement.dataset.ai7ImportCompletionPainted === undefined &&
+          document.documentElement.dataset.ai7ImportCompletionAcknowledged === undefined;
+        if (globalThis.__ai7HeldCompletionOriginalAnimationFrame) {
+          globalThis.requestAnimationFrame = globalThis.__ai7HeldCompletionOriginalAnimationFrame;
+        }
+        if (globalThis.__ai7HeldCompletionOriginalCancelAnimationFrame) {
+          globalThis.cancelAnimationFrame = globalThis.__ai7HeldCompletionOriginalCancelAnimationFrame;
+        }
+        delete globalThis.__ai7HeldCompletionOriginalAnimationFrame;
+        delete globalThis.__ai7HeldCompletionOriginalCancelAnimationFrame;
+        delete globalThis.__ai7CancelledCompletionFrameId;
+        delete globalThis.__ai7HeldCompletionFrames;
+        return valid;
+      })()`,
+      'completion-obsolete-presentation-not-acknowledged',
+    );
     await closeProduct();
     renderer = await launchProduct({ dataRoot: beforePaintRoot });
     await waitFor(
@@ -2759,7 +3347,10 @@ async function main() {
       pickerPath: docx,
       importControl: 'before-commit',
     });
-    await runJourney(renderer, sample1Expectation, { expectInterruption: true });
+    await runJourney(renderer, sample1Expectation, {
+      expectInterruption: true,
+      diagnosticReviewLocation: 'before-commit-review',
+    });
     await closeProduct();
     renderer = await launchProduct({ dataRoot: beforeCommitRoot });
     await waitFor(renderer, `document.querySelector('[data-screen="import-recovery"]')`, 'before-commit-recovery');
@@ -2775,7 +3366,10 @@ async function main() {
       `document.querySelector('.recovery-notice')?.textContent.includes('已重新校验完整暂存快照')`,
       'before-commit-review-revalidated',
     );
-    await runJourney(renderer, sample1Expectation, { start: 'accepted-review' });
+    await runJourney(renderer, sample1Expectation, {
+      start: 'accepted-review',
+      diagnosticReviewLocation: 'before-commit-review',
+    });
     await closeProduct();
 
     const afterCommitRoot = await createCanonicalExternalDataRoot(resolve(runRoot, 'after-commit-data'), checkoutRoot);
@@ -2784,7 +3378,10 @@ async function main() {
       pickerPath: docx,
       importControl: 'after-commit-before-response',
     });
-    await runJourney(renderer, sample1Expectation, { expectInterruption: true });
+    await runJourney(renderer, sample1Expectation, {
+      expectInterruption: true,
+      diagnosticReviewLocation: 'after-commit-review',
+    });
     await closeProduct();
     renderer = await launchProduct({ dataRoot: afterCommitRoot });
     await waitFor(
@@ -2810,7 +3407,10 @@ async function main() {
       pickerPath: docx,
       importControl: 'uncertain-reconciliation',
     });
-    await runJourney(renderer, sample1Expectation, { expectInterruption: true });
+    await runJourney(renderer, sample1Expectation, {
+      expectInterruption: true,
+      diagnosticReviewLocation: 'uncertain-review',
+    });
     await closeProduct();
     renderer = await launchProduct({
       dataRoot: uncertainRoot,
@@ -2827,6 +3427,10 @@ async function main() {
       'uncertain-fail-closed',
     );
     await closeProduct();
+
+    // Keep the observed-bug regression terminal so its deliberate multi-window lifecycle cannot
+    // influence unrelated J-01 import/recovery scenarios on either supported desktop platform.
+    await runIssue178WindowCloseRegression();
   } finally {
     try {
       await cancellation.cleanup();
@@ -2836,4 +3440,7 @@ async function main() {
   }
 }
 
-main().catch(() => reportJourneyFailure('J-01', diagnosticLocation));
+main().catch(() => {
+  reportJourneyFailure('J-01', diagnosticLocation);
+  if (browserLifecycleIncomplete) process.stderr.write('', () => process.exit(1));
+});

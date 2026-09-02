@@ -1,4 +1,5 @@
 import { createWriteStream } from 'node:fs';
+import { spawn } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
 import { lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm } from 'node:fs/promises';
 import { once } from 'node:events';
@@ -12,16 +13,85 @@ import { installJourneyCancellationCleanup, reportJourneyFailure } from './contr
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const DEBUG_SELECTORS = new Set(['DEBUG', 'DEBUG_FILE', 'PWDEBUG', 'PWDEBUGIMPL']);
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const CDP_OPERATION_TIMEOUT_MS = 60_000;
+const BROWSER_CLOSE_TIMEOUT_MS = 25_000;
+const LOOPBACK_CLOSE_TIMEOUT_MS = 5_000;
+const CREDENTIAL_CLEANUP_TIMEOUT_MS = 15_000;
+const FORCE_EXIT_TIMEOUT_MS = 5_000;
+const BROWSER_CLOSE_TIMEOUT = new Error('J-12/browser-close-timeout');
+const BROWSER_DISCONNECTED = new Error('J-12/browser-disconnected');
+const RENDERER_CDP_FAILURE = new Error('J-12/renderer-cdp-response');
+const RENDERER_CDP_TIMEOUT = new Error('J-12/renderer-cdp-timeout');
+const RENDERER_SESSION_CLOSED = new Error('J-12/renderer-session-closed');
+const LOOPBACK_CLOSE_TIMEOUT = new Error('J-12/loopback-close-timeout');
+const CREDENTIAL_CLEANUP_TIMEOUT = new Error('J-12/credential-cleanup-timeout');
 let location = 'entry';
 let Zip;
 let ZipPassThrough;
 let strToU8;
+let runnerLifecycleIncomplete = false;
 
 function at(next) { location = next; }
 function requireJourney(condition, name) { if (!condition) throw new Error(`J-12/${name}`); }
 function inside(parent, child) {
   const relation = relative(parent, child);
   return relation === '' || (!relation.startsWith(`..${sep}`) && relation !== '..' && !isAbsolute(relation));
+}
+
+function createBrowserDisconnectBoundary(browser) {
+  let rejectDisconnected;
+  const disconnected = new Promise((_, reject) => {
+    rejectDisconnected = reject;
+  });
+  disconnected.catch(() => undefined);
+  const onDisconnected = () => rejectDisconnected(BROWSER_DISCONNECTED);
+  browser.once('disconnected', onDisconnected);
+  if (!browser.isConnected()) {
+    browser.off('disconnected', onDisconnected);
+    onDisconnected();
+  }
+  return async (operation) => {
+    operation.catch(() => undefined);
+    try {
+      return await Promise.race([operation, disconnected]);
+    } catch (error) {
+      if (!browser.isConnected()) throw BROWSER_DISCONNECTED;
+      throw error;
+    }
+  };
+}
+
+async function awaitCdpOperation(operation, deadline) {
+  operation.catch(() => undefined);
+  const remaining = deadline - Date.now();
+  requireJourney(remaining > 0, 'renderer-cdp-timeout');
+  let timeout;
+  try {
+    return await Promise.race([
+      operation,
+      new Promise((_, reject) => {
+        timeout = setTimeout(() => reject(RENDERER_CDP_TIMEOUT), remaining);
+        timeout.unref();
+      }),
+    ]);
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function awaitFixedOperation(operation, timeoutMs, timeoutError) {
+  operation.catch(() => undefined);
+  let timeout;
+  try {
+    return await Promise.race([
+      operation,
+      new Promise((_, reject) => {
+        timeout = setTimeout(() => reject(timeoutError), timeoutMs);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 function parseJourney() {
@@ -75,7 +145,15 @@ async function createLoopbackSentinel() {
     close: async () => {
       if (closed) return;
       closed = true;
-      await new Promise((resolveClose, rejectClose) => server.close((error) => error ? rejectClose(error) : resolveClose()));
+      const close = new Promise((resolveClose, rejectClose) =>
+        server.close((error) => error ? rejectClose(error) : resolveClose()));
+      try {
+        await awaitFixedOperation(close, LOOPBACK_CLOSE_TIMEOUT_MS, LOOPBACK_CLOSE_TIMEOUT);
+      } catch (error) {
+        runnerLifecycleIncomplete = true;
+        server.closeAllConnections();
+        throw error;
+      }
       requireJourney(!runtimeFault, 'loopback-runtime');
     },
   };
@@ -116,10 +194,18 @@ async function createSyntheticDocx(path) {
 }
 
 async function createRendererManager(browser) {
-  const root = await browser.newBrowserCDPSession();
+  const rootDeadline = Date.now() + CDP_OPERATION_TIMEOUT_MS;
+  const withBrowserConnection = createBrowserDisconnectBoundary(browser);
+  const root = await awaitCdpOperation(
+    withBrowserConnection(browser.newBrowserCDPSession()),
+    rootDeadline,
+  );
   const renderers = new Map();
   const pending = new Map();
+  const detachedSessions = new Set();
   let nextId = 1;
+  const sendRoot = (method, params = {}, deadline = Date.now() + CDP_OPERATION_TIMEOUT_MS) =>
+    awaitCdpOperation(withBrowserConnection(root.send(method, params)), deadline);
   root.on('Target.receivedMessageFromTarget', ({ sessionId, message }) => {
     let response;
     try { response = JSON.parse(message); } catch { return; }
@@ -128,45 +214,74 @@ async function createRendererManager(browser) {
     const completion = pending.get(key);
     if (!completion) return;
     pending.delete(key);
-    if (response.error) completion.reject(new Error('J-12/renderer-cdp-response'));
+    if (response.error) completion.reject(RENDERER_CDP_FAILURE);
     else completion.resolve(response.result);
+  });
+  root.on('Target.detachedFromTarget', ({ sessionId }) => {
+    detachedSessions.add(sessionId);
+    for (const [key, completion] of pending) {
+      if (!key.startsWith(`${sessionId}:`)) continue;
+      pending.delete(key);
+      completion.reject(RENDERER_SESSION_CLOSED);
+    }
   });
   const attach = async (target) => {
     if (renderers.has(target.targetId)) return renderers.get(target.targetId);
-    const { sessionId } = await root.send('Target.attachToTarget', { targetId: target.targetId, flatten: false });
-    const send = async (method, params = {}) => {
-      const id = nextId++;
-      const key = `${sessionId}:${id}`;
-      const response = new Promise((resolveResponse, rejectResponse) => {
-        const timeout = setTimeout(() => {
-          pending.delete(key);
-          rejectResponse(new Error('J-12/renderer-cdp-timeout'));
-        }, 60_000);
-        timeout.unref();
-        pending.set(key, {
-          resolve: (value) => { clearTimeout(timeout); resolveResponse(value); },
-          reject: (error) => { clearTimeout(timeout); rejectResponse(error); },
+    const attached = (async () => {
+      const attachDeadline = Date.now() + CDP_OPERATION_TIMEOUT_MS;
+      const { sessionId } = await sendRoot(
+        'Target.attachToTarget',
+        { targetId: target.targetId, flatten: false },
+        attachDeadline,
+      );
+      const send = async (method, params = {}, deadline = Date.now() + CDP_OPERATION_TIMEOUT_MS) => {
+        if (detachedSessions.has(sessionId)) throw RENDERER_SESSION_CLOSED;
+        const id = nextId++;
+        const key = `${sessionId}:${id}`;
+        const remaining = deadline - Date.now();
+        requireJourney(remaining > 0, 'renderer-cdp-timeout');
+        const response = new Promise((resolveResponse, rejectResponse) => {
+          const timeout = setTimeout(() => {
+            pending.delete(key);
+            rejectResponse(RENDERER_CDP_TIMEOUT);
+          }, remaining);
+          timeout.unref();
+          pending.set(key, {
+            resolve: (value) => { clearTimeout(timeout); resolveResponse(value); },
+            reject: (error) => { clearTimeout(timeout); rejectResponse(error); },
+          });
         });
-      });
-      await root.send('Target.sendMessageToTarget', { sessionId, message: JSON.stringify({ id, method, params }) });
-      return response;
-    };
-    const renderer = {
-      targetId: target.targetId,
-      send,
-      evaluate: async (expression) => {
-        const response = await send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true });
-        requireJourney(!response.exceptionDetails, `renderer-evaluate-${location}`);
-        return response.result.value;
-      },
-    };
-    renderers.set(target.targetId, renderer);
-    await send('Runtime.enable');
-    return renderer;
+        const dispatch = sendRoot(
+          'Target.sendMessageToTarget',
+          { sessionId, message: JSON.stringify({ id, method, params }) },
+          deadline,
+        );
+        const [, result] = await Promise.all([dispatch, withBrowserConnection(response)]);
+        return result;
+      };
+      const renderer = {
+        targetId: target.targetId,
+        send,
+        evaluate: async (expression) => {
+          const response = await send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true });
+          requireJourney(!response.exceptionDetails, `renderer-evaluate-${location}`);
+          return response.result.value;
+        },
+      };
+      await send('Runtime.enable', {}, attachDeadline);
+      return renderer;
+    })();
+    renderers.set(target.targetId, attached);
+    try {
+      return await attached;
+    } catch (error) {
+      renderers.delete(target.targetId);
+      throw error;
+    }
   };
   return {
     list: async () => {
-      const targets = (await root.send('Target.getTargets')).targetInfos.filter((item) => item.type === 'page');
+      const targets = (await sendRoot('Target.getTargets')).targetInfos.filter((item) => item.type === 'page');
       return Promise.all(targets.map(attach));
     },
   };
@@ -252,31 +367,77 @@ async function assertSecretsAbsentFromDataRoot(root, secrets, name) {
   await visit(root);
 }
 
-async function syntheticCredentialEntry(credentialReference) {
+const CREDENTIAL_CLEANUP_SCRIPT = `
+let input = '';
+process.stdin.setEncoding('utf8');
+process.stdin.on('data', (chunk) => {
+  input += chunk;
+  if (input.length > 128) process.exit(2);
+});
+process.stdin.once('end', async () => {
+  try {
+    const value = JSON.parse(input);
+    if (value === null || typeof value !== 'object' ||
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value.credentialReference)) {
+      process.exit(2);
+    }
+    const { pathToFileURL } = require('node:url');
+    const { resolve } = require('node:path');
+    const denial = await import(pathToFileURL(resolve('dist/shared/network-denial.mjs')).href);
+    denial.installNodeNetworkDenial();
+    const { AsyncEntry } = require('@napi-rs/keyring');
+    const removed = await new AsyncEntry(
+      'io.github.zhouy1017.ai7.model-service',
+      'credential-reference:' + value.credentialReference,
+    ).deleteCredential();
+    process.exit(removed === true ? 0 : 3);
+  } catch {
+    process.exit(4);
+  }
+});
+`;
+
+async function removeSyntheticCredentialWithElectron(executable, credentialReference) {
+  requireJourney(isAbsolute(executable), 'credential-direct-cleanup-executable');
   requireJourney(UUID_PATTERN.test(credentialReference), 'credential-direct-cleanup-reference');
   requireJourney(
     process.env.NAPI_RS_NATIVE_LIBRARY_PATH === undefined && process.env.NAPI_RS_FORCE_WASI === undefined,
     'credential-direct-cleanup-override',
   );
-  requireJourney(
-    (process.platform === 'win32' && process.arch === 'x64') ||
-      (process.platform === 'darwin' && process.arch === 'arm64'),
-    'credential-direct-cleanup-platform',
-  );
-  const { AsyncEntry } = await import('@napi-rs/keyring');
-  return new AsyncEntry(
-    'io.github.zhouy1017.ai7.model-service',
-    `credential-reference:${credentialReference}`,
-  );
-}
-
-async function readSyntheticCredentialDirect(credentialReference) {
-  return (await (await syntheticCredentialEntry(credentialReference)).getPassword()) ?? undefined;
-}
-
-async function removeSyntheticCredentialDirect(credentialReference) {
-  const removed = await (await syntheticCredentialEntry(credentialReference)).deleteCredential();
-  requireJourney(removed === true, 'credential-direct-cleanup-unconfirmed');
+  const child = spawn(executable, ['-e', CREDENTIAL_CLEANUP_SCRIPT], {
+    cwd: ROOT,
+    env: { ...productEnvironment(executable), ELECTRON_RUN_AS_NODE: '1' },
+    stdio: ['pipe', 'ignore', 'ignore'],
+    windowsHide: true,
+  });
+  child.stdin.on('error', () => undefined);
+  const terminal = new Promise((resolveTerminal, rejectTerminal) => {
+    child.once('error', rejectTerminal);
+    child.once('exit', (code, signal) => resolveTerminal({ code, signal }));
+  });
+  terminal.catch(() => undefined);
+  child.stdin.end(JSON.stringify({ credentialReference }));
+  let result;
+  try {
+    result = await awaitFixedOperation(
+      terminal,
+      CREDENTIAL_CLEANUP_TIMEOUT_MS,
+      CREDENTIAL_CLEANUP_TIMEOUT,
+    );
+  } catch (error) {
+    try {
+      child.kill('SIGKILL');
+    } catch {
+      // The bounded terminal observation below remains authoritative.
+    }
+    try {
+      await awaitFixedOperation(terminal, FORCE_EXIT_TIMEOUT_MS, CREDENTIAL_CLEANUP_TIMEOUT);
+    } catch {
+      child.unref();
+    }
+    throw error;
+  }
+  requireJourney(result.code === 0 && result.signal === null, 'credential-direct-cleanup-unconfirmed');
 }
 
 function hasErrorCode(error, code) {
@@ -424,35 +585,66 @@ async function main() {
   let runRootAcquisition;
   let tempParent;
   let dataRootForCleanup;
+  let electronExecutableForCleanup;
   let launchForCleanup;
   let managerForCleanup;
   let credentialMutationReached = false;
   let credentialReferenceForCleanup;
   let productCredentialCleanupSucceeded = false;
   let credentialCleanupFailure;
+  let cleanupFailure;
   let cleanupPromise;
   let finalCleanupRequested = false;
+  let activeBrowserClose;
+  const closeBrowserBounded = async (ownedBrowser) => {
+    if (activeBrowserClose !== undefined) return activeBrowserClose;
+    if (ownedBrowser === undefined) return;
+    if (!ownedBrowser.isConnected()) {
+      runnerLifecycleIncomplete = true;
+      throw BROWSER_DISCONNECTED;
+    }
+    const closePromise = ownedBrowser.close();
+    closePromise.catch(() => undefined);
+    let timeout;
+    const boundedClose = Promise.race([
+      closePromise,
+      new Promise((_, reject) => {
+        timeout = setTimeout(() => reject(BROWSER_CLOSE_TIMEOUT), BROWSER_CLOSE_TIMEOUT_MS);
+      }),
+    ]);
+    activeBrowserClose = boundedClose;
+    try {
+      await boundedClose;
+    } catch (error) {
+      runnerLifecycleIncomplete = true;
+      throw error;
+    } finally {
+      clearTimeout(timeout);
+      if (activeBrowserClose === boundedClose) activeBrowserClose = undefined;
+    }
+  };
   const closeOwnedBrowser = async () => {
-    let ownedBrowser = browser;
-    if (ownedBrowser === undefined && browserAcquisition !== undefined) {
-      try {
-        ownedBrowser = await browserAcquisition;
-      } catch {
-        browserAcquisition = undefined;
-        managerForCleanup = undefined;
-        return;
-      }
-    }
-    if (ownedBrowser === undefined) {
-      browserAcquisition = undefined;
-      managerForCleanup = undefined;
-      return;
-    }
-    browser = ownedBrowser;
-    await ownedBrowser.close();
+    const ownedBrowser = browser;
+    const ownedAcquisition = browserAcquisition;
     browser = undefined;
     browserAcquisition = undefined;
     managerForCleanup = undefined;
+    const acquiredBrowser =
+      ownedBrowser ??
+      (ownedAcquisition === undefined
+        ? undefined
+        : await ownedAcquisition.catch(() => undefined));
+    await closeBrowserBounded(acquiredBrowser);
+  };
+  const closeOwnedBrowserForCleanup = async () => {
+    try {
+      await closeOwnedBrowser();
+      return true;
+    } catch (error) {
+      runnerLifecycleIncomplete = true;
+      cleanupFailure ??= error;
+      return false;
+    }
   };
   const removeSyntheticCredentialThroughProduct = async () => {
     if (managerForCleanup === undefined) return false;
@@ -492,18 +684,20 @@ async function main() {
           credentialCleanupFailure ??= error;
         }
         if (!productCredentialCleanupSucceeded && launchForCleanup !== undefined && runRoot !== undefined) {
-          await closeOwnedBrowser();
-          try {
-            const cleanupManager = await launchForCleanup();
-            const [cleanupRenderer] = await waitForRendererCount(cleanupManager, 1, 'credential-cleanup-window');
-            await waitFor(cleanupRenderer, `document.querySelector('[data-screen="landing"]')`, 'credential-cleanup-ready');
-            productCredentialCleanupSucceeded = await removeSyntheticCredentialThroughProduct();
-          } catch (error) {
-            credentialCleanupFailure ??= error;
+          const closedForProductRetry = await closeOwnedBrowserForCleanup();
+          if (closedForProductRetry) {
+            try {
+              const cleanupManager = await launchForCleanup();
+              const [cleanupRenderer] = await waitForRendererCount(cleanupManager, 1, 'credential-cleanup-window');
+              await waitFor(cleanupRenderer, `document.querySelector('[data-screen="landing"]')`, 'credential-cleanup-ready');
+              productCredentialCleanupSucceeded = await removeSyntheticCredentialThroughProduct();
+            } catch (error) {
+              credentialCleanupFailure ??= error;
+            }
           }
         }
         if (!productCredentialCleanupSucceeded) {
-          await closeOwnedBrowser();
+          await closeOwnedBrowserForCleanup();
           if (credentialReferenceForCleanup === undefined && dataRootForCleanup !== undefined && runRoot !== undefined) {
             try {
               const recovered = await recoverSyntheticCredentialCleanupState(dataRootForCleanup, runRoot);
@@ -518,7 +712,14 @@ async function main() {
           }
           if (!productCredentialCleanupSucceeded && credentialReferenceForCleanup !== undefined) {
             try {
-              await removeSyntheticCredentialDirect(credentialReferenceForCleanup);
+              requireJourney(
+                electronExecutableForCleanup !== undefined,
+                'credential-direct-cleanup-executable',
+              );
+              await removeSyntheticCredentialWithElectron(
+                electronExecutableForCleanup,
+                credentialReferenceForCleanup,
+              );
               productCredentialCleanupSucceeded = true;
             } catch (error) {
               credentialCleanupFailure ??= error;
@@ -526,19 +727,28 @@ async function main() {
           }
         }
       }
-      await closeOwnedBrowser();
+      await closeOwnedBrowserForCleanup();
       const ownedLoopback = loopback ?? (loopbackAcquisition === undefined ? undefined : await loopbackAcquisition.catch(() => undefined));
-      await ownedLoopback?.close().catch(() => undefined);
+      try {
+        await ownedLoopback?.close();
+      } catch (error) {
+        cleanupFailure ??= error;
+      }
       loopback = undefined;
       const ownedRoot = runRoot ?? (runRootAcquisition === undefined ? undefined : await runRootAcquisition.catch(() => undefined));
       if (ownedRoot !== undefined) {
-        requireJourney(tempParent !== undefined && dirname(ownedRoot) === tempParent && basename(ownedRoot).startsWith('ai7-j12-e2e-') && (await realpath(ownedRoot)) === ownedRoot, 'cleanup-target');
-        await rm(ownedRoot, { recursive: true, force: true });
-        runRoot = undefined;
+        try {
+          requireJourney(tempParent !== undefined && dirname(ownedRoot) === tempParent && basename(ownedRoot).startsWith('ai7-j12-e2e-') && (await realpath(ownedRoot)) === ownedRoot, 'cleanup-target');
+          await rm(ownedRoot, { recursive: true, force: true });
+          runRoot = undefined;
+        } catch (error) {
+          cleanupFailure ??= error;
+        }
       }
       if (credentialMutationReached && !productCredentialCleanupSucceeded) {
         throw credentialCleanupFailure ?? new Error('J-12/credential-cleanup-failed');
       }
+      if (cleanupFailure !== undefined) throw cleanupFailure;
     })();
     return cleanupPromise;
   };
@@ -576,6 +786,7 @@ async function main() {
     dataRootForCleanup = dataRoot;
     const shellRoot = await ensureCanonicalDataDirectory(dataRoot, 'shell');
     const executable = electronExecutable();
+    electronExecutableForCleanup = executable;
     const launch = async (picker) => {
       const args = [
         '--disable-background-networking', '--disable-component-update', '--disable-default-apps', '--disable-domain-reliability',
@@ -593,12 +804,7 @@ async function main() {
       return managerForCleanup;
     };
     launchForCleanup = launch;
-    const close = async () => {
-      await browser.close();
-      browser = undefined;
-      browserAcquisition = undefined;
-      managerForCleanup = undefined;
-    };
+    const close = closeOwnedBrowser;
 
     at('offline-empty-and-import');
     let manager = await launch(syntheticDocx);
@@ -680,7 +886,13 @@ async function main() {
     );
     const routeEventBeforeRisk = await primary.evaluate(`document.documentElement.dataset.ai7BookWorkbenchRouteGeneration??null`);
     at('close-risk-cross-window-focus');
-    await bookBRenderer.send('Page.bringToFront');
+    const focusedBookB = await bookBRenderer.evaluate(`window.ai7.openBookWorkbench({kind:'book',bookId:${JSON.stringify(bookB)}})`);
+    requireJourney(
+      focusedBookB?.target === 'requesting-window' &&
+        focusedBookB.route?.kind === 'book' &&
+        focusedBookB.route.bookId === bookB,
+      'risk-book-b-public-focus-route',
+    );
     await waitFor(bookBRenderer, `document.hasFocus() && document.visibilityState==='visible'`, 'risk-book-b-focused');
     await assertRenderer(primary, `!document.hasFocus()`, 'risk-book-a-not-focused');
     await new Promise((resolveWait) => setTimeout(resolveWait, 100));
@@ -1084,10 +1296,6 @@ async function main() {
       'model-first-nonsecret-projection',
     );
     credentialReferenceForCleanup = firstConnection.connection.credentialReference;
-    requireJourney(
-      (await readSyntheticCredentialDirect(credentialReferenceForCleanup)) === secretOne,
-      'model-first-os-store-value',
-    );
     await primary.send('Emulation.setDeviceMetricsOverride', { width: 640, height: 800, deviceScaleFactor: 2, mobile: false });
     await primary.send('Emulation.setPageScaleFactor', { pageScaleFactor: 2 });
     await assertRenderer(primary, `document.documentElement.scrollWidth<=document.documentElement.clientWidth+2 && getComputedStyle(document.querySelector('.model-role-grid')).gridTemplateColumns.split(' ').length===1`, 'model-settings-zoom-reflow');
@@ -1122,10 +1330,6 @@ async function main() {
         replacedConnection?.credentialOperationState === 'ready',
       'model-replacement-stable-reference',
     );
-    requireJourney(
-      (await readSyntheticCredentialDirect(credentialReferenceForCleanup)) === secretTwo,
-      'model-replacement-os-store-value',
-    );
     await close();
     await assertSecretsAbsentFromDataRoot(dataRoot, [secretOne, secretTwo], 'model-replacement-secrets-absent-from-data-root');
 
@@ -1142,10 +1346,6 @@ async function main() {
       removedConnection?.credentialReference === firstConnection.connection.credentialReference &&
         removedConnection?.credentialOperationState === 'missing',
       'model-removed-stable-reference',
-    );
-    requireJourney(
-      (await readSyntheticCredentialDirect(credentialReferenceForCleanup)) === undefined,
-      'model-removed-os-store-absence',
     );
     productCredentialCleanupSucceeded = true;
     await close();
@@ -1173,4 +1373,7 @@ async function main() {
   }
 }
 
-main().catch(() => reportJourneyFailure('J-12', location));
+main().catch(() => {
+  reportJourneyFailure('J-12', location);
+  if (runnerLifecycleIncomplete) process.stderr.write('', () => process.exit(1));
+});
