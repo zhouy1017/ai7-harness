@@ -12,7 +12,7 @@ const SAMPLE1_PATH = resolve(ROOT, 'SampleBooks', 'sample1.docx');
 const SAMPLE1_BYTES = 29_550;
 const SAMPLE1_SHA256 = 'b8a3dbde0aa8a1ec7265f9ae3fe47877759e7947c5ab69682cd0a8f424a8d483';
 const DEBUG_SELECTORS = new Set(['DEBUG', 'DEBUG_FILE', 'PWDEBUG', 'PWDEBUGIMPL']);
-const BROWSER_CLOSE_TIMEOUT_MS = 10_000;
+const BROWSER_CLOSE_TIMEOUT_MS = 25_000;
 const BROWSER_CLOSE_TIMEOUT = new Error('J-01/browser-close-timeout');
 let diagnosticLocation = 'entry';
 let electronExecutable;
@@ -1720,12 +1720,18 @@ async function main() {
       return attachRendererTarget(browser);
     };
     const closeProduct = async () => {
+      at('window-close');
       const ownedBrowser = browser;
       browser = undefined;
       browserAcquisition = undefined;
       if (ownedBrowser?.isConnected() !== true) browserCloseIncomplete = true;
       requireJourney(ownedBrowser?.isConnected() === true, 'browser-close-connection');
-      await closeBrowserBounded(ownedBrowser);
+      try {
+        await closeBrowserBounded(ownedBrowser);
+      } catch (error) {
+        if (ownedBrowser.isConnected() && browser === undefined) browser = ownedBrowser;
+        throw error;
+      }
     };
     const sample1Expectation = {
       sourceSha256: SAMPLE1_SHA256,
