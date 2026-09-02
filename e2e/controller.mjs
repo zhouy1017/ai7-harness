@@ -78,7 +78,7 @@ if (isJourneyRunner) {
   }
 }
 
-export const ADMITTED_JOURNEYS = Object.freeze(['J-01', 'J-02', 'J-08', 'J-12', 'J-15']);
+export const ADMITTED_JOURNEYS = Object.freeze(['J-01', 'J-02', 'J-08', 'J-12', 'J-15', 'J-03']);
 
 const JOURNEY_MODULES = Object.freeze({
   'J-01': new URL('./run-j01.mjs', import.meta.url),
@@ -86,6 +86,7 @@ const JOURNEY_MODULES = Object.freeze({
   'J-08': new URL('./run-j08.mjs', import.meta.url),
   'J-12': new URL('./run-j12.mjs', import.meta.url),
   'J-15': new URL('./run-j15.mjs', import.meta.url),
+  'J-03': new URL('./run-j03.mjs', import.meta.url),
 });
 
 const JOURNEY_LOCATIONS = Object.freeze({
@@ -202,6 +203,12 @@ const JOURNEY_LOCATIONS = Object.freeze({
     'second-book-disabled',
     'accessibility-reflow-forced-colors',
     'zero-activity',
+  ]),
+  'J-03': Object.freeze([
+    'entry',
+    'controller-imports',
+    'renderer-ready',
+    'task-authorization-workbench',
   ]),
 });
 
