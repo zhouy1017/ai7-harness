@@ -8,6 +8,7 @@ import { strToU8, zipSync } from 'fflate';
 import { installJourneyCancellationCleanup, reportJourneyFailure } from './controller.mjs';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
+const PRODUCT_RENDERER_URL = pathToFileURL(resolve(ROOT, 'dist', 'renderer', 'index.html')).href;
 const SAMPLE1_PATH = resolve(ROOT, 'SampleBooks', 'sample1.docx');
 const SAMPLE1_BYTES = 29_550;
 const SAMPLE1_SHA256 = 'b8a3dbde0aa8a1ec7265f9ae3fe47877759e7947c5ab69682cd0a8f424a8d483';
@@ -16,6 +17,10 @@ const BROWSER_LAUNCH_TIMEOUT_MS = 35_000;
 const BROWSER_CLOSE_TIMEOUT_MS = 25_000;
 const BROWSER_LAUNCH_TIMEOUT = new Error('J-01/browser-launch-timeout');
 const BROWSER_CLOSE_TIMEOUT = new Error('J-01/browser-close-timeout');
+const BROWSER_DISCONNECTED = new Error('J-01/browser-disconnected');
+const RENDERER_CDP_FAILURE = new Error('J-01/renderer-cdp-response');
+const RENDERER_CDP_TIMEOUT = new Error('J-01/renderer-cdp-timeout');
+const RENDERER_SESSION_CLOSED = new Error('J-01/renderer-session-closed');
 let diagnosticLocation = 'entry';
 let electronExecutable;
 let browserLifecycleIncomplete = false;
@@ -26,6 +31,47 @@ function at(location) {
 
 function requireJourney(condition, location) {
   if (!condition) throw new Error(`J-01/${location}`);
+}
+
+function createBrowserDisconnectBoundary(browser) {
+  let rejectDisconnected;
+  const disconnected = new Promise((_, reject) => {
+    rejectDisconnected = reject;
+  });
+  disconnected.catch(() => undefined);
+  const onDisconnected = () => rejectDisconnected(BROWSER_DISCONNECTED);
+  browser.once('disconnected', onDisconnected);
+  if (!browser.isConnected()) {
+    browser.off('disconnected', onDisconnected);
+    onDisconnected();
+  }
+  return async (operation) => {
+    operation.catch(() => undefined);
+    try {
+      return await Promise.race([operation, disconnected]);
+    } catch (error) {
+      if (!browser.isConnected()) throw BROWSER_DISCONNECTED;
+      throw error;
+    }
+  };
+}
+
+async function awaitCdpOperation(operation, deadline) {
+  operation.catch(() => undefined);
+  const remaining = deadline - Date.now();
+  requireJourney(remaining > 0, 'renderer-cdp-timeout');
+  let timeout;
+  try {
+    return await Promise.race([
+      operation,
+      new Promise((_, reject) => {
+        timeout = setTimeout(() => reject(RENDERER_CDP_TIMEOUT), remaining);
+        timeout.unref();
+      }),
+    ]);
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 function pathIsInside(parent, child) {
@@ -128,24 +174,39 @@ function productEnvironment(executable) {
 }
 
 async function attachRendererTarget(browser) {
-  const rootSession = await browser.newBrowserCDPSession();
   const deadline = Date.now() + 30_000;
+  const withBrowserConnection = createBrowserDisconnectBoundary(browser);
+  const rootSession = await awaitCdpOperation(
+    withBrowserConnection(browser.newBrowserCDPSession()),
+    deadline,
+  );
+  const sendRoot = (method, params = {}, operationDeadline = Date.now() + 30_000) =>
+    awaitCdpOperation(withBrowserConnection(rootSession.send(method, params)), operationDeadline);
   let pageTarget;
   while (Date.now() < deadline) {
-    const { targetInfos } = await rootSession.send('Target.getTargets');
+    const { targetInfos } = await sendRoot('Target.getTargets', {}, deadline);
     const pages = targetInfos.filter((target) => target.type === 'page');
-    if (pages.length === 1) {
+    requireJourney(pages.length <= 1, 'renderer-target-count');
+    const candidate = pages[0];
+    if (candidate?.url === PRODUCT_RENDERER_URL) {
       pageTarget = pages[0];
       break;
     }
-    requireJourney(pages.length === 0, 'renderer-target-count');
+    requireJourney(
+      candidate === undefined || candidate.url === '' || candidate.url === 'about:blank',
+      'renderer-target-url',
+    );
     await new Promise((resolveWait) => setTimeout(resolveWait, 50));
   }
   requireJourney(pageTarget, 'renderer-target-timeout');
-  const { sessionId } = await rootSession.send('Target.attachToTarget', {
-    targetId: pageTarget.targetId,
-    flatten: false,
-  });
+  const { sessionId } = await sendRoot(
+    'Target.attachToTarget',
+    {
+      targetId: pageTarget.targetId,
+      flatten: false,
+    },
+    deadline,
+  );
   let nextId = 1;
   const pending = new Map();
   rootSession.on('Target.receivedMessageFromTarget', ({ sessionId: incomingSessionId, message }) => {
@@ -160,16 +221,23 @@ async function attachRendererTarget(browser) {
     const completion = pending.get(response.id);
     if (!completion) return;
     pending.delete(response.id);
-    if (response.error) completion.reject(new Error('J-01/renderer-cdp-response'));
+    if (response.error) completion.reject(RENDERER_CDP_FAILURE);
     else completion.resolve(response.result);
   });
-  const send = async (method, params = {}) => {
+  rootSession.on('Target.detachedFromTarget', ({ sessionId: detachedSessionId }) => {
+    if (detachedSessionId !== sessionId) return;
+    for (const completion of pending.values()) completion.reject(RENDERER_SESSION_CLOSED);
+    pending.clear();
+  });
+  const send = async (method, params = {}, operationDeadline = Date.now() + 30_000) => {
     const id = nextId++;
+    const remaining = operationDeadline - Date.now();
+    requireJourney(remaining > 0, 'renderer-carrier-timeout');
     const response = new Promise((resolveResponse, rejectResponse) => {
       const timeout = setTimeout(() => {
         pending.delete(id);
-        rejectResponse(new Error('J-01/renderer-cdp-timeout'));
-      }, 30_000);
+        rejectResponse(RENDERER_CDP_TIMEOUT);
+      }, remaining);
       timeout.unref();
       pending.set(id, {
         resolve: (value) => {
@@ -182,41 +250,65 @@ async function attachRendererTarget(browser) {
         },
       });
     });
-    await rootSession.send('Target.sendMessageToTarget', {
+    const dispatch = sendRoot('Target.sendMessageToTarget', {
       sessionId,
       message: JSON.stringify({ id, method, params }),
-    });
-    return response;
+    }, operationDeadline);
+    const [, result] = await Promise.all([dispatch, withBrowserConnection(response)]);
+    return result;
   };
-  const evaluate = async (expression) => {
-    const response = await send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true });
+  const evaluate = async (expression, operationDeadline) => {
+    const response = await send(
+      'Runtime.evaluate',
+      { expression, awaitPromise: true, returnByValue: true },
+      operationDeadline,
+    );
     requireJourney(!response.exceptionDetails, 'renderer-evaluate');
     return response.result.value;
   };
-  await send('Runtime.enable');
-  at('renderer-ready');
-  return { evaluate };
+  await send('Runtime.enable', {}, deadline);
+  let latestCarrierError;
+  while (Date.now() < deadline) {
+    try {
+      if (await evaluate(
+        `location.href === ${JSON.stringify(PRODUCT_RENDERER_URL)} && typeof window.ai7 === 'object' && document.querySelector('#screen') !== null`,
+        deadline,
+      )) {
+        at('renderer-ready');
+        return { evaluate };
+      }
+      latestCarrierError = undefined;
+    } catch (error) {
+      if (
+        error === BROWSER_DISCONNECTED ||
+        error === RENDERER_CDP_TIMEOUT ||
+        error === RENDERER_SESSION_CLOSED
+      ) {
+        throw error;
+      }
+      latestCarrierError = error;
+    }
+    await new Promise((resolveWait) => setTimeout(resolveWait, 50));
+  }
+  if (latestCarrierError !== undefined) {
+    throw new Error('J-01/renderer-carrier-timeout', { cause: latestCarrierError });
+  }
+  throw new Error('J-01/renderer-carrier-timeout');
 }
 
 async function createRendererManager(browser) {
-  const root = await browser.newBrowserCDPSession();
+  const rootDeadline = Date.now() + 30_000;
+  const withBrowserConnection = createBrowserDisconnectBoundary(browser);
+  const root = await awaitCdpOperation(
+    withBrowserConnection(browser.newBrowserCDPSession()),
+    rootDeadline,
+  );
   const renderers = new Map();
   const pending = new Map();
+  const detachedSessions = new Set();
   let nextId = 1;
-  const sendRoot = async (method, params = {}) => {
-    let timeout;
-    try {
-      return await Promise.race([
-        root.send(method, params),
-        new Promise((_, rejectSend) => {
-          timeout = setTimeout(() => rejectSend(new Error('J-01/renderer-cdp-timeout')), 30_000);
-          timeout.unref();
-        }),
-      ]);
-    } finally {
-      clearTimeout(timeout);
-    }
-  };
+  const sendRoot = (method, params = {}, deadline = Date.now() + 30_000) =>
+    awaitCdpOperation(withBrowserConnection(root.send(method, params)), deadline);
   root.on('Target.receivedMessageFromTarget', ({ sessionId, message }) => {
     let response;
     try {
@@ -229,55 +321,106 @@ async function createRendererManager(browser) {
     const completion = pending.get(key);
     if (!completion) return;
     pending.delete(key);
-    if (response.error) completion.reject(new Error('J-01/renderer-cdp-response'));
+    if (response.error) completion.reject(RENDERER_CDP_FAILURE);
     else completion.resolve(response.result);
+  });
+  root.on('Target.detachedFromTarget', ({ sessionId }) => {
+    detachedSessions.add(sessionId);
+    for (const [key, completion] of pending) {
+      if (!key.startsWith(`${sessionId}:`)) continue;
+      pending.delete(key);
+      completion.reject(RENDERER_SESSION_CLOSED);
+    }
   });
   const attach = async (target) => {
     if (renderers.has(target.targetId)) return renderers.get(target.targetId);
-    const { sessionId } = await sendRoot('Target.attachToTarget', { targetId: target.targetId, flatten: false });
-    const send = async (method, params = {}) => {
-      const id = nextId++;
-      const key = `${sessionId}:${id}`;
-      const response = new Promise((resolveResponse, rejectResponse) => {
-        const timeout = setTimeout(() => {
-          pending.delete(key);
-          rejectResponse(new Error('J-01/renderer-cdp-timeout'));
-        }, 30_000);
-        timeout.unref();
-        pending.set(key, {
-          resolve: (value) => {
-            clearTimeout(timeout);
-            resolveResponse(value);
-          },
-          reject: (error) => {
-            clearTimeout(timeout);
-            rejectResponse(error);
-          },
+    const attached = (async () => {
+      const carrierDeadline = Date.now() + 30_000;
+      const { sessionId } = await sendRoot('Target.attachToTarget', { targetId: target.targetId, flatten: false });
+      const send = async (method, params = {}, deadline = Date.now() + 30_000) => {
+        if (detachedSessions.has(sessionId)) throw RENDERER_SESSION_CLOSED;
+        const id = nextId++;
+        const key = `${sessionId}:${id}`;
+        const remaining = deadline - Date.now();
+        requireJourney(remaining > 0, 'renderer-carrier-timeout');
+        const response = new Promise((resolveResponse, rejectResponse) => {
+          const timeout = setTimeout(() => {
+            pending.delete(key);
+            rejectResponse(RENDERER_CDP_TIMEOUT);
+          }, remaining);
+          timeout.unref();
+          pending.set(key, {
+            resolve: (value) => {
+              clearTimeout(timeout);
+              resolveResponse(value);
+            },
+            reject: (error) => {
+              clearTimeout(timeout);
+              rejectResponse(error);
+            },
+          });
         });
-      });
-      const dispatch = sendRoot('Target.sendMessageToTarget', {
-        sessionId,
-        message: JSON.stringify({ id, method, params }),
-      });
-      const [, result] = await Promise.all([dispatch, response]);
-      return result;
-    };
-    const renderer = {
-      targetId: target.targetId,
-      evaluate: async (expression) => {
-        const response = await send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true });
-        requireJourney(!response.exceptionDetails, 'renderer-evaluate');
-        return response.result.value;
-      },
-    };
-    renderers.set(target.targetId, renderer);
-    await send('Runtime.enable');
-    return renderer;
+        const dispatch = sendRoot('Target.sendMessageToTarget', {
+          sessionId,
+          message: JSON.stringify({ id, method, params }),
+        }, deadline);
+        const [, result] = await Promise.all([dispatch, withBrowserConnection(response)]);
+        return result;
+      };
+      const renderer = {
+        targetId: target.targetId,
+        evaluate: async (expression) => {
+          const response = await send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true });
+          requireJourney(!response.exceptionDetails, 'renderer-evaluate');
+          return response.result.value;
+        },
+      };
+      await send('Runtime.enable', {}, carrierDeadline);
+      let latestCarrierError;
+      while (Date.now() < carrierDeadline) {
+        try {
+          const response = await send('Runtime.evaluate', {
+            expression: `location.href === ${JSON.stringify(PRODUCT_RENDERER_URL)} && typeof window.ai7 === 'object' && document.querySelector('#screen') !== null`,
+            awaitPromise: true,
+            returnByValue: true,
+          }, carrierDeadline);
+          requireJourney(!response.exceptionDetails, 'renderer-evaluate');
+          if (response.result.value === true) return renderer;
+          latestCarrierError = undefined;
+        } catch (error) {
+          if (
+            error === BROWSER_DISCONNECTED ||
+            error === RENDERER_CDP_TIMEOUT ||
+            error === RENDERER_SESSION_CLOSED
+          ) {
+            throw error;
+          }
+          latestCarrierError = error;
+        }
+        await new Promise((resolveWait) => setTimeout(resolveWait, 50));
+      }
+      if (latestCarrierError !== undefined) {
+        throw new Error('J-01/renderer-carrier-timeout', { cause: latestCarrierError });
+      }
+      throw new Error('J-01/renderer-carrier-timeout');
+    })();
+    renderers.set(target.targetId, attached);
+    try {
+      return await attached;
+    } catch (error) {
+      renderers.delete(target.targetId);
+      throw error;
+    }
   };
   return {
     list: async () => {
-      const targets = (await sendRoot('Target.getTargets')).targetInfos.filter((target) => target.type === 'page');
-      return Promise.all(targets.map(attach));
+      const pages = (await sendRoot('Target.getTargets')).targetInfos.filter((target) => target.type === 'page');
+      requireJourney(
+        pages.every((target) =>
+          target.url === PRODUCT_RENDERER_URL || target.url === '' || target.url === 'about:blank'),
+        'renderer-target-url',
+      );
+      return Promise.all(pages.filter((target) => target.url === PRODUCT_RENDERER_URL).map(attach));
     },
     close: (targetId) => sendRoot('Target.closeTarget', { targetId }),
   };
@@ -302,6 +445,15 @@ async function waitFor(renderer, expression, location) {
       latestEvaluationError = undefined;
       if (matched) return;
     } catch (error) {
+      if (
+        error === BROWSER_DISCONNECTED ||
+        error === RENDERER_CDP_FAILURE ||
+        error === RENDERER_CDP_TIMEOUT ||
+        error === RENDERER_SESSION_CLOSED
+      ) {
+        if (error === BROWSER_DISCONNECTED) browserLifecycleIncomplete = true;
+        throw error;
+      }
       latestEvaluationError = error;
     }
     await new Promise((resolveWait) => setTimeout(resolveWait, 50));
@@ -533,6 +685,7 @@ async function prepareManuscriptReimportReview(renderer, expectation) {
   } = expectation;
   requireJourney(start === 'landing' || start === 'target', `${scenario}-start`);
   if (start === 'landing') {
+    at('landing');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, `${scenario}-landing`);
     await clickExactButton(renderer, '导入稿件', `${scenario}-stage`);
     await waitFor(renderer, `document.querySelector('[data-screen="target"]')`, `${scenario}-target`);
@@ -2491,14 +2644,22 @@ async function main() {
     await closeProduct();
 
     let reimportTamperRejected = false;
+    let reimportTamperProductCarrierAttached = false;
     try {
       renderer = await launchProduct({
         dataRoot: reimportPagedRoot,
         importControl: 'tamper-reimport-proof-before-validation',
       });
+      reimportTamperProductCarrierAttached = true;
       await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady === 'true'`, 'reimport-tamper-must-not-start');
     } catch (error) {
-      if (isBrowserLaunchTimeout(error)) throw error;
+      if (
+        isBrowserLaunchTimeout(error) ||
+        reimportTamperProductCarrierAttached ||
+        (browser !== undefined && error !== BROWSER_DISCONNECTED)
+      ) {
+        throw error;
+      }
       reimportTamperRejected = true;
     }
     await closeOwnedBrowser();
