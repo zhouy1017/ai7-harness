@@ -12,11 +12,13 @@ const SAMPLE1_PATH = resolve(ROOT, 'SampleBooks', 'sample1.docx');
 const SAMPLE1_BYTES = 29_550;
 const SAMPLE1_SHA256 = 'b8a3dbde0aa8a1ec7265f9ae3fe47877759e7947c5ab69682cd0a8f424a8d483';
 const DEBUG_SELECTORS = new Set(['DEBUG', 'DEBUG_FILE', 'PWDEBUG', 'PWDEBUGIMPL']);
+const BROWSER_LAUNCH_TIMEOUT_MS = 35_000;
 const BROWSER_CLOSE_TIMEOUT_MS = 25_000;
+const BROWSER_LAUNCH_TIMEOUT = new Error('J-01/browser-launch-timeout');
 const BROWSER_CLOSE_TIMEOUT = new Error('J-01/browser-close-timeout');
 let diagnosticLocation = 'entry';
 let electronExecutable;
-let browserCloseIncomplete = false;
+let browserLifecycleIncomplete = false;
 
 function at(location) {
   diagnosticLocation = location;
@@ -1513,7 +1515,12 @@ async function main() {
   const { createCanonicalExternalDataRoot, ensureCanonicalDataDirectory } = await import(
     pathToFileURL(dataRootEntry).href
   );
-  const { chromium } = await import('playwright-core');
+  const {
+    chromium,
+    errors: { TimeoutError: PlaywrightTimeoutError },
+  } = await import('playwright-core');
+  const isBrowserLaunchTimeout = (error) =>
+    error === BROWSER_LAUNCH_TIMEOUT || error instanceof PlaywrightTimeoutError;
   const tempParent = await realpath(tmpdir());
   const checkoutRoot = await realpath(ROOT);
   requireJourney(
@@ -1543,7 +1550,7 @@ async function main() {
     try {
       await boundedClose;
     } catch (error) {
-      browserCloseIncomplete = true;
+      browserLifecycleIncomplete = true;
       throw error;
     } finally {
       clearTimeout(timeout);
@@ -1702,7 +1709,7 @@ async function main() {
       );
       at('launch');
       cancellation.throwIfRequested();
-      const acquisition = chromium.launch({
+      const launchPromise = chromium.launch({
         executablePath: executable,
         headless: false,
         ignoreDefaultArgs: true,
@@ -1710,10 +1717,24 @@ async function main() {
         env: productEnvironment(executable),
         timeout: 30_000,
       });
+      launchPromise.catch(() => undefined);
+      let launchTimeout;
+      const acquisition = Promise.race([
+        launchPromise,
+        new Promise((_, reject) => {
+          launchTimeout = setTimeout(() => {
+            reject(BROWSER_LAUNCH_TIMEOUT);
+          }, BROWSER_LAUNCH_TIMEOUT_MS);
+        }),
+      ]);
       browserAcquisition = acquisition;
       try {
         browser = await acquisition;
+      } catch (error) {
+        if (isBrowserLaunchTimeout(error)) browserLifecycleIncomplete = true;
+        throw error;
       } finally {
+        clearTimeout(launchTimeout);
         if (browserAcquisition === acquisition) browserAcquisition = undefined;
       }
       cancellation.throwIfRequested();
@@ -1724,7 +1745,7 @@ async function main() {
       const ownedBrowser = browser;
       browser = undefined;
       browserAcquisition = undefined;
-      if (ownedBrowser?.isConnected() !== true) browserCloseIncomplete = true;
+      if (ownedBrowser?.isConnected() !== true) browserLifecycleIncomplete = true;
       requireJourney(ownedBrowser?.isConnected() === true, 'browser-close-connection');
       try {
         await closeBrowserBounded(ownedBrowser);
@@ -2476,7 +2497,8 @@ async function main() {
         importControl: 'tamper-reimport-proof-before-validation',
       });
       await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady === 'true'`, 'reimport-tamper-must-not-start');
-    } catch {
+    } catch (error) {
+      if (isBrowserLaunchTimeout(error)) throw error;
       reimportTamperRejected = true;
     }
     await closeOwnedBrowser();
@@ -3100,5 +3122,5 @@ async function main() {
 
 main().catch(() => {
   reportJourneyFailure('J-01', diagnosticLocation);
-  if (browserCloseIncomplete) process.stderr.write('', () => process.exit(1));
+  if (browserLifecycleIncomplete) process.stderr.write('', () => process.exit(1));
 });
