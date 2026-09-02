@@ -2,34 +2,31 @@
 
 ## What's done
 
-- Issue #176's single product commit has been rebased from old `dev@37347d6962984618732ca3aeb251dd100b430009` onto exact current `dev@012d9e330a66f46cc288b24b9ef7e16962c3d960` in the isolated `feat/176-editorial-workspace-sidecar-revisions` worktree. The local candidate contains the independent-review repairs and normalized subject; Draft PR #177's unchanged pre-rebase remote head remains `5865bbcf6248b141c55732e401e0fd65fbb6be2d` until final local validation closes.
-- Owner binding amendment https://github.com/zhouy1017/ai7-harness/issues/176#issuecomment-5517169002 supersedes only the obsolete Actions-usage-read conditions. Usage is Owner-monitored and is not a development, Ready, Gate, or integration precondition; every paired-Gate, failure-to-Draft, privacy, Provider/recording, lifecycle, and `main` boundary remains.
-- The existing `EditorialWorkspaceProfileStore` remains the only behavior owner and keeps its three-method `inspect(bookId)` / `install(bookId)` / `enable(bookId)` interface. The implementation adds only the authorized SQLite v12→v13 route, two frozen canonical sidecar definitions, append-only exact-Book pins, Revision 1 migration pins, fresh direct Revision 2 enablement, explicit Revision 1→2 append, strict startup validation, service protocol v14, existing-card presentation, synchronized J-15 behavior, and J-12's schema assertion.
-- Definition and pin rows are update/delete guarded, every writable connection enables and verifies recursive triggers, and startup rejects a connection that cannot enforce those guards against conflict replacement. Startup accepts only exact Revision 1, Revision 2, or Revision 1→2 histories with canonical pin times and native enablement bindings; causal order is revision-defined and does not assume a monotonic host clock. Canonical reproduction remains fixed at 588/660 bytes and the accepted SHA-256 digests.
-- Rebase conflict resolution semantically retains Issue #184's J-12 public ready/missing projections, stable opaque Credential Reference, setup-Node no-raw-read rule, and pinned Electron Node-mode cleanup while applying Issue #176's schema-v13/sidecar/J-15 documentation. No whole-file side was selected.
-- The integrated Issue #178 code remains authoritative: J-12 public focus/cleanup, bounded `ServiceClient` stop, renderer completion-frame cancellation, Electron close repair, and J-01/controller/run-all/workflow paths are preserved outside the exact authorized #176 deltas.
+- Issue #176 / PR #177 integrated exact head `c21428bb7534865ea4069863e3ccd80150fa2a02` into `dev@7dec919ecb8a37d34dc8e450d52d7d2708d43726`. Gate run `33692616156` passed J-01, J-02, J-08, J-12, and J-15 on Windows Server 2025 x64 and macOS 15 arm64.
+- The existing `EditorialWorkspaceProfileStore` now owns SQLite schema v13's two frozen `ai7.editorial-workspace-profile.authority` revisions and insert-only exact-Book pins behind its unchanged three-method interface; service protocol v14 and the existing renderer card expose the bounded lifecycle.
+- The native 263-byte carrier remains unchanged. Revision 2 only makes the exact current Book's primary Manuscript Revision and Source Versions eligible to be requested; it grants no actual read, Task, Plan, Run, Provider, credential, network, Effect, Enrollment, or Apply authority.
+- Every writable SQLite connection enables and verifies recursive triggers, canonical pin instants fail closed, and Revision 1→2 causality follows the fixed append path rather than host-clock monotonicity.
+- Issue #178's Electron-main close/cancellation repair and Issue #184's nonsecret ready/missing credential proof, stable opaque reference, setup-Node no-raw-read rule, and pinned cleanup remain integrated.
+- Issue #188 archives exactly the consumed Issue #176 root checkpoint. The outgoing `HANDOFF.md` remains in Git history; stable implementation, ADRs, policies, README/source-checkout, and Journey owners remain current. This lifecycle unit's own archive sweep is `none — current routing already closes the node`.
 
 ## What's next
 
-- Re-verify the completed, repaired candidate's exact twelve-path branch diff plus every overlap invariant against current `dev`.
-- Run fresh exact-head Windows `doctor -> bootstrap -> build -> e2e:all` with the repository-pinned Node/pnpm/Electron inputs. Confirm J-01/J-02/J-08/J-12/J-15 and cleanup residue; old-head completion is diagnostic history only.
-- While PR #177 remains Draft, force-push with explicit lease against remote head `5865bbcf6248b141c55732e401e0fd65fbb6be2d`, update its closure to the final exact head and preserved #178/#184 owners, then make one normal Ready transition for a paired Windows/macOS Gate.
-- Integrate only after the unchanged exact head passes both platforms. Then run Issue #176's scoped lifecycle closure before refreshing Issue #47.
+- After Issue #188 integrates into the newest exact `dev`, re-resolve and refresh existing Issue #47 in place. Replace its historical target-qualified authority, Change Brief, structural budget, acceptance criteria, and labels before restoring `ready-for-agent`.
+- Then create Issue #47's one branch/worktree and dispatch one writable Worker for only the bounded provider-free J-03 authorization outcome that consumes the exact Revision 2 Book pin.
 
 ## Key decisions
 
-- Active revision is fixed-domain logic: explicit Revision 2 pin, otherwise explicit Revision 1 pin, otherwise none. No `latest`, generic revision chooser, update, downgrade, rollback, or catalog mechanism exists.
-- Legal per-Book pin histories are Revision 1 only, Revision 1 then Revision 2, or fresh Revision 2 only. Revision 2 changes only two eligible current-Book readable-scope kinds; it grants no actual read, Task, Plan, Run, Provider, credential, network, Effect, Enrollment, or Apply authority.
-- J-12 should differ from current `dev` only by schema 12→13, `ServiceClient` only by protocol 13→14, and renderer only inside the sidecar presentation. Application, J-01, controller, run-all, and workflow must remain byte-identical to current `dev`.
-- Provider calls, execution-time secret resolution, exact `sample1` recording, fixture admission, publication, release, and `main` promotion remain outside autonomous work.
+- Issue #47 authorizes an exact Task Intent and Plan Envelope without executing it. Issue #91 remains the sole later foreground execution owner.
+- Usage is Owner-monitored and is not a development, Ready, Gate, or integration precondition. Paired-Gate, failure-to-Draft, privacy, Provider/recording, lifecycle, and `main` boundaries remain unchanged.
+- Provider calls, execution-time secret resolution, exact `sample1` recording, fixture generation or admission, publication, release, distribution, and `main` promotion remain outside autonomous work. Recording still requires a separate action Issue and fresh contemporaneous human-attended confirmation.
 
 ## Unresolved matters or blockers
 
-- No known authority or implementation blocker remains. Fresh exact-head Windows completion and the paired Hosted Gate are still required before integration.
-- Issue #47 remains blocked until Issue #176 and its lifecycle close. The later recording remains a separate human-attended action with fresh contemporaneous confirmation.
+- No known blocker prevents the authorized in-place Issue #47 refresh after this lifecycle PR integrates.
+- Issue #47 remains historical and `ready-for-human` until that exact refresh is complete; no Worker may use its old brief.
 
 ## Safe Resume Prompt
 
 ```text
-Resume Issue #176 from the rebased local candidate in the isolated issue-176-sidecar-revisions worktree on Draft PR #177. Retain #184's nonsecret J-12 wording, #178's product/E2E repairs, and the review fixes for conflict-replacement immutability and wall-clock rollback. Verify the exact twelve-path diff and critical blob invariants, then run fresh exact-head Windows doctor -> bootstrap -> build -> e2e:all. With zero owned residue, force-push only while Draft using explicit lease against 5865bbc, update the PR closure, and permit one normal paired Gate. Do not query usage, call a Provider, resolve an execution secret, record sample1, admit a fixture, publish, release, or promote main.
+Commander: after the Issue #176 lifecycle pull request is live on the newest exact dev, re-resolve and refresh the existing Issue #47 in place under ADR 0045, ADR 0055, and the Owner authorization at issue comment 5489351376. Replace its historical authority/base, structural budget, acceptance criteria, and labels before restoring ready-for-agent; then create its one task branch/worktree and dispatch one Worker for only the bounded provider-free J-03 authorization outcome. Consume the exact Revision 2 Book pin, preserve Issue #91 as the execution owner, and do not query usage, call a Provider, resolve a secret, perform sample1 recording, admit a fixture, publish, release, or promote main.
 ```

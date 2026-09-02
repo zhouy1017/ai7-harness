@@ -22,3 +22,4 @@ Archived lifecycle nodes are historical records excluded from ordinary current-s
 - [Issue #170 Gate projection synchronization — 2026-09-01](issue-170-gate-projection-sync-2026-09-01/INDEX.md): integrated Issue #170 / PR #171 consumed instruction checkpoint and current Owner-decision routing.
 - [Issue #178 Electron main crash — 2026-09-03](issue-178-electron-main-crash-2026-09-03/INDEX.md): integrated Issue #178 / PR #180 consumed P0 repair checkpoint and current routing.
 - [Issue #184 J-12 protected-secret proof — 2026-09-03](issue-184-j12-protected-secret-proof-2026-09-03/INDEX.md): integrated Issue #184 / PR #185 consumed documentation-sync checkpoint and current routing.
+- [Issue #176 editorial-workspace sidecar revisions — 2026-09-03](issue-176-editorial-workspace-sidecar-revisions-2026-09-03/INDEX.md): integrated Issue #176 / PR #177 consumed checkpoint and current Issue #47 routing.
