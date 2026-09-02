@@ -1176,6 +1176,7 @@ async function runJourney(
     editAfterCommit = exerciseEditor,
     stopAfterAcceptedReview = false,
     holdCompletionPaint = false,
+    diagnosticReviewLocation = 'review',
   } = options;
   const hasIdentityFinding = identityClass !== null;
   const expectedNonEffects = degraded
@@ -1259,7 +1260,7 @@ async function runJourney(
   }
   await clickExactButton(renderer, '确认书名并复核', 'review-click');
   await waitFor(renderer, `document.querySelector('[data-screen="review"]')`, 'review-screen');
-  at('review');
+  at(diagnosticReviewLocation);
   if (hasIdentityFinding) {
     await assertRenderer(
       renderer,
@@ -1322,7 +1323,7 @@ async function runJourney(
   );
   }
   if (start === 'accepted-review') {
-    at('review');
+    at(diagnosticReviewLocation);
     await assertRenderer(
       renderer,
       `document.querySelector('[data-screen="review"] [data-source-sha256]')?.textContent === ${JSON.stringify(sourceSha256)} && document.querySelector('[data-screen="review"] [data-source-bytes]')?.textContent === ${JSON.stringify(String(sourceBytes))} && Array.from(document.querySelectorAll('button')).some((button) => button.textContent === ${JSON.stringify(degraded ? '按上述降级方式新建图书并导入稿件' : '新建图书并导入稿件')} && !button.disabled)`,
@@ -2988,15 +2989,22 @@ async function main() {
       `document.querySelector('.recovery-notice')?.textContent.includes('不会从原路径读取或替换暂存内容')`,
       'path-loss-snapshot-disclosure',
     );
-    await runJourney(renderer, { ...sample1Expectation, exerciseEditor: true }, { start: 'target' });
+    await runJourney(
+      renderer,
+      { ...sample1Expectation, exerciseEditor: true },
+      { start: 'target', diagnosticReviewLocation: 'continuity-review' },
+    );
     await closeProduct();
 
     renderer = await launchProduct({ dataRoot: continuityRoot, pickerPath: docx });
-    await runJourney(renderer, exactSample1Expectation);
+    await runJourney(renderer, exactSample1Expectation, { diagnosticReviewLocation: 'continuity-review' });
     await closeProduct();
 
     renderer = await launchProduct({ dataRoot: continuityRoot, pickerPath: syntheticAPath });
-    await runJourney(renderer, syntheticAExpectation, { stopAfterAcceptedReview: true });
+    await runJourney(renderer, syntheticAExpectation, {
+      stopAfterAcceptedReview: true,
+      diagnosticReviewLocation: 'continuity-review',
+    });
     await closeProduct();
     renderer = await launchProduct({ dataRoot: continuityRoot });
     await waitFor(
@@ -3016,11 +3024,14 @@ async function main() {
       `document.querySelector('.recovery-notice')?.textContent.includes('已重新校验完整暂存快照')`,
       'identity-review-revalidated',
     );
-    await runJourney(renderer, syntheticAExpectation, { start: 'accepted-review' });
+    await runJourney(renderer, syntheticAExpectation, {
+      start: 'accepted-review',
+      diagnosticReviewLocation: 'continuity-review',
+    });
     await closeProduct();
 
     renderer = await launchProduct({ dataRoot: continuityRoot, pickerPath: syntheticBPath });
-    await runJourney(renderer, syntheticBExpectation);
+    await runJourney(renderer, syntheticBExpectation, { diagnosticReviewLocation: 'continuity-review' });
     await closeProduct();
 
     renderer = await launchProduct({ dataRoot: continuityRoot, pickerPath: docx });
@@ -3053,7 +3064,10 @@ async function main() {
       pickerPath: docx,
       importControl: 'legacy-reviewed-v2',
     });
-    await runJourney(renderer, sample1Expectation, { stopAfterAcceptedReview: true });
+    await runJourney(renderer, sample1Expectation, {
+      stopAfterAcceptedReview: true,
+      diagnosticReviewLocation: 'legacy-review',
+    });
     await closeProduct();
     renderer = await launchProduct({ dataRoot: legacyReviewRoot });
     await waitFor(
@@ -3073,12 +3087,18 @@ async function main() {
       `document.querySelector('.recovery-notice')?.textContent.includes('旧复核已失效') && !Array.from(document.querySelectorAll('button')).some((button) => button.textContent === '按上述降级方式新建图书并导入稿件')`,
       'legacy-review-requires-v4-rereview',
     );
-    await runJourney(renderer, sample1Expectation, { start: 'target' });
+    await runJourney(renderer, sample1Expectation, {
+      start: 'target',
+      diagnosticReviewLocation: 'legacy-review',
+    });
     await closeProduct();
 
     const beforePaintRoot = await createCanonicalExternalDataRoot(resolve(runRoot, 'before-paint-data'), checkoutRoot);
     renderer = await launchProduct({ dataRoot: beforePaintRoot, pickerPath: docx });
-    await runJourney(renderer, sample1Expectation, { holdCompletionPaint: true });
+    await runJourney(renderer, sample1Expectation, {
+      holdCompletionPaint: true,
+      diagnosticReviewLocation: 'before-paint-review',
+    });
     await closeProduct();
     renderer = await launchProduct({ dataRoot: beforePaintRoot });
     await waitFor(
@@ -3204,7 +3224,10 @@ async function main() {
       pickerPath: docx,
       importControl: 'before-commit',
     });
-    await runJourney(renderer, sample1Expectation, { expectInterruption: true });
+    await runJourney(renderer, sample1Expectation, {
+      expectInterruption: true,
+      diagnosticReviewLocation: 'before-commit-review',
+    });
     await closeProduct();
     renderer = await launchProduct({ dataRoot: beforeCommitRoot });
     await waitFor(renderer, `document.querySelector('[data-screen="import-recovery"]')`, 'before-commit-recovery');
@@ -3220,7 +3243,10 @@ async function main() {
       `document.querySelector('.recovery-notice')?.textContent.includes('已重新校验完整暂存快照')`,
       'before-commit-review-revalidated',
     );
-    await runJourney(renderer, sample1Expectation, { start: 'accepted-review' });
+    await runJourney(renderer, sample1Expectation, {
+      start: 'accepted-review',
+      diagnosticReviewLocation: 'before-commit-review',
+    });
     await closeProduct();
 
     const afterCommitRoot = await createCanonicalExternalDataRoot(resolve(runRoot, 'after-commit-data'), checkoutRoot);
@@ -3229,7 +3255,10 @@ async function main() {
       pickerPath: docx,
       importControl: 'after-commit-before-response',
     });
-    await runJourney(renderer, sample1Expectation, { expectInterruption: true });
+    await runJourney(renderer, sample1Expectation, {
+      expectInterruption: true,
+      diagnosticReviewLocation: 'after-commit-review',
+    });
     await closeProduct();
     renderer = await launchProduct({ dataRoot: afterCommitRoot });
     await waitFor(
@@ -3255,7 +3284,10 @@ async function main() {
       pickerPath: docx,
       importControl: 'uncertain-reconciliation',
     });
-    await runJourney(renderer, sample1Expectation, { expectInterruption: true });
+    await runJourney(renderer, sample1Expectation, {
+      expectInterruption: true,
+      diagnosticReviewLocation: 'uncertain-review',
+    });
     await closeProduct();
     renderer = await launchProduct({
       dataRoot: uncertainRoot,
