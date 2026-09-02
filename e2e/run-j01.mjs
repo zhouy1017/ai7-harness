@@ -1341,7 +1341,24 @@ async function runJourney(
   if (holdCompletionPaint) {
     await assertRenderer(
       renderer,
-      `(() => { let frameId = 0; globalThis.__ai7HeldCompletionFrames = []; globalThis.__ai7HeldCompletionOriginalAnimationFrame = globalThis.requestAnimationFrame.bind(globalThis); globalThis.requestAnimationFrame = (callback) => { globalThis.__ai7HeldCompletionFrames.push(callback); frameId += 1; return frameId; }; return true; })()`,
+      `(() => {
+        let frameId = 0;
+        globalThis.__ai7HeldCompletionFrames = [];
+        globalThis.__ai7HeldCompletionOriginalAnimationFrame = globalThis.requestAnimationFrame.bind(globalThis);
+        globalThis.__ai7HeldCompletionOriginalCancelAnimationFrame = globalThis.cancelAnimationFrame.bind(globalThis);
+        globalThis.requestAnimationFrame = (callback) => {
+          frameId += 1;
+          globalThis.__ai7HeldCompletionFrames.push({ id: frameId, callback });
+          return frameId;
+        };
+        globalThis.cancelAnimationFrame = (cancelledId) => {
+          const frames = globalThis.__ai7HeldCompletionFrames;
+          const index = frames.findIndex((frame) => frame.id === cancelledId);
+          if (index >= 0) frames.splice(index, 1);
+          else globalThis.__ai7HeldCompletionOriginalCancelAnimationFrame(cancelledId);
+        };
+        return true;
+      })()`,
       'completion-paint-held',
     );
   }
@@ -3131,7 +3148,7 @@ async function main() {
     at('completion-visibility-transition');
     await assertRenderer(
       renderer,
-      `(() => { const frame = globalThis.__ai7HeldCompletionFrames?.shift(); if (typeof frame !== 'function') return false; frame(performance.now()); return true; })()`,
+      `(() => { const frame = globalThis.__ai7HeldCompletionFrames?.shift(); if (typeof frame?.callback !== 'function') return false; frame.callback(performance.now()); return true; })()`,
       'completion-visibility-first-frame',
     );
     await waitFor(
@@ -3144,25 +3161,30 @@ async function main() {
       `(async () => {
         const descriptor = Object.getOwnPropertyDescriptor(Document.prototype, 'visibilityState');
         if (descriptor?.configurable !== true || typeof descriptor.get !== 'function') return false;
+        const pendingFrameId = globalThis.__ai7HeldCompletionFrames?.[0]?.id;
+        if (typeof pendingFrameId !== 'number') return false;
         Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
         document.dispatchEvent(new Event('visibilitychange'));
+        await new Promise((resolveWait) => setTimeout(resolveWait, 0));
+        const pendingFrameCancelled = globalThis.__ai7HeldCompletionFrames?.length === 0;
+        globalThis.__ai7CancelledCompletionFrameId = pendingFrameId;
         await new Promise((resolveWait) => setTimeout(resolveWait, 50));
         delete document.visibilityState;
         document.dispatchEvent(new Event('visibilitychange'));
-        return document.visibilityState === 'visible' &&
+        return pendingFrameCancelled && document.visibilityState === 'visible' &&
           document.documentElement.dataset.ai7ImportCompletionPainted === undefined &&
           document.documentElement.dataset.ai7ImportCompletionAcknowledged === undefined;
       })()`,
-      'completion-visibility-restored-before-second-frame',
+      'completion-visibility-cancels-stalled-frame',
     );
-    await assertRenderer(
+    await waitFor(
       renderer,
-      `(async () => { const frame = globalThis.__ai7HeldCompletionFrames?.shift(); if (typeof frame !== 'function') return false; frame(performance.now()); await new Promise((resolveWait) => setTimeout(resolveWait, 0)); return globalThis.__ai7HeldCompletionFrames?.length === 1 && document.documentElement.dataset.ai7ImportCompletionPainted === undefined && document.documentElement.dataset.ai7ImportCompletionAcknowledged === undefined; })()`,
+      `globalThis.__ai7HeldCompletionFrames?.length === 1 && globalThis.__ai7HeldCompletionFrames[0].id !== globalThis.__ai7CancelledCompletionFrameId && document.documentElement.dataset.ai7ImportCompletionPainted === undefined && document.documentElement.dataset.ai7ImportCompletionAcknowledged === undefined`,
       'completion-visibility-restarts-two-frame-proof',
     );
     await assertRenderer(
       renderer,
-      `(() => { const frame = globalThis.__ai7HeldCompletionFrames?.shift(); if (typeof frame !== 'function') return false; frame(performance.now()); return true; })()`,
+      `(() => { const frame = globalThis.__ai7HeldCompletionFrames?.shift(); if (typeof frame?.callback !== 'function') return false; frame.callback(performance.now()); return true; })()`,
       'completion-presentation-retry-first-frame',
     );
     await waitFor(
@@ -3177,13 +3199,11 @@ async function main() {
         const screen = document.querySelector('#screen');
         const commit = screen?.querySelector('[data-import-commit-id]');
         const commitId = commit?.dataset.importCommitId;
-        const frame = frames?.shift();
-        if (!screen || !commitId || typeof frame !== 'function') return false;
+        if (!screen || !commitId || frames?.length !== 1) return false;
         screen.dataset.screen = 'review';
         screen.dataset.screen = 'imported';
         commit.dataset.importCommitId = 'obsolete-completion-presentation';
         commit.dataset.importCommitId = commitId;
-        frame(performance.now());
         await new Promise((resolveWait) => setTimeout(resolveWait, 0));
         const valid = screen.dataset.screen === 'imported' && commit.dataset.importCommitId === commitId &&
           frames.length === 0 && document.documentElement.dataset.ai7ImportCompletionPainted === undefined &&
@@ -3191,7 +3211,12 @@ async function main() {
         if (globalThis.__ai7HeldCompletionOriginalAnimationFrame) {
           globalThis.requestAnimationFrame = globalThis.__ai7HeldCompletionOriginalAnimationFrame;
         }
+        if (globalThis.__ai7HeldCompletionOriginalCancelAnimationFrame) {
+          globalThis.cancelAnimationFrame = globalThis.__ai7HeldCompletionOriginalCancelAnimationFrame;
+        }
         delete globalThis.__ai7HeldCompletionOriginalAnimationFrame;
+        delete globalThis.__ai7HeldCompletionOriginalCancelAnimationFrame;
+        delete globalThis.__ai7CancelledCompletionFrameId;
         delete globalThis.__ai7HeldCompletionFrames;
         return valid;
       })()`,

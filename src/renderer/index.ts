@@ -367,32 +367,38 @@ async function acknowledgeCompletionAfterPaint(result: ImportCommitProjection): 
     while (true) {
       if (!await waitForVisibleProductReady(presentation.signal)) return false;
       let eligibilityChanged = false;
-      const recordVisibilityChange = (): void => {
+      const framePair = new AbortController();
+      const recordEligibilityChange = (): void => {
         eligibilityChanged = true;
+        framePair.abort();
       };
-      const readinessObserver = new MutationObserver(() => {
-        eligibilityChanged = true;
-      });
-      document.addEventListener('visibilitychange', recordVisibilityChange);
+      const abortFramePair = (): void => framePair.abort();
+      const readinessObserver = new MutationObserver(recordEligibilityChange);
+      document.addEventListener('visibilitychange', recordEligibilityChange);
+      presentation.signal.addEventListener('abort', abortFramePair, { once: true });
       readinessObserver.observe(document.documentElement, {
         attributes: true,
         attributeFilter: ['data-ai7-product-ready'],
       });
+      if (presentation.signal.aborted) abortFramePair();
+      if (!productIsVisibleAndReady()) recordEligibilityChange();
       let twoFramesPresented = false;
       try {
-        twoFramesPresented = await nextVisibleFrame(presentation.signal) &&
-          await nextVisibleFrame(presentation.signal);
+        twoFramesPresented = await nextVisibleFrame(framePair.signal) &&
+          await nextVisibleFrame(framePair.signal);
       } finally {
-        if (readinessObserver.takeRecords().length > 0) eligibilityChanged = true;
+        if (readinessObserver.takeRecords().length > 0) recordEligibilityChange();
         readinessObserver.disconnect();
-        document.removeEventListener('visibilitychange', recordVisibilityChange);
+        document.removeEventListener('visibilitychange', recordEligibilityChange);
+        presentation.signal.removeEventListener('abort', abortFramePair);
       }
       if (presentationObserver.takeRecords().length > 0) presentation.abort();
-      if (presentation.signal.aborted || !twoFramesPresented) return false;
+      if (presentation.signal.aborted) return false;
       const currentCommit = screen.querySelector<HTMLElement>('[data-import-commit-id]');
       if (screen.dataset['screen'] !== 'imported' || currentCommit !== presentedCommit ||
         currentCommit.dataset['importCommitId'] !== result.commitId) return false;
-      if (!eligibilityChanged && productIsVisibleAndReady()) break;
+      if (eligibilityChanged || !twoFramesPresented || !productIsVisibleAndReady()) continue;
+      break;
     }
   } finally {
     presentationObserver.disconnect();
