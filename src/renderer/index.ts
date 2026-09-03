@@ -1622,7 +1622,7 @@ function renderTaskAuthorization(host: HTMLElement, projection: TaskAuthorizatio
         } catch (error) {
           setStatus(rendererErrorMessage(error, '无法核对前台执行边界。'), 'error');
         } finally {
-          if (inspectBoundary.isConnected) inspectBoundary.disabled = false;
+          if (inspectBoundary.isConnected && !authorityInterrupted) inspectBoundary.disabled = false;
         }
       });
       inspectBoundary.dataset['taskAuthorizationAction'] = 'inspect-foreground-boundary';
