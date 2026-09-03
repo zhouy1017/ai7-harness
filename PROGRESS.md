@@ -2,29 +2,30 @@
 
 ## What's done
 
-- Issue #194 / PR #195 integrated into exact `dev@ee3f037a4d0f85866d7eeb6e207d6f8e987aa2a3` from exact head `2a0618ef11bca0a14a7f00e27601204051892f0f`. Paired Gate run `33722504779`, attempt 1, passed J-01, J-02, J-08, J-12, J-15, and J-03 on Windows and macOS.
-- Issue #196 preserves the outgoing Issue #194 root `PROGRESS.md` byte-for-byte in `docs/archive/issue-194-j01-landing-transition-2026-09-03/`, indexes that consumed checkpoint, and retains the outgoing root `HANDOFF.md` only in Git history.
-- Root `PROGRESS.md` and `HANDOFF.md` now route the next development action back to existing Issue #91 / Draft PR #193; no product, E2E, workflow, dependency, policy, or authority behavior changed.
+- Issue #201's bounded T2 renderer repair is implemented from exact `dev@98e8d8b49e2095a8b07fa8a069218ac2a76a60f2` on `fix/201-programmatic-navigation-settlement`; implementation commit `e0b423cbb2b50aaf76c57ae6e469d9cda067387c` changes only `src/renderer/index.ts`.
+- The conditional, payload-free J-02 scheduler probe produced the required RED ordering on the prior product: the proportion request reached `0.000%`, a deliberately exposed trailing scroll entered before programmatic settlement completed, and the visible result was then overwritten. The same probe passed after the repair, and every probe byte was deleted; `e2e/run-j02.mjs` remains byte-identical to the base.
+- Existing `navigate()` now synchronously claims the single existing `edgeNavigation` guard before local-edit settlement and retains it through request, window load/chrome update, and double-`requestAnimationFrame` settlement. Cursor navigation prepares its fresh cursor and continuity after local-edit settlement inside that same owner; there is no second lock, queue, retry, timeout, service/editor change, or public-interface change.
+- The unmodified provider-free J-02 diagnostic passed with `LOCAL_DIAGNOSTIC_ONLY/J-02/pass/not-completion`. At exact implementation commit `e0b423cbb2b50aaf76c57ae6e469d9cda067387c`, pinned Windows `doctor`, `bootstrap`, `build`, and `e2e:all` passed; J-01, J-02, J-08, J-12, J-15, and J-03 all reported `LOCAL_COMPLETION/.../pass`, followed by `LOCAL_COMPLETION/all/pass`.
 
 ## What's next
 
-- After Issue #196 integrates, rebase existing branch `feat/91-foreground-execution-boundary` from old head `1d5362eb336b473dd017ef10140daed852622426` onto the resulting exact `dev`, retaining both Issue #194's J-01 runner repair and Issue #91's J-03/provider-free implementation.
-- Run fresh exact-head Windows `doctor` → `bootstrap` → `build` → `e2e:all` before the single Ready transition of existing Draft PR #193 and its paired Windows/macOS Hosted Gate.
+- Repeat pinned Windows `doctor` -> `bootstrap` -> `build` -> `e2e:all` at the resulting checkpoint-document HEAD before handoff.
+- After that exact-head repeat remains green, the Commander may inspect the branch, perform the issue-owned push/pull-request transition targeting `dev`, and obtain the required paired Windows/macOS Hosted Gate without broadening Issue #201.
 
 ## Key decisions
 
-- Resume the existing Issue #91 and Draft PR #193 after rebase; this lifecycle unit neither rewrites their Change Brief nor creates replacement work.
-- Issue #194 is complete and consumed. Its archived checkpoint is historical evidence, while current routing remains at the root.
-- Issue #196's own archive sweep is `none — current routing already closes the node`; no recursive status-only lifecycle unit follows.
-- The Owner independently monitors Actions usage; this route performs no usage query or estimate.
+- The deterministic RED confirmed Issue #201's specified product race, so the conditional implementation boundary opened; this was not classified as a selector/timing-only repair or contamination.
+- Navigation settlement remains one renderer-owned critical section. The existing guard is released in `finally`, including settle refusal, missing cursor, load refusal, and error paths, while the successful path keeps it through two animation frames so renderer-generated scroll cannot recurse.
+- The requested Claude Sonnet 5 medium worker binding was unavailable on this collaboration surface; the authorized fallback was OpenAI Codex GPT-5.6 Sol at ultra reasoning.
+- The Owner independently monitors Actions usage. This work made no usage query, Provider call, credential read, `sample1` action, recording action, GitHub mutation, or Hosted CI trigger.
 
 ## Unresolved matters or blockers
 
-- The resulting exact `dev` is resolved only after Issue #196 integrates. Re-fetch and stop on drift before rebasing or integrating #91/#193.
-- The #91 rebase and its fresh Local completion remain future work; no product blocker is asserted by this documentation-only lifecycle unit.
+- No local product blocker is known. Hosted Gate evidence and the external issue/pull-request transitions remain outstanding Commander actions.
+- The checkpoint-only documentation commit changes HEAD, so its fresh exact-head Windows repeat must remain distinct from the already-passing implementation-commit evidence above.
 
 ## Safe Resume Prompt
 
 ```text
-Commander: after Issue #196 integrates, rebase existing branch feat/91-foreground-execution-boundary from old head 1d5362eb336b473dd017ef10140daed852622426 onto the resulting exact dev. Retain Issue #194's integrated J-01 runner repair and Issue #91's J-03/provider-free implementation, keep the new root lifecycle routers, and run fresh exact-head Windows doctor, bootstrap, build, and e2e:all before the single Ready transition of existing Draft PR #193.
+Worker/Commander: on fix/201-programmatic-navigation-settlement, verify the checkpoint-document HEAD is clean and repeat pinned Windows doctor, bootstrap, build, and e2e:all. Stop on any Journey failure. If all six Journeys pass, hand off exact Issue #201 without scope expansion for the issue-owned push/pull-request transition targeting dev and the required paired Windows/macOS Hosted Gate; do not query Actions usage or touch Provider, credentials, sample1, or recording.
 ```
