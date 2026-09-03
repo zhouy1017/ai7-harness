@@ -2,32 +2,29 @@
 
 ## What's done
 
-- Issue #194's bounded J-01 Gate-runner repair is implemented from exact `dev@6af45d19c8c9fb1ed8ee93d59331638ff2016726` in code commits `69638102711402a81d18d3ef895104fb324e8e0c` and `93ed082d17b3e9bc9bfe35b9c18d7b68a8965ff3`.
-- `e2e/run-j01.mjs` now waits without side effects for exactly one enabled `导入稿件` action inside `[data-screen="landing"]`, performs one separately guarded click, assigns only the landing-to-target wait to `landing-target-transition`, gives the manuscript-reimport helper the fixed `reimport-pre-review` location, and returns the module-global location to existing `review` only after that helper's final successful assertion.
-- `e2e/controller.mjs` replaces coarse `landing` with only `landing-action-ready`, `landing-target-transition`, and `reimport-pre-review`. `e2e/run.mjs`, `e2e/diagnose.mjs`, `e2e/run-all.mjs`, and `.github/workflows/e2e.yml` remain unchanged.
-- Three Issue-bounded temporary mutations independently produced `LOCAL_DIAGNOSTIC_ONLY/J-01/landing-action-ready/journey-failure/not-completion`, `LOCAL_DIAGNOSTIC_ONLY/J-01/landing-target-transition/journey-failure/not-completion`, and `LOCAL_DIAGNOSTIC_ONLY/J-01/reimport-pre-review/journey-failure/not-completion`. Every probe byte was deleted; no diagnostic log or artifact was retained.
-- The reimport location was re-exercised with an Issue-bounded helper-internal failure. A separate post-helper mutation reported `reimport-pre-review` before the stage-lifetime fix and `review` after it; both probes were deleted.
-- On Windows 11 x64 with pinned Node `24.18.1` and pnpm `11.24.0`, syntax/diff/probe-cleanup checks and the real targeted J-01 passed after the follow-up. Exact head `1eb75c679000288aa0ffa78b5d44831035eb2e9d` then passed fresh `doctor` → `bootstrap` → `build` → `e2e:all`, including all six current Journeys and `LOCAL_COMPLETION/all/pass`.
+- Issue #194 / PR #195 integrated into exact `dev@ee3f037a4d0f85866d7eeb6e207d6f8e987aa2a3` from exact head `2a0618ef11bca0a14a7f00e27601204051892f0f`. Paired Gate run `33722504779`, attempt 1, passed J-01, J-02, J-08, J-12, J-15, and J-03 on Windows and macOS.
+- Issue #196 preserves the outgoing Issue #194 root `PROGRESS.md` byte-for-byte in `docs/archive/issue-194-j01-landing-transition-2026-09-03/`, indexes that consumed checkpoint, and retains the outgoing root `HANDOFF.md` only in Git history.
+- Root `PROGRESS.md` and `HANDOFF.md` now route the next development action back to existing Issue #91 / Draft PR #193; no product, E2E, workflow, dependency, policy, or authority behavior changed.
 
 ## What's next
 
-- The Commander re-resolves current `dev`, inspects this locally complete bounded branch, and owns push, Draft pull request creation/update, Ready transition, the single normal paired Windows/macOS Hosted Gate occurrence, and integration.
-- A changing repair after review returns the pull request to Draft and restores fresh local completion before another Ready transition; Hosted CI is not used for diagnosis.
+- After Issue #196 integrates, rebase existing branch `feat/91-foreground-execution-boundary` from old head `1d5362eb336b473dd017ef10140daed852622426` onto the resulting exact `dev`, retaining both Issue #194's J-01 runner repair and Issue #91's J-03/provider-free implementation.
+- Run fresh exact-head Windows `doctor` → `bootstrap` → `build` → `e2e:all` before the single Ready transition of existing Draft PR #193 and its paired Windows/macOS Hosted Gate.
 
 ## Key decisions
 
-- Readiness polling is side-effect-free. The exact scoped action is rechecked and clicked once in a separate renderer evaluation; that click evaluation is never retried.
-- `landing-target-transition` ends immediately after the target screen appears; the existing `review` location owns subsequent primary pre-review work. The independent reimport helper uses `reimport-pre-review` throughout its own preparation path and restores `review` only after the review contract succeeds.
-- The existing 30-second finite wait remains unchanged and no retry was added because deterministic local evidence did not implicate the timeout.
-- The repair changes no renderer, Electron main, service, product semantics, Provider/network/credential behavior, dependency, SampleBook, workflow, Journey order, or payload-safe reporting boundary.
+- Resume the existing Issue #91 and Draft PR #193 after rebase; this lifecycle unit neither rewrites their Change Brief nor creates replacement work.
+- Issue #194 is complete and consumed. Its archived checkpoint is historical evidence, while current routing remains at the root.
+- Issue #196's own archive sweep is `none — current routing already closes the node`; no recursive status-only lifecycle unit follows.
+- The Owner independently monitors Actions usage; this route performs no usage query or estimate.
 
 ## Unresolved matters or blockers
 
-- No blocker or remaining finding exists inside Issue #194's runner budget. The incident does not establish a separate product-side staging defect, and any future evidence requiring product changes stops outside this brief.
-- Paired Hosted Gate evidence remains pending the Commander-owned Ready lifecycle.
+- The resulting exact `dev` is resolved only after Issue #196 integrates. Re-fetch and stop on drift before rebasing or integrating #91/#193.
+- The #91 rebase and its fresh Local completion remain future work; no product blocker is asserted by this documentation-only lifecycle unit.
 
 ## Safe Resume Prompt
 
 ```text
-Commander: inspect Issue #194's locally complete bounded J-01 runner repair, re-resolve exact dev, and keep every external action Commander-owned. Preserve the side-effect-free readiness wait, one guarded click, exact stage lifetimes, unchanged timeout/no retry, and payload-safe diagnostics. After the branch is pushed and its pull request is Ready, use only the single normal paired Windows/macOS Hosted Gate occurrence; do not use Hosted CI as a debugger.
+Commander: after Issue #196 integrates, rebase existing branch feat/91-foreground-execution-boundary from old head 1d5362eb336b473dd017ef10140daed852622426 onto the resulting exact dev. Retain Issue #194's integrated J-01 runner repair and Issue #91's J-03/provider-free implementation, keep the new root lifecycle routers, and run fresh exact-head Windows doctor, bootstrap, build, and e2e:all before the single Ready transition of existing Draft PR #193.
 ```
