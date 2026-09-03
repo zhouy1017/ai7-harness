@@ -3151,8 +3151,8 @@ async function main() {
       holdCompletionPaint: true,
       diagnosticReviewLocation: 'before-paint-review',
     });
-    // Issue #178 / nearest supported Journey J-01: a visible imported result must reject a
-    // frame pair crossed by a hidden interval and must not acknowledge an obsolete screen/commit.
+    // Issue #47 / nearest supported Journey J-01: import completion acknowledgement must settle
+    // before the ancillary Task authorization inspection/card settles.
     at('completion-visibility-transition');
     await waitFor(
       renderer,
@@ -3164,6 +3164,8 @@ async function main() {
       `(async () => { await new Promise((resolveWait) => setTimeout(resolveWait, 0)); return Boolean(document.querySelector('[data-task-authorization-book-id]')) && !document.querySelector('[data-task-authorization-state]') && document.documentElement.dataset.ai7ImportCompletionPainted === undefined && document.documentElement.dataset.ai7ImportCompletionAcknowledged === undefined; })()`,
       'completion-defers-task-authorization-inspection',
     );
+    // Issue #178 / nearest supported Journey J-01: a visible imported result must reject a
+    // frame pair crossed by a hidden interval and must not acknowledge an obsolete screen/commit.
     await assertRenderer(
       renderer,
       `(() => { const frame = globalThis.__ai7HeldCompletionFrames?.shift(); if (typeof frame?.callback !== 'function') return false; frame.callback(performance.now()); return true; })()`,
