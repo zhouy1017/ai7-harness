@@ -2,27 +2,28 @@
 
 ## What's done
 
-- Issue #210 preflight and bounded documentation repair are complete on the branch created from exact `dev@c396eab25d2261cb59918c264a6f61ce474cea20`.
-- The consumed Issue #207 root `HANDOFF.md` and `PROGRESS.md` were preserved byte-for-byte in one indexed archive node; the archive index and current routers now route to Issue #209, then Issue #198 / Draft PR #199.
-- Receipt verification matched dispatch `9746217b-044c-48f3-893c-8152aa2fa160`, Issue body revision 1/hash, task session, branch, worktree, exact base/target, Worker/T1 role, and accepted launch binding.
+- Repository-development dispatch now routes through ADR 0059, the Codex-only Issue-bound Task Session runbook, and the query-only Dispatch Register.
+- ADR 0015 is preserved as explicitly superseded history; the active provider-neutral/Claude/Spark/fallback and unverifiable actual-model rules are removed without changing product-runtime provider semantics or CI evidence.
+- Issue #210 / PR #211 remains the completed predecessor routing repair at the cutover base.
 
 ## What's next
 
-- Commander-only integration of Issue #210: validate the exact six-path delta, push, open the Draft pull request, make it Ready once, and squash-merge only if `dev` has not drifted.
-- Then integrate Issue #209's authorized J-02 effect-based verification delta before resuming Issue #198 / Draft PR #199.
+- The Commander queries current Issue receipts and built-in Task state, then launches a fresh Issue #209 T2 Worker attempt at `gpt-5.6-terra @ high` from exact current `dev`.
+- After Issue #209 integrates, the Commander revises Issue #198 for the resulting exact base/target and launches a fresh T2 Worker attempt before further controlled-file work.
 
 ## Key decisions
 
-- This documentation-only change adds no product behavior or automated proof work and does not alter the Provider, credential, `sample1`, fixture, export, publication, release, distribution, or `main` boundaries.
-- Under ADR 0058, repository development does not query, estimate, report, or consider Actions usage.
+- T0 Issue shaping, dispatch, acceptance, integration, and external actions remain Commander-only; every T1–T3 Worker and every Reviewer receives a fresh top-level Codex Task Session with a verified Launch Receipt.
+- Root `PROGRESS.md` and `HANDOFF.md` are Commander-owned integration-line routers. Per-attempt evidence lives in Issue receipts and Task state, with no central mutable Git ledger or transient-status projection here.
+- Product Provider, Model Role, DSH, Provider Processing/fallback, credential, Effect, provider-free E2E, export, publication, distribution, release, and `main` authority are unchanged.
 
 ## Unresolved matters or blockers
 
-- Issue #210 is locally complete; external push, pull-request state changes, and merge remain Commander-only.
-- Issue #209 and then Issue #198 remain pending integration and their separately required validation routes.
+- Issue #209 remains the next product integration; Issue #198 must wait for that integration and a new exact base/target binding.
+- Required product validation and paired Hosted Gate evidence remain governed by each product Issue and the current CI boundary.
 
 ## Safe Resume Prompt
 
 ```text
-Commander: validate and integrate Issue #210's exact six-path documentation delta from the branch created from exact dev@c396eab25d2261cb59918c264a6f61ce474cea20 through its authorized route, then integrate Issue #209's authorized J-02 effect-based verification delta before re-resolving Issue #198 / Draft PR #199. Under ADR 0058, do not query, estimate, report, or consider Actions usage. Do not touch Provider, credentials, sample1, recording, fixture admission, product Effect, export, publication, release, distribution, or main.
+Commander: query the Dispatch Register and current Issue receipts first. Launch a fresh Issue #209 T2 Worker Task at gpt-5.6-terra @ high from exact current dev and integrate it through its authorized route. Then revise Issue #198 for the resulting exact base/target and launch a fresh T2 attempt, preserving #201's renderer repair and three waits plus #198's payload-safe diagnostics. Keep product integration serial; under ADR 0058 do not query, estimate, report, or consider Actions usage. Do not touch Provider, credentials, sample1, recording, fixture admission, product Effect, export, publication, release, distribution, or main.
 ```

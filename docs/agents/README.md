@@ -1,6 +1,6 @@
 # Agent document router
 
-This is the task-oriented reading map. Root [`AGENTS.md`](../../AGENTS.md) and current [`PROGRESS.md`](../../PROGRESS.md) are the only universal reading set. Load the smallest additional row that covers the active Change Brief; do not read every linked document by default.
+This is the task-oriented reading map. Root [`AGENTS.md`](../../AGENTS.md) is the universal entry. A Commander then reads current [`PROGRESS.md`](../../PROGRESS.md), [`HANDOFF.md`](../../HANDOFF.md), and the [Dispatch Register](./dispatch-register.md). During the no-write bootstrap, a Worker or Reviewer reads `AGENTS.md`, its GitHub Issue, and immutable launch expectations; after the finalized Receipt permalink arrives, it fetches and verifies that Receipt before edits. Load the smallest additional row that covers the active Change Brief; do not read another task transcript, every linked document, or the root routers by default.
 
 ## Design-truth order
 
@@ -21,6 +21,7 @@ Use [design authority and action authorization](./design-authority.md) for confl
 
 | Task | Read after the universal set |
 | --- | --- |
+| Repository dispatch, resume, acceptance, or retention | [Repository Development Dispatch](../../kick-in/27-repository-development-dispatch.md); [Dispatch Register](./dispatch-register.md); active Issue receipts; built-in Codex task state |
 | Any non-mechanical change | Active Issue/Change Brief; [incremental development](./incremental-development.md); relevant context/ADR; affected sections of [project constraints](./project-constraints.md) |
 | Mechanical T1 change | Short Change Brief; exact named paths; applicable formatting or Git rule only |
 | Bug diagnosis | Nearest supported journey and issue; affected code path; [CI boundary](./ci-test-boundaries.md). Temporary diagnostics do not become standing gates |
@@ -37,7 +38,7 @@ Use [design authority and action authorization](./design-authority.md) for confl
 - Root context files and Policy Documents own current domain and authority definitions.
 - `kick-in/` records the design interview and migration reasoning. It is not the ordinary implementation entry point and cannot override a root authority owner.
 - `docs/architecture-v2/` and `docs/ui-ux-v2/` are the Owner-accepted implementation-facing design packages on `dev`; their acceptance defines design truth but grants no adjacent action, provider/export authority, publication, release, or `main` promotion.
-- `HANDOFF.md` is a current router only. `PROGRESS.md` is a current checkpoint only.
+- `HANDOFF.md` and `PROGRESS.md` are Commander-owned integration-line routers, not Task/attempt state or universal Worker/Reviewer context.
 - `docs/archive/` is historical storage, excluded from default search and context assembly.
 
 ## Keep the reading set small

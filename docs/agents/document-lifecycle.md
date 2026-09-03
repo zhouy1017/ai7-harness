@@ -37,7 +37,7 @@ Archive consumed working material only after its live conclusion has been promot
 - prior `PROGRESS.md` checkpoints and replaced root handoff text;
 - consumed session/freeze handoffs;
 - candidate or superseded design packages;
-- review packets, dispatch records, phase plans, issue-local analysis, and prototype notes; and
+- review packets, legacy repository-local dispatch records, phase plans, issue-local analysis, and prototype notes; and
 - historical migration or verification plans that must remain available as evidence but must not guide current work.
 
 ### Delete
@@ -86,13 +86,15 @@ Archive contents preserve historical meaning. Do not edit an archived document t
 6. If material moves, place it in one node directory and write its index. Preserve original paths in the index.
 7. Replace stable root entry points with concise current versions; update ordinary links so they do not route through archives.
 8. Delete approved disposable material and report what was removed and recoverability.
-9. Replace root `PROGRESS.md` with one current checkpoint and one safe Resume Prompt. When the outgoing checkpoint represents the completed, consumed, superseded, or frozen node, archive exactly that one named snapshot. Do not archive intermediate checkpoints from the same node; the Issue, PR, accepted decision, and Git history carry their detail.
+9. The Commander replaces root `PROGRESS.md` and `HANDOFF.md` when integration routing changes. When the outgoing router represents the completed, consumed, superseded, or frozen node and a named snapshot is needed, archive exactly that one node-level version. Issue receipts, pull requests, accepted decisions, and Git history carry attempt detail.
 10. Run lightweight documentation checks: local links outside archives, root wrappers/routers, archive-index completeness for moved files, and `git diff --check`. This is maintenance, not a new proof gate.
 
 ## Progress and handoff rules
 
-`PROGRESS.md` is updated after every sub-task by replacing its current checkpoint rather than appending chronology. Individual commands and minor edits inside one sub-task do not create separate checkpoints. At a triggering lifecycle node, archive at most one outgoing node-level checkpoint under Sweep step 9, then write the new current state. Intermediate sub-task updates within that node are replaced without archival. This creates periodic node-driven snapshots without an append-only log or one archive per command.
+`PROGRESS.md` and `HANDOFF.md` are Commander-owned integration-line routers. They contain durable current routing and one safe Resume Prompt, not per-attempt chronology, transient Task status, or a universal Worker/Reviewer startup packet. The Commander replaces them when the integration route changes; parallel Workers and Reviewers use their Issue, Launch/Return Receipts, and Task Session instead.
 
-`HANDOFF.md` is a current cold-start router, not a narrative transcript. A task-specific handoff is archived only after its successor confirms consumption or the task is frozen/closed. The successor records the new current Resume Prompt before the old handoff leaves the active path.
+When a Change Brief explicitly makes a root-router transition part of one atomic outcome, that Worker may edit only the authorized router paths; the edit remains an integration projection rather than the Worker's progress ledger. At a triggering node, archive at most one outgoing node-level snapshot under Sweep step 9. A task-specific historical handoff is archived only after its successor confirms consumption or the task is frozen/closed.
 
 No parallel `MEMORY.md`, duplicate progress ledger, or archive-derived current-state summary is created.
+
+Codex Task retention is separate. The Commander keeps completed Worker/Reviewer Tasks visible through Issue merge, close, or abandonment, leaves `needs-commander` visible, and immediately archives a `cancelled` or `superseded` Task after its Return Receipt. See the [Dispatch Register](dispatch-register.md); Task archival creates no `docs/archive/` node.

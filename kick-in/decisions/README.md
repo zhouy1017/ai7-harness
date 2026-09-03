@@ -1,6 +1,6 @@
 # Decision Records
 
-Accepted system-wide architecture decisions live under [`docs/adr/`](../../docs/adr/). The current root sequence contains 42 records, ADR 0001 through ADR 0042:
+Accepted and explicitly superseded system-wide decisions live under [`docs/adr/`](../../docs/adr/). The current root sequence contains 59 records, ADR 0001 through ADR 0059:
 
 - [ADR 0001: Version Editorial Dimension configuration at task start](../../docs/adr/0001-versioned-editorial-dimension-configuration.md)
 - [ADR 0002: Separate Book, Series, Cross-project, and House-learning scopes](../../docs/adr/0002-book-series-cross-project-and-house-learning-scopes.md)
@@ -11,12 +11,12 @@ Accepted system-wide architecture decisions live under [`docs/adr/`](../../docs/
 - [ADR 0007: Separate decisions, authority, and Effect proof](../../docs/adr/0007-separate-decisions-authority-and-effect-proof.md)
 - [ADR 0008: Use deliverable-owned workflow profiles](../../docs/adr/0008-use-deliverable-owned-workflow-profiles.md)
 - [ADR 0009: Use authority-bearing Plan Envelopes](../../docs/adr/0009-use-authority-bearing-plan-envelopes.md)
-- [ADR 0010: Separate Task Skill instruction, implementation, and authority](../../docs/adr/0010-separate-task-skill-instruction-implementation-and-authority.md)
+- [ADR 0010: Historical Task Skill instruction/implementation split — superseded by ADR 0045](../../docs/adr/0010-separate-task-skill-instruction-implementation-and-authority.md)
 - [ADR 0011: Separate task-business and Harness-execution ledgers](../../docs/adr/0011-separate-task-business-and-harness-execution-ledgers.md)
 - [ADR 0012: Exclude legacy production-data migration](../../docs/adr/0012-exclude-legacy-production-data-migration.md)
 - [ADR 0013: Ship a Standalone-only V1 and defer Word integration](../../docs/adr/0013-ship-standalone-only-v1.md)
 - [ADR 0014: Historical one-Windows verification decision, superseded by ADRs 0027 and 0028](../../docs/adr/0014-verify-on-one-windows-gate.md)
-- [ADR 0015: Keep development dispatch rules provider-neutral](../../docs/adr/0015-provider-neutral-development-dispatch.md)
+- [ADR 0015: Historical provider-neutral development dispatch — superseded by ADR 0059](../../docs/adr/0015-provider-neutral-development-dispatch.md)
 - [ADR 0016: Keep AI7 proprietary and sample manuscripts local-only](../../docs/adr/0016-proprietary-license-and-local-only-sample-manuscripts.md)
 - [ADR 0017: Compose the full Harness engine behind a narrow tool surface](../../docs/adr/0017-full-engine-narrow-tool-surface.md)
 - [ADR 0018: Tier activation for agent-authored revisions](../../docs/adr/0018-tiered-activation-for-agent-authored-revisions.md)
@@ -43,7 +43,24 @@ Accepted system-wide architecture decisions live under [`docs/adr/`](../../docs/
 - [ADR 0039: Delegate local-export collisions to native OS workflows](../../docs/adr/0039-delegate-local-export-collisions-to-native-os-workflows.md)
 - [ADR 0040: Preserve post-designation maintenance as versioned cases](../../docs/adr/0040-preserve-post-designation-maintenance-as-versioned-cases.md)
 - [ADR 0041: Use a DSH-first, DeepSeek-primary, AI7-owned architecture](../../docs/adr/0041-dsh-first-deepseek-primary-architecture.md)
-- [ADR 0042: Admit and locally pin third-party DSH plugins](../../docs/adr/0042-admit-and-pin-third-party-dsh-plugins.md)
+- [ADR 0042: Historical third-party DSH plugin admission — superseded by ADR 0045](../../docs/adr/0042-admit-and-pin-third-party-dsh-plugins.md)
+- [ADR 0043: Allow Owner-designated Public SampleBooks in repository and CI](../../docs/adr/0043-allow-public-samplebooks-in-repository-and-ci.md)
+- [ADR 0044: Use sample1 as the compatibility and recording baseline](../../docs/adr/0044-use-sample1-as-compatibility-and-recording-baseline.md)
+- [ADR 0045: Preserve native DSH artifacts behind AI7 authority sidecars](../../docs/adr/0045-preserve-native-dsh-artifacts-behind-ai7-authority-sidecars.md)
+- [ADR 0046: Separate Provider Processing by operational scope](../../docs/adr/0046-separate-provider-processing-by-operational-scope.md)
+- [ADR 0047: Separate targeted retrieval from covered manuscript analysis](../../docs/adr/0047-separate-targeted-retrieval-from-covered-manuscript-analysis.md)
+- [ADR 0048: Enroll and evaluate background manuscript analysis](../../docs/adr/0048-enroll-and-evaluate-background-manuscript-analysis.md)
+- [ADR 0049: Bound hosted Actions consumption inside the E2E Gate](../../docs/adr/0049-bound-hosted-actions-consumption-inside-the-e2e-gate.md)
+- [ADR 0050: Historical hosted-E2E waiver during Actions exhaustion — superseded by ADR 0053](../../docs/adr/0050-waive-hosted-e2e-integration-evidence-during-actions-exhaustion.md)
+- [ADR 0051: Admit J-12 as the fourth supported E2E journey](../../docs/adr/0051-admit-j-12-as-the-fourth-supported-e2e-journey.md)
+- [ADR 0052: Select the macOS V1 distribution and data-location profile](../../docs/adr/0052-select-the-macos-v1-distribution-and-data-location-profile.md)
+- [ADR 0053: Preserve local-first development through a bounded CI-degraded mode](../../docs/adr/0053-preserve-local-first-development-through-a-bounded-ci-degraded-mode.md)
+- [ADR 0054: Defer macOS evidence until after the initial v1.0.0 development milestone](../../docs/adr/0054-defer-macos-evidence-until-after-initial-v1-0-0-development-milestone.md)
+- [ADR 0055: Stage the bounded provider-free J-03 authorization journey](../../docs/adr/0055-stage-the-bounded-provider-free-j-03-authorization-journey.md)
+- [ADR 0056: Stage the bounded provider-free J-15 artifact lifecycle journey](../../docs/adr/0056-stage-the-bounded-provider-free-j-15-artifact-lifecycle-journey.md)
+- [ADR 0057: Restore the hosted Gate under observed Actions usage](../../docs/adr/0057-restore-hosted-gate-under-observed-actions-usage.md)
+- [ADR 0058: Remove Actions usage observation from development gating](../../docs/adr/0058-remove-actions-usage-observation-from-development-gating.md)
+- [ADR 0059: Dispatch repository work through Issue-bound Codex Task Sessions](../../docs/adr/0059-dispatch-repository-work-through-issue-bound-codex-task-sessions.md)
 
 Create a record here only when a choice is hard to reverse, surprising without context, and the result of a real trade-off. Use sequential names such as `0001-fresh-ai7-repository.md` and keep the record concise: what was decided, why, meaningful rejected alternatives, and any non-obvious consequence.
 

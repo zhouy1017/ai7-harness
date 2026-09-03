@@ -1,4 +1,10 @@
+---
+status: superseded
+---
+
 # Keep development dispatch rules provider-neutral
+
+This decision is superseded in full by [ADR 0059](./0059-dispatch-repository-work-through-issue-bound-codex-task-sessions.md). Its provider-neutral Layer A/B policy, Claude-first/cross-provider selection, Spark lane, fallback, CLI plumbing, and actual-binding reporting are historical only. The original body remains below unchanged as decision history. ADR 0027's earlier supersession of this ADR's verification and review-gate clauses also remains historical and is not revived.
 
 Repository development uses three agent roles. The Commander decides dispatch, reviews returned work, and is the sole integrator and sole external-action authority. A Worker writes only its own worktree and branch, runs the E2E Functional Gate only when its implementation work affects a supported journey or observed-bug outcome, and reports; it never merges, pushes, publishes, or touches credentials, manuscripts, or private sample Books.
 
