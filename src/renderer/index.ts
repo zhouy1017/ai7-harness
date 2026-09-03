@@ -1256,8 +1256,8 @@ function renderBookOverview(
 
   const taskHost = element('div');
   taskHost.dataset['taskAuthorizationBookId'] = overview.book.bookId;
-  if (overview.manuscriptState.state === 'populated') {
-    content.append(taskHost);
+  const inspectTaskAuthorization = (): void => {
+    if (!taskHost.isConnected || overview.manuscriptState.state !== 'populated') return;
     void window.ai7.inspectTaskAuthorization().then(
       (projection) => {
         if (taskHost.isConnected && projection.bookId === taskHost.dataset['taskAuthorizationBookId']) {
@@ -1275,6 +1275,9 @@ function renderBookOverview(
         taskHost.replaceChildren(unavailable);
       },
     );
+  };
+  if (overview.manuscriptState.state === 'populated') {
+    content.append(taskHost);
   }
 
   const detailHost = element('div');
@@ -1425,8 +1428,10 @@ function renderBookOverview(
         for (const action of completionActionButtons) action.disabled = false;
         setStatus(completion.completionLabel, 'success');
       }
+      inspectTaskAuthorization();
     });
   } else {
+    inspectTaskAuthorization();
     setStatus('图书工作概览已打开');
   }
 }

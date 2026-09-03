@@ -1374,7 +1374,6 @@ async function runJourney(
     degraded ? '按上述降级方式新建图书并导入稿件' : '新建图书并导入稿件',
     'commit-click',
   );
-  atPrimaryReviewStage('completion');
   if (expectInterruption) {
     await waitFor(
       renderer,
@@ -1385,6 +1384,7 @@ async function runJourney(
     return;
   }
   await waitFor(renderer, `document.querySelector('[data-screen="imported"]')`, 'imported');
+  atPrimaryReviewStage('completion');
   await assertRenderer(
     renderer,
     `document.querySelector('[data-screen="imported"]')?.textContent.includes('稿件已导入') && document.querySelector('[data-screen="imported"]')?.textContent.includes('图书工作概览')`,
@@ -3161,7 +3161,7 @@ async function main() {
     );
     await assertRenderer(
       renderer,
-      `Boolean(document.querySelector('[data-task-authorization-book-id]')) && !document.querySelector('[data-task-authorization-state]') && document.documentElement.dataset.ai7ImportCompletionPainted === undefined && document.documentElement.dataset.ai7ImportCompletionAcknowledged === undefined`,
+      `(async () => { await new Promise((resolveWait) => setTimeout(resolveWait, 0)); return Boolean(document.querySelector('[data-task-authorization-book-id]')) && !document.querySelector('[data-task-authorization-state]') && document.documentElement.dataset.ai7ImportCompletionPainted === undefined && document.documentElement.dataset.ai7ImportCompletionAcknowledged === undefined; })()`,
       'completion-defers-task-authorization-inspection',
     );
     await assertRenderer(
