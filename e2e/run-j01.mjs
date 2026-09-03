@@ -1031,6 +1031,7 @@ async function collectEditorBlockIdentities(renderer, scenario, openEditor = tru
     const firstBlockId = page[0].id;
     await clickExactButton(renderer, '向后浏览', `${scenario}-next-editor-page`);
     await waitFor(renderer, `document.querySelector('[data-testid="manuscript-editor"] [data-block-id]')?.dataset.blockId !== ${JSON.stringify(firstBlockId)}`, `${scenario}-next-editor-page-ready`);
+    await renderer.evaluate(`new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
   }
   return identities;
 }
@@ -1048,6 +1049,7 @@ async function collectEditorBlockIdentitySequence(renderer, scenario) {
     const firstBlockId = page[0].id;
     await clickExactButton(renderer, '向后浏览', `${scenario}-next-editor-page`);
     await waitFor(renderer, `document.querySelector('[data-testid="manuscript-editor"] [data-block-id]')?.dataset.blockId !== ${JSON.stringify(firstBlockId)}`, `${scenario}-next-editor-page-ready`);
+    await renderer.evaluate(`new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
   }
   return identities;
 }
