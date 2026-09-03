@@ -331,7 +331,7 @@ async function fill(renderer, selector, value, name) {
   );
 }
 
-async function importSample1(renderer) {
+async function importSample1(renderer, cancellation) {
   await click(renderer, '导入稿件', 'import-open');
   await waitFor(renderer, `document.querySelector('[data-screen="target"]')`, 'import-target');
   at('sample1-import-target');
@@ -343,11 +343,13 @@ async function importSample1(renderer) {
   at('sample1-import-title');
   await assertRenderer(renderer, `document.querySelector('[data-source-sha256]')?.textContent===${JSON.stringify(SAMPLE1_SHA256)} && document.querySelector('[data-source-bytes]')?.textContent===${JSON.stringify(String(SAMPLE1_BYTES))}`, 'import-exact-source');
   await fill(renderer, '#book-title', 'J-03 sample1 任务授权', 'import-title');
+  cancellation.throwIfRequested();
   await click(renderer, '确认书名并复核', 'import-review');
   await waitFor(renderer, `document.querySelector('[data-screen="review"]')`, 'import-review-ready');
   at('sample1-import-review');
   await assertRenderer(renderer, `(() => { const acceptance=document.querySelector('#accept-import-degradation'); if(!(acceptance instanceof HTMLInputElement)||acceptance.checked)return false; acceptance.click(); return acceptance.checked; })()`, 'import-degradation-explicit');
   await waitFor(renderer, `Array.from(document.querySelectorAll('button')).some((button)=>button.textContent==='按上述降级方式新建图书并导入稿件'&&!button.disabled)`, 'import-degradation-accepted');
+  cancellation.throwIfRequested();
   await click(renderer, '按上述降级方式新建图书并导入稿件', 'import-commit');
   await waitFor(renderer, `document.querySelector('[data-screen="imported"] .book-overview[data-manuscript-state="populated"]')`, 'import-completed', 180_000);
   at('sample1-import-completed');
@@ -361,13 +363,14 @@ async function importSample1(renderer) {
   return identity;
 }
 
-async function createEmptyBook(renderer) {
+async function createEmptyBook(renderer, cancellation) {
   await click(renderer, '新建图书', 'cross-book-open');
   await waitFor(renderer, `document.querySelector('[data-screen="book-create"]')`, 'cross-book-form');
   await fill(renderer, '#empty-book-title', 'J-03 路由边界图书', 'cross-book-title');
   await fill(renderer, '#empty-book-number', 'J03-ROUTE-BOUNDARY', 'cross-book-number');
   await click(renderer, '复核创建', 'cross-book-review');
   await waitFor(renderer, `document.querySelector('[data-screen="book-create-review"]')`, 'cross-book-review-ready');
+  cancellation.throwIfRequested();
   await click(renderer, '新建图书', 'cross-book-commit');
   await waitFor(renderer, `document.querySelector('.book-overview[data-manuscript-state="empty"]')`, 'cross-book-created');
   const bookId = await renderer.evaluate(`document.querySelector('.book-overview')?.dataset.bookId`);
@@ -377,13 +380,18 @@ async function createEmptyBook(renderer) {
   return bookId;
 }
 
-async function saveEditorSuffix(renderer, suffix, expectedSequence) {
+async function saveEditorSuffix(renderer, suffix, expectedSequence, cancellation) {
+  cancellation.throwIfRequested();
   await click(renderer, '打开稿件', 'edit-open');
   await waitFor(renderer, `document.querySelector('[data-screen="editor"] [data-testid="manuscript-editor"]')`, 'edit-ready');
+  cancellation.throwIfRequested();
   await assertRenderer(renderer, `(() => { const block=document.querySelector('[data-testid="manuscript-editor"] [data-block-id]'); if(!(block instanceof HTMLElement))return false; block.focus(); const range=document.createRange(); range.selectNodeContents(block); range.collapse(false); const selection=getSelection(); selection.removeAllRanges(); selection.addRange(range); document.execCommand('insertText',false,${JSON.stringify(suffix)}); return block.textContent?.endsWith(${JSON.stringify(suffix)}); })()`, 'edit-inserted');
+  cancellation.throwIfRequested();
   await waitFor(renderer, `!Array.from(document.querySelectorAll('button')).find((item)=>item.textContent==='保存当前编辑')?.disabled`, 'edit-dirty');
+  cancellation.throwIfRequested();
   await click(renderer, '保存当前编辑', 'edit-save');
   await waitFor(renderer, `document.querySelector('#persistence-status')?.dataset.tone==='success' && document.querySelector('#persistence-status')?.textContent.includes('修订日志')`, 'edit-durable', 120_000);
+  cancellation.throwIfRequested();
   await assertRenderer(renderer, `document.querySelector('.editor-meta')?.textContent.includes(${JSON.stringify(`修订日志序号 ${expectedSequence}`)})`, 'edit-sequence');
   await click(renderer, '返回图书工作概览', 'edit-return');
   await waitFor(renderer, `document.querySelector('[data-screen="book-overview"]')`, 'edit-returned');
@@ -396,6 +404,23 @@ async function waitFor(renderer, expression, name, timeout = 60_000) {
     await new Promise((resolveWait) => setTimeout(resolveWait, 50));
   }
   throw new Error(`J-03/${name}`);
+}
+
+async function repeatPreparationWithForeignBook(renderer, crossBookId, cancellation) {
+  cancellation.throwIfRequested();
+  let job = await renderer.evaluate(
+    `window.ai7.prepareTaskAuthorization({goal:${JSON.stringify(TASK_GOAL)},bookId:${JSON.stringify(crossBookId)}})`,
+  );
+  const deadline = Date.now() + 120_000;
+  while (job?.state === 'queued' || job?.state === 'running') {
+    cancellation.throwIfRequested();
+    requireJourney(UUID_PATTERN.test(job.jobId) && Date.now() < deadline, 'cross-book-prepare-bounded');
+    await new Promise((resolveWait) => setTimeout(resolveWait, 25));
+    cancellation.throwIfRequested();
+    job = await renderer.evaluate(`window.ai7.pollServiceJob({jobId:${JSON.stringify(job.jobId)}})`);
+  }
+  cancellation.throwIfRequested();
+  return job;
 }
 
 async function main() {
@@ -420,6 +445,7 @@ async function main() {
   let cleanupPromise;
   let finalCleanupRequested = false;
   let activeBrowserClose;
+  let browserCloseRejected = false;
   const closeBrowserBounded = async (ownedBrowser) => {
     if (ownedBrowser === undefined || !ownedBrowser.isConnected()) return;
     if (activeBrowserClose !== undefined) return activeBrowserClose;
@@ -430,14 +456,17 @@ async function main() {
     try {
       await boundedClose;
     } catch (error) {
-      if (ownedBrowser.isConnected()) {
-        runnerLifecycleIncomplete = true;
-        throw error;
-      }
+      browserCloseRejected = true;
+      runnerLifecycleIncomplete = true;
+      throw error;
     } finally {
       if (activeBrowserClose === boundedClose) activeBrowserClose = undefined;
     }
-    requireJourney(!ownedBrowser.isConnected(), 'browser-close-unconfirmed');
+    if (ownedBrowser.isConnected()) {
+      browserCloseRejected = true;
+      runnerLifecycleIncomplete = true;
+      throw new Error('J-03/browser-close-unconfirmed');
+    }
   };
   const closeOwnedBrowser = async () => {
     const ownedBrowser = browser;
@@ -491,6 +520,7 @@ async function main() {
     return true;
   };
   const cleanup = () => (cleanupPromise ??= (async () => {
+    if (browserCloseRejected) throw cleanupFailure ?? new Error('J-03/browser-cleanup-failed');
     if (credentialMutationReached && !credentialRemoved) {
       try {
         await removeCredentialThroughProduct();
@@ -499,6 +529,7 @@ async function main() {
       }
       if (!credentialRemoved && launchForCleanup !== undefined) {
         const closedForRetry = await closeOwnedBrowserForCleanup();
+        if (browserCloseRejected) throw cleanupFailure ?? new Error('J-03/browser-cleanup-failed');
         if (closedForRetry) {
           try {
             await launchForCleanup(true);
@@ -510,7 +541,9 @@ async function main() {
         }
       }
       if (!credentialRemoved) {
+        if (browserCloseRejected) throw cleanupFailure ?? new Error('J-03/browser-cleanup-failed');
         const closedForFallback = await closeOwnedBrowserForCleanup();
+        if (browserCloseRejected) throw cleanupFailure ?? new Error('J-03/browser-cleanup-failed');
         if (closedForFallback && credentialReferenceForCleanup === undefined && dataRoot !== undefined && runRoot !== undefined) {
           try {
             const recovered = await recoverSyntheticCredentialCleanupState(dataRoot, runRoot);
@@ -531,14 +564,15 @@ async function main() {
         }
       }
     }
+    if (browserCloseRejected) throw cleanupFailure ?? new Error('J-03/browser-cleanup-failed');
     const browserClosed = await closeOwnedBrowserForCleanup();
+    if (!browserClosed) throw cleanupFailure ?? new Error('J-03/browser-cleanup-failed');
     const ownedLoopback = loopback ?? (loopbackAcquisition === undefined ? undefined : await loopbackAcquisition.catch(() => undefined));
     try { await ownedLoopback?.close(); } catch (error) { cleanupFailure ??= error; }
     loopback = undefined;
     if (credentialMutationReached && !credentialRemoved) {
       throw credentialCleanupFailure ?? new Error('J-03/credential-cleanup-failed');
     }
-    if (!browserClosed) throw cleanupFailure ?? new Error('J-03/browser-cleanup-failed');
     const ownedRoot = runRoot ?? (runRootAcquisition === undefined ? undefined : await runRootAcquisition.catch(() => undefined));
     if (ownedRoot !== undefined) {
       if (syntheticSecret !== undefined && dataRoot !== undefined) {
@@ -624,7 +658,7 @@ async function main() {
 
     at('sample1-import');
     cancellation.throwIfRequested();
-    const imported = await importSample1(renderer);
+    const imported = await importSample1(renderer, cancellation);
     cancellation.throwIfRequested();
 
     at('task-prerequisites-unavailable');
@@ -653,7 +687,9 @@ async function main() {
     cancellation.throwIfRequested();
     syntheticSecret = randomBytes(48).toString('base64url');
     await fill(renderer, '#main-editorial-connection-name', 'J-03 主编辑连接', 'model-name');
+    cancellation.throwIfRequested();
     await fill(renderer, '#main-editorial-credential', syntheticSecret, 'model-secret');
+    cancellation.throwIfRequested();
     credentialMutationReached = true;
     await click(renderer, '保护并保存', 'model-save');
     await waitFor(renderer, `document.querySelector('[data-model-role="main-editorial"]')?.dataset.modelRoleStatus==='available' && document.querySelector('[data-credential-state="ready"]')`, 'model-saved');
@@ -672,14 +708,14 @@ async function main() {
     await click(renderer, '返回', 'model-back');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'model-back-library');
     cancellation.throwIfRequested();
-    const crossBookId = await createEmptyBook(renderer);
+    const crossBookId = await createEmptyBook(renderer, cancellation);
     cancellation.throwIfRequested();
     await assertRenderer(renderer, `(() => { const button=document.querySelector('button[data-book-id=${JSON.stringify(imported.bookId)}]'); if(!(button instanceof HTMLButtonElement))return false; button.click(); return true; })()`, 'book-reopen');
     await waitFor(renderer, `document.querySelector('.book-overview[data-book-id=${JSON.stringify(imported.bookId)}]')`, 'book-reopened');
 
     at('acknowledged-edit');
     cancellation.throwIfRequested();
-    await saveEditorSuffix(renderer, '，J-03 授权前已确认编辑', 1);
+    await saveEditorSuffix(renderer, '，J-03 授权前已确认编辑', 1, cancellation);
     cancellation.throwIfRequested();
     await waitFor(renderer, `document.querySelector('.task-authorization-card[data-task-authorization-state="available"]')`, 'task-available');
 
@@ -699,17 +735,11 @@ async function main() {
     await renderer.send('Emulation.setPageScaleFactor', { pageScaleFactor: 1 });
     await renderer.send('Emulation.clearDeviceMetricsOverride');
 
-    at('cross-book-route-guard');
-    cancellation.throwIfRequested();
-    const crossBookPreparation = await renderer.evaluate(`(async()=>{let job=await window.ai7.prepareTaskAuthorization({goal:${JSON.stringify(TASK_GOAL)},bookId:${JSON.stringify(crossBookId)}});while(job.state==='queued'||job.state==='running'){await new Promise((resolve)=>setTimeout(resolve,25));job=await window.ai7.pollServiceJob({jobId:job.jobId});}return job;})()`);
-    requireJourney(crossBookPreparation?.state === 'completed' && crossBookPreparation.result?.bookId === imported.bookId, 'prepare-sender-owned-book-route');
-    cancellation.throwIfRequested();
-    await click(renderer, '返回图书列表', 'prepared-return-library');
-    await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'prepared-library');
-    await assertRenderer(renderer, `(() => { const button=document.querySelector('button[data-book-id=${JSON.stringify(imported.bookId)}]'); if(!(button instanceof HTMLButtonElement))return false; button.click(); return true; })()`, 'prepared-reopen-book');
-
     at('plan-prepared');
+    cancellation.throwIfRequested();
+    await click(renderer, '准备任务授权计划', 'prepare-click');
     await waitFor(renderer, `document.querySelector('.task-authorization-card')?.dataset.taskAuthorizationState==='prepared'`, 'prepared', 120_000);
+    cancellation.throwIfRequested();
     const prepared = await renderer.evaluate(`window.ai7.inspectTaskAuthorization()`);
     requireJourney(prepared?.state === 'prepared' && prepared.taskIntent?.goal === TASK_GOAL &&
       prepared.checkpoint?.revisionLabel === 'r2' && prepared.checkpoint?.createdForDirtyJournal === true &&
@@ -736,8 +766,14 @@ async function main() {
       prepared.actions?.canAuthorize === true && prepared.authorization === null && prepared.runRecord === null,
     'prepared-exact-envelope');
     await assertRenderer(renderer, `(() => { const card=document.querySelector('.task-authorization-card'); const button=card?.querySelector('[data-task-authorization-action="authorize-no-dispatch"]'); return card?.textContent.includes('仅血缘证据，不属于可读范围') && card.textContent.includes(${JSON.stringify(imported.bookId)}) && card.textContent.includes(${JSON.stringify(prepared.manuscriptPin.manuscriptId)}) && card.textContent.includes(${JSON.stringify(NATIVE_CARRIER_DIGEST)}) && card.textContent.includes('空（无）') && card.textContent.includes('development-ci · v1 · 拒绝 · 0 次实时传输') && button?.textContent==='记录本次运行授权（不派发）'; })()`, 'prepared-preview');
-    const repeatedPreparation = await renderer.evaluate(`window.ai7.prepareTaskAuthorization({goal:${JSON.stringify(TASK_GOAL)}})`);
-    requireJourney(repeatedPreparation?.state === 'completed' && repeatedPreparation.result?.checkpoint?.revisionId === prepared.checkpoint.revisionId && repeatedPreparation.result?.planEnvelope?.digest === prepared.planEnvelope.digest, 'prepared-idempotent-no-empty-revision');
+
+    at('cross-book-route-guard');
+    const crossBookPreparation = await repeatPreparationWithForeignBook(renderer, crossBookId, cancellation);
+    requireJourney(crossBookPreparation?.state === 'completed' && crossBookPreparation.result?.bookId === imported.bookId &&
+      crossBookPreparation.result?.checkpoint?.revisionId === prepared.checkpoint.revisionId &&
+      crossBookPreparation.result?.planEnvelope?.digest === prepared.planEnvelope.digest,
+    'prepare-sender-owned-book-route-idempotent');
+    await assertRenderer(renderer, `document.querySelector('.book-overview')?.dataset.bookId===${JSON.stringify(imported.bookId)} && document.querySelector('.task-authorization-card')?.dataset.taskAuthorizationState==='prepared'`, 'prepare-route-remained-current-book');
 
     at('authorization-recorded');
     cancellation.throwIfRequested();
@@ -755,7 +791,7 @@ async function main() {
     cancellation.throwIfRequested();
 
     at('post-authorization-edit');
-    await saveEditorSuffix(renderer, '，J-03 授权后继续编辑', 2);
+    await saveEditorSuffix(renderer, '，J-03 授权后继续编辑', 2, cancellation);
     await waitFor(renderer, `document.querySelector('.task-authorization-card')?.dataset.taskAuthorizationState==='authorized'`, 'post-edit-record');
     const afterEdit = await renderer.evaluate(`window.ai7.inspectTaskAuthorization()`);
     requireJourney(afterEdit?.checkpoint?.revisionId === authorized.checkpoint.revisionId &&
