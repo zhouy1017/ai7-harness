@@ -24,3 +24,4 @@ Archived lifecycle nodes are historical records excluded from ordinary current-s
 - [Issue #184 J-12 protected-secret proof — 2026-09-03](issue-184-j12-protected-secret-proof-2026-09-03/INDEX.md): integrated Issue #184 / PR #185 consumed documentation-sync checkpoint and current routing.
 - [Issue #176 editorial-workspace sidecar revisions — 2026-09-03](issue-176-editorial-workspace-sidecar-revisions-2026-09-03/INDEX.md): integrated Issue #176 / PR #177 consumed checkpoint and current Issue #47 routing.
 - [Issue #47 provider-denied Task authorization — 2026-09-03](issue-47-provider-denied-task-authorization-2026-09-03/INDEX.md): integrated Issue #47 / PR #190 consumed checkpoint and current Issue #91 routing.
+- [Issue #194 J-01 landing transition — 2026-09-03](issue-194-j01-landing-transition-2026-09-03/INDEX.md): integrated Issue #194 / PR #195 consumed checkpoint and resumed Issue #91 routing.
