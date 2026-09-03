@@ -3,7 +3,7 @@ import { closeSync, constants, createReadStream, fstatSync, lstatSync, openSync,
 import { copyFile, lstat, open, realpath, rename, rm } from 'node:fs/promises';
 import { basename, isAbsolute, posix, relative, resolve, sep } from 'node:path';
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
-import { MAX_BLOCK_CODE_UNITS, MAX_FRAME_BYTES } from '../shared/protocol.js';
+import { J03_TASK_GOAL, MAX_BLOCK_CODE_UNITS, MAX_FRAME_BYTES } from '../shared/protocol.js';
 import type {
   BookCreationCommitProjection,
   BookCreationReviewProjection,
@@ -61,6 +61,8 @@ import type {
   StartupProjection,
   BookWorkbenchRoute,
   ResolvedBookWorkbenchRoute,
+  LaunchPolicyProjection,
+  TaskAuthorizationProjection,
 } from '../shared/protocol.js';
 import {
   deriveImportFidelityPlan,
@@ -103,6 +105,14 @@ import {
   validateEditorialWorkspaceProfileNativeSchema,
   validateEditorialWorkspaceProfileSchema,
 } from './editorial-workspace-profile.js';
+import {
+  initializeTaskAuthorizationSchema,
+  TASK_AUTHORIZATION_SCHEMA_VERSION,
+  TaskAuthorizationError,
+  TaskAuthorizationStore,
+  validateTaskAuthorizationSchema,
+  type TaskPreparationResult,
+} from './task-authorization.js';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const TOKEN_PATTERN = UUID_PATTERN;
@@ -1093,7 +1103,8 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === MANUSCRIPT_REIMPORT_SCHEMA_VERSION ||
       currentVersion === MODEL_SERVICE_SCHEMA_VERSION ||
       currentVersion === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION ||
-      currentVersion === EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION,
+      currentVersion === EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION ||
+      currentVersion === TASK_AUTHORIZATION_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -1106,7 +1117,8 @@ function initializeSchema(db: DatabaseSync): void {
     currentVersion === MANUSCRIPT_REIMPORT_SCHEMA_VERSION ||
     currentVersion === MODEL_SERVICE_SCHEMA_VERSION ||
     currentVersion === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION ||
-    currentVersion === EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION
+    currentVersion === EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION ||
+    currentVersion === TASK_AUTHORIZATION_SCHEMA_VERSION
   ) return;
   if (currentVersion === 1) {
     migrateSchemaV1ToV2(db);
@@ -1438,14 +1450,14 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
     version === SCHEMA_VERSION || version === SOURCE_IMPORT_SCHEMA_VERSION ||
       version === MANUSCRIPT_REIMPORT_SCHEMA_VERSION || version === MODEL_SERVICE_SCHEMA_VERSION ||
       version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION ||
-      version === EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION,
+      version === EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION || version === TASK_AUTHORIZATION_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
   if (version === SOURCE_IMPORT_SCHEMA_VERSION || version === MANUSCRIPT_REIMPORT_SCHEMA_VERSION ||
       version === MODEL_SERVICE_SCHEMA_VERSION ||
       version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION ||
-      version === EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION) return;
+      version === EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION || version === TASK_AUTHORIZATION_SCHEMA_VERSION) return;
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
   );
@@ -1544,13 +1556,13 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
     version === SOURCE_IMPORT_SCHEMA_VERSION || version === MANUSCRIPT_REIMPORT_SCHEMA_VERSION ||
       version === MODEL_SERVICE_SCHEMA_VERSION ||
       version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION ||
-      version === EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION,
+      version === EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION || version === TASK_AUTHORIZATION_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
   if (version === MANUSCRIPT_REIMPORT_SCHEMA_VERSION || version === MODEL_SERVICE_SCHEMA_VERSION ||
       version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION ||
-      version === EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION) return;
+      version === EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION || version === TASK_AUTHORIZATION_SCHEMA_VERSION) return;
   validateSourceImportSchemaTruth(db, profile);
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
@@ -1723,7 +1735,8 @@ function validateModelServiceSchema(db: DatabaseSync, profile: BuiltInWorkflowPr
     profile,
     true,
     version >= EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION,
-    version === EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION,
+    version >= EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION,
+    version === TASK_AUTHORIZATION_SCHEMA_VERSION,
   );
   const invalid = db.prepare(
     `SELECT 1 FROM model_service_connections
@@ -1746,17 +1759,17 @@ function initializeModelServiceSchema(db: DatabaseSync, profile: BuiltInWorkflow
   requireStore(
     version === MANUSCRIPT_REIMPORT_SCHEMA_VERSION || version === MODEL_SERVICE_SCHEMA_VERSION ||
       version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION ||
-      version === EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION,
+      version === EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION || version === TASK_AUTHORIZATION_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
   if (version === MODEL_SERVICE_SCHEMA_VERSION ||
       version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION ||
-      version === EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION) {
+      version === EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION || version === TASK_AUTHORIZATION_SCHEMA_VERSION) {
     validateModelServiceSchema(db, profile);
     if (version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION) {
       validateEditorialWorkspaceProfileNativeSchema(db);
-    } else if (version === EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION) {
+    } else if (version >= EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION) {
       validateEditorialWorkspaceProfileSchema(db);
     }
     return;
@@ -2452,6 +2465,7 @@ export class EditorialStore {
   readonly #bounded: BoundedManuscriptStore;
   readonly #recoveryObjects: RecoveryObjectStore;
   readonly #editorialWorkspaceProfile: EditorialWorkspaceProfileStore;
+  readonly #taskAuthorization: TaskAuthorizationStore;
   readonly #workflowProfile: BuiltInWorkflowProfile;
   readonly #lifetimeId: string;
   readonly #control: StoreControl;
@@ -2474,6 +2488,7 @@ export class EditorialStore {
     bounded: BoundedManuscriptStore,
     recoveryObjects: RecoveryObjectStore,
     editorialWorkspaceProfile: EditorialWorkspaceProfileStore,
+    taskAuthorization: TaskAuthorizationStore,
     workflowProfile: BuiltInWorkflowProfile,
     lifetimeId: string,
     control: StoreControl,
@@ -2487,6 +2502,7 @@ export class EditorialStore {
     this.#bounded = bounded;
     this.#recoveryObjects = recoveryObjects;
     this.#editorialWorkspaceProfile = editorialWorkspaceProfile;
+    this.#taskAuthorization = taskAuthorization;
     this.#workflowProfile = workflowProfile;
     this.#lifetimeId = lifetimeId;
     this.#control = control;
@@ -2530,21 +2546,27 @@ export class EditorialStore {
     initializeBoundedSchema(authority, workflowProfile);
     validateEditorialWorkspaceProfileSchema(authority);
     const editorialWorkspaceProfile = await EditorialWorkspaceProfileStore.open(authority, dataRoot, codeRoot);
+    initializeTaskAuthorizationSchema(authority);
+    initializeBoundedSchema(authority, workflowProfile);
+    validateEditorialWorkspaceProfileSchema(authority);
+    validateTaskAuthorizationSchema(authority);
     const journal = new DatabaseSync(databasePath);
     configureDatabase(journal);
     const ingest = new DatabaseSync(databasePath);
     configureDatabase(ingest);
     const lifetimeId = randomUUID();
+    const boundedAuthority = new BoundedManuscriptStore(authority);
     const store = new EditorialStore(
       dataRoot,
       objectsRoot,
       authority,
       journal,
       ingest,
-      new BoundedManuscriptStore(authority),
+      boundedAuthority,
       new BoundedManuscriptStore(journal),
       recoveryObjects,
       editorialWorkspaceProfile,
+      new TaskAuthorizationStore(authority, boundedAuthority),
       workflowProfile,
       lifetimeId,
       control,
@@ -2580,7 +2602,37 @@ export class EditorialStore {
     return this.#artifactCall(() => this.#editorialWorkspaceProfile.enable(bookId));
   }
 
+  inspectTaskAuthorization(bookId: string): TaskAuthorizationProjection {
+    return this.#taskCall(() => this.#taskAuthorization.inspect(bookId));
+  }
+
+  createTaskAuthorizationPreparationWork(
+    bookId: string,
+    goal: typeof J03_TASK_GOAL,
+    launchPolicy: LaunchPolicyProjection,
+  ): TaskPreparationResult {
+    return this.#taskCall(() => this.#taskAuthorization.prepare({ phase: 'start', bookId, goal, launchPolicy }));
+  }
+
+  advanceTaskAuthorizationPreparationWork(workId: string): TaskPreparationResult {
+    return this.#taskCall(() => this.#taskAuthorization.prepare({ phase: 'advance', workId }));
+  }
+
+  cancelTaskAuthorizationPreparationWork(workId: string): boolean {
+    this.#taskCall(() => this.#taskAuthorization.prepare({ phase: 'cancel', workId }));
+    return true;
+  }
+
+  authorizeTaskAuthorization(
+    bookId: string,
+    taskIntentId: string,
+    planEnvelopeDigest: string,
+  ): TaskAuthorizationProjection {
+    return this.#taskCall(() => this.#taskAuthorization.authorize(bookId, taskIntentId, planEnvelopeDigest));
+  }
+
   close(): void {
+    this.#taskAuthorization.prepare({ phase: 'cancel-all' });
     for (const workId of Array.from(this.#reimportPreparationWork.keys())) {
       this.cancelManuscriptReimportPreparationWork(workId);
     }
@@ -4271,7 +4323,7 @@ export class EditorialStore {
     if (checkpointStart.workId !== null) {
       this.#authority.exec(
         `CREATE UNIQUE INDEX IF NOT EXISTS temp.reimport_checkpoint_identity
-           ON reimport_checkpoint_rows(work_id, block_id)`,
+           ON manuscript_checkpoint_rows(work_id, block_id)`,
       );
     }
     const workId = randomUUID();
@@ -4347,7 +4399,7 @@ export class EditorialStore {
     } else if (sourceKind === 'current' && work.checkpointWorkId !== null) {
       rows = this.#authority.prepare(
         `SELECT block_id, position, kind, level, text, digest
-         FROM temp.reimport_checkpoint_rows
+         FROM temp.manuscript_checkpoint_rows
          WHERE work_id = ? AND position > ? ORDER BY position LIMIT ${REIMPORT_MAPPING_BATCH_SIZE}`,
       ).all(work.checkpointWorkId, work.occurrenceCursor) as SqlRow[];
     } else {
@@ -4418,7 +4470,7 @@ export class EditorialStore {
       const target = this.#resolveReimportTarget(
         work.targetSelection, work.snapshot, checkpoint.checkpoint, this.#identityFindings(work.snapshot), true);
       const checkpointBlockCount = asNumber(one(this.#authority.prepare(
-        'SELECT count(*) total FROM temp.reimport_checkpoint_rows WHERE work_id = ?',
+        'SELECT count(*) total FROM temp.manuscript_checkpoint_rows WHERE work_id = ?',
       ).all(work.checkpointWorkId) as SqlRow[], 'REIMPORT_COMPARISON_INVALID', '无法核对当前固定点块数。').total);
       requireStore(checkpointBlockCount > 0, 'REIMPORT_COMPARISON_INVALID', '当前固定点没有稿件块。');
       this.#initializeReimportPreparationMapping(work, target, checkpointBlockCount);
@@ -8272,7 +8324,7 @@ export class EditorialStore {
   ): Generator<ReimportMappingBatch> {
     const checkpointTable = checkpointWorkId === null
       ? 'manuscript_block_versions'
-      : 'temp.reimport_checkpoint_rows';
+      : 'temp.manuscript_checkpoint_rows';
     const checkpointScopeColumn = checkpointWorkId === null ? 'revision_id' : 'work_id';
     const checkpointScopeId = checkpointWorkId ?? target.checkpoint.revisionId;
     const stagedCount = asNumber(one(this.#authority.prepare(
@@ -9553,6 +9605,16 @@ export class EditorialStore {
         throw new StoreFatalError(error);
       }
       if (error instanceof EditorialWorkspaceProfileError) throw new StoreError(error.code, error.message);
+      throw error;
+    }
+  }
+
+  #taskCall<T>(operation: () => T): T {
+    this.#assertAvailable();
+    try {
+      return operation();
+    } catch (error) {
+      if (error instanceof TaskAuthorizationError) throw new StoreError(error.code, error.message);
       throw error;
     }
   }

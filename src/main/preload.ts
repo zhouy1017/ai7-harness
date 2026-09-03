@@ -202,6 +202,12 @@ const api: RendererApi = Object.freeze({
     invoke<ServiceOperationMap['installEditorialWorkspaceProfile']['output']>(IPC_CHANNELS.installEditorialWorkspaceProfile),
   enableEditorialWorkspaceProfile: () =>
     invoke<ServiceOperationMap['enableEditorialWorkspaceProfile']['output']>(IPC_CHANNELS.enableEditorialWorkspaceProfile),
+  inspectTaskAuthorization: () =>
+    invoke<ServiceOperationMap['inspectTaskAuthorization']['output']>(IPC_CHANNELS.inspectTaskAuthorization),
+  prepareTaskAuthorization: (input: Omit<ServiceOperationMap['prepareTaskAuthorization']['input'], 'bookId'>) =>
+    invoke<ServiceOperationMap['prepareTaskAuthorization']['output']>(IPC_CHANNELS.prepareTaskAuthorization, input),
+  authorizeTaskAuthorization: (input: Omit<ServiceOperationMap['authorizeTaskAuthorization']['input'], 'bookId'>) =>
+    invoke<ServiceOperationMap['authorizeTaskAuthorization']['output']>(IPC_CHANNELS.authorizeTaskAuthorization, input),
   listBooks: (input: ServiceOperationMap['listBooks']['input']) =>
     invoke<ServiceOperationMap['listBooks']['output']>(IPC_CHANNELS.listBooks, input),
   prepareNewBookReview: (input: ServiceOperationMap['prepareNewBookReview']['input']) =>

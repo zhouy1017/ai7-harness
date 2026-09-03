@@ -468,7 +468,7 @@ async function recoverSyntheticCredentialCleanupState(dataRoot, runRoot) {
   try {
     database.exec('PRAGMA query_only = ON;');
     const version = database.prepare('PRAGMA user_version').get();
-    requireJourney(version?.user_version === 13, 'credential-cleanup-metadata-version');
+    requireJourney(version?.user_version === 14, 'credential-cleanup-metadata-version');
     const rows = database.prepare(
       `SELECT connection_id, role_id, connection_name, provider_id, model_id,
               adapter_revision, configuration_revision, approved_fallback_chain,

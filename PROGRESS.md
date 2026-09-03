@@ -2,30 +2,34 @@
 
 ## What's done
 
-- Issue #47 is bound to branch `feat/47-record-provider-denied-authorization` at exact base `dev@013959a5c0e018f22a0cba9933b3622c2219629d`; the full refreshed Issue body, labels, comments, and routed authority have been resolved.
-- The dormant pre-change diagnostic was confirmed as `LOCAL_DIAGNOSTIC_ONLY/cli/not-completion`.
-- The permanent J-03 runner is admitted after J-15 in the existing controller. With the exact Node 24.18.1 runtime and a production build, it now reaches the renderer and gives the payload-safe RED `J-03/task-authorization-workbench` at the first missing Task-authorization API seam.
-- No Provider, credential, Protected Secret Store, payload, Session, scheduler, or product network path was accessed.
+- Issue #47 remains bound to `feat/47-record-provider-denied-authorization` at exact base `dev@013959a5c0e018f22a0cba9933b3622c2219629d`; Draft PR #190 is Commander-owned and no push or PR mutation has been performed by the Worker.
+- The permanent J-03 runner/controller first produced the committed payload-safe RED at the missing renderer seam (`6fa072681a1bfe527a010ab04b91a98eb59ebbfa`) and now passes the complete product path.
+- Schema v14 and protocol v15 implement one deep `TaskAuthorizationStore` on the existing `ai7.sqlite`. Its small inspect/prepare/authorize surface owns exact SQL, canonical JSON and SHA-256 links, immutable rows, idempotency, migration, and startup semantic validation.
+- The existing bounded Manuscript checkpoint machinery now owns both reimport and exact `Task Input / 任务输入` checkpoints, shares one per-branch concurrency map, and reuses the current exact Revision when the journal is unchanged.
+- The Book workbench freezes exact sample1 lineage, the current primary Manuscript task checkpoint, enabled carrier plus Revision 2 sidecar, Main Editorial Role with the fixed DeepSeek binding, empty fallback, missing opaque credential reference, public-or-synthetic outbound category, unset budget, and trusted development-ci Provider Processing v1 denial. Source Version remains unreadable lineage evidence.
+- The exact renderer actions are preparation and `记录本次运行授权（不派发）`; the terminal state is `已记录授权 · 未派发`. The record remains fixed after later edit and restart and creates no Provider, Session, scheduler, payload, egress, network, model, or Effect activity.
+- J-03 now performs real sample1 import, carrier install/Revision 2 enablement, supported synthetic credential setup/removal, acknowledged edits, prepare/authorize/restart, J-14 IME/focus/200%/forced-colors checks, zero-activity assertions, post-close secret residue scanning, and full disposable-root cleanup without a database oracle. J-12 also passes after its schema-v14 startup validator was corrected to include all ten task-ledger foreign-key signatures; the temporary diagnostic was deleted.
+- `README.md` and `docs/development/source-checkout.md` now describe schema v14, protocol/J-03 operation, accepted Journey order, and the provider-denied non-effect boundary.
 
 ## What's next
 
-- Add the schema-v14 deep Task-authorization store and generalize the existing bounded Manuscript checkpoint owner for exact purpose `Task Input / 任务输入`.
-- Wire protocol v15, the cooperative preparation job, sender-owned main/preload boundary, contained Book-workbench UI, and the rest of the real J-03/J-14 journey.
-- Run the exact-head Windows doctor, bootstrap, build, and `e2e:all` completion sequence.
+- Review the complete diff for boundary/strict-schema consistency and run build plus the affected J-01/J-12/J-15/J-03 journeys.
+- Remove all local dependency/runtime junction residues and temporary diagnostic roots.
+- Commit the coherent implementation, then run the exact-head Windows `doctor` → `bootstrap` → `build` → `e2e:all` completion sequence with the pinned Node 24.18.1 runtime.
 
 ## Key decisions
 
-- Task authorization will be one deep store with only inspect/prepare/authorize operations; SQL, canonical JSON, digests, immutability, idempotency, and startup validation remain internal.
-- Existing checkpoint machinery will be generalized, not duplicated. Reimport and Task-input checkpoint work will share one per-branch concurrency owner, and unchanged journals will create no empty revision.
-- The Task record is authorization-only and fixed to provider-processing v1 denial; execution remains owned by Issue #91.
+- Task authorization is an immutable record-only ledger, not a generic Task framework or execution path. A recorded authorization has no dispatcher surface and cannot auto-start.
+- Plan preparation is the only new cooperative job kind and delegates its Manuscript copying to the generalized existing checkpoint owner; there is no second checkpoint implementation.
+- J-03 observes only product projections. Its one synthetic secret is written and removed through existing supported product UI/API paths, is never read back or output, and is scanned only after product closure.
 
 ## Unresolved matters or blockers
 
-- No product-scope or authority blocker is known.
-- Fresh-worktree dependency restoration encountered registry timeouts. Local development currently uses already verified dependency/runtime carriers from the Issue #46 worktree; this is local residue only and will be removed before completion.
+- No product-scope, Provider, credential-authority, or structural-budget blocker is known.
+- Fresh-worktree bootstrap previously encountered registry timeouts. Local development still uses verified dependency/runtime carriers from the Issue #46 worktree; these residues must be removed and the exact bootstrap retried before completion.
 
 ## Safe Resume Prompt
 
 ```text
-Worker: continue Issue #47 from the committed permanent J-03 RED. Implement only the schema-v14/provider-free Task authorization vertical slice, reuse the existing checkpoint machinery for Task Input, preserve the fixed Revision 2/DeepSeek/missing-credential/v1-denial envelope, and stop before any execution, Provider, secret, Session, scheduler, payload, egress, recording, or publication behavior.
+Worker: finish Issue #47 only. Review and validate the schema-v14/provider-free Task authorization slice, keep exact sample1/Revision 2/DeepSeek/missing-credential/v1-denial facts immutable, remove local junction and diagnostic residue, commit with the required model trailer, and run exact-head Windows doctor, bootstrap, build, and e2e:all without entering any Provider, secret-read, Session, scheduler, payload, egress, recording, publication, or execution path.
 ```

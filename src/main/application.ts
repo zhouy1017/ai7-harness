@@ -71,7 +71,7 @@ interface ManuscriptCapability {
 
 interface EditorResourceCapability {
   kind: 'job' | 'search' | 'preview';
-  operation: 'search' | 'replacement' | 'reimport';
+  operation: 'search' | 'replacement' | 'reimport' | 'task-authorization';
   bookId: string;
   manuscriptId: string | null;
   branchId: string | null;
@@ -141,6 +141,7 @@ function parseArguments(argv: string[]): LaunchArguments {
           key === '--j02-picker-path' ||
           key === '--j08-picker-path' ||
           key === '--j12-picker-path' ||
+          key === '--j03-picker-path' ||
           key === '--j01-import-control' ||
           key === '--j08-recovery-control' ||
           key === '--j12-observe-reveal' ||
@@ -154,7 +155,8 @@ function parseArguments(argv: string[]): LaunchArguments {
   const j02PickerPath = values.get('--j02-picker-path');
   const j08PickerPath = values.get('--j08-picker-path');
   const j12PickerPath = values.get('--j12-picker-path');
-  requireDesktop([j01PickerPath, j02PickerPath, j08PickerPath, j12PickerPath].filter(Boolean).length <= 1);
+  const j03PickerPath = values.get('--j03-picker-path');
+  requireDesktop([j01PickerPath, j02PickerPath, j08PickerPath, j12PickerPath, j03PickerPath].filter(Boolean).length <= 1);
   requireDesktop(
     j01PickerPath === undefined ||
       (process.env.AI7_E2E_JOURNEY === 'J-01' &&
@@ -179,7 +181,13 @@ function parseArguments(argv: string[]): LaunchArguments {
         isAbsolute(j12PickerPath) &&
         extname(j12PickerPath).toLocaleLowerCase('en-US') === '.docx'),
   );
-  const injectedPickerPath = j01PickerPath ?? j02PickerPath ?? j08PickerPath ?? j12PickerPath;
+  requireDesktop(
+    j03PickerPath === undefined ||
+      (process.env.AI7_E2E_JOURNEY === 'J-03' &&
+        isAbsolute(j03PickerPath) &&
+        extname(j03PickerPath).toLocaleLowerCase('en-US') === '.docx'),
+  );
+  const injectedPickerPath = j01PickerPath ?? j02PickerPath ?? j08PickerPath ?? j12PickerPath ?? j03PickerPath;
   const importControlValue = values.get('--j01-import-control');
   const importControl =
     importControlValue === 'before-commit' ||
@@ -451,7 +459,9 @@ function registerRendererHandlers(
       ? 'search'
       : job.kind === 'replacement'
         ? 'replacement'
-        : 'reimport';
+        : job.kind === 'task-authorization-preparation'
+          ? 'task-authorization'
+          : 'reimport';
   const resourceSeed = (
     capability: ManuscriptCapability | EditorResourceCapability,
     operation: EditorResourceCapability['operation'] = 'operation' in capability ? capability.operation : 'search',
@@ -512,6 +522,10 @@ function registerRendererHandlers(
         capability.branchId !== null && result.branchId !== capability.branchId
       ) {
         throw new ServiceCallError('AI7_EDITOR_CAPABILITY_INVALID', '稿件重新导入提交结果不属于当前图书工作台。');
+      }
+    } else if (result !== null && 'taskIntent' in result) {
+      if (actualOperation !== 'task-authorization' || result.bookId !== capability.bookId) {
+        throw new ServiceCallError('AI7_EDITOR_CAPABILITY_INVALID', '任务授权准备结果不属于当前图书工作台。');
       }
     } else if (result !== null) {
       throw new ServiceCallError('AI7_EDITOR_CAPABILITY_INVALID', '后台编辑操作返回了不适用的结果类型。');
@@ -1699,6 +1713,61 @@ function registerRendererHandlers(
         return result;
       });
     }),
+  );
+  ipcMain.handle(IPC_CHANNELS.inspectTaskAuthorization, (event) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      requireAuthority();
+      const route = requireCurrentBookRoute(owned);
+      const routeGeneration = owned.routeGeneration;
+      const routeRequestSequence = owned.routeRequestSequence;
+      const result = await service.call('inspectTaskAuthorization', { bookId: route.bookId });
+      requireCurrentRouteReadEpoch(owned, routeGeneration, routeRequestSequence);
+      if (result.bookId !== route.bookId) {
+        throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '任务授权记录不属于当前图书工作台。');
+      }
+      return result;
+    }),
+  );
+  ipcMain.handle(
+    IPC_CHANNELS.prepareTaskAuthorization,
+    (event, input: Omit<ServiceOperationMap['prepareTaskAuthorization']['input'], 'bookId'>) =>
+      envelope(async () => {
+        const owned = requireSender(event);
+        return serializeEffect(async () => {
+          requireAuthority();
+          const route = requireCurrentBookRoute(owned);
+          const result = await service.call('prepareTaskAuthorization', { bookId: route.bookId, ...input });
+          if (result.kind !== 'task-authorization-preparation') {
+            throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '任务授权准备结果类型无效。');
+          }
+          rememberEditorResource(owned, 'job', result.jobId, {
+            operation: 'task-authorization',
+            bookId: route.bookId,
+            manuscriptId: null,
+            branchId: null,
+          });
+          return result;
+        });
+      }),
+  );
+  ipcMain.handle(
+    IPC_CHANNELS.authorizeTaskAuthorization,
+    (event, input: Omit<ServiceOperationMap['authorizeTaskAuthorization']['input'], 'bookId'>) =>
+      envelope(async () => {
+        const owned = requireSender(event);
+        return serializeEffect(async () => {
+          requireAuthority();
+          const route = requireCurrentBookRoute(owned);
+          const routeGeneration = owned.routeGeneration;
+          const result = await service.call('authorizeTaskAuthorization', { bookId: route.bookId, ...input });
+          requireCurrentRouteGeneration(owned, routeGeneration);
+          if (result.bookId !== route.bookId) {
+            throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '任务运行授权结果不属于当前图书工作台。');
+          }
+          return result;
+        });
+      }),
   );
   ipcMain.handle(IPC_CHANNELS.startSearch, (event, input: ServiceOperationMap['startSearch']['input']) =>
     envelope(async () => {

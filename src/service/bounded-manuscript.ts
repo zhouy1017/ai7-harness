@@ -48,6 +48,11 @@ import {
   NATIVE_ARTIFACT_BOOK_ENABLEMENTS_SCHEMA_SQL,
   NATIVE_ARTIFACT_INSTALLATIONS_SCHEMA_SQL,
 } from './editorial-workspace-profile.js';
+import {
+  TASK_AUTHORIZATION_SCHEMA_SQL,
+  TASK_AUTHORIZATION_SCHEMA_VERSION,
+  TASK_AUTHORIZATION_TRIGGER_SQL,
+} from './task-authorization.js';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const DIGEST_PATTERN = /^[0-9a-f]{64}$/;
@@ -1349,6 +1354,41 @@ const IMPORT_DRAFT_TRIGGER_SQL = {
 } as const;
 
 const SCHEMA_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
+  task_intents: [
+    'book_id>books.book_id:NO ACTION/NO ACTION/NONE',
+  ],
+  task_input_checkpoints: [
+    'branch_id>manuscript_branches.branch_id:NO ACTION/NO ACTION/NONE',
+    'manuscript_id>manuscripts.manuscript_id:NO ACTION/NO ACTION/NONE',
+    'revision_id>manuscript_revisions.revision_id:NO ACTION/NO ACTION/NONE',
+    'task_intent_id>task_intents.task_intent_id:NO ACTION/NO ACTION/NONE',
+  ],
+  task_manuscript_pins: [
+    'task_intent_id>task_intents.task_intent_id:NO ACTION/NO ACTION/NONE',
+  ],
+  task_artifact_pins: [
+    'task_intent_id>task_intents.task_intent_id:NO ACTION/NO ACTION/NONE',
+  ],
+  run_source_scopes: [
+    'task_intent_id>task_intents.task_intent_id:NO ACTION/NO ACTION/NONE',
+  ],
+  provider_resolution_plans: [
+    'task_intent_id>task_intents.task_intent_id:NO ACTION/NO ACTION/NONE',
+  ],
+  execution_plans: [
+    'task_intent_id>task_intents.task_intent_id:NO ACTION/NO ACTION/NONE',
+  ],
+  plan_envelopes: [
+    'task_intent_id>task_intents.task_intent_id:NO ACTION/NO ACTION/NONE',
+  ],
+  run_authorizations: [
+    'plan_envelope_sha256>plan_envelopes.sha256:NO ACTION/NO ACTION/NONE',
+    'task_intent_id>task_intents.task_intent_id:NO ACTION/NO ACTION/NONE',
+  ],
+  run_records: [
+    'authorization_id>run_authorizations.authorization_id:NO ACTION/NO ACTION/NONE',
+    'task_intent_id>task_intents.task_intent_id:NO ACTION/NO ACTION/NONE',
+  ],
   editorial_workspace_profile_sidecar_revisions: [
     'native_artifact_id>native_artifact_installations.artifact_id:NO ACTION/NO ACTION/NONE',
   ],
@@ -1908,6 +1948,7 @@ function requireManuscriptReimportTargetSchema(
   includeModelServiceTable = false,
   includeNativeArtifactTables = false,
   includeAuthoritySidecarTables = false,
+  includeTaskAuthorizationTables = false,
 ): void {
   requireExactSchema(
     db,
@@ -1927,12 +1968,14 @@ function requireManuscriptReimportTargetSchema(
             editorial_workspace_profile_book_pins: EDITORIAL_WORKSPACE_PROFILE_BOOK_PINS_SCHEMA_SQL,
           }
         : {}),
+      ...(includeTaskAuthorizationTables ? TASK_AUTHORIZATION_SCHEMA_SQL : {}),
     },
     MANUSCRIPT_REIMPORT_INDEX_SQL,
     true,
     {
       ...MANUSCRIPT_REIMPORT_TRIGGER_SQL,
       ...(includeAuthoritySidecarTables ? EDITORIAL_WORKSPACE_PROFILE_SIDECAR_TRIGGER_SQL : {}),
+      ...(includeTaskAuthorizationTables ? TASK_AUTHORIZATION_TRIGGER_SQL : {}),
     },
   );
 }
@@ -4566,12 +4609,14 @@ export function validateManuscriptReimportSchemaTruth(
   includeModelServiceTable = false,
   includeNativeArtifactTables = false,
   includeAuthoritySidecarTables = false,
+  includeTaskAuthorizationTables = false,
 ): void {
   requireManuscriptReimportTargetSchema(
     db,
     includeModelServiceTable,
     includeNativeArtifactTables,
     includeAuthoritySidecarTables,
+    includeTaskAuthorizationTables,
   );
   validateSchemaAuthorityIds(db);
   validateWorkflowSemanticTruth(db, profile);
@@ -4594,19 +4639,21 @@ export function initializeBoundedSchema(db: DatabaseSync, profile: BuiltInWorkfl
       version === RECOVERY_SCHEMA_VERSION || version === SCHEMA_VERSION ||
       version === SOURCE_IMPORT_SCHEMA_VERSION || version === MANUSCRIPT_REIMPORT_SCHEMA_VERSION ||
       version === MODEL_SERVICE_SCHEMA_VERSION || version === NATIVE_ARTIFACT_SCHEMA_VERSION ||
-      version === AUTHORITY_SIDECAR_SCHEMA_VERSION,
+      version === AUTHORITY_SIDECAR_SCHEMA_VERSION || version === TASK_AUTHORIZATION_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
   if (version === MANUSCRIPT_REIMPORT_SCHEMA_VERSION || version === MODEL_SERVICE_SCHEMA_VERSION ||
-      version === NATIVE_ARTIFACT_SCHEMA_VERSION || version === AUTHORITY_SIDECAR_SCHEMA_VERSION) {
+      version === NATIVE_ARTIFACT_SCHEMA_VERSION || version === AUTHORITY_SIDECAR_SCHEMA_VERSION ||
+      version === TASK_AUTHORIZATION_SCHEMA_VERSION) {
     transact(db, () => {
       validateManuscriptReimportSchemaTruth(
         db,
         profile,
         version >= MODEL_SERVICE_SCHEMA_VERSION,
         version >= NATIVE_ARTIFACT_SCHEMA_VERSION,
-        version === AUTHORITY_SIDECAR_SCHEMA_VERSION,
+        version >= AUTHORITY_SIDECAR_SCHEMA_VERSION,
+        version === TASK_AUTHORIZATION_SCHEMA_VERSION,
       );
       terminalizeOrphanedReplacementPreviews(db);
       reclaimOrphanedSearchSessions(db);
@@ -4858,7 +4905,11 @@ interface BranchBinding {
   lastCheckpointSequence: number;
 }
 
-export interface ReimportCheckpointBinding {
+export type ManuscriptCheckpointPurpose =
+  | 'Reimport Safety / 重新导入安全固定点'
+  | 'Task Input / 任务输入';
+
+export interface ManuscriptCheckpointBinding {
   bookId: string;
   manuscriptId: string;
   branchId: string;
@@ -4869,7 +4920,9 @@ export interface ReimportCheckpointBinding {
   createdForDirtyJournal: boolean;
 }
 
-interface ReimportCheckpointWork {
+export type ReimportCheckpointBinding = ManuscriptCheckpointBinding;
+
+interface ManuscriptCheckpointWork {
   workId: string;
   binding: BranchBinding;
   revisionId: string;
@@ -4880,15 +4933,18 @@ interface ReimportCheckpointWork {
   expectedPosition: number;
   offset: number;
   createdAt: string;
+  purpose: ManuscriptCheckpointPurpose;
   state: 'copying' | 'prepared';
 }
 
-export interface ReimportCheckpointProgress {
+export interface ManuscriptCheckpointProgress {
   done: boolean;
   completed: number;
   total: number;
-  checkpoint: ReimportCheckpointBinding | null;
+  checkpoint: ManuscriptCheckpointBinding | null;
 }
+
+export type ReimportCheckpointProgress = ManuscriptCheckpointProgress;
 
 export interface RecoverySnapshotPlan {
   snapshotId: string;
@@ -4962,7 +5018,7 @@ export type VerifiedRecoverySnapshot =
 export class BoundedManuscriptStore {
   readonly #db: DatabaseSync;
   readonly #cursorSecret = randomBytes(32);
-  readonly #reimportCheckpointWork = new Map<string, ReimportCheckpointWork>();
+  readonly #manuscriptCheckpointWork = new Map<string, ManuscriptCheckpointWork>();
 
   constructor(db: DatabaseSync) {
     this.#db = db;
@@ -4985,7 +5041,19 @@ export class BoundedManuscriptStore {
   createReimportCheckpointWork(
     manuscriptId: string,
     branchId: string,
-  ): { workId: string | null; total: number; checkpoint: ReimportCheckpointBinding | null } {
+  ): { workId: string | null; total: number; checkpoint: ManuscriptCheckpointBinding | null } {
+    return this.createManuscriptCheckpointWork(
+      manuscriptId,
+      branchId,
+      'Reimport Safety / 重新导入安全固定点',
+    );
+  }
+
+  createManuscriptCheckpointWork(
+    manuscriptId: string,
+    branchId: string,
+    purpose: ManuscriptCheckpointPurpose,
+  ): { workId: string | null; total: number; checkpoint: ManuscriptCheckpointBinding | null } {
     const binding = this.#binding(manuscriptId, branchId);
     this.#requireBranchEditable(branchId);
     if (binding.journalSequence === binding.lastCheckpointSequence) {
@@ -5004,15 +5072,15 @@ export class BoundedManuscriptStore {
         },
       };
     }
-    requireBounded(!Array.from(this.#reimportCheckpointWork.values()).some((work) => work.binding.branchId === branchId),
-      'SERVICE_BUSY', '该稿件已有重新导入固定点任务。');
+    requireBounded(!Array.from(this.#manuscriptCheckpointWork.values()).some((work) => work.binding.branchId === branchId),
+      'SERVICE_BUSY', '该稿件已有固定点任务。');
     const previous = one(this.#db.prepare(
       'SELECT ordinal, source_version_id FROM manuscript_revisions WHERE revision_id = ?',
     ).all(binding.revisionId) as SqlRow[], 'REIMPORT_CHECKPOINT_INVALID', '当前稿件修订版缺失。');
     const totalBlocks = lastWorkingPosition(this.#db, branchId);
     requireBounded(totalBlocks > 0, 'REIMPORT_CHECKPOINT_INVALID', '工作稿没有内容块。');
     this.#db.exec(
-      `CREATE TEMP TABLE IF NOT EXISTS reimport_checkpoint_rows(
+      `CREATE TEMP TABLE IF NOT EXISTS manuscript_checkpoint_rows(
          work_id TEXT NOT NULL,
          revision_id TEXT NOT NULL,
          block_id TEXT NOT NULL,
@@ -5027,7 +5095,7 @@ export class BoundedManuscriptStore {
        ) WITHOUT ROWID`,
     );
     const workId = randomUUID();
-    this.#reimportCheckpointWork.set(workId, {
+    this.#manuscriptCheckpointWork.set(workId, {
       workId,
       binding,
       revisionId: randomUUID(),
@@ -5038,14 +5106,19 @@ export class BoundedManuscriptStore {
       expectedPosition: 1,
       offset: 0,
       createdAt: new Date().toISOString(),
+      purpose,
       state: 'copying',
     });
     return { workId, total: totalBlocks, checkpoint: null };
   }
 
   advanceReimportCheckpointWork(workId: string): ReimportCheckpointProgress {
+    return this.advanceManuscriptCheckpointWork(workId);
+  }
+
+  advanceManuscriptCheckpointWork(workId: string): ManuscriptCheckpointProgress {
     requireBounded(UUID_PATTERN.test(workId), 'JOB_INVALID', '重新导入固定点任务标识无效。');
-    const work = this.#reimportCheckpointWork.get(workId);
+    const work = this.#manuscriptCheckpointWork.get(workId);
     requireBounded(work !== undefined, 'JOB_NOT_FOUND', '重新导入固定点任务不存在或已结束。');
     if (work.state === 'prepared') {
       return {
@@ -5079,7 +5152,7 @@ export class BoundedManuscriptStore {
     ).all(work.binding.branchId, work.cursor, MIGRATION_BATCH) as SqlRow[];
     if (rows.length > 0) {
       const insert = this.#db.prepare(
-        `INSERT INTO temp.reimport_checkpoint_rows(
+        `INSERT INTO temp.manuscript_checkpoint_rows(
            work_id, revision_id, block_id, position, kind, level, text, digest, start_offset, grapheme_length
          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       );
@@ -5130,8 +5203,15 @@ export class BoundedManuscriptStore {
   }
 
   finalizeReimportCheckpointWork(workId: string, persistComparison: () => void): ReimportCheckpointBinding {
+    return this.finalizeManuscriptCheckpointWork(workId, persistComparison);
+  }
+
+  finalizeManuscriptCheckpointWork(
+    workId: string,
+    persistCheckpointOwner: (checkpoint: ManuscriptCheckpointBinding, purpose: ManuscriptCheckpointPurpose) => void,
+  ): ManuscriptCheckpointBinding {
     requireBounded(UUID_PATTERN.test(workId), 'JOB_INVALID', '重新导入固定点任务标识无效。');
-    const work = this.#reimportCheckpointWork.get(workId);
+    const work = this.#manuscriptCheckpointWork.get(workId);
     requireBounded(work !== undefined && work.state === 'prepared', 'REIMPORT_CHECKPOINT_INVALID',
       '重新导入固定点尚未完成有界准备。');
     const checkpoint = transact(this.#db, () => {
@@ -5153,7 +5233,7 @@ export class BoundedManuscriptStore {
         `INSERT INTO manuscript_block_versions(
            revision_id, block_id, position, kind, level, text, digest, start_offset, grapheme_length
          ) SELECT ?, block_id, position, kind, level, text, digest, start_offset, grapheme_length
-           FROM temp.reimport_checkpoint_rows WHERE work_id = ? ORDER BY position`,
+           FROM temp.manuscript_checkpoint_rows WHERE work_id = ? ORDER BY position`,
       ).run(work.revisionId, workId);
       requireBounded(copied.changes === work.totalBlocks, 'REIMPORT_CHECKPOINT_INVALID',
         '重新导入固定点内容块不完整。');
@@ -5167,10 +5247,8 @@ export class BoundedManuscriptStore {
         'UPDATE manuscript_branches SET base_revision_id = ? WHERE branch_id = ? AND base_revision_id = ?',
       ).run(work.revisionId, work.binding.branchId, work.binding.revisionId).changes === 1,
       'REIMPORT_CHECKPOINT_STALE', '建立重新导入安全固定点时分支已变化。');
-      persistComparison();
-      this.#db.prepare('DELETE FROM temp.reimport_checkpoint_rows WHERE work_id = ?').run(workId);
       const completed = this.#binding(work.binding.manuscriptId, work.binding.branchId);
-      return {
+      const checkpoint = {
         bookId: completed.bookId,
         manuscriptId: completed.manuscriptId,
         branchId: completed.branchId,
@@ -5180,15 +5258,22 @@ export class BoundedManuscriptStore {
         journalSequence: completed.journalSequence,
         createdForDirtyJournal: true,
       };
+      persistCheckpointOwner(checkpoint, work.purpose);
+      this.#db.prepare('DELETE FROM temp.manuscript_checkpoint_rows WHERE work_id = ?').run(workId);
+      return checkpoint;
     });
-    this.#reimportCheckpointWork.delete(workId);
+    this.#manuscriptCheckpointWork.delete(workId);
     return checkpoint;
   }
 
   cancelReimportCheckpointWork(workId: string): boolean {
+    return this.cancelManuscriptCheckpointWork(workId);
+  }
+
+  cancelManuscriptCheckpointWork(workId: string): boolean {
     requireBounded(UUID_PATTERN.test(workId), 'JOB_INVALID', '重新导入固定点任务标识无效。');
-    if (!this.#reimportCheckpointWork.delete(workId)) return false;
-    this.#db.prepare('DELETE FROM temp.reimport_checkpoint_rows WHERE work_id = ?').run(workId);
+    if (!this.#manuscriptCheckpointWork.delete(workId)) return false;
+    this.#db.prepare('DELETE FROM temp.manuscript_checkpoint_rows WHERE work_id = ?').run(workId);
     return true;
   }
 

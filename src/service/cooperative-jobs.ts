@@ -97,6 +97,39 @@ export class CooperativeJobOwner {
     return structuredClone(job.projection);
   }
 
+  startTaskAuthorizationPreparation(
+    bookId: Parameters<EditorialStore['createTaskAuthorizationPreparationWork']>[0],
+    goal: Parameters<EditorialStore['createTaskAuthorizationPreparationWork']>[1],
+    launchPolicy: Parameters<EditorialStore['createTaskAuthorizationPreparationWork']>[2],
+  ): ServiceJobProjection {
+    this.#requireCapacity();
+    const work = this.#store.createTaskAuthorizationPreparationWork(bookId, goal, launchPolicy);
+    const jobId = randomUUID();
+    const job: JobRecord = {
+      subjectId: work.workId ?? bookId,
+      cancelRequested: false,
+      scheduled: false,
+      projection: {
+        jobId,
+        kind: 'task-authorization-preparation',
+        state: work.done ? 'completed' : 'queued',
+        progress: {
+          completed: work.done ? work.total : 0,
+          total: work.total,
+          label: work.done ? '任务授权计划准备完成' : '正在有界准备任务输入固定点…',
+        },
+        result: work.projection,
+        failure: null,
+      },
+    };
+    if (work.done) this.#rememberPolledTerminal(jobId, job);
+    else {
+      this.#jobs.set(jobId, job);
+      this.#schedule(job);
+    }
+    return structuredClone(job.projection);
+  }
+
   startReimportResolution(
     draftId: string,
     expectedDraftVersion: number,
@@ -203,11 +236,14 @@ export class CooperativeJobOwner {
         };
       }
     } else if ((job.projection.kind === 'reimport-preparation' || job.projection.kind === 'reimport-resolution' ||
+      job.projection.kind === 'task-authorization-preparation' ||
       job.projection.kind === 'reimport-commit') &&
       (job.projection.state === 'queued' || job.projection.state === 'running')) {
       job.cancelRequested = true;
       if (job.projection.kind === 'reimport-preparation') {
         this.#store.cancelManuscriptReimportPreparationWork(job.subjectId);
+      } else if (job.projection.kind === 'task-authorization-preparation') {
+        this.#store.cancelTaskAuthorizationPreparationWork(job.subjectId);
       } else if (job.projection.kind === 'reimport-resolution') {
         this.#store.cancelReimportResolutionWork(job.subjectId);
       } else {
@@ -222,6 +258,8 @@ export class CooperativeJobOwner {
           ...job.projection.progress,
           label: job.projection.kind === 'reimport-preparation'
             ? '重新导入比较准备已取消'
+            : job.projection.kind === 'task-authorization-preparation'
+              ? '任务授权计划准备已取消'
             : job.projection.kind === 'reimport-resolution'
               ? '结构身份解决已取消'
               : '重新导入提交已取消',
@@ -249,6 +287,8 @@ export class CooperativeJobOwner {
         else if (job.projection.kind === 'replacement') this.#store.cancelReplacement(job.subjectId);
         else if (job.projection.kind === 'reimport-preparation') {
           this.#store.cancelManuscriptReimportPreparationWork(job.subjectId);
+        } else if (job.projection.kind === 'task-authorization-preparation') {
+          this.#store.cancelTaskAuthorizationPreparationWork(job.subjectId);
         } else if (job.projection.kind === 'reimport-resolution') {
           this.#store.cancelReimportResolutionWork(job.subjectId);
         } else {
@@ -304,6 +344,21 @@ export class CooperativeJobOwner {
             label: progress.done ? '重新导入比较准备完成' : '正在有界准备重新导入比较…',
           },
           result: progress.review,
+        };
+        if (!progress.done) this.#schedule(job, REIMPORT_BATCH_YIELD_MS);
+        return;
+      }
+      if (job.projection.kind === 'task-authorization-preparation') {
+        const progress = this.#store.advanceTaskAuthorizationPreparationWork(job.subjectId);
+        job.projection = {
+          ...job.projection,
+          state: progress.done ? 'completed' : 'running',
+          progress: {
+            completed: progress.completed,
+            total: progress.total,
+            label: progress.done ? '任务授权计划准备完成' : '正在有界准备任务输入固定点…',
+          },
+          result: progress.projection,
         };
         if (!progress.done) this.#schedule(job, REIMPORT_BATCH_YIELD_MS);
         return;
@@ -366,6 +421,8 @@ export class CooperativeJobOwner {
       else if (job.projection.kind === 'replacement') this.#store.cancelReplacement(job.subjectId);
       else if (job.projection.kind === 'reimport-preparation') {
         this.#store.cancelManuscriptReimportPreparationWork(job.subjectId);
+      } else if (job.projection.kind === 'task-authorization-preparation') {
+        this.#store.cancelTaskAuthorizationPreparationWork(job.subjectId);
       } else if (job.projection.kind === 'reimport-resolution') {
         this.#store.cancelReimportResolutionWork(job.subjectId);
       } else {

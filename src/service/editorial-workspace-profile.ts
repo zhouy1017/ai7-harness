@@ -5,6 +5,7 @@ import { isAbsolute, posix, relative, resolve, sep } from 'node:path';
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
 import type { EditorialWorkspaceProfileProjection } from '../shared/protocol.js';
 import { ensureCanonicalDataDirectory, inspectCanonicalDataFile } from '../shared/data-root.js';
+import { TASK_AUTHORIZATION_SCHEMA_VERSION } from './task-authorization.js';
 
 export const EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION = 12;
 export const EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION = 13;
@@ -297,7 +298,7 @@ function requireExactTrigger(db: DatabaseSync, name: string, expectedSql: string
   requireProfile(
     row !== undefined && typeof row.sql === 'string' && canonicalSchemaSql(row.sql) === canonicalSchemaSql(expectedSql),
     'NATIVE_ARTIFACT_SCHEMA_INVALID',
-    `权限侧车触发器 ${name} 与 schema v13 不一致。`,
+    `权限侧车触发器 ${name} 与当前固定 schema 不一致。`,
   );
 }
 
@@ -478,11 +479,11 @@ export function initializeEditorialWorkspaceProfileSchema(db: DatabaseSync): voi
   let version = asNumber(row.user_version);
   requireProfile(
     version === 11 || version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION ||
-      version === EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION,
+      version === EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION || version === TASK_AUTHORIZATION_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
-  if (version === EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION) {
+  if (version === EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION || version === TASK_AUTHORIZATION_SCHEMA_VERSION) {
     validateEditorialWorkspaceProfileSchema(db);
     return;
   }

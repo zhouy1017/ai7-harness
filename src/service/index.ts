@@ -4,6 +4,7 @@ import {
   MAX_EDIT_CODE_UNITS,
   MAX_FRAME_BYTES,
   MAX_REPLACEMENT_EXCLUSIONS,
+  J03_TASK_GOAL,
   type J01ImportControl,
   type J08RecoveryControl,
   type LaunchPolicyProjection,
@@ -248,9 +249,26 @@ function decodeRequest(frame: Uint8Array): ServiceRequest {
     }
     case 'inspectEditorialWorkspaceProfile':
     case 'installEditorialWorkspaceProfile':
-    case 'enableEditorialWorkspaceProfile': {
+    case 'enableEditorialWorkspaceProfile':
+    case 'inspectTaskAuthorization': {
       const input = requireInput(value.input, ['bookId'], tentativeId);
       if (!isBoundedString(input.bookId, 36) || !UUID_PATTERN.test(input.bookId)) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
+    case 'prepareTaskAuthorization': {
+      const input = requireInput(value.input, ['bookId', 'goal'], tentativeId);
+      if (!isBoundedString(input.bookId, 36) || !UUID_PATTERN.test(input.bookId) || input.goal !== J03_TASK_GOAL) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
+    case 'authorizeTaskAuthorization': {
+      const input = requireInput(value.input, ['bookId', 'taskIntentId', 'planEnvelopeDigest'], tentativeId);
+      if (!isBoundedString(input.bookId, 36) || !UUID_PATTERN.test(input.bookId) ||
+          !isBoundedString(input.taskIntentId, 36) || !UUID_PATTERN.test(input.taskIntentId) ||
+          !isBoundedString(input.planEnvelopeDigest, 64) || !HEX_DIGEST_PATTERN.test(input.planEnvelopeDigest)) {
         throw new ProtocolError(tentativeId);
       }
       break;
@@ -834,6 +852,35 @@ async function dispatch(
         ok: true,
         op: request.op,
         result: await store.enableEditorialWorkspaceProfile(request.input.bookId),
+      };
+    case 'inspectTaskAuthorization':
+      return {
+        id: request.id,
+        ok: true,
+        op: request.op,
+        result: store.inspectTaskAuthorization(request.input.bookId),
+      };
+    case 'prepareTaskAuthorization':
+      return {
+        id: request.id,
+        ok: true,
+        op: request.op,
+        result: jobs.startTaskAuthorizationPreparation(
+          request.input.bookId,
+          request.input.goal,
+          launchPolicy,
+        ),
+      };
+    case 'authorizeTaskAuthorization':
+      return {
+        id: request.id,
+        ok: true,
+        op: request.op,
+        result: store.authorizeTaskAuthorization(
+          request.input.bookId,
+          request.input.taskIntentId,
+          request.input.planEnvelopeDigest,
+        ),
       };
     case 'listBooks':
       return { id: request.id, ok: true, op: request.op, result: store.listBooks(request.input.after) };
