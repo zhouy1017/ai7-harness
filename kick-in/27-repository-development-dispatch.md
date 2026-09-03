@@ -1,166 +1,141 @@
 # Repository Development Dispatch
 
-Status: **accepted in Question 25 with owner revisions through 2026-08-31**
-
 ## Scope
 
-This is **repository-development tooling only**. It governs how agents build this repository. It is never AI7 product runtime behavior, never a shipped end-user workflow, and never to be conflated with Harness product subagents. That boundary was accepted at Question 6 and is unchanged.
+This runbook governs repository-development work performed through Codex Task Sessions. It is not AI7 product runtime behavior, a Model Role, a Provider Resolution Plan, a Harness Session, or a second product agent loop. [ADR 0059](../docs/adr/0059-dispatch-repository-work-through-issue-bound-codex-task-sessions.md) owns the decision; this file owns the operating detail.
 
-The legacy multi-agent pilot at `ai7-reborn-ai@3e6e9ac` is not the baseline. Its bespoke lifecycle state machine under `scripts/agent-orchestration/`, and the `agent-host-connector/` with DPAPI, Windows Hello enrollment, and provider-specific process launch, are rejected as too heavy: at the audit pin the pilot had not completed its required real-host observations, and it solves a host-authority problem this repository does not have. It remains old-repository reference evidence.
+## Roles and fixed bindings
 
-## Layer A — Operating rules
-
-These are provider-neutral invariants. They are stated without reference to any model, and switching providers or models cannot change any of them. **No rule in this layer may ever be conditioned on which model is running.**
-
-### Roles and authority
-
-| Role | May | Never |
+| Role or class | Binding | Authority |
 | --- | --- | --- |
-| **Commander** | Decide dispatch, review returned work, push task branches, maintain Draft/Ready pull-request state, and integrate: merge, release. Sole external-action authority. Holds the owner's foreground session | — |
-| **Worker** | Read the repository, write only its own worktree and branch, run the authorized Local diagnostic/Local completion sequence, and report | Merge, push any branch, change pull-request state, dispatch hosted workflows, publish, take external actions, or read/write credentials, real manuscripts, or private sample Books |
-| **Reviewer** | Read the branch under review and its brief from fresh, strictly read-only context; produce a review report and advisory verdict | Author the reviewed change; write to the branch; dispatch, delegate to, or spawn another agent; integrate; or take external actions |
+| **Commander** | `gpt-5.6-sol @ ultra` | Holds the owner's foreground session; shapes T0 work and Issues, dispatches, accepts reports, integrates, and alone takes external actions |
+| **T1 Worker** — mechanical | `gpt-5.6-luna @ medium` | Executes one exact brief in its own branch/worktree and reports |
+| **T2 Worker** — standard build | `gpt-5.6-terra @ high` | Executes one exact brief in its own branch/worktree and reports |
+| **T3 Worker** — high-stakes | `gpt-5.6-sol @ xhigh` | Executes one exact brief in its own branch/worktree and reports |
+| **Reviewer** | Same binding as the reviewed T1/T2/T3 class | Starts fresh, remains read-only and non-author, and returns advisory findings |
 
-The reviewer's verdict is **advisory**. The commander decides and integrates.
+T0 clarification, Issue shaping, dispatch, acceptance, integration, and every external action stay with the Commander. The Commander does not perform T1–T3 controlled-file work inline. Every T1–T3 Worker and every Reviewer starts in a fresh top-level Codex Task Session; never fork, reuse, or convert the Commander, another role, or an earlier attempt.
 
-### Dispatch
+`T3-par` is only the name for Commander coordination of independent T1, T2, or T3 Task Sessions. It is not a task class, binding row, or permission for in-session subagents.
 
-- One worker per branch, per worktree, off an exact base commit. Never two writers in one tree.
-- Soft cap of three concurrent workers. The binding constraint is commander review capacity, not dispatch capacity.
-- **T0 work is never dispatched**: ambiguous scope, a brief that is itself in doubt, or anything requiring the owner's decision. A worker starts cold and re-derives context the commander already holds; that is the most expensive path.
-- A worker whose brief turns out to be wrong **stops and reports**. It never self-escalates to a higher class.
-- Before Commander integration, rebase onto the current intended integration target (`dev` for ordinary development work). Record the new exact target commit and re-resolve every `<target-commit>:<path>` authority in the Change Brief. If authority or semantics drifted, stop for re-scoping; this integration maintenance is not a new review or proof gate. `main` is the stable/release-promotion line and needs a separate exact Owner authorization; frozen `design-doc` is an allowlist source, never an integration target. Implementation follows the current normal route under [ADR 0058](../docs/adr/0058-remove-actions-usage-observation-from-development-gating.md) after [ADR 0057](../docs/adr/0057-restore-hosted-gate-under-observed-actions-usage.md)'s restoration, or an exact ADR 0053 degraded route plus the current [ADR 0054](../docs/adr/0054-defer-macos-evidence-until-after-initial-v1-0-0-development-milestone.md) milestone phase in the [CI boundary](../docs/agents/ci-test-boundaries.md), without creating another Gate.
-- Every dispatched unit is extracted from the applicable [`Change Brief`](../docs/agents/change-brief.md): exact base/target-qualified authority, one outcome, current reuse anchor, structural budget, non-goals, stop conditions, implementation journey/bug or non-behavior `N/A`, and reporting boundary. Do not send full transcripts, archive trees, or unrelated design packages.
+Role authority is invariant across bindings:
 
-### Local completion and hosted integration
+- A Worker may read the repository, write only its own worktree and branch, run the authorized Local diagnostic/Local completion sequence, commit locally when instructed, and report. It never pushes, changes an Issue or pull request, merges, publishes, archives tasks, reads or writes credentials or protected material, or takes another external action.
+- A Reviewer reads the Issue, Launch Receipt, branch, and applicable authority from fresh context. It never authors the reviewed change, writes the branch, dispatches another task, integrates, or takes an external action. Its verdict is advisory and never becomes a pull-request, CI, exact-head, zero-finding, or iterative-review gate.
+- The Commander alone may create or revise Issues, post receipts, create or archive Task Sessions, push, manage Draft/Ready state, merge, release, or publish within separately authorized scope.
 
-A Worker develops and debugs on its actual supported host. It restores only existing accepted pins, uses the payload-safe Local diagnostic command when useful, runs the repository-root `doctor` → `bootstrap` → `build` → applicable Journey sequence, solves every locally reproducible required-platform failure, and reruns the clean `build` plus applicable Journey before reporting normal Local completion. Declared caches may accelerate iteration but never supply correctness. Before the exact Initial v1.0.0 Development Milestone Boundary, fresh exact-head Windows `doctor` → `bootstrap` → `build` → `e2e:all` is required before Ready. Under restored normal operation the paired Hosted Gate then supplies Windows/macOS integration evidence; under an exact degraded interval ADR 0054 instead defers macOS truthfully. The report labels its state `Local diagnostic` or `Local completion` and records only exact head, host, commands, and outcomes without logs, proof artifacts, Provider payloads, private inputs, credentials, or personal dependency state.
+## Task classes and no fallback
 
-Pull requests remain Draft during authoring, review, rebase, and local validation. The Commander makes one locally complete, authority-re-resolved pull request Ready. While workflow `342459594` is active and applicable, Ready arms its one hosted occurrence. A changing or repair push first returns the pull request to Draft; concurrency cancellation is not an iterative-debugging allowance. A product/bootstrap/build/Journey failure or unknown required by the active route returns the pull request to Draft; only the Commander may rerun one clearly external runner/network/infrastructure transient without a code change. Repository-development agents and the Commander do not query, estimate, report, or consider Actions minutes, balance, allowance, cost, billing, or usage attribution for continued work, Ready, or merge; unknown, unreadable, or apparently insufficient usage is not a blocker. The Owner monitors independently and may later intervene explicitly. Workflow, run, check, and job status and conclusions remain the allowed source for Gate evidence and are distinct from billing or run/job Usage views. This lifecycle creates no exact-head, same-SHA, formal-review, zero-finding, or billing-proof gate.
-
-Before the Initial v1.0.0 Development Milestone Boundary, Windows Local completion covers every then-current executable Journey at the rebased head before Ready. The current set is J-01/J-02/J-08/J-12/J-15/J-03 after Issue #47's atomic cutover. Under ADR 0058 the subsequent paired Hosted Gate restored by ADR 0057 must succeed; under exact ADR 0053 degraded operation, the Commander instead records workflow state, absence of runs, external condition, and ADR 0054's truthful Windows-only disclosure immediately before Ready and merge. Product pull requests integrate one at a time from current `dev`; no local result, advisory review, dormant workflow projection, fake green, substitute Gate, or single-platform run is claimed as hosted Gate evidence. Pure documentation, design, and CI-governance work uses only its Change Brief's applicable local validation. Independent branches consume stable owners/interfaces on current `dev`; any necessary stacked dependency and integration order must be explicit and separately authorized.
-
-ADR 0057 is the separate exact authority for the 2026-09-01 enablement after Issue #166 integrates; ADR 0058 supersedes only its usage-observation conditions. Neither grants a probe, automatic enablement, manual dispatch, replacement workflow, retrospective run, rerun beyond the single clearly external-transient exception, or per-pull-request backfill. A future disabled/degraded interval requires a new authoritative external-CI fact and Commander external action. At the milestone boundary a separately authorized re-entry still validates consolidated `dev` before later product or release-path integration.
-
-### Review
-
-- Independent review is optional and advisory. A verdict must not become a pull-request (PR), CI, branch, exact-head, zero-finding, iterative re-review, or other proof gate. Use review for hostile architecture feedback or when the owner requests it.
-- A Reviewer is never the author and starts from fresh, strictly read-only context rather than the authoring task transcript.
-- Record the reviewed task class. The Reviewer binding must meet or exceed that class under the Layer B table.
-- A Reviewer may not dispatch, delegate to, or spawn another agent. The Commander directly dispatches every Reviewer, including every parallel review.
-- A review finding informs the Commander; it does not itself require proof work or another review.
-
-### Reporting
-
-Every returned Worker unit carries one line with role, requested binding, actual provider/model/effort, task class, fallback status, and exact reason.
-
-For product work, the returned unit also labels the result `Local diagnostic` or `Local completion` and records the exact head, local validation host, commands, and outcomes. This is a concise development report, not a proof receipt or substitute for the applicable hosted Gate.
-
-Every Reviewer report carries one line with the reviewed task class; requested and actual provider/model/effort; confirmation that the actual binding meets the class floor; fresh-context, read-only, non-author independence; fallback status; and the exact fallback or same-provider reason when applicable. This record is required only when review is requested and is not a proof receipt or gate.
-
-### Usage discipline
-
-1. Do not dispatch what the foreground session can do inline.
-2. Batch mechanical work into one T1 worker rather than several.
-3. Keep briefs tight; cold-start cost scales with what the worker must rediscover.
-4. Urgency is not a task class and never changes the binding.
-5. Do not consume or probe Worker quota for T0 work, Commander decisions, final integration, or independent review merely to satisfy a provider preference; those remain in their existing roles.
-6. Use an accepted capacity lane only for an existing eligible unit; do not invent or fragment work merely to consume available capacity.
-7. Map the current implementation narrowly before dispatch and use the earliest adequate rung in the [incremental development lifecycle](../docs/agents/incremental-development.md). Do not pay cold-start cost for a parallel design the existing owner can absorb.
-
-## Layer B — Bindings
-
-This whole layer is **the only provider-specific policy surface in this design**. It contains the class-to-model table, Worker provider order and accepted capacity lanes, and quota fallback. Replacing a provider changes this layer, never Layer A. Operational dispatch logs may name an actual binding as evidence; they do not create another policy surface.
-
-| Class | Codex | Claude | Relative cost |
-| --- | --- | --- | --- |
-| **Commander** | `gpt-5.6-sol` @ `ultra` | `claude-opus-5` @ high | top |
-| **T1** — mechanical | `gpt-5.6-luna` @ medium | `claude-haiku-4-5-20251001` @ low | 1× |
-| **T2** — standard build | `gpt-5.6-terra` @ high | `claude-sonnet-5` @ medium | 2.5× |
-| **T3** — high-stakes | `gpt-5.6-sol` @ xhigh | `claude-opus-5` @ high | 5× |
-| **T3-par** — high-stakes and genuinely splittable | `gpt-5.6-sol` @ `ultra` | — dispatch parallel workers instead | 5× plus subagents |
-
-Task class is the provider-neutral unit. The Reviewer floor is evaluated **in task classes**, then bound: a T3 branch requires a T3-or-higher Reviewer binding, regardless of which provider authored it.
-
-Cross-provider review is preferred, but Reviewer assignment is not subject to the Worker provider order. The Commander selects the Reviewer binding independently, records requested and actual provider/model/effort and independence, and records the exact fallback or same-provider reason when cross-provider review is unavailable. `gpt-5.3-codex-spark` @ `xhigh` is a Worker-only lane and never satisfies a Reviewer class floor.
-
-### Worker provider order
-
-The normal order follows the owner's 2026-08-22 revision: every dispatch-eligible, bounded Worker task outside the Spark lane uses the matching **Claude Code** binding first. Continue assigning those Worker units to Claude Code while its current quota is available; do not load-balance away from it merely to conserve that quota.
-
-When a real dispatch reports that Claude Code is unavailable or its usable quota is exhausted, record the attempted binding, observed condition, time, actual fallback binding, and exact downgrade reason. Then use the same task-class Codex binding from the table. Do not repeatedly spend attempts against a known exhausted quota window; retry Claude only after availability or quota reset is evidenced. This provider order does not apply to the Commander seat, final integration, or Reviewer assignment, whose role authority, task-class floor, independent binding selection, and independence rules remain unchanged.
-
-`T3-par` is a Commander coordination mode, not a missing Claude Worker model row. The Commander decomposes genuinely separable work into bounded T1, T2, or T3 Worker briefs; each brief applies its eligible Worker provider order at its unchanged class, while architecture decisions and synthesis stay with the Commander.
-
-### Spark-eligible Worker lane
-
-The owner's 2026-08-31 revision permits direct `gpt-5.3-codex-spark` @ `xhigh` dispatch only for an existing T1 or T2 **coding** unit that has all of these properties:
-
-- an exact written brief;
-- an already identified existing owner or seam;
-- one focused code outcome and a bounded small edit; and
-- deterministic validation that establishes correctness without unresolved judgment.
-
-When the dispatching host exposes `gpt-5.3-codex-spark` @ `xhigh` and has capacity, prefer that direct binding for an eligible unit without first probing Claude Code. Record the requested and actual binding under the normal reporting rule. One model-unavailable or capacity result ends the Spark attempt for that unit and falls through to the normal same-class order: Claude Code first, then the same-class Codex table binding if Claude is unavailable or exhausted. Never downgrade or relabel the task class to reach Spark.
-
-The lane excludes T0 and T3; Commander and Reviewer work; architecture, domain, ADR, or authority decisions; security, privacy, egress, credential, or Effect work; schemas, migrations, dependencies, or native adapters; workflow or Gate changes; concurrency, recovery, or replay; new public interfaces or design-system primitives; non-trivial accessibility; broad refactors; and any unit whose correctness still requires judgment. Spark never changes Worker authority, one-Worker branch/worktree isolation, required validation, reporting, fallback recording, or Commander-only integration and external-action rules.
-
-### Task classes
-
-| Class | Definition | Examples in this project |
+| Class | Test | Examples |
 | --- | --- | --- |
-| **T0** | Not dispatched | Ambiguous scope; brief in doubt; anything needing the owner's decision |
-| **T1** | Mechanical — correct output needs little judgment | Small glossary/index updates, format fixes, path renames, cross-repository file inventory |
-| **T2** | Standard build from a written brief | A vertical slice, E2E journey or bug-regression scenario, straightforward refactor |
-| **T3** | High-stakes | Architecture, domain modeling, ADR drafting, Effects, named authorities, recovery and replay, credential broker, source-scope enforcement, manuscript revision and merge semantics |
+| **T0** | Scope or authority still requires Commander/Owner judgment | Ambiguous scope, a brief in doubt, or an unresolved authority decision |
+| **T1** | Correctness needs little judgment and can be checked mechanically | Format repair, exact index update, path rename |
+| **T2** | A written brief and existing seam make the build straightforward | Bounded vertical slice, E2E journey, ordinary defect repair |
+| **T3** | The work changes or records high-stakes boundaries | Architecture, domain, ADR, authority, Effect, credentials, recovery, replay, source scope |
 
-The T1 test is whether correctness can be checked without judgment. Running a link checker is T1; deciding which records contradict one another is T3.
+There is no automatic fallback. If the specified model or effort is unavailable, the Commander records a Launch Receipt with `launch_result: launch-unavailable`, starts no Worker or Reviewer turn, closes that attempt with a `failed` Return Receipt, and leaves the Issue incomplete. A different Codex binding requires a material Issue-body revision with its reason, a new attempt, and a fresh Task Session. Never downgrade or relabel the class, and never substitute Commander inline execution.
 
-### Effort scales are not comparable across providers
+## Canonical Issue identity
 
-Codex exposes `none → low → medium → high → xhigh → max → ultra` on Sol; Claude exposes a shorter ladder. Bindings map **task outcome to setting**, never label to matching label. `max` extends Sol's chain-of-thought budget; `ultra` can use internal subagents to decompose, parallelize, and reassemble work when the assigned repository role permits it. Role authority overrides that capability: an `ultra` Reviewer still may not dispatch, delegate to, or spawn another agent.
+The GitHub Issue body is the canonical current Change Brief. It states:
 
-Tier selection is roughly a five-fold cost swing and is the primary lever; effort is the fine dial. Sol is $5/$30 per million tokens, Terra $2.50/$15, Luna $1/$6.
+- `Brief revision` as an integer;
+- the main Worker role and task class;
+- the exact model and reasoning effort;
+- exact base, named branch, requested fresh-worktree mode, and intended target;
+- target-qualified authority, outcome, reuse anchor, structural budget, non-goals, stop conditions, validation, and external-action boundary.
 
-### Fallback
+The body hash is SHA-256 over the exact UTF-8 bytes of the GitHub API `body` string. Do not include a newline added by a CLI or display layer.
 
-| Condition | Action |
+Before `create_thread`, a material body change—role, class, binding, outcome, authority, base/target, branch/worktree ownership, structural budget, non-goals, stop conditions, validation, or reporting/external-action boundary—requires an incremented `Brief revision`. A pre-launch editorial-only body edit may keep the revision when the contract is unchanged, but the Commander recomputes the hash. The `create_thread` request freezes the expected revision/hash. Any later body-byte change prevents or invalidates that attempt; after a Launch Receipt it always requires an incremented revision, new attempt, and fresh Task Session, even when editorial-only. Comments, labels, and assignments outside the body do not restart an attempt.
+
+One Task Session identity is `Issue + role + attempt`. A follow-up may reuse that session only while its role, attempt, Brief revision/body bytes, requested binding, role-specific start commit, exact base/target, and authority remain unchanged. A Worker starts at the exact integration base. A Reviewer starts at the immutable completed authoring commit recorded as `reviewed_head`. Start a new attempt and fresh Task Session for a new role; any post-launch Issue-body byte change; a new binding; an unavailable-launch rebind; a reroute or mismatch response; an exact base/target or `reviewed_head` rebind; or a superseded or cancelled attempt.
+
+## Two-stage launch
+
+`create_thread` atomically sends the first prompt before it returns the Task Session ID, so a complete receipt cannot exist before launch. Use this sequence:
+
+1. The Commander prepares the role-specific exact start, preallocates a unique `dispatch_id`, computes the Issue-body hash, and requests a fresh isolated Codex worktree from that commit. For a Worker, it creates the work-ready Issue and named task branch from the exact integration base. For a Reviewer, it fixes the completed authoring commit as immutable `reviewed_head`; the Reviewer receives no branch ownership. The app-managed worktree path and Task/client ID do not yet exist and cannot be placed in the first prompt.
+2. The Commander launches a fresh Task with a first prompt containing only the Issue URL, dispatch ID, expected Brief revision/body hash, role/class/binding, named branch, exact base/target, the `reviewed_head` when the role is Reviewer, and a no-write bootstrap-preflight instruction. The prompt requires the Task to report its actual cwd/worktree and current branch-or-detached state.
+3. The Worker or Reviewer reads root `AGENTS.md`, the Issue, and those immutable launch expectations, then verifies the hash, actual checkout at the role-specific start commit, and every start/stop condition read-only. It reports `preflight-ready` or `needs-commander` and stops without expecting a Receipt or editing controlled files.
+4. After `create_thread` returns the Task/client ID and that first turn stops, the Commander verifies the generated worktree path and clean checkout at the role-specific start. If a Worker checkout is detached, the Commander may attach it to the pre-created Issue branch only while it is clean and still at the exact integration base. A Reviewer stays detached and read-only at `reviewed_head`; never attach it to the branch. The Commander then posts the finalized Launch Receipt as one GitHub Issue comment and sends only that immutable comment permalink as the follow-up.
+5. The Worker or Reviewer fetches the exact comment, verifies every field against the Issue, task, checkout and preflight facts, and only then begins authorized work. A mismatch returns `needs-commander` without a controlled-file edit.
+
+There is no mutable `pending` receipt and no claim that task creation plus receipt publication is atomic.
+
+Task titles use exactly `[#<issue>] <role> A<attempt> — <issue title>`.
+
+## Receipts and binding evidence
+
+Each attempt has exactly one standardized Launch Receipt and one Return Receipt as GitHub Issue comments. The Issue body owns the brief; receipts own attempt evidence and must not restate or revise the brief. Once posted, a receipt comment is immutable: never edit or delete it. If it is wrong, close or supersede that attempt with its Return Receipt and start a new attempt.
+
+The Launch Receipt records:
+
+- schema version, `dispatch_id`, Issue, role, class, attempt, Brief revision and body hash;
+- `requested_binding`, `launch_accepted_binding`, and `runtime_model_event` at launch;
+- `reported_execution_binding`, explicitly labeled as inference from launch acceptance plus observed runtime events, never proof of the effective model;
+- Task Session ID, client thread ID when present, title, branch, worktree, exact base and intended target, plus the immutable `reviewed_head` for a Reviewer;
+- creation timestamp, `launch_result: accepted | launch-unavailable`, and live status at receipt when a Task exists.
+
+The Return Receipt records:
+
+- the same dispatch/Issue/role/class/attempt identity;
+- terminal status `completed | needs-commander | failed | cancelled | superseded`;
+- final `runtime_model_event` and inferred `reported_execution_binding` with the same non-attestation label;
+- exact head and concise outcome, validation state, unresolved matters, and safe next action;
+- Task live status, GitHub Issue state, pull-request state/reference, and timestamp.
+
+A Reviewer Return Receipt repeats the exact `reviewed_head` from its Launch Receipt and also records the reviewed class and `class_match`. Set `class_match: true` only when `requested_binding` and `launch_accepted_binding` both equal the fixed reviewed-class binding and `runtime_model_event` is `none`. A self-report never satisfies the match; `rerouted` or `mismatch` stops the attempt. The Reviewer binding lives in that Reviewer's own Launch/Return Receipts, not in the Issue's main Worker binding block.
+
+`runtime_model_event` is `none`, `rerouted`, or `mismatch`. An observed reroute or mismatch stops the attempt and requires Commander resolution plus a fresh attempt before controlled-file work continues. A model self-report is not attestation. This Codex-only workflow has no provider field and no unqualified `actual model` field.
+
+Only the Commander posts the terminal Return Receipt after accepting the Worker or Reviewer report. Keep three state namespaces separate:
+
+| Namespace | Values |
 | --- | --- |
-| A Spark-eligible T1/T2 coding unit and Spark is exposed with capacity | Dispatch direct to `gpt-5.3-codex-spark` @ `xhigh` without a Claude probe |
-| One Spark attempt reports unavailable or no capacity | Record the exact result; continue with the normal same-class order |
-| Any other eligible bounded Worker task and Claude Code quota is available | Use the same-class Claude binding first |
-| Claude Code is unavailable or its usable Worker quota is exhausted | Record the observed failure and reason; use the same-class Codex binding for the current quota window |
-| One provider's quota is short | Same task class, other provider's binding |
-| The commander's provider is exhausted | The commander seat moves to the other provider; task classes are unchanged |
-| Both providers are short | Stop dispatching; foreground work only |
+| Codex Task live status | `setup-pending | running | needs-attention | idle` |
+| Attempt terminal status | `completed | needs-commander | failed | cancelled | superseded` |
+| GitHub state | Issue and pull-request states from GitHub |
 
-**Downgrade the provider, never the task class.** Fallback is bidirectional by design: either provider can be the constrained one. On 2026-08-17 the Codex quota was exhausted while Claude remained available, which is precisely the case a one-directional policy would have failed to handle.
+`idle` never means `completed`.
 
-## Plumbing
+## Dispatch and parallel work
 
-Cross-provider dispatch needs one small mechanism, not a system: the commander shells out to the other provider's CLI non-interactively with a brief, a worktree path, and a model and effort selection, then collects the report. Codex CLI 0.147.0 provides `codex exec` for this; Claude Code provides subagents with per-agent model selection, worktree isolation, and background execution.
+- One Issue owns one branch, one pull request, and one writable Worker. Never give two writers the same branch, worktree, or controlled paths.
+- When two or more work-ready Issues are independent, the Commander should author them concurrently, with at most three active Worker Task Sessions. Do not split work merely to fill slots.
+- Parallel branches consume only stable owners and interfaces on current `dev`; they never depend on unintegrated candidate code or overlap controlled responsibility.
+- Product integration remains serial. After each integration, every remaining branch re-resolves authority and base, rebases, and revalidates. Because that changes the exact base/target binding, its old attempt stops; the Commander records the terminal status and launches a fresh attempt/Task before any further controlled-file work.
+- The live project view is the query-only [Dispatch Register](../docs/agents/dispatch-register.md). Do not create a central mutable Git ledger, daemon, database, host connector, query script, or workflow.
 
-Specify the contract tool-agnostically and implement it on whichever tooling is installed. Do not hard-code one vendor's mechanism into Layer A.
+## Local completion and return
 
-At merge, closure, abandonment, accepted integration, supersession, confirmed handoff consumption, or long-task freeze, the responsible foreground session runs the scoped [documentation archive sweep](../docs/agents/document-lifecycle.md). Archiving is node-driven and does not create a timer, host service, or additional agent role.
+A Worker follows the applicable Change Brief and [incremental development lifecycle](../docs/agents/incremental-development.md). Product work restores only accepted pins, uses payload-safe diagnostics when useful, and completes the repository-root `doctor` → `bootstrap` → `build` → applicable Journey sequence on its supported host. Documentation/design-only work creates no automated proof and runs only its named checks.
 
-## Deferred
+The final Worker report contains:
 
-| Deferred | Add it when |
-| --- | --- |
-| Typed authority requests | Informal coordination demonstrably fails |
-| Replay-safe dispatch receipts | Dispatch volume makes reconstructing what happened genuinely hard |
-| A formal commander/worker/evaluator role taxonomy beyond the three roles above | A fourth role is actually needed |
-| Any host connector, enrollment, or DPAPI machinery | Never, absent a concrete host-authority problem |
+- role, task class, Issue/attempt/dispatch identity;
+- requested and launch-accepted binding;
+- final runtime model event and inferred reported execution binding, never an attestation;
+- exact base/head, host, planned versus actual structural delta, changed paths, reuse/new-owner disposition, authority/data impact, cleanup, validation commands/outcomes, unresolved matters, and one safe next action;
+- `Local diagnostic` or `Local completion` for product work, or the exact non-behavior validation state for documentation/design-only work.
+
+Do not include raw logs, proof artifacts, credentials, Provider payloads, private material, or personal dependency state. A Worker stops and returns `needs-commander` when the Issue is wrong, the structural budget must expand, authority or semantics drift, a required dependency/process/schema is missing from scope, protected material would be exposed, or required validation fails outside the authorized change.
+
+The Commander audits the returned report and branch state, posts the Return Receipt, and alone performs authorized external integration. Pull requests remain Draft during authoring, review, rebase, and local validation. The current [CI boundary](../docs/agents/ci-test-boundaries.md) governs Local completion and Hosted Gate evidence; no dispatch or review receipt is a new gate.
+
+## Review and retention
+
+Independent review is optional and advisory unless an exact Owner/Issue instruction requests one. After an authoring head is locally complete, the Commander fixes that exact commit as immutable `reviewed_head` and launches the Reviewer from it as a separate fresh attempt at the reviewed class's binding. The Reviewer verifies its checkout and Launch Receipt against `reviewed_head`, reads the canonical Issue from fresh context, and never reuses the Worker task or transcript. After accepting the review report, the Commander repeats that same head in the Return Receipt.
+
+Keep a completed Worker or Reviewer Task visible through the Issue's merge, close, or abandonment, then the Commander archives it. A `needs-commander` task remains visible. A `superseded` or `cancelled` attempt receives a Return Receipt and is archived immediately. Codex Task archival is task retention; it is distinct from repository `docs/archive/` document lifecycle.
 
 ## Decision summary
 
-Accepted in Question 25 and revised by the owner on 2026-08-22 and 2026-08-31:
+Accepted in Question 25, replaced by the Owner on 2026-09-03, and recorded in ADR 0059:
 
-- three roles — Commander, Worker, Reviewer — with the Reviewer a fresh-context, strictly read-only, non-author agent that the Commander directly dispatches and that may not dispatch or spawn another agent;
-- Codex is the main entry and normally holds the commander seat, at top capability;
-- Spark-eligible T1/T2 coding units prefer direct `gpt-5.3-codex-spark` @ `xhigh` dispatch while exposed with capacity, then fall through after one unavailable/capacity result; every other dispatch-eligible bounded Worker task uses Claude Code first while its quota is available, then falls back at the same class to Codex, and every actual binding and fallback reason is recorded;
-- independent review is optional and advisory; the reviewed class, Reviewer binding floor, requested and actual provider/model/effort, independence, and any fallback or same-provider reason are recorded; cross-provider review is preferred without inheriting Worker provider order, Spark is never a Reviewer binding, and no verdict becomes a pull-request (PR), CI, branch, exact-head, zero-finding, iterative re-review, or other proof gate;
-- operating rules stay identical across providers and models, with Layer B as the only provider-specific policy surface; and
-- the legacy orchestration pilot and its host connector are rejected as baselines.
-
-See [ADR 0015](../docs/adr/0015-provider-neutral-development-dispatch.md).
+- fixed Codex-only bindings by role/class;
+- fresh Issue-bound Task Sessions for every Worker, Reviewer, role, and attempt;
+- a two-stage verified Launch Receipt and Commander-authored Return Receipt;
+- no fallback, runtime-model attestation claim, or Commander inline T1–T3 substitute;
+- queryable Issue receipts plus built-in task tools instead of orchestration infrastructure; and
+- bounded parallel authoring with serial product integration and fresh attempts after target drift.

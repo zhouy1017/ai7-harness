@@ -10,7 +10,8 @@ At task start record:
 - branch or detached state;
 - intended integration target as an exact commit, not only a moving branch name;
 - whether that target is canonical, candidate, or historical; and
-- the exact owner authorization and, separately, any Commander dispatch/execution instruction for the requested class of action.
+- the exact owner authorization and, separately, any Commander dispatch/execution instruction for the requested class of action; and
+- for a Worker or Reviewer, the canonical Issue revision/body hash, role-specific start commit (Worker exact base; Reviewer immutable `reviewed_head`), and immutable launch expectations during no-write bootstrap, followed by the verified `Issue + role + attempt` Launch Receipt before controlled-file work.
 
 During development, `dev` is the current integration and implementation-facing design line; `main` is the stable/release-promotion line. Frozen `design-doc@6895f02d2983865516d267809d8cdda77026f62c` is an allowlist source only. A file being visible, newer, longer, merged, review-clean, frozen, or internally labeled `accepted-candidate` does not promote it to an intended target.
 
@@ -56,9 +57,9 @@ Design truth precedence above does not grant action. Apply this matrix after res
 | Role | May authorize or execute | May not do |
 | --- | --- | --- |
 | **Owner** | Grant or expand product and design scope; authorize architecture or semantic change, implementation planning/start, Foundation Replacement, software/repository release or repository-publication scope, and other owner-reserved decisions | A decision is not integrated merely because it was stated; durable changes still enter their authority-owning record and normal integration path |
-| **Commander** | Within owner-authorized scope, shape Change Briefs, dispatch Workers and Reviewers, authorize a bounded internal replacement that preserves every listed boundary, integrate through pull requests, and execute approved repository external actions | Expand product/design/implementation scope; authorize Foundation Replacement; convert candidate material into canonical truth; transfer Commander authority through provider fallback |
-| **Worker** | Execute the exact brief in its own worktree and branch; stop and report when the envelope is insufficient | Expand scope, self-authorize replacement, integrate, push, publish, or take external actions |
-| **Independent Reviewer** | Perform bounded fresh-context, strictly read-only, non-author advisory review when directly dispatched by the Commander | Author the reviewed change; dispatch, delegate to, or spawn another agent; turn advice into a gate; integrate; or take external actions |
+| **Commander** | Within owner-authorized scope, shape T0 Change Briefs, launch fresh Worker/Reviewer Task Sessions, authorize a bounded internal replacement that preserves every listed boundary, accept reports, integrate through pull requests, and execute approved repository external actions | Perform T1–T3 controlled-file work inline; expand product/design/implementation scope; authorize Foundation Replacement; convert candidate material into canonical truth; transfer authority through a model/binding change |
+| **Worker** | After verifying its Issue and Launch Receipt, execute the exact brief in its own fresh Task Session, worktree and branch; stop and report when the envelope is insufficient | Expand scope, reuse another role/attempt, self-authorize replacement, integrate, push, publish, or take external actions |
+| **Independent Reviewer** | After verifying its Issue, immutable `reviewed_head`, and Launch Receipt, perform bounded fresh-context, strictly read-only, non-author advisory review in a separate fresh Task Session at that head | Reuse the Worker session/transcript; author the reviewed change; dispatch, delegate to, or spawn another agent; turn advice into a gate; integrate; or take external actions |
 
 Owner authorization defines the allowed purpose and outer scope. Commander authority controls repository dispatch, integration, and external execution inside that scope. Neither substitutes for the other.
 
@@ -80,6 +81,7 @@ Unknowns do not automatically create research, prototypes, audits, or validation
 
 Every non-mechanical Change Brief records:
 
+- Brief revision, main Worker class and exact requested model/effort;
 - exact base and intended integration target commit;
 - every canonical authority as target commit plus path;
 - owner authorization and, separately, Commander dispatch/execution authority with their scopes;

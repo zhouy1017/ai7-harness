@@ -2,15 +2,15 @@
 
 Status: **binding for architecture and design forks when referenced by `AGENTS.md`**
 
-This runbook specializes the provider-neutral Commander, Worker, and optional Reviewer rules in [Repository Development Dispatch](../../kick-in/27-repository-development-dispatch.md). Under ADR 0027, design validation is intentionally light: hostile review is advisory and source/evidence proof is not an architecture gate.
+This runbook specializes the Issue-bound Codex Commander, Worker, and optional Reviewer rules in [Repository Development Dispatch](../../kick-in/27-repository-development-dispatch.md). Under ADR 0027, design validation is intentionally light: hostile review is advisory and source/evidence proof is not an architecture gate.
 
 ## Invariants
 
 1. During development, `dev` is the current implementation-facing design and integration line. `main` is the protected stable/release-promotion line and advances only through a separately Owner-authorized promotion. A branch, task, prototype, review, frozen-source artifact, or handoff remains qualified evidence until the Owner accepts the change and the Commander integrates it into the intended line through the normal pull-request path.
-2. One writing task has one branch, one worktree, and one Worker. Never give two tasks write authority over the same checkout or file set.
-3. The Commander owns the freeze point, dispatch, conflict resolution, acceptance proposal, integration decision, and every external action.
+2. One writing Issue has one branch, one worktree, one writable Worker, and a fresh Task Session for each attempt. Never give two Tasks write authority over the same checkout or file set.
+3. The Commander owns T0 Issue shaping, the freeze point, dispatch, conflict resolution, acceptance proposal, integration decision, receipts, and every external action; it does not perform T1–T3 controlled-file work inline.
 4. A Worker whose brief is frozen may finish only work already materially underway. It may not add architecture assumptions, widen scope, or treat another candidate branch as canonical.
-5. A Reviewer starts from fresh, curated context, never the authoring task transcript. Architecture review and hostile challenge are Reviewer assignments, not new roles.
+5. A Reviewer starts in a separate fresh top-level Codex Task Session at the immutable completed candidate commit recorded as `reviewed_head`, from the Issue and its own Launch Receipt, never the authoring Task transcript. Architecture review and hostile challenge are Reviewer assignments, not new roles.
 6. Accepted ADRs and canonical context definitions outrank summaries. Candidate revisions must identify every accepted decision they would supersede; they never rewrite history silently.
 7. Design exploration and product implementation are separate authorization boundaries. An exploration outcome cannot start scaffolding, dependency installation, implementation issue decomposition, or a product branch by implication.
 8. Archives are historical storage, never additional design lines. New work consumes current authority owners and Commander-curated conclusions; it reads an exact archive artifact only when a current record names a blocking historical question.
@@ -45,27 +45,27 @@ No task may mark itself `accepted`, `revised`, or `deferred`. The Commander reco
 
 ## Freeze contract
 
-The Commander freeze brief states the exact base commit, branch, allowed finishing work, prohibited expansion, validation required, and external-action boundary. The Worker then:
+The Commander records the freeze brief in the Issue body with its revision, exact binding/base/target, branch, allowed finishing work, prohibited expansion, validation, and external-action boundary. A material change starts a fresh attempt/Task. The Worker then:
 
 1. stops starting new sub-tasks and new design decisions;
 2. finishes only already-created or materially underway artifacts;
 3. removes or relocates scratch outputs that must not enter Git;
 4. writes a freeze handoff using the schema below;
-5. updates `PROGRESS.md` with a safe next action;
+5. reports the safe next action in its Task response for the Commander-authored Return Receipt;
 6. creates a local candidate commit when the branch is coherent;
 7. records any obvious unresolved assumption without launching a proof task;
-8. optionally receives advisory review when the Commander requests it; and
+8. may be followed by a separate fresh advisory Reviewer Task when the Commander requests it; and
 9. stops without pushing, opening a pull request, merging, publishing, or dispatching more work.
 
-The Commander marks a line `frozen` after checking the final report, branch head, worktree status, and handoff. Validation evidence and an exact-head review are not required.
+The Commander marks a line `frozen` and posts the Return Receipt after checking the final report, branch head, worktree status, and handoff. Validation evidence and an exact-head review are not required.
 
-Freeze is a document-lifecycle node. After the new unique Resume Prompt and handoff are current, run the scoped [archive sweep](document-lifecycle.md) for superseded progress, packets, and scratch. Do not archive the still-unconsumed freeze handoff itself.
+Freeze is a document-lifecycle node. After the Issue receipt and any separately authorized Commander-owned root routing are current, run the scoped [archive sweep](document-lifecycle.md) for superseded packets, handoffs, and scratch. Do not archive a still-unconsumed freeze handoff itself.
 
 ## Freeze record schema
 
 Every legacy freeze record consists of the Worker handoff plus the Commander control-board or packet-manifest entry. Together they contain these fields. The Worker records what is knowable before commit, and the Commander records the candidate head and any optional review reference afterward.
 
-- **Identity:** task title and ID, role, task class, branch, worktree, base commit, and candidate head commit; include a reviewed head only when optional review occurred.
+- **Identity:** Issue, role, attempt, dispatch/Task ID, requested and launch-accepted binding, runtime model event, inferred reported execution binding, branch, worktree, base commit, and candidate head commit; when optional review occurs, its Launch and Return Receipts both record that candidate commit as `reviewed_head`.
 - **Artifact status:** complete, partial, invalid, or deliberately omitted; candidate/reference status stated explicitly.
 - **Changed paths:** grouped by outcome rather than a raw transcript.
 - **Reusable assets:** requirements, domain discoveries, boundary cases, evidence, interfaces, prototypes, or tests worth inheriting.
@@ -77,10 +77,10 @@ Every legacy freeze record consists of the Worker handoff plus the Commander con
 
 ## Context-contamination firewall
 
-New architecture work consumes a review packet assembled by the Commander. It may include:
+New architecture work consumes the canonical Issue and a review packet assembled by the Commander. Root routers appear only when the Issue names them. The packet may include:
 
 - the exact canonical base commit;
-- `AGENTS.md`, `HANDOFF.md`, normalized project overview, decision map, context map, applicable context definitions, and accepted ADRs;
+- `AGENTS.md`, normalized project overview, decision map, context map, applicable context definitions, and accepted ADRs;
 - Commander-audited freeze handoffs;
 - a concise known-problems register; and
 - direct evidence paths needed to verify a claim.
@@ -105,21 +105,21 @@ Use one coherent design authority and independent challenge:
 | --- | --- | --- | --- |
 | Design control and integration | Commander | Commander's issue branch only | Control board, curated packet, decision proposal |
 | Legacy completion | Worker | Its existing branch/worktree only | Frozen candidate assets and handoff |
-| Architecture review | Reviewer | Read-only unless later dispatched as a Worker on a new issue | v1 assumptions, root causes, inheritance matrix, v2 principles, exploration map |
+| Architecture review | Reviewer | Fresh read-only Task; any later authoring uses a new Issue-bound Worker Task | v1 assumptions, root causes, inheritance matrix, v2 principles, exploration map |
 | Hostile architecture challenge | Reviewer | Read-only | Failure modes, missing evidence, and verdict |
 | Accepted architecture drafting | Worker, only after a written brief | A new issue branch/worktree | Coherent architecture/ADR candidate |
 
-The soft cap of three concurrent Workers still applies. Reviewer work does not authorize a competing architecture line; the Commander chooses what advances.
+Run at most three active Worker Task Sessions. When two or more work-ready Issues are independent, the Commander should dispatch them concurrently; never split work to fill slots. Reviewer work does not authorize a competing architecture line; the Commander chooses what advances.
 
 ## Commander control loop
 
-1. Record the canonical base and current task registry in the control board.
-2. Send scoped briefs; do not rely on tasks reading one another.
-3. Observe milestone snapshots rather than repeatedly pulling full histories.
-4. Audit returned handoffs and branch state before feeding conclusions forward.
+1. Query the [Dispatch Register](dispatch-register.md), record the canonical base, and shape each work-ready Issue.
+2. Launch fresh Tasks through the two-stage receipt protocol; do not rely on Tasks reading one another.
+3. Observe live status with built-in task tools rather than copying histories into a control file.
+4. Audit returned reports, handoffs, and branch state; then post the accepted Return Receipt.
 5. Update the review packet with conclusions, not transcripts.
-6. Resolve contradictions into an explicit question, evidence task, or superseding ADR proposal.
-7. Optionally dispatch one high-level hostile challenge against the coherent candidate; do not turn it into an exact-head proof cycle.
+6. Resolve contradictions into an explicit question, evidence Task, or superseding ADR proposal.
+7. Optionally dispatch one fresh high-level hostile Reviewer against the coherent candidate; do not turn it into an exact-head proof cycle.
 8. Present one recommended decision to the owner, with trade-offs and rejected alternatives.
 9. Record acceptance immediately in the authority-owning documents; otherwise keep the item candidate, revised, or deferred.
 
@@ -138,10 +138,10 @@ Architecture exploration does not end because legacy tasks are closed. It ends o
 
 ## Durable records
 
-- Current task state: the canonical GitHub Issue and its complete Change Brief.
-- Current development checkpoint: root [`PROGRESS.md`](../../PROGRESS.md).
-- Cold-start route: root [`HANDOFF.md`](../../HANDOFF.md).
+- Current brief and terminal attempt evidence: the canonical GitHub Issue body plus its Launch/Return Receipts.
+- Current Task liveness and retention: the query-only [Dispatch Register](dispatch-register.md) over built-in Codex task tools.
+- Current integration-line routing: Commander-owned root [`PROGRESS.md`](../../PROGRESS.md) and [`HANDOFF.md`](../../HANDOFF.md).
 - Accepted domain authority: [`CONTEXT-MAP.md`](../../CONTEXT-MAP.md) and its routed context owners.
 - Document lifecycle: [Document lifecycle and archiving](./document-lifecycle.md).
 
-The earlier architecture-exploration control board, review packet, and known-problems register remain source-qualified Git-history evidence only; they are excluded from the active V2 development baseline and are not routing targets. Update the Issue/Change Brief after dispatch, freeze, review, acceptance, or a branch-head change. Update `PROGRESS.md` after each sub-task by replacing its current checkpoint as required by `AGENTS.md`; archive at most the defined node-level outgoing snapshot, and only at the defined lifecycle nodes.
+The earlier architecture-exploration control board, review packet, and known-problems register remain source-qualified Git-history evidence only; they are excluded from the active V2 development baseline and are not routing targets. Increment the Issue Brief revision for every material contract change; ordinary dispatch, freeze, review, acceptance, branch-head, and terminal attempt evidence belongs in standardized receipts. Root routers change only when Commander integration routing changes. Archive at most the defined node-level outgoing snapshot, and only at the defined lifecycle nodes.

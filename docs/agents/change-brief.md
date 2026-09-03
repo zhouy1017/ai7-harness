@@ -1,8 +1,26 @@
 # Change Brief
 
-The Change Brief is not a separate paperwork system. Put the applicable form directly in the GitHub Issue and copy only the bounded Worker instructions into the dispatch brief.
+The Change Brief is not a separate paperwork system. Put the applicable form directly in the GitHub Issue body; a Codex launch prompt points to that immutable revision instead of duplicating it.
 
 Link to an accepted definition, ADR, Issue section, or existing code location instead of restating it. Write one grouped `N/A — <short reason>` for an inapplicable subsection or consecutive dimensions; do not repeat `N/A` field by field. Template-shaped narrative, duplicated context, and boilerplate inserted only to fill every heading are prohibited.
+
+## Issue identity and revision
+
+Every work-ready Issue body begins with:
+
+```md
+Brief revision: <positive integer>
+
+## Main Worker binding
+
+- Role: Worker
+- Task class: T1 | T2 | T3
+- Requested binding: `<model> @ <reasoning effort>`
+```
+
+The requested binding is the fixed class binding in [Repository Development Dispatch](../../kick-in/27-repository-development-dispatch.md). A Reviewer's binding belongs in that Reviewer's own Launch/Return Receipts, not in this main Worker block. The Commander computes `issue_body_sha256` over the exact UTF-8 bytes of the GitHub API `body` string, without a CLI-added newline.
+
+Before launch, increment `Brief revision` when a body edit changes role, class, binding, outcome, authority, exact base/target, branch/worktree ownership, structural budget, non-goals, stop conditions, validation, or reporting/external-action boundaries. An editorial-only pre-launch edit may keep the revision if the contract is unchanged, but its hash must be recomputed. The `create_thread` request freezes the expected revision/hash; any later body-byte change prevents or invalidates that attempt. After a Launch Receipt, even an editorial-only body change requires an incremented revision, new attempt, and fresh Task Session. Comments, labels, and assignments outside the body do not restart an attempt.
 
 ## Short form — mechanical T1
 
@@ -73,19 +91,17 @@ Use this only when correctness requires little judgment and no product behavior,
 
 “No current implementation” is valid only for an authorized first-owner bootstrap. It is not permission to create speculative layers.
 
-## Worker dispatch extraction
+## Task dispatch extraction
 
-The Commander sends only:
+The Issue body is the extraction. The Commander's first `create_thread` prompt sends only:
 
-- exact base, branch/worktree, role and task class;
-- exact outcome and accepted basis;
-- current owner/reuse anchor;
-- structural budget and non-goals;
-- stop conditions;
-- applicable E2E journey/bug, or non-behavior `N/A`; and
-- reporting/external-action boundary.
+- Issue URL and preallocated `dispatch_id`;
+- expected Brief revision and exact body hash;
+- role, task class, requested model/effort, and attempt;
+- named branch, exact base and intended target, plus the immutable completed `reviewed_head` for a Reviewer; and
+- a no-write bootstrap-preflight instruction that reports the generated actual cwd/worktree and branch-or-detached state.
 
-Do not send full transcripts, archive trees, unrelated design packages, or the entire repository history.
+The first prompt cannot name an app-managed worktree path or Task/client ID that does not exist yet. A Worker starts at the exact integration base; a Reviewer starts at the immutable completed authoring commit recorded as `reviewed_head` while retaining the Issue's exact base/target context. After the first turn stops and the Task Session ID exists, the Commander verifies the generated clean checkout at that role-specific start, attaches only a detached Worker checkout to the pre-created Issue branch when needed, posts the finalized Launch Receipt, and sends only its permalink. A Reviewer stays detached and read-only at `reviewed_head`. The Worker or Reviewer fetches and verifies the Issue plus receipt before controlled-file work. Do not send full transcripts, archive trees, unrelated design packages, the entire repository history, or a duplicated Change Brief. Follow the two-stage launch and attempt-identity rules in the dispatch owner.
 
 Candidate journey IDs and candidate design packages retain their status. They may not be promoted merely to fill a Change Brief field.
 

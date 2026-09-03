@@ -33,3 +33,5 @@ This ADR supersedes the mandatory verification and review-gate clauses of ADRs 0
 [ADR 0057](./0057-restore-hosted-gate-under-observed-actions-usage.md) restored the normal one-occurrence paired Hosted Gate after Issue #88's J-15 cutover and removed dormant J-03 from the active workflow until Issue #47's atomic cutover. Its then-current Actions-usage-observation conditions are historical under [ADR 0058](./0058-remove-actions-usage-observation-from-development-gating.md), which removes those conditions from repository development while preserving this decision's one-Gate identity, platform parity, failure meaning, provider-free boundary, and excluded proof surfaces.
 
 The concise implementation rules live in [`docs/agents/ci-test-boundaries.md`](../agents/ci-test-boundaries.md).
+
+[ADR 0059](./0059-dispatch-repository-work-through-issue-bound-codex-task-sessions.md) supersedes ADR 0015's remaining repository-development dispatch policy. This ADR's earlier supersession of ADR 0015's mandatory verification and review-gate clauses remains historical truth; ADR 0059 does not revive them or add a dispatch, model, receipt, review, exact-head, or other proof gate.

@@ -304,7 +304,7 @@ The inheritance audit resolved the definition owners for these terms. They remai
 | Harness Tool | AI7 Capability / authority boundary / Effect Receipt |
 | DSH Analysis Contract | Coverage Manifest / Manuscript Analysis Result Set / Background Analysis Enrollment / Workflow Instance |
 | Run Source Scope | Working Corpus / Outbound Data Category / mutation authority |
-| Model Role | Model Provider / model name / Provider Binding / Repository Development Dispatch Layer B binding policy |
+| Model Role | Model Provider / model name / Provider Binding / repository-development requested or launch-accepted binding |
 | Provider Resolution Plan | Plan Envelope / dynamic provider choice / skill preference |
 | Provider Preflight | Run Authorization / live model call |
 | Provider Account Limit | Run Budget Ceiling / Run Budget Ceiling Reached / provider rate limit / scheduler capacity / automatic fallback authority |
@@ -333,10 +333,11 @@ The inheritance audit resolved the definition owners for these terms. They remai
 
 `Task Skill`, `Task Skill Manifest/Package/Candidate`, `Installed Task Skill Version`, `Task Skill Enablement/Activation`, `Harness Skill Projection`, `Third-Party DSH Plugin`, `Plugin Admission Snapshot`, and `Local Plugin Pin` are legacy-only language preserved in superseded ADRs 0010/0042 and historical target commits. Do not use them as current AI7 object names. Their responsibilities now route to native DSH artifact identities plus separate AI7-owned provenance, compatibility, scope, authority, audit, rollback, update, enablement, per-Run activation, and Apply seams; exact implementation-facing sidecar and activation record names remain deliberately unresolved.
 
-Two collisions come from repository tooling rather than from Harness, and are recorded here because the words are nearly identical:
+Three collisions come from repository tooling rather than from Harness, and are recorded here because the words are nearly identical:
 
 - A **Repository Development Dispatch reviewer** produces a *review report* about a code branch. It is engineering tooling and carries no product authority. A **Review Decision** is a professional editorial judgment at a workflow gate, defined in the Editorial context. Never let one term stand for the other.
-- The Dispatch **Layer B binding policy** names providers, models, reasoning effort, provider order, and quota fallback for development agents. A **Model Role** declares product model requirements and by design names no provider, model, endpoint, or credential; provider selection is frozen by Provider Preflight into the Plan Envelope. A development binding policy must never be readable as a Provider Resolution Plan, and the two must not share vocabulary, configuration, or code paths.
+- A repository-development **Codex Task Session** is the app task carrying one `Issue + role + attempt`; it is not an AI7 Task, Run, Harness Session, DSH subagent, or product execution record.
+- Repository-development `requested_binding`, `launch_accepted_binding`, `runtime_model_event`, and inferred `reported_execution_binding` are dispatch evidence. A **Model Role** declares product model requirements without choosing a provider, model, endpoint, or credential; Provider Preflight freezes product Provider bindings and the Approved Fallback Chain into the Plan Envelope. The two mechanisms share no authority, configuration, or code path.
 
 ## Simplified Chinese label discipline
 
