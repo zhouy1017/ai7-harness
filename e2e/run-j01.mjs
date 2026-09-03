@@ -1178,6 +1178,10 @@ async function runJourney(
     holdCompletionPaint = false,
     diagnosticReviewLocation = 'review',
   } = options;
+  const usePrimaryReviewDiagnostics = diagnosticReviewLocation === 'review';
+  const atPrimaryReviewStage = (location) => {
+    if (usePrimaryReviewDiagnostics) at(location);
+  };
   const hasIdentityFinding = identityClass !== null;
   const expectedNonEffects = degraded
     ? [
@@ -1261,6 +1265,7 @@ async function runJourney(
   await clickExactButton(renderer, '确认书名并复核', 'review-click');
   await waitFor(renderer, `document.querySelector('[data-screen="review"]')`, 'review-screen');
   at(diagnosticReviewLocation);
+  atPrimaryReviewStage('review-contract');
   if (hasIdentityFinding) {
     await assertRenderer(
       renderer,
@@ -1294,6 +1299,7 @@ async function runJourney(
       `(() => { const acceptance = document.querySelector('#accept-import-degradation'); if (!acceptance) return false; acceptance.click(); return true; })()`,
       'degradation-accept',
     );
+    atPrimaryReviewStage('review-acceptance');
     await waitFor(
       renderer,
       `document.querySelector('#accept-import-degradation')?.checked && Array.from(document.querySelectorAll('button')).some((button) => button.textContent === '按上述降级方式新建图书并导入稿件' && !button.disabled)`,
@@ -1362,11 +1368,13 @@ async function runJourney(
       'completion-paint-held',
     );
   }
+  atPrimaryReviewStage('commit');
   await clickExactButton(
     renderer,
     degraded ? '按上述降级方式新建图书并导入稿件' : '新建图书并导入稿件',
     'commit-click',
   );
+  atPrimaryReviewStage('completion');
   if (expectInterruption) {
     await waitFor(
       renderer,

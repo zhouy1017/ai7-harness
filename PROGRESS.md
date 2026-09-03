@@ -2,35 +2,30 @@
 
 ## What's done
 
-- Issue #47 remains bound to `feat/47-record-provider-denied-authorization` at exact base `dev@013959a5c0e018f22a0cba9933b3622c2219629d`; Draft PR #190 is Commander-owned. The current exact validated implementation head is `173b2f617bf98b570e976abed32e3372841266d4`; the Worker has not pushed or changed pull-request state.
-- The permanent J-03 runner first produced the payload-safe RED at `6fa072681a1bfe527a010ab04b91a98eb59ebbfa`. Schema-v14/protocol-v15 product implementation landed at `894929ea950c261d85686c761c47743dd549f65f`, and review remediation landed at `4e2d261cc8f58cbf5e1956b7af0eed63e9a2aefd`.
-- One deep `TaskAuthorizationStore` on the existing `ai7.sqlite` owns exact SQL, canonical JSON and SHA-256 links, immutable rows, idempotency, migration, startup semantic validation, and the small inspect/prepare/authorize surface. The existing bounded Manuscript checkpoint owner now also owns exact `Task Input / 任务输入`, shares one per-branch concurrency map with reimport, and reuses a clean current Revision without creating an empty one.
-- Product availability now requires exact sample1 primary-Manuscript lineage, the exact installed native carrier plus enabled Revision 2 sidecar, and fixed missing opaque credential metadata. Frozen records still reopen from immutable rows. Main reconstructs renderer mutations from trusted fields so a foreign renderer `bookId` cannot override the sender-owned current-Book route.
-- The frozen Run Source Scope independently identifies the exact Book, primary Manuscript, Task Input Revision, and Revision digest; Source Version remains unreadable lineage evidence. The Artifact Pin includes the exact native carrier digest and Revision 2 sidecar digest. The fixed Main Editorial DeepSeek binding, empty fallback, missing opaque credential readiness, public-or-synthetic category, unset budget, and trusted development-ci Provider Processing v1 denial remain unchanged.
-- The Book workbench exposes only preparation and `记录本次运行授权（不派发）`; terminal state is exactly `已记录授权 · 未派发`. Later edits, restart, and configuration changes cannot retarget or start it, and no Provider, Session, scheduler, payload, egress, network, model, or Effect surface exists.
-- Permanent J-03 now proves the negative prerequisite state, exact scope/carrier projection and UI, sender-owned cross-Book routing, real sample1/import/setup/Revision 2/edit/prepare/authorize/restart behavior, J-14 IME/focus/200%/forced-colors behavior, zero activity, and idempotence. Cancellation has mutation safety points, bounded current/acquiring-browser interruption, confirmed disconnect before root deletion, and fail-closed protected-store cleanup.
-- At `4e2d261`, the pinned Windows toolchain build and permanent J-03 passed. The first `bb768d7` full sequence closed at `J-15/restart-persistence`; `ce6144b` corrected that same fixture's exact v12 cleanup for the new empty task-ledger tables. Follow-up review then required per-mutation cancellation points, sticky fail-closed browser close handling, and the real visible prepare action plus bounded cross-Book idempotent retry; `300f78f` implemented those, and `173b2f6` added the final pre-acceptance cancellation point.
-- Exact head `173b2f617bf98b570e976abed32e3372841266d4` passed Windows 11 x64 `doctor` → `bootstrap` → `build` → `e2e:all` with pinned Node 24.18.1/pnpm 11.24.0. The resolved Journey set J-01/J-02/J-08/J-12/J-15/J-03 all passed and produced `LOCAL_COMPLETION/all/pass`.
-- Four old J-03/J-15 temporary roots and one root left by a deliberately interrupted local J-02 run were removed after exact-parent/no-reparse/no-process checks. The unrelated older J-02 root was left untouched. At the validated completion boundary, J-03/J-15 root counts, owned process count, and dependency/runtime junction count were zero.
-- `README.md`, `docs/development/source-checkout.md`, `docs/agents/ci-test-boundaries.md`, and `docs/agents/incremental-development.md` describe the current six-Journey J-01/J-02/J-08/J-12/J-15/J-03 projection and the provider-denied boundary. No ADR history was changed.
+- Issue #47 remains on `feat/47-record-provider-denied-authorization` from exact `dev@013959a5c0e018f22a0cba9933b3622c2219629d`; Draft PR #190 and every remote action remain Commander-owned.
+- The provider-free Task authorization implementation and permanent J-03 are unchanged. Exact implementation head `173b2f617bf98b570e976abed32e3372841266d4` previously passed the pinned Windows `doctor` → `bootstrap` → `build` → `e2e:all` sequence for J-01/J-02/J-08/J-12/J-15/J-03. Later commits through `85e64c5aae9627116d5ee272073a27ff9c969567` changed routing documentation only.
+- Paired Hosted Gate run `33704901249` checked exact head `85e64c5aae9627116d5ee272073a27ff9c969567`. Its macOS job failed at the payload-safe but overly broad `J-01/review` marker; fail-fast cancelled the paired Windows job. No later Journey or Hosted completion is claimed.
+- The permanent exact-path J-01 diagnostic passed twice on Windows at the affected head and after the bounded diagnostic change. The Issue #47 J-01 product delta is limited to the exact preload-key assertion, which executes before `review` and therefore passed in the failing Hosted run.
+- Source inspection found that the initial review renderer is constructed synchronously after its preparation IPC completes, while the only asynchronous review mutation—degradation acceptance—already has a bounded wait. The runner's `review` marker instead remained active across review-contract assertions, acceptance, the commit click, and durable completion, and was reused by multiple clean setup imports. Existing evidence therefore does not identify a product defect or justify a speculative product/timeout change.
+- The permanent J-01 runner and controller now admit payload-safe `review-contract`, `review-acceptance`, `commit`, and `completion` markers for the prior default `review` path. Existing continuity and interruption scenario markers remain unchanged. Build and the targeted J-01 diagnostic pass locally.
 
 ## What's next
 
-- Commander verifies the current remote `dev`, pushes this branch, updates Draft PR #190, and owns review/Ready plus required paired Hosted Gate observation.
-- Any rebase, integration, publication, release, or `main` promotion remains separately Commander/Owner-routed; the Worker performs no further product mutation.
+- Run the pinned exact-head Windows `doctor` → `bootstrap` → `build` → `e2e:all` sequence, record cleanup/residue evidence, and checkpoint the final routing state.
+- Commander then owns branch push, Draft PR #190 update, review/Ready handling, and any paired Hosted Gate rerun. Only a new safe marker from that rerun can distinguish a macOS product failure from a transient timing/test incident.
 
 ## Key decisions
 
-- Task authorization remains one immutable record-only ledger, not a generic Task framework or execution path. A recorded authorization has no dispatcher surface and cannot auto-start.
-- Readable scope is an exact four-part selection of Book, primary Manuscript, Task Input Revision, and Revision digest. Source Version is evidence only, while both native carrier and sidecar identities are digest-pinned.
-- J-03 observes only product projections. Its one synthetic secret is written and removed through existing supported product paths, is never read back or output, and is scanned only after confirmed product closure. Cleanup preserves the root whenever browser disconnect or protected-store removal is unconfirmed.
+- Do not change product behavior or lengthen timeouts without a reproducing boundary. The current evidence is two local passes plus a Hosted marker that spans several distinct operations.
+- Diagnostic names expose only lifecycle stages. They contain no manuscript, source, identifier, payload, path, credential, Provider, model, or artifact data.
+- Issue #47 authority remains provider-free and record-only; no Provider, secret read, Session, scheduler, payload, egress, network, recording, model execution, or Effect path is entered.
 
 ## Unresolved matters or blockers
 
-- No product-scope, local-validation, Provider, credential-authority, or structural-budget blocker is known. Hosted Gate evidence is not claimed by this local result and remains Commander-owned.
+- The exact macOS cause remains unclassified because the old `review` marker discarded the necessary boundary. There is no local product-scope or structural-budget blocker; Hosted evidence remains incomplete and Commander-owned.
 
 ## Safe Resume Prompt
 
 ```text
-Commander: receive Issue #47 from validated implementation head 173b2f617bf98b570e976abed32e3372841266d4 plus its final routing-doc commit. Confirm the Worker's final docs-only exact-head Windows sequence, then own push, pull-request review/Ready handling, and required paired Hosted Gate observation. Do not treat local completion as Hosted evidence or enter Provider/secret-read/session/scheduler/payload/egress/model/Effect paths.
+Commander: after the Worker reports final exact-head local validation, push the Issue #47 branch and rerun the paired Hosted Gate. Classify any macOS recurrence only from the new payload-safe J-01 review-contract/review-acceptance/commit/completion marker; do not infer payload details, broaden product behavior, or enter Provider/secret/session/scheduler/egress/model/Effect paths.
 ```
