@@ -53,6 +53,10 @@ The main-owned picker hook supplies the selected result but cannot expose a path
 
 The macOS source-checkout host contract is macOS 15+ arm64, matching the selected V1 CPU/OS support profile. Source checkout truthfully reports `source-checkout`; it does not claim the separately selected direct-download Developer ID-signed/hardened/notarized DMG. Packaged macOS product data belongs in the OS-resolved per-user Application Support location for `io.github.zhouy1017.ai7` with no silent fallback, but this source-checkout route performs no package, signing, notarization, upload, or release action.
 
+## J-03 authorization boundary
+
+For v14 specifically, startup validation binds the exact native carrier and Revision 2 sidecar digests, an independently identified Book/primary Manuscript/Task Input Revision/digest readable scope, unreadable Source Version lineage evidence, the fixed missing-credential DeepSeek binding, and Provider Processing v1 denial. Preparation is unavailable until all current prerequisites exist, while an already frozen record reopens from its immutable rows. J-03 proves the Task action is unavailable before those prerequisites and that a renderer-supplied foreign Book identifier cannot override the Main-owned current-Book route. Its prepared product projection and UI expose the same exact carrier and scope identities. Cancellation checkpoints prevent further credential, edit, preparation, or authorization mutations after an interrupt; bounded browser disconnect and protected-store cleanup must succeed before disposable state is deleted.
+
 ## Closed product interval
 
 After bootstrap, the E2E controller, Electron main, isolated renderer, and service deny outbound HTTP(S), WebSocket, DNS, and socket primitives appropriate to their process. The product receives no repository token, registry credential, provider credential, debug selector, or ambient payload path. Renderer checks return booleans only; ordinary scenarios emit a fixed failure location, the diagnostic wrapper re-emits only a bounded allowlisted tuple, and neither creates a screenshot, trace, video, artifact, log payload, database assertion, or tracked DOCX.

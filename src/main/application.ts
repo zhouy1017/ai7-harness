@@ -1737,7 +1737,10 @@ function registerRendererHandlers(
         return serializeEffect(async () => {
           requireAuthority();
           const route = requireCurrentBookRoute(owned);
-          const result = await service.call('prepareTaskAuthorization', { bookId: route.bookId, ...input });
+          const result = await service.call('prepareTaskAuthorization', {
+            goal: input.goal,
+            bookId: route.bookId,
+          });
           if (result.kind !== 'task-authorization-preparation') {
             throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '任务授权准备结果类型无效。');
           }
@@ -1760,7 +1763,11 @@ function registerRendererHandlers(
           requireAuthority();
           const route = requireCurrentBookRoute(owned);
           const routeGeneration = owned.routeGeneration;
-          const result = await service.call('authorizeTaskAuthorization', { bookId: route.bookId, ...input });
+          const result = await service.call('authorizeTaskAuthorization', {
+            taskIntentId: input.taskIntentId,
+            planEnvelopeDigest: input.planEnvelopeDigest,
+            bookId: route.bookId,
+          });
           requireCurrentRouteGeneration(owned, routeGeneration);
           if (result.bookId !== route.bookId) {
             throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '任务运行授权结果不属于当前图书工作台。');

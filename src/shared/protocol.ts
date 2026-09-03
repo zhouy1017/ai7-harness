@@ -948,12 +948,16 @@ export interface TaskAuthorizationProjection {
     sourceDigest: 'b8a3dbde0aa8a1ec7265f9ae3fe47877759e7947c5ab69682cd0a8f424a8d483';
   };
   runSourceScope: null | {
+    bookId: string;
+    manuscriptId: string;
+    taskInputRevision: { revisionId: string; revisionDigest: string };
     readableScopeKinds: readonly ['current-book-primary-manuscript-revision'];
     sourceVersionEvidence: { sourceVersionId: string; readable: false };
   };
   artifactPin: null | {
     identity: '@ai7/editorial-workspace-profile';
     version: '1.0.0';
+    nativeCarrierSha256: 'ae485040c8fa602ab2e98ec91dd122201d40a8be41d8a4f86f7cd55ddb1e434d';
     sidecarIdentity: 'ai7.editorial-workspace-profile.authority';
     sidecarRevision: 2;
     sidecarSha256: '980b565f25bdff29e539365e17344346017b05146a45cfea35c8ed7d528a1bff';

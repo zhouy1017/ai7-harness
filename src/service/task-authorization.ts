@@ -11,6 +11,7 @@ export const TASK_AUTHORIZATION_SCHEMA_VERSION = 14;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const DIGEST_PATTERN = /^[0-9a-f]{64}$/;
 const SAMPLE1_SOURCE_DIGEST = 'b8a3dbde0aa8a1ec7265f9ae3fe47877759e7947c5ab69682cd0a8f424a8d483' as const;
+const NATIVE_CARRIER_DIGEST = 'ae485040c8fa602ab2e98ec91dd122201d40a8be41d8a4f86f7cd55ddb1e434d' as const;
 const SIDECAR_DIGEST = '980b565f25bdff29e539365e17344346017b05146a45cfea35c8ed7d528a1bff' as const;
 const EXPECTED_OUTCOME = '供编辑复核的结构与叙事连贯性重点清单' as const;
 const CHECKPOINT_PURPOSE = 'Task Input / 任务输入' as const;
@@ -224,6 +225,7 @@ function validateStoredCanonicalRows(db: DatabaseSync): void {
             mr.revision_id joined_revision_id, mr.revision_digest joined_revision_digest,
             mr.source_version_id, sv.source_digest, m.manuscript_id joined_manuscript_id,
             mb.branch_id joined_branch_id, pin.book_id artifact_pin_book_id,
+            installation.content_sha256 native_carrier_sha256,
             connection.credential_reference,
             ra.task_intent_id authorization_task_id, ra.authorization_id, ra.plan_envelope_sha256,
             ra.origin, ra.authorized_at, ra.canonical_json authorization_json,
@@ -249,6 +251,8 @@ function validateStoredCanonicalRows(db: DatabaseSync): void {
        AND pin.native_artifact_id = '@ai7/editorial-workspace-profile'
        AND pin.sidecar_id = 'ai7.editorial-workspace-profile.authority'
        AND pin.sidecar_revision = 2 AND pin.sidecar_sha256 = '${SIDECAR_DIGEST}'
+     LEFT JOIN native_artifact_installations installation
+       ON installation.artifact_id = pin.native_artifact_id
      LEFT JOIN model_service_connections connection
        ON connection.connection_id = 'main-editorial-deepseek-v4-pro'`,
   ).all() as SqlRow[];
@@ -286,6 +290,7 @@ function validateStoredCanonicalRows(db: DatabaseSync): void {
         row.joined_branch_id === branchId && row.joined_revision_id === revisionId &&
         row.joined_revision_digest === revisionDigest && UUID_PATTERN.test(sourceVersionId) &&
         row.source_digest === SAMPLE1_SOURCE_DIGEST && row.artifact_pin_book_id === bookId &&
+        row.native_carrier_sha256 === NATIVE_CARRIER_DIGEST &&
         UUID_PATTERN.test(credentialReference),
         'TASK_RECORD_INVALID',
         '任务计划所固定的输入、构件或本地绑定无效。',
@@ -312,11 +317,15 @@ function validateStoredCanonicalRows(db: DatabaseSync): void {
       requireTask(row.artifact_pin_json === canonicalJson({
         identity: '@ai7/editorial-workspace-profile',
         version: '1.0.0',
+        nativeCarrierSha256: NATIVE_CARRIER_DIGEST,
         sidecarIdentity: 'ai7.editorial-workspace-profile.authority',
         sidecarRevision: 2,
         sidecarSha256: SIDECAR_DIGEST,
       }), 'TASK_RECORD_INVALID', '任务原生构件 pin 无效。');
       requireTask(row.source_scope_json === canonicalJson({
+        bookId,
+        manuscriptId,
+        taskInputRevision: { revisionId, revisionDigest },
         readableScopeKinds: ['current-book-primary-manuscript-revision'],
         sourceVersionEvidence: { sourceVersionId, readable: false },
       }), 'TASK_RECORD_INVALID', '任务运行来源范围无效。');
@@ -483,11 +492,15 @@ export class TaskAuthorizationStore {
   inspect(bookId: string): TaskAuthorizationProjection {
     requireTask(UUID_PATTERN.test(bookId), 'TASK_BOOK_INVALID', '任务所属图书无效。');
     const intent = this.#db.prepare('SELECT * FROM task_intents WHERE book_id = ?').get(bookId) as SqlRow | undefined;
-    if (intent === undefined) return this.#available(bookId);
+    if (intent === undefined) {
+      this.#binding(bookId);
+      return this.#available(bookId);
+    }
     const taskIntentId = asString(intent.task_intent_id);
     const checkpoint = this.#db.prepare('SELECT * FROM task_input_checkpoints WHERE task_intent_id = ?')
       .get(taskIntentId) as SqlRow | undefined;
     if (checkpoint === undefined) {
+      this.#binding(bookId);
       return { ...this.#available(bookId), taskIntent: this.#intentProjection(intent), actions: { canPrepare: true, canAuthorize: false } };
     }
     const read = <T>(table: string): T => {
@@ -700,11 +713,18 @@ export class TaskAuthorizationStore {
     const artifactPin = {
       identity: '@ai7/editorial-workspace-profile',
       version: '1.0.0',
+      nativeCarrierSha256: NATIVE_CARRIER_DIGEST,
       sidecarIdentity: 'ai7.editorial-workspace-profile.authority',
       sidecarRevision: 2,
       sidecarSha256: SIDECAR_DIGEST,
     } as const;
     const sourceScope = {
+      bookId: checkpoint.bookId,
+      manuscriptId: checkpoint.manuscriptId,
+      taskInputRevision: {
+        revisionId: checkpoint.revisionId,
+        revisionDigest: checkpoint.revisionDigest,
+      },
       readableScopeKinds: ['current-book-primary-manuscript-revision'],
       sourceVersionEvidence: { sourceVersionId: facts.sourceVersionId, readable: false },
     } as const;
@@ -783,7 +803,7 @@ export class TaskAuthorizationStore {
     const row = this.#db.prepare(
       `SELECT m.manuscript_id, mb.branch_id, bws.base_revision_id, bws.journal_sequence, bws.working_digest,
               mr.source_version_id, sv.source_digest,
-              pin.sidecar_revision, pin.sidecar_sha256,
+              pin.sidecar_revision, pin.sidecar_sha256, installation.content_sha256 native_carrier_sha256,
               connection.credential_reference, connection.credential_operation_state
        FROM manuscripts m
        JOIN manuscript_branches mb ON mb.manuscript_id = m.manuscript_id
@@ -793,13 +813,15 @@ export class TaskAuthorizationStore {
        JOIN editorial_workspace_profile_book_pins pin ON pin.book_id = m.book_id
          AND pin.native_artifact_id = '@ai7/editorial-workspace-profile'
          AND pin.sidecar_id = 'ai7.editorial-workspace-profile.authority'
+       JOIN native_artifact_installations installation ON installation.artifact_id = pin.native_artifact_id
        JOIN model_service_connections connection ON connection.connection_id = 'main-editorial-deepseek-v4-pro'
        WHERE m.book_id = ? AND m.role = 'primary'
        ORDER BY pin.sidecar_revision DESC`,
     ).get(...(checkpoint === undefined ? [bookId] : [checkpoint.revisionId, bookId])) as SqlRow | undefined;
     requireTask(row !== undefined && row.source_digest === SAMPLE1_SOURCE_DIGEST,
       'TASK_LINEAGE_UNAVAILABLE', '当前图书不是精确 sample1 主稿件血缘。');
-    requireTask(row.sidecar_revision === 2 && row.sidecar_sha256 === SIDECAR_DIGEST,
+    requireTask(row.native_carrier_sha256 === NATIVE_CARRIER_DIGEST &&
+      row.sidecar_revision === 2 && row.sidecar_sha256 === SIDECAR_DIGEST,
       'TASK_ARTIFACT_PIN_UNAVAILABLE', '当前图书尚未固定编辑工作区方案 Revision 2。');
     requireTask(row.credential_operation_state === 'missing' && UUID_PATTERN.test(asString(row.credential_reference)),
       'TASK_PROVIDER_BINDING_UNAVAILABLE', '主编辑角色缺少固定的未就绪凭据引用元数据。');
