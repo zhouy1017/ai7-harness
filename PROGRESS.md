@@ -27,7 +27,6 @@
 
 ## Unresolved matters or blockers
 
-- No product-scope, Provider, credential-authority, or structural-budget blocker is known.
 - No product-scope, local-validation, Provider, credential-authority, or structural-budget blocker is known. Hosted Gate evidence is not claimed by this local result and remains Commander-owned.
 
 ## Safe Resume Prompt
