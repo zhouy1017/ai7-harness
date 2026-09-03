@@ -11,12 +11,12 @@
 - The renderer now defers the optional task inspection until the import-completion acknowledgement attempt settles; ordinary Book overview rendering still inspects immediately. The permanent path proves the task host remains unsettled before paint/ack and the card settles after recovered acknowledgement.
 - The J-01 runner and controller admit payload-safe `review-contract`, `review-acceptance`, `commit`, and `completion` markers for the prior default `review` path. `review-acceptance` is set before its checkbox/click assertion, `commit` remains active through the bounded imported-screen wait, and `completion` starts before the existing durable paint/ack wait. Existing continuity and interruption scenario markers remain unchanged. The product fix passes build and targeted J-01 locally.
 - Exact diagnostic head `ab0ed6d90eda2bad19769f6fc16dbde66dec47f7` passed the pinned Windows 11 x64 `doctor` → `bootstrap` → `build` → `e2e:all` sequence with Node 24.18.1, pnpm 11.24.0, and Electron 43.4.1. J-01/J-02/J-08/J-12/J-15/J-03 all passed with `LOCAL_COMPLETION/all/pass`.
+- Exact GREEN head `a6a5da0e2d290101f1ca889506dffd4f3468f12d` also passed the pinned Windows 11 x64 `doctor` → `bootstrap` → `build` → `e2e:all` sequence; J-01/J-02/J-08/J-12/J-15/J-03 all passed with `LOCAL_COMPLETION/all/pass`.
 - Cleanup left zero newly created Journey roots, zero owned Node/Electron processes, and zero non-dependency reparse points. Older unrelated temporary roots were not modified.
 
 ## What's next
 
-- Run the pinned exact-head Windows full sequence after the GREEN commit and checkpoint cleanup evidence.
-- Commander then owns branch push, Draft PR #190 update, review handling, and any paired Hosted Gate rerun. A new safe marker can only narrow the recurrence phase; it does not classify root cause. Any recurrence or ambiguity keeps PR #190 Draft and requires local diagnosis under the CI boundary before Ready.
+- Commander owns branch push, Draft PR #190 update, review handling, and any paired Hosted Gate rerun. A new safe marker can only narrow the recurrence phase; it does not classify root cause. Any recurrence or ambiguity keeps PR #190 Draft and requires local diagnosis under the CI boundary before Ready.
 
 ## Key decisions
 
@@ -31,5 +31,5 @@
 ## Safe Resume Prompt
 
 ```text
-Worker: commit the GREEN completion-ordering fix after build and targeted J-01, then run the pinned exact-head Windows full sequence and checkpoint cleanup evidence. Commander subsequently owns push and any paired Hosted Gate rerun. Use any new payload-safe marker only to narrow a recurrence phase; any recurrence or ambiguity keeps PR #190 Draft and requires local diagnosis under the CI boundary. Do not infer that the fixed ordering defect caused the prior macOS failure or enter Provider/secret/session/scheduler/egress/model/Effect paths.
+Commander: receive Issue #47 from exact GREEN head a6a5da0e2d290101f1ca889506dffd4f3468f12d plus its final routing-doc commit, push the branch, and own review plus any paired Hosted Gate rerun. Use any new payload-safe marker only to narrow a recurrence phase; any recurrence or ambiguity keeps PR #190 Draft and requires local diagnosis under the CI boundary. Do not infer that the fixed ordering defect caused the prior macOS failure or enter Provider/secret/session/scheduler/egress/model/Effect paths.
 ```
