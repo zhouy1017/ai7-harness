@@ -7,11 +7,11 @@
 - `e2e/controller.mjs` replaces coarse `landing` with only `landing-action-ready`, `landing-target-transition`, and `reimport-pre-review`. `e2e/run.mjs`, `e2e/diagnose.mjs`, `e2e/run-all.mjs`, and `.github/workflows/e2e.yml` remain unchanged.
 - Three Issue-bounded temporary mutations independently produced `LOCAL_DIAGNOSTIC_ONLY/J-01/landing-action-ready/journey-failure/not-completion`, `LOCAL_DIAGNOSTIC_ONLY/J-01/landing-target-transition/journey-failure/not-completion`, and `LOCAL_DIAGNOSTIC_ONLY/J-01/reimport-pre-review/journey-failure/not-completion`. Every probe byte was deleted; no diagnostic log or artifact was retained.
 - The reimport location was re-exercised with an Issue-bounded helper-internal failure. A separate post-helper mutation reported `reimport-pre-review` before the stage-lifetime fix and `review` after it; both probes were deleted.
-- On Windows 11 x64 with pinned Node `24.18.1` and pnpm `11.24.0`, syntax/diff/probe-cleanup checks and the real targeted J-01 passed after the follow-up. Exact head `ed8a991edd761db38922e8a4b6183ca5d010f83d` had previously passed fresh `doctor` → `bootstrap` → `build` → `e2e:all`; the new one-line stage-lifetime commit still requires its post-checkpoint exact-head sequence.
+- On Windows 11 x64 with pinned Node `24.18.1` and pnpm `11.24.0`, syntax/diff/probe-cleanup checks and the real targeted J-01 passed after the follow-up. Exact head `1eb75c679000288aa0ffa78b5d44831035eb2e9d` then passed fresh `doctor` → `bootstrap` → `build` → `e2e:all`, including all six current Journeys and `LOCAL_COMPLETION/all/pass`.
 
 ## What's next
 
-- The Worker runs fresh pinned `doctor` → `bootstrap` → `build` → `e2e:all` on the committed post-checkpoint exact head. After it passes, the Commander re-resolves current `dev`, inspects this bounded branch, and owns push, Draft pull request creation/update, Ready transition, the single normal paired Windows/macOS Hosted Gate occurrence, and integration.
+- The Commander re-resolves current `dev`, inspects this locally complete bounded branch, and owns push, Draft pull request creation/update, Ready transition, the single normal paired Windows/macOS Hosted Gate occurrence, and integration.
 - A changing repair after review returns the pull request to Draft and restores fresh local completion before another Ready transition; Hosted CI is not used for diagnosis.
 
 ## Key decisions
@@ -23,11 +23,11 @@
 
 ## Unresolved matters or blockers
 
-- No code or scope blocker remains inside Issue #194's runner budget. Fresh post-checkpoint exact-head Local completion remains pending; the incident does not establish a separate product-side staging defect, and any future evidence requiring product changes stops outside this brief.
+- No blocker or remaining finding exists inside Issue #194's runner budget. The incident does not establish a separate product-side staging defect, and any future evidence requiring product changes stops outside this brief.
 - Paired Hosted Gate evidence remains pending the Commander-owned Ready lifecycle.
 
 ## Safe Resume Prompt
 
 ```text
-Worker: run fresh pinned doctor, bootstrap, build, and e2e:all on Issue #194's committed post-checkpoint exact head. If every current Journey passes, hand back to the Commander for exact-dev re-resolution, push, Draft/Ready lifecycle, and the one normal paired Windows/macOS Hosted Gate occurrence. Preserve the side-effect-free readiness wait, one guarded click, exact stage lifetimes, unchanged timeout/no retry, and payload-safe diagnostics.
+Commander: inspect Issue #194's locally complete bounded J-01 runner repair, re-resolve exact dev, and keep every external action Commander-owned. Preserve the side-effect-free readiness wait, one guarded click, exact stage lifetimes, unchanged timeout/no retry, and payload-safe diagnostics. After the branch is pushed and its pull request is Ready, use only the single normal paired Windows/macOS Hosted Gate occurrence; do not use Hosted CI as a debugger.
 ```
