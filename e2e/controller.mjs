@@ -94,6 +94,71 @@ if (isJourneyRunner) {
 
 export const ADMITTED_JOURNEYS = Object.freeze(['J-01', 'J-02', 'J-08', 'J-12', 'J-15', 'J-03']);
 
+const J01_COMMON_COMPLETION_PHASES = Object.freeze([
+  'imported-transition',
+  'content-contract',
+  'durable-paint-ack',
+]);
+const J01_REIMPORT_INITIAL_PHASES = Object.freeze([
+  ...J01_COMMON_COMPLETION_PHASES,
+  'post-completion-identities',
+  'source-graph',
+]);
+const J01_COMPLETION_PHASES_BY_SCENARIO = Object.freeze({
+  'source-populated-cross-book': Object.freeze([
+    ...J01_COMMON_COMPLETION_PHASES,
+    'post-completion-identities',
+    'source-graph',
+  ]),
+  reimport: Object.freeze([...J01_REIMPORT_INITIAL_PHASES, 'reimport-initial-edit']),
+  'reimport-degraded': J01_REIMPORT_INITIAL_PHASES,
+  'reimport-paged': Object.freeze([
+    ...J01_REIMPORT_INITIAL_PHASES,
+    'reimport-initial-edit',
+    'editor-scan',
+  ]),
+  'reimport-repeated': Object.freeze([
+    ...J01_REIMPORT_INITIAL_PHASES,
+    'reimport-initial-edit',
+  ]),
+  'reimport-ambiguous': Object.freeze([...J01_REIMPORT_INITIAL_PHASES, 'editor-scan']),
+  'reimport-before-commit': J01_REIMPORT_INITIAL_PHASES,
+  'reimport-after-commit': J01_REIMPORT_INITIAL_PHASES,
+  'reimport-uncertain': J01_REIMPORT_INITIAL_PHASES,
+  'reimport-path-loss': J01_REIMPORT_INITIAL_PHASES,
+  'reimport-reselection': J01_REIMPORT_INITIAL_PHASES,
+  'continuity-path-loss': J01_COMMON_COMPLETION_PHASES,
+  'continuity-sample1': J01_COMMON_COMPLETION_PHASES,
+  'continuity-identity-review-resumed': J01_COMMON_COMPLETION_PHASES,
+  'continuity-synthetic-b': J01_COMMON_COMPLETION_PHASES,
+  'legacy-review-rereview': J01_COMMON_COMPLETION_PHASES,
+  'before-paint': Object.freeze([
+    'imported-transition',
+    'content-contract',
+    'held-before-paint',
+  ]),
+  'before-commit-resumed': J01_COMMON_COMPLETION_PHASES,
+});
+const formatJ01CompletionLocation = (scenario, phase) => `completion-${scenario}-${phase}`;
+const J01_COMPLETION_LOCATIONS = Object.freeze(
+  Object.entries(J01_COMPLETION_PHASES_BY_SCENARIO).flatMap(([scenario, phases]) =>
+    phases.map((phase) => formatJ01CompletionLocation(scenario, phase)),
+  ),
+);
+
+export function createJ01CompletionLocation(scenario) {
+  if (!Object.hasOwn(J01_COMPLETION_PHASES_BY_SCENARIO, scenario)) {
+    throw new TypeError('J-01 completion diagnostic scenario is not admitted.');
+  }
+  const admittedPhases = J01_COMPLETION_PHASES_BY_SCENARIO[scenario];
+  return (phase) => {
+    if (!admittedPhases.includes(phase)) {
+      throw new TypeError('J-01 completion diagnostic phase is not admitted.');
+    }
+    return formatJ01CompletionLocation(scenario, phase);
+  };
+}
+
 const JOURNEY_MODULES = Object.freeze({
   'J-01': new URL('./run-j01.mjs', import.meta.url),
   'J-02': new URL('./run-j02.mjs', import.meta.url),
@@ -201,7 +266,6 @@ const JOURNEY_LOCATIONS = Object.freeze({
     'review-contract',
     'review-acceptance',
     'commit',
-    'completion',
     'completion-visibility-transition',
     'continuity-review',
     'legacy-review',
@@ -212,6 +276,7 @@ const JOURNEY_LOCATIONS = Object.freeze({
     'editor',
     ...J01_LAUNCH_LOCATIONS,
     'window-close',
+    ...J01_COMPLETION_LOCATIONS,
   ]),
   'J-02': Object.freeze([
     'entry',
