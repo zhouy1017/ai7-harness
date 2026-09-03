@@ -347,6 +347,7 @@ async function importSample1(renderer, cancellation) {
   await click(renderer, '确认书名并复核', 'import-review');
   await waitFor(renderer, `document.querySelector('[data-screen="review"]')`, 'import-review-ready');
   at('sample1-import-review');
+  cancellation.throwIfRequested();
   await assertRenderer(renderer, `(() => { const acceptance=document.querySelector('#accept-import-degradation'); if(!(acceptance instanceof HTMLInputElement)||acceptance.checked)return false; acceptance.click(); return acceptance.checked; })()`, 'import-degradation-explicit');
   await waitFor(renderer, `Array.from(document.querySelectorAll('button')).some((button)=>button.textContent==='按上述降级方式新建图书并导入稿件'&&!button.disabled)`, 'import-degradation-accepted');
   cancellation.throwIfRequested();
