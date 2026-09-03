@@ -1881,7 +1881,8 @@ async function main() {
     );
     const executable = electronExecutable();
     const entry = resolve(ROOT, 'dist', 'main', 'index.cjs');
-    const launchProduct = async ({ dataRoot, pickerPath, importControl }) => {
+    const launchProduct = async ({ dataRoot, pickerPath, importControl, launchScenario }) => {
+      requireJourney(/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(launchScenario), 'launch-scenario');
       const shellRoot = await ensureCanonicalDataDirectory(dataRoot, 'shell');
       const productArgs = [
         '--disable-background-networking',
@@ -1908,8 +1909,8 @@ async function main() {
           !productArgs.some((argument) => /--inspect|--remote-debugging-port|^https?:|^wss?:/i.test(argument)),
         'pipe-only-product-transport',
       );
-      at('launch');
       cancellation.throwIfRequested();
+      at(`launch-${launchScenario}-browser-acquisition`);
       const launchPromise = chromium.launch({
         executablePath: executable,
         headless: false,
@@ -1939,6 +1940,7 @@ async function main() {
         if (browserAcquisition === acquisition) browserAcquisition = undefined;
       }
       cancellation.throwIfRequested();
+      at(`launch-${launchScenario}-renderer-target`);
       return attachRendererTarget(browser);
     };
     const closeProduct = async () => {
@@ -1994,7 +1996,7 @@ async function main() {
       // workspace usable and let the closed Book reopen with unique routing, without a JavaScript Error.
       at('window-close');
       const windowCloseRoot = await createCanonicalExternalDataRoot(resolve(runRoot, 'window-close-data'), checkoutRoot);
-      renderer = await launchProduct({ dataRoot: windowCloseRoot });
+      renderer = await launchProduct({ dataRoot: windowCloseRoot, launchScenario: 'window-close' });
       at('window-close');
       await waitFor(
         renderer,
@@ -2135,10 +2137,10 @@ async function main() {
     };
 
     const emptyBookRoot = await createCanonicalExternalDataRoot(resolve(runRoot, 'empty-book-first-import-data'), checkoutRoot);
-    renderer = await launchProduct({ dataRoot: emptyBookRoot, pickerPath: docx });
+    renderer = await launchProduct({ dataRoot: emptyBookRoot, pickerPath: docx, launchScenario: 'empty-book-first-import' });
     const populatedBookId = await runEmptyBookFirstImport(renderer, sample1Expectation, async ({ bookId, title }) => {
       await closeProduct();
-      const relaunched = await launchProduct({ dataRoot: emptyBookRoot });
+      const relaunched = await launchProduct({ dataRoot: emptyBookRoot, launchScenario: 'empty-book-review-recovery' });
       await waitFor(relaunched, `document.querySelector('[data-screen="import-recovery"]')`, 'existing-book-review-recovery');
       await assertRenderer(
         relaunched,
@@ -2155,7 +2157,7 @@ async function main() {
       return relaunched;
     });
     await closeProduct();
-    renderer = await launchProduct({ dataRoot: emptyBookRoot, pickerPath: docx });
+    renderer = await launchProduct({ dataRoot: emptyBookRoot, pickerPath: docx, launchScenario: 'populated-book-open-before-source' });
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'populated-book-source-landing');
     await assertRenderer(
       renderer,
@@ -2209,7 +2211,7 @@ async function main() {
     await closeProduct();
 
     const sourceRoot = await createCanonicalExternalDataRoot(resolve(runRoot, 'source-import-data'), checkoutRoot);
-    renderer = await launchProduct({ dataRoot: sourceRoot, pickerPath: docx });
+    renderer = await launchProduct({ dataRoot: sourceRoot, pickerPath: docx, launchScenario: 'source-bound-new' });
     const sourceBoundReview = await prepareSourceImportReview(renderer, { ...sample1Expectation, scenario: 'source-bound-new' });
     requireJourney(
       sourceBoundReview.disposition === 'created' && sourceBoundReview.stableIdentity === `book:${sourceBoundReview.bookId}`,
@@ -2225,7 +2227,7 @@ async function main() {
     );
     await closeProduct();
 
-    renderer = await launchProduct({ dataRoot: sourceRoot, pickerPath: docx });
+    renderer = await launchProduct({ dataRoot: sourceRoot, pickerPath: docx, launchScenario: 'source-same-book-reuse' });
     const sameBookReview = await prepareSourceImportReview(renderer, {
       ...sample1Expectation,
       targetBookId: sourceBoundResult.bookId,
@@ -2263,7 +2265,7 @@ async function main() {
     const sourceEmptyBookId = await renderer.evaluate(`document.querySelector('[data-screen="book-overview"] .book-overview')?.dataset.bookId`);
     requireJourney(/^[0-9a-f-]{36}$/i.test(sourceEmptyBookId ?? ''), 'source-empty-book-id');
     await closeProduct();
-    renderer = await launchProduct({ dataRoot: sourceRoot, pickerPath: docx });
+    renderer = await launchProduct({ dataRoot: sourceRoot, pickerPath: docx, launchScenario: 'source-empty-cross-book' });
     const crossBookEmptyReview = await prepareSourceImportReview(renderer, {
       ...sample1Expectation,
       targetBookId: sourceEmptyBookId,
@@ -2271,7 +2273,7 @@ async function main() {
     });
     requireJourney(crossBookEmptyReview.disposition === 'created', 'source-empty-cross-book-review');
     await closeProduct();
-    renderer = await launchProduct({ dataRoot: sourceRoot });
+    renderer = await launchProduct({ dataRoot: sourceRoot, launchScenario: 'source-reviewed-restart' });
     await waitFor(renderer, `document.querySelector('[data-screen="import-recovery"]')`, 'source-reviewed-restart');
     await assertRenderer(
       renderer,
@@ -2293,7 +2295,7 @@ async function main() {
     );
     await closeProduct();
 
-    renderer = await launchProduct({ dataRoot: sourceRoot, pickerPath: syntheticBPath });
+    renderer = await launchProduct({ dataRoot: sourceRoot, pickerPath: syntheticBPath, launchScenario: 'source-populated-cross-book-import' });
     await runJourney(renderer, { sourceSha256: syntheticBSha256, sourceBytes: syntheticBInfo.size, degraded: false });
     const crossBookPopulatedId = await renderer.evaluate(`document.querySelector('[data-screen="imported"] .book-overview')?.dataset.bookId`);
     const crossBookPopulatedBefore = await renderer.evaluate(`Array.from(document.querySelectorAll('.record-navigation button[data-record-kind]'), (button) => ({ kind: button.dataset.recordKind, id: button.dataset.recordId }))`);
@@ -2302,7 +2304,7 @@ async function main() {
       'source-populated-cross-book-before',
     );
     await closeProduct();
-    renderer = await launchProduct({ dataRoot: sourceRoot, pickerPath: docx });
+    renderer = await launchProduct({ dataRoot: sourceRoot, pickerPath: docx, launchScenario: 'source-populated-cross-book-review' });
     const crossBookPopulatedReview = await prepareSourceImportReview(renderer, {
       ...sample1Expectation,
       targetBookId: crossBookPopulatedId,
@@ -2334,11 +2336,12 @@ async function main() {
       dataRoot: sourceAfterCommitRoot,
       pickerPath: docx,
       importControl: 'legacy-result-json-without-receipt',
+      launchScenario: 'source-after-commit-import',
     });
     await prepareSourceImportReview(renderer, { ...sample1Expectation, scenario: 'source-after-commit' });
     await commitPreparedSourceImport(renderer, { expectInterruption: true });
     await closeProduct();
-    renderer = await launchProduct({ dataRoot: sourceAfterCommitRoot });
+    renderer = await launchProduct({ dataRoot: sourceAfterCommitRoot, launchScenario: 'source-after-commit-recovered' });
     await waitFor(renderer, `document.querySelector('[data-screen="imported"]')`, 'source-after-commit-recovered');
     await waitFor(
       renderer,
@@ -2365,11 +2368,12 @@ async function main() {
       dataRoot: sourceUncertainRoot,
       pickerPath: docx,
       importControl: 'uncertain-reconciliation',
+      launchScenario: 'source-uncertain-import',
     });
     await prepareSourceImportReview(renderer, { ...sample1Expectation, scenario: 'source-uncertain' });
     await commitPreparedSourceImport(renderer, { expectInterruption: true });
     await closeProduct();
-    renderer = await launchProduct({ dataRoot: sourceUncertainRoot, importControl: 'uncertain-reconciliation' });
+    renderer = await launchProduct({ dataRoot: sourceUncertainRoot, importControl: 'uncertain-reconciliation', launchScenario: 'source-uncertain-recovered' });
     await waitFor(renderer, `document.querySelector('[data-screen="import-uncertain"]')`, 'source-uncertain-recovered');
     await assertRenderer(
       renderer,
@@ -2379,7 +2383,7 @@ async function main() {
     await closeProduct();
 
     const reimportRoot = await createCanonicalExternalDataRoot(resolve(runRoot, 'manuscript-reimport-data'), checkoutRoot);
-    renderer = await launchProduct({ dataRoot: reimportRoot, pickerPath: syntheticAPath });
+    renderer = await launchProduct({ dataRoot: reimportRoot, pickerPath: syntheticAPath, launchScenario: 'reimport-initial' });
     const {
       bookId: reimportBookId,
       lineageSourceVersionId: initialLineageSourceVersionId,
@@ -2392,7 +2396,7 @@ async function main() {
     await createDurableJournalEdit(renderer);
     await closeProduct();
 
-    renderer = await launchProduct({ dataRoot: reimportRoot, pickerPath: syntheticCPath });
+    renderer = await launchProduct({ dataRoot: reimportRoot, pickerPath: syntheticCPath, launchScenario: 'reimport-verified-changed' });
     await prepareManuscriptReimportReview(renderer, {
       targetBookId: reimportBookId,
       lineageStatus: 'verified',
@@ -2403,7 +2407,7 @@ async function main() {
       scenario: 'reimport-verified-changed',
     });
     await closeProduct();
-    renderer = await launchProduct({ dataRoot: reimportRoot });
+    renderer = await launchProduct({ dataRoot: reimportRoot, launchScenario: 'reimport-reviewed-restart' });
     await waitFor(renderer, `document.querySelector('[data-screen="import-recovery"]')`, 'reimport-reviewed-restart');
     await assertRenderer(
       renderer,
@@ -2421,7 +2425,7 @@ async function main() {
     });
     await closeProduct();
 
-    renderer = await launchProduct({ dataRoot: reimportRoot, pickerPath: syntheticCPath });
+    renderer = await launchProduct({ dataRoot: reimportRoot, pickerPath: syntheticCPath, launchScenario: 'reimport-verified-no-change' });
     await prepareManuscriptReimportReview(renderer, {
       targetBookId: reimportBookId,
       lineageStatus: 'verified',
@@ -2439,7 +2443,7 @@ async function main() {
     });
     await closeProduct();
 
-    renderer = await launchProduct({ dataRoot: reimportRoot, pickerPath: syntheticAPath });
+    renderer = await launchProduct({ dataRoot: reimportRoot, pickerPath: syntheticAPath, launchScenario: 'reimport-unconfirmed-changed' });
     await prepareManuscriptReimportReview(renderer, {
       targetBookId: reimportBookId,
       lineageStatus: 'unconfirmed',
@@ -2456,7 +2460,7 @@ async function main() {
     });
     await closeProduct();
 
-    renderer = await launchProduct({ dataRoot: reimportRoot, pickerPath: syntheticBPath });
+    renderer = await launchProduct({ dataRoot: reimportRoot, pickerPath: syntheticBPath, launchScenario: 'reimport-unconfirmed-no-change' });
     await prepareManuscriptReimportReview(renderer, {
       targetBookId: reimportBookId,
       lineageStatus: 'unconfirmed',
@@ -2473,7 +2477,7 @@ async function main() {
     });
     await closeProduct();
 
-    renderer = await launchProduct({ dataRoot: reimportRoot, pickerPath: syntheticBPath });
+    renderer = await launchProduct({ dataRoot: reimportRoot, pickerPath: syntheticBPath, launchScenario: 'reimport-no-change-lineage' });
     await prepareManuscriptReimportReview(renderer, {
       targetBookId: reimportBookId,
       lineageStatus: 'verified',
@@ -2490,7 +2494,7 @@ async function main() {
       scenario: 'reimport-no-change-lineage',
     });
     await closeProduct();
-    renderer = await launchProduct({ dataRoot: reimportRoot });
+    renderer = await launchProduct({ dataRoot: reimportRoot, launchScenario: 'reimport-no-change-lineage-restart' });
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'reimport-no-change-lineage-restart');
     await assertRenderer(
       renderer,
@@ -2524,7 +2528,7 @@ async function main() {
       resolve(runRoot, 'reimport-degraded-data'),
       checkoutRoot,
     );
-    renderer = await launchProduct({ dataRoot: reimportDegradedRoot, pickerPath: syntheticAPath });
+    renderer = await launchProduct({ dataRoot: reimportDegradedRoot, pickerPath: syntheticAPath, launchScenario: 'reimport-degraded-initial' });
     const reimportDegradedInitial = await importInitialManuscriptForReimport(
       renderer,
       syntheticASha256,
@@ -2532,7 +2536,7 @@ async function main() {
       'reimport-degraded',
     );
     await closeProduct();
-    renderer = await launchProduct({ dataRoot: reimportDegradedRoot, pickerPath: docx });
+    renderer = await launchProduct({ dataRoot: reimportDegradedRoot, pickerPath: docx, launchScenario: 'reimport-degraded-review' });
     await prepareManuscriptReimportReview(renderer, {
       targetBookId: reimportDegradedInitial.bookId,
       lineageStatus: 'unconfirmed',
@@ -2542,7 +2546,7 @@ async function main() {
       scenario: 'reimport-degraded',
     });
     await closeProduct();
-    renderer = await launchProduct({ dataRoot: reimportDegradedRoot });
+    renderer = await launchProduct({ dataRoot: reimportDegradedRoot, launchScenario: 'reimport-degraded-restart-required' });
     await waitFor(renderer, `document.querySelector('[data-screen="import-recovery"]')`, 'reimport-degraded-restart-required');
     await clickExactButton(renderer, '继续导入', 'reimport-degraded-restart-required-continue');
     await waitFor(renderer, `document.querySelector('[data-accept-reimport-degradation]')`, 'reimport-degraded-required-restored');
@@ -2551,7 +2555,7 @@ async function main() {
     await clickExactButton(renderer, '明确接受完整降级集合', 'reimport-degraded-accept');
     await waitFor(renderer, `document.querySelector('[data-import-review-kind="reimport"]')?.dataset.reimportDraftVersion !== ${JSON.stringify(degradationVersion)} && document.querySelector('[data-import-review-kind="reimport"]')?.textContent.includes('已明确接受完整降级集合')`, 'reimport-degraded-accept-persisted');
     await closeProduct();
-    renderer = await launchProduct({ dataRoot: reimportDegradedRoot });
+    renderer = await launchProduct({ dataRoot: reimportDegradedRoot, launchScenario: 'reimport-degraded-restart-accepted' });
     await waitFor(renderer, `document.querySelector('[data-screen="import-recovery"]')`, 'reimport-degraded-restart-accepted');
     await clickExactButton(renderer, '继续导入', 'reimport-degraded-restart-accepted-continue');
     await waitFor(renderer, `document.querySelector('[data-import-review-kind="reimport"]')?.textContent.includes('已明确接受完整降级集合') && !document.querySelector('[data-accept-reimport-degradation]')`, 'reimport-degraded-acceptance-restored');
@@ -2569,7 +2573,7 @@ async function main() {
       resolve(runRoot, 'reimport-paged-data'),
       checkoutRoot,
     );
-    renderer = await launchProduct({ dataRoot: reimportPagedRoot, pickerPath: syntheticPagedBasePath });
+    renderer = await launchProduct({ dataRoot: reimportPagedRoot, pickerPath: syntheticPagedBasePath, launchScenario: 'reimport-paged-initial' });
     const reimportPagedInitial = await importInitialManuscriptForReimport(
       renderer,
       syntheticPagedBaseSha256,
@@ -2580,7 +2584,7 @@ async function main() {
     const initialPagedIdentities = await collectEditorBlockIdentities(renderer, 'reimport-paged-initial', false);
     requireJourney(Object.keys(initialPagedIdentities).length === 260, 'reimport-paged-initial-identities');
     await closeProduct();
-    renderer = await launchProduct({ dataRoot: reimportPagedRoot, pickerPath: syntheticPagedChangedPath });
+    renderer = await launchProduct({ dataRoot: reimportPagedRoot, pickerPath: syntheticPagedChangedPath, launchScenario: 'reimport-paged-review' });
     await prepareManuscriptReimportReview(renderer, {
       targetBookId: reimportPagedInitial.bookId,
       lineageStatus: 'unconfirmed',
@@ -2610,7 +2614,7 @@ async function main() {
       'reimport-paged-identity-consequences',
     );
     await closeProduct();
-    renderer = await launchProduct({ dataRoot: reimportPagedRoot });
+    renderer = await launchProduct({ dataRoot: reimportPagedRoot, launchScenario: 'reimport-paged-replay' });
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'reimport-paged-replay-restart');
     const invalidReplayInput = {
       ...reimportPagedCommit.replayInput,
@@ -2651,7 +2655,7 @@ async function main() {
       resolve(runRoot, 'reimport-repeated-data'),
       checkoutRoot,
     );
-    renderer = await launchProduct({ dataRoot: reimportRepeatedRoot, pickerPath: syntheticRepeatedBasePath });
+    renderer = await launchProduct({ dataRoot: reimportRepeatedRoot, pickerPath: syntheticRepeatedBasePath, launchScenario: 'reimport-repeated-initial' });
     const reimportRepeatedInitial = await importInitialManuscriptForReimport(
       renderer,
       syntheticRepeatedBaseSha256,
@@ -2660,7 +2664,7 @@ async function main() {
     );
     await createDurableJournalEdit(renderer);
     await closeProduct();
-    renderer = await launchProduct({ dataRoot: reimportRepeatedRoot, pickerPath: syntheticRepeatedChangedPath });
+    renderer = await launchProduct({ dataRoot: reimportRepeatedRoot, pickerPath: syntheticRepeatedChangedPath, launchScenario: 'reimport-repeated-review' });
     await prepareManuscriptReimportReview(renderer, {
       targetBookId: reimportRepeatedInitial.bookId,
       lineageStatus: 'unconfirmed',
@@ -2681,7 +2685,7 @@ async function main() {
       resolve(runRoot, 'reimport-ambiguous-data'),
       checkoutRoot,
     );
-    renderer = await launchProduct({ dataRoot: reimportAmbiguousRoot, pickerPath: syntheticAmbiguousBasePath });
+    renderer = await launchProduct({ dataRoot: reimportAmbiguousRoot, pickerPath: syntheticAmbiguousBasePath, launchScenario: 'reimport-ambiguous-initial' });
     const reimportAmbiguousInitial = await importInitialManuscriptForReimport(
       renderer,
       syntheticAmbiguousBaseSha256,
@@ -2690,7 +2694,7 @@ async function main() {
     );
     const initialAmbiguousIdentities = await collectEditorBlockIdentitySequence(renderer, 'reimport-ambiguous-initial');
     await closeProduct();
-    renderer = await launchProduct({ dataRoot: reimportAmbiguousRoot, pickerPath: syntheticAmbiguousReimportPath });
+    renderer = await launchProduct({ dataRoot: reimportAmbiguousRoot, pickerPath: syntheticAmbiguousReimportPath, launchScenario: 'reimport-ambiguous-review' });
     await prepareManuscriptReimportReview(renderer, {
       targetBookId: reimportAmbiguousInitial.bookId,
       lineageStatus: 'unconfirmed',
@@ -2719,6 +2723,7 @@ async function main() {
       renderer = await launchProduct({
         dataRoot: reimportPagedRoot,
         importControl: 'tamper-reimport-proof-before-validation',
+        launchScenario: 'reimport-tamper-proof',
       });
       reimportTamperProductCarrierAttached = true;
       await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady === 'true'`, 'reimport-tamper-must-not-start');
@@ -2740,7 +2745,7 @@ async function main() {
       resolve(runRoot, 'reimport-before-commit-data'),
       checkoutRoot,
     );
-    renderer = await launchProduct({ dataRoot: reimportBeforeCommitRoot, pickerPath: syntheticAPath });
+    renderer = await launchProduct({ dataRoot: reimportBeforeCommitRoot, pickerPath: syntheticAPath, launchScenario: 'reimport-before-commit-initial' });
     const reimportBeforeCommitInitial = await importInitialManuscriptForReimport(
       renderer,
       syntheticASha256,
@@ -2752,6 +2757,7 @@ async function main() {
       dataRoot: reimportBeforeCommitRoot,
       pickerPath: syntheticCPath,
       importControl: 'before-commit',
+      launchScenario: 'reimport-before-commit-interruption',
     });
     await prepareManuscriptReimportReview(renderer, {
       targetBookId: reimportBeforeCommitInitial.bookId,
@@ -2769,7 +2775,7 @@ async function main() {
       expectInterruption: true,
     });
     await closeProduct();
-    renderer = await launchProduct({ dataRoot: reimportBeforeCommitRoot });
+    renderer = await launchProduct({ dataRoot: reimportBeforeCommitRoot, launchScenario: 'reimport-before-commit-recovery' });
     await waitFor(renderer, `document.querySelector('[data-screen="import-recovery"]')`, 'reimport-before-commit-recovery');
     await assertRenderer(
       renderer,
@@ -2791,7 +2797,7 @@ async function main() {
       resolve(runRoot, 'reimport-after-commit-data'),
       checkoutRoot,
     );
-    renderer = await launchProduct({ dataRoot: reimportAfterCommitRoot, pickerPath: syntheticAPath });
+    renderer = await launchProduct({ dataRoot: reimportAfterCommitRoot, pickerPath: syntheticAPath, launchScenario: 'reimport-after-commit-initial' });
     const reimportAfterCommitInitial = await importInitialManuscriptForReimport(
       renderer,
       syntheticASha256,
@@ -2803,6 +2809,7 @@ async function main() {
       dataRoot: reimportAfterCommitRoot,
       pickerPath: syntheticCPath,
       importControl: 'legacy-result-json-without-receipt',
+      launchScenario: 'reimport-after-commit-interruption',
     });
     await prepareManuscriptReimportReview(renderer, {
       targetBookId: reimportAfterCommitInitial.bookId,
@@ -2820,7 +2827,7 @@ async function main() {
       expectInterruption: true,
     });
     await closeProduct();
-    renderer = await launchProduct({ dataRoot: reimportAfterCommitRoot });
+    renderer = await launchProduct({ dataRoot: reimportAfterCommitRoot, launchScenario: 'reimport-after-commit-recovery' });
     await assertCommittedManuscriptReimport(renderer, {
       changed: true,
       lineageStatus: 'unconfirmed',
@@ -2834,7 +2841,7 @@ async function main() {
       resolve(runRoot, 'reimport-uncertain-data'),
       checkoutRoot,
     );
-    renderer = await launchProduct({ dataRoot: reimportUncertainRoot, pickerPath: syntheticAPath });
+    renderer = await launchProduct({ dataRoot: reimportUncertainRoot, pickerPath: syntheticAPath, launchScenario: 'reimport-uncertain-initial' });
     const reimportUncertainInitial = await importInitialManuscriptForReimport(
       renderer,
       syntheticASha256,
@@ -2846,6 +2853,7 @@ async function main() {
       dataRoot: reimportUncertainRoot,
       pickerPath: syntheticCPath,
       importControl: 'uncertain-reconciliation',
+      launchScenario: 'reimport-uncertain-interruption',
     });
     await prepareManuscriptReimportReview(renderer, {
       targetBookId: reimportUncertainInitial.bookId,
@@ -2863,7 +2871,7 @@ async function main() {
       expectInterruption: true,
     });
     await closeProduct();
-    renderer = await launchProduct({ dataRoot: reimportUncertainRoot, importControl: 'uncertain-reconciliation' });
+    renderer = await launchProduct({ dataRoot: reimportUncertainRoot, importControl: 'uncertain-reconciliation', launchScenario: 'reimport-uncertain-recovery' });
     await waitFor(renderer, `document.querySelector('[data-screen="import-uncertain"]')`, 'reimport-uncertain-recovered');
     await assertRenderer(
       renderer,
@@ -2876,7 +2884,7 @@ async function main() {
       resolve(runRoot, 'reimport-source-path-loss-data'),
       checkoutRoot,
     );
-    renderer = await launchProduct({ dataRoot: reimportPathLossRoot, pickerPath: syntheticAPath });
+    renderer = await launchProduct({ dataRoot: reimportPathLossRoot, pickerPath: syntheticAPath, launchScenario: 'reimport-path-loss-initial' });
     const reimportPathLossInitial = await importInitialManuscriptForReimport(
       renderer,
       syntheticASha256,
@@ -2893,7 +2901,7 @@ async function main() {
         (await digestFile(reimportPathLossInput)) === syntheticCSha256,
       'reimport-path-loss-input-identity',
     );
-    renderer = await launchProduct({ dataRoot: reimportPathLossRoot, pickerPath: reimportPathLossInput });
+    renderer = await launchProduct({ dataRoot: reimportPathLossRoot, pickerPath: reimportPathLossInput, launchScenario: 'reimport-path-loss-review' });
     await prepareManuscriptReimportReview(renderer, {
       targetBookId: reimportPathLossInitial.bookId,
       lineageStatus: 'verified',
@@ -2906,7 +2914,7 @@ async function main() {
     await closeProduct();
     await rm(reimportPathLossInput, { force: true });
     requireJourney(!existsSync(reimportPathLossInput), 'reimport-path-loss-input-removed');
-    renderer = await launchProduct({ dataRoot: reimportPathLossRoot });
+    renderer = await launchProduct({ dataRoot: reimportPathLossRoot, launchScenario: 'reimport-path-loss-recovery' });
     await waitFor(renderer, `document.querySelector('[data-screen="import-recovery"]')`, 'reimport-path-loss-recovery');
     await assertRenderer(
       renderer,
@@ -2938,7 +2946,7 @@ async function main() {
       resolve(runRoot, 'reimport-staged-object-loss-data'),
       checkoutRoot,
     );
-    renderer = await launchProduct({ dataRoot: reimportReselectionRoot, pickerPath: syntheticAPath });
+    renderer = await launchProduct({ dataRoot: reimportReselectionRoot, pickerPath: syntheticAPath, launchScenario: 'reimport-reselection-initial' });
     const reimportReselectionInitial = await importInitialManuscriptForReimport(
       renderer,
       syntheticASha256,
@@ -2950,6 +2958,7 @@ async function main() {
       dataRoot: reimportReselectionRoot,
       pickerPath: syntheticCPath,
       importControl: 'before-commit',
+      launchScenario: 'reimport-reselection-interruption',
     });
     await prepareManuscriptReimportReview(renderer, {
       targetBookId: reimportReselectionInitial.bookId,
@@ -2977,7 +2986,7 @@ async function main() {
     requireJourney((await lstat(lostReimportObject)).isFile(), 'reimport-reselection-object-before-loss');
     await rm(lostReimportObject, { force: true });
     requireJourney(!existsSync(lostReimportObject), 'reimport-reselection-object-removed');
-    renderer = await launchProduct({ dataRoot: reimportReselectionRoot, pickerPath: syntheticBPath });
+    renderer = await launchProduct({ dataRoot: reimportReselectionRoot, pickerPath: syntheticBPath, launchScenario: 'reimport-reselection-required' });
     await waitFor(renderer, `document.querySelector('[data-screen="import-recovery"]')`, 'reimport-reselection-required');
     await assertRenderer(
       renderer,
@@ -2992,7 +3001,7 @@ async function main() {
       'reimport-reselection-mismatch-no-authority-change',
     );
     await closeProduct();
-    renderer = await launchProduct({ dataRoot: reimportReselectionRoot, pickerPath: syntheticCPath });
+    renderer = await launchProduct({ dataRoot: reimportReselectionRoot, pickerPath: syntheticCPath, launchScenario: 'reimport-reselection-preserved' });
     await waitFor(renderer, `document.querySelector('[data-screen="import-recovery"]')`, 'reimport-reselection-preserved');
     await assertRenderer(
       renderer,
@@ -3030,7 +3039,7 @@ async function main() {
     await copyFile(docx, selectedCopy);
     requireJourney((await realpath(selectedCopy)) === selectedCopy, 'selected-copy-identity');
 
-    renderer = await launchProduct({ dataRoot: continuityRoot, pickerPath: selectedCopy });
+    renderer = await launchProduct({ dataRoot: continuityRoot, pickerPath: selectedCopy, launchScenario: 'restart-before-review' });
     await waitFor(
       renderer,
       `document.documentElement.dataset.ai7ProductReady === 'true' && document.querySelector('[data-screen="landing"]')`,
@@ -3041,7 +3050,7 @@ async function main() {
     await closeProduct();
     await rm(selectedCopy, { force: true });
 
-    renderer = await launchProduct({ dataRoot: continuityRoot });
+    renderer = await launchProduct({ dataRoot: continuityRoot, launchScenario: 'path-loss-recovery' });
     await waitFor(
       renderer,
       `document.documentElement.dataset.ai7ProductReady === 'true' && document.querySelector('[data-screen="import-recovery"]')`,
@@ -3066,17 +3075,17 @@ async function main() {
     );
     await closeProduct();
 
-    renderer = await launchProduct({ dataRoot: continuityRoot, pickerPath: docx });
+    renderer = await launchProduct({ dataRoot: continuityRoot, pickerPath: docx, launchScenario: 'continuity-exact-sample' });
     await runJourney(renderer, exactSample1Expectation, { diagnosticReviewLocation: 'continuity-review' });
     await closeProduct();
 
-    renderer = await launchProduct({ dataRoot: continuityRoot, pickerPath: syntheticAPath });
+    renderer = await launchProduct({ dataRoot: continuityRoot, pickerPath: syntheticAPath, launchScenario: 'continuity-synthetic-a' });
     await runJourney(renderer, syntheticAExpectation, {
       stopAfterAcceptedReview: true,
       diagnosticReviewLocation: 'continuity-review',
     });
     await closeProduct();
-    renderer = await launchProduct({ dataRoot: continuityRoot });
+    renderer = await launchProduct({ dataRoot: continuityRoot, launchScenario: 'continuity-identity-review-recovery' });
     await waitFor(
       renderer,
       `document.documentElement.dataset.ai7ProductReady === 'true' && document.querySelector('[data-screen="import-recovery"]')`,
@@ -3100,11 +3109,11 @@ async function main() {
     });
     await closeProduct();
 
-    renderer = await launchProduct({ dataRoot: continuityRoot, pickerPath: syntheticBPath });
+    renderer = await launchProduct({ dataRoot: continuityRoot, pickerPath: syntheticBPath, launchScenario: 'continuity-synthetic-b' });
     await runJourney(renderer, syntheticBExpectation, { diagnosticReviewLocation: 'continuity-review' });
     await closeProduct();
 
-    renderer = await launchProduct({ dataRoot: continuityRoot, pickerPath: docx });
+    renderer = await launchProduct({ dataRoot: continuityRoot, pickerPath: docx, launchScenario: 'abandon-stage' });
     await waitFor(
       renderer,
       `document.documentElement.dataset.ai7ProductReady === 'true' && document.querySelector('[data-screen="landing"]')`,
@@ -3113,7 +3122,7 @@ async function main() {
     await clickExactButton(renderer, '导入稿件', 'abandon-stage-click');
     await waitFor(renderer, `document.querySelector('[data-screen="target"]')`, 'abandon-stage-target');
     await closeProduct();
-    renderer = await launchProduct({ dataRoot: continuityRoot });
+    renderer = await launchProduct({ dataRoot: continuityRoot, launchScenario: 'abandon-recovery' });
     await waitFor(renderer, `document.querySelector('[data-screen="import-recovery"]')`, 'abandon-recovery');
     await clickExactButton(renderer, '放弃', 'abandon-explicit');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'abandon-landing');
@@ -3133,13 +3142,14 @@ async function main() {
       dataRoot: legacyReviewRoot,
       pickerPath: docx,
       importControl: 'legacy-reviewed-v2',
+      launchScenario: 'legacy-review-initial',
     });
     await runJourney(renderer, sample1Expectation, {
       stopAfterAcceptedReview: true,
       diagnosticReviewLocation: 'legacy-review',
     });
     await closeProduct();
-    renderer = await launchProduct({ dataRoot: legacyReviewRoot });
+    renderer = await launchProduct({ dataRoot: legacyReviewRoot, launchScenario: 'legacy-review-recovery' });
     await waitFor(
       renderer,
       `document.documentElement.dataset.ai7ProductReady === 'true' && document.querySelector('[data-screen="import-recovery"]')`,
@@ -3164,7 +3174,7 @@ async function main() {
     await closeProduct();
 
     const beforePaintRoot = await createCanonicalExternalDataRoot(resolve(runRoot, 'before-paint-data'), checkoutRoot);
-    renderer = await launchProduct({ dataRoot: beforePaintRoot, pickerPath: docx });
+    renderer = await launchProduct({ dataRoot: beforePaintRoot, pickerPath: docx, launchScenario: 'before-paint-initial' });
     await runJourney(renderer, sample1Expectation, {
       holdCompletionPaint: true,
       diagnosticReviewLocation: 'before-paint-review',
@@ -3261,7 +3271,7 @@ async function main() {
       'completion-obsolete-presentation-not-acknowledged',
     );
     await closeProduct();
-    renderer = await launchProduct({ dataRoot: beforePaintRoot });
+    renderer = await launchProduct({ dataRoot: beforePaintRoot, launchScenario: 'before-paint-recovery' });
     await waitFor(
       renderer,
       `document.documentElement.dataset.ai7ProductReady === 'true' && document.querySelector('[data-screen="imported"]')`,
@@ -3280,7 +3290,7 @@ async function main() {
     await closeProduct();
 
     const abandonFailureRoot = await createCanonicalExternalDataRoot(resolve(runRoot, 'abandon-failure-data'), checkoutRoot);
-    renderer = await launchProduct({ dataRoot: abandonFailureRoot, pickerPath: docx });
+    renderer = await launchProduct({ dataRoot: abandonFailureRoot, pickerPath: docx, launchScenario: 'abandon-failure-stage' });
     await waitFor(
       renderer,
       `document.documentElement.dataset.ai7ProductReady === 'true' && document.querySelector('[data-screen="landing"]')`,
@@ -3299,6 +3309,7 @@ async function main() {
     renderer = await launchProduct({
       dataRoot: abandonFailureRoot,
       importControl: 'abandon-object-delete-failure',
+      launchScenario: 'abandon-failure-interruption',
     });
     await waitFor(renderer, `document.querySelector('[data-screen="import-recovery"]')`, 'abandon-failure-recovery');
     await clickExactButton(renderer, '放弃', 'abandon-failure-explicit');
@@ -3324,7 +3335,7 @@ async function main() {
       'abandon-failure-repeat-no-false-success',
     );
     await closeProduct();
-    renderer = await launchProduct({ dataRoot: abandonFailureRoot });
+    renderer = await launchProduct({ dataRoot: abandonFailureRoot, launchScenario: 'abandon-failure-retry' });
     await waitFor(
       renderer,
       `document.documentElement.dataset.ai7ProductReady === 'true' && document.querySelector('[data-screen="landing"]')`,
@@ -3334,7 +3345,7 @@ async function main() {
     await closeProduct();
 
     const abandonInterruptionRoot = await createCanonicalExternalDataRoot(resolve(runRoot, 'abandon-interruption-data'), checkoutRoot);
-    renderer = await launchProduct({ dataRoot: abandonInterruptionRoot, pickerPath: docx });
+    renderer = await launchProduct({ dataRoot: abandonInterruptionRoot, pickerPath: docx, launchScenario: 'abandon-interruption-stage' });
     await waitFor(
       renderer,
       `document.documentElement.dataset.ai7ProductReady === 'true' && document.querySelector('[data-screen="landing"]')`,
@@ -3353,6 +3364,7 @@ async function main() {
     renderer = await launchProduct({
       dataRoot: abandonInterruptionRoot,
       importControl: 'after-abandon-object-delete-before-finalize',
+      launchScenario: 'abandon-interruption-interruption',
     });
     await waitFor(renderer, `document.querySelector('[data-screen="import-recovery"]')`, 'abandon-interruption-recovery');
     await clickExactButton(renderer, '放弃', 'abandon-interruption-explicit');
@@ -3364,7 +3376,7 @@ async function main() {
     await assertRenderer(renderer, `!document.querySelector('[data-screen="landing"]')`, 'abandon-interruption-no-success');
     requireJourney(!existsSync(interruptedAbandonObject), 'abandon-interruption-object-removed');
     await closeProduct();
-    renderer = await launchProduct({ dataRoot: abandonInterruptionRoot, pickerPath: docx });
+    renderer = await launchProduct({ dataRoot: abandonInterruptionRoot, pickerPath: docx, launchScenario: 'abandon-interruption-retry' });
     await waitFor(
       renderer,
       `document.documentElement.dataset.ai7ProductReady === 'true' && document.querySelector('[data-screen="landing"]')`,
@@ -3384,13 +3396,14 @@ async function main() {
       dataRoot: beforeCommitRoot,
       pickerPath: docx,
       importControl: 'before-commit',
+      launchScenario: 'before-commit-initial',
     });
     await runJourney(renderer, sample1Expectation, {
       expectInterruption: true,
       diagnosticReviewLocation: 'before-commit-review',
     });
     await closeProduct();
-    renderer = await launchProduct({ dataRoot: beforeCommitRoot });
+    renderer = await launchProduct({ dataRoot: beforeCommitRoot, launchScenario: 'before-commit-recovery' });
     await waitFor(renderer, `document.querySelector('[data-screen="import-recovery"]')`, 'before-commit-recovery');
     await assertRenderer(
       renderer,
@@ -3415,13 +3428,14 @@ async function main() {
       dataRoot: afterCommitRoot,
       pickerPath: docx,
       importControl: 'after-commit-before-response',
+      launchScenario: 'after-commit-initial',
     });
     await runJourney(renderer, sample1Expectation, {
       expectInterruption: true,
       diagnosticReviewLocation: 'after-commit-review',
     });
     await closeProduct();
-    renderer = await launchProduct({ dataRoot: afterCommitRoot });
+    renderer = await launchProduct({ dataRoot: afterCommitRoot, launchScenario: 'after-commit-recovery' });
     await waitFor(
       renderer,
       `document.documentElement.dataset.ai7ProductReady === 'true' && document.querySelector('[data-screen="imported"]')`,
@@ -3444,6 +3458,7 @@ async function main() {
       dataRoot: uncertainRoot,
       pickerPath: docx,
       importControl: 'uncertain-reconciliation',
+      launchScenario: 'uncertain-initial',
     });
     await runJourney(renderer, sample1Expectation, {
       expectInterruption: true,
@@ -3453,6 +3468,7 @@ async function main() {
     renderer = await launchProduct({
       dataRoot: uncertainRoot,
       importControl: 'uncertain-reconciliation',
+      launchScenario: 'uncertain-recovery',
     });
     await waitFor(
       renderer,
