@@ -684,8 +684,8 @@ async function prepareManuscriptReimportReview(renderer, expectation) {
     scenario,
   } = expectation;
   requireJourney(start === 'landing' || start === 'target', `${scenario}-start`);
+  at('reimport-pre-review');
   if (start === 'landing') {
-    at('landing');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, `${scenario}-landing`);
     await clickExactButton(renderer, '导入稿件', `${scenario}-stage`);
     await waitFor(renderer, `document.querySelector('[data-screen="target"]')`, `${scenario}-target`);
@@ -1220,9 +1220,24 @@ async function runJourney(
     'renderer-network-denial',
   );
   if (start === 'landing') {
-    at('landing');
-    await clickExactButton(renderer, '导入稿件', 'stage-click');
-    await waitFor(renderer, `document.querySelector('[data-screen="target"]')`, 'stage-target');
+    at('landing-action-ready');
+    await waitFor(
+      renderer,
+      `(() => { const screen = document.querySelector('[data-screen="landing"]'); const actions = Array.from(screen?.querySelectorAll('button') ?? []).filter((button) => button.textContent === '导入稿件'); return actions.length === 1 && !actions[0].disabled; })()`,
+      'landing-action-ready',
+    );
+    await assertRenderer(
+      renderer,
+      `(() => { const screen = document.querySelector('[data-screen="landing"]'); const actions = Array.from(screen?.querySelectorAll('button') ?? []).filter((button) => button.textContent === '导入稿件'); if (actions.length !== 1 || actions[0].disabled) return false; actions[0].click(); return true; })()`,
+      'landing-action-ready',
+    );
+    at('landing-target-transition');
+    await waitFor(
+      renderer,
+      `document.querySelector('[data-screen="target"]')`,
+      'landing-target-transition',
+    );
+    at('review');
   }
   if (start !== 'accepted-review') {
     if (hasIdentityFinding) {
