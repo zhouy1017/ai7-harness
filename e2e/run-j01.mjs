@@ -1294,12 +1294,12 @@ async function runJourney(
       `(() => { const items = Array.from(document.querySelectorAll('[data-degradation-category]')); const expected = [['inline-styles','266'],['sections','1']]; return items.length === expected.length && items.every((item, index) => item.dataset.degradationCategory === expected[index][0] && item.dataset.degradationCount === expected[index][1]); })()`,
       'degradation-complete-server-set',
     );
+    atPrimaryReviewStage('review-acceptance');
     await assertRenderer(
       renderer,
       `(() => { const acceptance = document.querySelector('#accept-import-degradation'); if (!acceptance) return false; acceptance.click(); return true; })()`,
       'degradation-accept',
     );
-    atPrimaryReviewStage('review-acceptance');
     await waitFor(
       renderer,
       `document.querySelector('#accept-import-degradation')?.checked && Array.from(document.querySelectorAll('button')).some((button) => button.textContent === '按上述降级方式新建图书并导入稿件' && !button.disabled)`,
@@ -3154,6 +3154,16 @@ async function main() {
     // Issue #178 / nearest supported Journey J-01: a visible imported result must reject a
     // frame pair crossed by a hidden interval and must not acknowledge an obsolete screen/commit.
     at('completion-visibility-transition');
+    await waitFor(
+      renderer,
+      `document.querySelector('[data-native-artifact-state]')`,
+      'completion-pre-ack-artifact-inspection-settled',
+    );
+    await assertRenderer(
+      renderer,
+      `Boolean(document.querySelector('[data-task-authorization-book-id]')) && !document.querySelector('[data-task-authorization-state]') && document.documentElement.dataset.ai7ImportCompletionPainted === undefined && document.documentElement.dataset.ai7ImportCompletionAcknowledged === undefined`,
+      'completion-defers-task-authorization-inspection',
+    );
     await assertRenderer(
       renderer,
       `(() => { const frame = globalThis.__ai7HeldCompletionFrames?.shift(); if (typeof frame?.callback !== 'function') return false; frame.callback(performance.now()); return true; })()`,
@@ -3244,7 +3254,7 @@ async function main() {
     );
     await waitFor(
       renderer,
-      `document.visibilityState === 'visible' && document.documentElement.dataset.ai7ImportCompletionPainted === 'true' && document.documentElement.dataset.ai7ImportCompletionAcknowledged === 'true'`,
+      `document.visibilityState === 'visible' && document.documentElement.dataset.ai7ImportCompletionPainted === 'true' && document.documentElement.dataset.ai7ImportCompletionAcknowledged === 'true' && Boolean(document.querySelector('[data-task-authorization-state]'))`,
       'before-paint-recovery-acknowledged',
     );
     await closeProduct();
