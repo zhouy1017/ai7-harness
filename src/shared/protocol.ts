@@ -22,6 +22,8 @@ export type J01ImportControl =
   | 'abandon-object-delete-failure'
   | 'after-abandon-object-delete-before-finalize';
 
+export type J03ForegroundExecutionControl = 'interrupt-before-foreground-boundary-response';
+
 export type J08RecoveryControl = 'interrupt-after-journal-ack';
 
 export const IPC_CHANNELS = {

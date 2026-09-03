@@ -5,6 +5,7 @@ import { delimiter, dirname, isAbsolute, resolve } from 'node:path';
 import {
   MAX_FRAME_BYTES,
   type J01ImportControl,
+  type J03ForegroundExecutionControl,
   type J08RecoveryControl,
   type ServiceOperation,
   type ServiceOperationMap,
@@ -61,10 +62,12 @@ async function exitsBefore(
 function serviceEnvironment(
   executable: string,
   importControl: J01ImportControl | undefined,
+  foregroundExecutionControl: J03ForegroundExecutionControl | undefined,
   recoveryControl: J08RecoveryControl | undefined,
 ): NodeJS.ProcessEnv {
   const selected: NodeJS.ProcessEnv = { ELECTRON_RUN_AS_NODE: '1' };
   if (importControl) selected.AI7_E2E_JOURNEY = 'J-01';
+  if (foregroundExecutionControl) selected.AI7_E2E_JOURNEY = 'J-03';
   if (recoveryControl) selected.AI7_E2E_JOURNEY = 'J-08';
   const names =
     process.platform === 'win32'
@@ -138,6 +141,7 @@ export class ServiceClient {
     serviceEntry: string,
     dataRoot: string,
     importControl?: J01ImportControl,
+    foregroundExecutionControl?: J03ForegroundExecutionControl,
     recoveryControl?: J08RecoveryControl,
   ): Promise<ServiceClient> {
     if (!isAbsolute(executable) || !isAbsolute(serviceEntry) || !isAbsolute(dataRoot)) {
@@ -145,13 +149,16 @@ export class ServiceClient {
     }
     const args = [serviceEntry, '--data-root', dataRoot, '--parent-pid', String(process.pid)];
     if (importControl) args.push('--j01-import-control', importControl);
+    if (foregroundExecutionControl) {
+      args.push('--j03-foreground-execution-control', foregroundExecutionControl);
+    }
     if (recoveryControl) args.push('--j08-recovery-control', recoveryControl);
     const child = spawn(
       executable,
       args,
       {
         cwd: dirname(serviceEntry),
-        env: serviceEnvironment(executable, importControl, recoveryControl),
+        env: serviceEnvironment(executable, importControl, foregroundExecutionControl, recoveryControl),
         stdio: ['pipe', 'pipe', 'pipe'],
         windowsHide: true,
       },

@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url';
 import {
   MAX_FRAME_BYTES,
   type J01ImportControl,
+  type J03ForegroundExecutionControl,
   type J08RecoveryControl,
   type LaunchPolicyProjection,
   type ServiceFailureResponse,
@@ -522,6 +523,7 @@ function parseArguments(argv: string[]): {
   dataRoot: string;
   parentPid: number;
   importControl: J01ImportControl | undefined;
+  foregroundExecutionControl: J03ForegroundExecutionControl | undefined;
   recoveryControl: J08RecoveryControl | undefined;
 } {
   const values = new Map<string, string>();
@@ -533,7 +535,7 @@ function parseArguments(argv: string[]): {
       !value ||
       values.has(key) ||
       (key !== '--data-root' && key !== '--parent-pid' && key !== '--j01-import-control' &&
-        key !== '--j08-recovery-control')
+        key !== '--j03-foreground-execution-control' && key !== '--j08-recovery-control')
     ) {
       throw new ProtocolError();
     }
@@ -554,6 +556,11 @@ function parseArguments(argv: string[]): {
     importControlValue === 'after-abandon-object-delete-before-finalize'
       ? importControlValue
       : undefined;
+  const foregroundExecutionControlValue = values.get('--j03-foreground-execution-control');
+  const foregroundExecutionControl =
+    foregroundExecutionControlValue === 'interrupt-before-foreground-boundary-response'
+      ? foregroundExecutionControlValue
+      : undefined;
   const recoveryControlValue = values.get('--j08-recovery-control');
   const recoveryControl = recoveryControlValue === 'interrupt-after-journal-ack'
     ? recoveryControlValue
@@ -566,13 +573,15 @@ function parseArguments(argv: string[]): {
     process.ppid !== parentPid ||
     (importControlValue !== undefined &&
       (importControl === undefined || process.env.AI7_E2E_JOURNEY !== 'J-01')) ||
+    (foregroundExecutionControlValue !== undefined &&
+      (foregroundExecutionControl === undefined || process.env.AI7_E2E_JOURNEY !== 'J-03')) ||
     (recoveryControlValue !== undefined &&
       (recoveryControl === undefined || process.env.AI7_E2E_JOURNEY !== 'J-08')) ||
-    (importControl !== undefined && recoveryControl !== undefined)
+    [importControl, foregroundExecutionControl, recoveryControl].filter(Boolean).length > 1
   ) {
     throw new ProtocolError();
   }
-  return { dataRoot, parentPid, importControl, recoveryControl };
+  return { dataRoot, parentPid, importControl, foregroundExecutionControl, recoveryControl };
 }
 
 function parentIsAlive(parentPid: number): boolean {
@@ -587,7 +596,8 @@ function parentIsAlive(parentPid: number): boolean {
 
 async function run(): Promise<void> {
   installNodeNetworkDenial();
-  const { dataRoot, parentPid, importControl, recoveryControl } = parseArguments(process.argv.slice(2));
+  const { dataRoot, parentPid, importControl, foregroundExecutionControl, recoveryControl } =
+    parseArguments(process.argv.slice(2));
   const [
     { EditorialStore, StoreError, StoreFatalError },
     { mountDormantHarness },
@@ -657,6 +667,11 @@ async function run(): Promise<void> {
         store.rewriteCommittedResultWithoutPresentationForTest(request.input.commitId);
         stop();
         throw new Error('E2E interruption after legacy source result_json rewrite.');
+      }
+      if (request.op === 'inspectForegroundExecutionBoundary' && response.ok &&
+          foregroundExecutionControl === 'interrupt-before-foreground-boundary-response') {
+        stop();
+        throw new Error('E2E interruption before foreground boundary response.');
       }
       await writeResponse(response);
       if (request.op === 'flushJournalEdit' && response.ok && recoveryControl === 'interrupt-after-journal-ack') {

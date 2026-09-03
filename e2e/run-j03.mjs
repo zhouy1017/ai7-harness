@@ -632,10 +632,22 @@ async function main() {
       resolve(ROOT, 'dist', 'main', 'index.cjs'), '--data-root', dataRoot, '--launcher-pid', String(process.pid),
       '--j03-picker-path', SAMPLE1_PATH,
     ];
-    requireJourney(!args.some((argument) => /--inspect|--remote-debugging-port|^https?:|^wss?:/i.test(argument)), 'pipe-only-product-transport');
-    launchForCleanup = async (forCleanup = false) => {
+    const foregroundInterruptionArgs = [
+      ...args,
+      '--j03-foreground-execution-control', 'interrupt-before-foreground-boundary-response',
+    ];
+    requireJourney(!foregroundInterruptionArgs.some((argument) =>
+      /--inspect|--remote-debugging-port|^https?:|^wss?:/i.test(argument)), 'pipe-only-product-transport');
+    launchForCleanup = async (forCleanup = false, interruptBeforeForegroundBoundaryResponse = false) => {
       if (!forCleanup) cancellation.throwIfRequested();
-      const acquisition = chromium.launch({ executablePath: executable, headless: false, ignoreDefaultArgs: true, args, env: productEnvironment(executable), timeout: 60_000 });
+      const acquisition = chromium.launch({
+        executablePath: executable,
+        headless: false,
+        ignoreDefaultArgs: true,
+        args: interruptBeforeForegroundBoundaryResponse ? foregroundInterruptionArgs : args,
+        env: productEnvironment(executable),
+        timeout: 60_000,
+      });
       browserAcquisition = acquisition;
       const acquiredBrowser = await acquisition;
       attachProductOutput('J-03', acquiredBrowser, forCleanup ? 'cleanup' : 'launch');
@@ -865,6 +877,20 @@ async function main() {
       !Array.from(document.querySelectorAll('.task-authorization-card button')).some((button)=>button.dataset.taskAuthorizationAction!=='inspect-foreground-boundary') &&
       !Object.keys(window.ai7).some((key)=>/provider|session|scheduler|payload|egress/i.test(key))`, 'no-execution-surface');
     requireJourney(loopback.healthy() && loopback.observedRequests() === 0, 'zero-network-provider-session');
+
+    at('foreground-boundary-check');
+    await closeOwnedBrowser();
+    cancellation.throwIfRequested();
+    await launchForCleanup(false, true);
+    await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'interruption-restart-ready');
+    await assertRenderer(renderer, `(() => { const button=document.querySelector('button[data-book-id=${JSON.stringify(imported.bookId)}]'); if(!(button instanceof HTMLButtonElement))return false; button.click(); return true; })()`, 'interruption-open-book');
+    await waitFor(renderer, `document.querySelector('.task-authorization-card')?.dataset.taskAuthorizationState==='authorized'`, 'interruption-record-visible');
+    await click(renderer, '核对前台执行边界（不派发）', 'interruption-boundary-click');
+    await waitFor(renderer, `document.documentElement.dataset.ai7ServiceState==='interrupted' &&
+      document.querySelector('#persistence-status')?.dataset.tone==='error' &&
+      document.querySelector('#persistence-status')?.textContent==='本地业务服务已停止。'`, 'interruption-boundary-settled');
+    await assertRenderer(renderer, `(() => { const action=document.querySelector('[data-task-authorization-action="inspect-foreground-boundary"]'); const controls=Array.from(document.querySelectorAll('#screen button, #screen input')); return action instanceof HTMLButtonElement && action.isConnected && action.disabled && controls.length>0 && controls.every((control)=>control.disabled) && document.querySelector('[data-task-authorization-terminal="recorded-not-dispatched"]')?.textContent==='已记录授权 · 未派发' && !document.querySelector('[data-foreground-execution-state]'); })()`, 'interruption-remains-fail-closed');
+    requireJourney(loopback.healthy() && loopback.observedRequests() === 0, 'interruption-zero-network');
   } finally {
     finalCleanupRequested = true;
     try { await cancellation.cleanup(); } finally { cancellation.dispose(); }

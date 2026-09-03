@@ -26,6 +26,7 @@ import {
   type ImportDraftRecoveryProjection,
   type ImportCommitProjection,
   type J01ImportControl,
+  type J03ForegroundExecutionControl,
   type J08RecoveryControl,
   type ModelServiceSettingsProjection,
   type PickerReselectResult,
@@ -51,6 +52,7 @@ interface LaunchArguments {
   dataRoot: string;
   injectedPickerPath: string | undefined;
   importControl: J01ImportControl | undefined;
+  foregroundExecutionControl: J03ForegroundExecutionControl | undefined;
   recoveryControl: J08RecoveryControl | undefined;
   observeJ12Reveal: boolean;
   launcherPid: number;
@@ -143,6 +145,7 @@ function parseArguments(argv: string[]): LaunchArguments {
           key === '--j12-picker-path' ||
           key === '--j03-picker-path' ||
           key === '--j01-import-control' ||
+          key === '--j03-foreground-execution-control' ||
           key === '--j08-recovery-control' ||
           key === '--j12-observe-reveal' ||
           key === '--launcher-pid'),
@@ -200,6 +203,11 @@ function parseArguments(argv: string[]): LaunchArguments {
     importControlValue === 'after-abandon-object-delete-before-finalize'
       ? importControlValue
       : undefined;
+  const foregroundExecutionControlValue = values.get('--j03-foreground-execution-control');
+  const foregroundExecutionControl =
+    foregroundExecutionControlValue === 'interrupt-before-foreground-boundary-response'
+      ? foregroundExecutionControlValue
+      : undefined;
   const recoveryControlValue = values.get('--j08-recovery-control');
   const recoveryControl = recoveryControlValue === 'interrupt-after-journal-ack'
     ? recoveryControlValue
@@ -211,15 +219,27 @@ function parseArguments(argv: string[]): LaunchArguments {
     importControlValue === undefined || (process.env.AI7_E2E_JOURNEY === 'J-01' && importControl !== undefined),
   );
   requireDesktop(
+    foregroundExecutionControlValue === undefined ||
+      (process.env.AI7_E2E_JOURNEY === 'J-03' && foregroundExecutionControl !== undefined),
+  );
+  requireDesktop(
     recoveryControlValue === undefined || (process.env.AI7_E2E_JOURNEY === 'J-08' && recoveryControl !== undefined),
   );
-  requireDesktop(!(importControl && recoveryControl));
+  requireDesktop([importControl, foregroundExecutionControl, recoveryControl].filter(Boolean).length <= 1);
   requireDesktop(
     observeJ12RevealValue === undefined ||
       (process.env.AI7_E2E_JOURNEY === 'J-12' && observeJ12RevealValue === 'true'),
   );
   requireDesktop(Number.isSafeInteger(launcherPid) && launcherPid > 0 && launcherPid === process.ppid);
-  return { dataRoot, injectedPickerPath, importControl, recoveryControl, observeJ12Reveal, launcherPid };
+  return {
+    dataRoot,
+    injectedPickerPath,
+    importControl,
+    foregroundExecutionControl,
+    recoveryControl,
+    observeJ12Reveal,
+    launcherPid,
+  };
 }
 
 function processIsAlive(pid: number): boolean {
@@ -2238,7 +2258,12 @@ export async function runApplication(): Promise<void> {
     startupLocation = 'service-ready';
     const serviceEntry = resolve(__dirname, '..', 'service', 'index.mjs');
     service = await ServiceClient.start(
-      process.execPath, serviceEntry, dataRoot, launch.importControl, launch.recoveryControl,
+      process.execPath,
+      serviceEntry,
+      dataRoot,
+      launch.importControl,
+      launch.foregroundExecutionControl,
+      launch.recoveryControl,
     );
     service.onUnexpectedExit(() => {
       serviceInterrupted = true;
