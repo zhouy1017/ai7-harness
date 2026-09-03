@@ -28,8 +28,9 @@ import type {
   SourceImportCommitProjection,
   StagedImportProjection,
   StartupProjection,
+  TaskAuthorizationProjection,
 } from '../shared/protocol.js';
-import { MAX_REPLACEMENT_EXCLUSIONS } from '../shared/protocol.js';
+import { J03_TASK_GOAL, MAX_REPLACEMENT_EXCLUSIONS } from '../shared/protocol.js';
 import { mountBoundedEditor, type BoundedEditor, type EditorContinuity } from './editor.js';
 
 function requiredElement(selector: string): HTMLElement {
@@ -1253,6 +1254,32 @@ function renderBookOverview(
     },
   );
 
+  const taskHost = element('div');
+  taskHost.dataset['taskAuthorizationBookId'] = overview.book.bookId;
+  const inspectTaskAuthorization = (): void => {
+    if (!taskHost.isConnected || overview.manuscriptState.state !== 'populated') return;
+    void window.ai7.inspectTaskAuthorization().then(
+      (projection) => {
+        if (taskHost.isConnected && projection.bookId === taskHost.dataset['taskAuthorizationBookId']) {
+          renderTaskAuthorization(taskHost, projection);
+        }
+      },
+      (error) => {
+        if (!taskHost.isConnected) return;
+        const unavailable = element('section', 'task-authorization-card attention-note');
+        unavailable.dataset['taskAuthorizationState'] = 'unavailable';
+        unavailable.append(
+          element('h3', undefined, '任务运行授权'),
+          element('p', undefined, rendererErrorMessage(error, '无法读取本地图书任务授权记录。')),
+        );
+        taskHost.replaceChildren(unavailable);
+      },
+    );
+  };
+  if (overview.manuscriptState.state === 'populated') {
+    content.append(taskHost);
+  }
+
   const detailHost = element('div');
   const actions = element('div', 'button-row');
   const completionActionButtons: HTMLButtonElement[] = [];
@@ -1401,10 +1428,162 @@ function renderBookOverview(
         for (const action of completionActionButtons) action.disabled = false;
         setStatus(completion.completionLabel, 'success');
       }
+      inspectTaskAuthorization();
     });
   } else {
+    inspectTaskAuthorization();
     setStatus('图书工作概览已打开');
   }
+}
+
+function renderTaskAuthorization(host: HTMLElement, projection: TaskAuthorizationProjection): void {
+  const card = element('section', 'task-authorization-card');
+  card.dataset['taskAuthorizationState'] = projection.state;
+  card.dataset['taskAuthorizationBookId'] = projection.bookId;
+  if (projection.taskIntent) card.dataset['taskIntentId'] = projection.taskIntent.taskIntentId;
+  if (projection.planEnvelope) card.dataset['planEnvelopeDigest'] = projection.planEnvelope.digest;
+  const heading = element('div', 'task-authorization-heading');
+  heading.append(
+    element('h3', undefined, '任务运行授权'),
+    element(
+      'span',
+      `status-pill task-authorization-status task-authorization-status-${projection.state}`,
+      projection.state === 'available' ? '待准备' : projection.state === 'prepared' ? '计划待授权' : '已记录授权 · 未派发',
+    ),
+  );
+  card.append(
+    heading,
+    element('p', 'field-note', '本流程只冻结并记录本次标准直接授权；Provider Processing v1 固定拒绝派发。'),
+  );
+  if (projection.state === 'available' || (projection.taskIntent !== null && projection.checkpoint === null)) {
+    const form = element('section', 'form-row task-authorization-form');
+    const label = element('label', undefined, '固定任务目标');
+    label.htmlFor = 'j03-task-goal';
+    const goal = element('input');
+    goal.id = 'j03-task-goal';
+    goal.value = J03_TASK_GOAL;
+    goal.maxLength = J03_TASK_GOAL.length;
+    goal.autocomplete = 'off';
+    const actions = element('div', 'button-row task-authorization-actions');
+    const prepare = button('准备任务授权计划', 'primary', async () => {
+      if (goal.value !== J03_TASK_GOAL) {
+        goal.setAttribute('aria-invalid', 'true');
+        setStatus('任务目标必须与本次固定目标完全一致。', 'error');
+        return;
+      }
+      goal.removeAttribute('aria-invalid');
+      prepare.disabled = true;
+      cancel.hidden = false;
+      setStatus('正在有界固定任务输入并准备计划…', 'busy');
+      try {
+        const initial = await window.ai7.prepareTaskAuthorization({ goal: J03_TASK_GOAL });
+        cancel.dataset['serviceJobId'] = initial.jobId;
+        const completed = await awaitServiceJob(initial, (job) => {
+          cancel.dataset['serviceJobId'] = job.jobId;
+          setStatus(job.progress.label, job.state === 'failed' ? 'error' : 'busy');
+        });
+        if (completed.state === 'cancelled') {
+          prepare.disabled = false;
+          cancel.hidden = true;
+          setStatus('任务计划准备已取消；任务草稿与稿件编辑保持不变。', 'success');
+          return;
+        }
+        if (completed.kind !== 'task-authorization-preparation' || completed.result === null ||
+            !('taskIntent' in completed.result)) throw new Error('任务授权准备未返回计划。');
+        if (host.isConnected && completed.result.bookId === host.dataset['taskAuthorizationBookId']) {
+          renderTaskAuthorization(host, completed.result);
+          setStatus('任务授权计划已冻结；当前仍未派发。', 'success');
+        }
+      } catch (error) {
+        prepare.disabled = false;
+        cancel.hidden = true;
+        setStatus(rendererErrorMessage(error, '无法准备任务授权计划。'), 'error');
+      }
+    });
+    prepare.dataset['taskAuthorizationAction'] = 'prepare';
+    const cancel = button('取消准备', 'quiet', async () => {
+      const jobId = cancel.dataset['serviceJobId'];
+      if (!jobId) return;
+      cancel.disabled = true;
+      try {
+        await window.ai7.cancelServiceJob({ jobId });
+      } catch (error) {
+        cancel.disabled = false;
+        setStatus(rendererErrorMessage(error, '无法取消任务计划准备。'), 'error');
+      }
+    });
+    cancel.hidden = true;
+    actions.append(prepare, cancel);
+    form.append(label, goal, element('p', 'field-note', '目标由当前 J-03 工作流固定；不会构造模型请求。'), actions);
+    card.append(form);
+  } else {
+    const checkpoint = projection.checkpoint!;
+    const manuscriptPin = projection.manuscriptPin!;
+    const sourceScope = projection.runSourceScope!;
+    const artifact = projection.artifactPin!;
+    const provider = projection.providerResolutionPlan!;
+    const plan = projection.executionPlan!;
+    const envelope = projection.planEnvelope!;
+    const facts = element('dl', 'task-authorization-facts');
+    facts.append(
+      element('dt', undefined, '任务目标'), element('dd', undefined, projection.taskIntent!.goal),
+      element('dt', undefined, '预期结果'), element('dd', undefined, projection.taskIntent!.expectedOutcome),
+      element('dt', undefined, '目标修订版'), element('dd', 'technical-identity', `${checkpoint.revisionLabel} · ${checkpoint.revisionId}`),
+      element('dt', undefined, '任务输入固定点'), element('dd', undefined, `${checkpoint.purpose} · ${checkpoint.createdForDirtyJournal ? '由已确认编辑创建' : '复用当前精确修订版'}`),
+      element('dt', undefined, '修订版摘要'), element('dd', 'technical-identity', manuscriptPin.revisionDigest),
+      element('dt', undefined, '来源版本证据'), element('dd', 'technical-identity', `${sourceScope.sourceVersionEvidence.sourceVersionId} · 仅血缘证据，不属于可读范围`),
+      element('dt', undefined, '可读范围'), element('dd', 'technical-identity', `仅图书 ${sourceScope.bookId} · 主稿件 ${sourceScope.manuscriptId} · Task Input 修订版 ${sourceScope.taskInputRevision.revisionId} · ${sourceScope.taskInputRevision.revisionDigest}`),
+      element('dt', undefined, '原生构件'), element('dd', 'technical-identity', `${artifact.identity}@${artifact.version}`),
+      element('dt', undefined, '原生构件摘要'), element('dd', 'technical-identity', artifact.nativeCarrierSha256),
+      element('dt', undefined, '权限侧车'), element('dd', 'technical-identity', `${artifact.sidecarIdentity} · Revision ${artifact.sidecarRevision} · ${artifact.sidecarSha256}`),
+      element('dt', undefined, 'Model Role'), element('dd', undefined, provider.role),
+      element('dt', undefined, 'Capability'), element('dd', undefined, '空（无）'),
+      element('dt', undefined, 'Provider Binding'), element('dd', undefined, `${provider.providerId} · ${provider.modelId} · adapter r${provider.adapterRevision} · config r${provider.configurationRevision}`),
+      element('dt', undefined, 'Approved Fallback Chain'), element('dd', undefined, '空（无）'),
+      element('dt', undefined, 'Credential Reference'), element('dd', 'technical-identity', `${provider.credentialReference} · readiness ${provider.credentialReadiness}`),
+      element('dt', undefined, 'Outbound Data Category'), element('dd', undefined, provider.outboundDataCategory),
+      element('dt', undefined, 'Run Budget Ceiling'), element('dd', undefined, '未设置任务预算上限'),
+      element('dt', undefined, 'Provider Processing'), element('dd', undefined, 'development-ci · v1 · 拒绝 · 0 次实时传输'),
+      element('dt', undefined, '计划步骤'), element('dd', undefined, plan.steps.join(' → ')),
+      element('dt', undefined, 'Effect'), element('dd', undefined, '空（无）'),
+      element('dt', undefined, 'Plan Envelope'), element('dd', 'technical-identity', envelope.digest),
+      element('dt', undefined, '派发状态'), element('dd', undefined, envelope.summary),
+    );
+    card.append(element('h4', undefined, 'Plan Preview / 计划预览'), facts);
+    const nonEffects = element('ul', 'task-authorization-non-effects');
+    for (const statement of projection.namedNonEffects) nonEffects.append(element('li', undefined, statement));
+    card.append(element('h4', undefined, '明确不会发生'), nonEffects);
+    if (projection.actions.canAuthorize) {
+      const actions = element('div', 'button-row task-authorization-actions');
+      const authorize = button('记录本次运行授权（不派发）', 'primary', async () => {
+        authorize.disabled = true;
+        setStatus('正在记录标准直接运行授权…', 'busy');
+        try {
+          const authorized = await window.ai7.authorizeTaskAuthorization({
+            taskIntentId: projection.taskIntent!.taskIntentId,
+            planEnvelopeDigest: envelope.digest,
+          });
+          if (host.isConnected && authorized.bookId === host.dataset['taskAuthorizationBookId']) {
+            renderTaskAuthorization(host, authorized);
+            setStatus('已记录授权 · 未派发', 'success');
+          }
+        } catch (error) {
+          authorize.disabled = false;
+          setStatus(rendererErrorMessage(error, '无法记录任务运行授权。'), 'error');
+        }
+      });
+      authorize.dataset['taskAuthorizationAction'] = 'authorize-no-dispatch';
+      actions.append(authorize);
+      card.append(actions);
+    }
+    if (projection.runRecord) {
+      const terminal = element('p', 'success-note task-authorization-terminal', projection.runRecord.terminalLabel);
+      terminal.dataset['taskAuthorizationTerminal'] = projection.runRecord.state;
+      terminal.dataset['runRecordId'] = projection.runRecord.runRecordId;
+      card.append(terminal);
+    }
+  }
+  host.replaceChildren(card);
 }
 
 function renderEditorialWorkspaceProfile(
@@ -2473,10 +2652,11 @@ function renderTargetChoice(
             setStatus('重新导入比较准备已取消；暂存草稿未变化。', 'success');
             return;
           }
-          const review = completed.result;
-          if (completed.kind !== 'reimport-preparation' || review === null || !('checkpoint' in review)) {
+          if (completed.kind !== 'reimport-preparation') {
             throw new Error('重新导入比较任务未返回复核结果。');
           }
+          const review = completed.result;
+          if (review === null || !('draftId' in review)) throw new Error('重新导入比较任务未返回复核结果。');
           renderManuscriptReimportReview(review, recoveryNotice, recoveryReturn);
           setStatus('稿件重新导入比较已准备', 'success');
         } catch (error) {
@@ -2838,10 +3018,11 @@ function renderManuscriptReimportReview(
             setStatus('结构身份解决已取消；复核权威未变化。', 'success');
             return;
           }
-          const refreshed = completed.result;
-          if (completed.kind !== 'reimport-resolution' || refreshed === null || !('checkpoint' in refreshed)) {
+          if (completed.kind !== 'reimport-resolution') {
             throw new Error('结构身份解决任务未返回复核结果。');
           }
+          const refreshed = completed.result;
+          if (refreshed === null || !('draftId' in refreshed)) throw new Error('结构身份解决任务未返回复核结果。');
           cancelResolution.remove();
           renderManuscriptReimportReview(refreshed, recoveryNotice, recoveryReturn, mappingAfter);
           setStatus('结构身份后果已持久化；复核摘要已更新', 'success');
@@ -3254,7 +3435,8 @@ async function awaitServiceJob(
   let job = initial;
   let previousReimportProgress = initial.progress.completed;
   const requireMonotonicReimportProgress = (next: ServiceJobProjection): void => {
-    if (next.kind !== 'reimport-preparation' && next.kind !== 'reimport-resolution' && next.kind !== 'reimport-commit') return;
+    if (next.kind !== 'reimport-preparation' && next.kind !== 'reimport-resolution' && next.kind !== 'reimport-commit' &&
+        next.kind !== 'task-authorization-preparation') return;
     if (!Number.isSafeInteger(next.progress.completed) || !Number.isSafeInteger(next.progress.total) ||
       next.progress.completed < previousReimportProgress || next.progress.completed > next.progress.total ||
       next.progress.total <= 0 ||

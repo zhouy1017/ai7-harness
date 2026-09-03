@@ -1178,6 +1178,10 @@ async function runJourney(
     holdCompletionPaint = false,
     diagnosticReviewLocation = 'review',
   } = options;
+  const usePrimaryReviewDiagnostics = diagnosticReviewLocation === 'review';
+  const atPrimaryReviewStage = (location) => {
+    if (usePrimaryReviewDiagnostics) at(location);
+  };
   const hasIdentityFinding = identityClass !== null;
   const expectedNonEffects = degraded
     ? [
@@ -1207,7 +1211,7 @@ async function runJourney(
   );
   await assertRenderer(
     renderer,
-    `typeof globalThis.process === 'undefined' && typeof globalThis.require === 'undefined' && Object.keys(window.ai7).sort().join(',') === 'abandonImportDraft,acceptReimportDegradation,acknowledgeImportCompletion,cancelServiceJob,commitBookCreation,commitManuscriptReimport,commitNewBookImport,commitReplacement,commitSourceImport,continueImportDraft,deferRecovery,dismissReplacementPreview,enableEditorialWorkspaceProfile,flushJournalEdit,freezeReplacement,getBookOverview,getBookWorkbenchRoute,getHistoricalRevision,getImportStartup,getManuscriptWindow,getManuscriptWindowAt,getModelServiceSettings,getOutline,getProductDataLocation,getRecoveryComparison,getReimportIdentityCandidatePage,getReimportLineageSourceVersionPage,getReimportMappingPage,getSearchResults,getStartup,inspectEditorialWorkspaceProfile,installEditorialWorkspaceProfile,leaveBookWorkbench,listBooks,listPriorWork,openBookWorkbench,platform,pollServiceJob,prepareBookCreation,prepareManuscriptReimport,prepareNewBookReview,prepareReplacement,prepareSourceImportReview,redoManuscript,removeModelServiceCredential,reselectImportDraft,resolveReimportMapping,restoreRecovery,revealProductDataLocation,saveMilestone,saveModelServiceCredential,selectAndStageDocx,startReplacementCommit,startSearch,undoManuscript,viewRecoveryCandidate'`,
+    `typeof globalThis.process === 'undefined' && typeof globalThis.require === 'undefined' && Object.keys(window.ai7).sort().join(',') === 'abandonImportDraft,acceptReimportDegradation,acknowledgeImportCompletion,authorizeTaskAuthorization,cancelServiceJob,commitBookCreation,commitManuscriptReimport,commitNewBookImport,commitReplacement,commitSourceImport,continueImportDraft,deferRecovery,dismissReplacementPreview,enableEditorialWorkspaceProfile,flushJournalEdit,freezeReplacement,getBookOverview,getBookWorkbenchRoute,getHistoricalRevision,getImportStartup,getManuscriptWindow,getManuscriptWindowAt,getModelServiceSettings,getOutline,getProductDataLocation,getRecoveryComparison,getReimportIdentityCandidatePage,getReimportLineageSourceVersionPage,getReimportMappingPage,getSearchResults,getStartup,inspectEditorialWorkspaceProfile,inspectTaskAuthorization,installEditorialWorkspaceProfile,leaveBookWorkbench,listBooks,listPriorWork,openBookWorkbench,platform,pollServiceJob,prepareBookCreation,prepareManuscriptReimport,prepareNewBookReview,prepareReplacement,prepareSourceImportReview,prepareTaskAuthorization,redoManuscript,removeModelServiceCredential,reselectImportDraft,resolveReimportMapping,restoreRecovery,revealProductDataLocation,saveMilestone,saveModelServiceCredential,selectAndStageDocx,startReplacementCommit,startSearch,undoManuscript,viewRecoveryCandidate'`,
     'renderer-isolation',
   );
   await assertRenderer(
@@ -1261,6 +1265,7 @@ async function runJourney(
   await clickExactButton(renderer, '确认书名并复核', 'review-click');
   await waitFor(renderer, `document.querySelector('[data-screen="review"]')`, 'review-screen');
   at(diagnosticReviewLocation);
+  atPrimaryReviewStage('review-contract');
   if (hasIdentityFinding) {
     await assertRenderer(
       renderer,
@@ -1289,6 +1294,7 @@ async function runJourney(
       `(() => { const items = Array.from(document.querySelectorAll('[data-degradation-category]')); const expected = [['inline-styles','266'],['sections','1']]; return items.length === expected.length && items.every((item, index) => item.dataset.degradationCategory === expected[index][0] && item.dataset.degradationCount === expected[index][1]); })()`,
       'degradation-complete-server-set',
     );
+    atPrimaryReviewStage('review-acceptance');
     await assertRenderer(
       renderer,
       `(() => { const acceptance = document.querySelector('#accept-import-degradation'); if (!acceptance) return false; acceptance.click(); return true; })()`,
@@ -1362,6 +1368,7 @@ async function runJourney(
       'completion-paint-held',
     );
   }
+  atPrimaryReviewStage('commit');
   await clickExactButton(
     renderer,
     degraded ? '按上述降级方式新建图书并导入稿件' : '新建图书并导入稿件',
@@ -1377,6 +1384,7 @@ async function runJourney(
     return;
   }
   await waitFor(renderer, `document.querySelector('[data-screen="imported"]')`, 'imported');
+  atPrimaryReviewStage('completion');
   await assertRenderer(
     renderer,
     `document.querySelector('[data-screen="imported"]')?.textContent.includes('稿件已导入') && document.querySelector('[data-screen="imported"]')?.textContent.includes('图书工作概览')`,
@@ -3143,9 +3151,21 @@ async function main() {
       holdCompletionPaint: true,
       diagnosticReviewLocation: 'before-paint-review',
     });
+    // Issue #47 / nearest supported Journey J-01: import completion acknowledgement must settle
+    // before the ancillary Task authorization inspection/card settles.
+    at('completion-visibility-transition');
+    await waitFor(
+      renderer,
+      `document.querySelector('[data-native-artifact-state]')`,
+      'completion-pre-ack-artifact-inspection-settled',
+    );
+    await assertRenderer(
+      renderer,
+      `(async () => { await new Promise((resolveWait) => setTimeout(resolveWait, 0)); return Boolean(document.querySelector('[data-task-authorization-book-id]')) && !document.querySelector('[data-task-authorization-state]') && document.documentElement.dataset.ai7ImportCompletionPainted === undefined && document.documentElement.dataset.ai7ImportCompletionAcknowledged === undefined; })()`,
+      'completion-defers-task-authorization-inspection',
+    );
     // Issue #178 / nearest supported Journey J-01: a visible imported result must reject a
     // frame pair crossed by a hidden interval and must not acknowledge an obsolete screen/commit.
-    at('completion-visibility-transition');
     await assertRenderer(
       renderer,
       `(() => { const frame = globalThis.__ai7HeldCompletionFrames?.shift(); if (typeof frame?.callback !== 'function') return false; frame.callback(performance.now()); return true; })()`,
@@ -3236,7 +3256,7 @@ async function main() {
     );
     await waitFor(
       renderer,
-      `document.visibilityState === 'visible' && document.documentElement.dataset.ai7ImportCompletionPainted === 'true' && document.documentElement.dataset.ai7ImportCompletionAcknowledged === 'true'`,
+      `document.visibilityState === 'visible' && document.documentElement.dataset.ai7ImportCompletionPainted === 'true' && document.documentElement.dataset.ai7ImportCompletionAcknowledged === 'true' && Boolean(document.querySelector('[data-task-authorization-state]'))`,
       'before-paint-recovery-acknowledged',
     );
     await closeProduct();

@@ -93,6 +93,15 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .native-artifact-status-installed-disabled { background: #fff0cf; color: #76530f; }
 .native-artifact-status-enabled-for-book { background: #e5f1e7; color: #28533a; }
 .native-artifact-status-unavailable-needs-attention { background: #f3e4e0; color: #753a31; }
+.task-authorization-card { margin-top: 1.3rem; padding: 1.15rem 1.25rem; border: 1px solid #c8c6d8; border-radius: 12px; background: #f8f7fc; }
+.task-authorization-heading { display: flex; align-items: center; justify-content: space-between; gap: .8rem; }
+.task-authorization-heading h3, .task-authorization-card h4 { margin: 0; }
+.task-authorization-card h4 { margin-top: 1rem; }
+.task-authorization-facts { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: .45rem .8rem; margin: .9rem 0 0; }
+.task-authorization-non-effects { margin: .55rem 0 0; padding-left: 1.2rem; line-height: 1.65; }
+.task-authorization-status-available { background: #f1ede3; color: #50574e; }
+.task-authorization-status-prepared { background: #fff0cf; color: #76530f; }
+.task-authorization-status-authorized { background: #e5f1e7; color: #28533a; }
 dt { color: #6b7068; font-size: .86rem; }
 dd { margin: 0; overflow-wrap: anywhere; }
 code { font-family: ui-monospace, "SFMono-Regular", Consolas, monospace; font-size: .8rem; }
@@ -218,8 +227,8 @@ legend { margin-bottom: .7rem; font-weight: 800; }
   .editor-window { padding: 1.25rem; }
   .window-actions { grid-template-columns: auto 1fr auto; }
   .position-rail-label { grid-column: 1 / -1; }
-  .native-artifact-facts { grid-template-columns: 1fr; }
-  .native-artifact-facts dd + dt { margin-top: .35rem; }
+  .native-artifact-facts, .task-authorization-facts { grid-template-columns: 1fr; }
+  .native-artifact-facts dd + dt, .task-authorization-facts dd + dt { margin-top: .35rem; }
 }
 
 @media (max-width: 560px) {
@@ -237,7 +246,7 @@ legend { margin-bottom: .7rem; font-weight: 800; }
   .editor-toolbar, .manuscript-navigator, .manuscript-surface, .editor-window, .editor-identities,
   .search-result, .replacement-review, .recent-work-item, .book-summary-item, .status-bar, .recovery-snapshot-disclosure,
   .recovery-readonly-blocks, .recovered-state-marker, .model-role-card, .native-artifact-card,
-  .native-artifact-authority {
+  .native-artifact-authority, .task-authorization-card {
     color: CanvasText;
     background: Canvas;
     border-color: CanvasText;

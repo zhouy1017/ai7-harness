@@ -78,7 +78,7 @@ if (isJourneyRunner) {
   }
 }
 
-export const ADMITTED_JOURNEYS = Object.freeze(['J-01', 'J-02', 'J-08', 'J-12', 'J-15']);
+export const ADMITTED_JOURNEYS = Object.freeze(['J-01', 'J-02', 'J-08', 'J-12', 'J-15', 'J-03']);
 
 const JOURNEY_MODULES = Object.freeze({
   'J-01': new URL('./run-j01.mjs', import.meta.url),
@@ -86,6 +86,7 @@ const JOURNEY_MODULES = Object.freeze({
   'J-08': new URL('./run-j08.mjs', import.meta.url),
   'J-12': new URL('./run-j12.mjs', import.meta.url),
   'J-15': new URL('./run-j15.mjs', import.meta.url),
+  'J-03': new URL('./run-j03.mjs', import.meta.url),
 });
 
 const JOURNEY_LOCATIONS = Object.freeze({
@@ -97,6 +98,10 @@ const JOURNEY_LOCATIONS = Object.freeze({
     'renderer-ready',
     'landing',
     'review',
+    'review-contract',
+    'review-acceptance',
+    'commit',
+    'completion',
     'completion-visibility-transition',
     'continuity-review',
     'legacy-review',
@@ -201,6 +206,40 @@ const JOURNEY_LOCATIONS = Object.freeze({
     'restart-book-a-unavailable',
     'second-book-disabled',
     'accessibility-reflow-forced-colors',
+    'zero-activity',
+  ]),
+  'J-03': Object.freeze([
+    'entry',
+    'controller-loopback',
+    'controller-imports',
+    'exact-sample1',
+    'renderer-ready',
+    'renderer-api-boundary',
+    'renderer-task-api',
+    'renderer-zero-execution-api',
+    'sample1-import',
+    'sample1-import-target',
+    'sample1-import-relationship',
+    'sample1-import-title',
+    'sample1-import-review',
+    'sample1-import-completed',
+    'task-prerequisites-unavailable',
+    'artifact-revision2',
+    'artifact-install',
+    'artifact-enable',
+    'artifact-enabled',
+    'model-setup-remove',
+    'model-settings-ready',
+    'model-credential-saved',
+    'model-credential-removed',
+    'acknowledged-edit',
+    'j14-ime-focus',
+    'j14-reflow-forced-colors',
+    'plan-prepared',
+    'cross-book-route-guard',
+    'authorization-recorded',
+    'post-authorization-edit',
+    'restart-immutable',
     'zero-activity',
   ]),
 });

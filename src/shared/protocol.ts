@@ -1,4 +1,4 @@
-export const SERVICE_PROTOCOL_VERSION = 14 as const;
+export const SERVICE_PROTOCOL_VERSION = 15 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -41,6 +41,9 @@ export const IPC_CHANNELS = {
   inspectEditorialWorkspaceProfile: 'ai7:j15:inspect-editorial-workspace-profile',
   installEditorialWorkspaceProfile: 'ai7:j15:install-editorial-workspace-profile',
   enableEditorialWorkspaceProfile: 'ai7:j15:enable-editorial-workspace-profile',
+  inspectTaskAuthorization: 'ai7:j03:inspect-task-authorization',
+  prepareTaskAuthorization: 'ai7:j03:prepare-task-authorization',
+  authorizeTaskAuthorization: 'ai7:j03:authorize-task-authorization',
   listBooks: 'ai7:j01:list-books',
   prepareNewBookReview: 'ai7:j01:prepare-new-book-review',
   commitNewBookImport: 'ai7:j01:commit-new-book-import',
@@ -915,6 +918,99 @@ export interface ModelServiceSettingsProjection {
   authorityStatement: '凭据就绪不授予模型处理、对外导出、运行、受控动作或公开发布权限。';
 }
 
+export const J03_TASK_GOAL = '分析当前书稿的结构与叙事连贯性，列出供编辑复核的重点。' as const;
+
+export interface TaskAuthorizationProjection {
+  bookId: string;
+  state: 'available' | 'prepared' | 'authorized';
+  taskIntent: null | {
+    taskIntentId: string;
+    goal: typeof J03_TASK_GOAL;
+    expectedOutcome: '供编辑复核的结构与叙事连贯性重点清单';
+    createdAt: string;
+  };
+  checkpoint: null | {
+    manuscriptId: string;
+    branchId: string;
+    revisionId: string;
+    revisionLabel: string;
+    revisionDigest: string;
+    journalSequence: number;
+    purpose: 'Task Input / 任务输入';
+    createdForDirtyJournal: boolean;
+  };
+  manuscriptPin: null | {
+    bookId: string;
+    manuscriptId: string;
+    revisionId: string;
+    revisionDigest: string;
+    sourceVersionId: string;
+    sourceDigest: 'b8a3dbde0aa8a1ec7265f9ae3fe47877759e7947c5ab69682cd0a8f424a8d483';
+  };
+  runSourceScope: null | {
+    bookId: string;
+    manuscriptId: string;
+    taskInputRevision: { revisionId: string; revisionDigest: string };
+    readableScopeKinds: readonly ['current-book-primary-manuscript-revision'];
+    sourceVersionEvidence: { sourceVersionId: string; readable: false };
+  };
+  artifactPin: null | {
+    identity: '@ai7/editorial-workspace-profile';
+    version: '1.0.0';
+    nativeCarrierSha256: 'ae485040c8fa602ab2e98ec91dd122201d40a8be41d8a4f86f7cd55ddb1e434d';
+    sidecarIdentity: 'ai7.editorial-workspace-profile.authority';
+    sidecarRevision: 2;
+    sidecarSha256: '980b565f25bdff29e539365e17344346017b05146a45cfea35c8ed7d528a1bff';
+  };
+  providerResolutionPlan: null | {
+    role: 'Main Editorial Role';
+    capabilities: readonly [];
+    providerId: 'deepseek-open-platform';
+    modelId: 'deepseek-v4-pro';
+    adapterRevision: 1;
+    configurationRevision: 1;
+    approvedFallbackChain: readonly [];
+    credentialReference: string;
+    credentialReadiness: 'missing';
+    outboundDataCategory: 'public-or-synthetic';
+    runBudgetCeiling: 'unset';
+    providerProcessing: { operationalScope: 'development-ci'; version: 'v1'; decision: 'deny'; authorizedLiveTransmissionCount: 0 };
+  };
+  executionPlan: null | {
+    steps: readonly ['分析结构', '分析叙事连贯性', '形成编辑复核重点'];
+    effects: readonly [];
+    stopCondition: 'Provider Processing v1 denies dispatch';
+  };
+  planEnvelope: null | {
+    digest: string;
+    providerStatus: 'denied';
+    dispatchAllowed: false;
+    summary: '计划已冻结；Provider Processing v1 拒绝派发';
+  };
+  authorization: null | {
+    authorizationId: string;
+    planEnvelopeDigest: string;
+    origin: 'standard-direct';
+    authorizedAt: string;
+  };
+  runRecord: null | {
+    runRecordId: string;
+    state: 'recorded-not-dispatched';
+    dispatched: false;
+    terminalLabel: '已记录授权 · 未派发';
+    recordedAt: string;
+  };
+  actions: { canPrepare: boolean; canAuthorize: boolean };
+  namedNonEffects: readonly [
+    '不派发调度器任务',
+    '不创建 DSH Session',
+    '不读取或解析凭据',
+    '不构造 Provider payload',
+    '不访问网络或调用 Provider',
+    '不创建或执行 Effect'
+  ];
+}
+
 export interface HistoricalRevisionProjection {
   mode: 'historical-revision';
   readOnly: true;
@@ -1193,11 +1289,12 @@ export interface DurableHistoryProjection {
 
 export interface ServiceJobProjection {
   jobId: string;
-  kind: 'search' | 'replacement' | 'reimport-preparation' | 'reimport-resolution' | 'reimport-commit';
+  kind: 'search' | 'replacement' | 'reimport-preparation' | 'reimport-resolution' | 'reimport-commit' |
+    'task-authorization-preparation';
   state: 'queued' | 'running' | 'completed' | 'cancelled' | 'failed';
   progress: { completed: number; total: number; label: string };
   result: SearchSummaryProjection | ReplacementPreviewProjection | ReviewBeforeManuscriptReimportProjection |
-    ManuscriptReimportCommitProjection | null;
+    ManuscriptReimportCommitProjection | TaskAuthorizationProjection | null;
   failure: null | { code: string; message: string };
 }
 
@@ -1471,6 +1568,18 @@ export interface ServiceOperationMap {
     input: { bookId: string };
     output: EditorialWorkspaceProfileProjection;
   };
+  inspectTaskAuthorization: {
+    input: { bookId: string };
+    output: TaskAuthorizationProjection;
+  };
+  prepareTaskAuthorization: {
+    input: { bookId: string; goal: typeof J03_TASK_GOAL };
+    output: ServiceJobProjection;
+  };
+  authorizeTaskAuthorization: {
+    input: { bookId: string; taskIntentId: string; planEnvelopeDigest: string };
+    output: TaskAuthorizationProjection;
+  };
   listBooks: {
     input: { after: BookSummaryCursor | null };
     output: BookSummaryPageProjection;
@@ -1685,6 +1794,12 @@ export interface RendererApi {
   inspectEditorialWorkspaceProfile(): Promise<EditorialWorkspaceProfileProjection>;
   installEditorialWorkspaceProfile(): Promise<EditorialWorkspaceProfileProjection>;
   enableEditorialWorkspaceProfile(): Promise<EditorialWorkspaceProfileProjection>;
+  inspectTaskAuthorization(): Promise<TaskAuthorizationProjection>;
+  prepareTaskAuthorization(input: { goal: typeof J03_TASK_GOAL }): Promise<ServiceJobProjection>;
+  authorizeTaskAuthorization(input: {
+    taskIntentId: string;
+    planEnvelopeDigest: string;
+  }): Promise<TaskAuthorizationProjection>;
   listBooks(input: ServiceOperationMap['listBooks']['input']): Promise<BookSummaryPageProjection>;
   prepareNewBookReview(input: ServiceOperationMap['prepareNewBookReview']['input']): Promise<ReviewBeforeImportProjection>;
   commitNewBookImport(input: CommitNewBookRendererInput): Promise<ManuscriptImportCommitProjection>;
