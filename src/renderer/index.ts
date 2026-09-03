@@ -3875,45 +3875,56 @@ function renderEditorWindow(
     }
   }
 
+  type NavigationRequest = {
+    target: Parameters<typeof window.ai7.getManuscriptWindowAt>[0]['target'];
+    continuity: EditorContinuity | undefined;
+    preserveOffWindowContinuity: boolean;
+  };
+
   async function navigate(
-    target: Parameters<typeof window.ai7.getManuscriptWindowAt>[0]['target'],
+    targetOrPrepare: NavigationRequest['target'] | (() => NavigationRequest | undefined),
     continuity?: EditorContinuity,
     preserveOffWindowContinuity = false,
   ): Promise<boolean> {
-    if (authoritativeMutationBusy() || !(await settleLocalEdit()) || !editor) return false;
+    if (authoritativeMutationBusy() || edgeNavigation || !editor) return false;
+    edgeNavigation = true;
     try {
+      if (!(await settleLocalEdit()) || !editor) return false;
+      const navigation = typeof targetOrPrepare === 'function'
+        ? targetOrPrepare()
+        : { target: targetOrPrepare, continuity, preserveOffWindowContinuity };
+      if (!navigation) return false;
       const binding = editor.currentWindow();
       const next = await window.ai7.getManuscriptWindowAt({
         manuscriptId: binding.manuscriptId,
         branchId: binding.branchId,
-        target,
+        target: navigation.target,
       });
-      const loaded = preserveOffWindowContinuity && continuity
-        ? editor.loadNavigationWindow(next, continuity)
-        : editor.loadWindow(next, continuity);
+      const loaded = navigation.preserveOffWindowContinuity && navigation.continuity
+        ? editor.loadNavigationWindow(next, navigation.continuity)
+        : editor.loadWindow(next, navigation.continuity);
       if (!loaded) return false;
       currentWindow = next;
       updateWindowChrome();
       setStatus(`已到达${next.position.structureLabel ? `“${next.position.structureLabel}”附近，` : ''}${next.position.label}。`, 'success');
+      await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
       return true;
     } catch (error) {
       setStatus(rendererErrorMessage(error, '无法移动到该稿件位置。'), 'error');
       return false;
+    } finally {
+      edgeNavigation = false;
     }
   }
 
   async function navigateCursor(direction: 'previous' | 'next'): Promise<void> {
-    if (authoritativeMutationBusy() || edgeNavigation || !(await settleLocalEdit()) || !editor) return;
-    const cursor = direction === 'previous' ? editor.currentWindow().previousCursor : editor.currentWindow().nextCursor;
-    if (!cursor) return;
-    edgeNavigation = true;
-    try {
+    await navigate(() => {
+      if (!editor) return undefined;
+      const cursor = direction === 'previous' ? editor.currentWindow().previousCursor : editor.currentWindow().nextCursor;
+      if (!cursor) return undefined;
       const continuity = editor.captureNavigationContinuity();
-      await navigate({ kind: 'cursor', cursor }, continuity, true);
-      await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
-    } finally {
-      edgeNavigation = false;
-    }
+      return { target: { kind: 'cursor', cursor }, continuity, preserveOffWindowContinuity: true };
+    });
   }
 
   async function loadOutline(cursor: string | null, propagateFailure = false): Promise<void> {
