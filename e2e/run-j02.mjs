@@ -571,9 +571,126 @@ async function runWorkspaceJourney(renderer, dataRoot) {
     'single-service-job-gap-actual-start-ipc',
   );
   at('cooperative-edit-during-search');
+  const firstCooperativeEdit = '协作'.repeat(150);
+  const secondCooperativeEdit = '续写';
   await assertRenderer(
     renderer,
-    `(() => { const blocks = document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]'); const edit = (block, text) => { if (!block) return false; block.focus(); const range = document.createRange(); range.selectNodeContents(block); range.collapse(false); const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range); return document.execCommand('insertText', false, text); }; return edit(blocks[0], '协作'.repeat(150)) && edit(blocks[1], '续写'); })()`,
+    `(() => {
+      const editor = document.querySelector('[data-testid="manuscript-editor"]');
+      const save = Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '保存当前编辑');
+      const cancel = Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '取消当前操作');
+      const blocks = Array.from(editor?.querySelectorAll(':scope > [data-block-id]') ?? []);
+      const first = blocks[0];
+      const second = blocks[1];
+      if (!(editor instanceof HTMLElement) || editor.dataset.operationLocked !== 'false' || editor.getAttribute('contenteditable') !== 'true' ||
+          editor.getAttribute('aria-readonly') !== 'false' || !(save instanceof HTMLButtonElement) || !save.disabled ||
+          !(cancel instanceof HTMLButtonElement) || cancel.hidden || !cancel.dataset.serviceJobId ||
+          cancel.dataset.serviceJobId !== globalThis.__ai7ServiceJobId ||
+          document.querySelectorAll('button[data-service-job-id="' + cancel.dataset.serviceJobId + '"]').length !== 1 ||
+          !(first instanceof HTMLElement) || !(second instanceof HTMLElement) || !first.dataset.blockId || !second.dataset.blockId ||
+          first.dataset.blockId === second.dataset.blockId || first.textContent === null || second.textContent === null) return false;
+      editor.focus();
+      const range = document.createRange();
+      range.selectNodeContents(first);
+      range.collapse(false);
+      const selection = window.getSelection();
+      if (!selection) return false;
+      selection.removeAllRanges();
+      selection.addRange(range);
+      globalThis.__ai7CooperativeEdit = {
+        jobId: cancel.dataset.serviceJobId,
+        first: { blockId: first.dataset.blockId, before: first.textContent },
+        second: { blockId: second.dataset.blockId, before: second.textContent },
+      };
+      return document.activeElement === editor && selection.isCollapsed && first.contains(selection.anchorNode);
+    })()`,
+    'sustained-first-block-selection-ready',
+  );
+  await renderer.send('Input.insertText', { text: firstCooperativeEdit });
+  await waitForChecks(
+    renderer,
+    `(() => {
+      const state = globalThis.__ai7CooperativeEdit;
+      const editor = document.querySelector('[data-testid="manuscript-editor"]');
+      const save = Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '保存当前编辑');
+      const cancel = Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '取消当前操作');
+      const blocks = Array.from(editor?.querySelectorAll(':scope > [data-block-id]') ?? []);
+      const first = blocks.find((block) => block.getAttribute('data-block-id') === state?.first?.blockId);
+      const second = blocks.find((block) => block.getAttribute('data-block-id') === state?.second?.blockId);
+      return {
+        rootPresent: editor instanceof HTMLElement,
+        operationUnlocked: editor?.dataset.operationLocked === 'false',
+        editorWritable: editor?.getAttribute('contenteditable') === 'true',
+        ariaWritable: editor?.getAttribute('aria-readonly') === 'false',
+        editorFocused: document.activeElement === editor,
+        firstIdentity: first instanceof HTMLElement && first.dataset.blockId === state?.first?.blockId,
+        firstText: first?.textContent === state?.first?.before + ${JSON.stringify(firstCooperativeEdit)},
+        secondIdentity: second instanceof HTMLElement && second.dataset.blockId === state?.second?.blockId,
+        secondTextUnchanged: second?.textContent === state?.second?.before,
+        distinctBlocks: first instanceof HTMLElement && second instanceof HTMLElement && first !== second,
+        dirty: save instanceof HTMLButtonElement && !save.disabled,
+        sameRunningSearchJob: cancel instanceof HTMLButtonElement && !cancel.hidden && cancel.dataset.serviceJobId === state?.jobId && state?.jobId === globalThis.__ai7ServiceJobId,
+        singleServiceJob: typeof state?.jobId === 'string' && document.querySelectorAll('button[data-service-job-id="' + state.jobId + '"]').length === 1,
+      };
+    })()`,
+    'sustained-first-block-effect',
+  );
+  await assertRenderer(
+    renderer,
+    `(() => {
+      const state = globalThis.__ai7CooperativeEdit;
+      const editor = document.querySelector('[data-testid="manuscript-editor"]');
+      const save = Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '保存当前编辑');
+      const cancel = Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '取消当前操作');
+      const blocks = Array.from(editor?.querySelectorAll(':scope > [data-block-id]') ?? []);
+      const first = blocks.find((block) => block.getAttribute('data-block-id') === state?.first?.blockId);
+      const second = blocks.find((block) => block.getAttribute('data-block-id') === state?.second?.blockId);
+      if (!(editor instanceof HTMLElement) || editor.dataset.operationLocked !== 'false' || editor.getAttribute('contenteditable') !== 'true' ||
+          editor.getAttribute('aria-readonly') !== 'false' || !(save instanceof HTMLButtonElement) || save.disabled ||
+          !(cancel instanceof HTMLButtonElement) || cancel.hidden || cancel.dataset.serviceJobId !== state?.jobId ||
+          state?.jobId !== globalThis.__ai7ServiceJobId || typeof state?.jobId !== 'string' ||
+          document.querySelectorAll('button[data-service-job-id="' + state.jobId + '"]').length !== 1 ||
+          !(first instanceof HTMLElement) || first.textContent !== state?.first?.before + ${JSON.stringify(firstCooperativeEdit)} ||
+          !(second instanceof HTMLElement) || second.textContent !== state?.second?.before || first === second) return false;
+      editor.focus();
+      const range = document.createRange();
+      range.selectNodeContents(second);
+      range.collapse(false);
+      const selection = window.getSelection();
+      if (!selection) return false;
+      selection.removeAllRanges();
+      selection.addRange(range);
+      return document.activeElement === editor && selection.isCollapsed && second.contains(selection.anchorNode);
+    })()`,
+    'sustained-second-block-selection-ready',
+  );
+  await renderer.send('Input.insertText', { text: secondCooperativeEdit });
+  await waitForChecks(
+    renderer,
+    `(() => {
+      const state = globalThis.__ai7CooperativeEdit;
+      const editor = document.querySelector('[data-testid="manuscript-editor"]');
+      const save = Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '保存当前编辑');
+      const cancel = Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '取消当前操作');
+      const blocks = Array.from(editor?.querySelectorAll(':scope > [data-block-id]') ?? []);
+      const first = blocks.find((block) => block.getAttribute('data-block-id') === state?.first?.blockId);
+      const second = blocks.find((block) => block.getAttribute('data-block-id') === state?.second?.blockId);
+      return {
+        rootPresent: editor instanceof HTMLElement,
+        operationUnlocked: editor?.dataset.operationLocked === 'false',
+        editorWritable: editor?.getAttribute('contenteditable') === 'true',
+        ariaWritable: editor?.getAttribute('aria-readonly') === 'false',
+        editorFocused: document.activeElement === editor,
+        firstIdentity: first instanceof HTMLElement && first.dataset.blockId === state?.first?.blockId,
+        firstText: first?.textContent === state?.first?.before + ${JSON.stringify(firstCooperativeEdit)},
+        secondIdentity: second instanceof HTMLElement && second.dataset.blockId === state?.second?.blockId,
+        secondText: second?.textContent === state?.second?.before + ${JSON.stringify(secondCooperativeEdit)},
+        distinctBlocks: first instanceof HTMLElement && second instanceof HTMLElement && first !== second,
+        dirty: save instanceof HTMLButtonElement && !save.disabled,
+        sameRunningSearchJob: cancel instanceof HTMLButtonElement && !cancel.hidden && cancel.dataset.serviceJobId === state?.jobId && state?.jobId === globalThis.__ai7ServiceJobId,
+        singleServiceJob: typeof state?.jobId === 'string' && document.querySelectorAll('button[data-service-job-id="' + state.jobId + '"]').length === 1,
+      };
+    })()`,
     'sustained-multiblock-edit-during-search',
   );
   await waitFor(renderer, `!Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '保存当前编辑')?.disabled`, 'concurrent-edit-dirty');
