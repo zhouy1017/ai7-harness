@@ -684,8 +684,8 @@ async function prepareManuscriptReimportReview(renderer, expectation) {
     scenario,
   } = expectation;
   requireJourney(start === 'landing' || start === 'target', `${scenario}-start`);
+  at('reimport-pre-review');
   if (start === 'landing') {
-    at('landing');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, `${scenario}-landing`);
     await clickExactButton(renderer, '导入稿件', `${scenario}-stage`);
     await waitFor(renderer, `document.querySelector('[data-screen="target"]')`, `${scenario}-target`);
@@ -776,6 +776,7 @@ async function prepareManuscriptReimportReview(renderer, expectation) {
     `(() => { const review = document.querySelector('[data-import-review-kind="reimport"]'); const text = review?.textContent ?? ''; const changedMappings = review?.querySelectorAll('[data-reimport-mapping-state="unresolved"]').length ?? 0; const values = Object.fromEntries(Array.from(review?.querySelectorAll('dt') ?? [], (label) => [label.textContent, label.nextElementSibling?.textContent])); const exactSource = review?.querySelector('[data-reimport-source-sha256]'); const lineageExact = ${lineageStatus === 'verified' ? `values['来源关系版本 ID'] === ${JSON.stringify(lineageSourceVersionId)} && /^[0-9a-f-]{36}$/i.test(values['来源关系修订版 ID'] ?? '')` : `values['来源关系版本 ID'] === undefined && values['来源关系修订版 ID'] === undefined`}; return review?.dataset.reimportLineageStatus === ${JSON.stringify(lineageStatus)} && review.dataset.reimportComparisonKind === ${JSON.stringify(lineageStatus === 'verified' ? 'three-way' : 'two-way')} && /^[0-9a-f-]{36}$/i.test(values['当前固定点修订版 ID'] ?? '') && /^[0-9a-f]{64}$/.test(values['当前固定点修订版摘要'] ?? '') && lineageExact && exactSource?.dataset.reimportSourceSha256 === ${JSON.stringify(stagedSourceIdentity.sha256)} && exactSource.dataset.reimportSourceBytes === ${JSON.stringify(stagedSourceIdentity.bytes)} && text.includes(${JSON.stringify(lineageStatus === 'verified' ? '来源关系已确认' : '来源关系未确认')}) && text.includes(${JSON.stringify(dirtyCheckpoint ? '已为未固定修订日志创建专用安全固定点' : '当前稿件已经位于持久固定点')}) && text.includes('不执行模糊匹配或通用合并') && text.includes('不创建第二份主稿件') && text.includes('工作流程实例') && text.includes('不授予或执行模型提供方传输') && text.includes('不导出、不发送、不交付、不发布') && ${changed ? 'changedMappings > 0 && review.dataset.reimportCommitReady === "false"' : `changedMappings === 0 && review.dataset.reimportCommitReady === "${degraded ? 'false' : 'true'}" && text.includes("未发现稿件变化")`} && ${degraded ? "Boolean(review.querySelector('[data-accept-reimport-degradation]')) && text.includes('必须明确接受完整降级集合')" : "!review.querySelector('[data-accept-reimport-degradation]')"}; })()`,
     `${scenario}-review-contract`,
   );
+  at('review');
 }
 
 async function manuscriptReimportReviewProof(renderer, scenario) {
@@ -1220,9 +1221,24 @@ async function runJourney(
     'renderer-network-denial',
   );
   if (start === 'landing') {
-    at('landing');
-    await clickExactButton(renderer, '导入稿件', 'stage-click');
-    await waitFor(renderer, `document.querySelector('[data-screen="target"]')`, 'stage-target');
+    at('landing-action-ready');
+    await waitFor(
+      renderer,
+      `(() => { const screen = document.querySelector('[data-screen="landing"]'); const actions = Array.from(screen?.querySelectorAll('button') ?? []).filter((button) => button.textContent === '导入稿件'); return actions.length === 1 && !actions[0].disabled; })()`,
+      'landing-action-ready',
+    );
+    await assertRenderer(
+      renderer,
+      `(() => { const screen = document.querySelector('[data-screen="landing"]'); const actions = Array.from(screen?.querySelectorAll('button') ?? []).filter((button) => button.textContent === '导入稿件'); if (actions.length !== 1 || actions[0].disabled) return false; actions[0].click(); return true; })()`,
+      'landing-action-ready',
+    );
+    at('landing-target-transition');
+    await waitFor(
+      renderer,
+      `document.querySelector('[data-screen="target"]')`,
+      'landing-target-transition',
+    );
+    at('review');
   }
   if (start !== 'accepted-review') {
     if (hasIdentityFinding) {
