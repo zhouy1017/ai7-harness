@@ -8,11 +8,12 @@
 - The permanent exact-path J-01 diagnostic passed twice on Windows at the affected head and after the bounded diagnostic change. The Issue #47 J-01 product delta is limited to the exact preload-key assertion, which executes before `review` and therefore passed in the failing Hosted run.
 - Source inspection found that the initial review renderer is constructed synchronously after its preparation IPC completes, while the only asynchronous review mutation—degradation acceptance—already has a bounded wait. The runner's `review` marker instead remained active across review-contract assertions, acceptance, the commit click, and durable completion, and was reused by multiple clean setup imports. Existing evidence therefore does not identify a product defect or justify a speculative product/timeout change.
 - The permanent J-01 runner and controller now admit payload-safe `review-contract`, `review-acceptance`, `commit`, and `completion` markers for the prior default `review` path. Existing continuity and interruption scenario markers remain unchanged. Build and the targeted J-01 diagnostic pass locally.
+- Exact diagnostic head `ab0ed6d90eda2bad19769f6fc16dbde66dec47f7` passed the pinned Windows 11 x64 `doctor` → `bootstrap` → `build` → `e2e:all` sequence with Node 24.18.1, pnpm 11.24.0, and Electron 43.4.1. J-01/J-02/J-08/J-12/J-15/J-03 all passed with `LOCAL_COMPLETION/all/pass`.
+- Cleanup left zero newly created Journey roots, zero owned Node/Electron processes, and zero non-dependency reparse points. Older unrelated temporary roots were not modified.
 
 ## What's next
 
-- Run the pinned exact-head Windows `doctor` → `bootstrap` → `build` → `e2e:all` sequence, record cleanup/residue evidence, and checkpoint the final routing state.
-- Commander then owns branch push, Draft PR #190 update, review/Ready handling, and any paired Hosted Gate rerun. Only a new safe marker from that rerun can distinguish a macOS product failure from a transient timing/test incident.
+- Commander owns branch push, Draft PR #190 update, review/Ready handling, and any paired Hosted Gate rerun. Only a new safe marker from that rerun can distinguish a macOS product failure from a transient timing/test incident.
 
 ## Key decisions
 
@@ -27,5 +28,5 @@
 ## Safe Resume Prompt
 
 ```text
-Commander: after the Worker reports final exact-head local validation, push the Issue #47 branch and rerun the paired Hosted Gate. Classify any macOS recurrence only from the new payload-safe J-01 review-contract/review-acceptance/commit/completion marker; do not infer payload details, broaden product behavior, or enter Provider/secret/session/scheduler/egress/model/Effect paths.
+Commander: receive Issue #47 from locally validated diagnostic head ab0ed6d90eda2bad19769f6fc16dbde66dec47f7 plus its final routing-doc commit, push the branch, and rerun the paired Hosted Gate. Classify any macOS recurrence only from the new payload-safe J-01 review-contract/review-acceptance/commit/completion marker; do not infer payload details, broaden product behavior, or enter Provider/secret/session/scheduler/egress/model/Effect paths.
 ```
