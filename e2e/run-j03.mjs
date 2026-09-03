@@ -801,6 +801,31 @@ async function main() {
     requireJourney(repeatedAuthorization?.authorization?.authorizationId === authorized.authorization.authorizationId && repeatedAuthorization?.runRecord?.runRecordId === authorized.runRecord.runRecordId, 'authorization-idempotent');
     cancellation.throwIfRequested();
 
+    at('foreground-boundary-check');
+    await assertRenderer(renderer, `document.querySelector('[data-task-authorization-action="inspect-foreground-boundary"]')?.textContent==='核对前台执行边界（不派发）'`, 'foreground-boundary-action-visible');
+    await click(renderer, '核对前台执行边界（不派发）', 'foreground-boundary-click');
+    await waitFor(renderer, `document.querySelector('[data-foreground-execution-state="blocked-before-dispatch"]')?.textContent.includes('前台执行已拒绝 · 未启动')`, 'foreground-boundary-blocked');
+    await assertRenderer(renderer, `(() => { const result=document.querySelector('[data-foreground-execution-state="blocked-before-dispatch"]'); return result?.textContent.includes('record-only-no-dispatch') && result.textContent.includes('development-ci · Provider Processing v1 · 0 次实时传输') && result.textContent.includes('生产或录制尝试必须创建新 Plan Envelope 并重新记录 Run Authorization'); })()`, 'foreground-boundary-visible-reasons');
+
+    const blockedBoundary = await renderer.evaluate(`window.ai7.inspectForegroundExecutionBoundary({runRecordId:${JSON.stringify(authorized.runRecord.runRecordId)},bookId:${JSON.stringify(crossBookId)}})`);
+    requireJourney(blockedBoundary?.state === 'blocked-before-dispatch' && blockedBoundary?.terminalLabel === '前台执行已拒绝 · 未启动' &&
+      blockedBoundary?.bookId === imported.bookId && blockedBoundary?.taskIntentId === authorized.taskIntent.taskIntentId &&
+      blockedBoundary?.planEnvelopeDigest === authorized.planEnvelope.digest && blockedBoundary?.authorizationId === authorized.authorization.authorizationId &&
+      blockedBoundary?.runRecordId === authorized.runRecord.runRecordId && blockedBoundary?.runAuthority === 'record-only-no-dispatch' &&
+      blockedBoundary?.launchPolicy?.integrityState === 'verified' && blockedBoundary?.launchPolicy?.operationalScope === 'development-ci' &&
+      blockedBoundary?.launchPolicy?.providerProcessing?.version === 'v1' && blockedBoundary?.launchPolicy?.providerProcessing?.decision === 'deny' &&
+      blockedBoundary?.launchPolicy?.providerProcessing?.authorizedLiveTransmissionCount === 0 &&
+      blockedBoundary?.launchPolicy?.providerProcessing?.liveTransmissionAllowed === false &&
+      blockedBoundary?.requiresNewPlanEnvelope === true && blockedBoundary?.requiresRenewedRunAuthorization === true &&
+      JSON.stringify(blockedBoundary?.reasons) === JSON.stringify([
+        '现有 Run 权限仅为 record-only-no-dispatch，不能派发。',
+        '当前可信启动范围为 development-ci，Provider Processing v1 允许 0 次实时传输。',
+        '生产或录制尝试必须创建新 Plan Envelope 并重新记录 Run Authorization。',
+      ]), 'foreground-boundary-exact-denial');
+    const afterBoundary = await renderer.evaluate(`window.ai7.inspectTaskAuthorization()`);
+    requireJourney(JSON.stringify(afterBoundary) === JSON.stringify(authorized), 'foreground-boundary-read-only');
+    cancellation.throwIfRequested();
+
     at('post-authorization-edit');
     await saveEditorSuffix(renderer, '，J-03 授权后继续编辑', 2, cancellation);
     await waitFor(renderer, `document.querySelector('.task-authorization-card')?.dataset.taskAuthorizationState==='authorized'`, 'post-edit-record');
@@ -809,6 +834,7 @@ async function main() {
       afterEdit?.checkpoint?.revisionDigest === authorized.checkpoint.revisionDigest &&
       afterEdit?.authorization?.authorizationId === authorized.authorization.authorizationId &&
       afterEdit?.runRecord?.runRecordId === authorized.runRecord.runRecordId, 'post-edit-immutable');
+    await assertRenderer(renderer, `document.querySelector('[data-task-authorization-action="inspect-foreground-boundary"]')?.textContent==='核对前台执行边界（不派发）'`, 'post-edit-foreground-boundary-visible');
     cancellation.throwIfRequested();
 
     at('restart-immutable');
@@ -824,10 +850,19 @@ async function main() {
       restarted?.authorization?.authorizationId === authorized.authorization.authorizationId &&
       restarted?.runRecord?.runRecordId === authorized.runRecord.runRecordId && restarted?.runRecord?.dispatched === false,
     'restart-record-immutable');
+    await click(renderer, '核对前台执行边界（不派发）', 'restart-foreground-boundary-click');
+    await waitFor(renderer, `document.querySelector('[data-foreground-execution-state="blocked-before-dispatch"]')?.textContent.includes('前台执行已拒绝 · 未启动')`, 'restart-foreground-boundary-blocked');
+    const restartedBoundary = await renderer.evaluate(`window.ai7.inspectForegroundExecutionBoundary({runRecordId:${JSON.stringify(authorized.runRecord.runRecordId)}})`);
+    requireJourney(restartedBoundary?.bookId === blockedBoundary.bookId && restartedBoundary?.taskIntentId === blockedBoundary.taskIntentId &&
+      restartedBoundary?.planEnvelopeDigest === blockedBoundary.planEnvelopeDigest && restartedBoundary?.authorizationId === blockedBoundary.authorizationId &&
+      restartedBoundary?.runRecordId === blockedBoundary.runRecordId && restartedBoundary?.state === blockedBoundary.state &&
+      JSON.stringify(restartedBoundary?.reasons) === JSON.stringify(blockedBoundary.reasons),
+    'restart-foreground-boundary-immutable');
 
     at('zero-activity');
     await assertRenderer(renderer, `document.querySelector('[data-task-authorization-terminal="recorded-not-dispatched"]')?.textContent==='已记录授权 · 未派发' &&
-      !document.querySelector('.task-authorization-card button') &&
+      document.querySelector('[data-foreground-execution-state="blocked-before-dispatch"]')?.textContent.includes('前台执行已拒绝 · 未启动') &&
+      !Array.from(document.querySelectorAll('.task-authorization-card button')).some((button)=>button.dataset.taskAuthorizationAction!=='inspect-foreground-boundary') &&
       !Object.keys(window.ai7).some((key)=>/provider|session|scheduler|payload|egress/i.test(key))`, 'no-execution-surface');
     requireJourney(loopback.healthy() && loopback.observedRequests() === 0, 'zero-network-provider-session');
   } finally {
