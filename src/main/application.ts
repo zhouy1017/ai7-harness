@@ -1730,6 +1730,26 @@ function registerRendererHandlers(
     }),
   );
   ipcMain.handle(
+    IPC_CHANNELS.inspectForegroundExecutionBoundary,
+    (event, input: Omit<ServiceOperationMap['inspectForegroundExecutionBoundary']['input'], 'bookId'>) =>
+      envelope(async () => {
+        const owned = requireSender(event);
+        requireAuthority();
+        const route = requireCurrentBookRoute(owned);
+        const routeGeneration = owned.routeGeneration;
+        const routeRequestSequence = owned.routeRequestSequence;
+        const result = await service.call('inspectForegroundExecutionBoundary', {
+          bookId: route.bookId,
+          runRecordId: input.runRecordId,
+        });
+        requireCurrentRouteReadEpoch(owned, routeGeneration, routeRequestSequence);
+        if (result.bookId !== route.bookId || result.runRecordId !== input.runRecordId) {
+          throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '前台执行边界核对结果不属于当前图书或运行。');
+        }
+        return result;
+      }),
+  );
+  ipcMain.handle(
     IPC_CHANNELS.prepareTaskAuthorization,
     (event, input: Omit<ServiceOperationMap['prepareTaskAuthorization']['input'], 'bookId'>) =>
       envelope(async () => {

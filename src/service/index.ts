@@ -238,6 +238,17 @@ async function dispatch(
         op: request.op,
         result: store.inspectTaskAuthorization(request.input.bookId),
       };
+    case 'inspectForegroundExecutionBoundary':
+      return {
+        id: request.id,
+        ok: true,
+        op: request.op,
+        result: store.inspectForegroundExecutionBoundary(
+          request.input.bookId,
+          request.input.runRecordId,
+          launchPolicy,
+        ),
+      };
     case 'prepareTaskAuthorization':
       return {
         id: request.id,

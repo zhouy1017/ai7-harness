@@ -245,6 +245,14 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       }
       break;
     }
+    case 'inspectForegroundExecutionBoundary': {
+      const input = requireInput(value.input, ['bookId', 'runRecordId'], tentativeId);
+      if (!isBoundedString(input.bookId, 36) || !UUID_PATTERN.test(input.bookId) ||
+          !isBoundedString(input.runRecordId, 36) || !UUID_PATTERN.test(input.runRecordId)) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
     case 'prepareTaskAuthorization': {
       const input = requireInput(value.input, ['bookId', 'goal'], tentativeId);
       if (!isBoundedString(input.bookId, 36) || !UUID_PATTERN.test(input.bookId) || input.goal !== J03_TASK_GOAL) {

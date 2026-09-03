@@ -7,6 +7,7 @@ import type {
   FidelityCategoryProjection,
   ContinueImportProjection,
   EditorialWorkspaceProfileProjection,
+  ForegroundExecutionBoundaryProjection,
   ImportCommitProjection,
   ImportDraftRecoveryProjection,
   ImportStartupProjection,
@@ -1436,6 +1437,29 @@ function renderBookOverview(
   }
 }
 
+function renderForegroundExecutionBoundary(
+  host: HTMLElement,
+  projection: ForegroundExecutionBoundaryProjection,
+): void {
+  const result = element('section', 'attention-note task-foreground-execution-boundary');
+  result.dataset['foregroundExecutionState'] = projection.state;
+  const lineage = element('dl', 'task-authorization-facts');
+  lineage.append(
+    element('dt', undefined, '图书'), element('dd', 'technical-identity', projection.bookId),
+    element('dt', undefined, 'Task Intent'), element('dd', 'technical-identity', projection.taskIntentId),
+    element('dt', undefined, 'Plan Envelope'), element('dd', 'technical-identity', projection.planEnvelopeDigest),
+    element('dt', undefined, 'Run Authorization'), element('dd', 'technical-identity', projection.authorizationId),
+    element('dt', undefined, 'Run Record'), element('dd', 'technical-identity', projection.runRecordId),
+    element('dt', undefined, 'Run 权限'), element('dd', undefined, projection.runAuthority),
+    element('dt', undefined, '当前可信策略'),
+    element('dd', undefined, `${projection.launchPolicy.operationalScope} · Provider Processing ${projection.launchPolicy.providerProcessing.version} · ${projection.launchPolicy.providerProcessing.authorizedLiveTransmissionCount} 次实时传输`),
+  );
+  const reasons = element('ul', 'task-authorization-non-effects');
+  for (const reason of projection.reasons) reasons.append(element('li', undefined, reason));
+  result.append(element('h4', undefined, projection.terminalLabel), lineage, reasons);
+  host.replaceChildren(result);
+}
+
 function renderTaskAuthorization(host: HTMLElement, projection: TaskAuthorizationProjection): void {
   const card = element('section', 'task-authorization-card');
   card.dataset['taskAuthorizationState'] = projection.state;
@@ -1576,11 +1600,34 @@ function renderTaskAuthorization(host: HTMLElement, projection: TaskAuthorizatio
       actions.append(authorize);
       card.append(actions);
     }
-    if (projection.runRecord) {
-      const terminal = element('p', 'success-note task-authorization-terminal', projection.runRecord.terminalLabel);
-      terminal.dataset['taskAuthorizationTerminal'] = projection.runRecord.state;
-      terminal.dataset['runRecordId'] = projection.runRecord.runRecordId;
+    const runRecord = projection.runRecord;
+    if (runRecord) {
+      const terminal = element('p', 'success-note task-authorization-terminal', runRecord.terminalLabel);
+      terminal.dataset['taskAuthorizationTerminal'] = runRecord.state;
+      terminal.dataset['runRecordId'] = runRecord.runRecordId;
       card.append(terminal);
+      const actions = element('div', 'button-row task-authorization-actions');
+      const boundaryHost = element('div');
+      boundaryHost.setAttribute('aria-live', 'polite');
+      const inspectBoundary = button('核对前台执行边界（不派发）', 'secondary', async () => {
+        inspectBoundary.disabled = true;
+        setStatus('正在核对前台执行边界…', 'busy');
+        try {
+          const boundary = await window.ai7.inspectForegroundExecutionBoundary({ runRecordId: runRecord.runRecordId });
+          if (host.isConnected && boundary.bookId === host.dataset['taskAuthorizationBookId'] &&
+              boundary.runRecordId === runRecord.runRecordId) {
+            renderForegroundExecutionBoundary(boundaryHost, boundary);
+            setStatus(boundary.terminalLabel);
+          }
+        } catch (error) {
+          setStatus(rendererErrorMessage(error, '无法核对前台执行边界。'), 'error');
+        } finally {
+          if (inspectBoundary.isConnected) inspectBoundary.disabled = false;
+        }
+      });
+      inspectBoundary.dataset['taskAuthorizationAction'] = 'inspect-foreground-boundary';
+      actions.append(inspectBoundary);
+      card.append(actions, boundaryHost);
     }
   }
   host.replaceChildren(card);

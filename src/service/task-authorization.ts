@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
 import {
   J03_TASK_GOAL,
+  type ForegroundExecutionBoundaryProjection,
   type LaunchPolicyProjection,
   type TaskAuthorizationProjection,
 } from '../shared/protocol.js';
@@ -23,6 +24,11 @@ const NON_EFFECTS = [
   '不构造 Provider payload',
   '不访问网络或调用 Provider',
   '不创建或执行 Effect',
+] as const;
+const FOREGROUND_DENIAL_REASONS = [
+  '现有 Run 权限仅为 record-only-no-dispatch，不能派发。',
+  '当前可信启动范围为 development-ci，Provider Processing v1 允许 0 次实时传输。',
+  '生产或录制尝试必须创建新 Plan Envelope 并重新记录 Run Authorization。',
 ] as const;
 
 type SqlRow = Record<string, SQLOutputValue>;
@@ -559,6 +565,43 @@ export class TaskAuthorizationStore {
       },
       actions: { canPrepare: false, canAuthorize: authorization === undefined },
       namedNonEffects: NON_EFFECTS,
+    };
+  }
+
+  inspectForegroundExecutionBoundary(
+    bookId: string,
+    runRecordId: string,
+    launchPolicy: LaunchPolicyProjection,
+  ): ForegroundExecutionBoundaryProjection {
+    requireTask(UUID_PATTERN.test(bookId) && UUID_PATTERN.test(runRecordId),
+      'TASK_FOREGROUND_BOUNDARY_INVALID', '前台执行边界核对参数无效。');
+    this.#requireDeniedPolicy(launchPolicy);
+    validateStoredCanonicalRows(this.#db);
+    const recorded = this.inspect(bookId);
+    requireTask(recorded.state === 'authorized' && recorded.taskIntent !== null && recorded.checkpoint !== null &&
+      recorded.manuscriptPin?.bookId === bookId && recorded.runSourceScope?.bookId === bookId &&
+      recorded.artifactPin !== null && recorded.providerResolutionPlan?.providerProcessing.operationalScope === 'development-ci' &&
+      recorded.providerResolutionPlan.providerProcessing.version === 'v1' &&
+      recorded.providerResolutionPlan.providerProcessing.decision === 'deny' &&
+      recorded.providerResolutionPlan.providerProcessing.authorizedLiveTransmissionCount === 0 &&
+      recorded.executionPlan !== null && recorded.planEnvelope?.dispatchAllowed === false &&
+      recorded.authorization?.planEnvelopeDigest === recorded.planEnvelope.digest &&
+      recorded.runRecord?.runRecordId === runRecordId && recorded.runRecord.state === 'recorded-not-dispatched' &&
+      recorded.runRecord.dispatched === false,
+    'TASK_FOREGROUND_BOUNDARY_UNAVAILABLE', '仅可核对当前图书中已记录且未派发的运行。');
+    return {
+      bookId,
+      taskIntentId: recorded.taskIntent.taskIntentId,
+      planEnvelopeDigest: recorded.planEnvelope.digest,
+      authorizationId: recorded.authorization.authorizationId,
+      runRecordId: recorded.runRecord.runRecordId,
+      state: 'blocked-before-dispatch',
+      terminalLabel: '前台执行已拒绝 · 未启动',
+      runAuthority: 'record-only-no-dispatch',
+      launchPolicy: structuredClone(launchPolicy),
+      requiresNewPlanEnvelope: true,
+      requiresRenewedRunAuthorization: true,
+      reasons: FOREGROUND_DENIAL_REASONS,
     };
   }
 

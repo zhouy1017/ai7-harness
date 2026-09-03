@@ -1,4 +1,4 @@
-export const SERVICE_PROTOCOL_VERSION = 15 as const;
+export const SERVICE_PROTOCOL_VERSION = 16 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -42,6 +42,7 @@ export const IPC_CHANNELS = {
   installEditorialWorkspaceProfile: 'ai7:j15:install-editorial-workspace-profile',
   enableEditorialWorkspaceProfile: 'ai7:j15:enable-editorial-workspace-profile',
   inspectTaskAuthorization: 'ai7:j03:inspect-task-authorization',
+  inspectForegroundExecutionBoundary: 'ai7:j03:inspect-foreground-execution-boundary',
   prepareTaskAuthorization: 'ai7:j03:prepare-task-authorization',
   authorizeTaskAuthorization: 'ai7:j03:authorize-task-authorization',
   listBooks: 'ai7:j01:list-books',
@@ -1011,6 +1012,25 @@ export interface TaskAuthorizationProjection {
   ];
 }
 
+export interface ForegroundExecutionBoundaryProjection {
+  bookId: string;
+  taskIntentId: string;
+  planEnvelopeDigest: string;
+  authorizationId: string;
+  runRecordId: string;
+  state: 'blocked-before-dispatch';
+  terminalLabel: '前台执行已拒绝 · 未启动';
+  runAuthority: 'record-only-no-dispatch';
+  launchPolicy: LaunchPolicyProjection;
+  requiresNewPlanEnvelope: true;
+  requiresRenewedRunAuthorization: true;
+  reasons: readonly [
+    '现有 Run 权限仅为 record-only-no-dispatch，不能派发。',
+    '当前可信启动范围为 development-ci，Provider Processing v1 允许 0 次实时传输。',
+    '生产或录制尝试必须创建新 Plan Envelope 并重新记录 Run Authorization。'
+  ];
+}
+
 export interface HistoricalRevisionProjection {
   mode: 'historical-revision';
   readOnly: true;
@@ -1572,6 +1592,10 @@ export interface ServiceOperationMap {
     input: { bookId: string };
     output: TaskAuthorizationProjection;
   };
+  inspectForegroundExecutionBoundary: {
+    input: { bookId: string; runRecordId: string };
+    output: ForegroundExecutionBoundaryProjection;
+  };
   prepareTaskAuthorization: {
     input: { bookId: string; goal: typeof J03_TASK_GOAL };
     output: ServiceJobProjection;
@@ -1795,6 +1819,10 @@ export interface RendererApi {
   installEditorialWorkspaceProfile(): Promise<EditorialWorkspaceProfileProjection>;
   enableEditorialWorkspaceProfile(): Promise<EditorialWorkspaceProfileProjection>;
   inspectTaskAuthorization(): Promise<TaskAuthorizationProjection>;
+  inspectForegroundExecutionBoundary(input: Omit<
+    ServiceOperationMap['inspectForegroundExecutionBoundary']['input'],
+    'bookId'
+  >): Promise<ForegroundExecutionBoundaryProjection>;
   prepareTaskAuthorization(input: { goal: typeof J03_TASK_GOAL }): Promise<ServiceJobProjection>;
   authorizeTaskAuthorization(input: {
     taskIntentId: string;
