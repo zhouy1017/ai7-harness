@@ -2204,6 +2204,7 @@ export async function runApplication(): Promise<void> {
     await requireSameCanonicalDataDirectory(shellRoot, app.getPath('userData'));
     startupLocation = 'single-instance';
     if (!app.requestSingleInstanceLock()) {
+      process.stderr.write('AI7_STARTUP_FAILED/single-instance-lock\n');
       await stop();
       app.exit(0);
       return;
