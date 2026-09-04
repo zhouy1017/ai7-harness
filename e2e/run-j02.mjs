@@ -28,6 +28,7 @@ const RECOVERY_OBJECT_PATTERN = /^[0-9a-f]{64}\.snapshot$/;
 const DEBUG_SELECTORS = new Set(['DEBUG', 'DEBUG_FILE', 'PWDEBUG', 'PWDEBUGIMPL']);
 const CJK_BASE = 0x4e00;
 const CJK_SPAN = 0x1000;
+const RENDERER_TARGET_DISCONNECT_SETTLE_MS = 250;
 const STARTUP_FAILURE_MARKERS = Object.freeze([
   Object.freeze(['AI7_STARTUP_FAILED/runtime', 'launch-restart-renderer-target-query-startup-runtime']),
   Object.freeze(['AI7_STARTUP_FAILED/arguments', 'launch-restart-renderer-target-query-startup-arguments']),
@@ -169,6 +170,38 @@ async function createSyntheticDocx(path) {
   requireJourney(metadata.isFile() && !metadata.isSymbolicLink() && metadata.size > CHARACTER_COUNT, 'fixture-file');
 }
 
+// `browser.newBrowserCDPSession()` yields a child CDP session. Playwright's connection
+// close disposes only the root session, so a request that is still in flight when the
+// product process exits is never rejected and the caller waits forever. Bound it on the
+// browser's own `disconnected` event, after a short grace period that lets a real
+// protocol rejection win whenever Playwright still produces one, so the restart loop
+// reaches its existing classification instead of hanging.
+function settleOnBrowserDisconnect(browser, request) {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    let armed = false;
+    let graceTimer;
+    const finish = (settle, value) => {
+      if (settled) return;
+      settled = true;
+      browser.off('disconnected', observeDisconnect);
+      if (graceTimer !== undefined) clearTimeout(graceTimer);
+      settle(value);
+    };
+    function observeDisconnect() {
+      if (armed || settled) return;
+      armed = true;
+      graceTimer = setTimeout(
+        () => finish(reject, new Error('renderer-target query abandoned after the browser disconnected')),
+        RENDERER_TARGET_DISCONNECT_SETTLE_MS,
+      );
+    }
+    request.then((value) => finish(resolve, value), (error) => finish(reject, error));
+    browser.on('disconnected', observeDisconnect);
+    if (!browser.isConnected()) observeDisconnect();
+  });
+}
+
 async function attachRendererTarget(browser, launchScenario) {
   at(`launch-${launchScenario}-renderer-cdp-session`);
   const rootSession = await browser.newBrowserCDPSession();
@@ -182,7 +215,7 @@ async function attachRendererTarget(browser, launchScenario) {
       const observeSessionClose = () => { sessionClosed = true; };
       rootSession.once('close', observeSessionClose);
       try {
-        ({ targetInfos } = await rootSession.send('Target.getTargets'));
+        ({ targetInfos } = await settleOnBrowserDisconnect(browser, rootSession.send('Target.getTargets')));
       } catch (error) {
         const startupLocations = new Set(
           error instanceof Error
