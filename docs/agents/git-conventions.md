@@ -1,6 +1,6 @@
 # Git conventions
 
-Binding for every agent and every human working in this repository. These rules keep every Issue-bound Codex Task uniform.
+Binding for every agent and every human working in this repository. These rules keep every Issue-bound Task Session uniform.
 
 ## Branches
 
@@ -22,7 +22,7 @@ docs/17-glossary-collision-guard
 - `<issue>` is the GitHub issue number. GitHub Issues is the canonical tracker, so work without an issue is work nobody can find later.
 - `<slug>` is two to five lowercase words, hyphen-separated, describing the outcome rather than the method.
 
-One Issue, one branch, one pull request, and one writable Worker. Every Worker attempt runs in a fresh Codex Task Session under the verified Issue/Launch Receipt identity defined by Repository Development Dispatch.
+One Issue, one branch, one pull request, and one writable Worker. Every Worker attempt runs in a fresh Claude Code Task Session under the verified Issue/Launch Receipt identity defined by Repository Development Dispatch.
 
 Before work is labeled `ready-for-agent` or dispatched, the Issue contains the applicable [Change Brief](change-brief.md). Mechanical T1 work may use the short form; every non-mechanical change uses the full authority, reuse, structural-budget, non-goal, consequence, and stop-condition form. A Worker never enlarges that brief itself.
 
@@ -43,7 +43,7 @@ Conventional Commits: `type(scope): subject`.
 
 Subject in the imperative, lowercase, no trailing period, under 72 characters. The body explains **why**, not what — the diff already shows what. State rejected alternatives when a choice was contested, and name any accepted decision the change implements or revises.
 
-Agent-authored commits carry the stable product-level trailer `Co-authored-by: OpenAI Codex <codex@openai.com>`. Task class, requested binding, launch acceptance, and inferred execution binding belong only in Issue receipts; a commit trailer never claims effective runtime-model attestation.
+Agent-authored commits carry the stable product-level trailer `Co-Authored-By: Claude <noreply@anthropic.com>`. Task class, requested binding, launch acceptance, and inferred execution binding belong only in Issue receipts; a commit trailer never names a model or claims effective runtime-model attestation.
 
 ## Pull requests
 
@@ -54,7 +54,7 @@ Pull requests open as Draft and remain Draft during authoring, debugging, review
 - Body records only the Change Brief closure delta: planned versus actual structure, existing implementation reused, any new owner/dependency and why, journey/bug outcome or `N/A` for non-behavior work, migration/cleanup, unresolved matters, and archive-sweep result when a lifecycle node was triggered.
 - For an implementation change affecting a supported Journey or observed-bug outcome, Local completion precedes Ready and the one logical E2E Functional Gate passes the same applicable Journey IDs on Windows and macOS. Before the exact Initial v1.0.0 Development Milestone Boundary, fresh exact-head Windows `doctor` → `bootstrap` → `build` → `e2e:all` remains required before Ready; while the restored workflow is active, its paired Hosted Gate must then succeed before merge. During an exact ADR 0053 degraded interval only, [ADR 0054](../adr/0054-defer-macos-evidence-until-after-initial-v1-0-0-development-milestone.md) permits the Windows-only route with truthful macOS deferral. A required product/bootstrap/build/Journey failure or unknown returns the pull request to Draft.
 - Documentation-only and design-only changes do not create automated proof work. Lint, type-check, format, build, package, signing, release, same-SHA, or formal-review checks are not additional required pull-request gates.
-- Independent review is optional and advisory. When review is requested, the Commander directly launches a fresh top-level, strictly read-only, non-author Reviewer Task at the immutable completed authoring commit recorded as `reviewed_head`; a Reviewer may not dispatch, delegate to, or spawn another agent. Record the reviewed task class and use that class's fixed Codex binding.
+- Independent review is optional and advisory. When review is requested, the Commander directly launches a fresh top-level, strictly read-only, non-author Reviewer Task at the immutable completed authoring commit recorded as `reviewed_head`; a Reviewer may not dispatch, delegate to, or spawn another agent. Record the reviewed task class and use that class's fixed Claude Code binding.
 - The Reviewer Launch and Return Receipts record the same `reviewed_head`. The Return Receipt also records the requested and launch-accepted binding, reviewed class, `class_match`, independence, runtime model event, and reported execution binding explicitly labeled as inference rather than proof. Evaluate `class_match` only from the requested/launch-accepted binding plus runtime event; self-report never satisfies it, and `rerouted` or `mismatch` stops the attempt. The Reviewer binding stays in its own receipts, not the main Worker binding block. A verdict must not become a pull-request (PR), CI, branch, exact-head, zero-finding, iterative re-review, or other proof gate.
 - **Only the Commander merges.** Workers and Reviewers never do.
 

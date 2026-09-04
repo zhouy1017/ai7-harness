@@ -97,4 +97,4 @@ When a Change Brief explicitly makes a root-router transition part of one atomic
 
 No parallel `MEMORY.md`, duplicate progress ledger, or archive-derived current-state summary is created.
 
-Codex Task retention is separate. The Commander keeps completed Worker/Reviewer Tasks visible through Issue merge, close, or abandonment, leaves `needs-commander` visible, and immediately archives a `cancelled` or `superseded` Task after its Return Receipt. See the [Dispatch Register](dispatch-register.md); Task archival creates no `docs/archive/` node.
+Task Session retention is separate. The Commander keeps completed Worker/Reviewer Task Sessions visible through Issue merge, close, or abandonment, leaves `needs-commander` visible, and immediately archives a `cancelled` or `superseded` Task Session after its Return Receipt. See the [Dispatch Register](dispatch-register.md); session archival creates no `docs/archive/` node.
