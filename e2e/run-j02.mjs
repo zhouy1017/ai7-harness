@@ -762,9 +762,10 @@ async function runWorkspaceJourney(renderer, dataRoot) {
   at('cooperative-search-close');
   await waitFor(renderer, `Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '取消当前操作')?.hidden`, 'stale-search-closed');
 
-  at('authoritative-mutation-drain');
   const dirtyHistoryObservation = await renderer.observeIpc();
+  at('authoritative-mutation-dirty-edit');
   await editThenInvokeOnDirty(renderer, '稳', ['保存当前编辑', '撤销'], 'dirty-saving-undo-start');
+  at('authoritative-mutation-drain-state');
   await waitForChecks(
     renderer,
     `(() => { const editor = document.querySelector('[data-testid="manuscript-editor"]'); const host = editor?.parentElement; const journal = Array.from(document.querySelectorAll('.editor-meta > span')).find((item) => item.textContent?.startsWith('修订日志序号 ')); const undo = Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '撤销'); const retry = Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '重试权威刷新'); return { journalSequence5: journal?.textContent === '修订日志序号 5', operationUnlocked: editor?.dataset.operationLocked === 'false', editorWritable: editor?.getAttribute('contenteditable') === 'true', ariaWritable: editor?.getAttribute('aria-readonly') === 'false', continuityResolved: editor instanceof HTMLElement && !editor.hasAttribute('tabindex'), authoritativeMutationCleared: host?.dataset.authoritativeMutation === 'false', authoritativeStartCleared: undo instanceof HTMLButtonElement && !undo.disabled, recoveryNotRequired: retry instanceof HTMLButtonElement && retry.hidden }; })()`,
@@ -775,6 +776,7 @@ async function runWorkspaceJourney(renderer, dataRoot) {
   const dirtyHistoryEvents = dirtyHistoryCompleted.events.filter((event) => event.ordinal > (dirtyHistoryObservation.events.at(-1)?.ordinal ?? 0));
   const dirtyFlushInvoke = dirtyHistoryEvents.find((event) => event.operation === 'flushJournalEdit' && event.phase === 'invoke');
   const dirtyUndoInvoke = dirtyHistoryEvents.find((event) => event.operation === 'undoManuscript' && event.phase === 'invoke');
+  at('authoritative-mutation-ipc-order');
   requireJourney(
     (dirtyHistoryCompleted.counts.flushJournalEdit ?? 0) - (dirtyHistoryObservation.counts.flushJournalEdit ?? 0) === 1 &&
       (dirtyHistoryCompleted.counts.undoManuscript ?? 0) - (dirtyHistoryObservation.counts.undoManuscript ?? 0) === 1 &&
