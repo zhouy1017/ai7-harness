@@ -15,12 +15,13 @@ Brief revision: <positive integer>
 
 - Role: Worker
 - Task class: T1 | T2 | T3
-- Requested binding: `<model> @ <reasoning effort>`
+- Requested binding (codex): `<model> @ <reasoning effort>`
+- Requested binding (claude-code): `<model> @ <reasoning effort>`
 ```
 
-The requested binding is the fixed class binding in [Repository Development Dispatch](../../kick-in/27-repository-development-dispatch.md). A Reviewer's binding belongs in that Reviewer's own Launch/Return Receipts, not in this main Worker block. The Commander computes `issue_body_sha256` over the exact UTF-8 bytes of the GitHub API `body` string, without a CLI-added newline.
+Each requested-binding line is that harness's fixed class binding in [Repository Development Dispatch](../../kick-in/27-repository-development-dispatch.md). The launching Commander's harness selects which line becomes the attempt's `requested_binding`; a body carrying only one legacy `Requested binding:` line binds only the harness of that model family, and adding the other line is a material revision. A Reviewer's binding belongs in that Reviewer's own Launch/Return Receipts, not in this main Worker block. The Commander computes `issue_body_sha256` over the exact UTF-8 bytes of the GitHub API `body` string, without a CLI-added newline.
 
-Before launch, increment `Brief revision` when a body edit changes role, class, binding, outcome, authority, exact base/target, branch/worktree ownership, structural budget, non-goals, stop conditions, validation, or reporting/external-action boundaries. An editorial-only pre-launch edit may keep the revision if the contract is unchanged, but its hash must be recomputed. The session-creation request freezes the expected revision/hash; any later body-byte change prevents or invalidates that attempt. After a Launch Receipt, even an editorial-only body change requires an incremented revision, new attempt, and fresh Task Session. Comments, labels, and assignments outside the body do not restart an attempt.
+Before launch, increment `Brief revision` when a body edit changes role, class, either binding, outcome, authority, exact base/target, branch/worktree ownership, structural budget, non-goals, stop conditions, validation, or reporting/external-action boundaries. An editorial-only pre-launch edit may keep the revision if the contract is unchanged, but its hash must be recomputed. The session-creation request freezes the expected revision/hash; any later body-byte change prevents or invalidates that attempt. After a Launch Receipt, even an editorial-only body change requires an incremented revision, new attempt, and fresh Task Session. Comments, labels, and assignments outside the body do not restart an attempt.
 
 ## Short form — mechanical T1
 
@@ -97,11 +98,11 @@ The Issue body is the extraction. The Commander's first prompt to the new Task S
 
 - Issue URL and preallocated `dispatch_id`;
 - expected Brief revision and exact body hash;
-- role, task class, requested model/effort, and attempt;
+- harness, role, task class, requested model/effort, and attempt;
 - named branch, exact base and intended target, plus the immutable completed `reviewed_head` for a Reviewer; and
 - a no-write bootstrap-preflight instruction that reports the generated actual cwd/worktree and branch-or-detached state.
 
-The first prompt cannot name a session ID or the app-generated worktree branch that does not exist yet. A Worker starts at the exact integration base; a Reviewer starts at the immutable completed authoring commit recorded as `reviewed_head` while retaining the Issue's exact base/target context. After the first turn stops and the session metadata exists, the Commander verifies the reported model/effort and the generated clean checkout at that role-specific start, renames only a Worker worktree branch to the reserved Issue branch, posts the finalized Launch Receipt, and sends only its permalink. A Reviewer stays detached and read-only at `reviewed_head`. The Worker or Reviewer fetches and verifies the Issue plus receipt before controlled-file work. Do not send full transcripts, archive trees, unrelated design packages, the entire repository history, or a duplicated Change Brief. Follow the two-stage launch and attempt-identity rules in the dispatch owner.
+The first prompt cannot name a session or Task ID, an app-managed worktree path, or an app-generated branch that does not exist yet. A Worker starts at the exact integration base; a Reviewer starts at the immutable completed authoring commit recorded as `reviewed_head` while retaining the Issue's exact base/target context. After the first turn stops and the session identity exists, the Commander verifies the launch-accepted binding and the generated clean checkout at that role-specific start, attaches only a Worker checkout to the Issue branch by its harness's attach step, posts the finalized Launch Receipt, and sends only its permalink. A Reviewer stays detached and read-only at `reviewed_head`. The Worker or Reviewer fetches and verifies the Issue plus receipt before controlled-file work. Do not send full transcripts, archive trees, unrelated design packages, the entire repository history, or a duplicated Change Brief. Follow the two-stage launch and attempt-identity rules in the dispatch owner.
 
 Candidate journey IDs and candidate design packages retain their status. They may not be promoted merely to fill a Change Brief field.
 

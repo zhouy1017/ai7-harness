@@ -336,7 +336,7 @@ The inheritance audit resolved the definition owners for these terms. They remai
 Three collisions come from repository tooling rather than from Harness, and are recorded here because the words are nearly identical:
 
 - A **Repository Development Dispatch reviewer** produces a *review report* about a code branch. It is engineering tooling and carries no product authority. A **Review Decision** is a professional editorial judgment at a workflow gate, defined in the Editorial context. Never let one term stand for the other.
-- A repository-development **Task Session** is one fresh top-level Claude Code session, with its own worktree, carrying one `Issue + role + attempt`; it is not an AI7 Task, Run, Harness Session, DSH subagent, or product execution record.
+- A repository-development **Task Session** is one fresh top-level session of the Commander's harness (a Codex Task Session or a Claude Code desktop session), with its own worktree, carrying one `Issue + harness + role + attempt`; it is not an AI7 Task, Run, Harness Session, DSH subagent, or product execution record.
 - Repository-development `requested_binding`, `launch_accepted_binding`, `runtime_model_event`, and inferred `reported_execution_binding` are dispatch evidence. A **Model Role** declares product model requirements without choosing a provider, model, endpoint, or credential; Provider Preflight freezes product Provider bindings and the Approved Fallback Chain into the Plan Envelope. The two mechanisms share no authority, configuration, or code path.
 
 ## Simplified Chinese label discipline
