@@ -1,8 +1,10 @@
 ---
-status: accepted
+status: superseded
 ---
 
 # Dispatch repository work through Issue-bound Claude Code sessions
+
+This decision is superseded in full by [ADR 0061](./0061-route-repository-dispatch-by-commander-harness.md). Its Claude Code-only exclusivity is historical; its Claude Code route, bindings, session tooling, and schema-v2 receipt shape continue as the `claude-code` route under ADR 0061 beside the restored Codex route. The original body remains below unchanged as decision history.
 
 On 2026-09-04 the Owner moved repository development from Codex to Claude Code and replaced ADR 0059's Codex-only tooling with one Claude Code process. Every dispatch-eligible T1/T2/T3 Worker and every Reviewer starts in a fresh top-level Claude Code Task Session whose authority is frozen by one GitHub Issue and one verified Launch Receipt. The Commander/Worker/Reviewer authority split, one-Issue/branch/pull-request/single-writer rule, Issue-body hash, two-stage launch, no-fallback rule, bounded parallelism, serial integration, three state namespaces, validation lifecycle, and Commander-only integration/external-action boundary are inherited from ADR 0059 unchanged.
 

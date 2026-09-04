@@ -1,6 +1,6 @@
 # Decision Records
 
-Accepted and explicitly superseded system-wide decisions live under [`docs/adr/`](../../docs/adr/). The current root sequence contains 60 records, ADR 0001 through ADR 0060:
+Accepted and explicitly superseded system-wide decisions live under [`docs/adr/`](../../docs/adr/). The current root sequence contains 61 records, ADR 0001 through ADR 0061:
 
 - [ADR 0001: Version Editorial Dimension configuration at task start](../../docs/adr/0001-versioned-editorial-dimension-configuration.md)
 - [ADR 0002: Separate Book, Series, Cross-project, and House-learning scopes](../../docs/adr/0002-book-series-cross-project-and-house-learning-scopes.md)
@@ -61,7 +61,8 @@ Accepted and explicitly superseded system-wide decisions live under [`docs/adr/`
 - [ADR 0057: Restore the hosted Gate under observed Actions usage](../../docs/adr/0057-restore-hosted-gate-under-observed-actions-usage.md)
 - [ADR 0058: Remove Actions usage observation from development gating](../../docs/adr/0058-remove-actions-usage-observation-from-development-gating.md)
 - [ADR 0059: Historical Codex-only Issue-bound dispatch — superseded by ADR 0060](../../docs/adr/0059-dispatch-repository-work-through-issue-bound-codex-task-sessions.md)
-- [ADR 0060: Dispatch repository work through Issue-bound Claude Code sessions](../../docs/adr/0060-dispatch-repository-work-through-issue-bound-claude-code-sessions.md)
+- [ADR 0060: Historical Claude Code-only Issue-bound dispatch — superseded by ADR 0061](../../docs/adr/0060-dispatch-repository-work-through-issue-bound-claude-code-sessions.md)
+- [ADR 0061: Route repository dispatch by the Commander's harness](../../docs/adr/0061-route-repository-dispatch-by-commander-harness.md)
 
 Create a record here only when a choice is hard to reverse, surprising without context, and the result of a real trade-off. Use sequential names such as `0001-fresh-ai7-repository.md` and keep the record concise: what was decided, why, meaningful rejected alternatives, and any non-obvious consequence.
 

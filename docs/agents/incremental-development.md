@@ -4,7 +4,7 @@ This is the binding implementation and iteration loop. Its purpose is to add one
 
 ## 1. Admit one bounded outcome
 
-Work starts from one GitHub Issue, one branch, one pull request, and one writable Worker in a fresh top-level Claude Code Task Session. Product work states one user-visible outcome or one observed user-visible defect. Design, documentation, dependency, and repository-maintenance work states one exact decision, consumer, or repository-operational outcome. Layer-only activity such as “rewrite the service,” “modernize the editor,” “port all tests,” or “clean the architecture” is not an outcome.
+Work starts from one GitHub Issue, one branch, one pull request, and one writable Worker in a fresh top-level Task Session on the Commander's harness. Product work states one user-visible outcome or one observed user-visible defect. Design, documentation, dependency, and repository-maintenance work states one exact decision, consumer, or repository-operational outcome. Layer-only activity such as “rewrite the service,” “modernize the editor,” “port all tests,” or “clean the architecture” is not an outcome.
 
 Before dispatch, resolve design authority and action authorization. Ambiguous T0 work, an unaccepted candidate dependency, or a missing owner decision stays with the Commander/owner and is not dispatched. The Commander shapes and dispatches T1–T3 Issues but does not perform their controlled-file work inline. A Worker starts only after verifying its Issue body hash and finalized Launch Receipt.
 
