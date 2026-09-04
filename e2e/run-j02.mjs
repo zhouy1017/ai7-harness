@@ -4,7 +4,7 @@ import { once } from 'node:events';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { arch, platform, release, tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { installJourneyCancellationCleanup, reportJourneyFailure } from './controller.mjs';
+import { attachProductOutput, installJourneyCancellationCleanup, localDebugEnabled, reportJourneyFailure } from './controller.mjs';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const CHARACTER_COUNT = 10_000_000;
@@ -50,8 +50,11 @@ function at(location) {
   diagnosticLocation = location;
 }
 
-function requireJourney(condition, location) {
-  if (!condition) throw new Error(`J-02/${location}`);
+function requireJourney(condition, location, detail) {
+  if (condition) return;
+  const error = new Error(`J-02/${location}`);
+  if (detail !== undefined) error.detail = detail;
+  throw error;
 }
 
 function pathIsInside(parent, child) {
@@ -69,7 +72,7 @@ function parseJourney() {
       (platform() === 'darwin' && arch() === 'arm64' && Number(release().split('.')[0]) >= 24),
     'host-runtime',
   );
-  requireJourney(!Object.keys(process.env).some((name) => DEBUG_SELECTORS.has(name.toUpperCase())), 'debug-environment');
+  requireJourney(localDebugEnabled() || !Object.keys(process.env).some((name) => DEBUG_SELECTORS.has(name.toUpperCase())), 'debug-environment');
 }
 
 function productEnvironment(executable) {
@@ -264,7 +267,7 @@ async function attachRendererTarget(browser, launchScenario) {
   };
   const evaluate = async (expression) => {
     const response = await send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true });
-    requireJourney(!response.exceptionDetails, 'renderer-evaluate');
+    requireJourney(!response.exceptionDetails, 'renderer-evaluate', response.exceptionDetails);
     return response.result.value;
   };
   const observeIpc = async () => {
@@ -1040,6 +1043,7 @@ async function main() {
       cancellation.throwIfRequested();
       browserAcquisition = chromium.launch({ executablePath: executable, headless: false, ignoreDefaultArgs: true, args: productArgs, env: productEnvironment(executable), timeout: 60_000 });
       browser = await browserAcquisition;
+      attachProductOutput('J-02', browser, launchScenario);
       at(`launch-${launchScenario}-post-acquisition-cancellation`);
       cancellation.throwIfRequested();
       return attachRendererTarget(browser, launchScenario);
@@ -1065,4 +1069,4 @@ async function main() {
   }
 }
 
-main().catch(() => reportJourneyFailure('J-02', diagnosticLocation));
+main().catch((error) => reportJourneyFailure('J-02', diagnosticLocation, error));

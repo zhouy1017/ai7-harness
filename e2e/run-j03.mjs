@@ -6,7 +6,7 @@ import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep 
 import { createServer } from 'node:http';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { installJourneyCancellationCleanup, reportJourneyFailure } from './controller.mjs';
+import { attachProductOutput, installJourneyCancellationCleanup, localDebugEnabled, reportJourneyFailure } from './controller.mjs';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const SAMPLE1_PATH = resolve(ROOT, 'SampleBooks', 'sample1.docx');
@@ -27,7 +27,12 @@ let location = 'entry';
 let runnerLifecycleIncomplete = false;
 
 function at(next) { location = next; }
-function requireJourney(condition, name) { if (!condition) throw new Error(`J-03/${name}`); }
+function requireJourney(condition, name, detail) {
+  if (condition) return;
+  const error = new Error(`J-03/${name}`);
+  if (detail !== undefined) error.detail = detail;
+  throw error;
+}
 function inside(parent, child) {
   const relation = relative(parent, child);
   return relation === '' || (!relation.startsWith(`..${sep}`) && relation !== '..' && !isAbsolute(relation));
@@ -43,7 +48,7 @@ function parseJourney() {
       (platform() === 'darwin' && arch() === 'arm64' && Number(release().split('.')[0]) >= 24),
     'host-runtime',
   );
-  requireJourney(!Object.keys(process.env).some((name) => DEBUG_SELECTORS.has(name.toUpperCase())), 'debug-environment');
+  requireJourney(localDebugEnabled() || !Object.keys(process.env).some((name) => DEBUG_SELECTORS.has(name.toUpperCase())), 'debug-environment');
 }
 
 function productEnvironment(executable) {
@@ -629,6 +634,7 @@ async function main() {
       const acquisition = chromium.launch({ executablePath: executable, headless: false, ignoreDefaultArgs: true, args, env: productEnvironment(executable), timeout: 60_000 });
       browserAcquisition = acquisition;
       const acquiredBrowser = await acquisition;
+      attachProductOutput('J-03', acquiredBrowser, forCleanup ? 'cleanup' : 'launch');
       if (browserAcquisition === acquisition) {
         browser = acquiredBrowser;
         browserAcquisition = undefined;
@@ -826,7 +832,7 @@ async function main() {
   }
 }
 
-main().catch(() => {
-  reportJourneyFailure('J-03', location);
+main().catch((error) => {
+  reportJourneyFailure('J-03', location, error);
   if (runnerLifecycleIncomplete) process.stderr.write('', () => process.exit(1));
 });

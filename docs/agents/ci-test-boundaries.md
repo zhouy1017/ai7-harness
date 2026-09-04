@@ -42,8 +42,8 @@ Under [ADR 0062](../adr/0062-adopt-a-local-verification-ladder-with-ci-as-delive
 | L2 service-integration tests | `pnpm run test:service` (vitest over the service stores on a temporary data root and SQLite database, without Electron) | Staged; lands with its own Issue |
 | L3 build | `pnpm run build` | Available |
 | L4 admitted Journeys | `pnpm run e2e -- --journey <id>` and `pnpm run e2e:all` | Available; output stays payload-safe and CI-identical |
-| Debug | `pnpm run e2e:debug -- --journey <id>` | Staged; lands with the e2e debug Issue |
-| Repeat | `pnpm run e2e:repeat -- --journey <id> --times <n>` | Staged; lands with the e2e debug Issue |
+| Debug | `pnpm run e2e:debug -- --journey <id>` | Available; artifacts under ignored `test-results/e2e/<journey>/<timestamp>/` |
+| Repeat | `pnpm run e2e:repeat -- --journey <id> --times <n>` | Available; keeps only the failing run's artifacts |
 
 Until a staged command lands, the ladder consists of the available layers. A new owner ships with its unit tests in the same Issue. An observed bug first receives the smallest regression at the nearest unit or service layer; an E2E variation is added only when the user-visible outcome requires it. Tests are removed only when the behavior they protect is explicitly changed. No coverage target, test catalog, quarantine, or flaky registry is created.
 

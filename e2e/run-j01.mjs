@@ -5,7 +5,7 @@ import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep 
 import { arch, platform, release, tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { strToU8, zipSync } from 'fflate';
-import { installJourneyCancellationCleanup, reportJourneyFailure } from './controller.mjs';
+import { attachProductOutput, installJourneyCancellationCleanup, localDebugEnabled, reportJourneyFailure } from './controller.mjs';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const PRODUCT_RENDERER_URL = pathToFileURL(resolve(ROOT, 'dist', 'renderer', 'index.html')).href;
@@ -29,8 +29,11 @@ function at(location) {
   diagnosticLocation = location;
 }
 
-function requireJourney(condition, location) {
-  if (!condition) throw new Error(`J-01/${location}`);
+function requireJourney(condition, location, detail) {
+  if (condition) return;
+  const error = new Error(`J-01/${location}`);
+  if (detail !== undefined) error.detail = detail;
+  throw error;
 }
 
 function createBrowserDisconnectBoundary(browser) {
@@ -148,7 +151,7 @@ function parseJourney() {
     'host-runtime',
   );
   requireJourney(
-    !Object.keys(process.env).some((name) => DEBUG_SELECTORS.has(name.toUpperCase())),
+    localDebugEnabled() || !Object.keys(process.env).some((name) => DEBUG_SELECTORS.has(name.toUpperCase())),
     'debug-environment',
   );
 }
@@ -263,7 +266,7 @@ async function attachRendererTarget(browser) {
       { expression, awaitPromise: true, returnByValue: true },
       operationDeadline,
     );
-    requireJourney(!response.exceptionDetails, 'renderer-evaluate');
+    requireJourney(!response.exceptionDetails, 'renderer-evaluate', response.exceptionDetails);
     return response.result.value;
   };
   await send('Runtime.enable', {}, deadline);
@@ -371,7 +374,7 @@ async function createRendererManager(browser) {
         targetId: target.targetId,
         evaluate: async (expression) => {
           const response = await send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true });
-          requireJourney(!response.exceptionDetails, 'renderer-evaluate');
+          requireJourney(!response.exceptionDetails, 'renderer-evaluate', response.exceptionDetails);
           return response.result.value;
         },
       };
@@ -384,7 +387,7 @@ async function createRendererManager(browser) {
             awaitPromise: true,
             returnByValue: true,
           }, carrierDeadline);
-          requireJourney(!response.exceptionDetails, 'renderer-evaluate');
+          requireJourney(!response.exceptionDetails, 'renderer-evaluate', response.exceptionDetails);
           if (response.result.value === true) return renderer;
           latestCarrierError = undefined;
         } catch (error) {
@@ -1932,6 +1935,7 @@ async function main() {
       browserAcquisition = acquisition;
       try {
         browser = await acquisition;
+        attachProductOutput('J-01', browser, launchScenario);
       } catch (error) {
         if (isBrowserLaunchTimeout(error)) browserLifecycleIncomplete = true;
         throw error;
@@ -3494,7 +3498,7 @@ async function main() {
   }
 }
 
-main().catch(() => {
-  reportJourneyFailure('J-01', diagnosticLocation);
+main().catch((error) => {
+  reportJourneyFailure('J-01', diagnosticLocation, error);
   if (browserLifecycleIncomplete) process.stderr.write('', () => process.exit(1));
 });
