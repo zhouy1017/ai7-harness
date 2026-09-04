@@ -13,6 +13,8 @@
   "scripts": {
     "doctor": "node tools/doctor.mjs",
     "bootstrap": "node tools/bootstrap.mjs",
+    "check": "node tools/check.mjs",
+    "test": "vitest run tests/unit",
     "build": "node tools/build-controller.mjs",
     "start-built": "node tools/start-built.mjs",
     "e2e": "node e2e/run.mjs",
@@ -55,6 +57,7 @@
     "@types/node": "24.13.3",
     "esbuild": "0.28.2",
     "playwright-core": "1.62.1",
-    "typescript": "6.0.3"
+    "typescript": "6.0.3",
+    "vitest": "4.1.11"
   }
 }
