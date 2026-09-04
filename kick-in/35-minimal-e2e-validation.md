@@ -1,6 +1,6 @@
 # Minimal E2E validation
 
-Status: **accepted; supersedes the engineering-verification gates in earlier design records**
+Status: **accepted; supersedes the engineering-verification gates in earlier design records; amended by [ADR 0062](../docs/adr/0062-adopt-a-local-verification-ladder-with-ci-as-delivery-gate.md), which adds the required developer-run Local Verification Ladder while keeping this one hosted Gate**
 
 ## Decision
 
@@ -31,7 +31,7 @@ An admitted scenario has no quarantine, flaky registry, tolerated-failure status
 
 ## Excluded validation machinery
 
-Unless the owner explicitly reverses [ADR 0027](../docs/adr/0027-concentrate-ci-on-e2e-functionality.md), do not add separate unit, integration, contract, property, coverage, lint, type-check, format, static-analysis, performance, load, security, privacy, compliance, accessibility, provider, live-model, schema, ABI, packaging, replay, provenance, reproducibility, signature, notarization, platform-certification, release-proof, release-receipt, same-SHA, architecture-closure, exact-head-review, or formal-review gates.
+For hosted CI and merge evidence, unless the owner explicitly reverses [ADR 0027](../docs/adr/0027-concentrate-ci-on-e2e-functionality.md), do not add separate unit, integration, contract, property, coverage, lint, type-check, format, static-analysis, performance, load, security, privacy, compliance, accessibility, provider, live-model, schema, ABI, packaging, replay, provenance, reproducibility, signature, notarization, platform-certification, release-proof, release-receipt, same-SHA, architecture-closure, exact-head-review, or formal-review gates.
 
 Lint, type-check, format, and build may exist as developer commands, but they are not required CI, merge evidence, or independent proof programmes. Temporary diagnostics may support diagnosis or implementation; they remain non-gating and are deleted before integration unless their user-visible behavior is admitted into the E2E Functional Gate.
 
@@ -43,6 +43,6 @@ This rule removes proof machinery, not product behavior. Factual Verification, a
 
 ## Accepted trade-off
 
-The project knowingly accepts weaker early detection of performance, security, provider, packaging, compatibility, accessibility, and rare edge-case regressions. Simplicity and delivery velocity take priority unless the owner explicitly reverses ADR 0027.
+The project knowingly accepts weaker early detection of performance, security, provider, packaging, compatibility, accessibility, and rare edge-case regressions. Simplicity and delivery velocity take priority unless the owner explicitly reverses ADR 0027. ADR 0062 narrows this trade-off for local development: unit, service-integration, and full-fidelity debug surfaces are required locally without becoming hosted gates.
 
 Implementation details are binding in [`docs/agents/ci-test-boundaries.md`](../docs/agents/ci-test-boundaries.md).

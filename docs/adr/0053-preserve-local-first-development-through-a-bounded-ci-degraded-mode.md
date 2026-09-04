@@ -57,3 +57,5 @@ This mode accepts the bounded risk that a platform-specific regression may integ
 The executable projection and future-Agent rules live in [`docs/agents/ci-test-boundaries.md`](../agents/ci-test-boundaries.md). The concrete local command and cache implementation lives in [`docs/development/source-checkout.md`](../development/source-checkout.md).
 
 [ADR 0057](./0057-restore-hosted-gate-under-observed-actions-usage.md) records the 2026-09-01 end of this specific Actions-exhaustion condition and separately authorizes safe workflow restoration after its configuration is truthful. This ADR remains the only bounded fallback for a future independently recorded external CI condition; restoration creates no automatic degraded-mode exit, rerun, probe, or backfill precedent.
+
+[ADR 0062](./0062-adopt-a-local-verification-ladder-with-ci-as-delivery-gate.md) amends the Local diagnostic state above: on the developer host the staged `e2e:debug` and `e2e:repeat` commands may emit full-fidelity artifacts into ignored `test-results/`, while `e2e:diagnose`, Local completion reporting, and the Hosted Gate keep their payload-safe rules.
