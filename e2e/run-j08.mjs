@@ -5,7 +5,7 @@ import { createServer } from 'node:http';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { arch, platform, release, tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { attachProductOutput, installJourneyCancellationCleanup, localDebugEnabled, reportJourneyFailure } from './controller.mjs';
+import { attachProductOutput, installJourneyCancellationCleanup, localDebugEnabled, recordDebugDetail, reportJourneyFailure } from './controller.mjs';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const DEBUG_SELECTORS = new Set(['DEBUG', 'DEBUG_FILE', 'PWDEBUG', 'PWDEBUGIMPL']);
@@ -16,7 +16,10 @@ let Zip;
 let ZipPassThrough;
 let strToU8;
 
-function at(next) { location = next; }
+function at(next) {
+  location = next;
+  if (localDebugEnabled()) recordDebugDetail('J-08', `at ${next}`);
+}
 function requireJourney(condition, name, detail) {
   if (condition) return;
   const error = new Error(`J-08/${name}`);

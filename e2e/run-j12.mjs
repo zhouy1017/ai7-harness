@@ -8,7 +8,7 @@ import { arch, platform, release, tmpdir } from 'node:os';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { attachProductOutput, installJourneyCancellationCleanup, localDebugEnabled, reportJourneyFailure } from './controller.mjs';
+import { attachProductOutput, installJourneyCancellationCleanup, localDebugEnabled, recordDebugDetail, reportJourneyFailure } from './controller.mjs';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const DEBUG_SELECTORS = new Set(['DEBUG', 'DEBUG_FILE', 'PWDEBUG', 'PWDEBUGIMPL']);
@@ -31,7 +31,10 @@ let ZipPassThrough;
 let strToU8;
 let runnerLifecycleIncomplete = false;
 
-function at(next) { location = next; }
+function at(next) {
+  location = next;
+  if (localDebugEnabled()) recordDebugDetail('J-12', `at ${next}`);
+}
 function requireJourney(condition, name, detail) {
   if (condition) return;
   const error = new Error(`J-12/${name}`);

@@ -6,7 +6,7 @@ import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep 
 import { createServer } from 'node:http';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { attachProductOutput, installJourneyCancellationCleanup, localDebugEnabled, reportJourneyFailure } from './controller.mjs';
+import { attachProductOutput, installJourneyCancellationCleanup, localDebugEnabled, recordDebugDetail, reportJourneyFailure } from './controller.mjs';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const SAMPLE1_PATH = resolve(ROOT, 'SampleBooks', 'sample1.docx');
@@ -26,7 +26,10 @@ const CREDENTIAL_CLEANUP_TIMEOUT = new Error('J-03/credential-cleanup-timeout');
 let location = 'entry';
 let runnerLifecycleIncomplete = false;
 
-function at(next) { location = next; }
+function at(next) {
+  location = next;
+  if (localDebugEnabled()) recordDebugDetail('J-03', `at ${next}`);
+}
 function requireJourney(condition, name, detail) {
   if (condition) return;
   const error = new Error(`J-03/${name}`);
