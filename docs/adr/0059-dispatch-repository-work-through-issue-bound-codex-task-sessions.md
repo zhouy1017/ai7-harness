@@ -1,8 +1,10 @@
 ---
-status: accepted
+status: superseded
 ---
 
 # Dispatch repository work through Issue-bound Codex Task Sessions
+
+This decision is superseded in full by [ADR 0060](./0060-dispatch-repository-work-through-issue-bound-claude-code-sessions.md). Its Codex-only bindings, Codex Task Session tooling, schema-v1 receipt fields, Codex live-status values, and Codex commit trailer are historical only; the role model, Issue-body hash, two-stage launch, no-fallback, parallelism, and Commander-only boundaries it introduced continue under ADR 0060. The original body remains below unchanged as decision history.
 
 The Owner replaces ADR 0015's provider-neutral, Claude-first/Spark/fallback repository-development design with one Codex-only process. Every dispatch-eligible T1/T2/T3 Worker and every Reviewer starts in a fresh top-level Codex Task Session whose authority is frozen by one GitHub Issue and one verified Launch Receipt. The existing Commander/Worker/Reviewer authority split, one-Issue/branch/pull-request/single-writer rule, validation lifecycle, and Commander-only integration/external-action boundary remain unchanged.
 

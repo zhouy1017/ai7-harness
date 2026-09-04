@@ -34,4 +34,4 @@ This ADR supersedes the mandatory verification and review-gate clauses of ADRs 0
 
 The concise implementation rules live in [`docs/agents/ci-test-boundaries.md`](../agents/ci-test-boundaries.md).
 
-[ADR 0059](./0059-dispatch-repository-work-through-issue-bound-codex-task-sessions.md) supersedes ADR 0015's remaining repository-development dispatch policy. This ADR's earlier supersession of ADR 0015's mandatory verification and review-gate clauses remains historical truth; ADR 0059 does not revive them or add a dispatch, model, receipt, review, exact-head, or other proof gate.
+[ADR 0059](./0059-dispatch-repository-work-through-issue-bound-codex-task-sessions.md) superseded ADR 0015's remaining repository-development dispatch policy, and [ADR 0060](./0060-dispatch-repository-work-through-issue-bound-claude-code-sessions.md) now supersedes ADR 0059's Codex-only tooling. This ADR's earlier supersession of ADR 0015's mandatory verification and review-gate clauses remains historical truth; neither ADR 0059 nor ADR 0060 revives them or adds a dispatch, model, receipt, review, exact-head, or other proof gate.

@@ -2,7 +2,7 @@
 
 Status: **binding for architecture and design forks when referenced by `AGENTS.md`**
 
-This runbook specializes the Issue-bound Codex Commander, Worker, and optional Reviewer rules in [Repository Development Dispatch](../../kick-in/27-repository-development-dispatch.md). Under ADR 0027, design validation is intentionally light: hostile review is advisory and source/evidence proof is not an architecture gate.
+This runbook specializes the Issue-bound Claude Code Commander, Worker, and optional Reviewer rules in [Repository Development Dispatch](../../kick-in/27-repository-development-dispatch.md). Under ADR 0027, design validation is intentionally light: hostile review is advisory and source/evidence proof is not an architecture gate.
 
 ## Invariants
 
@@ -10,7 +10,7 @@ This runbook specializes the Issue-bound Codex Commander, Worker, and optional R
 2. One writing Issue has one branch, one worktree, one writable Worker, and a fresh Task Session for each attempt. Never give two Tasks write authority over the same checkout or file set.
 3. The Commander owns T0 Issue shaping, the freeze point, dispatch, conflict resolution, acceptance proposal, integration decision, receipts, and every external action; it does not perform T1–T3 controlled-file work inline.
 4. A Worker whose brief is frozen may finish only work already materially underway. It may not add architecture assumptions, widen scope, or treat another candidate branch as canonical.
-5. A Reviewer starts in a separate fresh top-level Codex Task Session at the immutable completed candidate commit recorded as `reviewed_head`, from the Issue and its own Launch Receipt, never the authoring Task transcript. Architecture review and hostile challenge are Reviewer assignments, not new roles.
+5. A Reviewer starts in a separate fresh top-level Claude Code Task Session at the immutable completed candidate commit recorded as `reviewed_head`, from the Issue and its own Launch Receipt, never the authoring Task transcript. Architecture review and hostile challenge are Reviewer assignments, not new roles.
 6. Accepted ADRs and canonical context definitions outrank summaries. Candidate revisions must identify every accepted decision they would supersede; they never rewrite history silently.
 7. Design exploration and product implementation are separate authorization boundaries. An exploration outcome cannot start scaffolding, dependency installation, implementation issue decomposition, or a product branch by implication.
 8. Archives are historical storage, never additional design lines. New work consumes current authority owners and Commander-curated conclusions; it reads an exact archive artifact only when a current record names a blocking historical question.
@@ -139,7 +139,7 @@ Architecture exploration does not end because legacy tasks are closed. It ends o
 ## Durable records
 
 - Current brief and terminal attempt evidence: the canonical GitHub Issue body plus its Launch/Return Receipts.
-- Current Task liveness and retention: the query-only [Dispatch Register](dispatch-register.md) over built-in Codex task tools.
+- Current Task liveness and retention: the query-only [Dispatch Register](dispatch-register.md) over the Claude desktop session tools.
 - Current integration-line routing: Commander-owned root [`PROGRESS.md`](../../PROGRESS.md) and [`HANDOFF.md`](../../HANDOFF.md).
 - Accepted domain authority: [`CONTEXT-MAP.md`](../../CONTEXT-MAP.md) and its routed context owners.
 - Document lifecycle: [Document lifecycle and archiving](./document-lifecycle.md).

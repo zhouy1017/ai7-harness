@@ -21,7 +21,7 @@ Use [design authority and action authorization](./design-authority.md) for confl
 
 | Task | Read after the universal set |
 | --- | --- |
-| Repository dispatch, resume, acceptance, or retention | [Repository Development Dispatch](../../kick-in/27-repository-development-dispatch.md); [Dispatch Register](./dispatch-register.md); active Issue receipts; built-in Codex task state |
+| Repository dispatch, resume, acceptance, or retention | [Repository Development Dispatch](../../kick-in/27-repository-development-dispatch.md); [Dispatch Register](./dispatch-register.md); active Issue receipts; Claude desktop session state |
 | Any non-mechanical change | Active Issue/Change Brief; [incremental development](./incremental-development.md); relevant context/ADR; affected sections of [project constraints](./project-constraints.md) |
 | Mechanical T1 change | Short Change Brief; exact named paths; applicable formatting or Git rule only |
 | Bug diagnosis | Nearest supported journey and issue; affected code path; [CI boundary](./ci-test-boundaries.md). Temporary diagnostics do not become standing gates |
