@@ -212,6 +212,8 @@ const JOURNEY_LOCATIONS = Object.freeze({
   'J-02': Object.freeze([
     'entry',
     'renderer-ready',
+    'renderer-ready-flag',
+    'renderer-ready-landing',
     'bounded-workspace',
     'cooperative-position-input',
     'cooperative-position-resolve',
