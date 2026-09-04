@@ -90,7 +90,7 @@ Research answers one named question blocking the current Issue. Inspect current 
 
 A spike or prototype is allowed only when the question cannot be answered from the current seams. Its brief names the question, bounded inputs, exit condition, what may be learned, and deletion/archive disposition. It is not production structure or implementation permission.
 
-A generic payload-safe diagnostic facility may remain when it reports only the allowlisted non-payload metadata defined by the CI boundary and is explicitly labelled non-completion. Issue-specific temporary probes stop when the concrete issue is understood and are deleted before integration unless their user-visible behavior is admitted into the one E2E Functional Gate.
+A generic payload-safe diagnostic facility may remain when it reports only the allowlisted non-payload metadata defined by the CI boundary and is explicitly labelled non-completion. Issue-specific temporary probes stop when the concrete issue is understood and are deleted before integration unless their user-visible behavior is admitted into the one E2E Functional Gate. Under ADR 0062, full-fidelity local debug output belongs to the staged `e2e:debug`/`e2e:repeat` commands and stays inside ignored `test-results/`; a red Hosted Gate is reproduced locally, then in a CI-parity environment, before any diagnostic-marker change.
 
 ## 8. Verify the user outcome
 
@@ -101,7 +101,7 @@ Follow [CI and test boundaries](./ci-test-boundaries.md):
 - Windows and macOS execute the same applicable journey IDs; and
 - documentation/design-only changes create no automated proof task.
 
-Development and debugging complete locally before a pull request becomes Ready. On the actual supported development host, normal work runs the repository-root `doctor` → `bootstrap` → `build` → applicable Journey sequence. Restore only existing accepted pins. Declared caches may accelerate iteration but never become correctness inputs. The final `build` validates and replaces its canonical output before the applicable Journey rerun. CI-degraded integration follows the CI boundary's stricter exact-rebased-head, every-current-executable-Journey, affected-platform, and one-at-a-time rules. The executable set is now J-01/J-02/J-08/J-12/J-15/J-03 after Issue #47's atomic real-J-03 cutover. Every report resolves the exact IDs at its exact head rather than asserting a fixed total.
+Development and debugging complete locally before a pull request becomes Ready. On the actual supported development host, normal work runs the Local Verification Ladder defined by ADR 0062: today its available layers are the repository-root `doctor` → `bootstrap` → `build` → applicable Journey sequence, and the staged type-check, unit, service-integration, debug, and repeat layers join as their Issues land. Restore only existing accepted pins. Declared caches may accelerate iteration but never become correctness inputs. The final `build` validates and replaces its canonical output before the applicable Journey rerun. CI-degraded integration follows the CI boundary's stricter exact-rebased-head, every-current-executable-Journey, affected-platform, and one-at-a-time rules. The executable set is now J-01/J-02/J-08/J-12/J-15/J-03 after Issue #47's atomic real-J-03 cutover. Every report resolves the exact IDs at its exact head rather than asserting a fixed total.
 
 Before the boundary, the full all-Journey sequence passes on actual Windows at the exact rebased head before Ready. ADR 0058 then requires the normal paired Hosted Gate restored by ADR 0057 while it is active; ADR 0054 defers macOS without a pass claim only during an exact degraded interval. Every platform failure or unknown required by the active route blocks. ADR 0054's milestone exception expires at the boundary; separately authorized Windows/macOS re-entry then validates consolidated `dev`, and Ready but unmerged product work rebases afterward.
 
@@ -120,7 +120,7 @@ The Worker reports from its verified `Issue + role + attempt`; after acceptance 
 - data/migration/authority impact;
 - applicable journey or bug outcome exercised;
 - cleanup performed, including any replaced path removed;
-- local validation host, commands, and outcomes, without logs or proof artifacts;
+- local validation host, commands, and outcomes for every available Local Verification Ladder layer, without logs or proof artifacts;
 - unresolved matters; and
 - one safe next action.
 

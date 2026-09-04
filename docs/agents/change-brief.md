@@ -117,6 +117,7 @@ The PR body links the Issue and adds only:
 - Existing structure reused:
 - New owner/dependency introduced and why:
 - Journey/bug outcome and Gate projection disposition; documentation/design-only work uses `N/A — no implementation behavior change`:
+- Local Verification Ladder (exact head, host, outcome of each available layer); documentation/design-only work uses `N/A — no automated proof`:
 - Migration/cleanup completed:
 - Unresolved matters and safe next action:
 - Archive sweep result, if triggered:
