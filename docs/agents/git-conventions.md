@@ -22,7 +22,7 @@ docs/17-glossary-collision-guard
 - `<issue>` is the GitHub issue number. GitHub Issues is the canonical tracker, so work without an issue is work nobody can find later.
 - `<slug>` is two to five lowercase words, hyphen-separated, describing the outcome rather than the method.
 
-One Issue, one branch, one pull request, and one writable Worker. Every Worker attempt runs in a fresh Task Session on the Commander's harness under the verified Issue/Launch Receipt identity defined by Repository Development Dispatch.
+One Issue, one branch, one pull request, and one writable Worker. Every Worker attempt runs in a fresh Task Session on the harness the Commander selects for it, in an applicable launch mode, under the verified Issue/Launch Receipt identity defined by Repository Development Dispatch.
 
 Before work is labeled `ready-for-agent` or dispatched, the Issue contains the applicable [Change Brief](change-brief.md). Mechanical T1 work may use the short form; every non-mechanical change uses the full authority, reuse, structural-budget, non-goal, consequence, and stop-condition form. A Worker never enlarges that brief itself.
 
@@ -43,7 +43,7 @@ Conventional Commits: `type(scope): subject`.
 
 Subject in the imperative, lowercase, no trailing period, under 72 characters. The body explains **why**, not what — the diff already shows what. State rejected alternatives when a choice was contested, and name any accepted decision the change implements or revises.
 
-Agent-authored commits carry the stable product-level trailer of the Commander's harness: `Co-authored-by: OpenAI Codex <codex@openai.com>` on the Codex route or `Co-Authored-By: Claude <noreply@anthropic.com>` on the Claude Code route. Task class, requested binding, launch acceptance, and inferred execution binding belong only in Issue receipts; a commit trailer never names a model or claims effective runtime-model attestation.
+Agent-authored commits carry the stable product-level trailer of the attempt's own harness, the harness of the session that authored the commit: `Co-authored-by: OpenAI Codex <codex@openai.com>` for a Codex attempt or `Co-Authored-By: Claude <noreply@anthropic.com>` for a Claude Code attempt, regardless of the Commander's harness. Task class, requested binding, launch acceptance, and inferred execution binding belong only in Issue receipts; a commit trailer never names a model or claims effective runtime-model attestation.
 
 ## Pull requests
 
