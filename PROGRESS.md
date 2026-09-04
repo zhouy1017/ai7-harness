@@ -28,7 +28,7 @@
 
 - `check` and `test` (#236) and `e2e:debug` and `e2e:repeat` (#238) exist only on their Draft branches until integrated; `test:service` has no Issue yet. Until then the ladder consists of the available layers.
 - The J-02 Windows-only restart failure behind #217/#227 has no root cause; its reproduction campaign waits for the debug/repeat commands.
-- No dispatched attempt has used the `subagent` or `cli-session` mode yet; worktree start, unchanged-worktree removal, CLI permission coverage, and Codex sandbox network access are specified from the tool contracts and documentation, and the first such attempts' receipts record what is actually observed.
+- The `subagent` mode is now observed: Issue #239's attempts confirmed that the harness removes a still-unchanged worktree when the agent's turn ends, which destroyed two no-write preflights before their attach step, and that one untracked `.ai7-preflight-<dispatch_id>` marker keeps the worktree alive. The dispatch owner, Change Brief, and Dispatch Register carry that rule. No attempt has used the `cli-session` mode yet; its worktree start, CLI permission coverage, and Codex sandbox network access are still specified only from the tool contracts and documentation, and the first such attempt's receipts record what is actually observed.
 - Whether the `.agents/skills` vendoring on `temp/freeze-20260904-112022` enters `dev`, archival of `handoff20260817/`, and removal of stale local worktree registrations are separate Owner decisions.
 
 ## Safe Resume Prompt

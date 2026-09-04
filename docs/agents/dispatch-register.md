@@ -62,7 +62,7 @@ Normalize built-in state while retaining the raw source state when it is availab
 | Claude Code top-level session | `isArchived: true` | `archived` |
 | Claude Code subagent | `ListAgents` shows the agent busy | `running` |
 | Claude Code subagent | `ListAgents` shows the agent idle, or its turn-completion notification has arrived | `idle` |
-| Claude Code subagent | No longer listed: stopped through `TaskStop`, or its hosting session ended | `ended` |
+| Claude Code subagent | No longer listed: stopped through `TaskStop`, or its hosting session ended. When a subagent ends, the harness also removes its worktree if that worktree is still unchanged, so a live attempt is one whose preflight left the untracked `.ai7-preflight-<dispatch_id>` marker at the worktree root and has not yet deleted it | `ended` |
 | `cli-session`, either harness | The CLI process is alive | `running` |
 | `cli-session`, either harness | The process exited after a turn and the reported session or thread ID is resumable | `idle` |
 | `cli-session`, either harness | The session cannot be resumed, or the process was stopped before its turn ended | `ended` |
