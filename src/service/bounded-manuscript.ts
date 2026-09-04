@@ -4632,7 +4632,18 @@ export function validateManuscriptReimportSchemaTruth(
   requireBounded(violations.length === 0, 'SCHEMA_MIGRATION_FAILED', '数据库引用校验失败。');
 }
 
-export function initializeBoundedSchema(db: DatabaseSync, profile: BuiltInWorkflowProfile): void {
+/**
+ * `validateStoreTruth` may be set to false only by a caller that already runs the terminal-version
+ * store-truth validation at an earlier and a later position of the same `EditorialStore.open`, so
+ * that a store already at the terminal version pays for the whole-store validation twice instead of
+ * once per layered initializer. Every migrating branch, and every version below the terminal one,
+ * validates exactly as it does when the flag is absent.
+ */
+export function initializeBoundedSchema(
+  db: DatabaseSync,
+  profile: BuiltInWorkflowProfile,
+  validateStoreTruth = true,
+): void {
   const version = asNumber(one(db.prepare('PRAGMA user_version').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取数据库版本。').user_version);
   requireBounded(
     version === CONTINUITY_SCHEMA_VERSION || version === EDITOR_SCHEMA_VERSION ||
@@ -4647,14 +4658,16 @@ export function initializeBoundedSchema(db: DatabaseSync, profile: BuiltInWorkfl
       version === NATIVE_ARTIFACT_SCHEMA_VERSION || version === AUTHORITY_SIDECAR_SCHEMA_VERSION ||
       version === TASK_AUTHORIZATION_SCHEMA_VERSION) {
     transact(db, () => {
-      validateManuscriptReimportSchemaTruth(
-        db,
-        profile,
-        version >= MODEL_SERVICE_SCHEMA_VERSION,
-        version >= NATIVE_ARTIFACT_SCHEMA_VERSION,
-        version >= AUTHORITY_SIDECAR_SCHEMA_VERSION,
-        version === TASK_AUTHORIZATION_SCHEMA_VERSION,
-      );
+      if (validateStoreTruth || version !== TASK_AUTHORIZATION_SCHEMA_VERSION) {
+        validateManuscriptReimportSchemaTruth(
+          db,
+          profile,
+          version >= MODEL_SERVICE_SCHEMA_VERSION,
+          version >= NATIVE_ARTIFACT_SCHEMA_VERSION,
+          version >= AUTHORITY_SIDECAR_SCHEMA_VERSION,
+          version === TASK_AUTHORIZATION_SCHEMA_VERSION,
+        );
+      }
       terminalizeOrphanedReplacementPreviews(db);
       reclaimOrphanedSearchSessions(db);
     });

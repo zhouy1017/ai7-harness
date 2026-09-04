@@ -1726,18 +1726,24 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
   requireStore(violations.length === 0, 'SCHEMA_MIGRATION_FAILED', '数据库引用校验失败。');
 }
 
-function validateModelServiceSchema(db: DatabaseSync, profile: BuiltInWorkflowProfile): void {
+function validateModelServiceSchema(
+  db: DatabaseSync,
+  profile: BuiltInWorkflowProfile,
+  validateStoreTruth = true,
+): void {
   const version = asNumber(
     one(db.prepare('PRAGMA user_version').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取数据库版本。').user_version,
   );
-  validateManuscriptReimportSchemaTruth(
-    db,
-    profile,
-    true,
-    version >= EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION,
-    version >= EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION,
-    version === TASK_AUTHORIZATION_SCHEMA_VERSION,
-  );
+  if (validateStoreTruth || version !== TASK_AUTHORIZATION_SCHEMA_VERSION) {
+    validateManuscriptReimportSchemaTruth(
+      db,
+      profile,
+      true,
+      version >= EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION,
+      version >= EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION,
+      version === TASK_AUTHORIZATION_SCHEMA_VERSION,
+    );
+  }
   const invalid = db.prepare(
     `SELECT 1 FROM model_service_connections
      WHERE connection_id != 'main-editorial-deepseek-v4-pro'
@@ -1752,7 +1758,17 @@ function validateModelServiceSchema(db: DatabaseSync, profile: BuiltInWorkflowPr
   requireStore(invalid === undefined, 'SCHEMA_INVALID', '模型服务连接记录超出当前固定绑定。');
 }
 
-function initializeModelServiceSchema(db: DatabaseSync, profile: BuiltInWorkflowProfile): void {
+/**
+ * `validateStoreTruth` follows the same rule as `initializeBoundedSchema`: only a caller that keeps
+ * an earlier and a later terminal-version store-truth validation in the same `EditorialStore.open`
+ * may suppress this intermediate one. The fixed model-service connection check always runs, and any
+ * version below the terminal one validates exactly as it does when the flag is absent.
+ */
+function initializeModelServiceSchema(
+  db: DatabaseSync,
+  profile: BuiltInWorkflowProfile,
+  validateStoreTruth = true,
+): void {
   const version = asNumber(
     one(db.prepare('PRAGMA user_version').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取数据库版本。').user_version,
   );
@@ -1766,7 +1782,7 @@ function initializeModelServiceSchema(db: DatabaseSync, profile: BuiltInWorkflow
   if (version === MODEL_SERVICE_SCHEMA_VERSION ||
       version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION ||
       version === EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION || version === TASK_AUTHORIZATION_SCHEMA_VERSION) {
-    validateModelServiceSchema(db, profile);
+    validateModelServiceSchema(db, profile, validateStoreTruth);
     if (version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION) {
       validateEditorialWorkspaceProfileNativeSchema(db);
     } else if (version >= EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION) {
@@ -2541,10 +2557,13 @@ export class EditorialStore {
       ).run().changes === 1, 'E2E_CONTROL_INVALID', '没有可用于启动校验的重新导入证明。');
     }
     initializeManuscriptReimportSchema(authority, workflowProfile);
-    initializeModelServiceSchema(authority, workflowProfile);
+    // A store already at the terminal version is validated whole exactly twice per open: once above,
+    // before any cleanup write, and once below, after the E2E control injection, the layered
+    // initializers, and native-artifact partial recovery. The initializers between those two points
+    // would otherwise repeat the same whole-store validation over an unchanged store.
+    initializeModelServiceSchema(authority, workflowProfile, false);
     initializeEditorialWorkspaceProfileSchema(authority);
-    initializeBoundedSchema(authority, workflowProfile);
-    validateEditorialWorkspaceProfileSchema(authority);
+    initializeBoundedSchema(authority, workflowProfile, false);
     const editorialWorkspaceProfile = await EditorialWorkspaceProfileStore.open(authority, dataRoot, codeRoot);
     initializeTaskAuthorizationSchema(authority);
     initializeBoundedSchema(authority, workflowProfile);

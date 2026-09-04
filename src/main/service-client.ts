@@ -15,6 +15,11 @@ import {
 const MAX_PENDING_REQUESTS = 16;
 const REQUEST_TIMEOUT_MS = 30_000;
 const LONG_REQUEST_TIMEOUT_MS = 10 * 60_000;
+// The startup readiness call waits for the service to open a store whose schema work grows with the
+// stored manuscript, so it is bounded separately from an ordinary request and never by a deadline
+// shorter than the launch wait a caller applies to the window it is starting. A service that fails
+// or exits still rejects this call at once, so startup failure remains immediate.
+const STARTUP_READY_TIMEOUT_MS = 2 * 60_000;
 const SERVICE_STOP_GRACE_MS = 5_000;
 const SERVICE_STOP_FORCE_MS = 5_000;
 
@@ -187,12 +192,14 @@ export class ServiceClient {
         this.#pending.delete(id);
         reject(new ServiceCallError('SERVICE_TIMEOUT', '本地业务服务响应超时。'));
         this.#fault();
-      }, operation === 'stageSelectedDocx' || operation === 'commitNewBookImport' || operation === 'commitSourceImport' ||
-          operation === 'commitManuscriptReimport' || operation === 'commitReplacement' ||
-          operation === 'saveMilestone' || operation === 'getStartup' || operation === 'getRecoveryComparison' ||
-          operation === 'viewRecoveryCandidate' || operation === 'restoreRecovery'
-        ? LONG_REQUEST_TIMEOUT_MS
-        : REQUEST_TIMEOUT_MS);
+      }, operation === 'ready'
+        ? STARTUP_READY_TIMEOUT_MS
+        : operation === 'stageSelectedDocx' || operation === 'commitNewBookImport' || operation === 'commitSourceImport' ||
+            operation === 'commitManuscriptReimport' || operation === 'commitReplacement' ||
+            operation === 'saveMilestone' || operation === 'getStartup' || operation === 'getRecoveryComparison' ||
+            operation === 'viewRecoveryCandidate' || operation === 'restoreRecovery'
+          ? LONG_REQUEST_TIMEOUT_MS
+          : REQUEST_TIMEOUT_MS);
       timeout.unref();
       this.#pending.set(id, {
         operation,
