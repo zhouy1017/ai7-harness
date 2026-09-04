@@ -28,6 +28,7 @@ const RECOVERY_OBJECT_PATTERN = /^[0-9a-f]{64}\.snapshot$/;
 const DEBUG_SELECTORS = new Set(['DEBUG', 'DEBUG_FILE', 'PWDEBUG', 'PWDEBUGIMPL']);
 const CJK_BASE = 0x4e00;
 const CJK_SPAN = 0x1000;
+const SINGLE_INSTANCE_LOCK_TOKEN = 'AI7_STARTUP_FAILED/single-instance-lock';
 let diagnosticLocation = 'entry';
 let electronExecutable;
 let Zip;
@@ -153,21 +154,51 @@ async function createSyntheticDocx(path) {
   requireJourney(metadata.isFile() && !metadata.isSymbolicLink() && metadata.size > CHARACTER_COUNT, 'fixture-file');
 }
 
-async function attachRendererTarget(browser) {
+async function attachRendererTarget(browser, launchScenario) {
+  at(`launch-${launchScenario}-renderer-cdp-session`);
   const rootSession = await browser.newBrowserCDPSession();
   const deadline = Date.now() + 60_000;
   let pageTarget;
   while (Date.now() < deadline) {
-    const { targetInfos } = await rootSession.send('Target.getTargets');
+    at(`launch-${launchScenario}-renderer-target-query`);
+    let targetInfos;
+    if (launchScenario === 'restart') {
+      let sessionClosed = false;
+      const observeSessionClose = () => { sessionClosed = true; };
+      rootSession.once('close', observeSessionClose);
+      try {
+        ({ targetInfos } = await rootSession.send('Target.getTargets'));
+      } catch (error) {
+        if (error instanceof Error && error.message.includes(SINGLE_INSTANCE_LOCK_TOKEN)) {
+          at('launch-restart-renderer-target-query-single-instance-lock');
+        } else if (!browser.isConnected()) {
+          at('launch-restart-renderer-target-query-browser-disconnected');
+        } else if (sessionClosed) {
+          at('launch-restart-renderer-target-query-session-closed-connected');
+        } else {
+          at('launch-restart-renderer-target-query-rejected-connected');
+        }
+        throw error;
+      } finally {
+        rootSession.off('close', observeSessionClose);
+      }
+    } else {
+      ({ targetInfos } = await rootSession.send('Target.getTargets'));
+    }
+    at(`launch-${launchScenario}-renderer-target-classification`);
     const pages = targetInfos.filter((target) => target.type === 'page');
+    at(`launch-${launchScenario}-renderer-target-cardinality`);
     if (pages.length === 1) {
       pageTarget = pages[0];
       break;
     }
     requireJourney(pages.length === 0, 'renderer-target-count');
+    at(`launch-${launchScenario}-renderer-target-wait`);
     await new Promise((resolveWait) => setTimeout(resolveWait, 50));
   }
+  at(`launch-${launchScenario}-renderer-target-timeout`);
   requireJourney(pageTarget, 'renderer-target-timeout');
+  at(`launch-${launchScenario}-renderer-target-attach`);
   const { sessionId } = await rootSession.send('Target.attachToTarget', { targetId: pageTarget.targetId, flatten: false });
   let nextId = 1;
   const pending = new Map();
@@ -234,6 +265,7 @@ async function attachRendererTarget(browser) {
     }
     throw new Error('J-02/preload-ipc-observation');
   };
+  at(`launch-${launchScenario}-renderer-runtime-enable`);
   await send('Runtime.enable');
   return { evaluate, observeIpc, send };
 }
@@ -836,14 +868,16 @@ async function runWorkspaceJourney(renderer, dataRoot) {
   await clickButton(renderer, '预览替换', 'milestone-stale-preview-start');
   await waitFor(renderer, `!document.querySelector('.replacement-review')?.hidden && document.querySelector('.search-results')?.dataset.inclusionLocked === 'true'`, 'milestone-stale-preview-ready');
 
-  at('milestone-history');
+  at('milestone-form');
   await assertRenderer(renderer, `(() => { const details = document.querySelector('.milestone-section'); details.open = true; return true; })()`, 'milestone-open');
   await fill(renderer, '#milestone-label', '结构复核完成', 'milestone-label');
   await fill(renderer, '#milestone-purpose', '确认千万字编辑与替换状态', 'milestone-purpose');
   await fill(renderer, '#milestone-note', '本地里程碑，不表示导出或发布。', 'milestone-note');
+  at('milestone-save-dispatch');
   const milestoneDrainObservation = await renderer.observeIpc();
   await editThenInvokeOnDirty(renderer, '碑', ['保存为里程碑版本'], 'dirty-milestone-save');
   try {
+    at('milestone-r2-resolution');
     await waitFor(
       renderer,
       `document.querySelector('.editor-meta')?.textContent.includes('当前修订版 r2')`,
@@ -856,6 +890,7 @@ async function runWorkspaceJourney(renderer, dataRoot) {
     const objectCategory = await milestoneObjectTimeoutCategory(dataRoot);
     throw new Error(`J-02/milestone-r2-${ipcCategory}-${objectCategory}`);
   }
+  at('milestone-save-ipc-order');
   const milestoneDrainCompleted = await renderer.observeIpc();
   const milestoneDrainEvents = milestoneDrainCompleted.events.filter((event) => event.ordinal > (milestoneDrainObservation.events.at(-1)?.ordinal ?? 0));
   const milestoneFlushInvoke = milestoneDrainEvents.find((event) => event.operation === 'flushJournalEdit' && event.phase === 'invoke');
@@ -866,12 +901,15 @@ async function runWorkspaceJourney(renderer, dataRoot) {
       milestoneFlushInvoke?.ordinal < milestoneSaveInvoke?.ordinal,
     'dirty-milestone-authoritative-ipc-order',
   );
+  at('milestone-search-state-stale');
   await waitFor(renderer, `document.querySelector('.search-results')?.childElementCount === 0 && document.querySelector('.replacement-review')?.hidden && document.querySelector('.search-results')?.dataset.inclusionLocked === 'false' && Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '返回查找前位置')?.hidden && document.querySelector('.search-section .field-note')?.textContent.includes('稿件修订版已变化')`, 'milestone-revision-stales-all-search-state');
+  at('milestone-authoritative-ready');
   await waitForChecks(
     renderer,
     `(() => { const editor = document.querySelector('[data-testid="manuscript-editor"]'); const host = editor?.parentElement; const undo = Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '撤销'); return { authoritativeMutationCleared: host?.dataset.authoritativeMutation === 'false', operationUnlocked: editor?.dataset.operationLocked === 'false', undoReady: undo instanceof HTMLButtonElement && !undo.disabled }; })()`,
     'milestone-authoritative-ready',
   );
+  at('milestone-undo-drain');
   await clickButton(renderer, '撤销', 'undo');
   await waitForChecks(
     renderer,
@@ -879,6 +917,7 @@ async function runWorkspaceJourney(renderer, dataRoot) {
     'undo-drained-before-close',
     120_000,
   );
+  at('milestone-close-risk-stable');
   await renderer.evaluate(`new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
   await assertRenderer(renderer, `document.documentElement.dataset.ai7CloseRisk === 'false'`, 'undo-close-risk-stable');
 }
@@ -976,19 +1015,22 @@ async function main() {
       resolve(ROOT, 'dist', 'main', 'index.cjs'), '--data-root', dataRoot, '--launcher-pid', String(process.pid), '--j02-picker-path', docx,
     ];
     requireJourney(isAbsolute(dataRoot) && isAbsolute(docx) && !productArgs.some((argument) => /--inspect|--remote-debugging-port|^https?:|^wss?:/i.test(argument)), 'pipe-only-product-transport');
-    const launch = async () => {
+    const launch = async (launchScenario) => {
+      at(`launch-${launchScenario}-browser-acquisition`);
       cancellation.throwIfRequested();
       browserAcquisition = chromium.launch({ executablePath: executable, headless: false, ignoreDefaultArgs: true, args: productArgs, env: productEnvironment(executable), timeout: 60_000 });
       browser = await browserAcquisition;
+      at(`launch-${launchScenario}-post-acquisition-cancellation`);
       cancellation.throwIfRequested();
-      return attachRendererTarget(browser);
+      return attachRendererTarget(browser, launchScenario);
     };
-    let renderer = await launch();
+    let renderer = await launch('initial');
     await importAndOpen(renderer);
     await runWorkspaceJourney(renderer, dataRoot);
+    at('restart-browser-close');
     await browser.close();
     browser = undefined;
-    renderer = await launch();
+    renderer = await launch('restart');
     await runRestartJourney(renderer);
     await runAccessibilityJourney(renderer);
     await browser.close();
