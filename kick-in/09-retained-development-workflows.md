@@ -89,7 +89,7 @@ This is **Repository Development Dispatch**, not an AI7 end-user workflow and no
 The source had not completed its required real Host observations at the pin. Current treatment under ADR 0061 is therefore:
 
 - Keep role-specific exact-start isolation—Worker at the integration base and Reviewer at immutable `reviewed_head`—one writable Worker, Issue-bound briefs, finalized Launch/Return Receipts, Commander-only integration/external actions, and secret/manuscript exclusion.
-- Use fresh top-level Task Sessions on the Commander's harness plus that harness's built-in session queries instead of copying the large repository-specific state machine.
+- Use fresh Task Sessions on the harness the Commander selects per attempt, in its launch modes, plus the Commander's own session, agent, and background-process queries instead of copying the large repository-specific state machine.
 - Keep recording adapters test-only.
 - Treat Windows Host enrollment, old provider/model routing, old schema compatibility, and the pilot evaluator as reference material rather than requirements.
 
