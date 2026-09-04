@@ -37,8 +37,8 @@ Under [ADR 0062](../adr/0062-adopt-a-local-verification-ladder-with-ci-as-delive
 
 | Layer | Command | Status |
 | --- | --- | --- |
-| L0 type check | `pnpm run check` (`tsc --noEmit`, including `tests/**`) | Staged; lands with the vitest dependency Issue |
-| L1 unit tests | `pnpm test` (vitest over pure modules) | Staged; lands with the vitest dependency Issue |
+| L0 type check | `pnpm run check` (`tsc --noEmit`, including `tests/**`, full diagnostics on the developer host) | Available |
+| L1 unit tests | `pnpm test` (vitest over `tests/unit`) | Available |
 | L2 service-integration tests | `pnpm run test:service` (vitest over the service stores on a temporary data root and SQLite database, without Electron) | Staged; lands with its own Issue |
 | L3 build | `pnpm run build` | Available |
 | L4 admitted Journeys | `pnpm run e2e -- --journey <id>` and `pnpm run e2e:all` | Available; output stays payload-safe and CI-identical |
