@@ -8,7 +8,7 @@ import { arch, platform, release, tmpdir } from 'node:os';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { installJourneyCancellationCleanup, reportJourneyFailure } from './controller.mjs';
+import { attachProductOutput, installJourneyCancellationCleanup, localDebugEnabled, recordDebugDetail, reportJourneyFailure } from './controller.mjs';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const DEBUG_SELECTORS = new Set(['DEBUG', 'DEBUG_FILE', 'PWDEBUG', 'PWDEBUGIMPL']);
@@ -31,8 +31,16 @@ let ZipPassThrough;
 let strToU8;
 let runnerLifecycleIncomplete = false;
 
-function at(next) { location = next; }
-function requireJourney(condition, name) { if (!condition) throw new Error(`J-12/${name}`); }
+function at(next) {
+  location = next;
+  if (localDebugEnabled()) recordDebugDetail('J-12', `at ${next}`);
+}
+function requireJourney(condition, name, detail) {
+  if (condition) return;
+  const error = new Error(`J-12/${name}`);
+  if (detail !== undefined) error.detail = detail;
+  throw error;
+}
 function inside(parent, child) {
   const relation = relative(parent, child);
   return relation === '' || (!relation.startsWith(`..${sep}`) && relation !== '..' && !isAbsolute(relation));
@@ -104,7 +112,7 @@ function parseJourney() {
       (platform() === 'darwin' && arch() === 'arm64' && Number(release().split('.')[0]) >= 24),
     'host-runtime',
   );
-  requireJourney(!Object.keys(process.env).some((name) => DEBUG_SELECTORS.has(name.toUpperCase())), 'debug-environment');
+  requireJourney(localDebugEnabled() || !Object.keys(process.env).some((name) => DEBUG_SELECTORS.has(name.toUpperCase())), 'debug-environment');
 }
 
 function productEnvironment(executable) {
@@ -799,6 +807,7 @@ async function main() {
       cancellation.throwIfRequested();
       browserAcquisition = chromium.launch({ executablePath: executable, headless: false, ignoreDefaultArgs: true, args, env: productEnvironment(executable), timeout: 60_000 });
       browser = await browserAcquisition;
+      attachProductOutput('J-12', browser, 'launch');
       cancellation.throwIfRequested();
       managerForCleanup = await createRendererManager(browser);
       return managerForCleanup;
@@ -1373,7 +1382,7 @@ async function main() {
   }
 }
 
-main().catch(() => {
-  reportJourneyFailure('J-12', location);
+main().catch((error) => {
+  reportJourneyFailure('J-12', location, error);
   if (runnerLifecycleIncomplete) process.stderr.write('', () => process.exit(1));
 });

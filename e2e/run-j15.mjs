@@ -5,7 +5,7 @@ import { arch, platform, release, tmpdir } from 'node:os';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { installJourneyCancellationCleanup, reportJourneyFailure } from './controller.mjs';
+import { attachProductOutput, installJourneyCancellationCleanup, localDebugEnabled, recordDebugDetail, reportJourneyFailure } from './controller.mjs';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const PROFILE_DIGEST = 'ae485040c8fa602ab2e98ec91dd122201d40a8be41d8a4f86f7cd55ddb1e434d';
@@ -18,8 +18,16 @@ const DEBUG_SELECTORS = new Set(['DEBUG', 'DEBUG_FILE', 'PWDEBUG', 'PWDEBUGIMPL'
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 let location = 'entry';
 
-function at(next) { location = next; }
-function requireJourney(condition, name) { if (!condition) throw new Error(`J-15/${name}`); }
+function at(next) {
+  location = next;
+  if (localDebugEnabled()) recordDebugDetail('J-15', `at ${next}`);
+}
+function requireJourney(condition, name, detail) {
+  if (condition) return;
+  const error = new Error(`J-15/${name}`);
+  if (detail !== undefined) error.detail = detail;
+  throw error;
+}
 function inside(parent, child) {
   const relation = relative(parent, child);
   return relation === '' || (!relation.startsWith(`..${sep}`) && relation !== '..' && !isAbsolute(relation));
@@ -35,7 +43,7 @@ function parseJourney() {
       (platform() === 'darwin' && arch() === 'arm64' && Number(release().split('.')[0]) >= 24),
     'host-runtime',
   );
-  requireJourney(!Object.keys(process.env).some((name) => DEBUG_SELECTORS.has(name.toUpperCase())), 'debug-environment');
+  requireJourney(localDebugEnabled() || !Object.keys(process.env).some((name) => DEBUG_SELECTORS.has(name.toUpperCase())), 'debug-environment');
 }
 
 function productEnvironment(executable) {
@@ -332,6 +340,7 @@ async function main() {
       cancellation.throwIfRequested();
       browserAcquisition = chromium.launch({ executablePath: executable, headless: false, ignoreDefaultArgs: true, args, env: productEnvironment(executable), timeout: 60_000 });
       browser = await browserAcquisition;
+      attachProductOutput('J-15', browser, 'launch');
       cancellation.throwIfRequested();
       return createRendererManager(browser);
     };
@@ -538,4 +547,4 @@ async function main() {
   }
 }
 
-main().catch(() => reportJourneyFailure('J-15', location));
+main().catch((error) => reportJourneyFailure('J-15', location, error));

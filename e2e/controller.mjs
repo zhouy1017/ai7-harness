@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
-import { resolve } from 'node:path';
+import { appendFileSync, createWriteStream, mkdirSync, writeFileSync } from 'node:fs';
+import { relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
@@ -9,6 +10,15 @@ const CANCELLATION_MESSAGE = 'ai7-e2e-cancel';
 const CANCELLATION_SIGNALS = new Set(['SIGINT', 'SIGTERM']);
 const CONTROLLER_DISCONNECT = 'controller-disconnect';
 const SIGNAL_CLEANUP_GRACE_MS = 90_000;
+// Local debug (ADR 0062): controller-only switch. Never forwarded to the product process, refused under CI.
+const LOCAL_DEBUG_ENV = 'AI7_E2E_LOCAL_DEBUG';
+const LOCAL_DEBUG_DIR_ENV = 'AI7_E2E_LOCAL_DEBUG_DIR';
+const CI_SELECTORS = Object.freeze(['CI', 'GITHUB_ACTIONS', 'AI7_CI_WINDOWS_SERVER_2025']);
+const DEBUG_CAPTURE_TIMEOUT_MS = 10_000;
+const debugCaptures = new Set();
+let debugArtifactRoot;
+let productAttachSequence = 0;
+let screenshotsWritten = 0;
 const cancellationHandlers = new Set();
 let pendingCancellationSignal = null;
 let runnerForcedTermination;
@@ -389,11 +399,13 @@ export function isAdmittedLocation(journey, location) {
   return location === 'controller' || JOURNEY_LOCATIONS[journey]?.includes(location) === true;
 }
 
-export function reportJourneyFailure(journey, location) {
+export function reportJourneyFailure(journey, location, error) {
   const admitted = isAdmittedLocation(journey, location) ? location : 'controller';
   disconnectControllerChannel();
   console.error(`${journey}/${admitted}`);
   process.exitCode = 1;
+  if (!localDebugEnabled()) return undefined;
+  return writeDebugFailure(journey, location, error);
 }
 
 export function installJourneyCancellationCleanup(cleanup, interrupt = () => undefined) {
@@ -406,6 +418,7 @@ export function installJourneyCancellationCleanup(cleanup, interrupt = () => und
   const runCleanup = () => {
     cleanupPromise ??= Promise.resolve().then(async () => {
       await interruptionPromise;
+      if (localDebugEnabled()) await captureArmedBrowsers('final');
       await cleanup();
     });
     return cleanupPromise;
@@ -455,17 +468,31 @@ function boundedCollector(stream) {
   };
 }
 
-export async function runJourneyProcess(journey) {
+export async function runJourneyProcess(journey, options = {}) {
   const args = [resolve(ROOT, 'e2e', 'run.mjs'), '--journey', journey];
+  const artifactRoot = options.debug === true ? createDebugArtifactRoot(journey) : null;
+  const env = artifactRoot === null
+    ? process.env
+    : {
+        ...process.env,
+        [LOCAL_DEBUG_ENV]: '1',
+        [LOCAL_DEBUG_DIR_ENV]: artifactRoot,
+        DEBUG: 'pw:browser',
+        DEBUG_FILE: resolve(artifactRoot, 'playwright-browser.log'),
+      };
   const child = spawn(process.execPath, args, {
     cwd: ROOT,
-    env: process.env,
+    env,
     stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
     windowsHide: true,
   });
 
   const stdout = boundedCollector(child.stdout);
   const stderr = boundedCollector(child.stderr);
+  if (artifactRoot !== null) {
+    teeStream(child.stdout, resolve(artifactRoot, 'runner-stdout.log'));
+    teeStream(child.stderr, resolve(artifactRoot, 'runner-stderr.log'));
+  }
 
   return new Promise((resolveExit) => {
     let settled = false;
@@ -501,6 +528,7 @@ export async function runJourneyProcess(journey) {
       resolveExit({
         ...result,
         controllerSignal,
+        artifactRoot,
         stdout: stdout.output(),
         stderr: stderr.output(),
         outputOverflow: stdout.overflow() || stderr.overflow(),
@@ -511,4 +539,211 @@ export async function runJourneyProcess(journey) {
       finish({ code: code ?? 1, signal, spawnError: false }),
     );
   });
+}
+
+// ---- Local debug (ADR 0062) -------------------------------------------------------------------
+
+/** True when a hosted CI marker is present; the local debug switch is refused there. */
+export function localDebugRefused() {
+  return CI_SELECTORS.some((name) => process.env[name] !== undefined);
+}
+
+/** True only on a developer host that set the controller switch. Never true under CI. */
+export function localDebugEnabled() {
+  return process.env[LOCAL_DEBUG_ENV] === '1' && !localDebugRefused();
+}
+
+/** The ignored per-run artifact directory under test-results/; created lazily, shared with a launching controller. */
+export function localDebugArtifactRoot(journey) {
+  if (debugArtifactRoot === undefined) {
+    const inherited = process.env[LOCAL_DEBUG_DIR_ENV];
+    debugArtifactRoot = inherited !== undefined && inherited !== ''
+      ? inherited
+      : resolve(ROOT, 'test-results', 'e2e', journey, new Date().toISOString().replace(/[:.]/g, '-'));
+    mkdirSync(debugArtifactRoot, { recursive: true });
+  }
+  return debugArtifactRoot;
+}
+
+let createdArtifactRoots = 0;
+
+/** A fresh artifact directory for one launched run; the child inherits it through the environment. */
+export function createDebugArtifactRoot(journey) {
+  createdArtifactRoots += 1;
+  const stamp = `${new Date().toISOString().replace(/[:.]/g, '-')}-${createdArtifactRoots}`;
+  const path = resolve(ROOT, 'test-results', 'e2e', journey, stamp);
+  mkdirSync(path, { recursive: true });
+  return path;
+}
+
+export function debugArtifactLabel(path) {
+  return relative(ROOT, path).split(sep).join('/');
+}
+
+/** Append one developer-facing detail line; a no-op without the switch. */
+export function recordDebugDetail(journey, text) {
+  if (!localDebugEnabled()) return;
+  appendFileSync(resolve(localDebugArtifactRoot(journey), 'details.log'), `${new Date().toISOString()} ${text}\n`);
+}
+
+/** Arm a screenshot capture for every page of a launched browser; product process output arrives through Playwright's browser log. */
+export function attachProductOutput(journey, browser, label = 'launch') {
+  if (!localDebugEnabled() || browser === undefined || browser === null) return;
+  const artifactRoot = localDebugArtifactRoot(journey);
+  const sequence = ++productAttachSequence;
+  const capture = (phase) => captureBrowserScreenshots(browser, artifactRoot, `${sequence}-${label}-${phase}`);
+  debugCaptures.add(capture);
+  if (typeof browser.once === 'function') browser.once('disconnected', () => debugCaptures.delete(capture));
+}
+
+async function captureArmedBrowsers(phase) {
+  let written = 0;
+  for (const capture of [...debugCaptures]) {
+    try {
+      written += await capture(phase);
+    } catch (captureError) {
+      if (debugArtifactRoot !== undefined) {
+        appendFileSync(
+          resolve(debugArtifactRoot, 'details.log'),
+          `${new Date().toISOString()} screenshot capture (${phase}) failed: ${captureError instanceof Error ? captureError.message : String(captureError)}\n`,
+        );
+      }
+    }
+  }
+  screenshotsWritten += written;
+  return written;
+}
+
+function teeStream(source, path) {
+  const file = createWriteStream(path, { flags: 'a' });
+  source.on('data', (chunk) => file.write(chunk));
+  source.once('close', () => file.end());
+  source.once('error', () => file.end());
+}
+
+function withTimeout(promise, milliseconds) {
+  let timer;
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error('debug-capture-timeout')), milliseconds);
+      timer.unref();
+    }),
+  ]).finally(() => clearTimeout(timer));
+}
+
+async function captureBrowserScreenshots(browser, artifactRoot, label) {
+  if (typeof browser.isConnected === 'function' && !browser.isConnected()) return 0;
+  const session = await withTimeout(browser.newBrowserCDPSession(), DEBUG_CAPTURE_TIMEOUT_MS);
+  let written = 0;
+  try {
+    const { targetInfos } = await withTimeout(session.send('Target.getTargets'), DEBUG_CAPTURE_TIMEOUT_MS);
+    for (const target of targetInfos.filter((info) => info.type === 'page')) {
+      const { sessionId } = await withTimeout(
+        session.send('Target.attachToTarget', { targetId: target.targetId, flatten: false }),
+        DEBUG_CAPTURE_TIMEOUT_MS,
+      );
+      try {
+        const data = await withTimeout(
+          new Promise((resolveShot, rejectShot) => {
+            const id = 1;
+            const onMessage = ({ sessionId: incoming, message }) => {
+              if (incoming !== sessionId) return;
+              let parsed;
+              try {
+                parsed = JSON.parse(message);
+              } catch {
+                return;
+              }
+              if (parsed.id !== id) return;
+              session.off('Target.receivedMessageFromTarget', onMessage);
+              if (parsed.error) rejectShot(new Error(parsed.error.message ?? 'debug-capture-error'));
+              else resolveShot(parsed.result?.data);
+            };
+            session.on('Target.receivedMessageFromTarget', onMessage);
+            session
+              .send('Target.sendMessageToTarget', {
+                sessionId,
+                message: JSON.stringify({ id, method: 'Page.captureScreenshot', params: { format: 'png' } }),
+              })
+              .catch(rejectShot);
+          }),
+          DEBUG_CAPTURE_TIMEOUT_MS,
+        );
+        if (typeof data === 'string' && data.length > 0) {
+          written += 1;
+          writeFileSync(resolve(artifactRoot, `screenshot-${label}-${written}.png`), Buffer.from(data, 'base64'));
+        }
+      } finally {
+        await session.send('Target.detachFromTarget', { sessionId }).catch(() => undefined);
+      }
+    }
+  } finally {
+    await session.detach().catch(() => undefined);
+  }
+  return written;
+}
+
+function describeError(error, depth = 0) {
+  if (depth > 8 || error === undefined || error === null) return [];
+  const lines = [];
+  const prefix = depth === 0 ? 'error' : `cause[${depth}]`;
+  if (error instanceof Error) {
+    lines.push(`${prefix}: ${error.stack ?? `${error.name}: ${error.message}`}`);
+    if ('code' in error && error.code !== undefined) lines.push(`${prefix}.code: ${String(error.code)}`);
+    if ('detail' in error && error.detail !== undefined) {
+      let detail;
+      try {
+        detail = typeof error.detail === 'string' ? error.detail : JSON.stringify(error.detail, null, 2);
+      } catch {
+        detail = String(error.detail);
+      }
+      lines.push(`${prefix}.detail: ${detail}`);
+    }
+    lines.push(...describeError(error.cause, depth + 1));
+  } else {
+    let rendered;
+    try {
+      rendered = typeof error === 'string' ? error : JSON.stringify(error);
+    } catch {
+      rendered = String(error);
+    }
+    lines.push(`${prefix}: ${rendered}`);
+  }
+  return lines;
+}
+
+async function writeDebugFailure(journey, location, error) {
+  const artifactRoot = localDebugArtifactRoot(journey);
+  const lines = [
+    `journey: ${journey}`,
+    `location: ${location}`,
+    `recorded_at: ${new Date().toISOString()}`,
+    `node: ${process.versions.node}`,
+    `platform: ${process.platform} ${process.arch}`,
+    ...describeError(error),
+  ];
+  writeFileSync(resolve(artifactRoot, 'failure.txt'), `${lines.join('\n')}\n`);
+  await captureArmedBrowsers('failure');
+  console.error(`LOCAL_DEBUG/${journey}/artifacts/${debugArtifactLabel(artifactRoot)}/screenshots/${screenshotsWritten}`);
+}
+
+/** Classify a finished journey process the same way the payload-safe diagnostic does. */
+export function classifyJourneyResult(result, journey) {
+  if (result.spawnError) return { location: 'controller', errorClass: 'controller-spawn' };
+  if (result.controllerSignal !== null) return { location: 'controller', errorClass: 'controller-signal' };
+  if (result.signal !== null) return { location: 'controller', errorClass: 'controller-child-signal' };
+  if (result.outputOverflow) return { location: 'controller', errorClass: 'controller-output-ambiguous' };
+  const locations = result.stderr
+    .split(/\r?\n/u)
+    .map((line) => {
+      const prefix = `${journey}/`;
+      if (!line.startsWith(prefix)) return null;
+      const location = line.slice(prefix.length);
+      return isAdmittedLocation(journey, location) ? location : null;
+    })
+    .filter((location) => location !== null);
+  if (locations.length === 1) return { location: locations[0], errorClass: 'journey-failure' };
+  if (result.stdout.length === 0 && result.stderr.length === 0) return { location: 'controller', errorClass: 'controller-exit' };
+  return { location: 'controller', errorClass: 'controller-output-ambiguous' };
 }

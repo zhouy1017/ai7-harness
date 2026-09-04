@@ -27,7 +27,11 @@ pnpm run e2e -- --journey J-15
 pnpm run e2e -- --journey J-03
 pnpm run e2e:all
 pnpm --silent run e2e:diagnose -- --journey <J-01|J-02|J-08|J-12|J-15|J-03>
+pnpm run e2e:debug -- --journey <J-01|J-02|J-08|J-12|J-15|J-03>
+pnpm run e2e:repeat -- --journey <J-01|J-02|J-08|J-12|J-15|J-03> --times <n>
 ```
+
+`e2e:debug` runs one admitted Journey with the controller-only `AI7_E2E_LOCAL_DEBUG` switch: the runner's stdout/stderr, the product process output that Playwright logs for the launched browser (`playwright-browser.log`), the complete failure error with its `cause` chain and stack, and a screenshot of every open renderer page taken before the runner's cleanup are written only under ignored `test-results/e2e/<journey>/<timestamp>/`. `e2e:repeat` runs the same Journey up to `n` times through that mode, stops at the first failure, and deletes the artifacts of passing runs. Both refuse to run under `CI`, `GITHUB_ACTIONS`, or the Windows CI marker, never forward the switch to the product process, and leave `e2e`, `e2e:all`, and `e2e:diagnose` output byte-identical (ADR 0062).
 
 The pnpm SRI-bearing `packageManager` declaration is the pnpm selection authority. `doctor` reports the OS/CPU, exact runtime pins, canonical native adapter, official npm registry, host Node distribution identity/URL/SHA-256, lock/config hashes, and host Electron artifact identity/URL/SHA-256. The Node runtime executing the command must itself be exactly 24.18.1; CI selects it with the full-SHA-pinned `actions/setup-node` action and the repository records the official distribution digest.
 

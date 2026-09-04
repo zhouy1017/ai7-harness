@@ -5,7 +5,7 @@ import { createServer } from 'node:http';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { arch, platform, release, tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { installJourneyCancellationCleanup, reportJourneyFailure } from './controller.mjs';
+import { attachProductOutput, installJourneyCancellationCleanup, localDebugEnabled, recordDebugDetail, reportJourneyFailure } from './controller.mjs';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const DEBUG_SELECTORS = new Set(['DEBUG', 'DEBUG_FILE', 'PWDEBUG', 'PWDEBUGIMPL']);
@@ -16,8 +16,16 @@ let Zip;
 let ZipPassThrough;
 let strToU8;
 
-function at(next) { location = next; }
-function requireJourney(condition, name) { if (!condition) throw new Error(`J-08/${name}`); }
+function at(next) {
+  location = next;
+  if (localDebugEnabled()) recordDebugDetail('J-08', `at ${next}`);
+}
+function requireJourney(condition, name, detail) {
+  if (condition) return;
+  const error = new Error(`J-08/${name}`);
+  if (detail !== undefined) error.detail = detail;
+  throw error;
+}
 function inside(parent, child) {
   const relation = relative(parent, child);
   return relation === '' || (!relation.startsWith(`..${sep}`) && relation !== '..' && !isAbsolute(relation));
@@ -33,7 +41,7 @@ function parseJourney() {
       (platform() === 'darwin' && arch() === 'arm64' && Number(release().split('.')[0]) >= 24),
     'host-runtime',
   );
-  requireJourney(!Object.keys(process.env).some((name) => DEBUG_SELECTORS.has(name.toUpperCase())), 'debug-environment');
+  requireJourney(localDebugEnabled() || !Object.keys(process.env).some((name) => DEBUG_SELECTORS.has(name.toUpperCase())), 'debug-environment');
 }
 
 function productEnvironment(executable) {
@@ -337,6 +345,7 @@ async function main() {
       cancellation.throwIfRequested();
       browserAcquisition = chromium.launch({ executablePath: executable, headless: false, ignoreDefaultArgs: true, args, env: productEnvironment(executable), timeout: 60_000 });
       browser = await browserAcquisition;
+      attachProductOutput('J-08', browser, 'launch');
       cancellation.throwIfRequested();
       return attachRenderer(browser);
     };
@@ -550,4 +559,4 @@ async function exists(path) {
   try { await lstat(path); return true; } catch (error) { if (error?.code === 'ENOENT') return false; throw error; }
 }
 
-main().catch(() => reportJourneyFailure('J-08', location));
+main().catch((error) => reportJourneyFailure('J-08', location, error));
