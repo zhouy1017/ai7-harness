@@ -1,5 +1,5 @@
 import { createWriteStream, existsSync } from 'node:fs';
-import { lstat, mkdtemp, opendir, realpath, rm, stat } from 'node:fs/promises';
+import { lstat, mkdtemp, opendir, readFile, realpath, rm, stat } from 'node:fs/promises';
 import { once } from 'node:events';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { arch, platform, release, tmpdir } from 'node:os';
@@ -40,6 +40,8 @@ const STARTUP_FAILURE_MARKERS = Object.freeze([
   Object.freeze(['AI7_STARTUP_FAILED/renderer-first-paint', 'launch-restart-renderer-target-query-startup-renderer-first-paint']),
   Object.freeze(['AI7_STARTUP_FAILED/readiness-signal', 'launch-restart-renderer-target-query-startup-readiness-signal']),
 ]);
+const STARTUP_FAILURE_WITNESS_NAME = '.ai7-j02-startup-failure';
+const STARTUP_FAILURE_WITNESS_MAX_BYTES = 64;
 let diagnosticLocation = 'entry';
 let electronExecutable;
 let Zip;
@@ -86,6 +88,22 @@ function productEnvironment(executable) {
     selected.PATH = [dirname(executable), '/usr/bin', '/bin', '/usr/sbin', '/sbin'].join(delimiter);
   }
   return selected;
+}
+
+function startupFailureWitnessPath(shellRoot) {
+  return resolve(shellRoot, STARTUP_FAILURE_WITNESS_NAME);
+}
+
+async function readStartupFailureWitnessLocation(path) {
+  try {
+    const metadata = await lstat(path);
+    if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.size < 1 || metadata.size > STARTUP_FAILURE_WITNESS_MAX_BYTES ||
+      (await realpath(path)) !== path) return undefined;
+    const value = await readFile(path, 'utf8');
+    return STARTUP_FAILURE_MARKERS.find(([token]) => value === `${token}\n`)?.[1];
+  } catch {
+    return undefined;
+  }
 }
 
 function blockText(position) {
@@ -165,7 +183,7 @@ async function createSyntheticDocx(path) {
   requireJourney(metadata.isFile() && !metadata.isSymbolicLink() && metadata.size > CHARACTER_COUNT, 'fixture-file');
 }
 
-async function attachRendererTarget(browser, launchScenario) {
+async function attachRendererTarget(browser, launchScenario, startupFailureWitness) {
   at(`launch-${launchScenario}-renderer-cdp-session`);
   const rootSession = await browser.newBrowserCDPSession();
   const deadline = Date.now() + 60_000;
@@ -192,7 +210,10 @@ async function attachRendererTarget(browser, launchScenario) {
         } else if (startupLocations.size > 1) {
           at('launch-restart-renderer-target-query-browser-disconnected-multiple-startup-markers');
         } else if (!browser.isConnected()) {
-          at('launch-restart-renderer-target-query-browser-disconnected-no-startup-marker');
+          at(
+            (await readStartupFailureWitnessLocation(startupFailureWitness))
+              ?? 'launch-restart-renderer-target-query-browser-disconnected-no-valid-startup-witness',
+          );
         } else if (sessionClosed) {
           at('launch-restart-renderer-target-query-session-closed-connected');
         } else {
@@ -1028,6 +1049,7 @@ async function main() {
     await createSyntheticDocx(docx);
     const dataRoot = await createCanonicalExternalDataRoot(resolve(runRoot, 'data'), checkoutRoot);
     const shellRoot = await ensureCanonicalDataDirectory(dataRoot, 'shell');
+    const startupFailureWitness = startupFailureWitnessPath(shellRoot);
     const executable = electronExecutable();
     const productArgs = [
       '--disable-background-networking', '--disable-component-update', '--disable-default-apps', '--disable-domain-reliability',
@@ -1042,14 +1064,16 @@ async function main() {
       browser = await browserAcquisition;
       at(`launch-${launchScenario}-post-acquisition-cancellation`);
       cancellation.throwIfRequested();
-      return attachRendererTarget(browser, launchScenario);
+      return attachRendererTarget(browser, launchScenario, startupFailureWitness);
     };
+    await rm(startupFailureWitness, { force: true });
     let renderer = await launch('initial');
     await importAndOpen(renderer);
     await runWorkspaceJourney(renderer, dataRoot);
     at('restart-browser-close');
     await browser.close();
     browser = undefined;
+    await rm(startupFailureWitness, { force: true });
     renderer = await launch('restart');
     await runRestartJourney(renderer);
     await runAccessibilityJourney(renderer);

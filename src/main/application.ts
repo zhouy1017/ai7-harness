@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { writeFile } from 'node:fs/promises';
 import { release } from 'node:os';
 import { basename, extname, isAbsolute, resolve } from 'node:path';
 import {
@@ -1995,6 +1996,7 @@ function registerRendererHandlers(
 
 export async function runApplication(): Promise<void> {
   let startupLocation = 'runtime';
+  let writeStartupFailureWitness = async (_token: string): Promise<void> => undefined;
   let service: ServiceClient | undefined;
   let serviceInterrupted = false;
   let productReady = false;
@@ -2197,6 +2199,17 @@ export async function runApplication(): Promise<void> {
     const dataRoot = await createCanonicalExternalDataRoot(launch.dataRoot, codeRoot);
     startupLocation = 'shell-root';
     const shellRoot = await ensureCanonicalDataDirectory(dataRoot, 'shell');
+    const startupFailureWitness = process.env.AI7_E2E_JOURNEY === 'J-02'
+      ? resolve(shellRoot, '.ai7-j02-startup-failure')
+      : undefined;
+    writeStartupFailureWitness = async (token: string): Promise<void> => {
+      if (startupFailureWitness === undefined) return;
+      try {
+        await writeFile(startupFailureWitness, `${token}\n`, { encoding: 'utf8', flag: 'wx', mode: 0o600 });
+      } catch {
+        // A diagnostic witness must not alter the existing startup failure behavior.
+      }
+    };
     const earlyUserDataSwitch = app.commandLine.getSwitchValue('user-data-dir');
     requireDesktop(isAbsolute(earlyUserDataSwitch));
     await requireSameCanonicalDataDirectory(shellRoot, earlyUserDataSwitch, app.getPath('userData'));
@@ -2204,6 +2217,7 @@ export async function runApplication(): Promise<void> {
     await requireSameCanonicalDataDirectory(shellRoot, app.getPath('userData'));
     startupLocation = 'single-instance';
     if (!app.requestSingleInstanceLock()) {
+      await writeStartupFailureWitness('AI7_STARTUP_FAILED/single-instance-lock');
       process.stderr.write('AI7_STARTUP_FAILED/single-instance-lock\n');
       await stop();
       app.exit(0);
@@ -2604,6 +2618,7 @@ export async function runApplication(): Promise<void> {
     initialWindow.window.webContents.send(MAIN_EVENTS.productReady);
     requireDesktop(!serviceInterrupted);
   } catch {
+    await writeStartupFailureWitness(`AI7_STARTUP_FAILED/${startupLocation}`);
     process.stderr.write(`AI7_STARTUP_FAILED/${startupLocation}\n`);
     quitting = true;
     app.removeListener('before-quit', beforeQuit);

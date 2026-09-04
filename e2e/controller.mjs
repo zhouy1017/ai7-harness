@@ -252,7 +252,7 @@ const JOURNEY_LOCATIONS = Object.freeze({
     'launch-restart-renderer-target-query-startup-renderer-first-paint',
     'launch-restart-renderer-target-query-startup-readiness-signal',
     'launch-restart-renderer-target-query-browser-disconnected-multiple-startup-markers',
-    'launch-restart-renderer-target-query-browser-disconnected-no-startup-marker',
+    'launch-restart-renderer-target-query-browser-disconnected-no-valid-startup-witness',
     'launch-restart-renderer-target-query-session-closed-connected',
     'launch-restart-renderer-target-query-rejected-connected',
     'launch-restart-renderer-target-classification',
