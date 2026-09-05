@@ -16,6 +16,7 @@ import {
 } from 'electron';
 import {
   IPC_CHANNELS,
+  J04_MODEL_ADAPTER_CONTROL_PATTERN,
   MAIN_EVENTS,
   type CommitNewBookRendererInput,
   type CommitManuscriptReimportRendererInput,
@@ -27,6 +28,7 @@ import {
   type ImportCommitProjection,
   type J01ImportControl,
   type J03ForegroundExecutionControl,
+  type J04ModelAdapterControl,
   type J08RecoveryControl,
   type ModelServiceSettingsProjection,
   type PickerReselectResult,
@@ -54,6 +56,7 @@ interface LaunchArguments {
   importControl: J01ImportControl | undefined;
   foregroundExecutionControl: J03ForegroundExecutionControl | undefined;
   recoveryControl: J08RecoveryControl | undefined;
+  modelAdapterControl: J04ModelAdapterControl | undefined;
   observeJ12Reveal: boolean;
   launcherPid: number;
 }
@@ -73,7 +76,7 @@ interface ManuscriptCapability {
 
 interface EditorResourceCapability {
   kind: 'job' | 'search' | 'preview';
-  operation: 'search' | 'replacement' | 'reimport' | 'task-authorization';
+  operation: 'search' | 'replacement' | 'reimport' | 'task-authorization' | 'baseline-analysis';
   bookId: string;
   manuscriptId: string | null;
   branchId: string | null;
@@ -144,9 +147,11 @@ function parseArguments(argv: string[]): LaunchArguments {
           key === '--j08-picker-path' ||
           key === '--j12-picker-path' ||
           key === '--j03-picker-path' ||
+          key === '--j04-picker-path' ||
           key === '--j01-import-control' ||
           key === '--j03-foreground-execution-control' ||
           key === '--j08-recovery-control' ||
+          key === '--j04-model-adapter' ||
           key === '--j12-observe-reveal' ||
           key === '--launcher-pid'),
     );
@@ -159,7 +164,8 @@ function parseArguments(argv: string[]): LaunchArguments {
   const j08PickerPath = values.get('--j08-picker-path');
   const j12PickerPath = values.get('--j12-picker-path');
   const j03PickerPath = values.get('--j03-picker-path');
-  requireDesktop([j01PickerPath, j02PickerPath, j08PickerPath, j12PickerPath, j03PickerPath].filter(Boolean).length <= 1);
+  const j04PickerPath = values.get('--j04-picker-path');
+  requireDesktop([j01PickerPath, j02PickerPath, j08PickerPath, j12PickerPath, j03PickerPath, j04PickerPath].filter(Boolean).length <= 1);
   requireDesktop(
     j01PickerPath === undefined ||
       (process.env.AI7_E2E_JOURNEY === 'J-01' &&
@@ -190,7 +196,13 @@ function parseArguments(argv: string[]): LaunchArguments {
         isAbsolute(j03PickerPath) &&
         extname(j03PickerPath).toLocaleLowerCase('en-US') === '.docx'),
   );
-  const injectedPickerPath = j01PickerPath ?? j02PickerPath ?? j08PickerPath ?? j12PickerPath ?? j03PickerPath;
+  requireDesktop(
+    j04PickerPath === undefined ||
+      (process.env.AI7_E2E_JOURNEY === 'J-04' &&
+        isAbsolute(j04PickerPath) &&
+        extname(j04PickerPath).toLocaleLowerCase('en-US') === '.docx'),
+  );
+  const injectedPickerPath = j01PickerPath ?? j02PickerPath ?? j08PickerPath ?? j12PickerPath ?? j03PickerPath ?? j04PickerPath;
   const importControlValue = values.get('--j01-import-control');
   const importControl =
     importControlValue === 'before-commit' ||
@@ -212,6 +224,10 @@ function parseArguments(argv: string[]): LaunchArguments {
   const recoveryControl = recoveryControlValue === 'interrupt-after-journal-ack'
     ? recoveryControlValue
     : undefined;
+  const modelAdapterControlValue = values.get('--j04-model-adapter');
+  const modelAdapterControl = modelAdapterControlValue !== undefined && J04_MODEL_ADAPTER_CONTROL_PATTERN.test(modelAdapterControlValue)
+    ? modelAdapterControlValue
+    : undefined;
   const observeJ12RevealValue = values.get('--j12-observe-reveal');
   const observeJ12Reveal = observeJ12RevealValue === 'true';
   const launcherPid = Number(values.get('--launcher-pid'));
@@ -225,7 +241,10 @@ function parseArguments(argv: string[]): LaunchArguments {
   requireDesktop(
     recoveryControlValue === undefined || (process.env.AI7_E2E_JOURNEY === 'J-08' && recoveryControl !== undefined),
   );
-  requireDesktop([importControl, foregroundExecutionControl, recoveryControl].filter(Boolean).length <= 1);
+  requireDesktop(
+    modelAdapterControlValue === undefined || (process.env.AI7_E2E_JOURNEY === 'J-04' && modelAdapterControl !== undefined),
+  );
+  requireDesktop([importControl, foregroundExecutionControl, recoveryControl, modelAdapterControl].filter(Boolean).length <= 1);
   requireDesktop(
     observeJ12RevealValue === undefined ||
       (process.env.AI7_E2E_JOURNEY === 'J-12' && observeJ12RevealValue === 'true'),
@@ -237,6 +256,7 @@ function parseArguments(argv: string[]): LaunchArguments {
     importControl,
     foregroundExecutionControl,
     recoveryControl,
+    modelAdapterControl,
     observeJ12Reveal,
     launcherPid,
   };
@@ -481,7 +501,9 @@ function registerRendererHandlers(
         ? 'replacement'
         : job.kind === 'task-authorization-preparation'
           ? 'task-authorization'
-          : 'reimport';
+          : job.kind === 'baseline-analysis-preparation'
+            ? 'baseline-analysis'
+            : 'reimport';
   const resourceSeed = (
     capability: ManuscriptCapability | EditorResourceCapability,
     operation: EditorResourceCapability['operation'] = 'operation' in capability ? capability.operation : 'search',
@@ -542,6 +564,10 @@ function registerRendererHandlers(
         capability.branchId !== null && result.branchId !== capability.branchId
       ) {
         throw new ServiceCallError('AI7_EDITOR_CAPABILITY_INVALID', '稿件重新导入提交结果不属于当前图书工作台。');
+      }
+    } else if (result !== null && 'coverageManifest' in result) {
+      if (actualOperation !== 'baseline-analysis' || result.bookId !== capability.bookId) {
+        throw new ServiceCallError('AI7_EDITOR_CAPABILITY_INVALID', '基线稿件分析准备结果不属于当前图书工作台。');
       }
     } else if (result !== null && 'taskIntent' in result) {
       if (actualOperation !== 'task-authorization' || result.bookId !== capability.bookId) {
@@ -1816,6 +1842,68 @@ function registerRendererHandlers(
         });
       }),
   );
+  ipcMain.handle(IPC_CHANNELS.inspectBaselineAnalysis, (event) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      requireAuthority();
+      const route = requireCurrentBookRoute(owned);
+      const routeGeneration = owned.routeGeneration;
+      const routeRequestSequence = owned.routeRequestSequence;
+      const result = await service.call('inspectBaselineAnalysis', { bookId: route.bookId });
+      requireCurrentRouteReadEpoch(owned, routeGeneration, routeRequestSequence);
+      if (result.bookId !== route.bookId) {
+        throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '基线稿件分析记录不属于当前图书工作台。');
+      }
+      return result;
+    }),
+  );
+  ipcMain.handle(
+    IPC_CHANNELS.prepareBaselineAnalysis,
+    (event, input: Omit<ServiceOperationMap['prepareBaselineAnalysis']['input'], 'bookId'>) =>
+      envelope(async () => {
+        const owned = requireSender(event);
+        return serializeEffect(async () => {
+          requireAuthority();
+          const route = requireCurrentBookRoute(owned);
+          const result = await service.call('prepareBaselineAnalysis', {
+            goal: input.goal,
+            bookId: route.bookId,
+          });
+          if (result.kind !== 'baseline-analysis-preparation') {
+            throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '基线稿件分析准备结果类型无效。');
+          }
+          rememberEditorResource(owned, 'job', result.jobId, {
+            operation: 'baseline-analysis',
+            bookId: route.bookId,
+            manuscriptId: null,
+            branchId: null,
+          });
+          return result;
+        });
+      }),
+  );
+  ipcMain.handle(
+    IPC_CHANNELS.authorizeBaselineAnalysis,
+    (event, input: Omit<ServiceOperationMap['authorizeBaselineAnalysis']['input'], 'bookId'>) =>
+      envelope(async () => {
+        const owned = requireSender(event);
+        return serializeEffect(async () => {
+          requireAuthority();
+          const route = requireCurrentBookRoute(owned);
+          const routeGeneration = owned.routeGeneration;
+          const result = await service.call('authorizeBaselineAnalysis', {
+            taskIntentId: input.taskIntentId,
+            planEnvelopeDigest: input.planEnvelopeDigest,
+            bookId: route.bookId,
+          });
+          requireCurrentRouteGeneration(owned, routeGeneration);
+          if (result.bookId !== route.bookId) {
+            throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '基线稿件分析授权结果不属于当前图书工作台。');
+          }
+          return result;
+        });
+      }),
+  );
   ipcMain.handle(IPC_CHANNELS.startSearch, (event, input: ServiceOperationMap['startSearch']['input']) =>
     envelope(async () => {
       const owned = requireSender(event);
@@ -2264,6 +2352,7 @@ export async function runApplication(): Promise<void> {
       launch.importControl,
       launch.foregroundExecutionControl,
       launch.recoveryControl,
+      launch.modelAdapterControl,
     );
     service.onUnexpectedExit(() => {
       serviceInterrupted = true;
