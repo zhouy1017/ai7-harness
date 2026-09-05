@@ -6,6 +6,7 @@ import {
   MAX_FRAME_BYTES,
   type J01ImportControl,
   type J03ForegroundExecutionControl,
+  type J04ModelAdapterControl,
   type J08RecoveryControl,
   type ServiceOperation,
   type ServiceOperationMap,
@@ -64,11 +65,13 @@ function serviceEnvironment(
   importControl: J01ImportControl | undefined,
   foregroundExecutionControl: J03ForegroundExecutionControl | undefined,
   recoveryControl: J08RecoveryControl | undefined,
+  modelAdapterControl: J04ModelAdapterControl | undefined,
 ): NodeJS.ProcessEnv {
   const selected: NodeJS.ProcessEnv = { ELECTRON_RUN_AS_NODE: '1' };
   if (importControl) selected.AI7_E2E_JOURNEY = 'J-01';
   if (foregroundExecutionControl) selected.AI7_E2E_JOURNEY = 'J-03';
   if (recoveryControl) selected.AI7_E2E_JOURNEY = 'J-08';
+  if (modelAdapterControl) selected.AI7_E2E_JOURNEY = 'J-04';
   const names =
     process.platform === 'win32'
       ? ['SystemRoot', 'WINDIR', 'TEMP', 'TMP', 'PATHEXT', 'ComSpec', 'APPDATA', 'LOCALAPPDATA', 'USERPROFILE']
@@ -89,7 +92,7 @@ function serviceEnvironment(
 
 function readinessIsExact(value: ServiceReadiness): boolean {
   return (
-    value.protocolVersion === 16 &&
+    value.protocolVersion === 17 &&
     value.state === 'ready' &&
     value.runtime.electron === '43.4.1' &&
     value.runtime.node === '24.18.1' &&
@@ -143,6 +146,7 @@ export class ServiceClient {
     importControl?: J01ImportControl,
     foregroundExecutionControl?: J03ForegroundExecutionControl,
     recoveryControl?: J08RecoveryControl,
+    modelAdapterControl?: J04ModelAdapterControl,
   ): Promise<ServiceClient> {
     if (!isAbsolute(executable) || !isAbsolute(serviceEntry) || !isAbsolute(dataRoot)) {
       throw new ServiceCallError('SERVICE_LAUNCH_INVALID', '本地业务服务启动参数无效。');
@@ -153,12 +157,13 @@ export class ServiceClient {
       args.push('--j03-foreground-execution-control', foregroundExecutionControl);
     }
     if (recoveryControl) args.push('--j08-recovery-control', recoveryControl);
+    if (modelAdapterControl) args.push('--j04-model-adapter', modelAdapterControl);
     const child = spawn(
       executable,
       args,
       {
         cwd: dirname(serviceEntry),
-        env: serviceEnvironment(executable, importControl, foregroundExecutionControl, recoveryControl),
+        env: serviceEnvironment(executable, importControl, foregroundExecutionControl, recoveryControl, modelAdapterControl),
         stdio: ['pipe', 'pipe', 'pipe'],
         windowsHide: true,
       },
@@ -204,7 +209,8 @@ export class ServiceClient {
         : operation === 'stageSelectedDocx' || operation === 'commitNewBookImport' || operation === 'commitSourceImport' ||
             operation === 'commitManuscriptReimport' || operation === 'commitReplacement' ||
             operation === 'saveMilestone' || operation === 'getStartup' || operation === 'getRecoveryComparison' ||
-            operation === 'viewRecoveryCandidate' || operation === 'restoreRecovery'
+            operation === 'viewRecoveryCandidate' || operation === 'restoreRecovery' ||
+            operation === 'authorizeBaselineAnalysis'
           ? LONG_REQUEST_TIMEOUT_MS
           : REQUEST_TIMEOUT_MS);
       timeout.unref();

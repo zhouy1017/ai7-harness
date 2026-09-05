@@ -1,5 +1,5 @@
 import type { LlmAdapter, LlmProviderInfo, LlmResolvedModelInfo, StreamChunk, GenerateOptions } from '@deepseek-ai/dsh-llm';
-import { parseUnitMessageHeader, unitRequestDigest } from '../analysis/contract.js';
+import { BASELINE_PROMPT_CONTRACT, parseUnitMessageHeader, unitRequestDigest } from '../analysis/contract.js';
 import { AI7_FAILURE_CODES, type DshFailureCodes } from './classification.js';
 import { LOCAL_DETERMINISTIC_MODEL, LOCAL_DETERMINISTIC_ROUTE } from './egress-gate.js';
 import { lastUserMessageText } from './payload.js';
@@ -12,9 +12,35 @@ import type { ResolvedModelFixture } from './model-fixture.js';
  * request digest recomputed from the frozen prompt contract and the manifest unit digest; a request
  * the fixture does not describe fails closed as a fixture mismatch, which the Run records as a gap.
  *
+ * A fixture response may name a block of the unit it answers with `{{block:N}}` (the N-th own block
+ * listed in the unit message, 1-based). Block identities are minted per import, so a hand-written
+ * fixture cannot know them; the placeholder lets a synthetic response cite exact in-unit ranges
+ * while echoing nothing of the manuscript beyond those identities.
+ *
  * Structurally an `LlmAdapter`; the class is not extended so that no DSH runtime value is imported
  * before the service installs network denial.
  */
+const BLOCK_PLACEHOLDER = /\{\{block:(\d+)\}\}/gu;
+const BLOCK_LINE = /^\[(blk_[0-9a-f]{24})\] /u;
+
+/** Own block identities of a unit message, in order: the `[blk_…]` lines after the own-blocks header. */
+export function ownBlockIdsOf(unitMessage: string): string[] {
+  const lines = unitMessage.split('\n');
+  const start = lines.indexOf(BASELINE_PROMPT_CONTRACT.ownHeader);
+  if (start === -1) return [];
+  const ids: string[] = [];
+  for (const line of lines.slice(start + 1)) {
+    const match = BLOCK_LINE.exec(line);
+    if (match !== null) ids.push(match[1]!);
+  }
+  return ids;
+}
+
+/** Substitute `{{block:N}}` placeholders; an out-of-range placeholder is left for the contract to reject. */
+export function substituteBlockPlaceholders(text: string, ownBlockIds: ReadonlyArray<string>): string {
+  return text.replace(BLOCK_PLACEHOLDER, (placeholder, index: string) => ownBlockIds[Number(index) - 1] ?? placeholder);
+}
+
 export class Ai7LocalDeterministicAdapter implements LlmAdapter {
   readonly #fixture: ResolvedModelFixture;
   readonly #promptContractDigest: string;
@@ -72,13 +98,15 @@ export class Ai7LocalDeterministicAdapter implements LlmAdapter {
     }
     const response = entry.response;
     switch (response.kind) {
-      case 'unit-result':
+      case 'unit-result': {
+        const replay = substituteBlockPlaceholders(response.text, ownBlockIdsOf(text!));
         yield { type: 'block-start', index: 0, blockType: 'text' };
-        yield { type: 'text-delta', index: 0, text: response.text };
-        yield { type: 'block-end', index: 0, block: { type: 'text', text: response.text } };
+        yield { type: 'text-delta', index: 0, text: replay };
+        yield { type: 'block-end', index: 0, block: { type: 'text', text: replay } };
         yield { type: 'usage', usage: { inputTokens: response.usage.inputTokens, outputTokens: response.usage.outputTokens } };
         yield { type: 'finish', reason: { kind: 'stop' } };
         return;
+      }
       case 'adapter-failure':
         yield failure(response.code, response.message, response.status ?? undefined);
         return;

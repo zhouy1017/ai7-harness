@@ -1513,7 +1513,7 @@ function renderTaskAuthorization(host: HTMLElement, projection: TaskAuthorizatio
           return;
         }
         if (completed.kind !== 'task-authorization-preparation' || completed.result === null ||
-            !('taskIntent' in completed.result)) throw new Error('任务授权准备未返回计划。');
+            !('runRecord' in completed.result)) throw new Error('任务授权准备未返回计划。');
         if (host.isConnected && completed.result.bookId === host.dataset['taskAuthorizationBookId']) {
           renderTaskAuthorization(host, completed.result);
           setStatus('任务授权计划已冻结；当前仍未派发。', 'success');

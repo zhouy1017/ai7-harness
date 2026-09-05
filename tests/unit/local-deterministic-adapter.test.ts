@@ -8,7 +8,8 @@ import type { GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm';
 import { BASELINE_PROMPT_CONTRACT_DIGEST, parseUnitResult, unitRequestDigest } from '../../src/service/analysis/contract.js';
 import { AI7_FAILURE_CODES, classifyModelFailure, evaluateRunBudgetCeiling } from '../../src/service/provider/classification.js';
 import { LOCAL_DETERMINISTIC_MODEL, LOCAL_DETERMINISTIC_ROUTE } from '../../src/service/provider/egress-gate.js';
-import { Ai7LocalDeterministicAdapter } from '../../src/service/provider/local-deterministic-adapter.js';
+import { Ai7LocalDeterministicAdapter, ownBlockIdsOf, substituteBlockPlaceholders } from '../../src/service/provider/local-deterministic-adapter.js';
+import { BASELINE_PROMPT_CONTRACT } from '../../src/service/analysis/contract.js';
 import { ModelFixtureError, fixturePath, loadModelFixture, parseModelFixture } from '../../src/service/provider/model-fixture.js';
 
 // Fixtures (iii)–(v) are hand-written synthetic shapes consumed here only; their request digests are
@@ -70,6 +71,24 @@ describe('synthetic fixtures (iii)–(v)', () => {
     const chunks = await collect(adapter.stream(request()));
     expect(chunks).toEqual([{ type: 'finish', reason: { kind: 'aborted', failure: { code: AI7_FAILURE_CODES.INTERRUPTED, message: 'Synthetic interruption before the unit response completed.' } } }]);
     expect(classifyModelFailure({ code: AI7_FAILURE_CODES.INTERRUPTED, message: '' }, codes)).toMatchObject({ signal: 'interrupted', failureClass: 'interrupted' });
+  });
+
+  it('substitutes in-unit block placeholders from the unit message and leaves out-of-range ones for the contract', () => {
+    const own1 = `blk_${'1'.repeat(24)}`;
+    const own2 = `blk_${'2'.repeat(24)}`;
+    const overlap = `blk_${'0'.repeat(24)}`;
+    const message = [
+      `分析单元 2/3 · 单元摘要 ${ZERO_UNIT_DIGEST}`,
+      BASELINE_PROMPT_CONTRACT.overlapHeader,
+      `[${overlap}] (paragraph) 重叠段落。`,
+      BASELINE_PROMPT_CONTRACT.ownHeader,
+      `[${own1}] (heading h1) 合成标题`,
+      `[${own2}] (paragraph) 合成段落。`,
+    ].join('\n');
+    expect(ownBlockIdsOf(message)).toEqual([own1, own2]);
+    expect(ownBlockIdsOf('没有消息头')).toEqual([]);
+    expect(substituteBlockPlaceholders('{"blockId":"{{block:2}}","other":"{{block:1}}","far":"{{block:9}}"}', ownBlockIdsOf(message)))
+      .toBe(`{"blockId":"${own2}","other":"${own1}","far":"{{block:9}}"}`);
   });
 
   it('fails closed as a fixture mismatch for an unknown unit, a different unit digest, another route, or no header', async () => {

@@ -1,5 +1,6 @@
 import { isAbsolute } from 'node:path';
 import {
+  BASELINE_ANALYSIS_TASK_GOAL,
   MAX_EDIT_CODE_UNITS,
   MAX_REPLACEMENT_EXCLUSIONS,
   J03_TASK_GOAL,
@@ -238,7 +239,8 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     case 'inspectEditorialWorkspaceProfile':
     case 'installEditorialWorkspaceProfile':
     case 'enableEditorialWorkspaceProfile':
-    case 'inspectTaskAuthorization': {
+    case 'inspectTaskAuthorization':
+    case 'inspectBaselineAnalysis': {
       const input = requireInput(value.input, ['bookId'], tentativeId);
       if (!isBoundedString(input.bookId, 36) || !UUID_PATTERN.test(input.bookId)) {
         throw new ProtocolError(tentativeId);
@@ -260,7 +262,15 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       }
       break;
     }
-    case 'authorizeTaskAuthorization': {
+    case 'prepareBaselineAnalysis': {
+      const input = requireInput(value.input, ['bookId', 'goal'], tentativeId);
+      if (!isBoundedString(input.bookId, 36) || !UUID_PATTERN.test(input.bookId) || input.goal !== BASELINE_ANALYSIS_TASK_GOAL) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
+    case 'authorizeTaskAuthorization':
+    case 'authorizeBaselineAnalysis': {
       const input = requireInput(value.input, ['bookId', 'taskIntentId', 'planEnvelopeDigest'], tentativeId);
       if (!isBoundedString(input.bookId, 36) || !UUID_PATTERN.test(input.bookId) ||
           !isBoundedString(input.taskIntentId, 36) || !UUID_PATTERN.test(input.taskIntentId) ||

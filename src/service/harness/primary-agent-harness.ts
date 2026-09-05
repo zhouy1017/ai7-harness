@@ -86,7 +86,8 @@ export interface HarnessExecutionRequest {
   readonly model: string;
   readonly systemPrompt: string;
   readonly promptContractDigest: string;
-  readonly adapter: LlmAdapter;
+  /** Builds the one bound adapter once the composition has resolved the DSH failure-code constants. */
+  readonly adapterFactory: (codes: DshFailureCodes) => LlmAdapter;
   /** The final gate, evaluated over the complete assembled payload immediately before every model call. */
   readonly gate: (payload: AssembledModelPayload) => EgressDecision;
   /** Receives a `transmit-remote` ticket for the adapter's transmit step; never called under v1. */
@@ -151,7 +152,7 @@ export async function prepareExecution(request: HarnessExecutionRequest): Promis
     await context.plugin(loop.AgentLoop, { maxParallelToolCalls: 1, agents: [] });
     context.systemPrompt.suppressRuntimeContext();
     context.systemPrompt.section({ name: PROMPT_SECTION_NAME, order: 0, text: request.systemPrompt, complete: true });
-    context.llm.registerAdapter([request.route], request.adapter);
+    context.llm.registerAdapter([request.route], request.adapterFactory(failureCodes));
     context.on('llm/stream', function (this: LlmRuntime, options: GenerateOptions, next: () => AsyncIterable<StreamChunk>) {
       if (!bound) return refusalStream('执行绑定尚未核对；未发送任何内容。');
       const decision = request.gate(options);

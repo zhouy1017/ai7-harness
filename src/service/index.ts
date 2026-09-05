@@ -1,9 +1,11 @@
-import { isAbsolute } from 'node:path';
+import { isAbsolute, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
+  J04_MODEL_ADAPTER_CONTROL_PATTERN,
   MAX_FRAME_BYTES,
   type J01ImportControl,
   type J03ForegroundExecutionControl,
+  type J04ModelAdapterControl,
   type J08RecoveryControl,
   type LaunchPolicyProjection,
   type ServiceFailureResponse,
@@ -16,6 +18,7 @@ import { decodeRequest, isSafeInteger, ProtocolError } from './request-frames.js
 import type { DormantHarnessRuntime } from './runtime.js';
 import type { EditorialStore } from './store.js';
 import type { CooperativeJobOwner } from './cooperative-jobs.js';
+import type { BaselineAnalysisExecutionOwner } from './analysis/execution.js';
 
 async function* readFrames(): AsyncGenerator<Uint8Array> {
   const header = Buffer.allocUnsafe(4);
@@ -90,10 +93,12 @@ async function dispatch(
   store: EditorialStore,
   harness: DormantHarnessRuntime,
   jobs: CooperativeJobOwner,
+  analysisExecution: BaselineAnalysisExecutionOwner,
   request: ServiceRequest,
   importControl: J01ImportControl | undefined,
   launchPolicy: LaunchPolicyProjection,
 ): Promise<ServiceSuccessResponse> {
+  const analysisProgress = (runRecordId: string) => analysisExecution.progressFor(runRecordId);
   switch (request.op) {
     case 'ready':
       return { id: request.id, ok: true, op: request.op, result: harness.readiness };
@@ -272,6 +277,41 @@ async function dispatch(
           request.input.planEnvelopeDigest,
         ),
       };
+    case 'inspectBaselineAnalysis':
+      return {
+        id: request.id,
+        ok: true,
+        op: request.op,
+        result: store.inspectBaselineAnalysis(request.input.bookId, analysisProgress),
+      };
+    case 'prepareBaselineAnalysis':
+      return {
+        id: request.id,
+        ok: true,
+        op: request.op,
+        result: jobs.startBaselineAnalysisPreparation(request.input.bookId, request.input.goal, launchPolicy),
+      };
+    case 'authorizeBaselineAnalysis': {
+      const authorized = store.authorizeBaselineAnalysis(
+        request.input.bookId,
+        request.input.taskIntentId,
+        request.input.planEnvelopeDigest,
+      );
+      if (authorized.dispatchRunRecordId !== null) {
+        try {
+          analysisExecution.admitAndDispatch(authorized.dispatchRunRecordId);
+        } catch (error) {
+          const code = error instanceof Error && 'code' in error && typeof error.code === 'string' ? error.code : 'EXECUTION_ADMISSION_FAILED';
+          throw new StoreErrorClass(code, error instanceof Error ? error.message : '运行未能进入调度。');
+        }
+      }
+      return {
+        id: request.id,
+        ok: true,
+        op: request.op,
+        result: store.inspectBaselineAnalysis(request.input.bookId, analysisProgress),
+      };
+    }
     case 'listBooks':
       return { id: request.id, ok: true, op: request.op, result: store.listBooks(request.input.after) };
     case 'prepareNewBookReview':
@@ -525,6 +565,7 @@ function parseArguments(argv: string[]): {
   importControl: J01ImportControl | undefined;
   foregroundExecutionControl: J03ForegroundExecutionControl | undefined;
   recoveryControl: J08RecoveryControl | undefined;
+  modelAdapterControl: J04ModelAdapterControl | undefined;
 } {
   const values = new Map<string, string>();
   for (let index = 0; index < argv.length; index += 2) {
@@ -535,7 +576,8 @@ function parseArguments(argv: string[]): {
       !value ||
       values.has(key) ||
       (key !== '--data-root' && key !== '--parent-pid' && key !== '--j01-import-control' &&
-        key !== '--j03-foreground-execution-control' && key !== '--j08-recovery-control')
+        key !== '--j03-foreground-execution-control' && key !== '--j08-recovery-control' &&
+        key !== '--j04-model-adapter')
     ) {
       throw new ProtocolError();
     }
@@ -565,6 +607,10 @@ function parseArguments(argv: string[]): {
   const recoveryControl = recoveryControlValue === 'interrupt-after-journal-ack'
     ? recoveryControlValue
     : undefined;
+  const modelAdapterControlValue = values.get('--j04-model-adapter');
+  const modelAdapterControl = modelAdapterControlValue !== undefined && J04_MODEL_ADAPTER_CONTROL_PATTERN.test(modelAdapterControlValue)
+    ? modelAdapterControlValue
+    : undefined;
   if (
     !dataRoot ||
     !isAbsolute(dataRoot) ||
@@ -577,11 +623,13 @@ function parseArguments(argv: string[]): {
       (foregroundExecutionControl === undefined || process.env.AI7_E2E_JOURNEY !== 'J-03')) ||
     (recoveryControlValue !== undefined &&
       (recoveryControl === undefined || process.env.AI7_E2E_JOURNEY !== 'J-08')) ||
-    [importControl, foregroundExecutionControl, recoveryControl].filter(Boolean).length > 1
+    (modelAdapterControlValue !== undefined &&
+      (modelAdapterControl === undefined || process.env.AI7_E2E_JOURNEY !== 'J-04')) ||
+    [importControl, foregroundExecutionControl, recoveryControl, modelAdapterControl].filter(Boolean).length > 1
   ) {
     throw new ProtocolError();
   }
-  return { dataRoot, parentPid, importControl, foregroundExecutionControl, recoveryControl };
+  return { dataRoot, parentPid, importControl, foregroundExecutionControl, recoveryControl, modelAdapterControl };
 }
 
 function parentIsAlive(parentPid: number): boolean {
@@ -594,22 +642,31 @@ function parentIsAlive(parentPid: number): boolean {
   }
 }
 
+let StoreErrorClass: typeof import('./store.js').StoreError;
+
 async function run(): Promise<void> {
   installNodeNetworkDenial();
-  const { dataRoot, parentPid, importControl, foregroundExecutionControl, recoveryControl } =
+  const { dataRoot, parentPid, importControl, foregroundExecutionControl, recoveryControl, modelAdapterControl } =
     parseArguments(process.argv.slice(2));
   const [
     { EditorialStore, StoreError, StoreFatalError },
     { mountDormantHarness },
     { CooperativeJobOwner },
     { resolveSourceCheckoutLaunchPolicy },
+    { BaselineAnalysisExecutionOwner },
+    { loadModelFixture },
+    { createKeyringSecretResolver },
   ] =
     await Promise.all([
       import('./store.js'),
       import('./runtime.js'),
       import('./cooperative-jobs.js'),
       import('./launch-policy.js'),
+      import('./analysis/execution.js'),
+      import('./provider/model-fixture.js'),
+      import('./provider/keyring-secret-resolver.js'),
     ]);
+  StoreErrorClass = StoreError;
   let stopping = false;
   const stop = (): void => {
     if (stopping) return;
@@ -626,18 +683,33 @@ async function run(): Promise<void> {
   let store: EditorialStore | undefined;
   let harness: DormantHarnessRuntime | undefined;
   let jobs: CooperativeJobOwner | undefined;
+  let analysisExecution: BaselineAnalysisExecutionOwner | undefined;
   try {
     const codeRoot = fileURLToPath(new URL('../', import.meta.url));
     const launchPolicy = await resolveSourceCheckoutLaunchPolicy(codeRoot);
+    // The J-04-only control resolves the hand-written synthetic fixture before the store opens, so the
+    // frozen plan can pin the exact fixture identity, lineage, and digest; every other launch binds no route.
+    const fixture = modelAdapterControl === undefined
+      ? null
+      : await loadModelFixture(resolve(codeRoot, 'tests', 'fixtures', 'model'), modelAdapterControl);
     store = await EditorialStore.open(dataRoot, codeRoot, {
       induceUnprovableReconciliation: importControl === 'uncertain-reconciliation',
       persistLegacyReviewedDraft: importControl === 'legacy-reviewed-v2',
       induceReimportProofTamper: importControl === 'tamper-reimport-proof-before-validation',
       induceAbandonObjectRemovalFailure: importControl === 'abandon-object-delete-failure',
       interruptAfterAbandonObjectRemoval: importControl === 'after-abandon-object-delete-before-finalize',
+      baselineAnalysisRoute: fixture === null
+        ? null
+        : { fixtureIdentity: fixture.identity, fixtureSha256: fixture.sha256, fixtureLineage: fixture.lineage },
     });
     harness = await mountDormantHarness();
     jobs = new CooperativeJobOwner(store);
+    analysisExecution = new BaselineAnalysisExecutionOwner({
+      ledger: store.baselineAnalysisLedger,
+      launchPolicy,
+      fixture,
+      secretResolver: createKeyringSecretResolver(),
+    });
     for await (const frame of readFrames()) {
       let request: ServiceRequest;
       try {
@@ -649,7 +721,7 @@ async function run(): Promise<void> {
       }
       let response: ServiceResponse;
       try {
-        response = await dispatch(store, harness, jobs, request, importControl, launchPolicy);
+        response = await dispatch(store, harness, jobs, analysisExecution, request, importControl, launchPolicy);
       } catch (error) {
         if (error instanceof StoreFatalError) {
           stop();
@@ -686,6 +758,7 @@ async function run(): Promise<void> {
     process.removeListener('SIGINT', stop);
     try {
       jobs?.dispose();
+      await analysisExecution?.dispose();
       await harness?.dispose();
     } finally {
       store?.close();

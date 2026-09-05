@@ -92,8 +92,20 @@ function splitSection(section: Section): ManifestBlockInput[][] {
   return groups;
 }
 
-function unitDigest(ordinal: number, blockIds: readonly string[], blockDigests: readonly string[], overlap: readonly string[]): string {
-  return sha256Hex(canonicalJson({ ordinal, blockIds, blockDigests, overlapBlockIds: overlap }));
+/**
+ * The unit digest covers the unit's position in the revision and the content digests of its own and
+ * overlap blocks, not block identities: identities are minted per import, while the same manuscript
+ * content must yield the same unit digest (and therefore the same fixture request digest) in every
+ * import of the same source.
+ */
+function unitDigest(
+  ordinal: number,
+  startPosition: number,
+  endPosition: number,
+  blockDigests: readonly string[],
+  overlapBlockDigests: readonly string[],
+): string {
+  return sha256Hex(canonicalJson({ ordinal, startPosition, endPosition, blockDigests, overlapBlockDigests }));
 }
 
 export function deriveCoverageManifest(input: CoverageManifestInput): CoverageManifestProjection {
@@ -116,6 +128,8 @@ export function deriveCoverageManifest(input: CoverageManifestInput): CoverageMa
       const blockIds = group.map((block) => block.blockId);
       const blockDigests = group.map((block) => block.digest);
       const overlapBlockIds = overlap.map((block) => block.blockId);
+      const startPosition = group[0]!.position;
+      const endPosition = group[group.length - 1]!.position;
       units.push({
         ordinal,
         sectionOrdinal: section.ordinal,
@@ -124,13 +138,13 @@ export function deriveCoverageManifest(input: CoverageManifestInput): CoverageMa
         headingBlockId: section.heading?.blockId ?? null,
         headingText: section.heading?.text ?? null,
         headingLevel: section.heading?.level ?? null,
-        startPosition: group[0]!.position,
-        endPosition: group[group.length - 1]!.position,
+        startPosition,
+        endPosition,
         blockIds,
         blockDigests,
         overlapBlockIds,
         graphemes: group.reduce((total, block) => total + block.graphemes, 0),
-        digest: unitDigest(ordinal, blockIds, blockDigests, overlapBlockIds),
+        digest: unitDigest(ordinal, startPosition, endPosition, blockDigests, overlap.map((block) => block.digest)),
       });
     });
   }

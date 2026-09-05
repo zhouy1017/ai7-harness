@@ -59,7 +59,7 @@ describe('PrimaryAgentHarness', () => {
       model: LOCAL_DETERMINISTIC_MODEL,
       systemPrompt: SYSTEM,
       promptContractDigest: BASELINE_PROMPT_CONTRACT_DIGEST,
-      adapter,
+      adapterFactory: () => adapter,
       gate: (payload) => {
         const decision = evaluateEgress(payload, bindingFacts(bindingDigest), { currentBindingDigest: () => currentBinding, acceptedOutputDigests: accepted });
         gateDecisions.push(decision.decision);
@@ -114,7 +114,7 @@ describe('PrimaryAgentHarness', () => {
       model: LOCAL_DETERMINISTIC_MODEL,
       systemPrompt: SYSTEM,
       promptContractDigest: BASELINE_PROMPT_CONTRACT_DIGEST,
-      adapter,
+      adapterFactory: () => adapter,
       gate: () => ({ decision: 'transmit-local', payloadDigest: 'a'.repeat(64) }),
       onTransmitTicket: () => undefined,
     });

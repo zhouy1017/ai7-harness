@@ -64,7 +64,16 @@ import type {
   ForegroundExecutionBoundaryProjection,
   LaunchPolicyProjection,
   TaskAuthorizationProjection,
+  BASELINE_ANALYSIS_TASK_GOAL,
+  BaselineAnalysisProjection,
 } from '../shared/protocol.js';
+import {
+  AnalysisError,
+  BaselineAnalysisStore,
+  type BaselineAnalysisPreparationResult,
+  type BaselineAnalysisRouteFacts,
+  type ProgressReader,
+} from './analysis/baseline-analysis-store.js';
 import {
   deriveImportFidelityPlan,
   DOCX_PARSER_IDENTITY,
@@ -1883,6 +1892,8 @@ interface StoreControl {
   induceReimportProofTamper: boolean;
   induceAbandonObjectRemovalFailure: boolean;
   interruptAfterAbandonObjectRemoval: boolean;
+  /** The J-04-only local deterministic route resolved at service startup; `null` in every other launch. */
+  baselineAnalysisRoute: BaselineAnalysisRouteFacts | null;
 }
 
 function continuationNotice(access: OriginalFileAccessProjection): string {
@@ -2493,6 +2504,7 @@ export class EditorialStore {
   readonly #recoveryObjects: RecoveryObjectStore;
   readonly #editorialWorkspaceProfile: EditorialWorkspaceProfileStore;
   readonly #taskAuthorization: TaskAuthorizationStore;
+  readonly #baselineAnalysis: BaselineAnalysisStore;
   readonly #workflowProfile: BuiltInWorkflowProfile;
   readonly #lifetimeId: string;
   readonly #control: StoreControl;
@@ -2516,6 +2528,7 @@ export class EditorialStore {
     recoveryObjects: RecoveryObjectStore,
     editorialWorkspaceProfile: EditorialWorkspaceProfileStore,
     taskAuthorization: TaskAuthorizationStore,
+    baselineAnalysis: BaselineAnalysisStore,
     workflowProfile: BuiltInWorkflowProfile,
     lifetimeId: string,
     control: StoreControl,
@@ -2530,6 +2543,7 @@ export class EditorialStore {
     this.#recoveryObjects = recoveryObjects;
     this.#editorialWorkspaceProfile = editorialWorkspaceProfile;
     this.#taskAuthorization = taskAuthorization;
+    this.#baselineAnalysis = baselineAnalysis;
     this.#workflowProfile = workflowProfile;
     this.#lifetimeId = lifetimeId;
     this.#control = control;
@@ -2544,6 +2558,7 @@ export class EditorialStore {
       induceReimportProofTamper: false,
       induceAbandonObjectRemovalFailure: false,
       interruptAfterAbandonObjectRemoval: false,
+      baselineAnalysisRoute: null,
     },
   ): Promise<EditorialStore> {
     requireStore(isAbsolute(dataRootInput), 'DATA_ROOT_INVALID', 'Agent Data Root 必须是绝对路径。');
@@ -2597,6 +2612,7 @@ export class EditorialStore {
       recoveryObjects,
       editorialWorkspaceProfile,
       new TaskAuthorizationStore(authority, boundedAuthority),
+      new BaselineAnalysisStore(authority, boundedAuthority, control.baselineAnalysisRoute),
       workflowProfile,
       lifetimeId,
       control,
@@ -2670,8 +2686,47 @@ export class EditorialStore {
     return this.#taskCall(() => this.#taskAuthorization.authorize(bookId, taskIntentId, planEnvelopeDigest));
   }
 
+  // ---- J-04 baseline manuscript analysis (Issue #92) ----------------------------------------------
+
+  inspectBaselineAnalysis(bookId: string, progress?: ProgressReader): BaselineAnalysisProjection {
+    return this.#analysisCall(() => this.#baselineAnalysis.inspect(bookId, progress));
+  }
+
+  createBaselineAnalysisPreparationWork(
+    bookId: string,
+    goal: typeof BASELINE_ANALYSIS_TASK_GOAL,
+    launchPolicy: LaunchPolicyProjection,
+  ): BaselineAnalysisPreparationResult {
+    return this.#analysisCall(() => this.#baselineAnalysis.prepare({ phase: 'start', bookId, goal, launchPolicy }));
+  }
+
+  advanceBaselineAnalysisPreparationWork(workId: string): BaselineAnalysisPreparationResult {
+    return this.#analysisCall(() => this.#baselineAnalysis.prepare({ phase: 'advance', workId }));
+  }
+
+  cancelBaselineAnalysisPreparationWork(workId: string): boolean {
+    this.#analysisCall(() => this.#baselineAnalysis.prepare({ phase: 'cancel', workId }));
+    return true;
+  }
+
+  /** Records the standard-direct authorization and the Run; the caller admits the Run when dispatch is allowed. */
+  authorizeBaselineAnalysis(
+    bookId: string,
+    taskIntentId: string,
+    planEnvelopeDigest: string,
+  ): { projection: BaselineAnalysisProjection; dispatchRunRecordId: string | null } {
+    return this.#analysisCall(() => this.#baselineAnalysis.authorize(bookId, taskIntentId, planEnvelopeDigest));
+  }
+
+  /** The append-only analysis ledger the execution owner writes through; service-internal. */
+  get baselineAnalysisLedger(): BaselineAnalysisStore {
+    this.#assertAvailable();
+    return this.#baselineAnalysis;
+  }
+
   close(): void {
     this.#taskAuthorization.prepare({ phase: 'cancel-all' });
+    this.#baselineAnalysis.prepare({ phase: 'cancel-all' });
     for (const workId of Array.from(this.#reimportPreparationWork.keys())) {
       this.cancelManuscriptReimportPreparationWork(workId);
     }
@@ -9654,6 +9709,21 @@ export class EditorialStore {
       return operation();
     } catch (error) {
       if (error instanceof TaskAuthorizationError) throw new StoreError(error.code, error.message);
+      throw error;
+    }
+  }
+
+  #analysisCall<T>(operation: () => T): T {
+    this.#assertAvailable();
+    try {
+      return operation();
+    } catch (error) {
+      if (error instanceof AnalysisError) throw new StoreError(error.code, error.message);
+      if (error instanceof BoundedStoreFatalError) {
+        this.#poisoned = true;
+        throw new StoreFatalError(error);
+      }
+      if (error instanceof BoundedStoreError) throw new StoreError(error.code, error.message);
       throw error;
     }
   }
