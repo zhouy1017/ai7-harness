@@ -5,7 +5,7 @@ import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep 
 import { arch, platform, release, tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { strToU8, zipSync } from 'fflate';
-import { attachProductOutput, installJourneyCancellationCleanup, localDebugEnabled, recordDebugDetail, reportJourneyFailure } from './controller.mjs';
+import { attachProductOutput, installJourneyCancellationCleanup, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect } from './controller.mjs';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const PRODUCT_RENDERER_URL = pathToFileURL(resolve(ROOT, 'dist', 'renderer', 'index.html')).href;
@@ -35,29 +35,6 @@ function requireJourney(condition, location, detail) {
   const error = new Error(`J-01/${location}`);
   if (detail !== undefined) error.detail = detail;
   throw error;
-}
-
-function createBrowserDisconnectBoundary(browser) {
-  let rejectDisconnected;
-  const disconnected = new Promise((_, reject) => {
-    rejectDisconnected = reject;
-  });
-  disconnected.catch(() => undefined);
-  const onDisconnected = () => rejectDisconnected(BROWSER_DISCONNECTED);
-  browser.once('disconnected', onDisconnected);
-  if (!browser.isConnected()) {
-    browser.off('disconnected', onDisconnected);
-    onDisconnected();
-  }
-  return async (operation) => {
-    operation.catch(() => undefined);
-    try {
-      return await Promise.race([operation, disconnected]);
-    } catch (error) {
-      if (!browser.isConnected()) throw BROWSER_DISCONNECTED;
-      throw error;
-    }
-  };
 }
 
 async function awaitCdpOperation(operation, deadline) {
@@ -179,7 +156,11 @@ function productEnvironment(executable) {
 
 async function attachRendererTarget(browser) {
   const deadline = Date.now() + 30_000;
-  const withBrowserConnection = createBrowserDisconnectBoundary(browser);
+  const withBrowserConnection = (operation) =>
+    settleOnBrowserDisconnect(browser, operation, {
+      disconnectError: BROWSER_DISCONNECTED,
+      coerceRejectionAfterDisconnect: true,
+    });
   const rootSession = await awaitCdpOperation(
     withBrowserConnection(browser.newBrowserCDPSession()),
     deadline,
@@ -302,7 +283,11 @@ async function attachRendererTarget(browser) {
 
 async function createRendererManager(browser) {
   const rootDeadline = Date.now() + 30_000;
-  const withBrowserConnection = createBrowserDisconnectBoundary(browser);
+  const withBrowserConnection = (operation) =>
+    settleOnBrowserDisconnect(browser, operation, {
+      disconnectError: BROWSER_DISCONNECTED,
+      coerceRejectionAfterDisconnect: true,
+    });
   const root = await awaitCdpOperation(
     withBrowserConnection(browser.newBrowserCDPSession()),
     rootDeadline,

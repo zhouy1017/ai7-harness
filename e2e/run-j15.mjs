@@ -5,7 +5,7 @@ import { arch, platform, release, tmpdir } from 'node:os';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { attachProductOutput, installJourneyCancellationCleanup, localDebugEnabled, recordDebugDetail, reportJourneyFailure } from './controller.mjs';
+import { attachProductOutput, installJourneyCancellationCleanup, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect } from './controller.mjs';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const PROFILE_DIGEST = 'ae485040c8fa602ab2e98ec91dd122201d40a8be41d8a4f86f7cd55ddb1e434d';
@@ -93,7 +93,8 @@ async function createLoopbackSentinel() {
 }
 
 async function createRendererManager(browser) {
-  const root = await browser.newBrowserCDPSession();
+  const guard = (request) => settleOnBrowserDisconnect(browser, request);
+  const root = await guard(browser.newBrowserCDPSession());
   const renderers = new Map();
   const pending = new Map();
   let nextId = 1;
@@ -110,7 +111,7 @@ async function createRendererManager(browser) {
   });
   const attach = async (target) => {
     if (renderers.has(target.targetId)) return renderers.get(target.targetId);
-    const { sessionId } = await root.send('Target.attachToTarget', { targetId: target.targetId, flatten: false });
+    const { sessionId } = await guard(root.send('Target.attachToTarget', { targetId: target.targetId, flatten: false }));
     const send = async (method, params = {}) => {
       const id = nextId++;
       const key = `${sessionId}:${id}`;
@@ -125,7 +126,7 @@ async function createRendererManager(browser) {
           reject: (error) => { clearTimeout(timeout); rejectResponse(error); },
         });
       });
-      await root.send('Target.sendMessageToTarget', { sessionId, message: JSON.stringify({ id, method, params }) });
+      await guard(root.send('Target.sendMessageToTarget', { sessionId, message: JSON.stringify({ id, method, params }) }));
       return response;
     };
     const renderer = {
@@ -142,7 +143,7 @@ async function createRendererManager(browser) {
   };
   return {
     list: async () => {
-      const targets = (await root.send('Target.getTargets')).targetInfos.filter((item) => item.type === 'page');
+      const targets = (await guard(root.send('Target.getTargets'))).targetInfos.filter((item) => item.type === 'page');
       return Promise.all(targets.map(attach));
     },
   };
