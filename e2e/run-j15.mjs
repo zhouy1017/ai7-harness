@@ -245,6 +245,19 @@ async function constructPredecessorV12(dataRoot, bookId) {
     database.exec(`
       PRAGMA foreign_keys = OFF;
       BEGIN IMMEDIATE;
+      DROP TABLE analysis_task_outcomes;
+      DROP TABLE analysis_unit_results;
+      DROP TABLE analysis_result_set_revisions;
+      DROP TABLE analysis_result_sets;
+      DROP TABLE analysis_harness_spans;
+      DROP TABLE analysis_execution_bindings;
+      DROP TABLE analysis_execution_attempts;
+      DROP TABLE analysis_run_states;
+      DROP TABLE analysis_run_records;
+      DROP TABLE analysis_run_authorizations;
+      DROP TABLE analysis_plan_records;
+      DROP TABLE analysis_task_input_checkpoints;
+      DROP TABLE analysis_task_intents;
       DROP TABLE run_records;
       DROP TABLE run_authorizations;
       DROP TABLE plan_envelopes;
