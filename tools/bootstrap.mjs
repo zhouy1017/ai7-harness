@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { createReadStream, existsSync } from 'node:fs';
-import { mkdir, mkdtemp, open, realpath, rename, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, open, readdir, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { delimiter, dirname, isAbsolute, posix, relative, resolve, sep } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -229,6 +229,73 @@ async function ensurePinnedArchive(artifact, cacheRoot, allowedHosts) {
   return target;
 }
 
+async function countIncompletePayloads(directory) {
+  let incomplete = 0;
+  let inspected = 0;
+  for (const entry of await readdir(directory, { withFileTypes: true })) {
+    const child = resolve(directory, entry.name);
+    if (entry.isSymbolicLink()) {
+      inspected += 1;
+      if (!existsSync(child)) incomplete += 1;
+      continue;
+    }
+    if (!entry.isDirectory()) continue;
+    if (entry.name.startsWith('@')) {
+      const scoped = await countIncompletePayloads(child);
+      incomplete += scoped.inspected === 0 ? 1 : scoped.incomplete;
+      inspected += scoped.inspected === 0 ? 1 : scoped.inspected;
+      continue;
+    }
+    inspected += 1;
+    if ((await readdir(child)).length === 0) incomplete += 1;
+  }
+  return { incomplete, inspected };
+}
+
+async function countDanglingLinks(directory) {
+  let dangling = 0;
+  for (const entry of await readdir(directory, { withFileTypes: true })) {
+    if (entry.name === '.pnpm' || entry.name === '.bin') continue;
+    const child = resolve(directory, entry.name);
+    if (entry.isSymbolicLink()) {
+      if (!existsSync(child)) dangling += 1;
+      continue;
+    }
+    if (entry.isDirectory() && entry.name.startsWith('@')) {
+      dangling += await countDanglingLinks(child);
+    }
+  }
+  return dangling;
+}
+
+async function verifyInstalledClosure() {
+  const nodeModules = resolve(ROOT, 'node_modules');
+  const virtualStore = resolve(nodeModules, '.pnpm');
+  requireValue(existsSync(virtualStore), 'The frozen install produced no pnpm virtual store to verify.');
+
+  let incomplete = 0;
+  let inspected = 0;
+  for (const entry of await readdir(virtualStore, { withFileTypes: true })) {
+    if (!entry.isDirectory() || entry.name === 'node_modules') continue;
+    const payloads = resolve(virtualStore, entry.name, 'node_modules');
+    if (!existsSync(payloads)) {
+      incomplete += 1;
+      inspected += 1;
+      continue;
+    }
+    const counted = await countIncompletePayloads(payloads);
+    incomplete += counted.inspected === 0 ? 1 : counted.incomplete;
+    inspected += counted.inspected === 0 ? 1 : counted.inspected;
+  }
+  incomplete += await countDanglingLinks(nodeModules);
+
+  requireValue(inspected > 0, 'The frozen install resolved no package directories to verify.');
+  requireValue(
+    incomplete === 0,
+    `The installed dependency closure is incomplete: ${incomplete} of ${inspected} resolved package directories are empty or dangling. Remove node_modules and re-run bootstrap.`,
+  );
+}
+
 async function main() {
   const diagnosis = inspectDevelopmentInputs();
   await prepareGeneratedRoots();
@@ -255,6 +322,7 @@ async function main() {
     '--cache-dir',
     resolve(CACHE_ROOT, 'pnpm'),
   ]);
+  await verifyInstalledClosure();
   const archive = await ensurePinnedArchive(artifact, ELECTRON_CACHE, [
     'github.com',
     'release-assets.githubusercontent.com',
