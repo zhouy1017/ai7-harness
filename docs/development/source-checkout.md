@@ -19,6 +19,7 @@ pnpm run doctor
 pnpm run bootstrap
 pnpm run check
 pnpm test
+pnpm run test:service
 pnpm run build
 pnpm run start-built -- --data-root <absolute-path>
 pnpm run e2e -- --journey J-01
@@ -33,7 +34,7 @@ pnpm run e2e:debug -- --journey <J-01|J-02|J-08|J-12|J-15|J-03>
 pnpm run e2e:repeat -- --journey <J-01|J-02|J-08|J-12|J-15|J-03> --times <n>
 ```
 
-`check` runs the exact TypeScript check that `build` performs, with full diagnostics for the developer host; `test` runs the vitest unit suites under `tests/unit`. Both are Local Verification Ladder layers under ADR 0062: developer-run surfaces that never become hosted gates and never appear in the workflow.
+`check` runs the exact TypeScript check that `build` performs, with full diagnostics for the developer host; `test` runs the vitest unit suites under `tests/unit`; `test:service` runs the vitest service-integration suites under `tests/service`, which open the real service stores on a disposable Agent Data Root outside this checkout and need no Electron, no Provider, and no network. All three are Local Verification Ladder layers under ADR 0062: developer-run surfaces that never become hosted gates and never appear in the workflow.
 
 `e2e:debug` runs one admitted Journey with the controller-only `AI7_E2E_LOCAL_DEBUG` switch: the runner's stdout/stderr, the product process output that Playwright logs for the launched browser (`playwright-browser.log`), the complete failure error with its `cause` chain and stack, and a screenshot of every open renderer page taken before the runner's cleanup are written only under ignored `test-results/e2e/<journey>/<timestamp>/`. `e2e:repeat` runs the same Journey up to `n` times through that mode, stops at the first failure, and deletes the artifacts of passing runs. Both refuse to run under `CI`, `GITHUB_ACTIONS`, or the Windows CI marker, never forward the switch to the product process, and leave `e2e`, `e2e:all`, and `e2e:diagnose` output byte-identical (ADR 0062).
 
