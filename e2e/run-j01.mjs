@@ -5,7 +5,7 @@ import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep 
 import { arch, platform, release, tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { strToU8, zipSync } from 'fflate';
-import { attachProductOutput, installJourneyCancellationCleanup, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect } from './controller.mjs';
+import { attachProductOutput, awaitWithinDeadline, installJourneyCancellationCleanup, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect } from './controller.mjs';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const PRODUCT_RENDERER_URL = pathToFileURL(resolve(ROOT, 'dist', 'renderer', 'index.html')).href;
@@ -38,21 +38,10 @@ function requireJourney(condition, location, detail) {
 }
 
 async function awaitCdpOperation(operation, deadline) {
-  operation.catch(() => undefined);
-  const remaining = deadline - Date.now();
-  requireJourney(remaining > 0, 'renderer-cdp-timeout');
-  let timeout;
-  try {
-    return await Promise.race([
-      operation,
-      new Promise((_, reject) => {
-        timeout = setTimeout(() => reject(RENDERER_CDP_TIMEOUT), remaining);
-        timeout.unref();
-      }),
-    ]);
-  } finally {
-    clearTimeout(timeout);
-  }
+  return awaitWithinDeadline(operation, deadline, {
+    timeoutError: RENDERER_CDP_TIMEOUT,
+    onDeadlineExpired: () => requireJourney(false, 'renderer-cdp-timeout'),
+  });
 }
 
 function pathIsInside(parent, child) {
