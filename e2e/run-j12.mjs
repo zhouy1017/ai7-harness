@@ -8,7 +8,7 @@ import { arch, platform, release, tmpdir } from 'node:os';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { attachProductOutput, installJourneyCancellationCleanup, localDebugEnabled, recordDebugDetail, reportJourneyFailure } from './controller.mjs';
+import { attachProductOutput, installJourneyCancellationCleanup, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect } from './controller.mjs';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const DEBUG_SELECTORS = new Set(['DEBUG', 'DEBUG_FILE', 'PWDEBUG', 'PWDEBUGIMPL']);
@@ -44,29 +44,6 @@ function requireJourney(condition, name, detail) {
 function inside(parent, child) {
   const relation = relative(parent, child);
   return relation === '' || (!relation.startsWith(`..${sep}`) && relation !== '..' && !isAbsolute(relation));
-}
-
-function createBrowserDisconnectBoundary(browser) {
-  let rejectDisconnected;
-  const disconnected = new Promise((_, reject) => {
-    rejectDisconnected = reject;
-  });
-  disconnected.catch(() => undefined);
-  const onDisconnected = () => rejectDisconnected(BROWSER_DISCONNECTED);
-  browser.once('disconnected', onDisconnected);
-  if (!browser.isConnected()) {
-    browser.off('disconnected', onDisconnected);
-    onDisconnected();
-  }
-  return async (operation) => {
-    operation.catch(() => undefined);
-    try {
-      return await Promise.race([operation, disconnected]);
-    } catch (error) {
-      if (!browser.isConnected()) throw BROWSER_DISCONNECTED;
-      throw error;
-    }
-  };
 }
 
 async function awaitCdpOperation(operation, deadline) {
@@ -203,7 +180,11 @@ async function createSyntheticDocx(path) {
 
 async function createRendererManager(browser) {
   const rootDeadline = Date.now() + CDP_OPERATION_TIMEOUT_MS;
-  const withBrowserConnection = createBrowserDisconnectBoundary(browser);
+  const withBrowserConnection = (operation) =>
+    settleOnBrowserDisconnect(browser, operation, {
+      disconnectError: BROWSER_DISCONNECTED,
+      coerceRejectionAfterDisconnect: true,
+    });
   const root = await awaitCdpOperation(
     withBrowserConnection(browser.newBrowserCDPSession()),
     rootDeadline,

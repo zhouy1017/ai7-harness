@@ -4,7 +4,7 @@ import { once } from 'node:events';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { arch, platform, release, tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { attachProductOutput, installJourneyCancellationCleanup, localDebugEnabled, recordDebugDetail, reportJourneyFailure } from './controller.mjs';
+import { attachProductOutput, installJourneyCancellationCleanup, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect } from './controller.mjs';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const CHARACTER_COUNT = 10_000_000;
@@ -33,7 +33,7 @@ const RECOVERY_OBJECT_PATTERN = /^[0-9a-f]{64}\.snapshot$/;
 const DEBUG_SELECTORS = new Set(['DEBUG', 'DEBUG_FILE', 'PWDEBUG', 'PWDEBUGIMPL']);
 const CJK_BASE = 0x4e00;
 const CJK_SPAN = 0x1000;
-const RENDERER_TARGET_DISCONNECT_SETTLE_MS = 250;
+const RENDERER_TARGET_QUERY_ABANDONED = new Error('renderer-target query abandoned after the browser disconnected');
 const STARTUP_FAILURE_MARKERS = Object.freeze([
   Object.freeze(['AI7_STARTUP_FAILED/runtime', 'launch-restart-renderer-target-query-startup-runtime']),
   Object.freeze(['AI7_STARTUP_FAILED/arguments', 'launch-restart-renderer-target-query-startup-arguments']),
@@ -176,41 +176,10 @@ async function createSyntheticDocx(path) {
   requireJourney(metadata.isFile() && !metadata.isSymbolicLink() && metadata.size > CHARACTER_COUNT, 'fixture-file');
 }
 
-// `browser.newBrowserCDPSession()` yields a child CDP session. Playwright's connection
-// close disposes only the root session, so a request that is still in flight when the
-// product process exits is never rejected and the caller waits forever. Bound it on the
-// browser's own `disconnected` event, after a short grace period that lets a real
-// protocol rejection win whenever Playwright still produces one, so the restart loop
-// reaches its existing classification instead of hanging.
-function settleOnBrowserDisconnect(browser, request) {
-  return new Promise((resolve, reject) => {
-    let settled = false;
-    let armed = false;
-    let graceTimer;
-    const finish = (settle, value) => {
-      if (settled) return;
-      settled = true;
-      browser.off('disconnected', observeDisconnect);
-      if (graceTimer !== undefined) clearTimeout(graceTimer);
-      settle(value);
-    };
-    function observeDisconnect() {
-      if (armed || settled) return;
-      armed = true;
-      graceTimer = setTimeout(
-        () => finish(reject, new Error('renderer-target query abandoned after the browser disconnected')),
-        RENDERER_TARGET_DISCONNECT_SETTLE_MS,
-      );
-    }
-    request.then((value) => finish(resolve, value), (error) => finish(reject, error));
-    browser.on('disconnected', observeDisconnect);
-    if (!browser.isConnected()) observeDisconnect();
-  });
-}
-
 async function attachRendererTarget(browser, launchScenario) {
   at(`launch-${launchScenario}-renderer-cdp-session`);
-  const rootSession = await browser.newBrowserCDPSession();
+  const guard = (request, options) => settleOnBrowserDisconnect(browser, request, options);
+  const rootSession = await guard(browser.newBrowserCDPSession());
   const deadline = Date.now() + 60_000;
   let pageTarget;
   while (Date.now() < deadline) {
@@ -221,7 +190,9 @@ async function attachRendererTarget(browser, launchScenario) {
       const observeSessionClose = () => { sessionClosed = true; };
       rootSession.once('close', observeSessionClose);
       try {
-        ({ targetInfos } = await settleOnBrowserDisconnect(browser, rootSession.send('Target.getTargets')));
+        ({ targetInfos } = await guard(rootSession.send('Target.getTargets'), {
+          disconnectError: RENDERER_TARGET_QUERY_ABANDONED,
+        }));
       } catch (error) {
         const startupLocations = new Set(
           error instanceof Error
@@ -246,7 +217,7 @@ async function attachRendererTarget(browser, launchScenario) {
         rootSession.off('close', observeSessionClose);
       }
     } else {
-      ({ targetInfos } = await rootSession.send('Target.getTargets'));
+      ({ targetInfos } = await guard(rootSession.send('Target.getTargets')));
     }
     at(`launch-${launchScenario}-renderer-target-classification`);
     const pages = targetInfos.filter((target) => target.type === 'page');
@@ -262,7 +233,7 @@ async function attachRendererTarget(browser, launchScenario) {
   at(`launch-${launchScenario}-renderer-target-timeout`);
   requireJourney(pageTarget, 'renderer-target-timeout');
   at(`launch-${launchScenario}-renderer-target-attach`);
-  const { sessionId } = await rootSession.send('Target.attachToTarget', { targetId: pageTarget.targetId, flatten: false });
+  const { sessionId } = await guard(rootSession.send('Target.attachToTarget', { targetId: pageTarget.targetId, flatten: false }));
   let nextId = 1;
   const pending = new Map();
   const executionContexts = new Set();
@@ -302,7 +273,7 @@ async function attachRendererTarget(browser, launchScenario) {
         reject: (error) => { clearTimeout(timeout); rejectResponse(error); },
       });
     });
-    await rootSession.send('Target.sendMessageToTarget', { sessionId, message: JSON.stringify({ id, method, params }) });
+    await guard(rootSession.send('Target.sendMessageToTarget', { sessionId, message: JSON.stringify({ id, method, params }) }));
     return response;
   };
   const evaluate = async (expression) => {

@@ -5,7 +5,7 @@ import { createServer } from 'node:http';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { arch, platform, release, tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { attachProductOutput, installJourneyCancellationCleanup, localDebugEnabled, recordDebugDetail, reportJourneyFailure } from './controller.mjs';
+import { attachProductOutput, installJourneyCancellationCleanup, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect } from './controller.mjs';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const DEBUG_SELECTORS = new Set(['DEBUG', 'DEBUG_FILE', 'PWDEBUG', 'PWDEBUGIMPL']);
@@ -133,17 +133,18 @@ async function createSyntheticDocx(path, title, seed) {
 }
 
 async function attachRenderer(browser) {
-  const root = await browser.newBrowserCDPSession();
+  const guard = (request) => settleOnBrowserDisconnect(browser, request);
+  const root = await guard(browser.newBrowserCDPSession());
   const deadline = Date.now() + 60_000;
   let target;
   while (Date.now() < deadline) {
-    const pages = (await root.send('Target.getTargets')).targetInfos.filter((item) => item.type === 'page');
+    const pages = (await guard(root.send('Target.getTargets'))).targetInfos.filter((item) => item.type === 'page');
     if (pages.length === 1) { target = pages[0]; break; }
     requireJourney(pages.length === 0, 'renderer-target-count');
     await new Promise((resolveWait) => setTimeout(resolveWait, 50));
   }
   requireJourney(target, 'renderer-target-timeout');
-  const { sessionId } = await root.send('Target.attachToTarget', { targetId: target.targetId, flatten: false });
+  const { sessionId } = await guard(root.send('Target.attachToTarget', { targetId: target.targetId, flatten: false }));
   let nextId = 1;
   const pending = new Map();
   root.on('Target.receivedMessageFromTarget', ({ sessionId: incoming, message }) => {
@@ -167,7 +168,7 @@ async function attachRenderer(browser) {
         reject: (error) => { clearTimeout(timeout); rejectResponse(error); },
       });
     });
-    await root.send('Target.sendMessageToTarget', { sessionId, message: JSON.stringify({ id, method, params }) });
+    await guard(root.send('Target.sendMessageToTarget', { sessionId, message: JSON.stringify({ id, method, params }) }));
     return response;
   };
   await send('Runtime.enable');

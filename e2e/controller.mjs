@@ -15,6 +15,10 @@ const LOCAL_DEBUG_ENV = 'AI7_E2E_LOCAL_DEBUG';
 const LOCAL_DEBUG_DIR_ENV = 'AI7_E2E_LOCAL_DEBUG_DIR';
 const CI_SELECTORS = Object.freeze(['CI', 'GITHUB_ACTIONS', 'AI7_CI_WINDOWS_SERVER_2025']);
 const DEBUG_CAPTURE_TIMEOUT_MS = 10_000;
+// Grace that lets a real protocol rejection or a late response win after the browser disconnects.
+const CDP_DISCONNECT_SETTLE_MS = 250;
+const CDP_REQUEST_ABANDONED = 'child CDP request abandoned after the browser disconnected';
+const browserDisconnectWatchers = new WeakMap();
 const debugCaptures = new Set();
 let debugArtifactRoot;
 let productAttachSequence = 0;
@@ -621,6 +625,73 @@ function teeStream(source, path) {
   source.on('data', (chunk) => file.write(chunk));
   source.once('close', () => file.end());
   source.once('error', () => file.end());
+}
+
+function isBrowserConnected(browser) {
+  return typeof browser.isConnected !== 'function' || browser.isConnected();
+}
+
+/** Keep exactly one `disconnected` listener per browser however many requests are in flight. */
+function watchBrowserDisconnect(browser, onDisconnected) {
+  if (!isBrowserConnected(browser)) {
+    onDisconnected();
+    return () => undefined;
+  }
+  let watcher = browserDisconnectWatchers.get(browser);
+  if (watcher === undefined) {
+    watcher = { waiters: new Set() };
+    browser.on('disconnected', () => {
+      for (const waiter of [...watcher.waiters]) waiter();
+    });
+    browserDisconnectWatchers.set(browser, watcher);
+  }
+  watcher.waiters.add(onDisconnected);
+  return () => watcher.waiters.delete(onDisconnected);
+}
+
+/**
+ * `browser.newBrowserCDPSession()` yields a child CDP session. Playwright's connection close
+ * disposes only the root session, so a request that is still in flight when the product process
+ * exits is never rejected and the caller waits forever. Bound every child-session request on the
+ * browser's own `disconnected` event, after a short grace period that lets a real protocol
+ * rejection or a late response win whenever Playwright still produces one, so each runner reaches
+ * its existing classification instead of hanging.
+ *
+ * `disconnectError` is the runner's own rejection for an abandoned request. J-01 and J-12 classify
+ * on that error's identity, so they also set `coerceRejectionAfterDisconnect`, which reports a
+ * rejection arriving once the browser is already gone as that same error.
+ */
+export function settleOnBrowserDisconnect(browser, request, options = {}) {
+  const {
+    disconnectError,
+    coerceRejectionAfterDisconnect = false,
+    graceMs = CDP_DISCONNECT_SETTLE_MS,
+  } = options;
+  const abandoned = () => disconnectError ?? new Error(CDP_REQUEST_ABANDONED);
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    let graceTimer;
+    let release = () => undefined;
+    const finish = (settle, value) => {
+      if (settled) return;
+      settled = true;
+      release();
+      if (graceTimer !== undefined) clearTimeout(graceTimer);
+      settle(value);
+    };
+    const onDisconnected = () => {
+      if (settled || graceTimer !== undefined) return;
+      graceTimer = setTimeout(() => finish(reject, abandoned()), graceMs);
+    };
+    release = watchBrowserDisconnect(browser, onDisconnected);
+    request.then(
+      (value) => finish(resolve, value),
+      (error) => finish(
+        reject,
+        coerceRejectionAfterDisconnect && !isBrowserConnected(browser) ? abandoned() : error,
+      ),
+    );
+  });
 }
 
 function withTimeout(promise, milliseconds) {
