@@ -1033,6 +1033,179 @@ export interface ForegroundExecutionBoundaryProjection {
   ];
 }
 
+// ---- J-04 covered baseline manuscript analysis (Issue #92) ----------------------------------------
+
+/** One completely enumerated Analysis Unit of a Coverage Manifest: own block range plus bounded overlap context. */
+export interface CoverageManifestUnitProjection {
+  ordinal: number;
+  sectionOrdinal: number;
+  subUnitIndex: number;
+  subUnitCount: number;
+  headingBlockId: string | null;
+  headingText: string | null;
+  headingLevel: number | null;
+  startPosition: number;
+  endPosition: number;
+  blockIds: ReadonlyArray<string>;
+  blockDigests: ReadonlyArray<string>;
+  overlapBlockIds: ReadonlyArray<string>;
+  graphemes: number;
+  digest: string;
+}
+
+/** Deterministic, versioned coverage plan for one exact Manuscript Pin; gaps never live here. */
+export interface CoverageManifestProjection {
+  schema: 'ai7.coverage-manifest/1';
+  manuscript: {
+    bookId: string;
+    manuscriptId: string;
+    branchId: string;
+    revisionId: string;
+    revisionLabel: string;
+    revisionDigest: string;
+  };
+  parameters: { unitBudgetGraphemes: number; overlapBlocks: number };
+  totalBlocks: number;
+  totalGraphemes: number;
+  sectionCount: number;
+  units: ReadonlyArray<CoverageManifestUnitProjection>;
+  digest: string;
+}
+
+export type AnalysisEntityKind = 'person' | 'place' | 'organization' | 'object' | 'term' | 'other';
+
+export interface AnalysisSourceRangeProjection {
+  blockId: string;
+  fromGrapheme: number | null;
+  toGrapheme: number | null;
+}
+
+export interface AnalysisEntityProjection {
+  name: string;
+  kind: AnalysisEntityKind;
+  aliases: ReadonlyArray<string>;
+  note: string | null;
+  sourceRanges: ReadonlyArray<AnalysisSourceRangeProjection>;
+  unitOrdinals: ReadonlyArray<number>;
+}
+
+export interface AnalysisEventProjection {
+  unitOrdinal: number;
+  ordinal: number;
+  summary: string;
+  chronology: string | null;
+  participants: ReadonlyArray<string>;
+  sourceRanges: ReadonlyArray<AnalysisSourceRangeProjection>;
+}
+
+export interface AnalysisRelationshipProjection {
+  subject: string;
+  object: string;
+  relation: string;
+  sourceRanges: ReadonlyArray<AnalysisSourceRangeProjection>;
+  unitOrdinals: ReadonlyArray<number>;
+}
+
+export interface AnalysisSettingClaimProjection {
+  unitOrdinal: number;
+  subject: string;
+  claim: string;
+  sourceRanges: ReadonlyArray<AnalysisSourceRangeProjection>;
+}
+
+export interface AnalysisConflictProjection {
+  kind: 'unit-reported' | 'alias-collision' | 'entity-kind-divergence' | 'setting-claim-divergence';
+  description: string;
+  sourceRanges: ReadonlyArray<AnalysisSourceRangeProjection>;
+  unitOrdinals: ReadonlyArray<number>;
+}
+
+export interface AnalysisUnresolvedProjection {
+  unitOrdinal: number;
+  description: string;
+  sourceRanges: ReadonlyArray<AnalysisSourceRangeProjection>;
+}
+
+export interface AnalysisGapProjection {
+  unitOrdinal: number;
+  code: 'adapter-failure' | 'contract-invalid' | 'interrupted' | 'egress-refused' | 'not-attempted';
+  reason: string;
+  startPosition: number;
+  endPosition: number;
+  blockIds: ReadonlyArray<string>;
+}
+
+export interface AnalysisReducerStageProjection {
+  stage: 'unit-validation' | 'section-reduction' | 'contradiction-continuity' | 'book-synthesis';
+  state: 'closed' | 'closed-with-gaps' | 'not-run';
+  inputCount: number;
+}
+
+export interface AnalysisSectionProjection {
+  sectionOrdinal: number;
+  headingText: string | null;
+  headingLevel: number | null;
+  unitOrdinals: ReadonlyArray<number>;
+  closedUnitOrdinals: ReadonlyArray<number>;
+  gapUnitOrdinals: ReadonlyArray<number>;
+  synopsis: string;
+  entities: ReadonlyArray<AnalysisEntityProjection>;
+  events: ReadonlyArray<AnalysisEventProjection>;
+  relationships: ReadonlyArray<AnalysisRelationshipProjection>;
+  settingClaims: ReadonlyArray<AnalysisSettingClaimProjection>;
+  conflicts: ReadonlyArray<AnalysisConflictProjection>;
+  unresolved: ReadonlyArray<AnalysisUnresolvedProjection>;
+}
+
+export interface AnalysisSynthesisProjection {
+  synopsis: string;
+  entities: ReadonlyArray<AnalysisEntityProjection>;
+  events: ReadonlyArray<AnalysisEventProjection>;
+  relationships: ReadonlyArray<AnalysisRelationshipProjection>;
+  settingClaims: ReadonlyArray<AnalysisSettingClaimProjection>;
+  conflicts: ReadonlyArray<AnalysisConflictProjection>;
+  unresolved: ReadonlyArray<AnalysisUnresolvedProjection>;
+}
+
+/** Four independently labeled state axes; no aggregate flag, colour, or score collapses them. */
+export interface AnalysisCoverageAxis {
+  axis: 'coverage';
+  state: 'complete' | 'partial';
+  label: string;
+  unitsTotal: number;
+  unitsClosed: number;
+  gapCount: number;
+}
+
+export interface AnalysisReducerClosureAxis {
+  axis: 'reducer-closure';
+  state: 'closed' | 'closed-with-gaps' | 'open';
+  label: string;
+  stages: ReadonlyArray<AnalysisReducerStageProjection>;
+}
+
+export interface AnalysisFreshnessAxis {
+  axis: 'freshness';
+  state: 'current' | 'stale';
+  label: string;
+  boundRevisionId: string;
+  boundRevisionDigest: string;
+  currentRevisionId: string;
+  currentWorkingDigest: string;
+  currentJournalSequence: number;
+  comparison: 'local-deterministic';
+}
+
+export interface AnalysisAssuranceAxis {
+  axis: 'assurance';
+  state: 'qualified' | 'qualified-with-open-conflicts' | 'limited';
+  label: string;
+  unresolvedConflictCount: number;
+  unresolvedItemCount: number;
+  lowConfidenceUnitCount: number;
+  statement: '仅为模型输出的结构化归纳；不构成事实判定、编辑评审或稿件变更。';
+}
+
 export interface HistoricalRevisionProjection {
   mode: 'historical-revision';
   readOnly: true;
