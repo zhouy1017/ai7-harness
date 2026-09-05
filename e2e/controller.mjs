@@ -446,6 +446,7 @@ const JOURNEY_LOCATIONS = Object.freeze({
     'plan-prepared',
     'cross-book-route-guard',
     'authorization-recorded',
+    'foreground-boundary-check',
     'post-authorization-edit',
     'restart-immutable',
     'zero-activity',

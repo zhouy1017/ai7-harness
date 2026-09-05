@@ -61,6 +61,7 @@ import type {
   StartupProjection,
   BookWorkbenchRoute,
   ResolvedBookWorkbenchRoute,
+  ForegroundExecutionBoundaryProjection,
   LaunchPolicyProjection,
   TaskAuthorizationProjection,
 } from '../shared/protocol.js';
@@ -2623,6 +2624,15 @@ export class EditorialStore {
 
   inspectTaskAuthorization(bookId: string): TaskAuthorizationProjection {
     return this.#taskCall(() => this.#taskAuthorization.inspect(bookId));
+  }
+
+  inspectForegroundExecutionBoundary(
+    bookId: string,
+    runRecordId: string,
+    launchPolicy: LaunchPolicyProjection,
+  ): ForegroundExecutionBoundaryProjection {
+    return this.#taskCall(() =>
+      this.#taskAuthorization.inspectForegroundExecutionBoundary(bookId, runRecordId, launchPolicy));
   }
 
   createTaskAuthorizationPreparationWork(
