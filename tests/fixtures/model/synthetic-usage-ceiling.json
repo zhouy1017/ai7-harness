@@ -1,0 +1,19 @@
+{
+  "schema": "ai7.model-fixture/1",
+  "identity": "synthetic-usage-ceiling",
+  "description": "Hand-written synthetic shape (iv): one conforming unit result whose reported usage is evaluated against an explicit Run Budget Ceiling at unit and service level only. Public synthetic text; no manuscript content.",
+  "basedOn": null,
+  "provider": "ai7-local-deterministic",
+  "model": "ai7-deterministic-fixture",
+  "entries": [
+    {
+      "unitOrdinal": 1,
+      "requestDigest": "5ce83890840cf38fddacf0aec45f234dada8cee453236aceeb468b0055ae14ce",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.baseline-manuscript-analysis.unit-result/1\",\"unitOrdinal\":1,\"synopsis\":\"合成用量夹具：本单元结构概述为占位文本。\",\"entities\":[],\"events\":[],\"relationships\":[],\"settingClaims\":[],\"conflicts\":[],\"unresolved\":[],\"confidence\":\"medium\"}",
+        "usage": { "inputTokens": 900000, "outputTokens": 120000 }
+      }
+    }
+  ]
+}
