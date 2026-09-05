@@ -5,7 +5,7 @@ import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep 
 import { arch, platform, release, tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { strToU8, zipSync } from 'fflate';
-import { attachProductOutput, awaitWithinDeadline, installJourneyCancellationCleanup, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect } from './controller.mjs';
+import { attachProductOutput, awaitWithinDeadline, createJ01CompletionLocation, installJourneyCancellationCleanup, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect } from './controller.mjs';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const PRODUCT_RENDERER_URL = pathToFileURL(resolve(ROOT, 'dist', 'renderer', 'index.html')).href;
@@ -28,6 +28,14 @@ let browserLifecycleIncomplete = false;
 function at(location) {
   diagnosticLocation = location;
   if (localDebugEnabled()) recordDebugDetail('J-01', `at ${location}`);
+}
+
+async function duringCompletionPhase(scenario, phase, operation) {
+  const previousLocation = diagnosticLocation;
+  at(createJ01CompletionLocation(scenario)(phase));
+  const result = await operation();
+  at(previousLocation);
+  return result;
 }
 
 function requireJourney(condition, location, detail) {
@@ -979,12 +987,31 @@ async function createDurableJournalEdit(renderer) {
 }
 
 async function importInitialManuscriptForReimport(renderer, sourceSha256, sourceBytes, scenario) {
-  await runJourney(renderer, { sourceSha256, sourceBytes, degraded: false });
-  const bookId = await renderer.evaluate(`document.querySelector('[data-screen="imported"] .book-overview')?.dataset.bookId`);
-  const lineageSourceVersionId = await renderer.evaluate(`document.querySelector('[data-screen="imported"] [data-record-kind="source"]')?.dataset.recordId`);
-  requireJourney(
-    /^[0-9a-f-]{36}$/i.test(bookId ?? '') && /^[0-9a-f-]{36}$/i.test(lineageSourceVersionId ?? ''),
-    `${scenario}-initial-identities`,
+  await runJourney(
+    renderer,
+    { sourceSha256, sourceBytes, degraded: false },
+    { diagnosticScenario: scenario },
+  );
+  const bookId = await duringCompletionPhase(
+    scenario,
+    'post-completion-identities',
+    async () => {
+      const identity = await renderer.evaluate(`document.querySelector('[data-screen="imported"] .book-overview')?.dataset.bookId`);
+      requireJourney(/^[0-9a-f-]{36}$/i.test(identity ?? ''), `${scenario}-initial-identities`);
+      return identity;
+    },
+  );
+  const lineageSourceVersionId = await duringCompletionPhase(
+    scenario,
+    'source-graph',
+    async () => {
+      const sourceVersionId = await renderer.evaluate(`document.querySelector('[data-screen="imported"] [data-record-kind="source"]')?.dataset.recordId`);
+      requireJourney(
+        /^[0-9a-f-]{36}$/i.test(sourceVersionId ?? ''),
+        `${scenario}-initial-source-graph`,
+      );
+      return sourceVersionId;
+    },
   );
   return { bookId, lineageSourceVersionId };
 }
@@ -1158,7 +1185,10 @@ async function runJourney(
     stopAfterAcceptedReview = false,
     holdCompletionPaint = false,
     diagnosticReviewLocation = 'review',
+    diagnosticScenario,
   } = options;
+  const duringCompletion = (phase, operation) =>
+    duringCompletionPhase(diagnosticScenario, phase, operation);
   const usePrimaryReviewDiagnostics = diagnosticReviewLocation === 'review';
   const atPrimaryReviewStage = (location) => {
     if (usePrimaryReviewDiagnostics) at(location);
@@ -1379,26 +1409,39 @@ async function runJourney(
     await assertRenderer(renderer, `!document.querySelector('[data-screen="imported"]')`, 'no-optimistic-import-success');
     return;
   }
-  await waitFor(renderer, `document.querySelector('[data-screen="imported"]')`, 'imported');
-  atPrimaryReviewStage('completion');
-  await assertRenderer(
-    renderer,
-    `document.querySelector('[data-screen="imported"]')?.textContent.includes('稿件已导入') && document.querySelector('[data-screen="imported"]')?.textContent.includes('图书工作概览')`,
-    'import-completion',
+  await duringCompletion(
+    'imported-transition',
+    () => waitFor(renderer, `document.querySelector('[data-screen="imported"]')`, 'imported'),
+  );
+  await duringCompletion(
+    'content-contract',
+    () => assertRenderer(
+      renderer,
+      `document.querySelector('[data-screen="imported"]')?.textContent.includes('稿件已导入') && document.querySelector('[data-screen="imported"]')?.textContent.includes('图书工作概览')`,
+      'import-completion',
+    ),
   );
   if (holdCompletionPaint) {
-    await waitFor(renderer, `globalThis.__ai7HeldCompletionFrames?.length === 1`, 'completion-awaits-first-paint');
-    await assertRenderer(
-      renderer,
-      `document.documentElement.dataset.ai7ImportCompletionPainted === undefined && document.documentElement.dataset.ai7ImportCompletionAcknowledged === undefined && Boolean(document.querySelector('[data-screen="imported"] [data-import-commit-id]'))`,
-      'completion-unacknowledged-before-paint',
+    await duringCompletion(
+      'held-before-paint',
+      async () => {
+        await waitFor(renderer, `globalThis.__ai7HeldCompletionFrames?.length === 1`, 'completion-awaits-first-paint');
+        await assertRenderer(
+          renderer,
+          `document.documentElement.dataset.ai7ImportCompletionPainted === undefined && document.documentElement.dataset.ai7ImportCompletionAcknowledged === undefined && Boolean(document.querySelector('[data-screen="imported"] [data-import-commit-id]'))`,
+          'completion-unacknowledged-before-paint',
+        );
+      },
     );
     return;
   }
-  await waitFor(
-    renderer,
-    `document.visibilityState === 'visible' && document.documentElement.dataset.ai7ProductReady === 'true' && document.documentElement.dataset.ai7ImportCompletionPainted === 'true' && document.documentElement.dataset.ai7ImportCompletionAcknowledged === 'true' && Boolean(document.querySelector('[data-screen="imported"] [data-import-commit-id]'))`,
-    'completion-observed-durable',
+  await duringCompletion(
+    'durable-paint-ack',
+    () => waitFor(
+      renderer,
+      `document.visibilityState === 'visible' && document.documentElement.dataset.ai7ProductReady === 'true' && document.documentElement.dataset.ai7ImportCompletionPainted === 'true' && document.documentElement.dataset.ai7ImportCompletionAcknowledged === 'true' && Boolean(document.querySelector('[data-screen="imported"] [data-import-commit-id]'))`,
+      'completion-observed-durable',
+    ),
   );
   if (!editAfterCommit) return;
   await clickExactButton(renderer, '稿件导入记录', 'record-open');
@@ -2275,12 +2318,28 @@ async function main() {
     await closeProduct();
 
     renderer = await launchProduct({ dataRoot: sourceRoot, pickerPath: syntheticBPath, launchScenario: 'source-populated-cross-book-import' });
-    await runJourney(renderer, { sourceSha256: syntheticBSha256, sourceBytes: syntheticBInfo.size, degraded: false });
-    const crossBookPopulatedId = await renderer.evaluate(`document.querySelector('[data-screen="imported"] .book-overview')?.dataset.bookId`);
-    const crossBookPopulatedBefore = await renderer.evaluate(`Array.from(document.querySelectorAll('.record-navigation button[data-record-kind]'), (button) => ({ kind: button.dataset.recordKind, id: button.dataset.recordId }))`);
-    requireJourney(
-      /^[0-9a-f-]{36}$/i.test(crossBookPopulatedId ?? '') && crossBookPopulatedBefore.length === 6,
-      'source-populated-cross-book-before',
+    await runJourney(
+      renderer,
+      { sourceSha256: syntheticBSha256, sourceBytes: syntheticBInfo.size, degraded: false },
+      { diagnosticScenario: 'source-populated-cross-book' },
+    );
+    const crossBookPopulatedId = await duringCompletionPhase(
+      'source-populated-cross-book',
+      'post-completion-identities',
+      async () => {
+        const identity = await renderer.evaluate(`document.querySelector('[data-screen="imported"] .book-overview')?.dataset.bookId`);
+        requireJourney(/^[0-9a-f-]{36}$/i.test(identity ?? ''), 'source-populated-cross-book-before');
+        return identity;
+      },
+    );
+    const crossBookPopulatedBefore = await duringCompletionPhase(
+      'source-populated-cross-book',
+      'source-graph',
+      async () => {
+        const graph = await renderer.evaluate(`Array.from(document.querySelectorAll('.record-navigation button[data-record-kind]'), (button) => ({ kind: button.dataset.recordKind, id: button.dataset.recordId }))`);
+        requireJourney(graph.length === 6, 'source-populated-cross-book-before');
+        return graph;
+      },
     );
     await closeProduct();
     renderer = await launchProduct({ dataRoot: sourceRoot, pickerPath: docx, launchScenario: 'source-populated-cross-book-review' });
@@ -2372,7 +2431,11 @@ async function main() {
       syntheticAInfo.size,
       'reimport',
     );
-    await createDurableJournalEdit(renderer);
+    await duringCompletionPhase(
+      'reimport',
+      'reimport-initial-edit',
+      () => createDurableJournalEdit(renderer),
+    );
     await closeProduct();
 
     renderer = await launchProduct({ dataRoot: reimportRoot, pickerPath: syntheticCPath, launchScenario: 'reimport-verified-changed' });
@@ -2559,9 +2622,20 @@ async function main() {
       syntheticPagedBaseInfo.size,
       'reimport-paged',
     );
-    await createDurableJournalEdit(renderer);
-    const initialPagedIdentities = await collectEditorBlockIdentities(renderer, 'reimport-paged-initial', false);
-    requireJourney(Object.keys(initialPagedIdentities).length === 260, 'reimport-paged-initial-identities');
+    await duringCompletionPhase(
+      'reimport-paged',
+      'reimport-initial-edit',
+      () => createDurableJournalEdit(renderer),
+    );
+    const initialPagedIdentities = await duringCompletionPhase(
+      'reimport-paged',
+      'editor-scan',
+      async () => {
+        const identities = await collectEditorBlockIdentities(renderer, 'reimport-paged-initial', false);
+        requireJourney(Object.keys(identities).length === 260, 'reimport-paged-initial-identities');
+        return identities;
+      },
+    );
     await closeProduct();
     renderer = await launchProduct({ dataRoot: reimportPagedRoot, pickerPath: syntheticPagedChangedPath, launchScenario: 'reimport-paged-review' });
     await prepareManuscriptReimportReview(renderer, {
@@ -2641,7 +2715,11 @@ async function main() {
       syntheticRepeatedBaseInfo.size,
       'reimport-repeated',
     );
-    await createDurableJournalEdit(renderer);
+    await duringCompletionPhase(
+      'reimport-repeated',
+      'reimport-initial-edit',
+      () => createDurableJournalEdit(renderer),
+    );
     await closeProduct();
     renderer = await launchProduct({ dataRoot: reimportRepeatedRoot, pickerPath: syntheticRepeatedChangedPath, launchScenario: 'reimport-repeated-review' });
     await prepareManuscriptReimportReview(renderer, {
@@ -2671,7 +2749,11 @@ async function main() {
       syntheticAmbiguousBaseInfo.size,
       'reimport-ambiguous',
     );
-    const initialAmbiguousIdentities = await collectEditorBlockIdentitySequence(renderer, 'reimport-ambiguous-initial');
+    const initialAmbiguousIdentities = await duringCompletionPhase(
+      'reimport-ambiguous',
+      'editor-scan',
+      () => collectEditorBlockIdentitySequence(renderer, 'reimport-ambiguous-initial'),
+    );
     await closeProduct();
     renderer = await launchProduct({ dataRoot: reimportAmbiguousRoot, pickerPath: syntheticAmbiguousReimportPath, launchScenario: 'reimport-ambiguous-review' });
     await prepareManuscriptReimportReview(renderer, {
@@ -3050,12 +3132,19 @@ async function main() {
     await runJourney(
       renderer,
       { ...sample1Expectation, exerciseEditor: true },
-      { start: 'target', diagnosticReviewLocation: 'continuity-review' },
+      {
+        start: 'target',
+        diagnosticReviewLocation: 'continuity-review',
+        diagnosticScenario: 'continuity-path-loss',
+      },
     );
     await closeProduct();
 
     renderer = await launchProduct({ dataRoot: continuityRoot, pickerPath: docx, launchScenario: 'continuity-exact-sample' });
-    await runJourney(renderer, exactSample1Expectation, { diagnosticReviewLocation: 'continuity-review' });
+    await runJourney(renderer, exactSample1Expectation, {
+      diagnosticReviewLocation: 'continuity-review',
+      diagnosticScenario: 'continuity-sample1',
+    });
     await closeProduct();
 
     renderer = await launchProduct({ dataRoot: continuityRoot, pickerPath: syntheticAPath, launchScenario: 'continuity-synthetic-a' });
@@ -3085,11 +3174,15 @@ async function main() {
     await runJourney(renderer, syntheticAExpectation, {
       start: 'accepted-review',
       diagnosticReviewLocation: 'continuity-review',
+      diagnosticScenario: 'continuity-identity-review-resumed',
     });
     await closeProduct();
 
     renderer = await launchProduct({ dataRoot: continuityRoot, pickerPath: syntheticBPath, launchScenario: 'continuity-synthetic-b' });
-    await runJourney(renderer, syntheticBExpectation, { diagnosticReviewLocation: 'continuity-review' });
+    await runJourney(renderer, syntheticBExpectation, {
+      diagnosticReviewLocation: 'continuity-review',
+      diagnosticScenario: 'continuity-synthetic-b',
+    });
     await closeProduct();
 
     renderer = await launchProduct({ dataRoot: continuityRoot, pickerPath: docx, launchScenario: 'abandon-stage' });
@@ -3149,6 +3242,7 @@ async function main() {
     await runJourney(renderer, sample1Expectation, {
       start: 'target',
       diagnosticReviewLocation: 'legacy-review',
+      diagnosticScenario: 'legacy-review-rereview',
     });
     await closeProduct();
 
@@ -3157,6 +3251,7 @@ async function main() {
     await runJourney(renderer, sample1Expectation, {
       holdCompletionPaint: true,
       diagnosticReviewLocation: 'before-paint-review',
+      diagnosticScenario: 'before-paint',
     });
     // Issue #47 / nearest supported Journey J-01: import completion acknowledgement must settle
     // before the ancillary Task authorization inspection/card settles.
@@ -3399,6 +3494,7 @@ async function main() {
     await runJourney(renderer, sample1Expectation, {
       start: 'accepted-review',
       diagnosticReviewLocation: 'before-commit-review',
+      diagnosticScenario: 'before-commit-resumed',
     });
     await closeProduct();
 
