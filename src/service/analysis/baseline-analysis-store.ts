@@ -1015,11 +1015,11 @@ export class BaselineAnalysisStore {
        JOIN branch_working_state bws ON bws.branch_id = mb.branch_id
        JOIN manuscript_revisions mr ON mr.revision_id = ${checkpoint === undefined ? 'bws.base_revision_id' : '?'}
        JOIN source_versions sv ON sv.source_version_id = mr.source_version_id AND sv.book_id = m.book_id
-       JOIN editorial_workspace_profile_book_pins pin ON pin.book_id = m.book_id
+       LEFT JOIN editorial_workspace_profile_book_pins pin ON pin.book_id = m.book_id
          AND pin.native_artifact_id = '@ai7/editorial-workspace-profile'
          AND pin.sidecar_id = 'ai7.editorial-workspace-profile.authority'
-       JOIN native_artifact_installations installation ON installation.artifact_id = pin.native_artifact_id
-       JOIN model_service_connections connection ON connection.connection_id = 'main-editorial-deepseek-v4-pro'
+       LEFT JOIN native_artifact_installations installation ON installation.artifact_id = pin.native_artifact_id
+       LEFT JOIN model_service_connections connection ON connection.connection_id = 'main-editorial-deepseek-v4-pro'
        WHERE m.book_id = ? AND m.role = 'primary'
        ORDER BY pin.sidecar_revision DESC`,
     ).get(...(checkpoint === undefined ? [bookId] : [checkpoint.revisionId, bookId])) as SqlRow | undefined;
@@ -1027,6 +1027,8 @@ export class BaselineAnalysisStore {
       'ANALYSIS_LINEAGE_UNAVAILABLE', '当前图书不是精确 sample1 主稿件血缘。');
     requireAnalysis(row.native_carrier_sha256 === NATIVE_CARRIER_DIGEST && row.sidecar_revision === 2 && row.sidecar_sha256 === SIDECAR_DIGEST,
       'ANALYSIS_ARTIFACT_PIN_UNAVAILABLE', '当前图书尚未固定编辑工作区方案 Revision 2。');
+    requireAnalysis(typeof row.credential_operation_state === 'string' && typeof row.credential_reference === 'string',
+      'ANALYSIS_PROVIDER_BINDING_UNAVAILABLE', '主编辑角色缺少固定的凭据引用元数据。');
     const state = asString(row.credential_operation_state);
     requireAnalysis((state === 'ready' || state === 'missing' || state === 'needs-attention') && UUID_PATTERN.test(asString(row.credential_reference)),
       'ANALYSIS_PROVIDER_BINDING_UNAVAILABLE', '主编辑角色缺少固定的凭据引用元数据。');

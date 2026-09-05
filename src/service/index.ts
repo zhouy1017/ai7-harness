@@ -689,9 +689,11 @@ async function run(): Promise<void> {
     const launchPolicy = await resolveSourceCheckoutLaunchPolicy(codeRoot);
     // The J-04-only control resolves the hand-written synthetic fixture before the store opens, so the
     // frozen plan can pin the exact fixture identity, lineage, and digest; every other launch binds no route.
+    // Fixtures are test inputs that never enter the built carrier, so they resolve from the source checkout
+    // that contains `dist/`, never from the carrier itself.
     const fixture = modelAdapterControl === undefined
       ? null
-      : await loadModelFixture(resolve(codeRoot, 'tests', 'fixtures', 'model'), modelAdapterControl);
+      : await loadModelFixture(resolve(codeRoot, '..', 'tests', 'fixtures', 'model'), modelAdapterControl);
     store = await EditorialStore.open(dataRoot, codeRoot, {
       induceUnprovableReconciliation: importControl === 'uncertain-reconciliation',
       persistLegacyReviewedDraft: importControl === 'legacy-reviewed-v2',
