@@ -60,6 +60,15 @@ describe('decodeRequest accepts well-formed frames', () => {
     };
     expect(decodeRequest(frameOf(request))).toEqual(request);
   });
+
+  it('accepts a foreground-boundary inspection that names a Book and a Run record', () => {
+    const request = {
+      id: randomUUID(),
+      op: 'inspectForegroundExecutionBoundary',
+      input: { bookId: randomUUID(), runRecordId: randomUUID() },
+    };
+    expect(decodeRequest(frameOf(request))).toEqual(request);
+  });
 });
 
 describe('decodeRequest enforces size limits', () => {
@@ -157,6 +166,24 @@ describe('decodeRequest rejects malformed frames', () => {
     expect(
       rejectionFor(frameOf({ id, op: 'getHistoricalRevision', input: { revisionId: randomUUID(), cursor: 7 } }))
         .requestId,
+    ).toBe(id);
+  });
+
+  it('rejects a foreground-boundary inspection whose Run identity or key set is wrong', () => {
+    const id = randomUUID();
+    expect(
+      rejectionFor(
+        frameOf({ id, op: 'inspectForegroundExecutionBoundary', input: { bookId: randomUUID(), runRecordId: 'not-a-uuid' } }),
+      ).requestId,
+    ).toBe(id);
+    expect(
+      rejectionFor(
+        frameOf({
+          id,
+          op: 'inspectForegroundExecutionBoundary',
+          input: { bookId: randomUUID(), runRecordId: randomUUID(), extra: 1 },
+        }),
+      ).requestId,
     ).toBe(id);
   });
 });
