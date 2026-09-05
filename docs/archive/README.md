@@ -29,3 +29,4 @@ Archived lifecycle nodes are historical records excluded from ordinary current-s
 - [Issue #205 remove Actions usage observation — 2026-09-03](issue-205-remove-actions-usage-observation-2026-09-03/INDEX.md): integrated Issue #205 / PR #206 consumed checkpoint and current Issue #198 / Draft PR #199 routing.
 - [Issue #207 close Issue #205 routing — 2026-09-03](issue-207-close-issue205-routing-2026-09-03/INDEX.md): consumed Issue #207 closure routing and current Issue #209 → #198 route.
 - [Issue #209 J-02 effect-based edit — 2026-09-04](issue-209-j02-effect-based-edit-2026-09-04/INDEX.md): merged Issue #209 / PR #214 closure snapshot and consumed root routing.
+- [Issue #262 agent-guidance baseline — 2026-08-25](agent-guidance-baseline-2026-08-25/INDEX.md): consumed 2026-08-17 handoff bundle superseded by the current `AGENTS.md` router baseline.
