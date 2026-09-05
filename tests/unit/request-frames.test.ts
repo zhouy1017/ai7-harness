@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { ProtocolError, decodeRequest } from '../../src/service/request-frames.js';
-import { MAX_EDIT_CODE_UNITS, MAX_REPLACEMENT_EXCLUSIONS } from '../../src/shared/protocol.js';
+import { BASELINE_ANALYSIS_TASK_GOAL, MAX_EDIT_CODE_UNITS, MAX_REPLACEMENT_EXCLUSIONS } from '../../src/shared/protocol.js';
 
 const encoder = new TextEncoder();
 
@@ -68,6 +68,19 @@ describe('decodeRequest accepts well-formed frames', () => {
       input: { bookId: randomUUID(), runRecordId: randomUUID() },
     };
     expect(decodeRequest(frameOf(request))).toEqual(request);
+  });
+
+  it('accepts the three baseline-analysis operations with their exact inputs', () => {
+    const inspect = { id: randomUUID(), op: 'inspectBaselineAnalysis', input: { bookId: randomUUID() } };
+    const prepare = { id: randomUUID(), op: 'prepareBaselineAnalysis', input: { bookId: randomUUID(), goal: BASELINE_ANALYSIS_TASK_GOAL } };
+    const authorize = {
+      id: randomUUID(),
+      op: 'authorizeBaselineAnalysis',
+      input: { bookId: randomUUID(), taskIntentId: randomUUID(), planEnvelopeDigest: 'a'.repeat(64) },
+    };
+    expect(decodeRequest(frameOf(inspect))).toEqual(inspect);
+    expect(decodeRequest(frameOf(prepare))).toEqual(prepare);
+    expect(decodeRequest(frameOf(authorize))).toEqual(authorize);
   });
 });
 
@@ -167,6 +180,13 @@ describe('decodeRequest rejects malformed frames', () => {
       rejectionFor(frameOf({ id, op: 'getHistoricalRevision', input: { revisionId: randomUUID(), cursor: 7 } }))
         .requestId,
     ).toBe(id);
+  });
+
+  it('rejects a baseline-analysis preparation whose goal is not the fixed goal or whose digest is malformed', () => {
+    const id = randomUUID();
+    expect(rejectionFor(frameOf({ id, op: 'prepareBaselineAnalysis', input: { bookId: randomUUID(), goal: '其他目标' } })).requestId).toBe(id);
+    expect(rejectionFor(frameOf({ id, op: 'authorizeBaselineAnalysis', input: { bookId: randomUUID(), taskIntentId: randomUUID(), planEnvelopeDigest: 'short' } })).requestId).toBe(id);
+    expect(rejectionFor(frameOf({ id, op: 'inspectBaselineAnalysis', input: { bookId: randomUUID(), extra: 1 } })).requestId).toBe(id);
   });
 
   it('rejects a foreground-boundary inspection whose Run identity or key set is wrong', () => {

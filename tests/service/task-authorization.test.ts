@@ -5,7 +5,11 @@ import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
-import { TASK_AUTHORIZATION_SCHEMA_SQL } from '../../src/service/task-authorization.js';
+import {
+  ANALYSIS_LEDGER_SCHEMA_SQL,
+  TASK_AUTHORIZATION_SCHEMA_SQL,
+  TASK_AUTHORIZATION_SCHEMA_VERSION,
+} from '../../src/service/task-authorization.js';
 import { J03_TASK_GOAL, type LaunchPolicyProjection } from '../../src/shared/protocol.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 
@@ -27,6 +31,9 @@ const CONNECTION_NAME = 'L2 主编辑连接';
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const DIGEST_PATTERN = /^[0-9a-f]{64}$/;
 const IMMUTABLE_TABLES = Object.keys(TASK_AUTHORIZATION_SCHEMA_SQL);
+// Revision 15 (Issue #92) adds the baseline-analysis relations beside the J-03 ledger. A J-03
+// authorization must leave every one of them empty: the additive migration writes no row.
+const ANALYSIS_LEDGER_TABLES = Object.keys(ANALYSIS_LEDGER_SCHEMA_SQL);
 
 let roots: ServiceTestRoots;
 
@@ -296,6 +303,13 @@ describe('task authorization over the real store on exact sample1', () => {
     // table rejects `UPDATE` and `DELETE` through its own trigger, with the row left in place.
     const database = new DatabaseSync(storeDatabasePath());
     try {
+      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version)
+        .toBe(TASK_AUTHORIZATION_SCHEMA_VERSION);
+      expect(ANALYSIS_LEDGER_TABLES.length).toBeGreaterThan(0);
+      for (const table of ANALYSIS_LEDGER_TABLES) {
+        const rows = database.prepare(`SELECT count(*) total FROM ${table}`).get() as { total: number };
+        expect(rows.total).toBe(0);
+      }
       expect(IMMUTABLE_TABLES.length).toBeGreaterThan(0);
       for (const table of IMMUTABLE_TABLES) {
         const before = database.prepare(`SELECT count(*) total FROM ${table}`).get() as { total: number };

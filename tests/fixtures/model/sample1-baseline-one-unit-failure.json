@@ -1,0 +1,20 @@
+{
+  "schema": "ai7.model-fixture/1",
+  "identity": "sample1-baseline-one-unit-failure",
+  "description": "Hand-written synthetic shape (ii) layered over shape (i): identical to sample1-baseline-happy except that Analysis Unit 2 answers with an adapter failure, which the Run must persist as an exact gap. The J-04 journey and the L2 suite consume this composite fixture. Public synthetic text only; no manuscript content.",
+  "basedOn": "sample1-baseline-happy",
+  "provider": "ai7-local-deterministic",
+  "model": "ai7-deterministic-fixture",
+  "entries": [
+    {
+      "unitOrdinal": 2,
+      "requestDigest": "cbc613c1c72be55aa803ab03658fa4e70638719764daf6a3a2ceef1034496295",
+      "response": {
+        "kind": "adapter-failure",
+        "code": "SYNTHETIC_ADAPTER_FAILURE",
+        "message": "Synthetic adapter failure for Analysis Unit 2 (fixture shape ii).",
+        "status": null
+      }
+    }
+  ]
+}

@@ -1,4 +1,6 @@
 import type {
+  BaselineAnalysisProjection,
+  BaselineAnalysisResultSetRevisionProjection,
   BookCreationReviewProjection,
   BookRecordPresentation,
   BookSummaryPageProjection,
@@ -31,7 +33,7 @@ import type {
   StartupProjection,
   TaskAuthorizationProjection,
 } from '../shared/protocol.js';
-import { J03_TASK_GOAL, MAX_REPLACEMENT_EXCLUSIONS } from '../shared/protocol.js';
+import { BASELINE_ANALYSIS_TASK_GOAL, J03_TASK_GOAL, MAX_REPLACEMENT_EXCLUSIONS } from '../shared/protocol.js';
 import { mountBoundedEditor, type BoundedEditor, type EditorContinuity } from './editor.js';
 
 function requiredElement(selector: string): HTMLElement {
@@ -1277,8 +1279,30 @@ function renderBookOverview(
       },
     );
   };
+  const analysisHost = element('div');
+  analysisHost.dataset['analysisBookId'] = overview.book.bookId;
+  const inspectBaselineAnalysis = (): void => {
+    if (!analysisHost.isConnected || overview.manuscriptState.state !== 'populated') return;
+    void window.ai7.inspectBaselineAnalysis().then(
+      (projection) => {
+        if (analysisHost.isConnected && projection.bookId === analysisHost.dataset['analysisBookId']) {
+          renderBaselineAnalysis(analysisHost, projection, overview.book.title);
+        }
+      },
+      (error) => {
+        if (!analysisHost.isConnected) return;
+        const unavailable = element('section', 'baseline-analysis-card attention-note');
+        unavailable.dataset['analysisState'] = 'unavailable';
+        unavailable.append(
+          element('h3', undefined, '基线稿件分析'),
+          element('p', undefined, rendererErrorMessage(error, '无法读取本地图书的基线稿件分析记录。')),
+        );
+        analysisHost.replaceChildren(unavailable);
+      },
+    );
+  };
   if (overview.manuscriptState.state === 'populated') {
-    content.append(taskHost);
+    content.append(taskHost, analysisHost);
   }
 
   const detailHost = element('div');
@@ -1430,11 +1454,374 @@ function renderBookOverview(
         setStatus(completion.completionLabel, 'success');
       }
       inspectTaskAuthorization();
+      inspectBaselineAnalysis();
     });
   } else {
     inspectTaskAuthorization();
+    inspectBaselineAnalysis();
     setStatus('图书工作概览已打开');
   }
+}
+
+function analysisRanges(ranges: ReadonlyArray<{ blockId: string; fromGrapheme: number | null; toGrapheme: number | null }>): string {
+  if (ranges.length === 0) return '无精确范围';
+  return ranges.map((range) => range.fromGrapheme === null || range.toGrapheme === null
+    ? `${range.blockId}（整块）`
+    : `${range.blockId} · 字素 ${range.fromGrapheme}–${range.toGrapheme}`).join('；');
+}
+
+function analysisReturnButton(
+  blockId: string,
+  manuscriptId: string,
+  branchId: string,
+  bookTitle: string,
+): HTMLButtonElement {
+  const returnToRange = button('回到稿件范围', 'quiet', async () => {
+    returnToRange.disabled = true;
+    setStatus('正在打开对应稿件范围…', 'busy');
+    try {
+      renderEditorWindow(await window.ai7.getManuscriptWindowAt({ manuscriptId, branchId, target: { kind: 'block', blockId } }), bookTitle);
+    } catch (error) {
+      returnToRange.disabled = false;
+      setStatus(rendererErrorMessage(error, '无法打开对应稿件范围。'), 'error');
+    }
+  });
+  returnToRange.dataset['analysisAction'] = 'return-to-range';
+  returnToRange.dataset['analysisBlockId'] = blockId;
+  return returnToRange;
+}
+
+function renderAnalysisAxis(
+  axis: BaselineAnalysisResultSetRevisionProjection['coverage' | 'reducerClosure' | 'freshness' | 'assurance'],
+  details: ReadonlyArray<string>,
+): HTMLElement {
+  const section = element('section', `analysis-axis analysis-axis-${axis.axis}`);
+  section.dataset['analysisAxis'] = axis.axis;
+  section.dataset['axisState'] = axis.state;
+  const heading = axis.axis === 'coverage' ? '覆盖' : axis.axis === 'reducer-closure' ? '归约/综合闭合' : axis.axis === 'freshness' ? '精确修订版新鲜度' : '语义/证据保证';
+  section.append(element('h5', undefined, heading), element('p', 'analysis-axis-label', axis.label));
+  const list = element('ul', 'analysis-list');
+  for (const detail of details) list.append(element('li', undefined, detail));
+  section.append(list);
+  return section;
+}
+
+function renderBaselineAnalysisOverview(
+  card: HTMLElement,
+  projection: BaselineAnalysisProjection,
+  revision: BaselineAnalysisResultSetRevisionProjection,
+  bookTitle: string,
+): void {
+  const checkpoint = projection.checkpoint!;
+  card.dataset['resultRevisionId'] = revision.revisionId;
+  card.dataset['resultRevisionDigest'] = revision.digest;
+  card.dataset['gapCount'] = String(revision.gaps.length);
+  card.dataset['conflictCount'] = String(revision.conflicts.length);
+  card.dataset['freshnessState'] = revision.freshness.state;
+  card.append(element('h4', undefined, 'Manuscript Analysis Overview / 稿件分析概览'));
+  const identity = element('dl', 'analysis-facts');
+  identity.append(
+    element('dt', undefined, '分析契约'), element('dd', 'technical-identity', `${projection.kind} · ${revision.contractVersion}`),
+    element('dt', undefined, '精确稿件 pin'), element('dd', 'technical-identity', `${revision.manuscriptPin.revisionLabel} · ${revision.manuscriptPin.revisionId} · ${revision.manuscriptPin.revisionDigest}`),
+    element('dt', undefined, '结果集修订版'), element('dd', 'technical-identity', `Revision ${revision.ordinal} · ${revision.revisionId}`),
+    element('dt', undefined, '修订版摘要'), element('dd', 'technical-identity', revision.digest),
+    element('dt', undefined, '覆盖清单摘要'), element('dd', 'technical-identity', revision.coverageManifestDigest),
+    element('dt', undefined, 'Schema / Reducer 摘要'), element('dd', 'technical-identity', `${revision.schemaDigest} · ${revision.reducerDigest}`),
+    element('dt', undefined, '模型适配器 pin'), element('dd', 'technical-identity', `${revision.adapterPin.route} · ${revision.adapterPin.model} · ${revision.adapterPin.fixtureIdentity} · ${revision.adapterPin.fixtureSha256}`),
+    element('dt', undefined, '执行绑定 pin'), element('dd', 'technical-identity', `${revision.bindingPin.bindingDigest} · Session ${revision.bindingPin.harnessSessionId}`),
+    element('dt', undefined, '策略 pin'), element('dd', undefined, `${revision.policyPin.operationalScope} · Provider Processing ${revision.policyPin.providerProcessingVersion} · ${revision.policyPin.liveTransmissions} 次实时传输`),
+    element('dt', undefined, '用量'), element('dd', undefined, `${revision.usage.requests} 次模型请求 · 输入 ${revision.usage.inputTokens} · 输出 ${revision.usage.outputTokens}`),
+  );
+  card.append(identity);
+
+  const axes = element('div', 'analysis-axes');
+  axes.append(
+    renderAnalysisAxis(revision.coverage, [
+      `${revision.coverage.unitsClosed}/${revision.coverage.unitsTotal} 个分析单元闭合`,
+      `${revision.coverage.gapCount} 处缺口（失败、跳过或无效单元）`,
+    ]),
+    renderAnalysisAxis(revision.reducerClosure, revision.reducerClosure.stages.map((stage) => `${stage.stage}：${stage.state}（${stage.inputCount} 项输入）`)),
+    renderAnalysisAxis(revision.freshness, [
+      `绑定修订版 ${revision.freshness.boundRevisionId}`,
+      `当前修订版 ${revision.freshness.currentRevisionId} · 修订日志序号 ${revision.freshness.currentJournalSequence}`,
+      '仅通过本地确定性比较判定；不调用 Provider',
+    ]),
+    renderAnalysisAxis(revision.assurance, [
+      `${revision.assurance.unresolvedConflictCount} 处未解决冲突 · ${revision.assurance.unresolvedItemCount} 项未解决事项 · ${revision.assurance.lowConfidenceUnitCount} 个低置信单元`,
+      revision.assurance.statement,
+    ]),
+  );
+  card.append(element('h4', undefined, '四个独立状态轴'), axes);
+
+  const gaps = element('ul', 'analysis-list analysis-gap-list');
+  if (revision.gaps.length === 0) gaps.append(element('li', undefined, '无缺口'));
+  for (const gap of revision.gaps) {
+    const item = element('li');
+    item.dataset['analysisGapUnit'] = String(gap.unitOrdinal);
+    item.dataset['analysisGapCode'] = gap.code;
+    item.append(element('span', undefined, `单元 ${gap.unitOrdinal} · ${gap.code} · 内容块 ${gap.startPosition}–${gap.endPosition} · ${gap.reason} `));
+    if (gap.blockIds[0] !== undefined) item.append(analysisReturnButton(gap.blockIds[0], checkpoint.manuscriptId, checkpoint.branchId, bookTitle));
+    gaps.append(item);
+  }
+  card.append(element('h4', undefined, `缺口 · ${revision.gaps.length} 处`), gaps);
+
+  const conflicts = element('ul', 'analysis-list analysis-conflict-list');
+  if (revision.conflicts.length === 0) conflicts.append(element('li', undefined, '无冲突'));
+  for (const conflict of revision.conflicts) {
+    const item = element('li');
+    item.dataset['analysisConflictKind'] = conflict.kind;
+    item.append(element('span', undefined, `${conflict.kind} · 单元 ${conflict.unitOrdinals.join('、')} · ${conflict.description} · ${analysisRanges(conflict.sourceRanges)} `));
+    if (conflict.sourceRanges[0] !== undefined) item.append(analysisReturnButton(conflict.sourceRanges[0].blockId, checkpoint.manuscriptId, checkpoint.branchId, bookTitle));
+    conflicts.append(item);
+  }
+  card.append(element('h4', undefined, `冲突 · ${revision.conflicts.length} 处（保持未解决）`), conflicts);
+
+  const synthesis = element('section', 'analysis-synthesis');
+  synthesis.append(
+    element('h4', undefined, '全书综合'),
+    element('p', undefined, revision.synthesis.synopsis.length > 0 ? revision.synthesis.synopsis : '（没有闭合单元可供综合）'),
+    element('p', 'field-note', `实体 ${revision.synthesis.entities.length} · 事件 ${revision.synthesis.events.length} · 关系 ${revision.synthesis.relationships.length} · 设定声明 ${revision.synthesis.settingClaims.length} · 未解决事项 ${revision.synthesis.unresolved.length}`),
+  );
+  const entities = element('ul', 'analysis-list');
+  for (const entity of revision.synthesis.entities) {
+    entities.append(element('li', undefined, `${entity.name}（${entity.kind}${entity.aliases.length > 0 ? `，别名 ${entity.aliases.join('、')}` : ''}）· 来自单元 ${entity.unitOrdinals.join('、')} · ${analysisRanges(entity.sourceRanges)}`));
+  }
+  synthesis.append(entities);
+  card.append(synthesis);
+
+  const units = element('ul', 'analysis-unit-list');
+  for (const unit of revision.units) {
+    const item = element('li', 'analysis-unit');
+    item.dataset['analysisUnit'] = String(unit.unitOrdinal);
+    item.dataset['analysisUnitState'] = unit.state;
+    const details = element('details');
+    const manifestUnit = projection.coverageManifest?.units[unit.unitOrdinal - 1];
+    const range = manifestUnit === undefined ? '' : ` · 内容块 ${manifestUnit.startPosition}–${manifestUnit.endPosition}`;
+    details.append(element('summary', undefined, unit.state === 'closed'
+      ? `单元 ${unit.unitOrdinal} · 已闭合 · 置信 ${unit.confidence}${range}`
+      : `单元 ${unit.unitOrdinal} · 缺口 · ${unit.gap.code}${range}`));
+    const body = element('div');
+    body.append(element('p', 'field-note technical-identity', `请求摘要 ${unit.requestDigest}`));
+    if (unit.state === 'closed') {
+      body.append(
+        element('p', undefined, unit.synopsis),
+        element('p', 'field-note', `实体 ${unit.entities.length} · 事件 ${unit.events.length} · 关系 ${unit.relationships.length} · 设定声明 ${unit.settingClaims.length} · 单元内冲突 ${unit.conflicts.length} · 未解决 ${unit.unresolved.length}${unit.usage === null ? '' : ` · 用量 ${unit.usage.inputTokens}/${unit.usage.outputTokens}`}`),
+      );
+      const firstRange = unit.entities.flatMap((entity) => entity.sourceRanges)[0] ?? unit.events.flatMap((event) => event.sourceRanges)[0];
+      if (firstRange !== undefined) body.append(analysisReturnButton(firstRange.blockId, checkpoint.manuscriptId, checkpoint.branchId, bookTitle));
+    } else {
+      body.append(element('p', 'attention-note', unit.gap.reason));
+      if (unit.gap.blockIds[0] !== undefined) body.append(analysisReturnButton(unit.gap.blockIds[0], checkpoint.manuscriptId, checkpoint.branchId, bookTitle));
+    }
+    details.append(body);
+    item.append(details);
+    units.append(item);
+  }
+  card.append(element('h4', undefined, `分析单元结果 · ${revision.units.length} 个`), units);
+}
+
+function renderBaselineAnalysis(host: HTMLElement, projection: BaselineAnalysisProjection, bookTitle: string): void {
+  const card = element('section', 'baseline-analysis-card');
+  card.dataset['analysisState'] = projection.state;
+  card.dataset['analysisBookId'] = projection.bookId;
+  if (projection.taskIntent) card.dataset['taskIntentId'] = projection.taskIntent.taskIntentId;
+  if (projection.planEnvelope) card.dataset['planEnvelopeDigest'] = projection.planEnvelope.digest;
+  if (projection.coverageManifest) {
+    card.dataset['coverageManifestDigest'] = projection.coverageManifest.digest;
+    card.dataset['analysisUnits'] = String(projection.coverageManifest.units.length);
+  }
+  if (projection.run) card.dataset['runState'] = projection.run.state;
+  if (projection.taskOutcome) {
+    card.dataset['taskOutcomeId'] = projection.taskOutcome.outcomeId;
+    card.dataset['taskOutcomeClassification'] = projection.taskOutcome.classification;
+  }
+  const heading = element('div', 'baseline-analysis-heading');
+  heading.append(
+    element('h3', undefined, '基线稿件分析'),
+    element('span', `status-pill analysis-state analysis-state-${projection.state}`, projection.stateLabel),
+  );
+  card.append(heading, element('p', 'field-note', '一个精确版本化的覆盖式分析种类；远程绑定被 Provider Processing v1 拒绝，结果集修订版不修改稿件。'));
+
+  const refreshLater = (): void => {
+    window.setTimeout(async () => {
+      if (!host.isConnected || host.dataset['analysisBookId'] !== projection.bookId) return;
+      try {
+        const next = await window.ai7.inspectBaselineAnalysis();
+        if (host.isConnected && next.bookId === host.dataset['analysisBookId']) renderBaselineAnalysis(host, next, bookTitle);
+      } catch (error) {
+        if (host.isConnected) setStatus(rendererErrorMessage(error, '无法刷新基线稿件分析状态。'), 'error');
+      }
+    }, 250);
+  };
+
+  if (projection.state === 'available') {
+    const form = element('section', 'form-row analysis-form');
+    const label = element('label', undefined, '固定任务目标');
+    label.htmlFor = 'j04-analysis-goal';
+    const goal = element('input');
+    goal.id = 'j04-analysis-goal';
+    goal.value = BASELINE_ANALYSIS_TASK_GOAL;
+    goal.readOnly = true;
+    const actions = element('div', 'button-row analysis-actions');
+    const start = button('开始基线稿件分析', 'primary', async () => {
+      start.disabled = true;
+      cancel.hidden = false;
+      setStatus('正在有界固定任务输入并派生覆盖清单…', 'busy');
+      try {
+        const initial = await window.ai7.prepareBaselineAnalysis({ goal: BASELINE_ANALYSIS_TASK_GOAL });
+        cancel.dataset['serviceJobId'] = initial.jobId;
+        const completed = await awaitServiceJob(initial, (job) => {
+          cancel.dataset['serviceJobId'] = job.jobId;
+          setStatus(job.progress.label, job.state === 'failed' ? 'error' : 'busy');
+        });
+        if (completed.state === 'cancelled') {
+          start.disabled = false;
+          cancel.hidden = true;
+          setStatus('基线稿件分析准备已取消；稿件与任务草稿保持不变。', 'success');
+          return;
+        }
+        if (completed.kind !== 'baseline-analysis-preparation' || completed.result === null ||
+            !('coverageManifest' in completed.result)) throw new Error('基线稿件分析准备未返回计划。');
+        if (host.isConnected && completed.result.bookId === host.dataset['analysisBookId']) {
+          renderBaselineAnalysis(host, completed.result, bookTitle);
+          setStatus('覆盖清单已派生，计划已冻结；等待授权。', 'success');
+        }
+      } catch (error) {
+        start.disabled = false;
+        cancel.hidden = true;
+        setStatus(rendererErrorMessage(error, '无法开始基线稿件分析。'), 'error');
+      }
+    });
+    start.dataset['analysisAction'] = 'prepare';
+    const cancel = button('取消准备', 'quiet', async () => {
+      const jobId = cancel.dataset['serviceJobId'];
+      if (!jobId) return;
+      cancel.disabled = true;
+      try {
+        await window.ai7.cancelServiceJob({ jobId });
+      } catch (error) {
+        cancel.disabled = false;
+        setStatus(rendererErrorMessage(error, '无法取消基线稿件分析准备。'), 'error');
+      }
+    });
+    cancel.hidden = true;
+    actions.append(start, cancel);
+    form.append(label, goal, element('p', 'field-note', '开始后先固定任务输入修订版并派生确定性覆盖清单；不会构造模型请求。'), actions);
+    card.append(form);
+    host.replaceChildren(card);
+    return;
+  }
+
+  const checkpoint = projection.checkpoint!;
+  const manifest = projection.coverageManifest!;
+  const provider = projection.providerResolutionPlan!;
+  const envelope = projection.planEnvelope!;
+  const facts = element('dl', 'analysis-facts');
+  facts.append(
+    element('dt', undefined, '任务目标'), element('dd', undefined, projection.taskIntent!.goal),
+    element('dt', undefined, '预期结果'), element('dd', undefined, projection.taskIntent!.expectedOutcome),
+    element('dt', undefined, '任务输入修订版'), element('dd', 'technical-identity', `${checkpoint.revisionLabel} · ${checkpoint.revisionId} · ${checkpoint.revisionDigest}`),
+    element('dt', undefined, '覆盖清单'), element('dd', 'technical-identity', `${manifest.units.length} 个分析单元 · ${manifest.sectionCount} 个结构段 · ${manifest.totalBlocks} 个内容块 · ${manifest.totalGraphemes} 字素 · 单元预算 ${manifest.parameters.unitBudgetGraphemes} 字素 · 重叠 ${manifest.parameters.overlapBlocks} 块`),
+    element('dt', undefined, '覆盖清单摘要'), element('dd', 'technical-identity', manifest.digest),
+    element('dt', undefined, 'Model Role'), element('dd', undefined, provider.role),
+    element('dt', undefined, '远程绑定（被拒绝）'), element('dd', undefined, `${provider.remoteBinding.providerId} · ${provider.remoteBinding.modelId} · adapter r${provider.remoteBinding.adapterRevision} · config r${provider.remoteBinding.configurationRevision} · 凭据 ${provider.remoteBinding.credentialReadiness} · development-ci · v1 · 0 次实时传输`),
+    element('dt', undefined, '执行路由'), element('dd', 'technical-identity', provider.executionRoute.kind === 'none'
+      ? '无（未提供 J-04 本地确定性模型适配器控制）'
+      : `${provider.executionRoute.kind} · ${provider.executionRoute.model} · 夹具 ${provider.executionRoute.fixtureIdentity} · ${provider.executionRoute.fixtureSha256}`),
+    element('dt', undefined, 'Outbound Data Category'), element('dd', undefined, provider.outboundDataCategory),
+    element('dt', undefined, 'Run Budget Ceiling'), element('dd', undefined, '未设置任务预算上限'),
+    element('dt', undefined, '提示契约摘要'), element('dd', 'technical-identity', envelope.promptContractDigest),
+    element('dt', undefined, '行为组合摘要'), element('dd', 'technical-identity', envelope.behaviorCompositionDigest),
+    element('dt', undefined, 'Plan Envelope'), element('dd', 'technical-identity', envelope.digest),
+    element('dt', undefined, '派发状态'), element('dd', undefined, envelope.summary),
+  );
+  card.append(element('h4', undefined, 'Coverage Manifest / 覆盖清单与计划预览'), facts);
+  const unitList = element('ul', 'analysis-list analysis-manifest-units');
+  for (const unit of manifest.units) {
+    const item = element('li', undefined, `单元 ${unit.ordinal} · 结构段 ${unit.sectionOrdinal}${unit.headingText === null ? '' : `「${unit.headingText}」`} ${unit.subUnitIndex}/${unit.subUnitCount} · 内容块 ${unit.startPosition}–${unit.endPosition} · ${unit.graphemes} 字素 · 重叠 ${unit.overlapBlockIds.length} 块`);
+    item.dataset['manifestUnit'] = String(unit.ordinal);
+    unitList.append(item);
+  }
+  card.append(unitList);
+
+  if (projection.actions.canAuthorize) {
+    const actions = element('div', 'button-row analysis-actions');
+    const authorize = button(envelope.dispatchAllowed ? '授权并派发运行' : '记录运行授权（将于派发前阻止）', 'primary', async () => {
+      authorize.disabled = true;
+      setStatus(envelope.dispatchAllowed ? '正在记录标准直接运行授权并进入调度…' : '正在记录标准直接运行授权…', 'busy');
+      try {
+        const authorized = await window.ai7.authorizeBaselineAnalysis({
+          taskIntentId: projection.taskIntent!.taskIntentId,
+          planEnvelopeDigest: envelope.digest,
+        });
+        if (host.isConnected && authorized.bookId === host.dataset['analysisBookId']) {
+          renderBaselineAnalysis(host, authorized, bookTitle);
+          setStatus(authorized.run?.stateLabel ?? '已记录授权', authorized.state === 'authorized-blocked' ? undefined : 'success');
+        }
+      } catch (error) {
+        authorize.disabled = false;
+        setStatus(rendererErrorMessage(error, '无法记录基线稿件分析运行授权。'), 'error');
+      }
+    });
+    authorize.dataset['analysisAction'] = 'authorize';
+    actions.append(authorize);
+    card.append(actions);
+  }
+
+  const run = projection.run;
+  if (run) {
+    const runSection = element('section', 'analysis-run');
+    runSection.dataset['runState'] = run.state;
+    runSection.append(element('h4', undefined, `Run Record · ${run.stateLabel}`));
+    const runFacts = element('dl', 'analysis-facts');
+    runFacts.append(
+      element('dt', undefined, 'Run Record'), element('dd', 'technical-identity', run.runRecordId),
+      element('dt', undefined, 'Run Authorization'), element('dd', 'technical-identity', `${projection.authorization!.authorizationId} · ${projection.authorization!.origin} · ${projection.authorization!.authority}`),
+      element('dt', undefined, '状态转换'), element('dd', undefined, run.transitions.map((transition) => `${transition.sequence}. ${transition.state}`).join(' → ')),
+    );
+    if (run.attempt) {
+      runFacts.append(
+        element('dt', undefined, '执行尝试'), element('dd', 'technical-identity', `${run.attempt.attemptId} · 凭据就绪检查 ${run.attempt.credentialReadinessCheck.readiness} · 未释放任何值`),
+        element('dt', undefined, '执行绑定'), element('dd', 'technical-identity', run.attempt.executionBinding === null ? '尚未持久化' : `${run.attempt.executionBinding.bindingDigest} · Session ${run.attempt.executionBinding.harnessSessionId}`),
+        element('dt', undefined, 'Harness Execution Span'), element('dd', undefined, `${run.attempt.spans.length} 个区段（按标识引用，不复制内容）`),
+      );
+    }
+    runSection.append(runFacts);
+    if (run.blockedReasons) {
+      const reasons = element('ul', 'analysis-list attention-note');
+      reasons.dataset['analysisBlocked'] = 'blocked-before-dispatch';
+      for (const reason of run.blockedReasons) reasons.append(element('li', undefined, reason));
+      runSection.append(reasons);
+    }
+    if (run.progress) {
+      const progress = element('p', 'analysis-progress');
+      progress.dataset['analysisProgress'] = `${run.progress.unitsSettled}/${run.progress.unitsTotal}`;
+      progress.setAttribute('aria-live', 'polite');
+      progress.textContent = `分析单元进度 ${run.progress.unitsSettled}/${run.progress.unitsTotal}${run.progress.currentUnitOrdinal === null ? '' : ` · 正在处理单元 ${run.progress.currentUnitOrdinal}`}`;
+      runSection.append(progress);
+    }
+    card.append(runSection);
+  }
+
+  if (projection.resultSetRevision) renderBaselineAnalysisOverview(card, projection, projection.resultSetRevision, bookTitle);
+
+  if (projection.taskOutcome) {
+    const outcome = element('section', 'success-note analysis-outcome');
+    outcome.dataset['taskOutcomeId'] = projection.taskOutcome.outcomeId;
+    outcome.dataset['taskOutcomeClassification'] = projection.taskOutcome.classification;
+    outcome.append(
+      element('h4', undefined, projection.taskOutcome.label),
+      element('p', 'technical-identity', `Task Outcome ${projection.taskOutcome.outcomeId} · 链接结果集修订版 ${projection.taskOutcome.resultSetRevisionId ?? '无'}`),
+      element('p', undefined, `安全的下一步：${projection.taskOutcome.safeNextAction}`),
+    );
+    card.append(outcome);
+  }
+
+  const nonEffects = element('ul', 'analysis-list');
+  for (const statement of projection.namedNonEffects) nonEffects.append(element('li', undefined, statement));
+  card.append(element('h4', undefined, '明确不会发生'), nonEffects);
+  host.replaceChildren(card);
+  if (projection.state === 'admitted' || projection.state === 'executing') refreshLater();
 }
 
 function renderForegroundExecutionBoundary(
@@ -1513,7 +1900,7 @@ function renderTaskAuthorization(host: HTMLElement, projection: TaskAuthorizatio
           return;
         }
         if (completed.kind !== 'task-authorization-preparation' || completed.result === null ||
-            !('taskIntent' in completed.result)) throw new Error('任务授权准备未返回计划。');
+            !('runRecord' in completed.result)) throw new Error('任务授权准备未返回计划。');
         if (host.isConnected && completed.result.bookId === host.dataset['taskAuthorizationBookId']) {
           renderTaskAuthorization(host, completed.result);
           setStatus('任务授权计划已冻结；当前仍未派发。', 'success');
@@ -3483,7 +3870,7 @@ async function awaitServiceJob(
   let previousReimportProgress = initial.progress.completed;
   const requireMonotonicReimportProgress = (next: ServiceJobProjection): void => {
     if (next.kind !== 'reimport-preparation' && next.kind !== 'reimport-resolution' && next.kind !== 'reimport-commit' &&
-        next.kind !== 'task-authorization-preparation') return;
+        next.kind !== 'task-authorization-preparation' && next.kind !== 'baseline-analysis-preparation') return;
     if (!Number.isSafeInteger(next.progress.completed) || !Number.isSafeInteger(next.progress.total) ||
       next.progress.completed < previousReimportProgress || next.progress.completed > next.progress.total ||
       next.progress.total <= 0 ||

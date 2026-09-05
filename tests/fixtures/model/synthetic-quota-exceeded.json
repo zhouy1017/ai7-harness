@@ -1,0 +1,19 @@
+{
+  "schema": "ai7.model-fixture/1",
+  "identity": "synthetic-quota-exceeded",
+  "description": "Hand-written synthetic shape (iii): an account-limit response for one synthetic unit, classified as a Provider Account Limit blocker at unit and service level only. Public synthetic text; no manuscript content.",
+  "basedOn": null,
+  "provider": "ai7-local-deterministic",
+  "model": "ai7-deterministic-fixture",
+  "entries": [
+    {
+      "unitOrdinal": 1,
+      "requestDigest": "5ce83890840cf38fddacf0aec45f234dada8cee453236aceeb468b0055ae14ce",
+      "response": {
+        "kind": "quota-exceeded",
+        "message": "Insufficient Balance (synthetic fixture shape)",
+        "status": 402
+      }
+    }
+  ]
+}

@@ -1,4 +1,4 @@
-export const SERVICE_PROTOCOL_VERSION = 16 as const;
+export const SERVICE_PROTOCOL_VERSION = 17 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -26,6 +26,14 @@ export type J03ForegroundExecutionControl = 'interrupt-before-foreground-boundar
 
 export type J08RecoveryControl = 'interrupt-after-journal-ack';
 
+/**
+ * The J-04-only launch control: the identity of a hand-written synthetic deterministic fixture under
+ * `tests/fixtures/model/`. Admitted only with `AI7_E2E_JOURNEY=J-04`, mutually exclusive with every
+ * other control, and the only way the `ai7-local-deterministic` route can be bound.
+ */
+export type J04ModelAdapterControl = string;
+export const J04_MODEL_ADAPTER_CONTROL_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
+
 export const IPC_CHANNELS = {
   getStartup: 'ai7:j08:get-startup',
   getRecoveryComparison: 'ai7:j08:get-recovery-comparison',
@@ -47,6 +55,9 @@ export const IPC_CHANNELS = {
   inspectForegroundExecutionBoundary: 'ai7:j03:inspect-foreground-execution-boundary',
   prepareTaskAuthorization: 'ai7:j03:prepare-task-authorization',
   authorizeTaskAuthorization: 'ai7:j03:authorize-task-authorization',
+  inspectBaselineAnalysis: 'ai7:j04:inspect-baseline-analysis',
+  prepareBaselineAnalysis: 'ai7:j04:prepare-baseline-analysis',
+  authorizeBaselineAnalysis: 'ai7:j04:authorize-baseline-analysis',
   listBooks: 'ai7:j01:list-books',
   prepareNewBookReview: 'ai7:j01:prepare-new-book-review',
   commitNewBookImport: 'ai7:j01:commit-new-book-import',
@@ -1033,6 +1044,359 @@ export interface ForegroundExecutionBoundaryProjection {
   ];
 }
 
+// ---- J-04 covered baseline manuscript analysis (Issue #92) ----------------------------------------
+
+/** One completely enumerated Analysis Unit of a Coverage Manifest: own block range plus bounded overlap context. */
+export interface CoverageManifestUnitProjection {
+  ordinal: number;
+  sectionOrdinal: number;
+  subUnitIndex: number;
+  subUnitCount: number;
+  headingBlockId: string | null;
+  headingText: string | null;
+  headingLevel: number | null;
+  startPosition: number;
+  endPosition: number;
+  blockIds: ReadonlyArray<string>;
+  blockDigests: ReadonlyArray<string>;
+  overlapBlockIds: ReadonlyArray<string>;
+  graphemes: number;
+  digest: string;
+}
+
+/** Deterministic, versioned coverage plan for one exact Manuscript Pin; gaps never live here. */
+export interface CoverageManifestProjection {
+  schema: 'ai7.coverage-manifest/1';
+  manuscript: {
+    bookId: string;
+    manuscriptId: string;
+    branchId: string;
+    revisionId: string;
+    revisionLabel: string;
+    revisionDigest: string;
+  };
+  parameters: { unitBudgetGraphemes: number; overlapBlocks: number };
+  totalBlocks: number;
+  totalGraphemes: number;
+  sectionCount: number;
+  units: ReadonlyArray<CoverageManifestUnitProjection>;
+  digest: string;
+}
+
+export type AnalysisEntityKind = 'person' | 'place' | 'organization' | 'object' | 'term' | 'other';
+
+export interface AnalysisSourceRangeProjection {
+  blockId: string;
+  fromGrapheme: number | null;
+  toGrapheme: number | null;
+}
+
+export interface AnalysisEntityProjection {
+  name: string;
+  kind: AnalysisEntityKind;
+  aliases: ReadonlyArray<string>;
+  note: string | null;
+  sourceRanges: ReadonlyArray<AnalysisSourceRangeProjection>;
+  unitOrdinals: ReadonlyArray<number>;
+}
+
+export interface AnalysisEventProjection {
+  unitOrdinal: number;
+  ordinal: number;
+  summary: string;
+  chronology: string | null;
+  participants: ReadonlyArray<string>;
+  sourceRanges: ReadonlyArray<AnalysisSourceRangeProjection>;
+}
+
+export interface AnalysisRelationshipProjection {
+  subject: string;
+  object: string;
+  relation: string;
+  sourceRanges: ReadonlyArray<AnalysisSourceRangeProjection>;
+  unitOrdinals: ReadonlyArray<number>;
+}
+
+export interface AnalysisSettingClaimProjection {
+  unitOrdinal: number;
+  subject: string;
+  claim: string;
+  sourceRanges: ReadonlyArray<AnalysisSourceRangeProjection>;
+}
+
+export interface AnalysisConflictProjection {
+  kind: 'unit-reported' | 'alias-collision' | 'entity-kind-divergence' | 'setting-claim-divergence';
+  description: string;
+  sourceRanges: ReadonlyArray<AnalysisSourceRangeProjection>;
+  unitOrdinals: ReadonlyArray<number>;
+}
+
+export interface AnalysisUnresolvedProjection {
+  unitOrdinal: number;
+  description: string;
+  sourceRanges: ReadonlyArray<AnalysisSourceRangeProjection>;
+}
+
+export interface AnalysisGapProjection {
+  unitOrdinal: number;
+  code: 'adapter-failure' | 'contract-invalid' | 'interrupted' | 'egress-refused' | 'not-attempted';
+  reason: string;
+  startPosition: number;
+  endPosition: number;
+  blockIds: ReadonlyArray<string>;
+}
+
+export interface AnalysisReducerStageProjection {
+  stage: 'unit-validation' | 'section-reduction' | 'contradiction-continuity' | 'book-synthesis';
+  state: 'closed' | 'closed-with-gaps' | 'not-run';
+  inputCount: number;
+}
+
+export interface AnalysisSectionProjection {
+  sectionOrdinal: number;
+  headingText: string | null;
+  headingLevel: number | null;
+  unitOrdinals: ReadonlyArray<number>;
+  closedUnitOrdinals: ReadonlyArray<number>;
+  gapUnitOrdinals: ReadonlyArray<number>;
+  synopsis: string;
+  entities: ReadonlyArray<AnalysisEntityProjection>;
+  events: ReadonlyArray<AnalysisEventProjection>;
+  relationships: ReadonlyArray<AnalysisRelationshipProjection>;
+  settingClaims: ReadonlyArray<AnalysisSettingClaimProjection>;
+  conflicts: ReadonlyArray<AnalysisConflictProjection>;
+  unresolved: ReadonlyArray<AnalysisUnresolvedProjection>;
+}
+
+export interface AnalysisSynthesisProjection {
+  synopsis: string;
+  entities: ReadonlyArray<AnalysisEntityProjection>;
+  events: ReadonlyArray<AnalysisEventProjection>;
+  relationships: ReadonlyArray<AnalysisRelationshipProjection>;
+  settingClaims: ReadonlyArray<AnalysisSettingClaimProjection>;
+  conflicts: ReadonlyArray<AnalysisConflictProjection>;
+  unresolved: ReadonlyArray<AnalysisUnresolvedProjection>;
+}
+
+/** Four independently labeled state axes; no aggregate flag, colour, or score collapses them. */
+export interface AnalysisCoverageAxis {
+  axis: 'coverage';
+  state: 'complete' | 'partial';
+  label: string;
+  unitsTotal: number;
+  unitsClosed: number;
+  gapCount: number;
+}
+
+export interface AnalysisReducerClosureAxis {
+  axis: 'reducer-closure';
+  state: 'closed' | 'closed-with-gaps' | 'open';
+  label: string;
+  stages: ReadonlyArray<AnalysisReducerStageProjection>;
+}
+
+export interface AnalysisFreshnessAxis {
+  axis: 'freshness';
+  state: 'current' | 'stale';
+  label: string;
+  boundRevisionId: string;
+  boundRevisionDigest: string;
+  currentRevisionId: string;
+  currentWorkingDigest: string;
+  currentJournalSequence: number;
+  comparison: 'local-deterministic';
+}
+
+export interface AnalysisAssuranceAxis {
+  axis: 'assurance';
+  state: 'qualified' | 'qualified-with-open-conflicts' | 'limited';
+  label: string;
+  unresolvedConflictCount: number;
+  unresolvedItemCount: number;
+  lowConfidenceUnitCount: number;
+  statement: '仅为模型输出的结构化归纳；不构成事实判定、编辑评审或稿件变更。';
+}
+
+export const BASELINE_ANALYSIS_KIND = 'baseline-manuscript-analysis' as const;
+export const BASELINE_ANALYSIS_CONTRACT_VERSION = 'ai7.baseline-manuscript-analysis/1' as const;
+export const BASELINE_ANALYSIS_TASK_GOAL = '对当前书稿执行基线稿件分析，形成覆盖全部结构单元的结果集修订版。' as const;
+
+export type BaselineAnalysisRunState =
+  | 'authorized'
+  | 'blocked-before-dispatch'
+  | 'admitted'
+  | 'executing'
+  | 'completed'
+  | 'completed-with-gaps'
+  | 'failed'
+  | 'interrupted';
+
+export type BaselineAnalysisUnitProjection =
+  | {
+      unitOrdinal: number;
+      state: 'closed';
+      requestDigest: string;
+      responseDigest: string;
+      usage: { inputTokens: number; outputTokens: number } | null;
+      confidence: 'high' | 'medium' | 'low';
+      synopsis: string;
+      entities: ReadonlyArray<Omit<AnalysisEntityProjection, 'unitOrdinals'>>;
+      events: ReadonlyArray<Omit<AnalysisEventProjection, 'unitOrdinal'>>;
+      relationships: ReadonlyArray<Omit<AnalysisRelationshipProjection, 'unitOrdinals'>>;
+      settingClaims: ReadonlyArray<Omit<AnalysisSettingClaimProjection, 'unitOrdinal'>>;
+      conflicts: ReadonlyArray<{ description: string; sourceRanges: ReadonlyArray<AnalysisSourceRangeProjection> }>;
+      unresolved: ReadonlyArray<{ description: string; sourceRanges: ReadonlyArray<AnalysisSourceRangeProjection> }>;
+    }
+  | {
+      unitOrdinal: number;
+      state: 'gap';
+      requestDigest: string;
+      gap: AnalysisGapProjection;
+    };
+
+export interface BaselineAnalysisExecutionBindingProjection {
+  attemptId: string;
+  bindingDigest: string;
+  harnessSessionId: string;
+  behaviorCompositionDigest: string;
+  promptContractDigest: string;
+  planEnvelopeDigest: string;
+  runSourceScopeDigest: string;
+  providerResolutionPlanDigest: string;
+  coverageManifestDigest: string;
+  route: 'ai7-local-deterministic';
+  model: 'ai7-deterministic-fixture';
+  fixtureIdentity: string;
+  fixtureSha256: string;
+  nativeCarrierSha256: string;
+  sidecarRevision: 2;
+  boundAt: string;
+}
+
+export interface BaselineAnalysisResultSetRevisionProjection {
+  resultSetId: string;
+  revisionId: string;
+  ordinal: number;
+  createdAt: string;
+  digest: string;
+  contractVersion: typeof BASELINE_ANALYSIS_CONTRACT_VERSION;
+  manuscriptPin: { bookId: string; manuscriptId: string; revisionId: string; revisionLabel: string; revisionDigest: string };
+  coverageManifestDigest: string;
+  schemaDigest: string;
+  reducerDigest: string;
+  adapterPin: { route: 'ai7-local-deterministic'; model: 'ai7-deterministic-fixture'; fixtureIdentity: string; fixtureSha256: string };
+  bindingPin: { attemptId: string; bindingDigest: string; harnessSessionId: string; behaviorCompositionDigest: string; promptContractDigest: string };
+  policyPin: { operationalScope: 'development-ci'; providerProcessingVersion: 'v1'; activePolicySetVersion: 'v3'; liveTransmissions: 0 };
+  provenance: { taskIntentId: string; runRecordId: string; attemptId: string };
+  usage: { inputTokens: number; outputTokens: number; requests: number };
+  coverage: AnalysisCoverageAxis;
+  reducerClosure: AnalysisReducerClosureAxis;
+  freshness: AnalysisFreshnessAxis;
+  assurance: AnalysisAssuranceAxis;
+  gaps: ReadonlyArray<AnalysisGapProjection>;
+  conflicts: ReadonlyArray<AnalysisConflictProjection>;
+  sections: ReadonlyArray<AnalysisSectionProjection>;
+  synthesis: AnalysisSynthesisProjection;
+  units: ReadonlyArray<BaselineAnalysisUnitProjection>;
+}
+
+export interface BaselineAnalysisProjection {
+  bookId: string;
+  kind: typeof BASELINE_ANALYSIS_KIND;
+  contractVersion: typeof BASELINE_ANALYSIS_CONTRACT_VERSION;
+  state: 'available' | 'prepared' | 'authorized-blocked' | 'admitted' | 'executing' | 'settled' | 'failed' | 'interrupted';
+  stateLabel: string;
+  taskIntent: null | {
+    taskIntentId: string;
+    goal: typeof BASELINE_ANALYSIS_TASK_GOAL;
+    expectedOutcome: '稿件分析结果集修订版（基线稿件分析契约 v1）';
+    createdAt: string;
+  };
+  checkpoint: null | TaskAuthorizationProjection['checkpoint'];
+  manuscriptPin: null | {
+    bookId: string;
+    manuscriptId: string;
+    revisionId: string;
+    revisionLabel: string;
+    revisionDigest: string;
+    sourceVersionId: string;
+    sourceDigest: string;
+  };
+  artifactPin: null | TaskAuthorizationProjection['artifactPin'];
+  runSourceScope: null | TaskAuthorizationProjection['runSourceScope'];
+  coverageManifest: null | CoverageManifestProjection;
+  providerResolutionPlan: null | {
+    role: 'Main Editorial Role';
+    capabilities: readonly [];
+    remoteBinding: {
+      providerId: 'deepseek-open-platform';
+      modelId: 'deepseek-v4-pro';
+      adapterRevision: 1;
+      configurationRevision: 1;
+      approvedFallbackChain: readonly [];
+      credentialSlot: 'deepseek-api-key';
+      credentialReference: string;
+      credentialReadiness: ModelCredentialOperationState;
+      providerProcessing: { operationalScope: 'development-ci'; version: 'v1'; decision: 'deny'; authorizedLiveTransmissionCount: 0 };
+    };
+    executionRoute:
+      | { kind: 'ai7-local-deterministic'; model: 'ai7-deterministic-fixture'; fixtureIdentity: string; fixtureSha256: string; fixtureLineage: ReadonlyArray<{ identity: string; sha256: string }> }
+      | { kind: 'none'; reason: 'j04-model-adapter-control-absent' };
+    outboundDataCategory: 'public-or-synthetic';
+    runBudgetCeiling: 'unset';
+  };
+  executionPlan: null | {
+    steps: ReadonlyArray<string>;
+    effects: readonly [];
+    unitCount: number;
+    reducerStages: readonly ['unit-validation', 'section-reduction', 'contradiction-continuity', 'book-synthesis'];
+    stopCondition: string;
+  };
+  planEnvelope: null | {
+    digest: string;
+    dispatchAllowed: boolean;
+    providerStatus: 'remote-denied-local-deterministic' | 'remote-denied-no-route';
+    summary: string;
+    promptContractDigest: string;
+    behaviorCompositionDigest: string;
+  };
+  authorization: null | {
+    authorizationId: string;
+    planEnvelopeDigest: string;
+    origin: 'standard-direct';
+    authority: 'standard-direct-dispatch' | 'record-only-no-dispatch';
+    authorizedAt: string;
+  };
+  run: null | {
+    runRecordId: string;
+    state: BaselineAnalysisRunState;
+    stateLabel: string;
+    recordedAt: string;
+    transitions: ReadonlyArray<{ sequence: number; state: BaselineAnalysisRunState; recordedAt: string; detail: string | null }>;
+    blockedReasons: ReadonlyArray<string> | null;
+    progress: { unitsTotal: number; unitsSettled: number; currentUnitOrdinal: number | null } | null;
+    attempt: null | {
+      attemptId: string;
+      ordinal: 1;
+      startedAt: string;
+      credentialReadinessCheck: { slot: 'deepseek-api-key'; readiness: 'present' | 'missing'; valueReleased: false };
+      executionBinding: BaselineAnalysisExecutionBindingProjection | null;
+      spans: ReadonlyArray<{ ordinal: number; harnessSessionId: string; startSeq: number; endSeq: number; unitOrdinal: number | null }>;
+    };
+  };
+  resultSetRevision: null | BaselineAnalysisResultSetRevisionProjection;
+  taskOutcome: null | {
+    outcomeId: string;
+    classification: 'completed' | 'completed-with-gaps' | 'failed' | 'interrupted';
+    label: string;
+    recordedAt: string;
+    resultSetRevisionId: string | null;
+    safeNextAction: string;
+  };
+  actions: { canPrepare: boolean; canAuthorize: boolean };
+  namedNonEffects: ReadonlyArray<string>;
+}
+
 export interface HistoricalRevisionProjection {
   mode: 'historical-revision';
   readOnly: true;
@@ -1312,11 +1676,11 @@ export interface DurableHistoryProjection {
 export interface ServiceJobProjection {
   jobId: string;
   kind: 'search' | 'replacement' | 'reimport-preparation' | 'reimport-resolution' | 'reimport-commit' |
-    'task-authorization-preparation';
+    'task-authorization-preparation' | 'baseline-analysis-preparation';
   state: 'queued' | 'running' | 'completed' | 'cancelled' | 'failed';
   progress: { completed: number; total: number; label: string };
   result: SearchSummaryProjection | ReplacementPreviewProjection | ReviewBeforeManuscriptReimportProjection |
-    ManuscriptReimportCommitProjection | TaskAuthorizationProjection | null;
+    ManuscriptReimportCommitProjection | TaskAuthorizationProjection | BaselineAnalysisProjection | null;
   failure: null | { code: string; message: string };
 }
 
@@ -1606,6 +1970,18 @@ export interface ServiceOperationMap {
     input: { bookId: string; taskIntentId: string; planEnvelopeDigest: string };
     output: TaskAuthorizationProjection;
   };
+  inspectBaselineAnalysis: {
+    input: { bookId: string };
+    output: BaselineAnalysisProjection;
+  };
+  prepareBaselineAnalysis: {
+    input: { bookId: string; goal: typeof BASELINE_ANALYSIS_TASK_GOAL };
+    output: ServiceJobProjection;
+  };
+  authorizeBaselineAnalysis: {
+    input: { bookId: string; taskIntentId: string; planEnvelopeDigest: string };
+    output: BaselineAnalysisProjection;
+  };
   listBooks: {
     input: { after: BookSummaryCursor | null };
     output: BookSummaryPageProjection;
@@ -1830,6 +2206,9 @@ export interface RendererApi {
     taskIntentId: string;
     planEnvelopeDigest: string;
   }): Promise<TaskAuthorizationProjection>;
+  inspectBaselineAnalysis(): Promise<BaselineAnalysisProjection>;
+  prepareBaselineAnalysis(input: { goal: typeof BASELINE_ANALYSIS_TASK_GOAL }): Promise<ServiceJobProjection>;
+  authorizeBaselineAnalysis(input: { taskIntentId: string; planEnvelopeDigest: string }): Promise<BaselineAnalysisProjection>;
   listBooks(input: ServiceOperationMap['listBooks']['input']): Promise<BookSummaryPageProjection>;
   prepareNewBookReview(input: ServiceOperationMap['prepareNewBookReview']['input']): Promise<ReviewBeforeImportProjection>;
   commitNewBookImport(input: CommitNewBookRendererInput): Promise<ManuscriptImportCommitProjection>;

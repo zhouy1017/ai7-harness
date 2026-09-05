@@ -1,5 +1,8 @@
-const SERVICE_NAME = 'io.github.zhouy1017.ai7.model-service';
-const REFERENCE_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+import {
+  PROTECTED_SECRET_SERVICE_NAME,
+  protectedSecretEntryName,
+  protectedSecretNativeOverridePresent,
+} from '../shared/protected-secret-identity.js';
 
 type KeyringEntry = {
   setPassword(password: string): Promise<void>;
@@ -22,8 +25,7 @@ abstract class KeyringProtectedSecretStore implements ProtectedSecretStore {
   constructor(private readonly Entry: KeyringEntryConstructor) {}
 
   #entry(credentialReference: string): KeyringEntry {
-    if (!REFERENCE_PATTERN.test(credentialReference)) throw new Error('PROTECTED_SECRET_REFERENCE_INVALID');
-    return new this.Entry(SERVICE_NAME, `credential-reference:${credentialReference}`);
+    return new this.Entry(PROTECTED_SECRET_SERVICE_NAME, protectedSecretEntryName(credentialReference));
   }
 
   async set(credentialReference: string, secret: string): Promise<void> {
@@ -54,7 +56,7 @@ class MacOsKeychainStore extends KeyringProtectedSecretStore {
 
 /** Opens the one native OS store supported by this exact source-checkout runtime. */
 export async function openProtectedSecretStore(): Promise<ProtectedSecretStore> {
-  if (process.env.NAPI_RS_NATIVE_LIBRARY_PATH !== undefined || process.env.NAPI_RS_FORCE_WASI !== undefined) {
+  if (protectedSecretNativeOverridePresent()) {
     throw new Error('PROTECTED_SECRET_NATIVE_OVERRIDE_DENIED');
   }
   const platform = process.platform;
