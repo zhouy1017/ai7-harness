@@ -39,7 +39,7 @@ Under [ADR 0062](../adr/0062-adopt-a-local-verification-ladder-with-ci-as-delive
 | --- | --- | --- |
 | L0 type check | `pnpm run check` (`tsc --noEmit`, including `tests/**`, full diagnostics on the developer host) | Available |
 | L1 unit tests | `pnpm test` (vitest over `tests/unit`) | Available |
-| L2 service-integration tests | `pnpm run test:service` (vitest over the service stores on a temporary data root and SQLite database, without Electron) | Staged; lands with its own Issue |
+| L2 service-integration tests | `pnpm run test:service` (vitest over the service stores on a temporary data root and SQLite database, without Electron) | Available; provider-free, and its task-authorization suite consumes only the ADR 0043-admitted `SampleBooks/sample1.docx` |
 | L3 build | `pnpm run build` | Available |
 | L4 admitted Journeys | `pnpm run e2e -- --journey <id>` and `pnpm run e2e:all` | Available; output stays payload-safe and CI-identical |
 | Debug | `pnpm run e2e:debug -- --journey <id>` | Available; artifacts under ignored `test-results/e2e/<journey>/<timestamp>/` |

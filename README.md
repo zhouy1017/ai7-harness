@@ -22,11 +22,12 @@ pnpm run doctor
 pnpm run bootstrap
 pnpm run check
 pnpm test
+pnpm run test:service
 pnpm run build
 pnpm run start-built -- --data-root <absolute-path-outside-this-checkout>
 ```
 
-`check` is the exact TypeScript check with full diagnostics and `test` runs the vitest unit suites in `tests/unit`; both are developer-run Local Verification Ladder layers under ADR 0062, not hosted gates. `doctor` rejects unsupported hosts and recognized build-affecting ambient overrides. `bootstrap` reconstructs the exact frozen npm closure, verifies the host Electron zip, and materializes the generated runtime without an Electron npm package or native npm extractor. `build` produces the main, sandboxed preload, renderer, service, shared data-root/network boundary modules, and notices under ignored `dist/`.
+`check` is the exact TypeScript check with full diagnostics, `test` runs the vitest unit suites in `tests/unit`, and `test:service` runs the vitest service-integration suites in `tests/service` against the real service stores on a disposable Agent Data Root without Electron; all three are developer-run Local Verification Ladder layers under ADR 0062, not hosted gates. `doctor` rejects unsupported hosts and recognized build-affecting ambient overrides. `bootstrap` reconstructs the exact frozen npm closure, verifies the host Electron zip, and materializes the generated runtime without an Electron npm package or native npm extractor. `build` produces the main, sandboxed preload, renderer, service, shared data-root/network boundary modules, and notices under ignored `dist/`.
 
 `start-built` creates and canonicalizes the selected Agent Data Root and its `shell` directory before Electron starts, passes that exact shell through Chromium's standard user-data switch, preserves it if present, prints only `AI7_READY` after the database, dormant six-service Harness composition, renderer load, and first paint are ready, and remains attached until AI7 exits. The data root must be absolute and must not contain or be contained by the checkout.
 
