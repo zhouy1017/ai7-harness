@@ -8,7 +8,7 @@ import { arch, platform, release, tmpdir } from 'node:os';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { attachProductOutput, installJourneyCancellationCleanup, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect } from './controller.mjs';
+import { attachProductOutput, awaitWithinDeadline, installJourneyCancellationCleanup, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect } from './controller.mjs';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const DEBUG_SELECTORS = new Set(['DEBUG', 'DEBUG_FILE', 'PWDEBUG', 'PWDEBUGIMPL']);
@@ -47,21 +47,10 @@ function inside(parent, child) {
 }
 
 async function awaitCdpOperation(operation, deadline) {
-  operation.catch(() => undefined);
-  const remaining = deadline - Date.now();
-  requireJourney(remaining > 0, 'renderer-cdp-timeout');
-  let timeout;
-  try {
-    return await Promise.race([
-      operation,
-      new Promise((_, reject) => {
-        timeout = setTimeout(() => reject(RENDERER_CDP_TIMEOUT), remaining);
-        timeout.unref();
-      }),
-    ]);
-  } finally {
-    clearTimeout(timeout);
-  }
+  return awaitWithinDeadline(operation, deadline, {
+    timeoutError: RENDERER_CDP_TIMEOUT,
+    onDeadlineExpired: () => requireJourney(false, 'renderer-cdp-timeout'),
+  });
 }
 
 async function awaitFixedOperation(operation, timeoutMs, timeoutError) {

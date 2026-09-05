@@ -694,6 +694,40 @@ export function settleOnBrowserDisconnect(browser, request, options = {}) {
   });
 }
 
+/**
+ * Race a CDP operation against the deadline its calling step already owns, so one deadline policy
+ * serves every runner that bounds a child-session request.
+ *
+ * The runner keeps both identities this reports. `timeoutError` is the runner's own rejection for an
+ * operation that outlives the deadline, whose identity the runner compares. `onDeadlineExpired` is
+ * how the runner fails a deadline that is already spent before the operation starts, so that path
+ * keeps reporting the runner's own location; a caller that supplies none is rejected with
+ * `timeoutError`. The operation is bound before either decision so an abandoned request never
+ * surfaces as an unhandled rejection, and the timer is unref'd and cleared on both settle paths so
+ * it never holds the runner open.
+ */
+export async function awaitWithinDeadline(operation, deadline, options = {}) {
+  const { timeoutError, onDeadlineExpired } = options;
+  operation.catch(() => undefined);
+  const remaining = deadline - Date.now();
+  if (remaining <= 0) {
+    if (onDeadlineExpired !== undefined) return onDeadlineExpired();
+    throw timeoutError;
+  }
+  let timeout;
+  try {
+    return await Promise.race([
+      operation,
+      new Promise((_, reject) => {
+        timeout = setTimeout(() => reject(timeoutError), remaining);
+        timeout.unref();
+      }),
+    ]);
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 function withTimeout(promise, milliseconds) {
   let timer;
   return Promise.race([
