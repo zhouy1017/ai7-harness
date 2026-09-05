@@ -23,6 +23,11 @@ const OVERLAP_QUERY = '哈哈';
 const EXCLUSION_TEXT = '边界排除校验';
 const EXPECTED_EXCLUSION_MATCHES = 1_001;
 const MILESTONE_RECOVERY_SNAPSHOT_TIMEOUT = 10 * 60_000;
+// The product's own startup readiness deadline, src/main/service-client.ts STARTUP_READY_TIMEOUT_MS.
+const PRODUCT_STARTUP_READY_TIMEOUT = 2 * 60_000;
+// Margin for the renderer paint and the landing screen's service IPC, which follow the main process's readiness signal.
+const RENDERER_READY_MARGIN = 15_000;
+const RENDERER_READY_TIMEOUT = PRODUCT_STARTUP_READY_TIMEOUT + RENDERER_READY_MARGIN;
 const RECOVERY_PARTIAL_PATTERN = /^\.partial-[0-9a-f-]{36}$/i;
 const RECOVERY_OBJECT_PATTERN = /^[0-9a-f]{64}\.snapshot$/;
 const DEBUG_SELECTORS = new Set(['DEBUG', 'DEBUG_FILE', 'PWDEBUG', 'PWDEBUGIMPL']);
@@ -42,6 +47,7 @@ const STARTUP_FAILURE_MARKERS = Object.freeze([
   Object.freeze(['AI7_STARTUP_FAILED/readiness-signal', 'launch-restart-renderer-target-query-startup-readiness-signal']),
 ]);
 let diagnosticLocation = 'entry';
+let launchStartedAt;
 let electronExecutable;
 let Zip;
 let ZipPassThrough;
@@ -353,6 +359,37 @@ async function waitForChecks(renderer, expression, location, timeout = 60_000) {
   throw new Error(`J-02/${location}:${failed.join(',')}`);
 }
 
+/**
+ * The initial-launch readiness wait. Both halves of readiness are polled separately so an expiry names the one that
+ * was still missing — the preload's `ai7ProductReady` flag or the landing screen the flag precedes — instead of a bare
+ * marker. The deadline follows the product's own startup readiness deadline plus a fixed margin, so a slow but healthy
+ * host that the product itself still tolerates does not fail the Journey. A wait that succeeds prints nothing.
+ */
+async function waitForRendererReady(renderer) {
+  const deadline = Date.now() + RENDERER_READY_TIMEOUT;
+  let flag = false;
+  let landing = false;
+  while (Date.now() < deadline) {
+    const checks = await renderer.evaluate(
+      `({ flag: document.documentElement.dataset.ai7ProductReady === 'true', landing: Boolean(document.querySelector('[data-screen="landing"]')) })`,
+    );
+    if (checks && typeof checks === 'object' && !Array.isArray(checks)) {
+      flag = checks.flag === true;
+      landing = checks.landing === true;
+      if (flag && landing) return;
+    }
+    await new Promise((resolveWait) => setTimeout(resolveWait, 50));
+  }
+  const location = flag ? 'renderer-ready-landing' : 'renderer-ready-flag';
+  at(location);
+  requireJourney(false, location, {
+    waited_ms: RENDERER_READY_TIMEOUT,
+    elapsed_since_launch_ms: launchStartedAt === undefined ? null : Date.now() - launchStartedAt,
+    product_ready_flag: flag,
+    landing_screen: landing,
+  });
+}
+
 async function assertRenderer(renderer, expression, location) {
   requireJourney(await renderer.evaluate(`Boolean(${expression})`), location);
 }
@@ -431,7 +468,7 @@ async function press(renderer, key, modifiers = 0) {
 
 async function importAndOpen(renderer) {
   at('renderer-ready');
-  await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady === 'true' && document.querySelector('[data-screen="landing"]')`, 'renderer-ready');
+  await waitForRendererReady(renderer);
   await assertRenderer(renderer, `typeof globalThis.process === 'undefined' && typeof globalThis.require === 'undefined'`, 'renderer-isolation');
   requireJourney(await renderer.evaluate(`(async () => { try { await fetch('http://127.0.0.1:9/j02-denial'); return false; } catch { return true; } })()`), 'renderer-network-denial');
   await clickButton(renderer, '导入稿件', 'stage-click');
@@ -1073,6 +1110,7 @@ async function main() {
     ];
     requireJourney(isAbsolute(dataRoot) && isAbsolute(docx) && !productArgs.some((argument) => /--inspect|--remote-debugging-port|^https?:|^wss?:/i.test(argument)), 'pipe-only-product-transport');
     const launch = async (launchScenario) => {
+      launchStartedAt = Date.now();
       at(`launch-${launchScenario}-browser-acquisition`);
       cancellation.throwIfRequested();
       browserAcquisition = chromium.launch({ executablePath: executable, headless: false, ignoreDefaultArgs: true, args: productArgs, env: productEnvironment(executable), timeout: 60_000 });
