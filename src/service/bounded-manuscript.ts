@@ -49,6 +49,9 @@ import {
   NATIVE_ARTIFACT_INSTALLATIONS_SCHEMA_SQL,
 } from './editorial-workspace-profile.js';
 import {
+  ANALYSIS_LEDGER_SCHEMA_SQL,
+  ANALYSIS_LEDGER_TRIGGER_SQL,
+  J03_TASK_AUTHORIZATION_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_SQL,
   TASK_AUTHORIZATION_SCHEMA_VERSION,
   TASK_AUTHORIZATION_TRIGGER_SQL,
@@ -1389,6 +1392,55 @@ const SCHEMA_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
     'authorization_id>run_authorizations.authorization_id:NO ACTION/NO ACTION/NONE',
     'task_intent_id>task_intents.task_intent_id:NO ACTION/NO ACTION/NONE',
   ],
+  analysis_task_intents: [
+    'book_id>books.book_id:NO ACTION/NO ACTION/NONE',
+  ],
+  analysis_task_input_checkpoints: [
+    'branch_id>manuscript_branches.branch_id:NO ACTION/NO ACTION/NONE',
+    'manuscript_id>manuscripts.manuscript_id:NO ACTION/NO ACTION/NONE',
+    'revision_id>manuscript_revisions.revision_id:NO ACTION/NO ACTION/NONE',
+    'task_intent_id>analysis_task_intents.task_intent_id:NO ACTION/NO ACTION/NONE',
+  ],
+  analysis_plan_records: [
+    'task_intent_id>analysis_task_intents.task_intent_id:NO ACTION/NO ACTION/NONE',
+  ],
+  analysis_run_authorizations: [
+    'task_intent_id>analysis_task_intents.task_intent_id:NO ACTION/NO ACTION/NONE',
+  ],
+  analysis_run_records: [
+    'authorization_id>analysis_run_authorizations.authorization_id:NO ACTION/NO ACTION/NONE',
+    'task_intent_id>analysis_task_intents.task_intent_id:NO ACTION/NO ACTION/NONE',
+  ],
+  analysis_run_states: [
+    'run_record_id>analysis_run_records.run_record_id:NO ACTION/NO ACTION/NONE',
+  ],
+  analysis_execution_attempts: [
+    'run_record_id>analysis_run_records.run_record_id:NO ACTION/NO ACTION/NONE',
+  ],
+  analysis_execution_bindings: [
+    'attempt_id>analysis_execution_attempts.attempt_id:NO ACTION/NO ACTION/NONE',
+  ],
+  analysis_harness_spans: [
+    'attempt_id>analysis_execution_attempts.attempt_id:NO ACTION/NO ACTION/NONE',
+  ],
+  analysis_result_sets: [
+    'book_id>books.book_id:NO ACTION/NO ACTION/NONE',
+  ],
+  analysis_result_set_revisions: [
+    'attempt_id>analysis_execution_attempts.attempt_id:NO ACTION/NO ACTION/NONE',
+    'manuscript_revision_id>manuscript_revisions.revision_id:NO ACTION/NO ACTION/NONE',
+    'result_set_id>analysis_result_sets.result_set_id:NO ACTION/NO ACTION/NONE',
+    'run_record_id>analysis_run_records.run_record_id:NO ACTION/NO ACTION/NONE',
+    'task_intent_id>analysis_task_intents.task_intent_id:NO ACTION/NO ACTION/NONE',
+  ],
+  analysis_unit_results: [
+    'revision_id>analysis_result_set_revisions.revision_id:NO ACTION/NO ACTION/NONE',
+  ],
+  analysis_task_outcomes: [
+    'result_set_revision_id>analysis_result_set_revisions.revision_id:NO ACTION/NO ACTION/NONE',
+    'run_record_id>analysis_run_records.run_record_id:NO ACTION/NO ACTION/NONE',
+    'task_intent_id>analysis_task_intents.task_intent_id:NO ACTION/NO ACTION/NONE',
+  ],
   editorial_workspace_profile_sidecar_revisions: [
     'native_artifact_id>native_artifact_installations.artifact_id:NO ACTION/NO ACTION/NONE',
   ],
@@ -1949,6 +2001,7 @@ function requireManuscriptReimportTargetSchema(
   includeNativeArtifactTables = false,
   includeAuthoritySidecarTables = false,
   includeTaskAuthorizationTables = false,
+  includeAnalysisLedgerTables = false,
 ): void {
   requireExactSchema(
     db,
@@ -1969,6 +2022,7 @@ function requireManuscriptReimportTargetSchema(
           }
         : {}),
       ...(includeTaskAuthorizationTables ? TASK_AUTHORIZATION_SCHEMA_SQL : {}),
+      ...(includeAnalysisLedgerTables ? ANALYSIS_LEDGER_SCHEMA_SQL : {}),
     },
     MANUSCRIPT_REIMPORT_INDEX_SQL,
     true,
@@ -1976,6 +2030,7 @@ function requireManuscriptReimportTargetSchema(
       ...MANUSCRIPT_REIMPORT_TRIGGER_SQL,
       ...(includeAuthoritySidecarTables ? EDITORIAL_WORKSPACE_PROFILE_SIDECAR_TRIGGER_SQL : {}),
       ...(includeTaskAuthorizationTables ? TASK_AUTHORIZATION_TRIGGER_SQL : {}),
+      ...(includeAnalysisLedgerTables ? ANALYSIS_LEDGER_TRIGGER_SQL : {}),
     },
   );
 }
@@ -4610,6 +4665,7 @@ export function validateManuscriptReimportSchemaTruth(
   includeNativeArtifactTables = false,
   includeAuthoritySidecarTables = false,
   includeTaskAuthorizationTables = false,
+  includeAnalysisLedgerTables = false,
 ): void {
   requireManuscriptReimportTargetSchema(
     db,
@@ -4617,6 +4673,7 @@ export function validateManuscriptReimportSchemaTruth(
     includeNativeArtifactTables,
     includeAuthoritySidecarTables,
     includeTaskAuthorizationTables,
+    includeAnalysisLedgerTables,
   );
   validateSchemaAuthorityIds(db);
   validateWorkflowSemanticTruth(db, profile);
@@ -4650,13 +4707,14 @@ export function initializeBoundedSchema(
       version === RECOVERY_SCHEMA_VERSION || version === SCHEMA_VERSION ||
       version === SOURCE_IMPORT_SCHEMA_VERSION || version === MANUSCRIPT_REIMPORT_SCHEMA_VERSION ||
       version === MODEL_SERVICE_SCHEMA_VERSION || version === NATIVE_ARTIFACT_SCHEMA_VERSION ||
-      version === AUTHORITY_SIDECAR_SCHEMA_VERSION || version === TASK_AUTHORIZATION_SCHEMA_VERSION,
+      version === AUTHORITY_SIDECAR_SCHEMA_VERSION || version === J03_TASK_AUTHORIZATION_SCHEMA_VERSION ||
+      version === TASK_AUTHORIZATION_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
   if (version === MANUSCRIPT_REIMPORT_SCHEMA_VERSION || version === MODEL_SERVICE_SCHEMA_VERSION ||
       version === NATIVE_ARTIFACT_SCHEMA_VERSION || version === AUTHORITY_SIDECAR_SCHEMA_VERSION ||
-      version === TASK_AUTHORIZATION_SCHEMA_VERSION) {
+      version === J03_TASK_AUTHORIZATION_SCHEMA_VERSION || version === TASK_AUTHORIZATION_SCHEMA_VERSION) {
     transact(db, () => {
       if (validateStoreTruth || version !== TASK_AUTHORIZATION_SCHEMA_VERSION) {
         validateManuscriptReimportSchemaTruth(
@@ -4665,6 +4723,7 @@ export function initializeBoundedSchema(
           version >= MODEL_SERVICE_SCHEMA_VERSION,
           version >= NATIVE_ARTIFACT_SCHEMA_VERSION,
           version >= AUTHORITY_SIDECAR_SCHEMA_VERSION,
+          version >= J03_TASK_AUTHORIZATION_SCHEMA_VERSION,
           version === TASK_AUTHORIZATION_SCHEMA_VERSION,
         );
       }

@@ -6,9 +6,19 @@ import {
   type LaunchPolicyProjection,
   type TaskAuthorizationProjection,
 } from '../shared/protocol.js';
+import {
+  BASELINE_ANALYSIS_CONTRACT_VERSION,
+  BASELINE_ANALYSIS_KIND,
+  BASELINE_ANALYSIS_TASK_GOAL,
+  TASK_INPUT_CHECKPOINT_PURPOSE,
+} from './analysis/identity.js';
+import { ANALYSIS_RESULT_SET_SCHEMA_SQL } from './analysis/result-set-schema.js';
 
 const PREDECESSOR_SCHEMA_VERSION = 13;
-export const TASK_AUTHORIZATION_SCHEMA_VERSION = 14;
+/** The J-03 revision (Issue #47): the ten immutable record-only task-authorization relations. */
+export const J03_TASK_AUTHORIZATION_SCHEMA_VERSION = 14;
+/** The additive baseline-analysis revision (Issue #92): analysis task kind, attempts, bindings, outcomes, result sets. */
+export const TASK_AUTHORIZATION_SCHEMA_VERSION = 15;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const DIGEST_PATTERN = /^[0-9a-f]{64}$/;
 const SAMPLE1_SOURCE_DIGEST = 'b8a3dbde0aa8a1ec7265f9ae3fe47877759e7947c5ab69682cd0a8f424a8d483' as const;
@@ -115,18 +125,143 @@ export const TASK_AUTHORIZATION_SCHEMA_SQL = {
 } as const;
 
 const IMMUTABLE_TABLES = Object.keys(TASK_AUTHORIZATION_SCHEMA_SQL);
-export const TASK_AUTHORIZATION_TRIGGER_SQL = Object.fromEntries(IMMUTABLE_TABLES.flatMap((table) => [
-  [`${table}_no_update`, `CREATE TRIGGER ${table}_no_update
+
+function immutabilityTriggers(tables: readonly string[]): Readonly<Record<string, string>> {
+  return Object.fromEntries(tables.flatMap((table) => [
+    [`${table}_no_update`, `CREATE TRIGGER ${table}_no_update
     BEFORE UPDATE ON ${table}
     BEGIN
       SELECT RAISE(ABORT, 'TASK_LEDGER_IMMUTABLE');
     END`],
-  [`${table}_no_delete`, `CREATE TRIGGER ${table}_no_delete
+    [`${table}_no_delete`, `CREATE TRIGGER ${table}_no_delete
     BEFORE DELETE ON ${table}
     BEGIN
       SELECT RAISE(ABORT, 'TASK_LEDGER_IMMUTABLE');
     END`],
-])) as Readonly<Record<string, string>>;
+  ])) as Readonly<Record<string, string>>;
+}
+
+export const TASK_AUTHORIZATION_TRIGGER_SQL = immutabilityTriggers(IMMUTABLE_TABLES);
+
+/**
+ * Schema revision 15: the baseline-analysis Task kind and its executed Run, as additive append-only
+ * relations beside the untouched J-03 ledger. The Task-kind discriminator lives here because the
+ * J-03 tables fix one record-only Task per Book and are validated byte for byte. Run states beyond
+ * `recorded-not-dispatched` are append-only transition rows; attempts, Execution Bindings, Harness
+ * Execution Span references, and Task Outcomes are each written once. The Result Set relations
+ * belong to the covered-analysis owner and are created before `analysis_task_outcomes`, which links
+ * a revision.
+ */
+export const ANALYSIS_LEDGER_SCHEMA_SQL = {
+  analysis_task_intents: `CREATE TABLE analysis_task_intents (
+    task_intent_id TEXT PRIMARY KEY,
+    book_id TEXT NOT NULL UNIQUE REFERENCES books(book_id),
+    kind TEXT NOT NULL CHECK(kind = '${BASELINE_ANALYSIS_KIND}'),
+    contract_version TEXT NOT NULL CHECK(contract_version = '${BASELINE_ANALYSIS_CONTRACT_VERSION}'),
+    goal TEXT NOT NULL CHECK(goal = '${BASELINE_ANALYSIS_TASK_GOAL}'),
+    created_at TEXT NOT NULL,
+    canonical_json TEXT NOT NULL,
+    sha256 TEXT NOT NULL UNIQUE CHECK(length(sha256) = 64)
+  ) STRICT`,
+  analysis_task_input_checkpoints: `CREATE TABLE analysis_task_input_checkpoints (
+    task_intent_id TEXT PRIMARY KEY REFERENCES analysis_task_intents(task_intent_id),
+    manuscript_id TEXT NOT NULL REFERENCES manuscripts(manuscript_id),
+    branch_id TEXT NOT NULL REFERENCES manuscript_branches(branch_id),
+    revision_id TEXT NOT NULL REFERENCES manuscript_revisions(revision_id),
+    revision_label TEXT NOT NULL,
+    revision_digest TEXT NOT NULL CHECK(length(revision_digest) = 64),
+    journal_sequence INTEGER NOT NULL CHECK(journal_sequence >= 0),
+    purpose TEXT NOT NULL CHECK(purpose = '${TASK_INPUT_CHECKPOINT_PURPOSE}'),
+    created_for_dirty_journal INTEGER NOT NULL CHECK(created_for_dirty_journal IN (0, 1)),
+    canonical_json TEXT NOT NULL,
+    sha256 TEXT NOT NULL UNIQUE CHECK(length(sha256) = 64),
+    created_at TEXT NOT NULL
+  ) STRICT`,
+  analysis_plan_records: `CREATE TABLE analysis_plan_records (
+    task_intent_id TEXT NOT NULL REFERENCES analysis_task_intents(task_intent_id),
+    component TEXT NOT NULL CHECK(component IN (
+      'manuscript-pin', 'artifact-pin', 'run-source-scope', 'coverage-manifest',
+      'provider-resolution-plan', 'execution-plan', 'plan-envelope'
+    )),
+    canonical_json TEXT NOT NULL,
+    sha256 TEXT NOT NULL CHECK(length(sha256) = 64),
+    created_at TEXT NOT NULL,
+    PRIMARY KEY(task_intent_id, component)
+  ) STRICT`,
+  analysis_run_authorizations: `CREATE TABLE analysis_run_authorizations (
+    authorization_id TEXT PRIMARY KEY,
+    task_intent_id TEXT NOT NULL UNIQUE REFERENCES analysis_task_intents(task_intent_id),
+    plan_envelope_sha256 TEXT NOT NULL CHECK(length(plan_envelope_sha256) = 64),
+    origin TEXT NOT NULL CHECK(origin = 'standard-direct'),
+    authority TEXT NOT NULL CHECK(authority IN ('standard-direct-dispatch', 'record-only-no-dispatch')),
+    authorized_at TEXT NOT NULL,
+    canonical_json TEXT NOT NULL,
+    sha256 TEXT NOT NULL UNIQUE CHECK(length(sha256) = 64)
+  ) STRICT`,
+  analysis_run_records: `CREATE TABLE analysis_run_records (
+    run_record_id TEXT PRIMARY KEY,
+    task_intent_id TEXT NOT NULL UNIQUE REFERENCES analysis_task_intents(task_intent_id),
+    authorization_id TEXT NOT NULL UNIQUE REFERENCES analysis_run_authorizations(authorization_id),
+    recorded_at TEXT NOT NULL,
+    canonical_json TEXT NOT NULL,
+    sha256 TEXT NOT NULL UNIQUE CHECK(length(sha256) = 64)
+  ) STRICT`,
+  analysis_run_states: `CREATE TABLE analysis_run_states (
+    run_record_id TEXT NOT NULL REFERENCES analysis_run_records(run_record_id),
+    sequence INTEGER NOT NULL CHECK(sequence >= 1),
+    state TEXT NOT NULL CHECK(state IN (
+      'authorized', 'blocked-before-dispatch', 'admitted', 'executing',
+      'completed', 'completed-with-gaps', 'failed', 'interrupted'
+    )),
+    recorded_at TEXT NOT NULL,
+    canonical_json TEXT NOT NULL,
+    sha256 TEXT NOT NULL CHECK(length(sha256) = 64),
+    PRIMARY KEY(run_record_id, sequence)
+  ) STRICT`,
+  analysis_execution_attempts: `CREATE TABLE analysis_execution_attempts (
+    attempt_id TEXT PRIMARY KEY,
+    run_record_id TEXT NOT NULL REFERENCES analysis_run_records(run_record_id),
+    ordinal INTEGER NOT NULL CHECK(ordinal = 1),
+    started_at TEXT NOT NULL,
+    canonical_json TEXT NOT NULL,
+    sha256 TEXT NOT NULL UNIQUE CHECK(length(sha256) = 64),
+    UNIQUE(run_record_id, ordinal)
+  ) STRICT`,
+  analysis_execution_bindings: `CREATE TABLE analysis_execution_bindings (
+    attempt_id TEXT PRIMARY KEY REFERENCES analysis_execution_attempts(attempt_id),
+    harness_session_id TEXT NOT NULL UNIQUE,
+    bound_at TEXT NOT NULL,
+    canonical_json TEXT NOT NULL,
+    sha256 TEXT NOT NULL UNIQUE CHECK(length(sha256) = 64)
+  ) STRICT`,
+  analysis_harness_spans: `CREATE TABLE analysis_harness_spans (
+    span_id TEXT PRIMARY KEY,
+    attempt_id TEXT NOT NULL REFERENCES analysis_execution_attempts(attempt_id),
+    ordinal INTEGER NOT NULL CHECK(ordinal >= 1),
+    harness_session_id TEXT NOT NULL,
+    start_seq INTEGER NOT NULL CHECK(start_seq >= 0),
+    end_seq INTEGER NOT NULL CHECK(end_seq >= start_seq),
+    unit_ordinal INTEGER CHECK(unit_ordinal IS NULL OR unit_ordinal >= 1),
+    recorded_at TEXT NOT NULL,
+    canonical_json TEXT NOT NULL,
+    sha256 TEXT NOT NULL UNIQUE CHECK(length(sha256) = 64),
+    UNIQUE(attempt_id, ordinal)
+  ) STRICT`,
+  ...ANALYSIS_RESULT_SET_SCHEMA_SQL,
+  analysis_task_outcomes: `CREATE TABLE analysis_task_outcomes (
+    outcome_id TEXT PRIMARY KEY,
+    task_intent_id TEXT NOT NULL UNIQUE REFERENCES analysis_task_intents(task_intent_id),
+    run_record_id TEXT NOT NULL UNIQUE REFERENCES analysis_run_records(run_record_id),
+    classification TEXT NOT NULL CHECK(classification IN ('completed', 'completed-with-gaps', 'failed', 'interrupted')),
+    result_set_revision_id TEXT REFERENCES analysis_result_set_revisions(revision_id),
+    recorded_at TEXT NOT NULL,
+    canonical_json TEXT NOT NULL,
+    sha256 TEXT NOT NULL UNIQUE CHECK(length(sha256) = 64)
+  ) STRICT`,
+} as const;
+
+const ANALYSIS_LEDGER_TABLES = Object.keys(ANALYSIS_LEDGER_SCHEMA_SQL);
+export const ANALYSIS_LEDGER_TRIGGER_SQL = immutabilityTriggers(ANALYSIS_LEDGER_TABLES);
 
 export class TaskAuthorizationError extends Error {
   constructor(readonly code: string, message: string) {
@@ -206,8 +341,8 @@ function transact<T>(db: DatabaseSync, body: () => T): T {
   }
 }
 
-function validateStoredCanonicalRows(db: DatabaseSync): void {
-  for (const table of IMMUTABLE_TABLES) {
+function validateCanonicalRowDigests(db: DatabaseSync, tables: readonly string[]): void {
+  for (const table of tables) {
     const rows = db.prepare(`SELECT canonical_json, sha256 FROM ${table}`).all() as SqlRow[];
     for (const row of rows) {
       const json = asString(row.canonical_json);
@@ -216,6 +351,10 @@ function validateStoredCanonicalRows(db: DatabaseSync): void {
       parseCanonicalJson(json);
     }
   }
+}
+
+function validateStoredCanonicalRows(db: DatabaseSync): void {
+  validateCanonicalRowDigests(db, IMMUTABLE_TABLES);
   const rows = db.prepare(
     `SELECT ti.task_intent_id, ti.book_id, ti.goal, ti.expected_outcome, ti.created_at,
             ti.canonical_json intent_json,
@@ -403,40 +542,86 @@ function validateStoredCanonicalRows(db: DatabaseSync): void {
     'TASK_RECORD_INVALID', '任务授权记录引用校验失败。');
 }
 
-export function validateTaskAuthorizationSchema(db: DatabaseSync): void {
-  const version = asNumber((db.prepare('PRAGMA user_version').get() as SqlRow).user_version);
-  requireTask(version === TASK_AUTHORIZATION_SCHEMA_VERSION, 'SCHEMA_UNSUPPORTED', '数据库版本不受支持。');
-  for (const [name, sql] of Object.entries(TASK_AUTHORIZATION_SCHEMA_SQL)) {
-    const row = db.prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = ?").get(name) as SqlRow | undefined;
+function requireExactObjects(
+  db: DatabaseSync,
+  type: 'table' | 'trigger',
+  expected: Readonly<Record<string, string>>,
+  label: string,
+): void {
+  for (const [name, sql] of Object.entries(expected)) {
+    const row = db.prepare('SELECT sql FROM sqlite_schema WHERE type = ? AND name = ?').get(type, name) as SqlRow | undefined;
     requireTask(row !== undefined && normalizeSql(asString(row.sql)) === normalizeSql(sql),
-      'SCHEMA_INVALID', `任务授权表 ${name} 结构不兼容。`);
+      'SCHEMA_INVALID', `${label} ${name} 结构不兼容。`);
   }
-  for (const [name, sql] of Object.entries(TASK_AUTHORIZATION_TRIGGER_SQL)) {
-    const row = db.prepare("SELECT sql FROM sqlite_schema WHERE type = 'trigger' AND name = ?").get(name) as SqlRow | undefined;
-    requireTask(row !== undefined && normalizeSql(asString(row.sql)) === normalizeSql(sql),
-      'SCHEMA_INVALID', `任务授权触发器 ${name} 结构不兼容。`);
-  }
+}
+
+/** The J-03 relations, validated exactly as revision 14 defined them; revision 15 adds beside them. */
+function validateJ03TaskAuthorizationSchema(db: DatabaseSync): void {
+  requireExactObjects(db, 'table', TASK_AUTHORIZATION_SCHEMA_SQL, '任务授权表');
+  requireExactObjects(db, 'trigger', TASK_AUTHORIZATION_TRIGGER_SQL, '任务授权触发器');
   validateStoredCanonicalRows(db);
 }
 
-export function initializeTaskAuthorizationSchema(db: DatabaseSync): void {
+/**
+ * Structural and digest validation of the revision-15 relations. Every stored canonical row must
+ * still digest to its recorded SHA-256; the analysis owners revalidate the record graphs they read.
+ */
+export function validateAnalysisLedgerSchema(db: DatabaseSync): void {
+  requireExactObjects(db, 'table', ANALYSIS_LEDGER_SCHEMA_SQL, '分析任务账本表');
+  requireExactObjects(db, 'trigger', ANALYSIS_LEDGER_TRIGGER_SQL, '分析任务账本触发器');
+  validateCanonicalRowDigests(db, ANALYSIS_LEDGER_TABLES);
+  requireTask(db.prepare('PRAGMA foreign_key_check').all().length === 0,
+    'TASK_RECORD_INVALID', '分析任务账本引用校验失败。');
+}
+
+export function validateTaskAuthorizationSchema(db: DatabaseSync): void {
   const version = asNumber((db.prepare('PRAGMA user_version').get() as SqlRow).user_version);
-  requireTask(version === PREDECESSOR_SCHEMA_VERSION || version === TASK_AUTHORIZATION_SCHEMA_VERSION,
-    'SCHEMA_UNSUPPORTED', '数据库版本不受支持。');
-  if (version === TASK_AUTHORIZATION_SCHEMA_VERSION) return validateTaskAuthorizationSchema(db);
+  requireTask(version === TASK_AUTHORIZATION_SCHEMA_VERSION, 'SCHEMA_UNSUPPORTED', '数据库版本不受支持。');
+  validateJ03TaskAuthorizationSchema(db);
+  validateAnalysisLedgerSchema(db);
+}
+
+function migrateInTransaction(db: DatabaseSync, statements: string, label: string): void {
   try {
     db.exec(`BEGIN IMMEDIATE;
-      ${Object.values(TASK_AUTHORIZATION_SCHEMA_SQL).join(';\n')};
-      ${Object.values(TASK_AUTHORIZATION_TRIGGER_SQL).join(';\n')};
-      PRAGMA user_version = ${TASK_AUTHORIZATION_SCHEMA_VERSION};`);
+      ${statements}`);
     validateTaskAuthorizationSchema(db);
     db.exec('COMMIT');
   } catch (error) {
     try { db.exec('ROLLBACK'); } catch (rollbackError) {
-      throw new AggregateError([error, rollbackError], 'Task authorization schema rollback failed.');
+      throw new AggregateError([error, rollbackError], `${label} schema rollback failed.`);
     }
     throw error;
   }
+}
+
+/**
+ * Forward-only, additive: a revision-13 store gains the J-03 relations and the analysis relations
+ * in one transaction; a revision-14 store gains only the analysis relations and keeps every J-03
+ * row untouched; a revision-15 store is validated whole.
+ */
+export function initializeTaskAuthorizationSchema(db: DatabaseSync): void {
+  const version = asNumber((db.prepare('PRAGMA user_version').get() as SqlRow).user_version);
+  requireTask(
+    version === PREDECESSOR_SCHEMA_VERSION || version === J03_TASK_AUTHORIZATION_SCHEMA_VERSION ||
+      version === TASK_AUTHORIZATION_SCHEMA_VERSION,
+    'SCHEMA_UNSUPPORTED', '数据库版本不受支持。',
+  );
+  if (version === TASK_AUTHORIZATION_SCHEMA_VERSION) return validateTaskAuthorizationSchema(db);
+  const analysisStatements = `${Object.values(ANALYSIS_LEDGER_SCHEMA_SQL).join(';\n')};
+      ${Object.values(ANALYSIS_LEDGER_TRIGGER_SQL).join(';\n')};
+      PRAGMA user_version = ${TASK_AUTHORIZATION_SCHEMA_VERSION};`;
+  if (version === J03_TASK_AUTHORIZATION_SCHEMA_VERSION) {
+    validateJ03TaskAuthorizationSchema(db);
+    return migrateInTransaction(db, analysisStatements, 'Analysis ledger');
+  }
+  migrateInTransaction(
+    db,
+    `${Object.values(TASK_AUTHORIZATION_SCHEMA_SQL).join(';\n')};
+      ${Object.values(TASK_AUTHORIZATION_TRIGGER_SQL).join(';\n')};
+      ${analysisStatements}`,
+    'Task authorization',
+  );
 }
 
 interface ManuscriptCheckpointBinding {
