@@ -15,6 +15,7 @@
     "bootstrap": "node tools/bootstrap.mjs",
     "check": "node tools/check.mjs",
     "test": "vitest run tests/unit",
+    "test:service": "vitest run tests/service",
     "build": "node tools/build-controller.mjs",
     "start-built": "node tools/start-built.mjs",
     "e2e": "node e2e/run.mjs",
