@@ -22,7 +22,7 @@ Development runs a **Local Verification Ladder** on the actual supported develop
 | Debug | `e2e:debug -- --journey <id>` | Full-fidelity local run: complete error and `cause` chain, stack, product stdout/stderr, failure screenshot, written only to ignored `test-results/` |
 | Repeat | `e2e:repeat -- --journey <id> --times N` | Bounded repetition of one Journey that stops at the first failure and keeps that run's full-fidelity artifacts |
 
-`build`, `e2e`, `e2e:all`, and `e2e:diagnose` exist today. `check`, `test`, `test:service`, `e2e:debug`, and `e2e:repeat` are staged and land only through their implementing Issues; no document may describe them as available before then.
+`build`, `e2e`, `e2e:all`, `e2e:diagnose`, `check`, `test`, `test:service`, `e2e:debug`, and `e2e:repeat` all exist and are available under the ladder table above. `check` and `test` landed through PR #236 (#235, `dev@abcb6989`), `e2e:debug` and `e2e:repeat` landed through PR #238 (#237, `dev@16fd4d01`), and `test:service` landed through PR #254 (#243, `dev@17402d70`).
 
 ADR 0027's exclusion list continues to govern CI and merge evidence: no unit, integration, coverage, lint, type-check, or other standing gate is added to the hosted workflow. ADR 0027's statement that the Owner accepts lower engineering rigor no longer applies to local development. vitest is the accepted local test runner and is admitted through its own dependency Issue under the exact-pin and provenance rules.
 
