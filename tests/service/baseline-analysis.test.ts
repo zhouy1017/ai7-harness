@@ -11,9 +11,12 @@ import { fixtureEntryKey, loadModelFixture, type ResolvedModelFixture } from '..
 import type { SecretResolver } from '../../src/service/provider/credential-broker.js';
 import {
   ANALYSIS_LEDGER_REVISION_15_SQL,
+  ANALYSIS_LEDGER_REVISION_16_SQL,
+  ANALYSIS_LEDGER_REVISION_17_TABLES,
   ANALYSIS_LEDGER_SCHEMA_SQL,
   ANALYSIS_LEDGER_TRIGGER_SQL,
   J04_BASELINE_ANALYSIS_SCHEMA_VERSION,
+  SUCCESSIVE_TASK_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_SQL,
   TASK_AUTHORIZATION_SCHEMA_VERSION,
 } from '../../src/service/task-authorization.js';
@@ -147,13 +150,42 @@ function tableRows(database: DatabaseSync, table: string, columns = '*'): Row[] 
 }
 
 const REVISION_15_INTENT_COLUMNS = 'task_intent_id, book_id, kind, contract_version, goal, created_at, canonical_json, sha256';
+const PRE_17_PLAN_COLUMNS = 'task_intent_id, component, canonical_json, sha256, created_at';
 
-/** Rebuild the two revision-16 relations in their exact revision-15 shape and stamp the store as revision 15. */
+/** Drop the three revision-17 relations and rebuild `analysis_plan_records` in its exact revision-16 shape (plan version 1 only). */
+function downgradePlanRecordsToRevision16(database: DatabaseSync): void {
+  for (const table of [...ANALYSIS_LEDGER_REVISION_17_TABLES].reverse()) database.exec(`DROP TABLE ${table}`);
+  database.exec('CREATE TEMP TABLE downgrade_plans AS SELECT rowid AS r, * FROM analysis_plan_records WHERE plan_version = 1');
+  database.exec('DROP TABLE analysis_plan_records');
+  database.exec(ANALYSIS_LEDGER_REVISION_16_SQL.analysis_plan_records);
+  database.exec(`INSERT INTO analysis_plan_records(${PRE_17_PLAN_COLUMNS}) SELECT ${PRE_17_PLAN_COLUMNS} FROM temp.downgrade_plans ORDER BY r`);
+  database.exec('DROP TABLE temp.downgrade_plans');
+  database.exec(ANALYSIS_LEDGER_TRIGGER_SQL['analysis_plan_records_no_update']!);
+  database.exec(ANALYSIS_LEDGER_TRIGGER_SQL['analysis_plan_records_no_delete']!);
+}
+
+/** Rebuild the revision-17 store in its exact revision-16 shape and stamp it as revision 16. */
+function downgradeToRevision16(databasePath: string): void {
+  const database = new DatabaseSync(databasePath);
+  try {
+    database.exec('PRAGMA foreign_keys = OFF');
+    database.exec('BEGIN IMMEDIATE');
+    downgradePlanRecordsToRevision16(database);
+    database.exec(`PRAGMA user_version = ${SUCCESSIVE_TASK_SCHEMA_VERSION}`);
+    database.exec('COMMIT');
+    database.exec('PRAGMA foreign_keys = ON');
+  } finally {
+    database.close();
+  }
+}
+
+/** Rebuild the revision-17 store in its exact revision-15 shape (the two rev-16 relations as rev 15) and stamp it as revision 15. */
 function downgradeToRevision15(databasePath: string): void {
   const database = new DatabaseSync(databasePath);
   try {
     database.exec('PRAGMA foreign_keys = OFF');
     database.exec('BEGIN IMMEDIATE');
+    downgradePlanRecordsToRevision16(database);
     database.exec('CREATE TEMP TABLE downgrade_intents AS SELECT rowid AS r, * FROM analysis_task_intents');
     database.exec('DROP TABLE analysis_task_intents');
     database.exec(ANALYSIS_LEDGER_REVISION_15_SQL.analysis_task_intents);
@@ -161,11 +193,11 @@ function downgradeToRevision15(databasePath: string): void {
     database.exec('DROP TABLE temp.downgrade_intents');
     database.exec(ANALYSIS_LEDGER_TRIGGER_SQL['analysis_task_intents_no_update']!);
     database.exec(ANALYSIS_LEDGER_TRIGGER_SQL['analysis_task_intents_no_delete']!);
-    database.exec('CREATE TEMP TABLE downgrade_plans AS SELECT rowid AS r, * FROM analysis_plan_records');
+    database.exec('CREATE TEMP TABLE downgrade_plans_15 AS SELECT rowid AS r, * FROM analysis_plan_records');
     database.exec('DROP TABLE analysis_plan_records');
     database.exec(ANALYSIS_LEDGER_REVISION_15_SQL.analysis_plan_records);
-    database.exec('INSERT INTO analysis_plan_records(task_intent_id, component, canonical_json, sha256, created_at) SELECT task_intent_id, component, canonical_json, sha256, created_at FROM temp.downgrade_plans ORDER BY r');
-    database.exec('DROP TABLE temp.downgrade_plans');
+    database.exec(`INSERT INTO analysis_plan_records(${PRE_17_PLAN_COLUMNS}) SELECT ${PRE_17_PLAN_COLUMNS} FROM temp.downgrade_plans_15 ORDER BY r`);
+    database.exec('DROP TABLE temp.downgrade_plans_15');
     database.exec(ANALYSIS_LEDGER_TRIGGER_SQL['analysis_plan_records_no_update']!);
     database.exec(ANALYSIS_LEDGER_TRIGGER_SQL['analysis_plan_records_no_delete']!);
     database.exec(`PRAGMA user_version = ${J04_BASELINE_ANALYSIS_SCHEMA_VERSION}`);
@@ -196,7 +228,7 @@ describe('baseline manuscript analysis over the real store on exact sample1', ()
 
       const available = store.inspectBaselineAnalysis(bookId);
       expect(available.state).toBe('available');
-      expect(available.actions).toEqual({ canPrepare: true, canAuthorize: false });
+      expect(available.actions).toEqual({ canPrepare: true, canAuthorize: false, canReconfirmPlan: false });
       expect(available.namedNonEffects.some((statement) => statement.includes('Enrollment'))).toBe(true);
 
       const prepared = prepare(store, bookId);
@@ -222,7 +254,7 @@ describe('baseline manuscript analysis over the real store on exact sample1', ()
       expect(prepared.providerResolutionPlan?.executionRoute).toMatchObject({ kind: 'ai7-local-deterministic', fixtureIdentity: 'sample1-baseline-one-unit-failure', fixtureSha256: fixture.sha256 });
       expect(prepared.planEnvelope).toMatchObject({ dispatchAllowed: true, providerStatus: 'remote-denied-local-deterministic', promptContractDigest: BASELINE_PROMPT_CONTRACT_DIGEST });
       expect(prepared.executionPlan?.unitCount).toBe(SAMPLE1_UNITS);
-      expect(prepared.actions).toEqual({ canPrepare: false, canAuthorize: true });
+      expect(prepared.actions).toEqual({ canPrepare: false, canAuthorize: true, canReconfirmPlan: false });
       // Preparing again returns the frozen plan.
       expect(prepare(store, bookId).planEnvelope?.digest).toBe(prepared.planEnvelope!.digest);
 
@@ -295,7 +327,7 @@ describe('baseline manuscript analysis over the real store on exact sample1', ()
       expect(revision.sections[0]!.gapUnitOrdinals).toEqual([2]);
       // The Task Outcome links the revision.
       expect(settled.taskOutcome).toMatchObject({ classification: 'completed-with-gaps', resultSetRevisionId: revisionId });
-      expect(settled.actions).toEqual({ canPrepare: false, canAuthorize: false });
+      expect(settled.actions).toEqual({ canPrepare: false, canAuthorize: false, canReconfirmPlan: false });
       store.markCleanShutdown();
     } finally {
       await owner.dispose();
@@ -335,18 +367,303 @@ describe('baseline manuscript analysis over the real store on exact sample1', ()
       reopened.close();
     }
 
-    // Every analysis relation with rows rejects update and delete in the database itself.
+    // Every analysis relation with rows rejects update and delete in the database itself; a Run without
+    // drift or a retry-safe failure leaves the Plan Revision and Plan Adaptation relations empty.
     const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
     try {
       expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(TASK_AUTHORIZATION_SCHEMA_VERSION);
+      const expectedEmpty = new Set(['analysis_plan_revisions', 'analysis_plan_adaptations']);
       for (const table of Object.keys(ANALYSIS_LEDGER_SCHEMA_SQL)) {
         const total = (database.prepare(`SELECT count(*) total FROM ${table}`).get() as { total: number }).total;
+        if (expectedEmpty.has(table)) {
+          // Their immutability is exercised with rows by the safe-retry and Plan Revision suites below.
+          expect(total).toBe(0);
+          continue;
+        }
         expect(total).toBeGreaterThan(0);
         expect(() => database.prepare(`UPDATE ${table} SET sha256 = sha256`).run()).toThrowError(/TASK_LEDGER_IMMUTABLE/u);
         expect(() => database.prepare(`DELETE FROM ${table}`).run()).toThrowError(/TASK_LEDGER_IMMUTABLE/u);
         expect((database.prepare(`SELECT count(*) total FROM ${table}`).get() as { total: number }).total).toBe(total);
       }
       expect((database.prepare('SELECT count(*) total FROM analysis_unit_results').get() as { total: number }).total).toBe(SAMPLE1_UNITS);
+      expect((database.prepare('SELECT count(*) total FROM analysis_plan_versions').get() as { total: number }).total).toBe(1);
+      expect(database.prepare('SELECT plan_version FROM analysis_plan_records GROUP BY plan_version').all()).toEqual([{ plan_version: 1 }]);
+    } finally {
+      database.close();
+    }
+  }, 300_000);
+
+  it('retries a retry-safe unit failure once inside the unchanged envelope and records the Plan Adaptation', async () => {
+    await requireExactSample1(roots.codeRoot);
+    const transient = await loadModelFixture(FIXTURES_ROOT, 'sample1-baseline-transient-retry');
+    expect(transient.lineage.map((link) => link.identity)).toEqual(['sample1-baseline-transient-retry', 'sample1-baseline-one-unit-failure', 'sample1-baseline-happy']);
+    const store = await openWithRoute(roots.dataRoot, transient);
+    const owner = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy, fixture: transient, secretResolver: fakeSecretResolver() });
+    let bookId: string;
+    let bindingDigest: string;
+    try {
+      const imported = await importSample1Book(store, roots.codeRoot, 'L2 sample1 安全重试');
+      bookId = imported.bookId;
+      await pinEditorialWorkspaceProfileRevision2(store, bookId);
+      const credentialReference = recordMissingCredentialConnection(store, 'L2 主编辑连接');
+      const prepared = prepare(store, bookId);
+      // The Plan Boundary Split and the version ordinal are inside the canonical envelope.
+      expect(prepared.planEnvelope?.planVersion).toBe(1);
+      expect(prepared.planEnvelope?.boundary).toMatchObject({
+        adaptable: [{ adaptationClass: 'safe-retry', label: '安全重试' }],
+        participation: { expected: false, statement: '预计无需中途参与' },
+      });
+      expect(prepared.planEnvelope?.boundary?.material.map((entry) => entry.field)).toEqual([
+        'providerBinding.providerId', 'providerBinding.modelId', 'providerBinding.adapterRevision', 'providerBinding.configurationRevision', 'providerBinding.credentialReference',
+        'artifactPin.identity', 'artifactPin.version', 'artifactPin.nativeCarrierSha256', 'artifactPin.sidecarRevision', 'artifactPin.sidecarSha256',
+        'selectedRange', 'predecessorRevision', 'runBudgetCeiling', 'outboundDataCategory', 'expectedOutcome',
+      ]);
+      expect(prepared.planVersion).toMatchObject({ ordinal: 1, state: 'current', planRevisionId: null, planEnvelopeDigest: prepared.planEnvelope!.digest });
+      expect(prepared.planVersion?.materialInputs).toEqual({
+        providerBinding: { providerId: 'deepseek-open-platform', modelId: 'deepseek-v4-pro', adapterRevision: 1, configurationRevision: 1, credentialReference },
+        artifactPin: { identity: '@ai7/editorial-workspace-profile', version: '1.0.0', nativeCarrierSha256: 'ae485040c8fa602ab2e98ec91dd122201d40a8be41d8a4f86f7cd55ddb1e434d', sidecarRevision: 2, sidecarSha256: '980b565f25bdff29e539365e17344346017b05146a45cfea35c8ed7d528a1bff' },
+        selectedRange: null,
+        predecessorRevision: null,
+        runBudgetCeiling: 'unset',
+        outboundDataCategory: 'public-or-synthetic',
+        expectedOutcome: '稿件分析结果集修订版（基线稿件分析契约 v1）',
+      });
+      expect(prepared.planVersions).toHaveLength(1);
+      expect(prepared.planRevisions).toEqual([]);
+      expect(prepared.planRevision).toBeNull();
+      expect(prepared.actions).toEqual({ canPrepare: false, canAuthorize: true, canReconfirmPlan: false });
+
+      const authorized = store.authorizeBaselineAnalysis(bookId, prepared.taskIntent!.taskIntentId, prepared.planEnvelope!.digest);
+      expect(authorized.projection.authorization).toMatchObject({ planVersionOrdinal: 1, planEnvelopeDigest: prepared.planEnvelope!.digest });
+      expect(authorized.projection.planVersion?.state).toBe('bound');
+      owner.admitAndDispatch(authorized.dispatchRunRecordId!);
+      const settled = await settle(owner, store, bookId);
+      expect(settled.state).toBe('settled');
+      expect(settled.run?.state).toBe('completed-with-gaps');
+      const attempt = settled.run!.attempt!;
+      bindingDigest = attempt.executionBinding!.bindingDigest;
+      // Nine technical turns: unit 5 twice (attempt 1, then the safe retry as attempt 2); every span names the gate's payload digest.
+      expect(attempt.spans.map((span) => [span.unitOrdinal, span.attemptIndex])).toEqual([[1, 1], [2, 1], [3, 1], [4, 1], [5, 1], [5, 2], [6, 1], [7, 1], [8, 1]]);
+      expect(attempt.spans.every((span) => span.payloadDigest !== null && DIGEST_PATTERN.test(span.payloadDigest))).toBe(true);
+      expect(attempt.spans[5]!.payloadDigest).not.toBe(attempt.spans[4]!.payloadDigest);
+      // The adaptation record: one, for unit 5, written for attempt 2 inside the unchanged envelope and binding.
+      expect(settled.run!.adaptations).toHaveLength(1);
+      const adaptation = settled.run!.adaptations[0]!;
+      expect(adaptation).toMatchObject({
+        attemptId: attempt.attemptId,
+        runRecordId: settled.run!.runRecordId,
+        taskIntentId: prepared.taskIntent!.taskIntentId,
+        ordinal: 1,
+        unitOrdinal: 5,
+        adaptationClass: 'safe-retry',
+        attemptIndex: 2,
+        failureCode: 'PROVIDER_ERROR',
+        failureClass: 'adapter-failure',
+        failureStatus: 503,
+        firstPayloadDigest: attempt.spans[4]!.payloadDigest,
+        planEnvelopeDigest: prepared.planEnvelope!.digest,
+        bindingDigest,
+      });
+      expect(adaptation.adaptationId).toMatch(UUID_PATTERN);
+      expect(adaptation.requestDigest).toBe(unitRequestDigest(BASELINE_PROMPT_CONTRACT_DIGEST, 5, prepared.coverageManifest!.units[4]!.digest));
+      expect(adaptation.classifiedReason).toContain('PROVIDER_ERROR');
+      expect(adaptation.label).toBe(`计划内调整 · 单元 5 安全重试 1 次 · ${adaptation.classifiedReason}`);
+      // The unit settled from the retry; unit 2's non-retry-safe failure stays a first-attempt gap with no adaptation.
+      const revision = settled.resultSetRevision!;
+      expect(revision.units.map((unit) => unit.state)).toEqual(['closed', 'gap', 'closed', 'closed', 'closed', 'closed', 'closed', 'closed']);
+      expect(revision.units[4]).toMatchObject({ state: 'closed', usage: { inputTokens: 1400, outputTokens: 180 } });
+      expect(revision.gaps).toHaveLength(1);
+      expect(revision.gaps[0]).toMatchObject({ unitOrdinal: 2, code: 'adapter-failure', reason: expect.stringContaining('SYNTHETIC_ADAPTER_FAILURE') });
+      expect(revision.gaps[0]!.reason).not.toContain('安全重试');
+      expect(revision.usage.requests).toBe(9);
+      // Token usage sums the seven closed units; the two failed attempts (unit 2, unit 5's first) report no usage but count as requests.
+      expect(revision.usage.inputTokens).toBe(1400 + 1500 + 1500 + 1400 + 1450 + 1500 + 800);
+      expect(revision.provenance).toMatchObject({ runRecordId: settled.run!.runRecordId, planVersion: 1, adaptations: { count: 1, unitOrdinals: [5] } });
+      expect(revision.bindingPin.bindingDigest).toBe(bindingDigest);
+      expect(revision.coverage).toMatchObject({ unitsTotal: 8, unitsClosed: 7, gapCount: 1 });
+      expect(revision.adapterPin.fixtureIdentity).toBe('sample1-baseline-transient-retry');
+      store.markCleanShutdown();
+    } finally {
+      await owner.dispose();
+      store.close();
+    }
+    // Restart: the adaptation, the spans, and the bound version persist unchanged.
+    const reopened = await openWithRoute(roots.dataRoot, transient);
+    try {
+      const restarted = reopened.inspectBaselineAnalysis(bookId);
+      expect(restarted.run?.adaptations).toHaveLength(1);
+      expect(restarted.run?.adaptations[0]).toMatchObject({ unitOrdinal: 5, bindingDigest, attemptIndex: 2 });
+      expect(restarted.run?.attempt?.spans.map((span) => span.attemptIndex)).toEqual([1, 1, 1, 1, 1, 2, 1, 1, 1]);
+      expect(restarted.authorization?.planVersionOrdinal).toBe(1);
+      expect(restarted.resultSetRevision?.provenance.adaptations).toEqual({ count: 1, unitOrdinals: [5] });
+      reopened.markCleanShutdown();
+    } finally {
+      reopened.close();
+    }
+    const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+    try {
+      expect((database.prepare('SELECT count(*) total FROM analysis_plan_adaptations').get() as { total: number }).total).toBe(1);
+      expect(database.prepare('SELECT ordinal, unit_ordinal, adaptation_class FROM analysis_plan_adaptations').all()).toEqual([{ ordinal: 1, unit_ordinal: 5, adaptation_class: 'safe-retry' }]);
+      expect(() => database.prepare('UPDATE analysis_plan_adaptations SET unit_ordinal = 6').run()).toThrowError(/TASK_LEDGER_IMMUTABLE/u);
+      expect(() => database.prepare('DELETE FROM analysis_plan_adaptations').run()).toThrowError(/TASK_LEDGER_IMMUTABLE/u);
+      expect((database.prepare('SELECT count(*) total FROM analysis_harness_spans').get() as { total: number }).total).toBe(9);
+    } finally {
+      database.close();
+    }
+  }, 300_000);
+
+  it('supersedes a prepared plan on material drift, refuses the stale version, and reconfirms the next version on the same Task', async () => {
+    await requireExactSample1(roots.codeRoot);
+    const store = await openWithRoute(roots.dataRoot, fixture);
+    const owner = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: fakeSecretResolver() });
+    const reconfirm = (bookId: string, update: BaselineAnalysisUpdateRequest): BaselineAnalysisProjection => {
+      const result = store.createBaselineAnalysisPreparationWork(bookId, BASELINE_ANALYSIS_MODE_GOALS[update.mode], update, launchPolicy, true);
+      expect(result.done).toBe(true);
+      return result.projection!;
+    };
+    let bookId: string;
+    let taskIntentId: string;
+    let v2Digest: string;
+    try {
+      const imported = await importSample1Book(store, roots.codeRoot, 'L2 sample1 计划修订');
+      bookId = imported.bookId;
+      await pinEditorialWorkspaceProfileRevision2(store, bookId);
+      const credentialReference = recordMissingCredentialConnection(store, 'L2 主编辑连接');
+      const first = await runToSettled(store, owner, bookId, null);
+      const revision1 = first.settled.resultSetRevision!;
+      const options = first.settled.updateControls!.actions['reanalyze-range'].options;
+      const rangeA = { startPosition: options[2]!.startPosition, endPosition: options[2]!.endPosition };
+      const rangeB = { startPosition: options[7]!.startPosition, endPosition: options[7]!.endPosition };
+      expect(options[2]!.expected).toEqual({ reused: 5, recomputed: 3, invalidated: 1, bypassed: 2 });
+      expect(options[7]!.expected).toEqual({ reused: 6, recomputed: 2, invalidated: 1, bypassed: 1 });
+
+      // Version 1 of a `重新分析所选范围` Task over unit 3.
+      const prepared = prepare(store, bookId, { mode: 'reanalyze-range', selectedRange: rangeA });
+      taskIntentId = prepared.taskIntent!.taskIntentId;
+      const v1Digest = prepared.planEnvelope!.digest;
+      expect(prepared.planVersion).toMatchObject({ ordinal: 1, state: 'current', planRevisionId: null });
+      expect(prepared.planVersion?.materialInputs).toMatchObject({
+        providerBinding: { credentialReference },
+        selectedRange: rangeA,
+        predecessorRevision: { revisionId: revision1.revisionId, ordinal: 1, digest: revision1.digest },
+      });
+      expect(prepared.update).toMatchObject({ selectedRange: rangeA, reusePlan: { counts: { reused: 5, recomputed: 3, invalidated: 1, bypassed: 2 } } });
+      // The same request returns the frozen plan.
+      expect(prepare(store, bookId, { mode: 'reanalyze-range', selectedRange: rangeA }).planEnvelope?.digest).toBe(v1Digest);
+      expect(() => reconfirm(bookId, { mode: 'reanalyze-range', selectedRange: rangeA })).toThrowError(/ANALYSIS_PLAN_REVISION_ABSENT|没有待重新确认/u);
+
+      // A different range on the prepared Task is material drift: one pending Plan Revision on the same Task Intent, no new version yet.
+      const drifted = prepare(store, bookId, { mode: 'reanalyze-range', selectedRange: rangeB });
+      expect(drifted.taskIntent?.taskIntentId).toBe(taskIntentId);
+      expect(drifted.planVersion).toMatchObject({ ordinal: 1, state: 'superseded' });
+      expect(drifted.planVersions).toHaveLength(1);
+      expect(drifted.planEnvelope?.digest).toBe(v1Digest);
+      expect(drifted.update?.selectedRange).toEqual(rangeA);
+      expect(drifted.actions).toEqual({ canPrepare: false, canAuthorize: false, canReconfirmPlan: true });
+      const pending = drifted.planRevision!;
+      expect(pending.planRevisionId).toMatch(UUID_PATTERN);
+      expect(pending).toMatchObject({ priorOrdinal: 1, nextOrdinal: null, trigger: 'prepare', resolved: false, changedFields: ['selectedRange', 'reusePlan.counts'] });
+      expect(pending.detectedAt).not.toBeNull();
+      expect(pending.diff).toEqual([
+        { field: 'selectedRange', label: expect.any(String), prior: rangeA, proposed: rangeB, materiality: 'material' },
+        { field: 'reusePlan.counts', label: expect.any(String), prior: { reused: 5, recomputed: 3, invalidated: 1, bypassed: 2 }, proposed: { reused: 6, recomputed: 2, invalidated: 1, bypassed: 1 }, materiality: 'derived' },
+      ]);
+      expect(pending.proposed).toMatchObject({ selectedRange: rangeB, providerBinding: { credentialReference } });
+      expect(pending.label).toBe('计划修订 · 版本 1 → 2（待重新确认） · selectedRange、reusePlan.counts');
+      expect(drifted.planRevisions).toHaveLength(1);
+      // Inspect re-reads the same pending revision; re-proposing the same range records nothing new.
+      expect(store.inspectBaselineAnalysis(bookId).planRevision?.planRevisionId).toBe(pending.planRevisionId);
+      expect(prepare(store, bookId, { mode: 'reanalyze-range', selectedRange: rangeB }).planRevisions).toHaveLength(1);
+
+      // Authorizing the stale version is refused with the safe reason and creates no Run Record.
+      let refusal: unknown;
+      try {
+        store.authorizeBaselineAnalysis(bookId, taskIntentId, v1Digest);
+      } catch (error) {
+        refusal = error;
+      }
+      expect(refusal).toBeInstanceOf(StoreError);
+      expect((refusal as StoreError).code).toBe('ANALYSIS_PLAN_REVISION_REQUIRED');
+      expect((refusal as StoreError).message).toContain('plan-revision-required');
+      expect(store.inspectBaselineAnalysis(bookId).run).toBeNull();
+      expect(store.inspectBaselineAnalysis(bookId).authorization).toBeNull();
+      // Reconfirming a different proposal than the pending one is refused as stale.
+      expect(() => reconfirm(bookId, { mode: 'reanalyze-range', selectedRange: rangeA })).toThrowError(/ANALYSIS_PLAN_REVISION_STALE|已过期/u);
+
+      // `重新确认计划` yields version 2 on the same Task Intent and resolves the revision.
+      const reconfirmed = reconfirm(bookId, { mode: 'reanalyze-range', selectedRange: rangeB });
+      v2Digest = reconfirmed.planEnvelope!.digest;
+      expect(reconfirmed.taskIntent?.taskIntentId).toBe(taskIntentId);
+      expect(reconfirmed.planVersion).toMatchObject({ ordinal: 2, state: 'current', planRevisionId: pending.planRevisionId, planEnvelopeDigest: v2Digest });
+      expect(reconfirmed.planVersions.map((version) => [version.ordinal, version.state])).toEqual([[1, 'superseded'], [2, 'current']]);
+      expect(reconfirmed.planVersions[0]!.planEnvelopeDigest).toBe(v1Digest);
+      expect(reconfirmed.planRevisions).toHaveLength(1);
+      expect(reconfirmed.planRevisions[0]).toMatchObject({ planRevisionId: pending.planRevisionId, priorOrdinal: 1, nextOrdinal: 2, resolved: true, label: '计划修订 · 版本 1 → 2 · selectedRange、reusePlan.counts' });
+      expect(reconfirmed.planRevision).toBeNull();
+      expect(v2Digest).not.toBe(v1Digest);
+      expect(reconfirmed.planEnvelope?.planVersion).toBe(2);
+      expect(reconfirmed.coverageManifest?.digest).toBe(prepared.coverageManifest?.digest);
+      expect(reconfirmed.checkpoint?.revisionId).toBe(prepared.checkpoint?.revisionId);
+      expect(reconfirmed.update).toMatchObject({ selectedRange: rangeB, reusePlan: { counts: { reused: 6, recomputed: 2, invalidated: 1, bypassed: 1 }, recomputeClosure: [8] } });
+      expect(reconfirmed.runSourceScope).toMatchObject({ unitScope: { recomputedUnitOrdinals: [2, 8] } });
+      expect(reconfirmed.actions).toEqual({ canPrepare: false, canAuthorize: true, canReconfirmPlan: false });
+      expect(() => reconfirm(bookId, { mode: 'reanalyze-range', selectedRange: rangeB })).toThrowError(/ANALYSIS_PLAN_REVISION_ABSENT|没有待重新确认/u);
+
+      // The stale version stays refused; version 2 authorizes, binds ordinal 2, and settles a successor revision.
+      expect(() => store.authorizeBaselineAnalysis(bookId, taskIntentId, v1Digest)).toThrowError(/plan-revision-required/u);
+      const authorized = store.authorizeBaselineAnalysis(bookId, taskIntentId, v2Digest);
+      expect(authorized.projection.authorization).toMatchObject({ planVersionOrdinal: 2, planEnvelopeDigest: v2Digest });
+      expect(authorized.projection.planVersions.map((version) => version.state)).toEqual(['superseded', 'bound']);
+      owner.admitAndDispatch(authorized.dispatchRunRecordId!);
+      const settled = await settle(owner, store, bookId);
+      const revision2 = settled.resultSetRevision!;
+      expect(revision2).toMatchObject({
+        ordinal: 2,
+        update: { mode: 'reanalyze-range', selectedRange: rangeB, counts: { reused: 6, recomputed: 2, invalidated: 1, bypassed: 1 }, predecessor: { revisionId: revision1.revisionId, ordinal: 1 } },
+        provenance: { planVersion: 2, adaptations: { count: 0, unitOrdinals: [] } },
+      });
+      expect(settled.run!.attempt!.spans.map((span) => span.unitOrdinal)).toEqual([2, 8]);
+      expect(settled.run!.attempt!.executionBinding).toMatchObject({ planEnvelopeDigest: v2Digest });
+      expect(settled.run!.adaptations).toEqual([]);
+      const boundBinding = settled.run!.attempt!.executionBinding!.bindingDigest;
+
+      // An acknowledged manuscript edit after the checkpoint changes no plan version, no revision, and no binding.
+      appendToFirstBlock(store, imported.manuscriptId, imported.branchId, J04_EDIT_SUFFIX);
+      const edited = store.inspectBaselineAnalysis(bookId);
+      expect(edited.planVersions.map((version) => [version.ordinal, version.state])).toEqual([[1, 'superseded'], [2, 'bound']]);
+      expect(edited.planRevisions).toHaveLength(1);
+      expect(edited.planRevision).toBeNull();
+      expect(edited.planEnvelope?.digest).toBe(v2Digest);
+      expect(edited.run?.attempt?.executionBinding?.bindingDigest).toBe(boundBinding);
+      expect(edited.resultSetRevision?.freshness.state).toBe('stale');
+      store.markCleanShutdown();
+    } finally {
+      await owner.dispose();
+      store.close();
+    }
+    // Restart: every plan version and the resolved revision reopen unchanged; the relations are immutable.
+    const reopened = await openWithRoute(roots.dataRoot, fixture);
+    try {
+      const restarted = reopened.inspectBaselineAnalysis(bookId);
+      expect(restarted.taskIntent?.taskIntentId).toBe(taskIntentId);
+      expect(restarted.planVersions.map((version) => [version.ordinal, version.state])).toEqual([[1, 'superseded'], [2, 'bound']]);
+      expect(restarted.planRevisions[0]).toMatchObject({ priorOrdinal: 1, nextOrdinal: 2, resolved: true });
+      expect(restarted.authorization?.planVersionOrdinal).toBe(2);
+      expect(restarted.planEnvelope?.digest).toBe(v2Digest);
+      reopened.markCleanShutdown();
+    } finally {
+      reopened.close();
+    }
+    const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+    try {
+      expect(database.prepare('SELECT ordinal FROM analysis_plan_versions WHERE task_intent_id = ? ORDER BY ordinal').all(taskIntentId)).toEqual([{ ordinal: 1 }, { ordinal: 2 }]);
+      expect((database.prepare('SELECT count(*) total FROM analysis_plan_versions').get() as { total: number }).total).toBe(3);
+      expect((database.prepare('SELECT count(*) total FROM analysis_plan_revisions').get() as { total: number }).total).toBe(1);
+      expect((database.prepare('SELECT count(*) total FROM analysis_plan_records WHERE task_intent_id = ? AND plan_version = 2').get(taskIntentId) as { total: number }).total).toBe(8);
+      for (const table of ['analysis_plan_versions', 'analysis_plan_revisions', 'analysis_plan_records']) {
+        expect(() => database.prepare(`UPDATE ${table} SET sha256 = sha256`).run()).toThrowError(/TASK_LEDGER_IMMUTABLE/u);
+        expect(() => database.prepare(`DELETE FROM ${table}`).run()).toThrowError(/TASK_LEDGER_IMMUTABLE/u);
+      }
     } finally {
       database.close();
     }
@@ -572,49 +889,69 @@ describe('baseline manuscript analysis over the real store on exact sample1', ()
       store.close();
     }
     const j03Tables = Object.keys(TASK_AUTHORIZATION_SCHEMA_SQL);
-    const analysisTables = Object.keys(ANALYSIS_LEDGER_SCHEMA_SQL);
+    const seededTables = new Set<string>(ANALYSIS_LEDGER_REVISION_17_TABLES);
+    const analysisTables = Object.keys(ANALYSIS_LEDGER_SCHEMA_SQL).filter((table) => !seededTables.has(table));
     const before = new DatabaseSync(databasePath, { readOnly: true });
     let j03Before: Record<string, Row[]>;
     let analysisBefore: Record<string, Row[]>;
+    let versionsBefore: Row[];
     try {
       j03Before = Object.fromEntries(j03Tables.map((table) => [table, tableRows(before, table)]));
       analysisBefore = Object.fromEntries(analysisTables.map((table) => [table, tableRows(before, table, table === 'analysis_task_intents' ? REVISION_15_INTENT_COLUMNS : '*')]));
+      versionsBefore = tableRows(before, 'analysis_plan_versions', 'task_intent_id, ordinal, plan_revision_id, plan_envelope_sha256, created_at');
       expect(j03Before['task_intents']).toHaveLength(1);
       expect(analysisBefore['analysis_task_intents']).toHaveLength(1);
+      expect(versionsBefore).toHaveLength(1);
     } finally {
       before.close();
     }
-    downgradeToRevision15(databasePath);
-    const downgraded = new DatabaseSync(databasePath, { readOnly: true });
-    try {
-      expect((downgraded.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(J04_BASELINE_ANALYSIS_SCHEMA_VERSION);
-      expect(() => downgraded.prepare('SELECT mode FROM analysis_task_intents').all()).toThrow();
-    } finally {
-      downgraded.close();
+    // Both predecessor revisions migrate forward: 15 (two rebuilt relations) and, after the first migration, 16 (the plan records).
+    for (const [downgrade, expectedVersion] of [[downgradeToRevision15, J04_BASELINE_ANALYSIS_SCHEMA_VERSION], [downgradeToRevision16, SUCCESSIVE_TASK_SCHEMA_VERSION]] as const) {
+      downgrade(databasePath);
+      const downgraded = new DatabaseSync(databasePath, { readOnly: true });
+      try {
+        expect((downgraded.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(expectedVersion);
+        expect(() => downgraded.prepare('SELECT plan_version FROM analysis_plan_records').all()).toThrow();
+        expect(() => downgraded.prepare('SELECT count(*) FROM analysis_plan_versions').all()).toThrow();
+        if (expectedVersion === J04_BASELINE_ANALYSIS_SCHEMA_VERSION) expect(() => downgraded.prepare('SELECT mode FROM analysis_task_intents').all()).toThrow();
+      } finally {
+        downgraded.close();
+      }
+      // Opening the store migrates forward; every pre-17 row is byte for byte the row it was, and the one frozen plan is seeded as version 1.
+      const migrated = await openWithRoute(roots.dataRoot, fixture);
+      try {
+        const after = new DatabaseSync(databasePath, { readOnly: true });
+        try {
+          expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(TASK_AUTHORIZATION_SCHEMA_VERSION);
+          for (const table of j03Tables) expect(tableRows(after, table)).toEqual(j03Before[table]);
+          for (const table of analysisTables) {
+            expect(tableRows(after, table, table === 'analysis_task_intents' ? REVISION_15_INTENT_COLUMNS : '*')).toEqual(analysisBefore[table]);
+          }
+          expect(tableRows(after, 'analysis_task_intents', 'mode, predecessor_revision_id, selected_start_position, selected_end_position'))
+            .toEqual([{ mode: 'first-baseline', predecessor_revision_id: null, selected_start_position: null, selected_end_position: null }]);
+          expect(tableRows(after, 'analysis_plan_versions', 'task_intent_id, ordinal, plan_revision_id, plan_envelope_sha256, created_at')).toEqual(versionsBefore);
+          expect(tableRows(after, 'analysis_plan_revisions')).toEqual([]);
+          expect(tableRows(after, 'analysis_plan_adaptations')).toEqual([]);
+        } finally {
+          after.close();
+        }
+        const restarted = migrated.inspectBaselineAnalysis(bookId);
+        expect(restarted).toMatchObject({ state: 'settled', taskIntent: { mode: 'first-baseline' }, history: { latestOrdinal: 1 }, authorization: { planVersionOrdinal: 1 } });
+        expect(restarted.planVersions.map((version) => [version.ordinal, version.state])).toEqual([[1, 'bound']]);
+        expect(migrated.inspectTaskAuthorization(bookId).state).toBe('authorized');
+        migrated.markCleanShutdown();
+      } finally {
+        migrated.close();
+      }
     }
 
-    // Opening the store migrates forward; the migrated first baseline then serves as the predecessor of a real update.
+    // The migrated first baseline then serves as the predecessor of a real update.
     const migrated = await openWithRoute(roots.dataRoot, fixture);
     const migratedOwner = new BaselineAnalysisExecutionOwner({ ledger: migrated.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: fakeSecretResolver() });
     try {
-      const after = new DatabaseSync(databasePath, { readOnly: true });
-      try {
-        expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(TASK_AUTHORIZATION_SCHEMA_VERSION);
-        for (const table of j03Tables) expect(tableRows(after, table)).toEqual(j03Before[table]);
-        for (const table of analysisTables) {
-          expect(tableRows(after, table, table === 'analysis_task_intents' ? REVISION_15_INTENT_COLUMNS : '*')).toEqual(analysisBefore[table]);
-        }
-        expect(tableRows(after, 'analysis_task_intents', 'mode, predecessor_revision_id, selected_start_position, selected_end_position'))
-          .toEqual([{ mode: 'first-baseline', predecessor_revision_id: null, selected_start_position: null, selected_end_position: null }]);
-      } finally {
-        after.close();
-      }
-      const restarted = migrated.inspectBaselineAnalysis(bookId);
-      expect(restarted).toMatchObject({ state: 'settled', taskIntent: { mode: 'first-baseline' }, history: { latestOrdinal: 1 } });
-      expect(migrated.inspectTaskAuthorization(bookId).state).toBe('authorized');
       appendToFirstBlock(migrated, manuscriptId, branchId, J04_EDIT_SUFFIX);
       const sync = await runToSettled(migrated, migratedOwner, bookId, { mode: 'sync-current', selectedRange: null });
-      expect(sync.settled.resultSetRevision).toMatchObject({ ordinal: 2, update: { mode: 'sync-current', counts: { reused: 6, recomputed: 2, invalidated: 2, bypassed: 0 } } });
+      expect(sync.settled.resultSetRevision).toMatchObject({ ordinal: 2, update: { mode: 'sync-current', counts: { reused: 6, recomputed: 2, invalidated: 2, bypassed: 0 } }, provenance: { planVersion: 1 } });
       migrated.markCleanShutdown();
     } finally {
       await migratedOwner.dispose();

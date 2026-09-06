@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { CONTEXT_WINDOW_EXCEEDED_CODE, INVALID_CREDENTIAL_CODE, QUOTA_EXCEEDED_CODE, attributionHeaders } from '@deepseek-ai/dsh-llm';
 import type { GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm';
 import { BASELINE_PROMPT_CONTRACT_DIGEST } from '../../src/service/analysis/contract.js';
-import { AI7_FAILURE_CODES, classifyModelFailure, evaluateRunBudgetCeiling } from '../../src/service/provider/classification.js';
+import { AI7_FAILURE_CODES, RETRY_SAFE_FAILURE_TABLE, classifyModelFailure, evaluateRunBudgetCeiling, isRetrySafeFailure } from '../../src/service/provider/classification.js';
 import { CredentialBroker, type CredentialSlotBinding } from '../../src/service/provider/credential-broker.js';
 import {
   DEEPSEEK_ENDPOINT,
@@ -186,6 +186,33 @@ describe('classification', () => {
     expect(classifyModelFailure({ code: AI7_FAILURE_CODES.EGRESS_REFUSED, message: '' }, codes)).toMatchObject({ signal: 'interrupted', failureClass: 'egress-refused' });
     expect(classifyModelFailure({ code: 'SOMETHING_ELSE', message: '' }, codes)).toMatchObject({ signal: 'failed', failureClass: 'adapter-failure', code: 'SOMETHING_ELSE' });
     expect(QUOTA_EXCEEDED_CODE).toBe('QUOTA');
+  });
+
+  it('admits exactly rate limits, transport failures, and 5xx provider errors to the one safe retry (Issue #48)', () => {
+    const verdict = (code: string, status?: number) => classifyModelFailure({ code, message: '', ...(status === undefined ? {} : { status }) }, codes);
+    expect(RETRY_SAFE_FAILURE_TABLE).toEqual({ RATE_LIMIT: 'any-status', TRANSPORT_FAILED: 'any-status', PROVIDER_ERROR: 'server-status-only' });
+    expect(verdict(AI7_FAILURE_CODES.RATE_LIMIT)).toMatchObject({ failureClass: 'rate-limit', retrySafe: true, status: null });
+    expect(verdict(AI7_FAILURE_CODES.RATE_LIMIT, 429)).toMatchObject({ retrySafe: true, status: 429 });
+    expect(verdict(AI7_FAILURE_CODES.TRANSPORT_FAILED)).toMatchObject({ failureClass: 'adapter-failure', retrySafe: true });
+    expect(verdict(AI7_FAILURE_CODES.PROVIDER_ERROR, 500)).toMatchObject({ failureClass: 'adapter-failure', retrySafe: true, status: 500 });
+    expect(verdict(AI7_FAILURE_CODES.PROVIDER_ERROR, 503)).toMatchObject({ retrySafe: true, reason: '适配器失败（PROVIDER_ERROR · 503）。' });
+    expect(verdict(AI7_FAILURE_CODES.PROVIDER_ERROR, 599)).toMatchObject({ retrySafe: true });
+    // A provider error without a server status is not known to be transient.
+    expect(verdict(AI7_FAILURE_CODES.PROVIDER_ERROR)).toMatchObject({ retrySafe: false, status: null });
+    expect(verdict(AI7_FAILURE_CODES.PROVIDER_ERROR, 400)).toMatchObject({ retrySafe: false });
+    expect(verdict(AI7_FAILURE_CODES.PROVIDER_ERROR, 499)).toMatchObject({ retrySafe: false });
+    expect(verdict(AI7_FAILURE_CODES.PROVIDER_ERROR, 600)).toMatchObject({ retrySafe: false });
+    // Every other class keeps its first-attempt meaning, whatever status it carries.
+    for (const code of [
+      QUOTA_EXCEEDED_CODE, INVALID_CREDENTIAL_CODE, CONTEXT_WINDOW_EXCEEDED_CODE,
+      AI7_FAILURE_CODES.INTERRUPTED, AI7_FAILURE_CODES.EGRESS_REFUSED, AI7_FAILURE_CODES.NETWORK_DENIED, AI7_FAILURE_CODES.FIXTURE_MISMATCH,
+      AI7_FAILURE_CODES.INVALID_RESPONSE, AI7_FAILURE_CODES.TRANSMIT_TICKET_ABSENT, 'SYNTHETIC_ADAPTER_FAILURE', 'MAX_TOKENS', 'UNKNOWN',
+    ]) {
+      expect(verdict(code, 503).retrySafe).toBe(false);
+      expect(verdict(code).retrySafe).toBe(false);
+    }
+    expect(isRetrySafeFailure({ code: 'constructor', message: '' })).toBe(false);
+    expect(isRetrySafeFailure({ code: AI7_FAILURE_CODES.PROVIDER_ERROR, message: '', status: 503.5 })).toBe(false);
   });
 
   it('evaluates usage against an explicit Run Budget Ceiling and leaves unset unevaluated', () => {
