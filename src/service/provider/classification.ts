@@ -46,35 +46,63 @@ export interface ClassifiedModelFailure {
   /** Safe, payload-free reason for records and the UI. */
   readonly reason: string;
   readonly code: string;
+  /** The transport status the failure carried, when any; `null` otherwise. */
+  readonly status: number | null;
+  /** Whether the closed retry-safe table admits exactly one in-envelope safe retry of the same unit request. */
+  readonly retrySafe: boolean;
+}
+
+/**
+ * The closed retry-safe classification table (Issue #48, the `safe-retry` Plan Adaptation): a failed
+ * unit request may be repeated once inside the unchanged Plan Envelope only when its code is
+ * `RATE_LIMIT`, `TRANSPORT_FAILED`, or `PROVIDER_ERROR` carrying a 5xx server status. Every other
+ * code — Provider Account Limit, invalid credential, context-window exceeded, interruption, egress
+ * refusal, network denial, fixture mismatch, invalid response, and any unknown adapter code — is
+ * never retried and keeps its first-attempt meaning.
+ */
+export const RETRY_SAFE_FAILURE_TABLE: Readonly<Record<string, 'any-status' | 'server-status-only'>> = {
+  [AI7_FAILURE_CODES.RATE_LIMIT]: 'any-status',
+  [AI7_FAILURE_CODES.TRANSPORT_FAILED]: 'any-status',
+  [AI7_FAILURE_CODES.PROVIDER_ERROR]: 'server-status-only',
+};
+
+export function isRetrySafeFailure(failure: ModelFailureFacts): boolean {
+  const rule = Object.hasOwn(RETRY_SAFE_FAILURE_TABLE, failure.code) ? RETRY_SAFE_FAILURE_TABLE[failure.code] : undefined;
+  if (rule === undefined) return false;
+  if (rule === 'any-status') return true;
+  return typeof failure.status === 'number' && Number.isSafeInteger(failure.status) && failure.status >= 500 && failure.status <= 599;
 }
 
 export function classifyModelFailure(failure: ModelFailureFacts, codes: DshFailureCodes): ClassifiedModelFailure {
   const code = failure.code;
+  const status = typeof failure.status === 'number' && Number.isSafeInteger(failure.status) ? failure.status : null;
+  const classified = (signal: 'failed' | 'interrupted', failureClass: ModelFailureClass, reason: string): ClassifiedModelFailure =>
+    ({ signal, failureClass, reason, code, status, retrySafe: isRetrySafeFailure(failure) });
   if (code === codes.QUOTA_EXCEEDED_CODE) {
-    return { signal: 'failed', failureClass: 'provider-account-limit', reason: 'Provider Account Limit：模型服务账户限额阻止了本次请求。', code };
+    return classified('failed', 'provider-account-limit', 'Provider Account Limit：模型服务账户限额阻止了本次请求。');
   }
   if (code === codes.INVALID_CREDENTIAL_CODE) {
-    return { signal: 'failed', failureClass: 'invalid-credential', reason: '凭据不可用：模型服务拒绝了所提供的凭据。', code };
+    return classified('failed', 'invalid-credential', '凭据不可用：模型服务拒绝了所提供的凭据。');
   }
   if (code === codes.CONTEXT_WINDOW_EXCEEDED_CODE) {
-    return { signal: 'failed', failureClass: 'context-window-exceeded', reason: '上下文窗口超限：单元请求超出模型上下文容量。', code };
+    return classified('failed', 'context-window-exceeded', '上下文窗口超限：单元请求超出模型上下文容量。');
   }
   if (code === AI7_FAILURE_CODES.INTERRUPTED) {
-    return { signal: 'interrupted', failureClass: 'interrupted', reason: '请求被中断。', code };
+    return classified('interrupted', 'interrupted', '请求被中断。');
   }
   if (code === AI7_FAILURE_CODES.EGRESS_REFUSED) {
-    return { signal: 'interrupted', failureClass: 'egress-refused', reason: 'Provider Payload/Egress Gate 拒绝发送；尝试已暂停。', code };
+    return classified('interrupted', 'egress-refused', 'Provider Payload/Egress Gate 拒绝发送；尝试已暂停。');
   }
   if (code === AI7_FAILURE_CODES.NETWORK_DENIED) {
-    return { signal: 'failed', failureClass: 'network-denied', reason: '出站网络在当前产品区间内被禁用。', code };
+    return classified('failed', 'network-denied', '出站网络在当前产品区间内被禁用。');
   }
   if (code === AI7_FAILURE_CODES.FIXTURE_MISMATCH) {
-    return { signal: 'failed', failureClass: 'fixture-mismatch', reason: '确定性夹具没有该单元与请求摘要对应的响应。', code };
+    return classified('failed', 'fixture-mismatch', '确定性夹具没有该单元与请求摘要对应的响应。');
   }
   if (code === AI7_FAILURE_CODES.RATE_LIMIT) {
-    return { signal: 'failed', failureClass: 'rate-limit', reason: '模型服务速率限制拒绝了本次请求。', code };
+    return classified('failed', 'rate-limit', '模型服务速率限制拒绝了本次请求。');
   }
-  return { signal: 'failed', failureClass: 'adapter-failure', reason: `适配器失败（${code}）。`, code };
+  return classified('failed', 'adapter-failure', `适配器失败（${code}${status === null ? '' : ` · ${status}`}）。`);
 }
 
 /** Exact Run Budget Ceiling state bound in the Plan Envelope: `unset` by default, otherwise an explicit token ceiling. */
