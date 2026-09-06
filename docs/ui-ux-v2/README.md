@@ -1,10 +1,8 @@
 # AI7 V2 UI/UX design session
 
-Status: **Owner-approved Issue #86 V2 UI/UX successor; repository-current only in an exact integrated `dev` commit containing this revision; accepted-but-unintegrated elsewhere; design authority only, not implementation evidence**
+Status: **frozen design reference as of `dev@4c50ce31b0f15ff2bfadd2af17fc914c317e0f22` under [ADR 0064](../adr/0064-reweight-repository-development-toward-value-first-delivery.md); UI/UX design authority only, not implementation evidence**
 
 This directory records owner decisions from the independent AI7 V2 UI/UX interview. It defines product presentation and interaction only; it does not authorize product code, prototypes, Figma work, dependency installation, testing, review, publishing, or external action.
-
-The Issue #86 normalization is repository-current only when read from an exact integrated `dev` commit containing this revision; elsewhere it remains accepted-but-unintegrated. The current product integrates the provider-free J-01 new-Book path with exact identity disclosure and interrupted-import continuity/reconciliation, complete provider-free J-02 10M bounded editing, and complete provider-free J-08 Recovery Workspace. It remains neither full J-01 nor the broader Book Workspace; these UI records do not claim an Agent Workspace, artifact lifecycle, Provider path, retrieval/analysis/results, Enrollment, Proposal/Effect, or AI7 Apply implementation exists.
 
 ## Authority and reference
 

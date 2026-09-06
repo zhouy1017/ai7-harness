@@ -1,10 +1,10 @@
 # AI7 V2 semantic journey continuity
 
-Status: **Owner-approved Issue #86 successor; repository-current only in an exact integrated `dev` commit containing this revision; accepted-but-unintegrated elsewhere; not implementation or validation evidence**
+Status: **frozen design reference as of `dev@4c50ce31b0f15ff2bfadd2af17fc914c317e0f22` under [ADR 0064](../adr/0064-reweight-repository-development-toward-value-first-delivery.md); semantic journey map, not implementation or validation evidence**
 
 ## Source and use
 
-The stable IDs and original business hypotheses come only from `docs/ui-ux/interaction-spec.md` in exact frozen object `587d6455f6a578d3df8a39f534ec7a057c07a18c`. Exact object `247b7dacb267ba2f4076ca8461c95e5f0508b343` is frozen V2 architecture provenance, not current authority. The Issue #86 successor is repository-current only in an exact integrated `dev` commit containing this revision; elsewhere it remains accepted-but-unintegrated.
+The stable IDs and original business hypotheses come only from `docs/ui-ux/interaction-spec.md` in exact frozen object `587d6455f6a578d3df8a39f534ec7a057c07a18c`. Exact object `247b7dacb267ba2f4076ca8461c95e5f0508b343` is frozen V2 architecture provenance, not current authority.
 
 The list is a semantic coverage map. It does not inherit old screen geometry, prototype/Figma artifacts, component implementation, Windows-specific mechanism detail or completed verification claims. One logical provider-free E2E Functional Gate may cover these as complete Windows-and-macOS user journeys plus discovered bug regressions; this document creates no separate usability, accessibility, performance, platform-certification or UI gate.
 

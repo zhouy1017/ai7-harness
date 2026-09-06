@@ -1,6 +1,6 @@
 # AI7 Execution
 
-Status: **Issue #86 Owner-approved Execution successor context; repository-current only in an exact integrated `dev` commit containing this revision; accepted-but-unintegrated elsewhere**
+Status: **frozen design reference as of `dev@4c50ce31b0f15ff2bfadd2af17fc914c317e0f22` under [ADR 0064](../../adr/0064-reweight-repository-development-toward-value-first-delivery.md); canonical Execution context; term definitions change only through an ADR that names the clause**
 
 The AI7 product language for Task Intents, native DSH artifacts, Task Ledger records, authority, Effects, and their exact bindings to Harness execution, kept distinct from Harness runtime primitives.
 

@@ -4,7 +4,7 @@ status: accepted
 
 # Separate Provider Processing by operational scope
 
-This ADR records the Owner-approved Provider Processing correction for Issue #86. It is repository-current only when read from an exact integrated `dev` commit containing this revision; elsewhere it remains accepted-but-unintegrated. It defines policy and authority contracts only; no Provider adapter, endpoint, model, credential, launch selector, call, policy activation or implementation follows from it.
+This ADR records the Owner-approved Provider Processing correction for Issue #86. It defines policy and authority contracts only; no Provider adapter, endpoint, model, credential, launch selector, call, policy activation or implementation follows from it.
 
 ## Decision
 

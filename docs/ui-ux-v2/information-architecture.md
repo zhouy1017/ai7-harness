@@ -1,6 +1,6 @@
 # AI7 V2 information architecture
 
-Status: **Owner-approved Issue #86 successor; repository-current only in an exact integrated `dev` commit containing this revision; accepted-but-unintegrated elsewhere; not implementation evidence**
+Status: **frozen design reference as of `dev@4c50ce31b0f15ff2bfadd2af17fc914c317e0f22` under [ADR 0064](../adr/0064-reweight-repository-development-toward-value-first-delivery.md); not implementation evidence**
 
 ## Accepted organizing model
 
@@ -63,7 +63,7 @@ The workspace may host task preparation, dialogue, artifact-supported work and l
 
 ## Accepted documentation-completion boundary
 
-The earlier interview-completion statement is historical. Issue #8 closed the dependency-ordered branches in [`MISSING-DESIGN-DECISION-MAP.md`](./MISSING-DESIGN-DECISION-MAP.md). Issue #86 supplies the target-qualified successor for Book-bound Agent Workspace, native DSH artifact lifecycle, operational-scope Provider policy selection, covered manuscript analysis, Background Analysis Enrollment and universal single-use AI7 Apply. These additions are repository-current only in an exact integrated `dev` commit containing this revision, remain accepted-but-unintegrated elsewhere, and grant no implementation authority.
+The earlier interview-completion statement is historical. Issue #8 closed the dependency-ordered branches in [`MISSING-DESIGN-DECISION-MAP.md`](./MISSING-DESIGN-DECISION-MAP.md). Issue #86 supplies the target-qualified successor for Book-bound Agent Workspace, native DSH artifact lifecycle, operational-scope Provider policy selection, covered manuscript analysis, Background Analysis Enrollment and universal single-use AI7 Apply.
 
 ## Semantic state presentation hierarchy
 

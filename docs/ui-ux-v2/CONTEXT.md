@@ -1,8 +1,8 @@
 # AI7 V2 UI/UX
 
-Status: **Owner-approved Issue #86 V2 presentation successor context; repository-current only in an exact integrated `dev` commit containing this revision; accepted-but-unintegrated elsewhere; root domain contexts retain semantic authority**
+Status: **frozen design reference as of `dev@4c50ce31b0f15ff2bfadd2af17fc914c317e0f22` under [ADR 0064](../adr/0064-reweight-repository-development-toward-value-first-delivery.md); presentation context; root domain contexts retain semantic authority**
 
-The target-qualified presentation language for how professional editors perceive and operate AI7. The predecessor baseline remains historical context; Issue #86 additions are repository-current only in an exact integrated `dev` commit containing this revision and remain accepted-but-unintegrated elsewhere. This file owns presentation concepts only and does not redefine editorial or execution authority.
+The target-qualified presentation language for how professional editors perceive and operate AI7. The predecessor baseline remains historical context. This file owns presentation concepts only and does not redefine editorial or execution authority.
 
 Shared `Native DSH Artifact`, `DSH Skill/Plugin/Bundle/Profile/Agent Preset`, `Source Skill Snapshot`, `Imported Skill Working Revision`, `Artifact Update Rule`, `Default Execution Rule`, `Background Analysis Enrollment`, `DSH Analysis Contract`, `AI7 Apply`, `Coverage Manifest`, `Analysis Unit`, `Baseline Manuscript Analysis Contract`, `Manuscript Analysis Result Set/Revision`, and `Analysis Quality Metric` meanings remain owned by the root [contexts](../../CONTEXT-MAP.md); the presentation terms below only project them.
 

@@ -4,7 +4,7 @@ status: accepted
 
 # Separate targeted retrieval from covered manuscript analysis
 
-This ADR extends [ADR 0026](./0026-manuscript-retrieval-returns-candidates.md) without weakening it. It is repository-current only when read from an exact integrated `dev` commit containing this revision; elsewhere it remains accepted-but-unintegrated. It authorizes no retrieval, index, embedding, analysis, Provider or storage implementation.
+This ADR extends [ADR 0026](./0026-manuscript-retrieval-returns-candidates.md) without weakening it. It authorizes no retrieval, index, embedding, analysis, Provider or storage implementation.
 
 ## Decision
 

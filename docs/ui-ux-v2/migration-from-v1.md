@@ -1,12 +1,12 @@
 # Migration from the frozen V1 UI/UX semantics
 
-Status: **Owner-approved Issue #86 successor; repository-current only in an exact integrated `dev` commit containing this revision; accepted-but-unintegrated elsewhere; design and provenance only**
+Status: **frozen design reference as of `dev@4c50ce31b0f15ff2bfadd2af17fc914c317e0f22` under [ADR 0064](../adr/0064-reweight-repository-development-toward-value-first-delivery.md); design and provenance only**
 
 ## Authority and purpose
 
 - Frozen reference input: exact Git object `587d6455f6a578d3df8a39f534ec7a057c07a18c` under `docs/ui-ux/`.
 - Frozen V2 architecture provenance input: exact Git object `247b7dacb267ba2f4076ca8461c95e5f0508b343`; it is input evidence only, not current authority.
-- Current target authority must be resolved from an exact integrated `dev` commit through [`CONTEXT-MAP.md`](../../CONTEXT-MAP.md), root [`docs/adr/`](../adr/) and [`architecture-v2`](../architecture-v2/README.md). The Issue #86 successor is repository-current only in a tree that contains this revision and accepted-but-unintegrated elsewhere. Root ADR 0028's Windows-and-macOS one-product contract overrides the frozen reference.
+- Current target authority must be resolved from an exact integrated `dev` commit through [`CONTEXT-MAP.md`](../../CONTEXT-MAP.md), root [`docs/adr/`](../adr/) and [`architecture-v2`](../architecture-v2/README.md). Root ADR 0028's Windows-and-macOS one-product contract overrides the frozen reference.
 
 This document records how individually accepted portable V1 meanings were reshaped into the target V2 baseline and then identifies the bounded Issue #86 V2-to-V2 successor normalization. It does not migrate screens, code, components or test evidence; authorize adjacent implementation, prototypes or Figma work; or claim that any journey has been implemented or validated.
 

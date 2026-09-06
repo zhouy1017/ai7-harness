@@ -1,8 +1,6 @@
 # V2 migration direction
 
-Status: **Owner-approved Issue #86 design-to-implementation successor direction; repository-current only in an exact integrated `dev` commit containing this revision; accepted-but-unintegrated elsewhere; execute only through a later authorized Issue and Change Brief**
-
-The Issue #86 normalization is repository-current only when read from an exact integrated `dev` commit containing this revision; elsewhere it remains accepted-but-unintegrated. It changes documentation authority only and does not authorize or claim an implementation migration.
+Status: **frozen design reference as of `dev@4c50ce31b0f15ff2bfadd2af17fc914c317e0f22` under [ADR 0064](../adr/0064-reweight-repository-development-toward-value-first-delivery.md); design-to-implementation direction executed only through plan slices**
 
 Migration preserves AI7's product and domain model, **preserves and reshapes the DeepSeek Harness baseline** rather than removing it, adds the accepted Model Role bindings and provider boundary, keeps Codex material as non-runtime reference, and removes proof machinery and legacy runtime/UI assumptions. This is selective reuse, not a history merge or wholesale source copy.
 

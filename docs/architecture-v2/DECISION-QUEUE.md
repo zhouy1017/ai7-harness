@@ -1,6 +1,6 @@
 # V2 owner decision queue
 
-Status: **no current Owner decision blocks the bounded Issue #86 successor; repository-current only in an exact integrated `dev` commit containing this revision; accepted-but-unintegrated elsewhere**
+Status: **frozen design reference as of `dev@4c50ce31b0f15ff2bfadd2af17fc914c317e0f22` under [ADR 0064](../adr/0064-reweight-repository-development-toward-value-first-delivery.md); trigger-based future Owner decisions only**
 
 This queue contains only future choices that would materially change accepted scope or authority. DSH capability unknowns, exact versions, package selection, composition details, configuration fields, event shapes, catalog adapters, trust-tier implementation, sandbox mechanics, sidecar/conversion/reconciliation storage, Workflow Profile carrier mapping, scoped enablement, per-Run activation, Enrollment storage, Result Set serialization, analysis-metric snapshots, and ordinary implementation trade-offs are not owner questions and do not enter this file. Neither is routine provider configuration: binding the Frontier Model Role to another eligible provider is a user setting inside the accepted architecture, not an owner decision. The trusted development/CI versus fixture-recording versus ordinary-production policy scope is different: it is fixed by build/launch authority and is not a product setting.
 
