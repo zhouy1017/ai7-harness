@@ -135,9 +135,10 @@ export class CooperativeJobOwner {
     goal: Parameters<EditorialStore['createBaselineAnalysisPreparationWork']>[1],
     update: Parameters<EditorialStore['createBaselineAnalysisPreparationWork']>[2],
     launchPolicy: Parameters<EditorialStore['createBaselineAnalysisPreparationWork']>[3],
+    reconfirm: boolean,
   ): ServiceJobProjection {
     this.#requireCapacity();
-    const work = this.#store.createBaselineAnalysisPreparationWork(bookId, goal, update, launchPolicy);
+    const work = this.#store.createBaselineAnalysisPreparationWork(bookId, goal, update, launchPolicy, reconfirm);
     const jobId = randomUUID();
     const job: JobRecord = {
       subjectId: work.workId ?? bookId,

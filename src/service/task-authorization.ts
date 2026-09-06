@@ -13,6 +13,7 @@ import {
   BASELINE_ANALYSIS_TASK_GOAL,
   TASK_INPUT_CHECKPOINT_PURPOSE,
 } from './analysis/identity.js';
+import { canonicalRecord as analysisCanonicalRecord } from './analysis/canonical.js';
 import { ANALYSIS_RESULT_SET_SCHEMA_SQL } from './analysis/result-set-schema.js';
 
 const PREDECESSOR_SCHEMA_VERSION = 13;
@@ -21,7 +22,9 @@ export const J03_TASK_AUTHORIZATION_SCHEMA_VERSION = 14;
 /** The additive baseline-analysis revision (Issue #92): analysis task kind, attempts, bindings, outcomes, result sets. */
 export const J04_BASELINE_ANALYSIS_SCHEMA_VERSION = 15;
 /** The successive-task revision (Issue #93): more than one baseline-analysis Task per Book, update mode, predecessor, range, reuse plan. */
-export const TASK_AUTHORIZATION_SCHEMA_VERSION = 16;
+export const SUCCESSIVE_TASK_SCHEMA_VERSION = 16;
+/** The plan-version revision (Issue #48): plan components keyed by plan version, Plan Revisions with their diff, Plan Adaptations. */
+export const TASK_AUTHORIZATION_SCHEMA_VERSION = 17;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const DIGEST_PATTERN = /^[0-9a-f]{64}$/;
 const SAMPLE1_SOURCE_DIGEST = 'b8a3dbde0aa8a1ec7265f9ae3fe47877759e7947c5ab69682cd0a8f424a8d483' as const;
@@ -174,6 +177,21 @@ export const ANALYSIS_LEDGER_REVISION_15_SQL = {
   ) STRICT`,
 } as const;
 
+/** The revision-16 shape of the one relation revision 17 rebuilds; kept to validate a revision-16 store exactly before its rows are copied forward. */
+export const ANALYSIS_LEDGER_REVISION_16_SQL = {
+  analysis_plan_records: `CREATE TABLE analysis_plan_records (
+    task_intent_id TEXT NOT NULL REFERENCES analysis_task_intents(task_intent_id),
+    component TEXT NOT NULL CHECK(component IN (
+      'manuscript-pin', 'artifact-pin', 'run-source-scope', 'coverage-manifest',
+      'provider-resolution-plan', 'execution-plan', 'plan-envelope', 'reuse-plan'
+    )),
+    canonical_json TEXT NOT NULL,
+    sha256 TEXT NOT NULL CHECK(length(sha256) = 64),
+    created_at TEXT NOT NULL,
+    PRIMARY KEY(task_intent_id, component)
+  ) STRICT`,
+} as const;
+
 /**
  * Schema revision 15 introduced the baseline-analysis Task kind and its executed Run as additive
  * append-only relations beside the untouched J-03 ledger; the Task-kind discriminator lives here
@@ -190,6 +208,15 @@ export const ANALYSIS_LEDGER_REVISION_15_SQL = {
  * updates and, for `重新分析所选范围`, the explicitly selected block range; `analysis_plan_records`
  * admits the `reuse-plan` component. Both rebuilds copy every existing row with identical canonical
  * JSON and digest inside the migration transaction.
+ *
+ * Revision 17 (Issue #48) makes the Plan Envelope an authority-bearing boundary: the plan
+ * components are keyed by Task Intent, plan version, and component (every existing row becomes
+ * version 1 with its canonical JSON and digest untouched); `analysis_plan_versions` records one
+ * immutable row per version with the envelope digest a Run Authorization binds;
+ * `analysis_plan_revisions` records each Plan Revision with its field-level diff and the version it
+ * supersedes, and the version that resolves it links back; `analysis_plan_adaptations` records each
+ * in-envelope `safe-retry` adaptation of an attempt, keyed by attempt and ordinal. Every J-03
+ * relation, CHECK, trigger, and row stays byte for byte unchanged.
  */
 export const ANALYSIS_LEDGER_SCHEMA_SQL = {
   analysis_task_intents: `CREATE TABLE analysis_task_intents (
@@ -229,6 +256,7 @@ export const ANALYSIS_LEDGER_SCHEMA_SQL = {
   ) STRICT`,
   analysis_plan_records: `CREATE TABLE analysis_plan_records (
     task_intent_id TEXT NOT NULL REFERENCES analysis_task_intents(task_intent_id),
+    plan_version INTEGER NOT NULL CHECK(plan_version >= 1),
     component TEXT NOT NULL CHECK(component IN (
       'manuscript-pin', 'artifact-pin', 'run-source-scope', 'coverage-manifest',
       'provider-resolution-plan', 'execution-plan', 'plan-envelope', 'reuse-plan'
@@ -236,7 +264,29 @@ export const ANALYSIS_LEDGER_SCHEMA_SQL = {
     canonical_json TEXT NOT NULL,
     sha256 TEXT NOT NULL CHECK(length(sha256) = 64),
     created_at TEXT NOT NULL,
-    PRIMARY KEY(task_intent_id, component)
+    PRIMARY KEY(task_intent_id, plan_version, component)
+  ) STRICT`,
+  analysis_plan_versions: `CREATE TABLE analysis_plan_versions (
+    plan_version_id TEXT PRIMARY KEY,
+    task_intent_id TEXT NOT NULL REFERENCES analysis_task_intents(task_intent_id),
+    ordinal INTEGER NOT NULL CHECK(ordinal >= 1),
+    plan_revision_id TEXT UNIQUE REFERENCES analysis_plan_revisions(plan_revision_id),
+    plan_envelope_sha256 TEXT NOT NULL UNIQUE CHECK(length(plan_envelope_sha256) = 64),
+    created_at TEXT NOT NULL,
+    canonical_json TEXT NOT NULL,
+    sha256 TEXT NOT NULL UNIQUE CHECK(length(sha256) = 64),
+    UNIQUE(task_intent_id, ordinal),
+    CHECK((ordinal = 1) = (plan_revision_id IS NULL))
+  ) STRICT`,
+  analysis_plan_revisions: `CREATE TABLE analysis_plan_revisions (
+    plan_revision_id TEXT PRIMARY KEY,
+    task_intent_id TEXT NOT NULL REFERENCES analysis_task_intents(task_intent_id),
+    prior_plan_version_id TEXT NOT NULL REFERENCES analysis_plan_versions(plan_version_id),
+    prior_ordinal INTEGER NOT NULL CHECK(prior_ordinal >= 1),
+    trigger_kind TEXT NOT NULL CHECK(trigger_kind IN ('prepare', 'inspect', 'reconfirm')),
+    detected_at TEXT NOT NULL,
+    canonical_json TEXT NOT NULL,
+    sha256 TEXT NOT NULL UNIQUE CHECK(length(sha256) = 64)
   ) STRICT`,
   analysis_run_authorizations: `CREATE TABLE analysis_run_authorizations (
     authorization_id TEXT PRIMARY KEY,
@@ -297,6 +347,17 @@ export const ANALYSIS_LEDGER_SCHEMA_SQL = {
     sha256 TEXT NOT NULL UNIQUE CHECK(length(sha256) = 64),
     UNIQUE(attempt_id, ordinal)
   ) STRICT`,
+  analysis_plan_adaptations: `CREATE TABLE analysis_plan_adaptations (
+    adaptation_id TEXT PRIMARY KEY,
+    attempt_id TEXT NOT NULL REFERENCES analysis_execution_attempts(attempt_id),
+    ordinal INTEGER NOT NULL CHECK(ordinal >= 1),
+    unit_ordinal INTEGER NOT NULL CHECK(unit_ordinal >= 1),
+    adaptation_class TEXT NOT NULL CHECK(adaptation_class = 'safe-retry'),
+    recorded_at TEXT NOT NULL,
+    canonical_json TEXT NOT NULL,
+    sha256 TEXT NOT NULL UNIQUE CHECK(length(sha256) = 64),
+    UNIQUE(attempt_id, ordinal)
+  ) STRICT`,
   ...ANALYSIS_RESULT_SET_SCHEMA_SQL,
   analysis_task_outcomes: `CREATE TABLE analysis_task_outcomes (
     outcome_id TEXT PRIMARY KEY,
@@ -312,6 +373,17 @@ export const ANALYSIS_LEDGER_SCHEMA_SQL = {
 
 const ANALYSIS_LEDGER_TABLES = Object.keys(ANALYSIS_LEDGER_SCHEMA_SQL);
 export const ANALYSIS_LEDGER_TRIGGER_SQL = immutabilityTriggers(ANALYSIS_LEDGER_TABLES);
+/** The relations revision 17 adds; absent from every earlier revision and created after the rebuild it performs. */
+export const ANALYSIS_LEDGER_REVISION_17_TABLES = ['analysis_plan_versions', 'analysis_plan_revisions', 'analysis_plan_adaptations'] as const;
+
+/** The analysis tables and triggers of revisions 15 and 16: the current set without what revision 17 added. */
+function preRevision17Objects(): { tables: Record<string, string>; triggers: Record<string, string> } {
+  const added = new Set<string>(ANALYSIS_LEDGER_REVISION_17_TABLES);
+  const tables = Object.fromEntries(Object.entries(ANALYSIS_LEDGER_SCHEMA_SQL).filter(([name]) => !added.has(name)));
+  const triggers = Object.fromEntries(Object.entries(ANALYSIS_LEDGER_TRIGGER_SQL)
+    .filter(([name]) => !Array.from(added).some((table) => name === `${table}_no_update` || name === `${table}_no_delete`)));
+  return { tables, triggers };
+}
 
 export class TaskAuthorizationError extends Error {
   constructor(readonly code: string, message: string) {
@@ -626,9 +698,18 @@ export function validateAnalysisLedgerSchema(db: DatabaseSync): void {
 
 /** The revision-15 analysis relations, validated exactly before the forward copy rebuilds two of them. */
 function validateRevision15AnalysisLedgerSchema(db: DatabaseSync): void {
-  requireExactObjects(db, 'table', { ...ANALYSIS_LEDGER_SCHEMA_SQL, ...ANALYSIS_LEDGER_REVISION_15_SQL }, '分析任务账本表（修订版 15）');
-  requireExactObjects(db, 'trigger', ANALYSIS_LEDGER_TRIGGER_SQL, '分析任务账本触发器');
-  validateCanonicalRowDigests(db, ANALYSIS_LEDGER_TABLES);
+  const { tables, triggers } = preRevision17Objects();
+  requireExactObjects(db, 'table', { ...tables, ...ANALYSIS_LEDGER_REVISION_15_SQL }, '分析任务账本表（修订版 15）');
+  requireExactObjects(db, 'trigger', triggers, '分析任务账本触发器（修订版 15）');
+  validateCanonicalRowDigests(db, Object.keys(tables));
+}
+
+/** The revision-16 analysis relations, validated exactly before the forward copy rebuilds the plan records. */
+function validateRevision16AnalysisLedgerSchema(db: DatabaseSync): void {
+  const { tables, triggers } = preRevision17Objects();
+  requireExactObjects(db, 'table', { ...tables, ...ANALYSIS_LEDGER_REVISION_16_SQL }, '分析任务账本表（修订版 16）');
+  requireExactObjects(db, 'trigger', triggers, '分析任务账本触发器（修订版 16）');
+  validateCanonicalRowDigests(db, Object.keys(tables));
 }
 
 export function validateTaskAuthorizationSchema(db: DatabaseSync): void {
@@ -674,12 +755,38 @@ function rebuildAnalysisRelation(db: DatabaseSync, table: keyof typeof ANALYSIS_
 }
 
 /**
- * Revision 15 → 16: rebuild `analysis_task_intents` (mode, predecessor, selected range; no `book_id`
- * uniqueness) and `analysis_plan_records` (the `reuse-plan` component). Existing intents are
- * `first-baseline` rows with no predecessor and no range; their canonical JSON and digests are the
- * revision-15 bytes. Every other relation and every J-03 row is untouched.
+ * Every plan a store froze before revision 17 becomes plan version 1 of its Task Intent: one
+ * `analysis_plan_versions` row per existing `plan-envelope` record, minted at migration with the
+ * envelope's digest and creation time and no Plan Revision. The plan records themselves are the
+ * copied version-1 rows.
  */
-function migrateAnalysisLedgerToRevision16(db: DatabaseSync): void {
+function seedInitialPlanVersions(db: DatabaseSync): void {
+  const envelopes = db.prepare(
+    "SELECT task_intent_id, sha256, created_at FROM analysis_plan_records WHERE component = 'plan-envelope' AND plan_version = 1 ORDER BY rowid",
+  ).all() as SqlRow[];
+  const insert = db.prepare(
+    `INSERT INTO analysis_plan_versions(plan_version_id, task_intent_id, ordinal, plan_revision_id, plan_envelope_sha256, created_at, canonical_json, sha256)
+     VALUES (?, ?, 1, NULL, ?, ?, ?, ?)`,
+  );
+  for (const envelope of envelopes) {
+    const planVersionId = randomUUID();
+    const taskIntentId = asString(envelope.task_intent_id);
+    const planEnvelopeDigest = asString(envelope.sha256);
+    const createdAt = asString(envelope.created_at);
+    const record = analysisCanonicalRecord({ planVersionId, taskIntentId, ordinal: 1, planRevisionId: null, planEnvelopeDigest, createdAt });
+    insert.run(planVersionId, taskIntentId, planEnvelopeDigest, createdAt, record.json, record.digest);
+  }
+}
+
+/**
+ * Revision 15 or 16 → 17. From 15, `analysis_task_intents` is first rebuilt as revision 16 defined
+ * it (mode, predecessor, selected range; no `book_id` uniqueness): existing intents are
+ * `first-baseline` rows with no predecessor and no range. From either, `analysis_plan_records` is
+ * rebuilt with every row copied as plan version 1, the three revision-17 relations are created with
+ * their immutability triggers, and one version-1 row is seeded per frozen plan. Every row keeps its
+ * canonical JSON and digest; every other relation and every J-03 row is untouched.
+ */
+function migrateAnalysisLedgerToRevision17(db: DatabaseSync, from: typeof J04_BASELINE_ANALYSIS_SCHEMA_VERSION | typeof SUCCESSIVE_TASK_SCHEMA_VERSION): void {
   const foreignKeysState = (): number => asNumber((db.prepare('PRAGMA foreign_keys').get() as SqlRow).foreign_keys);
   const restoreForeignKeys = foreignKeysState() === 1;
   db.exec('PRAGMA foreign_keys = OFF');
@@ -687,24 +794,32 @@ function migrateAnalysisLedgerToRevision16(db: DatabaseSync): void {
   try {
     try {
       db.exec('BEGIN IMMEDIATE');
-      rebuildAnalysisRelation(db, 'analysis_task_intents',
-        `INSERT INTO analysis_task_intents(
-           task_intent_id, book_id, kind, contract_version, goal, created_at, canonical_json, sha256,
-           mode, predecessor_revision_id, selected_start_position, selected_end_position
-         ) SELECT task_intent_id, book_id, kind, contract_version, goal, created_at, canonical_json, sha256,
-                  'first-baseline', NULL, NULL, NULL
-           FROM temp.migrate_analysis_task_intents ORDER BY migrate_rowid`);
+      if (from === J04_BASELINE_ANALYSIS_SCHEMA_VERSION) {
+        rebuildAnalysisRelation(db, 'analysis_task_intents',
+          `INSERT INTO analysis_task_intents(
+             task_intent_id, book_id, kind, contract_version, goal, created_at, canonical_json, sha256,
+             mode, predecessor_revision_id, selected_start_position, selected_end_position
+           ) SELECT task_intent_id, book_id, kind, contract_version, goal, created_at, canonical_json, sha256,
+                    'first-baseline', NULL, NULL, NULL
+             FROM temp.migrate_analysis_task_intents ORDER BY migrate_rowid`);
+      }
       rebuildAnalysisRelation(db, 'analysis_plan_records',
-        `INSERT INTO analysis_plan_records(task_intent_id, component, canonical_json, sha256, created_at)
-         SELECT task_intent_id, component, canonical_json, sha256, created_at
+        `INSERT INTO analysis_plan_records(task_intent_id, plan_version, component, canonical_json, sha256, created_at)
+         SELECT task_intent_id, 1, component, canonical_json, sha256, created_at
            FROM temp.migrate_analysis_plan_records ORDER BY migrate_rowid`);
+      for (const table of ANALYSIS_LEDGER_REVISION_17_TABLES) {
+        db.exec(ANALYSIS_LEDGER_SCHEMA_SQL[table]);
+        db.exec(ANALYSIS_LEDGER_TRIGGER_SQL[`${table}_no_update`]!);
+        db.exec(ANALYSIS_LEDGER_TRIGGER_SQL[`${table}_no_delete`]!);
+      }
+      seedInitialPlanVersions(db);
       db.exec(`PRAGMA user_version = ${TASK_AUTHORIZATION_SCHEMA_VERSION}`);
       requireTask(db.prepare('PRAGMA foreign_key_check').all().length === 0, 'SCHEMA_MIGRATION_FAILED', '分析任务账本迁移后引用校验失败。');
       validateTaskAuthorizationSchema(db);
       db.exec('COMMIT');
     } catch (error) {
       try { db.exec('ROLLBACK'); } catch (rollbackError) {
-        throw new AggregateError([error, rollbackError], 'Analysis ledger revision 16 rollback failed.');
+        throw new AggregateError([error, rollbackError], 'Analysis ledger revision 17 rollback failed.');
       }
       throw error;
     }
@@ -719,21 +834,28 @@ function migrateAnalysisLedgerToRevision16(db: DatabaseSync): void {
 /**
  * Forward-only: a revision-13 store gains the J-03 relations and the analysis relations in one
  * transaction; a revision-14 store gains only the analysis relations and keeps every J-03 row
- * untouched; a revision-15 store has its two rebuilt relations copied forward with every row's
- * canonical JSON and digest preserved; a revision-16 store is validated whole.
+ * untouched; a revision-15 or revision-16 store has its rebuilt relations copied forward with every
+ * row's canonical JSON and digest preserved and its frozen plans seeded as plan version 1; a
+ * revision-17 store is validated whole.
  */
 export function initializeTaskAuthorizationSchema(db: DatabaseSync): void {
   const version = asNumber((db.prepare('PRAGMA user_version').get() as SqlRow).user_version);
   requireTask(
     version === PREDECESSOR_SCHEMA_VERSION || version === J03_TASK_AUTHORIZATION_SCHEMA_VERSION ||
-      version === J04_BASELINE_ANALYSIS_SCHEMA_VERSION || version === TASK_AUTHORIZATION_SCHEMA_VERSION,
+      version === J04_BASELINE_ANALYSIS_SCHEMA_VERSION || version === SUCCESSIVE_TASK_SCHEMA_VERSION ||
+      version === TASK_AUTHORIZATION_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED', '数据库版本不受支持。',
   );
   if (version === TASK_AUTHORIZATION_SCHEMA_VERSION) return validateTaskAuthorizationSchema(db);
+  if (version === SUCCESSIVE_TASK_SCHEMA_VERSION) {
+    validateJ03TaskAuthorizationSchema(db);
+    validateRevision16AnalysisLedgerSchema(db);
+    return migrateAnalysisLedgerToRevision17(db, SUCCESSIVE_TASK_SCHEMA_VERSION);
+  }
   if (version === J04_BASELINE_ANALYSIS_SCHEMA_VERSION) {
     validateJ03TaskAuthorizationSchema(db);
     validateRevision15AnalysisLedgerSchema(db);
-    return migrateAnalysisLedgerToRevision16(db);
+    return migrateAnalysisLedgerToRevision17(db, J04_BASELINE_ANALYSIS_SCHEMA_VERSION);
   }
   const analysisStatements = `${Object.values(ANALYSIS_LEDGER_SCHEMA_SQL).join(';\n')};
       ${Object.values(ANALYSIS_LEDGER_TRIGGER_SQL).join(';\n')};
