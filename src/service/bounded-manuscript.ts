@@ -49,13 +49,25 @@ import {
   NATIVE_ARTIFACT_INSTALLATIONS_SCHEMA_SQL,
 } from './editorial-workspace-profile.js';
 import {
+  ANALYSIS_LEDGER_REVISION_15_SQL,
   ANALYSIS_LEDGER_SCHEMA_SQL,
   ANALYSIS_LEDGER_TRIGGER_SQL,
   J03_TASK_AUTHORIZATION_SCHEMA_VERSION,
+  J04_BASELINE_ANALYSIS_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_SQL,
   TASK_AUTHORIZATION_SCHEMA_VERSION,
   TASK_AUTHORIZATION_TRIGGER_SQL,
 } from './task-authorization.js';
+
+/**
+ * The analysis ledger as revision 15 created it and as revision 16 rebuilt two of its relations;
+ * both shapes validate exactly, so a revision-15 store passes this layer before the forward copy.
+ */
+const ANALYSIS_LEDGER_EXPECTED_SCHEMA_SQL: Readonly<Record<string, string | ReadonlyArray<string>>> = {
+  ...ANALYSIS_LEDGER_SCHEMA_SQL,
+  analysis_task_intents: [ANALYSIS_LEDGER_SCHEMA_SQL.analysis_task_intents, ANALYSIS_LEDGER_REVISION_15_SQL.analysis_task_intents],
+  analysis_plan_records: [ANALYSIS_LEDGER_SCHEMA_SQL.analysis_plan_records, ANALYSIS_LEDGER_REVISION_15_SQL.analysis_plan_records],
+};
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const DIGEST_PATTERN = /^[0-9a-f]{64}$/;
@@ -1854,6 +1866,10 @@ function requireExactTableSchema(db: DatabaseSync, name: string, expectedSql: st
           'reviewed_reuse_source_version_id>source_versions.source_version_id:NO ACTION/NO ACTION/NONE',
         ]
       : []),
+    // Revision 16 (Issue #93): an update Task names the predecessor Result Set Revision it updates.
+    ...(name === 'analysis_task_intents' && canonicalSchemaSql(matchedExpectedSql) === canonicalSchemaSql(ANALYSIS_LEDGER_SCHEMA_SQL.analysis_task_intents)
+      ? ['predecessor_revision_id>analysis_result_set_revisions.revision_id:NO ACTION/NO ACTION/NONE']
+      : []),
   ].sort();
   requireBounded(
     actualForeignKeys.join('\n') === expectedForeignKeys.join('\n'),
@@ -2022,7 +2038,7 @@ function requireManuscriptReimportTargetSchema(
           }
         : {}),
       ...(includeTaskAuthorizationTables ? TASK_AUTHORIZATION_SCHEMA_SQL : {}),
-      ...(includeAnalysisLedgerTables ? ANALYSIS_LEDGER_SCHEMA_SQL : {}),
+      ...(includeAnalysisLedgerTables ? ANALYSIS_LEDGER_EXPECTED_SCHEMA_SQL : {}),
     },
     MANUSCRIPT_REIMPORT_INDEX_SQL,
     true,
@@ -4708,13 +4724,14 @@ export function initializeBoundedSchema(
       version === SOURCE_IMPORT_SCHEMA_VERSION || version === MANUSCRIPT_REIMPORT_SCHEMA_VERSION ||
       version === MODEL_SERVICE_SCHEMA_VERSION || version === NATIVE_ARTIFACT_SCHEMA_VERSION ||
       version === AUTHORITY_SIDECAR_SCHEMA_VERSION || version === J03_TASK_AUTHORIZATION_SCHEMA_VERSION ||
-      version === TASK_AUTHORIZATION_SCHEMA_VERSION,
+      version === J04_BASELINE_ANALYSIS_SCHEMA_VERSION || version === TASK_AUTHORIZATION_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
   if (version === MANUSCRIPT_REIMPORT_SCHEMA_VERSION || version === MODEL_SERVICE_SCHEMA_VERSION ||
       version === NATIVE_ARTIFACT_SCHEMA_VERSION || version === AUTHORITY_SIDECAR_SCHEMA_VERSION ||
-      version === J03_TASK_AUTHORIZATION_SCHEMA_VERSION || version === TASK_AUTHORIZATION_SCHEMA_VERSION) {
+      version === J03_TASK_AUTHORIZATION_SCHEMA_VERSION || version === J04_BASELINE_ANALYSIS_SCHEMA_VERSION ||
+      version === TASK_AUTHORIZATION_SCHEMA_VERSION) {
     transact(db, () => {
       if (validateStoreTruth || version !== TASK_AUTHORIZATION_SCHEMA_VERSION) {
         validateManuscriptReimportSchemaTruth(
@@ -4724,7 +4741,7 @@ export function initializeBoundedSchema(
           version >= NATIVE_ARTIFACT_SCHEMA_VERSION,
           version >= AUTHORITY_SIDECAR_SCHEMA_VERSION,
           version >= J03_TASK_AUTHORIZATION_SCHEMA_VERSION,
-          version === TASK_AUTHORIZATION_SCHEMA_VERSION,
+          version >= J04_BASELINE_ANALYSIS_SCHEMA_VERSION,
         );
       }
       terminalizeOrphanedReplacementPreviews(db);

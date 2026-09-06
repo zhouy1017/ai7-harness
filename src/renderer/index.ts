@@ -1668,7 +1668,7 @@ function renderBaselineAnalysis(host: HTMLElement, projection: BaselineAnalysisP
       cancel.hidden = false;
       setStatus('正在有界固定任务输入并派生覆盖清单…', 'busy');
       try {
-        const initial = await window.ai7.prepareBaselineAnalysis({ goal: BASELINE_ANALYSIS_TASK_GOAL });
+        const initial = await window.ai7.prepareBaselineAnalysis({ goal: BASELINE_ANALYSIS_TASK_GOAL, update: null });
         cancel.dataset['serviceJobId'] = initial.jobId;
         const completed = await awaitServiceJob(initial, (job) => {
           cancel.dataset['serviceJobId'] = job.jobId;

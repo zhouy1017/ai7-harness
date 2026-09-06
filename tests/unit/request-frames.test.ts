@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { ProtocolError, decodeRequest } from '../../src/service/request-frames.js';
-import { BASELINE_ANALYSIS_TASK_GOAL, MAX_EDIT_CODE_UNITS, MAX_REPLACEMENT_EXCLUSIONS } from '../../src/shared/protocol.js';
+import { BASELINE_ANALYSIS_MODE_GOALS, BASELINE_ANALYSIS_TASK_GOAL, MAX_EDIT_CODE_UNITS, MAX_REPLACEMENT_EXCLUSIONS } from '../../src/shared/protocol.js';
 
 const encoder = new TextEncoder();
 
@@ -71,16 +71,20 @@ describe('decodeRequest accepts well-formed frames', () => {
   });
 
   it('accepts the three baseline-analysis operations with their exact inputs', () => {
-    const inspect = { id: randomUUID(), op: 'inspectBaselineAnalysis', input: { bookId: randomUUID() } };
-    const prepare = { id: randomUUID(), op: 'prepareBaselineAnalysis', input: { bookId: randomUUID(), goal: BASELINE_ANALYSIS_TASK_GOAL } };
+    const inspect = { id: randomUUID(), op: 'inspectBaselineAnalysis', input: { bookId: randomUUID(), revisionId: null } };
+    const inspectRevision = { id: randomUUID(), op: 'inspectBaselineAnalysis', input: { bookId: randomUUID(), revisionId: randomUUID() } };
+    const prepare = { id: randomUUID(), op: 'prepareBaselineAnalysis', input: { bookId: randomUUID(), goal: BASELINE_ANALYSIS_TASK_GOAL, update: null } };
+    const sync = { id: randomUUID(), op: 'prepareBaselineAnalysis', input: { bookId: randomUUID(), goal: BASELINE_ANALYSIS_MODE_GOALS['sync-current'], update: { mode: 'sync-current', selectedRange: null } } };
+    const range = { id: randomUUID(), op: 'prepareBaselineAnalysis', input: { bookId: randomUUID(), goal: BASELINE_ANALYSIS_MODE_GOALS['reanalyze-range'], update: { mode: 'reanalyze-range', selectedRange: { startPosition: 26, endPosition: 43 } } } };
+    const whole = { id: randomUUID(), op: 'prepareBaselineAnalysis', input: { bookId: randomUUID(), goal: BASELINE_ANALYSIS_MODE_GOALS['reanalyze-book'], update: { mode: 'reanalyze-book', selectedRange: null } } };
     const authorize = {
       id: randomUUID(),
       op: 'authorizeBaselineAnalysis',
       input: { bookId: randomUUID(), taskIntentId: randomUUID(), planEnvelopeDigest: 'a'.repeat(64) },
     };
-    expect(decodeRequest(frameOf(inspect))).toEqual(inspect);
-    expect(decodeRequest(frameOf(prepare))).toEqual(prepare);
-    expect(decodeRequest(frameOf(authorize))).toEqual(authorize);
+    for (const request of [inspect, inspectRevision, prepare, sync, range, whole, authorize]) {
+      expect(decodeRequest(frameOf(request))).toEqual(request);
+    }
   });
 });
 
@@ -182,11 +186,25 @@ describe('decodeRequest rejects malformed frames', () => {
     ).toBe(id);
   });
 
-  it('rejects a baseline-analysis preparation whose goal is not the fixed goal or whose digest is malformed', () => {
+  it('rejects a baseline-analysis preparation whose goal, mode, or range is inconsistent, or whose digest is malformed', () => {
     const id = randomUUID();
-    expect(rejectionFor(frameOf({ id, op: 'prepareBaselineAnalysis', input: { bookId: randomUUID(), goal: '其他目标' } })).requestId).toBe(id);
-    expect(rejectionFor(frameOf({ id, op: 'authorizeBaselineAnalysis', input: { bookId: randomUUID(), taskIntentId: randomUUID(), planEnvelopeDigest: 'short' } })).requestId).toBe(id);
-    expect(rejectionFor(frameOf({ id, op: 'inspectBaselineAnalysis', input: { bookId: randomUUID(), extra: 1 } })).requestId).toBe(id);
+    const bookId = randomUUID();
+    const prepare = (goal: string, update: unknown) => frameOf({ id, op: 'prepareBaselineAnalysis', input: { bookId, goal, update } });
+    expect(rejectionFor(prepare('其他目标', null)).requestId).toBe(id);
+    expect(rejectionFor(frameOf({ id, op: 'prepareBaselineAnalysis', input: { bookId, goal: BASELINE_ANALYSIS_TASK_GOAL } })).requestId).toBe(id);
+    // A goal that names another mode than `update.mode`, a range for a non-range mode, a missing range, and an inverted range.
+    expect(rejectionFor(prepare(BASELINE_ANALYSIS_MODE_GOALS['sync-current'], null)).requestId).toBe(id);
+    expect(rejectionFor(prepare(BASELINE_ANALYSIS_TASK_GOAL, { mode: 'sync-current', selectedRange: null })).requestId).toBe(id);
+    expect(rejectionFor(prepare(BASELINE_ANALYSIS_MODE_GOALS['reanalyze-book'], { mode: 'sync-current', selectedRange: null })).requestId).toBe(id);
+    expect(rejectionFor(prepare(BASELINE_ANALYSIS_MODE_GOALS['sync-current'], { mode: 'sync-current', selectedRange: { startPosition: 1, endPosition: 2 } })).requestId).toBe(id);
+    expect(rejectionFor(prepare(BASELINE_ANALYSIS_MODE_GOALS['reanalyze-range'], { mode: 'reanalyze-range', selectedRange: null })).requestId).toBe(id);
+    expect(rejectionFor(prepare(BASELINE_ANALYSIS_MODE_GOALS['reanalyze-range'], { mode: 'reanalyze-range', selectedRange: { startPosition: 5, endPosition: 4 } })).requestId).toBe(id);
+    expect(rejectionFor(prepare(BASELINE_ANALYSIS_MODE_GOALS['reanalyze-range'], { mode: 'reanalyze-range', selectedRange: { startPosition: 0, endPosition: 4 } })).requestId).toBe(id);
+    expect(rejectionFor(prepare(BASELINE_ANALYSIS_MODE_GOALS['reanalyze-book'], { mode: 'reanalyze-book' })).requestId).toBe(id);
+    expect(rejectionFor(frameOf({ id, op: 'authorizeBaselineAnalysis', input: { bookId, taskIntentId: randomUUID(), planEnvelopeDigest: 'short' } })).requestId).toBe(id);
+    expect(rejectionFor(frameOf({ id, op: 'inspectBaselineAnalysis', input: { bookId, extra: 1 } })).requestId).toBe(id);
+    expect(rejectionFor(frameOf({ id, op: 'inspectBaselineAnalysis', input: { bookId } })).requestId).toBe(id);
+    expect(rejectionFor(frameOf({ id, op: 'inspectBaselineAnalysis', input: { bookId, revisionId: 'not-a-uuid' } })).requestId).toBe(id);
   });
 
   it('rejects a foreground-boundary inspection whose Run identity or key set is wrong', () => {

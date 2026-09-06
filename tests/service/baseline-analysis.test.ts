@@ -10,7 +10,13 @@ import { BASELINE_PROMPT_CONTRACT_DIGEST, unitRequestDigest } from '../../src/se
 import { fixtureEntryKey, loadModelFixture, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
 import type { SecretResolver } from '../../src/service/provider/credential-broker.js';
 import { ANALYSIS_LEDGER_SCHEMA_SQL, ANALYSIS_LEDGER_TRIGGER_SQL, TASK_AUTHORIZATION_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
-import { BASELINE_ANALYSIS_TASK_GOAL, type BaselineAnalysisProjection, type LaunchPolicyProjection } from '../../src/shared/protocol.js';
+import {
+  BASELINE_ANALYSIS_MODE_GOALS,
+  BASELINE_ANALYSIS_TASK_GOAL,
+  type BaselineAnalysisProjection,
+  type BaselineAnalysisUpdateRequest,
+  type LaunchPolicyProjection,
+} from '../../src/shared/protocol.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import {
   SAMPLE1_BLOCKS,
@@ -61,8 +67,9 @@ function fakeSecretResolver(): SecretResolver & { reads: string[] } {
   return { reads, resolve: async (reference) => { reads.push(reference); return null; } };
 }
 
-function prepare(store: EditorialStore, bookId: string): BaselineAnalysisProjection {
-  let progress = store.createBaselineAnalysisPreparationWork(bookId, BASELINE_ANALYSIS_TASK_GOAL, launchPolicy);
+function prepare(store: EditorialStore, bookId: string, update: BaselineAnalysisUpdateRequest | null = null): BaselineAnalysisProjection {
+  const goal = update === null ? BASELINE_ANALYSIS_TASK_GOAL : BASELINE_ANALYSIS_MODE_GOALS[update.mode];
+  let progress = store.createBaselineAnalysisPreparationWork(bookId, goal, update, launchPolicy);
   while (!progress.done) progress = store.advanceBaselineAnalysisPreparationWork(progress.workId!);
   expect(progress.projection).not.toBeNull();
   return progress.projection!;

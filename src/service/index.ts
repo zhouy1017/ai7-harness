@@ -282,14 +282,14 @@ async function dispatch(
         id: request.id,
         ok: true,
         op: request.op,
-        result: store.inspectBaselineAnalysis(request.input.bookId, analysisProgress),
+        result: store.inspectBaselineAnalysis(request.input.bookId, analysisProgress, request.input.revisionId),
       };
     case 'prepareBaselineAnalysis':
       return {
         id: request.id,
         ok: true,
         op: request.op,
-        result: jobs.startBaselineAnalysisPreparation(request.input.bookId, request.input.goal, launchPolicy),
+        result: jobs.startBaselineAnalysisPreparation(request.input.bookId, request.input.goal, request.input.update, launchPolicy),
       };
     case 'authorizeBaselineAnalysis': {
       const authorized = store.authorizeBaselineAnalysis(

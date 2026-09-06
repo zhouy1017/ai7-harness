@@ -5,7 +5,7 @@ import { isAbsolute, posix, relative, resolve, sep } from 'node:path';
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
 import type { EditorialWorkspaceProfileProjection } from '../shared/protocol.js';
 import { ensureCanonicalDataDirectory, inspectCanonicalDataFile } from '../shared/data-root.js';
-import { J03_TASK_AUTHORIZATION_SCHEMA_VERSION, TASK_AUTHORIZATION_SCHEMA_VERSION } from './task-authorization.js';
+import { J03_TASK_AUTHORIZATION_SCHEMA_VERSION, J04_BASELINE_ANALYSIS_SCHEMA_VERSION, TASK_AUTHORIZATION_SCHEMA_VERSION } from './task-authorization.js';
 
 export const EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION = 12;
 export const EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION = 13;
@@ -480,12 +480,12 @@ export function initializeEditorialWorkspaceProfileSchema(db: DatabaseSync): voi
   requireProfile(
     version === 11 || version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION ||
       version === EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION || version === J03_TASK_AUTHORIZATION_SCHEMA_VERSION ||
-      version === TASK_AUTHORIZATION_SCHEMA_VERSION,
+      version === J04_BASELINE_ANALYSIS_SCHEMA_VERSION || version === TASK_AUTHORIZATION_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
   if (version === EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION || version === J03_TASK_AUTHORIZATION_SCHEMA_VERSION ||
-      version === TASK_AUTHORIZATION_SCHEMA_VERSION) {
+      version === J04_BASELINE_ANALYSIS_SCHEMA_VERSION || version === TASK_AUTHORIZATION_SCHEMA_VERSION) {
     validateEditorialWorkspaceProfileSchema(db);
     return;
   }

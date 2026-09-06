@@ -1,4 +1,4 @@
-export const SERVICE_PROTOCOL_VERSION = 17 as const;
+export const SERVICE_PROTOCOL_VERSION = 18 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -1185,6 +1185,8 @@ export interface AnalysisCoverageAxis {
   label: string;
   unitsTotal: number;
   unitsClosed: number;
+  /** Closed units whose result was reused from the predecessor revision by lineage; disclosed, never hidden. */
+  unitsReused: number;
   gapCount: number;
 }
 
@@ -1195,9 +1197,13 @@ export interface AnalysisReducerClosureAxis {
   stages: ReadonlyArray<AnalysisReducerStageProjection>;
 }
 
+/**
+ * Exact-revision freshness. Only the latest revision of a Result Set can be `current`; an older
+ * revision is `superseded` and stays labeled by its original pin, never as deleted or current truth.
+ */
 export interface AnalysisFreshnessAxis {
   axis: 'freshness';
-  state: 'current' | 'stale';
+  state: 'current' | 'stale' | 'superseded';
   label: string;
   boundRevisionId: string;
   boundRevisionDigest: string;
@@ -1221,6 +1227,90 @@ export const BASELINE_ANALYSIS_KIND = 'baseline-manuscript-analysis' as const;
 export const BASELINE_ANALYSIS_CONTRACT_VERSION = 'ai7.baseline-manuscript-analysis/1' as const;
 export const BASELINE_ANALYSIS_TASK_GOAL = '对当前书稿执行基线稿件分析，形成覆盖全部结构单元的结果集修订版。' as const;
 
+/**
+ * The three exact update meanings (ADR 0047; editorial CONTEXT) beside the first baseline. Each mode
+ * has one fixed Task goal text and one exact action label; a Task carries exactly one mode.
+ */
+export type BaselineAnalysisUpdateMode = 'sync-current' | 'reanalyze-range' | 'reanalyze-book';
+export type BaselineAnalysisTaskMode = 'first-baseline' | BaselineAnalysisUpdateMode;
+export const BASELINE_ANALYSIS_UPDATE_MODES: readonly BaselineAnalysisUpdateMode[] = ['sync-current', 'reanalyze-range', 'reanalyze-book'];
+export const BASELINE_ANALYSIS_MODE_GOALS = {
+  'first-baseline': BASELINE_ANALYSIS_TASK_GOAL,
+  'sync-current': '将基线稿件分析同步到当前稿件：复用内容一致的兼容单元，仅重算失效闭包，追加一个结果集修订版。',
+  'reanalyze-range': '重新分析所选范围：绕过所选内容块范围及其重叠闭包的既有模型结果，复用其余兼容单元，追加一个结果集修订版。',
+  'reanalyze-book': '重新分析全书：绕过全部既有模型结果，按当前覆盖清单重算每个分析单元，追加一个结果集修订版。',
+} as const satisfies Record<BaselineAnalysisTaskMode, string>;
+export type BaselineAnalysisGoal = (typeof BASELINE_ANALYSIS_MODE_GOALS)[BaselineAnalysisTaskMode];
+export const BASELINE_ANALYSIS_MODE_LABELS = {
+  'first-baseline': '首次基线分析',
+  'sync-current': '同步到当前稿件',
+  'reanalyze-range': '重新分析所选范围',
+  'reanalyze-book': '重新分析全书',
+} as const satisfies Record<BaselineAnalysisTaskMode, string>;
+export const BASELINE_ANALYSIS_MODE_MEANINGS = {
+  'first-baseline': '对固定的任务输入修订版派生覆盖清单并逐单元执行基线稿件分析契约 v1，形成首个结果集修订版。',
+  'sync-current': '复用与前一修订版内容一致（自身内容块与重叠内容块摘要逐一相同）的已闭合单元，仅重算确定性失效/依赖闭包，并针对当前稿件 pin 重新归约四个状态轴。',
+  'reanalyze-range': '绕过所选内容块范围内的单元及其重叠上下文来自这些单元的单元的既有模型结果，其余兼容单元按血缘复用，并针对当前稿件 pin 重新归约四个状态轴。',
+  'reanalyze-book': '绕过全部既有模型结果，按当前覆盖清单重算每个分析单元，即使清单与前一修订版完全相同也不复用任何单元。',
+} as const satisfies Record<BaselineAnalysisTaskMode, string>;
+
+/** An explicit editor choice over exact block positions of the Task Input revision (inclusive). */
+export interface BaselineAnalysisSelectedRange {
+  startPosition: number;
+  endPosition: number;
+}
+
+/** The update request carried by `prepareBaselineAnalysis` beside the fixed goal; `null` for the first baseline. */
+export interface BaselineAnalysisUpdateRequest {
+  mode: BaselineAnalysisUpdateMode;
+  selectedRange: BaselineAnalysisSelectedRange | null;
+}
+
+export interface AnalysisReusePlanCounts {
+  reused: number;
+  recomputed: number;
+  invalidated: number;
+  bypassed: number;
+}
+
+export interface AnalysisReusePlanUnitProjection {
+  unitOrdinal: number;
+  startPosition: number;
+  endPosition: number;
+  /** The content-exact, position-independent compatibility key of the new unit. */
+  contentKey: string;
+  disposition: 'reused' | 'recomputed';
+  reason: 'compatible' | 'no-compatible-predecessor' | 'predecessor-gap' | 'contract-version-mismatch' | 'bypassed-selected-range' | 'bypassed-whole-book';
+  reusedFrom: null | { revisionId: string; revisionOrdinal: number; unitOrdinal: number };
+}
+
+export interface AnalysisReusePlanPredecessorUnitProjection {
+  unitOrdinal: number;
+  state: 'closed' | 'gap';
+  disposition: 'reused' | 'bypassed' | 'invalidated';
+  successorUnitOrdinal: number | null;
+}
+
+/** The canonical, digested reuse plan: a plan component recorded at preparation and re-derived at execution. */
+export interface AnalysisReusePlanProjection {
+  schema: 'ai7.baseline-manuscript-analysis.reuse-plan/1';
+  mode: BaselineAnalysisUpdateMode;
+  contractVersion: typeof BASELINE_ANALYSIS_CONTRACT_VERSION;
+  predecessor: { revisionId: string; ordinal: number; digest: string; contractVersion: string; coverageManifestDigest: string; unitCount: number };
+  coverageManifestDigest: string;
+  selectedRange: BaselineAnalysisSelectedRange | null;
+  /** Unit ordinals `重新分析所选范围` recomputes: the intersecting units plus their overlap dependants. */
+  recomputeClosure: ReadonlyArray<number>;
+  units: ReadonlyArray<AnalysisReusePlanUnitProjection>;
+  predecessorUnits: ReadonlyArray<AnalysisReusePlanPredecessorUnitProjection>;
+  counts: AnalysisReusePlanCounts;
+}
+
+/** Per-unit lineage of a Result Set Revision: recomputed by this Run, or reused from an exact predecessor unit. */
+export type AnalysisUnitLineage =
+  | { kind: 'recomputed' }
+  | { kind: 'reused'; revisionId: string; revisionOrdinal: number; unitOrdinal: number };
+
 export type BaselineAnalysisRunState =
   | 'authorized'
   | 'blocked-before-dispatch'
@@ -1235,9 +1325,11 @@ export type BaselineAnalysisUnitProjection =
   | {
       unitOrdinal: number;
       state: 'closed';
+      /** The request digest of the model request that produced this result (the predecessor's for a reused unit). */
       requestDigest: string;
       responseDigest: string;
       usage: { inputTokens: number; outputTokens: number } | null;
+      lineage: AnalysisUnitLineage;
       confidence: 'high' | 'medium' | 'low';
       synopsis: string;
       entities: ReadonlyArray<Omit<AnalysisEntityProjection, 'unitOrdinals'>>;
@@ -1251,8 +1343,19 @@ export type BaselineAnalysisUnitProjection =
       unitOrdinal: number;
       state: 'gap';
       requestDigest: string;
+      lineage: AnalysisUnitLineage;
       gap: AnalysisGapProjection;
     };
+
+/** How a Result Set Revision came to be: the first baseline, or one exact update of a predecessor revision. */
+export interface BaselineAnalysisRevisionUpdateProjection {
+  mode: BaselineAnalysisTaskMode;
+  modeLabel: string;
+  predecessor: null | { revisionId: string; ordinal: number; digest: string };
+  reusePlanDigest: string | null;
+  selectedRange: BaselineAnalysisSelectedRange | null;
+  counts: AnalysisReusePlanCounts;
+}
 
 export interface BaselineAnalysisExecutionBindingProjection {
   attemptId: string;
@@ -1288,7 +1391,11 @@ export interface BaselineAnalysisResultSetRevisionProjection {
   bindingPin: { attemptId: string; bindingDigest: string; harnessSessionId: string; behaviorCompositionDigest: string; promptContractDigest: string };
   policyPin: { operationalScope: 'development-ci'; providerProcessingVersion: 'v1'; activePolicySetVersion: 'v3'; liveTransmissions: 0 };
   provenance: { taskIntentId: string; runRecordId: string; attemptId: string };
+  /** Model usage of this Run: counted for recomputed units only; reused units cost nothing. */
   usage: { inputTokens: number; outputTokens: number; requests: number };
+  update: BaselineAnalysisRevisionUpdateProjection;
+  /** Per-unit lineage in unit order; every entry of `units` carries the same fact. */
+  lineage: ReadonlyArray<{ unitOrdinal: number } & AnalysisUnitLineage>;
   coverage: AnalysisCoverageAxis;
   reducerClosure: AnalysisReducerClosureAxis;
   freshness: AnalysisFreshnessAxis;
@@ -1300,6 +1407,112 @@ export interface BaselineAnalysisResultSetRevisionProjection {
   units: ReadonlyArray<BaselineAnalysisUnitProjection>;
 }
 
+/** The latest Task's update facts when it is one of the three update modes. */
+export interface BaselineAnalysisUpdateProjection {
+  mode: BaselineAnalysisUpdateMode;
+  modeLabel: string;
+  meaning: string;
+  predecessor: {
+    revisionId: string;
+    ordinal: number;
+    digest: string;
+    manuscriptPin: { revisionLabel: string; revisionId: string; revisionDigest: string };
+  };
+  /** Whether the predecessor is still the latest revision of the Book's Result Set; authorization re-verifies it. */
+  predecessorCurrent: boolean;
+  selectedRange: BaselineAnalysisSelectedRange | null;
+  /** The recorded plan component once preparation froze the plan; `null` before that. */
+  reusePlan: AnalysisReusePlanProjection | null;
+  reusePlanDigest: string | null;
+}
+
+/** One selectable contiguous range for `重新分析所选范围`: a structural unit the current manifest derives. */
+export interface BaselineAnalysisRangeOptionProjection {
+  unitOrdinal: number;
+  sectionOrdinal: number;
+  headingText: string | null;
+  subUnitIndex: number;
+  subUnitCount: number;
+  startPosition: number;
+  endPosition: number;
+  graphemes: number;
+  label: string;
+  /** The reuse-versus-recompute counts this choice would produce against the latest revision. */
+  expected: AnalysisReusePlanCounts;
+}
+
+export interface BaselineAnalysisUpdateActionProjection {
+  mode: BaselineAnalysisUpdateMode;
+  label: string;
+  goal: string;
+  meaning: string;
+  available: boolean;
+  unavailableReason: string | null;
+  /** The expected reuse-versus-recompute counts against the latest revision; `null` when the choice decides them. */
+  expected: AnalysisReusePlanCounts | null;
+}
+
+/**
+ * The Analysis Update Controls: present once a Result Set Revision exists. Everything an editor
+ * needs before any Task is issued: the selected meaning, the exact target revision, the expected
+ * reuse-versus-recompute counts derived over the current working manuscript, the Provider /
+ * outbound-category / budget consequence, and that a successor revision will be appended.
+ */
+export interface BaselineAnalysisUpdateControlsProjection {
+  target: {
+    revisionId: string;
+    ordinal: number;
+    digest: string;
+    manuscriptPin: { revisionLabel: string; revisionId: string; revisionDigest: string };
+    freshness: 'current' | 'stale';
+  };
+  /** The current working manuscript the next Task Input checkpoint would pin, as the manifest would derive it. */
+  working: { revisionLabel: string; journalSequence: number; workingDigest: string; totalBlocks: number; unitCount: number; sectionCount: number };
+  /** True while a Task is authorized for dispatch, admitted, or executing: no new update Task may be prepared. */
+  blockedByActiveRun: boolean;
+  actions: {
+    'sync-current': BaselineAnalysisUpdateActionProjection;
+    'reanalyze-range': BaselineAnalysisUpdateActionProjection & { options: ReadonlyArray<BaselineAnalysisRangeOptionProjection> };
+    'reanalyze-book': BaselineAnalysisUpdateActionProjection;
+  };
+  providerConsequence: string;
+  successorBehavior: string;
+}
+
+export interface BaselineAnalysisHistoryEntryProjection {
+  revisionId: string;
+  ordinal: number;
+  digest: string;
+  createdAt: string;
+  mode: BaselineAnalysisTaskMode;
+  modeLabel: string;
+  manuscriptPin: { revisionLabel: string; revisionId: string; revisionDigest: string };
+  coverageManifestDigest: string;
+  contractVersion: typeof BASELINE_ANALYSIS_CONTRACT_VERSION;
+  counts: AnalysisReusePlanCounts;
+  predecessor: null | { revisionId: string; ordinal: number; digest: string };
+  reusePlanDigest: string | null;
+  producingRun: { taskIntentId: string; runRecordId: string; attemptId: string; classification: 'completed' | 'completed-with-gaps' | 'failed' | 'interrupted' | null };
+  usage: { inputTokens: number; outputTokens: number; requests: number };
+  unitsTotal: number;
+  unitsClosed: number;
+  gapCount: number;
+  conflictCount: number;
+  /** Only the latest revision can be current; older ones keep their original pin and are superseded. */
+  current: boolean;
+  freshness: 'current' | 'stale' | 'superseded';
+  freshnessLabel: string;
+}
+
+/** The immutable chronological projection of one Result Set's revisions, in ordinal order. */
+export interface BaselineAnalysisHistoryProjection {
+  resultSetId: string;
+  kind: typeof BASELINE_ANALYSIS_KIND;
+  createdAt: string;
+  latestOrdinal: number;
+  entries: ReadonlyArray<BaselineAnalysisHistoryEntryProjection>;
+}
+
 export interface BaselineAnalysisProjection {
   bookId: string;
   kind: typeof BASELINE_ANALYSIS_KIND;
@@ -1308,9 +1521,11 @@ export interface BaselineAnalysisProjection {
   stateLabel: string;
   taskIntent: null | {
     taskIntentId: string;
-    goal: typeof BASELINE_ANALYSIS_TASK_GOAL;
+    goal: BaselineAnalysisGoal;
     expectedOutcome: '稿件分析结果集修订版（基线稿件分析契约 v1）';
     createdAt: string;
+    mode: BaselineAnalysisTaskMode;
+    modeLabel: string;
   };
   checkpoint: null | TaskAuthorizationProjection['checkpoint'];
   manuscriptPin: null | {
@@ -1384,6 +1599,7 @@ export interface BaselineAnalysisProjection {
       spans: ReadonlyArray<{ ordinal: number; harnessSessionId: string; startSeq: number; endSeq: number; unitOrdinal: number | null }>;
     };
   };
+  /** The latest revision of the Book's Result Set; the current truth candidate, never an older one. */
   resultSetRevision: null | BaselineAnalysisResultSetRevisionProjection;
   taskOutcome: null | {
     outcomeId: string;
@@ -1393,6 +1609,14 @@ export interface BaselineAnalysisProjection {
     resultSetRevisionId: string | null;
     safeNextAction: string;
   };
+  /** The latest Task's update facts; `null` while the latest Task is the first baseline. */
+  update: null | BaselineAnalysisUpdateProjection;
+  /** The Analysis Update Controls; `null` until the Book holds a Result Set Revision. */
+  updateControls: null | BaselineAnalysisUpdateControlsProjection;
+  /** The Analysis Result Revision History; `null` until the Book holds a Result Set Revision. */
+  history: null | BaselineAnalysisHistoryProjection;
+  /** One exact revision opened read-only by `revisionId`; `null` when inspecting the latest. */
+  inspectedRevision: null | { revision: BaselineAnalysisResultSetRevisionProjection; current: boolean; readOnly: true };
   actions: { canPrepare: boolean; canAuthorize: boolean };
   namedNonEffects: ReadonlyArray<string>;
 }
@@ -1971,11 +2195,11 @@ export interface ServiceOperationMap {
     output: TaskAuthorizationProjection;
   };
   inspectBaselineAnalysis: {
-    input: { bookId: string };
+    input: { bookId: string; revisionId: string | null };
     output: BaselineAnalysisProjection;
   };
   prepareBaselineAnalysis: {
-    input: { bookId: string; goal: typeof BASELINE_ANALYSIS_TASK_GOAL };
+    input: { bookId: string; goal: BaselineAnalysisGoal; update: BaselineAnalysisUpdateRequest | null };
     output: ServiceJobProjection;
   };
   authorizeBaselineAnalysis: {
@@ -2206,8 +2430,8 @@ export interface RendererApi {
     taskIntentId: string;
     planEnvelopeDigest: string;
   }): Promise<TaskAuthorizationProjection>;
-  inspectBaselineAnalysis(): Promise<BaselineAnalysisProjection>;
-  prepareBaselineAnalysis(input: { goal: typeof BASELINE_ANALYSIS_TASK_GOAL }): Promise<ServiceJobProjection>;
+  inspectBaselineAnalysis(input?: { revisionId: string | null }): Promise<BaselineAnalysisProjection>;
+  prepareBaselineAnalysis(input: { goal: BaselineAnalysisGoal; update: BaselineAnalysisUpdateRequest | null }): Promise<ServiceJobProjection>;
   authorizeBaselineAnalysis(input: { taskIntentId: string; planEnvelopeDigest: string }): Promise<BaselineAnalysisProjection>;
   listBooks(input: ServiceOperationMap['listBooks']['input']): Promise<BookSummaryPageProjection>;
   prepareNewBookReview(input: ServiceOperationMap['prepareNewBookReview']['input']): Promise<ReviewBeforeImportProjection>;
