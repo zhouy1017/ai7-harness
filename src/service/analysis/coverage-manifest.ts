@@ -179,6 +179,29 @@ export function manifestDigestIsExact(manifest: CoverageManifestProjection): boo
   return DIGEST_PATTERN.test(digest) && sha256Hex(canonicalJson(body)) === digest;
 }
 
+/**
+ * The content-exact, position-independent compatibility key of every unit, in unit order: a digest
+ * over the unit's own block content digests and its overlap block content digests, each in order.
+ * Overlap context only ever comes from the immediately preceding sub-unit of the same section, so the
+ * overlap digests are read from that unit's own digests and need no extra manifest field. Ordinal,
+ * positions, and block identities are deliberately excluded: a unit whose content moved but did not
+ * change keeps its key, while any own or overlap change gives a new one. Successive manifests of the
+ * same Book compare units by this key when a later Run reuses earlier unit results.
+ */
+export function unitContentKeys(manifest: CoverageManifestProjection): string[] {
+  return manifest.units.map((unit, index) => {
+    const previous = index === 0 ? null : manifest.units[index - 1]!;
+    const overlapBlockDigests = unit.overlapBlockIds.map((blockId) => {
+      const overlapIndex = previous === null ? -1 : previous.blockIds.indexOf(blockId);
+      requireAnalysis(previous !== null && overlapIndex >= 0 && previous.sectionOrdinal === unit.sectionOrdinal,
+        'COVERAGE_MANIFEST_INVALID', '覆盖清单的重叠上下文不来自同一结构段的前一子单元。');
+      return previous.blockDigests[overlapIndex]!;
+    });
+    requireAnalysis(unit.blockDigests.length === unit.blockIds.length, 'COVERAGE_MANIFEST_INVALID', '覆盖清单单元的内容摘要数量无效。');
+    return sha256Hex(canonicalJson({ blockDigests: unit.blockDigests, overlapBlockDigests }));
+  });
+}
+
 /** Every block position of the revision must belong to exactly one unit's own range. */
 export function manifestCoversEveryBlock(manifest: CoverageManifestProjection): boolean {
   const covered = new Set<number>();

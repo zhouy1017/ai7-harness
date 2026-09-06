@@ -10,7 +10,7 @@ import { AI7_FAILURE_CODES, classifyModelFailure, evaluateRunBudgetCeiling } fro
 import { LOCAL_DETERMINISTIC_MODEL, LOCAL_DETERMINISTIC_ROUTE } from '../../src/service/provider/egress-gate.js';
 import { Ai7LocalDeterministicAdapter, ownBlockIdsOf, substituteBlockPlaceholders } from '../../src/service/provider/local-deterministic-adapter.js';
 import { BASELINE_PROMPT_CONTRACT } from '../../src/service/analysis/contract.js';
-import { ModelFixtureError, fixturePath, loadModelFixture, parseModelFixture } from '../../src/service/provider/model-fixture.js';
+import { ModelFixtureError, fixtureEntryKey, fixturePath, loadModelFixture, parseModelFixture } from '../../src/service/provider/model-fixture.js';
 
 // Fixtures (iii)–(v) are hand-written synthetic shapes consumed here only; their request digests are
 // the deterministic function of the frozen prompt contract and a synthetic all-zero unit digest.
@@ -41,7 +41,7 @@ describe('synthetic fixtures (iii)–(v)', () => {
       const fixture = await loadModelFixture(FIXTURES_ROOT, identity);
       expect(fixture.identity).toBe(identity);
       expect(fixture.lineage).toHaveLength(1);
-      expect(fixture.entries.get(1)?.requestDigest).toBe(ZERO_UNIT_REQUEST_DIGEST);
+      expect(fixture.entries.get(fixtureEntryKey(1, ZERO_UNIT_REQUEST_DIGEST))?.requestDigest).toBe(ZERO_UNIT_REQUEST_DIGEST);
       expect(fixture.sha256).toMatch(/^[0-9a-f]{64}$/);
     }
   });
@@ -118,8 +118,8 @@ describe('model fixture loading', () => {
     });
   }
 
-  function entry(unitOrdinal: number, text: string): unknown {
-    return { unitOrdinal, requestDigest: 'e'.repeat(64), response: { kind: 'unit-result', text, usage: { inputTokens: 1, outputTokens: 1 } } };
+  function entry(unitOrdinal: number, text: string, requestDigest = 'e'.repeat(64)): unknown {
+    return { unitOrdinal, requestDigest, response: { kind: 'unit-result', text, usage: { inputTokens: 1, outputTokens: 1 } } };
   }
 
   it('merges a variant over its base so the variant restates only what it changes', async () => {
@@ -129,11 +129,27 @@ describe('model fixture loading', () => {
     ]));
     const resolved = await loadModelFixture(root, 'variant');
     expect(resolved.lineage.map((link) => link.identity)).toEqual(['variant', 'base']);
-    expect(resolved.entries.get(1)?.response).toMatchObject({ kind: 'unit-result', text: 'one' });
-    expect(resolved.entries.get(2)?.response).toMatchObject({ kind: 'adapter-failure', code: 'SYNTHETIC_FAILURE' });
-    expect(resolved.entries.get(3)?.response).toMatchObject({ kind: 'unit-result', text: 'three' });
+    const key = (ordinal: number) => fixtureEntryKey(ordinal, 'e'.repeat(64));
+    expect(resolved.entries.get(key(1))?.response).toMatchObject({ kind: 'unit-result', text: 'one' });
+    expect(resolved.entries.get(key(2))?.response).toMatchObject({ kind: 'adapter-failure', code: 'SYNTHETIC_FAILURE' });
+    expect(resolved.entries.get(key(3))?.response).toMatchObject({ kind: 'unit-result', text: 'three' });
     const base = await loadModelFixture(root, 'base');
     expect(base.sha256).not.toBe(resolved.sha256);
+  });
+
+  it('keys entries by unit ordinal and request digest so one identity serves successive manifests of the same unit', async () => {
+    const before = unitRequestDigest(BASELINE_PROMPT_CONTRACT_DIGEST, 1, 'a'.repeat(64));
+    const after = unitRequestDigest(BASELINE_PROMPT_CONTRACT_DIGEST, 1, 'b'.repeat(64));
+    await writeFile(join(root, 'successive.json'), fixture('successive', null, [entry(1, 'before-edit', before), entry(1, 'after-edit', after)]));
+    const resolved = await loadModelFixture(root, 'successive');
+    expect(resolved.entries.size).toBe(2);
+    expect(resolved.entries.get(fixtureEntryKey(1, before))?.response).toMatchObject({ text: 'before-edit' });
+    expect(resolved.entries.get(fixtureEntryKey(1, after))?.response).toMatchObject({ text: 'after-edit' });
+    const adapter = new Ai7LocalDeterministicAdapter(resolved, BASELINE_PROMPT_CONTRACT_DIGEST, codes);
+    const served = async (unitDigest: string) => collect(adapter.stream(request(`分析单元 1/1 · 单元摘要 ${unitDigest}`)));
+    expect((await served('a'.repeat(64))).find((chunk) => chunk.type === 'block-end')).toMatchObject({ block: { text: 'before-edit' } });
+    expect((await served('b'.repeat(64))).find((chunk) => chunk.type === 'block-end')).toMatchObject({ block: { text: 'after-edit' } });
+    expect(await served('c'.repeat(64))).toMatchObject([{ type: 'finish', reason: { kind: 'error', failure: { code: AI7_FAILURE_CODES.FIXTURE_MISMATCH } } }]);
   });
 
   it('rejects an absent fixture, a cyclic base chain, an identity that differs from its file name, and invalid shapes', async () => {
@@ -144,7 +160,8 @@ describe('model fixture loading', () => {
     await writeFile(join(root, 'renamed.json'), fixture('other', null, []));
     await expect(loadModelFixture(root, 'renamed')).rejects.toMatchObject({ code: 'MODEL_FIXTURE_INVALID' });
     expect(() => parseModelFixture({})).toThrowError(ModelFixtureError);
-    expect(() => parseModelFixture(JSON.parse(fixture('x', null, [entry(1, 'a'), entry(1, 'b')])))).toThrowError(/单元序号重复/u);
+    expect(() => parseModelFixture(JSON.parse(fixture('x', null, [entry(1, 'a'), entry(1, 'b')])))).toThrowError(/单元序号与请求摘要重复/u);
+    expect(() => parseModelFixture(JSON.parse(fixture('x', null, [entry(1, 'a'), entry(1, 'b', 'f'.repeat(64))])))).not.toThrow();
     expect(() => parseModelFixture(JSON.parse(fixture('x', null, [{ unitOrdinal: 1, requestDigest: 'short', response: { kind: 'interrupted', message: 'x' } }])))).toThrowError(/条目无效/u);
     expect(() => parseModelFixture(JSON.parse(fixture('x', 'x', [])))).toThrowError(/基础引用无效/u);
     expect(() => fixturePath(root, '../escape')).toThrowError(ModelFixtureError);

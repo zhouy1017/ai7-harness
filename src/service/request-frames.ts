@@ -1,9 +1,11 @@
 import { isAbsolute } from 'node:path';
 import {
-  BASELINE_ANALYSIS_TASK_GOAL,
+  BASELINE_ANALYSIS_MODE_GOALS,
+  BASELINE_ANALYSIS_UPDATE_MODES,
   MAX_EDIT_CODE_UNITS,
   MAX_REPLACEMENT_EXCLUSIONS,
   J03_TASK_GOAL,
+  type BaselineAnalysisUpdateMode,
   type ServiceRequest,
 } from '../shared/protocol.js';
 
@@ -239,10 +241,17 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     case 'inspectEditorialWorkspaceProfile':
     case 'installEditorialWorkspaceProfile':
     case 'enableEditorialWorkspaceProfile':
-    case 'inspectTaskAuthorization':
-    case 'inspectBaselineAnalysis': {
+    case 'inspectTaskAuthorization': {
       const input = requireInput(value.input, ['bookId'], tentativeId);
       if (!isBoundedString(input.bookId, 36) || !UUID_PATTERN.test(input.bookId)) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
+    case 'inspectBaselineAnalysis': {
+      const input = requireInput(value.input, ['bookId', 'revisionId'], tentativeId);
+      if (!isBoundedString(input.bookId, 36) || !UUID_PATTERN.test(input.bookId) ||
+          !(input.revisionId === null || (isBoundedString(input.revisionId, 36) && UUID_PATTERN.test(input.revisionId)))) {
         throw new ProtocolError(tentativeId);
       }
       break;
@@ -263,8 +272,24 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       break;
     }
     case 'prepareBaselineAnalysis': {
-      const input = requireInput(value.input, ['bookId', 'goal'], tentativeId);
-      if (!isBoundedString(input.bookId, 36) || !UUID_PATTERN.test(input.bookId) || input.goal !== BASELINE_ANALYSIS_TASK_GOAL) {
+      // The goal is one of the four fixed mode goals; `update` is null exactly for the first baseline,
+      // names the mode whose goal was sent, and carries a block range exactly for `重新分析所选范围`.
+      const input = requireInput(value.input, ['bookId', 'goal', 'update'], tentativeId);
+      if (!isBoundedString(input.bookId, 36) || !UUID_PATTERN.test(input.bookId)) throw new ProtocolError(tentativeId);
+      const update = input.update;
+      if (update === null) {
+        if (input.goal !== BASELINE_ANALYSIS_MODE_GOALS['first-baseline']) throw new ProtocolError(tentativeId);
+        break;
+      }
+      if (!isRecord(update) || !hasExactKeys(update, ['mode', 'selectedRange']) ||
+          !BASELINE_ANALYSIS_UPDATE_MODES.includes(update.mode as BaselineAnalysisUpdateMode) ||
+          input.goal !== BASELINE_ANALYSIS_MODE_GOALS[update.mode as BaselineAnalysisUpdateMode]) {
+        throw new ProtocolError(tentativeId);
+      }
+      const range = update.selectedRange;
+      const validRange = isRecord(range) && hasExactKeys(range, ['startPosition', 'endPosition']) &&
+        isSafeInteger(range.startPosition, 1) && isSafeInteger(range.endPosition, 1) && range.endPosition >= range.startPosition;
+      if ((update.mode === 'reanalyze-range') !== validRange || (update.mode !== 'reanalyze-range' && range !== null)) {
         throw new ProtocolError(tentativeId);
       }
       break;

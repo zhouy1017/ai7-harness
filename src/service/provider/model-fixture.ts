@@ -4,9 +4,12 @@ import { DIGEST_PATTERN, hasExactKeys, isRecord, sha256Hex } from '../analysis/c
 
 /**
  * Hand-written synthetic deterministic model fixtures (`tests/fixtures/model/<identity>.json`): one
- * typed response per Analysis Unit keyed by unit ordinal and request digest. A fixture may be based
- * on another so a variant (one failing unit) restates only the entries it changes. Fixtures carry
- * public synthetic text only and echo no manuscript content beyond exact block identities.
+ * typed response per Analysis Unit request, keyed by the pair of unit ordinal and request digest.
+ * The pair key lets one fixture identity serve successive Coverage Manifests of the same Book: a
+ * unit whose content changed after an acknowledged edit derives a new request digest and is served
+ * by its own entry beside the entry of the earlier content. A fixture may be based on another so a
+ * variant (one failing unit) restates only the entries it changes. Fixtures carry public synthetic
+ * text only and echo no manuscript content beyond exact block identities.
  */
 export const MODEL_FIXTURE_SCHEMA = 'ai7.model-fixture/1' as const;
 export const FIXTURE_IDENTITY_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
@@ -35,14 +38,19 @@ export interface ModelFixture {
   readonly entries: ReadonlyArray<ModelFixtureEntry>;
 }
 
-/** A fixture with its base chain merged: entries keyed by unit ordinal, variant entries winning. */
+/** A fixture with its base chain merged: entries keyed by {@link fixtureEntryKey}, variant entries winning. */
 export interface ResolvedModelFixture {
   readonly identity: string;
   readonly description: string;
   readonly lineage: ReadonlyArray<{ identity: string; sha256: string }>;
-  readonly entries: ReadonlyMap<number, ModelFixtureEntry>;
+  readonly entries: ReadonlyMap<string, ModelFixtureEntry>;
   /** Digest over the lineage digests; the binding pins it. */
   readonly sha256: string;
+}
+
+/** The resolver key: unit ordinal and request digest together, so one identity serves successive manifests. */
+export function fixtureEntryKey(unitOrdinal: number, requestDigest: string): string {
+  return `${unitOrdinal}:${requestDigest}`;
 }
 
 export class ModelFixtureError extends Error {
@@ -100,13 +108,14 @@ export function parseModelFixture(value: unknown): ModelFixture {
     '夹具基础引用无效。');
   requireFixture(value.provider === 'ai7-local-deterministic' && value.model === 'ai7-deterministic-fixture', '夹具路由或模型无效。');
   requireFixture(Array.isArray(value.entries) && value.entries.length <= 4_096, '夹具条目集合无效。');
-  const seen = new Set<number>();
+  const seen = new Set<string>();
   const entries = value.entries.map((entry): ModelFixtureEntry => {
     requireFixture(isRecord(entry) && hasExactKeys(entry, ['unitOrdinal', 'requestDigest', 'response']) &&
       Number.isSafeInteger(entry.unitOrdinal) && (entry.unitOrdinal as number) >= 1 &&
       typeof entry.requestDigest === 'string' && DIGEST_PATTERN.test(entry.requestDigest), '夹具条目无效。');
-    requireFixture(!seen.has(entry.unitOrdinal as number), '夹具条目单元序号重复。');
-    seen.add(entry.unitOrdinal as number);
+    const key = fixtureEntryKey(entry.unitOrdinal as number, entry.requestDigest);
+    requireFixture(!seen.has(key), '夹具条目单元序号与请求摘要重复。');
+    seen.add(key);
     return { unitOrdinal: entry.unitOrdinal as number, requestDigest: entry.requestDigest, response: parseResponse(entry.response) };
   });
   return {
@@ -130,7 +139,7 @@ export function fixturePath(fixturesRoot: string, identity: string): string {
   return target;
 }
 
-/** Load one fixture and its base chain from the fixtures root; the resolved entries are keyed by unit ordinal. */
+/** Load one fixture and its base chain from the fixtures root; the resolved entries are keyed by unit ordinal and request digest. */
 export async function loadModelFixture(fixturesRoot: string, identity: string): Promise<ResolvedModelFixture> {
   const chain: Array<{ fixture: ModelFixture; sha256: string }> = [];
   let current: string | null = identity;
@@ -155,9 +164,9 @@ export async function loadModelFixture(fixturesRoot: string, identity: string): 
     chain.push({ fixture, sha256: sha256Hex(bytes) });
     current = fixture.basedOn;
   }
-  const entries = new Map<number, ModelFixtureEntry>();
+  const entries = new Map<string, ModelFixtureEntry>();
   for (const link of [...chain].reverse()) {
-    for (const entry of link.fixture.entries) entries.set(entry.unitOrdinal, entry);
+    for (const entry of link.fixture.entries) entries.set(fixtureEntryKey(entry.unitOrdinal, entry.requestDigest), entry);
   }
   const lineage = chain.map((link) => ({ identity: link.fixture.identity, sha256: link.sha256 }));
   return {

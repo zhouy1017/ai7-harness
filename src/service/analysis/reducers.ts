@@ -250,9 +250,15 @@ function stage(
   return { stage: name, state: gaps > 0 ? 'closed-with-gaps' : 'closed', inputCount };
 }
 
+/**
+ * Reduce the complete unit set of one revision. `reusedUnitOrdinals` names the closed units whose
+ * result was copied from the predecessor revision by lineage; they count as closed coverage and
+ * their reuse is disclosed in the coverage axis, never hidden.
+ */
 export function reduceBaselineAnalysis(
   manifest: CoverageManifestProjection,
   outcomes: ReadonlyArray<UnitOutcome>,
+  reusedUnitOrdinals: ReadonlySet<number> = new Set(),
 ): BaselineReduction {
   const byOrdinal = new Map(outcomes.map((outcome) => [outcome.unitOrdinal, outcome] as const));
   const units = manifest.units;
@@ -318,14 +324,17 @@ export function reduceBaselineAnalysis(
     stage('contradiction-continuity', closed.length, gaps.length),
     stage('book-synthesis', sections.length, gaps.length),
   ];
+  const unitsReused = closed.filter((outcome) => reusedUnitOrdinals.has(outcome.unitOrdinal)).length;
+  const reuseNote = unitsReused === 0 ? '' : ` · 复用 ${unitsReused} 单元`;
   const coverage: AnalysisCoverageAxis = {
     axis: 'coverage',
     state: gaps.length === 0 ? 'complete' : 'partial',
     label: gaps.length === 0
-      ? `覆盖：完整 · ${closed.length}/${units.length} 单元`
-      : `覆盖：部分 · ${closed.length}/${units.length} 单元 · ${gaps.length} 处缺口`,
+      ? `覆盖：完整 · ${closed.length}/${units.length} 单元${reuseNote}`
+      : `覆盖：部分 · ${closed.length}/${units.length} 单元 · ${gaps.length} 处缺口${reuseNote}`,
     unitsTotal: units.length,
     unitsClosed: closed.length,
+    unitsReused,
     gapCount: gaps.length,
   };
   const reducerClosure: AnalysisReducerClosureAxis = {

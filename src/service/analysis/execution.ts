@@ -1,13 +1,13 @@
 import { randomUUID } from 'node:crypto';
-import type { AnalysisGapProjection, LaunchPolicyProjection } from '../../shared/protocol.js';
+import type { AnalysisGapProjection, AnalysisSourceRangeProjection, CoverageManifestUnitProjection, LaunchPolicyProjection } from '../../shared/protocol.js';
 import { prepareExecution, type HarnessExecutionSpan, type PrimaryAgentHarnessHandle } from '../harness/primary-agent-harness.js';
 import { CredentialBroker, type SecretResolver } from '../provider/credential-broker.js';
 import { LOCAL_DETERMINISTIC_MODEL, LOCAL_DETERMINISTIC_ROUTE, evaluateEgress, type EgressBindingFacts } from '../provider/egress-gate.js';
 import { Ai7LocalDeterministicAdapter } from '../provider/local-deterministic-adapter.js';
 import type { ResolvedModelFixture } from '../provider/model-fixture.js';
 import { canonicalRecord } from './canonical.js';
-import type { BaselineAnalysisStore, ExecutionBindingRecord, ExecutionPlanFacts, RunProgress, UnitResultRecord } from './baseline-analysis-store.js';
-import { BASELINE_PROMPT_CONTRACT, BASELINE_PROMPT_CONTRACT_DIGEST, buildUnitMessage, parseUnitResult, unitRequestDigest } from './contract.js';
+import type { BaselineAnalysisStore, ExecutionBindingRecord, ExecutionPlanFacts, PredecessorUnitResult, RunProgress, UnitResultRecord } from './baseline-analysis-store.js';
+import { BASELINE_PROMPT_CONTRACT, BASELINE_PROMPT_CONTRACT_DIGEST, buildUnitMessage, parseUnitResult, unitRequestDigest, type BaselineUnitResult } from './contract.js';
 import { BASELINE_ANALYSIS_CONTRACT_VERSION } from './identity.js';
 import { reduceBaselineAnalysis, type UnitOutcome } from './reducers.js';
 
@@ -16,7 +16,47 @@ import { reduceBaselineAnalysis, type UnitOutcome } from './reducers.js';
  * lifecycle, the immutable Execution Binding persisted before the first model call, the
  * PrimaryAgentHarness composition, the closed signal set, and finish. It reads only the frozen plan,
  * writes only append-only ledger rows, and never lets a DSH event become business truth.
+ *
+ * An update Run (Issue #93) submits only the units its verified reuse plan marks `recomputed`, in
+ * manifest order, with the Run Source Scope admitting only their messages; every `reused` unit is
+ * copied from the predecessor revision by lineage with its source ranges remapped onto the new
+ * unit's block identities, and the reducers run over the complete new unit set.
  */
+/**
+ * Remap the source ranges of a reused predecessor result onto the new unit: the i-th own block and
+ * the i-th overlap block of the predecessor unit correspond to the same positions of the new unit
+ * because the compatibility key proved their content digests equal in order. Identities usually
+ * coincide; when they differ the remap keeps `回到稿件范围` pointing at the block that carries the
+ * same content in the current revision.
+ */
+export function remapReusedResult(
+  result: BaselineUnitResult,
+  predecessorUnit: CoverageManifestUnitProjection,
+  newUnit: CoverageManifestUnitProjection,
+): BaselineUnitResult {
+  const from = [...predecessorUnit.blockIds, ...predecessorUnit.overlapBlockIds];
+  const to = [...newUnit.blockIds, ...newUnit.overlapBlockIds];
+  if (from.length !== to.length) throw new ExecutionAdmissionError('EXECUTION_LINEAGE_INVALID', '复用单元与前一单元的内容块数量不一致。');
+  const mapping = new Map(from.map((blockId, index) => [blockId, to[index]!] as const));
+  const ranges = (list: ReadonlyArray<AnalysisSourceRangeProjection>): AnalysisSourceRangeProjection[] => list.map((range) => {
+    const blockId = mapping.get(range.blockId);
+    if (blockId === undefined) throw new ExecutionAdmissionError('EXECUTION_LINEAGE_INVALID', '复用单元的来源范围引用了前一单元之外的内容块。');
+    return { blockId, fromGrapheme: range.fromGrapheme, toGrapheme: range.toGrapheme };
+  });
+  return {
+    schema: result.schema,
+    unitOrdinal: newUnit.ordinal,
+    synopsis: result.synopsis,
+    entities: result.entities.map((entity) => ({ ...entity, aliases: [...entity.aliases], sourceRanges: ranges(entity.sourceRanges) })),
+    events: result.events.map((event) => ({ ...event, participants: [...event.participants], sourceRanges: ranges(event.sourceRanges) })),
+    relationships: result.relationships.map((relationship) => ({ ...relationship, sourceRanges: ranges(relationship.sourceRanges) })),
+    settingClaims: result.settingClaims.map((claim) => ({ ...claim, sourceRanges: ranges(claim.sourceRanges) })),
+    conflicts: result.conflicts.map((note) => ({ ...note, sourceRanges: ranges(note.sourceRanges) })),
+    unresolved: result.unresolved.map((note) => ({ ...note, sourceRanges: ranges(note.sourceRanges) })),
+    confidence: result.confidence,
+  };
+}
+
 export interface ExecutionOwnerDependencies {
   readonly ledger: BaselineAnalysisStore;
   readonly launchPolicy: LaunchPolicyProjection;
@@ -40,10 +80,10 @@ interface ActiveRun {
 }
 
 const SAFE_NEXT_ACTIONS = {
-  completed: '检查结果集修订版的四个状态轴、缺口与冲突清单；如需重新分析，请发起新的任务授权。',
-  'completed-with-gaps': '逐项查看缺口单元与冲突清单；缺口单元可在新的授权运行中补做，结果集修订版本身不会改写。',
-  failed: '核对运行失败原因；修复后可重新准备并授权新的运行。',
-  interrupted: '运行已在派发后中断；已完成单元的结果与缺口均已保留，续行需要新的授权运行。',
+  completed: '检查结果集修订版的四个状态轴、缺口与冲突清单；稿件变化后可用「同步到当前稿件」，或用「重新分析所选范围」/「重新分析全书」发起新的授权运行，追加后继修订版。',
+  'completed-with-gaps': '逐项查看缺口单元与冲突清单；缺口单元在任一更新方式的新授权运行中都会重算，结果集修订版本身不会改写。',
+  failed: '核对运行失败原因；修复后可通过分析更新操作重新准备并授权新的运行。',
+  interrupted: '运行已在派发后中断；已完成单元的结果与缺口均已保留，续行需要通过分析更新操作发起新的授权运行。',
 } as const;
 
 export class BaselineAnalysisExecutionOwner {
@@ -70,10 +110,15 @@ export class BaselineAnalysisExecutionOwner {
     if (this.#deps.ledger.currentRunState(runRecordId) !== 'authorized') {
       throw new ExecutionAdmissionError('EXECUTION_STATE_INVALID', '只有刚记录授权的运行可以进入调度。');
     }
-    this.#deps.ledger.recordRunState(runRecordId, 'admitted', { detail: '已进入 AI7 调度器（单槽位）。', unitsTotal: facts.manifest.units.length });
+    const submitted = facts.update === null ? facts.manifest.units.length : facts.update.reusePlan.counts.recomputed;
+    this.#deps.ledger.recordRunState(runRecordId, 'admitted', {
+      detail: '已进入 AI7 调度器（单槽位）。',
+      unitsTotal: facts.manifest.units.length,
+      ...(facts.update === null ? {} : { updateMode: facts.update.mode, unitsRecomputed: submitted, unitsReused: facts.update.reusePlan.counts.reused }),
+    });
     const active: ActiveRun = {
       runRecordId,
-      progress: { unitsTotal: facts.manifest.units.length, unitsSettled: 0, currentUnitOrdinal: null },
+      progress: { unitsTotal: submitted, unitsSettled: 0, currentUnitOrdinal: null },
       harness: null,
       interrupted: false,
       done: Promise.resolve(),
@@ -131,8 +176,15 @@ export class BaselineAnalysisExecutionOwner {
     const blocks = ledger.readRevisionBlocks(facts.checkpoint.manuscriptId, facts.checkpoint.revisionId);
     const blocksById = new Map(blocks.map((block) => [block.blockId, block] as const));
     const manifest = facts.manifest;
-    const unitMessages = manifest.units.map((unit) => buildUnitMessage(unit, manifest.units.length, blocksById));
-    const admittedUserMessages = new Set(unitMessages);
+    const update = facts.update;
+    // Only recomputed units form unit messages; the Run Source Scope admits exactly those.
+    const recomputedOrdinals = new Set(update === null
+      ? manifest.units.map((unit) => unit.ordinal)
+      : update.reusePlan.units.filter((unit) => unit.disposition === 'recomputed').map((unit) => unit.unitOrdinal));
+    const submittedUnits = manifest.units.filter((unit) => recomputedOrdinals.has(unit.ordinal));
+    const unitMessages = new Map(submittedUnits.map((unit) => [unit.ordinal, buildUnitMessage(unit, manifest.units.length, blocksById)] as const));
+    const admittedUserMessages = new Set(unitMessages.values());
+    const predecessorResults: ReadonlyMap<number, PredecessorUnitResult> = update === null ? new Map() : ledger.loadPredecessorUnitResults(update.predecessor.revisionId);
     const acceptedOutputDigests = new Set<string>();
     let currentBindingDigest: string | null = null;
     const harnessSessionId = randomUUID();
@@ -189,6 +241,7 @@ export class BaselineAnalysisExecutionOwner {
         runBudgetCeiling: 'unset',
         dispatchAttribution: 'Dispatch',
         boundAt,
+        ...(update === null ? {} : { update: { mode: update.mode, predecessorRevisionId: update.predecessor.revisionId, reusePlanDigest: update.reusePlanDigest } }),
       };
       const bindingDigest = canonicalRecord(bindingRecord).digest;
       // Readiness only: the product path reaches the Protected Secret Store and releases no value.
@@ -211,17 +264,45 @@ export class BaselineAnalysisExecutionOwner {
         admittedUserMessages,
       };
       harness.bindExecution({ harnessSessionId, behaviorCompositionDigest: harness.composition.digest, promptContractDigest: BASELINE_PROMPT_CONTRACT_DIGEST });
-      ledger.recordRunState(facts.runRecordId, 'executing', { detail: '执行绑定已持久化并核对；开始逐单元执行。', attemptId, bindingDigest, unitsTotal: manifest.units.length });
+      ledger.recordRunState(facts.runRecordId, 'executing', {
+        detail: update === null ? '执行绑定已持久化并核对；开始逐单元执行。' : '执行绑定已持久化并核对；按血缘复用兼容单元，仅对重算单元逐单元执行。',
+        attemptId,
+        bindingDigest,
+        unitsTotal: manifest.units.length,
+        ...(update === null ? {} : { unitsRecomputed: submittedUnits.length, unitsReused: update.reusePlan.counts.reused }),
+      });
 
       const outcomes: UnitOutcome[] = [];
       const unitRecords: UnitResultRecord[] = [];
       const usage = { inputTokens: 0, outputTokens: 0, requests: 0 };
+      const reusedOrdinals = new Set<number>();
+      // Reused units are copied by lineage before any model call; they never form a request or count usage.
+      if (update !== null) {
+        for (const planUnit of update.reusePlan.units) {
+          if (planUnit.disposition !== 'reused' || planUnit.reusedFrom === null) continue;
+          const source = predecessorResults.get(planUnit.reusedFrom.unitOrdinal);
+          const predecessorUnit = update.predecessor.manifest.units[planUnit.reusedFrom.unitOrdinal - 1];
+          const newUnit = manifest.units[planUnit.unitOrdinal - 1];
+          if (source === undefined || predecessorUnit === undefined || newUnit === undefined) {
+            throw new ExecutionAdmissionError('EXECUTION_LINEAGE_INVALID', '复用计划引用的前一单元结果不存在。');
+          }
+          const result = remapReusedResult(source.result, predecessorUnit, newUnit);
+          reusedOrdinals.add(newUnit.ordinal);
+          outcomes.push({ unitOrdinal: newUnit.ordinal, state: 'closed', result });
+          unitRecords.push({
+            unitOrdinal: newUnit.ordinal,
+            requestDigest: source.requestDigest,
+            lineage: { kind: 'reused', revisionId: planUnit.reusedFrom.revisionId, revisionOrdinal: planUnit.reusedFrom.revisionOrdinal, unitOrdinal: planUnit.reusedFrom.unitOrdinal },
+            closed: { state: 'closed', responseDigest: source.responseDigest, usage: source.usage, result: stripSchema(result) },
+          });
+        }
+      }
       let spanOrdinal = 0;
-      for (const [index, unit] of manifest.units.entries()) {
+      for (const unit of submittedUnits) {
         if (active.interrupted) break;
         active.progress.currentUnitOrdinal = unit.ordinal;
         const requestDigest = unitRequestDigest(BASELINE_PROMPT_CONTRACT_DIGEST, unit.ordinal, unit.digest);
-        const turn = await harness.submitUnit(unitMessages[index]!);
+        const turn = await harness.submitUnit(unitMessages.get(unit.ordinal)!);
         spanOrdinal += 1;
         spans.push(turn.span);
         ledger.recordSpan(attemptId, spanOrdinal, turn.span, unit.ordinal);
@@ -238,6 +319,7 @@ export class BaselineAnalysisExecutionOwner {
           unitRecords.push({
             unitOrdinal: unit.ordinal,
             requestDigest,
+            lineage: { kind: 'recomputed' },
             closed: { state: 'gap', gap: { unitOrdinal: unit.ordinal, code, reason, startPosition: unit.startPosition, endPosition: unit.endPosition, blockIds: [...unit.blockIds] } },
           });
         };
@@ -249,6 +331,7 @@ export class BaselineAnalysisExecutionOwner {
             unitRecords.push({
               unitOrdinal: unit.ordinal,
               requestDigest,
+              lineage: { kind: 'recomputed' },
               closed: { state: 'closed', responseDigest: candidate.digest, usage: unitUsage, result: stripSchema(parsed.result) },
             });
           } else {
@@ -274,7 +357,8 @@ export class BaselineAnalysisExecutionOwner {
         active.progress.unitsSettled += 1;
       }
       if (active.interrupted && terminalClassification === 'completed') terminalClassification = 'interrupted';
-      const reduction = reduceBaselineAnalysis(manifest, outcomes);
+      // The reducers and the contradiction/continuity pass run over the complete new unit set: reused plus recomputed.
+      const reduction = reduceBaselineAnalysis(manifest, outcomes, reusedOrdinals);
       if (terminalClassification === 'completed' && reduction.gaps.length > 0) terminalClassification = 'completed-with-gaps';
       // Units the interrupted loop never reached are recorded as exact not-attempted gaps.
       for (const gapEntry of reduction.gaps) {
@@ -282,6 +366,7 @@ export class BaselineAnalysisExecutionOwner {
           unitRecords.push({
             unitOrdinal: gapEntry.unitOrdinal,
             requestDigest: unitRequestDigest(BASELINE_PROMPT_CONTRACT_DIGEST, gapEntry.unitOrdinal, manifest.units[gapEntry.unitOrdinal - 1]!.digest),
+            lineage: { kind: 'recomputed' },
             closed: { state: 'gap', gap: gapEntry },
           });
         }
@@ -297,9 +382,11 @@ export class BaselineAnalysisExecutionOwner {
         usage,
       });
       ledger.recordRunState(facts.runRecordId, terminalClassification, {
-        detail: `运行终态：${terminalClassification}；结果集修订版 ${revision.revisionId}。`,
+        detail: `运行终态：${terminalClassification}；结果集修订版 ${revision.revisionId}（Revision ${revision.ordinal}）。`,
         resultSetRevisionId: revision.revisionId,
+        resultSetRevisionOrdinal: revision.ordinal,
         unitsClosed: reduction.coverage.unitsClosed,
+        unitsReused: reduction.coverage.unitsReused,
         unitsTotal: reduction.coverage.unitsTotal,
         gapCount: reduction.gaps.length,
         conflictCount: reduction.conflicts.length,

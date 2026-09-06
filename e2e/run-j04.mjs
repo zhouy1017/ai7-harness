@@ -8,9 +8,12 @@ import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { attachProductOutput, installJourneyCancellationCleanup, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect } from './controller.mjs';
 
-// Supported-journey scenario: J-04 covered baseline manuscript analysis (Issue #92, bounded S36 slice).
+// Supported-journey scenario: J-04 covered baseline manuscript analysis (Issue #92, bounded S36 slice)
+// extended in place by Issue #93 (S37): after the acknowledged edit, the three Analysis Update
+// Controls each append a successor Result Set Revision through the same real path, and the Analysis
+// Result Revision History keeps every earlier revision reachable, immutable, and bound to its pin.
 // Inputs: exact ADR 0043 SampleBooks/sample1.docx plus the hand-written synthetic model fixtures under
-// tests/fixtures/model/. The product executes the Run over the in-process ai7-local-deterministic route;
+// tests/fixtures/model/. The product executes every Run over the in-process ai7-local-deterministic route;
 // the remote DeepSeek binding stays denied under Provider Processing v1 and no socket is opened.
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const SAMPLE1_PATH = resolve(ROOT, 'SampleBooks', 'sample1.docx');
@@ -23,6 +26,13 @@ const SIDECAR_REVISION_2_DIGEST = '980b565f25bdff29e539365e17344346017b05146a45c
 const NATIVE_CARRIER_DIGEST = 'ae485040c8fa602ab2e98ec91dd122201d40a8be41d8a4f86f7cd55ddb1e434d';
 const PROMPT_CONTRACT_DIGEST = '4ba25b2f848b99213336f67dc2b7960c942bfbcf6213a0d3fd91c427efb57eb5';
 const TASK_GOAL = '对当前书稿执行基线稿件分析，形成覆盖全部结构单元的结果集修订版。';
+const SYNC_GOAL = '将基线稿件分析同步到当前稿件：复用内容一致的兼容单元，仅重算失效闭包，追加一个结果集修订版。';
+const RANGE_GOAL = '重新分析所选范围：绕过所选内容块范围及其重叠闭包的既有模型结果，复用其余兼容单元，追加一个结果集修订版。';
+const BOOK_GOAL = '重新分析全书：绕过全部既有模型结果，按当前覆盖清单重算每个分析单元，追加一个结果集修订版。';
+const REUSE_PLAN_SCHEMA = 'ai7.baseline-manuscript-analysis.reuse-plan/1';
+/** Every button the settled card may carry: navigation, the three update controls, history, and the hidden cancel. */
+const ANALYSIS_ACTIONS = ['return-to-range', 'sync-current', 'reanalyze-range', 'reanalyze-book', 'open-revision', 'close-revision', 'cancel-preparation'];
+const ONLY_ANALYSIS_ACTIONS = `Array.from(card.querySelectorAll('button')).every((button)=>${JSON.stringify(ANALYSIS_ACTIONS)}.includes(button.dataset.analysisAction))`;
 const ASSURANCE_STATEMENT = '仅为模型输出的结构化归纳；不构成事实判定、编辑评审或稿件变更。';
 const FIXTURES_ROOT = resolve(ROOT, 'tests', 'fixtures', 'model');
 const FIXTURE_IDENTITY = 'sample1-baseline-one-unit-failure';
@@ -224,7 +234,7 @@ async function recoverSyntheticCredentialCleanupState(dataRoot, runRoot) {
   }
   try {
     database.exec('PRAGMA query_only = ON;');
-    requireJourney(database.prepare('PRAGMA user_version').get()?.user_version === 15, 'credential-cleanup-metadata-version');
+    requireJourney(database.prepare('PRAGMA user_version').get()?.user_version === 16, 'credential-cleanup-metadata-version');
     const rows = database.prepare(
       `SELECT connection_id, role_id, provider_id, model_id, adapter_revision, configuration_revision,
               approved_fallback_chain, credential_slot, credential_reference, credential_operation_state
@@ -464,6 +474,99 @@ function requireRevisionShape(revision, prepared, attempt, fixtureDigest, name) 
     revision.units.every((unit, index) => unit.unitOrdinal === index + 1 && DIGEST_PATTERN.test(unit.requestDigest)) &&
     revision.sections?.length === 1 && JSON.stringify(revision.sections[0].gapUnitOrdinals) === JSON.stringify([2]) &&
     revision.synthesis?.entities?.some((entity) => entity.name === '合成之城'), `${name}-content`, { gaps: revision.gaps, conflictKinds: revision.conflicts?.map((conflict) => conflict.kind), unitStates: revision.units?.map((unit) => unit.state), sections: revision.sections?.map((section) => section.gapUnitOrdinals) });
+}
+
+/** The product's content-exact, position-independent unit key, recomputed here from the manifest alone. */
+function unitContentKeys(manifest) {
+  return manifest.units.map((unit, index) => {
+    const previous = index === 0 ? null : manifest.units[index - 1];
+    const overlapBlockDigests = unit.overlapBlockIds.map((blockId) => previous.blockDigests[previous.blockIds.indexOf(blockId)]);
+    return createHash('sha256').update(JSON.stringify({ blockDigests: unit.blockDigests, overlapBlockDigests }), 'utf8').digest('hex');
+  });
+}
+
+/**
+ * The runner's own derivation of the reuse plan from the two manifests and the predecessor's unit
+ * states: reused only when a closed predecessor unit shares the key and the mode does not bypass it;
+ * 重新分析所选范围 bypasses the intersecting units plus their overlap dependants; 重新分析全书 bypasses all.
+ */
+function deriveExpectedPlan(previous, previousStates, next, mode, range) {
+  const previousKeys = unitContentKeys(previous);
+  const nextKeys = unitContentKeys(next);
+  const closedByKey = new Map();
+  previous.units.forEach((unit, index) => {
+    if (previousStates[index] !== 'closed') return;
+    closedByKey.set(previousKeys[index], [...(closedByKey.get(previousKeys[index]) ?? []), unit.ordinal]);
+  });
+  const intersecting = new Set(range === null ? [] : next.units.filter((unit) => unit.endPosition >= range.startPosition && unit.startPosition <= range.endPosition).map((unit) => unit.ordinal));
+  const closure = new Set(intersecting);
+  for (const unit of next.units) {
+    if (unit.overlapBlockIds.length === 0) continue;
+    if (next.units.some((candidate) => intersecting.has(candidate.ordinal) && unit.overlapBlockIds.every((id) => candidate.blockIds.includes(id)))) closure.add(unit.ordinal);
+  }
+  const consumed = new Map();
+  const dispositions = next.units.map((unit, index) => {
+    const candidate = (closedByKey.get(nextKeys[index]) ?? []).find((ordinal) => !consumed.has(ordinal)) ?? null;
+    const bypassed = mode === 'reanalyze-book' || (mode === 'reanalyze-range' && closure.has(unit.ordinal));
+    if (candidate !== null) consumed.set(candidate, bypassed ? 'bypassed' : 'reused');
+    return candidate !== null && !bypassed ? 'reused' : 'recomputed';
+  });
+  return {
+    counts: {
+      reused: dispositions.filter((item) => item === 'reused').length,
+      recomputed: dispositions.filter((item) => item === 'recomputed').length,
+      invalidated: previous.units.length - consumed.size,
+      bypassed: Array.from(consumed.values()).filter((item) => item === 'bypassed').length,
+    },
+    dispositions,
+    recomputed: next.units.filter((_unit, index) => dispositions[index] === 'recomputed').map((unit) => unit.ordinal),
+    closure: Array.from(closure).sort((left, right) => left - right),
+  };
+}
+
+function withoutKey(value, key) {
+  const copy = { ...value };
+  delete copy[key];
+  return copy;
+}
+
+/** Records read back from canonical JSON carry sorted keys, so a range compares by fields, never by text. */
+function sameNullableRecord(actual, expected) {
+  return actual === null || expected === null ? actual === expected : sameRecord(actual, expected);
+}
+
+/** A successor revision: the same Result Set, the next ordinal, the exact update facts and per-unit lineage, usage for recomputed units only. */
+function requireSuccessorShape(revision, expected, attempt, fixtureDigest, name) {
+  const unitLineageExact = (unit, index) => unit.unitOrdinal === index + 1 && unit.lineage?.kind === expected.lineage[index] &&
+    (unit.lineage.kind === 'recomputed' || (unit.lineage.revisionId === expected.predecessor.revisionId &&
+      unit.lineage.revisionOrdinal === expected.predecessor.ordinal && unit.lineage.unitOrdinal === index + 1));
+  requireJourney(UUID_PATTERN.test(revision?.revisionId) && revision?.resultSetId === expected.resultSetId && revision?.ordinal === expected.ordinal &&
+    DIGEST_PATTERN.test(revision?.digest) && revision?.contractVersion === 'ai7.baseline-manuscript-analysis/1' &&
+    revision?.manuscriptPin?.revisionId === expected.boundRevisionId && revision?.coverageManifestDigest === expected.manifestDigest &&
+    revision?.adapterPin?.fixtureIdentity === FIXTURE_IDENTITY && revision?.adapterPin?.fixtureSha256 === fixtureDigest &&
+    revision?.bindingPin?.attemptId === attempt.attemptId && revision?.bindingPin?.bindingDigest === attempt.executionBinding.bindingDigest &&
+    revision?.bindingPin?.promptContractDigest === PROMPT_CONTRACT_DIGEST &&
+    sameRecord(revision?.policyPin, { operationalScope: 'development-ci', providerProcessingVersion: 'v1', activePolicySetVersion: 'v3', liveTransmissions: 0 }) &&
+    revision?.update?.mode === expected.mode && revision?.update?.modeLabel === expected.modeLabel &&
+    sameRecord(revision?.update?.predecessor, expected.predecessor) && revision?.update?.reusePlanDigest === expected.reusePlanDigest &&
+    sameRecord(revision?.update?.counts, expected.counts) && sameNullableRecord(revision?.update?.selectedRange ?? null, expected.selectedRange) &&
+    JSON.stringify(revision?.lineage?.map((entry) => entry.kind)) === JSON.stringify(expected.lineage) &&
+    revision?.units?.length === SAMPLE1_UNITS && revision.units.every(unitLineageExact) &&
+    revision?.usage?.requests === expected.counts.recomputed &&
+    revision?.coverage?.unitsTotal === SAMPLE1_UNITS && revision?.coverage?.unitsClosed === SAMPLE1_UNITS - 1 &&
+    revision?.coverage?.unitsReused === expected.counts.reused && revision?.coverage?.gapCount === 1 &&
+    revision?.freshness?.state === expected.freshness && revision?.freshness?.boundRevisionId === expected.boundRevisionId &&
+    revision?.assurance?.state === 'qualified-with-open-conflicts' && revision?.gaps?.length === 1 && revision.gaps[0].unitOrdinal === 2 &&
+    JSON.stringify(revision?.conflicts?.map((conflict) => conflict.kind)) === JSON.stringify(['unit-reported', 'alias-collision', 'entity-kind-divergence', 'setting-claim-divergence']) &&
+    JSON.stringify(revision?.units?.map((unit) => unit.state)) === JSON.stringify(['closed', 'gap', 'closed', 'closed', 'closed', 'closed', 'closed', 'closed']),
+  `${name}-successor`, { expected, revision: revision === null || revision === undefined ? revision : { ...revision, units: undefined, sections: undefined, synthesis: undefined } });
+}
+
+async function settleAuthorizedRun(renderer, name) {
+  await click(renderer, '授权并派发运行', `${name}-authorize-click`);
+  await waitFor(renderer, `['settled','failed','interrupted'].includes(document.querySelector('.baseline-analysis-card')?.dataset.analysisState)`, `${name}-settled`, 180_000);
+  await assertRenderer(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='settled'`, `${name}-settled-state`);
+  return renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
 }
 
 async function main() {
@@ -878,7 +981,10 @@ async function main() {
         card.querySelectorAll('[data-analysis-unit][data-analysis-unit-state="closed"]').length===${SAMPLE1_UNITS - 1} &&
         card.textContent.includes(${JSON.stringify(ASSURANCE_STATEMENT)}) && card.textContent.includes(${JSON.stringify(revision.revisionId)}) &&
         card.textContent.includes(${JSON.stringify(revision.digest)}) && card.textContent.includes('任务结果：已完成（保留缺口）') &&
-        buttons.length>0 && buttons.every((button)=>button.dataset.analysisAction==='return-to-range') &&
+        buttons.length>0 && buttons.some((button)=>button.dataset.analysisAction==='return-to-range') && ${ONLY_ANALYSIS_ACTIONS} &&
+        card.querySelector('[data-update-action="sync-current"][data-update-available="false"]')!==null &&
+        card.querySelector('[data-update-action="reanalyze-book"][data-update-available="true"]')!==null &&
+        card.querySelector('.analysis-history')?.dataset.historyCount==='1' &&
         !card.querySelector('[data-analysis-action="prepare"], [data-analysis-action="authorize"]');
     })()`, 'settled-overview-surface');
 
@@ -924,8 +1030,329 @@ async function main() {
     'stale-independent-axis', { checkpoint: stale?.checkpoint, freshness: staleRevision?.freshness, previousFreshness: revision.freshness, actions: stale?.actions });
     await assertRenderer(renderer, `(() => { const card=document.querySelector('.baseline-analysis-card'); const axis=(name)=>card?.querySelector('[data-analysis-axis='+JSON.stringify(name)+']')?.dataset.axisState; return axis('freshness')==='stale' && axis('coverage')==='partial' && axis('reducer-closure')==='closed-with-gaps' && axis('assurance')==='qualified-with-open-conflicts' && card.dataset.resultRevisionId===${JSON.stringify(revision.revisionId)}; })()`, 'stale-overview-surface');
 
+    at('update-controls-disclosed');
+    cancellation.throwIfRequested();
+    const controlsStale = stale.updateControls;
+    requireJourney(controlsStale?.target?.revisionId === revision.revisionId && controlsStale.target.ordinal === 1 && controlsStale.target.digest === revision.digest &&
+      controlsStale.target.freshness === 'stale' && controlsStale.blockedByActiveRun === false &&
+      controlsStale.working?.totalBlocks === SAMPLE1_BLOCKS && controlsStale.working?.unitCount === SAMPLE1_UNITS && controlsStale.working?.sectionCount === 1 &&
+      controlsStale.working?.journalSequence === 1 && controlsStale.working?.branchId === settled.checkpoint.branchId &&
+      controlsStale.working?.workingDigest === staleRevision.freshness.currentWorkingDigest &&
+      controlsStale.actions?.['sync-current']?.available === true && controlsStale.actions['sync-current'].unavailableReason === null &&
+      controlsStale.actions['sync-current'].goal === SYNC_GOAL && controlsStale.actions['sync-current'].label === '同步到当前稿件' &&
+      sameRecord(controlsStale.actions['sync-current'].expected, { reused: 6, recomputed: 2, invalidated: 2, bypassed: 0 }) &&
+      controlsStale.actions['reanalyze-range']?.available === true && controlsStale.actions['reanalyze-range'].expected === null &&
+      controlsStale.actions['reanalyze-range'].goal === RANGE_GOAL && controlsStale.actions['reanalyze-range'].options?.length === SAMPLE1_UNITS &&
+      controlsStale.actions['reanalyze-range'].options.every((option, index) => option.unitOrdinal === index + 1 &&
+        option.startPosition === SAMPLE1_UNIT_RANGES[index][0] && option.endPosition === SAMPLE1_UNIT_RANGES[index][1] && option.sectionOrdinal === 1 &&
+        typeof option.label === 'string' && option.expected.recomputed >= 2) &&
+      // Against revision 1 the edited unit 1 and the gap unit 2 recompute in every mode; a range over unit 3 adds units 3 and 4.
+      sameRecord(controlsStale.actions['reanalyze-range'].options[2].expected, { reused: 4, recomputed: 4, invalidated: 2, bypassed: 2 }) &&
+      controlsStale.actions['reanalyze-book']?.available === true && controlsStale.actions['reanalyze-book'].goal === BOOK_GOAL &&
+      sameRecord(controlsStale.actions['reanalyze-book'].expected, { reused: 0, recomputed: 8, invalidated: 2, bypassed: 6 }) &&
+      controlsStale.providerConsequence.includes('0 次实时传输') && controlsStale.providerConsequence.includes('public-or-synthetic') &&
+      controlsStale.successorBehavior.includes('后继修订版'),
+    'update-controls-projection', controlsStale);
+    await assertRenderer(renderer, `(() => {
+      const section=document.querySelector('.baseline-analysis-card .analysis-update-controls');
+      if(!section) return false;
+      const action=(mode)=>section.querySelector('[data-update-action='+JSON.stringify(mode)+']');
+      const sync=action('sync-current'), range=action('reanalyze-range'), whole=action('reanalyze-book');
+      const radios=Array.from(section.querySelectorAll('input[name="analysis-range"]'));
+      return section.dataset.updateTargetOrdinal==='1' && section.dataset.updateTargetRevisionId===${JSON.stringify(revision.revisionId)} &&
+        section.dataset.updateTargetFreshness==='stale' && section.dataset.updateBlocked==='false' && section.dataset.workingUnits==='8' && section.dataset.workingBlocks==='97' &&
+        sync?.dataset.updateAvailable==='true' && sync.dataset.expectedReused==='6' && sync.dataset.expectedRecomputed==='2' && sync.dataset.expectedInvalidated==='2' && sync.dataset.expectedBypassed==='0' &&
+        sync.querySelector('[data-analysis-action="sync-current"]') instanceof HTMLButtonElement && !sync.querySelector('[data-analysis-action="sync-current"]').disabled &&
+        range?.dataset.updateAvailable==='true' && radios.length===8 && radios.every((radio)=>!radio.checked && !radio.disabled) && !range.dataset.selectedRange &&
+        range.querySelector('[data-analysis-action="reanalyze-range"]')?.disabled===true && range.querySelectorAll('.analysis-range-option label').length===8 &&
+        whole?.dataset.updateAvailable==='true' && whole.dataset.expectedReused==='0' && whole.dataset.expectedRecomputed==='8' && whole.dataset.expectedInvalidated==='2' && whole.dataset.expectedBypassed==='6' &&
+        !whole.querySelector('[data-analysis-action="reanalyze-book"]').disabled &&
+        section.textContent.includes('0 次实时传输') && section.textContent.includes('public-or-synthetic') && section.textContent.includes(${JSON.stringify(revision.revisionId)}) &&
+        section.textContent.includes(${JSON.stringify(SYNC_GOAL)}) && section.textContent.includes(${JSON.stringify(RANGE_GOAL)}) && section.textContent.includes(${JSON.stringify(BOOK_GOAL)}) &&
+        section.textContent.includes('后继修订版') && !document.querySelector('[data-analysis-action="prepare"], [data-analysis-action="authorize"]');
+    })()`, 'update-controls-surface');
+
+    at('sync-current-prepare');
+    cancellation.throwIfRequested();
+    await click(renderer, '同步到当前稿件', 'sync-click');
+    await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='prepared'`, 'sync-prepared', 120_000);
+    const preparedSync = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    const syncManifest = preparedSync?.coverageManifest;
+    const syncExpected = deriveExpectedPlan(manifest, revision.units.map((unit) => unit.state), syncManifest, 'sync-current', null);
+    const syncPlan = preparedSync?.update?.reusePlan;
+    requireJourney(preparedSync?.state === 'prepared' && preparedSync.taskIntent?.mode === 'sync-current' && preparedSync.taskIntent?.goal === SYNC_GOAL &&
+      preparedSync.taskIntent?.taskIntentId !== prepared.taskIntent.taskIntentId && preparedSync.checkpoint?.revisionId !== prepared.checkpoint.revisionId &&
+      syncManifest?.totalBlocks === SAMPLE1_BLOCKS && syncManifest.units?.length === SAMPLE1_UNITS && syncManifest.manuscript?.revisionId === preparedSync.checkpoint.revisionId &&
+      syncManifest.digest !== manifest.digest && syncManifest.units[0].digest !== manifest.units[0].digest &&
+      syncManifest.units.slice(1).every((unit, index) => unit.digest === manifest.units[index + 1].digest && sameRange(unit, SAMPLE1_UNIT_RANGES[index + 1])) &&
+      sameRecord(syncExpected.counts, { reused: 6, recomputed: 2, invalidated: 2, bypassed: 0 }) &&
+      preparedSync.update?.mode === 'sync-current' && preparedSync.update.modeLabel === '同步到当前稿件' && preparedSync.update.predecessorCurrent === true && preparedSync.update.selectedRange === null &&
+      preparedSync.update.predecessor?.revisionId === revision.revisionId && preparedSync.update.predecessor.ordinal === 1 && preparedSync.update.predecessor.digest === revision.digest &&
+      preparedSync.update.predecessor.manuscriptPin?.revisionId === revision.manuscriptPin.revisionId &&
+      DIGEST_PATTERN.test(preparedSync.update.reusePlanDigest) && syncPlan?.schema === REUSE_PLAN_SCHEMA && syncPlan.mode === 'sync-current' &&
+      syncPlan.coverageManifestDigest === syncManifest.digest && syncPlan.predecessor?.revisionId === revision.revisionId && syncPlan.predecessor.coverageManifestDigest === manifest.digest &&
+      sameRecord(syncPlan.counts, syncExpected.counts) && sameRecord(syncPlan.counts, controlsStale.actions['sync-current'].expected) &&
+      JSON.stringify(syncPlan.units.map((unit) => unit.disposition)) === JSON.stringify(syncExpected.dispositions) &&
+      syncPlan.units[0].reason === 'no-compatible-predecessor' && syncPlan.units[1].reason === 'predecessor-gap' &&
+      syncPlan.units.slice(2).every((unit, index) => unit.reason === 'compatible' && unit.reusedFrom?.revisionId === revision.revisionId && unit.reusedFrom?.revisionOrdinal === 1 && unit.reusedFrom?.unitOrdinal === index + 3) &&
+      JSON.stringify(syncPlan.predecessorUnits.map((unit) => unit.disposition)) === JSON.stringify(['invalidated', 'invalidated', 'reused', 'reused', 'reused', 'reused', 'reused', 'reused']) &&
+      JSON.stringify(preparedSync.runSourceScope?.unitScope?.recomputedUnitOrdinals) === JSON.stringify(syncExpected.recomputed) &&
+      JSON.stringify(preparedSync.runSourceScope?.unitScope?.reusedUnitOrdinals) === JSON.stringify([3, 4, 5, 6, 7, 8]) &&
+      preparedSync.executionPlan?.unitCount === SAMPLE1_UNITS && preparedSync.executionPlan?.recomputedUnitCount === syncExpected.counts.recomputed &&
+      preparedSync.executionPlan?.reusedUnitCount === syncExpected.counts.reused &&
+      preparedSync.planEnvelope?.digest !== prepared.planEnvelope.digest && preparedSync.planEnvelope?.dispatchAllowed === true &&
+      preparedSync.planEnvelope?.promptContractDigest === PROMPT_CONTRACT_DIGEST && preparedSync.planEnvelope?.behaviorCompositionDigest === prepared.planEnvelope.behaviorCompositionDigest &&
+      preparedSync.providerResolutionPlan?.executionRoute?.fixtureIdentity === FIXTURE_IDENTITY && preparedSync.providerResolutionPlan?.executionRoute?.fixtureSha256 === fixtureDigest &&
+      preparedSync.providerResolutionPlan?.remoteBinding?.providerProcessing?.decision === 'deny' &&
+      preparedSync.resultSetRevision?.revisionId === revision.revisionId && preparedSync.authorization === null && preparedSync.run === null && preparedSync.taskOutcome === null &&
+      preparedSync.actions?.canPrepare === false && preparedSync.actions?.canAuthorize === true,
+    'sync-prepared-plan', { syncExpected, update: preparedSync?.update, unitScope: preparedSync?.runSourceScope?.unitScope, executionPlan: preparedSync?.executionPlan, actions: preparedSync?.actions });
+    await assertRenderer(renderer, `(() => { const card=document.querySelector('.baseline-analysis-card'); return card?.dataset.planUpdateMode==='sync-current' && card.dataset.planReused==='6' && card.dataset.planRecomputed==='2' && card.dataset.planInvalidated==='2' && card.dataset.planBypassed==='0' && card.dataset.reusePlanDigest===${JSON.stringify(preparedSync.update.reusePlanDigest)} && card.dataset.planEnvelopeDigest===${JSON.stringify(preparedSync.planEnvelope.digest)} && card.dataset.coverageManifestDigest===${JSON.stringify(syncManifest.digest)} && card.querySelectorAll('[data-reuse-plan-unit]').length===8 && card.querySelector('[data-reuse-plan-unit="1"][data-reuse-disposition="recomputed"][data-reuse-reason="no-compatible-predecessor"]')!==null && card.querySelector('[data-reuse-plan-unit="2"][data-reuse-disposition="recomputed"][data-reuse-reason="predecessor-gap"]')!==null && card.querySelector('[data-reuse-plan-unit="3"][data-reuse-disposition="reused"][data-reuse-reason="compatible"]')!==null && card.querySelectorAll('[data-reuse-predecessor-disposition="invalidated"]').length===2 && card.querySelectorAll('[data-reuse-predecessor-disposition="reused"]').length===6 && card.textContent.includes(${JSON.stringify(SYNC_GOAL)}) && card.textContent.includes('Revision 1') && card.querySelector('[data-analysis-action="authorize"]') instanceof HTMLButtonElement && !card.querySelector('[data-analysis-action="authorize"]').disabled && !card.querySelector('[data-analysis-action="prepare"]'); })()`, 'sync-plan-preview');
+
+    at('sync-current-dispatch');
+    cancellation.throwIfRequested();
+    const settledSync = await settleAuthorizedRun(renderer, 'sync');
+
+    at('sync-current-revision');
+    const revision2 = settledSync?.resultSetRevision;
+    const attemptSync = settledSync?.run?.attempt;
+    requireJourney(settledSync?.state === 'settled' && settledSync.taskIntent?.taskIntentId === preparedSync.taskIntent.taskIntentId &&
+      settledSync.run?.state === 'completed-with-gaps' && settledSync.run.runRecordId !== settled.run.runRecordId &&
+      JSON.stringify(settledSync.run.transitions?.map((transition) => transition.state)) === JSON.stringify(['authorized', 'admitted', 'executing', 'completed-with-gaps']) &&
+      JSON.stringify(attemptSync?.spans?.map((span) => span.unitOrdinal)) === JSON.stringify(syncExpected.recomputed) &&
+      attemptSync.executionBinding?.planEnvelopeDigest === preparedSync.planEnvelope.digest && attemptSync.executionBinding?.coverageManifestDigest === syncManifest.digest &&
+      attemptSync.executionBinding?.harnessSessionId !== attempt.executionBinding.harnessSessionId &&
+      settledSync.taskOutcome?.resultSetRevisionId === revision2?.revisionId && settledSync.taskOutcome?.classification === 'completed-with-gaps' &&
+      settledSync.update?.reusePlanDigest === preparedSync.update.reusePlanDigest,
+    'sync-settled-run', { run: settledSync?.run, taskOutcome: settledSync?.taskOutcome });
+    requireSuccessorShape(revision2, {
+      resultSetId: revision.resultSetId, ordinal: 2, mode: 'sync-current', modeLabel: '同步到当前稿件',
+      predecessor: { revisionId: revision.revisionId, ordinal: 1, digest: revision.digest }, reusePlanDigest: preparedSync.update.reusePlanDigest,
+      counts: syncExpected.counts, selectedRange: null, lineage: syncExpected.dispositions, boundRevisionId: preparedSync.checkpoint.revisionId,
+      manifestDigest: syncManifest.digest, freshness: 'current',
+    }, attemptSync, fixtureDigest, 'sync-revision');
+    // A reused unit is the predecessor's result copied by lineage; a recomputed unit carries a new request digest.
+    requireJourney(JSON.stringify(withoutKey(revision2.units[2], 'lineage')) === JSON.stringify(withoutKey(revision.units[2], 'lineage')) &&
+      revision2.units[0].requestDigest !== revision.units[0].requestDigest && revision2.units[2].requestDigest === revision.units[2].requestDigest &&
+      revision2.freshness.currentRevisionId === preparedSync.checkpoint.revisionId && revision2.manuscriptPin.revisionDigest === staleRevision.freshness.currentWorkingDigest &&
+      revision2.usage.inputTokens < revision.usage.inputTokens, 'sync-reused-unit-copy', { reused: revision2.units[2], usage: revision2.usage });
+    // The predecessor is unchanged and reachable read-only while the latest stays the latest.
+    const olderView = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis({ revisionId: ${JSON.stringify(revision.revisionId)} })`);
+    requireJourney(olderView?.inspectedRevision?.readOnly === true && olderView.inspectedRevision.current === false &&
+      olderView.inspectedRevision.revision?.freshness?.state === 'superseded' && olderView.inspectedRevision.revision.freshness.boundRevisionId === revision.manuscriptPin.revisionId &&
+      JSON.stringify(withoutKey(olderView.inspectedRevision.revision, 'freshness')) === JSON.stringify(withoutKey(revision, 'freshness')) &&
+      olderView.resultSetRevision?.revisionId === revision2.revisionId && olderView.history?.entries?.length === 2,
+    'sync-predecessor-immutable', { inspected: olderView?.inspectedRevision === undefined ? undefined : { ...olderView.inspectedRevision, revision: { ...olderView.inspectedRevision.revision, units: undefined, sections: undefined, synthesis: undefined } } });
+    await assertRenderer(renderer, `(() => {
+      const card=document.querySelector('.baseline-analysis-card');
+      const axis=(name)=>card?.querySelector('[data-analysis-axis='+JSON.stringify(name)+']')?.dataset.axisState;
+      const history=card?.querySelector('.analysis-history');
+      return card?.dataset.resultRevisionOrdinal==='2' && card.dataset.resultRevisionId===${JSON.stringify(revision2.revisionId)} && card.dataset.resultRevisionDigest===${JSON.stringify(revision2.digest)} &&
+        card.dataset.updateMode==='sync-current' && card.dataset.reusedCount==='6' && card.dataset.recomputedCount==='2' && card.dataset.invalidatedCount==='2' && card.dataset.bypassedCount==='0' &&
+        card.dataset.freshnessState==='current' && card.dataset.gapCount==='1' && card.dataset.conflictCount==='4' && axis('freshness')==='current' && axis('coverage')==='partial' &&
+        card.querySelectorAll('[data-analysis-unit]').length===8 && card.querySelector('[data-analysis-unit="3"][data-analysis-unit-lineage="reused"][data-analysis-unit-reused-from="1/3"]')!==null &&
+        card.querySelector('[data-analysis-unit="1"][data-analysis-unit-lineage="recomputed"]')!==null && card.querySelectorAll('[data-analysis-unit-lineage="reused"]').length===6 &&
+        card.textContent.includes('后继于 Revision 1') && card.textContent.includes('复用 6') && card.textContent.includes(${JSON.stringify(preparedSync.update.reusePlanDigest)}) &&
+        history?.dataset.historyCount==='2' && history.dataset.historyLatestOrdinal==='2' &&
+        history.querySelector('[data-history-ordinal="1"][data-history-current="false"][data-history-freshness="superseded"][data-history-mode="first-baseline"]')!==null &&
+        history.querySelector('[data-history-ordinal="2"][data-history-current="true"][data-history-freshness="current"][data-history-mode="sync-current"][data-history-predecessor-ordinal="1"]')!==null &&
+        card.querySelector('[data-update-action="sync-current"][data-update-available="false"]')!==null && ${ONLY_ANALYSIS_ACTIONS};
+    })()`, 'sync-overview-surface');
+
+    at('reanalyze-range-select');
+    cancellation.throwIfRequested();
+    const rangeOption = settledSync.updateControls?.actions?.['reanalyze-range']?.options?.[2];
+    requireJourney(settledSync.updateControls?.target?.ordinal === 2 && settledSync.updateControls.target.revisionId === revision2.revisionId &&
+      settledSync.updateControls.target.freshness === 'current' && settledSync.updateControls.actions['sync-current'].available === false &&
+      rangeOption?.unitOrdinal === 3 && rangeOption.startPosition === SAMPLE1_UNIT_RANGES[2][0] && rangeOption.endPosition === SAMPLE1_UNIT_RANGES[2][1] &&
+      sameRecord(rangeOption.expected, { reused: 5, recomputed: 3, invalidated: 1, bypassed: 2 }), 'range-option', settledSync.updateControls);
+    const selectedRange = { startPosition: rangeOption.startPosition, endPosition: rangeOption.endPosition };
+    await assertRenderer(renderer, `(() => {
+      const block=document.querySelector('.baseline-analysis-card [data-update-action="reanalyze-range"]');
+      const radios=Array.from(block?.querySelectorAll('input[name="analysis-range"]')??[]);
+      const radio=block?.querySelector('#analysis-range-3');
+      const start=block?.querySelector('[data-analysis-action="reanalyze-range"]');
+      if(!(radio instanceof HTMLInputElement)||radios.length!==8||radios.some((item)=>item.checked)||!(start instanceof HTMLButtonElement)||!start.disabled||block.dataset.selectedRange) return false;
+      radio.click();
+      return radio.checked && radios.filter((item)=>item.checked).length===1 && block.dataset.selectedRange===${JSON.stringify(`${selectedRange.startPosition}-${selectedRange.endPosition}`)} &&
+        block.dataset.expectedReused==='5' && block.dataset.expectedRecomputed==='3' && block.dataset.expectedInvalidated==='1' && block.dataset.expectedBypassed==='2' && !start.disabled &&
+        block.textContent.includes(${JSON.stringify(`内容块 ${selectedRange.startPosition}–${selectedRange.endPosition}`)});
+    })()`, 'range-select');
+
+    at('reanalyze-range-prepare');
+    cancellation.throwIfRequested();
+    await click(renderer, '重新分析所选范围', 'range-click');
+    await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='prepared'`, 'range-prepared', 120_000);
+    const preparedRange = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    const rangeManifest = preparedRange?.coverageManifest;
+    const rangeExpected = deriveExpectedPlan(syncManifest, revision2.units.map((unit) => unit.state), rangeManifest, 'reanalyze-range', selectedRange);
+    const rangePlan = preparedRange?.update?.reusePlan;
+    requireJourney(preparedRange?.state === 'prepared' && preparedRange.taskIntent?.mode === 'reanalyze-range' && preparedRange.taskIntent?.goal === RANGE_GOAL &&
+      rangeManifest?.digest === syncManifest.digest && preparedRange.checkpoint?.revisionId === preparedSync.checkpoint.revisionId &&
+      sameRecord(preparedRange.update?.selectedRange, selectedRange) && preparedRange.update.predecessor?.revisionId === revision2.revisionId &&
+      preparedRange.update.predecessor.ordinal === 2 && preparedRange.update.predecessor.digest === revision2.digest && preparedRange.update.predecessorCurrent === true &&
+      sameRecord(rangeExpected.counts, { reused: 5, recomputed: 3, invalidated: 1, bypassed: 2 }) && JSON.stringify(rangeExpected.closure) === JSON.stringify([3, 4]) &&
+      rangePlan?.mode === 'reanalyze-range' && sameRecord(rangePlan.selectedRange, selectedRange) && JSON.stringify(rangePlan.recomputeClosure) === JSON.stringify(rangeExpected.closure) &&
+      sameRecord(rangePlan.counts, rangeExpected.counts) && sameRecord(rangePlan.counts, rangeOption.expected) &&
+      JSON.stringify(rangePlan.units.map((unit) => unit.disposition)) === JSON.stringify(rangeExpected.dispositions) &&
+      JSON.stringify(rangePlan.units.map((unit) => unit.reason)) === JSON.stringify(['compatible', 'predecessor-gap', 'bypassed-selected-range', 'bypassed-selected-range', 'compatible', 'compatible', 'compatible', 'compatible']) &&
+      rangePlan.units[0].reusedFrom?.revisionId === revision2.revisionId && rangePlan.units[0].reusedFrom?.unitOrdinal === 1 &&
+      JSON.stringify(rangePlan.predecessorUnits.map((unit) => unit.disposition)) === JSON.stringify(['reused', 'invalidated', 'bypassed', 'bypassed', 'reused', 'reused', 'reused', 'reused']) &&
+      JSON.stringify(preparedRange.runSourceScope?.unitScope?.recomputedUnitOrdinals) === JSON.stringify(rangeExpected.recomputed) &&
+      preparedRange.executionPlan?.recomputedUnitCount === 3 && preparedRange.executionPlan?.reusedUnitCount === 5 &&
+      preparedRange.planEnvelope?.digest !== preparedSync.planEnvelope.digest && preparedRange.actions?.canAuthorize === true,
+    'range-prepared-plan', { rangeExpected, update: preparedRange?.update, unitScope: preparedRange?.runSourceScope?.unitScope });
+    await assertRenderer(renderer, `(() => { const card=document.querySelector('.baseline-analysis-card'); return card?.dataset.planUpdateMode==='reanalyze-range' && card.dataset.planReused==='5' && card.dataset.planRecomputed==='3' && card.dataset.planInvalidated==='1' && card.dataset.planBypassed==='2' && card.querySelector('[data-reuse-plan-unit="3"][data-reuse-disposition="recomputed"][data-reuse-reason="bypassed-selected-range"]')!==null && card.querySelector('[data-reuse-plan-unit="4"][data-reuse-disposition="recomputed"][data-reuse-reason="bypassed-selected-range"]')!==null && card.querySelector('[data-reuse-plan-unit="1"][data-reuse-disposition="reused"]')!==null && card.querySelectorAll('[data-reuse-predecessor-disposition="bypassed"]').length===2 && card.textContent.includes(${JSON.stringify(`内容块 ${selectedRange.startPosition}–${selectedRange.endPosition}`)}) && card.querySelector('[data-analysis-action="authorize"]') instanceof HTMLButtonElement; })()`, 'range-plan-preview');
+
+    at('reanalyze-range-dispatch');
+    cancellation.throwIfRequested();
+    const settledRange = await settleAuthorizedRun(renderer, 'range');
+
+    at('reanalyze-range-revision');
+    const revision3 = settledRange?.resultSetRevision;
+    const attemptRange = settledRange?.run?.attempt;
+    requireJourney(settledRange?.state === 'settled' && settledRange.run?.state === 'completed-with-gaps' &&
+      JSON.stringify(attemptRange?.spans?.map((span) => span.unitOrdinal)) === JSON.stringify(rangeExpected.recomputed) &&
+      settledRange.taskOutcome?.resultSetRevisionId === revision3?.revisionId, 'range-settled-run', settledRange?.run);
+    requireSuccessorShape(revision3, {
+      resultSetId: revision.resultSetId, ordinal: 3, mode: 'reanalyze-range', modeLabel: '重新分析所选范围',
+      predecessor: { revisionId: revision2.revisionId, ordinal: 2, digest: revision2.digest }, reusePlanDigest: preparedRange.update.reusePlanDigest,
+      counts: rangeExpected.counts, selectedRange, lineage: rangeExpected.dispositions, boundRevisionId: preparedSync.checkpoint.revisionId,
+      manifestDigest: rangeManifest.digest, freshness: 'current',
+    }, attemptRange, fixtureDigest, 'range-revision');
+    requireJourney(JSON.stringify(withoutKey(revision3.units[0], 'lineage')) === JSON.stringify(withoutKey(revision2.units[0], 'lineage')) &&
+      revision3.units[2].requestDigest === revision2.units[2].requestDigest && revision3.manuscriptPin.revisionId === revision2.manuscriptPin.revisionId &&
+      JSON.stringify(revision3.synthesis) === JSON.stringify(revision2.synthesis), 'range-reused-and-recomputed-content');
+    await assertRenderer(renderer, `(() => { const card=document.querySelector('.baseline-analysis-card'); const history=card?.querySelector('.analysis-history'); return card?.dataset.resultRevisionOrdinal==='3' && card.dataset.updateMode==='reanalyze-range' && card.dataset.reusedCount==='5' && card.dataset.recomputedCount==='3' && card.dataset.invalidatedCount==='1' && card.dataset.bypassedCount==='2' && card.dataset.freshnessState==='current' && card.querySelector('[data-analysis-unit="1"][data-analysis-unit-lineage="reused"][data-analysis-unit-reused-from="2/1"]')!==null && card.querySelector('[data-analysis-unit="3"][data-analysis-unit-lineage="recomputed"]')!==null && card.textContent.includes(${JSON.stringify(`内容块 ${selectedRange.startPosition}–${selectedRange.endPosition}`)}) && history?.dataset.historyCount==='3' && history.querySelector('[data-history-ordinal="3"][data-history-current="true"][data-history-mode="reanalyze-range"][data-history-predecessor-ordinal="2"]')!==null && history.querySelector('[data-history-ordinal="2"][data-history-current="false"][data-history-freshness="superseded"]')!==null && ${ONLY_ANALYSIS_ACTIONS}; })()`, 'range-overview-surface');
+
+    at('reanalyze-book-prepare');
+    cancellation.throwIfRequested();
+    await assertRenderer(renderer, `(() => { const whole=document.querySelector('.baseline-analysis-card [data-update-action="reanalyze-book"]'); return whole?.dataset.updateAvailable==='true' && whole.dataset.expectedReused==='0' && whole.dataset.expectedRecomputed==='8' && whole.dataset.expectedInvalidated==='1' && whole.dataset.expectedBypassed==='7' && !whole.querySelector('[data-analysis-action="reanalyze-book"]').disabled; })()`, 'book-control');
+    await click(renderer, '重新分析全书', 'book-click');
+    await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='prepared'`, 'book-prepared', 120_000);
+    const preparedBook = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    const bookManifest = preparedBook?.coverageManifest;
+    const bookExpected = deriveExpectedPlan(rangeManifest, revision3.units.map((unit) => unit.state), bookManifest, 'reanalyze-book', null);
+    const bookPlan = preparedBook?.update?.reusePlan;
+    requireJourney(preparedBook?.state === 'prepared' && preparedBook.taskIntent?.mode === 'reanalyze-book' && preparedBook.taskIntent?.goal === BOOK_GOAL &&
+      bookManifest?.digest === rangeManifest.digest && preparedBook.update?.predecessor?.revisionId === revision3.revisionId && preparedBook.update.predecessor.ordinal === 3 &&
+      preparedBook.update.selectedRange === null && sameRecord(bookExpected.counts, { reused: 0, recomputed: 8, invalidated: 1, bypassed: 7 }) &&
+      bookPlan?.mode === 'reanalyze-book' && sameRecord(bookPlan.counts, bookExpected.counts) &&
+      bookPlan.units.every((unit) => unit.disposition === 'recomputed' && unit.reason === 'bypassed-whole-book' && unit.reusedFrom === null) &&
+      JSON.stringify(bookPlan.predecessorUnits.map((unit) => unit.disposition)) === JSON.stringify(['bypassed', 'invalidated', 'bypassed', 'bypassed', 'bypassed', 'bypassed', 'bypassed', 'bypassed']) &&
+      JSON.stringify(preparedBook.runSourceScope?.unitScope?.recomputedUnitOrdinals) === JSON.stringify([1, 2, 3, 4, 5, 6, 7, 8]) &&
+      preparedBook.executionPlan?.recomputedUnitCount === 8 && preparedBook.executionPlan?.reusedUnitCount === 0 && preparedBook.actions?.canAuthorize === true,
+    'book-prepared-plan', { bookExpected, update: preparedBook?.update });
+    await assertRenderer(renderer, `(() => { const card=document.querySelector('.baseline-analysis-card'); return card?.dataset.planUpdateMode==='reanalyze-book' && card.dataset.planReused==='0' && card.dataset.planRecomputed==='8' && card.dataset.planInvalidated==='1' && card.dataset.planBypassed==='7' && card.querySelectorAll('[data-reuse-plan-unit][data-reuse-disposition="recomputed"][data-reuse-reason="bypassed-whole-book"]').length===8 && card.querySelectorAll('[data-reuse-predecessor-disposition="bypassed"]').length===7; })()`, 'book-plan-preview');
+
+    at('reanalyze-book-dispatch');
+    cancellation.throwIfRequested();
+    const settledBook = await settleAuthorizedRun(renderer, 'book');
+
+    at('reanalyze-book-revision');
+    const revision4 = settledBook?.resultSetRevision;
+    const attemptBook = settledBook?.run?.attempt;
+    requireJourney(settledBook?.state === 'settled' && settledBook.run?.state === 'completed-with-gaps' &&
+      JSON.stringify(attemptBook?.spans?.map((span) => span.unitOrdinal)) === JSON.stringify([1, 2, 3, 4, 5, 6, 7, 8]) &&
+      settledBook.taskOutcome?.resultSetRevisionId === revision4?.revisionId, 'book-settled-run', settledBook?.run);
+    requireSuccessorShape(revision4, {
+      resultSetId: revision.resultSetId, ordinal: 4, mode: 'reanalyze-book', modeLabel: '重新分析全书',
+      predecessor: { revisionId: revision3.revisionId, ordinal: 3, digest: revision3.digest }, reusePlanDigest: preparedBook.update.reusePlanDigest,
+      counts: bookExpected.counts, selectedRange: null, lineage: bookExpected.dispositions, boundRevisionId: preparedSync.checkpoint.revisionId,
+      manifestDigest: bookManifest.digest, freshness: 'current',
+    }, attemptBook, fixtureDigest, 'book-revision');
+    // No mode mutated the manuscript: every successor pins the working state the acknowledged edit produced.
+    requireJourney(JSON.stringify(revision4.synthesis) === JSON.stringify(revision3.synthesis) && revision4.usage.requests === SAMPLE1_UNITS &&
+      revision4.manuscriptPin.revisionId === revision2.manuscriptPin.revisionId && revision4.manuscriptPin.revisionDigest === staleRevision.freshness.currentWorkingDigest &&
+      settledBook.updateControls?.working?.workingDigest === staleRevision.freshness.currentWorkingDigest && settledBook.updateControls.working.totalBlocks === SAMPLE1_BLOCKS,
+    'book-no-manuscript-mutation', { pin: revision4.manuscriptPin, working: settledBook?.updateControls?.working });
+    await assertRenderer(renderer, `(() => { const card=document.querySelector('.baseline-analysis-card'); return card?.dataset.resultRevisionOrdinal==='4' && card.dataset.updateMode==='reanalyze-book' && card.dataset.reusedCount==='0' && card.dataset.recomputedCount==='8' && card.dataset.bypassedCount==='7' && card.querySelectorAll('[data-analysis-unit-lineage="recomputed"]').length===8 && card.querySelectorAll('[data-analysis-unit-lineage="reused"]').length===0 && ${ONLY_ANALYSIS_ACTIONS}; })()`, 'book-overview-surface');
+
+    at('revision-history');
+    const history = settledBook.history;
+    requireJourney(history?.resultSetId === revision.resultSetId && history.kind === 'baseline-manuscript-analysis' && history.latestOrdinal === 4 && history.entries?.length === 4 &&
+      JSON.stringify(history.entries.map((entry) => [entry.ordinal, entry.mode, entry.modeLabel, entry.current, entry.freshness, entry.predecessor?.ordinal ?? null, entry.usage.requests, entry.gapCount, entry.conflictCount, entry.unitsClosed])) ===
+        JSON.stringify([[1, 'first-baseline', '首次基线分析', false, 'superseded', null, 8, 1, 4, 7], [2, 'sync-current', '同步到当前稿件', false, 'superseded', 1, 2, 1, 4, 7], [3, 'reanalyze-range', '重新分析所选范围', false, 'superseded', 2, 3, 1, 4, 7], [4, 'reanalyze-book', '重新分析全书', true, 'current', 3, 8, 1, 4, 7]]) &&
+      JSON.stringify(history.entries.map((entry) => entry.revisionId)) === JSON.stringify([revision.revisionId, revision2.revisionId, revision3.revisionId, revision4.revisionId]) &&
+      JSON.stringify(history.entries.map((entry) => entry.digest)) === JSON.stringify([revision.digest, revision2.digest, revision3.digest, revision4.digest]) &&
+      history.entries.every((entry, index) => sameRecord(entry.counts, [revision.update.counts, syncExpected.counts, rangeExpected.counts, bookExpected.counts][index])) &&
+      JSON.stringify(history.entries.map((entry) => entry.reusePlanDigest)) === JSON.stringify([null, preparedSync.update.reusePlanDigest, preparedRange.update.reusePlanDigest, preparedBook.update.reusePlanDigest]) &&
+      history.entries[0].manuscriptPin.revisionId === revision.manuscriptPin.revisionId && history.entries[0].manuscriptPin.revisionLabel === 'r1' &&
+      history.entries.slice(1).every((entry) => entry.manuscriptPin.revisionId === revision2.manuscriptPin.revisionId) &&
+      history.entries.every((entry) => UUID_PATTERN.test(entry.producingRun?.runRecordId) && entry.producingRun.classification === 'completed-with-gaps' &&
+        DIGEST_PATTERN.test(entry.manuscriptPin.revisionDigest) && DIGEST_PATTERN.test(entry.coverageManifestDigest) && typeof entry.freshnessLabel === 'string') &&
+      history.entries[1].producingRun.runRecordId === settledSync.run.runRecordId && history.entries[3].producingRun.attemptId === attemptBook.attemptId,
+    'history-projection', history);
+    await assertRenderer(renderer, `(() => {
+      const section=document.querySelector('.baseline-analysis-card .analysis-history');
+      const entries=Array.from(section?.querySelectorAll('[data-history-ordinal]')??[]);
+      return section?.dataset.historyCount==='4' && section.dataset.historyLatestOrdinal==='4' && section.dataset.historyResultSetId===${JSON.stringify(revision.resultSetId)} &&
+        entries.map((entry)=>entry.dataset.historyOrdinal).join(',')==='1,2,3,4' && entries.map((entry)=>entry.dataset.historyMode).join(',')==='first-baseline,sync-current,reanalyze-range,reanalyze-book' &&
+        entries.map((entry)=>entry.dataset.historyCurrent).join(',')==='false,false,false,true' && entries.map((entry)=>entry.dataset.historyFreshness).join(',')==='superseded,superseded,superseded,current' &&
+        entries.map((entry)=>entry.dataset.historyPredecessorOrdinal).join(',')===',1,2,3' &&
+        entries.every((entry)=>entry.querySelector('[data-analysis-action="open-revision"]') instanceof HTMLButtonElement && !entry.querySelector('[data-analysis-action="open-revision"]').disabled) &&
+        section.textContent.includes(${JSON.stringify(revision.revisionId)}) && section.textContent.includes(${JSON.stringify(revision4.digest)}) && section.textContent.includes('首次基线分析') && section.textContent.includes('已被取代 · 按原始 pin 保留') &&
+        !section.querySelector('[data-analysis-action="close-revision"]');
+    })()`, 'history-surface');
+
+    at('history-open-read-only');
+    cancellation.throwIfRequested();
+    await assertRenderer(renderer, `(() => { const button=document.querySelector('[data-analysis-action="open-revision"][data-analysis-revision-ordinal="1"]'); if(!(button instanceof HTMLButtonElement)||button.disabled)return false; button.click(); return true; })()`, 'history-open-click');
+    await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.inspectedRevisionOrdinal==='1'`, 'history-open-rendered');
+    const historical = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis({ revisionId: ${JSON.stringify(revision.revisionId)} })`);
+    requireJourney(historical?.inspectedRevision?.readOnly === true && historical.inspectedRevision.current === false &&
+      historical.inspectedRevision.revision?.ordinal === 1 && historical.inspectedRevision.revision.digest === revision.digest &&
+      historical.inspectedRevision.revision.freshness.state === 'superseded' && historical.inspectedRevision.revision.freshness.boundRevisionId === revision.manuscriptPin.revisionId &&
+      JSON.stringify(withoutKey(historical.inspectedRevision.revision, 'freshness')) === JSON.stringify(withoutKey(revision, 'freshness')) &&
+      historical.resultSetRevision?.ordinal === 4 && historical.history?.entries?.length === 4, 'history-open-projection');
+    await assertRenderer(renderer, `(() => {
+      const card=document.querySelector('.baseline-analysis-card');
+      const axis=(name)=>card?.querySelector('[data-analysis-axis='+JSON.stringify(name)+']')?.dataset.axisState;
+      return card?.dataset.inspectedRevisionOrdinal==='1' && card.dataset.inspectedRevisionId===${JSON.stringify(revision.revisionId)} && card.dataset.inspectedCurrent==='false' &&
+        card.dataset.resultRevisionOrdinal==='4' && card.dataset.resultRevisionId===${JSON.stringify(revision4.revisionId)} && card.dataset.updateMode==='first-baseline' &&
+        card.querySelectorAll('[data-analysis-axis]').length===4 && axis('freshness')==='superseded' && axis('coverage')==='partial' && axis('reducer-closure')==='closed-with-gaps' && axis('assurance')==='qualified-with-open-conflicts' &&
+        card.querySelectorAll('[data-analysis-unit]').length===8 && card.querySelectorAll('[data-analysis-unit-lineage="recomputed"]').length===8 &&
+        card.querySelector('[data-analysis-gap-unit="2"] [data-analysis-action="return-to-range"]') instanceof HTMLButtonElement &&
+        card.textContent.includes('历史修订版 Revision 1（只读）') && card.textContent.includes('已被后续修订版取代') && card.textContent.includes(${JSON.stringify(revision.digest)}) &&
+        card.querySelector('[data-analysis-action="close-revision"]') instanceof HTMLButtonElement &&
+        card.querySelector('[data-analysis-action="open-revision"][data-analysis-revision-ordinal="1"]')?.disabled===true && ${ONLY_ANALYSIS_ACTIONS};
+    })()`, 'history-open-surface');
+    // 回到稿件范围 from the historical view opens the ordinary editor at the referenced block; the Overview then returns to the latest.
+    await assertRenderer(renderer, `(() => { const button=document.querySelector('[data-analysis-gap-unit="2"] [data-analysis-action="return-to-range"]'); if(!(button instanceof HTMLButtonElement)||button.disabled||button.dataset.analysisBlockId!==${JSON.stringify(gapBlockId)})return false; button.click(); return true; })()`, 'history-return-to-range-click');
+    await waitFor(renderer, `document.querySelector('[data-screen="editor"] [data-testid="manuscript-editor"] [data-block-id=${JSON.stringify(gapBlockId)}]')`, 'history-return-to-range-editor', 120_000);
+    cancellation.throwIfRequested();
+    await click(renderer, '返回图书工作概览', 'history-return-back');
+    await waitFor(renderer, `document.querySelector('[data-screen="book-overview"]') && document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='settled'`, 'history-return-overview');
+    await assertRenderer(renderer, `(() => { const card=document.querySelector('.baseline-analysis-card'); return !card?.dataset.inspectedRevisionOrdinal && card?.dataset.resultRevisionOrdinal==='4'; })()`, 'history-latest-restored');
+    // Opening another revision and closing it explicitly returns to the latest as well.
+    await assertRenderer(renderer, `(() => { const button=document.querySelector('[data-analysis-action="open-revision"][data-analysis-revision-ordinal="2"]'); if(!(button instanceof HTMLButtonElement)||button.disabled)return false; button.click(); return true; })()`, 'history-open-second-click');
+    await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.inspectedRevisionOrdinal==='2' && document.querySelector('.baseline-analysis-card')?.dataset.updateMode==='sync-current'`, 'history-open-second-rendered');
+    await click(renderer, '返回最新修订版', 'history-close-click');
+    await waitFor(renderer, `!document.querySelector('.baseline-analysis-card')?.dataset.inspectedRevisionOrdinal && document.querySelector('.baseline-analysis-card')?.dataset.resultRevisionOrdinal==='4' && document.querySelector('.baseline-analysis-card')?.dataset.updateMode==='reanalyze-book'`, 'history-closed');
+    const afterHistory = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    requireJourney(JSON.stringify(afterHistory) === JSON.stringify(settledBook), 'history-read-only');
+
+    at('restart-history');
+    await closeOwnedBrowser();
+    cancellation.throwIfRequested();
+    await launchForCleanup();
+    await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'restart-history-ready');
+    await assertRenderer(renderer, `(() => { const button=document.querySelector('button[data-book-id=${JSON.stringify(imported.bookId)}]'); if(!(button instanceof HTMLButtonElement))return false; button.click(); return true; })()`, 'restart-history-open-book');
+    await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='settled' && document.querySelector('.baseline-analysis-card')?.dataset.resultRevisionOrdinal==='4'`, 'restart-history-visible');
+    const restartedHistory = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    requireJourney(JSON.stringify(restartedHistory) === JSON.stringify(settledBook), 'restart-history-immutable');
+    for (const [ordinal, expectedRevision] of [[1, revision], [2, revision2], [3, revision3]]) {
+      const reopened = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis({ revisionId: ${JSON.stringify(expectedRevision.revisionId)} })`);
+      requireJourney(reopened?.inspectedRevision?.revision?.ordinal === ordinal && reopened.inspectedRevision.current === false &&
+        reopened.inspectedRevision.revision.freshness.state === 'superseded' &&
+        JSON.stringify(withoutKey(reopened.inspectedRevision.revision, 'freshness')) === JSON.stringify(withoutKey(expectedRevision, 'freshness')),
+      `restart-history-revision-${ordinal}`);
+    }
+    await assertRenderer(renderer, `document.querySelector('.baseline-analysis-card .analysis-history')?.dataset.historyCount==='4'`, 'restart-history-surface');
+    cancellation.throwIfRequested();
+
     at('zero-activity');
-    await assertRenderer(renderer, `(() => { const card=document.querySelector('.baseline-analysis-card'); return card?.dataset.analysisState==='settled' && Array.from(card.querySelectorAll('button')).every((button)=>button.dataset.analysisAction==='return-to-range') && !document.querySelector('[data-analysis-action="prepare"], [data-analysis-action="authorize"]') && !Object.keys(window.ai7).some((key)=>/provider|session|scheduler|payload|egress/i.test(key)); })()`, 'no-execution-surface');
+    await assertRenderer(renderer, `(() => { const card=document.querySelector('.baseline-analysis-card'); return card?.dataset.analysisState==='settled' && card.dataset.resultRevisionOrdinal==='4' && ${ONLY_ANALYSIS_ACTIONS} && !document.querySelector('[data-analysis-action="prepare"], [data-analysis-action="authorize"]') && !Object.keys(window.ai7).some((key)=>/provider|session|scheduler|payload|egress|effect|enrol|apply|export/i.test(key)); })()`, 'no-execution-surface');
     requireJourney(loopback.healthy() && loopback.observedRequests() === 0, 'zero-network-provider-session');
   } finally {
     finalCleanupRequested = true;

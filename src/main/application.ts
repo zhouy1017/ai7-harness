@@ -1842,14 +1842,15 @@ function registerRendererHandlers(
         });
       }),
   );
-  ipcMain.handle(IPC_CHANNELS.inspectBaselineAnalysis, (event) =>
+  ipcMain.handle(IPC_CHANNELS.inspectBaselineAnalysis, (event, input?: Omit<ServiceOperationMap['inspectBaselineAnalysis']['input'], 'bookId'>) =>
     envelope(async () => {
       const owned = requireSender(event);
       requireAuthority();
       const route = requireCurrentBookRoute(owned);
       const routeGeneration = owned.routeGeneration;
       const routeRequestSequence = owned.routeRequestSequence;
-      const result = await service.call('inspectBaselineAnalysis', { bookId: route.bookId });
+      const revisionId = typeof input?.revisionId === 'string' ? input.revisionId : null;
+      const result = await service.call('inspectBaselineAnalysis', { bookId: route.bookId, revisionId });
       requireCurrentRouteReadEpoch(owned, routeGeneration, routeRequestSequence);
       if (result.bookId !== route.bookId) {
         throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '基线稿件分析记录不属于当前图书工作台。');
@@ -1867,6 +1868,7 @@ function registerRendererHandlers(
           const route = requireCurrentBookRoute(owned);
           const result = await service.call('prepareBaselineAnalysis', {
             goal: input.goal,
+            update: input.update,
             bookId: route.bookId,
           });
           if (result.kind !== 'baseline-analysis-preparation') {
