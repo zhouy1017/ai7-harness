@@ -27,3 +27,4 @@ test-results/
 *.sqlite-*
 *.db
 *.db-*
+*.key.txt
