@@ -50,10 +50,13 @@ import {
 } from './editorial-workspace-profile.js';
 import {
   ANALYSIS_LEDGER_REVISION_15_SQL,
+  ANALYSIS_LEDGER_REVISION_16_SQL,
+  ANALYSIS_LEDGER_REVISION_17_TABLES,
   ANALYSIS_LEDGER_SCHEMA_SQL,
   ANALYSIS_LEDGER_TRIGGER_SQL,
   J03_TASK_AUTHORIZATION_SCHEMA_VERSION,
   J04_BASELINE_ANALYSIS_SCHEMA_VERSION,
+  SUCCESSIVE_TASK_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_SQL,
   TASK_AUTHORIZATION_SCHEMA_VERSION,
   TASK_AUTHORIZATION_TRIGGER_SQL,
@@ -66,8 +69,17 @@ import {
 const ANALYSIS_LEDGER_EXPECTED_SCHEMA_SQL: Readonly<Record<string, string | ReadonlyArray<string>>> = {
   ...ANALYSIS_LEDGER_SCHEMA_SQL,
   analysis_task_intents: [ANALYSIS_LEDGER_SCHEMA_SQL.analysis_task_intents, ANALYSIS_LEDGER_REVISION_15_SQL.analysis_task_intents],
-  analysis_plan_records: [ANALYSIS_LEDGER_SCHEMA_SQL.analysis_plan_records, ANALYSIS_LEDGER_REVISION_15_SQL.analysis_plan_records],
+  analysis_plan_records: [ANALYSIS_LEDGER_SCHEMA_SQL.analysis_plan_records, ANALYSIS_LEDGER_REVISION_16_SQL.analysis_plan_records, ANALYSIS_LEDGER_REVISION_15_SQL.analysis_plan_records],
 };
+
+/** The analysis ledger before revision 17 (Issue #48): the same relations without the plan-version, Plan Revision, and Plan Adaptation tables and their triggers. */
+const PRE_17_ANALYSIS_LEDGER_EXPECTED_SCHEMA_SQL: Readonly<Record<string, string | ReadonlyArray<string>>> = Object.fromEntries(
+  Object.entries(ANALYSIS_LEDGER_EXPECTED_SCHEMA_SQL).filter(([name]) => !(ANALYSIS_LEDGER_REVISION_17_TABLES as ReadonlyArray<string>).includes(name)),
+);
+const PRE_17_ANALYSIS_LEDGER_TRIGGER_SQL: Readonly<Record<string, string>> = Object.fromEntries(
+  Object.entries(ANALYSIS_LEDGER_TRIGGER_SQL).filter(([name]) =>
+    !ANALYSIS_LEDGER_REVISION_17_TABLES.some((table) => name === `${table}_no_update` || name === `${table}_no_delete`)),
+);
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const DIGEST_PATTERN = /^[0-9a-f]{64}$/;
@@ -1416,6 +1428,18 @@ const SCHEMA_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
   analysis_plan_records: [
     'task_intent_id>analysis_task_intents.task_intent_id:NO ACTION/NO ACTION/NONE',
   ],
+  // Revision 17 (Issue #48): plan versions and Plan Revisions link both ways; adaptations belong to an attempt.
+  analysis_plan_versions: [
+    'plan_revision_id>analysis_plan_revisions.plan_revision_id:NO ACTION/NO ACTION/NONE',
+    'task_intent_id>analysis_task_intents.task_intent_id:NO ACTION/NO ACTION/NONE',
+  ],
+  analysis_plan_revisions: [
+    'prior_plan_version_id>analysis_plan_versions.plan_version_id:NO ACTION/NO ACTION/NONE',
+    'task_intent_id>analysis_task_intents.task_intent_id:NO ACTION/NO ACTION/NONE',
+  ],
+  analysis_plan_adaptations: [
+    'attempt_id>analysis_execution_attempts.attempt_id:NO ACTION/NO ACTION/NONE',
+  ],
   analysis_run_authorizations: [
     'task_intent_id>analysis_task_intents.task_intent_id:NO ACTION/NO ACTION/NONE',
   ],
@@ -2018,7 +2042,10 @@ function requireManuscriptReimportTargetSchema(
   includeAuthoritySidecarTables = false,
   includeTaskAuthorizationTables = false,
   includeAnalysisLedgerTables = false,
+  includePlanVersionTables = false,
 ): void {
+  const analysisTables = includePlanVersionTables ? ANALYSIS_LEDGER_EXPECTED_SCHEMA_SQL : PRE_17_ANALYSIS_LEDGER_EXPECTED_SCHEMA_SQL;
+  const analysisTriggers = includePlanVersionTables ? ANALYSIS_LEDGER_TRIGGER_SQL : PRE_17_ANALYSIS_LEDGER_TRIGGER_SQL;
   requireExactSchema(
     db,
     {
@@ -2038,7 +2065,7 @@ function requireManuscriptReimportTargetSchema(
           }
         : {}),
       ...(includeTaskAuthorizationTables ? TASK_AUTHORIZATION_SCHEMA_SQL : {}),
-      ...(includeAnalysisLedgerTables ? ANALYSIS_LEDGER_EXPECTED_SCHEMA_SQL : {}),
+      ...(includeAnalysisLedgerTables ? analysisTables : {}),
     },
     MANUSCRIPT_REIMPORT_INDEX_SQL,
     true,
@@ -2046,7 +2073,7 @@ function requireManuscriptReimportTargetSchema(
       ...MANUSCRIPT_REIMPORT_TRIGGER_SQL,
       ...(includeAuthoritySidecarTables ? EDITORIAL_WORKSPACE_PROFILE_SIDECAR_TRIGGER_SQL : {}),
       ...(includeTaskAuthorizationTables ? TASK_AUTHORIZATION_TRIGGER_SQL : {}),
-      ...(includeAnalysisLedgerTables ? ANALYSIS_LEDGER_TRIGGER_SQL : {}),
+      ...(includeAnalysisLedgerTables ? analysisTriggers : {}),
     },
   );
 }
@@ -4682,6 +4709,7 @@ export function validateManuscriptReimportSchemaTruth(
   includeAuthoritySidecarTables = false,
   includeTaskAuthorizationTables = false,
   includeAnalysisLedgerTables = false,
+  includePlanVersionTables = false,
 ): void {
   requireManuscriptReimportTargetSchema(
     db,
@@ -4690,6 +4718,7 @@ export function validateManuscriptReimportSchemaTruth(
     includeAuthoritySidecarTables,
     includeTaskAuthorizationTables,
     includeAnalysisLedgerTables,
+    includePlanVersionTables,
   );
   validateSchemaAuthorityIds(db);
   validateWorkflowSemanticTruth(db, profile);
@@ -4724,14 +4753,15 @@ export function initializeBoundedSchema(
       version === SOURCE_IMPORT_SCHEMA_VERSION || version === MANUSCRIPT_REIMPORT_SCHEMA_VERSION ||
       version === MODEL_SERVICE_SCHEMA_VERSION || version === NATIVE_ARTIFACT_SCHEMA_VERSION ||
       version === AUTHORITY_SIDECAR_SCHEMA_VERSION || version === J03_TASK_AUTHORIZATION_SCHEMA_VERSION ||
-      version === J04_BASELINE_ANALYSIS_SCHEMA_VERSION || version === TASK_AUTHORIZATION_SCHEMA_VERSION,
+      version === J04_BASELINE_ANALYSIS_SCHEMA_VERSION || version === SUCCESSIVE_TASK_SCHEMA_VERSION ||
+      version === TASK_AUTHORIZATION_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
   if (version === MANUSCRIPT_REIMPORT_SCHEMA_VERSION || version === MODEL_SERVICE_SCHEMA_VERSION ||
       version === NATIVE_ARTIFACT_SCHEMA_VERSION || version === AUTHORITY_SIDECAR_SCHEMA_VERSION ||
       version === J03_TASK_AUTHORIZATION_SCHEMA_VERSION || version === J04_BASELINE_ANALYSIS_SCHEMA_VERSION ||
-      version === TASK_AUTHORIZATION_SCHEMA_VERSION) {
+      version === SUCCESSIVE_TASK_SCHEMA_VERSION || version === TASK_AUTHORIZATION_SCHEMA_VERSION) {
     transact(db, () => {
       if (validateStoreTruth || version !== TASK_AUTHORIZATION_SCHEMA_VERSION) {
         validateManuscriptReimportSchemaTruth(
@@ -4742,6 +4772,7 @@ export function initializeBoundedSchema(
           version >= AUTHORITY_SIDECAR_SCHEMA_VERSION,
           version >= J03_TASK_AUTHORIZATION_SCHEMA_VERSION,
           version >= J04_BASELINE_ANALYSIS_SCHEMA_VERSION,
+          version >= TASK_AUTHORIZATION_SCHEMA_VERSION,
         );
       }
       terminalizeOrphanedReplacementPreviews(db);

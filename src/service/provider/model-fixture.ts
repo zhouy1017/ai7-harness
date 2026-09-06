@@ -130,9 +130,9 @@ export function parseModelFixture(value: unknown): ModelFixture {
       Number.isSafeInteger(entry.unitOrdinal) && (entry.unitOrdinal as number) >= 1 &&
       typeof entry.requestDigest === 'string' && DIGEST_PATTERN.test(entry.requestDigest), '夹具条目无效。');
     const attempt = 'attempt' in entry ? entry.attempt : null;
-    requireFixture(attempt === null || (Number.isSafeInteger(attempt) && (attempt as number) >= 1 && (attempt as number) <= MAX_FIXTURE_ATTEMPT), '夹具条目的尝试序号无效。');
+    requireFixture(!('attempt' in entry) || (Number.isSafeInteger(attempt) && (attempt as number) >= 1 && (attempt as number) <= MAX_FIXTURE_ATTEMPT), '夹具条目的尝试序号无效。');
     const key = fixtureEntryKey(entry.unitOrdinal as number, entry.requestDigest, attempt as number | null);
-    requireFixture(!seen.has(key), '夹具条目单元序号、请求摘要与尝试序号重复。');
+    requireFixture(!seen.has(key), '夹具条目单元序号与请求摘要重复（含尝试序号）。');
     seen.add(key);
     return { unitOrdinal: entry.unitOrdinal as number, requestDigest: entry.requestDigest, attempt: attempt as number | null, response: parseResponse(entry.response) };
   });
