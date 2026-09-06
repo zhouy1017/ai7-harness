@@ -6,24 +6,13 @@ The original phase-by-phase document mixed still-useful migration direction with
 
 ## Current boundary
 
-- The design interview is complete and the normalized V2 package is the accepted implementation-facing design baseline on `dev`; at this baseline node the repository remains documentation-only.
-- During development, `dev` is the long-lived integration line. `main` is the protected stable/release-promotion line and advances only through a separate exact Owner authorization. The frozen `design-doc` aggregate supplies allowlist provenance only.
-- The Owner separately authorized the sequenced policy-baseline, implementation-planning, and bounded provider-free J-01 new-Book tracer work. The restrictive v1 policy baselines are now present; implementation planning is next, and every remaining step still needs its exact Issue, complete Change Brief, Worker branch/worktree, and Commander integration.
-- No dependency installation, product scaffold, predecessor asset copy, Plugin discovery, data migration, or release follows from this router.
-
-## Current authorized direction
-
-This is a sequence, not a set of independent gates:
-
-1. **Keep the exact promoted baseline.** Issue #20 establishes current ADRs, contexts, product constraints, V2 UI/architecture routing, and the source/disposition manifest on `dev`. Candidate or historical documents remain qualified and cannot silently fill gaps.
-2. **Keep the two restrictive v1 policy baselines.** Issue #22 establishes versioned Provider Processing and External Export policies: Provider Processing v1 has exactly zero provider allow rules, while External Export v1 makes only the accepted exact local-file Effect policy-eligible. They implement no runtime enforcement, authorize no live provider transmission or network export, and grant no export implementation authority.
-3. **Plan and bootstrap through the bounded tracer.** Apply the [Source Checkout Buildability Contract](../docs/agents/source-checkout-buildability.md) on every declared Windows/macOS development host while delivering the public-synthetic, provider-free J-01 new-Book happy path. Use one documented root command surface, regular tracked inputs, immutable declared dependencies, reconstructable dependency stores, and the production-shaped renderer/main/service/Harness/domain topology. Never depend on predecessor/sibling checkouts, personal paths, ambient payloads, private material, credentials, pre-generated output, or CI-image-only state. The tracer ends at a bounded manuscript window and confirmed durable Edit Journal and does not claim complete J-01.
-4. **Deliver further vertical journeys incrementally.** Implement one complete user-visible outcome at a time across the real product path. Once a responsibility exists, follow the [incremental development lifecycle](../docs/agents/incremental-development.md) and its reuse-before-new-code ladder. Do not create layer-porting issues, parallel authorities, a second loop, or speculative infrastructure.
-5. **Expand capabilities or package only for admitted outcomes.** Skills, providers, native adapters, dependencies, platform mechanics, packaging, and release work each need a bounded Change Brief and applicable authority. Windows and macOS share product outcomes while native mechanics may differ explicitly; packaging creates no additional proof gate.
+- The design interview is complete, the frozen design references are the accepted baseline, and implementation is under way on `dev`.
+- The current delivery order is [`docs/development/development-plan.md`](../docs/development/development-plan.md) under [ADR 0064](../docs/adr/0064-reweight-repository-development-toward-value-first-delivery.md); this router no longer sequences work.
+- No dependency installation, predecessor asset copy, Plugin discovery, data migration, or release follows from this router.
 
 ## Work-item shape
 
-Every implementation Issue uses the [Change Brief](../docs/agents/change-brief.md) and names:
+Every implementation Issue uses the one-page [Change Brief](../docs/agents/change-brief.md) and names:
 
 - one user-visible outcome or observed defect;
 - exact accepted design and action authority;
@@ -42,4 +31,4 @@ The only standing automated engineering surface is the provider-free [E2E Functi
 
 ## Development roles and records
 
-Repository work follows [Repository Development Dispatch](./27-repository-development-dispatch.md), [Git conventions](../docs/agents/git-conventions.md), and the [document lifecycle](../docs/agents/document-lifecycle.md). `PROGRESS.md` holds only the current checkpoint; consumed plans and handoffs leave the active path at lifecycle nodes.
+Repository work follows [Repository Development Dispatch](./27-repository-development-dispatch.md), [Git conventions](../docs/agents/git-conventions.md), and the [document lifecycle](../docs/agents/document-lifecycle.md). `PROGRESS.md` holds the current status and next slice; consumed plans and handoffs leave the active path at lifecycle nodes.

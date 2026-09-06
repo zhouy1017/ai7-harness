@@ -1,26 +1,17 @@
 # Issue tracker: GitHub
 
-Issues and PRDs for this repository live as GitHub Issues. Use authenticated GitHub tooling and resolve the target from the configured repository remote once it exists. Before a remote exists, do not publish planning work elsewhere implicitly.
+Issues and the epic PRD pointer live as GitHub Issues; the PRD text lives at [`docs/prd/ai7-v2-prd.md`](../prd/ai7-v2-prd.md) and the delivery order at [`docs/development/development-plan.md`](../development/development-plan.md).
 
 ## Conventions
 
-- Create, read, list, comment on, label, and close work through GitHub Issues.
-- Use `--body-file` for multiline issue bodies so commands remain shell-safe.
-- Fetch labels and comments when a skill needs the full ticket state.
-- A request to “publish to the issue tracker” means create a GitHub issue.
-- A request to “fetch the relevant ticket” means read the GitHub issue and its comments and labels.
-- Every work-ready Issue contains the applicable [Change Brief](change-brief.md). Keep it in the Issue rather than creating a duplicate planning file.
-- Every work-ready body states `Brief revision`, main Worker role/class, and the exact requested model/reasoning effort for each supported harness, `codex` and `claude-code`. Before launch, material contract changes increment the revision; an editorial-only change may keep it but requires a recomputed SHA-256 over the exact UTF-8 bytes of the GitHub API body string without a CLI-added newline.
-- `ready-for-agent` means the outcome, exact target-qualified authority/base, fixed class binding, existing implementation or authorized first owner, structural budget, non-goals, consequences, applicable implementation journey/bug or explicit non-behavior `N/A`, stop conditions, validation, and external-action boundary are complete enough for a cold Worker.
-- Use `needs-info` when factual inputs are missing and `ready-for-human` when product scope, domain meaning, authority, privacy/egress, foundation replacement, or another owner decision is required. Do not dispatch T0 ambiguity.
-- One repository-development attempt is `Issue + role + attempt`. The Commander posts exactly one standardized Launch Receipt and, after accepting the report, one Return Receipt per attempt as Issue comments. Receipt comments record attempt evidence but never amend the body contract; once posted they are never edited or deleted. An erroneous receipt closes or supersedes the attempt and requires a new attempt.
-- The session-creation request freezes the expected Issue revision/hash and role-specific start commit: exact base for a Worker or immutable `reviewed_head` for a Reviewer. Any later Issue-body byte change prevents or invalidates that attempt; after a Launch Receipt it requires an incremented revision and fresh Task Session even when editorial-only. Comments, labels, and assignments outside the body do not restart an attempt. Role/binding/base/target or `reviewed_head` change, runtime reroute/mismatch, cancellation, or supersession also requires a new attempt.
-- When an Issue is merged, closed, or abandoned, its owner runs the scoped [documentation archive sweep](document-lifecycle.md) and leaves one current safe next action.
-
-Use [Repository Development Dispatch](../../kick-in/27-repository-development-dispatch.md) for receipt schemas and two-stage launch, and the [Dispatch Register](dispatch-register.md) for the query-only project view. Workers and Reviewers never post receipts or otherwise mutate Issue state.
+- Create, read, list, comment on, label, and close work through GitHub Issues with authenticated tooling. Use `--body-file` for multiline bodies.
+- Every plan slice has one Issue titled `[Sxx] J-xx: <outcome>`. Its body carries a **Plan slot** block (phase, order, class, journey, dependencies, design links) and, once the slice is reached, the one-page [Change Brief](./change-brief.md) written on the then-current `dev` head. Earlier planning text stays below a `Historical planning input` heading and is not dispatchable.
+- `ready-for-agent` means the one-page Brief is complete: outcome, acceptance criteria, allowed change, non-goals, Journey disposition, stop conditions, and links. `needs-info` means factual inputs are missing; `ready-for-human` means an Owner decision is required. T0 ambiguity is never dispatched.
+- One attempt is `Issue + harness + role + attempt`. The Commander posts one schema-v5 Launch Receipt and one Return Receipt per attempt as Issue comments; receipts never amend the body, and once posted they are never edited or deleted. A wrong receipt is superseded by a Return Receipt and a new attempt.
+- A T3 body is frozen by its SHA-256 over the exact UTF-8 bytes of the GitHub API `body` string; T1 and T2 bodies by Brief revision only. A material change after a Launch Receipt requires a new attempt; a base-only drift does not.
+- Workers and Reviewers never post receipts or mutate Issue state.
+- When an Issue is merged, closed, or abandoned, the Commander updates `PROGRESS.md` and runs the scoped [archive sweep](./document-lifecycle.md).
 
 ## Pull requests as a triage surface
 
-PRs as a request surface: **no**.
-
-There are no external contributors at this stage. Pull requests represent implementation and review, not incoming feature requests. GitHub shares numbering between issues and pull requests, so resolve an ambiguous `#N` before acting.
+Pull requests represent implementation, not incoming requests. GitHub shares numbering between Issues and pull requests, so resolve an ambiguous `#N` before acting.

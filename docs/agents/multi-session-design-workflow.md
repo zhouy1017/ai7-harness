@@ -140,7 +140,7 @@ Architecture exploration does not end because legacy tasks are closed. It ends o
 
 - Current brief and terminal attempt evidence: the canonical GitHub Issue body plus its Launch/Return Receipts.
 - Current Task liveness and retention: the query-only [Dispatch Register](dispatch-register.md) over the Commander harness's session tools.
-- Current integration-line routing: Commander-owned root [`PROGRESS.md`](../../PROGRESS.md) and [`HANDOFF.md`](../../HANDOFF.md).
+- Current integration-line routing: Commander-owned root [`PROGRESS.md`](../../PROGRESS.md) and the [development plan](../development/development-plan.md).
 - Accepted domain authority: [`CONTEXT-MAP.md`](../../CONTEXT-MAP.md) and its routed context owners.
 - Document lifecycle: [Document lifecycle and archiving](./document-lifecycle.md).
 
