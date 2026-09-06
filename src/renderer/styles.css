@@ -117,7 +117,20 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .analysis-unit { padding: .7rem; border: 1px solid #ded9cd; border-radius: 9px; background: #fffdf8; }
 .analysis-unit summary { cursor: pointer; font-weight: 800; }
 .analysis-unit p { margin: .45rem 0 0; overflow-wrap: anywhere; }
-.analysis-run, .analysis-synthesis { margin-top: 1rem; padding-top: 1rem; border-top: 1px solid #d5dcd9; }
+.analysis-run, .analysis-synthesis, .analysis-reuse-plan, .analysis-update-controls, .analysis-history { margin-top: 1rem; padding-top: 1rem; border-top: 1px solid #d5dcd9; }
+.analysis-update-action { margin-top: .8rem; padding: .8rem; border: 1px solid #d5dcd9; border-radius: 10px; background: #fffdf8; }
+.analysis-update-action h5 { margin: 0; font-size: .95rem; }
+.analysis-update-action p { margin: .45rem 0 0; overflow-wrap: anywhere; }
+.analysis-update-action[data-update-available="false"] { opacity: .85; }
+.analysis-update-expected { font-weight: 800; }
+.analysis-range-options { margin: .6rem 0 0; padding: .6rem .8rem; border: 1px solid #ded9cd; border-radius: 9px; min-width: 0; }
+.analysis-range-options legend { font-weight: 800; padding: 0 .3rem; }
+.analysis-range-option { display: flex; align-items: flex-start; gap: .5rem; margin: .35rem 0 0; line-height: 1.55; overflow-wrap: anywhere; }
+.analysis-range-option input { margin-top: .3rem; flex: 0 0 auto; }
+.analysis-history-list { display: grid; gap: .55rem; margin: .55rem 0 0; padding-left: 1.4rem; }
+.analysis-history-entry { padding: .6rem .7rem; border: 1px solid #ded9cd; border-radius: 9px; background: #fffdf8; }
+.analysis-history-entry p { margin: .3rem 0 0; overflow-wrap: anywhere; }
+.analysis-history-entry[data-history-current="true"] { border-color: #8fb59b; }
 .analysis-progress { margin: .6rem 0 0; font-weight: 800; }
 .analysis-state-available { background: #f1ede3; color: #50574e; }
 .analysis-state-prepared { background: #fff0cf; color: #76530f; }
@@ -270,7 +283,8 @@ legend { margin-bottom: .7rem; font-weight: 800; }
   .editor-toolbar, .manuscript-navigator, .manuscript-surface, .editor-window, .editor-identities,
   .search-result, .replacement-review, .recent-work-item, .book-summary-item, .status-bar, .recovery-snapshot-disclosure,
   .recovery-readonly-blocks, .recovered-state-marker, .model-role-card, .native-artifact-card,
-  .native-artifact-authority, .task-authorization-card, .baseline-analysis-card, .analysis-axis, .analysis-unit {
+  .native-artifact-authority, .task-authorization-card, .baseline-analysis-card, .analysis-axis, .analysis-unit,
+  .analysis-update-action, .analysis-range-options, .analysis-history-entry {
     color: CanvasText;
     background: Canvas;
     border-color: CanvasText;

@@ -1467,7 +1467,7 @@ export interface BaselineAnalysisUpdateControlsProjection {
     freshness: 'current' | 'stale';
   };
   /** The current working manuscript the next Task Input checkpoint would pin, as the manifest would derive it. */
-  working: { revisionLabel: string; journalSequence: number; workingDigest: string; totalBlocks: number; unitCount: number; sectionCount: number };
+  working: { branchId: string; revisionLabel: string; journalSequence: number; workingDigest: string; totalBlocks: number; unitCount: number; sectionCount: number };
   /** True while a Task is authorized for dispatch, admitted, or executing: no new update Task may be prepared. */
   blockedByActiveRun: boolean;
   actions: {

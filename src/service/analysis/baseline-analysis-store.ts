@@ -861,6 +861,7 @@ export class BaselineAnalysisStore {
         freshness,
       },
       working: {
+        branchId: head.branchId,
         revisionLabel: head.currentRevisionLabel,
         journalSequence: head.currentJournalSequence,
         workingDigest: head.currentWorkingDigest,
