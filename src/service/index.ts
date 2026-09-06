@@ -289,7 +289,7 @@ async function dispatch(
         id: request.id,
         ok: true,
         op: request.op,
-        result: jobs.startBaselineAnalysisPreparation(request.input.bookId, request.input.goal, request.input.update, launchPolicy),
+        result: jobs.startBaselineAnalysisPreparation(request.input.bookId, request.input.goal, request.input.update, launchPolicy, request.input.reconfirm),
       };
     case 'authorizeBaselineAnalysis': {
       const authorized = store.authorizeBaselineAnalysis(

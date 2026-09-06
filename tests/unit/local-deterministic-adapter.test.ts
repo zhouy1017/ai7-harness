@@ -10,7 +10,7 @@ import { AI7_FAILURE_CODES, classifyModelFailure, evaluateRunBudgetCeiling } fro
 import { LOCAL_DETERMINISTIC_MODEL, LOCAL_DETERMINISTIC_ROUTE } from '../../src/service/provider/egress-gate.js';
 import { Ai7LocalDeterministicAdapter, ownBlockIdsOf, substituteBlockPlaceholders } from '../../src/service/provider/local-deterministic-adapter.js';
 import { BASELINE_PROMPT_CONTRACT } from '../../src/service/analysis/contract.js';
-import { ModelFixtureError, fixtureEntryKey, fixturePath, loadModelFixture, parseModelFixture } from '../../src/service/provider/model-fixture.js';
+import { ModelFixtureError, fixtureEntryKey, fixturePath, loadModelFixture, parseModelFixture, resolveFixtureEntry } from '../../src/service/provider/model-fixture.js';
 
 // Fixtures (iii)–(v) are hand-written synthetic shapes consumed here only; their request digests are
 // the deterministic function of the frozen prompt contract and a synthetic all-zero unit digest.
@@ -150,6 +150,72 @@ describe('model fixture loading', () => {
     expect((await served('a'.repeat(64))).find((chunk) => chunk.type === 'block-end')).toMatchObject({ block: { text: 'before-edit' } });
     expect((await served('b'.repeat(64))).find((chunk) => chunk.type === 'block-end')).toMatchObject({ block: { text: 'after-edit' } });
     expect(await served('c'.repeat(64))).toMatchObject([{ type: 'finish', reason: { kind: 'error', failure: { code: AI7_FAILURE_CODES.FIXTURE_MISMATCH } } }]);
+  });
+
+  it('answers the n-th request of a unit and digest from its attempt-specific entry and every other from the any-attempt entry', async () => {
+    await writeFile(join(root, 'attempts.json'), fixture('attempts', null, [
+      entry(1, 'steady', ZERO_UNIT_REQUEST_DIGEST),
+      { unitOrdinal: 1, requestDigest: ZERO_UNIT_REQUEST_DIGEST, attempt: 1, response: { kind: 'adapter-failure', code: 'PROVIDER_ERROR', message: '合成瞬时服务端错误', status: 503 } },
+      { unitOrdinal: 1, requestDigest: ZERO_UNIT_REQUEST_DIGEST, attempt: 3, response: { kind: 'adapter-failure', code: 'RATE_LIMIT', message: '合成速率限制', status: 429 } },
+    ]));
+    const resolved = await loadModelFixture(root, 'attempts');
+    expect(resolved.entries.size).toBe(3);
+    expect(resolved.entries.get(fixtureEntryKey(1, ZERO_UNIT_REQUEST_DIGEST))?.attempt).toBeNull();
+    expect(resolved.entries.get(fixtureEntryKey(1, ZERO_UNIT_REQUEST_DIGEST, 1))?.attempt).toBe(1);
+    expect(fixtureEntryKey(1, ZERO_UNIT_REQUEST_DIGEST, 1)).toBe(`1:${ZERO_UNIT_REQUEST_DIGEST}#1`);
+    expect(resolveFixtureEntry(resolved.entries, 1, ZERO_UNIT_REQUEST_DIGEST, 1)?.response).toMatchObject({ code: 'PROVIDER_ERROR', status: 503 });
+    expect(resolveFixtureEntry(resolved.entries, 1, ZERO_UNIT_REQUEST_DIGEST, 2)?.response).toMatchObject({ kind: 'unit-result', text: 'steady' });
+    expect(resolveFixtureEntry(resolved.entries, 1, ZERO_UNIT_REQUEST_DIGEST, 3)?.response).toMatchObject({ code: 'RATE_LIMIT' });
+    expect(resolveFixtureEntry(resolved.entries, 1, ZERO_UNIT_REQUEST_DIGEST, 9)?.response).toMatchObject({ text: 'steady' });
+    expect(resolveFixtureEntry(resolved.entries, 2, ZERO_UNIT_REQUEST_DIGEST, 1)).toBeUndefined();
+    // The adapter counts the served pair within its own lifetime: attempt 1 fails, 2 succeeds, 3 is rate-limited, 4 succeeds.
+    const adapter = new Ai7LocalDeterministicAdapter(resolved, BASELINE_PROMPT_CONTRACT_DIGEST, codes);
+    const served = async () => collect(adapter.stream(request()));
+    expect((await served()).at(-1)).toMatchObject({ type: 'finish', reason: { kind: 'error', failure: { code: 'PROVIDER_ERROR', status: 503 } } });
+    expect((await served()).find((chunk) => chunk.type === 'block-end')).toMatchObject({ block: { text: 'steady' } });
+    expect((await served()).at(-1)).toMatchObject({ type: 'finish', reason: { kind: 'error', failure: { code: 'RATE_LIMIT', status: 429 } } });
+    expect((await served()).find((chunk) => chunk.type === 'block-end')).toMatchObject({ block: { text: 'steady' } });
+    expect(adapter.servedRequests).toBe(4);
+    // A request the fixture never describes does not advance any served pair; a fresh adapter starts at attempt 1 again.
+    expect(await collect(adapter.stream(request(`分析单元 2/2 · 单元摘要 ${ZERO_UNIT_DIGEST}`)))).toMatchObject([{ type: 'finish', reason: { kind: 'error', failure: { code: AI7_FAILURE_CODES.FIXTURE_MISMATCH } } }]);
+    const fresh = new Ai7LocalDeterministicAdapter(resolved, BASELINE_PROMPT_CONTRACT_DIGEST, codes);
+    expect((await collect(fresh.stream(request()))).at(-1)).toMatchObject({ type: 'finish', reason: { kind: 'error', failure: { code: 'PROVIDER_ERROR' } } });
+  });
+
+  it('rejects an invalid or duplicate attempt and keeps every attempt-free fixture unchanged', async () => {
+    const withAttempt = (attempt: unknown) => fixture('bad-attempt', null, [{ unitOrdinal: 1, requestDigest: 'e'.repeat(64), attempt, response: { kind: 'unit-result', text: 'x', usage: { inputTokens: 1, outputTokens: 1 } } }]);
+    for (const attempt of [0, -1, 9, 1.5, '1', null]) {
+      expect(() => parseModelFixture(JSON.parse(withAttempt(attempt)))).toThrowError(ModelFixtureError);
+    }
+    const duplicate = fixture('dup', null, [
+      { unitOrdinal: 1, requestDigest: 'e'.repeat(64), attempt: 1, response: { kind: 'unit-result', text: 'x', usage: { inputTokens: 1, outputTokens: 1 } } },
+      { unitOrdinal: 1, requestDigest: 'e'.repeat(64), attempt: 1, response: { kind: 'unit-result', text: 'y', usage: { inputTokens: 1, outputTokens: 1 } } },
+    ]);
+    expect(() => parseModelFixture(JSON.parse(duplicate))).toThrowError(/重复/u);
+    // The same pair with and without an attempt is not a duplicate.
+    const beside = fixture('beside', null, [entry(1, 'any'), { unitOrdinal: 1, requestDigest: 'e'.repeat(64), attempt: 2, response: { kind: 'unit-result', text: 'second', usage: { inputTokens: 1, outputTokens: 1 } } }]);
+    expect(parseModelFixture(JSON.parse(beside)).entries.map((item) => item.attempt)).toEqual([null, 2]);
+    for (const identity of ['sample1-baseline-happy', 'sample1-baseline-one-unit-failure', 'synthetic-quota-exceeded', 'synthetic-usage-ceiling', 'synthetic-interrupted']) {
+      const existing = await loadModelFixture(FIXTURES_ROOT, identity);
+      expect(Array.from(existing.entries.values()).every((item) => item.attempt === null)).toBe(true);
+    }
+  });
+
+  it('(vi) sample1-baseline-transient-retry layers a first-attempt PROVIDER_ERROR 503 for unit 5 over shape (ii)', async () => {
+    const transient = await loadModelFixture(FIXTURES_ROOT, 'sample1-baseline-transient-retry');
+    expect(transient.lineage.map((link) => link.identity)).toEqual(['sample1-baseline-transient-retry', 'sample1-baseline-one-unit-failure', 'sample1-baseline-happy']);
+    const unit5 = '8d32b61042d075334c910da1d6fc6887b2c6f84c3034707c721070399fba328f';
+    const unit2 = 'cbc613c1c72be55aa803ab03658fa4e70638719764daf6a3a2ceef1034496295';
+    expect(resolveFixtureEntry(transient.entries, 5, unit5, 1)?.response).toMatchObject({ kind: 'adapter-failure', code: 'PROVIDER_ERROR', status: 503 });
+    expect(resolveFixtureEntry(transient.entries, 5, unit5, 2)?.response).toMatchObject({ kind: 'unit-result', usage: { inputTokens: 1400, outputTokens: 180 } });
+    expect(classifyModelFailure({ code: 'PROVIDER_ERROR', message: '', status: 503 }, codes).retrySafe).toBe(true);
+    // Unit 2's inherited failure stays non-retry-safe and answers every attempt.
+    expect(resolveFixtureEntry(transient.entries, 2, unit2, 1)?.response).toMatchObject({ code: 'SYNTHETIC_ADAPTER_FAILURE' });
+    expect(resolveFixtureEntry(transient.entries, 2, unit2, 2)?.response).toMatchObject({ code: 'SYNTHETIC_ADAPTER_FAILURE' });
+    expect(classifyModelFailure({ code: 'SYNTHETIC_ADAPTER_FAILURE', message: '' }, codes).retrySafe).toBe(false);
+    const base = await loadModelFixture(FIXTURES_ROOT, 'sample1-baseline-one-unit-failure');
+    expect(transient.sha256).not.toBe(base.sha256);
+    expect(transient.entries.size).toBe(base.entries.size + 1);
   });
 
   it('rejects an absent fixture, a cyclic base chain, an identity that differs from its file name, and invalid shapes', async () => {

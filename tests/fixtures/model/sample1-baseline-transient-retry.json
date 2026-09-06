@@ -1,0 +1,21 @@
+{
+  "schema": "ai7.model-fixture/1",
+  "identity": "sample1-baseline-transient-retry",
+  "description": "Hand-written synthetic shape (vi) layered over shape (ii): identical to sample1-baseline-one-unit-failure except that Analysis Unit 5 answers its first attempt with a transient PROVIDER_ERROR server error (status 503). The entry names attempt 1 only, so the safe retry of the same unit and request digest falls through to the base's conforming unit result; unit 2 keeps its non-retry-safe adapter failure and stays a gap with no adaptation. The J-04 safe-retry stages and the L2 suite consume this composite fixture. Public synthetic text only; no manuscript content.",
+  "basedOn": "sample1-baseline-one-unit-failure",
+  "provider": "ai7-local-deterministic",
+  "model": "ai7-deterministic-fixture",
+  "entries": [
+    {
+      "unitOrdinal": 5,
+      "requestDigest": "8d32b61042d075334c910da1d6fc6887b2c6f84c3034707c721070399fba328f",
+      "attempt": 1,
+      "response": {
+        "kind": "adapter-failure",
+        "code": "PROVIDER_ERROR",
+        "message": "Synthetic transient model-service server error for Analysis Unit 5 on attempt 1 (fixture shape vi).",
+        "status": 503
+      }
+    }
+  ]
+}

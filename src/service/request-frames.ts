@@ -273,9 +273,10 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     }
     case 'prepareBaselineAnalysis': {
       // The goal is one of the four fixed mode goals; `update` is null exactly for the first baseline,
-      // names the mode whose goal was sent, and carries a block range exactly for `重新分析所选范围`.
-      const input = requireInput(value.input, ['bookId', 'goal', 'update'], tentativeId);
-      if (!isBoundedString(input.bookId, 36) || !UUID_PATTERN.test(input.bookId)) throw new ProtocolError(tentativeId);
+      // names the mode whose goal was sent, and carries a block range exactly for `重新分析所选范围`;
+      // `reconfirm` is the explicit `重新确认计划` of a prepared Task's pending Plan Revision.
+      const input = requireInput(value.input, ['bookId', 'goal', 'update', 'reconfirm'], tentativeId);
+      if (!isBoundedString(input.bookId, 36) || !UUID_PATTERN.test(input.bookId) || typeof input.reconfirm !== 'boolean') throw new ProtocolError(tentativeId);
       const update = input.update;
       if (update === null) {
         if (input.goal !== BASELINE_ANALYSIS_MODE_GOALS['first-baseline']) throw new ProtocolError(tentativeId);

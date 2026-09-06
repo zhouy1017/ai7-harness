@@ -1869,6 +1869,7 @@ function registerRendererHandlers(
           const result = await service.call('prepareBaselineAnalysis', {
             goal: input.goal,
             update: input.update,
+            reconfirm: input.reconfirm === true,
             bookId: route.bookId,
           });
           if (result.kind !== 'baseline-analysis-preparation') {

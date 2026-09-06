@@ -120,6 +120,7 @@ import {
   initializeTaskAuthorizationSchema,
   J03_TASK_AUTHORIZATION_SCHEMA_VERSION,
   J04_BASELINE_ANALYSIS_SCHEMA_VERSION,
+  SUCCESSIVE_TASK_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_VERSION,
   TaskAuthorizationError,
   TaskAuthorizationStore,
@@ -1119,6 +1120,7 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION ||
       currentVersion === J03_TASK_AUTHORIZATION_SCHEMA_VERSION ||
       currentVersion === J04_BASELINE_ANALYSIS_SCHEMA_VERSION ||
+      currentVersion === SUCCESSIVE_TASK_SCHEMA_VERSION ||
       currentVersion === TASK_AUTHORIZATION_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
@@ -1135,6 +1137,7 @@ function initializeSchema(db: DatabaseSync): void {
     currentVersion === EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION ||
     currentVersion === J03_TASK_AUTHORIZATION_SCHEMA_VERSION ||
     currentVersion === J04_BASELINE_ANALYSIS_SCHEMA_VERSION ||
+    currentVersion === SUCCESSIVE_TASK_SCHEMA_VERSION ||
     currentVersion === TASK_AUTHORIZATION_SCHEMA_VERSION
   ) return;
   if (currentVersion === 1) {
@@ -1468,7 +1471,8 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === MANUSCRIPT_REIMPORT_SCHEMA_VERSION || version === MODEL_SERVICE_SCHEMA_VERSION ||
       version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION ||
       version === EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION || version === J03_TASK_AUTHORIZATION_SCHEMA_VERSION ||
-      version === J04_BASELINE_ANALYSIS_SCHEMA_VERSION || version === TASK_AUTHORIZATION_SCHEMA_VERSION,
+      version === J04_BASELINE_ANALYSIS_SCHEMA_VERSION || version === SUCCESSIVE_TASK_SCHEMA_VERSION ||
+      version === TASK_AUTHORIZATION_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -1476,7 +1480,8 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === MODEL_SERVICE_SCHEMA_VERSION ||
       version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION ||
       version === EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION || version === J03_TASK_AUTHORIZATION_SCHEMA_VERSION ||
-      version === J04_BASELINE_ANALYSIS_SCHEMA_VERSION || version === TASK_AUTHORIZATION_SCHEMA_VERSION) return;
+      version === J04_BASELINE_ANALYSIS_SCHEMA_VERSION || version === SUCCESSIVE_TASK_SCHEMA_VERSION ||
+      version === TASK_AUTHORIZATION_SCHEMA_VERSION) return;
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
   );
@@ -1576,14 +1581,16 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === MODEL_SERVICE_SCHEMA_VERSION ||
       version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION ||
       version === EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION || version === J03_TASK_AUTHORIZATION_SCHEMA_VERSION ||
-      version === J04_BASELINE_ANALYSIS_SCHEMA_VERSION || version === TASK_AUTHORIZATION_SCHEMA_VERSION,
+      version === J04_BASELINE_ANALYSIS_SCHEMA_VERSION || version === SUCCESSIVE_TASK_SCHEMA_VERSION ||
+      version === TASK_AUTHORIZATION_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
   if (version === MANUSCRIPT_REIMPORT_SCHEMA_VERSION || version === MODEL_SERVICE_SCHEMA_VERSION ||
       version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION ||
       version === EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION || version === J03_TASK_AUTHORIZATION_SCHEMA_VERSION ||
-      version === J04_BASELINE_ANALYSIS_SCHEMA_VERSION || version === TASK_AUTHORIZATION_SCHEMA_VERSION) return;
+      version === J04_BASELINE_ANALYSIS_SCHEMA_VERSION || version === SUCCESSIVE_TASK_SCHEMA_VERSION ||
+      version === TASK_AUTHORIZATION_SCHEMA_VERSION) return;
   validateSourceImportSchemaTruth(db, profile);
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
@@ -1764,6 +1771,7 @@ function validateModelServiceSchema(
       version >= EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION,
       version >= J03_TASK_AUTHORIZATION_SCHEMA_VERSION,
       version >= J04_BASELINE_ANALYSIS_SCHEMA_VERSION,
+      version >= TASK_AUTHORIZATION_SCHEMA_VERSION,
     );
   }
   const invalid = db.prepare(
@@ -1798,14 +1806,16 @@ function initializeModelServiceSchema(
     version === MANUSCRIPT_REIMPORT_SCHEMA_VERSION || version === MODEL_SERVICE_SCHEMA_VERSION ||
       version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION ||
       version === EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION || version === J03_TASK_AUTHORIZATION_SCHEMA_VERSION ||
-      version === J04_BASELINE_ANALYSIS_SCHEMA_VERSION || version === TASK_AUTHORIZATION_SCHEMA_VERSION,
+      version === J04_BASELINE_ANALYSIS_SCHEMA_VERSION || version === SUCCESSIVE_TASK_SCHEMA_VERSION ||
+      version === TASK_AUTHORIZATION_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
   if (version === MODEL_SERVICE_SCHEMA_VERSION ||
       version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION ||
       version === EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION || version === J03_TASK_AUTHORIZATION_SCHEMA_VERSION ||
-      version === J04_BASELINE_ANALYSIS_SCHEMA_VERSION || version === TASK_AUTHORIZATION_SCHEMA_VERSION) {
+      version === J04_BASELINE_ANALYSIS_SCHEMA_VERSION || version === SUCCESSIVE_TASK_SCHEMA_VERSION ||
+      version === TASK_AUTHORIZATION_SCHEMA_VERSION) {
     validateModelServiceSchema(db, profile, validateStoreTruth);
     if (version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION) {
       validateEditorialWorkspaceProfileNativeSchema(db);
@@ -2701,8 +2711,9 @@ export class EditorialStore {
     goal: BaselineAnalysisGoal,
     update: BaselineAnalysisUpdateRequest | null,
     launchPolicy: LaunchPolicyProjection,
+    reconfirm = false,
   ): BaselineAnalysisPreparationResult {
-    return this.#analysisCall(() => this.#baselineAnalysis.prepare({ phase: 'start', bookId, goal, update, launchPolicy }));
+    return this.#analysisCall(() => this.#baselineAnalysis.prepare({ phase: 'start', bookId, goal, update, reconfirm, launchPolicy }));
   }
 
   advanceBaselineAnalysisPreparationWork(workId: string): BaselineAnalysisPreparationResult {

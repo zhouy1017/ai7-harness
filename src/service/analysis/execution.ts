@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { AnalysisGapProjection, AnalysisSourceRangeProjection, CoverageManifestUnitProjection, LaunchPolicyProjection } from '../../shared/protocol.js';
 import { prepareExecution, type HarnessExecutionSpan, type PrimaryAgentHarnessHandle } from '../harness/primary-agent-harness.js';
 import { CredentialBroker, type SecretResolver } from '../provider/credential-broker.js';
+import type { ClassifiedModelFailure } from '../provider/classification.js';
 import { LOCAL_DETERMINISTIC_MODEL, LOCAL_DETERMINISTIC_ROUTE, evaluateEgress, type EgressBindingFacts } from '../provider/egress-gate.js';
 import { Ai7LocalDeterministicAdapter } from '../provider/local-deterministic-adapter.js';
 import type { ResolvedModelFixture } from '../provider/model-fixture.js';
@@ -21,6 +22,12 @@ import { reduceBaselineAnalysis, type UnitOutcome } from './reducers.js';
  * manifest order, with the Run Source Scope admitting only their messages; every `reused` unit is
  * copied from the predecessor revision by lineage with its source ranges remapped onto the new
  * unit's block identities, and the reducers run over the complete new unit set.
+ *
+ * The one declared Plan Adaptation (Issue #48, `safe-retry`): when a unit's first request fails with
+ * a retry-safe classification, the owner records the adaptation durably, then resubmits the
+ * byte-identical unit message once through the same Egress Gate evaluation inside the unchanged
+ * Execution Binding and envelope; the unit settles from the retry's outcome and both attempts count
+ * as usage. A non-retry-safe failure, an interruption, or an ambiguous turn is never retried.
  */
 /**
  * Remap the source ranges of a reused predecessor result onto the new unit: the i-th own block and
@@ -191,6 +198,8 @@ export class BaselineAnalysisExecutionOwner {
     const attemptId = randomUUID();
     const boundAt = new Date().toISOString();
     let bindingFacts: EgressBindingFacts | null = null;
+    // The payload digest the gate admitted for the turn in flight; recorded by reference, never the payload.
+    let admittedPayloadDigest: string | null = null;
     const harness = await prepareExecution({
       sessionId: harnessSessionId,
       route: LOCAL_DETERMINISTIC_ROUTE,
@@ -200,7 +209,9 @@ export class BaselineAnalysisExecutionOwner {
       adapterFactory: (codes) => new Ai7LocalDeterministicAdapter(fixture, BASELINE_PROMPT_CONTRACT_DIGEST, codes),
       gate: (payload) => {
         if (bindingFacts === null) return { decision: 'refuse', reason: 'binding-stale', detail: '执行绑定尚未持久化；未发送任何内容。' };
-        return evaluateEgress(payload, bindingFacts, { currentBindingDigest: () => currentBindingDigest, acceptedOutputDigests });
+        const decision = evaluateEgress(payload, bindingFacts, { currentBindingDigest: () => currentBindingDigest, acceptedOutputDigests });
+        admittedPayloadDigest = decision.decision === 'refuse' ? null : decision.payloadDigest;
+        return decision;
       },
       onTransmitTicket: () => {
         throw new ExecutionAdmissionError('EXECUTION_REMOTE_TICKET_FORBIDDEN', 'Provider Processing v1 下不得签发 transmit-remote。');
@@ -217,6 +228,7 @@ export class BaselineAnalysisExecutionOwner {
         runRecordId: facts.runRecordId,
         bookId: facts.bookId,
         planEnvelopeDigest: facts.planEnvelopeDigest,
+        planVersion: facts.planVersionOrdinal,
         runSourceScopeDigest: facts.runSourceScopeDigest,
         providerResolutionPlanDigest: facts.providerResolutionPlanDigest,
         coverageManifestDigest: facts.manifestDigest,
@@ -298,22 +310,61 @@ export class BaselineAnalysisExecutionOwner {
         }
       }
       let spanOrdinal = 0;
-      for (const unit of submittedUnits) {
-        if (active.interrupted) break;
-        active.progress.currentUnitOrdinal = unit.ordinal;
-        const requestDigest = unitRequestDigest(BASELINE_PROMPT_CONTRACT_DIGEST, unit.ordinal, unit.digest);
+      let adaptationOrdinal = 0;
+      const adaptedUnitOrdinals: number[] = [];
+      // One technical turn for one unit attempt: the span is recorded by reference with the attempt index
+      // and the admitted payload digest, and every attempt's usage counts toward the Run.
+      const submitAttempt = async (unit: CoverageManifestUnitProjection, attemptIndex: number) => {
+        admittedPayloadDigest = null;
         const turn = await harness.submitUnit(unitMessages.get(unit.ordinal)!);
+        const payloadDigest = admittedPayloadDigest;
         spanOrdinal += 1;
         spans.push(turn.span);
-        ledger.recordSpan(attemptId, spanOrdinal, turn.span, unit.ordinal);
+        ledger.recordSpan(attemptId, spanOrdinal, turn.span, unit.ordinal, { attemptIndex, payloadDigest });
         usage.requests += 1;
-        const candidate = turn.signals.find((signal) => signal.kind === 'contentCandidate');
         const usageSignal = turn.signals.find((signal) => signal.kind === 'usage');
         const unitUsage = usageSignal?.kind === 'usage' ? { inputTokens: usageSignal.usage.inputTokens, outputTokens: usageSignal.usage.outputTokens } : null;
         if (unitUsage !== null) {
           usage.inputTokens += unitUsage.inputTokens;
           usage.outputTokens += unitUsage.outputTokens;
         }
+        return { turn, unitUsage, payloadDigest };
+      };
+      for (const unit of submittedUnits) {
+        if (active.interrupted) break;
+        active.progress.currentUnitOrdinal = unit.ordinal;
+        const requestDigest = unitRequestDigest(BASELINE_PROMPT_CONTRACT_DIGEST, unit.ordinal, unit.digest);
+        let attempt = await submitAttempt(unit, 1);
+        let firstFailure: ClassifiedModelFailure | null = null;
+        if (attempt.turn.terminal === 'failed' && !active.interrupted) {
+          const failed = attempt.turn.signals.find((signal) => signal.kind === 'failed');
+          if (failed?.kind === 'failed' && failed.failure.retrySafe) {
+            // The `safe-retry` Plan Adaptation: recorded before the retry is dispatched, inside the unchanged
+            // envelope and Execution Binding; the retry repeats the byte-identical unit message once.
+            firstFailure = failed.failure;
+            adaptationOrdinal += 1;
+            ledger.recordAdaptation({
+              attemptId,
+              runRecordId: facts.runRecordId,
+              taskIntentId: facts.taskIntentId,
+              ordinal: adaptationOrdinal,
+              unitOrdinal: unit.ordinal,
+              classifiedReason: failed.failure.reason,
+              failureCode: failed.failure.code,
+              failureClass: failed.failure.failureClass,
+              failureStatus: failed.failure.status,
+              requestDigest,
+              firstPayloadDigest: attempt.payloadDigest,
+              planEnvelopeDigest: facts.planEnvelopeDigest,
+              bindingDigest,
+            });
+            adaptedUnitOrdinals.push(unit.ordinal);
+            if (currentBindingDigest !== bindingDigest) throw new ExecutionAdmissionError('EXECUTION_BINDING_DIGEST_DRIFT', '计划内调整期间执行绑定发生变化。');
+            attempt = await submitAttempt(unit, 2);
+          }
+        }
+        const { turn, unitUsage } = attempt;
+        const candidate = turn.signals.find((signal) => signal.kind === 'contentCandidate');
         const gap = (code: AnalysisGapProjection['code'], reason: string): void => {
           outcomes.push({ unitOrdinal: unit.ordinal, state: 'gap', code, reason });
           unitRecords.push({
@@ -342,7 +393,9 @@ export class BaselineAnalysisExecutionOwner {
           gap('contract-invalid', '技术回合完成但没有模型输出。');
         } else if (turn.terminal === 'failed') {
           const failure = turn.signals.find((signal) => signal.kind === 'failed');
-          gap('adapter-failure', failure?.kind === 'failed' ? `${failure.failure.reason}（${failure.failure.code}）` : '适配器失败。');
+          const reason = failure?.kind === 'failed' ? `${failure.failure.reason}（${failure.failure.code}）` : '适配器失败。';
+          // A second failure names both attempts; the unit is never retried again.
+          gap('adapter-failure', firstFailure === null ? reason : `第 1 次尝试：${firstFailure.reason}（${firstFailure.code}）；安全重试后第 2 次尝试：${reason}`);
         } else if (turn.terminal === 'interrupted') {
           const failure = turn.signals.find((signal) => signal.kind === 'interrupted');
           const egress = failure?.kind === 'interrupted' && failure.failure.failureClass === 'egress-refused';
@@ -380,6 +433,7 @@ export class BaselineAnalysisExecutionOwner {
         reduction,
         units: unitRecords,
         usage,
+        adaptedUnitOrdinals,
       });
       ledger.recordRunState(facts.runRecordId, terminalClassification, {
         detail: `运行终态：${terminalClassification}；结果集修订版 ${revision.revisionId}（Revision ${revision.ordinal}）。`,

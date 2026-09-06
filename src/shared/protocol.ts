@@ -1,4 +1,4 @@
-export const SERVICE_PROTOCOL_VERSION = 18 as const;
+export const SERVICE_PROTOCOL_VERSION = 19 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -1357,6 +1357,113 @@ export interface BaselineAnalysisRevisionUpdateProjection {
   counts: AnalysisReusePlanCounts;
 }
 
+/** The material plan fields whose drift between Plan Preview and Run Authorization requires a Plan Revision (Issue #48). */
+export type MaterialPlanField =
+  | 'providerBinding.providerId'
+  | 'providerBinding.modelId'
+  | 'providerBinding.adapterRevision'
+  | 'providerBinding.configurationRevision'
+  | 'providerBinding.credentialReference'
+  | 'artifactPin.identity'
+  | 'artifactPin.version'
+  | 'artifactPin.nativeCarrierSha256'
+  | 'artifactPin.sidecarRevision'
+  | 'artifactPin.sidecarSha256'
+  | 'selectedRange'
+  | 'predecessorRevision'
+  | 'runBudgetCeiling'
+  | 'outboundDataCategory'
+  | 'expectedOutcome';
+
+/** The material inputs one frozen plan version carries, re-derived from durable state for drift detection. */
+export interface MaterialPlanInputsProjection {
+  providerBinding: { providerId: string; modelId: string; adapterRevision: number; configurationRevision: number; credentialReference: string };
+  artifactPin: { identity: string; version: string; nativeCarrierSha256: string; sidecarRevision: number; sidecarSha256: string };
+  selectedRange: BaselineAnalysisSelectedRange | null;
+  predecessorRevision: { revisionId: string; ordinal: number; digest: string } | null;
+  runBudgetCeiling: 'unset';
+  outboundDataCategory: 'public-or-synthetic';
+  expectedOutcome: string;
+}
+
+export type PlanRevisionDiffValue =
+  | string
+  | number
+  | null
+  | BaselineAnalysisSelectedRange
+  | { revisionId: string; ordinal: number; digest: string }
+  | AnalysisReusePlanCounts;
+
+/** One line of a concise Plan Revision diff: the field, its prior and proposed values, and whether it is material or a derived consequence. */
+export interface PlanRevisionDiffEntryProjection {
+  field: MaterialPlanField | 'reusePlan.counts';
+  label: string;
+  prior: PlanRevisionDiffValue;
+  proposed: PlanRevisionDiffValue;
+  materiality: 'material' | 'derived';
+}
+
+/** The Plan Boundary Split inside the canonical envelope: declared in-envelope adaptations, material fields, and expected editor participation. */
+export interface PlanBoundarySplitProjection {
+  adaptable: ReadonlyArray<{ adaptationClass: 'safe-retry'; label: string; statement: string }>;
+  material: ReadonlyArray<{ field: MaterialPlanField; label: string }>;
+  participation: { expected: false; statement: string };
+}
+
+/** One immutable plan version of a Task Intent; only the latest can be `current` or `bound`. */
+export interface BaselineAnalysisPlanVersionProjection {
+  planVersionId: string;
+  ordinal: number;
+  planEnvelopeDigest: string;
+  /** The Plan Revision this version resolved; `null` for the first version. */
+  planRevisionId: string | null;
+  createdAt: string;
+  state: 'current' | 'superseded' | 'bound';
+}
+
+/**
+ * One Plan Revision: the immutable field-level diff between a prior plan version and the inputs
+ * proposed for the next one. A stored pending revision (`planRevisionId` set, `resolved` false)
+ * awaits `重新确认计划`; a live entry (`planRevisionId` null) reports durable-state drift the store
+ * detected on inspect and records at reconfirmation.
+ */
+export interface BaselineAnalysisPlanRevisionProjection {
+  planRevisionId: string | null;
+  priorPlanVersionId: string;
+  priorOrdinal: number;
+  nextOrdinal: number | null;
+  trigger: 'prepare' | 'inspect' | 'reconfirm';
+  /** The record time of a stored revision; `null` for a live entry derived on inspect. */
+  detectedAt: string | null;
+  changedFields: ReadonlyArray<string>;
+  diff: ReadonlyArray<PlanRevisionDiffEntryProjection>;
+  proposed: MaterialPlanInputsProjection;
+  resolved: boolean;
+  label: string;
+}
+
+/** One durable `safe-retry` Plan Adaptation of a Run: written before the retry is dispatched, inside the unchanged envelope and binding. */
+export interface BaselineAnalysisPlanAdaptationProjection {
+  adaptationId: string;
+  attemptId: string;
+  runRecordId: string;
+  taskIntentId: string;
+  ordinal: number;
+  unitOrdinal: number;
+  adaptationClass: 'safe-retry';
+  attemptIndex: number;
+  classifiedReason: string;
+  failureCode: string;
+  failureClass: string;
+  failureStatus: number | null;
+  requestDigest: string;
+  firstPayloadDigest: string | null;
+  planEnvelopeDigest: string;
+  bindingDigest: string;
+  recordedAt: string;
+  label: string;
+}
+
 export interface BaselineAnalysisExecutionBindingProjection {
   attemptId: string;
   bindingDigest: string;
@@ -1390,8 +1497,9 @@ export interface BaselineAnalysisResultSetRevisionProjection {
   adapterPin: { route: 'ai7-local-deterministic'; model: 'ai7-deterministic-fixture'; fixtureIdentity: string; fixtureSha256: string };
   bindingPin: { attemptId: string; bindingDigest: string; harnessSessionId: string; behaviorCompositionDigest: string; promptContractDigest: string };
   policyPin: { operationalScope: 'development-ci'; providerProcessingVersion: 'v1'; activePolicySetVersion: 'v3'; liveTransmissions: 0 };
-  provenance: { taskIntentId: string; runRecordId: string; attemptId: string };
-  /** Model usage of this Run: counted for recomputed units only; reused units cost nothing. */
+  /** The producing Run; from Issue #48 also the bound plan version and the in-envelope adaptations the Run recorded. */
+  provenance: { taskIntentId: string; runRecordId: string; attemptId: string; planVersion?: number; adaptations?: { count: number; unitOrdinals: ReadonlyArray<number> } };
+  /** Model usage of this Run: counted for recomputed units only, every attempt included; reused units cost nothing. */
   usage: { inputTokens: number; outputTokens: number; requests: number };
   update: BaselineAnalysisRevisionUpdateProjection;
   /** Per-unit lineage in unit order; every entry of `units` carries the same fact. */
@@ -1574,10 +1682,24 @@ export interface BaselineAnalysisProjection {
     summary: string;
     promptContractDigest: string;
     behaviorCompositionDigest: string;
+    /** The plan version this envelope freezes; `null` for an envelope recorded before plan versions existed. */
+    planVersion: number | null;
+    /** The Plan Boundary Split the envelope carries; `null` for an envelope recorded before it existed. */
+    boundary: PlanBoundarySplitProjection | null;
   };
+  /** The latest plan version of the latest Task with its frozen material inputs; `null` before preparation. */
+  planVersion: null | (BaselineAnalysisPlanVersionProjection & { materialInputs: MaterialPlanInputsProjection });
+  /** Every plan version of the latest Task in ordinal order. */
+  planVersions: ReadonlyArray<BaselineAnalysisPlanVersionProjection>;
+  /** Every recorded Plan Revision of the latest Task in detection order. */
+  planRevisions: ReadonlyArray<BaselineAnalysisPlanRevisionProjection>;
+  /** The Plan Revision `查看计划修订` shows while the current version is superseded; `null` when the plan is current or bound. */
+  planRevision: null | BaselineAnalysisPlanRevisionProjection;
   authorization: null | {
     authorizationId: string;
     planEnvelopeDigest: string;
+    /** The plan version the authorization bound, resolved from the envelope digest. */
+    planVersionOrdinal: number | null;
     origin: 'standard-direct';
     authority: 'standard-direct-dispatch' | 'record-only-no-dispatch';
     authorizedAt: string;
@@ -1588,6 +1710,8 @@ export interface BaselineAnalysisProjection {
     stateLabel: string;
     recordedAt: string;
     transitions: ReadonlyArray<{ sequence: number; state: BaselineAnalysisRunState; recordedAt: string; detail: string | null }>;
+    /** The Run's durable Plan Adaptations in record order; each sits in the timeline beside the transitions. */
+    adaptations: ReadonlyArray<BaselineAnalysisPlanAdaptationProjection>;
     blockedReasons: ReadonlyArray<string> | null;
     progress: { unitsTotal: number; unitsSettled: number; currentUnitOrdinal: number | null } | null;
     attempt: null | {
@@ -1596,7 +1720,7 @@ export interface BaselineAnalysisProjection {
       startedAt: string;
       credentialReadinessCheck: { slot: 'deepseek-api-key'; readiness: 'present' | 'missing'; valueReleased: false };
       executionBinding: BaselineAnalysisExecutionBindingProjection | null;
-      spans: ReadonlyArray<{ ordinal: number; harnessSessionId: string; startSeq: number; endSeq: number; unitOrdinal: number | null }>;
+      spans: ReadonlyArray<{ ordinal: number; harnessSessionId: string; startSeq: number; endSeq: number; unitOrdinal: number | null; attemptIndex: number; payloadDigest: string | null }>;
     };
   };
   /** The latest revision of the Book's Result Set; the current truth candidate, never an older one. */
@@ -1617,7 +1741,8 @@ export interface BaselineAnalysisProjection {
   history: null | BaselineAnalysisHistoryProjection;
   /** One exact revision opened read-only by `revisionId`; `null` when inspecting the latest. */
   inspectedRevision: null | { revision: BaselineAnalysisResultSetRevisionProjection; current: boolean; readOnly: true };
-  actions: { canPrepare: boolean; canAuthorize: boolean };
+  /** `canAuthorize` is false while a Plan Revision is pending; `canReconfirmPlan` is true exactly then. */
+  actions: { canPrepare: boolean; canAuthorize: boolean; canReconfirmPlan: boolean };
   namedNonEffects: ReadonlyArray<string>;
 }
 
@@ -2199,7 +2324,8 @@ export interface ServiceOperationMap {
     output: BaselineAnalysisProjection;
   };
   prepareBaselineAnalysis: {
-    input: { bookId: string; goal: BaselineAnalysisGoal; update: BaselineAnalysisUpdateRequest | null };
+    /** `reconfirm` is `重新确认计划`: resolve the pending Plan Revision of the prepared Task into its next plan version instead of preparing anew. */
+    input: { bookId: string; goal: BaselineAnalysisGoal; update: BaselineAnalysisUpdateRequest | null; reconfirm: boolean };
     output: ServiceJobProjection;
   };
   authorizeBaselineAnalysis: {
@@ -2431,7 +2557,7 @@ export interface RendererApi {
     planEnvelopeDigest: string;
   }): Promise<TaskAuthorizationProjection>;
   inspectBaselineAnalysis(input?: { revisionId: string | null }): Promise<BaselineAnalysisProjection>;
-  prepareBaselineAnalysis(input: { goal: BaselineAnalysisGoal; update: BaselineAnalysisUpdateRequest | null }): Promise<ServiceJobProjection>;
+  prepareBaselineAnalysis(input: { goal: BaselineAnalysisGoal; update: BaselineAnalysisUpdateRequest | null; reconfirm: boolean }): Promise<ServiceJobProjection>;
   authorizeBaselineAnalysis(input: { taskIntentId: string; planEnvelopeDigest: string }): Promise<BaselineAnalysisProjection>;
   listBooks(input: ServiceOperationMap['listBooks']['input']): Promise<BookSummaryPageProjection>;
   prepareNewBookReview(input: ServiceOperationMap['prepareNewBookReview']['input']): Promise<ReviewBeforeImportProjection>;

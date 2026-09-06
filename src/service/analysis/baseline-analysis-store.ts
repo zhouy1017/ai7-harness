@@ -11,6 +11,9 @@ import {
   type BaselineAnalysisGoal,
   type BaselineAnalysisHistoryEntryProjection,
   type BaselineAnalysisHistoryProjection,
+  type BaselineAnalysisPlanAdaptationProjection,
+  type BaselineAnalysisPlanRevisionProjection,
+  type BaselineAnalysisPlanVersionProjection,
   type BaselineAnalysisProjection,
   type BaselineAnalysisRangeOptionProjection,
   type BaselineAnalysisResultSetRevisionProjection,
@@ -25,8 +28,22 @@ import {
   type BaselineAnalysisUpdateRequest,
   type CoverageManifestProjection,
   type LaunchPolicyProjection,
+  type MaterialPlanInputsProjection,
   type ModelCredentialOperationState,
+  type PlanBoundarySplitProjection,
+  type PlanRevisionDiffEntryProjection,
 } from '../../shared/protocol.js';
+import {
+  PLAN_REVISION_REQUIRED_REASON,
+  buildPlanAdaptationRecord,
+  diffMaterialPlanInputs,
+  materialPlanInputsOfComponents,
+  planAdaptationLabel,
+  planBoundarySplit,
+  planRevisionLabel,
+  reusePlanCountsDiffEntry,
+  sameMaterialPlanInputs,
+} from './plan-boundary.js';
 import {
   AnalysisError,
   DIGEST_PATTERN,
@@ -167,7 +184,7 @@ export type BaselineAnalysisPreparationResult = {
 };
 
 export type BaselineAnalysisPrepareInput =
-  | { phase: 'start'; bookId: string; goal: BaselineAnalysisGoal; update: BaselineAnalysisUpdateRequest | null; launchPolicy: LaunchPolicyProjection }
+  | { phase: 'start'; bookId: string; goal: BaselineAnalysisGoal; update: BaselineAnalysisUpdateRequest | null; reconfirm: boolean; launchPolicy: LaunchPolicyProjection }
   | { phase: 'advance'; workId: string }
   | { phase: 'cancel'; workId: string }
   | { phase: 'cancel-all' };
@@ -189,11 +206,41 @@ export interface ExecutionUpdateFacts {
   readonly reusePlanDigest: string;
 }
 
+/** One `analysis_plan_versions` row: an immutable plan version of a Task Intent and the envelope digest it froze. */
+interface PlanVersionFacts {
+  readonly planVersionId: string;
+  readonly taskIntentId: string;
+  readonly ordinal: number;
+  readonly planRevisionId: string | null;
+  readonly planEnvelopeDigest: string;
+  readonly createdAt: string;
+}
+
+/** The input of one `safe-retry` Plan Adaptation the execution owner records before it dispatches the retry. */
+export interface PlanAdaptationInput {
+  readonly attemptId: string;
+  readonly runRecordId: string;
+  readonly taskIntentId: string;
+  readonly ordinal: number;
+  readonly unitOrdinal: number;
+  readonly classifiedReason: string;
+  readonly failureCode: string;
+  readonly failureClass: string;
+  readonly failureStatus: number | null;
+  readonly requestDigest: string;
+  readonly firstPayloadDigest: string | null;
+  readonly planEnvelopeDigest: string;
+  readonly bindingDigest: string;
+}
+
 /** Everything the execution owner needs from the frozen plan before the first model call. */
 export interface ExecutionPlanFacts {
   readonly bookId: string;
   readonly taskIntentId: string;
   readonly runRecordId: string;
+  /** The exact plan version the Run Authorization bound. */
+  readonly planVersionId: string;
+  readonly planVersionOrdinal: number;
   readonly checkpoint: ManuscriptCheckpointBinding;
   readonly manifest: CoverageManifestProjection;
   readonly manifestDigest: string;
@@ -215,6 +262,8 @@ export interface ExecutionBindingRecord {
   readonly runRecordId: string;
   readonly bookId: string;
   readonly planEnvelopeDigest: string;
+  /** The plan version the envelope digest identifies; a Plan Adaptation never changes it. */
+  readonly planVersion: number;
   readonly runSourceScopeDigest: string;
   readonly providerResolutionPlanDigest: string;
   readonly coverageManifestDigest: string;
@@ -263,6 +312,8 @@ export interface RevisionPersistInput {
   readonly reduction: BaselineReduction;
   readonly units: ReadonlyArray<UnitResultRecord>;
   readonly usage: { inputTokens: number; outputTokens: number; requests: number };
+  /** The units the Run adapted in-envelope (one safe retry each), disclosed in the revision's provenance. */
+  readonly adaptedUnitOrdinals: ReadonlyArray<number>;
 }
 
 function asString(value: unknown): string {
@@ -361,13 +412,17 @@ export class BaselineAnalysisStore {
         updateControls: revision === null ? null : this.#updateControls(bookId, revision, false),
         history,
         inspectedRevision,
-        actions: { canPrepare: revision === null, canAuthorize: false },
+        actions: { canPrepare: revision === null, canAuthorize: false, canReconfirmPlan: false },
       };
     }
-    const plan = this.#planRecords(intent.taskIntentId, intent.mode);
+    const versions = this.#planVersionFacts(intent.taskIntentId);
+    const currentVersion = versions.at(-1);
+    requireAnalysis(currentVersion !== undefined, 'ANALYSIS_RECORD_INVALID', '任务计划缺少计划版本。');
+    const plan = this.#planRecords(intent.taskIntentId, intent.mode, currentVersion.ordinal);
     const manifest = plan['coverage-manifest'] as CoverageManifestProjection;
     requireAnalysis(manifestDigestIsExact(manifest) && manifestCoversEveryBlock(manifest), 'ANALYSIS_RECORD_INVALID', '覆盖清单记录无效。');
-    const digests = this.#planDigests(intent.taskIntentId);
+    const digests = this.#planDigests(intent.taskIntentId, currentVersion.ordinal);
+    requireAnalysis(digests['plan-envelope'] === currentVersion.planEnvelopeDigest, 'ANALYSIS_RECORD_INVALID', '计划版本与其计划信封不一致。');
     const envelope = plan['plan-envelope'] as Record<string, unknown>;
     const authorization = this.#db.prepare('SELECT * FROM analysis_run_authorizations WHERE task_intent_id = ?').get(intent.taskIntentId) as SqlRow | undefined;
     const runRecord = this.#db.prepare('SELECT * FROM analysis_run_records WHERE task_intent_id = ?').get(intent.taskIntentId) as SqlRow | undefined;
@@ -384,6 +439,48 @@ export class BaselineAnalysisStore {
     const providerPlan = plan['provider-resolution-plan'] as BaselineAnalysisProjection['providerResolutionPlan'];
     const reusePlan = intent.mode === 'first-baseline' ? null : plan['reuse-plan'] as AnalysisReusePlanProjection;
     const update = intent.mode === 'first-baseline' ? null : this.#updateProjection(intent, reusePlan, digests['reuse-plan'] ?? null, revision);
+    // Drift detection (Issue #48): before authorization the material inputs are re-derived from durable
+    // state and compared with the frozen version; a stored pending Plan Revision takes precedence over a
+    // live difference. After authorization the bound plan is final for its Run and nothing is compared.
+    const materialInputs = materialPlanInputsOfComponents(plan, BASELINE_ANALYSIS_EXPECTED_OUTCOME);
+    const revisions = this.#planRevisionProjections(intent.taskIntentId, versions);
+    let planRevision: BaselineAnalysisPlanRevisionProjection | null = null;
+    if (authorization === undefined) {
+      planRevision = revisions.filter((entry) => !entry.resolved && entry.priorPlanVersionId === currentVersion.planVersionId).at(-1) ?? null;
+      if (planRevision === null) {
+        const live = this.#currentMaterialInputs(bookId, intent.mode, materialInputs.selectedRange);
+        const diff = diffMaterialPlanInputs(materialInputs, live);
+        if (diff.length > 0) {
+          const changedFields = diff.map((entry) => entry.field);
+          planRevision = {
+            planRevisionId: null,
+            priorPlanVersionId: currentVersion.planVersionId,
+            priorOrdinal: currentVersion.ordinal,
+            nextOrdinal: null,
+            trigger: 'inspect',
+            detectedAt: null,
+            changedFields,
+            diff,
+            proposed: live,
+            resolved: false,
+            label: planRevisionLabel(currentVersion.ordinal, null, changedFields),
+          };
+        }
+      }
+    }
+    const boundVersion = authorization === undefined ? null : versions.find((entry) => entry.planEnvelopeDigest === asString(authorization.plan_envelope_sha256)) ?? null;
+    const planVersions = versions.map((entry): BaselineAnalysisPlanVersionProjection => ({
+      planVersionId: entry.planVersionId,
+      ordinal: entry.ordinal,
+      planEnvelopeDigest: entry.planEnvelopeDigest,
+      planRevisionId: entry.planRevisionId,
+      createdAt: entry.createdAt,
+      state: boundVersion !== null && entry.planVersionId === boundVersion.planVersionId
+        ? 'bound'
+        : entry.ordinal < currentVersion.ordinal || planRevision !== null ? 'superseded' : 'current',
+    }));
+    // A predecessor drift is a different Task Intent, never a reconfirmation of this one.
+    const canReconfirmPlan = authorization === undefined && planRevision !== null && !planRevision.changedFields.includes('predecessorRevision');
     return {
       bookId,
       kind: BASELINE_ANALYSIS_KIND,
@@ -419,10 +516,17 @@ export class BaselineAnalysisStore {
         summary: asString(envelope.summary),
         promptContractDigest: asString(envelope.promptContractDigest),
         behaviorCompositionDigest: asString(envelope.behaviorCompositionDigest),
+        planVersion: typeof envelope.planVersion === 'number' ? envelope.planVersion : null,
+        boundary: isRecord(envelope.boundary) ? envelope.boundary as unknown as PlanBoundarySplitProjection : null,
       },
+      planVersion: { ...planVersions[planVersions.length - 1]!, materialInputs },
+      planVersions,
+      planRevisions: revisions,
+      planRevision,
       authorization: authorization === undefined ? null : {
         authorizationId: asString(authorization.authorization_id),
         planEnvelopeDigest: asString(authorization.plan_envelope_sha256),
+        planVersionOrdinal: boundVersion?.ordinal ?? null,
         origin: 'standard-direct',
         authority: asString(authorization.authority) as 'standard-direct-dispatch' | 'record-only-no-dispatch',
         authorizedAt: asString(authorization.authorized_at),
@@ -441,7 +545,11 @@ export class BaselineAnalysisStore {
       updateControls: revision === null ? null : this.#updateControls(bookId, revision, runIsActive(run?.state ?? null)),
       history,
       inspectedRevision,
-      actions: { canPrepare: false, canAuthorize: authorization === undefined && (update === null || update.predecessorCurrent) },
+      actions: {
+        canPrepare: false,
+        canAuthorize: authorization === undefined && (update === null || update.predecessorCurrent) && planRevision === null,
+        canReconfirmPlan,
+      },
       namedNonEffects: NON_EFFECTS,
     };
   }
@@ -462,6 +570,10 @@ export class BaselineAnalysisStore {
       providerResolutionPlan: null,
       executionPlan: null,
       planEnvelope: null,
+      planVersion: null,
+      planVersions: [],
+      planRevisions: [],
+      planRevision: null,
       authorization: null,
       run: null,
       resultSetRevision: null,
@@ -470,9 +582,222 @@ export class BaselineAnalysisStore {
       updateControls: null,
       history: null,
       inspectedRevision: null,
-      actions: { canPrepare: true, canAuthorize: false },
+      actions: { canPrepare: true, canAuthorize: false, canReconfirmPlan: false },
       namedNonEffects: NON_EFFECTS,
     };
+  }
+
+  // ---- plan versions and revisions ---------------------------------------------------------------
+
+  #planVersionFacts(taskIntentId: string): PlanVersionFacts[] {
+    return (this.#db.prepare('SELECT * FROM analysis_plan_versions WHERE task_intent_id = ? ORDER BY ordinal').all(taskIntentId) as SqlRow[])
+      .map((row) => this.#planVersionOfRow(row));
+  }
+
+  #planVersionOfRow(row: SqlRow): PlanVersionFacts {
+    const record = parseCanonicalJson(asString(row.canonical_json)) as Record<string, unknown>;
+    requireAnalysis(record.planVersionId === row.plan_version_id && record.ordinal === row.ordinal && record.planEnvelopeDigest === row.plan_envelope_sha256,
+      'ANALYSIS_RECORD_INVALID', '计划版本记录无效。');
+    return {
+      planVersionId: asString(row.plan_version_id),
+      taskIntentId: asString(row.task_intent_id),
+      ordinal: asNumber(row.ordinal),
+      planRevisionId: row.plan_revision_id === null ? null : asString(row.plan_revision_id),
+      planEnvelopeDigest: asString(row.plan_envelope_sha256),
+      createdAt: asString(row.created_at),
+    };
+  }
+
+  #planVersionByEnvelopeDigest(planEnvelopeDigest: string): PlanVersionFacts | undefined {
+    const row = this.#db.prepare('SELECT * FROM analysis_plan_versions WHERE plan_envelope_sha256 = ?').get(planEnvelopeDigest) as SqlRow | undefined;
+    return row === undefined ? undefined : this.#planVersionOfRow(row);
+  }
+
+  #envelopeDigestOfRun(runRecordId: string): string | undefined {
+    const row = this.#db.prepare(
+      `SELECT a.plan_envelope_sha256 FROM analysis_run_records r
+       JOIN analysis_run_authorizations a ON a.authorization_id = r.authorization_id
+       WHERE r.run_record_id = ?`,
+    ).get(runRecordId) as SqlRow | undefined;
+    return row === undefined ? undefined : asString(row.plan_envelope_sha256);
+  }
+
+  /** Every Plan Revision of a Task in detection order; resolved when a later version links back to it. */
+  #planRevisionProjections(taskIntentId: string, versions: ReadonlyArray<PlanVersionFacts>): BaselineAnalysisPlanRevisionProjection[] {
+    const rows = this.#db.prepare('SELECT * FROM analysis_plan_revisions WHERE task_intent_id = ? ORDER BY rowid').all(taskIntentId) as SqlRow[];
+    return rows.map((row) => {
+      const record = parseCanonicalJson(asString(row.canonical_json)) as Record<string, unknown>;
+      const planRevisionId = asString(row.plan_revision_id);
+      requireAnalysis(record.planRevisionId === planRevisionId && Array.isArray(record.diff) && isRecord(record.proposed), 'ANALYSIS_RECORD_INVALID', '计划修订记录无效。');
+      const diff = record.diff as PlanRevisionDiffEntryProjection[];
+      const changedFields = diff.map((entry) => entry.field);
+      const resolvedBy = versions.find((entry) => entry.planRevisionId === planRevisionId);
+      const priorOrdinal = asNumber(row.prior_ordinal);
+      const nextOrdinal = resolvedBy?.ordinal ?? null;
+      return {
+        planRevisionId,
+        priorPlanVersionId: asString(row.prior_plan_version_id),
+        priorOrdinal,
+        nextOrdinal,
+        trigger: asString(row.trigger_kind) as 'prepare' | 'inspect' | 'reconfirm',
+        detectedAt: asString(row.detected_at),
+        changedFields,
+        diff,
+        proposed: record.proposed as unknown as MaterialPlanInputsProjection,
+        resolved: resolvedBy !== undefined,
+        label: planRevisionLabel(priorOrdinal, nextOrdinal, changedFields),
+      };
+    });
+  }
+
+  /**
+   * The material plan inputs as durable state holds them now: the Main Editorial Role connection
+   * (provider, model, adapter and configuration revisions, Credential Reference — never its readiness),
+   * the highest pinned authority sidecar with its native carrier, the range the caller names, the
+   * Book's latest Result Set Revision for an update Task, and the fixed ceiling, category, and outcome
+   * class. Read leniently so a drifted pin or binding yields a diff rather than a refusal.
+   */
+  #currentMaterialInputs(bookId: string, mode: BaselineAnalysisTaskMode, selectedRange: BaselineAnalysisSelectedRange | null): MaterialPlanInputsProjection {
+    const connection = this.#db.prepare(
+      `SELECT provider_id, model_id, adapter_revision, configuration_revision, credential_reference
+       FROM model_service_connections WHERE connection_id = 'main-editorial-deepseek-v4-pro'`,
+    ).get() as SqlRow | undefined;
+    requireAnalysis(connection !== undefined, 'ANALYSIS_PROVIDER_BINDING_UNAVAILABLE', '主编辑角色缺少固定的凭据引用元数据。');
+    const pin = this.#db.prepare(
+      `SELECT pin.native_artifact_id, pin.sidecar_revision, pin.sidecar_sha256, installation.artifact_version, installation.content_sha256
+       FROM editorial_workspace_profile_book_pins pin
+       JOIN native_artifact_installations installation ON installation.artifact_id = pin.native_artifact_id
+       WHERE pin.book_id = ? AND pin.sidecar_id = 'ai7.editorial-workspace-profile.authority'
+       ORDER BY pin.sidecar_revision DESC LIMIT 1`,
+    ).get(bookId) as SqlRow | undefined;
+    requireAnalysis(pin !== undefined, 'ANALYSIS_ARTIFACT_PIN_UNAVAILABLE', '当前图书尚未固定编辑工作区方案。');
+    const latest = mode === 'first-baseline' ? undefined : this.#revisionRows(bookId).at(-1);
+    return {
+      providerBinding: {
+        providerId: asString(connection.provider_id),
+        modelId: asString(connection.model_id),
+        adapterRevision: asNumber(connection.adapter_revision),
+        configurationRevision: asNumber(connection.configuration_revision),
+        credentialReference: asString(connection.credential_reference),
+      },
+      artifactPin: {
+        identity: asString(pin.native_artifact_id),
+        version: asString(pin.artifact_version),
+        nativeCarrierSha256: asString(pin.content_sha256),
+        sidecarRevision: asNumber(pin.sidecar_revision),
+        sidecarSha256: asString(pin.sidecar_sha256),
+      },
+      selectedRange: mode === 'reanalyze-range' ? selectedRange : null,
+      predecessorRevision: latest === undefined ? null : { revisionId: asString(latest.revision_id), ordinal: asNumber(latest.ordinal), digest: asString(latest.sha256) },
+      runBudgetCeiling: 'unset',
+      outboundDataCategory: 'public-or-synthetic',
+      expectedOutcome: BASELINE_ANALYSIS_EXPECTED_OUTCOME,
+    };
+  }
+
+  /** The reuse-plan counts a version would derive for the given range against the latest revision; `null` for the first baseline. */
+  #reusePlanCountsFor(bookId: string, mode: BaselineAnalysisTaskMode, manifest: CoverageManifestProjection, selectedRange: BaselineAnalysisSelectedRange | null): AnalysisReusePlanCounts | null {
+    if (mode === 'first-baseline') return null;
+    const latestRow = this.#revisionRows(bookId).at(-1);
+    if (latestRow === undefined) return null;
+    return deriveReusePlan({ mode, selectedRange: mode === 'reanalyze-range' ? selectedRange : null, manifest, predecessor: this.#predecessorFacts(latestRow) }).counts;
+  }
+
+  #insertPlanRevision(input: {
+    taskIntentId: string;
+    prior: PlanVersionFacts;
+    priorInputs: MaterialPlanInputsProjection;
+    proposed: MaterialPlanInputsProjection;
+    diff: ReadonlyArray<PlanRevisionDiffEntryProjection>;
+    trigger: 'prepare' | 'reconfirm';
+    instant: string;
+  }): string {
+    const planRevisionId = randomUUID();
+    const record = canonicalRecord({
+      planRevisionId,
+      taskIntentId: input.taskIntentId,
+      priorPlanVersionId: input.prior.planVersionId,
+      priorOrdinal: input.prior.ordinal,
+      trigger: input.trigger,
+      detectedAt: input.instant,
+      prior: input.priorInputs,
+      proposed: input.proposed,
+      diff: input.diff,
+    });
+    this.#db.prepare(
+      `INSERT INTO analysis_plan_revisions(plan_revision_id, task_intent_id, prior_plan_version_id, prior_ordinal, trigger_kind, detected_at, canonical_json, sha256)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(planRevisionId, input.taskIntentId, input.prior.planVersionId, input.prior.ordinal, input.trigger, input.instant, record.json, record.digest);
+    return planRevisionId;
+  }
+
+  /**
+   * A prepared, unauthorized Task prepared again (Issue #48). The same material inputs return the
+   * frozen plan. Different inputs — a different `重新分析所选范围` range, or durable-state drift of the
+   * Provider Binding, artifact pin, ceiling, category, or outcome — record one pending Plan Revision
+   * with its field-level diff and the derived reuse-plan counts; the prepared version is thereby
+   * superseded and cannot be authorized. `重新确认计划` (`reconfirm`) resolves the pending revision — or
+   * records the live drift as one — and writes the next plan version on the same Task Intent.
+   */
+  #revisePreparedPlan(
+    bookId: string,
+    intent: IntentFacts,
+    existing: BaselineAnalysisProjection,
+    requestedRange: BaselineAnalysisSelectedRange | null,
+    reconfirm: boolean,
+  ): BaselineAnalysisProjection {
+    const current = this.#planVersionFacts(intent.taskIntentId).at(-1);
+    requireAnalysis(current !== undefined && existing.planVersion !== null && existing.coverageManifest !== null, 'ANALYSIS_RECORD_INVALID', '任务计划缺少计划版本。');
+    const stored = existing.planVersion.materialInputs;
+    const proposed = this.#currentMaterialInputs(bookId, intent.mode, requestedRange);
+    const pending = existing.planRevision;
+    const instant = new Date().toISOString();
+    const manifest = existing.coverageManifest;
+    const diffFor = (): PlanRevisionDiffEntryProjection[] => {
+      const entries = diffMaterialPlanInputs(stored, proposed);
+      const storedCounts = existing.update?.reusePlan?.counts ?? null;
+      const proposedCounts = this.#reusePlanCountsFor(bookId, intent.mode, manifest, proposed.selectedRange);
+      const derived = storedCounts === null || proposedCounts === null ? null : reusePlanCountsDiffEntry(storedCounts, proposedCounts);
+      return derived === null ? entries : [...entries, derived];
+    };
+    if (!reconfirm) {
+      if (sameMaterialPlanInputs(stored, proposed)) return existing;
+      if (pending !== null && pending.planRevisionId !== null && sameMaterialPlanInputs(pending.proposed, proposed)) return existing;
+      const diff = diffFor();
+      requireAnalysis(!diff.some((entry) => entry.field === 'predecessorRevision'), 'ANALYSIS_PREDECESSOR_DRIFT',
+        '该任务的前一修订版已不再是结果集的最新修订版；请基于最新修订版重新准备更新。');
+      transact(this.#db, () => this.#insertPlanRevision({ taskIntentId: intent.taskIntentId, prior: current, priorInputs: stored, proposed, diff, trigger: 'prepare', instant }));
+      return this.inspect(bookId);
+    }
+    requireAnalysis(pending !== null, 'ANALYSIS_PLAN_REVISION_ABSENT', '当前计划没有待重新确认的计划修订。');
+    requireAnalysis(existing.actions.canReconfirmPlan, 'ANALYSIS_PREDECESSOR_DRIFT', '该任务的前一修订版已不再是结果集的最新修订版；请基于最新修订版重新准备更新。');
+    requireAnalysis(sameMaterialPlanInputs(pending.proposed, proposed), 'ANALYSIS_PLAN_REVISION_STALE', '计划修订已过期；请重新查看计划修订后再确认。');
+    const checkpointRow = this.#db.prepare('SELECT * FROM analysis_task_input_checkpoints WHERE task_intent_id = ?').get(intent.taskIntentId) as SqlRow | undefined;
+    requireAnalysis(checkpointRow !== undefined, 'ANALYSIS_RECORD_INVALID', '任务输入固定点缺失。');
+    const checkpoint: ManuscriptCheckpointBinding = {
+      bookId,
+      manuscriptId: asString(checkpointRow.manuscript_id),
+      branchId: asString(checkpointRow.branch_id),
+      revisionId: asString(checkpointRow.revision_id),
+      revisionLabel: asString(checkpointRow.revision_label),
+      revisionDigest: asString(checkpointRow.revision_digest),
+      journalSequence: asNumber(checkpointRow.journal_sequence),
+      createdForDirtyJournal: asNumber(checkpointRow.created_for_dirty_journal) === 1,
+    };
+    transact(this.#db, () => {
+      const planRevisionId = pending.planRevisionId ??
+        this.#insertPlanRevision({ taskIntentId: intent.taskIntentId, prior: current, priorInputs: stored, proposed, diff: diffFor(), trigger: 'reconfirm', instant });
+      this.#writePlanVersion({
+        intent,
+        checkpoint,
+        checkpointDigest: asString(checkpointRow.sha256),
+        ordinal: current.ordinal + 1,
+        selectedRange: proposed.selectedRange,
+        planRevisionId,
+        instant,
+      });
+    });
+    return this.inspect(bookId);
   }
 
   #latestIntentRow(bookId: string): SqlRow | undefined {
@@ -496,9 +821,9 @@ export class BaselineAnalysisStore {
     };
   }
 
-  /** The frozen plan components of one Task; an update Task must also carry its `reuse-plan`. */
-  #planRecords(taskIntentId: string, mode: BaselineAnalysisTaskMode | 'any'): Record<string, unknown> {
-    const rows = this.#db.prepare('SELECT component, canonical_json FROM analysis_plan_records WHERE task_intent_id = ?').all(taskIntentId) as SqlRow[];
+  /** The frozen plan components of one plan version of a Task; an update Task must also carry its `reuse-plan`. */
+  #planRecords(taskIntentId: string, mode: BaselineAnalysisTaskMode | 'any', planVersion: number): Record<string, unknown> {
+    const rows = this.#db.prepare('SELECT component, canonical_json FROM analysis_plan_records WHERE task_intent_id = ? AND plan_version = ?').all(taskIntentId, planVersion) as SqlRow[];
     const records: Record<string, unknown> = {};
     for (const row of rows) records[asString(row.component)] = parseCanonicalJson(asString(row.canonical_json));
     const required = ['manuscript-pin', 'artifact-pin', 'run-source-scope', 'coverage-manifest', 'provider-resolution-plan', 'execution-plan', 'plan-envelope'];
@@ -509,8 +834,8 @@ export class BaselineAnalysisStore {
     return records;
   }
 
-  #planDigests(taskIntentId: string): Record<string, string> {
-    return Object.fromEntries((this.#db.prepare('SELECT component, sha256 FROM analysis_plan_records WHERE task_intent_id = ?').all(taskIntentId) as SqlRow[])
+  #planDigests(taskIntentId: string, planVersion: number): Record<string, string> {
+    return Object.fromEntries((this.#db.prepare('SELECT component, sha256 FROM analysis_plan_records WHERE task_intent_id = ? AND plan_version = ?').all(taskIntentId, planVersion) as SqlRow[])
       .map((row) => [asString(row.component), asString(row.sha256)]));
   }
 
@@ -535,13 +860,18 @@ export class BaselineAnalysisStore {
       const attemptJson = parseCanonicalJson(asString(attemptRow.canonical_json)) as Record<string, unknown>;
       const check = attemptJson.credentialReadinessCheck as { slot: 'deepseek-api-key'; readiness: 'present' | 'missing' };
       const bindingRow = this.#db.prepare('SELECT * FROM analysis_execution_bindings WHERE attempt_id = ?').get(attemptId) as SqlRow | undefined;
-      const spans = (this.#db.prepare('SELECT * FROM analysis_harness_spans WHERE attempt_id = ? ORDER BY ordinal').all(attemptId) as SqlRow[]).map((row) => ({
-        ordinal: asNumber(row.ordinal),
-        harnessSessionId: asString(row.harness_session_id),
-        startSeq: asNumber(row.start_seq),
-        endSeq: asNumber(row.end_seq),
-        unitOrdinal: row.unit_ordinal === null ? null : asNumber(row.unit_ordinal),
-      }));
+      const spans = (this.#db.prepare('SELECT * FROM analysis_harness_spans WHERE attempt_id = ? ORDER BY ordinal').all(attemptId) as SqlRow[]).map((row) => {
+        const record = parseCanonicalJson(asString(row.canonical_json)) as Record<string, unknown>;
+        return {
+          ordinal: asNumber(row.ordinal),
+          harnessSessionId: asString(row.harness_session_id),
+          startSeq: asNumber(row.start_seq),
+          endSeq: asNumber(row.end_seq),
+          unitOrdinal: row.unit_ordinal === null ? null : asNumber(row.unit_ordinal),
+          attemptIndex: typeof record.attemptIndex === 'number' ? record.attemptIndex : 1,
+          payloadDigest: typeof record.payloadDigest === 'string' ? record.payloadDigest : null,
+        };
+      });
       attempt = {
         attemptId,
         ordinal: 1,
@@ -551,12 +881,22 @@ export class BaselineAnalysisStore {
         spans,
       };
     }
+    const adaptations = (this.#db.prepare(
+      `SELECT adaptation.* FROM analysis_plan_adaptations adaptation
+       JOIN analysis_execution_attempts attempt ON attempt.attempt_id = adaptation.attempt_id
+       WHERE attempt.run_record_id = ? ORDER BY adaptation.ordinal`,
+    ).all(runRecordId) as SqlRow[]).map((row): BaselineAnalysisPlanAdaptationProjection => {
+      const record = parseCanonicalJson(asString(row.canonical_json)) as Omit<BaselineAnalysisPlanAdaptationProjection, 'label'>;
+      requireAnalysis(record.adaptationId === row.adaptation_id && record.adaptationClass === 'safe-retry', 'ANALYSIS_RECORD_INVALID', '计划内调整记录无效。');
+      return { ...record, label: planAdaptationLabel(record.unitOrdinal, record.classifiedReason) };
+    });
     return {
       runRecordId,
       state: current.state,
       stateLabel: RUN_STATE_LABELS[current.state],
       recordedAt: asString(runRecord.recorded_at),
       transitions,
+      adaptations,
       blockedReasons: current.state === 'blocked-before-dispatch' ? BLOCKED_REASONS : null,
       progress: current.state === 'admitted' || current.state === 'executing' ? progress(runRecordId) : null,
       attempt,
@@ -758,10 +1098,14 @@ export class BaselineAnalysisStore {
     };
   }
 
-  /** The predecessor facts a reuse plan is derived against, read from the immutable revision rows. */
+  /** The predecessor facts a reuse plan is derived against, read from the immutable revision rows and the plan version its Run bound. */
   #predecessorFacts(row: SqlRow): ReusePlanPredecessor {
     const revisionId = asString(row.revision_id);
-    const manifest = this.#planRecords(asString(row.task_intent_id), 'any')['coverage-manifest'] as CoverageManifestProjection;
+    const taskIntentId = asString(row.task_intent_id);
+    const envelopeDigest = this.#envelopeDigestOfRun(asString(row.run_record_id));
+    const version = (envelopeDigest === undefined ? undefined : this.#planVersionByEnvelopeDigest(envelopeDigest)) ?? this.#planVersionFacts(taskIntentId).at(-1);
+    requireAnalysis(version !== undefined, 'ANALYSIS_RECORD_INVALID', '前一修订版的计划版本缺失。');
+    const manifest = this.#planRecords(taskIntentId, 'any', version.ordinal)['coverage-manifest'] as CoverageManifestProjection;
     requireAnalysis(manifestDigestIsExact(manifest) && manifest.digest === asString(row.coverage_manifest_sha256),
       'ANALYSIS_RECORD_INVALID', '前一修订版的覆盖清单记录无效。');
     const unitStates = (this.#db.prepare('SELECT unit_ordinal, state FROM analysis_unit_results WHERE revision_id = ? ORDER BY unit_ordinal').all(revisionId) as SqlRow[])
@@ -804,7 +1148,8 @@ export class BaselineAnalysisStore {
         manuscriptPin: { revisionLabel: pin.revisionLabel, revisionId: pin.revisionId, revisionDigest: pin.revisionDigest },
       },
       predecessorCurrent: latest !== null && latest.revisionId === intent.predecessorRevisionId && latest.digest === asString(predecessorRow.sha256),
-      selectedRange: intent.selectedRange,
+      // The current plan version's range; the intent row keeps the range first requested.
+      selectedRange: reusePlan === null ? intent.selectedRange : reusePlan.selectedRange,
       reusePlan,
       reusePlanDigest,
     };
@@ -918,11 +1263,16 @@ export class BaselineAnalysisStore {
     }
     const binding = this.#binding(input.bookId);
     const latestIntent = existing.taskIntent === null ? null : this.#intentFacts(this.#latestIntentRow(input.bookId)!);
-    const reusable = latestIntent !== null && existing.run === null && latestIntent.mode === mode &&
-      sameRange(latestIntent.selectedRange, selectedRange) && latestIntent.predecessorRevisionId === (latest?.revisionId ?? null);
-    if (reusable && existing.checkpoint !== null) {
-      return { done: true, workId: null, completed: 1, total: 1, projection: existing };
+    // The same Task: the latest intent, no Run yet, the same update mode and the same predecessor. A
+    // prepared one is revised in place (Issue #48); an interrupted preparation is resumed only for the
+    // same request; anything else is a new Task Intent.
+    const sameTask = latestIntent !== null && existing.run === null && latestIntent.mode === mode &&
+      latestIntent.predecessorRevisionId === (latest?.revisionId ?? null);
+    if (sameTask && existing.checkpoint !== null) {
+      return { done: true, workId: null, completed: 1, total: 1, projection: this.#revisePreparedPlan(input.bookId, latestIntent, existing, selectedRange, input.reconfirm) };
     }
+    requireAnalysis(!input.reconfirm, 'ANALYSIS_PLAN_REVISION_ABSENT', '当前没有已冻结且待重新确认的计划。');
+    const reusable = sameTask && sameRange(latestIntent.selectedRange, selectedRange);
     const taskIntentId = reusable ? latestIntent.taskIntentId : randomUUID();
     if (!reusable) {
       const createdAt = new Date().toISOString();
@@ -984,8 +1334,51 @@ export class BaselineAnalysisStore {
     const intentRow = this.#db.prepare('SELECT * FROM analysis_task_intents WHERE task_intent_id = ?').get(taskIntentId) as SqlRow | undefined;
     requireAnalysis(intentRow !== undefined, 'ANALYSIS_RECORD_INVALID', '任务意图缺失。');
     const intent = this.#intentFacts(intentRow);
-    const facts = this.#binding(checkpoint.bookId, checkpoint);
+    // The checkpoint must still be the working head when the plan is first frozen.
+    this.#binding(checkpoint.bookId, checkpoint);
     const instant = new Date().toISOString();
+    const checkpointRecord = canonicalRecord({
+      branchId: checkpoint.branchId,
+      createdForDirtyJournal: checkpoint.createdForDirtyJournal,
+      journalSequence: checkpoint.journalSequence,
+      manuscriptId: checkpoint.manuscriptId,
+      purpose,
+      revisionDigest: checkpoint.revisionDigest,
+      revisionId: checkpoint.revisionId,
+      revisionLabel: checkpoint.revisionLabel,
+      taskIntentId,
+    });
+    this.#db.prepare(
+      `INSERT INTO analysis_task_input_checkpoints(
+         task_intent_id, manuscript_id, branch_id, revision_id, revision_label, revision_digest,
+         journal_sequence, purpose, created_for_dirty_journal, canonical_json, sha256, created_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(taskIntentId, checkpoint.manuscriptId, checkpoint.branchId, checkpoint.revisionId, checkpoint.revisionLabel,
+      checkpoint.revisionDigest, checkpoint.journalSequence, purpose, checkpoint.createdForDirtyJournal ? 1 : 0,
+      checkpointRecord.json, checkpointRecord.digest, instant);
+    this.#writePlanVersion({ intent, checkpoint, checkpointDigest: checkpointRecord.digest, ordinal: 1, selectedRange: intent.selectedRange, planRevisionId: null, instant });
+  }
+
+  /**
+   * Freeze one plan version of a Task: the seven components (eight for an update Task) derived from
+   * the checkpoint revision, the current Provider Binding, the artifact pin, and the version's own
+   * selected range, plus the envelope that pins their digests, the prompt contract, the behavior
+   * composition, the version ordinal, and the Plan Boundary Split; then the version row itself.
+   * Version 1 is written with the checkpoint; a later version resolves a Plan Revision.
+   */
+  #writePlanVersion(input: {
+    intent: IntentFacts;
+    checkpoint: ManuscriptCheckpointBinding;
+    checkpointDigest: string;
+    ordinal: number;
+    selectedRange: BaselineAnalysisSelectedRange | null;
+    planRevisionId: string | null;
+    instant: string;
+  }): { planVersionId: string; planEnvelopeDigest: string } {
+    const { intent, checkpoint, ordinal, instant } = input;
+    const taskIntentId = intent.taskIntentId;
+    // A later version never re-validates the checkpoint against the working head: manuscript edits are non-material.
+    const facts = this.#binding(checkpoint.bookId, checkpoint, ordinal === 1);
     const blocks = this.readRevisionBlocks(checkpoint.manuscriptId, checkpoint.revisionId);
     const manifest = deriveCoverageManifest({
       bookId: checkpoint.bookId,
@@ -1004,22 +1397,11 @@ export class BaselineAnalysisStore {
         'ANALYSIS_PREDECESSOR_DRIFT', '该任务的前一修订版已不再是结果集的最新修订版；请基于最新修订版重新准备更新。');
       reusePlan = deriveReusePlan({
         mode: intent.mode,
-        selectedRange: intent.mode === 'reanalyze-range' ? requireSelectedRange(intent.selectedRange, manifest.totalBlocks) : null,
+        selectedRange: intent.mode === 'reanalyze-range' ? requireSelectedRange(input.selectedRange, manifest.totalBlocks) : null,
         manifest,
         predecessor: this.#predecessorFacts(latestRow),
       });
     }
-    const checkpointRecord = canonicalRecord({
-      branchId: checkpoint.branchId,
-      createdForDirtyJournal: checkpoint.createdForDirtyJournal,
-      journalSequence: checkpoint.journalSequence,
-      manuscriptId: checkpoint.manuscriptId,
-      purpose,
-      revisionDigest: checkpoint.revisionDigest,
-      revisionId: checkpoint.revisionId,
-      revisionLabel: checkpoint.revisionLabel,
-      taskIntentId,
-    });
     const manuscriptPin = {
       bookId: checkpoint.bookId,
       manuscriptId: checkpoint.manuscriptId,
@@ -1111,7 +1493,7 @@ export class BaselineAnalysisStore {
         ? '计划已冻结；远程绑定被 Provider Processing v1 拒绝，执行绑定至 AI7 本地确定性模型适配器'
         : '计划已冻结；远程绑定被 Provider Processing v1 拒绝，且没有可执行的本地路由',
       taskIntentId,
-      checkpointDigest: checkpointRecord.digest,
+      checkpointDigest: input.checkpointDigest,
       manuscriptPinDigest: records['manuscript-pin']!.digest,
       artifactPinDigest: records['artifact-pin']!.digest,
       runSourceScopeDigest: records['run-source-scope']!.digest,
@@ -1120,6 +1502,9 @@ export class BaselineAnalysisStore {
       executionPlanDigest: records['execution-plan']!.digest,
       promptContractDigest: BASELINE_PROMPT_CONTRACT_DIGEST,
       behaviorCompositionDigest: composition.digest,
+      // The plan version and the Plan Boundary Split are part of the canonical envelope (Issue #48).
+      planVersion: ordinal,
+      boundary: planBoundarySplit(),
     };
     const envelope = canonicalRecord(reusePlan === null ? envelopeBase : {
       ...envelopeBase,
@@ -1128,19 +1513,18 @@ export class BaselineAnalysisStore {
       predecessorRevisionDigest: reusePlan.predecessor.digest,
       reusePlanDigest: records['reuse-plan']!.digest,
     });
-    this.#db.prepare(
-      `INSERT INTO analysis_task_input_checkpoints(
-         task_intent_id, manuscript_id, branch_id, revision_id, revision_label, revision_digest,
-         journal_sequence, purpose, created_for_dirty_journal, canonical_json, sha256, created_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run(taskIntentId, checkpoint.manuscriptId, checkpoint.branchId, checkpoint.revisionId, checkpoint.revisionLabel,
-      checkpoint.revisionDigest, checkpoint.journalSequence, purpose, checkpoint.createdForDirtyJournal ? 1 : 0,
-      checkpointRecord.json, checkpointRecord.digest, instant);
     const insert = this.#db.prepare(
-      'INSERT INTO analysis_plan_records(task_intent_id, component, canonical_json, sha256, created_at) VALUES (?, ?, ?, ?, ?)',
+      'INSERT INTO analysis_plan_records(task_intent_id, plan_version, component, canonical_json, sha256, created_at) VALUES (?, ?, ?, ?, ?, ?)',
     );
-    for (const [component, record] of Object.entries(records)) insert.run(taskIntentId, component, record.json, record.digest, instant);
-    insert.run(taskIntentId, 'plan-envelope', envelope.json, envelope.digest, instant);
+    for (const [component, record] of Object.entries(records)) insert.run(taskIntentId, ordinal, component, record.json, record.digest, instant);
+    insert.run(taskIntentId, ordinal, 'plan-envelope', envelope.json, envelope.digest, instant);
+    const planVersionId = randomUUID();
+    const version = canonicalRecord({ planVersionId, taskIntentId, ordinal, planRevisionId: input.planRevisionId, planEnvelopeDigest: envelope.digest, createdAt: instant });
+    this.#db.prepare(
+      `INSERT INTO analysis_plan_versions(plan_version_id, task_intent_id, ordinal, plan_revision_id, plan_envelope_sha256, created_at, canonical_json, sha256)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(planVersionId, taskIntentId, ordinal, input.planRevisionId, envelope.digest, instant, version.json, version.digest);
+    return { planVersionId, planEnvelopeDigest: envelope.digest };
   }
 
   // ---- authorization -----------------------------------------------------------------------------
@@ -1149,9 +1533,18 @@ export class BaselineAnalysisStore {
     requireAnalysis(UUID_PATTERN.test(bookId) && UUID_PATTERN.test(taskIntentId) && DIGEST_PATTERN.test(planEnvelopeDigest),
       'ANALYSIS_AUTHORIZATION_INVALID', '任务运行授权参数无效。');
     const prepared = this.inspect(bookId);
-    requireAnalysis(prepared.taskIntent?.taskIntentId === taskIntentId && prepared.planEnvelope?.digest === planEnvelopeDigest,
+    requireAnalysis(prepared.taskIntent?.taskIntentId === taskIntentId && prepared.planEnvelope !== null && prepared.planVersion !== null,
       'ANALYSIS_AUTHORIZATION_STALE', '任务计划已经变化；无法记录该授权。');
-    if (prepared.authorization !== null) return { projection: prepared, dispatchRunRecordId: null };
+    if (prepared.authorization !== null) {
+      requireAnalysis(prepared.planEnvelope.digest === planEnvelopeDigest, 'ANALYSIS_AUTHORIZATION_STALE', '任务计划已经变化；无法记录该授权。');
+      return { projection: prepared, dispatchRunRecordId: null };
+    }
+    // Version-bound authorization (Issue #48): a superseded plan version, or the current version while a
+    // Plan Revision is pending, is refused with the safe reason `plan-revision-required` and no Run Record.
+    const namesSupersededVersion = prepared.planVersions.some((version) => version.planEnvelopeDigest === planEnvelopeDigest && version.ordinal < prepared.planVersion!.ordinal);
+    requireAnalysis(!namesSupersededVersion && prepared.planRevision === null, 'ANALYSIS_PLAN_REVISION_REQUIRED',
+      `计划需要修订（${PLAN_REVISION_REQUIRED_REASON}）：该计划版本已被取代或有待重新确认的计划修订；请查看计划修订并重新确认计划后再授权。`);
+    requireAnalysis(prepared.planEnvelope.digest === planEnvelopeDigest, 'ANALYSIS_AUTHORIZATION_STALE', '任务计划已经变化；无法记录该授权。');
     requireAnalysis(prepared.state === 'prepared', 'ANALYSIS_AUTHORIZATION_INVALID', '任务计划尚未准备完成。');
     // An update Task is re-verified against the Result Set: its predecessor must still be the latest revision.
     requireAnalysis(prepared.update === null || prepared.update.predecessorCurrent,
@@ -1161,7 +1554,15 @@ export class BaselineAnalysisStore {
     const runRecordId = randomUUID();
     const instant = new Date().toISOString();
     const authority = dispatchAllowed ? 'standard-direct-dispatch' : 'record-only-no-dispatch';
-    const authorization = canonicalRecord({ authorizationId, origin: 'standard-direct', planEnvelopeDigest, taskIntentId, authority });
+    const authorization = canonicalRecord({
+      authorizationId,
+      origin: 'standard-direct',
+      planEnvelopeDigest,
+      planVersionId: prepared.planVersion.planVersionId,
+      planVersionOrdinal: prepared.planVersion.ordinal,
+      taskIntentId,
+      authority,
+    });
     const run = canonicalRecord({ runRecordId, authorizationId, taskIntentId, recordedAt: instant });
     transact(this.#db, () => {
       this.#db.prepare(
@@ -1220,8 +1621,11 @@ export class BaselineAnalysisStore {
     const intent = this.#intentFacts(intentRow);
     const checkpointRow = this.#db.prepare('SELECT * FROM analysis_task_input_checkpoints WHERE task_intent_id = ?').get(intent.taskIntentId) as SqlRow | undefined;
     requireAnalysis(checkpointRow !== undefined, 'ANALYSIS_RECORD_INVALID', '任务输入固定点缺失。');
-    const plan = this.#planRecords(intent.taskIntentId, intent.mode);
-    const digests = this.#planDigests(intent.taskIntentId);
+    // The Run executes exactly the plan version its authorization bound, never a later one.
+    const version = this.#planVersionByEnvelopeDigest(asString(run.plan_envelope_sha256));
+    requireAnalysis(version !== undefined && version.taskIntentId === intent.taskIntentId, 'ANALYSIS_RECORD_INVALID', '运行授权绑定的计划版本缺失。');
+    const plan = this.#planRecords(intent.taskIntentId, intent.mode, version.ordinal);
+    const digests = this.#planDigests(intent.taskIntentId, version.ordinal);
     const manifest = plan['coverage-manifest'] as CoverageManifestProjection;
     requireAnalysis(manifestDigestIsExact(manifest), 'ANALYSIS_RECORD_INVALID', '覆盖清单记录无效。');
     const providerPlan = plan['provider-resolution-plan'] as NonNullable<BaselineAnalysisProjection['providerResolutionPlan']>;
@@ -1239,13 +1643,13 @@ export class BaselineAnalysisStore {
         'ANALYSIS_PREDECESSOR_DRIFT', '该任务的前一修订版已不再是结果集的最新修订版；未开始执行。');
       const predecessor = this.#predecessorFacts(predecessorRow);
       const stored = plan['reuse-plan'] as AnalysisReusePlanProjection;
-      const rederived = deriveReusePlan({ mode: intent.mode, selectedRange: intent.selectedRange, manifest, predecessor });
+      const rederived = deriveReusePlan({ mode: intent.mode, selectedRange: stored.selectedRange, manifest, predecessor });
       const record = reusePlanRecord(rederived);
       requireAnalysis(record.digest === digests['reuse-plan'] && canonicalJson(stored) === record.json && envelope.reusePlanDigest === record.digest,
         'ANALYSIS_REUSE_PLAN_DRIFT', '重新推导的复用计划与冻结计划不一致；未开始执行。');
       update = {
         mode: intent.mode,
-        selectedRange: intent.selectedRange,
+        selectedRange: stored.selectedRange,
         predecessor: {
           revisionId: predecessor.revisionId,
           ordinal: predecessor.ordinal,
@@ -1261,6 +1665,8 @@ export class BaselineAnalysisStore {
       bookId: intent.bookId,
       taskIntentId: intent.taskIntentId,
       runRecordId,
+      planVersionId: version.planVersionId,
+      planVersionOrdinal: version.ordinal,
       checkpoint: {
         bookId: intent.bookId,
         manuscriptId: asString(checkpointRow.manuscript_id),
@@ -1383,14 +1789,36 @@ export class BaselineAnalysisStore {
     return { bindingDigest: binding.digest };
   }
 
-  recordSpan(attemptId: string, ordinal: number, span: { sessionId: string; startSeq: number; endSeq: number }, unitOrdinal: number | null): void {
+  /** One technical turn by reference; from Issue #48 also which attempt of its unit it was and the payload digest the gate admitted. */
+  recordSpan(
+    attemptId: string,
+    ordinal: number,
+    span: { sessionId: string; startSeq: number; endSeq: number },
+    unitOrdinal: number | null,
+    turn: { attemptIndex: number; payloadDigest: string | null } = { attemptIndex: 1, payloadDigest: null },
+  ): void {
     const recordedAt = new Date().toISOString();
-    const record = canonicalRecord({ spanId: randomUUID(), attemptId, ordinal, harnessSessionId: span.sessionId, startSeq: span.startSeq, endSeq: span.endSeq, unitOrdinal, recordedAt });
+    const record = canonicalRecord({
+      spanId: randomUUID(), attemptId, ordinal, harnessSessionId: span.sessionId, startSeq: span.startSeq, endSeq: span.endSeq, unitOrdinal, recordedAt,
+      attemptIndex: turn.attemptIndex, payloadDigest: turn.payloadDigest,
+    });
     const spanId = (parseCanonicalJson(record.json) as { spanId: string }).spanId;
     this.#db.prepare(
       `INSERT INTO analysis_harness_spans(span_id, attempt_id, ordinal, harness_session_id, start_seq, end_seq, unit_ordinal, recorded_at, canonical_json, sha256)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(spanId, attemptId, ordinal, span.sessionId, span.startSeq, span.endSeq, unitOrdinal, recordedAt, record.json, record.digest);
+  }
+
+  /** The durable `safe-retry` Plan Adaptation, written before the retry is dispatched; immutable like every ledger row. */
+  recordAdaptation(input: PlanAdaptationInput): { adaptationId: string; digest: string; recordedAt: string } {
+    const adaptationId = randomUUID();
+    const recordedAt = new Date().toISOString();
+    const built = buildPlanAdaptationRecord({ adaptationId, ...input, attemptIndex: 2, recordedAt });
+    this.#db.prepare(
+      `INSERT INTO analysis_plan_adaptations(adaptation_id, attempt_id, ordinal, unit_ordinal, adaptation_class, recorded_at, canonical_json, sha256)
+       VALUES (?, ?, ?, ?, 'safe-retry', ?, ?, ?)`,
+    ).run(adaptationId, input.attemptId, input.ordinal, input.unitOrdinal, recordedAt, built.json, built.digest);
+    return { adaptationId, digest: built.digest, recordedAt };
   }
 
   /**
@@ -1462,7 +1890,13 @@ export class BaselineAnalysisStore {
           promptContractDigest: facts.promptContractDigest,
         },
         policyPin: { operationalScope: 'development-ci', providerProcessingVersion: 'v1', activePolicySetVersion: 'v3', liveTransmissions: 0 },
-        provenance: { taskIntentId: facts.taskIntentId, runRecordId: facts.runRecordId, attemptId: input.attemptId },
+        provenance: {
+          taskIntentId: facts.taskIntentId,
+          runRecordId: facts.runRecordId,
+          attemptId: input.attemptId,
+          planVersion: facts.planVersionOrdinal,
+          adaptations: { count: input.adaptedUnitOrdinals.length, unitOrdinals: [...input.adaptedUnitOrdinals] },
+        },
         usage: input.usage,
         coverage: input.reduction.coverage,
         reducerClosure: input.reduction.reducerClosure,
@@ -1530,7 +1964,7 @@ export class BaselineAnalysisStore {
 
   // ---- shared bindings -------------------------------------------------------------------------
 
-  #binding(bookId: string, checkpoint?: ManuscriptCheckpointBinding): {
+  #binding(bookId: string, checkpoint?: ManuscriptCheckpointBinding, enforceHead = true): {
     manuscriptId: string;
     branchId: string;
     sourceVersionId: string;
@@ -1565,11 +1999,14 @@ export class BaselineAnalysisStore {
     const state = asString(row.credential_operation_state);
     requireAnalysis((state === 'ready' || state === 'missing' || state === 'needs-attention') && UUID_PATTERN.test(asString(row.credential_reference)),
       'ANALYSIS_PROVIDER_BINDING_UNAVAILABLE', '主编辑角色缺少固定的凭据引用元数据。');
-    if (checkpoint !== undefined) {
+    if (checkpoint !== undefined && enforceHead) {
       requireAnalysis(row.manuscript_id === checkpoint.manuscriptId && row.branch_id === checkpoint.branchId &&
         row.base_revision_id === checkpoint.revisionId && row.journal_sequence === checkpoint.journalSequence &&
         row.working_digest === checkpoint.revisionDigest,
       'ANALYSIS_CHECKPOINT_STALE', '任务输入固定点已经变化。');
+    } else if (checkpoint !== undefined) {
+      requireAnalysis(row.manuscript_id === checkpoint.manuscriptId && row.branch_id === checkpoint.branchId,
+        'ANALYSIS_CHECKPOINT_STALE', '任务输入固定点不属于当前稿件。');
     }
     return {
       manuscriptId: asString(row.manuscript_id),
