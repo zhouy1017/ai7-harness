@@ -7,7 +7,7 @@ import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { BaselineAnalysisExecutionOwner } from '../../src/service/analysis/execution.js';
 import { BASELINE_PROMPT_CONTRACT_DIGEST, unitRequestDigest } from '../../src/service/analysis/contract.js';
-import { loadModelFixture, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
+import { fixtureEntryKey, loadModelFixture, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
 import type { SecretResolver } from '../../src/service/provider/credential-broker.js';
 import { ANALYSIS_LEDGER_SCHEMA_SQL, ANALYSIS_LEDGER_TRIGGER_SQL, TASK_AUTHORIZATION_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import { BASELINE_ANALYSIS_TASK_GOAL, type BaselineAnalysisProjection, type LaunchPolicyProjection } from '../../src/shared/protocol.js';
@@ -108,9 +108,10 @@ describe('baseline manuscript analysis over the real store on exact sample1', ()
       expect(manifest.units.every((unit) => unit.graphemes <= manifest.parameters.unitBudgetGraphemes)).toBe(true);
       expect(manifest.units.slice(1).every((unit) => unit.overlapBlockIds.length === manifest.parameters.overlapBlocks)).toBe(true);
       expect(manifest.digest).toMatch(DIGEST_PATTERN);
-      // The fixture is keyed by the exact request digests this manifest derives.
+      // The fixture is keyed by the exact unit ordinals and request digests this manifest derives.
       for (const unit of manifest.units) {
-        expect(fixture.entries.get(unit.ordinal)?.requestDigest).toBe(unitRequestDigest(BASELINE_PROMPT_CONTRACT_DIGEST, unit.ordinal, unit.digest));
+        const requestDigest = unitRequestDigest(BASELINE_PROMPT_CONTRACT_DIGEST, unit.ordinal, unit.digest);
+        expect(fixture.entries.get(fixtureEntryKey(unit.ordinal, requestDigest))?.requestDigest).toBe(requestDigest);
       }
       expect(prepared.providerResolutionPlan?.remoteBinding.credentialReference).toBe(credentialReference);
       expect(prepared.providerResolutionPlan?.remoteBinding.credentialReadiness).toBe('missing');

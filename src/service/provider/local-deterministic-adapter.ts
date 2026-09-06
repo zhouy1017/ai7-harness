@@ -3,14 +3,15 @@ import { BASELINE_PROMPT_CONTRACT, parseUnitMessageHeader, unitRequestDigest } f
 import { AI7_FAILURE_CODES, type DshFailureCodes } from './classification.js';
 import { LOCAL_DETERMINISTIC_MODEL, LOCAL_DETERMINISTIC_ROUTE } from './egress-gate.js';
 import { lastUserMessageText } from './payload.js';
-import type { ResolvedModelFixture } from './model-fixture.js';
+import { fixtureEntryKey, type ResolvedModelFixture } from './model-fixture.js';
 
 /**
  * The AI7 local deterministic model adapter: replays a hand-written synthetic fixture in-process and
  * transmits nothing. It is the bound adapter in every supported development launch and in the E2E
- * Gate. Each request is matched by the unit ordinal parsed from the unit message header and the
- * request digest recomputed from the frozen prompt contract and the manifest unit digest; a request
- * the fixture does not describe fails closed as a fixture mismatch, which the Run records as a gap.
+ * Gate. Each request is matched by the pair of the unit ordinal parsed from the unit message header
+ * and the request digest recomputed from the frozen prompt contract and the manifest unit digest, so
+ * one fixture identity serves successive manifests of the same Book; a request the fixture does not
+ * describe fails closed as a fixture mismatch, which the Run records as a gap.
  *
  * A fixture response may name a block of the unit it answers with `{{block:N}}` (the N-th own block
  * listed in the unit message, 1-based). Block identities are minted per import, so a hand-written
@@ -90,10 +91,10 @@ export class Ai7LocalDeterministicAdapter implements LlmAdapter {
       yield failure(AI7_FAILURE_CODES.FIXTURE_MISMATCH, '请求不含可识别的分析单元消息头。');
       return;
     }
-    const entry = this.#fixture.entries.get(header.ordinal);
     const expectedDigest = unitRequestDigest(this.#promptContractDigest, header.ordinal, header.unitDigest);
-    if (entry === undefined || entry.requestDigest !== expectedDigest) {
-      yield failure(AI7_FAILURE_CODES.FIXTURE_MISMATCH, `夹具 ${this.#fixture.identity} 没有单元 ${header.ordinal} 的对应响应。`);
+    const entry = this.#fixture.entries.get(fixtureEntryKey(header.ordinal, expectedDigest));
+    if (entry === undefined) {
+      yield failure(AI7_FAILURE_CODES.FIXTURE_MISMATCH, `夹具 ${this.#fixture.identity} 没有单元 ${header.ordinal} 在当前请求摘要下的对应响应。`);
       return;
     }
     const response = entry.response;
