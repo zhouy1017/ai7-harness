@@ -4,7 +4,7 @@ status: accepted
 
 # Preserve native DSH artifacts behind AI7 authority sidecars
 
-This ADR records the Owner-approved native-artifact direction for Issue #86. It is repository-current only when read from an exact integrated `dev` commit containing this revision; elsewhere it remains accepted-but-unintegrated. It authorizes no discovery, installation, dependency change, executable admission, Provider call, product implementation, release, or `main` action.
+This ADR records the Owner-approved native-artifact direction for Issue #86. It authorizes no discovery, installation, dependency change, executable admission, Provider call, product implementation, release, or `main` action.
 
 ## Decision
 

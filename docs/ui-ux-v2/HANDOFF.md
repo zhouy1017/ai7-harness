@@ -1,6 +1,6 @@
 # AI7 V2 UI/UX baseline handoff
 
-Status: **Owner-approved Issue #86 implementation-facing successor; repository-current only in an exact integrated `dev` commit containing this revision; accepted-but-unintegrated elsewhere; not implementation or validation evidence**
+Status: **frozen design reference as of `dev@4c50ce31b0f15ff2bfadd2af17fc914c317e0f22` under [ADR 0064](../adr/0064-reweight-repository-development-toward-value-first-delivery.md); design handoff, not implementation or validation evidence**
 
 ## Authority and provenance
 
@@ -30,7 +30,7 @@ Artifact discovery/acquisition/validation/install/scoped enablement, Artifact Up
 
 The Issue #86 policy successor preserves Provider Processing v1 and v2 byte-for-byte and maps trusted operational scopes as development/CI → v1, exact fixture recording → v2, and ordinary production → new v3; External Export remains pinned to unchanged v1. This is a selection/policy contract only. It provides no trusted launch-selector implementation, credential, endpoint, live Provider call, runtime enforcement, external export, policy activation or cross-scope fallback authority.
 
-Current target implementation integrates the provider-free J-01 new-Book path with exact identity disclosure and interrupted-import continuity/reconciliation, complete provider-free J-02 10M bounded editing, complete provider-free J-08 Recovery Workspace, and Issue #42's bounded provider-free J-12 Book/Revision Workbench and Data & Storage slice. J-12 provides at most one Workbench per exact Book, non-focus-stealing distinct-Book windows, immutable historical Revision viewing, native sender-owned selection, offline/restart persistence, and truthful Product Data Location meaning. It remains neither full J-01 nor the broader canonical J-12/Book Workspace and has zero Providers, Agents and Sessions. Detached Manuscript Window/Active Binding and #46 credential/Keychain operations remain unimplemented.
+Implementation status lives only in root `PROGRESS.md` and `docs/development/e2e-journeys.md` under ADR 0064; this package claims no implementation.
 
 ## Action boundary
 

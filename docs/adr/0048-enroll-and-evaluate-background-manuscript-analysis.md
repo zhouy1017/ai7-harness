@@ -4,7 +4,7 @@ status: accepted
 
 # Enroll and evaluate background manuscript analysis
 
-This ADR records the Owner-approved background-analysis and quality boundary for Issue #86. It extends [ADR 0019](./0019-editorial-quality-metrics-and-behavior-evaluation-gate.md) rather than replacing delivery-quality semantics. It is repository-current only when read from an exact integrated `dev` commit containing this revision; elsewhere it remains accepted-but-unintegrated. It authorizes no Provider call, scheduler, analysis implementation, learning or manuscript mutation.
+This ADR records the Owner-approved background-analysis and quality boundary for Issue #86. It extends [ADR 0019](./0019-editorial-quality-metrics-and-behavior-evaluation-gate.md) rather than replacing delivery-quality semantics. It authorizes no Provider call, scheduler, analysis implementation, learning or manuscript mutation.
 
 ## Background Analysis Enrollment
 

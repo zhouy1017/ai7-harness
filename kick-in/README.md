@@ -1,6 +1,6 @@
 # AI7 Harness Kick-in
 
-Status: **accepted `dev` design baseline; initial implementation is authorized only through the sequenced Issues named in the current handoff**
+Status: **frozen design room as of `dev@4c50ce31b0f15ff2bfadd2af17fc914c317e0f22` under [ADR 0064](../docs/adr/0064-reweight-repository-development-toward-value-first-delivery.md); historical migration reasoning, not the implementation entry point**
 
 This folder is the migration design room for a new AI7 product that preserves the valuable product language, safety invariants, workflows, and user evidence from AI7 Reborn while adopting DeepSeek Harness as its agent execution and Agent Behavior foundation.
 
@@ -21,7 +21,7 @@ The fresh-repository half is settled by Owner instruction. During development, `
 
 The rest is now accepted too. The license and reuse authorization were settled at Question 27, the meaning of full Harness capability at Question 29, and the dependency strategy at Question 30. After the interview, ADR 0028 unified product scope as one Windows-and-macOS Standalone product; concrete macOS mechanics remain explicitly deferred. The missing-design audit is complete through root ADR 0040, including the destination-independent package, native local-export collision, and versioned maintenance refinements. The V2 UI/UX baseline adds wait-by-default D-084, Interactive Editorial Dialogue J-16, and UI ADR 0014 without changing authority or exposing raw chain of thought. **The design interview is complete**: all 36 questions are resolved or explicitly deferred, and the Owner has separately authorized exact baseline normalization, minimum policy baselines, implementation planning, and one bounded provider-free J-01 happy-path tracer in that sequence.
 
-Agents arriving without prior context start at repository-root `AGENTS.md`. A Commander then reads the compact current `PROGRESS.md`, `HANDOFF.md`, and [Dispatch Register](../docs/agents/dispatch-register.md); a Worker or Reviewer reads its Issue and verified Launch Receipt. Use `docs/agents/README.md` to load task-specific material. Do not read this entire design room, another Task transcript, or `docs/archive/` by default.
+Agents arriving without prior context start at repository-root `AGENTS.md`. A Commander then reads `PROGRESS.md`, the [development plan](../docs/development/development-plan.md), and the [Dispatch Register](../docs/agents/dispatch-register.md); a Worker or Reviewer reads its Issue and verified Launch Receipt. Use `docs/agents/README.md` to load task-specific material. Do not read this entire design room, another Task transcript, or `docs/archive/` by default.
 
 ## Document map
 
@@ -52,7 +52,7 @@ Agents arriving without prior context start at repository-root `AGENTS.md`. A Co
 25. [Legacy data migration boundary](./24-legacy-data-migration-boundary.md) — accepted production-data exclusion with protected credential, mock-provider evidence, and selected test-Book exceptions.
 26. [Standalone-only V1 and deferred Word alternative](./25-standalone-word-surface-boundary.md) — accepted Question 23 single-surface boundary and professional editing obligation.
 27. [Tiered verification and mock-provider evidence](./26-tiered-verification-and-mock-provider-evidence.md) — historical Question 24 plan; its engineering-verification gates are superseded by the minimal E2E decision.
-28. [Repository development dispatch](./27-repository-development-dispatch.md) — current Question 25/ADR 0061/ADR 0063 three-role model with fixed per-harness bindings, per-attempt harness and launch-mode selection, fresh Issue-bound Task Sessions, two-stage receipts, and query-driven coordination.
+28. [Repository development dispatch](./27-repository-development-dispatch.md) — the three-role model with fixed per-harness bindings, per-attempt harness and launch-mode selection, fresh Issue-bound Task Sessions, schema-v5 receipts, and query-driven coordination under ADRs 0061, 0063, and 0064.
 29. [Harness capability and authority boundary](./28-harness-capability-and-authority-boundary.md) — accepted Question 29 full-engine/narrow-surface split, Agent Data Root, profile separation, and tiered activation for agent-authored revisions.
 30. [Editorial quality metrics](./29-editorial-quality-metrics.md) — accepted Question 36 Quality Signal families, derived metrics, cold-start tolerance, and low-burden feedback interaction; any separate Behavior Evaluation Gate is superseded by ADR 0027.
 31. [Upstream consumption and upgrade contract](./30-upstream-consumption-and-upgrade-contract.md) — accepted Question 30 exact-pin discipline and package-subset selection; its separate upgrade-proof programme is superseded by ADR 0027.

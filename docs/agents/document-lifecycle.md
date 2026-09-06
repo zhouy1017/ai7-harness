@@ -21,7 +21,7 @@ Individual commands, minor edits, ordinary small sub-tasks, and calendar dates a
 
 Keep stable authority owners and active entry points at stable paths:
 
-- root `AGENTS.md`, `HANDOFF.md`, `PROGRESS.md`, `CLAUDE.md`, and `LICENSE`;
+- root `AGENTS.md`, `PROGRESS.md`, `CLAUDE.md`, and `LICENSE`, plus `docs/development/development-plan.md`;
 - accepted and superseded root ADRs;
 - canonical context definitions, `CONTEXT-MAP.md`, current Policy Documents, and the root glossary index;
 - active agent runbooks;
@@ -86,12 +86,12 @@ Archive contents preserve historical meaning. Do not edit an archived document t
 6. If material moves, place it in one node directory and write its index. Preserve original paths in the index.
 7. Replace stable root entry points with concise current versions; update ordinary links so they do not route through archives.
 8. Delete approved disposable material and report what was removed and recoverability.
-9. The Commander replaces root `PROGRESS.md` and `HANDOFF.md` when integration routing changes. When the outgoing router represents the completed, consumed, superseded, or frozen node and a named snapshot is needed, archive exactly that one node-level version. Issue receipts, pull requests, accepted decisions, and Git history carry attempt detail.
+9. The Commander updates root `PROGRESS.md` when integration routing changes, inside the integrating pull request or through its own documentation pull request. When the outgoing router represents the completed, consumed, superseded, or frozen node and a named snapshot is needed, archive exactly that one node-level version. Issue receipts, pull requests, accepted decisions, and Git history carry attempt detail.
 10. Run lightweight documentation checks: local links outside archives, root wrappers/routers, archive-index completeness for moved files, and `git diff --check`. This is maintenance, not a new proof gate.
 
 ## Progress and handoff rules
 
-`PROGRESS.md` and `HANDOFF.md` are Commander-owned integration-line routers. They contain durable current routing and one safe Resume Prompt, not per-attempt chronology, transient Task status, or a universal Worker/Reviewer startup packet. The Commander replaces them when the integration route changes; parallel Workers and Reviewers use their Issue, Launch/Return Receipts, and Task Session instead.
+`PROGRESS.md` is the Commander-owned integration-line router. It contains durable current status, the next plan slice, and one safe Resume Prompt, not per-attempt chronology, transient Task status, or a universal Worker/Reviewer startup packet. The Commander replaces it when the integration route changes; parallel Workers and Reviewers use their Issue, Launch/Return Receipts, and Task Session instead.
 
 When a Change Brief explicitly makes a root-router transition part of one atomic outcome, that Worker may edit only the authorized router paths; the edit remains an integration projection rather than the Worker's progress ledger. At a triggering node, archive at most one outgoing node-level snapshot under Sweep step 9. A task-specific historical handoff is archived only after its successor confirms consumption or the task is frozen/closed.
 

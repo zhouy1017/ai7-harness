@@ -26,7 +26,7 @@ Use the first applicable owner of a fact; do not average conflicting documents.
 3. **Canonical decision owners.** Accepted root ADRs, Policy Documents, and canonical context definitions at the intended target commit own hard decisions, authority, and domain language. An ADR without frontmatter is not automatically non-accepted; use that target's decision index and explicit supersession.
 4. **Accepted work specification.** The active Issue and supported journey own the bounded outcome after they agree with the canonical decision owners.
 5. **Current implementation.** Code, schemas, and configuration show what exists and where the current seams are. They do not silently overrule accepted design; a contradiction is a finding to resolve.
-6. **Current routers and background.** `HANDOFF.md`, `PROGRESS.md`, `kick-in/`, overviews, and review packets explain state and reasoning but do not own conflicting truth.
+6. **Current routers and background.** `PROGRESS.md`, the development plan, `kick-in/`, overviews, and review packets explain state and reasoning but do not own conflicting truth.
 7. **Candidate/evidence material.** Design packages, prototypes, Figma, freeze handoffs, advisory reviews, and experiments are usable only with their status attached.
 8. **Archive.** Historical artifacts are consulted only by exact reference when current authority cannot answer a blocking question.
 
@@ -57,7 +57,7 @@ Design truth precedence above does not grant action. Apply this matrix after res
 | Role | May authorize or execute | May not do |
 | --- | --- | --- |
 | **Owner** | Grant or expand product and design scope; authorize architecture or semantic change, implementation planning/start, Foundation Replacement, software/repository release or repository-publication scope, and other owner-reserved decisions | A decision is not integrated merely because it was stated; durable changes still enter their authority-owning record and normal integration path |
-| **Commander** | Within owner-authorized scope, shape T0 Change Briefs, launch fresh Worker/Reviewer Task Sessions on either harness in an applicable launch mode (a hand-created top-level session, a Claude Code Agent-tool subagent, or a CLI-launched session), authorize a bounded internal replacement that preserves every listed boundary, accept reports, integrate through pull requests, and execute approved repository external actions | Perform T1–T3 controlled-file work inline or edit a subagent or CLI-launched attempt's worktree or branch; expand product/design/implementation scope; authorize Foundation Replacement; convert candidate material into canonical truth; transfer authority through a model/binding change |
+| **Commander** | Within owner-authorized scope, shape T0 Change Briefs, launch fresh Worker/Reviewer Task Sessions on either harness in an applicable launch mode (a hand-created top-level session, a Claude Code Agent-tool subagent, or a CLI-launched session), authorize a bounded internal replacement that preserves every listed boundary, accept reports, integrate through pull requests, and execute approved repository external actions | Perform T1–T3 product work inline (mechanical documentation edits through its own pull request are allowed under ADR 0064) or edit a subagent or CLI-launched attempt's worktree or branch; expand product/design/implementation scope; authorize Foundation Replacement; convert candidate material into canonical truth; transfer authority through a model/binding change |
 | **Worker** | After verifying its Issue and Launch Receipt, execute the exact brief in its own fresh Task Session, worktree and branch; stop and report when the envelope is insufficient | Expand scope, reuse another role/attempt, self-authorize replacement, integrate, push, publish, or take external actions |
 | **Independent Reviewer** | After verifying its Issue, immutable `reviewed_head`, and Launch Receipt, perform bounded fresh-context, strictly read-only, non-author advisory review in a separate fresh Task Session at that head | Reuse the Worker session/transcript; author the reviewed change; dispatch, delegate to, or spawn another agent; turn advice into a gate; integrate; or take external actions |
 
@@ -77,17 +77,6 @@ Classify an unresolved point before acting:
 
 Unknowns do not automatically create research, prototypes, audits, or validation programmes.
 
-## Change Brief authority block
+## Change Brief authority
 
-Every non-mechanical Change Brief records:
-
-- Brief revision, main Worker class and exact requested model/effort;
-- exact base and intended integration target commit;
-- every canonical authority as target commit plus path;
-- owner authorization and, separately, Commander dispatch/execution authority with their scopes;
-- applicable accepted ADRs, Policy Documents, contexts, Issue, and journey;
-- candidate or historical inputs and their non-authoritative status;
-- any explicit supersession required; and
-- open matters deliberately left unresolved.
-
-If this block cannot be completed, the task is not ready for a Worker.
+Every Brief links its authority (plan slice, ADRs, contexts, predecessor Issues) instead of restating it; the form is the one-page [Change Brief](./change-brief.md). If those links cannot be named, the task is not ready for a Worker.

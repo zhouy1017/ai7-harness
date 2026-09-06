@@ -4,7 +4,7 @@ Status: **Issue #8 decision map complete for exact `origin/dev@2f8471f0d80ffa79f
 
 Authority: accepted target omission history for the frozen V2 design baseline. It grants no `main` promotion, implementation, provider processing, external publishing/sending, delivery proof, tests, prototypes, or release authority. The owner-settled local-export/manual exact `发稿版本` boundary is not a decision ticket.
 
-This file remains exclusively the Issue #8 five-batch dependency map and is not repurposed for Issue #86. The Owner-approved Issue #86 23-question successor delta and its deferred implementation details are recorded in [`DECISION-QUEUE.md`](./DECISION-QUEUE.md) and UI ADRs [0015](./adr/0015-book-bound-dsh-composed-agent-workspace.md), [0016](./adr/0016-stage-dsh-artifact-acquisition-enablement-run-and-apply.md), and [0017](./adr/0017-use-versioned-coverage-aware-manuscript-analysis.md); they are repository-current only in an exact integrated `dev` commit containing this revision and accepted-but-unintegrated elsewhere.
+This file remains exclusively the Issue #8 five-batch dependency map and is not repurposed for Issue #86. The Owner-approved Issue #86 23-question successor delta and its deferred implementation details are recorded in [`DECISION-QUEUE.md`](./DECISION-QUEUE.md) and UI ADRs [0015](./adr/0015-book-bound-dsh-composed-agent-workspace.md), [0016](./adr/0016-stage-dsh-artifact-acquisition-enablement-run-and-apply.md), and [0017](./adr/0017-use-versioned-coverage-aware-manuscript-analysis.md).
 
 ## Dependency map
 

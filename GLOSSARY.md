@@ -1,6 +1,6 @@
 # Glossary Reference
 
-This maintained bilingual reference routes readers to target-qualified definition owners and warns about cross-context name collisions. English terms are stable architecture/record identifiers within their stated target; the Simplified Chinese column is the preferred Chinese-first product and discussion label. It does not duplicate definitions; edit the relevant context `CONTEXT.md` instead. Issue #86 additions are repository-current only when read from an exact integrated `dev` commit containing this revision; elsewhere they remain accepted-but-unintegrated and do not become current authority merely because they appear in a worktree.
+This maintained bilingual reference routes readers to target-qualified definition owners and warns about cross-context name collisions. English terms are stable architecture/record identifiers within their stated target; the Simplified Chinese column is the preferred Chinese-first product and discussion label. It does not duplicate definitions; edit the relevant context `CONTEXT.md` instead.
 
 ## Context indexes
 
