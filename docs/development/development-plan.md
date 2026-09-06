@@ -20,7 +20,7 @@ Product integration stays serial. Slices in different phases never run in parall
 
 | Order | Slice | Issue | Class | Journey | Outcome | Depends on | Status |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| 0.1 | S13 | #48 | T3 | J-04 | Plan Revision on material drift and the `safe-retry` in-envelope adaptation on the executing analysis Task | — | Worker A1 interrupted by a session limit on 2026-09-06 with uncommitted work in its worktree; resume or supersede |
+| 0.1 | S13 | #48 | T3 | J-04 | Plan Revision on material drift and the `safe-retry` in-envelope adaptation on the executing analysis Task | — | integrated (PR #280, `dev@f417e50`) |
 
 ## Phase 1 — real analysis loop on `sample1`
 
@@ -70,6 +70,7 @@ Exit criterion: a Run starts in one action, survives interruption with explicit 
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | 3.1 | S45 | #277 | T2 | J-03 | Quick Start and Default Execution Rule with a three-question intake | Phase 2 | planned |
 | 3.2 | S15 | #50 | T3 | J-10 | Resume, Retry, Rewind, Redo, Replay with per-unit incremental persistence and the Run Continuation Checkpoint | S13 | planned |
+| 3.2a | S13-f1 | #281 | T2 | J-04 | Read every material plan field from durable state; revert path and durable supersession for pending Plan Revisions; settle the dead `inspect` trigger kind (advisory review of #48) | S13 | planned |
 | 3.3 | S13b | new | T3 | J-04 | Restart-safe Clarification Requests with choice-first answers (prompt contract v2) | S15 | Issue opened when reached |
 | 3.4 | S16 | #51 | T2 | J-10 | Run Budget Ceiling termination, Provider Account Limit recovery, ambiguous outcomes | S15 | planned |
 | 3.5 | S14 | #49 | T3 | J-09 | Concurrent Book work without focus or scope leakage | S16 | planned |
