@@ -530,6 +530,11 @@ function withoutKey(value, key) {
   return copy;
 }
 
+/** Records read back from canonical JSON carry sorted keys, so a range compares by fields, never by text. */
+function sameNullableRecord(actual, expected) {
+  return actual === null || expected === null ? actual === expected : sameRecord(actual, expected);
+}
+
 /** A successor revision: the same Result Set, the next ordinal, the exact update facts and per-unit lineage, usage for recomputed units only. */
 function requireSuccessorShape(revision, expected, attempt, fixtureDigest, name) {
   const unitLineageExact = (unit, index) => unit.unitOrdinal === index + 1 && unit.lineage?.kind === expected.lineage[index] &&
@@ -544,7 +549,7 @@ function requireSuccessorShape(revision, expected, attempt, fixtureDigest, name)
     sameRecord(revision?.policyPin, { operationalScope: 'development-ci', providerProcessingVersion: 'v1', activePolicySetVersion: 'v3', liveTransmissions: 0 }) &&
     revision?.update?.mode === expected.mode && revision?.update?.modeLabel === expected.modeLabel &&
     sameRecord(revision?.update?.predecessor, expected.predecessor) && revision?.update?.reusePlanDigest === expected.reusePlanDigest &&
-    sameRecord(revision?.update?.counts, expected.counts) && JSON.stringify(revision?.update?.selectedRange) === JSON.stringify(expected.selectedRange) &&
+    sameRecord(revision?.update?.counts, expected.counts) && sameNullableRecord(revision?.update?.selectedRange ?? null, expected.selectedRange) &&
     JSON.stringify(revision?.lineage?.map((entry) => entry.kind)) === JSON.stringify(expected.lineage) &&
     revision?.units?.length === SAMPLE1_UNITS && revision.units.every(unitLineageExact) &&
     revision?.usage?.requests === expected.counts.recomputed &&
@@ -1041,9 +1046,10 @@ async function main() {
       controlsStale.actions['reanalyze-range'].options.every((option, index) => option.unitOrdinal === index + 1 &&
         option.startPosition === SAMPLE1_UNIT_RANGES[index][0] && option.endPosition === SAMPLE1_UNIT_RANGES[index][1] && option.sectionOrdinal === 1 &&
         typeof option.label === 'string' && option.expected.recomputed >= 2) &&
-      sameRecord(controlsStale.actions['reanalyze-range'].options[2].expected, { reused: 5, recomputed: 3, invalidated: 1, bypassed: 2 }) &&
+      // Against revision 1 the edited unit 1 and the gap unit 2 recompute in every mode; a range over unit 3 adds units 3 and 4.
+      sameRecord(controlsStale.actions['reanalyze-range'].options[2].expected, { reused: 4, recomputed: 4, invalidated: 2, bypassed: 2 }) &&
       controlsStale.actions['reanalyze-book']?.available === true && controlsStale.actions['reanalyze-book'].goal === BOOK_GOAL &&
-      sameRecord(controlsStale.actions['reanalyze-book'].expected, { reused: 0, recomputed: 8, invalidated: 1, bypassed: 7 }) &&
+      sameRecord(controlsStale.actions['reanalyze-book'].expected, { reused: 0, recomputed: 8, invalidated: 2, bypassed: 6 }) &&
       controlsStale.providerConsequence.includes('0 次实时传输') && controlsStale.providerConsequence.includes('public-or-synthetic') &&
       controlsStale.successorBehavior.includes('后继修订版'),
     'update-controls-projection', controlsStale);
@@ -1059,7 +1065,7 @@ async function main() {
         sync.querySelector('[data-analysis-action="sync-current"]') instanceof HTMLButtonElement && !sync.querySelector('[data-analysis-action="sync-current"]').disabled &&
         range?.dataset.updateAvailable==='true' && radios.length===8 && radios.every((radio)=>!radio.checked && !radio.disabled) && !range.dataset.selectedRange &&
         range.querySelector('[data-analysis-action="reanalyze-range"]')?.disabled===true && range.querySelectorAll('.analysis-range-option label').length===8 &&
-        whole?.dataset.updateAvailable==='true' && whole.dataset.expectedReused==='0' && whole.dataset.expectedRecomputed==='8' && whole.dataset.expectedBypassed==='7' &&
+        whole?.dataset.updateAvailable==='true' && whole.dataset.expectedReused==='0' && whole.dataset.expectedRecomputed==='8' && whole.dataset.expectedInvalidated==='2' && whole.dataset.expectedBypassed==='6' &&
         !whole.querySelector('[data-analysis-action="reanalyze-book"]').disabled &&
         section.textContent.includes('0 次实时传输') && section.textContent.includes('public-or-synthetic') && section.textContent.includes(${JSON.stringify(revision.revisionId)}) &&
         section.textContent.includes(${JSON.stringify(SYNC_GOAL)}) && section.textContent.includes(${JSON.stringify(RANGE_GOAL)}) && section.textContent.includes(${JSON.stringify(BOOK_GOAL)}) &&
@@ -1183,10 +1189,10 @@ async function main() {
     const rangePlan = preparedRange?.update?.reusePlan;
     requireJourney(preparedRange?.state === 'prepared' && preparedRange.taskIntent?.mode === 'reanalyze-range' && preparedRange.taskIntent?.goal === RANGE_GOAL &&
       rangeManifest?.digest === syncManifest.digest && preparedRange.checkpoint?.revisionId === preparedSync.checkpoint.revisionId &&
-      JSON.stringify(preparedRange.update?.selectedRange) === JSON.stringify(selectedRange) && preparedRange.update.predecessor?.revisionId === revision2.revisionId &&
+      sameRecord(preparedRange.update?.selectedRange, selectedRange) && preparedRange.update.predecessor?.revisionId === revision2.revisionId &&
       preparedRange.update.predecessor.ordinal === 2 && preparedRange.update.predecessor.digest === revision2.digest && preparedRange.update.predecessorCurrent === true &&
       sameRecord(rangeExpected.counts, { reused: 5, recomputed: 3, invalidated: 1, bypassed: 2 }) && JSON.stringify(rangeExpected.closure) === JSON.stringify([3, 4]) &&
-      rangePlan?.mode === 'reanalyze-range' && JSON.stringify(rangePlan.selectedRange) === JSON.stringify(selectedRange) && JSON.stringify(rangePlan.recomputeClosure) === JSON.stringify(rangeExpected.closure) &&
+      rangePlan?.mode === 'reanalyze-range' && sameRecord(rangePlan.selectedRange, selectedRange) && JSON.stringify(rangePlan.recomputeClosure) === JSON.stringify(rangeExpected.closure) &&
       sameRecord(rangePlan.counts, rangeExpected.counts) && sameRecord(rangePlan.counts, rangeOption.expected) &&
       JSON.stringify(rangePlan.units.map((unit) => unit.disposition)) === JSON.stringify(rangeExpected.dispositions) &&
       JSON.stringify(rangePlan.units.map((unit) => unit.reason)) === JSON.stringify(['compatible', 'predecessor-gap', 'bypassed-selected-range', 'bypassed-selected-range', 'compatible', 'compatible', 'compatible', 'compatible']) &&
@@ -1269,7 +1275,7 @@ async function main() {
         JSON.stringify([[1, 'first-baseline', '首次基线分析', false, 'superseded', null, 8, 1, 4, 7], [2, 'sync-current', '同步到当前稿件', false, 'superseded', 1, 2, 1, 4, 7], [3, 'reanalyze-range', '重新分析所选范围', false, 'superseded', 2, 3, 1, 4, 7], [4, 'reanalyze-book', '重新分析全书', true, 'current', 3, 8, 1, 4, 7]]) &&
       JSON.stringify(history.entries.map((entry) => entry.revisionId)) === JSON.stringify([revision.revisionId, revision2.revisionId, revision3.revisionId, revision4.revisionId]) &&
       JSON.stringify(history.entries.map((entry) => entry.digest)) === JSON.stringify([revision.digest, revision2.digest, revision3.digest, revision4.digest]) &&
-      JSON.stringify(history.entries.map((entry) => entry.counts)) === JSON.stringify([revision.update.counts, syncExpected.counts, rangeExpected.counts, bookExpected.counts]) &&
+      history.entries.every((entry, index) => sameRecord(entry.counts, [revision.update.counts, syncExpected.counts, rangeExpected.counts, bookExpected.counts][index])) &&
       JSON.stringify(history.entries.map((entry) => entry.reusePlanDigest)) === JSON.stringify([null, preparedSync.update.reusePlanDigest, preparedRange.update.reusePlanDigest, preparedBook.update.reusePlanDigest]) &&
       history.entries[0].manuscriptPin.revisionId === revision.manuscriptPin.revisionId && history.entries[0].manuscriptPin.revisionLabel === 'r1' &&
       history.entries.slice(1).every((entry) => entry.manuscriptPin.revisionId === revision2.manuscriptPin.revisionId) &&
