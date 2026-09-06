@@ -7,14 +7,19 @@ import { DIGEST_PATTERN, hasExactKeys, isRecord, sha256Hex } from '../analysis/c
  * typed response per Analysis Unit request, keyed by the pair of unit ordinal and request digest.
  * The pair key lets one fixture identity serve successive Coverage Manifests of the same Book: a
  * unit whose content changed after an acknowledged edit derives a new request digest and is served
- * by its own entry beside the entry of the earlier content. A fixture may be based on another so a
- * variant (one failing unit) restates only the entries it changes. Fixtures carry public synthetic
- * text only and echo no manuscript content beyond exact block identities.
+ * by its own entry beside the entry of the earlier content. An entry may additionally name the
+ * 1-based `attempt` it answers, so a fixture can answer the first and the second attempt of the
+ * same unit and request digest differently (the `safe-retry` Plan Adaptation of Issue #48); an
+ * entry without `attempt` answers every attempt the attempt-specific entries do not. A fixture may
+ * be based on another so a variant (one failing unit) restates only the entries it changes.
+ * Fixtures carry public synthetic text only and echo no manuscript content beyond exact block
+ * identities.
  */
 export const MODEL_FIXTURE_SCHEMA = 'ai7.model-fixture/1' as const;
 export const FIXTURE_IDENTITY_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
 const MAX_FIXTURE_BYTES = 512 * 1024;
 const MAX_BASE_DEPTH = 4;
+const MAX_FIXTURE_ATTEMPT = 8;
 
 export type ModelFixtureResponse =
   | { readonly kind: 'unit-result'; readonly text: string; readonly usage: { readonly inputTokens: number; readonly outputTokens: number } }
@@ -25,6 +30,8 @@ export type ModelFixtureResponse =
 export interface ModelFixtureEntry {
   readonly unitOrdinal: number;
   readonly requestDigest: string;
+  /** The 1-based attempt this entry answers, or `null` for an entry that answers every attempt. */
+  readonly attempt: number | null;
   readonly response: ModelFixtureResponse;
 }
 
@@ -48,9 +55,17 @@ export interface ResolvedModelFixture {
   readonly sha256: string;
 }
 
-/** The resolver key: unit ordinal and request digest together, so one identity serves successive manifests. */
-export function fixtureEntryKey(unitOrdinal: number, requestDigest: string): string {
-  return `${unitOrdinal}:${requestDigest}`;
+/**
+ * The resolver key: unit ordinal and request digest together, so one identity serves successive
+ * manifests; an attempt-specific entry appends `#<attempt>` so it sits beside the any-attempt entry.
+ */
+export function fixtureEntryKey(unitOrdinal: number, requestDigest: string, attempt: number | null = null): string {
+  return attempt === null ? `${unitOrdinal}:${requestDigest}` : `${unitOrdinal}:${requestDigest}#${attempt}`;
+}
+
+/** The entry answering the given attempt: the attempt-specific entry when present, else the any-attempt entry. */
+export function resolveFixtureEntry(entries: ReadonlyMap<string, ModelFixtureEntry>, unitOrdinal: number, requestDigest: string, attempt: number): ModelFixtureEntry | undefined {
+  return entries.get(fixtureEntryKey(unitOrdinal, requestDigest, attempt)) ?? entries.get(fixtureEntryKey(unitOrdinal, requestDigest));
 }
 
 export class ModelFixtureError extends Error {
@@ -110,13 +125,16 @@ export function parseModelFixture(value: unknown): ModelFixture {
   requireFixture(Array.isArray(value.entries) && value.entries.length <= 4_096, '夹具条目集合无效。');
   const seen = new Set<string>();
   const entries = value.entries.map((entry): ModelFixtureEntry => {
-    requireFixture(isRecord(entry) && hasExactKeys(entry, ['unitOrdinal', 'requestDigest', 'response']) &&
+    requireFixture(isRecord(entry) &&
+      (hasExactKeys(entry, ['unitOrdinal', 'requestDigest', 'response']) || hasExactKeys(entry, ['unitOrdinal', 'requestDigest', 'attempt', 'response'])) &&
       Number.isSafeInteger(entry.unitOrdinal) && (entry.unitOrdinal as number) >= 1 &&
       typeof entry.requestDigest === 'string' && DIGEST_PATTERN.test(entry.requestDigest), '夹具条目无效。');
-    const key = fixtureEntryKey(entry.unitOrdinal as number, entry.requestDigest);
-    requireFixture(!seen.has(key), '夹具条目单元序号与请求摘要重复。');
+    const attempt = 'attempt' in entry ? entry.attempt : null;
+    requireFixture(attempt === null || (Number.isSafeInteger(attempt) && (attempt as number) >= 1 && (attempt as number) <= MAX_FIXTURE_ATTEMPT), '夹具条目的尝试序号无效。');
+    const key = fixtureEntryKey(entry.unitOrdinal as number, entry.requestDigest, attempt as number | null);
+    requireFixture(!seen.has(key), '夹具条目单元序号、请求摘要与尝试序号重复。');
     seen.add(key);
-    return { unitOrdinal: entry.unitOrdinal as number, requestDigest: entry.requestDigest, response: parseResponse(entry.response) };
+    return { unitOrdinal: entry.unitOrdinal as number, requestDigest: entry.requestDigest, attempt: attempt as number | null, response: parseResponse(entry.response) };
   });
   return {
     schema: MODEL_FIXTURE_SCHEMA,
@@ -166,7 +184,7 @@ export async function loadModelFixture(fixturesRoot: string, identity: string): 
   }
   const entries = new Map<string, ModelFixtureEntry>();
   for (const link of [...chain].reverse()) {
-    for (const entry of link.fixture.entries) entries.set(fixtureEntryKey(entry.unitOrdinal, entry.requestDigest), entry);
+    for (const entry of link.fixture.entries) entries.set(fixtureEntryKey(entry.unitOrdinal, entry.requestDigest, entry.attempt), entry);
   }
   const lineage = chain.map((link) => ({ identity: link.fixture.identity, sha256: link.sha256 }));
   return {
