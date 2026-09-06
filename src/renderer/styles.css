@@ -117,7 +117,16 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .analysis-unit { padding: .7rem; border: 1px solid #ded9cd; border-radius: 9px; background: #fffdf8; }
 .analysis-unit summary { cursor: pointer; font-weight: 800; }
 .analysis-unit p { margin: .45rem 0 0; overflow-wrap: anywhere; }
-.analysis-run, .analysis-synthesis, .analysis-reuse-plan, .analysis-update-controls, .analysis-history { margin-top: 1rem; padding-top: 1rem; border-top: 1px solid #d5dcd9; }
+.analysis-run, .analysis-synthesis, .analysis-reuse-plan, .analysis-update-controls, .analysis-history, .analysis-plan-boundary, .analysis-plan-versions { margin-top: 1rem; padding-top: 1rem; border-top: 1px solid #d5dcd9; }
+.analysis-plan-boundary h5, .analysis-run h5 { margin-top: .8rem; font-size: .9rem; }
+.analysis-plan-participation { margin: .45rem 0 0; font-weight: 800; }
+.analysis-plan-preview-footer { margin-top: .8rem; font-weight: 800; }
+.analysis-plan-revision { margin-top: 1rem; padding: .9rem 1rem; }
+.analysis-plan-revision-diff { margin-top: .8rem; overflow-x: auto; }
+.analysis-plan-revision-table { width: 100%; border-collapse: collapse; font-size: .9rem; }
+.analysis-plan-revision-table th, .analysis-plan-revision-table td { padding: .35rem .5rem; border-bottom: 1px solid #ded9cd; text-align: left; vertical-align: top; overflow-wrap: anywhere; }
+.analysis-timeline { margin: .55rem 0 0; padding-left: 1.4rem; line-height: 1.65; overflow-wrap: anywhere; }
+.analysis-timeline li[data-timeline-kind="adaptation"] { font-weight: 800; }
 .analysis-update-action { margin-top: .8rem; padding: .8rem; border: 1px solid #d5dcd9; border-radius: 10px; background: #fffdf8; }
 .analysis-update-action h5 { margin: 0; font-size: .95rem; }
 .analysis-update-action p { margin: .45rem 0 0; overflow-wrap: anywhere; }
@@ -284,7 +293,7 @@ legend { margin-bottom: .7rem; font-weight: 800; }
   .search-result, .replacement-review, .recent-work-item, .book-summary-item, .status-bar, .recovery-snapshot-disclosure,
   .recovery-readonly-blocks, .recovered-state-marker, .model-role-card, .native-artifact-card,
   .native-artifact-authority, .task-authorization-card, .baseline-analysis-card, .analysis-axis, .analysis-unit,
-  .analysis-update-action, .analysis-range-options, .analysis-history-entry {
+  .analysis-update-action, .analysis-range-options, .analysis-history-entry, .analysis-plan-revision {
     color: CanvasText;
     background: Canvas;
     border-color: CanvasText;
