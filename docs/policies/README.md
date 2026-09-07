@@ -42,26 +42,13 @@ Provider Processing v1, v2 and v3, their schemas and human projections, plus [`a
 
 ## Local validation
 
-The schemas deliberately declare JSON Schema Draft 7 and are self-contained. With PowerShell 7.6, validate from the repository root and treat schema-parser errors as failures:
+The schemas deliberately declare JSON Schema Draft 7 and are self-contained. Validate every discovered `docs/policies/*.json` and `*.schema.json` pair from the repository root with the installed closure only, no dependency:
 
-```powershell
-$cases = @(
-  @('docs/policies/provider-processing-policy.v4.json', 'docs/policies/provider-processing-policy.v4.schema.json'),
-  @('docs/policies/active-policy-set.v4.json', 'docs/policies/active-policy-set.v4.schema.json'),
-  @('docs/policies/provider-processing-policy.v3.json', 'docs/policies/provider-processing-policy.v3.schema.json'),
-  @('docs/policies/active-policy-set.v3.json', 'docs/policies/active-policy-set.v3.schema.json'),
-  @('docs/policies/provider-processing-policy.v2.json', 'docs/policies/provider-processing-policy.v2.schema.json'),
-  @('docs/policies/active-policy-set.v2.json', 'docs/policies/active-policy-set.v2.schema.json'),
-  @('docs/policies/provider-processing-policy.v1.json', 'docs/policies/provider-processing-policy.v1.schema.json'),
-  @('docs/policies/external-export-policy.v1.json', 'docs/policies/external-export-policy.v1.schema.json'),
-  @('docs/policies/active-policy-set.v1.json', 'docs/policies/active-policy-set.v1.schema.json')
-)
-
-foreach ($case in $cases) {
-  $valid = Test-Json -LiteralPath $case[0] -SchemaFile $case[1] -ErrorAction Stop
-  if (-not $valid) { throw "Schema validation failed: $($case[0])" }
-}
 ```
+node tools/validate-policies.mjs
+```
+
+It prints one line per pair naming the policy file and `ok` or the first failure's schema path and reason, and exits non-zero if any pair fails to validate or a schema uses a keyword the validator does not implement. `pnpm test` also runs this validation as `tests/unit/policy-schemas.test.ts`, so a policy document that stops matching its schema fails the Local Verification Ladder.
 
 JSON Schema validates the manifest shape but cannot read repository files to prove a digest. Verify every pin separately against the exact file bytes:
 
