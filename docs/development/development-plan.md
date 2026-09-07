@@ -28,7 +28,7 @@ Exit criterion: one `developer-live` Run on exact `sample1` produces unit result
 
 | Order | Slice | Issue | Class | Journey | Outcome | Depends on | Status |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| 1.1 | S40 | #272 | T3 | J-04 | `developer-live` scope: Provider Processing v4, active set v4, trusted launch form, per-unit Session, required ceiling, `deepseek-v4-flash` through the `opencode-go` route, the ADR 0067 enrollment helper, Provider Test Ledger and Result Cache, quota classification, Egress Gate `transmit-remote` | S13 | planned |
+| 1.1 | S40 | #272 | T3 | J-04 | `developer-live` scope: Provider Processing v4, active set v4, trusted launch form, per-unit Session, required ceiling, `deepseek-v4-flash` through the `opencode-go` route, the ADR 0067 enrollment helper, Provider Test Ledger and Result Cache, quota classification, Egress Gate `transmit-remote` | S13 | integrated (PR #285, `dev@3c3d820`); the live smoke run is deferred |
 | 1.2 | S41 | #273 | T2 | J-04 | Fixture generation from the Provider Result Cache with echo checks; content-digest resolution for unit and service tests | S40 | planned |
 | 1.3 | S42 | #274 | T3 | J-04 | Baseline Cross-Unit Reduction Contract v1 over topic-reorganized unit results; `reducer`-lineage findings | S40 | planned |
 | 1.4 | S18 | #53 | T3 | J-04 | Factual review: assertion markers, Factual Review Contract v1, research capability with a per-Run search budget and institutional-source list, independent Reference Integrity / Claim Support / Factual Verification, the ADR 0066 finding record | S40 | planned |
