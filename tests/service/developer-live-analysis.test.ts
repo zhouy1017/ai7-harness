@@ -7,7 +7,12 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { EditorialStore } from '../../src/service/store.js';
 import { DEVELOPER_LIVE_POLICY_BINDING, resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { BaselineAnalysisExecutionOwner, DEVELOPER_LIVE_TRANSMITTABLE_SOURCE_DIGESTS } from '../../src/service/analysis/execution.js';
-import { SAMPLE1_SOURCE_DIGEST } from '../../src/service/analysis/baseline-analysis-store.js';
+import {
+  SAMPLE1_SOURCE_DIGEST,
+  blockedReasons,
+  namedNonEffects,
+  providerConsequence,
+} from '../../src/service/analysis/baseline-analysis-store.js';
 import { BASELINE_PROMPT_CONTRACT_DIGEST, unitRequestDigest } from '../../src/service/analysis/contract.js';
 import { loadModelFixture, resolveFixtureEntry } from '../../src/service/provider/model-fixture.js';
 import { ownBlockIdsOf, substituteBlockPlaceholders } from '../../src/service/provider/local-deterministic-adapter.js';
@@ -412,6 +417,64 @@ describe('the developer-live scope over exact sample1 with a stub transport', ()
     // A limit response is never cached: the same request must be asked again later.
     expect(await new ProviderResultCache(cacheRoot).lookup('deepseek-v4-flash', String(lines[0]!.requestDigest))).toBeNull();
     await store.close();
+  });
+
+  it('states the bound scope, version, route, and ceiling on every reading that names them', async () => {
+    const calls: StubCall[] = [];
+    const { store, bookId, prepared } = await prepareLive(roots.dataRoot);
+    const responses = await unitAnswers(prepared);
+    const settled = await runLive(store, bookId, prepared, owner(store, stubTransport({ calls, responses })));
+    expect(calls).toHaveLength(SAMPLE1_UNITS);
+
+    // Not one surface may say the remote binding was refused or that nothing was transmitted while
+    // this Run was transmitting: that contradiction is the defect (#307 problem P2).
+    const consequence = settled.updateControls!.providerConsequence;
+    for (const reading of [...settled.namedNonEffects, consequence]) {
+      expect(reading).not.toContain('development-ci');
+      expect(reading).not.toContain('拒绝');
+      expect(reading).not.toContain('0 次');
+    }
+
+    // The scope, the version, the bound route, and the ceiling as the number the launch froze.
+    const scopeStatement = settled.namedNonEffects.find((statement) => statement.includes('Provider Processing'))!;
+    expect(scopeStatement).toContain('developer-live · Provider Processing v4');
+    expect(scopeStatement).toContain('任务运行预算上限 500000 tokens');
+    expect(scopeStatement).toContain('opencode-go · deepseek-v4-flash');
+    expect(consequence).toContain('developer-live · Provider Processing v4');
+    expect(consequence).toContain('任务运行预算上限 500000 tokens');
+    expect(consequence).toContain('opencode-go · deepseek-v4-flash');
+    // The transmission count an update states is the recomputed unit count, never zero.
+    expect(consequence).toContain('每个重算单元形成一次实时传输并计入用量');
+    // A developer-live plan always dispatches, so a blocked Run is unreachable under this scope.
+    expect(settled.run!.blockedReasons).toBeNull();
+
+    // The ceiling is read from the binding rather than from a second constant: another launch, another number.
+    const narrower = liveBinding({ kind: 'tokens', maxTotalTokens: 250_000 }).live;
+    expect(namedNonEffects(narrower).join('\n')).toContain('任务运行预算上限 250000 tokens');
+    expect(providerConsequence(narrower)).toContain('任务运行预算上限 250000 tokens');
+    expect(blockedReasons(narrower)[0]).toContain('任务运行预算上限 250000 tokens');
+    await store.close();
+  });
+
+  // The exact text this file's base (dev@5aadb1c2) stated as constants, captured before they were
+  // derived. J-03, J-04, and the local service suite pin these readings; deriving them from the bound
+  // launch must not move one byte of what `development-ci` produces.
+  it('leaves every development-ci reading byte-identical to the captured base text', () => {
+    expect(namedNonEffects(null)).toEqual([
+      '不修改稿件，不创建修订版或事实判定',
+      '不创建学习资格、策略激活、Enrollment、Apply 或 Effect',
+      '只读取当前图书的任务输入修订版，不读取其他图书',
+      'development-ci · Provider Processing v1：0 次实时传输，远程绑定被拒绝',
+      '凭据值不进入任务账本、协议帧、日志、诊断或 Session 内容',
+    ]);
+    expect(blockedReasons(null)).toEqual([
+      '当前可信启动范围为 development-ci，Provider Processing v1 允许 0 次实时传输；远程 DeepSeek 绑定被拒绝。',
+      '未提供 J-04 专用的本地确定性模型适配器控制，因此没有可执行的本地路由。',
+      '运行授权已记录；派发前阻止，未创建 Session、未构造 Provider payload、未访问网络。',
+    ]);
+    expect(providerConsequence(null)).toBe(
+      '与首次基线分析相同：远程 DeepSeek 绑定被 development-ci · Provider Processing v1 拒绝（0 次实时传输），只有 J-04 控制绑定的 AI7 本地确定性模型适配器可执行；外发数据类别 public-or-synthetic；未设置任务预算上限；只有重算单元形成模型请求并计入用量，复用单元不形成任何模型负载。',
+    );
   });
 
   it('admits exactly the one Public SampleBook of this slice as transmittable', () => {
