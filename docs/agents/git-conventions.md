@@ -69,6 +69,8 @@ Integrate product pull requests serially. After each integration, remaining bran
 
 **Squash merge.** Each task merge to `dev` is one complete task, so history reads as a sequence of finished outcomes rather than agent scratch work. The pull-request body becomes the squashed commit body. A `dev` to `main` promotion remains subject to its separate Owner authorization.
 
+**Retire the branch at merge.** Squash merging means `git branch --merged dev` never lists a landed task branch, so nothing retires by itself: merge with `gh pr merge --squash --delete-branch` and delete the local branch in the same step. An abandoned branch is deleted when its Issue closes, with its tip recorded in the closing comment so the commits stay reachable by SHA. Retire the attempt's worktree in the same step under the [Dispatch Register](dispatch-register.md) retention rule.
+
 After merge, closure, or abandonment, run the applicable [documentation archive sweep](document-lifecycle.md). This is lifecycle maintenance, not an additional merge or review gate.
 
 ## Tags and releases
