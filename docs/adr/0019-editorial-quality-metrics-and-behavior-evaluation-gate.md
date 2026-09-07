@@ -1,3 +1,7 @@
+---
+status: accepted
+---
+
 # Measure editorial quality from editor decisions and gate behavior on it
 
 AI7 owns the quality evaluator the pinned Harness does not provide. Quality Signals are captured from three families: explicit editor feedback on unsatisfied results; editor-authored content as a style reference rather than a pass/fail signal, routed through the Learning Eligibility Policy; and decision and version differences, which are the strongest family because they are behavioral rather than reported. From these come verbatim acceptance rate, revision distance, survival to the delivered revision, dissatisfaction by Editorial Dimension, and workload displacement. Quality and workload are always reported together, because the accepted success criterion is Editor-comparable Delivery Quality plus measurable workload reduction, and acceptance rate alone is perverse — an agent optimizing for it learns to propose safe, trivial changes.

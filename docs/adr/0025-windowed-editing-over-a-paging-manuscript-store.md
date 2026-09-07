@@ -1,3 +1,7 @@
+---
+status: accepted
+---
+
 # Edit through bounded windows over a paging manuscript store
 
 Long Chinese manuscripts are a required product feature with three binding tiers, counted in Chinese characters. Below 500K characters there must be no sensible performance degradation and editing must feel the same as with a short document. Up to 1M characters there must be no critical performance issue: operations may be visibly slower, but nothing blocks work and long operations report progress. Up to 10M characters there must be no crash and no unresponsiveness — the application opens, stays interactive, never hangs the UI thread, never exhausts memory, and never loses data, with degraded speed acceptable and breaking not. For scale, 10M Chinese characters is roughly 30 MB of UTF-8 text and between 50,000 and 100,000 Manuscript Blocks at typical prose paragraph lengths. No private or real manuscript supplies repository or hosted-CI evidence.

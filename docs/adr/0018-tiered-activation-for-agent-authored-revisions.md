@@ -1,3 +1,7 @@
+---
+status: accepted
+---
+
 # Tier activation for agent-authored revisions
 
 AI7 may improve its own agent behavior from production data and user feedback. This is Agent Behavior Improvement: distinct from Model Training, which remains prohibited, and from Editorial Learning, which governs the house's editorial preferences. The rule that separates safe adaptation from authority drift is that **a prompt may shape quality but may never grant authority** — if changing a piece of text could widen what the system is permitted to do, it is a Policy Document rather than a prompt.

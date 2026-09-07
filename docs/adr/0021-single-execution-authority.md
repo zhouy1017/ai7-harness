@@ -1,3 +1,7 @@
+---
+status: accepted
+---
+
 # Keep one agent-loop implementation and schedule from AI7
 
 Harness owns the generic agent loop — the cycle that assembles context, calls the model, dispatches tool calls, and repeats until a stop condition — and AI7 never writes a second implementation of it. The prohibition is about implementations, not instances: ten Books worked at once means ten Harness Sessions each running an instance of the same loop, which is not a second loop any more than many browser tabs are many browsers. Parallel Runs across multiple Books, together with background analysis and learning work, are required product behavior rather than a tolerated exception. A genuine second implementation is refused because four accepted decisions would break: the Session Ledger would stop being the authoritative execution record, ambiguous-outcome handling would have two answers, the capability guard would have a hole in one dispatch path, and exact Execution Bindings plus Harness Execution Spans would no longer identify one authoritative execution trace for each business attempt.

@@ -1,3 +1,7 @@
+---
+status: accepted
+---
+
 # Compose the full Harness engine behind a narrow tool surface
 
 AI7 composes the complete required Harness behavior engine — the generic turn loop, planning, context assembly, tool pipeline, policy/composition seams, Sessions, and subagents where needed — while an editorial Run never receives the generic coding-agent tool surface of shell, roaming filesystem, and arbitrary network. "Full engine" means the complete behavior/composition capability AI7 needs, never the full Harness package set. Harness `schedule`, `jobs`, and workflow packages are excluded from the selected subset: AI7 owns which Runs exist and every durable editorial Workflow Instance, while DSH converses inside an AI7-authorized execution. Upstream replay or snapshot support may be inspected or used only inside a later exact journey or diagnosis; it is not an admitted standing proof programme. "Full capability" and least privilege conflict only when the engine is confused with the tool surface. The governing reason is the user: a literature professional cannot assess whether a proposed action is safe, so the product must never ask them to authorize one. Capability decisions belong to AI7's composition rather than to a runtime prompt that delegates expert judgment to someone without the basis to exercise it, and every capability an editor sees is expressed in editorial terms rather than in processes, paths, or endpoints.

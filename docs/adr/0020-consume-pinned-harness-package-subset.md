@@ -1,3 +1,7 @@
+---
+status: accepted
+---
+
 # Consume a pinned subset of Harness packages
 
 AI7 consumes DeepSeek Harness as exactly pinned public npm packages rather than forking the monorepo or vendoring source. The accepted consumed baseline is the exact `0.1.0-rc.6` version across the selected subset, with a committed lockfile and integrity hashes; never use a range, bare install, branch, `latest`, or `next`. Registry dist-tags are mutable discovery evidence, not authority: on 2026-08-25 `@deepseek-ai/dsh-agent-loop` reported `latest=0.1.0-rc.6`, `next=0.1.1-rc.2`, while the excluded `@deepseek-ai/dsh` CLI aggregate reported `latest=next=0.1.1-rc.2`. The audited revision `0.1.0-rc.5` was not published at the frozen audit, so the installable `0.1.0-rc.6` baseline and audited commit remain separate provenance facts. Implementation planning verifies immutable metadata for every selected package before locking; if the exact coherent subset is unavailable, it stops for re-scoping instead of mixing eras. Upstream publishes no git tags and no GitHub releases, so AI7 tracks commits and npm versions itself and reads diffs rather than treating a dist-tag as a release signal.

@@ -1,3 +1,7 @@
+---
+status: accepted
+---
+
 # Retrieve over manuscripts, returning candidates rather than truth
 
 Long manuscripts exceed any model context window, so AI7 retrieves over the manuscript itself to preserve detail. This extends the accepted Source Search, Exact Fetch, and Synthesis pipeline from imported sources to manuscripts. The rule separating retrieval from authority is the one already accepted for sources and carries over unchanged: search discovers candidates, and only an Exact Fetch against the pinned Manuscript Revision returns authoritative text. A retrieved chunk is a pointer, never a quotation source, and fuzzy or vector matching can never certify a quotation. This matters more for manuscripts than for sources, because the model is being asked about text the editor is actively changing.

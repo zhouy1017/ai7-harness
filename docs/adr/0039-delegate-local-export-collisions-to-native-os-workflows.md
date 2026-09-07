@@ -1,3 +1,7 @@
+---
+status: accepted
+---
+
 # Delegate local-export collisions to native OS workflows
 
 When a local export target already exists, AI7 invokes the current platform's native save or copy conflict workflow instead of presenting a second AI7 collision modal. The OS may use platform-specific wording and layout, but its resolved outcomes normalize to an alternative final name/path, cancellation, or replacement. A create or replace choice supplies the exact final target and disposition for a frozen Local Export Preparation, from which AI7 records the target-bound Effect Intent and Effect Approval before file commit; cancellation creates no attempted file Effect and no success receipt. A native apply-to-all choice may create individual approvals only for the exact currently enumerated colliding files, never standing overwrite permission for unseen or future files.
