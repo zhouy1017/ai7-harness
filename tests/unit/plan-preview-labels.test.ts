@@ -1,22 +1,6 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import type { ProviderProcessingPin, RunBudgetCeilingState } from '../../src/shared/protocol.js';
-
-// `src/renderer/index.ts` is the Electron renderer entry point, not a library: importing it observes
-// `document.documentElement` and calls `window.ai7.getBookWorkbenchRoute()` immediately. Stub just
-// enough of those globals before import so evaluation is inert, then import purely to reach the two
-// exported Plan Preview label helpers — no DOM harness exists in this repository (neither jsdom nor
-// happy-dom is resolved in the installed closure) to render the card itself.
-vi.stubGlobal(
-  'MutationObserver',
-  class {
-    observe(): void {}
-    disconnect(): void {}
-  },
-);
-vi.stubGlobal('document', { documentElement: { dataset: {}, style: {} }, querySelector: () => ({}) });
-vi.stubGlobal('window', { ai7: { getBookWorkbenchRoute: () => new Promise<never>(() => {}) } });
-
-const { providerProcessingLabel, runBudgetCeilingLabel } = await import('../../src/renderer/index.js');
+import { providerProcessingLabel, runBudgetCeilingLabel } from '../../src/renderer/plan-preview-labels.js';
 
 describe('runBudgetCeilingLabel', () => {
   it('states unset for the development-ci reading and the token ceiling for a set developer-live ceiling', () => {
