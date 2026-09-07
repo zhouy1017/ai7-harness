@@ -5,7 +5,7 @@ import { DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE } from '../../shared/prote
 import type { DeveloperLiveRuntime } from '../launch-policy.js';
 import { CredentialBroker, type CredentialSlotBinding, type SecretResolver } from '../provider/credential-broker.js';
 import { evaluateRunBudgetCeiling, type ClassifiedModelFailure, type RunBudgetCeiling, type UsageFacts } from '../provider/classification.js';
-import { DeepSeekOpenAiCompatibleAdapter, OPENCODE_GO_ROUTE_PROFILE } from '../provider/deepseek-adapter.js';
+import { DeepSeekOpenAiCompatibleAdapter, OPENCODE_GO_ROUTE_PROFILE, isProviderAccountLimit } from '../provider/deepseek-adapter.js';
 import {
   LOCAL_DETERMINISTIC_MODEL,
   LOCAL_DETERMINISTIC_ROUTE,
@@ -17,6 +17,7 @@ import {
 } from '../provider/egress-gate.js';
 import { Ai7LocalDeterministicAdapter } from '../provider/local-deterministic-adapter.js';
 import type { ResolvedModelFixture } from '../provider/model-fixture.js';
+import { ProviderResultCache, providerRequestDigest, usageOfResponse } from '../provider/provider-result-cache.js';
 import { canonicalRecord } from './canonical.js';
 import { SAMPLE1_SOURCE_DIGEST, type BaselineAnalysisStore, type ExecutionBindingRecord, type ExecutionPlanFacts, type PredecessorUnitResult, type RunProgress, type UnitResultRecord } from './baseline-analysis-store.js';
 import { BASELINE_PROMPT_CONTRACT, BASELINE_PROMPT_CONTRACT_DIGEST, buildUnitMessage, parseUnitResult, unitRequestDigest, type BaselineUnitResult } from './contract.js';
@@ -245,6 +246,14 @@ export class BaselineAnalysisExecutionOwner {
     const credentialSlot = live === null ? 'deepseek-api-key' as const : OPENCODE_GO_ROUTE_PROFILE.credentialSlot;
     const credentialReference = live === null ? facts.credentialReference : DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE;
     const runBudgetCeiling: RunBudgetCeiling = live === null ? { kind: 'unset' } : live.launch.runBudgetCeiling;
+    // The test item purpose is the Task mode, so a first baseline and each update mode number their
+    // live calls separately and a repeated purpose can never collide with an unrelated test.
+    const testItemPurpose = facts.update === null ? 'first-baseline' : facts.update.mode;
+    let cache: ProviderResultCache | null = null;
+    if (live !== null) {
+      cache = new ProviderResultCache(live.launch.providerCacheRoot);
+      await cache.open();
+    }
     const blocks = ledger.readRevisionBlocks(facts.checkpoint.manuscriptId, facts.checkpoint.revisionId);
     const blocksById = new Map(blocks.map((block) => [block.blockId, block] as const));
     const manifest = facts.manifest;
@@ -297,9 +306,9 @@ export class BaselineAnalysisExecutionOwner {
             codes,
             profile: OPENCODE_GO_ROUTE_PROFILE,
             sessionId: () => harness.currentSessionId(),
-            // The captured native `fetch`: the only transport that survives the network denial, and
-            // only here, inside the broker's release step for an admitted opencode-go payload.
-            transport: (url, init) => live.nativeFetch(url, init),
+            // The captured native `fetch`, reached only through the cache: an identical request
+            // replays without transmitting, and a live call happens at most once per test item.
+            transport: (url, init) => transmitOnce(cache!, live, testItemPurpose, model, url, init),
           }),
       gate: (payload) => {
         if (bindingFacts === null) return { decision: 'refuse', reason: 'binding-stale', detail: '执行绑定尚未持久化；未发送任何内容。' };
@@ -591,6 +600,92 @@ export class BaselineAnalysisExecutionOwner {
       await harness.finish();
     }
   }
+}
+
+/**
+ * One live call, at most once. The request digest is taken over the canonical body the adapter
+ * assembled — the same bytes the gate admitted, and the only part of the request that ever reaches
+ * the cache, since the headers carry the credential. An identical request replays from the cache and
+ * transmits nothing; otherwise the call claims a fresh test item id, transmits once, and records the
+ * result under it. A refused item id fails the turn rather than transmitting anyway.
+ */
+async function transmitOnce(
+  cache: ProviderResultCache,
+  live: DeveloperLiveRuntime,
+  purpose: string,
+  model: string,
+  url: string,
+  init: { method: 'POST'; headers: Record<string, string>; body: string; signal?: AbortSignal },
+): Promise<{ status: number; json(): Promise<unknown> }> {
+  const requestDigest = providerRequestDigest(init.body);
+  const replayed = await cache.lookup(model, requestDigest);
+  if (replayed !== null) {
+    await cache.record({
+      itemId: cache.nextItemId(purpose),
+      purpose,
+      model,
+      promptContractDigest: BASELINE_PROMPT_CONTRACT_DIGEST,
+      requestDigest,
+      outcome: 'replayed',
+      status: replayed.status,
+      usage: replayed.usage,
+      recordedAt: new Date().toISOString(),
+    });
+    return { status: replayed.status, json: () => Promise.resolve(replayed.response) };
+  }
+  const itemId = cache.nextItemId(purpose);
+  cache.claimItem(itemId);
+  const transmittedAt = new Date().toISOString();
+  let response: { status: number; json(): Promise<unknown> };
+  try {
+    response = await live.nativeFetch(url, init);
+  } catch (error) {
+    await cache.record({
+      itemId, purpose, model, promptContractDigest: BASELINE_PROMPT_CONTRACT_DIGEST, requestDigest,
+      outcome: 'failed', status: null, usage: null, recordedAt: new Date().toISOString(),
+    });
+    throw error;
+  }
+  let body: unknown = null;
+  try {
+    body = await response.json();
+  } catch {
+    body = null;
+  }
+  const usage = usageOfResponse(body);
+  // Only a result worth replaying is cached: a limit or a server error must be asked again later.
+  if (response.status === 200) {
+    await cache.store({ model, requestDigest, requestBody: init.body, status: response.status, response: body, usage, transmittedAt });
+  }
+  const accountLimit = isProviderAccountLimit(OPENCODE_GO_ROUTE_PROFILE, response.status, body);
+  const resetWindow = accountLimit ? providerResetWindow(body) : null;
+  await cache.record({
+    itemId,
+    purpose,
+    model,
+    promptContractDigest: BASELINE_PROMPT_CONTRACT_DIGEST,
+    requestDigest,
+    outcome: response.status === 200 ? 'transmitted' : 'failed',
+    status: response.status,
+    usage,
+    ...(accountLimit ? { classification: 'quota-exhausted' as const } : {}),
+    ...(resetWindow === null ? {} : { resetWindow }),
+    recordedAt: new Date().toISOString(),
+  });
+  return { status: response.status, json: () => Promise.resolve(body) };
+}
+
+/** The reset window a limit response stated, when it stated one; recorded in the ledger, never guessed. */
+function providerResetWindow(body: unknown): string | null {
+  if (body === null || typeof body !== 'object') return null;
+  const error = (body as { error?: unknown }).error;
+  if (error === null || typeof error !== 'object') return null;
+  for (const key of ['reset_at', 'resets_at', 'reset', 'retry_after']) {
+    const value = (error as Record<string, unknown>)[key];
+    if (typeof value === 'string' && value.length > 0) return value;
+    if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  }
+  return null;
 }
 
 function requireCompositionMatch(actual: string, planned: string): void {

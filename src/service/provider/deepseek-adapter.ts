@@ -51,6 +51,14 @@ export interface ProviderRouteProfile {
   readonly model: string;
   readonly credentialSlot: CredentialSlot;
   readonly bodyPolicy: 'deepseek-thinking' | 'openai-chat-completions';
+  /**
+   * How a rate-limit-shaped response is read. The production route keeps `429 → RATE_LIMIT`, which is
+   * retry-safe. On the developer-live route a 429, a 402, or a body naming the usage limit is one
+   * thing — the development account's limit — so it classifies as a Provider Account Limit, which is
+   * not retry-safe and ends the Run. The gateway's limit shape is undocumented, so all three are read
+   * the same way rather than guessing which one it sends.
+   */
+  readonly limitPolicy: 'rate-limit-retryable' | 'account-limit-terminal';
   /** Whether the mandatory DSH attribution headers travel with the request; only the production route sends them. */
   readonly dshAttribution: boolean;
   /** Whether the request carries the technical Session id in `x-opencode-session`. */
@@ -65,6 +73,7 @@ export const DEEPSEEK_ROUTE_PROFILE: ProviderRouteProfile = {
   model: DEEPSEEK_MODEL,
   credentialSlot: 'deepseek-api-key',
   bodyPolicy: 'deepseek-thinking',
+  limitPolicy: 'rate-limit-retryable',
   dshAttribution: true,
   sessionHeader: false,
   displayName: 'DeepSeek 开放平台（官方）',
@@ -77,6 +86,7 @@ export const OPENCODE_GO_ROUTE_PROFILE: ProviderRouteProfile = {
   model: OPENCODE_GO_MODEL,
   credentialSlot: 'opencode-go',
   bodyPolicy: 'openai-chat-completions',
+  limitPolicy: 'account-limit-terminal',
   dshAttribution: false,
   sessionHeader: true,
   displayName: 'OpenCode Go（开发者实时）',
@@ -174,14 +184,35 @@ function nonNegativeInteger(value: unknown): number | null {
   return Number.isSafeInteger(value) && (value as number) >= 0 ? (value as number) : null;
 }
 
-/** Parse one OpenAI-compatible completion response into the closed AI7 signal set. */
-export function parseDeepSeekResponse(status: number, body: unknown, codes: DshFailureCodes): DeepSeekParsedResponse {
+/** The error text of one response, lowercased, for the limit and context-window shapes to be read from. */
+function errorTextOf(body: unknown): string {
   const errorRecord = isRecord(body) && isRecord(body.error) ? body.error : null;
-  const errorText = errorRecord === null
+  return errorRecord === null
     ? ''
     : [errorRecord.code, errorRecord.type, errorRecord.message].filter((part) => typeof part === 'string').join(' ').toLocaleLowerCase('en-US');
+}
+
+/**
+ * Whether one response is this route's Provider Account Limit. Only a route whose `limitPolicy` is
+ * `account-limit-terminal` reads a 429 this way; on the production route a 429 stays a retry-safe
+ * rate limit, exactly as it was.
+ */
+export function isProviderAccountLimit(profile: ProviderRouteProfile, status: number, body: unknown): boolean {
+  const limitText = /insufficient[_ ]?(balance|quota)|quota|balance|usage limit|credit/u.test(errorTextOf(body));
+  if (status === 402 || limitText) return true;
+  return profile.limitPolicy === 'account-limit-terminal' && status === 429;
+}
+
+/** Parse one OpenAI-compatible completion response into the closed AI7 signal set. */
+export function parseDeepSeekResponse(
+  status: number,
+  body: unknown,
+  codes: DshFailureCodes,
+  profile: ProviderRouteProfile = DEEPSEEK_ROUTE_PROFILE,
+): DeepSeekParsedResponse {
+  const errorText = errorTextOf(body);
   if (status === 401 || status === 403) return { kind: 'failure', code: codes.INVALID_CREDENTIAL_CODE, message: '模型服务拒绝了凭据。', status };
-  if (status === 402 || /insufficient[_ ]?(balance|quota)|quota|balance/u.test(errorText)) {
+  if (isProviderAccountLimit(profile, status, body)) {
     return { kind: 'failure', code: codes.QUOTA_EXCEEDED_CODE, message: '模型服务账户限额或余额不足。', status };
   }
   if (status === 429) return { kind: 'failure', code: AI7_FAILURE_CODES.RATE_LIMIT, message: '模型服务速率限制。', status };
@@ -344,7 +375,7 @@ export class DeepSeekOpenAiCompatibleAdapter implements LlmAdapter {
         } catch {
           body = null;
         }
-        return parseDeepSeekResponse(response.status, body, this.#deps.codes);
+        return parseDeepSeekResponse(response.status, body, this.#deps.codes, this.#profile);
       });
     } catch (error) {
       const classified = classifyTransportError(error);
