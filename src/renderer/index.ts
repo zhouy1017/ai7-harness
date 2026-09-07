@@ -9,7 +9,6 @@ import type {
   BaselineAnalysisUpdateRequest,
   PlanBoundarySplitProjection,
   PlanRevisionDiffValue,
-  RunBudgetCeilingState,
   BookCreationReviewProjection,
   BookRecordPresentation,
   BookSummaryPageProjection,
@@ -27,7 +26,6 @@ import type {
   ModelServiceSettingsProjection,
   OutlineProjection,
   PriorWorkItemProjection,
-  ProviderProcessingPin,
   ReplacementPreviewProjection,
   RecoveryComparisonProjection,
   RecoverySelection,
@@ -45,6 +43,7 @@ import type {
 } from '../shared/protocol.js';
 import { BASELINE_ANALYSIS_TASK_GOAL, J03_TASK_GOAL, MAX_REPLACEMENT_EXCLUSIONS } from '../shared/protocol.js';
 import { mountBoundedEditor, type BoundedEditor, type EditorContinuity } from './editor.js';
+import { providerProcessingLabel, runBudgetCeilingLabel } from './plan-preview-labels.js';
 
 function requiredElement(selector: string): HTMLElement {
   const node = document.querySelector<HTMLElement>(selector);
@@ -2226,25 +2225,6 @@ function renderBaselineAnalysis(host: HTMLElement, projection: BaselineAnalysisP
   card.append(element('h4', undefined, '明确不会发生'), nonEffects);
   host.replaceChildren(card);
   if (projection.state === 'admitted' || projection.state === 'executing') refreshLater();
-}
-
-/**
- * The exact Run Budget Ceiling wording. `未设置任务预算上限` is true only when the plan really froze
- * `unset`; a developer-live plan freezes a required token ceiling and must say so, because the
- * ceiling is what bounds a Run that can actually transmit.
- */
-export function runBudgetCeilingLabel(ceiling: RunBudgetCeilingState): string {
-  return ceiling === 'unset' ? '未设置任务预算上限' : `任务运行预算上限：${ceiling.maxTotalTokens} tokens`;
-}
-
-/**
- * The exact Provider Processing pin wording. `development-ci · v1 · 拒绝 · 0 次实时传输` is the only
- * reading J-03 ever produces today; the shape carries every scope's pin so a future scope's reading
- * renders faithfully instead of repeating the development-ci constant.
- */
-export function providerProcessingLabel(pin: ProviderProcessingPin): string {
-  const decisionLabel = pin.decision === 'deny' ? '拒绝' : pin.decision;
-  return `${pin.operationalScope} · ${pin.version} · ${decisionLabel} · ${pin.authorizedLiveTransmissionCount} 次实时传输`;
 }
 
 /** The execution route of the frozen plan: the deterministic fixture pin, or the live route's endpoint. */
