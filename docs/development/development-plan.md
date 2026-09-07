@@ -24,11 +24,13 @@ Product integration stays serial. Slices in different phases never run in parall
 
 ## Phase 1 — real analysis loop on `sample1`
 
-Exit criterion: one `developer-live` Run on exact `sample1` produces unit results, model-driven cross-unit findings, sourced factual findings, a sampled assurance estimate, and a Run Report; fixtures generated from that Run replay the same path in J-04; the Owner has read at least one Run Report and its findings.
+Exit criterion: one `developer-live` Run on exact `sample1` produces unit results, model-driven cross-unit findings, sourced factual findings, a sampled assurance estimate, and a Run Report; fixtures generated from that Run replay the same path in J-04; the Owner has read at least one Run Report and its findings. The first live Run, `S40/smoke/1` of 2026-09-07 ([#307](https://github.com/zhouy1017/ai7-harness/issues/307)), met the transport half of this and not the result half: it transmitted eight units under the bound ceiling, kept every enforcement guarantee, and produced a Result Set Revision, but three of the eight failed the unit contract. The criterion stays unmet until slice 1.1a closes.
 
 | Order | Slice | Issue | Class | Journey | Outcome | Depends on | Status |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | 1.1 | S40 | #272 | T3 | J-04 | `developer-live` scope: Provider Processing v4, active set v4, trusted launch form, per-unit Session, required ceiling, `deepseek-v4-flash` through the `opencode-go` route, the ADR 0067 enrollment helper, Provider Test Ledger and Result Cache, quota classification, Egress Gate `transmit-remote` | S13 | integrated (PR #285, `dev@3c3d820`); the live smoke run is deferred |
+| 1.1a | S40-f6 | #306 | T3 | J-04 | Diagnose and fix the `contract-invalid (not-json)` failures the first live Run produced in three of eight units, from the cached responses and without a new live call | S40 | **blocks this phase's exit** |
+| 1.1b | S40-f5 | #303 | T2 | J-03, J-04 | Derive every scope, policy-version, transmission-count, ceiling, and binding statement from the bound launch, and sweep for every remaining hardcoded one | S40 | planned |
 | 1.2 | S41 | #273 | T2 | J-04 | Fixture generation from the Provider Result Cache with echo checks; content-digest resolution for unit and service tests | S40 | planned |
 | 1.3 | S42 | #274 | T3 | J-04 | Baseline Cross-Unit Reduction Contract v1 over topic-reorganized unit results; `reducer`-lineage findings | S40 | planned |
 | 1.4 | S18 | #53 | T3 | J-04 | Factual review: assertion markers, Factual Review Contract v1, research capability with a per-Run search budget and institutional-source list, independent Reference Integrity / Claim Support / Factual Verification, the ADR 0066 finding record | S40 | planned |
@@ -49,6 +51,29 @@ Exit criterion: one `developer-live` Run on exact `sample1` produces unit result
 **S19 (#54).** `保存为来源材料` commits a retention-permitted research snapshot into a Book-owned Source Version with a Source Acquisition Record (ADR 0035); a finding offers `提出更正提议`, which creates an exact-revision Correction Proposal on a Proposal Branch without applying it. J-04 asserts both. Non-goals: Proposal Decision and Apply (Phase 2).
 
 **S43 (#275)** and **S44 (#276)** are specified in their Issues.
+
+## Phase 1c — what the first live Run exposed
+
+Exit criterion: the display and liveness rules are stated in `docs/ui-ux-v2/`, every surface of the seven executable Journeys carries a verdict against them, and no surface tells an editor something that is not derived from current state.
+
+These slices come from [#307](https://github.com/zhouy1017/ai7-harness/issues/307), the record of `S40/smoke/1`. They sit **before Phase 2** deliberately. Phase 2 builds Proposal review, Apply, conflict resolution, and export — four families of new surfaces. Building them before these rules exist means applying today's habits four more times and paying to undo them later. A rule is cheap to state and expensive to retrofit, which is the same argument slice 1.1b makes about sweeps: the cost of a wrong pattern is the number of places it has been copied to.
+
+| Order | Slice | Issue | Class | Journey | Outcome | Depends on | Status |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 1c.1 | S46 | #304 | T3 | all | State the decision-layer / technical-identity rule with persistent primary actions, local time, and the editorial vocabulary; then survey every surface of the seven Journeys with a per-surface verdict | 1.1b | planned |
+| 1c.2 | S47 | #305 | T3 | J-04 | Define the liveness signal beside Measured Run Progress from facts the system already holds, with a sampling obligation, a stale case, and the lifetime of a transient indicator | 1.1b | planned |
+| 1c.3 | S48 | #308 | T1 | — | `--check` answers `present`, `absent`, or `unavailable`, so a failed check is distinguishable from a missing credential without revealing anything about a value | — | planned |
+
+**S46 (#304)** and **S47 (#305)** are rule-first: the Commander settles the rule and the survey method, and only then dispatches per-surface application, which can run as T1 or T2 units against a rule that already exists. Neither removes any exact identity from the product; both change where it sits and what else must be true beside it.
+
+**S48 (#308)** is independent of the other two and can run at any time.
+
+## Unscheduled backlog
+
+Open, recorded, and deliberately not ordered — the Commander schedules them when the Owner reaches them. Listing them here keeps them visible without implying a delivery position.
+
+- **From the parallel T1 wave of 2026-09-07:** #286 (the retried unit's payload digest on the Plan Adaptation), #287 (durable-state drift proven beyond unit tests), #288 (the Task Intent range versus later plan versions), #297 (two admitted Public SampleBooks that do not import through the bounded DOCX path), #301 (extract the Plan Preview label helpers so their test needs no DOM stub).
+- **From the advisory review of #48:** #281 (S13-f1), already carried at slot 3.2a below.
 
 ## Phase 2 — from proposal to delivered files
 
