@@ -95,19 +95,6 @@ export const SCHEMA_DIGEST = sha256Hex(canonicalJson({ contractVersion: BASELINE
 const EXECUTION_STEPS = ['派生覆盖清单', '逐单元执行基线稿件分析契约 v1', '章节归约', '跨单元矛盾与连续性核对', '全书综合', '形成结果集修订版'] as const;
 const UPDATE_EXECUTION_STEPS = ['派生覆盖清单并计算复用计划', '按血缘复用兼容单元', '仅对重算单元逐单元执行基线稿件分析契约 v1', '章节归约', '跨单元矛盾与连续性核对', '全书综合', '追加后继结果集修订版'] as const;
 const REDUCER_STAGES = ['unit-validation', 'section-reduction', 'contradiction-continuity', 'book-synthesis'] as const;
-const NON_EFFECTS = [
-  '不修改稿件，不创建修订版或事实判定',
-  '不创建学习资格、策略激活、Enrollment、Apply 或 Effect',
-  '只读取当前图书的任务输入修订版，不读取其他图书',
-  'development-ci · Provider Processing v1：0 次实时传输，远程绑定被拒绝',
-  '凭据值不进入任务账本、协议帧、日志、诊断或 Session 内容',
-] as const;
-const BLOCKED_REASONS = [
-  '当前可信启动范围为 development-ci，Provider Processing v1 允许 0 次实时传输；远程 DeepSeek 绑定被拒绝。',
-  '未提供 J-04 专用的本地确定性模型适配器控制，因此没有可执行的本地路由。',
-  '运行授权已记录；派发前阻止，未创建 Session、未构造 Provider payload、未访问网络。',
-] as const;
-const PROVIDER_CONSEQUENCE = '与首次基线分析相同：远程 DeepSeek 绑定被 development-ci · Provider Processing v1 拒绝（0 次实时传输），只有 J-04 控制绑定的 AI7 本地确定性模型适配器可执行；外发数据类别 public-or-synthetic；未设置任务预算上限；只有重算单元形成模型请求并计入用量，复用单元不形成任何模型负载。' as const;
 const SUCCESSOR_BEHAVIOR = '每次更新都是新的用户发起任务，经准备 → 计划预览 → 标准直接授权 → 执行后，在同一结果集上追加下一序号的不可变后继修订版；前一修订版不被改写，且始终可在修订历史中按其原始稿件 pin 查看。' as const;
 const ACTIVE_RUN_REASON = '当前已有分析任务在调度或执行中；在其结束前不能准备新的更新任务。' as const;
 const SYNC_UNAVAILABLE_REASON = '结果集修订版仍绑定当前稿件；只有在已确认编辑使精确修订版新鲜度为“已过期”后才可同步到当前稿件。' as const;
@@ -385,6 +372,47 @@ export interface LaunchBinding {
 
 const DEVELOPMENT_CI_LAUNCH: LaunchBinding = { operationalScope: 'development-ci', live: null };
 
+/**
+ * Every statement a Task surface makes about the trusted scope, the Provider Processing version, the
+ * live transmissions, and the Run Budget Ceiling is derived here from the bound launch, never from a
+ * constant. Under `development-ci` each one reads exactly as it always has — the v1 denial and its
+ * zero live transmissions, byte for byte. Under `developer-live` each states the scope the launch
+ * actually bound, its version, the route, and the frozen token ceiling: a surface that promised zero
+ * transmission one row above the endpoint the Run was calling is the defect these derive away.
+ *
+ * The three are exported so a test can compare both readings against the captured base text directly,
+ * without standing up the Run each surface would otherwise need.
+ */
+export function namedNonEffects(live: LaunchBinding['live']): ReadonlyArray<string> {
+  return [
+    '不修改稿件，不创建修订版或事实判定',
+    '不创建学习资格、策略激活、Enrollment、Apply 或 Effect',
+    '只读取当前图书的任务输入修订版，不读取其他图书',
+    live === null
+      ? 'development-ci · Provider Processing v1：0 次实时传输，远程绑定被拒绝'
+      : `developer-live · Provider Processing v4：实时传输受运行边界约束（任务运行预算上限 ${live.runBudgetCeiling.maxTotalTokens} tokens），远程绑定 ${live.route} · ${live.model} 已获准`,
+    '凭据值不进入任务账本、协议帧、日志、诊断或 Session 内容',
+  ];
+}
+
+/** Why a Run that cannot dispatch was blocked; only the first reason states the launch's own facts. */
+export function blockedReasons(live: LaunchBinding['live']): ReadonlyArray<string> {
+  return [
+    live === null
+      ? '当前可信启动范围为 development-ci，Provider Processing v1 允许 0 次实时传输；远程 DeepSeek 绑定被拒绝。'
+      : `当前可信启动范围为 developer-live，Provider Processing v4 允许的实时传输受运行边界约束（任务运行预算上限 ${live.runBudgetCeiling.maxTotalTokens} tokens）；远程绑定 ${live.route} · ${live.model} 已获准。`,
+    '未提供 J-04 专用的本地确定性模型适配器控制，因此没有可执行的本地路由。',
+    '运行授权已记录；派发前阻止，未创建 Session、未构造 Provider payload、未访问网络。',
+  ];
+}
+
+/** What an analysis update does to the Provider, stated for the launch the next Run would execute under. */
+export function providerConsequence(live: LaunchBinding['live']): string {
+  return live === null
+    ? '与首次基线分析相同：远程 DeepSeek 绑定被 development-ci · Provider Processing v1 拒绝（0 次实时传输），只有 J-04 控制绑定的 AI7 本地确定性模型适配器可执行；外发数据类别 public-or-synthetic；未设置任务预算上限；只有重算单元形成模型请求并计入用量，复用单元不形成任何模型负载。'
+    : `与首次基线分析相同：远程绑定 ${live.route} · ${live.model} 在 developer-live · Provider Processing v4 下可执行，实时传输受运行边界约束；外发数据类别 public-or-synthetic；任务运行预算上限 ${live.runBudgetCeiling.maxTotalTokens} tokens；每个重算单元形成一次实时传输并计入用量，复用单元不形成任何模型负载。`;
+}
+
 export class BaselineAnalysisStore {
   readonly #db: DatabaseSync;
   readonly #checkpointOwner: CheckpointOwner;
@@ -603,7 +631,7 @@ export class BaselineAnalysisStore {
         canAuthorize: authorization === undefined && (update === null || update.predecessorCurrent) && planRevision === null,
         canReconfirmPlan,
       },
-      namedNonEffects: NON_EFFECTS,
+      namedNonEffects: namedNonEffects(this.#launch.live),
     };
   }
 
@@ -636,7 +664,7 @@ export class BaselineAnalysisStore {
       history: null,
       inspectedRevision: null,
       actions: { canPrepare: true, canAuthorize: false, canReconfirmPlan: false },
-      namedNonEffects: NON_EFFECTS,
+      namedNonEffects: namedNonEffects(this.#launch.live),
     };
   }
 
@@ -919,6 +947,14 @@ export class BaselineAnalysisStore {
       };
     });
     const current = transitions[transitions.length - 1]!;
+    // A blocked Run states the reasons its own state transition recorded, not the reasons the launch
+    // running right now would state: a Run blocked under development-ci keeps that reading forever,
+    // exactly as a Result Set Revision keeps its own policy pin. Only a record written before those
+    // reasons were durable falls back to the bound launch.
+    const currentRecord = parseCanonicalJson(asString(states[states.length - 1]!.canonical_json)) as Record<string, unknown>;
+    const recordedReasons = Array.isArray(currentRecord.reasons) && currentRecord.reasons.every((reason) => typeof reason === 'string')
+      ? currentRecord.reasons as ReadonlyArray<string>
+      : null;
     const attemptRow = this.#db.prepare('SELECT * FROM analysis_execution_attempts WHERE run_record_id = ?').get(runRecordId) as SqlRow | undefined;
     let attempt: NonNullable<BaselineAnalysisProjection['run']>['attempt'] = null;
     if (attemptRow !== undefined) {
@@ -963,7 +999,7 @@ export class BaselineAnalysisStore {
       recordedAt: asString(runRecord.recorded_at),
       transitions,
       adaptations,
-      blockedReasons: current.state === 'blocked-before-dispatch' ? BLOCKED_REASONS : null,
+      blockedReasons: current.state === 'blocked-before-dispatch' ? recordedReasons ?? blockedReasons(this.#launch.live) : null,
       progress: current.state === 'admitted' || current.state === 'executing' ? progress(runRecordId) : null,
       attempt,
     };
@@ -1286,7 +1322,7 @@ export class BaselineAnalysisStore {
         'reanalyze-range': { ...action('reanalyze-range', true, null, null), options },
         'reanalyze-book': action('reanalyze-book', true, null, expected('reanalyze-book', null)),
       },
-      providerConsequence: PROVIDER_CONSEQUENCE,
+      providerConsequence: providerConsequence(this.#launch.live),
       successorBehavior: SUCCESSOR_BEHAVIOR,
     };
   }
@@ -1666,7 +1702,8 @@ export class BaselineAnalysisStore {
       ).run(runRecordId, taskIntentId, authorizationId, instant, run.json, run.digest);
       this.#insertRunState(runRecordId, 1, 'authorized', { detail: '标准直接运行授权已记录。' }, instant);
       if (!dispatchAllowed) {
-        this.#insertRunState(runRecordId, 2, 'blocked-before-dispatch', { detail: BLOCKED_REASONS.join(' '), reasons: BLOCKED_REASONS }, instant);
+        const reasons = blockedReasons(this.#launch.live);
+        this.#insertRunState(runRecordId, 2, 'blocked-before-dispatch', { detail: reasons.join(' '), reasons }, instant);
       }
     });
     return { projection: this.inspect(bookId), dispatchRunRecordId: dispatchAllowed ? runRecordId : null };
