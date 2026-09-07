@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -28,6 +29,7 @@ import {
   type LaunchPolicyProjection,
 } from '../../src/shared/protocol.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
+import { writeSyntheticDocx } from '../support/synthetic-docx.js';
 import {
   SAMPLE1_UNITS,
   importSample1Book,
@@ -414,5 +416,39 @@ describe('the developer-live scope over exact sample1 with a stub transport', ()
 
   it('admits exactly the one Public SampleBook of this slice as transmittable', () => {
     expect([...DEVELOPER_LIVE_TRANSMITTABLE_SOURCE_DIGESTS]).toEqual([SAMPLE1_SOURCE_DIGEST]);
+  });
+
+  it('refuses to prepare a baseline analysis Task whose lineage is not exact sample1, before any transport, workspace-profile pin, or credential is touched', async () => {
+    // A generated-only synthetic manuscript (no manuscript or manuscript derivative involved): its
+    // lineage must never reach a Run Authorization, let alone dispatch. This is the earlier,
+    // always-reached refusal — deleting it would leave every other test in this file green while the
+    // transmit guarantee it exists to protect is gone.
+    const store = await openLiveStore(roots.dataRoot);
+    const selectedPath = join(roots.inputRoot, 'non-sample1.docx');
+    await writeSyntheticDocx(selectedPath, {
+      paragraphs: [{ text: '合成非 sample1 稿件正文。' }],
+      coreTitle: 'developer-live 非 sample1 血缘',
+    });
+    const staged = await store.stageSelectedDocx(randomUUID(), selectedPath);
+    expect(staged.source.format).toBe('DOCX');
+    expect(staged.source.sourceSha256).not.toBe(SAMPLE1_SOURCE_DIGEST);
+    const target = { kind: 'new-book', choiceId: 'new-book', confirmedTitle: staged.titleSuggestion.value } as const;
+    const review = store.prepareNewBookReview(staged.draftId, staged.draftVersion, target, false);
+    expect(review.reviewDigest).not.toBeNull();
+    const commitId = randomUUID();
+    const commit = await store.commitNewBookImport({
+      draftId: staged.draftId,
+      expectedDraftVersion: review.draftVersion,
+      reviewDigest: review.reviewDigest!,
+      commitId,
+    });
+    await store.acknowledgeImportCompletion(commitId);
+
+    // No workspace-profile pin and no credential connection exist for this Book: the lineage check in
+    // `#binding()` is the first condition it evaluates, ahead of the artifact-pin and credential checks
+    // it also owns and ahead of the developer-live transmittable-set check in the execution owner.
+    expect(refusalCode(() => store.createBaselineAnalysisPreparationWork(commit.bookId, BASELINE_ANALYSIS_TASK_GOAL, null, launchPolicy)))
+      .toBe('ANALYSIS_LINEAGE_UNAVAILABLE');
+    await store.close();
   });
 });
