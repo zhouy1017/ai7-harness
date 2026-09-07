@@ -14,10 +14,31 @@ import {
 
 const HELPER_PATH = fileURLToPath(new URL('../../tools/enroll-dev-credential.mjs', import.meta.url));
 
+type CheckDependencies = {
+  env?: NodeJS.ProcessEnv;
+  platform?: NodeJS.Platform;
+  architecture?: string;
+  importKeyring?: () => Promise<{ AsyncEntry: new (service: string, account: string) => { getPassword: () => Promise<string | undefined> } }>;
+};
+
 type Helper = {
   parseEnrollmentArguments: (argv: string[]) => { mode: 'store' | 'check'; slot: string; credentialReference: string; fromFile: string | null };
   continuousIntegrationPresent: (env?: NodeJS.ProcessEnv) => boolean;
+  resolveCheckReading: (credentialReference: string, deps?: CheckDependencies) => Promise<'present' | 'absent' | 'unavailable'>;
 };
+
+const SUPPORTED_HOST: Required<Pick<CheckDependencies, 'platform' | 'architecture'>> =
+  process.platform === 'win32' ? { platform: 'win32', architecture: 'x64' } : { platform: 'darwin', architecture: 'arm64' };
+
+function fakeCarrier(password: string | undefined) {
+  return async () => ({
+    AsyncEntry: class {
+      async getPassword() {
+        return password;
+      }
+    },
+  });
+}
 
 // @ts-expect-error tools/*.mjs carry no declarations; the helper is exercised as the plain module it is.
 const helper = (await import('../../tools/enroll-dev-credential.mjs')) as unknown as Helper;
@@ -35,10 +56,10 @@ describe('enrol-dev-credential identity', () => {
     expect(CREDENTIAL_REFERENCE_PATTERN.test(DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE)).toBe(true);
   });
 
-  it('writes no diagnostic on the store path: the only output in the file is the two check words', async () => {
+  it('writes no diagnostic on the store path: the only output in the file is the one check line', async () => {
     const source = await readFile(HELPER_PATH, 'utf8');
     const writes = source.match(/process\.(stdout|stderr)\.write\([^)]*\)/gu) ?? [];
-    expect(writes).toEqual(["process.stdout.write(typeof value === 'string' && value.length > 0 ? 'present\\n' : 'absent\\n')"]);
+    expect(writes).toEqual(['process.stdout.write(`${reading}\\n`)']);
     expect(source).not.toMatch(/console\.(log|error|warn|info)/u);
   });
 });
@@ -74,5 +95,65 @@ describe('parseEnrollmentArguments', () => {
     expect(helper.continuousIntegrationPresent({ CI: 'true' })).toBe(true);
     expect(helper.continuousIntegrationPresent({ GITHUB_ACTIONS: 'true' })).toBe(true);
     expect(helper.continuousIntegrationPresent({ AI7_E2E_JOURNEY: 'J-04' })).toBe(true);
+  });
+});
+
+describe('resolveCheckReading', () => {
+  it('reads present when the carrier resolves and the store holds a non-empty value', async () => {
+    const reading = await helper.resolveCheckReading(DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE, {
+      env: {},
+      ...SUPPORTED_HOST,
+      importKeyring: fakeCarrier('a-secret'),
+    });
+    expect(reading).toBe('present');
+  });
+
+  it('reads absent when the carrier resolves but the store holds nothing', async () => {
+    const reading = await helper.resolveCheckReading(DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE, {
+      env: {},
+      ...SUPPORTED_HOST,
+      importKeyring: fakeCarrier(undefined),
+    });
+    expect(reading).toBe('absent');
+  });
+
+  it('reads unavailable, never absent, when the carrier is unresolvable', async () => {
+    const reading = await helper.resolveCheckReading(DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE, {
+      env: {},
+      ...SUPPORTED_HOST,
+      importKeyring: async () => {
+        throw new Error('module not found: @napi-rs/keyring');
+      },
+    });
+    expect(reading).toBe('unavailable');
+    expect(reading).not.toBe('absent');
+  });
+
+  it('reads unavailable on an unsupported platform or architecture', async () => {
+    const reading = await helper.resolveCheckReading(DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE, {
+      env: {},
+      platform: 'linux',
+      architecture: 'x64',
+      importKeyring: fakeCarrier('a-secret'),
+    });
+    expect(reading).toBe('unavailable');
+  });
+
+  it('reads unavailable when a native-carrier override is present', async () => {
+    const reading = await helper.resolveCheckReading(DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE, {
+      env: { NAPI_RS_FORCE_WASI: '1' },
+      ...SUPPORTED_HOST,
+      importKeyring: fakeCarrier('a-secret'),
+    });
+    expect(reading).toBe('unavailable');
+  });
+
+  it('reads unavailable when CI is detected', async () => {
+    const reading = await helper.resolveCheckReading(DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE, {
+      env: { CI: 'true' },
+      ...SUPPORTED_HOST,
+      importKeyring: fakeCarrier('a-secret'),
+    });
+    expect(reading).toBe('unavailable');
   });
 });
