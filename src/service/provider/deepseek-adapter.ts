@@ -2,26 +2,96 @@ import type { GenerateOptions, LlmAdapter, LlmProviderInfo, LlmResolvedModelInfo
 import { canonicalJson, isRecord, sha256Hex } from '../analysis/canonical.js';
 import { AI7_FAILURE_CODES, type DshFailureCodes } from './classification.js';
 import type { CredentialBroker, CredentialSlotBinding } from './credential-broker.js';
-import { DEEPSEEK_MODEL, DEEPSEEK_ROUTE, type TransmitTicket } from './egress-gate.js';
+import {
+  DEEPSEEK_MODEL,
+  DEEPSEEK_ROUTE,
+  OPENCODE_GO_MODEL,
+  OPENCODE_GO_ROUTE,
+  type CredentialSlot,
+  type RemoteExecutionRoute,
+  type TransmitTicket,
+} from './egress-gate.js';
 import { messageText, type AssembledModelPayload } from './payload.js';
 
 /**
- * The AI7-owned DeepSeek OpenAI-compatible adapter, revision 1: `POST https://api.deepseek.com/chat/completions`,
- * model `deepseek-v4-pro`, thinking enabled at high reasoning effort, no provider-native tools. It
- * assembles a deterministic request from the frozen prompt contract, records the request digest, and
- * transmits only after a `transmit-remote` decision the gate issued for the same binding — which
- * never happens under Provider Processing v1. The credential enters only the `authorization` header
- * inside the broker's release callback; the assembled request and its digest never contain it.
+ * The AI7-owned OpenAI-compatible Provider adapter, revision 1. One adapter serves both remote
+ * routes; a route profile — endpoint, model, credential slot, header policy, and body policy — is the
+ * only thing that differs between them. `deepseek-open-platform` is the unchanged production route
+ * (`POST https://api.deepseek.com/chat/completions`, model `deepseek-v4-pro`, thinking enabled at
+ * high reasoning effort). `opencode-go` is the developer-live route of Provider Processing v4
+ * (`POST https://opencode.ai/zen/go/v1/chat/completions`, bare model id `deepseek-v4-flash`, a
+ * standard chat-completions body with no DeepSeek-specific parameters, and the technical Session id
+ * in `x-opencode-session` for the gateway's prompt cache).
+ *
+ * Neither route exposes provider-native tools. The adapter assembles a deterministic request from the
+ * frozen prompt contract, records the request digest, and transmits only after a `transmit-remote`
+ * decision the gate issued for the same binding. The credential enters only the `authorization`
+ * header inside the broker's release callback; the assembled request and its digest never contain it.
  */
 export const DEEPSEEK_ADAPTER_REVISION = 1 as const;
 export const DEEPSEEK_CONFIGURATION_REVISION = 1 as const;
 export const DEEPSEEK_ENDPOINT = 'https://api.deepseek.com/chat/completions' as const;
 export const DEEPSEEK_REASONING_EFFORT = 'high' as const;
+/** The OpenCode Go chat-completions endpoint of the developer-live route (verified 2026-09-06). */
+export const OPENCODE_GO_ENDPOINT = 'https://opencode.ai/zen/go/v1/chat/completions' as const;
+/** The opaque per-request Session header the gateway uses for prompt caching; it carries the Session id and nothing else. */
+export const OPENCODE_GO_SESSION_HEADER = 'x-opencode-session' as const;
+/** The specific User-Agent the developer-live route sends: the product and the trusted scope, no host or user detail. */
+export const OPENCODE_GO_USER_AGENT = 'AI7-Harness/1.0 (developer-live)' as const;
+
+/**
+ * One remote route's complete request policy. `bodyPolicy` is the whole difference between the two
+ * bodies: `deepseek-thinking` adds `thinking` and `reasoning_effort`, `openai-chat-completions` sends
+ * the standard fields only, because the gateway's acceptance of DeepSeek-specific parameters is
+ * unverified and the Brief forbids sending them until the smoke run proves otherwise.
+ */
+export interface ProviderRouteProfile {
+  readonly route: RemoteExecutionRoute;
+  readonly endpoint: string;
+  readonly model: string;
+  readonly credentialSlot: CredentialSlot;
+  readonly bodyPolicy: 'deepseek-thinking' | 'openai-chat-completions';
+  /** Whether the mandatory DSH attribution headers travel with the request; only the production route sends them. */
+  readonly dshAttribution: boolean;
+  /** Whether the request carries the technical Session id in `x-opencode-session`. */
+  readonly sessionHeader: boolean;
+  readonly displayName: string;
+  readonly modelDisplayName: string;
+}
+
+export const DEEPSEEK_ROUTE_PROFILE: ProviderRouteProfile = {
+  route: DEEPSEEK_ROUTE,
+  endpoint: DEEPSEEK_ENDPOINT,
+  model: DEEPSEEK_MODEL,
+  credentialSlot: 'deepseek-api-key',
+  bodyPolicy: 'deepseek-thinking',
+  dshAttribution: true,
+  sessionHeader: false,
+  displayName: 'DeepSeek 开放平台（官方）',
+  modelDisplayName: 'DeepSeek V4 Pro High',
+};
+
+export const OPENCODE_GO_ROUTE_PROFILE: ProviderRouteProfile = {
+  route: OPENCODE_GO_ROUTE,
+  endpoint: OPENCODE_GO_ENDPOINT,
+  model: OPENCODE_GO_MODEL,
+  credentialSlot: 'opencode-go',
+  bodyPolicy: 'openai-chat-completions',
+  dshAttribution: false,
+  sessionHeader: true,
+  displayName: 'OpenCode Go（开发者实时）',
+  modelDisplayName: 'DeepSeek V4 Flash',
+};
+
+export const PROVIDER_ROUTE_PROFILES: Readonly<Record<RemoteExecutionRoute, ProviderRouteProfile>> = {
+  [DEEPSEEK_ROUTE]: DEEPSEEK_ROUTE_PROFILE,
+  [OPENCODE_GO_ROUTE]: OPENCODE_GO_ROUTE_PROFILE,
+};
 
 export interface DeepSeekRequestAssembly {
-  readonly url: typeof DEEPSEEK_ENDPOINT;
+  readonly url: string;
   readonly method: 'POST';
-  /** Headers without the credential: content type and the mandatory DSH attribution. */
+  /** Headers without the credential: content type, and whatever else the route profile declares. */
   readonly headers: Readonly<Record<string, string>>;
   /** Canonical JSON body; the digest is over exactly these bytes. */
   readonly body: string;
@@ -29,10 +99,18 @@ export interface DeepSeekRequestAssembly {
   readonly promptContractDigest: string;
 }
 
-export function assembleDeepSeekRequest(
+export interface ProviderRequestContext {
+  readonly attribution: Readonly<Record<string, string>>;
+  readonly promptContractDigest: string;
+  /** The technical Session id of the turn in flight; required by a profile that sends the Session header. */
+  readonly sessionId?: string;
+}
+
+/** Assemble one route's request. The body policy and the header set come from the profile and nothing else. */
+export function assembleProviderRequest(
+  profile: ProviderRouteProfile,
   payload: AssembledModelPayload,
-  attribution: Readonly<Record<string, string>>,
-  promptContractDigest: string,
+  context: ProviderRequestContext,
 ): DeepSeekRequestAssembly {
   const messages: Array<{ role: string; content: string }> = [];
   if (payload.system !== undefined && payload.system.length > 0) messages.push({ role: 'system', content: payload.system });
@@ -43,20 +121,38 @@ export function assembleDeepSeekRequest(
     messages.push({ role: message.role, content: text });
   }
   const body = canonicalJson({
-    model: DEEPSEEK_MODEL,
+    model: profile.model,
     messages,
     stream: false,
-    thinking: { type: 'enabled' },
-    reasoning_effort: DEEPSEEK_REASONING_EFFORT,
+    ...(profile.bodyPolicy === 'deepseek-thinking'
+      ? { thinking: { type: 'enabled' }, reasoning_effort: DEEPSEEK_REASONING_EFFORT }
+      : {}),
   });
+  if (profile.sessionHeader && (context.sessionId === undefined || context.sessionId.length === 0)) {
+    throw new Error('PROVIDER_REQUEST_SESSION_ABSENT');
+  }
   return {
-    url: DEEPSEEK_ENDPOINT,
+    url: profile.endpoint,
     method: 'POST',
-    headers: { 'content-type': 'application/json', accept: 'application/json', ...attribution },
+    headers: {
+      'content-type': 'application/json',
+      accept: 'application/json',
+      ...(profile.dshAttribution ? context.attribution : {}),
+      ...(profile.sessionHeader ? { [OPENCODE_GO_SESSION_HEADER]: context.sessionId!, 'user-agent': OPENCODE_GO_USER_AGENT } : {}),
+    },
     body,
     requestDigest: sha256Hex(body),
-    promptContractDigest,
+    promptContractDigest: context.promptContractDigest,
   };
+}
+
+/** The production route's assembly, unchanged in url, headers, body, and digest. */
+export function assembleDeepSeekRequest(
+  payload: AssembledModelPayload,
+  attribution: Readonly<Record<string, string>>,
+  promptContractDigest: string,
+): DeepSeekRequestAssembly {
+  return assembleProviderRequest(DEEPSEEK_ROUTE_PROFILE, payload, { attribution, promptContractDigest });
 }
 
 export function authorizationHeader(secret: string): Readonly<Record<string, string>> {
@@ -155,15 +251,28 @@ export interface DeepSeekAdapterDependencies {
   readonly codes: DshFailureCodes;
   /** Defaults to the global `fetch`, which the product interval denies. */
   readonly transport?: DeepSeekTransport;
+  /** The route this adapter serves; the unchanged production route when absent. */
+  readonly profile?: ProviderRouteProfile;
+  /** The technical Session id of the turn in flight; required by a profile that sends the Session header. */
+  readonly sessionId?: () => string;
 }
 
 export class DeepSeekOpenAiCompatibleAdapter implements LlmAdapter {
   readonly #deps: DeepSeekAdapterDependencies;
+  readonly #profile: ProviderRouteProfile;
   readonly #requestDigests: string[] = [];
   #transmissions = 0;
 
   constructor(deps: DeepSeekAdapterDependencies) {
     this.#deps = deps;
+    this.#profile = deps.profile ?? DEEPSEEK_ROUTE_PROFILE;
+    if (this.#profile.credentialSlot !== deps.slotBinding.slot) throw new Error('PROVIDER_ROUTE_SLOT_MISMATCH');
+    if (this.#profile.sessionHeader && deps.sessionId === undefined) throw new Error('PROVIDER_ROUTE_SESSION_SOURCE_ABSENT');
+  }
+
+  /** The route profile this adapter serves. */
+  get profile(): ProviderRouteProfile {
+    return this.#profile;
   }
 
   /** Request digests assembled so far, whether or not a transmission followed. */
@@ -177,7 +286,7 @@ export class DeepSeekOpenAiCompatibleAdapter implements LlmAdapter {
   }
 
   providerInfo(provider: string): LlmProviderInfo {
-    return { id: provider, name: 'DeepSeek 开放平台（官方）' };
+    return { id: provider, name: this.#profile.displayName };
   }
 
   providerRetryPolicy(): undefined {
@@ -189,7 +298,7 @@ export class DeepSeekOpenAiCompatibleAdapter implements LlmAdapter {
   }
 
   resolveModel(provider: string, model: string): Promise<LlmResolvedModelInfo> {
-    return Promise.resolve({ provider, id: model, name: 'DeepSeek V4 Pro High', inputModalities: ['text'] });
+    return Promise.resolve({ provider, id: model, name: this.#profile.modelDisplayName, inputModalities: ['text'] });
   }
 
   async *stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
@@ -197,11 +306,21 @@ export class DeepSeekOpenAiCompatibleAdapter implements LlmAdapter {
       type: 'finish',
       reason: { kind: code === AI7_FAILURE_CODES.INTERRUPTED ? 'aborted' : 'error', failure: { code, message, ...(status === undefined ? {} : { status }) } },
     });
-    if (options.provider !== DEEPSEEK_ROUTE || options.model !== DEEPSEEK_MODEL) {
-      yield fail(AI7_FAILURE_CODES.INVALID_RESPONSE, 'DeepSeek 适配器只服务其固定路由与模型。');
+    if (options.provider !== this.#profile.route || options.model !== this.#profile.model) {
+      yield fail(AI7_FAILURE_CODES.INVALID_RESPONSE, '适配器只服务其绑定路由与模型。');
       return;
     }
-    const assembly = assembleDeepSeekRequest(options, this.#deps.attribution(), this.#deps.promptContractDigest);
+    let assembly: DeepSeekRequestAssembly;
+    try {
+      assembly = assembleProviderRequest(this.#profile, options, {
+        attribution: this.#deps.attribution(),
+        promptContractDigest: this.#deps.promptContractDigest,
+        ...(this.#deps.sessionId === undefined ? {} : { sessionId: this.#deps.sessionId() }),
+      });
+    } catch {
+      yield fail(AI7_FAILURE_CODES.INVALID_RESPONSE, '无法为本步骤组装请求；未发送任何内容。');
+      return;
+    }
     this.#requestDigests.push(assembly.requestDigest);
     const ticket = this.#deps.tickets.take();
     if (ticket === null || ticket.bindingDigest !== this.#deps.slotBinding.bindingDigest) {

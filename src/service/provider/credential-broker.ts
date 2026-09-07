@@ -1,6 +1,6 @@
 import { CREDENTIAL_REFERENCE_PATTERN } from '../../shared/protected-secret-identity.js';
 import { DIGEST_PATTERN } from '../analysis/canonical.js';
-import type { TransmitTicket } from './egress-gate.js';
+import type { CredentialSlot, TransmitTicket } from './egress-gate.js';
 
 /**
  * The Credential Broker maps (Execution Binding, Model Role, logical slot) to the opaque Credential
@@ -17,7 +17,7 @@ export interface SecretResolver {
 export interface CredentialSlotBinding {
   readonly bindingDigest: string;
   readonly modelRole: 'Main Editorial Role';
-  readonly slot: 'deepseek-api-key';
+  readonly slot: CredentialSlot;
   readonly credentialReference: string;
 }
 
@@ -30,9 +30,12 @@ export class CredentialBrokerError extends Error {
   }
 }
 
+/** The closed slot set: the production connection's key and the developer-live route's development credential. */
+const CREDENTIAL_SLOTS: ReadonlySet<CredentialSlot> = new Set<CredentialSlot>(['deepseek-api-key', 'opencode-go']);
+
 function requireBinding(binding: CredentialSlotBinding): void {
   if (!DIGEST_PATTERN.test(binding.bindingDigest) || binding.modelRole !== 'Main Editorial Role' ||
-      binding.slot !== 'deepseek-api-key' || !CREDENTIAL_REFERENCE_PATTERN.test(binding.credentialReference)) {
+      !CREDENTIAL_SLOTS.has(binding.slot) || !CREDENTIAL_REFERENCE_PATTERN.test(binding.credentialReference)) {
     throw new CredentialBrokerError('CREDENTIAL_BINDING_INVALID', '凭据槽位绑定无效。');
   }
 }

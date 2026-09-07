@@ -14,8 +14,15 @@ export const LOCAL_DETERMINISTIC_ROUTE = 'ai7-local-deterministic' as const;
 export const LOCAL_DETERMINISTIC_MODEL = 'ai7-deterministic-fixture' as const;
 export const DEEPSEEK_ROUTE = 'deepseek-open-platform' as const;
 export const DEEPSEEK_MODEL = 'deepseek-v4-pro' as const;
+/** The developer-live route of Provider Processing v4 (ADR 0065, ADR 0067): OpenCode Go with the bare model id. */
+export const OPENCODE_GO_ROUTE = 'opencode-go' as const;
+export const OPENCODE_GO_MODEL = 'deepseek-v4-flash' as const;
 
-export type ExecutionRoute = typeof LOCAL_DETERMINISTIC_ROUTE | typeof DEEPSEEK_ROUTE;
+/** Every route a Provider Resolution Plan may bind; the two remote ones are served by the same adapter. */
+export type ExecutionRoute = typeof LOCAL_DETERMINISTIC_ROUTE | typeof DEEPSEEK_ROUTE | typeof OPENCODE_GO_ROUTE;
+export type RemoteExecutionRoute = typeof DEEPSEEK_ROUTE | typeof OPENCODE_GO_ROUTE;
+/** The logical credential slots of the Main Editorial Role: one per remote route. */
+export type CredentialSlot = 'deepseek-api-key' | 'opencode-go';
 
 export interface EgressPolicyPin {
   readonly operationalScope: 'development-ci';
