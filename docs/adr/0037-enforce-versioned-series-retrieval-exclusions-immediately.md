@@ -1,3 +1,7 @@
+---
+status: accepted
+---
+
 # Enforce versioned Series Retrieval Exclusions immediately
 
 A Series Retrieval Exclusion is a versioned append-only restriction with an exact member Book, Source Version, stable Series Knowledge Item, or stable knowledge class target plus scope, effective time, and optional reason. An item-targeted exclusion covers that item's current and future revisions, while a class-targeted exclusion covers later matching items. Once effective it refuses every later affected Series-scoped read, including work not yet performed by a queued, authorized, or active Run. The exclusion never rewrites that Run's frozen authorization or already fetched evidence, but the affected Run stops and may continue only through a Plan Revision plus renewed Run Authorization or be cancelled; completed history remains immutable and receives a later impact marker where applicable. Changing or ending an exclusion appends a superseding revision and never restores an old authorization or automatically resumes work.

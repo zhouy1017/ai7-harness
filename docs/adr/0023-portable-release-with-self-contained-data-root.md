@@ -1,3 +1,7 @@
+---
+status: accepted
+---
+
 # Ship portable and installer channels with a self-contained data root
 
 On Windows, AI7 ships a zip portable folder and an NSIS installer, produced from the same source so that neither is a separate product. The portable channel is the reason this Windows design exists: the intended users are publishing professionals on managed corporate machines, and needing no admin rights, no registry writes, and no IT ticket removes a real adoption gate. The predecessor shipped portable builds for the same audience, and dropping the embedded Python interpreter makes the folder substantially smaller. The installer serves users who simply expect one. This revises the original decision, which shipped portable only and deferred an installer until a concrete need appeared. ADR 0028 adds macOS as an equal product platform, and [ADR 0052](./0052-select-the-macos-v1-distribution-and-data-location-profile.md) now owns its deliberately different package/update and data-root mechanics.

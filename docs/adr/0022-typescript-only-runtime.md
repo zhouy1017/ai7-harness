@@ -1,3 +1,7 @@
+---
+status: accepted
+---
+
 # Ship a TypeScript-only runtime with no embedded Python
 
 AI7 is TypeScript and Node throughout, and no Python interpreter ships with the product. The audit of the predecessor removed the reason to keep one: its 62 Python files carry zero third-party dependencies — no `requirements.txt`, no `python-docx`, no PDF library — and handle DOCX with `zipfile` and `xml.etree`, treating it as the zip of XML it is. Python was the backend implementation language rather than a document-processing capability, and the packaged interpreter existed only to ship that backend. Every capability in it has a direct Node equivalent, mostly stdlib to stdlib: a zip library and an XML parser for OOXML, `node:crypto` for hashing, and the Credential Broker over the platform Protected Secret Store—Windows Credential Manager or macOS Keychain—in place of direct legacy DPAPI calls.

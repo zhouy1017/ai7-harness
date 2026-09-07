@@ -1,3 +1,7 @@
+---
+status: accepted
+---
+
 # Exclude legacy production-data migration
 
 The new AI7 starts with an empty production business store and will not import AI7 Reborn Books, manuscripts, indexes, memory, Task/Run/Operation history, workflows, decisions, Effects, receipts, or UI state. The design-level transfer allowlist is limited to later user-initiated API credentials directly into the target platform's Protected Secret Store through the Credential Broker—Windows Credential Manager or macOS Keychain—separately reviewed mock-model-provider generators/fixtures, and explicitly selected test-only sample Books. No item is selected merely because it is allowlisted: the current baseline and provider-free tracer use none of them and use public-synthetic input instead. A selected real/sample Book remains local and never enters a repository, hosted CI, artifact, log, distributable fixture, corpus, or proof programme. This keeps obsolete schemas and private operational history out of the new domain and Harness ledgers; no general legacy-data importer or insecure secret fallback is created.

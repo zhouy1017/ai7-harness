@@ -1,3 +1,7 @@
+---
+status: accepted
+---
+
 # Keep AI7 proprietary and sample manuscripts local-only
 
 AI7 is proprietary and its rights rest solely with the repository owner. The repository carries an explicit all-rights-reserved `LICENSE` rather than relying on default copyright, because an unstated license reads as unresolved and had been blocking source reuse. No open-source grant is made: AI7 is a commercial product for mainland Chinese publishing houses, it holds unpublished editorial material, and it is built partly on a private predecessor. A proprietary license does not discharge inbound obligations — DeepSeek Harness is MIT and its history also carries BSD-3-Clause material, a BSD-licensed native component, and vendored payload obligations, some of which may be identity- or distribution-scoped and must be verified rather than assumed to extend to an AI7-branded distribution. Any AI7 build therefore ships a maintained third-party notices file.

@@ -1,3 +1,7 @@
+---
+status: accepted
+---
+
 # Preserve post-designation maintenance as versioned cases
 
 AI7 records each post-designation maintenance matter as a stable Maintenance Case with immutable Maintenance Case Revisions, bound permanently to the exact Publication Version and Editorial Deliverable Revision concerned. Each case has one stable Maintenance Classification:
