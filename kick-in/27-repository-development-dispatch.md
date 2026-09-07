@@ -2,7 +2,7 @@
 
 ## Scope
 
-This runbook is the operating detail for repository development through Task Sessions on either supported harness, Codex or Claude Code. [ADR 0061](../docs/adr/0061-route-repository-dispatch-by-commander-harness.md) owns the fixed bindings and the `subagent` launch mode, [ADR 0063](../docs/adr/0063-allow-cross-harness-dispatch-through-cli-launched-task-sessions.md) owns per-attempt harness selection and the `cli-session` mode, and [ADR 0064](../docs/adr/0064-reweight-repository-development-toward-value-first-delivery.md) owns the current receipt schema, the optional Reviewer, the T3-only body hash, base-drift continuation, and the Commander's mechanical-edit allowance. [ADR 0068](../docs/adr/0068-rebind-the-t3-worker-and-reserve-fable-for-the-commander-and-reviewer.md) owns the current Claude Code T3 Worker and Reviewer bindings. None of this is AI7 product behavior; a repository-development subagent is never a DSH subagent.
+This runbook is the operating detail for repository development through Task Sessions on either supported harness, Codex or Claude Code. [ADR 0061](../docs/adr/0061-route-repository-dispatch-by-commander-harness.md) owns the fixed bindings and the `subagent` launch mode, [ADR 0063](../docs/adr/0063-allow-cross-harness-dispatch-through-cli-launched-task-sessions.md) owns per-attempt harness selection and the `cli-session` mode, and [ADR 0064](../docs/adr/0064-reweight-repository-development-toward-value-first-delivery.md) owns the current receipt schema, the optional Reviewer, the T3-only body hash, base-drift continuation, and the Commander's mechanical-edit allowance. [ADR 0068](../docs/adr/0068-rebind-the-t3-worker-and-reserve-fable-for-the-commander-and-reviewer.md) owns the T3 Worker rebinding and the fixed Reviewer binding; [ADR 0069](../docs/adr/0069-bind-the-parallel-closeout-wave.md) owns the current Claude Code Commander and T1 bindings, Commander-performed review, and the single-E2E-slot rule for parallel attempts. None of this is AI7 product behavior; a repository-development subagent is never a DSH subagent.
 
 A **Task Session** is one fresh execution context on the attempt's harness with its own isolated worktree. One attempt never changes its harness or launch mode.
 
@@ -10,8 +10,8 @@ A **Task Session** is one fresh execution context on the attempt's harness with 
 
 | Role or class | `codex` | `claude-code` | Authority |
 | --- | --- | --- | --- |
-| Commander | `gpt-5.6-sol @ ultra` | `claude-fable-5-1 @ xhigh` | Shapes slices and Issues, dispatches, accepts reports, integrates, takes every external action; may make mechanical documentation edits through its own pull request |
-| T1 Worker (mechanical) | `gpt-5.6-luna @ medium` | `claude-sonnet-5 @ medium` | Executes one brief in its own branch and worktree |
+| Commander | `gpt-5.6-sol @ ultra` | `claude-opus-5 @ high` | Shapes slices and Issues, dispatches, accepts reports, integrates, takes every external action; may make mechanical documentation edits through its own pull request |
+| T1 Worker (mechanical) | `gpt-5.6-luna @ medium` | `claude-sonnet-5 @ high` | Executes one brief in its own branch and worktree |
 | T2 Worker (standard build) | `gpt-5.6-terra @ high` | `claude-opus-5 @ high` | Same |
 | T3 Worker (high-stakes) | `gpt-5.6-sol @ xhigh` | `claude-opus-5 @ high` | Same |
 | Reviewer (optional) | reviewed class binding | `claude-fable-5-1 @ xhigh` (every reviewed class) | Fresh read-only advisory review at `reviewed_head`; never authors, dispatches, or spawns |
@@ -45,7 +45,7 @@ The Issue body is the one-page [Change Brief](../docs/agents/change-brief.md). I
 
 ## Receipts (schema v5)
 
-Each attempt has exactly one Launch Receipt and one Return Receipt as GitHub Issue comments, marked `<!-- ai7-dispatch-launch-receipt:v5 -->` and `<!-- ai7-dispatch-return-receipt:v5 -->`. A receipt is immutable; a wrong receipt is closed by a Return Receipt (`superseded` or `failed`) and a new attempt. Schema v1–v4 receipts remain historical evidence.
+Each attempt has exactly one Launch Receipt and one Return Receipt as GitHub Issue comments, marked `<!-- ai7-dispatch-launch-receipt:v5 -->` and `<!-- ai7-dispatch-return-receipt:v5 -->`. A receipt is immutable; a wrong receipt is closed by a Return Receipt (`superseded` or `failed`) and a new attempt. **An attempt that ends before its Launch Receipt exists** — an unavailable binding, or a preflight that fails or whose session dies before the attach step — is closed by a Return Receipt alone, carrying `launch_receipt: none` and the reason in `unresolved`; the pairing rule does not apply to it, and no Launch Receipt is written after the fact. Issue #239 attempt A2 and Issue #221 attempt A4 are the recorded instances. Schema v1–v4 receipts remain historical evidence.
 
 Launch Receipt: `dispatch_id`, `issue`, `role`, `class`, `attempt`, `brief_revision`, `brief_sha256` (T3; otherwise `none`), `commander_harness`, `harness`, `launch_mode`, `binding` (model and effort as launched, plus `inherited` in `subagent` mode), `base` or `reviewed_head`, `branch`, `worktree`, `session` (session, thread, or agent id), `created_at`.
 
