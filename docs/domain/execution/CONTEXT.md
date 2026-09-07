@@ -255,6 +255,8 @@ The exact Book, Series, Cross-project, source, and revision read boundary author
 _中文_: 任务运行来源范围
 _Avoid_: Working Corpus, Outbound Data Category, mutation authority
 
+Under `developer-live`, only an admitted Public SampleBook's Run Source Scope may ever reach Model Provider transmission (ADR 0065), and that boundary is enforced twice. The primary refusal is a lineage check the baseline-analysis owner (`src/service/analysis/baseline-analysis-store.ts`) applies at prepare time, before any workspace-profile pin, credential check, or Run Authorization exists; `tests/service/developer-live-analysis.test.ts` proves it reachable by preparing a Task on a Book outside the admitted lineage and asserting the `ANALYSIS_LINEAGE_UNAVAILABLE` refusal reaches the caller. The later transmittable-set check the execution owner (`src/service/analysis/execution.ts`) applies immediately before dispatch is defence in depth for the same boundary: no test can reach it while the earlier refusal stands, because a non-admitted Book is already refused before a Run Authorization can exist to dispatch. A weakened or removed lineage check therefore fails the covering test above, which is what points at it rather than at the later check.
+
 **Model Role**:
 A provider-independent function actually needed by a Task Intent, native DSH artifact, or DSH Analysis Contract, such as planner, writer, reviewer, embedder, or reranker.
 _中文_: 模型角色
