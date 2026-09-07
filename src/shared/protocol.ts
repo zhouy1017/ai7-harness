@@ -1,4 +1,4 @@
-export const SERVICE_PROTOCOL_VERSION = 19 as const;
+export const SERVICE_PROTOCOL_VERSION = 20 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -888,6 +888,22 @@ export interface ModelServiceConnectionProjection {
  */
 export type TrustedOperationalScope = 'development-ci' | 'developer-live';
 export type ProviderProcessingVersion = 'v1' | 'v4';
+/** Exact Run Budget Ceiling state: `unset` under development-ci, an explicit total-token ceiling under developer-live. */
+export type RunBudgetCeilingState = 'unset' | { kind: 'tokens'; maxTotalTokens: number };
+/** The execution route an analysis Run binds: the in-process deterministic adapter or the developer-live OpenCode Go route. */
+export type ExecutionRouteId = 'ai7-local-deterministic' | 'opencode-go';
+/** A remote Provider route a Provider Resolution Plan may name. */
+export type RemoteProviderId = 'deepseek-open-platform' | 'opencode-go';
+/** A logical credential slot of the Main Editorial Role. */
+export type CredentialSlotId = 'deepseek-api-key' | 'opencode-go';
+/** The Provider Processing pin a Provider Resolution Plan carries for its trusted scope. */
+export type ProviderProcessingPin =
+  | { operationalScope: 'development-ci'; version: 'v1'; decision: 'deny'; authorizedLiveTransmissionCount: 0 }
+  | { operationalScope: 'developer-live'; version: 'v4'; decision: 'eligible-only'; authorizedLiveTransmissionCount: 'bounded-by-run' };
+/** The policy pin a Result Set Revision records; `liveTransmissions` is the policy's bound, never a usage count. */
+export type ResultSetPolicyPin =
+  | { operationalScope: 'development-ci'; providerProcessingVersion: 'v1'; activePolicySetVersion: 'v4'; liveTransmissions: 0 }
+  | { operationalScope: 'developer-live'; providerProcessingVersion: 'v4'; activePolicySetVersion: 'v4'; liveTransmissions: 'bounded-by-run' };
 
 /** The three launch-form arguments the built entry accepts beside `--data-root`; carried by argv only, never by an environment variable or setting. */
 export const TRUSTED_SCOPE_ARGUMENT = '--trusted-operational-scope';
@@ -1441,7 +1457,7 @@ export interface MaterialPlanInputsProjection {
   artifactPin: { identity: string; version: string; nativeCarrierSha256: string; sidecarRevision: number; sidecarSha256: string };
   selectedRange: BaselineAnalysisSelectedRange | null;
   predecessorRevision: { revisionId: string; ordinal: number; digest: string } | null;
-  runBudgetCeiling: 'unset';
+  runBudgetCeiling: RunBudgetCeilingState;
   outboundDataCategory: 'public-or-synthetic';
   expectedOutcome: string;
 }
@@ -1452,7 +1468,9 @@ export type PlanRevisionDiffValue =
   | null
   | BaselineAnalysisSelectedRange
   | { revisionId: string; ordinal: number; digest: string }
-  | AnalysisReusePlanCounts;
+  | AnalysisReusePlanCounts
+  /** The ceiling is a material field, so an explicit token ceiling is a diffable value too. */
+  | Extract<RunBudgetCeilingState, { kind: 'tokens' }>;
 
 /** One line of a concise Plan Revision diff: the field, its prior and proposed values, and whether it is material or a derived consequence. */
 export interface PlanRevisionDiffEntryProjection {
@@ -1534,10 +1552,11 @@ export interface BaselineAnalysisExecutionBindingProjection {
   runSourceScopeDigest: string;
   providerResolutionPlanDigest: string;
   coverageManifestDigest: string;
-  route: 'ai7-local-deterministic';
-  model: 'ai7-deterministic-fixture';
-  fixtureIdentity: string;
-  fixtureSha256: string;
+  route: ExecutionRouteId;
+  model: string;
+  /** The deterministic fixture pin; `null` on the developer-live route, which replays no fixture. */
+  fixtureIdentity: string | null;
+  fixtureSha256: string | null;
   nativeCarrierSha256: string;
   sidecarRevision: 2;
   boundAt: string;
@@ -1554,9 +1573,9 @@ export interface BaselineAnalysisResultSetRevisionProjection {
   coverageManifestDigest: string;
   schemaDigest: string;
   reducerDigest: string;
-  adapterPin: { route: 'ai7-local-deterministic'; model: 'ai7-deterministic-fixture'; fixtureIdentity: string; fixtureSha256: string };
+  adapterPin: { route: ExecutionRouteId; model: string; fixtureIdentity: string | null; fixtureSha256: string | null };
   bindingPin: { attemptId: string; bindingDigest: string; harnessSessionId: string; behaviorCompositionDigest: string; promptContractDigest: string };
-  policyPin: { operationalScope: 'development-ci'; providerProcessingVersion: 'v1'; activePolicySetVersion: 'v4'; liveTransmissions: 0 };
+  policyPin: ResultSetPolicyPin;
   /** The producing Run; from Issue #48 also the bound plan version and the in-envelope adaptations the Run recorded. */
   provenance: { taskIntentId: string; runRecordId: string; attemptId: string; planVersion?: number; adaptations?: { count: number; unitOrdinals: ReadonlyArray<number> } };
   /** Model usage of this Run: counted for recomputed units only, every attempt included; reused units cost nothing. */
@@ -1712,21 +1731,23 @@ export interface BaselineAnalysisProjection {
     role: 'Main Editorial Role';
     capabilities: readonly [];
     remoteBinding: {
-      providerId: 'deepseek-open-platform';
-      modelId: 'deepseek-v4-pro';
+      providerId: RemoteProviderId;
+      modelId: 'deepseek-v4-pro' | 'deepseek-v4-flash';
       adapterRevision: 1;
       configurationRevision: 1;
       approvedFallbackChain: readonly [];
-      credentialSlot: 'deepseek-api-key';
+      credentialSlot: CredentialSlotId;
       credentialReference: string;
       credentialReadiness: ModelCredentialOperationState;
-      providerProcessing: { operationalScope: 'development-ci'; version: 'v1'; decision: 'deny'; authorizedLiveTransmissionCount: 0 };
+      providerProcessing: ProviderProcessingPin;
     };
     executionRoute:
       | { kind: 'ai7-local-deterministic'; model: 'ai7-deterministic-fixture'; fixtureIdentity: string; fixtureSha256: string; fixtureLineage: ReadonlyArray<{ identity: string; sha256: string }> }
+      /** The developer-live route replays no fixture: its identity is the endpoint it transmits to. */
+      | { kind: 'opencode-go'; model: 'deepseek-v4-flash'; endpoint: string }
       | { kind: 'none'; reason: 'j04-model-adapter-control-absent' };
     outboundDataCategory: 'public-or-synthetic';
-    runBudgetCeiling: 'unset';
+    runBudgetCeiling: RunBudgetCeilingState;
   };
   executionPlan: null | {
     steps: ReadonlyArray<string>;
@@ -1738,7 +1759,7 @@ export interface BaselineAnalysisProjection {
   planEnvelope: null | {
     digest: string;
     dispatchAllowed: boolean;
-    providerStatus: 'remote-denied-local-deterministic' | 'remote-denied-no-route';
+    providerStatus: 'remote-denied-local-deterministic' | 'remote-denied-no-route' | 'remote-eligible-developer-live';
     summary: string;
     promptContractDigest: string;
     behaviorCompositionDigest: string;
@@ -1778,7 +1799,7 @@ export interface BaselineAnalysisProjection {
       attemptId: string;
       ordinal: 1;
       startedAt: string;
-      credentialReadinessCheck: { slot: 'deepseek-api-key'; readiness: 'present' | 'missing'; valueReleased: false };
+      credentialReadinessCheck: { slot: CredentialSlotId; readiness: 'present' | 'missing'; valueReleased: false };
       executionBinding: BaselineAnalysisExecutionBindingProjection | null;
       spans: ReadonlyArray<{ ordinal: number; harnessSessionId: string; startSeq: number; endSeq: number; unitOrdinal: number | null; attemptIndex: number; payloadDigest: string | null }>;
     };

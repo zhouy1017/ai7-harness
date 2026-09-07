@@ -9,6 +9,7 @@ import type {
   BaselineAnalysisUpdateRequest,
   PlanBoundarySplitProjection,
   PlanRevisionDiffValue,
+  RunBudgetCeilingState,
   BookCreationReviewProjection,
   BookRecordPresentation,
   BookSummaryPageProjection,
@@ -1748,6 +1749,7 @@ function diffValueText(value: PlanRevisionDiffValue): string {
   if (typeof value === 'string' || typeof value === 'number') return String(value);
   if ('startPosition' in value) return rangeText(value);
   if ('revisionId' in value) return `Revision ${value.ordinal} · ${value.revisionId} · ${value.digest}`;
+  if ('kind' in value) return runBudgetCeilingLabel(value);
   return reuseCountsText(value);
 }
 
@@ -2225,6 +2227,22 @@ function renderBaselineAnalysis(host: HTMLElement, projection: BaselineAnalysisP
   if (projection.state === 'admitted' || projection.state === 'executing') refreshLater();
 }
 
+/**
+ * The exact Run Budget Ceiling wording. `未设置任务预算上限` is true only when the plan really froze
+ * `unset`; a developer-live plan freezes a required token ceiling and must say so, because the
+ * ceiling is what bounds a Run that can actually transmit.
+ */
+function runBudgetCeilingLabel(ceiling: RunBudgetCeilingState): string {
+  return ceiling === 'unset' ? '未设置任务预算上限' : `任务运行预算上限：${ceiling.maxTotalTokens} tokens`;
+}
+
+/** The execution route of the frozen plan: the deterministic fixture pin, or the live route's endpoint. */
+function executionRouteLabel(route: NonNullable<BaselineAnalysisProjection['providerResolutionPlan']>['executionRoute']): string {
+  if (route.kind === 'none') return '无（未提供 J-04 本地确定性模型适配器控制）';
+  if (route.kind === 'opencode-go') return `${route.kind} · ${route.model} · ${route.endpoint}`;
+  return `${route.kind} · ${route.model} · 夹具 ${route.fixtureIdentity} · ${route.fixtureSha256}`;
+}
+
 /** The frozen plan of the latest Task: checkpoint, manifest, Provider plan, envelope, reuse plan, authorization, Run. */
 function renderFrozenAnalysisPlan(card: HTMLElement, projection: BaselineAnalysisProjection, host: HTMLElement, bookTitle: string): void {
   const checkpoint = projection.checkpoint!;
@@ -2241,11 +2259,9 @@ function renderFrozenAnalysisPlan(card: HTMLElement, projection: BaselineAnalysi
     element('dt', undefined, '覆盖清单摘要'), element('dd', 'technical-identity', manifest.digest),
     element('dt', undefined, 'Model Role'), element('dd', undefined, provider.role),
     element('dt', undefined, '远程绑定（被拒绝）'), element('dd', undefined, `${provider.remoteBinding.providerId} · ${provider.remoteBinding.modelId} · adapter r${provider.remoteBinding.adapterRevision} · config r${provider.remoteBinding.configurationRevision} · 凭据 ${provider.remoteBinding.credentialReadiness} · development-ci · v1 · 0 次实时传输`),
-    element('dt', undefined, '执行路由'), element('dd', 'technical-identity', provider.executionRoute.kind === 'none'
-      ? '无（未提供 J-04 本地确定性模型适配器控制）'
-      : `${provider.executionRoute.kind} · ${provider.executionRoute.model} · 夹具 ${provider.executionRoute.fixtureIdentity} · ${provider.executionRoute.fixtureSha256}`),
+    element('dt', undefined, '执行路由'), element('dd', 'technical-identity', executionRouteLabel(provider.executionRoute)),
     element('dt', undefined, 'Outbound Data Category'), element('dd', undefined, provider.outboundDataCategory),
-    element('dt', undefined, 'Run Budget Ceiling'), element('dd', undefined, '未设置任务预算上限'),
+    element('dt', undefined, 'Run Budget Ceiling'), element('dd', undefined, runBudgetCeilingLabel(provider.runBudgetCeiling)),
     element('dt', undefined, '提示契约摘要'), element('dd', 'technical-identity', envelope.promptContractDigest),
     element('dt', undefined, '行为组合摘要'), element('dd', 'technical-identity', envelope.behaviorCompositionDigest),
     element('dt', undefined, 'Plan Envelope'), element('dd', 'technical-identity', envelope.digest),

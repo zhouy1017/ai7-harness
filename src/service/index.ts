@@ -19,6 +19,7 @@ import {
   type TrustedLaunchForm,
 } from '../shared/protocol.js';
 import { armSingleHostAllowance, installNodeNetworkDenial } from '../shared/network-denial.js';
+import { DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE } from '../shared/protected-secret-identity.js';
 import { DEVELOPER_LIVE_POLICY_BINDING, resolveDeveloperLiveLaunch, type DeveloperLiveRuntime } from './launch-policy.js';
 import { decodeRequest, isSafeInteger, ProtocolError } from './request-frames.js';
 import type { DormantHarnessRuntime } from './runtime.js';
@@ -738,6 +739,21 @@ async function run(): Promise<void> {
         ? null
         : { fixtureIdentity: fixture.identity, fixtureSha256: fixture.sha256, fixtureLineage: fixture.lineage },
     });
+    // The ledger learns the trusted launch once, before any frame is served, so every plan it freezes
+    // names the binding this launch actually bound rather than re-deriving one at dispatch.
+    store.baselineAnalysisLedger.bindLaunch(developerLive === null
+      ? { operationalScope: 'development-ci', live: null }
+      : {
+          operationalScope: 'developer-live',
+          live: {
+            route: DEVELOPER_LIVE_POLICY_BINDING.route,
+            model: DEVELOPER_LIVE_POLICY_BINDING.model,
+            endpoint: DEVELOPER_LIVE_POLICY_BINDING.endpoint,
+            credentialSlot: DEVELOPER_LIVE_POLICY_BINDING.credentialSlot,
+            credentialReference: DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE,
+            runBudgetCeiling: developerLive.launch.runBudgetCeiling,
+          },
+        });
     harness = await mountDormantHarness();
     jobs = new CooperativeJobOwner(store);
     analysisExecution = new BaselineAnalysisExecutionOwner({

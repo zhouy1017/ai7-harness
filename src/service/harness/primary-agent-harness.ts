@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type { Context } from '@deepseek-ai/cordis';
 import type { AgentHandle } from '@deepseek-ai/dsh-agent';
 import type { GenerateOptions, LlmAdapter, LlmRuntime, StreamChunk, TokenUsage } from '@deepseek-ai/dsh-llm';
@@ -80,12 +81,25 @@ export interface HarnessTurnOutcome {
   readonly span: HarnessExecutionSpan;
 }
 
+/**
+ * How many technical Sessions one attempt composes. `single` is the production and deterministic
+ * composition: one accumulating Session carries every unit. `per-unit` is the developer-live
+ * composition Provider Processing v4 requires: every unit gets a fresh agent and Session inside the
+ * same Cordis context, so no unit's material ever appears in another unit's request, and the gateway
+ * caches per Session. The Execution Binding's `harnessSessionId` stays the lineage root either way.
+ */
+export type HarnessSessionMode = 'single' | 'per-unit';
+
 export interface HarnessExecutionRequest {
   readonly sessionId: string;
   readonly route: ExecutionRoute;
   readonly model: string;
   readonly systemPrompt: string;
   readonly promptContractDigest: string;
+  /** Defaults to `single`; `per-unit` composes one Session per submitted unit. */
+  readonly sessionMode?: HarnessSessionMode;
+  /** Derives each per-unit Session id from the lineage root; defaults to a fresh UUID per unit. */
+  readonly nextSessionId?: () => string;
   /** Builds the one bound adapter once the composition has resolved the DSH failure-code constants. */
   readonly adapterFactory: (codes: DshFailureCodes) => LlmAdapter;
   /** The final gate, evaluated over the complete assembled payload immediately before every model call. */
@@ -95,9 +109,13 @@ export interface HarnessExecutionRequest {
 }
 
 export interface PrimaryAgentHarnessHandle {
+  /** The lineage root: the Session the Execution Binding pins, and under `single` the only Session. */
   readonly sessionId: string;
+  readonly sessionMode: HarnessSessionMode;
   readonly composition: HarnessCompositionDescriptor;
   readonly failureCodes: DshFailureCodes;
+  /** The technical Session id the turn in flight uses; the lineage root until a unit opens its own. */
+  currentSessionId(): string;
   /** Verify the persisted binding pins this composition and session before the first model call. */
   bindExecution(binding: { harnessSessionId: string; behaviorCompositionDigest: string; promptContractDigest: string }): void;
   /** Start one turn with authorized unit material and return its ordered signals; the last is terminal. */
@@ -180,8 +198,11 @@ export async function prepareExecution(request: HarnessExecutionRequest): Promis
     await context.fiber.dispose();
     throw error;
   }
-  const live = handle;
-  const session = live.agent.session;
+  const sessionMode: HarnessSessionMode = request.sessionMode ?? 'single';
+  // The root agent and Session: under `single` it serves every unit; under `per-unit` it is the
+  // lineage root the binding pins and is disposed before the first unit opens its own Session.
+  let live = handle;
+  let currentSessionId = request.sessionId;
 
   const projectTurn = (events: ReadonlyArray<SessionEvent>): Omit<HarnessTurnOutcome, 'span'> => {
     const signals: HarnessSignal[] = [];
@@ -234,10 +255,28 @@ export async function prepareExecution(request: HarnessExecutionRequest): Promis
     return { signals, terminal };
   };
 
+  /** Replace the live agent and Session with a fresh pair inside the same context; the old pair is disposed first. */
+  const openUnitSession = async (): Promise<void> => {
+    const nextId = request.nextSessionId?.() ?? randomUUID();
+    requireHarness(nextId !== currentSessionId, 'HARNESS_SESSION_ID_REPEATED', '每个分析单元必须使用新的技术会话。');
+    await live.dispose();
+    const next = await context.agents.create({
+      sessionId: sessions.SessionId(nextId),
+      agentOptions: { provider: request.route, model: request.model },
+    });
+    requireHarness(next.agent.session.id === nextId, 'HARNESS_COMPOSITION_INVALID', 'PrimaryAgentHarness 未建立本单元的技术会话。');
+    live = next;
+    currentSessionId = nextId;
+  };
+
   return {
     sessionId: request.sessionId,
+    sessionMode,
     composition,
     failureCodes,
+    currentSessionId() {
+      return currentSessionId;
+    },
     bindExecution(binding) {
       requireHarness(!disposed, 'HARNESS_DISPOSED', 'PrimaryAgentHarness 已释放。');
       requireHarness(
@@ -251,12 +290,15 @@ export async function prepareExecution(request: HarnessExecutionRequest): Promis
     async submitUnit(text) {
       requireHarness(!disposed, 'HARNESS_DISPOSED', 'PrimaryAgentHarness 已释放。');
       requireHarness(bound, 'HARNESS_UNBOUND', '执行绑定尚未核对，不能提交单元。');
+      if (sessionMode === 'per-unit') await openUnitSession();
+      const session = live.agent.session;
       const startSeq = session.seq;
       live.agent.followup(llm.createUserMessage({ content: [{ type: 'text', text }], source: { kind: 'user' } }));
       await live.agent.whenIdle();
       const endSeq = session.seq - 1;
       const events = session.events.slice(startSeq);
-      const span = { sessionId: request.sessionId, startSeq, endSeq };
+      // Each span records the Session that actually carried the turn, so per-unit lineage is exact.
+      const span = { sessionId: currentSessionId, startSeq, endSeq };
       spans.push(span);
       return { ...projectTurn(events), span };
     },
