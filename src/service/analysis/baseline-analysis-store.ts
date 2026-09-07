@@ -716,6 +716,11 @@ export class BaselineAnalysisStore {
        FROM model_service_connections WHERE connection_id = 'main-editorial-deepseek-v4-pro'`,
     ).get() as SqlRow | undefined;
     requireAnalysis(connection !== undefined, 'ANALYSIS_PROVIDER_BINDING_UNAVAILABLE', '主编辑角色缺少固定的凭据引用元数据。');
+    // Drift is a comparison of like with like: the re-derivation must name the binding this launch
+    // binds, exactly as the freeze did. Under developer-live that is the live route, its development
+    // Credential Reference, and the launch form's ceiling — not the production connection row, whose
+    // binding this scope never uses. Otherwise every developer-live plan would look drifted at once.
+    const live = this.#launch.live;
     const pin = this.#db.prepare(
       `SELECT pin.native_artifact_id, pin.sidecar_revision, pin.sidecar_sha256, installation.artifact_version, installation.content_sha256
        FROM editorial_workspace_profile_book_pins pin
@@ -726,13 +731,21 @@ export class BaselineAnalysisStore {
     requireAnalysis(pin !== undefined, 'ANALYSIS_ARTIFACT_PIN_UNAVAILABLE', '当前图书尚未固定编辑工作区方案。');
     const latest = mode === 'first-baseline' ? undefined : this.#revisionRows(bookId).at(-1);
     return {
-      providerBinding: {
-        providerId: asString(connection.provider_id),
-        modelId: asString(connection.model_id),
-        adapterRevision: asNumber(connection.adapter_revision),
-        configurationRevision: asNumber(connection.configuration_revision),
-        credentialReference: asString(connection.credential_reference),
-      },
+      providerBinding: live === null
+        ? {
+            providerId: asString(connection.provider_id),
+            modelId: asString(connection.model_id),
+            adapterRevision: asNumber(connection.adapter_revision),
+            configurationRevision: asNumber(connection.configuration_revision),
+            credentialReference: asString(connection.credential_reference),
+          }
+        : {
+            providerId: live.route,
+            modelId: live.model,
+            adapterRevision: 1,
+            configurationRevision: 1,
+            credentialReference: live.credentialReference,
+          },
       artifactPin: {
         identity: asString(pin.native_artifact_id),
         version: asString(pin.artifact_version),
@@ -742,7 +755,7 @@ export class BaselineAnalysisStore {
       },
       selectedRange: mode === 'reanalyze-range' ? selectedRange : null,
       predecessorRevision: latest === undefined ? null : { revisionId: asString(latest.revision_id), ordinal: asNumber(latest.ordinal), digest: asString(latest.sha256) },
-      runBudgetCeiling: 'unset',
+      runBudgetCeiling: live === null ? 'unset' : live.runBudgetCeiling,
       outboundDataCategory: 'public-or-synthetic',
       expectedOutcome: BASELINE_ANALYSIS_EXPECTED_OUTCOME,
     };
