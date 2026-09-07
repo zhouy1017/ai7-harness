@@ -1063,8 +1063,8 @@ export interface TaskAuthorizationProjection {
     credentialReference: string;
     credentialReadiness: 'missing';
     outboundDataCategory: 'public-or-synthetic';
-    runBudgetCeiling: 'unset';
-    providerProcessing: { operationalScope: 'development-ci'; version: 'v1'; decision: 'deny'; authorizedLiveTransmissionCount: 0 };
+    runBudgetCeiling: RunBudgetCeilingState;
+    providerProcessing: ProviderProcessingPin;
   };
   executionPlan: null | {
     steps: readonly ['分析结构', '分析叙事连贯性', '形成编辑复核重点'];
