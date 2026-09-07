@@ -27,6 +27,7 @@ import type {
   ModelServiceSettingsProjection,
   OutlineProjection,
   PriorWorkItemProjection,
+  ProviderProcessingPin,
   ReplacementPreviewProjection,
   RecoveryComparisonProjection,
   RecoverySelection,
@@ -2232,8 +2233,18 @@ function renderBaselineAnalysis(host: HTMLElement, projection: BaselineAnalysisP
  * `unset`; a developer-live plan freezes a required token ceiling and must say so, because the
  * ceiling is what bounds a Run that can actually transmit.
  */
-function runBudgetCeilingLabel(ceiling: RunBudgetCeilingState): string {
+export function runBudgetCeilingLabel(ceiling: RunBudgetCeilingState): string {
   return ceiling === 'unset' ? '未设置任务预算上限' : `任务运行预算上限：${ceiling.maxTotalTokens} tokens`;
+}
+
+/**
+ * The exact Provider Processing pin wording. `development-ci · v1 · 拒绝 · 0 次实时传输` is the only
+ * reading J-03 ever produces today; the shape carries every scope's pin so a future scope's reading
+ * renders faithfully instead of repeating the development-ci constant.
+ */
+export function providerProcessingLabel(pin: ProviderProcessingPin): string {
+  const decisionLabel = pin.decision === 'deny' ? '拒绝' : pin.decision;
+  return `${pin.operationalScope} · ${pin.version} · ${decisionLabel} · ${pin.authorizedLiveTransmissionCount} 次实时传输`;
 }
 
 /** The execution route of the frozen plan: the deterministic fixture pin, or the live route's endpoint. */
@@ -2471,15 +2482,15 @@ function renderTaskAuthorization(host: HTMLElement, projection: TaskAuthorizatio
       element('dt', undefined, '原生构件摘要'), element('dd', 'technical-identity', artifact.nativeCarrierSha256),
       element('dt', undefined, '权限侧车'), element('dd', 'technical-identity', `${artifact.sidecarIdentity} · Revision ${artifact.sidecarRevision} · ${artifact.sidecarSha256}`),
       element('dt', undefined, 'Model Role'), element('dd', undefined, provider.role),
-      element('dt', undefined, 'Capability'), element('dd', undefined, '空（无）'),
+      element('dt', undefined, 'Capability'), element('dd', undefined, provider.capabilities.length === 0 ? '空（无）' : provider.capabilities.join('、')),
       element('dt', undefined, 'Provider Binding'), element('dd', undefined, `${provider.providerId} · ${provider.modelId} · adapter r${provider.adapterRevision} · config r${provider.configurationRevision}`),
-      element('dt', undefined, 'Approved Fallback Chain'), element('dd', undefined, '空（无）'),
+      element('dt', undefined, 'Approved Fallback Chain'), element('dd', undefined, provider.approvedFallbackChain.length === 0 ? '空（无）' : provider.approvedFallbackChain.join('、')),
       element('dt', undefined, 'Credential Reference'), element('dd', 'technical-identity', `${provider.credentialReference} · readiness ${provider.credentialReadiness}`),
       element('dt', undefined, 'Outbound Data Category'), element('dd', undefined, provider.outboundDataCategory),
-      element('dt', undefined, 'Run Budget Ceiling'), element('dd', undefined, '未设置任务预算上限'),
-      element('dt', undefined, 'Provider Processing'), element('dd', undefined, 'development-ci · v1 · 拒绝 · 0 次实时传输'),
+      element('dt', undefined, 'Run Budget Ceiling'), element('dd', undefined, runBudgetCeilingLabel(provider.runBudgetCeiling)),
+      element('dt', undefined, 'Provider Processing'), element('dd', undefined, providerProcessingLabel(provider.providerProcessing)),
       element('dt', undefined, '计划步骤'), element('dd', undefined, plan.steps.join(' → ')),
-      element('dt', undefined, 'Effect'), element('dd', undefined, '空（无）'),
+      element('dt', undefined, 'Effect'), element('dd', undefined, plan.effects.length === 0 ? '空（无）' : plan.effects.join('、')),
       element('dt', undefined, 'Plan Envelope'), element('dd', 'technical-identity', envelope.digest),
       element('dt', undefined, '派发状态'), element('dd', undefined, envelope.summary),
     );
