@@ -32,6 +32,10 @@ import {
   type ModelCredentialOperationState,
   type PlanBoundarySplitProjection,
   type PlanRevisionDiffEntryProjection,
+  type CredentialSlotId,
+  type ExecutionRouteId,
+  type ResultSetPolicyPin,
+  type RunBudgetCeilingState,
 } from '../../shared/protocol.js';
 import {
   PLAN_REVISION_REQUIRED_REASON,
@@ -71,7 +75,8 @@ import { LOCAL_DETERMINISTIC_MODEL, LOCAL_DETERMINISTIC_ROUTE } from '../provide
 
 type SqlRow = Record<string, SQLOutputValue>;
 
-const SAMPLE1_SOURCE_DIGEST = 'b8a3dbde0aa8a1ec7265f9ae3fe47877759e7947c5ab69682cd0a8f424a8d483' as const;
+/** The exact `sample1` source digest: the Public SampleBook lineage every baseline-analysis Task requires. */
+export const SAMPLE1_SOURCE_DIGEST = 'b8a3dbde0aa8a1ec7265f9ae3fe47877759e7947c5ab69682cd0a8f424a8d483' as const;
 const NATIVE_CARRIER_DIGEST = 'ae485040c8fa602ab2e98ec91dd122201d40a8be41d8a4f86f7cd55ddb1e434d' as const;
 const SIDECAR_DIGEST = '980b565f25bdff29e539365e17344346017b05146a45cfea35c8ed7d528a1bff' as const;
 /** The first-baseline revision record (Issue #92): unchanged in shape. */
@@ -248,7 +253,10 @@ export interface ExecutionPlanFacts {
   readonly runSourceScopeDigest: string;
   readonly providerResolutionPlanDigest: string;
   readonly credentialReference: string;
-  readonly route: BaselineAnalysisRouteFacts;
+  /** The source digest the frozen manuscript pin carries; the execution owner re-checks it before any dispatch. */
+  readonly sourceDigest: string;
+  /** The bound deterministic fixture; `null` under developer-live, whose route replays no fixture. */
+  readonly route: BaselineAnalysisRouteFacts | null;
   readonly artifactPin: { nativeCarrierSha256: string; sidecarRevision: 2; sidecarSha256: string };
   readonly promptContractDigest: string;
   readonly behaviorCompositionDigest: string;
@@ -272,14 +280,16 @@ export interface ExecutionBindingRecord {
   readonly behaviorCompositionDigest: string;
   readonly promptContractDigest: string;
   readonly contractVersion: typeof BASELINE_ANALYSIS_CONTRACT_VERSION;
+  /** The lineage root Session; under developer-live each unit opens its own Session beneath it. */
   readonly harnessSessionId: string;
-  readonly route: typeof LOCAL_DETERMINISTIC_ROUTE;
-  readonly model: typeof LOCAL_DETERMINISTIC_MODEL;
-  readonly adapterPin: { fixtureIdentity: string; fixtureSha256: string };
-  readonly credentialSlot: { modelRole: 'Main Editorial Role'; slot: 'deepseek-api-key'; credentialReference: string };
+  readonly route: ExecutionRouteId;
+  readonly model: string;
+  /** The deterministic fixture pin; `null` on the live route, which replays no fixture. */
+  readonly adapterPin: { fixtureIdentity: string; fixtureSha256: string } | null;
+  readonly credentialSlot: { modelRole: 'Main Editorial Role'; slot: CredentialSlotId; credentialReference: string };
   readonly outboundDataCategory: 'public-or-synthetic';
-  readonly policyPin: { operationalScope: 'development-ci'; providerProcessingVersion: 'v1'; activePolicySetVersion: 'v3'; liveTransmissions: 0 };
-  readonly runBudgetCeiling: 'unset';
+  readonly policyPin: ResultSetPolicyPin;
+  readonly runBudgetCeiling: RunBudgetCeilingState;
   readonly dispatchAttribution: 'Dispatch';
   readonly boundAt: string;
   /** The update mode and reuse-plan digest an update attempt executes; absent for the first baseline. */
@@ -353,11 +363,34 @@ function runIsActive(state: BaselineAnalysisRunState | null): boolean {
   return state === 'authorized' || state === 'admitted' || state === 'executing';
 }
 
+/**
+ * The launch facts a Run's plan must freeze, handed to the ledger once by the service entry. Under
+ * `development-ci` the plan stays exactly what it was: the denied production binding, the local
+ * deterministic route when one is bound, and an `unset` ceiling. Under `developer-live` the plan
+ * freezes the v4 binding — the `opencode-go` route, its bare model id, its fixed development
+ * Credential Reference, and the required token ceiling — because every one of those is a material
+ * plan input that must be pinned before authorization, not chosen at dispatch.
+ */
+export interface LaunchBinding {
+  readonly operationalScope: 'development-ci' | 'developer-live';
+  readonly live: {
+    readonly route: 'opencode-go';
+    readonly model: 'deepseek-v4-flash';
+    readonly endpoint: string;
+    readonly credentialSlot: 'opencode-go';
+    readonly credentialReference: string;
+    readonly runBudgetCeiling: { readonly kind: 'tokens'; readonly maxTotalTokens: number };
+  } | null;
+}
+
+const DEVELOPMENT_CI_LAUNCH: LaunchBinding = { operationalScope: 'development-ci', live: null };
+
 export class BaselineAnalysisStore {
   readonly #db: DatabaseSync;
   readonly #checkpointOwner: CheckpointOwner;
   readonly #route: BaselineAnalysisRouteFacts | null;
   readonly #work = new Map<string, PreparationWork>();
+  #launch: LaunchBinding = DEVELOPMENT_CI_LAUNCH;
 
   constructor(db: DatabaseSync, checkpointOwner: CheckpointOwner, route: BaselineAnalysisRouteFacts | null) {
     this.#db = db;
@@ -367,6 +400,26 @@ export class BaselineAnalysisStore {
 
   get route(): BaselineAnalysisRouteFacts | null {
     return this.#route;
+  }
+
+  get launch(): LaunchBinding {
+    return this.#launch;
+  }
+
+  /**
+   * Bind the trusted launch facts. The service entry calls this once, before it serves any frame, so
+   * that the store never has to reach for a launch policy of its own; a `developer-live` scope
+   * without its live binding, or a live binding under any other scope, is refused rather than
+   * silently downgraded to the provider-free plan.
+   */
+  bindLaunch(launch: LaunchBinding): void {
+    requireAnalysis((launch.operationalScope === 'developer-live') === (launch.live !== null),
+      'ANALYSIS_LAUNCH_BINDING_INVALID', '可信区间与开发者实时绑定不一致。');
+    requireAnalysis(launch.live === null ||
+      (launch.live.runBudgetCeiling.kind === 'tokens' && Number.isSafeInteger(launch.live.runBudgetCeiling.maxTotalTokens) &&
+        launch.live.runBudgetCeiling.maxTotalTokens > 0 && UUID_PATTERN.test(launch.live.credentialReference)),
+    'ANALYSIS_LAUNCH_BINDING_INVALID', '开发者实时绑定缺少必需的运行预算上限或凭据引用。');
+    this.#launch = launch;
   }
 
   // ---- inspection -------------------------------------------------------------------------------
@@ -663,6 +716,11 @@ export class BaselineAnalysisStore {
        FROM model_service_connections WHERE connection_id = 'main-editorial-deepseek-v4-pro'`,
     ).get() as SqlRow | undefined;
     requireAnalysis(connection !== undefined, 'ANALYSIS_PROVIDER_BINDING_UNAVAILABLE', '主编辑角色缺少固定的凭据引用元数据。');
+    // Drift is a comparison of like with like: the re-derivation must name the binding this launch
+    // binds, exactly as the freeze did. Under developer-live that is the live route, its development
+    // Credential Reference, and the launch form's ceiling — not the production connection row, whose
+    // binding this scope never uses. Otherwise every developer-live plan would look drifted at once.
+    const live = this.#launch.live;
     const pin = this.#db.prepare(
       `SELECT pin.native_artifact_id, pin.sidecar_revision, pin.sidecar_sha256, installation.artifact_version, installation.content_sha256
        FROM editorial_workspace_profile_book_pins pin
@@ -673,13 +731,21 @@ export class BaselineAnalysisStore {
     requireAnalysis(pin !== undefined, 'ANALYSIS_ARTIFACT_PIN_UNAVAILABLE', '当前图书尚未固定编辑工作区方案。');
     const latest = mode === 'first-baseline' ? undefined : this.#revisionRows(bookId).at(-1);
     return {
-      providerBinding: {
-        providerId: asString(connection.provider_id),
-        modelId: asString(connection.model_id),
-        adapterRevision: asNumber(connection.adapter_revision),
-        configurationRevision: asNumber(connection.configuration_revision),
-        credentialReference: asString(connection.credential_reference),
-      },
+      providerBinding: live === null
+        ? {
+            providerId: asString(connection.provider_id),
+            modelId: asString(connection.model_id),
+            adapterRevision: asNumber(connection.adapter_revision),
+            configurationRevision: asNumber(connection.configuration_revision),
+            credentialReference: asString(connection.credential_reference),
+          }
+        : {
+            providerId: live.route,
+            modelId: live.model,
+            adapterRevision: 1,
+            configurationRevision: 1,
+            credentialReference: live.credentialReference,
+          },
       artifactPin: {
         identity: asString(pin.native_artifact_id),
         version: asString(pin.artifact_version),
@@ -689,7 +755,7 @@ export class BaselineAnalysisStore {
       },
       selectedRange: mode === 'reanalyze-range' ? selectedRange : null,
       predecessorRevision: latest === undefined ? null : { revisionId: asString(latest.revision_id), ordinal: asNumber(latest.ordinal), digest: asString(latest.sha256) },
-      runBudgetCeiling: 'unset',
+      runBudgetCeiling: live === null ? 'unset' : live.runBudgetCeiling,
       outboundDataCategory: 'public-or-synthetic',
       expectedOutcome: BASELINE_ANALYSIS_EXPECTED_OUTCOME,
     };
@@ -858,7 +924,7 @@ export class BaselineAnalysisStore {
     if (attemptRow !== undefined) {
       const attemptId = asString(attemptRow.attempt_id);
       const attemptJson = parseCanonicalJson(asString(attemptRow.canonical_json)) as Record<string, unknown>;
-      const check = attemptJson.credentialReadinessCheck as { slot: 'deepseek-api-key'; readiness: 'present' | 'missing' };
+      const check = attemptJson.credentialReadinessCheck as { slot: CredentialSlotId; readiness: 'present' | 'missing' };
       const bindingRow = this.#db.prepare('SELECT * FROM analysis_execution_bindings WHERE attempt_id = ?').get(attemptId) as SqlRow | undefined;
       const spans = (this.#db.prepare('SELECT * FROM analysis_harness_spans WHERE attempt_id = ? ORDER BY ordinal').all(attemptId) as SqlRow[]).map((row) => {
         const record = parseCanonicalJson(asString(row.canonical_json)) as Record<string, unknown>;
@@ -876,7 +942,7 @@ export class BaselineAnalysisStore {
         attemptId,
         ordinal: 1,
         startedAt: asString(attemptRow.started_at),
-        credentialReadinessCheck: { slot: 'deepseek-api-key', readiness: check.readiness, valueReleased: false },
+        credentialReadinessCheck: { slot: check.slot, readiness: check.readiness, valueReleased: false },
         executionBinding: bindingRow === undefined ? null : this.#bindingProjection(bindingRow),
         spans,
       };
@@ -915,10 +981,10 @@ export class BaselineAnalysisStore {
       runSourceScopeDigest: binding.runSourceScopeDigest,
       providerResolutionPlanDigest: binding.providerResolutionPlanDigest,
       coverageManifestDigest: binding.coverageManifestDigest,
-      route: LOCAL_DETERMINISTIC_ROUTE,
-      model: LOCAL_DETERMINISTIC_MODEL,
-      fixtureIdentity: binding.adapterPin.fixtureIdentity,
-      fixtureSha256: binding.adapterPin.fixtureSha256,
+      route: binding.route,
+      model: binding.model,
+      fixtureIdentity: binding.adapterPin?.fixtureIdentity ?? null,
+      fixtureSha256: binding.adapterPin?.fixtureSha256 ?? null,
       nativeCarrierSha256: binding.nativeArtifact.nativeCarrierSha256,
       sidecarRevision: 2,
       boundAt: binding.boundAt,
@@ -1435,37 +1501,59 @@ export class BaselineAnalysisStore {
         reusedUnitOrdinals: reusePlan.units.filter((unit) => unit.disposition === 'reused').map((unit) => unit.unitOrdinal),
       },
     };
-    const composition = describeComposition(LOCAL_DETERMINISTIC_ROUTE, LOCAL_DETERMINISTIC_MODEL, BASELINE_PROMPT_CONTRACT_DIGEST);
+    // The plan freezes whichever binding the launch bound: the denied production binding on the
+    // deterministic route, or the v4 live binding. Both are frozen before authorization, never chosen
+    // at dispatch, so an authorized Run can never transmit somewhere its plan did not name.
+    const live = this.#launch.live;
+    const composition = live === null
+      ? describeComposition(LOCAL_DETERMINISTIC_ROUTE, LOCAL_DETERMINISTIC_MODEL, BASELINE_PROMPT_CONTRACT_DIGEST)
+      : describeComposition(live.route, live.model, BASELINE_PROMPT_CONTRACT_DIGEST);
     const providerPlan = {
       role: 'Main Editorial Role',
       capabilities: [],
-      remoteBinding: {
-        providerId: 'deepseek-open-platform',
-        modelId: 'deepseek-v4-pro',
-        adapterRevision: 1,
-        configurationRevision: 1,
-        approvedFallbackChain: [],
-        credentialSlot: 'deepseek-api-key',
-        credentialReference: facts.credentialReference,
-        credentialReadiness: facts.credentialOperationState,
-        providerProcessing: { operationalScope: 'development-ci', version: 'v1', decision: 'deny', authorizedLiveTransmissionCount: 0 },
-      },
-      executionRoute: this.#route === null
-        ? { kind: 'none', reason: 'j04-model-adapter-control-absent' }
+      remoteBinding: live === null
+        ? {
+            providerId: 'deepseek-open-platform',
+            modelId: 'deepseek-v4-pro',
+            adapterRevision: 1,
+            configurationRevision: 1,
+            approvedFallbackChain: [],
+            credentialSlot: 'deepseek-api-key',
+            credentialReference: facts.credentialReference,
+            credentialReadiness: facts.credentialOperationState,
+            providerProcessing: { operationalScope: 'development-ci', version: 'v1', decision: 'deny', authorizedLiveTransmissionCount: 0 },
+          }
         : {
-            kind: LOCAL_DETERMINISTIC_ROUTE,
-            model: LOCAL_DETERMINISTIC_MODEL,
-            fixtureIdentity: this.#route.fixtureIdentity,
-            fixtureSha256: this.#route.fixtureSha256,
-            fixtureLineage: this.#route.fixtureLineage,
+            providerId: live.route,
+            modelId: live.model,
+            adapterRevision: 1,
+            configurationRevision: 1,
+            approvedFallbackChain: [],
+            credentialSlot: live.credentialSlot,
+            credentialReference: live.credentialReference,
+            credentialReadiness: facts.credentialOperationState,
+            providerProcessing: { operationalScope: 'developer-live', version: 'v4', decision: 'eligible-only', authorizedLiveTransmissionCount: 'bounded-by-run' },
           },
+      executionRoute: live !== null
+        ? { kind: live.route, model: live.model, endpoint: live.endpoint }
+        : this.#route === null
+          ? { kind: 'none', reason: 'j04-model-adapter-control-absent' }
+          : {
+              kind: LOCAL_DETERMINISTIC_ROUTE,
+              model: LOCAL_DETERMINISTIC_MODEL,
+              fixtureIdentity: this.#route.fixtureIdentity,
+              fixtureSha256: this.#route.fixtureSha256,
+              fixtureLineage: this.#route.fixtureLineage,
+            },
       outboundDataCategory: 'public-or-synthetic',
-      runBudgetCeiling: 'unset',
+      runBudgetCeiling: live === null ? 'unset' : live.runBudgetCeiling,
     };
-    const dispatchAllowed = this.#route !== null;
-    const stopCondition = dispatchAllowed
-      ? 'Provider Processing v1 denies the remote route; execution binds only ai7-local-deterministic'
-      : 'Provider Processing v1 denies the remote route and no local deterministic route is bound';
+    const dispatchAllowed = live !== null || this.#route !== null;
+    const stopCondition = live !== null
+      ? 'Provider Processing v4 binds opencode-go under developer-live; the Run Budget Ceiling and the Coverage Manifest unit count bound every transmission'
+      : dispatchAllowed
+        ? 'Provider Processing v1 denies the remote route; execution binds only ai7-local-deterministic'
+        : 'Provider Processing v1 denies the remote route and no local deterministic route is bound';
     const executionPlan = reusePlan === null
       ? { steps: EXECUTION_STEPS, effects: [], unitCount: manifest.units.length, reducerStages: REDUCER_STAGES, stopCondition }
       : {
@@ -1487,11 +1575,15 @@ export class BaselineAnalysisStore {
     };
     if (reusePlan !== null) records['reuse-plan'] = reusePlanRecord(reusePlan);
     const envelopeBase = {
-      providerStatus: dispatchAllowed ? 'remote-denied-local-deterministic' : 'remote-denied-no-route',
+      providerStatus: live !== null
+        ? 'remote-eligible-developer-live'
+        : dispatchAllowed ? 'remote-denied-local-deterministic' : 'remote-denied-no-route',
       dispatchAllowed,
-      summary: dispatchAllowed
-        ? '计划已冻结；远程绑定被 Provider Processing v1 拒绝，执行绑定至 AI7 本地确定性模型适配器'
-        : '计划已冻结；远程绑定被 Provider Processing v1 拒绝，且没有可执行的本地路由',
+      summary: live !== null
+        ? `计划已冻结；developer-live · Provider Processing v4 允许绑定 ${live.route} · ${live.model}，实时传输受运行边界约束`
+        : dispatchAllowed
+          ? '计划已冻结；远程绑定被 Provider Processing v1 拒绝，执行绑定至 AI7 本地确定性模型适配器'
+          : '计划已冻结；远程绑定被 Provider Processing v1 拒绝，且没有可执行的本地路由',
       taskIntentId,
       checkpointDigest: input.checkpointDigest,
       manuscriptPinDigest: records['manuscript-pin']!.digest,
@@ -1629,9 +1721,20 @@ export class BaselineAnalysisStore {
     const manifest = plan['coverage-manifest'] as CoverageManifestProjection;
     requireAnalysis(manifestDigestIsExact(manifest), 'ANALYSIS_RECORD_INVALID', '覆盖清单记录无效。');
     const providerPlan = plan['provider-resolution-plan'] as NonNullable<BaselineAnalysisProjection['providerResolutionPlan']>;
-    requireAnalysis(providerPlan.executionRoute.kind === LOCAL_DETERMINISTIC_ROUTE, 'ANALYSIS_ROUTE_ABSENT', '计划没有可执行的本地路由。');
-    requireAnalysis(this.#route !== null && this.#route.fixtureIdentity === providerPlan.executionRoute.fixtureIdentity &&
-      this.#route.fixtureSha256 === providerPlan.executionRoute.fixtureSha256, 'ANALYSIS_ROUTE_STALE', '当前启动的本地路由与冻结计划不一致。');
+    // The route the plan froze must still be the route this launch binds. A developer-live plan
+    // cannot execute under a provider-free launch, and a deterministic plan cannot execute live.
+    const live = this.#launch.live;
+    if (live !== null) {
+      requireAnalysis(providerPlan.executionRoute.kind === live.route && providerPlan.executionRoute.model === live.model &&
+        providerPlan.executionRoute.endpoint === live.endpoint, 'ANALYSIS_ROUTE_STALE', '当前启动的实时路由与冻结计划不一致。');
+      requireAnalysis(providerPlan.remoteBinding.credentialReference === live.credentialReference &&
+        canonicalJson(providerPlan.runBudgetCeiling) === canonicalJson(live.runBudgetCeiling),
+      'ANALYSIS_ROUTE_STALE', '当前启动的凭据引用或运行预算上限与冻结计划不一致。');
+    } else {
+      requireAnalysis(providerPlan.executionRoute.kind === LOCAL_DETERMINISTIC_ROUTE, 'ANALYSIS_ROUTE_ABSENT', '计划没有可执行的本地路由。');
+      requireAnalysis(this.#route !== null && this.#route.fixtureIdentity === providerPlan.executionRoute.fixtureIdentity &&
+        this.#route.fixtureSha256 === providerPlan.executionRoute.fixtureSha256, 'ANALYSIS_ROUTE_STALE', '当前启动的本地路由与冻结计划不一致。');
+    }
     const envelope = plan['plan-envelope'] as Record<string, unknown>;
     const artifactPin = plan['artifact-pin'] as { nativeCarrierSha256: string; sidecarSha256: string };
     let update: ExecutionUpdateFacts | null = null;
@@ -1683,6 +1786,8 @@ export class BaselineAnalysisStore {
       runSourceScopeDigest: asString(digests['run-source-scope']),
       providerResolutionPlanDigest: asString(digests['provider-resolution-plan']),
       credentialReference: providerPlan.remoteBinding.credentialReference,
+      sourceDigest: (plan['manuscript-pin'] as { sourceDigest: string }).sourceDigest,
+      // The deterministic fixture facts; `null` on the live route, which replays no fixture.
       route: this.#route,
       artifactPin: { nativeCarrierSha256: artifactPin.nativeCarrierSha256, sidecarRevision: 2, sidecarSha256: artifactPin.sidecarSha256 },
       promptContractDigest: asString(envelope.promptContractDigest),
@@ -1770,7 +1875,7 @@ export class BaselineAnalysisStore {
       dispatchAttribution: 'Dispatch',
       credentialReadinessCheck: {
         modelRole: 'Main Editorial Role',
-        slot: 'deepseek-api-key',
+        slot: input.binding.credentialSlot.slot,
         credentialReference: input.binding.credentialSlot.credentialReference,
         readiness: input.credentialReadiness,
         valueReleased: false,
@@ -1829,6 +1934,7 @@ export class BaselineAnalysisStore {
    */
   persistRevision(input: RevisionPersistInput): { resultSetId: string; revisionId: string; ordinal: number; digest: string } {
     const { facts } = input;
+    const live = this.#launch.live;
     const createdAt = new Date().toISOString();
     return transact(this.#db, () => {
       let resultSetRow = this.#db.prepare('SELECT result_set_id FROM analysis_result_sets WHERE book_id = ? AND kind = ?').get(facts.bookId, BASELINE_ANALYSIS_KIND) as SqlRow | undefined;
@@ -1881,7 +1987,11 @@ export class BaselineAnalysisStore {
         coverageManifestDigest: facts.manifestDigest,
         schemaDigest: SCHEMA_DIGEST,
         reducerDigest: REDUCER_DIGEST,
-        adapterPin: { route: LOCAL_DETERMINISTIC_ROUTE, model: LOCAL_DETERMINISTIC_MODEL, fixtureIdentity: facts.route.fixtureIdentity, fixtureSha256: facts.route.fixtureSha256 },
+        // The revision pins the route that produced it: the fixture on the deterministic route, the
+        // live route's own identity when the Run actually transmitted.
+        adapterPin: live === null
+          ? { route: LOCAL_DETERMINISTIC_ROUTE, model: LOCAL_DETERMINISTIC_MODEL, fixtureIdentity: facts.route!.fixtureIdentity, fixtureSha256: facts.route!.fixtureSha256 }
+          : { route: live.route, model: live.model, fixtureIdentity: null, fixtureSha256: null },
         bindingPin: {
           attemptId: input.attemptId,
           bindingDigest: input.bindingDigest,
@@ -1889,7 +1999,9 @@ export class BaselineAnalysisStore {
           behaviorCompositionDigest: facts.behaviorCompositionDigest,
           promptContractDigest: facts.promptContractDigest,
         },
-        policyPin: { operationalScope: 'development-ci', providerProcessingVersion: 'v1', activePolicySetVersion: 'v3', liveTransmissions: 0 },
+        policyPin: live === null
+          ? { operationalScope: 'development-ci', providerProcessingVersion: 'v1', activePolicySetVersion: 'v4', liveTransmissions: 0 }
+          : { operationalScope: 'developer-live', providerProcessingVersion: 'v4', activePolicySetVersion: 'v4', liveTransmissions: 'bounded-by-run' },
         provenance: {
           taskIntentId: facts.taskIntentId,
           runRecordId: facts.runRecordId,
@@ -2017,10 +2129,22 @@ export class BaselineAnalysisStore {
     };
   }
 
+  /**
+   * A plan may be frozen only under a verified launch policy that matches the bound launch: the
+   * provider-free `development-ci` v1 denial, or the `developer-live` v4 eligibility whose live
+   * binding this store already holds. An unverified or mismatched policy freezes nothing.
+   */
   #requireDeniedPolicy(policy: LaunchPolicyProjection): void {
     requireAnalysis(policy.integrityState === 'verified' && policy.denialReason === null &&
-      policy.operationalScope === 'development-ci' && policy.activePolicySetVersion === 'v3' &&
-      policy.providerProcessing.version === 'v1' && policy.providerProcessing.decision === 'deny' &&
+      policy.operationalScope === this.#launch.operationalScope && policy.activePolicySetVersion === 'v4',
+    'ANALYSIS_POLICY_UNAVAILABLE', '可信启动策略与已绑定的可信区间不一致。');
+    if (this.#launch.live !== null) {
+      requireAnalysis(policy.providerProcessing.version === 'v4' && policy.providerProcessing.decision === 'eligible-only' &&
+        policy.providerProcessing.authorizedLiveTransmissionCount === 'bounded-by-run' && policy.providerProcessing.liveTransmissionAllowed === true,
+      'ANALYSIS_POLICY_UNAVAILABLE', '无法建立可信的 developer-live Provider Processing v4 记录。');
+      return;
+    }
+    requireAnalysis(policy.providerProcessing.version === 'v1' && policy.providerProcessing.decision === 'deny' &&
       policy.providerProcessing.authorizedLiveTransmissionCount === 0 && policy.providerProcessing.liveTransmissionAllowed === false,
     'ANALYSIS_POLICY_UNAVAILABLE', '无法建立可信的 development-ci Provider Processing v1 拒绝记录。');
   }

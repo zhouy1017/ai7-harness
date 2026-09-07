@@ -160,10 +160,22 @@ export function materialPlanInputsOfComponents(components: Readonly<Record<strin
       ordinal: asNumber(predecessor.ordinal, '前一修订版记录无效。'),
       digest: asString(predecessor.digest, '前一修订版记录无效。'),
     },
-    runBudgetCeiling: 'unset',
+    runBudgetCeiling: runBudgetCeilingOf(providerPlan.runBudgetCeiling),
     outboundDataCategory: 'public-or-synthetic',
     expectedOutcome,
   };
+}
+
+/**
+ * The exact ceiling state the frozen plan carries. It is a material field (ADR 0009), so drift
+ * detection must compare the real value rather than a constant: under `developer-live` a plan version
+ * froze an explicit token ceiling, and re-preparing at a different ceiling is a Plan Revision. The
+ * remaining Issue #281 fields stay derived from the constants they already use.
+ */
+function runBudgetCeilingOf(value: unknown): MaterialPlanInputsProjection['runBudgetCeiling'] {
+  if (value === 'unset') return 'unset';
+  requireAnalysis(isRecord(value) && value.kind === 'tokens', 'ANALYSIS_RECORD_INVALID', 'Run Budget Ceiling 记录无效。');
+  return { kind: 'tokens', maxTotalTokens: asNumber(value.maxTotalTokens, 'Run Budget Ceiling 记录无效。') };
 }
 
 export interface PlanAdaptationRecordInput {

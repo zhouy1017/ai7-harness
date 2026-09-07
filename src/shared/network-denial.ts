@@ -9,7 +9,24 @@ import net from 'node:net';
 import tls from 'node:tls';
 
 export const NETWORK_DENIED_CODE = 'AI7_OUTBOUND_NETWORK_DENIED';
+export const NETWORK_ALLOWANCE_LATE_CODE = 'AI7_NETWORK_ALLOWANCE_LATE';
+export const NETWORK_ALLOWANCE_INVALID_CODE = 'AI7_NETWORK_ALLOWANCE_INVALID';
 let networkDenialInstalled = false;
+
+/**
+ * The one single-host allowance of the developer-live scope (ADR 0065, Issue #272). It is armed by
+ * the service entry only under Provider Processing v4 and only before the denial is installed, so
+ * the denial's own replacements consult it at call time: exactly the armed host and port may open a
+ * TLS or TCP connection and resolve their name; every other primitive, host, and port stays denied,
+ * and the global `fetch`, HTTP clients, servers, datagrams, and WebSockets are denied regardless.
+ */
+export interface SingleHostAllowance {
+  readonly host: string;
+  readonly port: number;
+}
+
+const HOSTNAME_SHAPE = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*$/u;
+let allowance: SingleHostAllowance | null = null;
 
 class OutboundNetworkDeniedError extends Error {
   readonly code = NETWORK_DENIED_CODE;
@@ -26,6 +43,54 @@ function denyNetwork(): never {
 
 function denyFetch(): Promise<never> {
   return Promise.reject(new OutboundNetworkDeniedError());
+}
+
+/** Arm the single-host allowance. Must precede `installNodeNetworkDenial()`; a late or repeated arming fails closed. */
+export function armSingleHostAllowance(target: SingleHostAllowance): void {
+  if (networkDenialInstalled) throw new Error(NETWORK_ALLOWANCE_LATE_CODE);
+  if (allowance !== null) throw new Error(NETWORK_ALLOWANCE_INVALID_CODE);
+  const host = target.host.toLowerCase();
+  if (!HOSTNAME_SHAPE.test(host) || !Number.isSafeInteger(target.port) || target.port < 1 || target.port > 65_535) {
+    throw new Error(NETWORK_ALLOWANCE_INVALID_CODE);
+  }
+  allowance = { host, port: target.port };
+}
+
+/** The armed allowance, or `null` when every remote primitive is denied. */
+export function singleHostAllowance(): SingleHostAllowance | null {
+  return allowance;
+}
+
+/** The host and port one `connect` call addresses, as `net`, `tls`, and `Socket.prototype.connect` accept them; IPC paths never resolve. */
+export function connectionTargetOf(args: readonly unknown[]): { host: string; port: number } | null {
+  const first = args[0];
+  if (typeof first === 'number' || (typeof first === 'string' && /^\d+$/u.test(first))) {
+    const port = Number(first);
+    const host = typeof args[1] === 'string' ? args[1] : 'localhost';
+    return Number.isSafeInteger(port) ? { host: host.toLowerCase(), port } : null;
+  }
+  if (first !== null && typeof first === 'object' && !Array.isArray(first)) {
+    const options = first as Record<string, unknown>;
+    if (options['path'] !== undefined) return null;
+    const port = typeof options['port'] === 'string' ? Number(options['port']) : options['port'];
+    const hostValue = options['host'] ?? options['hostname'] ?? 'localhost';
+    if (typeof hostValue !== 'string' || !Number.isSafeInteger(port)) return null;
+    return { host: hostValue.toLowerCase(), port: port as number };
+  }
+  return null;
+}
+
+/** Whether one connection request addresses exactly the armed host and port. */
+export function allowanceAdmitsConnection(args: readonly unknown[]): boolean {
+  if (allowance === null) return false;
+  const target = connectionTargetOf(args);
+  return target !== null && target.host === allowance.host && target.port === allowance.port;
+}
+
+/** Whether one name lookup names exactly the armed host. */
+export function allowanceAdmitsLookup(args: readonly unknown[]): boolean {
+  const hostname = args[0];
+  return allowance !== null && typeof hostname === 'string' && hostname.toLowerCase() === allowance.host;
 }
 
 function requireDenied(action: () => unknown): void {
@@ -56,6 +121,18 @@ function replaceCallable(
   Object.defineProperty(target, key, { ...descriptor, configurable: false, writable: false, value });
 }
 
+/** Replace a primitive with a gate that forwards to the original only for an admitted call and denies everything else. */
+function gateCallable(target: object, key: PropertyKey, admits: (args: readonly unknown[]) => boolean, required = true): void {
+  const descriptor = requireDescriptor(target, key, required);
+  if (!descriptor) return;
+  const original = descriptor.value as (...args: unknown[]) => unknown;
+  const gated = function gatedNetworkPrimitive(this: unknown, ...args: unknown[]): unknown {
+    if (admits(args)) return Reflect.apply(original, this, args);
+    return denyNetwork();
+  };
+  Object.defineProperty(target, key, { ...descriptor, configurable: false, writable: false, value: gated });
+}
+
 function replaceConstructor(target: object, key: PropertyKey, required = true): void {
   const descriptor = requireDescriptor(target, key, required);
   if (!descriptor) return;
@@ -82,24 +159,24 @@ export function installNodeNetworkDenial(): void {
   replaceCallable(http2, 'connect');
   replaceCallable(http2, 'createServer');
   replaceCallable(http2, 'createSecureServer');
-  replaceCallable(net, 'connect');
-  replaceCallable(net, 'createConnection');
+  gateCallable(net, 'connect', allowanceAdmitsConnection);
+  gateCallable(net, 'createConnection', allowanceAdmitsConnection);
   replaceCallable(net, 'createServer');
-  replaceCallable(net.Socket.prototype, 'connect');
+  gateCallable(net.Socket.prototype, 'connect', allowanceAdmitsConnection);
   replaceCallable(net.Server.prototype, 'listen');
-  replaceCallable(tls, 'connect');
+  gateCallable(tls, 'connect', allowanceAdmitsConnection);
   replaceCallable(tls, 'createServer');
-  replaceCallable(tls.TLSSocket.prototype, 'connect', denyNetwork, false);
+  gateCallable(tls.TLSSocket.prototype, 'connect', allowanceAdmitsConnection, false);
   replaceCallable(dgram, 'createSocket');
   replaceCallable(dgram.Socket.prototype, 'bind');
   replaceCallable(dgram.Socket.prototype, 'connect');
   replaceCallable(dgram.Socket.prototype, 'send');
 
-  for (const key of ['lookup', 'resolve', 'resolve4', 'resolve6', 'resolveAny', 'resolveCaa', 'resolveCname', 'resolveMx', 'resolveNaptr', 'resolveNs', 'resolvePtr', 'resolveSoa', 'resolveSrv', 'resolveTxt', 'reverse'] as const) {
+  gateCallable(dns, 'lookup', allowanceAdmitsLookup);
+  gateCallable(dnsPromises, 'lookup', allowanceAdmitsLookup);
+  for (const key of ['resolve', 'resolve4', 'resolve6', 'resolveAny', 'resolveCaa', 'resolveCname', 'resolveMx', 'resolveNaptr', 'resolveNs', 'resolvePtr', 'resolveSoa', 'resolveSrv', 'resolveTxt', 'reverse'] as const) {
     replaceCallable(dns, key);
     replaceCallable(dnsPromises, key);
-  }
-  for (const key of ['resolve', 'resolve4', 'resolve6', 'resolveAny', 'resolveCaa', 'resolveCname', 'resolveMx', 'resolveNaptr', 'resolveNs', 'resolvePtr', 'resolveSoa', 'resolveSrv', 'resolveTxt', 'reverse'] as const) {
     replaceCallable(dns.Resolver.prototype, key);
     replaceCallable(dnsPromises.Resolver.prototype, key);
   }
@@ -118,5 +195,9 @@ export function installNodeNetworkDenial(): void {
   }
   requireDenied(() => Reflect.apply(http.ClientRequest, undefined, [{ host: '127.0.0.1', port: 9 }]));
   requireDenied(() => Reflect.construct(http.ClientRequest, [{ host: '127.0.0.1', port: 9 }]));
+  // A host no allowance can name proves the gates deny before any socket or lookup exists.
+  requireDenied(() => net.connect({ host: 'ai7-denied.invalid', port: 9 }));
+  requireDenied(() => tls.connect({ host: 'ai7-denied.invalid', port: 9 }));
+  requireDenied(() => dns.lookup('ai7-denied.invalid', () => undefined));
   networkDenialInstalled = true;
 }

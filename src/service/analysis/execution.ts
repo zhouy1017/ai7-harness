@@ -1,13 +1,25 @@
 import { randomUUID } from 'node:crypto';
-import type { AnalysisGapProjection, AnalysisSourceRangeProjection, CoverageManifestUnitProjection, LaunchPolicyProjection } from '../../shared/protocol.js';
+import type { AnalysisGapProjection, AnalysisSourceRangeProjection, CoverageManifestUnitProjection, ExecutionRouteId, LaunchPolicyProjection } from '../../shared/protocol.js';
 import { prepareExecution, type HarnessExecutionSpan, type PrimaryAgentHarnessHandle } from '../harness/primary-agent-harness.js';
-import { CredentialBroker, type SecretResolver } from '../provider/credential-broker.js';
-import type { ClassifiedModelFailure } from '../provider/classification.js';
-import { LOCAL_DETERMINISTIC_MODEL, LOCAL_DETERMINISTIC_ROUTE, evaluateEgress, type EgressBindingFacts } from '../provider/egress-gate.js';
+import { DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE } from '../../shared/protected-secret-identity.js';
+import type { DeveloperLiveRuntime } from '../launch-policy.js';
+import { CredentialBroker, type CredentialSlotBinding, type SecretResolver } from '../provider/credential-broker.js';
+import { evaluateRunBudgetCeiling, type ClassifiedModelFailure, type RunBudgetCeiling, type UsageFacts } from '../provider/classification.js';
+import { DeepSeekOpenAiCompatibleAdapter, OPENCODE_GO_ROUTE_PROFILE, isProviderAccountLimit } from '../provider/deepseek-adapter.js';
+import {
+  LOCAL_DETERMINISTIC_MODEL,
+  LOCAL_DETERMINISTIC_ROUTE,
+  OPENCODE_GO_ROUTE,
+  evaluateEgress,
+  type EgressBindingFacts,
+  type EgressCeilingState,
+  type TransmitTicket,
+} from '../provider/egress-gate.js';
 import { Ai7LocalDeterministicAdapter } from '../provider/local-deterministic-adapter.js';
 import type { ResolvedModelFixture } from '../provider/model-fixture.js';
+import { ProviderResultCache, providerRequestDigest, usageOfResponse } from '../provider/provider-result-cache.js';
 import { canonicalRecord } from './canonical.js';
-import type { BaselineAnalysisStore, ExecutionBindingRecord, ExecutionPlanFacts, PredecessorUnitResult, RunProgress, UnitResultRecord } from './baseline-analysis-store.js';
+import { SAMPLE1_SOURCE_DIGEST, type BaselineAnalysisStore, type ExecutionBindingRecord, type ExecutionPlanFacts, type PredecessorUnitResult, type RunProgress, type UnitResultRecord } from './baseline-analysis-store.js';
 import { BASELINE_PROMPT_CONTRACT, BASELINE_PROMPT_CONTRACT_DIGEST, buildUnitMessage, parseUnitResult, unitRequestDigest, type BaselineUnitResult } from './contract.js';
 import { BASELINE_ANALYSIS_CONTRACT_VERSION } from './identity.js';
 import { reduceBaselineAnalysis, type UnitOutcome } from './reducers.js';
@@ -69,6 +81,8 @@ export interface ExecutionOwnerDependencies {
   readonly launchPolicy: LaunchPolicyProjection;
   readonly fixture: ResolvedModelFixture | null;
   readonly secretResolver: SecretResolver;
+  /** The developer-live launch facts and captured transport; present exactly when the policy bound v4. */
+  readonly developerLive?: DeveloperLiveRuntime | null;
 }
 
 export class ExecutionAdmissionError extends Error {
@@ -93,6 +107,34 @@ const SAFE_NEXT_ACTIONS = {
   interrupted: '运行已在派发后中断；已完成单元的结果与缺口均已保留，续行需要通过分析更新操作发起新的授权运行。',
 } as const;
 
+/**
+ * The two developer-live interruptions the closed CHECK sets admit only as `interrupted`, with the
+ * distinction carried in the state detail, the outcome summary, and the safe next action (settlement
+ * l). A dedicated classification is S16's job, not this slice's, so nothing here invents one.
+ */
+const LIVE_INTERRUPTIONS = {
+  'run-budget-ceiling-reached': {
+    detail: '任务运行预算上限已达到；已完成单元的结果与缺口均已保留，未再发起任何传输。',
+    summary: 'Run Budget Ceiling Reached：运行在达到任务运行预算上限时停止，部分结果集修订版已保留。',
+    safeNextAction: '查看已保留的部分结果与缺口；如需继续，请以更高的 --run-budget-ceiling 重新启动并通过分析更新操作发起新的授权运行。',
+  },
+  'provider-account-limit': {
+    detail: 'Provider Account Limit：模型服务账户限额结束了本次运行；没有重试、回退或第二个模型。',
+    summary: 'Provider Account Limit：模型服务账户限额结束了运行，部分结果集修订版已保留。',
+    safeNextAction: '待模型服务账户限额窗口恢复后，通过分析更新操作发起新的授权运行；本次运行不会自动重试，也不会改用其它模型。',
+  },
+} as const;
+
+type LiveInterruption = keyof typeof LIVE_INTERRUPTIONS;
+
+/**
+ * The transmittable set under v4: exact `sample1` and nothing else (settlement l). ADR 0065 admits
+ * only Owner-designated Public SampleBooks, and this slice fixes the set to the one Book whose
+ * lineage the plan already pins. Any other Book refuses before dispatch rather than at the gate, so
+ * no unadmitted manuscript is ever assembled into a payload at all.
+ */
+export const DEVELOPER_LIVE_TRANSMITTABLE_SOURCE_DIGESTS: ReadonlySet<string> = new Set([SAMPLE1_SOURCE_DIGEST]);
+
 export class BaselineAnalysisExecutionOwner {
   readonly #deps: ExecutionOwnerDependencies;
   readonly #broker: CredentialBroker;
@@ -100,6 +142,13 @@ export class BaselineAnalysisExecutionOwner {
   #disposed = false;
 
   constructor(deps: ExecutionOwnerDependencies) {
+    // The developer-live runtime and the bound scope are one fact: a v4 launch that reached this owner
+    // without its launch facts and captured transport could never enforce the ceiling or the cache, and a
+    // runtime under any other scope would be a transport nothing may use.
+    const live = deps.developerLive ?? null;
+    if ((deps.launchPolicy.operationalScope === 'developer-live') !== (live !== null)) {
+      throw new ExecutionAdmissionError('EXECUTION_DEVELOPER_LIVE_RUNTIME_MISMATCH', '开发者实时运行时与已绑定的可信区间不一致。');
+    }
     this.#deps = deps;
     this.#broker = new CredentialBroker(deps.secretResolver);
   }
@@ -112,8 +161,13 @@ export class BaselineAnalysisExecutionOwner {
   admitAndDispatch(runRecordId: string): void {
     if (this.#disposed) throw new ExecutionAdmissionError('EXECUTION_STOPPING', '本地业务服务正在停止。');
     if (this.#active !== null) throw new ExecutionAdmissionError('EXECUTION_BUSY', '当前已有一个运行在执行；本实例一次只执行一个运行。');
-    if (this.#deps.fixture === null) throw new ExecutionAdmissionError('EXECUTION_ROUTE_ABSENT', '没有可执行的本地确定性路由。');
+    const live = this.#deps.developerLive ?? null;
+    if (live === null && this.#deps.fixture === null) throw new ExecutionAdmissionError('EXECUTION_ROUTE_ABSENT', '没有可执行的本地确定性路由。');
     const facts = this.#deps.ledger.loadExecutionPlan(runRecordId);
+    // The Public SampleBook check precedes admission, so an unadmitted Book never reaches a payload.
+    if (live !== null && !DEVELOPER_LIVE_TRANSMITTABLE_SOURCE_DIGESTS.has(facts.sourceDigest)) {
+      throw new ExecutionAdmissionError('EXECUTION_SOURCE_NOT_TRANSMITTABLE', '当前图书不在 developer-live 可传输的 Public SampleBook 集合内；未发起任何传输。');
+    }
     if (this.#deps.ledger.currentRunState(runRecordId) !== 'authorized') {
       throw new ExecutionAdmissionError('EXECUTION_STATE_INVALID', '只有刚记录授权的运行可以进入调度。');
     }
@@ -175,10 +229,30 @@ export class BaselineAnalysisExecutionOwner {
 
   async #execute(active: ActiveRun, facts: ExecutionPlanFacts): Promise<void> {
     const ledger = this.#deps.ledger;
-    const fixture = this.#deps.fixture!;
     const policy = this.#deps.launchPolicy;
-    if (policy.operationalScope !== 'development-ci' || policy.providerProcessing.version !== 'v1' || policy.providerProcessing.liveTransmissionAllowed !== false) {
-      throw new ExecutionAdmissionError('EXECUTION_POLICY_INVALID', '当前可信策略不是 development-ci · Provider Processing v1。');
+    const live = this.#deps.developerLive ?? null;
+    if (live === null) {
+      if (policy.operationalScope !== 'development-ci' || policy.providerProcessing.version !== 'v1' || policy.providerProcessing.liveTransmissionAllowed !== false) {
+        throw new ExecutionAdmissionError('EXECUTION_POLICY_INVALID', '当前可信策略不是 development-ci · Provider Processing v1。');
+      }
+    } else if (policy.operationalScope !== 'developer-live' || policy.providerProcessing.version !== 'v4' ||
+        policy.providerProcessing.decision !== 'eligible-only' || policy.providerProcessing.liveTransmissionAllowed !== true) {
+      throw new ExecutionAdmissionError('EXECUTION_POLICY_INVALID', '当前可信策略不是 developer-live · Provider Processing v4。');
+    }
+    const fixture = this.#deps.fixture;
+    // The route the plan froze, resolved once: the deterministic fixture, or the live route profile.
+    const route: ExecutionRouteId = live === null ? LOCAL_DETERMINISTIC_ROUTE : OPENCODE_GO_ROUTE;
+    const model = live === null ? LOCAL_DETERMINISTIC_MODEL : OPENCODE_GO_ROUTE_PROFILE.model;
+    const credentialSlot = live === null ? 'deepseek-api-key' as const : OPENCODE_GO_ROUTE_PROFILE.credentialSlot;
+    const credentialReference = live === null ? facts.credentialReference : DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE;
+    const runBudgetCeiling: RunBudgetCeiling = live === null ? { kind: 'unset' } : live.launch.runBudgetCeiling;
+    // The test item purpose is the Task mode, so a first baseline and each update mode number their
+    // live calls separately and a repeated purpose can never collide with an unrelated test.
+    const testItemPurpose = facts.update === null ? 'first-baseline' : facts.update.mode;
+    let cache: ProviderResultCache | null = null;
+    if (live !== null) {
+      cache = new ProviderResultCache(live.launch.providerCacheRoot);
+      await cache.open();
     }
     const blocks = ledger.readRevisionBlocks(facts.checkpoint.manuscriptId, facts.checkpoint.revisionId);
     const blocksById = new Map(blocks.map((block) => [block.blockId, block] as const));
@@ -200,26 +274,61 @@ export class BaselineAnalysisExecutionOwner {
     let bindingFacts: EgressBindingFacts | null = null;
     // The payload digest the gate admitted for the turn in flight; recorded by reference, never the payload.
     let admittedPayloadDigest: string | null = null;
+    // Usage accumulated so far, in the shape the ceiling evaluator reads. Every attempt counts, so the
+    // ceiling sees exactly what the Run has spent at the instant the gate asks, before each dispatch.
+    const accumulated: UsageFacts[] = [];
+    const ceilingState = (): EgressCeilingState => {
+      if (runBudgetCeiling.kind === 'unset') return 'unset';
+      return evaluateRunBudgetCeiling(accumulated, runBudgetCeiling).state === 'reached' ? 'reached' : 'within';
+    };
+    // The single-use ticket the gate issued for the step in flight; the adapter takes it or refuses.
+    let pendingTicket: TransmitTicket | null = null;
+    let bindingDigestForSlot = '';
     const harness = await prepareExecution({
       sessionId: harnessSessionId,
-      route: LOCAL_DETERMINISTIC_ROUTE,
-      model: LOCAL_DETERMINISTIC_MODEL,
+      route,
+      model,
       systemPrompt: BASELINE_PROMPT_CONTRACT.systemPrompt,
       promptContractDigest: BASELINE_PROMPT_CONTRACT_DIGEST,
-      adapterFactory: (codes) => new Ai7LocalDeterministicAdapter(fixture, BASELINE_PROMPT_CONTRACT_DIGEST, codes),
+      // One technical Session per Analysis Unit under v4; the deterministic route keeps its single
+      // accumulating Session, so J-04's proven composition is untouched.
+      ...(live === null ? {} : { sessionMode: 'per-unit' as const }),
+      adapterFactory: (codes) => live === null
+        ? new Ai7LocalDeterministicAdapter(fixture!, BASELINE_PROMPT_CONTRACT_DIGEST, codes)
+        : new DeepSeekOpenAiCompatibleAdapter({
+            broker: this.#broker,
+            get slotBinding(): CredentialSlotBinding {
+              return { bindingDigest: bindingDigestForSlot, modelRole: 'Main Editorial Role', slot: credentialSlot, credentialReference };
+            },
+            tickets: { take: () => { const current = pendingTicket; pendingTicket = null; return current; } },
+            attribution: () => ({}),
+            promptContractDigest: BASELINE_PROMPT_CONTRACT_DIGEST,
+            codes,
+            profile: OPENCODE_GO_ROUTE_PROFILE,
+            sessionId: () => harness.currentSessionId(),
+            // The captured native `fetch`, reached only through the cache: an identical request
+            // replays without transmitting, and a live call happens at most once per test item.
+            transport: (url, init) => transmitOnce(cache!, live, testItemPurpose, model, url, init),
+          }),
       gate: (payload) => {
         if (bindingFacts === null) return { decision: 'refuse', reason: 'binding-stale', detail: '执行绑定尚未持久化；未发送任何内容。' };
-        const decision = evaluateEgress(payload, bindingFacts, { currentBindingDigest: () => currentBindingDigest, acceptedOutputDigests });
+        const decision = evaluateEgress(payload, bindingFacts, { currentBindingDigest: () => currentBindingDigest, acceptedOutputDigests, ceilingState });
         admittedPayloadDigest = decision.decision === 'refuse' ? null : decision.payloadDigest;
         return decision;
       },
-      onTransmitTicket: () => {
-        throw new ExecutionAdmissionError('EXECUTION_REMOTE_TICKET_FORBIDDEN', 'Provider Processing v1 下不得签发 transmit-remote。');
+      onTransmitTicket: (ticket) => {
+        if (live === null) {
+          throw new ExecutionAdmissionError('EXECUTION_REMOTE_TICKET_FORBIDDEN', 'Provider Processing v1 下不得签发 transmit-remote。');
+        }
+        pendingTicket = ticket;
       },
     });
     active.harness = harness;
     const spans: HarnessExecutionSpan[] = [];
     let terminalClassification: 'completed' | 'completed-with-gaps' | 'failed' | 'interrupted' = 'completed';
+    // Which of the two developer-live interruptions settled this Run, when one did; the closed CHECK
+    // sets record both as `interrupted`, so the distinction lives in the detail, summary, and action.
+    let liveInterruption: LiveInterruption | null = null;
     try {
       requireCompositionMatch(harness.composition.digest, facts.behaviorCompositionDigest);
       const bindingRecord: ExecutionBindingRecord = {
@@ -244,13 +353,15 @@ export class BaselineAnalysisExecutionOwner {
         promptContractDigest: BASELINE_PROMPT_CONTRACT_DIGEST,
         contractVersion: BASELINE_ANALYSIS_CONTRACT_VERSION,
         harnessSessionId,
-        route: LOCAL_DETERMINISTIC_ROUTE,
-        model: LOCAL_DETERMINISTIC_MODEL,
-        adapterPin: { fixtureIdentity: fixture.identity, fixtureSha256: fixture.sha256 },
-        credentialSlot: { modelRole: 'Main Editorial Role', slot: 'deepseek-api-key', credentialReference: facts.credentialReference },
+        route,
+        model,
+        adapterPin: live === null ? { fixtureIdentity: fixture!.identity, fixtureSha256: fixture!.sha256 } : null,
+        credentialSlot: { modelRole: 'Main Editorial Role', slot: credentialSlot, credentialReference },
         outboundDataCategory: 'public-or-synthetic',
-        policyPin: { operationalScope: 'development-ci', providerProcessingVersion: 'v1', activePolicySetVersion: 'v3', liveTransmissions: 0 },
-        runBudgetCeiling: 'unset',
+        policyPin: live === null
+          ? { operationalScope: 'development-ci', providerProcessingVersion: 'v1', activePolicySetVersion: 'v4', liveTransmissions: 0 }
+          : { operationalScope: 'developer-live', providerProcessingVersion: 'v4', activePolicySetVersion: 'v4', liveTransmissions: 'bounded-by-run' },
+        runBudgetCeiling: runBudgetCeiling.kind === 'unset' ? 'unset' : runBudgetCeiling,
         dispatchAttribution: 'Dispatch',
         boundAt,
         ...(update === null ? {} : { update: { mode: update.mode, predecessorRevisionId: update.predecessor.revisionId, reusePlanDigest: update.reusePlanDigest } }),
@@ -260,19 +371,27 @@ export class BaselineAnalysisExecutionOwner {
       const credentialReadiness = await this.#broker.checkReadiness({
         bindingDigest,
         modelRole: 'Main Editorial Role',
-        slot: 'deepseek-api-key',
-        credentialReference: facts.credentialReference,
+        slot: credentialSlot,
+        credentialReference,
       });
       const persisted = ledger.persistAttemptAndBinding({ runRecordId: facts.runRecordId, binding: bindingRecord, credentialReadiness });
       if (persisted.bindingDigest !== bindingDigest) throw new ExecutionAdmissionError('EXECUTION_BINDING_DIGEST_DRIFT', '执行绑定摘要在持久化时发生变化。');
+      // A live Run cannot start without its credential: the broker would refuse the release anyway,
+      // and refusing here keeps the Run from spending Sessions to reach the same conclusion.
+      if (live !== null && credentialReadiness !== 'present') {
+        throw new ExecutionAdmissionError('EXECUTION_CREDENTIAL_ABSENT', '受保护凭据库中没有 opencode-go 开发凭据；未发起任何传输。');
+      }
       currentBindingDigest = bindingDigest;
+      bindingDigestForSlot = bindingDigest;
       bindingFacts = {
         bindingDigest,
-        route: LOCAL_DETERMINISTIC_ROUTE,
-        model: LOCAL_DETERMINISTIC_MODEL,
+        route,
+        model,
         systemPrompt: BASELINE_PROMPT_CONTRACT.systemPrompt,
         outboundDataCategory: 'public-or-synthetic',
-        policy: { operationalScope: 'development-ci', providerProcessingVersion: 'v1', liveTransmissionAllowed: false, authorizedLiveTransmissionCount: 0 },
+        policy: live === null
+          ? { operationalScope: 'development-ci', providerProcessingVersion: 'v1', liveTransmissionAllowed: false, authorizedLiveTransmissionCount: 0 }
+          : { operationalScope: 'developer-live', providerProcessingVersion: 'v4', liveTransmissionAllowed: true, authorizedLiveTransmissionCount: 'bounded-by-run' },
         admittedUserMessages,
       };
       harness.bindExecution({ harnessSessionId, behaviorCompositionDigest: harness.composition.digest, promptContractDigest: BASELINE_PROMPT_CONTRACT_DIGEST });
@@ -327,11 +446,20 @@ export class BaselineAnalysisExecutionOwner {
         if (unitUsage !== null) {
           usage.inputTokens += unitUsage.inputTokens;
           usage.outputTokens += unitUsage.outputTokens;
+          // The ceiling counts every attempt, including a safe retry's, from this instant onward.
+          accumulated.push(unitUsage);
         }
         return { turn, unitUsage, payloadDigest };
       };
       for (const unit of submittedUnits) {
         if (active.interrupted) break;
+        // The ceiling is evaluated before every dispatch, not only inside the gate: reaching it ends
+        // the Run here, before the next unit forms a request at all.
+        if (ceilingState() === 'reached') {
+          liveInterruption = 'run-budget-ceiling-reached';
+          terminalClassification = 'interrupted';
+          break;
+        }
         active.progress.currentUnitOrdinal = unit.ordinal;
         const requestDigest = unitRequestDigest(BASELINE_PROMPT_CONTRACT_DIGEST, unit.ordinal, unit.digest);
         let attempt = await submitAttempt(unit, 1);
@@ -396,10 +524,18 @@ export class BaselineAnalysisExecutionOwner {
           const reason = failure?.kind === 'failed' ? `${failure.failure.reason}（${failure.failure.code}）` : '适配器失败。';
           // A second failure names both attempts; the unit is never retried again.
           gap('adapter-failure', firstFailure === null ? reason : `第 1 次尝试：${firstFailure.reason}（${firstFailure.code}）；安全重试后第 2 次尝试：${reason}`);
+          // A Provider Account Limit ends the Run outright: no retry, no fallback, no second model.
+          if (failure?.kind === 'failed' && failure.failure.failureClass === 'provider-account-limit') {
+            liveInterruption = 'provider-account-limit';
+            terminalClassification = 'interrupted';
+            break;
+          }
         } else if (turn.terminal === 'interrupted') {
           const failure = turn.signals.find((signal) => signal.kind === 'interrupted');
           const egress = failure?.kind === 'interrupted' && failure.failure.failureClass === 'egress-refused';
           gap(egress ? 'egress-refused' : 'interrupted', failure?.kind === 'interrupted' ? failure.failure.reason : '请求被中断。');
+          // An egress refusal that names the ceiling is the ceiling settlement, not a bare interruption.
+          if (egress && ceilingState() === 'reached') liveInterruption = 'run-budget-ceiling-reached';
           terminalClassification = 'interrupted';
           break;
         } else {
@@ -435,8 +571,11 @@ export class BaselineAnalysisExecutionOwner {
         usage,
         adaptedUnitOrdinals,
       });
+      const interruption = liveInterruption === null ? null : LIVE_INTERRUPTIONS[liveInterruption];
       ledger.recordRunState(facts.runRecordId, terminalClassification, {
-        detail: `运行终态：${terminalClassification}；结果集修订版 ${revision.revisionId}（Revision ${revision.ordinal}）。`,
+        detail: interruption === null
+          ? `运行终态：${terminalClassification}；结果集修订版 ${revision.revisionId}（Revision ${revision.ordinal}）。`
+          : `运行终态：${terminalClassification} · ${liveInterruption}；${interruption.detail}结果集修订版 ${revision.revisionId}（Revision ${revision.ordinal}）。`,
         resultSetRevisionId: revision.revisionId,
         resultSetRevisionOrdinal: revision.ordinal,
         unitsClosed: reduction.coverage.unitsClosed,
@@ -450,8 +589,10 @@ export class BaselineAnalysisExecutionOwner {
         runRecordId: facts.runRecordId,
         classification: terminalClassification,
         resultSetRevisionId: revision.revisionId,
-        summary: `${reduction.coverage.label}；${reduction.reducerClosure.label}；${reduction.assurance.label}。`,
-        safeNextAction: SAFE_NEXT_ACTIONS[terminalClassification],
+        summary: interruption === null
+          ? `${reduction.coverage.label}；${reduction.reducerClosure.label}；${reduction.assurance.label}。`
+          : `${interruption.summary}${reduction.coverage.label}；${reduction.reducerClosure.label}；${reduction.assurance.label}。`,
+        safeNextAction: interruption === null ? SAFE_NEXT_ACTIONS[terminalClassification] : interruption.safeNextAction,
       });
     } finally {
       currentBindingDigest = null;
@@ -459,6 +600,92 @@ export class BaselineAnalysisExecutionOwner {
       await harness.finish();
     }
   }
+}
+
+/**
+ * One live call, at most once. The request digest is taken over the canonical body the adapter
+ * assembled — the same bytes the gate admitted, and the only part of the request that ever reaches
+ * the cache, since the headers carry the credential. An identical request replays from the cache and
+ * transmits nothing; otherwise the call claims a fresh test item id, transmits once, and records the
+ * result under it. A refused item id fails the turn rather than transmitting anyway.
+ */
+async function transmitOnce(
+  cache: ProviderResultCache,
+  live: DeveloperLiveRuntime,
+  purpose: string,
+  model: string,
+  url: string,
+  init: { method: 'POST'; headers: Record<string, string>; body: string; signal?: AbortSignal },
+): Promise<{ status: number; json(): Promise<unknown> }> {
+  const requestDigest = providerRequestDigest(init.body);
+  const replayed = await cache.lookup(model, requestDigest);
+  if (replayed !== null) {
+    await cache.record({
+      itemId: cache.nextItemId(purpose),
+      purpose,
+      model,
+      promptContractDigest: BASELINE_PROMPT_CONTRACT_DIGEST,
+      requestDigest,
+      outcome: 'replayed',
+      status: replayed.status,
+      usage: replayed.usage,
+      recordedAt: new Date().toISOString(),
+    });
+    return { status: replayed.status, json: () => Promise.resolve(replayed.response) };
+  }
+  const itemId = cache.nextItemId(purpose);
+  cache.claimItem(itemId);
+  const transmittedAt = new Date().toISOString();
+  let response: { status: number; json(): Promise<unknown> };
+  try {
+    response = await live.nativeFetch(url, init);
+  } catch (error) {
+    await cache.record({
+      itemId, purpose, model, promptContractDigest: BASELINE_PROMPT_CONTRACT_DIGEST, requestDigest,
+      outcome: 'failed', status: null, usage: null, recordedAt: new Date().toISOString(),
+    });
+    throw error;
+  }
+  let body: unknown = null;
+  try {
+    body = await response.json();
+  } catch {
+    body = null;
+  }
+  const usage = usageOfResponse(body);
+  // Only a result worth replaying is cached: a limit or a server error must be asked again later.
+  if (response.status === 200) {
+    await cache.store({ model, requestDigest, requestBody: init.body, status: response.status, response: body, usage, transmittedAt });
+  }
+  const accountLimit = isProviderAccountLimit(OPENCODE_GO_ROUTE_PROFILE, response.status, body);
+  const resetWindow = accountLimit ? providerResetWindow(body) : null;
+  await cache.record({
+    itemId,
+    purpose,
+    model,
+    promptContractDigest: BASELINE_PROMPT_CONTRACT_DIGEST,
+    requestDigest,
+    outcome: response.status === 200 ? 'transmitted' : 'failed',
+    status: response.status,
+    usage,
+    ...(accountLimit ? { classification: 'quota-exhausted' as const } : {}),
+    ...(resetWindow === null ? {} : { resetWindow }),
+    recordedAt: new Date().toISOString(),
+  });
+  return { status: response.status, json: () => Promise.resolve(body) };
+}
+
+/** The reset window a limit response stated, when it stated one; recorded in the ledger, never guessed. */
+function providerResetWindow(body: unknown): string | null {
+  if (body === null || typeof body !== 'object') return null;
+  const error = (body as { error?: unknown }).error;
+  if (error === null || typeof error !== 'object') return null;
+  for (const key of ['reset_at', 'resets_at', 'reset', 'retry_after']) {
+    const value = (error as Record<string, unknown>)[key];
+    if (typeof value === 'string' && value.length > 0) return value;
+    if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  }
+  return null;
 }
 
 function requireCompositionMatch(actual: string, planned: string): void {

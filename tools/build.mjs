@@ -101,11 +101,12 @@ async function ensureClosedOutputs() {
     'config/dsh-profiles/manuscript-editorial/package.json',
     'config/native-artifact-sources/editorial-workspace-profile/package.json',
     'config/source-checkout-launch-authority.json',
-    'docs/policies/active-policy-set.v3.json',
+    'docs/policies/active-policy-set.v4.json',
     'docs/policies/external-export-policy.v1.json',
     'docs/policies/provider-processing-policy.v1.json',
     'docs/policies/provider-processing-policy.v2.json',
     'docs/policies/provider-processing-policy.v3.json',
+    'docs/policies/provider-processing-policy.v4.json',
     'notices/ELECTRON_LICENSE',
     'notices/ELECTRON_LICENSES.chromium.html',
     'notices/THIRD_PARTY_NOTICES.md',
@@ -178,11 +179,12 @@ async function ensureClosedOutputs() {
   );
   const exactPolicyCarriers = [
     'config/source-checkout-launch-authority.json',
-    'docs/policies/active-policy-set.v3.json',
+    'docs/policies/active-policy-set.v4.json',
     'docs/policies/external-export-policy.v1.json',
     'docs/policies/provider-processing-policy.v1.json',
     'docs/policies/provider-processing-policy.v2.json',
     'docs/policies/provider-processing-policy.v3.json',
+    'docs/policies/provider-processing-policy.v4.json',
   ];
   for (const path of exactPolicyCarriers) {
     const built = await readFile(outputPath(...path.split('/')));
@@ -367,11 +369,12 @@ async function main() {
   );
   for (const path of [
     'config/source-checkout-launch-authority.json',
-    'docs/policies/active-policy-set.v3.json',
+    'docs/policies/active-policy-set.v4.json',
     'docs/policies/external-export-policy.v1.json',
     'docs/policies/provider-processing-policy.v1.json',
     'docs/policies/provider-processing-policy.v2.json',
     'docs/policies/provider-processing-policy.v3.json',
+    'docs/policies/provider-processing-policy.v4.json',
   ]) {
     await copyFile(resolve(ROOT, ...path.split('/')), outputPath(...path.split('/')));
   }

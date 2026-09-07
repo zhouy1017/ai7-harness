@@ -14,15 +14,40 @@ export const LOCAL_DETERMINISTIC_ROUTE = 'ai7-local-deterministic' as const;
 export const LOCAL_DETERMINISTIC_MODEL = 'ai7-deterministic-fixture' as const;
 export const DEEPSEEK_ROUTE = 'deepseek-open-platform' as const;
 export const DEEPSEEK_MODEL = 'deepseek-v4-pro' as const;
+/** The developer-live route of Provider Processing v4 (ADR 0065, ADR 0067): OpenCode Go with the bare model id. */
+export const OPENCODE_GO_ROUTE = 'opencode-go' as const;
+export const OPENCODE_GO_MODEL = 'deepseek-v4-flash' as const;
 
-export type ExecutionRoute = typeof LOCAL_DETERMINISTIC_ROUTE | typeof DEEPSEEK_ROUTE;
+/** Every route a Provider Resolution Plan may bind; the two remote ones are served by the same adapter. */
+export type ExecutionRoute = typeof LOCAL_DETERMINISTIC_ROUTE | typeof DEEPSEEK_ROUTE | typeof OPENCODE_GO_ROUTE;
+export type RemoteExecutionRoute = typeof DEEPSEEK_ROUTE | typeof OPENCODE_GO_ROUTE;
+/** The logical credential slots of the Main Editorial Role: one per remote route. */
+export type CredentialSlot = 'deepseek-api-key' | 'opencode-go';
 
-export interface EgressPolicyPin {
-  readonly operationalScope: 'development-ci';
-  readonly providerProcessingVersion: 'v1';
-  readonly liveTransmissionAllowed: false;
-  readonly authorizedLiveTransmissionCount: 0;
-}
+/**
+ * The trusted scope's Provider Processing pin, as the gate sees it. v1 denies every remote route; v4
+ * admits exactly one, and only while the Run's own bounds still hold.
+ */
+export type EgressPolicyPin =
+  | {
+      readonly operationalScope: 'development-ci';
+      readonly providerProcessingVersion: 'v1';
+      readonly liveTransmissionAllowed: false;
+      readonly authorizedLiveTransmissionCount: 0;
+    }
+  | {
+      readonly operationalScope: 'developer-live';
+      readonly providerProcessingVersion: 'v4';
+      readonly liveTransmissionAllowed: true;
+      readonly authorizedLiveTransmissionCount: 'bounded-by-run';
+    };
+
+/**
+ * The Run Budget Ceiling as the gate must see it immediately before a transmission: `unset` is a
+ * refusal under v4, because Provider Processing v4 requires a non-`unset` ceiling, and `reached`
+ * refuses because the Run has spent its bound.
+ */
+export type EgressCeilingState = 'unset' | 'within' | 'reached';
 
 /** The binding facts the gate compares against; a frozen subset of the persisted Execution Binding. */
 export interface EgressBindingFacts {
@@ -42,6 +67,8 @@ export interface EgressAttemptScope {
   currentBindingDigest: () => string | null;
   /** SHA-256 digests of assistant texts this attempt already accepted; prior history may carry only these. */
   readonly acceptedOutputDigests: ReadonlySet<string>;
+  /** The ceiling state from accumulated usage, evaluated at this instant; `unset` on the deterministic route. */
+  ceilingState?: () => EgressCeilingState;
 }
 
 export type EgressRefusalReason =
@@ -53,7 +80,9 @@ export type EgressRefusalReason =
   | 'payload-out-of-scope'
   | 'unknown-message-role'
   | 'outbound-category-mismatch'
-  | 'remote-route-denied-under-v1';
+  | 'remote-route-denied-under-v1'
+  | 'run-budget-ceiling-unset'
+  | 'run-budget-ceiling-reached';
 
 export interface TransmitTicket {
   readonly decision: 'transmit-remote';
@@ -118,10 +147,17 @@ export function evaluateEgress(
   if (last.role !== 'user') return refuse('payload-out-of-scope', '请求末尾不是单元消息；未发送任何内容。');
   const digest = payloadDigest(payload);
   if (binding.route === LOCAL_DETERMINISTIC_ROUTE) return { decision: 'transmit-local', payloadDigest: digest };
-  if (binding.policy.operationalScope === 'development-ci' && binding.policy.providerProcessingVersion === 'v1' &&
-      binding.policy.liveTransmissionAllowed === false) {
+  if (binding.policy.operationalScope === 'development-ci') {
     return refuse('remote-route-denied-under-v1', 'development-ci · Provider Processing v1 允许 0 次实时传输；未发送任何内容。');
   }
-  // Unreachable while the policy pin type admits only v1; kept so the decision set stays complete.
+  // Under v4 the ceiling is a precondition of the decision itself, evaluated here from accumulated
+  // usage, so no dispatch can precede it and no ceiling state can be assumed from an earlier turn.
+  const ceiling = scope.ceilingState?.() ?? 'unset';
+  if (ceiling === 'unset') {
+    return refuse('run-budget-ceiling-unset', 'Provider Processing v4 要求非 unset 的任务运行预算上限；未发送任何内容。');
+  }
+  if (ceiling === 'reached') {
+    return refuse('run-budget-ceiling-reached', '任务运行预算上限已达到；未发送任何内容。');
+  }
   return { decision: 'transmit-remote', payloadDigest: digest, ticket: { decision: 'transmit-remote', bindingDigest: binding.bindingDigest, payloadDigest: digest } };
 }

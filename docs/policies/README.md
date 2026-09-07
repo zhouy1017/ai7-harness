@@ -15,21 +15,26 @@ A policy version is repository-current and repository-canonical only at an exact
 | Provider Processing v1 — `development-ci` | [`provider-processing-policy.v1.json`](provider-processing-policy.v1.json) | [`provider-processing-policy.v1.schema.json`](provider-processing-policy.v1.schema.json) | [`provider-processing-policy.md`](provider-processing-policy.md) |
 | Provider Processing v2 — `fixture-recording` | [`provider-processing-policy.v2.json`](provider-processing-policy.v2.json) | [`provider-processing-policy.v2.schema.json`](provider-processing-policy.v2.schema.json) | [`provider-processing-policy.v2.md`](provider-processing-policy.v2.md) |
 | Provider Processing v3 — `ordinary-production` | [`provider-processing-policy.v3.json`](provider-processing-policy.v3.json) | [`provider-processing-policy.v3.schema.json`](provider-processing-policy.v3.schema.json) | [`provider-processing-policy.v3.md`](provider-processing-policy.v3.md) |
+| Provider Processing v4 — `developer-live` | [`provider-processing-policy.v4.json`](provider-processing-policy.v4.json) | [`provider-processing-policy.v4.schema.json`](provider-processing-policy.v4.schema.json) | [`provider-processing-policy.v4.md`](provider-processing-policy.v4.md) |
 | External Export v1 — all scopes | [`external-export-policy.v1.json`](external-export-policy.v1.json) | [`external-export-policy.v1.schema.json`](external-export-policy.v1.schema.json) | [`external-export-policy.md`](external-export-policy.md) |
 
-At a qualifying integrated `dev` target, [`active-policy-set.v3.json`](active-policy-set.v3.json), validated by [`active-policy-set.v3.schema.json`](active-policy-set.v3.schema.json), is the active selection owner. Trusted build/launch authority must bind exactly one of its three Provider Processing scopes for each launch. An ordinary product setting, environment variable, Provider, artifact or Plugin cannot select the scope, and there is no cross-scope fallback. A selection is valid only when scope, policy identity, version, canonical path and SHA-256 digest all match at that exact target; missing or unknown scope denies Provider Processing. Selecting a predecessor for rollback means creating and reviewing the applicable active-set selection; it never means mutating an immutable policy version or restoring revoked authority.
+At a qualifying integrated `dev` target, [`active-policy-set.v4.json`](active-policy-set.v4.json), validated by [`active-policy-set.v4.schema.json`](active-policy-set.v4.schema.json), is the sole active selection owner for all four Provider Processing scopes. Trusted build/launch authority must bind exactly one of them for each launch: the source-checkout carrier binds `development-ci` by default, and the built entry's launch argument `--trusted-operational-scope developer-live` binds `developer-live` on a developer host only; `fixture-recording` and `ordinary-production` are not selectable from the source checkout. An ordinary product setting, environment variable, Provider, artifact or Plugin cannot select the scope, and there is no cross-scope fallback. A selection is valid only when scope, policy identity, version, canonical path and SHA-256 digest all match at that exact target; missing or unknown scope denies Provider Processing. Selecting a predecessor for rollback means creating and reviewing the applicable active-set selection; it never means mutating an immutable policy version or restoring revoked authority.
 
-This active set is a closed selection contract, not a runtime mode inside a Policy Document. It creates no trusted launch selector and makes no implementation claim.
+Active-set v4 also corrects the `ordinary-production` pin: active-set v3 recorded a digest that no longer matched the v3 policy bytes, and v4 pins the exact current bytes (`7ee954e6…`). Active-set v3 itself is preserved byte for byte as immutable predecessor history.
+
+This active set is a closed selection contract, not a runtime mode inside a Policy Document. It creates no trusted launch selector by itself; the launch argument and its verification are implementation owned by `src/service/launch-policy.ts`.
 
 When target-qualified as above, Provider Processing v2 denies by default and has exactly one eligible-only rule, `sample1-manual-model-fixture-recording`. Under [ADR 0044](../adr/0044-use-sample1-as-compatibility-and-recording-baseline.md), that rule is exact-source, local-only, human-attended, CI-denied, one-call, non-`unset`-budget, exact-binding and no-fallback. Policy eligibility does not implement or dispatch the future call; follow the [manual recording runbook](../development/manual-model-fixture-recording.md) only after separate action authorization and immediate human intervention.
 
 Provider Processing v1 remains the provider-free `development-ci` selection and denies every live transmission. Provider Processing v3 is default-deny and contains exactly two ordinary-production eligible-only rules: a newly user-initiated Task may create an exact Run through direct authorization or a matching active Default Execution Rule, while a new autonomous background manuscript-analysis dispatch additionally requires a matching active Background Analysis Enrollment. Setup, import, credential configuration, artifact installation or enablement never creates either authority. Moving the same already-authorized Run into the background changes presentation only; a new idle, scheduled, post-checkpoint, import-triggered or cross-Run dispatch needs the Enrollment.
 
+Provider Processing v4 is the human-attended `developer-live` scope of [ADR 0065](../adr/0065-admit-a-developer-live-provider-processing-scope.md) and [ADR 0067](../adr/0067-authorize-the-opencode-go-development-credential-with-live-once-testing.md): default-deny with one eligible-only rule for a newly user-initiated Task on a developer host over an admitted Public SampleBook (S40: exact `sample1`), bound to route `opencode-go` and model `deepseek-v4-flash`, one technical Session per Analysis Unit, transmissions bounded by the Coverage Manifest unit count plus declared `safe-retry` adaptations, a required non-`unset` Run Budget Ceiling (development default 500,000 total tokens) evaluated before every dispatch, identical requests replayed from the Provider Result Cache, repeated test items refused, and a limit response classified `quota-exhausted` that ends the Run as a Provider Account Limit. It emits no fixture and never runs in CI or hosted.
+
 External Export v1 denies by default and contains only one policy-eligibility rule for a platform-native user-selected local-filesystem file Effect over an exact Delivery Package version or Editorial Deliverable Revision; every file still requires its own frozen preparation, exact Effect Intent and Effect Approval, atomic commit/verification, and Effect Receipt or classified outcome. The active set creates no provider, endpoint, model, credential, file-operation implementation, current recording, network/cloud/email destination, learning, publication, Public Release Permission, or outcome proof.
 
 ## Immutable predecessor records
 
-Provider Processing v1 and v2, their schemas and human projections, plus [`active-policy-set.v1.json`](active-policy-set.v1.json), [`active-policy-set.v2.json`](active-policy-set.v2.json) and their schemas, remain byte-preserved immutable predecessor history. Active-set v3 references those exact v1/v2 Provider bytes for their retained scopes rather than rewriting them. External Export v1 is selected unchanged by all active-set generations.
+Provider Processing v1, v2 and v3, their schemas and human projections, plus [`active-policy-set.v1.json`](active-policy-set.v1.json), [`active-policy-set.v2.json`](active-policy-set.v2.json), [`active-policy-set.v3.json`](active-policy-set.v3.json) and their schemas, remain byte-preserved immutable predecessor history. Active-set v4 references those exact v1/v2/v3 Provider bytes for their retained scopes rather than rewriting them. External Export v1 is selected unchanged by all active-set generations.
 
 ## Existing design-phase policy references
 
@@ -41,6 +46,8 @@ The schemas deliberately declare JSON Schema Draft 7 and are self-contained. Wit
 
 ```powershell
 $cases = @(
+  @('docs/policies/provider-processing-policy.v4.json', 'docs/policies/provider-processing-policy.v4.schema.json'),
+  @('docs/policies/active-policy-set.v4.json', 'docs/policies/active-policy-set.v4.schema.json'),
   @('docs/policies/provider-processing-policy.v3.json', 'docs/policies/provider-processing-policy.v3.schema.json'),
   @('docs/policies/active-policy-set.v3.json', 'docs/policies/active-policy-set.v3.schema.json'),
   @('docs/policies/provider-processing-policy.v2.json', 'docs/policies/provider-processing-policy.v2.schema.json'),
@@ -59,7 +66,7 @@ foreach ($case in $cases) {
 JSON Schema validates the manifest shape but cannot read repository files to prove a digest. Verify every pin separately against the exact file bytes:
 
 ```powershell
-$set = Get-Content -Raw -LiteralPath 'docs/policies/active-policy-set.v3.json' | ConvertFrom-Json -ErrorAction Stop
+$set = Get-Content -Raw -LiteralPath 'docs/policies/active-policy-set.v4.json' | ConvertFrom-Json -ErrorAction Stop
 $providerPins = $set.activePolicies.'provider-processing-policy'.scopePins.PSObject.Properties.Value
 $pins = @($providerPins) + @($set.activePolicies.'external-export-policy')
 foreach ($pin in $pins) {

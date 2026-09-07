@@ -7,13 +7,20 @@ import { AI7_FAILURE_CODES, RETRY_SAFE_FAILURE_TABLE, classifyModelFailure, eval
 import { CredentialBroker, type CredentialSlotBinding } from '../../src/service/provider/credential-broker.js';
 import {
   DEEPSEEK_ENDPOINT,
+  DEEPSEEK_ROUTE_PROFILE,
   DeepSeekOpenAiCompatibleAdapter,
+  OPENCODE_GO_ENDPOINT,
+  OPENCODE_GO_ROUTE_PROFILE,
+  OPENCODE_GO_SESSION_HEADER,
+  OPENCODE_GO_USER_AGENT,
+  PROVIDER_ROUTE_PROFILES,
   assembleDeepSeekRequest,
+  assembleProviderRequest,
   classifyTransportError,
   parseDeepSeekResponse,
   type DeepSeekTransport,
 } from '../../src/service/provider/deepseek-adapter.js';
-import { DEEPSEEK_MODEL, DEEPSEEK_ROUTE, type TransmitTicket } from '../../src/service/provider/egress-gate.js';
+import { DEEPSEEK_MODEL, DEEPSEEK_ROUTE, OPENCODE_GO_MODEL, OPENCODE_GO_ROUTE, type TransmitTicket } from '../../src/service/provider/egress-gate.js';
 import { NETWORK_DENIED_CODE, installNodeNetworkDenial } from '../../src/shared/network-denial.js';
 
 // The remote path is complete but never transmits under v1. Every credential here is a placeholder
@@ -94,6 +101,104 @@ describe('assembleDeepSeekRequest', () => {
     expect(body).not.toHaveProperty('tools');
     expect(first.requestDigest).toMatch(/^[0-9a-f]{64}$/);
     expect(first.promptContractDigest).toBe(BASELINE_PROMPT_CONTRACT_DIGEST);
+  });
+});
+
+describe('provider route generalization', () => {
+  const SESSION = randomUUID();
+
+  function liveRequest(): GenerateOptions {
+    return { ...request(), provider: OPENCODE_GO_ROUTE, model: OPENCODE_GO_MODEL };
+  }
+
+  it('keys the two remote routes by their profiles and nothing else', () => {
+    expect(Object.keys(PROVIDER_ROUTE_PROFILES).sort()).toEqual(['deepseek-open-platform', 'opencode-go']);
+    expect(DEEPSEEK_ROUTE_PROFILE).toMatchObject({
+      route: DEEPSEEK_ROUTE, endpoint: DEEPSEEK_ENDPOINT, model: DEEPSEEK_MODEL,
+      credentialSlot: 'deepseek-api-key', bodyPolicy: 'deepseek-thinking', dshAttribution: true, sessionHeader: false,
+    });
+    expect(OPENCODE_GO_ROUTE_PROFILE).toMatchObject({
+      route: OPENCODE_GO_ROUTE, endpoint: OPENCODE_GO_ENDPOINT, model: OPENCODE_GO_MODEL,
+      credentialSlot: 'opencode-go', bodyPolicy: 'openai-chat-completions', dshAttribution: false, sessionHeader: true,
+    });
+    // The bare Go model id: no provider prefix of any kind.
+    expect(OPENCODE_GO_MODEL).toBe('deepseek-v4-flash');
+    expect(OPENCODE_GO_ENDPOINT).toBe('https://opencode.ai/zen/go/v1/chat/completions');
+  });
+
+  it('assembles the opencode-go body as a standard chat completion with no DeepSeek-specific parameters', () => {
+    const assembly = assembleProviderRequest(OPENCODE_GO_ROUTE_PROFILE, liveRequest(), {
+      attribution: attributionHeaders(), promptContractDigest: BASELINE_PROMPT_CONTRACT_DIGEST, sessionId: SESSION,
+    });
+    expect(assembly.url).toBe(OPENCODE_GO_ENDPOINT);
+    expect(JSON.parse(assembly.body)).toEqual({
+      messages: [{ content: SYSTEM, role: 'system' }, { content: UNIT, role: 'user' }],
+      model: 'deepseek-v4-flash',
+      stream: false,
+    });
+    expect(assembly.body).not.toContain('thinking');
+    expect(assembly.body).not.toContain('reasoning_effort');
+    expect(assembly.headers).toEqual({
+      accept: 'application/json',
+      'content-type': 'application/json',
+      [OPENCODE_GO_SESSION_HEADER]: SESSION,
+      'user-agent': OPENCODE_GO_USER_AGENT,
+    });
+    expect(OPENCODE_GO_USER_AGENT).toMatch(/AI7/u);
+    expect(OPENCODE_GO_USER_AGENT).toMatch(/developer-live/u);
+    expect(assembly.headers).not.toHaveProperty('authorization');
+  });
+
+  it('refuses to assemble the session-bearing route without a Session id', () => {
+    expect(() => assembleProviderRequest(OPENCODE_GO_ROUTE_PROFILE, liveRequest(), {
+      attribution: attributionHeaders(), promptContractDigest: BASELINE_PROMPT_CONTRACT_DIGEST,
+    })).toThrowError(/PROVIDER_REQUEST_SESSION_ABSENT/u);
+  });
+
+  it('transmits the live route with the bearer, the Session header, and the bound slot only', async () => {
+    const calls: Array<{ url: string; init: Parameters<DeepSeekTransport>[1] }> = [];
+    const liveBinding = { ...slotBinding, slot: 'opencode-go' as const };
+    const broker = new CredentialBroker({ resolve: async () => 'placeholder-secret' });
+    let ticket: TransmitTicket | null = ticketFor();
+    const instance = new DeepSeekOpenAiCompatibleAdapter({
+      broker,
+      slotBinding: liveBinding,
+      tickets: { take: () => { const current = ticket; ticket = null; return current; } },
+      attribution: () => attributionHeaders(),
+      promptContractDigest: BASELINE_PROMPT_CONTRACT_DIGEST,
+      codes,
+      profile: OPENCODE_GO_ROUTE_PROFILE,
+      sessionId: () => SESSION,
+      transport: async (url, init) => {
+        calls.push({ url, init });
+        return { status: 200, json: async () => ({ choices: [{ message: { content: '{"ok":true}' } }], usage: { prompt_tokens: 7, completion_tokens: 3 } }) };
+      },
+    });
+    const chunks = await collect(instance.stream(liveRequest()));
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.url).toBe(OPENCODE_GO_ENDPOINT);
+    expect(calls[0]!.init.headers.authorization).toBe('Bearer placeholder-secret');
+    expect(calls[0]!.init.headers[OPENCODE_GO_SESSION_HEADER]).toBe(SESSION);
+    expect(calls[0]!.init.body).not.toContain('placeholder-secret');
+    expect(chunks.at(-1)).toEqual({ type: 'finish', reason: { kind: 'stop' } });
+    expect(instance.transmissions).toBe(1);
+    // The production route is not this adapter's route: a production request is refused, not retargeted.
+    const production = await collect(instance.stream(request()));
+    expect(production).toEqual([{ type: 'finish', reason: { kind: 'error', failure: { code: AI7_FAILURE_CODES.INVALID_RESPONSE, message: '适配器只服务其绑定路由与模型。' } } }]);
+  });
+
+  it('refuses a profile whose slot is not the bound slot, and a session route with no Session source', () => {
+    const deps = {
+      broker: new CredentialBroker({ resolve: async () => null }),
+      tickets: { take: () => null },
+      attribution: () => attributionHeaders(),
+      promptContractDigest: BASELINE_PROMPT_CONTRACT_DIGEST,
+      codes,
+    };
+    expect(() => new DeepSeekOpenAiCompatibleAdapter({ ...deps, slotBinding, profile: OPENCODE_GO_ROUTE_PROFILE, sessionId: () => SESSION }))
+      .toThrowError(/PROVIDER_ROUTE_SLOT_MISMATCH/u);
+    expect(() => new DeepSeekOpenAiCompatibleAdapter({ ...deps, slotBinding: { ...slotBinding, slot: 'opencode-go' }, profile: OPENCODE_GO_ROUTE_PROFILE }))
+      .toThrowError(/PROVIDER_ROUTE_SESSION_SOURCE_ABSENT/u);
   });
 });
 

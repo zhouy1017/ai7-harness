@@ -3,6 +3,10 @@ import { fileURLToPath } from 'node:url';
 import {
   J04_MODEL_ADAPTER_CONTROL_PATTERN,
   MAX_FRAME_BYTES,
+  PROVIDER_CACHE_ROOT_ARGUMENT,
+  RUN_BUDGET_CEILING_ARGUMENT,
+  TRUSTED_SCOPE_ARGUMENT,
+  parseTrustedLaunchForm,
   type J01ImportControl,
   type J03ForegroundExecutionControl,
   type J04ModelAdapterControl,
@@ -12,8 +16,11 @@ import {
   type ServiceRequest,
   type ServiceResponse,
   type ServiceSuccessResponse,
+  type TrustedLaunchForm,
 } from '../shared/protocol.js';
-import { installNodeNetworkDenial } from '../shared/network-denial.js';
+import { armSingleHostAllowance, installNodeNetworkDenial } from '../shared/network-denial.js';
+import { DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE } from '../shared/protected-secret-identity.js';
+import { DEVELOPER_LIVE_POLICY_BINDING, resolveDeveloperLiveLaunch, type DeveloperLiveRuntime } from './launch-policy.js';
 import { decodeRequest, isSafeInteger, ProtocolError } from './request-frames.js';
 import type { DormantHarnessRuntime } from './runtime.js';
 import type { EditorialStore } from './store.js';
@@ -562,6 +569,7 @@ async function dispatch(
 function parseArguments(argv: string[]): {
   dataRoot: string;
   parentPid: number;
+  launchForm: TrustedLaunchForm;
   importControl: J01ImportControl | undefined;
   foregroundExecutionControl: J03ForegroundExecutionControl | undefined;
   recoveryControl: J08RecoveryControl | undefined;
@@ -577,12 +585,20 @@ function parseArguments(argv: string[]): {
       values.has(key) ||
       (key !== '--data-root' && key !== '--parent-pid' && key !== '--j01-import-control' &&
         key !== '--j03-foreground-execution-control' && key !== '--j08-recovery-control' &&
-        key !== '--j04-model-adapter')
+        key !== '--j04-model-adapter' && key !== TRUSTED_SCOPE_ARGUMENT && key !== RUN_BUDGET_CEILING_ARGUMENT &&
+        key !== PROVIDER_CACHE_ROOT_ARGUMENT)
     ) {
       throw new ProtocolError();
     }
     values.set(key, value);
   }
+  // The trusted launch form (ADR 0065): re-parsed here exactly as main parsed it; never read from the environment.
+  const launchForm = parseTrustedLaunchForm({
+    trustedOperationalScope: values.get(TRUSTED_SCOPE_ARGUMENT),
+    runBudgetCeiling: values.get(RUN_BUDGET_CEILING_ARGUMENT),
+    providerCacheRoot: values.get(PROVIDER_CACHE_ROOT_ARGUMENT),
+  });
+  if (launchForm === null || (launchForm.providerCacheRoot !== null && !isAbsolute(launchForm.providerCacheRoot))) throw new ProtocolError();
   const dataRoot = values.get('--data-root');
   const parentPidValue = values.get('--parent-pid');
   const parentPid = Number(parentPidValue);
@@ -625,11 +641,15 @@ function parseArguments(argv: string[]): {
       (recoveryControl === undefined || process.env.AI7_E2E_JOURNEY !== 'J-08')) ||
     (modelAdapterControlValue !== undefined &&
       (modelAdapterControl === undefined || process.env.AI7_E2E_JOURNEY !== 'J-04')) ||
-    [importControl, foregroundExecutionControl, recoveryControl, modelAdapterControl].filter(Boolean).length > 1
+    [importControl, foregroundExecutionControl, recoveryControl, modelAdapterControl].filter(Boolean).length > 1 ||
+    // developer-live is a human-attended developer-host launch: never a Journey launch, never with a Journey control.
+    (launchForm.trustedOperationalScope !== 'development-ci' &&
+      (process.env.AI7_E2E_JOURNEY !== undefined || importControlValue !== undefined || foregroundExecutionControlValue !== undefined ||
+        recoveryControlValue !== undefined || modelAdapterControlValue !== undefined))
   ) {
     throw new ProtocolError();
   }
-  return { dataRoot, parentPid, importControl, foregroundExecutionControl, recoveryControl, modelAdapterControl };
+  return { dataRoot, parentPid, launchForm, importControl, foregroundExecutionControl, recoveryControl, modelAdapterControl };
 }
 
 function parentIsAlive(parentPid: number): boolean {
@@ -645,9 +665,18 @@ function parentIsAlive(parentPid: number): boolean {
 let StoreErrorClass: typeof import('./store.js').StoreError;
 
 async function run(): Promise<void> {
-  installNodeNetworkDenial();
-  const { dataRoot, parentPid, importControl, foregroundExecutionControl, recoveryControl, modelAdapterControl } =
+  // The native `fetch` is captured before the denial replaces the global; only the developer-live
+  // `opencode-go` transport ever receives it, and only through the adapter's transmit step.
+  const nativeFetch: typeof fetch = globalThis.fetch;
+  const { dataRoot, parentPid, launchForm, importControl, foregroundExecutionControl, recoveryControl, modelAdapterControl } =
     parseArguments(process.argv.slice(2));
+  if (launchForm.trustedOperationalScope === 'developer-live') {
+    // The single-host allowance (settlement l): armed before the denial so its gates admit exactly the
+    // policy's endpoint host and port; Node's own fetch resolves `tls.connect` and `dns.lookup` at call time.
+    const endpoint = new URL(DEVELOPER_LIVE_POLICY_BINDING.endpoint);
+    armSingleHostAllowance({ host: endpoint.hostname, port: endpoint.port === '' ? 443 : Number(endpoint.port) });
+  }
+  installNodeNetworkDenial();
   const [
     { EditorialStore, StoreError, StoreFatalError },
     { mountDormantHarness },
@@ -686,7 +715,13 @@ async function run(): Promise<void> {
   let analysisExecution: BaselineAnalysisExecutionOwner | undefined;
   try {
     const codeRoot = fileURLToPath(new URL('../', import.meta.url));
-    const launchPolicy = await resolveSourceCheckoutLaunchPolicy(codeRoot);
+    const launchPolicy = await resolveSourceCheckoutLaunchPolicy(codeRoot, launchForm.trustedOperationalScope);
+    // The developer-live runtime exists only when the requested scope actually verified; a denied policy
+    // keeps the product provider-free exactly like development-ci, and the ceiling is never `unset` under
+    // v4. The captured `fetch` travels with the launch facts and reaches no other owner.
+    const developerLive: DeveloperLiveRuntime | null = launchPolicy.operationalScope === 'developer-live'
+      ? { launch: resolveDeveloperLiveLaunch(launchForm, resolve(codeRoot, '..')), nativeFetch }
+      : null;
     // The J-04-only control resolves the hand-written synthetic fixture before the store opens, so the
     // frozen plan can pin the exact fixture identity, lineage, and digest; every other launch binds no route.
     // Fixtures are test inputs that never enter the built carrier, so they resolve from the source checkout
@@ -704,6 +739,21 @@ async function run(): Promise<void> {
         ? null
         : { fixtureIdentity: fixture.identity, fixtureSha256: fixture.sha256, fixtureLineage: fixture.lineage },
     });
+    // The ledger learns the trusted launch once, before any frame is served, so every plan it freezes
+    // names the binding this launch actually bound rather than re-deriving one at dispatch.
+    store.baselineAnalysisLedger.bindLaunch(developerLive === null
+      ? { operationalScope: 'development-ci', live: null }
+      : {
+          operationalScope: 'developer-live',
+          live: {
+            route: DEVELOPER_LIVE_POLICY_BINDING.route,
+            model: DEVELOPER_LIVE_POLICY_BINDING.model,
+            endpoint: DEVELOPER_LIVE_POLICY_BINDING.endpoint,
+            credentialSlot: DEVELOPER_LIVE_POLICY_BINDING.credentialSlot,
+            credentialReference: DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE,
+            runBudgetCeiling: developerLive.launch.runBudgetCeiling,
+          },
+        });
     harness = await mountDormantHarness();
     jobs = new CooperativeJobOwner(store);
     analysisExecution = new BaselineAnalysisExecutionOwner({
@@ -711,6 +761,7 @@ async function run(): Promise<void> {
       launchPolicy,
       fixture,
       secretResolver: createKeyringSecretResolver(),
+      developerLive,
     });
     for await (const frame of readFrames()) {
       let request: ServiceRequest;

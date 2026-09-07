@@ -1,4 +1,4 @@
-export const SERVICE_PROTOCOL_VERSION = 19 as const;
+export const SERVICE_PROTOCOL_VERSION = 20 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -881,17 +881,93 @@ export interface ModelServiceConnectionProjection {
   credentialUpdatedAt: string;
 }
 
+/**
+ * The trusted operational scopes the source checkout can bind from its launch form (ADR 0065):
+ * `development-ci` by default, `developer-live` only through `--trusted-operational-scope`.
+ * `fixture-recording` and `ordinary-production` stay unselectable from the source checkout.
+ */
+export type TrustedOperationalScope = 'development-ci' | 'developer-live';
+export type ProviderProcessingVersion = 'v1' | 'v4';
+/** Exact Run Budget Ceiling state: `unset` under development-ci, an explicit total-token ceiling under developer-live. */
+export type RunBudgetCeilingState = 'unset' | { kind: 'tokens'; maxTotalTokens: number };
+/** The execution route an analysis Run binds: the in-process deterministic adapter or the developer-live OpenCode Go route. */
+export type ExecutionRouteId = 'ai7-local-deterministic' | 'opencode-go';
+/** A remote Provider route a Provider Resolution Plan may name. */
+export type RemoteProviderId = 'deepseek-open-platform' | 'opencode-go';
+/** A logical credential slot of the Main Editorial Role. */
+export type CredentialSlotId = 'deepseek-api-key' | 'opencode-go';
+/** The Provider Processing pin a Provider Resolution Plan carries for its trusted scope. */
+export type ProviderProcessingPin =
+  | { operationalScope: 'development-ci'; version: 'v1'; decision: 'deny'; authorizedLiveTransmissionCount: 0 }
+  | { operationalScope: 'developer-live'; version: 'v4'; decision: 'eligible-only'; authorizedLiveTransmissionCount: 'bounded-by-run' };
+/** The policy pin a Result Set Revision records; `liveTransmissions` is the policy's bound, never a usage count. */
+export type ResultSetPolicyPin =
+  | { operationalScope: 'development-ci'; providerProcessingVersion: 'v1'; activePolicySetVersion: 'v4'; liveTransmissions: 0 }
+  | { operationalScope: 'developer-live'; providerProcessingVersion: 'v4'; activePolicySetVersion: 'v4'; liveTransmissions: 'bounded-by-run' };
+
+/** The three launch-form arguments the built entry accepts beside `--data-root`; carried by argv only, never by an environment variable or setting. */
+export const TRUSTED_SCOPE_ARGUMENT = '--trusted-operational-scope';
+export const RUN_BUDGET_CEILING_ARGUMENT = '--run-budget-ceiling';
+export const PROVIDER_CACHE_ROOT_ARGUMENT = '--provider-cache-root';
+export const LAUNCH_SELECTABLE_SCOPES: ReadonlyArray<TrustedOperationalScope> = ['development-ci', 'developer-live'];
+/** A positive decimal token count without sign, separators, or leading zeros; twelve digits stay well inside the safe-integer range. */
+export const RUN_BUDGET_CEILING_PATTERN = /^[1-9][0-9]{0,11}$/u;
+/** Windows drive-rooted, UNC, or POSIX-rooted; every process on the launch path re-checks with its own path owner. */
+const ABSOLUTE_PATH_SHAPE = /^(?:[A-Za-z]:[\\/]|\\\\|\/)/u;
+
+export interface TrustedLaunchForm {
+  readonly trustedOperationalScope: TrustedOperationalScope;
+  /** The explicit ceiling in total tokens, or `null` for the scope default. */
+  readonly runBudgetCeiling: number | null;
+  /** The explicit absolute Provider Result Cache root, or `null` for the scope default. */
+  readonly providerCacheRoot: string | null;
+}
+
+export interface RawTrustedLaunchForm {
+  readonly trustedOperationalScope?: string | undefined;
+  readonly runBudgetCeiling?: string | undefined;
+  readonly providerCacheRoot?: string | undefined;
+}
+
+export function isTrustedOperationalScope(value: string): value is TrustedOperationalScope {
+  return (LAUNCH_SELECTABLE_SCOPES as ReadonlyArray<string>).includes(value);
+}
+
+/**
+ * Parse the launch form exactly as every process on the launch path does: an unknown scope, a
+ * malformed ceiling, a relative cache root, or a ceiling or cache root without the developer-live
+ * scope yields `null`, and the caller fails closed. Absent arguments select `development-ci`.
+ */
+export function parseTrustedLaunchForm(raw: RawTrustedLaunchForm): TrustedLaunchForm | null {
+  const scope = raw.trustedOperationalScope ?? 'development-ci';
+  if (!isTrustedOperationalScope(scope)) return null;
+  if (scope !== 'developer-live' && (raw.runBudgetCeiling !== undefined || raw.providerCacheRoot !== undefined)) return null;
+  let runBudgetCeiling: number | null = null;
+  if (raw.runBudgetCeiling !== undefined) {
+    if (!RUN_BUDGET_CEILING_PATTERN.test(raw.runBudgetCeiling)) return null;
+    runBudgetCeiling = Number(raw.runBudgetCeiling);
+    if (!Number.isSafeInteger(runBudgetCeiling) || runBudgetCeiling <= 0) return null;
+  }
+  let providerCacheRoot: string | null = null;
+  if (raw.providerCacheRoot !== undefined) {
+    if (!ABSOLUTE_PATH_SHAPE.test(raw.providerCacheRoot)) return null;
+    providerCacheRoot = raw.providerCacheRoot;
+  }
+  return { trustedOperationalScope: scope, runBudgetCeiling, providerCacheRoot };
+}
+
 export interface LaunchPolicyProjection {
   integrityState: 'verified' | 'denied';
   denialReason: string | null;
-  operationalScope: 'development-ci' | null;
-  activePolicySetVersion: 'v3' | null;
+  operationalScope: TrustedOperationalScope | null;
+  activePolicySetVersion: 'v4' | null;
   providerProcessing: {
-    version: 'v1' | null;
-    decision: 'deny';
-    authorizedLiveTransmissionCount: 0;
-    liveTransmissionAllowed: false;
-    label: '开发与持续集成：零次实时传输';
+    version: ProviderProcessingVersion | null;
+    decision: 'deny' | 'eligible-only';
+    /** `0` under development-ci; the verbatim token `bounded-by-run` under developer-live. */
+    authorizedLiveTransmissionCount: 0 | 'bounded-by-run';
+    liveTransmissionAllowed: boolean;
+    label: '开发与持续集成：零次实时传输' | '开发者实时：实时传输受运行边界约束';
   };
   externalExport: {
     version: 'v1' | null;
@@ -1381,7 +1457,7 @@ export interface MaterialPlanInputsProjection {
   artifactPin: { identity: string; version: string; nativeCarrierSha256: string; sidecarRevision: number; sidecarSha256: string };
   selectedRange: BaselineAnalysisSelectedRange | null;
   predecessorRevision: { revisionId: string; ordinal: number; digest: string } | null;
-  runBudgetCeiling: 'unset';
+  runBudgetCeiling: RunBudgetCeilingState;
   outboundDataCategory: 'public-or-synthetic';
   expectedOutcome: string;
 }
@@ -1392,7 +1468,9 @@ export type PlanRevisionDiffValue =
   | null
   | BaselineAnalysisSelectedRange
   | { revisionId: string; ordinal: number; digest: string }
-  | AnalysisReusePlanCounts;
+  | AnalysisReusePlanCounts
+  /** The ceiling is a material field, so an explicit token ceiling is a diffable value too. */
+  | Extract<RunBudgetCeilingState, { kind: 'tokens' }>;
 
 /** One line of a concise Plan Revision diff: the field, its prior and proposed values, and whether it is material or a derived consequence. */
 export interface PlanRevisionDiffEntryProjection {
@@ -1474,10 +1552,11 @@ export interface BaselineAnalysisExecutionBindingProjection {
   runSourceScopeDigest: string;
   providerResolutionPlanDigest: string;
   coverageManifestDigest: string;
-  route: 'ai7-local-deterministic';
-  model: 'ai7-deterministic-fixture';
-  fixtureIdentity: string;
-  fixtureSha256: string;
+  route: ExecutionRouteId;
+  model: string;
+  /** The deterministic fixture pin; `null` on the developer-live route, which replays no fixture. */
+  fixtureIdentity: string | null;
+  fixtureSha256: string | null;
   nativeCarrierSha256: string;
   sidecarRevision: 2;
   boundAt: string;
@@ -1494,9 +1573,9 @@ export interface BaselineAnalysisResultSetRevisionProjection {
   coverageManifestDigest: string;
   schemaDigest: string;
   reducerDigest: string;
-  adapterPin: { route: 'ai7-local-deterministic'; model: 'ai7-deterministic-fixture'; fixtureIdentity: string; fixtureSha256: string };
+  adapterPin: { route: ExecutionRouteId; model: string; fixtureIdentity: string | null; fixtureSha256: string | null };
   bindingPin: { attemptId: string; bindingDigest: string; harnessSessionId: string; behaviorCompositionDigest: string; promptContractDigest: string };
-  policyPin: { operationalScope: 'development-ci'; providerProcessingVersion: 'v1'; activePolicySetVersion: 'v3'; liveTransmissions: 0 };
+  policyPin: ResultSetPolicyPin;
   /** The producing Run; from Issue #48 also the bound plan version and the in-envelope adaptations the Run recorded. */
   provenance: { taskIntentId: string; runRecordId: string; attemptId: string; planVersion?: number; adaptations?: { count: number; unitOrdinals: ReadonlyArray<number> } };
   /** Model usage of this Run: counted for recomputed units only, every attempt included; reused units cost nothing. */
@@ -1652,21 +1731,23 @@ export interface BaselineAnalysisProjection {
     role: 'Main Editorial Role';
     capabilities: readonly [];
     remoteBinding: {
-      providerId: 'deepseek-open-platform';
-      modelId: 'deepseek-v4-pro';
+      providerId: RemoteProviderId;
+      modelId: 'deepseek-v4-pro' | 'deepseek-v4-flash';
       adapterRevision: 1;
       configurationRevision: 1;
       approvedFallbackChain: readonly [];
-      credentialSlot: 'deepseek-api-key';
+      credentialSlot: CredentialSlotId;
       credentialReference: string;
       credentialReadiness: ModelCredentialOperationState;
-      providerProcessing: { operationalScope: 'development-ci'; version: 'v1'; decision: 'deny'; authorizedLiveTransmissionCount: 0 };
+      providerProcessing: ProviderProcessingPin;
     };
     executionRoute:
       | { kind: 'ai7-local-deterministic'; model: 'ai7-deterministic-fixture'; fixtureIdentity: string; fixtureSha256: string; fixtureLineage: ReadonlyArray<{ identity: string; sha256: string }> }
+      /** The developer-live route replays no fixture: its identity is the endpoint it transmits to. */
+      | { kind: 'opencode-go'; model: 'deepseek-v4-flash'; endpoint: string }
       | { kind: 'none'; reason: 'j04-model-adapter-control-absent' };
     outboundDataCategory: 'public-or-synthetic';
-    runBudgetCeiling: 'unset';
+    runBudgetCeiling: RunBudgetCeilingState;
   };
   executionPlan: null | {
     steps: ReadonlyArray<string>;
@@ -1678,7 +1759,7 @@ export interface BaselineAnalysisProjection {
   planEnvelope: null | {
     digest: string;
     dispatchAllowed: boolean;
-    providerStatus: 'remote-denied-local-deterministic' | 'remote-denied-no-route';
+    providerStatus: 'remote-denied-local-deterministic' | 'remote-denied-no-route' | 'remote-eligible-developer-live';
     summary: string;
     promptContractDigest: string;
     behaviorCompositionDigest: string;
@@ -1718,7 +1799,7 @@ export interface BaselineAnalysisProjection {
       attemptId: string;
       ordinal: 1;
       startedAt: string;
-      credentialReadinessCheck: { slot: 'deepseek-api-key'; readiness: 'present' | 'missing'; valueReleased: false };
+      credentialReadinessCheck: { slot: CredentialSlotId; readiness: 'present' | 'missing'; valueReleased: false };
       executionBinding: BaselineAnalysisExecutionBindingProjection | null;
       spans: ReadonlyArray<{ ordinal: number; harnessSessionId: string; startSeq: number; endSeq: number; unitOrdinal: number | null; attemptIndex: number; payloadDigest: string | null }>;
     };
