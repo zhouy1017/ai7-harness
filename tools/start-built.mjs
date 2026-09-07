@@ -9,10 +9,41 @@ const READINESS = Buffer.from('AI7_READY\n', 'ascii');
 const MAX_READINESS_PREFIX_BYTES = 4;
 const READINESS_TIMEOUT_MS = 30_000;
 const STARTUP_LOCATION_PATTERN = /AI7_STARTUP_FAILED\/(network-denial|application-import|runtime|arguments|data-root|shell-root|single-instance|electron-ready|service-ready|renderer-first-paint|readiness-signal)/;
+// The launch form (ADR 0065, Issue #272): `--data-root` is required; the trusted operational scope
+// defaults to `development-ci`, and the ceiling and cache root are accepted only with `developer-live`.
+// The form travels as argv through Electron main to the service; no environment variable carries it.
+const LAUNCH_ARGUMENTS = new Set(['--data-root', '--trusted-operational-scope', '--run-budget-ceiling', '--provider-cache-root']);
+const RUN_BUDGET_CEILING_PATTERN = /^[1-9][0-9]{0,11}$/u;
 let childFailureLocation;
 
 function requireLaunch(condition) {
   if (!condition) throw new Error('AI7_BUILT_LAUNCH_INVALID');
+}
+
+/** Parse the exact launch form; every invalid shape fails closed before Electron exists. */
+export function parseBuiltLaunchArguments(args) {
+  requireLaunch(Array.isArray(args) && args.length % 2 === 0);
+  const values = new Map();
+  for (let index = 0; index < args.length; index += 2) {
+    const key = args[index];
+    const value = args[index + 1];
+    requireLaunch(typeof key === 'string' && typeof value === 'string' && value.length > 0 && LAUNCH_ARGUMENTS.has(key) && !values.has(key));
+    values.set(key, value);
+  }
+  const dataRoot = values.get('--data-root');
+  requireLaunch(dataRoot !== undefined && isAbsolute(dataRoot));
+  const scope = values.get('--trusted-operational-scope') ?? 'development-ci';
+  requireLaunch(scope === 'development-ci' || scope === 'developer-live');
+  const ceiling = values.get('--run-budget-ceiling');
+  const cacheRoot = values.get('--provider-cache-root');
+  requireLaunch(scope === 'developer-live' || (ceiling === undefined && cacheRoot === undefined));
+  requireLaunch(ceiling === undefined || RUN_BUDGET_CEILING_PATTERN.test(ceiling));
+  requireLaunch(cacheRoot === undefined || isAbsolute(cacheRoot));
+  const forwarded = [];
+  if (values.has('--trusted-operational-scope')) forwarded.push('--trusted-operational-scope', scope);
+  if (ceiling !== undefined) forwarded.push('--run-budget-ceiling', ceiling);
+  if (cacheRoot !== undefined) forwarded.push('--provider-cache-root', cacheRoot);
+  return { dataRoot, trustedOperationalScope: scope, runBudgetCeiling: ceiling ?? null, providerCacheRoot: cacheRoot ?? null, forwarded };
 }
 
 function launchEnvironment(executable) {
@@ -39,7 +70,7 @@ async function main() {
   requireLaunch(process.versions.node === '24.18.1');
   const args = process.argv.slice(2);
   if (args[0] === '--') args.shift();
-  requireLaunch(args.length === 2 && args[0] === '--data-root' && isAbsolute(args[1]));
+  const launch = parseBuiltLaunchArguments(args);
   const executable = electronExecutable();
   const entry = resolve(ROOT, 'dist', 'main', 'index.cjs');
   const dataRootEntry = resolve(ROOT, 'dist', 'shared', 'data-root.mjs');
@@ -47,7 +78,7 @@ async function main() {
   const { createCanonicalExternalDataRoot, ensureCanonicalDataDirectory } = await import(
     pathToFileURL(dataRootEntry).href
   );
-  const dataRoot = await createCanonicalExternalDataRoot(args[1], ROOT);
+  const dataRoot = await createCanonicalExternalDataRoot(launch.dataRoot, ROOT);
   const shellRoot = await ensureCanonicalDataDirectory(dataRoot, 'shell');
   const child = spawn(executable, [
     '--disable-background-networking',
@@ -63,6 +94,7 @@ async function main() {
     dataRoot,
     '--launcher-pid',
     String(process.pid),
+    ...launch.forwarded,
   ], {
     cwd: ROOT,
     env: launchEnvironment(executable),
@@ -130,7 +162,10 @@ async function main() {
   process.exitCode = exitCode;
 }
 
-main().catch(() => {
-  console.error(`AI7_START_FAILED/${childFailureLocation ?? 'launcher'}`);
-  process.exitCode = 1;
-});
+const invokedDirectly = process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+if (invokedDirectly) {
+  main().catch(() => {
+    console.error(`AI7_START_FAILED/${childFailureLocation ?? 'launcher'}`);
+    process.exitCode = 1;
+  });
+}

@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { AnalysisGapProjection, AnalysisSourceRangeProjection, CoverageManifestUnitProjection, LaunchPolicyProjection } from '../../shared/protocol.js';
 import { prepareExecution, type HarnessExecutionSpan, type PrimaryAgentHarnessHandle } from '../harness/primary-agent-harness.js';
+import type { DeveloperLiveRuntime } from '../launch-policy.js';
 import { CredentialBroker, type SecretResolver } from '../provider/credential-broker.js';
 import type { ClassifiedModelFailure } from '../provider/classification.js';
 import { LOCAL_DETERMINISTIC_MODEL, LOCAL_DETERMINISTIC_ROUTE, evaluateEgress, type EgressBindingFacts } from '../provider/egress-gate.js';
@@ -69,6 +70,8 @@ export interface ExecutionOwnerDependencies {
   readonly launchPolicy: LaunchPolicyProjection;
   readonly fixture: ResolvedModelFixture | null;
   readonly secretResolver: SecretResolver;
+  /** The developer-live launch facts and captured transport; present exactly when the policy bound v4. */
+  readonly developerLive?: DeveloperLiveRuntime | null;
 }
 
 export class ExecutionAdmissionError extends Error {
@@ -100,6 +103,13 @@ export class BaselineAnalysisExecutionOwner {
   #disposed = false;
 
   constructor(deps: ExecutionOwnerDependencies) {
+    // The developer-live runtime and the bound scope are one fact: a v4 launch that reached this owner
+    // without its launch facts and captured transport could never enforce the ceiling or the cache, and a
+    // runtime under any other scope would be a transport nothing may use.
+    const live = deps.developerLive ?? null;
+    if ((deps.launchPolicy.operationalScope === 'developer-live') !== (live !== null)) {
+      throw new ExecutionAdmissionError('EXECUTION_DEVELOPER_LIVE_RUNTIME_MISMATCH', '开发者实时运行时与已绑定的可信区间不一致。');
+    }
     this.#deps = deps;
     this.#broker = new CredentialBroker(deps.secretResolver);
   }
@@ -249,7 +259,7 @@ export class BaselineAnalysisExecutionOwner {
         adapterPin: { fixtureIdentity: fixture.identity, fixtureSha256: fixture.sha256 },
         credentialSlot: { modelRole: 'Main Editorial Role', slot: 'deepseek-api-key', credentialReference: facts.credentialReference },
         outboundDataCategory: 'public-or-synthetic',
-        policyPin: { operationalScope: 'development-ci', providerProcessingVersion: 'v1', activePolicySetVersion: 'v3', liveTransmissions: 0 },
+        policyPin: { operationalScope: 'development-ci', providerProcessingVersion: 'v1', activePolicySetVersion: 'v4', liveTransmissions: 0 },
         runBudgetCeiling: 'unset',
         dispatchAttribution: 'Dispatch',
         boundAt,

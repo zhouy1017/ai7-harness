@@ -881,17 +881,77 @@ export interface ModelServiceConnectionProjection {
   credentialUpdatedAt: string;
 }
 
+/**
+ * The trusted operational scopes the source checkout can bind from its launch form (ADR 0065):
+ * `development-ci` by default, `developer-live` only through `--trusted-operational-scope`.
+ * `fixture-recording` and `ordinary-production` stay unselectable from the source checkout.
+ */
+export type TrustedOperationalScope = 'development-ci' | 'developer-live';
+export type ProviderProcessingVersion = 'v1' | 'v4';
+
+/** The three launch-form arguments the built entry accepts beside `--data-root`; carried by argv only, never by an environment variable or setting. */
+export const TRUSTED_SCOPE_ARGUMENT = '--trusted-operational-scope';
+export const RUN_BUDGET_CEILING_ARGUMENT = '--run-budget-ceiling';
+export const PROVIDER_CACHE_ROOT_ARGUMENT = '--provider-cache-root';
+export const LAUNCH_SELECTABLE_SCOPES: ReadonlyArray<TrustedOperationalScope> = ['development-ci', 'developer-live'];
+/** A positive decimal token count without sign, separators, or leading zeros; twelve digits stay well inside the safe-integer range. */
+export const RUN_BUDGET_CEILING_PATTERN = /^[1-9][0-9]{0,11}$/u;
+/** Windows drive-rooted, UNC, or POSIX-rooted; every process on the launch path re-checks with its own path owner. */
+const ABSOLUTE_PATH_SHAPE = /^(?:[A-Za-z]:[\\/]|\\\\|\/)/u;
+
+export interface TrustedLaunchForm {
+  readonly trustedOperationalScope: TrustedOperationalScope;
+  /** The explicit ceiling in total tokens, or `null` for the scope default. */
+  readonly runBudgetCeiling: number | null;
+  /** The explicit absolute Provider Result Cache root, or `null` for the scope default. */
+  readonly providerCacheRoot: string | null;
+}
+
+export interface RawTrustedLaunchForm {
+  readonly trustedOperationalScope?: string | undefined;
+  readonly runBudgetCeiling?: string | undefined;
+  readonly providerCacheRoot?: string | undefined;
+}
+
+export function isTrustedOperationalScope(value: string): value is TrustedOperationalScope {
+  return (LAUNCH_SELECTABLE_SCOPES as ReadonlyArray<string>).includes(value);
+}
+
+/**
+ * Parse the launch form exactly as every process on the launch path does: an unknown scope, a
+ * malformed ceiling, a relative cache root, or a ceiling or cache root without the developer-live
+ * scope yields `null`, and the caller fails closed. Absent arguments select `development-ci`.
+ */
+export function parseTrustedLaunchForm(raw: RawTrustedLaunchForm): TrustedLaunchForm | null {
+  const scope = raw.trustedOperationalScope ?? 'development-ci';
+  if (!isTrustedOperationalScope(scope)) return null;
+  if (scope !== 'developer-live' && (raw.runBudgetCeiling !== undefined || raw.providerCacheRoot !== undefined)) return null;
+  let runBudgetCeiling: number | null = null;
+  if (raw.runBudgetCeiling !== undefined) {
+    if (!RUN_BUDGET_CEILING_PATTERN.test(raw.runBudgetCeiling)) return null;
+    runBudgetCeiling = Number(raw.runBudgetCeiling);
+    if (!Number.isSafeInteger(runBudgetCeiling) || runBudgetCeiling <= 0) return null;
+  }
+  let providerCacheRoot: string | null = null;
+  if (raw.providerCacheRoot !== undefined) {
+    if (!ABSOLUTE_PATH_SHAPE.test(raw.providerCacheRoot)) return null;
+    providerCacheRoot = raw.providerCacheRoot;
+  }
+  return { trustedOperationalScope: scope, runBudgetCeiling, providerCacheRoot };
+}
+
 export interface LaunchPolicyProjection {
   integrityState: 'verified' | 'denied';
   denialReason: string | null;
-  operationalScope: 'development-ci' | null;
-  activePolicySetVersion: 'v3' | null;
+  operationalScope: TrustedOperationalScope | null;
+  activePolicySetVersion: 'v4' | null;
   providerProcessing: {
-    version: 'v1' | null;
-    decision: 'deny';
-    authorizedLiveTransmissionCount: 0;
-    liveTransmissionAllowed: false;
-    label: '开发与持续集成：零次实时传输';
+    version: ProviderProcessingVersion | null;
+    decision: 'deny' | 'eligible-only';
+    /** `0` under development-ci; the verbatim token `bounded-by-run` under developer-live. */
+    authorizedLiveTransmissionCount: 0 | 'bounded-by-run';
+    liveTransmissionAllowed: boolean;
+    label: '开发与持续集成：零次实时传输' | '开发者实时：实时传输受运行边界约束';
   };
   externalExport: {
     version: 'v1' | null;
@@ -1496,7 +1556,7 @@ export interface BaselineAnalysisResultSetRevisionProjection {
   reducerDigest: string;
   adapterPin: { route: 'ai7-local-deterministic'; model: 'ai7-deterministic-fixture'; fixtureIdentity: string; fixtureSha256: string };
   bindingPin: { attemptId: string; bindingDigest: string; harnessSessionId: string; behaviorCompositionDigest: string; promptContractDigest: string };
-  policyPin: { operationalScope: 'development-ci'; providerProcessingVersion: 'v1'; activePolicySetVersion: 'v3'; liveTransmissions: 0 };
+  policyPin: { operationalScope: 'development-ci'; providerProcessingVersion: 'v1'; activePolicySetVersion: 'v4'; liveTransmissions: 0 };
   /** The producing Run; from Issue #48 also the bound plan version and the in-envelope adaptations the Run recorded. */
   provenance: { taskIntentId: string; runRecordId: string; attemptId: string; planVersion?: number; adaptations?: { count: number; unitOrdinals: ReadonlyArray<number> } };
   /** Model usage of this Run: counted for recomputed units only, every attempt included; reused units cost nothing. */

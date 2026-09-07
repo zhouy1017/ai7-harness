@@ -1318,7 +1318,7 @@ export class TaskAuthorizationStore {
 
   #requireDeniedPolicy(policy: LaunchPolicyProjection): void {
     requireTask(policy.integrityState === 'verified' && policy.denialReason === null &&
-      policy.operationalScope === 'development-ci' && policy.activePolicySetVersion === 'v3' &&
+      policy.operationalScope === 'development-ci' && policy.activePolicySetVersion === 'v4' &&
       policy.providerProcessing.version === 'v1' && policy.providerProcessing.decision === 'deny' &&
       policy.providerProcessing.authorizedLiveTransmissionCount === 0 &&
       policy.providerProcessing.liveTransmissionAllowed === false,

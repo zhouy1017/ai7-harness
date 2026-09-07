@@ -278,7 +278,7 @@ export interface ExecutionBindingRecord {
   readonly adapterPin: { fixtureIdentity: string; fixtureSha256: string };
   readonly credentialSlot: { modelRole: 'Main Editorial Role'; slot: 'deepseek-api-key'; credentialReference: string };
   readonly outboundDataCategory: 'public-or-synthetic';
-  readonly policyPin: { operationalScope: 'development-ci'; providerProcessingVersion: 'v1'; activePolicySetVersion: 'v3'; liveTransmissions: 0 };
+  readonly policyPin: { operationalScope: 'development-ci'; providerProcessingVersion: 'v1'; activePolicySetVersion: 'v4'; liveTransmissions: 0 };
   readonly runBudgetCeiling: 'unset';
   readonly dispatchAttribution: 'Dispatch';
   readonly boundAt: string;
@@ -1889,7 +1889,7 @@ export class BaselineAnalysisStore {
           behaviorCompositionDigest: facts.behaviorCompositionDigest,
           promptContractDigest: facts.promptContractDigest,
         },
-        policyPin: { operationalScope: 'development-ci', providerProcessingVersion: 'v1', activePolicySetVersion: 'v3', liveTransmissions: 0 },
+        policyPin: { operationalScope: 'development-ci', providerProcessingVersion: 'v1', activePolicySetVersion: 'v4', liveTransmissions: 0 },
         provenance: {
           taskIntentId: facts.taskIntentId,
           runRecordId: facts.runRecordId,
@@ -2019,7 +2019,7 @@ export class BaselineAnalysisStore {
 
   #requireDeniedPolicy(policy: LaunchPolicyProjection): void {
     requireAnalysis(policy.integrityState === 'verified' && policy.denialReason === null &&
-      policy.operationalScope === 'development-ci' && policy.activePolicySetVersion === 'v3' &&
+      policy.operationalScope === 'development-ci' && policy.activePolicySetVersion === 'v4' &&
       policy.providerProcessing.version === 'v1' && policy.providerProcessing.decision === 'deny' &&
       policy.providerProcessing.authorizedLiveTransmissionCount === 0 && policy.providerProcessing.liveTransmissionAllowed === false,
     'ANALYSIS_POLICY_UNAVAILABLE', '无法建立可信的 development-ci Provider Processing v1 拒绝记录。');

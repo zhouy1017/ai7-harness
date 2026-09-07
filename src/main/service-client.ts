@@ -4,6 +4,9 @@ import { once } from 'node:events';
 import { delimiter, dirname, isAbsolute, resolve } from 'node:path';
 import {
   MAX_FRAME_BYTES,
+  PROVIDER_CACHE_ROOT_ARGUMENT,
+  RUN_BUDGET_CEILING_ARGUMENT,
+  TRUSTED_SCOPE_ARGUMENT,
   type J01ImportControl,
   type J03ForegroundExecutionControl,
   type J04ModelAdapterControl,
@@ -12,6 +15,7 @@ import {
   type ServiceOperationMap,
   type ServiceReadiness,
   type ServiceResponse,
+  type TrustedLaunchForm,
 } from '../shared/protocol.js';
 
 const MAX_PENDING_REQUESTS = 16;
@@ -143,6 +147,7 @@ export class ServiceClient {
     executable: string,
     serviceEntry: string,
     dataRoot: string,
+    launchForm: TrustedLaunchForm,
     importControl?: J01ImportControl,
     foregroundExecutionControl?: J03ForegroundExecutionControl,
     recoveryControl?: J08RecoveryControl,
@@ -152,6 +157,10 @@ export class ServiceClient {
       throw new ServiceCallError('SERVICE_LAUNCH_INVALID', '本地业务服务启动参数无效。');
     }
     const args = [serviceEntry, '--data-root', dataRoot, '--parent-pid', String(process.pid)];
+    // The trusted launch form travels as argv, exactly as main received it; the service re-parses it.
+    if (launchForm.trustedOperationalScope !== 'development-ci') args.push(TRUSTED_SCOPE_ARGUMENT, launchForm.trustedOperationalScope);
+    if (launchForm.runBudgetCeiling !== null) args.push(RUN_BUDGET_CEILING_ARGUMENT, String(launchForm.runBudgetCeiling));
+    if (launchForm.providerCacheRoot !== null) args.push(PROVIDER_CACHE_ROOT_ARGUMENT, launchForm.providerCacheRoot);
     if (importControl) args.push('--j01-import-control', importControl);
     if (foregroundExecutionControl) {
       args.push('--j03-foreground-execution-control', foregroundExecutionControl);

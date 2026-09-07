@@ -18,6 +18,10 @@ import {
   IPC_CHANNELS,
   J04_MODEL_ADAPTER_CONTROL_PATTERN,
   MAIN_EVENTS,
+  PROVIDER_CACHE_ROOT_ARGUMENT,
+  RUN_BUDGET_CEILING_ARGUMENT,
+  TRUSTED_SCOPE_ARGUMENT,
+  parseTrustedLaunchForm,
   type CommitNewBookRendererInput,
   type CommitManuscriptReimportRendererInput,
   type CommitSourceImportRendererInput,
@@ -40,6 +44,7 @@ import {
   type ReviewBeforeManuscriptReimportProjection,
   type ServiceJobProjection,
   type ServiceOperationMap,
+  type TrustedLaunchForm,
 } from '../shared/protocol.js';
 import { ServiceCallError, ServiceClient } from './service-client.js';
 import { openProtectedSecretStore, type ProtectedSecretStore } from './protected-secret-store.js';
@@ -52,6 +57,8 @@ import {
 
 interface LaunchArguments {
   dataRoot: string;
+  /** The trusted launch form (ADR 0065): scope, ceiling, and cache root exactly as the launcher passed them. */
+  launchForm: TrustedLaunchForm;
   injectedPickerPath: string | undefined;
   importControl: J01ImportControl | undefined;
   foregroundExecutionControl: J03ForegroundExecutionControl | undefined;
@@ -153,12 +160,23 @@ function parseArguments(argv: string[]): LaunchArguments {
           key === '--j08-recovery-control' ||
           key === '--j04-model-adapter' ||
           key === '--j12-observe-reveal' ||
-          key === '--launcher-pid'),
+          key === '--launcher-pid' ||
+          key === TRUSTED_SCOPE_ARGUMENT ||
+          key === RUN_BUDGET_CEILING_ARGUMENT ||
+          key === PROVIDER_CACHE_ROOT_ARGUMENT),
     );
     values.set(key, value);
   }
   const dataRoot = values.get('--data-root');
   requireDesktop(dataRoot !== undefined && isAbsolute(dataRoot));
+  // The trusted launch form: an unknown scope, a malformed ceiling, or a relative cache root denies startup.
+  const launchForm = parseTrustedLaunchForm({
+    trustedOperationalScope: values.get(TRUSTED_SCOPE_ARGUMENT),
+    runBudgetCeiling: values.get(RUN_BUDGET_CEILING_ARGUMENT),
+    providerCacheRoot: values.get(PROVIDER_CACHE_ROOT_ARGUMENT),
+  });
+  requireDesktop(launchForm !== null);
+  requireDesktop(launchForm.providerCacheRoot === null || isAbsolute(launchForm.providerCacheRoot));
   const j01PickerPath = values.get('--j01-picker-path');
   const j02PickerPath = values.get('--j02-picker-path');
   const j08PickerPath = values.get('--j08-picker-path');
@@ -250,8 +268,15 @@ function parseArguments(argv: string[]): LaunchArguments {
       (process.env.AI7_E2E_JOURNEY === 'J-12' && observeJ12RevealValue === 'true'),
   );
   requireDesktop(Number.isSafeInteger(launcherPid) && launcherPid > 0 && launcherPid === process.ppid);
+  // developer-live is a human-attended developer-host launch: never a Journey launch and never combined with a Journey control.
+  requireDesktop(
+    launchForm.trustedOperationalScope === 'development-ci' ||
+      (process.env.AI7_E2E_JOURNEY === undefined && injectedPickerPath === undefined && observeJ12RevealValue === undefined &&
+        importControlValue === undefined && foregroundExecutionControlValue === undefined && recoveryControlValue === undefined && modelAdapterControlValue === undefined),
+  );
   return {
     dataRoot,
+    launchForm,
     injectedPickerPath,
     importControl,
     foregroundExecutionControl,
@@ -2352,6 +2377,7 @@ export async function runApplication(): Promise<void> {
       process.execPath,
       serviceEntry,
       dataRoot,
+      launch.launchForm,
       launch.importControl,
       launch.foregroundExecutionControl,
       launch.recoveryControl,
