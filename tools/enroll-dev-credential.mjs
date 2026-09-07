@@ -11,13 +11,16 @@ import { fileURLToPath } from 'node:url';
  * uses, through the same pinned `@napi-rs/keyring` carrier, and then says nothing:
  *
  *   node tools/enroll-dev-credential.mjs --slot opencode-go --from-file <path>   (silent; exit 0)
- *   node tools/enroll-dev-credential.mjs --slot opencode-go --check              (prints `present` or `absent`)
+ *   node tools/enroll-dev-credential.mjs --slot opencode-go --check              (prints `present`, `absent`, or `unavailable`)
  *
- * Silence is the contract. The store path prints nothing on stdout and nothing on stderr, because
- * anything it printed would be one process away from the value itself; a failure is an exit code and
- * nothing more. `--check` prints exactly one of two words and never the value or its length. The
- * helper refuses to run under CI, refuses a native-carrier override, and refuses any slot but
- * `opencode-go`, so it cannot become a general secret-writing tool.
+ * Silence is the contract on the store path: it prints nothing on stdout and nothing on stderr,
+ * because anything it printed would be one process away from the value itself, and a failure there
+ * is an exit code and nothing more. `--check` prints exactly one of three words, always, on every
+ * path, and never the value, its length, or its age. `unavailable` means the check itself could not
+ * be performed — carrier unresolvable, unsupported platform or architecture, a native-carrier
+ * override, or a CI host — and never means the credential is missing; the missing case is `absent`,
+ * exit 0. `unavailable` exits non-zero. The helper refuses to run under CI, refuses a native-carrier
+ * override, and refuses any slot but `opencode-go`, so it cannot become a general secret-writing tool.
  *
  * The two keyring identity literals below are deliberately duplicated from
  * `src/shared/protected-secret-identity.ts`: this file is plain ESM run by `node` directly, before
@@ -75,15 +78,38 @@ function nativeOverridePresent(env = process.env) {
   return env.NAPI_RS_NATIVE_LIBRARY_PATH !== undefined || env.NAPI_RS_FORCE_WASI !== undefined;
 }
 
-async function openEntry(credentialReference) {
-  requireEnrollment(!nativeOverridePresent());
-  const platform = process.platform;
-  const architecture = process.arch;
+async function openEntry(credentialReference, {
+  env = process.env,
+  platform = process.platform,
+  architecture = process.arch,
+  importKeyring = () => import('@napi-rs/keyring'),
+} = {}) {
+  requireEnrollment(!nativeOverridePresent(env));
   requireEnrollment((platform === 'win32' && architecture === 'x64') || (platform === 'darwin' && architecture === 'arm64'));
-  const module = await import('@napi-rs/keyring');
+  const module = await importKeyring();
   const Entry = module.AsyncEntry;
   requireEnrollment(typeof Entry === 'function');
   return new Entry(PROTECTED_SECRET_SERVICE_NAME, `credential-reference:${credentialReference}`);
+}
+
+/**
+ * The entire `--check` reading, collapsed to its three-word result. Every precondition failure —
+ * CI, a native-carrier override, an unsupported platform or architecture, or an unresolvable
+ * carrier — and any store-access failure below it are indistinguishable from one another on
+ * purpose: `unavailable` says only that the check could not run, never why, and never `absent`.
+ * The dependencies are injectable so a test can prove the unresolvable-carrier path without ever
+ * opening a real OS keyring.
+ */
+export async function resolveCheckReading(credentialReference, deps = {}) {
+  const { env = process.env } = deps;
+  try {
+    requireEnrollment(!continuousIntegrationPresent(env));
+    const entry = await openEntry(credentialReference, deps);
+    const value = await entry.getPassword();
+    return typeof value === 'string' && value.length > 0 ? 'present' : 'absent';
+  } catch {
+    return 'unavailable';
+  }
 }
 
 /**
@@ -101,14 +127,15 @@ async function readSecret(path) {
 
 async function main() {
   const argv = process.argv.slice(2);
-  requireEnrollment(!continuousIntegrationPresent());
   const request = parseEnrollmentArguments(argv);
-  const entry = await openEntry(request.credentialReference);
   if (request.mode === 'check') {
-    const value = await entry.getPassword();
-    process.stdout.write(typeof value === 'string' && value.length > 0 ? 'present\n' : 'absent\n');
+    const reading = await resolveCheckReading(request.credentialReference);
+    process.stdout.write(`${reading}\n`);
+    if (reading === 'unavailable') process.exitCode = 1;
     return;
   }
+  requireEnrollment(!continuousIntegrationPresent());
+  const entry = await openEntry(request.credentialReference);
   await entry.setPassword(await readSecret(request.fromFile));
 }
 
