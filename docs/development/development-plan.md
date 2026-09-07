@@ -29,8 +29,8 @@ Exit criterion: one `developer-live` Run on exact `sample1` produces unit result
 | Order | Slice | Issue | Class | Journey | Outcome | Depends on | Status |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | 1.1 | S40 | #272 | T3 | J-04 | `developer-live` scope: Provider Processing v4, active set v4, trusted launch form, per-unit Session, required ceiling, `deepseek-v4-flash` through the `opencode-go` route, the ADR 0067 enrollment helper, Provider Test Ledger and Result Cache, quota classification, Egress Gate `transmit-remote` | S13 | integrated (PR #285, `dev@3c3d820`); the live smoke run is deferred |
-| 1.1a | S40-f6 | #306 | T3 | J-04 | Diagnose and fix the `contract-invalid (not-json)` failures the first live Run produced in three of eight units, from the cached responses and without a new live call | S40 | **blocks this phase's exit** |
-| 1.1b | S40-f5 | #303 | T2 | J-03, J-04 | Derive every scope, policy-version, transmission-count, ceiling, and binding statement from the bound launch, and sweep for every remaining hardcoded one | S40 | planned |
+| 1.1a | S40-f6 | #306 | T3 | J-04 | Diagnose and fix the `contract-invalid (not-json)` failures the first live Run produced in three of eight units, from the cached responses and without a new live call | S40, #310 | **blocks this phase's exit** |
+| 1.1b | S40-f5 | #303 | T2 | J-03, J-04 | Derive every scope, policy-version, transmission-count, ceiling, and binding statement from the bound launch, and sweep for every remaining hardcoded one | S40 | integrated (PR #315) |
 | 1.2 | S41 | #273 | T2 | J-04 | Fixture generation from the Provider Result Cache with echo checks; content-digest resolution for unit and service tests | S40 | planned |
 | 1.3 | S42 | #274 | T3 | J-04 | Baseline Cross-Unit Reduction Contract v1 over topic-reorganized unit results; `reducer`-lineage findings | S40 | planned |
 | 1.4 | S18 | #53 | T3 | J-04 | Factual review: assertion markers, Factual Review Contract v1, research capability with a per-Run search budget and institutional-source list, independent Reference Integrity / Claim Support / Factual Verification, the ADR 0066 finding record | S40 | planned |
@@ -62,7 +62,11 @@ These slices come from [#307](https://github.com/zhouy1017/ai7-harness/issues/30
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | 1c.1 | S46 | #304 | T3 | all | State the decision-layer / technical-identity rule with persistent primary actions, local time, and the editorial vocabulary; then survey every surface of the seven Journeys with a per-surface verdict | 1.1b | planned |
 | 1c.2 | S47 | #305 | T3 | J-04 | Define the liveness signal beside Measured Run Progress from facts the system already holds, with a sampling obligation, a stale case, and the lifetime of a transient indicator | 1.1b | planned |
-| 1c.3 | S48 | #308 | T1 | — | `--check` answers `present`, `absent`, or `unavailable`, so a failed check is distinguishable from a missing credential without revealing anything about a value | — | planned |
+| 1c.3 | S48 | #308 | T1 | — | `--check` answers `present`, `absent`, or `unavailable`, so a failed check is distinguishable from a missing credential without revealing anything about a value | — | integrated (PR #314) |
+| 1c.4 | S49 | #310 | T3 | J-04 | Model capability profiles keyed by route and model, with the adapter normalizing every response into one canonical result — so a second vendor is a profile, not a branch | S40 | planned; **blocks 1.1a** |
+| 1c.5 | S50 | #311 | T2 | J-01, J-04, J-12 | Test manuscripts composed from admitted SampleBook content rather than invented text | #313 | planned |
+| 1c.6 | S51 | #313 | T3 | J-01 | Multi-format manuscript intake normalizing to DOCX, with the Source Version always keeping the original | #297 | planned |
+| 1c.7 | S52 | #316 | T2 | J-03 | The provider-denied Task kind's scope statements derived from the bound launch, as #303 did for the analysis store | #303 | planned |
 
 **S46 (#304)** and **S47 (#305)** are rule-first: the Commander settles the rule and the survey method, and only then dispatches per-surface application, which can run as T1 or T2 units against a rule that already exists. Neither removes any exact identity from the product; both change where it sits and what else must be true beside it.
 
