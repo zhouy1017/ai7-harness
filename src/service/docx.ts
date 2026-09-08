@@ -23,8 +23,6 @@ const MAX_XML_TEXT_TOKEN_CODE_UNITS = MAX_BLOCK_CODE_UNITS;
 const MAX_XML_MARKUP_TOKEN_CODE_UNITS = MAX_BLOCK_CODE_UNITS * 8;
 const MAX_XML_NESTING_DEPTH = 128;
 export const DOCX_PARSER_IDENTITY = 'ai7-docx-fflate-saxes/1';
-const SAMPLE1_SOURCE_BYTES = 29_550;
-const SAMPLE1_SOURCE_SHA256 = 'b8a3dbde0aa8a1ec7265f9ae3fe47877759e7947c5ab69682cd0a8f424a8d483';
 
 export interface ImportFidelityDegradation {
   categoryKey: FidelityCategoryKey;
@@ -521,7 +519,10 @@ async function readStreamingArchive(
 }
 
 function fidelityReport(signals: DocumentSignals, entryNames: string[]): FidelityCategoryProjection[] {
-  const headersFooters = entryNames.filter((name) => /^word\/(header|footer)\d*\.xml$/i.test(name)).length;
+  return buildFidelityReport(signals, entryNames.filter((name) => /^word\/(header|footer)\d*\.xml$/i.test(name)).length);
+}
+
+function buildFidelityReport(signals: DocumentSignals, headersFooters: number): FidelityCategoryProjection[] {
   return [
     {
       key: 'inline-styles', label: '行内样式', count: signals.inlineStyles,
@@ -591,23 +592,42 @@ function hasExactFidelityProjection(value: unknown, expected: readonly FidelityC
   });
 }
 
+/** The report the eight categories would carry for these counts, or `undefined` when the counts are not readable. */
+function reportForCandidateCounts(value: unknown): FidelityCategoryProjection[] | undefined {
+  if (!Array.isArray(value) || value.length !== 8) return undefined;
+  const counts: number[] = [];
+  for (const candidate of value) {
+    if (candidate === null || typeof candidate !== 'object' || Array.isArray(candidate)) return undefined;
+    const count = (candidate as Record<string, unknown>).count;
+    if (typeof count !== 'number' || !Number.isInteger(count) || count < 0) return undefined;
+    counts.push(count);
+  }
+  return buildFidelityReport(
+    {
+      inlineStyles: counts[0]!, commentsRevisions: counts[1]!, notes: counts[2]!,
+      tables: counts[3]!, imagesCaptions: counts[4]!, sections: counts[5]!,
+    },
+    counts[6]!,
+  );
+}
+
+/**
+ * Plans any well-formed fidelity report (ADR 0072 §4): a report whose eight categories carry the keys,
+ * labels, statuses, status labels, details, and non-negative integer counts `fidelityReport` would emit
+ * yields `clean-import-no-round-trip` when every count is zero and `degraded-import-no-round-trip`
+ * otherwise, listing every category with a positive count in report order — `不支持导入` classes
+ * included, because the editor accepts them in the same Import Degradation Decision. Anything that is
+ * not such a report yields `undefined`. `sourceDigest` and `sourceBytes` no longer decide anything and
+ * are kept only so the store's and the reimport path's call sites do not move.
+ */
 export function deriveImportFidelityPlan(fidelity: unknown, sourceDigest: string, sourceBytes: number): ImportFidelityPlan | undefined {
-  const cleanProjection = fidelityReport(
-    { inlineStyles: 0, commentsRevisions: 0, notes: 0, tables: 0, imagesCaptions: 0, sections: 0 },
-    [],
-  );
-  if (hasExactFidelityProjection(fidelity, cleanProjection)) return { outcome: 'clean-import-no-round-trip', degradations: [] };
-  if (sourceDigest !== SAMPLE1_SOURCE_SHA256 || sourceBytes !== SAMPLE1_SOURCE_BYTES) return undefined;
-  const sample1Projection = fidelityReport(
-    { inlineStyles: 266, commentsRevisions: 0, notes: 0, tables: 0, imagesCaptions: 0, sections: 1 },
-    [],
-  );
-  if (!hasExactFidelityProjection(fidelity, sample1Projection)) return undefined;
-  return {
-    outcome: 'degraded-import-no-round-trip',
-    degradations: fidelity.filter((category) => category.status === 'degraded')
-      .map((category) => ({ categoryKey: category.key, label: category.label, count: category.count })),
-  };
+  const expected = reportForCandidateCounts(fidelity);
+  if (expected === undefined || !hasExactFidelityProjection(fidelity, expected)) return undefined;
+  const degradations = fidelity.filter((category) => category.count > 0)
+    .map((category) => ({ categoryKey: category.key, label: category.label, count: category.count }));
+  return degradations.length === 0
+    ? { outcome: 'clean-import-no-round-trip', degradations: [] }
+    : { outcome: 'degraded-import-no-round-trip', degradations };
 }
 
 export async function parseDocx(
@@ -632,7 +652,7 @@ export async function parseDocx(
     : { value: fallbackTitle, sourceLabel: '文件名' as const };
   requireDocx(titleSuggestion.value.length > 0, 'no usable title suggestion');
   const fidelity = fidelityReport(archive.document.signals, archive.entryNames);
-  requireDocx(deriveImportFidelityPlan(fidelity, archive.sourceDigest, archive.archiveBytes) !== undefined, 'document uses a fidelity branch outside the bounded import');
+  requireDocx(deriveImportFidelityPlan(fidelity, archive.sourceDigest, archive.archiveBytes) !== undefined, 'document fidelity report is malformed');
   return {
     parserIdentity: DOCX_PARSER_IDENTITY,
     sourceDigest: archive.sourceDigest,

@@ -156,6 +156,19 @@ describe('parseDocx', () => {
     expect(sections?.statusLabel).toBe('完整保留');
   });
 
+  it('counts a terminal section that carries attributes and children exactly once', async () => {
+    const { parsed } = await parseFixture({
+      terminalSection: { attributes: { rsidR: '00AB12CD' }, children: ['pgSz', 'pgMar', 'cols', 'docGrid'] },
+    });
+    const sections = parsed.fidelity.find((category) => category.key === 'sections');
+    expect(sections?.count).toBe(1);
+    expect(sections?.statusLabel).toBe('降级导入');
+    expect(deriveImportFidelityPlan(parsed.fidelity, parsed.sourceDigest, parsed.archiveBytes)).toEqual({
+      outcome: 'degraded-import-no-round-trip',
+      degradations: [{ categoryKey: 'sections', label: '分节', count: 1 }],
+    });
+  });
+
   it('rejects a body-level element after the terminal section properties', async () => {
     await expect(
       parseFixture({
@@ -211,15 +224,44 @@ describe('deriveImportFidelityPlan and isCleanTracerFidelity', () => {
     expect(fidelity.every((category) => category.key === 'round-trip-export' || category.count === 0)).toBe(true);
   });
 
-  it('refuses a degraded projection that is not the recorded compatibility baseline', async () => {
-    const { fidelity } = await cleanFidelity();
-    const degraded: FidelityCategoryProjection[] = fidelity.map((category) =>
-      category.key === 'inline-styles'
-        ? { ...category, count: 1, status: 'degraded', statusLabel: '降级导入' }
-        : category,
+  it('plans a degraded import for a degraded projection that is not the compatibility baseline', async () => {
+    const { parsed } = await parseFixture({
+      extraEntries: {
+        'word/document.xml': bodyDocumentXml(
+          '<w:p><w:r><w:rPr><w:b/></w:rPr><w:t>加粗文字</w:t></w:r></w:p><w:sectPr/>',
+        ),
+      },
+    });
+    expect(isCleanTracerFidelity(parsed.fidelity)).toBe(false);
+    expect(deriveImportFidelityPlan(parsed.fidelity, parsed.sourceDigest, parsed.archiveBytes)).toEqual({
+      outcome: 'degraded-import-no-round-trip',
+      degradations: [{ categoryKey: 'inline-styles', label: '行内样式', count: 1 }],
+    });
+  });
+
+  it('lists an unsupported category with a positive count as a degradation', async () => {
+    const { parsed } = await parseFixture({
+      extraEntries: {
+        'word/document.xml': bodyDocumentXml(
+          '<w:p><w:r><w:t>正文</w:t><w:footnoteReference w:id="2"/></w:r></w:p><w:sectPr/>',
+        ),
+      },
+    });
+    const notes = parsed.fidelity.find((category) => category.key === 'notes');
+    expect(notes?.statusLabel).toBe('不支持导入');
+    expect(deriveImportFidelityPlan(parsed.fidelity, parsed.sourceDigest, parsed.archiveBytes)).toEqual({
+      outcome: 'degraded-import-no-round-trip',
+      degradations: [{ categoryKey: 'notes', label: '脚注与尾注', count: 1 }],
+    });
+  });
+
+  it('refuses a report whose category no longer matches its own count', async () => {
+    const { fidelity, sourceDigest, archiveBytes } = await cleanFidelity();
+    const inconsistent: FidelityCategoryProjection[] = fidelity.map((category) =>
+      category.key === 'inline-styles' ? { ...category, count: 1 } : category,
     );
-    expect(isCleanTracerFidelity(degraded)).toBe(false);
-    expect(deriveImportFidelityPlan(degraded, '0'.repeat(64), 1_234)).toBeUndefined();
+    expect(isCleanTracerFidelity(inconsistent)).toBe(false);
+    expect(deriveImportFidelityPlan(inconsistent, sourceDigest, archiveBytes)).toBeUndefined();
   });
 
   it('refuses a projection that is not a fidelity report at all', async () => {
