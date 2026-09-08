@@ -1618,18 +1618,10 @@ function renderBaselineAnalysisOverview(
   }
   const identity = element('dl', 'analysis-facts');
   identity.append(
-    element('dt', undefined, '分析契约'), element('dd', 'technical-identity', `${projection.kind} · ${revision.contractVersion}`),
-    element('dt', undefined, '精确稿件 pin'), element('dd', 'technical-identity', `${revision.manuscriptPin.revisionLabel} · ${revision.manuscriptPin.revisionId} · ${revision.manuscriptPin.revisionDigest}`),
-    element('dt', undefined, '结果集修订版'), element('dd', 'technical-identity', `Revision ${revision.ordinal} · ${revision.revisionId}`),
-    element('dt', undefined, '修订版摘要'), element('dd', 'technical-identity', revision.digest),
     element('dt', undefined, '更新方式'), element('dd', undefined, revision.update.predecessor === null
       ? `${revision.update.modeLabel} · 无前一修订版`
       : `${revision.update.modeLabel} · 后继于 Revision ${revision.update.predecessor.ordinal} · ${rangeText(revision.update.selectedRange)}`),
     element('dt', undefined, '单元血缘'), element('dd', undefined, reuseCountsText(revision.update.counts)),
-    element('dt', undefined, '覆盖清单摘要'), element('dd', 'technical-identity', revision.coverageManifestDigest),
-    element('dt', undefined, 'Schema / Reducer 摘要'), element('dd', 'technical-identity', `${revision.schemaDigest} · ${revision.reducerDigest}`),
-    element('dt', undefined, '模型适配器 pin'), element('dd', 'technical-identity', `${revision.adapterPin.route} · ${revision.adapterPin.model} · ${revision.adapterPin.fixtureIdentity} · ${revision.adapterPin.fixtureSha256}`),
-    element('dt', undefined, '执行绑定 pin'), element('dd', 'technical-identity', `${revision.bindingPin.bindingDigest} · Session ${revision.bindingPin.harnessSessionId}`),
     element('dt', undefined, '策略 pin'), element('dd', undefined, `${revision.policyPin.operationalScope} · Provider Processing ${revision.policyPin.providerProcessingVersion} · ${revision.policyPin.liveTransmissions} 次实时传输`),
     element('dt', undefined, '用量'), element('dd', undefined, `${revision.usage.requests} 次模型请求（仅重算单元，含安全重试）· 输入 ${revision.usage.inputTokens} · 输出 ${revision.usage.outputTokens}`),
     element('dt', undefined, '计划版本'), element('dd', undefined, revision.provenance.planVersion === undefined ? '未记录' : `版本 ${revision.provenance.planVersion}（运行授权所绑定）`),
@@ -1652,13 +1644,21 @@ function renderBaselineAnalysisOverview(
     element('dt', undefined, '计划内调整'),
     element('dd', undefined, revision.provenance.adaptations === undefined ? '未记录' : `${revision.provenance.adaptations.count} 次${adaptedUnits.length === 0 ? '' : ` · 单元 ${adaptedUnits.join('、')}`}`),
   );
-  if (revision.update.predecessor !== null) {
-    identity.append(
+  card.append(identity, technicalDetails(
+    'analysis-facts',
+    element('dt', undefined, '分析契约'), element('dd', 'technical-identity', `${projection.kind} · ${revision.contractVersion}`),
+    element('dt', undefined, '精确稿件 pin'), element('dd', 'technical-identity', `${revision.manuscriptPin.revisionLabel} · ${revision.manuscriptPin.revisionId} · ${revision.manuscriptPin.revisionDigest}`),
+    element('dt', undefined, '结果集修订版'), element('dd', 'technical-identity', `Revision ${revision.ordinal} · ${revision.revisionId}`),
+    element('dt', undefined, '修订版摘要'), element('dd', 'technical-identity', revision.digest),
+    element('dt', undefined, '覆盖清单摘要'), element('dd', 'technical-identity', revision.coverageManifestDigest),
+    element('dt', undefined, 'Schema / Reducer 摘要'), element('dd', 'technical-identity', `${revision.schemaDigest} · ${revision.reducerDigest}`),
+    element('dt', undefined, '模型适配器 pin'), element('dd', 'technical-identity', `${revision.adapterPin.route} · ${revision.adapterPin.model} · ${revision.adapterPin.fixtureIdentity} · ${revision.adapterPin.fixtureSha256}`),
+    element('dt', undefined, '执行绑定 pin'), element('dd', 'technical-identity', `${revision.bindingPin.bindingDigest} · Session ${revision.bindingPin.harnessSessionId}`),
+    ...(revision.update.predecessor === null ? [] : [
       element('dt', undefined, '前一修订版'), element('dd', 'technical-identity', `Revision ${revision.update.predecessor.ordinal} · ${revision.update.predecessor.revisionId} · ${revision.update.predecessor.digest}`),
       element('dt', undefined, '复用计划摘要'), element('dd', 'technical-identity', revision.update.reusePlanDigest ?? '无'),
-    );
-  }
-  card.append(identity, element('h4', undefined, `计划内调整 · ${adaptedUnits.length} 次`), adaptations);
+    ]),
+  ), element('h4', undefined, `计划内调整 · ${adaptedUnits.length} 次`), adaptations);
 
   const axes = element('div', 'analysis-axes');
   axes.append(
@@ -1767,14 +1767,19 @@ function renderReusePlanPreview(card: HTMLElement, projection: BaselineAnalysisP
   section.dataset['reusePlanMode'] = plan.mode;
   section.append(element('h4', undefined, `复用计划 · ${update.modeLabel}`));
   const facts = element('dl', 'analysis-facts');
+  // Whether the target is still the latest revision is a decision the editor must weigh before starting
+  // an update, so it stays at full rank; only the identity of that target goes one step away.
   facts.append(
     element('dt', undefined, '更新含义'), element('dd', undefined, update.meaning),
-    element('dt', undefined, '目标修订版'), element('dd', 'technical-identity', `Revision ${update.predecessor.ordinal} · ${update.predecessor.revisionId} · ${update.predecessor.digest} · 绑定 ${update.predecessor.manuscriptPin.revisionLabel}${update.predecessorCurrent ? '' : ' · 已不再是最新修订版'}`),
+    element('dt', undefined, '目标修订版'), element('dd', undefined, `Revision ${update.predecessor.ordinal} · 绑定 ${update.predecessor.manuscriptPin.revisionLabel}${update.predecessorCurrent ? '' : ' · 已不再是最新修订版'}`),
     element('dt', undefined, '所选范围'), element('dd', undefined, rangeText(update.selectedRange)),
     element('dt', undefined, '复用与重算'), element('dd', undefined, reuseCountsText(plan.counts)),
-    element('dt', undefined, '复用计划摘要'), element('dd', 'technical-identity', update.reusePlanDigest ?? ''),
   );
-  section.append(facts);
+  section.append(facts, technicalDetails(
+    'analysis-facts',
+    element('dt', undefined, '目标修订版身份'), element('dd', 'technical-identity', `${update.predecessor.revisionId} · ${update.predecessor.digest}`),
+    element('dt', undefined, '复用计划摘要'), element('dd', 'technical-identity', update.reusePlanDigest ?? ''),
+  ));
   const list = element('ul', 'analysis-list analysis-reuse-plan-units');
   for (const unit of plan.units) {
     const item = element('li', undefined, unit.disposition === 'reused' && unit.reusedFrom !== null
@@ -2050,13 +2055,19 @@ function renderAnalysisUpdateControls(card: HTMLElement, projection: BaselineAna
   section.dataset['workingBlocks'] = String(controls.working.totalBlocks);
   section.append(element('h4', undefined, 'Analysis Update Controls / 分析更新操作'));
   const facts = element('dl', 'analysis-facts');
+  // Freshness and the work an update would cover are what the editor weighs before issuing a Task, so
+  // both readings stay at full rank; the digests that identify them go one step away.
   facts.append(
-    element('dt', undefined, '目标修订版'), element('dd', 'technical-identity', `Revision ${controls.target.ordinal} · ${controls.target.revisionId} · ${controls.target.digest} · 绑定 ${controls.target.manuscriptPin.revisionLabel} · 新鲜度 ${controls.target.freshness === 'stale' ? '已过期' : '当前'}`),
-    element('dt', undefined, '当前稿件'), element('dd', 'technical-identity', `${controls.working.revisionLabel} + 修订日志序号 ${controls.working.journalSequence} · ${controls.working.workingDigest} · ${controls.working.totalBlocks} 个内容块 · 将派生 ${controls.working.unitCount} 个分析单元 / ${controls.working.sectionCount} 个结构段`),
+    element('dt', undefined, '目标修订版'), element('dd', undefined, `Revision ${controls.target.ordinal} · 绑定 ${controls.target.manuscriptPin.revisionLabel} · 新鲜度 ${controls.target.freshness === 'stale' ? '已过期' : '当前'}`),
+    element('dt', undefined, '当前稿件'), element('dd', undefined, `${controls.working.revisionLabel} + 修订日志序号 ${controls.working.journalSequence} · ${controls.working.totalBlocks} 个内容块 · 将派生 ${controls.working.unitCount} 个分析单元 / ${controls.working.sectionCount} 个结构段`),
     element('dt', undefined, 'Provider / 外发 / 预算'), element('dd', undefined, controls.providerConsequence),
     element('dt', undefined, '后继修订版'), element('dd', undefined, controls.successorBehavior),
   );
-  section.append(facts);
+  section.append(facts, technicalDetails(
+    'analysis-facts',
+    element('dt', undefined, '目标修订版身份'), element('dd', 'technical-identity', `${controls.target.revisionId} · ${controls.target.digest}`),
+    element('dt', undefined, '当前稿件摘要'), element('dd', 'technical-identity', controls.working.workingDigest),
+  ));
   if (controls.blockedByActiveRun) section.append(element('p', 'attention-note', '当前已有分析任务在调度或执行中；在其结束前不能准备新的更新任务。'));
   const actionButtons: HTMLButtonElement[] = [];
   const cancel = analysisCancelButton();
@@ -2299,23 +2310,27 @@ function renderFrozenAnalysisPlan(card: HTMLElement, projection: BaselineAnalysi
     element('dt', undefined, '任务目标'), element('dd', undefined, projection.taskIntent!.goal),
     element('dt', undefined, '更新方式'), element('dd', undefined, projection.taskIntent!.modeLabel),
     element('dt', undefined, '预期结果'), element('dd', undefined, projection.taskIntent!.expectedOutcome),
-    element('dt', undefined, '任务输入修订版'), element('dd', 'technical-identity', `${checkpoint.revisionLabel} · ${checkpoint.revisionId} · ${checkpoint.revisionDigest}`),
-    element('dt', undefined, '覆盖清单'), element('dd', 'technical-identity', `${manifest.units.length} 个分析单元 · ${manifest.sectionCount} 个结构段 · ${manifest.totalBlocks} 个内容块 · ${manifest.totalGraphemes} 字素 · 单元预算 ${manifest.parameters.unitBudgetGraphemes} 字素 · 重叠 ${manifest.parameters.overlapBlocks} 块`),
-    element('dt', undefined, '覆盖清单摘要'), element('dd', 'technical-identity', manifest.digest),
+    element('dt', undefined, '任务输入修订版'), element('dd', undefined, checkpoint.revisionLabel),
+    // How much of the manuscript this Run would cover is what the plan costs, so it reads at full rank.
+    element('dt', undefined, '覆盖清单'), element('dd', undefined, `${manifest.units.length} 个分析单元 · ${manifest.sectionCount} 个结构段 · ${manifest.totalBlocks} 个内容块 · ${manifest.totalGraphemes} 字素 · 单元预算 ${manifest.parameters.unitBudgetGraphemes} 字素 · 重叠 ${manifest.parameters.overlapBlocks} 块`),
     element('dt', undefined, 'Model Role'), element('dd', undefined, provider.role),
     element('dt', undefined, '远程绑定（被拒绝）'), element('dd', undefined, `${provider.remoteBinding.providerId} · ${provider.remoteBinding.modelId} · adapter r${provider.remoteBinding.adapterRevision} · config r${provider.remoteBinding.configurationRevision} · 凭据 ${provider.remoteBinding.credentialReadiness} · development-ci · v1 · 0 次实时传输`),
-    element('dt', undefined, '执行路由'), element('dd', 'technical-identity', executionRouteLabel(provider.executionRoute)),
     element('dt', undefined, 'Outbound Data Category'), element('dd', undefined, provider.outboundDataCategory),
     element('dt', undefined, 'Run Budget Ceiling'), element('dd', undefined, runBudgetCeilingLabel(provider.runBudgetCeiling)),
-    element('dt', undefined, '提示契约摘要'), element('dd', 'technical-identity', envelope.promptContractDigest),
-    element('dt', undefined, '行为组合摘要'), element('dd', 'technical-identity', envelope.behaviorCompositionDigest),
-    element('dt', undefined, 'Plan Envelope'), element('dd', 'technical-identity', envelope.digest),
     element('dt', undefined, '计划版本'), element('dd', undefined, projection.planVersion === null
       ? '未记录'
       : `版本 ${projection.planVersion.ordinal} · ${projection.planVersion.state === 'bound' ? '已被运行授权绑定' : projection.planVersion.state === 'current' ? '当前 · 待授权' : '已被取代'}`),
     element('dt', undefined, '派发状态'), element('dd', undefined, envelope.summary),
   );
-  card.append(element('h4', undefined, 'Coverage Manifest / 覆盖清单与计划预览'), facts);
+  card.append(element('h4', undefined, 'Coverage Manifest / 覆盖清单与计划预览'), facts, technicalDetails(
+    'analysis-facts',
+    element('dt', undefined, '任务输入修订版身份'), element('dd', 'technical-identity', `${checkpoint.revisionId} · ${checkpoint.revisionDigest}`),
+    element('dt', undefined, '覆盖清单摘要'), element('dd', 'technical-identity', manifest.digest),
+    element('dt', undefined, '执行路由'), element('dd', 'technical-identity', executionRouteLabel(provider.executionRoute)),
+    element('dt', undefined, '提示契约摘要'), element('dd', 'technical-identity', envelope.promptContractDigest),
+    element('dt', undefined, '行为组合摘要'), element('dd', 'technical-identity', envelope.behaviorCompositionDigest),
+    element('dt', undefined, 'Plan Envelope'), element('dd', 'technical-identity', envelope.digest),
+  ));
   const unitList = element('ul', 'analysis-list analysis-manifest-units');
   for (const unit of manifest.units) {
     const item = element('li', undefined, `单元 ${unit.ordinal} · 结构段 ${unit.sectionOrdinal}${unit.headingText === null ? '' : `「${unit.headingText}」`} ${unit.subUnitIndex}/${unit.subUnitCount} · 内容块 ${unit.startPosition}–${unit.endPosition} · ${unit.graphemes} 字素 · 重叠 ${unit.overlapBlockIds.length} 块`);
@@ -2362,9 +2377,10 @@ function renderFrozenAnalysisPlan(card: HTMLElement, projection: BaselineAnalysi
     runSection.dataset['runState'] = run.state;
     runSection.append(element('h4', undefined, `Run Record · ${run.stateLabel}`));
     const runFacts = element('dl', 'analysis-facts');
+    // Who authorized this Run, on whose authority and against which plan version, is the decision behind
+    // it; only the identifiers and the envelope digest that name them go one step away.
     runFacts.append(
-      element('dt', undefined, 'Run Record'), element('dd', 'technical-identity', run.runRecordId),
-      element('dt', undefined, 'Run Authorization'), element('dd', 'technical-identity', `${projection.authorization!.authorizationId} · ${projection.authorization!.origin} · ${projection.authorization!.authority} · 计划版本 ${projection.authorization!.planVersionOrdinal ?? '未记录'} · 信封 ${projection.authorization!.planEnvelopeDigest}`),
+      element('dt', undefined, '运行授权'), element('dd', undefined, `${projection.authorization!.origin} · ${projection.authorization!.authority} · 计划版本 ${projection.authorization!.planVersionOrdinal ?? '未记录'}`),
       element('dt', undefined, '状态转换'), element('dd', undefined, run.transitions.map((transition) => `${transition.sequence}. ${transition.state}`).join(' → ')),
       element('dt', undefined, '计划内调整'), element('dd', undefined, run.adaptations.length === 0
         ? '无'
@@ -2383,13 +2399,22 @@ function renderFrozenAnalysisPlan(card: HTMLElement, projection: BaselineAnalysi
     runFacts.append(element('dt', undefined, '上次状态更新'), lastTransitionValue);
     runSection.dataset['runAdaptations'] = String(run.adaptations.length);
     if (run.attempt) {
+      // That the credential readiness check released no value is a Provider decision the editor is owed
+      // at full rank; the attempt's identity and binding digest are the technical half of the same fact.
       runFacts.append(
-        element('dt', undefined, '执行尝试'), element('dd', 'technical-identity', `${run.attempt.attemptId} · 凭据就绪检查 ${run.attempt.credentialReadinessCheck.readiness} · 未释放任何值`),
-        element('dt', undefined, '执行绑定'), element('dd', 'technical-identity', run.attempt.executionBinding === null ? '尚未持久化' : `${run.attempt.executionBinding.bindingDigest} · Session ${run.attempt.executionBinding.harnessSessionId}`),
+        element('dt', undefined, '凭据就绪检查'), element('dd', undefined, `${run.attempt.credentialReadinessCheck.readiness} · 未释放任何值`),
         element('dt', undefined, 'Harness Execution Span'), element('dd', undefined, `${run.attempt.spans.length} 个区段（按标识引用，不复制内容）`),
       );
     }
-    runSection.append(runFacts, element('h5', undefined, '时间线'), renderRunTimeline(run));
+    runSection.append(runFacts, technicalDetails(
+      'analysis-facts',
+      element('dt', undefined, 'Run Record'), element('dd', 'technical-identity', run.runRecordId),
+      element('dt', undefined, 'Run Authorization'), element('dd', 'technical-identity', `${projection.authorization!.authorizationId} · 信封 ${projection.authorization!.planEnvelopeDigest}`),
+      ...(run.attempt === null ? [] : [
+        element('dt', undefined, '执行尝试'), element('dd', 'technical-identity', run.attempt.attemptId),
+        element('dt', undefined, '执行绑定'), element('dd', 'technical-identity', run.attempt.executionBinding === null ? '尚未持久化' : `${run.attempt.executionBinding.bindingDigest} · Session ${run.attempt.executionBinding.harnessSessionId}`),
+      ]),
+    ), element('h5', undefined, '时间线'), renderRunTimeline(run));
     if (run.blockedReasons) {
       const reasons = element('ul', 'analysis-list attention-note');
       reasons.dataset['analysisBlocked'] = 'blocked-before-dispatch';
@@ -2440,18 +2465,22 @@ function renderForegroundExecutionBoundary(
   result.dataset['foregroundExecutionState'] = projection.state;
   const lineage = element('dl', 'task-authorization-facts');
   lineage.append(
-    element('dt', undefined, '图书'), element('dd', 'technical-identity', projection.bookId),
-    element('dt', undefined, 'Task Intent'), element('dd', 'technical-identity', projection.taskIntentId),
-    element('dt', undefined, 'Plan Envelope'), element('dd', 'technical-identity', projection.planEnvelopeDigest),
-    element('dt', undefined, 'Run Authorization'), element('dd', 'technical-identity', projection.authorizationId),
-    element('dt', undefined, 'Run Record'), element('dd', 'technical-identity', projection.runRecordId),
     element('dt', undefined, 'Run 权限'), element('dd', undefined, projection.runAuthority),
     element('dt', undefined, '当前可信策略'),
     element('dd', undefined, `${projection.launchPolicy.operationalScope} · Provider Processing ${projection.launchPolicy.providerProcessing.version} · ${projection.launchPolicy.providerProcessing.authorizedLiveTransmissionCount} 次实时传输`),
   );
   const reasons = element('ul', 'task-authorization-non-effects');
   for (const reason of projection.reasons) reasons.append(element('li', undefined, reason));
-  result.append(element('h4', undefined, projection.terminalLabel), lineage, reasons);
+  // The blocker and the policy that produced it stay at full rank (V2-UX-LAYER-002); the five lineage
+  // identifiers that let a reader trace it are what goes one step away.
+  result.append(element('h4', undefined, projection.terminalLabel), lineage, reasons, technicalDetails(
+    'task-authorization-facts',
+    element('dt', undefined, '图书'), element('dd', 'technical-identity', projection.bookId),
+    element('dt', undefined, 'Task Intent'), element('dd', 'technical-identity', projection.taskIntentId),
+    element('dt', undefined, 'Plan Envelope'), element('dd', 'technical-identity', projection.planEnvelopeDigest),
+    element('dt', undefined, 'Run Authorization'), element('dd', 'technical-identity', projection.authorizationId),
+    element('dt', undefined, 'Run Record'), element('dd', 'technical-identity', projection.runRecordId),
+  ));
   host.replaceChildren(result);
 }
 
@@ -2547,32 +2576,36 @@ function renderTaskAuthorization(host: HTMLElement, projection: TaskAuthorizatio
     facts.append(
       element('dt', undefined, '任务目标'), element('dd', undefined, projection.taskIntent!.goal),
       element('dt', undefined, '预期结果'), element('dd', undefined, projection.taskIntent!.expectedOutcome),
-      element('dt', undefined, '目标修订版'), element('dd', 'technical-identity', `${checkpoint.revisionLabel} · ${checkpoint.revisionId}`),
+      element('dt', undefined, '目标修订版'), element('dd', undefined, checkpoint.revisionLabel),
       element('dt', undefined, '任务输入固定点'), element('dd', undefined, `${checkpoint.purpose} · ${checkpoint.createdForDirtyJournal ? '由已确认编辑创建' : '复用当前精确修订版'}`),
-      element('dt', undefined, '修订版摘要'), element('dd', 'technical-identity', manuscriptPin.revisionDigest),
       // V2-UX-LAYER-002 names the scope of reading un-demotable, so both scope statements read at full
       // rank: what this Run may read, and that the lineage evidence is outside it. Only the bare
       // identifier of that evidence is technical, and it is disclosed as its own row below.
       element('dt', undefined, '来源版本证据'), element('dd', undefined, '仅血缘证据，不属于可读范围'),
       element('dt', undefined, '可读范围'), element('dd', undefined, `仅图书 ${sourceScope.bookId} · 主稿件 ${sourceScope.manuscriptId} · Task Input 修订版 ${sourceScope.taskInputRevision.revisionId} · ${sourceScope.taskInputRevision.revisionDigest}`),
-      element('dt', undefined, '来源版本证据 ID'), element('dd', 'technical-identity', sourceScope.sourceVersionEvidence.sourceVersionId),
-      element('dt', undefined, '原生构件'), element('dd', 'technical-identity', `${artifact.identity}@${artifact.version}`),
-      element('dt', undefined, '原生构件摘要'), element('dd', 'technical-identity', artifact.nativeCarrierSha256),
-      element('dt', undefined, '权限侧车'), element('dd', 'technical-identity', `${artifact.sidecarIdentity} · Revision ${artifact.sidecarRevision} · ${artifact.sidecarSha256}`),
+      element('dt', undefined, '原生构件'), element('dd', undefined, `${artifact.identity}@${artifact.version}`),
+      element('dt', undefined, '权限侧车'), element('dd', undefined, `${artifact.sidecarIdentity} · Revision ${artifact.sidecarRevision}`),
       element('dt', undefined, 'Model Role'), element('dd', undefined, provider.role),
       element('dt', undefined, 'Capability'), element('dd', undefined, provider.capabilities.length === 0 ? '空（无）' : provider.capabilities.join('、')),
       element('dt', undefined, 'Provider Binding'), element('dd', undefined, `${provider.providerId} · ${provider.modelId} · adapter r${provider.adapterRevision} · config r${provider.configurationRevision}`),
       element('dt', undefined, 'Approved Fallback Chain'), element('dd', undefined, provider.approvedFallbackChain.length === 0 ? '空（无）' : provider.approvedFallbackChain.join('、')),
-      element('dt', undefined, 'Credential Reference'), element('dd', 'technical-identity', `${provider.credentialReference} · readiness ${provider.credentialReadiness}`),
+      element('dt', undefined, 'Credential Reference'), element('dd', undefined, `readiness ${provider.credentialReadiness}`),
       element('dt', undefined, 'Outbound Data Category'), element('dd', undefined, provider.outboundDataCategory),
       element('dt', undefined, 'Run Budget Ceiling'), element('dd', undefined, runBudgetCeilingLabel(provider.runBudgetCeiling)),
       element('dt', undefined, 'Provider Processing'), element('dd', undefined, providerProcessingLabel(provider.providerProcessing)),
       element('dt', undefined, '计划步骤'), element('dd', undefined, plan.steps.join(' → ')),
       element('dt', undefined, 'Effect'), element('dd', undefined, plan.effects.length === 0 ? '空（无）' : plan.effects.join('、')),
-      element('dt', undefined, 'Plan Envelope'), element('dd', 'technical-identity', envelope.digest),
       element('dt', undefined, '派发状态'), element('dd', undefined, envelope.summary),
     );
-    card.append(element('h4', undefined, 'Plan Preview / 计划预览'), facts);
+    card.append(element('h4', undefined, 'Plan Preview / 计划预览'), facts, technicalDetails(
+      'task-authorization-facts',
+      element('dt', undefined, '目标修订版身份'), element('dd', 'technical-identity', `${checkpoint.revisionId} · ${manuscriptPin.revisionDigest}`),
+      element('dt', undefined, '来源版本证据 ID'), element('dd', 'technical-identity', sourceScope.sourceVersionEvidence.sourceVersionId),
+      element('dt', undefined, '原生构件摘要'), element('dd', 'technical-identity', artifact.nativeCarrierSha256),
+      element('dt', undefined, '权限侧车摘要'), element('dd', 'technical-identity', artifact.sidecarSha256),
+      element('dt', undefined, 'Credential Reference'), element('dd', 'technical-identity', provider.credentialReference),
+      element('dt', undefined, 'Plan Envelope'), element('dd', 'technical-identity', envelope.digest),
+    ));
     const nonEffects = element('ul', 'task-authorization-non-effects');
     for (const statement of projection.namedNonEffects) nonEffects.append(element('li', undefined, statement));
     card.append(element('h4', undefined, '明确不会发生'), nonEffects);
@@ -2657,20 +2690,25 @@ function renderEditorialWorkspaceProfile(
   );
   const values = element('dl', 'native-artifact-facts');
   values.append(
-    element('dt', undefined, '原生载体身份'), element('dd', 'technical-identity', projection.identity),
     element('dt', undefined, '类型'), element('dd', undefined, projection.kind),
-    element('dt', undefined, '原生载体版本'), element('dd', 'technical-identity', projection.version),
     element('dt', undefined, '来源'), element('dd', undefined, projection.provenance),
     element('dt', undefined, '许可'), element('dd', undefined, projection.license),
-    element('dt', undefined, '内置载体'), element('dd', 'technical-identity', projection.source),
     element('dt', undefined, '精确字节'), element('dd', undefined, `${projection.byteLength} bytes`),
-    element('dt', undefined, 'SHA-256'), element('dd', 'technical-identity', projection.sha256),
     element('dt', undefined, '兼容性'), element('dd', undefined, projection.compatibility),
+  );
+  const artifactExact = technicalDetails(
+    'native-artifact-facts',
+    element('dt', undefined, '原生载体身份'), element('dd', 'technical-identity', projection.identity),
+    element('dt', undefined, '原生载体版本'), element('dd', 'technical-identity', projection.version),
+    element('dt', undefined, '内置载体'), element('dd', 'technical-identity', projection.source),
+    element('dt', undefined, 'SHA-256'), element('dd', 'technical-identity', projection.sha256),
   );
   const sidecar = element('section', 'native-artifact-authority');
   const sidecarValues = element('dl', 'native-artifact-facts');
+  // Which Revision is in force for this Book, what successor is on offer, and when each was pinned are
+  // the enablement decisions this card exists for, so the pin history keeps its local reading at full
+  // rank; the sidecar's identity and the exact pin instants go one step away.
   sidecarValues.append(
-    element('dt', undefined, '侧车身份'), element('dd', 'technical-identity', projection.sidecar.identity),
     element('dt', undefined, '当前生效 Revision'), element('dd', undefined,
       projection.sidecar.activeRevision === null ? '空（本图书未启用）' : `Revision ${projection.sidecar.activeRevision}`),
     element('dt', undefined, '可审阅后继'), element('dd', undefined,
@@ -2678,16 +2716,22 @@ function renderEditorialWorkspaceProfile(
     element('dt', undefined, '本图书 pin 历史'), element('dd', undefined,
       projection.sidecar.pinHistory.length === 0
         ? '空（无）'
-        : projection.sidecar.pinHistory.map((pin) => `Revision ${pin.revision} · ${pin.sha256} · ${pin.pinnedAt}`).join('；')),
+        : projection.sidecar.pinHistory.map((pin) => `Revision ${pin.revision} · ${pin.sha256} · ${localInstantLabel(pin.pinnedAt)}`).join('；')),
   );
-  sidecar.append(element('h4', undefined, 'AI7 权限侧车'), sidecarValues);
+  sidecar.append(element('h4', undefined, 'AI7 权限侧车'), sidecarValues, technicalDetails(
+    'native-artifact-facts',
+    element('dt', undefined, '侧车身份'), element('dd', 'technical-identity', projection.sidecar.identity),
+    element('dt', undefined, '本图书 pin 历史（精确时间）'), element('dd', 'technical-identity',
+      projection.sidecar.pinHistory.length === 0
+        ? '空（无）'
+        : projection.sidecar.pinHistory.map((pin) => `Revision ${pin.revision} · ${pin.pinnedAt}`).join('；')),
+  ));
   for (const revision of projection.sidecar.revisions) {
     const revisionSection = element('section', 'native-artifact-authority');
     revisionSection.dataset['authoritySidecarRevision'] = String(revision.revision);
     const authorityValues = element('dl', 'native-artifact-facts');
     authorityValues.append(
       element('dt', undefined, '规范字节'), element('dd', undefined, `${revision.byteLength} bytes`),
-      element('dt', undefined, 'SHA-256'), element('dd', 'technical-identity', revision.sha256),
       element('dt', undefined, '兼容性'), element('dd', undefined, revision.compatibility),
       element('dt', undefined, 'Model Role'), element('dd', undefined, revision.authorityCeiling.modelRoles.join('、')),
       element('dt', undefined, 'Capability'), element('dd', undefined, revision.authorityCeiling.capabilities.length === 0 ? '空（无）' : revision.authorityCeiling.capabilities.join('、')),
@@ -2699,7 +2743,9 @@ function renderEditorialWorkspaceProfile(
       element('dt', undefined, 'Enrollment'), element('dd', undefined, revision.authorityCeiling.backgroundAnalysisEnrollment ? '有' : '空（无）'),
       element('dt', undefined, 'Apply'), element('dd', undefined, revision.authorityCeiling.applyAuthority ? '有' : '空（无）'),
     );
-    revisionSection.append(element('h4', undefined, `Authority Ceiling · Revision ${revision.revision}`), authorityValues);
+    revisionSection.append(element('h4', undefined, `Authority Ceiling · Revision ${revision.revision}`), authorityValues,
+      technicalDetails('native-artifact-facts',
+        element('dt', undefined, 'SHA-256'), element('dd', 'technical-identity', revision.sha256)));
     sidecar.append(revisionSection);
   }
   const nonEffects = element('ul', 'native-artifact-non-effects');
@@ -2746,6 +2792,7 @@ function renderEditorialWorkspaceProfile(
     heading,
     element('p', 'field-note', '这是一份声明式、Provider-free 的本地方案；安装与为当前图书启用是两个独立动作。'),
     values,
+    artifactExact,
     sidecar,
     element('h4', undefined, '明确不会发生'),
     nonEffects,
@@ -3796,14 +3843,16 @@ function renderSourceImportReview(
   const targetValues = element('dl');
   targetValues.append(
     element('dt', undefined, '精确目标'), element('dd', undefined, review.target.label),
-    element('dt', undefined, '目标图书 ID'), element('dd', 'technical-identity', review.target.bookId),
-    element('dt', undefined, '目标稳定标识'), element('dd', 'technical-identity', review.target.stableIdentity),
     ...(review.target.kind === 'new-book'
       ? [element('dt', undefined, '确认书名'), element('dd', undefined, review.target.confirmedTitle)]
       : [element('dt', undefined, '内部编号'), element('dd', undefined, review.target.internalNumber ?? '未设置')]),
     element('dt', undefined, '导入关系'), element('dd', undefined, review.target.relationshipLabel),
   );
-  target.append(element('h3', undefined, '目标与关系'), targetValues);
+  target.append(element('h3', undefined, '目标与关系'), targetValues, technicalDetails(
+    undefined,
+    element('dt', undefined, '目标图书 ID'), element('dd', 'technical-identity', review.target.bookId),
+    element('dt', undefined, '目标稳定标识'), element('dd', 'technical-identity', review.target.stableIdentity),
+  ));
   content.append(target);
   if (review.identityFindings.length > 0) {
     content.append(identityFindingDisclosure(review.identityFindings, review.target.label));
@@ -3812,31 +3861,42 @@ function renderSourceImportReview(
   const boundary = element('section', 'review-section');
   boundary.dataset['sourceRetainedBoundary'] = review.retainedBoundary.kind;
   const boundaryValues = element('dl');
+  // Each pinned value now carries its own attribute rather than being found by position in the `<dl>`,
+  // because the three digests move into the disclosure and a positional lookup would silently follow
+  // the wrong row.
+  const retainedBytes = element('dd', undefined, String(review.retainedBoundary.sourceBytes));
+  retainedBytes.setAttribute('data-source-bytes', '');
+  const retainedDigest = element('dd', 'technical-identity', review.retainedBoundary.sourceSha256);
+  retainedDigest.setAttribute('data-source-sha256', '');
+  const contentDigest = element('dd', 'technical-identity', review.retainedBoundary.contentDigest);
+  contentDigest.setAttribute('data-content-digest', '');
+  const structureDigest = element('dd', 'technical-identity', review.retainedBoundary.structureDigest);
+  structureDigest.setAttribute('data-structure-digest', '');
   boundaryValues.append(
     element('dt', undefined, '保留边界'), element('dd', undefined, review.retainedBoundary.label),
     element('dt', undefined, '文件名'), element('dd', undefined, review.retainedBoundary.displayName),
     element('dt', undefined, '格式'), element('dd', undefined, review.retainedBoundary.format),
-    element('dt', undefined, '来源字节数'), element('dd', undefined, String(review.retainedBoundary.sourceBytes)),
-    element('dt', undefined, '来源 SHA-256'), element('dd', 'technical-identity', review.retainedBoundary.sourceSha256),
-    element('dt', undefined, '内容摘要'), element('dd', 'technical-identity', review.retainedBoundary.contentDigest),
-    element('dt', undefined, '结构摘要'), element('dd', 'technical-identity', review.retainedBoundary.structureDigest),
+    element('dt', undefined, '来源字节数'), retainedBytes,
   );
-  const boundaryValuesList = boundaryValues.querySelectorAll('dd');
-  boundaryValuesList[3]?.setAttribute('data-source-bytes', '');
-  boundaryValuesList[4]?.setAttribute('data-source-sha256', '');
-  boundaryValuesList[5]?.setAttribute('data-content-digest', '');
-  boundaryValuesList[6]?.setAttribute('data-structure-digest', '');
-  boundary.append(element('h3', undefined, '完整本地文件与内容边界'), boundaryValues);
+  boundary.append(element('h3', undefined, '完整本地文件与内容边界'), boundaryValues, technicalDetails(
+    undefined,
+    element('dt', undefined, '来源 SHA-256'), retainedDigest,
+    element('dt', undefined, '内容摘要'), contentDigest,
+    element('dt', undefined, '结构摘要'), structureDigest,
+  ));
 
   const provenance = element('section', 'review-section');
   provenance.dataset['sourceReviewProvenance'] = review.provenance.acquisitionPath;
   const provenanceValues = element('dl');
+  // This sub-surface holds no other technical row, so the exact instant rides inside the decision row
+  // rather than justifying a disclosure of its own; `data-acquired-at` keeps the unmodified ISO instant.
+  const acquiredAt = instantValue(review.provenance.acquiredAt);
+  acquiredAt.setAttribute('data-acquired-at', review.provenance.acquiredAt);
   provenanceValues.append(
     element('dt', undefined, '取得方式'), element('dd', undefined, review.provenance.label),
     element('dt', undefined, '处理范围'), element('dd', undefined, review.provenance.locality === 'local-provider-free' ? '本地 · 未调用 Provider' : review.provenance.locality),
-    element('dt', undefined, '取得时间'), element('dd', undefined, review.provenance.acquiredAt),
+    element('dt', undefined, '取得时间'), acquiredAt,
   );
-  provenanceValues.querySelectorAll('dd')[2]?.setAttribute('data-acquired-at', review.provenance.acquiredAt);
   provenance.append(element('h3', undefined, '来源记录'), provenanceValues);
 
   const sourceResult = element('section', 'review-section');
@@ -3844,10 +3904,12 @@ function renderSourceImportReview(
   const sourceResultValues = element('dl');
   sourceResultValues.append(
     element('dt', undefined, '结果'), element('dd', undefined, review.sourceVersionResult.label),
+  );
+  sourceResult.append(element('h3', undefined, '图书拥有的来源版本'), sourceResultValues, technicalDetails(
+    undefined,
     element('dt', undefined, '来源版本 ID'),
     element('dd', 'technical-identity', review.sourceVersionResult.sourceVersionId ?? '提交时在所选图书内创建'),
-  );
-  sourceResult.append(element('h3', undefined, '图书拥有的来源版本'), sourceResultValues);
+  ));
   content.append(boundary, provenance, sourceResult);
 
   const dimensions = element('section', 'review-section');
@@ -3945,15 +4007,27 @@ function renderManuscriptReimportReview(
   const values = element('dl');
   values.append(
     element('dt', undefined, '目标图书'), element('dd', undefined, review.target.label),
-    element('dt', undefined, '主稿件 ID'), element('dd', 'technical-identity', review.target.manuscriptId),
-    element('dt', undefined, '稿件分支 ID'), element('dd', 'technical-identity', review.target.branchId),
     element('dt', undefined, '导入关系'), element('dd', undefined, review.target.relationshipLabel),
     element('dt', undefined, '安全固定点'), element('dd', undefined, `${review.checkpoint.revisionLabel} · 修订日志 ${review.checkpoint.journalSequence}`),
-    element('dt', undefined, '当前固定点修订版 ID'), element('dd', 'technical-identity', review.checkpoint.revisionId),
-    element('dt', undefined, '当前固定点修订版摘要'), element('dd', 'technical-identity', review.checkpoint.revisionDigest),
     element('dt', undefined, '固定点来源'), element('dd', undefined,
       review.checkpoint.createdForDirtyJournal ? '已为未固定修订日志创建专用安全固定点' : '当前稿件已经位于持久固定点'),
     element('dt', undefined, '来源关系'), element('dd', undefined, review.lineage.label),
+    element('dt', undefined, '比较方式'), element('dd', undefined,
+      review.lineage.comparisonKind === 'three-way' ? '三方比较' : '两方比较'),
+    element('dt', undefined, '来源版本结果'), element('dd', undefined, review.sourceVersionResult.label),
+    element('dt', undefined, '暂存文件名'), element('dd', undefined, review.source.displayName),
+    element('dt', undefined, '暂存格式'), element('dd', undefined, review.source.format),
+    element('dt', undefined, '暂存来源字节数'), element('dd', undefined, String(review.source.sourceBytes)),
+    element('dt', undefined, '暂存来源范围'), element('dd', undefined, review.source.provenanceLabel),
+  );
+  target.dataset['reimportSourceSha256'] = review.source.sourceSha256;
+  target.dataset['reimportSourceBytes'] = String(review.source.sourceBytes);
+  target.append(element('h3', undefined, '目标、固定点与来源关系'), values, technicalDetails(
+    undefined,
+    element('dt', undefined, '主稿件 ID'), element('dd', 'technical-identity', review.target.manuscriptId),
+    element('dt', undefined, '稿件分支 ID'), element('dd', 'technical-identity', review.target.branchId),
+    element('dt', undefined, '当前固定点修订版 ID'), element('dd', 'technical-identity', review.checkpoint.revisionId),
+    element('dt', undefined, '当前固定点修订版摘要'), element('dd', 'technical-identity', review.checkpoint.revisionDigest),
     ...(review.lineage.status === 'verified'
       ? [
           element('dt', undefined, '来源关系版本 ID'),
@@ -3962,18 +4036,8 @@ function renderManuscriptReimportReview(
           element('dd', 'technical-identity', review.lineage.revisionId),
         ]
       : []),
-    element('dt', undefined, '比较方式'), element('dd', undefined,
-      review.lineage.comparisonKind === 'three-way' ? '三方比较' : '两方比较'),
-    element('dt', undefined, '来源版本结果'), element('dd', undefined, review.sourceVersionResult.label),
-    element('dt', undefined, '暂存文件名'), element('dd', undefined, review.source.displayName),
-    element('dt', undefined, '暂存格式'), element('dd', undefined, review.source.format),
-    element('dt', undefined, '暂存来源字节数'), element('dd', undefined, String(review.source.sourceBytes)),
     element('dt', undefined, '暂存来源 SHA-256'), element('dd', 'technical-identity', review.source.sourceSha256),
-    element('dt', undefined, '暂存来源范围'), element('dd', undefined, review.source.provenanceLabel),
-  );
-  target.dataset['reimportSourceSha256'] = review.source.sourceSha256;
-  target.dataset['reimportSourceBytes'] = String(review.source.sourceBytes);
-  target.append(element('h3', undefined, '目标、固定点与来源关系'), values);
+  ));
   content.append(target);
 
   const summary = element('section', 'review-section');
@@ -4286,20 +4350,23 @@ function renderReview(
   const finalActionLabel = review.target.kind === 'existing-book'
     ? degraded ? '按上述降级方式导入为首份稿件' : '导入为首份稿件'
     : degraded ? '按上述降级方式新建图书并导入稿件' : '新建图书并导入稿件';
+  const identityExact: HTMLElement[] = [];
   if (review.target.kind === 'existing-book') {
     const reviewedBookId = element('dd', 'technical-identity', review.target.bookId);
     reviewedBookId.dataset['reviewedBookId'] = review.target.bookId;
     identityDetails.append(
       element('dt', undefined, '目标图书'),
       element('dd', undefined, review.target.label),
-      element('dt', undefined, '目标图书 ID'),
-      reviewedBookId,
-      element('dt', undefined, '目标稳定标识'),
-      element('dd', 'technical-identity', review.target.stableIdentity),
       element('dt', undefined, '目标内部编号'),
       element('dd', undefined, review.target.internalNumber ?? '未设置'),
       element('dt', undefined, '稿件关系'),
       element('dd', undefined, review.target.relationshipLabel),
+    );
+    identityExact.push(
+      element('dt', undefined, '目标图书 ID'),
+      reviewedBookId,
+      element('dt', undefined, '目标稳定标识'),
+      element('dd', 'technical-identity', review.target.stableIdentity),
     );
   }
   identityDetails.append(
@@ -4309,12 +4376,11 @@ function renderReview(
     element('dd', undefined, review.source.provenanceLabel),
     element('dt', undefined, '来源字节数'),
     sourceBytes,
-    element('dt', undefined, '来源 SHA-256'),
-    sourceDigest,
     element('dt', undefined, '最终动作'),
     element('dd', undefined, finalActionLabel),
   );
-  identity.append(identityDetails);
+  identityExact.push(element('dt', undefined, '来源 SHA-256'), sourceDigest);
+  identity.append(identityDetails, technicalDetails(undefined, ...identityExact));
   content.append(identity);
   if (review.identityFindings.length > 0) {
     content.append(identityFindingDisclosure(review.identityFindings, review.target.label));
