@@ -51,15 +51,20 @@ export type StructuredOutput = 'none' | 'json-object' | 'json-schema' | 'tool-ca
  * Where the answer text is read from; `none` means no channel is declared and every response is
  * malformed. `content-text-blocks` is the Anthropic-compatible shape's channel: the answer is the
  * concatenation of the `text` of every `type: 'text'` block, in the order the response lists them.
+ * `output-message-text` is the Responses shape's: the answer is the concatenation of the `text` of
+ * every `type: 'output_text'` part of every `type: 'message'` item of `output`, in that same order,
+ * and a `type: 'refusal'` part is not answer text, so a message carrying only refusals answers empty.
  */
-export type AnswerChannel = 'none' | 'message-content-string' | 'content-text-blocks';
+export type AnswerChannel = 'none' | 'message-content-string' | 'content-text-blocks' | 'output-message-text';
 
 /**
  * Where reasoning is read from when the model reports it separately from the answer.
  * `content-thinking-blocks` declares presence and nothing more: a `type: 'thinking'` block in the
  * content array means the model reasoned, which is the whole of what an empty answer needs to know.
+ * `output-reasoning-items` says the same of a `type: 'reasoning'` item of the Responses shape's
+ * `output`: its presence is read, and neither its `summary` nor its `content` is.
  */
-export type ReasoningChannel = 'none' | 'message-reasoning-content' | 'content-thinking-blocks';
+export type ReasoningChannel = 'none' | 'message-reasoning-content' | 'content-thinking-blocks' | 'output-reasoning-items';
 
 /** Whether the reported output tokens include reasoning tokens; `unknown` until something has measured it. */
 export type UsageAttribution = 'includes-reasoning' | 'separate' | 'unknown';
