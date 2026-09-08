@@ -7,6 +7,7 @@ import {
   parseCrossUnitCitedBlocks,
   parseCrossUnitMessageHeader,
 } from '../analysis/cross-unit-contract.js';
+import { parseFactualReviewUnitMessageHeader } from '../analysis/factual-review-contract.js';
 import { AI7_FAILURE_CODES, type DshFailureCodes } from './classification.js';
 import { LOCAL_DETERMINISTIC_MODEL, LOCAL_DETERMINISTIC_ROUTE } from './egress-gate.js';
 import { lastUserMessageText } from './payload.js';
@@ -27,6 +28,11 @@ import { fixtureEntryKey, resolveFixtureEntry, type ModelFixtureEntry, type Reso
  * listed in the unit message, 1-based). Block identities are minted per import, so a hand-written
  * fixture cannot know them; the placeholder lets a synthetic response cite exact in-unit ranges
  * while echoing nothing of the manuscript beyond those identities.
+ *
+ * A factual-review unit message (Issue #53) is recognized by its own header and answered from the
+ * same fixture format under its own prompt-contract digest. Its responses need no placeholder: that
+ * contract anchors a quotation by the block's 1-based position in the message, and the service
+ * locates the quotation in the committed block itself.
  *
  * The Run's one cross-unit reduction (ADR 0066) is matched the same way under unit ordinal `0`: its
  * header names the closed unit set, and its request digest is a function of the frozen cross-unit
@@ -164,10 +170,14 @@ export class Ai7LocalDeterministicAdapter implements LlmAdapter {
       return;
     }
     const text = lastUserMessageText(options);
-    // The reduction's header is tried first and the two are disjoint, so a unit message can never be
-    // read as a reduction or the other way round.
+    // The three headers are disjoint and are tried in turn, so a unit message of either analysis kind
+    // can never be read as the other kind's or as the reduction's. Which kind a request belongs to is
+    // decided by its header alone; its request digest is then keyed by that kind's contract digest,
+    // which the adapter was constructed with.
     const crossUnit = text === null ? null : parseCrossUnitMessageHeader(text);
-    const header = text === null || crossUnit !== null ? null : parseUnitMessageHeader(text);
+    const header = text === null || crossUnit !== null
+      ? null
+      : parseUnitMessageHeader(text) ?? parseFactualReviewUnitMessageHeader(text);
     if (crossUnit === null && header === null) {
       yield failure(AI7_FAILURE_CODES.FIXTURE_MISMATCH, '请求不含可识别的分析单元消息头。');
       return;
