@@ -1252,6 +1252,30 @@ export interface AnalysisConflictProjection {
   unitOrdinals: ReadonlyArray<number>;
 }
 
+/**
+ * One model-driven cross-unit finding (ADR 0066): a divergence the deterministic pre-filter cannot
+ * reach, stated with the source ranges on every side and a confidence. `unitOrdinals` is the lineage
+ * the Result Set is read by — every unit the finding cites, sorted and deduplicated from its sides.
+ * A finding is evidence for the editor, never a verdict: no side is marked right.
+ */
+export interface AnalysisCrossUnitFindingProjection {
+  kind: 'contradiction' | 'continuity-break' | 'alias-identity-divergence' | 'chronology-conflict';
+  description: string;
+  sides: ReadonlyArray<{ unitOrdinal: number; sourceRanges: ReadonlyArray<AnalysisSourceRangeProjection> }>;
+  unitOrdinals: ReadonlyArray<number>;
+  confidence: 'high' | 'medium' | 'low';
+}
+
+/** What the cross-unit reduction did in the Run that produced this revision, including why it did not run. */
+export interface AnalysisCrossUnitReductionProjection {
+  state: 'closed' | 'gap' | 'not-run';
+  /** The exact reason for a gap or for not running; `null` when the reduction closed. */
+  reason: string | null;
+  /** The reduction's request digest; `null` when it never formed a request. */
+  requestDigest: string | null;
+  findingCount: number;
+}
+
 export interface AnalysisUnresolvedProjection {
   unitOrdinal: number;
   description: string;
@@ -1268,7 +1292,7 @@ export interface AnalysisGapProjection {
 }
 
 export interface AnalysisReducerStageProjection {
-  stage: 'unit-validation' | 'section-reduction' | 'contradiction-continuity' | 'book-synthesis';
+  stage: 'unit-validation' | 'section-reduction' | 'contradiction-continuity' | 'cross-unit-reduction' | 'book-synthesis';
   state: 'closed' | 'closed-with-gaps' | 'not-run';
   inputCount: number;
 }
@@ -1338,9 +1362,12 @@ export interface AnalysisAssuranceAxis {
   axis: 'assurance';
   state: 'qualified' | 'qualified-with-open-conflicts' | 'limited';
   label: string;
+  /** Unresolved conflicts from the deterministic pass and the units themselves; the reading it has always been. */
   unresolvedConflictCount: number;
   unresolvedItemCount: number;
   lowConfidenceUnitCount: number;
+  /** Model-driven cross-unit findings, disclosed beside the deterministic count and never folded into it. */
+  crossUnitFindingCount: number;
   statement: '仅为模型输出的结构化归纳；不构成事实判定、编辑评审或稿件变更。';
 }
 

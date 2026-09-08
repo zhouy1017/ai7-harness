@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { deriveCoverageManifest, type ManifestBlockInput } from '../../src/service/analysis/coverage-manifest.js';
 import { BASELINE_UNIT_RESULT_SCHEMA, type BaselineUnitResult } from '../../src/service/analysis/contract.js';
-import { ASSURANCE_STATEMENT, detectCrossUnitConflicts, reduceBaselineAnalysis, type UnitOutcome } from '../../src/service/analysis/reducers.js';
+import { ASSURANCE_STATEMENT, CROSS_UNIT_NOT_RUN, detectCrossUnitConflicts, reduceBaselineAnalysis, type UnitOutcome } from '../../src/service/analysis/reducers.js';
 
 // Synthetic unit results over a synthetic manifest. The reducers must preserve unit lineage, keep
 // every gap and conflict visible, and never collapse the four axes into one flag.
@@ -93,14 +93,62 @@ describe('reduceBaselineAnalysis', () => {
     expect(JSON.stringify(reduction)).not.toMatch(/"complete":|完整"|"score"/u);
   });
 
+  // Synchronized delta (#274): the model-driven cross-unit reduction is the fourth stage, between the
+  // deterministic contradiction pass it post-filters and the synthesis it precedes. This reduction was
+  // asked for no reduction, so its stage is `not-run` — which is not a gap and does not qualify the axis.
   it('closes every reducer stage while recording that gaps were carried through', () => {
     expect(reduction.reducerClosure.state).toBe('closed-with-gaps');
     expect(reduction.reducerClosure.stages.map((stage) => [stage.stage, stage.state])).toEqual([
       ['unit-validation', 'closed-with-gaps'],
       ['section-reduction', 'closed-with-gaps'],
       ['contradiction-continuity', 'closed-with-gaps'],
+      ['cross-unit-reduction', 'not-run'],
       ['book-synthesis', 'closed-with-gaps'],
     ]);
+    expect(reduction.crossUnitFindings).toEqual([]);
+    expect(reduction.crossUnitReduction).toEqual({ state: 'not-run', reason: CROSS_UNIT_NOT_RUN.reason, requestDigest: null, findingCount: 0 });
+  });
+
+  it('carries model-driven findings beside the deterministic conflicts, with lineage to every unit cited', () => {
+    const closed = reduceBaselineAnalysis(manifest, [closedUnit3, gapUnit2, closedUnit1], new Set(), {
+      state: 'closed',
+      requestDigest: 'a'.repeat(64),
+      usage: { inputTokens: 120, outputTokens: 40 },
+      findings: [{
+        kind: 'chronology-conflict',
+        description: '合成时序冲突：单元 3 的事件早于单元 1 所述。',
+        sides: [
+          { unitOrdinal: 3, sourceRanges: [range(6)] },
+          { unitOrdinal: 1, sourceRanges: [range(2)] },
+        ],
+        confidence: 'medium',
+      }],
+    });
+    expect(closed.reducerClosure.stages.map((stage) => [stage.stage, stage.state, stage.inputCount]))
+      .toContainEqual(['cross-unit-reduction', 'closed', 2]);
+    expect(closed.crossUnitReduction).toEqual({ state: 'closed', reason: null, requestDigest: 'a'.repeat(64), findingCount: 1 });
+    // The lineage is sorted and deduplicated from the sides; the sides themselves keep their own order.
+    expect(closed.crossUnitFindings[0]!.unitOrdinals).toEqual([1, 3]);
+    expect(closed.crossUnitFindings[0]!.sides.map((side) => side.unitOrdinal)).toEqual([3, 1]);
+    expect(closed.assurance.crossUnitFindingCount).toBe(1);
+    // No unit result and no deterministic conflict moved.
+    expect(closed.conflicts).toEqual(reduction.conflicts);
+    expect(closed.assurance.unresolvedConflictCount).toBe(reduction.assurance.unresolvedConflictCount);
+    expect(closed.sections).toEqual(reduction.sections);
+    expect(closed.synthesis).toEqual(reduction.synthesis);
+  });
+
+  it('records a refused reduction as a stage gap without inventing a finding', () => {
+    const bounded = reduceBaselineAnalysis(manifest, [closedUnit1, { unitOrdinal: 2, state: 'closed', result: result(2, {}) },
+      { unitOrdinal: 3, state: 'closed', result: result(3, {}) }], new Set(), {
+      state: 'gap', code: 'policy-bounded', reason: '跨单元归纳未派发。', requestDigest: 'b'.repeat(64),
+    });
+    expect(bounded.coverage.state).toBe('complete');
+    expect(bounded.reducerClosure.state).toBe('closed-with-gaps');
+    expect(bounded.reducerClosure.label).toBe('归约/综合闭合：已闭合 · 跨单元归纳保留 1 处缺口');
+    expect(bounded.crossUnitFindings).toEqual([]);
+    expect(bounded.crossUnitReduction).toMatchObject({ state: 'gap', reason: '跨单元归纳未派发。', findingCount: 0 });
+    expect(bounded.gaps).toEqual([]);
   });
 
   it('preserves unit lineage in section and book reductions', () => {

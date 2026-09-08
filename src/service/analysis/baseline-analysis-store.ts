@@ -61,6 +61,11 @@ import {
   sha256Hex,
 } from './canonical.js';
 import { BASELINE_PROMPT_CONTRACT_DIGEST, BASELINE_UNIT_RESULT_SCHEMA, unitRequestDigest, type BaselineUnitResult } from './contract.js';
+import {
+  BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST,
+  BASELINE_CROSS_UNIT_RESULT_SCHEMA,
+  CROSS_UNIT_FINDING_KINDS,
+} from './cross-unit-contract.js';
 import { deriveCoverageManifest, manifestCoversEveryBlock, manifestDigestIsExact, type ManifestBlockInput } from './coverage-manifest.js';
 import {
   BASELINE_ANALYSIS_CONTRACT_VERSION,
@@ -86,12 +91,19 @@ export const RESULT_SET_REVISION_SCHEMA = 'ai7.baseline-manuscript-analysis.resu
 export const RESULT_SET_SUCCESSOR_REVISION_SCHEMA = 'ai7.baseline-manuscript-analysis.result-set-revision/2' as const;
 export const REDUCER_DESCRIPTOR = {
   schema: 'ai7.baseline-manuscript-analysis.reducers/1',
-  stages: ['unit-validation', 'section-reduction', 'contradiction-continuity', 'book-synthesis'],
+  stages: ['unit-validation', 'section-reduction', 'contradiction-continuity', 'cross-unit-reduction', 'book-synthesis'],
   contradictionRules: ['alias-collision', 'entity-kind-divergence', 'setting-claim-divergence'],
+  crossUnitFindingKinds: CROSS_UNIT_FINDING_KINDS,
   certaintyPolicy: 'report-only-never-resolve',
 } as const;
 export const REDUCER_DIGEST = sha256Hex(canonicalJson(REDUCER_DESCRIPTOR));
-export const SCHEMA_DIGEST = sha256Hex(canonicalJson({ contractVersion: BASELINE_ANALYSIS_CONTRACT_VERSION, unitResultSchema: BASELINE_UNIT_RESULT_SCHEMA, promptContractDigest: BASELINE_PROMPT_CONTRACT_DIGEST }));
+export const SCHEMA_DIGEST = sha256Hex(canonicalJson({
+  contractVersion: BASELINE_ANALYSIS_CONTRACT_VERSION,
+  unitResultSchema: BASELINE_UNIT_RESULT_SCHEMA,
+  promptContractDigest: BASELINE_PROMPT_CONTRACT_DIGEST,
+  crossUnitResultSchema: BASELINE_CROSS_UNIT_RESULT_SCHEMA,
+  crossUnitPromptContractDigest: BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST,
+}));
 
 const EXECUTION_STEPS = ['派生覆盖清单', '逐单元执行基线稿件分析契约 v1', '章节归约', '跨单元矛盾与连续性核对', '全书综合', '形成结果集修订版'] as const;
 const UPDATE_EXECUTION_STEPS = ['派生覆盖清单并计算复用计划', '按血缘复用兼容单元', '仅对重算单元逐单元执行基线稿件分析契约 v1', '章节归约', '跨单元矛盾与连续性核对', '全书综合', '追加后继结果集修订版'] as const;
