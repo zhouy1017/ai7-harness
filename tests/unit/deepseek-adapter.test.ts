@@ -32,6 +32,18 @@ const codes = { QUOTA_EXCEEDED_CODE, INVALID_CREDENTIAL_CODE, CONTEXT_WINDOW_EXC
 const SYSTEM = '合成系统提示。';
 const UNIT = `分析单元 1/1 · 单元摘要 ${'1'.repeat(64)}\n[blk_${'a'.repeat(24)}] (paragraph) 合成段落。`;
 
+/**
+ * The exact bytes each current profile sends for one fixed payload, captured at `dev@5344aa62` before
+ * route and model capability profiles were separated (Issue #310). The promise that separation makes
+ * is byte identity: expressing today's two profiles in the new shape may not move one byte of either
+ * request. A digest over a fixed payload is the only form of that proof which survives the refactor,
+ * so both digests are frozen literals here rather than values derived from the code under test.
+ */
+const PRODUCTION_REQUEST_BODY = `{"messages":[{"content":"${SYSTEM}","role":"system"},{"content":${JSON.stringify(UNIT)},"role":"user"}],"model":"deepseek-v4-pro","reasoning_effort":"high","stream":false,"thinking":{"type":"enabled"}}`;
+const PRODUCTION_REQUEST_DIGEST = '6dbe1241b0d5f43c2905a55bd0a417bc57c51960acd695465012ec851d0635b1';
+const OPENCODE_GO_REQUEST_BODY = `{"messages":[{"content":"${SYSTEM}","role":"system"},{"content":${JSON.stringify(UNIT)},"role":"user"}],"model":"deepseek-v4-flash","stream":false}`;
+const OPENCODE_GO_REQUEST_DIGEST = 'bcb7d5c44fe404a2884d65991a737c6e7026790ddfca34845cbc785fbdae933b';
+
 function request(): GenerateOptions {
   return {
     provider: DEEPSEEK_ROUTE,
@@ -102,6 +114,12 @@ describe('assembleDeepSeekRequest', () => {
     expect(first.requestDigest).toMatch(/^[0-9a-f]{64}$/);
     expect(first.promptContractDigest).toBe(BASELINE_PROMPT_CONTRACT_DIGEST);
   });
+
+  it('sends the exact production bytes frozen before the profile split', () => {
+    const assembly = assembleDeepSeekRequest(request(), attributionHeaders(), BASELINE_PROMPT_CONTRACT_DIGEST);
+    expect(assembly.body).toBe(PRODUCTION_REQUEST_BODY);
+    expect(assembly.requestDigest).toBe(PRODUCTION_REQUEST_DIGEST);
+  });
 });
 
 describe('provider route generalization', () => {
@@ -136,6 +154,8 @@ describe('provider route generalization', () => {
       model: 'deepseek-v4-flash',
       stream: false,
     });
+    expect(assembly.body).toBe(OPENCODE_GO_REQUEST_BODY);
+    expect(assembly.requestDigest).toBe(OPENCODE_GO_REQUEST_DIGEST);
     expect(assembly.body).not.toContain('thinking');
     expect(assembly.body).not.toContain('reasoning_effort');
     expect(assembly.headers).toEqual({
