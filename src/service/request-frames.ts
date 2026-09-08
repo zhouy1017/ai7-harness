@@ -161,7 +161,7 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       }
       break;
     }
-    case 'stageSelectedDocx': {
+    case 'stageSelectedManuscript': {
       const input = requireInput(value.input, ['selectionToken', 'selectedPath'], tentativeId);
       if (
         !isBoundedString(input.selectionToken, 36) ||

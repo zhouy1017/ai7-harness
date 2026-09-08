@@ -178,12 +178,12 @@ async function dispatch(
       };
     case 'getImportStartup':
       return { id: request.id, ok: true, op: request.op, result: await store.getImportStartup() };
-    case 'stageSelectedDocx':
+    case 'stageSelectedManuscript':
       return {
         id: request.id,
         ok: true,
         op: request.op,
-        result: await store.stageSelectedDocx(request.input.selectionToken, request.input.selectedPath),
+        result: await store.stageSelectedManuscript(request.input.selectionToken, request.input.selectedPath),
       };
     case 'continueImportDraft':
       return {

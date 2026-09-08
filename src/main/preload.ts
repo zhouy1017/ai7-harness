@@ -183,7 +183,7 @@ const api: RendererApi = Object.freeze({
     invoke<ServiceOperationMap['restoreRecovery']['output']>(IPC_CHANNELS.restoreRecovery, input),
   getImportStartup: () =>
     invoke<ServiceOperationMap['getImportStartup']['output']>(IPC_CHANNELS.getImportStartup),
-  selectAndStageDocx: () => invoke<PickerStageResult>(IPC_CHANNELS.selectAndStageDocx),
+  selectAndStageManuscript: () => invoke<PickerStageResult>(IPC_CHANNELS.selectAndStageManuscript),
   continueImportDraft: (input: ServiceOperationMap['continueImportDraft']['input']) =>
     invoke<ServiceOperationMap['continueImportDraft']['output']>(IPC_CHANNELS.continueImportDraft, input),
   reselectImportDraft: (input: { draftId: string; expectedDraftVersion: number }) =>

@@ -1433,7 +1433,7 @@ function renderBookOverview(
       importFirst.disabled = true;
       setStatus('正在本地解析 DOCX…', 'busy');
       try {
-        const result = await window.ai7.selectAndStageDocx();
+        const result = await window.ai7.selectAndStageManuscript();
         if (result.status === 'cancelled') {
           importFirst.disabled = false;
           setStatus('已取消文件选择');
@@ -3202,7 +3202,7 @@ function renderLanding(
     importButton.disabled = true;
     setStatus('正在本地解析 DOCX…', 'busy');
     try {
-      const result = await window.ai7.selectAndStageDocx();
+      const result = await window.ai7.selectAndStageManuscript();
       if (result.status === 'cancelled') {
         importButton.disabled = false;
         setStatus('已取消文件选择');
