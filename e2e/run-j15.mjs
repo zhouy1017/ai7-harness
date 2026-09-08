@@ -380,6 +380,11 @@ async function main() {
     // direct-child dl would miss 侧车身份 and every SHA-256. The helper below reads both layers, which
     // is what V2-UX-LAYER-008 asks of a Journey: assert the decision reading, and assert that the
     // technical layer still carries the exact value.
+    // Synchronized delta (#334): a ceiling's empty fields no longer cost a row each, so `Readable Scope`
+    // and the seven other foldable fields are read by their absence and by the one row that names them —
+    // `权限上限` when a revision declares none of the eight, `未声明` when it declares some. `Model Role`
+    // is not one of the eight and stays at full rank. Neither Revision is in force or on offer here, so
+    // nothing is past and both sections render in place.
     await assertRenderer(renderer, `(() => {
       const card=document.querySelector('.native-artifact-card');
       const text=card?.textContent??'';
@@ -396,7 +401,6 @@ async function main() {
       const sidecarFacts=facts(sidecar);
       const revision1Facts=facts(revision1);
       const revision2Facts=facts(revision2);
-      const emptyLabels=['Capability','Provider Binding','Credential','Network','Effect','Enrollment','Apply'];
       return card?.dataset.nativeArtifactIdentity==='@ai7/editorial-workspace-profile' &&
         card.dataset.authoritySidecarIdentity===${JSON.stringify(SIDECAR_ID)} &&
         !card.dataset.authoritySidecarActiveRevision && !card.dataset.authoritySidecarOfferedRevision &&
@@ -406,12 +410,17 @@ async function main() {
         sidecarFacts['侧车身份']===${JSON.stringify(SIDECAR_ID)} && sidecarFacts['当前生效 Revision']==='空（本图书未启用）' &&
         sidecarFacts['可审阅后继']==='空（无）' && sidecarFacts['本图书 pin 历史']==='空（无）' &&
         revision1Facts['规范字节']==='588 bytes' && revision1Facts['SHA-256']===${JSON.stringify(SIDECAR_REVISION_1_DIGEST)} &&
-        revision1Facts['Model Role']==='Main Editorial Role' && revision1Facts['Readable Scope']==='空（无）' &&
-        emptyLabels.every((label)=>revision1Facts[label]==='空（无）') &&
+        revision1Facts['Model Role']==='Main Editorial Role' &&
+        revision1Facts['权限上限']==='未声明任何权限（8 项均为空）' && revision1Facts['未声明']===undefined &&
+        revision1Facts['Capability']===undefined && revision1Facts['Readable Scope']===undefined &&
+        revision1Facts['Apply']===undefined && !revision1.textContent.includes('空（无）') &&
         revision2Facts['规范字节']==='660 bytes' && revision2Facts['SHA-256']===${JSON.stringify(SIDECAR_REVISION_2_DIGEST)} &&
         revision2Facts['Model Role']==='Main Editorial Role' &&
         revision2Facts['Readable Scope']==='current-book-primary-manuscript-revision、current-book-source-version' &&
-        emptyLabels.every((label)=>revision2Facts[label]==='空（无）') &&
+        revision2Facts['未声明']==='Capability、Provider Binding、Credential、Network、Effect、Enrollment、Apply' &&
+        revision2Facts['权限上限']===undefined && revision2Facts['Capability']===undefined &&
+        !revision2.textContent.includes('空（无）') &&
+        revision1.parentElement===sidecar && revision2.parentElement===sidecar && !text.includes('其他 Revision') &&
         text.includes('不创建 Task、Plan、Run 或 Session') && text.includes('不读取图书、稿件或来源内容') &&
         text.includes('Revision 2 仅扩大可请求范围，不创建实际读取或运行权限') &&
         text.includes('不授予 Provider、凭据、网络、Effect、Enrollment 或 Apply 权限') &&
@@ -442,16 +451,22 @@ async function main() {
     at('enable-effect');
     await waitFor(renderer, `document.querySelector('[data-native-artifact-state="enabled-for-book"]') || document.querySelector('#persistence-status')?.dataset.tone==='error'`, 'enabled-book-a-settled', 120_000);
     await assertRenderer(renderer, `Boolean(document.querySelector('[data-native-artifact-state="enabled-for-book"]'))`, 'enabled-book-a');
+    // Synchronized delta (#334): the pin history is a list in both layers, one `li` per pin, and the
+    // digest that used to ride in the decision reading now sits beside its exact instant in the
+    // disclosure. Reading the two lists asserts the same fact the joined string did — this Book pinned
+    // Revision 2 and nothing else — and that the digest is still there, per pin, to copy.
     await assertRenderer(renderer, `(() => {
       const card=document.querySelector('.native-artifact-card');
       const sidecar=card?.querySelector(':scope > .native-artifact-authority');
-      const pinTerm=Array.from(sidecar?.querySelectorAll(':scope > dl.native-artifact-facts > dt')??[])
-        .find((item)=>item.textContent==='本图书 pin 历史');
-      const pinHistory=pinTerm?.nextElementSibling?.textContent??'';
+      const pins=(selector)=>Array.from(sidecar?.querySelectorAll(selector)??[],(item)=>item.textContent??'');
+      const decisionPins=pins(':scope > dl.native-artifact-facts li[data-sidecar-pin]');
+      const exactPins=pins(':scope > details.technical-details li[data-sidecar-pin]');
       return !document.querySelector('.native-artifact-actions button') && card?.textContent.includes('已安装 · 已为本图书启用') &&
         card.dataset.authoritySidecarActiveRevision==='2' && !card.dataset.authoritySidecarOfferedRevision &&
-        pinHistory.includes('Revision 2') && pinHistory.includes(${JSON.stringify(SIDECAR_REVISION_2_DIGEST)}) &&
-        !pinHistory.includes('Revision 1');
+        decisionPins.length===1 && decisionPins[0].startsWith('Revision 2 · ') &&
+        !decisionPins[0].includes(${JSON.stringify(SIDECAR_REVISION_2_DIGEST)}) &&
+        exactPins.length===1 && exactPins[0].startsWith('Revision 2 · ' + ${JSON.stringify(SIDECAR_REVISION_2_DIGEST)} + ' · ') &&
+        exactPins[0].endsWith('Z');
     })()`, 'enabled-no-repeat-action');
     await closeBrowser();
 
@@ -472,14 +487,16 @@ async function main() {
     await assertRenderer(renderer, `(() => {
       const card=document.querySelector('.book-overview[data-book-id=${JSON.stringify(bookA)}] .native-artifact-card');
       const sidecar=card?.querySelector(':scope > .native-artifact-authority');
-      const pinTerm=Array.from(sidecar?.querySelectorAll(':scope > dl.native-artifact-facts > dt')??[])
-        .find((item)=>item.textContent==='本图书 pin 历史');
-      const pinHistory=pinTerm?.nextElementSibling?.textContent??'';
+      const pins=(selector)=>Array.from(sidecar?.querySelectorAll(selector)??[],(item)=>item.textContent??'');
+      const decisionPins=pins(':scope > dl.native-artifact-facts li[data-sidecar-pin]');
+      const exactPins=pins(':scope > details.technical-details li[data-sidecar-pin]');
       return card?.dataset.nativeArtifactState==='enabled-for-book' &&
         card.dataset.authoritySidecarActiveRevision==='1' && card.dataset.authoritySidecarOfferedRevision==='2' &&
-        pinHistory.includes('Revision 1') && pinHistory.includes(${JSON.stringify(SIDECAR_REVISION_1_DIGEST)}) &&
-        !pinHistory.includes('Revision 2') &&
-        card.querySelector('[data-native-artifact-action="enable-current-book"]')?.textContent==='审阅并追加 Revision 2';
+        decisionPins.length===1 && decisionPins[0].startsWith('Revision 1 · ') &&
+        exactPins.length===1 && exactPins[0].startsWith('Revision 1 · ' + ${JSON.stringify(SIDECAR_REVISION_1_DIGEST)} + ' · ') &&
+        exactPins[0].endsWith('Z') && !card.textContent.includes('其他 Revision') &&
+        card.querySelector('[data-native-artifact-action="enable-current-book"]')?.textContent==='审阅并追加 Revision 2' &&
+        card.lastElementChild?.classList.contains('native-artifact-actions');
     })()`, 'book-a-v12-migrated-revision-1');
 
     at('enable-current-book');
@@ -491,14 +508,23 @@ async function main() {
     await assertRenderer(renderer, `(() => {
       const card=document.querySelector('.native-artifact-card');
       const sidecar=card?.querySelector(':scope > .native-artifact-authority');
-      const pinTerm=Array.from(sidecar?.querySelectorAll(':scope > dl.native-artifact-facts > dt')??[])
-        .find((item)=>item.textContent==='本图书 pin 历史');
-      const pinHistory=pinTerm?.nextElementSibling?.textContent??'';
+      const pins=(selector)=>Array.from(sidecar?.querySelectorAll(selector)??[],(item)=>item.textContent??'');
+      const decisionPins=pins(':scope > dl.native-artifact-facts li[data-sidecar-pin]');
+      const exactPins=pins(':scope > details.technical-details li[data-sidecar-pin]');
+      // Synchronized delta (#334): both pins read as list items in each layer, in the order this Book
+      // pinned them, and Revision 1 — neither in force nor on offer any more — is one step away inside
+      // the counted disclosure, with its ceiling and its digest still in the record.
+      const past=card?.querySelector('[data-authority-sidecar-revision="1"]')?.closest('details');
       return card?.dataset.authoritySidecarActiveRevision==='2' && !card.dataset.authoritySidecarOfferedRevision &&
         !card.querySelector('.native-artifact-actions button') &&
-        pinHistory.includes(${JSON.stringify(SIDECAR_REVISION_1_DIGEST)}) &&
-        pinHistory.includes(${JSON.stringify(SIDECAR_REVISION_2_DIGEST)}) &&
-        pinHistory.indexOf('Revision 1') < pinHistory.indexOf('Revision 2');
+        decisionPins.length===2 && decisionPins[0].startsWith('Revision 1 · ') && decisionPins[1].startsWith('Revision 2 · ') &&
+        exactPins.length===2 &&
+        exactPins[0].startsWith('Revision 1 · ' + ${JSON.stringify(SIDECAR_REVISION_1_DIGEST)} + ' · ') &&
+        exactPins[1].startsWith('Revision 2 · ' + ${JSON.stringify(SIDECAR_REVISION_2_DIGEST)} + ' · ') &&
+        exactPins.every((line)=>line.endsWith('Z')) &&
+        card.querySelector('[data-authority-sidecar-revision="2"]')?.parentElement===sidecar &&
+        past?.parentElement===sidecar && past.querySelector(':scope > summary')?.textContent==='其他 Revision（1）' &&
+        past.querySelector('[data-authority-sidecar-revision="1"] .technical-identity')?.textContent===${JSON.stringify(SIDECAR_REVISION_1_DIGEST)};
     })()`, 'successor-preserves-revision-1');
     await closeBrowser();
 
@@ -525,12 +551,14 @@ async function main() {
     await assertRenderer(renderer, `(() => {
       const card=document.querySelector('.book-overview[data-book-id=${JSON.stringify(bookA)}] .native-artifact-card');
       const sidecar=card?.querySelector(':scope > .native-artifact-authority');
-      const pinTerm=Array.from(sidecar?.querySelectorAll(':scope > dl.native-artifact-facts > dt')??[])
-        .find((item)=>item.textContent==='本图书 pin 历史');
-      const pinHistory=pinTerm?.nextElementSibling?.textContent??'';
+      const pins=(selector)=>Array.from(sidecar?.querySelectorAll(selector)??[],(item)=>item.textContent??'');
+      const decisionPins=pins(':scope > dl.native-artifact-facts li[data-sidecar-pin]');
+      const exactPins=pins(':scope > details.technical-details li[data-sidecar-pin]');
       return card?.dataset.authoritySidecarActiveRevision==='2' && !card.dataset.authoritySidecarOfferedRevision &&
-        pinHistory.includes(${JSON.stringify(SIDECAR_REVISION_1_DIGEST)}) &&
-        pinHistory.includes(${JSON.stringify(SIDECAR_REVISION_2_DIGEST)});
+        decisionPins.length===2 && decisionPins[0].startsWith('Revision 1 · ') && decisionPins[1].startsWith('Revision 2 · ') &&
+        exactPins.length===2 &&
+        exactPins[0].includes(${JSON.stringify(SIDECAR_REVISION_1_DIGEST)}) &&
+        exactPins[1].includes(${JSON.stringify(SIDECAR_REVISION_2_DIGEST)});
     })()`, 'book-a-sidecar-history-after-restart');
     await click(renderer, '返回图书列表', 'return-after-book-a');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'landing-before-book-b');

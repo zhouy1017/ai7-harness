@@ -856,6 +856,46 @@ async function main() {
     await waitFor(renderer, `document.querySelector('.native-artifact-card')?.dataset.authoritySidecarActiveRevision==='2'`, 'artifact-enabled');
     at('artifact-enabled');
     await assertRenderer(renderer, `(() => { const card=document.querySelector('.native-artifact-card'); return card?.dataset.nativeArtifactState==='enabled-for-book' && card.textContent.includes(${JSON.stringify(SIDECAR_REVISION_2_DIGEST)}); })()`, 'artifact-exact-revision2');
+    // Synchronized delta (#334), by addition: the artifact card folds each ceiling's empty fields into one
+    // row, lists the pin history, and moves a revision that is neither in force nor on offer into one
+    // counted disclosure. Every assertion above survives that unchanged, so this addition is what pins the
+    // new readings and, per V2-UX-LAYER-008, that the folded revision's ceiling digest and each pin's
+    // exact instant are still in the record one step away.
+    await assertRenderer(renderer, `(() => {
+      const card=document.querySelector('.native-artifact-card');
+      const sidecar=card?.querySelector(':scope > .native-artifact-authority');
+      const facts=(root)=>{
+        const result={};
+        for(const term of root?.querySelectorAll(':scope > dl.native-artifact-facts > dt, :scope > details.technical-details > dl > dt')??[]){
+          result[term.textContent??'']=term.nextElementSibling?.textContent??'';
+        }
+        return result;
+      };
+      const pins=(selector)=>Array.from(sidecar?.querySelectorAll(selector)??[],(item)=>item.textContent??'');
+      const decisionPins=pins(':scope > dl.native-artifact-facts li[data-sidecar-pin]');
+      const exactPins=pins(':scope > details.technical-details li[data-sidecar-pin]');
+      const active=card?.querySelector('[data-authority-sidecar-revision="2"]');
+      const superseded=card?.querySelector('[data-authority-sidecar-revision="1"]');
+      const past=superseded?.closest('details');
+      const activeFacts=facts(active);
+      const supersededFacts=facts(superseded);
+      return active?.parentElement===sidecar && past?.parentElement===sidecar &&
+        past.querySelector(':scope > summary')?.textContent==='其他 Revision（1）' &&
+        activeFacts['Model Role']==='Main Editorial Role' &&
+        activeFacts['Readable Scope']==='current-book-primary-manuscript-revision、current-book-source-version' &&
+        activeFacts['未声明']==='Capability、Provider Binding、Credential、Network、Effect、Enrollment、Apply' &&
+        activeFacts['SHA-256']===${JSON.stringify(SIDECAR_REVISION_2_DIGEST)} &&
+        supersededFacts['Model Role']==='Main Editorial Role' &&
+        supersededFacts['权限上限']==='未声明任何权限（8 项均为空）' && supersededFacts['未声明']===undefined &&
+        /^[0-9a-f]{64}$/.test(supersededFacts['SHA-256']) &&
+        supersededFacts['SHA-256']!==${JSON.stringify(SIDECAR_REVISION_2_DIGEST)} &&
+        !active.textContent.includes('空（无）') && !superseded.textContent.includes('空（无）') &&
+        decisionPins.length===1 && decisionPins[0].startsWith('Revision 2 · ') &&
+        !decisionPins[0].includes(${JSON.stringify(SIDECAR_REVISION_2_DIGEST)}) &&
+        exactPins.length===1 && exactPins[0].startsWith('Revision 2 · ' + ${JSON.stringify(SIDECAR_REVISION_2_DIGEST)} + ' · ') &&
+        exactPins[0].endsWith('Z') &&
+        card.lastElementChild?.classList.contains('native-artifact-actions');
+    })()`, 'artifact-card-layer-surface');
 
     at('model-setup-remove');
     await click(renderer, '返回图书列表', 'model-return-library');
