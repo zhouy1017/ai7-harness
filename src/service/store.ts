@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { closeSync, constants, createReadStream, fstatSync, lstatSync, openSync, readSync } from 'node:fs';
 import { copyFile, lstat, open, realpath, rename, rm } from 'node:fs/promises';
-import { basename, isAbsolute, posix, relative, resolve, sep } from 'node:path';
+import { basename, extname, isAbsolute, posix, relative, resolve, sep } from 'node:path';
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
 import { J03_TASK_GOAL, MAX_BLOCK_CODE_UNITS, MAX_FRAME_BYTES } from '../shared/protocol.js';
 import type {
@@ -38,7 +38,9 @@ import type {
   ReimportIdentityCandidatePageProjection,
   ReimportLineageSourceVersionPageProjection,
   ReimportMappingPageProjection,
+  SourceFormat,
   SourceImportCommitProjection,
+  SourceImportRetainedBoundaryLabel,
   SourceImportTargetSelection,
   StagedImportProjection,
   ContinueImportProjection,
@@ -78,11 +80,18 @@ import {
 import {
   deriveImportFidelityPlan,
   DOCX_PARSER_IDENTITY,
+  MAX_ARCHIVE_BYTES,
   parseDocx,
   type ImportFidelityPlan,
   type ParsedDocx,
   type ParsedDocxBlock,
 } from './docx.js';
+import {
+  MANUSCRIPT_FORMAT_HEAD_BYTES,
+  editableImport,
+  identifyManuscriptFormat,
+  manuscriptObjectExtension,
+} from './manuscript-format.js';
 import {
   BoundedManuscriptStore,
   BoundedStoreError,
@@ -205,6 +214,13 @@ const DEGRADATION_DECISION_SCHEMA = 'ai7.import-degradation-decision/1';
 const SOURCE_IMPORT_RECORD_SCHEMA = 'ai7.source-import-record/1';
 const SOURCE_IMPORT_RETAINED_BOUNDARY_LABEL =
   '保留完整所选 DOCX 文件及本地解析出的完整内容与结构身份' as const;
+/** An original kept whole with no local parse claims no content or structure identity (ADR 0072 §2). */
+const SOURCE_IMPORT_RETAINED_ORIGINAL_BOUNDARY_LABEL =
+  '保留完整所选原始文件及其精确身份；未进行本地解析' as const;
+
+function retainedBoundaryLabel(parsed: boolean): SourceImportRetainedBoundaryLabel {
+  return parsed ? SOURCE_IMPORT_RETAINED_BOUNDARY_LABEL : SOURCE_IMPORT_RETAINED_ORIGINAL_BOUNDARY_LABEL;
+}
 const SOURCE_IMPORT_NON_EFFECTS = [
   '不创建稿件',
   '不创建稿件修订版',
@@ -778,8 +794,42 @@ function safeDisplayName(input: string): string {
   requireStore(input.isWellFormed(), 'SOURCE_IDENTITY_INVALID', '来源标识无效。');
   const name = input.normalize('NFC').replace(/[\u0000-\u001f\u007f]/g, '').trim();
   requireStore(name.length > 0 && name.length <= 180 && !/[\\/]/.test(name), 'SOURCE_IDENTITY_INVALID', '来源标识无效。');
-  requireStore(name.toLowerCase().endsWith('.docx'), 'SOURCE_IDENTITY_INVALID', '来源必须是 DOCX。');
   return name;
+}
+
+/**
+ * The parser's two "this is not a WordprocessingML package" refusals. They say the file is not a
+ * DOCX at all, which the router answers by classifying it as unrecognised and retaining it
+ * source-only; every other `DOCX_REJECTED` is a bound a hostile archive crossed and stays a refusal.
+ */
+const NOT_A_WORDPROCESSING_PACKAGE = [
+  'DOCX_REJECTED:not a WordprocessingML DOCX',
+  'DOCX_REJECTED:package does not declare a WordprocessingML document',
+] as const;
+
+function isNotAWordprocessingPackage(error: unknown): boolean {
+  return error instanceof Error && NOT_A_WORDPROCESSING_PACKAGE.some((message) => error.message === message);
+}
+
+const SOURCE_FORMATS: ReadonlyArray<SourceFormat> = ['DOCX', 'DOC', 'PDF', 'ODT', 'RTF', 'TXT', 'MD', 'UNKNOWN'];
+
+function nullableString(value: SQLOutputValue | undefined): string | null {
+  return value === null || value === undefined ? null : asString(value);
+}
+
+function requireSourceFormat(value: string): SourceFormat {
+  const format = SOURCE_FORMATS.find((candidate) => candidate === value);
+  requireStore(format !== undefined, 'STORE_CORRUPT', '来源格式无效。');
+  return format!;
+}
+
+/**
+ * A file the product did not parse has no title metadata, so the file name is the only suggestion
+ * there is — the same fallback the DOCX parser uses when a package carries no title.
+ */
+function fileNameTitleSuggestion(displayName: string): string {
+  const withoutExtension = displayName.slice(0, displayName.length - extname(displayName).length).trim();
+  return withoutExtension.length > 0 ? withoutExtension : displayName;
 }
 
 async function digestFile(path: string): Promise<string> {
@@ -2017,11 +2067,14 @@ interface DraftSnapshot {
   reviewedBranchId: string | null;
   reviewDigest: string | null;
   stagedAt: string;
-  parserIdentity: string;
+  /** What the intake router identified the selected file as; only `DOCX` was parsed. */
+  sourceFormat: SourceFormat;
+  /** Null together, for a retained original the product never parsed (ADR 0072 §2). */
+  parserIdentity: string | null;
   sourceDigest: string;
   sourceBytes: number;
-  contentDigest: string;
-  structureDigest: string;
+  contentDigest: string | null;
+  structureDigest: string | null;
   blockCount: number;
   characterCount: number;
   fidelity: FidelityCategoryProjection[];
@@ -2524,8 +2577,8 @@ function sourceImportRecordsToCreate(
 function sourceImportRetainedBoundary(snapshot: DraftSnapshot): ReviewBeforeSourceImportProjection['retainedBoundary'] {
   return {
     kind: 'complete-local-file',
-    label: SOURCE_IMPORT_RETAINED_BOUNDARY_LABEL,
-    format: 'DOCX',
+    label: retainedBoundaryLabel(snapshot.parserIdentity !== null),
+    format: snapshot.sourceFormat,
     displayName: snapshot.displayName,
     sourceSha256: snapshot.sourceDigest,
     sourceBytes: snapshot.sourceBytes,
@@ -2540,7 +2593,8 @@ function createSourceImportReviewDigest(
   identityFindings: ReadonlyArray<ImportIdentityFindingProjection>,
 ): string {
   return sha256(canonicalJson({
-    schema: 'ai7.source-import-review/1',
+    // Revision 2: the retained boundary now carries the identified format and may carry no parse.
+    schema: 'ai7.source-import-review/2',
     draftId: snapshot.draftId,
     draftVersion: snapshot.version,
     target: target.kind === 'new-book'
@@ -3119,7 +3173,7 @@ export class EditorialStore {
     const manuscripts = this.#authority.prepare(
       `SELECT m.manuscript_id, m.created_at, mb.branch_id, mr.revision_id, mr.revision_label,
               mr.revision_digest, mr.source_version_id, mr.created_at revision_created_at,
-              sv.display_name, sv.source_digest, sv.content_digest, sv.structure_digest, sv.parser_identity,
+              sv.display_name, sv.format, sv.source_digest, sv.content_digest, sv.structure_digest, sv.parser_identity,
               co.byte_length source_bytes,
               sp.provenance_id, sp.acquisition_path, sp.locality,
               wi.workflow_instance_id, wi.current_phase, wi.state, wi.profile_id, wi.profile_version,
@@ -3232,6 +3286,7 @@ export class EditorialStore {
         {
           kind: 'source', label: '来源版本与来源记录', sourceVersionId,
           provenanceId: asString(row.provenance_id), bookId, displayName: asString(row.display_name),
+          format: requireSourceFormat(asString(row.format)),
           sourceDigest: asString(row.source_digest), contentDigest: asString(row.content_digest),
           structureDigest: asString(row.structure_digest), parserIdentity: asString(row.parser_identity),
           acquisitionPath: 'native-file-picker', locality: 'local-provider-free',
@@ -3344,7 +3399,7 @@ export class EditorialStore {
   ): BookRecordPresentation[] {
     if (recordIds.length === 0) return [];
     const rows = this.#authority.prepare(
-      `SELECT rr.*, sv.display_name, sv.source_digest, sv.content_digest, sv.structure_digest,
+      `SELECT rr.*, sv.display_name, sv.format, sv.source_digest, sv.content_digest, sv.structure_digest,
               sv.parser_identity, co.byte_length source_bytes, sp.acquisition_path, sp.locality,
               fr.outcome fidelity_outcome, fr.review_digest fidelity_review_digest,
               dd.decision degradation_decision
@@ -3416,6 +3471,12 @@ export class EditorialStore {
         '稿件重新导入记录图或摘要无效。',
       );
       if (!presentedSources.has(sourceVersionId)) {
+        // A reimport compares parsed blocks, so its Source Version always carries a whole parse.
+        requireStore(
+          row.parser_identity !== null && row.content_digest !== null && row.structure_digest !== null,
+          'BOOK_RECORD_GRAPH_INVALID',
+          '稿件重新导入的来源版本缺少本地解析身份。',
+        );
         records.push({
           kind: 'source',
           label: '来源版本与来源记录',
@@ -3423,6 +3484,7 @@ export class EditorialStore {
           provenanceId,
           bookId,
           displayName: asString(row.display_name),
+          format: requireSourceFormat(asString(row.format)),
           sourceDigest: asString(row.source_digest),
           contentDigest: asString(row.content_digest),
           structureDigest: asString(row.structure_digest),
@@ -3474,7 +3536,7 @@ export class EditorialStore {
       `SELECT sir.source_import_record_id, sir.commit_id, sir.book_id, sir.source_version_id,
               sir.provenance_id, sir.target_kind, sir.source_version_disposition, sir.retained_boundary_json,
               sir.named_non_effects_json, sir.record_digest, sir.imported_at,
-              sv.display_name, sv.source_digest, sv.content_digest, sv.structure_digest,
+              sv.display_name, sv.format, sv.source_digest, sv.content_digest, sv.structure_digest,
               sv.parser_identity, co.byte_length, sp.acquisition_path, sp.locality,
               sp.sanitized_identity
        FROM source_import_records sir
@@ -3510,12 +3572,17 @@ export class EditorialStore {
         '来源导入保留边界或非影响记录不完整。',
       );
       const boundary = retained as Record<string, unknown>;
+      // A Source Version is either wholly parsed or wholly unparsed, and its record says which.
+      const parserIdentity = row.parser_identity === null ? null : asString(row.parser_identity);
+      const contentDigest = row.content_digest === null ? null : asString(row.content_digest);
+      const structureDigest = row.structure_digest === null ? null : asString(row.structure_digest);
+      const format = requireSourceFormat(asString(row.format));
       requireStore(
-        boundary.kind === 'complete-local-file' && boundary.label === SOURCE_IMPORT_RETAINED_BOUNDARY_LABEL &&
-          boundary.format === 'DOCX' && boundary.displayName === asString(row.sanitized_identity) &&
+        boundary.kind === 'complete-local-file' && boundary.label === retainedBoundaryLabel(parserIdentity !== null) &&
+          boundary.format === format && boundary.displayName === asString(row.sanitized_identity) &&
           boundary.sourceSha256 === asString(row.source_digest) &&
-          boundary.contentDigest === asString(row.content_digest) &&
-          boundary.structureDigest === asString(row.structure_digest) &&
+          (boundary.contentDigest ?? null) === contentDigest &&
+          (boundary.structureDigest ?? null) === structureDigest &&
           typeof boundary.sourceBytes === 'number' && Number.isSafeInteger(boundary.sourceBytes) &&
           boundary.sourceBytes === asNumber(row.byte_length),
         'BOOK_RECORD_GRAPH_INVALID',
@@ -3543,10 +3610,11 @@ export class EditorialStore {
           provenanceId,
           bookId,
           displayName: asString(row.display_name),
+          format,
           sourceDigest: asString(row.source_digest),
-          contentDigest: asString(row.content_digest),
-          structureDigest: asString(row.structure_digest),
-          parserIdentity: asString(row.parser_identity),
+          contentDigest,
+          structureDigest,
+          parserIdentity,
           acquisitionPath: 'native-file-picker',
           locality: 'local-provider-free',
         });
@@ -3564,12 +3632,12 @@ export class EditorialStore {
         sourceVersionDisposition: disposition,
         retainedBoundary: {
           kind: 'complete-local-file',
-          format: 'DOCX',
+          format,
           displayName: asString(row.sanitized_identity),
           sourceSha256: asString(row.source_digest),
           sourceBytes: boundary.sourceBytes,
-          contentDigest: asString(row.content_digest),
-          structureDigest: asString(row.structure_digest),
+          contentDigest,
+          structureDigest,
         },
         namedNonEffects: namedNonEffects as string[],
         recordDigest,
@@ -3741,15 +3809,18 @@ export class EditorialStore {
     requireStore(TOKEN_PATTERN.test(selectionToken), 'SELECTION_INVALID', '文件选择令牌无效。');
     requireStore(isAbsolute(selectedPathInput), 'SELECTION_INVALID', '文件选择结果无效。');
 
+    const selectedPath = await realpath(selectedPathInput);
+    const displayName = safeDisplayName(basename(selectedPath));
+    const draftId = randomUUID();
+    const format = await this.#identifySelectedManuscript(selectedPath, displayName);
+    if (format !== 'DOCX') return this.#stageSourceOnlyDraft(draftId, selectionToken, selectedPath, displayName, format);
+
     try {
-      const selectedPath = await realpath(selectedPathInput);
-      const displayName = safeDisplayName(basename(selectedPath));
-      const draftId = randomUUID();
       const ingested = await this.#parseIntoIngest(draftId, selectedPath, displayName);
       try {
         return await this.#withContentObjectLifecycle(async () => {
           const { parsed } = ingested;
-          const relativeKey = await this.#persistContentObject(selectedPath, parsed);
+          const relativeKey = await this.#persistContentObject(selectedPath, parsed.sourceDigest, 'DOCX');
           const now = new Date().toISOString();
           this.#transaction(this.#authority, () => {
             this.#authority
@@ -3798,6 +3869,7 @@ export class EditorialStore {
             reviewedBranchId: null,
             reviewDigest: null,
             stagedAt: now,
+            sourceFormat: 'DOCX',
             parserIdentity: parsed.parserIdentity,
             sourceDigest: parsed.sourceDigest,
             sourceBytes: parsed.archiveBytes,
@@ -3815,11 +3887,84 @@ export class EditorialStore {
       }
     } catch (error) {
       if (error instanceof StoreError) throw error;
+      // A ZIP that is not a WordprocessingML package is not a format the product recognises, so it
+      // is retained source-only rather than refused; every other bound stays a refusal, because a
+      // hostile archive is not something to keep (ADR 0072 §1).
+      if (isNotAWordprocessingPackage(error)) {
+        return this.#stageSourceOnlyDraft(draftId, selectionToken, selectedPath, displayName, 'UNKNOWN');
+      }
       if (error instanceof Error && error.message.startsWith('DOCX_REJECTED:')) {
         throw new StoreError('DOCX_REJECTED', '该 DOCX 不符合当前受限本地导入边界。');
       }
       throw error;
     }
+  }
+
+  /**
+   * Read at most the identification window and name the format from its bytes (ADR 0072 §1). The
+   * parser's archive bound applies to every format before anything is retained, and nothing beyond
+   * this window is read from a file the product will not parse (ADR 0072 §9).
+   */
+  async #identifySelectedManuscript(selectedPath: string, displayName: string): Promise<SourceFormat> {
+    const handle = await open(selectedPath, 'r');
+    try {
+      const status = await handle.stat();
+      requireStore(status.isFile(), 'SELECTION_INVALID', '文件选择结果无效。');
+      requireStore(status.size > 0, 'SOURCE_EMPTY', '所选文件为空。');
+      requireStore(status.size <= MAX_ARCHIVE_BYTES, 'SOURCE_TOO_LARGE', '所选文件超出本地导入的大小上限。');
+      const head = new Uint8Array(Math.min(status.size, MANUSCRIPT_FORMAT_HEAD_BYTES));
+      const { bytesRead } = await handle.read(head, 0, head.length, 0);
+      return identifyManuscriptFormat(head.subarray(0, bytesRead), displayName);
+    } finally {
+      await handle.close();
+    }
+  }
+
+  /**
+   * Stage a file the product will not read as an editable Manuscript: the original is retained whole
+   * with its exact identity and nothing is parsed, so the draft has no staged snapshot and the
+   * editor is offered `作为来源材料导入` alone (ADR 0072 §2, V2-UX-IMP-006).
+   */
+  async #stageSourceOnlyDraft(
+    draftId: string,
+    selectionToken: string,
+    selectedPath: string,
+    displayName: string,
+    format: SourceFormat,
+  ): Promise<StagedImportProjection> {
+    return this.#withContentObjectLifecycle(async () => {
+      const retained = await this.#persistRetainedOriginal(selectedPath, format);
+      const now = new Date().toISOString();
+      this.#transaction(this.#authority, () => {
+        this.#authority
+          .prepare(
+            `INSERT INTO content_objects(object_digest, relative_key, byte_length, verified_at)
+             VALUES (?, ?, ?, ?)
+             ON CONFLICT(object_digest) DO NOTHING`,
+          )
+          .run(retained.digest, retained.relativeKey, retained.byteLength, now);
+        const object = one(
+          this.#authority.prepare('SELECT relative_key, byte_length FROM content_objects WHERE object_digest = ?').all(retained.digest) as SqlRow[],
+          'OBJECT_VERIFY_FAILED',
+          '暂存对象记录缺失。',
+        );
+        requireStore(
+          asString(object.relative_key) === retained.relativeKey && asNumber(object.byte_length) === retained.byteLength,
+          'OBJECT_VERIFY_FAILED',
+          '暂存对象记录冲突。',
+        );
+        this.#authority
+          .prepare(
+            `INSERT INTO import_drafts(
+               draft_id, selection_token, state, draft_version, display_name, object_digest, selected_path,
+               staged_at, source_format
+             ) VALUES (?, ?, 'staged', 1, ?, ?, ?, ?, ?)`,
+          )
+          .run(draftId, selectionToken, displayName, retained.digest, selectedPath, now, format);
+        this.#assertForeignKeys(this.#authority);
+      });
+      return this.#stagedProjection(this.#loadDraftSnapshot(draftId));
+    });
   }
 
   async getImportStartup(): Promise<ImportStartupProjection> {
@@ -4172,10 +4317,25 @@ export class EditorialStore {
 
     let selectedPath: string;
     let displayName: string;
-    let ingested: IngestedDocx;
+    let format: SourceFormat;
     try {
       selectedPath = await realpath(selectedPathInput);
       displayName = safeDisplayName(basename(selectedPath));
+      format = await this.#identifySelectedManuscript(selectedPath, displayName);
+    } catch (error) {
+      if (error instanceof StoreFatalError) throw error;
+      throw new StoreError('SNAPSHOT_RESELECTION_REQUIRED', '重选文件无法形成完整的本地暂存快照。');
+    }
+    // Reselection identifies the file the same way staging does, so a format the product does not
+    // read as a Manuscript comes back as the same source-only draft rather than a bare refusal.
+    if (format !== 'DOCX') {
+      return this.#reselectSourceOnlyDraft(
+        { draftId, selectionToken, selectedPath, displayName, format },
+        { expectedDigest, expectedDraftVersion, previousState, recovered: attempt !== null },
+      );
+    }
+    let ingested: IngestedDocx;
+    try {
       ingested = await this.#parseIntoIngest(draftId, selectedPath, displayName);
     } catch (error) {
       if (error instanceof StoreFatalError) throw error;
@@ -4200,7 +4360,7 @@ export class EditorialStore {
           'DRAFT_VERSION_CHANGED',
           '导入草稿在重选持久化前已变化。',
         );
-        const relativeKey = await this.#persistContentObject(selectedPath, parsed);
+        const relativeKey = await this.#persistContentObject(selectedPath, parsed.sourceDigest, 'DOCX');
         const nextVersion = expectedDraftVersion + 1;
         const now = new Date().toISOString();
         this.#transaction(this.#authority, () => {
@@ -4248,6 +4408,76 @@ export class EditorialStore {
     } finally {
       this.#discardIngest(ingested.ingestId);
     }
+  }
+
+  /**
+   * Reselect the exact original behind a source-only draft. There is nothing to parse, so the file's
+   * own digest is the whole identity check, and the draft returns to `staged` with the same
+   * source-only shape it had before.
+   */
+  async #reselectSourceOnlyDraft(
+    selection: { draftId: string; selectionToken: string; selectedPath: string; displayName: string; format: SourceFormat },
+    draft: { expectedDigest: string; expectedDraftVersion: number; previousState: string; recovered: boolean },
+  ): Promise<ContinueImportProjection> {
+    const { draftId, selectionToken, selectedPath, displayName, format } = selection;
+    return this.#withContentObjectLifecycle(async () => {
+      this.#requireNoAbandonmentCleanupIntent(draftId);
+      const retained = await this.#persistRetainedOriginal(selectedPath, format);
+      requireStore(retained.digest === draft.expectedDigest, 'RESELECTION_MISMATCH', '重选文件与原暂存来源身份不一致。');
+      const nextVersion = draft.expectedDraftVersion + 1;
+      const now = new Date().toISOString();
+      this.#transaction(this.#authority, () => {
+        const current = one(
+          this.#authority
+            .prepare('SELECT state, draft_version, object_digest FROM import_drafts WHERE draft_id = ?')
+            .all(draftId) as SqlRow[],
+          'DRAFT_NOT_FOUND',
+          '导入草稿不存在。',
+        );
+        requireStore(
+          (asString(current.state) === 'staged' || asString(current.state) === 'reviewed') &&
+            asNumber(current.draft_version) === draft.expectedDraftVersion &&
+            asString(current.object_digest) === draft.expectedDigest,
+          'DRAFT_VERSION_CHANGED',
+          '导入草稿在重选持久化前已变化。',
+        );
+        this.#authority
+          .prepare(
+            `INSERT INTO content_objects(object_digest, relative_key, byte_length, verified_at)
+             VALUES (?, ?, ?, ?)
+             ON CONFLICT(object_digest) DO UPDATE SET
+               relative_key = excluded.relative_key,
+               byte_length = excluded.byte_length,
+               verified_at = excluded.verified_at`,
+          )
+          .run(retained.digest, retained.relativeKey, retained.byteLength, now);
+        const draftUpdate = this.#authority
+          .prepare(
+            `UPDATE import_drafts
+             SET selection_token = ?, state = 'staged', draft_version = ?, display_name = ?, object_digest = ?,
+                 selected_path = ?, source_format = ?, reviewed_title = NULL, reviewed_target_choice_id = NULL,
+                 reviewed_target_kind = NULL, reviewed_existing_book_id = NULL,
+                 reviewed_relationship = NULL, reviewed_book_state_digest = NULL,
+                 reviewed_reuse_source_version_id = NULL,
+                 reviewed_lineage_status = NULL, reviewed_lineage_source_version_id = NULL,
+                 reviewed_checkpoint_revision_id = NULL, reviewed_manuscript_id = NULL, reviewed_branch_id = NULL,
+                 review_digest = NULL, reviewed_at = NULL
+             WHERE draft_id = ? AND draft_version = ? AND state IN ('staged', 'reviewed')`,
+          )
+          .run(selectionToken, nextVersion, displayName, retained.digest, selectedPath, format,
+            draftId, draft.expectedDraftVersion);
+        requireStore(draftUpdate.changes === 1, 'DRAFT_VERSION_CHANGED', '导入草稿在重选时已变化。');
+        this.#authority.prepare("DELETE FROM import_commit_attempts WHERE draft_id = ? AND state = 'prepared'").run(draftId);
+        this.#assertForeignKeys(this.#authority);
+      });
+      return {
+        state: 'target-review-required',
+        staged: this.#stagedProjection(this.#loadDraftSnapshot(draftId)),
+        originalFileAccess: { state: 'available-exact', label: '原始所选文件仍可访问且身份一致' },
+        reviewInvalidated: draft.previousState === 'reviewed' || draft.recovered,
+        notice: '已通过原来源摘要精确匹配完成重选；请重新确认全部决定。',
+      };
+    });
   }
 
   async abandonImportDraft(draftId: string, expectedDraftVersion: number): Promise<ImportStartupProjection> {
@@ -5451,7 +5681,7 @@ export class EditorialStore {
           `INSERT INTO source_versions(
              source_version_id, book_id, object_digest, source_digest, content_digest, structure_digest,
              parser_identity, format, display_name, created_at
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, 'DOCX', ?, ?)`,
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           sourceVersionId,
@@ -5461,6 +5691,7 @@ export class EditorialStore {
           snapshot.contentDigest,
           snapshot.structureDigest,
           snapshot.parserIdentity,
+          snapshot.sourceFormat,
           snapshot.displayName,
           now,
         );
@@ -5820,7 +6051,11 @@ export class EditorialStore {
       const identityFindings = this.#identityFindings(snapshot);
       const target = this.#reconstructReviewedSourceImportTarget(snapshot, identityFindings);
       requireStore(target !== null, 'REVIEW_CHANGED', '来源导入复核无法由当前权威状态重建。');
-      this.#boundedCall(() => this.#boundedAuthority.assertStagedDraftIntegrity(input.draftId));
+      // Only a parsed draft has a staged snapshot to assert integrity over; a retained original has
+      // its exact bytes and nothing else (ADR 0072 §2).
+      if (snapshot.parserIdentity !== null) {
+        this.#boundedCall(() => this.#boundedAuthority.assertStagedDraftIntegrity(input.draftId));
+      }
 
       const now = new Date().toISOString();
       const bookId = target.bookId;
@@ -5852,7 +6087,7 @@ export class EditorialStore {
           `INSERT INTO source_versions(
              source_version_id, book_id, object_digest, source_digest, content_digest, structure_digest,
              parser_identity, format, display_name, created_at
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, 'DOCX', ?, ?)`,
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         ).run(
           sourceVersionId,
           bookId,
@@ -5861,6 +6096,7 @@ export class EditorialStore {
           snapshot.contentDigest,
           snapshot.structureDigest,
           snapshot.parserIdentity,
+          snapshot.sourceFormat,
           snapshot.displayName,
           now,
         );
@@ -5873,9 +6109,10 @@ export class EditorialStore {
         requireStore(
           asString(source.book_id) === bookId && asString(source.object_digest) === snapshot.objectDigest &&
             asString(source.source_digest) === snapshot.sourceDigest &&
-            asString(source.content_digest) === snapshot.contentDigest &&
-            asString(source.structure_digest) === snapshot.structureDigest &&
-            asString(source.parser_identity) === snapshot.parserIdentity && asString(source.format) === 'DOCX',
+            nullableString(source.content_digest) === snapshot.contentDigest &&
+            nullableString(source.structure_digest) === snapshot.structureDigest &&
+            nullableString(source.parser_identity) === snapshot.parserIdentity &&
+            asString(source.format) === snapshot.sourceFormat,
           'SOURCE_VERSION_REUSE_INCOMPATIBLE',
           '明确选择的同图书来源版本与当前完整文件及解析身份不一致。',
         );
@@ -6540,9 +6777,10 @@ export class EditorialStore {
           `INSERT INTO source_versions(
              source_version_id, book_id, object_digest, source_digest, content_digest, structure_digest,
              parser_identity, format, display_name, created_at
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, 'DOCX', ?, ?)`,
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         ).run(sourceVersionId, target.bookId, snapshot.objectDigest, snapshot.sourceDigest,
-          snapshot.contentDigest, snapshot.structureDigest, snapshot.parserIdentity, snapshot.displayName, now);
+          snapshot.contentDigest, snapshot.structureDigest, snapshot.parserIdentity, snapshot.sourceFormat,
+          snapshot.displayName, now);
       } else {
         const source = one(this.#authority.prepare(
           `SELECT book_id, object_digest, source_digest, content_digest, structure_digest, parser_identity, format
@@ -7706,6 +7944,9 @@ export class EditorialStore {
         'SNAPSHOT_RESELECTION_REQUIRED',
         '暂存对象摘要无效。',
       );
+      // A retained original was never parsed, so its exact bytes — verified just above — are the
+      // whole of what there is to revalidate, and no parser version can drift under it.
+      if (snapshot.parserIdentity === null) return { snapshot, parserDrift: false };
       const ingested = await this.#parseIntoIngest(snapshot.draftId, objectPath, snapshot.displayName);
       try {
         const { parsed } = ingested;
@@ -7792,20 +8033,31 @@ export class EditorialStore {
     return this.#loadDraftSnapshot(snapshot.draftId);
   }
 
-  async #persistContentObject(selectedPath: string, parsed: ParsedDocx): Promise<string> {
-    this.#requireNoAbandonmentCleanupForObject(parsed.sourceDigest);
-    const relativeKey = posix.join('sha256', parsed.sourceDigest.slice(0, 2), `${parsed.sourceDigest}.docx`);
+  /** The retained original keeps the extension of the format it was identified as (ADR 0072 §2). */
+  async #persistRetainedOriginal(
+    selectedPath: string,
+    format: SourceFormat,
+  ): Promise<{ digest: string; byteLength: number; relativeKey: string }> {
+    const digest = await digestFile(selectedPath);
+    const byteLength = (await lstat(selectedPath)).size;
+    return { digest, byteLength, relativeKey: await this.#persistContentObject(selectedPath, digest, format) };
+  }
+
+  async #persistContentObject(selectedPath: string, sourceDigest: string, format: SourceFormat): Promise<string> {
+    this.#requireNoAbandonmentCleanupForObject(sourceDigest);
+    const extension = manuscriptObjectExtension(format);
+    const relativeKey = posix.join('sha256', sourceDigest.slice(0, 2), `${sourceDigest}${extension}`);
     const objectDirectory = await ensureCanonicalDataDirectory(
       this.#dataRoot,
       'objects',
       'sha256',
-      parsed.sourceDigest.slice(0, 2),
+      sourceDigest.slice(0, 2),
     );
-    const objectFileName = `${parsed.sourceDigest}.docx`;
+    const objectFileName = `${sourceDigest}${extension}`;
     const inspectedObject = await inspectCanonicalDataFile(this.#dataRoot, objectDirectory, objectFileName);
     const objectPath = inspectedObject.path;
     requireStore(isInside(this.#objectsRoot, objectPath), 'OBJECT_PATH_INVALID', '对象路径越界。');
-    if (!inspectedObject.exists || (await digestFile(objectPath)) !== parsed.sourceDigest) {
+    if (!inspectedObject.exists || (await digestFile(objectPath)) !== sourceDigest) {
       const temporary = `${objectPath}.${process.pid}.${randomUUID()}.partial`;
       const temporaryName = basename(temporary);
       requireStore(
@@ -7827,11 +8079,11 @@ export class EditorialStore {
         } finally {
           await handle.close();
         }
-        requireStore((await digestFile(temporary)) === parsed.sourceDigest, 'OBJECT_VERIFY_FAILED', '暂存对象校验失败。');
+        requireStore((await digestFile(temporary)) === sourceDigest, 'OBJECT_VERIFY_FAILED', '暂存对象校验失败。');
         await rename(temporary, objectPath);
         const activated = await inspectCanonicalDataFile(this.#dataRoot, objectDirectory, objectFileName);
         requireStore(
-          activated.exists && activated.path === objectPath && (await digestFile(objectPath)) === parsed.sourceDigest,
+          activated.exists && activated.path === objectPath && (await digestFile(objectPath)) === sourceDigest,
           'OBJECT_PATH_INVALID',
           '暂存对象激活无效。',
         );
@@ -7915,7 +8167,9 @@ export class EditorialStore {
         });
         startOffset += block.graphemeLength;
         if (batch.length === INGEST_BATCH_SIZE) flushBatch();
-      }, undefined, options);
+      // The router already identified the file as a DOCX from its content, so the display name is
+      // not asked to prove it: a DOCX under any other name is still a DOCX (ADR 0072 §1).
+      }, undefined, { ...options, formatIdentified: true });
       flushBatch();
       requireStore(
         parsed.blockCount === inserted && parsed.characterCount === startOffset && inserted > 0,
@@ -8001,8 +8255,11 @@ export class EditorialStore {
 
   #contentObjectPath(objectDigest: string, relativeKey: string): string {
     requireStore(/^[0-9a-f]{64}$/.test(objectDigest), 'OBJECT_PATH_INVALID', '对象摘要无效。');
-    const expectedKey = posix.join('sha256', objectDigest.slice(0, 2), `${objectDigest}.docx`);
-    requireStore(relativeKey === expectedKey, 'OBJECT_PATH_INVALID', '对象相对路径无效。');
+    // The retained original keeps the extension of the format it was identified as, so the key is
+    // checked against every admitted one rather than against DOCX alone (ADR 0072 §2).
+    const expectedKeys = SOURCE_FORMATS.map((format) =>
+      posix.join('sha256', objectDigest.slice(0, 2), `${objectDigest}${manuscriptObjectExtension(format)}`));
+    requireStore(expectedKeys.includes(relativeKey), 'OBJECT_PATH_INVALID', '对象相对路径无效。');
     const path = resolve(this.#objectsRoot, ...relativeKey.split('/'));
     requireStore(isInside(this.#objectsRoot, path), 'OBJECT_PATH_INVALID', '对象路径越界。');
     return path;
@@ -8341,11 +8598,12 @@ export class EditorialStore {
       draftVersion: snapshot.version,
       source: {
         displayName: snapshot.displayName,
-        format: 'DOCX',
+        format: snapshot.sourceFormat,
         sourceSha256: snapshot.sourceDigest,
         sourceBytes: snapshot.sourceBytes,
         provenanceLabel: '本机文件选择器 · 本地解析 · 未联网',
       },
+      editableImport: editableImport(snapshot.sourceFormat),
       titleSuggestion: { value: snapshot.titleSuggestion, sourceLabel: snapshot.titleSource },
       identityFindings,
       targetChoices: [targetChoice, ...existingBooks],
@@ -9247,21 +9505,23 @@ export class EditorialStore {
     const findings = new Map<string, ImportIdentityFindingProjection>();
     for (const row of rows) {
       const sourceDigest = asString(row.source_digest);
-      const contentDigest = asString(row.content_digest);
-      const structureDigest = asString(row.structure_digest);
-      const parserIdentity = asString(row.parser_identity);
+      // A Source Version the product never parsed has no content or structure identity, and neither
+      // has an unparsed draft, so only the original's digest can classify either of them: the
+      // content-digest findings need a parse on both sides (ADR 0072 §2).
+      const contentDigest = nullableString(row.content_digest);
+      const structureDigest = nullableString(row.structure_digest);
+      const parserIdentity = nullableString(row.parser_identity);
       const displayName = asString(row.display_name);
+      const comparableParse = parserIdentity !== null && snapshot.parserIdentity !== null;
       const identityClass =
         sourceDigest === snapshot.sourceDigest
           ? ({ kind: 'immutable-original', label: '精确原始文件身份' } as const)
-          : parserIdentity === snapshot.parserIdentity &&
+          : comparableParse &&
+              parserIdentity === snapshot.parserIdentity &&
               contentDigest === snapshot.contentDigest &&
               structureDigest === snapshot.structureDigest
             ? ({ kind: 'parsed-content-structure', label: '发现相同内容' } as const)
-            : displayName === snapshot.displayName &&
-                (sourceDigest !== snapshot.sourceDigest ||
-                  contentDigest !== snapshot.contentDigest ||
-                  structureDigest !== snapshot.structureDigest)
+            : displayName === snapshot.displayName
               ? ({ kind: 'filename-collision', label: '名称相同，内容不同' } as const)
               : undefined;
       if (!identityClass) continue;
@@ -9294,11 +9554,11 @@ export class EditorialStore {
                   d.reviewed_book_state_digest, d.reviewed_reuse_source_version_id,
                   d.reviewed_lineage_status, d.reviewed_lineage_source_version_id,
                   d.reviewed_checkpoint_revision_id, d.reviewed_manuscript_id, d.reviewed_branch_id,
-                  d.staged_at, s.parser_identity, s.source_digest,
+                  d.staged_at, d.source_format, s.parser_identity, s.source_digest,
                   s.content_digest, s.structure_digest, s.block_count, s.character_count, s.fidelity_json,
                   s.title_suggestion, s.title_source, co.byte_length
            FROM import_drafts d
-           JOIN staged_import_snapshots s ON s.draft_id = d.draft_id
+           LEFT JOIN staged_import_snapshots s ON s.draft_id = d.draft_id
            JOIN content_objects co ON co.object_digest = d.object_digest
            WHERE d.draft_id = ?`,
         )
@@ -9306,13 +9566,20 @@ export class EditorialStore {
       'DRAFT_NOT_FOUND',
       '导入草稿不存在或已完成。',
     );
-    const sourceDigest = asString(row.source_digest);
+    const sourceFormat = requireSourceFormat(asString(row.source_format));
+    // Only a DOCX was parsed, so only a DOCX has a staged snapshot; every other draft is
+    // source-only and carries the original's identity alone (ADR 0072 §2).
+    const parsed = sourceFormat === 'DOCX';
+    requireStore(parsed === (row.parser_identity !== null), 'STORE_CORRUPT', '暂存解析结果与来源格式不一致。');
+    const sourceDigest = parsed ? asString(row.source_digest) : asString(row.object_digest);
     const sourceBytes = asNumber(row.byte_length);
     requireStore(asString(row.object_digest) === sourceDigest, 'STORE_CORRUPT', '暂存对象与来源摘要不一致。');
-    const fidelityValue = parseStoredJson(asString(row.fidelity_json), '导入保真快照无效。');
-    const plan = deriveImportFidelityPlan(fidelityValue, sourceDigest, sourceBytes);
-    requireStore(plan, 'FIDELITY_OUTSIDE_TRACER', '持久化导入保真快照不符合当前受限边界。');
-    const titleSource = asString(row.title_source);
+    const fidelityValue = parsed ? parseStoredJson(asString(row.fidelity_json), '导入保真快照无效。') : [];
+    if (parsed) {
+      const plan = deriveImportFidelityPlan(fidelityValue, sourceDigest, sourceBytes);
+      requireStore(plan, 'FIDELITY_OUTSIDE_TRACER', '持久化导入保真快照不符合当前受限边界。');
+    }
+    const titleSource = parsed ? asString(row.title_source) : '文件名';
     requireStore(titleSource === 'DOCX 标题元数据' || titleSource === '文件名', 'STORE_CORRUPT', '书名建议来源无效。');
     const reviewedTargetChoiceId =
       row.reviewed_target_choice_id === null ? null : asString(row.reviewed_target_choice_id);
@@ -9378,20 +9645,28 @@ export class EditorialStore {
       reviewedBranchId,
       reviewDigest: row.review_digest === null ? null : asString(row.review_digest),
       stagedAt: asString(row.staged_at),
-      parserIdentity: asString(row.parser_identity),
+      sourceFormat,
+      parserIdentity: parsed ? asString(row.parser_identity) : null,
       sourceDigest,
       sourceBytes,
-      contentDigest: asString(row.content_digest),
-      structureDigest: asString(row.structure_digest),
-      blockCount: asNumber(row.block_count),
-      characterCount: asNumber(row.character_count),
+      contentDigest: parsed ? asString(row.content_digest) : null,
+      structureDigest: parsed ? asString(row.structure_digest) : null,
+      blockCount: parsed ? asNumber(row.block_count) : 0,
+      characterCount: parsed ? asNumber(row.character_count) : 0,
       fidelity: fidelityValue as FidelityCategoryProjection[],
-      titleSuggestion: asString(row.title_suggestion),
+      titleSuggestion: parsed ? asString(row.title_suggestion) : fileNameTitleSuggestion(asString(row.display_name)),
       titleSource,
     };
   }
 
+  /**
+   * Only a DOCX has a fidelity plan, so asking for one is also how every editable-import path
+   * refuses a format that was never parsed, whatever a client asks for (ADR 0072 §2).
+   */
   #requireFidelityPlan(snapshot: DraftSnapshot): ImportFidelityPlan {
+    const refusal = editableImport(snapshot.sourceFormat);
+    requireStore(refusal.available, 'FORMAT_UNSUPPORTED_FOR_EDITABLE_IMPORT',
+      refusal.available ? '' : refusal.reason);
     const plan = deriveImportFidelityPlan(snapshot.fidelity, snapshot.sourceDigest, snapshot.sourceBytes);
     requireStore(plan, 'FIDELITY_OUTSIDE_TRACER', '当前导入的保真计划不符合受限边界。');
     return plan;
@@ -9582,7 +9857,7 @@ export class EditorialStore {
               sir.source_version_id, sir.provenance_id, sir.target_kind,
               sir.source_version_disposition, sir.retained_boundary_json,
               sir.named_non_effects_json, sir.record_digest, sir.imported_at,
-              sv.display_name, sv.object_digest, sv.source_digest, sv.content_digest,
+              sv.display_name, sv.format, sv.object_digest, sv.source_digest, sv.content_digest,
               sv.structure_digest, sv.parser_identity, co.byte_length,
               sp.acquisition_path, sp.locality, sp.sanitized_identity, sp.recorded_at
        FROM import_commits ic
@@ -9615,12 +9890,13 @@ export class EditorialStore {
     );
     const boundary = retained as ReviewBeforeSourceImportProjection['retainedBoundary'];
     requireStore(
-      boundary.kind === 'complete-local-file' && boundary.label === SOURCE_IMPORT_RETAINED_BOUNDARY_LABEL &&
-        boundary.format === 'DOCX' && boundary.displayName === asString(row.sanitized_identity) &&
+      boundary.kind === 'complete-local-file' &&
+        boundary.label === retainedBoundaryLabel(row.parser_identity !== null) &&
+        boundary.format === asString(row.format) && boundary.displayName === asString(row.sanitized_identity) &&
         boundary.sourceSha256 === asString(row.source_digest) &&
         boundary.sourceBytes === asNumber(row.byte_length) &&
-        boundary.contentDigest === asString(row.content_digest) &&
-        boundary.structureDigest === asString(row.structure_digest),
+        boundary.contentDigest === nullableString(row.content_digest) &&
+        boundary.structureDigest === nullableString(row.structure_digest),
       'STORE_CORRUPT',
       '来源导入保留边界与来源版本不一致。',
     );
@@ -9660,7 +9936,7 @@ export class EditorialStore {
       sourceVersionDisposition: disposition,
       source: {
         displayName: boundary.displayName,
-        format: 'DOCX',
+        format: boundary.format,
         sourceSha256: boundary.sourceSha256,
         sourceBytes: boundary.sourceBytes,
         provenanceLabel: '本机文件选择器 · 本地解析 · 未联网',

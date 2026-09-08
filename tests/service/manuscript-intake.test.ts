@@ -1,9 +1,13 @@
+import { randomUUID } from 'node:crypto';
+import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { EditorialStore } from '../../src/service/store.js';
 import { MANUSCRIPT_INTAKE_SCHEMA_VERSION, TASK_AUTHORIZATION_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
-import { importSample1Book, requireExactSample1 } from '../support/sample1-baseline.js';
+import type { SourceFormat } from '../../src/shared/protocol.js';
+import { importSample1Book, requireExactSample1, sample1Path } from '../support/sample1-baseline.js';
+import { syntheticPdfBytes } from '../support/synthetic-pdf.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 
 // Service-integration suite (L2) for multi-format intake (ADR 0072 §1–2). It drives the real
@@ -118,6 +122,195 @@ function downgradeToRevision17(databasePath: string): void {
     database.close();
   }
 }
+
+const encoder = new TextEncoder();
+
+function concat(...parts: Array<Uint8Array | string>): Uint8Array {
+  const encoded = parts.map((part) => (typeof part === 'string' ? encoder.encode(part) : part));
+  const buffer = new Uint8Array(encoded.reduce((sum, part) => sum + part.length, 0));
+  let offset = 0;
+  for (const part of encoded) {
+    buffer.set(part, offset);
+    offset += part.length;
+  }
+  return buffer;
+}
+
+/** One stored ZIP local entry, enough for the router and for the parser to read the archive. */
+function zipStoredEntry(name: string, data: string): Uint8Array {
+  const nameBytes = encoder.encode(name);
+  const dataBytes = encoder.encode(data);
+  const header = new Uint8Array(30);
+  header.set([0x50, 0x4b, 0x03, 0x04], 0);
+  header[18] = dataBytes.length & 0xff;
+  header[22] = dataBytes.length & 0xff;
+  header[26] = nameBytes.length & 0xff;
+  header[27] = (nameBytes.length >> 8) & 0xff;
+  return concat(header, nameBytes, dataBytes);
+}
+
+const ODF_TEXT = 'application/vnd.oasis.opendocument.text';
+
+/** Store refusals are read by their code; the message is product copy and not the assertion. */
+function expectStoreErrorCode(run: () => unknown, code: string): void {
+  try {
+    run();
+  } catch (error) {
+    expect((error as { code?: string }).code).toBe(code);
+    return;
+  }
+  throw new Error(`Expected a ${code} refusal.`);
+}
+
+/** Synthetic inputs only: bytes with no manuscript content, in every format the router recognises. */
+const SOURCE_ONLY_INPUTS: ReadonlyArray<{ format: SourceFormat; fileName: string; bytes: () => Uint8Array; reason: string }> = [
+  {
+    format: 'PDF', fileName: '固定版式样例.pdf', bytes: syntheticPdfBytes,
+    reason: 'PDF 为固定版式，没有可靠的可编辑往返；可作为来源材料保留。',
+  },
+  {
+    format: 'DOC', fileName: '旧版样例.doc',
+    bytes: () => concat(Uint8Array.of(0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1), new Uint8Array(504)),
+    reason: '旧版 Word（.doc）的本地转换尚未提供；可作为来源材料保留。',
+  },
+  {
+    format: 'RTF', fileName: '样例.rtf', bytes: () => concat('{\\rtf1\\ansi\\deff0}'),
+    reason: '该格式的本地转换尚未提供；可作为来源材料保留。',
+  },
+  {
+    format: 'ODT', fileName: '样例.odt', bytes: () => zipStoredEntry('mimetype', ODF_TEXT),
+    reason: '该格式的本地转换尚未提供；可作为来源材料保留。',
+  },
+  {
+    format: 'TXT', fileName: '样例.txt', bytes: () => concat('合成纯文本\n第二行\n'),
+    reason: '纯文本与 Markdown 的本地转换尚未提供；可作为来源材料保留。',
+  },
+  {
+    format: 'MD', fileName: '样例.md', bytes: () => concat('# 合成标题\n\n正文\n'),
+    reason: '纯文本与 Markdown 的本地转换尚未提供；可作为来源材料保留。',
+  },
+  {
+    format: 'UNKNOWN', fileName: '未知样例.dat', bytes: () => Uint8Array.of(0xff, 0xfe, 0x00, 0x41, 0x42),
+    reason: '无法识别文件格式；可作为来源材料保留。',
+  },
+];
+
+describe('multi-format intake over the real store', () => {
+  it('reads a DOCX exactly as before, whatever its name says', async () => {
+    await requireExactSample1(roots.codeRoot);
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const staged = await store.stageSelectedDocx(randomUUID(), sample1Path(roots.codeRoot));
+      expect(staged.source.format).toBe('DOCX');
+      expect(staged.editableImport).toEqual({ available: true });
+      expect(staged.detectedBlockCount).toBeGreaterThan(0);
+      expect(staged.fidelity.length).toBeGreaterThan(0);
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+  }, 120_000);
+
+  it.each(SOURCE_ONLY_INPUTS)(
+    'stages $format source-only and commits a Source Version with no parse',
+    async ({ format, fileName, bytes, reason }) => {
+      const selectedPath = join(roots.inputRoot, fileName);
+      await writeFile(selectedPath, bytes());
+      const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+      let commitId: string;
+      try {
+        const staged = await store.stageSelectedDocx(randomUUID(), selectedPath);
+        expect(staged.source.format).toBe(format);
+        expect(staged.editableImport).toEqual({
+          available: false,
+          code: 'FORMAT_UNSUPPORTED_FOR_EDITABLE_IMPORT',
+          reason,
+        });
+        // Nothing was parsed, so nothing is claimed: no fidelity, no blocks, the file name as title.
+        expect(staged.fidelity).toEqual([]);
+        expect(staged.detectedBlockCount).toBe(0);
+        expect(staged.titleSuggestion.sourceLabel).toBe('文件名');
+
+        // Editable import is refused whatever a client asks for, not only in the surface.
+        expectStoreErrorCode(
+          () => store.prepareNewBookReview(staged.draftId, staged.draftVersion,
+            { kind: 'new-book', choiceId: 'new-book', confirmedTitle: '不应创建' }, false),
+          'FORMAT_UNSUPPORTED_FOR_EDITABLE_IMPORT',
+        );
+
+        const review = store.prepareSourceImportReview(staged.draftId, staged.draftVersion, {
+          kind: 'new-book', choiceId: 'new-book', confirmedTitle: `来源材料 ${format}`, relationship: 'source-only',
+        });
+        expect(review.retainedBoundary).toMatchObject({
+          format,
+          label: '保留完整所选原始文件及其精确身份；未进行本地解析',
+          contentDigest: null,
+          structureDigest: null,
+        });
+        commitId = randomUUID();
+        const commit = await store.commitSourceImport({
+          draftId: staged.draftId,
+          expectedDraftVersion: review.draftVersion,
+          reviewDigest: review.reviewDigest,
+          commitId,
+        });
+        expect(commit.completionLabel).toBe('来源材料已导入');
+        expect(await store.acknowledgeImportCompletion(commitId)).toEqual({ state: 'acknowledged' });
+        store.markCleanShutdown();
+      } finally {
+        store.close();
+      }
+
+      const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+      try {
+        expect(tableRows(database, 'source_versions', 'format, content_digest, structure_digest, parser_identity'))
+          .toEqual([{ format, content_digest: null, structure_digest: null, parser_identity: null }]);
+        expect(tableRows(database, 'source_provenance', 'parser_identity')).toEqual([{ parser_identity: null }]);
+        // The retained original keeps its own extension, never the DOCX one.
+        expect(tableRows(database, 'content_objects', 'relative_key')).toEqual([
+          { relative_key: expect.stringMatching(new RegExp(`\\${OBJECT_EXTENSIONS[format]}$`, 'u')) },
+        ]);
+        expect(tableRows(database, 'staged_import_snapshots')).toEqual([]);
+        expect(tableRows(database, 'manuscripts')).toEqual([]);
+      } finally {
+        database.close();
+      }
+    },
+    120_000,
+  );
+
+  it('keeps refusing a hostile archive instead of retaining it', async () => {
+    // A traversal entry name is a hostile-input bound, not a "this is not a DOCX" verdict, so it
+    // stays a refusal with no source-only offer.
+    const selectedPath = join(roots.inputRoot, '恶意.docx');
+    await writeFile(selectedPath, zipStoredEntry('../escape.xml', '<Types/>'));
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      await expect(store.stageSelectedDocx(randomUUID(), selectedPath)).rejects.toMatchObject({ code: 'DOCX_REJECTED' });
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+  }, 120_000);
+
+  it('retains a ZIP that is not a WordprocessingML package as an unrecognised original', async () => {
+    const selectedPath = join(roots.inputRoot, '并非稿件.docx');
+    await writeFile(selectedPath, zipStoredEntry('readme.txt', 'not a package'));
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const staged = await store.stageSelectedDocx(randomUUID(), selectedPath);
+      expect(staged.source.format).toBe('UNKNOWN');
+      expect(staged.editableImport.available).toBe(false);
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+  }, 120_000);
+});
+
+const OBJECT_EXTENSIONS: Readonly<Record<SourceFormat, string>> = {
+  DOCX: '.docx', DOC: '.doc', PDF: '.pdf', ODT: '.odt', RTF: '.rtf', TXT: '.txt', MD: '.md', UNKNOWN: '.bin',
+};
 
 describe('schema revision 18 over the real store', () => {
   it('migrates a revision-17 store forward with every Source Version row byte for byte', async () => {

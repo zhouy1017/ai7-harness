@@ -265,15 +265,21 @@ function sourceCard(staged: StagedImportProjection): HTMLElement {
   sourceBytes.setAttribute('data-source-bytes', '');
   const sourceDigest = element('dd', 'technical-identity', staged.source.sourceSha256);
   sourceDigest.setAttribute('data-source-sha256', '');
+  const sourceFormat = element('dd', undefined, staged.source.format);
+  sourceFormat.setAttribute('data-source-format', staged.source.format);
   details.append(
     element('dt', undefined, '格式'),
-    element('dd', undefined, staged.source.format),
+    sourceFormat,
     element('dt', undefined, '来源'),
     element('dd', undefined, staged.source.provenanceLabel),
     element('dt', undefined, '来源字节数'),
     sourceBytes,
+    // A file the product did not parse detected no blocks, so it says what it retained instead of
+    // reporting a count of nothing.
     element('dt', undefined, '检测结果'),
-    element('dd', undefined, `${staged.detectedBlockCount} 个可编辑内容块`),
+    element('dd', undefined, staged.editableImport.available
+      ? `${staged.detectedBlockCount} 个可编辑内容块`
+      : '未进行本地解析；仅保留原始文件'),
   );
   card.append(details, technicalDetails(undefined, element('dt', undefined, '来源 SHA-256'), sourceDigest));
   return card;
@@ -3416,13 +3422,19 @@ function renderTargetChoice(
   );
   let revealedControl: HTMLElement | undefined;
   if (selectedChoice) {
+    // A format the product cannot read as an editable Manuscript states why, right above the one
+    // relationship it can still offer (ADR 0072 §2, V2-UX-IMP-006).
+    if (!staged.editableImport.available) {
+      content.append(element('p', 'attention-note', staged.editableImport.reason));
+    }
     const relationship = element('fieldset');
     relationship.setAttribute('role', 'radiogroup');
     relationship.setAttribute('aria-label', '本地文件与所选图书的关系');
     relationship.dataset['importRelationshipChoices'] = 'unselected-by-default';
     relationship.append(element('legend', undefined, '导入关系（默认不选择）'));
-    const allowedRelationships: ReadonlyArray<ImportRelationshipChoice> =
-      selectedChoice.kind === 'existing-book' && selectedChoice.manuscriptState === 'populated'
+    const allowedRelationships: ReadonlyArray<ImportRelationshipChoice> = !staged.editableImport.available
+      ? ['source-only']
+      : selectedChoice.kind === 'existing-book' && selectedChoice.manuscriptState === 'populated'
         ? ['source-only', 'reimport']
         : ['first-manuscript', 'source-only'];
     for (const relationshipKind of allowedRelationships) {
@@ -3886,21 +3898,29 @@ function renderSourceImportReview(
   retainedBytes.setAttribute('data-source-bytes', '');
   const retainedDigest = element('dd', 'technical-identity', review.retainedBoundary.sourceSha256);
   retainedDigest.setAttribute('data-source-sha256', '');
-  const contentDigest = element('dd', 'technical-identity', review.retainedBoundary.contentDigest);
-  contentDigest.setAttribute('data-content-digest', '');
-  const structureDigest = element('dd', 'technical-identity', review.retainedBoundary.structureDigest);
-  structureDigest.setAttribute('data-structure-digest', '');
   boundaryValues.append(
     element('dt', undefined, '保留边界'), element('dd', undefined, review.retainedBoundary.label),
     element('dt', undefined, '文件名'), element('dd', undefined, review.retainedBoundary.displayName),
     element('dt', undefined, '格式'), element('dd', undefined, review.retainedBoundary.format),
     element('dt', undefined, '来源字节数'), retainedBytes,
   );
+  // A retained original the product never parsed has no content or structure identity, so those two
+  // rows are absent rather than empty: the surface claims only what was actually derived.
+  const parsedDigestRows: HTMLElement[] = [];
+  if (review.retainedBoundary.contentDigest !== null && review.retainedBoundary.structureDigest !== null) {
+    const contentDigest = element('dd', 'technical-identity', review.retainedBoundary.contentDigest);
+    contentDigest.setAttribute('data-content-digest', '');
+    const structureDigest = element('dd', 'technical-identity', review.retainedBoundary.structureDigest);
+    structureDigest.setAttribute('data-structure-digest', '');
+    parsedDigestRows.push(
+      element('dt', undefined, '内容摘要'), contentDigest,
+      element('dt', undefined, '结构摘要'), structureDigest,
+    );
+  }
   boundary.append(element('h3', undefined, '完整本地文件与内容边界'), boundaryValues, technicalDetails(
     undefined,
     element('dt', undefined, '来源 SHA-256'), retainedDigest,
-    element('dt', undefined, '内容摘要'), contentDigest,
-    element('dt', undefined, '结构摘要'), structureDigest,
+    ...parsedDigestRows,
   ));
 
   const provenance = element('section', 'review-section');

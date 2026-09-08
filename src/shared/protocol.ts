@@ -1,4 +1,4 @@
-export const SERVICE_PROTOCOL_VERSION = 21 as const;
+export const SERVICE_PROTOCOL_VERSION = 22 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -251,10 +251,12 @@ export type BookRecordPresentation =
       provenanceId: string;
       bookId: string;
       displayName: string;
+      format: SourceFormat;
       sourceDigest: string;
-      contentDigest: string;
-      structureDigest: string;
-      parserIdentity: string;
+      /** Null together, for a retained original the product never parsed (ADR 0072 §2). */
+      contentDigest: string | null;
+      structureDigest: string | null;
+      parserIdentity: string | null;
       acquisitionPath: 'native-file-picker';
       locality: 'local-provider-free';
     }
@@ -303,12 +305,12 @@ export type BookRecordPresentation =
       sourceVersionDisposition: 'created' | 'reused-same-book';
       retainedBoundary: {
         kind: 'complete-local-file';
-        format: 'DOCX';
+        format: SourceFormat;
         displayName: string;
         sourceSha256: string;
         sourceBytes: number;
-        contentDigest: string;
-        structureDigest: string;
+        contentDigest: string | null;
+        structureDigest: string | null;
       };
       namedNonEffects: ReadonlyArray<string>;
       recordDigest: string;
@@ -489,6 +491,14 @@ export interface BookCreationCommitProjection {
  */
 export type SourceFormat = 'DOCX' | 'DOC' | 'PDF' | 'ODT' | 'RTF' | 'TXT' | 'MD' | 'UNKNOWN';
 
+/**
+ * What a source-only import retained. The second label belongs to an original the product kept
+ * whole without parsing, so it claims no content or structure identity it did not derive.
+ */
+export type SourceImportRetainedBoundaryLabel =
+  | '保留完整所选 DOCX 文件及本地解析出的完整内容与结构身份'
+  | '保留完整所选原始文件及其精确身份；未进行本地解析';
+
 /** Whether the staged file can become an editable Manuscript, and why not when it cannot. */
 export type EditableImportProjection =
   | { available: true }
@@ -512,11 +522,12 @@ export interface StagedImportProjection {
   draftVersion: number;
   source: {
     displayName: string;
-    format: 'DOCX';
+    format: SourceFormat;
     sourceSha256: string;
     sourceBytes: number;
     provenanceLabel: '本机文件选择器 · 本地解析 · 未联网';
   };
+  editableImport: EditableImportProjection;
   titleSuggestion: {
     value: string;
     sourceLabel: 'DOCX 标题元数据' | '文件名';
@@ -629,13 +640,13 @@ export interface ReviewBeforeSourceImportProjection {
   identityFindings: ReadonlyArray<ImportIdentityFindingProjection>;
   retainedBoundary: {
     kind: 'complete-local-file';
-    label: '保留完整所选 DOCX 文件及本地解析出的完整内容与结构身份';
-    format: 'DOCX';
+    label: SourceImportRetainedBoundaryLabel;
+    format: SourceFormat;
     displayName: string;
     sourceSha256: string;
     sourceBytes: number;
-    contentDigest: string;
-    structureDigest: string;
+    contentDigest: string | null;
+    structureDigest: string | null;
   };
   provenance: {
     acquisitionPath: 'native-file-picker';

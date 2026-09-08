@@ -10,7 +10,8 @@ import {
   type FidelityCategoryProjection,
 } from '../shared/protocol.js';
 
-const MAX_ARCHIVE_BYTES = 64 * 1024 * 1024;
+/** The intake router applies this same bound to a file of any format before it is retained. */
+export const MAX_ARCHIVE_BYTES = 64 * 1024 * 1024;
 const MAX_EXPANDED_BYTES = 96 * 1024 * 1024;
 const MAX_ENTRY_BYTES = 64 * 1024 * 1024;
 const MAX_ENTRY_COUNT = 256;
@@ -105,11 +106,16 @@ function graphemeCount(value: string): number {
   return Array.from(segmenter.segment(value)).length;
 }
 
-function safeDisplayName(input: string): string {
+/**
+ * The `.docx` extension is asked for only when nothing else has established the format. The intake
+ * router identifies a manuscript from its content (ADR 0072 §1) and says so, because a DOCX under
+ * any other name is still a DOCX; a caller that parses a file on the name alone keeps the check.
+ */
+function safeDisplayName(input: string, requireDocxExtension = true): string {
   requireDocx(input.isWellFormed(), 'invalid display name');
   const name = basename(input).normalize('NFC').replace(/[\u0000-\u001f\u007f]/g, '').trim();
   requireDocx(name.length > 0 && name.length <= 180, 'invalid display name');
-  requireDocx(extname(name).toLowerCase() === '.docx', 'selected file is not DOCX');
+  if (requireDocxExtension) requireDocx(extname(name).toLowerCase() === '.docx', 'selected file is not DOCX');
   return name;
 }
 
@@ -635,9 +641,9 @@ export async function parseDocx(
   displayNameInput: string,
   onBlock: (block: ParsedDocxBlock) => void,
   expectedSource?: { digest: string; bytes: number },
-  options: { signal?: AbortSignal; onArchiveProgress?: (bytes: number) => void } = {},
+  options: { signal?: AbortSignal; onArchiveProgress?: (bytes: number) => void; formatIdentified?: boolean } = {},
 ): Promise<ParsedDocx> {
-  const displayName = safeDisplayName(displayNameInput);
+  const displayName = safeDisplayName(displayNameInput, options.formatIdentified !== true);
   const archive = await readStreamingArchive(path, onBlock, options);
   if (expectedSource) {
     requireDocx(archive.sourceDigest === expectedSource.digest && archive.archiveBytes === expectedSource.bytes, 'selected file changed during staging');
