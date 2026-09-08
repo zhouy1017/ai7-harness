@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { EditorialStore } from '../../src/service/store.js';
-import { writeSyntheticDocx } from '../support/synthetic-docx.js';
+import { ADMITTED_SMALL_DOCX, composeManuscriptDocx } from '../support/composed-fixture.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 
 // Service-integration suite (L2) for the recovery path. An acknowledged journal edit followed by a
@@ -10,7 +10,7 @@ import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-d
 // from on its next start, so the suite closes the store without `markCleanShutdown` rather than
 // simulating the condition through the database.
 
-const TITLE = '恢复用合成书稿';
+const TITLE = '恢复用组稿书稿';
 const INSERTED_TEXT = '断电前写入的文字。';
 
 let roots: ServiceTestRoots;
@@ -23,21 +23,15 @@ afterEach(async () => {
   await roots.dispose();
 });
 
-async function importSyntheticBook(store: EditorialStore): Promise<{
+async function importComposedBook(store: EditorialStore): Promise<{
   bookId: string;
   manuscriptId: string;
   branchId: string;
 }> {
   const selectedPath = join(roots.inputRoot, 'fixture.docx');
-  await writeSyntheticDocx(selectedPath, {
-    coreTitle: TITLE,
-    paragraphs: [
-      { text: TITLE, style: 'Title' },
-      { text: '第一章', style: 'Heading1' },
-      { text: '第一段正文内容。' },
-      { text: '第二段正文内容。' },
-    ],
-  });
+  // What is recovered here is edited manuscript text, so the manuscript is composed from an admitted
+  // Public SampleBook rather than generated. Six blocks are enough: the subject is the journal, not size.
+  await composeManuscriptDocx(selectedPath, { source: ADMITTED_SMALL_DOCX, startBlock: 1, blocks: 6, title: TITLE });
   const staged = await store.stageSelectedDocx(randomUUID(), selectedPath);
   const review = store.prepareNewBookReview(
     staged.draftId,
@@ -86,12 +80,12 @@ function flushOneEdit(
 
 describe('recovery after an unclean close', () => {
   it('raises a recovery comparison, defers it, then restores the journal state', async () => {
-    let manuscript: Awaited<ReturnType<typeof importSyntheticBook>>;
+    let manuscript: Awaited<ReturnType<typeof importComposedBook>>;
     let edit: ReturnType<typeof flushOneEdit>;
 
     const interrupted = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     try {
-      manuscript = await importSyntheticBook(interrupted);
+      manuscript = await importComposedBook(interrupted);
       edit = flushOneEdit(interrupted, manuscript.manuscriptId, manuscript.branchId);
       expect(edit.sequence).toBe(1);
     } finally {
