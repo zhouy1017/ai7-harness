@@ -10,11 +10,13 @@ import type { CoverageManifestProjection, CoverageManifestUnitProjection } from 
 const DIGEST_PATTERN = /^[0-9a-f]{64}$/;
 
 /**
- * A manifest is only ever read here for `digest` and for each unit's `sectionOrdinal`, so the fixture
- * states exactly the section layout under test: `sections` gives the number of units in each section,
- * in section order.
+ * A manifest is read for each unit's `sectionOrdinal` and its content digest, so the fixture states
+ * exactly the section layout under test: `sections` gives the number of units in each section, in
+ * section order. `minting` stands for one import of that manuscript: it moves every block identity and
+ * the manifest's own digest, both of which a real import mints afresh, and moves no unit content
+ * digest, which a real import derives from the block content and therefore reproduces.
  */
-function manifest(sections: ReadonlyArray<number>, digest = 'm'.repeat(64)): Pick<CoverageManifestProjection, 'digest' | 'units'> {
+function manifest(sections: ReadonlyArray<number>, minting = 'a'): Pick<CoverageManifestProjection, 'digest' | 'units'> {
   const units: CoverageManifestUnitProjection[] = [];
   sections.forEach((unitCount, index) => {
     for (let subUnit = 1; subUnit <= unitCount; subUnit += 1) {
@@ -29,15 +31,15 @@ function manifest(sections: ReadonlyArray<number>, digest = 'm'.repeat(64)): Pic
         headingLevel: null,
         startPosition: ordinal,
         endPosition: ordinal,
-        blockIds: [`blk_${String(ordinal).padStart(24, '0')}`],
+        blockIds: [`blk_${(minting + String(ordinal)).padStart(24, '0')}`],
         blockDigests: [String(ordinal).padStart(64, '0')],
         overlapBlockIds: [],
         graphemes: 10,
-        digest: String(ordinal).padStart(64, 'a'),
+        digest: String(ordinal).padStart(64, 'e'),
       });
     }
   });
-  return { digest, units };
+  return { digest: minting.repeat(64).slice(0, 64), units };
 }
 
 function candidate(ref: string, unitOrdinal: number, tier = 'medium'): AssuranceSamplingCandidate {
@@ -60,18 +62,14 @@ describe('drawAssuranceSample (ADR 0066 §Assurance sampling)', () => {
   });
 
   /**
-   * The seed is a function of the manifest digest, which covers the minted identities of one import,
-   * so it moves when the same manuscript is imported again. The keyed hash therefore decides *which*
-   * candidates are drawn and nothing else: the drawn set is emitted in candidate order, which both
-   * kinds derive from the manuscript and the model. Without this a fixture could not answer a sampling
-   * turn twice, because the listing — and the digest over it — would flip between imports.
+   * The keyed hash decides *which* candidates are drawn and nothing else: the drawn set is emitted in
+   * candidate order, which both kinds derive from the manuscript and the model. Without this a fixture
+   * could not answer a sampling turn twice, because the listing — and the digest over it — would flip.
    */
   it('emits the drawn candidates in candidate order, whatever the seed does to the selection', () => {
     const set = candidates(1, 6);
-    for (const digest of ['m'.repeat(64), 'n'.repeat(64), '0'.repeat(64)]) {
-      const draw = drawAssuranceSample(manifest([8], digest), set);
-      expect(draw.sampled.map((entry) => entry.ref)).toEqual(['0', '1', '2', '3', '4', '5']);
-    }
+    const draw = drawAssuranceSample(manifest([8]), set);
+    expect(draw.sampled.map((entry) => entry.ref)).toEqual(['0', '1', '2', '3', '4', '5']);
     // A partial draw keeps candidate order too; only its membership follows the seed.
     const partial = drawAssuranceSample(manifest([8]), candidates(1, 40));
     const positions = partial.sampled.map((entry) => Number(entry.ref));
@@ -93,23 +91,53 @@ describe('drawAssuranceSample (ADR 0066 §Assurance sampling)', () => {
   });
 
   /**
-   * The property acceptance criterion 1 turns on: an editor holding only the recorded seed and the
-   * revision's own findings can redraw the identical sample and check that this is the set that was
-   * asked about. Nothing here consults a clock, an insertion order, or `Math.random`.
+   * The property acceptance criterion 1 turns on, and the reason revision 3 moved the seed off the
+   * manifest digest: every input is content. A manifest digest covers the minted identities of one
+   * import, so a seed taken over it would move on re-import and no fixture could answer a *partial*
+   * sample — the drawn membership would differ from the one the fixture was written for.
    */
-  it('is reproducible from the manifest and the findings alone, and moves when either does', () => {
+  it('draws the same seed and the same sample from two mintings of one manuscript', () => {
+    // Forty candidates in three sections, so the draw is genuinely partial: thirty of the forty.
+    const set = [...candidates(1, 20), ...candidates(4, 12, 20), ...candidates(6, 8, 32)];
+    const first = drawAssuranceSample(manifest([3, 2, 4], 'a'), set);
+    expect(first.size).toBe(DEFAULT_ASSURANCE_SAMPLE_SIZE);
+    expect(first.size).toBeLessThan(first.candidateCount);
+
+    // A second import of the same manuscript: every block identity is new, the manifest's own digest
+    // is new, and the factual kind's refs are minted afresh from those block identities.
+    const remintedManifest = manifest([3, 2, 4], 'b');
+    const remintedSet = set.map((entry, index) => ({ ...entry, ref: `fnd_${String(index).padStart(24, 'f')}` }));
+    expect(JSON.stringify(remintedManifest)).not.toContain('blk_0000000000000000000000a1');
+    expect(remintedSet.map((entry) => entry.ref)).not.toEqual(set.map((entry) => entry.ref));
+
+    const second = drawAssuranceSample(remintedManifest, remintedSet);
+    expect(second.seed).toBe(first.seed);
+    expect(second.strata).toEqual(first.strata);
+    // The same findings were drawn: same positions in candidate order, whatever they are now called.
+    const positionsOf = (draw: typeof first, source: ReadonlyArray<AssuranceSamplingCandidate>) =>
+      draw.sampled.map((entry) => source.indexOf(entry) + 1);
+    expect(positionsOf(second, remintedSet)).toEqual(positionsOf(first, set));
+    expect(second.sampled.map((entry) => entry.text)).toEqual(first.sampled.map((entry) => entry.text));
+  });
+
+  it('draws a different seed whenever the findings differ in content', () => {
     const layout = manifest([3, 2, 4]);
     const set = [...candidates(1, 5), ...candidates(4, 4, 5), ...candidates(6, 6, 9)];
     const first = drawAssuranceSample(layout, set);
-    const redrawn = drawAssuranceSample(layout, set.map((entry) => ({ ...entry })));
-    expect(redrawn).toEqual(first);
-    // A different manuscript revision is a different manifest digest, so the same findings redraw differently.
-    expect(drawAssuranceSample(manifest([3, 2, 4], 'n'.repeat(64)), set).seed).not.toBe(first.seed);
-    // One changed finding text is a changed finding set.
+    expect(drawAssuranceSample(layout, set.map((entry) => ({ ...entry }))).seed).toBe(first.seed);
+    // One changed finding text is a changed finding set — the case a re-Run over an edited manuscript
+    // produces, and the one a fixture entry must not be allowed to answer by accident.
     const edited = set.map((entry, index) => (index === 0 ? { ...entry, text: '合成发现（已改）。' } : entry));
     expect(drawAssuranceSample(layout, edited).seed).not.toBe(first.seed);
-    // One finding fewer is too.
+    // So is a changed tier, a changed anchor unit, one finding fewer, and a different order.
+    expect(drawAssuranceSample(layout, set.map((entry, index) => (index === 0 ? { ...entry, tier: 'low' } : entry))).seed).not.toBe(first.seed);
+    expect(drawAssuranceSample(layout, set.map((entry, index) => (index === 0 ? { ...entry, unitOrdinal: 2 } : entry))).seed).not.toBe(first.seed);
     expect(drawAssuranceSample(layout, set.slice(1)).seed).not.toBe(first.seed);
+    expect(drawAssuranceSample(layout, [set[1]!, set[0]!, ...set.slice(2)]).seed).not.toBe(first.seed);
+    // A changed unit content digest is a changed manuscript, and moves it too.
+    const edits = manifest([3, 2, 4]);
+    expect(drawAssuranceSample({ units: edits.units.map((unit, index) => (index === 0 ? { ...unit, digest: '9'.repeat(64) } : unit)) }, set).seed)
+      .not.toBe(first.seed);
   });
 
   it('refuses to stratify a candidate whose unit the manifest does not hold', () => {

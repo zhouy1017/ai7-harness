@@ -310,12 +310,41 @@ export interface AssuranceSamplingTurn {
 }
 
 /**
- * The keyed hash one candidate is ordered by inside its stratum. It is a function of the seed and the
- * candidate's own `ref`, so the draw is reproducible from the recorded seed alone and no shuffle,
- * clock, or `Math.random` is involved anywhere in the analysis service.
+ * The keyed hash one candidate is ordered by inside its stratum: a function of the seed and the
+ * candidate's 1-based position in candidate order. Position rather than `ref`, for the same reason the
+ * seed is taken over content — the factual kind mints a `ref` per import — so no shuffle, clock, or
+ * `Math.random` is involved anywhere in the analysis service and the draw is the same on every import.
  */
-function sortKey(seed: string, ref: string): string {
-  return sha256Hex(`${seed}${ref}`);
+function sortKey(seed: string, position: number): string {
+  return sha256Hex(`${seed}${position}`);
+}
+
+/**
+ * The digest of one candidate set: SHA-256 over the canonical JSON of the candidates at their
+ * positions, never over a `ref`. Together with the manifest's unit content digests it makes the seed a
+ * function of the manuscript and the findings alone.
+ */
+function findingsDigestOf(candidates: ReadonlyArray<AssuranceSamplingCandidate>): string {
+  return sha256Hex(canonicalJson(candidates.map((candidate, index) => ({
+    position: index + 1,
+    unitOrdinal: candidate.unitOrdinal,
+    tier: candidate.tier,
+    text: candidate.text,
+  }))));
+}
+
+/**
+ * The seed the draw is keyed by: a function of the manifest's unit content digests in ordinal order
+ * and of the candidates at their positions. Every input is content — a unit digest is taken over block
+ * content digests, never over minted block identities — so the same manuscript and the same findings
+ * seed the same draw on every import, which is what lets a fixture answer a partial sample at all.
+ * The manifest digest could not give this: it covers the import's own minted identities.
+ */
+export function assuranceSampleSeed(
+  unitDigests: ReadonlyArray<string>,
+  candidates: ReadonlyArray<AssuranceSamplingCandidate>,
+): string {
+  return sha256Hex(canonicalJson({ unitDigests, findingsDigest: findingsDigestOf(candidates) }));
 }
 
 /**
@@ -329,20 +358,22 @@ function sortKey(seed: string, ref: string): string {
  * default it is drawn to otherwise. The size is still never more than the candidate count.
  */
 export function drawAssuranceSample(
-  manifest: Pick<CoverageManifestProjection, 'digest' | 'units'>,
+  manifest: Pick<CoverageManifestProjection, 'units'>,
   candidates: ReadonlyArray<AssuranceSamplingCandidate>,
 ): AssuranceSampleDraw {
-  const findingsDigest = sha256Hex(canonicalJson(candidates));
-  const seed = sha256Hex(canonicalJson({ manifestDigest: manifest.digest, findingsDigest }));
-  const groups = new Map<number, AssuranceSamplingCandidate[]>();
-  for (const candidate of candidates) {
+  const seed = assuranceSampleSeed(manifest.units.map((unit) => unit.digest), candidates);
+  // Each candidate travels with its 1-based position in candidate order: the position is what the
+  // seed digested and what the sort key is taken over, and it is the same on every import.
+  const groups = new Map<number, Array<{ candidate: AssuranceSamplingCandidate; position: number }>>();
+  candidates.forEach((candidate, index) => {
     const unit = manifest.units[candidate.unitOrdinal - 1];
     requireAnalysis(unit !== undefined && unit.ordinal === candidate.unitOrdinal,
       'ANALYSIS_ASSURANCE_STRATUM_UNKNOWN', '抽样候选发现的单元不在覆盖清单内，无法按结构段分层。');
+    const entry = { candidate, position: index + 1 };
     const group = groups.get(unit.sectionOrdinal);
-    if (group === undefined) groups.set(unit.sectionOrdinal, [candidate]);
-    else group.push(candidate);
-  }
+    if (group === undefined) groups.set(unit.sectionOrdinal, [entry]);
+    else group.push(entry);
+  });
   const sections = [...groups.keys()].sort((left, right) => left - right);
   if (sections.length === 0) {
     return { seed, size: 0, candidateCount: 0, strata: [], sampled: [] };
@@ -377,21 +408,22 @@ export function drawAssuranceSample(
     if (!placed) break;
   }
   const strata: AnalysisAssuranceSampleStratumProjection[] = [];
-  const drawn = new Set<string>();
+  const drawn = new Set<number>();
   for (const section of sections) {
     const group = groups.get(section)!;
     const take = quota.get(section)!;
     const ordered = [...group].sort((left, right) => {
-      const keys = [sortKey(seed, left.ref), sortKey(seed, right.ref)];
-      return keys[0]! < keys[1]! ? -1 : keys[0]! > keys[1]! ? 1 : left.ref < right.ref ? -1 : left.ref > right.ref ? 1 : 0;
+      const keys = [sortKey(seed, left.position), sortKey(seed, right.position)];
+      return keys[0]! < keys[1]! ? -1 : keys[0]! > keys[1]! ? 1 : left.position - right.position;
     });
     strata.push({ sectionOrdinal: section, candidates: group.length, sampled: take });
-    for (const candidate of ordered.slice(0, take)) drawn.add(candidate.ref);
+    for (const entry of ordered.slice(0, take)) drawn.add(entry.position);
   }
   // The keyed hash decides *which* candidates are drawn; they are emitted in candidate order, which
-  // both kinds derive from the manuscript and the model rather than from the seed. A turn's listing is
-  // therefore the same on every import of one manuscript, which is what lets a fixture answer it.
-  const sampled = candidates.filter((candidate) => drawn.has(candidate.ref));
+  // both kinds derive from the manuscript and the model rather than from the seed. Membership and
+  // listing are therefore both the same on every import of one manuscript, which is what lets a
+  // fixture answer a sampling turn — a partial sample included.
+  const sampled = candidates.filter((_candidate, index) => drawn.has(index + 1));
   return { seed, size: sampled.length, candidateCount: candidates.length, strata, sampled };
 }
 

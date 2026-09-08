@@ -1242,14 +1242,18 @@ async function main() {
       sameRecord(revision.reducerClosure.stages[5], { stage: 'assurance-sampling', state: 'closed', inputCount: assuranceSample.candidateCount }),
       'assurance-sample-closed', { assuranceSample, stages: revision.reducerClosure.stages });
 
-    // The seed is reproducible from the revision's own manifest digest and its own findings: an editor
-    // holding only what the revision discloses can redraw the identical sample and check the set.
+    // The seed is reproducible from content alone — the manifest's unit content digests in ordinal
+    // order and the revision's own findings at their positions, never a minted identity or a `ref`
+    // (revision 3). An editor holding only what the revision discloses can redraw the identical sample
+    // and check that this is the set that was asked about.
+    const unitDigests = manifest.units.map((unit) => unit.digest);
     const candidates = revision.crossUnitFindings.map((finding, index) => ({
-      ref: String(index), unitOrdinal: finding.sides[0].unitOrdinal, tier: finding.confidence, text: finding.description,
+      position: index + 1, unitOrdinal: finding.sides[0].unitOrdinal, tier: finding.confidence, text: finding.description,
     }));
     const findingsDigest = sha256Hex(canonicalJson(candidates));
-    requireJourney(assuranceSample.seed === sha256Hex(canonicalJson({ manifestDigest: manifest.digest, findingsDigest })),
-      'assurance-sample-seed-redrawn', { seed: assuranceSample.seed, manifestDigest: manifest.digest });
+    requireJourney(assuranceSample.seed === sha256Hex(canonicalJson({ unitDigests, findingsDigest })) &&
+      !JSON.stringify(candidates).includes('blk_'),
+      'assurance-sample-seed-redrawn', { seed: assuranceSample.seed, unitDigests, findingsDigest });
 
     // Exact sample1 is one structural section, so the stratum is one; every section holding a finding
     // contributes at least one disposition, and here that is the whole sample.
