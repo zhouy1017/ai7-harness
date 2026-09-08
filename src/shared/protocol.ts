@@ -1,4 +1,4 @@
-export const SERVICE_PROTOCOL_VERSION = 23 as const;
+export const SERVICE_PROTOCOL_VERSION = 24 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -257,6 +257,13 @@ export type BookRecordPresentation =
       contentDigest: string | null;
       structureDigest: string | null;
       parserIdentity: string | null;
+      /**
+       * Null together, and set only for an original the product read through a converted DOCX
+       * working representation: the object the Manuscript was read from, and who converted it. The
+       * digest of record above stays the original file's (ADR 0072 §2).
+       */
+      workingObjectDigest: string | null;
+      converterIdentity: string | null;
       acquisitionPath: 'native-file-picker';
       locality: 'local-provider-free';
     }
@@ -499,9 +506,22 @@ export type SourceImportRetainedBoundaryLabel =
   | '保留完整所选 DOCX 文件及本地解析出的完整内容与结构身份'
   | '保留完整所选原始文件及其精确身份；未进行本地解析';
 
-/** Whether the staged file can become an editable Manuscript, and why not when it cannot. */
+/**
+ * The converter a format is read through, and the format it was read from. A format with no
+ * conversion is read natively; nothing else in the product may present a conversion as a native
+ * read (ADR 0072 §2, §3).
+ */
+export interface ManuscriptConversionProjection {
+  converterIdentity: string;
+  sourceFormat: 'TXT' | 'MD';
+}
+
+/**
+ * Whether the staged file can become an editable Manuscript, why not when it cannot, and through
+ * which converter when it can only be read through one.
+ */
 export type EditableImportProjection =
-  | { available: true }
+  | { available: true; conversion?: ManuscriptConversionProjection }
   | { available: false; code: 'FORMAT_UNSUPPORTED_FOR_EDITABLE_IMPORT'; reason: string };
 
 export interface ImportIdentityFindingProjection {
@@ -526,6 +546,10 @@ export interface StagedImportProjection {
     sourceSha256: string;
     sourceBytes: number;
     provenanceLabel: '本机文件选择器 · 本地解析 · 未联网';
+    /** What this draft was actually read through, or null when the file was read natively. */
+    conversion: ManuscriptConversionProjection | null;
+    /** The working representation's own digest, never the digest of record (ADR 0072 §2). */
+    workingObjectSha256: string | null;
   };
   editableImport: EditableImportProjection;
   titleSuggestion: {

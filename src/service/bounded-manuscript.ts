@@ -39,7 +39,7 @@ import {
   type SearchResultsProjection,
   type SearchSummaryProjection,
 } from '../shared/protocol.js';
-import { deriveImportFidelityPlan } from './docx.js';
+import { deriveImportFidelityPlan, type FidelityConversionIdentity } from './docx.js';
 import type { BuiltInWorkflowProfile } from './native-workflow-profile.js';
 import {
   EDITORIAL_WORKSPACE_PROFILE_BOOK_PINS_SCHEMA_SQL,
@@ -61,6 +61,7 @@ import {
   TASK_AUTHORIZATION_SCHEMA_SQL,
   TASK_AUTHORIZATION_SCHEMA_VERSION,
   TASK_AUTHORIZATION_TRIGGER_SQL,
+  TEXT_CONVERSION_SCHEMA_VERSION,
 } from './task-authorization.js';
 
 /**
@@ -186,8 +187,9 @@ const COMMON_SCHEMA_SQL = {
     UNIQUE(dimension_set_id, position)
   ) STRICT`,
   // Revision 18 widens the format and makes the three parse fields nullable together, so a Source
-  // Version may be a retained original the product never parsed; both shapes are accepted because a
-  // store below the terminal revision still carries the first one.
+  // Version may be a retained original the product never parsed; revision 19 appends the working
+  // representation an original was read through and the converter that produced it. Every shape is
+  // accepted because a store below the terminal revision still carries an earlier one.
   source_versions: [
     `CREATE TABLE source_versions (
     source_version_id TEXT PRIMARY KEY,
@@ -213,6 +215,23 @@ const COMMON_SCHEMA_SQL = {
     format TEXT NOT NULL CHECK(format IN ('DOCX', 'DOC', 'PDF', 'ODT', 'RTF', 'TXT', 'MD', 'UNKNOWN')),
     display_name TEXT NOT NULL,
     created_at TEXT NOT NULL,
+    CHECK((content_digest IS NULL) = (structure_digest IS NULL) AND (structure_digest IS NULL) = (parser_identity IS NULL)),
+    UNIQUE(book_id, source_digest)
+  ) STRICT`,
+    // Exactly what revision 19's two `ALTER TABLE ADD COLUMN` statements leave behind: SQLite
+    // appends each new column after the last column definition and before the table constraints.
+    `CREATE TABLE source_versions (
+    source_version_id TEXT PRIMARY KEY,
+    book_id TEXT NOT NULL REFERENCES books(book_id),
+    object_digest TEXT NOT NULL REFERENCES content_objects(object_digest),
+    source_digest TEXT NOT NULL CHECK(length(source_digest) = 64),
+    content_digest TEXT CHECK(content_digest IS NULL OR length(content_digest) = 64),
+    structure_digest TEXT CHECK(structure_digest IS NULL OR length(structure_digest) = 64),
+    parser_identity TEXT,
+    format TEXT NOT NULL CHECK(format IN ('DOCX', 'DOC', 'PDF', 'ODT', 'RTF', 'TXT', 'MD', 'UNKNOWN')),
+    display_name TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    working_object_digest TEXT REFERENCES content_objects(object_digest), converter_identity TEXT,
     CHECK((content_digest IS NULL) = (structure_digest IS NULL) AND (structure_digest IS NULL) = (parser_identity IS NULL)),
     UNIQUE(book_id, source_digest)
   ) STRICT`,
@@ -332,7 +351,9 @@ const COMMON_SCHEMA_SQL = {
         AND uncertainty_code IS NULL)
     )
   ) STRICT`,
-  import_abandonment_cleanup_intents: `CREATE TABLE import_abandonment_cleanup_intents (
+  // Revision 19 appends the working representation the cleanup must remove beside the original.
+  import_abandonment_cleanup_intents: [
+    `CREATE TABLE import_abandonment_cleanup_intents (
     draft_id TEXT PRIMARY KEY REFERENCES import_drafts(draft_id),
     object_digest TEXT NOT NULL UNIQUE REFERENCES content_objects(object_digest),
     expected_draft_version INTEGER NOT NULL CHECK(expected_draft_version >= 1),
@@ -345,6 +366,20 @@ const COMMON_SCHEMA_SQL = {
       OR (state = 'bytes-removed' AND bytes_removed_at IS NOT NULL)
     )
   ) STRICT`,
+    `CREATE TABLE import_abandonment_cleanup_intents (
+    draft_id TEXT PRIMARY KEY REFERENCES import_drafts(draft_id),
+    object_digest TEXT NOT NULL UNIQUE REFERENCES content_objects(object_digest),
+    expected_draft_version INTEGER NOT NULL CHECK(expected_draft_version >= 1),
+    relative_key TEXT NOT NULL,
+    state TEXT NOT NULL CHECK(state IN ('prepared', 'bytes-removed')),
+    requested_at TEXT NOT NULL,
+    bytes_removed_at TEXT, working_object_digest TEXT,
+    CHECK(
+      (state = 'prepared' AND bytes_removed_at IS NULL)
+      OR (state = 'bytes-removed' AND bytes_removed_at IS NOT NULL)
+    )
+  ) STRICT`,
+  ],
 } as const;
 
 const MIGRATED_CONTINUITY_IMPORT_DRAFT_SQL = `CREATE TABLE import_drafts (
@@ -1065,8 +1100,9 @@ const MANUSCRIPT_REIMPORT_SCHEMA_SQL = {
     round_trip_guaranteed INTEGER NOT NULL CHECK(round_trip_guaranteed = 0),
     created_at TEXT NOT NULL
   ) STRICT`,
-  // Revision 18 appends the format the draft's file was identified as; both shapes are accepted
-  // because a store below the terminal revision has not gained the column yet.
+  // Revision 18 appends the format the draft's file was identified as and revision 19 the working
+  // representation it was read through; every shape is accepted because a store below the terminal
+  // revision has not gained the columns yet.
   import_drafts: [
     `CREATE TABLE import_drafts (
     draft_id TEXT PRIMARY KEY,
@@ -1127,6 +1163,37 @@ const MANUSCRIPT_REIMPORT_SCHEMA_SQL = {
     reviewed_branch_id TEXT REFERENCES manuscript_branches(branch_id),
     source_format TEXT NOT NULL DEFAULT 'DOCX'
       CHECK(source_format IN ('DOCX', 'DOC', 'PDF', 'ODT', 'RTF', 'TXT', 'MD', 'UNKNOWN'))
+  ) STRICT`,
+    `CREATE TABLE import_drafts (
+    draft_id TEXT PRIMARY KEY,
+    selection_token TEXT NOT NULL UNIQUE,
+    state TEXT NOT NULL CHECK(state IN ('staged', 'reviewed', 'committed')),
+    draft_version INTEGER NOT NULL CHECK(draft_version >= 1),
+    display_name TEXT NOT NULL,
+    object_digest TEXT NOT NULL REFERENCES content_objects(object_digest),
+    selected_path TEXT,
+    reviewed_title TEXT,
+    reviewed_target_choice_id TEXT
+      CHECK(reviewed_target_choice_id IS NULL OR reviewed_target_choice_id IN ('new-book', 'new-book-distinct-intended-work')),
+    review_digest TEXT UNIQUE,
+    committed_commit_id TEXT UNIQUE,
+    staged_at TEXT NOT NULL,
+    reviewed_at TEXT,
+    committed_at TEXT,
+    reviewed_target_kind TEXT CHECK(reviewed_target_kind IS NULL OR reviewed_target_kind IN ('new-book', 'existing-book')),
+    reviewed_existing_book_id TEXT REFERENCES books(book_id),
+    reviewed_relationship TEXT
+      CHECK(reviewed_relationship IS NULL OR reviewed_relationship IN ('new-book-first-manuscript', 'first-manuscript', 'source-only', 'reimport')),
+    reviewed_book_state_digest TEXT
+      CHECK(reviewed_book_state_digest IS NULL OR length(reviewed_book_state_digest) = 64),
+    reviewed_reuse_source_version_id TEXT REFERENCES source_versions(source_version_id),
+    reviewed_lineage_status TEXT CHECK(reviewed_lineage_status IS NULL OR reviewed_lineage_status IN ('verified', 'unconfirmed')),
+    reviewed_lineage_source_version_id TEXT REFERENCES source_versions(source_version_id),
+    reviewed_checkpoint_revision_id TEXT REFERENCES manuscript_revisions(revision_id),
+    reviewed_manuscript_id TEXT REFERENCES manuscripts(manuscript_id),
+    reviewed_branch_id TEXT REFERENCES manuscript_branches(branch_id),
+    source_format TEXT NOT NULL DEFAULT 'DOCX'
+      CHECK(source_format IN ('DOCX', 'DOC', 'PDF', 'ODT', 'RTF', 'TXT', 'MD', 'UNKNOWN')), working_object_digest TEXT, converter_identity TEXT
   ) STRICT`,
   ],
   import_commits: `CREATE TABLE import_commits (
@@ -1903,6 +1970,21 @@ function foreignKeySignature(row: SqlRow): string {
   return `${row.from}>${row.table}.${row.to}:${row.on_update}/${row.on_delete}/${row.match}`;
 }
 
+/**
+ * The conversion a persisted report must be rebuilt with, from the converter identity and format a
+ * row carries: a review whose loss a converter caused reconstructs only when that converter is
+ * named, so a converted import and a parsed one are never read back as each other (ADR 0072 §3).
+ */
+function rowFidelityConversion(
+  converterIdentity: SQLOutputValue | undefined,
+  format: SQLOutputValue | undefined,
+): FidelityConversionIdentity | undefined {
+  if (converterIdentity === null || converterIdentity === undefined) return undefined;
+  const sourceFormat = asString(format);
+  requireBounded(sourceFormat === 'TXT' || sourceFormat === 'MD', 'SCHEMA_INVALID', '转换来源格式无效。');
+  return { identity: asString(converterIdentity), sourceFormat };
+}
+
 function requireExactTableSchema(db: DatabaseSync, name: string, expectedSql: string | ReadonlyArray<string>): void {
   const actualSql = schemaObjectSql(db, 'table', name);
   const expectedCandidates = typeof expectedSql === 'string' ? [expectedSql] : expectedSql;
@@ -1962,6 +2044,12 @@ function requireExactTableSchema(db: DatabaseSync, name: string, expectedSql: st
     // Revision 16 (Issue #93): an update Task names the predecessor Result Set Revision it updates.
     ...(name === 'analysis_task_intents' && canonicalSchemaSql(matchedExpectedSql) === canonicalSchemaSql(ANALYSIS_LEDGER_SCHEMA_SQL.analysis_task_intents)
       ? ['predecessor_revision_id>analysis_result_set_revisions.revision_id:NO ACTION/NO ACTION/NONE']
+      : []),
+    // Revision 19 (Issue #356): a Source Version may link the working representation it was read
+    // through, which is a content object of its own beside the original.
+    ...(name === 'source_versions' &&
+      canonicalSchemaSql(matchedExpectedSql) === canonicalSchemaSql(COMMON_SCHEMA_SQL.source_versions[2]!)
+      ? ['working_object_digest>content_objects.object_digest:NO ACTION/NO ACTION/NONE']
       : []),
   ].sort();
   requireBounded(
@@ -4581,7 +4669,8 @@ function validateManuscriptReimportTruth(db: DatabaseSync): void {
         'SCHEMA_INVALID', '稿件重新导入当前解决摘要无效。');
       const reviewedDraft = one(db.prepare(
         `SELECT d.draft_version, d.object_digest, d.review_digest, d.reviewed_book_state_digest,
-                d.reviewed_reuse_source_version_id, b.stable_identity, co.byte_length source_bytes,
+                d.reviewed_reuse_source_version_id, d.source_format, d.converter_identity,
+                b.stable_identity, co.byte_length source_bytes,
                 ss.fidelity_json
          FROM import_drafts d
          JOIN books b ON b.book_id = ?
@@ -4617,6 +4706,7 @@ function validateManuscriptReimportTruth(db: DatabaseSync): void {
         reviewFidelity,
         asString(comparison.staged_source_digest),
         asNumber(reviewedDraft.source_bytes),
+        rowFidelityConversion(reviewedDraft.converter_identity, reviewedDraft.source_format),
       );
       requireBounded(reviewPlan !== undefined, 'SCHEMA_INVALID', '稿件重新导入保真复核不符合受限边界。');
       const degradationDecisionState = reviewPlan.degradations.length === 0
@@ -4655,7 +4745,7 @@ function validateManuscriptReimportTruth(db: DatabaseSync): void {
       requireBounded(reviewDigest === asString(reviewedDraft.review_digest),
         'SCHEMA_INVALID', '稿件重新导入复核摘要无效。');
       const record = db.prepare(
-        `SELECT rr.*, sv.source_digest, co.byte_length source_bytes,
+        `SELECT rr.*, sv.source_digest, sv.format, sv.converter_identity, co.byte_length source_bytes,
                 fr.outcome fidelity_outcome, fr.review_digest fidelity_review_digest,
                 dd.decision degradation_decision
          FROM manuscript_reimport_records rr
@@ -4704,7 +4794,12 @@ function validateManuscriptReimportTruth(db: DatabaseSync): void {
             detail: asString(row.detail),
           };
         });
-        const plan = deriveImportFidelityPlan(categories, asString(record.source_digest), asNumber(record.source_bytes));
+        const plan = deriveImportFidelityPlan(
+          categories,
+          asString(record.source_digest),
+          asNumber(record.source_bytes),
+          rowFidelityConversion(record.converter_identity, record.format),
+        );
         const degradationDecision = plan && plan.degradations.length > 0
           ? canonicalJson({
               schema: 'ai7.import-degradation-decision/1',
@@ -4823,7 +4918,8 @@ export function initializeBoundedSchema(
       version === MODEL_SERVICE_SCHEMA_VERSION || version === NATIVE_ARTIFACT_SCHEMA_VERSION ||
       version === AUTHORITY_SIDECAR_SCHEMA_VERSION || version === J03_TASK_AUTHORIZATION_SCHEMA_VERSION ||
       version === J04_BASELINE_ANALYSIS_SCHEMA_VERSION || version === SUCCESSIVE_TASK_SCHEMA_VERSION ||
-      version === TASK_AUTHORIZATION_SCHEMA_VERSION || version === MANUSCRIPT_INTAKE_SCHEMA_VERSION,
+      version === TASK_AUTHORIZATION_SCHEMA_VERSION || version === MANUSCRIPT_INTAKE_SCHEMA_VERSION ||
+      version === TEXT_CONVERSION_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -4831,9 +4927,9 @@ export function initializeBoundedSchema(
       version === NATIVE_ARTIFACT_SCHEMA_VERSION || version === AUTHORITY_SIDECAR_SCHEMA_VERSION ||
       version === J03_TASK_AUTHORIZATION_SCHEMA_VERSION || version === J04_BASELINE_ANALYSIS_SCHEMA_VERSION ||
       version === SUCCESSIVE_TASK_SCHEMA_VERSION || version === TASK_AUTHORIZATION_SCHEMA_VERSION ||
-      version === MANUSCRIPT_INTAKE_SCHEMA_VERSION) {
+      version === MANUSCRIPT_INTAKE_SCHEMA_VERSION || version === TEXT_CONVERSION_SCHEMA_VERSION) {
     transact(db, () => {
-      if (validateStoreTruth || version !== MANUSCRIPT_INTAKE_SCHEMA_VERSION) {
+      if (validateStoreTruth || version !== TEXT_CONVERSION_SCHEMA_VERSION) {
         validateManuscriptReimportSchemaTruth(
           db,
           profile,

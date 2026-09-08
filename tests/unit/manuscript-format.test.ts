@@ -117,9 +117,14 @@ describe('identifyManuscriptFormat', () => {
 describe('the routing table', () => {
   const formats: ReadonlyArray<SourceFormat> = ['DOCX', 'DOC', 'PDF', 'ODT', 'RTF', 'TXT', 'MD', 'UNKNOWN'];
 
-  it('offers editable import for DOCX alone, with a stated reason for every other format', () => {
+  it('reads a DOCX natively, TXT and MD through the converter, and states a reason for the rest', () => {
+    // A DOCX is the only format read with no conversion at all (ADR 0072 §1).
     expect(editableImport('DOCX')).toEqual({ available: true });
-    for (const format of formats.filter((candidate) => candidate !== 'DOCX')) {
+    expect(editableImport('TXT'))
+      .toEqual({ available: true, conversion: { converterIdentity: 'ai7-text-to-docx/1', sourceFormat: 'TXT' } });
+    expect(editableImport('MD'))
+      .toEqual({ available: true, conversion: { converterIdentity: 'ai7-text-to-docx/1', sourceFormat: 'MD' } });
+    for (const format of formats.filter((candidate) => !['DOCX', 'TXT', 'MD'].includes(candidate))) {
       const projection = editableImport(format);
       expect(projection.available).toBe(false);
       expect(projection).toMatchObject({ code: 'FORMAT_UNSUPPORTED_FOR_EDITABLE_IMPORT' });

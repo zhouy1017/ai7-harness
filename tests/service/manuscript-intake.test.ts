@@ -1,10 +1,14 @@
-import { randomUUID } from 'node:crypto';
-import { writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { createHash, randomUUID } from 'node:crypto';
+import { readdir, writeFile } from 'node:fs/promises';
+import { extname, join } from 'node:path';
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { EditorialStore } from '../../src/service/store.js';
-import { MANUSCRIPT_INTAKE_SCHEMA_VERSION, TASK_AUTHORIZATION_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import {
+  MANUSCRIPT_INTAKE_SCHEMA_VERSION,
+  TASK_AUTHORIZATION_SCHEMA_VERSION,
+  TEXT_CONVERSION_SCHEMA_VERSION,
+} from '../../src/service/task-authorization.js';
 import type { SourceFormat } from '../../src/shared/protocol.js';
 import { importSample1Book, requireExactSample1, sample1Path } from '../support/sample1-baseline.js';
 import { syntheticPdfBytes } from '../support/synthetic-pdf.js';
@@ -94,6 +98,12 @@ function tableRows(database: DatabaseSync, table: string, columns = '*'): Row[] 
   return database.prepare(`SELECT ${columns} FROM ${table} ORDER BY rowid`).all() as Row[];
 }
 
+/** How many content objects the Agent Data Root actually holds, whatever the records say. */
+async function countObjectFiles(dataRoot: string): Promise<number> {
+  const entries = await readdir(join(dataRoot, 'objects'), { recursive: true, withFileTypes: true });
+  return entries.filter((entry) => entry.isFile()).length;
+}
+
 /** Take a store back to the revision-17 shape: the narrow relations, and no draft format. */
 function downgradeToRevision17(databasePath: string): void {
   const database = new DatabaseSync(databasePath);
@@ -115,6 +125,9 @@ function downgradeToRevision17(databasePath: string): void {
       DROP TABLE source_provenance_v18;
       ${REVISION_17_SOURCE_TRIGGER_SQL}
       ALTER TABLE import_drafts DROP COLUMN source_format;
+      ALTER TABLE import_drafts DROP COLUMN working_object_digest;
+      ALTER TABLE import_drafts DROP COLUMN converter_identity;
+      ALTER TABLE import_abandonment_cleanup_intents DROP COLUMN working_object_digest;
       PRAGMA user_version = ${TASK_AUTHORIZATION_SCHEMA_VERSION};
       COMMIT;`);
     database.exec('PRAGMA legacy_alter_table = OFF; PRAGMA foreign_keys = ON;');
@@ -180,14 +193,6 @@ const SOURCE_ONLY_INPUTS: ReadonlyArray<{ format: SourceFormat; fileName: string
   {
     format: 'ODT', fileName: '样例.odt', bytes: () => zipStoredEntry('mimetype', ODF_TEXT),
     reason: '该格式的本地转换尚未提供；可作为来源材料保留。',
-  },
-  {
-    format: 'TXT', fileName: '样例.txt', bytes: () => concat('合成纯文本\n第二行\n'),
-    reason: '纯文本与 Markdown 的本地转换尚未提供；可作为来源材料保留。',
-  },
-  {
-    format: 'MD', fileName: '样例.md', bytes: () => concat('# 合成标题\n\n正文\n'),
-    reason: '纯文本与 Markdown 的本地转换尚未提供；可作为来源材料保留。',
   },
   {
     format: 'UNKNOWN', fileName: '未知样例.dat', bytes: () => Uint8Array.of(0xff, 0xfe, 0x00, 0x41, 0x42),
@@ -312,6 +317,154 @@ const OBJECT_EXTENSIONS: Readonly<Record<SourceFormat, string>> = {
   DOCX: '.docx', DOC: '.doc', PDF: '.pdf', ODT: '.odt', RTF: '.rtf', TXT: '.txt', MD: '.md', UNKNOWN: '.bin',
 };
 
+/** Synthetic text authored for this suite; a `.md` construct is there to be counted, not read. */
+const CONVERTED_INPUTS: ReadonlyArray<{
+  format: 'TXT' | 'MD';
+  fileName: string;
+  text: string;
+  blockCount: number;
+  degraded: ReadonlyArray<{ key: string; count: number }>;
+}> = [
+  {
+    format: 'TXT', fileName: '合成纯文本.txt', text: '第一段。\n\n第二段。\n\n第三段。\n',
+    blockCount: 3, degraded: [],
+  },
+  {
+    format: 'MD', fileName: '合成标记.md', text: '# 合成标题\n\n带 *强调* 的一段。\n\n| 甲 | 乙 |\n',
+    blockCount: 3, degraded: [{ key: 'inline-styles', count: 1 }, { key: 'tables', count: 1 }],
+  },
+];
+
+describe('conversion to a DOCX working representation over the real store', () => {
+  it.each(CONVERTED_INPUTS)(
+    'stages $format as an editable draft beside the retained original and commits both links',
+    async ({ format, fileName, text, blockCount, degraded }) => {
+      const selectedPath = join(roots.inputRoot, fileName);
+      await writeFile(selectedPath, concat(text));
+      const originalDigest = createHash('sha256').update(concat(text)).digest('hex');
+      const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+      const commitId = randomUUID();
+      try {
+        const staged = await store.stageSelectedManuscript(randomUUID(), selectedPath);
+        // The Source Version's identity is the original's, whatever the Manuscript was read from.
+        expect(staged.source.format).toBe(format);
+        expect(staged.source.sourceSha256).toBe(originalDigest);
+        expect(staged.source.conversion).toEqual({ converterIdentity: 'ai7-text-to-docx/1', sourceFormat: format });
+        expect(staged.source.workingObjectSha256).toMatch(/^[0-9a-f]{64}$/u);
+        expect(staged.source.workingObjectSha256).not.toBe(originalDigest);
+        expect(staged.editableImport).toEqual({
+          available: true,
+          conversion: { converterIdentity: 'ai7-text-to-docx/1', sourceFormat: format },
+        });
+        expect(staged.detectedBlockCount).toBe(blockCount);
+        expect(staged.titleSuggestion.sourceLabel).toBe('文件名');
+        // Every class the conversion touched names the converter as its cause; the rest do not.
+        expect(staged.fidelity.filter((category) => category.count > 0)
+          .map((category) => ({ key: category.key, count: category.count }))).toEqual(degraded);
+        for (const category of staged.fidelity) {
+          expect(category.detail.startsWith(`由 ai7-text-to-docx/1 从 ${format} 转换保留为原文字符：`))
+            .toBe(category.count > 0);
+        }
+
+        const review = store.prepareNewBookReview(staged.draftId, staged.draftVersion,
+          { kind: 'new-book', choiceId: 'new-book', confirmedTitle: `转换稿件 ${format}` }, degraded.length > 0);
+        expect(review.source.conversion).toEqual({ converterIdentity: 'ai7-text-to-docx/1', sourceFormat: format });
+        expect(review.fidelity).toEqual(staged.fidelity);
+        const commit = await store.commitNewBookImport({
+          draftId: staged.draftId,
+          expectedDraftVersion: review.draftVersion,
+          reviewDigest: review.reviewDigest!,
+          commitId,
+        });
+        expect(commit.completionLabel).toBe('稿件已导入');
+        expect(commit.source.conversion).toEqual({ converterIdentity: 'ai7-text-to-docx/1', sourceFormat: format });
+        expect(await store.acknowledgeImportCompletion(commitId)).toEqual({ state: 'acknowledged' });
+        // The Book's records read the same way after the commit as the review said they would.
+        const overview = store.getBookOverview(commit.bookId);
+        const sourceRecord = overview.records.find((record) => record.kind === 'source');
+        expect(sourceRecord).toMatchObject({
+          format,
+          sourceDigest: originalDigest,
+          converterIdentity: 'ai7-text-to-docx/1',
+          workingObjectDigest: staged.source.workingObjectSha256,
+        });
+        store.markCleanShutdown();
+      } finally {
+        store.close();
+      }
+
+      const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+      try {
+        const sources = tableRows(database, 'source_versions',
+          'format, source_digest, parser_identity, working_object_digest, converter_identity') as Row[];
+        expect(sources).toHaveLength(1);
+        expect(sources[0]).toMatchObject({
+          format,
+          source_digest: originalDigest,
+          parser_identity: 'ai7-docx-fflate-saxes/1',
+          converter_identity: 'ai7-text-to-docx/1',
+        });
+        expect(sources[0]!.working_object_digest).not.toBe(originalDigest);
+        // Two objects: the original under its own extension, the working representation under DOCX.
+        const keys = (tableRows(database, 'content_objects', 'relative_key') as Row[])
+          .map((row) => extname(String(row.relative_key))).sort();
+        expect(keys).toEqual([OBJECT_EXTENSIONS[format], '.docx'].sort());
+      } finally {
+        database.close();
+      }
+    },
+    120_000,
+  );
+
+  it('converts the same file to the same working object, so a reselection changes nothing', async () => {
+    const selectedPath = join(roots.inputRoot, '重复转换.txt');
+    await writeFile(selectedPath, concat('第一段。\n\n第二段。\n'));
+    const first = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    let workingDigest: string | null;
+    try {
+      const staged = await first.stageSelectedManuscript(randomUUID(), selectedPath);
+      workingDigest = staged.source.workingObjectSha256;
+      await first.abandonImportDraft(staged.draftId, staged.draftVersion);
+      first.markCleanShutdown();
+    } finally {
+      first.close();
+    }
+    const second = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const staged = await second.stageSelectedManuscript(randomUUID(), selectedPath);
+      expect(staged.source.workingObjectSha256).toBe(workingDigest);
+      second.markCleanShutdown();
+    } finally {
+      second.close();
+    }
+  }, 120_000);
+
+  it('removes the working representation with the original when a converted draft is abandoned', async () => {
+    const selectedPath = join(roots.inputRoot, '放弃转换.txt');
+    await writeFile(selectedPath, concat('第一段。\n\n第二段。\n'));
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const staged = await store.stageSelectedManuscript(randomUUID(), selectedPath);
+      expect(await countObjectFiles(roots.dataRoot)).toBe(2);
+      const startup = await store.abandonImportDraft(staged.draftId, staged.draftVersion);
+      expect(startup.state).toBe('none');
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+    // Neither object remains: not the original the editor selected, and not what it was read from.
+    expect(await countObjectFiles(roots.dataRoot)).toBe(0);
+    const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+    try {
+      expect(tableRows(database, 'content_objects')).toEqual([]);
+      expect(tableRows(database, 'import_drafts')).toEqual([]);
+      expect(tableRows(database, 'import_abandonment_cleanup_intents')).toEqual([]);
+    } finally {
+      database.close();
+    }
+  }, 120_000);
+});
+
 describe('schema revision 18 over the real store', () => {
   it('migrates a revision-17 store forward with every Source Version row byte for byte', async () => {
     await requireExactSample1(roots.codeRoot);
@@ -358,7 +511,7 @@ describe('schema revision 18 over the real store', () => {
     const after = new DatabaseSync(databasePath, { readOnly: true });
     try {
       expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version)
-        .toBe(MANUSCRIPT_INTAKE_SCHEMA_VERSION);
+        .toBe(TEXT_CONVERSION_SCHEMA_VERSION);
       // Every row is the row it was: the parsed DOCX keeps its digests, its parser, and its format.
       expect(tableRows(after, 'source_versions', REVISION_17_SOURCE_VERSION_COLUMNS)).toEqual(sourceVersionsBefore);
       expect(tableRows(after, 'source_provenance', REVISION_17_PROVENANCE_COLUMNS)).toEqual(provenanceBefore);
@@ -369,7 +522,9 @@ describe('schema revision 18 over the real store', () => {
       expect(after.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
       const columns = after.prepare('PRAGMA table_info(source_versions)').all() as Row[];
       const nullable = columns.filter((column) => column.notnull === 0).map((column) => column.name).sort();
-      expect(nullable).toEqual(['content_digest', 'parser_identity', 'structure_digest']);
+      expect(nullable).toEqual([
+        'content_digest', 'converter_identity', 'parser_identity', 'structure_digest', 'working_object_digest',
+      ]);
       // The three guards on the rebuilt relation are back, so a pending cleanup still blocks a write.
       const triggers = after.prepare(
         "SELECT name FROM sqlite_schema WHERE type = 'trigger' AND tbl_name = 'source_versions' ORDER BY name",
@@ -379,6 +534,79 @@ describe('schema revision 18 over the real store', () => {
         'abandonment_cleanup_block_source_update',
         'abandonment_cleanup_block_source_update_v5',
       ]);
+    } finally {
+      after.close();
+    }
+  }, 120_000);
+});
+
+/** Take a store back to the revision-18 shape: the conversion columns are simply not there. */
+function downgradeToRevision18(databasePath: string): void {
+  const database = new DatabaseSync(databasePath);
+  try {
+    database.exec(`BEGIN IMMEDIATE;
+      ALTER TABLE source_versions DROP COLUMN working_object_digest;
+      ALTER TABLE source_versions DROP COLUMN converter_identity;
+      ALTER TABLE import_drafts DROP COLUMN working_object_digest;
+      ALTER TABLE import_drafts DROP COLUMN converter_identity;
+      ALTER TABLE import_abandonment_cleanup_intents DROP COLUMN working_object_digest;
+      PRAGMA user_version = ${MANUSCRIPT_INTAKE_SCHEMA_VERSION};
+      COMMIT;`);
+  } finally {
+    database.close();
+  }
+}
+
+const REVISION_18_SOURCE_VERSION_COLUMNS = REVISION_17_SOURCE_VERSION_COLUMNS;
+
+describe('schema revision 19 over the real store', () => {
+  it('migrates a revision-18 store forward with every Source Version row byte for byte', async () => {
+    await requireExactSample1(roots.codeRoot);
+    const databasePath = join(roots.dataRoot, 'store', 'ai7.sqlite');
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    let bookId: string;
+    try {
+      bookId = (await importSample1Book(store, roots.codeRoot, '修订版 19 迁移')).bookId;
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+
+    downgradeToRevision18(databasePath);
+
+    const downgraded = new DatabaseSync(databasePath, { readOnly: true });
+    let sourceVersionsBefore: Row[];
+    let draftsBefore: Row[];
+    try {
+      expect((downgraded.prepare('PRAGMA user_version').get() as { user_version: number }).user_version)
+        .toBe(MANUSCRIPT_INTAKE_SCHEMA_VERSION);
+      expect(() => downgraded.prepare('SELECT converter_identity FROM source_versions').all()).toThrow();
+      sourceVersionsBefore = tableRows(downgraded, 'source_versions', REVISION_18_SOURCE_VERSION_COLUMNS);
+      draftsBefore = tableRows(downgraded, 'import_drafts', `${REVISION_17_DRAFT_COLUMNS}, source_format`);
+      expect(sourceVersionsBefore).toHaveLength(1);
+      expect(draftsBefore).toHaveLength(1);
+    } finally {
+      downgraded.close();
+    }
+
+    const migrated = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      expect(migrated.listBooks(null).items.map((item) => item.bookId)).toEqual([bookId]);
+      migrated.markCleanShutdown();
+    } finally {
+      migrated.close();
+    }
+
+    const after = new DatabaseSync(databasePath, { readOnly: true });
+    try {
+      expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version)
+        .toBe(TEXT_CONVERSION_SCHEMA_VERSION);
+      // Every row is the row it was; a DOCX read natively gains two columns and fills neither.
+      expect(tableRows(after, 'source_versions', REVISION_18_SOURCE_VERSION_COLUMNS)).toEqual(sourceVersionsBefore);
+      expect(tableRows(after, 'import_drafts', `${REVISION_17_DRAFT_COLUMNS}, source_format`)).toEqual(draftsBefore);
+      expect(tableRows(after, 'source_versions', 'working_object_digest, converter_identity'))
+        .toEqual([{ working_object_digest: null, converter_identity: null }]);
+      expect(after.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
     } finally {
       after.close();
     }
