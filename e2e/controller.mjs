@@ -556,6 +556,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'coverage-manifest',
     'authorize-dispatch',
     'result-set-revision',
+    'cross-unit-reduction',
     'return-to-range',
     'restart-immutable',
     'acknowledged-edit-stale',

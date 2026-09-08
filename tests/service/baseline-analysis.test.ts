@@ -329,8 +329,9 @@ describe('baseline manuscript analysis over the real store on exact sample1', ()
           expect(side.sourceRanges.every((range) => unit.blockIds.includes(range.blockId))).toBe(true);
         }
       }
-      // It modified no unit result and joined no conflict list: the deterministic kinds are as they were.
-      expect(revision.conflicts.every((conflict) => conflict.kind !== 'chronology-conflict')).toBe(true);
+      // It joined no conflict list — the two projections carry disjoint kind unions, so that is a type
+      // guarantee rather than an assertion — and it modified no unit result.
+      expect(revision.units.every((unit) => !JSON.stringify(unit).includes('crossUnit'))).toBe(true);
       // The exact gap: unit 2, the adapter failure, with its exact block range.
       const unit2 = manifest.units[1]!;
       expect(revision.gaps).toEqual([{
