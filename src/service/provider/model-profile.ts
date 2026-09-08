@@ -1,6 +1,7 @@
 import {
   DEEPSEEK_MODEL,
   DEEPSEEK_ROUTE,
+  OPENCODE_GO_MESSAGES_ROUTE,
   OPENCODE_GO_MODEL,
   OPENCODE_GO_ROUTE,
   type RemoteExecutionRoute,
@@ -46,11 +47,19 @@ export type ReasoningControl = 'none' | 'deepseek-thinking';
  */
 export type StructuredOutput = 'none' | 'json-object' | 'json-schema' | 'tool-call';
 
-/** Where the answer text is read from; `none` means no channel is declared and every response is malformed. */
-export type AnswerChannel = 'none' | 'message-content-string';
+/**
+ * Where the answer text is read from; `none` means no channel is declared and every response is
+ * malformed. `content-text-blocks` is the Anthropic-compatible shape's channel: the answer is the
+ * concatenation of the `text` of every `type: 'text'` block, in the order the response lists them.
+ */
+export type AnswerChannel = 'none' | 'message-content-string' | 'content-text-blocks';
 
-/** Where reasoning is read from when the model reports it separately from the answer. */
-export type ReasoningChannel = 'none' | 'message-reasoning-content';
+/**
+ * Where reasoning is read from when the model reports it separately from the answer.
+ * `content-thinking-blocks` declares presence and nothing more: a `type: 'thinking'` block in the
+ * content array means the model reasoned, which is the whole of what an empty answer needs to know.
+ */
+export type ReasoningChannel = 'none' | 'message-reasoning-content' | 'content-thinking-blocks';
 
 /** Whether the reported output tokens include reasoning tokens; `unknown` until something has measured it. */
 export type UsageAttribution = 'includes-reasoning' | 'separate' | 'unknown';
@@ -95,8 +104,11 @@ export function modelProfileKey(route: RemoteExecutionRoute, model: string): Mod
   return `${route}/${model}`;
 }
 
-/** ADR 0067's facts about the Go gateway, read from the OpenCode documentation on the date it records. */
-const ADR_0067_DOCUMENTATION: CapabilityEvidence = {
+/**
+ * ADR 0067's facts about the Go gateway, read from the OpenCode documentation on the date it records.
+ * Exported because a route states the provenance of its credential header form from the same reading.
+ */
+export const ADR_0067_DOCUMENTATION: CapabilityEvidence = {
   kind: 'vendor-documentation',
   source: 'ADR 0067 · OpenCode Go documentation',
   readOn: '2026-09-06',
@@ -123,18 +135,23 @@ const JSON_OBJECT_LIVE_ITEM: CapabilityEvidence = {
 
 /**
  * The documentation pair the OpenCode Go plan's models are declared from, read on 2026-09-08: the Go
- * page for which models the gateway serves on `chat/completions`, the Zen model table for the exact
- * id each one answers to. It is one record rather than two because a model needs both facts to be
- * declarable at all — a path without an id cannot be keyed, and an id without a path cannot be
- * assembled — and one constant rather than a copy per profile because the pair is a single reading.
+ * page for which path the gateway serves each model on, the Zen model table for the exact id it
+ * answers to. It is one record rather than two because a model needs both facts to be declarable at
+ * all — a path without an id cannot be keyed, and an id without a path cannot be assembled — and one
+ * constant rather than a copy per profile because both paths are a single reading of one pair of
+ * pages.
+ *
+ * Where the two pages disagree, the Go page decides and the disagreement is recorded rather than
+ * resolved: it is the page that describes this plan, and only a live item can settle which path a
+ * model actually answers on.
  */
-const OPENCODE_GO_CHAT_COMPLETIONS_DOCUMENTATION: CapabilityEvidence = {
+const OPENCODE_GO_PLAN_DOCUMENTATION: CapabilityEvidence = {
   kind: 'vendor-documentation',
   source: 'OpenCode Go https://opencode.ai/docs/go/ · Zen model table https://opencode.ai/docs/zen/',
   readOn: '2026-09-08',
 };
 
-const PRODUCTION_BASELINE: CapabilityEvidence = { kind: 'frozen-request-baseline', since: 'adapter revision 1' };
+export const PRODUCTION_BASELINE: CapabilityEvidence = { kind: 'frozen-request-baseline', since: 'adapter revision 1' };
 const UNVERIFIED: CapabilityEvidence = { kind: 'unverified' };
 
 /**
@@ -233,24 +250,36 @@ export const OPENCODE_GO_V4_PRO_PROFILE: ProviderModelProfile = {
   },
 };
 
+/** One path of the OpenCode Go plan: the route that reaches it and the shape it is spoken to in. */
+interface OpenCodeGoPath {
+  readonly route: RemoteExecutionRoute;
+  readonly requestShape: RequestShape;
+}
+
+const GO_CHAT_COMPLETIONS: OpenCodeGoPath = { route: OPENCODE_GO_ROUTE, requestShape: 'openai-chat-completions' };
+const GO_MESSAGES: OpenCodeGoPath = { route: OPENCODE_GO_MESSAGES_ROUTE, requestShape: 'anthropic-messages' };
+
 /**
  * One more model of the same gateway, declared exactly as the profile above declares its own: the
- * documentation pair establishes that it is reached on `chat/completions` under this id, and nothing
+ * documentation pair establishes which path it is reached on and under which id, and nothing
  * establishes anything else, so every other capability is absent and says why. The shape is a
- * function rather than eight more copies of the literal above because the eight differ only in an id
- * and a printed name: inert becomes a property of the construction, not of eight chances to restate
- * it. `answerChannel: 'none'` is the whole of what makes a row inert — a profile that declares no
- * answer channel cannot read any response — and only a live test item may ever move one of these
- * values, never a declaration.
+ * function rather than thirteen more copies of the literal above because they differ only in a path,
+ * an id, and a printed name: inert becomes a property of the construction, not of thirteen chances to
+ * restate it. `answerChannel: 'none'` is the whole of what makes a row inert — a profile that
+ * declares no answer channel cannot read any response — and only a live test item may ever move one
+ * of these values, never a declaration.
+ *
+ * The path is a parameter because that is exactly what the second request shape cost this table: a
+ * model on `/messages` is the same row with two of its fields read from somewhere else.
  */
-function inertOpenCodeGoModel(model: string, productName: string): ProviderModelProfile {
+function inertOpenCodeGoModel(path: OpenCodeGoPath, model: string, productName: string): ProviderModelProfile {
   return {
-    key: modelProfileKey(OPENCODE_GO_ROUTE, model),
-    route: OPENCODE_GO_ROUTE,
+    key: modelProfileKey(path.route, model),
+    route: path.route,
     model,
     displayName: `${productName}（OpenCode Go）`,
     capabilities: {
-      requestShape: 'openai-chat-completions',
+      requestShape: path.requestShape,
       reasoningControl: 'none',
       structuredOutput: 'none',
       answerChannel: 'none',
@@ -258,7 +287,7 @@ function inertOpenCodeGoModel(model: string, productName: string): ProviderModel
       usageAttribution: 'unknown',
     },
     evidence: {
-      requestShape: OPENCODE_GO_CHAT_COMPLETIONS_DOCUMENTATION,
+      requestShape: OPENCODE_GO_PLAN_DOCUMENTATION,
       reasoningControl: UNVERIFIED,
       structuredOutput: UNVERIFIED,
       answerChannel: UNVERIFIED,
@@ -269,8 +298,8 @@ function inertOpenCodeGoModel(model: string, productName: string): ProviderModel
 }
 
 /*
- * Every remaining model the documentation pair admits: the Go page places it on `chat/completions`
- * **and** the Zen model table states its id verbatim. Both facts or no row, because an id the
+ * Every remaining model the documentation pair admits on `chat/completions`: the Go page places it
+ * there **and** the Zen model table states its id verbatim. Both facts or no row, because an id the
  * documentation does not print is a guess, and a guess is the failure this table exists to prevent.
  * None of them is exported: nothing above the provider layer may name one, and a profile no module
  * can import is a profile no binding can reach.
@@ -278,18 +307,33 @@ function inertOpenCodeGoModel(model: string, productName: string): ProviderModel
  * Named by the documentation and deliberately absent:
  * - LongCat-2.0, Hy4 preview, Hy3, Omen Alpha, MiMo-V2.5, MiMo-V2.5-Pro — the Go page names the
  *   product, the Zen table states no id for it, so there is nothing to key a row by.
- * - MiniMax — the two pages disagree about its path: the Go page places it on `/messages`, the Zen
- *   table on `chat/completions`. A disagreement is not a fact, and it is recorded rather than
- *   resolved here; the unit that owns the `anthropic-messages` shape decides it.
+ * - Qwen3.8 Flash — the Go page places it on `/messages`, but the Zen table states no id for it.
  */
-const OPENCODE_GO_GLM_5_3_FLASH_PROFILE = inertOpenCodeGoModel('glm-5.3-flash', 'GLM-5.3-Flash');
-const OPENCODE_GO_GLM_5_3_PROFILE = inertOpenCodeGoModel('glm-5.3', 'GLM-5.3');
-const OPENCODE_GO_GLM_5_2_PROFILE = inertOpenCodeGoModel('glm-5.2', 'GLM-5.2');
-const OPENCODE_GO_GLM_5_1_PROFILE = inertOpenCodeGoModel('glm-5.1', 'GLM-5.1');
-const OPENCODE_GO_KIMI_K3_PROFILE = inertOpenCodeGoModel('kimi-k3', 'Kimi K3');
-const OPENCODE_GO_KIMI_K2_7_CODE_PROFILE = inertOpenCodeGoModel('kimi-k2.7-code', 'Kimi K2.7 Code');
-const OPENCODE_GO_KIMI_K2_6_PROFILE = inertOpenCodeGoModel('kimi-k2.6', 'Kimi K2.6');
-const OPENCODE_GO_V4_FLASH_VISION_EXP_PROFILE = inertOpenCodeGoModel('deepseek-v4-flash-vision-exp', 'DeepSeek V4 Flash Vision Exp');
+const OPENCODE_GO_GLM_5_3_FLASH_PROFILE = inertOpenCodeGoModel(GO_CHAT_COMPLETIONS, 'glm-5.3-flash', 'GLM-5.3-Flash');
+const OPENCODE_GO_GLM_5_3_PROFILE = inertOpenCodeGoModel(GO_CHAT_COMPLETIONS, 'glm-5.3', 'GLM-5.3');
+const OPENCODE_GO_GLM_5_2_PROFILE = inertOpenCodeGoModel(GO_CHAT_COMPLETIONS, 'glm-5.2', 'GLM-5.2');
+const OPENCODE_GO_GLM_5_1_PROFILE = inertOpenCodeGoModel(GO_CHAT_COMPLETIONS, 'glm-5.1', 'GLM-5.1');
+const OPENCODE_GO_KIMI_K3_PROFILE = inertOpenCodeGoModel(GO_CHAT_COMPLETIONS, 'kimi-k3', 'Kimi K3');
+const OPENCODE_GO_KIMI_K2_7_CODE_PROFILE = inertOpenCodeGoModel(GO_CHAT_COMPLETIONS, 'kimi-k2.7-code', 'Kimi K2.7 Code');
+const OPENCODE_GO_KIMI_K2_6_PROFILE = inertOpenCodeGoModel(GO_CHAT_COMPLETIONS, 'kimi-k2.6', 'Kimi K2.6');
+const OPENCODE_GO_V4_FLASH_VISION_EXP_PROFILE = inertOpenCodeGoModel(GO_CHAT_COMPLETIONS, 'deepseek-v4-flash-vision-exp', 'DeepSeek V4 Flash Vision Exp');
+
+/*
+ * The same admitted-set rule applied to the plan's `/messages` path, which the `anthropic-messages`
+ * shape now makes declarable. Every row is inert exactly as the rows above are: the request shape is
+ * established, and everything a response would have taught is not.
+ *
+ * MiniMax is here on a disagreement, not on agreement. The Go page places it on `/messages`; the Zen
+ * table places it on `chat/completions`. The Go page decides, because it is the page that describes
+ * this plan, and the disagreement is recorded here rather than resolved: the first live item on one
+ * of these ids settles it, and until then declaring the wrong path costs nothing, since no profile
+ * on this route can read a response at all.
+ */
+const OPENCODE_GO_QWEN_3_7_PLUS_PROFILE = inertOpenCodeGoModel(GO_MESSAGES, 'qwen3.7-plus', 'Qwen3.7 Plus');
+const OPENCODE_GO_QWEN_3_6_PLUS_PROFILE = inertOpenCodeGoModel(GO_MESSAGES, 'qwen3.6-plus', 'Qwen3.6 Plus');
+const OPENCODE_GO_MINIMAX_M3_PROFILE = inertOpenCodeGoModel(GO_MESSAGES, 'minimax-m3', 'MiniMax M3');
+const OPENCODE_GO_MINIMAX_M2_7_PROFILE = inertOpenCodeGoModel(GO_MESSAGES, 'minimax-m2.7', 'MiniMax M2.7');
+const OPENCODE_GO_MINIMAX_M2_5_PROFILE = inertOpenCodeGoModel(GO_MESSAGES, 'minimax-m2.5', 'MiniMax M2.5');
 
 export const PROVIDER_MODEL_PROFILES: Readonly<Record<ModelProfileKey, ProviderModelProfile>> = {
   [DEEPSEEK_V4_PRO_PROFILE.key]: DEEPSEEK_V4_PRO_PROFILE,
@@ -303,6 +347,11 @@ export const PROVIDER_MODEL_PROFILES: Readonly<Record<ModelProfileKey, ProviderM
   [OPENCODE_GO_KIMI_K2_7_CODE_PROFILE.key]: OPENCODE_GO_KIMI_K2_7_CODE_PROFILE,
   [OPENCODE_GO_KIMI_K2_6_PROFILE.key]: OPENCODE_GO_KIMI_K2_6_PROFILE,
   [OPENCODE_GO_V4_FLASH_VISION_EXP_PROFILE.key]: OPENCODE_GO_V4_FLASH_VISION_EXP_PROFILE,
+  [OPENCODE_GO_QWEN_3_7_PLUS_PROFILE.key]: OPENCODE_GO_QWEN_3_7_PLUS_PROFILE,
+  [OPENCODE_GO_QWEN_3_6_PLUS_PROFILE.key]: OPENCODE_GO_QWEN_3_6_PLUS_PROFILE,
+  [OPENCODE_GO_MINIMAX_M3_PROFILE.key]: OPENCODE_GO_MINIMAX_M3_PROFILE,
+  [OPENCODE_GO_MINIMAX_M2_7_PROFILE.key]: OPENCODE_GO_MINIMAX_M2_7_PROFILE,
+  [OPENCODE_GO_MINIMAX_M2_5_PROFILE.key]: OPENCODE_GO_MINIMAX_M2_5_PROFILE,
 };
 
 /** The declared profile for one route and model, or `null` when nothing has declared that pair. */

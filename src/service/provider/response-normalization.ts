@@ -30,7 +30,8 @@ export type MalformedReason =
   | 'answer-channel-not-declared'
   | 'response-not-a-record'
   | 'choice-absent'
-  | 'answer-channel-absent';
+  | 'answer-channel-absent'
+  | 'content-absent';
 
 /**
  * One response, normalized. `empty-answer` carries whether the declared reasoning channel had
@@ -71,12 +72,27 @@ function usageOf(body: Record<string, unknown>): ModelUsage | null {
 }
 
 /**
- * Normalize one response body against the channels its model profile declares. Deliberately callable
- * with a body alone: a cached response can be classified without an adapter, a transport, a
- * credential, or a Run, which is what makes replaying a past failure possible at all.
+ * The usage an Anthropic-compatible response reports. Two counts, named for the sides of the request
+ * rather than for the prompt, and no cache field: this shape reports cache reads under names nothing
+ * has observed, and an unobserved field is not read.
  */
-export function normalizeModelResponse(profile: ProviderModelProfile, body: unknown): CanonicalModelResult {
-  if (profile.capabilities.answerChannel === 'none') return { kind: 'malformed', reason: 'answer-channel-not-declared' };
+function contentBlockUsageOf(body: Record<string, unknown>): ModelUsage | null {
+  if (!isRecord(body.usage)) return null;
+  const inputTokens = nonNegativeInteger(body.usage.input_tokens);
+  const outputTokens = nonNegativeInteger(body.usage.output_tokens);
+  if (inputTokens === null || outputTokens === null) return null;
+  return { inputTokens, outputTokens };
+}
+
+/** One `content` entry of the declared type, as far as this module reads it. */
+function isBlockOfType(block: unknown, type: string): block is Record<string, unknown> {
+  return isRecord(block) && block.type === type;
+}
+
+/**
+ * The chat-completions reading: one choice, one message, the answer a string on it.
+ */
+function normalizeMessageContentString(profile: ProviderModelProfile, body: unknown): CanonicalModelResult {
   if (!isRecord(body) || !Array.isArray(body.choices)) return { kind: 'malformed', reason: 'response-not-a-record' };
   const choice: unknown = body.choices[0];
   if (body.choices.length === 0 || !isRecord(choice)) return { kind: 'malformed', reason: 'choice-absent' };
@@ -90,4 +106,44 @@ export function normalizeModelResponse(profile: ProviderModelProfile, body: unkn
     : null;
   if (choice.message.content.length === 0) return { kind: 'empty-answer', reasoningPresent: reasoning !== null, usage };
   return { kind: 'answer', text: choice.message.content, reasoningText: reasoning, usage };
+}
+
+/**
+ * The Anthropic-compatible reading: the answer is the concatenation of every text block's `text`, in
+ * order. A response with no `content` array matched no channel at all and is `content-absent`; a
+ * `content` array that yields no text is the empty answer this module exists to distinguish, whether
+ * the array carries no text block or a text block that is empty, because both hand the contract layer
+ * the same `''` it must never be handed.
+ *
+ * `stop_reason` is deliberately not carried: a truncated answer is one the contract layer already
+ * reads as unparsable, and the canonical result gains no field a single vendor needs. Reasoning is
+ * read as presence only, since the declared channel establishes that the model thought and nothing
+ * has established what the block's text field is called.
+ */
+function normalizeContentBlocks(profile: ProviderModelProfile, body: unknown): CanonicalModelResult {
+  if (!isRecord(body)) return { kind: 'malformed', reason: 'response-not-a-record' };
+  if (!Array.isArray(body.content)) return { kind: 'malformed', reason: 'content-absent' };
+  const text = body.content
+    .filter((block): block is Record<string, unknown> => isBlockOfType(block, 'text') && typeof block.text === 'string')
+    .map((block) => block.text as string)
+    .join('');
+  const usage = contentBlockUsageOf(body);
+  const reasoningPresent = profile.capabilities.reasoningChannel === 'content-thinking-blocks' &&
+    body.content.some((block) => isBlockOfType(block, 'thinking'));
+  if (text.length === 0) return { kind: 'empty-answer', reasoningPresent, usage };
+  return { kind: 'answer', text, reasoningText: null, usage };
+}
+
+/**
+ * Normalize one response body against the channels its model profile declares. Deliberately callable
+ * with a body alone: a cached response can be classified without an adapter, a transport, a
+ * credential, or a Run, which is what makes replaying a past failure possible at all.
+ *
+ * The shape is chosen by the declared answer channel and by nothing else — no route, no model id, no
+ * endpoint — which is what keeps a second vendor's response shape a row in the profile table.
+ */
+export function normalizeModelResponse(profile: ProviderModelProfile, body: unknown): CanonicalModelResult {
+  if (profile.capabilities.answerChannel === 'none') return { kind: 'malformed', reason: 'answer-channel-not-declared' };
+  if (profile.capabilities.answerChannel === 'content-text-blocks') return normalizeContentBlocks(profile, body);
+  return normalizeMessageContentString(profile, body);
 }

@@ -4,19 +4,26 @@ import { AI7_FAILURE_CODES, type DshFailureCodes } from './classification.js';
 import type { CredentialBroker, CredentialSlotBinding } from './credential-broker.js';
 import {
   DEEPSEEK_ROUTE,
+  OPENCODE_GO_MESSAGES_ROUTE,
   OPENCODE_GO_ROUTE,
   type CredentialSlot,
   type RemoteExecutionRoute,
   type TransmitTicket,
 } from './egress-gate.js';
-import { DEEPSEEK_V4_PRO_PROFILE, type ProviderModelProfile } from './model-profile.js';
+import {
+  ADR_0067_DOCUMENTATION,
+  DEEPSEEK_V4_PRO_PROFILE,
+  PRODUCTION_BASELINE,
+  type CapabilityEvidence,
+  type ProviderModelProfile,
+} from './model-profile.js';
 import { messageText, type AssembledModelPayload } from './payload.js';
 import { normalizeModelResponse, type CanonicalModelResult } from './response-normalization.js';
 
 /**
- * The AI7-owned OpenAI-compatible Provider adapter, revision 1. One adapter serves both remote
- * routes, composed from two profiles: a **route profile** — endpoint, credential slot, header
- * policy, limit reading — says how to reach a model, and a **model profile**
+ * The AI7-owned Provider adapter, revision 1. One adapter serves every remote route and both
+ * implemented request shapes, composed from two profiles: a **route profile** — endpoint, credential
+ * slot, header policy, limit reading, output cap — says how to reach a model, and a **model profile**
  * (`./model-profile.ts`) says how to speak to one. They are separate because one route serves many
  * models, so a model's capabilities cannot hang off the route that carries it.
  * `deepseek-open-platform` is the unchanged production route
@@ -24,9 +31,11 @@ import { normalizeModelResponse, type CanonicalModelResult } from './response-no
  * high reasoning effort). `opencode-go` is the developer-live route of Provider Processing v4
  * (`POST https://opencode.ai/zen/go/v1/chat/completions`, bare model id `deepseek-v4-flash`, a
  * standard chat-completions body with no DeepSeek-specific parameters, and the technical Session id
- * in `x-opencode-session` for the gateway's prompt cache).
+ * in `x-opencode-session` for the gateway's prompt cache). `opencode-go-messages` is the same plan's
+ * Anthropic-compatible path, declared and inert: no model on it can read a response, and no Provider
+ * Resolution Plan may bind it (`ExecutionRoute` in `./egress-gate.ts`).
  *
- * Neither route exposes provider-native tools. The adapter assembles a deterministic request from the
+ * No route exposes provider-native tools. The adapter assembles a deterministic request from the
  * frozen prompt contract, records the request digest, and transmits only after a `transmit-remote`
  * decision the gate issued for the same binding. The credential enters only the `authorization`
  * header inside the broker's release callback; the assembled request and its digest never contain it.
@@ -37,6 +46,15 @@ export const DEEPSEEK_ENDPOINT = 'https://api.deepseek.com/chat/completions' as 
 export const DEEPSEEK_REASONING_EFFORT = 'high' as const;
 /** The OpenCode Go chat-completions endpoint of the developer-live route (verified 2026-09-06). */
 export const OPENCODE_GO_ENDPOINT = 'https://opencode.ai/zen/go/v1/chat/completions' as const;
+/** The same plan's Anthropic-compatible path, which the Go page documents for its Qwen and MiniMax models. */
+export const OPENCODE_GO_MESSAGES_ENDPOINT = 'https://opencode.ai/zen/go/v1/messages' as const;
+/**
+ * The per-turn output cap `opencode-go-messages` declares, because its shape requires the request to
+ * name one. The largest unit output observed to date is 24,225 tokens, so this leaves headroom above
+ * anything a unit has actually produced; it bounds one turn and nothing more, the Run Budget Ceiling
+ * being the authority over the Run.
+ */
+export const OPENCODE_GO_MESSAGES_MAX_OUTPUT_TOKENS = 32_768 as const;
 /** The opaque per-request Session header the gateway uses for prompt caching; it carries the Session id and nothing else. */
 export const OPENCODE_GO_SESSION_HEADER = 'x-opencode-session' as const;
 /** The specific User-Agent the developer-live route sends: the product and the trusted scope, no host or user detail. */
@@ -64,6 +82,21 @@ export interface ProviderRouteProfile {
   readonly dshAttribution: boolean;
   /** Whether the request carries the technical Session id in `x-opencode-session`. */
   readonly sessionHeader: boolean;
+  /**
+   * The per-turn output cap this route's shape forces the request to name, or `null` for a shape that
+   * requires none. It is a request-side declaration and nothing more: the Run Budget Ceiling remains
+   * the authority over the Run, and a shape that names no cap sends no field, so declaring one here
+   * cannot move the bytes of a route that does not need it. A shape that requires a cap on a route
+   * declaring `null` refuses to assemble rather than inventing a number.
+   */
+  readonly maxOutputTokens: number | null;
+  /**
+   * How this route's credential header form was established. A model profile says the provenance of
+   * every capability it declares; a route says the provenance of the one fact that decides whether a
+   * credential reaches the endpoint at all, so that a new route cannot be added without stating where
+   * its header form came from.
+   */
+  readonly credentialHeaderEvidence: CapabilityEvidence;
   readonly displayName: string;
 }
 
@@ -74,6 +107,10 @@ export const DEEPSEEK_ROUTE_PROFILE: ProviderRouteProfile = {
   limitPolicy: 'rate-limit-retryable',
   dshAttribution: true,
   sessionHeader: false,
+  // Chat completions names no output cap, so this route sends no such field and its bytes cannot move.
+  maxOutputTokens: null,
+  // `authorization: Bearer` is what adapter revision 1 has always sent on this route.
+  credentialHeaderEvidence: PRODUCTION_BASELINE,
   displayName: 'DeepSeek 开放平台（官方）',
 };
 
@@ -84,12 +121,38 @@ export const OPENCODE_GO_ROUTE_PROFILE: ProviderRouteProfile = {
   limitPolicy: 'account-limit-terminal',
   dshAttribution: false,
   sessionHeader: true,
+  maxOutputTokens: null,
+  credentialHeaderEvidence: ADR_0067_DOCUMENTATION,
   displayName: 'OpenCode Go（开发者实时）',
+};
+
+/**
+ * The same gateway, the same account, and the same credential slot reached over its
+ * Anthropic-compatible path. It is a second route rather than a second model of the first because a
+ * route is how a model is reached, and both the endpoint and the request shape differ; the credential
+ * slot does not, which is why declaring it moves no credential boundary.
+ *
+ * Every model on it is inert. The header form is the one ADR 0067 records for the gateway —
+ * `authorization: Bearer`, which is what this adapter sends — rather than the `x-api-key` and
+ * `anthropic-version` pair Claude's own endpoint documents: the Go page documents no header for this
+ * path, so the route says where its form came from and waits for a live item to observe it.
+ */
+export const OPENCODE_GO_MESSAGES_ROUTE_PROFILE: ProviderRouteProfile = {
+  route: OPENCODE_GO_MESSAGES_ROUTE,
+  endpoint: OPENCODE_GO_MESSAGES_ENDPOINT,
+  credentialSlot: 'opencode-go',
+  limitPolicy: 'account-limit-terminal',
+  dshAttribution: false,
+  sessionHeader: true,
+  maxOutputTokens: OPENCODE_GO_MESSAGES_MAX_OUTPUT_TOKENS,
+  credentialHeaderEvidence: ADR_0067_DOCUMENTATION,
+  displayName: 'OpenCode Go · Messages（开发者实时）',
 };
 
 export const PROVIDER_ROUTE_PROFILES: Readonly<Record<RemoteExecutionRoute, ProviderRouteProfile>> = {
   [DEEPSEEK_ROUTE]: DEEPSEEK_ROUTE_PROFILE,
   [OPENCODE_GO_ROUTE]: OPENCODE_GO_ROUTE_PROFILE,
+  [OPENCODE_GO_MESSAGES_ROUTE]: OPENCODE_GO_MESSAGES_ROUTE_PROFILE,
 };
 
 export interface DeepSeekRequestAssembly {
@@ -110,37 +173,41 @@ export interface ProviderRequestContext {
   readonly sessionId?: string;
 }
 
-/**
- * Assemble one request. The header set comes from the route profile, the body from the model
- * profile's declared capabilities, and nothing is read from anywhere else — which is what makes a
- * new model a new row in the profile table rather than a new branch here.
- *
- * The two shapes ADR 0067 documents behind the Go gateway's other paths refuse rather than guess. Of
- * the structured-output constraints only `json-object` is implemented, as exactly one body field —
- * `response_format: {"type":"json_object"}`, the chat-completions spelling — and `json-schema` and
- * `tool-call` still refuse, because naming a constraint is not implementing it. Implementing one is
- * still not sending it: the field travels only for a model whose profile declares `json-object`, and
- * that declaration needs the live evidence the profile table demands (Issue #306).
- */
-export function assembleProviderRequest(
-  profile: ProviderRouteProfile,
-  model: ProviderModelProfile,
-  payload: AssembledModelPayload,
-  context: ProviderRequestContext,
-): DeepSeekRequestAssembly {
-  if (model.route !== profile.route) throw new Error('PROVIDER_MODEL_ROUTE_MISMATCH');
-  if (model.capabilities.requestShape !== 'openai-chat-completions') throw new Error('PROVIDER_REQUEST_SHAPE_UNSUPPORTED');
-  const structuredOutput = model.capabilities.structuredOutput;
-  if (structuredOutput !== 'none' && structuredOutput !== 'json-object') throw new Error('PROVIDER_STRUCTURED_OUTPUT_UNSUPPORTED');
+/** The turn's user and assistant messages as both shapes carry them; where the system prompt goes is each shape's own business. */
+function conversationMessages(payload: AssembledModelPayload): Array<{ role: string; content: string }> {
   const messages: Array<{ role: string; content: string }> = [];
-  if (payload.system !== undefined && payload.system.length > 0) messages.push({ role: 'system', content: payload.system });
   for (const message of payload.messages) {
     const text = messageText(message);
     if (text === null) throw new Error('DEEPSEEK_REQUEST_NON_TEXT_CONTENT');
     if (message.role !== 'user' && message.role !== 'assistant') throw new Error('DEEPSEEK_REQUEST_ROLE_INVALID');
     messages.push({ role: message.role, content: text });
   }
-  const body = canonicalJson({
+  return messages;
+}
+
+/** The system prompt of one payload, or `null` when the payload carries none. */
+function systemPromptOf(payload: AssembledModelPayload): string | null {
+  return payload.system !== undefined && payload.system.length > 0 ? payload.system : null;
+}
+
+/**
+ * The chat-completions body, exactly as adapter revision 1 has always assembled it: the system prompt
+ * is the first message, and both frozen request digests are over these bytes.
+ *
+ * Of the structured-output constraints only `json-object` is implemented, as exactly one body field —
+ * `response_format: {"type":"json_object"}`, the chat-completions spelling — and `json-schema` and
+ * `tool-call` still refuse, because naming a constraint is not implementing it. Implementing one is
+ * still not sending it: the field travels only for a model whose profile declares `json-object`, and
+ * that declaration needs the live evidence the profile table demands (Issue #306).
+ */
+function chatCompletionsBody(model: ProviderModelProfile, payload: AssembledModelPayload): string {
+  const structuredOutput = model.capabilities.structuredOutput;
+  if (structuredOutput !== 'none' && structuredOutput !== 'json-object') throw new Error('PROVIDER_STRUCTURED_OUTPUT_UNSUPPORTED');
+  const system = systemPromptOf(payload);
+  const messages = system === null
+    ? conversationMessages(payload)
+    : [{ role: 'system', content: system }, ...conversationMessages(payload)];
+  return canonicalJson({
     model: model.model,
     messages,
     stream: false,
@@ -152,6 +219,61 @@ export function assembleProviderRequest(
     // model without any other byte of the request changing.
     ...(structuredOutput === 'json-object' ? { response_format: { type: 'json_object' } } : {}),
   });
+}
+
+/**
+ * The Anthropic-compatible body, from the Anthropic Messages API reference read on 2026-09-08
+ * (`https://platform.claude.com/docs/en/api/messages`): `{ model, max_tokens, system?, messages }`.
+ *
+ * Two facts of this shape are worth stating where they are implemented. The system prompt is a
+ * top-level field and never a message, so the same `AssembledModelPayload` that puts it first in a
+ * chat-completions array puts it beside the array here, and nothing above the adapter learns the
+ * difference. And `max_tokens` is mandatory, so it is taken from the route's declaration or the
+ * request refuses: a cap the assembler invented would be a bound nobody authorized.
+ *
+ * The reasoning and structured-output spellings this adapter implements are the chat-completions
+ * ones, so a profile that declares either on this shape refuses rather than sending a field the
+ * endpoint never documented.
+ */
+function anthropicMessagesBody(
+  profile: ProviderRouteProfile,
+  model: ProviderModelProfile,
+  payload: AssembledModelPayload,
+): string {
+  if (model.capabilities.structuredOutput !== 'none') throw new Error('PROVIDER_STRUCTURED_OUTPUT_UNSUPPORTED');
+  if (model.capabilities.reasoningControl !== 'none') throw new Error('PROVIDER_REASONING_CONTROL_UNSUPPORTED');
+  if (profile.maxOutputTokens === null) throw new Error('PROVIDER_MAX_OUTPUT_TOKENS_ABSENT');
+  const system = systemPromptOf(payload);
+  return canonicalJson({
+    model: model.model,
+    max_tokens: profile.maxOutputTokens,
+    ...(system === null ? {} : { system }),
+    messages: conversationMessages(payload),
+  });
+}
+
+/**
+ * Assemble one request. The header set comes from the route profile, the body from the model
+ * profile's declared capabilities, and nothing is read from anywhere else — which is what makes a
+ * new model a new row in the profile table rather than a new branch here.
+ *
+ * Two of the three shapes ADR 0067 documents behind the Go gateway's paths are implemented and
+ * `openai-responses` still refuses rather than guessing. The branch is on `requestShape` alone: no
+ * route, model id, or endpoint is consulted, so a model behind an Anthropic-compatible endpoint is a
+ * profile rather than a branch, and nothing above this function learns which shape it got.
+ */
+export function assembleProviderRequest(
+  profile: ProviderRouteProfile,
+  model: ProviderModelProfile,
+  payload: AssembledModelPayload,
+  context: ProviderRequestContext,
+): DeepSeekRequestAssembly {
+  if (model.route !== profile.route) throw new Error('PROVIDER_MODEL_ROUTE_MISMATCH');
+  const shape = model.capabilities.requestShape;
+  if (shape !== 'openai-chat-completions' && shape !== 'anthropic-messages') throw new Error('PROVIDER_REQUEST_SHAPE_UNSUPPORTED');
+  const body = shape === 'anthropic-messages'
+    ? anthropicMessagesBody(profile, model, payload)
+    : chatCompletionsBody(model, payload);
   if (profile.sessionHeader && (context.sessionId === undefined || context.sessionId.length === 0)) {
     throw new Error('PROVIDER_REQUEST_SESSION_ABSENT');
   }
