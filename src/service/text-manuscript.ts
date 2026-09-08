@@ -85,7 +85,11 @@ const LINK_REFERENCE = /\[[^\]\n]*\]\([^)\s]*\)/g;
 const INLINE_CODE = /`[^`\n]+`/g;
 const EMPHASIS = /\*\*[^*\n]+\*\*|__[^_\n]+__|\*[^*\n]+\*|_[^_\n]+_/g;
 
-interface ConvertedParagraph {
+/**
+ * One paragraph of a working representation, in the form every converter hands to the package
+ * builder below. A converter decides what a paragraph is; the builder decides what a DOCX is.
+ */
+export interface ConvertedParagraph {
   /** The literal lines of one paragraph; a boundary between two of them is a hard line break. */
   lines: string[];
   /** A `w:pStyle` value the DOCX parser reads as a heading, or none for a body paragraph. */
@@ -105,7 +109,8 @@ function escapeXml(value: string): string {
   return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-function emptyLoss(): ConversionLoss {
+/** The zero of the seven counted classes, which every converter starts its own counting from. */
+export function emptyLoss(): ConversionLoss {
   return {
     inlineStyles: 0,
     commentsRevisions: 0,
@@ -247,13 +252,35 @@ function paragraphXml(paragraph: ConvertedParagraph): string {
 }
 
 /**
- * Convert a plain-text or Markdown manuscript into the DOCX working representation the product
- * reads it through. The result is never the digest of record: the caller keeps the original file
- * and its digest as the Source Version's identity (ADR 0072 §2).
+ * Package paragraphs as the DOCX working representation the product reads a converted file
+ * through. Every converter builds its package here, so the working representation of a `.txt`, a
+ * `.md`, and a `.doc` differ only in the paragraphs their readers found (ADR 0072 §5).
  *
  * The package carries no run properties, table, image, section child, header, or footer, so the
  * DOCX parser reports no fidelity signal of its own for it and every count in the merged review is
- * this conversion's — the invariant `deriveImportFidelityPlan` relies on to rebuild the report.
+ * the conversion's — the invariant `deriveImportFidelityPlan` relies on to rebuild the report.
+ * Nothing here reads a clock or a file, so the same paragraphs always give the same bytes.
+ */
+export function buildManuscriptPackage(paragraphs: readonly ConvertedParagraph[]): Uint8Array {
+  const documentXml =
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+    '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>' +
+    paragraphs.map(paragraphXml).join('') +
+    '<w:sectPr/></w:body></w:document>';
+  return zipSync(
+    {
+      '[Content_Types].xml': strToU8(CONTENT_TYPES_XML),
+      'docProps/core.xml': strToU8(CORE_PROPERTIES_XML),
+      'word/document.xml': strToU8(documentXml),
+    },
+    { level: ARCHIVE_LEVEL, mtime: ARCHIVE_MTIME },
+  );
+}
+
+/**
+ * Convert a plain-text or Markdown manuscript into the DOCX working representation the product
+ * reads it through. The result is never the digest of record: the caller keeps the original file
+ * and its digest as the Source Version's identity (ADR 0072 §2).
  */
 export function convertTextManuscript(
   bytes: Uint8Array,
@@ -268,18 +295,5 @@ export function convertTextManuscript(
     paragraphs.some((paragraph) => paragraph.lines.join('').trim().length > 0),
     '文件没有可转换为稿件的文本内容。',
   );
-  const documentXml =
-    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
-    '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>' +
-    paragraphs.map(paragraphXml).join('') +
-    '<w:sectPr/></w:body></w:document>';
-  const docx = zipSync(
-    {
-      '[Content_Types].xml': strToU8(CONTENT_TYPES_XML),
-      'docProps/core.xml': strToU8(CORE_PROPERTIES_XML),
-      'word/document.xml': strToU8(documentXml),
-    },
-    { level: ARCHIVE_LEVEL, mtime: ARCHIVE_MTIME },
-  );
-  return { docx, loss };
+  return { docx: buildManuscriptPackage(paragraphs), loss };
 }
