@@ -4338,7 +4338,13 @@ function renderManuscriptReimportReview(
     actions.append(commit, cancelCommit);
   }
   actions.append(abandon);
-  content.append(actions);
+  // The sticky `.commit-bar` the other two reviews use, so this review's commit and cancel stay
+  // reachable below the fidelity table and the block mappings (V2-UX-LAYER-005). It carries the
+  // action row alone: the atomic-commit sentence its siblings show is copy, and this change is
+  // position only.
+  const commitBar = element('section', 'commit-bar');
+  commitBar.append(actions);
+  content.append(commitBar);
   appendRecoveryReturnAction(content, recoveryReturn);
   replaceScreen('review', content);
 }
