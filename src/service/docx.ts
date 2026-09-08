@@ -8,8 +8,9 @@ import {
   MAX_BLOCK_GRAPHEMES,
   type FidelityCategoryKey,
   type FidelityCategoryProjection,
+  type ManuscriptConversionProjection,
 } from '../shared/protocol.js';
-import type { ConversionLoss, ConvertibleSourceFormat } from './text-manuscript.js';
+import type { ConversionLoss } from './text-manuscript.js';
 
 /** The intake router applies this same bound to a file of any format before it is retained. */
 export const MAX_ARCHIVE_BYTES = 64 * 1024 * 1024;
@@ -74,13 +75,27 @@ export interface DocumentSignals {
 /**
  * A conversion whose loss the report counts and names (ADR 0072 §3). The classes stay the design's
  * eight and the labels stay the class's: what changes is that a class carrying conversion loss says
- * who converted the file and that the characters were kept as the author typed them.
+ * who converted the file and what that converter did with the content.
  */
 export interface FidelityConversion {
   identity: string;
-  sourceFormat: ConvertibleSourceFormat;
+  sourceFormat: ManuscriptConversionProjection['sourceFormat'];
   loss: ConversionLoss;
 }
+
+/**
+ * What each converter did to the content a class counts. A text conversion keeps the author's
+ * characters and loses only the structure they spelled out; a `.doc` conversion drops content the
+ * reader could not carry across. One prefix cannot say both, so the review says which happened.
+ *
+ * An identity absent from this map cannot be phrased: `buildFidelityReport` refuses to write such a
+ * detail and `deriveImportFidelityPlan` refuses to plan a report that names one, so a converter can
+ * never reach the editor with a review nobody can reconstruct.
+ */
+const CONVERSION_LOSS_PHRASES: Readonly<Record<string, string>> = {
+  'ai7-text-to-docx/1': '转换保留为原文字符',
+  'ai7-doc-to-docx/1': '转换时未能保留',
+};
 
 /**
  * What a persisted converted report can be rebuilt from. The loss is not stored per class and does
@@ -568,9 +583,11 @@ export function buildFidelityReport(
     sections: signals.sections + (loss?.sections ?? 0),
     headersFooters: headersFooters + (loss?.headersFooters ?? 0),
   };
+  const phrase = conversion === undefined ? undefined : CONVERSION_LOSS_PHRASES[conversion.identity];
+  requireDocx(conversion === undefined || phrase !== undefined, 'unknown converter identity');
   const detail = (key: keyof typeof count, text: string): string =>
     conversion && loss![key] > 0
-      ? `由 ${conversion.identity} 从 ${conversion.sourceFormat} 转换保留为原文字符：${text}`
+      ? `由 ${conversion.identity} 从 ${conversion.sourceFormat} ${phrase}：${text}`
       : text;
   return [
     {
@@ -663,6 +680,8 @@ function reportForCandidateCounts(
     tables: counts[3]!, imagesCaptions: counts[4]!, sections: counts[5]!,
   };
   if (!conversion) return buildFidelityReport(signals, counts[6]!);
+  // A converter this build cannot phrase is not one whose report this build can rebuild.
+  if (CONVERSION_LOSS_PHRASES[conversion.identity] === undefined) return undefined;
   return buildFidelityReport(
     { inlineStyles: 0, commentsRevisions: 0, notes: 0, tables: 0, imagesCaptions: 0, sections: 0 },
     0,

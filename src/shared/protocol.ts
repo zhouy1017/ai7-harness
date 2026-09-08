@@ -513,7 +513,7 @@ export type SourceImportRetainedBoundaryLabel =
  */
 export interface ManuscriptConversionProjection {
   converterIdentity: string;
-  sourceFormat: 'TXT' | 'MD';
+  sourceFormat: 'TXT' | 'MD' | 'DOC';
 }
 
 /**

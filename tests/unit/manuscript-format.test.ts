@@ -117,14 +117,17 @@ describe('identifyManuscriptFormat', () => {
 describe('the routing table', () => {
   const formats: ReadonlyArray<SourceFormat> = ['DOCX', 'DOC', 'PDF', 'ODT', 'RTF', 'TXT', 'MD', 'UNKNOWN'];
 
-  it('reads a DOCX natively, TXT and MD through the converter, and states a reason for the rest', () => {
+  it('reads a DOCX natively, the convertible formats through their converter, and states a reason for the rest', () => {
     // A DOCX is the only format read with no conversion at all (ADR 0072 §1).
     expect(editableImport('DOCX')).toEqual({ available: true });
     expect(editableImport('TXT'))
       .toEqual({ available: true, conversion: { converterIdentity: 'ai7-text-to-docx/1', sourceFormat: 'TXT' } });
     expect(editableImport('MD'))
       .toEqual({ available: true, conversion: { converterIdentity: 'ai7-text-to-docx/1', sourceFormat: 'MD' } });
-    for (const format of formats.filter((candidate) => !['DOCX', 'TXT', 'MD'].includes(candidate))) {
+    // A legacy `.doc` is read through its own converter, not the text one (ADR 0072 §5, #351).
+    expect(editableImport('DOC'))
+      .toEqual({ available: true, conversion: { converterIdentity: 'ai7-doc-to-docx/1', sourceFormat: 'DOC' } });
+    for (const format of formats.filter((candidate) => !['DOCX', 'TXT', 'MD', 'DOC'].includes(candidate))) {
       const projection = editableImport(format);
       expect(projection.available).toBe(false);
       expect(projection).toMatchObject({ code: 'FORMAT_UNSUPPORTED_FOR_EDITABLE_IMPORT' });
