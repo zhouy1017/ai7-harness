@@ -1,4 +1,4 @@
-export const SERVICE_PROTOCOL_VERSION = 24 as const;
+export const SERVICE_PROTOCOL_VERSION = 25 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -1661,6 +1661,9 @@ export interface BaselineAnalysisResultSetRevisionProjection {
   assurance: AnalysisAssuranceAxis;
   gaps: ReadonlyArray<AnalysisGapProjection>;
   conflicts: ReadonlyArray<AnalysisConflictProjection>;
+  /** Model-driven cross-unit findings beside the deterministic conflicts; empty when the reduction did not close. */
+  crossUnitFindings: ReadonlyArray<AnalysisCrossUnitFindingProjection>;
+  crossUnitReduction: AnalysisCrossUnitReductionProjection;
   sections: ReadonlyArray<AnalysisSectionProjection>;
   synthesis: AnalysisSynthesisProjection;
   units: ReadonlyArray<BaselineAnalysisUnitProjection>;
@@ -1891,6 +1894,8 @@ export interface BaselineAnalysisProjection {
       completedAttempts: number;
       /** The longest step this Run has actually settled, which the stale case is measured against. */
       longestSettledUnitMs: number | null;
+      /** Which declared step is in flight: the unit loop, or the one cross-unit reduction after it. */
+      stage: 'units' | 'cross-unit-reduction';
       /** The `recordedAt` of the Run Record's latest transition, composed by the store. */
       lastTransitionAt: string;
     } | null;

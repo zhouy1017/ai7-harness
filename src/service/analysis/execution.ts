@@ -20,7 +20,7 @@ import { Ai7LocalDeterministicAdapter } from '../provider/local-deterministic-ad
 import type { ResolvedModelFixture } from '../provider/model-fixture.js';
 import { ProviderResultCache, providerRequestDigest, usageOfResponse } from '../provider/provider-result-cache.js';
 import { canonicalRecord } from './canonical.js';
-import { SAMPLE1_SOURCE_DIGEST, type BaselineAnalysisStore, type ExecutionBindingRecord, type ExecutionPlanFacts, type PredecessorUnitResult, type RunProgress, type UnitResultRecord } from './baseline-analysis-store.js';
+import { SAMPLE1_SOURCE_DIGEST, type BaselineAnalysisStore, type ExecutionBindingRecord, type ExecutionPlanFacts, type PredecessorUnitResult, type RunProgress, type RunProgressStage, type UnitResultRecord } from './baseline-analysis-store.js';
 import { BASELINE_PROMPT_CONTRACT, BASELINE_PROMPT_CONTRACT_DIGEST, buildUnitMessage, parseUnitResult, unitRequestDigest, type BaselineUnitResult, type UnitResultParseFailureCode } from './contract.js';
 import { BASELINE_ANALYSIS_CONTRACT_VERSION } from './identity.js';
 import { reduceBaselineAnalysis, type UnitOutcome } from './reducers.js';
@@ -103,6 +103,7 @@ interface ActiveRun {
     attemptState: RunAttemptState | null;
     completedAttempts: number;
     longestSettledUnitMs: number | null;
+    stage: RunProgressStage;
   };
   /**
    * The live adapter's transmission counter, read on demand; `null` on the deterministic route, which
@@ -248,6 +249,7 @@ export class BaselineAnalysisExecutionOwner {
         attemptState: null,
         completedAttempts: 0,
         longestSettledUnitMs: null,
+        stage: 'units',
       },
       transmissions: null,
       transmissionsAtDispatch: 0,
