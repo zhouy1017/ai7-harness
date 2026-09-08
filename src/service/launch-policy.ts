@@ -144,6 +144,7 @@ function deny(reason: string): LaunchPolicyProjection {
       liveTransmissionAllowed: false,
       crossUnitReductionAllowed: false,
       assuranceSamplingAllowed: false,
+      runReportReflectionAllowed: false,
       label: '开发与持续集成：零次实时传输',
     },
     externalExport: {
@@ -204,7 +205,11 @@ function verifyDevelopmentCiPolicy(policy: Record<string, unknown>): void {
  * revision that named a suboperation could not be fed through `resolveSourceCheckoutLaunchPolicy` at
  * all — which is the point of the pins, and why the reading is tested here instead.
  */
-export function verifyDeveloperLivePolicy(policy: Record<string, unknown>): { crossUnitReductionAllowed: boolean; assuranceSamplingAllowed: boolean } {
+export function verifyDeveloperLivePolicy(policy: Record<string, unknown>): {
+  crossUnitReductionAllowed: boolean;
+  assuranceSamplingAllowed: boolean;
+  runReportReflectionAllowed: boolean;
+} {
   requirePolicy(policy['operationalScope'] === 'developer-live' && policy['lifecycleStatus'] === 'active');
   const selection = policy['trustedSelection'];
   requirePolicy(
@@ -250,6 +255,10 @@ export function verifyDeveloperLivePolicy(policy: Record<string, unknown>): { cr
   // Read exactly as the reduction's key is, for exactly the same reason.
   const assuranceSamplingAllowed = (transmissions as Record<string, unknown>)['assuranceSamplingAllowed'];
   requirePolicy(assuranceSamplingAllowed === undefined || typeof assuranceSamplingAllowed === 'boolean');
+  // The Run Report's reflection turn (ADR 0066 §Run Report), which v4 does not name either. Read
+  // exactly as the two above are, for exactly the same reason.
+  const runReportReflectionAllowed = (transmissions as Record<string, unknown>)['runReportReflectionAllowed'];
+  requirePolicy(runReportReflectionAllowed === undefined || typeof runReportReflectionAllowed === 'boolean');
   const preconditions = rule['authorizationPreconditions'];
   requirePolicy(
     isRecord(preconditions) &&
@@ -271,7 +280,11 @@ export function verifyDeveloperLivePolicy(policy: Record<string, unknown>): { cr
   requirePolicy(isRecord(source) && source['privateManuscriptAllowed'] === false && source['otherBookRefusedBeforeDispatch'] === true);
   const capture = rule['capture'];
   requirePolicy(isRecord(capture) && capture['fixtureEmissionAllowed'] === false && capture['uploadAllowed'] === false && capture['providerResultCacheAllowed'] === true);
-  return { crossUnitReductionAllowed: crossUnitReductionAllowed === true, assuranceSamplingAllowed: assuranceSamplingAllowed === true };
+  return {
+    crossUnitReductionAllowed: crossUnitReductionAllowed === true,
+    assuranceSamplingAllowed: assuranceSamplingAllowed === true,
+    runReportReflectionAllowed: runReportReflectionAllowed === true,
+  };
 }
 
 /**
@@ -405,6 +418,7 @@ export async function resolveSourceCheckoutLaunchPolicy(
           liveTransmissionAllowed: true,
           crossUnitReductionAllowed: suboperations.crossUnitReductionAllowed,
           assuranceSamplingAllowed: suboperations.assuranceSamplingAllowed,
+          runReportReflectionAllowed: suboperations.runReportReflectionAllowed,
           label: '开发者实时：实时传输受运行边界约束',
         },
         externalExport,
@@ -422,9 +436,10 @@ export async function resolveSourceCheckoutLaunchPolicy(
         decision: 'deny',
         authorizedLiveTransmissionCount: 0,
         liveTransmissionAllowed: false,
-        // v1 authorizes zero transmissions, so no step of a Run may transmit, these two included.
+        // v1 authorizes zero transmissions, so no step of a Run may transmit, these three included.
         crossUnitReductionAllowed: false,
         assuranceSamplingAllowed: false,
+        runReportReflectionAllowed: false,
         label: '开发与持续集成：零次实时传输',
       },
       externalExport,

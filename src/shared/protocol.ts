@@ -1027,6 +1027,13 @@ export interface LaunchPolicyProjection {
      * `true` — absent included — means the suboperation does not dispatch at all.
      */
     assuranceSamplingAllowed?: boolean;
+    /**
+     * Whether the active Provider Processing policy names the Run Report's reflection turn (ADR
+     * 0066 §Run Report). Read exactly as the two keys above are: the reflection is one more
+     * transmission beyond v4's per-unit bound, so anything but `true` — absent included — means the
+     * turn does not dispatch and the report records `policy-bounded` with its reason.
+     */
+    runReportReflectionAllowed?: boolean;
     label: '开发与持续集成：零次实时传输' | '开发者实时：实时传输受运行边界约束';
   };
   externalExport: {

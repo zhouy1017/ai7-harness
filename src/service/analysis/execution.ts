@@ -50,14 +50,23 @@ import {
   type GapUnitOutcome,
 } from './reducers.js';
 import {
+  buildRunReportReflectionMessage,
+  parseRunReportReflectionResult,
+  type RunReportReflectionParseFailureCode,
+} from './run-report-contract.js';
+import {
+  RUN_REPORT_NO_USAGE,
   buildRunReport,
+  runReportAccounting,
   runReportReflectionNotRun,
+  type RunReportAccounting,
   type RunReportFacts,
   type RunReportReflectionOutcome,
   type RunReportRevisionUsageStageId,
   type RunReportSpan,
   type RunReportUnitObservation,
   type RunReportUnitRow,
+  type RunReportUsage,
 } from './run-report.js';
 
 /**
@@ -396,12 +405,70 @@ export class BaselineAnalysisExecutionOwner {
   }
 
   /**
-   * The Run Report's `if redone` list. It is the fourth declared suboperation and runs last — after
-   * the sample, after the reduction is final, and after the revision is persisted — so the accounting
-   * it reflects on is the revision's own.
+   * The Run Report's `if redone` list: the fourth declared suboperation (ADR 0066 §Run Report).
+   *
+   * It runs last — after the sample, after the reduction is final, and after the revision is
+   * persisted — so the accounting it reflects on is the revision's own and can never change it. Its
+   * usage is therefore recorded on the report alone: the revision is already immutable, and no
+   * request count of any Journey moves because of it.
+   *
+   * The guard order is the sample's — interruption, policy, ceiling — and every refusal happens
+   * before a message is assembled, so a Run that may not reflect never builds one. It records no
+   * execution-span row, because the span table is unit-only and this step belongs to no unit, and it
+   * makes exactly one further user message admissible at the gate.
    */
-  #reflect(): Promise<RunReportReflectionOutcome> {
-    return Promise.resolve(runReportReflectionNotRun(RUN_REPORT_REFLECTION_NOT_REACHED));
+  async #reflect(context: RunReportReflectionContext): Promise<RunReportReflectionOutcome> {
+    const { active, harness, live, policy } = context;
+    if (context.stopped || active.interrupted) return runReportReflectionNotRun(RUN_REPORT_REFLECTION_NOT_REACHED);
+    if (live !== null && policy.providerProcessing.runReportReflectionAllowed !== true) {
+      // The reflection is a transmission the active Provider Processing policy does not name, so it
+      // never forms a request at all. Policy v4 authorizes one transmission per Analysis Unit.
+      return { ifRedone: { state: 'policy-bounded', items: [], reason: RUN_REPORT_REFLECTION_POLICY_BOUNDED }, usage: RUN_REPORT_NO_USAGE };
+    }
+    if (context.ceilingState() === 'reached') {
+      return runReportReflectionNotRun('任务运行预算上限已达到；运行反思未派发。');
+    }
+    const message = buildRunReportReflectionMessage(context.runRecordId, context.accounting);
+    // The same set the gate reads: exactly one further user message becomes admissible, and every
+    // other refusal — route, model, system prompt, tools, prior outputs — is untouched.
+    context.admittedUserMessages.add(message);
+    active.progress.stage = 'run-report-reflection';
+    active.progress.currentUnitOrdinal = null;
+    active.progress.currentUnitStartedAt = new Date().toISOString();
+    active.progress.attemptState = 'dispatched';
+    active.transmissionsAtDispatch = active.transmissions?.() ?? 0;
+    const result = await harness.submitUnit(message);
+    const canonical = context.liveAdapter.instance?.lastCanonicalResult ?? null;
+    const usageSignal = result.signals.find((signal) => signal.kind === 'usage');
+    const turnUsage = usageSignal?.kind === 'usage'
+      ? { inputTokens: usageSignal.usage.inputTokens, outputTokens: usageSignal.usage.outputTokens }
+      : null;
+    // Counted on the report and against the Run's ceiling, and deliberately nowhere else: the
+    // revision this reflects on was persisted before the turn was dispatched.
+    if (turnUsage !== null) context.accumulated.push(turnUsage);
+    const usage: RunReportUsage = {
+      requests: 1,
+      inputTokens: turnUsage?.inputTokens ?? 0,
+      outputTokens: turnUsage?.outputTokens ?? 0,
+    };
+    active.progress.completedAttempts += 1;
+    const gap = (reason: string): RunReportReflectionOutcome => ({ ifRedone: { state: 'gap', items: [], reason }, usage });
+    const candidate = result.signals.find((signal) => signal.kind === 'contentCandidate');
+    if (result.terminal === 'completed' && candidate?.kind === 'contentCandidate') {
+      context.acceptedOutputDigests.add(candidate.digest);
+      if (canonical?.kind === 'empty-answer') return gap(runReportReflectionEmptyAnswerGapReason(canonical.reasoningPresent));
+      const parsed = parseRunReportReflectionResult(candidate.text);
+      if (!parsed.ok) return gap(unparsableRunReportReflectionAnswerGapReason(parsed.code, parsed.detail, candidate.text));
+      return { ifRedone: { state: 'closed', items: parsed.result.items, reason: null }, usage };
+    }
+    if (result.terminal === 'completed') return gap('运行反思的技术回合完成但没有模型输出。');
+    if (result.terminal === 'failed') {
+      const failure = result.signals.find((signal) => signal.kind === 'failed');
+      // No safe retry here: one attempt, and a retry-safe failure is a disclosed absence like any other.
+      return gap(failure?.kind === 'failed' ? `${failure.failure.reason}（${failure.failure.code}）` : '适配器失败。');
+    }
+    const failure = result.signals.find((signal) => signal.kind === 'interrupted');
+    return gap(failure?.kind === 'interrupted' ? failure.failure.reason : '运行反思被中断。');
   }
 
   async #execute(active: ActiveRun, facts: ExecutionPlanFacts): Promise<void> {
@@ -975,7 +1042,11 @@ export class BaselineAnalysisExecutionOwner {
           ? `${reduction.coverage.label}；${reduction.reducerClosure.label}；${reduction.assurance.label}。`
           : `${interruption.summary}${reduction.coverage.label}；${reduction.reducerClosure.label}；${reduction.assurance.label}。`,
         safeNextAction: interruption === null ? SAFE_NEXT_ACTIONS[terminalClassification] : interruption.safeNextAction,
-        report: buildRunReport(reportFacts, await this.#reflect()),
+        report: buildRunReport(reportFacts, await this.#reflect({
+          active, harness, runRecordId: facts.runRecordId, accounting: runReportAccounting(reportFacts),
+          admittedUserMessages, acceptedOutputDigests, liveAdapter, accumulated, ceilingState, live, policy,
+          stopped: terminalClassification === 'interrupted',
+        })),
       });
     } finally {
       currentBindingDigest = null;
@@ -1104,6 +1175,46 @@ export const ASSURANCE_SAMPLING_POLICY_BOUNDED = '保证抽样未派发：当前
 
 /** The exact disclosure of a Run that stopped before the reflection turn could be formed at all. */
 export const RUN_REPORT_REFLECTION_NOT_REACHED = '运行在形成结果集修订版前结束，运行反思未发起。' as const;
+
+/** The exact disclosure when the active Provider Processing policy does not name the reflection turn. */
+export const RUN_REPORT_REFLECTION_POLICY_BOUNDED = '运行反思未派发：当前 Provider Processing 策略仅授权单元数内的传输' as const;
+
+/**
+ * The two readings of a reflection turn that came back with nothing usable. They mirror the sample's
+ * exactly, and say the one thing that matters about this suboperation's failure: the Run's own result
+ * is untouched, because the revision was persisted before the turn was ever dispatched.
+ */
+export function runReportReflectionEmptyAnswerGapReason(reasoningPresent: boolean): string {
+  return reasoningPresent
+    ? '运行反思未闭合：模型完成了推理，但答案通道为空。本次运行的结果集修订版不受影响。'
+    : '运行反思未闭合：模型的答案通道与推理通道都为空。本次运行的结果集修订版不受影响。';
+}
+
+export function unparsableRunReportReflectionAnswerGapReason(
+  code: RunReportReflectionParseFailureCode,
+  detail: string,
+  answerText: string,
+): string {
+  return `运行反思结果不符合契约 v1（${code}）：${detail}模型返回了 ${[...answerText].length} 个字符，其中没有可解析的反思结果。本次运行的结果集修订版不受影响。`;
+}
+
+/** Exactly what the reflection suboperation may read or move; no finding and no block is among them. */
+interface RunReportReflectionContext {
+  readonly active: ActiveRun;
+  readonly harness: PrimaryAgentHarnessHandle;
+  readonly runRecordId: string;
+  /** The stable accounting of the report this turn reflects on; counts, codes, and digests only. */
+  readonly accounting: RunReportAccounting;
+  readonly admittedUserMessages: Set<string>;
+  readonly acceptedOutputDigests: Set<string>;
+  readonly liveAdapter: { instance: DeepSeekOpenAiCompatibleAdapter | null };
+  readonly accumulated: UsageFacts[];
+  readonly ceilingState: () => EgressCeilingState;
+  readonly live: DeveloperLiveRuntime | null;
+  readonly policy: LaunchPolicyProjection;
+  /** Whether the Run had already stopped; a stopped Run reflects on nothing. */
+  readonly stopped: boolean;
+}
 
 /** Exactly what the sampling suboperation may read or move; the finding components are not among them. */
 interface AssuranceSamplingContext {

@@ -150,6 +150,9 @@ describe('resolveSourceCheckoutLaunchPolicy', () => {
       // reduction, and a sampling turn is one more transmission per anchor unit, so it does not
       // dispatch either. The Owner's policy v5 is what would name both.
       assuranceSamplingAllowed: false,
+      // Issue #276: the Run Report's reflection turn is one more transmission still, and v4 names it
+      // no more than it names the other two. It therefore does not dispatch under this scope either.
+      runReportReflectionAllowed: false,
       label: '开发者实时：实时传输受运行边界约束',
     });
     expect(projection.externalExport.version).toBe('v1');
@@ -157,7 +160,7 @@ describe('resolveSourceCheckoutLaunchPolicy', () => {
     expect(projection.publicReleasePermission.present).toBe(false);
   });
 
-  it('reads neither declared suboperation’s transmission under either selectable scope', async () => {
+  it('reads no declared suboperation’s transmission under either selectable scope', async () => {
     await placeValidCheckout();
     for (const scope of ['development-ci', 'developer-live'] as const) {
       const projection = await resolveSourceCheckoutLaunchPolicy(codeRoot, scope);
@@ -165,31 +168,53 @@ describe('resolveSourceCheckoutLaunchPolicy', () => {
       expect(projection.providerProcessing.crossUnitReductionAllowed).toBe(false);
       // Absent from the exact v4 bytes, which is exactly what `false` means here.
       expect(projection.providerProcessing.assuranceSamplingAllowed).toBe(false);
+      expect(projection.providerProcessing.runReportReflectionAllowed).toBe(false);
     }
-    // The denial carries the same reading, so no unreadable launch can turn either step on.
+    // The denial carries the same reading, so no unreadable launch can turn any step on.
     const denied = await resolveSourceCheckoutLaunchPolicy(codeRoot, 'ordinary-production' as TrustedOperationalScope);
     expect(denied.integrityState).toBe('denied');
     expect(denied.providerProcessing.crossUnitReductionAllowed).toBe(false);
     expect(denied.providerProcessing.assuranceSamplingAllowed).toBe(false);
+    expect(denied.providerProcessing.runReportReflectionAllowed).toBe(false);
   });
 
   it('reads assuranceSamplingAllowed as absent, false, or true, and refuses a non-boolean', async () => {
     // Absent is the v4 document as it stands, and it reads exactly as an explicit `false` does.
     const asIs = JSON.parse(await readFile(join(REPO_ROOT, ...V4_PATH.split('/')), 'utf8')) as Record<string, unknown>;
-    expect(verifyDeveloperLivePolicy(asIs)).toEqual({ crossUnitReductionAllowed: false, assuranceSamplingAllowed: false });
-    expect(verifyDeveloperLivePolicy(await v4PolicyWithTransmissions({ assuranceSamplingAllowed: false })))
-      .toEqual({ crossUnitReductionAllowed: false, assuranceSamplingAllowed: false });
+    const none = { crossUnitReductionAllowed: false, assuranceSamplingAllowed: false, runReportReflectionAllowed: false };
+    expect(verifyDeveloperLivePolicy(asIs)).toEqual(none);
+    expect(verifyDeveloperLivePolicy(await v4PolicyWithTransmissions({ assuranceSamplingAllowed: false }))).toEqual(none);
 
     // A policy revision that names the suboperation is read as naming it, and moves nothing else.
     expect(verifyDeveloperLivePolicy(await v4PolicyWithTransmissions({ assuranceSamplingAllowed: true })))
-      .toEqual({ crossUnitReductionAllowed: false, assuranceSamplingAllowed: true });
+      .toEqual({ ...none, assuranceSamplingAllowed: true });
     expect(verifyDeveloperLivePolicy(await v4PolicyWithTransmissions({ assuranceSamplingAllowed: true, crossUnitReductionAllowed: true })))
-      .toEqual({ crossUnitReductionAllowed: true, assuranceSamplingAllowed: true });
+      .toEqual({ ...none, assuranceSamplingAllowed: true, crossUnitReductionAllowed: true });
 
     // A key that is present but not a boolean is a policy the launch cannot read, and an unreadable
     // policy is refused outright — never read as a permissive default.
     for (const value of ['true', 1, null, {}, []]) {
       await expect(v4PolicyWithTransmissions({ assuranceSamplingAllowed: value }).then(verifyDeveloperLivePolicy))
+        .rejects.toThrow('LAUNCH_POLICY_INVALID');
+    }
+  });
+
+  it('reads runReportReflectionAllowed as absent, false, or true, and refuses a non-boolean', async () => {
+    const none = { crossUnitReductionAllowed: false, assuranceSamplingAllowed: false, runReportReflectionAllowed: false };
+    // Absent from the exact v4 bytes; the key is read exactly as the two beside it are.
+    const asIs = JSON.parse(await readFile(join(REPO_ROOT, ...V4_PATH.split('/')), 'utf8')) as Record<string, unknown>;
+    expect(verifyDeveloperLivePolicy(asIs).runReportReflectionAllowed).toBe(false);
+    expect(verifyDeveloperLivePolicy(await v4PolicyWithTransmissions({ runReportReflectionAllowed: false }))).toEqual(none);
+
+    // A policy revision that names the reflection turn names it alone, and moves neither other key.
+    expect(verifyDeveloperLivePolicy(await v4PolicyWithTransmissions({ runReportReflectionAllowed: true })))
+      .toEqual({ ...none, runReportReflectionAllowed: true });
+    expect(verifyDeveloperLivePolicy(await v4PolicyWithTransmissions({
+      runReportReflectionAllowed: true, assuranceSamplingAllowed: true, crossUnitReductionAllowed: true,
+    }))).toEqual({ crossUnitReductionAllowed: true, assuranceSamplingAllowed: true, runReportReflectionAllowed: true });
+
+    for (const value of ['true', 1, null, {}, []]) {
+      await expect(v4PolicyWithTransmissions({ runReportReflectionAllowed: value }).then(verifyDeveloperLivePolicy))
         .rejects.toThrow('LAUNCH_POLICY_INVALID');
     }
   });

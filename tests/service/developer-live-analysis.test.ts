@@ -403,6 +403,21 @@ describe('the developer-live scope over exact sample1 with a stub transport', ()
     expect(revision.assurance.sampledPrecision).toBeNull();
     expect(revision.assurance.label).not.toContain('抽样');
     expect(revision.reducerClosure.stages.at(-1)).toEqual({ stage: 'assurance-sampling', state: 'closed-with-gaps', inputCount: 2 });
+
+    // The Run Report's reflection turn is one more transmission this policy does not name either, so
+    // it never formed a request: no call carries its header, and the report says exactly why.
+    expect(calls.some((call) => call.body.includes('运行反思'))).toBe(false);
+    const report = settled.taskOutcome!.report!;
+    expect(report.ifRedone).toEqual({
+      state: 'policy-bounded',
+      items: [],
+      reason: '运行反思未派发：当前 Provider Processing 策略仅授权单元数内的传输',
+    });
+    // A turn that never dispatched costs nothing, and the reconciliation is untouched by it.
+    expect(report.usagePerStage['run-report-reflection']).toEqual({ requests: 0, inputTokens: 0, outputTokens: 0 });
+    expect(runReportUsageReconciles(report, revision.usage)).toBe(true);
+    expect(report.usagePerStage['cross-unit-reduction'].requests).toBe(1);
+    expect(report.usagePerStage['assurance-sampling'].requests).toBe(0);
     await store.close();
   });
 
