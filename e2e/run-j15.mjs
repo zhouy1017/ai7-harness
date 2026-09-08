@@ -375,14 +375,14 @@ async function main() {
     requireJourney(fetchRejected === true && loopback.healthy() && loopback.observedRequests() === 0, 'offline-product');
     const bookA = await createEmptyBook(renderer, 'J15 空图书甲');
     await waitFor(renderer, `document.querySelector('[data-native-artifact-state="available-to-install"]')`, 'available-card');
+    // Synchronized delta (#332): each of these sections now states its decision rows in its own dl and
+    // its digests in a second dl inside one closed 查看技术详情, so reading only the section's
+    // direct-child dl would miss 侧车身份 and every SHA-256. The helper below reads both layers, which
+    // is what V2-UX-LAYER-008 asks of a Journey: assert the decision reading, and assert that the
+    // technical layer still carries the exact value.
     await assertRenderer(renderer, `(() => {
       const card=document.querySelector('.native-artifact-card');
       const text=card?.textContent??'';
-      // Synchronized delta (#332): each of these sections now states its decision rows in its own `<dl>`
-      // and its digests in a second `<dl>` inside one closed `查看技术详情`, so reading only the
-      // section's direct-child `<dl>` would miss `侧车身份` and every `SHA-256`. Both layers are read
-      // here, which is what V2-UX-LAYER-008 asks of a Journey: assert the decision reading and assert
-      // that the technical layer still carries the exact value.
       const facts=(root)=>{
         const result={};
         for(const term of root?.querySelectorAll(':scope > dl.native-artifact-facts > dt, :scope > details.technical-details > dl > dt')??[]){
