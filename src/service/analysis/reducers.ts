@@ -40,7 +40,13 @@ export type UnitOutcome =
  * own codes; `policy-bounded` and `run-budget-ceiling-reached` are the two the reduction adds,
  * because it is the only step whose dispatch a launch policy or a spent ceiling can refuse on its own.
  */
-export type CrossUnitGapCode = 'adapter-failure' | 'contract-invalid' | 'interrupted' | 'policy-bounded' | 'run-budget-ceiling-reached';
+export type CrossUnitGapCode =
+  | 'adapter-failure'
+  | 'contract-invalid'
+  | 'interrupted'
+  | 'egress-refused'
+  | 'policy-bounded'
+  | 'run-budget-ceiling-reached';
 
 /** What the reduction did, as the execution owner observed it. `not-run` is fewer than two closed units. */
 export type CrossUnitOutcome =
@@ -381,6 +387,7 @@ export function reduceBaselineAnalysis(
     state: crossUnit.state,
     reason: crossUnit.state === 'closed' ? null : crossUnit.reason,
     requestDigest: crossUnit.state === 'not-run' ? null : crossUnit.requestDigest,
+    usage: crossUnit.state === 'closed' ? crossUnit.usage : null,
     findingCount: crossUnitFindings.length,
   };
   const stages: AnalysisReducerStageProjection[] = [

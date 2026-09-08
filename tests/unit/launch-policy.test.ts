@@ -127,11 +127,28 @@ describe('resolveSourceCheckoutLaunchPolicy', () => {
       decision: 'eligible-only',
       authorizedLiveTransmissionCount: 'bounded-by-run',
       liveTransmissionAllowed: true,
+      // Issue #274: v4 authorizes one transmission per Analysis Unit and names no cross-unit
+      // reduction, so the reduction does not dispatch under this scope. A v5 that names it is the
+      // Owner's decision; until then the exact policy bytes this pin verifies say `false`.
+      crossUnitReductionAllowed: false,
       label: '开发者实时：实时传输受运行边界约束',
     });
     expect(projection.externalExport.version).toBe('v1');
     expect(projection.externalExport.currentExportEffectAvailable).toBe(false);
     expect(projection.publicReleasePermission.present).toBe(false);
+  });
+
+  it('reads no cross-unit reduction transmission under either selectable scope', async () => {
+    await placeValidCheckout();
+    for (const scope of ['development-ci', 'developer-live'] as const) {
+      const projection = await resolveSourceCheckoutLaunchPolicy(codeRoot, scope);
+      expect(projection.integrityState).toBe('verified');
+      expect(projection.providerProcessing.crossUnitReductionAllowed).toBe(false);
+    }
+    // The denial carries the same reading, so no unreadable launch can turn the step on.
+    const denied = await resolveSourceCheckoutLaunchPolicy(codeRoot, 'ordinary-production');
+    expect(denied.integrityState).toBe('denied');
+    expect(denied.providerProcessing.crossUnitReductionAllowed).toBe(false);
   });
 
   it('denies the scopes the source checkout cannot select and any unknown scope', async () => {

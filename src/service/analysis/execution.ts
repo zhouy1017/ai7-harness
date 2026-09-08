@@ -22,8 +22,17 @@ import { ProviderResultCache, providerRequestDigest, usageOfResponse } from '../
 import { canonicalRecord } from './canonical.js';
 import { SAMPLE1_SOURCE_DIGEST, type BaselineAnalysisStore, type ExecutionBindingRecord, type ExecutionPlanFacts, type PredecessorUnitResult, type RunProgress, type RunProgressStage, type UnitResultRecord } from './baseline-analysis-store.js';
 import { BASELINE_PROMPT_CONTRACT, BASELINE_PROMPT_CONTRACT_DIGEST, buildUnitMessage, parseUnitResult, unitRequestDigest, type BaselineUnitResult, type UnitResultParseFailureCode } from './contract.js';
+import {
+  BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST,
+  buildCrossUnitMessage,
+  citedBlocksByUnit,
+  crossUnitRequestDigest,
+  parseCrossUnitResult,
+  unitSetDigest,
+  type CrossUnitResultParseFailureCode,
+} from './cross-unit-contract.js';
 import { BASELINE_ANALYSIS_CONTRACT_VERSION } from './identity.js';
-import { reduceBaselineAnalysis, type UnitOutcome } from './reducers.js';
+import { CROSS_UNIT_NOT_RUN, reduceBaselineAnalysis, type CrossUnitOutcome, type UnitOutcome } from './reducers.js';
 
 /**
  * The execution owner: AI7 scheduler admission for one Run per service instance, the attempt
@@ -185,6 +194,21 @@ export function emptyAnswerGapReason(reasoningPresent: boolean): string {
  */
 export function unparsableAnswerGapReason(code: UnitResultParseFailureCode, detail: string, answerText: string): string {
   return `单元结果不符合契约 v1（${code}）：${detail}模型返回了 ${[...answerText].length} 个字符，其中没有可解析的单元结果。重新分析本单元可能有帮助。`;
+}
+
+/**
+ * The same two readings for the cross-unit reduction, which fails as a whole rather than per unit:
+ * every unit result is already settled and stays settled, so what an editor learns is that this one
+ * further step produced nothing and that the unit results below it are unaffected.
+ */
+export function crossUnitEmptyAnswerGapReason(reasoningPresent: boolean): string {
+  return reasoningPresent
+    ? '跨单元归纳未闭合：模型完成了推理，但答案通道为空。各单元结果不受影响；重新发起分析通常会得到跨单元结果。'
+    : '跨单元归纳未闭合：模型的答案通道与推理通道都为空。各单元结果不受影响；如反复出现，请检查模型服务状态。';
+}
+
+export function unparsableCrossUnitAnswerGapReason(code: CrossUnitResultParseFailureCode, detail: string, answerText: string): string {
+  return `跨单元归纳结果不符合契约 v1（${code}）：${detail}模型返回了 ${[...answerText].length} 个字符，其中没有可解析的跨单元结果。各单元结果不受影响。`;
 }
 
 /**
@@ -656,8 +680,85 @@ export class BaselineAnalysisExecutionOwner {
         active.progress.longestSettledUnitMs = Math.max(active.progress.longestSettledUnitMs ?? 0, settledMs);
       }
       if (active.interrupted && terminalClassification === 'completed') terminalClassification = 'interrupted';
+
+      // The one declared cross-unit suboperation (ADR 0066), inside this Run's unchanged envelope and
+      // Execution Binding: one message admitted through the same gate, one turn, one attempt, no
+      // adaptation. It runs only after a unit loop that reached its end — an interrupted Run, a spent
+      // ceiling, or a Provider Account Limit has already stopped this Run, and nothing further is sent.
+      const closedOutcomes = outcomes
+        .filter((outcome): outcome is Extract<UnitOutcome, { state: 'closed' }> => outcome.state === 'closed')
+        .sort((left, right) => left.unitOrdinal - right.unitOrdinal);
+      let crossUnit: CrossUnitOutcome = CROSS_UNIT_NOT_RUN;
+      if (terminalClassification === 'interrupted' || active.interrupted) {
+        crossUnit = { state: 'not-run', reason: '运行在单元阶段结束前停止，跨单元归纳未发起。' };
+      } else if (closedOutcomes.length >= 2) {
+        const requestDigest = crossUnitRequestDigest(BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST, unitSetDigest(closedOutcomes));
+        const gap = (code: Extract<CrossUnitOutcome, { state: 'gap' }>['code'], reason: string): CrossUnitOutcome =>
+          ({ state: 'gap', code, reason, requestDigest });
+        if (live !== null && policy.providerProcessing.crossUnitReductionAllowed !== true) {
+          // The reduction is a transmission the active Provider Processing policy does not name, so it
+          // never forms a request at all. Policy v4 authorizes one transmission per Analysis Unit.
+          crossUnit = gap('policy-bounded', '跨单元归纳未派发：当前 Provider Processing 策略仅授权单元数内的传输');
+        } else if (ceilingState() === 'reached') {
+          // The ceiling is evaluated before this dispatch exactly as before a unit's, so a Run that has
+          // spent its bound ends here rather than spending one more turn to discover it.
+          crossUnit = gap('run-budget-ceiling-reached', '任务运行预算上限已达到；跨单元归纳未派发。');
+        } else {
+          const message = buildCrossUnitMessage(closedOutcomes, manifest.units.length);
+          // The same set the gate reads: exactly one further user message becomes admissible, and every
+          // other refusal — route, model, system prompt, tools, prior outputs — is untouched.
+          admittedUserMessages.add(message);
+          active.progress.stage = 'cross-unit-reduction';
+          active.progress.currentUnitOrdinal = null;
+          active.progress.currentUnitStartedAt = new Date().toISOString();
+          active.progress.attemptState = 'dispatched';
+          active.transmissionsAtDispatch = active.transmissions?.() ?? 0;
+          const turn = await harness.submitUnit(message);
+          const canonical = liveAdapter.instance?.lastCanonicalResult ?? null;
+          // The reduction's turn is a model turn like any other: it counts as a request, its usage
+          // counts toward the Run and the ceiling, and it records no execution-span row, because the
+          // span table is unit-only and this step belongs to no unit.
+          usage.requests += 1;
+          const usageSignal = turn.signals.find((signal) => signal.kind === 'usage');
+          const crossUnitUsage = usageSignal?.kind === 'usage'
+            ? { inputTokens: usageSignal.usage.inputTokens, outputTokens: usageSignal.usage.outputTokens }
+            : null;
+          if (crossUnitUsage !== null) {
+            usage.inputTokens += crossUnitUsage.inputTokens;
+            usage.outputTokens += crossUnitUsage.outputTokens;
+            accumulated.push(crossUnitUsage);
+          }
+          active.progress.completedAttempts += 1;
+          const candidate = turn.signals.find((signal) => signal.kind === 'contentCandidate');
+          if (turn.terminal === 'completed' && candidate?.kind === 'contentCandidate') {
+            acceptedOutputDigests.add(candidate.digest);
+            if (canonical?.kind === 'empty-answer') {
+              crossUnit = gap('contract-invalid', crossUnitEmptyAnswerGapReason(canonical.reasoningPresent));
+            } else {
+              const parsed = parseCrossUnitResult(candidate.text, {
+                closedOrdinals: closedOutcomes.map((outcome) => outcome.unitOrdinal),
+                citedBlocksByUnit: citedBlocksByUnit(closedOutcomes),
+              });
+              crossUnit = parsed.ok
+                ? { state: 'closed', findings: parsed.result.findings, requestDigest, usage: crossUnitUsage }
+                : gap('contract-invalid', unparsableCrossUnitAnswerGapReason(parsed.code, parsed.detail, candidate.text));
+            }
+          } else if (turn.terminal === 'completed') {
+            crossUnit = gap('contract-invalid', '跨单元归纳的技术回合完成但没有模型输出。');
+          } else if (turn.terminal === 'failed') {
+            const failure = turn.signals.find((signal) => signal.kind === 'failed');
+            // No safe retry here: one attempt, and a retry-safe failure is a gap like any other.
+            crossUnit = gap('adapter-failure', failure?.kind === 'failed' ? `${failure.failure.reason}（${failure.failure.code}）` : '适配器失败。');
+          } else {
+            const failure = turn.signals.find((signal) => signal.kind === 'interrupted');
+            const egress = failure?.kind === 'interrupted' && failure.failure.failureClass === 'egress-refused';
+            crossUnit = gap(egress ? 'egress-refused' : 'interrupted', failure?.kind === 'interrupted' ? failure.failure.reason : '跨单元归纳被中断。');
+          }
+        }
+      }
+
       // The reducers and the contradiction/continuity pass run over the complete new unit set: reused plus recomputed.
-      const reduction = reduceBaselineAnalysis(manifest, outcomes, reusedOrdinals);
+      const reduction = reduceBaselineAnalysis(manifest, outcomes, reusedOrdinals, crossUnit);
       if (terminalClassification === 'completed' && reduction.gaps.length > 0) terminalClassification = 'completed-with-gaps';
       // Units the interrupted loop never reached are recorded as exact not-attempted gaps.
       for (const gapEntry of reduction.gaps) {

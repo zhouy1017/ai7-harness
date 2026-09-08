@@ -106,7 +106,7 @@ describe('reduceBaselineAnalysis', () => {
       ['book-synthesis', 'closed-with-gaps'],
     ]);
     expect(reduction.crossUnitFindings).toEqual([]);
-    expect(reduction.crossUnitReduction).toEqual({ state: 'not-run', reason: CROSS_UNIT_NOT_RUN.reason, requestDigest: null, findingCount: 0 });
+    expect(reduction.crossUnitReduction).toEqual({ state: 'not-run', reason: CROSS_UNIT_NOT_RUN.reason, requestDigest: null, usage: null, findingCount: 0 });
   });
 
   it('carries model-driven findings beside the deterministic conflicts, with lineage to every unit cited', () => {
@@ -126,7 +126,9 @@ describe('reduceBaselineAnalysis', () => {
     });
     expect(closed.reducerClosure.stages.map((stage) => [stage.stage, stage.state, stage.inputCount]))
       .toContainEqual(['cross-unit-reduction', 'closed', 2]);
-    expect(closed.crossUnitReduction).toEqual({ state: 'closed', reason: null, requestDigest: 'a'.repeat(64), findingCount: 1 });
+    expect(closed.crossUnitReduction).toEqual({
+      state: 'closed', reason: null, requestDigest: 'a'.repeat(64), usage: { inputTokens: 120, outputTokens: 40 }, findingCount: 1,
+    });
     // The lineage is sorted and deduplicated from the sides; the sides themselves keep their own order.
     expect(closed.crossUnitFindings[0]!.unitOrdinals).toEqual([1, 3]);
     expect(closed.crossUnitFindings[0]!.sides.map((side) => side.unitOrdinal)).toEqual([3, 1]);

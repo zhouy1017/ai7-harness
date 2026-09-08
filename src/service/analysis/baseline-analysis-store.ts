@@ -113,6 +113,7 @@ const PRE_CROSS_UNIT_REDUCTION = {
   state: 'not-run',
   reason: '该修订版由未包含跨单元归纳的运行产生。',
   requestDigest: null,
+  usage: null,
   findingCount: 0,
 } as const;
 

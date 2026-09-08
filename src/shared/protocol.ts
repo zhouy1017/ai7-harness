@@ -1013,6 +1013,13 @@ export interface LaunchPolicyProjection {
     /** `0` under development-ci; the verbatim token `bounded-by-run` under developer-live. */
     authorizedLiveTransmissionCount: 0 | 'bounded-by-run';
     liveTransmissionAllowed: boolean;
+    /**
+     * Whether the active Provider Processing policy names the cross-unit reduction's transmission
+     * (ADR 0066). Optional exactly as the policy key is, and read the same way: anything but `true`
+     * — absent included — means the reduction does not dispatch, because v4 authorizes one
+     * transmission per Analysis Unit and a step it does not name is not among them.
+     */
+    crossUnitReductionAllowed?: boolean;
     label: '开发与持续集成：零次实时传输' | '开发者实时：实时传输受运行边界约束';
   };
   externalExport: {
@@ -1266,13 +1273,19 @@ export interface AnalysisCrossUnitFindingProjection {
   confidence: 'high' | 'medium' | 'low';
 }
 
-/** What the cross-unit reduction did in the Run that produced this revision, including why it did not run. */
+/**
+ * What the cross-unit reduction did in the Run that produced this revision, including why it did not
+ * run. The reduction forms no execution-span row of its own — the span table is unit-only — so this
+ * is where its one attempt is recorded, transport facts included.
+ */
 export interface AnalysisCrossUnitReductionProjection {
   state: 'closed' | 'gap' | 'not-run';
   /** The exact reason for a gap or for not running; `null` when the reduction closed. */
   reason: string | null;
   /** The reduction's request digest; `null` when it never formed a request. */
   requestDigest: string | null;
+  /** What the reduction's one turn cost; `null` when it never dispatched or reported no usage. */
+  usage: { inputTokens: number; outputTokens: number } | null;
   findingCount: number;
 }
 

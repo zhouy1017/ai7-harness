@@ -298,7 +298,8 @@ describe('baseline manuscript analysis over the real store on exact sample1', ()
       expect(revision.coverageManifestDigest).toBe(manifest.digest);
       expect(revision.bindingPin).toMatchObject({ attemptId, bindingDigest: binding.bindingDigest, harnessSessionId: binding.harnessSessionId });
       expect(revision.policyPin).toEqual({ operationalScope: 'development-ci', providerProcessingVersion: 'v1', activePolicySetVersion: 'v4', liveTransmissions: 0 });
-      expect(revision.usage.requests).toBe(SAMPLE1_UNITS);
+      // Synchronized delta (#274): eight unit turns plus the one cross-unit reduction turn after them.
+      expect(revision.usage.requests).toBe(SAMPLE1_UNITS + 1);
       // Four independent axes; no aggregate flag.
       expect(revision.coverage).toMatchObject({ axis: 'coverage', state: 'partial', unitsTotal: 8, unitsClosed: 7, gapCount: 1 });
       expect(revision.reducerClosure).toMatchObject({ axis: 'reducer-closure', state: 'closed-with-gaps' });
@@ -475,7 +476,8 @@ describe('baseline manuscript analysis over the real store on exact sample1', ()
       expect(revision.gaps).toHaveLength(1);
       expect(revision.gaps[0]).toMatchObject({ unitOrdinal: 2, code: 'adapter-failure', reason: expect.stringContaining('SYNTHETIC_ADAPTER_FAILURE') });
       expect(revision.gaps[0]!.reason).not.toContain('安全重试');
-      expect(revision.usage.requests).toBe(9);
+      // Synchronized delta (#274): eight units, unit 5's safe retry, and the cross-unit reduction.
+      expect(revision.usage.requests).toBe(10);
       // Token usage sums the seven closed units; the two failed attempts (unit 2, unit 5's first) report no usage but count as requests.
       expect(revision.usage.inputTokens).toBe(1400 + 1500 + 1500 + 1400 + 1450 + 1500 + 800);
       expect(revision.provenance).toMatchObject({ runRecordId: settled.run!.runRecordId, planVersion: 1, adaptations: { count: 1, unitOrdinals: [5] } });
@@ -767,7 +769,9 @@ describe('baseline manuscript analysis over the real store on exact sample1', ()
       const { lineage: _l2, ...reusedCopy } = revision2.units[2]!;
       expect(reusedCopy).toEqual(reusedSource);
       expect(revision2.units[1]!.state).toBe('gap');
-      expect(revision2.usage.requests).toBe(2);
+      // Synchronized delta (#274): two recomputed units plus the reduction, which runs over the
+      // complete new unit set — reused units included — and so runs in every update mode too.
+      expect(revision2.usage.requests).toBe(3);
       expect(revision2.coverage).toMatchObject({ unitsTotal: 8, unitsClosed: 7, unitsReused: 6, gapCount: 1 });
       expect(revision2.coverage.label).toContain('复用 6');
       expect(revision2.freshness).toMatchObject({ state: 'current', boundRevisionId: sync.prepared.checkpoint!.revisionId });
@@ -797,7 +801,7 @@ describe('baseline manuscript analysis over the real store on exact sample1', ()
       expect(revision3).toMatchObject({ ordinal: 3, update: { mode: 'reanalyze-range', selectedRange: { startPosition: option.startPosition, endPosition: option.endPosition }, predecessor: { revisionId: revision2.revisionId, ordinal: 2 } } });
       expect(revision3.lineage.map((entry) => entry.kind)).toEqual(['reused', 'recomputed', 'recomputed', 'recomputed', 'reused', 'reused', 'reused', 'reused']);
       expect(revision3.units[0]).toMatchObject({ lineage: { kind: 'reused', revisionOrdinal: 2, unitOrdinal: 1 } });
-      expect(revision3.usage.requests).toBe(3);
+      expect(revision3.usage.requests).toBe(4);
       expect(range.settled.run!.attempt!.spans.map((span) => span.unitOrdinal)).toEqual([2, 3, 4]);
       expect(revision3.coverage).toMatchObject({ unitsClosed: 7, unitsReused: 5, gapCount: 1 });
 
@@ -810,7 +814,7 @@ describe('baseline manuscript analysis over the real store on exact sample1', ()
       const revision4 = whole.settled.resultSetRevision!;
       expect(revision4).toMatchObject({ ordinal: 4, update: { mode: 'reanalyze-book', predecessor: { revisionId: revision3.revisionId, ordinal: 3 }, counts: plan4.counts } });
       expect(revision4.lineage.every((entry) => entry.kind === 'recomputed')).toBe(true);
-      expect(revision4.usage.requests).toBe(8);
+      expect(revision4.usage.requests).toBe(9);
       expect(revision4.coverage).toMatchObject({ unitsClosed: 7, unitsReused: 0, gapCount: 1 });
       expect(revision4.synthesis).toEqual(revision3.synthesis);
 
@@ -818,10 +822,10 @@ describe('baseline manuscript analysis over the real store on exact sample1', ()
       const history = whole.settled.history!;
       expect(history.latestOrdinal).toBe(4);
       expect(history.entries.map((entry) => [entry.ordinal, entry.mode, entry.current, entry.freshness, entry.predecessor?.ordinal ?? null, entry.usage.requests])).toEqual([
-        [1, 'first-baseline', false, 'superseded', null, 8],
-        [2, 'sync-current', false, 'superseded', 1, 2],
-        [3, 'reanalyze-range', false, 'superseded', 2, 3],
-        [4, 'reanalyze-book', true, 'current', 3, 8],
+        [1, 'first-baseline', false, 'superseded', null, 9],
+        [2, 'sync-current', false, 'superseded', 1, 3],
+        [3, 'reanalyze-range', false, 'superseded', 2, 4],
+        [4, 'reanalyze-book', true, 'current', 3, 9],
       ]);
       expect(history.entries.map((entry) => entry.counts)).toEqual([revision1.update.counts, plan2.counts, plan3.counts, plan4.counts]);
       expect(history.entries.map((entry) => entry.digest)).toEqual([revision1.digest, revision2.digest, revision3.digest, revision4.digest]);
