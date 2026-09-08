@@ -420,7 +420,8 @@ function sha256(value: string): string {
   return createHash('sha256').update(value, 'utf8').digest('hex');
 }
 
-function canonicalRecord(value: unknown): { json: string; digest: string } {
+/** Exported so a suite can write a record this store's own guard will not let it produce. */
+export function canonicalRecord(value: unknown): { json: string; digest: string } {
   const json = canonicalJson(value);
   return { json, digest: sha256(json) };
 }

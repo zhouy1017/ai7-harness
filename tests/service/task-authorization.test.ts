@@ -9,8 +9,20 @@ import {
   ANALYSIS_LEDGER_SCHEMA_SQL,
   TASK_AUTHORIZATION_SCHEMA_SQL,
   TASK_AUTHORIZATION_SCHEMA_VERSION,
+  TaskAuthorizationError,
+  canonicalRecord,
+  executionPlanValue,
+  planEnvelopeSummary,
+  planEnvelopeValue,
+  planStopCondition,
+  providerResolutionPlanValue,
+  validateTaskAuthorizationSchema,
 } from '../../src/service/task-authorization.js';
-import { J03_TASK_GOAL, type LaunchPolicyProjection } from '../../src/shared/protocol.js';
+import {
+  J03_TASK_GOAL,
+  type LaunchPolicyProjection,
+  type ProviderProcessingPin,
+} from '../../src/shared/protocol.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 
 // Service-integration suite (L2) for task authorization. `TaskAuthorizationStore` gates its whole
@@ -34,6 +46,14 @@ const IMMUTABLE_TABLES = Object.keys(TASK_AUTHORIZATION_SCHEMA_SQL);
 // Revision 15 (Issue #92) adds the baseline-analysis relations beside the J-03 ledger. A J-03
 // authorization must leave every one of them empty: the additive migration writes no row.
 const ANALYSIS_LEDGER_TABLES = Object.keys(ANALYSIS_LEDGER_SCHEMA_SQL);
+// The two pins `ProviderProcessingPin` declares. Only the first is reachable through the store: the
+// guard admits nothing else, which is why the second one's row has to be written by hand below.
+const DEVELOPMENT_CI_PIN: ProviderProcessingPin = {
+  operationalScope: 'development-ci', version: 'v1', decision: 'deny', authorizedLiveTransmissionCount: 0,
+};
+const DEVELOPER_LIVE_PIN: ProviderProcessingPin = {
+  operationalScope: 'developer-live', version: 'v4', decision: 'eligible-only', authorizedLiveTransmissionCount: 'bounded-by-run',
+};
 
 let roots: ServiceTestRoots;
 
@@ -132,6 +152,111 @@ function recordUnreadyCredentialMetadata(store: EditorialStore): string {
   // The reference is stable metadata: removing readiness never re-keys the connection.
   expect(missing.credentialReference).toBe(credentialReference);
   return credentialReference;
+}
+
+/**
+ * Write one prepared plan graph straight into the immutable ledger, pinned to `pin`. The store's own
+ * guard admits only the `development-ci` denial, so a plan carrying any other Provider Processing
+ * pin cannot be produced through the API; writing the row is the only way to observe what the read
+ * side does with one. `executionPlan` overrides the derivation so a record whose statements are not
+ * its own pin's readings can be written too.
+ */
+function writePreparedPlan(
+  database: DatabaseSync,
+  bookId: string,
+  pin: ProviderProcessingPin,
+  executionPlan: unknown = executionPlanValue(pin),
+): void {
+  const binding = database.prepare(
+    `SELECT m.manuscript_id, mb.branch_id, mr.revision_id, mr.revision_label, mr.revision_digest,
+            mr.source_version_id, bws.journal_sequence, connection.credential_reference
+     FROM manuscripts m
+     JOIN manuscript_branches mb ON mb.manuscript_id = m.manuscript_id
+     JOIN branch_working_state bws ON bws.branch_id = mb.branch_id
+     JOIN manuscript_revisions mr ON mr.revision_id = bws.base_revision_id
+     JOIN model_service_connections connection ON connection.connection_id = 'main-editorial-deepseek-v4-pro'
+     WHERE m.book_id = ? AND m.role = 'primary'`,
+  ).get(bookId) as {
+    manuscript_id: string; branch_id: string; revision_id: string; revision_label: string;
+    revision_digest: string; source_version_id: string; journal_sequence: number; credential_reference: string;
+  };
+  const taskIntentId = randomUUID();
+  const instant = new Date().toISOString();
+  const records = {
+    intent: canonicalRecord({
+      bookId,
+      createdAt: instant,
+      expectedOutcome: '供编辑复核的结构与叙事连贯性重点清单',
+      goal: J03_TASK_GOAL,
+      taskIntentId,
+    }),
+    checkpoint: canonicalRecord({
+      branchId: binding.branch_id,
+      createdForDirtyJournal: false,
+      journalSequence: binding.journal_sequence,
+      manuscriptId: binding.manuscript_id,
+      purpose: 'Task Input / 任务输入',
+      revisionDigest: binding.revision_digest,
+      revisionId: binding.revision_id,
+      revisionLabel: binding.revision_label,
+      taskIntentId,
+    }),
+    manuscriptPin: canonicalRecord({
+      bookId,
+      manuscriptId: binding.manuscript_id,
+      revisionId: binding.revision_id,
+      revisionDigest: binding.revision_digest,
+      sourceVersionId: binding.source_version_id,
+      sourceDigest: SAMPLE1_SHA256,
+    }),
+    artifactPin: canonicalRecord({
+      identity: '@ai7/editorial-workspace-profile',
+      version: '1.0.0',
+      nativeCarrierSha256: NATIVE_CARRIER_SHA256,
+      sidecarIdentity: 'ai7.editorial-workspace-profile.authority',
+      sidecarRevision: 2,
+      sidecarSha256: SIDECAR_REVISION_2_SHA256,
+    }),
+    sourceScope: canonicalRecord({
+      bookId,
+      manuscriptId: binding.manuscript_id,
+      taskInputRevision: { revisionId: binding.revision_id, revisionDigest: binding.revision_digest },
+      readableScopeKinds: ['current-book-primary-manuscript-revision'],
+      sourceVersionEvidence: { sourceVersionId: binding.source_version_id, readable: false },
+    }),
+    providerPlan: canonicalRecord(providerResolutionPlanValue(binding.credential_reference, pin)),
+    executionPlan: canonicalRecord(executionPlan),
+  };
+  const envelope = canonicalRecord(planEnvelopeValue(pin, {
+    taskIntentId,
+    checkpointDigest: records.checkpoint.digest,
+    manuscriptPinDigest: records.manuscriptPin.digest,
+    artifactPinDigest: records.artifactPin.digest,
+    runSourceScopeDigest: records.sourceScope.digest,
+    providerResolutionPlanDigest: records.providerPlan.digest,
+    executionPlanDigest: records.executionPlan.digest,
+  }));
+  database.prepare(
+    `INSERT INTO task_intents(task_intent_id, book_id, goal, expected_outcome, created_at, canonical_json, sha256)
+     VALUES (?, ?, ?, '供编辑复核的结构与叙事连贯性重点清单', ?, ?, ?)`,
+  ).run(taskIntentId, bookId, J03_TASK_GOAL, instant, records.intent.json, records.intent.digest);
+  database.prepare(
+    `INSERT INTO task_input_checkpoints(
+       task_intent_id, manuscript_id, branch_id, revision_id, revision_label, revision_digest,
+       journal_sequence, purpose, created_for_dirty_journal, canonical_json, sha256, created_at
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, 'Task Input / 任务输入', 0, ?, ?, ?)`,
+  ).run(taskIntentId, binding.manuscript_id, binding.branch_id, binding.revision_id, binding.revision_label,
+    binding.revision_digest, binding.journal_sequence, records.checkpoint.json, records.checkpoint.digest, instant);
+  const insert = (table: string, record: { json: string; digest: string }): void => {
+    database.prepare(`INSERT INTO ${table}(task_intent_id, canonical_json, sha256, created_at) VALUES (?, ?, ?, ?)`)
+      .run(taskIntentId, record.json, record.digest, instant);
+  };
+  insert('task_manuscript_pins', records.manuscriptPin);
+  insert('task_artifact_pins', records.artifactPin);
+  insert('run_source_scopes', records.sourceScope);
+  insert('provider_resolution_plans', records.providerPlan);
+  insert('execution_plans', records.executionPlan);
+  insert('plan_envelopes', envelope);
 }
 
 /** Drive the preparation job to completion the way the cooperative job owner does for the product. */
@@ -376,6 +501,84 @@ describe('task authorization over the real store on exact sample1', () => {
         `"providerStatus":"denied","runSourceScopeDigest":"${digestOf('run_source_scopes')}",` +
         `"summary":"计划已冻结；Provider Processing v1 拒绝派发","taskIntentId":"${taskIntentId}"}`,
       );
+    } finally {
+      database.close();
+    }
+  }, 300_000);
+
+  // `task_artifact_pins.sha256` is unique and the artifact pin record is identical for every Book, so
+  // one store holds at most one prepared J-03 plan. Each scope is therefore observed in its own
+  // store: the `development-ci` row above, read back after a reopen, and the `developer-live` row
+  // here. Neither is ever validated against the scope the launch reading it happens to bind.
+  it('reads a stored plan against the pin that plan itself froze', async () => {
+    await requireExactSample1();
+    let bookId: string;
+
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      bookId = (await importSample1(store)).bookId;
+      await pinProfileRevision2(store, bookId);
+      recordUnreadyCredentialMetadata(store);
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+
+    const database = new DatabaseSync(storeDatabasePath());
+    try {
+      writePreparedPlan(database, bookId, DEVELOPER_LIVE_PIN);
+    } finally {
+      database.close();
+    }
+
+    // Opening validates every stored row, and this one is validated against its own v4 pin under a
+    // launch that binds `development-ci`: the guard still refuses to write such a plan, but the read
+    // side keeps one valid, which is what a relaunch under another scope needs.
+    const reopened = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const live = reopened.inspectTaskAuthorization(bookId);
+      expect(live.state).toBe('prepared');
+      expect(live.providerResolutionPlan?.providerProcessing).toEqual(DEVELOPER_LIVE_PIN);
+      expect(live.executionPlan?.stopCondition).toBe(planStopCondition(DEVELOPER_LIVE_PIN));
+      expect(live.planEnvelope?.summary).toBe(planEnvelopeSummary(DEVELOPER_LIVE_PIN));
+      expect(live.executionPlan?.stopCondition).not.toContain('v1');
+      expect(live.planEnvelope?.summary).not.toContain('v1');
+      reopened.markCleanShutdown();
+    } finally {
+      reopened.close();
+    }
+  }, 300_000);
+
+  it('refuses a stored plan whose statements are not its own pin readings', async () => {
+    await requireExactSample1();
+    let bookId: string;
+
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      bookId = (await importSample1(store)).bookId;
+      await pinProfileRevision2(store, bookId);
+      recordUnreadyCredentialMetadata(store);
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+
+    const database = new DatabaseSync(storeDatabasePath());
+    try {
+      // A developer-live pin above an Execution Plan that still states the v1 denial: exactly the
+      // drift between a plan's pin and a plan's statements that deriving them makes impossible. The
+      // validator is called directly, as the store calls it when it opens, so that the refusal is
+      // observed without leaving a store that failed to open holding this database.
+      writePreparedPlan(database, bookId, DEVELOPER_LIVE_PIN, executionPlanValue(DEVELOPMENT_CI_PIN));
+      let refused: unknown;
+      try {
+        validateTaskAuthorizationSchema(database);
+      } catch (error) {
+        refused = error;
+      }
+      expect(refused).toBeInstanceOf(TaskAuthorizationError);
+      expect((refused as TaskAuthorizationError).code).toBe('TASK_RECORD_INVALID');
+      expect((refused as TaskAuthorizationError).message).toBe('Execution Plan 无效。');
     } finally {
       database.close();
     }
