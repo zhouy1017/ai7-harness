@@ -2671,6 +2671,17 @@ function renderTaskAuthorization(host: HTMLElement, projection: TaskAuthorizatio
     const plan = projection.executionPlan!;
     const envelope = projection.planEnvelope!;
     const facts = element('dl', 'task-authorization-facts');
+    // A field the plan declared nothing for no longer costs a full-weight row (ADR 0071 §2). Nothing
+    // leaves the record: the labels collect into one `未声明` row that closes the record, in the order
+    // they read in, so the reading is still that this plan declared none of them.
+    const undeclared: string[] = [];
+    const declaredRow = (label: string, values: ReadonlyArray<string>): ReadonlyArray<HTMLElement> => {
+      if (values.length === 0) {
+        undeclared.push(label);
+        return [];
+      }
+      return [element('dt', undefined, label), element('dd', undefined, values.join('、'))];
+    };
     facts.append(
       element('dt', undefined, '任务目标'), element('dd', undefined, projection.taskIntent!.goal),
       element('dt', undefined, '预期结果'), element('dd', undefined, projection.taskIntent!.expectedOutcome),
@@ -2684,23 +2695,29 @@ function renderTaskAuthorization(host: HTMLElement, projection: TaskAuthorizatio
       element('dt', undefined, '原生构件'), element('dd', undefined, `${artifact.identity}@${artifact.version}`),
       element('dt', undefined, '权限侧车'), element('dd', undefined, `${artifact.sidecarIdentity} · Revision ${artifact.sidecarRevision}`),
       element('dt', undefined, 'Model Role'), element('dd', undefined, provider.role),
-      element('dt', undefined, 'Capability'), element('dd', undefined, provider.capabilities.length === 0 ? '空（无）' : provider.capabilities.join('、')),
-      element('dt', undefined, 'Provider Binding'), element('dd', undefined, `${provider.providerId} · ${provider.modelId} · adapter r${provider.adapterRevision} · config r${provider.configurationRevision}`),
-      element('dt', undefined, 'Approved Fallback Chain'), element('dd', undefined, provider.approvedFallbackChain.length === 0 ? '空（无）' : provider.approvedFallbackChain.join('、')),
+      ...declaredRow('Capability', provider.capabilities),
+      // Which provider and which model this Run would reach is the binding an editor weighs; the adapter
+      // and configuration revisions that froze it are identities, and they read in the disclosure below.
+      element('dt', undefined, 'Provider Binding'), element('dd', undefined, `${provider.providerId} · ${provider.modelId}`),
+      ...declaredRow('Approved Fallback Chain', provider.approvedFallbackChain),
       element('dt', undefined, 'Credential Reference'), element('dd', undefined, `readiness ${provider.credentialReadiness}`),
       element('dt', undefined, 'Outbound Data Category'), element('dd', undefined, provider.outboundDataCategory),
       element('dt', undefined, 'Run Budget Ceiling'), element('dd', undefined, runBudgetCeilingLabel(provider.runBudgetCeiling)),
       element('dt', undefined, 'Provider Processing'), element('dd', undefined, providerProcessingLabel(provider.providerProcessing)),
       element('dt', undefined, '计划步骤'), element('dd', undefined, plan.steps.join(' → ')),
-      element('dt', undefined, 'Effect'), element('dd', undefined, plan.effects.length === 0 ? '空（无）' : plan.effects.join('、')),
+      ...declaredRow('Effect', plan.effects),
       element('dt', undefined, '派发状态'), element('dd', undefined, envelope.summary),
     );
+    if (undeclared.length > 0) {
+      facts.append(element('dt', undefined, '未声明'), element('dd', undefined, undeclared.join('、')));
+    }
     card.append(element('h4', undefined, 'Plan Preview / 计划预览'), facts, technicalDetails(
       'task-authorization-facts',
       element('dt', undefined, '目标修订版身份'), element('dd', 'technical-identity', `${checkpoint.revisionId} · ${manuscriptPin.revisionDigest}`),
       element('dt', undefined, '来源版本证据 ID'), element('dd', 'technical-identity', sourceScope.sourceVersionEvidence.sourceVersionId),
       element('dt', undefined, '原生构件摘要'), element('dd', 'technical-identity', artifact.nativeCarrierSha256),
       element('dt', undefined, '权限侧车摘要'), element('dd', 'technical-identity', artifact.sidecarSha256),
+      element('dt', undefined, 'Provider Binding（适配器与契约）'), element('dd', 'technical-identity', `adapter r${provider.adapterRevision} · config r${provider.configurationRevision}`),
       element('dt', undefined, 'Credential Reference'), element('dd', 'technical-identity', provider.credentialReference),
       element('dt', undefined, 'Plan Envelope'), element('dd', 'technical-identity', envelope.digest),
     ));
@@ -2805,46 +2822,98 @@ function renderEditorialWorkspaceProfile(
   const sidecarValues = element('dl', 'native-artifact-facts');
   // Which Revision is in force for this Book, what successor is on offer, and when each was pinned are
   // the enablement decisions this card exists for, so the pin history keeps its local reading at full
-  // rank; the sidecar's identity and the exact pin instants go one step away.
+  // rank; the sidecar's identity and the exact pin instants go one step away. It reads as a list rather
+  // than a `；`-joined wall (ADR 0071 §2) — one line per pin, in the order this Book pinned them — and
+  // each pin's digest and exact instant stay on one line of their own in the disclosure, so a reader can
+  // copy the identity of one pin without separating it from the pin it belongs to.
+  const pinHistoryValue = (layer: 'decision' | 'technical'): HTMLElement => {
+    const value = element('dd', layer === 'technical' ? 'technical-identity' : undefined);
+    if (projection.sidecar.pinHistory.length === 0) {
+      value.textContent = '空（无）';
+      return value;
+    }
+    const pins = element('ul');
+    for (const pin of projection.sidecar.pinHistory) {
+      const item = element('li', undefined, layer === 'technical'
+        ? `Revision ${pin.revision} · ${pin.sha256} · ${pin.pinnedAt}`
+        : `Revision ${pin.revision} · ${localInstantLabel(pin.pinnedAt)}`);
+      item.dataset['sidecarPin'] = String(pin.revision);
+      pins.append(item);
+    }
+    value.append(pins);
+    return value;
+  };
   sidecarValues.append(
     element('dt', undefined, '当前生效 Revision'), element('dd', undefined,
       projection.sidecar.activeRevision === null ? '空（本图书未启用）' : `Revision ${projection.sidecar.activeRevision}`),
     element('dt', undefined, '可审阅后继'), element('dd', undefined,
       projection.sidecar.offeredRevision === null ? '空（无）' : `Revision ${projection.sidecar.offeredRevision}`),
-    element('dt', undefined, '本图书 pin 历史'), element('dd', undefined,
-      projection.sidecar.pinHistory.length === 0
-        ? '空（无）'
-        : projection.sidecar.pinHistory.map((pin) => `Revision ${pin.revision} · ${pin.sha256} · ${localInstantLabel(pin.pinnedAt)}`).join('；')),
+    element('dt', undefined, '本图书 pin 历史'), pinHistoryValue('decision'),
   );
   sidecar.append(element('h4', undefined, 'AI7 权限侧车'), sidecarValues, technicalDetails(
     'native-artifact-facts',
     element('dt', undefined, '侧车身份'), element('dd', 'technical-identity', projection.sidecar.identity),
-    element('dt', undefined, '本图书 pin 历史（精确时间）'), element('dd', 'technical-identity',
-      projection.sidecar.pinHistory.length === 0
-        ? '空（无）'
-        : projection.sidecar.pinHistory.map((pin) => `Revision ${pin.revision} · ${pin.pinnedAt}`).join('；')),
+    element('dt', undefined, '本图书 pin 历史（精确时间）'), pinHistoryValue('technical'),
   ));
+  // Past revisions go one step away, so the card's actions stay reachable without scrolling past every
+  // revision this artifact has ever had (ADR 0071 §2): the Revision in force for this Book and the
+  // successor on offer render in place, and every other section moves into one disclosure that states
+  // how many there are. When neither is pinned nothing here is past — every section renders in place,
+  // because the ceiling an editor is deciding to install is the decision, not history.
+  const pinned = projection.sidecar.activeRevision !== null || projection.sidecar.offeredRevision !== null;
+  const pastRevisions: HTMLElement[] = [];
   for (const revision of projection.sidecar.revisions) {
     const revisionSection = element('section', 'native-artifact-authority');
     revisionSection.dataset['authoritySidecarRevision'] = String(revision.revision);
     const authorityValues = element('dl', 'native-artifact-facts');
+    const ceiling = revision.authorityCeiling;
+    // The eight ceiling fields that can be empty fold into one reading (ADR 0071 §2): a granted field
+    // keeps its own row, and the rest collect their labels, in the order they read in, into the row that
+    // closes the record. A ceiling that grants none of the eight says so once rather than eight times;
+    // `Model Role`, which this artifact always declares, stays at full rank either way.
+    const undeclared: string[] = [];
+    const ceilingRow = (label: string, granted: ReadonlyArray<string> | boolean): ReadonlyArray<HTMLElement> => {
+      const reading = typeof granted === 'boolean'
+        ? (granted ? '有' : null)
+        : (granted.length === 0 ? null : granted.join('、'));
+      if (reading === null) {
+        undeclared.push(label);
+        return [];
+      }
+      return [element('dt', undefined, label), element('dd', undefined, reading)];
+    };
     authorityValues.append(
       element('dt', undefined, '规范字节'), element('dd', undefined, `${revision.byteLength} bytes`),
       element('dt', undefined, '兼容性'), element('dd', undefined, revision.compatibility),
-      element('dt', undefined, 'Model Role'), element('dd', undefined, revision.authorityCeiling.modelRoles.join('、')),
-      element('dt', undefined, 'Capability'), element('dd', undefined, revision.authorityCeiling.capabilities.length === 0 ? '空（无）' : revision.authorityCeiling.capabilities.join('、')),
-      element('dt', undefined, 'Readable Scope'), element('dd', undefined, revision.authorityCeiling.readableScopeKinds.length === 0 ? '空（无）' : revision.authorityCeiling.readableScopeKinds.join('、')),
-      element('dt', undefined, 'Provider Binding'), element('dd', undefined, revision.authorityCeiling.providerBindings.length === 0 ? '空（无）' : revision.authorityCeiling.providerBindings.join('、')),
-      element('dt', undefined, 'Credential'), element('dd', undefined, revision.authorityCeiling.credentialAccess ? '有' : '空（无）'),
-      element('dt', undefined, 'Network'), element('dd', undefined, revision.authorityCeiling.networkAccess ? '有' : '空（无）'),
-      element('dt', undefined, 'Effect'), element('dd', undefined, revision.authorityCeiling.effectClasses.length === 0 ? '空（无）' : revision.authorityCeiling.effectClasses.join('、')),
-      element('dt', undefined, 'Enrollment'), element('dd', undefined, revision.authorityCeiling.backgroundAnalysisEnrollment ? '有' : '空（无）'),
-      element('dt', undefined, 'Apply'), element('dd', undefined, revision.authorityCeiling.applyAuthority ? '有' : '空（无）'),
+      element('dt', undefined, 'Model Role'), element('dd', undefined, ceiling.modelRoles.join('、')),
+      ...ceilingRow('Capability', ceiling.capabilities),
+      ...ceilingRow('Readable Scope', ceiling.readableScopeKinds),
+      ...ceilingRow('Provider Binding', ceiling.providerBindings),
+      ...ceilingRow('Credential', ceiling.credentialAccess),
+      ...ceilingRow('Network', ceiling.networkAccess),
+      ...ceilingRow('Effect', ceiling.effectClasses),
+      ...ceilingRow('Enrollment', ceiling.backgroundAnalysisEnrollment),
+      ...ceilingRow('Apply', ceiling.applyAuthority),
     );
+    if (undeclared.length === 8) {
+      authorityValues.append(element('dt', undefined, '权限上限'), element('dd', undefined, '未声明任何权限（8 项均为空）'));
+    } else if (undeclared.length > 0) {
+      authorityValues.append(element('dt', undefined, '未声明'), element('dd', undefined, undeclared.join('、')));
+    }
     revisionSection.append(element('h4', undefined, `Authority Ceiling · Revision ${revision.revision}`), authorityValues,
       technicalDetails('native-artifact-facts',
         element('dt', undefined, 'SHA-256'), element('dd', 'technical-identity', revision.sha256)));
-    sidecar.append(revisionSection);
+    if (!pinned || revision.revision === projection.sidecar.activeRevision ||
+        revision.revision === projection.sidecar.offeredRevision) {
+      sidecar.append(revisionSection);
+    } else {
+      pastRevisions.push(revisionSection);
+    }
+  }
+  if (pastRevisions.length > 0) {
+    const otherRevisions = element('details', 'technical-details');
+    otherRevisions.append(element('summary', undefined, `其他 Revision（${pastRevisions.length}）`), ...pastRevisions);
+    sidecar.append(otherRevisions);
   }
   const nonEffects = element('ul', 'native-artifact-non-effects');
   for (const statement of projection.namedNonEffects) nonEffects.append(element('li', undefined, statement));
