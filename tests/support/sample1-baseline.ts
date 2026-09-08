@@ -33,7 +33,7 @@ export async function importSample1Book(
   codeRoot: string,
   title: string,
 ): Promise<{ bookId: string; manuscriptId: string; branchId: string; revisionId: string }> {
-  const staged = await store.stageSelectedDocx(randomUUID(), sample1Path(codeRoot));
+  const staged = await store.stageSelectedManuscript(randomUUID(), sample1Path(codeRoot));
   expect(staged.source.sourceSha256).toBe(SAMPLE1_SHA256);
   const target = { kind: 'new-book', choiceId: 'new-book', confirmedTitle: title } as const;
   const pending = store.prepareNewBookReview(staged.draftId, staged.draftVersion, target, false);

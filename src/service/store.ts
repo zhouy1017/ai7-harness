@@ -3804,7 +3804,7 @@ export class EditorialStore {
     );
   }
 
-  async stageSelectedDocx(selectionToken: string, selectedPathInput: string): Promise<StagedImportProjection> {
+  async stageSelectedManuscript(selectionToken: string, selectedPathInput: string): Promise<StagedImportProjection> {
     this.#assertAvailable();
     requireStore(TOKEN_PATTERN.test(selectionToken), 'SELECTION_INVALID', '文件选择令牌无效。');
     requireStore(isAbsolute(selectedPathInput), 'SELECTION_INVALID', '文件选择结果无效。');

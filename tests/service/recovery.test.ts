@@ -32,7 +32,7 @@ async function importComposedBook(store: EditorialStore): Promise<{
   // What is recovered here is edited manuscript text, so the manuscript is composed from an admitted
   // Public SampleBook rather than generated. Six blocks are enough: the subject is the journal, not size.
   await composeManuscriptDocx(selectedPath, { source: ADMITTED_SMALL_DOCX, startBlock: 1, blocks: 6, title: TITLE });
-  const staged = await store.stageSelectedDocx(randomUUID(), selectedPath);
+  const staged = await store.stageSelectedManuscript(randomUUID(), selectedPath);
   const review = store.prepareNewBookReview(
     staged.draftId,
     staged.draftVersion,

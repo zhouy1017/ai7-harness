@@ -62,7 +62,7 @@ printed, or committed; the probe that produced these numbers was a throwaway del
 before the commit rather than integrated.
 
 A refusal has two layers, and only the outer one is visible to an editor. The parser
-throws `DOCX_REJECTED:<structural reason>` (`src/service/docx.ts:84`); `stageSelectedDocx`
+throws `DOCX_REJECTED:<structural reason>` (`src/service/docx.ts:84`); `stageSelectedManuscript`
 catches it and flattens every reason to one sentence,
 `该 DOCX 不符合当前受限本地导入边界。` (`src/service/store.ts:3662`). The structural
 reason is what this table records.
@@ -134,5 +134,5 @@ different kind: they encode what `sample1` happens to look like.
 **`.doc` and `.pdf` are refused on the extension**, at `docx.ts:115` inside
 `safeDisplayName`, called from the first statement of `parseDocx` (`docx.ts:641`). The
 file is never opened, so this measurement says nothing about whether either file's
-contents could be read. `stageSelectedDocx` adds no separate format gate of its own
+contents could be read. `stageSelectedManuscript` adds no separate format gate of its own
 (`src/service/store.ts:3589`), so `parseDocx` is the entire intake boundary today.

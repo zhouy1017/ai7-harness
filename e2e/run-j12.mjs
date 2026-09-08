@@ -995,7 +995,7 @@ async function main() {
     await clickBook(primary, bookB, 'draft-open-b');
     await waitForRendererCount(manager, 2, 'draft-two-windows');
     const draftBookBRenderer = await findRenderer(manager, `document.querySelector('.book-overview[data-book-id=${JSON.stringify(bookB)}]')`, 'draft-b-window');
-    const stagedDraft = await primary.evaluate(`window.ai7.selectAndStageDocx()`);
+    const stagedDraft = await primary.evaluate(`window.ai7.selectAndStageManuscript()`);
     requireJourney(stagedDraft?.status === 'staged' && UUID_PATTERN.test(stagedDraft.staged?.draftId), 'draft-native-selection');
     const foreignImportStartup = await draftBookBRenderer.evaluate(`window.ai7.getImportStartup().then(()=>({accepted:true}),error=>({accepted:false,code:error?.code}))`);
     requireJourney(

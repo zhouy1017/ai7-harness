@@ -1,4 +1,4 @@
-export const SERVICE_PROTOCOL_VERSION = 22 as const;
+export const SERVICE_PROTOCOL_VERSION = 23 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -41,7 +41,7 @@ export const IPC_CHANNELS = {
   deferRecovery: 'ai7:j08:defer-recovery',
   restoreRecovery: 'ai7:j08:restore-recovery',
   getImportStartup: 'ai7:j01:get-import-startup',
-  selectAndStageDocx: 'ai7:j01:select-and-stage-docx',
+  selectAndStageManuscript: 'ai7:j01:select-and-stage-manuscript',
   continueImportDraft: 'ai7:j01:continue-import-draft',
   reselectImportDraft: 'ai7:j01:reselect-import-draft',
   abandonImportDraft: 'ai7:j01:abandon-import-draft',
@@ -2386,7 +2386,7 @@ export interface ServiceOperationMap {
     output: RecoveryRestorationProjection;
   };
   getImportStartup: { input: Record<string, never>; output: ImportStartupProjection };
-  stageSelectedDocx: {
+  stageSelectedManuscript: {
     input: { selectionToken: string; selectedPath: string };
     output: StagedImportProjection;
   };
@@ -2662,7 +2662,7 @@ export interface RendererApi {
   deferRecovery(input: ServiceOperationMap['deferRecovery']['input']): Promise<RecoveryDeferralProjection>;
   restoreRecovery(input: Omit<ServiceOperationMap['restoreRecovery']['input'], 'restorationId'>): Promise<RecoveryRestorationProjection>;
   getImportStartup(): Promise<ImportStartupProjection>;
-  selectAndStageDocx(): Promise<PickerStageResult>;
+  selectAndStageManuscript(): Promise<PickerStageResult>;
   continueImportDraft(input: ServiceOperationMap['continueImportDraft']['input']): Promise<ContinueImportProjection>;
   reselectImportDraft(input: {
     draftId: string;

@@ -961,7 +961,7 @@ function registerRendererHandlers(
     requireDesktop(typeof input === 'boolean', 'AI7_RENDERER_BOUNDARY_INVALID');
     owned.closeRisk = input;
   };
-  const chooseDocx = async (owned: OwnedRendererWindow): Promise<string | undefined> => {
+  const chooseManuscript = async (owned: OwnedRendererWindow): Promise<string | undefined> => {
     let selectedPath = owned.injectedPickerPath;
     owned.injectedPickerPath = undefined;
     if (!selectedPath) {
@@ -1175,15 +1175,15 @@ function registerRendererHandlers(
     }),
   );
 
-  ipcMain.handle(IPC_CHANNELS.selectAndStageDocx, (event) =>
+  ipcMain.handle(IPC_CHANNELS.selectAndStageManuscript, (event) =>
     envelope<PickerStageResult>(async () => {
       const owned = requireSender(event);
       return serializeEffect(async () => {
         requireAuthority();
         claims.requireNewDraftCapacity(owned);
-        const selectedPath = await chooseDocx(owned);
+        const selectedPath = await chooseManuscript(owned);
         if (!selectedPath) return { status: 'cancelled' as const };
-        const staged = await service.call('stageSelectedDocx', { selectionToken: randomUUID(), selectedPath });
+        const staged = await service.call('stageSelectedManuscript', { selectionToken: randomUUID(), selectedPath });
         rememberImportDraft(owned, staged.draftId);
         return { status: 'staged' as const, staged };
       });
@@ -1218,7 +1218,7 @@ function registerRendererHandlers(
               input.expectedDraftVersion >= 1,
             'AI7_RENDERER_BOUNDARY_INVALID',
           );
-          const selectedPath = await chooseDocx(owned);
+          const selectedPath = await chooseManuscript(owned);
           if (!selectedPath) return { status: 'cancelled' as const };
           const target = owned.importTargets.get(input.draftId);
           if (target) await reserveExistingImportTarget(owned, target);

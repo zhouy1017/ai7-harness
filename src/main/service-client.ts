@@ -96,7 +96,7 @@ function serviceEnvironment(
 
 function readinessIsExact(value: ServiceReadiness): boolean {
   return (
-    value.protocolVersion === 22 &&
+    value.protocolVersion === 23 &&
     value.state === 'ready' &&
     value.runtime.electron === '43.4.1' &&
     value.runtime.node === '24.18.1' &&
@@ -215,7 +215,7 @@ export class ServiceClient {
         this.#fault();
       }, operation === 'ready'
         ? STARTUP_READY_TIMEOUT_MS
-        : operation === 'stageSelectedDocx' || operation === 'commitNewBookImport' || operation === 'commitSourceImport' ||
+        : operation === 'stageSelectedManuscript' || operation === 'commitNewBookImport' || operation === 'commitSourceImport' ||
             operation === 'commitManuscriptReimport' || operation === 'commitReplacement' ||
             operation === 'saveMilestone' || operation === 'getStartup' || operation === 'getRecoveryComparison' ||
             operation === 'viewRecoveryCandidate' || operation === 'restoreRecovery' ||
