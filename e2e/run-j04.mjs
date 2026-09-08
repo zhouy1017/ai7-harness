@@ -1003,6 +1003,29 @@ async function main() {
         !card.querySelector('[data-analysis-action="prepare"], [data-analysis-action="authorize"]');
     })()`, 'settled-overview-surface');
 
+    // The Run Liveness Signal, asserted where this Journey is deterministic: after settlement. While
+    // the card is `executing` the runner may see the signal line, but a deterministic Run settles too
+    // fast to require catching it, so the pass never depends on that. What must hold once the Run has
+    // stopped is that the signal ended with it, that no status toast still claims the Run entered the
+    // scheduler, and that the Run Record answers "when" in local time with the exact instant beside it.
+    // It stays inside the `result-set-revision` stage: `e2e/controller.mjs` pins this Journey's stage
+    // names, and reading the settled Run's own surface is what that stage already is.
+    const lastTransition = settled.run.transitions[settled.run.transitions.length - 1];
+    await assertRenderer(renderer, `(() => {
+      const card=document.querySelector('.baseline-analysis-card');
+      if(!card) return false;
+      const row=card.querySelector('[data-run-last-transition-at]');
+      const exact=row?.querySelector('.technical-identity');
+      if(!(row instanceof HTMLElement) || !(exact instanceof HTMLElement)) return false;
+      const decision=row.textContent.replace(exact.textContent,'');
+      return !card.querySelector('.analysis-progress') &&
+        !(document.querySelector('#persistence-status')?.textContent ?? '').includes('已进入调度器') &&
+        row.dataset.runLastTransitionAt===${JSON.stringify(lastTransition.recordedAt)} &&
+        exact.textContent===${JSON.stringify(lastTransition.recordedAt)} &&
+        decision!==${JSON.stringify(lastTransition.recordedAt)} &&
+        /^\\d{4}\\/\\d{2}\\/\\d{2}\\s\\d{2}:\\d{2}:\\d{2}\\s·\\s${lastTransition.state}$/u.test(decision);
+    })()`, 'run-liveness-settled-surface');
+
     at('return-to-range');
     cancellation.throwIfRequested();
     const gapBlockId = revision.gaps[0].blockIds[0];
