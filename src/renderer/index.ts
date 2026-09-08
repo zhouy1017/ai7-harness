@@ -1898,7 +1898,7 @@ function diffValueText(value: PlanRevisionDiffValue): string {
 function renderPlanBoundarySplit(card: HTMLElement, boundary: PlanBoundarySplitProjection | null): void {
   const section = element('section', 'analysis-plan-boundary');
   section.dataset['planBoundary'] = boundary === null ? 'absent' : 'present';
-  section.append(element('h4', undefined, 'Plan Boundary Split / 计划边界分栏'));
+  section.append(element('h4', undefined, '计划边界分栏'));
   if (boundary === null) {
     section.append(element('p', 'field-note', '该计划信封记录于计划边界分栏存在之前；重新准备后将携带分栏。'));
     card.append(section);
@@ -2140,14 +2140,14 @@ function renderAnalysisUpdateControls(card: HTMLElement, projection: BaselineAna
   section.dataset['updateBlocked'] = controls.blockedByActiveRun ? 'true' : 'false';
   section.dataset['workingUnits'] = String(controls.working.unitCount);
   section.dataset['workingBlocks'] = String(controls.working.totalBlocks);
-  section.append(element('h4', undefined, 'Analysis Update Controls / 分析更新操作'));
+  section.append(element('h4', undefined, '分析更新操作'));
   const facts = element('dl', 'analysis-facts');
   // Freshness and the work an update would cover are what the editor weighs before issuing a Task, so
   // both readings stay at full rank; the digests that identify them go one step away.
   facts.append(
     element('dt', undefined, '目标修订版'), element('dd', undefined, `Revision ${controls.target.ordinal} · 绑定 ${controls.target.manuscriptPin.revisionLabel} · 新鲜度 ${controls.target.freshness === 'stale' ? '已过期' : '当前'}`),
     element('dt', undefined, '当前稿件'), element('dd', undefined, `${controls.working.revisionLabel} + 修订日志序号 ${controls.working.journalSequence} · ${controls.working.totalBlocks} 个内容块 · 将派生 ${controls.working.unitCount} 个分析单元 / ${controls.working.sectionCount} 个结构段`),
-    element('dt', undefined, 'Provider / 外发 / 预算'), element('dd', undefined, controls.providerConsequence),
+    element('dt', undefined, '模型提供方 / 外发 / 预算'), element('dd', undefined, controls.providerConsequence),
     element('dt', undefined, '后继修订版'), element('dd', undefined, controls.successorBehavior),
   );
   section.append(facts, technicalDetails(
@@ -2244,7 +2244,7 @@ function renderAnalysisHistory(card: HTMLElement, projection: BaselineAnalysisPr
   // How many revisions there are and which one is latest are decisions, not identities: they stay at
   // full rank, and only the result set's own identity and kind step down into the disclosure.
   section.append(
-    element('h4', undefined, 'Analysis Result Revision History / 分析结果修订历史'),
+    element('h4', undefined, '分析结果修订历史'),
     element('p', 'field-note', `${history.entries.length} 个修订版 · 最新 Revision ${history.latestOrdinal}`),
     technicalDetails('analysis-facts',
       element('dt', undefined, '结果集'), element('dd', 'technical-identity', `${history.resultSetId} · ${history.kind}`)),
@@ -2411,23 +2411,23 @@ function renderFrozenAnalysisPlan(card: HTMLElement, projection: BaselineAnalysi
     element('dt', undefined, '任务输入修订版'), element('dd', undefined, checkpoint.revisionLabel),
     // How much of the manuscript this Run would cover is what the plan costs, so it reads at full rank.
     element('dt', undefined, '覆盖清单'), element('dd', undefined, `${manifest.units.length} 个分析单元 · ${manifest.sectionCount} 个结构段 · ${manifest.totalBlocks} 个内容块 · ${manifest.totalGraphemes} 字素 · 单元预算 ${manifest.parameters.unitBudgetGraphemes} 字素 · 重叠 ${manifest.parameters.overlapBlocks} 块`),
-    element('dt', undefined, 'Model Role'), element('dd', undefined, provider.role),
+    element('dt', undefined, '模型角色'), element('dd', undefined, provider.role),
     element('dt', undefined, '远程绑定（被拒绝）'), element('dd', undefined, `${provider.remoteBinding.providerId} · ${provider.remoteBinding.modelId} · adapter r${provider.remoteBinding.adapterRevision} · config r${provider.remoteBinding.configurationRevision} · 凭据 ${provider.remoteBinding.credentialReadiness} · development-ci · v1 · 0 次实时传输`),
-    element('dt', undefined, 'Outbound Data Category'), element('dd', undefined, provider.outboundDataCategory),
-    element('dt', undefined, 'Run Budget Ceiling'), element('dd', undefined, runBudgetCeilingLabel(provider.runBudgetCeiling)),
+    element('dt', undefined, '外发数据类别'), element('dd', undefined, provider.outboundDataCategory),
+    element('dt', undefined, '任务运行预算上限'), element('dd', undefined, runBudgetCeilingLabel(provider.runBudgetCeiling)),
     element('dt', undefined, '计划版本'), element('dd', undefined, projection.planVersion === null
       ? '未记录'
       : `版本 ${projection.planVersion.ordinal} · ${projection.planVersion.state === 'bound' ? '已被运行授权绑定' : projection.planVersion.state === 'current' ? '当前 · 待授权' : '已被取代'}`),
     element('dt', undefined, '派发状态'), element('dd', undefined, envelope.summary),
   );
-  card.append(element('h4', undefined, 'Coverage Manifest / 覆盖清单与计划预览'), facts, technicalDetails(
+  card.append(element('h4', undefined, '覆盖清单与计划预览'), facts, technicalDetails(
     'analysis-facts',
     element('dt', undefined, '任务输入修订版身份'), element('dd', 'technical-identity', `${checkpoint.revisionId} · ${checkpoint.revisionDigest}`),
     element('dt', undefined, '覆盖清单摘要'), element('dd', 'technical-identity', manifest.digest),
     element('dt', undefined, '执行路由'), element('dd', 'technical-identity', executionRouteLabel(provider.executionRoute)),
     element('dt', undefined, '提示契约摘要'), element('dd', 'technical-identity', envelope.promptContractDigest),
     element('dt', undefined, '行为组合摘要'), element('dd', 'technical-identity', envelope.behaviorCompositionDigest),
-    element('dt', undefined, 'Plan Envelope'), element('dd', 'technical-identity', envelope.digest),
+    element('dt', undefined, '计划权限边界'), element('dd', 'technical-identity', envelope.digest),
   ));
   const unitList = element('ul', 'analysis-list analysis-manifest-units');
   for (const unit of manifest.units) {
@@ -2473,7 +2473,7 @@ function renderFrozenAnalysisPlan(card: HTMLElement, projection: BaselineAnalysi
   if (run) {
     const runSection = element('section', 'analysis-run');
     runSection.dataset['runState'] = run.state;
-    runSection.append(element('h4', undefined, `Run Record · ${run.stateLabel}`));
+    runSection.append(element('h4', undefined, `任务运行记录 · ${run.stateLabel}`));
     const runFacts = element('dl', 'analysis-facts');
     // Who authorized this Run, on whose authority and against which plan version, is the decision behind
     // it; only the identifiers and the envelope digest that name them go one step away.
@@ -2501,13 +2501,13 @@ function renderFrozenAnalysisPlan(card: HTMLElement, projection: BaselineAnalysi
       // at full rank; the attempt's identity and binding digest are the technical half of the same fact.
       runFacts.append(
         element('dt', undefined, '凭据就绪检查'), element('dd', undefined, `${run.attempt.credentialReadinessCheck.readiness} · 未释放任何值`),
-        element('dt', undefined, 'Harness Execution Span'), element('dd', undefined, `${run.attempt.spans.length} 个区段（按标识引用，不复制内容）`),
+        element('dt', undefined, 'Harness 执行区段'), element('dd', undefined, `${run.attempt.spans.length} 个区段（按标识引用，不复制内容）`),
       );
     }
     runSection.append(runFacts, technicalDetails(
       'analysis-facts',
-      element('dt', undefined, 'Run Record'), element('dd', 'technical-identity', run.runRecordId),
-      element('dt', undefined, 'Run Authorization'), element('dd', 'technical-identity', `${projection.authorization!.authorizationId} · 信封 ${projection.authorization!.planEnvelopeDigest}`),
+      element('dt', undefined, '任务运行记录'), element('dd', 'technical-identity', run.runRecordId),
+      element('dt', undefined, '任务运行授权'), element('dd', 'technical-identity', `${projection.authorization!.authorizationId} · 信封 ${projection.authorization!.planEnvelopeDigest}`),
       ...(run.attempt === null ? [] : [
         element('dt', undefined, '执行尝试'), element('dd', 'technical-identity', run.attempt.attemptId),
         element('dt', undefined, '执行绑定'), element('dd', 'technical-identity', run.attempt.executionBinding === null ? '尚未持久化' : `${run.attempt.executionBinding.bindingDigest} · Session ${run.attempt.executionBinding.harnessSessionId}`),
@@ -2563,7 +2563,7 @@ function renderForegroundExecutionBoundary(
   result.dataset['foregroundExecutionState'] = projection.state;
   const lineage = element('dl', 'task-authorization-facts');
   lineage.append(
-    element('dt', undefined, 'Run 权限'), element('dd', undefined, projection.runAuthority),
+    element('dt', undefined, '任务运行权限'), element('dd', undefined, projection.runAuthority),
     element('dt', undefined, '当前可信策略'),
     element('dd', undefined, `${projection.launchPolicy.operationalScope} · Provider Processing ${projection.launchPolicy.providerProcessing.version} · ${projection.launchPolicy.providerProcessing.authorizedLiveTransmissionCount} 次实时传输`),
   );
@@ -2574,10 +2574,10 @@ function renderForegroundExecutionBoundary(
   result.append(element('h4', undefined, projection.terminalLabel), lineage, reasons, technicalDetails(
     'task-authorization-facts',
     element('dt', undefined, '图书'), element('dd', 'technical-identity', projection.bookId),
-    element('dt', undefined, 'Task Intent'), element('dd', 'technical-identity', projection.taskIntentId),
-    element('dt', undefined, 'Plan Envelope'), element('dd', 'technical-identity', projection.planEnvelopeDigest),
-    element('dt', undefined, 'Run Authorization'), element('dd', 'technical-identity', projection.authorizationId),
-    element('dt', undefined, 'Run Record'), element('dd', 'technical-identity', projection.runRecordId),
+    element('dt', undefined, '任务意图'), element('dd', 'technical-identity', projection.taskIntentId),
+    element('dt', undefined, '计划权限边界'), element('dd', 'technical-identity', projection.planEnvelopeDigest),
+    element('dt', undefined, '任务运行授权'), element('dd', 'technical-identity', projection.authorizationId),
+    element('dt', undefined, '任务运行记录'), element('dd', 'technical-identity', projection.runRecordId),
   ));
   host.replaceChildren(result);
 }
@@ -2694,32 +2694,32 @@ function renderTaskAuthorization(host: HTMLElement, projection: TaskAuthorizatio
       element('dt', undefined, '可读范围'), element('dd', undefined, `仅图书 ${sourceScope.bookId} · 主稿件 ${sourceScope.manuscriptId} · Task Input 修订版 ${sourceScope.taskInputRevision.revisionId} · ${sourceScope.taskInputRevision.revisionDigest}`),
       element('dt', undefined, '原生构件'), element('dd', undefined, `${artifact.identity}@${artifact.version}`),
       element('dt', undefined, '权限侧车'), element('dd', undefined, `${artifact.sidecarIdentity} · Revision ${artifact.sidecarRevision}`),
-      element('dt', undefined, 'Model Role'), element('dd', undefined, provider.role),
-      ...declaredRow('Capability', provider.capabilities),
+      element('dt', undefined, '模型角色'), element('dd', undefined, provider.role),
+      ...declaredRow('AI7 能力', provider.capabilities),
       // Which provider and which model this Run would reach is the binding an editor weighs; the adapter
       // and configuration revisions that froze it are identities, and they read in the disclosure below.
-      element('dt', undefined, 'Provider Binding'), element('dd', undefined, `${provider.providerId} · ${provider.modelId}`),
-      ...declaredRow('Approved Fallback Chain', provider.approvedFallbackChain),
-      element('dt', undefined, 'Credential Reference'), element('dd', undefined, `readiness ${provider.credentialReadiness}`),
-      element('dt', undefined, 'Outbound Data Category'), element('dd', undefined, provider.outboundDataCategory),
-      element('dt', undefined, 'Run Budget Ceiling'), element('dd', undefined, runBudgetCeilingLabel(provider.runBudgetCeiling)),
-      element('dt', undefined, 'Provider Processing'), element('dd', undefined, providerProcessingLabel(provider.providerProcessing)),
+      element('dt', undefined, '模型提供方绑定'), element('dd', undefined, `${provider.providerId} · ${provider.modelId}`),
+      ...declaredRow('已批准备用链', provider.approvedFallbackChain),
+      element('dt', undefined, '凭据引用'), element('dd', undefined, `readiness ${provider.credentialReadiness}`),
+      element('dt', undefined, '外发数据类别'), element('dd', undefined, provider.outboundDataCategory),
+      element('dt', undefined, '任务运行预算上限'), element('dd', undefined, runBudgetCeilingLabel(provider.runBudgetCeiling)),
+      element('dt', undefined, '模型服务数据处理策略'), element('dd', undefined, providerProcessingLabel(provider.providerProcessing)),
       element('dt', undefined, '计划步骤'), element('dd', undefined, plan.steps.join(' → ')),
-      ...declaredRow('Effect', plan.effects),
+      ...declaredRow('受控动作', plan.effects),
       element('dt', undefined, '派发状态'), element('dd', undefined, envelope.summary),
     );
     if (undeclared.length > 0) {
       facts.append(element('dt', undefined, '未声明'), element('dd', undefined, undeclared.join('、')));
     }
-    card.append(element('h4', undefined, 'Plan Preview / 计划预览'), facts, technicalDetails(
+    card.append(element('h4', undefined, '计划预览'), facts, technicalDetails(
       'task-authorization-facts',
       element('dt', undefined, '目标修订版身份'), element('dd', 'technical-identity', `${checkpoint.revisionId} · ${manuscriptPin.revisionDigest}`),
       element('dt', undefined, '来源版本证据 ID'), element('dd', 'technical-identity', sourceScope.sourceVersionEvidence.sourceVersionId),
       element('dt', undefined, '原生构件摘要'), element('dd', 'technical-identity', artifact.nativeCarrierSha256),
       element('dt', undefined, '权限侧车摘要'), element('dd', 'technical-identity', artifact.sidecarSha256),
-      element('dt', undefined, 'Provider Binding（适配器与契约）'), element('dd', 'technical-identity', `adapter r${provider.adapterRevision} · config r${provider.configurationRevision}`),
-      element('dt', undefined, 'Credential Reference'), element('dd', 'technical-identity', provider.credentialReference),
-      element('dt', undefined, 'Plan Envelope'), element('dd', 'technical-identity', envelope.digest),
+      element('dt', undefined, '模型提供方绑定（适配器与契约）'), element('dd', 'technical-identity', `adapter r${provider.adapterRevision} · config r${provider.configurationRevision}`),
+      element('dt', undefined, '凭据引用'), element('dd', 'technical-identity', provider.credentialReference),
+      element('dt', undefined, '计划权限边界'), element('dd', 'technical-identity', envelope.digest),
     ));
     const nonEffects = element('ul', 'task-authorization-non-effects');
     for (const statement of projection.namedNonEffects) nonEffects.append(element('li', undefined, statement));
@@ -2885,22 +2885,22 @@ function renderEditorialWorkspaceProfile(
     authorityValues.append(
       element('dt', undefined, '规范字节'), element('dd', undefined, `${revision.byteLength} bytes`),
       element('dt', undefined, '兼容性'), element('dd', undefined, revision.compatibility),
-      element('dt', undefined, 'Model Role'), element('dd', undefined, ceiling.modelRoles.join('、')),
-      ...ceilingRow('Capability', ceiling.capabilities),
-      ...ceilingRow('Readable Scope', ceiling.readableScopeKinds),
-      ...ceilingRow('Provider Binding', ceiling.providerBindings),
-      ...ceilingRow('Credential', ceiling.credentialAccess),
-      ...ceilingRow('Network', ceiling.networkAccess),
-      ...ceilingRow('Effect', ceiling.effectClasses),
-      ...ceilingRow('Enrollment', ceiling.backgroundAnalysisEnrollment),
-      ...ceilingRow('Apply', ceiling.applyAuthority),
+      element('dt', undefined, '模型角色'), element('dd', undefined, ceiling.modelRoles.join('、')),
+      ...ceilingRow('AI7 能力', ceiling.capabilities),
+      ...ceilingRow('可读范围', ceiling.readableScopeKinds),
+      ...ceilingRow('模型提供方绑定', ceiling.providerBindings),
+      ...ceilingRow('凭据访问', ceiling.credentialAccess),
+      ...ceilingRow('网络访问', ceiling.networkAccess),
+      ...ceilingRow('受控动作', ceiling.effectClasses),
+      ...ceilingRow('后台分析登记', ceiling.backgroundAnalysisEnrollment),
+      ...ceilingRow('AI7 正式应用', ceiling.applyAuthority),
     );
     if (undeclared.length === 8) {
       authorityValues.append(element('dt', undefined, '权限上限'), element('dd', undefined, '未声明任何权限（8 项均为空）'));
     } else if (undeclared.length > 0) {
       authorityValues.append(element('dt', undefined, '未声明'), element('dd', undefined, undeclared.join('、')));
     }
-    revisionSection.append(element('h4', undefined, `Authority Ceiling · Revision ${revision.revision}`), authorityValues,
+    revisionSection.append(element('h4', undefined, `权限上限 · Revision ${revision.revision}`), authorityValues,
       technicalDetails('native-artifact-facts',
         element('dt', undefined, 'SHA-256'), element('dd', 'technical-identity', revision.sha256)));
     if (!pinned || revision.revision === projection.sidecar.activeRevision ||
@@ -3129,7 +3129,7 @@ async function renderDataAndStorage(): Promise<void> {
       element('dt', undefined, '实际位置'), root,
       element('dt', undefined, '本机占用'), element('dd', undefined, projection.footprint.label),
     );
-    summary.append(element('h3', undefined, 'Product Data Location'), values);
+    summary.append(element('h3', undefined, '产品数据位置'), values);
     const credentials = element('section', 'review-section');
     credentials.append(
       element('h3', undefined, '凭据与产品数据分开'),
