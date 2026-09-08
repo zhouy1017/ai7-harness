@@ -31,7 +31,8 @@ export type MalformedReason =
   | 'response-not-a-record'
   | 'choice-absent'
   | 'answer-channel-absent'
-  | 'content-absent';
+  | 'content-absent'
+  | 'output-absent';
 
 /**
  * One response, normalized. `empty-answer` carries whether the declared reasoning channel had
@@ -84,7 +85,25 @@ function contentBlockUsageOf(body: Record<string, unknown>): ModelUsage | null {
   return { inputTokens, outputTokens };
 }
 
-/** One `content` entry of the declared type, as far as this module reads it. */
+/**
+ * The usage a Responses-shaped response reports. The two counts are named for the sides of the
+ * request as the Anthropic-compatible shape names them, and the reasoning count sits one level down
+ * in `output_tokens_details`, where it is read into the field the canonical usage already has.
+ * `input_tokens_details` is not read: nothing has observed this gateway's cache accounting, and an
+ * unobserved field is not a field this module invents a meaning for.
+ */
+function outputItemUsageOf(body: Record<string, unknown>): ModelUsage | null {
+  if (!isRecord(body.usage)) return null;
+  const inputTokens = nonNegativeInteger(body.usage.input_tokens);
+  const outputTokens = nonNegativeInteger(body.usage.output_tokens);
+  const reasoningTokens = isRecord(body.usage.output_tokens_details)
+    ? nonNegativeInteger(body.usage.output_tokens_details.reasoning_tokens)
+    : null;
+  if (inputTokens === null || outputTokens === null) return null;
+  return { inputTokens, outputTokens, ...(reasoningTokens === null ? {} : { reasoningTokens }) };
+}
+
+/** One `content` block or `output` item of the declared type, as far as this module reads it. */
 function isBlockOfType(block: unknown, type: string): block is Record<string, unknown> {
   return isRecord(block) && block.type === type;
 }
@@ -135,6 +154,34 @@ function normalizeContentBlocks(profile: ProviderModelProfile, body: unknown): C
 }
 
 /**
+ * The Responses reading: `output` is a list of items rather than of answer parts, so the answer is
+ * one level deeper than the shape before it — the `text` of every `output_text` part of every
+ * `message` item, in order. A `refusal` part is not answer text: the model declining to answer is
+ * the empty answer this module exists to distinguish, not a string for the contract layer to fail to
+ * parse. A response with no `output` array matched no channel at all and is `output-absent`.
+ *
+ * `status`, `incomplete_details`, and `error` are deliberately not carried, for the reason
+ * `stop_reason` is not carried above: an incomplete or failed body reads as the empty or unparsable
+ * answer the layers above already handle, and the canonical result gains no field one vendor needs.
+ * `output_text` is not read either — the SDK synthesizes it client-side and the wire body has none.
+ */
+function normalizeOutputItems(profile: ProviderModelProfile, body: unknown): CanonicalModelResult {
+  if (!isRecord(body)) return { kind: 'malformed', reason: 'response-not-a-record' };
+  if (!Array.isArray(body.output)) return { kind: 'malformed', reason: 'output-absent' };
+  const text = body.output
+    .filter((item): item is Record<string, unknown> => isBlockOfType(item, 'message'))
+    .flatMap((item): ReadonlyArray<unknown> => (Array.isArray(item.content) ? item.content : []))
+    .filter((part): part is Record<string, unknown> => isBlockOfType(part, 'output_text') && typeof part.text === 'string')
+    .map((part) => part.text as string)
+    .join('');
+  const usage = outputItemUsageOf(body);
+  const reasoningPresent = profile.capabilities.reasoningChannel === 'output-reasoning-items' &&
+    body.output.some((item) => isBlockOfType(item, 'reasoning'));
+  if (text.length === 0) return { kind: 'empty-answer', reasoningPresent, usage };
+  return { kind: 'answer', text, reasoningText: null, usage };
+}
+
+/**
  * Normalize one response body against the channels its model profile declares. Deliberately callable
  * with a body alone: a cached response can be classified without an adapter, a transport, a
  * credential, or a Run, which is what makes replaying a past failure possible at all.
@@ -145,5 +192,6 @@ function normalizeContentBlocks(profile: ProviderModelProfile, body: unknown): C
 export function normalizeModelResponse(profile: ProviderModelProfile, body: unknown): CanonicalModelResult {
   if (profile.capabilities.answerChannel === 'none') return { kind: 'malformed', reason: 'answer-channel-not-declared' };
   if (profile.capabilities.answerChannel === 'content-text-blocks') return normalizeContentBlocks(profile, body);
+  if (profile.capabilities.answerChannel === 'output-message-text') return normalizeOutputItems(profile, body);
   return normalizeMessageContentString(profile, body);
 }

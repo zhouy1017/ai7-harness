@@ -5,6 +5,7 @@ import type { CredentialBroker, CredentialSlotBinding } from './credential-broke
 import {
   DEEPSEEK_ROUTE,
   OPENCODE_GO_MESSAGES_ROUTE,
+  OPENCODE_GO_RESPONSES_ROUTE,
   OPENCODE_GO_ROUTE,
   type CredentialSlot,
   type RemoteExecutionRoute,
@@ -21,7 +22,7 @@ import { messageText, type AssembledModelPayload } from './payload.js';
 import { normalizeModelResponse, type CanonicalModelResult } from './response-normalization.js';
 
 /**
- * The AI7-owned Provider adapter, revision 1. One adapter serves every remote route and both
+ * The AI7-owned Provider adapter, revision 1. One adapter serves every remote route and all three
  * implemented request shapes, composed from two profiles: a **route profile** — endpoint, credential
  * slot, header policy, limit reading, output cap — says how to reach a model, and a **model profile**
  * (`./model-profile.ts`) says how to speak to one. They are separate because one route serves many
@@ -31,9 +32,10 @@ import { normalizeModelResponse, type CanonicalModelResult } from './response-no
  * high reasoning effort). `opencode-go` is the developer-live route of Provider Processing v4
  * (`POST https://opencode.ai/zen/go/v1/chat/completions`, bare model id `deepseek-v4-flash`, a
  * standard chat-completions body with no DeepSeek-specific parameters, and the technical Session id
- * in `x-opencode-session` for the gateway's prompt cache). `opencode-go-messages` is the same plan's
- * Anthropic-compatible path, declared and inert: no model on it can read a response, and no Provider
- * Resolution Plan may bind it (`ExecutionRoute` in `./egress-gate.ts`).
+ * in `x-opencode-session` for the gateway's prompt cache). `opencode-go-messages` and
+ * `opencode-go-responses` are the same plan's Anthropic-compatible and OpenAI-compatible paths,
+ * declared and inert: no model on either can read a response, and no Provider Resolution Plan may
+ * bind them (`ExecutionRoute` in `./egress-gate.ts`).
  *
  * No route exposes provider-native tools. The adapter assembles a deterministic request from the
  * frozen prompt contract, records the request digest, and transmits only after a `transmit-remote`
@@ -48,6 +50,8 @@ export const DEEPSEEK_REASONING_EFFORT = 'high' as const;
 export const OPENCODE_GO_ENDPOINT = 'https://opencode.ai/zen/go/v1/chat/completions' as const;
 /** The same plan's Anthropic-compatible path, which the Go page documents for its Qwen and MiniMax models. */
 export const OPENCODE_GO_MESSAGES_ENDPOINT = 'https://opencode.ai/zen/go/v1/messages' as const;
+/** The same plan's OpenAI-compatible path, which the Go page documents for its GPT and Grok models. */
+export const OPENCODE_GO_RESPONSES_ENDPOINT = 'https://opencode.ai/zen/go/v1/responses' as const;
 /**
  * The per-turn output cap `opencode-go-messages` declares, because its shape requires the request to
  * name one. The largest unit output observed to date is 24,225 tokens, so this leaves headroom above
@@ -149,10 +153,34 @@ export const OPENCODE_GO_MESSAGES_ROUTE_PROFILE: ProviderRouteProfile = {
   displayName: 'OpenCode Go · Messages（开发者实时）',
 };
 
+/**
+ * The same gateway again, over its OpenAI-compatible path, and a third route for the same reason the
+ * second one is one: the endpoint and the request shape differ, the credential slot does not.
+ *
+ * It declares no output cap, and that is a statement rather than an omission. The shape leaves
+ * `max_output_tokens` optional, nothing has established a per-turn bound for the models this path
+ * serves, and an optional field is not one the request must name — so the route says `null` and the
+ * assembler sends nothing, exactly as the two chat-completions routes do.
+ */
+export const OPENCODE_GO_RESPONSES_ROUTE_PROFILE: ProviderRouteProfile = {
+  route: OPENCODE_GO_RESPONSES_ROUTE,
+  endpoint: OPENCODE_GO_RESPONSES_ENDPOINT,
+  credentialSlot: 'opencode-go',
+  limitPolicy: 'account-limit-terminal',
+  dshAttribution: false,
+  sessionHeader: true,
+  maxOutputTokens: null,
+  // The Go page documents no header for this path either, so the reading ADR 0067 recorded for the
+  // gateway stands for it, and the route waits for a live item exactly as the `/messages` one does.
+  credentialHeaderEvidence: ADR_0067_DOCUMENTATION,
+  displayName: 'OpenCode Go · Responses（开发者实时）',
+};
+
 export const PROVIDER_ROUTE_PROFILES: Readonly<Record<RemoteExecutionRoute, ProviderRouteProfile>> = {
   [DEEPSEEK_ROUTE]: DEEPSEEK_ROUTE_PROFILE,
   [OPENCODE_GO_ROUTE]: OPENCODE_GO_ROUTE_PROFILE,
   [OPENCODE_GO_MESSAGES_ROUTE]: OPENCODE_GO_MESSAGES_ROUTE_PROFILE,
+  [OPENCODE_GO_RESPONSES_ROUTE]: OPENCODE_GO_RESPONSES_ROUTE_PROFILE,
 };
 
 export interface DeepSeekRequestAssembly {
@@ -253,14 +281,66 @@ function anthropicMessagesBody(
 }
 
 /**
+ * The OpenAI Responses body, from the vendor's published SDK contract read on 2026-09-08: the
+ * platform reference page refuses an unauthenticated fetch, so the source of record is the OpenAI
+ * Node SDK's `src/resources/responses/responses.ts` at commit
+ * `eecbebe294be7e657c99a34eb104a6a4b507335c` (2026-09-05). The body is `{ model, instructions?, input }`.
+ *
+ * Two facts of this shape are worth stating where they are implemented. The system prompt is the
+ * top-level `instructions` and never an input item — the third spelling of the one thing the
+ * `AssembledModelPayload` carries, and the third time nothing above the adapter learns which. And
+ * `max_output_tokens` is *optional* here, unlike the mandatory `max_tokens` of the shape before it,
+ * so the route's declaration decides: a number sends the field, `null` sends nothing, and no cap is
+ * invented for a route that declares none.
+ *
+ * This shape has mechanisms of its own for the two capabilities that refuse here —
+ * `text.format: { type: 'json_object' }` for a required JSON answer and `reasoning.effort` for
+ * reasoning control. They are named as the documented spellings for the live item that first needs
+ * one, and neither is assembled: the spellings this adapter implements are the chat-completions
+ * ones, so a profile declaring either on this shape refuses rather than sending a field on a guess.
+ */
+function openaiResponsesBody(
+  profile: ProviderRouteProfile,
+  model: ProviderModelProfile,
+  payload: AssembledModelPayload,
+): string {
+  if (model.capabilities.structuredOutput !== 'none') throw new Error('PROVIDER_STRUCTURED_OUTPUT_UNSUPPORTED');
+  if (model.capabilities.reasoningControl !== 'none') throw new Error('PROVIDER_REASONING_CONTROL_UNSUPPORTED');
+  const instructions = systemPromptOf(payload);
+  return canonicalJson({
+    model: model.model,
+    ...(instructions === null ? {} : { instructions }),
+    input: conversationMessages(payload),
+    ...(profile.maxOutputTokens === null ? {} : { max_output_tokens: profile.maxOutputTokens }),
+  });
+}
+
+/**
+ * The body of one request, chosen by the declared request shape and by nothing else — no route,
+ * model id, or endpoint is consulted, which is what makes a model behind a second or third vendor's
+ * endpoint a row in the profile table rather than a branch above the provider layer.
+ *
+ * All three shapes ADR 0067 documents behind the Go gateway's paths are implemented as of this
+ * revision, and the `default` still stands: a profile is data, so the union cannot rule out at
+ * runtime a shape that no profile in the table declares.
+ */
+function providerRequestBody(
+  profile: ProviderRouteProfile,
+  model: ProviderModelProfile,
+  payload: AssembledModelPayload,
+): string {
+  switch (model.capabilities.requestShape) {
+    case 'openai-chat-completions': return chatCompletionsBody(model, payload);
+    case 'anthropic-messages': return anthropicMessagesBody(profile, model, payload);
+    case 'openai-responses': return openaiResponsesBody(profile, model, payload);
+    default: throw new Error('PROVIDER_REQUEST_SHAPE_UNSUPPORTED');
+  }
+}
+
+/**
  * Assemble one request. The header set comes from the route profile, the body from the model
  * profile's declared capabilities, and nothing is read from anywhere else — which is what makes a
  * new model a new row in the profile table rather than a new branch here.
- *
- * Two of the three shapes ADR 0067 documents behind the Go gateway's paths are implemented and
- * `openai-responses` still refuses rather than guessing. The branch is on `requestShape` alone: no
- * route, model id, or endpoint is consulted, so a model behind an Anthropic-compatible endpoint is a
- * profile rather than a branch, and nothing above this function learns which shape it got.
  */
 export function assembleProviderRequest(
   profile: ProviderRouteProfile,
@@ -269,11 +349,7 @@ export function assembleProviderRequest(
   context: ProviderRequestContext,
 ): DeepSeekRequestAssembly {
   if (model.route !== profile.route) throw new Error('PROVIDER_MODEL_ROUTE_MISMATCH');
-  const shape = model.capabilities.requestShape;
-  if (shape !== 'openai-chat-completions' && shape !== 'anthropic-messages') throw new Error('PROVIDER_REQUEST_SHAPE_UNSUPPORTED');
-  const body = shape === 'anthropic-messages'
-    ? anthropicMessagesBody(profile, model, payload)
-    : chatCompletionsBody(model, payload);
+  const body = providerRequestBody(profile, model, payload);
   if (profile.sessionHeader && (context.sessionId === undefined || context.sessionId.length === 0)) {
     throw new Error('PROVIDER_REQUEST_SESSION_ABSENT');
   }

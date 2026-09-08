@@ -3,6 +3,7 @@ import {
   DEEPSEEK_ROUTE,
   OPENCODE_GO_MESSAGES_ROUTE,
   OPENCODE_GO_MODEL,
+  OPENCODE_GO_RESPONSES_ROUTE,
   OPENCODE_GO_ROUTE,
   type RemoteExecutionRoute,
 } from './egress-gate.js';
@@ -28,9 +29,9 @@ import {
 
 /**
  * How the request body is assembled. ADR 0067 records that the Go gateway serves Qwen and MiniMax
- * over the Anthropic-compatible `/messages` path and GPT and Grok over `/responses`; both are named
- * here so a profile can state its shape honestly, and both refuse at assembly until an adapter
- * implements them. Naming a shape is not implementing it.
+ * over the Anthropic-compatible `/messages` path and GPT and Grok over `/responses`; all three
+ * shapes are named here so a profile can state its shape honestly, and all three are assembled as of
+ * S54c. What a profile declares is still what it gets: the adapter reads this field and nothing else.
  */
 export type RequestShape = 'openai-chat-completions' | 'anthropic-messages' | 'openai-responses';
 
@@ -51,15 +52,20 @@ export type StructuredOutput = 'none' | 'json-object' | 'json-schema' | 'tool-ca
  * Where the answer text is read from; `none` means no channel is declared and every response is
  * malformed. `content-text-blocks` is the Anthropic-compatible shape's channel: the answer is the
  * concatenation of the `text` of every `type: 'text'` block, in the order the response lists them.
+ * `output-message-text` is the Responses shape's: the answer is the concatenation of the `text` of
+ * every `type: 'output_text'` part of every `type: 'message'` item of `output`, in that same order,
+ * and a `type: 'refusal'` part is not answer text, so a message carrying only refusals answers empty.
  */
-export type AnswerChannel = 'none' | 'message-content-string' | 'content-text-blocks';
+export type AnswerChannel = 'none' | 'message-content-string' | 'content-text-blocks' | 'output-message-text';
 
 /**
  * Where reasoning is read from when the model reports it separately from the answer.
  * `content-thinking-blocks` declares presence and nothing more: a `type: 'thinking'` block in the
  * content array means the model reasoned, which is the whole of what an empty answer needs to know.
+ * `output-reasoning-items` says the same of a `type: 'reasoning'` item of the Responses shape's
+ * `output`: its presence is read, and neither its `summary` nor its `content` is.
  */
-export type ReasoningChannel = 'none' | 'message-reasoning-content' | 'content-thinking-blocks';
+export type ReasoningChannel = 'none' | 'message-reasoning-content' | 'content-thinking-blocks' | 'output-reasoning-items';
 
 /** Whether the reported output tokens include reasoning tokens; `unknown` until something has measured it. */
 export type UsageAttribution = 'includes-reasoning' | 'separate' | 'unknown';
@@ -148,6 +154,22 @@ const JSON_OBJECT_LIVE_ITEM: CapabilityEvidence = {
 const OPENCODE_GO_PLAN_DOCUMENTATION: CapabilityEvidence = {
   kind: 'vendor-documentation',
   source: 'OpenCode Go https://opencode.ai/docs/go/ · Zen model table https://opencode.ai/docs/zen/',
+  readOn: '2026-09-08',
+};
+
+/**
+ * The same reading of the same pair, plus the source the third shape's own contract came from. The
+ * vendor's platform reference page refuses an unauthenticated fetch, so the shape is read from the
+ * published SDK instead, named by the exact commit that was read rather than by a moving branch.
+ *
+ * A `/responses` row therefore names three sources for the one capability it declares — which path
+ * the gateway serves the model on, which id it answers to, and what the shape on that path is —
+ * because that is what establishing it took.
+ */
+const OPENCODE_GO_RESPONSES_DOCUMENTATION: CapabilityEvidence = {
+  kind: 'vendor-documentation',
+  source: 'OpenCode Go https://opencode.ai/docs/go/ · Zen model table https://opencode.ai/docs/zen/' +
+    ' · OpenAI Node SDK src/resources/responses/responses.ts@eecbebe294be7e657c99a34eb104a6a4b507335c',
   readOn: '2026-09-08',
 };
 
@@ -254,10 +276,29 @@ export const OPENCODE_GO_V4_PRO_PROFILE: ProviderModelProfile = {
 interface OpenCodeGoPath {
   readonly route: RemoteExecutionRoute;
   readonly requestShape: RequestShape;
+  /**
+   * What established the shape of this path, carried by the path because it differs between them:
+   * two of the three are read from the documentation pair alone, and the third needed the vendor's
+   * SDK beside it. A row states the provenance it actually has, not the one its neighbours have.
+   */
+  readonly documentation: CapabilityEvidence;
 }
 
-const GO_CHAT_COMPLETIONS: OpenCodeGoPath = { route: OPENCODE_GO_ROUTE, requestShape: 'openai-chat-completions' };
-const GO_MESSAGES: OpenCodeGoPath = { route: OPENCODE_GO_MESSAGES_ROUTE, requestShape: 'anthropic-messages' };
+const GO_CHAT_COMPLETIONS: OpenCodeGoPath = {
+  route: OPENCODE_GO_ROUTE,
+  requestShape: 'openai-chat-completions',
+  documentation: OPENCODE_GO_PLAN_DOCUMENTATION,
+};
+const GO_MESSAGES: OpenCodeGoPath = {
+  route: OPENCODE_GO_MESSAGES_ROUTE,
+  requestShape: 'anthropic-messages',
+  documentation: OPENCODE_GO_PLAN_DOCUMENTATION,
+};
+const GO_RESPONSES: OpenCodeGoPath = {
+  route: OPENCODE_GO_RESPONSES_ROUTE,
+  requestShape: 'openai-responses',
+  documentation: OPENCODE_GO_RESPONSES_DOCUMENTATION,
+};
 
 /**
  * One more model of the same gateway, declared exactly as the profile above declares its own: the
@@ -269,8 +310,9 @@ const GO_MESSAGES: OpenCodeGoPath = { route: OPENCODE_GO_MESSAGES_ROUTE, request
  * declares no answer channel cannot read any response — and only a live test item may ever move one
  * of these values, never a declaration.
  *
- * The path is a parameter because that is exactly what the second request shape cost this table: a
- * model on `/messages` is the same row with two of its fields read from somewhere else.
+ * The path is a parameter because that is exactly what a second and a third request shape cost this
+ * table: a model on `/messages` or `/responses` is the same row with three of its fields — the
+ * route, the shape, and what established the shape — read from somewhere else.
  */
 function inertOpenCodeGoModel(path: OpenCodeGoPath, model: string, productName: string): ProviderModelProfile {
   return {
@@ -287,7 +329,7 @@ function inertOpenCodeGoModel(path: OpenCodeGoPath, model: string, productName: 
       usageAttribution: 'unknown',
     },
     evidence: {
-      requestShape: OPENCODE_GO_PLAN_DOCUMENTATION,
+      requestShape: path.documentation,
       reasoningControl: UNVERIFIED,
       structuredOutput: UNVERIFIED,
       answerChannel: UNVERIFIED,
@@ -335,6 +377,22 @@ const OPENCODE_GO_MINIMAX_M3_PROFILE = inertOpenCodeGoModel(GO_MESSAGES, 'minima
 const OPENCODE_GO_MINIMAX_M2_7_PROFILE = inertOpenCodeGoModel(GO_MESSAGES, 'minimax-m2.7', 'MiniMax M2.7');
 const OPENCODE_GO_MINIMAX_M2_5_PROFILE = inertOpenCodeGoModel(GO_MESSAGES, 'minimax-m2.5', 'MiniMax M2.5');
 
+/*
+ * The same admitted-set rule applied to the plan's `/responses` path, which the `openai-responses`
+ * shape now makes declarable. The Go page places four products there; the Zen model table states an
+ * id verbatim for two of them, and those two are the rows.
+ *
+ * Named by the documentation and deliberately absent:
+ * - Muse Spark 1.3 / 1.2 — the two pages disagree on the id itself, not on the path: the Go page
+ *   prints `muse-spark-1.3-contributor` and `muse-spark-1.2-contributor`, the Zen table prints
+ *   `muse-spark-1.3` and `muse-spark-1.2`. No id is stated by both, so there is none to key a row
+ *   by, and picking one would be the guess this table exists to prevent.
+ * - The Zen table's further `/responses` rows — the GPT 5.x family, Grok 4.5, Grok Build — are Zen
+ *   rather than the Go plan, and this table declares the plan the credential slot reaches.
+ */
+const OPENCODE_GO_GROK_4_6_PROFILE = inertOpenCodeGoModel(GO_RESPONSES, 'grok-4.6', 'Grok 4.6');
+const OPENCODE_GO_GPT_5_6_LUNA_PROFILE = inertOpenCodeGoModel(GO_RESPONSES, 'gpt-5.6-luna', 'GPT 5.6 Luna');
+
 export const PROVIDER_MODEL_PROFILES: Readonly<Record<ModelProfileKey, ProviderModelProfile>> = {
   [DEEPSEEK_V4_PRO_PROFILE.key]: DEEPSEEK_V4_PRO_PROFILE,
   [OPENCODE_GO_V4_FLASH_PROFILE.key]: OPENCODE_GO_V4_FLASH_PROFILE,
@@ -352,6 +410,8 @@ export const PROVIDER_MODEL_PROFILES: Readonly<Record<ModelProfileKey, ProviderM
   [OPENCODE_GO_MINIMAX_M3_PROFILE.key]: OPENCODE_GO_MINIMAX_M3_PROFILE,
   [OPENCODE_GO_MINIMAX_M2_7_PROFILE.key]: OPENCODE_GO_MINIMAX_M2_7_PROFILE,
   [OPENCODE_GO_MINIMAX_M2_5_PROFILE.key]: OPENCODE_GO_MINIMAX_M2_5_PROFILE,
+  [OPENCODE_GO_GROK_4_6_PROFILE.key]: OPENCODE_GO_GROK_4_6_PROFILE,
+  [OPENCODE_GO_GPT_5_6_LUNA_PROFILE.key]: OPENCODE_GO_GPT_5_6_LUNA_PROFILE,
 };
 
 /** The declared profile for one route and model, or `null` when nothing has declared that pair. */

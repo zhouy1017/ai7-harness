@@ -23,15 +23,26 @@ export const OPENCODE_GO_MODEL = 'deepseek-v4-flash' as const;
  * the credential does not, so declaring it moves no credential boundary.
  */
 export const OPENCODE_GO_MESSAGES_ROUTE = 'opencode-go-messages' as const;
+/**
+ * The same plan reached over its OpenAI-compatible `/responses` path (ADR 0067), which the Go page
+ * documents for its GPT and Grok models. A third route for the reason the second one exists: the
+ * endpoint and the request shape differ, and the credential does not.
+ */
+export const OPENCODE_GO_RESPONSES_ROUTE = 'opencode-go-responses' as const;
 
 /**
- * Every route a Provider Resolution Plan may bind. `opencode-go-messages` is deliberately absent: no
- * Run may bind a route whose every model is inert, and this gate is the place that enforces it, so
- * this union is a narrower statement than `RemoteExecutionRoute` rather than a superset of it.
+ * Every route a Provider Resolution Plan may bind. Neither `opencode-go-messages` nor
+ * `opencode-go-responses` is here: no Run may bind a route whose every model is inert, and this gate
+ * is the place that enforces it, so this union is a narrower statement than `RemoteExecutionRoute`
+ * rather than a superset of it.
  */
 export type ExecutionRoute = typeof LOCAL_DETERMINISTIC_ROUTE | typeof DEEPSEEK_ROUTE | typeof OPENCODE_GO_ROUTE;
 /** Every remote route a profile may be declared for, bindable or not; all of them are served by the same adapter. */
-export type RemoteExecutionRoute = typeof DEEPSEEK_ROUTE | typeof OPENCODE_GO_ROUTE | typeof OPENCODE_GO_MESSAGES_ROUTE;
+export type RemoteExecutionRoute =
+  | typeof DEEPSEEK_ROUTE
+  | typeof OPENCODE_GO_ROUTE
+  | typeof OPENCODE_GO_MESSAGES_ROUTE
+  | typeof OPENCODE_GO_RESPONSES_ROUTE;
 /** The logical credential slots of the Main Editorial Role: one per remote route. */
 export type CredentialSlot = 'deepseek-api-key' | 'opencode-go';
 
