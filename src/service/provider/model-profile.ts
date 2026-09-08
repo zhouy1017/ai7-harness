@@ -32,8 +32,16 @@ import {
  * over the Anthropic-compatible `/messages` path and GPT and Grok over `/responses`; all three
  * shapes are named here so a profile can state its shape honestly, and all three are assembled as of
  * S54c. What a profile declares is still what it gets: the adapter reads this field and nothing else.
+ *
+ * `google-generate-content` is the fourth and the first that no route of this gateway serves: Gemini
+ * is on no OpenCode Go path, so the shape is assembled and read against test-local profiles until a
+ * route with the credential slot its own endpoint needs arrives (plan slot 1c.10).
  */
-export type RequestShape = 'openai-chat-completions' | 'anthropic-messages' | 'openai-responses';
+export type RequestShape =
+  | 'openai-chat-completions'
+  | 'anthropic-messages'
+  | 'openai-responses'
+  | 'google-generate-content';
 
 /** What parameters control reasoning. `deepseek-thinking` is the production route's `thinking` plus `reasoning_effort`. */
 export type ReasoningControl = 'none' | 'deepseek-thinking';

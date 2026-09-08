@@ -22,7 +22,7 @@ import { messageText, type AssembledModelPayload } from './payload.js';
 import { normalizeModelResponse, type CanonicalModelResult } from './response-normalization.js';
 
 /**
- * The AI7-owned Provider adapter, revision 1. One adapter serves every remote route and all three
+ * The AI7-owned Provider adapter, revision 1. One adapter serves every remote route and all four
  * implemented request shapes, composed from two profiles: a **route profile** — endpoint, credential
  * slot, header policy, limit reading, output cap — says how to reach a model, and a **model profile**
  * (`./model-profile.ts`) says how to speak to one. They are separate because one route serves many
@@ -35,7 +35,10 @@ import { normalizeModelResponse, type CanonicalModelResult } from './response-no
  * in `x-opencode-session` for the gateway's prompt cache). `opencode-go-messages` and
  * `opencode-go-responses` are the same plan's Anthropic-compatible and OpenAI-compatible paths,
  * declared and inert: no model on either can read a response, and no Provider Resolution Plan may
- * bind them (`ExecutionRoute` in `./egress-gate.ts`).
+ * bind them (`ExecutionRoute` in `./egress-gate.ts`). The fourth shape, `google-generate-content`,
+ * has no route at all: Gemini is served by no path of this gateway, so the shape is assembled only
+ * for a profile that declares it, and the route its own endpoint needs waits for the credential slot
+ * of plan slot 1c.10.
  *
  * No route exposes provider-native tools. The adapter assembles a deterministic request from the
  * frozen prompt contract, records the request digest, and transmits only after a `transmit-remote`
@@ -63,6 +66,10 @@ export const OPENCODE_GO_MESSAGES_MAX_OUTPUT_TOKENS = 32_768 as const;
 export const OPENCODE_GO_SESSION_HEADER = 'x-opencode-session' as const;
 /** The specific User-Agent the developer-live route sends: the product and the trusted scope, no host or user detail. */
 export const OPENCODE_GO_USER_AGENT = 'AI7-Harness/1.0 (developer-live)' as const;
+/** The method the generateContent shape appends to the model id it addresses in the path. */
+const GOOGLE_GENERATE_CONTENT_METHOD = ':generateContent' as const;
+/** A model id that stands in a URL path segment as it is written; the shape that addresses one refuses anything else. */
+const URL_ADDRESSABLE_MODEL_ID = /^[A-Za-z0-9._-]+$/u;
 
 /**
  * How one remote route is reached: everything that is true of the route whichever model it carries.
@@ -316,13 +323,58 @@ function openaiResponsesBody(
 }
 
 /**
+ * The generateContent body, from Google's published SDK contract read on 2026-09-08 — the source of
+ * record is `googleapis/js-genai` `src/types.ts` at commit
+ * `3e1d923ef914812c1d209aa2e5461a717d03a081` (2026-08-31), with the method and path from
+ * `https://ai.google.dev/api/generate-content`. The body is
+ * `{ systemInstruction?, contents, generationConfig? }`.
+ *
+ * Three facts of this shape are worth stating where they are implemented. The system prompt is the
+ * top-level `systemInstruction` with one text part and never a `contents` entry — the fourth spelling
+ * of the one thing the `AssembledModelPayload` carries. The roles are this shape's own: `assistant`
+ * is `model` here, mapped in this arm alone so that `conversationMessages` keeps saying what every
+ * other shape means by a turn. And `generationConfig` travels only when the route declares something
+ * to put in it, exactly as the optional cap of the shape before it does, so a route declaring `null`
+ * sends no such key at all.
+ *
+ * The model id is not in the body: this shape addresses it in the URL, which `providerRequestUrl`
+ * derives. The credential is not here either, and unlike the three shapes before it this endpoint
+ * takes it in `x-goog-api-key` rather than `authorization: Bearer`
+ * (`https://ai.google.dev/gemini-api/docs/api-key`, read the same day). That form is recorded for the
+ * route of plan slot 1c.10 and is not implemented: no route here reaches this shape.
+ *
+ * Structured output and reasoning control refuse, as they do on the two shapes before it. This shape
+ * spells them `generationConfig.responseMimeType: 'application/json'` with `responseSchema`, and
+ * `generationConfig.thinkingConfig`; they are named as the documented spellings for the live item
+ * that first needs one, and neither is assembled. Nothing else travels either — no `safetySettings`,
+ * no `tools`, no `temperature`.
+ */
+function googleGenerateContentBody(
+  profile: ProviderRouteProfile,
+  model: ProviderModelProfile,
+  payload: AssembledModelPayload,
+): string {
+  if (model.capabilities.structuredOutput !== 'none') throw new Error('PROVIDER_STRUCTURED_OUTPUT_UNSUPPORTED');
+  if (model.capabilities.reasoningControl !== 'none') throw new Error('PROVIDER_REASONING_CONTROL_UNSUPPORTED');
+  const systemInstruction = systemPromptOf(payload);
+  return canonicalJson({
+    contents: conversationMessages(payload).map((message) => ({
+      role: message.role === 'assistant' ? 'model' : message.role,
+      parts: [{ text: message.content }],
+    })),
+    ...(systemInstruction === null ? {} : { systemInstruction: { parts: [{ text: systemInstruction }] } }),
+    ...(profile.maxOutputTokens === null ? {} : { generationConfig: { maxOutputTokens: profile.maxOutputTokens } }),
+  });
+}
+
+/**
  * The body of one request, chosen by the declared request shape and by nothing else — no route,
  * model id, or endpoint is consulted, which is what makes a model behind a second or third vendor's
  * endpoint a row in the profile table rather than a branch above the provider layer.
  *
  * All three shapes ADR 0067 documents behind the Go gateway's paths are implemented as of this
- * revision, and the `default` still stands: a profile is data, so the union cannot rule out at
- * runtime a shape that no profile in the table declares.
+ * revision, and the fourth beside them, and the `default` still stands: a profile is data, so the
+ * union cannot rule out at runtime a shape that no profile in the table declares.
  */
 function providerRequestBody(
   profile: ProviderRouteProfile,
@@ -333,8 +385,29 @@ function providerRequestBody(
     case 'openai-chat-completions': return chatCompletionsBody(model, payload);
     case 'anthropic-messages': return anthropicMessagesBody(profile, model, payload);
     case 'openai-responses': return openaiResponsesBody(profile, model, payload);
+    case 'google-generate-content': return googleGenerateContentBody(profile, model, payload);
     default: throw new Error('PROVIDER_REQUEST_SHAPE_UNSUPPORTED');
   }
+}
+
+/**
+ * The URL of one request: the route's endpoint, except on the one shape that addresses the model in
+ * the path instead of naming it in the body. There the route's `endpoint` is the models collection
+ * — `https://generativelanguage.googleapis.com/v1beta/models` for the official service — and the
+ * method is appended to the id, which is the whole of what the shape's REST contract asks for
+ * (`POST .../{model=models/*}:generateContent`). No route-profile field is added for it: a route
+ * already says where it is reached, and this shape reads that one field differently.
+ *
+ * A model id that cannot stand in a path segment refuses rather than being escaped into one. Percent
+ * encoding an id would send a request for a model nobody declared, and a declared id that needs
+ * encoding is a row this table should not have; the check is scoped to this shape because on the
+ * three where the id is a body field it is a string like any other, and refusing there would move
+ * requests that are pinned byte for byte.
+ */
+function providerRequestUrl(profile: ProviderRouteProfile, model: ProviderModelProfile): string {
+  if (model.capabilities.requestShape !== 'google-generate-content') return profile.endpoint;
+  if (!URL_ADDRESSABLE_MODEL_ID.test(model.model)) throw new Error('PROVIDER_MODEL_ID_UNADDRESSABLE');
+  return `${profile.endpoint}/${model.model}${GOOGLE_GENERATE_CONTENT_METHOD}`;
 }
 
 /**
@@ -349,12 +422,14 @@ export function assembleProviderRequest(
   context: ProviderRequestContext,
 ): DeepSeekRequestAssembly {
   if (model.route !== profile.route) throw new Error('PROVIDER_MODEL_ROUTE_MISMATCH');
+  // The address before the payload: a model that cannot be reached has no request to assemble.
+  const url = providerRequestUrl(profile, model);
   const body = providerRequestBody(profile, model, payload);
   if (profile.sessionHeader && (context.sessionId === undefined || context.sessionId.length === 0)) {
     throw new Error('PROVIDER_REQUEST_SESSION_ABSENT');
   }
   return {
-    url: profile.endpoint,
+    url,
     method: 'POST',
     headers: {
       'content-type': 'application/json',
