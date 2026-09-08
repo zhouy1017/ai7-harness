@@ -40,6 +40,13 @@ const ONLY_ANALYSIS_ACTIONS = `Array.from(card.querySelectorAll('button')).every
 /** The Book workbench's own primary actions, in the order the populated workbench builds them. */
 const WORKBENCH_ACTIONS = ['打开稿件', '打开另一本图书', '返回图书列表'];
 const ASSURANCE_STATEMENT = '仅为模型输出的结构化归纳；不构成事实判定、编辑评审或稿件变更。';
+/** The Decision Layer's label for every conflict kind this fixture reports, keyed by the reducer token the record keeps. */
+const CONFLICT_KIND_LABELS = {
+  'unit-reported': '单元内报告',
+  'alias-collision': '别名冲突',
+  'entity-kind-divergence': '实体类别分歧',
+  'setting-claim-divergence': '设定声明分歧',
+};
 const FIXTURES_ROOT = resolve(ROOT, 'tests', 'fixtures', 'model');
 const FIXTURE_IDENTITY = 'sample1-baseline-one-unit-failure';
 const FIXTURE_BASE_IDENTITY = 'sample1-baseline-happy';
@@ -1005,6 +1012,39 @@ async function main() {
         !card.querySelector('[data-analysis-action="prepare"], [data-analysis-action="authorize"]');
     })()`, 'settled-overview-surface');
 
+    // V2-UX-LAYER-006 and 008 on the card's two provenance lists (#333). The Decision Layer reads an
+    // entity's provenance as its units and a block count and a conflict's as its kind in the editor's
+    // language, so no identifier wall interrupts either list; the exact ranges are still carried,
+    // unabridged, in the one disclosure each list closes with, and the reducer's token still rides on
+    // the entry where the record and every other assertion read it.
+    const provenanceEntity = revision.synthesis.entities.find((entity) => entity.sourceRanges.length > 0);
+    const provenanceBlockId = provenanceEntity?.sourceRanges[0]?.blockId;
+    const provenanceUnits = [...new Set(provenanceEntity?.unitOrdinals ?? [])].sort((left, right) => left - right).join('、');
+    const provenanceBlocks = new Set((provenanceEntity?.sourceRanges ?? []).map((range) => range.blockId)).size;
+    const conflictBlockId = revision.conflicts[0]?.sourceRanges[0]?.blockId;
+    requireJourney(provenanceEntity !== undefined && provenanceUnits.length > 0 && conflictBlockId !== undefined,
+      'provenance-projection', { entity: provenanceEntity, conflict: revision.conflicts[0] });
+    await assertRenderer(renderer, `(() => {
+      const card=document.querySelector('.baseline-analysis-card');
+      const labels=${JSON.stringify(CONFLICT_KIND_LABELS)};
+      const entityList=card?.querySelector('.analysis-synthesis .analysis-list');
+      const entity=Array.from(entityList?.children??[]).find((item)=>item.textContent.startsWith(${JSON.stringify(`${provenanceEntity.name}（`)}));
+      const entityExact=entityList?.nextElementSibling;
+      const conflictList=card?.querySelector('.analysis-conflict-list');
+      const conflicts=Array.from(conflictList?.children??[]);
+      const conflictExact=conflictList?.nextElementSibling;
+      if(!(entity instanceof HTMLElement) || conflicts.length!==4) return false;
+      if(!(entityExact instanceof HTMLDetailsElement) || !(conflictExact instanceof HTMLDetailsElement)) return false;
+      return entity.textContent.endsWith(${JSON.stringify(`）· 来自单元 ${provenanceUnits} · ${provenanceBlocks} 个内容块`)}) &&
+        !entityList.textContent.includes('blk_') && !conflictList.textContent.includes('blk_') &&
+        !entityExact.open && !conflictExact.open &&
+        entityExact.querySelector('dl > dd.technical-identity')!==null && conflictExact.querySelector('dl > dd.technical-identity')!==null &&
+        entityExact.textContent.includes(${JSON.stringify(provenanceBlockId)}) && conflictExact.textContent.includes(${JSON.stringify(conflictBlockId)}) &&
+        conflicts.every((item)=>typeof labels[item.dataset.analysisConflictKind]==='string' &&
+          item.textContent.startsWith(labels[item.dataset.analysisConflictKind]) &&
+          !item.textContent.includes(item.dataset.analysisConflictKind));
+    })()`, 'analysis-provenance-and-conflict-label-surface');
+
     // V2-UX-LAYER-005, asserted where the rule is hardest to keep: the settled result set is the
     // longest thing this workbench ever renders, and the workbench's own way out must survive it. The
     // three actions are read by label, enabled state and container — never by document position — and
@@ -1363,6 +1403,27 @@ async function main() {
         section.textContent.includes(${JSON.stringify(revision.revisionId)}) && section.textContent.includes(${JSON.stringify(revision4.digest)}) && section.textContent.includes('首次基线分析') && section.textContent.includes('已被取代 · 按原始 pin 保留') &&
         !section.querySelector('[data-analysis-action="close-revision"]');
     })()`, 'history-surface');
+
+    // V2-UX-LAYER-001 and 008 on the history (#333): how many revisions there are, which is latest,
+    // what each one is and what it cost stay at full rank, while each entry's two identity lines and
+    // the set's own identity each sit in exactly one disclosure — still exact, still in the DOM, one
+    // step below the entry they belong to (V2-UX-LAYER-007).
+    await assertRenderer(renderer, `(() => {
+      const section=document.querySelector('.baseline-analysis-card .analysis-history');
+      const entries=Array.from(section?.querySelectorAll('[data-history-ordinal]')??[]);
+      const setExact=section?.querySelector(':scope > details.technical-details');
+      const first=entries[0];
+      if(entries.length!==4 || !(setExact instanceof HTMLDetailsElement) || !(first instanceof HTMLElement)) return false;
+      const firstExact=first.querySelector('details.technical-details');
+      if(!(firstExact instanceof HTMLDetailsElement)) return false;
+      return !section.querySelector('.field-note.technical-identity') &&
+        section.querySelectorAll(':scope > details.technical-details').length===1 && !setExact.open &&
+        setExact.textContent.includes(${JSON.stringify(revision.resultSetId)}) && setExact.textContent.includes('baseline-manuscript-analysis') &&
+        Array.from(section.querySelectorAll(':scope > p')).some((line)=>line.textContent==='4 个修订版 · 最新 Revision 4') &&
+        entries.every((entry)=>entry.querySelectorAll('details.technical-details').length===1 && entry.querySelectorAll(':scope > p').length===2) &&
+        firstExact.textContent.includes(${JSON.stringify(revision.revisionId)}) && firstExact.textContent.includes(${JSON.stringify(revision.digest)}) &&
+        !first.querySelector(':scope > p').textContent.includes(${JSON.stringify(revision.revisionId)});
+    })()`, 'history-identity-disclosure-surface');
 
     at('history-open-read-only');
     cancellation.throwIfRequested();

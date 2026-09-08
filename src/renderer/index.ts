@@ -45,6 +45,9 @@ import type {
 import { BASELINE_ANALYSIS_TASK_GOAL, J03_TASK_GOAL, MAX_REPLACEMENT_EXCLUSIONS } from '../shared/protocol.js';
 import { mountBoundedEditor, type BoundedEditor, type EditorContinuity } from './editor.js';
 import {
+  ANALYSIS_CONFLICT_KIND_LABELS,
+  analysisBlockCountLabel,
+  analysisProvenanceSummary,
   attemptStateLabel,
   elapsedLabel,
   localInstantLabel,
@@ -1587,6 +1590,11 @@ function renderBookOverview(
   }
 }
 
+/**
+ * The Technical Identity Layer's form of one item's provenance (V2-UX-LAYER-006): every source range
+ * it records, exact and unabridged. It is what a provenance list's disclosure holds, one step below
+ * the decision reading `analysisProvenanceSummary` gives the same item.
+ */
 function analysisRanges(ranges: ReadonlyArray<{ blockId: string; fromGrapheme: number | null; toGrapheme: number | null }>): string {
   if (ranges.length === 0) return '无精确范围';
   return ranges.map((range) => range.fromGrapheme === null || range.toGrapheme === null
@@ -1753,16 +1761,24 @@ function renderBaselineAnalysisOverview(
   }
   card.append(element('h4', undefined, `缺口 · ${revision.gaps.length} 处`), gaps);
 
+  // A conflict names its kind in the editor's language (V2-UX-LAYER-003) and its provenance as a block
+  // count; its unit ordinals already stand at full rank beside it, so the summary would only repeat
+  // them. The exact ranges of every conflict sit in the one disclosure below the list.
   const conflicts = element('ul', 'analysis-list analysis-conflict-list');
+  const conflictRanges: HTMLElement[] = [];
   if (revision.conflicts.length === 0) conflicts.append(element('li', undefined, '无冲突'));
   for (const conflict of revision.conflicts) {
     const item = element('li');
+    const kindLabel = ANALYSIS_CONFLICT_KIND_LABELS[conflict.kind];
+    const units = conflict.unitOrdinals.join('、');
     item.dataset['analysisConflictKind'] = conflict.kind;
-    item.append(element('span', undefined, `${conflict.kind} · 单元 ${conflict.unitOrdinals.join('、')} · ${conflict.description} · ${analysisRanges(conflict.sourceRanges)} `));
+    item.append(element('span', undefined, `${kindLabel} · 单元 ${units} · ${conflict.description} · ${analysisBlockCountLabel(conflict.sourceRanges)} `));
     if (conflict.sourceRanges[0] !== undefined) item.append(returnButton(conflict.sourceRanges[0].blockId));
     conflicts.append(item);
+    conflictRanges.push(element('dt', undefined, `${kindLabel} · 单元 ${units}`), element('dd', 'technical-identity', analysisRanges(conflict.sourceRanges)));
   }
   card.append(element('h4', undefined, `冲突 · ${revision.conflicts.length} 处（保持未解决）`), conflicts);
+  if (conflictRanges.length > 0) card.append(technicalDetails('analysis-facts', ...conflictRanges));
 
   const synthesis = element('section', 'analysis-synthesis');
   synthesis.append(
@@ -1770,11 +1786,16 @@ function renderBaselineAnalysisOverview(
     element('p', undefined, revision.synthesis.synopsis.length > 0 ? revision.synthesis.synopsis : '（没有闭合单元可供综合）'),
     element('p', 'field-note', `实体 ${revision.synthesis.entities.length} · 事件 ${revision.synthesis.events.length} · 关系 ${revision.synthesis.relationships.length} · 设定声明 ${revision.synthesis.settingClaims.length} · 未解决事项 ${revision.synthesis.unresolved.length}`),
   );
+  // An entity's provenance reads as its units and how many blocks they cover (V2-UX-LAYER-006); the
+  // identifiers themselves never interrupt the list, they wait one step below it.
   const entities = element('ul', 'analysis-list');
+  const entityRanges: HTMLElement[] = [];
   for (const entity of revision.synthesis.entities) {
-    entities.append(element('li', undefined, `${entity.name}（${entity.kind}${entity.aliases.length > 0 ? `，别名 ${entity.aliases.join('、')}` : ''}）· 来自单元 ${entity.unitOrdinals.join('、')} · ${analysisRanges(entity.sourceRanges)}`));
+    entities.append(element('li', undefined, `${entity.name}（${entity.kind}${entity.aliases.length > 0 ? `，别名 ${entity.aliases.join('、')}` : ''}）· ${analysisProvenanceSummary(entity.unitOrdinals, entity.sourceRanges)}`));
+    entityRanges.push(element('dt', undefined, entity.name), element('dd', 'technical-identity', analysisRanges(entity.sourceRanges)));
   }
   synthesis.append(entities);
+  if (entityRanges.length > 0) synthesis.append(technicalDetails('analysis-facts', ...entityRanges));
   card.append(synthesis);
 
   const units = element('ul', 'analysis-unit-list');
@@ -2220,9 +2241,13 @@ function renderAnalysisHistory(card: HTMLElement, projection: BaselineAnalysisPr
   section.dataset['historyLatestOrdinal'] = String(history.latestOrdinal);
   section.dataset['historyCount'] = String(history.entries.length);
   section.dataset['historyResultSetId'] = history.resultSetId;
+  // How many revisions there are and which one is latest are decisions, not identities: they stay at
+  // full rank, and only the result set's own identity and kind step down into the disclosure.
   section.append(
     element('h4', undefined, 'Analysis Result Revision History / 分析结果修订历史'),
-    element('p', 'field-note technical-identity', `结果集 ${history.resultSetId} · ${history.kind} · ${history.entries.length} 个修订版 · 最新 Revision ${history.latestOrdinal}`),
+    element('p', 'field-note', `${history.entries.length} 个修订版 · 最新 Revision ${history.latestOrdinal}`),
+    technicalDetails('analysis-facts',
+      element('dt', undefined, '结果集'), element('dd', 'technical-identity', `${history.resultSetId} · ${history.kind}`)),
   );
   const open = async (revisionId: string | null): Promise<void> => {
     setStatus(revisionId === null ? '正在返回最新修订版…' : '正在只读打开历史修订版…', 'busy');
@@ -2245,11 +2270,18 @@ function renderAnalysisHistory(card: HTMLElement, projection: BaselineAnalysisPr
     item.dataset['historyCurrent'] = entry.current ? 'true' : 'false';
     item.dataset['historyFreshness'] = entry.freshness;
     item.dataset['historyPredecessorOrdinal'] = entry.predecessor === null ? '' : String(entry.predecessor.ordinal);
+    // What the entry is and what it cost stay at full rank; its identities — the revision's own and
+    // the Run that produced it — travel together in the entry's one disclosure, in the order they read
+    // in before (V2-UX-LAYER-001).
     item.append(
       element('p', undefined, `Revision ${entry.ordinal} · ${entry.modeLabel} · 绑定 ${entry.manuscriptPin.revisionLabel} · ${entry.current ? '当前最新' : '已被取代 · 按原始 pin 保留'} · ${entry.freshnessLabel}`),
-      element('p', 'field-note technical-identity', `${entry.revisionId} · 摘要 ${entry.digest} · 稿件 pin ${entry.manuscriptPin.revisionId} · ${entry.manuscriptPin.revisionDigest}`),
       element('p', 'field-note', `${reuseCountsText(entry.counts)} · 前一修订版 ${entry.predecessor === null ? '无' : `Revision ${entry.predecessor.ordinal}`} · 缺口 ${entry.gapCount} · 冲突 ${entry.conflictCount} · 覆盖 ${entry.unitsClosed}/${entry.unitsTotal}`),
-      element('p', 'field-note technical-identity', `Run ${entry.producingRun.runRecordId} · ${entry.producingRun.classification ?? '无结果'} · ${entry.usage.requests} 次模型请求 · 输入 ${entry.usage.inputTokens} · 输出 ${entry.usage.outputTokens}`),
+      technicalDetails('analysis-facts',
+        element('dt', undefined, '修订版身份'),
+        element('dd', 'technical-identity', `${entry.revisionId} · 摘要 ${entry.digest} · 稿件 pin ${entry.manuscriptPin.revisionId} · ${entry.manuscriptPin.revisionDigest}`),
+        element('dt', undefined, '产出 Run 与用量'),
+        element('dd', 'technical-identity', `Run ${entry.producingRun.runRecordId} · ${entry.producingRun.classification ?? '无结果'} · ${entry.usage.requests} 次模型请求 · 输入 ${entry.usage.inputTokens} · 输出 ${entry.usage.outputTokens}`),
+      ),
     );
     const view = button('查看该修订版（只读）', 'quiet', () => open(entry.revisionId));
     view.dataset['analysisAction'] = 'open-revision';
