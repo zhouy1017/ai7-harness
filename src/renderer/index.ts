@@ -47,13 +47,18 @@ import { mountBoundedEditor, type BoundedEditor, type EditorContinuity } from '.
 import {
   ANALYSIS_CONFLICT_KIND_LABELS,
   analysisBlockCountLabel,
+  analysisKindSubtitle,
   analysisProvenanceSummary,
   attemptStateLabel,
   elapsedLabel,
+  launchPolicyIntegritySentence,
   localInstantLabel,
   providerProcessingLabel,
+  remoteBindingPolicyReading,
+  remoteBindingRowLabel,
   runBudgetCeilingLabel,
   runStepIsStale,
+  taskAuthorizationDispatchNote,
 } from './plan-preview-labels.js';
 
 function requiredElement(selector: string): HTMLElement {
@@ -2325,7 +2330,11 @@ function renderBaselineAnalysis(host: HTMLElement, projection: BaselineAnalysisP
     element('h3', undefined, '基线稿件分析'),
     element('span', `status-pill analysis-state analysis-state-${projection.state}`, projection.stateLabel),
   );
-  card.append(heading, element('p', 'field-note', '一个精确版本化的覆盖式分析种类；远程绑定被 Provider Processing v1 拒绝，结果集修订版不修改稿件。'));
+  // The binding clause reads the launch this Book actually bound: the frozen plan's pin first, then the
+  // pin the latest Revision recorded, and before either exists there is no launch to state.
+  card.append(heading, element('p', 'field-note', analysisKindSubtitle(
+    projection.providerResolutionPlan?.remoteBinding.providerProcessing ?? projection.resultSetRevision?.policyPin ?? null,
+  )));
 
   const refreshLater = (): void => {
     window.setTimeout(async () => {
@@ -2412,7 +2421,8 @@ function renderFrozenAnalysisPlan(card: HTMLElement, projection: BaselineAnalysi
     // How much of the manuscript this Run would cover is what the plan costs, so it reads at full rank.
     element('dt', undefined, '覆盖清单'), element('dd', undefined, `${manifest.units.length} 个分析单元 · ${manifest.sectionCount} 个结构段 · ${manifest.totalBlocks} 个内容块 · ${manifest.totalGraphemes} 字素 · 单元预算 ${manifest.parameters.unitBudgetGraphemes} 字素 · 重叠 ${manifest.parameters.overlapBlocks} 块`),
     element('dt', undefined, '模型角色'), element('dd', undefined, provider.role),
-    element('dt', undefined, '远程绑定（被拒绝）'), element('dd', undefined, `${provider.remoteBinding.providerId} · ${provider.remoteBinding.modelId} · adapter r${provider.remoteBinding.adapterRevision} · config r${provider.remoteBinding.configurationRevision} · 凭据 ${provider.remoteBinding.credentialReadiness} · development-ci · v1 · 0 次实时传输`),
+    element('dt', undefined, remoteBindingRowLabel(provider.remoteBinding.providerProcessing.decision)),
+    element('dd', undefined, `${provider.remoteBinding.providerId} · ${provider.remoteBinding.modelId} · adapter r${provider.remoteBinding.adapterRevision} · config r${provider.remoteBinding.configurationRevision} · 凭据 ${provider.remoteBinding.credentialReadiness} · ${remoteBindingPolicyReading(provider.remoteBinding.providerProcessing)}`),
     element('dt', undefined, '外发数据类别'), element('dd', undefined, provider.outboundDataCategory),
     element('dt', undefined, '任务运行预算上限'), element('dd', undefined, runBudgetCeilingLabel(provider.runBudgetCeiling)),
     element('dt', undefined, '计划版本'), element('dd', undefined, projection.planVersion === null
@@ -2599,7 +2609,7 @@ function renderTaskAuthorization(host: HTMLElement, projection: TaskAuthorizatio
   );
   card.append(
     heading,
-    element('p', 'field-note', '本流程只冻结并记录本次标准直接授权；Provider Processing v1 固定拒绝派发。'),
+    element('p', 'field-note', taskAuthorizationDispatchNote(projection.providerResolutionPlan?.providerProcessing ?? null)),
   );
   if (projection.state === 'available' || (projection.taskIntent !== null && projection.checkpoint === null)) {
     const form = element('section', 'form-row task-authorization-form');
@@ -3273,7 +3283,7 @@ function renderModelServiceSettingsProjection(projection: ModelServiceSettingsPr
     'p',
     projection.launchPolicy.integrityState === 'verified' ? 'success-note' : 'attention-note',
     projection.launchPolicy.integrityState === 'verified'
-      ? '策略完整性：已验证。当前开发与持续集成范围保持零次实时传输。'
+      ? launchPolicyIntegritySentence(projection.launchPolicy.providerProcessing.label)
       : '策略完整性：验证未通过。Provider Processing 保持拒绝，不会进行模型传输。',
   );
   policyIntegrity.dataset['policyIntegrityState'] = projection.launchPolicy.integrityState;

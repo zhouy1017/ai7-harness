@@ -1,7 +1,9 @@
 import type {
   AnalysisConflictProjection,
   AnalysisSourceRangeProjection,
+  LaunchPolicyProjection,
   ProviderProcessingPin,
+  ResultSetPolicyPin,
   RunAttemptState,
   RunBudgetCeilingState,
 } from '../shared/protocol.js';
@@ -23,6 +25,67 @@ export function runBudgetCeilingLabel(ceiling: RunBudgetCeilingState): string {
 export function providerProcessingLabel(pin: ProviderProcessingPin): string {
   const decisionLabel = pin.decision === 'deny' ? '拒绝' : pin.decision;
   return `${pin.operationalScope} · ${pin.version} · ${decisionLabel} · ${pin.authorizedLiveTransmissionCount} 次实时传输`;
+}
+
+/**
+ * The frozen plan's remote-binding reading in the Decision Layer's own phrasing: the scope, the pin
+ * version, and what the pin bounds. `0` is a count and reads as one; `bounded-by-run` is not a count,
+ * so it reads as the bound it is rather than as `bounded-by-run 次实时传输`, which would state a
+ * transmission count no launch ever authorized.
+ */
+export function remoteBindingPolicyReading(pin: ProviderProcessingPin): string {
+  const bound = pin.authorizedLiveTransmissionCount === 'bounded-by-run'
+    ? '受运行边界约束'
+    : `${pin.authorizedLiveTransmissionCount} 次实时传输`;
+  return `${pin.operationalScope} · ${pin.version} · ${bound}`;
+}
+
+/** The frozen plan's remote-binding row label, which states the pin's decision rather than assuming denial. */
+export function remoteBindingRowLabel(decision: ProviderProcessingPin['decision']): string {
+  return decision === 'deny' ? '远程绑定（被拒绝）' : '远程绑定（仅限资格）';
+}
+
+/**
+ * What the authorization flow will and will not do, derived from the plan it froze (V2-UX-LAYER-002):
+ * the named non-effect stays at full rank, but which non-effect is true depends on the launch. Before
+ * a plan exists there is no pin to read, so the sentence states only what the flow itself does — never
+ * a dispatch decision no plan has frozen.
+ */
+export function taskAuthorizationDispatchNote(pin: ProviderProcessingPin | null): string {
+  const flow = '本流程只冻结并记录本次标准直接授权';
+  if (pin === null) return `${flow}。`;
+  return pin.decision === 'deny'
+    ? `${flow}；Provider Processing ${pin.version} 固定拒绝派发。`
+    : `${flow}；Provider Processing ${pin.version} 仅允许运行边界内的实时传输。`;
+}
+
+/**
+ * What the baseline analysis kind is, and what its remote binding may do under the launch that bound
+ * it. The frozen plan's pin is the truth when a plan exists; a Book that only holds a Result Set
+ * Revision reads the pin that Revision recorded, where the policy's own bound (`liveTransmissions`)
+ * carries the decision. With neither, the clause is dropped rather than guessed: the two facts that
+ * hold in every state — the kind and that a Revision does not modify the manuscript — still read.
+ */
+export function analysisKindSubtitle(policy: ProviderProcessingPin | ResultSetPolicyPin | null): string {
+  const kind = '一个精确版本化的覆盖式分析种类';
+  const revision = '结果集修订版不修改稿件';
+  if (policy === null) return `${kind}；${revision}。`;
+  const version = 'version' in policy ? policy.version : policy.providerProcessingVersion;
+  const denied = 'decision' in policy ? policy.decision === 'deny' : policy.liveTransmissions === 0;
+  return denied
+    ? `${kind}；远程绑定被 Provider Processing ${version} 拒绝，${revision}。`
+    : `${kind}；远程绑定在 Provider Processing ${version} 下仅限资格，${revision}。`;
+}
+
+/**
+ * The launch integrity sentence of the model-service settings, derived from the launch the projection
+ * carries: the scope and the bound it holds are the two halves of the Provider Processing label, so a
+ * `developer-live` launch never reads a sentence written for `development-ci`. The parameter is that
+ * label's closed union, and both of its members carry the `：` the halves are taken around.
+ */
+export function launchPolicyIntegritySentence(label: LaunchPolicyProjection['providerProcessing']['label']): string {
+  const separator = label.indexOf('：');
+  return `策略完整性：已验证。当前${label.slice(0, separator)}范围保持${label.slice(separator + 1)}。`;
 }
 
 /**
