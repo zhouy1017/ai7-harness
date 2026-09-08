@@ -250,6 +250,28 @@ describe('model capability profiles', () => {
     expect(OPENCODE_GO_V4_PRO_PROFILE.capabilities).not.toEqual(DEEPSEEK_V4_PRO_PROFILE.capabilities);
   });
 
+  it('declares each active model as one exact combination of the six capabilities', () => {
+    expect(DEEPSEEK_V4_PRO_PROFILE.capabilities).toEqual({
+      requestShape: 'openai-chat-completions',
+      // The production body's `thinking` plus `reasoning_effort`, which is all `bodyPolicy` ever meant.
+      reasoningControl: 'deepseek-thinking',
+      structuredOutput: 'none',
+      answerChannel: 'message-content-string',
+      // This route has never transmitted, so nothing about how it answers has been observed.
+      reasoningChannel: 'none',
+      usageAttribution: 'unknown',
+    });
+    expect(OPENCODE_GO_V4_FLASH_PROFILE.capabilities).toEqual({
+      requestShape: 'openai-chat-completions',
+      // No DeepSeek-specific parameter travels to the gateway until one is observed accepted.
+      reasoningControl: 'none',
+      structuredOutput: 'none',
+      answerChannel: 'message-content-string',
+      reasoningChannel: 'message-reasoning-content',
+      usageAttribution: 'includes-reasoning',
+    });
+  });
+
   it('declares no structured output for either current profile, because nothing has observed one accepted', () => {
     expect(DEEPSEEK_V4_PRO_PROFILE.capabilities.structuredOutput).toBe('none');
     expect(OPENCODE_GO_V4_FLASH_PROFILE.capabilities.structuredOutput).toBe('none');
