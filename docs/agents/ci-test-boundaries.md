@@ -37,7 +37,7 @@ Under [ADR 0062](../adr/0062-adopt-a-local-verification-ladder-with-ci-as-delive
 
 | Layer | Command | Status |
 | --- | --- | --- |
-| L0 type check | `pnpm run check` (`tsc --noEmit`, including `tests/**`, full diagnostics on the developer host) | Available |
+| L0 type check | `pnpm run check` (`tsc --noEmit`, including `tests/**`, full diagnostics on the developer host, then `node --check` over every tracked `e2e/*.mjs` and `tools/*.mjs`) | Available |
 | L1 unit tests | `pnpm test` (vitest over `tests/unit`) | Available |
 | L2 service-integration tests | `pnpm run test:service` (vitest over the service stores on a temporary data root and SQLite database, without Electron) | Available; provider-free, and its task-authorization and baseline-analysis suites consume only the ADR 0043-admitted `SampleBooks/sample1.docx` plus the hand-written synthetic model fixtures under `tests/fixtures/model/` |
 | L3 build | `pnpm run build` | Available |
