@@ -16,6 +16,15 @@
         "message": "Synthetic transient model-service server error for Analysis Unit 5 on attempt 1 (fixture shape vi).",
         "status": 503
       }
+    },
+    {
+      "unitOrdinal": 0,
+      "requestDigest": "b5b0d47b071e3daaea61e25c547aef2ef1ae92a0f18c6e2b69ed80c17010a4d5",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.analysis.run-report-reflection-result/1\",\"items\":[{\"suggestion\":\"对触发过安全重试的单元，下一次运行可以先缩小单元规模或延长首轮等待，减少重试。\",\"basis\":\"本次记录了 1 次计划内调整，该单元在安全重试后的第 2 次尝试才闭合。\"},{\"suggestion\":\"以适配器失败闭合的单元建议下一轮单独重算一次，再决定是否整本重算。\",\"basis\":\"8 个提交单元中有 1 个以 adapter-failure 闭合，且它没有触发安全重试。\"},{\"suggestion\":\"把两次尝试的用量都计入单元预算，不要只按一次尝试估算。\",\"basis\":\"单元阶段的请求数比提交单元数多 1，多出的正是那一次安全重试。\"}]}",
+        "usage": { "inputTokens": 920, "outputTokens": 220 }
+      }
     }
   ]
 }

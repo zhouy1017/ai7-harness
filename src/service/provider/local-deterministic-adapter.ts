@@ -14,6 +14,11 @@ import {
   parseCrossUnitMessageHeader,
 } from '../analysis/cross-unit-contract.js';
 import { parseFactualReviewUnitMessageHeader } from '../analysis/factual-review-contract.js';
+import {
+  RUN_REPORT_REFLECTION_PROMPT_CONTRACT_DIGEST,
+  parseRunReportReflectionMessageHeader,
+  runReportReflectionRequestDigest,
+} from '../analysis/run-report-contract.js';
 import { AI7_FAILURE_CODES, type DshFailureCodes } from './classification.js';
 import { LOCAL_DETERMINISTIC_MODEL, LOCAL_DETERMINISTIC_ROUTE } from './egress-gate.js';
 import { lastUserMessageText } from './payload.js';
@@ -47,6 +52,12 @@ import { fixtureEntryKey, resolveFixtureEntry, type ModelFixtureEntry, type Reso
  * ranges of two units without a fixture author ever knowing a minted identity. Content-digest mode
  * keys entries by a unit's own block texts, which the reduction has none of, so it never answers
  * there; that mode exists for `tests/` and the reduction simply records a gap under it.
+ *
+ * The Run Report's one reflection turn (S44) is matched the same way under unit ordinal `0`: its
+ * header names the Run and carries the digest of that Run's own accounting, and its request digest is
+ * a function of the frozen reflection contract and that accounting alone. Its responses need no
+ * placeholder — the request carried no block and no finding, so the answer can name none — and
+ * content-digest mode never answers one, for the same reason it never answers the other two.
  *
  * Each assurance sampling turn (S43) is matched the same way under unit ordinal `0`: its header names
  * the anchor unit and carries that unit's content digest and the digest of the findings the turn
@@ -196,45 +207,61 @@ export class Ai7LocalDeterministicAdapter implements LlmAdapter {
     // kind's contract digest, which the adapter was constructed with.
     const crossUnit = text === null ? null : parseCrossUnitMessageHeader(text);
     const sampling = text === null || crossUnit !== null ? null : parseAssuranceSamplingMessageHeader(text);
-    const header = text === null || crossUnit !== null || sampling !== null
+    const reflection = text === null || crossUnit !== null || sampling !== null
+      ? null
+      : parseRunReportReflectionMessageHeader(text);
+    const header = text === null || crossUnit !== null || sampling !== null || reflection !== null
       ? null
       : parseUnitMessageHeader(text) ?? parseFactualReviewUnitMessageHeader(text);
-    if (crossUnit === null && sampling === null && header === null) {
+    if (crossUnit === null && sampling === null && reflection === null && header === null) {
       yield failure(AI7_FAILURE_CODES.FIXTURE_MISMATCH, '请求不含可识别的分析单元消息头。');
       return;
     }
     // Ordinal 0 is not a unit: it is the reduction's entry, keyed by the closed unit set its header
-    // names, or a sampling turn's, keyed by the anchor unit and the findings its header names. The two
-    // cannot collide, because each digest is taken over its own contract digest and its own key set.
-    const ordinal = crossUnit === null && sampling === null ? header!.ordinal : 0;
+    // names, a sampling turn's, keyed by the anchor unit and the findings its header names, or the Run
+    // Report reflection's, keyed by the Run's own accounting. None can collide, because each digest is
+    // taken over its own frozen contract digest as well as its own key set.
+    const ordinal = crossUnit === null && sampling === null && reflection === null ? header!.ordinal : 0;
     const expectedDigest = crossUnit !== null
       ? crossUnitRequestDigest(BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST, crossUnit.unitSetDigest)
       : sampling !== null
         ? assuranceSamplingRequestDigest(ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST, sampling.unitOrdinal, sampling.unitDigest, sampling.sampleDigest)
-        : this.#resolveBy === 'content-digest'
-          ? unitContentDigest(ownBlockTextsOf(text!))
-          : unitRequestDigest(this.#promptContractDigest, header!.ordinal, header!.unitDigest);
+        : reflection !== null
+          ? runReportReflectionRequestDigest(RUN_REPORT_REFLECTION_PROMPT_CONTRACT_DIGEST, reflection.accountingDigest)
+          : this.#resolveBy === 'content-digest'
+            ? unitContentDigest(ownBlockTextsOf(text!))
+            : unitRequestDigest(this.#promptContractDigest, header!.ordinal, header!.unitDigest);
     const pairKey = fixtureEntryKey(ordinal, expectedDigest);
     const attempt = (this.#servedByKey.get(pairKey) ?? 0) + 1;
     this.#servedByKey.set(pairKey, attempt);
     const entry = resolveFixtureEntry(this.#entries, ordinal, expectedDigest, attempt);
     if (entry === undefined) {
-      const named = crossUnit !== null || sampling !== null;
+      const named = crossUnit !== null || sampling !== null || reflection !== null;
       const label = !named && this.#resolveBy === 'content-digest' ? '内容摘要' : '请求摘要';
-      const subject = crossUnit !== null ? '跨单元归纳' : sampling !== null ? `单元 ${sampling.unitOrdinal} 的保证抽样` : `单元 ${ordinal}`;
-      yield failure(AI7_FAILURE_CODES.FIXTURE_MISMATCH, `夹具 ${this.#fixture.identity} 没有${subject}在当前${label}下的对应响应。`);
+      const subject = crossUnit !== null ? '跨单元归纳'
+        : sampling !== null ? `单元 ${sampling.unitOrdinal} 的保证抽样`
+          : reflection !== null ? '运行反思'
+            : `单元 ${ordinal}`;
+      // The reflection's key is the Run's own accounting and nothing minted, so naming it here is
+      // what lets a fixture author add the one missing entry without re-deriving anything.
+      const key = reflection === null ? '' : `（账目摘要 ${reflection.accountingDigest}）`;
+      yield failure(AI7_FAILURE_CODES.FIXTURE_MISMATCH, `夹具 ${this.#fixture.identity} 没有${subject}${key}在当前${label}下的对应响应。`);
       return;
     }
     const response = entry.response;
     switch (response.kind) {
       case 'unit-result': {
         // A sampling response names each finding by `{{ref:N}}` — the N-th finding its turn listed —
-        // because the factual kind mints a `findingId` per import and a fixture cannot know one.
-        const replay = sampling !== null
-          ? substituteAssuranceSamplingRefPlaceholders(response.text, parseAssuranceSamplingListedRefs(text!))
-          : crossUnit === null
-            ? substituteBlockPlaceholders(response.text, ownBlockIdsOf(text!))
-            : substituteCrossUnitBlockPlaceholders(response.text, parseCrossUnitCitedBlocks(text!));
+        // because the factual kind mints a `findingId` per import and a fixture cannot know one. A
+        // reflection response needs no placeholder at all: it names no finding and no block, because
+        // its request carried neither.
+        const replay = reflection !== null
+          ? response.text
+          : sampling !== null
+            ? substituteAssuranceSamplingRefPlaceholders(response.text, parseAssuranceSamplingListedRefs(text!))
+            : crossUnit === null
+              ? substituteBlockPlaceholders(response.text, ownBlockIdsOf(text!))
+              : substituteCrossUnitBlockPlaceholders(response.text, parseCrossUnitCitedBlocks(text!));
         yield { type: 'block-start', index: 0, blockType: 'text' };
         yield { type: 'text-delta', index: 0, text: replay };
         yield { type: 'block-end', index: 0, block: { type: 'text', text: replay } };

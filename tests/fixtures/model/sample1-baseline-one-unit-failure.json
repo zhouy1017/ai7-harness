@@ -1,7 +1,7 @@
 {
   "schema": "ai7.model-fixture/1",
   "identity": "sample1-baseline-one-unit-failure",
-  "description": "Hand-written synthetic shape (ii) layered over shape (i): identical to sample1-baseline-happy except that Analysis Unit 2 answers with an adapter failure, which the Run must persist as an exact gap. The J-04 journey and the L2 suite consume this composite fixture. Two unit-ordinal-0 entries answer the cross-unit reduction over the two closed sets a Run reaches once unit 2 is a gap: the seven units with unit 1 as first analysed, and the same seven after J-04's acknowledged edit recomputes unit 1. sample1-baseline-transient-retry settles unit 5 to the same result and therefore reaches these same two sets, so it inherits both entries and restates neither. Public synthetic text only; no manuscript content.",
+  "description": "Hand-written synthetic shape (ii) layered over shape (i): identical to sample1-baseline-happy except that Analysis Unit 2 answers with an adapter failure, which the Run must persist as an exact gap. The J-04 journey and the L2 suite consume this composite fixture. Two unit-ordinal-0 entries answer the cross-unit reduction over the two closed sets a Run reaches once unit 2 is a gap: the seven units with unit 1 as first analysed, and the same seven after J-04's acknowledged edit recomputes unit 1. sample1-baseline-transient-retry reaches the same two sets and inherits both. Four further unit-ordinal-0 entries answer the Run Report reflection turn, one per distinct accounting J-04's four Runs on this fixture produce: the first baseline, sync-current, the range reanalysis, and the whole-Book reanalysis; each is keyed by that Run's accounting digest, a function of counts, codes, and usage alone. Public synthetic text only; no manuscript content and no finding text.",
   "basedOn": "sample1-baseline-happy",
   "provider": "ai7-local-deterministic",
   "model": "ai7-deterministic-fixture",
@@ -32,6 +32,42 @@
         "kind": "unit-result",
         "text": "{\"schema\":\"ai7.baseline-manuscript-analysis.cross-unit-result/1\",\"findings\":[{\"kind\":\"chronology-conflict\",\"description\":\"合成时序冲突：单元 1 把人物甲抵达合成之城记为「开端」，单元 3 让人物乙回望该城却不给出时序，两处对同一段行程的先后无法同时成立。\",\"sides\":[{\"unitOrdinal\":1,\"sourceRanges\":[{\"blockId\":\"{{unit:1:block:2}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"unitOrdinal\":3,\"sourceRanges\":[{\"blockId\":\"{{unit:3:block:2}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]}],\"confidence\":\"medium\"},{\"kind\":\"continuity-break\",\"description\":\"合成连续性断裂：单元 1 让人物甲抵达合成之城之后，单元 3 只写人物乙的视角，未交代人物甲的去向。\",\"sides\":[{\"unitOrdinal\":1,\"sourceRanges\":[{\"blockId\":\"{{unit:1:block:2}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"unitOrdinal\":3,\"sourceRanges\":[{\"blockId\":\"{{unit:3:block:2}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]}],\"confidence\":\"low\"}],\"notes\":[\"合成备注：其余单元未再提及这两处。\"]}",
         "usage": { "inputTokens": 2000, "outputTokens": 300 }
+      }
+    },
+    {
+      "unitOrdinal": 0,
+      "requestDigest": "beadd216031f094e1f6add8140c942cd915d78a11629d96973aaa28fb48a1c5f",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.analysis.run-report-reflection-result/1\",\"items\":[{\"suggestion\":\"下一次运行先单独重算以适配器失败闭合的那个单元，闭合后再发起跨单元归纳。\",\"basis\":\"本次提交 8 个单元，其中 1 个以 adapter-failure 闭合，跨单元归纳只看到 7 个已闭合单元。\"},{\"suggestion\":\"对估计精度为 0.00 的发现层级降低信任，下一轮优先复核该层级。\",\"basis\":\"保证抽样共判定 2 条，其中 low 层级 1 条判定为需降级，该层级估计精度为 0.00。\"},{\"suggestion\":\"维持当前单元预算：本次没有单元因规模触发重试。\",\"basis\":\"计划内调整次数为 0，每个提交单元都只用了一次尝试。\"}]}",
+        "usage": { "inputTokens": 900, "outputTokens": 210 }
+      }
+    },
+    {
+      "unitOrdinal": 0,
+      "requestDigest": "7b0e5f7ad72982c225f7812c6096222e1d810db6be5bcc69eea3ed5ec3a7a59a",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.analysis.run-report-reflection-result/1\",\"items\":[{\"suggestion\":\"同步运行前先单独处理上一版遗留的缺口单元，避免它在新一轮里再次成为缺口。\",\"basis\":\"本次复用 6 个单元、重算 2 个，重算后仍有 1 个单元以缺口闭合。\"},{\"suggestion\":\"复用比例已经很高，可把单元预算集中给需要重算的单元。\",\"basis\":\"8 个单元中 6 个按血缘复用，只有 2 个单元产生了传输。\"}]}",
+        "usage": { "inputTokens": 860, "outputTokens": 180 }
+      }
+    },
+    {
+      "unitOrdinal": 0,
+      "requestDigest": "146651af4d337a6ea9c695a3608105bc2b5bd2715d2d7878340d9660db168b11",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.analysis.run-report-reflection-result/1\",\"items\":[{\"suggestion\":\"所选范围下一次可以再向前扩一个单元，让重算集合完整覆盖仍是缺口的那个单元的上下文。\",\"basis\":\"本次按范围重算 3 个单元、复用 5 个，重算集合内仍有 1 个单元以缺口闭合。\"},{\"suggestion\":\"范围运行的抽样规模偏小，下一轮可在范围外也抽取候选以稳定估计精度。\",\"basis\":\"本次候选发现与抽样条数都很少，各层级的估计精度只由个位数的判定得出。\"}]}",
+        "usage": { "inputTokens": 880, "outputTokens": 190 }
+      }
+    },
+    {
+      "unitOrdinal": 0,
+      "requestDigest": "febb575449d202394e4d8ffe012453d53fd276082a8d785831347c387b19b192",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.analysis.run-report-reflection-result/1\",\"items\":[{\"suggestion\":\"全书重算下一次可先只重算上一版的缺口单元，确认其能闭合后再整本重算。\",\"basis\":\"本次重算了全部 8 个单元，仍有 1 个单元以 adapter-failure 闭合，其余 7 个的结论与上一版一致。\"},{\"suggestion\":\"整本重算的用量集中在单元阶段，下一轮可据此估算单元预算。\",\"basis\":\"各阶段用量中单元阶段的请求数等于提交单元数，归纳与抽样各只有个位数请求。\"}]}",
+        "usage": { "inputTokens": 910, "outputTokens": 200 }
       }
     }
   ]

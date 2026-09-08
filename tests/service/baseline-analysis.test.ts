@@ -507,6 +507,22 @@ describe('baseline manuscript analysis over the real store on exact sample1', ()
       expect(reportDigest).toBe(runReportDigest(body));
       expect(report.accountingDigest).toBe(runReportAccountingDigest(runReportAccountingOf(body)));
       expect(JSON.stringify(runReportAccountingOf(body))).not.toContain('wallMs');
+      // The reflection turn closed from its fixture entry, and cost the report alone: it dispatched
+      // after the revision was persisted, so the revision's own request count is untouched by it.
+      expect(report.ifRedone.state).toBe('closed');
+      expect(report.ifRedone.items.length).toBeGreaterThan(0);
+      expect(report.ifRedone.reason).toBeNull();
+      expect(report.usagePerStage['run-report-reflection'].requests).toBe(1);
+      expect(revision.usage.requests).toBe(SAMPLE1_UNITS + 1 + 1);
+      // No item names a block, a finding, or a quotation: the message carried none of the three.
+      for (const item of report.ifRedone.items) {
+        expect(item.suggestion).not.toMatch(/blk_[0-9a-f]{24}/u);
+        expect(item.basis).not.toMatch(/blk_[0-9a-f]{24}/u);
+        for (const finding of revision.crossUnitFindings) {
+          expect(item.suggestion).not.toContain(finding.description);
+          expect(item.basis).not.toContain(finding.description);
+        }
+      }
       reportJson = canonicalJson(report);
       expect(settled.actions).toEqual({ canPrepare: false, canAuthorize: false, canReconfirmPlan: false });
       store.markCleanShutdown();

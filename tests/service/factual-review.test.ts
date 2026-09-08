@@ -25,6 +25,7 @@ import {
   type FactualReviewProjection,
   type LaunchPolicyProjection,
 } from '../../src/shared/protocol.js';
+import { runReportUsageReconciles } from '../../src/service/analysis/run-report.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import {
   SAMPLE1_UNITS,
@@ -172,6 +173,26 @@ describe('factual review over the real store on exact sample1', () => {
       ]);
       expect(revision.reducerClosure.state).toBe('closed');
       expect(revision.assurance.statement).toBe(FACTUAL_REVIEW_ASSURANCE_STATEMENT);
+
+      // The Run Report is recorded for this kind too (Issue #276), from the same facts and with the
+      // same reconciliation; the reflection closes from this fixture's own ordinal-0 entry.
+      const report = settled.taskOutcome!.report!;
+      expect(settled.taskOutcome!.reportAbsentReason).toBeNull();
+      expect(runReportUsageReconciles(report, revision.usage)).toBe(true);
+      expect(report.units).toEqual({ submitted: SAMPLE1_UNITS, reused: 0, recomputed: SAMPLE1_UNITS, gaps: 0, retried: 0 });
+      expect(report.failures).toEqual([]);
+      // The factual kind declares no cross-unit reduction, so that stage never ran and cost nothing.
+      expect(report.stages.map((stage) => [stage.stage, stage.state])).toEqual([
+        ['units', 'closed'], ['cross-unit-reduction', 'not-run'], ['assurance-sampling', 'closed'], ['reduction', 'closed'],
+      ]);
+      expect(report.usagePerStage['cross-unit-reduction']).toEqual({ requests: 0, inputTokens: 0, outputTokens: 0 });
+      // The counts name this kind's own finding classes — severity tiers and exclusion reasons — and
+      // carry no quotation, question, or block identity with them.
+      expect(report.findingCounts.every((entry) => entry.kind.startsWith('finding:') || entry.kind.startsWith('excluded:'))).toBe(true);
+      for (const finding of revision.findings) expect(JSON.stringify(report)).not.toContain(finding.quote);
+      expect(report.ifRedone.state).toBe('closed');
+      expect(report.ifRedone.items.length).toBeGreaterThan(0);
+      expect(report.usagePerStage['run-report-reflection'].requests).toBe(1);
 
       // Issue #275: the sample closed over every located finding — twenty is under the default thirty —
       // drawn in one stratum, because exact sample1 is one structural section.
