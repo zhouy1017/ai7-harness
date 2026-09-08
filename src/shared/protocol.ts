@@ -1069,13 +1069,15 @@ export interface TaskAuthorizationProjection {
   executionPlan: null | {
     steps: readonly ['分析结构', '分析叙事连贯性', '形成编辑复核重点'];
     effects: readonly [];
-    stopCondition: 'Provider Processing v1 denies dispatch';
+    /** Derived from the Provider Processing pin the plan froze; `Provider Processing v1 denies dispatch` under `development-ci`. */
+    stopCondition: string;
   };
   planEnvelope: null | {
     digest: string;
     providerStatus: 'denied';
     dispatchAllowed: false;
-    summary: '计划已冻结；Provider Processing v1 拒绝派发';
+    /** Derived from the same pin; `计划已冻结；Provider Processing v1 拒绝派发` under `development-ci`. */
+    summary: string;
   };
   authorization: null | {
     authorizationId: string;
@@ -1113,11 +1115,8 @@ export interface ForegroundExecutionBoundaryProjection {
   launchPolicy: LaunchPolicyProjection;
   requiresNewPlanEnvelope: true;
   requiresRenewedRunAuthorization: true;
-  reasons: readonly [
-    '现有 Run 权限仅为 record-only-no-dispatch，不能派发。',
-    '当前可信启动范围为 development-ci，Provider Processing v1 允许 0 次实时传输。',
-    '生产或录制尝试必须创建新 Plan Envelope 并重新记录 Run Authorization。'
-  ];
+  /** Exactly three reasons; only the middle one is derived from the launch's own Provider Processing pin. */
+  reasons: readonly [string, string, string];
 }
 
 // ---- J-04 covered baseline manuscript analysis (Issue #92) ----------------------------------------
