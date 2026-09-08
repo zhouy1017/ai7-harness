@@ -3,20 +3,23 @@ import { canonicalJson, isRecord, sha256Hex } from '../analysis/canonical.js';
 import { AI7_FAILURE_CODES, type DshFailureCodes } from './classification.js';
 import type { CredentialBroker, CredentialSlotBinding } from './credential-broker.js';
 import {
-  DEEPSEEK_MODEL,
   DEEPSEEK_ROUTE,
-  OPENCODE_GO_MODEL,
   OPENCODE_GO_ROUTE,
   type CredentialSlot,
   type RemoteExecutionRoute,
   type TransmitTicket,
 } from './egress-gate.js';
+import { DEEPSEEK_V4_PRO_PROFILE, type ProviderModelProfile } from './model-profile.js';
 import { messageText, type AssembledModelPayload } from './payload.js';
+import { normalizeModelResponse, type CanonicalModelResult } from './response-normalization.js';
 
 /**
  * The AI7-owned OpenAI-compatible Provider adapter, revision 1. One adapter serves both remote
- * routes; a route profile — endpoint, model, credential slot, header policy, and body policy — is the
- * only thing that differs between them. `deepseek-open-platform` is the unchanged production route
+ * routes, composed from two profiles: a **route profile** — endpoint, credential slot, header
+ * policy, limit reading — says how to reach a model, and a **model profile**
+ * (`./model-profile.ts`) says how to speak to one. They are separate because one route serves many
+ * models, so a model's capabilities cannot hang off the route that carries it.
+ * `deepseek-open-platform` is the unchanged production route
  * (`POST https://api.deepseek.com/chat/completions`, model `deepseek-v4-pro`, thinking enabled at
  * high reasoning effort). `opencode-go` is the developer-live route of Provider Processing v4
  * (`POST https://opencode.ai/zen/go/v1/chat/completions`, bare model id `deepseek-v4-flash`, a
@@ -40,17 +43,15 @@ export const OPENCODE_GO_SESSION_HEADER = 'x-opencode-session' as const;
 export const OPENCODE_GO_USER_AGENT = 'AI7-Harness/1.0 (developer-live)' as const;
 
 /**
- * One remote route's complete request policy. `bodyPolicy` is the whole difference between the two
- * bodies: `deepseek-thinking` adds `thinking` and `reasoning_effort`, `openai-chat-completions` sends
- * the standard fields only, because the gateway's acceptance of DeepSeek-specific parameters is
- * unverified and the Brief forbids sending them until the smoke run proves otherwise.
+ * How one remote route is reached: everything that is true of the route whichever model it carries.
+ * What differs between models — the body shape, the reasoning parameters, the channels a response is
+ * read from — is declared by a `ProviderModelProfile` instead, because the `opencode-go` gateway
+ * serves seven vendors' models through this one route (ADR 0067).
  */
 export interface ProviderRouteProfile {
   readonly route: RemoteExecutionRoute;
   readonly endpoint: string;
-  readonly model: string;
   readonly credentialSlot: CredentialSlot;
-  readonly bodyPolicy: 'deepseek-thinking' | 'openai-chat-completions';
   /**
    * How a rate-limit-shaped response is read. The production route keeps `429 → RATE_LIMIT`, which is
    * retry-safe. On the developer-live route a 429, a 402, or a body naming the usage limit is one
@@ -64,33 +65,26 @@ export interface ProviderRouteProfile {
   /** Whether the request carries the technical Session id in `x-opencode-session`. */
   readonly sessionHeader: boolean;
   readonly displayName: string;
-  readonly modelDisplayName: string;
 }
 
 export const DEEPSEEK_ROUTE_PROFILE: ProviderRouteProfile = {
   route: DEEPSEEK_ROUTE,
   endpoint: DEEPSEEK_ENDPOINT,
-  model: DEEPSEEK_MODEL,
   credentialSlot: 'deepseek-api-key',
-  bodyPolicy: 'deepseek-thinking',
   limitPolicy: 'rate-limit-retryable',
   dshAttribution: true,
   sessionHeader: false,
   displayName: 'DeepSeek 开放平台（官方）',
-  modelDisplayName: 'DeepSeek V4 Pro High',
 };
 
 export const OPENCODE_GO_ROUTE_PROFILE: ProviderRouteProfile = {
   route: OPENCODE_GO_ROUTE,
   endpoint: OPENCODE_GO_ENDPOINT,
-  model: OPENCODE_GO_MODEL,
   credentialSlot: 'opencode-go',
-  bodyPolicy: 'openai-chat-completions',
   limitPolicy: 'account-limit-terminal',
   dshAttribution: false,
   sessionHeader: true,
   displayName: 'OpenCode Go（开发者实时）',
-  modelDisplayName: 'DeepSeek V4 Flash',
 };
 
 export const PROVIDER_ROUTE_PROFILES: Readonly<Record<RemoteExecutionRoute, ProviderRouteProfile>> = {
@@ -116,12 +110,25 @@ export interface ProviderRequestContext {
   readonly sessionId?: string;
 }
 
-/** Assemble one route's request. The body policy and the header set come from the profile and nothing else. */
+/**
+ * Assemble one request. The header set comes from the route profile, the body from the model
+ * profile's declared capabilities, and nothing is read from anywhere else — which is what makes a
+ * new model a new row in the profile table rather than a new branch here.
+ *
+ * The two shapes ADR 0067 documents behind the Go gateway's other paths refuse rather than guess, as
+ * does any structured-output constraint: no capability may put a byte on the wire that nothing has
+ * yet observed the model accept. Requiring a JSON answer is Issue #306's, and it starts by changing
+ * a model profile's `structuredOutput`, not by editing this function.
+ */
 export function assembleProviderRequest(
   profile: ProviderRouteProfile,
+  model: ProviderModelProfile,
   payload: AssembledModelPayload,
   context: ProviderRequestContext,
 ): DeepSeekRequestAssembly {
+  if (model.route !== profile.route) throw new Error('PROVIDER_MODEL_ROUTE_MISMATCH');
+  if (model.capabilities.requestShape !== 'openai-chat-completions') throw new Error('PROVIDER_REQUEST_SHAPE_UNSUPPORTED');
+  if (model.capabilities.structuredOutput !== 'none') throw new Error('PROVIDER_STRUCTURED_OUTPUT_UNSUPPORTED');
   const messages: Array<{ role: string; content: string }> = [];
   if (payload.system !== undefined && payload.system.length > 0) messages.push({ role: 'system', content: payload.system });
   for (const message of payload.messages) {
@@ -131,10 +138,10 @@ export function assembleProviderRequest(
     messages.push({ role: message.role, content: text });
   }
   const body = canonicalJson({
-    model: profile.model,
+    model: model.model,
     messages,
     stream: false,
-    ...(profile.bodyPolicy === 'deepseek-thinking'
+    ...(model.capabilities.reasoningControl === 'deepseek-thinking'
       ? { thinking: { type: 'enabled' }, reasoning_effort: DEEPSEEK_REASONING_EFFORT }
       : {}),
   });
@@ -162,27 +169,21 @@ export function assembleDeepSeekRequest(
   attribution: Readonly<Record<string, string>>,
   promptContractDigest: string,
 ): DeepSeekRequestAssembly {
-  return assembleProviderRequest(DEEPSEEK_ROUTE_PROFILE, payload, { attribution, promptContractDigest });
+  return assembleProviderRequest(DEEPSEEK_ROUTE_PROFILE, DEEPSEEK_V4_PRO_PROFILE, payload, { attribution, promptContractDigest });
 }
 
 export function authorizationHeader(secret: string): Readonly<Record<string, string>> {
   return { authorization: `Bearer ${secret}` };
 }
 
-export interface DeepSeekUsage {
-  readonly inputTokens: number;
-  readonly outputTokens: number;
-  readonly cacheReadTokens?: number;
-  readonly reasoningTokens?: number;
-}
-
-export type DeepSeekParsedResponse =
-  | { readonly kind: 'success'; readonly text: string; readonly reasoningText: string | null; readonly usage: DeepSeekUsage | null }
+/**
+ * One response as everything above the adapter may see it: either this route's transport-level
+ * failure, or the canonical result the model profile's declared channels yielded. No caller learns
+ * the vendor's body shape, and none of them ever receives an empty answer disguised as an answer.
+ */
+export type ProviderResponseOutcome =
+  | CanonicalModelResult
   | { readonly kind: 'failure'; readonly code: string; readonly message: string; readonly status: number };
-
-function nonNegativeInteger(value: unknown): number | null {
-  return Number.isSafeInteger(value) && (value as number) >= 0 ? (value as number) : null;
-}
 
 /** The error text of one response, lowercased, for the limit and context-window shapes to be read from. */
 function errorTextOf(body: unknown): string {
@@ -203,13 +204,18 @@ export function isProviderAccountLimit(profile: ProviderRouteProfile, status: nu
   return profile.limitPolicy === 'account-limit-terminal' && status === 429;
 }
 
-/** Parse one OpenAI-compatible completion response into the closed AI7 signal set. */
-export function parseDeepSeekResponse(
+/**
+ * Read one response: first the status, which is the route's to classify, then the body, which is the
+ * model profile's. The split matters — a 429 means the same thing whichever model answered it, while
+ * where the answer text lives is a property of the model alone.
+ */
+export function parseProviderResponse(
   status: number,
   body: unknown,
   codes: DshFailureCodes,
-  profile: ProviderRouteProfile = DEEPSEEK_ROUTE_PROFILE,
-): DeepSeekParsedResponse {
+  profile: ProviderRouteProfile,
+  model: ProviderModelProfile,
+): ProviderResponseOutcome {
   const errorText = errorTextOf(body);
   if (status === 401 || status === 403) return { kind: 'failure', code: codes.INVALID_CREDENTIAL_CODE, message: '模型服务拒绝了凭据。', status };
   if (isProviderAccountLimit(profile, status, body)) {
@@ -221,32 +227,7 @@ export function parseDeepSeekResponse(
   }
   if (status >= 500) return { kind: 'failure', code: AI7_FAILURE_CODES.PROVIDER_ERROR, message: '模型服务返回服务端错误。', status };
   if (status !== 200) return { kind: 'failure', code: AI7_FAILURE_CODES.INVALID_RESPONSE, message: '模型服务返回了无法分类的状态。', status };
-  if (!isRecord(body) || !Array.isArray(body.choices) || body.choices.length === 0 || !isRecord(body.choices[0]) ||
-      !isRecord(body.choices[0].message) || typeof body.choices[0].message.content !== 'string') {
-    return { kind: 'failure', code: AI7_FAILURE_CODES.INVALID_RESPONSE, message: '模型服务响应不含可用内容。', status };
-  }
-  const message = body.choices[0].message;
-  const content = message.content;
-  if (typeof content !== 'string') return { kind: 'failure', code: AI7_FAILURE_CODES.INVALID_RESPONSE, message: '模型服务响应不含可用内容。', status };
-  const reasoning = typeof message.reasoning_content === 'string' ? message.reasoning_content : null;
-  let usage: DeepSeekUsage | null = null;
-  if (isRecord(body.usage)) {
-    const promptTokens = nonNegativeInteger(body.usage.prompt_tokens);
-    const completionTokens = nonNegativeInteger(body.usage.completion_tokens);
-    const cacheHit = nonNegativeInteger(body.usage.prompt_cache_hit_tokens) ?? 0;
-    const reasoningTokens = isRecord(body.usage.completion_tokens_details)
-      ? nonNegativeInteger(body.usage.completion_tokens_details.reasoning_tokens)
-      : null;
-    if (promptTokens !== null && completionTokens !== null) {
-      usage = {
-        inputTokens: Math.max(0, promptTokens - cacheHit),
-        outputTokens: completionTokens,
-        ...(cacheHit > 0 ? { cacheReadTokens: cacheHit } : {}),
-        ...(reasoningTokens === null ? {} : { reasoningTokens }),
-      };
-    }
-  }
-  return { kind: 'success', text: content, reasoningText: reasoning, usage };
+  return normalizeModelResponse(model, body);
 }
 
 /** Classify a transport-level rejection (network denial, abort, other) into failure facts. */
@@ -284,6 +265,8 @@ export interface DeepSeekAdapterDependencies {
   readonly transport?: DeepSeekTransport;
   /** The route this adapter serves; the unchanged production route when absent. */
   readonly profile?: ProviderRouteProfile;
+  /** The model this adapter speaks to; the production model when absent. Must belong to the bound route. */
+  readonly modelProfile?: ProviderModelProfile;
   /** The technical Session id of the turn in flight; required by a profile that sends the Session header. */
   readonly sessionId?: () => string;
 }
@@ -291,19 +274,30 @@ export interface DeepSeekAdapterDependencies {
 export class DeepSeekOpenAiCompatibleAdapter implements LlmAdapter {
   readonly #deps: DeepSeekAdapterDependencies;
   readonly #profile: ProviderRouteProfile;
+  readonly #modelProfile: ProviderModelProfile;
   readonly #requestDigests: string[] = [];
   #transmissions = 0;
+  #lastResult: CanonicalModelResult | null = null;
 
   constructor(deps: DeepSeekAdapterDependencies) {
     this.#deps = deps;
     this.#profile = deps.profile ?? DEEPSEEK_ROUTE_PROFILE;
+    this.#modelProfile = deps.modelProfile ?? DEEPSEEK_V4_PRO_PROFILE;
     if (this.#profile.credentialSlot !== deps.slotBinding.slot) throw new Error('PROVIDER_ROUTE_SLOT_MISMATCH');
     if (this.#profile.sessionHeader && deps.sessionId === undefined) throw new Error('PROVIDER_ROUTE_SESSION_SOURCE_ABSENT');
+    // A model profile belongs to exactly one route: the capabilities of a model behind one gateway
+    // say nothing about the same model id behind another.
+    if (this.#modelProfile.route !== this.#profile.route) throw new Error('PROVIDER_MODEL_ROUTE_MISMATCH');
   }
 
   /** The route profile this adapter serves. */
   get profile(): ProviderRouteProfile {
     return this.#profile;
+  }
+
+  /** The model profile this adapter speaks to. */
+  get modelProfile(): ProviderModelProfile {
+    return this.#modelProfile;
   }
 
   /** Request digests assembled so far, whether or not a transmission followed. */
@@ -314,6 +308,18 @@ export class DeepSeekOpenAiCompatibleAdapter implements LlmAdapter {
   /** Transmit attempts that reached the transport; zero for every v1 Run. */
   get transmissions(): number {
     return this.#transmissions;
+  }
+
+  /**
+   * The canonical result of the turn in flight, out of band, cleared at the start of every turn and
+   * `null` whenever the turn produced no response at all. It travels beside the stream rather than
+   * inside it because a `StreamChunk` cannot carry the distinction: the harness projects an assistant
+   * message into one string, and an empty answer and an answer of `''` are that same string. The
+   * execution owner reads this immediately after each `submitUnit`, exactly as it reads
+   * `assembledRequestDigests` and `transmissions`.
+   */
+  get lastCanonicalResult(): CanonicalModelResult | null {
+    return this.#lastResult;
   }
 
   providerInfo(provider: string): LlmProviderInfo {
@@ -329,7 +335,7 @@ export class DeepSeekOpenAiCompatibleAdapter implements LlmAdapter {
   }
 
   resolveModel(provider: string, model: string): Promise<LlmResolvedModelInfo> {
-    return Promise.resolve({ provider, id: model, name: this.#profile.modelDisplayName, inputModalities: ['text'] });
+    return Promise.resolve({ provider, id: model, name: this.#modelProfile.displayName, inputModalities: ['text'] });
   }
 
   async *stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
@@ -337,13 +343,16 @@ export class DeepSeekOpenAiCompatibleAdapter implements LlmAdapter {
       type: 'finish',
       reason: { kind: code === AI7_FAILURE_CODES.INTERRUPTED ? 'aborted' : 'error', failure: { code, message, ...(status === undefined ? {} : { status }) } },
     });
-    if (options.provider !== this.#profile.route || options.model !== this.#profile.model) {
+    // Cleared here so a reader after this turn never sees the previous turn's result: a turn that
+    // fails before any response arrives has no canonical result, and must not appear to have one.
+    this.#lastResult = null;
+    if (options.provider !== this.#profile.route || options.model !== this.#modelProfile.model) {
       yield fail(AI7_FAILURE_CODES.INVALID_RESPONSE, '适配器只服务其绑定路由与模型。');
       return;
     }
     let assembly: DeepSeekRequestAssembly;
     try {
-      assembly = assembleProviderRequest(this.#profile, options, {
+      assembly = assembleProviderRequest(this.#profile, this.#modelProfile, options, {
         attribution: this.#deps.attribution(),
         promptContractDigest: this.#deps.promptContractDigest,
         ...(this.#deps.sessionId === undefined ? {} : { sessionId: this.#deps.sessionId() }),
@@ -358,7 +367,7 @@ export class DeepSeekOpenAiCompatibleAdapter implements LlmAdapter {
       yield fail(AI7_FAILURE_CODES.TRANSMIT_TICKET_ABSENT, '没有本步骤的 transmit-remote 决定；未发送任何内容。');
       return;
     }
-    let outcome: DeepSeekParsedResponse;
+    let outcome: ProviderResponseOutcome;
     try {
       outcome = await this.#deps.broker.releaseTo(this.#deps.slotBinding, ticket, async (secret) => {
         this.#transmissions += 1;
@@ -375,7 +384,7 @@ export class DeepSeekOpenAiCompatibleAdapter implements LlmAdapter {
         } catch {
           body = null;
         }
-        return parseDeepSeekResponse(response.status, body, this.#deps.codes, this.#profile);
+        return parseProviderResponse(response.status, body, this.#deps.codes, this.#profile, this.#modelProfile);
       });
     } catch (error) {
       const classified = classifyTransportError(error);
@@ -386,9 +395,20 @@ export class DeepSeekOpenAiCompatibleAdapter implements LlmAdapter {
       yield fail(outcome.code, outcome.message, outcome.status);
       return;
     }
+    this.#lastResult = outcome;
+    // A response that matched no declared channel is this route's `INVALID_RESPONSE`, exactly as it
+    // was before the channels were declared; the canonical result records which channel was missing.
+    if (outcome.kind === 'malformed') {
+      yield fail(AI7_FAILURE_CODES.INVALID_RESPONSE, '模型服务响应不含可用内容。', 200);
+      return;
+    }
+    // An empty answer streams exactly what it streamed before — the harness composition and every
+    // Journey above it see an unchanged event shape — and the fact that the answer channel was empty
+    // travels out of band, where a string cannot lose it.
+    const text = outcome.kind === 'answer' ? outcome.text : '';
     yield { type: 'block-start', index: 0, blockType: 'text' };
-    yield { type: 'text-delta', index: 0, text: outcome.text };
-    yield { type: 'block-end', index: 0, block: { type: 'text', text: outcome.text } };
+    yield { type: 'text-delta', index: 0, text };
+    yield { type: 'block-end', index: 0, block: { type: 'text', text } };
     if (outcome.usage !== null) yield { type: 'usage', usage: { ...outcome.usage } };
     yield { type: 'finish', reason: { kind: 'stop' } };
   }
