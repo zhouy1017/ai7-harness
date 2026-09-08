@@ -5,6 +5,7 @@ import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep 
 import { arch, platform, release, tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { strToU8, zipSync } from 'fflate';
+import { admittedParagraphs, ADMITTED_SMALL_DOCX } from './composed-docx.mjs';
 import { attachProductOutput, awaitWithinDeadline, createJ01CompletionLocation, installJourneyCancellationCleanup, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect } from './controller.mjs';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
@@ -121,13 +122,6 @@ async function createSyntheticDocx(path, variant) {
   };
   await writeFile(path, zipSync(entries, { level: 6, mtime: new Date('2026-01-01T00:00:00.000Z') }));
 }
-
-/**
- * Three blank-line-separated paragraphs of text authored for this Journey. It carries no manuscript
- * content of any kind and no heading marker: intake needs a real `.txt` only so it has something to
- * identify, convert, and read as an editable Manuscript (ADR 0072 §5).
- */
-const SYNTHETIC_TXT_TEXT = '第一段合成文本。\n\n第二段合成文本。\n\n第三段合成文本。\n';
 
 /**
  * A minimal well-formed PDF: a catalog, an empty page tree, a cross-reference table and a trailer.
@@ -1883,8 +1877,15 @@ async function main() {
         (await realpath(syntheticPdfPath)) === syntheticPdfPath && syntheticPdfInfo.size > 0,
       'synthetic-pdf-identity',
     );
+    // The `.txt` intake scenario reads real admitted manuscript text (ADR 0043) instead of authored
+    // sentences: twelve paragraphs of the small admitted source, extracted at run time and never
+    // committed. `admittedBlocks` already excludes any paragraph that normalizes to nothing, so the
+    // trim-and-drop below is a defensive check over an admitted source, not an expected occurrence.
+    const textManuscriptParagraphs = (
+      await admittedParagraphs({ source: ADMITTED_SMALL_DOCX, startBlock: 1, blocks: 12 })
+    ).map((paragraph) => paragraph.trim()).filter((paragraph) => paragraph.length > 0);
     const syntheticTxtPath = resolve(syntheticRoot, 'text-manuscript.txt');
-    await writeFile(syntheticTxtPath, strToU8(SYNTHETIC_TXT_TEXT));
+    await writeFile(syntheticTxtPath, strToU8(`${textManuscriptParagraphs.join('\n\n')}\n`));
     const syntheticTxtInfo = await lstat(syntheticTxtPath);
     const syntheticTxtSha256 = await digestFile(syntheticTxtPath);
     requireJourney(
@@ -2449,10 +2450,11 @@ async function main() {
       'text-manuscript-conversion-note',
     );
     // Conversion of plain text loses nothing: every class is 完整保留 but the round-trip one, which
-    // is what it always is, and the three authored paragraphs are the three detected blocks.
+    // is what it always is, and the written paragraphs are the detected blocks, counted rather than
+    // pinned to a literal.
     await assertRenderer(
       renderer,
-      `(() => { const rows = Array.from(document.querySelectorAll('[data-fidelity-category]')); return rows.length === 8 && rows.every((row) => row.dataset.fidelityCategory === 'round-trip-export' ? row.querySelector('.status-pill')?.classList.contains('status-unsupported') : row.querySelector('.count')?.textContent.includes('· 0 项') && row.querySelector('.status-pill')?.classList.contains('status-preserved')) && document.body.textContent.includes('3 个可编辑内容块'); })()`,
+      `(() => { const rows = Array.from(document.querySelectorAll('[data-fidelity-category]')); return rows.length === 8 && rows.every((row) => row.dataset.fidelityCategory === 'round-trip-export' ? row.querySelector('.status-pill')?.classList.contains('status-unsupported') : row.querySelector('.count')?.textContent.includes('· 0 项') && row.querySelector('.status-pill')?.classList.contains('status-preserved')) && document.body.textContent.includes(${JSON.stringify(`${textManuscriptParagraphs.length} 个可编辑内容块`)}); })()`,
       'text-manuscript-fidelity-clean',
     );
     await clickExactButton(renderer, '确认书名并复核', 'text-manuscript-review-action');

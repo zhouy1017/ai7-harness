@@ -120,6 +120,20 @@ function paragraphXml(block) {
 }
 
 /**
+ * The plain paragraph texts of the contiguous 1-based excerpt `[startBlock, startBlock + blocks)` of
+ * `source` under exact root `SampleBooks/`, in order — the same block reading `composeAdmittedDocx`
+ * performs internally, without building a DOCX around it.
+ */
+export async function admittedParagraphs({ source, startBlock, blocks }) {
+  const available = await admittedBlocks(source);
+  const lastBlock = startBlock + blocks - 1;
+  if (!Number.isSafeInteger(startBlock) || !Number.isSafeInteger(blocks) || startBlock < 1 || blocks < 1 || lastBlock > available.length) {
+    throw new Error(`composed excerpt out of range: blocks ${startBlock}-${lastBlock} of ${available.length} in ${admittedSourcePath(source)}`);
+  }
+  return available.slice(startBlock - 1, lastBlock).map((block) => block.text);
+}
+
+/**
  * Compose one DOCX at `path` from the contiguous 1-based excerpt `[startBlock, startBlock + blocks)` of
  * `source` under exact root `SampleBooks/`, carrying the caller's `title` as the package's `dc:title` —
  * the title is always authored and never taken from the source. Returns the archive bytes. The same
