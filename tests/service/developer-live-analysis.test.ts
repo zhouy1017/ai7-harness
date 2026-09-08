@@ -633,7 +633,7 @@ describe('the developer-live scope over exact sample1 with a stub transport', ()
       blocks: 4,
       title: 'developer-live 非 sample1 血缘',
     });
-    const staged = await store.stageSelectedDocx(randomUUID(), selectedPath);
+    const staged = await store.stageSelectedManuscript(randomUUID(), selectedPath);
     expect(staged.source.format).toBe('DOCX');
     expect(staged.source.sourceSha256).not.toBe(SAMPLE1_SOURCE_DIGEST);
     const target = { kind: 'new-book', choiceId: 'new-book', confirmedTitle: staged.titleSuggestion.value } as const;

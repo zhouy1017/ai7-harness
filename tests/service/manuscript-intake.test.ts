@@ -200,7 +200,7 @@ describe('multi-format intake over the real store', () => {
     await requireExactSample1(roots.codeRoot);
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     try {
-      const staged = await store.stageSelectedDocx(randomUUID(), sample1Path(roots.codeRoot));
+      const staged = await store.stageSelectedManuscript(randomUUID(), sample1Path(roots.codeRoot));
       expect(staged.source.format).toBe('DOCX');
       expect(staged.editableImport).toEqual({ available: true });
       expect(staged.detectedBlockCount).toBeGreaterThan(0);
@@ -219,7 +219,7 @@ describe('multi-format intake over the real store', () => {
       const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
       let commitId: string;
       try {
-        const staged = await store.stageSelectedDocx(randomUUID(), selectedPath);
+        const staged = await store.stageSelectedManuscript(randomUUID(), selectedPath);
         expect(staged.source.format).toBe(format);
         expect(staged.editableImport).toEqual({
           available: false,
@@ -286,7 +286,7 @@ describe('multi-format intake over the real store', () => {
     await writeFile(selectedPath, zipStoredEntry('../escape.xml', '<Types/>'));
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     try {
-      await expect(store.stageSelectedDocx(randomUUID(), selectedPath)).rejects.toMatchObject({ code: 'DOCX_REJECTED' });
+      await expect(store.stageSelectedManuscript(randomUUID(), selectedPath)).rejects.toMatchObject({ code: 'DOCX_REJECTED' });
       store.markCleanShutdown();
     } finally {
       store.close();
@@ -298,7 +298,7 @@ describe('multi-format intake over the real store', () => {
     await writeFile(selectedPath, zipStoredEntry('readme.txt', 'not a package'));
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     try {
-      const staged = await store.stageSelectedDocx(randomUUID(), selectedPath);
+      const staged = await store.stageSelectedManuscript(randomUUID(), selectedPath);
       expect(staged.source.format).toBe('UNKNOWN');
       expect(staged.editableImport.available).toBe(false);
       store.markCleanShutdown();

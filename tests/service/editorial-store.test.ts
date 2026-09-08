@@ -72,7 +72,7 @@ async function importComposedBook(store: EditorialStore): Promise<{
   const selectedPath = join(roots.inputRoot, 'fixture.docx');
   await composeManuscriptDocx(selectedPath, EXCERPT);
 
-  const staged = await store.stageSelectedDocx(randomUUID(), selectedPath);
+  const staged = await store.stageSelectedManuscript(randomUUID(), selectedPath);
   expect(staged.source.format).toBe('DOCX');
   expect(staged.titleSuggestion.value).toBe(TITLE);
   expect(staged.identityFindings).toHaveLength(0);

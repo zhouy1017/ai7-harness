@@ -84,7 +84,7 @@ async function requireExactSample1(): Promise<void> {
 
 /** Import exact `sample1` as a new Book, accepting the fidelity degradations its review reports. */
 async function importSample1(store: EditorialStore): Promise<{ bookId: string; manuscriptId: string }> {
-  const staged = await store.stageSelectedDocx(randomUUID(), sample1Path());
+  const staged = await store.stageSelectedManuscript(randomUUID(), sample1Path());
   expect(staged.source.format).toBe('DOCX');
   expect(staged.source.sourceSha256).toBe(SAMPLE1_SHA256);
   expect(staged.source.sourceBytes).toBe(SAMPLE1_BYTES);
