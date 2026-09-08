@@ -272,12 +272,10 @@ function sourceCard(staged: StagedImportProjection): HTMLElement {
     element('dd', undefined, staged.source.provenanceLabel),
     element('dt', undefined, '来源字节数'),
     sourceBytes,
-    element('dt', undefined, '来源 SHA-256'),
-    sourceDigest,
     element('dt', undefined, '检测结果'),
     element('dd', undefined, `${staged.detectedBlockCount} 个可编辑内容块`),
   );
-  card.append(details);
+  card.append(details, technicalDetails(undefined, element('dt', undefined, '来源 SHA-256'), sourceDigest));
   return card;
 }
 
@@ -309,12 +307,14 @@ function identityFindingDisclosure(
     details.append(
       element('dt', undefined, '匹配图书'),
       element('dd', undefined, `${finding.bookTitle} · ${finding.bookId}`),
+    );
+    item.append(classes, details, technicalDetails(
+      undefined,
       element('dt', undefined, '来源材料版本'),
       element('dd', 'technical-identity', finding.sourceVersionId),
       element('dt', undefined, finding.recordLabel),
       element('dd', 'technical-identity', finding.importRecordId),
-    );
-    item.append(classes, details);
+    ));
     disclosure.append(item);
   }
   return disclosure;
@@ -524,19 +524,25 @@ function recoveryCandidateCard(
   revisionDigest.dataset['candidateRevisionDigest'] = candidate.revisionDigest;
   details.append(
     element('dt', undefined, '修订版'), element('dd', undefined, candidate.revisionLabel),
-    element('dt', undefined, '修订版身份'), revisionIdentity,
-    element('dt', undefined, '修订摘要'), revisionDigest,
-    element('dt', undefined, '持久边界'), element('dd', undefined, `修订日志序号 ${candidate.journalSequence} · ${candidate.durableAt}`),
+    element('dt', undefined, '持久边界'), element('dd', undefined, `修订日志序号 ${candidate.journalSequence} · ${localInstantLabel(candidate.durableAt)}`),
     element('dt', undefined, '覆盖范围'), element('dd', undefined, candidate.coveredChangeExtent),
     element('dt', undefined, '校验'), element('dd', undefined, candidate.verification),
     element('dt', undefined, '限制'), element('dd', undefined, candidate.limitation),
   );
+  const exact = [
+    element('dt', undefined, '修订版身份'), revisionIdentity,
+    element('dt', undefined, '修订摘要'), revisionDigest,
+    element('dt', undefined, '持久边界（精确时间）'), element('dd', 'technical-identity', candidate.durableAt),
+  ];
   if (candidate.snapshotId !== null) {
     const snapshotIdentity = element('dd', 'technical-identity', candidate.snapshotId);
     snapshotIdentity.dataset['snapshotId'] = candidate.snapshotId;
-    details.append(element('dt', undefined, '快照身份'), snapshotIdentity);
+    exact.push(element('dt', undefined, '快照身份'), snapshotIdentity);
   }
-  copy.append(details);
+  // The disclosure sits inside the candidate's `<label>`, which is safe by construction: `<details>` is
+  // interactive content, so a click on its summary never runs the label's activation behavior and can
+  // never select this recovery source on the reader's behalf (V2-UX-LAYER-007).
+  copy.append(details, technicalDetails('recovery-candidate-details', ...exact));
   radio.addEventListener('change', () => {
     if (!radio.checked) return;
     onSelect(candidate.kind === 'snapshot'
@@ -569,14 +575,19 @@ function renderManuscriptRecovery(recovery: RecoveryComparisonProjection): void 
   const identityDetails = element('dl');
   identityDetails.append(
     element('dt', undefined, '图书'), element('dd', undefined, `${recovery.bookTitle} · ${recovery.bookId}`),
-    element('dt', undefined, '稿件'), element('dd', 'technical-identity', recovery.manuscriptId),
     element('dt', undefined, '分支'), element('dd', undefined, `${recovery.branchName} · ${recovery.branchId}`),
     element('dt', undefined, '最后持久写入边界'),
-    element('dd', undefined, `修订日志序号 ${recovery.lastDurableEditBoundary.journalSequence} · ${recovery.lastDurableEditBoundary.durableAt}`),
+    element('dd', undefined, `修订日志序号 ${recovery.lastDurableEditBoundary.journalSequence} · ${localInstantLabel(recovery.lastDurableEditBoundary.durableAt)}`),
     element('dt', undefined, '覆盖范围'), element('dd', undefined, recovery.lastDurableEditBoundary.coveredChangeExtent),
   );
   identity.append(element('h3', undefined, '精确受影响稿件'), identityDetails,
-    element('p', 'uncertain-support', recovery.lastDurableEditBoundary.uncertainty));
+    element('p', 'uncertain-support', recovery.lastDurableEditBoundary.uncertainty),
+    technicalDetails(
+      undefined,
+      element('dt', undefined, '稿件'), element('dd', 'technical-identity', recovery.manuscriptId),
+      element('dt', undefined, '最后持久写入边界（精确时间）'),
+      element('dd', 'technical-identity', recovery.lastDurableEditBoundary.durableAt),
+    ));
   content.append(identity);
 
   const choices = element('fieldset', 'recovery-comparison');
@@ -740,16 +751,21 @@ function renderHistoricalRevision(projection: HistoricalRevisionProjection): voi
   );
   const identity = element('section', 'source-card');
   const values = element('dl');
+  // A durable record, so the absolute local time stays in the Decision Layer (V2-UX-COPY-011) and only
+  // the exact instant joins the identities one step away.
   values.append(
+    element('dt', undefined, '创建时间'), element('dd', undefined, localInstantLabel(projection.createdAt)),
+  );
+  identity.append(element('h3', undefined, '不可变修订身份'), values, technicalDetails(
+    undefined,
     element('dt', undefined, '图书 ID'), element('dd', 'technical-identity', projection.bookId),
     element('dt', undefined, '稿件 ID'), element('dd', 'technical-identity', projection.manuscriptId),
     element('dt', undefined, '分支 ID'), element('dd', 'technical-identity', projection.branchId),
     element('dt', undefined, '修订版 ID'), element('dd', 'technical-identity', projection.revisionId),
     element('dt', undefined, '修订摘要'), element('dd', 'technical-identity', projection.revisionDigest),
     element('dt', undefined, '来源版本 ID'), element('dd', 'technical-identity', projection.sourceVersionId),
-    element('dt', undefined, '创建时间'), element('dd', undefined, projection.createdAt),
-  );
-  identity.append(element('h3', undefined, '不可变修订身份'), values);
+    element('dt', undefined, '创建时间（精确）'), element('dd', 'technical-identity', projection.createdAt),
+  ));
   const blocks = element('article', 'recovery-readonly-blocks historical-revision-blocks');
   blocks.setAttribute('aria-label', '历史修订版只读内容窗口');
   for (const block of projection.blocks) {
@@ -1273,12 +1289,14 @@ function renderBookOverview(
   const identity = element('section', 'source-card');
   const identityValues = element('dl');
   identityValues.append(
-    element('dt', undefined, '图书 ID'), element('dd', 'technical-identity', overview.book.bookId),
-    element('dt', undefined, '稳定标识'), element('dd', 'technical-identity', overview.book.stableIdentity),
     element('dt', undefined, '内部编号'), element('dd', undefined, overview.book.internalNumber ?? '未设置'),
     element('dt', undefined, '稿件状态'), element('dd', undefined, overview.manuscriptState.label),
   );
-  identity.append(element('h3', undefined, '图书'), identityValues);
+  identity.append(element('h3', undefined, '图书'), identityValues, technicalDetails(
+    undefined,
+    element('dt', undefined, '图书 ID'), element('dd', 'technical-identity', overview.book.bookId),
+    element('dt', undefined, '稳定标识'), element('dd', 'technical-identity', overview.book.stableIdentity),
+  ));
   content.append(identity);
 
   const artifactHost = element('div');
@@ -2747,11 +2765,13 @@ function renderBookCreationReview(review: BookCreationReviewProjection): void {
   const values = element('dl');
   values.append(
     element('dt', undefined, '书名'), element('dd', undefined, review.proposed.title),
-    element('dt', undefined, '拟用图书 ID'), element('dd', 'technical-identity', review.proposed.bookId),
-    element('dt', undefined, '拟用稳定标识'), element('dd', 'technical-identity', review.proposed.stableIdentity),
     element('dt', undefined, '内部编号'), element('dd', undefined, review.proposed.internalNumber ?? '未设置'),
   );
-  identity.append(element('h3', undefined, '拟创建图书'), values);
+  identity.append(element('h3', undefined, '拟创建图书'), values, technicalDetails(
+    undefined,
+    element('dt', undefined, '拟用图书 ID'), element('dd', 'technical-identity', review.proposed.bookId),
+    element('dt', undefined, '拟用稳定标识'), element('dd', 'technical-identity', review.proposed.stableIdentity),
+  ));
   content.append(
     identity,
     listSection('将创建的记录', review.recordsToCreate),
