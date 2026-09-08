@@ -4784,6 +4784,8 @@ export class EditorialStore {
     const snapshot = this.#loadDraftSnapshot(draftId);
     requireStore(snapshot.state === 'staged', 'DRAFT_STATE_CHANGED', '导入草稿状态已变化。');
     requireStore(snapshot.version === expectedDraftVersion, 'DRAFT_VERSION_CHANGED', '导入草稿版本已变化。');
+    // A reimport compares parsed blocks, so a format that was never parsed cannot begin one.
+    this.#requireEditableFormat(snapshot);
     const binding = this.#reimportManuscriptBinding(targetSelection.bookId);
     requireStore(!Array.from(this.#reimportPreparationWork.values()).some((work) => work.draftId === draftId),
       'SERVICE_BUSY', '该重新导入草稿已有比较准备任务。');
@@ -7913,7 +7915,11 @@ export class EditorialStore {
       'SNAPSHOT_RESELECTION_REQUIRED',
       '暂存对象摘要无效。',
     );
-    this.#boundedCall(() => this.#boundedAuthority.assertStagedDraftIntegrity(snapshot.draftId));
+    // A retained original has no staged snapshot; its exact bytes, verified above, are the whole of
+    // what completeness means for it (ADR 0072 §2).
+    if (snapshot.parserIdentity !== null) {
+      this.#boundedCall(() => this.#boundedAuthority.assertStagedDraftIntegrity(snapshot.draftId));
+    }
   }
 
   async #revalidateSnapshot(snapshot: DraftSnapshot): Promise<{ snapshot: DraftSnapshot; parserDrift: boolean }> {
@@ -9660,13 +9666,17 @@ export class EditorialStore {
   }
 
   /**
-   * Only a DOCX has a fidelity plan, so asking for one is also how every editable-import path
-   * refuses a format that was never parsed, whatever a client asks for (ADR 0072 §2).
+   * Every path that would make an editable Manuscript refuses a format the product did not read as
+   * one, whatever a client asks for, with the same reason the surface states (ADR 0072 §2).
    */
-  #requireFidelityPlan(snapshot: DraftSnapshot): ImportFidelityPlan {
+  #requireEditableFormat(snapshot: DraftSnapshot): void {
     const refusal = editableImport(snapshot.sourceFormat);
     requireStore(refusal.available, 'FORMAT_UNSUPPORTED_FOR_EDITABLE_IMPORT',
       refusal.available ? '' : refusal.reason);
+  }
+
+  #requireFidelityPlan(snapshot: DraftSnapshot): ImportFidelityPlan {
+    this.#requireEditableFormat(snapshot);
     const plan = deriveImportFidelityPlan(snapshot.fidelity, snapshot.sourceDigest, snapshot.sourceBytes);
     requireStore(plan, 'FIDELITY_OUTSIDE_TRACER', '当前导入的保真计划不符合受限边界。');
     return plan;
