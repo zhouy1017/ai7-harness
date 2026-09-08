@@ -22,17 +22,29 @@ import {
   parseCrossUnitResult,
   unitSetDigest,
 } from '../../src/service/analysis/cross-unit-contract.js';
+import {
+  ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST,
+  ASSURANCE_SAMPLING_RESULT_SCHEMA,
+  assuranceSampleDigest,
+  assuranceSamplingRequestDigest,
+  buildAssuranceSamplingMessage,
+  parseAssuranceSamplingListedRefs,
+  parseAssuranceSamplingMessageHeader,
+  parseAssuranceSamplingResult,
+} from '../../src/service/analysis/assurance-sampling-contract.js';
 import { AI7_FAILURE_CODES, classifyModelFailure, evaluateRunBudgetCeiling } from '../../src/service/provider/classification.js';
 import { LOCAL_DETERMINISTIC_MODEL, LOCAL_DETERMINISTIC_ROUTE } from '../../src/service/provider/egress-gate.js';
 import {
   Ai7LocalDeterministicAdapter,
   ownBlockIdsOf,
   ownBlockTextsOf,
+  substituteAssuranceSamplingRefPlaceholders,
   substituteBlockPlaceholders,
   substituteCrossUnitBlockPlaceholders,
   unitContentDigest,
 } from '../../src/service/provider/local-deterministic-adapter.js';
 import { BASELINE_PROMPT_CONTRACT } from '../../src/service/analysis/contract.js';
+import type { CoverageManifestUnitProjection } from '../../src/shared/protocol.js';
 import {
   ModelFixtureError,
   fixtureEntryKey,
@@ -324,10 +336,16 @@ describe('model fixture loading', () => {
       const committed = await loadModelFixture(FIXTURES_ROOT, identity);
       expect(Array.from(committed.entries.values()).every((item) => item.unitOrdinal >= 1), identity).toBe(true);
     }
-    // The sample1 fixtures carry exactly the reduction entries their own closed sets need.
+    // The sample1 fixtures carry exactly the ordinal-0 entries their own Runs need: the reduction
+    // entries of their closed sets, plus the two assurance sampling entries of Issue #275 — one for
+    // unit 1 as first analysed and one for it after J-04's acknowledged edit, both inherited by the
+    // two variants, because a sampling turn is keyed by unit content and listed findings alone.
     const counts = await Promise.all(['sample1-baseline-happy', 'sample1-baseline-one-unit-failure', 'sample1-baseline-transient-retry']
       .map(async (identity) => Array.from((await loadModelFixture(FIXTURES_ROOT, identity)).entries.values()).filter((item) => item.unitOrdinal === 0).length));
-    expect(counts).toEqual([1, 3, 3]);
+    expect(counts).toEqual([3, 5, 5]);
+    const factual = await loadModelFixture(FIXTURES_ROOT, 'sample1-factual-authored');
+    // One sampling turn per anchor unit: every one of sample1's eight units holds a located finding.
+    expect(Array.from(factual.entries.values()).filter((item) => item.unitOrdinal === 0)).toHaveLength(8);
   });
 });
 
@@ -434,6 +452,124 @@ describe('cross-unit reduction replay', () => {
     expect(substituteCrossUnitBlockPlaceholders('{{unit:1:block:1}}', cited)).toBe(BLOCK_A);
     expect(substituteCrossUnitBlockPlaceholders('{{unit:1:block:9}}', cited)).toBe('{{unit:1:block:9}}');
     expect(substituteCrossUnitBlockPlaceholders('{{unit:2:block:1}}', cited)).toBe('{{unit:2:block:1}}');
+  });
+});
+
+// The assurance sampling turn (Issue #275, ADR 0066): a third ordinal-0 shape, keyed by the anchor
+// unit and the findings the turn listed, whose responses name a finding by its listed position.
+describe('assurance sampling replay', () => {
+  const BLOCK_A = `blk_${'1'.repeat(24)}`;
+  const BLOCK_B = `blk_${'2'.repeat(24)}`;
+  const UNIT_DIGEST = '7'.repeat(64);
+  let root: string;
+
+  const UNIT: CoverageManifestUnitProjection = {
+    ordinal: 4, sectionOrdinal: 2, subUnitIndex: 1, subUnitCount: 1,
+    headingBlockId: BLOCK_A, headingText: '合成标题', headingLevel: 1,
+    startPosition: 4, endPosition: 5, blockIds: [BLOCK_A, BLOCK_B], blockDigests: ['3'.repeat(64), '4'.repeat(64)],
+    overlapBlockIds: [], graphemes: 20, digest: UNIT_DIGEST,
+  };
+  const BLOCKS = new Map([
+    [BLOCK_A, { blockId: BLOCK_A, kind: 'heading' as const, level: 1, text: '合成标题' }],
+    [BLOCK_B, { blockId: BLOCK_B, kind: 'paragraph' as const, level: null, text: '合成正文。' }],
+  ]);
+  // Minted refs, exactly as the factual kind produces: a fixture author cannot know either of them.
+  const FINDINGS = [
+    { ref: 'fnd_aaaaaaaaaaaaaaaaaaaaaaaa', unitOrdinal: 4, tier: 'A', text: '合成发现一。' },
+    { ref: 'fnd_bbbbbbbbbbbbbbbbbbbbbbbb', unitOrdinal: 4, tier: 'B', text: '合成发现二。' },
+  ];
+  const MESSAGE = buildAssuranceSamplingMessage(UNIT, 8, BLOCKS, FINDINGS);
+  const REQUEST_DIGEST = assuranceSamplingRequestDigest(
+    ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST, UNIT.ordinal, UNIT_DIGEST, assuranceSampleDigest(FINDINGS),
+  );
+  const RESPONSE = JSON.stringify({
+    schema: ASSURANCE_SAMPLING_RESULT_SCHEMA,
+    dispositions: [
+      { ref: '{{ref:1}}', disposition: '成立', reason: '本单元内容块按原样支持该发现。' },
+      { ref: '{{ref:2}}', disposition: '需降级', reason: '内容块只支持较弱的说法。' },
+    ],
+  });
+
+  beforeEach(async () => {
+    root = await mkdtemp(join(tmpdir(), 'ai7-sampling-test-'));
+    await writeFile(join(root, 'sampling.json'), JSON.stringify({
+      schema: 'ai7.model-fixture/1', identity: 'sampling', description: '合成测试夹具', basedOn: null,
+      provider: 'ai7-local-deterministic', model: 'ai7-deterministic-fixture',
+      entries: [{ unitOrdinal: 0, requestDigest: REQUEST_DIGEST, response: { kind: 'unit-result', text: RESPONSE, usage: { inputTokens: 400, outputTokens: 60 } } }],
+    }));
+  });
+
+  afterEach(async () => {
+    await rm(root, { recursive: true, force: true });
+  });
+
+  function samplingRequest(text: string): GenerateOptions {
+    return {
+      provider: LOCAL_DETERMINISTIC_ROUTE,
+      model: LOCAL_DETERMINISTIC_MODEL,
+      system: '合成系统提示。',
+      messages: [{ id: 'm1' as never, role: 'user', content: [{ type: 'text', text }], source: { kind: 'user' } }],
+    };
+  }
+
+  it('answers a sampling turn from its ordinal-0 entry with every listed ref substituted', async () => {
+    const adapter = new Ai7LocalDeterministicAdapter(await loadModelFixture(root, 'sampling'), BASELINE_PROMPT_CONTRACT_DIGEST, codes);
+    const chunks = await collect(adapter.stream(samplingRequest(MESSAGE)));
+    const replayed = chunks.find((chunk) => chunk.type === 'block-end');
+    const text = replayed?.type === 'block-end' && replayed.block.type === 'text' ? replayed.block.text : '';
+    expect(text).not.toContain('{{ref:');
+    const parsed = parseAssuranceSamplingResult(text, { refs: FINDINGS.map((finding) => finding.ref) });
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.result.dispositions.map((entry) => [entry.ref, entry.disposition])).toEqual([
+      [FINDINGS[0]!.ref, '成立'],
+      [FINDINGS[1]!.ref, '需降级'],
+    ]);
+    expect(chunks.find((chunk) => chunk.type === 'usage')).toEqual({ type: 'usage', usage: { inputTokens: 400, outputTokens: 60 } });
+  });
+
+  it('fails closed when the anchor unit’s blocks or the listed findings are not the ones the entry answers', async () => {
+    const adapter = new Ai7LocalDeterministicAdapter(await loadModelFixture(root, 'sampling'), BASELINE_PROMPT_CONTRACT_DIGEST, codes);
+    const otherUnit = buildAssuranceSamplingMessage({ ...UNIT, digest: '8'.repeat(64) }, 8, BLOCKS, FINDINGS);
+    expect(await collect(adapter.stream(samplingRequest(otherUnit))))
+      .toMatchObject([{ type: 'finish', reason: { kind: 'error', failure: { code: AI7_FAILURE_CODES.FIXTURE_MISMATCH, message: expect.stringContaining('单元 4 的保证抽样') } } }]);
+    const otherFindings = buildAssuranceSamplingMessage(UNIT, 8, BLOCKS, [FINDINGS[0]!]);
+    expect(await collect(adapter.stream(samplingRequest(otherFindings))))
+      .toMatchObject([{ type: 'finish', reason: { kind: 'error', failure: { code: AI7_FAILURE_CODES.FIXTURE_MISMATCH } } }]);
+  });
+
+  it('is keyed by content alone, so the same turn under fresh identities finds the same entry', async () => {
+    const adapter = new Ai7LocalDeterministicAdapter(await loadModelFixture(root, 'sampling'), BASELINE_PROMPT_CONTRACT_DIGEST, codes);
+    // A second import: different block identities, different `findingId`s, the same manuscript.
+    const remintedBlockA = `blk_${'5'.repeat(24)}`;
+    const remintedBlockB = `blk_${'6'.repeat(24)}`;
+    const reminted = buildAssuranceSamplingMessage(
+      { ...UNIT, blockIds: [remintedBlockA, remintedBlockB], headingBlockId: remintedBlockA },
+      8,
+      new Map([
+        [remintedBlockA, { blockId: remintedBlockA, kind: 'heading' as const, level: 1, text: '合成标题' }],
+        [remintedBlockB, { blockId: remintedBlockB, kind: 'paragraph' as const, level: null, text: '合成正文。' }],
+      ]),
+      FINDINGS.map((finding, index) => ({ ...finding, ref: `fnd_${String(index + 7).repeat(24)}` })),
+    );
+    expect(reminted).not.toBe(MESSAGE);
+    const chunks = await collect(adapter.stream(samplingRequest(reminted)));
+    const replayed = chunks.find((chunk) => chunk.type === 'block-end');
+    const text = replayed?.type === 'block-end' && replayed.block.type === 'text' ? replayed.block.text : '';
+    // The entry answered, and its refs resolved to this import's identities rather than the first's.
+    expect(text).toContain(`fnd_${'7'.repeat(24)}`);
+    expect(text).not.toContain(FINDINGS[0]!.ref);
+  });
+
+  it('never reads a sampling turn as a unit message or as the reduction, and back', () => {
+    expect(parseUnitMessageHeader(MESSAGE)).toBeNull();
+    expect(parseCrossUnitMessageHeader(MESSAGE)).toBeNull();
+    expect(parseAssuranceSamplingMessageHeader(`分析单元 1/1 · 单元摘要 ${ZERO_UNIT_DIGEST}`)).toBeNull();
+    // An out-of-range placeholder is left in place for the contract to refuse.
+    expect(substituteAssuranceSamplingRefPlaceholders('{{ref:1}}', ['a'])).toBe('a');
+    expect(substituteAssuranceSamplingRefPlaceholders('{{ref:9}}', ['a'])).toBe('{{ref:9}}');
+    expect(parseAssuranceSamplingListedRefs(MESSAGE)).toEqual(FINDINGS.map((finding) => finding.ref));
+    expect(parseAssuranceSamplingListedRefs('没有发现小节')).toEqual([]);
   });
 });
 

@@ -263,6 +263,8 @@ export function reduceFactualReview(input: FactualReductionInput): FactualReduct
     unresolvedItemCount: findings.length,
     lowConfidenceUnitCount: 0,
     crossUnitFindingCount: 0,
+    // Filled in by the sampling pass after this reduction, exactly as the baseline kind's is.
+    sampledPrecision: null,
     statement: FACTUAL_REVIEW_ASSURANCE_STATEMENT,
   };
 

@@ -1,4 +1,4 @@
-export const SERVICE_PROTOCOL_VERSION = 26 as const;
+export const SERVICE_PROTOCOL_VERSION = 27 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -1020,6 +1020,13 @@ export interface LaunchPolicyProjection {
      * transmission per Analysis Unit and a step it does not name is not among them.
      */
     crossUnitReductionAllowed?: boolean;
+    /**
+     * Whether the active Provider Processing policy names the assurance sampling suboperation's
+     * transmissions (ADR 0066). Read exactly as `crossUnitReductionAllowed` is: a sampling turn is
+     * one more transmission per anchor unit, still beyond v4's per-unit bound, so anything but
+     * `true` — absent included — means the suboperation does not dispatch at all.
+     */
+    assuranceSamplingAllowed?: boolean;
     label: '开发与持续集成：零次实时传输' | '开发者实时：实时传输受运行边界约束';
   };
   externalExport: {
@@ -1289,6 +1296,59 @@ export interface AnalysisCrossUnitReductionProjection {
   findingCount: number;
 }
 
+/** The closed disposition set of the assurance sampling suboperation (ADR 0066); never a boolean. */
+export type AnalysisAssuranceDisposition = '成立' | '需降级' | '应删除';
+
+export interface AnalysisAssuranceSampleStratumProjection {
+  sectionOrdinal: number;
+  /** Candidates the section held, and how many of them the allocation drew. */
+  candidates: number;
+  sampled: number;
+}
+
+/**
+ * One sampled finding's disposition. It names the finding by `ref` and lives only here: no finding is
+ * edited, deleted, reordered, or re-ranked by a disposition, which is evidence for the editor and for
+ * the Run Report and never a verdict.
+ */
+export interface AnalysisAssuranceSampleDispositionProjection {
+  ref: string;
+  unitOrdinal: number;
+  /** The finding's own tier: the baseline kind's confidence, the factual kind's severity. */
+  tier: string;
+  disposition: AnalysisAssuranceDisposition;
+  reason: string;
+}
+
+/** Estimated precision of one tier of the sampled set: upheld over sampled, rounded to two decimals. */
+export interface AnalysisAssuranceSamplePrecisionProjection {
+  tier: string;
+  sampled: number;
+  upheld: number;
+  estimate: number;
+}
+
+/**
+ * What the assurance sampling suboperation did in the Run that produced this revision, including why
+ * it did not run. Like the cross-unit reduction it forms no execution-span row of its own, so this is
+ * where its turns are recorded. The seed is disclosed so the sample can be redrawn from the manifest
+ * and the revision's own findings and checked.
+ */
+export interface AnalysisAssuranceSampleProjection {
+  state: 'closed' | 'closed-with-gaps' | 'gap' | 'not-run';
+  /** The recorded seed the draw is reproducible from; `null` when no sample was drawn. */
+  seed: string | null;
+  size: number;
+  candidateCount: number;
+  strata: ReadonlyArray<AnalysisAssuranceSampleStratumProjection>;
+  dispositions: ReadonlyArray<AnalysisAssuranceSampleDispositionProjection>;
+  precision: ReadonlyArray<AnalysisAssuranceSamplePrecisionProjection>;
+  /** What the sampling turns cost; `null` when none dispatched or none reported usage. */
+  usage: { inputTokens: number; outputTokens: number } | null;
+  /** The exact reason for a gap or for not running; `null` when every turn closed. */
+  reason: string | null;
+}
+
 export interface AnalysisUnresolvedProjection {
   unitOrdinal: number;
   description: string;
@@ -1309,6 +1369,8 @@ export interface AnalysisReducerStageProjection {
    * The declared reducer stages of every analysis kind. The first five are the baseline kind's; the
    * factual-review kind (S18a) reports `unit-validation`, then `reference-integrity` — the
    * deterministic location of each quotation in the block it names — and `finding-reduction`.
+   * `assurance-sampling` (S43) closes both kinds: it is the one stage every kind that declares a
+   * sampling binding reports, and it sits after that kind's last stage.
    */
   stage:
     | 'unit-validation'
@@ -1317,7 +1379,8 @@ export interface AnalysisReducerStageProjection {
     | 'cross-unit-reduction'
     | 'book-synthesis'
     | 'reference-integrity'
-    | 'finding-reduction';
+    | 'finding-reduction'
+    | 'assurance-sampling';
   state: 'closed' | 'closed-with-gaps' | 'not-run';
   inputCount: number;
 }
@@ -1393,6 +1456,12 @@ export interface AnalysisAssuranceAxis {
   lowConfidenceUnitCount: number;
   /** Model-driven cross-unit findings, disclosed beside the deterministic count and never folded into it. */
   crossUnitFindingCount: number;
+  /**
+   * What the assurance sample found, when one closed: how many findings were judged, how many were
+   * upheld, and the estimated precision. `null` when no sample closed. The axis *state* never moves on
+   * a disposition — a sample is evidence about the findings, not a re-reading of the Run.
+   */
+  sampledPrecision: { size: number; upheld: number; estimate: number } | null;
   /** The kind's own statement of what its result is and is not; one exact text per analysis kind. */
   statement: AnalysisAssuranceStatement;
 }
@@ -1742,6 +1811,8 @@ export interface BaselineAnalysisResultSetRevisionProjection {
   /** Model-driven cross-unit findings beside the deterministic conflicts; empty when the reduction did not close. */
   crossUnitFindings: ReadonlyArray<AnalysisCrossUnitFindingProjection>;
   crossUnitReduction: AnalysisCrossUnitReductionProjection;
+  /** The adversarial sample drawn over `crossUnitFindings` after the reduction; it edits none of them. */
+  assuranceSample: AnalysisAssuranceSampleProjection;
   sections: ReadonlyArray<AnalysisSectionProjection>;
   synthesis: AnalysisSynthesisProjection;
   units: ReadonlyArray<BaselineAnalysisUnitProjection>;
@@ -1972,8 +2043,8 @@ export interface BaselineAnalysisProjection {
       completedAttempts: number;
       /** The longest step this Run has actually settled, which the stale case is measured against. */
       longestSettledUnitMs: number | null;
-      /** Which declared step is in flight: the unit loop, or the one cross-unit reduction after it. */
-      stage: 'units' | 'cross-unit-reduction';
+      /** Which declared step is in flight: the unit loop, the cross-unit reduction, or the sample. */
+      stage: 'units' | 'cross-unit-reduction' | 'assurance-sampling';
       /** The `recordedAt` of the Run Record's latest transition, composed by the store. */
       lastTransitionAt: string;
     } | null;
@@ -2185,6 +2256,8 @@ export interface FactualReviewResultSetRevisionProjection {
   excluded: ReadonlyArray<FactualReviewExcludedProjection>;
   assertionCounts: FactualReviewAssertionCountsProjection;
   research: FactualReviewResearchProjection;
+  /** The adversarial sample drawn over `findings` after the reduction; it edits none of them. */
+  assuranceSample: AnalysisAssuranceSampleProjection;
   units: ReadonlyArray<FactualReviewUnitProjection>;
 }
 

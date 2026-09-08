@@ -164,10 +164,36 @@ describe('factual review over the real store on exact sample1', () => {
       expect(revision.policyPin).toMatchObject({ operationalScope: 'development-ci', providerProcessingVersion: 'v1', liveTransmissions: 0 });
       expect(revision.coverage).toMatchObject({ state: 'complete', unitsTotal: SAMPLE1_UNITS, unitsClosed: SAMPLE1_UNITS, gapCount: 0 });
       expect(revision.gaps).toEqual([]);
-      expect(revision.usage.requests).toBe(SAMPLE1_UNITS);
-      expect(revision.reducerClosure.stages.map((stage) => stage.stage)).toEqual(['unit-validation', 'reference-integrity', 'finding-reduction']);
+      // Synchronized delta (#275): eight unit turns and one assurance sampling turn per anchor unit.
+      // Every one of the eight units anchors at least one located finding, so the sample is eight turns.
+      expect(revision.usage.requests).toBe(SAMPLE1_UNITS * 2);
+      expect(revision.reducerClosure.stages.map((stage) => stage.stage)).toEqual([
+        'unit-validation', 'reference-integrity', 'finding-reduction', 'assurance-sampling',
+      ]);
       expect(revision.reducerClosure.state).toBe('closed');
       expect(revision.assurance.statement).toBe(FACTUAL_REVIEW_ASSURANCE_STATEMENT);
+
+      // Issue #275: the sample closed over every located finding — twenty is under the default thirty —
+      // drawn in one stratum, because exact sample1 is one structural section.
+      expect(revision.assuranceSample).toMatchObject({
+        state: 'closed',
+        size: revision.findings.length,
+        candidateCount: revision.findings.length,
+        strata: [{ sectionOrdinal: 1, candidates: revision.findings.length, sampled: revision.findings.length }],
+        reason: null,
+      });
+      expect(revision.assuranceSample.seed).toMatch(DIGEST_PATTERN);
+      expect(revision.assuranceSample.dispositions.map((entry) => entry.ref)).toEqual(revision.findings.map((finding) => finding.findingId));
+      expect(revision.assuranceSample.dispositions.every((entry) => entry.disposition === '成立' && entry.reason.length > 0)).toBe(true);
+      // Every disposition names a finding the revision holds, at that finding's own unit and tier.
+      for (const entry of revision.assuranceSample.dispositions) {
+        const finding = revision.findings.find((candidate) => candidate.findingId === entry.ref)!;
+        expect({ unitOrdinal: entry.unitOrdinal, tier: entry.tier }).toEqual({ unitOrdinal: finding.unitOrdinal, tier: finding.severity });
+      }
+      expect(revision.assuranceSample.precision.map((entry) => entry.tier)).toEqual(['A', 'B', 'C']);
+      expect(revision.assuranceSample.precision.every((entry) => entry.upheld === entry.sampled && entry.estimate === 1)).toBe(true);
+      expect(revision.assurance.sampledPrecision).toEqual({ size: revision.findings.length, upheld: revision.findings.length, estimate: 1 });
+      expect(revision.assurance.label).toContain(`· 抽样 ${revision.findings.length} 条 · 估计精度 1.00`);
 
       // Every finding is anchored by the service, not by the model: its range slices the committed
       // block back to the exact quotation it claims.

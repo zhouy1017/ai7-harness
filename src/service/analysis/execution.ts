@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { AnalysisGapProjection, AnalysisSourceRangeProjection, CoverageManifestUnitProjection, ExecutionRouteId, LaunchPolicyProjection, RunAttemptState } from '../../shared/protocol.js';
+import type { AnalysisAssuranceSampleDispositionProjection, AnalysisGapProjection, AnalysisSourceRangeProjection, CoverageManifestProjection, CoverageManifestUnitProjection, ExecutionRouteId, LaunchPolicyProjection, RunAttemptState } from '../../shared/protocol.js';
 import { prepareExecution, type HarnessExecutionSpan, type PrimaryAgentHarnessHandle } from '../harness/primary-agent-harness.js';
 import { DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE } from '../../shared/protected-secret-identity.js';
 import type { DeveloperLiveRuntime } from '../launch-policy.js';
@@ -19,10 +19,18 @@ import {
 import { Ai7LocalDeterministicAdapter } from '../provider/local-deterministic-adapter.js';
 import type { ResolvedModelFixture } from '../provider/model-fixture.js';
 import { ProviderResultCache, providerRequestDigest, usageOfResponse } from '../provider/provider-result-cache.js';
+import {
+  assuranceSamplingTurns,
+  buildAssuranceSamplingMessage,
+  drawAssuranceSample,
+  parseAssuranceSamplingResult,
+  type AssuranceSamplingParseFailureCode,
+} from './assurance-sampling-contract.js';
 import { canonicalRecord } from './canonical.js';
 import { SAMPLE1_SOURCE_DIGEST, type BaselineAnalysisStore, type ExecutionBindingRecord, type ExecutionPlanFacts, type PredecessorUnitResult, type RunProgress, type RunProgressStage, type UnitResultRecord } from './baseline-analysis-store.js';
 import type { BaselineUnitResult } from './contract.js';
-import type { AnalysisKindDefinition } from './kind-definition.js';
+import type { ManifestBlockInput } from './coverage-manifest.js';
+import { applyAssuranceSample, type AnalysisKindDefinition, type AnalysisReductionResult } from './kind-definition.js';
 import {
   BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST,
   buildCrossUnitMessage,
@@ -32,7 +40,15 @@ import {
   unitSetDigest,
   type CrossUnitResultParseFailureCode,
 } from './cross-unit-contract.js';
-import { CROSS_UNIT_NOT_RUN, type ClosedUnitOutcome, type CrossUnitOutcome, type GapUnitOutcome } from './reducers.js';
+import {
+  CROSS_UNIT_NOT_RUN,
+  assuranceSampleNotRun,
+  assuranceSampleOutcome,
+  type AssuranceSampleOutcome,
+  type ClosedUnitOutcome,
+  type CrossUnitOutcome,
+  type GapUnitOutcome,
+} from './reducers.js';
 
 /**
  * The execution owner: AI7 scheduler admission for one Run per service instance, the attempt
@@ -209,6 +225,26 @@ export function crossUnitEmptyAnswerGapReason(reasoningPresent: boolean): string
 
 export function unparsableCrossUnitAnswerGapReason(code: CrossUnitResultParseFailureCode, detail: string, answerText: string): string {
   return `跨单元归纳结果不符合契约 v1（${code}）：${detail}模型返回了 ${[...answerText].length} 个字符，其中没有可解析的跨单元结果。各单元结果不受影响。`;
+}
+
+/**
+ * The same two readings for one assurance sampling turn, which fails per anchor unit rather than as a
+ * whole: the findings themselves are already settled and stay settled, the other units' turns still
+ * answer, and what this one unit's sampled findings lost is a disposition, not their place in the
+ * Result Set. Every sampling gap is stated as one of these, prefixed by the unit it belongs to.
+ */
+export function assuranceSamplingTurnGapReason(unitOrdinal: number, detail: string): string {
+  return `单元 ${unitOrdinal} 的保证抽样未闭合：${detail}这些发现本身不受影响，其余单元的判定照常记录。`;
+}
+
+export function assuranceSamplingEmptyAnswerGapReason(reasoningPresent: boolean): string {
+  return reasoningPresent
+    ? '模型完成了推理，但答案通道为空。'
+    : '模型的答案通道与推理通道都为空。';
+}
+
+export function unparsableAssuranceSamplingAnswerGapReason(code: AssuranceSamplingParseFailureCode, detail: string, answerText: string): string {
+  return `判定结果不符合契约 v1（${code}）：${detail}模型返回了 ${[...answerText].length} 个字符，其中没有可解析的判定结果。`;
 }
 
 /**
@@ -767,8 +803,21 @@ export class BaselineAnalysisExecutionOwner {
       }
 
       // The kind's reducers run over the complete new unit set: reused plus recomputed.
-      const reduction = definition.reduce({ manifest, outcomes, reusedUnitOrdinals: reusedOrdinals, blocks: blocksById, crossUnit });
-      if (terminalClassification === 'completed' && reduction.gaps.length > 0) terminalClassification = 'completed-with-gaps';
+      const reduced = definition.reduce({ manifest, outcomes, reusedUnitOrdinals: reusedOrdinals, blocks: blocksById, crossUnit });
+      if (terminalClassification === 'completed' && reduced.gaps.length > 0) terminalClassification = 'completed-with-gaps';
+
+      // The one declared assurance sampling suboperation (ADR 0066), inside this Run's unchanged
+      // envelope and Execution Binding: one admitted user message per anchor unit, one turn each, no
+      // adaptation. It runs only after a unit loop that reached its end, for the same reason the
+      // reduction does — an interrupted Run has already stopped, and nothing further is sent.
+      const sample = await this.#drawAndJudge({
+        active, definition, harness, reduction: reduced, manifest, blocksById, admittedUserMessages,
+        acceptedOutputDigests, liveAdapter, usage, accumulated, ceilingState, live, policy,
+        stopped: terminalClassification === 'interrupted',
+      });
+      // The second reducer pass: the sample joins the revision and re-labels the assurance axis, and
+      // every finding component comes through byte for byte.
+      const reduction = applyAssuranceSample(reduced, sample);
       // Units the interrupted loop never reached are recorded as exact not-attempted gaps.
       for (const gapEntry of reduction.gaps) {
         if (!unitRecords.some((record) => record.unitOrdinal === gapEntry.unitOrdinal)) {
@@ -822,6 +871,139 @@ export class BaselineAnalysisExecutionOwner {
       await harness.finish();
     }
   }
+
+  /**
+   * Draw the assurance sample and put each anchor unit's share of it to the model once.
+   *
+   * The guard order is the reduction's — interruption, policy, ceiling — and the policy guard sits
+   * outside the loop, so a scope whose Provider Processing policy does not name the suboperation never
+   * assembles a single message, let alone transmits one. Every parameter this takes is a thing the
+   * suboperation may read or move; the reduction's finding components are deliberately not among them,
+   * because a disposition never edits a finding.
+   */
+  async #drawAndJudge(context: AssuranceSamplingContext): Promise<AssuranceSampleOutcome> {
+    const { active, definition, harness, reduction, manifest, live, policy } = context;
+    if (definition.assurance === null) return assuranceSampleNotRun(definition.assuranceAbsentReason);
+    if (context.stopped || active.interrupted) return assuranceSampleNotRun('运行在单元阶段结束前停止，保证抽样未发起。');
+    const candidates = definition.assurance.candidates(reduction);
+    if (candidates.length === 0) return assuranceSampleNotRun('本次运行没有可抽样的发现，保证抽样未发起。');
+    const draw = drawAssuranceSample(manifest, candidates);
+    const dispositions: AnalysisAssuranceSampleDispositionProjection[] = [];
+    const gapReasons: string[] = [];
+    const sampled = { inputTokens: 0, outputTokens: 0, turnsWithUsage: 0 };
+    if (live !== null && policy.providerProcessing.assuranceSamplingAllowed !== true) {
+      // The sampling turns are transmissions the active Provider Processing policy does not name, so
+      // none of them forms a request. Policy v4 authorizes one transmission per Analysis Unit.
+      return assuranceSampleOutcome(draw, [], null, [ASSURANCE_SAMPLING_POLICY_BOUNDED]);
+    }
+    for (const turn of assuranceSamplingTurns(draw.sampled)) {
+      if (active.interrupted) {
+        gapReasons.push(assuranceSamplingTurnGapReason(turn.unitOrdinal, '运行已中断，本轮未派发。'));
+        break;
+      }
+      // The ceiling is evaluated before every dispatch exactly as before a unit's, so a Run that has
+      // spent its bound ends here rather than spending one more turn to discover it.
+      if (context.ceilingState() === 'reached') {
+        gapReasons.push(assuranceSamplingTurnGapReason(turn.unitOrdinal, '任务运行预算上限已达到，本轮未派发。'));
+        break;
+      }
+      const unit = manifest.units[turn.unitOrdinal - 1]!;
+      const message = buildAssuranceSamplingMessage(unit, manifest.units.length, context.blocksById, turn.findings);
+      // The same set the gate reads: exactly one further user message becomes admissible per turn, and
+      // every other refusal — route, model, system prompt, tools, prior outputs — is untouched.
+      context.admittedUserMessages.add(message);
+      active.progress.stage = 'assurance-sampling';
+      // The unit loop is over; a sampling turn is about a unit but is not one of its attempts, so the
+      // reader sees the stage rather than a unit ordinal, exactly as it does for the reduction.
+      active.progress.currentUnitOrdinal = null;
+      active.progress.currentUnitStartedAt = new Date().toISOString();
+      active.progress.attemptState = 'dispatched';
+      active.transmissionsAtDispatch = active.transmissions?.() ?? 0;
+      const result = await harness.submitUnit(message);
+      const canonical = context.liveAdapter.instance?.lastCanonicalResult ?? null;
+      // A sampling turn is a model turn like any other: it counts as a request, its usage counts
+      // toward the Run and the ceiling, and it records no execution-span row, because the span table
+      // is unit-only and this step is not one of the unit's attempts.
+      context.usage.requests += 1;
+      const usageSignal = result.signals.find((signal) => signal.kind === 'usage');
+      const turnUsage = usageSignal?.kind === 'usage'
+        ? { inputTokens: usageSignal.usage.inputTokens, outputTokens: usageSignal.usage.outputTokens }
+        : null;
+      if (turnUsage !== null) {
+        context.usage.inputTokens += turnUsage.inputTokens;
+        context.usage.outputTokens += turnUsage.outputTokens;
+        context.accumulated.push(turnUsage);
+        sampled.inputTokens += turnUsage.inputTokens;
+        sampled.outputTokens += turnUsage.outputTokens;
+        sampled.turnsWithUsage += 1;
+      }
+      active.progress.completedAttempts += 1;
+      const gap = (detail: string): void => { gapReasons.push(assuranceSamplingTurnGapReason(turn.unitOrdinal, detail)); };
+      const candidate = result.signals.find((signal) => signal.kind === 'contentCandidate');
+      if (result.terminal === 'completed' && candidate?.kind === 'contentCandidate') {
+        context.acceptedOutputDigests.add(candidate.digest);
+        if (canonical?.kind === 'empty-answer') {
+          gap(assuranceSamplingEmptyAnswerGapReason(canonical.reasoningPresent));
+          continue;
+        }
+        const parsed = parseAssuranceSamplingResult(candidate.text, { refs: turn.findings.map((finding) => finding.ref) });
+        if (!parsed.ok) {
+          gap(unparsableAssuranceSamplingAnswerGapReason(parsed.code, parsed.detail, candidate.text));
+          continue;
+        }
+        // The disposition names its finding by `ref`; the tier and the anchor unit are read back from
+        // the candidate the Run itself drew, never from the model's answer.
+        const byRef = new Map(turn.findings.map((finding) => [finding.ref, finding] as const));
+        for (const entry of parsed.result.dispositions) {
+          const finding = byRef.get(entry.ref)!;
+          dispositions.push({
+            ref: entry.ref,
+            unitOrdinal: finding.unitOrdinal,
+            tier: finding.tier,
+            disposition: entry.disposition,
+            reason: entry.reason,
+          });
+        }
+      } else if (result.terminal === 'completed') {
+        gap('技术回合完成但没有模型输出。');
+      } else if (result.terminal === 'failed') {
+        const failure = result.signals.find((signal) => signal.kind === 'failed');
+        // No safe retry here: one attempt per turn, and a retry-safe failure is a gap like any other.
+        gap(failure?.kind === 'failed' ? `${failure.failure.reason}（${failure.failure.code}）` : '适配器失败。');
+        // A Provider Account Limit ends the suboperation outright: no retry, no fallback, no second model.
+        if (failure?.kind === 'failed' && failure.failure.failureClass === 'provider-account-limit') break;
+      } else {
+        const failure = result.signals.find((signal) => signal.kind === 'interrupted');
+        gap(failure?.kind === 'interrupted' ? failure.failure.reason : '保证抽样被中断。');
+        break;
+      }
+    }
+    const usage = sampled.turnsWithUsage === 0 ? null : { inputTokens: sampled.inputTokens, outputTokens: sampled.outputTokens };
+    return assuranceSampleOutcome(draw, dispositions, usage, gapReasons);
+  }
+}
+
+/** The exact disclosure when the active Provider Processing policy does not name the suboperation. */
+export const ASSURANCE_SAMPLING_POLICY_BOUNDED = '保证抽样未派发：当前 Provider Processing 策略仅授权单元数内的传输' as const;
+
+/** Exactly what the sampling suboperation may read or move; the finding components are not among them. */
+interface AssuranceSamplingContext {
+  readonly active: ActiveRun;
+  readonly definition: AnalysisKindDefinition;
+  readonly harness: PrimaryAgentHarnessHandle;
+  readonly reduction: AnalysisReductionResult;
+  readonly manifest: CoverageManifestProjection;
+  readonly blocksById: ReadonlyMap<string, Pick<ManifestBlockInput, 'blockId' | 'kind' | 'level' | 'text'>>;
+  readonly admittedUserMessages: Set<string>;
+  readonly acceptedOutputDigests: Set<string>;
+  readonly liveAdapter: { instance: DeepSeekOpenAiCompatibleAdapter | null };
+  readonly usage: { inputTokens: number; outputTokens: number; requests: number };
+  readonly accumulated: UsageFacts[];
+  readonly ceilingState: () => EgressCeilingState;
+  readonly live: DeveloperLiveRuntime | null;
+  readonly policy: LaunchPolicyProjection;
+  /** Whether the Run had already stopped when the unit loop ended; a stopped Run samples nothing. */
+  readonly stopped: boolean;
 }
 
 /**

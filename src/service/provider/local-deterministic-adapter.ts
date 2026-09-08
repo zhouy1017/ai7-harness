@@ -1,5 +1,11 @@
 import type { LlmAdapter, LlmProviderInfo, LlmResolvedModelInfo, StreamChunk, GenerateOptions } from '@deepseek-ai/dsh-llm';
 import { sha256Hex } from '../analysis/canonical.js';
+import {
+  ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST,
+  assuranceSamplingRequestDigest,
+  parseAssuranceSamplingListedRefs,
+  parseAssuranceSamplingMessageHeader,
+} from '../analysis/assurance-sampling-contract.js';
 import { BASELINE_PROMPT_CONTRACT, parseUnitMessageHeader, unitRequestDigest } from '../analysis/contract.js';
 import {
   BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST,
@@ -42,6 +48,14 @@ import { fixtureEntryKey, resolveFixtureEntry, type ModelFixtureEntry, type Reso
  * keys entries by a unit's own block texts, which the reduction has none of, so it never answers
  * there; that mode exists for `tests/` and the reduction simply records a gap under it.
  *
+ * Each assurance sampling turn (S43) is matched the same way under unit ordinal `0`: its header names
+ * the anchor unit and carries that unit's content digest and the digest of the findings the turn
+ * listed, so its request digest is a function of the frozen sampling contract, the blocks carried, and
+ * the findings listed. Its responses name a finding as `{{ref:N}}` — the N-th finding listed in the
+ * message — because the factual kind mints a `findingId` from a committed block identity and no
+ * fixture author can know one. Content-digest mode never answers a sampling turn, for the same reason
+ * it never answers the reduction.
+ *
  * A test may instead construct the adapter with `resolveBy: 'content-digest'`, which keys the same
  * fixture by the unit's own block texts rather than by the request digest. Block identities are
  * minted per import, so a fixture generated from one import of a text cannot answer a fresh import
@@ -53,6 +67,7 @@ import { fixtureEntryKey, resolveFixtureEntry, type ModelFixtureEntry, type Reso
  */
 const BLOCK_PLACEHOLDER = /\{\{block:(\d+)\}\}/gu;
 const CROSS_UNIT_BLOCK_PLACEHOLDER = /\{\{unit:(\d+):block:(\d+)\}\}/gu;
+const SAMPLING_REF_PLACEHOLDER = /\{\{ref:(\d+)\}\}/gu;
 const BLOCK_LINE = /^\[(blk_[0-9a-f]{24})\] /u;
 /** The `({kind}{level})` marker the prompt contract writes between a block's identity and its text. */
 const BLOCK_KIND_MARKER = /^\((?:title|heading|paragraph)(?: h[1-6])?\) /u;
@@ -116,6 +131,11 @@ export function substituteCrossUnitBlockPlaceholders(text: string, citedBlocks: 
     citedBlocks.get(Number(unit))?.[Number(index) - 1] ?? placeholder);
 }
 
+/** Substitute `{{ref:N}}` placeholders with the N-th finding a sampling turn listed, 1-based. */
+export function substituteAssuranceSamplingRefPlaceholders(text: string, listedRefs: ReadonlyArray<string>): string {
+  return text.replace(SAMPLING_REF_PLACEHOLDER, (placeholder, index: string) => listedRefs[Number(index) - 1] ?? placeholder);
+}
+
 export class Ai7LocalDeterministicAdapter implements LlmAdapter {
   readonly #fixture: ResolvedModelFixture;
   readonly #promptContractDigest: string;
@@ -170,41 +190,51 @@ export class Ai7LocalDeterministicAdapter implements LlmAdapter {
       return;
     }
     const text = lastUserMessageText(options);
-    // The three headers are disjoint and are tried in turn, so a unit message of either analysis kind
-    // can never be read as the other kind's or as the reduction's. Which kind a request belongs to is
-    // decided by its header alone; its request digest is then keyed by that kind's contract digest,
-    // which the adapter was constructed with.
+    // The four headers are disjoint and are tried in turn, so a unit message of either analysis kind
+    // can never be read as the other kind's, as the reduction's, or as a sampling turn's. Which kind a
+    // request belongs to is decided by its header alone; its request digest is then keyed by that
+    // kind's contract digest, which the adapter was constructed with.
     const crossUnit = text === null ? null : parseCrossUnitMessageHeader(text);
-    const header = text === null || crossUnit !== null
+    const sampling = text === null || crossUnit !== null ? null : parseAssuranceSamplingMessageHeader(text);
+    const header = text === null || crossUnit !== null || sampling !== null
       ? null
       : parseUnitMessageHeader(text) ?? parseFactualReviewUnitMessageHeader(text);
-    if (crossUnit === null && header === null) {
+    if (crossUnit === null && sampling === null && header === null) {
       yield failure(AI7_FAILURE_CODES.FIXTURE_MISMATCH, '请求不含可识别的分析单元消息头。');
       return;
     }
-    // Ordinal 0 is the reduction's entry; it is keyed by the closed unit set its header names.
-    const ordinal = crossUnit === null ? header!.ordinal : 0;
+    // Ordinal 0 is not a unit: it is the reduction's entry, keyed by the closed unit set its header
+    // names, or a sampling turn's, keyed by the anchor unit and the findings its header names. The two
+    // cannot collide, because each digest is taken over its own contract digest and its own key set.
+    const ordinal = crossUnit === null && sampling === null ? header!.ordinal : 0;
     const expectedDigest = crossUnit !== null
       ? crossUnitRequestDigest(BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST, crossUnit.unitSetDigest)
-      : this.#resolveBy === 'content-digest'
-        ? unitContentDigest(ownBlockTextsOf(text!))
-        : unitRequestDigest(this.#promptContractDigest, header!.ordinal, header!.unitDigest);
+      : sampling !== null
+        ? assuranceSamplingRequestDigest(ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST, sampling.unitOrdinal, sampling.unitDigest, sampling.sampleDigest)
+        : this.#resolveBy === 'content-digest'
+          ? unitContentDigest(ownBlockTextsOf(text!))
+          : unitRequestDigest(this.#promptContractDigest, header!.ordinal, header!.unitDigest);
     const pairKey = fixtureEntryKey(ordinal, expectedDigest);
     const attempt = (this.#servedByKey.get(pairKey) ?? 0) + 1;
     this.#servedByKey.set(pairKey, attempt);
     const entry = resolveFixtureEntry(this.#entries, ordinal, expectedDigest, attempt);
     if (entry === undefined) {
-      const label = crossUnit === null && this.#resolveBy === 'content-digest' ? '内容摘要' : '请求摘要';
-      const subject = crossUnit === null ? `单元 ${ordinal}` : '跨单元归纳';
+      const named = crossUnit !== null || sampling !== null;
+      const label = !named && this.#resolveBy === 'content-digest' ? '内容摘要' : '请求摘要';
+      const subject = crossUnit !== null ? '跨单元归纳' : sampling !== null ? `单元 ${sampling.unitOrdinal} 的保证抽样` : `单元 ${ordinal}`;
       yield failure(AI7_FAILURE_CODES.FIXTURE_MISMATCH, `夹具 ${this.#fixture.identity} 没有${subject}在当前${label}下的对应响应。`);
       return;
     }
     const response = entry.response;
     switch (response.kind) {
       case 'unit-result': {
-        const replay = crossUnit === null
-          ? substituteBlockPlaceholders(response.text, ownBlockIdsOf(text!))
-          : substituteCrossUnitBlockPlaceholders(response.text, parseCrossUnitCitedBlocks(text!));
+        // A sampling response names each finding by `{{ref:N}}` — the N-th finding its turn listed —
+        // because the factual kind mints a `findingId` per import and a fixture cannot know one.
+        const replay = sampling !== null
+          ? substituteAssuranceSamplingRefPlaceholders(response.text, parseAssuranceSamplingListedRefs(text!))
+          : crossUnit === null
+            ? substituteBlockPlaceholders(response.text, ownBlockIdsOf(text!))
+            : substituteCrossUnitBlockPlaceholders(response.text, parseCrossUnitCitedBlocks(text!));
         yield { type: 'block-start', index: 0, blockType: 'text' };
         yield { type: 'text-delta', index: 0, text: replay };
         yield { type: 'block-end', index: 0, block: { type: 'text', text: replay } };

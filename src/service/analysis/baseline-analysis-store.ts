@@ -218,12 +218,12 @@ export interface RunProgress {
   readonly attemptState: RunAttemptState | null;
   readonly completedAttempts: number;
   readonly longestSettledUnitMs: number | null;
-  /** Which declared step of the Run is in flight: the unit loop, or the one cross-unit reduction after it. */
+  /** Which declared step of the Run is in flight: the unit loop, the cross-unit reduction, or the sample. */
   readonly stage: RunProgressStage;
 }
 
 /** The Run's declared steps, in the order the execution owner performs them. */
-export type RunProgressStage = 'units' | 'cross-unit-reduction';
+export type RunProgressStage = 'units' | 'cross-unit-reduction' | 'assurance-sampling';
 
 export type ProgressReader = (runRecordId: string) => RunProgress | null;
 
