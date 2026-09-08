@@ -238,6 +238,12 @@ describe('provider route generalization', () => {
 });
 
 describe('model capability profiles', () => {
+  /** A test-local profile: the live one with some capabilities restated, so a case may declare what no shipped profile does. */
+  const shape = (capabilities: Partial<ProviderModelProfile['capabilities']>): ProviderModelProfile => ({
+    ...OPENCODE_GO_V4_FLASH_PROFILE,
+    capabilities: { ...OPENCODE_GO_V4_FLASH_PROFILE.capabilities, ...capabilities },
+  });
+
   it('keys every model by route and model, so one model id behind two routes is two profiles', () => {
     expect(Object.keys(PROVIDER_MODEL_PROFILES).sort()).toEqual([
       'deepseek-open-platform/deepseek-v4-pro', 'opencode-go/deepseek-v4-flash', 'opencode-go/deepseek-v4-pro',
@@ -313,18 +319,38 @@ describe('model capability profiles', () => {
   });
 
   it('refuses to assemble a body for a capability no adapter implements', () => {
-    const shape = (capabilities: Partial<ProviderModelProfile['capabilities']>): ProviderModelProfile => ({
-      ...OPENCODE_GO_V4_FLASH_PROFILE,
-      capabilities: { ...OPENCODE_GO_V4_FLASH_PROFILE.capabilities, ...capabilities },
-    });
     const context = { attribution: attributionHeaders(), promptContractDigest: BASELINE_PROMPT_CONTRACT_DIGEST, sessionId: randomUUID() };
     const live = { ...request(), provider: OPENCODE_GO_ROUTE, model: OPENCODE_GO_MODEL };
     expect(() => assembleProviderRequest(OPENCODE_GO_ROUTE_PROFILE, shape({ requestShape: 'anthropic-messages' }), live, context))
       .toThrowError(/PROVIDER_REQUEST_SHAPE_UNSUPPORTED/u);
-    expect(() => assembleProviderRequest(OPENCODE_GO_ROUTE_PROFILE, shape({ structuredOutput: 'json-object' }), live, context))
+    expect(() => assembleProviderRequest(OPENCODE_GO_ROUTE_PROFILE, shape({ requestShape: 'openai-responses' }), live, context))
+      .toThrowError(/PROVIDER_REQUEST_SHAPE_UNSUPPORTED/u);
+    // Naming a structured-output constraint is not implementing it: only `json-object` is assembled.
+    expect(() => assembleProviderRequest(OPENCODE_GO_ROUTE_PROFILE, shape({ structuredOutput: 'json-schema' }), live, context))
+      .toThrowError(/PROVIDER_STRUCTURED_OUTPUT_UNSUPPORTED/u);
+    expect(() => assembleProviderRequest(OPENCODE_GO_ROUTE_PROFILE, shape({ structuredOutput: 'tool-call' }), live, context))
       .toThrowError(/PROVIDER_STRUCTURED_OUTPUT_UNSUPPORTED/u);
     expect(() => assembleProviderRequest(OPENCODE_GO_ROUTE_PROFILE, DEEPSEEK_V4_PRO_PROFILE, live, context))
       .toThrowError(/PROVIDER_MODEL_ROUTE_MISMATCH/u);
+  });
+
+  it('requires a JSON object of a profile that declares it, by adding exactly one field to the body', () => {
+    const context = { attribution: attributionHeaders(), promptContractDigest: BASELINE_PROMPT_CONTRACT_DIGEST, sessionId: randomUUID() };
+    const live = { ...request(), provider: OPENCODE_GO_ROUTE, model: OPENCODE_GO_MODEL };
+    const asked = assembleProviderRequest(OPENCODE_GO_ROUTE_PROFILE, OPENCODE_GO_V4_FLASH_PROFILE, live, context);
+    const required = assembleProviderRequest(OPENCODE_GO_ROUTE_PROFILE, shape({ structuredOutput: 'json-object' }), live, context);
+    const askedBody = JSON.parse(asked.body) as Record<string, unknown>;
+    // The whole difference, stated as a difference: the `none` body plus `response_format`, nothing else.
+    expect(JSON.parse(required.body)).toEqual({ ...askedBody, response_format: { type: 'json_object' } });
+    // The chat-completions spelling on the wire, not a paraphrase of it.
+    expect(required.body).toContain('"response_format":{"type":"json_object"}');
+    expect(required.url).toBe(asked.url);
+    expect(required.headers).toEqual(asked.headers);
+    // Different bytes are a different request: the declaring profile pays for the constraint in its digest.
+    expect(required.requestDigest).not.toBe(asked.requestDigest);
+    // A profile that declares nothing sends nothing, which is why both current profiles are untouched.
+    expect(asked.body).not.toContain('response_format');
+    expect(assembleDeepSeekRequest(request(), attributionHeaders(), BASELINE_PROMPT_CONTRACT_DIGEST).body).not.toContain('response_format');
   });
 });
 
