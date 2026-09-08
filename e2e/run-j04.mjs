@@ -1868,7 +1868,10 @@ async function main() {
       JSON.stringify(revision5.provenance?.adaptations) === JSON.stringify({ count: 1, unitOrdinals: [5] }) && revision5.provenance?.planVersion === 1 &&
       revision5.provenance?.runRecordId === settledRetry.run.runRecordId && revision5.bindingPin?.bindingDigest === attemptRetry.executionBinding.bindingDigest &&
       revision5.adapterPin?.fixtureIdentity === RETRY_FIXTURE_IDENTITY && revision5.adapterPin?.fixtureSha256 === retryFixtureDigest &&
-      sameRecord(revision5.update?.counts, retryOption.expected) && revision5.coverage?.unitsClosed === SAMPLE1_UNITS - 1 && revision5.coverage?.gapCount === 1,
+      sameRecord(revision5.update?.counts, retryOption.expected) && revision5.coverage?.unitsClosed === SAMPLE1_UNITS - 1 && revision5.coverage?.gapCount === 1 &&
+      // Synchronized delta (#276): this Run's report counts the adaptation, and its reflection closed
+      // from the fixture entry keyed by this Run's own accounting.
+      settledRetry.taskOutcome?.report?.units?.retried === 1 && settledRetry.taskOutcome?.report?.ifRedone?.state === 'closed',
     'safe-retry-record', { run: settledRetry?.run === undefined ? undefined : { ...settledRetry.run, attempt: undefined }, adaptation, spans: retrySpans, provenance: revision5?.provenance, usage: revision5?.usage });
     await assertRenderer(renderer, `(() => {
       const card=document.querySelector('.baseline-analysis-card');
@@ -1980,7 +1983,10 @@ async function main() {
       revision6?.ordinal === 6 && revision6.update?.mode === 'reanalyze-range' && sameRecord(revision6.update?.selectedRange, rangeB) && sameRecord(revision6.update?.counts, driftOptionB.expected) &&
       revision6.update?.predecessor?.revisionId === revision5.revisionId && revision6.provenance?.planVersion === 2 && JSON.stringify(revision6.provenance?.adaptations) === JSON.stringify({ count: 0, unitOrdinals: [] }) &&
       // Synchronized delta (#274, #275): two recomputed units, the reduction's turn, and the sample's.
-      revision6.usage?.requests === 3 + SAMPLING_TURNS && revision6.adapterPin?.fixtureSha256 === retryFixtureDigest && revision6.gaps?.length === 1 && revision6.gaps[0].unitOrdinal === 2,
+      revision6.usage?.requests === 3 + SAMPLING_TURNS && revision6.adapterPin?.fixtureSha256 === retryFixtureDigest && revision6.gaps?.length === 1 && revision6.gaps[0].unitOrdinal === 2 &&
+      // Synchronized delta (#276): this Run adapted nothing, and its reflection closed from the
+      // fixture entry keyed by its own accounting.
+      settledDrift.taskOutcome?.report?.units?.retried === 0 && settledDrift.taskOutcome?.report?.ifRedone?.state === 'closed',
     'plan-revision-settled', { authorization: settledDrift?.authorization, planVersions: settledDrift?.planVersions, provenance: revision6?.provenance, update: revision6?.update });
     await assertRenderer(renderer, `(() => { const card=document.querySelector('.baseline-analysis-card'); const history=card?.querySelector('.analysis-history'); return card?.dataset.resultRevisionOrdinal==='6' && card.dataset.adaptationCount==='0' && card.dataset.planVersion==='2' && card.querySelector('[data-plan-version-ordinal="2"][data-plan-version-state="bound"]')!==null && card.querySelector('.analysis-plan-versions [data-plan-revision-next="2"][data-plan-revision-resolved="true"]')!==null && card.textContent.includes('计划版本 2') && card.querySelector('.analysis-timeline')?.dataset.timelineAdaptations==='0' && history?.dataset.historyCount==='6' && ${ONLY_ANALYSIS_ACTIONS}; })()`, 'plan-revision-overview-surface');
 

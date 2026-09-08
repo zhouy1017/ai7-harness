@@ -1,7 +1,7 @@
 {
   "schema": "ai7.model-fixture/1",
   "identity": "sample1-baseline-transient-retry",
-  "description": "Hand-written synthetic shape (vi) layered over shape (ii): identical to sample1-baseline-one-unit-failure except that Analysis Unit 5 answers its first attempt with a transient PROVIDER_ERROR server error (status 503). The entry names attempt 1 only, so the safe retry of the same unit and request digest falls through to the base's conforming unit result; unit 2 keeps its non-retry-safe adapter failure and stays a gap with no adaptation. The J-04 safe-retry stages and the L2 suite consume this composite fixture. The safe retry settles unit 5 to the base's own result, so this variant's closed unit set is the base's, and it inherits both of sample1-baseline-one-unit-failure's unit-ordinal-0 cross-unit reduction entries without restating either. Public synthetic text only; no manuscript content.",
+  "description": "Hand-written synthetic shape (vi) layered over shape (ii): identical to sample1-baseline-one-unit-failure except that Analysis Unit 5 answers its first attempt with a transient PROVIDER_ERROR server error (status 503). The entry names attempt 1 only, so the safe retry of the same unit and request digest falls through to the base's conforming unit result; unit 2 keeps its non-retry-safe adapter failure and stays a gap with no adaptation. The J-04 safe-retry stages and the L2 suite consume this composite fixture. The safe retry settles unit 5 to the base's own result, so this variant's closed unit set is the base's, and it inherits both of the base's cross-unit reduction entries without restating either. Three unit-ordinal-0 entries answer the Run Report reflection turn, one per distinct accounting a Run on this fixture produces: the L2 suite's first baseline, and J-04's safe-retry range Run and its plan-revision range Run. Public synthetic text only; no manuscript content and no finding text.",
   "basedOn": "sample1-baseline-one-unit-failure",
   "provider": "ai7-local-deterministic",
   "model": "ai7-deterministic-fixture",
@@ -24,6 +24,24 @@
         "kind": "unit-result",
         "text": "{\"schema\":\"ai7.analysis.run-report-reflection-result/1\",\"items\":[{\"suggestion\":\"对触发过安全重试的单元，下一次运行可以先缩小单元规模或延长首轮等待，减少重试。\",\"basis\":\"本次记录了 1 次计划内调整，该单元在安全重试后的第 2 次尝试才闭合。\"},{\"suggestion\":\"以适配器失败闭合的单元建议下一轮单独重算一次，再决定是否整本重算。\",\"basis\":\"8 个提交单元中有 1 个以 adapter-failure 闭合，且它没有触发安全重试。\"},{\"suggestion\":\"把两次尝试的用量都计入单元预算，不要只按一次尝试估算。\",\"basis\":\"单元阶段的请求数比提交单元数多 1，多出的正是那一次安全重试。\"}]}",
         "usage": { "inputTokens": 920, "outputTokens": 220 }
+      }
+    },
+    {
+      "unitOrdinal": 0,
+      "requestDigest": "4b75c1aea668a788c490dfb6084ef6deb7b621ba41f1dfd01f972e2dcff28e12",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.analysis.run-report-reflection-result/1\",\"items\":[{\"suggestion\":\"以适配器失败闭合的单元，下一轮建议单独重算，而不是随所选范围一起重算。\",\"basis\":\"本次覆盖 8 个单元、已闭合 7 个，仍有 1 个以缺口闭合。\"},{\"suggestion\":\"对触发过安全重试的单元缩小规模或延长首轮等待，减少重试次数。\",\"basis\":\"本次记录了 1 次计划内调整，该单元在重试后的第 2 次尝试才闭合。\"}]}",
+        "usage": { "inputTokens": 890, "outputTokens": 195 }
+      }
+    },
+    {
+      "unitOrdinal": 0,
+      "requestDigest": "fb7ea5017f1402a189a3e9958e8306bb491a8d3cee4da550432378632eb26838",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.analysis.run-report-reflection-result/1\",\"items\":[{\"suggestion\":\"所选范围下一轮可以再向前扩一个单元，让重算集合覆盖仍是缺口的那个单元。\",\"basis\":\"本次复用 6 个单元、重算 2 个，重算后仍有 1 个单元以缺口闭合。\"},{\"suggestion\":\"本轮没有触发任何计划内调整，可以维持当前的单元预算不变。\",\"basis\":\"计划内调整次数为 0，每个重算单元都只用了一次尝试。\"}]}",
+        "usage": { "inputTokens": 870, "outputTokens": 185 }
       }
     }
   ]
