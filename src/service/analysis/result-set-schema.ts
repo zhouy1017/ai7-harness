@@ -1,3 +1,4 @@
+import { FACTUAL_REVIEW_CONTRACT_VERSION, FACTUAL_REVIEW_KIND } from '../../shared/protocol.js';
 import { BASELINE_ANALYSIS_CONTRACT_VERSION, BASELINE_ANALYSIS_KIND } from './identity.js';
 
 /**
@@ -6,12 +7,16 @@ import { BASELINE_ANALYSIS_CONTRACT_VERSION, BASELINE_ANALYSIS_KIND } from './id
  * revisions, and the typed per-unit results each revision closed or recorded as a gap. They are
  * installed by the task-ledger schema revision 15 and never rewritten; `analysis_task_outcomes`
  * references a revision, so these relations are created before it.
+ *
+ * The relations were keyed by kind from the start; their CHECKs were not. Schema revision 20 (Issue
+ * #53) widens exactly those two CHECKs so a Book may hold the factual-review Result Set beside the
+ * baseline one, and the `UNIQUE(book_id, kind)` that has always been here keeps them one apiece.
  */
 export const ANALYSIS_RESULT_SET_SCHEMA_SQL = {
   analysis_result_sets: `CREATE TABLE analysis_result_sets (
     result_set_id TEXT PRIMARY KEY,
     book_id TEXT NOT NULL REFERENCES books(book_id),
-    kind TEXT NOT NULL CHECK(kind = '${BASELINE_ANALYSIS_KIND}'),
+    kind TEXT NOT NULL CHECK(kind IN ('${BASELINE_ANALYSIS_KIND}', '${FACTUAL_REVIEW_KIND}')),
     created_at TEXT NOT NULL,
     canonical_json TEXT NOT NULL,
     sha256 TEXT NOT NULL UNIQUE CHECK(length(sha256) = 64),
@@ -27,7 +32,7 @@ export const ANALYSIS_RESULT_SET_SCHEMA_SQL = {
     manuscript_revision_id TEXT NOT NULL REFERENCES manuscript_revisions(revision_id),
     manuscript_revision_digest TEXT NOT NULL CHECK(length(manuscript_revision_digest) = 64),
     coverage_manifest_sha256 TEXT NOT NULL CHECK(length(coverage_manifest_sha256) = 64),
-    contract_version TEXT NOT NULL CHECK(contract_version = '${BASELINE_ANALYSIS_CONTRACT_VERSION}'),
+    contract_version TEXT NOT NULL CHECK(contract_version IN ('${BASELINE_ANALYSIS_CONTRACT_VERSION}', '${FACTUAL_REVIEW_CONTRACT_VERSION}')),
     created_at TEXT NOT NULL,
     canonical_json TEXT NOT NULL,
     sha256 TEXT NOT NULL UNIQUE CHECK(length(sha256) = 64),

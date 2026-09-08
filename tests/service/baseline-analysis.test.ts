@@ -12,11 +12,13 @@ import type { SecretResolver } from '../../src/service/provider/credential-broke
 import {
   ANALYSIS_LEDGER_REVISION_15_SQL,
   ANALYSIS_LEDGER_REVISION_16_SQL,
+  ANALYSIS_LEDGER_REVISION_19_SQL,
   ANALYSIS_LEDGER_REVISION_17_TABLES,
   ANALYSIS_LEDGER_SCHEMA_SQL,
   ANALYSIS_LEDGER_TRIGGER_SQL,
   J04_BASELINE_ANALYSIS_SCHEMA_VERSION,
   SUCCESSIVE_TASK_SCHEMA_VERSION,
+  FACTUAL_REVIEW_SCHEMA_VERSION,
   TEXT_CONVERSION_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_SQL,
 } from '../../src/service/task-authorization.js';
@@ -172,6 +174,40 @@ function downgradeToRevision16(databasePath: string): void {
     database.exec('BEGIN IMMEDIATE');
     downgradePlanRecordsToRevision16(database);
     database.exec(`PRAGMA user_version = ${SUCCESSIVE_TASK_SCHEMA_VERSION}`);
+    database.exec('COMMIT');
+    database.exec('PRAGMA foreign_keys = ON');
+  } finally {
+    database.close();
+  }
+}
+
+const REVISION_19_INTENT_COLUMNS =
+  'task_intent_id, book_id, kind, contract_version, goal, created_at, canonical_json, sha256, mode, predecessor_revision_id, selected_start_position, selected_end_position';
+const RESULT_SET_COLUMNS = 'result_set_id, book_id, kind, created_at, canonical_json, sha256';
+const RESULT_SET_REVISION_COLUMNS =
+  'revision_id, result_set_id, ordinal, task_intent_id, run_record_id, attempt_id, manuscript_revision_id, manuscript_revision_digest, coverage_manifest_sha256, contract_version, created_at, canonical_json, sha256';
+
+/** Rebuild one relation in an exact earlier shape with every row copied in its original order. */
+function downgradeRelation(database: DatabaseSync, table: string, sql: string, columns: string): void {
+  database.exec(`CREATE TEMP TABLE downgrade_${table} AS SELECT rowid AS r, * FROM ${table}`);
+  database.exec(`DROP TABLE ${table}`);
+  database.exec(sql);
+  database.exec(`INSERT INTO ${table}(${columns}) SELECT ${columns} FROM temp.downgrade_${table} ORDER BY r`);
+  database.exec(`DROP TABLE temp.downgrade_${table}`);
+  database.exec(ANALYSIS_LEDGER_TRIGGER_SQL[`${table}_no_update`]!);
+  database.exec(ANALYSIS_LEDGER_TRIGGER_SQL[`${table}_no_delete`]!);
+}
+
+/** Rebuild the revision-20 store in its exact revision-19 shape (one analysis kind) and stamp it as revision 19. */
+function downgradeToRevision19(databasePath: string): void {
+  const database = new DatabaseSync(databasePath);
+  try {
+    database.exec('PRAGMA foreign_keys = OFF');
+    database.exec('BEGIN IMMEDIATE');
+    downgradeRelation(database, 'analysis_result_set_revisions', ANALYSIS_LEDGER_REVISION_19_SQL.analysis_result_set_revisions, RESULT_SET_REVISION_COLUMNS);
+    downgradeRelation(database, 'analysis_result_sets', ANALYSIS_LEDGER_REVISION_19_SQL.analysis_result_sets, RESULT_SET_COLUMNS);
+    downgradeRelation(database, 'analysis_task_intents', ANALYSIS_LEDGER_REVISION_19_SQL.analysis_task_intents, REVISION_19_INTENT_COLUMNS);
+    database.exec(`PRAGMA user_version = ${TEXT_CONVERSION_SCHEMA_VERSION}`);
     database.exec('COMMIT');
     database.exec('PRAGMA foreign_keys = ON');
   } finally {
@@ -397,7 +433,7 @@ describe('baseline manuscript analysis over the real store on exact sample1', ()
     // drift or a retry-safe failure leaves the Plan Revision and Plan Adaptation relations empty.
     const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
     try {
-      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(TEXT_CONVERSION_SCHEMA_VERSION);
+      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(FACTUAL_REVIEW_SCHEMA_VERSION);
       const expectedEmpty = new Set(['analysis_plan_revisions', 'analysis_plan_adaptations']);
       for (const table of Object.keys(ANALYSIS_LEDGER_SCHEMA_SQL)) {
         const total = (database.prepare(`SELECT count(*) total FROM ${table}`).get() as { total: number }).total;
@@ -952,7 +988,7 @@ describe('baseline manuscript analysis over the real store on exact sample1', ()
       try {
         const after = new DatabaseSync(databasePath, { readOnly: true });
         try {
-          expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(TEXT_CONVERSION_SCHEMA_VERSION);
+          expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(FACTUAL_REVIEW_SCHEMA_VERSION);
           for (const table of j03Tables) expect(tableRows(after, table)).toEqual(j03Before[table]);
           for (const table of analysisTables) {
             expect(tableRows(after, table, table === 'analysis_task_intents' ? REVISION_15_INTENT_COLUMNS : '*')).toEqual(analysisBefore[table]);
@@ -989,6 +1025,76 @@ describe('baseline manuscript analysis over the real store on exact sample1', ()
     }
   }, 300_000);
 
+  it('migrates a revision-19 store forward to the two-kind schema with every row byte for byte', async () => {
+    await requireExactSample1(roots.codeRoot);
+    const databasePath = join(roots.dataRoot, 'store', 'ai7.sqlite');
+    const store = await openWithRoute(roots.dataRoot, fixture);
+    const owner = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: fakeSecretResolver() });
+    let bookId: string;
+    try {
+      const imported = await importSample1Book(store, roots.codeRoot, 'L2 sample1 修订版 19 迁移');
+      bookId = imported.bookId;
+      await pinEditorialWorkspaceProfileRevision2(store, bookId);
+      recordMissingCredentialConnection(store, 'L2 主编辑连接');
+      const first = await runToSettled(store, owner, bookId, null);
+      expect(first.settled.resultSetRevision!.ordinal).toBe(1);
+      store.markCleanShutdown();
+    } finally {
+      await owner.dispose();
+      store.close();
+    }
+    // Every row of the three relations revision 20 rebuilds, exactly as revision 19 wrote them.
+    const j03Tables = Object.keys(TASK_AUTHORIZATION_SCHEMA_SQL);
+    const analysisTables = Object.keys(ANALYSIS_LEDGER_SCHEMA_SQL);
+    const before = new DatabaseSync(databasePath, { readOnly: true });
+    let j03Before: Record<string, Row[]>;
+    let analysisBefore: Record<string, Row[]>;
+    try {
+      j03Before = Object.fromEntries(j03Tables.map((table) => [table, tableRows(before, table)]));
+      analysisBefore = Object.fromEntries(analysisTables.map((table) => [table, tableRows(before, table)]));
+      expect(analysisBefore['analysis_task_intents']).toHaveLength(1);
+      expect(analysisBefore['analysis_result_sets']).toHaveLength(1);
+      expect(analysisBefore['analysis_result_set_revisions']).toHaveLength(1);
+    } finally {
+      before.close();
+    }
+
+    downgradeToRevision19(databasePath);
+    const downgraded = new DatabaseSync(databasePath, { readOnly: true });
+    try {
+      expect((downgraded.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(TEXT_CONVERSION_SCHEMA_VERSION);
+      // The revision-19 CHECKs admit one kind and nothing else, which is what makes this a migration.
+      expect(() => downgraded.prepare('SELECT 1').all()).not.toThrow();
+    } finally {
+      downgraded.close();
+    }
+
+    const migrated = await openWithRoute(roots.dataRoot, fixture);
+    try {
+      const after = new DatabaseSync(databasePath, { readOnly: true });
+      try {
+        expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(FACTUAL_REVIEW_SCHEMA_VERSION);
+        for (const table of j03Tables) expect(tableRows(after, table)).toEqual(j03Before[table]);
+        for (const table of analysisTables) expect(tableRows(after, table)).toEqual(analysisBefore[table]);
+        // The widened CHECKs are in place: the second kind is admissible where it was not before.
+        const intents = after.prepare("SELECT sql FROM sqlite_schema WHERE name = 'analysis_task_intents'").get() as { sql: string };
+        expect(intents.sql).toContain("'factual-review'");
+        const sets = after.prepare("SELECT sql FROM sqlite_schema WHERE name = 'analysis_result_sets'").get() as { sql: string };
+        expect(sets.sql).toContain("'factual-review'");
+        const revisions = after.prepare("SELECT sql FROM sqlite_schema WHERE name = 'analysis_result_set_revisions'").get() as { sql: string };
+        expect(revisions.sql).toContain("'ai7.factual-review/1'");
+      } finally {
+        after.close();
+      }
+      const restarted = migrated.inspectBaselineAnalysis(bookId);
+      expect(restarted).toMatchObject({ state: 'settled', taskIntent: { mode: 'first-baseline' }, history: { latestOrdinal: 1 } });
+      expect(migrated.inspectFactualReview(bookId).state).toBe('available');
+      migrated.markCleanShutdown();
+    } finally {
+      migrated.close();
+    }
+  }, 300_000);
+
   it('migrates a revision-14 store forward without rewriting any J-03 row', async () => {
     const store = await openWithRoute(roots.dataRoot, null);
     store.markCleanShutdown();
@@ -1012,7 +1118,7 @@ describe('baseline manuscript analysis over the real store on exact sample1', ()
     }
     const verify = new DatabaseSync(databasePath);
     try {
-      expect((verify.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(TEXT_CONVERSION_SCHEMA_VERSION);
+      expect((verify.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(FACTUAL_REVIEW_SCHEMA_VERSION);
       for (const table of Object.keys(ANALYSIS_LEDGER_SCHEMA_SQL)) {
         expect((verify.prepare(`SELECT count(*) total FROM ${table}`).get() as { total: number }).total).toBe(0);
       }

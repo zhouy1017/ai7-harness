@@ -34,6 +34,18 @@ const MAX_BASE_DEPTH = 4;
 const MAX_FIXTURE_ATTEMPT = 8;
 /** The keys an entry may carry beside the three it must; every other key is still refused. */
 const OPTIONAL_ENTRY_KEYS = ['attempt', 'contentDigest'] as const;
+/** The keys a fixture may carry beside the seven it must; every other key is still refused. */
+const OPTIONAL_FIXTURE_KEYS = ['provenance'] as const;
+
+/**
+ * How a fixture's responses came to exist. `recorded` is the default and what every fixture written
+ * before this key existed is: a response captured from a model, or hand-written to stand in for one.
+ * `authored` states that a human wrote the responses after reading the admitted manuscript units they
+ * answer — the honest provenance of a fixture whose quotations are verbatim manuscript text (ADR
+ * 0043), and the value the S41 generator replaces when it records the same entries from a live item.
+ */
+export type ModelFixtureProvenance = 'recorded' | 'authored';
+const FIXTURE_PROVENANCE: readonly ModelFixtureProvenance[] = ['recorded', 'authored'];
 
 export type ModelFixtureResponse =
   | { readonly kind: 'unit-result'; readonly text: string; readonly usage: { readonly inputTokens: number; readonly outputTokens: number } }
@@ -57,6 +69,8 @@ export interface ModelFixture {
   readonly identity: string;
   readonly description: string;
   readonly basedOn: string | null;
+  /** How this fixture came to exist; a fixture that does not say is `recorded`. */
+  readonly provenance: ModelFixtureProvenance;
   readonly provider: 'ai7-local-deterministic';
   readonly model: 'ai7-deterministic-fixture';
   readonly entries: ReadonlyArray<ModelFixtureEntry>;
@@ -66,6 +80,8 @@ export interface ModelFixture {
 export interface ResolvedModelFixture {
   readonly identity: string;
   readonly description: string;
+  /** The head fixture's provenance; a base it restates entries from keeps its own. */
+  readonly provenance: ModelFixtureProvenance;
   readonly lineage: ReadonlyArray<{ identity: string; sha256: string }>;
   readonly entries: ReadonlyMap<string, ModelFixtureEntry>;
   /** Digest over the lineage digests; the binding pins it. */
@@ -131,8 +147,13 @@ function parseResponse(value: unknown): ModelFixtureResponse {
 }
 
 export function parseModelFixture(value: unknown): ModelFixture {
-  requireFixture(isRecord(value) && hasExactKeys(value, ['schema', 'identity', 'description', 'basedOn', 'provider', 'model', 'entries']),
-    '夹具键集合无效。');
+  // The seven required keys, plus whichever optional key this fixture actually carries: a fixture
+  // naming none is the exact key set the schema has always accepted, and an unknown key is refused.
+  requireFixture(isRecord(value) && hasExactKeys(value, [
+    'schema', 'identity', 'description', 'basedOn', 'provider', 'model', 'entries',
+    ...OPTIONAL_FIXTURE_KEYS.filter((key) => key in value),
+  ]), '夹具键集合无效。');
+  requireFixture(!('provenance' in value) || FIXTURE_PROVENANCE.includes(value.provenance as ModelFixtureProvenance), '夹具来源标注无效。');
   requireFixture(value.schema === MODEL_FIXTURE_SCHEMA, '夹具 schema 无效。');
   requireFixture(typeof value.identity === 'string' && FIXTURE_IDENTITY_PATTERN.test(value.identity), '夹具身份无效。');
   requireFixture(wellFormed(value.description, 1_024), '夹具描述无效。');
@@ -169,6 +190,7 @@ export function parseModelFixture(value: unknown): ModelFixture {
     identity: value.identity,
     description: value.description,
     basedOn: value.basedOn as string | null,
+    provenance: ('provenance' in value ? value.provenance : 'recorded') as ModelFixtureProvenance,
     provider: 'ai7-local-deterministic',
     model: 'ai7-deterministic-fixture',
     entries,
@@ -218,6 +240,7 @@ export async function loadModelFixture(fixturesRoot: string, identity: string): 
   return {
     identity,
     description: chain[0]!.fixture.description,
+    provenance: chain[0]!.fixture.provenance,
     lineage,
     entries,
     sha256: sha256Hex(lineage.map((link) => `${link.identity}:${link.sha256}`).join('\n')),

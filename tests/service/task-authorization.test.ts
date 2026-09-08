@@ -7,7 +7,7 @@ import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import {
   ANALYSIS_LEDGER_SCHEMA_SQL,
-  TEXT_CONVERSION_SCHEMA_VERSION,
+  FACTUAL_REVIEW_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_SQL,
   TaskAuthorizationError,
   canonicalRecord,
@@ -447,7 +447,7 @@ describe('task authorization over the real store on exact sample1', () => {
     const database = new DatabaseSync(storeDatabasePath());
     try {
       expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version)
-        .toBe(TEXT_CONVERSION_SCHEMA_VERSION);
+        .toBe(FACTUAL_REVIEW_SCHEMA_VERSION);
       expect(ANALYSIS_LEDGER_TABLES.length).toBeGreaterThan(0);
       for (const table of ANALYSIS_LEDGER_TABLES) {
         const rows = database.prepare(`SELECT count(*) total FROM ${table}`).get() as { total: number };

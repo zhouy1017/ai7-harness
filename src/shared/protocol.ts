@@ -1,4 +1,4 @@
-export const SERVICE_PROTOCOL_VERSION = 25 as const;
+export const SERVICE_PROTOCOL_VERSION = 26 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -1305,7 +1305,19 @@ export interface AnalysisGapProjection {
 }
 
 export interface AnalysisReducerStageProjection {
-  stage: 'unit-validation' | 'section-reduction' | 'contradiction-continuity' | 'cross-unit-reduction' | 'book-synthesis';
+  /**
+   * The declared reducer stages of every analysis kind. The first five are the baseline kind's; the
+   * factual-review kind (S18a) reports `unit-validation`, then `reference-integrity` — the
+   * deterministic location of each quotation in the block it names — and `finding-reduction`.
+   */
+  stage:
+    | 'unit-validation'
+    | 'section-reduction'
+    | 'contradiction-continuity'
+    | 'cross-unit-reduction'
+    | 'book-synthesis'
+    | 'reference-integrity'
+    | 'finding-reduction';
   state: 'closed' | 'closed-with-gaps' | 'not-run';
   inputCount: number;
 }
@@ -1381,8 +1393,21 @@ export interface AnalysisAssuranceAxis {
   lowConfidenceUnitCount: number;
   /** Model-driven cross-unit findings, disclosed beside the deterministic count and never folded into it. */
   crossUnitFindingCount: number;
-  statement: '仅为模型输出的结构化归纳；不构成事实判定、编辑评审或稿件变更。';
+  /** The kind's own statement of what its result is and is not; one exact text per analysis kind. */
+  statement: AnalysisAssuranceStatement;
 }
+
+/**
+ * The assurance statement of each analysis kind, exact and fixed. The baseline kind's says its result
+ * is a structured summary; the factual-review kind's says its result is a list of checkable assertions
+ * with their exact quotation positions and that no external evidence has checked any of them.
+ */
+export const BASELINE_ANALYSIS_ASSURANCE_STATEMENT = '仅为模型输出的结构化归纳；不构成事实判定、编辑评审或稿件变更。' as const;
+export const FACTUAL_REVIEW_ASSURANCE_STATEMENT =
+  '仅为模型列出的可核查断言与其精确引文位置；未经外部证据核查，不构成事实判定、编辑评审或稿件变更。' as const;
+export type AnalysisAssuranceStatement =
+  | typeof BASELINE_ANALYSIS_ASSURANCE_STATEMENT
+  | typeof FACTUAL_REVIEW_ASSURANCE_STATEMENT;
 
 export const BASELINE_ANALYSIS_KIND = 'baseline-manuscript-analysis' as const;
 export const BASELINE_ANALYSIS_CONTRACT_VERSION = 'ai7.baseline-manuscript-analysis/1' as const;
@@ -1414,6 +1439,43 @@ export const BASELINE_ANALYSIS_MODE_MEANINGS = {
   'reanalyze-range': '绕过所选内容块范围内的单元及其重叠上下文来自这些单元的单元的既有模型结果，其余兼容单元按血缘复用，并针对当前稿件 pin 重新归约四个状态轴。',
   'reanalyze-book': '绕过全部既有模型结果，按当前覆盖清单重算每个分析单元，即使清单与前一修订版完全相同也不复用任何单元。',
 } as const satisfies Record<BaselineAnalysisTaskMode, string>;
+
+/**
+ * The second analysis kind (plan slice S18a): a **factual review** of the same Book, on the same real
+ * path, with its own exact-versioned contract, Result Set identity, and Task modes. It lists the
+ * Manuscript Assertions of each Analysis Unit and anchors each to the exact quotation position it
+ * claims; it fetches no evidence, so nothing it records is a factual judgement (ADR 0066, ADR 0074).
+ */
+export const FACTUAL_REVIEW_KIND = 'factual-review' as const;
+export const FACTUAL_REVIEW_CONTRACT_VERSION = 'ai7.factual-review/1' as const;
+export const FACTUAL_REVIEW_TASK_GOAL = '对当前书稿执行事实核查，逐单元列出可核查断言并精确定位其引文，形成结果集修订版。' as const;
+export const FACTUAL_REVIEW_EXPECTED_OUTCOME = '事实核查结果集修订版（事实核查契约 v1）' as const;
+
+/**
+ * The factual kind's two Task modes: the whole manuscript, or one explicitly selected block range.
+ * `range` is admitted by the durable schema (revision 20) and carries its fixed goal; the Task surface
+ * that offers it arrives with S18b, so this slice prepares only `whole-manuscript`.
+ */
+export type FactualReviewTaskMode = 'whole-manuscript' | 'range';
+export const FACTUAL_REVIEW_TASK_MODES: readonly FactualReviewTaskMode[] = ['whole-manuscript', 'range'];
+export const FACTUAL_REVIEW_MODE_GOALS = {
+  'whole-manuscript': FACTUAL_REVIEW_TASK_GOAL,
+  range: '对所选内容块范围执行事实核查，逐单元列出可核查断言并精确定位其引文，形成结果集修订版。',
+} as const satisfies Record<FactualReviewTaskMode, string>;
+export type FactualReviewGoal = (typeof FACTUAL_REVIEW_MODE_GOALS)[FactualReviewTaskMode];
+export const FACTUAL_REVIEW_MODE_LABELS = {
+  'whole-manuscript': '全书事实核查',
+  range: '所选范围事实核查',
+} as const satisfies Record<FactualReviewTaskMode, string>;
+export const FACTUAL_REVIEW_MODE_MEANINGS = {
+  'whole-manuscript': '对固定的任务输入修订版派生覆盖清单并逐单元执行事实核查契约 v1，列出可核查断言并按内容块文本确定性校验每条引文。',
+  range: '仅对所选内容块范围内的分析单元执行事实核查契约 v1，其余单元不进入本次运行。',
+} as const satisfies Record<FactualReviewTaskMode, string>;
+
+/** Every analysis kind a Book may hold, and every Task mode any of them declares. */
+export type AnalysisKindId = typeof BASELINE_ANALYSIS_KIND | typeof FACTUAL_REVIEW_KIND;
+export type AnalysisTaskMode = BaselineAnalysisTaskMode | FactualReviewTaskMode;
+export type AnalysisGoal = BaselineAnalysisGoal | FactualReviewGoal;
 
 /** An explicit editor choice over exact block positions of the Task Input revision (inclusive). */
 export interface BaselineAnalysisSelectedRange {
@@ -1508,9 +1570,12 @@ export type BaselineAnalysisUnitProjection =
       gap: AnalysisGapProjection;
     };
 
-/** How a Result Set Revision came to be: the first baseline, or one exact update of a predecessor revision. */
+/**
+ * How a Result Set Revision came to be: its kind's initial mode, or one exact update of a predecessor
+ * revision. The mode is any analysis kind's mode, because every kind records how its revision arose.
+ */
 export interface BaselineAnalysisRevisionUpdateProjection {
-  mode: BaselineAnalysisTaskMode;
+  mode: AnalysisTaskMode;
   modeLabel: string;
   predecessor: null | { revisionId: string; ordinal: number; digest: string };
   reusePlanDigest: string | null;
@@ -1943,6 +2008,256 @@ export interface BaselineAnalysisProjection {
   actions: { canPrepare: boolean; canAuthorize: boolean; canReconfirmPlan: boolean };
   namedNonEffects: ReadonlyArray<string>;
 }
+
+/**
+ * The assertion classes of kick-in 17's two-axis evidence model. Only `real-world-fact` and
+ * `quotation` become findings; the other three are listed and counted so that an editor can see what
+ * the model declined to treat as a checkable fact rather than having it silently dropped.
+ */
+export type FactualAssertionClass = 'real-world-fact' | 'quotation' | 'report-about-manuscript' | 'fictional-canon' | 'judgment';
+export const FACTUAL_ASSERTION_CLASSES: readonly FactualAssertionClass[] =
+  ['real-world-fact', 'quotation', 'report-about-manuscript', 'fictional-canon', 'judgment'];
+/** The classes an assertion must carry to become a finding; the rest are counted only. */
+export const FACTUAL_FINDING_CLASSES: readonly FactualAssertionClass[] = ['real-world-fact', 'quotation'];
+
+/** The closed category set of the Factual Review Contract v1. */
+export type FactualAssertionCategory = '时间' | '地点' | '人物' | '机构' | '器物' | '数字' | '引文' | '史实' | '技术' | '其他';
+export const FACTUAL_ASSERTION_CATEGORIES: readonly FactualAssertionCategory[] =
+  ['时间', '地点', '人物', '机构', '器物', '数字', '引文', '史实', '技术', '其他'];
+
+/** ADR 0066's severity tiers: `A` confirmed, `B` probable, `C` advisory. */
+export type FactualSeverityTier = 'A' | 'B' | 'C';
+export const FACTUAL_SEVERITY_TIERS: readonly FactualSeverityTier[] = ['A', 'B', 'C'];
+
+/**
+ * ADR 0066's six verdicts. Until a research egress is accepted and its slice integrates (ADR 0074,
+ * proposed), every model-judged finding is `未外部复核`: the model raised a question that no
+ * admissible evidence has answered.
+ */
+export type FactualVerdict = '确证' | '部分成立' | '存疑' | '无法核实' | '未外部复核' | '误报';
+export const FACTUAL_VERDICTS: readonly FactualVerdict[] = ['确证', '部分成立', '存疑', '无法核实', '未外部复核', '误报'];
+export const FACTUAL_UNREVIEWED_VERDICT = '未外部复核' as const;
+
+/**
+ * The three checks of kick-in 17 rule 5, reported independently and never collapsed into one badge.
+ * Reference Integrity is deterministic; Claim Support and Factual Verification are model-judged over
+ * captured evidence, and with no evidence fetched they read `未核查`.
+ */
+export type FactualReferenceIntegrityState = 'verified' | 'failed';
+export type FactualEvidenceState = '未核查' | '成立' | '不成立' | '冲突' | '不适用';
+export const FACTUAL_UNCHECKED_STATE = '未核查' as const;
+
+/** The research capability's disclosed state; `外部研究未获准` is the only one this slice can produce. */
+export type FactualResearchState = '外部研究未获准' | '研究预算已用尽' | '已检索';
+export const FACTUAL_RESEARCH_NOT_AUTHORIZED = '外部研究未获准' as const;
+
+/**
+ * The exact grapheme range Reference Integrity located. Unlike a model-supplied source range it is
+ * never open-ended: a finding exists only because the service found its quotation at these offsets.
+ */
+export interface FactualSourceRangeProjection {
+  blockId: string;
+  fromGrapheme: number;
+  toGrapheme: number;
+}
+
+/** The identity of one listed assertion inside its unit: the block it named and its position in the list. */
+export interface FactualAssertionIdentityProjection {
+  unitOrdinal: number;
+  blockOrdinal: number;
+  assertionOrdinal: number;
+}
+
+/**
+ * One factual finding in ADR 0066's record shape. `sourceRange` is the exact grapheme range the
+ * service located in the committed block, never an offset the model supplied; a finding exists only
+ * because Reference Integrity verified its quotation there.
+ */
+export interface FactualReviewFindingProjection {
+  findingId: string;
+  unitOrdinal: number;
+  blockId: string;
+  sourceRange: FactualSourceRangeProjection;
+  quote: string;
+  assertionClass: FactualAssertionClass;
+  category: FactualAssertionCategory;
+  severity: FactualSeverityTier;
+  question: string;
+  basis: string;
+  verdict: FactualVerdict;
+  states: {
+    referenceIntegrity: FactualReferenceIntegrityState;
+    claimSupport: FactualEvidenceState;
+    factualVerification: FactualEvidenceState;
+  };
+  /** Captured evidence records; empty under every scope until ADR 0074's slice admits a lookup. */
+  evidence: readonly [];
+  research: { state: FactualResearchState; budget: null };
+  /** The identities of the duplicate assertions merged into this record; empty when none were. */
+  mergedFrom: ReadonlyArray<FactualAssertionIdentityProjection>;
+}
+
+/** Why an assertion never became a finding: its quotation could not be anchored in the block it named. */
+export type FactualExclusionReason = 'quote-not-found' | 'quote-ambiguous';
+
+/**
+ * The excluded appendix (ADR 0066): an assertion the model listed whose quotation Reference Integrity
+ * could not verify. It keeps its identity and its reason and never carries a source range — the
+ * service does not rewrite a quotation to make it match.
+ */
+export interface FactualReviewExcludedProjection {
+  findingId: string;
+  unitOrdinal: number;
+  /** The block the model named, when its ordinal resolved to one of the unit's blocks. */
+  blockId: string;
+  blockOrdinal: number;
+  quote: string;
+  assertionClass: FactualAssertionClass;
+  category: FactualAssertionCategory;
+  severity: FactualSeverityTier;
+  question: string;
+  basis: string;
+  states: {
+    referenceIntegrity: 'failed';
+    claimSupport: FactualEvidenceState;
+    factualVerification: FactualEvidenceState;
+  };
+  reason: FactualExclusionReason;
+  reasonLabel: string;
+}
+
+/**
+ * What the model listed, by class, category, and tier, before any of it became a finding.
+ *
+ * Each breakdown is an ordered list rather than a keyed map, in its closed set's own order. A durable
+ * record is canonicalized by more than one owner, and two canonicalizers need not agree on how to
+ * order non-ASCII object keys; a list depends on no collation at all.
+ */
+export interface FactualReviewAssertionCountsProjection {
+  listed: number;
+  byClass: ReadonlyArray<{ assertionClass: FactualAssertionClass; count: number }>;
+  byCategory: ReadonlyArray<{ category: FactualAssertionCategory; count: number }>;
+  bySeverity: ReadonlyArray<{ severity: FactualSeverityTier; count: number }>;
+  /** Assertions of a finding class whose quotation verified, before duplicates merged. */
+  verified: number;
+  excluded: number;
+  merged: number;
+}
+
+/** The research capability's disclosed outcome for the whole Run: what it was allowed to do, and what it did. */
+export interface FactualReviewResearchProjection {
+  state: FactualResearchState;
+  fetched: 0;
+  statement: string;
+}
+
+/**
+ * The factual kind's Result Set Revision: the findings, the excluded appendix, the assertion counts,
+ * and the research disclosure in place of the baseline kind's entities, events, relationships, and
+ * settings. Every shared component — coverage, gaps, usage, lineage, freshness, assurance — is the
+ * same reading the baseline kind carries, computed by the same reducers.
+ */
+export interface FactualReviewResultSetRevisionProjection {
+  resultSetId: string;
+  revisionId: string;
+  ordinal: number;
+  createdAt: string;
+  digest: string;
+  contractVersion: typeof FACTUAL_REVIEW_CONTRACT_VERSION;
+  manuscriptPin: { bookId: string; manuscriptId: string; revisionId: string; revisionLabel: string; revisionDigest: string };
+  coverageManifestDigest: string;
+  schemaDigest: string;
+  reducerDigest: string;
+  adapterPin: { route: ExecutionRouteId; model: string; fixtureIdentity: string | null; fixtureSha256: string | null };
+  bindingPin: { attemptId: string; bindingDigest: string; harnessSessionId: string; behaviorCompositionDigest: string; promptContractDigest: string };
+  policyPin: ResultSetPolicyPin;
+  provenance: { taskIntentId: string; runRecordId: string; attemptId: string; planVersion?: number; adaptations?: { count: number; unitOrdinals: ReadonlyArray<number> } };
+  usage: { inputTokens: number; outputTokens: number; requests: number };
+  /** Which mode produced this revision and with what unit counts; the same fact every kind records. */
+  update: BaselineAnalysisRevisionUpdateProjection;
+  lineage: ReadonlyArray<{ unitOrdinal: number } & AnalysisUnitLineage>;
+  coverage: AnalysisCoverageAxis;
+  reducerClosure: AnalysisReducerClosureAxis;
+  freshness: AnalysisFreshnessAxis;
+  assurance: AnalysisAssuranceAxis;
+  gaps: ReadonlyArray<AnalysisGapProjection>;
+  findings: ReadonlyArray<FactualReviewFindingProjection>;
+  excluded: ReadonlyArray<FactualReviewExcludedProjection>;
+  assertionCounts: FactualReviewAssertionCountsProjection;
+  research: FactualReviewResearchProjection;
+  units: ReadonlyArray<FactualReviewUnitProjection>;
+}
+
+export type FactualReviewUnitProjection =
+  | {
+      unitOrdinal: number;
+      state: 'closed';
+      requestDigest: string;
+      responseDigest: string;
+      usage: { inputTokens: number; outputTokens: number } | null;
+      lineage: AnalysisUnitLineage;
+      assertions: ReadonlyArray<{
+        blockOrdinal: number;
+        quote: string;
+        assertionClass: FactualAssertionClass;
+        category: FactualAssertionCategory;
+        severity: FactualSeverityTier;
+        question: string;
+        basis: string;
+      }>;
+    }
+  | { unitOrdinal: number; state: 'gap'; requestDigest: string; lineage: AnalysisUnitLineage; gap: AnalysisGapProjection };
+
+export interface FactualReviewHistoryEntryProjection extends Omit<BaselineAnalysisHistoryEntryProjection, 'mode' | 'contractVersion'> {
+  mode: FactualReviewTaskMode;
+  contractVersion: typeof FACTUAL_REVIEW_CONTRACT_VERSION;
+}
+
+export interface FactualReviewHistoryProjection {
+  resultSetId: string;
+  kind: typeof FACTUAL_REVIEW_KIND;
+  createdAt: string;
+  latestOrdinal: number;
+  entries: ReadonlyArray<FactualReviewHistoryEntryProjection>;
+}
+
+/**
+ * The factual kind's Task projection. Every member the two kinds share is the member the baseline
+ * projection declares; only the kind discriminator, the contract version, the Task mode, the declared
+ * reducer stages, and the Result Set Revision differ. The baseline shape is therefore unchanged, and
+ * a reader discriminates on `kind` (protocol 26).
+ */
+export interface FactualReviewProjection extends Omit<
+  BaselineAnalysisProjection,
+  'kind' | 'contractVersion' | 'taskIntent' | 'executionPlan' | 'resultSetRevision' | 'update' | 'updateControls' | 'history' | 'inspectedRevision'
+> {
+  kind: typeof FACTUAL_REVIEW_KIND;
+  contractVersion: typeof FACTUAL_REVIEW_CONTRACT_VERSION;
+  taskIntent: null | {
+    taskIntentId: string;
+    goal: FactualReviewGoal;
+    expectedOutcome: typeof FACTUAL_REVIEW_EXPECTED_OUTCOME;
+    createdAt: string;
+    mode: FactualReviewTaskMode;
+    modeLabel: string;
+  };
+  executionPlan: null | {
+    steps: ReadonlyArray<string>;
+    effects: readonly [];
+    unitCount: number;
+    reducerStages: readonly ['unit-validation', 'reference-integrity', 'finding-reduction'];
+    stopCondition: string;
+  };
+  resultSetRevision: null | FactualReviewResultSetRevisionProjection;
+  /** The factual kind declares no update mode yet; its update surfaces arrive with S18b and S19. */
+  update: null;
+  updateControls: null;
+  history: null | FactualReviewHistoryProjection;
+  inspectedRevision: null | { revision: FactualReviewResultSetRevisionProjection; current: boolean; readOnly: true };
+}
+
+/** Every analysis projection, discriminated on `kind`. */
+export type AnalysisProjection = BaselineAnalysisProjection | FactualReviewProjection;
 
 export interface HistoricalRevisionProjection {
   mode: 'historical-revision';

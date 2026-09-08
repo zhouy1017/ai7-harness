@@ -46,6 +46,8 @@ import {
 // Fixtures (iii)–(v) are hand-written synthetic shapes consumed here only; their request digests are
 // the deterministic function of the frozen prompt contract and a synthetic all-zero unit digest.
 
+import { FACTUAL_REVIEW_PROMPT_CONTRACT_DIGEST, factualReviewRequestDigest } from '../../src/service/analysis/factual-review-contract.js';
+
 const FIXTURES_ROOT = resolve(fileURLToPath(new URL('../fixtures/model/', import.meta.url)));
 const codes = { QUOTA_EXCEEDED_CODE, INVALID_CREDENTIAL_CODE, CONTEXT_WINDOW_EXCEEDED_CODE };
 const ZERO_UNIT_DIGEST = '0'.repeat(64);
@@ -247,6 +249,45 @@ describe('model fixture loading', () => {
     const base = await loadModelFixture(FIXTURES_ROOT, 'sample1-baseline-one-unit-failure');
     expect(transient.sha256).not.toBe(base.sha256);
     expect(transient.entries.size).toBe(base.entries.size + 1);
+  });
+
+  // Issue #53: a second analysis kind shares this adapter. Which kind a request belongs to is decided
+  // by its header alone, and its request digest is keyed by the contract digest the adapter holds.
+  it('answers a factual-review unit message under its own contract digest and leaves the baseline path alone', async () => {
+    const factualDigest = factualReviewRequestDigest(FACTUAL_REVIEW_PROMPT_CONTRACT_DIGEST, 1, ZERO_UNIT_DIGEST);
+    expect(factualDigest).not.toBe(ZERO_UNIT_REQUEST_DIGEST);
+    await writeFile(join(root, 'factual.json'), fixture('factual', null, [entry(1, 'factual-answer', factualDigest)]));
+    const resolved = await loadModelFixture(root, 'factual');
+    const adapter = new Ai7LocalDeterministicAdapter(resolved, FACTUAL_REVIEW_PROMPT_CONTRACT_DIGEST, codes);
+    const factualHeader = `事实核查单元 1/1 · 单元摘要 ${ZERO_UNIT_DIGEST}`;
+    expect(parseUnitMessageHeader(factualHeader)).toBeNull();
+    expect((await collect(adapter.stream(request(factualHeader)))).find((chunk) => chunk.type === 'block-end'))
+      .toMatchObject({ block: { text: 'factual-answer' } });
+    // One adapter serves one Run and therefore one kind: it is bound to that kind's contract digest,
+    // and a Run only ever hands it the messages it built. A baseline-bound adapter given the factual
+    // header derives the baseline digest, which this fixture does not describe.
+    const baselineBound = new Ai7LocalDeterministicAdapter(resolved, BASELINE_PROMPT_CONTRACT_DIGEST, codes);
+    expect((await collect(baselineBound.stream(request(factualHeader)))).at(-1))
+      .toMatchObject({ type: 'finish', reason: { kind: 'error', failure: { code: AI7_FAILURE_CODES.FIXTURE_MISMATCH } } });
+    expect((await collect(baselineBound.stream(request()))).at(-1))
+      .toMatchObject({ type: 'finish', reason: { kind: 'error', failure: { code: AI7_FAILURE_CODES.FIXTURE_MISMATCH } } });
+  });
+
+  // Issue #53: the optional top-level `provenance`, admitted as S41 admitted the per-entry `contentDigest`.
+  it('admits an optional fixture provenance and defaults a fixture without one to recorded', async () => {
+    expect(parseModelFixture(JSON.parse(fixture('plain', null, [entry(1, 'a')]))).provenance).toBe('recorded');
+    const authored = JSON.parse(fixture('authored', null, [entry(1, 'a')])) as Record<string, unknown>;
+    authored['provenance'] = 'authored';
+    expect(parseModelFixture(authored).provenance).toBe('authored');
+    authored['provenance'] = 'invented';
+    expect(() => parseModelFixture(authored)).toThrowError(/来源标注无效/u);
+    const unknownKey = JSON.parse(fixture('plain', null, [entry(1, 'a')])) as Record<string, unknown>;
+    unknownKey['author'] = 'someone';
+    expect(() => parseModelFixture(unknownKey)).toThrowError(/键集合无效/u);
+    // The six fixtures that ship keep the default, so none of their bytes move.
+    for (const identity of ['sample1-baseline-happy', 'sample1-baseline-one-unit-failure', 'synthetic-quota-exceeded']) {
+      expect((await loadModelFixture(FIXTURES_ROOT, identity)).provenance).toBe('recorded');
+    }
   });
 
   it('rejects an absent fixture, a cyclic base chain, an identity that differs from its file name, and invalid shapes', async () => {
