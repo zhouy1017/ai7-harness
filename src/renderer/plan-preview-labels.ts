@@ -1,4 +1,10 @@
-import type { ProviderProcessingPin, RunAttemptState, RunBudgetCeilingState } from '../shared/protocol.js';
+import type {
+  AnalysisConflictProjection,
+  AnalysisSourceRangeProjection,
+  ProviderProcessingPin,
+  RunAttemptState,
+  RunBudgetCeilingState,
+} from '../shared/protocol.js';
 
 /**
  * The exact Run Budget Ceiling wording. `未设置任务预算上限` is true only when the plan really froze
@@ -63,3 +69,42 @@ export function runStepIsStale(elapsedMs: number, longestSettledUnitMs: number |
     ? elapsedMs > RUN_LIVENESS_UNMEASURED_STALE_MS
     : elapsedMs > longestSettledUnitMs * 2;
 }
+
+/**
+ * How many content blocks a provenance collection touches (V2-UX-LAYER-006), never the identifiers
+ * themselves: whole-block and partial ranges count alike, and two ranges of one block count once.
+ * An empty collection reads `无精确范围` rather than `0 个内容块`, which would report a measurement
+ * the analysis never made.
+ */
+export function analysisBlockCountLabel(ranges: ReadonlyArray<Pick<AnalysisSourceRangeProjection, 'blockId'>>): string {
+  const blocks = new Set(ranges.map((range) => range.blockId));
+  return blocks.size === 0 ? '无精确范围' : `${blocks.size} 个内容块`;
+}
+
+/**
+ * An item's provenance as the Decision Layer reads it (V2-UX-LAYER-006): `来自单元 1、2、5 · 25 个内容块`,
+ * with the block identifiers one step away in its list's technical disclosure. The units are the
+ * item's own recorded ordinals, ascending and deduplicated — never inferred from a block identifier —
+ * so an item that records no unit reads as its block count alone rather than as an empty unit list.
+ */
+export function analysisProvenanceSummary(
+  unitOrdinals: ReadonlyArray<number>,
+  ranges: ReadonlyArray<Pick<AnalysisSourceRangeProjection, 'blockId'>>,
+): string {
+  const units = [...new Set(unitOrdinals)].sort((left, right) => left - right);
+  const blocks = analysisBlockCountLabel(ranges);
+  return units.length === 0 ? blocks : `来自单元 ${units.join('、')} · ${blocks}`;
+}
+
+/**
+ * One editorial Chinese label per conflict kind the analysis can report (V2-UX-LAYER-003): the
+ * reducer's token is its own vocabulary, not the editor's. A `Record` over the closed union, so a
+ * new kind fails to compile here instead of reaching the card as a raw token; the token itself stays
+ * on the entry in `data-analysis-conflict-kind`, where the record and the Journeys read it.
+ */
+export const ANALYSIS_CONFLICT_KIND_LABELS: Record<AnalysisConflictProjection['kind'], string> = {
+  'unit-reported': '单元内报告',
+  'alias-collision': '别名冲突',
+  'entity-kind-divergence': '实体类别分歧',
+  'setting-claim-divergence': '设定声明分歧',
+};

@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import type { ProviderProcessingPin, RunBudgetCeilingState } from '../../src/shared/protocol.js';
+import type { AnalysisConflictProjection, ProviderProcessingPin, RunBudgetCeilingState } from '../../src/shared/protocol.js';
 import {
+  ANALYSIS_CONFLICT_KIND_LABELS,
   RUN_LIVENESS_UNMEASURED_STALE_MS,
+  analysisBlockCountLabel,
+  analysisProvenanceSummary,
   attemptStateLabel,
   elapsedLabel,
   localInstantLabel,
@@ -97,5 +100,67 @@ describe('localInstantLabel', () => {
 
   it('returns an unparsable value unchanged rather than inventing a time', () => {
     expect(localInstantLabel('not-an-instant')).toBe('not-an-instant');
+  });
+});
+
+/** Every conflict kind the analysis types admit; the labels are asserted over exactly this list. */
+const ANALYSIS_CONFLICT_KINDS: ReadonlyArray<AnalysisConflictProjection['kind']> = [
+  'unit-reported', 'alias-collision', 'entity-kind-divergence', 'setting-claim-divergence',
+];
+
+const range = (blockId: string, fromGrapheme: number | null = null, toGrapheme: number | null = null) =>
+  ({ blockId, fromGrapheme, toGrapheme });
+
+describe('analysisBlockCountLabel', () => {
+  it('counts distinct blocks, whole-block and partial ranges alike', () => {
+    expect(analysisBlockCountLabel([range('blk_a'), range('blk_b', 0, 12), range('blk_c')])).toBe('3 个内容块');
+  });
+
+  it('counts a block once however many ranges of it an item carries', () => {
+    expect(analysisBlockCountLabel([range('blk_a', 0, 5), range('blk_a', 9, 40), range('blk_a')])).toBe('1 个内容块');
+  });
+
+  it('reads no exact range rather than zero blocks when the collection is empty', () => {
+    expect(analysisBlockCountLabel([])).toBe('无精确范围');
+  });
+});
+
+describe('analysisProvenanceSummary', () => {
+  // V2-UX-LAYER-006's own example, so the Decision Layer's reading is pinned literally.
+  it('reads as units and a block count, in ascending deduplicated unit order', () => {
+    const ranges = Array.from({ length: 25 }, (_, index) => range(`blk_${index}`));
+    expect(analysisProvenanceSummary([5, 1, 2, 1], ranges)).toBe('来自单元 1、2、5 · 25 个内容块');
+  });
+
+  it('sorts units by ordinal rather than by their decimal text', () => {
+    expect(analysisProvenanceSummary([10, 2], [range('blk_a')])).toBe('来自单元 2、10 · 1 个内容块');
+  });
+
+  it('reads a single-unit item with its one ordinal', () => {
+    expect(analysisProvenanceSummary([3], [range('blk_a'), range('blk_b', 2, 8)])).toBe('来自单元 3 · 2 个内容块');
+  });
+
+  it('states the block count alone when the item records no unit, and never an empty unit list', () => {
+    expect(analysisProvenanceSummary([], [range('blk_a')])).toBe('1 个内容块');
+    expect(analysisProvenanceSummary([], [])).toBe('无精确范围');
+  });
+
+  it('says no exact range for an item with units but no recorded range', () => {
+    expect(analysisProvenanceSummary([2, 4], [])).toBe('来自单元 2、4 · 无精确范围');
+  });
+});
+
+describe('ANALYSIS_CONFLICT_KIND_LABELS', () => {
+  it('labels every conflict kind the union admits, and no kind it does not', () => {
+    expect(Object.keys(ANALYSIS_CONFLICT_KIND_LABELS).sort()).toStrictEqual([...ANALYSIS_CONFLICT_KINDS].sort());
+  });
+
+  it('gives each kind a distinct, non-empty label that is never the reducer token itself', () => {
+    const labels = ANALYSIS_CONFLICT_KINDS.map((kind) => ANALYSIS_CONFLICT_KIND_LABELS[kind]);
+    for (const [index, kind] of ANALYSIS_CONFLICT_KINDS.entries()) {
+      expect(labels[index]).not.toBe('');
+      expect(labels[index]).not.toBe(kind);
+    }
+    expect(new Set(labels).size).toBe(ANALYSIS_CONFLICT_KINDS.length);
   });
 });
