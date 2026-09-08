@@ -49,6 +49,13 @@ import {
   type CrossUnitOutcome,
   type GapUnitOutcome,
 } from './reducers.js';
+import type {
+  RunReportRevisionUsageStageId,
+  RunReportSpan,
+  RunReportStageId,
+  RunReportUnitObservation,
+  RunReportUnitRow,
+} from './run-report.js';
 
 /**
  * The execution owner: AI7 scheduler admission for one Run per service instance, the attempt
@@ -556,6 +563,28 @@ export class BaselineAnalysisExecutionOwner {
       const outcomes: Array<ClosedUnitOutcome<unknown> | GapUnitOutcome> = [];
       const unitRecords: UnitResultRecord[] = [];
       const usage = { inputTokens: 0, outputTokens: 0, requests: 0 };
+      // The same turns, counted a second time by the stage they belong to (ADR 0066 §Run Report).
+      // Both counters move at the same three call sites, so the report's three revision-facing stages
+      // sum to the revision's own usage by construction rather than by subtracting one from another.
+      const stageUsage: Record<RunReportRevisionUsageStageId, { requests: number; inputTokens: number; outputTokens: number }> = {
+        units: { requests: 0, inputTokens: 0, outputTokens: 0 },
+        'cross-unit-reduction': { requests: 0, inputTokens: 0, outputTokens: 0 },
+        'assurance-sampling': { requests: 0, inputTokens: 0, outputTokens: 0 },
+      };
+      const countTurn = (stage: RunReportRevisionUsageStageId, turnUsage: { inputTokens: number; outputTokens: number } | null): void => {
+        usage.requests += 1;
+        stageUsage[stage].requests += 1;
+        if (turnUsage === null) return;
+        usage.inputTokens += turnUsage.inputTokens;
+        usage.outputTokens += turnUsage.outputTokens;
+        stageUsage[stage].inputTokens += turnUsage.inputTokens;
+        stageUsage[stage].outputTokens += turnUsage.outputTokens;
+        // The ceiling counts every attempt, including a safe retry's, from this instant onward.
+        accumulated.push(turnUsage);
+      };
+      const clock = new RunStageClock();
+      // What the owner saw while it settled each unit; a reused unit and one never reached have none.
+      const unitObservations = new Map<number, RunReportUnitObservation>();
       const reusedOrdinals = new Set<number>();
       // Reused units are copied by lineage before any model call; they never form a request or count usage.
       if (update !== null) {
@@ -597,20 +626,17 @@ export class BaselineAnalysisExecutionOwner {
         spanOrdinal += 1;
         spans.push(turn.span);
         ledger.recordSpan(attemptId, spanOrdinal, turn.span, unit.ordinal, { attemptIndex, payloadDigest });
-        usage.requests += 1;
         const usageSignal = turn.signals.find((signal) => signal.kind === 'usage');
         const unitUsage = usageSignal?.kind === 'usage' ? { inputTokens: usageSignal.usage.inputTokens, outputTokens: usageSignal.usage.outputTokens } : null;
-        if (unitUsage !== null) {
-          usage.inputTokens += unitUsage.inputTokens;
-          usage.outputTokens += unitUsage.outputTokens;
-          // The ceiling counts every attempt, including a safe retry's, from this instant onward.
-          accumulated.push(unitUsage);
-        }
+        countTurn('units', unitUsage);
         // One model turn came back. It counts whether it transmitted, replayed from the Provider Result
         // Cache, or read the deterministic fixture: what the reader learns is that the Run is moving.
         active.progress.completedAttempts += 1;
         return { turn, unitUsage, payloadDigest, canonical };
       };
+      // The `units` stage of the Run Report: first dispatch to last settled unit. A Run whose every
+      // unit was reused by lineage submits nothing and opens no segment at all.
+      if (submittedUnits.length > 0) clock.open('units');
       for (const unit of submittedUnits) {
         if (active.interrupted) break;
         // The ceiling is evaluated before every dispatch, not only inside the gate: reaching it ends
@@ -626,6 +652,18 @@ export class BaselineAnalysisExecutionOwner {
         const unitStartedAtMs = Date.now();
         const requestDigest = definition.requestDigest(unit.ordinal, unit.digest);
         let attempt = await submitAttempt(unit, 1, 'dispatched');
+        let attempts = 1;
+        let unitUsageTotal = attempt.unitUsage;
+        // What the Run Report records about this unit, taken at the instant it settles however it
+        // settles — closed, gap, or the gap that ends the Run — so no terminal branch loses it.
+        const observe = (): void => {
+          unitObservations.set(unit.ordinal, {
+            unitOrdinal: unit.ordinal,
+            attempts,
+            wallMs: Date.now() - unitStartedAtMs,
+            usage: unitUsageTotal,
+          });
+        };
         let firstFailure: ClassifiedModelFailure | null = null;
         if (attempt.turn.terminal === 'failed' && !active.interrupted) {
           const failed = attempt.turn.signals.find((signal) => signal.kind === 'failed');
@@ -652,11 +690,16 @@ export class BaselineAnalysisExecutionOwner {
             adaptedUnitOrdinals.push(unit.ordinal);
             if (currentBindingDigest !== bindingDigest) throw new ExecutionAdmissionError('EXECUTION_BINDING_DIGEST_DRIFT', '计划内调整期间执行绑定发生变化。');
             attempt = await submitAttempt(unit, 2, 'retrying');
+            attempts = 2;
+            // Both attempts cost the Run, so the unit's row carries what the unit cost, not what its
+            // last attempt cost.
+            unitUsageTotal = addUsage(unitUsageTotal, attempt.unitUsage);
           }
         }
         const { turn, unitUsage } = attempt;
         const candidate = turn.signals.find((signal) => signal.kind === 'contentCandidate');
         const gap = (code: AnalysisGapProjection['code'], reason: string): void => {
+          observe();
           outcomes.push({ unitOrdinal: unit.ordinal, state: 'gap', code, reason });
           unitRecords.push({
             unitOrdinal: unit.ordinal,
@@ -675,6 +718,7 @@ export class BaselineAnalysisExecutionOwner {
         } else if (turn.terminal === 'completed' && candidate?.kind === 'contentCandidate') {
           const parsed = definition.parseUnitResult(candidate.text, unit);
           if (parsed.ok) {
+            observe();
             acceptedOutputDigests.add(candidate.digest);
             outcomes.push({ unitOrdinal: unit.ordinal, state: 'closed', result: parsed.result });
             unitRecords.push({
@@ -720,6 +764,7 @@ export class BaselineAnalysisExecutionOwner {
         const settledMs = Date.now() - unitStartedAtMs;
         active.progress.longestSettledUnitMs = Math.max(active.progress.longestSettledUnitMs ?? 0, settledMs);
       }
+      clock.close();
       if (active.interrupted && terminalClassification === 'completed') terminalClassification = 'interrupted';
 
       // The one declared cross-unit suboperation (ADR 0066), inside this Run's unchanged envelope and
@@ -753,6 +798,9 @@ export class BaselineAnalysisExecutionOwner {
           // The same set the gate reads: exactly one further user message becomes admissible, and every
           // other refusal — route, model, system prompt, tools, prior outputs — is untouched.
           admittedUserMessages.add(message);
+          // The reduction's own stage, opened only here: a reduction refused by policy or by a spent
+          // ceiling never dispatched, and a stage that never ran reports no time at all.
+          clock.open('cross-unit-reduction');
           active.progress.stage = 'cross-unit-reduction';
           active.progress.currentUnitOrdinal = null;
           active.progress.currentUnitStartedAt = new Date().toISOString();
@@ -763,16 +811,11 @@ export class BaselineAnalysisExecutionOwner {
           // The reduction's turn is a model turn like any other: it counts as a request, its usage
           // counts toward the Run and the ceiling, and it records no execution-span row, because the
           // span table is unit-only and this step belongs to no unit.
-          usage.requests += 1;
           const usageSignal = turn.signals.find((signal) => signal.kind === 'usage');
           const crossUnitUsage = usageSignal?.kind === 'usage'
             ? { inputTokens: usageSignal.usage.inputTokens, outputTokens: usageSignal.usage.outputTokens }
             : null;
-          if (crossUnitUsage !== null) {
-            usage.inputTokens += crossUnitUsage.inputTokens;
-            usage.outputTokens += crossUnitUsage.outputTokens;
-            accumulated.push(crossUnitUsage);
-          }
+          countTurn('cross-unit-reduction', crossUnitUsage);
           active.progress.completedAttempts += 1;
           const candidate = turn.signals.find((signal) => signal.kind === 'contentCandidate');
           if (turn.terminal === 'completed' && candidate?.kind === 'contentCandidate') {
@@ -802,9 +845,14 @@ export class BaselineAnalysisExecutionOwner {
         }
       }
 
-      // The kind's reducers run over the complete new unit set: reused plus recomputed.
+      // The kind's reducers run over the complete new unit set: reused plus recomputed. This is the
+      // first of the `reduction` stage's two segments; the second is the persist below. The sampling
+      // await between them belongs to the sampling stage, so the two segments are measured apart and
+      // the four stage totals partition the Run's own work.
+      clock.open('reduction');
       const reduced = definition.reduce({ manifest, outcomes, reusedUnitOrdinals: reusedOrdinals, blocks: blocksById, crossUnit });
       if (terminalClassification === 'completed' && reduced.gaps.length > 0) terminalClassification = 'completed-with-gaps';
+      clock.close();
 
       // The one declared assurance sampling suboperation (ADR 0066), inside this Run's unchanged
       // envelope and Execution Binding: one admitted user message per anchor unit, one turn each, no
@@ -812,11 +860,12 @@ export class BaselineAnalysisExecutionOwner {
       // reduction does — an interrupted Run has already stopped, and nothing further is sent.
       const sample = await this.#drawAndJudge({
         active, definition, harness, reduction: reduced, manifest, blocksById, admittedUserMessages,
-        acceptedOutputDigests, liveAdapter, usage, accumulated, ceilingState, live, policy,
+        acceptedOutputDigests, liveAdapter, countTurn, clock, ceilingState, live, policy,
         stopped: terminalClassification === 'interrupted',
       });
       // The second reducer pass: the sample joins the revision and re-labels the assurance axis, and
-      // every finding component comes through byte for byte.
+      // every finding component comes through byte for byte. The `reduction` stage resumes here.
+      clock.open('reduction');
       const reduction = applyAssuranceSample(reduced, sample);
       // Units the interrupted loop never reached are recorded as exact not-attempted gaps.
       for (const gapEntry of reduction.gaps) {
@@ -840,6 +889,7 @@ export class BaselineAnalysisExecutionOwner {
         usage,
         adaptedUnitOrdinals,
       });
+      clock.close();
       const interruption = liveInterruption === null ? null : LIVE_INTERRUPTIONS[liveInterruption];
       ledger.recordRunState(facts.runRecordId, terminalClassification, {
         detail: interruption === null
@@ -912,6 +962,10 @@ export class BaselineAnalysisExecutionOwner {
       // The same set the gate reads: exactly one further user message becomes admissible per turn, and
       // every other refusal — route, model, system prompt, tools, prior outputs — is untouched.
       context.admittedUserMessages.add(message);
+      // The sampling stage, opened on the first turn that actually dispatches: a suboperation stopped
+      // by interruption, policy, or the ceiling reports no time because it consumed none. Re-opening
+      // per turn keeps the segments contiguous from the first dispatch to the last turn's settlement.
+      context.clock.open('assurance-sampling');
       active.progress.stage = 'assurance-sampling';
       // The unit loop is over; a sampling turn is about a unit but is not one of its attempts, so the
       // reader sees the stage rather than a unit ordinal, exactly as it does for the reduction.
@@ -924,15 +978,12 @@ export class BaselineAnalysisExecutionOwner {
       // A sampling turn is a model turn like any other: it counts as a request, its usage counts
       // toward the Run and the ceiling, and it records no execution-span row, because the span table
       // is unit-only and this step is not one of the unit's attempts.
-      context.usage.requests += 1;
       const usageSignal = result.signals.find((signal) => signal.kind === 'usage');
       const turnUsage = usageSignal?.kind === 'usage'
         ? { inputTokens: usageSignal.usage.inputTokens, outputTokens: usageSignal.usage.outputTokens }
         : null;
+      context.countTurn('assurance-sampling', turnUsage);
       if (turnUsage !== null) {
-        context.usage.inputTokens += turnUsage.inputTokens;
-        context.usage.outputTokens += turnUsage.outputTokens;
-        context.accumulated.push(turnUsage);
         sampled.inputTokens += turnUsage.inputTokens;
         sampled.outputTokens += turnUsage.outputTokens;
         sampled.turnsWithUsage += 1;
@@ -978,6 +1029,7 @@ export class BaselineAnalysisExecutionOwner {
         break;
       }
     }
+    context.clock.close();
     const usage = sampled.turnsWithUsage === 0 ? null : { inputTokens: sampled.inputTokens, outputTokens: sampled.outputTokens };
     return assuranceSampleOutcome(draw, dispositions, usage, gapReasons);
   }
@@ -997,13 +1049,92 @@ interface AssuranceSamplingContext {
   readonly admittedUserMessages: Set<string>;
   readonly acceptedOutputDigests: Set<string>;
   readonly liveAdapter: { instance: DeepSeekOpenAiCompatibleAdapter | null };
-  readonly usage: { inputTokens: number; outputTokens: number; requests: number };
-  readonly accumulated: UsageFacts[];
+  /** Counts one settled model turn against both the Run's total and its Run Report stage. */
+  readonly countTurn: (stage: RunReportRevisionUsageStageId, usage: { inputTokens: number; outputTokens: number } | null) => void;
+  /** The owner's own clock; the suboperation opens its stage only once a turn is actually dispatched. */
+  readonly clock: RunStageClock;
   readonly ceilingState: () => EgressCeilingState;
   readonly live: DeveloperLiveRuntime | null;
   readonly policy: LaunchPolicyProjection;
   /** Whether the Run had already stopped when the unit loop ended; a stopped Run samples nothing. */
   readonly stopped: boolean;
+}
+
+/** What two attempts of one unit cost together; `null` only when neither reported any usage at all. */
+function addUsage(
+  left: { inputTokens: number; outputTokens: number } | null,
+  right: { inputTokens: number; outputTokens: number } | null,
+): { inputTokens: number; outputTokens: number } | null {
+  if (left === null) return right;
+  if (right === null) return left;
+  return { inputTokens: left.inputTokens + right.inputTokens, outputTokens: left.outputTokens + right.outputTokens };
+}
+
+/**
+ * The execution owner's own clock over its own work: one accumulating wall-time total per declared
+ * Run Report stage, taken from instants this owner holds. Nothing here reads the Harness Session
+ * Ledger, which is the boundary the Run Report's stop condition draws.
+ *
+ * Segments are disjoint by construction — opening one closes whatever was open — so the four totals
+ * partition the Run's work rather than nesting. `reduction` is the stage that needs this: the kind's
+ * reducers run before the assurance sample and the persist runs after it, and the sampling await
+ * between them belongs to the sampling stage. A stage therefore reports the first instant it was
+ * entered, the last instant it settled, and the sum of its own segments in between — which for
+ * `reduction` is deliberately less than the distance between those two instants.
+ */
+class RunStageClock {
+  readonly #totals = new Map<RunReportStageId, RunReportSpan>();
+  #open: { stage: RunReportStageId; startedAt: string; at: number } | null = null;
+
+  open(stage: RunReportStageId): void {
+    this.close();
+    this.#open = { stage, startedAt: new Date().toISOString(), at: Date.now() };
+  }
+
+  close(): void {
+    const open = this.#open;
+    if (open === null) return;
+    this.#open = null;
+    const settledAt = new Date().toISOString();
+    const wallMs = Date.now() - open.at;
+    const previous = this.#totals.get(open.stage);
+    this.#totals.set(open.stage, previous === undefined
+      ? { startedAt: open.startedAt, settledAt, wallMs }
+      : { startedAt: previous.startedAt, settledAt, wallMs: previous.wallMs + wallMs });
+  }
+
+  /** The measured segments, by stage; a stage the Run never entered is absent rather than zero. */
+  spans(): ReadonlyMap<RunReportStageId, RunReportSpan> {
+    this.close();
+    return this.#totals;
+  }
+}
+
+/**
+ * The Run Report's unit rows: the revision's own unit records, joined with what the owner observed
+ * while it settled each one. A reused unit carries the predecessor's usage and no attempts of its
+ * own; a unit an interrupted loop never reached carries its `not-attempted` gap and neither. The rows
+ * are therefore exactly the revision's units, which is what lets the report's accounting be checked
+ * against the revision's coverage and lineage counts.
+ */
+export function runReportUnitRows(
+  records: ReadonlyArray<UnitResultRecord>,
+  observations: ReadonlyMap<number, RunReportUnitObservation>,
+): RunReportUnitRow[] {
+  return records.map((record) => {
+    const observed = observations.get(record.unitOrdinal) ?? null;
+    return {
+      unitOrdinal: record.unitOrdinal,
+      state: record.closed.state,
+      lineage: record.lineage.kind,
+      attempts: observed?.attempts ?? 0,
+      wallMs: observed?.wallMs ?? null,
+      // What the unit cost this Run — both attempts of a retried unit, not just its last — and, for a
+      // unit this Run never submitted, what the predecessor's own record already carried.
+      usage: observed?.usage ?? (record.closed.state === 'closed' ? record.closed.usage : null),
+      gapCode: record.closed.state === 'gap' ? record.closed.gap.code : null,
+    };
+  });
 }
 
 /**

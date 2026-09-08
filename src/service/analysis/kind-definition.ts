@@ -13,6 +13,7 @@ import {
   FACTUAL_REVIEW_MODE_MEANINGS,
   FACTUAL_REVIEW_TASK_MODES,
   type AnalysisAssuranceAxis,
+  type AnalysisConflictProjection,
   type AnalysisCoverageAxis,
   type AnalysisCrossUnitFindingProjection,
   type AnalysisGapProjection,
@@ -22,6 +23,7 @@ import {
   type AnalysisTaskMode,
   type CoverageManifestProjection,
   type CoverageManifestUnitProjection,
+  type FactualReviewExcludedProjection,
   type FactualReviewFindingProjection,
 } from '../../shared/protocol.js';
 import { FixtureReplayResearchCapability, type ResearchCapability } from '../capabilities/research.js';
@@ -196,6 +198,14 @@ export interface AnalysisKindDefinition {
   readonly assurance: AssuranceSamplingBinding | null;
   /** Why the sampling stage did not run, for a kind that declares no such stage. */
   readonly assuranceAbsentReason: string;
+  /**
+   * How many findings of each class this reduction produced, as the kind that owns them names its own
+   * classes. The Run Report's accounting names these counts and nothing else about a finding: never a
+   * description, a quotation, an entity, or a source range. The kind decides what a class is, because
+   * only the kind knows — the baseline kind's are its cross-unit finding kinds and its deterministic
+   * conflict kinds, the factual kind's are its severity tiers and its exclusions.
+   */
+  findingCounts(reduction: AnalysisReductionResult): ReadonlyArray<{ kind: string; count: number }>;
   buildUnitMessage(
     unit: CoverageManifestUnitProjection,
     totalUnits: number,
@@ -213,6 +223,26 @@ export interface AnalysisKindDefinition {
   /** The unresolved-conflict count a stored revision discloses; `0` for a kind with no conflict pass. */
   conflictCountOf(body: Readonly<Record<string, unknown>>): number;
   mode(mode: AnalysisTaskMode): AnalysisModeDefinition;
+}
+
+/**
+ * Counts of one reduction component's members by the class each names, prefixed by the component so
+ * two components' classes can never collide, and sorted by the resulting key so two Runs over the
+ * same findings list them the same way — which is what makes the Run Report's accounting digest
+ * stable. A class with no member is omitted rather than reported as zero: the accounting counts what
+ * the Run produced, and a kind's class set is the kind's business, not the report's.
+ */
+function countByClass<T>(
+  items: ReadonlyArray<T>,
+  component: string,
+  classOf: (item: T) => string,
+): Array<{ kind: string; count: number }> {
+  const counts = new Map<string, number>();
+  for (const item of items) {
+    const key = `${component}:${classOf(item)}`;
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  return [...counts.keys()].sort().map((kind) => ({ kind, count: counts.get(kind)! }));
 }
 
 function modeIndex(modes: ReadonlyArray<AnalysisModeDefinition>): (mode: AnalysisTaskMode) => AnalysisModeDefinition {
@@ -301,6 +331,21 @@ export function baselineAnalysisKindDefinition(): AnalysisKindDefinition {
         })),
     },
     assuranceAbsentReason: '',
+    // The baseline kind's finding classes: the model-driven cross-unit kinds and the deterministic
+    // conflict kinds, counted apart because they are produced by different passes and an editor
+    // reading the Run Report distrusts them separately.
+    findingCounts: (reduction) => [
+      ...countByClass(
+        reduction.components.crossUnitFindings as ReadonlyArray<AnalysisCrossUnitFindingProjection>,
+        'cross-unit-finding',
+        (finding) => finding.kind,
+      ),
+      ...countByClass(
+        reduction.components.conflicts as ReadonlyArray<AnalysisConflictProjection>,
+        'conflict',
+        (conflict) => conflict.kind,
+      ),
+    ],
     buildUnitMessage,
     parseUnitMessageHeader,
     requestDigest: (unitOrdinal, unitDigest) => unitRequestDigest(BASELINE_PROMPT_CONTRACT_DIGEST, unitOrdinal, unitDigest),
@@ -421,6 +466,21 @@ export function factualReviewKindDefinition(research: ResearchCapability = new F
         })),
     },
     assuranceAbsentReason: '',
+    // The factual kind's finding classes: the severity tier of every located finding, and the
+    // exclusion reason of every assertion Reference Integrity could not locate. Both are closed sets
+    // and neither carries a quotation.
+    findingCounts: (reduction) => [
+      ...countByClass(
+        reduction.components.findings as ReadonlyArray<FactualReviewFindingProjection>,
+        'finding',
+        (finding) => finding.severity,
+      ),
+      ...countByClass(
+        reduction.components.excluded as ReadonlyArray<FactualReviewExcludedProjection>,
+        'excluded',
+        (excluded) => excluded.reason,
+      ),
+    ],
     buildUnitMessage: buildFactualReviewUnitMessage,
     parseUnitMessageHeader: parseFactualReviewUnitMessageHeader,
     requestDigest: (unitOrdinal, unitDigest) => factualReviewRequestDigest(FACTUAL_REVIEW_PROMPT_CONTRACT_DIGEST, unitOrdinal, unitDigest),
