@@ -558,6 +558,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'result-set-revision',
     'cross-unit-reduction',
     'assurance-sampling',
+    'run-report',
     'return-to-range',
     'restart-immutable',
     'acknowledged-edit-stale',
