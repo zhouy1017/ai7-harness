@@ -1,9 +1,10 @@
 import type { LlmAdapter, LlmProviderInfo, LlmResolvedModelInfo, StreamChunk, GenerateOptions } from '@deepseek-ai/dsh-llm';
+import { sha256Hex } from '../analysis/canonical.js';
 import { BASELINE_PROMPT_CONTRACT, parseUnitMessageHeader, unitRequestDigest } from '../analysis/contract.js';
 import { AI7_FAILURE_CODES, type DshFailureCodes } from './classification.js';
 import { LOCAL_DETERMINISTIC_MODEL, LOCAL_DETERMINISTIC_ROUTE } from './egress-gate.js';
 import { lastUserMessageText } from './payload.js';
-import { fixtureEntryKey, resolveFixtureEntry, type ResolvedModelFixture } from './model-fixture.js';
+import { fixtureEntryKey, resolveFixtureEntry, type ModelFixtureEntry, type ResolvedModelFixture } from './model-fixture.js';
 
 /**
  * The AI7 local deterministic model adapter: replays a hand-written synthetic fixture in-process and
@@ -21,23 +22,66 @@ import { fixtureEntryKey, resolveFixtureEntry, type ResolvedModelFixture } from 
  * fixture cannot know them; the placeholder lets a synthetic response cite exact in-unit ranges
  * while echoing nothing of the manuscript beyond those identities.
  *
+ * A test may instead construct the adapter with `resolveBy: 'content-digest'`, which keys the same
+ * fixture by the unit's own block texts rather than by the request digest. Block identities are
+ * minted per import, so a fixture generated from one import of a text cannot answer a fresh import
+ * of the same text under a request digest; the content digest does not move with the identities, so
+ * it can. Production and the J-04 Journey stay on request digests: the mode exists for `tests/`.
+ *
  * Structurally an `LlmAdapter`; the class is not extended so that no DSH runtime value is imported
  * before the service installs network denial.
  */
 const BLOCK_PLACEHOLDER = /\{\{block:(\d+)\}\}/gu;
 const BLOCK_LINE = /^\[(blk_[0-9a-f]{24})\] /u;
+/** The `({kind}{level})` marker the prompt contract writes between a block's identity and its text. */
+const BLOCK_KIND_MARKER = /^\((?:title|heading|paragraph)(?: h[1-6])?\) /u;
 
-/** Own block identities of a unit message, in order: the `[blk_…]` lines after the own-blocks header. */
-export function ownBlockIdsOf(unitMessage: string): string[] {
+/** How a request is matched to a fixture entry: by the request digest, or by the unit's own text alone. */
+export type FixtureResolution = 'request-digest' | 'content-digest';
+
+/** The own blocks of a unit message, in order: the `[blk_…]` lines after the own-blocks header. */
+function ownBlockLinesOf(unitMessage: string): Array<{ id: string; rest: string }> {
   const lines = unitMessage.split('\n');
   const start = lines.indexOf(BASELINE_PROMPT_CONTRACT.ownHeader);
   if (start === -1) return [];
-  const ids: string[] = [];
+  const blocks: Array<{ id: string; rest: string }> = [];
   for (const line of lines.slice(start + 1)) {
     const match = BLOCK_LINE.exec(line);
-    if (match !== null) ids.push(match[1]!);
+    if (match !== null) blocks.push({ id: match[1]!, rest: line.slice(match[0].length) });
   }
-  return ids;
+  return blocks;
+}
+
+/** Own block identities of a unit message, in order: the `[blk_…]` lines after the own-blocks header. */
+export function ownBlockIdsOf(unitMessage: string): string[] {
+  return ownBlockLinesOf(unitMessage).map((block) => block.id);
+}
+
+/**
+ * Own block texts of a unit message, in order and positionally matching {@link ownBlockIdsOf}: each
+ * own block line with its identity and its kind marker removed, so what is left is the block text
+ * the prompt contract's `blockLine` interpolated and nothing the import minted.
+ */
+export function ownBlockTextsOf(unitMessage: string): string[] {
+  return ownBlockLinesOf(unitMessage).map((block) => block.rest.replace(BLOCK_KIND_MARKER, ''));
+}
+
+/**
+ * The content key of one Analysis Unit: SHA-256 over its own block texts joined by a newline. It is
+ * a function of the manuscript text alone — no block identity, no unit digest, no prompt contract —
+ * which is exactly why a fixture keyed by it survives a re-import of the same manuscript.
+ */
+export function unitContentDigest(ownBlockTexts: ReadonlyArray<string>): string {
+  return sha256Hex(ownBlockTexts.join('\n'));
+}
+
+/** The entries reachable in content mode, keyed by content digest; an entry without one is unreachable. */
+function contentDigestEntries(fixture: ResolvedModelFixture): Map<string, ModelFixtureEntry> {
+  const entries = new Map<string, ModelFixtureEntry>();
+  for (const entry of fixture.entries.values()) {
+    if (entry.contentDigest !== null) entries.set(fixtureEntryKey(entry.unitOrdinal, entry.contentDigest, entry.attempt), entry);
+  }
+  return entries;
 }
 
 /** Substitute `{{block:N}}` placeholders; an out-of-range placeholder is left for the contract to reject. */
@@ -49,13 +93,22 @@ export class Ai7LocalDeterministicAdapter implements LlmAdapter {
   readonly #fixture: ResolvedModelFixture;
   readonly #promptContractDigest: string;
   readonly #codes: DshFailureCodes;
+  readonly #resolveBy: FixtureResolution;
+  readonly #entries: ReadonlyMap<string, ModelFixtureEntry>;
   readonly #servedByKey = new Map<string, number>();
   #served = 0;
 
-  constructor(fixture: ResolvedModelFixture, promptContractDigest: string, codes: DshFailureCodes) {
+  constructor(
+    fixture: ResolvedModelFixture,
+    promptContractDigest: string,
+    codes: DshFailureCodes,
+    options: { readonly resolveBy?: FixtureResolution } = {},
+  ) {
     this.#fixture = fixture;
     this.#promptContractDigest = promptContractDigest;
     this.#codes = codes;
+    this.#resolveBy = options.resolveBy ?? 'request-digest';
+    this.#entries = this.#resolveBy === 'content-digest' ? contentDigestEntries(fixture) : fixture.entries;
   }
 
   /** Replayed requests so far; there is never a transmission count. */
@@ -95,13 +148,16 @@ export class Ai7LocalDeterministicAdapter implements LlmAdapter {
       yield failure(AI7_FAILURE_CODES.FIXTURE_MISMATCH, '请求不含可识别的分析单元消息头。');
       return;
     }
-    const expectedDigest = unitRequestDigest(this.#promptContractDigest, header.ordinal, header.unitDigest);
+    const expectedDigest = this.#resolveBy === 'content-digest'
+      ? unitContentDigest(ownBlockTextsOf(text!))
+      : unitRequestDigest(this.#promptContractDigest, header.ordinal, header.unitDigest);
     const pairKey = fixtureEntryKey(header.ordinal, expectedDigest);
     const attempt = (this.#servedByKey.get(pairKey) ?? 0) + 1;
     this.#servedByKey.set(pairKey, attempt);
-    const entry = resolveFixtureEntry(this.#fixture.entries, header.ordinal, expectedDigest, attempt);
+    const entry = resolveFixtureEntry(this.#entries, header.ordinal, expectedDigest, attempt);
     if (entry === undefined) {
-      yield failure(AI7_FAILURE_CODES.FIXTURE_MISMATCH, `夹具 ${this.#fixture.identity} 没有单元 ${header.ordinal} 在当前请求摘要下的对应响应。`);
+      const label = this.#resolveBy === 'content-digest' ? '内容摘要' : '请求摘要';
+      yield failure(AI7_FAILURE_CODES.FIXTURE_MISMATCH, `夹具 ${this.#fixture.identity} 没有单元 ${header.ordinal} 在当前${label}下的对应响应。`);
       return;
     }
     const response = entry.response;
