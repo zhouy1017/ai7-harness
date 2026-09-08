@@ -77,7 +77,6 @@ interface DocumentParseResult {
   contentDigest: string;
   structureDigest: string;
   signals: DocumentSignals;
-  sample1TerminalSectionSeen: boolean;
 }
 
 function requireDocx(condition: unknown, message: string): asserts condition {
@@ -138,12 +137,6 @@ function attributeValue(tag: SaxesTagNS, localName: string): string | undefined 
   return Object.values(tag.attributes).find((attribute) => attribute.local === localName)?.value;
 }
 
-function attributeLocalNames(tag: SaxesTagNS): string[] {
-  return Object.values(tag.attributes)
-    .map((attribute) => attribute.local)
-    .sort();
-}
-
 function hasExactStrings(actual: readonly string[], expected: readonly string[]): boolean {
   return actual.length === expected.length && actual.every((value, index) => value === expected[index]);
 }
@@ -199,8 +192,7 @@ function createDocumentParser(
   const ancestors: string[] = [];
   let runProperties: { depth: number; styled: boolean } | undefined;
   let terminalSectionSeen = false;
-  let sample1TerminalSectionSeen = false;
-  let terminalSection: { depth: number; kind: 'default' | 'sample1'; children: string[] } | undefined;
+  let terminalSection: { depth: number; attributeCount: number; descendantCount: number } | undefined;
   let paragraph: { text: string; style: string | undefined } | undefined;
   let xmlTokenCodeUnits = 0;
   let inXmlMarkup = false;
@@ -252,13 +244,7 @@ function createDocumentParser(
     const parent = ancestors.at(-1);
     const grandparent = ancestors.at(-2);
     if (terminalSectionSeen && parent === 'body') requireDocx(false, 'terminal section properties are not terminal');
-    if (terminalSection && tag.local !== 'sectPr') {
-      requireDocx(
-        terminalSection.kind === 'sample1' && ancestors.length === terminalSection.depth + 1,
-        'non-default terminal section properties',
-      );
-      terminalSection.children.push(tag.local);
-    }
+    if (terminalSection && tag.local !== 'sectPr') terminalSection.descendantCount += 1;
     if (runProperties) runProperties.styled = true;
     switch (tag.local) {
       case 'p':
@@ -310,12 +296,11 @@ function createDocumentParser(
       case 'sectPr':
         if (parent === 'body') {
           requireDocx(!terminalSectionSeen && terminalSection === undefined, 'duplicate terminal section properties');
-          const attributes = attributeLocalNames(tag);
-          if (attributes.length === 0) terminalSection = { depth: ancestors.length, kind: 'default', children: [] };
-          else {
-            requireDocx(hasExactStrings(attributes, ['rsidR', 'rsidRPr']), 'non-default terminal section properties');
-            terminalSection = { depth: ancestors.length, kind: 'sample1', children: [] };
-          }
+          terminalSection = {
+            depth: ancestors.length,
+            attributeCount: Object.keys(tag.attributes).length,
+            descendantCount: 0,
+          };
         } else if (parent === 'pPr' && grandparent === 'p') signals.sections += 1;
         else requireDocx(false, 'unsupported section properties');
         break;
@@ -336,12 +321,7 @@ function createDocumentParser(
       runProperties = undefined;
     }
     if (tag.local === 'sectPr' && terminalSection?.depth === ancestors.length) {
-      if (terminalSection.kind === 'default') requireDocx(terminalSection.children.length === 0, 'non-default terminal section properties');
-      else {
-        requireDocx(hasExactStrings(terminalSection.children, ['pgSz', 'pgMar', 'cols', 'docGrid']), 'non-default terminal section properties');
-        sample1TerminalSectionSeen = true;
-        signals.sections += 1;
-      }
+      if (terminalSection.attributeCount > 0 || terminalSection.descendantCount > 0) signals.sections += 1;
       terminalSectionSeen = true;
       terminalSection = undefined;
     }
@@ -413,7 +393,6 @@ function createDocumentParser(
         contentDigest: contentHash.digest('hex'),
         structureDigest: structureHash.update(']').digest('hex'),
         signals,
-        sample1TerminalSectionSeen,
       };
     },
   };
@@ -643,11 +622,6 @@ export async function parseDocx(
   if (expectedSource) {
     requireDocx(archive.sourceDigest === expectedSource.digest && archive.archiveBytes === expectedSource.bytes, 'selected file changed during staging');
   }
-  const exactSample1 = archive.sourceDigest === SAMPLE1_SOURCE_SHA256 && archive.archiveBytes === SAMPLE1_SOURCE_BYTES;
-  requireDocx(
-    !archive.document.sample1TerminalSectionSeen || exactSample1,
-    'non-default terminal section properties',
-  );
   const contentTypes = decodeMetadataXml(archive.metadata.get('[Content_Types].xml')!);
   requireDocx(contentTypes.includes('wordprocessingml.document.main+xml'), 'package does not declare a WordprocessingML document');
   const coreTitle = archive.metadata.get('docProps/core.xml');

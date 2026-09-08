@@ -20,8 +20,17 @@ export interface SyntheticDocxParagraph {
   style?: string;
 }
 
+export interface SyntheticDocxTerminalSection {
+  /** `w:sectPr` attributes by local name, for example `{ rsidR: '00AB12CD' }`. */
+  attributes?: Readonly<Record<string, string>>;
+  /** Empty child elements by local name, for example `['pgSz', 'pgMar', 'cols', 'docGrid']`. */
+  children?: readonly string[];
+}
+
 export interface SyntheticDocxOptions {
   paragraphs?: readonly SyntheticDocxParagraph[];
+  /** Shape of the body-level terminal `w:sectPr`; omitted means the bare `<w:sectPr/>` container. */
+  terminalSection?: SyntheticDocxTerminalSection;
   /** Adds `docProps/core.xml` carrying this `dc:title`. */
   coreTitle?: string;
   omitContentTypes?: boolean;
@@ -32,6 +41,14 @@ export interface SyntheticDocxOptions {
 
 function escapeXml(value: string): string {
   return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function terminalSectionXml(section: SyntheticDocxTerminalSection | undefined): string {
+  const attributes = Object.entries(section?.attributes ?? {})
+    .map(([name, value]) => ` w:${name}="${escapeXml(value).replace(/"/g, '&quot;')}"`)
+    .join('');
+  const children = (section?.children ?? []).map((name) => `<w:${name}/>`).join('');
+  return children.length === 0 ? `<w:sectPr${attributes}/>` : `<w:sectPr${attributes}>${children}</w:sectPr>`;
 }
 
 function paragraphXml(paragraph: SyntheticDocxParagraph): string {
@@ -48,7 +65,7 @@ export function buildSyntheticDocx(options: SyntheticDocxOptions = {}): Uint8Arr
     '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
     '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>' +
     paragraphs.map(paragraphXml).join('') +
-    '<w:sectPr/>' +
+    terminalSectionXml(options.terminalSection) +
     '</w:body></w:document>';
 
   const entries: Record<string, Uint8Array> = {};

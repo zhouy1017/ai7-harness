@@ -33,6 +33,15 @@ async function parseFixture(
   return { parsed, blocks };
 }
 
+/** A literal `word/document.xml` body, for the shapes `writeSyntheticDocx` deliberately cannot emit. */
+function bodyDocumentXml(body: string): Uint8Array {
+  return new TextEncoder().encode(
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+    '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">' +
+    `<w:body>${body}</w:body></w:document>`,
+  );
+}
+
 describe('parseDocx', () => {
   it('parses title, heading, and paragraph blocks carrying CJK text', async () => {
     const { parsed, blocks } = await parseFixture({
@@ -138,6 +147,33 @@ describe('parseDocx', () => {
     await expect(parseFixture({ paragraphs: [{ text: '' }] })).rejects.toThrow(
       'DOCX_REJECTED:DOCX contains no editable text blocks',
     );
+  });
+
+  it('counts an empty terminal section as no section at all', async () => {
+    const { parsed } = await parseFixture({ terminalSection: {} });
+    const sections = parsed.fidelity.find((category) => category.key === 'sections');
+    expect(sections?.count).toBe(0);
+    expect(sections?.statusLabel).toBe('完整保留');
+  });
+
+  it('rejects a body-level element after the terminal section properties', async () => {
+    await expect(
+      parseFixture({
+        extraEntries: {
+          'word/document.xml': bodyDocumentXml('<w:p><w:r><w:t>正文</w:t></w:r></w:p><w:sectPr/><w:p/>'),
+        },
+      }),
+    ).rejects.toThrow('DOCX_REJECTED:terminal section properties are not terminal');
+  });
+
+  it('rejects section properties in an unsupported place', async () => {
+    await expect(
+      parseFixture({
+        extraEntries: {
+          'word/document.xml': bodyDocumentXml('<w:p><w:sectPr/><w:r><w:t>正文</w:t></w:r></w:p>'),
+        },
+      }),
+    ).rejects.toThrow('DOCX_REJECTED:unsupported section properties');
   });
 
   it('rejects a source that changed after staging', async () => {
