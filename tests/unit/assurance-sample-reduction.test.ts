@@ -147,6 +147,37 @@ describe('assuranceSamplePrecision', () => {
   });
 });
 
+/**
+ * A Result Set Revision is immutable history. One recorded before this slice carries no sample, and is
+ * read as the Run it actually was rather than rewritten to claim one — the same treatment #274 gave a
+ * revision recorded before the cross-unit reduction, which this case pins beside it.
+ */
+describe('a revision recorded before the sample existed', () => {
+  it('reads back as a Run that ran no sample, for both kinds, without inventing one', () => {
+    const baseline = baselineAnalysisKindDefinition().revisionComponents({
+      conflicts: [], sections: [], synthesis: {},
+    });
+    expect(baseline.assuranceSample).toEqual({
+      state: 'not-run', seed: null, size: 0, candidateCount: 0, strata: [], dispositions: [], precision: [], usage: null,
+      reason: '该修订版由未包含保证抽样的运行产生。',
+    });
+    // The pre-#274 reading is unchanged beside it, and neither fallback invents a finding.
+    expect(baseline.crossUnitFindings).toEqual([]);
+    expect(baseline.crossUnitReduction).toMatchObject({ state: 'not-run', findingCount: 0 });
+
+    const factual = factualReviewKindDefinition().revisionComponents({
+      findings: [], excluded: [], assertionCounts: {}, research: {},
+    });
+    expect(factual.assuranceSample).toEqual(baseline.assuranceSample);
+
+    // A revision that does carry one is read as it was written, never replaced by the fallback.
+    const recorded = assuranceSampleOutcome(DRAW, [disposition('0', 'medium', '成立')], null, []);
+    expect(baselineAnalysisKindDefinition().revisionComponents({
+      conflicts: [], sections: [], synthesis: {}, assuranceSample: recorded,
+    }).assuranceSample).toEqual(recorded);
+  });
+});
+
 describe('the two kinds’ sampling bindings', () => {
   it('declares the baseline kind’s cross-unit findings, anchored in each finding’s first side', () => {
     const definition = baselineAnalysisKindDefinition();
