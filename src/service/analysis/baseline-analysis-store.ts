@@ -1,14 +1,19 @@
 import { randomUUID } from 'node:crypto';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import {
-  BASELINE_ANALYSIS_MODE_LABELS,
-  BASELINE_ANALYSIS_MODE_MEANINGS,
+  type AnalysisGoal,
+  type AnalysisKindId,
+  type AnalysisProjection,
+  type AnalysisTaskMode,
+  type FactualReviewProjection,
+  type FactualReviewHistoryProjection,
+  type FactualReviewResultSetRevisionProjection,
   type AnalysisFreshnessAxis,
+  type AnalysisReducerStageProjection,
   type AnalysisReusePlanCounts,
   type AnalysisReusePlanProjection,
   type AnalysisUnitLineage,
   type BaselineAnalysisExecutionBindingProjection,
-  type BaselineAnalysisGoal,
   type BaselineAnalysisHistoryEntryProjection,
   type BaselineAnalysisHistoryProjection,
   type BaselineAnalysisPlanAdaptationProjection,
@@ -20,7 +25,6 @@ import {
   type BaselineAnalysisRevisionUpdateProjection,
   type BaselineAnalysisRunState,
   type BaselineAnalysisSelectedRange,
-  type BaselineAnalysisTaskMode,
   type BaselineAnalysisUnitProjection,
   type BaselineAnalysisUpdateControlsProjection,
   type BaselineAnalysisUpdateMode,
@@ -60,22 +64,12 @@ import {
   requireAnalysis,
   sha256Hex,
 } from './canonical.js';
-import { BASELINE_PROMPT_CONTRACT_DIGEST, BASELINE_UNIT_RESULT_SCHEMA, unitRequestDigest, type BaselineUnitResult } from './contract.js';
-import {
-  BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST,
-  BASELINE_CROSS_UNIT_RESULT_SCHEMA,
-  CROSS_UNIT_FINDING_KINDS,
-} from './cross-unit-contract.js';
+import { BASELINE_UNIT_RESULT_SCHEMA, unitRequestDigest, type BaselineUnitResult } from './contract.js';
 import { deriveCoverageManifest, manifestCoversEveryBlock, manifestDigestIsExact, type ManifestBlockInput } from './coverage-manifest.js';
-import {
-  BASELINE_ANALYSIS_CONTRACT_VERSION,
-  BASELINE_ANALYSIS_EXPECTED_OUTCOME,
-  BASELINE_ANALYSIS_KIND,
-  TASK_INPUT_CHECKPOINT_PURPOSE,
-  goalForMode,
-} from './identity.js';
-import type { BaselineReduction } from './reducers.js';
+import { TASK_INPUT_CHECKPOINT_PURPOSE } from './identity.js';
+import type { AnalysisKindDefinition, AnalysisReductionResult } from './kind-definition.js';
 import { deriveReusePlan, requireSelectedRange, reusePlanRecord, type ReusePlanPredecessor } from './reuse-plan.js';
+import { baselineAnalysisKindDefinition } from './kind-definition.js';
 import { describeComposition } from '../harness/primary-agent-harness.js';
 import { LOCAL_DETERMINISTIC_MODEL, LOCAL_DETERMINISTIC_ROUTE } from '../provider/egress-gate.js';
 
@@ -85,38 +79,6 @@ type SqlRow = Record<string, SQLOutputValue>;
 export const SAMPLE1_SOURCE_DIGEST = 'b8a3dbde0aa8a1ec7265f9ae3fe47877759e7947c5ab69682cd0a8f424a8d483' as const;
 const NATIVE_CARRIER_DIGEST = 'ae485040c8fa602ab2e98ec91dd122201d40a8be41d8a4f86f7cd55ddb1e434d' as const;
 const SIDECAR_DIGEST = '980b565f25bdff29e539365e17344346017b05146a45cfea35c8ed7d528a1bff' as const;
-/** The first-baseline revision record (Issue #92): unchanged in shape. */
-export const RESULT_SET_REVISION_SCHEMA = 'ai7.baseline-manuscript-analysis.result-set-revision/1' as const;
-/** A successor revision record (Issue #93): the `/1` keys plus `update` and per-unit `lineage`. */
-export const RESULT_SET_SUCCESSOR_REVISION_SCHEMA = 'ai7.baseline-manuscript-analysis.result-set-revision/2' as const;
-export const REDUCER_DESCRIPTOR = {
-  schema: 'ai7.baseline-manuscript-analysis.reducers/1',
-  stages: ['unit-validation', 'section-reduction', 'contradiction-continuity', 'cross-unit-reduction', 'book-synthesis'],
-  contradictionRules: ['alias-collision', 'entity-kind-divergence', 'setting-claim-divergence'],
-  crossUnitFindingKinds: CROSS_UNIT_FINDING_KINDS,
-  certaintyPolicy: 'report-only-never-resolve',
-} as const;
-export const REDUCER_DIGEST = sha256Hex(canonicalJson(REDUCER_DESCRIPTOR));
-export const SCHEMA_DIGEST = sha256Hex(canonicalJson({
-  contractVersion: BASELINE_ANALYSIS_CONTRACT_VERSION,
-  unitResultSchema: BASELINE_UNIT_RESULT_SCHEMA,
-  promptContractDigest: BASELINE_PROMPT_CONTRACT_DIGEST,
-  crossUnitResultSchema: BASELINE_CROSS_UNIT_RESULT_SCHEMA,
-  crossUnitPromptContractDigest: BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST,
-}));
-
-const EXECUTION_STEPS = ['派生覆盖清单', '逐单元执行基线稿件分析契约 v1', '章节归约', '跨单元矛盾与连续性核对', '全书综合', '形成结果集修订版'] as const;
-const UPDATE_EXECUTION_STEPS = ['派生覆盖清单并计算复用计划', '按血缘复用兼容单元', '仅对重算单元逐单元执行基线稿件分析契约 v1', '章节归约', '跨单元矛盾与连续性核对', '全书综合', '追加后继结果集修订版'] as const;
-const REDUCER_STAGES = ['unit-validation', 'section-reduction', 'contradiction-continuity', 'book-synthesis'] as const;
-/** How a revision recorded before Issue #274 reads: its Run had no cross-unit reduction to report. */
-const PRE_CROSS_UNIT_REDUCTION = {
-  state: 'not-run',
-  reason: '该修订版由未包含跨单元归纳的运行产生。',
-  requestDigest: null,
-  usage: null,
-  findingCount: 0,
-} as const;
-
 const SUCCESSOR_BEHAVIOR ='每次更新都是新的用户发起任务，经准备 → 计划预览 → 标准直接授权 → 执行后，在同一结果集上追加下一序号的不可变后继修订版；前一修订版不被改写，且始终可在修订历史中按其原始稿件 pin 查看。' as const;
 const ACTIVE_RUN_REASON = '当前已有分析任务在调度或执行中；在其结束前不能准备新的更新任务。' as const;
 const SYNC_UNAVAILABLE_REASON = '结果集修订版仍绑定当前稿件；只有在已确认编辑使精确修订版新鲜度为“已过期”后才可同步到当前稿件。' as const;
@@ -182,23 +144,61 @@ interface PreparationWork {
 interface IntentFacts {
   readonly taskIntentId: string;
   readonly bookId: string;
-  readonly mode: BaselineAnalysisTaskMode;
-  readonly goal: BaselineAnalysisGoal;
+  readonly mode: AnalysisTaskMode;
+  readonly goal: string;
   readonly createdAt: string;
   readonly predecessorRevisionId: string | null;
   readonly selectedRange: BaselineAnalysisSelectedRange | null;
 }
 
-export type BaselineAnalysisPreparationResult = {
+/**
+ * The kind-generic shape the store builds before it is read as one kind's projection. Every member
+ * either is identical for both kinds or is widened to what the definition supplies; nothing here is
+ * a member neither kind declares.
+ */
+type AnalysisProjectionShape = Omit<
+  BaselineAnalysisProjection,
+  'kind' | 'contractVersion' | 'taskIntent' | 'executionPlan' | 'resultSetRevision' | 'update' | 'updateControls' | 'history' | 'inspectedRevision'
+> & {
+  kind: AnalysisKindId;
+  contractVersion: string;
+  taskIntent: null | { taskIntentId: string; goal: string; expectedOutcome: string; createdAt: string; mode: AnalysisTaskMode; modeLabel: string };
+  executionPlan: null | {
+    steps: ReadonlyArray<string>;
+    effects: readonly [];
+    unitCount: number;
+    recomputedUnitCount?: number;
+    reusedUnitCount?: number;
+    reducerStages: ReadonlyArray<AnalysisReducerStageProjection['stage']>;
+    stopCondition: string;
+  };
+  resultSetRevision: null | BaselineAnalysisResultSetRevisionProjection | FactualReviewResultSetRevisionProjection;
+  update: null | BaselineAnalysisUpdateProjection;
+  updateControls: null | BaselineAnalysisUpdateControlsProjection;
+  history: null | BaselineAnalysisHistoryProjection | FactualReviewHistoryProjection;
+  inspectedRevision: null | {
+    revision: BaselineAnalysisResultSetRevisionProjection | FactualReviewResultSetRevisionProjection;
+    current: boolean;
+    readOnly: true;
+  };
+};
+
+/**
+ * The progress of one preparation. The projection is the kind's own once a caller that knows which
+ * ledger it asked narrows it; the ledger itself returns the discriminated union.
+ */
+export type AnalysisPreparationResult<TProjection = AnalysisProjection> = {
   done: boolean;
   workId: string | null;
   completed: number;
   total: number;
-  projection: BaselineAnalysisProjection | null;
+  projection: TProjection | null;
 };
 
+export type BaselineAnalysisPreparationResult = AnalysisPreparationResult;
+
 export type BaselineAnalysisPrepareInput =
-  | { phase: 'start'; bookId: string; goal: BaselineAnalysisGoal; update: BaselineAnalysisUpdateRequest | null; reconfirm: boolean; launchPolicy: LaunchPolicyProjection }
+  | { phase: 'start'; bookId: string; goal: AnalysisGoal; update: BaselineAnalysisUpdateRequest | null; reconfirm: boolean; launchPolicy: LaunchPolicyProjection }
   | { phase: 'advance'; workId: string }
   | { phase: 'cancel'; workId: string }
   | { phase: 'cancel-all' };
@@ -304,7 +304,8 @@ export interface ExecutionBindingRecord {
   readonly nativeArtifact: { identity: '@ai7/editorial-workspace-profile'; version: '1.0.0'; nativeCarrierSha256: string; sidecarRevision: 2; sidecarSha256: string };
   readonly behaviorCompositionDigest: string;
   readonly promptContractDigest: string;
-  readonly contractVersion: typeof BASELINE_ANALYSIS_CONTRACT_VERSION;
+  /** The exact contract version of the analysis kind this attempt executes. */
+  readonly contractVersion: string;
   /** The lineage root Session; under developer-live each unit opens its own Session beneath it. */
   readonly harnessSessionId: string;
   readonly route: ExecutionRouteId;
@@ -344,7 +345,7 @@ export interface RevisionPersistInput {
   readonly attemptId: string;
   readonly bindingDigest: string;
   readonly harnessSessionId: string;
-  readonly reduction: BaselineReduction;
+  readonly reduction: AnalysisReductionResult;
   readonly units: ReadonlyArray<UnitResultRecord>;
   readonly usage: { inputTokens: number; outputTokens: number; requests: number };
   /** The units the Run adapted in-envelope (one safe retry each), disclosed in the revision's provenance. */
@@ -451,21 +452,45 @@ export function providerConsequence(live: LaunchBinding['live']): string {
     : `与首次基线分析相同：远程绑定 ${live.route} · ${live.model} 在 developer-live · Provider Processing v4 下可执行，实时传输受运行边界约束；外发数据类别 public-or-synthetic；任务运行预算上限 ${live.runBudgetCeiling.maxTotalTokens} tokens；每个重算单元形成一次实时传输并计入用量，复用单元不形成任何模型负载。`;
 }
 
+/**
+ * The append-only ledger of one analysis kind of one Book database. The kind it serves is the
+ * {@link AnalysisKindDefinition} it is constructed with: the identity it tags every row with, the
+ * contract version, the Task modes and their goals, the frozen prompt contract its plans freeze, the
+ * reducer its Runs reduce through, and the stages its plans declare. Two instances over the same
+ * database serve the two kinds of Issue #53 without either seeing the other's Tasks, plans, Runs, or
+ * revisions: every read is filtered by the definition's kind.
+ */
 export class BaselineAnalysisStore {
   readonly #db: DatabaseSync;
   readonly #checkpointOwner: CheckpointOwner;
   readonly #route: BaselineAnalysisRouteFacts | null;
+  readonly #definition: AnalysisKindDefinition;
   readonly #work = new Map<string, PreparationWork>();
   #launch: LaunchBinding = DEVELOPMENT_CI_LAUNCH;
 
-  constructor(db: DatabaseSync, checkpointOwner: CheckpointOwner, route: BaselineAnalysisRouteFacts | null) {
+  constructor(
+    db: DatabaseSync,
+    checkpointOwner: CheckpointOwner,
+    route: BaselineAnalysisRouteFacts | null,
+    definition: AnalysisKindDefinition = baselineAnalysisKindDefinition(),
+  ) {
     this.#db = db;
     this.#checkpointOwner = checkpointOwner;
     this.#route = route;
+    this.#definition = definition;
   }
 
   get route(): BaselineAnalysisRouteFacts | null {
     return this.#route;
+  }
+
+  /** The analysis kind this ledger serves; the execution owner reads its contract through this. */
+  get definition(): AnalysisKindDefinition {
+    return this.#definition;
+  }
+
+  get kind(): AnalysisKindId {
+    return this.#definition.kind;
   }
 
   get launch(): LaunchBinding {
@@ -491,11 +516,14 @@ export class BaselineAnalysisStore {
   // ---- inspection -------------------------------------------------------------------------------
 
   /**
-   * The Book's latest baseline-analysis Task with the latest Result Set Revision, the Revision
+   * The Book's latest Task of this ledger's kind with the latest Result Set Revision, the Revision
    * History, and the Analysis Update Controls; `revisionId` additionally opens one exact revision
    * read-only. Older revisions never replace `resultSetRevision`, which is always the latest.
+   *
+   * The shape is discriminated on `kind`: a caller that knows which ledger it asked narrows the union
+   * on that member, and the baseline kind's shape is exactly what it has always been.
    */
-  inspect(bookId: string, progress: ProgressReader = () => null, revisionId: string | null = null): BaselineAnalysisProjection {
+  inspect(bookId: string, progress: ProgressReader = () => null, revisionId: string | null = null): AnalysisProjection {
     requireAnalysis(UUID_PATTERN.test(bookId), 'ANALYSIS_BOOK_INVALID', '任务所属图书无效。');
     requireAnalysis(revisionId === null || UUID_PATTERN.test(revisionId), 'ANALYSIS_REVISION_INVALID', '结果集修订版标识无效。');
     const intentRow = this.#latestIntentRow(bookId);
@@ -508,10 +536,10 @@ export class BaselineAnalysisStore {
     const taskIntent = {
       taskIntentId: intent.taskIntentId,
       goal: intent.goal,
-      expectedOutcome: BASELINE_ANALYSIS_EXPECTED_OUTCOME,
+      expectedOutcome: this.#definition.expectedOutcome,
       createdAt: intent.createdAt,
       mode: intent.mode,
-      modeLabel: BASELINE_ANALYSIS_MODE_LABELS[intent.mode],
+      modeLabel: this.#definition.mode(intent.mode).label,
     };
     const revisionRows = this.#revisionRows(bookId);
     const latestRow = revisionRows.at(-1);
@@ -522,17 +550,17 @@ export class BaselineAnalysisStore {
     const checkpoint = this.#db.prepare('SELECT * FROM analysis_task_input_checkpoints WHERE task_intent_id = ?').get(intent.taskIntentId) as SqlRow | undefined;
     if (checkpoint === undefined) {
       this.#binding(bookId);
-      const update = intent.mode === 'first-baseline' ? null : this.#updateProjection(intent, null, null, revision);
-      return {
-        ...this.#available(bookId),
+      const update = this.#isInitial(intent.mode) ? null : this.#updateProjection(intent, null, null, revision);
+      return this.#asProjection({
+        ...this.#shape(bookId),
         taskIntent,
         resultSetRevision: revision,
         update,
-        updateControls: revision === null ? null : this.#updateControls(bookId, revision, false),
+        updateControls: this.#updateControlsFor(bookId, revision, false),
         history,
         inspectedRevision,
         actions: { canPrepare: revision === null, canAuthorize: false, canReconfirmPlan: false },
-      };
+      });
     }
     const versions = this.#planVersionFacts(intent.taskIntentId);
     const currentVersion = versions.at(-1);
@@ -556,12 +584,13 @@ export class BaselineAnalysisStore {
             : run.state === 'completed' || run.state === 'completed-with-gaps' ? 'settled'
               : run.state === 'failed' ? 'failed' : 'interrupted';
     const providerPlan = plan['provider-resolution-plan'] as BaselineAnalysisProjection['providerResolutionPlan'];
-    const reusePlan = intent.mode === 'first-baseline' ? null : plan['reuse-plan'] as AnalysisReusePlanProjection;
-    const update = intent.mode === 'first-baseline' ? null : this.#updateProjection(intent, reusePlan, digests['reuse-plan'] ?? null, revision);
+    const initial = this.#isInitial(intent.mode);
+    const reusePlan = initial ? null : plan['reuse-plan'] as AnalysisReusePlanProjection;
+    const update = initial ? null : this.#updateProjection(intent, reusePlan, digests['reuse-plan'] ?? null, revision);
     // Drift detection (Issue #48): before authorization the material inputs are re-derived from durable
     // state and compared with the frozen version; a stored pending Plan Revision takes precedence over a
     // live difference. After authorization the bound plan is final for its Run and nothing is compared.
-    const materialInputs = materialPlanInputsOfComponents(plan, BASELINE_ANALYSIS_EXPECTED_OUTCOME);
+    const materialInputs = materialPlanInputsOfComponents(plan, this.#definition.expectedOutcome);
     const revisions = this.#planRevisionProjections(intent.taskIntentId, versions);
     let planRevision: BaselineAnalysisPlanRevisionProjection | null = null;
     if (authorization === undefined) {
@@ -600,10 +629,10 @@ export class BaselineAnalysisStore {
     }));
     // A predecessor drift is a different Task Intent, never a reconfirmation of this one.
     const canReconfirmPlan = authorization === undefined && planRevision !== null && !planRevision.changedFields.includes('predecessorRevision');
-    return {
+    return this.#asProjection({
       bookId,
-      kind: BASELINE_ANALYSIS_KIND,
-      contractVersion: BASELINE_ANALYSIS_CONTRACT_VERSION,
+      kind: this.#definition.kind,
+      contractVersion: this.#definition.contractVersion,
       state,
       stateLabel: state === 'prepared' ? '计划已冻结 · 待授权'
         : state === 'authorized-blocked' ? '已授权 · 派发前阻止'
@@ -661,7 +690,7 @@ export class BaselineAnalysisStore {
         safeNextAction: asString((parseCanonicalJson(asString(outcome.canonical_json)) as Record<string, unknown>).safeNextAction),
       },
       update,
-      updateControls: revision === null ? null : this.#updateControls(bookId, revision, runIsActive(run?.state ?? null)),
+      updateControls: this.#updateControlsFor(bookId, revision, runIsActive(run?.state ?? null)),
       history,
       inspectedRevision,
       actions: {
@@ -670,14 +699,30 @@ export class BaselineAnalysisStore {
         canReconfirmPlan,
       },
       namedNonEffects: namedNonEffects(this.#launch.live),
-    };
+    });
   }
 
-  #available(bookId: string): BaselineAnalysisProjection {
+  /**
+   * The one place the kind-generic shape the store builds becomes the discriminated projection a
+   * caller reads. Every member is already the member its kind declares — the kind, the contract
+   * version, the Task mode, the declared stages, and the revision components all come from the
+   * definition — and the union is discriminated on `kind`, which no other value in the shape can
+   * contradict.
+   */
+  #asProjection(shape: AnalysisProjectionShape): AnalysisProjection {
+    return shape as AnalysisProjection;
+  }
+
+  #available(bookId: string): AnalysisProjection {
+    return this.#asProjection(this.#shape(bookId));
+  }
+
+  /** The `待开始` shape of this ledger's kind: the Book has no Task of it yet. */
+  #shape(bookId: string): AnalysisProjectionShape {
     return {
       bookId,
-      kind: BASELINE_ANALYSIS_KIND,
-      contractVersion: BASELINE_ANALYSIS_CONTRACT_VERSION,
+      kind: this.#definition.kind,
+      contractVersion: this.#definition.contractVersion,
       state: 'available',
       stateLabel: '待开始',
       taskIntent: null,
@@ -776,7 +821,7 @@ export class BaselineAnalysisStore {
    * Book's latest Result Set Revision for an update Task, and the fixed ceiling, category, and outcome
    * class. Read leniently so a drifted pin or binding yields a diff rather than a refusal.
    */
-  #currentMaterialInputs(bookId: string, mode: BaselineAnalysisTaskMode, selectedRange: BaselineAnalysisSelectedRange | null): MaterialPlanInputsProjection {
+  #currentMaterialInputs(bookId: string, mode: AnalysisTaskMode, selectedRange: BaselineAnalysisSelectedRange | null): MaterialPlanInputsProjection {
     const connection = this.#db.prepare(
       `SELECT provider_id, model_id, adapter_revision, configuration_revision, credential_reference
        FROM model_service_connections WHERE connection_id = 'main-editorial-deepseek-v4-pro'`,
@@ -795,7 +840,7 @@ export class BaselineAnalysisStore {
        ORDER BY pin.sidecar_revision DESC LIMIT 1`,
     ).get(bookId) as SqlRow | undefined;
     requireAnalysis(pin !== undefined, 'ANALYSIS_ARTIFACT_PIN_UNAVAILABLE', '当前图书尚未固定编辑工作区方案。');
-    const latest = mode === 'first-baseline' ? undefined : this.#revisionRows(bookId).at(-1);
+    const latest = this.#isInitial(mode) ? undefined : this.#revisionRows(bookId).at(-1);
     return {
       providerBinding: live === null
         ? {
@@ -819,20 +864,25 @@ export class BaselineAnalysisStore {
         sidecarRevision: asNumber(pin.sidecar_revision),
         sidecarSha256: asString(pin.sidecar_sha256),
       },
-      selectedRange: mode === 'reanalyze-range' ? selectedRange : null,
+      selectedRange: this.#definition.mode(mode).rangeBound ? selectedRange : null,
       predecessorRevision: latest === undefined ? null : { revisionId: asString(latest.revision_id), ordinal: asNumber(latest.ordinal), digest: asString(latest.sha256) },
       runBudgetCeiling: live === null ? 'unset' : live.runBudgetCeiling,
       outboundDataCategory: 'public-or-synthetic',
-      expectedOutcome: BASELINE_ANALYSIS_EXPECTED_OUTCOME,
+      expectedOutcome: this.#definition.expectedOutcome,
     };
   }
 
-  /** The reuse-plan counts a version would derive for the given range against the latest revision; `null` for the first baseline. */
-  #reusePlanCountsFor(bookId: string, mode: BaselineAnalysisTaskMode, manifest: CoverageManifestProjection, selectedRange: BaselineAnalysisSelectedRange | null): AnalysisReusePlanCounts | null {
-    if (mode === 'first-baseline') return null;
+  /** The reuse-plan counts a version would derive for the given range against the latest revision; `null` for an initial mode. */
+  #reusePlanCountsFor(bookId: string, mode: AnalysisTaskMode, manifest: CoverageManifestProjection, selectedRange: BaselineAnalysisSelectedRange | null): AnalysisReusePlanCounts | null {
+    if (this.#isInitial(mode)) return null;
     const latestRow = this.#revisionRows(bookId).at(-1);
     if (latestRow === undefined) return null;
-    return deriveReusePlan({ mode, selectedRange: mode === 'reanalyze-range' ? selectedRange : null, manifest, predecessor: this.#predecessorFacts(latestRow) }).counts;
+    return deriveReusePlan({
+      mode: mode as BaselineAnalysisUpdateMode,
+      selectedRange: this.#definition.mode(mode).rangeBound ? selectedRange : null,
+      manifest,
+      predecessor: this.#predecessorFacts(latestRow),
+    }).counts;
   }
 
   #insertPlanRevision(input: {
@@ -874,10 +924,10 @@ export class BaselineAnalysisStore {
   #revisePreparedPlan(
     bookId: string,
     intent: IntentFacts,
-    existing: BaselineAnalysisProjection,
+    existing: AnalysisProjection,
     requestedRange: BaselineAnalysisSelectedRange | null,
     reconfirm: boolean,
-  ): BaselineAnalysisProjection {
+  ): AnalysisProjection {
     const current = this.#planVersionFacts(intent.taskIntentId).at(-1);
     requireAnalysis(current !== undefined && existing.planVersion !== null && existing.coverageManifest !== null, 'ANALYSIS_RECORD_INVALID', '任务计划缺少计划版本。');
     const stored = existing.planVersion.materialInputs;
@@ -932,21 +982,33 @@ export class BaselineAnalysisStore {
     return this.inspect(bookId);
   }
 
+  /**
+   * The Book's latest Task **of this ledger's kind**. The kind filter is what lets a Book hold both
+   * kinds at once: without it the factual Task a Book gained would be handed to the baseline
+   * projection, which would then read a plan frozen under a contract it does not speak.
+   */
   #latestIntentRow(bookId: string): SqlRow | undefined {
-    return this.#db.prepare('SELECT * FROM analysis_task_intents WHERE book_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1').get(bookId) as SqlRow | undefined;
+    return this.#db.prepare(
+      'SELECT * FROM analysis_task_intents WHERE book_id = ? AND kind = ? ORDER BY created_at DESC, rowid DESC LIMIT 1',
+    ).get(bookId, this.#definition.kind) as SqlRow | undefined;
+  }
+
+  /** A mode that starts a Result Set rather than updating one; the kind's definition decides which. */
+  #isInitial(mode: AnalysisTaskMode): boolean {
+    return this.#definition.mode(mode).initial;
   }
 
   #intentFacts(row: SqlRow): IntentFacts {
-    const mode = asString(row.mode) as BaselineAnalysisTaskMode;
+    const mode = asString(row.mode) as AnalysisTaskMode;
     const goal = asString(row.goal);
-    requireAnalysis(goal === goalForMode(mode), 'ANALYSIS_RECORD_INVALID', '任务意图的目标与更新方式不一致。');
+    requireAnalysis(goal === this.#definition.mode(mode).goal, 'ANALYSIS_RECORD_INVALID', '任务意图的目标与更新方式不一致。');
     const start = row.selected_start_position;
     const end = row.selected_end_position;
     return {
       taskIntentId: asString(row.task_intent_id),
       bookId: asString(row.book_id),
       mode,
-      goal: goal as BaselineAnalysisGoal,
+      goal,
       createdAt: asString(row.created_at),
       predecessorRevisionId: row.predecessor_revision_id === null ? null : asString(row.predecessor_revision_id),
       selectedRange: start === null || end === null ? null : { startPosition: asNumber(start), endPosition: asNumber(end) },
@@ -954,12 +1016,12 @@ export class BaselineAnalysisStore {
   }
 
   /** The frozen plan components of one plan version of a Task; an update Task must also carry its `reuse-plan`. */
-  #planRecords(taskIntentId: string, mode: BaselineAnalysisTaskMode | 'any', planVersion: number): Record<string, unknown> {
+  #planRecords(taskIntentId: string, mode: AnalysisTaskMode | 'any', planVersion: number): Record<string, unknown> {
     const rows = this.#db.prepare('SELECT component, canonical_json FROM analysis_plan_records WHERE task_intent_id = ? AND plan_version = ?').all(taskIntentId, planVersion) as SqlRow[];
     const records: Record<string, unknown> = {};
     for (const row of rows) records[asString(row.component)] = parseCanonicalJson(asString(row.canonical_json));
     const required = ['manuscript-pin', 'artifact-pin', 'run-source-scope', 'coverage-manifest', 'provider-resolution-plan', 'execution-plan', 'plan-envelope'];
-    if (mode !== 'first-baseline' && mode !== 'any') required.push('reuse-plan');
+    if (mode !== 'any' && !this.#isInitial(mode)) required.push('reuse-plan');
     for (const component of required) {
       requireAnalysis(records[component] !== undefined, 'ANALYSIS_RECORD_INVALID', '任务计划记录图不完整。');
     }
@@ -1076,23 +1138,31 @@ export class BaselineAnalysisStore {
       `SELECT r.* FROM analysis_result_set_revisions r
        JOIN analysis_result_sets s ON s.result_set_id = r.result_set_id
        WHERE s.book_id = ? AND s.kind = ? ORDER BY r.ordinal`,
-    ).all(bookId, BASELINE_ANALYSIS_KIND) as SqlRow[];
+    ).all(bookId, this.#definition.kind) as SqlRow[];
   }
 
   #revisionBody(row: SqlRow): Record<string, unknown> {
     const body = parseCanonicalJson(asString(row.canonical_json)) as Record<string, unknown>;
-    requireAnalysis(body.schema === RESULT_SET_REVISION_SCHEMA || body.schema === RESULT_SET_SUCCESSOR_REVISION_SCHEMA,
+    requireAnalysis(body.schema === this.#definition.revisionSchema || body.schema === this.#definition.successorRevisionSchema,
       'ANALYSIS_RECORD_INVALID', '结果集修订版记录无效。');
     return body;
   }
 
-  /** The `update` facts of a revision body; a `/1` (first-baseline) body carries none and is synthesized. */
+  /** The `update` facts of a revision body; an initial-mode body carries none and is synthesized. */
   #revisionUpdate(body: Record<string, unknown>, unitCount: number): BaselineAnalysisRevisionUpdateProjection {
+    const initial = this.#definition.initialMode;
     if (!isRecord(body.update)) {
-      return { mode: 'first-baseline', modeLabel: BASELINE_ANALYSIS_MODE_LABELS['first-baseline'], predecessor: null, reusePlanDigest: null, selectedRange: null, counts: firstBaselineCounts(unitCount) };
+      return {
+        mode: initial as BaselineAnalysisRevisionUpdateProjection['mode'],
+        modeLabel: this.#definition.mode(initial).label,
+        predecessor: null,
+        reusePlanDigest: null,
+        selectedRange: null,
+        counts: firstBaselineCounts(unitCount),
+      };
     }
     const update = body.update as Omit<BaselineAnalysisRevisionUpdateProjection, 'modeLabel'>;
-    return { ...update, modeLabel: BASELINE_ANALYSIS_MODE_LABELS[update.mode] };
+    return { ...update, modeLabel: this.#definition.mode(update.mode).label };
   }
 
   #unitLineage(unit: Record<string, unknown>): AnalysisUnitLineage {
@@ -1110,13 +1180,17 @@ export class BaselineAnalysisStore {
       });
     const manuscriptPin = body.manuscriptPin as BaselineAnalysisResultSetRevisionProjection['manuscriptPin'];
     const coverage = body.coverage as BaselineAnalysisResultSetRevisionProjection['coverage'];
+    // The shared components are read the same way for every kind; the kind's own components — the
+    // baseline's sections and synthesis, the factual kind's findings and excluded appendix — are read
+    // back by its definition, so this projection never needs to know which kind it is serving.
     return {
+      ...this.#definition.revisionComponents(body),
       resultSetId: asString(row.result_set_id),
       revisionId,
       ordinal,
       createdAt: asString(row.created_at),
       digest: asString(row.sha256),
-      contractVersion: BASELINE_ANALYSIS_CONTRACT_VERSION,
+      contractVersion: this.#definition.contractVersion,
       manuscriptPin,
       coverageManifestDigest: asString(row.coverage_manifest_sha256),
       schemaDigest: asString(body.schemaDigest),
@@ -1133,15 +1207,9 @@ export class BaselineAnalysisStore {
       freshness: this.#freshness(manuscriptPin, ordinal < latestOrdinal),
       assurance: body.assurance as BaselineAnalysisResultSetRevisionProjection['assurance'],
       gaps: body.gaps as BaselineAnalysisResultSetRevisionProjection['gaps'],
-      conflicts: body.conflicts as BaselineAnalysisResultSetRevisionProjection['conflicts'],
-      // A revision written before Issue #274 carries neither field; it is immutable history and is read
-      // as what it is — a revision whose Run never ran the reduction — never rewritten to add them.
-      crossUnitFindings: (body.crossUnitFindings ?? []) as BaselineAnalysisResultSetRevisionProjection['crossUnitFindings'],
-      crossUnitReduction: (body.crossUnitReduction ?? PRE_CROSS_UNIT_REDUCTION) as BaselineAnalysisResultSetRevisionProjection['crossUnitReduction'],
-      sections: body.sections as BaselineAnalysisResultSetRevisionProjection['sections'],
-      synthesis: body.synthesis as BaselineAnalysisResultSetRevisionProjection['synthesis'],
       units,
-    };
+      // The kind's own components complete the shape; which they are is the definition's to know.
+    } as unknown as BaselineAnalysisResultSetRevisionProjection;
   }
 
   #inspectedRevision(rows: SqlRow[], revisionId: string, latestOrdinal: number): NonNullable<BaselineAnalysisProjection['inspectedRevision']> {
@@ -1195,9 +1263,9 @@ export class BaselineAnalysisStore {
 
   #history(bookId: string, rows: SqlRow[], latest: BaselineAnalysisResultSetRevisionProjection | null): BaselineAnalysisHistoryProjection | null {
     if (rows.length === 0 || latest === null) return null;
-    const resultSet = this.#db.prepare('SELECT * FROM analysis_result_sets WHERE book_id = ? AND kind = ?').get(bookId, BASELINE_ANALYSIS_KIND) as SqlRow | undefined;
+    const resultSet = this.#db.prepare('SELECT * FROM analysis_result_sets WHERE book_id = ? AND kind = ?').get(bookId, this.#definition.kind) as SqlRow | undefined;
     requireAnalysis(resultSet !== undefined, 'ANALYSIS_RECORD_INVALID', '结果集记录缺失。');
-    const entries: BaselineAnalysisHistoryEntryProjection[] = rows.map((row) => {
+    const entries = rows.map((row): BaselineAnalysisHistoryEntryProjection => {
       const body = this.#revisionBody(row);
       const ordinal = asNumber(row.ordinal);
       const revisionId = asString(row.revision_id);
@@ -1213,11 +1281,11 @@ export class BaselineAnalysisStore {
         ordinal,
         digest: asString(row.sha256),
         createdAt: asString(row.created_at),
-        mode: update.mode,
+        mode: update.mode as BaselineAnalysisHistoryEntryProjection['mode'],
         modeLabel: update.modeLabel,
         manuscriptPin: { revisionLabel: pin.revisionLabel, revisionId: pin.revisionId, revisionDigest: pin.revisionDigest },
         coverageManifestDigest: asString(row.coverage_manifest_sha256),
-        contractVersion: BASELINE_ANALYSIS_CONTRACT_VERSION,
+        contractVersion: this.#definition.contractVersion as BaselineAnalysisHistoryEntryProjection['contractVersion'],
         counts: update.counts,
         predecessor: update.predecessor,
         reusePlanDigest: update.reusePlanDigest,
@@ -1239,11 +1307,11 @@ export class BaselineAnalysisStore {
     });
     return {
       resultSetId: asString(resultSet.result_set_id),
-      kind: BASELINE_ANALYSIS_KIND,
+      kind: this.#definition.kind,
       createdAt: asString(resultSet.created_at),
       latestOrdinal: latest.ordinal,
       entries,
-    };
+    } as BaselineAnalysisHistoryProjection;
   }
 
   /** The predecessor facts a reuse plan is derived against, read from the immutable revision rows and the plan version its Run bound. */
@@ -1281,14 +1349,14 @@ export class BaselineAnalysisStore {
     reusePlanDigest: string | null,
     latest: BaselineAnalysisResultSetRevisionProjection | null,
   ): BaselineAnalysisUpdateProjection {
-    requireAnalysis(intent.mode !== 'first-baseline' && intent.predecessorRevisionId !== null, 'ANALYSIS_RECORD_INVALID', '更新任务缺少前一修订版。');
+    requireAnalysis(!this.#isInitial(intent.mode) && intent.predecessorRevisionId !== null, 'ANALYSIS_RECORD_INVALID', '更新任务缺少前一修订版。');
     const predecessorRow = this.#revisionRowById(intent.predecessorRevisionId);
     const body = this.#revisionBody(predecessorRow);
     const pin = body.manuscriptPin as BaselineAnalysisResultSetRevisionProjection['manuscriptPin'];
     return {
-      mode: intent.mode,
-      modeLabel: BASELINE_ANALYSIS_MODE_LABELS[intent.mode],
-      meaning: BASELINE_ANALYSIS_MODE_MEANINGS[intent.mode],
+      mode: intent.mode as BaselineAnalysisUpdateMode,
+      modeLabel: this.#definition.mode(intent.mode).label,
+      meaning: this.#definition.mode(intent.mode).meaning,
       predecessor: {
         revisionId: intent.predecessorRevisionId,
         ordinal: asNumber(predecessorRow.ordinal),
@@ -1301,6 +1369,20 @@ export class BaselineAnalysisStore {
       reusePlan,
       reusePlanDigest,
     };
+  }
+
+  /**
+   * The Analysis Update Controls of a kind that declares update modes. A kind with none — the factual
+   * review, whose update surfaces are S18b's and S19's — offers no control rather than an empty one,
+   * so nothing claims an editor could start an update this slice cannot plan.
+   */
+  #updateControlsFor(
+    bookId: string,
+    revision: BaselineAnalysisResultSetRevisionProjection | null,
+    blockedByActiveRun: boolean,
+  ): BaselineAnalysisUpdateControlsProjection | null {
+    if (revision === null || this.#definition.updateModes.length === 0) return null;
+    return this.#updateControls(bookId, revision, blockedByActiveRun);
   }
 
   /**
@@ -1326,9 +1408,9 @@ export class BaselineAnalysisStore {
     const freshness = latest.freshness.state === 'stale' ? 'stale' : 'current';
     const action = (mode: BaselineAnalysisUpdateMode, available: boolean, unavailableReason: string | null, counts: AnalysisReusePlanCounts | null) => ({
       mode,
-      label: BASELINE_ANALYSIS_MODE_LABELS[mode],
-      goal: goalForMode(mode),
-      meaning: BASELINE_ANALYSIS_MODE_MEANINGS[mode],
+      label: this.#definition.mode(mode).label,
+      goal: this.#definition.mode(mode).goal,
+      meaning: this.#definition.mode(mode).meaning,
       available: available && !blockedByActiveRun,
       unavailableReason: blockedByActiveRun ? ACTIVE_RUN_REASON : unavailableReason,
       expected: counts,
@@ -1390,8 +1472,9 @@ export class BaselineAnalysisStore {
     }
     if (input.phase === 'advance') return this.#advance(input.workId);
     const update = input.update;
-    const mode: BaselineAnalysisTaskMode = update === null ? 'first-baseline' : update.mode;
-    requireAnalysis(input.goal === goalForMode(mode), 'ANALYSIS_GOAL_INVALID', '任务目标与所选更新方式的固定目标不一致。');
+    const mode: AnalysisTaskMode = update === null ? this.#definition.initialMode : update.mode;
+    requireAnalysis(update === null || this.#definition.updateModes.includes(mode), 'ANALYSIS_UPDATE_MODE_UNAVAILABLE', '本分析种类没有该更新方式。');
+    requireAnalysis(input.goal === this.#definition.mode(mode).goal, 'ANALYSIS_GOAL_INVALID', '任务目标与所选更新方式的固定目标不一致。');
     this.#requireDeniedPolicy(input.launchPolicy);
     const existing = this.inspect(input.bookId);
     requireAnalysis(!runIsActive(existing.run?.state ?? null), 'ANALYSIS_TASK_ACTIVE', ACTIVE_RUN_REASON);
@@ -1401,10 +1484,10 @@ export class BaselineAnalysisStore {
       requireAnalysis(latest === null, 'ANALYSIS_FIRST_BASELINE_EXISTS', '本图书已存在结果集修订版；请使用分析更新操作追加后继修订版。');
     } else {
       requireAnalysis(latest !== null && existing.updateControls !== null, 'ANALYSIS_PREDECESSOR_ABSENT', '本图书尚无结果集修订版；请先完成首次基线分析。');
-      const control = existing.updateControls.actions[update.mode];
+      const control = existing.updateControls!.actions[update.mode];
       requireAnalysis(control.available, 'ANALYSIS_UPDATE_MODE_UNAVAILABLE', control.unavailableReason ?? SYNC_UNAVAILABLE_REASON);
-      if (update.mode === 'reanalyze-range') {
-        selectedRange = requireSelectedRange(update.selectedRange, existing.updateControls.working.totalBlocks);
+      if (this.#definition.mode(update.mode).rangeBound) {
+        selectedRange = requireSelectedRange(update.selectedRange, existing.updateControls!.working.totalBlocks);
       } else {
         requireAnalysis(update.selectedRange === null, 'ANALYSIS_SELECTED_RANGE_INVALID', '只有重新分析所选范围可以携带内容块范围。');
       }
@@ -1424,16 +1507,17 @@ export class BaselineAnalysisStore {
     const taskIntentId = reusable ? latestIntent.taskIntentId : randomUUID();
     if (!reusable) {
       const createdAt = new Date().toISOString();
+      const initial = this.#isInitial(mode);
       const base = {
         bookId: input.bookId,
-        contractVersion: BASELINE_ANALYSIS_CONTRACT_VERSION,
+        contractVersion: this.#definition.contractVersion,
         createdAt,
-        expectedOutcome: BASELINE_ANALYSIS_EXPECTED_OUTCOME,
+        expectedOutcome: this.#definition.expectedOutcome,
         goal: input.goal,
-        kind: BASELINE_ANALYSIS_KIND,
+        kind: this.#definition.kind,
         taskIntentId,
       };
-      const intent = canonicalRecord(mode === 'first-baseline' ? base : {
+      const intent = canonicalRecord(initial ? base : {
         ...base,
         mode,
         predecessorRevisionId: latest!.revisionId,
@@ -1445,8 +1529,8 @@ export class BaselineAnalysisStore {
            task_intent_id, book_id, kind, contract_version, goal, created_at, canonical_json, sha256,
            mode, predecessor_revision_id, selected_start_position, selected_end_position
          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      ).run(taskIntentId, input.bookId, BASELINE_ANALYSIS_KIND, BASELINE_ANALYSIS_CONTRACT_VERSION, input.goal, createdAt, intent.json, intent.digest,
-        mode, mode === 'first-baseline' ? null : latest!.revisionId, selectedRange?.startPosition ?? null, selectedRange?.endPosition ?? null);
+      ).run(taskIntentId, input.bookId, this.#definition.kind, this.#definition.contractVersion, input.goal, createdAt, intent.json, intent.digest,
+        mode, initial ? null : latest!.revisionId, selectedRange?.startPosition ?? null, selectedRange?.endPosition ?? null);
     }
     const active = Array.from(this.#work.values()).find((work) => work.taskIntentId === taskIntentId);
     if (active !== undefined) return { done: false, workId: active.workId, completed: 0, total: active.total, projection: null };
@@ -1538,14 +1622,14 @@ export class BaselineAnalysisStore {
       blocks,
     });
     let reusePlan: AnalysisReusePlanProjection | null = null;
-    if (intent.mode !== 'first-baseline') {
+    if (!this.#isInitial(intent.mode)) {
       requireAnalysis(intent.predecessorRevisionId !== null, 'ANALYSIS_RECORD_INVALID', '更新任务缺少前一修订版。');
       const latestRow = this.#revisionRows(checkpoint.bookId).at(-1);
       requireAnalysis(latestRow !== undefined && asString(latestRow.revision_id) === intent.predecessorRevisionId,
         'ANALYSIS_PREDECESSOR_DRIFT', '该任务的前一修订版已不再是结果集的最新修订版；请基于最新修订版重新准备更新。');
       reusePlan = deriveReusePlan({
-        mode: intent.mode,
-        selectedRange: intent.mode === 'reanalyze-range' ? requireSelectedRange(input.selectedRange, manifest.totalBlocks) : null,
+        mode: intent.mode as BaselineAnalysisUpdateMode,
+        selectedRange: this.#definition.mode(intent.mode).rangeBound ? requireSelectedRange(input.selectedRange, manifest.totalBlocks) : null,
         manifest,
         predecessor: this.#predecessorFacts(latestRow),
       });
@@ -1587,9 +1671,10 @@ export class BaselineAnalysisStore {
     // deterministic route, or the v4 live binding. Both are frozen before authorization, never chosen
     // at dispatch, so an authorized Run can never transmit somewhere its plan did not name.
     const live = this.#launch.live;
+    const promptContractDigest = this.#definition.promptContractDigest;
     const composition = live === null
-      ? describeComposition(LOCAL_DETERMINISTIC_ROUTE, LOCAL_DETERMINISTIC_MODEL, BASELINE_PROMPT_CONTRACT_DIGEST)
-      : describeComposition(live.route, live.model, BASELINE_PROMPT_CONTRACT_DIGEST);
+      ? describeComposition(LOCAL_DETERMINISTIC_ROUTE, LOCAL_DETERMINISTIC_MODEL, promptContractDigest)
+      : describeComposition(live.route, live.model, promptContractDigest);
     const providerPlan = {
       role: 'Main Editorial Role',
       capabilities: [],
@@ -1637,14 +1722,14 @@ export class BaselineAnalysisStore {
         ? 'Provider Processing v1 denies the remote route; execution binds only ai7-local-deterministic'
         : 'Provider Processing v1 denies the remote route and no local deterministic route is bound';
     const executionPlan = reusePlan === null
-      ? { steps: EXECUTION_STEPS, effects: [], unitCount: manifest.units.length, reducerStages: REDUCER_STAGES, stopCondition }
+      ? { steps: this.#definition.executionSteps, effects: [], unitCount: manifest.units.length, reducerStages: this.#definition.reducerStages, stopCondition }
       : {
-          steps: UPDATE_EXECUTION_STEPS,
+          steps: this.#definition.updateExecutionSteps,
           effects: [],
           unitCount: manifest.units.length,
           recomputedUnitCount: reusePlan.counts.recomputed,
           reusedUnitCount: reusePlan.counts.reused,
-          reducerStages: REDUCER_STAGES,
+          reducerStages: this.#definition.reducerStages,
           stopCondition,
         };
     const records: Record<string, { json: string; digest: string }> = {
@@ -1674,7 +1759,7 @@ export class BaselineAnalysisStore {
       coverageManifestDigest: manifest.digest,
       providerResolutionPlanDigest: records['provider-resolution-plan']!.digest,
       executionPlanDigest: records['execution-plan']!.digest,
-      promptContractDigest: BASELINE_PROMPT_CONTRACT_DIGEST,
+      promptContractDigest,
       behaviorCompositionDigest: composition.digest,
       // The plan version and the Plan Boundary Split are part of the canonical envelope (Issue #48).
       planVersion: ordinal,
@@ -1703,7 +1788,7 @@ export class BaselineAnalysisStore {
 
   // ---- authorization -----------------------------------------------------------------------------
 
-  authorize(bookId: string, taskIntentId: string, planEnvelopeDigest: string): { projection: BaselineAnalysisProjection; dispatchRunRecordId: string | null } {
+  authorize(bookId: string, taskIntentId: string, planEnvelopeDigest: string): { projection: AnalysisProjection; dispatchRunRecordId: string | null } {
     requireAnalysis(UUID_PATTERN.test(bookId) && UUID_PATTERN.test(taskIntentId) && DIGEST_PATTERN.test(planEnvelopeDigest),
       'ANALYSIS_AUTHORIZATION_INVALID', '任务运行授权参数无效。');
     const prepared = this.inspect(bookId);
@@ -1821,7 +1906,7 @@ export class BaselineAnalysisStore {
     const envelope = plan['plan-envelope'] as Record<string, unknown>;
     const artifactPin = plan['artifact-pin'] as { nativeCarrierSha256: string; sidecarSha256: string };
     let update: ExecutionUpdateFacts | null = null;
-    if (intent.mode !== 'first-baseline') {
+    if (!this.#isInitial(intent.mode)) {
       requireAnalysis(intent.predecessorRevisionId !== null, 'ANALYSIS_RECORD_INVALID', '更新任务缺少前一修订版。');
       const predecessorRow = this.#revisionRowById(intent.predecessorRevisionId);
       const latestRow = this.#revisionRows(intent.bookId).at(-1);
@@ -1829,12 +1914,12 @@ export class BaselineAnalysisStore {
         'ANALYSIS_PREDECESSOR_DRIFT', '该任务的前一修订版已不再是结果集的最新修订版；未开始执行。');
       const predecessor = this.#predecessorFacts(predecessorRow);
       const stored = plan['reuse-plan'] as AnalysisReusePlanProjection;
-      const rederived = deriveReusePlan({ mode: intent.mode, selectedRange: stored.selectedRange, manifest, predecessor });
+      const rederived = deriveReusePlan({ mode: intent.mode as BaselineAnalysisUpdateMode, selectedRange: stored.selectedRange, manifest, predecessor });
       const record = reusePlanRecord(rederived);
       requireAnalysis(record.digest === digests['reuse-plan'] && canonicalJson(stored) === record.json && envelope.reusePlanDigest === record.digest,
         'ANALYSIS_REUSE_PLAN_DRIFT', '重新推导的复用计划与冻结计划不一致；未开始执行。');
       update = {
-        mode: intent.mode,
+        mode: intent.mode as BaselineAnalysisUpdateMode,
         selectedRange: stored.selectedRange,
         predecessor: {
           revisionId: predecessor.revisionId,
@@ -2020,12 +2105,13 @@ export class BaselineAnalysisStore {
     const live = this.#launch.live;
     const createdAt = new Date().toISOString();
     return transact(this.#db, () => {
-      let resultSetRow = this.#db.prepare('SELECT result_set_id FROM analysis_result_sets WHERE book_id = ? AND kind = ?').get(facts.bookId, BASELINE_ANALYSIS_KIND) as SqlRow | undefined;
+      const kind = this.#definition.kind;
+      let resultSetRow = this.#db.prepare('SELECT result_set_id FROM analysis_result_sets WHERE book_id = ? AND kind = ?').get(facts.bookId, kind) as SqlRow | undefined;
       if (resultSetRow === undefined) {
         const resultSetId = randomUUID();
-        const record = canonicalRecord({ resultSetId, bookId: facts.bookId, kind: BASELINE_ANALYSIS_KIND, createdAt });
+        const record = canonicalRecord({ resultSetId, bookId: facts.bookId, kind, createdAt });
         this.#db.prepare('INSERT INTO analysis_result_sets(result_set_id, book_id, kind, created_at, canonical_json, sha256) VALUES (?, ?, ?, ?, ?, ?)')
-          .run(resultSetId, facts.bookId, BASELINE_ANALYSIS_KIND, createdAt, record.json, record.digest);
+          .run(resultSetId, facts.bookId, kind, createdAt, record.json, record.digest);
         resultSetRow = { result_set_id: resultSetId };
       }
       const resultSetId = asString(resultSetRow.result_set_id);
@@ -2053,9 +2139,9 @@ export class BaselineAnalysisStore {
         return { unitOrdinal: unit.unitOrdinal, state: unit.closed.state, record: canonicalRecord(body) };
       });
       const base = {
-        schema: successor ? RESULT_SET_SUCCESSOR_REVISION_SCHEMA : RESULT_SET_REVISION_SCHEMA,
-        kind: BASELINE_ANALYSIS_KIND,
-        contractVersion: BASELINE_ANALYSIS_CONTRACT_VERSION,
+        schema: successor ? this.#definition.successorRevisionSchema : this.#definition.revisionSchema,
+        kind,
+        contractVersion: this.#definition.contractVersion,
         resultSetId,
         revisionId,
         ordinal,
@@ -2068,8 +2154,8 @@ export class BaselineAnalysisStore {
           revisionDigest: facts.checkpoint.revisionDigest,
         },
         coverageManifestDigest: facts.manifestDigest,
-        schemaDigest: SCHEMA_DIGEST,
-        reducerDigest: REDUCER_DIGEST,
+        schemaDigest: this.#definition.schemaDigest,
+        reducerDigest: this.#definition.reducerDigest,
         // The revision pins the route that produced it: the fixture on the deterministic route, the
         // live route's own identity when the Run actually transmitted.
         adapterPin: live === null
@@ -2097,13 +2183,10 @@ export class BaselineAnalysisStore {
         reducerClosure: input.reduction.reducerClosure,
         assurance: input.reduction.assurance,
         gaps: input.reduction.gaps,
-        conflicts: input.reduction.conflicts,
-        // The model-driven findings sit beside the deterministic conflicts, never inside them, and the
-        // reduction's own attempt is recorded here because it forms no execution-span row of its own.
-        crossUnitFindings: input.reduction.crossUnitFindings,
-        crossUnitReduction: input.reduction.crossUnitReduction,
-        sections: input.reduction.sections,
-        synthesis: input.reduction.synthesis,
+        // The kind's own components: the baseline's conflicts, cross-unit findings, sections, and
+        // synthesis; the factual kind's findings, excluded appendix, assertion counts, and research
+        // disclosure. Canonical JSON sorts keys, so the record's bytes do not depend on this order.
+        ...input.reduction.components,
         unitDigests: unitRecords.map((unit) => ({ unitOrdinal: unit.unitOrdinal, state: unit.state, sha256: unit.record.digest })),
       };
       const body = canonicalRecord(facts.update === null ? base : {
@@ -2123,7 +2206,7 @@ export class BaselineAnalysisStore {
            manuscript_revision_digest, coverage_manifest_sha256, contract_version, created_at, canonical_json, sha256
          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(revisionId, resultSetId, ordinal, facts.taskIntentId, facts.runRecordId, input.attemptId, facts.checkpoint.revisionId,
-        facts.checkpoint.revisionDigest, facts.manifestDigest, BASELINE_ANALYSIS_CONTRACT_VERSION, createdAt, body.json, body.digest);
+        facts.checkpoint.revisionDigest, facts.manifestDigest, this.#definition.contractVersion, createdAt, body.json, body.digest);
       const insertUnit = this.#db.prepare('INSERT INTO analysis_unit_results(revision_id, unit_ordinal, state, canonical_json, sha256) VALUES (?, ?, ?, ?, ?)');
       for (const unit of unitRecords) insertUnit.run(revisionId, unit.unitOrdinal, unit.state, unit.record.json, unit.record.digest);
       return { resultSetId, revisionId, ordinal, digest: body.digest };

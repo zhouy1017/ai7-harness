@@ -21,7 +21,8 @@ import type { ResolvedModelFixture } from '../provider/model-fixture.js';
 import { ProviderResultCache, providerRequestDigest, usageOfResponse } from '../provider/provider-result-cache.js';
 import { canonicalRecord } from './canonical.js';
 import { SAMPLE1_SOURCE_DIGEST, type BaselineAnalysisStore, type ExecutionBindingRecord, type ExecutionPlanFacts, type PredecessorUnitResult, type RunProgress, type RunProgressStage, type UnitResultRecord } from './baseline-analysis-store.js';
-import { BASELINE_PROMPT_CONTRACT, BASELINE_PROMPT_CONTRACT_DIGEST, buildUnitMessage, parseUnitResult, unitRequestDigest, type BaselineUnitResult, type UnitResultParseFailureCode } from './contract.js';
+import type { BaselineUnitResult } from './contract.js';
+import type { AnalysisKindDefinition } from './kind-definition.js';
 import {
   BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST,
   buildCrossUnitMessage,
@@ -31,8 +32,7 @@ import {
   unitSetDigest,
   type CrossUnitResultParseFailureCode,
 } from './cross-unit-contract.js';
-import { BASELINE_ANALYSIS_CONTRACT_VERSION } from './identity.js';
-import { CROSS_UNIT_NOT_RUN, reduceBaselineAnalysis, type CrossUnitOutcome, type UnitOutcome } from './reducers.js';
+import { CROSS_UNIT_NOT_RUN, type ClosedUnitOutcome, type CrossUnitOutcome, type GapUnitOutcome } from './reducers.js';
 
 /**
  * The execution owner: AI7 scheduler admission for one Run per service instance, the attempt
@@ -192,7 +192,7 @@ export function emptyAnswerGapReason(reasoningPresent: boolean): string {
  * Characters are counted as code points — `src/service/analysis/` exports no grapheme counter, and
  * UTF-16 units would report a number no reader could recognize as a count of characters.
  */
-export function unparsableAnswerGapReason(code: UnitResultParseFailureCode, detail: string, answerText: string): string {
+export function unparsableAnswerGapReason(code: string, detail: string, answerText: string): string {
   return `单元结果不符合契约 v1（${code}）：${detail}模型返回了 ${[...answerText].length} 个字符，其中没有可解析的单元结果。重新分析本单元可能有帮助。`;
 }
 
@@ -326,6 +326,11 @@ export class BaselineAnalysisExecutionOwner {
 
   async #execute(active: ActiveRun, facts: ExecutionPlanFacts): Promise<void> {
     const ledger = this.#deps.ledger;
+    // Everything kind-specific this Run needs: the frozen system section, the unit message builder and
+    // its header, the unit result parser, the reducer, and whether the kind declares a cross-unit
+    // suboperation at all. The owner itself is the same owner for every analysis kind.
+    const definition: AnalysisKindDefinition = ledger.definition;
+    const promptContractDigest = definition.promptContractDigest;
     const policy = this.#deps.launchPolicy;
     const live = this.#deps.developerLive ?? null;
     if (live === null) {
@@ -360,7 +365,7 @@ export class BaselineAnalysisExecutionOwner {
       ? manifest.units.map((unit) => unit.ordinal)
       : update.reusePlan.units.filter((unit) => unit.disposition === 'recomputed').map((unit) => unit.unitOrdinal));
     const submittedUnits = manifest.units.filter((unit) => recomputedOrdinals.has(unit.ordinal));
-    const unitMessages = new Map(submittedUnits.map((unit) => [unit.ordinal, buildUnitMessage(unit, manifest.units.length, blocksById)] as const));
+    const unitMessages = new Map(submittedUnits.map((unit) => [unit.ordinal, definition.buildUnitMessage(unit, manifest.units.length, blocksById)] as const));
     const admittedUserMessages = new Set(unitMessages.values());
     const predecessorResults: ReadonlyMap<number, PredecessorUnitResult> = update === null ? new Map() : ledger.loadPredecessorUnitResults(update.predecessor.revisionId);
     const acceptedOutputDigests = new Set<string>();
@@ -392,13 +397,13 @@ export class BaselineAnalysisExecutionOwner {
       sessionId: harnessSessionId,
       route,
       model,
-      systemPrompt: BASELINE_PROMPT_CONTRACT.systemPrompt,
-      promptContractDigest: BASELINE_PROMPT_CONTRACT_DIGEST,
+      systemPrompt: definition.systemPrompt,
+      promptContractDigest,
       // One technical Session per Analysis Unit under v4; the deterministic route keeps its single
       // accumulating Session, so J-04's proven composition is untouched.
       ...(live === null ? {} : { sessionMode: 'per-unit' as const }),
       adapterFactory: (codes) => {
-        if (live === null) return new Ai7LocalDeterministicAdapter(fixture!, BASELINE_PROMPT_CONTRACT_DIGEST, codes);
+        if (live === null) return new Ai7LocalDeterministicAdapter(fixture!, promptContractDigest, codes);
         liveAdapter.instance = new DeepSeekOpenAiCompatibleAdapter({
           broker: this.#broker,
           get slotBinding(): CredentialSlotBinding {
@@ -406,7 +411,7 @@ export class BaselineAnalysisExecutionOwner {
           },
           tickets: { take: () => { const current = pendingTicket; pendingTicket = null; return current; } },
           attribution: () => ({}),
-          promptContractDigest: BASELINE_PROMPT_CONTRACT_DIGEST,
+          promptContractDigest,
           codes,
           profile: OPENCODE_GO_ROUTE_PROFILE,
           modelProfile: OPENCODE_GO_V4_FLASH_PROFILE,
@@ -415,7 +420,7 @@ export class BaselineAnalysisExecutionOwner {
           // replays without transmitting, and a live call happens at most once per test item. The
           // bound route profile travels with the call, so the cache step reads a limit the way this
           // route declares limits are read rather than by knowing which route it is serving.
-          transport: (url, init) => transmitOnce(cache!, live, testItemPurpose, OPENCODE_GO_ROUTE_PROFILE, model, url, init),
+          transport: (url, init) => transmitOnce(cache!, live, testItemPurpose, promptContractDigest, OPENCODE_GO_ROUTE_PROFILE, model, url, init),
         });
         return liveAdapter.instance;
       },
@@ -459,8 +464,8 @@ export class BaselineAnalysisExecutionOwner {
           sidecarSha256: facts.artifactPin.sidecarSha256,
         },
         behaviorCompositionDigest: harness.composition.digest,
-        promptContractDigest: BASELINE_PROMPT_CONTRACT_DIGEST,
-        contractVersion: BASELINE_ANALYSIS_CONTRACT_VERSION,
+        promptContractDigest,
+        contractVersion: definition.contractVersion,
         harnessSessionId,
         route,
         model,
@@ -496,14 +501,14 @@ export class BaselineAnalysisExecutionOwner {
         bindingDigest,
         route,
         model,
-        systemPrompt: BASELINE_PROMPT_CONTRACT.systemPrompt,
+        systemPrompt: definition.systemPrompt,
         outboundDataCategory: 'public-or-synthetic',
         policy: live === null
           ? { operationalScope: 'development-ci', providerProcessingVersion: 'v1', liveTransmissionAllowed: false, authorizedLiveTransmissionCount: 0 }
           : { operationalScope: 'developer-live', providerProcessingVersion: 'v4', liveTransmissionAllowed: true, authorizedLiveTransmissionCount: 'bounded-by-run' },
         admittedUserMessages,
       };
-      harness.bindExecution({ harnessSessionId, behaviorCompositionDigest: harness.composition.digest, promptContractDigest: BASELINE_PROMPT_CONTRACT_DIGEST });
+      harness.bindExecution({ harnessSessionId, behaviorCompositionDigest: harness.composition.digest, promptContractDigest });
       ledger.recordRunState(facts.runRecordId, 'executing', {
         detail: update === null ? '执行绑定已持久化并核对；开始逐单元执行。' : '执行绑定已持久化并核对；按血缘复用兼容单元，仅对重算单元逐单元执行。',
         attemptId,
@@ -512,7 +517,7 @@ export class BaselineAnalysisExecutionOwner {
         ...(update === null ? {} : { unitsRecomputed: submittedUnits.length, unitsReused: update.reusePlan.counts.reused }),
       });
 
-      const outcomes: UnitOutcome[] = [];
+      const outcomes: Array<ClosedUnitOutcome<unknown> | GapUnitOutcome> = [];
       const unitRecords: UnitResultRecord[] = [];
       const usage = { inputTokens: 0, outputTokens: 0, requests: 0 };
       const reusedOrdinals = new Set<number>();
@@ -533,7 +538,7 @@ export class BaselineAnalysisExecutionOwner {
             unitOrdinal: newUnit.ordinal,
             requestDigest: source.requestDigest,
             lineage: { kind: 'reused', revisionId: planUnit.reusedFrom.revisionId, revisionOrdinal: planUnit.reusedFrom.revisionOrdinal, unitOrdinal: planUnit.reusedFrom.unitOrdinal },
-            closed: { state: 'closed', responseDigest: source.responseDigest, usage: source.usage, result: stripSchema(result) },
+            closed: { state: 'closed', responseDigest: source.responseDigest, usage: source.usage, result: definition.unitRecord(result) },
           });
         }
       }
@@ -583,7 +588,7 @@ export class BaselineAnalysisExecutionOwner {
         // The instant the reader computes elapsed time from; the product itself estimates nothing.
         active.progress.currentUnitStartedAt = new Date().toISOString();
         const unitStartedAtMs = Date.now();
-        const requestDigest = unitRequestDigest(BASELINE_PROMPT_CONTRACT_DIGEST, unit.ordinal, unit.digest);
+        const requestDigest = definition.requestDigest(unit.ordinal, unit.digest);
         let attempt = await submitAttempt(unit, 1, 'dispatched');
         let firstFailure: ClassifiedModelFailure | null = null;
         if (attempt.turn.terminal === 'failed' && !active.interrupted) {
@@ -632,7 +637,7 @@ export class BaselineAnalysisExecutionOwner {
           acceptedOutputDigests.add(candidate.digest);
           gap('contract-invalid', emptyAnswerGapReason(attempt.canonical.reasoningPresent));
         } else if (turn.terminal === 'completed' && candidate?.kind === 'contentCandidate') {
-          const parsed = parseUnitResult(candidate.text, { unitOrdinal: unit.ordinal, blockIds: [...unit.blockIds, ...unit.overlapBlockIds] });
+          const parsed = definition.parseUnitResult(candidate.text, unit);
           if (parsed.ok) {
             acceptedOutputDigests.add(candidate.digest);
             outcomes.push({ unitOrdinal: unit.ordinal, state: 'closed', result: parsed.result });
@@ -640,7 +645,7 @@ export class BaselineAnalysisExecutionOwner {
               unitOrdinal: unit.ordinal,
               requestDigest,
               lineage: { kind: 'recomputed' },
-              closed: { state: 'closed', responseDigest: candidate.digest, usage: unitUsage, result: stripSchema(parsed.result) },
+              closed: { state: 'closed', responseDigest: candidate.digest, usage: unitUsage, result: definition.unitRecord(parsed.result) },
             });
           } else {
             acceptedOutputDigests.add(candidate.digest);
@@ -686,10 +691,14 @@ export class BaselineAnalysisExecutionOwner {
       // adaptation. It runs only after a unit loop that reached its end — an interrupted Run, a spent
       // ceiling, or a Provider Account Limit has already stopped this Run, and nothing further is sent.
       const closedOutcomes = outcomes
-        .filter((outcome): outcome is Extract<UnitOutcome, { state: 'closed' }> => outcome.state === 'closed')
+        .filter((outcome): outcome is ClosedUnitOutcome<BaselineUnitResult> => outcome.state === 'closed')
         .sort((left, right) => left.unitOrdinal - right.unitOrdinal);
       let crossUnit: CrossUnitOutcome = CROSS_UNIT_NOT_RUN;
-      if (terminalClassification === 'interrupted' || active.interrupted) {
+      if (definition.crossUnit === null) {
+        // A kind that declares no cross-unit contract never forms the request, never counts a turn,
+        // and says so exactly. The baseline path below is unchanged, request counts included.
+        crossUnit = { state: 'not-run', reason: definition.crossUnitAbsentReason };
+      } else if (terminalClassification === 'interrupted' || active.interrupted) {
         crossUnit = { state: 'not-run', reason: '运行在单元阶段结束前停止，跨单元归纳未发起。' };
       } else if (closedOutcomes.length >= 2) {
         const requestDigest = crossUnitRequestDigest(BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST, unitSetDigest(closedOutcomes));
@@ -757,15 +766,15 @@ export class BaselineAnalysisExecutionOwner {
         }
       }
 
-      // The reducers and the contradiction/continuity pass run over the complete new unit set: reused plus recomputed.
-      const reduction = reduceBaselineAnalysis(manifest, outcomes, reusedOrdinals, crossUnit);
+      // The kind's reducers run over the complete new unit set: reused plus recomputed.
+      const reduction = definition.reduce({ manifest, outcomes, reusedUnitOrdinals: reusedOrdinals, blocks: blocksById, crossUnit });
       if (terminalClassification === 'completed' && reduction.gaps.length > 0) terminalClassification = 'completed-with-gaps';
       // Units the interrupted loop never reached are recorded as exact not-attempted gaps.
       for (const gapEntry of reduction.gaps) {
         if (!unitRecords.some((record) => record.unitOrdinal === gapEntry.unitOrdinal)) {
           unitRecords.push({
             unitOrdinal: gapEntry.unitOrdinal,
-            requestDigest: unitRequestDigest(BASELINE_PROMPT_CONTRACT_DIGEST, gapEntry.unitOrdinal, manifest.units[gapEntry.unitOrdinal - 1]!.digest),
+            requestDigest: definition.requestDigest(gapEntry.unitOrdinal, manifest.units[gapEntry.unitOrdinal - 1]!.digest),
             lineage: { kind: 'recomputed' },
             closed: { state: 'gap', gap: gapEntry },
           });
@@ -793,7 +802,7 @@ export class BaselineAnalysisExecutionOwner {
         unitsReused: reduction.coverage.unitsReused,
         unitsTotal: reduction.coverage.unitsTotal,
         gapCount: reduction.gaps.length,
-        conflictCount: reduction.conflicts.length,
+        conflictCount: reduction.conflictCount,
       });
       ledger.recordOutcome({
         taskIntentId: facts.taskIntentId,
@@ -826,6 +835,7 @@ async function transmitOnce(
   cache: ProviderResultCache,
   live: DeveloperLiveRuntime,
   purpose: string,
+  promptContractDigest: string,
   profile: ProviderRouteProfile,
   model: string,
   url: string,
@@ -838,7 +848,7 @@ async function transmitOnce(
       itemId: cache.nextItemId(purpose),
       purpose,
       model,
-      promptContractDigest: BASELINE_PROMPT_CONTRACT_DIGEST,
+      promptContractDigest,
       requestDigest,
       outcome: 'replayed',
       status: replayed.status,
@@ -855,7 +865,7 @@ async function transmitOnce(
     response = await live.nativeFetch(url, init);
   } catch (error) {
     await cache.record({
-      itemId, purpose, model, promptContractDigest: BASELINE_PROMPT_CONTRACT_DIGEST, requestDigest,
+      itemId, purpose, model, promptContractDigest, requestDigest,
       outcome: 'failed', status: null, usage: null, recordedAt: new Date().toISOString(),
     });
     throw error;
@@ -877,7 +887,7 @@ async function transmitOnce(
     itemId,
     purpose,
     model,
-    promptContractDigest: BASELINE_PROMPT_CONTRACT_DIGEST,
+    promptContractDigest,
     requestDigest,
     outcome: response.status === 200 ? 'transmitted' : 'failed',
     status: response.status,
@@ -906,7 +916,3 @@ function requireCompositionMatch(actual: string, planned: string): void {
   if (actual !== planned) throw new ExecutionAdmissionError('EXECUTION_COMPOSITION_DRIFT', '组合摘要与冻结计划不一致；未开始执行。');
 }
 
-function stripSchema(result: Record<string, unknown> | { schema: string }): Record<string, unknown> {
-  const { schema: _schema, unitOrdinal: _unitOrdinal, ...rest } = result as Record<string, unknown>;
-  return rest;
-}

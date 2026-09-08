@@ -62,6 +62,7 @@ import {
   TASK_AUTHORIZATION_SCHEMA_VERSION,
   TASK_AUTHORIZATION_TRIGGER_SQL,
   TEXT_CONVERSION_SCHEMA_VERSION,
+  FACTUAL_REVIEW_SCHEMA_VERSION,
 } from './task-authorization.js';
 
 /**
@@ -4923,7 +4924,7 @@ export function initializeBoundedSchema(
       version === AUTHORITY_SIDECAR_SCHEMA_VERSION || version === J03_TASK_AUTHORIZATION_SCHEMA_VERSION ||
       version === J04_BASELINE_ANALYSIS_SCHEMA_VERSION || version === SUCCESSIVE_TASK_SCHEMA_VERSION ||
       version === TASK_AUTHORIZATION_SCHEMA_VERSION || version === MANUSCRIPT_INTAKE_SCHEMA_VERSION ||
-      version === TEXT_CONVERSION_SCHEMA_VERSION,
+      version === TEXT_CONVERSION_SCHEMA_VERSION || version === FACTUAL_REVIEW_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -4931,9 +4932,10 @@ export function initializeBoundedSchema(
       version === NATIVE_ARTIFACT_SCHEMA_VERSION || version === AUTHORITY_SIDECAR_SCHEMA_VERSION ||
       version === J03_TASK_AUTHORIZATION_SCHEMA_VERSION || version === J04_BASELINE_ANALYSIS_SCHEMA_VERSION ||
       version === SUCCESSIVE_TASK_SCHEMA_VERSION || version === TASK_AUTHORIZATION_SCHEMA_VERSION ||
-      version === MANUSCRIPT_INTAKE_SCHEMA_VERSION || version === TEXT_CONVERSION_SCHEMA_VERSION) {
+      version === MANUSCRIPT_INTAKE_SCHEMA_VERSION || version === TEXT_CONVERSION_SCHEMA_VERSION ||
+      version === FACTUAL_REVIEW_SCHEMA_VERSION) {
     transact(db, () => {
-      if (validateStoreTruth || version !== TEXT_CONVERSION_SCHEMA_VERSION) {
+      if (validateStoreTruth || version !== FACTUAL_REVIEW_SCHEMA_VERSION) {
         validateManuscriptReimportSchemaTruth(
           db,
           profile,

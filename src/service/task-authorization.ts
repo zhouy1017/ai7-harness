@@ -16,6 +16,7 @@ import {
   BASELINE_ANALYSIS_TASK_GOAL,
   TASK_INPUT_CHECKPOINT_PURPOSE,
 } from './analysis/identity.js';
+import { FACTUAL_REVIEW_CONTRACT_VERSION, FACTUAL_REVIEW_KIND, FACTUAL_REVIEW_MODE_GOALS } from '../shared/protocol.js';
 import { canonicalRecord as analysisCanonicalRecord } from './analysis/canonical.js';
 import { ANALYSIS_RESULT_SET_SCHEMA_SQL } from './analysis/result-set-schema.js';
 
@@ -42,6 +43,15 @@ export const MANUSCRIPT_INTAKE_SCHEMA_VERSION = 18;
  * terminal version is declared here, where every module reads it.
  */
 export const TEXT_CONVERSION_SCHEMA_VERSION = 19;
+/**
+ * The second-analysis-kind revision (Issue #53): a Book may hold a `factual-review` Task and Result
+ * Set beside its baseline ones, so the kind-coupled CHECKs of `analysis_task_intents`,
+ * `analysis_result_sets`, and `analysis_result_set_revisions` widen to admit both kinds, each bound
+ * to its own contract version and its own mode set. Nothing else moves: the three relations are
+ * rebuilt with every row copied byte for byte, and every other relation, trigger, and row is
+ * untouched.
+ */
+export const FACTUAL_REVIEW_SCHEMA_VERSION = 20;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const DIGEST_PATTERN = /^[0-9a-f]{64}$/;
 const SAMPLE1_SOURCE_DIGEST = 'b8a3dbde0aa8a1ec7265f9ae3fe47877759e7947c5ab69682cd0a8f424a8d483' as const;
@@ -189,6 +199,63 @@ export const ANALYSIS_LEDGER_REVISION_15_SQL = {
   ) STRICT`,
 } as const;
 
+/**
+ * The revision-19 shapes of the three relations revision 20 rebuilds: the one analysis kind and its
+ * four modes, and the two Result Set relations pinned to that kind's literals. They are kept only to
+ * validate a revision-19 store exactly before its rows are copied forward, and for the migration case.
+ */
+export const ANALYSIS_LEDGER_REVISION_19_SQL = {
+  analysis_task_intents: `CREATE TABLE analysis_task_intents (
+    task_intent_id TEXT PRIMARY KEY,
+    book_id TEXT NOT NULL REFERENCES books(book_id),
+    kind TEXT NOT NULL CHECK(kind = '${BASELINE_ANALYSIS_KIND}'),
+    contract_version TEXT NOT NULL CHECK(contract_version = '${BASELINE_ANALYSIS_CONTRACT_VERSION}'),
+    goal TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    canonical_json TEXT NOT NULL,
+    sha256 TEXT NOT NULL UNIQUE CHECK(length(sha256) = 64),
+    mode TEXT NOT NULL CHECK(mode IN ('first-baseline', 'sync-current', 'reanalyze-range', 'reanalyze-book')),
+    predecessor_revision_id TEXT REFERENCES analysis_result_set_revisions(revision_id),
+    selected_start_position INTEGER CHECK(selected_start_position IS NULL OR selected_start_position >= 1),
+    selected_end_position INTEGER CHECK(selected_end_position IS NULL OR selected_end_position >= selected_start_position),
+    CHECK((mode = 'first-baseline' AND goal = '${BASELINE_ANALYSIS_MODE_GOALS['first-baseline']}')
+      OR (mode = 'sync-current' AND goal = '${BASELINE_ANALYSIS_MODE_GOALS['sync-current']}')
+      OR (mode = 'reanalyze-range' AND goal = '${BASELINE_ANALYSIS_MODE_GOALS['reanalyze-range']}')
+      OR (mode = 'reanalyze-book' AND goal = '${BASELINE_ANALYSIS_MODE_GOALS['reanalyze-book']}')),
+    CHECK((mode = 'first-baseline') = (predecessor_revision_id IS NULL)),
+    CHECK((mode = 'reanalyze-range') = (selected_start_position IS NOT NULL)),
+    CHECK((selected_start_position IS NULL) = (selected_end_position IS NULL))
+  ) STRICT`,
+  analysis_result_sets: `CREATE TABLE analysis_result_sets (
+    result_set_id TEXT PRIMARY KEY,
+    book_id TEXT NOT NULL REFERENCES books(book_id),
+    kind TEXT NOT NULL CHECK(kind = '${BASELINE_ANALYSIS_KIND}'),
+    created_at TEXT NOT NULL,
+    canonical_json TEXT NOT NULL,
+    sha256 TEXT NOT NULL UNIQUE CHECK(length(sha256) = 64),
+    UNIQUE(book_id, kind)
+  ) STRICT`,
+  analysis_result_set_revisions: `CREATE TABLE analysis_result_set_revisions (
+    revision_id TEXT PRIMARY KEY,
+    result_set_id TEXT NOT NULL REFERENCES analysis_result_sets(result_set_id),
+    ordinal INTEGER NOT NULL CHECK(ordinal >= 1),
+    task_intent_id TEXT NOT NULL REFERENCES analysis_task_intents(task_intent_id),
+    run_record_id TEXT NOT NULL REFERENCES analysis_run_records(run_record_id),
+    attempt_id TEXT NOT NULL REFERENCES analysis_execution_attempts(attempt_id),
+    manuscript_revision_id TEXT NOT NULL REFERENCES manuscript_revisions(revision_id),
+    manuscript_revision_digest TEXT NOT NULL CHECK(length(manuscript_revision_digest) = 64),
+    coverage_manifest_sha256 TEXT NOT NULL CHECK(length(coverage_manifest_sha256) = 64),
+    contract_version TEXT NOT NULL CHECK(contract_version = '${BASELINE_ANALYSIS_CONTRACT_VERSION}'),
+    created_at TEXT NOT NULL,
+    canonical_json TEXT NOT NULL,
+    sha256 TEXT NOT NULL UNIQUE CHECK(length(sha256) = 64),
+    UNIQUE(result_set_id, ordinal)
+  ) STRICT`,
+} as const;
+
+/** The three relations revision 20 rebuilds, in the order the foreign keys read them. */
+export const ANALYSIS_LEDGER_REVISION_20_TABLES = ['analysis_task_intents', 'analysis_result_sets', 'analysis_result_set_revisions'] as const;
+
 /** The revision-16 shape of the one relation revision 17 rebuilds; kept to validate a revision-16 store exactly before its rows are copied forward. */
 export const ANALYSIS_LEDGER_REVISION_16_SQL = {
   analysis_plan_records: `CREATE TABLE analysis_plan_records (
@@ -234,22 +301,28 @@ export const ANALYSIS_LEDGER_SCHEMA_SQL = {
   analysis_task_intents: `CREATE TABLE analysis_task_intents (
     task_intent_id TEXT PRIMARY KEY,
     book_id TEXT NOT NULL REFERENCES books(book_id),
-    kind TEXT NOT NULL CHECK(kind = '${BASELINE_ANALYSIS_KIND}'),
-    contract_version TEXT NOT NULL CHECK(contract_version = '${BASELINE_ANALYSIS_CONTRACT_VERSION}'),
+    kind TEXT NOT NULL CHECK(kind IN ('${BASELINE_ANALYSIS_KIND}', '${FACTUAL_REVIEW_KIND}')),
+    contract_version TEXT NOT NULL CHECK(contract_version IN ('${BASELINE_ANALYSIS_CONTRACT_VERSION}', '${FACTUAL_REVIEW_CONTRACT_VERSION}')),
     goal TEXT NOT NULL,
     created_at TEXT NOT NULL,
     canonical_json TEXT NOT NULL,
     sha256 TEXT NOT NULL UNIQUE CHECK(length(sha256) = 64),
-    mode TEXT NOT NULL CHECK(mode IN ('first-baseline', 'sync-current', 'reanalyze-range', 'reanalyze-book')),
+    mode TEXT NOT NULL CHECK(mode IN ('first-baseline', 'sync-current', 'reanalyze-range', 'reanalyze-book', 'whole-manuscript', 'range')),
     predecessor_revision_id TEXT REFERENCES analysis_result_set_revisions(revision_id),
     selected_start_position INTEGER CHECK(selected_start_position IS NULL OR selected_start_position >= 1),
     selected_end_position INTEGER CHECK(selected_end_position IS NULL OR selected_end_position >= selected_start_position),
+    CHECK((kind = '${BASELINE_ANALYSIS_KIND}' AND contract_version = '${BASELINE_ANALYSIS_CONTRACT_VERSION}'
+        AND mode IN ('first-baseline', 'sync-current', 'reanalyze-range', 'reanalyze-book'))
+      OR (kind = '${FACTUAL_REVIEW_KIND}' AND contract_version = '${FACTUAL_REVIEW_CONTRACT_VERSION}'
+        AND mode IN ('whole-manuscript', 'range'))),
     CHECK((mode = 'first-baseline' AND goal = '${BASELINE_ANALYSIS_MODE_GOALS['first-baseline']}')
       OR (mode = 'sync-current' AND goal = '${BASELINE_ANALYSIS_MODE_GOALS['sync-current']}')
       OR (mode = 'reanalyze-range' AND goal = '${BASELINE_ANALYSIS_MODE_GOALS['reanalyze-range']}')
-      OR (mode = 'reanalyze-book' AND goal = '${BASELINE_ANALYSIS_MODE_GOALS['reanalyze-book']}')),
-    CHECK((mode = 'first-baseline') = (predecessor_revision_id IS NULL)),
-    CHECK((mode = 'reanalyze-range') = (selected_start_position IS NOT NULL)),
+      OR (mode = 'reanalyze-book' AND goal = '${BASELINE_ANALYSIS_MODE_GOALS['reanalyze-book']}')
+      OR (mode = 'whole-manuscript' AND goal = '${FACTUAL_REVIEW_MODE_GOALS['whole-manuscript']}')
+      OR (mode = 'range' AND goal = '${FACTUAL_REVIEW_MODE_GOALS.range}')),
+    CHECK((mode IN ('first-baseline', 'whole-manuscript')) = (predecessor_revision_id IS NULL)),
+    CHECK((mode IN ('reanalyze-range', 'range')) = (selected_start_position IS NOT NULL)),
     CHECK((selected_start_position IS NULL) = (selected_end_position IS NULL))
   ) STRICT`,
   analysis_task_input_checkpoints: `CREATE TABLE analysis_task_input_checkpoints (
@@ -828,9 +901,16 @@ function validateRevision16AnalysisLedgerSchema(db: DatabaseSync): void {
 
 export function validateTaskAuthorizationSchema(db: DatabaseSync): void {
   const version = asNumber((db.prepare('PRAGMA user_version').get() as SqlRow).user_version);
-  requireTask(version === TEXT_CONVERSION_SCHEMA_VERSION, 'SCHEMA_UNSUPPORTED', '数据库版本不受支持。');
+  requireTask(version === FACTUAL_REVIEW_SCHEMA_VERSION, 'SCHEMA_UNSUPPORTED', '数据库版本不受支持。');
   validateJ03TaskAuthorizationSchema(db);
   validateAnalysisLedgerSchema(db);
+}
+
+/** The revision-19 analysis relations, validated exactly before the forward copy rebuilds the three. */
+function validateRevision19AnalysisLedgerSchema(db: DatabaseSync): void {
+  requireExactObjects(db, 'table', { ...ANALYSIS_LEDGER_SCHEMA_SQL, ...ANALYSIS_LEDGER_REVISION_19_SQL }, '分析任务账本表（修订版 19）');
+  requireExactObjects(db, 'trigger', ANALYSIS_LEDGER_TRIGGER_SQL, '分析任务账本触发器（修订版 19）');
+  validateCanonicalRowDigests(db, Object.keys(ANALYSIS_LEDGER_SCHEMA_SQL));
 }
 
 function migrateInTransaction(db: DatabaseSync, statements: string, label: string): void {
@@ -866,6 +946,25 @@ function rebuildAnalysisRelation(db: DatabaseSync, table: keyof typeof ANALYSIS_
   }
   const after = asNumber((db.prepare(`SELECT count(*) total FROM ${table}`).get() as SqlRow).total);
   requireTask(before === after, 'SCHEMA_MIGRATION_FAILED', `分析任务账本 ${table} 迁移未保留全部记录。`);
+}
+
+/**
+ * The two Result Set relations of revision 20, rebuilt from their current exact text with every row
+ * copied byte for byte. They are rebuilt together because the revisions reference the sets, and both
+ * carry a kind-coupled CHECK that the second analysis kind widens.
+ */
+function rebuildResultSetRelations(db: DatabaseSync): void {
+  rebuildAnalysisRelation(db, 'analysis_result_sets',
+    `INSERT INTO analysis_result_sets(result_set_id, book_id, kind, created_at, canonical_json, sha256)
+     SELECT result_set_id, book_id, kind, created_at, canonical_json, sha256
+       FROM temp.migrate_analysis_result_sets ORDER BY migrate_rowid`);
+  rebuildAnalysisRelation(db, 'analysis_result_set_revisions',
+    `INSERT INTO analysis_result_set_revisions(
+       revision_id, result_set_id, ordinal, task_intent_id, run_record_id, attempt_id, manuscript_revision_id,
+       manuscript_revision_digest, coverage_manifest_sha256, contract_version, created_at, canonical_json, sha256
+     ) SELECT revision_id, result_set_id, ordinal, task_intent_id, run_record_id, attempt_id, manuscript_revision_id,
+              manuscript_revision_digest, coverage_manifest_sha256, contract_version, created_at, canonical_json, sha256
+       FROM temp.migrate_analysis_result_set_revisions ORDER BY migrate_rowid`);
 }
 
 /**
@@ -908,15 +1007,25 @@ function migrateAnalysisLedgerToRevision17(db: DatabaseSync, from: typeof J04_BA
   try {
     try {
       db.exec('BEGIN IMMEDIATE');
-      if (from === J04_BASELINE_ANALYSIS_SCHEMA_VERSION) {
-        rebuildAnalysisRelation(db, 'analysis_task_intents',
-          `INSERT INTO analysis_task_intents(
-             task_intent_id, book_id, kind, contract_version, goal, created_at, canonical_json, sha256,
-             mode, predecessor_revision_id, selected_start_position, selected_end_position
-           ) SELECT task_intent_id, book_id, kind, contract_version, goal, created_at, canonical_json, sha256,
-                    'first-baseline', NULL, NULL, NULL
-             FROM temp.migrate_analysis_task_intents ORDER BY migrate_rowid`);
-      }
+      // Every relation is rebuilt from its current exact text, so a store that starts at 15 or 16
+      // reaches revision 20 in one transaction: a revision-15 intent becomes a `first-baseline` row
+      // with no predecessor and no range, a revision-16 one keeps the mode facts it already carries,
+      // and both gain the widened kind CHECK with their canonical JSON and digest untouched.
+      rebuildAnalysisRelation(db, 'analysis_task_intents',
+        from === J04_BASELINE_ANALYSIS_SCHEMA_VERSION
+          ? `INSERT INTO analysis_task_intents(
+               task_intent_id, book_id, kind, contract_version, goal, created_at, canonical_json, sha256,
+               mode, predecessor_revision_id, selected_start_position, selected_end_position
+             ) SELECT task_intent_id, book_id, kind, contract_version, goal, created_at, canonical_json, sha256,
+                      'first-baseline', NULL, NULL, NULL
+               FROM temp.migrate_analysis_task_intents ORDER BY migrate_rowid`
+          : `INSERT INTO analysis_task_intents(
+               task_intent_id, book_id, kind, contract_version, goal, created_at, canonical_json, sha256,
+               mode, predecessor_revision_id, selected_start_position, selected_end_position
+             ) SELECT task_intent_id, book_id, kind, contract_version, goal, created_at, canonical_json, sha256,
+                      mode, predecessor_revision_id, selected_start_position, selected_end_position
+               FROM temp.migrate_analysis_task_intents ORDER BY migrate_rowid`);
+      rebuildResultSetRelations(db);
       rebuildAnalysisRelation(db, 'analysis_plan_records',
         `INSERT INTO analysis_plan_records(task_intent_id, plan_version, component, canonical_json, sha256, created_at)
          SELECT task_intent_id, 1, component, canonical_json, sha256, created_at
@@ -927,7 +1036,7 @@ function migrateAnalysisLedgerToRevision17(db: DatabaseSync, from: typeof J04_BA
         db.exec(ANALYSIS_LEDGER_TRIGGER_SQL[`${table}_no_delete`]!);
       }
       seedInitialPlanVersions(db);
-      db.exec(`PRAGMA user_version = ${TEXT_CONVERSION_SCHEMA_VERSION}`);
+      db.exec(`PRAGMA user_version = ${FACTUAL_REVIEW_SCHEMA_VERSION}`);
       requireTask(db.prepare('PRAGMA foreign_key_check').all().length === 0, 'SCHEMA_MIGRATION_FAILED', '分析任务账本迁移后引用校验失败。');
       validateTaskAuthorizationSchema(db);
       db.exec('COMMIT');
@@ -946,12 +1055,53 @@ function migrateAnalysisLedgerToRevision17(db: DatabaseSync, from: typeof J04_BA
 }
 
 /**
- * Revision 17 or 18 → 19. Both revisions widen `store.ts`'s intake relations, which that module
- * migrates before this runs; no task-authorization or analysis relation moves, so once the store
- * relations carry the new shape the terminal version is all that is left to advance.
+ * Revision 17 or 18 → 19 → 20. Revisions 18 and 19 widen `store.ts`'s intake relations, which that
+ * module migrates before this runs; no task-authorization or analysis relation moved for them, so
+ * only revision 20's rebuild is left to perform.
  */
 function migrateToTextConversionRevision19(db: DatabaseSync): void {
-  migrateInTransaction(db, `PRAGMA user_version = ${TEXT_CONVERSION_SCHEMA_VERSION};`, 'Text conversion');
+  migrateAnalysisLedgerToRevision20(db);
+}
+
+/**
+ * Revision 19 → 20. The three kind-coupled relations are rebuilt from their current exact text with
+ * every existing row copied byte for byte in its original row order — canonical JSON and digest
+ * included — inside one transaction with foreign keys off, exactly as revision 17 rebuilt its own.
+ * The widened CHECKs admit the second analysis kind; no existing row changes, and no other relation,
+ * trigger, or row is touched.
+ */
+function migrateAnalysisLedgerToRevision20(db: DatabaseSync): void {
+  const foreignKeysState = (): number => asNumber((db.prepare('PRAGMA foreign_keys').get() as SqlRow).foreign_keys);
+  const restoreForeignKeys = foreignKeysState() === 1;
+  db.exec('PRAGMA foreign_keys = OFF');
+  requireTask(foreignKeysState() === 0, 'SCHEMA_MIGRATION_FAILED', '无法暂时停用引用校验以迁移分析任务账本。');
+  try {
+    try {
+      db.exec('BEGIN IMMEDIATE');
+      rebuildAnalysisRelation(db, 'analysis_task_intents',
+        `INSERT INTO analysis_task_intents(
+           task_intent_id, book_id, kind, contract_version, goal, created_at, canonical_json, sha256,
+           mode, predecessor_revision_id, selected_start_position, selected_end_position
+         ) SELECT task_intent_id, book_id, kind, contract_version, goal, created_at, canonical_json, sha256,
+                  mode, predecessor_revision_id, selected_start_position, selected_end_position
+           FROM temp.migrate_analysis_task_intents ORDER BY migrate_rowid`);
+      rebuildResultSetRelations(db);
+      db.exec(`PRAGMA user_version = ${FACTUAL_REVIEW_SCHEMA_VERSION}`);
+      requireTask(db.prepare('PRAGMA foreign_key_check').all().length === 0, 'SCHEMA_MIGRATION_FAILED', '分析任务账本迁移后引用校验失败。');
+      validateTaskAuthorizationSchema(db);
+      db.exec('COMMIT');
+    } catch (error) {
+      try { db.exec('ROLLBACK'); } catch (rollbackError) {
+        throw new AggregateError([error, rollbackError], 'Analysis ledger revision 20 rollback failed.');
+      }
+      throw error;
+    }
+  } finally {
+    if (restoreForeignKeys) {
+      db.exec('PRAGMA foreign_keys = ON');
+      requireTask(foreignKeysState() === 1, 'SCHEMA_MIGRATION_FAILED', '无法恢复引用校验。');
+    }
+  }
 }
 
 /**
@@ -967,10 +1117,15 @@ export function initializeTaskAuthorizationSchema(db: DatabaseSync): void {
     version === PREDECESSOR_SCHEMA_VERSION || version === J03_TASK_AUTHORIZATION_SCHEMA_VERSION ||
       version === J04_BASELINE_ANALYSIS_SCHEMA_VERSION || version === SUCCESSIVE_TASK_SCHEMA_VERSION ||
       version === TASK_AUTHORIZATION_SCHEMA_VERSION || version === MANUSCRIPT_INTAKE_SCHEMA_VERSION ||
-      version === TEXT_CONVERSION_SCHEMA_VERSION,
+      version === TEXT_CONVERSION_SCHEMA_VERSION || version === FACTUAL_REVIEW_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED', '数据库版本不受支持。',
   );
-  if (version === TEXT_CONVERSION_SCHEMA_VERSION) return validateTaskAuthorizationSchema(db);
+  if (version === FACTUAL_REVIEW_SCHEMA_VERSION) return validateTaskAuthorizationSchema(db);
+  if (version === TEXT_CONVERSION_SCHEMA_VERSION) {
+    validateJ03TaskAuthorizationSchema(db);
+    validateRevision19AnalysisLedgerSchema(db);
+    return migrateAnalysisLedgerToRevision20(db);
+  }
   if (version === TASK_AUTHORIZATION_SCHEMA_VERSION || version === MANUSCRIPT_INTAKE_SCHEMA_VERSION) {
     return migrateToTextConversionRevision19(db);
   }
@@ -986,7 +1141,7 @@ export function initializeTaskAuthorizationSchema(db: DatabaseSync): void {
   }
   const analysisStatements = `${Object.values(ANALYSIS_LEDGER_SCHEMA_SQL).join(';\n')};
       ${Object.values(ANALYSIS_LEDGER_TRIGGER_SQL).join(';\n')};
-      PRAGMA user_version = ${TEXT_CONVERSION_SCHEMA_VERSION};`;
+      PRAGMA user_version = ${FACTUAL_REVIEW_SCHEMA_VERSION};`;
   if (version === J03_TASK_AUTHORIZATION_SCHEMA_VERSION) {
     validateJ03TaskAuthorizationSchema(db);
     return migrateInTransaction(db, analysisStatements, 'Analysis ledger');

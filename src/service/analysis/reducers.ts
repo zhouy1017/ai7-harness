@@ -31,9 +31,76 @@ import type { CrossUnitFinding } from './cross-unit-contract.js';
  * Result Set beside the deterministic conflicts with lineage to every unit they cite; they never
  * modify a unit result, never merge into the conflict list, and never resolve a side.
  */
-export type UnitOutcome =
-  | { readonly unitOrdinal: number; readonly state: 'closed'; readonly result: BaselineUnitResult }
-  | { readonly unitOrdinal: number; readonly state: 'gap'; readonly code: AnalysisGapProjection['code']; readonly reason: string };
+/** One unit that closed, carrying whichever typed result its analysis kind's contract produced. */
+export interface ClosedUnitOutcome<TResult> {
+  readonly unitOrdinal: number;
+  readonly state: 'closed';
+  readonly result: TResult;
+}
+
+/** One unit that did not close. Identical for every analysis kind: a gap is a gap. */
+export interface GapUnitOutcome {
+  readonly unitOrdinal: number;
+  readonly state: 'gap';
+  readonly code: AnalysisGapProjection['code'];
+  readonly reason: string;
+}
+
+export type UnitOutcome = ClosedUnitOutcome<BaselineUnitResult> | GapUnitOutcome;
+
+/**
+ * Every unit of the manifest in ordinal order, with a unit the Run never reached recorded as an exact
+ * `not-attempted` gap. Shared by every analysis kind: which units a revision covers is a fact about
+ * the Coverage Manifest and the Run, not about the contract the units were read under.
+ */
+export function orderUnitOutcomes<TResult>(
+  manifest: CoverageManifestProjection,
+  outcomes: ReadonlyArray<ClosedUnitOutcome<TResult> | GapUnitOutcome>,
+): Array<ClosedUnitOutcome<TResult> | GapUnitOutcome> {
+  const byOrdinal = new Map(outcomes.map((outcome) => [outcome.unitOrdinal, outcome] as const));
+  return manifest.units.map((unit) => byOrdinal.get(unit.ordinal) ?? {
+    unitOrdinal: unit.ordinal,
+    state: 'gap',
+    code: 'not-attempted',
+    reason: '该单元未进入执行。',
+  });
+}
+
+/** The exact gaps of an ordered outcome list, each carrying the manifest positions of its unit. */
+export function unitGaps<TResult>(
+  manifest: CoverageManifestProjection,
+  ordered: ReadonlyArray<ClosedUnitOutcome<TResult> | GapUnitOutcome>,
+): AnalysisGapProjection[] {
+  return ordered
+    .filter((outcome): outcome is GapUnitOutcome => outcome.state === 'gap')
+    .map((outcome) => {
+      const unit = manifest.units[outcome.unitOrdinal - 1]!;
+      return {
+        unitOrdinal: outcome.unitOrdinal,
+        code: outcome.code,
+        reason: outcome.reason,
+        startPosition: unit.startPosition,
+        endPosition: unit.endPosition,
+        blockIds: [...unit.blockIds],
+      };
+    });
+}
+
+/** The coverage axis, worded identically for every analysis kind: units closed, reused, and missing. */
+export function coverageAxis(counts: { unitsTotal: number; unitsClosed: number; unitsReused: number; gapCount: number }): AnalysisCoverageAxis {
+  const reuseNote = counts.unitsReused === 0 ? '' : ` · 复用 ${counts.unitsReused} 单元`;
+  return {
+    axis: 'coverage',
+    state: counts.gapCount === 0 ? 'complete' : 'partial',
+    label: counts.gapCount === 0
+      ? `覆盖：完整 · ${counts.unitsClosed}/${counts.unitsTotal} 单元${reuseNote}`
+      : `覆盖：部分 · ${counts.unitsClosed}/${counts.unitsTotal} 单元 · ${counts.gapCount} 处缺口${reuseNote}`,
+    unitsTotal: counts.unitsTotal,
+    unitsClosed: counts.unitsClosed,
+    unitsReused: counts.unitsReused,
+    gapCount: counts.gapCount,
+  };
+}
 
 /**
  * Why a cross-unit reduction did not close. The three the transport can produce are the unit loop's
@@ -324,28 +391,10 @@ export function reduceBaselineAnalysis(
   reusedUnitOrdinals: ReadonlySet<number> = new Set(),
   crossUnit: CrossUnitOutcome = CROSS_UNIT_NOT_RUN,
 ): BaselineReduction {
-  const byOrdinal = new Map(outcomes.map((outcome) => [outcome.unitOrdinal, outcome] as const));
   const units = manifest.units;
-  const ordered: UnitOutcome[] = units.map((unit) => byOrdinal.get(unit.ordinal) ?? {
-    unitOrdinal: unit.ordinal,
-    state: 'gap',
-    code: 'not-attempted',
-    reason: '该单元未进入执行。',
-  });
+  const ordered = orderUnitOutcomes(manifest, outcomes);
   const closed = ordered.filter((outcome): outcome is Extract<UnitOutcome, { state: 'closed' }> => outcome.state === 'closed');
-  const gaps: AnalysisGapProjection[] = ordered
-    .filter((outcome): outcome is Extract<UnitOutcome, { state: 'gap' }> => outcome.state === 'gap')
-    .map((outcome) => {
-      const unit = units[outcome.unitOrdinal - 1]!;
-      return {
-        unitOrdinal: outcome.unitOrdinal,
-        code: outcome.code,
-        reason: outcome.reason,
-        startPosition: unit.startPosition,
-        endPosition: unit.endPosition,
-        blockIds: [...unit.blockIds],
-      };
-    });
+  const gaps = unitGaps(manifest, ordered);
 
   const sections: AnalysisSectionProjection[] = [];
   const sectionOrdinals = sortedUnique(units.map((unit) => unit.sectionOrdinal));
@@ -398,18 +447,7 @@ export function reduceBaselineAnalysis(
     stage('book-synthesis', sections.length, gaps.length),
   ];
   const unitsReused = closed.filter((outcome) => reusedUnitOrdinals.has(outcome.unitOrdinal)).length;
-  const reuseNote = unitsReused === 0 ? '' : ` · 复用 ${unitsReused} 单元`;
-  const coverage: AnalysisCoverageAxis = {
-    axis: 'coverage',
-    state: gaps.length === 0 ? 'complete' : 'partial',
-    label: gaps.length === 0
-      ? `覆盖：完整 · ${closed.length}/${units.length} 单元${reuseNote}`
-      : `覆盖：部分 · ${closed.length}/${units.length} 单元 · ${gaps.length} 处缺口${reuseNote}`,
-    unitsTotal: units.length,
-    unitsClosed: closed.length,
-    unitsReused,
-    gapCount: gaps.length,
-  };
+  const coverage = coverageAxis({ unitsTotal: units.length, unitsClosed: closed.length, unitsReused, gapCount: gaps.length });
   // A stage that carried gaps through qualifies the axis; a stage that never ran does not, because
   // `not-run` reports that there was nothing for it to close, not that something was lost.
   const stagesCarriedGaps = stages.some((entry) => entry.state === 'closed-with-gaps');

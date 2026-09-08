@@ -70,14 +70,18 @@ import type {
   BaselineAnalysisGoal,
   BaselineAnalysisProjection,
   BaselineAnalysisUpdateRequest,
+  FactualReviewGoal,
+  FactualReviewProjection,
 } from '../shared/protocol.js';
 import {
   AnalysisError,
   BaselineAnalysisStore,
+  type AnalysisPreparationResult,
   type BaselineAnalysisPreparationResult,
   type BaselineAnalysisRouteFacts,
   type ProgressReader,
 } from './analysis/baseline-analysis-store.js';
+import { factualReviewKindDefinition } from './analysis/kind-definition.js';
 import { convertDocManuscript, isDocConversionRefusal } from './doc-manuscript.js';
 import {
   buildFidelityReport,
@@ -143,6 +147,7 @@ import {
   SUCCESSIVE_TASK_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_VERSION,
   TEXT_CONVERSION_SCHEMA_VERSION,
+  FACTUAL_REVIEW_SCHEMA_VERSION,
   TaskAuthorizationError,
   TaskAuthorizationStore,
   validateTaskAuthorizationSchema,
@@ -1328,7 +1333,8 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === SUCCESSIVE_TASK_SCHEMA_VERSION ||
       currentVersion === TASK_AUTHORIZATION_SCHEMA_VERSION ||
       currentVersion === MANUSCRIPT_INTAKE_SCHEMA_VERSION ||
-      currentVersion === TEXT_CONVERSION_SCHEMA_VERSION,
+      currentVersion === TEXT_CONVERSION_SCHEMA_VERSION ||
+      currentVersion === FACTUAL_REVIEW_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -1347,7 +1353,8 @@ function initializeSchema(db: DatabaseSync): void {
     currentVersion === SUCCESSIVE_TASK_SCHEMA_VERSION ||
     currentVersion === TASK_AUTHORIZATION_SCHEMA_VERSION ||
     currentVersion === MANUSCRIPT_INTAKE_SCHEMA_VERSION ||
-    currentVersion === TEXT_CONVERSION_SCHEMA_VERSION
+    currentVersion === TEXT_CONVERSION_SCHEMA_VERSION ||
+    currentVersion === FACTUAL_REVIEW_SCHEMA_VERSION
   ) return;
   if (currentVersion === 1) {
     migrateSchemaV1ToV2(db);
@@ -1682,7 +1689,7 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION || version === J03_TASK_AUTHORIZATION_SCHEMA_VERSION ||
       version === J04_BASELINE_ANALYSIS_SCHEMA_VERSION || version === SUCCESSIVE_TASK_SCHEMA_VERSION ||
       version === TASK_AUTHORIZATION_SCHEMA_VERSION || version === MANUSCRIPT_INTAKE_SCHEMA_VERSION ||
-      version === TEXT_CONVERSION_SCHEMA_VERSION,
+      version === TEXT_CONVERSION_SCHEMA_VERSION || version === FACTUAL_REVIEW_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -1692,7 +1699,7 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION || version === J03_TASK_AUTHORIZATION_SCHEMA_VERSION ||
       version === J04_BASELINE_ANALYSIS_SCHEMA_VERSION || version === SUCCESSIVE_TASK_SCHEMA_VERSION ||
       version === TASK_AUTHORIZATION_SCHEMA_VERSION || version === MANUSCRIPT_INTAKE_SCHEMA_VERSION ||
-      version === TEXT_CONVERSION_SCHEMA_VERSION) return;
+      version === TEXT_CONVERSION_SCHEMA_VERSION || version === FACTUAL_REVIEW_SCHEMA_VERSION) return;
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
   );
@@ -1794,7 +1801,7 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION || version === J03_TASK_AUTHORIZATION_SCHEMA_VERSION ||
       version === J04_BASELINE_ANALYSIS_SCHEMA_VERSION || version === SUCCESSIVE_TASK_SCHEMA_VERSION ||
       version === TASK_AUTHORIZATION_SCHEMA_VERSION || version === MANUSCRIPT_INTAKE_SCHEMA_VERSION ||
-      version === TEXT_CONVERSION_SCHEMA_VERSION,
+      version === TEXT_CONVERSION_SCHEMA_VERSION || version === FACTUAL_REVIEW_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -1803,7 +1810,7 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION || version === J03_TASK_AUTHORIZATION_SCHEMA_VERSION ||
       version === J04_BASELINE_ANALYSIS_SCHEMA_VERSION || version === SUCCESSIVE_TASK_SCHEMA_VERSION ||
       version === TASK_AUTHORIZATION_SCHEMA_VERSION || version === MANUSCRIPT_INTAKE_SCHEMA_VERSION ||
-      version === TEXT_CONVERSION_SCHEMA_VERSION) return;
+      version === TEXT_CONVERSION_SCHEMA_VERSION || version === FACTUAL_REVIEW_SCHEMA_VERSION) return;
   validateSourceImportSchemaTruth(db, profile);
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
@@ -2096,7 +2103,7 @@ function validateModelServiceSchema(
   const version = asNumber(
     one(db.prepare('PRAGMA user_version').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取数据库版本。').user_version,
   );
-  if (validateStoreTruth || version !== TEXT_CONVERSION_SCHEMA_VERSION) {
+  if (validateStoreTruth || version !== FACTUAL_REVIEW_SCHEMA_VERSION) {
     validateManuscriptReimportSchemaTruth(
       db,
       profile,
@@ -2142,7 +2149,7 @@ function initializeModelServiceSchema(
       version === EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION || version === J03_TASK_AUTHORIZATION_SCHEMA_VERSION ||
       version === J04_BASELINE_ANALYSIS_SCHEMA_VERSION || version === SUCCESSIVE_TASK_SCHEMA_VERSION ||
       version === TASK_AUTHORIZATION_SCHEMA_VERSION || version === MANUSCRIPT_INTAKE_SCHEMA_VERSION ||
-      version === TEXT_CONVERSION_SCHEMA_VERSION,
+      version === TEXT_CONVERSION_SCHEMA_VERSION || version === FACTUAL_REVIEW_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2151,7 +2158,7 @@ function initializeModelServiceSchema(
       version === EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION || version === J03_TASK_AUTHORIZATION_SCHEMA_VERSION ||
       version === J04_BASELINE_ANALYSIS_SCHEMA_VERSION || version === SUCCESSIVE_TASK_SCHEMA_VERSION ||
       version === TASK_AUTHORIZATION_SCHEMA_VERSION || version === MANUSCRIPT_INTAKE_SCHEMA_VERSION ||
-      version === TEXT_CONVERSION_SCHEMA_VERSION) {
+      version === TEXT_CONVERSION_SCHEMA_VERSION || version === FACTUAL_REVIEW_SCHEMA_VERSION) {
     validateModelServiceSchema(db, profile, validateStoreTruth);
     if (version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION) {
       validateEditorialWorkspaceProfileNativeSchema(db);
@@ -2873,6 +2880,7 @@ export class EditorialStore {
   readonly #editorialWorkspaceProfile: EditorialWorkspaceProfileStore;
   readonly #taskAuthorization: TaskAuthorizationStore;
   readonly #baselineAnalysis: BaselineAnalysisStore;
+  readonly #factualReview: BaselineAnalysisStore;
   readonly #workflowProfile: BuiltInWorkflowProfile;
   readonly #lifetimeId: string;
   readonly #control: StoreControl;
@@ -2897,6 +2905,7 @@ export class EditorialStore {
     editorialWorkspaceProfile: EditorialWorkspaceProfileStore,
     taskAuthorization: TaskAuthorizationStore,
     baselineAnalysis: BaselineAnalysisStore,
+    factualReview: BaselineAnalysisStore,
     workflowProfile: BuiltInWorkflowProfile,
     lifetimeId: string,
     control: StoreControl,
@@ -2912,6 +2921,7 @@ export class EditorialStore {
     this.#editorialWorkspaceProfile = editorialWorkspaceProfile;
     this.#taskAuthorization = taskAuthorization;
     this.#baselineAnalysis = baselineAnalysis;
+    this.#factualReview = factualReview;
     this.#workflowProfile = workflowProfile;
     this.#lifetimeId = lifetimeId;
     this.#control = control;
@@ -2985,6 +2995,7 @@ export class EditorialStore {
       editorialWorkspaceProfile,
       new TaskAuthorizationStore(authority, boundedAuthority),
       new BaselineAnalysisStore(authority, boundedAuthority, control.baselineAnalysisRoute),
+      new BaselineAnalysisStore(authority, boundedAuthority, control.baselineAnalysisRoute, factualReviewKindDefinition()),
       workflowProfile,
       lifetimeId,
       control,
@@ -3061,7 +3072,49 @@ export class EditorialStore {
   // ---- J-04 baseline manuscript analysis (Issue #92) ----------------------------------------------
 
   inspectBaselineAnalysis(bookId: string, progress?: ProgressReader, revisionId: string | null = null): BaselineAnalysisProjection {
-    return this.#analysisCall(() => this.#baselineAnalysis.inspect(bookId, progress, revisionId));
+    return this.#analysisCall(() => this.#baselineAnalysis.inspect(bookId, progress, revisionId)) as BaselineAnalysisProjection;
+  }
+
+  // ---- J-04 factual review (Issue #53, plan slice S18a) -------------------------------------------
+
+  /**
+   * The Book's factual review: the second analysis kind, on the same real path and through the same
+   * operations. Its projection is discriminated on `kind`, and no renderer reads it in this slice —
+   * the editor surfaces arrive with S18b, so no request frame, preload member, or `window.ai7` entry
+   * changes here.
+   */
+  inspectFactualReview(bookId: string, progress?: ProgressReader, revisionId: string | null = null): FactualReviewProjection {
+    return this.#analysisCall(() => this.#factualReview.inspect(bookId, progress, revisionId)) as FactualReviewProjection;
+  }
+
+  createFactualReviewPreparationWork(
+    bookId: string,
+    goal: FactualReviewGoal,
+    launchPolicy: LaunchPolicyProjection,
+    reconfirm = false,
+  ): AnalysisPreparationResult<FactualReviewProjection> {
+    const result = this.#analysisCall(() => this.#factualReview.prepare({ phase: 'start', bookId, goal, update: null, reconfirm, launchPolicy }));
+    return { ...result, projection: result.projection as FactualReviewProjection | null };
+  }
+
+  advanceFactualReviewPreparationWork(workId: string): AnalysisPreparationResult<FactualReviewProjection> {
+    const result = this.#analysisCall(() => this.#factualReview.prepare({ phase: 'advance', workId }));
+    return { ...result, projection: result.projection as FactualReviewProjection | null };
+  }
+
+  authorizeFactualReview(
+    bookId: string,
+    taskIntentId: string,
+    planEnvelopeDigest: string,
+  ): { projection: FactualReviewProjection; dispatchRunRecordId: string | null } {
+    const authorized = this.#analysisCall(() => this.#factualReview.authorize(bookId, taskIntentId, planEnvelopeDigest));
+    return { projection: authorized.projection as FactualReviewProjection, dispatchRunRecordId: authorized.dispatchRunRecordId };
+  }
+
+  /** The factual kind's append-only ledger, which its execution owner writes through; service-internal. */
+  get factualReviewLedger(): BaselineAnalysisStore {
+    this.#assertAvailable();
+    return this.#factualReview;
   }
 
   createBaselineAnalysisPreparationWork(
@@ -3070,12 +3123,18 @@ export class EditorialStore {
     update: BaselineAnalysisUpdateRequest | null,
     launchPolicy: LaunchPolicyProjection,
     reconfirm = false,
-  ): BaselineAnalysisPreparationResult {
-    return this.#analysisCall(() => this.#baselineAnalysis.prepare({ phase: 'start', bookId, goal, update, reconfirm, launchPolicy }));
+  ): AnalysisPreparationResult<BaselineAnalysisProjection> {
+    return this.#baselineProgress(() => this.#baselineAnalysis.prepare({ phase: 'start', bookId, goal, update, reconfirm, launchPolicy }));
   }
 
-  advanceBaselineAnalysisPreparationWork(workId: string): BaselineAnalysisPreparationResult {
-    return this.#analysisCall(() => this.#baselineAnalysis.prepare({ phase: 'advance', workId }));
+  advanceBaselineAnalysisPreparationWork(workId: string): AnalysisPreparationResult<BaselineAnalysisProjection> {
+    return this.#baselineProgress(() => this.#baselineAnalysis.prepare({ phase: 'advance', workId }));
+  }
+
+  /** One baseline preparation step, with its projection read as the kind the caller asked for. */
+  #baselineProgress(body: () => BaselineAnalysisPreparationResult): AnalysisPreparationResult<BaselineAnalysisProjection> {
+    const result = this.#analysisCall(body);
+    return { ...result, projection: result.projection as BaselineAnalysisProjection | null };
   }
 
   cancelBaselineAnalysisPreparationWork(workId: string): boolean {
@@ -3089,7 +3148,8 @@ export class EditorialStore {
     taskIntentId: string,
     planEnvelopeDigest: string,
   ): { projection: BaselineAnalysisProjection; dispatchRunRecordId: string | null } {
-    return this.#analysisCall(() => this.#baselineAnalysis.authorize(bookId, taskIntentId, planEnvelopeDigest));
+    const authorized = this.#analysisCall(() => this.#baselineAnalysis.authorize(bookId, taskIntentId, planEnvelopeDigest));
+    return { projection: authorized.projection as BaselineAnalysisProjection, dispatchRunRecordId: authorized.dispatchRunRecordId };
   }
 
   /** The append-only analysis ledger the execution owner writes through; service-internal. */
@@ -3101,6 +3161,7 @@ export class EditorialStore {
   close(): void {
     this.#taskAuthorization.prepare({ phase: 'cancel-all' });
     this.#baselineAnalysis.prepare({ phase: 'cancel-all' });
+    this.#factualReview.prepare({ phase: 'cancel-all' });
     for (const workId of Array.from(this.#reimportPreparationWork.keys())) {
       this.cancelManuscriptReimportPreparationWork(workId);
     }
