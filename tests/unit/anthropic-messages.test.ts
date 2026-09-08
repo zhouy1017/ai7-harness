@@ -145,8 +145,8 @@ describe('assembleProviderRequest · anthropic-messages', () => {
       .toThrowError(/PROVIDER_STRUCTURED_OUTPUT_UNSUPPORTED/u);
     expect(() => assembleProviderRequest(CAPPED_ROUTE_PROFILE, messagesModel({ reasoningControl: 'deepseek-thinking' }), payload(), context))
       .toThrowError(/PROVIDER_REASONING_CONTROL_UNSUPPORTED/u);
-    // The third shape is still named and still unimplemented.
-    expect(() => assembleProviderRequest(CAPPED_ROUTE_PROFILE, messagesModel({ requestShape: 'openai-responses' }), payload(), context))
+    // Every named shape is implemented as of S54c, and a shape none of them names still refuses.
+    expect(() => assembleProviderRequest(CAPPED_ROUTE_PROFILE, messagesModel({ requestShape: 'a-shape-nobody-declared' as ProviderModelProfile['capabilities']['requestShape'] }), payload(), context))
       .toThrowError(/PROVIDER_REQUEST_SHAPE_UNSUPPORTED/u);
     // And the route bound to the model is still checked before anything is assembled.
     expect(() => assembleProviderRequest(DEEPSEEK_ROUTE_PROFILE, messagesModel(), payload(), context))
