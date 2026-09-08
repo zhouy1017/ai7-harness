@@ -539,9 +539,10 @@ function recoveryCandidateCard(
     snapshotIdentity.dataset['snapshotId'] = candidate.snapshotId;
     exact.push(element('dt', undefined, '快照身份'), snapshotIdentity);
   }
-  // The disclosure sits inside the candidate's `<label>`, which is safe by construction: `<details>` is
-  // interactive content, so a click on its summary never runs the label's activation behavior and can
-  // never select this recovery source on the reader's behalf (V2-UX-LAYER-007).
+  // This disclosure sits inside the candidate's `<label>`, and after its radio. Both matter: `<details>`
+  // is interactive content, so a click on the summary never runs the label's activation behavior and can
+  // never select this recovery source on the reader's behalf (V2-UX-LAYER-007); and coming after the
+  // radio, it adds no tab stop before the choice itself.
   copy.append(details, technicalDetails('recovery-candidate-details', ...exact));
   radio.addEventListener('change', () => {
     if (!radio.checked) return;
@@ -573,21 +574,21 @@ function renderManuscriptRecovery(recovery: RecoveryComparisonProjection): void 
   );
   const identity = element('section', 'source-card recovery-identity');
   const identityDetails = element('dl');
+  // This card takes the demoting rank but no disclosure of its own. A `<summary>` is focusable and this
+  // card sits between the heading and the recovery radiogroup, so a disclosure here puts a tab stop in
+  // front of the screen's primary decision — the choice a recovery screen exists to present. The
+  // candidates' own disclosures sit after their radio and cost the reader nothing.
+  const durableBoundary = instantValue(recovery.lastDurableEditBoundary.durableAt);
+  durableBoundary.prepend(`修订日志序号 ${recovery.lastDurableEditBoundary.journalSequence} · `);
   identityDetails.append(
     element('dt', undefined, '图书'), element('dd', undefined, `${recovery.bookTitle} · ${recovery.bookId}`),
+    element('dt', undefined, '稿件'), element('dd', 'technical-identity', recovery.manuscriptId),
     element('dt', undefined, '分支'), element('dd', undefined, `${recovery.branchName} · ${recovery.branchId}`),
-    element('dt', undefined, '最后持久写入边界'),
-    element('dd', undefined, `修订日志序号 ${recovery.lastDurableEditBoundary.journalSequence} · ${localInstantLabel(recovery.lastDurableEditBoundary.durableAt)}`),
+    element('dt', undefined, '最后持久写入边界'), durableBoundary,
     element('dt', undefined, '覆盖范围'), element('dd', undefined, recovery.lastDurableEditBoundary.coveredChangeExtent),
   );
   identity.append(element('h3', undefined, '精确受影响稿件'), identityDetails,
-    element('p', 'uncertain-support', recovery.lastDurableEditBoundary.uncertainty),
-    technicalDetails(
-      undefined,
-      element('dt', undefined, '稿件'), element('dd', 'technical-identity', recovery.manuscriptId),
-      element('dt', undefined, '最后持久写入边界（精确时间）'),
-      element('dd', 'technical-identity', recovery.lastDurableEditBoundary.durableAt),
-    ));
+    element('p', 'uncertain-support', recovery.lastDurableEditBoundary.uncertainty));
   content.append(identity);
 
   const choices = element('fieldset', 'recovery-comparison');
