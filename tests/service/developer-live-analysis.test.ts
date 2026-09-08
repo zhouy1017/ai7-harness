@@ -150,6 +150,46 @@ function stubTransport(options: {
   return transport as unknown as typeof fetch;
 }
 
+/**
+ * The same stub transport, held open. Each call announces its arrival and then waits until the test
+ * releases that call, so a Run can be observed while a unit is genuinely in flight rather than only
+ * between units — which is the whole question the Run Liveness Signal answers. A released call
+ * answers exactly as `stubTransport` would; nothing about the request changes.
+ */
+function heldTransport(options: { calls: StubCall[]; responses: Map<number, UnitAnswer> }): {
+  transport: typeof fetch;
+  arrived(index: number): Promise<void>;
+  release(index: number): void;
+} {
+  const inner = stubTransport(options) as unknown as (url: string, init: { headers: Record<string, string>; body: string }) => Promise<unknown>;
+  const arrivals: Array<() => void> = [];
+  const gates: Array<() => void> = [];
+  const arrived: Array<Promise<void>> = [];
+  const held: Array<Promise<void>> = [];
+  // Slots are made on demand from either side, so the test may wait on a call that has not arrived
+  // and release one that has not either.
+  const ensure = (index: number): void => {
+    while (arrived.length <= index) {
+      arrived.push(new Promise<void>((resolve) => arrivals.push(resolve)));
+      held.push(new Promise<void>((resolve) => gates.push(resolve)));
+    }
+  };
+  let next = 0;
+  const transport = async (url: string, init: { headers: Record<string, string>; body: string }) => {
+    const index = next;
+    next += 1;
+    ensure(index);
+    arrivals[index]!();
+    await held[index]!;
+    return inner(url, init);
+  };
+  return {
+    transport: transport as unknown as typeof fetch,
+    arrived: (index) => { ensure(index); return arrived[index]!; },
+    release: (index) => { ensure(index); gates[index]!(); },
+  };
+}
+
 function owner(store: EditorialStore, nativeFetch: typeof fetch, ceiling: Ceiling = CEILING): BaselineAnalysisExecutionOwner {
   return new BaselineAnalysisExecutionOwner({
     ledger: store.baselineAnalysisLedger,
@@ -293,6 +333,63 @@ describe('the developer-live scope over exact sample1 with a stub transport', ()
       expect(line).not.toHaveProperty('requestBody');
       expect(line).not.toHaveProperty('response');
     }
+    await store.close();
+  });
+
+  it('answers what the Run is doing while a unit is in flight, and measures each step as it settles', async () => {
+    const calls: StubCall[] = [];
+    const { store, bookId, prepared } = await prepareLive(roots.dataRoot);
+    const responses = await unitAnswers(prepared);
+    const held = heldTransport({ calls, responses });
+    const execution = owner(store, held.transport);
+    const authorized = store.authorizeBaselineAnalysis(bookId, prepared.taskIntent!.taskIntentId, prepared.planEnvelope!.digest);
+    const runRecordId = authorized.dispatchRunRecordId!;
+    execution.admitAndDispatch(runRecordId);
+
+    // Unit 1's request is in the transport and no answer has come back. This is the ninety-second
+    // interval the first live Run could say nothing about; every fact below is one the owner holds.
+    await held.arrived(0);
+    const inFlight = execution.progressFor(runRecordId)!;
+    expect(inFlight.currentUnitOrdinal).toBe(1);
+    expect(inFlight.unitsSettled).toBe(0);
+    expect(inFlight.completedAttempts).toBe(0);
+    expect(inFlight.attemptState).toBe('awaiting-response');
+    expect(inFlight.longestSettledUnitMs).toBeNull();
+    expect(Number.isNaN(Date.parse(inFlight.currentUnitStartedAt!))).toBe(false);
+
+    // The store composes the fifth fact from the Run Record's own latest transition, and the whole
+    // projection stays identities, counts, and instants: no unit message, no answer, no payload.
+    const executing = store.inspectBaselineAnalysis(bookId, (id) => execution.progressFor(id));
+    expect(executing.run!.state).toBe('executing');
+    const projected = executing.run!.progress!;
+    expect(projected.lastTransitionAt).toBe(executing.run!.transitions[executing.run!.transitions.length - 1]!.recordedAt);
+    expect(projected.attemptState).toBe('awaiting-response');
+    expect(projected.currentUnitStartedAt).toBe(inFlight.currentUnitStartedAt);
+    expect(JSON.stringify(projected)).not.toContain('分析单元');
+
+    // Released, unit 1 settles; by the time unit 2 has reached the transport the Run has measured a
+    // step of its own, which is what the stale case is judged against from here on.
+    held.release(0);
+    await held.arrived(1);
+    const nextUnit = execution.progressFor(runRecordId)!;
+    expect(nextUnit.currentUnitOrdinal).toBe(2);
+    expect(nextUnit.unitsSettled).toBe(1);
+    expect(nextUnit.completedAttempts).toBe(1);
+    expect(nextUnit.longestSettledUnitMs).not.toBeNull();
+    expect(nextUnit.longestSettledUnitMs!).toBeGreaterThanOrEqual(0);
+    expect(nextUnit.currentUnitStartedAt).not.toBe(inFlight.currentUnitStartedAt);
+    expect(nextUnit.attemptState).toBe('awaiting-response');
+
+    for (let index = 1; index <= SAMPLE1_UNITS; index += 1) held.release(index);
+    await execution.whenIdle();
+
+    // A settled Run projects no progress at all: the signal ends with the state that produced it,
+    // rather than lingering as the first live Run's status toast did.
+    const settled = store.inspectBaselineAnalysis(bookId, (id) => execution.progressFor(id));
+    expect(settled.run!.state).toBe('completed');
+    expect(settled.run!.progress).toBeNull();
+    expect(execution.progressFor(runRecordId)).toBeNull();
+    expect(calls).toHaveLength(SAMPLE1_UNITS);
     await store.close();
   });
 

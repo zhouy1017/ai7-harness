@@ -43,7 +43,14 @@ import type {
 } from '../shared/protocol.js';
 import { BASELINE_ANALYSIS_TASK_GOAL, J03_TASK_GOAL, MAX_REPLACEMENT_EXCLUSIONS } from '../shared/protocol.js';
 import { mountBoundedEditor, type BoundedEditor, type EditorContinuity } from './editor.js';
-import { providerProcessingLabel, runBudgetCeilingLabel } from './plan-preview-labels.js';
+import {
+  attemptStateLabel,
+  elapsedLabel,
+  localInstantLabel,
+  providerProcessingLabel,
+  runBudgetCeilingLabel,
+  runStepIsStale,
+} from './plan-preview-labels.js';
 
 function requiredElement(selector: string): HTMLElement {
   const node = document.querySelector<HTMLElement>(selector);
@@ -2286,7 +2293,11 @@ function renderFrozenAnalysisPlan(card: HTMLElement, projection: BaselineAnalysi
         });
         if (host.isConnected && authorized.bookId === host.dataset['analysisBookId']) {
           renderBaselineAnalysis(host, authorized, bookTitle);
-          setStatus(authorized.run?.stateLabel ?? '已记录授权', authorized.state === 'authorized-blocked' ? undefined : 'success');
+          // The refusal is a message about an action that failed, so it belongs in the status line. The
+          // success path's state does not: the card's header pill carries it and re-renders with every
+          // refresh, while a toast reading `已进入调度器` would outlive the state that produced it
+          // (V2-UX-LIVE-004) — which is exactly what the first live Run showed.
+          if (authorized.state === 'authorized-blocked') setStatus(authorized.run?.stateLabel ?? '已记录授权');
         }
       } catch (error) {
         authorize.disabled = false;
@@ -2312,6 +2323,17 @@ function renderFrozenAnalysisPlan(card: HTMLElement, projection: BaselineAnalysi
         ? '无'
         : `${run.adaptations.length} 次 · 单元 ${run.adaptations.map((adaptation) => adaptation.unitOrdinal).join('、')} · 安全重试；执行绑定与计划信封未变`),
     );
+    // When the Run last changed state, in the Decision Layer's local time with the exact instant beside
+    // it (V2-UX-LAYER-004). It reads from the transitions rather than from `progress`, so it stays
+    // legible after the Run settles and `progress` is gone — a settled Run still answers "when".
+    const lastTransition = run.transitions[run.transitions.length - 1]!;
+    const lastTransitionValue = element('dd');
+    lastTransitionValue.dataset['runLastTransitionAt'] = lastTransition.recordedAt;
+    lastTransitionValue.append(
+      `${localInstantLabel(lastTransition.recordedAt)} · ${lastTransition.state}`,
+      element('span', 'technical-identity', lastTransition.recordedAt),
+    );
+    runFacts.append(element('dt', undefined, '上次状态更新'), lastTransitionValue);
     runSection.dataset['runAdaptations'] = String(run.adaptations.length);
     if (run.attempt) {
       runFacts.append(
@@ -2328,10 +2350,35 @@ function renderFrozenAnalysisPlan(card: HTMLElement, projection: BaselineAnalysi
       runSection.append(reasons);
     }
     if (run.progress) {
+      // The Run Liveness Signal (ADR 0071 §3): Measured Run Progress, then only facts the system
+      // already holds — which unit is in flight and since when, what the attempt is doing, when the Run
+      // last changed state, how many model turns are done. Elapsed time is computed here from a shown
+      // instant, so the reader can check it; nothing is estimated, and no percentage is invented.
+      const facts = run.progress;
+      const elapsedMs = facts.currentUnitStartedAt === null ? null : Date.now() - Date.parse(facts.currentUnitStartedAt);
+      const stale = elapsedMs !== null && runStepIsStale(elapsedMs, facts.longestSettledUnitMs);
       const progress = element('p', 'analysis-progress');
-      progress.dataset['analysisProgress'] = `${run.progress.unitsSettled}/${run.progress.unitsTotal}`;
+      progress.dataset['analysisProgress'] = `${facts.unitsSettled}/${facts.unitsTotal}`;
+      progress.dataset['runCompletedAttempts'] = String(facts.completedAttempts);
+      if (facts.attemptState !== null) progress.dataset['runAttemptState'] = facts.attemptState;
+      // The stale reading is an attribute as well as a sentence so a Journey can observe it without
+      // matching prose, and so the surface can style it without a second element.
+      if (stale) progress.dataset['runLiveness'] = 'stale';
       progress.setAttribute('aria-live', 'polite');
-      progress.textContent = `分析单元进度 ${run.progress.unitsSettled}/${run.progress.unitsTotal}${projection.update === null ? '' : '（仅重算单元）'}${run.progress.currentUnitOrdinal === null ? '' : ` · 正在处理单元 ${run.progress.currentUnitOrdinal}`}`;
+      const reading = [
+        `分析单元进度 ${facts.unitsSettled}/${facts.unitsTotal}${projection.update === null ? '' : '（仅重算单元）'}`,
+        ...(facts.currentUnitOrdinal === null ? [] : [`正在处理单元 ${facts.currentUnitOrdinal}`]),
+        ...(elapsedMs === null ? [] : [`本单元已用时 ${elapsedLabel(elapsedMs)}`]),
+        ...(facts.attemptState === null ? [] : [attemptStateLabel(facts.attemptState)]),
+        `上次状态更新 ${localInstantLabel(facts.lastTransitionAt)}`,
+        `已完成模型回合 ${facts.completedAttempts} 次`,
+      ].join(' · ');
+      // Over the bar this Run measured for itself, the surface says so and shows the same facts. It
+      // adds no action: cancelling is already the safe one, and it never claims the Run has died.
+      progress.textContent = stale ? `本步骤用时已超过通常水平。${reading}` : reading;
+      progress.append(element('span', 'technical-identity', facts.currentUnitStartedAt === null
+        ? `上次状态更新 ${facts.lastTransitionAt}`
+        : `本单元开始 ${facts.currentUnitStartedAt} · 上次状态更新 ${facts.lastTransitionAt}`));
       runSection.append(progress);
     }
     card.append(runSection);

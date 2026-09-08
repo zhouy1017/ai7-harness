@@ -35,6 +35,7 @@ import {
   type CredentialSlotId,
   type ExecutionRouteId,
   type ResultSetPolicyPin,
+  type RunAttemptState,
   type RunBudgetCeilingState,
 } from '../../shared/protocol.js';
 import {
@@ -181,10 +182,21 @@ export type BaselineAnalysisPrepareInput =
   | { phase: 'cancel'; workId: string }
   | { phase: 'cancel-all' };
 
+/**
+ * What the execution owner observes of the Run in flight: Measured Run Progress and the four
+ * liveness facts it holds itself (ADR 0071 §3). The fifth, `lastTransitionAt`, belongs to the ledger's
+ * own transitions and is composed by `#runProjection`, which already reads them; the owner never
+ * re-reads the record it is writing to. Identities, counts, and instants only — V2-UX-LIVE-006 keeps
+ * model content, prompt text, and payloads out of this shape entirely.
+ */
 export interface RunProgress {
   readonly unitsTotal: number;
   readonly unitsSettled: number;
   readonly currentUnitOrdinal: number | null;
+  readonly currentUnitStartedAt: string | null;
+  readonly attemptState: RunAttemptState | null;
+  readonly completedAttempts: number;
+  readonly longestSettledUnitMs: number | null;
 }
 
 export type ProgressReader = (runRecordId: string) => RunProgress | null;
@@ -992,6 +1004,10 @@ export class BaselineAnalysisStore {
       requireAnalysis(record.adaptationId === row.adaptation_id && record.adaptationClass === 'safe-retry', 'ANALYSIS_RECORD_INVALID', '计划内调整记录无效。');
       return { ...record, label: planAdaptationLabel(record.unitOrdinal, record.classifiedReason) };
     });
+    // The liveness signal's fifth fact: when this Run last changed state. The execution owner cannot
+    // hold it — it is the ledger's transition, read here already — so the projection composes it onto
+    // the four facts the owner does hold. A Run with no owner in flight keeps today's `null`.
+    const live = current.state === 'admitted' || current.state === 'executing' ? progress(runRecordId) : null;
     return {
       runRecordId,
       state: current.state,
@@ -1000,7 +1016,7 @@ export class BaselineAnalysisStore {
       transitions,
       adaptations,
       blockedReasons: current.state === 'blocked-before-dispatch' ? recordedReasons ?? blockedReasons(this.#launch.live) : null,
-      progress: current.state === 'admitted' || current.state === 'executing' ? progress(runRecordId) : null,
+      progress: live === null ? null : { ...live, lastTransitionAt: current.recordedAt },
       attempt,
     };
   }

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { AnalysisGapProjection, AnalysisSourceRangeProjection, CoverageManifestUnitProjection, ExecutionRouteId, LaunchPolicyProjection } from '../../shared/protocol.js';
+import type { AnalysisGapProjection, AnalysisSourceRangeProjection, CoverageManifestUnitProjection, ExecutionRouteId, LaunchPolicyProjection, RunAttemptState } from '../../shared/protocol.js';
 import { prepareExecution, type HarnessExecutionSpan, type PrimaryAgentHarnessHandle } from '../harness/primary-agent-harness.js';
 import { DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE } from '../../shared/protected-secret-identity.js';
 import type { DeveloperLiveRuntime } from '../launch-policy.js';
@@ -95,10 +95,40 @@ export class ExecutionAdmissionError extends Error {
 
 interface ActiveRun {
   readonly runRecordId: string;
-  readonly progress: { unitsTotal: number; unitsSettled: number; currentUnitOrdinal: number | null };
+  readonly progress: {
+    unitsTotal: number;
+    unitsSettled: number;
+    currentUnitOrdinal: number | null;
+    currentUnitStartedAt: string | null;
+    attemptState: RunAttemptState | null;
+    completedAttempts: number;
+    longestSettledUnitMs: number | null;
+  };
+  /**
+   * The live adapter's transmission counter, read on demand; `null` on the deterministic route, which
+   * has no transport to enter. It is a function rather than a number because the counter moves while
+   * the execution owner is parked on one `await`.
+   */
+  transmissions: (() => number) | null;
+  /** What that counter read when the attempt in flight was dispatched. */
+  transmissionsAtDispatch: number;
   harness: PrimaryAgentHarnessHandle | null;
   interrupted: boolean;
   done: Promise<void>;
+}
+
+/**
+ * What the attempt in flight is doing, at the instant a reader asks. `retrying` and `null` are
+ * recorded by the execution loop, which knows them; the step from `dispatched` to `awaiting-response`
+ * is derived, because nothing in this owner runs between handing a unit to the harness and the turn
+ * resolving. The live adapter increments its own counter as it enters the transport, so a counter
+ * past this attempt's baseline is exactly the fact that the request is out and an answer is awaited.
+ * The deterministic route stays `dispatched`: it waits for no model.
+ */
+function attemptStateOf(active: ActiveRun): RunAttemptState | null {
+  if (active.progress.attemptState !== 'dispatched') return active.progress.attemptState;
+  const transmissions = active.transmissions?.() ?? 0;
+  return transmissions > active.transmissionsAtDispatch ? 'awaiting-response' : 'dispatched';
 }
 
 const SAFE_NEXT_ACTIONS = {
@@ -183,7 +213,9 @@ export class BaselineAnalysisExecutionOwner {
   }
 
   progressFor(runRecordId: string): RunProgress | null {
-    return this.#active?.runRecordId === runRecordId ? { ...this.#active.progress } : null;
+    const active = this.#active;
+    if (active === null || active.runRecordId !== runRecordId) return null;
+    return { ...active.progress, attemptState: attemptStateOf(active) };
   }
 
   /** Single-slot admission: one Run per instance; a second dispatch is refused, never queued. */
@@ -208,7 +240,17 @@ export class BaselineAnalysisExecutionOwner {
     });
     const active: ActiveRun = {
       runRecordId,
-      progress: { unitsTotal: submitted, unitsSettled: 0, currentUnitOrdinal: null },
+      progress: {
+        unitsTotal: submitted,
+        unitsSettled: 0,
+        currentUnitOrdinal: null,
+        currentUnitStartedAt: null,
+        attemptState: null,
+        completedAttempts: 0,
+        longestSettledUnitMs: null,
+      },
+      transmissions: null,
+      transmissionsAtDispatch: 0,
       harness: null,
       interrupted: false,
       done: Promise.resolve(),
@@ -317,6 +359,9 @@ export class BaselineAnalysisExecutionOwner {
     // after `submitUnit`. It stays absent on the deterministic route, which has no Provider response
     // to normalize and no empty answer to distinguish from a contract failure.
     const liveAdapter: { instance: DeepSeekOpenAiCompatibleAdapter | null } = { instance: null };
+    // The same counter the liveness signal reads to tell a dispatched attempt from one already in the
+    // transport. Nothing but the count crosses this closure.
+    active.transmissions = () => liveAdapter.instance?.transmissions ?? 0;
     const harness = await prepareExecution({
       sessionId: harnessSessionId,
       route,
@@ -471,8 +516,12 @@ export class BaselineAnalysisExecutionOwner {
       const adaptedUnitOrdinals: number[] = [];
       // One technical turn for one unit attempt: the span is recorded by reference with the attempt index
       // and the admitted payload digest, and every attempt's usage counts toward the Run.
-      const submitAttempt = async (unit: CoverageManifestUnitProjection, attemptIndex: number) => {
+      const submitAttempt = async (unit: CoverageManifestUnitProjection, attemptIndex: number, attemptState: RunAttemptState) => {
         admittedPayloadDigest = null;
+        // The baseline this attempt's `awaiting-response` is derived against, taken before the harness
+        // can enter the transport, so the reading belongs to this attempt and not the previous one.
+        active.transmissionsAtDispatch = active.transmissions?.() ?? 0;
+        active.progress.attemptState = attemptState;
         const turn = await harness.submitUnit(unitMessages.get(unit.ordinal)!);
         // Read before anything else can start a turn: the adapter clears this at the start of every
         // stream, so it is this attempt's result or nothing.
@@ -490,6 +539,9 @@ export class BaselineAnalysisExecutionOwner {
           // The ceiling counts every attempt, including a safe retry's, from this instant onward.
           accumulated.push(unitUsage);
         }
+        // One model turn came back. It counts whether it transmitted, replayed from the Provider Result
+        // Cache, or read the deterministic fixture: what the reader learns is that the Run is moving.
+        active.progress.completedAttempts += 1;
         return { turn, unitUsage, payloadDigest, canonical };
       };
       for (const unit of submittedUnits) {
@@ -502,8 +554,11 @@ export class BaselineAnalysisExecutionOwner {
           break;
         }
         active.progress.currentUnitOrdinal = unit.ordinal;
+        // The instant the reader computes elapsed time from; the product itself estimates nothing.
+        active.progress.currentUnitStartedAt = new Date().toISOString();
+        const unitStartedAtMs = Date.now();
         const requestDigest = unitRequestDigest(BASELINE_PROMPT_CONTRACT_DIGEST, unit.ordinal, unit.digest);
-        let attempt = await submitAttempt(unit, 1);
+        let attempt = await submitAttempt(unit, 1, 'dispatched');
         let firstFailure: ClassifiedModelFailure | null = null;
         if (attempt.turn.terminal === 'failed' && !active.interrupted) {
           const failed = attempt.turn.signals.find((signal) => signal.kind === 'failed');
@@ -529,7 +584,7 @@ export class BaselineAnalysisExecutionOwner {
             });
             adaptedUnitOrdinals.push(unit.ordinal);
             if (currentBindingDigest !== bindingDigest) throw new ExecutionAdmissionError('EXECUTION_BINDING_DIGEST_DRIFT', '计划内调整期间执行绑定发生变化。');
-            attempt = await submitAttempt(unit, 2);
+            attempt = await submitAttempt(unit, 2, 'retrying');
           }
         }
         const { turn, unitUsage } = attempt;
@@ -592,6 +647,11 @@ export class BaselineAnalysisExecutionOwner {
           break;
         }
         active.progress.unitsSettled += 1;
+        // The bar the stale case is measured against is this Run's own longest settled step, so a model
+        // that answers in ninety seconds and one that answers in ten are each judged by their own pace.
+        // A unit that settled as a gap took real time too, and counts.
+        const settledMs = Date.now() - unitStartedAtMs;
+        active.progress.longestSettledUnitMs = Math.max(active.progress.longestSettledUnitMs ?? 0, settledMs);
       }
       if (active.interrupted && terminalClassification === 'completed') terminalClassification = 'interrupted';
       // The reducers and the contradiction/continuity pass run over the complete new unit set: reused plus recomputed.
@@ -645,6 +705,8 @@ export class BaselineAnalysisExecutionOwner {
     } finally {
       currentBindingDigest = null;
       active.progress.currentUnitOrdinal = null;
+      active.progress.currentUnitStartedAt = null;
+      active.progress.attemptState = null;
       await harness.finish();
     }
   }
