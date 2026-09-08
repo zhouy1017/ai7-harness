@@ -1,4 +1,4 @@
-export const SERVICE_PROTOCOL_VERSION = 26 as const;
+export const SERVICE_PROTOCOL_VERSION = 27 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
