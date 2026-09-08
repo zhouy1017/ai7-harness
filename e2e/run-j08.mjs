@@ -1,20 +1,27 @@
-import { createWriteStream, existsSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { appendFile, lstat, mkdir, mkdtemp, open as openFile, readdir, realpath, rename, rm, stat, truncate, writeFile } from 'node:fs/promises';
-import { once } from 'node:events';
 import { createServer } from 'node:http';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { arch, platform, release, tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { ADMITTED_SMALL_DOCX, composeAdmittedDocx } from './composed-docx.mjs';
 import { attachProductOutput, installJourneyCancellationCleanup, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect } from './controller.mjs';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const DEBUG_SELECTORS = new Set(['DEBUG', 'DEBUG_FILE', 'PWDEBUG', 'PWDEBUGIMPL']);
 const OBJECT_PATTERN = /^[0-9a-f]{64}\.snapshot$/;
+// This Journey's subject is recovery of edited text, so its three inputs are composed at run time from
+// the admitted small Public SampleBook rather than generated, under the content rule in
+// docs/agents/ci-test-boundaries.md. The three ranges do not overlap, so the three Books carry distinct
+// digests, and each title is authored here: none is ever taken from the source. The affected Book's
+// range stays long enough for the bounded read-only recovery view to remain a real bound at 32 blocks;
+// the other two are only imported, opened, and edited at their first block. The composer defers its
+// third-party carriers to first use, so composition still happens after the network denial below.
+const EXCERPT_A = Object.freeze({ source: ADMITTED_SMALL_DOCX, startBlock: 1, blocks: 40, title: '恢复边界甲' });
+const EXCERPT_B = Object.freeze({ source: ADMITTED_SMALL_DOCX, startBlock: 41, blocks: 30, title: '无关工作乙' });
+const EXCERPT_C = Object.freeze({ source: ADMITTED_SMALL_DOCX, startBlock: 71, blocks: 25, title: '待处理导入丙' });
 let location = 'entry';
 let electronExecutable;
-let Zip;
-let ZipPassThrough;
-let strToU8;
 
 function at(next) {
   location = next;
@@ -98,36 +105,8 @@ async function createLoopbackSentinel() {
   };
 }
 
-async function createSyntheticDocx(path, title, seed) {
-  const output = createWriteStream(path, { flags: 'wx' });
-  let pendingDrain;
-  const drain = async () => {
-    const pending = pendingDrain;
-    if (!pending) return;
-    try { await pending; } finally { if (pendingDrain === pending) pendingDrain = undefined; }
-  };
-  const completion = new Promise((resolveCompletion, rejectCompletion) => {
-    output.once('finish', resolveCompletion);
-    output.once('error', rejectCompletion);
-  });
-  const zip = new Zip((error, data, final) => {
-    if (error) { output.destroy(error); return; }
-    if (!output.write(data) && pendingDrain === undefined) pendingDrain = once(output, 'drain').then(() => undefined);
-    if (final) output.end();
-  });
-  const push = async (name, text) => {
-    const entry = new ZipPassThrough(name);
-    zip.add(entry);
-    entry.push(strToU8(text), true);
-    await drain();
-  };
-  await push('[Content_Types].xml', '<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/></Types>');
-  await push('docProps/core.xml', `<?xml version="1.0" encoding="UTF-8"?><cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>${title}</dc:title></cp:coreProperties>`);
-  const paragraphs = Array.from({ length: 48 }, (_, index) =>
-    `<w:p>${index === 0 ? '<w:pPr><w:pStyle w:val="Title"/></w:pPr>' : index % 12 === 0 ? '<w:pPr><w:pStyle w:val="Heading1"/></w:pPr>' : ''}<w:r><w:t>${title}的公开合成段落${seed}-${index + 1}，用于本地恢复功能校验。</w:t></w:r></w:p>`).join('');
-  await push('word/document.xml', `<?xml version="1.0" encoding="UTF-8"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>${paragraphs}</w:body></w:document>`);
-  zip.end();
-  await completion;
+async function composeInput(path, request, seed) {
+  await composeAdmittedDocx(path, request);
   const metadata = await lstat(path);
   requireJourney(metadata.isFile() && !metadata.isSymbolicLink() && metadata.size > 1_000, `fixture-${seed}`);
 }
@@ -311,7 +290,6 @@ async function main() {
     const denial = resolve(ROOT, 'dist', 'shared', 'network-denial.mjs');
     requireJourney(existsSync(denial), 'controller-network-denial-carrier');
     (await import(pathToFileURL(denial).href)).installNodeNetworkDenial();
-    ({ Zip, ZipPassThrough, strToU8 } = await import('fflate'));
     ({ electronExecutable } = await import('../tools/electron-runtime.mjs'));
     const { createCanonicalExternalDataRoot, ensureCanonicalDataDirectory } = await import(pathToFileURL(resolve(ROOT, 'dist', 'shared', 'data-root.mjs')).href);
     const { chromium } = await import('playwright-core');
@@ -323,14 +301,14 @@ async function main() {
     runRoot = await runRootAcquisition;
     cancellation.throwIfRequested();
     requireJourney(dirname(runRoot) === tempParent && basename(runRoot).startsWith('ai7-j08-e2e-'), 'temp-root');
-    const inputs = resolve(runRoot, 'synthetic-inputs');
+    const inputs = resolve(runRoot, 'composed-inputs');
     await mkdir(inputs);
     const bookA = resolve(inputs, 'recovery-a.docx');
     const bookB = resolve(inputs, 'unrelated-b.docx');
     const draftC = resolve(inputs, 'pending-import-c.docx');
-    await createSyntheticDocx(bookA, '恢复边界甲', 'a');
-    await createSyntheticDocx(bookB, '无关工作乙', 'b');
-    await createSyntheticDocx(draftC, '待处理导入丙', 'c');
+    await composeInput(bookA, EXCERPT_A, 'a');
+    await composeInput(bookB, EXCERPT_B, 'b');
+    await composeInput(draftC, EXCERPT_C, 'c');
     const dataRoot = await createCanonicalExternalDataRoot(resolve(runRoot, 'data'), checkout);
     const shellRoot = await ensureCanonicalDataDirectory(dataRoot, 'shell');
     const executable = electronExecutable();
