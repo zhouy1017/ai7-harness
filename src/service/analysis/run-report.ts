@@ -12,6 +12,7 @@ import {
   type RunReportRecordProjection,
   type RunReportStageId,
   type RunReportStageProjection,
+  type RunReportSuggestionProjection,
   type RunReportUnitAccountingProjection,
   type RunReportUnitRowProjection,
   type RunReportUsageProjection,
@@ -54,6 +55,7 @@ export type RunReportRecord = RunReportRecordProjection;
 export type RunReportUsage = RunReportUsageProjection;
 export type RunReportUnitRow = RunReportUnitRowProjection;
 export type RunReportIfRedone = RunReportIfRedoneProjection;
+export type RunReportSuggestion = RunReportSuggestionProjection;
 
 export const RUN_REPORT_NO_USAGE: RunReportUsage = { requests: 0, inputTokens: 0, outputTokens: 0 };
 
