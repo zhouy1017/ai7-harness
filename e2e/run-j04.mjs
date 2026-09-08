@@ -1235,12 +1235,12 @@ async function main() {
     // The findings as they stand before the sampling component is considered at all; the sample must
     // leave them byte-identical, which is ADR 0066's "never edits, deletes, or reorders findings".
     const findingsBeforeSampling = JSON.stringify(revision.crossUnitFindings);
-    const sample = revision.assuranceSample;
-    requireJourney(sample?.state === 'closed' && sample?.reason === null && DIGEST_PATTERN.test(sample?.seed) &&
-      sample?.size === revision.crossUnitFindings.length && sample?.candidateCount === revision.crossUnitFindings.length &&
-      sample?.usage?.inputTokens > 0 && sample?.usage?.outputTokens > 0 &&
-      sameRecord(revision.reducerClosure.stages[5], { stage: 'assurance-sampling', state: 'closed', inputCount: sample.candidateCount }),
-      'assurance-sample-closed', { assuranceSample: sample, stages: revision.reducerClosure.stages });
+    const assuranceSample = revision.assuranceSample;
+    requireJourney(assuranceSample?.state === 'closed' && assuranceSample?.reason === null && DIGEST_PATTERN.test(assuranceSample?.seed) &&
+      assuranceSample?.size === revision.crossUnitFindings.length && assuranceSample?.candidateCount === revision.crossUnitFindings.length &&
+      assuranceSample?.usage?.inputTokens > 0 && assuranceSample?.usage?.outputTokens > 0 &&
+      sameRecord(revision.reducerClosure.stages[5], { stage: 'assurance-sampling', state: 'closed', inputCount: assuranceSample.candidateCount }),
+      'assurance-sample-closed', { assuranceSample, stages: revision.reducerClosure.stages });
 
     // The seed is reproducible from the revision's own manifest digest and its own findings: an editor
     // holding only what the revision discloses can redraw the identical sample and check the set.
@@ -1248,25 +1248,25 @@ async function main() {
       ref: String(index), unitOrdinal: finding.sides[0].unitOrdinal, tier: finding.confidence, text: finding.description,
     }));
     const findingsDigest = sha256Hex(canonicalJson(candidates));
-    requireJourney(sample.seed === sha256Hex(canonicalJson({ manifestDigest: manifest.digest, findingsDigest })),
-      'assurance-sample-seed-redrawn', { seed: sample.seed, manifestDigest: manifest.digest });
+    requireJourney(assuranceSample.seed === sha256Hex(canonicalJson({ manifestDigest: manifest.digest, findingsDigest })),
+      'assurance-sample-seed-redrawn', { seed: assuranceSample.seed, manifestDigest: manifest.digest });
 
     // Exact sample1 is one structural section, so the stratum is one; every section holding a finding
     // contributes at least one disposition, and here that is the whole sample.
     const sections = new Set(revision.crossUnitFindings.map((finding) => manifest.units[finding.sides[0].unitOrdinal - 1].sectionOrdinal));
-    requireJourney(sample.strata.length === sections.size &&
-      sample.strata.every((stratum) => sections.has(stratum.sectionOrdinal) && stratum.sampled >= 1 && stratum.sampled <= stratum.candidates) &&
-      sample.strata.reduce((total, stratum) => total + stratum.sampled, 0) === sample.size &&
-      [...sections].every((sectionOrdinal) => sample.dispositions.some((entry) =>
+    requireJourney(assuranceSample.strata.length === sections.size &&
+      assuranceSample.strata.every((stratum) => sections.has(stratum.sectionOrdinal) && stratum.sampled >= 1 && stratum.sampled <= stratum.candidates) &&
+      assuranceSample.strata.reduce((total, stratum) => total + stratum.sampled, 0) === assuranceSample.size &&
+      [...sections].every((sectionOrdinal) => assuranceSample.dispositions.some((entry) =>
         manifest.units[entry.unitOrdinal - 1].sectionOrdinal === sectionOrdinal)),
-      'assurance-sample-strata', { strata: sample.strata, sections: [...sections] });
+      'assurance-sample-strata', { strata: assuranceSample.strata, sections: [...sections] });
 
     // One disposition per drawn finding, each naming its finding by `ref` at that finding's own anchor
     // unit and tier, and exactly one of them is the fixture-driven `需降级` with a stated reason.
-    const downgraded = sample.dispositions.filter((entry) => entry.disposition === '需降级');
-    requireJourney(sample.dispositions.length === sample.size &&
-      new Set(sample.dispositions.map((entry) => entry.ref)).size === sample.size &&
-      sample.dispositions.every((entry) => {
+    const downgraded = assuranceSample.dispositions.filter((entry) => entry.disposition === '需降级');
+    requireJourney(assuranceSample.dispositions.length === assuranceSample.size &&
+      new Set(assuranceSample.dispositions.map((entry) => entry.ref)).size === assuranceSample.size &&
+      assuranceSample.dispositions.every((entry) => {
         const finding = revision.crossUnitFindings[Number(entry.ref)];
         if (finding === undefined || !['成立', '需降级', '应删除'].includes(entry.disposition)) return false;
         if (typeof entry.reason !== 'string' || entry.reason.length === 0) return false;
@@ -1274,21 +1274,21 @@ async function main() {
       }) &&
       downgraded.length === 1 && downgraded[0].reason.length > 0 &&
       revision.crossUnitFindings[Number(downgraded[0].ref)]?.kind === 'continuity-break',
-      'assurance-sample-dispositions', { dispositions: sample.dispositions });
+      'assurance-sample-dispositions', { dispositions: assuranceSample.dispositions });
 
     // Estimated precision per tier of the sampled set: upheld over sampled, `成立` only, two decimals.
-    requireJourney(sample.precision.length > 0 &&
-      sample.precision.every((entry) => {
-        const ofTier = sample.dispositions.filter((disposition) => disposition.tier === entry.tier);
+    requireJourney(assuranceSample.precision.length > 0 &&
+      assuranceSample.precision.every((entry) => {
+        const ofTier = assuranceSample.dispositions.filter((disposition) => disposition.tier === entry.tier);
         const upheld = ofTier.filter((disposition) => disposition.disposition === '成立').length;
         return entry.sampled === ofTier.length && entry.upheld === upheld &&
           entry.estimate === Math.round((upheld / ofTier.length) * 100) / 100;
       }) &&
-      sample.precision.reduce((total, entry) => total + entry.sampled, 0) === sample.size &&
-      revision.assurance.sampledPrecision?.size === sample.size &&
-      revision.assurance.sampledPrecision?.upheld === sample.dispositions.filter((entry) => entry.disposition === '成立').length &&
-      revision.assurance.label.includes(`· 抽样 ${sample.size} 条 · 估计精度 ${revision.assurance.sampledPrecision.estimate.toFixed(2)}`),
-      'assurance-sample-precision', { precision: sample.precision, sampledPrecision: revision.assurance.sampledPrecision, label: revision.assurance.label });
+      assuranceSample.precision.reduce((total, entry) => total + entry.sampled, 0) === assuranceSample.size &&
+      revision.assurance.sampledPrecision?.size === assuranceSample.size &&
+      revision.assurance.sampledPrecision?.upheld === assuranceSample.dispositions.filter((entry) => entry.disposition === '成立').length &&
+      revision.assurance.label.includes(`· 抽样 ${assuranceSample.size} 条 · 估计精度 ${revision.assurance.sampledPrecision.estimate.toFixed(2)}`),
+      'assurance-sample-precision', { precision: assuranceSample.precision, sampledPrecision: revision.assurance.sampledPrecision, label: revision.assurance.label });
 
     // No finding was edited, deleted, reordered, or re-ranked by a disposition, and the axis state the
     // reducers gave this Run is untouched: a sample is evidence about findings, never a verdict.
