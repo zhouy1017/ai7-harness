@@ -56,6 +56,7 @@ import {
   ANALYSIS_LEDGER_TRIGGER_SQL,
   J03_TASK_AUTHORIZATION_SCHEMA_VERSION,
   J04_BASELINE_ANALYSIS_SCHEMA_VERSION,
+  MANUSCRIPT_INTAKE_SCHEMA_VERSION,
   SUCCESSIVE_TASK_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_SQL,
   TASK_AUTHORIZATION_SCHEMA_VERSION,
@@ -184,7 +185,11 @@ const COMMON_SCHEMA_SQL = {
     PRIMARY KEY(dimension_set_id, dimension_id),
     UNIQUE(dimension_set_id, position)
   ) STRICT`,
-  source_versions: `CREATE TABLE source_versions (
+  // Revision 18 widens the format and makes the three parse fields nullable together, so a Source
+  // Version may be a retained original the product never parsed; both shapes are accepted because a
+  // store below the terminal revision still carries the first one.
+  source_versions: [
+    `CREATE TABLE source_versions (
     source_version_id TEXT PRIMARY KEY,
     book_id TEXT NOT NULL REFERENCES books(book_id),
     object_digest TEXT NOT NULL REFERENCES content_objects(object_digest),
@@ -197,6 +202,21 @@ const COMMON_SCHEMA_SQL = {
     created_at TEXT NOT NULL,
     UNIQUE(book_id, source_digest)
   ) STRICT`,
+    `CREATE TABLE source_versions (
+    source_version_id TEXT PRIMARY KEY,
+    book_id TEXT NOT NULL REFERENCES books(book_id),
+    object_digest TEXT NOT NULL REFERENCES content_objects(object_digest),
+    source_digest TEXT NOT NULL CHECK(length(source_digest) = 64),
+    content_digest TEXT CHECK(content_digest IS NULL OR length(content_digest) = 64),
+    structure_digest TEXT CHECK(structure_digest IS NULL OR length(structure_digest) = 64),
+    parser_identity TEXT,
+    format TEXT NOT NULL CHECK(format IN ('DOCX', 'DOC', 'PDF', 'ODT', 'RTF', 'TXT', 'MD', 'UNKNOWN')),
+    display_name TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    CHECK((content_digest IS NULL) = (structure_digest IS NULL) AND (structure_digest IS NULL) = (parser_identity IS NULL)),
+    UNIQUE(book_id, source_digest)
+  ) STRICT`,
+  ],
   source_provenance: `CREATE TABLE source_provenance (
     provenance_id TEXT PRIMARY KEY,
     source_version_id TEXT NOT NULL UNIQUE REFERENCES source_versions(source_version_id),
@@ -994,7 +1014,9 @@ const SOURCE_IMPORT_SCHEMA_SQL = {
         AND uncertainty_code IS NULL)
     )
   ) STRICT`,
-  source_provenance: `CREATE TABLE source_provenance (
+  // Revision 18 makes the parser identity nullable for the same reason `source_versions` does.
+  source_provenance: [
+    `CREATE TABLE source_provenance (
     provenance_id TEXT PRIMARY KEY,
     source_version_id TEXT NOT NULL REFERENCES source_versions(source_version_id),
     acquisition_path TEXT NOT NULL CHECK(acquisition_path = 'native-file-picker'),
@@ -1003,6 +1025,16 @@ const SOURCE_IMPORT_SCHEMA_SQL = {
     parser_identity TEXT NOT NULL,
     recorded_at TEXT NOT NULL
   ) STRICT`,
+    `CREATE TABLE source_provenance (
+    provenance_id TEXT PRIMARY KEY,
+    source_version_id TEXT NOT NULL REFERENCES source_versions(source_version_id),
+    acquisition_path TEXT NOT NULL CHECK(acquisition_path = 'native-file-picker'),
+    locality TEXT NOT NULL CHECK(locality = 'local-provider-free'),
+    sanitized_identity TEXT NOT NULL,
+    parser_identity TEXT,
+    recorded_at TEXT NOT NULL
+  ) STRICT`,
+  ],
   source_import_records: `CREATE TABLE source_import_records (
     source_import_record_id TEXT PRIMARY KEY,
     commit_id TEXT NOT NULL UNIQUE,
@@ -1033,7 +1065,10 @@ const MANUSCRIPT_REIMPORT_SCHEMA_SQL = {
     round_trip_guaranteed INTEGER NOT NULL CHECK(round_trip_guaranteed = 0),
     created_at TEXT NOT NULL
   ) STRICT`,
-  import_drafts: `CREATE TABLE import_drafts (
+  // Revision 18 appends the format the draft's file was identified as; both shapes are accepted
+  // because a store below the terminal revision has not gained the column yet.
+  import_drafts: [
+    `CREATE TABLE import_drafts (
     draft_id TEXT PRIMARY KEY,
     selection_token TEXT NOT NULL UNIQUE,
     state TEXT NOT NULL CHECK(state IN ('staged', 'reviewed', 'committed')),
@@ -1062,6 +1097,38 @@ const MANUSCRIPT_REIMPORT_SCHEMA_SQL = {
     reviewed_manuscript_id TEXT REFERENCES manuscripts(manuscript_id),
     reviewed_branch_id TEXT REFERENCES manuscript_branches(branch_id)
   ) STRICT`,
+    `CREATE TABLE import_drafts (
+    draft_id TEXT PRIMARY KEY,
+    selection_token TEXT NOT NULL UNIQUE,
+    state TEXT NOT NULL CHECK(state IN ('staged', 'reviewed', 'committed')),
+    draft_version INTEGER NOT NULL CHECK(draft_version >= 1),
+    display_name TEXT NOT NULL,
+    object_digest TEXT NOT NULL REFERENCES content_objects(object_digest),
+    selected_path TEXT,
+    reviewed_title TEXT,
+    reviewed_target_choice_id TEXT
+      CHECK(reviewed_target_choice_id IS NULL OR reviewed_target_choice_id IN ('new-book', 'new-book-distinct-intended-work')),
+    review_digest TEXT UNIQUE,
+    committed_commit_id TEXT UNIQUE,
+    staged_at TEXT NOT NULL,
+    reviewed_at TEXT,
+    committed_at TEXT,
+    reviewed_target_kind TEXT CHECK(reviewed_target_kind IS NULL OR reviewed_target_kind IN ('new-book', 'existing-book')),
+    reviewed_existing_book_id TEXT REFERENCES books(book_id),
+    reviewed_relationship TEXT
+      CHECK(reviewed_relationship IS NULL OR reviewed_relationship IN ('new-book-first-manuscript', 'first-manuscript', 'source-only', 'reimport')),
+    reviewed_book_state_digest TEXT
+      CHECK(reviewed_book_state_digest IS NULL OR length(reviewed_book_state_digest) = 64),
+    reviewed_reuse_source_version_id TEXT REFERENCES source_versions(source_version_id),
+    reviewed_lineage_status TEXT CHECK(reviewed_lineage_status IS NULL OR reviewed_lineage_status IN ('verified', 'unconfirmed')),
+    reviewed_lineage_source_version_id TEXT REFERENCES source_versions(source_version_id),
+    reviewed_checkpoint_revision_id TEXT REFERENCES manuscript_revisions(revision_id),
+    reviewed_manuscript_id TEXT REFERENCES manuscripts(manuscript_id),
+    reviewed_branch_id TEXT REFERENCES manuscript_branches(branch_id),
+    source_format TEXT NOT NULL DEFAULT 'DOCX'
+      CHECK(source_format IN ('DOCX', 'DOC', 'PDF', 'ODT', 'RTF', 'TXT', 'MD', 'UNKNOWN'))
+  ) STRICT`,
+  ],
   import_commits: `CREATE TABLE import_commits (
     commit_id TEXT PRIMARY KEY,
     draft_id TEXT NOT NULL UNIQUE REFERENCES import_drafts(draft_id),
@@ -1880,7 +1947,9 @@ function requireExactTableSchema(db: DatabaseSync, name: string, expectedSql: st
           'reviewed_reuse_source_version_id>source_versions.source_version_id:NO ACTION/NO ACTION/NONE',
         ]
       : []),
-    ...(name === 'import_drafts' && canonicalSchemaSql(matchedExpectedSql) === canonicalSchemaSql(MANUSCRIPT_REIMPORT_SCHEMA_SQL.import_drafts)
+    ...(name === 'import_drafts' && MANUSCRIPT_REIMPORT_SCHEMA_SQL.import_drafts.some(
+      (candidate) => canonicalSchemaSql(matchedExpectedSql) === canonicalSchemaSql(candidate),
+    )
       ? [
           'reviewed_branch_id>manuscript_branches.branch_id:NO ACTION/NO ACTION/NONE',
           'reviewed_checkpoint_revision_id>manuscript_revisions.revision_id:NO ACTION/NO ACTION/NONE',
@@ -4754,16 +4823,17 @@ export function initializeBoundedSchema(
       version === MODEL_SERVICE_SCHEMA_VERSION || version === NATIVE_ARTIFACT_SCHEMA_VERSION ||
       version === AUTHORITY_SIDECAR_SCHEMA_VERSION || version === J03_TASK_AUTHORIZATION_SCHEMA_VERSION ||
       version === J04_BASELINE_ANALYSIS_SCHEMA_VERSION || version === SUCCESSIVE_TASK_SCHEMA_VERSION ||
-      version === TASK_AUTHORIZATION_SCHEMA_VERSION,
+      version === TASK_AUTHORIZATION_SCHEMA_VERSION || version === MANUSCRIPT_INTAKE_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
   if (version === MANUSCRIPT_REIMPORT_SCHEMA_VERSION || version === MODEL_SERVICE_SCHEMA_VERSION ||
       version === NATIVE_ARTIFACT_SCHEMA_VERSION || version === AUTHORITY_SIDECAR_SCHEMA_VERSION ||
       version === J03_TASK_AUTHORIZATION_SCHEMA_VERSION || version === J04_BASELINE_ANALYSIS_SCHEMA_VERSION ||
-      version === SUCCESSIVE_TASK_SCHEMA_VERSION || version === TASK_AUTHORIZATION_SCHEMA_VERSION) {
+      version === SUCCESSIVE_TASK_SCHEMA_VERSION || version === TASK_AUTHORIZATION_SCHEMA_VERSION ||
+      version === MANUSCRIPT_INTAKE_SCHEMA_VERSION) {
     transact(db, () => {
-      if (validateStoreTruth || version !== TASK_AUTHORIZATION_SCHEMA_VERSION) {
+      if (validateStoreTruth || version !== MANUSCRIPT_INTAKE_SCHEMA_VERSION) {
         validateManuscriptReimportSchemaTruth(
           db,
           profile,

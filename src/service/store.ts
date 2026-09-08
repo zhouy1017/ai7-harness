@@ -120,6 +120,7 @@ import {
   initializeTaskAuthorizationSchema,
   J03_TASK_AUTHORIZATION_SCHEMA_VERSION,
   J04_BASELINE_ANALYSIS_SCHEMA_VERSION,
+  MANUSCRIPT_INTAKE_SCHEMA_VERSION,
   SUCCESSIVE_TASK_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_VERSION,
   TaskAuthorizationError,
@@ -253,6 +254,71 @@ const SOURCE_PROVENANCE_V9_SCHEMA_SQL = `CREATE TABLE source_provenance (
   parser_identity TEXT NOT NULL,
   recorded_at TEXT NOT NULL
 ) STRICT`;
+/**
+ * Revision 18's Source Version relations (ADR 0072 §2). A Source Version may now be an original the
+ * product retained without ever parsing it, so `format` widens to what the intake router identified
+ * and the three parse fields become nullable together: a Source Version carries a whole local parse
+ * or none of it, never half of one.
+ */
+const SOURCE_VERSION_V18_SCHEMA_SQL = `CREATE TABLE source_versions (
+  source_version_id TEXT PRIMARY KEY,
+  book_id TEXT NOT NULL REFERENCES books(book_id),
+  object_digest TEXT NOT NULL REFERENCES content_objects(object_digest),
+  source_digest TEXT NOT NULL CHECK(length(source_digest) = 64),
+  content_digest TEXT CHECK(content_digest IS NULL OR length(content_digest) = 64),
+  structure_digest TEXT CHECK(structure_digest IS NULL OR length(structure_digest) = 64),
+  parser_identity TEXT,
+  format TEXT NOT NULL CHECK(format IN ('DOCX', 'DOC', 'PDF', 'ODT', 'RTF', 'TXT', 'MD', 'UNKNOWN')),
+  display_name TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  CHECK((content_digest IS NULL) = (structure_digest IS NULL) AND (structure_digest IS NULL) = (parser_identity IS NULL)),
+  UNIQUE(book_id, source_digest)
+) STRICT`;
+const SOURCE_PROVENANCE_V18_SCHEMA_SQL = `CREATE TABLE source_provenance (
+  provenance_id TEXT PRIMARY KEY,
+  source_version_id TEXT NOT NULL REFERENCES source_versions(source_version_id),
+  acquisition_path TEXT NOT NULL CHECK(acquisition_path = 'native-file-picker'),
+  locality TEXT NOT NULL CHECK(locality = 'local-provider-free'),
+  sanitized_identity TEXT NOT NULL,
+  parser_identity TEXT,
+  recorded_at TEXT NOT NULL
+) STRICT`;
+/** Every draft records what its file was identified as; every row that predates revision 18 is a DOCX. */
+const IMPORT_DRAFT_SOURCE_FORMAT_V18_COLUMN_SQL =
+  "ALTER TABLE import_drafts ADD COLUMN source_format TEXT NOT NULL DEFAULT 'DOCX' " +
+  "CHECK(source_format IN ('DOCX', 'DOC', 'PDF', 'ODT', 'RTF', 'TXT', 'MD', 'UNKNOWN'))";
+/** The three `source_versions` guards, re-created verbatim after the table is rebuilt. */
+const SOURCE_VERSION_REBUILT_TRIGGER_SQL = `
+  CREATE TRIGGER abandonment_cleanup_block_source_insert
+  BEFORE INSERT ON source_versions
+  WHEN EXISTS (
+    SELECT 1 FROM import_abandonment_cleanup_intents i
+    WHERE i.object_digest = NEW.object_digest
+  )
+  BEGIN
+    SELECT RAISE(ABORT, 'ABANDONMENT_CLEANUP_PENDING');
+  END;
+
+  CREATE TRIGGER abandonment_cleanup_block_source_update
+  BEFORE UPDATE OF object_digest ON source_versions
+  WHEN EXISTS (
+    SELECT 1 FROM import_abandonment_cleanup_intents i
+    WHERE i.object_digest = NEW.object_digest
+  )
+  BEGIN
+    SELECT RAISE(ABORT, 'ABANDONMENT_CLEANUP_PENDING');
+  END;
+
+  CREATE TRIGGER abandonment_cleanup_block_source_update_v5
+  BEFORE UPDATE ON source_versions
+  WHEN EXISTS (
+    SELECT 1 FROM import_abandonment_cleanup_intents i
+    WHERE i.object_digest = OLD.object_digest OR i.object_digest = NEW.object_digest
+  )
+  BEGIN
+    SELECT RAISE(ABORT, 'ABANDONMENT_CLEANUP_PENDING');
+  END;
+`;
 const SOURCE_IMPORT_DRAFT_V9_SCHEMA_SQL = `CREATE TABLE import_drafts (
   draft_id TEXT PRIMARY KEY,
   selection_token TEXT NOT NULL UNIQUE,
@@ -1121,7 +1187,8 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === J03_TASK_AUTHORIZATION_SCHEMA_VERSION ||
       currentVersion === J04_BASELINE_ANALYSIS_SCHEMA_VERSION ||
       currentVersion === SUCCESSIVE_TASK_SCHEMA_VERSION ||
-      currentVersion === TASK_AUTHORIZATION_SCHEMA_VERSION,
+      currentVersion === TASK_AUTHORIZATION_SCHEMA_VERSION ||
+      currentVersion === MANUSCRIPT_INTAKE_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -1138,7 +1205,8 @@ function initializeSchema(db: DatabaseSync): void {
     currentVersion === J03_TASK_AUTHORIZATION_SCHEMA_VERSION ||
     currentVersion === J04_BASELINE_ANALYSIS_SCHEMA_VERSION ||
     currentVersion === SUCCESSIVE_TASK_SCHEMA_VERSION ||
-    currentVersion === TASK_AUTHORIZATION_SCHEMA_VERSION
+    currentVersion === TASK_AUTHORIZATION_SCHEMA_VERSION ||
+    currentVersion === MANUSCRIPT_INTAKE_SCHEMA_VERSION
   ) return;
   if (currentVersion === 1) {
     migrateSchemaV1ToV2(db);
@@ -1472,7 +1540,7 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION ||
       version === EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION || version === J03_TASK_AUTHORIZATION_SCHEMA_VERSION ||
       version === J04_BASELINE_ANALYSIS_SCHEMA_VERSION || version === SUCCESSIVE_TASK_SCHEMA_VERSION ||
-      version === TASK_AUTHORIZATION_SCHEMA_VERSION,
+      version === TASK_AUTHORIZATION_SCHEMA_VERSION || version === MANUSCRIPT_INTAKE_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -1481,7 +1549,7 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION ||
       version === EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION || version === J03_TASK_AUTHORIZATION_SCHEMA_VERSION ||
       version === J04_BASELINE_ANALYSIS_SCHEMA_VERSION || version === SUCCESSIVE_TASK_SCHEMA_VERSION ||
-      version === TASK_AUTHORIZATION_SCHEMA_VERSION) return;
+      version === TASK_AUTHORIZATION_SCHEMA_VERSION || version === MANUSCRIPT_INTAKE_SCHEMA_VERSION) return;
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
   );
@@ -1582,7 +1650,7 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION ||
       version === EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION || version === J03_TASK_AUTHORIZATION_SCHEMA_VERSION ||
       version === J04_BASELINE_ANALYSIS_SCHEMA_VERSION || version === SUCCESSIVE_TASK_SCHEMA_VERSION ||
-      version === TASK_AUTHORIZATION_SCHEMA_VERSION,
+      version === TASK_AUTHORIZATION_SCHEMA_VERSION || version === MANUSCRIPT_INTAKE_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -1590,7 +1658,7 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION ||
       version === EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION || version === J03_TASK_AUTHORIZATION_SCHEMA_VERSION ||
       version === J04_BASELINE_ANALYSIS_SCHEMA_VERSION || version === SUCCESSIVE_TASK_SCHEMA_VERSION ||
-      version === TASK_AUTHORIZATION_SCHEMA_VERSION) return;
+      version === TASK_AUTHORIZATION_SCHEMA_VERSION || version === MANUSCRIPT_INTAKE_SCHEMA_VERSION) return;
   validateSourceImportSchemaTruth(db, profile);
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
@@ -1754,6 +1822,92 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
   requireStore(violations.length === 0, 'SCHEMA_MIGRATION_FAILED', '数据库引用校验失败。');
 }
 
+/** Whether a relation already carries the revision-18 shape, which decides the rebuild below. */
+function columnIsNullable(db: DatabaseSync, table: string, column: string): boolean {
+  const rows = (db.prepare(`PRAGMA table_info(${table})`).all() as SqlRow[])
+    .filter((row) => asString(row.name) === column);
+  requireStore(rows.length === 1, 'SCHEMA_INVALID', '无法读取来源版本结构。');
+  return asNumber(rows[0]!.notnull) === 0;
+}
+
+function columnExists(db: DatabaseSync, table: string, column: string): boolean {
+  return (db.prepare(`PRAGMA table_info(${table})`).all() as SqlRow[])
+    .some((row) => asString(row.name) === column);
+}
+
+/**
+ * Revision 18's intake relations. `source_versions` and `source_provenance` are rebuilt so that a
+ * retained original with no parse can be recorded (ADR 0072 §2), with every existing row copied
+ * forward byte for byte — every one of them is a DOCX the product did parse, so none loses a digest
+ * — and the three `source_versions` guards re-created verbatim. `import_drafts` gains the format its
+ * file was identified as, defaulted so every row that predates this revision reads `DOCX`.
+ *
+ * The version itself moves in `task-authorization.ts`, where the terminal revision is declared. This
+ * runs first and is shape-detected, so a store created fresh at revision 18 does no work here and an
+ * interruption between the rebuild and the version bump simply repeats the bump on the next open.
+ */
+function initializeManuscriptIntakeSchema(db: DatabaseSync): void {
+  const rebuildRelations = !columnIsNullable(db, 'source_versions', 'content_digest');
+  const addDraftFormat = !columnExists(db, 'import_drafts', 'source_format');
+  if (!rebuildRelations && !addDraftFormat) return;
+  const legacyAlterTable = asNumber(
+    one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
+  );
+  db.exec('PRAGMA foreign_keys = OFF; PRAGMA legacy_alter_table = ON;');
+  let migrationError: unknown;
+  try {
+    db.exec('BEGIN IMMEDIATE;');
+    if (rebuildRelations) {
+      db.exec(`
+        DROP TRIGGER abandonment_cleanup_block_source_insert;
+        DROP TRIGGER abandonment_cleanup_block_source_update;
+        DROP TRIGGER abandonment_cleanup_block_source_update_v5;
+        ALTER TABLE source_versions RENAME TO source_versions_v17;
+        ALTER TABLE source_provenance RENAME TO source_provenance_v17;
+        ${SOURCE_VERSION_V18_SCHEMA_SQL};
+        INSERT INTO source_versions(
+          source_version_id, book_id, object_digest, source_digest, content_digest, structure_digest,
+          parser_identity, format, display_name, created_at
+        )
+        SELECT source_version_id, book_id, object_digest, source_digest, content_digest, structure_digest,
+               parser_identity, format, display_name, created_at
+        FROM source_versions_v17 ORDER BY rowid;
+        ${SOURCE_PROVENANCE_V18_SCHEMA_SQL};
+        INSERT INTO source_provenance(
+          provenance_id, source_version_id, acquisition_path, locality,
+          sanitized_identity, parser_identity, recorded_at
+        )
+        SELECT provenance_id, source_version_id, acquisition_path, locality,
+               sanitized_identity, parser_identity, recorded_at
+        FROM source_provenance_v17 ORDER BY rowid;
+        DROP TABLE source_versions_v17;
+        DROP TABLE source_provenance_v17;
+        ${SOURCE_VERSION_REBUILT_TRIGGER_SQL}
+      `);
+    }
+    if (addDraftFormat) db.exec(`${IMPORT_DRAFT_SOURCE_FORMAT_V18_COLUMN_SQL};`);
+    db.exec('COMMIT;');
+  } catch (error) {
+    migrationError = error;
+    try {
+      db.exec('ROLLBACK');
+    } catch (rollbackError) {
+      migrationError = new AggregateError([error, rollbackError], 'SQLite manuscript intake schema migration rollback failed.');
+    }
+  } finally {
+    try {
+      db.exec(`PRAGMA legacy_alter_table = ${legacyAlterTable}; PRAGMA foreign_keys = ON;`);
+    } catch (restoreError) {
+      migrationError = migrationError
+        ? new AggregateError([migrationError, restoreError], 'SQLite manuscript intake migration and pragma restoration failed.')
+        : restoreError;
+    }
+  }
+  if (migrationError) throw migrationError;
+  const violations = db.prepare('PRAGMA foreign_key_check').all();
+  requireStore(violations.length === 0, 'SCHEMA_MIGRATION_FAILED', '数据库引用校验失败。');
+}
+
 function validateModelServiceSchema(
   db: DatabaseSync,
   profile: BuiltInWorkflowProfile,
@@ -1762,7 +1916,7 @@ function validateModelServiceSchema(
   const version = asNumber(
     one(db.prepare('PRAGMA user_version').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取数据库版本。').user_version,
   );
-  if (validateStoreTruth || version !== TASK_AUTHORIZATION_SCHEMA_VERSION) {
+  if (validateStoreTruth || version !== MANUSCRIPT_INTAKE_SCHEMA_VERSION) {
     validateManuscriptReimportSchemaTruth(
       db,
       profile,
@@ -1807,7 +1961,7 @@ function initializeModelServiceSchema(
       version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION ||
       version === EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION || version === J03_TASK_AUTHORIZATION_SCHEMA_VERSION ||
       version === J04_BASELINE_ANALYSIS_SCHEMA_VERSION || version === SUCCESSIVE_TASK_SCHEMA_VERSION ||
-      version === TASK_AUTHORIZATION_SCHEMA_VERSION,
+      version === TASK_AUTHORIZATION_SCHEMA_VERSION || version === MANUSCRIPT_INTAKE_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -1815,7 +1969,7 @@ function initializeModelServiceSchema(
       version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION ||
       version === EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION || version === J03_TASK_AUTHORIZATION_SCHEMA_VERSION ||
       version === J04_BASELINE_ANALYSIS_SCHEMA_VERSION || version === SUCCESSIVE_TASK_SCHEMA_VERSION ||
-      version === TASK_AUTHORIZATION_SCHEMA_VERSION) {
+      version === TASK_AUTHORIZATION_SCHEMA_VERSION || version === MANUSCRIPT_INTAKE_SCHEMA_VERSION) {
     validateModelServiceSchema(db, profile, validateStoreTruth);
     if (version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION) {
       validateEditorialWorkspaceProfileNativeSchema(db);
@@ -2605,6 +2759,9 @@ export class EditorialStore {
     initializeEditorialWorkspaceProfileSchema(authority);
     initializeBoundedSchema(authority, workflowProfile, false);
     const editorialWorkspaceProfile = await EditorialWorkspaceProfileStore.open(authority, dataRoot, codeRoot);
+    // The intake relations widen before the terminal version moves, so the version and the shape it
+    // names change together for every store that reaches revision 18.
+    initializeManuscriptIntakeSchema(authority);
     initializeTaskAuthorizationSchema(authority);
     initializeBoundedSchema(authority, workflowProfile);
     validateEditorialWorkspaceProfileSchema(authority);
