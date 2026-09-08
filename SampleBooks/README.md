@@ -51,9 +51,8 @@ table and [Issue #311](https://github.com/zhouy1017/ai7-harness/issues/311) depe
 it.
 
 The `Imports at #297's head` column is that first reading. `Imports after ADR 0072 §4`
-beside it is the second, measured the same way at
-`feat/352-classified-docx-import@3608c6879195f48e1803290685cd93283ef02042`
-after [Issue #352](https://github.com/zhouy1017/ai7-harness/issues/352) implemented
+beside it is the second, measured the same way at the head of the pull request that
+closes [Issue #352](https://github.com/zhouy1017/ai7-harness/issues/352), which implemented
 [ADR 0072 §4](../docs/adr/0072-admit-multi-format-manuscript-intake-with-docx-as-the-working-representation.md),
 with the same parser identity `ai7-docx-fflate-saxes/1`.
 
