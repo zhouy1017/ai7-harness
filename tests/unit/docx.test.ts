@@ -489,4 +489,32 @@ describe('deriveImportFidelityPlan and isCleanTracerFidelity', () => {
     expect(deriveImportFidelityPlan(report, 'a'.repeat(64), 1024, { ...conversion, sourceFormat: 'TXT' }))
       .toBeUndefined();
   });
+
+  // #351's case: one prefix per converter, and an identity this build cannot phrase is refused.
+  it('says what each converter did to the content, and refuses an identity it cannot phrase', () => {
+    const signals = { inlineStyles: 0, commentsRevisions: 0, notes: 0, tables: 0, imagesCaptions: 0, sections: 0 };
+    const loss = {
+      inlineStyles: 0, commentsRevisions: 0, notes: 0, tables: 0,
+      imagesCaptions: 0, sections: 0, headersFooters: 1,
+    };
+    const text = { identity: 'ai7-text-to-docx/1', sourceFormat: 'TXT' as const };
+    const legacy = { identity: 'ai7-doc-to-docx/1', sourceFormat: 'DOC' as const };
+    const textReport = buildFidelityReport(signals, 0, { ...text, loss });
+    const legacyReport = buildFidelityReport(signals, 0, { ...legacy, loss });
+    const detail = (report: FidelityCategoryProjection[]): string =>
+      report.find((category) => category.key === 'headers-footers')!.detail;
+    // The text conversion kept the author's characters; the legacy one could not.
+    expect(detail(textReport).startsWith('由 ai7-text-to-docx/1 从 TXT 转换保留为原文字符：')).toBe(true);
+    expect(detail(legacyReport).startsWith('由 ai7-doc-to-docx/1 从 DOC 转换时未能保留：')).toBe(true);
+    const planned = { outcome: 'degraded-import-no-round-trip', degradations: [{ categoryKey: 'headers-footers', label: '页眉与页脚', count: 1 }] };
+    expect(deriveImportFidelityPlan(textReport, 'a'.repeat(64), 1024, text)).toEqual(planned);
+    expect(deriveImportFidelityPlan(legacyReport, 'a'.repeat(64), 1024, legacy)).toEqual(planned);
+    // Each rebuilds under its own identity alone: the prefixes no longer read the same.
+    expect(deriveImportFidelityPlan(legacyReport, 'a'.repeat(64), 1024, { ...text, sourceFormat: 'DOC' }))
+      .toBeUndefined();
+    const unknown = { identity: 'ai7-unwritten-converter/1', sourceFormat: 'DOC' as const };
+    expect(() => buildFidelityReport(signals, 0, { ...unknown, loss }))
+      .toThrow('DOCX_REJECTED:unknown converter identity');
+    expect(deriveImportFidelityPlan(legacyReport, 'a'.repeat(64), 1024, unknown)).toBeUndefined();
+  });
 });
