@@ -15,8 +15,10 @@ import { syntheticPdfBytes } from '../support/synthetic-pdf.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 
 // Service-integration suite (L2) for multi-format intake (ADR 0072 §1–2). It drives the real
-// `EditorialStore` on a temporary Agent Data Root without Electron. The only admitted material it
-// reads is exact `sample1`, through the shared baseline support; every other input is synthetic.
+// `EditorialStore` on a temporary Agent Data Root without Electron. The admitted material it reads
+// is exact `sample1`, through the shared baseline support, and the one admitted legacy `.doc`,
+// which only a real legacy document can stand for; every other input is synthetic. The admitted
+// files are read in place and spoken of in counts and digests alone.
 
 type Row = Record<string, SQLOutputValue>;
 
@@ -182,11 +184,6 @@ const SOURCE_ONLY_INPUTS: ReadonlyArray<{ format: SourceFormat; fileName: string
     reason: 'PDF 为固定版式，没有可靠的可编辑往返；可作为来源材料保留。',
   },
   {
-    format: 'DOC', fileName: '旧版样例.doc',
-    bytes: () => concat(Uint8Array.of(0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1), new Uint8Array(504)),
-    reason: '旧版 Word（.doc）的本地转换尚未提供；可作为来源材料保留。',
-  },
-  {
     format: 'RTF', fileName: '样例.rtf', bytes: () => concat('{\\rtf1\\ansi\\deff0}'),
     reason: '该格式的本地转换尚未提供；可作为来源材料保留。',
   },
@@ -317,6 +314,18 @@ const OBJECT_EXTENSIONS: Readonly<Record<SourceFormat, string>> = {
   DOCX: '.docx', DOC: '.doc', PDF: '.pdf', ODT: '.odt', RTF: '.rtf', TXT: '.txt', MD: '.md', UNKNOWN: '.bin',
 };
 
+const DOC_CONVERTER = 'ai7-doc-to-docx/1';
+/** Exact path under `SampleBooks/`, with the identity `SampleBooks/README.md` admits it under. */
+const ADMITTED_DOC_SHA256 = '931d8035946f7689aaaa25c14c5822f46eedc59d23925081ded7b06618d9e4d2';
+const ADMITTED_DOC_BYTES = 1_173_504;
+/** What this converter makes of it: a derived object's digest, and its body paragraph count. */
+const ADMITTED_DOC_WORKING_SHA256 = 'ea5068a74444217fbca9ece5ab572933c007b0d8797f0d1cd3f815314a8213a1';
+const ADMITTED_DOC_BLOCKS = 5_815;
+
+function admittedDocPath(codeRoot: string): string {
+  return join(codeRoot, 'SampleBooks', '3天兽（定稿395870字)##＊.doc');
+}
+
 /** Synthetic text authored for this suite; a `.md` construct is there to be counted, not read. */
 const CONVERTED_INPUTS: ReadonlyArray<{
   format: 'TXT' | 'MD';
@@ -415,6 +424,91 @@ describe('conversion to a DOCX working representation over the real store', () =
     },
     120_000,
   );
+
+  it('stages the admitted legacy .doc as an editable draft and commits both links', async () => {
+    const selectedPath = admittedDocPath(roots.codeRoot);
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    const commitId = randomUUID();
+    try {
+      const staged = await store.stageSelectedManuscript(randomUUID(), selectedPath);
+      // The original is the digest of record; the working representation is a second object.
+      expect(staged.source.format).toBe('DOC');
+      expect(staged.source.sourceSha256).toBe(ADMITTED_DOC_SHA256);
+      expect(staged.source.sourceBytes).toBe(ADMITTED_DOC_BYTES);
+      expect(staged.source.conversion).toEqual({ converterIdentity: DOC_CONVERTER, sourceFormat: 'DOC' });
+      expect(staged.source.workingObjectSha256).toBe(ADMITTED_DOC_WORKING_SHA256);
+      expect(staged.editableImport).toEqual({
+        available: true,
+        conversion: { converterIdentity: DOC_CONVERTER, sourceFormat: 'DOC' },
+      });
+      expect(staged.detectedBlockCount).toBe(ADMITTED_DOC_BLOCKS);
+      expect(staged.titleSuggestion.sourceLabel).toBe('文件名');
+      // What the reader exposed and the conversion dropped, named as this converter's doing.
+      expect(staged.fidelity.filter((category) => category.count > 0)
+        .map((category) => ({ key: category.key, count: category.count })))
+        .toEqual([{ key: 'headers-footers', count: 1 }]);
+      for (const category of staged.fidelity) {
+        expect(category.detail.startsWith(`由 ${DOC_CONVERTER} 从 DOC 转换时未能保留：`)).toBe(category.count > 0);
+      }
+
+      const review = store.prepareNewBookReview(staged.draftId, staged.draftVersion,
+        { kind: 'new-book', choiceId: 'new-book', confirmedTitle: '转换稿件 DOC' }, true);
+      expect(review.source.conversion).toEqual({ converterIdentity: DOC_CONVERTER, sourceFormat: 'DOC' });
+      expect(review.fidelity).toEqual(staged.fidelity);
+      const commit = await store.commitNewBookImport({
+        draftId: staged.draftId,
+        expectedDraftVersion: review.draftVersion,
+        reviewDigest: review.reviewDigest!,
+        commitId,
+      });
+      expect(commit.completionLabel).toBe('稿件已导入');
+      expect(commit.source.conversion).toEqual({ converterIdentity: DOC_CONVERTER, sourceFormat: 'DOC' });
+      expect(await store.acknowledgeImportCompletion(commitId)).toEqual({ state: 'acknowledged' });
+      const sourceRecord = store.getBookOverview(commit.bookId).records.find((record) => record.kind === 'source');
+      expect(sourceRecord).toMatchObject({
+        format: 'DOC',
+        sourceDigest: ADMITTED_DOC_SHA256,
+        parserIdentity: 'ai7-docx-fflate-saxes/1',
+        converterIdentity: DOC_CONVERTER,
+        workingObjectDigest: ADMITTED_DOC_WORKING_SHA256,
+      });
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+
+    const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+    try {
+      const sources = tableRows(database, 'source_versions',
+        'format, source_digest, parser_identity, working_object_digest, converter_identity') as Row[];
+      expect(sources).toEqual([{
+        format: 'DOC',
+        source_digest: ADMITTED_DOC_SHA256,
+        parser_identity: 'ai7-docx-fflate-saxes/1',
+        working_object_digest: ADMITTED_DOC_WORKING_SHA256,
+        converter_identity: DOC_CONVERTER,
+      }]);
+      // Two objects: the original under `.doc`, the working representation under `.docx`.
+      const keys = (tableRows(database, 'content_objects', 'relative_key') as Row[])
+        .map((row) => extname(String(row.relative_key))).sort();
+      expect(keys).toEqual(['.doc', '.docx']);
+    } finally {
+      database.close();
+    }
+  }, 180_000);
+
+  it('removes both objects when a converted legacy .doc draft is abandoned', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const staged = await store.stageSelectedManuscript(randomUUID(), admittedDocPath(roots.codeRoot));
+      expect(await countObjectFiles(roots.dataRoot)).toBe(2);
+      expect((await store.abandonImportDraft(staged.draftId, staged.draftVersion)).state).toBe('none');
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+    expect(await countObjectFiles(roots.dataRoot)).toBe(0);
+  }, 180_000);
 
   it('converts the same file to the same working object, so a reselection changes nothing', async () => {
     const selectedPath = join(roots.inputRoot, '重复转换.txt');
