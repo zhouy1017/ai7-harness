@@ -2,9 +2,12 @@ import { createHash, randomUUID } from 'node:crypto';
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
 import {
   J03_TASK_GOAL,
+  isTrustedOperationalScope,
   type ForegroundExecutionBoundaryProjection,
   type LaunchPolicyProjection,
+  type ProviderProcessingPin,
   type TaskAuthorizationProjection,
+  type TrustedOperationalScope,
 } from '../shared/protocol.js';
 import {
   BASELINE_ANALYSIS_CONTRACT_VERSION,
@@ -40,11 +43,6 @@ const NON_EFFECTS = [
   '不构造 Provider payload',
   '不访问网络或调用 Provider',
   '不创建或执行 Effect',
-] as const;
-const FOREGROUND_DENIAL_REASONS = [
-  '现有 Run 权限仅为 record-only-no-dispatch，不能派发。',
-  '当前可信启动范围为 development-ci，Provider Processing v1 允许 0 次实时传输。',
-  '生产或录制尝试必须创建新 Plan Envelope 并重新记录 Run Authorization。',
 ] as const;
 
 type SqlRow = Record<string, SQLOutputValue>;
@@ -422,7 +420,8 @@ function sha256(value: string): string {
   return createHash('sha256').update(value, 'utf8').digest('hex');
 }
 
-function canonicalRecord(value: unknown): { json: string; digest: string } {
+/** Exported so a suite can write a record this store's own guard will not let it produce. */
+export function canonicalRecord(value: unknown): { json: string; digest: string } {
   const json = canonicalJson(value);
   return { json, digest: sha256(json) };
 }
@@ -461,6 +460,124 @@ function transact<T>(db: DatabaseSync, body: () => T): T {
     }
     throw error;
   }
+}
+
+/**
+ * The exact Provider Processing pin each trusted scope defines, as `ProviderProcessingPin` declares
+ * it. This is the one place the closed value sets live: admitting a second scope to this Task kind
+ * is a row here and a branch in the four readings below, not a hunt through the seven statements
+ * that used to spell `development-ci`, `v1`, and `0` out for themselves.
+ */
+const PROVIDER_PROCESSING_PINS: Readonly<Record<TrustedOperationalScope, ProviderProcessingPin>> = {
+  'development-ci': { operationalScope: 'development-ci', version: 'v1', decision: 'deny', authorizedLiveTransmissionCount: 0 },
+  'developer-live': { operationalScope: 'developer-live', version: 'v4', decision: 'eligible-only', authorizedLiveTransmissionCount: 'bounded-by-run' },
+};
+
+/**
+ * The pin a stored value carries, or `null` when it is not exactly the pin of the scope it names.
+ * A record is only ever read against its own pin — never against the scope the current launch
+ * happens to bind — so a row written under one scope stays valid after a relaunch under another.
+ */
+function providerProcessingPinOf(value: unknown): ProviderProcessingPin | null {
+  if (value === null || typeof value !== 'object') return null;
+  const scope = (value as { operationalScope?: unknown }).operationalScope;
+  if (typeof scope !== 'string' || !isTrustedOperationalScope(scope)) return null;
+  const pin = PROVIDER_PROCESSING_PINS[scope];
+  return canonicalJson(value) === canonicalJson(pin) ? pin : null;
+}
+
+/**
+ * The pin the bound launch carries. The launch's own scope selects it, and a launch whose stated
+ * version, decision, or transmission count disagrees with its scope is refused rather than pinned.
+ */
+export function planProviderProcessingPin(policy: LaunchPolicyProjection): ProviderProcessingPin {
+  const scope = policy.operationalScope;
+  requireTask(scope !== null, 'TASK_POLICY_UNAVAILABLE', '可信启动范围缺失。');
+  const pin = PROVIDER_PROCESSING_PINS[scope];
+  requireTask(policy.providerProcessing.version === pin.version &&
+    policy.providerProcessing.decision === pin.decision &&
+    policy.providerProcessing.authorizedLiveTransmissionCount === pin.authorizedLiveTransmissionCount,
+  'TASK_POLICY_UNAVAILABLE', '可信启动范围与其 Provider Processing 记录不一致。');
+  return pin;
+}
+
+/**
+ * Every statement this Task kind makes about its trusted scope is derived from one pin: the
+ * Execution Plan's stop condition, the Plan Envelope's summary, and the foreground boundary's three
+ * denial reasons. Under `development-ci` each reads exactly as it always has, byte for byte; a
+ * surface that promised zero live transmission under a launch that authorizes them is the defect
+ * these derive away. They are exported so a test can assert the readings of a scope the guard in
+ * `#requireDeniedPolicy` will not let the store reach.
+ */
+export function planStopCondition(pin: ProviderProcessingPin): string {
+  return pin.decision === 'deny'
+    ? `Provider Processing ${pin.version} denies dispatch`
+    : `Provider Processing ${pin.version} admits dispatch bounded by the Run`;
+}
+
+export function planEnvelopeSummary(pin: ProviderProcessingPin): string {
+  return pin.decision === 'deny'
+    ? `计划已冻结；Provider Processing ${pin.version} 拒绝派发`
+    : `计划已冻结；Provider Processing ${pin.version} 允许的实时传输受运行边界约束`;
+}
+
+/** Why a recorded Run cannot start in the foreground; only the middle reason states the launch's own facts. */
+export function foregroundDenialReasons(pin: ProviderProcessingPin): readonly [string, string, string] {
+  return [
+    '现有 Run 权限仅为 record-only-no-dispatch，不能派发。',
+    pin.decision === 'deny'
+      ? `当前可信启动范围为 ${pin.operationalScope}，Provider Processing ${pin.version} 允许 ${pin.authorizedLiveTransmissionCount} 次实时传输。`
+      : `当前可信启动范围为 ${pin.operationalScope}，Provider Processing ${pin.version} 允许的实时传输受运行边界约束（${pin.authorizedLiveTransmissionCount}）。`,
+    '生产或录制尝试必须创建新 Plan Envelope 并重新记录 Run Authorization。',
+  ];
+}
+
+/**
+ * The three plan records whose content depends on the pin, built once for both sides: the write side
+ * passes the pin of the bound launch, the read side passes the pin the row itself carries, so the
+ * two can never drift. Everything else about the plan — the denied production binding, the fixed
+ * steps, the frozen digests — is what it always was.
+ */
+export function providerResolutionPlanValue(credentialReference: string, pin: ProviderProcessingPin) {
+  return {
+    role: 'Main Editorial Role',
+    capabilities: [],
+    providerId: 'deepseek-open-platform',
+    modelId: 'deepseek-v4-pro',
+    adapterRevision: 1,
+    configurationRevision: 1,
+    approvedFallbackChain: [],
+    credentialReference,
+    credentialReadiness: 'missing',
+    outboundDataCategory: 'public-or-synthetic',
+    runBudgetCeiling: 'unset',
+    providerProcessing: pin,
+  } as const;
+}
+
+export function executionPlanValue(pin: ProviderProcessingPin) {
+  return {
+    steps: ['分析结构', '分析叙事连贯性', '形成编辑复核重点'],
+    effects: [],
+    stopCondition: planStopCondition(pin),
+  } as const;
+}
+
+export function planEnvelopeValue(pin: ProviderProcessingPin, frozen: {
+  taskIntentId: string;
+  checkpointDigest: string;
+  manuscriptPinDigest: string;
+  artifactPinDigest: string;
+  runSourceScopeDigest: string;
+  providerResolutionPlanDigest: string;
+  executionPlanDigest: string;
+}) {
+  return {
+    providerStatus: 'denied',
+    dispatchAllowed: false,
+    summary: planEnvelopeSummary(pin),
+    ...frozen,
+  } as const;
 }
 
 function validateCanonicalRowDigests(db: DatabaseSync, tables: readonly string[]): void {
@@ -596,34 +713,17 @@ function validateStoredCanonicalRows(db: DatabaseSync): void {
         readableScopeKinds: ['current-book-primary-manuscript-revision'],
         sourceVersionEvidence: { sourceVersionId, readable: false },
       }), 'TASK_RECORD_INVALID', '任务运行来源范围无效。');
-      requireTask(row.provider_plan_json === canonicalJson({
-        role: 'Main Editorial Role',
-        capabilities: [],
-        providerId: 'deepseek-open-platform',
-        modelId: 'deepseek-v4-pro',
-        adapterRevision: 1,
-        configurationRevision: 1,
-        approvedFallbackChain: [],
-        credentialReference,
-        credentialReadiness: 'missing',
-        outboundDataCategory: 'public-or-synthetic',
-        runBudgetCeiling: 'unset',
-        providerProcessing: {
-          operationalScope: 'development-ci',
-          version: 'v1',
-          decision: 'deny',
-          authorizedLiveTransmissionCount: 0,
-        },
-      }), 'TASK_RECORD_INVALID', 'Provider Resolution Plan 无效。');
-      requireTask(row.execution_plan_json === canonicalJson({
-        steps: ['分析结构', '分析叙事连贯性', '形成编辑复核重点'],
-        effects: [],
-        stopCondition: 'Provider Processing v1 denies dispatch',
-      }), 'TASK_RECORD_INVALID', 'Execution Plan 无效。');
-      requireTask(row.envelope_json === canonicalJson({
-        providerStatus: 'denied',
-        dispatchAllowed: false,
-        summary: '计划已冻结；Provider Processing v1 拒绝派发',
+      // The plan is validated against the pin it froze, not against the launch reading it now: the
+      // row states its own scope, and the Execution Plan and Plan Envelope must be the derivations
+      // of that same pin. Under `development-ci` this is byte for byte the check it always was.
+      const pin = providerProcessingPinOf(
+        (parseCanonicalJson(row.provider_plan_json) as { providerProcessing?: unknown }).providerProcessing);
+      requireTask(pin !== null, 'TASK_RECORD_INVALID', 'Provider Resolution Plan 的 Provider Processing pin 无效。');
+      requireTask(row.provider_plan_json === canonicalJson(providerResolutionPlanValue(credentialReference, pin)),
+        'TASK_RECORD_INVALID', 'Provider Resolution Plan 无效。');
+      requireTask(row.execution_plan_json === canonicalJson(executionPlanValue(pin)),
+        'TASK_RECORD_INVALID', 'Execution Plan 无效。');
+      requireTask(row.envelope_json === canonicalJson(planEnvelopeValue(pin, {
         taskIntentId,
         checkpointDigest: asString(row.checkpoint_sha256),
         manuscriptPinDigest: asString(row.manuscript_pin_sha256),
@@ -631,7 +731,7 @@ function validateStoredCanonicalRows(db: DatabaseSync): void {
         runSourceScopeDigest: asString(row.source_scope_sha256),
         providerResolutionPlanDigest: asString(row.provider_plan_sha256),
         executionPlanDigest: asString(row.execution_plan_sha256),
-      }), 'TASK_RECORD_INVALID', 'Plan Envelope 无效。');
+      })), 'TASK_RECORD_INVALID', 'Plan Envelope 无效。');
     }
     requireTask((row.authorization_task_id !== null) === (row.run_task_id !== null),
       'TASK_RECORD_INVALID', '任务授权与运行记录不完整。');
@@ -953,7 +1053,7 @@ export class TaskAuthorizationStore {
     const envelope = parseCanonicalJson(envelopeRow.canonical_json) as {
       providerStatus: 'denied';
       dispatchAllowed: false;
-      summary: '计划已冻结；Provider Processing v1 拒绝派发';
+      summary: string;
     };
     const authorization = this.#db.prepare('SELECT * FROM run_authorizations WHERE task_intent_id = ?')
       .get(taskIntentId) as SqlRow | undefined;
@@ -1014,10 +1114,8 @@ export class TaskAuthorizationStore {
     const recorded = this.inspect(bookId);
     requireTask(recorded.state === 'authorized' && recorded.taskIntent !== null && recorded.checkpoint !== null &&
       recorded.manuscriptPin?.bookId === bookId && recorded.runSourceScope?.bookId === bookId &&
-      recorded.artifactPin !== null && recorded.providerResolutionPlan?.providerProcessing.operationalScope === 'development-ci' &&
-      recorded.providerResolutionPlan.providerProcessing.version === 'v1' &&
-      recorded.providerResolutionPlan.providerProcessing.decision === 'deny' &&
-      recorded.providerResolutionPlan.providerProcessing.authorizedLiveTransmissionCount === 0 &&
+      recorded.artifactPin !== null &&
+      providerProcessingPinOf(recorded.providerResolutionPlan?.providerProcessing) !== null &&
       recorded.executionPlan !== null && recorded.planEnvelope?.dispatchAllowed === false &&
       recorded.authorization?.planEnvelopeDigest === recorded.planEnvelope.digest &&
       recorded.runRecord?.runRecordId === runRecordId && recorded.runRecord.state === 'recorded-not-dispatched' &&
@@ -1035,7 +1133,7 @@ export class TaskAuthorizationStore {
       launchPolicy: structuredClone(launchPolicy),
       requiresNewPlanEnvelope: true,
       requiresRenewedRunAuthorization: true,
-      reasons: FOREGROUND_DENIAL_REASONS,
+      reasons: foregroundDenialReasons(planProviderProcessingPin(launchPolicy)),
     };
   }
 
@@ -1205,30 +1303,9 @@ export class TaskAuthorizationStore {
       readableScopeKinds: ['current-book-primary-manuscript-revision'],
       sourceVersionEvidence: { sourceVersionId: facts.sourceVersionId, readable: false },
     } as const;
-    const providerPlan = {
-      role: 'Main Editorial Role',
-      capabilities: [],
-      providerId: 'deepseek-open-platform',
-      modelId: 'deepseek-v4-pro',
-      adapterRevision: 1,
-      configurationRevision: 1,
-      approvedFallbackChain: [],
-      credentialReference: facts.credentialReference,
-      credentialReadiness: 'missing',
-      outboundDataCategory: 'public-or-synthetic',
-      runBudgetCeiling: 'unset',
-      providerProcessing: {
-        operationalScope: 'development-ci',
-        version: 'v1',
-        decision: 'deny',
-        authorizedLiveTransmissionCount: 0,
-      },
-    } as const;
-    const executionPlan = {
-      steps: ['分析结构', '分析叙事连贯性', '形成编辑复核重点'],
-      effects: [],
-      stopCondition: 'Provider Processing v1 denies dispatch',
-    } as const;
+    const pin = planProviderProcessingPin(launchPolicy);
+    const providerPlan = providerResolutionPlanValue(facts.credentialReference, pin);
+    const executionPlan = executionPlanValue(pin);
     const records = {
       manuscriptPin: canonicalRecord(manuscriptPin),
       artifactPin: canonicalRecord(artifactPin),
@@ -1236,10 +1313,7 @@ export class TaskAuthorizationStore {
       providerPlan: canonicalRecord(providerPlan),
       executionPlan: canonicalRecord(executionPlan),
     };
-    const envelopeValue = {
-      providerStatus: 'denied',
-      dispatchAllowed: false,
-      summary: '计划已冻结；Provider Processing v1 拒绝派发',
+    const envelope = canonicalRecord(planEnvelopeValue(pin, {
       taskIntentId,
       checkpointDigest: checkpointRecord.digest,
       manuscriptPinDigest: records.manuscriptPin.digest,
@@ -1247,8 +1321,7 @@ export class TaskAuthorizationStore {
       runSourceScopeDigest: records.sourceScope.digest,
       providerResolutionPlanDigest: records.providerPlan.digest,
       executionPlanDigest: records.executionPlan.digest,
-    } as const;
-    const envelope = canonicalRecord(envelopeValue);
+    }));
     this.#db.prepare(
       `INSERT INTO task_input_checkpoints(
          task_intent_id, manuscript_id, branch_id, revision_id, revision_label, revision_digest,
