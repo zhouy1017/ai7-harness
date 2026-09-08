@@ -69,6 +69,7 @@ import { deriveCoverageManifest, manifestCoversEveryBlock, manifestDigestIsExact
 import { TASK_INPUT_CHECKPOINT_PURPOSE } from './identity.js';
 import type { AnalysisKindDefinition, AnalysisReductionResult } from './kind-definition.js';
 import { deriveReusePlan, requireSelectedRange, reusePlanRecord, type ReusePlanPredecessor } from './reuse-plan.js';
+import { PRE_RUN_REPORT_REASON, runReportDigest, runReportProjection, type RunReportRecord } from './run-report.js';
 import { baselineAnalysisKindDefinition } from './kind-definition.js';
 import { describeComposition } from '../harness/primary-agent-harness.js';
 import { LOCAL_DETERMINISTIC_MODEL, LOCAL_DETERMINISTIC_ROUTE } from '../provider/egress-gate.js';
@@ -223,7 +224,7 @@ export interface RunProgress {
 }
 
 /** The Run's declared steps, in the order the execution owner performs them. */
-export type RunProgressStage = 'units' | 'cross-unit-reduction' | 'assurance-sampling';
+export type RunProgressStage = 'units' | 'cross-unit-reduction' | 'assurance-sampling' | 'run-report-reflection';
 
 export type ProgressReader = (runRecordId: string) => RunProgress | null;
 
@@ -681,14 +682,7 @@ export class BaselineAnalysisStore {
       },
       run,
       resultSetRevision: revision,
-      taskOutcome: outcome === undefined ? null : {
-        outcomeId: asString(outcome.outcome_id),
-        classification: asString(outcome.classification) as keyof typeof OUTCOME_LABELS,
-        label: OUTCOME_LABELS[asString(outcome.classification) as keyof typeof OUTCOME_LABELS],
-        recordedAt: asString(outcome.recorded_at),
-        resultSetRevisionId: outcome.result_set_revision_id === null ? null : asString(outcome.result_set_revision_id),
-        safeNextAction: asString((parseCanonicalJson(asString(outcome.canonical_json)) as Record<string, unknown>).safeNextAction),
-      },
+      taskOutcome: outcome === undefined ? null : this.#outcomeProjection(outcome),
       update,
       updateControls: this.#updateControlsFor(bookId, revision, runIsActive(run?.state ?? null)),
       history,
@@ -700,6 +694,50 @@ export class BaselineAnalysisStore {
       },
       namedNonEffects: namedNonEffects(this.#launch.live),
     });
+  }
+
+  /**
+   * The durable `safe-retry` Plan Adaptations of one Run, in record order. Both the Run's timeline
+   * and its Run Report read them from here, so neither restates what the other saw.
+   */
+  adaptationsOf(runRecordId: string): BaselineAnalysisPlanAdaptationProjection[] {
+    return (this.#db.prepare(
+      `SELECT adaptation.* FROM analysis_plan_adaptations adaptation
+       JOIN analysis_execution_attempts attempt ON attempt.attempt_id = adaptation.attempt_id
+       WHERE attempt.run_record_id = ? ORDER BY adaptation.ordinal`,
+    ).all(runRecordId) as SqlRow[]).map((row): BaselineAnalysisPlanAdaptationProjection => {
+      const record = parseCanonicalJson(asString(row.canonical_json)) as Omit<BaselineAnalysisPlanAdaptationProjection, 'label'>;
+      requireAnalysis(record.adaptationId === row.adaptation_id && record.adaptationClass === 'safe-retry', 'ANALYSIS_RECORD_INVALID', '计划内调整记录无效。');
+      return { ...record, label: planAdaptationLabel(record.unitOrdinal, record.classifiedReason) };
+    });
+  }
+
+  /**
+   * One Task Outcome as a reader receives it, its Run Report included.
+   *
+   * A Task Outcome recorded before Issue #276 carries no report. It is immutable history and is read
+   * as exactly what it is: `report` is `null`, the absence is disclosed in the reader's own language,
+   * and nothing here rewrites the row to invent one. A report that is present is projected with the
+   * digest of its own stored canonical JSON, checked against the digest the Run recorded beside it —
+   * so a reader never receives a report whose bytes and whose digest disagree.
+   */
+  #outcomeProjection(row: SqlRow): NonNullable<BaselineAnalysisProjection['taskOutcome']> {
+    const record = parseCanonicalJson(asString(row.canonical_json)) as Record<string, unknown>;
+    const classification = asString(row.classification) as keyof typeof OUTCOME_LABELS;
+    const report = isRecord(record.report) ? record.report as unknown as RunReportRecord : null;
+    if (report !== null) {
+      requireAnalysis(runReportDigest(report) === record.reportDigest, 'ANALYSIS_RECORD_INVALID', '运行报告与其记录的摘要不一致。');
+    }
+    return {
+      outcomeId: asString(row.outcome_id),
+      classification,
+      label: OUTCOME_LABELS[classification],
+      recordedAt: asString(row.recorded_at),
+      resultSetRevisionId: row.result_set_revision_id === null ? null : asString(row.result_set_revision_id),
+      safeNextAction: asString(record.safeNextAction),
+      report: report === null ? null : runReportProjection(report),
+      reportAbsentReason: report === null ? PRE_RUN_REPORT_REASON : null,
+    };
   }
 
   /**
@@ -1083,15 +1121,7 @@ export class BaselineAnalysisStore {
         spans,
       };
     }
-    const adaptations = (this.#db.prepare(
-      `SELECT adaptation.* FROM analysis_plan_adaptations adaptation
-       JOIN analysis_execution_attempts attempt ON attempt.attempt_id = adaptation.attempt_id
-       WHERE attempt.run_record_id = ? ORDER BY adaptation.ordinal`,
-    ).all(runRecordId) as SqlRow[]).map((row): BaselineAnalysisPlanAdaptationProjection => {
-      const record = parseCanonicalJson(asString(row.canonical_json)) as Omit<BaselineAnalysisPlanAdaptationProjection, 'label'>;
-      requireAnalysis(record.adaptationId === row.adaptation_id && record.adaptationClass === 'safe-retry', 'ANALYSIS_RECORD_INVALID', '计划内调整记录无效。');
-      return { ...record, label: planAdaptationLabel(record.unitOrdinal, record.classifiedReason) };
-    });
+    const adaptations = this.adaptationsOf(runRecordId);
     // The liveness signal's fifth fact: when this Run last changed state. The execution owner cannot
     // hold it — it is the ledger's transition, read here already — so the projection composes it onto
     // the four facts the owner does hold. A Run with no owner in flight keeps today's `null`.
@@ -2220,6 +2250,12 @@ export class BaselineAnalysisStore {
     resultSetRevisionId: string | null;
     summary: string;
     safeNextAction: string;
+    /**
+     * The Run Report of the Run this outcome settles (ADR 0066 §Run Report). It is written here,
+     * once, inside the outcome's canonical JSON and beside the digest of its own canonical form;
+     * the outcomes relation is insert-only under the immutability triggers, so nothing rewrites it.
+     */
+    report: RunReportRecord;
   }): void {
     const outcomeId = randomUUID();
     const recordedAt = new Date().toISOString();
@@ -2231,6 +2267,8 @@ export class BaselineAnalysisStore {
       resultSetRevisionId: input.resultSetRevisionId,
       summary: input.summary,
       safeNextAction: input.safeNextAction,
+      report: input.report,
+      reportDigest: runReportDigest(input.report),
       recordedAt,
     });
     this.#db.prepare(

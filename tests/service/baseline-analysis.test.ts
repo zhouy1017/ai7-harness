@@ -33,6 +33,15 @@ import {
   type JournalAcknowledgement,
   type LaunchPolicyProjection,
 } from '../../src/shared/protocol.js';
+import { canonicalJson, sha256Hex } from '../../src/service/analysis/canonical.js';
+import {
+  PRE_RUN_REPORT_REASON,
+  runReportAccountingDigest,
+  runReportAccountingOf,
+  runReportDigest,
+  runReportUsageReconciles,
+} from '../../src/service/analysis/run-report.js';
+import { RUN_REPORT_STAGES } from '../../src/shared/protocol.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import {
   SAMPLE1_BLOCKS,
@@ -198,6 +207,41 @@ function downgradeRelation(database: DatabaseSync, table: string, sql: string, c
   database.exec(ANALYSIS_LEDGER_TRIGGER_SQL[`${table}_no_delete`]!);
 }
 
+const TASK_OUTCOME_COLUMNS =
+  'outcome_id, task_intent_id, run_record_id, classification, result_set_revision_id, recorded_at, canonical_json, sha256';
+
+/**
+ * Rewrite every Task Outcome as one recorded before Issue #276: the same row, the same relation, and
+ * a canonical JSON with no `report` and no `reportDigest`. It is how a store that predates the Run
+ * Report actually looks, and nothing in the product ever performs this — the outcomes relation is
+ * insert-only, and history is read as what it is rather than rewritten to add a report.
+ */
+function stripRunReportsFromOutcomes(databasePath: string): void {
+  const database = new DatabaseSync(databasePath);
+  try {
+    database.exec('PRAGMA foreign_keys = OFF');
+    database.exec('BEGIN IMMEDIATE');
+    const rows = tableRows(database, 'analysis_task_outcomes');
+    database.exec('DROP TABLE analysis_task_outcomes');
+    database.exec(ANALYSIS_LEDGER_SCHEMA_SQL.analysis_task_outcomes);
+    const insert = database.prepare(
+      `INSERT INTO analysis_task_outcomes(${TASK_OUTCOME_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    );
+    for (const row of rows) {
+      const { report: _report, reportDigest: _digest, ...body } = JSON.parse(String(row.canonical_json)) as Record<string, unknown>;
+      const json = canonicalJson(body);
+      insert.run(String(row.outcome_id), String(row.task_intent_id), String(row.run_record_id), String(row.classification),
+        row.result_set_revision_id === null ? null : String(row.result_set_revision_id), String(row.recorded_at), json, sha256Hex(json));
+    }
+    database.exec(ANALYSIS_LEDGER_TRIGGER_SQL['analysis_task_outcomes_no_update']!);
+    database.exec(ANALYSIS_LEDGER_TRIGGER_SQL['analysis_task_outcomes_no_delete']!);
+    database.exec('COMMIT');
+    database.exec('PRAGMA foreign_keys = ON');
+  } finally {
+    database.close();
+  }
+}
+
 /** Rebuild the revision-20 store in its exact revision-19 shape (one analysis kind) and stamp it as revision 19. */
 function downgradeToRevision19(databasePath: string): void {
   const database = new DatabaseSync(databasePath);
@@ -253,6 +297,7 @@ describe('baseline manuscript analysis over the real store on exact sample1', ()
     let bookId: string;
     let revisionId: string;
     let attemptId: string;
+    let reportJson: string;
     try {
       const imported = await importSample1Book(store, roots.codeRoot, 'L2 sample1 基线分析');
       bookId = imported.bookId;
@@ -415,6 +460,70 @@ describe('baseline manuscript analysis over the real store on exact sample1', ()
       expect(revision.sections[0]!.gapUnitOrdinals).toEqual([2]);
       // The Task Outcome links the revision.
       expect(settled.taskOutcome).toMatchObject({ classification: 'completed-with-gaps', resultSetRevisionId: revisionId });
+
+      // The Run Report (ADR 0066 §Run Report) is inside the outcome, and it is this Run's own facts.
+      const report = settled.taskOutcome!.report!;
+      expect(settled.taskOutcome!.reportAbsentReason).toBeNull();
+      expect(report).toMatchObject({
+        schema: 'ai7.analysis.run-report/1',
+        runRecordId: settled.run!.runRecordId,
+        taskIntentId: settled.taskIntent!.taskIntentId,
+        attemptId,
+        resultSetRevisionId: revisionId,
+        classification: 'completed-with-gaps',
+      });
+      // The four stages, with wall time the owner measured and nothing read from a session ledger.
+      expect(report.stages.map((stage) => stage.stage)).toEqual([...RUN_REPORT_STAGES]);
+      expect(report.stages.map((stage) => stage.state)).toEqual(['closed-with-gaps', 'closed', 'closed', 'closed']);
+      expect(report.stages.every((stage) => typeof stage.wallMs === 'number' && stage.wallMs >= 0)).toBe(true);
+      expect(report.stages.every((stage) => typeof stage.startedAt === 'string' && typeof stage.settledAt === 'string')).toBe(true);
+      // Usage per stage reconciles with the revision's own total, field by field.
+      expect(runReportUsageReconciles(report, revision.usage)).toBe(true);
+      expect(report.usagePerStage.units.requests + report.usagePerStage['cross-unit-reduction'].requests +
+        report.usagePerStage['assurance-sampling'].requests).toBe(revision.usage.requests);
+      // The unit accounting is the revision's coverage and lineage, counted rather than restated.
+      expect(report.units).toEqual({
+        submitted: SAMPLE1_UNITS, reused: 0, recomputed: SAMPLE1_UNITS, gaps: revision.gaps.length, retried: 0,
+      });
+      expect(report.unitRows.map((row) => row.unitOrdinal)).toEqual(revision.units.map((unit) => unit.unitOrdinal));
+      expect(report.unitRows.map((row) => row.state)).toEqual(revision.units.map((unit) => unit.state));
+      // Every gap the revision carries appears exactly once, named by its stage and classified code.
+      expect(report.failures).toEqual(revision.gaps.map((entry) => ({ stage: 'units', code: entry.code, reason: entry.reason })));
+      // The assurance section is a copy of the revision's sample, never a second draw.
+      expect(report.assurance).toEqual({
+        state: revision.assuranceSample.state,
+        seed: revision.assuranceSample.seed,
+        size: revision.assuranceSample.size,
+        candidateCount: revision.assuranceSample.candidateCount,
+        precision: revision.assuranceSample.precision,
+        upheld: revision.assuranceSample.dispositions.filter((entry) => entry.disposition === '成立').length,
+      });
+      // The finding counts name classes and count them; no description, quotation, or range travels.
+      expect(report.findingCounts.every((entry) => entry.count > 0)).toBe(true);
+      expect(JSON.stringify(report)).not.toContain(revision.synthesis.synopsis);
+      for (const finding of revision.crossUnitFindings) expect(JSON.stringify(report)).not.toContain(finding.description);
+      // The report's own digest, and the accounting digest that excludes its clocks.
+      const { reportDigest, ...body } = report;
+      expect(reportDigest).toBe(runReportDigest(body));
+      expect(report.accountingDigest).toBe(runReportAccountingDigest(runReportAccountingOf(body)));
+      expect(JSON.stringify(runReportAccountingOf(body))).not.toContain('wallMs');
+      // The reflection turn closed from its fixture entry, and cost the report alone: it dispatched
+      // after the revision was persisted, so the revision's own request count is untouched by it.
+      expect(report.ifRedone.state).toBe('closed');
+      expect(report.ifRedone.items.length).toBeGreaterThan(0);
+      expect(report.ifRedone.reason).toBeNull();
+      expect(report.usagePerStage['run-report-reflection'].requests).toBe(1);
+      expect(revision.usage.requests).toBe(SAMPLE1_UNITS + 1 + 1);
+      // No item names a block, a finding, or a quotation: the message carried none of the three.
+      for (const item of report.ifRedone.items) {
+        expect(item.suggestion).not.toMatch(/blk_[0-9a-f]{24}/u);
+        expect(item.basis).not.toMatch(/blk_[0-9a-f]{24}/u);
+        for (const finding of revision.crossUnitFindings) {
+          expect(item.suggestion).not.toContain(finding.description);
+          expect(item.basis).not.toContain(finding.description);
+        }
+      }
+      reportJson = canonicalJson(report);
       expect(settled.actions).toEqual({ canPrepare: false, canAuthorize: false, canReconfirmPlan: false });
       store.markCleanShutdown();
     } finally {
@@ -430,6 +539,9 @@ describe('baseline manuscript analysis over the real store on exact sample1', ()
       expect(restarted.resultSetRevision?.revisionId).toBe(revisionId);
       expect(restarted.resultSetRevision?.freshness.state).toBe('current');
       expect(restarted.run?.attempt?.attemptId).toBe(attemptId);
+      // The Run Report survives restart byte for byte: it is durable state, not a live computation.
+      expect(canonicalJson(restarted.taskOutcome!.report)).toBe(reportJson);
+      expect(restarted.taskOutcome!.reportAbsentReason).toBeNull();
       const window = reopened.getManuscriptWindow(restarted.checkpoint!.manuscriptId, restarted.checkpoint!.branchId, null);
       const block = window.blocks[0]!;
       const acknowledgement = reopened.flushJournalEdit({
@@ -574,6 +686,15 @@ describe('baseline manuscript analysis over the real store on exact sample1', ()
       expect(revision.bindingPin.bindingDigest).toBe(bindingDigest);
       expect(revision.coverage).toMatchObject({ unitsTotal: 8, unitsClosed: 7, gapCount: 1 });
       expect(revision.adapterPin.fixtureIdentity).toBe('sample1-baseline-transient-retry');
+      // The Run Report of a Run that adapted in-envelope: the retry is counted, and the unit's row
+      // carries what both of its attempts cost rather than what its last one did (Issue #276).
+      const report = settled.taskOutcome!.report!;
+      expect(report.units).toEqual({ submitted: SAMPLE1_UNITS, reused: 0, recomputed: SAMPLE1_UNITS, gaps: 1, retried: 1 });
+      expect(report.adaptations).toEqual([{ unitOrdinal: 5, classifiedReason: adaptation.classifiedReason, recordedAt: adaptation.recordedAt }]);
+      expect(report.usagePerStage.units.requests).toBe(SAMPLE1_UNITS + 1);
+      expect(runReportUsageReconciles(report, revision.usage)).toBe(true);
+      expect(report.unitRows[4]).toMatchObject({ unitOrdinal: 5, state: 'closed', attempts: 2 });
+      expect(report.ifRedone.state).toBe('closed');
       store.markCleanShutdown();
     } finally {
       await owner.dispose();
@@ -779,9 +900,14 @@ describe('baseline manuscript analysis over the real store on exact sample1', ()
       expect(authorized.projection.run?.blockedReasons?.length).toBe(3);
       expect(authorized.projection.run?.transitions.map((transition) => transition.state)).toEqual(['authorized', 'blocked-before-dispatch']);
       expect(authorized.projection.resultSetRevision).toBeNull();
+      // A Run blocked before dispatch records no Task Outcome and therefore no Run Report: its
+      // `blocked-before-dispatch` transition and its three reasons are its whole disclosure, and this
+      // slice adds neither an outcome for it nor a classification value (Issue #276, revision 2).
       expect(authorized.projection.taskOutcome).toBeNull();
       const owner = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy, fixture: null, secretResolver: fakeSecretResolver() });
       expect(() => owner.admitAndDispatch(authorized.projection.run!.runRecordId)).toThrowError(/EXECUTION_ROUTE_ABSENT|没有可执行的本地确定性路由/u);
+      // And it stays so after the refused dispatch: nothing invents an outcome to hang a report on.
+      expect(store.inspectBaselineAnalysis(imported.bookId).taskOutcome).toBeNull();
       // Authorizing again is idempotent and a stale envelope digest is refused.
       expect(store.authorizeBaselineAnalysis(imported.bookId, prepared.taskIntent!.taskIntentId, prepared.planEnvelope!.digest).projection.authorization?.authorizationId)
         .toBe(authorized.projection.authorization?.authorizationId);
@@ -789,6 +915,53 @@ describe('baseline manuscript analysis over the real store on exact sample1', ()
       store.markCleanShutdown();
     } finally {
       store.close();
+    }
+  }, 300_000);
+
+  it('reads a Task Outcome recorded before the Run Report with no report and the disclosed reason', async () => {
+    await requireExactSample1(roots.codeRoot);
+    const store = await openWithRoute(roots.dataRoot, fixture);
+    const owner = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: fakeSecretResolver() });
+    let bookId: string;
+    let outcomeId: string;
+    try {
+      const imported = await importSample1Book(store, roots.codeRoot, 'L2 sample1 早于运行报告的任务结果');
+      bookId = imported.bookId;
+      await pinEditorialWorkspaceProfileRevision2(store, bookId);
+      recordMissingCredentialConnection(store, 'L2 主编辑连接');
+      const { settled } = await runToSettled(store, owner, bookId, null);
+      outcomeId = settled.taskOutcome!.outcomeId;
+      expect(settled.taskOutcome!.report).not.toBeNull();
+      store.markCleanShutdown();
+    } finally {
+      await owner.dispose();
+      store.close();
+    }
+
+    stripRunReportsFromOutcomes(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+
+    const reopened = await openWithRoute(roots.dataRoot, fixture);
+    try {
+      const outcome = reopened.inspectBaselineAnalysis(bookId).taskOutcome!;
+      // The same outcome, read as exactly what it is: no report, and the absence said in the reader's
+      // own language rather than as a null a surface would have to guess at.
+      expect(outcome.outcomeId).toBe(outcomeId);
+      expect(outcome.classification).toBe('completed-with-gaps');
+      expect(outcome.safeNextAction.length).toBeGreaterThan(0);
+      expect(outcome.report).toBeNull();
+      expect(outcome.reportAbsentReason).toBe(PRE_RUN_REPORT_REASON);
+      expect(outcome.reportAbsentReason).toBe('该任务结果由未生成运行报告的运行产生。');
+      // Reading it does not rewrite it: the relation is insert-only and stays that way.
+      const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+      try {
+        expect(() => database.prepare('UPDATE analysis_task_outcomes SET sha256 = sha256').run()).toThrowError(/TASK_LEDGER_IMMUTABLE/u);
+        expect(String(tableRows(database, 'analysis_task_outcomes')[0]!.canonical_json)).not.toContain('"report"');
+      } finally {
+        database.close();
+      }
+      reopened.markCleanShutdown();
+    } finally {
+      reopened.close();
     }
   }, 300_000);
 

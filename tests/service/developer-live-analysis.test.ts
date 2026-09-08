@@ -17,6 +17,7 @@ import { BASELINE_PROMPT_CONTRACT_DIGEST, unitRequestDigest } from '../../src/se
 import { loadModelFixture, resolveFixtureEntry } from '../../src/service/provider/model-fixture.js';
 import { ownBlockIdsOf, substituteBlockPlaceholders, substituteCrossUnitBlockPlaceholders } from '../../src/service/provider/local-deterministic-adapter.js';
 import { parseCrossUnitCitedBlocks, parseCrossUnitMessageHeader } from '../../src/service/analysis/cross-unit-contract.js';
+import { runReportUsageReconciles } from '../../src/service/analysis/run-report.js';
 import {
   OPENCODE_GO_ENDPOINT,
   OPENCODE_GO_SESSION_HEADER,
@@ -402,6 +403,21 @@ describe('the developer-live scope over exact sample1 with a stub transport', ()
     expect(revision.assurance.sampledPrecision).toBeNull();
     expect(revision.assurance.label).not.toContain('抽样');
     expect(revision.reducerClosure.stages.at(-1)).toEqual({ stage: 'assurance-sampling', state: 'closed-with-gaps', inputCount: 2 });
+
+    // The Run Report's reflection turn is one more transmission this policy does not name either, so
+    // it never formed a request: no call carries its header, and the report says exactly why.
+    expect(calls.some((call) => call.body.includes('运行反思'))).toBe(false);
+    const report = settled.taskOutcome!.report!;
+    expect(report.ifRedone).toEqual({
+      state: 'policy-bounded',
+      items: [],
+      reason: '运行反思未派发：当前 Provider Processing 策略仅授权单元数内的传输',
+    });
+    // A turn that never dispatched costs nothing, and the reconciliation is untouched by it.
+    expect(report.usagePerStage['run-report-reflection']).toEqual({ requests: 0, inputTokens: 0, outputTokens: 0 });
+    expect(runReportUsageReconciles(report, revision.usage)).toBe(true);
+    expect(report.usagePerStage['cross-unit-reduction'].requests).toBe(1);
+    expect(report.usagePerStage['assurance-sampling'].requests).toBe(0);
     await store.close();
   });
 
@@ -593,6 +609,29 @@ describe('the developer-live scope over exact sample1 with a stub transport', ()
     expect(revision.coverage.unitsTotal).toBe(SAMPLE1_UNITS);
     expect(revision.coverage.unitsClosed).toBe(1);
     expect(revision.usage.inputTokens + revision.usage.outputTokens).toBe(100);
+
+    // An interrupted Run still leaves a Run Report, and it carries what the interruption cost it:
+    // one unit's usage, seven not-attempted gaps, and the two suboperations that never ran.
+    const report = settled.taskOutcome!.report!;
+    expect(settled.taskOutcome!.reportAbsentReason).toBeNull();
+    expect(report.classification).toBe('interrupted');
+    expect(runReportUsageReconciles(report, revision.usage)).toBe(true);
+    expect(report.usagePerStage.units).toEqual({ requests: 1, inputTokens: 60, outputTokens: 40 });
+    expect(report.usagePerStage['cross-unit-reduction']).toEqual({ requests: 0, inputTokens: 0, outputTokens: 0 });
+    expect(report.usagePerStage['assurance-sampling']).toEqual({ requests: 0, inputTokens: 0, outputTokens: 0 });
+    expect(report.units).toEqual({ submitted: SAMPLE1_UNITS, reused: 0, recomputed: SAMPLE1_UNITS, gaps: SAMPLE1_UNITS - 1, retried: 0 });
+    // Every gap the revision carries is named once, and the units it never reached say exactly that.
+    expect(report.failures).toEqual(revision.gaps.map((entry) => ({ stage: 'units', code: entry.code, reason: entry.reason })));
+    expect(report.unitRows.filter((row) => row.gapCode === 'not-attempted')).toHaveLength(SAMPLE1_UNITS - 1);
+    expect(report.unitRows[0]).toMatchObject({ unitOrdinal: 1, state: 'closed', attempts: 1, usage: { inputTokens: 60, outputTokens: 40 } });
+    // The two suboperations and the reflection never ran; the deterministic reduction did.
+    expect(report.stages.map((stage) => [stage.stage, stage.state])).toEqual([
+      ['units', 'closed-with-gaps'], ['cross-unit-reduction', 'not-run'], ['assurance-sampling', 'not-run'], ['reduction', 'closed'],
+    ]);
+    expect(report.stages[1]!.wallMs).toBeNull();
+    expect(report.stages[2]!.wallMs).toBeNull();
+    expect(report.ifRedone.state).toBe('not-run');
+    expect(report.ifRedone.items).toEqual([]);
     await store.close();
   });
 

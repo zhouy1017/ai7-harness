@@ -1305,6 +1305,92 @@ async function main() {
       revisionAgain.units.every((unit) => !JSON.stringify(unit).includes('assurance')),
       'assurance-sample-edits-nothing', { crossUnitFindings: revisionAgain.crossUnitFindings });
 
+    // Synchronized delta (#276): the same Run left one durable Run Report inside its Task Outcome.
+    // Opening it from the Overview and the Task Outcome is S44b, so everything asserted here is at the
+    // projection level. No request-count pin moves: the reflection turn dispatches after the revision
+    // is persisted, so `revision.usage.requests` stays at SAMPLE1_UNITS + 1 + SAMPLING_TURNS.
+    at('run-report');
+    cancellation.throwIfRequested();
+    const report = settled.taskOutcome?.report;
+    requireJourney(report?.schema === 'ai7.analysis.run-report/1' && settled.taskOutcome?.reportAbsentReason === null &&
+      report.runRecordId === settled.run.runRecordId && report.taskIntentId === settled.taskIntent.taskIntentId &&
+      report.attemptId === attempt.attemptId && report.resultSetRevisionId === revision.revisionId &&
+      report.classification === 'completed-with-gaps' && typeof report.recordedAt === 'string',
+      'run-report-bound', { report: report === undefined ? null : { ...report, unitRows: undefined } });
+
+    // The four declared stages, each with the instants the execution owner itself took. Nothing here
+    // comes from the Harness Session Ledger, which is the boundary this slice's stop condition draws.
+    requireJourney(canonicalJson(report.stages.map((stage) => stage.stage)) ===
+        canonicalJson(['units', 'cross-unit-reduction', 'assurance-sampling', 'reduction']) &&
+      canonicalJson(report.stages.map((stage) => stage.state)) ===
+        canonicalJson(['closed-with-gaps', 'closed', 'closed', 'closed']) &&
+      report.stages.every((stage) => Number.isInteger(stage.wallMs) && stage.wallMs >= 0 &&
+        typeof stage.startedAt === 'string' && typeof stage.settledAt === 'string'),
+      'run-report-stages', { stages: report.stages });
+
+    // Usage per stage reconciles with the revision field by field, and the reflection's own sits beside
+    // it rather than inside it: the revision was persisted before that turn was ever dispatched.
+    const summedUsage = ['units', 'cross-unit-reduction', 'assurance-sampling'].reduce((total, stage) => ({
+      requests: total.requests + report.usagePerStage[stage].requests,
+      inputTokens: total.inputTokens + report.usagePerStage[stage].inputTokens,
+      outputTokens: total.outputTokens + report.usagePerStage[stage].outputTokens,
+    }), { requests: 0, inputTokens: 0, outputTokens: 0 });
+    requireJourney(sameRecord(summedUsage, {
+      requests: revision.usage.requests, inputTokens: revision.usage.inputTokens, outputTokens: revision.usage.outputTokens,
+    }) &&
+      revision.usage.requests === SAMPLE1_UNITS + 1 + SAMPLING_TURNS &&
+      report.usagePerStage.units.requests === SAMPLE1_UNITS &&
+      report.usagePerStage['cross-unit-reduction'].requests === 1 &&
+      report.usagePerStage['assurance-sampling'].requests === SAMPLING_TURNS &&
+      report.usagePerStage['run-report-reflection'].requests === 1,
+      'run-report-usage-reconciles', { usagePerStage: report.usagePerStage, revisionUsage: revision.usage });
+
+    // The unit accounting is the revision's own coverage and lineage, counted rather than restated.
+    const reusedUnits = revision.lineage.filter((entry) => entry.kind === 'reused').length;
+    requireJourney(sameRecord(report.units, {
+      submitted: SAMPLE1_UNITS, reused: reusedUnits, recomputed: SAMPLE1_UNITS - reusedUnits,
+      gaps: revision.gaps.length, retried: 0,
+    }) &&
+      report.units.reused === revision.coverage.unitsReused && report.units.gaps === revision.coverage.gapCount &&
+      report.unitRows.length === revision.coverage.unitsTotal &&
+      canonicalJson(report.unitRows.map((row) => [row.unitOrdinal, row.state, row.lineage])) ===
+        canonicalJson(revision.units.map((unit, index) => [unit.unitOrdinal, unit.state, revision.lineage[index].kind])),
+      'run-report-unit-accounting', { units: report.units, coverage: revision.coverage, unitRows: report.unitRows });
+
+    // Every gap the revision carries appears exactly once, named by its stage and its classified code.
+    requireJourney(canonicalJson(report.failures) ===
+      canonicalJson(revision.gaps.map((gap) => ({ stage: 'units', code: gap.code, reason: gap.reason }))),
+      'run-report-failures', { failures: report.failures, gaps: revision.gaps });
+
+    // The assurance section is a copy of the revision's own sample, never a second draw.
+    requireJourney(report.assurance.state === assuranceSample.state && report.assurance.seed === assuranceSample.seed &&
+      report.assurance.size === assuranceSample.size && report.assurance.candidateCount === assuranceSample.candidateCount &&
+      canonicalJson(report.assurance.precision) === canonicalJson(assuranceSample.precision) &&
+      report.assurance.upheld === assuranceSample.dispositions.filter((entry) => entry.disposition === '成立').length,
+      'run-report-assurance', { assurance: report.assurance, sample: assuranceSample });
+
+    // The `if redone` list closed from its fixture entry, and names no block, no finding, and no
+    // quotation — the message it answered carried none of the three, only counts and codes.
+    requireJourney(report.ifRedone.state === 'closed' && report.ifRedone.reason === null &&
+      report.ifRedone.items.length >= 1 && report.ifRedone.items.length <= 10 &&
+      report.ifRedone.items.every((item) => typeof item.suggestion === 'string' && item.suggestion.length > 0 &&
+        typeof item.basis === 'string' && item.basis.length > 0 &&
+        !/blk_[0-9a-f]{24}/u.test(`${item.suggestion}${item.basis}`) &&
+        revision.crossUnitFindings.every((finding) =>
+          !item.suggestion.includes(finding.description) && !item.basis.includes(finding.description))),
+      'run-report-if-redone', { ifRedone: report.ifRedone });
+
+    // The report's own digest is over its own canonical JSON, wall times and instants included. The
+    // accounting digest beside it is over the stable part alone — and the proof that the clocks are
+    // out of it is that the reflection closed at all: the fixture entry was keyed by a digest minted
+    // from a different Run, on a different host, whose wall times were not these.
+    const { reportDigest, ...reportBody } = report;
+    const reportJson = canonicalJson(reportBody);
+    requireJourney(DIGEST_PATTERN.test(reportDigest) && reportDigest === sha256Hex(reportJson) &&
+      DIGEST_PATTERN.test(report.accountingDigest) && report.accountingDigest !== reportDigest &&
+      reportJson.includes('"wallMs"') && reportJson.includes('"startedAt"') && reportJson.includes('"settledAt"'),
+      'run-report-digests', { reportDigest, accountingDigest: report.accountingDigest });
+
     at('return-to-range');
     cancellation.throwIfRequested();
     const gapBlockId = revision.gaps[0].blockIds[0];
@@ -1325,6 +1411,13 @@ async function main() {
     await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='settled'`, 'restart-record-visible');
     const restarted = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
     requireJourney(JSON.stringify(restarted) === JSON.stringify(settled), 'restart-record-immutable');
+    // Synchronized delta (#276): the Run Report is durable state, not a live computation, so it reads
+    // back byte for byte — its own digest included — after the product has been closed and reopened.
+    const restartedReport = restarted.taskOutcome?.report;
+    requireJourney(restartedReport !== undefined && restartedReport !== null &&
+      canonicalJson({ ...restartedReport, reportDigest: undefined }) === reportJson &&
+      restartedReport.reportDigest === reportDigest && restarted.taskOutcome?.reportAbsentReason === null,
+      'restart-run-report-identical', { reportDigest: restartedReport?.reportDigest, expected: reportDigest });
     cancellation.throwIfRequested();
 
     at('acknowledged-edit-stale');
@@ -1775,7 +1868,10 @@ async function main() {
       JSON.stringify(revision5.provenance?.adaptations) === JSON.stringify({ count: 1, unitOrdinals: [5] }) && revision5.provenance?.planVersion === 1 &&
       revision5.provenance?.runRecordId === settledRetry.run.runRecordId && revision5.bindingPin?.bindingDigest === attemptRetry.executionBinding.bindingDigest &&
       revision5.adapterPin?.fixtureIdentity === RETRY_FIXTURE_IDENTITY && revision5.adapterPin?.fixtureSha256 === retryFixtureDigest &&
-      sameRecord(revision5.update?.counts, retryOption.expected) && revision5.coverage?.unitsClosed === SAMPLE1_UNITS - 1 && revision5.coverage?.gapCount === 1,
+      sameRecord(revision5.update?.counts, retryOption.expected) && revision5.coverage?.unitsClosed === SAMPLE1_UNITS - 1 && revision5.coverage?.gapCount === 1 &&
+      // Synchronized delta (#276): this Run's report counts the adaptation, and its reflection closed
+      // from the fixture entry keyed by this Run's own accounting.
+      settledRetry.taskOutcome?.report?.units?.retried === 1 && settledRetry.taskOutcome?.report?.ifRedone?.state === 'closed',
     'safe-retry-record', { run: settledRetry?.run === undefined ? undefined : { ...settledRetry.run, attempt: undefined }, adaptation, spans: retrySpans, provenance: revision5?.provenance, usage: revision5?.usage });
     await assertRenderer(renderer, `(() => {
       const card=document.querySelector('.baseline-analysis-card');
@@ -1887,7 +1983,10 @@ async function main() {
       revision6?.ordinal === 6 && revision6.update?.mode === 'reanalyze-range' && sameRecord(revision6.update?.selectedRange, rangeB) && sameRecord(revision6.update?.counts, driftOptionB.expected) &&
       revision6.update?.predecessor?.revisionId === revision5.revisionId && revision6.provenance?.planVersion === 2 && JSON.stringify(revision6.provenance?.adaptations) === JSON.stringify({ count: 0, unitOrdinals: [] }) &&
       // Synchronized delta (#274, #275): two recomputed units, the reduction's turn, and the sample's.
-      revision6.usage?.requests === 3 + SAMPLING_TURNS && revision6.adapterPin?.fixtureSha256 === retryFixtureDigest && revision6.gaps?.length === 1 && revision6.gaps[0].unitOrdinal === 2,
+      revision6.usage?.requests === 3 + SAMPLING_TURNS && revision6.adapterPin?.fixtureSha256 === retryFixtureDigest && revision6.gaps?.length === 1 && revision6.gaps[0].unitOrdinal === 2 &&
+      // Synchronized delta (#276): this Run adapted nothing, and its reflection closed from the
+      // fixture entry keyed by its own accounting.
+      settledDrift.taskOutcome?.report?.units?.retried === 0 && settledDrift.taskOutcome?.report?.ifRedone?.state === 'closed',
     'plan-revision-settled', { authorization: settledDrift?.authorization, planVersions: settledDrift?.planVersions, provenance: revision6?.provenance, update: revision6?.update });
     await assertRenderer(renderer, `(() => { const card=document.querySelector('.baseline-analysis-card'); const history=card?.querySelector('.analysis-history'); return card?.dataset.resultRevisionOrdinal==='6' && card.dataset.adaptationCount==='0' && card.dataset.planVersion==='2' && card.querySelector('[data-plan-version-ordinal="2"][data-plan-version-state="bound"]')!==null && card.querySelector('.analysis-plan-versions [data-plan-revision-next="2"][data-plan-revision-resolved="true"]')!==null && card.textContent.includes('计划版本 2') && card.querySelector('.analysis-timeline')?.dataset.timelineAdaptations==='0' && history?.dataset.historyCount==='6' && ${ONLY_ANALYSIS_ACTIONS}; })()`, 'plan-revision-overview-surface');
 

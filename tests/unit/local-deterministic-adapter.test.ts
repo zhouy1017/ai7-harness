@@ -260,7 +260,9 @@ describe('model fixture loading', () => {
     expect(classifyModelFailure({ code: 'SYNTHETIC_ADAPTER_FAILURE', message: '' }, codes).retrySafe).toBe(false);
     const base = await loadModelFixture(FIXTURES_ROOT, 'sample1-baseline-one-unit-failure');
     expect(transient.sha256).not.toBe(base.sha256);
-    expect(transient.entries.size).toBe(base.entries.size + 1);
+    // Four entries of its own over the base: unit 5's first-attempt failure, and (Issue #276) the
+    // three Run Report reflection answers for the accountings the Runs on this fixture produce.
+    expect(transient.entries.size).toBe(base.entries.size + 4);
   });
 
   // Issue #53: a second analysis kind shares this adapter. Which kind a request belongs to is decided
@@ -340,12 +342,20 @@ describe('model fixture loading', () => {
     // entries of their closed sets, plus the two assurance sampling entries of Issue #275 — one for
     // unit 1 as first analysed and one for it after J-04's acknowledged edit, both inherited by the
     // two variants, because a sampling turn is keyed by unit content and listed findings alone.
+    //
+    // Synchronized delta (Issue #276): `sample1-baseline-one-unit-failure` gains four Run Report
+    // reflection entries, one per distinct accounting J-04's four Runs on it produce, and
+    // `sample1-baseline-transient-retry` gains three — the L2 suite's first baseline on it, and
+    // J-04's safe-retry range Run and plan-revision range Run. `sample1-baseline-happy` gains none:
+    // it is never the bound route of a development-ci Run, and its two variants carry the accountings
+    // their own Runs reach.
     const counts = await Promise.all(['sample1-baseline-happy', 'sample1-baseline-one-unit-failure', 'sample1-baseline-transient-retry']
       .map(async (identity) => Array.from((await loadModelFixture(FIXTURES_ROOT, identity)).entries.values()).filter((item) => item.unitOrdinal === 0).length));
-    expect(counts).toEqual([3, 5, 5]);
+    expect(counts).toEqual([3, 9, 12]);
     const factual = await loadModelFixture(FIXTURES_ROOT, 'sample1-factual-authored');
-    // One sampling turn per anchor unit: every one of sample1's eight units holds a located finding.
-    expect(Array.from(factual.entries.values()).filter((item) => item.unitOrdinal === 0)).toHaveLength(8);
+    // One sampling turn per anchor unit — every one of sample1's eight units holds a located finding —
+    // and one Run Report reflection entry for the accounting that Run produces.
+    expect(Array.from(factual.entries.values()).filter((item) => item.unitOrdinal === 0)).toHaveLength(9);
   });
 });
 

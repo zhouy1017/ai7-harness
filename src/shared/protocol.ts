@@ -1,4 +1,4 @@
-export const SERVICE_PROTOCOL_VERSION = 27 as const;
+export const SERVICE_PROTOCOL_VERSION = 28 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -1027,6 +1027,13 @@ export interface LaunchPolicyProjection {
      * `true` — absent included — means the suboperation does not dispatch at all.
      */
     assuranceSamplingAllowed?: boolean;
+    /**
+     * Whether the active Provider Processing policy names the Run Report's reflection turn (ADR
+     * 0066 §Run Report). Read exactly as the two keys above are: the reflection is one more
+     * transmission beyond v4's per-unit bound, so anything but `true` — absent included — means the
+     * turn does not dispatch and the report records `policy-bounded` with its reason.
+     */
+    runReportReflectionAllowed?: boolean;
     label: '开发与持续集成：零次实时传输' | '开发者实时：实时传输受运行边界约束';
   };
   externalExport: {
@@ -1347,6 +1354,146 @@ export interface AnalysisAssuranceSampleProjection {
   usage: { inputTokens: number; outputTokens: number } | null;
   /** The exact reason for a gap or for not running; `null` when every turn closed. */
   reason: string | null;
+}
+
+/**
+ * The Run Report (ADR 0066 §Run Report): one durable record of what a Run did, written once into the
+ * Run's Task Outcome and never rewritten. It is the first learning loop — the document the Owner
+ * reads at the end of Phase 1 and the accounting a future Run of the same manuscript reads first.
+ *
+ * The report counts and never restates. No finding, entity, quotation, synopsis, or block text
+ * appears anywhere in it: every value is a count, a closed code, an enum, an instant, a token figure,
+ * or a digest. That is what lets its stable part travel to a model as the reflection turn's whole
+ * input with no manuscript content going with it.
+ */
+export const RUN_REPORT_STAGES = ['units', 'cross-unit-reduction', 'assurance-sampling', 'reduction'] as const;
+export type RunReportStageId = (typeof RUN_REPORT_STAGES)[number];
+
+/**
+ * The stages usage is accounted under. `reduction` is deterministic and never transmits, so it has
+ * wall time and no usage; the reflection turn dispatches after the revision is already immutable, so
+ * it has usage and no stage row. The first three therefore sum to the revision's own recorded usage
+ * field by field, which is the reconciliation the Run Report promises.
+ */
+export const RUN_REPORT_USAGE_STAGES = ['units', 'cross-unit-reduction', 'assurance-sampling', 'run-report-reflection'] as const;
+export type RunReportUsageStageId = (typeof RUN_REPORT_USAGE_STAGES)[number];
+
+export interface RunReportUsageProjection {
+  requests: number;
+  inputTokens: number;
+  outputTokens: number;
+}
+
+/**
+ * One stage's row. The three time fields are present exactly when the owner entered the stage, so a
+ * stage that never ran carries `not-run` and no instants rather than a zero that would read as work
+ * done in no time. `wallMs` is the sum of the stage's own disjoint segments: for `reduction`, whose
+ * two segments sit either side of the sampling await, that is deliberately less than the distance
+ * between `startedAt` and `settledAt`, so the four stage totals partition the Run's work.
+ */
+export interface RunReportStageProjection {
+  stage: RunReportStageId;
+  state: 'closed' | 'closed-with-gaps' | 'gap' | 'not-run';
+  startedAt: string | null;
+  settledAt: string | null;
+  wallMs: number | null;
+}
+
+export interface RunReportUnitAccountingProjection {
+  submitted: number;
+  reused: number;
+  recomputed: number;
+  gaps: number;
+  retried: number;
+}
+
+export interface RunReportUnitRowProjection {
+  unitOrdinal: number;
+  state: 'closed' | 'gap';
+  lineage: 'recomputed' | 'reused';
+  /** Model turns this unit cost: `0` for a reused unit and for one an interrupted loop never reached. */
+  attempts: number;
+  wallMs: number | null;
+  usage: { inputTokens: number; outputTokens: number } | null;
+  gapCode: AnalysisGapProjection['code'] | null;
+}
+
+export interface RunReportAdaptationProjection {
+  unitOrdinal: number;
+  classifiedReason: string;
+  recordedAt: string;
+}
+
+/** One failure the Run carries, named by the stage that produced it and its classified code. */
+export interface RunReportFailureProjection {
+  stage: RunReportStageId;
+  code: string;
+  reason: string;
+}
+
+/** The assurance sample as the report copies it; never a second draw and never a recomputation. */
+export interface RunReportAssuranceProjection {
+  state: AnalysisAssuranceSampleProjection['state'];
+  seed: string | null;
+  size: number;
+  candidateCount: number;
+  precision: ReadonlyArray<AnalysisAssuranceSamplePrecisionProjection>;
+  /** Sampled findings the model upheld as `成立`; the numerator every per-tier estimate is built from. */
+  upheld: number;
+}
+
+/** One class of finding the Run produced, as the kind that owns it names its own classes. */
+export interface RunReportFindingCountProjection {
+  kind: string;
+  count: number;
+}
+
+export interface RunReportSuggestionProjection {
+  suggestion: string;
+  basis: string;
+}
+
+/**
+ * The `if redone` list: what the model would do differently on the next Run of this manuscript. It
+ * closes only when the reflection turn dispatched and parsed; every other outcome states its reason
+ * in the reader's own language, exactly as the two other suboperations state theirs. No item
+ * restates a finding, quotes the manuscript, or proposes an edit — the contract forbids all three.
+ */
+export type RunReportIfRedoneProjection =
+  | { state: 'closed'; items: ReadonlyArray<RunReportSuggestionProjection>; reason: null }
+  | { state: 'not-run' | 'policy-bounded' | 'gap'; items: readonly []; reason: string };
+
+/** The Run Report as it is recorded inside the Task Outcome, before its own digest is taken. */
+export interface RunReportRecordProjection {
+  schema: 'ai7.analysis.run-report/1';
+  runRecordId: string;
+  taskIntentId: string;
+  /** The Run's one execution attempt; `null` for a Run that failed before its attempt was persisted. */
+  attemptId: string | null;
+  resultSetRevisionId: string | null;
+  classification: 'completed' | 'completed-with-gaps' | 'failed' | 'interrupted';
+  recordedAt: string;
+  stages: ReadonlyArray<RunReportStageProjection>;
+  units: RunReportUnitAccountingProjection;
+  unitRows: ReadonlyArray<RunReportUnitRowProjection>;
+  adaptations: ReadonlyArray<RunReportAdaptationProjection>;
+  failures: ReadonlyArray<RunReportFailureProjection>;
+  usagePerStage: Readonly<Record<RunReportUsageStageId, RunReportUsageProjection>>;
+  findingCounts: ReadonlyArray<RunReportFindingCountProjection>;
+  assurance: RunReportAssuranceProjection;
+  ifRedone: RunReportIfRedoneProjection;
+  /**
+   * SHA-256 over the canonical JSON of the report's stable accounting — stage states but not their
+   * wall times, unit counts but not their instants, and neither the seed nor the reflection's own
+   * result. Two deterministic replays of one fixture over one manuscript therefore mint the same
+   * digest even though their clocks differ, which is what lets a fixture pin the reflection turn.
+   */
+  accountingDigest: string;
+}
+
+/** The report as a reader receives it: the recorded record with the digest of its own canonical JSON. */
+export interface RunReportProjection extends RunReportRecordProjection {
+  reportDigest: string;
 }
 
 export interface AnalysisUnresolvedProjection {
@@ -2043,8 +2190,11 @@ export interface BaselineAnalysisProjection {
       completedAttempts: number;
       /** The longest step this Run has actually settled, which the stale case is measured against. */
       longestSettledUnitMs: number | null;
-      /** Which declared step is in flight: the unit loop, the cross-unit reduction, or the sample. */
-      stage: 'units' | 'cross-unit-reduction' | 'assurance-sampling';
+      /**
+       * Which declared step is in flight: the unit loop, the cross-unit reduction, the sample, or
+       * the Run Report's reflection turn — which runs last, after the revision is already persisted.
+       */
+      stage: 'units' | 'cross-unit-reduction' | 'assurance-sampling' | 'run-report-reflection';
       /** The `recordedAt` of the Run Record's latest transition, composed by the store. */
       lastTransitionAt: string;
     } | null;
@@ -2066,6 +2216,14 @@ export interface BaselineAnalysisProjection {
     recordedAt: string;
     resultSetRevisionId: string | null;
     safeNextAction: string;
+    /**
+     * The Run Report of the Run this outcome settled (ADR 0066 §Run Report): an immutable record
+     * inside the outcome, read back with the digest of its own canonical JSON. `null` for a Task
+     * Outcome recorded before the report existed, which is history and is never rewritten.
+     */
+    report: RunReportProjection | null;
+    /** Why there is no report to read; `null` exactly when there is one. */
+    reportAbsentReason: string | null;
   };
   /** The latest Task's update facts; `null` while the latest Task is the first baseline. */
   update: null | BaselineAnalysisUpdateProjection;

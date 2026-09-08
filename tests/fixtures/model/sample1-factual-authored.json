@@ -150,6 +150,15 @@
         "text": "{\"schema\":\"ai7.analysis.assurance-sampling-result/1\",\"dispositions\":[{\"ref\":\"{{ref:1}}\",\"disposition\":\"成立\",\"reason\":\"引文在本单元所声明的内容块中逐字出现，内容块按原样支持该断言的提法与定位。\"}]}",
         "usage": { "inputTokens": 1520, "outputTokens": 110 }
       }
+    },
+    {
+      "unitOrdinal": 0,
+      "requestDigest": "94c3f12e5d139117a3888285fe408c7386f3db7fff681f08c104ed41e3405b35",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.analysis.run-report-reflection-result/1\",\"items\":[{\"suggestion\":\"本次没有缺口，下一次运行可以维持当前的单元预算不变。\",\"basis\":\"运行终态为 completed，缺口数为 0，计划内调整次数为 0。\"},{\"suggestion\":\"下一轮可以扩大保证抽样的规模，让各层级的估计精度不再只由个位数的判定得出。\",\"basis\":\"本次抽样规模由候选发现的条数决定，账目中各层级的抽样数都很小。\"},{\"suggestion\":\"被参考完整性排除的断言下一轮可换一种定位方式复核，而不是直接重算整个单元。\",\"basis\":\"账目按类别分别记录了已定位的发现条数与被排除的条数。\"}]}",
+        "usage": { "inputTokens": 940, "outputTokens": 230 }
+      }
     }
   ]
 }
