@@ -149,6 +149,18 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .analysis-state-failed, .analysis-state-interrupted { background: #f3e4e0; color: #753a31; }
 dt { color: #6b7068; font-size: .86rem; }
 dd { margin: 0; overflow-wrap: anywhere; }
+/* The Technical Identity Layer (V2-UX-LAYER-001). One rank below the decision content beside it — the
+   label's colour and size, never smaller — and that is the whole of the demotion: nothing is truncated,
+   `user-select` is untouched, and `overflow-wrap: anywhere` on `dd` keeps a digest whole and selectable
+   at every width, so every exact value stays reachable, copyable and unabridged (V2-UX-LAYER-007). */
+.technical-identity { color: #6b7068; font-size: .86rem; }
+/* The exact instant that rides inside a decision row: its own line, so it reads as a second value rather
+   than a continuation of the sentence, and never bold merely because the row it sits in is. It adds no
+   separator character, because a Journey subtracts this element's text to read the decision layer's. */
+span.technical-identity { display: block; font-weight: 400; }
+.technical-details { margin-top: 1rem; }
+.technical-details > summary { cursor: pointer; color: #6b7068; font-size: .86rem; font-weight: 700; }
+.technical-details > dl { margin-top: .55rem; }
 code { font-family: ui-monospace, "SFMono-Regular", Consolas, monospace; font-size: .8rem; }
 
 fieldset { margin: 1.4rem 0 0; padding: 0; border: 0; }

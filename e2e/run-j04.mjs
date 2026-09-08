@@ -1026,6 +1026,22 @@ async function main() {
         /^\\d{4}\\/\\d{2}\\/\\d{2}\\s\\d{2}:\\d{2}:\\d{2}\\s·\\s${lastTransition.state}$/u.test(decision);
     })()`, 'run-liveness-settled-surface');
 
+    // V2-UX-LAYER-004 on the Run timeline, asserted on both layers as V2-UX-LAYER-008 requires: every
+    // entry reads as local date and time, and the exact instant it was recorded at is still carried
+    // beside it in the technical layer. Transition entries are filtered by kind and stay in sequence
+    // order, because the timeline sorts by recorded instant and breaks ties by sequence.
+    await assertRenderer(renderer, `(() => {
+      const items=Array.from(document.querySelectorAll('.analysis-timeline [data-timeline-kind="transition"]'));
+      const exact=${JSON.stringify(settled.run.transitions.map((transition) => transition.recordedAt))};
+      if(items.length!==exact.length) return false;
+      return items.every((item,index)=>{
+        const instant=item.querySelector('.technical-identity');
+        if(!(instant instanceof HTMLElement) || instant.textContent!==exact[index]) return false;
+        const decision=item.textContent.replace(instant.textContent,'');
+        return /\\d{4}\\/\\d{2}\\/\\d{2}\\s\\d{2}:\\d{2}:\\d{2}/u.test(decision) && !decision.includes(exact[index]);
+      });
+    })()`, 'run-timeline-local-time-with-exact-instant');
+
     at('return-to-range');
     cancellation.throwIfRequested();
     const gapBlockId = revision.gaps[0].blockIds[0];
