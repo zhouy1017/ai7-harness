@@ -218,9 +218,9 @@ export function reduceFactualReview(input: FactualReductionInput): FactualReduct
 
   const assertionCounts: FactualReviewAssertionCountsProjection = {
     listed,
-    byClass,
-    byCategory,
-    bySeverity,
+    byClass: FACTUAL_ASSERTION_CLASSES.map((assertionClass) => ({ assertionClass, count: byClass[assertionClass] })),
+    byCategory: FACTUAL_ASSERTION_CATEGORIES.map((category) => ({ category, count: byCategory[category] })),
+    bySeverity: FACTUAL_SEVERITY_TIERS.map((severity) => ({ severity, count: bySeverity[severity] })),
     verified,
     excluded: excluded.length,
     merged,

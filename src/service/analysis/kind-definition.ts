@@ -157,6 +157,8 @@ export interface AnalysisKindDefinition {
   unitRecord(result: unknown): Record<string, unknown>;
   /** The kind-specific keys of a stored revision body, read back for the projection. */
   revisionComponents(body: Readonly<Record<string, unknown>>): Record<string, unknown>;
+  /** The unresolved-conflict count a stored revision discloses; `0` for a kind with no conflict pass. */
+  conflictCountOf(body: Readonly<Record<string, unknown>>): number;
   mode(mode: AnalysisTaskMode): AnalysisModeDefinition;
 }
 
@@ -270,6 +272,7 @@ export function baselineAnalysisKindDefinition(): AnalysisKindDefinition {
       sections: body.sections,
       synthesis: body.synthesis,
     }),
+    conflictCountOf: (body) => (body.conflicts as ReadonlyArray<unknown> | undefined)?.length ?? 0,
     mode: modeIndex(BASELINE_MODES),
   };
 }
@@ -371,6 +374,8 @@ export function factualReviewKindDefinition(research: ResearchCapability = new F
       assertionCounts: body.assertionCounts,
       research: body.research,
     }),
+    // The factual kind runs no conflict pass; its unresolved items are findings, counted in their own axis.
+    conflictCountOf: () => 0,
     mode: modeIndex(FACTUAL_REVIEW_MODES),
   };
 }

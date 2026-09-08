@@ -105,7 +105,7 @@ export function researchDisclosure(outcomes: ReadonlyArray<ResearchOutcome>): { 
 export class RefusingResearchCapability implements ResearchCapability {
   constructor(readonly scope: TrustedOperationalScope | 'unbound' = 'unbound') {}
 
-  lookup(): ResearchOutcome {
+  lookup(_question?: ResearchQuestion, _budget?: ResearchBudget | null): ResearchOutcome {
     return RESEARCH_REFUSED;
   }
 }
@@ -138,7 +138,7 @@ export class FixtureReplayResearchCapability implements ResearchCapability {
     return this.#fixtures.size;
   }
 
-  lookup(question: ResearchQuestion): ResearchOutcome {
+  lookup(question: ResearchQuestion, _budget: ResearchBudget | null = null): ResearchOutcome {
     return this.#fixtures.get(researchFixtureKey(question.question)) ?? refusal(RESEARCH_FIXTURE_ABSENT_REASON);
   }
 }

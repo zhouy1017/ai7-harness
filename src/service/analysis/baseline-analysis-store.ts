@@ -1299,7 +1299,7 @@ export class BaselineAnalysisStore {
         unitsTotal: coverage.unitsTotal,
         unitsClosed: coverage.unitsClosed,
         gapCount: (body.gaps as unknown[]).length,
-        conflictCount: (body.conflicts as unknown[]).length,
+        conflictCount: this.#definition.conflictCountOf(body),
         current: ordinal === latest.ordinal,
         freshness: freshness.state,
         freshnessLabel: freshness.label,

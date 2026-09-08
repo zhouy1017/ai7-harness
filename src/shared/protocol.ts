@@ -2051,6 +2051,16 @@ export const FACTUAL_UNCHECKED_STATE = '未核查' as const;
 export type FactualResearchState = '外部研究未获准' | '研究预算已用尽' | '已检索';
 export const FACTUAL_RESEARCH_NOT_AUTHORIZED = '外部研究未获准' as const;
 
+/**
+ * The exact grapheme range Reference Integrity located. Unlike a model-supplied source range it is
+ * never open-ended: a finding exists only because the service found its quotation at these offsets.
+ */
+export interface FactualSourceRangeProjection {
+  blockId: string;
+  fromGrapheme: number;
+  toGrapheme: number;
+}
+
 /** The identity of one listed assertion inside its unit: the block it named and its position in the list. */
 export interface FactualAssertionIdentityProjection {
   unitOrdinal: number;
@@ -2067,7 +2077,7 @@ export interface FactualReviewFindingProjection {
   findingId: string;
   unitOrdinal: number;
   blockId: string;
-  sourceRange: AnalysisSourceRangeProjection;
+  sourceRange: FactualSourceRangeProjection;
   quote: string;
   assertionClass: FactualAssertionClass;
   category: FactualAssertionCategory;
@@ -2116,12 +2126,18 @@ export interface FactualReviewExcludedProjection {
   reasonLabel: string;
 }
 
-/** What the model listed, by class and by category, before any of it became a finding. */
+/**
+ * What the model listed, by class, category, and tier, before any of it became a finding.
+ *
+ * Each breakdown is an ordered list rather than a keyed map, in its closed set's own order. A durable
+ * record is canonicalized by more than one owner, and two canonicalizers need not agree on how to
+ * order non-ASCII object keys; a list depends on no collation at all.
+ */
 export interface FactualReviewAssertionCountsProjection {
   listed: number;
-  byClass: Readonly<Record<FactualAssertionClass, number>>;
-  byCategory: Readonly<Record<FactualAssertionCategory, number>>;
-  bySeverity: Readonly<Record<FactualSeverityTier, number>>;
+  byClass: ReadonlyArray<{ assertionClass: FactualAssertionClass; count: number }>;
+  byCategory: ReadonlyArray<{ category: FactualAssertionCategory; count: number }>;
+  bySeverity: ReadonlyArray<{ severity: FactualSeverityTier; count: number }>;
   /** Assertions of a finding class whose quotation verified, before duplicates merged. */
   verified: number;
   excluded: number;

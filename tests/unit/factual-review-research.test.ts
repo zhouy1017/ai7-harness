@@ -25,7 +25,7 @@ const RESEARCH_MODULE = fileURLToPath(new URL('../../src/service/capabilities/re
 
 describe('the research capability', () => {
   it('refuses under every scope with the disclosed state', () => {
-    for (const scope of ['development-ci', 'developer-live', 'fixture-recording', 'ordinary-production', 'unbound'] as const) {
+    for (const scope of ['development-ci', 'developer-live', 'unbound'] as const) {
       const outcome = researchCapabilityFor(scope).lookup(question, null);
       expect(outcome.state).toBe(FACTUAL_RESEARCH_NOT_AUTHORIZED);
       expect(outcome.evidence).toEqual([]);

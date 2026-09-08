@@ -72,6 +72,10 @@ function closed(assertions: ReadonlyArray<FactualUnitAssertion>): FactualUnitOut
   return { unitOrdinal: unit.ordinal, state: 'closed', result };
 }
 
+function countOf<K extends string>(rows: ReadonlyArray<Record<string, unknown>>, key: K, value: string): number {
+  return rows.find((row) => row[key] === value)?.count as number;
+}
+
 function reduce(outcomes: ReadonlyArray<FactualUnitOutcome>) {
   return reduceFactualReview({ manifest, outcomes, blocks: blocksById, research });
 }
@@ -151,13 +155,13 @@ describe('the factual review reduction', () => {
     expect(reduction.findings).toHaveLength(1);
     expect(reduction.excluded).toEqual([]);
     expect(reduction.assertionCounts.listed).toBe(3);
-    expect(reduction.assertionCounts.byClass['real-world-fact']).toBe(1);
-    expect(reduction.assertionCounts.byClass['fictional-canon']).toBe(1);
-    expect(reduction.assertionCounts.byClass.judgment).toBe(1);
-    expect(reduction.assertionCounts.byCategory['时间']).toBe(1);
-    expect(reduction.assertionCounts.byCategory['其他']).toBe(2);
-    expect(reduction.assertionCounts.bySeverity.A).toBe(2);
-    expect(reduction.assertionCounts.bySeverity.C).toBe(1);
+    expect(countOf(reduction.assertionCounts.byClass, 'assertionClass', 'real-world-fact')).toBe(1);
+    expect(countOf(reduction.assertionCounts.byClass, 'assertionClass', 'fictional-canon')).toBe(1);
+    expect(countOf(reduction.assertionCounts.byClass, 'assertionClass', 'judgment')).toBe(1);
+    expect(countOf(reduction.assertionCounts.byCategory, 'category', '时间')).toBe(1);
+    expect(countOf(reduction.assertionCounts.byCategory, 'category', '其他')).toBe(2);
+    expect(countOf(reduction.assertionCounts.bySeverity, 'severity', 'A')).toBe(2);
+    expect(countOf(reduction.assertionCounts.bySeverity, 'severity', 'C')).toBe(1);
   });
 
   it('keeps a unit the Run never reached as an exact gap and reports partial coverage', () => {
