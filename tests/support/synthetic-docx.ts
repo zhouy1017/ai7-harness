@@ -1,8 +1,9 @@
 import { writeFile } from 'node:fs/promises';
 import { strToU8, zipSync } from 'fflate';
 
-// Generated-only DOCX fixtures for the unit suites. No manuscript or manuscript derivative
-// enters this helper: every part is assembled from literal text supplied by the calling test.
+// Generated-only DOCX fixtures for tests whose subject is the container: malformed packaging, a
+// missing part, an import bound, a fixture whose only role is to exist. A test whose subject is
+// manuscript content composes real prose instead, through `./composed-fixture.js`.
 
 const CONTENT_TYPES_XML =
   '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
