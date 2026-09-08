@@ -4163,8 +4163,11 @@ export class EditorialStore {
     if (!converted) return this.#stageSourceOnlyDraft(draftId, selectionToken, selectedPath, displayName, 'UNKNOWN');
     const fidelity = conversionFidelityReport(conversion, converted.loss);
     return this.#withContentObjectLifecycle(async () => {
+      // The original is persisted first, so a refusal that belongs to it — a pending abandonment
+      // cleanup above all — is raised before any byte of a derived object is written.
+      const retained = await this.#persistRetainedOriginal(selectedPath, conversion.sourceFormat);
       const working = await this.#persistWorkingObject(converted.docx);
-      const ingested = await this.#parseIntoIngest(draftId, working.path, displayName);
+      const ingested = await this.#parseIntoIngestedWorkingRepresentation(draftId, working.path, displayName);
       try {
         const { parsed } = ingested;
         // The converter emits no run property, table, image, section child, header, or footer, so
@@ -4176,7 +4179,6 @@ export class EditorialStore {
           'OBJECT_VERIFY_FAILED',
           '工作表示对象与解析结果不一致。',
         );
-        const retained = await this.#persistRetainedOriginal(selectedPath, conversion.sourceFormat);
         const now = new Date().toISOString();
         this.#transaction(this.#authority, () => {
           this.#insertContentObject(working.digest, working.relativeKey, working.byteLength, now);
@@ -4219,6 +4221,26 @@ export class EditorialStore {
       return convertTextManuscript(bytes, { format });
     } catch (error) {
       if (isTextConversionRefusal(error)) return null;
+      throw error;
+    }
+  }
+
+  /**
+   * Parse a working representation the product itself wrote. Its bounds are the parser's, so text
+   * past them is refused as the bound it crossed and never as a claim about the selected file.
+   */
+  async #parseIntoIngestedWorkingRepresentation(
+    draftId: string,
+    workingPath: string,
+    displayName: string,
+  ): Promise<IngestedDocx> {
+    try {
+      return await this.#parseIntoIngest(draftId, workingPath, displayName);
+    } catch (error) {
+      if (error instanceof StoreError || error instanceof StoreFatalError) throw error;
+      if (error instanceof Error && error.message.startsWith('DOCX_REJECTED:')) {
+        throw new StoreError('DOCX_REJECTED', '转换得到的工作表示超出当前受限本地导入边界。');
+      }
       throw error;
     }
   }
