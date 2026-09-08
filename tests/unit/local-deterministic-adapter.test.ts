@@ -5,12 +5,43 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { CONTEXT_WINDOW_EXCEEDED_CODE, INVALID_CREDENTIAL_CODE, QUOTA_EXCEEDED_CODE } from '@deepseek-ai/dsh-llm';
 import type { GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm';
-import { BASELINE_PROMPT_CONTRACT_DIGEST, parseUnitResult, unitRequestDigest } from '../../src/service/analysis/contract.js';
+import {
+  BASELINE_PROMPT_CONTRACT_DIGEST,
+  BASELINE_UNIT_RESULT_SCHEMA,
+  parseUnitMessageHeader,
+  parseUnitResult,
+  unitRequestDigest,
+  type BaselineUnitResult,
+} from '../../src/service/analysis/contract.js';
+import {
+  BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST,
+  buildCrossUnitMessage,
+  citedBlocksByUnit,
+  crossUnitRequestDigest,
+  parseCrossUnitMessageHeader,
+  parseCrossUnitResult,
+  unitSetDigest,
+} from '../../src/service/analysis/cross-unit-contract.js';
 import { AI7_FAILURE_CODES, classifyModelFailure, evaluateRunBudgetCeiling } from '../../src/service/provider/classification.js';
 import { LOCAL_DETERMINISTIC_MODEL, LOCAL_DETERMINISTIC_ROUTE } from '../../src/service/provider/egress-gate.js';
-import { Ai7LocalDeterministicAdapter, ownBlockIdsOf, ownBlockTextsOf, substituteBlockPlaceholders, unitContentDigest } from '../../src/service/provider/local-deterministic-adapter.js';
+import {
+  Ai7LocalDeterministicAdapter,
+  ownBlockIdsOf,
+  ownBlockTextsOf,
+  substituteBlockPlaceholders,
+  substituteCrossUnitBlockPlaceholders,
+  unitContentDigest,
+} from '../../src/service/provider/local-deterministic-adapter.js';
 import { BASELINE_PROMPT_CONTRACT } from '../../src/service/analysis/contract.js';
-import { ModelFixtureError, fixtureEntryKey, fixturePath, loadModelFixture, parseModelFixture, resolveFixtureEntry } from '../../src/service/provider/model-fixture.js';
+import {
+  ModelFixtureError,
+  fixtureEntryKey,
+  fixturePath,
+  loadModelFixture,
+  parseModelFixture,
+  resolveFixtureEntry,
+  type ResolvedModelFixture,
+} from '../../src/service/provider/model-fixture.js';
 
 // Fixtures (iii)–(v) are hand-written synthetic shapes consumed here only; their request digests are
 // the deterministic function of the frozen prompt contract and a synthetic all-zero unit digest.
@@ -232,6 +263,210 @@ describe('model fixture loading', () => {
     expect(() => parseModelFixture(JSON.parse(fixture('x', 'x', [])))).toThrowError(/基础引用无效/u);
     expect(() => fixturePath(root, '../escape')).toThrowError(ModelFixtureError);
     expect(() => fixturePath(root, 'Upper')).toThrowError(ModelFixtureError);
+  });
+
+  // Issue #274: ordinal 0 is not an Analysis Unit but the Run's one cross-unit reduction. It is
+  // admitted, keyed, and merged exactly like every other entry; the schema string does not move.
+  it('admits unit ordinal 0 as the cross-unit reduction entry and still refuses a negative ordinal', async () => {
+    expect(parseModelFixture(JSON.parse(fixture('zero', null, [entry(0, 'reduction')]))).entries[0]?.unitOrdinal).toBe(0);
+    for (const ordinal of [-1, 1.5, '0', null]) {
+      expect(() => parseModelFixture(JSON.parse(fixture('bad', null, [entry(ordinal as number, 'x')]))), String(ordinal)).toThrowError(ModelFixtureError);
+    }
+    // Ordinal 0 sits beside the unit entries of the same digest rather than colliding with any of them.
+    await writeFile(join(root, 'both.json'), fixture('both', null, [entry(0, 'reduction'), entry(1, 'unit-one')]));
+    const resolved = await loadModelFixture(root, 'both');
+    expect(resolved.entries.get(fixtureEntryKey(0, 'e'.repeat(64)))?.response).toMatchObject({ text: 'reduction' });
+    expect(resolved.entries.get(fixtureEntryKey(1, 'e'.repeat(64)))?.response).toMatchObject({ text: 'unit-one' });
+    // The synthetic fixtures end before the reduction: each answers one unit and then fails, exceeds a
+    // ceiling, or interrupts, so no Run over them ever closes two units and none carries an ordinal 0.
+    for (const identity of ['synthetic-quota-exceeded', 'synthetic-usage-ceiling', 'synthetic-interrupted']) {
+      const committed = await loadModelFixture(FIXTURES_ROOT, identity);
+      expect(Array.from(committed.entries.values()).every((item) => item.unitOrdinal >= 1), identity).toBe(true);
+    }
+    // The sample1 fixtures carry exactly the reduction entries their own closed sets need.
+    const counts = await Promise.all(['sample1-baseline-happy', 'sample1-baseline-one-unit-failure', 'sample1-baseline-transient-retry']
+      .map(async (identity) => Array.from((await loadModelFixture(FIXTURES_ROOT, identity)).entries.values()).filter((item) => item.unitOrdinal === 0).length));
+    expect(counts).toEqual([1, 3, 3]);
+  });
+});
+
+// The cross-unit reduction (Issue #274, ADR 0066): the adapter answers it from an ordinal-0 entry
+// keyed by the reduction's own request digest, and substitutes {{unit:U:block:N}} from the message's
+// cited-blocks section so a hand-written response can cite exact ranges of two units.
+describe('cross-unit reduction replay', () => {
+  const BLOCK_A = `blk_${'a'.repeat(24)}`;
+  const BLOCK_B = `blk_${'b'.repeat(24)}`;
+  const BLOCK_C = `blk_${'c'.repeat(24)}`;
+  const BLOCK_D = `blk_${'d'.repeat(24)}`;
+  let root: string;
+
+  function closedUnit(unitOrdinal: number, blocks: [string, string]): { unitOrdinal: number; result: BaselineUnitResult } {
+    const range = (blockId: string) => ({ blockId, fromGrapheme: null, toGrapheme: null });
+    return {
+      unitOrdinal,
+      result: {
+        schema: BASELINE_UNIT_RESULT_SCHEMA,
+        unitOrdinal,
+        synopsis: `合成概述（单元 ${unitOrdinal}）。`,
+        entities: [{ name: `合成人物${unitOrdinal}`, kind: 'person', aliases: [], note: null, sourceRanges: [range(blocks[0])] }],
+        events: [],
+        relationships: [],
+        settingClaims: [{ subject: '合成之城', claim: unitOrdinal === 1 ? '位于北方' : '位于南方', sourceRanges: [range(blocks[1])] }],
+        conflicts: [],
+        unresolved: [],
+        confidence: 'high',
+      },
+    };
+  }
+
+  const CLOSED = [closedUnit(1, [BLOCK_A, BLOCK_B]), closedUnit(3, [BLOCK_C, BLOCK_D])];
+  const MESSAGE = buildCrossUnitMessage(CLOSED, 8);
+  const REQUEST_DIGEST = crossUnitRequestDigest(BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST, unitSetDigest(CLOSED));
+  const RESPONSE = JSON.stringify({
+    schema: 'ai7.baseline-manuscript-analysis.cross-unit-result/1',
+    findings: [{
+      kind: 'contradiction',
+      description: '合成矛盾：单元 1 与单元 3 对合成之城的方位陈述不一致。',
+      sides: [
+        { unitOrdinal: 1, sourceRanges: [{ blockId: '{{unit:1:block:2}}', fromGrapheme: null, toGrapheme: null }] },
+        { unitOrdinal: 3, sourceRanges: [{ blockId: '{{unit:3:block:2}}', fromGrapheme: null, toGrapheme: null }] },
+      ],
+      confidence: 'medium',
+    }],
+    notes: [],
+  });
+
+  beforeEach(async () => {
+    root = await mkdtemp(join(tmpdir(), 'ai7-cross-unit-test-'));
+    await writeFile(join(root, 'reduction.json'), JSON.stringify({
+      schema: 'ai7.model-fixture/1', identity: 'reduction', description: '合成测试夹具', basedOn: null,
+      provider: 'ai7-local-deterministic', model: 'ai7-deterministic-fixture',
+      entries: [{ unitOrdinal: 0, requestDigest: REQUEST_DIGEST, response: { kind: 'unit-result', text: RESPONSE, usage: { inputTokens: 700, outputTokens: 90 } } }],
+    }));
+  });
+
+  afterEach(async () => {
+    await rm(root, { recursive: true, force: true });
+  });
+
+  function reductionRequest(text: string): GenerateOptions {
+    return {
+      provider: LOCAL_DETERMINISTIC_ROUTE,
+      model: LOCAL_DETERMINISTIC_MODEL,
+      system: '合成系统提示。',
+      messages: [{ id: 'm1' as never, role: 'user', content: [{ type: 'text', text }], source: { kind: 'user' } }],
+    };
+  }
+
+  it('answers the reduction from its ordinal-0 entry with every cited block substituted', async () => {
+    const adapter = new Ai7LocalDeterministicAdapter(await loadModelFixture(root, 'reduction'), BASELINE_PROMPT_CONTRACT_DIGEST, codes);
+    const chunks = await collect(adapter.stream(reductionRequest(MESSAGE)));
+    const replayed = chunks.find((chunk) => chunk.type === 'block-end');
+    const text = replayed?.type === 'block-end' && replayed.block.type === 'text' ? replayed.block.text : '';
+    expect(text).not.toContain('{{unit:');
+    const parsed = parseCrossUnitResult(text, { closedOrdinals: [1, 3], citedBlocksByUnit: citedBlocksByUnit(CLOSED) });
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    // Each side cites the exact block the message listed second for its own unit.
+    expect(parsed.result.findings[0]!.sides.map((side) => side.sourceRanges[0]!.blockId)).toEqual([BLOCK_B, BLOCK_D]);
+    expect(chunks.find((chunk) => chunk.type === 'usage')).toEqual({ type: 'usage', usage: { inputTokens: 700, outputTokens: 90 } });
+  });
+
+  it('fails closed when the closed unit set is not the one the entry answers', async () => {
+    const adapter = new Ai7LocalDeterministicAdapter(await loadModelFixture(root, 'reduction'), BASELINE_PROMPT_CONTRACT_DIGEST, codes);
+    const other = buildCrossUnitMessage([CLOSED[0]!, closedUnit(4, [BLOCK_C, BLOCK_D])], 8);
+    expect(await collect(adapter.stream(reductionRequest(other))))
+      .toMatchObject([{ type: 'finish', reason: { kind: 'error', failure: { code: AI7_FAILURE_CODES.FIXTURE_MISMATCH, message: expect.stringContaining('跨单元归纳') } } }]);
+  });
+
+  it('never reads a unit message as a reduction, or a reduction as a unit', async () => {
+    const adapter = new Ai7LocalDeterministicAdapter(await loadModelFixture(root, 'reduction'), BASELINE_PROMPT_CONTRACT_DIGEST, codes);
+    // A unit message resolves by unit ordinal, finds no unit entry in this fixture, and says so.
+    expect(await collect(adapter.stream(request())))
+      .toMatchObject([{ type: 'finish', reason: { kind: 'error', failure: { message: expect.stringContaining('单元 1') } } }]);
+    expect(parseUnitMessageHeader(MESSAGE)).toBeNull();
+    expect(parseCrossUnitMessageHeader(`分析单元 1/1 · 单元摘要 ${ZERO_UNIT_DIGEST}`)).toBeNull();
+  });
+
+  it('leaves an out-of-range placeholder in place for the contract to refuse', () => {
+    const cited = citedBlocksByUnit(CLOSED);
+    expect(substituteCrossUnitBlockPlaceholders('{{unit:1:block:1}}', cited)).toBe(BLOCK_A);
+    expect(substituteCrossUnitBlockPlaceholders('{{unit:1:block:9}}', cited)).toBe('{{unit:1:block:9}}');
+    expect(substituteCrossUnitBlockPlaceholders('{{unit:2:block:1}}', cited)).toBe('{{unit:2:block:1}}');
+  });
+});
+
+/**
+ * The pinned unit-set digests of the committed sample1 fixtures (Issue #274). Each is rebuilt here
+ * from the fixture's own responses rather than from a Run: block identities are minted per import,
+ * and the digest indexes each cited block by its position, so any injective substitution of the
+ * `{{block:N}}` placeholders reproduces the exact digest a Run computes. That is what lets a
+ * hand-written ordinal-0 entry be keyed at all, and this suite is what keeps it honest.
+ */
+describe('sample1 cross-unit reduction entries', () => {
+  /** Enough synthetic identities for any unit of the sample1 manifest; distinct per unit and per position. */
+  function syntheticBlockIds(unitOrdinal: number): string[] {
+    return Array.from({ length: 32 }, (_item, index) => `blk_${String(unitOrdinal).padStart(2, '0')}${String(index + 1).padStart(2, '0')}${'0'.repeat(20)}`);
+  }
+
+  /**
+   * One closed unit set as a Run would hold it: for each ordinal the fixture's conforming response,
+   * with `{{block:N}}` filled from that unit's synthetic identities. `unitOneMarker` picks between the
+   * two unit-1 responses the happy fixture carries — the original and the one J-04's acknowledged edit
+   * recomputes — because they are what make two distinct closed sets of the same eight units.
+   */
+  function closedSet(fixture: ResolvedModelFixture, ordinals: readonly number[], unitOneMarker: string) {
+    return ordinals.map((unitOrdinal) => {
+      const candidates = Array.from(fixture.entries.values())
+        .filter((item) => item.unitOrdinal === unitOrdinal && item.response.kind === 'unit-result');
+      const chosen = candidates.length === 1
+        ? candidates[0]
+        : candidates.find((item) => item.response.kind === 'unit-result' && item.response.text.includes(unitOneMarker));
+      expect(chosen?.response.kind, `unit ${unitOrdinal}`).toBe('unit-result');
+      const blockIds = syntheticBlockIds(unitOrdinal);
+      const text = substituteBlockPlaceholders(chosen!.response.kind === 'unit-result' ? chosen!.response.text : '', blockIds);
+      const parsed = parseUnitResult(text, { unitOrdinal, blockIds });
+      expect(parsed.ok, `unit ${unitOrdinal} parses`).toBe(true);
+      return { unitOrdinal, result: parsed.ok ? parsed.result : (undefined as never) };
+    });
+  }
+
+  const SEVEN = [1, 3, 4, 5, 6, 7, 8] as const;
+  const EIGHT = [1, 2, 3, 4, 5, 6, 7, 8] as const;
+  const ORIGINAL_UNIT_ONE = '合成概述（单元 1）：';
+  const RECOMPUTED_UNIT_ONE = '合成概述（单元 1 · 已确认编辑后重算）';
+
+  it('pins one digest per closed unit set the fixtures reach, and every ordinal-0 entry answers one', async () => {
+    const happy = await loadModelFixture(FIXTURES_ROOT, 'sample1-baseline-happy');
+    const failure = await loadModelFixture(FIXTURES_ROOT, 'sample1-baseline-one-unit-failure');
+    const retry = await loadModelFixture(FIXTURES_ROOT, 'sample1-baseline-transient-retry');
+
+    // Set A — the seven units that close when unit 2 fails, with unit 1 as first analysed. Every
+    // first-baseline Run over sample1 under either variant reaches it.
+    const setA = unitSetDigest(closedSet(failure, SEVEN, ORIGINAL_UNIT_ONE));
+    // Set B — the same seven units after J-04's acknowledged edit recomputes unit 1. Every update Run
+    // reaches it, whichever of the three update modes asked for it.
+    const setB = unitSetDigest(closedSet(failure, SEVEN, RECOMPUTED_UNIT_ONE));
+    // Set C — all eight units, which only the happy fixture closes, since unit 2 answers there.
+    const setC = unitSetDigest(closedSet(happy, EIGHT, ORIGINAL_UNIT_ONE));
+    expect(new Set([setA, setB, setC]).size).toBe(3);
+    expect([setA, setB, setC]).toEqual([
+      '07dcb9d6dc825a008ba491c8f0fcb236252b8dba68ceaa1be738b2614473857f',
+      '330f5f44073d4758826cbe384c615677ff1e53fa55c546ac7b30bbb218d682e1',
+      '487d3aa59a9aa024db456117b35d6c46ea52590b2e1bf6a5d901dddcab9eaeac',
+    ]);
+
+    // The variants restate no reduction entry of their own: the two seven-unit sets are a property of
+    // the one-unit-failure lineage, and transient-retry settles unit 5 to the same result, so it
+    // reaches those same two sets and inherits both entries.
+    const keyOf = (setDigest: string) => fixtureEntryKey(0, crossUnitRequestDigest(BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST, setDigest));
+    expect(happy.entries.get(keyOf(setC))?.unitOrdinal).toBe(0);
+    for (const fixture of [failure, retry]) {
+      expect(fixture.entries.get(keyOf(setA))?.unitOrdinal).toBe(0);
+      expect(fixture.entries.get(keyOf(setB))?.unitOrdinal).toBe(0);
+    }
+    expect(retry.entries.get(keyOf(setA))).toEqual(failure.entries.get(keyOf(setA)));
+    expect(retry.entries.get(keyOf(setB))).toEqual(failure.entries.get(keyOf(setB)));
   });
 });
 

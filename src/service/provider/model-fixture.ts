@@ -15,6 +15,11 @@ import { DIGEST_PATTERN, hasExactKeys, isRecord, sha256Hex } from '../analysis/c
  * Fixtures carry public synthetic text only and echo no manuscript content beyond exact block
  * identities.
  *
+ * Unit ordinal `0` is not an Analysis Unit: it is the Run's one cross-unit reduction (ADR 0066),
+ * whose request digest is a function of the frozen cross-unit prompt contract and the exact closed
+ * unit set. It is keyed and resolved like any other entry, so nothing else about the fixture format
+ * moves and the schema string stays `ai7.model-fixture/1`.
+ *
  * An entry may additionally carry a `contentDigest` over the unit's own block texts. The request
  * digest binds the block identities of one import, so a fixture generated from that import answers
  * only it; the content digest binds the text alone, which is what lets the same entry answer a fresh
@@ -37,6 +42,7 @@ export type ModelFixtureResponse =
   | { readonly kind: 'interrupted'; readonly message: string };
 
 export interface ModelFixtureEntry {
+  /** The Analysis Unit this entry answers, or `0` for the Run's one cross-unit reduction. */
   readonly unitOrdinal: number;
   readonly requestDigest: string;
   /** The 1-based attempt this entry answers, or `null` for an entry that answers every attempt. */
@@ -141,7 +147,7 @@ export function parseModelFixture(value: unknown): ModelFixture {
     // still refused.
     requireFixture(isRecord(entry) &&
       hasExactKeys(entry, ['unitOrdinal', 'requestDigest', 'response', ...OPTIONAL_ENTRY_KEYS.filter((key) => key in entry)]) &&
-      Number.isSafeInteger(entry.unitOrdinal) && (entry.unitOrdinal as number) >= 1 &&
+      Number.isSafeInteger(entry.unitOrdinal) && (entry.unitOrdinal as number) >= 0 &&
       typeof entry.requestDigest === 'string' && DIGEST_PATTERN.test(entry.requestDigest), '夹具条目无效。');
     const attempt = 'attempt' in entry ? entry.attempt : null;
     requireFixture(!('attempt' in entry) || (Number.isSafeInteger(attempt) && (attempt as number) >= 1 && (attempt as number) <= MAX_FIXTURE_ATTEMPT), '夹具条目的尝试序号无效。');

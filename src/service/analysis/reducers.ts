@@ -2,6 +2,8 @@ import type {
   AnalysisAssuranceAxis,
   AnalysisConflictProjection,
   AnalysisCoverageAxis,
+  AnalysisCrossUnitFindingProjection,
+  AnalysisCrossUnitReductionProjection,
   AnalysisEntityProjection,
   AnalysisEventProjection,
   AnalysisGapProjection,
@@ -16,16 +18,52 @@ import type {
   CoverageManifestProjection,
 } from '../../shared/protocol.js';
 import type { BaselineUnitResult } from './contract.js';
+import type { CrossUnitFinding } from './cross-unit-contract.js';
 
 /**
  * Typed reducers over Analysis Unit results. Section-level and Book-level reduction preserve unit
  * lineage, gaps, and conflicts; a deterministic cross-unit contradiction/continuity pass runs before
  * the final synthesis; no reducer manufactures certainty — a divergence is reported as an unresolved
  * conflict, never resolved by choosing a side.
+ *
+ * Since Issue #274 the deterministic pass is a pre-filter for one further stage: the model-driven
+ * cross-unit reduction (ADR 0066), whose outcome the execution owner hands in. Its findings enter the
+ * Result Set beside the deterministic conflicts with lineage to every unit they cite; they never
+ * modify a unit result, never merge into the conflict list, and never resolve a side.
  */
 export type UnitOutcome =
   | { readonly unitOrdinal: number; readonly state: 'closed'; readonly result: BaselineUnitResult }
   | { readonly unitOrdinal: number; readonly state: 'gap'; readonly code: AnalysisGapProjection['code']; readonly reason: string };
+
+/**
+ * Why a cross-unit reduction did not close. The three the transport can produce are the unit loop's
+ * own codes; `policy-bounded` and `run-budget-ceiling-reached` are the two the reduction adds,
+ * because it is the only step whose dispatch a launch policy or a spent ceiling can refuse on its own.
+ */
+export type CrossUnitGapCode =
+  | 'adapter-failure'
+  | 'contract-invalid'
+  | 'interrupted'
+  | 'egress-refused'
+  | 'policy-bounded'
+  | 'run-budget-ceiling-reached';
+
+/** What the reduction did, as the execution owner observed it. `not-run` is fewer than two closed units. */
+export type CrossUnitOutcome =
+  | {
+      readonly state: 'closed';
+      readonly findings: ReadonlyArray<CrossUnitFinding>;
+      readonly requestDigest: string;
+      readonly usage: { readonly inputTokens: number; readonly outputTokens: number } | null;
+    }
+  | { readonly state: 'gap'; readonly code: CrossUnitGapCode; readonly reason: string; readonly requestDigest: string }
+  | { readonly state: 'not-run'; readonly reason: string };
+
+/** The outcome of a reduction that was never asked for: the default for every caller without one. */
+export const CROSS_UNIT_NOT_RUN: Extract<CrossUnitOutcome, { state: 'not-run' }> = {
+  state: 'not-run',
+  reason: '已闭合单元少于两个，跨单元归纳未发起。',
+};
 
 export interface BaselineReduction {
   readonly coverage: AnalysisCoverageAxis;
@@ -35,6 +73,9 @@ export interface BaselineReduction {
   readonly synthesis: AnalysisSynthesisProjection;
   readonly gaps: ReadonlyArray<AnalysisGapProjection>;
   readonly conflicts: ReadonlyArray<AnalysisConflictProjection>;
+  /** The model-driven findings, each with lineage to every unit it cites; empty unless the reduction closed. */
+  readonly crossUnitFindings: ReadonlyArray<AnalysisCrossUnitFindingProjection>;
+  readonly crossUnitReduction: AnalysisCrossUnitReductionProjection;
 }
 
 export const ASSURANCE_STATEMENT = '仅为模型输出的结构化归纳；不构成事实判定、编辑评审或稿件变更。' as const;
@@ -250,15 +291,38 @@ function stage(
   return { stage: name, state: gaps > 0 ? 'closed-with-gaps' : 'closed', inputCount };
 }
 
+/** The stage state of the model-driven reduction: what it did, not how many gaps the units carried. */
+function crossUnitStageState(crossUnit: CrossUnitOutcome): AnalysisReducerStageProjection['state'] {
+  if (crossUnit.state === 'not-run') return 'not-run';
+  return crossUnit.state === 'gap' ? 'closed-with-gaps' : 'closed';
+}
+
+/**
+ * The findings as the Result Set carries them: the contract's typed finding plus the lineage the
+ * revision is read by — every unit it cites, sorted and deduplicated from its own sides. Nothing is
+ * merged, reordered, or resolved; the projection adds lineage and takes nothing away.
+ */
+function crossUnitFindingProjections(findings: ReadonlyArray<CrossUnitFinding>): AnalysisCrossUnitFindingProjection[] {
+  return findings.map((finding) => ({
+    kind: finding.kind,
+    description: finding.description,
+    sides: finding.sides.map((side) => ({ unitOrdinal: side.unitOrdinal, sourceRanges: side.sourceRanges.map((range) => ({ ...range })) })),
+    unitOrdinals: sortedUnique(finding.sides.map((side) => side.unitOrdinal)),
+    confidence: finding.confidence,
+  }));
+}
+
 /**
  * Reduce the complete unit set of one revision. `reusedUnitOrdinals` names the closed units whose
  * result was copied from the predecessor revision by lineage; they count as closed coverage and
- * their reuse is disclosed in the coverage axis, never hidden.
+ * their reuse is disclosed in the coverage axis, never hidden. `crossUnit` is the model-driven
+ * reduction's outcome, which the execution owner observed inside the same Run envelope.
  */
 export function reduceBaselineAnalysis(
   manifest: CoverageManifestProjection,
   outcomes: ReadonlyArray<UnitOutcome>,
   reusedUnitOrdinals: ReadonlySet<number> = new Set(),
+  crossUnit: CrossUnitOutcome = CROSS_UNIT_NOT_RUN,
 ): BaselineReduction {
   const byOrdinal = new Map(outcomes.map((outcome) => [outcome.unitOrdinal, outcome] as const));
   const units = manifest.units;
@@ -306,8 +370,8 @@ export function reduceBaselineAnalysis(
     });
   }
 
-  const crossUnit = detectCrossUnitConflicts(closed);
-  const conflicts: AnalysisConflictProjection[] = [...unitReportedConflicts(closed), ...crossUnit];
+  const deterministicConflicts = detectCrossUnitConflicts(closed);
+  const conflicts: AnalysisConflictProjection[] = [...unitReportedConflicts(closed), ...deterministicConflicts];
   const synthesis: AnalysisSynthesisProjection = {
     synopsis: sections.map((section) => section.synopsis).filter((text) => text.length > 0).join('\n'),
     entities: mergeEntities(closed),
@@ -318,10 +382,19 @@ export function reduceBaselineAnalysis(
     unresolved: collectNotes(closed, (result) => result.unresolved),
   };
 
+  const crossUnitFindings = crossUnitFindingProjections(crossUnit.state === 'closed' ? crossUnit.findings : []);
+  const crossUnitReduction: AnalysisCrossUnitReductionProjection = {
+    state: crossUnit.state,
+    reason: crossUnit.state === 'closed' ? null : crossUnit.reason,
+    requestDigest: crossUnit.state === 'not-run' ? null : crossUnit.requestDigest,
+    usage: crossUnit.state === 'closed' ? crossUnit.usage : null,
+    findingCount: crossUnitFindings.length,
+  };
   const stages: AnalysisReducerStageProjection[] = [
     stage('unit-validation', ordered.length, gaps.length),
     stage('section-reduction', sections.length, sections.filter((section) => section.gapUnitOrdinals.length > 0).length),
     stage('contradiction-continuity', closed.length, gaps.length),
+    { stage: 'cross-unit-reduction', state: crossUnitStageState(crossUnit), inputCount: closed.length },
     stage('book-synthesis', sections.length, gaps.length),
   ];
   const unitsReused = closed.filter((outcome) => reusedUnitOrdinals.has(outcome.unitOrdinal)).length;
@@ -337,12 +410,17 @@ export function reduceBaselineAnalysis(
     unitsReused,
     gapCount: gaps.length,
   };
+  // A stage that carried gaps through qualifies the axis; a stage that never ran does not, because
+  // `not-run` reports that there was nothing for it to close, not that something was lost.
+  const stagesCarriedGaps = stages.some((entry) => entry.state === 'closed-with-gaps');
   const reducerClosure: AnalysisReducerClosureAxis = {
     axis: 'reducer-closure',
-    state: stages.every((entry) => entry.state === 'closed') ? 'closed' : 'closed-with-gaps',
-    label: stages.every((entry) => entry.state === 'closed')
+    state: stagesCarriedGaps ? 'closed-with-gaps' : 'closed',
+    label: !stagesCarriedGaps
       ? '归约/综合闭合：全部阶段已闭合'
-      : `归约/综合闭合：已闭合 · 保留 ${gaps.length} 处缺口`,
+      : gaps.length > 0
+        ? `归约/综合闭合：已闭合 · 保留 ${gaps.length} 处缺口`
+        : '归约/综合闭合：已闭合 · 跨单元归纳保留 1 处缺口',
     stages,
   };
   const lowConfidence = closed.filter((outcome) => outcome.result.confidence === 'low').length;
@@ -361,7 +439,10 @@ export function reduceBaselineAnalysis(
     unresolvedConflictCount: conflicts.length,
     unresolvedItemCount,
     lowConfidenceUnitCount: lowConfidence,
+    // Disclosed beside the deterministic count, never folded into it: the axis states stay exactly the
+    // readings they were, and a model-driven finding is evidence for the editor rather than a verdict.
+    crossUnitFindingCount: crossUnitFindings.length,
     statement: ASSURANCE_STATEMENT,
   };
-  return { coverage, reducerClosure, assurance, sections, synthesis, gaps, conflicts };
+  return { coverage, reducerClosure, assurance, sections, synthesis, gaps, conflicts, crossUnitFindings, crossUnitReduction };
 }

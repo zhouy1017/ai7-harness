@@ -61,6 +61,11 @@ import {
   sha256Hex,
 } from './canonical.js';
 import { BASELINE_PROMPT_CONTRACT_DIGEST, BASELINE_UNIT_RESULT_SCHEMA, unitRequestDigest, type BaselineUnitResult } from './contract.js';
+import {
+  BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST,
+  BASELINE_CROSS_UNIT_RESULT_SCHEMA,
+  CROSS_UNIT_FINDING_KINDS,
+} from './cross-unit-contract.js';
 import { deriveCoverageManifest, manifestCoversEveryBlock, manifestDigestIsExact, type ManifestBlockInput } from './coverage-manifest.js';
 import {
   BASELINE_ANALYSIS_CONTRACT_VERSION,
@@ -86,17 +91,33 @@ export const RESULT_SET_REVISION_SCHEMA = 'ai7.baseline-manuscript-analysis.resu
 export const RESULT_SET_SUCCESSOR_REVISION_SCHEMA = 'ai7.baseline-manuscript-analysis.result-set-revision/2' as const;
 export const REDUCER_DESCRIPTOR = {
   schema: 'ai7.baseline-manuscript-analysis.reducers/1',
-  stages: ['unit-validation', 'section-reduction', 'contradiction-continuity', 'book-synthesis'],
+  stages: ['unit-validation', 'section-reduction', 'contradiction-continuity', 'cross-unit-reduction', 'book-synthesis'],
   contradictionRules: ['alias-collision', 'entity-kind-divergence', 'setting-claim-divergence'],
+  crossUnitFindingKinds: CROSS_UNIT_FINDING_KINDS,
   certaintyPolicy: 'report-only-never-resolve',
 } as const;
 export const REDUCER_DIGEST = sha256Hex(canonicalJson(REDUCER_DESCRIPTOR));
-export const SCHEMA_DIGEST = sha256Hex(canonicalJson({ contractVersion: BASELINE_ANALYSIS_CONTRACT_VERSION, unitResultSchema: BASELINE_UNIT_RESULT_SCHEMA, promptContractDigest: BASELINE_PROMPT_CONTRACT_DIGEST }));
+export const SCHEMA_DIGEST = sha256Hex(canonicalJson({
+  contractVersion: BASELINE_ANALYSIS_CONTRACT_VERSION,
+  unitResultSchema: BASELINE_UNIT_RESULT_SCHEMA,
+  promptContractDigest: BASELINE_PROMPT_CONTRACT_DIGEST,
+  crossUnitResultSchema: BASELINE_CROSS_UNIT_RESULT_SCHEMA,
+  crossUnitPromptContractDigest: BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST,
+}));
 
 const EXECUTION_STEPS = ['派生覆盖清单', '逐单元执行基线稿件分析契约 v1', '章节归约', '跨单元矛盾与连续性核对', '全书综合', '形成结果集修订版'] as const;
 const UPDATE_EXECUTION_STEPS = ['派生覆盖清单并计算复用计划', '按血缘复用兼容单元', '仅对重算单元逐单元执行基线稿件分析契约 v1', '章节归约', '跨单元矛盾与连续性核对', '全书综合', '追加后继结果集修订版'] as const;
 const REDUCER_STAGES = ['unit-validation', 'section-reduction', 'contradiction-continuity', 'book-synthesis'] as const;
-const SUCCESSOR_BEHAVIOR = '每次更新都是新的用户发起任务，经准备 → 计划预览 → 标准直接授权 → 执行后，在同一结果集上追加下一序号的不可变后继修订版；前一修订版不被改写，且始终可在修订历史中按其原始稿件 pin 查看。' as const;
+/** How a revision recorded before Issue #274 reads: its Run had no cross-unit reduction to report. */
+const PRE_CROSS_UNIT_REDUCTION = {
+  state: 'not-run',
+  reason: '该修订版由未包含跨单元归纳的运行产生。',
+  requestDigest: null,
+  usage: null,
+  findingCount: 0,
+} as const;
+
+const SUCCESSOR_BEHAVIOR ='每次更新都是新的用户发起任务，经准备 → 计划预览 → 标准直接授权 → 执行后，在同一结果集上追加下一序号的不可变后继修订版；前一修订版不被改写，且始终可在修订历史中按其原始稿件 pin 查看。' as const;
 const ACTIVE_RUN_REASON = '当前已有分析任务在调度或执行中；在其结束前不能准备新的更新任务。' as const;
 const SYNC_UNAVAILABLE_REASON = '结果集修订版仍绑定当前稿件；只有在已确认编辑使精确修订版新鲜度为“已过期”后才可同步到当前稿件。' as const;
 
@@ -197,7 +218,12 @@ export interface RunProgress {
   readonly attemptState: RunAttemptState | null;
   readonly completedAttempts: number;
   readonly longestSettledUnitMs: number | null;
+  /** Which declared step of the Run is in flight: the unit loop, or the one cross-unit reduction after it. */
+  readonly stage: RunProgressStage;
 }
+
+/** The Run's declared steps, in the order the execution owner performs them. */
+export type RunProgressStage = 'units' | 'cross-unit-reduction';
 
 export type ProgressReader = (runRecordId: string) => RunProgress | null;
 
@@ -1108,6 +1134,10 @@ export class BaselineAnalysisStore {
       assurance: body.assurance as BaselineAnalysisResultSetRevisionProjection['assurance'],
       gaps: body.gaps as BaselineAnalysisResultSetRevisionProjection['gaps'],
       conflicts: body.conflicts as BaselineAnalysisResultSetRevisionProjection['conflicts'],
+      // A revision written before Issue #274 carries neither field; it is immutable history and is read
+      // as what it is — a revision whose Run never ran the reduction — never rewritten to add them.
+      crossUnitFindings: (body.crossUnitFindings ?? []) as BaselineAnalysisResultSetRevisionProjection['crossUnitFindings'],
+      crossUnitReduction: (body.crossUnitReduction ?? PRE_CROSS_UNIT_REDUCTION) as BaselineAnalysisResultSetRevisionProjection['crossUnitReduction'],
       sections: body.sections as BaselineAnalysisResultSetRevisionProjection['sections'],
       synthesis: body.synthesis as BaselineAnalysisResultSetRevisionProjection['synthesis'],
       units,
@@ -2068,6 +2098,10 @@ export class BaselineAnalysisStore {
         assurance: input.reduction.assurance,
         gaps: input.reduction.gaps,
         conflicts: input.reduction.conflicts,
+        // The model-driven findings sit beside the deterministic conflicts, never inside them, and the
+        // reduction's own attempt is recorded here because it forms no execution-span row of its own.
+        crossUnitFindings: input.reduction.crossUnitFindings,
+        crossUnitReduction: input.reduction.crossUnitReduction,
         sections: input.reduction.sections,
         synthesis: input.reduction.synthesis,
         unitDigests: unitRecords.map((unit) => ({ unitOrdinal: unit.unitOrdinal, state: unit.state, sha256: unit.record.digest })),

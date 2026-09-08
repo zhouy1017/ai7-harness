@@ -142,6 +142,7 @@ function deny(reason: string): LaunchPolicyProjection {
       decision: 'deny',
       authorizedLiveTransmissionCount: 0,
       liveTransmissionAllowed: false,
+      crossUnitReductionAllowed: false,
       label: '开发与持续集成：零次实时传输',
     },
     externalExport: {
@@ -192,8 +193,11 @@ function verifyDevelopmentCiPolicy(policy: Record<string, unknown>): void {
   );
 }
 
-/** Provider Processing v4: default deny with exactly the one developer-live eligible-only rule and its exact binding. */
-function verifyDeveloperLivePolicy(policy: Record<string, unknown>): void {
+/**
+ * Provider Processing v4: default deny with exactly the one developer-live eligible-only rule and its
+ * exact binding. Returns whether the rule names the cross-unit reduction's transmission.
+ */
+function verifyDeveloperLivePolicy(policy: Record<string, unknown>): boolean {
   requirePolicy(policy['operationalScope'] === 'developer-live' && policy['lifecycleStatus'] === 'active');
   const selection = policy['trustedSelection'];
   requirePolicy(
@@ -230,6 +234,11 @@ function verifyDeveloperLivePolicy(policy: Record<string, unknown>): void {
       transmissions['identicalRequestReplaysFromProviderResultCache'] === true &&
       transmissions['repeatedTestItemIdentifierAllowed'] === false,
   );
+  // The cross-unit reduction's transmission (ADR 0066), which v4 does not name. An absent key is the
+  // v4 document as it stands and means `false`; a key that is present but not a boolean is a policy
+  // the launch cannot read, and an unreadable policy is the zero-transmission denial.
+  const crossUnitReductionAllowed = (transmissions as Record<string, unknown>)['crossUnitReductionAllowed'];
+  requirePolicy(crossUnitReductionAllowed === undefined || typeof crossUnitReductionAllowed === 'boolean');
   const preconditions = rule['authorizationPreconditions'];
   requirePolicy(
     isRecord(preconditions) &&
@@ -251,6 +260,7 @@ function verifyDeveloperLivePolicy(policy: Record<string, unknown>): void {
   requirePolicy(isRecord(source) && source['privateManuscriptAllowed'] === false && source['otherBookRefusedBeforeDispatch'] === true);
   const capture = rule['capture'];
   requirePolicy(isRecord(capture) && capture['fixtureEmissionAllowed'] === false && capture['uploadAllowed'] === false && capture['providerResultCacheAllowed'] === true);
+  return crossUnitReductionAllowed === true;
 }
 
 /**
@@ -371,7 +381,7 @@ export async function resolveSourceCheckoutLaunchPolicy(
     };
     const publicReleasePermission = { present: false as const, label: '公开发布许可：不存在' as const };
     if (requestedScope === 'developer-live') {
-      verifyDeveloperLivePolicy(selectedPolicy);
+      const crossUnitReductionAllowed = verifyDeveloperLivePolicy(selectedPolicy);
       return {
         integrityState: 'verified',
         denialReason: null,
@@ -382,6 +392,7 @@ export async function resolveSourceCheckoutLaunchPolicy(
           decision: 'eligible-only',
           authorizedLiveTransmissionCount: 'bounded-by-run',
           liveTransmissionAllowed: true,
+          crossUnitReductionAllowed,
           label: '开发者实时：实时传输受运行边界约束',
         },
         externalExport,
@@ -399,6 +410,8 @@ export async function resolveSourceCheckoutLaunchPolicy(
         decision: 'deny',
         authorizedLiveTransmissionCount: 0,
         liveTransmissionAllowed: false,
+        // v1 authorizes zero transmissions, so no step of a Run may transmit, this one included.
+        crossUnitReductionAllowed: false,
         label: '开发与持续集成：零次实时传输',
       },
       externalExport,
