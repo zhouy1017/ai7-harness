@@ -61,4 +61,8 @@ The four renderer sites #303's sweep routed to #304 (`src/renderer/index.ts:2166
 - **A fixed stall timeout.** Rejected: ninety seconds is normal for this model and ten minutes is not, and the product can measure the difference from its own steps instead of guessing in advance.
 - **Fix the pill, the timestamps, and the workbench actions one by one.** Rejected: P3, P4, and P7 are one defect — a surface asserting something not derived from current state or ranked by what an editor needs — and Phase 2 builds four families of new surfaces that would repeat it.
 
+## Erratum of the same day
+
+V2-UX-LIVE-001 and the matching activity-projection bullet first said "completed transmissions". #305's preflight showed the word is wrong on two of the three routes the signal must serve: the deterministic route transmits nothing and a Provider Result Cache replay transmits nothing, yet both complete an attempt an editor should see counted. The clause now reads "completed model attempts (each a transmission on a live route; a replay or a deterministic turn on the others)". The fact the signal composes is unchanged; the name is honest on every route.
+
 This decision governs presentation only. It changes no domain semantics, no Task, Run, Proposal, Effect, or export authority, no Provider Resolution Plan field, and no Journey's pinned values; it changes where those values sit and what else must be true beside them.
