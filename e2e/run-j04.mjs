@@ -881,11 +881,11 @@ async function main() {
       const supersededFacts=facts(superseded);
       return active?.parentElement===sidecar && past?.parentElement===sidecar &&
         past.querySelector(':scope > summary')?.textContent==='其他 Revision（1）' &&
-        activeFacts['Model Role']==='Main Editorial Role' &&
-        activeFacts['Readable Scope']==='current-book-primary-manuscript-revision、current-book-source-version' &&
-        activeFacts['未声明']==='Capability、Provider Binding、Credential、Network、Effect、Enrollment、Apply' &&
+        activeFacts['模型角色']==='Main Editorial Role' &&
+        activeFacts['可读范围']==='current-book-primary-manuscript-revision、current-book-source-version' &&
+        activeFacts['未声明']==='AI7 能力、模型提供方绑定、凭据访问、网络访问、受控动作、后台分析登记、AI7 正式应用' &&
         activeFacts['SHA-256']===${JSON.stringify(SIDECAR_REVISION_2_DIGEST)} &&
-        supersededFacts['Model Role']==='Main Editorial Role' &&
+        supersededFacts['模型角色']==='Main Editorial Role' &&
         supersededFacts['权限上限']==='未声明任何权限（8 项均为空）' && supersededFacts['未声明']===undefined &&
         /^[0-9a-f]{64}$/.test(supersededFacts['SHA-256']) &&
         supersededFacts['SHA-256']!==${JSON.stringify(SIDECAR_REVISION_2_DIGEST)} &&

@@ -410,15 +410,15 @@ async function main() {
         sidecarFacts['侧车身份']===${JSON.stringify(SIDECAR_ID)} && sidecarFacts['当前生效 Revision']==='空（本图书未启用）' &&
         sidecarFacts['可审阅后继']==='空（无）' && sidecarFacts['本图书 pin 历史']==='空（无）' &&
         revision1Facts['规范字节']==='588 bytes' && revision1Facts['SHA-256']===${JSON.stringify(SIDECAR_REVISION_1_DIGEST)} &&
-        revision1Facts['Model Role']==='Main Editorial Role' &&
+        revision1Facts['模型角色']==='Main Editorial Role' &&
         revision1Facts['权限上限']==='未声明任何权限（8 项均为空）' && revision1Facts['未声明']===undefined &&
-        revision1Facts['Capability']===undefined && revision1Facts['Readable Scope']===undefined &&
-        revision1Facts['Apply']===undefined && !revision1.textContent.includes('空（无）') &&
+        revision1Facts['AI7 能力']===undefined && revision1Facts['可读范围']===undefined &&
+        revision1Facts['AI7 正式应用']===undefined && !revision1.textContent.includes('空（无）') &&
         revision2Facts['规范字节']==='660 bytes' && revision2Facts['SHA-256']===${JSON.stringify(SIDECAR_REVISION_2_DIGEST)} &&
-        revision2Facts['Model Role']==='Main Editorial Role' &&
-        revision2Facts['Readable Scope']==='current-book-primary-manuscript-revision、current-book-source-version' &&
-        revision2Facts['未声明']==='Capability、Provider Binding、Credential、Network、Effect、Enrollment、Apply' &&
-        revision2Facts['权限上限']===undefined && revision2Facts['Capability']===undefined &&
+        revision2Facts['模型角色']==='Main Editorial Role' &&
+        revision2Facts['可读范围']==='current-book-primary-manuscript-revision、current-book-source-version' &&
+        revision2Facts['未声明']==='AI7 能力、模型提供方绑定、凭据访问、网络访问、受控动作、后台分析登记、AI7 正式应用' &&
+        revision2Facts['权限上限']===undefined && revision2Facts['AI7 能力']===undefined &&
         !revision2.textContent.includes('空（无）') &&
         revision1.parentElement===sidecar && revision2.parentElement===sidecar && !text.includes('其他 Revision') &&
         text.includes('不创建 Task、Plan、Run 或 Session') && text.includes('不读取图书、稿件或来源内容') &&
