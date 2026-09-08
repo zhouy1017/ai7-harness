@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 ---
 
 # Admit multi-format manuscript intake, keep the original as the Source Version, and widen the bounded DOCX import into a classified one
@@ -70,4 +70,4 @@ Import stays local: no network, no credential, no Harness, no model (V2-UX-IMP-0
 
 ## Status
 
-Proposed by the Commander on 2026-09-08 for the Owner's acceptance. The one decision that is the Owner's alone is §5's dependency choice as reported in the pull request that adds it; everything else follows from records already in force (V2-UX-IMP-001 to 012, ADR 0035, ADR 0043, ADR 0044, ADR 0070 §3).
+Accepted by the Owner on 2026-09-08. Proposed by the Commander the same day; the one decision that was the Owner's alone is §5's converter policy, accepted as written, with the exact package, version, size, and licence of any converter still reported in the pull request that adds it under ADR 0070 §3. Everything else follows from records already in force (V2-UX-IMP-001 to 012, ADR 0035, ADR 0043, ADR 0044, ADR 0070 §3).
