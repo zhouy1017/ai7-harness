@@ -38,3 +38,82 @@ Issue and pull request. Neither exception grants application distribution,
 production learning, export, external delivery, publication, Public Release
 Permission, or release-asset use. Runtime derivatives remain confined to
 disposable external test data roots under the existing cleanup lifecycle.
+
+## Import verdicts
+
+Measured at `dev@2b5d3eeed81afbdf4d1cce4c1c84a467fafca92a` with parser identity
+`ai7-docx-fflate-saxes/1`, by calling `parseDocx` once per admitted file exactly as
+`tests/unit/docx.test.ts` calls it. Any change to `src/service/docx.ts` is a reason to
+re-measure. Recorded for
+[Issue #297](https://github.com/zhouy1017/ai7-harness/issues/297);
+[Issue #313](https://github.com/zhouy1017/ai7-harness/issues/313) designs against this
+table and [Issue #311](https://github.com/zhouy1017/ai7-harness/issues/311) depends on
+it.
+
+Only counters and the parser's own structural refusal messages are recorded here. No
+block text, no document title, and no other manuscript-derived string was captured,
+printed, or committed; the probe that produced these numbers was a throwaway deleted
+before the commit rather than integrated.
+
+A refusal has two layers, and only the outer one is visible to an editor. The parser
+throws `DOCX_REJECTED:<structural reason>` (`src/service/docx.ts:84`); `stageSelectedDocx`
+catches it and flattens every reason to one sentence,
+`该 DOCX 不符合当前受限本地导入边界。` (`src/service/store.ts:3662`). The structural
+reason is what this table records.
+
+| Exact path under `SampleBooks/` | Format | Bytes | Imports today | Nature | Test input today | Settled decision | Recommendation |
+| --- | --- | ---: | --- | --- | --- | --- | --- |
+| `1蟠虺（修订290326字).docx` | DOCX | 546758 | No — `non-default terminal section properties` (`docx.ts:316`) | Editable | No <sup>1</sup> | stays admitted; today unimportable; the bounded boundary widens only through its own Issue, which #313's design decides | Accidental narrowing of the parser; worth its own Issue |
+| `2听漏（定稿368544字）.docx` | DOCX | 631075 | No — `non-default terminal section properties` (`docx.ts:316`) | Editable | No <sup>1</sup> | stays admitted; today unimportable; the bounded boundary widens only through its own Issue, which #313's design decides | Accidental narrowing of the parser; worth its own Issue |
+| `3天兽（定稿395870字)##＊.doc` | DOC | 1173504 | No — `selected file is not DOCX` (`docx.ts:115`), decided from the extension before any byte is read | Editable after conversion | No | stays admitted; intake is #313's (V2-UX-IMP-001 admits any format; conversion or source-only retention is that slice's to settle) | Not a parser bound at all; #313 owns it |
+| `春歌(一次通读后电子版).pdf` | PDF | 4330883 | No — `selected file is not DOCX` (`docx.ts:115`), decided from the extension before any byte is read | Source-only by nature (fixed layout) <sup>2</sup> | No | stays admitted; intake is #313's (V2-UX-IMP-001 admits any format; conversion or source-only retention is that slice's to settle) | Source-only retention under V2-UX-IMP-006; #313 owns it |
+| `蟠虺.docx` | DOCX | 43661 | No — `non-default terminal section properties` (`docx.ts:316`) | Editable | No <sup>1</sup> | stays admitted; today unimportable; the bounded boundary widens only through its own Issue, which #313's design decides | Accidental narrowing of the parser; worth its own Issue |
+| `sample1.docx` — **control** | DOCX | 29550 | Yes — 97 blocks, 8289 characters; fidelity `inline-styles` 266, `sections` 1, all other categories 0 | Editable | Yes | usable as test input under #311 | Control row: it reproduces the ADR 0044 baseline, which is what proves the probe read the parser correctly |
+
+<sup>1</sup> Not importable, so not a test input through the bounded path. Its content
+may still serve #311's composed-fixture builder, because that builder assembles its own
+DOCX container — but only if the builder reads the admitted file by some path other than
+`parseDocx`, which refuses it.
+
+<sup>2</sup> A by-design expectation from the format, not a measurement: the file was
+never opened. #313 decides it.
+
+**Three of the four admitted DOCX files refuse, not two.**
+`1蟠虺（修订290326字).docx` had never been attempted before this measurement and refuses
+for the same reason as the two already known. Only exact `sample1` imports.
+
+**What fires first, and why it reads as accidental.** All three DOCX refusals stop at
+`src/service/docx.ts:316`, on the body-level `<w:sectPr>` attribute set. An accepted
+terminal section must carry either no attributes at all — with no child elements
+(`docx.ts:339`) — or exactly `rsidR` and `rsidRPr` with children exactly `pgSz`, `pgMar`,
+`cols`, `docGrid` (`docx.ts:341`). The second shape is `sample1`'s own, named `'sample1'`
+in the code, and `parseDocx` then refuses even a matching document unless it is
+byte-exact `sample1` (`docx.ts:647-650`). So the branch admits exactly two documents: a
+synthetic zero-attribute container, and `sample1`. That is a fingerprint of the baseline
+rather than a boundary any requirement or ADR chose. No design record makes section
+properties a precondition for import: V2-UX-IMP-002 lists sections as a fidelity
+*category* to classify, the parser's own `sections` category already carries a
+`降级导入` label and detail, and V2-UX-IMP-005 makes an explicit Import Degradation
+Decision the design's answer to degradation. Refusing the file forecloses the decision
+the design says the editor should get to make.
+
+**A second gate stands behind the first.** This is read from the code, not measured —
+these files never reached it. Even with the terminal-section condition widened, a
+document with any inline style would then be refused at `docx.ts:661`
+(`document uses a fidelity branch outside the bounded import`), because
+`deriveImportFidelityPlan` admits only two projections: all-zero, or `sample1`'s exact
+266/1 shape at `sample1`'s exact digest and byte count (`docx.ts:615-632`). Widening the
+bounded import is therefore not a one-line change; the Issue that takes it on faces two
+gates in series.
+
+**These are narrowings, not the parser's safety bounds.** The archive, entry-count,
+entry-size, ZIP-ratio, XML nesting, DTD and entity, path-traversal and active-content
+checks are deliberate hardening against hostile input, and none of them fired for any
+admitted file. Nothing here recommends relaxing them. The two conditions above are of a
+different kind: they encode what `sample1` happens to look like.
+
+**`.doc` and `.pdf` are refused on the extension**, at `docx.ts:115` inside
+`safeDisplayName`, called from the first statement of `parseDocx` (`docx.ts:641`). The
+file is never opened, so this measurement says nothing about whether either file's
+contents could be read. `stageSelectedDocx` adds no separate format gate of its own
+(`src/service/store.ts:3589`), so `parseDocx` is the entire intake boundary today.
