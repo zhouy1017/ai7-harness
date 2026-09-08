@@ -5,7 +5,8 @@ import { DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE } from '../../shared/prote
 import type { DeveloperLiveRuntime } from '../launch-policy.js';
 import { CredentialBroker, type CredentialSlotBinding, type SecretResolver } from '../provider/credential-broker.js';
 import { evaluateRunBudgetCeiling, type ClassifiedModelFailure, type RunBudgetCeiling, type UsageFacts } from '../provider/classification.js';
-import { DeepSeekOpenAiCompatibleAdapter, OPENCODE_GO_ROUTE_PROFILE, isProviderAccountLimit } from '../provider/deepseek-adapter.js';
+import { DeepSeekOpenAiCompatibleAdapter, OPENCODE_GO_ROUTE_PROFILE, isProviderAccountLimit, type ProviderRouteProfile } from '../provider/deepseek-adapter.js';
+import { OPENCODE_GO_V4_FLASH_PROFILE } from '../provider/model-profile.js';
 import {
   LOCAL_DETERMINISTIC_MODEL,
   LOCAL_DETERMINISTIC_ROUTE,
@@ -242,7 +243,7 @@ export class BaselineAnalysisExecutionOwner {
     const fixture = this.#deps.fixture;
     // The route the plan froze, resolved once: the deterministic fixture, or the live route profile.
     const route: ExecutionRouteId = live === null ? LOCAL_DETERMINISTIC_ROUTE : OPENCODE_GO_ROUTE;
-    const model = live === null ? LOCAL_DETERMINISTIC_MODEL : OPENCODE_GO_ROUTE_PROFILE.model;
+    const model = live === null ? LOCAL_DETERMINISTIC_MODEL : OPENCODE_GO_V4_FLASH_PROFILE.model;
     const credentialSlot = live === null ? 'deepseek-api-key' as const : OPENCODE_GO_ROUTE_PROFILE.credentialSlot;
     const credentialReference = live === null ? facts.credentialReference : DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE;
     const runBudgetCeiling: RunBudgetCeiling = live === null ? { kind: 'unset' } : live.launch.runBudgetCeiling;
@@ -284,6 +285,10 @@ export class BaselineAnalysisExecutionOwner {
     // The single-use ticket the gate issued for the step in flight; the adapter takes it or refuses.
     let pendingTicket: TransmitTicket | null = null;
     let bindingDigestForSlot = '';
+    // The live adapter, kept so each turn's canonical result can be read out of band immediately
+    // after `submitUnit`. It stays absent on the deterministic route, which has no Provider response
+    // to normalize and no empty answer to distinguish from a contract failure.
+    const liveAdapter: { instance: DeepSeekOpenAiCompatibleAdapter | null } = { instance: null };
     const harness = await prepareExecution({
       sessionId: harnessSessionId,
       route,
@@ -293,23 +298,28 @@ export class BaselineAnalysisExecutionOwner {
       // One technical Session per Analysis Unit under v4; the deterministic route keeps its single
       // accumulating Session, so J-04's proven composition is untouched.
       ...(live === null ? {} : { sessionMode: 'per-unit' as const }),
-      adapterFactory: (codes) => live === null
-        ? new Ai7LocalDeterministicAdapter(fixture!, BASELINE_PROMPT_CONTRACT_DIGEST, codes)
-        : new DeepSeekOpenAiCompatibleAdapter({
-            broker: this.#broker,
-            get slotBinding(): CredentialSlotBinding {
-              return { bindingDigest: bindingDigestForSlot, modelRole: 'Main Editorial Role', slot: credentialSlot, credentialReference };
-            },
-            tickets: { take: () => { const current = pendingTicket; pendingTicket = null; return current; } },
-            attribution: () => ({}),
-            promptContractDigest: BASELINE_PROMPT_CONTRACT_DIGEST,
-            codes,
-            profile: OPENCODE_GO_ROUTE_PROFILE,
-            sessionId: () => harness.currentSessionId(),
-            // The captured native `fetch`, reached only through the cache: an identical request
-            // replays without transmitting, and a live call happens at most once per test item.
-            transport: (url, init) => transmitOnce(cache!, live, testItemPurpose, model, url, init),
-          }),
+      adapterFactory: (codes) => {
+        if (live === null) return new Ai7LocalDeterministicAdapter(fixture!, BASELINE_PROMPT_CONTRACT_DIGEST, codes);
+        liveAdapter.instance = new DeepSeekOpenAiCompatibleAdapter({
+          broker: this.#broker,
+          get slotBinding(): CredentialSlotBinding {
+            return { bindingDigest: bindingDigestForSlot, modelRole: 'Main Editorial Role', slot: credentialSlot, credentialReference };
+          },
+          tickets: { take: () => { const current = pendingTicket; pendingTicket = null; return current; } },
+          attribution: () => ({}),
+          promptContractDigest: BASELINE_PROMPT_CONTRACT_DIGEST,
+          codes,
+          profile: OPENCODE_GO_ROUTE_PROFILE,
+          modelProfile: OPENCODE_GO_V4_FLASH_PROFILE,
+          sessionId: () => harness.currentSessionId(),
+          // The captured native `fetch`, reached only through the cache: an identical request
+          // replays without transmitting, and a live call happens at most once per test item. The
+          // bound route profile travels with the call, so the cache step reads a limit the way this
+          // route declares limits are read rather than by knowing which route it is serving.
+          transport: (url, init) => transmitOnce(cache!, live, testItemPurpose, OPENCODE_GO_ROUTE_PROFILE, model, url, init),
+        });
+        return liveAdapter.instance;
+      },
       gate: (payload) => {
         if (bindingFacts === null) return { decision: 'refuse', reason: 'binding-stale', detail: '执行绑定尚未持久化；未发送任何内容。' };
         const decision = evaluateEgress(payload, bindingFacts, { currentBindingDigest: () => currentBindingDigest, acceptedOutputDigests, ceilingState });
@@ -436,6 +446,9 @@ export class BaselineAnalysisExecutionOwner {
       const submitAttempt = async (unit: CoverageManifestUnitProjection, attemptIndex: number) => {
         admittedPayloadDigest = null;
         const turn = await harness.submitUnit(unitMessages.get(unit.ordinal)!);
+        // Read before anything else can start a turn: the adapter clears this at the start of every
+        // stream, so it is this attempt's result or nothing.
+        const canonical = liveAdapter.instance?.lastCanonicalResult ?? null;
         const payloadDigest = admittedPayloadDigest;
         spanOrdinal += 1;
         spans.push(turn.span);
@@ -449,7 +462,7 @@ export class BaselineAnalysisExecutionOwner {
           // The ceiling counts every attempt, including a safe retry's, from this instant onward.
           accumulated.push(unitUsage);
         }
-        return { turn, unitUsage, payloadDigest };
+        return { turn, unitUsage, payloadDigest, canonical };
       };
       for (const unit of submittedUnits) {
         if (active.interrupted) break;
@@ -502,7 +515,15 @@ export class BaselineAnalysisExecutionOwner {
             closed: { state: 'gap', gap: { unitOrdinal: unit.ordinal, code, reason, startPosition: unit.startPosition, endPosition: unit.endPosition, blockIds: [...unit.blockIds] } },
           });
         };
-        if (turn.terminal === 'completed' && candidate?.kind === 'contentCandidate') {
+        if (turn.terminal === 'completed' && candidate?.kind === 'contentCandidate' && attempt.canonical?.kind === 'empty-answer') {
+          // The model was reached and answered in the channel its profile declares, and the channel
+          // was empty. That is not a contract the model broke — there is nothing to parse — so the
+          // empty string never reaches `parseUnitResult`, whose only reading of it is `not-json`.
+          // The gap keeps the existing closed code; what an editor should be told about an empty
+          // answer is Issue #306's, immediately after this.
+          acceptedOutputDigests.add(candidate.digest);
+          gap('contract-invalid', `模型在本单元的答案通道返回了空文本${attempt.canonical.reasoningPresent ? '，推理通道有内容' : '，推理通道也没有内容'}；没有可解析的单元结果。`);
+        } else if (turn.terminal === 'completed' && candidate?.kind === 'contentCandidate') {
           const parsed = parseUnitResult(candidate.text, { unitOrdinal: unit.ordinal, blockIds: [...unit.blockIds, ...unit.overlapBlockIds] });
           if (parsed.ok) {
             acceptedOutputDigests.add(candidate.digest);
@@ -613,6 +634,7 @@ async function transmitOnce(
   cache: ProviderResultCache,
   live: DeveloperLiveRuntime,
   purpose: string,
+  profile: ProviderRouteProfile,
   model: string,
   url: string,
   init: { method: 'POST'; headers: Record<string, string>; body: string; signal?: AbortSignal },
@@ -657,7 +679,7 @@ async function transmitOnce(
   if (response.status === 200) {
     await cache.store({ model, requestDigest, requestBody: init.body, status: response.status, response: body, usage, transmittedAt });
   }
-  const accountLimit = isProviderAccountLimit(OPENCODE_GO_ROUTE_PROFILE, response.status, body);
+  const accountLimit = isProviderAccountLimit(profile, response.status, body);
   const resetWindow = accountLimit ? providerResetWindow(body) : null;
   await cache.record({
     itemId,
