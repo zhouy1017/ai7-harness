@@ -14,6 +14,7 @@ import {
   FACTUAL_REVIEW_TASK_MODES,
   type AnalysisAssuranceAxis,
   type AnalysisCoverageAxis,
+  type AnalysisCrossUnitFindingProjection,
   type AnalysisGapProjection,
   type AnalysisKindId,
   type AnalysisReducerClosureAxis,
@@ -21,8 +22,14 @@ import {
   type AnalysisTaskMode,
   type CoverageManifestProjection,
   type CoverageManifestUnitProjection,
+  type FactualReviewFindingProjection,
 } from '../../shared/protocol.js';
 import { FixtureReplayResearchCapability, type ResearchCapability } from '../capabilities/research.js';
+import {
+  ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST,
+  ASSURANCE_SAMPLING_RESULT_SCHEMA,
+  type AssuranceSamplingCandidate,
+} from './assurance-sampling-contract.js';
 import { canonicalJson, sha256Hex } from './canonical.js';
 import {
   BASELINE_PROMPT_CONTRACT,
@@ -59,7 +66,16 @@ import {
   type FactualReviewUnitResult,
 } from './factual-review-contract.js';
 import { reduceFactualReview, type FactualUnitOutcome } from './factual-review-reducers.js';
-import { reduceBaselineAnalysis, type ClosedUnitOutcome, type GapUnitOutcome, type UnitOutcome } from './reducers.js';
+import {
+  PRE_ASSURANCE_SAMPLE,
+  assuranceSamplingStage,
+  reduceBaselineAnalysis,
+  withSampledPrecision,
+  type AssuranceSampleOutcome,
+  type ClosedUnitOutcome,
+  type GapUnitOutcome,
+  type UnitOutcome,
+} from './reducers.js';
 import type { CrossUnitOutcome } from './reducers.js';
 
 /**
@@ -119,6 +135,40 @@ export interface CrossUnitContractBinding {
   readonly resultSchema: string;
 }
 
+/**
+ * The assurance sampling suboperation of a kind that declares one (ADR 0066); `null` for a kind that
+ * does not. The universe of the sample is whatever the kind calls a finding, so the kind — not the
+ * execution owner and not the sampling contract — says which of its own reduction's components are
+ * sampleable and how each one reads as a candidate.
+ */
+export interface AssuranceSamplingBinding {
+  readonly promptContractDigest: string;
+  readonly resultSchema: string;
+  /** The sampleable findings of one reduction, in the order their `ref`s were assigned. */
+  candidates(reduction: AnalysisReductionResult): ReadonlyArray<AssuranceSamplingCandidate>;
+}
+
+/**
+ * The second reducer pass: fold one Run's assurance sample into the reduction it was drawn from.
+ *
+ * It adds the sample component, appends the sampling stage to the closure axis after the kind's last
+ * stage, and re-labels the assurance axis. It touches nothing else — every finding component comes
+ * through byte-identical, which is the whole promise of ADR 0066's "sampling never edits, deletes, or
+ * reorders findings" and what the Journey asserts by reading the same revision both ways.
+ *
+ * The closure axis keeps the `state` and `label` its kind's reducers gave it. What the sampling did is
+ * reported by its own stage row and by `assuranceSample.state`; the axis it feeds is the assurance
+ * axis, which is where ADR 0066 puts it.
+ */
+export function applyAssuranceSample(reduction: AnalysisReductionResult, sample: AssuranceSampleOutcome): AnalysisReductionResult {
+  return {
+    ...reduction,
+    assurance: withSampledPrecision(reduction.assurance, sample),
+    reducerClosure: { ...reduction.reducerClosure, stages: [...reduction.reducerClosure.stages, assuranceSamplingStage(sample)] },
+    components: { ...reduction.components, assuranceSample: sample },
+  };
+}
+
 export interface AnalysisKindDefinition {
   readonly kind: AnalysisKindId;
   readonly contractVersion: string;
@@ -143,6 +193,9 @@ export interface AnalysisKindDefinition {
   readonly crossUnit: CrossUnitContractBinding | null;
   /** Why the cross-unit stage did not run, for a kind that declares no such stage. */
   readonly crossUnitAbsentReason: string;
+  readonly assurance: AssuranceSamplingBinding | null;
+  /** Why the sampling stage did not run, for a kind that declares no such stage. */
+  readonly assuranceAbsentReason: string;
   buildUnitMessage(
     unit: CoverageManifestUnitProjection,
     totalUnits: number,
@@ -176,7 +229,7 @@ function modeIndex(modes: ReadonlyArray<AnalysisModeDefinition>): (mode: Analysi
 /** The reducer descriptor and schema digest the baseline revision pins; unchanged since Issue #274. */
 export const BASELINE_REDUCER_DESCRIPTOR = {
   schema: 'ai7.baseline-manuscript-analysis.reducers/1',
-  stages: ['unit-validation', 'section-reduction', 'contradiction-continuity', 'cross-unit-reduction', 'book-synthesis'],
+  stages: ['unit-validation', 'section-reduction', 'contradiction-continuity', 'cross-unit-reduction', 'book-synthesis', 'assurance-sampling'],
   contradictionRules: ['alias-collision', 'entity-kind-divergence', 'setting-claim-divergence'],
   crossUnitFindingKinds: CROSS_UNIT_FINDING_KINDS,
   certaintyPolicy: 'report-only-never-resolve',
@@ -233,6 +286,21 @@ export function baselineAnalysisKindDefinition(): AnalysisKindDefinition {
     updateExecutionSteps: BASELINE_UPDATE_EXECUTION_STEPS,
     crossUnit: { promptContractDigest: BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST, resultSchema: BASELINE_CROSS_UNIT_RESULT_SCHEMA },
     crossUnitAbsentReason: '',
+    assurance: {
+      promptContractDigest: ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST,
+      resultSchema: ASSURANCE_SAMPLING_RESULT_SCHEMA,
+      // The baseline kind's sampleable findings are the model-driven cross-unit ones: the deterministic
+      // conflicts are a string-matching pass whose reading a re-read of one unit could not settle. A
+      // finding is anchored in its first side's unit, which is the unit the sample re-reads it against.
+      candidates: (reduction) =>
+        (reduction.components.crossUnitFindings as ReadonlyArray<AnalysisCrossUnitFindingProjection>).map((finding, index) => ({
+          ref: String(index),
+          unitOrdinal: finding.sides[0]!.unitOrdinal,
+          tier: finding.confidence,
+          text: finding.description,
+        })),
+    },
+    assuranceAbsentReason: '',
     buildUnitMessage,
     parseUnitMessageHeader,
     requestDigest: (unitOrdinal, unitDigest) => unitRequestDigest(BASELINE_PROMPT_CONTRACT_DIGEST, unitOrdinal, unitDigest),
@@ -269,6 +337,7 @@ export function baselineAnalysisKindDefinition(): AnalysisKindDefinition {
       // read as what it is — a revision whose Run never ran the reduction — never rewritten to add them.
       crossUnitFindings: body.crossUnitFindings ?? [],
       crossUnitReduction: body.crossUnitReduction ?? PRE_CROSS_UNIT_REDUCTION,
+      assuranceSample: body.assuranceSample ?? PRE_ASSURANCE_SAMPLE,
       sections: body.sections,
       synthesis: body.synthesis,
     }),
@@ -281,7 +350,7 @@ export function baselineAnalysisKindDefinition(): AnalysisKindDefinition {
 
 export const FACTUAL_REVIEW_REDUCER_DESCRIPTOR = {
   schema: 'ai7.factual-review.reducers/1',
-  stages: ['unit-validation', 'reference-integrity', 'finding-reduction'],
+  stages: ['unit-validation', 'reference-integrity', 'finding-reduction', 'assurance-sampling'],
   referenceIntegrity: 'deterministic-normalized-exact-match-in-committed-block',
   normalization: ['whitespace-collapse', 'fullwidth-halfwidth-ascii'],
   findingClasses: ['real-world-fact', 'quotation'],
@@ -338,6 +407,20 @@ export function factualReviewKindDefinition(research: ResearchCapability = new F
     updateExecutionSteps: FACTUAL_REVIEW_UPDATE_EXECUTION_STEPS,
     crossUnit: null,
     crossUnitAbsentReason: FACTUAL_REVIEW_CROSS_UNIT_ABSENT_REASON,
+    assurance: {
+      promptContractDigest: ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST,
+      resultSchema: ASSURANCE_SAMPLING_RESULT_SCHEMA,
+      // The factual kind's sampleable findings are the ones Reference Integrity located: an excluded
+      // assertion has no source range to re-read it against, and its exclusion is already its reading.
+      candidates: (reduction) =>
+        (reduction.components.findings as ReadonlyArray<FactualReviewFindingProjection>).map((finding) => ({
+          ref: finding.findingId,
+          unitOrdinal: finding.unitOrdinal,
+          tier: finding.severity,
+          text: `「${finding.quote}」${finding.question}`,
+        })),
+    },
+    assuranceAbsentReason: '',
     buildUnitMessage: buildFactualReviewUnitMessage,
     parseUnitMessageHeader: parseFactualReviewUnitMessageHeader,
     requestDigest: (unitOrdinal, unitDigest) => factualReviewRequestDigest(FACTUAL_REVIEW_PROMPT_CONTRACT_DIGEST, unitOrdinal, unitDigest),
@@ -373,6 +456,8 @@ export function factualReviewKindDefinition(research: ResearchCapability = new F
       excluded: body.excluded,
       assertionCounts: body.assertionCounts,
       research: body.research,
+      // A revision recorded before Issue #275 carries no sample; it is read as the Run it was.
+      assuranceSample: body.assuranceSample ?? PRE_ASSURANCE_SAMPLE,
     }),
     // The factual kind runs no conflict pass; its unresolved items are findings, counted in their own axis.
     conflictCountOf: () => 0,

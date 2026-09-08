@@ -1,4 +1,8 @@
-import type { CoverageManifestProjection, CoverageManifestUnitProjection } from '../../shared/protocol.js';
+import type {
+  AnalysisAssuranceSampleStratumProjection,
+  CoverageManifestProjection,
+  CoverageManifestUnitProjection,
+} from '../../shared/protocol.js';
 import { DIGEST_PATTERN, canonicalJson, hasExactKeys, isRecord, requireAnalysis, sha256Hex } from './canonical.js';
 import type { ManifestBlockInput } from './coverage-manifest.js';
 
@@ -261,19 +265,13 @@ export function parseAssuranceSamplingResult(
   return { ok: true, result, canonicalJson: canonical, digest: sha256Hex(canonical) };
 }
 
-// ---- the seed and the strata (added by the next step) ---------------------------------------------
-
-interface AssuranceSampleStratumDraft {
-  readonly sectionOrdinal: number;
-  readonly candidates: number;
-  readonly sampled: number;
-}
+// ---- the seed and the strata ---------------------------------------------------------------------
 
 export interface AssuranceSampleDraw {
   readonly seed: string;
   readonly size: number;
   readonly candidateCount: number;
-  readonly strata: ReadonlyArray<AssuranceSampleStratum>;
+  readonly strata: ReadonlyArray<AnalysisAssuranceSampleStratumProjection>;
   /** The drawn candidates, by section ordinal then by keyed hash; the order the turns list them in. */
   readonly sampled: ReadonlyArray<AssuranceSamplingCandidate>;
 }
@@ -323,7 +321,7 @@ export function drawAssuranceSample(
     return { seed, size: 0, candidateCount: 0, strata: [], sampled: [] };
   }
   const size = Math.max(Math.min(DEFAULT_ASSURANCE_SAMPLE_SIZE, candidates.length), sections.length);
-  const quota = new Map(sections.map((section) => [section, 1] as const));
+  const quota = new Map<number, number>(sections.map((section) => [section, 1]));
   let remaining = size - sections.length;
   // The proportional part of the remainder, floored, then the leftover seats one at a time by largest
   // fractional remainder. A stratum already at capacity is skipped, and its seat moves to the next.
@@ -351,7 +349,7 @@ export function drawAssuranceSample(
     // Every stratum is at capacity: the sample is already the whole candidate set.
     if (!placed) break;
   }
-  const strata: AssuranceSampleStratum[] = [];
+  const strata: AnalysisAssuranceSampleStratumProjection[] = [];
   const sampled: AssuranceSamplingCandidate[] = [];
   for (const section of sections) {
     const group = groups.get(section)!;

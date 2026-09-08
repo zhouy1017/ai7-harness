@@ -1,5 +1,9 @@
 import type {
   AnalysisAssuranceAxis,
+  AnalysisAssuranceSampleDispositionProjection,
+  AnalysisAssuranceSamplePrecisionProjection,
+  AnalysisAssuranceSampleProjection,
+  AnalysisAssuranceSampleStratumProjection,
   AnalysisConflictProjection,
   AnalysisCoverageAxis,
   AnalysisCrossUnitFindingProjection,
@@ -17,6 +21,7 @@ import type {
   AnalysisUnresolvedProjection,
   CoverageManifestProjection,
 } from '../../shared/protocol.js';
+import type { AssuranceSampleDraw } from './assurance-sampling-contract.js';
 import type { BaselineUnitResult } from './contract.js';
 import type { CrossUnitFinding } from './cross-unit-contract.js';
 
@@ -131,6 +136,113 @@ export const CROSS_UNIT_NOT_RUN: Extract<CrossUnitOutcome, { state: 'not-run' }>
   state: 'not-run',
   reason: '已闭合单元少于两个，跨单元归纳未发起。',
 };
+
+/**
+ * Why an assurance sampling turn did not close. The four the transport can produce are the unit
+ * loop's own codes; `policy-bounded` and `run-budget-ceiling-reached` are the two the suboperation
+ * adds, because its dispatch is the one a launch policy or a spent ceiling can refuse on its own.
+ */
+export type AssuranceSampleGapCode = CrossUnitGapCode;
+
+/**
+ * What the sampling suboperation did, as the execution owner observed it. It is the projection the
+ * revision carries: there is nothing to translate between what the owner saw and what an editor reads,
+ * and the shape is canonical JSON either way.
+ */
+export type AssuranceSampleOutcome = AnalysisAssuranceSampleProjection;
+
+/** The outcome of a sample that was never drawn; the caller states why in `reason`. */
+export function assuranceSampleNotRun(reason: string): AssuranceSampleOutcome {
+  return { state: 'not-run', seed: null, size: 0, candidateCount: 0, strata: [], dispositions: [], precision: [], usage: null, reason };
+}
+
+/**
+ * How a revision recorded before Issue #275 reads: its Run had no assurance sample to report. It is
+ * immutable history and is read as what it is, never rewritten to add one.
+ */
+export const PRE_ASSURANCE_SAMPLE: AnalysisAssuranceSampleProjection =
+  assuranceSampleNotRun('该修订版由未包含保证抽样的运行产生。');
+
+/**
+ * Estimated precision per tier of the sampled set: `upheld` counts `成立` only, and `estimate` is
+ * `upheld / sampled` rounded to two decimals. Tiers are ordered by code point so two Runs over the
+ * same dispositions list them the same way without this reducer knowing what any kind's tiers mean.
+ */
+export function assuranceSamplePrecision(
+  dispositions: ReadonlyArray<AnalysisAssuranceSampleDispositionProjection>,
+): AnalysisAssuranceSamplePrecisionProjection[] {
+  const byTier = new Map<string, { sampled: number; upheld: number }>();
+  for (const entry of dispositions) {
+    const tally = byTier.get(entry.tier) ?? { sampled: 0, upheld: 0 };
+    tally.sampled += 1;
+    if (entry.disposition === '成立') tally.upheld += 1;
+    byTier.set(entry.tier, tally);
+  }
+  return [...byTier.keys()]
+    .sort((left, right) => (left < right ? -1 : left > right ? 1 : 0))
+    .map((tier) => {
+      const tally = byTier.get(tier)!;
+      return { tier, sampled: tally.sampled, upheld: tally.upheld, estimate: precisionEstimate(tally.upheld, tally.sampled) };
+    });
+}
+
+/** Two decimals, and exactly the arithmetic: two candidates split one `需降级` as 1.00 and 0.00. */
+function precisionEstimate(upheld: number, sampled: number): number {
+  return sampled === 0 ? 0 : Math.round((upheld / sampled) * 100) / 100;
+}
+
+/**
+ * The outcome of a sample that was drawn and dispatched: `closed` when every turn came back with its
+ * dispositions, `closed-with-gaps` when some turn failed and the others' dispositions stand, and `gap`
+ * when nothing was judged at all. The reason is the exact reading of whichever turns failed.
+ */
+export function assuranceSampleOutcome(
+  draw: Omit<AssuranceSampleDraw, 'sampled'>,
+  dispositions: ReadonlyArray<AnalysisAssuranceSampleDispositionProjection>,
+  usage: { inputTokens: number; outputTokens: number } | null,
+  gapReasons: ReadonlyArray<string>,
+): AssuranceSampleOutcome {
+  const state = gapReasons.length === 0 ? 'closed' : dispositions.length === 0 ? 'gap' : 'closed-with-gaps';
+  return {
+    state,
+    seed: draw.seed,
+    size: draw.size,
+    candidateCount: draw.candidateCount,
+    strata: draw.strata,
+    dispositions,
+    precision: assuranceSamplePrecision(dispositions),
+    usage,
+    reason: gapReasons.length === 0 ? null : gapReasons.join('；'),
+  };
+}
+
+/**
+ * The sampling clause the assurance axis gains, and the `sampledPrecision` beside it. The axis *state*
+ * is deliberately untouched: `qualified`, `qualified-with-open-conflicts`, and `limited` keep exactly
+ * the readings the reducers gave them, because a disposition is evidence about a finding and never a
+ * re-reading of the Run. `size` is what the sample actually judged, which is the drawn size whenever
+ * every turn closed and the honest smaller number when one did not.
+ */
+export function withSampledPrecision(axis: AnalysisAssuranceAxis, sample: AnalysisAssuranceSampleProjection): AnalysisAssuranceAxis {
+  if (sample.dispositions.length === 0) return { ...axis, sampledPrecision: null };
+  const size = sample.dispositions.length;
+  const upheld = sample.dispositions.filter((entry) => entry.disposition === '成立').length;
+  const estimate = precisionEstimate(upheld, size);
+  return {
+    ...axis,
+    label: `${axis.label} · 抽样 ${size} 条 · 估计精度 ${estimate.toFixed(2)}`,
+    sampledPrecision: { size, upheld, estimate },
+  };
+}
+
+/** The stage state of the sampling suboperation: what it did, not how many gaps the units carried. */
+export function assuranceSamplingStage(sample: AnalysisAssuranceSampleProjection): AnalysisReducerStageProjection {
+  return {
+    stage: 'assurance-sampling',
+    state: sample.state === 'not-run' ? 'not-run' : sample.state === 'closed' ? 'closed' : 'closed-with-gaps',
+    inputCount: sample.candidateCount,
+  };
+}
 
 export interface BaselineReduction {
   readonly coverage: AnalysisCoverageAxis;
@@ -480,6 +592,9 @@ export function reduceBaselineAnalysis(
     // Disclosed beside the deterministic count, never folded into it: the axis states stay exactly the
     // readings they were, and a model-driven finding is evidence for the editor rather than a verdict.
     crossUnitFindingCount: crossUnitFindings.length,
+    // The sample is drawn after this reduction, so the axis leaves it null and the sampling pass
+    // (`withSampledPrecision`) is the one place that fills it in.
+    sampledPrecision: null,
     statement: ASSURANCE_STATEMENT,
   };
   return { coverage, reducerClosure, assurance, sections, synthesis, gaps, conflicts, crossUnitFindings, crossUnitReduction };
