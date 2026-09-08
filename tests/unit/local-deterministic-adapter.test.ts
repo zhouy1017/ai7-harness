@@ -8,7 +8,7 @@ import type { GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm';
 import { BASELINE_PROMPT_CONTRACT_DIGEST, parseUnitResult, unitRequestDigest } from '../../src/service/analysis/contract.js';
 import { AI7_FAILURE_CODES, classifyModelFailure, evaluateRunBudgetCeiling } from '../../src/service/provider/classification.js';
 import { LOCAL_DETERMINISTIC_MODEL, LOCAL_DETERMINISTIC_ROUTE } from '../../src/service/provider/egress-gate.js';
-import { Ai7LocalDeterministicAdapter, ownBlockIdsOf, substituteBlockPlaceholders } from '../../src/service/provider/local-deterministic-adapter.js';
+import { Ai7LocalDeterministicAdapter, ownBlockIdsOf, ownBlockTextsOf, substituteBlockPlaceholders, unitContentDigest } from '../../src/service/provider/local-deterministic-adapter.js';
 import { BASELINE_PROMPT_CONTRACT } from '../../src/service/analysis/contract.js';
 import { ModelFixtureError, fixtureEntryKey, fixturePath, loadModelFixture, parseModelFixture, resolveFixtureEntry } from '../../src/service/provider/model-fixture.js';
 
@@ -232,5 +232,130 @@ describe('model fixture loading', () => {
     expect(() => parseModelFixture(JSON.parse(fixture('x', 'x', [])))).toThrowError(/基础引用无效/u);
     expect(() => fixturePath(root, '../escape')).toThrowError(ModelFixtureError);
     expect(() => fixturePath(root, 'Upper')).toThrowError(ModelFixtureError);
+  });
+});
+
+// Content-digest resolution (S41): a fixture generated from one import of a text answers a fresh
+// import of the same text, whose block identities are different. Nothing here changes the
+// request-digest path, which is what production and the J-04 Journey use.
+describe('content-digest resolution', () => {
+  const UNIT_TEXTS = ['合成段落一。', '合成段落二。'];
+  const CONTENT_DIGEST = unitContentDigest(UNIT_TEXTS);
+  let root: string;
+
+  beforeEach(async () => {
+    root = await mkdtemp(join(tmpdir(), 'ai7-content-digest-'));
+  });
+  afterEach(async () => {
+    await rm(root, { recursive: true, force: true });
+  });
+
+  function unitMessage(identities: ReadonlyArray<string>, texts: ReadonlyArray<string> = UNIT_TEXTS, unitDigest = ZERO_UNIT_DIGEST): string {
+    return [
+      `分析单元 1/1 · 单元摘要 ${unitDigest}`,
+      BASELINE_PROMPT_CONTRACT.ownHeader,
+      ...identities.map((identity, index) => `[${identity}] (paragraph) ${texts[index]!}`),
+    ].join('\n');
+  }
+
+  function payload(message: string): GenerateOptions {
+    return {
+      provider: LOCAL_DETERMINISTIC_ROUTE,
+      model: LOCAL_DETERMINISTIC_MODEL,
+      system: '合成系统提示。',
+      messages: [{ id: 'm1' as never, role: 'user', content: [{ type: 'text', text: message }], source: { kind: 'user' } }],
+    };
+  }
+
+  async function writeGenerated(identity: string, entries: unknown[]): Promise<void> {
+    await writeFile(join(root, `${identity}.json`), JSON.stringify({
+      schema: 'ai7.model-fixture/1', identity, description: '合成生成夹具', basedOn: null,
+      provider: 'ai7-local-deterministic', model: 'ai7-deterministic-fixture', entries,
+    }));
+  }
+
+  const generatedEntry = (text: string, contentDigest: string | null = CONTENT_DIGEST) => ({
+    unitOrdinal: 1,
+    requestDigest: ZERO_UNIT_REQUEST_DIGEST,
+    ...(contentDigest === null ? {} : { contentDigest }),
+    response: { kind: 'unit-result', text, usage: { inputTokens: 12, outputTokens: 3 } },
+  });
+
+  it('reads own block texts with the identity and the kind marker stripped, positionally beside the identities', () => {
+    const identities = [`blk_${'1'.repeat(24)}`, `blk_${'2'.repeat(24)}`];
+    const message = [
+      `分析单元 2/3 · 单元摘要 ${ZERO_UNIT_DIGEST}`,
+      BASELINE_PROMPT_CONTRACT.overlapHeader,
+      `[blk_${'0'.repeat(24)}] (paragraph) 重叠段落。`,
+      BASELINE_PROMPT_CONTRACT.ownHeader,
+      `[${identities[0]!}] (heading h1) 合成标题`,
+      `[${identities[1]!}] (paragraph) 合成段落。`,
+    ].join('\n');
+    expect(ownBlockTextsOf(message)).toEqual(['合成标题', '合成段落。']);
+    expect(ownBlockTextsOf(message)).toHaveLength(ownBlockIdsOf(message).length);
+    expect(ownBlockTextsOf('没有消息头')).toEqual([]);
+    // The overlap block is context, not own content: it is outside the digest either way.
+    expect(unitContentDigest(ownBlockTextsOf(message))).toBe(unitContentDigest(['合成标题', '合成段落。']));
+  });
+
+  it('resolves a generated entry for a fresh import whose block identities are new and whose text is the same', async () => {
+    await writeGenerated('generated', [generatedEntry('{"blockId":"{{block:2}}"}')]);
+    const fixture = await loadModelFixture(root, 'generated');
+    expect(Array.from(fixture.entries.values())[0]?.contentDigest).toBe(CONTENT_DIGEST);
+    const adapter = new Ai7LocalDeterministicAdapter(fixture, BASELINE_PROMPT_CONTRACT_DIGEST, codes, { resolveBy: 'content-digest' });
+    // A different import: new block identities, a new unit digest, the same manuscript text.
+    const fresh = unitMessage([`blk_${'7'.repeat(24)}`, `blk_${'8'.repeat(24)}`], UNIT_TEXTS, 'c'.repeat(64));
+    const chunks = await collect(adapter.stream(payload(fresh)));
+    expect(chunks.find((chunk) => chunk.type === 'block-end')).toMatchObject({ block: { text: `{"blockId":"blk_${'8'.repeat(24)}"}` } });
+    expect(chunks.at(-1)).toEqual({ type: 'finish', reason: { kind: 'stop' } });
+    // Different text under the same identities does not resolve.
+    const other = unitMessage([`blk_${'7'.repeat(24)}`, `blk_${'8'.repeat(24)}`], ['合成段落一。', '改写后的段落。']);
+    expect(await collect(adapter.stream(payload(other)))).toMatchObject([{ type: 'finish', reason: { kind: 'error', failure: { code: AI7_FAILURE_CODES.FIXTURE_MISMATCH } } }]);
+  });
+
+  it('leaves an entry without a content digest unreachable in content mode and unchanged in request mode', async () => {
+    await writeGenerated('request-only', [generatedEntry('合成响应', null)]);
+    const fixture = await loadModelFixture(root, 'request-only');
+    expect(Array.from(fixture.entries.values())[0]?.contentDigest).toBeNull();
+    const message = unitMessage([`blk_${'7'.repeat(24)}`, `blk_${'8'.repeat(24)}`]);
+    const content = new Ai7LocalDeterministicAdapter(fixture, BASELINE_PROMPT_CONTRACT_DIGEST, codes, { resolveBy: 'content-digest' });
+    expect(await collect(content.stream(payload(message)))).toMatchObject([{ type: 'finish', reason: { kind: 'error', failure: { code: AI7_FAILURE_CODES.FIXTURE_MISMATCH } } }]);
+    // The same fixture, the same message, the default mode: the request digest still answers.
+    const request = new Ai7LocalDeterministicAdapter(fixture, BASELINE_PROMPT_CONTRACT_DIGEST, codes);
+    expect((await collect(request.stream(payload(message)))).find((chunk) => chunk.type === 'block-end')).toMatchObject({ block: { text: '合成响应' } });
+  });
+
+  it('counts attempts per content key so an attempt-specific generated entry still answers the n-th request', async () => {
+    await writeGenerated('attempts-by-content', [
+      generatedEntry('稳定响应'),
+      { unitOrdinal: 1, requestDigest: ZERO_UNIT_REQUEST_DIGEST, attempt: 1, contentDigest: CONTENT_DIGEST, response: { kind: 'adapter-failure', code: 'PROVIDER_ERROR', message: '合成瞬时服务端错误', status: 503 } },
+    ]);
+    const adapter = new Ai7LocalDeterministicAdapter(await loadModelFixture(root, 'attempts-by-content'), BASELINE_PROMPT_CONTRACT_DIGEST, codes, { resolveBy: 'content-digest' });
+    const served = async () => collect(adapter.stream(payload(unitMessage([`blk_${'7'.repeat(24)}`, `blk_${'8'.repeat(24)}`]))));
+    expect((await served()).at(-1)).toMatchObject({ type: 'finish', reason: { kind: 'error', failure: { code: 'PROVIDER_ERROR', status: 503 } } });
+    expect((await served()).find((chunk) => chunk.type === 'block-end')).toMatchObject({ block: { text: '稳定响应' } });
+  });
+
+  it('admits contentDigest as an optional key, refuses a malformed one, and leaves every committed fixture without one', async () => {
+    const entry = (extra: Record<string, unknown>) => ({
+      schema: 'ai7.model-fixture/1', identity: 'x', description: '合成测试夹具', basedOn: null,
+      provider: 'ai7-local-deterministic', model: 'ai7-deterministic-fixture',
+      entries: [{ unitOrdinal: 1, requestDigest: 'e'.repeat(64), ...extra, response: { kind: 'unit-result', text: 'x', usage: { inputTokens: 1, outputTokens: 1 } } }],
+    });
+    expect(parseModelFixture(entry({ contentDigest: 'a'.repeat(64) })).entries[0]?.contentDigest).toBe('a'.repeat(64));
+    expect(parseModelFixture(entry({ attempt: 2, contentDigest: 'a'.repeat(64) })).entries[0]?.attempt).toBe(2);
+    expect(parseModelFixture(entry({})).entries[0]?.contentDigest).toBeNull();
+    for (const malformed of ['short', 'A'.repeat(64), '', null, 1, ['a'.repeat(64)]]) {
+      expect(() => parseModelFixture(entry({ contentDigest: malformed })), String(malformed)).toThrowError(ModelFixtureError);
+    }
+    // An unknown key is still refused, so the widened check did not become a permissive one.
+    expect(() => parseModelFixture(entry({ unknown: 'x' }))).toThrowError(/条目无效/u);
+    for (const identity of [
+      'sample1-baseline-happy', 'sample1-baseline-one-unit-failure', 'sample1-baseline-transient-retry',
+      'synthetic-quota-exceeded', 'synthetic-usage-ceiling', 'synthetic-interrupted',
+    ]) {
+      const committed = await loadModelFixture(FIXTURES_ROOT, identity);
+      expect(Array.from(committed.entries.values()).every((item) => item.contentDigest === null), identity).toBe(true);
+    }
   });
 });

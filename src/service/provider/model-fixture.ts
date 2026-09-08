@@ -14,12 +14,21 @@ import { DIGEST_PATTERN, hasExactKeys, isRecord, sha256Hex } from '../analysis/c
  * be based on another so a variant (one failing unit) restates only the entries it changes.
  * Fixtures carry public synthetic text only and echo no manuscript content beyond exact block
  * identities.
+ *
+ * An entry may additionally carry a `contentDigest` over the unit's own block texts. The request
+ * digest binds the block identities of one import, so a fixture generated from that import answers
+ * only it; the content digest binds the text alone, which is what lets the same entry answer a fresh
+ * import of the same manuscript. Nothing production-facing reads it — the deterministic adapter
+ * resolves by content digest only when a test constructs it that way — so the key set of every
+ * request-digest entry, and the schema version, are unchanged.
  */
 export const MODEL_FIXTURE_SCHEMA = 'ai7.model-fixture/1' as const;
 export const FIXTURE_IDENTITY_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
 const MAX_FIXTURE_BYTES = 512 * 1024;
 const MAX_BASE_DEPTH = 4;
 const MAX_FIXTURE_ATTEMPT = 8;
+/** The keys an entry may carry beside the three it must; every other key is still refused. */
+const OPTIONAL_ENTRY_KEYS = ['attempt', 'contentDigest'] as const;
 
 export type ModelFixtureResponse =
   | { readonly kind: 'unit-result'; readonly text: string; readonly usage: { readonly inputTokens: number; readonly outputTokens: number } }
@@ -32,6 +41,8 @@ export interface ModelFixtureEntry {
   readonly requestDigest: string;
   /** The 1-based attempt this entry answers, or `null` for an entry that answers every attempt. */
   readonly attempt: number | null;
+  /** The digest over this unit's own block texts, or `null` for an entry keyed by request digest alone. */
+  readonly contentDigest: string | null;
   readonly response: ModelFixtureResponse;
 }
 
@@ -125,16 +136,27 @@ export function parseModelFixture(value: unknown): ModelFixture {
   requireFixture(Array.isArray(value.entries) && value.entries.length <= 4_096, '夹具条目集合无效。');
   const seen = new Set<string>();
   const entries = value.entries.map((entry): ModelFixtureEntry => {
+    // The three required keys, plus whichever optional keys this entry actually carries: an entry
+    // naming neither is the exact key set the schema has always accepted, and an unknown key is
+    // still refused.
     requireFixture(isRecord(entry) &&
-      (hasExactKeys(entry, ['unitOrdinal', 'requestDigest', 'response']) || hasExactKeys(entry, ['unitOrdinal', 'requestDigest', 'attempt', 'response'])) &&
+      hasExactKeys(entry, ['unitOrdinal', 'requestDigest', 'response', ...OPTIONAL_ENTRY_KEYS.filter((key) => key in entry)]) &&
       Number.isSafeInteger(entry.unitOrdinal) && (entry.unitOrdinal as number) >= 1 &&
       typeof entry.requestDigest === 'string' && DIGEST_PATTERN.test(entry.requestDigest), '夹具条目无效。');
     const attempt = 'attempt' in entry ? entry.attempt : null;
     requireFixture(!('attempt' in entry) || (Number.isSafeInteger(attempt) && (attempt as number) >= 1 && (attempt as number) <= MAX_FIXTURE_ATTEMPT), '夹具条目的尝试序号无效。');
+    const contentDigest = 'contentDigest' in entry ? entry.contentDigest : null;
+    requireFixture(!('contentDigest' in entry) || (typeof contentDigest === 'string' && DIGEST_PATTERN.test(contentDigest)), '夹具条目的内容摘要无效。');
     const key = fixtureEntryKey(entry.unitOrdinal as number, entry.requestDigest, attempt as number | null);
     requireFixture(!seen.has(key), '夹具条目单元序号与请求摘要重复（含尝试序号）。');
     seen.add(key);
-    return { unitOrdinal: entry.unitOrdinal as number, requestDigest: entry.requestDigest, attempt: attempt as number | null, response: parseResponse(entry.response) };
+    return {
+      unitOrdinal: entry.unitOrdinal as number,
+      requestDigest: entry.requestDigest,
+      attempt: attempt as number | null,
+      contentDigest: contentDigest as string | null,
+      response: parseResponse(entry.response),
+    };
   });
   return {
     schema: MODEL_FIXTURE_SCHEMA,
