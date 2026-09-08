@@ -1,6 +1,12 @@
 import type { LlmAdapter, LlmProviderInfo, LlmResolvedModelInfo, StreamChunk, GenerateOptions } from '@deepseek-ai/dsh-llm';
 import { sha256Hex } from '../analysis/canonical.js';
 import { BASELINE_PROMPT_CONTRACT, parseUnitMessageHeader, unitRequestDigest } from '../analysis/contract.js';
+import {
+  BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST,
+  crossUnitRequestDigest,
+  parseCrossUnitCitedBlocks,
+  parseCrossUnitMessageHeader,
+} from '../analysis/cross-unit-contract.js';
 import { AI7_FAILURE_CODES, type DshFailureCodes } from './classification.js';
 import { LOCAL_DETERMINISTIC_MODEL, LOCAL_DETERMINISTIC_ROUTE } from './egress-gate.js';
 import { lastUserMessageText } from './payload.js';
@@ -22,6 +28,14 @@ import { fixtureEntryKey, resolveFixtureEntry, type ModelFixtureEntry, type Reso
  * fixture cannot know them; the placeholder lets a synthetic response cite exact in-unit ranges
  * while echoing nothing of the manuscript beyond those identities.
  *
+ * The Run's one cross-unit reduction (ADR 0066) is matched the same way under unit ordinal `0`: its
+ * header names the closed unit set, and its request digest is a function of the frozen cross-unit
+ * prompt contract and that set. Its responses cite blocks as `{{unit:U:block:N}}` — unit U's N-th
+ * cited block in the message's own cited-blocks section — so one synthetic finding can cite exact
+ * ranges of two units without a fixture author ever knowing a minted identity. Content-digest mode
+ * keys entries by a unit's own block texts, which the reduction has none of, so it never answers
+ * there; that mode exists for `tests/` and the reduction simply records a gap under it.
+ *
  * A test may instead construct the adapter with `resolveBy: 'content-digest'`, which keys the same
  * fixture by the unit's own block texts rather than by the request digest. Block identities are
  * minted per import, so a fixture generated from one import of a text cannot answer a fresh import
@@ -32,6 +46,7 @@ import { fixtureEntryKey, resolveFixtureEntry, type ModelFixtureEntry, type Reso
  * before the service installs network denial.
  */
 const BLOCK_PLACEHOLDER = /\{\{block:(\d+)\}\}/gu;
+const CROSS_UNIT_BLOCK_PLACEHOLDER = /\{\{unit:(\d+):block:(\d+)\}\}/gu;
 const BLOCK_LINE = /^\[(blk_[0-9a-f]{24})\] /u;
 /** The `({kind}{level})` marker the prompt contract writes between a block's identity and its text. */
 const BLOCK_KIND_MARKER = /^\((?:title|heading|paragraph)(?: h[1-6])?\) /u;
@@ -89,6 +104,12 @@ export function substituteBlockPlaceholders(text: string, ownBlockIds: ReadonlyA
   return text.replace(BLOCK_PLACEHOLDER, (placeholder, index: string) => ownBlockIds[Number(index) - 1] ?? placeholder);
 }
 
+/** Substitute `{{unit:U:block:N}}` placeholders from the cross-unit message's own cited-blocks section. */
+export function substituteCrossUnitBlockPlaceholders(text: string, citedBlocks: ReadonlyMap<number, ReadonlyArray<string>>): string {
+  return text.replace(CROSS_UNIT_BLOCK_PLACEHOLDER, (placeholder, unit: string, index: string) =>
+    citedBlocks.get(Number(unit))?.[Number(index) - 1] ?? placeholder);
+}
+
 export class Ai7LocalDeterministicAdapter implements LlmAdapter {
   readonly #fixture: ResolvedModelFixture;
   readonly #promptContractDigest: string;
@@ -143,27 +164,37 @@ export class Ai7LocalDeterministicAdapter implements LlmAdapter {
       return;
     }
     const text = lastUserMessageText(options);
-    const header = text === null ? null : parseUnitMessageHeader(text);
-    if (header === null) {
+    // The reduction's header is tried first and the two are disjoint, so a unit message can never be
+    // read as a reduction or the other way round.
+    const crossUnit = text === null ? null : parseCrossUnitMessageHeader(text);
+    const header = text === null || crossUnit !== null ? null : parseUnitMessageHeader(text);
+    if (crossUnit === null && header === null) {
       yield failure(AI7_FAILURE_CODES.FIXTURE_MISMATCH, '请求不含可识别的分析单元消息头。');
       return;
     }
-    const expectedDigest = this.#resolveBy === 'content-digest'
-      ? unitContentDigest(ownBlockTextsOf(text!))
-      : unitRequestDigest(this.#promptContractDigest, header.ordinal, header.unitDigest);
-    const pairKey = fixtureEntryKey(header.ordinal, expectedDigest);
+    // Ordinal 0 is the reduction's entry; it is keyed by the closed unit set its header names.
+    const ordinal = crossUnit === null ? header!.ordinal : 0;
+    const expectedDigest = crossUnit !== null
+      ? crossUnitRequestDigest(BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST, crossUnit.unitSetDigest)
+      : this.#resolveBy === 'content-digest'
+        ? unitContentDigest(ownBlockTextsOf(text!))
+        : unitRequestDigest(this.#promptContractDigest, header!.ordinal, header!.unitDigest);
+    const pairKey = fixtureEntryKey(ordinal, expectedDigest);
     const attempt = (this.#servedByKey.get(pairKey) ?? 0) + 1;
     this.#servedByKey.set(pairKey, attempt);
-    const entry = resolveFixtureEntry(this.#entries, header.ordinal, expectedDigest, attempt);
+    const entry = resolveFixtureEntry(this.#entries, ordinal, expectedDigest, attempt);
     if (entry === undefined) {
-      const label = this.#resolveBy === 'content-digest' ? '内容摘要' : '请求摘要';
-      yield failure(AI7_FAILURE_CODES.FIXTURE_MISMATCH, `夹具 ${this.#fixture.identity} 没有单元 ${header.ordinal} 在当前${label}下的对应响应。`);
+      const label = crossUnit === null && this.#resolveBy === 'content-digest' ? '内容摘要' : '请求摘要';
+      const subject = crossUnit === null ? `单元 ${ordinal}` : '跨单元归纳';
+      yield failure(AI7_FAILURE_CODES.FIXTURE_MISMATCH, `夹具 ${this.#fixture.identity} 没有${subject}在当前${label}下的对应响应。`);
       return;
     }
     const response = entry.response;
     switch (response.kind) {
       case 'unit-result': {
-        const replay = substituteBlockPlaceholders(response.text, ownBlockIdsOf(text!));
+        const replay = crossUnit === null
+          ? substituteBlockPlaceholders(response.text, ownBlockIdsOf(text!))
+          : substituteCrossUnitBlockPlaceholders(response.text, parseCrossUnitCitedBlocks(text!));
         yield { type: 'block-start', index: 0, blockType: 'text' };
         yield { type: 'text-delta', index: 0, text: replay };
         yield { type: 'block-end', index: 0, block: { type: 'text', text: replay } };

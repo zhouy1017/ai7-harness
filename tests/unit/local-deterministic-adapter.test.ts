@@ -5,10 +5,33 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { CONTEXT_WINDOW_EXCEEDED_CODE, INVALID_CREDENTIAL_CODE, QUOTA_EXCEEDED_CODE } from '@deepseek-ai/dsh-llm';
 import type { GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm';
-import { BASELINE_PROMPT_CONTRACT_DIGEST, parseUnitResult, unitRequestDigest } from '../../src/service/analysis/contract.js';
+import {
+  BASELINE_PROMPT_CONTRACT_DIGEST,
+  BASELINE_UNIT_RESULT_SCHEMA,
+  parseUnitMessageHeader,
+  parseUnitResult,
+  unitRequestDigest,
+  type BaselineUnitResult,
+} from '../../src/service/analysis/contract.js';
+import {
+  BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST,
+  buildCrossUnitMessage,
+  citedBlocksByUnit,
+  crossUnitRequestDigest,
+  parseCrossUnitMessageHeader,
+  parseCrossUnitResult,
+  unitSetDigest,
+} from '../../src/service/analysis/cross-unit-contract.js';
 import { AI7_FAILURE_CODES, classifyModelFailure, evaluateRunBudgetCeiling } from '../../src/service/provider/classification.js';
 import { LOCAL_DETERMINISTIC_MODEL, LOCAL_DETERMINISTIC_ROUTE } from '../../src/service/provider/egress-gate.js';
-import { Ai7LocalDeterministicAdapter, ownBlockIdsOf, ownBlockTextsOf, substituteBlockPlaceholders, unitContentDigest } from '../../src/service/provider/local-deterministic-adapter.js';
+import {
+  Ai7LocalDeterministicAdapter,
+  ownBlockIdsOf,
+  ownBlockTextsOf,
+  substituteBlockPlaceholders,
+  substituteCrossUnitBlockPlaceholders,
+  unitContentDigest,
+} from '../../src/service/provider/local-deterministic-adapter.js';
 import { BASELINE_PROMPT_CONTRACT } from '../../src/service/analysis/contract.js';
 import { ModelFixtureError, fixtureEntryKey, fixturePath, loadModelFixture, parseModelFixture, resolveFixtureEntry } from '../../src/service/provider/model-fixture.js';
 
@@ -232,6 +255,134 @@ describe('model fixture loading', () => {
     expect(() => parseModelFixture(JSON.parse(fixture('x', 'x', [])))).toThrowError(/基础引用无效/u);
     expect(() => fixturePath(root, '../escape')).toThrowError(ModelFixtureError);
     expect(() => fixturePath(root, 'Upper')).toThrowError(ModelFixtureError);
+  });
+
+  // Issue #274: ordinal 0 is not an Analysis Unit but the Run's one cross-unit reduction. It is
+  // admitted, keyed, and merged exactly like every other entry; the schema string does not move.
+  it('admits unit ordinal 0 as the cross-unit reduction entry and still refuses a negative ordinal', async () => {
+    expect(parseModelFixture(JSON.parse(fixture('zero', null, [entry(0, 'reduction')]))).entries[0]?.unitOrdinal).toBe(0);
+    for (const ordinal of [-1, 1.5, '0', null]) {
+      expect(() => parseModelFixture(JSON.parse(fixture('bad', null, [entry(ordinal as number, 'x')]))), String(ordinal)).toThrowError(ModelFixtureError);
+    }
+    // Ordinal 0 sits beside the unit entries of the same digest rather than colliding with any of them.
+    await writeFile(join(root, 'both.json'), fixture('both', null, [entry(0, 'reduction'), entry(1, 'unit-one')]));
+    const resolved = await loadModelFixture(root, 'both');
+    expect(resolved.entries.get(fixtureEntryKey(0, 'e'.repeat(64)))?.response).toMatchObject({ text: 'reduction' });
+    expect(resolved.entries.get(fixtureEntryKey(1, 'e'.repeat(64)))?.response).toMatchObject({ text: 'unit-one' });
+    // No fixture committed today carries one, so nothing existing changed meaning.
+    for (const identity of [
+      'sample1-baseline-happy', 'sample1-baseline-one-unit-failure', 'sample1-baseline-transient-retry',
+      'synthetic-quota-exceeded', 'synthetic-usage-ceiling', 'synthetic-interrupted',
+    ]) {
+      const committed = await loadModelFixture(FIXTURES_ROOT, identity);
+      expect(Array.from(committed.entries.values()).every((item) => item.unitOrdinal >= 1)).toBe(true);
+    }
+  });
+});
+
+// The cross-unit reduction (Issue #274, ADR 0066): the adapter answers it from an ordinal-0 entry
+// keyed by the reduction's own request digest, and substitutes {{unit:U:block:N}} from the message's
+// cited-blocks section so a hand-written response can cite exact ranges of two units.
+describe('cross-unit reduction replay', () => {
+  const BLOCK_A = `blk_${'a'.repeat(24)}`;
+  const BLOCK_B = `blk_${'b'.repeat(24)}`;
+  const BLOCK_C = `blk_${'c'.repeat(24)}`;
+  const BLOCK_D = `blk_${'d'.repeat(24)}`;
+  let root: string;
+
+  function closedUnit(unitOrdinal: number, blocks: [string, string]): { unitOrdinal: number; result: BaselineUnitResult } {
+    const range = (blockId: string) => ({ blockId, fromGrapheme: null, toGrapheme: null });
+    return {
+      unitOrdinal,
+      result: {
+        schema: BASELINE_UNIT_RESULT_SCHEMA,
+        unitOrdinal,
+        synopsis: `合成概述（单元 ${unitOrdinal}）。`,
+        entities: [{ name: `合成人物${unitOrdinal}`, kind: 'person', aliases: [], note: null, sourceRanges: [range(blocks[0])] }],
+        events: [],
+        relationships: [],
+        settingClaims: [{ subject: '合成之城', claim: unitOrdinal === 1 ? '位于北方' : '位于南方', sourceRanges: [range(blocks[1])] }],
+        conflicts: [],
+        unresolved: [],
+        confidence: 'high',
+      },
+    };
+  }
+
+  const CLOSED = [closedUnit(1, [BLOCK_A, BLOCK_B]), closedUnit(3, [BLOCK_C, BLOCK_D])];
+  const MESSAGE = buildCrossUnitMessage(CLOSED, 8);
+  const REQUEST_DIGEST = crossUnitRequestDigest(BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST, unitSetDigest(CLOSED));
+  const RESPONSE = JSON.stringify({
+    schema: 'ai7.baseline-manuscript-analysis.cross-unit-result/1',
+    findings: [{
+      kind: 'contradiction',
+      description: '合成矛盾：单元 1 与单元 3 对合成之城的方位陈述不一致。',
+      sides: [
+        { unitOrdinal: 1, sourceRanges: [{ blockId: '{{unit:1:block:2}}', fromGrapheme: null, toGrapheme: null }] },
+        { unitOrdinal: 3, sourceRanges: [{ blockId: '{{unit:3:block:2}}', fromGrapheme: null, toGrapheme: null }] },
+      ],
+      confidence: 'medium',
+    }],
+    notes: [],
+  });
+
+  beforeEach(async () => {
+    root = await mkdtemp(join(tmpdir(), 'ai7-cross-unit-test-'));
+    await writeFile(join(root, 'reduction.json'), JSON.stringify({
+      schema: 'ai7.model-fixture/1', identity: 'reduction', description: '合成测试夹具', basedOn: null,
+      provider: 'ai7-local-deterministic', model: 'ai7-deterministic-fixture',
+      entries: [{ unitOrdinal: 0, requestDigest: REQUEST_DIGEST, response: { kind: 'unit-result', text: RESPONSE, usage: { inputTokens: 700, outputTokens: 90 } } }],
+    }));
+  });
+
+  afterEach(async () => {
+    await rm(root, { recursive: true, force: true });
+  });
+
+  function reductionRequest(text: string): GenerateOptions {
+    return {
+      provider: LOCAL_DETERMINISTIC_ROUTE,
+      model: LOCAL_DETERMINISTIC_MODEL,
+      system: '合成系统提示。',
+      messages: [{ id: 'm1' as never, role: 'user', content: [{ type: 'text', text }], source: { kind: 'user' } }],
+    };
+  }
+
+  it('answers the reduction from its ordinal-0 entry with every cited block substituted', async () => {
+    const adapter = new Ai7LocalDeterministicAdapter(await loadModelFixture(root, 'reduction'), BASELINE_PROMPT_CONTRACT_DIGEST, codes);
+    const chunks = await collect(adapter.stream(reductionRequest(MESSAGE)));
+    const replayed = chunks.find((chunk) => chunk.type === 'block-end');
+    const text = replayed?.type === 'block-end' && replayed.block.type === 'text' ? replayed.block.text : '';
+    expect(text).not.toContain('{{unit:');
+    const parsed = parseCrossUnitResult(text, { closedOrdinals: [1, 3], citedBlocksByUnit: citedBlocksByUnit(CLOSED) });
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    // Each side cites the exact block the message listed second for its own unit.
+    expect(parsed.result.findings[0]!.sides.map((side) => side.sourceRanges[0]!.blockId)).toEqual([BLOCK_B, BLOCK_D]);
+    expect(chunks.find((chunk) => chunk.type === 'usage')).toEqual({ type: 'usage', usage: { inputTokens: 700, outputTokens: 90 } });
+  });
+
+  it('fails closed when the closed unit set is not the one the entry answers', async () => {
+    const adapter = new Ai7LocalDeterministicAdapter(await loadModelFixture(root, 'reduction'), BASELINE_PROMPT_CONTRACT_DIGEST, codes);
+    const other = buildCrossUnitMessage([CLOSED[0]!, closedUnit(4, [BLOCK_C, BLOCK_D])], 8);
+    expect(await collect(adapter.stream(reductionRequest(other))))
+      .toMatchObject([{ type: 'finish', reason: { kind: 'error', failure: { code: AI7_FAILURE_CODES.FIXTURE_MISMATCH, message: expect.stringContaining('跨单元归纳') } } }]);
+  });
+
+  it('never reads a unit message as a reduction, or a reduction as a unit', async () => {
+    const adapter = new Ai7LocalDeterministicAdapter(await loadModelFixture(root, 'reduction'), BASELINE_PROMPT_CONTRACT_DIGEST, codes);
+    // A unit message resolves by unit ordinal, finds no unit entry in this fixture, and says so.
+    expect(await collect(adapter.stream(request())))
+      .toMatchObject([{ type: 'finish', reason: { kind: 'error', failure: { message: expect.stringContaining('单元 1') } } }]);
+    expect(parseUnitMessageHeader(MESSAGE)).toBeNull();
+    expect(parseCrossUnitMessageHeader(`分析单元 1/1 · 单元摘要 ${ZERO_UNIT_DIGEST}`)).toBeNull();
+  });
+
+  it('leaves an out-of-range placeholder in place for the contract to refuse', () => {
+    const cited = citedBlocksByUnit(CLOSED);
+    expect(substituteCrossUnitBlockPlaceholders('{{unit:1:block:1}}', cited)).toBe(BLOCK_A);
+    expect(substituteCrossUnitBlockPlaceholders('{{unit:1:block:9}}', cited)).toBe('{{unit:1:block:9}}');
+    expect(substituteCrossUnitBlockPlaceholders('{{unit:2:block:1}}', cited)).toBe('{{unit:2:block:1}}');
   });
 });
 

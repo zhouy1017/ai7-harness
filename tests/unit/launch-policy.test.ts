@@ -146,7 +146,7 @@ describe('resolveSourceCheckoutLaunchPolicy', () => {
       expect(projection.providerProcessing.crossUnitReductionAllowed).toBe(false);
     }
     // The denial carries the same reading, so no unreadable launch can turn the step on.
-    const denied = await resolveSourceCheckoutLaunchPolicy(codeRoot, 'ordinary-production');
+    const denied = await resolveSourceCheckoutLaunchPolicy(codeRoot, 'ordinary-production' as TrustedOperationalScope);
     expect(denied.integrityState).toBe('denied');
     expect(denied.providerProcessing.crossUnitReductionAllowed).toBe(false);
   });
