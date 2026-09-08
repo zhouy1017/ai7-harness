@@ -1,7 +1,7 @@
 {
   "schema": "ai7.model-fixture/1",
   "identity": "sample1-baseline-transient-retry",
-  "description": "Hand-written synthetic shape (vi) layered over shape (ii): identical to sample1-baseline-one-unit-failure except that Analysis Unit 5 answers its first attempt with a transient PROVIDER_ERROR server error (status 503). The entry names attempt 1 only, so the safe retry of the same unit and request digest falls through to the base's conforming unit result; unit 2 keeps its non-retry-safe adapter failure and stays a gap with no adaptation. The J-04 safe-retry stages and the L2 suite consume this composite fixture. Public synthetic text only; no manuscript content.",
+  "description": "Hand-written synthetic shape (vi) layered over shape (ii): identical to sample1-baseline-one-unit-failure except that Analysis Unit 5 answers its first attempt with a transient PROVIDER_ERROR server error (status 503). The entry names attempt 1 only, so the safe retry of the same unit and request digest falls through to the base's conforming unit result; unit 2 keeps its non-retry-safe adapter failure and stays a gap with no adaptation. The J-04 safe-retry stages and the L2 suite consume this composite fixture. The safe retry settles unit 5 to the base's own result, so this variant's closed unit set is the base's, and it inherits both of sample1-baseline-one-unit-failure's unit-ordinal-0 cross-unit reduction entries without restating either. Public synthetic text only; no manuscript content.",
   "basedOn": "sample1-baseline-one-unit-failure",
   "provider": "ai7-local-deterministic",
   "model": "ai7-deterministic-fixture",

@@ -307,6 +307,30 @@ describe('baseline manuscript analysis over the real store on exact sample1', ()
       expect(revision.assurance).toMatchObject({ axis: 'assurance', state: 'qualified-with-open-conflicts' });
       expect(revision.assurance.unresolvedConflictCount).toBe(revision.conflicts.length);
       expect(JSON.stringify(revision)).not.toMatch(/"complete":/u);
+      // Issue #274: the cross-unit reduction ran as one further declared step of this same Run,
+      // answered from the fixture's ordinal-0 entry over the seven units that closed.
+      expect(revision.reducerClosure.stages.map((stage) => stage.stage)).toEqual([
+        'unit-validation', 'section-reduction', 'contradiction-continuity', 'cross-unit-reduction', 'book-synthesis',
+      ]);
+      expect(revision.reducerClosure.stages[3]).toEqual({ stage: 'cross-unit-reduction', state: 'closed', inputCount: SAMPLE1_UNITS - 1 });
+      expect(revision.crossUnitReduction).toEqual({
+        state: 'closed', reason: null,
+        requestDigest: 'f165b9f47a625feeb2d38ce95f0298dcaf90de2e8fa927c81463ee8f9b8ff996',
+        usage: { inputTokens: 2000, outputTokens: 300 }, findingCount: 2,
+      });
+      expect(revision.crossUnitFindings.map((finding) => finding.kind)).toEqual(['chronology-conflict', 'continuity-break']);
+      expect(revision.assurance.crossUnitFindingCount).toBe(revision.crossUnitFindings.length);
+      // Every finding carries lineage to two distinct closed units, and every block it cites belongs
+      // to the unit that side names — the placeholders resolved to this import's own identities.
+      for (const finding of revision.crossUnitFindings) {
+        expect(finding.unitOrdinals).toEqual([1, 3]);
+        for (const side of finding.sides) {
+          const unit = manifest.units[side.unitOrdinal - 1]!;
+          expect(side.sourceRanges.every((range) => unit.blockIds.includes(range.blockId))).toBe(true);
+        }
+      }
+      // It modified no unit result and joined no conflict list: the deterministic kinds are as they were.
+      expect(revision.conflicts.every((conflict) => conflict.kind !== 'chronology-conflict')).toBe(true);
       // The exact gap: unit 2, the adapter failure, with its exact block range.
       const unit2 = manifest.units[1]!;
       expect(revision.gaps).toEqual([{
@@ -478,8 +502,9 @@ describe('baseline manuscript analysis over the real store on exact sample1', ()
       expect(revision.gaps[0]!.reason).not.toContain('安全重试');
       // Synchronized delta (#274): eight units, unit 5's safe retry, and the cross-unit reduction.
       expect(revision.usage.requests).toBe(10);
-      // Token usage sums the seven closed units; the two failed attempts (unit 2, unit 5's first) report no usage but count as requests.
-      expect(revision.usage.inputTokens).toBe(1400 + 1500 + 1500 + 1400 + 1450 + 1500 + 800);
+      // Token usage sums the seven closed units and, since #274, the cross-unit reduction's own turn;
+      // the two failed attempts (unit 2, unit 5's first) report no usage but count as requests.
+      expect(revision.usage.inputTokens).toBe(1400 + 1500 + 1500 + 1400 + 1450 + 1500 + 800 + 2000);
       expect(revision.provenance).toMatchObject({ runRecordId: settled.run!.runRecordId, planVersion: 1, adaptations: { count: 1, unitOrdinals: [5] } });
       expect(revision.bindingPin.bindingDigest).toBe(bindingDigest);
       expect(revision.coverage).toMatchObject({ unitsTotal: 8, unitsClosed: 7, gapCount: 1 });

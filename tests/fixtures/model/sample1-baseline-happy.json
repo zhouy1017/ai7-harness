@@ -1,7 +1,7 @@
 {
   "schema": "ai7.model-fixture/1",
   "identity": "sample1-baseline-happy",
-  "description": "Hand-written synthetic shape (i): the happy exact-sample1 baseline run, one conforming Baseline Manuscript Analysis Contract v1 response per Analysis Unit of the sample1 Coverage Manifest (8 units over 97 blocks), keyed by unit ordinal and request digest. Every name, synopsis, event, claim, and note is public synthetic placeholder text; the only manuscript-derived facts are the exact in-unit block identities filled from {{block:N}} placeholders at replay. Units 1, 3, and 5 deliberately disagree so the deterministic contradiction pass reports one alias collision, one entity-kind divergence, and one setting-claim divergence. A second unit-1 entry carries the request digest unit 1 derives after J-04's acknowledged edit appends its suffix to the first block, so the same identity serves the successor Runs of 同步到当前稿件, 重新分析所选范围, and 重新分析全书 over the edited manuscript.",
+  "description": "Hand-written synthetic shape (i): the happy exact-sample1 baseline run, one conforming Baseline Manuscript Analysis Contract v1 response per Analysis Unit of the sample1 Coverage Manifest (8 units over 97 blocks), keyed by unit ordinal and request digest. Every name, synopsis, event, claim, and note is public synthetic placeholder text; the only manuscript-derived facts are the exact in-unit block identities filled from {{block:N}} placeholders at replay. Units 1, 3, and 5 deliberately disagree so the deterministic contradiction pass reports one alias collision, one entity-kind divergence, and one setting-claim divergence. A second unit-1 entry carries the request digest unit 1 derives after J-04's acknowledged edit appends its suffix to the first block, so the same identity serves the successor Runs of 同步到当前稿件, 重新分析所选范围, and 重新分析全书 over the edited manuscript. The unit-ordinal-0 entry answers the cross-unit reduction over this fixture's eight-unit closed set, keyed by cited-block positions.",
   "basedOn": null,
   "provider": "ai7-local-deterministic",
   "model": "ai7-deterministic-fixture",
@@ -85,6 +85,15 @@
         "kind": "unit-result",
         "text": "{\"schema\":\"ai7.baseline-manuscript-analysis.unit-result/1\",\"unitOrdinal\":8,\"synopsis\":\"合成概述（单元 8）：结尾段落收束合成情节。\",\"entities\":[],\"events\":[{\"ordinal\":1,\"summary\":\"合成事件：情节收束。\",\"chronology\":\"结尾\",\"participants\":[],\"sourceRanges\":[{\"blockId\":\"{{block:1}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]}],\"relationships\":[],\"settingClaims\":[],\"conflicts\":[],\"unresolved\":[],\"confidence\":\"high\"}",
         "usage": { "inputTokens": 800, "outputTokens": 120 }
+      }
+    },
+    {
+      "unitOrdinal": 0,
+      "requestDigest": "3e6c2262e197cb0179a4f49ab26d8bb54ca14e2eae81af26ed62f28eb039c336",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.baseline-manuscript-analysis.cross-unit-result/1\",\"findings\":[{\"kind\":\"chronology-conflict\",\"description\":\"合成时序冲突：单元 1 把人物甲抵达合成之城记为「开端」，单元 3 让人物乙回望该城却不给出时序，两处对同一段行程的先后无法同时成立。\",\"sides\":[{\"unitOrdinal\":1,\"sourceRanges\":[{\"blockId\":\"{{unit:1:block:2}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"unitOrdinal\":3,\"sourceRanges\":[{\"blockId\":\"{{unit:3:block:2}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]}],\"confidence\":\"medium\"},{\"kind\":\"continuity-break\",\"description\":\"合成连续性断裂：单元 1 让人物甲抵达合成之城之后，单元 3 只写人物乙的视角，未交代人物甲的去向。\",\"sides\":[{\"unitOrdinal\":1,\"sourceRanges\":[{\"blockId\":\"{{unit:1:block:2}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"unitOrdinal\":3,\"sourceRanges\":[{\"blockId\":\"{{unit:3:block:2}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]}],\"confidence\":\"low\"}],\"notes\":[\"合成备注：其余单元未再提及这两处。\"]}",
+        "usage": { "inputTokens": 2000, "outputTokens": 300 }
       }
     }
   ]

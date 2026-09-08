@@ -33,7 +33,15 @@ import {
   unitContentDigest,
 } from '../../src/service/provider/local-deterministic-adapter.js';
 import { BASELINE_PROMPT_CONTRACT } from '../../src/service/analysis/contract.js';
-import { ModelFixtureError, fixtureEntryKey, fixturePath, loadModelFixture, parseModelFixture, resolveFixtureEntry } from '../../src/service/provider/model-fixture.js';
+import {
+  ModelFixtureError,
+  fixtureEntryKey,
+  fixturePath,
+  loadModelFixture,
+  parseModelFixture,
+  resolveFixtureEntry,
+  type ResolvedModelFixture,
+} from '../../src/service/provider/model-fixture.js';
 
 // Fixtures (iii)–(v) are hand-written synthetic shapes consumed here only; their request digests are
 // the deterministic function of the frozen prompt contract and a synthetic all-zero unit digest.
@@ -269,14 +277,16 @@ describe('model fixture loading', () => {
     const resolved = await loadModelFixture(root, 'both');
     expect(resolved.entries.get(fixtureEntryKey(0, 'e'.repeat(64)))?.response).toMatchObject({ text: 'reduction' });
     expect(resolved.entries.get(fixtureEntryKey(1, 'e'.repeat(64)))?.response).toMatchObject({ text: 'unit-one' });
-    // No fixture committed today carries one, so nothing existing changed meaning.
-    for (const identity of [
-      'sample1-baseline-happy', 'sample1-baseline-one-unit-failure', 'sample1-baseline-transient-retry',
-      'synthetic-quota-exceeded', 'synthetic-usage-ceiling', 'synthetic-interrupted',
-    ]) {
+    // The synthetic fixtures end before the reduction: each answers one unit and then fails, exceeds a
+    // ceiling, or interrupts, so no Run over them ever closes two units and none carries an ordinal 0.
+    for (const identity of ['synthetic-quota-exceeded', 'synthetic-usage-ceiling', 'synthetic-interrupted']) {
       const committed = await loadModelFixture(FIXTURES_ROOT, identity);
-      expect(Array.from(committed.entries.values()).every((item) => item.unitOrdinal >= 1)).toBe(true);
+      expect(Array.from(committed.entries.values()).every((item) => item.unitOrdinal >= 1), identity).toBe(true);
     }
+    // The sample1 fixtures carry exactly the reduction entries their own closed sets need.
+    const counts = await Promise.all(['sample1-baseline-happy', 'sample1-baseline-one-unit-failure', 'sample1-baseline-transient-retry']
+      .map(async (identity) => Array.from((await loadModelFixture(FIXTURES_ROOT, identity)).entries.values()).filter((item) => item.unitOrdinal === 0).length));
+    expect(counts).toEqual([1, 3, 3]);
   });
 });
 
@@ -383,6 +393,80 @@ describe('cross-unit reduction replay', () => {
     expect(substituteCrossUnitBlockPlaceholders('{{unit:1:block:1}}', cited)).toBe(BLOCK_A);
     expect(substituteCrossUnitBlockPlaceholders('{{unit:1:block:9}}', cited)).toBe('{{unit:1:block:9}}');
     expect(substituteCrossUnitBlockPlaceholders('{{unit:2:block:1}}', cited)).toBe('{{unit:2:block:1}}');
+  });
+});
+
+/**
+ * The pinned unit-set digests of the committed sample1 fixtures (Issue #274). Each is rebuilt here
+ * from the fixture's own responses rather than from a Run: block identities are minted per import,
+ * and the digest indexes each cited block by its position, so any injective substitution of the
+ * `{{block:N}}` placeholders reproduces the exact digest a Run computes. That is what lets a
+ * hand-written ordinal-0 entry be keyed at all, and this suite is what keeps it honest.
+ */
+describe('sample1 cross-unit reduction entries', () => {
+  /** Enough synthetic identities for any unit of the sample1 manifest; distinct per unit and per position. */
+  function syntheticBlockIds(unitOrdinal: number): string[] {
+    return Array.from({ length: 32 }, (_item, index) => `blk_${String(unitOrdinal).padStart(2, '0')}${String(index + 1).padStart(2, '0')}${'0'.repeat(20)}`);
+  }
+
+  /**
+   * One closed unit set as a Run would hold it: for each ordinal the fixture's conforming response,
+   * with `{{block:N}}` filled from that unit's synthetic identities. `unitOneMarker` picks between the
+   * two unit-1 responses the happy fixture carries — the original and the one J-04's acknowledged edit
+   * recomputes — because they are what make two distinct closed sets of the same eight units.
+   */
+  function closedSet(fixture: ResolvedModelFixture, ordinals: readonly number[], unitOneMarker: string) {
+    return ordinals.map((unitOrdinal) => {
+      const candidates = Array.from(fixture.entries.values())
+        .filter((item) => item.unitOrdinal === unitOrdinal && item.response.kind === 'unit-result');
+      const chosen = candidates.length === 1
+        ? candidates[0]
+        : candidates.find((item) => item.response.kind === 'unit-result' && item.response.text.includes(unitOneMarker));
+      expect(chosen?.response.kind, `unit ${unitOrdinal}`).toBe('unit-result');
+      const blockIds = syntheticBlockIds(unitOrdinal);
+      const text = substituteBlockPlaceholders(chosen!.response.kind === 'unit-result' ? chosen!.response.text : '', blockIds);
+      const parsed = parseUnitResult(text, { unitOrdinal, blockIds });
+      expect(parsed.ok, `unit ${unitOrdinal} parses`).toBe(true);
+      return { unitOrdinal, result: parsed.ok ? parsed.result : (undefined as never) };
+    });
+  }
+
+  const SEVEN = [1, 3, 4, 5, 6, 7, 8] as const;
+  const EIGHT = [1, 2, 3, 4, 5, 6, 7, 8] as const;
+  const ORIGINAL_UNIT_ONE = '合成概述（单元 1）：';
+  const RECOMPUTED_UNIT_ONE = '合成概述（单元 1 · 已确认编辑后重算）';
+
+  it('pins one digest per closed unit set the fixtures reach, and every ordinal-0 entry answers one', async () => {
+    const happy = await loadModelFixture(FIXTURES_ROOT, 'sample1-baseline-happy');
+    const failure = await loadModelFixture(FIXTURES_ROOT, 'sample1-baseline-one-unit-failure');
+    const retry = await loadModelFixture(FIXTURES_ROOT, 'sample1-baseline-transient-retry');
+
+    // Set A — the seven units that close when unit 2 fails, with unit 1 as first analysed. Every
+    // first-baseline Run over sample1 under either variant reaches it.
+    const setA = unitSetDigest(closedSet(failure, SEVEN, ORIGINAL_UNIT_ONE));
+    // Set B — the same seven units after J-04's acknowledged edit recomputes unit 1. Every update Run
+    // reaches it, whichever of the three update modes asked for it.
+    const setB = unitSetDigest(closedSet(failure, SEVEN, RECOMPUTED_UNIT_ONE));
+    // Set C — all eight units, which only the happy fixture closes, since unit 2 answers there.
+    const setC = unitSetDigest(closedSet(happy, EIGHT, ORIGINAL_UNIT_ONE));
+    expect(new Set([setA, setB, setC]).size).toBe(3);
+    expect([setA, setB, setC]).toEqual([
+      '07dcb9d6dc825a008ba491c8f0fcb236252b8dba68ceaa1be738b2614473857f',
+      '330f5f44073d4758826cbe384c615677ff1e53fa55c546ac7b30bbb218d682e1',
+      '487d3aa59a9aa024db456117b35d6c46ea52590b2e1bf6a5d901dddcab9eaeac',
+    ]);
+
+    // The variants restate no reduction entry of their own: the two seven-unit sets are a property of
+    // the one-unit-failure lineage, and transient-retry settles unit 5 to the same result, so it
+    // reaches those same two sets and inherits both entries.
+    const keyOf = (setDigest: string) => fixtureEntryKey(0, crossUnitRequestDigest(BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST, setDigest));
+    expect(happy.entries.get(keyOf(setC))?.unitOrdinal).toBe(0);
+    for (const fixture of [failure, retry]) {
+      expect(fixture.entries.get(keyOf(setA))?.unitOrdinal).toBe(0);
+      expect(fixture.entries.get(keyOf(setB))?.unitOrdinal).toBe(0);
+    }
+    expect(retry.entries.get(keyOf(setA))).toEqual(failure.entries.get(keyOf(setA)));
+    expect(retry.entries.get(keyOf(setB))).toEqual(failure.entries.get(keyOf(setB)));
   });
 });
 
