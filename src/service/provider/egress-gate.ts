@@ -17,10 +17,21 @@ export const DEEPSEEK_MODEL = 'deepseek-v4-pro' as const;
 /** The developer-live route of Provider Processing v4 (ADR 0065, ADR 0067): OpenCode Go with the bare model id. */
 export const OPENCODE_GO_ROUTE = 'opencode-go' as const;
 export const OPENCODE_GO_MODEL = 'deepseek-v4-flash' as const;
+/**
+ * The same OpenCode Go plan reached over its Anthropic-compatible `/messages` path (ADR 0067). A
+ * second route because the endpoint and the request shape differ; the same credential slot because
+ * the credential does not, so declaring it moves no credential boundary.
+ */
+export const OPENCODE_GO_MESSAGES_ROUTE = 'opencode-go-messages' as const;
 
-/** Every route a Provider Resolution Plan may bind; the two remote ones are served by the same adapter. */
+/**
+ * Every route a Provider Resolution Plan may bind. `opencode-go-messages` is deliberately absent: no
+ * Run may bind a route whose every model is inert, and this gate is the place that enforces it, so
+ * this union is a narrower statement than `RemoteExecutionRoute` rather than a superset of it.
+ */
 export type ExecutionRoute = typeof LOCAL_DETERMINISTIC_ROUTE | typeof DEEPSEEK_ROUTE | typeof OPENCODE_GO_ROUTE;
-export type RemoteExecutionRoute = typeof DEEPSEEK_ROUTE | typeof OPENCODE_GO_ROUTE;
+/** Every remote route a profile may be declared for, bindable or not; all of them are served by the same adapter. */
+export type RemoteExecutionRoute = typeof DEEPSEEK_ROUTE | typeof OPENCODE_GO_ROUTE | typeof OPENCODE_GO_MESSAGES_ROUTE;
 /** The logical credential slots of the Main Editorial Role: one per remote route. */
 export type CredentialSlot = 'deepseek-api-key' | 'opencode-go';
 

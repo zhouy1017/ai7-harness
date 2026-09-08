@@ -10,6 +10,7 @@ import {
   DEEPSEEK_ROUTE_PROFILE,
   DeepSeekOpenAiCompatibleAdapter,
   OPENCODE_GO_ENDPOINT,
+  OPENCODE_GO_MESSAGES_ROUTE_PROFILE,
   OPENCODE_GO_ROUTE_PROFILE,
   OPENCODE_GO_SESSION_HEADER,
   OPENCODE_GO_USER_AGENT,
@@ -29,7 +30,14 @@ import {
   type ProviderModelProfile,
 } from '../../src/service/provider/model-profile.js';
 import { normalizeModelResponse } from '../../src/service/provider/response-normalization.js';
-import { DEEPSEEK_MODEL, DEEPSEEK_ROUTE, OPENCODE_GO_MODEL, OPENCODE_GO_ROUTE, type TransmitTicket } from '../../src/service/provider/egress-gate.js';
+import {
+  DEEPSEEK_MODEL,
+  DEEPSEEK_ROUTE,
+  OPENCODE_GO_MESSAGES_ROUTE,
+  OPENCODE_GO_MODEL,
+  OPENCODE_GO_ROUTE,
+  type TransmitTicket,
+} from '../../src/service/provider/egress-gate.js';
 import { NETWORK_DENIED_CODE, installNodeNetworkDenial } from '../../src/shared/network-denial.js';
 
 // The remote path is complete but never transmits under v1. Every credential here is a placeholder
@@ -149,8 +157,8 @@ describe('provider route generalization', () => {
     return { ...request(), provider: OPENCODE_GO_ROUTE, model: OPENCODE_GO_MODEL };
   }
 
-  it('keys the two remote routes by how they are reached, and never by a model', () => {
-    expect(Object.keys(PROVIDER_ROUTE_PROFILES).sort()).toEqual(['deepseek-open-platform', 'opencode-go']);
+  it('keys every remote route by how it is reached, and never by a model', () => {
+    expect(Object.keys(PROVIDER_ROUTE_PROFILES).sort()).toEqual(['deepseek-open-platform', 'opencode-go', 'opencode-go-messages']);
     expect(DEEPSEEK_ROUTE_PROFILE).toMatchObject({
       route: DEEPSEEK_ROUTE, endpoint: DEEPSEEK_ENDPOINT,
       credentialSlot: 'deepseek-api-key', dshAttribution: true, sessionHeader: false,
@@ -172,6 +180,14 @@ describe('provider route generalization', () => {
     expect(OPENCODE_GO_ROUTE_PROFILE.maxOutputTokens).toBeNull();
     expect(DEEPSEEK_ROUTE_PROFILE.credentialHeaderEvidence).toEqual({ kind: 'frozen-request-baseline', since: 'adapter revision 1' });
     expect(OPENCODE_GO_ROUTE_PROFILE.credentialHeaderEvidence).toMatchObject({ kind: 'vendor-documentation', source: expect.stringContaining('ADR 0067') });
+    // The `/messages` route is a second way to reach the same plan on the same credential slot: a new
+    // endpoint and a declared cap, and nothing else about the credential boundary moves.
+    expect(OPENCODE_GO_MESSAGES_ROUTE_PROFILE).toMatchObject({
+      route: 'opencode-go-messages', endpoint: 'https://opencode.ai/zen/go/v1/messages',
+      credentialSlot: 'opencode-go', dshAttribution: false, sessionHeader: true, maxOutputTokens: 32_768,
+    });
+    expect(OPENCODE_GO_MESSAGES_ROUTE_PROFILE.credentialSlot).toBe(OPENCODE_GO_ROUTE_PROFILE.credentialSlot);
+    expect(OPENCODE_GO_MESSAGES_ROUTE_PROFILE.credentialHeaderEvidence).toMatchObject({ kind: 'vendor-documentation', source: expect.stringContaining('ADR 0067') });
     expect(assembleDeepSeekRequest(request(), attributionHeaders(), BASELINE_PROMPT_CONTRACT_DIGEST).requestDigest).toBe(PRODUCTION_REQUEST_DIGEST);
     expect(assembleProviderRequest(OPENCODE_GO_ROUTE_PROFILE, OPENCODE_GO_V4_FLASH_PROFILE, liveRequest(), {
       attribution: attributionHeaders(), promptContractDigest: BASELINE_PROMPT_CONTRACT_DIGEST, sessionId: SESSION,
@@ -273,6 +289,9 @@ describe('model capability profiles', () => {
   it('keys every model by route and model, so one model id behind two routes is two profiles', () => {
     expect(Object.keys(PROVIDER_MODEL_PROFILES).sort()).toEqual([
       'deepseek-open-platform/deepseek-v4-pro',
+      // The same plan's `/messages` models, keyed by the second route that reaches them (S54b).
+      'opencode-go-messages/minimax-m2.5', 'opencode-go-messages/minimax-m2.7', 'opencode-go-messages/minimax-m3',
+      'opencode-go-messages/qwen3.6-plus', 'opencode-go-messages/qwen3.7-plus',
       // The OpenCode Go plan's chat-completions models, each keyed by the id the Zen table states (S54a).
       'opencode-go/deepseek-v4-flash', 'opencode-go/deepseek-v4-flash-vision-exp', 'opencode-go/deepseek-v4-pro',
       'opencode-go/glm-5.1', 'opencode-go/glm-5.2', 'opencode-go/glm-5.3', 'opencode-go/glm-5.3-flash',
@@ -310,7 +329,7 @@ describe('model capability profiles', () => {
     // model cannot enlarge the active set: a new row arrives inert or the count moves and this fails.
     expect(Object.values(PROVIDER_MODEL_PROFILES).filter((profile) => profile.capabilities.answerChannel !== 'none'))
       .toEqual([DEEPSEEK_V4_PRO_PROFILE, OPENCODE_GO_V4_FLASH_PROFILE]);
-    expect(Object.keys(PROVIDER_MODEL_PROFILES)).toHaveLength(11);
+    expect(Object.keys(PROVIDER_MODEL_PROFILES)).toHaveLength(16);
   });
 
   it('declares structured output exactly where one live item observed it accepted, and nowhere else', () => {
@@ -362,20 +381,19 @@ describe('model capability profiles', () => {
       .toEqual({ kind: 'malformed', reason: 'answer-channel-not-declared' });
   });
 
-  it('declares every model but the two active ones inert, and assembles each without a branch', () => {
-    const context = { attribution: attributionHeaders(), promptContractDigest: BASELINE_PROMPT_CONTRACT_DIGEST, sessionId: randomUUID() };
-    const live = { ...request(), provider: OPENCODE_GO_ROUTE, model: OPENCODE_GO_MODEL };
-    const flash = assembleProviderRequest(OPENCODE_GO_ROUTE_PROFILE, OPENCODE_GO_V4_FLASH_PROFILE, live, context);
+  it('declares every model but the two active ones inert, whichever path reaches it', () => {
     const inert = Object.values(PROVIDER_MODEL_PROFILES)
       .filter((profile) => profile.key !== DEEPSEEK_V4_PRO_PROFILE.key && profile.key !== OPENCODE_GO_V4_FLASH_PROFILE.key);
-    // #310's third model plus the eight the documentation pair admitted (S54a).
-    expect(inert).toHaveLength(9);
-    // One evidence record for one reading of the documentation pair, shared rather than restated.
+    // #310's third model, the eight the documentation pair admitted on chat completions (S54a), and
+    // the five it admits on `/messages` (S54b).
+    expect(inert).toHaveLength(14);
+    // One evidence record for one reading of the documentation pair, shared rather than restated —
+    // by both paths, because reading which path a model is served on is the same reading.
     const documentation = modelProfileFor(OPENCODE_GO_ROUTE, 'glm-5.3-flash')!.evidence.requestShape;
     expect(documentation).toEqual({ kind: 'vendor-documentation', source: expect.stringContaining('opencode.ai'), readOn: '2026-09-08' });
+    expect(modelProfileFor(OPENCODE_GO_MESSAGES_ROUTE, 'qwen3.7-plus')!.evidence.requestShape).toEqual(documentation);
 
     for (const profile of inert) {
-      expect(profile.route, profile.key).toBe(OPENCODE_GO_ROUTE);
       expect(profile.capabilities.answerChannel, profile.key).toBe('none');
       expect(profile.displayName, profile.key).toContain('（OpenCode Go）');
       // Only the request shape is established; every capability a response would have taught is not.
@@ -384,13 +402,29 @@ describe('model capability profiles', () => {
         expect(profile.evidence[capability], `${profile.key} · ${capability}`).toEqual({ kind: 'unverified' });
       }
       // Inert is enforced where a response is read, not where one is sent: declaring no answer
-      // channel refuses a perfectly well-formed body, exactly as it refuses #310's third model.
+      // channel refuses a perfectly well-formed body of either shape, exactly as it refuses #310's
+      // third model. This is the whole of what keeps a declared model from being reachable.
       expect(normalizeModelResponse(profile, { choices: [{ message: { content: '{"ok":true}' } }] }), profile.key)
         .toEqual({ kind: 'malformed', reason: 'answer-channel-not-declared' });
+      expect(normalizeModelResponse(profile, { content: [{ type: 'text', text: '{"ok":true}' }] }), profile.key)
+        .toEqual({ kind: 'malformed', reason: 'answer-channel-not-declared' });
+    }
+    // Every id is distinct, so fourteen rows are fourteen models rather than one written fourteen ways.
+    expect(new Set(inert.map((profile) => profile.model)).size).toBe(14);
+  });
 
-      // Assembly, by contrast, needed no branch for any of them: each sends the live route's bytes
-      // with its own model id, and without the one constraint only the live profile's evidence
-      // supports. That difference, and nothing else, is what declaring a model cost.
+  it('assembles each inert chat-completions model without a branch, as the live route bytes', () => {
+    const context = { attribution: attributionHeaders(), promptContractDigest: BASELINE_PROMPT_CONTRACT_DIGEST, sessionId: randomUUID() };
+    const live = { ...request(), provider: OPENCODE_GO_ROUTE, model: OPENCODE_GO_MODEL };
+    const flash = assembleProviderRequest(OPENCODE_GO_ROUTE_PROFILE, OPENCODE_GO_V4_FLASH_PROFILE, live, context);
+    const inert = Object.values(PROVIDER_MODEL_PROFILES)
+      .filter((profile) => profile.route === OPENCODE_GO_ROUTE && profile.key !== OPENCODE_GO_V4_FLASH_PROFILE.key);
+    expect(inert).toHaveLength(9);
+
+    for (const profile of inert) {
+      // Assembly needed no branch for any of them: each sends the live route's bytes with its own
+      // model id, and without the one constraint only the live profile's evidence supports. That
+      // difference, and nothing else, is what declaring a model cost.
       const expected = JSON.parse(flash.body) as Record<string, unknown>;
       expected.model = profile.model;
       delete expected.response_format;
@@ -400,8 +434,26 @@ describe('model capability profiles', () => {
       expect(assembly.headers, profile.key).toEqual(flash.headers);
       expect(assembly.body, profile.key).not.toContain('response_format');
     }
-    // Every id is distinct, so nine rows are nine models rather than one model written nine ways.
-    expect(new Set(inert.map((profile) => profile.model)).size).toBe(9);
+  });
+
+  it('assembles each inert /messages model as the second shape, on the second route, with the declared cap', () => {
+    const context = { attribution: attributionHeaders(), promptContractDigest: BASELINE_PROMPT_CONTRACT_DIGEST, sessionId: randomUUID() };
+    const live = { ...request(), provider: OPENCODE_GO_MESSAGES_ROUTE, model: 'qwen3.7-plus' };
+    const messagesModels = Object.values(PROVIDER_MODEL_PROFILES).filter((profile) => profile.route === OPENCODE_GO_MESSAGES_ROUTE);
+    expect(messagesModels.map((profile) => profile.model))
+      .toEqual(['qwen3.7-plus', 'qwen3.6-plus', 'minimax-m3', 'minimax-m2.7', 'minimax-m2.5']);
+
+    for (const profile of messagesModels) {
+      expect(profile.capabilities.requestShape, profile.key).toBe('anthropic-messages');
+      const assembly = assembleProviderRequest(OPENCODE_GO_MESSAGES_ROUTE_PROFILE, profile, live, context);
+      expect(JSON.parse(assembly.body), profile.key).toEqual({
+        model: profile.model,
+        max_tokens: 32_768,
+        system: SYSTEM,
+        messages: [{ role: 'user', content: UNIT }],
+      });
+      expect(assembly.url, profile.key).toBe('https://opencode.ai/zen/go/v1/messages');
+    }
   });
 
   it('refuses to assemble a body for a capability no adapter implements', () => {

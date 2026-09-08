@@ -893,7 +893,7 @@ export type RunBudgetCeilingState = 'unset' | { kind: 'tokens'; maxTotalTokens: 
 /** The execution route an analysis Run binds: the in-process deterministic adapter or the developer-live OpenCode Go route. */
 export type ExecutionRouteId = 'ai7-local-deterministic' | 'opencode-go';
 /** A remote Provider route a Provider Resolution Plan may name. */
-export type RemoteProviderId = 'deepseek-open-platform' | 'opencode-go';
+export type RemoteProviderId = 'deepseek-open-platform' | 'opencode-go' | 'opencode-go-messages';
 /** A logical credential slot of the Main Editorial Role. */
 export type CredentialSlotId = 'deepseek-api-key' | 'opencode-go';
 /** The Provider Processing pin a Provider Resolution Plan carries for its trusted scope. */
