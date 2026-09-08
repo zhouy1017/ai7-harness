@@ -37,9 +37,12 @@ export type RequestShape = 'openai-chat-completions' | 'anthropic-messages' | 'o
 export type ReasoningControl = 'none' | 'deepseek-thinking';
 
 /**
- * How a JSON answer is *required* of the model, as opposed to merely asked for in the prompt. Both
- * current profiles declare `none`: nothing has yet observed the gateway accept a format constraint,
- * and an OpenAI-compatible endpoint is not evidence that it does. Requiring one is Issue #306's.
+ * How a JSON answer is *required* of the model, as opposed to merely asked for in the prompt.
+ * `json-object` is the chat-completions `response_format` constraint the adapter assembles, and only
+ * `opencode-go/deepseek-v4-flash` declares it, on the strength of the one live test item that
+ * observed the gateway accept it (Issue #306). Every other profile declares `none`, because an
+ * OpenAI-compatible endpoint is not evidence that it accepts a format constraint. `json-schema` and
+ * `tool-call` are named so a profile can state its shape honestly and refuse at assembly.
  */
 export type StructuredOutput = 'none' | 'json-object' | 'json-schema' | 'tool-call';
 
@@ -107,6 +110,17 @@ const FIRST_LIVE_RUN: CapabilityEvidence = {
   observedOn: '2026-09-07',
 };
 
+/**
+ * The one live test item that put a format constraint on this gateway, `S40/reanalyze-range/1` of
+ * 2026-09-08, recorded on #306. One item, one response, one capability: it is evidence that the
+ * field is accepted, and evidence of nothing else.
+ */
+const JSON_OBJECT_LIVE_ITEM: CapabilityEvidence = {
+  kind: 'live-test-item',
+  itemIds: ['S40/reanalyze-range/1'],
+  observedOn: '2026-09-08',
+};
+
 const PRODUCTION_BASELINE: CapabilityEvidence = { kind: 'frozen-request-baseline', since: 'adapter revision 1' };
 const UNVERIFIED: CapabilityEvidence = { kind: 'unverified' };
 
@@ -143,6 +157,16 @@ export const DEEPSEEK_V4_PRO_PROFILE: ProviderModelProfile = {
  * first live Run's eight test items, whose responses live in the ADR 0067 Provider Result Cache
  * outside every checkout. It sends no DeepSeek-specific parameter: the gateway's acceptance of one
  * is unverified, and this table's rule is to declare that as absence rather than to assume it.
+ *
+ * It is the one profile that requires a JSON answer, and test item `S40/reanalyze-range/1` of
+ * 2026-09-08 is exactly why. That item established two things: the gateway accepted
+ * `response_format: {"type":"json_object"}` on this route without error — nothing in the response
+ * named the field, or the prompt's JSON-mode precondition — and the very unit that had returned an
+ * empty answer channel on the first live Run returned a JSON object the unit contract parsed.
+ *
+ * It established nothing further. One item is one response, so it does not show that the constraint
+ * is honoured on every response: an empty answer and an unparsable answer remain outcomes the
+ * execution owner reads and reports, not cases this declaration rules out.
  */
 export const OPENCODE_GO_V4_FLASH_PROFILE: ProviderModelProfile = {
   key: modelProfileKey(OPENCODE_GO_ROUTE, OPENCODE_GO_MODEL),
@@ -152,7 +176,7 @@ export const OPENCODE_GO_V4_FLASH_PROFILE: ProviderModelProfile = {
   capabilities: {
     requestShape: 'openai-chat-completions',
     reasoningControl: 'none',
-    structuredOutput: 'none',
+    structuredOutput: 'json-object',
     answerChannel: 'message-content-string',
     reasoningChannel: 'message-reasoning-content',
     usageAttribution: 'includes-reasoning',
@@ -160,7 +184,7 @@ export const OPENCODE_GO_V4_FLASH_PROFILE: ProviderModelProfile = {
   evidence: {
     requestShape: ADR_0067_DOCUMENTATION,
     reasoningControl: UNVERIFIED,
-    structuredOutput: UNVERIFIED,
+    structuredOutput: JSON_OBJECT_LIVE_ITEM,
     answerChannel: FIRST_LIVE_RUN,
     reasoningChannel: FIRST_LIVE_RUN,
     usageAttribution: FIRST_LIVE_RUN,

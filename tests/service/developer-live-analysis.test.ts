@@ -251,6 +251,8 @@ describe('the developer-live scope over exact sample1 with a stub transport', ()
       expect(call.headers[OPENCODE_GO_SESSION_HEADER]).toMatch(/^[0-9a-f-]{36}$/u);
       const body = JSON.parse(call.body) as Record<string, unknown>;
       expect(body.model).toBe('deepseek-v4-flash');
+      // The profile's declared constraint reaches the wire on the real path, not only at assembly.
+      expect(body.response_format).toEqual({ type: 'json_object' });
       expect(body).not.toHaveProperty('thinking');
       expect(body).not.toHaveProperty('reasoning_effort');
       // The credential never enters the body or its digest.
