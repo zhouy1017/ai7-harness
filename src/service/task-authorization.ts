@@ -35,6 +35,13 @@ export const TASK_AUTHORIZATION_SCHEMA_VERSION = 17;
  * version is declared here, where every module reads it.
  */
 export const MANUSCRIPT_INTAKE_SCHEMA_VERSION = 18;
+/**
+ * The text-conversion revision (Issue #356): a Source Version, its draft, and an abandonment
+ * cleanup intent may name the DOCX working representation an original was read through and the
+ * converter that produced it. Those are `store.ts`'s relations and it adds the columns; the
+ * terminal version is declared here, where every module reads it.
+ */
+export const TEXT_CONVERSION_SCHEMA_VERSION = 19;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const DIGEST_PATTERN = /^[0-9a-f]{64}$/;
 const SAMPLE1_SOURCE_DIGEST = 'b8a3dbde0aa8a1ec7265f9ae3fe47877759e7947c5ab69682cd0a8f424a8d483' as const;
@@ -821,7 +828,7 @@ function validateRevision16AnalysisLedgerSchema(db: DatabaseSync): void {
 
 export function validateTaskAuthorizationSchema(db: DatabaseSync): void {
   const version = asNumber((db.prepare('PRAGMA user_version').get() as SqlRow).user_version);
-  requireTask(version === MANUSCRIPT_INTAKE_SCHEMA_VERSION, 'SCHEMA_UNSUPPORTED', '数据库版本不受支持。');
+  requireTask(version === TEXT_CONVERSION_SCHEMA_VERSION, 'SCHEMA_UNSUPPORTED', '数据库版本不受支持。');
   validateJ03TaskAuthorizationSchema(db);
   validateAnalysisLedgerSchema(db);
 }
@@ -920,7 +927,7 @@ function migrateAnalysisLedgerToRevision17(db: DatabaseSync, from: typeof J04_BA
         db.exec(ANALYSIS_LEDGER_TRIGGER_SQL[`${table}_no_delete`]!);
       }
       seedInitialPlanVersions(db);
-      db.exec(`PRAGMA user_version = ${MANUSCRIPT_INTAKE_SCHEMA_VERSION}`);
+      db.exec(`PRAGMA user_version = ${TEXT_CONVERSION_SCHEMA_VERSION}`);
       requireTask(db.prepare('PRAGMA foreign_key_check').all().length === 0, 'SCHEMA_MIGRATION_FAILED', '分析任务账本迁移后引用校验失败。');
       validateTaskAuthorizationSchema(db);
       db.exec('COMMIT');
@@ -939,12 +946,12 @@ function migrateAnalysisLedgerToRevision17(db: DatabaseSync, from: typeof J04_BA
 }
 
 /**
- * Revision 17 → 18. The intake revision widens `store.ts`'s Source Version relations, which that
- * module rebuilds before this runs; no task-authorization or analysis relation moves, so once the
- * store relations carry the new shape the terminal version is all that is left to advance.
+ * Revision 17 or 18 → 19. Both revisions widen `store.ts`'s intake relations, which that module
+ * migrates before this runs; no task-authorization or analysis relation moves, so once the store
+ * relations carry the new shape the terminal version is all that is left to advance.
  */
-function migrateToManuscriptIntakeRevision18(db: DatabaseSync): void {
-  migrateInTransaction(db, `PRAGMA user_version = ${MANUSCRIPT_INTAKE_SCHEMA_VERSION};`, 'Manuscript intake');
+function migrateToTextConversionRevision19(db: DatabaseSync): void {
+  migrateInTransaction(db, `PRAGMA user_version = ${TEXT_CONVERSION_SCHEMA_VERSION};`, 'Text conversion');
 }
 
 /**
@@ -952,18 +959,21 @@ function migrateToManuscriptIntakeRevision18(db: DatabaseSync): void {
  * transaction; a revision-14 store gains only the analysis relations and keeps every J-03 row
  * untouched; a revision-15 or revision-16 store has its rebuilt relations copied forward with every
  * row's canonical JSON and digest preserved and its frozen plans seeded as plan version 1; a
- * revision-17 store only moves its version; a revision-18 store is validated whole.
+ * revision-17 or revision-18 store only moves its version; a revision-19 store is validated whole.
  */
 export function initializeTaskAuthorizationSchema(db: DatabaseSync): void {
   const version = asNumber((db.prepare('PRAGMA user_version').get() as SqlRow).user_version);
   requireTask(
     version === PREDECESSOR_SCHEMA_VERSION || version === J03_TASK_AUTHORIZATION_SCHEMA_VERSION ||
       version === J04_BASELINE_ANALYSIS_SCHEMA_VERSION || version === SUCCESSIVE_TASK_SCHEMA_VERSION ||
-      version === TASK_AUTHORIZATION_SCHEMA_VERSION || version === MANUSCRIPT_INTAKE_SCHEMA_VERSION,
+      version === TASK_AUTHORIZATION_SCHEMA_VERSION || version === MANUSCRIPT_INTAKE_SCHEMA_VERSION ||
+      version === TEXT_CONVERSION_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED', '数据库版本不受支持。',
   );
-  if (version === MANUSCRIPT_INTAKE_SCHEMA_VERSION) return validateTaskAuthorizationSchema(db);
-  if (version === TASK_AUTHORIZATION_SCHEMA_VERSION) return migrateToManuscriptIntakeRevision18(db);
+  if (version === TEXT_CONVERSION_SCHEMA_VERSION) return validateTaskAuthorizationSchema(db);
+  if (version === TASK_AUTHORIZATION_SCHEMA_VERSION || version === MANUSCRIPT_INTAKE_SCHEMA_VERSION) {
+    return migrateToTextConversionRevision19(db);
+  }
   if (version === SUCCESSIVE_TASK_SCHEMA_VERSION) {
     validateJ03TaskAuthorizationSchema(db);
     validateRevision16AnalysisLedgerSchema(db);
@@ -976,7 +986,7 @@ export function initializeTaskAuthorizationSchema(db: DatabaseSync): void {
   }
   const analysisStatements = `${Object.values(ANALYSIS_LEDGER_SCHEMA_SQL).join(';\n')};
       ${Object.values(ANALYSIS_LEDGER_TRIGGER_SQL).join(';\n')};
-      PRAGMA user_version = ${MANUSCRIPT_INTAKE_SCHEMA_VERSION};`;
+      PRAGMA user_version = ${TEXT_CONVERSION_SCHEMA_VERSION};`;
   if (version === J03_TASK_AUTHORIZATION_SCHEMA_VERSION) {
     validateJ03TaskAuthorizationSchema(db);
     return migrateInTransaction(db, analysisStatements, 'Analysis ledger');

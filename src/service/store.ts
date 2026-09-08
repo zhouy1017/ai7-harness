@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { closeSync, constants, createReadStream, fstatSync, lstatSync, openSync, readSync } from 'node:fs';
-import { copyFile, lstat, open, realpath, rename, rm } from 'node:fs/promises';
+import { copyFile, lstat, open, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { basename, extname, isAbsolute, posix, relative, resolve, sep } from 'node:path';
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
 import { J03_TASK_GOAL, MAX_BLOCK_CODE_UNITS, MAX_FRAME_BYTES } from '../shared/protocol.js';
@@ -27,6 +27,7 @@ import type {
   ManuscriptReimportTargetSelection,
   JournalAcknowledgement,
   JournalEditInput,
+  ManuscriptConversionProjection,
   ManuscriptWindowProjection,
   ModelCredentialOperationState,
   ModelServiceConnectionProjection,
@@ -78,10 +79,13 @@ import {
   type ProgressReader,
 } from './analysis/baseline-analysis-store.js';
 import {
+  buildFidelityReport,
   deriveImportFidelityPlan,
   DOCX_PARSER_IDENTITY,
+  isCleanTracerFidelity,
   MAX_ARCHIVE_BYTES,
   parseDocx,
+  type FidelityConversionIdentity,
   type ImportFidelityPlan,
   type ParsedDocx,
   type ParsedDocxBlock,
@@ -92,6 +96,12 @@ import {
   identifyManuscriptFormat,
   manuscriptObjectExtension,
 } from './manuscript-format.js';
+import {
+  convertTextManuscript,
+  isTextConversionRefusal,
+  type ConversionLoss,
+  type ConvertibleSourceFormat,
+} from './text-manuscript.js';
 import {
   BoundedManuscriptStore,
   BoundedStoreError,
@@ -132,6 +142,7 @@ import {
   MANUSCRIPT_INTAKE_SCHEMA_VERSION,
   SUCCESSIVE_TASK_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_VERSION,
+  TEXT_CONVERSION_SCHEMA_VERSION,
   TaskAuthorizationError,
   TaskAuthorizationStore,
   validateTaskAuthorizationSchema,
@@ -303,6 +314,23 @@ const SOURCE_PROVENANCE_V18_SCHEMA_SQL = `CREATE TABLE source_provenance (
 const IMPORT_DRAFT_SOURCE_FORMAT_V18_COLUMN_SQL =
   "ALTER TABLE import_drafts ADD COLUMN source_format TEXT NOT NULL DEFAULT 'DOCX' " +
   "CHECK(source_format IN ('DOCX', 'DOC', 'PDF', 'ODT', 'RTF', 'TXT', 'MD', 'UNKNOWN'))";
+/**
+ * Revision 19's conversion columns, all nullable so every existing row keeps its exact identity: a
+ * Source Version and its draft name the DOCX working representation the original was read through
+ * and the converter that produced it, and an abandonment cleanup intent names the working object it
+ * must remove beside the original (ADR 0072 §2).
+ */
+const SOURCE_VERSION_V19_COLUMNS_SQL = [
+  'ALTER TABLE source_versions ADD COLUMN working_object_digest TEXT REFERENCES content_objects(object_digest)',
+  'ALTER TABLE source_versions ADD COLUMN converter_identity TEXT',
+];
+const IMPORT_DRAFT_V19_COLUMNS_SQL = [
+  'ALTER TABLE import_drafts ADD COLUMN working_object_digest TEXT',
+  'ALTER TABLE import_drafts ADD COLUMN converter_identity TEXT',
+];
+const ABANDONMENT_CLEANUP_V19_COLUMN_SQL = [
+  'ALTER TABLE import_abandonment_cleanup_intents ADD COLUMN working_object_digest TEXT',
+];
 /** The three `source_versions` guards, re-created verbatim after the table is rebuilt. */
 const SOURCE_VERSION_REBUILT_TRIGGER_SQL = `
   CREATE TRIGGER abandonment_cleanup_block_source_insert
@@ -838,6 +866,67 @@ async function digestFile(path: string): Promise<string> {
   return hash.digest('hex');
 }
 
+/**
+ * The Import Fidelity Review for a converted file (ADR 0072 §3). The parser found nothing of its
+ * own in a working representation the product itself wrote, so every count in the review is the
+ * conversion's loss and every non-zero class names the converter as its cause.
+ */
+function conversionFidelityReport(
+  conversion: ManuscriptConversionProjection,
+  loss: ConversionLoss,
+): FidelityCategoryProjection[] {
+  return buildFidelityReport(
+    { inlineStyles: 0, commentsRevisions: 0, notes: 0, tables: 0, imagesCaptions: 0, sections: 0 },
+    0,
+    { identity: conversion.converterIdentity, sourceFormat: conversion.sourceFormat, loss },
+  );
+}
+
+/**
+ * The conversion a row carries, with the invariant `ALTER TABLE ADD COLUMN` could not express as a
+ * table `CHECK`: the working object and the converter's identity are null together or set together,
+ * and set only where the format is one the product reads through a converter (ADR 0072 §2).
+ */
+function readConversionColumns(
+  row: SqlRow,
+  format: SourceFormat,
+  message: string,
+): ManuscriptConversionProjection | null {
+  const workingObjectDigest = row.working_object_digest ?? null;
+  const converterIdentity = row.converter_identity ?? null;
+  requireStore((workingObjectDigest === null) === (converterIdentity === null), 'STORE_CORRUPT', message);
+  if (workingObjectDigest === null) return null;
+  requireStore(format === 'TXT' || format === 'MD', 'STORE_CORRUPT', message);
+  requireStore(DIGEST_PATTERN.test(asString(workingObjectDigest)), 'STORE_CORRUPT', message);
+  return { converterIdentity: asString(converterIdentity), sourceFormat: format };
+}
+
+/**
+ * The source surface of a stored commit result, read back from its Source Version row: the format
+ * and digest of record are the original's, and a converted import also names what it was read
+ * through (ADR 0072 §2).
+ */
+function storedSourceProjection(row: SqlRow): StagedImportProjection['source'] {
+  const format = requireSourceFormat(asString(row.format));
+  const conversion = readConversionColumns(row, format, '来源版本的转换记录不完整。');
+  return {
+    displayName: asString(row.display_name),
+    format,
+    sourceSha256: asString(row.source_digest),
+    sourceBytes: asNumber(row.byte_length),
+    provenanceLabel: '本机文件选择器 · 本地解析 · 未联网',
+    conversion,
+    workingObjectSha256: conversion === null ? null : asString(row.working_object_digest),
+  };
+}
+
+/** What such a review is rebuilt from, or `undefined` for a file the product read natively. */
+function fidelityConversion(conversion: ManuscriptConversionProjection | null): FidelityConversionIdentity | undefined {
+  return conversion === null
+    ? undefined
+    : { identity: conversion.converterIdentity, sourceFormat: conversion.sourceFormat };
+}
+
 function isInside(parent: string, child: string): boolean {
   const relation = relative(parent, child);
   return relation === '' || (!relation.startsWith(`..${sep}`) && relation !== '..' && !isAbsolute(relation));
@@ -1238,7 +1327,8 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === J04_BASELINE_ANALYSIS_SCHEMA_VERSION ||
       currentVersion === SUCCESSIVE_TASK_SCHEMA_VERSION ||
       currentVersion === TASK_AUTHORIZATION_SCHEMA_VERSION ||
-      currentVersion === MANUSCRIPT_INTAKE_SCHEMA_VERSION,
+      currentVersion === MANUSCRIPT_INTAKE_SCHEMA_VERSION ||
+      currentVersion === TEXT_CONVERSION_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -1256,7 +1346,8 @@ function initializeSchema(db: DatabaseSync): void {
     currentVersion === J04_BASELINE_ANALYSIS_SCHEMA_VERSION ||
     currentVersion === SUCCESSIVE_TASK_SCHEMA_VERSION ||
     currentVersion === TASK_AUTHORIZATION_SCHEMA_VERSION ||
-    currentVersion === MANUSCRIPT_INTAKE_SCHEMA_VERSION
+    currentVersion === MANUSCRIPT_INTAKE_SCHEMA_VERSION ||
+    currentVersion === TEXT_CONVERSION_SCHEMA_VERSION
   ) return;
   if (currentVersion === 1) {
     migrateSchemaV1ToV2(db);
@@ -1590,7 +1681,8 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION ||
       version === EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION || version === J03_TASK_AUTHORIZATION_SCHEMA_VERSION ||
       version === J04_BASELINE_ANALYSIS_SCHEMA_VERSION || version === SUCCESSIVE_TASK_SCHEMA_VERSION ||
-      version === TASK_AUTHORIZATION_SCHEMA_VERSION || version === MANUSCRIPT_INTAKE_SCHEMA_VERSION,
+      version === TASK_AUTHORIZATION_SCHEMA_VERSION || version === MANUSCRIPT_INTAKE_SCHEMA_VERSION ||
+      version === TEXT_CONVERSION_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -1599,7 +1691,8 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION ||
       version === EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION || version === J03_TASK_AUTHORIZATION_SCHEMA_VERSION ||
       version === J04_BASELINE_ANALYSIS_SCHEMA_VERSION || version === SUCCESSIVE_TASK_SCHEMA_VERSION ||
-      version === TASK_AUTHORIZATION_SCHEMA_VERSION || version === MANUSCRIPT_INTAKE_SCHEMA_VERSION) return;
+      version === TASK_AUTHORIZATION_SCHEMA_VERSION || version === MANUSCRIPT_INTAKE_SCHEMA_VERSION ||
+      version === TEXT_CONVERSION_SCHEMA_VERSION) return;
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
   );
@@ -1700,7 +1793,8 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION ||
       version === EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION || version === J03_TASK_AUTHORIZATION_SCHEMA_VERSION ||
       version === J04_BASELINE_ANALYSIS_SCHEMA_VERSION || version === SUCCESSIVE_TASK_SCHEMA_VERSION ||
-      version === TASK_AUTHORIZATION_SCHEMA_VERSION || version === MANUSCRIPT_INTAKE_SCHEMA_VERSION,
+      version === TASK_AUTHORIZATION_SCHEMA_VERSION || version === MANUSCRIPT_INTAKE_SCHEMA_VERSION ||
+      version === TEXT_CONVERSION_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -1708,7 +1802,8 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION ||
       version === EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION || version === J03_TASK_AUTHORIZATION_SCHEMA_VERSION ||
       version === J04_BASELINE_ANALYSIS_SCHEMA_VERSION || version === SUCCESSIVE_TASK_SCHEMA_VERSION ||
-      version === TASK_AUTHORIZATION_SCHEMA_VERSION || version === MANUSCRIPT_INTAKE_SCHEMA_VERSION) return;
+      version === TASK_AUTHORIZATION_SCHEMA_VERSION || version === MANUSCRIPT_INTAKE_SCHEMA_VERSION ||
+      version === TEXT_CONVERSION_SCHEMA_VERSION) return;
   validateSourceImportSchemaTruth(db, profile);
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
@@ -1958,6 +2053,41 @@ function initializeManuscriptIntakeSchema(db: DatabaseSync): void {
   requireStore(violations.length === 0, 'SCHEMA_MIGRATION_FAILED', '数据库引用校验失败。');
 }
 
+/**
+ * Revision 19's conversion columns (ADR 0072 §2). Every one is added by `ALTER TABLE ADD COLUMN`
+ * with a null default, so no relation is rebuilt, no row is copied, and no digest of record moves;
+ * a store that predates the revision simply gains five empty columns.
+ *
+ * `ALTER` cannot add a table `CHECK`, so the invariant those columns carry — both null or both set,
+ * and set only where the format is one the product converts — is enforced in this module's writes
+ * and in its read-side validation instead. Like revision 18 this runs before the version moves in
+ * `task-authorization.ts` and is shape-detected, so an interruption between the two repeats only
+ * the version bump on the next open.
+ */
+function initializeTextConversionSchema(db: DatabaseSync): void {
+  const statements = [
+    ...(columnExists(db, 'source_versions', 'working_object_digest') ? [] : SOURCE_VERSION_V19_COLUMNS_SQL),
+    ...(columnExists(db, 'import_drafts', 'working_object_digest') ? [] : IMPORT_DRAFT_V19_COLUMNS_SQL),
+    ...(columnExists(db, 'import_abandonment_cleanup_intents', 'working_object_digest')
+      ? []
+      : ABANDONMENT_CLEANUP_V19_COLUMN_SQL),
+  ];
+  if (statements.length === 0) return;
+  try {
+    db.exec(`BEGIN IMMEDIATE;
+      ${statements.join(';\n      ')};
+      COMMIT;`);
+  } catch (error) {
+    try {
+      db.exec('ROLLBACK');
+    } catch (rollbackError) {
+      throw new AggregateError([error, rollbackError], 'SQLite text conversion schema migration rollback failed.');
+    }
+    throw error;
+  }
+  requireStore(db.prepare('PRAGMA foreign_key_check').all().length === 0, 'SCHEMA_MIGRATION_FAILED', '数据库引用校验失败。');
+}
+
 function validateModelServiceSchema(
   db: DatabaseSync,
   profile: BuiltInWorkflowProfile,
@@ -1966,7 +2096,7 @@ function validateModelServiceSchema(
   const version = asNumber(
     one(db.prepare('PRAGMA user_version').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取数据库版本。').user_version,
   );
-  if (validateStoreTruth || version !== MANUSCRIPT_INTAKE_SCHEMA_VERSION) {
+  if (validateStoreTruth || version !== TEXT_CONVERSION_SCHEMA_VERSION) {
     validateManuscriptReimportSchemaTruth(
       db,
       profile,
@@ -2011,7 +2141,8 @@ function initializeModelServiceSchema(
       version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION ||
       version === EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION || version === J03_TASK_AUTHORIZATION_SCHEMA_VERSION ||
       version === J04_BASELINE_ANALYSIS_SCHEMA_VERSION || version === SUCCESSIVE_TASK_SCHEMA_VERSION ||
-      version === TASK_AUTHORIZATION_SCHEMA_VERSION || version === MANUSCRIPT_INTAKE_SCHEMA_VERSION,
+      version === TASK_AUTHORIZATION_SCHEMA_VERSION || version === MANUSCRIPT_INTAKE_SCHEMA_VERSION ||
+      version === TEXT_CONVERSION_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2019,7 +2150,8 @@ function initializeModelServiceSchema(
       version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION ||
       version === EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION || version === J03_TASK_AUTHORIZATION_SCHEMA_VERSION ||
       version === J04_BASELINE_ANALYSIS_SCHEMA_VERSION || version === SUCCESSIVE_TASK_SCHEMA_VERSION ||
-      version === TASK_AUTHORIZATION_SCHEMA_VERSION || version === MANUSCRIPT_INTAKE_SCHEMA_VERSION) {
+      version === TASK_AUTHORIZATION_SCHEMA_VERSION || version === MANUSCRIPT_INTAKE_SCHEMA_VERSION ||
+      version === TEXT_CONVERSION_SCHEMA_VERSION) {
     validateModelServiceSchema(db, profile, validateStoreTruth);
     if (version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION) {
       validateEditorialWorkspaceProfileNativeSchema(db);
@@ -2067,8 +2199,12 @@ interface DraftSnapshot {
   reviewedBranchId: string | null;
   reviewDigest: string | null;
   stagedAt: string;
-  /** What the intake router identified the selected file as; only `DOCX` was parsed. */
+  /** What the intake router identified the selected file as (ADR 0072 §1). */
   sourceFormat: SourceFormat;
+  /** The converter this draft was read through, or null for a file read natively or not at all. */
+  conversion: ManuscriptConversionProjection | null;
+  /** The working representation's digest, set exactly when `conversion` is (ADR 0072 §2). */
+  workingObjectDigest: string | null;
   /** Null together, for a retained original the product never parsed (ADR 0072 §2). */
   parserIdentity: string | null;
   sourceDigest: string;
@@ -2099,12 +2235,22 @@ interface CommitAttempt {
   completionAcknowledgedAt: string | null;
 }
 
+/**
+ * The working representation is always stored under `.docx` and its own digest, so a cleanup intent
+ * needs only the digest to find it again (ADR 0072 §2).
+ */
+function workingObjectRelativeKey(objectDigest: string): string {
+  return posix.join('sha256', objectDigest.slice(0, 2), `${objectDigest}${manuscriptObjectExtension('DOCX')}`);
+}
+
 interface AbandonmentCleanupIntent {
   draftId: string;
   objectDigest: string;
   expectedDraftVersion: number;
   relativeKey: string;
   state: 'prepared' | 'bytes-removed';
+  /** The converted working representation to remove beside the original, when there is one. */
+  workingObjectDigest: string | null;
 }
 
 interface StoreControl {
@@ -2814,8 +2960,9 @@ export class EditorialStore {
     initializeBoundedSchema(authority, workflowProfile, false);
     const editorialWorkspaceProfile = await EditorialWorkspaceProfileStore.open(authority, dataRoot, codeRoot);
     // The intake relations widen before the terminal version moves, so the version and the shape it
-    // names change together for every store that reaches revision 18.
+    // names change together for every store that reaches revision 18, and again for revision 19.
     initializeManuscriptIntakeSchema(authority);
+    initializeTextConversionSchema(authority);
     initializeTaskAuthorizationSchema(authority);
     initializeBoundedSchema(authority, workflowProfile);
     validateEditorialWorkspaceProfileSchema(authority);
@@ -3174,6 +3321,7 @@ export class EditorialStore {
       `SELECT m.manuscript_id, m.created_at, mb.branch_id, mr.revision_id, mr.revision_label,
               mr.revision_digest, mr.source_version_id, mr.created_at revision_created_at,
               sv.display_name, sv.format, sv.source_digest, sv.content_digest, sv.structure_digest, sv.parser_identity,
+              sv.working_object_digest, sv.converter_identity,
               co.byte_length source_bytes,
               sp.provenance_id, sp.acquisition_path, sp.locality,
               wi.workflow_instance_id, wi.current_phase, wi.state, wi.profile_id, wi.profile_version,
@@ -3240,10 +3388,16 @@ export class EditorialStore {
     const sourceVersionId = asString(row.source_version_id);
     const fidelityReviewId = asString(row.fidelity_review_id);
     const fidelityCategories = this.#loadPersistedFidelity(fidelityReviewId);
+    const sourceConversion = readConversionColumns(
+      row,
+      requireSourceFormat(asString(row.format)),
+      '来源版本的转换记录不完整。',
+    );
     const fidelityPlan = deriveImportFidelityPlan(
       fidelityCategories,
       asString(row.source_digest),
       asNumber(row.source_bytes),
+      fidelityConversion(sourceConversion),
     );
     const fidelityOutcome = asString(row.fidelity_outcome);
     requireStore(
@@ -3289,6 +3443,8 @@ export class EditorialStore {
           format: requireSourceFormat(asString(row.format)),
           sourceDigest: asString(row.source_digest), contentDigest: asString(row.content_digest),
           structureDigest: asString(row.structure_digest), parserIdentity: asString(row.parser_identity),
+          workingObjectDigest: sourceConversion === null ? null : asString(row.working_object_digest),
+          converterIdentity: sourceConversion === null ? null : sourceConversion.converterIdentity,
           acquisitionPath: 'native-file-picker', locality: 'local-provider-free',
         },
         {
@@ -3400,7 +3556,8 @@ export class EditorialStore {
     if (recordIds.length === 0) return [];
     const rows = this.#authority.prepare(
       `SELECT rr.*, sv.display_name, sv.format, sv.source_digest, sv.content_digest, sv.structure_digest,
-              sv.parser_identity, co.byte_length source_bytes, sp.acquisition_path, sp.locality,
+              sv.parser_identity, sv.working_object_digest, sv.converter_identity,
+              co.byte_length source_bytes, sp.acquisition_path, sp.locality,
               fr.outcome fidelity_outcome, fr.review_digest fidelity_review_digest,
               dd.decision degradation_decision
        FROM manuscript_reimport_records rr
@@ -3429,10 +3586,16 @@ export class EditorialStore {
       const comparisonKind = asString(row.comparison_kind) as 'three-way' | 'two-way';
       const fidelityReviewId = asString(row.fidelity_review_id);
       const fidelityCategories = this.#loadPersistedFidelity(fidelityReviewId);
+      const sourceConversion = readConversionColumns(
+        row,
+        requireSourceFormat(asString(row.format)),
+        '来源版本的转换记录不完整。',
+      );
       const fidelityPlan = deriveImportFidelityPlan(
         fidelityCategories,
         asString(row.source_digest),
         asNumber(row.source_bytes),
+        fidelityConversion(sourceConversion),
       );
       requireStore(fidelityPlan !== undefined && fidelityPlan.outcome === asString(row.fidelity_outcome) &&
         ((fidelityPlan.degradations.length === 0 && row.degradation_decision_id === null && row.degradation_decision === null) ||
@@ -3489,6 +3652,8 @@ export class EditorialStore {
           contentDigest: asString(row.content_digest),
           structureDigest: asString(row.structure_digest),
           parserIdentity: asString(row.parser_identity),
+          workingObjectDigest: sourceConversion === null ? null : asString(row.working_object_digest),
+          converterIdentity: sourceConversion === null ? null : sourceConversion.converterIdentity,
           acquisitionPath: 'native-file-picker',
           locality: 'local-provider-free',
         });
@@ -3537,7 +3702,8 @@ export class EditorialStore {
               sir.provenance_id, sir.target_kind, sir.source_version_disposition, sir.retained_boundary_json,
               sir.named_non_effects_json, sir.record_digest, sir.imported_at,
               sv.display_name, sv.format, sv.source_digest, sv.content_digest, sv.structure_digest,
-              sv.parser_identity, co.byte_length, sp.acquisition_path, sp.locality,
+              sv.parser_identity, sv.working_object_digest, sv.converter_identity,
+              co.byte_length, sp.acquisition_path, sp.locality,
               sp.sanitized_identity
        FROM source_import_records sir
        JOIN source_versions sv
@@ -3603,6 +3769,7 @@ export class EditorialStore {
       }));
       requireStore(recordDigest === asString(row.record_digest), 'BOOK_RECORD_GRAPH_INVALID', '来源导入记录摘要无效。');
       if (!presentedSources.has(sourceVersionId)) {
+        const conversion = readConversionColumns(row, format, '来源版本的转换记录不完整。');
         records.push({
           kind: 'source',
           label: '来源版本与来源记录',
@@ -3615,6 +3782,8 @@ export class EditorialStore {
           contentDigest,
           structureDigest,
           parserIdentity,
+          workingObjectDigest: conversion === null ? null : asString(row.working_object_digest),
+          converterIdentity: conversion === null ? null : conversion.converterIdentity,
           acquisitionPath: 'native-file-picker',
           locality: 'local-provider-free',
         });
@@ -3813,7 +3982,13 @@ export class EditorialStore {
     const displayName = safeDisplayName(basename(selectedPath));
     const draftId = randomUUID();
     const format = await this.#identifySelectedManuscript(selectedPath, displayName);
-    if (format !== 'DOCX') return this.#stageSourceOnlyDraft(draftId, selectionToken, selectedPath, displayName, format);
+    // The format table owns the routing (ADR 0072 §1): read natively, read through a converter, or
+    // retained source-only with the reason the surface states.
+    const route = editableImport(format);
+    if (!route.available) return this.#stageSourceOnlyDraft(draftId, selectionToken, selectedPath, displayName, format);
+    if (route.conversion) {
+      return this.#stageConvertedManuscriptDraft(draftId, selectionToken, selectedPath, displayName, route.conversion);
+    }
 
     try {
       const ingested = await this.#parseIntoIngest(draftId, selectedPath, displayName);
@@ -3855,6 +4030,8 @@ export class EditorialStore {
             displayName,
             objectDigest: parsed.sourceDigest,
             selectedPath,
+            conversion: null,
+            workingObjectDigest: null,
             reviewedTitle: null,
             reviewedTargetChoiceId: null,
             reviewedTargetKind: null,
@@ -3965,6 +4142,114 @@ export class EditorialStore {
       });
       return this.#stagedProjection(this.#loadDraftSnapshot(draftId));
     });
+  }
+
+  /**
+   * Stage a file the product reads through a DOCX working representation (ADR 0072 §2). The
+   * original is retained under its own extension and stays the digest of record; the converted DOCX
+   * is a second content object, parsed exactly as a selected DOCX is, and linked from the draft so
+   * that the commit can link it from the Source Version and an abandonment can remove it again.
+   */
+  async #stageConvertedManuscriptDraft(
+    draftId: string,
+    selectionToken: string,
+    selectedPath: string,
+    displayName: string,
+    conversion: ManuscriptConversionProjection,
+  ): Promise<StagedImportProjection> {
+    const converted = await this.#convertSelectedManuscript(selectedPath, conversion.sourceFormat);
+    // The identification window read only the file's head, so a file that turns out not to be the
+    // text it looked like is retained whole and unparsed rather than refused (ADR 0072 §1).
+    if (!converted) return this.#stageSourceOnlyDraft(draftId, selectionToken, selectedPath, displayName, 'UNKNOWN');
+    const fidelity = conversionFidelityReport(conversion, converted.loss);
+    return this.#withContentObjectLifecycle(async () => {
+      const working = await this.#persistWorkingObject(converted.docx);
+      const ingested = await this.#parseIntoIngest(draftId, working.path, displayName);
+      try {
+        const { parsed } = ingested;
+        // The converter emits no run property, table, image, section child, header, or footer, so
+        // every count in the merged review is the conversion's — the invariant the review's
+        // reconstruction rests on, checked here on the bytes actually produced.
+        requireStore(isCleanTracerFidelity(parsed.fidelity), 'FIDELITY_OUTSIDE_TRACER', '工作表示带有解析器自身的保真信号。');
+        requireStore(
+          parsed.sourceDigest === working.digest && parsed.archiveBytes === working.byteLength,
+          'OBJECT_VERIFY_FAILED',
+          '工作表示对象与解析结果不一致。',
+        );
+        const retained = await this.#persistRetainedOriginal(selectedPath, conversion.sourceFormat);
+        const now = new Date().toISOString();
+        this.#transaction(this.#authority, () => {
+          this.#insertContentObject(working.digest, working.relativeKey, working.byteLength, now);
+          this.#insertContentObject(retained.digest, retained.relativeKey, retained.byteLength, now);
+          this.#authority
+            .prepare(
+              `INSERT INTO import_drafts(
+                 draft_id, selection_token, state, draft_version, display_name, object_digest, selected_path,
+                 staged_at, source_format, working_object_digest, converter_identity
+               ) VALUES (?, ?, 'staged', 1, ?, ?, ?, ?, ?, ?, ?)`,
+            )
+            .run(
+              draftId, selectionToken, displayName, retained.digest, selectedPath, now,
+              conversion.sourceFormat, working.digest, conversion.converterIdentity,
+            );
+          // The staged snapshot is keyed on the original's digest: the working representation is
+          // what was read, never what the Source Version is (ADR 0072 §2).
+          this.#promoteIngestSnapshot(draftId, ingested, now, { sourceDigest: retained.digest, fidelity });
+          this.#boundedCall(() => this.#boundedAuthority.assertStagedDraftIntegrity(draftId));
+          this.#assertForeignKeys(this.#authority);
+        });
+        return this.#stagedProjection(this.#loadDraftSnapshot(draftId));
+      } finally {
+        this.#discardIngest(ingested.ingestId);
+      }
+    });
+  }
+
+  /**
+   * Convert the selected file, or `null` when its bytes are not the text its head window suggested.
+   * The whole file is read at once because a conversion has no streaming boundary to stop at; the
+   * archive bound was already applied to its size before anything was read.
+   */
+  async #convertSelectedManuscript(
+    selectedPath: string,
+    format: ConvertibleSourceFormat,
+  ): Promise<{ docx: Uint8Array; loss: ConversionLoss } | null> {
+    const bytes = await readFile(selectedPath);
+    try {
+      return convertTextManuscript(bytes, { format });
+    } catch (error) {
+      if (isTextConversionRefusal(error)) return null;
+      throw error;
+    }
+  }
+
+  /** The working representation is a content object of its own, under `.docx` and its own digest. */
+  async #persistWorkingObject(
+    docx: Uint8Array,
+  ): Promise<{ digest: string; byteLength: number; relativeKey: string; path: string }> {
+    const digest = sha256(docx);
+    const relativeKey = await this.#persistContentObject(docx, digest, 'DOCX');
+    return { digest, byteLength: docx.byteLength, relativeKey, path: this.#contentObjectPath(digest, relativeKey) };
+  }
+
+  #insertContentObject(objectDigest: string, relativeKey: string, byteLength: number, now: string): void {
+    this.#authority
+      .prepare(
+        `INSERT INTO content_objects(object_digest, relative_key, byte_length, verified_at)
+         VALUES (?, ?, ?, ?)
+         ON CONFLICT(object_digest) DO NOTHING`,
+      )
+      .run(objectDigest, relativeKey, byteLength, now);
+    const object = one(
+      this.#authority.prepare('SELECT relative_key, byte_length FROM content_objects WHERE object_digest = ?').all(objectDigest) as SqlRow[],
+      'OBJECT_VERIFY_FAILED',
+      '暂存对象记录缺失。',
+    );
+    requireStore(
+      asString(object.relative_key) === relativeKey && asNumber(object.byte_length) === byteLength,
+      'OBJECT_VERIFY_FAILED',
+      '暂存对象记录冲突。',
+    );
   }
 
   async getImportStartup(): Promise<ImportStartupProjection> {
@@ -4521,7 +4806,7 @@ export class EditorialStore {
       const draft = one(
         this.#authority
           .prepare(
-            `SELECT d.state, d.draft_version, d.object_digest, co.relative_key
+            `SELECT d.state, d.draft_version, d.object_digest, d.working_object_digest, co.relative_key
              FROM import_drafts d
              JOIN content_objects co ON co.object_digest = d.object_digest
              WHERE d.draft_id = ?`,
@@ -4553,6 +4838,11 @@ export class EditorialStore {
       );
       const objectDigest = asString(draft.object_digest);
       const relativeKey = asString(draft.relative_key);
+      // A converted draft owns two objects, and abandoning it removes both: the original the editor
+      // selected and the working representation the product wrote beside it (ADR 0072 §2).
+      const workingObjectDigest = draft.working_object_digest === null
+        ? null
+        : asString(draft.working_object_digest);
       const referencesBefore = one(
         this.#authority
           .prepare(
@@ -4572,16 +4862,18 @@ export class EditorialStore {
         this.#authority
           .prepare(
             `INSERT INTO import_abandonment_cleanup_intents(
-               draft_id, object_digest, expected_draft_version, relative_key, state, requested_at
-             ) VALUES (?, ?, ?, ?, 'prepared', ?)`,
+               draft_id, object_digest, expected_draft_version, relative_key, state, requested_at,
+               working_object_digest
+             ) VALUES (?, ?, ?, ?, 'prepared', ?, ?)`,
           )
-          .run(draftId, objectDigest, expectedDraftVersion, relativeKey, requestedAt);
+          .run(draftId, objectDigest, expectedDraftVersion, relativeKey, requestedAt, workingObjectDigest);
         const intent: AbandonmentCleanupIntent = {
           draftId,
           objectDigest,
           expectedDraftVersion,
           relativeKey,
           state: 'prepared',
+          workingObjectDigest,
         };
         this.#assertForeignKeys(this.#authority);
         return intent;
@@ -5682,8 +5974,8 @@ export class EditorialStore {
         .prepare(
           `INSERT INTO source_versions(
              source_version_id, book_id, object_digest, source_digest, content_digest, structure_digest,
-             parser_identity, format, display_name, created_at
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             parser_identity, format, display_name, created_at, working_object_digest, converter_identity
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           sourceVersionId,
@@ -5696,6 +5988,8 @@ export class EditorialStore {
           snapshot.sourceFormat,
           snapshot.displayName,
           now,
+          snapshot.workingObjectDigest,
+          snapshot.conversion?.converterIdentity ?? null,
         );
       this.#authority
         .prepare(
@@ -5946,6 +6240,7 @@ export class EditorialStore {
         fidelityPlan: plan,
         sourceDigest: snapshot.sourceDigest,
         sourceBytes: snapshot.sourceBytes,
+        conversion: snapshot.conversion,
       });
       this.#authority.prepare('DELETE FROM staged_import_snapshots WHERE draft_id = ?').run(input.draftId);
       this.#assertForeignKeys(this.#authority);
@@ -6088,8 +6383,8 @@ export class EditorialStore {
         this.#authority.prepare(
           `INSERT INTO source_versions(
              source_version_id, book_id, object_digest, source_digest, content_digest, structure_digest,
-             parser_identity, format, display_name, created_at
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             parser_identity, format, display_name, created_at, working_object_digest, converter_identity
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         ).run(
           sourceVersionId,
           bookId,
@@ -6101,6 +6396,8 @@ export class EditorialStore {
           snapshot.sourceFormat,
           snapshot.displayName,
           now,
+          snapshot.workingObjectDigest,
+          snapshot.conversion?.converterIdentity ?? null,
         );
       } else {
         const source = one(this.#authority.prepare(
@@ -6778,20 +7075,25 @@ export class EditorialStore {
         this.#authority.prepare(
           `INSERT INTO source_versions(
              source_version_id, book_id, object_digest, source_digest, content_digest, structure_digest,
-             parser_identity, format, display_name, created_at
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             parser_identity, format, display_name, created_at, working_object_digest, converter_identity
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         ).run(sourceVersionId, target.bookId, snapshot.objectDigest, snapshot.sourceDigest,
           snapshot.contentDigest, snapshot.structureDigest, snapshot.parserIdentity, snapshot.sourceFormat,
-          snapshot.displayName, now);
+          snapshot.displayName, now, snapshot.workingObjectDigest,
+          snapshot.conversion?.converterIdentity ?? null);
       } else {
         const source = one(this.#authority.prepare(
-          `SELECT book_id, object_digest, source_digest, content_digest, structure_digest, parser_identity, format
+          `SELECT book_id, object_digest, source_digest, content_digest, structure_digest, parser_identity, format,
+                  working_object_digest, converter_identity
            FROM source_versions WHERE source_version_id = ?`,
         ).all(sourceVersionId) as SqlRow[], 'SOURCE_VERSION_REUSE_INVALID', '明确选择的来源版本不存在。');
         requireStore(asString(source.book_id) === target.bookId && asString(source.object_digest) === snapshot.objectDigest &&
           asString(source.source_digest) === snapshot.sourceDigest && asString(source.content_digest) === snapshot.contentDigest &&
           asString(source.structure_digest) === snapshot.structureDigest && asString(source.parser_identity) === snapshot.parserIdentity &&
-          asString(source.format) === 'DOCX', 'SOURCE_VERSION_REUSE_INCOMPATIBLE', '明确选择的同图书来源版本与暂存快照不一致。');
+          asString(source.format) === snapshot.sourceFormat &&
+          (source.working_object_digest ?? null) === snapshot.workingObjectDigest &&
+          (source.converter_identity ?? null) === (snapshot.conversion?.converterIdentity ?? null),
+        'SOURCE_VERSION_REUSE_INCOMPATIBLE', '明确选择的同图书来源版本与暂存快照不一致。');
       }
       this.#authority.prepare(
         `INSERT INTO source_provenance(
@@ -7953,23 +8255,27 @@ export class EditorialStore {
       // A retained original was never parsed, so its exact bytes — verified just above — are the
       // whole of what there is to revalidate, and no parser version can drift under it.
       if (snapshot.parserIdentity === null) return { snapshot, parserDrift: false };
-      const ingested = await this.#parseIntoIngest(snapshot.draftId, objectPath, snapshot.displayName);
+      // A converted draft was read through its working representation, so that is what the parse is
+      // revalidated against, after the conversion itself is reproduced from the retained original.
+      const converted = snapshot.conversion === null ? null : await this.#revalidateConversion(snapshot, objectPath);
+      const ingested = await this.#parseIntoIngest(snapshot.draftId, converted?.path ?? objectPath, snapshot.displayName);
       try {
         const { parsed } = ingested;
         requireStore(
-          parsed.sourceDigest === snapshot.sourceDigest && parsed.archiveBytes === snapshot.sourceBytes,
+          parsed.sourceDigest === (converted?.digest ?? snapshot.sourceDigest) &&
+            parsed.archiveBytes === (converted?.byteLength ?? snapshot.sourceBytes),
           'SNAPSHOT_RESELECTION_REQUIRED',
           '暂存来源身份无法重建。',
         );
         if (parsed.parserIdentity !== snapshot.parserIdentity) {
-          return { snapshot: this.#refreshSnapshotForParserDrift(snapshot, ingested), parserDrift: true };
+          return { snapshot: this.#refreshSnapshotForParserDrift(snapshot, ingested, converted), parserDrift: true };
         }
         requireStore(
           parsed.contentDigest === snapshot.contentDigest &&
             parsed.structureDigest === snapshot.structureDigest &&
             parsed.blockCount === snapshot.blockCount &&
             parsed.characterCount === snapshot.characterCount &&
-            canonicalJson(parsed.fidelity) === canonicalJson(snapshot.fidelity) &&
+            canonicalJson(converted?.fidelity ?? parsed.fidelity) === canonicalJson(snapshot.fidelity) &&
             parsed.titleSuggestion.value === snapshot.titleSuggestion &&
             parsed.titleSuggestion.sourceLabel === snapshot.titleSource &&
             this.#ingestMatchesSnapshot(ingested.ingestId, snapshot.draftId),
@@ -7988,13 +8294,57 @@ export class EditorialStore {
     }
   }
 
-  #refreshSnapshotForParserDrift(snapshot: DraftSnapshot, ingested: IngestedDocx): DraftSnapshot {
+  /**
+   * Reproduce a converted draft's working representation from the retained original. The converter
+   * is pure, so the same bytes must give the same object; a review the editor is about to commit is
+   * the review that conversion produces, or the draft needs an exact reselection (ADR 0072 §2, §3).
+   */
+  async #revalidateConversion(
+    snapshot: DraftSnapshot,
+    originalPath: string,
+  ): Promise<{ digest: string; byteLength: number; path: string; fidelity: FidelityCategoryProjection[] }> {
+    const conversion = snapshot.conversion!;
+    const converted = await this.#convertSelectedManuscript(originalPath, conversion.sourceFormat);
+    requireStore(converted !== null, 'SNAPSHOT_RESELECTION_REQUIRED', '保留的原始文件无法再次转换。');
+    const digest = sha256(converted.docx);
+    requireStore(
+      digest === snapshot.workingObjectDigest,
+      'SNAPSHOT_RESELECTION_REQUIRED',
+      '工作表示无法按相同字节重建。',
+    );
+    const object = one(
+      this.#authority
+        .prepare('SELECT relative_key, byte_length FROM content_objects WHERE object_digest = ?')
+        .all(digest) as SqlRow[],
+      'SNAPSHOT_RESELECTION_REQUIRED',
+      '工作表示对象记录缺失。',
+    );
+    const path = this.#contentObjectPath(digest, asString(object.relative_key));
+    requireStore((await digestFile(path)) === digest, 'SNAPSHOT_RESELECTION_REQUIRED', '工作表示对象摘要无效。');
+    return {
+      digest,
+      byteLength: asNumber(object.byte_length),
+      path,
+      fidelity: conversionFidelityReport(conversion, converted.loss),
+    };
+  }
+
+  #refreshSnapshotForParserDrift(
+    snapshot: DraftSnapshot,
+    ingested: IngestedDocx,
+    converted: { digest: string; fidelity: FidelityCategoryProjection[] } | null = null,
+  ): DraftSnapshot {
     const nextVersion = snapshot.version + 1;
     const now = new Date().toISOString();
     this.#transaction(this.#authority, () => {
       this.#authority.prepare('DELETE FROM manuscript_reimport_comparisons WHERE draft_id = ?').run(snapshot.draftId);
       this.#authority.prepare('DELETE FROM staged_import_snapshots WHERE draft_id = ?').run(snapshot.draftId);
-      this.#promoteIngestSnapshot(snapshot.draftId, ingested, now);
+      this.#promoteIngestSnapshot(
+        snapshot.draftId,
+        ingested,
+        now,
+        converted === null ? undefined : { sourceDigest: snapshot.sourceDigest, fidelity: converted.fidelity },
+      );
       const update = this.#authority
         .prepare(
           `UPDATE import_drafts
@@ -8049,7 +8399,8 @@ export class EditorialStore {
     return { digest, byteLength, relativeKey: await this.#persistContentObject(selectedPath, digest, format) };
   }
 
-  async #persistContentObject(selectedPath: string, sourceDigest: string, format: SourceFormat): Promise<string> {
+  /** `source` is the selected file's path, or the bytes of a working representation the product wrote. */
+  async #persistContentObject(source: string | Uint8Array, sourceDigest: string, format: SourceFormat): Promise<string> {
     this.#requireNoAbandonmentCleanupForObject(sourceDigest);
     const extension = manuscriptObjectExtension(format);
     const relativeKey = posix.join('sha256', sourceDigest.slice(0, 2), `${sourceDigest}${extension}`);
@@ -8072,7 +8423,8 @@ export class EditorialStore {
         '暂存对象路径已存在。',
       );
       try {
-        await copyFile(selectedPath, temporary, constants.COPYFILE_EXCL);
+        if (typeof source === 'string') await copyFile(source, temporary, constants.COPYFILE_EXCL);
+        else await writeFile(temporary, source, { flag: 'wx' });
         const inspectedTemporary = await inspectCanonicalDataFile(this.#dataRoot, objectDirectory, temporaryName);
         requireStore(
           inspectedTemporary.exists && inspectedTemporary.path === temporary,
@@ -8203,7 +8555,17 @@ export class EditorialStore {
     }
   }
 
-  #promoteIngestSnapshot(draftId: string, ingested: IngestedDocx, createdAt: string): void {
+  /**
+   * `converted` belongs to a draft the product read through a working representation: the snapshot
+   * then keys on the original's digest and carries the merged review, while every derived digest
+   * stays the one the parser produced from the object it actually read (ADR 0072 §2).
+   */
+  #promoteIngestSnapshot(
+    draftId: string,
+    ingested: IngestedDocx,
+    createdAt: string,
+    converted?: { sourceDigest: string; fidelity: FidelityCategoryProjection[] },
+  ): void {
     const { parsed } = ingested;
     this.#authority
       .prepare(
@@ -8215,11 +8577,11 @@ export class EditorialStore {
       .run(
         draftId,
         parsed.parserIdentity,
-        parsed.sourceDigest,
+        converted?.sourceDigest ?? parsed.sourceDigest,
         parsed.contentDigest,
         parsed.structureDigest,
         parsed.blockCount,
-        canonicalJson(parsed.fidelity),
+        canonicalJson(converted?.fidelity ?? parsed.fidelity),
         parsed.titleSuggestion.value,
         parsed.titleSuggestion.sourceLabel,
         createdAt,
@@ -8274,7 +8636,7 @@ export class EditorialStore {
   #loadAbandonmentCleanupIntent(draftId: string): AbandonmentCleanupIntent | null {
     const rows = this.#authority
       .prepare(
-        `SELECT draft_id, object_digest, expected_draft_version, relative_key, state
+        `SELECT draft_id, object_digest, expected_draft_version, relative_key, state, working_object_digest
          FROM import_abandonment_cleanup_intents
          WHERE draft_id = ?`,
       )
@@ -8284,12 +8646,19 @@ export class EditorialStore {
     const row = rows[0]!;
     const state = asString(row.state);
     requireStore(state === 'prepared' || state === 'bytes-removed', 'STORE_CORRUPT', '放弃清理意图状态无效。');
+    const workingObjectDigest = row.working_object_digest === null ? null : asString(row.working_object_digest);
+    requireStore(
+      workingObjectDigest === null || DIGEST_PATTERN.test(workingObjectDigest),
+      'STORE_CORRUPT',
+      '放弃清理意图的工作表示摘要无效。',
+    );
     return {
       draftId: asString(row.draft_id),
       objectDigest: asString(row.object_digest),
       expectedDraftVersion: asNumber(row.expected_draft_version),
       relativeKey: asString(row.relative_key),
       state,
+      workingObjectDigest,
     };
   }
 
@@ -8368,19 +8737,37 @@ export class EditorialStore {
     );
   }
 
+  /** Every object a cleanup intent owns: the retained original, and a working representation. */
+  #cleanupObjects(intent: AbandonmentCleanupIntent): Array<{ digest: string; relativeKey: string }> {
+    return [
+      { digest: intent.objectDigest, relativeKey: intent.relativeKey },
+      ...(intent.workingObjectDigest === null
+        ? []
+        : [{ digest: intent.workingObjectDigest, relativeKey: workingObjectRelativeKey(intent.workingObjectDigest) }]),
+    ];
+  }
+
   async #contentObjectIsAbsent(intent: AbandonmentCleanupIntent): Promise<boolean> {
-    try {
-      await lstat(this.#contentObjectPath(intent.objectDigest, intent.relativeKey));
-      return false;
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return true;
-      throw new StoreError('ABANDON_CLEANUP_FAILED', '无法证明未共享暂存对象已经删除；放弃清理意图仍保留。');
+    for (const object of this.#cleanupObjects(intent)) {
+      try {
+        await lstat(this.#contentObjectPath(object.digest, object.relativeKey));
+        return false;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+          throw new StoreError('ABANDON_CLEANUP_FAILED', '无法证明未共享暂存对象已经删除；放弃清理意图仍保留。');
+        }
+      }
     }
+    return true;
   }
 
   #requireContentObjectAbsentForFinalization(intent: AbandonmentCleanupIntent): void {
+    for (const object of this.#cleanupObjects(intent)) this.#requireObjectAbsentForFinalization(object);
+  }
+
+  #requireObjectAbsentForFinalization(object: { digest: string; relativeKey: string }): void {
     try {
-      lstatSync(this.#contentObjectPath(intent.objectDigest, intent.relativeKey));
+      lstatSync(this.#contentObjectPath(object.digest, object.relativeKey));
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
       throw new StoreError(
@@ -8401,7 +8788,8 @@ export class EditorialStore {
     requireStore(
       intent.objectDigest === intentInput.objectDigest &&
         intent.expectedDraftVersion === intentInput.expectedDraftVersion &&
-        intent.relativeKey === intentInput.relativeKey,
+        intent.relativeKey === intentInput.relativeKey &&
+        intent.workingObjectDigest === intentInput.workingObjectDigest,
       'ABANDON_CLEANUP_INCONCLUSIVE',
       '持久放弃清理意图绑定已变化。',
     );
@@ -8410,7 +8798,9 @@ export class EditorialStore {
       if (this.#control.induceAbandonObjectRemovalFailure) {
         throw new Error('E2E induced failure at the production unshared-object removal boundary.');
       }
-      await rm(this.#contentObjectPath(intent.objectDigest, intent.relativeKey), { force: true });
+      for (const object of this.#cleanupObjects(intent)) {
+        await rm(this.#contentObjectPath(object.digest, object.relativeKey), { force: true });
+      }
       requireStore(
         await this.#contentObjectIsAbsent(intent),
         'ABANDON_CLEANUP_FAILED',
@@ -8488,6 +8878,28 @@ export class EditorialStore {
         .prepare('DELETE FROM content_objects WHERE object_digest = ? AND relative_key = ?')
         .run(intent!.objectDigest, intent!.relativeKey);
       requireStore(objectDeletion.changes === 1, 'ABANDON_CLEANUP_INCONCLUSIVE', '暂存对象权威记录无法完成清理。');
+      if (intent!.workingObjectDigest !== null) {
+        const workingReferences = one(
+          this.#authority
+            .prepare(
+              `SELECT
+                 (SELECT count(*) FROM source_versions WHERE working_object_digest = ?) source_refs,
+                 (SELECT count(*) FROM import_drafts WHERE working_object_digest = ?) draft_refs`,
+            )
+            .all(intent!.workingObjectDigest, intent!.workingObjectDigest) as SqlRow[],
+          'STORE_CORRUPT',
+          '无法核对工作表示的最终放弃清理引用。',
+        );
+        requireStore(
+          asNumber(workingReferences.source_refs) === 0 && asNumber(workingReferences.draft_refs) === 0,
+          'ABANDON_REFERENCE_CHANGED',
+          '工作表示在最终放弃清理时出现权威引用。',
+        );
+        const workingDeletion = this.#authority
+          .prepare('DELETE FROM content_objects WHERE object_digest = ? AND relative_key = ?')
+          .run(intent!.workingObjectDigest, workingObjectRelativeKey(intent!.workingObjectDigest));
+        requireStore(workingDeletion.changes === 1, 'ABANDON_CLEANUP_INCONCLUSIVE', '工作表示权威记录无法完成清理。');
+      }
       this.#assertForeignKeys(this.#authority);
     });
   }
@@ -8510,10 +8922,15 @@ export class EditorialStore {
   async #sweepUnreferencedContentObjects(): Promise<void> {
     const rows = this.#authority
       .prepare(
+        // A converted file's working representation is referenced as such, never as a digest of
+        // record, so the sweep counts that reference too or it would remove what a Manuscript was
+        // read from (ADR 0072 §2).
         `SELECT co.object_digest, co.relative_key
          FROM content_objects co
          WHERE NOT EXISTS (SELECT 1 FROM source_versions sv WHERE sv.object_digest = co.object_digest)
            AND NOT EXISTS (SELECT 1 FROM import_drafts d WHERE d.object_digest = co.object_digest)
+           AND NOT EXISTS (SELECT 1 FROM source_versions sv WHERE sv.working_object_digest = co.object_digest)
+           AND NOT EXISTS (SELECT 1 FROM import_drafts d WHERE d.working_object_digest = co.object_digest)
          ORDER BY co.object_digest`,
       )
       .all() as SqlRow[];
@@ -8530,7 +8947,9 @@ export class EditorialStore {
             `DELETE FROM content_objects
              WHERE object_digest = ?
                AND NOT EXISTS (SELECT 1 FROM source_versions sv WHERE sv.object_digest = content_objects.object_digest)
-               AND NOT EXISTS (SELECT 1 FROM import_drafts d WHERE d.object_digest = content_objects.object_digest)`,
+               AND NOT EXISTS (SELECT 1 FROM import_drafts d WHERE d.object_digest = content_objects.object_digest)
+               AND NOT EXISTS (SELECT 1 FROM source_versions sv WHERE sv.working_object_digest = content_objects.object_digest)
+               AND NOT EXISTS (SELECT 1 FROM import_drafts d WHERE d.working_object_digest = content_objects.object_digest)`,
           )
           .run(digest);
       });
@@ -8608,6 +9027,8 @@ export class EditorialStore {
         sourceSha256: snapshot.sourceDigest,
         sourceBytes: snapshot.sourceBytes,
         provenanceLabel: '本机文件选择器 · 本地解析 · 未联网',
+        conversion: snapshot.conversion,
+        workingObjectSha256: snapshot.workingObjectDigest,
       },
       editableImport: editableImport(snapshot.sourceFormat),
       titleSuggestion: { value: snapshot.titleSuggestion, sourceLabel: snapshot.titleSource },
@@ -9560,7 +9981,8 @@ export class EditorialStore {
                   d.reviewed_book_state_digest, d.reviewed_reuse_source_version_id,
                   d.reviewed_lineage_status, d.reviewed_lineage_source_version_id,
                   d.reviewed_checkpoint_revision_id, d.reviewed_manuscript_id, d.reviewed_branch_id,
-                  d.staged_at, d.source_format, s.parser_identity, s.source_digest,
+                  d.staged_at, d.source_format, d.working_object_digest, d.converter_identity,
+                  s.parser_identity, s.source_digest,
                   s.content_digest, s.structure_digest, s.block_count, s.character_count, s.fidelity_json,
                   s.title_suggestion, s.title_source, co.byte_length
            FROM import_drafts d
@@ -9573,16 +9995,20 @@ export class EditorialStore {
       '导入草稿不存在或已完成。',
     );
     const sourceFormat = requireSourceFormat(asString(row.source_format));
-    // Only a DOCX was parsed, so only a DOCX has a staged snapshot; every other draft is
-    // source-only and carries the original's identity alone (ADR 0072 §2).
-    const parsed = sourceFormat === 'DOCX';
+    // The two conversion columns are set together and only where the format is one the product
+    // converts; `ALTER TABLE` could not add that as a table `CHECK`, so it is required here on
+    // every read (ADR 0072 §2).
+    const conversion = readConversionColumns(row, sourceFormat, '导入草稿的转换记录不完整。');
+    // A DOCX was parsed natively and a converted file through its working representation; every
+    // other draft is source-only and carries the original's identity alone (ADR 0072 §2).
+    const parsed = sourceFormat === 'DOCX' || conversion !== null;
     requireStore(parsed === (row.parser_identity !== null), 'STORE_CORRUPT', '暂存解析结果与来源格式不一致。');
     const sourceDigest = parsed ? asString(row.source_digest) : asString(row.object_digest);
     const sourceBytes = asNumber(row.byte_length);
     requireStore(asString(row.object_digest) === sourceDigest, 'STORE_CORRUPT', '暂存对象与来源摘要不一致。');
     const fidelityValue = parsed ? parseStoredJson(asString(row.fidelity_json), '导入保真快照无效。') : [];
     if (parsed) {
-      const plan = deriveImportFidelityPlan(fidelityValue, sourceDigest, sourceBytes);
+      const plan = deriveImportFidelityPlan(fidelityValue, sourceDigest, sourceBytes, fidelityConversion(conversion));
       requireStore(plan, 'FIDELITY_OUTSIDE_TRACER', '持久化导入保真快照不符合当前受限边界。');
     }
     const titleSource = parsed ? asString(row.title_source) : '文件名';
@@ -9652,6 +10078,8 @@ export class EditorialStore {
       reviewDigest: row.review_digest === null ? null : asString(row.review_digest),
       stagedAt: asString(row.staged_at),
       sourceFormat,
+      conversion,
+      workingObjectDigest: conversion === null ? null : asString(row.working_object_digest),
       parserIdentity: parsed ? asString(row.parser_identity) : null,
       sourceDigest,
       sourceBytes,
@@ -9677,7 +10105,12 @@ export class EditorialStore {
 
   #requireFidelityPlan(snapshot: DraftSnapshot): ImportFidelityPlan {
     this.#requireEditableFormat(snapshot);
-    const plan = deriveImportFidelityPlan(snapshot.fidelity, snapshot.sourceDigest, snapshot.sourceBytes);
+    const plan = deriveImportFidelityPlan(
+      snapshot.fidelity,
+      snapshot.sourceDigest,
+      snapshot.sourceBytes,
+      fidelityConversion(snapshot.conversion),
+    );
     requireStore(plan, 'FIDELITY_OUTSIDE_TRACER', '当前导入的保真计划不符合受限边界。');
     return plan;
   }
@@ -9724,7 +10157,8 @@ export class EditorialStore {
 
   #loadStoredReimportResult(commitId: string): ManuscriptReimportCommitProjection {
     const row = one(this.#authority.prepare(
-      `SELECT ic.commit_id, ic.committed_at, rr.*, sv.display_name, sv.source_digest,
+      `SELECT ic.commit_id, ic.committed_at, rr.*, sv.display_name, sv.source_digest, sv.format,
+              sv.working_object_digest, sv.converter_identity,
               co.byte_length, d.reviewed_reuse_source_version_id
        FROM import_commits ic
        JOIN manuscript_reimport_records rr ON rr.commit_id = ic.commit_id
@@ -9763,13 +10197,7 @@ export class EditorialStore {
       comparisonKind,
       comparisonDigest: asString(row.comparison_digest),
       resolutionDigest: asString(row.resolution_digest),
-      source: {
-        displayName: asString(row.display_name),
-        format: 'DOCX',
-        sourceSha256: asString(row.source_digest),
-        sourceBytes: asNumber(row.byte_length),
-        provenanceLabel: '本机文件选择器 · 本地解析 · 未联网',
-      },
+      source: storedSourceProjection(row),
       receipt,
       overview: this.getBookOverview(bookId),
       window: this.getManuscriptWindow(manuscriptId, branchId, null),
@@ -9782,7 +10210,8 @@ export class EditorialStore {
         .prepare(
           `SELECT ic.commit_id, ic.committed_at, ir.import_record_id, ir.book_id, ir.manuscript_id,
                   ir.fidelity_review_id, ir.degradation_decision_id, ir.resulting_revision_id,
-                  mr.branch_id, sv.display_name, sv.object_digest, sv.source_digest, co.byte_length,
+                  mr.branch_id, sv.display_name, sv.object_digest, sv.source_digest, sv.format,
+                  sv.working_object_digest, sv.converter_identity, co.byte_length,
                   fr.outcome, fr.round_trip_guaranteed, dd.fidelity_review_id decision_fidelity_review_id,
                   dd.decision
            FROM import_commits ic
@@ -9813,7 +10242,8 @@ export class EditorialStore {
     const sourceBytes = asNumber(row.byte_length);
     requireStore(asString(row.object_digest) === sourceDigest, 'STORE_CORRUPT', '提交来源对象与来源摘要不一致。');
     const categories = this.#loadPersistedFidelity(fidelityReviewId);
-    const plan = deriveImportFidelityPlan(categories, sourceDigest, sourceBytes);
+    const conversion = readConversionColumns(row, requireSourceFormat(asString(row.format)), '来源版本的转换记录不完整。');
+    const plan = deriveImportFidelityPlan(categories, sourceDigest, sourceBytes, fidelityConversion(conversion));
     requireStore(plan, 'STORE_CORRUPT', '导入提交保真记录无效。');
     requireStore(asString(row.outcome) === plan.outcome && asNumber(row.round_trip_guaranteed) === 0, 'STORE_CORRUPT', '导入保真结论无效。');
     const degradationDecisionId = row.degradation_decision_id === null ? null : asString(row.degradation_decision_id);
@@ -9838,13 +10268,7 @@ export class EditorialStore {
       branchId: asString(row.branch_id),
       revisionId: asString(row.resulting_revision_id),
       importRecordId,
-      source: {
-        displayName: asString(row.display_name),
-        format: 'DOCX',
-        sourceSha256: sourceDigest,
-        sourceBytes,
-        provenanceLabel: '本机文件选择器 · 本地解析 · 未联网',
-      },
+      source: storedSourceProjection(row),
       fidelityReview: { fidelityReviewId, outcome: plan.outcome, categories },
       importRecord: {
         importRecordId,
@@ -9950,6 +10374,9 @@ export class EditorialStore {
         sourceSha256: boundary.sourceSha256,
         sourceBytes: boundary.sourceBytes,
         provenanceLabel: '本机文件选择器 · 本地解析 · 未联网',
+        // A source-only import retained the original whole and read nothing through a converter.
+        conversion: null,
+        workingObjectSha256: null,
       },
       retainedBoundary: boundary,
       provenance: {
@@ -9982,6 +10409,7 @@ export class EditorialStore {
     fidelityPlan: ImportFidelityPlan;
     sourceDigest: string;
     sourceBytes: number;
+    conversion: ManuscriptConversionProjection | null;
   }): void {
     const counts = one(
       this.#authority
@@ -10074,7 +10502,12 @@ export class EditorialStore {
       '导入提交未形成完整记录图。',
     );
     const categories = this.#loadPersistedFidelity(input.fidelityReviewId);
-    const persistedPlan = deriveImportFidelityPlan(categories, input.sourceDigest, input.sourceBytes);
+    const persistedPlan = deriveImportFidelityPlan(
+      categories,
+      input.sourceDigest,
+      input.sourceBytes,
+      fidelityConversion(input.conversion),
+    );
     requireStore(
       persistedPlan && canonicalJson(persistedPlan) === canonicalJson(input.fidelityPlan),
       'IMPORT_POSTCONDITION_FAILED',

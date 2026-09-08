@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   DOCX_PARSER_IDENTITY,
+  buildFidelityReport,
   deriveImportFidelityPlan,
   isCleanTracerFidelity,
   parseDocx,
@@ -433,5 +434,59 @@ describe('deriveImportFidelityPlan and isCleanTracerFidelity', () => {
     expect(deriveImportFidelityPlan([], sourceDigest, archiveBytes)).toBeUndefined();
     expect(deriveImportFidelityPlan([{ key: 'inline-styles' }], sourceDigest, archiveBytes)).toBeUndefined();
     expect(isCleanTracerFidelity([])).toBe(false);
+  });
+
+  // The two conversion cases of #356; everything else in this file is #353's.
+  it('names the converter in every class a conversion carried loss into, and nowhere else', () => {
+    const report = buildFidelityReport(
+      { inlineStyles: 0, commentsRevisions: 0, notes: 0, tables: 0, imagesCaptions: 0, sections: 0 },
+      0,
+      {
+        identity: 'ai7-text-to-docx/1',
+        sourceFormat: 'MD',
+        loss: {
+          inlineStyles: 2, commentsRevisions: 0, notes: 0, tables: 1,
+          imagesCaptions: 0, sections: 0, headersFooters: 0,
+        },
+      },
+    );
+    expect(report.map((category) => [category.key, category.count, category.statusLabel])).toEqual([
+      ['inline-styles', 2, '降级导入'],
+      ['comments-revisions', 0, '完整保留'],
+      ['notes', 0, '完整保留'],
+      ['tables', 1, '降级导入'],
+      ['images-captions', 0, '完整保留'],
+      ['sections', 0, '完整保留'],
+      ['headers-footers', 0, '完整保留'],
+      ['round-trip-export', 0, '不支持导入'],
+    ]);
+    const named = report.filter((category) => category.detail.startsWith('由 ai7-text-to-docx/1 从 MD 转换保留为原文字符：'));
+    expect(named.map((category) => category.key)).toEqual(['inline-styles', 'tables']);
+  });
+
+  it('refuses to plan a converted report unless the conversion that made it is named', () => {
+    const conversion = { identity: 'ai7-text-to-docx/1', sourceFormat: 'MD' as const };
+    const report = buildFidelityReport(
+      { inlineStyles: 0, commentsRevisions: 0, notes: 0, tables: 0, imagesCaptions: 0, sections: 0 },
+      0,
+      {
+        ...conversion,
+        loss: {
+          inlineStyles: 2, commentsRevisions: 0, notes: 0, tables: 1,
+          imagesCaptions: 0, sections: 0, headersFooters: 0,
+        },
+      },
+    );
+    expect(deriveImportFidelityPlan(report, 'a'.repeat(64), 1024)).toBeUndefined();
+    expect(deriveImportFidelityPlan(report, 'a'.repeat(64), 1024, conversion)).toEqual({
+      outcome: 'degraded-import-no-round-trip',
+      degradations: [
+        { categoryKey: 'inline-styles', label: '行内样式', count: 2 },
+        { categoryKey: 'tables', label: '表格', count: 1 },
+      ],
+    });
+    // A parser's own report is equally not a converted one, whichever way it is read.
+    expect(deriveImportFidelityPlan(report, 'a'.repeat(64), 1024, { ...conversion, sourceFormat: 'TXT' }))
+      .toBeUndefined();
   });
 });
