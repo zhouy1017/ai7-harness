@@ -231,6 +231,7 @@ describe('task authorization over the real store on exact sample1', () => {
       expect(prepared.executionPlan?.stopCondition).toBe('Provider Processing v1 denies dispatch');
       expect(prepared.planEnvelope?.providerStatus).toBe('denied');
       expect(prepared.planEnvelope?.dispatchAllowed).toBe(false);
+      expect(prepared.planEnvelope?.summary).toBe('计划已冻结；Provider Processing v1 拒绝派发');
       expect(prepared.planEnvelope?.digest).toMatch(DIGEST_PATTERN);
       expect(prepared.authorization).toBeNull();
       expect(prepared.runRecord).toBeNull();
@@ -280,6 +281,23 @@ describe('task authorization over the real store on exact sample1', () => {
       expect(inspected.runRecord?.runRecordId).toBe(runRecordId);
       expect(inspected.planEnvelope?.digest).toBe(prepared.planEnvelope!.digest);
 
+      // The foreground boundary refuses the recorded Run and states why in three exact reasons; only
+      // the middle one names the launch's own scope, Provider Processing version, and transmission
+      // count. These are byte pins: nothing about them may move when they stop being constants.
+      const boundary = store.inspectForegroundExecutionBoundary(bookId, runRecordId, launchPolicy);
+      expect(boundary.state).toBe('blocked-before-dispatch');
+      expect(boundary.terminalLabel).toBe('前台执行已拒绝 · 未启动');
+      expect(boundary.runAuthority).toBe('record-only-no-dispatch');
+      expect(boundary.requiresNewPlanEnvelope).toBe(true);
+      expect(boundary.requiresRenewedRunAuthorization).toBe(true);
+      expect(boundary.reasons).toEqual([
+        '现有 Run 权限仅为 record-only-no-dispatch，不能派发。',
+        '当前可信启动范围为 development-ci，Provider Processing v1 允许 0 次实时传输。',
+        '生产或录制尝试必须创建新 Plan Envelope 并重新记录 Run Authorization。',
+      ]);
+      // Reading the boundary records nothing: the projection is exactly what it was before.
+      expect(store.inspectTaskAuthorization(bookId)).toEqual(inspected);
+
       store.markCleanShutdown();
     } finally {
       store.close();
@@ -326,6 +344,38 @@ describe('task authorization over the real store on exact sample1', () => {
         .get(runRecordId) as { state: string; dispatched: number };
       expect(run.state).toBe('recorded-not-dispatched');
       expect(run.dispatched).toBe(0);
+
+      // The three stored records, pinned byte for byte as the canonical JSON this code writes today.
+      // Only the identifiers and digests one Run mints are interpolated; every statement about the
+      // trusted scope, the Provider Processing version, the decision, and the live transmission count
+      // is literal here, so a refactor that derives them instead has to reproduce them exactly.
+      const jsonOf = (table: string): string =>
+        (database.prepare(`SELECT canonical_json FROM ${table}`).get() as { canonical_json: string }).canonical_json;
+      const digestOf = (table: string): string =>
+        (database.prepare(`SELECT sha256 FROM ${table}`).get() as { sha256: string }).sha256;
+      const taskIntentId = (database.prepare('SELECT task_intent_id FROM task_intents')
+        .get() as { task_intent_id: string }).task_intent_id;
+      expect(jsonOf('provider_resolution_plans')).toBe(
+        `{"adapterRevision":1,"approvedFallbackChain":[],"capabilities":[],"configurationRevision":1,` +
+        `"credentialReadiness":"missing","credentialReference":${JSON.stringify(credentialReference)},` +
+        `"modelId":"deepseek-v4-pro","outboundDataCategory":"public-or-synthetic",` +
+        `"providerId":"deepseek-open-platform","providerProcessing":{"authorizedLiveTransmissionCount":0,` +
+        `"decision":"deny","operationalScope":"development-ci","version":"v1"},"role":"Main Editorial Role",` +
+        `"runBudgetCeiling":"unset"}`,
+      );
+      expect(jsonOf('execution_plans')).toBe(
+        '{"effects":[],"steps":["分析结构","分析叙事连贯性","形成编辑复核重点"],' +
+        '"stopCondition":"Provider Processing v1 denies dispatch"}',
+      );
+      expect(jsonOf('plan_envelopes')).toBe(
+        `{"artifactPinDigest":"${digestOf('task_artifact_pins')}",` +
+        `"checkpointDigest":"${digestOf('task_input_checkpoints')}","dispatchAllowed":false,` +
+        `"executionPlanDigest":"${digestOf('execution_plans')}",` +
+        `"manuscriptPinDigest":"${digestOf('task_manuscript_pins')}",` +
+        `"providerResolutionPlanDigest":"${digestOf('provider_resolution_plans')}",` +
+        `"providerStatus":"denied","runSourceScopeDigest":"${digestOf('run_source_scopes')}",` +
+        `"summary":"计划已冻结；Provider Processing v1 拒绝派发","taskIntentId":"${taskIntentId}"}`,
+      );
     } finally {
       database.close();
     }
