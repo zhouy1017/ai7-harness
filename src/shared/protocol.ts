@@ -1,4 +1,4 @@
-export const SERVICE_PROTOCOL_VERSION = 20 as const;
+export const SERVICE_PROTOCOL_VERSION = 21 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -1699,6 +1699,14 @@ export interface BaselineAnalysisHistoryProjection {
   entries: ReadonlyArray<BaselineAnalysisHistoryEntryProjection>;
 }
 
+/**
+ * What the Provider attempt of the unit in flight is doing, as an identity and nothing more
+ * (V2-UX-LIVE-001, V2-UX-LIVE-006). `dispatched` is the attempt the execution owner has handed to the
+ * harness, `awaiting-response` one whose request has entered the transport, and `retrying` the second
+ * attempt of a `safe-retry` Plan Adaptation. No model content, prompt text, or payload rides here.
+ */
+export type RunAttemptState = 'dispatched' | 'awaiting-response' | 'retrying';
+
 export interface BaselineAnalysisProjection {
   bookId: string;
   kind: typeof BASELINE_ANALYSIS_KIND;
@@ -1793,7 +1801,26 @@ export interface BaselineAnalysisProjection {
     /** The Run's durable Plan Adaptations in record order; each sits in the timeline beside the transitions. */
     adaptations: ReadonlyArray<BaselineAnalysisPlanAdaptationProjection>;
     blockedReasons: ReadonlyArray<string> | null;
-    progress: { unitsTotal: number; unitsSettled: number; currentUnitOrdinal: number | null } | null;
+    /**
+     * The Run Liveness Signal's facts while the Run is `admitted` or `executing` (ADR 0071 §3): what
+     * is in flight, since when, what the attempt is doing, and when the Run last changed state. Every
+     * field is a count or an instant; elapsed time is the reader's to compute, never the product's to
+     * estimate.
+     */
+    progress: {
+      unitsTotal: number;
+      unitsSettled: number;
+      currentUnitOrdinal: number | null;
+      /** The instant the current unit's attempt started; `null` between units. */
+      currentUnitStartedAt: string | null;
+      attemptState: RunAttemptState | null;
+      /** Model turns this Run has completed, live, replayed, or deterministic alike. */
+      completedAttempts: number;
+      /** The longest step this Run has actually settled, which the stale case is measured against. */
+      longestSettledUnitMs: number | null;
+      /** The `recordedAt` of the Run Record's latest transition, composed by the store. */
+      lastTransitionAt: string;
+    } | null;
     attempt: null | {
       attemptId: string;
       ordinal: 1;
