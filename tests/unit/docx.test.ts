@@ -12,6 +12,11 @@ import {
 import type { FidelityCategoryProjection } from '../../src/shared/protocol.js';
 import { writeSyntheticDocx, type SyntheticDocxOptions } from '../support/synthetic-docx.js';
 
+// Every fixture in this suite is generated, and stays generated: the subject throughout is the DOCX
+// container — packaging, parts, entry and size bounds, fidelity classes, and the shapes the parser must
+// refuse — where the block text is irrelevant by construction. A manuscript composed from an admitted
+// Public SampleBook would say nothing here that a generated container does not already say.
+
 let sandbox: string;
 
 beforeEach(async () => {
