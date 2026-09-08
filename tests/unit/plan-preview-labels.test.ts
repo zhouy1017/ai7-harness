@@ -1,17 +1,54 @@
 import { describe, expect, it } from 'vitest';
-import type { AnalysisConflictProjection, ProviderProcessingPin, RunBudgetCeilingState } from '../../src/shared/protocol.js';
+import type {
+  AnalysisConflictProjection,
+  ProviderProcessingPin,
+  ResultSetPolicyPin,
+  RunBudgetCeilingState,
+} from '../../src/shared/protocol.js';
 import {
   ANALYSIS_CONFLICT_KIND_LABELS,
   RUN_LIVENESS_UNMEASURED_STALE_MS,
   analysisBlockCountLabel,
+  analysisKindSubtitle,
   analysisProvenanceSummary,
   attemptStateLabel,
   elapsedLabel,
+  launchPolicyIntegritySentence,
   localInstantLabel,
   providerProcessingLabel,
+  remoteBindingPolicyReading,
+  remoteBindingRowLabel,
   runBudgetCeilingLabel,
   runStepIsStale,
+  taskAuthorizationDispatchNote,
 } from '../../src/renderer/plan-preview-labels.js';
+
+/*
+ * The four renderer scope statements of #337 derive from the launch their projection carries. Under
+ * `development-ci` every one of them must still render the exact bytes it rendered as a fixed string
+ * at `dev@5f3c4b44`, which is what these four literals are: captured before the derivation existed,
+ * asserted here so a derivation that drifts fails in `test` rather than in a Journey.
+ */
+const CAPTURED_DEVELOPMENT_CI = {
+  analysisKindSubtitle: '一个精确版本化的覆盖式分析种类；远程绑定被 Provider Processing v1 拒绝，结果集修订版不修改稿件。',
+  remoteBindingRowLabel: '远程绑定（被拒绝）',
+  remoteBindingPolicyReading: 'development-ci · v1 · 0 次实时传输',
+  taskAuthorizationDispatchNote: '本流程只冻结并记录本次标准直接授权；Provider Processing v1 固定拒绝派发。',
+  launchPolicyIntegritySentence: '策略完整性：已验证。当前开发与持续集成范围保持零次实时传输。',
+} as const;
+
+const DENIED_PIN: ProviderProcessingPin = {
+  operationalScope: 'development-ci', version: 'v1', decision: 'deny', authorizedLiveTransmissionCount: 0,
+};
+const ELIGIBLE_PIN: ProviderProcessingPin = {
+  operationalScope: 'developer-live', version: 'v4', decision: 'eligible-only', authorizedLiveTransmissionCount: 'bounded-by-run',
+};
+const DENIED_POLICY_PIN: ResultSetPolicyPin = {
+  operationalScope: 'development-ci', providerProcessingVersion: 'v1', activePolicySetVersion: 'v4', liveTransmissions: 0,
+};
+const ELIGIBLE_POLICY_PIN: ResultSetPolicyPin = {
+  operationalScope: 'developer-live', providerProcessingVersion: 'v4', activePolicySetVersion: 'v4', liveTransmissions: 'bounded-by-run',
+};
 
 describe('runBudgetCeilingLabel', () => {
   it('states unset for the development-ci reading and the token ceiling for a set developer-live ceiling', () => {
@@ -30,6 +67,76 @@ describe('providerProcessingLabel', () => {
   it('renders a developer-live pin with the bounded-by-run token verbatim', () => {
     const pin: ProviderProcessingPin = { operationalScope: 'developer-live', version: 'v4', decision: 'eligible-only', authorizedLiveTransmissionCount: 'bounded-by-run' };
     expect(providerProcessingLabel(pin)).toBe('developer-live · v4 · eligible-only · bounded-by-run 次实时传输');
+  });
+});
+
+describe('remoteBindingPolicyReading', () => {
+  it('reproduces the development-ci bytes the frozen plan row rendered as a fixed string', () => {
+    expect(remoteBindingPolicyReading(DENIED_PIN)).toBe(CAPTURED_DEVELOPMENT_CI.remoteBindingPolicyReading);
+  });
+
+  it('states a developer-live pin as the bound it is, never as a transmission count', () => {
+    expect(remoteBindingPolicyReading(ELIGIBLE_PIN)).toBe('developer-live · v4 · 受运行边界约束');
+    expect(remoteBindingPolicyReading(ELIGIBLE_PIN)).not.toContain('次实时传输');
+  });
+});
+
+describe('remoteBindingRowLabel', () => {
+  it('reproduces the denied row label the frozen plan rendered as a fixed string', () => {
+    expect(remoteBindingRowLabel(DENIED_PIN.decision)).toBe(CAPTURED_DEVELOPMENT_CI.remoteBindingRowLabel);
+  });
+
+  it('names an eligible-only binding as eligible rather than as denied', () => {
+    expect(remoteBindingRowLabel(ELIGIBLE_PIN.decision)).toBe('远程绑定（仅限资格）');
+  });
+});
+
+describe('taskAuthorizationDispatchNote', () => {
+  it('reproduces the development-ci bytes the note rendered as a fixed string', () => {
+    expect(taskAuthorizationDispatchNote(DENIED_PIN)).toBe(CAPTURED_DEVELOPMENT_CI.taskAuthorizationDispatchNote);
+  });
+
+  it('states the bounded live permission of an eligible-only plan instead of a fixed refusal', () => {
+    expect(taskAuthorizationDispatchNote(ELIGIBLE_PIN))
+      .toBe('本流程只冻结并记录本次标准直接授权；Provider Processing v4 仅允许运行边界内的实时传输。');
+  });
+
+  it('states only what the flow does before a plan has frozen a pin', () => {
+    expect(taskAuthorizationDispatchNote(null)).toBe('本流程只冻结并记录本次标准直接授权。');
+    expect(taskAuthorizationDispatchNote(null)).not.toContain('Provider Processing');
+  });
+});
+
+describe('analysisKindSubtitle', () => {
+  it('reproduces the development-ci bytes the analysis card rendered as a fixed string', () => {
+    expect(analysisKindSubtitle(DENIED_PIN)).toBe(CAPTURED_DEVELOPMENT_CI.analysisKindSubtitle);
+  });
+
+  it('reads the same denial from a Result Set Revision policy pin when only a Revision exists', () => {
+    expect(analysisKindSubtitle(DENIED_POLICY_PIN)).toBe(CAPTURED_DEVELOPMENT_CI.analysisKindSubtitle);
+  });
+
+  it('states an eligible-only binding from either pin shape', () => {
+    const eligible = '一个精确版本化的覆盖式分析种类；远程绑定在 Provider Processing v4 下仅限资格，结果集修订版不修改稿件。';
+    expect(analysisKindSubtitle(ELIGIBLE_PIN)).toBe(eligible);
+    expect(analysisKindSubtitle(ELIGIBLE_POLICY_PIN)).toBe(eligible);
+  });
+
+  it('drops the binding clause, and only that clause, when neither a plan nor a Revision exists', () => {
+    expect(analysisKindSubtitle(null)).toBe('一个精确版本化的覆盖式分析种类；结果集修订版不修改稿件。');
+    expect(analysisKindSubtitle(null)).not.toContain('Provider Processing');
+  });
+});
+
+describe('launchPolicyIntegritySentence', () => {
+  it('reproduces the development-ci bytes J-12 pins, from the label alone', () => {
+    expect(launchPolicyIntegritySentence('开发与持续集成：零次实时传输'))
+      .toBe(CAPTURED_DEVELOPMENT_CI.launchPolicyIntegritySentence);
+  });
+
+  it('reads a developer-live launch as its own scope and bound', () => {
+    expect(launchPolicyIntegritySentence('开发者实时：实时传输受运行边界约束'))
+      .toBe('策略完整性：已验证。当前开发者实时范围保持实时传输受运行边界约束。');
   });
 });
 
