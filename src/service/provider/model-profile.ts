@@ -121,6 +121,19 @@ const JSON_OBJECT_LIVE_ITEM: CapabilityEvidence = {
   observedOn: '2026-09-08',
 };
 
+/**
+ * The documentation pair the OpenCode Go plan's models are declared from, read on 2026-09-08: the Go
+ * page for which models the gateway serves on `chat/completions`, the Zen model table for the exact
+ * id each one answers to. It is one record rather than two because a model needs both facts to be
+ * declarable at all — a path without an id cannot be keyed, and an id without a path cannot be
+ * assembled — and one constant rather than a copy per profile because the pair is a single reading.
+ */
+const OPENCODE_GO_CHAT_COMPLETIONS_DOCUMENTATION: CapabilityEvidence = {
+  kind: 'vendor-documentation',
+  source: 'OpenCode Go https://opencode.ai/docs/go/ · Zen model table https://opencode.ai/docs/zen/',
+  readOn: '2026-09-08',
+};
+
 const PRODUCTION_BASELINE: CapabilityEvidence = { kind: 'frozen-request-baseline', since: 'adapter revision 1' };
 const UNVERIFIED: CapabilityEvidence = { kind: 'unverified' };
 
@@ -220,10 +233,76 @@ export const OPENCODE_GO_V4_PRO_PROFILE: ProviderModelProfile = {
   },
 };
 
+/**
+ * One more model of the same gateway, declared exactly as the profile above declares its own: the
+ * documentation pair establishes that it is reached on `chat/completions` under this id, and nothing
+ * establishes anything else, so every other capability is absent and says why. The shape is a
+ * function rather than eight more copies of the literal above because the eight differ only in an id
+ * and a printed name: inert becomes a property of the construction, not of eight chances to restate
+ * it. `answerChannel: 'none'` is the whole of what makes a row inert — a profile that declares no
+ * answer channel cannot read any response — and only a live test item may ever move one of these
+ * values, never a declaration.
+ */
+function inertOpenCodeGoModel(model: string, productName: string): ProviderModelProfile {
+  return {
+    key: modelProfileKey(OPENCODE_GO_ROUTE, model),
+    route: OPENCODE_GO_ROUTE,
+    model,
+    displayName: `${productName}（OpenCode Go）`,
+    capabilities: {
+      requestShape: 'openai-chat-completions',
+      reasoningControl: 'none',
+      structuredOutput: 'none',
+      answerChannel: 'none',
+      reasoningChannel: 'none',
+      usageAttribution: 'unknown',
+    },
+    evidence: {
+      requestShape: OPENCODE_GO_CHAT_COMPLETIONS_DOCUMENTATION,
+      reasoningControl: UNVERIFIED,
+      structuredOutput: UNVERIFIED,
+      answerChannel: UNVERIFIED,
+      reasoningChannel: UNVERIFIED,
+      usageAttribution: UNVERIFIED,
+    },
+  };
+}
+
+/*
+ * Every remaining model the documentation pair admits: the Go page places it on `chat/completions`
+ * **and** the Zen model table states its id verbatim. Both facts or no row, because an id the
+ * documentation does not print is a guess, and a guess is the failure this table exists to prevent.
+ * None of them is exported: nothing above the provider layer may name one, and a profile no module
+ * can import is a profile no binding can reach.
+ *
+ * Named by the documentation and deliberately absent:
+ * - LongCat-2.0, Hy4 preview, Hy3, Omen Alpha, MiMo-V2.5, MiMo-V2.5-Pro — the Go page names the
+ *   product, the Zen table states no id for it, so there is nothing to key a row by.
+ * - MiniMax — the two pages disagree about its path: the Go page places it on `/messages`, the Zen
+ *   table on `chat/completions`. A disagreement is not a fact, and it is recorded rather than
+ *   resolved here; the unit that owns the `anthropic-messages` shape decides it.
+ */
+const OPENCODE_GO_GLM_5_3_FLASH_PROFILE = inertOpenCodeGoModel('glm-5.3-flash', 'GLM-5.3-Flash');
+const OPENCODE_GO_GLM_5_3_PROFILE = inertOpenCodeGoModel('glm-5.3', 'GLM-5.3');
+const OPENCODE_GO_GLM_5_2_PROFILE = inertOpenCodeGoModel('glm-5.2', 'GLM-5.2');
+const OPENCODE_GO_GLM_5_1_PROFILE = inertOpenCodeGoModel('glm-5.1', 'GLM-5.1');
+const OPENCODE_GO_KIMI_K3_PROFILE = inertOpenCodeGoModel('kimi-k3', 'Kimi K3');
+const OPENCODE_GO_KIMI_K2_7_CODE_PROFILE = inertOpenCodeGoModel('kimi-k2.7-code', 'Kimi K2.7 Code');
+const OPENCODE_GO_KIMI_K2_6_PROFILE = inertOpenCodeGoModel('kimi-k2.6', 'Kimi K2.6');
+const OPENCODE_GO_V4_FLASH_VISION_EXP_PROFILE = inertOpenCodeGoModel('deepseek-v4-flash-vision-exp', 'DeepSeek V4 Flash Vision Exp');
+
 export const PROVIDER_MODEL_PROFILES: Readonly<Record<ModelProfileKey, ProviderModelProfile>> = {
   [DEEPSEEK_V4_PRO_PROFILE.key]: DEEPSEEK_V4_PRO_PROFILE,
   [OPENCODE_GO_V4_FLASH_PROFILE.key]: OPENCODE_GO_V4_FLASH_PROFILE,
   [OPENCODE_GO_V4_PRO_PROFILE.key]: OPENCODE_GO_V4_PRO_PROFILE,
+  [OPENCODE_GO_GLM_5_3_FLASH_PROFILE.key]: OPENCODE_GO_GLM_5_3_FLASH_PROFILE,
+  [OPENCODE_GO_GLM_5_3_PROFILE.key]: OPENCODE_GO_GLM_5_3_PROFILE,
+  [OPENCODE_GO_GLM_5_2_PROFILE.key]: OPENCODE_GO_GLM_5_2_PROFILE,
+  [OPENCODE_GO_GLM_5_1_PROFILE.key]: OPENCODE_GO_GLM_5_1_PROFILE,
+  [OPENCODE_GO_KIMI_K3_PROFILE.key]: OPENCODE_GO_KIMI_K3_PROFILE,
+  [OPENCODE_GO_KIMI_K2_7_CODE_PROFILE.key]: OPENCODE_GO_KIMI_K2_7_CODE_PROFILE,
+  [OPENCODE_GO_KIMI_K2_6_PROFILE.key]: OPENCODE_GO_KIMI_K2_6_PROFILE,
+  [OPENCODE_GO_V4_FLASH_VISION_EXP_PROFILE.key]: OPENCODE_GO_V4_FLASH_VISION_EXP_PROFILE,
 };
 
 /** The declared profile for one route and model, or `null` when nothing has declared that pair. */

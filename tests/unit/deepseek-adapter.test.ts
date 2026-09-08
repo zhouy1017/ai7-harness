@@ -260,7 +260,11 @@ describe('model capability profiles', () => {
 
   it('keys every model by route and model, so one model id behind two routes is two profiles', () => {
     expect(Object.keys(PROVIDER_MODEL_PROFILES).sort()).toEqual([
-      'deepseek-open-platform/deepseek-v4-pro', 'opencode-go/deepseek-v4-flash', 'opencode-go/deepseek-v4-pro',
+      'deepseek-open-platform/deepseek-v4-pro',
+      // The OpenCode Go plan's chat-completions models, each keyed by the id the Zen table states (S54a).
+      'opencode-go/deepseek-v4-flash', 'opencode-go/deepseek-v4-flash-vision-exp', 'opencode-go/deepseek-v4-pro',
+      'opencode-go/glm-5.1', 'opencode-go/glm-5.2', 'opencode-go/glm-5.3', 'opencode-go/glm-5.3-flash',
+      'opencode-go/kimi-k2.6', 'opencode-go/kimi-k2.7-code', 'opencode-go/kimi-k3',
     ]);
     expect(modelProfileFor(DEEPSEEK_ROUTE, DEEPSEEK_MODEL)).toBe(DEEPSEEK_V4_PRO_PROFILE);
     expect(modelProfileFor(OPENCODE_GO_ROUTE, OPENCODE_GO_MODEL)).toBe(OPENCODE_GO_V4_FLASH_PROFILE);
@@ -290,6 +294,11 @@ describe('model capability profiles', () => {
       reasoningChannel: 'message-reasoning-content',
       usageAttribution: 'includes-reasoning',
     });
+    // Exactly these two are active, and the table's size is pinned beside them so that declaring a
+    // model cannot enlarge the active set: a new row arrives inert or the count moves and this fails.
+    expect(Object.values(PROVIDER_MODEL_PROFILES).filter((profile) => profile.capabilities.answerChannel !== 'none'))
+      .toEqual([DEEPSEEK_V4_PRO_PROFILE, OPENCODE_GO_V4_FLASH_PROFILE]);
+    expect(Object.keys(PROVIDER_MODEL_PROFILES)).toHaveLength(11);
   });
 
   it('declares structured output exactly where one live item observed it accepted, and nowhere else', () => {
