@@ -714,6 +714,8 @@ Task Pattern Confidence governs reduced Run-review burden only. Output remains a
 - Clicking an expanded candidate, evidence comparison, or result may explicitly open a Dedicated Work Workspace; no background event changes work-surface mode automatically.
 - Provider/model/cost and diagnostics remain behind secondary disclosure unless they are the blocking condition. No activity surface implies factual verification, Proposal Decision, Effect Approval, Effect Receipt, workflow completion, Signoff, or Public Release Permission.
 - Run Budget Ceiling Reached, Provider Account Limit, Run Capacity Wait, Connectivity Wait State, Cooperative Run Pause, and Resume-ready Run State retain different labels and action sets; no generic `预算不足` or `继续` collapses them.
+- While a Run executes, the Run Activity Header and every other Run surface show the Run Liveness Signal beside Measured Run Progress (V2-UX-LIVE-001 to 003): the current unit and its start instant, the last recorded transition, completed transmissions with usage, and the Provider attempt's state, sampled within 2 seconds and refreshed at least every 5 seconds, with the measured stale case `本步骤用时已超过通常水平` and only the safe actions valid for the state.
+- A transient status indicator lives exactly as long as the state that produced it and never covers content it does not own (V2-UX-LIVE-004); an indicator that outlives its state is a statement not derived from current state, the same defect as a scope label that stops being true.
 
 ## Interactive Editorial Dialogue presentation
 

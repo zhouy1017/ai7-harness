@@ -126,6 +126,9 @@ Shared artifact, analysis, Enrollment and Apply meanings route to root contexts;
 | Dialogue Answer History | 问答记录 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Usable Candidate Stream | 可用候选结果流 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Measured Run Progress | 可测任务进度 | [AI7 V2 UI/UX](./CONTEXT.md) |
+| Decision Layer | 决策层 | [AI7 V2 UI/UX](./CONTEXT.md) |
+| Technical Identity Layer | 技术标识层 | [AI7 V2 UI/UX](./CONTEXT.md) |
+| Run Liveness Signal | 任务存活信号 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Book-grouped Run Overview | 按图书分组的任务概览 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Current Book Run Switcher | 当前图书任务切换器 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Foreground Run Projection | 前台任务投影 | [AI7 V2 UI/UX](./CONTEXT.md) |
@@ -431,6 +434,9 @@ Shared artifact, analysis, Enrollment and Apply meanings route to root contexts;
 | Dialogue Answer History | A raw provider transcript, hidden-reasoning archive, generic chat root, third ledger, transcript copy in the AI7 Task Ledger, authoritative Editorial Artifact, or permission to widen source/egress scope. |
 | Usable Candidate Stream | A default provider stream for ordinary Runs, authoritative Editorial Artifact, accepted Proposal, factual evidence, or applied mutation. |
 | Measured Run Progress | Model confidence, elapsed-time estimate, fake percentage, Workflow completion, or delivery readiness. |
+| Decision Layer | A summary that omits the ceiling, the non-effects, or the blocker; a developer debug view; a heading made of an English identifier. |
+| Technical Identity Layer | A deleted or truncated identity, the primary status of a surface, or a console or transcript inspector. |
+| Run Liveness Signal | An estimated percentage, a remaining-time estimate, a status pill frozen at one moment, or the undefined Connectivity Wait State. |
 | Book-grouped Run Overview | A new global ledger, a generic thread list, Working Corpus, or authority across Books. |
 | Current Book Run Switcher | Execution priority, pause/resume control, native-artifact selector, or conversation navigation. |
 | Foreground Run Projection | OS foreground execution, scheduler priority, exclusive provider use, or manuscript authority. |

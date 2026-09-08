@@ -448,6 +448,18 @@ _Avoid_: default provider stream, model thoughts, authoritative result, auto-app
 Exact completed-versus-total progress shown only when the work units are semantically comparable and the denominator is real and stable enough to remain meaningful; otherwise AI7 reports stage and milestones without a percentage.
 _Avoid_: estimated spinner percentage, model confidence, workflow completion
 
+**Decision Layer** (`决策层`):
+The part of an editor-facing surface that states what the surface is about, what an action will read, produce, and not do, what it costs, and the one safe next action, in the product's editorial Chinese and local time; it carries every authority-bearing fact at full rank and never a bare digest, identifier, or machine instant (ADR 0071).
+_Avoid_: summary that hides the ceiling or the non-effects, developer debug view, English identifier heading
+
+**Technical Identity Layer** (`技术标识层`):
+The disclosure-closed part of the same surface that carries the exact digests, record identifiers, references, schema and version identifiers, and ISO instants of the record — reachable, copyable, and unabridged one deliberate step away, and changing no state when opened (ADR 0071).
+_Avoid_: deleted identity, truncated digest, primary status, console
+
+**Run Liveness Signal** (`任务存活信号`):
+The reading beside Measured Run Progress that lets an editor tell, within a bounded interval and from facts the system already holds — the current unit and its start instant, the last recorded transition, completed transmissions and usage, the Provider attempt's state — whether a Run is alive, what it is doing now, and how long that step has taken, with a measured stale case and no estimated percentage (ADR 0071).
+_Avoid_: estimated spinner percentage, remaining-time estimate, frozen status pill, Connectivity Wait State
+
 **Book-grouped Run Overview** (`按图书分组的任务概览`):
 The Global Attention projection that groups queued, running, paused, and attention-requiring Runs beneath their authoritative Books while preserving each Run's exact target and state.
 _Avoid_: thread list, global task authority, cross-Book source scope

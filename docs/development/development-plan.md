@@ -60,8 +60,8 @@ These slices come from [#307](https://github.com/zhouy1017/ai7-harness/issues/30
 
 | Order | Slice | Issue | Class | Journey | Outcome | Depends on | Status |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| 1c.1 | S46 | #304 | T3 | all | State the decision-layer / technical-identity rule with persistent primary actions, local time, and the editorial vocabulary; then survey every surface of the seven Journeys with a per-surface verdict | 1.1b | planned |
-| 1c.2 | S47 | #305 | T3 | J-04 | Define the liveness signal beside Measured Run Progress from facts the system already holds, with a sampling obligation, a stale case, and the lifetime of a transient indicator | 1.1b | planned |
+| 1c.1 | S46 | #304 | T3 | all | State the decision-layer / technical-identity rule with persistent primary actions, local time, and the editorial vocabulary; then survey every surface of the seven Journeys with a per-surface verdict | 1.1b | rule stated (ADR 0071, V2-UX-LAYER-001 to 008); next: the survey as a T2 report-only unit, then per-surface T1/T2 units |
+| 1c.2 | S47 | #305 | T3 | J-04 | Define the liveness signal beside Measured Run Progress from facts the system already holds, with a sampling obligation, a stale case, and the lifetime of a transient indicator | 1.1b | rule stated (ADR 0071, V2-UX-LIVE-001 to 006); next: execution-owner exposure and the J-04 assertion as one T2 unit |
 | 1c.3 | S48 | #308 | T1 | — | `--check` answers `present`, `absent`, or `unavailable`, so a failed check is distinguishable from a missing credential without revealing anything about a value | — | integrated (PR #314) |
 | 1c.8 | S53 | #318 | T1 | none | The delivery Gate fires on a pull request opened directly as ready, not only on the draft-then-ready route | — | integrated (PR #319) |
 | 1c.4 | S49 | #310 | T3 | J-04 | Model capability profiles keyed by route and model, with the adapter normalizing every response into one canonical result — so a second vendor is a profile, not a branch | S40 | integrated (PR #320) |
@@ -71,7 +71,7 @@ These slices come from [#307](https://github.com/zhouy1017/ai7-harness/issues/30
 | 1c.9 | S54 | #321 | T3 | J-04, J-12 | The explicit provider support list — Gemini, OpenCode Go with every plan model, DeepSeek official, OpenAI, Claude, Qwen, HY — implementing the request shapes #310 named and refused | #310 | planned |
 | 1c.10 | S55a | #322 | T3 | J-12 | Tier 1 of provider configuration: an unlisted provider whose compatibility format AI7 already implements is configured by selecting that format and supplying endpoint, credential slot, and model ids — no agent, and a selected format claims the request shape only | #321 | planned |
 | 1c.11 | S55b | #322 | T3 | — | Tier 2, agent-driven discovery as repository tooling for a provider matching no implemented format: probes with synthetic content under a bounded budget, records shapes never bodies, emits a profile proposal a person admits | S55a | planned |
-| 1c.12 | S56 | #324 | T1 | none | Retire a merged branch by a sequence that actually works, and verify it, since `--delete-branch` fails silently for a branch checked out in a worktree | — | planned |
+| 1c.12 | S56 | #324 | T1 | none | Retire a merged branch by a sequence that actually works, and verify it, since `--delete-branch` fails silently for a branch checked out in a worktree | — | integrated (PR #326, `dev@b073905`) |
 
 **S46 (#304)** and **S47 (#305)** are rule-first: the Commander settles the rule and the survey method, and only then dispatches per-surface application, which can run as T1 or T2 units against a rule that already exists. Neither removes any exact identity from the product; both change where it sits and what else must be true beside it.
 
@@ -81,7 +81,8 @@ These slices come from [#307](https://github.com/zhouy1017/ai7-harness/issues/30
 
 Open, recorded, and deliberately not ordered — the Commander schedules them when the Owner reaches them. Listing them here keeps them visible without implying a delivery position.
 
-- **From the parallel T1 wave of 2026-09-07:** #286 (the retried unit's payload digest on the Plan Adaptation), #287 (durable-state drift proven beyond unit tests), #288 (the Task Intent range versus later plan versions), #297 (two admitted Public SampleBooks that do not import through the bounded DOCX path), #301 (extract the Plan Preview label helpers so their test needs no DOM stub).
+- **From the parallel T1 wave of 2026-09-07:** #286 (the retried unit's payload digest on the Plan Adaptation), #287 (durable-state drift proven beyond unit tests), #288 (the Task Intent range versus later plan versions), #301 (extract the Plan Preview label helpers so their test needs no DOM stub). #297 was scheduled ahead of 1c.6 as its input and is integrated (PR #327, `dev@eacffb9`): three of the four admitted DOCX files refuse at the same `sample1`-shaped condition, with a second gate behind it; #313's design decides the widening.
+- **From wave 4 of 2026-09-08:** #328 (`EditorialStore.open` leaks its database handle when ledger validation fails).
 - **From the advisory review of #48:** #281 (S13-f1), already carried at slot 3.2a below.
 
 ## Phase 2 — from proposal to delivered files
