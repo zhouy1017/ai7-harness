@@ -1027,6 +1027,15 @@ function appendRecordField(values: HTMLElement, label: string, value: string | n
   );
 }
 
+/**
+ * A record's instant. The record detail is itself the Technical Identity Layer, reached by a deliberate
+ * click, so it gains no disclosure of its own (the survey judged it conforming); the exact instant rides
+ * inside the row beside the absolute local reading V2-UX-COPY-011 requires of a durable receipt.
+ */
+function appendRecordInstant(values: HTMLElement, label: string, iso: string): void {
+  values.append(element('dt', undefined, label), instantValue(iso));
+}
+
 function recordPresentation(record: BookRecordPresentation): HTMLElement {
   const detail = element('section', 'source-card record-detail');
   detail.dataset['recordKind'] = record.kind;
@@ -1038,7 +1047,7 @@ function recordPresentation(record: BookRecordPresentation): HTMLElement {
       appendRecordField(values, '稳定标识', record.stableIdentity, true);
       appendRecordField(values, '书名', record.title);
       appendRecordField(values, '内部编号', record.internalNumber);
-      appendRecordField(values, '创建时间', record.createdAt);
+      appendRecordInstant(values, '创建时间', record.createdAt);
       appendRecordField(values, '编辑维度集 ID', record.dimensionSetId, true);
       appendRecordField(values, '编辑维度集摘要', record.dimensionSetDigest, true);
       break;
@@ -1046,7 +1055,7 @@ function recordPresentation(record: BookRecordPresentation): HTMLElement {
       appendRecordField(values, '稿件 ID', record.manuscriptId, true);
       appendRecordField(values, '所属图书 ID', record.bookId, true);
       appendRecordField(values, '关系', '主稿件');
-      appendRecordField(values, '创建时间', record.createdAt);
+      appendRecordInstant(values, '创建时间', record.createdAt);
       break;
     case 'revision':
       appendRecordField(values, '修订版 ID', record.revisionId, true);
@@ -1055,7 +1064,7 @@ function recordPresentation(record: BookRecordPresentation): HTMLElement {
       appendRecordField(values, '版本标签', record.revisionLabel);
       appendRecordField(values, '修订摘要', record.revisionDigest, true);
       appendRecordField(values, '来源版本 ID', record.sourceVersionId, true);
-      appendRecordField(values, '创建时间', record.createdAt);
+      appendRecordInstant(values, '创建时间', record.createdAt);
       break;
     case 'source':
       appendRecordField(values, '来源版本 ID', record.sourceVersionId, true);
@@ -1095,7 +1104,7 @@ function recordPresentation(record: BookRecordPresentation): HTMLElement {
       appendRecordField(values, '导入降级决定 ID', record.degradationDecisionId, true);
       appendRecordField(values, '结果修订版 ID', record.resultingRevisionId, true);
       appendRecordField(values, '来源记录 ID', record.provenanceId, true);
-      appendRecordField(values, '导入时间', record.importedAt);
+      appendRecordInstant(values, '导入时间', record.importedAt);
       break;
     case 'source-import-record':
       appendRecordField(values, '来源导入记录 ID', record.sourceImportRecordId, true);
@@ -1116,7 +1125,7 @@ function recordPresentation(record: BookRecordPresentation): HTMLElement {
       appendRecordField(values, '保留内容摘要', record.retainedBoundary.contentDigest, true);
       appendRecordField(values, '保留结构摘要', record.retainedBoundary.structureDigest, true);
       appendRecordField(values, '记录摘要', record.recordDigest, true);
-      appendRecordField(values, '导入时间', record.importedAt);
+      appendRecordInstant(values, '导入时间', record.importedAt);
       break;
     case 'manuscript-reimport-record':
       appendRecordField(values, '稿件重新导入记录 ID', record.reimportRecordId, true);
@@ -1139,7 +1148,7 @@ function recordPresentation(record: BookRecordPresentation): HTMLElement {
         : '完整保留 · 不提供 DOCX 往返保证');
       appendRecordField(values, '导入降级决定 ID', record.degradationDecisionId, true);
       appendRecordField(values, '记录摘要', record.recordDigest, true);
-      appendRecordField(values, '导入时间', record.importedAt);
+      appendRecordInstant(values, '导入时间', record.importedAt);
       break;
   }
   detail.append(values);
@@ -1866,7 +1875,8 @@ function renderPlanVersions(card: HTMLElement, projection: BaselineAnalysisProje
   if (projection.planRevisions.length > 0) {
     const revisions = element('ol', 'analysis-list analysis-plan-revision-list');
     for (const revision of projection.planRevisions) {
-      const item = element('li', undefined, `${revision.label} · ${revision.resolved ? '已重新确认' : '待重新确认'} · ${revision.detectedAt ?? ''}`);
+      const item = element('li', undefined, `${revision.label} · ${revision.resolved ? '已重新确认' : '待重新确认'}${revision.detectedAt === null ? '' : ` · ${localInstantLabel(revision.detectedAt)}`}`);
+      if (revision.detectedAt !== null) item.append(element('span', 'technical-identity', revision.detectedAt));
       item.dataset['planRevisionId'] = revision.planRevisionId ?? '';
       item.dataset['planRevisionPrior'] = String(revision.priorOrdinal);
       item.dataset['planRevisionNext'] = revision.nextOrdinal === null ? '' : String(revision.nextOrdinal);
@@ -1965,14 +1975,18 @@ function renderRunTimeline(run: NonNullable<BaselineAnalysisProjection['run']>):
   for (const entry of entries) {
     const item = element('li');
     item.dataset['timelineKind'] = entry.kind;
+    // Each entry reads as local time, with the exact instant it was recorded at beside it on its own
+    // line (V2-UX-LAYER-004) — a timeline whose only reading was an ISO instant said when to a machine.
     if (entry.transition !== null) {
       item.dataset['timelineState'] = entry.transition.state;
-      item.textContent = `${entry.transition.sequence}. ${entry.transition.state} · ${entry.transition.recordedAt}${entry.transition.detail === null ? '' : ` · ${entry.transition.detail}`}`;
+      item.textContent = `${entry.transition.sequence}. ${entry.transition.state} · ${localInstantLabel(entry.transition.recordedAt)}${entry.transition.detail === null ? '' : ` · ${entry.transition.detail}`}`;
+      item.append(element('span', 'technical-identity', entry.transition.recordedAt));
     } else if (entry.adaptation !== null) {
       item.dataset['adaptationUnit'] = String(entry.adaptation.unitOrdinal);
       item.dataset['adaptationClass'] = entry.adaptation.adaptationClass;
       item.dataset['adaptationOrdinal'] = String(entry.adaptation.ordinal);
-      item.textContent = `${entry.adaptation.label} · 第 ${entry.adaptation.attemptIndex} 次尝试 · ${entry.adaptation.recordedAt} · 信封 ${entry.adaptation.planEnvelopeDigest} · 绑定 ${entry.adaptation.bindingDigest}`;
+      item.textContent = `${entry.adaptation.label} · 第 ${entry.adaptation.attemptIndex} 次尝试 · ${localInstantLabel(entry.adaptation.recordedAt)} · 信封 ${entry.adaptation.planEnvelopeDigest} · 绑定 ${entry.adaptation.bindingDigest}`;
+      item.append(element('span', 'technical-identity', entry.adaptation.recordedAt));
     }
     timeline.append(item);
   }
