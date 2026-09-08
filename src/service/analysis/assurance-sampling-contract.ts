@@ -1,5 +1,5 @@
-import type { CoverageManifestUnitProjection } from '../../shared/protocol.js';
-import { DIGEST_PATTERN, canonicalJson, hasExactKeys, isRecord, sha256Hex } from './canonical.js';
+import type { CoverageManifestProjection, CoverageManifestUnitProjection } from '../../shared/protocol.js';
+import { DIGEST_PATTERN, canonicalJson, hasExactKeys, isRecord, requireAnalysis, sha256Hex } from './canonical.js';
 import type { ManifestBlockInput } from './coverage-manifest.js';
 
 /**
@@ -259,4 +259,126 @@ export function parseAssuranceSamplingResult(
   const result: AssuranceSamplingResult = { schema: ASSURANCE_SAMPLING_RESULT_SCHEMA, dispositions };
   const canonical = canonicalJson(result);
   return { ok: true, result, canonicalJson: canonical, digest: sha256Hex(canonical) };
+}
+
+// ---- the seed and the strata (added by the next step) ---------------------------------------------
+
+interface AssuranceSampleStratumDraft {
+  readonly sectionOrdinal: number;
+  readonly candidates: number;
+  readonly sampled: number;
+}
+
+export interface AssuranceSampleDraw {
+  readonly seed: string;
+  readonly size: number;
+  readonly candidateCount: number;
+  readonly strata: ReadonlyArray<AssuranceSampleStratum>;
+  /** The drawn candidates, by section ordinal then by keyed hash; the order the turns list them in. */
+  readonly sampled: ReadonlyArray<AssuranceSamplingCandidate>;
+}
+
+/** One sampling turn: the anchor unit and the sampled findings anchored there, in sample order. */
+export interface AssuranceSamplingTurn {
+  readonly unitOrdinal: number;
+  readonly findings: ReadonlyArray<AssuranceSamplingCandidate>;
+}
+
+/**
+ * The keyed hash one candidate is ordered by inside its stratum. It is a function of the seed and the
+ * candidate's own `ref`, so the draw is reproducible from the recorded seed alone and no shuffle,
+ * clock, or `Math.random` is involved anywhere in the analysis service.
+ */
+function sortKey(seed: string, ref: string): string {
+  return sha256Hex(`${seed}${ref}`);
+}
+
+/**
+ * Draw the stratified, fixed-seed sample (ADR 0066). Strata are the manifest's structural sections;
+ * every stratum holding a candidate contributes at least one, and the remainder is allocated
+ * proportionally to candidate counts, largest remainders first, ties by section ordinal.
+ *
+ * The floor and the default size can disagree — a Book with more than thirty sections that each hold a
+ * finding cannot give every section a place inside thirty. The floor wins, because "at least one per
+ * structural section" is the promise an editor reads the coverage of the sample by, and thirty is the
+ * default it is drawn to otherwise. The size is still never more than the candidate count.
+ */
+export function drawAssuranceSample(
+  manifest: Pick<CoverageManifestProjection, 'digest' | 'units'>,
+  candidates: ReadonlyArray<AssuranceSamplingCandidate>,
+): AssuranceSampleDraw {
+  const findingsDigest = sha256Hex(canonicalJson(candidates));
+  const seed = sha256Hex(canonicalJson({ manifestDigest: manifest.digest, findingsDigest }));
+  const groups = new Map<number, AssuranceSamplingCandidate[]>();
+  for (const candidate of candidates) {
+    const unit = manifest.units[candidate.unitOrdinal - 1];
+    requireAnalysis(unit !== undefined && unit.ordinal === candidate.unitOrdinal,
+      'ANALYSIS_ASSURANCE_STRATUM_UNKNOWN', '抽样候选发现的单元不在覆盖清单内，无法按结构段分层。');
+    const group = groups.get(unit.sectionOrdinal);
+    if (group === undefined) groups.set(unit.sectionOrdinal, [candidate]);
+    else group.push(candidate);
+  }
+  const sections = [...groups.keys()].sort((left, right) => left - right);
+  if (sections.length === 0) {
+    return { seed, size: 0, candidateCount: 0, strata: [], sampled: [] };
+  }
+  const size = Math.max(Math.min(DEFAULT_ASSURANCE_SAMPLE_SIZE, candidates.length), sections.length);
+  const quota = new Map(sections.map((section) => [section, 1] as const));
+  let remaining = size - sections.length;
+  // The proportional part of the remainder, floored, then the leftover seats one at a time by largest
+  // fractional remainder. A stratum already at capacity is skipped, and its seat moves to the next.
+  const shares = sections.map((section) => {
+    const count = groups.get(section)!.length;
+    const ideal = candidates.length === 0 ? 0 : (remaining * count) / candidates.length;
+    return { section, count, base: Math.floor(ideal), fraction: ideal - Math.floor(ideal) };
+  });
+  for (const share of shares) {
+    const give = Math.min(share.base, share.count - quota.get(share.section)!, remaining);
+    if (give <= 0) continue;
+    quota.set(share.section, quota.get(share.section)! + give);
+    remaining -= give;
+  }
+  const byRemainder = [...shares].sort((left, right) => right.fraction - left.fraction || left.section - right.section);
+  while (remaining > 0) {
+    let placed = false;
+    for (const share of byRemainder) {
+      if (remaining === 0) break;
+      if (quota.get(share.section)! >= share.count) continue;
+      quota.set(share.section, quota.get(share.section)! + 1);
+      remaining -= 1;
+      placed = true;
+    }
+    // Every stratum is at capacity: the sample is already the whole candidate set.
+    if (!placed) break;
+  }
+  const strata: AssuranceSampleStratum[] = [];
+  const sampled: AssuranceSamplingCandidate[] = [];
+  for (const section of sections) {
+    const group = groups.get(section)!;
+    const take = quota.get(section)!;
+    const ordered = [...group].sort((left, right) => {
+      const keys = [sortKey(seed, left.ref), sortKey(seed, right.ref)];
+      return keys[0]! < keys[1]! ? -1 : keys[0]! > keys[1]! ? 1 : left.ref < right.ref ? -1 : left.ref > right.ref ? 1 : 0;
+    });
+    strata.push({ sectionOrdinal: section, candidates: group.length, sampled: take });
+    sampled.push(...ordered.slice(0, take));
+  }
+  return { seed, size: sampled.length, candidateCount: candidates.length, strata, sampled };
+}
+
+/**
+ * The turns one draw dispatches: one per distinct anchor unit, in unit order, each listing that unit's
+ * sampled findings in sample order. A Run's sampling transmissions are therefore bounded by the number
+ * of distinct anchor units, which is never more than the unit count.
+ */
+export function assuranceSamplingTurns(sampled: ReadonlyArray<AssuranceSamplingCandidate>): AssuranceSamplingTurn[] {
+  const byUnit = new Map<number, AssuranceSamplingCandidate[]>();
+  for (const candidate of sampled) {
+    const group = byUnit.get(candidate.unitOrdinal);
+    if (group === undefined) byUnit.set(candidate.unitOrdinal, [candidate]);
+    else group.push(candidate);
+  }
+  return [...byUnit.keys()]
+    .sort((left, right) => left - right)
+    .map((unitOrdinal) => ({ unitOrdinal, findings: byUnit.get(unitOrdinal)! }));
 }
