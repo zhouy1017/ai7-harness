@@ -184,41 +184,25 @@ function parseArguments(argv: string[]): LaunchArguments {
   const j03PickerPath = values.get('--j03-picker-path');
   const j04PickerPath = values.get('--j04-picker-path');
   requireDesktop([j01PickerPath, j02PickerPath, j08PickerPath, j12PickerPath, j03PickerPath, j04PickerPath].filter(Boolean).length <= 1);
+  // The picker-path launch controls carry whatever their Journey selects, in any recognised format
+  // or none, so each one asks only that it is its own Journey's absolute path.
   requireDesktop(
-    j01PickerPath === undefined ||
-      (process.env.AI7_E2E_JOURNEY === 'J-01' &&
-        isAbsolute(j01PickerPath) &&
-        extname(j01PickerPath).toLocaleLowerCase('en-US') === '.docx'),
+    j01PickerPath === undefined || (process.env.AI7_E2E_JOURNEY === 'J-01' && isAbsolute(j01PickerPath)),
   );
   requireDesktop(
-    j02PickerPath === undefined ||
-      (process.env.AI7_E2E_JOURNEY === 'J-02' &&
-        isAbsolute(j02PickerPath) &&
-        extname(j02PickerPath).toLocaleLowerCase('en-US') === '.docx'),
+    j02PickerPath === undefined || (process.env.AI7_E2E_JOURNEY === 'J-02' && isAbsolute(j02PickerPath)),
   );
   requireDesktop(
-    j08PickerPath === undefined ||
-      (process.env.AI7_E2E_JOURNEY === 'J-08' &&
-        isAbsolute(j08PickerPath) &&
-        extname(j08PickerPath).toLocaleLowerCase('en-US') === '.docx'),
+    j08PickerPath === undefined || (process.env.AI7_E2E_JOURNEY === 'J-08' && isAbsolute(j08PickerPath)),
   );
   requireDesktop(
-    j12PickerPath === undefined ||
-      (process.env.AI7_E2E_JOURNEY === 'J-12' &&
-        isAbsolute(j12PickerPath) &&
-        extname(j12PickerPath).toLocaleLowerCase('en-US') === '.docx'),
+    j12PickerPath === undefined || (process.env.AI7_E2E_JOURNEY === 'J-12' && isAbsolute(j12PickerPath)),
   );
   requireDesktop(
-    j03PickerPath === undefined ||
-      (process.env.AI7_E2E_JOURNEY === 'J-03' &&
-        isAbsolute(j03PickerPath) &&
-        extname(j03PickerPath).toLocaleLowerCase('en-US') === '.docx'),
+    j03PickerPath === undefined || (process.env.AI7_E2E_JOURNEY === 'J-03' && isAbsolute(j03PickerPath)),
   );
   requireDesktop(
-    j04PickerPath === undefined ||
-      (process.env.AI7_E2E_JOURNEY === 'J-04' &&
-        isAbsolute(j04PickerPath) &&
-        extname(j04PickerPath).toLocaleLowerCase('en-US') === '.docx'),
+    j04PickerPath === undefined || (process.env.AI7_E2E_JOURNEY === 'J-04' && isAbsolute(j04PickerPath)),
   );
   const injectedPickerPath = j01PickerPath ?? j02PickerPath ?? j08PickerPath ?? j12PickerPath ?? j03PickerPath ?? j04PickerPath;
   const importControlValue = values.get('--j01-import-control');
@@ -981,20 +965,21 @@ function registerRendererHandlers(
     let selectedPath = owned.injectedPickerPath;
     owned.injectedPickerPath = undefined;
     if (!selectedPath) {
+      // Intake accepts a file whatever its extension and identifies the format from its content
+      // (ADR 0072 §1), so the picker suggests the recognised formats without restricting to them.
       const selected = await dialog.showOpenDialog(owned.window, {
-        title: '选择要导入的 DOCX 稿件',
+        title: '选择要导入的稿件文件',
         buttonLabel: '选择稿件',
         properties: ['openFile'],
-        filters: [{ name: 'Word 文档', extensions: ['docx'] }],
+        filters: [
+          { name: '稿件文件', extensions: ['docx', 'doc', 'pdf', 'odt', 'rtf', 'txt', 'md'] },
+          { name: '所有文件', extensions: ['*'] },
+        ],
       });
       if (selected.canceled || selected.filePaths.length !== 1) return undefined;
       selectedPath = selected.filePaths[0];
     }
-    requireDesktop(
-      selectedPath !== undefined &&
-        isAbsolute(selectedPath) &&
-        extname(basename(selectedPath)).toLocaleLowerCase('en-US') === '.docx',
-    );
+    requireDesktop(selectedPath !== undefined && isAbsolute(selectedPath));
     return selectedPath;
   };
 

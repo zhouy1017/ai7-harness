@@ -115,6 +115,26 @@ async function createSyntheticDocx(path, variant) {
   await writeFile(path, zipSync(entries, { level: 6, mtime: new Date('2026-01-01T00:00:00.000Z') }));
 }
 
+/**
+ * A minimal well-formed PDF: a catalog, an empty page tree, a cross-reference table and a trailer.
+ * It carries no text object and therefore no manuscript content of any kind — the Journey needs a
+ * real fixed-layout file only so intake has something to identify, refuse as editable, and retain.
+ */
+async function createSyntheticPdf(path) {
+  const objects = ['<< /Type /Catalog /Pages 2 0 R >>', '<< /Type /Pages /Kids [] /Count 0 >>'];
+  let body = '%PDF-1.7\n';
+  const offsets = [];
+  for (const [index, object] of objects.entries()) {
+    offsets.push(body.length);
+    body += `${index + 1} 0 obj\n${object}\nendobj\n`;
+  }
+  const startXref = body.length;
+  body += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+  for (const offset of offsets) body += `${String(offset).padStart(10, '0')} 00000 n \n`;
+  body += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${startXref}\n%%EOF\n`;
+  await writeFile(path, strToU8(body));
+}
+
 function parseJourney() {
   const args = process.argv.slice(2);
   if (args[0] === '--') args.shift();
@@ -1840,6 +1860,15 @@ async function main() {
     const syntheticRepeatedChangedPath = resolve(syntheticRoot, 'reimport-repeated-changed.docx');
     const syntheticAmbiguousBasePath = resolve(syntheticRoot, 'reimport-ambiguous-base.docx');
     const syntheticAmbiguousReimportPath = resolve(syntheticRoot, 'reimport-ambiguous-same-content.docx');
+    const syntheticPdfPath = resolve(syntheticRoot, 'source-only.pdf');
+    await createSyntheticPdf(syntheticPdfPath);
+    const syntheticPdfInfo = await lstat(syntheticPdfPath);
+    const syntheticPdfSha256 = await digestFile(syntheticPdfPath);
+    requireJourney(
+      syntheticPdfInfo.isFile() && !syntheticPdfInfo.isSymbolicLink() &&
+        (await realpath(syntheticPdfPath)) === syntheticPdfPath && syntheticPdfInfo.size > 0,
+      'synthetic-pdf-identity',
+    );
     await createSyntheticDocx(syntheticAPath, 'a');
     await createSyntheticDocx(syntheticBPath, 'b');
     await createSyntheticDocx(syntheticCPath, 'c');
@@ -2246,6 +2275,102 @@ async function main() {
       JSON.stringify(sourceBoundRecords) === JSON.stringify(['book', 'source', 'source-import-record']) &&
         (await renderer.evaluate(`document.querySelector('[data-screen="imported"] .book-overview')?.dataset.manuscriptState`)) === 'empty',
       'source-bound-zero-manuscript-book',
+    );
+    await closeProduct();
+
+    // A PDF has no honest editable round trip, so intake identifies it from its bytes, refuses it as
+    // an editable Manuscript with the reason stated, and offers only source-only retention
+    // (ADR 0072 §1–2, V2-UX-IMP-006). Nothing is parsed, so no content or structure digest exists.
+    const sourceOnlyPdfRoot = await createCanonicalExternalDataRoot(resolve(runRoot, 'source-only-pdf-data'), checkoutRoot);
+    renderer = await launchProduct({ dataRoot: sourceOnlyPdfRoot, pickerPath: syntheticPdfPath, launchScenario: 'source-only-pdf' });
+    await waitFor(
+      renderer,
+      `document.documentElement.dataset.ai7ProductReady === 'true' && document.querySelector('[data-screen="landing"]')`,
+      'source-only-pdf-landing',
+    );
+    await clickExactButton(renderer, '导入稿件', 'source-only-pdf-stage');
+    await waitFor(renderer, `document.querySelector('[data-screen="target"]')`, 'source-only-pdf-target');
+    await assertRenderer(
+      renderer,
+      `document.querySelector('[data-source-format]')?.dataset.sourceFormat === 'PDF'`,
+      'source-only-pdf-format',
+    );
+    await assertRenderer(
+      renderer,
+      `(() => { const target = document.querySelector('[data-import-target-choice="new-book"]'); if (!target) return false; target.click(); return true; })()`,
+      'source-only-pdf-target-select',
+    );
+    await waitFor(renderer, `document.querySelector('[data-screen="relationship"]')`, 'source-only-pdf-relationship');
+    await assertRenderer(
+      renderer,
+      `(() => { const source = document.querySelector('[data-import-relationship="source-only"]'); return source && !source.checked && !document.querySelector('[data-import-relationship="first-manuscript"]') && !document.querySelector('[data-import-relationship="reimport"]'); })()`,
+      'source-only-pdf-relationship-only-source',
+    );
+    await assertRenderer(
+      renderer,
+      `Array.from(document.querySelectorAll('.attention-note'), (note) => note.textContent).includes('PDF 为固定版式，没有可靠的可编辑往返；可作为来源材料保留。')`,
+      'source-only-pdf-reason',
+    );
+    await assertRenderer(
+      renderer,
+      `(() => { const source = document.querySelector('[data-import-relationship="source-only"]'); if (!source) return false; source.click(); return true; })()`,
+      'source-only-pdf-relationship-select',
+    );
+    await waitFor(renderer, `document.querySelector('[data-screen="title"] #book-title')`, 'source-only-pdf-title');
+    await assertRenderer(
+      renderer,
+      `!document.querySelector('[data-fidelity-category]') && document.querySelector('#book-title')?.value.length > 0`,
+      'source-only-pdf-no-fidelity',
+    );
+    await clickExactButton(renderer, '确认书名并复核', 'source-only-pdf-review-action');
+    await waitFor(renderer, `document.querySelector('[data-screen="review"] [data-import-review-kind="source-only"]')`, 'source-only-pdf-review');
+    await assertRenderer(
+      renderer,
+      `(() => { const review = document.querySelector('[data-import-review-kind="source-only"]'); return review?.querySelector('[data-source-sha256]')?.textContent === ${JSON.stringify(syntheticPdfSha256)} && review.querySelector('[data-source-bytes]')?.textContent === ${JSON.stringify(String(syntheticPdfInfo.size))} && !review.querySelector('[data-content-digest]') && !review.querySelector('[data-structure-digest]'); })()`,
+      'source-only-pdf-review-boundary',
+    );
+    // The commit is asserted here rather than through `commitPreparedSourceImport`, which pins
+    // `sample1`'s bytes and its two parse digests; every existing stage of that helper is unchanged.
+    await assertRenderer(
+      renderer,
+      `(() => { const commit = document.querySelector('[data-commit-source-import]'); if (!commit) return false; commit.click(); return true; })()`,
+      'source-only-pdf-commit',
+    );
+    await waitFor(renderer, `document.querySelector('[data-screen="imported"]')`, 'source-only-pdf-imported');
+    await waitFor(
+      renderer,
+      `document.documentElement.dataset.ai7ImportCompletionAcknowledged === 'true'`,
+      'source-only-pdf-completion-acknowledged',
+    );
+    await assertRenderer(
+      renderer,
+      `document.querySelector('[data-screen="imported"]')?.textContent.includes('来源材料已导入')`,
+      'source-only-pdf-completion-wording',
+    );
+    const sourceOnlyPdfIdentities = await renderer.evaluate(`(() => {
+      const overview = document.querySelector('[data-screen="imported"] .book-overview');
+      const source = document.querySelector('[data-view-source-version-id]');
+      return { bookId: overview?.dataset.bookId, sourceVersionId: source?.dataset.viewSourceVersionId, manuscriptState: overview?.dataset.manuscriptState };
+    })()`);
+    requireJourney(
+      /^[0-9a-f-]{36}$/i.test(sourceOnlyPdfIdentities?.bookId ?? '') &&
+        /^[0-9a-f-]{36}$/i.test(sourceOnlyPdfIdentities?.sourceVersionId ?? '') &&
+        sourceOnlyPdfIdentities?.manuscriptState === 'empty',
+      'source-only-pdf-completion-identities',
+    );
+    await assertRenderer(
+      renderer,
+      `(() => { const button = document.querySelector('[data-view-source-version-id]'); if (!button) return false; button.click(); return true; })()`,
+      'source-only-pdf-view-source',
+    );
+    const sourceOnlyPdfRecord = await renderer.evaluate(`(() => { const detail = document.querySelector('.record-detail[data-record-kind="source"]'); const values = {}; for (const label of detail?.querySelectorAll('dt') ?? []) values[label.textContent] = label.nextElementSibling?.textContent; return values; })()`);
+    requireJourney(
+      sourceOnlyPdfRecord?.['格式'] === 'PDF' &&
+        sourceOnlyPdfRecord?.['原文件 SHA-256'] === syntheticPdfSha256 &&
+        sourceOnlyPdfRecord?.['内容摘要'] === undefined &&
+        sourceOnlyPdfRecord?.['结构摘要'] === undefined &&
+        sourceOnlyPdfRecord?.['解析器'] === undefined,
+      'source-only-pdf-record-format',
     );
     await closeProduct();
 

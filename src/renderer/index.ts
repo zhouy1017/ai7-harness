@@ -265,15 +265,21 @@ function sourceCard(staged: StagedImportProjection): HTMLElement {
   sourceBytes.setAttribute('data-source-bytes', '');
   const sourceDigest = element('dd', 'technical-identity', staged.source.sourceSha256);
   sourceDigest.setAttribute('data-source-sha256', '');
+  const sourceFormat = element('dd', undefined, staged.source.format);
+  sourceFormat.setAttribute('data-source-format', staged.source.format);
   details.append(
     element('dt', undefined, '格式'),
-    element('dd', undefined, staged.source.format),
+    sourceFormat,
     element('dt', undefined, '来源'),
     element('dd', undefined, staged.source.provenanceLabel),
     element('dt', undefined, '来源字节数'),
     sourceBytes,
+    // A file the product did not parse detected no blocks, so it says what it retained instead of
+    // reporting a count of nothing.
     element('dt', undefined, '检测结果'),
-    element('dd', undefined, `${staged.detectedBlockCount} 个可编辑内容块`),
+    element('dd', undefined, staged.editableImport.available
+      ? `${staged.detectedBlockCount} 个可编辑内容块`
+      : '未进行本地解析；仅保留原始文件'),
   );
   card.append(details, technicalDetails(undefined, element('dt', undefined, '来源 SHA-256'), sourceDigest));
   return card;
@@ -1072,10 +1078,15 @@ function recordPresentation(record: BookRecordPresentation): HTMLElement {
       appendRecordField(values, '来源记录 ID', record.provenanceId, true);
       appendRecordField(values, '所属图书 ID', record.bookId, true);
       appendRecordField(values, '原文件名', record.displayName);
+      appendRecordField(values, '格式', record.format);
       appendRecordField(values, '原文件 SHA-256', record.sourceDigest, true);
-      appendRecordField(values, '内容摘要', record.contentDigest, true);
-      appendRecordField(values, '结构摘要', record.structureDigest, true);
-      appendRecordField(values, '解析器', record.parserIdentity);
+      // A retained original the product never parsed has no content, structure or parser identity,
+      // so those rows are absent rather than empty (ADR 0072 §2).
+      if (record.parserIdentity !== null) {
+        appendRecordField(values, '内容摘要', record.contentDigest, true);
+        appendRecordField(values, '结构摘要', record.structureDigest, true);
+        appendRecordField(values, '解析器', record.parserIdentity);
+      }
       appendRecordField(values, '取得方式', '本机文件选择器');
       appendRecordField(values, '处理边界', '本地 · 未调用 Provider');
       break;
@@ -1119,12 +1130,18 @@ function recordPresentation(record: BookRecordPresentation): HTMLElement {
         '来源版本结果',
         record.sourceVersionDisposition === 'reused-same-book' ? '复用已明确选择的同图书来源版本' : '创建图书拥有的新来源版本',
       );
-      appendRecordField(values, '保留边界', '完整所选 DOCX 文件及本地解析出的完整内容与结构身份');
+      // The boundary claims a parse only where one happened (ADR 0072 §2).
+      appendRecordField(values, '保留边界', record.retainedBoundary.contentDigest === null
+        ? '完整所选原始文件及其精确身份；未进行本地解析'
+        : '完整所选 DOCX 文件及本地解析出的完整内容与结构身份');
       appendRecordField(values, '保留文件名', record.retainedBoundary.displayName);
+      appendRecordField(values, '保留格式', record.retainedBoundary.format);
       appendRecordField(values, '保留字节数', String(record.retainedBoundary.sourceBytes));
       appendRecordField(values, '保留文件 SHA-256', record.retainedBoundary.sourceSha256, true);
-      appendRecordField(values, '保留内容摘要', record.retainedBoundary.contentDigest, true);
-      appendRecordField(values, '保留结构摘要', record.retainedBoundary.structureDigest, true);
+      if (record.retainedBoundary.contentDigest !== null && record.retainedBoundary.structureDigest !== null) {
+        appendRecordField(values, '保留内容摘要', record.retainedBoundary.contentDigest, true);
+        appendRecordField(values, '保留结构摘要', record.retainedBoundary.structureDigest, true);
+      }
       appendRecordField(values, '记录摘要', record.recordDigest, true);
       appendRecordInstant(values, '导入时间', record.importedAt);
       break;
@@ -3416,13 +3433,19 @@ function renderTargetChoice(
   );
   let revealedControl: HTMLElement | undefined;
   if (selectedChoice) {
+    // A format the product cannot read as an editable Manuscript states why, right above the one
+    // relationship it can still offer (ADR 0072 §2, V2-UX-IMP-006).
+    if (!staged.editableImport.available) {
+      content.append(element('p', 'attention-note', staged.editableImport.reason));
+    }
     const relationship = element('fieldset');
     relationship.setAttribute('role', 'radiogroup');
     relationship.setAttribute('aria-label', '本地文件与所选图书的关系');
     relationship.dataset['importRelationshipChoices'] = 'unselected-by-default';
     relationship.append(element('legend', undefined, '导入关系（默认不选择）'));
-    const allowedRelationships: ReadonlyArray<ImportRelationshipChoice> =
-      selectedChoice.kind === 'existing-book' && selectedChoice.manuscriptState === 'populated'
+    const allowedRelationships: ReadonlyArray<ImportRelationshipChoice> = !staged.editableImport.available
+      ? ['source-only']
+      : selectedChoice.kind === 'existing-book' && selectedChoice.manuscriptState === 'populated'
         ? ['source-only', 'reimport']
         : ['first-manuscript', 'source-only'];
     for (const relationshipKind of allowedRelationships) {
@@ -3886,21 +3909,29 @@ function renderSourceImportReview(
   retainedBytes.setAttribute('data-source-bytes', '');
   const retainedDigest = element('dd', 'technical-identity', review.retainedBoundary.sourceSha256);
   retainedDigest.setAttribute('data-source-sha256', '');
-  const contentDigest = element('dd', 'technical-identity', review.retainedBoundary.contentDigest);
-  contentDigest.setAttribute('data-content-digest', '');
-  const structureDigest = element('dd', 'technical-identity', review.retainedBoundary.structureDigest);
-  structureDigest.setAttribute('data-structure-digest', '');
   boundaryValues.append(
     element('dt', undefined, '保留边界'), element('dd', undefined, review.retainedBoundary.label),
     element('dt', undefined, '文件名'), element('dd', undefined, review.retainedBoundary.displayName),
     element('dt', undefined, '格式'), element('dd', undefined, review.retainedBoundary.format),
     element('dt', undefined, '来源字节数'), retainedBytes,
   );
+  // A retained original the product never parsed has no content or structure identity, so those two
+  // rows are absent rather than empty: the surface claims only what was actually derived.
+  const parsedDigestRows: HTMLElement[] = [];
+  if (review.retainedBoundary.contentDigest !== null && review.retainedBoundary.structureDigest !== null) {
+    const contentDigest = element('dd', 'technical-identity', review.retainedBoundary.contentDigest);
+    contentDigest.setAttribute('data-content-digest', '');
+    const structureDigest = element('dd', 'technical-identity', review.retainedBoundary.structureDigest);
+    structureDigest.setAttribute('data-structure-digest', '');
+    parsedDigestRows.push(
+      element('dt', undefined, '内容摘要'), contentDigest,
+      element('dt', undefined, '结构摘要'), structureDigest,
+    );
+  }
   boundary.append(element('h3', undefined, '完整本地文件与内容边界'), boundaryValues, technicalDetails(
     undefined,
     element('dt', undefined, '来源 SHA-256'), retainedDigest,
-    element('dt', undefined, '内容摘要'), contentDigest,
-    element('dt', undefined, '结构摘要'), structureDigest,
+    ...parsedDigestRows,
   ));
 
   const provenance = element('section', 'review-section');
