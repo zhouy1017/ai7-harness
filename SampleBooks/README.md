@@ -50,6 +50,13 @@ re-measure. Recorded for
 table and [Issue #311](https://github.com/zhouy1017/ai7-harness/issues/311) depends on
 it.
 
+The `Imports at #297's head` column is that first reading. `Imports after ADR 0072 §4`
+beside it is the second, measured the same way at
+`feat/352-classified-docx-import@3608c6879195f48e1803290685cd93283ef02042`
+after [Issue #352](https://github.com/zhouy1017/ai7-harness/issues/352) implemented
+[ADR 0072 §4](../docs/adr/0072-admit-multi-format-manuscript-intake-with-docx-as-the-working-representation.md),
+with the same parser identity `ai7-docx-fflate-saxes/1`.
+
 Only counters and the parser's own structural refusal messages are recorded here. No
 block text, no document title, and no other manuscript-derived string was captured,
 printed, or committed; the probe that produced these numbers was a throwaway deleted
@@ -61,14 +68,14 @@ catches it and flattens every reason to one sentence,
 `该 DOCX 不符合当前受限本地导入边界。` (`src/service/store.ts:3662`). The structural
 reason is what this table records.
 
-| Exact path under `SampleBooks/` | Format | Bytes | Imports today | Nature | Test input today | Settled decision | Recommendation |
-| --- | --- | ---: | --- | --- | --- | --- | --- |
-| `1蟠虺（修订290326字).docx` | DOCX | 546758 | No — `non-default terminal section properties` (`docx.ts:316`) | Editable | No <sup>1</sup> | stays admitted; today unimportable; the bounded boundary widens only through its own Issue, which #313's design decides | Accidental narrowing of the parser; worth its own Issue |
-| `2听漏（定稿368544字）.docx` | DOCX | 631075 | No — `non-default terminal section properties` (`docx.ts:316`) | Editable | No <sup>1</sup> | stays admitted; today unimportable; the bounded boundary widens only through its own Issue, which #313's design decides | Accidental narrowing of the parser; worth its own Issue |
-| `3天兽（定稿395870字)##＊.doc` | DOC | 1173504 | No — `selected file is not DOCX` (`docx.ts:115`), decided from the extension before any byte is read | Editable after conversion | No | stays admitted; intake is #313's (V2-UX-IMP-001 admits any format; conversion or source-only retention is that slice's to settle) | Not a parser bound at all; #313 owns it |
-| `春歌(一次通读后电子版).pdf` | PDF | 4330883 | No — `selected file is not DOCX` (`docx.ts:115`), decided from the extension before any byte is read | Source-only by nature (fixed layout) <sup>2</sup> | No | stays admitted; intake is #313's (V2-UX-IMP-001 admits any format; conversion or source-only retention is that slice's to settle) | Source-only retention under V2-UX-IMP-006; #313 owns it |
-| `蟠虺.docx` | DOCX | 43661 | No — `non-default terminal section properties` (`docx.ts:316`) | Editable | No <sup>1</sup> | stays admitted; today unimportable; the bounded boundary widens only through its own Issue, which #313's design decides | Accidental narrowing of the parser; worth its own Issue |
-| `sample1.docx` — **control** | DOCX | 29550 | Yes — 97 blocks, 8289 characters; fidelity `inline-styles` 266, `sections` 1, all other categories 0 | Editable | Yes | usable as test input under #311 | Control row: it reproduces the ADR 0044 baseline, which is what proves the probe read the parser correctly |
+| Exact path under `SampleBooks/` | Format | Bytes | Imports at #297's head | Imports after ADR 0072 §4 | Nature | Test input today | Settled decision | Recommendation |
+| --- | --- | ---: | --- | --- | --- | --- | --- | --- |
+| `1蟠虺（修订290326字).docx` | DOCX | 546758 | No — `non-default terminal section properties` (`docx.ts:316`) | Yes — 4434 blocks, 290325 characters; fidelity `inline-styles` 12424, `sections` 1, `headers-footers` 2, all other categories 0; plan `degraded-import-no-round-trip` | Editable | No <sup>1</sup> | stays admitted; today unimportable; the bounded boundary widens only through its own Issue, which #313's design decides | Accidental narrowing of the parser; worth its own Issue |
+| `2听漏（定稿368544字）.docx` | DOCX | 631075 | No — `non-default terminal section properties` (`docx.ts:316`) | Yes — 4577 blocks, 368544 characters; fidelity `inline-styles` 9868, `sections` 1, `headers-footers` 1, all other categories 0; plan `degraded-import-no-round-trip` | Editable | No <sup>1</sup> | stays admitted; today unimportable; the bounded boundary widens only through its own Issue, which #313's design decides | Accidental narrowing of the parser; worth its own Issue |
+| `3天兽（定稿395870字)##＊.doc` | DOC | 1173504 | No — `selected file is not DOCX` (`docx.ts:115`), decided from the extension before any byte is read | No — `selected file is not DOCX` (`docx.ts:112`), unchanged; the extension route is S51b's | Editable after conversion | No | stays admitted; intake is #313's (V2-UX-IMP-001 admits any format; conversion or source-only retention is that slice's to settle) | Not a parser bound at all; #313 owns it |
+| `春歌(一次通读后电子版).pdf` | PDF | 4330883 | No — `selected file is not DOCX` (`docx.ts:115`), decided from the extension before any byte is read | No — `selected file is not DOCX` (`docx.ts:112`), unchanged; the extension route is S51b's | Source-only by nature (fixed layout) <sup>2</sup> | No | stays admitted; intake is #313's (V2-UX-IMP-001 admits any format; conversion or source-only retention is that slice's to settle) | Source-only retention under V2-UX-IMP-006; #313 owns it |
+| `蟠虺.docx` | DOCX | 43661 | No — `non-default terminal section properties` (`docx.ts:316`) | Yes — 100 blocks, 8359 characters; fidelity `inline-styles` 216, `comments-revisions` 124, `sections` 1, all other categories 0; plan `degraded-import-no-round-trip` | Editable | No <sup>1</sup> | stays admitted; today unimportable; the bounded boundary widens only through its own Issue, which #313's design decides | Accidental narrowing of the parser; worth its own Issue |
+| `sample1.docx` — **control** | DOCX | 29550 | Yes — 97 blocks, 8289 characters; fidelity `inline-styles` 266, `sections` 1, all other categories 0 | Yes — unchanged: 97 blocks, 8289 characters; fidelity `inline-styles` 266, `sections` 1, all other categories 0; plan `degraded-import-no-round-trip` with exactly those two degradations | Editable | Yes | usable as test input under #311 | Control row: it reproduces the ADR 0044 baseline, which is what proves the probe read the parser correctly |
 
 <sup>1</sup> Not importable, so not a test input through the bounded path. Its content
 may still serve #311's composed-fixture builder, because that builder assembles its own
@@ -77,6 +84,19 @@ DOCX container — but only if the builder reads the admitted file by some path 
 
 <sup>2</sup> A by-design expectation from the format, not a measurement: the file was
 never opened. #313 decides it.
+
+**The second reading closes the table: all four admitted DOCX files import.** The two
+conditions the paragraphs below describe are exactly the ones #352 removed — the
+body-level terminal `sectPr` is now counted in the `sections` class instead of matched
+against `sample1`'s shape, and `deriveImportFidelityPlan` plans any well-formed report
+instead of the all-zero or `sample1`-exact projection. Each newly importing file carries
+`降级导入` or `不支持导入` counts, so each arrives with an explicit Import Degradation
+Decision (V2-UX-IMP-005) rather than a refusal; `蟠虺.docx`'s 124 comment and revision
+marks are dropped content the editor accepts in that same decision, not a blocking case.
+Exact `sample1` is unchanged, which is what proves the widening did not move the ADR 0044
+baseline. The `Settled decision` and `Recommendation` columns and footnote 1 remain #297's
+own reading at its own head; footnote 1's "not importable" no longer holds, so all three
+files are now readable through `parseDocx` for [Issue #311](https://github.com/zhouy1017/ai7-harness/issues/311).
 
 **Three of the four admitted DOCX files refuse, not two.**
 `1蟠虺（修订290326字).docx` had never been attempted before this measurement and refuses
