@@ -1,4 +1,9 @@
-import { ADMITTED_JOURNEYS, normalizePnpmArgs, runJourneyProcess } from './controller.mjs';
+import {
+  ADMITTED_JOURNEYS,
+  classifyJourneyResult,
+  normalizePnpmArgs,
+  runJourneyProcess,
+} from './controller.mjs';
 
 const args = normalizePnpmArgs(process.argv.slice(2));
 if (args.length !== 0) {
@@ -15,6 +20,10 @@ if (args.length !== 0) {
     }
     if (result.spawnError || result.code !== 0 || result.signal !== null) {
       console.error(`LOCAL_COMPLETION/${journey}/fail`);
+      // The child's own stage line, reduced to the admitted-location vocabulary, so a sequenced
+      // failure names where it stopped. Failure path only: a passing run's output is unchanged.
+      const failure = classifyJourneyResult(result, journey);
+      console.error(`LOCAL_COMPLETION/${journey}/fail/${failure.location}/${failure.errorClass}`);
       process.exitCode = result.code || 1;
       break;
     }
