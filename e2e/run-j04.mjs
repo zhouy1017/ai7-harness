@@ -43,9 +43,37 @@ const ASSURANCE_STATEMENT = '仅为模型输出的结构化归纳；不构成事
 /**
  * The reducer stages in the order the Run performs them. Synchronized delta (#274): the model-driven
  * `cross-unit-reduction` sits between the deterministic contradiction pass it post-filters and the
- * synthesis it precedes.
+ * synthesis it precedes. Synchronized delta (#275): `assurance-sampling` closes the list, because the
+ * sample is drawn over what the reduction and the synthesis already produced.
  */
-const REDUCER_STAGES = ['unit-validation', 'section-reduction', 'contradiction-continuity', 'cross-unit-reduction', 'book-synthesis'];
+const REDUCER_STAGES = ['unit-validation', 'section-reduction', 'contradiction-continuity', 'cross-unit-reduction', 'book-synthesis', 'assurance-sampling'];
+/**
+ * Synchronized delta (#275): every Run of this Journey performs exactly one assurance sampling turn.
+ * Both cross-unit findings are anchored in unit 1 — a finding's anchor is its first side's unit — and
+ * exact `sample1` is one structural section, so the sample is one stratum drawn to one turn.
+ */
+const SAMPLING_TURNS = 1;
+
+/**
+ * The service's canonical JSON form and its digest, restated here on purpose. The Journey recomputes
+ * the sample's seed from what the revision itself discloses — its manifest digest and its own findings
+ * — rather than from the product's own function, which is the only way the assertion means anything.
+ */
+function canonicalJson(value) {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
+  if (value !== null && typeof value === 'object') {
+    return `{${Object.entries(value)
+      .filter(([, item]) => item !== undefined)
+      .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+      .map(([key, item]) => `${JSON.stringify(key)}:${canonicalJson(item)}`)
+      .join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function sha256Hex(text) {
+  return createHash('sha256').update(text).digest('hex');
+}
 /** The four typed cross-unit finding kinds; this fixture reports the two the deterministic pass cannot reach. */
 const CROSS_UNIT_FINDING_KINDS = ['contradiction', 'continuity-break', 'alias-identity-divergence', 'chronology-conflict'];
 /** The Decision Layer's label for every conflict kind this fixture reports, keyed by the reducer token the record keeps. */
@@ -484,7 +512,8 @@ function requireRevisionShape(revision, prepared, attempt, fixtureDigest, name) 
     revision?.bindingPin?.promptContractDigest === PROMPT_CONTRACT_DIGEST &&
     sameRecord(revision?.policyPin, { operationalScope: 'development-ci', providerProcessingVersion: 'v1', activePolicySetVersion: 'v4', liveTransmissions: 0 }) &&
     revision?.provenance?.taskIntentId === prepared.taskIntent.taskIntentId && revision?.provenance?.attemptId === attempt.attemptId &&
-    revision?.usage?.requests === SAMPLE1_UNITS + 1, `${name}-identity`, { fixtureDigest, revision: revision === null || revision === undefined ? revision : { ...revision, units: undefined, sections: undefined, synthesis: undefined } });
+    // Synchronized delta (#274, #275): eight unit turns, the reduction's, and the sample's.
+    revision?.usage?.requests === SAMPLE1_UNITS + 1 + SAMPLING_TURNS, `${name}-identity`, { fixtureDigest, revision: revision === null || revision === undefined ? revision : { ...revision, units: undefined, sections: undefined, synthesis: undefined } });
   requireJourney(revision.coverage?.axis === 'coverage' && revision.coverage?.state === 'partial' && revision.coverage?.unitsTotal === SAMPLE1_UNITS &&
     revision.coverage?.unitsClosed === SAMPLE1_UNITS - 1 && revision.coverage?.gapCount === 1 && typeof revision.coverage?.label === 'string' &&
     revision.reducerClosure?.axis === 'reducer-closure' && revision.reducerClosure?.state === 'closed-with-gaps' &&
@@ -582,7 +611,8 @@ function requireSuccessorShape(revision, expected, attempt, fixtureDigest, name)
     sameRecord(revision?.update?.counts, expected.counts) && sameNullableRecord(revision?.update?.selectedRange ?? null, expected.selectedRange) &&
     JSON.stringify(revision?.lineage?.map((entry) => entry.kind)) === JSON.stringify(expected.lineage) &&
     revision?.units?.length === SAMPLE1_UNITS && revision.units.every(unitLineageExact) &&
-    revision?.usage?.requests === expected.counts.recomputed + 1 &&
+    // Synchronized delta (#274, #275): the recomputed units, the reduction's turn, and the sample's.
+    revision?.usage?.requests === expected.counts.recomputed + 1 + SAMPLING_TURNS &&
     revision?.coverage?.unitsTotal === SAMPLE1_UNITS && revision?.coverage?.unitsClosed === SAMPLE1_UNITS - 1 &&
     revision?.coverage?.unitsReused === expected.counts.reused && revision?.coverage?.gapCount === 1 &&
     revision?.freshness?.state === expected.freshness && revision?.freshness?.boundRevisionId === expected.boundRevisionId &&
@@ -594,6 +624,10 @@ function requireSuccessorShape(revision, expected, attempt, fixtureDigest, name)
     revision?.crossUnitReduction?.state === 'closed' && revision?.crossUnitReduction?.reason === null &&
     revision?.crossUnitFindings?.length === revision?.crossUnitReduction?.findingCount &&
     revision?.assurance?.crossUnitFindingCount === revision?.crossUnitFindings?.length &&
+    // Synchronized delta (#275): the sample closes in every successor Run too, over that Run's own
+    // findings, and its dispositions never move one of them.
+    revision?.assuranceSample?.state === 'closed' && revision?.assuranceSample?.size === revision?.crossUnitFindings?.length &&
+    sameRecord(revision?.reducerClosure?.stages?.[5], { stage: 'assurance-sampling', state: 'closed', inputCount: revision?.crossUnitFindings?.length }) &&
     JSON.stringify(revision?.conflicts?.map((conflict) => conflict.kind)) === JSON.stringify(['unit-reported', 'alias-collision', 'entity-kind-divergence', 'setting-claim-divergence']) &&
     JSON.stringify(revision?.units?.map((unit) => unit.state)) === JSON.stringify(['closed', 'gap', 'closed', 'closed', 'closed', 'closed', 'closed', 'closed']),
   `${name}-successor`, { expected, revision: revision === null || revision === undefined ? revision : { ...revision, units: undefined, sections: undefined, synthesis: undefined } });
@@ -1193,6 +1227,80 @@ async function main() {
     requireJourney(revision.conflicts.every((conflict) => !CROSS_UNIT_FINDING_KINDS.includes(conflict.kind)) &&
       revision.units.every((unit) => !JSON.stringify(unit).includes('crossUnit')), 'cross-unit-findings-are-not-conflicts');
 
+    // Synchronized delta (#275): after the reduction the same Run re-read each of its findings against
+    // the blocks of the unit that finding is anchored in, and recorded a disposition for each. The
+    // Overview's rendering of them is S42b, so everything asserted here is at the projection level.
+    at('assurance-sampling');
+    cancellation.throwIfRequested();
+    // The findings as they stand before the sampling component is considered at all; the sample must
+    // leave them byte-identical, which is ADR 0066's "never edits, deletes, or reorders findings".
+    const findingsBeforeSampling = JSON.stringify(revision.crossUnitFindings);
+    const sample = revision.assuranceSample;
+    requireJourney(sample?.state === 'closed' && sample?.reason === null && DIGEST_PATTERN.test(sample?.seed) &&
+      sample?.size === revision.crossUnitFindings.length && sample?.candidateCount === revision.crossUnitFindings.length &&
+      sample?.usage?.inputTokens > 0 && sample?.usage?.outputTokens > 0 &&
+      sameRecord(revision.reducerClosure.stages[5], { stage: 'assurance-sampling', state: 'closed', inputCount: sample.candidateCount }),
+      'assurance-sample-closed', { assuranceSample: sample, stages: revision.reducerClosure.stages });
+
+    // The seed is reproducible from the revision's own manifest digest and its own findings: an editor
+    // holding only what the revision discloses can redraw the identical sample and check the set.
+    const candidates = revision.crossUnitFindings.map((finding, index) => ({
+      ref: String(index), unitOrdinal: finding.sides[0].unitOrdinal, tier: finding.confidence, text: finding.description,
+    }));
+    const findingsDigest = sha256Hex(canonicalJson(candidates));
+    requireJourney(sample.seed === sha256Hex(canonicalJson({ manifestDigest: manifest.digest, findingsDigest })),
+      'assurance-sample-seed-redrawn', { seed: sample.seed, manifestDigest: manifest.digest });
+
+    // Exact sample1 is one structural section, so the stratum is one; every section holding a finding
+    // contributes at least one disposition, and here that is the whole sample.
+    const sections = new Set(revision.crossUnitFindings.map((finding) => manifest.units[finding.sides[0].unitOrdinal - 1].sectionOrdinal));
+    requireJourney(sample.strata.length === sections.size &&
+      sample.strata.every((stratum) => sections.has(stratum.sectionOrdinal) && stratum.sampled >= 1 && stratum.sampled <= stratum.candidates) &&
+      sample.strata.reduce((total, stratum) => total + stratum.sampled, 0) === sample.size &&
+      [...sections].every((sectionOrdinal) => sample.dispositions.some((entry) =>
+        manifest.units[entry.unitOrdinal - 1].sectionOrdinal === sectionOrdinal)),
+      'assurance-sample-strata', { strata: sample.strata, sections: [...sections] });
+
+    // One disposition per drawn finding, each naming its finding by `ref` at that finding's own anchor
+    // unit and tier, and exactly one of them is the fixture-driven `需降级` with a stated reason.
+    const downgraded = sample.dispositions.filter((entry) => entry.disposition === '需降级');
+    requireJourney(sample.dispositions.length === sample.size &&
+      new Set(sample.dispositions.map((entry) => entry.ref)).size === sample.size &&
+      sample.dispositions.every((entry) => {
+        const finding = revision.crossUnitFindings[Number(entry.ref)];
+        if (finding === undefined || !['成立', '需降级', '应删除'].includes(entry.disposition)) return false;
+        if (typeof entry.reason !== 'string' || entry.reason.length === 0) return false;
+        return entry.unitOrdinal === finding.sides[0].unitOrdinal && entry.tier === finding.confidence;
+      }) &&
+      downgraded.length === 1 && downgraded[0].reason.length > 0 &&
+      revision.crossUnitFindings[Number(downgraded[0].ref)]?.kind === 'continuity-break',
+      'assurance-sample-dispositions', { dispositions: sample.dispositions });
+
+    // Estimated precision per tier of the sampled set: upheld over sampled, `成立` only, two decimals.
+    requireJourney(sample.precision.length > 0 &&
+      sample.precision.every((entry) => {
+        const ofTier = sample.dispositions.filter((disposition) => disposition.tier === entry.tier);
+        const upheld = ofTier.filter((disposition) => disposition.disposition === '成立').length;
+        return entry.sampled === ofTier.length && entry.upheld === upheld &&
+          entry.estimate === Math.round((upheld / ofTier.length) * 100) / 100;
+      }) &&
+      sample.precision.reduce((total, entry) => total + entry.sampled, 0) === sample.size &&
+      revision.assurance.sampledPrecision?.size === sample.size &&
+      revision.assurance.sampledPrecision?.upheld === sample.dispositions.filter((entry) => entry.disposition === '成立').length &&
+      revision.assurance.label.includes(`· 抽样 ${sample.size} 条 · 估计精度 ${revision.assurance.sampledPrecision.estimate.toFixed(2)}`),
+      'assurance-sample-precision', { precision: sample.precision, sampledPrecision: revision.assurance.sampledPrecision, label: revision.assurance.label });
+
+    // No finding was edited, deleted, reordered, or re-ranked by a disposition, and the axis state the
+    // reducers gave this Run is untouched: a sample is evidence about findings, never a verdict.
+    const revisionAgain = (await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`)).resultSetRevision;
+    requireJourney(JSON.stringify(revisionAgain.crossUnitFindings) === findingsBeforeSampling &&
+      revisionAgain.assurance.state === 'qualified-with-open-conflicts' &&
+      revisionAgain.assurance.crossUnitFindingCount === revision.crossUnitFindings.length &&
+      revisionAgain.assurance.unresolvedConflictCount === revision.conflicts.length &&
+      !JSON.stringify(revisionAgain.crossUnitFindings).includes('disposition') &&
+      revisionAgain.units.every((unit) => !JSON.stringify(unit).includes('assurance')),
+      'assurance-sample-edits-nothing', { crossUnitFindings: revisionAgain.crossUnitFindings });
+
     at('return-to-range');
     cancellation.throwIfRequested();
     const gapBlockId = revision.gaps[0].blockIds[0];
@@ -1467,7 +1575,8 @@ async function main() {
       manifestDigest: bookManifest.digest, freshness: 'current',
     }, attemptBook, fixtureDigest, 'book-revision');
     // No mode mutated the manuscript: every successor pins the working state the acknowledged edit produced.
-    requireJourney(JSON.stringify(revision4.synthesis) === JSON.stringify(revision3.synthesis) && revision4.usage.requests === SAMPLE1_UNITS + 1 &&
+    // Synchronized delta (#274, #275): eight recomputed units, the reduction's turn, and the sample's.
+    requireJourney(JSON.stringify(revision4.synthesis) === JSON.stringify(revision3.synthesis) && revision4.usage.requests === SAMPLE1_UNITS + 1 + SAMPLING_TURNS &&
       revision4.manuscriptPin.revisionId === revision2.manuscriptPin.revisionId && revision4.manuscriptPin.revisionDigest === staleRevision.freshness.currentWorkingDigest &&
       settledBook.updateControls?.working?.workingDigest === staleRevision.freshness.currentWorkingDigest && settledBook.updateControls.working.totalBlocks === SAMPLE1_BLOCKS,
     'book-no-manuscript-mutation', { pin: revision4.manuscriptPin, working: settledBook?.updateControls?.working });
@@ -1477,8 +1586,9 @@ async function main() {
     const history = settledBook.history;
     requireJourney(history?.resultSetId === revision.resultSetId && history.kind === 'baseline-manuscript-analysis' && history.latestOrdinal === 4 && history.entries?.length === 4 &&
       JSON.stringify(history.entries.map((entry) => [entry.ordinal, entry.mode, entry.modeLabel, entry.current, entry.freshness, entry.predecessor?.ordinal ?? null, entry.usage.requests, entry.gapCount, entry.conflictCount, entry.unitsClosed])) ===
-        // Synchronized delta (#274): every Run's request count gains its one cross-unit reduction turn.
-        JSON.stringify([[1, 'first-baseline', '首次基线分析', false, 'superseded', null, 9, 1, 4, 7], [2, 'sync-current', '同步到当前稿件', false, 'superseded', 1, 3, 1, 4, 7], [3, 'reanalyze-range', '重新分析所选范围', false, 'superseded', 2, 4, 1, 4, 7], [4, 'reanalyze-book', '重新分析全书', true, 'current', 3, 9, 1, 4, 7]]) &&
+        // Synchronized delta (#274, #275): every Run's request count carries its one cross-unit
+        // reduction turn and its one assurance sampling turn beside its unit turns.
+        JSON.stringify([[1, 'first-baseline', '首次基线分析', false, 'superseded', null, 10, 1, 4, 7], [2, 'sync-current', '同步到当前稿件', false, 'superseded', 1, 4, 1, 4, 7], [3, 'reanalyze-range', '重新分析所选范围', false, 'superseded', 2, 5, 1, 4, 7], [4, 'reanalyze-book', '重新分析全书', true, 'current', 3, 10, 1, 4, 7]]) &&
       JSON.stringify(history.entries.map((entry) => entry.revisionId)) === JSON.stringify([revision.revisionId, revision2.revisionId, revision3.revisionId, revision4.revisionId]) &&
       JSON.stringify(history.entries.map((entry) => entry.digest)) === JSON.stringify([revision.digest, revision2.digest, revision3.digest, revision4.digest]) &&
       history.entries.every((entry, index) => sameRecord(entry.counts, [revision.update.counts, syncExpected.counts, rangeExpected.counts, bookExpected.counts][index])) &&
@@ -1654,7 +1764,9 @@ async function main() {
       adaptation.planEnvelopeDigest === preparedRetry.planEnvelope.digest && adaptation.bindingDigest === attemptRetry.executionBinding.bindingDigest &&
       adaptation.attemptId === attemptRetry.attemptId && adaptation.runRecordId === settledRetry.run.runRecordId && adaptation.firstPayloadDigest === retrySpans[1].payloadDigest &&
       UUID_PATTERN.test(adaptation.adaptationId) && DIGEST_PATTERN.test(adaptation.requestDigest) && typeof adaptation.recordedAt === 'string' &&
-      revision5?.ordinal === 5 && revision5.usage?.requests === 5 && revision5.units?.[4]?.state === 'closed' && revision5.units[4].lineage?.kind === 'recomputed' &&
+      // Synchronized delta (#274, #275): three recomputed units, unit 5's safe retry, the reduction's
+      // turn, and the sample's.
+      revision5?.ordinal === 5 && revision5.usage?.requests === 5 + SAMPLING_TURNS && revision5.units?.[4]?.state === 'closed' && revision5.units[4].lineage?.kind === 'recomputed' &&
       revision5.units[1]?.state === 'gap' && revision5.gaps?.length === 1 && revision5.gaps[0].unitOrdinal === 2 && !revision5.gaps[0].reason.includes('安全重试') &&
       JSON.stringify(revision5.provenance?.adaptations) === JSON.stringify({ count: 1, unitOrdinals: [5] }) && revision5.provenance?.planVersion === 1 &&
       revision5.provenance?.runRecordId === settledRetry.run.runRecordId && revision5.bindingPin?.bindingDigest === attemptRetry.executionBinding.bindingDigest &&
@@ -1770,7 +1882,8 @@ async function main() {
       settledDrift.run.adaptations?.length === 0 &&
       revision6?.ordinal === 6 && revision6.update?.mode === 'reanalyze-range' && sameRecord(revision6.update?.selectedRange, rangeB) && sameRecord(revision6.update?.counts, driftOptionB.expected) &&
       revision6.update?.predecessor?.revisionId === revision5.revisionId && revision6.provenance?.planVersion === 2 && JSON.stringify(revision6.provenance?.adaptations) === JSON.stringify({ count: 0, unitOrdinals: [] }) &&
-      revision6.usage?.requests === 3 && revision6.adapterPin?.fixtureSha256 === retryFixtureDigest && revision6.gaps?.length === 1 && revision6.gaps[0].unitOrdinal === 2,
+      // Synchronized delta (#274, #275): two recomputed units, the reduction's turn, and the sample's.
+      revision6.usage?.requests === 3 + SAMPLING_TURNS && revision6.adapterPin?.fixtureSha256 === retryFixtureDigest && revision6.gaps?.length === 1 && revision6.gaps[0].unitOrdinal === 2,
     'plan-revision-settled', { authorization: settledDrift?.authorization, planVersions: settledDrift?.planVersions, provenance: revision6?.provenance, update: revision6?.update });
     await assertRenderer(renderer, `(() => { const card=document.querySelector('.baseline-analysis-card'); const history=card?.querySelector('.analysis-history'); return card?.dataset.resultRevisionOrdinal==='6' && card.dataset.adaptationCount==='0' && card.dataset.planVersion==='2' && card.querySelector('[data-plan-version-ordinal="2"][data-plan-version-state="bound"]')!==null && card.querySelector('.analysis-plan-versions [data-plan-revision-next="2"][data-plan-revision-resolved="true"]')!==null && card.textContent.includes('计划版本 2') && card.querySelector('.analysis-timeline')?.dataset.timelineAdaptations==='0' && history?.dataset.historyCount==='6' && ${ONLY_ANALYSIS_ACTIONS}; })()`, 'plan-revision-overview-surface');
 
