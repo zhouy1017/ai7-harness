@@ -110,6 +110,35 @@ function button(label: string, className: 'primary' | 'secondary' | 'quiet', act
   return node;
 }
 
+/**
+ * The Technical Identity Layer's one affordance for a surface (V2-UX-LAYER-001): that surface's digests,
+ * record identifiers, references, schema and version identifiers and exact instants, closed by default,
+ * one deliberate step below the decision content it belongs to. The rows keep their labels and their
+ * `<dl>` structure — `gridClass` is the surface's own grid, so a disclosed row lines up exactly as it did
+ * at full rank — and nothing here is truncated or hidden from the record. `<details>` carries the whole
+ * behavior: opening or closing it reads nothing, writes nothing, and settles no decision
+ * (V2-UX-LAYER-007), so no surface needs its own toggle state.
+ */
+function technicalDetails(gridClass: string | undefined, ...rows: ReadonlyArray<HTMLElement>): HTMLElement {
+  const disclosure = element('details', 'technical-details');
+  const values = element('dl', gridClass);
+  values.append(...rows);
+  disclosure.append(element('summary', undefined, '查看技术详情'), values);
+  return disclosure;
+}
+
+/**
+ * A Decision Layer row that states an instant (V2-UX-LAYER-004, V2-UX-COPY-011): absolute local date and
+ * time, with the exact ISO instant riding inside the same `<dd>` on its own line. This is the shape for a
+ * surface with no disclosure of its own — where there is one, the exact instant is a disclosed row
+ * instead. Either way the local reading is never the only form shown, and never the exact one alone.
+ */
+function instantValue(iso: string): HTMLElement {
+  const value = element('dd');
+  value.append(localInstantLabel(iso), element('span', 'technical-identity', iso));
+  return value;
+}
+
 function setStatus(message: string, tone?: 'busy' | 'success' | 'error'): void {
   persistenceStatus.textContent = message;
   if (tone) persistenceStatus.dataset['tone'] = tone;
@@ -2503,8 +2532,12 @@ function renderTaskAuthorization(host: HTMLElement, projection: TaskAuthorizatio
       element('dt', undefined, '目标修订版'), element('dd', 'technical-identity', `${checkpoint.revisionLabel} · ${checkpoint.revisionId}`),
       element('dt', undefined, '任务输入固定点'), element('dd', undefined, `${checkpoint.purpose} · ${checkpoint.createdForDirtyJournal ? '由已确认编辑创建' : '复用当前精确修订版'}`),
       element('dt', undefined, '修订版摘要'), element('dd', 'technical-identity', manuscriptPin.revisionDigest),
-      element('dt', undefined, '来源版本证据'), element('dd', 'technical-identity', `${sourceScope.sourceVersionEvidence.sourceVersionId} · 仅血缘证据，不属于可读范围`),
-      element('dt', undefined, '可读范围'), element('dd', 'technical-identity', `仅图书 ${sourceScope.bookId} · 主稿件 ${sourceScope.manuscriptId} · Task Input 修订版 ${sourceScope.taskInputRevision.revisionId} · ${sourceScope.taskInputRevision.revisionDigest}`),
+      // V2-UX-LAYER-002 names the scope of reading un-demotable, so both scope statements read at full
+      // rank: what this Run may read, and that the lineage evidence is outside it. Only the bare
+      // identifier of that evidence is technical, and it is disclosed as its own row below.
+      element('dt', undefined, '来源版本证据'), element('dd', undefined, '仅血缘证据，不属于可读范围'),
+      element('dt', undefined, '可读范围'), element('dd', undefined, `仅图书 ${sourceScope.bookId} · 主稿件 ${sourceScope.manuscriptId} · Task Input 修订版 ${sourceScope.taskInputRevision.revisionId} · ${sourceScope.taskInputRevision.revisionDigest}`),
+      element('dt', undefined, '来源版本证据 ID'), element('dd', 'technical-identity', sourceScope.sourceVersionEvidence.sourceVersionId),
       element('dt', undefined, '原生构件'), element('dd', 'technical-identity', `${artifact.identity}@${artifact.version}`),
       element('dt', undefined, '原生构件摘要'), element('dd', 'technical-identity', artifact.nativeCarrierSha256),
       element('dt', undefined, '权限侧车'), element('dd', 'technical-identity', `${artifact.sidecarIdentity} · Revision ${artifact.sidecarRevision} · ${artifact.sidecarSha256}`),
@@ -2850,7 +2883,10 @@ async function renderDataAndStorage(): Promise<void> {
     );
     const summary = element('section', 'source-card');
     const values = element('dl');
-    const root = element('dd', 'technical-identity', projection.canonicalRoot);
+    // The one value this screen exists to state (V2-UX-LAYER-001: what the surface is about) — an editor
+    // came here to read where their data lives. Demoting it would put the answer behind a disclosure on
+    // the screen whose whole purpose is to give it, so it reads at full rank, not as technical identity.
+    const root = element('dd', undefined, projection.canonicalRoot);
     root.dataset['productDataRoot'] = projection.canonicalRoot;
     values.append(
       element('dt', undefined, '当前平台'), element('dd', undefined, projection.platformLabel),
