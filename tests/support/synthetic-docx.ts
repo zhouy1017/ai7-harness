@@ -28,6 +28,18 @@ export interface SyntheticDocxTerminalSection {
   children?: readonly string[];
 }
 
+export interface SyntheticDocxInjectedDeclaration {
+  part: 'word/document.xml' | 'docProps/core.xml';
+  /** Raw text spliced after the XML prolog and before the part's root element, e.g. `<!DOCTYPE x>` or `<!ENTITY x "y">`. */
+  declaration: string;
+}
+
+export interface SyntheticDocxNestingDepth {
+  part: 'word/document.xml' | 'docProps/core.xml';
+  /** Extra generic wrapper elements nested around the part's normal content. */
+  depth: number;
+}
+
 export interface SyntheticDocxOptions {
   paragraphs?: readonly SyntheticDocxParagraph[];
   /** Shape of the body-level terminal `w:sectPr`; omitted means the bare `<w:sectPr/>` container. */
@@ -36,7 +48,11 @@ export interface SyntheticDocxOptions {
   coreTitle?: string;
   omitContentTypes?: boolean;
   omitDocument?: boolean;
-  /** Extra ZIP entries, written after the generated ones so a test can replace or oversize a part. */
+  /** Injects a hostile declaration into `word/document.xml` or `docProps/core.xml`. */
+  injectedDeclaration?: SyntheticDocxInjectedDeclaration;
+  /** Nests `word/document.xml` or `docProps/core.xml` content to exercise the XML nesting-depth bound. */
+  nestingDepth?: SyntheticDocxNestingDepth;
+  /** Extra ZIP entries, written after the generated ones so a test can replace or oversize a part, or collide with one by name. */
   extraEntries?: Readonly<Record<string, Uint8Array>>;
 }
 
@@ -60,28 +76,54 @@ function paragraphXml(paragraph: SyntheticDocxParagraph): string {
   return `<w:p>${style}${run}</w:p>`;
 }
 
+/** Wraps `inner` in `depth` generic unprefixed elements, to exercise an XML nesting-depth bound without needing a real element shape. */
+function nestWrap(inner: string, depth: number): string {
+  let xml = inner;
+  for (let i = 0; i < depth; i += 1) xml = `<x>${xml}</x>`;
+  return xml;
+}
+
+function declarationFor(options: SyntheticDocxOptions, part: SyntheticDocxInjectedDeclaration['part']): string {
+  return options.injectedDeclaration?.part === part ? options.injectedDeclaration.declaration : '';
+}
+
+function depthFor(options: SyntheticDocxOptions, part: SyntheticDocxNestingDepth['part']): number {
+  return options.nestingDepth?.part === part ? options.nestingDepth.depth : 0;
+}
+
+function coreDocumentXml(options: SyntheticDocxOptions): string {
+  const titleXml = options.coreTitle === undefined ? '' : `<dc:title>${escapeXml(options.coreTitle)}</dc:title>`;
+  return (
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+    declarationFor(options, 'docProps/core.xml') +
+    '<cp:coreProperties' +
+    ' xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties"' +
+    ' xmlns:dc="http://purl.org/dc/elements/1.1/">' +
+    nestWrap(titleXml, depthFor(options, 'docProps/core.xml')) +
+    '</cp:coreProperties>'
+  );
+}
+
 export function buildSyntheticDocx(options: SyntheticDocxOptions = {}): Uint8Array {
   const paragraphs = options.paragraphs ?? [{ text: '合成段落内容。' }];
+  const bodyContent = nestWrap(
+    paragraphs.map(paragraphXml).join('') + terminalSectionXml(options.terminalSection),
+    depthFor(options, 'word/document.xml'),
+  );
   const documentXml =
     '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+    declarationFor(options, 'word/document.xml') +
     '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>' +
-    paragraphs.map(paragraphXml).join('') +
-    terminalSectionXml(options.terminalSection) +
+    bodyContent +
     '</w:body></w:document>';
 
   const entries: Record<string, Uint8Array> = {};
   if (options.omitContentTypes !== true) entries['[Content_Types].xml'] = strToU8(CONTENT_TYPES_XML);
   if (options.omitDocument !== true) entries['word/document.xml'] = strToU8(documentXml);
-  if (options.coreTitle !== undefined) {
-    entries['docProps/core.xml'] = strToU8(
-      '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
-      '<cp:coreProperties' +
-      ' xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties"' +
-      ' xmlns:dc="http://purl.org/dc/elements/1.1/">' +
-      `<dc:title>${escapeXml(options.coreTitle)}</dc:title>` +
-      '</cp:coreProperties>',
-    );
-  }
+  const wantsCoreProperties = options.coreTitle !== undefined
+    || options.injectedDeclaration?.part === 'docProps/core.xml'
+    || options.nestingDepth?.part === 'docProps/core.xml';
+  if (wantsCoreProperties) entries['docProps/core.xml'] = strToU8(coreDocumentXml(options));
   for (const [name, bytes] of Object.entries(options.extraEntries ?? {})) entries[name] = bytes;
   return zipSync(entries, { level: 6, mtime: new Date('2026-01-01T00:00:00.000Z') });
 }

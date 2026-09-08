@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -10,12 +11,43 @@ import {
   type ParsedDocxBlock,
 } from '../../src/service/docx.js';
 import type { FidelityCategoryProjection } from '../../src/shared/protocol.js';
-import { writeSyntheticDocx, type SyntheticDocxOptions } from '../support/synthetic-docx.js';
+import { buildSyntheticDocx, writeSyntheticDocx, type SyntheticDocxOptions } from '../support/synthetic-docx.js';
 
 // Every fixture in this suite is generated, and stays generated: the subject throughout is the DOCX
 // container — packaging, parts, entry and size bounds, fidelity classes, and the shapes the parser must
 // refuse — where the block text is irrelevant by construction. A manuscript composed from an admitted
 // Public SampleBook would say nothing here that a generated container does not already say.
+//
+// Size bounds a small synthetic archive cannot exercise (decision 3 of #353), with the size each would need,
+// and which of them a `zipSync` of zeros reaches under 4 MiB instead:
+//   - `DOCX archive is too large` (64 MiB) — checked against bytes actually read off disk as the archive
+//     streams in, not against any decompressed or declared size, so no compression trick shrinks the fixture;
+//     would need a real ~64 MiB file on disk.
+//   - `document XML exceeded its bound` (`word/document.xml` alone past 64 MiB, or the shared 96 MiB expanded
+//     total crossed while it streams) — unreachable under 4 MiB with this helper: `buildSyntheticDocx` always
+//     emits `word/document.xml` as the archive's second entry, before any `extraEntries` filler, so no earlier
+//     entry can pre-load the shared expanded-bytes counter before `word/document.xml` streams, and its own
+//     declared size is capped below 64 MiB by `ZIP entry is too large` (below) before it could reach 96 MiB
+//     anyway; would need a real ~65 MiB `word/document.xml`.
+//   - `metadata XML exceeded its bound` (`docProps/core.xml` or `[Content_Types].xml` past 1 MiB while
+//     streaming) — unreachable by any well-formed archive: `zipSync` always declares a part's exact real size,
+//     so `metadata XML entry is too large` (the declared-size check, already covered above) rejects an
+//     oversized metadata part before this streamed-size check ever runs.
+//   - `suspicious ZIP ratio` (2,000 : 1 above 1 MiB expanded) — unreachable by a well-formed archive: deflate's
+//     practical ceiling for a maximally repetitive payload is on the order of 1,032 : 1, below the bound.
+// `ZIP entry is too large`, `expanded DOCX is too large`, and `document text is too large` all turn out to be
+// reachable under 4 MiB from a `zipSync` of zeros (or another maximally repetitive payload) and are covered
+// below instead of listed here; so is `too many manuscript blocks`, which needs only a hundred thousand
+// one-character paragraphs and stays well under 4 MiB uncompressed.
+//
+// `duplicate terminal section properties` (`docx.ts`) is unreachable at this base, per #352's Worker report:
+// a second body-level `sectPr` trips `terminal section properties are not terminal` first, and a nested one
+// trips `unsupported section properties` first — both covered below. The guard stays in the parser.
+//
+// `DOCTYPE in core properties` (`docx.ts`) is also unreachable, which corrects decision 2 of #353: `parseDocx`
+// runs `docProps/core.xml` through `decodeMetadataXml` before it ever reaches the title parser, and that gate
+// already rejects any `<!DOCTYPE` substring as `DTD or entity declaration` first. `DOCTYPE in document XML`
+// has no such earlier gate and is covered below.
 
 let sandbox: string;
 
@@ -201,6 +233,132 @@ describe('parseDocx', () => {
       parseDocx(path, 'fixture.docx', () => {}, { digest: '0'.repeat(64), bytes: 1 }),
     ).rejects.toThrow('DOCX_REJECTED:selected file changed during staging');
   });
+});
+
+describe('parseDocx: hostile-input bounds', () => {
+  it("keeps buildSyntheticDocx({})'s bytes unchanged now that hostile-input options exist", () => {
+    const digest = createHash('sha256').update(buildSyntheticDocx()).digest('hex');
+    expect(digest).toBe('ddb296070783f25122c67d9b5a82bbc0d103a79f92f6d946d1bd8e231b5c7d32');
+  });
+
+  it('rejects a traversal ZIP entry name', async () => {
+    await expect(
+      parseFixture({ extraEntries: { '../evil.xml': new Uint8Array() } }),
+    ).rejects.toThrow('DOCX_REJECTED:traversal ZIP entry');
+  });
+
+  it('rejects an absolute ZIP entry name', async () => {
+    await expect(
+      parseFixture({ extraEntries: { '/evil.xml': new Uint8Array() } }),
+    ).rejects.toThrow('DOCX_REJECTED:absolute ZIP entry name');
+  });
+
+  it('rejects a duplicate ZIP entry name that differs only by case', async () => {
+    await expect(
+      parseFixture({ extraEntries: { 'WORD/DOCUMENT.XML': new Uint8Array() } }),
+    ).rejects.toThrow('DOCX_REJECTED:duplicate ZIP entry');
+  });
+
+  it('rejects a DTD or entity declaration in a metadata part', async () => {
+    await expect(
+      parseFixture({ injectedDeclaration: { part: 'docProps/core.xml', declaration: '<!DOCTYPE x>' } }),
+    ).rejects.toThrow('DOCX_REJECTED:DTD or entity declaration');
+  });
+
+  it('rejects a DOCTYPE in document XML', async () => {
+    await expect(
+      parseFixture({ injectedDeclaration: { part: 'word/document.xml', declaration: '<!DOCTYPE x>' } }),
+    ).rejects.toThrow('DOCX_REJECTED:DOCTYPE in document XML');
+  });
+
+  it('rejects core properties XML nesting past its safe bound', async () => {
+    await expect(
+      parseFixture({ nestingDepth: { part: 'docProps/core.xml', depth: 150 } }),
+    ).rejects.toThrow('DOCX_REJECTED:core properties XML nesting exceeds its safe bound');
+  });
+
+  it('rejects document XML nesting past its safe bound', async () => {
+    await expect(
+      parseFixture({ nestingDepth: { part: 'word/document.xml', depth: 150 } }),
+    ).rejects.toThrow('DOCX_REJECTED:document XML nesting exceeds its safe bound');
+  });
+
+  it('rejects a document XML markup token past its bound', async () => {
+    await expect(
+      parseFixture({ terminalSection: { attributes: { rsidR: 'x'.repeat(40_000) } } }),
+    ).rejects.toThrow('DOCX_REJECTED:document XML markup token exceeds its bound');
+  });
+
+  it('rejects a document XML text token past its block bound', async () => {
+    await expect(
+      parseFixture({ paragraphs: [{ text: 'x'.repeat(4_200) }] }),
+    ).rejects.toThrow('DOCX_REJECTED:document XML text token exceeds its block bound');
+  });
+
+  it('rejects a paragraph past its bounded block size', async () => {
+    await expect(
+      parseFixture({ paragraphs: [{ text: '字'.repeat(2_100) }] }),
+    ).rejects.toThrow('DOCX_REJECTED:paragraph exceeds the bounded block size');
+  });
+
+  it('rejects too many ZIP entries', async () => {
+    const extraEntries: Record<string, Uint8Array> = {};
+    for (let i = 0; i < 257; i += 1) extraEntries[`extra/${i}.xml`] = new Uint8Array();
+    await expect(parseFixture({ extraEntries })).rejects.toThrow('DOCX_REJECTED:too many ZIP entries');
+  });
+
+  it('rejects a vbaProject.bin entry', async () => {
+    await expect(
+      parseFixture({ extraEntries: { 'word/vbaProject.bin': new Uint8Array() } }),
+    ).rejects.toThrow('DOCX_REJECTED:active or embedded content is outside this import');
+  });
+
+  it('rejects an embeddings/ entry', async () => {
+    await expect(
+      parseFixture({ extraEntries: { 'word/embeddings/oleObject1.xml': new Uint8Array() } }),
+    ).rejects.toThrow('DOCX_REJECTED:active or embedded content is outside this import');
+  });
+
+  it('rejects an activeX/ entry', async () => {
+    await expect(
+      parseFixture({ extraEntries: { 'word/activeX/activeX1.xml': new Uint8Array() } }),
+    ).rejects.toThrow('DOCX_REJECTED:active or embedded content is outside this import');
+  });
+
+  it('rejects any .bin entry', async () => {
+    await expect(
+      parseFixture({ extraEntries: { 'word/media/blob.bin': new Uint8Array() } }),
+    ).rejects.toThrow('DOCX_REJECTED:active or embedded content is outside this import');
+  });
+
+  it('rejects too many manuscript blocks', async () => {
+    const paragraphs = Array.from({ length: 100_001 }, (_, index) => ({ text: String(index % 10) }));
+    await expect(parseFixture({ paragraphs })).rejects.toThrow('DOCX_REJECTED:too many manuscript blocks');
+  }, 30_000);
+
+  it('rejects document text past its total size bound', async () => {
+    const paragraphs = Array.from({ length: 4_885 }, () => ({ text: '字'.repeat(2_048) }));
+    await expect(parseFixture({ paragraphs })).rejects.toThrow('DOCX_REJECTED:document text is too large');
+  }, 30_000);
+
+  it('rejects a ZIP entry whose declared size is too large, from a zipSync of zeros under 4 MiB', async () => {
+    const filler = new Uint8Array(64 * 1024 * 1024 + 1);
+    await expect(
+      parseFixture({ extraEntries: { 'word/media/filler.dat': filler } }),
+    ).rejects.toThrow('DOCX_REJECTED:ZIP entry is too large');
+  }, 30_000);
+
+  it('rejects an archive whose expanded content exceeds its bound, from a zipSync of zeros under 4 MiB', async () => {
+    const filler = new Uint8Array(50 * 1024 * 1024);
+    await expect(
+      parseFixture({
+        extraEntries: {
+          'word/media/filler1.dat': filler,
+          'word/media/filler2.dat': filler,
+        },
+      }),
+    ).rejects.toThrow('DOCX_REJECTED:expanded DOCX is too large');
+  }, 60_000);
 });
 
 describe('deriveImportFidelityPlan and isCleanTracerFidelity', () => {
