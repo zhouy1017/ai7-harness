@@ -61,6 +61,19 @@ Only owner-accepted decisions are requirements here. Future feature requirements
 - **V2-UX-COPY-013**: Copy that names a recommendation, default or AI7 guess cannot present it as preselected, authorized, factually verified or editor-authored.
 - **V2-UX-COPY-014**: Dismissing a transient message hides only that projection. It never acknowledges Global Attention, resolves a record, clears a warning state, records satisfaction or suppresses a required safe-next-action entry.
 
+## Decision layer and technical identity
+
+Added by [ADR 0071](../adr/0071-state-the-decision-layer-and-run-liveness-rules.md) after the first live Provider Run showed every technical identity at the rank of the facts an editor decides on.
+
+- **V2-UX-LAYER-001**: Every editor-facing surface separates a Decision Layer from a Technical Identity Layer. The Decision Layer states, in this order where each applies, what the surface is about (object and state), what the action will read, what it will produce, what it will not do, what it costs, and the one safe next action. The Technical Identity Layer carries digests, record identifiers, references, schema and version identifiers, and machine instants, closed by default behind one disclosure affordance per surface (`查看技术详情` or the card's equivalent) and opened without changing any record or state.
+- **V2-UX-LAYER-002**: Nothing authority-bearing is demoted into the Technical Identity Layer: named non-effects (`明确不会发生`), the Run Budget Ceiling state, the scope of reading and the Outbound Data Category, the exact blocker, the Provider decision, the consequence of the primary action, and any decision the editor must weigh before acting stay in the Decision Layer at full rank.
+- **V2-UX-LAYER-003**: The Decision Layer speaks the product's editorial Chinese. A term of art appears in the form the root `GLOSSARY.md` or this package's glossary defines — its preferred Simplified Chinese label, with the English pair only where the glossary marks English as the accepted product label — and a bare English identifier such as `Run Record`, `Plan Envelope`, or `Task Outcome` never appears as a Decision Layer heading, label, or status.
+- **V2-UX-LAYER-004**: Time in the Decision Layer is absolute local date and time in the reader's convention, supplemented by relative time where V2-UX-COPY-011 allows it; the exact instant (ISO 8601 UTC with milliseconds) lives in the Technical Identity Layer beside it and is never the only form shown.
+- **V2-UX-LAYER-005**: A surface's primary actions — opening the manuscript, switching Books, returning to the Book Library, authorizing, cancelling — are reachable without scrolling at every scroll position of that surface, in a persistent action region that content never pushes off screen; they are never placed only below long content.
+- **V2-UX-LAYER-006**: Provenance and identity collections render as counts with disclosure, never as inline walls: an entity's source blocks read as `来自单元 1、2、5 · 25 个内容块` with the block identifiers one step away, and an identifier list never interrupts prose. A record whose fields are all empty renders as one line (`无`) or inside the technical layer, never as one full-weight row per empty field.
+- **V2-UX-LAYER-007**: Every exact identity remains reachable, copyable, and unabridged from its surface; the layering deletes, truncates, or hides nothing from the record. Opening or closing the technical layer changes no Task, Run, Proposal, decision, Effect, or persistence state.
+- **V2-UX-LAYER-008**: The supported Journeys assert the Decision Layer's readings and assert that the Technical Identity Layer still carries the exact values they pin; a surface conforms only when both assertions hold.
+
 ## V1 semantic migration and journey continuity
 
 - **V2-UX-MIG-001**: The only frozen UI/UX reference is exact object `587d6455f6a578d3df8a39f534ec7a057c07a18c`. It supplies semantics, state distinctions and `J-01`–`J-14` hypotheses only; V2 architecture and owner-accepted decisions govern every conflict.
@@ -468,6 +481,17 @@ Only owner-accepted decisions are requirements here. Future feature requirements
 - **V2-UX-RUN-010**: Run events never switch the central work surface automatically. The editor explicitly opens a Dedicated Work Workspace when a candidate, comparison, or evidence set requires full central space.
 - **V2-UX-RUN-011**: Global Attention may project the same compact phase, last milestone, and wait reason, but opening it returns to the Run's exact Book and Task context rather than creating a second activity authority.
 - **V2-UX-RUN-012**: The Run Activity Header distinguishes `任务运行预算已达上限` as a terminal partial Task Outcome, `模型服务账户限额` as a remediable provider blocker, and `任务已中断 · 可续行` as a settled Resume-ready Run State; none may reuse the other's action or completion wording.
+
+## Run liveness
+
+Added by [ADR 0071](../adr/0071-state-the-decision-layer-and-run-liveness-rules.md): between two increments of Measured Run Progress the design defined progress and several wait states, but nothing for "work is underway and the system is alive".
+
+- **V2-UX-LIVE-001**: Every Run surface carries a Run Liveness Signal beside Measured Run Progress while a Run is executing. It is composed only of facts the system already holds: the current unit's ordinal and the instant its attempt started, the instant of the last recorded Run Record transition, the count of completed transmissions and their recorded usage, and the Provider attempt's own state (`已派发`, `等待模型响应`, `安全重试中`). Elapsed time is computed by the reader from the shown instant; the product never estimates a percentage, a remaining time, or a completion, and a spinner is never the only signal.
+- **V2-UX-LIVE-002**: The signal is sampled, not event-bound: a change in any composing fact reaches the surface within 2 seconds, and the elapsed-time reading refreshes at least every 5 seconds while the Run is executing, so "still alive" is answerable inside that interval and not only at unit boundaries.
+- **V2-UX-LIVE-003**: The stale case is derived from the product's own measurements, never from a fixed guess: when the current step's elapsed time exceeds twice the longest completed step of this Run — or, before any step of this Run has completed, 3 minutes — the surface reads `本步骤用时已超过通常水平`, shows the elapsed time and the last recorded transition instant, and offers only the safe actions valid for the state (continue waiting, Cooperative Run Pause, cancellation). It never claims the Run has died unless a recorded state says so.
+- **V2-UX-LIVE-004**: A transient status indicator reflects the Run's current state or is not present: its lifetime is defined by the state that produced it, not by a timer and not by nothing, and it updates or disappears when that state ends. A transient indicator never occludes content it does not own.
+- **V2-UX-LIVE-005**: The rule applies to every Run surface — the baseline analysis card, the Run Activity Header, the Book-grouped Run Overview, and any Global Attention projection — with the same composing facts and the same stale case.
+- **V2-UX-LIVE-006**: The execution owner exposes the per-attempt state and timing the signal needs as identities and instants only; no model content, prompt text, or payload enters the projection.
 
 ## Interactive Editorial Dialogue and response presentation
 
