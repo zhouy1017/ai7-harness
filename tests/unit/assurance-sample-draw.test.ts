@@ -56,7 +56,26 @@ describe('drawAssuranceSample (ADR 0066 §Assurance sampling)', () => {
     expect(draw.size).toBe(2);
     expect(draw.candidateCount).toBe(2);
     expect(draw.strata).toEqual([{ sectionOrdinal: 1, candidates: 2, sampled: 2 }]);
-    expect(draw.sampled.map((entry) => entry.ref).sort()).toEqual(['0', '1']);
+    expect(draw.sampled.map((entry) => entry.ref)).toEqual(['0', '1']);
+  });
+
+  /**
+   * The seed is a function of the manifest digest, which covers the minted identities of one import,
+   * so it moves when the same manuscript is imported again. The keyed hash therefore decides *which*
+   * candidates are drawn and nothing else: the drawn set is emitted in candidate order, which both
+   * kinds derive from the manuscript and the model. Without this a fixture could not answer a sampling
+   * turn twice, because the listing — and the digest over it — would flip between imports.
+   */
+  it('emits the drawn candidates in candidate order, whatever the seed does to the selection', () => {
+    const set = candidates(1, 6);
+    for (const digest of ['m'.repeat(64), 'n'.repeat(64), '0'.repeat(64)]) {
+      const draw = drawAssuranceSample(manifest([8], digest), set);
+      expect(draw.sampled.map((entry) => entry.ref)).toEqual(['0', '1', '2', '3', '4', '5']);
+    }
+    // A partial draw keeps candidate order too; only its membership follows the seed.
+    const partial = drawAssuranceSample(manifest([8]), candidates(1, 40));
+    const positions = partial.sampled.map((entry) => Number(entry.ref));
+    expect(positions).toEqual([...positions].sort((left, right) => left - right));
   });
 
   it('caps the sample at thirty and still draws it deterministically', () => {
@@ -162,13 +181,13 @@ describe('the per-stratum floor and the largest-remainder allocation', () => {
 });
 
 describe('assuranceSamplingTurns', () => {
-  it('groups the drawn sample into one turn per anchor unit, in unit order', () => {
+  it('groups the drawn sample into one turn per anchor unit, in unit order and candidate order', () => {
     const draw = drawAssuranceSample(manifest([2, 2]), [
       candidate('0', 3), candidate('1', 1), candidate('2', 3), candidate('3', 2),
     ]);
     const turns = assuranceSamplingTurns(draw.sampled);
     expect(turns.map((turn) => turn.unitOrdinal)).toEqual([1, 2, 3]);
-    expect(turns.flatMap((turn) => turn.findings.map((finding) => finding.ref)).sort()).toEqual(['0', '1', '2', '3']);
+    expect(turns.map((turn) => turn.findings.map((finding) => finding.ref))).toEqual([['1'], ['3'], ['0', '2']]);
     // Bounded by the distinct anchor units, which is never more than the unit count.
     expect(turns.length).toBeLessThanOrEqual(4);
     expect(assuranceSamplingTurns([])).toEqual([]);

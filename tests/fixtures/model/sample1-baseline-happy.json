@@ -1,7 +1,7 @@
 {
   "schema": "ai7.model-fixture/1",
   "identity": "sample1-baseline-happy",
-  "description": "Hand-written synthetic shape (i): the happy exact-sample1 baseline run, one conforming Baseline Manuscript Analysis Contract v1 response per Analysis Unit of the sample1 Coverage Manifest (8 units over 97 blocks), keyed by unit ordinal and request digest. Every name, synopsis, event, claim, and note is public synthetic placeholder text; the only manuscript-derived facts are the exact in-unit block identities filled from {{block:N}} placeholders at replay. Units 1, 3, and 5 deliberately disagree so the deterministic contradiction pass reports one alias collision, one entity-kind divergence, and one setting-claim divergence. A second unit-1 entry carries the request digest unit 1 derives after J-04's acknowledged edit appends its suffix to the first block, so the same identity serves the successor Runs of 同步到当前稿件, 重新分析所选范围, and 重新分析全书 over the edited manuscript. The unit-ordinal-0 entry answers the cross-unit reduction over this fixture's eight-unit closed set, keyed by cited-block positions.",
+  "description": "Hand-written synthetic shape (i): the happy exact-sample1 baseline run, one conforming Contract v1 response per Analysis Unit of the sample1 Coverage Manifest (8 units over 97 blocks), keyed by unit ordinal and request digest. Every name, synopsis, event, claim, and note is public synthetic placeholder text; the only manuscript-derived facts are the block identities filled from {{block:N}} at replay. Units 1, 3, and 5 deliberately disagree so the deterministic pass reports one alias collision, one entity-kind divergence, and one setting-claim divergence. A second unit-1 entry carries the digest unit 1 derives after J-04's acknowledged edit, so one identity serves the three update modes too. One unit-ordinal-0 entry answers the cross-unit reduction over the eight-unit closed set; two more answer the assurance sampling turn, whose findings are both anchored in unit 1 — one before that edit, one after — naming each by listed position {{ref:N}}, upholding the first and downgrading the second.",
   "basedOn": null,
   "provider": "ai7-local-deterministic",
   "model": "ai7-deterministic-fixture",
@@ -94,6 +94,24 @@
         "kind": "unit-result",
         "text": "{\"schema\":\"ai7.baseline-manuscript-analysis.cross-unit-result/1\",\"findings\":[{\"kind\":\"chronology-conflict\",\"description\":\"合成时序冲突：单元 1 把人物甲抵达合成之城记为「开端」，单元 3 让人物乙回望该城却不给出时序，两处对同一段行程的先后无法同时成立。\",\"sides\":[{\"unitOrdinal\":1,\"sourceRanges\":[{\"blockId\":\"{{unit:1:block:2}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"unitOrdinal\":3,\"sourceRanges\":[{\"blockId\":\"{{unit:3:block:2}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]}],\"confidence\":\"medium\"},{\"kind\":\"continuity-break\",\"description\":\"合成连续性断裂：单元 1 让人物甲抵达合成之城之后，单元 3 只写人物乙的视角，未交代人物甲的去向。\",\"sides\":[{\"unitOrdinal\":1,\"sourceRanges\":[{\"blockId\":\"{{unit:1:block:2}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"unitOrdinal\":3,\"sourceRanges\":[{\"blockId\":\"{{unit:3:block:2}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]}],\"confidence\":\"low\"}],\"notes\":[\"合成备注：其余单元未再提及这两处。\"]}",
         "usage": { "inputTokens": 2000, "outputTokens": 300 }
+      }
+    },
+    {
+      "unitOrdinal": 0,
+      "requestDigest": "fa8a3fa8b8b19626a491ecb11c57037c5ed0dbf09e84822d2bcb952f9cccd202",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.analysis.assurance-sampling-result/1\",\"dispositions\":[{\"ref\":\"{{ref:1}}\",\"disposition\":\"成立\",\"reason\":\"重读单元 1 的内容块：人物甲抵达合成之城确被记为开端，与另一侧对同一段行程的说法无法同时成立，该时序冲突按原样成立。\"},{\"ref\":\"{{ref:2}}\",\"disposition\":\"需降级\",\"reason\":\"第 2 条连续性断裂只得到较弱的支持：单元 1 的内容块没有交代人物甲此后的去向，但也没有断言其缺席，宜降级为待确认的疑点。\"}]}",
+        "usage": { "inputTokens": 1600, "outputTokens": 220 }
+      }
+    },
+    {
+      "unitOrdinal": 0,
+      "requestDigest": "706dda4946bd02fced7606add9d3e27d60488b6c6520314c17f43de552bfb81c",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.analysis.assurance-sampling-result/1\",\"dispositions\":[{\"ref\":\"{{ref:1}}\",\"disposition\":\"成立\",\"reason\":\"重读单元 1 的内容块：人物甲抵达合成之城确被记为开端，与另一侧对同一段行程的说法无法同时成立，该时序冲突按原样成立。\"},{\"ref\":\"{{ref:2}}\",\"disposition\":\"需降级\",\"reason\":\"第 2 条连续性断裂只得到较弱的支持：单元 1 的内容块没有交代人物甲此后的去向，但也没有断言其缺席，宜降级为待确认的疑点。\"}]}",
+        "usage": { "inputTokens": 1610, "outputTokens": 220 }
       }
     }
   ]

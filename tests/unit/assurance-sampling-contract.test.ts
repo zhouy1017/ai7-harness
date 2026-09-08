@@ -118,18 +118,22 @@ describe('the assurance sampling request digest', () => {
   });
 
   /**
-   * The half a fixture depends on. A committed block identity is minted per import, so the digest
-   * names none: it is taken over the manifest unit's own content digest and over the findings' refs
-   * and texts, both of which survive a re-import of the same manuscript.
+   * The half a fixture depends on. Every identity in play is minted per import — a committed block
+   * identity, and with it the factual kind's `findingId`, which is derived from one — so the digest
+   * names none: it is taken over the manifest unit's own content digest and over the findings' texts
+   * at their listed positions, both of which survive a re-import of the same manuscript.
    */
-  it('names no block identity, so it survives a fresh minting of the same manuscript', () => {
+  it('is a function of text and position alone, so it survives a fresh minting of the same manuscript', () => {
     const sampleDigest = assuranceSampleDigest(FINDINGS);
     expect(sampleDigest).toMatch(DIGEST_PATTERN);
-    expect(JSON.stringify({ sampleDigest })).not.toContain('blk_');
-    // Listing order is part of the key, because it is part of what the model was shown.
-    expect(assuranceSampleDigest([...FINDINGS].reverse())).not.toBe(sampleDigest);
-    // The tier is not: it labels the finding, and a re-tiered finding is still the same claim to test.
+    // The same findings under freshly minted refs are the same turn to a fixture.
+    expect(assuranceSampleDigest(FINDINGS.map((finding, index) => ({ ...finding, ref: `fnd_${String(index).repeat(24)}` })))).toBe(sampleDigest);
+    // The tier is not part of it either: it labels a finding, and a re-tiered finding is the same claim.
     expect(assuranceSampleDigest(FINDINGS.map((finding) => ({ ...finding, tier: 'low' })))).toBe(sampleDigest);
+    // What is part of it: the text of every listed finding, its position, and the size of the listing.
+    expect(assuranceSampleDigest([...FINDINGS].reverse())).not.toBe(sampleDigest);
+    expect(assuranceSampleDigest(FINDINGS.map((finding) => ({ ...finding, text: `${finding.text}（已改）` })))).not.toBe(sampleDigest);
+    expect(assuranceSampleDigest([FINDINGS[0]!])).not.toBe(sampleDigest);
   });
 });
 

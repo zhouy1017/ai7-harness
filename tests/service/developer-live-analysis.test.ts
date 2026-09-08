@@ -15,7 +15,8 @@ import {
 } from '../../src/service/analysis/baseline-analysis-store.js';
 import { BASELINE_PROMPT_CONTRACT_DIGEST, unitRequestDigest } from '../../src/service/analysis/contract.js';
 import { loadModelFixture, resolveFixtureEntry } from '../../src/service/provider/model-fixture.js';
-import { ownBlockIdsOf, substituteBlockPlaceholders } from '../../src/service/provider/local-deterministic-adapter.js';
+import { ownBlockIdsOf, substituteBlockPlaceholders, substituteCrossUnitBlockPlaceholders } from '../../src/service/provider/local-deterministic-adapter.js';
+import { parseCrossUnitCitedBlocks, parseCrossUnitMessageHeader } from '../../src/service/analysis/cross-unit-contract.js';
 import {
   OPENCODE_GO_ENDPOINT,
   OPENCODE_GO_SESSION_HEADER,
@@ -125,11 +126,23 @@ function stubTransport(options: {
   calls: StubCall[];
   responses: Map<number, UnitAnswer>;
   override?: (ordinal: number) => { status: number; body: unknown } | null;
+  /** The synthetic cross-unit result, for a policy that names the reduction's transmission. */
+  crossUnit?: UnitAnswer;
 }): typeof fetch {
   const transport = async (url: string, init: { headers: Record<string, string>; body: string }) => {
     options.calls.push({ url, headers: { ...init.headers }, body: init.body });
     const request = JSON.parse(init.body) as { messages: Array<{ role: string; content: string }> };
     const last = request.messages.at(-1)!;
+    if (parseCrossUnitMessageHeader(last.content) !== null && options.crossUnit !== undefined) {
+      const reduction = substituteCrossUnitBlockPlaceholders(options.crossUnit.text, parseCrossUnitCitedBlocks(last.content));
+      return {
+        status: 200,
+        json: async () => ({
+          choices: [{ message: { content: reduction } }],
+          usage: { prompt_tokens: options.crossUnit!.usage.inputTokens, completion_tokens: options.crossUnit!.usage.outputTokens },
+        }),
+      };
+    }
     const ordinal = Number(/^分析单元 (\d+)\//u.exec(last.content)?.[1] ?? '0');
     const forced = options.override?.(ordinal) ?? null;
     if (forced !== null) return { status: forced.status, json: async () => forced.body };
@@ -190,10 +203,15 @@ function heldTransport(options: { calls: StubCall[]; responses: Map<number, Unit
   };
 }
 
-function owner(store: EditorialStore, nativeFetch: typeof fetch, ceiling: Ceiling = CEILING): BaselineAnalysisExecutionOwner {
+function owner(
+  store: EditorialStore,
+  nativeFetch: typeof fetch,
+  ceiling: Ceiling = CEILING,
+  policy: LaunchPolicyProjection = launchPolicy,
+): BaselineAnalysisExecutionOwner {
   return new BaselineAnalysisExecutionOwner({
     ledger: store.baselineAnalysisLedger,
-    launchPolicy,
+    launchPolicy: policy,
     fixture: null,
     // A local placeholder: the broker releases it to the transmit step and nothing else ever sees it.
     secretResolver: { resolve: async () => 'placeholder-development-key' },
@@ -333,6 +351,57 @@ describe('the developer-live scope over exact sample1 with a stub transport', ()
       expect(line).not.toHaveProperty('requestBody');
       expect(line).not.toHaveProperty('response');
     }
+    await store.close();
+  });
+
+  /**
+   * The two declared suboperations are gated one key each. Under the v4 bytes as they stand neither
+   * key is present, so the reduction never dispatches and the sample has no findings to draw — the
+   * case above already shows the transmission count staying at the unit count. This is the other half:
+   * a policy that names the reduction and not the sample, which is the exact shape of the policy v5
+   * question the Owner has been asked, and the only configuration in which the sampling policy guard
+   * is the thing that stops the step.
+   */
+  it('records policy-bounded and transmits nothing for a sample the active policy does not name', async () => {
+    const calls: StubCall[] = [];
+    const { store, bookId, prepared } = await prepareLive(roots.dataRoot);
+    const fixture = await loadModelFixture(FIXTURES_ROOT, 'sample1-baseline-happy');
+    const reduction = [...fixture.entries.values()].find((entry) => entry.unitOrdinal === 0 && entry.response.kind === 'unit-result' &&
+      entry.response.text.includes('cross-unit-result/1'))!;
+    const namesReductionOnly: LaunchPolicyProjection = {
+      ...launchPolicy,
+      providerProcessing: { ...launchPolicy.providerProcessing, crossUnitReductionAllowed: true, assuranceSamplingAllowed: false },
+    };
+    const transport = stubTransport({
+      calls,
+      responses: await unitAnswers(prepared),
+      crossUnit: (reduction.response as { kind: 'unit-result'; text: string; usage: { inputTokens: number; outputTokens: number } }),
+    });
+    const settled = await runLive(store, bookId, prepared, owner(store, transport, CEILING, namesReductionOnly));
+
+    // Eight unit turns and the one reduction turn the policy names; not one sampling turn.
+    expect(calls).toHaveLength(SAMPLE1_UNITS + 1);
+    expect(calls.some((call) => call.body.includes('保证抽样'))).toBe(false);
+    const revision = settled.resultSetRevision!;
+    expect(revision.usage.requests).toBe(SAMPLE1_UNITS + 1);
+    expect(revision.crossUnitReduction.state).toBe('closed');
+    expect(revision.crossUnitFindings).toHaveLength(2);
+
+    // The sample was drawn — it is the dispatch the policy stopped, not the draw — and says exactly why.
+    expect(revision.assuranceSample).toMatchObject({
+      state: 'gap',
+      size: 2,
+      candidateCount: 2,
+      dispositions: [],
+      precision: [],
+      usage: null,
+      reason: '保证抽样未派发：当前 Provider Processing 策略仅授权单元数内的传输',
+    });
+    expect(revision.assuranceSample.seed).toMatch(/^[0-9a-f]{64}$/u);
+    // Nothing about the findings or the axis moved: no disposition exists to move them.
+    expect(revision.assurance.sampledPrecision).toBeNull();
+    expect(revision.assurance.label).not.toContain('抽样');
+    expect(revision.reducerClosure.stages.at(-1)).toEqual({ stage: 'assurance-sampling', state: 'closed-with-gaps', inputCount: 2 });
     await store.close();
   });
 

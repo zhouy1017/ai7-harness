@@ -1,7 +1,7 @@
 {
   "schema": "ai7.model-fixture/1",
   "identity": "sample1-factual-authored",
-  "description": "事实核查契约 v1 的人工撰写夹具：逐单元阅读 sample1（ADR 0043 收录的 Public SampleBook）后写成，每条引文都是其所声明内容块的逐字子串。",
+  "description": "事实核查契约 v1 的人工撰写夹具：逐单元阅读 sample1（ADR 0043 收录的 Public SampleBook）后写成，每条引文都是其所声明内容块的逐字子串。另有 8 条 unitOrdinal 为 0 的条目，回答本夹具驱动的运行所发起的保证抽样：20 条已定位发现锚定在单元 1 至 8，每个锚定单元一轮，每条判定都按列出位置 {{ref:N}} 指名发现。判定一律为「成立」，理由也只说明这一点——引文经引文完整性逐字定位于其所声明的内容块，内容块因而按原样支持该断言的提法与定位；这是这一步能据本单元内容块作出的全部判断。",
   "basedOn": null,
   "provenance": "authored",
   "provider": "ai7-local-deterministic",
@@ -77,6 +77,78 @@
         "kind": "unit-result",
         "text": "{\"schema\":\"ai7.factual-review.unit-result/1\",\"unitOrdinal\":8,\"assertions\":[{\"quote\":\"上面有一串甲骨文的龟甲\",\"blockOrdinal\":2,\"assertionClass\":\"real-world-fact\",\"category\":\"技术\",\"severity\":\"C\",\"question\":\"甲骨文是否刻写于龟甲之上？其常见载体有哪些？\",\"basis\":\"文字载体是可与古文字学著作核对的事实，稿件在此处把甲骨文与龟甲直接关联。\"},{\"quote\":\"一片半个巴掌大小\",\"blockOrdinal\":2,\"assertionClass\":\"report-about-manuscript\",\"category\":\"器物\",\"severity\":\"C\",\"question\":\"稿件此处是否在描述书内器物的尺寸？\",\"basis\":\"这是对书内器物的描述，不是可对照外部世界核查的断言。\"},{\"quote\":\"从与曾小安结婚起，一晃八年\",\"blockOrdinal\":4,\"assertionClass\":\"fictional-canon\",\"category\":\"时间\",\"severity\":\"C\",\"question\":\"该时间跨度与全书其他处的年代叙述是否一致？\",\"basis\":\"属于作品内部年表，只作连续性检查。\"}]}",
         "usage": { "inputTokens": 1580, "outputTokens": 330 }
+      }
+    },
+    {
+      "unitOrdinal": 0,
+      "requestDigest": "dfb2cf1d65e8c1e72499c0b91f9ee17406e656a2895f89c9514dead6d97cb64f",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.analysis.assurance-sampling-result/1\",\"dispositions\":[{\"ref\":\"{{ref:1}}\",\"disposition\":\"成立\",\"reason\":\"引文在本单元所声明的内容块中逐字出现，内容块按原样支持该断言的提法与定位。\"},{\"ref\":\"{{ref:2}}\",\"disposition\":\"成立\",\"reason\":\"引文在本单元所声明的内容块中逐字出现，内容块按原样支持该断言的提法与定位。\"},{\"ref\":\"{{ref:3}}\",\"disposition\":\"成立\",\"reason\":\"引文在本单元所声明的内容块中逐字出现，内容块按原样支持该断言的提法与定位。\"}]}",
+        "usage": { "inputTokens": 2620, "outputTokens": 260 }
+      }
+    },
+    {
+      "unitOrdinal": 0,
+      "requestDigest": "48bfeb66810d7171e83cabedafce95653e07eef95870c7261bc5580f957092cc",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.analysis.assurance-sampling-result/1\",\"dispositions\":[{\"ref\":\"{{ref:1}}\",\"disposition\":\"成立\",\"reason\":\"引文在本单元所声明的内容块中逐字出现，内容块按原样支持该断言的提法与定位。\"},{\"ref\":\"{{ref:2}}\",\"disposition\":\"成立\",\"reason\":\"引文在本单元所声明的内容块中逐字出现，内容块按原样支持该断言的提法与定位。\"}]}",
+        "usage": { "inputTokens": 2100, "outputTokens": 180 }
+      }
+    },
+    {
+      "unitOrdinal": 0,
+      "requestDigest": "9c1f85b51cc12d4be53c2729edac7b9a851473763536600f4c9ee404d1725287",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.analysis.assurance-sampling-result/1\",\"dispositions\":[{\"ref\":\"{{ref:1}}\",\"disposition\":\"成立\",\"reason\":\"引文在本单元所声明的内容块中逐字出现，内容块按原样支持该断言的提法与定位。\"},{\"ref\":\"{{ref:2}}\",\"disposition\":\"成立\",\"reason\":\"引文在本单元所声明的内容块中逐字出现，内容块按原样支持该断言的提法与定位。\"}]}",
+        "usage": { "inputTokens": 2260, "outputTokens": 180 }
+      }
+    },
+    {
+      "unitOrdinal": 0,
+      "requestDigest": "a3d385c966092fd33b87c77f9346a8d990b59f9434adc20499cd80348ae0d421",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.analysis.assurance-sampling-result/1\",\"dispositions\":[{\"ref\":\"{{ref:1}}\",\"disposition\":\"成立\",\"reason\":\"引文在本单元所声明的内容块中逐字出现，内容块按原样支持该断言的提法与定位。\"},{\"ref\":\"{{ref:2}}\",\"disposition\":\"成立\",\"reason\":\"引文在本单元所声明的内容块中逐字出现，内容块按原样支持该断言的提法与定位。\"}]}",
+        "usage": { "inputTokens": 2540, "outputTokens": 180 }
+      }
+    },
+    {
+      "unitOrdinal": 0,
+      "requestDigest": "6d80c7251e393b5910d76e7dba2f73feb5b069a0122d4e1debdd93a70fe09dc8",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.analysis.assurance-sampling-result/1\",\"dispositions\":[{\"ref\":\"{{ref:1}}\",\"disposition\":\"成立\",\"reason\":\"引文在本单元所声明的内容块中逐字出现，内容块按原样支持该断言的提法与定位。\"}]}",
+        "usage": { "inputTokens": 2080, "outputTokens": 110 }
+      }
+    },
+    {
+      "unitOrdinal": 0,
+      "requestDigest": "04a59d5ce868a943a8b0576ffdfe2a4e72f4d8377af7006493a9f46e11b2dcff",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.analysis.assurance-sampling-result/1\",\"dispositions\":[{\"ref\":\"{{ref:1}}\",\"disposition\":\"成立\",\"reason\":\"引文在本单元所声明的内容块中逐字出现，内容块按原样支持该断言的提法与定位。\"},{\"ref\":\"{{ref:2}}\",\"disposition\":\"成立\",\"reason\":\"引文在本单元所声明的内容块中逐字出现，内容块按原样支持该断言的提法与定位。\"},{\"ref\":\"{{ref:3}}\",\"disposition\":\"成立\",\"reason\":\"引文在本单元所声明的内容块中逐字出现，内容块按原样支持该断言的提法与定位。\"},{\"ref\":\"{{ref:4}}\",\"disposition\":\"成立\",\"reason\":\"引文在本单元所声明的内容块中逐字出现，内容块按原样支持该断言的提法与定位。\"}]}",
+        "usage": { "inputTokens": 2400, "outputTokens": 320 }
+      }
+    },
+    {
+      "unitOrdinal": 0,
+      "requestDigest": "85635afca8dde8ae656f3a7d1114f1c177c5432a85ef2aa49d02359f99b4822a",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.analysis.assurance-sampling-result/1\",\"dispositions\":[{\"ref\":\"{{ref:1}}\",\"disposition\":\"成立\",\"reason\":\"引文在本单元所声明的内容块中逐字出现，内容块按原样支持该断言的提法与定位。\"},{\"ref\":\"{{ref:2}}\",\"disposition\":\"成立\",\"reason\":\"引文在本单元所声明的内容块中逐字出现，内容块按原样支持该断言的提法与定位。\"},{\"ref\":\"{{ref:3}}\",\"disposition\":\"成立\",\"reason\":\"引文在本单元所声明的内容块中逐字出现，内容块按原样支持该断言的提法与定位。\"},{\"ref\":\"{{ref:4}}\",\"disposition\":\"成立\",\"reason\":\"引文在本单元所声明的内容块中逐字出现，内容块按原样支持该断言的提法与定位。\"},{\"ref\":\"{{ref:5}}\",\"disposition\":\"成立\",\"reason\":\"引文在本单元所声明的内容块中逐字出现，内容块按原样支持该断言的提法与定位。\"}]}",
+        "usage": { "inputTokens": 2680, "outputTokens": 400 }
+      }
+    },
+    {
+      "unitOrdinal": 0,
+      "requestDigest": "9f33a81faf96dab164ae10e9dfdad49feeec035e5ecfe46473a5fb0173c7814e",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.analysis.assurance-sampling-result/1\",\"dispositions\":[{\"ref\":\"{{ref:1}}\",\"disposition\":\"成立\",\"reason\":\"引文在本单元所声明的内容块中逐字出现，内容块按原样支持该断言的提法与定位。\"}]}",
+        "usage": { "inputTokens": 1520, "outputTokens": 110 }
       }
     }
   ]

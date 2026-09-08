@@ -134,13 +134,19 @@ function requireBlock<T>(blocksById: ReadonlyMap<string, T>, blockId: string): T
 }
 
 /**
- * The digest of one turn's listed findings: SHA-256 over the canonical JSON of its sampled `ref`s and
- * texts in listing order. Together with the manifest unit's own content digest it makes the request
- * key a function of the blocks actually carried and the findings actually listed, so a changed block
- * or a changed finding set changes the key — the property the unit and cross-unit digests already hold.
+ * The digest of one turn's listed findings: SHA-256 over the canonical JSON of their texts, each at
+ * its 1-based position in the listing. Together with the manifest unit's own content digest it makes
+ * the request key a function of the blocks actually carried and the findings actually listed, so a
+ * changed block, a changed finding, or a changed listing changes it.
+ *
+ * The positions are the point, exactly as in `unitSetDigest`. A `ref` is not content: the factual
+ * kind's is minted from a committed block identity, which is minted per import, so the same manuscript
+ * imported twice yields different refs and a digest over them could never be reproduced — not across
+ * imports, and not across two runs of one test. A finding's text is a function of the manuscript and
+ * the model alone, so a hand-written fixture can pin this.
  */
 export function assuranceSampleDigest(findings: ReadonlyArray<AssuranceSamplingCandidate>): string {
-  return sha256Hex(canonicalJson(findings.map((finding) => ({ ref: finding.ref, text: finding.text }))));
+  return sha256Hex(canonicalJson(findings.map((finding, index) => ({ position: index + 1, text: finding.text }))));
 }
 
 /**
@@ -174,6 +180,27 @@ export function buildAssuranceSamplingMessage(
     lines.push(fill(contract.findingLine, { ref: finding.ref, tier: finding.tier, text: finding.text }));
   }
   return lines.join('\n');
+}
+
+const FINDING_LINE_PATTERN = /^- \[([A-Za-z0-9_-]{1,64})\]（/u;
+
+/**
+ * The refs a message built by {@link buildAssuranceSamplingMessage} listed, in listing order, read
+ * back from the text alone. The deterministic adapter holds only the assembled message, and the
+ * factual kind's `ref` is minted per import, so a hand-written fixture names a finding by its position
+ * here rather than by an identity it cannot know — the same move the cross-unit contract's
+ * cited-blocks reader exists for.
+ */
+export function parseAssuranceSamplingListedRefs(text: string): string[] {
+  const lines = text.split('\n');
+  const start = lines.indexOf(ASSURANCE_SAMPLING_PROMPT_CONTRACT.findingHeader);
+  if (start === -1) return [];
+  const refs: string[] = [];
+  for (const line of lines.slice(start + 1)) {
+    const match = FINDING_LINE_PATTERN.exec(line);
+    if (match !== null) refs.push(match[1]!);
+  }
+  return refs;
 }
 
 export interface AssuranceSamplingMessageHeader {
@@ -272,7 +299,7 @@ export interface AssuranceSampleDraw {
   readonly size: number;
   readonly candidateCount: number;
   readonly strata: ReadonlyArray<AnalysisAssuranceSampleStratumProjection>;
-  /** The drawn candidates, by section ordinal then by keyed hash; the order the turns list them in. */
+  /** The drawn candidates, in candidate order; the order the turns list them in. */
   readonly sampled: ReadonlyArray<AssuranceSamplingCandidate>;
 }
 
@@ -350,7 +377,7 @@ export function drawAssuranceSample(
     if (!placed) break;
   }
   const strata: AnalysisAssuranceSampleStratumProjection[] = [];
-  const sampled: AssuranceSamplingCandidate[] = [];
+  const drawn = new Set<string>();
   for (const section of sections) {
     const group = groups.get(section)!;
     const take = quota.get(section)!;
@@ -359,15 +386,19 @@ export function drawAssuranceSample(
       return keys[0]! < keys[1]! ? -1 : keys[0]! > keys[1]! ? 1 : left.ref < right.ref ? -1 : left.ref > right.ref ? 1 : 0;
     });
     strata.push({ sectionOrdinal: section, candidates: group.length, sampled: take });
-    sampled.push(...ordered.slice(0, take));
+    for (const candidate of ordered.slice(0, take)) drawn.add(candidate.ref);
   }
+  // The keyed hash decides *which* candidates are drawn; they are emitted in candidate order, which
+  // both kinds derive from the manuscript and the model rather than from the seed. A turn's listing is
+  // therefore the same on every import of one manuscript, which is what lets a fixture answer it.
+  const sampled = candidates.filter((candidate) => drawn.has(candidate.ref));
   return { seed, size: sampled.length, candidateCount: candidates.length, strata, sampled };
 }
 
 /**
  * The turns one draw dispatches: one per distinct anchor unit, in unit order, each listing that unit's
- * sampled findings in sample order. A Run's sampling transmissions are therefore bounded by the number
- * of distinct anchor units, which is never more than the unit count.
+ * sampled findings in candidate order. A Run's sampling transmissions are therefore bounded by the
+ * number of distinct anchor units, which is never more than the unit count.
  */
 export function assuranceSamplingTurns(sampled: ReadonlyArray<AssuranceSamplingCandidate>): AssuranceSamplingTurn[] {
   const byUnit = new Map<number, AssuranceSamplingCandidate[]>();
