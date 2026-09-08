@@ -205,7 +205,9 @@ async function recoverSyntheticCredentialCleanupState(dataRoot, runRoot) {
   }
   try {
     database.exec('PRAGMA query_only = ON;');
-    requireJourney(database.prepare('PRAGMA user_version').get()?.user_version === 19, 'credential-cleanup-metadata-version');
+    // Synchronized delta with Issue #53: schema revision 20 admits the second analysis kind, so this
+    // pin moves with the terminal version the service stamps (`FACTUAL_REVIEW_SCHEMA_VERSION`).
+    requireJourney(database.prepare('PRAGMA user_version').get()?.user_version === 20, 'credential-cleanup-metadata-version');
     const rows = database.prepare(
       `SELECT connection_id, role_id, provider_id, model_id, adapter_revision, configuration_revision,
               approved_fallback_chain, credential_slot, credential_reference, credential_operation_state
