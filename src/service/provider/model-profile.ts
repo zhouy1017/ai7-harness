@@ -55,8 +55,17 @@ export type StructuredOutput = 'none' | 'json-object' | 'json-schema' | 'tool-ca
  * `output-message-text` is the Responses shape's: the answer is the concatenation of the `text` of
  * every `type: 'output_text'` part of every `type: 'message'` item of `output`, in that same order,
  * and a `type: 'refusal'` part is not answer text, so a message carrying only refusals answers empty.
+ * `candidate-parts-text` is the generateContent shape's: the answer is the concatenation of the
+ * `text` of every part of the *first* candidate whose `thought` is not `true`, in that same order —
+ * the first candidate alone, because the request asks for one and a second would be a different
+ * answer rather than more of this one.
  */
-export type AnswerChannel = 'none' | 'message-content-string' | 'content-text-blocks' | 'output-message-text';
+export type AnswerChannel =
+  | 'none'
+  | 'message-content-string'
+  | 'content-text-blocks'
+  | 'output-message-text'
+  | 'candidate-parts-text';
 
 /**
  * Where reasoning is read from when the model reports it separately from the answer.
@@ -64,8 +73,15 @@ export type AnswerChannel = 'none' | 'message-content-string' | 'content-text-bl
  * content array means the model reasoned, which is the whole of what an empty answer needs to know.
  * `output-reasoning-items` says the same of a `type: 'reasoning'` item of the Responses shape's
  * `output`: its presence is read, and neither its `summary` nor its `content` is.
+ * `candidate-thought-parts` says the same of a part flagged `thought: true` in the first candidate of
+ * the generateContent shape: the flag is read, the text beside it is not.
  */
-export type ReasoningChannel = 'none' | 'message-reasoning-content' | 'content-thinking-blocks' | 'output-reasoning-items';
+export type ReasoningChannel =
+  | 'none'
+  | 'message-reasoning-content'
+  | 'content-thinking-blocks'
+  | 'output-reasoning-items'
+  | 'candidate-thought-parts';
 
 /** Whether the reported output tokens include reasoning tokens; `unknown` until something has measured it. */
 export type UsageAttribution = 'includes-reasoning' | 'separate' | 'unknown';
