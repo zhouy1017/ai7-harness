@@ -163,7 +163,19 @@ describe('provider route generalization', () => {
     for (const profile of Object.values(PROVIDER_ROUTE_PROFILES)) {
       expect(profile).not.toHaveProperty('model');
       expect(profile).not.toHaveProperty('bodyPolicy');
+      // No route may be added without saying where its credential header form came from.
+      expect(profile.credentialHeaderEvidence.kind, profile.route).not.toBe('unverified');
     }
+    // Chat completions requires no output cap, so neither existing route declares one and neither
+    // sends a field for it: the two digests below are the proof that declaring the field moved nothing.
+    expect(DEEPSEEK_ROUTE_PROFILE.maxOutputTokens).toBeNull();
+    expect(OPENCODE_GO_ROUTE_PROFILE.maxOutputTokens).toBeNull();
+    expect(DEEPSEEK_ROUTE_PROFILE.credentialHeaderEvidence).toEqual({ kind: 'frozen-request-baseline', since: 'adapter revision 1' });
+    expect(OPENCODE_GO_ROUTE_PROFILE.credentialHeaderEvidence).toMatchObject({ kind: 'vendor-documentation', source: expect.stringContaining('ADR 0067') });
+    expect(assembleDeepSeekRequest(request(), attributionHeaders(), BASELINE_PROMPT_CONTRACT_DIGEST).requestDigest).toBe(PRODUCTION_REQUEST_DIGEST);
+    expect(assembleProviderRequest(OPENCODE_GO_ROUTE_PROFILE, OPENCODE_GO_V4_FLASH_PROFILE, liveRequest(), {
+      attribution: attributionHeaders(), promptContractDigest: BASELINE_PROMPT_CONTRACT_DIGEST, sessionId: SESSION,
+    }).requestDigest).toBe(OPENCODE_GO_REQUEST_DIGEST);
     // The bare Go model id: no provider prefix of any kind.
     expect(OPENCODE_GO_MODEL).toBe('deepseek-v4-flash');
     expect(OPENCODE_GO_ENDPOINT).toBe('https://opencode.ai/zen/go/v1/chat/completions');

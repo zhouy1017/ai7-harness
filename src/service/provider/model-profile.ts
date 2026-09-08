@@ -95,8 +95,11 @@ export function modelProfileKey(route: RemoteExecutionRoute, model: string): Mod
   return `${route}/${model}`;
 }
 
-/** ADR 0067's facts about the Go gateway, read from the OpenCode documentation on the date it records. */
-const ADR_0067_DOCUMENTATION: CapabilityEvidence = {
+/**
+ * ADR 0067's facts about the Go gateway, read from the OpenCode documentation on the date it records.
+ * Exported because a route states the provenance of its credential header form from the same reading.
+ */
+export const ADR_0067_DOCUMENTATION: CapabilityEvidence = {
   kind: 'vendor-documentation',
   source: 'ADR 0067 · OpenCode Go documentation',
   readOn: '2026-09-06',
@@ -134,7 +137,7 @@ const OPENCODE_GO_CHAT_COMPLETIONS_DOCUMENTATION: CapabilityEvidence = {
   readOn: '2026-09-08',
 };
 
-const PRODUCTION_BASELINE: CapabilityEvidence = { kind: 'frozen-request-baseline', since: 'adapter revision 1' };
+export const PRODUCTION_BASELINE: CapabilityEvidence = { kind: 'frozen-request-baseline', since: 'adapter revision 1' };
 const UNVERIFIED: CapabilityEvidence = { kind: 'unverified' };
 
 /**

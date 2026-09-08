@@ -9,7 +9,13 @@ import {
   type RemoteExecutionRoute,
   type TransmitTicket,
 } from './egress-gate.js';
-import { DEEPSEEK_V4_PRO_PROFILE, type ProviderModelProfile } from './model-profile.js';
+import {
+  ADR_0067_DOCUMENTATION,
+  DEEPSEEK_V4_PRO_PROFILE,
+  PRODUCTION_BASELINE,
+  type CapabilityEvidence,
+  type ProviderModelProfile,
+} from './model-profile.js';
 import { messageText, type AssembledModelPayload } from './payload.js';
 import { normalizeModelResponse, type CanonicalModelResult } from './response-normalization.js';
 
@@ -64,6 +70,21 @@ export interface ProviderRouteProfile {
   readonly dshAttribution: boolean;
   /** Whether the request carries the technical Session id in `x-opencode-session`. */
   readonly sessionHeader: boolean;
+  /**
+   * The per-turn output cap this route's shape forces the request to name, or `null` for a shape that
+   * requires none. It is a request-side declaration and nothing more: the Run Budget Ceiling remains
+   * the authority over the Run, and a shape that names no cap sends no field, so declaring one here
+   * cannot move the bytes of a route that does not need it. A shape that requires a cap on a route
+   * declaring `null` refuses to assemble rather than inventing a number.
+   */
+  readonly maxOutputTokens: number | null;
+  /**
+   * How this route's credential header form was established. A model profile says the provenance of
+   * every capability it declares; a route says the provenance of the one fact that decides whether a
+   * credential reaches the endpoint at all, so that a new route cannot be added without stating where
+   * its header form came from.
+   */
+  readonly credentialHeaderEvidence: CapabilityEvidence;
   readonly displayName: string;
 }
 
@@ -74,6 +95,10 @@ export const DEEPSEEK_ROUTE_PROFILE: ProviderRouteProfile = {
   limitPolicy: 'rate-limit-retryable',
   dshAttribution: true,
   sessionHeader: false,
+  // Chat completions names no output cap, so this route sends no such field and its bytes cannot move.
+  maxOutputTokens: null,
+  // `authorization: Bearer` is what adapter revision 1 has always sent on this route.
+  credentialHeaderEvidence: PRODUCTION_BASELINE,
   displayName: 'DeepSeek 开放平台（官方）',
 };
 
@@ -84,6 +109,8 @@ export const OPENCODE_GO_ROUTE_PROFILE: ProviderRouteProfile = {
   limitPolicy: 'account-limit-terminal',
   dshAttribution: false,
   sessionHeader: true,
+  maxOutputTokens: null,
+  credentialHeaderEvidence: ADR_0067_DOCUMENTATION,
   displayName: 'OpenCode Go（开发者实时）',
 };
 
