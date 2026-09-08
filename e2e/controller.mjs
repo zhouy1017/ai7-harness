@@ -256,7 +256,7 @@ const J01_LAUNCH_LOCATIONS = Object.freeze(
   ]),
 );
 
-const JOURNEY_LOCATIONS = Object.freeze({
+export const JOURNEY_LOCATIONS = Object.freeze({
   'J-01': Object.freeze([
     'entry',
     'cli',
