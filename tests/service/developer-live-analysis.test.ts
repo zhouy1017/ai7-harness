@@ -34,7 +34,7 @@ import {
   type LaunchPolicyProjection,
 } from '../../src/shared/protocol.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
-import { writeSyntheticDocx } from '../support/synthetic-docx.js';
+import { ADMITTED_SMALL_DOCX, composeManuscriptDocx } from '../support/composed-fixture.js';
 import {
   SAMPLE1_UNITS,
   importSample1Book,
@@ -619,15 +619,19 @@ describe('the developer-live scope over exact sample1 with a stub transport', ()
   });
 
   it('refuses to prepare a baseline analysis Task whose lineage is not exact sample1, before any transport, workspace-profile pin, or credential is touched', async () => {
-    // A generated-only synthetic manuscript (no manuscript or manuscript derivative involved): its
-    // lineage must never reach a Run Authorization, let alone dispatch. This is the earlier,
-    // always-reached refusal — deleting it would leave every other test in this file green while the
-    // transmit guarantee it exists to protect is gone.
+    // A manuscript composed from an admitted Public SampleBook other than exact sample1 (ADR 0043):
+    // real prose, and a lineage that must never reach a Run Authorization, let alone dispatch. This is
+    // the earlier, always-reached refusal — deleting it would leave every other test in this file green
+    // while the transmit guarantee it exists to protect is gone. Nothing composed here can be
+    // transmitted: the refusal fires at preparation, and the transmittable set the case above pins
+    // still admits exact sample1 alone.
     const store = await openLiveStore(roots.dataRoot);
     const selectedPath = join(roots.inputRoot, 'non-sample1.docx');
-    await writeSyntheticDocx(selectedPath, {
-      paragraphs: [{ text: '合成非 sample1 稿件正文。' }],
-      coreTitle: 'developer-live 非 sample1 血缘',
+    await composeManuscriptDocx(selectedPath, {
+      source: ADMITTED_SMALL_DOCX,
+      startBlock: 1,
+      blocks: 4,
+      title: 'developer-live 非 sample1 血缘',
     });
     const staged = await store.stageSelectedDocx(randomUUID(), selectedPath);
     expect(staged.source.format).toBe('DOCX');
