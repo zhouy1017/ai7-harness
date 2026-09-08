@@ -1,7 +1,21 @@
-import type {
-  AnalysisAssuranceSampleProjection,
-  AnalysisCrossUnitReductionProjection,
-  AnalysisGapProjection,
+import {
+  RUN_REPORT_STAGES,
+  type AnalysisAssuranceSampleProjection,
+  type AnalysisCrossUnitReductionProjection,
+  type AnalysisGapProjection,
+  type RunReportAdaptationProjection,
+  type RunReportAssuranceProjection,
+  type RunReportFailureProjection,
+  type RunReportFindingCountProjection,
+  type RunReportIfRedoneProjection,
+  type RunReportProjection,
+  type RunReportRecordProjection,
+  type RunReportStageId,
+  type RunReportStageProjection,
+  type RunReportUnitAccountingProjection,
+  type RunReportUnitRowProjection,
+  type RunReportUsageProjection,
+  type RunReportUsageStageId,
 } from '../../shared/protocol.js';
 import { canonicalJson, sha256Hex } from './canonical.js';
 
@@ -31,76 +45,23 @@ import { canonicalJson, sha256Hex } from './canonical.js';
  */
 export const RUN_REPORT_SCHEMA = 'ai7.analysis.run-report/1' as const;
 
-/**
- * The four stages a Run Report accounts for, in the order the Run performs them. `reduction` is the
- * deterministic work — the kind's reducers and the persist — and is measured as disjoint segments
- * that exclude the sampling await, so the four `wallMs` values partition the Run's own work rather
- * than nesting one inside another.
- */
-export const RUN_REPORT_STAGES = ['units', 'cross-unit-reduction', 'assurance-sampling', 'reduction'] as const;
-export type RunReportStageId = (typeof RUN_REPORT_STAGES)[number];
-
-/**
- * The stages usage is accounted under: the three that transmit for the revision, plus the reflection
- * turn's own. `reduction` never transmits, so it has wall time and no usage; the reflection turn
- * transmits after the revision is already immutable, so it has usage and no stage row. The first
- * three therefore sum to the revision's recorded usage field by field, which is the reconciliation.
- */
-export const RUN_REPORT_USAGE_STAGES = ['units', 'cross-unit-reduction', 'assurance-sampling', 'run-report-reflection'] as const;
-export type RunReportUsageStageId = (typeof RUN_REPORT_USAGE_STAGES)[number];
-
 /** The three usage stages whose sum is the revision's own total; the reflection is deliberately not among them. */
 export const RUN_REPORT_REVISION_USAGE_STAGES = ['units', 'cross-unit-reduction', 'assurance-sampling'] as const;
 export type RunReportRevisionUsageStageId = (typeof RUN_REPORT_REVISION_USAGE_STAGES)[number];
 
-export type RunReportClassification = 'completed' | 'completed-with-gaps' | 'failed' | 'interrupted';
-
-export interface RunReportUsage {
-  readonly requests: number;
-  readonly inputTokens: number;
-  readonly outputTokens: number;
-}
+export type RunReportClassification = RunReportRecordProjection['classification'];
+export type RunReportRecord = RunReportRecordProjection;
+export type RunReportUsage = RunReportUsageProjection;
+export type RunReportUnitRow = RunReportUnitRowProjection;
+export type RunReportIfRedone = RunReportIfRedoneProjection;
 
 export const RUN_REPORT_NO_USAGE: RunReportUsage = { requests: 0, inputTokens: 0, outputTokens: 0 };
-
-/**
- * One stage's row. `state` says what the stage did; the three time fields are present exactly when
- * the owner actually entered the stage, so a stage that never ran carries `not-run` and no instants
- * rather than a zero that would read as work done in no time.
- */
-export interface RunReportStageProjection {
-  readonly stage: RunReportStageId;
-  readonly state: 'closed' | 'closed-with-gaps' | 'gap' | 'not-run';
-  readonly startedAt: string | null;
-  readonly settledAt: string | null;
-  /** The sum of this stage's disjoint segments; for `reduction` that is two segments, never the span between them. */
-  readonly wallMs: number | null;
-}
 
 /** One measured segment of one stage, as the execution owner's own clock saw it. */
 export interface RunReportSpan {
   readonly startedAt: string;
   readonly settledAt: string;
   readonly wallMs: number;
-}
-
-export interface RunReportUnitAccounting {
-  readonly submitted: number;
-  readonly reused: number;
-  readonly recomputed: number;
-  readonly gaps: number;
-  readonly retried: number;
-}
-
-export interface RunReportUnitRow {
-  readonly unitOrdinal: number;
-  readonly state: 'closed' | 'gap';
-  readonly lineage: 'recomputed' | 'reused';
-  /** Model turns this unit cost: `0` for a reused unit and for one the interrupted loop never reached. */
-  readonly attempts: number;
-  readonly wallMs: number | null;
-  readonly usage: { readonly inputTokens: number; readonly outputTokens: number } | null;
-  readonly gapCode: AnalysisGapProjection['code'] | null;
 }
 
 /** What the execution owner observed about one unit while it settled it; absent for a unit it never reached. */
@@ -110,48 +71,6 @@ export interface RunReportUnitObservation {
   readonly wallMs: number;
   readonly usage: { readonly inputTokens: number; readonly outputTokens: number } | null;
 }
-
-export interface RunReportAdaptationRow {
-  readonly unitOrdinal: number;
-  readonly classifiedReason: string;
-  readonly recordedAt: string;
-}
-
-export interface RunReportFailureRow {
-  readonly stage: RunReportStageId;
-  readonly code: string;
-  readonly reason: string;
-}
-
-export interface RunReportAssurance {
-  readonly state: AnalysisAssuranceSampleProjection['state'];
-  readonly seed: string | null;
-  readonly size: number;
-  readonly candidateCount: number;
-  readonly precision: AnalysisAssuranceSampleProjection['precision'];
-  /** Sampled findings the model upheld as `成立`; the numerator every per-tier estimate is built from. */
-  readonly upheld: number;
-}
-
-/** One class of finding the Run produced, as the kind that owns it names its own classes. */
-export interface RunReportFindingCount {
-  readonly kind: string;
-  readonly count: number;
-}
-
-export interface RunReportSuggestion {
-  readonly suggestion: string;
-  readonly basis: string;
-}
-
-/**
- * The `if redone` list: what the model would do differently on the next Run of this manuscript. It
- * closes only when the reflection turn dispatched and parsed; every other outcome states its reason
- * in the reader's own language, exactly as the two existing suboperations state theirs.
- */
-export type RunReportIfRedone =
-  | { readonly state: 'closed'; readonly items: ReadonlyArray<RunReportSuggestion>; readonly reason: null }
-  | { readonly state: 'not-run' | 'policy-bounded' | 'gap'; readonly items: readonly []; readonly reason: string };
 
 /** The reflection turn never dispatched and named no reason yet; the assembler's stand-in while the accounting is minted. */
 const IF_REDONE_PENDING: RunReportIfRedone = { state: 'not-run', items: [], reason: '' };
@@ -167,33 +86,6 @@ export function runReportReflectionNotRun(reason: string): RunReportReflectionOu
   return { ifRedone: { state: 'not-run', items: [], reason }, usage: RUN_REPORT_NO_USAGE };
 }
 
-export interface RunReportRecord {
-  readonly schema: typeof RUN_REPORT_SCHEMA;
-  readonly runRecordId: string;
-  readonly taskIntentId: string;
-  /** The Run's one execution attempt; `null` for a Run that failed before its attempt was persisted. */
-  readonly attemptId: string | null;
-  readonly resultSetRevisionId: string | null;
-  readonly classification: RunReportClassification;
-  readonly recordedAt: string;
-  readonly stages: ReadonlyArray<RunReportStageProjection>;
-  readonly units: RunReportUnitAccounting;
-  readonly unitRows: ReadonlyArray<RunReportUnitRow>;
-  readonly adaptations: ReadonlyArray<RunReportAdaptationRow>;
-  readonly failures: ReadonlyArray<RunReportFailureRow>;
-  readonly usagePerStage: Readonly<Record<RunReportUsageStageId, RunReportUsage>>;
-  readonly findingCounts: ReadonlyArray<RunReportFindingCount>;
-  readonly assurance: RunReportAssurance;
-  readonly ifRedone: RunReportIfRedone;
-  /** SHA-256 over the canonical JSON of {@link runReportAccountingOf}; the reflection turn's fixture key. */
-  readonly accountingDigest: string;
-}
-
-/** The report as a reader receives it: the record plus the digest of its own canonical JSON. */
-export interface RunReportProjection extends RunReportRecord {
-  readonly reportDigest: string;
-}
-
 /**
  * The stable accounting: every part of the report whose value is a function of the fixture and the
  * manuscript alone. Wall times, instants, identities, and the reflection's own result are all absent,
@@ -202,13 +94,13 @@ export interface RunReportProjection extends RunReportRecord {
 export interface RunReportAccounting {
   readonly classification: RunReportClassification;
   readonly stages: ReadonlyArray<{ readonly stage: RunReportStageId; readonly state: RunReportStageProjection['state'] }>;
-  readonly units: RunReportUnitAccounting;
+  readonly units: RunReportUnitAccountingProjection;
   readonly gapCodes: ReadonlyArray<{ readonly code: string; readonly count: number }>;
   readonly failureCodes: ReadonlyArray<{ readonly stage: RunReportStageId; readonly code: string; readonly count: number }>;
   readonly adaptationCount: number;
   readonly usagePerStage: Readonly<Record<RunReportRevisionUsageStageId, RunReportUsage>>;
-  readonly assurance: Omit<RunReportAssurance, 'seed'>;
-  readonly findingCounts: ReadonlyArray<RunReportFindingCount>;
+  readonly assurance: Omit<RunReportAssuranceProjection, 'seed'>;
+  readonly findingCounts: ReadonlyArray<RunReportFindingCountProjection>;
 }
 
 /** Everything the report is built from, apart from what the reflection turn itself produces. */
@@ -227,11 +119,16 @@ export interface RunReportFacts {
   readonly unitRows: ReadonlyArray<RunReportUnitRow>;
   /** Units this Run submitted to the model; a reused unit is not among them. */
   readonly submitted: number;
-  readonly adaptations: ReadonlyArray<RunReportAdaptationRow>;
+  readonly adaptations: ReadonlyArray<RunReportAdaptationProjection>;
   readonly gaps: ReadonlyArray<AnalysisGapProjection>;
-  readonly crossUnit: AnalysisCrossUnitReductionProjection;
+  /**
+   * What the cross-unit reduction did. Only the state and the reason reach a report, so this is
+   * narrower than the revision's own projection — which matters because the factual kind declares no
+   * reduction and therefore records no such component for the report to read.
+   */
+  readonly crossUnit: { readonly state: AnalysisCrossUnitReductionProjection['state']; readonly reason: string | null };
   readonly sample: AnalysisAssuranceSampleProjection;
-  readonly findingCounts: ReadonlyArray<RunReportFindingCount>;
+  readonly findingCounts: ReadonlyArray<RunReportFindingCountProjection>;
   /** The terminal reason of a Run that failed before it formed a revision; `null` for every other Run. */
   readonly terminalFailure: { readonly code: string; readonly reason: string } | null;
 }
@@ -282,8 +179,8 @@ function stageRows(facts: RunReportFacts): RunReportStageProjection[] {
  * then the one reduction's, then the sample's, then the terminal reason of a Run that never formed a
  * revision at all. Each names its stage and its classified code; none restates what was lost.
  */
-function failureRows(facts: RunReportFacts): RunReportFailureRow[] {
-  const rows: RunReportFailureRow[] = [...facts.gaps]
+function failureRows(facts: RunReportFacts): RunReportFailureProjection[] {
+  const rows: RunReportFailureProjection[] = [...facts.gaps]
     .sort((left, right) => left.unitOrdinal - right.unitOrdinal)
     .map((gap) => ({ stage: 'units' as const, code: gap.code, reason: gap.reason }));
   // A stage that never ran is not a failure: `not-run` says there was nothing for it to close, which
@@ -300,7 +197,7 @@ function failureRows(facts: RunReportFacts): RunReportFailureRow[] {
   return rows;
 }
 
-function assuranceOf(sample: AnalysisAssuranceSampleProjection): RunReportAssurance {
+function assuranceOf(sample: AnalysisAssuranceSampleProjection): RunReportAssuranceProjection {
   return {
     state: sample.state,
     seed: sample.seed,

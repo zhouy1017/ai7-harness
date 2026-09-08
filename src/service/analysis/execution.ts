@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { AnalysisAssuranceSampleDispositionProjection, AnalysisGapProjection, AnalysisSourceRangeProjection, CoverageManifestProjection, CoverageManifestUnitProjection, ExecutionRouteId, LaunchPolicyProjection, RunAttemptState } from '../../shared/protocol.js';
+import type { AnalysisAssuranceSampleDispositionProjection, AnalysisGapProjection, AnalysisSourceRangeProjection, CoverageManifestProjection, CoverageManifestUnitProjection, ExecutionRouteId, LaunchPolicyProjection, RunAttemptState, RunReportStageId } from '../../shared/protocol.js';
 import { prepareExecution, type HarnessExecutionSpan, type PrimaryAgentHarnessHandle } from '../harness/primary-agent-harness.js';
 import { DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE } from '../../shared/protected-secret-identity.js';
 import type { DeveloperLiveRuntime } from '../launch-policy.js';
@@ -49,12 +49,15 @@ import {
   type CrossUnitOutcome,
   type GapUnitOutcome,
 } from './reducers.js';
-import type {
-  RunReportRevisionUsageStageId,
-  RunReportSpan,
-  RunReportStageId,
-  RunReportUnitObservation,
-  RunReportUnitRow,
+import {
+  buildRunReport,
+  runReportReflectionNotRun,
+  type RunReportFacts,
+  type RunReportReflectionOutcome,
+  type RunReportRevisionUsageStageId,
+  type RunReportSpan,
+  type RunReportUnitObservation,
+  type RunReportUnitRow,
 } from './run-report.js';
 
 /**
@@ -352,6 +355,7 @@ export class BaselineAnalysisExecutionOwner {
 
   #recordFailure(facts: ExecutionPlanFacts, error: unknown): void {
     const code = error !== null && typeof error === 'object' && 'code' in error && typeof error.code === 'string' ? error.code : 'EXECUTION_FAILED';
+    const reason = `运行在形成结果集修订版前失败（${code}）。`;
     try {
       this.#deps.ledger.recordRunState(facts.runRecordId, 'failed', { detail: `运行在形成结果前失败（${code}）。`, code });
       this.#deps.ledger.recordOutcome({
@@ -359,12 +363,45 @@ export class BaselineAnalysisExecutionOwner {
         runRecordId: facts.runRecordId,
         classification: 'failed',
         resultSetRevisionId: null,
-        summary: `运行在形成结果集修订版前失败（${code}）。`,
+        summary: reason,
         safeNextAction: SAFE_NEXT_ACTIONS.failed,
+        // A Run that failed before it formed a revision still leaves a report: four stages that
+        // never ran, no units, no usage, and the terminal reason with its classified code.
+        report: buildRunReport({
+          runRecordId: facts.runRecordId,
+          taskIntentId: facts.taskIntentId,
+          attemptId: null,
+          resultSetRevisionId: null,
+          classification: 'failed',
+          recordedAt: new Date().toISOString(),
+          spans: new Map(),
+          usage: {
+            units: { requests: 0, inputTokens: 0, outputTokens: 0 },
+            'cross-unit-reduction': { requests: 0, inputTokens: 0, outputTokens: 0 },
+            'assurance-sampling': { requests: 0, inputTokens: 0, outputTokens: 0 },
+          },
+          unitRows: [],
+          submitted: 0,
+          adaptations: [],
+          gaps: [],
+          crossUnit: { state: 'not-run', reason },
+          sample: assuranceSampleNotRun(reason),
+          findingCounts: [],
+          terminalFailure: { code, reason },
+        }, runReportReflectionNotRun(RUN_REPORT_REFLECTION_NOT_REACHED)),
       });
     } catch {
       // The ledger already refused the terminal write; the run state stays as last recorded.
     }
+  }
+
+  /**
+   * The Run Report's `if redone` list. It is the fourth declared suboperation and runs last — after
+   * the sample, after the reduction is final, and after the revision is persisted — so the accounting
+   * it reflects on is the revision's own.
+   */
+  #reflect(): Promise<RunReportReflectionOutcome> {
+    return Promise.resolve(runReportReflectionNotRun(RUN_REPORT_REFLECTION_NOT_REACHED));
   }
 
   async #execute(active: ActiveRun, facts: ExecutionPlanFacts): Promise<void> {
@@ -903,6 +940,32 @@ export class BaselineAnalysisExecutionOwner {
         gapCount: reduction.gaps.length,
         conflictCount: reduction.conflictCount,
       });
+      // The Run Report (ADR 0066 §Run Report). Its facts are the ones this Run already recorded, and
+      // its accounting is the persisted revision's, because the revision is persisted above.
+      const reportFacts: RunReportFacts = {
+        runRecordId: facts.runRecordId,
+        taskIntentId: facts.taskIntentId,
+        attemptId,
+        resultSetRevisionId: revision.revisionId,
+        classification: terminalClassification,
+        recordedAt: new Date().toISOString(),
+        spans: clock.spans(),
+        usage: stageUsage,
+        unitRows: runReportUnitRows(unitRecords, unitObservations),
+        submitted: submittedUnits.length,
+        // Exactly the three fields decision 4 names; the adaptation's own digests, codes, and
+        // identities stay in the ledger row a reader can already open.
+        adaptations: ledger.adaptationsOf(facts.runRecordId).map((entry) => ({
+          unitOrdinal: entry.unitOrdinal,
+          classifiedReason: entry.classifiedReason,
+          recordedAt: entry.recordedAt,
+        })),
+        gaps: reduction.gaps,
+        crossUnit: { state: crossUnit.state, reason: crossUnit.state === 'closed' ? null : crossUnit.reason },
+        sample,
+        findingCounts: definition.findingCounts(reduction),
+        terminalFailure: null,
+      };
       ledger.recordOutcome({
         taskIntentId: facts.taskIntentId,
         runRecordId: facts.runRecordId,
@@ -912,6 +975,7 @@ export class BaselineAnalysisExecutionOwner {
           ? `${reduction.coverage.label}；${reduction.reducerClosure.label}；${reduction.assurance.label}。`
           : `${interruption.summary}${reduction.coverage.label}；${reduction.reducerClosure.label}；${reduction.assurance.label}。`,
         safeNextAction: interruption === null ? SAFE_NEXT_ACTIONS[terminalClassification] : interruption.safeNextAction,
+        report: buildRunReport(reportFacts, await this.#reflect()),
       });
     } finally {
       currentBindingDigest = null;
@@ -1037,6 +1101,9 @@ export class BaselineAnalysisExecutionOwner {
 
 /** The exact disclosure when the active Provider Processing policy does not name the suboperation. */
 export const ASSURANCE_SAMPLING_POLICY_BOUNDED = '保证抽样未派发：当前 Provider Processing 策略仅授权单元数内的传输' as const;
+
+/** The exact disclosure of a Run that stopped before the reflection turn could be formed at all. */
+export const RUN_REPORT_REFLECTION_NOT_REACHED = '运行在形成结果集修订版前结束，运行反思未发起。' as const;
 
 /** Exactly what the sampling suboperation may read or move; the finding components are not among them. */
 interface AssuranceSamplingContext {

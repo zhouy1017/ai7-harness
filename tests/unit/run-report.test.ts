@@ -6,7 +6,6 @@ import { runReportUnitRows } from '../../src/service/analysis/execution.js';
 import {
   PRE_RUN_REPORT_REASON,
   RUN_REPORT_SCHEMA,
-  RUN_REPORT_STAGES,
   buildRunReport,
   runReportAccounting,
   runReportAccountingDigest,
@@ -17,13 +16,13 @@ import {
   runReportUsageReconciles,
   type RunReportFacts,
   type RunReportSpan,
-  type RunReportStageId,
   type RunReportUnitRow,
 } from '../../src/service/analysis/run-report.js';
+import { RUN_REPORT_STAGES } from '../../src/shared/protocol.js';
 import type {
   AnalysisAssuranceSampleProjection,
-  AnalysisCrossUnitReductionProjection,
   AnalysisGapProjection,
+  RunReportStageId,
 } from '../../src/shared/protocol.js';
 
 const SEED = 's'.repeat(64);
@@ -67,13 +66,7 @@ const CLOSED_SAMPLE: AnalysisAssuranceSampleProjection = {
   reason: null,
 };
 
-const CLOSED_CROSS_UNIT: AnalysisCrossUnitReductionProjection = {
-  state: 'closed',
-  reason: null,
-  requestDigest: 'c'.repeat(64),
-  usage: { inputTokens: 200, outputTokens: 30 },
-  findingCount: 2,
-};
+const CLOSED_CROSS_UNIT: RunReportFacts['crossUnit'] = { state: 'closed', reason: null };
 
 /**
  * A Run of three units: one reused by lineage, one recomputed and retried once, one that gapped. The
@@ -144,7 +137,7 @@ describe('Run Report', () => {
     spans.delete('cross-unit-reduction');
     const notRun = buildRunReport(facts({
       spans,
-      crossUnit: { state: 'not-run', reason: '本类型不声明跨单元归纳。', requestDigest: null, usage: null, findingCount: 0 },
+      crossUnit: { state: 'not-run', reason: '本类型不声明跨单元归纳。' },
     }), REFLECTION);
     expect(notRun.stages[1]).toEqual({ stage: 'cross-unit-reduction', state: 'not-run', startedAt: null, settledAt: null, wallMs: null });
   });
@@ -158,7 +151,7 @@ describe('Run Report', () => {
 
   it('names every failure once, with its stage and its classified code', () => {
     const report = buildRunReport(facts({
-      crossUnit: { state: 'gap', reason: '跨单元归纳未闭合。', requestDigest: 'c'.repeat(64), usage: null, findingCount: 0 },
+      crossUnit: { state: 'gap', reason: '跨单元归纳未闭合。' },
       sample: { ...CLOSED_SAMPLE, state: 'closed-with-gaps', reason: '单元 2 的保证抽样未闭合。' },
     }), REFLECTION);
     expect(report.failures).toEqual([
@@ -195,7 +188,7 @@ describe('Run Report', () => {
       submitted: 0,
       adaptations: [],
       gaps: [],
-      crossUnit: { state: 'not-run', reason: '运行在形成结果前失败。', requestDigest: null, usage: null, findingCount: 0 },
+      crossUnit: { state: 'not-run', reason: '运行在形成结果前失败。' },
       sample: { state: 'not-run', seed: null, size: 0, candidateCount: 0, strata: [], dispositions: [], precision: [], usage: null, reason: '运行在形成结果前失败。' },
       findingCounts: [],
       terminalFailure: { code: 'EXECUTION_BINDING_DIGEST_DRIFT', reason: '执行绑定摘要在持久化时发生变化。' },
