@@ -37,6 +37,8 @@ const REUSE_PLAN_SCHEMA = 'ai7.baseline-manuscript-analysis.reuse-plan/1';
 /** Every button the settled card may carry: navigation, the three update controls, history, the plan-revision controls, and the hidden cancel. */
 const ANALYSIS_ACTIONS = ['return-to-range', 'sync-current', 'reanalyze-range', 'reanalyze-book', 'open-revision', 'close-revision', 'cancel-preparation', 'view-plan-revision', 'reconfirm-plan'];
 const ONLY_ANALYSIS_ACTIONS = `Array.from(card.querySelectorAll('button')).every((button)=>${JSON.stringify(ANALYSIS_ACTIONS)}.includes(button.dataset.analysisAction))`;
+/** The Book workbench's own primary actions, in the order the populated workbench builds them. */
+const WORKBENCH_ACTIONS = ['打开稿件', '打开另一本图书', '返回图书列表'];
 const ASSURANCE_STATEMENT = '仅为模型输出的结构化归纳；不构成事实判定、编辑评审或稿件变更。';
 const FIXTURES_ROOT = resolve(ROOT, 'tests', 'fixtures', 'model');
 const FIXTURE_IDENTITY = 'sample1-baseline-one-unit-failure';
@@ -1002,6 +1004,19 @@ async function main() {
         card.querySelector('.analysis-history')?.dataset.historyCount==='1' &&
         !card.querySelector('[data-analysis-action="prepare"], [data-analysis-action="authorize"]');
     })()`, 'settled-overview-surface');
+
+    // V2-UX-LAYER-005, asserted where the rule is hardest to keep: the settled result set is the
+    // longest thing this workbench ever renders, and the workbench's own way out must survive it. The
+    // three actions are read by label, enabled state and container — never by document position — and
+    // the region is asserted to be genuinely sticky rather than merely to carry the class.
+    await assertRenderer(renderer, `(() => {
+      const region=document.querySelector('.book-overview .workbench-actions');
+      if(!region) return false;
+      const buttons=Array.from(region.querySelectorAll(':scope > button'));
+      return JSON.stringify(buttons.map((button)=>button.textContent))===JSON.stringify(${JSON.stringify(WORKBENCH_ACTIONS)}) &&
+        buttons.every((button)=>!button.disabled) &&
+        getComputedStyle(region).position==='sticky';
+    })()`, 'workbench-actions-persistent');
 
     // The Run Liveness Signal, asserted where this Journey is deterministic: after settlement. While
     // the card is `executing` the runner may see the signal line, but a deterministic Run settles too
