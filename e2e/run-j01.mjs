@@ -116,6 +116,13 @@ async function createSyntheticDocx(path, variant) {
 }
 
 /**
+ * Three blank-line-separated paragraphs of text authored for this Journey. It carries no manuscript
+ * content of any kind and no heading marker: intake needs a real `.txt` only so it has something to
+ * identify, convert, and read as an editable Manuscript (ADR 0072 §5).
+ */
+const SYNTHETIC_TXT_TEXT = '第一段合成文本。\n\n第二段合成文本。\n\n第三段合成文本。\n';
+
+/**
  * A minimal well-formed PDF: a catalog, an empty page tree, a cross-reference table and a trailer.
  * It carries no text object and therefore no manuscript content of any kind — the Journey needs a
  * real fixed-layout file only so intake has something to identify, refuse as editable, and retain.
@@ -1869,6 +1876,15 @@ async function main() {
         (await realpath(syntheticPdfPath)) === syntheticPdfPath && syntheticPdfInfo.size > 0,
       'synthetic-pdf-identity',
     );
+    const syntheticTxtPath = resolve(syntheticRoot, 'text-manuscript.txt');
+    await writeFile(syntheticTxtPath, strToU8(SYNTHETIC_TXT_TEXT));
+    const syntheticTxtInfo = await lstat(syntheticTxtPath);
+    const syntheticTxtSha256 = await digestFile(syntheticTxtPath);
+    requireJourney(
+      syntheticTxtInfo.isFile() && !syntheticTxtInfo.isSymbolicLink() &&
+        (await realpath(syntheticTxtPath)) === syntheticTxtPath && syntheticTxtInfo.size > 0,
+      'synthetic-txt-identity',
+    );
     await createSyntheticDocx(syntheticAPath, 'a');
     await createSyntheticDocx(syntheticBPath, 'b');
     await createSyntheticDocx(syntheticCPath, 'c');
@@ -2371,6 +2387,88 @@ async function main() {
         sourceOnlyPdfRecord?.['结构摘要'] === undefined &&
         sourceOnlyPdfRecord?.['解析器'] === undefined,
       'source-only-pdf-record-format',
+    );
+    await closeProduct();
+
+    // A `.txt` has no editable round trip of its own either, but it does have an honest one through
+    // a DOCX working representation the product writes itself (ADR 0072 §1, §5). The original is
+    // retained as the digest of record; the Manuscript is read from the converted object beside it.
+    const textManuscriptRoot = await createCanonicalExternalDataRoot(resolve(runRoot, 'text-manuscript-data'), checkoutRoot);
+    renderer = await launchProduct({ dataRoot: textManuscriptRoot, pickerPath: syntheticTxtPath, launchScenario: 'text-manuscript' });
+    await waitFor(
+      renderer,
+      `document.documentElement.dataset.ai7ProductReady === 'true' && document.querySelector('[data-screen="landing"]')`,
+      'text-manuscript-landing',
+    );
+    await clickExactButton(renderer, '导入稿件', 'text-manuscript-stage');
+    await waitFor(renderer, `document.querySelector('[data-screen="target"]')`, 'text-manuscript-target');
+    await assertRenderer(
+      renderer,
+      `document.querySelector('[data-source-format]')?.dataset.sourceFormat === 'TXT' && document.querySelector('[data-source-sha256]')?.textContent === ${JSON.stringify(syntheticTxtSha256)}`,
+      'text-manuscript-format',
+    );
+    await assertRenderer(
+      renderer,
+      `(() => { const target = document.querySelector('[data-import-target-choice="new-book"]'); if (!target) return false; target.click(); return true; })()`,
+      'text-manuscript-target-select',
+    );
+    await waitFor(renderer, `document.querySelector('[data-screen="relationship"]')`, 'text-manuscript-relationship');
+    // A converted file is an editable Manuscript, so both relationships are on offer, exactly as
+    // they are for a DOCX; source-only stays a real answer for a `.txt` too.
+    await assertRenderer(
+      renderer,
+      `(() => { const manuscript = document.querySelector('[data-import-relationship="first-manuscript"]'); const source = document.querySelector('[data-import-relationship="source-only"]'); return manuscript && source && !manuscript.checked && !source.checked && !document.querySelector('.attention-note'); })()`,
+      'text-manuscript-relationship-both',
+    );
+    await assertRenderer(
+      renderer,
+      `(() => { const manuscript = document.querySelector('[data-import-relationship="first-manuscript"]'); if (!manuscript) return false; manuscript.click(); return true; })()`,
+      'text-manuscript-relationship-select',
+    );
+    await waitFor(renderer, `document.querySelector('[data-screen="title"] #book-title')`, 'text-manuscript-title');
+    await assertRenderer(
+      renderer,
+      `document.querySelector('[data-import-conversion-note]')?.dataset.importConversionNote === 'TXT' && document.querySelector('[data-import-conversion-note]')?.textContent === '本稿件由 ai7-text-to-docx/1 从 TXT 转换为 DOCX 工作表示后读取；下列损失由转换造成，原始文件原样保留。'`,
+      'text-manuscript-conversion-note',
+    );
+    // Conversion of plain text loses nothing: every class is 完整保留 but the round-trip one, which
+    // is what it always is, and the three authored paragraphs are the three detected blocks.
+    await assertRenderer(
+      renderer,
+      `(() => { const rows = Array.from(document.querySelectorAll('[data-fidelity-category]')); return rows.length === 8 && rows.every((row) => row.dataset.fidelityCategory === 'round-trip-export' ? row.querySelector('.status-pill')?.classList.contains('status-unsupported') : row.querySelector('.count')?.textContent.includes('· 0 项') && row.querySelector('.status-pill')?.classList.contains('status-preserved')) && document.body.textContent.includes('3 个可编辑内容块'); })()`,
+      'text-manuscript-fidelity-clean',
+    );
+    await clickExactButton(renderer, '确认书名并复核', 'text-manuscript-review-action');
+    await waitFor(renderer, `document.querySelector('[data-screen="review"]')`, 'text-manuscript-review');
+    await assertRenderer(
+      renderer,
+      `(() => { const note = document.querySelector('[data-screen="review"] [data-import-conversion-note]'); return note?.dataset.importConversionNote === 'TXT' && document.querySelector('[data-screen="review"] [data-source-sha256]')?.textContent === ${JSON.stringify(syntheticTxtSha256)} && !document.querySelector('#accept-import-degradation'); })()`,
+      'text-manuscript-review-conversion-note',
+    );
+    await clickExactButton(renderer, '新建图书并导入稿件', 'text-manuscript-commit');
+    await waitFor(renderer, `document.querySelector('[data-screen="imported"]')`, 'text-manuscript-imported');
+    await waitFor(
+      renderer,
+      `document.documentElement.dataset.ai7ImportCompletionAcknowledged === 'true'`,
+      'text-manuscript-completion-acknowledged',
+    );
+    await assertRenderer(
+      renderer,
+      `document.querySelector('[data-screen="imported"]')?.textContent.includes('稿件已导入') && document.querySelector('[data-screen="imported"]')?.textContent.includes('图书工作概览')`,
+      'text-manuscript-completion-wording',
+    );
+    await clickExactButton(renderer, '来源版本与来源记录', 'text-manuscript-view-source');
+    const textManuscriptRecord = await renderer.evaluate(`(() => { const detail = document.querySelector('.record-detail[data-record-kind="source"]'); const values = {}; for (const label of detail?.querySelectorAll('dt') ?? []) values[label.textContent] = label.nextElementSibling?.textContent; return values; })()`);
+    // The record names the original as the digest of record and the working representation beside
+    // it, never instead of it; the two digests are different objects (ADR 0072 §2).
+    requireJourney(
+      textManuscriptRecord?.['格式'] === 'TXT' &&
+        textManuscriptRecord?.['原文件 SHA-256'] === syntheticTxtSha256 &&
+        textManuscriptRecord?.['解析器'] === 'ai7-docx-fflate-saxes/1' &&
+        textManuscriptRecord?.['转换器'] === 'ai7-text-to-docx/1' &&
+        /^[0-9a-f]{64}$/.test(textManuscriptRecord?.['工作表示 SHA-256'] ?? '') &&
+        textManuscriptRecord?.['工作表示 SHA-256'] !== syntheticTxtSha256,
+      'text-manuscript-record-conversion',
     );
     await closeProduct();
 
