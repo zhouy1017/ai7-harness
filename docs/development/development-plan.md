@@ -69,6 +69,9 @@ These slices come from [#307](https://github.com/zhouy1017/ai7-harness/issues/30
 | 1c.6 | S51 | #313 | T3 | J-01 | Multi-format manuscript intake normalizing to DOCX, with the Source Version always keeping the original | #297 | planned |
 | 1c.7 | S52 | #316 | T2 | J-03 | The provider-denied Task kind's scope statements derived from the bound launch, as #303 did for the analysis store | #303 | planned |
 | 1c.9 | S54 | #321 | T3 | J-04, J-12 | The explicit provider support list — Gemini, OpenCode Go with every plan model, DeepSeek official, OpenAI, Claude, Qwen, HY — implementing the request shapes #310 named and refused | #310 | planned |
+| 1c.10 | S55a | #322 | T3 | J-12 | Tier 1 of provider configuration: an unlisted provider whose compatibility format AI7 already implements is configured by selecting that format and supplying endpoint, credential slot, and model ids — no agent, and a selected format claims the request shape only | #321 | planned |
+| 1c.11 | S55b | #322 | T3 | — | Tier 2, agent-driven discovery as repository tooling for a provider matching no implemented format: probes with synthetic content under a bounded budget, records shapes never bodies, emits a profile proposal a person admits | S55a | planned |
+| 1c.12 | S56 | #324 | T1 | none | Retire a merged branch by a sequence that actually works, and verify it, since `--delete-branch` fails silently for a branch checked out in a worktree | — | planned |
 
 **S46 (#304)** and **S47 (#305)** are rule-first: the Commander settles the rule and the survey method, and only then dispatches per-surface application, which can run as T1 or T2 units against a rule that already exists. Neither removes any exact identity from the product; both change where it sits and what else must be true beside it.
 
@@ -135,7 +138,3 @@ The human-attended `sample1` recording is scheduled after the Phase 1 exit crite
 ## Deferred and out of scope
 
 Packaging, signing, notarization, release, `dev` to `main` promotion, Word integration, additional platforms, private manuscripts in any development scope, and the self-hosted Gate remain outside this plan and need their own Owner decisions.
-
-## Not schedulable until the Owner decides
-
-- **#322 — agent-driven provider discovery for unlisted providers.** T0. The Owner must first say whether it is a product capability, where an end user points AI7 at their own provider and discovery runs on their machine with their credential against an endpoint AI7 has never seen, or repository tooling that emits a profile proposal a person reviews before the product ships it. Six authority questions — what admits a probe transmission, what a probe may send, who admits a discovered profile, how discovery coexists with live-once, which credential is released by what, and what happens when discovery is silently wrong — answer differently under each form. The Commander recommends tooling and will not draft the ADR before the answer.
