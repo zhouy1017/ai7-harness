@@ -686,6 +686,15 @@ describe('baseline manuscript analysis over the real store on exact sample1', ()
       expect(revision.bindingPin.bindingDigest).toBe(bindingDigest);
       expect(revision.coverage).toMatchObject({ unitsTotal: 8, unitsClosed: 7, gapCount: 1 });
       expect(revision.adapterPin.fixtureIdentity).toBe('sample1-baseline-transient-retry');
+      // The Run Report of a Run that adapted in-envelope: the retry is counted, and the unit's row
+      // carries what both of its attempts cost rather than what its last one did (Issue #276).
+      const report = settled.taskOutcome!.report!;
+      expect(report.units).toEqual({ submitted: SAMPLE1_UNITS, reused: 0, recomputed: SAMPLE1_UNITS, gaps: 1, retried: 1 });
+      expect(report.adaptations).toEqual([{ unitOrdinal: 5, classifiedReason: adaptation.classifiedReason, recordedAt: adaptation.recordedAt }]);
+      expect(report.usagePerStage.units.requests).toBe(SAMPLE1_UNITS + 1);
+      expect(runReportUsageReconciles(report, revision.usage)).toBe(true);
+      expect(report.unitRows[4]).toMatchObject({ unitOrdinal: 5, state: 'closed', attempts: 2 });
+      expect(report.ifRedone.state).toBe('closed');
       store.markCleanShutdown();
     } finally {
       await owner.dispose();
