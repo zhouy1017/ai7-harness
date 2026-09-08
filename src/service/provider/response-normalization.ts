@@ -32,7 +32,8 @@ export type MalformedReason =
   | 'choice-absent'
   | 'answer-channel-absent'
   | 'content-absent'
-  | 'output-absent';
+  | 'output-absent'
+  | 'candidate-absent';
 
 /**
  * One response, normalized. `empty-answer` carries whether the declared reasoning channel had
@@ -99,6 +100,23 @@ function outputItemUsageOf(body: Record<string, unknown>): ModelUsage | null {
   const reasoningTokens = isRecord(body.usage.output_tokens_details)
     ? nonNegativeInteger(body.usage.output_tokens_details.reasoning_tokens)
     : null;
+  if (inputTokens === null || outputTokens === null) return null;
+  return { inputTokens, outputTokens, ...(reasoningTokens === null ? {} : { reasoningTokens }) };
+}
+
+/**
+ * The usage a generateContent response reports, under names of its own: the counts live in
+ * `usageMetadata` rather than `usage`, and the reasoning count is a third count beside them rather
+ * than a detail one level down, so it is read into the field the canonical usage already has.
+ * `cachedContentTokenCount` is not read, for the reason `input_tokens_details` is not read above —
+ * nothing has observed this vendor's cache accounting — and `totalTokenCount` is a sum of counts this
+ * module already carries rather than a count of its own.
+ */
+function candidateUsageOf(body: Record<string, unknown>): ModelUsage | null {
+  if (!isRecord(body.usageMetadata)) return null;
+  const inputTokens = nonNegativeInteger(body.usageMetadata.promptTokenCount);
+  const outputTokens = nonNegativeInteger(body.usageMetadata.candidatesTokenCount);
+  const reasoningTokens = nonNegativeInteger(body.usageMetadata.thoughtsTokenCount);
   if (inputTokens === null || outputTokens === null) return null;
   return { inputTokens, outputTokens, ...(reasoningTokens === null ? {} : { reasoningTokens }) };
 }
@@ -182,6 +200,43 @@ function normalizeOutputItems(profile: ProviderModelProfile, body: unknown): Can
 }
 
 /**
+ * The generateContent reading: the answer is the concatenation of the `text` of every part of the
+ * first candidate that is not flagged `thought`, in order. A part is not typed the way the two shapes
+ * above type their blocks and items — it carries the fields it has — so a thought part is one whose
+ * `thought` is exactly `true`, and everything else with a string `text` is answer text.
+ *
+ * The `candidates` array is where this shape differs from the one before it, and deliberately so: an
+ * absent array *and an empty one* are `candidate-absent`, whereas an empty `output` above is the
+ * empty answer. An empty `output` is a model that answered with no item; an empty `candidates` is
+ * what this shape returns when the prompt was blocked, and no candidate is not an empty answer.
+ * `finishReason` and `promptFeedback.blockReason` are not carried, for the reason `stop_reason` and
+ * `status` are not carried above — the canonical result gains no field one vendor needs — so a
+ * blocked prompt reads as `candidate-absent`, and that reading is the one the first live item on this
+ * shape should confirm. A candidate with no `content`, no parts, or no non-thought text is the empty
+ * answer this module exists to distinguish, since all three hand the contract layer the same `''`.
+ */
+function normalizeCandidateParts(profile: ProviderModelProfile, body: unknown): CanonicalModelResult {
+  if (!isRecord(body)) return { kind: 'malformed', reason: 'response-not-a-record' };
+  if (!Array.isArray(body.candidates) || body.candidates.length === 0) return { kind: 'malformed', reason: 'candidate-absent' };
+  const candidate: unknown = body.candidates[0];
+  // A first entry that is not a record is not a candidate, so the response carries none rather than
+  // carrying one that answered emptily.
+  if (!isRecord(candidate)) return { kind: 'malformed', reason: 'candidate-absent' };
+  const parts: ReadonlyArray<unknown> = isRecord(candidate.content) && Array.isArray(candidate.content.parts)
+    ? candidate.content.parts
+    : [];
+  const text = parts
+    .filter((part): part is Record<string, unknown> => isRecord(part) && part.thought !== true && typeof part.text === 'string')
+    .map((part) => part.text as string)
+    .join('');
+  const usage = candidateUsageOf(body);
+  const reasoningPresent = profile.capabilities.reasoningChannel === 'candidate-thought-parts' &&
+    parts.some((part) => isRecord(part) && part.thought === true);
+  if (text.length === 0) return { kind: 'empty-answer', reasoningPresent, usage };
+  return { kind: 'answer', text, reasoningText: null, usage };
+}
+
+/**
  * Normalize one response body against the channels its model profile declares. Deliberately callable
  * with a body alone: a cached response can be classified without an adapter, a transport, a
  * credential, or a Run, which is what makes replaying a past failure possible at all.
@@ -193,5 +248,6 @@ export function normalizeModelResponse(profile: ProviderModelProfile, body: unkn
   if (profile.capabilities.answerChannel === 'none') return { kind: 'malformed', reason: 'answer-channel-not-declared' };
   if (profile.capabilities.answerChannel === 'content-text-blocks') return normalizeContentBlocks(profile, body);
   if (profile.capabilities.answerChannel === 'output-message-text') return normalizeOutputItems(profile, body);
+  if (profile.capabilities.answerChannel === 'candidate-parts-text') return normalizeCandidateParts(profile, body);
   return normalizeMessageContentString(profile, body);
 }
