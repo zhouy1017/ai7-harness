@@ -46,11 +46,19 @@ export type ReasoningControl = 'none' | 'deepseek-thinking';
  */
 export type StructuredOutput = 'none' | 'json-object' | 'json-schema' | 'tool-call';
 
-/** Where the answer text is read from; `none` means no channel is declared and every response is malformed. */
-export type AnswerChannel = 'none' | 'message-content-string';
+/**
+ * Where the answer text is read from; `none` means no channel is declared and every response is
+ * malformed. `content-text-blocks` is the Anthropic-compatible shape's channel: the answer is the
+ * concatenation of the `text` of every `type: 'text'` block, in the order the response lists them.
+ */
+export type AnswerChannel = 'none' | 'message-content-string' | 'content-text-blocks';
 
-/** Where reasoning is read from when the model reports it separately from the answer. */
-export type ReasoningChannel = 'none' | 'message-reasoning-content';
+/**
+ * Where reasoning is read from when the model reports it separately from the answer.
+ * `content-thinking-blocks` declares presence and nothing more: a `type: 'thinking'` block in the
+ * content array means the model reasoned, which is the whole of what an empty answer needs to know.
+ */
+export type ReasoningChannel = 'none' | 'message-reasoning-content' | 'content-thinking-blocks';
 
 /** Whether the reported output tokens include reasoning tokens; `unknown` until something has measured it. */
 export type UsageAttribution = 'includes-reasoning' | 'separate' | 'unknown';

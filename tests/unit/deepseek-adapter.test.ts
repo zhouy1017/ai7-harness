@@ -407,8 +407,7 @@ describe('model capability profiles', () => {
   it('refuses to assemble a body for a capability no adapter implements', () => {
     const context = { attribution: attributionHeaders(), promptContractDigest: BASELINE_PROMPT_CONTRACT_DIGEST, sessionId: randomUUID() };
     const live = { ...request(), provider: OPENCODE_GO_ROUTE, model: OPENCODE_GO_MODEL };
-    expect(() => assembleProviderRequest(OPENCODE_GO_ROUTE_PROFILE, shape({ requestShape: 'anthropic-messages' }), live, context))
-      .toThrowError(/PROVIDER_REQUEST_SHAPE_UNSUPPORTED/u);
+    // `anthropic-messages` is implemented as of S54b and has its own suite; `openai-responses` still refuses.
     expect(() => assembleProviderRequest(OPENCODE_GO_ROUTE_PROFILE, shape({ requestShape: 'openai-responses' }), live, context))
       .toThrowError(/PROVIDER_REQUEST_SHAPE_UNSUPPORTED/u);
     // Naming a structured-output constraint is not implementing it: only `json-object` is assembled.

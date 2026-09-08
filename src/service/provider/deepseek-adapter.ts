@@ -137,37 +137,41 @@ export interface ProviderRequestContext {
   readonly sessionId?: string;
 }
 
-/**
- * Assemble one request. The header set comes from the route profile, the body from the model
- * profile's declared capabilities, and nothing is read from anywhere else — which is what makes a
- * new model a new row in the profile table rather than a new branch here.
- *
- * The two shapes ADR 0067 documents behind the Go gateway's other paths refuse rather than guess. Of
- * the structured-output constraints only `json-object` is implemented, as exactly one body field —
- * `response_format: {"type":"json_object"}`, the chat-completions spelling — and `json-schema` and
- * `tool-call` still refuse, because naming a constraint is not implementing it. Implementing one is
- * still not sending it: the field travels only for a model whose profile declares `json-object`, and
- * that declaration needs the live evidence the profile table demands (Issue #306).
- */
-export function assembleProviderRequest(
-  profile: ProviderRouteProfile,
-  model: ProviderModelProfile,
-  payload: AssembledModelPayload,
-  context: ProviderRequestContext,
-): DeepSeekRequestAssembly {
-  if (model.route !== profile.route) throw new Error('PROVIDER_MODEL_ROUTE_MISMATCH');
-  if (model.capabilities.requestShape !== 'openai-chat-completions') throw new Error('PROVIDER_REQUEST_SHAPE_UNSUPPORTED');
-  const structuredOutput = model.capabilities.structuredOutput;
-  if (structuredOutput !== 'none' && structuredOutput !== 'json-object') throw new Error('PROVIDER_STRUCTURED_OUTPUT_UNSUPPORTED');
+/** The turn's user and assistant messages as both shapes carry them; where the system prompt goes is each shape's own business. */
+function conversationMessages(payload: AssembledModelPayload): Array<{ role: string; content: string }> {
   const messages: Array<{ role: string; content: string }> = [];
-  if (payload.system !== undefined && payload.system.length > 0) messages.push({ role: 'system', content: payload.system });
   for (const message of payload.messages) {
     const text = messageText(message);
     if (text === null) throw new Error('DEEPSEEK_REQUEST_NON_TEXT_CONTENT');
     if (message.role !== 'user' && message.role !== 'assistant') throw new Error('DEEPSEEK_REQUEST_ROLE_INVALID');
     messages.push({ role: message.role, content: text });
   }
-  const body = canonicalJson({
+  return messages;
+}
+
+/** The system prompt of one payload, or `null` when the payload carries none. */
+function systemPromptOf(payload: AssembledModelPayload): string | null {
+  return payload.system !== undefined && payload.system.length > 0 ? payload.system : null;
+}
+
+/**
+ * The chat-completions body, exactly as adapter revision 1 has always assembled it: the system prompt
+ * is the first message, and both frozen request digests are over these bytes.
+ *
+ * Of the structured-output constraints only `json-object` is implemented, as exactly one body field —
+ * `response_format: {"type":"json_object"}`, the chat-completions spelling — and `json-schema` and
+ * `tool-call` still refuse, because naming a constraint is not implementing it. Implementing one is
+ * still not sending it: the field travels only for a model whose profile declares `json-object`, and
+ * that declaration needs the live evidence the profile table demands (Issue #306).
+ */
+function chatCompletionsBody(model: ProviderModelProfile, payload: AssembledModelPayload): string {
+  const structuredOutput = model.capabilities.structuredOutput;
+  if (structuredOutput !== 'none' && structuredOutput !== 'json-object') throw new Error('PROVIDER_STRUCTURED_OUTPUT_UNSUPPORTED');
+  const system = systemPromptOf(payload);
+  const messages = system === null
+    ? conversationMessages(payload)
+    : [{ role: 'system', content: system }, ...conversationMessages(payload)];
+  return canonicalJson({
     model: model.model,
     messages,
     stream: false,
@@ -179,6 +183,61 @@ export function assembleProviderRequest(
     // model without any other byte of the request changing.
     ...(structuredOutput === 'json-object' ? { response_format: { type: 'json_object' } } : {}),
   });
+}
+
+/**
+ * The Anthropic-compatible body, from the Anthropic Messages API reference read on 2026-09-08
+ * (`https://platform.claude.com/docs/en/api/messages`): `{ model, max_tokens, system?, messages }`.
+ *
+ * Two facts of this shape are worth stating where they are implemented. The system prompt is a
+ * top-level field and never a message, so the same `AssembledModelPayload` that puts it first in a
+ * chat-completions array puts it beside the array here, and nothing above the adapter learns the
+ * difference. And `max_tokens` is mandatory, so it is taken from the route's declaration or the
+ * request refuses: a cap the assembler invented would be a bound nobody authorized.
+ *
+ * The reasoning and structured-output spellings this adapter implements are the chat-completions
+ * ones, so a profile that declares either on this shape refuses rather than sending a field the
+ * endpoint never documented.
+ */
+function anthropicMessagesBody(
+  profile: ProviderRouteProfile,
+  model: ProviderModelProfile,
+  payload: AssembledModelPayload,
+): string {
+  if (model.capabilities.structuredOutput !== 'none') throw new Error('PROVIDER_STRUCTURED_OUTPUT_UNSUPPORTED');
+  if (model.capabilities.reasoningControl !== 'none') throw new Error('PROVIDER_REASONING_CONTROL_UNSUPPORTED');
+  if (profile.maxOutputTokens === null) throw new Error('PROVIDER_MAX_OUTPUT_TOKENS_ABSENT');
+  const system = systemPromptOf(payload);
+  return canonicalJson({
+    model: model.model,
+    max_tokens: profile.maxOutputTokens,
+    ...(system === null ? {} : { system }),
+    messages: conversationMessages(payload),
+  });
+}
+
+/**
+ * Assemble one request. The header set comes from the route profile, the body from the model
+ * profile's declared capabilities, and nothing is read from anywhere else — which is what makes a
+ * new model a new row in the profile table rather than a new branch here.
+ *
+ * Two of the three shapes ADR 0067 documents behind the Go gateway's paths are implemented and
+ * `openai-responses` still refuses rather than guessing. The branch is on `requestShape` alone: no
+ * route, model id, or endpoint is consulted, so a model behind an Anthropic-compatible endpoint is a
+ * profile rather than a branch, and nothing above this function learns which shape it got.
+ */
+export function assembleProviderRequest(
+  profile: ProviderRouteProfile,
+  model: ProviderModelProfile,
+  payload: AssembledModelPayload,
+  context: ProviderRequestContext,
+): DeepSeekRequestAssembly {
+  if (model.route !== profile.route) throw new Error('PROVIDER_MODEL_ROUTE_MISMATCH');
+  const shape = model.capabilities.requestShape;
+  if (shape !== 'openai-chat-completions' && shape !== 'anthropic-messages') throw new Error('PROVIDER_REQUEST_SHAPE_UNSUPPORTED');
+  const body = shape === 'anthropic-messages'
+    ? anthropicMessagesBody(profile, model, payload)
+    : chatCompletionsBody(model, payload);
   if (profile.sessionHeader && (context.sessionId === undefined || context.sessionId.length === 0)) {
     throw new Error('PROVIDER_REQUEST_SESSION_ABSENT');
   }
