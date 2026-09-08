@@ -1,0 +1,83 @@
+{
+  "schema": "ai7.model-fixture/1",
+  "identity": "sample1-factual-authored",
+  "description": "事实核查契约 v1 的人工撰写夹具：逐单元阅读 sample1（ADR 0043 收录的 Public SampleBook）后写成，每条引文都是其所声明内容块的逐字子串。",
+  "basedOn": null,
+  "provenance": "authored",
+  "provider": "ai7-local-deterministic",
+  "model": "ai7-deterministic-fixture",
+  "entries": [
+    {
+      "unitOrdinal": 1,
+      "requestDigest": "a72d824bfbbc30310d1f4e93539ed59b88c999c77088433ed3f36d1bdbb96048",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.factual-review.unit-result/1\",\"unitOrdinal\":1,\"assertions\":[{\"quote\":\"王者用来盛酒和温酒的一套器皿\",\"blockOrdinal\":11,\"assertionClass\":\"real-world-fact\",\"category\":\"器物\",\"severity\":\"A\",\"question\":\"曾侯乙尊盘的功能是否为盛酒与温酒的一套器皿？其定名与用途在考古报告中如何表述？\",\"basis\":\"曾侯乙尊盘是可查证的出土文物，其器物功能有公开的考古著录，稿件对功能的断言可与之核对。\"},{\"quote\":\"刘醒龙\",\"blockOrdinal\":3,\"assertionClass\":\"real-world-fact\",\"category\":\"人物\",\"severity\":\"B\",\"question\":\"该作者姓名与本书署名是否一致？\",\"basis\":\"署名指向一位真实作者，可与出版记录核对。\"},{\"quote\":\"巴黎香榭丽舍大街\",\"blockOrdinal\":15,\"assertionClass\":\"real-world-fact\",\"category\":\"地点\",\"severity\":\"C\",\"question\":\"该街道名称的中文通行译名是否为香榭丽舍大街？\",\"basis\":\"这是一个真实地名，其通行译名可与工具书核对；此处仅涉及名称，不涉及情节。\"},{\"quote\":\"《青铜重器》之一\",\"blockOrdinal\":2,\"assertionClass\":\"report-about-manuscript\",\"category\":\"其他\",\"severity\":\"C\",\"question\":\"稿件是否自述属于该系列之一？\",\"basis\":\"这是关于稿件自身编次的陈述，不是可对照外部世界核查的事实断言。\"},{\"quote\":\"刚刚过完六十五岁生日的曾本之\",\"blockOrdinal\":8,\"assertionClass\":\"fictional-canon\",\"category\":\"人物\",\"severity\":\"C\",\"question\":\"该人物年龄在全书内部是否前后一致？\",\"basis\":\"人物与其年龄属于作品内部设定，只能在书内检查连续性，不适用真实世界事实规则。\"}]}",
+        "usage": { "inputTokens": 2480, "outputTokens": 470 }
+      }
+    },
+    {
+      "unitOrdinal": 2,
+      "requestDigest": "58f2f1ddb05f95fde73b6bd36a572a612cfc77348f5351b4941fc7d019ff3ad4",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.factual-review.unit-result/1\",\"unitOrdinal\":2,\"assertions\":[{\"quote\":\"随州擂鼓墩发掘曾侯乙大墓\",\"blockOrdinal\":11,\"assertionClass\":\"real-world-fact\",\"category\":\"史实\",\"severity\":\"A\",\"question\":\"曾侯乙墓是否位于随州擂鼓墩，其发掘年代与主持单位为何？\",\"basis\":\"这是有公开考古记录的发掘事件，地点与年代均可核对；若地名有误将直接损害稿件可信度。\"},{\"quote\":\"省博物馆背后，进东湖公园大门\",\"blockOrdinal\":8,\"assertionClass\":\"real-world-fact\",\"category\":\"地点\",\"severity\":\"B\",\"question\":\"省博物馆与东湖公园的相对位置是否如此描述？\",\"basis\":\"两处均为真实机构与园区，其相对位置可与公开地图核对。\"},{\"quote\":\"收到的是一封用甲骨文写的信\",\"blockOrdinal\":6,\"assertionClass\":\"report-about-manuscript\",\"category\":\"其他\",\"severity\":\"C\",\"question\":\"稿件此处是否在陈述其自身情节？\",\"basis\":\"这是对稿件叙述内容的复述，其真伪只在书内成立，不构成真实世界断言。\"},{\"quote\":\"这才是大师意识\",\"blockOrdinal\":2,\"assertionClass\":\"judgment\",\"category\":\"其他\",\"severity\":\"C\",\"question\":\"此处评价的依据是什么？\",\"basis\":\"这是叙述者转述的评价，属于判断而非可核查事实。\"}]}",
+        "usage": { "inputTokens": 1960, "outputTokens": 390 }
+      }
+    },
+    {
+      "unitOrdinal": 3,
+      "requestDigest": "1a7339023e5da259e73233b5cff4937b887dc1fef743b73ce2f84b7cc19c4938",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.factual-review.unit-result/1\",\"unitOrdinal\":3,\"assertions\":[{\"quote\":\"邮政法的核心是确保公民通信自由\",\"blockOrdinal\":18,\"assertionClass\":\"real-world-fact\",\"category\":\"其他\",\"severity\":\"B\",\"question\":\"现行邮政法是否以保障公民通信自由与通信秘密为其立法目的之一？\",\"basis\":\"这是关于成文法内容的断言，可与法律文本核对；若表述与法条不符，读者会据此形成错误印象。\"},{\"quote\":\"东亭邮局\",\"blockOrdinal\":10,\"assertionClass\":\"real-world-fact\",\"category\":\"机构\",\"severity\":\"C\",\"question\":\"该邮政机构名称是否存在，其辖区是否与稿件描述相符？\",\"basis\":\"机构名称可与公开的邮政网点信息核对。\"},{\"quote\":\"一堆被黄土掩埋的甲骨文\",\"blockOrdinal\":2,\"assertionClass\":\"fictional-canon\",\"category\":\"其他\",\"severity\":\"C\",\"question\":\"该梦境描写在全书内部是否一致？\",\"basis\":\"梦境属于作品内部设定，不能用真实世界事实规则去检验。\"},{\"quote\":\"别拿甲骨文吓唬人，我看你也是睁眼瞎\",\"blockOrdinal\":19,\"assertionClass\":\"judgment\",\"category\":\"其他\",\"severity\":\"C\",\"question\":\"此处人物评价是否有稿件内部依据？\",\"basis\":\"这是人物的主观评价，只能标注为判断并保留分歧。\"}]}",
+        "usage": { "inputTokens": 2320, "outputTokens": 420 }
+      }
+    },
+    {
+      "unitOrdinal": 4,
+      "requestDigest": "7b4df19a1045ed0649c36c6d834abc6b14cb151a97660b82bf84846e24b5a70c",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.factual-review.unit-result/1\",\"unitOrdinal\":4,\"assertions\":[{\"quote\":\"拯之承启\",\"blockOrdinal\":6,\"assertionClass\":\"quotation\",\"category\":\"引文\",\"severity\":\"B\",\"question\":\"这四个字是否可用甲骨文字形书写？其释读是否有据？\",\"basis\":\"稿件把这四个字作为甲骨文引文归属于一封来信，引文的字形与释读可与古文字工具书核对。\"},{\"quote\":\"曾侯乙尊盘\",\"blockOrdinal\":17,\"assertionClass\":\"real-world-fact\",\"category\":\"器物\",\"severity\":\"B\",\"question\":\"该器物定名是否为曾侯乙尊盘，其现藏机构为何？\",\"basis\":\"这是一件可查证的出土文物，定名与收藏地均有公开著录。\"},{\"quote\":\"马跃之专攻漆器和丝绸\",\"blockOrdinal\":14,\"assertionClass\":\"fictional-canon\",\"category\":\"人物\",\"severity\":\"C\",\"question\":\"该人物的研究方向在全书内部是否前后一致？\",\"basis\":\"人物设定属于作品内部，只检查连续性。\"}]}",
+        "usage": { "inputTokens": 2600, "outputTokens": 350 }
+      }
+    },
+    {
+      "unitOrdinal": 5,
+      "requestDigest": "b795a00683ef4aadfad6055b96fb8c1db1e392dccc7114750336fb741d718ecd",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.factual-review.unit-result/1\",\"unitOrdinal\":5,\"assertions\":[{\"quote\":\"曾侯乙尊盘\",\"blockOrdinal\":1,\"assertionClass\":\"real-world-fact\",\"category\":\"器物\",\"severity\":\"B\",\"question\":\"该器物定名是否为曾侯乙尊盘？\",\"basis\":\"与上一单元重叠上下文中同一处引文指向同一件可查证文物。\"},{\"quote\":\"宁波那边有个活动\",\"blockOrdinal\":6,\"assertionClass\":\"real-world-fact\",\"category\":\"地点\",\"severity\":\"C\",\"question\":\"该地名是否为真实城市？\",\"basis\":\"地名可与行政区划资料核对；此处不涉及活动本身的真实性。\"},{\"quote\":\"当年马跃之结婚时\",\"blockOrdinal\":5,\"assertionClass\":\"fictional-canon\",\"category\":\"人物\",\"severity\":\"C\",\"question\":\"该婚礼情节与全书其他处的叙述是否一致？\",\"basis\":\"属于作品内部情节，只作连续性检查。\"}]}",
+        "usage": { "inputTokens": 2140, "outputTokens": 330 }
+      }
+    },
+    {
+      "unitOrdinal": 6,
+      "requestDigest": "488d1b3fddbe24e9bc3078c988329b44a695cab7468b17c40e92a12dee14ec5d",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.factual-review.unit-result/1\",\"unitOrdinal\":6,\"assertions\":[{\"quote\":\"三年不鸣，一鸣惊人，三年不飞，一飞冲天\",\"blockOrdinal\":4,\"assertionClass\":\"real-world-fact\",\"category\":\"史实\",\"severity\":\"A\",\"question\":\"这一典故是否出自关于楚庄王的传世记载？其常见文本作何表述？\",\"basis\":\"这是有传世文献可据的典故，其归属人物与文句次序均可核对；若归属有误将直接损害稿件可信度。\"},{\"quote\":\"春秋五霸之一的楚庄王\",\"blockOrdinal\":4,\"assertionClass\":\"real-world-fact\",\"category\":\"人物\",\"severity\":\"A\",\"question\":\"楚庄王是否被列入春秋五霸？不同史书的五霸名单是否一致？\",\"basis\":\"五霸名单在不同典籍中并不一致，稿件采用了其中一种说法，需要核对其依据。\"},{\"quote\":\"父亲楚穆王死得太突然\",\"blockOrdinal\":4,\"assertionClass\":\"real-world-fact\",\"category\":\"人物\",\"severity\":\"B\",\"question\":\"楚穆王是否为楚庄王之父？其卒年与继位情形记载如何？\",\"basis\":\"世系与继位是可与史书核对的事实，稿件同时断言了亲属关系与卒故的突然性。\"},{\"quote\":\"十公里长的武珞路\",\"blockOrdinal\":6,\"assertionClass\":\"real-world-fact\",\"category\":\"数字\",\"severity\":\"B\",\"question\":\"武珞路的实际长度是否约为十公里？\",\"basis\":\"道路长度是可与公开地理资料核对的数字。\"},{\"quote\":\"恭维新上任的省长是二十一世纪的楚庄王\",\"blockOrdinal\":3,\"assertionClass\":\"report-about-manuscript\",\"category\":\"其他\",\"severity\":\"C\",\"question\":\"稿件此处是否在复述人物的发言？\",\"basis\":\"这是对书内发言的转述，不构成真实世界断言。\"}]}",
+        "usage": { "inputTokens": 2260, "outputTokens": 520 }
+      }
+    },
+    {
+      "unitOrdinal": 7,
+      "requestDigest": "5a103858929f0a0d9a0bc4daaebf6e7dc940ab081b8638fa3454cb1d4a538923",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.factual-review.unit-result/1\",\"unitOrdinal\":7,\"assertions\":[{\"quote\":\"拍摄于一九七八年曾侯乙尊盘刚刚出土之时\",\"blockOrdinal\":2,\"assertionClass\":\"real-world-fact\",\"category\":\"时间\",\"severity\":\"A\",\"question\":\"曾侯乙墓的发掘与该器物出土是否发生于一九七八年？\",\"basis\":\"出土年代有公开考古记录，是可直接核对的年代断言；若年代有误将直接损害稿件可信度。\"},{\"quote\":\"透空蟠虺纹饰附件\",\"blockOrdinal\":2,\"assertionClass\":\"real-world-fact\",\"category\":\"器物\",\"severity\":\"B\",\"question\":\"该器物附件是否为透空蟠虺纹？此纹饰名称的通行写法为何？\",\"basis\":\"纹饰定名可与考古著录核对，且与书名用字相关。\"},{\"quote\":\"一九六六年出土的九鼎七簋\",\"blockOrdinal\":17,\"assertionClass\":\"real-world-fact\",\"category\":\"时间\",\"severity\":\"A\",\"question\":\"该组鼎簋是否于一九六六年出土？其鼎簋数目记载为何？\",\"basis\":\"年代与器物数目都是可与考古报告核对的事实，且稿件据此提出礼制疑问。\"},{\"quote\":\"一九六五年出土的天兽御尊\",\"blockOrdinal\":17,\"assertionClass\":\"real-world-fact\",\"category\":\"时间\",\"severity\":\"A\",\"question\":\"天兽御尊是否于一九六五年出土？其定名的通行写法为何？\",\"basis\":\"出土年代与器物定名均可与著录核对。\"},{\"quote\":\"长江与汉水交汇\",\"blockOrdinal\":2,\"assertionClass\":\"real-world-fact\",\"category\":\"地点\",\"severity\":\"B\",\"question\":\"长江与汉水的交汇处是否位于此处所述位置？\",\"basis\":\"河流交汇位置是可与地理资料核对的事实。\"},{\"quote\":\"让青铜重器成为当代重器\",\"blockOrdinal\":16,\"assertionClass\":\"judgment\",\"category\":\"其他\",\"severity\":\"C\",\"question\":\"此处主张的依据是什么？\",\"basis\":\"这是人物提出的主张，属于判断而非事实。\"}]}",
+        "usage": { "inputTokens": 2540, "outputTokens": 610 }
+      }
+    },
+    {
+      "unitOrdinal": 8,
+      "requestDigest": "e67e9f0ea6cd324b1a2b7457b376da8f91265fb09d431ddc0d01a5327c6e49a8",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.factual-review.unit-result/1\",\"unitOrdinal\":8,\"assertions\":[{\"quote\":\"上面有一串甲骨文的龟甲\",\"blockOrdinal\":2,\"assertionClass\":\"real-world-fact\",\"category\":\"技术\",\"severity\":\"C\",\"question\":\"甲骨文是否刻写于龟甲之上？其常见载体有哪些？\",\"basis\":\"文字载体是可与古文字学著作核对的事实，稿件在此处把甲骨文与龟甲直接关联。\"},{\"quote\":\"一片半个巴掌大小\",\"blockOrdinal\":2,\"assertionClass\":\"report-about-manuscript\",\"category\":\"器物\",\"severity\":\"C\",\"question\":\"稿件此处是否在描述书内器物的尺寸？\",\"basis\":\"这是对书内器物的描述，不是可对照外部世界核查的断言。\"},{\"quote\":\"从与曾小安结婚起，一晃八年\",\"blockOrdinal\":4,\"assertionClass\":\"fictional-canon\",\"category\":\"时间\",\"severity\":\"C\",\"question\":\"该时间跨度与全书其他处的年代叙述是否一致？\",\"basis\":\"属于作品内部年表，只作连续性检查。\"}]}",
+        "usage": { "inputTokens": 1580, "outputTokens": 330 }
+      }
+    }
+  ]
+}
