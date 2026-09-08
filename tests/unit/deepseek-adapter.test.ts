@@ -260,7 +260,11 @@ describe('model capability profiles', () => {
 
   it('keys every model by route and model, so one model id behind two routes is two profiles', () => {
     expect(Object.keys(PROVIDER_MODEL_PROFILES).sort()).toEqual([
-      'deepseek-open-platform/deepseek-v4-pro', 'opencode-go/deepseek-v4-flash', 'opencode-go/deepseek-v4-pro',
+      'deepseek-open-platform/deepseek-v4-pro',
+      // The OpenCode Go plan's chat-completions models, each keyed by the id the Zen table states (S54a).
+      'opencode-go/deepseek-v4-flash', 'opencode-go/deepseek-v4-flash-vision-exp', 'opencode-go/deepseek-v4-pro',
+      'opencode-go/glm-5.1', 'opencode-go/glm-5.2', 'opencode-go/glm-5.3', 'opencode-go/glm-5.3-flash',
+      'opencode-go/kimi-k2.6', 'opencode-go/kimi-k2.7-code', 'opencode-go/kimi-k3',
     ]);
     expect(modelProfileFor(DEEPSEEK_ROUTE, DEEPSEEK_MODEL)).toBe(DEEPSEEK_V4_PRO_PROFILE);
     expect(modelProfileFor(OPENCODE_GO_ROUTE, OPENCODE_GO_MODEL)).toBe(OPENCODE_GO_V4_FLASH_PROFILE);
@@ -290,6 +294,11 @@ describe('model capability profiles', () => {
       reasoningChannel: 'message-reasoning-content',
       usageAttribution: 'includes-reasoning',
     });
+    // Exactly these two are active, and the table's size is pinned beside them so that declaring a
+    // model cannot enlarge the active set: a new row arrives inert or the count moves and this fails.
+    expect(Object.values(PROVIDER_MODEL_PROFILES).filter((profile) => profile.capabilities.answerChannel !== 'none'))
+      .toEqual([DEEPSEEK_V4_PRO_PROFILE, OPENCODE_GO_V4_FLASH_PROFILE]);
+    expect(Object.keys(PROVIDER_MODEL_PROFILES)).toHaveLength(11);
   });
 
   it('declares structured output exactly where one live item observed it accepted, and nowhere else', () => {
@@ -339,6 +348,48 @@ describe('model capability profiles', () => {
     // Declaring no answer channel makes it inert rather than accidentally functional.
     expect(normalizeModelResponse(OPENCODE_GO_V4_PRO_PROFILE, { choices: [{ message: { content: '{"ok":true}' } }] }))
       .toEqual({ kind: 'malformed', reason: 'answer-channel-not-declared' });
+  });
+
+  it('declares every model but the two active ones inert, and assembles each without a branch', () => {
+    const context = { attribution: attributionHeaders(), promptContractDigest: BASELINE_PROMPT_CONTRACT_DIGEST, sessionId: randomUUID() };
+    const live = { ...request(), provider: OPENCODE_GO_ROUTE, model: OPENCODE_GO_MODEL };
+    const flash = assembleProviderRequest(OPENCODE_GO_ROUTE_PROFILE, OPENCODE_GO_V4_FLASH_PROFILE, live, context);
+    const inert = Object.values(PROVIDER_MODEL_PROFILES)
+      .filter((profile) => profile.key !== DEEPSEEK_V4_PRO_PROFILE.key && profile.key !== OPENCODE_GO_V4_FLASH_PROFILE.key);
+    // #310's third model plus the eight the documentation pair admitted (S54a).
+    expect(inert).toHaveLength(9);
+    // One evidence record for one reading of the documentation pair, shared rather than restated.
+    const documentation = modelProfileFor(OPENCODE_GO_ROUTE, 'glm-5.3-flash')!.evidence.requestShape;
+    expect(documentation).toEqual({ kind: 'vendor-documentation', source: expect.stringContaining('opencode.ai'), readOn: '2026-09-08' });
+
+    for (const profile of inert) {
+      expect(profile.route, profile.key).toBe(OPENCODE_GO_ROUTE);
+      expect(profile.capabilities.answerChannel, profile.key).toBe('none');
+      expect(profile.displayName, profile.key).toContain('（OpenCode Go）');
+      // Only the request shape is established; every capability a response would have taught is not.
+      expect(profile.evidence.requestShape.kind, profile.key).toBe('vendor-documentation');
+      for (const capability of ['reasoningControl', 'structuredOutput', 'answerChannel', 'reasoningChannel', 'usageAttribution'] as const) {
+        expect(profile.evidence[capability], `${profile.key} · ${capability}`).toEqual({ kind: 'unverified' });
+      }
+      // Inert is enforced where a response is read, not where one is sent: declaring no answer
+      // channel refuses a perfectly well-formed body, exactly as it refuses #310's third model.
+      expect(normalizeModelResponse(profile, { choices: [{ message: { content: '{"ok":true}' } }] }), profile.key)
+        .toEqual({ kind: 'malformed', reason: 'answer-channel-not-declared' });
+
+      // Assembly, by contrast, needed no branch for any of them: each sends the live route's bytes
+      // with its own model id, and without the one constraint only the live profile's evidence
+      // supports. That difference, and nothing else, is what declaring a model cost.
+      const expected = JSON.parse(flash.body) as Record<string, unknown>;
+      expected.model = profile.model;
+      delete expected.response_format;
+      const assembly = assembleProviderRequest(OPENCODE_GO_ROUTE_PROFILE, profile, live, context);
+      expect(JSON.parse(assembly.body), profile.key).toEqual(expected);
+      expect(assembly.url, profile.key).toBe(flash.url);
+      expect(assembly.headers, profile.key).toEqual(flash.headers);
+      expect(assembly.body, profile.key).not.toContain('response_format');
+    }
+    // Every id is distinct, so nine rows are nine models rather than one model written nine ways.
+    expect(new Set(inert.map((profile) => profile.model)).size).toBe(9);
   });
 
   it('refuses to assemble a body for a capability no adapter implements', () => {
