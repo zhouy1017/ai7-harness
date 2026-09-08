@@ -1379,7 +1379,7 @@ function renderBookOverview(
   }
 
   const detailHost = element('div');
-  const actions = element('div', 'button-row');
+  const actions = element('div', 'button-row workbench-actions');
   const completionActionButtons: HTMLButtonElement[] = [];
   if (sourceCompletion) {
     const sourceRecord = sourceCompletion.receipt.source;
@@ -1477,7 +1477,6 @@ function renderBookOverview(
     button('打开另一本图书', 'secondary', () => renderBookWorkbenchChooser(overview)),
     button('返回图书列表', 'secondary', () => returnToLibrary()),
   );
-  content.append(actions);
 
   const records = element('section', 'review-section record-navigation');
   records.append(element('h3', undefined, '精确记录'));
@@ -1517,7 +1516,11 @@ function renderBookOverview(
     historyNavigation.append(next);
   }
   records.append(historyNavigation);
-  content.append(records);
+  // The actions follow the record navigation so the sticky region stays pinned for the whole page: a
+  // sticky bar releases once its own flow position scrolls into view, so a mid-page one would be
+  // pushed off screen by the record list — exactly what V2-UX-LAYER-005 forbids. This is the slot
+  // `.commit-bar` occupies on the three review surfaces.
+  content.append(records, actions);
   appendRecoveryReturnAction(content, recoveryReturn);
   replaceScreen(completion ? 'imported' : 'book-overview', content);
   if (completion) {
