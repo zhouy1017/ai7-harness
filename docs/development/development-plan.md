@@ -36,7 +36,7 @@ Exit criterion: one `developer-live` Run on exact `sample1` produces unit result
 | 1.4 | S18 | #53 | T3 | J-04 | Factual review: assertion markers, Factual Review Contract v1, research capability with a per-Run search budget and institutional-source list, independent Reference Integrity / Claim Support / Factual Verification, the ADR 0066 finding record | S40 | S18a (the service: kind, contract, Reference Integrity, finding record, refusing research capability, revision 20, protocol 26) integrated (PR #395, `dev@abb7bbb2`); S18b (surfaces) after the editor-surface handoff; S18c (live research) under ADR 0074 once accepted |
 | 1.5 | S19 | #54 | T3 | J-04 | `保存为来源材料` research snapshot into a Book-owned Source Version; exact-revision Correction Proposal from a finding | S18 | planned |
 | 1.6 | S43 | #275 | T2 | J-04 | Assurance sampling over cross-unit and factual findings feeding the assurance axis | S42, S18 | integrated 2026-09-09 as T3 (PR #397, `dev@7b8f626d`); dispositions render beside findings in S42b and S18b |
-| 1.7 | S44 | #276 | T2 | J-04 | Durable Run Report linked from the Task Outcome | S43 | S44a (the service step) dispatched 2026-09-09 as T3 (hashed Brief) on `dev@7b8f626d`; S44b (opening the report from the Overview and the Task Outcome) after the editor-surface handoff |
+| 1.7 | S44 | #276 | T2 | J-04 | Durable Run Report linked from the Task Outcome | S43 | S44a (the service step) integrated 2026-09-09 as T3 (PR #399, `dev@a9154593`); S44b (opening the report from the Overview and the Task Outcome) after the editor-surface handoff |
 
 ### Slice detail
 
