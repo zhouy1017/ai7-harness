@@ -1020,6 +1020,13 @@ export interface LaunchPolicyProjection {
      * transmission per Analysis Unit and a step it does not name is not among them.
      */
     crossUnitReductionAllowed?: boolean;
+    /**
+     * Whether the active Provider Processing policy names the assurance sampling suboperation's
+     * transmissions (ADR 0066). Read exactly as `crossUnitReductionAllowed` is: a sampling turn is
+     * one more transmission per anchor unit, still beyond v4's per-unit bound, so anything but
+     * `true` — absent included — means the suboperation does not dispatch at all.
+     */
+    assuranceSamplingAllowed?: boolean;
     label: '开发与持续集成：零次实时传输' | '开发者实时：实时传输受运行边界约束';
   };
   externalExport: {
@@ -2036,8 +2043,8 @@ export interface BaselineAnalysisProjection {
       completedAttempts: number;
       /** The longest step this Run has actually settled, which the stale case is measured against. */
       longestSettledUnitMs: number | null;
-      /** Which declared step is in flight: the unit loop, or the one cross-unit reduction after it. */
-      stage: 'units' | 'cross-unit-reduction';
+      /** Which declared step is in flight: the unit loop, the cross-unit reduction, or the sample. */
+      stage: 'units' | 'cross-unit-reduction' | 'assurance-sampling';
       /** The `recordedAt` of the Run Record's latest transition, composed by the store. */
       lastTransitionAt: string;
     } | null;

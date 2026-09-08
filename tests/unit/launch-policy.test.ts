@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { DEVELOPER_LIVE_POLICY_BINDING, resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
+import { DEVELOPER_LIVE_POLICY_BINDING, resolveSourceCheckoutLaunchPolicy, verifyDeveloperLivePolicy } from '../../src/service/launch-policy.js';
 import type { LaunchPolicyProjection, TrustedOperationalScope } from '../../src/shared/protocol.js';
 
 const REPO_ROOT = fileURLToPath(new URL('../../', import.meta.url));
@@ -39,6 +39,21 @@ async function placeBuiltFile(relativePath: string): Promise<void> {
 
 async function placeValidCheckout(): Promise<void> {
   for (const relativePath of CARRIED_PATHS) await placeBuiltFile(relativePath);
+}
+
+const V4_PATH = 'docs/policies/provider-processing-policy.v4.json';
+
+/**
+ * The exact v4 document with the given `transmissions` keys overridden. The digests the resolver
+ * checks are constants of `launch-policy.ts`, so a policy revision that named a suboperation could
+ * never be fed through `resolveSourceCheckoutLaunchPolicy`; the reading of those two optional keys is
+ * therefore pinned against the verification function itself, over the real bytes with one key varied.
+ */
+async function v4PolicyWithTransmissions(overrides: Readonly<Record<string, unknown>>): Promise<Record<string, unknown>> {
+  const v4 = JSON.parse(await readFile(join(REPO_ROOT, ...V4_PATH.split('/')), 'utf8')) as Record<string, unknown>;
+  const rule = (v4.decision as { providerAllowRules: Array<Record<string, unknown>> }).providerAllowRules[0]!;
+  rule.transmissions = { ...(rule.transmissions as Record<string, unknown>), ...overrides };
+  return v4;
 }
 
 function expectZeroTransmission(projection: LaunchPolicyProjection): void {
@@ -131,6 +146,10 @@ describe('resolveSourceCheckoutLaunchPolicy', () => {
       // reduction, so the reduction does not dispatch under this scope. A v5 that names it is the
       // Owner's decision; until then the exact policy bytes this pin verifies say `false`.
       crossUnitReductionAllowed: false,
+      // Issue #275: v4 names the assurance sampling suboperation no more than it names the
+      // reduction, and a sampling turn is one more transmission per anchor unit, so it does not
+      // dispatch either. The Owner's policy v5 is what would name both.
+      assuranceSamplingAllowed: false,
       label: '开发者实时：实时传输受运行边界约束',
     });
     expect(projection.externalExport.version).toBe('v1');
@@ -138,17 +157,41 @@ describe('resolveSourceCheckoutLaunchPolicy', () => {
     expect(projection.publicReleasePermission.present).toBe(false);
   });
 
-  it('reads no cross-unit reduction transmission under either selectable scope', async () => {
+  it('reads neither declared suboperation’s transmission under either selectable scope', async () => {
     await placeValidCheckout();
     for (const scope of ['development-ci', 'developer-live'] as const) {
       const projection = await resolveSourceCheckoutLaunchPolicy(codeRoot, scope);
       expect(projection.integrityState).toBe('verified');
       expect(projection.providerProcessing.crossUnitReductionAllowed).toBe(false);
+      // Absent from the exact v4 bytes, which is exactly what `false` means here.
+      expect(projection.providerProcessing.assuranceSamplingAllowed).toBe(false);
     }
-    // The denial carries the same reading, so no unreadable launch can turn the step on.
+    // The denial carries the same reading, so no unreadable launch can turn either step on.
     const denied = await resolveSourceCheckoutLaunchPolicy(codeRoot, 'ordinary-production' as TrustedOperationalScope);
     expect(denied.integrityState).toBe('denied');
     expect(denied.providerProcessing.crossUnitReductionAllowed).toBe(false);
+    expect(denied.providerProcessing.assuranceSamplingAllowed).toBe(false);
+  });
+
+  it('reads assuranceSamplingAllowed as absent, false, or true, and refuses a non-boolean', async () => {
+    // Absent is the v4 document as it stands, and it reads exactly as an explicit `false` does.
+    const asIs = JSON.parse(await readFile(join(REPO_ROOT, ...V4_PATH.split('/')), 'utf8')) as Record<string, unknown>;
+    expect(verifyDeveloperLivePolicy(asIs)).toEqual({ crossUnitReductionAllowed: false, assuranceSamplingAllowed: false });
+    expect(verifyDeveloperLivePolicy(await v4PolicyWithTransmissions({ assuranceSamplingAllowed: false })))
+      .toEqual({ crossUnitReductionAllowed: false, assuranceSamplingAllowed: false });
+
+    // A policy revision that names the suboperation is read as naming it, and moves nothing else.
+    expect(verifyDeveloperLivePolicy(await v4PolicyWithTransmissions({ assuranceSamplingAllowed: true })))
+      .toEqual({ crossUnitReductionAllowed: false, assuranceSamplingAllowed: true });
+    expect(verifyDeveloperLivePolicy(await v4PolicyWithTransmissions({ assuranceSamplingAllowed: true, crossUnitReductionAllowed: true })))
+      .toEqual({ crossUnitReductionAllowed: true, assuranceSamplingAllowed: true });
+
+    // A key that is present but not a boolean is a policy the launch cannot read, and an unreadable
+    // policy is refused outright — never read as a permissive default.
+    for (const value of ['true', 1, null, {}, []]) {
+      await expect(v4PolicyWithTransmissions({ assuranceSamplingAllowed: value }).then(verifyDeveloperLivePolicy))
+        .rejects.toThrow('LAUNCH_POLICY_INVALID');
+    }
   });
 
   it('denies the scopes the source checkout cannot select and any unknown scope', async () => {

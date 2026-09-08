@@ -143,6 +143,7 @@ function deny(reason: string): LaunchPolicyProjection {
       authorizedLiveTransmissionCount: 0,
       liveTransmissionAllowed: false,
       crossUnitReductionAllowed: false,
+      assuranceSamplingAllowed: false,
       label: '开发与持续集成：零次实时传输',
     },
     externalExport: {
@@ -195,9 +196,15 @@ function verifyDevelopmentCiPolicy(policy: Record<string, unknown>): void {
 
 /**
  * Provider Processing v4: default deny with exactly the one developer-live eligible-only rule and its
- * exact binding. Returns whether the rule names the cross-unit reduction's transmission.
+ * exact binding. Returns whether the rule names each of the two declared suboperations' transmissions
+ * (ADR 0066); v4 names neither, so both read `false` until a policy revision says otherwise.
+ *
+ * Exported so the reading of those two optional keys can be pinned against the exact v4 bytes with one
+ * key varied. The document digests this resolver checks are constants of this module, so a policy
+ * revision that named a suboperation could not be fed through `resolveSourceCheckoutLaunchPolicy` at
+ * all — which is the point of the pins, and why the reading is tested here instead.
  */
-function verifyDeveloperLivePolicy(policy: Record<string, unknown>): boolean {
+export function verifyDeveloperLivePolicy(policy: Record<string, unknown>): { crossUnitReductionAllowed: boolean; assuranceSamplingAllowed: boolean } {
   requirePolicy(policy['operationalScope'] === 'developer-live' && policy['lifecycleStatus'] === 'active');
   const selection = policy['trustedSelection'];
   requirePolicy(
@@ -239,6 +246,10 @@ function verifyDeveloperLivePolicy(policy: Record<string, unknown>): boolean {
   // the launch cannot read, and an unreadable policy is the zero-transmission denial.
   const crossUnitReductionAllowed = (transmissions as Record<string, unknown>)['crossUnitReductionAllowed'];
   requirePolicy(crossUnitReductionAllowed === undefined || typeof crossUnitReductionAllowed === 'boolean');
+  // The assurance sampling suboperation's transmissions (ADR 0066), which v4 does not name either.
+  // Read exactly as the reduction's key is, for exactly the same reason.
+  const assuranceSamplingAllowed = (transmissions as Record<string, unknown>)['assuranceSamplingAllowed'];
+  requirePolicy(assuranceSamplingAllowed === undefined || typeof assuranceSamplingAllowed === 'boolean');
   const preconditions = rule['authorizationPreconditions'];
   requirePolicy(
     isRecord(preconditions) &&
@@ -260,7 +271,7 @@ function verifyDeveloperLivePolicy(policy: Record<string, unknown>): boolean {
   requirePolicy(isRecord(source) && source['privateManuscriptAllowed'] === false && source['otherBookRefusedBeforeDispatch'] === true);
   const capture = rule['capture'];
   requirePolicy(isRecord(capture) && capture['fixtureEmissionAllowed'] === false && capture['uploadAllowed'] === false && capture['providerResultCacheAllowed'] === true);
-  return crossUnitReductionAllowed === true;
+  return { crossUnitReductionAllowed: crossUnitReductionAllowed === true, assuranceSamplingAllowed: assuranceSamplingAllowed === true };
 }
 
 /**
@@ -381,7 +392,7 @@ export async function resolveSourceCheckoutLaunchPolicy(
     };
     const publicReleasePermission = { present: false as const, label: '公开发布许可：不存在' as const };
     if (requestedScope === 'developer-live') {
-      const crossUnitReductionAllowed = verifyDeveloperLivePolicy(selectedPolicy);
+      const suboperations = verifyDeveloperLivePolicy(selectedPolicy);
       return {
         integrityState: 'verified',
         denialReason: null,
@@ -392,7 +403,8 @@ export async function resolveSourceCheckoutLaunchPolicy(
           decision: 'eligible-only',
           authorizedLiveTransmissionCount: 'bounded-by-run',
           liveTransmissionAllowed: true,
-          crossUnitReductionAllowed,
+          crossUnitReductionAllowed: suboperations.crossUnitReductionAllowed,
+          assuranceSamplingAllowed: suboperations.assuranceSamplingAllowed,
           label: '开发者实时：实时传输受运行边界约束',
         },
         externalExport,
@@ -410,8 +422,9 @@ export async function resolveSourceCheckoutLaunchPolicy(
         decision: 'deny',
         authorizedLiveTransmissionCount: 0,
         liveTransmissionAllowed: false,
-        // v1 authorizes zero transmissions, so no step of a Run may transmit, this one included.
+        // v1 authorizes zero transmissions, so no step of a Run may transmit, these two included.
         crossUnitReductionAllowed: false,
+        assuranceSamplingAllowed: false,
         label: '开发与持续集成：零次实时传输',
       },
       externalExport,
