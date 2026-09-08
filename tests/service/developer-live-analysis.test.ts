@@ -365,6 +365,42 @@ describe('the developer-live scope over exact sample1 with a stub transport', ()
     expect(fresh.nextItemId('smoke')).toBe('S40/smoke/10');
   });
 
+  it('records an empty answer as its own outcome instead of handing the contract an empty string', async () => {
+    const calls: StubCall[] = [];
+    const { store, bookId, prepared } = await prepareLive(roots.dataRoot);
+    const responses = await unitAnswers(prepared);
+    const execution = owner(store, stubTransport({
+      calls,
+      responses,
+      // The shape the first live Run produced for three of its eight units (#306, #307): the declared
+      // answer channel present and empty, beside a reasoning channel that had content. Before the
+      // normalization boundary existed this reached `parseUnitResult` as `''`, whose only reading of
+      // an empty string is `not-json` — a model reported as having broken the contract when what it
+      // actually did was answer with nothing.
+      override: (ordinal) => ordinal !== 2 ? null : {
+        status: 200,
+        body: {
+          choices: [{ message: { content: '', reasoning_content: '合成推理内容。' } }],
+          usage: { prompt_tokens: 40, completion_tokens: 60 },
+        },
+      },
+    }));
+    const settled = await runLive(store, bookId, prepared, execution);
+
+    expect(settled.run!.state).toBe('completed-with-gaps');
+    const gaps = settled.resultSetRevision!.gaps;
+    expect(gaps.map((entry) => entry.unitOrdinal)).toEqual([2]);
+    expect(gaps[0]!.code).toBe('contract-invalid');
+    expect(gaps[0]!.reason).toContain('空文本');
+    expect(gaps[0]!.reason).toContain('推理通道有内容');
+    // The mislabel this replaces: an empty answer is not a model that produced something unparseable.
+    expect(gaps[0]!.reason).not.toContain('不是 JSON');
+    // The Run continues and the empty unit's usage still counts: nothing about it is a failure.
+    expect(settled.resultSetRevision!.coverage.unitsClosed).toBe(SAMPLE1_UNITS - 1);
+    expect(calls).toHaveLength(SAMPLE1_UNITS);
+    await store.close();
+  });
+
   it('stops at the Run Budget Ceiling with the partial revision preserved', async () => {
     const calls: StubCall[] = [];
     // 100 tokens for the first unit against a 100-token ceiling: the second unit never dispatches,

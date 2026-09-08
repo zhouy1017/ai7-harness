@@ -17,9 +17,18 @@ import {
   assembleDeepSeekRequest,
   assembleProviderRequest,
   classifyTransportError,
-  parseDeepSeekResponse,
+  parseProviderResponse,
   type DeepSeekTransport,
 } from '../../src/service/provider/deepseek-adapter.js';
+import {
+  DEEPSEEK_V4_PRO_PROFILE,
+  OPENCODE_GO_V4_FLASH_PROFILE,
+  OPENCODE_GO_V4_PRO_PROFILE,
+  PROVIDER_MODEL_PROFILES,
+  modelProfileFor,
+  type ProviderModelProfile,
+} from '../../src/service/provider/model-profile.js';
+import { normalizeModelResponse } from '../../src/service/provider/response-normalization.js';
 import { DEEPSEEK_MODEL, DEEPSEEK_ROUTE, OPENCODE_GO_MODEL, OPENCODE_GO_ROUTE, type TransmitTicket } from '../../src/service/provider/egress-gate.js';
 import { NETWORK_DENIED_CODE, installNodeNetworkDenial } from '../../src/shared/network-denial.js';
 
@@ -31,6 +40,18 @@ installNodeNetworkDenial();
 const codes = { QUOTA_EXCEEDED_CODE, INVALID_CREDENTIAL_CODE, CONTEXT_WINDOW_EXCEEDED_CODE };
 const SYSTEM = '合成系统提示。';
 const UNIT = `分析单元 1/1 · 单元摘要 ${'1'.repeat(64)}\n[blk_${'a'.repeat(24)}] (paragraph) 合成段落。`;
+
+/**
+ * The exact bytes each current profile sends for one fixed payload, captured at `dev@5344aa62` before
+ * route and model capability profiles were separated (Issue #310). The promise that separation makes
+ * is byte identity: expressing today's two profiles in the new shape may not move one byte of either
+ * request. A digest over a fixed payload is the only form of that proof which survives the refactor,
+ * so both digests are frozen literals here rather than values derived from the code under test.
+ */
+const PRODUCTION_REQUEST_BODY = `{"messages":[{"content":"${SYSTEM}","role":"system"},{"content":${JSON.stringify(UNIT)},"role":"user"}],"model":"deepseek-v4-pro","reasoning_effort":"high","stream":false,"thinking":{"type":"enabled"}}`;
+const PRODUCTION_REQUEST_DIGEST = '6dbe1241b0d5f43c2905a55bd0a417bc57c51960acd695465012ec851d0635b1';
+const OPENCODE_GO_REQUEST_BODY = `{"messages":[{"content":"${SYSTEM}","role":"system"},{"content":${JSON.stringify(UNIT)},"role":"user"}],"model":"deepseek-v4-flash","stream":false}`;
+const OPENCODE_GO_REQUEST_DIGEST = 'bcb7d5c44fe404a2884d65991a737c6e7026790ddfca34845cbc785fbdae933b';
 
 function request(): GenerateOptions {
   return {
@@ -102,6 +123,12 @@ describe('assembleDeepSeekRequest', () => {
     expect(first.requestDigest).toMatch(/^[0-9a-f]{64}$/);
     expect(first.promptContractDigest).toBe(BASELINE_PROMPT_CONTRACT_DIGEST);
   });
+
+  it('sends the exact production bytes frozen before the profile split', () => {
+    const assembly = assembleDeepSeekRequest(request(), attributionHeaders(), BASELINE_PROMPT_CONTRACT_DIGEST);
+    expect(assembly.body).toBe(PRODUCTION_REQUEST_BODY);
+    expect(assembly.requestDigest).toBe(PRODUCTION_REQUEST_DIGEST);
+  });
 });
 
 describe('provider route generalization', () => {
@@ -111,23 +138,28 @@ describe('provider route generalization', () => {
     return { ...request(), provider: OPENCODE_GO_ROUTE, model: OPENCODE_GO_MODEL };
   }
 
-  it('keys the two remote routes by their profiles and nothing else', () => {
+  it('keys the two remote routes by how they are reached, and never by a model', () => {
     expect(Object.keys(PROVIDER_ROUTE_PROFILES).sort()).toEqual(['deepseek-open-platform', 'opencode-go']);
     expect(DEEPSEEK_ROUTE_PROFILE).toMatchObject({
-      route: DEEPSEEK_ROUTE, endpoint: DEEPSEEK_ENDPOINT, model: DEEPSEEK_MODEL,
-      credentialSlot: 'deepseek-api-key', bodyPolicy: 'deepseek-thinking', dshAttribution: true, sessionHeader: false,
+      route: DEEPSEEK_ROUTE, endpoint: DEEPSEEK_ENDPOINT,
+      credentialSlot: 'deepseek-api-key', dshAttribution: true, sessionHeader: false,
     });
     expect(OPENCODE_GO_ROUTE_PROFILE).toMatchObject({
-      route: OPENCODE_GO_ROUTE, endpoint: OPENCODE_GO_ENDPOINT, model: OPENCODE_GO_MODEL,
-      credentialSlot: 'opencode-go', bodyPolicy: 'openai-chat-completions', dshAttribution: false, sessionHeader: true,
+      route: OPENCODE_GO_ROUTE, endpoint: OPENCODE_GO_ENDPOINT,
+      credentialSlot: 'opencode-go', dshAttribution: false, sessionHeader: true,
     });
+    // A route knows nothing about a model: the gateway serves seven vendors' through one endpoint.
+    for (const profile of Object.values(PROVIDER_ROUTE_PROFILES)) {
+      expect(profile).not.toHaveProperty('model');
+      expect(profile).not.toHaveProperty('bodyPolicy');
+    }
     // The bare Go model id: no provider prefix of any kind.
     expect(OPENCODE_GO_MODEL).toBe('deepseek-v4-flash');
     expect(OPENCODE_GO_ENDPOINT).toBe('https://opencode.ai/zen/go/v1/chat/completions');
   });
 
   it('assembles the opencode-go body as a standard chat completion with no DeepSeek-specific parameters', () => {
-    const assembly = assembleProviderRequest(OPENCODE_GO_ROUTE_PROFILE, liveRequest(), {
+    const assembly = assembleProviderRequest(OPENCODE_GO_ROUTE_PROFILE, OPENCODE_GO_V4_FLASH_PROFILE, liveRequest(), {
       attribution: attributionHeaders(), promptContractDigest: BASELINE_PROMPT_CONTRACT_DIGEST, sessionId: SESSION,
     });
     expect(assembly.url).toBe(OPENCODE_GO_ENDPOINT);
@@ -136,6 +168,8 @@ describe('provider route generalization', () => {
       model: 'deepseek-v4-flash',
       stream: false,
     });
+    expect(assembly.body).toBe(OPENCODE_GO_REQUEST_BODY);
+    expect(assembly.requestDigest).toBe(OPENCODE_GO_REQUEST_DIGEST);
     expect(assembly.body).not.toContain('thinking');
     expect(assembly.body).not.toContain('reasoning_effort');
     expect(assembly.headers).toEqual({
@@ -150,7 +184,7 @@ describe('provider route generalization', () => {
   });
 
   it('refuses to assemble the session-bearing route without a Session id', () => {
-    expect(() => assembleProviderRequest(OPENCODE_GO_ROUTE_PROFILE, liveRequest(), {
+    expect(() => assembleProviderRequest(OPENCODE_GO_ROUTE_PROFILE, OPENCODE_GO_V4_FLASH_PROFILE, liveRequest(), {
       attribution: attributionHeaders(), promptContractDigest: BASELINE_PROMPT_CONTRACT_DIGEST,
     })).toThrowError(/PROVIDER_REQUEST_SESSION_ABSENT/u);
   });
@@ -168,6 +202,7 @@ describe('provider route generalization', () => {
       promptContractDigest: BASELINE_PROMPT_CONTRACT_DIGEST,
       codes,
       profile: OPENCODE_GO_ROUTE_PROFILE,
+      modelProfile: OPENCODE_GO_V4_FLASH_PROFILE,
       sessionId: () => SESSION,
       transport: async (url, init) => {
         calls.push({ url, init });
@@ -202,27 +237,163 @@ describe('provider route generalization', () => {
   });
 });
 
-describe('parseDeepSeekResponse', () => {
-  it('parses synthetic success with cache-adjusted usage and reasoning text', () => {
-    const parsed = parseDeepSeekResponse(200, {
+describe('model capability profiles', () => {
+  it('keys every model by route and model, so one model id behind two routes is two profiles', () => {
+    expect(Object.keys(PROVIDER_MODEL_PROFILES).sort()).toEqual([
+      'deepseek-open-platform/deepseek-v4-pro', 'opencode-go/deepseek-v4-flash', 'opencode-go/deepseek-v4-pro',
+    ]);
+    expect(modelProfileFor(DEEPSEEK_ROUTE, DEEPSEEK_MODEL)).toBe(DEEPSEEK_V4_PRO_PROFILE);
+    expect(modelProfileFor(OPENCODE_GO_ROUTE, OPENCODE_GO_MODEL)).toBe(OPENCODE_GO_V4_FLASH_PROFILE);
+    expect(modelProfileFor(OPENCODE_GO_ROUTE, 'a-model-nobody-declared')).toBeNull();
+    // The same model id, two routes, two different sets of capabilities: the reason the key is composite.
+    expect(OPENCODE_GO_V4_PRO_PROFILE.model).toBe(DEEPSEEK_V4_PRO_PROFILE.model);
+    expect(OPENCODE_GO_V4_PRO_PROFILE.capabilities).not.toEqual(DEEPSEEK_V4_PRO_PROFILE.capabilities);
+  });
+
+  it('declares each active model as one exact combination of the six capabilities', () => {
+    expect(DEEPSEEK_V4_PRO_PROFILE.capabilities).toEqual({
+      requestShape: 'openai-chat-completions',
+      // The production body's `thinking` plus `reasoning_effort`, which is all `bodyPolicy` ever meant.
+      reasoningControl: 'deepseek-thinking',
+      structuredOutput: 'none',
+      answerChannel: 'message-content-string',
+      // This route has never transmitted, so nothing about how it answers has been observed.
+      reasoningChannel: 'none',
+      usageAttribution: 'unknown',
+    });
+    expect(OPENCODE_GO_V4_FLASH_PROFILE.capabilities).toEqual({
+      requestShape: 'openai-chat-completions',
+      // No DeepSeek-specific parameter travels to the gateway until one is observed accepted.
+      reasoningControl: 'none',
+      structuredOutput: 'none',
+      answerChannel: 'message-content-string',
+      reasoningChannel: 'message-reasoning-content',
+      usageAttribution: 'includes-reasoning',
+    });
+  });
+
+  it('declares no structured output for either current profile, because nothing has observed one accepted', () => {
+    expect(DEEPSEEK_V4_PRO_PROFILE.capabilities.structuredOutput).toBe('none');
+    expect(OPENCODE_GO_V4_FLASH_PROFILE.capabilities.structuredOutput).toBe('none');
+    expect(DEEPSEEK_V4_PRO_PROFILE.evidence.structuredOutput).toEqual({ kind: 'unverified' });
+    expect(OPENCODE_GO_V4_FLASH_PROFILE.evidence.structuredOutput).toEqual({ kind: 'unverified' });
+  });
+
+  it('records how every capability was established, and calls every absent one unverified', () => {
+    for (const profile of Object.values(PROVIDER_MODEL_PROFILES)) {
+      const capabilities = Object.entries(profile.capabilities) as Array<[keyof typeof profile.capabilities, string]>;
+      expect(capabilities).toHaveLength(6);
+      for (const [capability, value] of capabilities) {
+        const evidence = profile.evidence[capability];
+        expect(evidence, `${profile.key} · ${capability}`).toBeDefined();
+        // An absent capability is absent because nobody verified it; a present one names a source.
+        if (value === 'none' || value === 'unknown') expect(evidence, `${profile.key} · ${capability}`).toEqual({ kind: 'unverified' });
+        else expect(evidence.kind, `${profile.key} · ${capability}`).not.toBe('unverified');
+      }
+    }
+    expect(OPENCODE_GO_V4_FLASH_PROFILE.evidence.answerChannel).toMatchObject({ kind: 'live-test-item', observedOn: '2026-09-07' });
+    expect(OPENCODE_GO_V4_FLASH_PROFILE.evidence.requestShape).toMatchObject({ kind: 'vendor-documentation', readOn: '2026-09-06' });
+  });
+
+  it('carries an inactive third model of the same gateway with every unverified capability absent', () => {
+    expect(OPENCODE_GO_V4_PRO_PROFILE.capabilities).toEqual({
+      requestShape: 'openai-chat-completions',
+      reasoningControl: 'none',
+      structuredOutput: 'none',
+      answerChannel: 'none',
+      reasoningChannel: 'none',
+      usageAttribution: 'unknown',
+    });
+    // Inactive means inactive: no route profile, no binding, and no policy names it.
+    expect(OPENCODE_GO_ROUTE_PROFILE).not.toHaveProperty('model');
+    expect(OPENCODE_GO_V4_PRO_PROFILE.key).not.toBe(OPENCODE_GO_V4_FLASH_PROFILE.key);
+    // Declaring no answer channel makes it inert rather than accidentally functional.
+    expect(normalizeModelResponse(OPENCODE_GO_V4_PRO_PROFILE, { choices: [{ message: { content: '{"ok":true}' } }] }))
+      .toEqual({ kind: 'malformed', reason: 'answer-channel-not-declared' });
+  });
+
+  it('refuses to assemble a body for a capability no adapter implements', () => {
+    const shape = (capabilities: Partial<ProviderModelProfile['capabilities']>): ProviderModelProfile => ({
+      ...OPENCODE_GO_V4_FLASH_PROFILE,
+      capabilities: { ...OPENCODE_GO_V4_FLASH_PROFILE.capabilities, ...capabilities },
+    });
+    const context = { attribution: attributionHeaders(), promptContractDigest: BASELINE_PROMPT_CONTRACT_DIGEST, sessionId: randomUUID() };
+    const live = { ...request(), provider: OPENCODE_GO_ROUTE, model: OPENCODE_GO_MODEL };
+    expect(() => assembleProviderRequest(OPENCODE_GO_ROUTE_PROFILE, shape({ requestShape: 'anthropic-messages' }), live, context))
+      .toThrowError(/PROVIDER_REQUEST_SHAPE_UNSUPPORTED/u);
+    expect(() => assembleProviderRequest(OPENCODE_GO_ROUTE_PROFILE, shape({ structuredOutput: 'json-object' }), live, context))
+      .toThrowError(/PROVIDER_STRUCTURED_OUTPUT_UNSUPPORTED/u);
+    expect(() => assembleProviderRequest(OPENCODE_GO_ROUTE_PROFILE, DEEPSEEK_V4_PRO_PROFILE, live, context))
+      .toThrowError(/PROVIDER_MODEL_ROUTE_MISMATCH/u);
+  });
+});
+
+describe('normalizeModelResponse', () => {
+  const answered = (content: string, reasoning?: string) => ({
+    choices: [{ message: { content, ...(reasoning === undefined ? {} : { reasoning_content: reasoning }) } }],
+    usage: { prompt_tokens: 11, completion_tokens: 7 },
+  });
+
+  it('separates an empty answer from an answer, and carries whether the model reasoned', () => {
+    // The shape the first live Run produced for three of eight units: the channel was there and empty.
+    expect(normalizeModelResponse(OPENCODE_GO_V4_FLASH_PROFILE, answered('', '合成推理'))).toEqual({
+      kind: 'empty-answer', reasoningPresent: true, usage: { inputTokens: 11, outputTokens: 7 },
+    });
+    expect(normalizeModelResponse(OPENCODE_GO_V4_FLASH_PROFILE, answered(''))).toEqual({
+      kind: 'empty-answer', reasoningPresent: false, usage: { inputTokens: 11, outputTokens: 7 },
+    });
+    expect(normalizeModelResponse(OPENCODE_GO_V4_FLASH_PROFILE, answered('{"ok":true}'))).toMatchObject({ kind: 'answer', text: '{"ok":true}' });
+    // Whitespace is an answer, not an empty one: only the contract may judge whether it parses.
+    expect(normalizeModelResponse(OPENCODE_GO_V4_FLASH_PROFILE, answered(' '))).toMatchObject({ kind: 'answer', text: ' ' });
+  });
+
+  it('names which declared channel a malformed response failed to match', () => {
+    expect(normalizeModelResponse(OPENCODE_GO_V4_FLASH_PROFILE, null)).toEqual({ kind: 'malformed', reason: 'response-not-a-record' });
+    expect(normalizeModelResponse(OPENCODE_GO_V4_FLASH_PROFILE, { choices: 'not-an-array' })).toEqual({ kind: 'malformed', reason: 'response-not-a-record' });
+    expect(normalizeModelResponse(OPENCODE_GO_V4_FLASH_PROFILE, { choices: [] })).toEqual({ kind: 'malformed', reason: 'choice-absent' });
+    expect(normalizeModelResponse(OPENCODE_GO_V4_FLASH_PROFILE, { choices: [{ message: {} }] })).toEqual({ kind: 'malformed', reason: 'answer-channel-absent' });
+    expect(normalizeModelResponse(OPENCODE_GO_V4_FLASH_PROFILE, { choices: [{ message: { content: [{ type: 'text' }] } }] }))
+      .toEqual({ kind: 'malformed', reason: 'answer-channel-absent' });
+  });
+
+  it('is callable with a response body alone, with no adapter, transport, credential, or Run', () => {
+    // What makes replaying a past response possible at all: one function, one profile, one body.
+    expect(normalizeModelResponse(OPENCODE_GO_V4_FLASH_PROFILE, { choices: [{ message: { content: '' } }] }))
+      .toEqual({ kind: 'empty-answer', reasoningPresent: false, usage: null });
+  });
+});
+
+describe('parseProviderResponse', () => {
+  const parse = (status: number, body: unknown, model: ProviderModelProfile = DEEPSEEK_V4_PRO_PROFILE) =>
+    parseProviderResponse(status, body, codes, model.route === DEEPSEEK_ROUTE ? DEEPSEEK_ROUTE_PROFILE : OPENCODE_GO_ROUTE_PROFILE, model);
+
+  it('parses synthetic success with cache-adjusted usage', () => {
+    const parsed = parse(200, {
       choices: [{ message: { content: '{"ok":true}', reasoning_content: '合成推理' } }],
       usage: { prompt_tokens: 120, completion_tokens: 30, prompt_cache_hit_tokens: 20, completion_tokens_details: { reasoning_tokens: 12 } },
-    }, codes);
+    });
     expect(parsed).toEqual({
-      kind: 'success', text: '{"ok":true}', reasoningText: '合成推理',
+      // The production profile declares no reasoning channel, so a field it never verified is not read.
+      kind: 'answer', text: '{"ok":true}', reasoningText: null,
       usage: { inputTokens: 100, outputTokens: 30, cacheReadTokens: 20, reasoningTokens: 12 },
     });
   });
 
+  it('reads the reasoning channel only for the profile that declares one', () => {
+    const body = { choices: [{ message: { content: '{"ok":true}', reasoning_content: '合成推理' } }] };
+    expect(parse(200, body, OPENCODE_GO_V4_FLASH_PROFILE)).toMatchObject({ kind: 'answer', reasoningText: '合成推理' });
+    expect(parse(200, body, DEEPSEEK_V4_PRO_PROFILE)).toMatchObject({ kind: 'answer', reasoningText: null });
+  });
+
   it('classifies error, quota-exceeded, credential, context, rate-limit, and malformed shapes into the closed code set', () => {
-    expect(parseDeepSeekResponse(402, { error: { message: 'Insufficient Balance', type: 'unknown_error' } }, codes)).toMatchObject({ kind: 'failure', code: QUOTA_EXCEEDED_CODE, status: 402 });
-    expect(parseDeepSeekResponse(400, { error: { type: 'insufficient_quota', message: 'quota exceeded' } }, codes)).toMatchObject({ kind: 'failure', code: QUOTA_EXCEEDED_CODE });
-    expect(parseDeepSeekResponse(401, { error: { message: 'Authentication Fails' } }, codes)).toMatchObject({ kind: 'failure', code: INVALID_CREDENTIAL_CODE });
-    expect(parseDeepSeekResponse(400, { error: { message: "This model's maximum context length is 128000 tokens" } }, codes)).toMatchObject({ kind: 'failure', code: CONTEXT_WINDOW_EXCEEDED_CODE });
-    expect(parseDeepSeekResponse(429, { error: { message: 'Rate limit reached' } }, codes)).toMatchObject({ kind: 'failure', code: AI7_FAILURE_CODES.RATE_LIMIT });
-    expect(parseDeepSeekResponse(500, { error: { message: 'server' } }, codes)).toMatchObject({ kind: 'failure', code: AI7_FAILURE_CODES.PROVIDER_ERROR });
-    expect(parseDeepSeekResponse(200, { choices: [] }, codes)).toMatchObject({ kind: 'failure', code: AI7_FAILURE_CODES.INVALID_RESPONSE });
-    expect(parseDeepSeekResponse(200, null, codes)).toMatchObject({ kind: 'failure', code: AI7_FAILURE_CODES.INVALID_RESPONSE });
+    expect(parse(402, { error: { message: 'Insufficient Balance', type: 'unknown_error' } })).toMatchObject({ kind: 'failure', code: QUOTA_EXCEEDED_CODE, status: 402 });
+    expect(parse(400, { error: { type: 'insufficient_quota', message: 'quota exceeded' } })).toMatchObject({ kind: 'failure', code: QUOTA_EXCEEDED_CODE });
+    expect(parse(401, { error: { message: 'Authentication Fails' } })).toMatchObject({ kind: 'failure', code: INVALID_CREDENTIAL_CODE });
+    expect(parse(400, { error: { message: "This model's maximum context length is 128000 tokens" } })).toMatchObject({ kind: 'failure', code: CONTEXT_WINDOW_EXCEEDED_CODE });
+    expect(parse(429, { error: { message: 'Rate limit reached' } })).toMatchObject({ kind: 'failure', code: AI7_FAILURE_CODES.RATE_LIMIT });
+    expect(parse(500, { error: { message: 'server' } })).toMatchObject({ kind: 'failure', code: AI7_FAILURE_CODES.PROVIDER_ERROR });
+    expect(parse(200, { choices: [] })).toMatchObject({ kind: 'malformed', reason: 'choice-absent' });
+    expect(parse(200, null)).toMatchObject({ kind: 'malformed', reason: 'response-not-a-record' });
   });
 
   it('classifies interrupted and denied transports', () => {
@@ -272,6 +443,53 @@ describe('DeepSeekOpenAiCompatibleAdapter.stream', () => {
     const wrongBinding = adapter({ ticket: ticketFor('f'.repeat(64)), secret: 'placeholder', transport: async () => ({ status: 200, json: async () => ({}) }) });
     expect((await collect(wrongBinding.adapter.stream(request()))).at(-1)).toMatchObject({ type: 'finish', reason: { kind: 'error', failure: { code: AI7_FAILURE_CODES.TRANSMIT_TICKET_ABSENT } } });
     expect(wrongBinding.calls).toEqual([]);
+  });
+
+  it('carries an empty answer out of band while the stream stays exactly what it was', async () => {
+    const { adapter: instance } = adapter({
+      ticket: ticketFor(),
+      secret: 'placeholder',
+      transport: async () => ({ status: 200, json: async () => ({ choices: [{ message: { content: '' } }], usage: { prompt_tokens: 9, completion_tokens: 4 } }) }),
+    });
+    const chunks = await collect(instance.stream(request()));
+    // The event shape is unchanged, because the harness composition and every Journey above it read it.
+    expect(chunks).toEqual([
+      { type: 'block-start', index: 0, blockType: 'text' },
+      { type: 'text-delta', index: 0, text: '' },
+      { type: 'block-end', index: 0, block: { type: 'text', text: '' } },
+      { type: 'usage', usage: { inputTokens: 9, outputTokens: 4 } },
+      { type: 'finish', reason: { kind: 'stop' } },
+    ]);
+    // The distinction a string cannot carry travels beside it.
+    expect(instance.lastCanonicalResult).toMatchObject({ kind: 'empty-answer', reasoningPresent: false });
+  });
+
+  it('clears the canonical result at the start of every turn, so a failed turn never reports the last one', async () => {
+    const { adapter: instance } = adapter({
+      ticket: ticketFor(),
+      secret: 'placeholder',
+      transport: async () => ({ status: 200, json: async () => ({ choices: [{ message: { content: '{"ok":true}' } }] }) }),
+    });
+    expect(instance.lastCanonicalResult).toBeNull();
+    await collect(instance.stream(request()));
+    expect(instance.lastCanonicalResult).toMatchObject({ kind: 'answer' });
+    // A turn with no ticket transmits nothing and therefore has no result of its own to report.
+    await collect(instance.stream(request()));
+    expect(instance.lastCanonicalResult).toBeNull();
+  });
+
+  it('fails a response that matches no declared channel exactly as it did before the channels were declared', async () => {
+    const { adapter: instance } = adapter({
+      ticket: ticketFor(),
+      secret: 'placeholder',
+      transport: async () => ({ status: 200, json: async () => ({ choices: [{ message: {} }] }) }),
+    });
+    const chunks = await collect(instance.stream(request()));
+    expect(chunks).toEqual([{
+      type: 'finish',
+      reason: { kind: 'error', failure: { code: AI7_FAILURE_CODES.INVALID_RESPONSE, message: '模型服务响应不含可用内容。', status: 200 } },
+    }]);
+    expect(instance.lastCanonicalResult).toMatchObject({ kind: 'malformed', reason: 'answer-channel-absent' });
   });
 
   it('opens no socket under v1 with network denial installed: the default transport is denied before any connection', async () => {
