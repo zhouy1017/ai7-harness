@@ -1981,7 +1981,11 @@ function rowFidelityConversion(
 ): FidelityConversionIdentity | undefined {
   if (converterIdentity === null || converterIdentity === undefined) return undefined;
   const sourceFormat = asString(format);
-  requireBounded(sourceFormat === 'TXT' || sourceFormat === 'MD', 'SCHEMA_INVALID', '转换来源格式无效。');
+  requireBounded(
+    sourceFormat === 'TXT' || sourceFormat === 'MD' || sourceFormat === 'DOC',
+    'SCHEMA_INVALID',
+    '转换来源格式无效。',
+  );
   return { identity: asString(converterIdentity), sourceFormat };
 }
 

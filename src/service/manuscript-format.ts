@@ -1,5 +1,6 @@
 import { extname } from 'node:path';
 import type { EditableImportProjection, SourceFormat } from '../shared/protocol.js';
+import { DOC_CONVERTER_IDENTITY } from './doc-manuscript.js';
 import { TEXT_CONVERTER_IDENTITY } from './text-manuscript.js';
 
 /**
@@ -22,9 +23,8 @@ const MARKDOWN_EXTENSIONS = new Set(['.md', '.markdown']);
 const EDITABLE_IMPORT_REFUSAL_CODE = 'FORMAT_UNSUPPORTED_FOR_EDITABLE_IMPORT' as const;
 
 /** One product-facing reason per format, naming the retention that is offered instead. */
-const EDITABLE_IMPORT_REFUSAL_REASONS: Readonly<Record<Exclude<SourceFormat, 'DOCX' | 'TXT' | 'MD'>, string>> = {
+const EDITABLE_IMPORT_REFUSAL_REASONS: Readonly<Record<Exclude<SourceFormat, 'DOCX' | 'TXT' | 'MD' | 'DOC'>, string>> = {
   PDF: 'PDF 为固定版式，没有可靠的可编辑往返；可作为来源材料保留。',
-  DOC: '旧版 Word（.doc）的本地转换尚未提供；可作为来源材料保留。',
   ODT: '该格式的本地转换尚未提供；可作为来源材料保留。',
   RTF: '该格式的本地转换尚未提供；可作为来源材料保留。',
   UNKNOWN: '无法识别文件格式；可作为来源材料保留。',
@@ -117,6 +117,9 @@ export function editableImport(format: SourceFormat): EditableImportProjection {
   if (format === 'DOCX') return { available: true };
   if (format === 'TXT' || format === 'MD') {
     return { available: true, conversion: { converterIdentity: TEXT_CONVERTER_IDENTITY, sourceFormat: format } };
+  }
+  if (format === 'DOC') {
+    return { available: true, conversion: { converterIdentity: DOC_CONVERTER_IDENTITY, sourceFormat: format } };
   }
   return { available: false, code: EDITABLE_IMPORT_REFUSAL_CODE, reason: EDITABLE_IMPORT_REFUSAL_REASONS[format] };
 }

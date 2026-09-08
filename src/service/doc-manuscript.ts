@@ -72,7 +72,13 @@ interface WordDocument {
 
 type WordExtractorConstructor = new () => { extract(source: Buffer): Promise<WordDocument> };
 
-const WordExtractor = createRequire(import.meta.url)('word-extractor') as WordExtractorConstructor;
+let readerConstructor: WordExtractorConstructor | undefined;
+
+/** Loaded on the first `.doc` rather than at import: nothing else in the product reads one. */
+function reader(): WordExtractorConstructor {
+  readerConstructor ??= createRequire(import.meta.url)('word-extractor') as WordExtractorConstructor;
+  return readerConstructor;
+}
 
 /**
  * The reader's own filter rewrites curly quotes, en and em dashes, and en and em spaces to ASCII.
@@ -178,7 +184,8 @@ export async function convertDocManuscript(bytes: Uint8Array): Promise<Converted
   requireDoc(hasOleSignature(bytes), '文件不是旧版 Word 文档，无法转换。');
   let document: WordDocument;
   try {
-    document = await new WordExtractor().extract(Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength));
+    const Reader = reader();
+    document = await new Reader().extract(Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength));
   } catch {
     // The reader's own message is not repeated: it is written for a developer, and a message about
     // a manuscript is one of the places a manuscript can leak.

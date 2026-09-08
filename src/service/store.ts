@@ -78,6 +78,7 @@ import {
   type BaselineAnalysisRouteFacts,
   type ProgressReader,
 } from './analysis/baseline-analysis-store.js';
+import { convertDocManuscript, isDocConversionRefusal } from './doc-manuscript.js';
 import {
   buildFidelityReport,
   deriveImportFidelityPlan,
@@ -100,7 +101,6 @@ import {
   convertTextManuscript,
   isTextConversionRefusal,
   type ConversionLoss,
-  type ConvertibleSourceFormat,
 } from './text-manuscript.js';
 import {
   BoundedManuscriptStore,
@@ -896,7 +896,7 @@ function readConversionColumns(
   const converterIdentity = row.converter_identity ?? null;
   requireStore((workingObjectDigest === null) === (converterIdentity === null), 'STORE_CORRUPT', message);
   if (workingObjectDigest === null) return null;
-  requireStore(format === 'TXT' || format === 'MD', 'STORE_CORRUPT', message);
+  requireStore(format === 'TXT' || format === 'MD' || format === 'DOC', 'STORE_CORRUPT', message);
   requireStore(DIGEST_PATTERN.test(asString(workingObjectDigest)), 'STORE_CORRUPT', message);
   return { converterIdentity: asString(converterIdentity), sourceFormat: format };
 }
@@ -4208,19 +4208,22 @@ export class EditorialStore {
   }
 
   /**
-   * Convert the selected file, or `null` when its bytes are not the text its head window suggested.
+   * Convert the selected file, or `null` when its bytes are not what its head window suggested.
    * The whole file is read at once because a conversion has no streaming boundary to stop at; the
    * archive bound was already applied to its size before anything was read.
+   *
+   * The format the conversion was routed by is what picks the converter, so staging, revalidation,
+   * and reselection all reach the same one for the same file (ADR 0072 §5).
    */
   async #convertSelectedManuscript(
     selectedPath: string,
-    format: ConvertibleSourceFormat,
+    format: ManuscriptConversionProjection['sourceFormat'],
   ): Promise<{ docx: Uint8Array; loss: ConversionLoss } | null> {
     const bytes = await readFile(selectedPath);
     try {
-      return convertTextManuscript(bytes, { format });
+      return format === 'DOC' ? await convertDocManuscript(bytes) : convertTextManuscript(bytes, { format });
     } catch (error) {
-      if (isTextConversionRefusal(error)) return null;
+      if (isTextConversionRefusal(error) || isDocConversionRefusal(error)) return null;
       throw error;
     }
   }
