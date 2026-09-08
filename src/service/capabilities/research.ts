@@ -26,9 +26,10 @@ import { DIGEST_PATTERN, hasExactKeys, isRecord, sha256Hex } from '../analysis/c
  * - {@link RefusingResearchCapability} is what every other scope gets, including `developer-live`:
  *   the live path belongs to S18c.
  *
- * This module contains no network call. It references no `fetch`, no `node:http`, no `node:https`, no
- * socket, and no URL of any host; the Egress Gate is not consulted because nothing here could ever
- * ask it for anything. The only I/O is reading admitted fixture files from the repository.
+ * This module contains no network call: it names no transport API, no socket module, and no host or
+ * URL of any kind, which its unit suite asserts over these very bytes. The Egress Gate is not
+ * consulted because nothing here could ever ask it for anything. The only I/O is reading admitted
+ * fixture files from the repository.
  */
 export interface ResearchQuestion {
   /** The finding this question serves; recorded so a later ledger item can name what a fetch was for. */
