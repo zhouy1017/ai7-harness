@@ -51,6 +51,7 @@ import {
 import {
   ANALYSIS_LEDGER_REVISION_15_SQL,
   ANALYSIS_LEDGER_REVISION_16_SQL,
+  ANALYSIS_LEDGER_REVISION_19_SQL,
   ANALYSIS_LEDGER_REVISION_17_TABLES,
   ANALYSIS_LEDGER_SCHEMA_SQL,
   ANALYSIS_LEDGER_TRIGGER_SQL,
@@ -66,13 +67,21 @@ import {
 } from './task-authorization.js';
 
 /**
- * The analysis ledger as revision 15 created it and as revision 16 rebuilt two of its relations;
- * both shapes validate exactly, so a revision-15 store passes this layer before the forward copy.
+ * The analysis ledger as revision 15 created it, as revision 16 rebuilt two of its relations, as
+ * revision 19 left them, and as revision 20 widened the three kind-coupled ones. Every one of those
+ * shapes validates exactly, so a store at any of them passes this layer before the forward copy that
+ * brings it to the current shape.
  */
 const ANALYSIS_LEDGER_EXPECTED_SCHEMA_SQL: Readonly<Record<string, string | ReadonlyArray<string>>> = {
   ...ANALYSIS_LEDGER_SCHEMA_SQL,
-  analysis_task_intents: [ANALYSIS_LEDGER_SCHEMA_SQL.analysis_task_intents, ANALYSIS_LEDGER_REVISION_15_SQL.analysis_task_intents],
+  analysis_task_intents: [
+    ANALYSIS_LEDGER_SCHEMA_SQL.analysis_task_intents,
+    ANALYSIS_LEDGER_REVISION_19_SQL.analysis_task_intents,
+    ANALYSIS_LEDGER_REVISION_15_SQL.analysis_task_intents,
+  ],
   analysis_plan_records: [ANALYSIS_LEDGER_SCHEMA_SQL.analysis_plan_records, ANALYSIS_LEDGER_REVISION_16_SQL.analysis_plan_records, ANALYSIS_LEDGER_REVISION_15_SQL.analysis_plan_records],
+  analysis_result_sets: [ANALYSIS_LEDGER_SCHEMA_SQL.analysis_result_sets, ANALYSIS_LEDGER_REVISION_19_SQL.analysis_result_sets],
+  analysis_result_set_revisions: [ANALYSIS_LEDGER_SCHEMA_SQL.analysis_result_set_revisions, ANALYSIS_LEDGER_REVISION_19_SQL.analysis_result_set_revisions],
 };
 
 /** The analysis ledger before revision 17 (Issue #48): the same relations without the plan-version, Plan Revision, and Plan Adaptation tables and their triggers. */
@@ -2047,7 +2056,8 @@ function requireExactTableSchema(db: DatabaseSync, name: string, expectedSql: st
         ]
       : []),
     // Revision 16 (Issue #93): an update Task names the predecessor Result Set Revision it updates.
-    ...(name === 'analysis_task_intents' && canonicalSchemaSql(matchedExpectedSql) === canonicalSchemaSql(ANALYSIS_LEDGER_SCHEMA_SQL.analysis_task_intents)
+    // Every shape from 16 onwards carries it; only the revision-15 shape does not.
+    ...(name === 'analysis_task_intents' && canonicalSchemaSql(matchedExpectedSql) !== canonicalSchemaSql(ANALYSIS_LEDGER_REVISION_15_SQL.analysis_task_intents)
       ? ['predecessor_revision_id>analysis_result_set_revisions.revision_id:NO ACTION/NO ACTION/NONE']
       : []),
     // Revision 19 (Issue #356): a Source Version may link the working representation it was read
