@@ -251,6 +251,8 @@ describe('the developer-live scope over exact sample1 with a stub transport', ()
       expect(call.headers[OPENCODE_GO_SESSION_HEADER]).toMatch(/^[0-9a-f-]{36}$/u);
       const body = JSON.parse(call.body) as Record<string, unknown>;
       expect(body.model).toBe('deepseek-v4-flash');
+      // The profile's declared constraint reaches the wire on the real path, not only at assembly.
+      expect(body.response_format).toEqual({ type: 'json_object' });
       expect(body).not.toHaveProperty('thinking');
       expect(body).not.toHaveProperty('reasoning_effort');
       // The credential never enters the body or its digest.
@@ -380,7 +382,7 @@ describe('the developer-live scope over exact sample1 with a stub transport', ()
       override: (ordinal) => ordinal !== 2 ? null : {
         status: 200,
         body: {
-          choices: [{ message: { content: '', reasoning_content: '合成推理内容。' } }],
+          choices: [{ message: { content: '', reasoning_content: '合成推理内容。' }, finish_reason: 'stop' }],
           usage: { prompt_tokens: 40, completion_tokens: 60 },
         },
       },
@@ -391,8 +393,10 @@ describe('the developer-live scope over exact sample1 with a stub transport', ()
     const gaps = settled.resultSetRevision!.gaps;
     expect(gaps.map((entry) => entry.unitOrdinal)).toEqual([2]);
     expect(gaps[0]!.code).toBe('contract-invalid');
-    expect(gaps[0]!.reason).toContain('空文本');
-    expect(gaps[0]!.reason).toContain('推理通道有内容');
+    // What an editor actually reads: what came back, and whether re-running this unit is likely to help.
+    expect(gaps[0]!.reason).toBe(
+      '模型完成了推理，但没有给出答案：答案通道为空，推理通道有内容。这不是稿件或契约的问题；重新分析本单元通常会得到结果。',
+    );
     // The mislabel this replaces: an empty answer is not a model that produced something unparseable.
     expect(gaps[0]!.reason).not.toContain('不是 JSON');
     // The Run continues and the empty unit's usage still counts: nothing about it is a failure.

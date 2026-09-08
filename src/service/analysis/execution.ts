@@ -21,7 +21,7 @@ import type { ResolvedModelFixture } from '../provider/model-fixture.js';
 import { ProviderResultCache, providerRequestDigest, usageOfResponse } from '../provider/provider-result-cache.js';
 import { canonicalRecord } from './canonical.js';
 import { SAMPLE1_SOURCE_DIGEST, type BaselineAnalysisStore, type ExecutionBindingRecord, type ExecutionPlanFacts, type PredecessorUnitResult, type RunProgress, type UnitResultRecord } from './baseline-analysis-store.js';
-import { BASELINE_PROMPT_CONTRACT, BASELINE_PROMPT_CONTRACT_DIGEST, buildUnitMessage, parseUnitResult, unitRequestDigest, type BaselineUnitResult } from './contract.js';
+import { BASELINE_PROMPT_CONTRACT, BASELINE_PROMPT_CONTRACT_DIGEST, buildUnitMessage, parseUnitResult, unitRequestDigest, type BaselineUnitResult, type UnitResultParseFailureCode } from './contract.js';
 import { BASELINE_ANALYSIS_CONTRACT_VERSION } from './identity.js';
 import { reduceBaselineAnalysis, type UnitOutcome } from './reducers.js';
 
@@ -127,6 +127,34 @@ const LIVE_INTERRUPTIONS = {
 } as const;
 
 type LiveInterruption = keyof typeof LIVE_INTERRUPTIONS;
+
+/**
+ * What an editor reads when a unit closed as a gap the model itself produced, as opposed to one the
+ * transport or the Run produced. Both readings answer the same two questions, because they are the
+ * only two an editor can act on: what came back, and whether re-running this unit is likely to help.
+ * The first live Run failed three of eight units with a reason that answered neither (#306, #307).
+ *
+ * They are module functions rather than expressions at the call site so that the exact text an editor
+ * sees can be asserted without a Run, a Provider, or a manuscript.
+ */
+export function emptyAnswerGapReason(reasoningPresent: boolean): string {
+  // Reasoning without an answer is the shape the first live Run produced: the model worked and lost
+  // the answer, which is worth repeating, and is not a fault of the manuscript or of the contract.
+  return reasoningPresent
+    ? '模型完成了推理，但没有给出答案：答案通道为空，推理通道有内容。这不是稿件或契约的问题；重新分析本单元通常会得到结果。'
+    : '模型没有给出答案：答案通道与推理通道都为空。重新分析本单元可能有帮助；如反复出现，请检查模型服务状态。';
+}
+
+/**
+ * The reading for an answer that came back and did not parse. `answerText` is taken only to be
+ * measured: its length is the whole of what an editor learns about it, because the answer is model
+ * output over manuscript content and no part of it may reach a gap reason, a log, or a report.
+ * Characters are counted as code points — `src/service/analysis/` exports no grapheme counter, and
+ * UTF-16 units would report a number no reader could recognize as a count of characters.
+ */
+export function unparsableAnswerGapReason(code: UnitResultParseFailureCode, detail: string, answerText: string): string {
+  return `单元结果不符合契约 v1（${code}）：${detail}模型返回了 ${[...answerText].length} 个字符，其中没有可解析的单元结果。重新分析本单元可能有帮助。`;
+}
 
 /**
  * The transmittable set under v4: exact `sample1` and nothing else (settlement l). ADR 0065 admits
@@ -519,10 +547,9 @@ export class BaselineAnalysisExecutionOwner {
           // The model was reached and answered in the channel its profile declares, and the channel
           // was empty. That is not a contract the model broke — there is nothing to parse — so the
           // empty string never reaches `parseUnitResult`, whose only reading of it is `not-json`.
-          // The gap keeps the existing closed code; what an editor should be told about an empty
-          // answer is Issue #306's, immediately after this.
+          // The gap keeps the existing closed code, which is a closed union and stays one.
           acceptedOutputDigests.add(candidate.digest);
-          gap('contract-invalid', `模型在本单元的答案通道返回了空文本${attempt.canonical.reasoningPresent ? '，推理通道有内容' : '，推理通道也没有内容'}；没有可解析的单元结果。`);
+          gap('contract-invalid', emptyAnswerGapReason(attempt.canonical.reasoningPresent));
         } else if (turn.terminal === 'completed' && candidate?.kind === 'contentCandidate') {
           const parsed = parseUnitResult(candidate.text, { unitOrdinal: unit.ordinal, blockIds: [...unit.blockIds, ...unit.overlapBlockIds] });
           if (parsed.ok) {
@@ -536,7 +563,7 @@ export class BaselineAnalysisExecutionOwner {
             });
           } else {
             acceptedOutputDigests.add(candidate.digest);
-            gap('contract-invalid', `单元结果不符合契约 v1（${parsed.code}）：${parsed.detail}`);
+            gap('contract-invalid', unparsableAnswerGapReason(parsed.code, parsed.detail, candidate.text));
           }
         } else if (turn.terminal === 'completed') {
           gap('contract-invalid', '技术回合完成但没有模型输出。');

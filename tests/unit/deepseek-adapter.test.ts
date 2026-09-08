@@ -50,8 +50,16 @@ const UNIT = `分析单元 1/1 · 单元摘要 ${'1'.repeat(64)}\n[blk_${'a'.rep
  */
 const PRODUCTION_REQUEST_BODY = `{"messages":[{"content":"${SYSTEM}","role":"system"},{"content":${JSON.stringify(UNIT)},"role":"user"}],"model":"deepseek-v4-pro","reasoning_effort":"high","stream":false,"thinking":{"type":"enabled"}}`;
 const PRODUCTION_REQUEST_DIGEST = '6dbe1241b0d5f43c2905a55bd0a417bc57c51960acd695465012ec851d0635b1';
-const OPENCODE_GO_REQUEST_BODY = `{"messages":[{"content":"${SYSTEM}","role":"system"},{"content":${JSON.stringify(UNIT)},"role":"user"}],"model":"deepseek-v4-flash","stream":false}`;
-const OPENCODE_GO_REQUEST_DIGEST = 'bcb7d5c44fe404a2884d65991a737c6e7026790ddfca34845cbc785fbdae933b';
+/**
+ * The `opencode-go` pin moved once, deliberately, when test item `S40/reanalyze-range/1` of
+ * 2026-09-08 observed the gateway accept a format constraint and the profile came to declare
+ * `json-object` (#306). The bytes before that were
+ * `…"model":"deepseek-v4-flash","stream":false}` digesting to
+ * `bcb7d5c44fe404a2884d65991a737c6e7026790ddfca34845cbc785fbdae933b`; the whole of the difference is
+ * the one `response_format` field. The production pin above did not move and may not.
+ */
+const OPENCODE_GO_REQUEST_BODY = `{"messages":[{"content":"${SYSTEM}","role":"system"},{"content":${JSON.stringify(UNIT)},"role":"user"}],"model":"deepseek-v4-flash","response_format":{"type":"json_object"},"stream":false}`;
+const OPENCODE_GO_REQUEST_DIGEST = 'b2ef9b2ab9dc1234df98940c9854218add36594bc818678d75efdf8577688730';
 
 function request(): GenerateOptions {
   return {
@@ -128,6 +136,9 @@ describe('assembleDeepSeekRequest', () => {
     const assembly = assembleDeepSeekRequest(request(), attributionHeaders(), BASELINE_PROMPT_CONTRACT_DIGEST);
     expect(assembly.body).toBe(PRODUCTION_REQUEST_BODY);
     expect(assembly.requestDigest).toBe(PRODUCTION_REQUEST_DIGEST);
+    // A capability another profile declares does not reach this route: the live profile now requires
+    // a JSON object and the production request is byte-identical to what it always was.
+    expect(assembly.body).not.toContain('response_format');
   });
 });
 
@@ -166,10 +177,13 @@ describe('provider route generalization', () => {
     expect(JSON.parse(assembly.body)).toEqual({
       messages: [{ content: SYSTEM, role: 'system' }, { content: UNIT, role: 'user' }],
       model: 'deepseek-v4-flash',
+      // The one constraint this profile declares, on the evidence of `S40/reanalyze-range/1`.
+      response_format: { type: 'json_object' },
       stream: false,
     });
     expect(assembly.body).toBe(OPENCODE_GO_REQUEST_BODY);
     expect(assembly.requestDigest).toBe(OPENCODE_GO_REQUEST_DIGEST);
+    expect(assembly.body).toContain('"response_format":{"type":"json_object"}');
     expect(assembly.body).not.toContain('thinking');
     expect(assembly.body).not.toContain('reasoning_effort');
     expect(assembly.headers).toEqual({
@@ -238,6 +252,12 @@ describe('provider route generalization', () => {
 });
 
 describe('model capability profiles', () => {
+  /** A test-local profile: the live one with some capabilities restated, so a case may declare what no shipped profile does. */
+  const shape = (capabilities: Partial<ProviderModelProfile['capabilities']>): ProviderModelProfile => ({
+    ...OPENCODE_GO_V4_FLASH_PROFILE,
+    capabilities: { ...OPENCODE_GO_V4_FLASH_PROFILE.capabilities, ...capabilities },
+  });
+
   it('keys every model by route and model, so one model id behind two routes is two profiles', () => {
     expect(Object.keys(PROVIDER_MODEL_PROFILES).sort()).toEqual([
       'deepseek-open-platform/deepseek-v4-pro', 'opencode-go/deepseek-v4-flash', 'opencode-go/deepseek-v4-pro',
@@ -265,18 +285,25 @@ describe('model capability profiles', () => {
       requestShape: 'openai-chat-completions',
       // No DeepSeek-specific parameter travels to the gateway until one is observed accepted.
       reasoningControl: 'none',
-      structuredOutput: 'none',
+      structuredOutput: 'json-object',
       answerChannel: 'message-content-string',
       reasoningChannel: 'message-reasoning-content',
       usageAttribution: 'includes-reasoning',
     });
   });
 
-  it('declares no structured output for either current profile, because nothing has observed one accepted', () => {
+  it('declares structured output exactly where one live item observed it accepted, and nowhere else', () => {
+    // The live route requires a JSON object because one test item saw the gateway take the field.
+    expect(OPENCODE_GO_V4_FLASH_PROFILE.capabilities.structuredOutput).toBe('json-object');
+    expect(OPENCODE_GO_V4_FLASH_PROFILE.evidence.structuredOutput).toEqual({
+      kind: 'live-test-item', itemIds: ['S40/reanalyze-range/1'], observedOn: '2026-09-08',
+    });
+    // The production route has never transmitted, so nothing has observed it accept anything.
     expect(DEEPSEEK_V4_PRO_PROFILE.capabilities.structuredOutput).toBe('none');
-    expect(OPENCODE_GO_V4_FLASH_PROFILE.capabilities.structuredOutput).toBe('none');
     expect(DEEPSEEK_V4_PRO_PROFILE.evidence.structuredOutput).toEqual({ kind: 'unverified' });
-    expect(OPENCODE_GO_V4_FLASH_PROFILE.evidence.structuredOutput).toEqual({ kind: 'unverified' });
+    // One model id behind the same gateway is not the model that was tested.
+    expect(OPENCODE_GO_V4_PRO_PROFILE.capabilities.structuredOutput).toBe('none');
+    expect(OPENCODE_GO_V4_PRO_PROFILE.evidence.structuredOutput).toEqual({ kind: 'unverified' });
   });
 
   it('records how every capability was established, and calls every absent one unverified', () => {
@@ -293,6 +320,8 @@ describe('model capability profiles', () => {
     }
     expect(OPENCODE_GO_V4_FLASH_PROFILE.evidence.answerChannel).toMatchObject({ kind: 'live-test-item', observedOn: '2026-09-07' });
     expect(OPENCODE_GO_V4_FLASH_PROFILE.evidence.requestShape).toMatchObject({ kind: 'vendor-documentation', readOn: '2026-09-06' });
+    // A capability established later names its own item and date, not the Run that predates it.
+    expect(OPENCODE_GO_V4_FLASH_PROFILE.evidence.structuredOutput).toMatchObject({ kind: 'live-test-item', observedOn: '2026-09-08' });
   });
 
   it('carries an inactive third model of the same gateway with every unverified capability absent', () => {
@@ -313,18 +342,40 @@ describe('model capability profiles', () => {
   });
 
   it('refuses to assemble a body for a capability no adapter implements', () => {
-    const shape = (capabilities: Partial<ProviderModelProfile['capabilities']>): ProviderModelProfile => ({
-      ...OPENCODE_GO_V4_FLASH_PROFILE,
-      capabilities: { ...OPENCODE_GO_V4_FLASH_PROFILE.capabilities, ...capabilities },
-    });
     const context = { attribution: attributionHeaders(), promptContractDigest: BASELINE_PROMPT_CONTRACT_DIGEST, sessionId: randomUUID() };
     const live = { ...request(), provider: OPENCODE_GO_ROUTE, model: OPENCODE_GO_MODEL };
     expect(() => assembleProviderRequest(OPENCODE_GO_ROUTE_PROFILE, shape({ requestShape: 'anthropic-messages' }), live, context))
       .toThrowError(/PROVIDER_REQUEST_SHAPE_UNSUPPORTED/u);
-    expect(() => assembleProviderRequest(OPENCODE_GO_ROUTE_PROFILE, shape({ structuredOutput: 'json-object' }), live, context))
+    expect(() => assembleProviderRequest(OPENCODE_GO_ROUTE_PROFILE, shape({ requestShape: 'openai-responses' }), live, context))
+      .toThrowError(/PROVIDER_REQUEST_SHAPE_UNSUPPORTED/u);
+    // Naming a structured-output constraint is not implementing it: only `json-object` is assembled.
+    expect(() => assembleProviderRequest(OPENCODE_GO_ROUTE_PROFILE, shape({ structuredOutput: 'json-schema' }), live, context))
+      .toThrowError(/PROVIDER_STRUCTURED_OUTPUT_UNSUPPORTED/u);
+    expect(() => assembleProviderRequest(OPENCODE_GO_ROUTE_PROFILE, shape({ structuredOutput: 'tool-call' }), live, context))
       .toThrowError(/PROVIDER_STRUCTURED_OUTPUT_UNSUPPORTED/u);
     expect(() => assembleProviderRequest(OPENCODE_GO_ROUTE_PROFILE, DEEPSEEK_V4_PRO_PROFILE, live, context))
       .toThrowError(/PROVIDER_MODEL_ROUTE_MISMATCH/u);
+  });
+
+  it('requires a JSON object of a profile that declares it, by adding exactly one field to the body', () => {
+    const context = { attribution: attributionHeaders(), promptContractDigest: BASELINE_PROMPT_CONTRACT_DIGEST, sessionId: randomUUID() };
+    const live = { ...request(), provider: OPENCODE_GO_ROUTE, model: OPENCODE_GO_MODEL };
+    // The shipped live profile against the same profile declaring nothing: the bytes this route sent
+    // before test item `S40/reanalyze-range/1` moved its pin, and the bytes it sends now.
+    const asked = assembleProviderRequest(OPENCODE_GO_ROUTE_PROFILE, shape({ structuredOutput: 'none' }), live, context);
+    const required = assembleProviderRequest(OPENCODE_GO_ROUTE_PROFILE, OPENCODE_GO_V4_FLASH_PROFILE, live, context);
+    const askedBody = JSON.parse(asked.body) as Record<string, unknown>;
+    // The whole difference, stated as a difference: the `none` body plus `response_format`, nothing else.
+    expect(JSON.parse(required.body)).toEqual({ ...askedBody, response_format: { type: 'json_object' } });
+    // The chat-completions spelling on the wire, not a paraphrase of it.
+    expect(required.body).toContain('"response_format":{"type":"json_object"}');
+    expect(required.url).toBe(asked.url);
+    expect(required.headers).toEqual(asked.headers);
+    // Different bytes are a different request: the declaring profile pays for the constraint in its digest.
+    expect(required.requestDigest).not.toBe(asked.requestDigest);
+    // A profile that declares nothing sends nothing, which is why the production route is untouched.
+    expect(asked.body).not.toContain('response_format');
+    expect(assembleDeepSeekRequest(request(), attributionHeaders(), BASELINE_PROMPT_CONTRACT_DIGEST).requestDigest).toBe(PRODUCTION_REQUEST_DIGEST);
   });
 });
 

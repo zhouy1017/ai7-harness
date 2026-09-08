@@ -115,10 +115,12 @@ export interface ProviderRequestContext {
  * profile's declared capabilities, and nothing is read from anywhere else — which is what makes a
  * new model a new row in the profile table rather than a new branch here.
  *
- * The two shapes ADR 0067 documents behind the Go gateway's other paths refuse rather than guess, as
- * does any structured-output constraint: no capability may put a byte on the wire that nothing has
- * yet observed the model accept. Requiring a JSON answer is Issue #306's, and it starts by changing
- * a model profile's `structuredOutput`, not by editing this function.
+ * The two shapes ADR 0067 documents behind the Go gateway's other paths refuse rather than guess. Of
+ * the structured-output constraints only `json-object` is implemented, as exactly one body field —
+ * `response_format: {"type":"json_object"}`, the chat-completions spelling — and `json-schema` and
+ * `tool-call` still refuse, because naming a constraint is not implementing it. Implementing one is
+ * still not sending it: the field travels only for a model whose profile declares `json-object`, and
+ * that declaration needs the live evidence the profile table demands (Issue #306).
  */
 export function assembleProviderRequest(
   profile: ProviderRouteProfile,
@@ -128,7 +130,8 @@ export function assembleProviderRequest(
 ): DeepSeekRequestAssembly {
   if (model.route !== profile.route) throw new Error('PROVIDER_MODEL_ROUTE_MISMATCH');
   if (model.capabilities.requestShape !== 'openai-chat-completions') throw new Error('PROVIDER_REQUEST_SHAPE_UNSUPPORTED');
-  if (model.capabilities.structuredOutput !== 'none') throw new Error('PROVIDER_STRUCTURED_OUTPUT_UNSUPPORTED');
+  const structuredOutput = model.capabilities.structuredOutput;
+  if (structuredOutput !== 'none' && structuredOutput !== 'json-object') throw new Error('PROVIDER_STRUCTURED_OUTPUT_UNSUPPORTED');
   const messages: Array<{ role: string; content: string }> = [];
   if (payload.system !== undefined && payload.system.length > 0) messages.push({ role: 'system', content: payload.system });
   for (const message of payload.messages) {
@@ -144,6 +147,10 @@ export function assembleProviderRequest(
     ...(model.capabilities.reasoningControl === 'deepseek-thinking'
       ? { thinking: { type: 'enabled' }, reasoning_effort: DEEPSEEK_REASONING_EFFORT }
       : {}),
+    // One field, and nothing else moves: a profile that declares `json-object` sends the body it
+    // would have sent anyway plus this key, so the constraint can be added to or withdrawn from a
+    // model without any other byte of the request changing.
+    ...(structuredOutput === 'json-object' ? { response_format: { type: 'json_object' } } : {}),
   });
   if (profile.sessionHeader && (context.sessionId === undefined || context.sessionId.length === 0)) {
     throw new Error('PROVIDER_REQUEST_SESSION_ABSENT');
