@@ -483,6 +483,17 @@ export interface BookCreationCommitProjection {
   overview: BookWorkOverviewProjection;
 }
 
+/**
+ * What the intake router identified the selected file as, from its content (ADR 0072 §1). Only
+ * `DOCX` is read natively; every other member is retained source-only, with no parse.
+ */
+export type SourceFormat = 'DOCX' | 'DOC' | 'PDF' | 'ODT' | 'RTF' | 'TXT' | 'MD' | 'UNKNOWN';
+
+/** Whether the staged file can become an editable Manuscript, and why not when it cannot. */
+export type EditableImportProjection =
+  | { available: true }
+  | { available: false; code: 'FORMAT_UNSUPPORTED_FOR_EDITABLE_IMPORT'; reason: string };
+
 export interface ImportIdentityFindingProjection {
   bookId: string;
   bookTitle: string;
