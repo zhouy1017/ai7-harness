@@ -1078,10 +1078,15 @@ function recordPresentation(record: BookRecordPresentation): HTMLElement {
       appendRecordField(values, '来源记录 ID', record.provenanceId, true);
       appendRecordField(values, '所属图书 ID', record.bookId, true);
       appendRecordField(values, '原文件名', record.displayName);
+      appendRecordField(values, '格式', record.format);
       appendRecordField(values, '原文件 SHA-256', record.sourceDigest, true);
-      appendRecordField(values, '内容摘要', record.contentDigest, true);
-      appendRecordField(values, '结构摘要', record.structureDigest, true);
-      appendRecordField(values, '解析器', record.parserIdentity);
+      // A retained original the product never parsed has no content, structure or parser identity,
+      // so those rows are absent rather than empty (ADR 0072 §2).
+      if (record.parserIdentity !== null) {
+        appendRecordField(values, '内容摘要', record.contentDigest, true);
+        appendRecordField(values, '结构摘要', record.structureDigest, true);
+        appendRecordField(values, '解析器', record.parserIdentity);
+      }
       appendRecordField(values, '取得方式', '本机文件选择器');
       appendRecordField(values, '处理边界', '本地 · 未调用 Provider');
       break;
@@ -1125,12 +1130,18 @@ function recordPresentation(record: BookRecordPresentation): HTMLElement {
         '来源版本结果',
         record.sourceVersionDisposition === 'reused-same-book' ? '复用已明确选择的同图书来源版本' : '创建图书拥有的新来源版本',
       );
-      appendRecordField(values, '保留边界', '完整所选 DOCX 文件及本地解析出的完整内容与结构身份');
+      // The boundary claims a parse only where one happened (ADR 0072 §2).
+      appendRecordField(values, '保留边界', record.retainedBoundary.contentDigest === null
+        ? '完整所选原始文件及其精确身份；未进行本地解析'
+        : '完整所选 DOCX 文件及本地解析出的完整内容与结构身份');
       appendRecordField(values, '保留文件名', record.retainedBoundary.displayName);
+      appendRecordField(values, '保留格式', record.retainedBoundary.format);
       appendRecordField(values, '保留字节数', String(record.retainedBoundary.sourceBytes));
       appendRecordField(values, '保留文件 SHA-256', record.retainedBoundary.sourceSha256, true);
-      appendRecordField(values, '保留内容摘要', record.retainedBoundary.contentDigest, true);
-      appendRecordField(values, '保留结构摘要', record.retainedBoundary.structureDigest, true);
+      if (record.retainedBoundary.contentDigest !== null && record.retainedBoundary.structureDigest !== null) {
+        appendRecordField(values, '保留内容摘要', record.retainedBoundary.contentDigest, true);
+        appendRecordField(values, '保留结构摘要', record.retainedBoundary.structureDigest, true);
+      }
       appendRecordField(values, '记录摘要', record.recordDigest, true);
       appendRecordInstant(values, '导入时间', record.importedAt);
       break;
