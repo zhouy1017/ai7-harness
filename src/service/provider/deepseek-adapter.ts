@@ -5,6 +5,7 @@ import type { CredentialBroker, CredentialSlotBinding } from './credential-broke
 import {
   DEEPSEEK_ROUTE,
   OPENCODE_GO_MESSAGES_ROUTE,
+  OPENCODE_GO_RESPONSES_ROUTE,
   OPENCODE_GO_ROUTE,
   type CredentialSlot,
   type RemoteExecutionRoute,
@@ -31,9 +32,10 @@ import { normalizeModelResponse, type CanonicalModelResult } from './response-no
  * high reasoning effort). `opencode-go` is the developer-live route of Provider Processing v4
  * (`POST https://opencode.ai/zen/go/v1/chat/completions`, bare model id `deepseek-v4-flash`, a
  * standard chat-completions body with no DeepSeek-specific parameters, and the technical Session id
- * in `x-opencode-session` for the gateway's prompt cache). `opencode-go-messages` is the same plan's
- * Anthropic-compatible path, declared and inert: no model on it can read a response, and no Provider
- * Resolution Plan may bind it (`ExecutionRoute` in `./egress-gate.ts`).
+ * in `x-opencode-session` for the gateway's prompt cache). `opencode-go-messages` and
+ * `opencode-go-responses` are the same plan's Anthropic-compatible and OpenAI-compatible paths,
+ * declared and inert: no model on either can read a response, and no Provider Resolution Plan may
+ * bind them (`ExecutionRoute` in `./egress-gate.ts`).
  *
  * No route exposes provider-native tools. The adapter assembles a deterministic request from the
  * frozen prompt contract, records the request digest, and transmits only after a `transmit-remote`
@@ -48,6 +50,8 @@ export const DEEPSEEK_REASONING_EFFORT = 'high' as const;
 export const OPENCODE_GO_ENDPOINT = 'https://opencode.ai/zen/go/v1/chat/completions' as const;
 /** The same plan's Anthropic-compatible path, which the Go page documents for its Qwen and MiniMax models. */
 export const OPENCODE_GO_MESSAGES_ENDPOINT = 'https://opencode.ai/zen/go/v1/messages' as const;
+/** The same plan's OpenAI-compatible path, which the Go page documents for its GPT and Grok models. */
+export const OPENCODE_GO_RESPONSES_ENDPOINT = 'https://opencode.ai/zen/go/v1/responses' as const;
 /**
  * The per-turn output cap `opencode-go-messages` declares, because its shape requires the request to
  * name one. The largest unit output observed to date is 24,225 tokens, so this leaves headroom above
@@ -149,10 +153,34 @@ export const OPENCODE_GO_MESSAGES_ROUTE_PROFILE: ProviderRouteProfile = {
   displayName: 'OpenCode Go · Messages（开发者实时）',
 };
 
+/**
+ * The same gateway again, over its OpenAI-compatible path, and a third route for the same reason the
+ * second one is one: the endpoint and the request shape differ, the credential slot does not.
+ *
+ * It declares no output cap, and that is a statement rather than an omission. The shape leaves
+ * `max_output_tokens` optional, nothing has established a per-turn bound for the models this path
+ * serves, and an optional field is not one the request must name — so the route says `null` and the
+ * assembler sends nothing, exactly as the two chat-completions routes do.
+ */
+export const OPENCODE_GO_RESPONSES_ROUTE_PROFILE: ProviderRouteProfile = {
+  route: OPENCODE_GO_RESPONSES_ROUTE,
+  endpoint: OPENCODE_GO_RESPONSES_ENDPOINT,
+  credentialSlot: 'opencode-go',
+  limitPolicy: 'account-limit-terminal',
+  dshAttribution: false,
+  sessionHeader: true,
+  maxOutputTokens: null,
+  // The Go page documents no header for this path either, so the reading ADR 0067 recorded for the
+  // gateway stands for it, and the route waits for a live item exactly as the `/messages` one does.
+  credentialHeaderEvidence: ADR_0067_DOCUMENTATION,
+  displayName: 'OpenCode Go · Responses（开发者实时）',
+};
+
 export const PROVIDER_ROUTE_PROFILES: Readonly<Record<RemoteExecutionRoute, ProviderRouteProfile>> = {
   [DEEPSEEK_ROUTE]: DEEPSEEK_ROUTE_PROFILE,
   [OPENCODE_GO_ROUTE]: OPENCODE_GO_ROUTE_PROFILE,
   [OPENCODE_GO_MESSAGES_ROUTE]: OPENCODE_GO_MESSAGES_ROUTE_PROFILE,
+  [OPENCODE_GO_RESPONSES_ROUTE]: OPENCODE_GO_RESPONSES_ROUTE_PROFILE,
 };
 
 export interface DeepSeekRequestAssembly {

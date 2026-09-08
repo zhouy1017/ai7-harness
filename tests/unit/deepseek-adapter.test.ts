@@ -11,6 +11,7 @@ import {
   DeepSeekOpenAiCompatibleAdapter,
   OPENCODE_GO_ENDPOINT,
   OPENCODE_GO_MESSAGES_ROUTE_PROFILE,
+  OPENCODE_GO_RESPONSES_ROUTE_PROFILE,
   OPENCODE_GO_ROUTE_PROFILE,
   OPENCODE_GO_SESSION_HEADER,
   OPENCODE_GO_USER_AGENT,
@@ -35,6 +36,7 @@ import {
   DEEPSEEK_ROUTE,
   OPENCODE_GO_MESSAGES_ROUTE,
   OPENCODE_GO_MODEL,
+  OPENCODE_GO_RESPONSES_ROUTE,
   OPENCODE_GO_ROUTE,
   type TransmitTicket,
 } from '../../src/service/provider/egress-gate.js';
@@ -158,7 +160,8 @@ describe('provider route generalization', () => {
   }
 
   it('keys every remote route by how it is reached, and never by a model', () => {
-    expect(Object.keys(PROVIDER_ROUTE_PROFILES).sort()).toEqual(['deepseek-open-platform', 'opencode-go', 'opencode-go-messages']);
+    expect(Object.keys(PROVIDER_ROUTE_PROFILES).sort())
+      .toEqual(['deepseek-open-platform', 'opencode-go', 'opencode-go-messages', 'opencode-go-responses']);
     expect(DEEPSEEK_ROUTE_PROFILE).toMatchObject({
       route: DEEPSEEK_ROUTE, endpoint: DEEPSEEK_ENDPOINT,
       credentialSlot: 'deepseek-api-key', dshAttribution: true, sessionHeader: false,
@@ -188,6 +191,15 @@ describe('provider route generalization', () => {
     });
     expect(OPENCODE_GO_MESSAGES_ROUTE_PROFILE.credentialSlot).toBe(OPENCODE_GO_ROUTE_PROFILE.credentialSlot);
     expect(OPENCODE_GO_MESSAGES_ROUTE_PROFILE.credentialHeaderEvidence).toMatchObject({ kind: 'vendor-documentation', source: expect.stringContaining('ADR 0067') });
+    // The `/responses` route is the third way to the same plan on the same slot. Its shape leaves the
+    // cap optional, so it declares none — a statement, not an omission, and the reason no request it
+    // assembles names a per-turn bound.
+    expect(OPENCODE_GO_RESPONSES_ROUTE_PROFILE).toMatchObject({
+      route: 'opencode-go-responses', endpoint: 'https://opencode.ai/zen/go/v1/responses',
+      credentialSlot: 'opencode-go', dshAttribution: false, sessionHeader: true, maxOutputTokens: null,
+    });
+    expect(OPENCODE_GO_RESPONSES_ROUTE_PROFILE.credentialSlot).toBe(OPENCODE_GO_ROUTE_PROFILE.credentialSlot);
+    expect(OPENCODE_GO_RESPONSES_ROUTE_PROFILE.credentialHeaderEvidence).toMatchObject({ kind: 'vendor-documentation', source: expect.stringContaining('ADR 0067') });
     expect(assembleDeepSeekRequest(request(), attributionHeaders(), BASELINE_PROMPT_CONTRACT_DIGEST).requestDigest).toBe(PRODUCTION_REQUEST_DIGEST);
     expect(assembleProviderRequest(OPENCODE_GO_ROUTE_PROFILE, OPENCODE_GO_V4_FLASH_PROFILE, liveRequest(), {
       attribution: attributionHeaders(), promptContractDigest: BASELINE_PROMPT_CONTRACT_DIGEST, sessionId: SESSION,
@@ -292,6 +304,8 @@ describe('model capability profiles', () => {
       // The same plan's `/messages` models, keyed by the second route that reaches them (S54b).
       'opencode-go-messages/minimax-m2.5', 'opencode-go-messages/minimax-m2.7', 'opencode-go-messages/minimax-m3',
       'opencode-go-messages/qwen3.6-plus', 'opencode-go-messages/qwen3.7-plus',
+      // The same plan's `/responses` models, keyed by the third route (S54c).
+      'opencode-go-responses/gpt-5.6-luna', 'opencode-go-responses/grok-4.6',
       // The OpenCode Go plan's chat-completions models, each keyed by the id the Zen table states (S54a).
       'opencode-go/deepseek-v4-flash', 'opencode-go/deepseek-v4-flash-vision-exp', 'opencode-go/deepseek-v4-pro',
       'opencode-go/glm-5.1', 'opencode-go/glm-5.2', 'opencode-go/glm-5.3', 'opencode-go/glm-5.3-flash',
@@ -329,7 +343,7 @@ describe('model capability profiles', () => {
     // model cannot enlarge the active set: a new row arrives inert or the count moves and this fails.
     expect(Object.values(PROVIDER_MODEL_PROFILES).filter((profile) => profile.capabilities.answerChannel !== 'none'))
       .toEqual([DEEPSEEK_V4_PRO_PROFILE, OPENCODE_GO_V4_FLASH_PROFILE]);
-    expect(Object.keys(PROVIDER_MODEL_PROFILES)).toHaveLength(16);
+    expect(Object.keys(PROVIDER_MODEL_PROFILES)).toHaveLength(18);
   });
 
   it('declares structured output exactly where one live item observed it accepted, and nowhere else', () => {
@@ -384,14 +398,21 @@ describe('model capability profiles', () => {
   it('declares every model but the two active ones inert, whichever path reaches it', () => {
     const inert = Object.values(PROVIDER_MODEL_PROFILES)
       .filter((profile) => profile.key !== DEEPSEEK_V4_PRO_PROFILE.key && profile.key !== OPENCODE_GO_V4_FLASH_PROFILE.key);
-    // #310's third model, the eight the documentation pair admitted on chat completions (S54a), and
-    // the five it admits on `/messages` (S54b).
-    expect(inert).toHaveLength(14);
+    // #310's third model, the eight the documentation pair admitted on chat completions (S54a), the
+    // five it admits on `/messages` (S54b), and the two on `/responses` (S54c).
+    expect(inert).toHaveLength(16);
     // One evidence record for one reading of the documentation pair, shared rather than restated —
     // by both paths, because reading which path a model is served on is the same reading.
     const documentation = modelProfileFor(OPENCODE_GO_ROUTE, 'glm-5.3-flash')!.evidence.requestShape;
     expect(documentation).toEqual({ kind: 'vendor-documentation', source: expect.stringContaining('opencode.ai'), readOn: '2026-09-08' });
     expect(modelProfileFor(OPENCODE_GO_MESSAGES_ROUTE, 'qwen3.7-plus')!.evidence.requestShape).toEqual(documentation);
+    // The third path is the exception, and says so: the same pair established the path and the id,
+    // and the shape itself was read from the vendor's published SDK at an exact commit.
+    expect(modelProfileFor(OPENCODE_GO_RESPONSES_ROUTE, 'grok-4.6')!.evidence.requestShape).toEqual({
+      kind: 'vendor-documentation',
+      source: expect.stringContaining('responses.ts@eecbebe294be7e657c99a34eb104a6a4b507335c'),
+      readOn: '2026-09-08',
+    });
 
     for (const profile of inert) {
       expect(profile.capabilities.answerChannel, profile.key).toBe('none');
@@ -408,9 +429,11 @@ describe('model capability profiles', () => {
         .toEqual({ kind: 'malformed', reason: 'answer-channel-not-declared' });
       expect(normalizeModelResponse(profile, { content: [{ type: 'text', text: '{"ok":true}' }] }), profile.key)
         .toEqual({ kind: 'malformed', reason: 'answer-channel-not-declared' });
+      expect(normalizeModelResponse(profile, { output: [{ type: 'message', content: [{ type: 'output_text', text: '{"ok":true}' }] }] }), profile.key)
+        .toEqual({ kind: 'malformed', reason: 'answer-channel-not-declared' });
     }
-    // Every id is distinct, so fourteen rows are fourteen models rather than one written fourteen ways.
-    expect(new Set(inert.map((profile) => profile.model)).size).toBe(14);
+    // Every id is distinct, so sixteen rows are sixteen models rather than one written sixteen ways.
+    expect(new Set(inert.map((profile) => profile.model)).size).toBe(16);
   });
 
   it('assembles each inert chat-completions model without a branch, as the live route bytes', () => {
@@ -453,6 +476,28 @@ describe('model capability profiles', () => {
         messages: [{ role: 'user', content: UNIT }],
       });
       expect(assembly.url, profile.key).toBe('https://opencode.ai/zen/go/v1/messages');
+    }
+  });
+
+  it('assembles each inert /responses model as the third shape, on the third route, with no cap', () => {
+    const context = { attribution: attributionHeaders(), promptContractDigest: BASELINE_PROMPT_CONTRACT_DIGEST, sessionId: randomUUID() };
+    const live = { ...request(), provider: OPENCODE_GO_RESPONSES_ROUTE, model: 'grok-4.6' };
+    const responsesModels = Object.values(PROVIDER_MODEL_PROFILES).filter((profile) => profile.route === OPENCODE_GO_RESPONSES_ROUTE);
+    // The two ids the documentation pair states verbatim, and only those two: Muse Spark is excluded
+    // on a disagreement about the id itself, and the Zen table's own `/responses` rows are not this plan.
+    expect(responsesModels.map((profile) => profile.model)).toEqual(['grok-4.6', 'gpt-5.6-luna']);
+
+    for (const profile of responsesModels) {
+      expect(profile.capabilities.requestShape, profile.key).toBe('openai-responses');
+      const assembly = assembleProviderRequest(OPENCODE_GO_RESPONSES_ROUTE_PROFILE, profile, live, context);
+      expect(JSON.parse(assembly.body), profile.key).toEqual({
+        model: profile.model,
+        instructions: SYSTEM,
+        input: [{ role: 'user', content: UNIT }],
+      });
+      // The route declares no cap, so no request on it names one.
+      expect(assembly.body, profile.key).not.toContain('max_output_tokens');
+      expect(assembly.url, profile.key).toBe('https://opencode.ai/zen/go/v1/responses');
     }
   });
 
