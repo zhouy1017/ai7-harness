@@ -307,14 +307,45 @@ export function parseCrossUnitCitedBlocks(text: string): Map<number, string[]> {
 }
 
 /**
+ * One closed result with every source range's `blockId` replaced by that block's 1-based index in its
+ * unit's cited-blocks list — the same index `{{unit:U:block:N}}` names. `0` marks a block the message
+ * never listed, which is every block a unit cited only in a conflict or an unresolved item: the
+ * reduction is never shown those, so they carry no index for it to mean anything by.
+ */
+function withIndexedRanges(result: BaselineUnitResult, index: ReadonlyMap<string, number>): Record<string, unknown> {
+  const ranges = (list: ReadonlyArray<AnalysisSourceRangeProjection>) =>
+    list.map((range) => ({ blockId: index.get(range.blockId) ?? 0, fromGrapheme: range.fromGrapheme, toGrapheme: range.toGrapheme }));
+  return {
+    unitOrdinal: result.unitOrdinal,
+    synopsis: result.synopsis,
+    confidence: result.confidence,
+    entities: result.entities.map((entity) => ({ ...entity, aliases: [...entity.aliases], sourceRanges: ranges(entity.sourceRanges) })),
+    events: result.events.map((event) => ({ ...event, participants: [...event.participants], sourceRanges: ranges(event.sourceRanges) })),
+    relationships: result.relationships.map((relationship) => ({ ...relationship, sourceRanges: ranges(relationship.sourceRanges) })),
+    settingClaims: result.settingClaims.map((claim) => ({ ...claim, sourceRanges: ranges(claim.sourceRanges) })),
+    conflicts: result.conflicts.map((note) => ({ ...note, sourceRanges: ranges(note.sourceRanges) })),
+    unresolved: result.unresolved.map((note) => ({ ...note, sourceRanges: ranges(note.sourceRanges) })),
+  };
+}
+
+/**
  * The digest of one exact closed unit set: SHA-256 over the canonical JSON of the closed results in
- * ordinal order with the schema field stripped. The same unit set always yields the same digest, so
- * a deterministic fixture entry answers exactly the reduction over exactly that set.
+ * ordinal order, the schema field stripped and every source range's `blockId` replaced by that
+ * block's 1-based index in its unit's cited-blocks list in first-citation order.
+ *
+ * The indices are the point. A committed block identity is minted from the import's own id, so the
+ * same manuscript imported twice carries different identities and a digest over raw identities could
+ * never be reproduced — not across imports, and not across two runs of one test. Positions are a
+ * function of the unit results alone, so the digest is one of content and structure, exactly as the
+ * unit contract's `unitDigest` is a function of block digests rather than of block identities. Two
+ * mintings of one unit set therefore yield one digest, and a hand-written fixture can pin it; any
+ * change to what a unit reported, or to which blocks it cited in what order, changes it.
  */
 export function unitSetDigest(closed: ReadonlyArray<ClosedUnitResult>): string {
-  const bodies = orderedClosed(closed).map(({ result }) => {
-    const { schema: _schema, ...rest } = result;
-    return rest;
+  const cited = citedBlocksByUnit(closed);
+  const bodies = orderedClosed(closed).map(({ unitOrdinal, result }) => {
+    const index = new Map((cited.get(unitOrdinal) ?? []).map((blockId, position) => [blockId, position + 1] as const));
+    return withIndexedRanges(result, index);
   });
   return sha256Hex(canonicalJson(bodies));
 }

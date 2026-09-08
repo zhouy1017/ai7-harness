@@ -113,12 +113,54 @@ describe('the cross-unit request digest', () => {
     // Ordinal order, not submission order, and identical results yield the identical digest.
     expect(unitSetDigest([...CLOSED].reverse())).toBe(unitSetDigest(CLOSED));
     expect(crossUnitRequestDigest(BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST, unitSetDigest([...CLOSED].reverse()))).toBe(digest);
-    // One changed unit result is a different unit set and therefore a different request.
-    const changed: ClosedUnitResult[] = [CLOSED[0]!, { unitOrdinal: 3, result: { ...CLOSED[1]!.result, synopsis: '合成概述（已改）。' } }];
-    expect(unitSetDigest(changed)).not.toBe(unitSetDigest(CLOSED));
-    // A missing unit is a different set too, which is what keeps a fixture entry bound to its own run.
-    expect(unitSetDigest([CLOSED[0]!])).not.toBe(unitSetDigest(CLOSED));
     expect(() => crossUnitRequestDigest('not-a-digest', unitSetDigest(CLOSED))).toThrow('ANALYSIS_REQUEST_DIGEST_INVALID');
+  });
+
+  /**
+   * The half a fixture depends on. A committed block identity is minted from the import's own id
+   * (`bounded-manuscript.ts`), so the same manuscript imported twice carries different identities; the
+   * digest survives that only because it indexes each cited block by its position rather than naming it.
+   */
+  it('is the same for two mintings of one closed set under different block identities', () => {
+    const reminted: ClosedUnitResult[] = [
+      { unitOrdinal: 1, result: unitResult(1, [`blk_${'1'.repeat(24)}`, `blk_${'2'.repeat(24)}`], '合成人物甲') },
+      { unitOrdinal: 3, result: unitResult(3, [`blk_${'3'.repeat(24)}`, `blk_${'4'.repeat(24)}`], '合成人物乙') },
+    ];
+    // Not one identity in common, and the message bytes differ because they name those identities.
+    expect(JSON.stringify(reminted)).not.toContain(BLOCK_A);
+    expect(buildCrossUnitMessage(reminted, 8)).not.toBe(buildCrossUnitMessage(CLOSED, 8));
+    expect(unitSetDigest(reminted)).toBe(unitSetDigest(CLOSED));
+    // A third minting whose identities happen to sort the other way is still the same set.
+    const resorted: ClosedUnitResult[] = [
+      { unitOrdinal: 1, result: unitResult(1, [`blk_${'f'.repeat(24)}`, `blk_${'e'.repeat(24)}`], '合成人物甲') },
+      { unitOrdinal: 3, result: unitResult(3, [`blk_${'d'.repeat(24)}`, `blk_${'c'.repeat(24)}`], '合成人物乙') },
+    ];
+    expect(unitSetDigest(resorted)).toBe(unitSetDigest(CLOSED));
+  });
+
+  it('differs whenever the closed set differs in content or in structure', () => {
+    const baseline = unitSetDigest(CLOSED);
+    // Content: one changed synopsis.
+    expect(unitSetDigest([CLOSED[0]!, { unitOrdinal: 3, result: { ...CLOSED[1]!.result, synopsis: '合成概述（已改）。' } }])).not.toBe(baseline);
+    // Content: one changed claim, which is what a cross-unit contradiction turns on.
+    const claims = CLOSED[1]!.result.settingClaims.map((claim) => ({ ...claim, claim: '位于东方' }));
+    expect(unitSetDigest([CLOSED[0]!, { unitOrdinal: 3, result: { ...CLOSED[1]!.result, settingClaims: claims } }])).not.toBe(baseline);
+    // Membership: a missing unit, and the same results under a different ordinal.
+    expect(unitSetDigest([CLOSED[0]!])).not.toBe(baseline);
+    expect(unitSetDigest([CLOSED[0]!, { unitOrdinal: 4, result: { ...CLOSED[1]!.result, unitOrdinal: 4 } }])).not.toBe(baseline);
+    // Structure: two items that cite one block are not two items that cite two, because the unit's
+    // cited-blocks list is one entry shorter and both items index into position 1.
+    const shared = { ...CLOSED[0]!.result, settingClaims: CLOSED[0]!.result.settingClaims.map((claim) => ({ ...claim, sourceRanges: [range(BLOCK_A)] })) };
+    expect(unitSetDigest([{ unitOrdinal: 1, result: shared }, CLOSED[1]!])).not.toBe(baseline);
+    // Permuting which identity sits in which slot is not a structural difference: the indices are
+    // positions in citation order, so this is the same set under a second minting.
+    expect(unitSetDigest([{ unitOrdinal: 1, result: unitResult(1, [BLOCK_B, BLOCK_A], '合成人物甲') }, CLOSED[1]!])).toBe(baseline);
+    // Structure: one more citation of an already-cited block changes what the message lists.
+    const extra = {
+      ...CLOSED[0]!.result,
+      relationships: [{ subject: '合成人物甲', object: '合成之城', relation: '抵达', sourceRanges: [range(BLOCK_A), range(BLOCK_B)] }],
+    };
+    expect(unitSetDigest([{ unitOrdinal: 1, result: extra }, CLOSED[1]!])).not.toBe(baseline);
   });
 });
 
