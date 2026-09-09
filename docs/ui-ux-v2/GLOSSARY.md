@@ -151,6 +151,14 @@ Shared artifact, analysis, Enrollment and Apply meanings route to root contexts;
 | Review Workspace | 审阅工作面 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Evaluation Workspace | 评估工作面 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Findings Center | 发现 | [AI7 V2 UI/UX](./CONTEXT.md) |
+| Task Drawer | 任务面 | [AI7 V2 UI/UX](./CONTEXT.md) |
+| Plan Mode | 精简 / 完整 | [AI7 V2 UI/UX](./CONTEXT.md) |
+| Editable Plan | 可编辑计划 | [AI7 V2 UI/UX](./CONTEXT.md) |
+| Delivery Card | 交付卡 | [AI7 V2 UI/UX](./CONTEXT.md) |
+| Book Delivery Package Card | 图书交付包 | [AI7 V2 UI/UX](./CONTEXT.md) |
+| Materials Library View | 资料库 | [AI7 V2 UI/UX](./CONTEXT.md) |
+| External Retention View | 外部来源留存 | [AI7 V2 UI/UX](./CONTEXT.md) |
+| Data Version Row | 数据版本 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Context-bound Clarification Card | 上下文绑定澄清卡 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Choice-first Input Card | 选项优先输入卡 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Clarification Blocking Scope | 澄清阻塞范围 | [AI7 V2 UI/UX](./CONTEXT.md) |
@@ -471,6 +479,14 @@ Shared artifact, analysis, Enrollment and Apply meanings route to root contexts;
 | Review Workspace | The analysis overview, the factual-verification lens alone, or a generic task list. |
 | Evaluation Workspace | The analysis overview, a Workflow Gate, or a Delivery Quality Metric dashboard. |
 | Findings Center | The Global Attention View, a second ledger, or dismissal as resolution. |
+| Task Drawer | A modal, a chat panel, a second work surface, or the Global Attention View. |
+| Plan Mode | Two plans, a summary that hides a material fact, or the quick-start path. |
+| Editable Plan | Editing a running Run, an authorization, or a free-text prompt. |
+| Delivery Card | A Book progress card, a milestone card, or a package card. |
+| Book Delivery Package Card | A per-document package, an export dialog, or a publication step. |
+| Materials Library View | A Book's 来源与证据, a file browser, or a Run Source Scope. |
+| External Retention View | The Factual Verification Policy Document, a citation list, or a web browser. |
+| Data Version Row | The software version, a migration log, or the Product Data Location path. |
 | Context-bound Clarification Card | Generic chat, a transient model question, Run Authorization, Proposal Decision, or notification alone. |
 | Choice-first Input Card | Forced-choice-only input, a preselected answer, tab navigation, or one generic approval interaction. |
 | Clarification Blocking Scope | Run Source Scope, mutation scope, the whole Run by default, or permission for independent work to exceed the envelope. |

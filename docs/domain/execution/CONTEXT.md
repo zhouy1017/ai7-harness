@@ -496,6 +496,11 @@ The one canonical AI7-owned directory shared by one running application/service 
 _中文_: 智能体数据根目录
 _Avoid_: Run Source Scope, a general filesystem grant, a proven whole-process OS sandbox, a repository working tree
 
+**Data Version**:
+The identifier of AI7's stored data format, frozen at each release and changed only when necessary, separate from the software version, written into every store and export package, and governing upgrade backup, disclosure and rollback ([ADR 0077](../../adr/0077-adopt-the-editor-facing-surface-specification-as-the-execution-standard.md)).
+_中文_: 数据版本
+_Avoid_: the software version, a migration script, a Manuscript Revision, the Product Data Location
+
 **Agent Behavior Asset**:
 A versioned prompt, instructional text, task guidance, or bounded ranking parameter—possibly carried by a native DSH Skill, Bundle, Profile, or Agent Preset—that shapes output quality and never grants authority. An agent may propose a revision, but imported Skill reconciliation remains inert until explicit adoption or a matching Artifact Update Rule, and authority-expanding change always returns to review.
 _中文_: 智能体行为资产

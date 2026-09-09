@@ -112,6 +112,7 @@ Added by [ADR 0071](../adr/0071-state-the-decision-layer-and-run-liveness-rules.
 - **V2-UX-BOOK-003**: AI7 never reduces a Book to one progress percentage or implies that its Editorial Deliverables share one Workflow Instance or phase.
 - **V2-UX-BOOK-004**: Workflow, Tasks, Evidence, Proposals, sources, Series context, and history/recovery appear as Contextual Work Lenses bound to the relevant Book or deliverable and open their authoritative records.
 - **V2-UX-BOOK-005**: Visual priority for the Manuscript does not merge authority, version history, workflow state, review, signoff, delivery, or release decisions across Editorial Deliverables.
+- **V2-UX-BOOK-006**: A Book carries `作者`, `责编` and `相关人`. Authors and editors may be several people; a 相关人 takes a role from a house list (校对 / 美编 / 译者 / 外审专家 / 作者经纪 / 营销 / 其他) and a name. The library card shows them and filters by 责编; feedback history, Learning Eligibility records and House Editorial Memory attribute by author and editor (FDBK-013) (ADR 0077).
 
 ## Series membership and sharing scope
 
@@ -155,6 +156,7 @@ Added by [ADR 0071](../adr/0071-state-the-decision-layer-and-run-liveness-rules.
 - **V2-UX-ATTN-006**: The sidebar badge is the Actionable Attention Count and includes only unresolved items in the first two groups that require editor action.
 - **V2-UX-ATTN-007**: Every Attention Projection Item shows its Book, Active Work Object, exact state or named decision, reason for attention, and safe next action, and navigates to the authoritative record.
 - **V2-UX-ATTN-008**: Attention ordering, grouping, badge changes, filtering, and dismissal never grant authority or mutate the underlying Task, decision, Effect, Workflow Instance, or recovery record.
+- **V2-UX-ATTN-009**: Material and knowledge-base items map into the same four groups: a failed external source retention into `异常与结果待确认`, a pending 资料库 attribution or Learning Eligibility into `等待你的决定`, and a completed indexing into `最近完成`; no fifth group exists (ADR 0077).
 
 ## Manuscript work-surface modes
 
@@ -289,6 +291,9 @@ Added by [ADR 0076](../adr/0076-align-editor-facing-surfaces-to-the-owner-s-sept
 - **V2-UX-IMP-052**: If a matching active Background Analysis Enrollment already covers the exact Book, new revision and selected analysis kinds, AI7 may queue one or more exact Task/Plan/Run records after import commit. Compatible kinds may share one authorized batch Run, while every kind keeps an independent Result Set, status, failure and feedback lifecycle; the import completion surface names queued work separately and never presents it as completed analysis.
 - **V2-UX-IMP-053**: Without a matching active Enrollment, import still completes as `稿件已导入` and the analysis projection remains `待分析` or another exact non-error state with no Provider call, transmission or cost. Import itself never creates, proposes as preselected, or activates an Enrollment.
 - **V2-UX-IMP-054**: A matching Enrollment still requires the selected production Provider policy, exact Run source/outbound/budget boundaries and final Provider preflight/egress checks. Import, source retention, Model Service setup and artifact enablement grant none of them.
+- **V2-UX-IMP-055**: DOCX content is retained by default. Headers and footers, page setup, style sheets, text boxes and images stay with the Book-owned Source Version and are restored on DOCX export while the manuscript surface edits body text and marks; the Import Fidelity Review labels such a class `完整保留（随文件保留）`, offers `保留 / 并入` where the editor may fold content into the body, and reserves `降级导入` for content that cannot be retained (for example a table-of-contents field), which still requires IMP-005's unselected decision (ADR 0077).
+- **V2-UX-IMP-056**: The first editable import of a Manuscript ends in the Book Work Overview once (IMP-011); a reimport ends by returning to the manuscript at the mapped position (ADR 0077).
+- **V2-UX-IMP-057**: Reimport Comparison presents structure at chapter level: exact chapters map automatically, and every ambiguity is resolved by the editor with `拆分`, `改写与新增`, `删除` or `并入`, never preselected. The file's revisions and comments enter as 修改建议 and 批注 with the author as source (MARK-009); the editor's own marks follow the mapping and any mark that cannot follow is listed for the editor (ADR 0077).
 
 ## Source Version acquisition
 
@@ -350,6 +355,7 @@ Added by [ADR 0076](../adr/0076-align-editor-facing-surfaces-to-the-owner-s-sept
 - **V2-UX-REV-010**: A category's search-engine use is stated once in its description in `知识库` and in the review configuration; it needs no per-Run disclosure and no separate authorization. Model transmission disclosure under TASK-035 and LAYER-002 is unchanged.
 - **V2-UX-REV-011**: 情节逻辑与前后一致 consumes the baseline analysis's conflict and unresolved items as immediate, model-free leads before deep review; the leads are not shown on the analysis overview.
 - **V2-UX-REV-012**: Guidelines and 工序 are managed in `知识库`; the review configuration only selects them and shows their versions, and a Review Run snapshots the versions it used.
+- **V2-UX-REV-013**: The category `书系一致性` checks characters, settings and timelines across the Book's Series against its Series Knowledge (SER-013 to 019); it is unavailable when the Book is in no Series, its basis names the exact Series Knowledge revisions used, and its findings return to each affected Book's manuscript as 批注 or 修改建议 (ADR 0077).
 
 ## Manuscript evaluation and reader's report
 
@@ -368,6 +374,7 @@ Added by [ADR 0076](../adr/0076-align-editor-facing-surfaces-to-the-owner-s-sept
 - **V2-UX-EVAL-011**: Editor adjustments, comments and reasons enter Editorial Learning as Quality Signals; house-level calibration of AI7's starting scores runs in the background, is disclosed under `设置 › 评估校准` with disable and audit routes, starts only after at least 10 adjustments, and never alters a risk item.
 - **V2-UX-EVAL-012**: Re-evaluation after manuscript changes creates a new version compared item by item with the previous one; older versions stay reachable.
 - **V2-UX-EVAL-013**: 审稿意见 is a fixed special task run from a finalized evaluation with two V1 templates — `给作者的修改意见` and `给编辑部 / 选题会的审读报告` — structured 总体评价, 主要优点, 主要问题, 修改建议, 结论. The draft is an Editorial Artifact (revision letter or developmental review), is edited on the manuscript surface with the same marks, exports as DOCX, and is seeded with house exemplars from `知识库`; marketing points come from writing tasks in `交付物`, not from this task.
+- **V2-UX-EVAL-014**: `设置 › 评估校准与预测` shows the calibration progress toward the 10-adjustment threshold and that calibration adjusts only AI7's starting scores, the prediction switch with the 30-Book actuals threshold and what enabling it adds, and the central entry for Pricing and First-print Actuals per Book; the Evaluation Profile itself is managed in `知识库 › 评估方案` (ADR 0077).
 
 ## Knowledge Base
 
@@ -378,6 +385,11 @@ Added by [ADR 0076](../adr/0076-align-editor-facing-surfaces-to-the-owner-s-sept
 - **V2-UX-KB-003**: A Review Guideline Document is a human-readable, house- or authority-issued document with numbered clauses that findings cite; converting an issued document into a managed one keeps its provenance.
 - **V2-UX-KB-004**: Exemplars seed 审稿意见 and writing tasks under Learning Eligibility governance; an exemplar is never copied into a manuscript or deliverable.
 - **V2-UX-KB-005**: `知识库` owns the management projection for native artifacts and Rules whose placement Issue #86 deferred; the Background Analysis Enrollment presentation stays separate.
+- **V2-UX-KB-006**: Exemplars are organized by Book and mirror the deliverable structure (审稿意见 / 新闻稿 / 宣传文章 / 评论文章 …). A Book produced with AI7 archives its finalized 审稿意见 and delivered documents into 范例 automatically when its Publication Version is designated, with `仅本社` as the default Learning Eligibility and no prompt; earlier Books are imported by the editor with Book, author and editor named (ADR 0077).
+- **V2-UX-KB-007**: `资料库` holds editor-collected books, papers, documents and web captures. An item is indexed on arrival; the editor assigns its attribution (`某本书` / `书系` / `社级`) and Learning Eligibility, and only an attributed item can be listed under `允许参考` by a Task (TASK-030/032). A pending attribution is an attention item (ATTN-009) (ADR 0077).
+- **V2-UX-KB-008**: `外部来源留存` is the cross-Book index of the sources the External Evidence Retention Procedure retains (SRC-013): snapshot, link, retrieval time, the Books, Runs and sentences that used it, its Source Translation and its state (`有效`, `需复核`, `失效`). Ownership stays with each Book's 来源与证据; a source that could not be retained keeps only its link and time, lowers dependent evidence to `待定` and enters `待我处理`; a later search that finds the same source reuses the retained copy (ADR 0077).
+- **V2-UX-KB-009**: Every 资料库 item and retained source carries a five-layer Material Index built locally: the original, metadata, extracted text (with recognition for scans and a labeled machine translation for non-Chinese text), segments with page or position anchors citable at sentence level, and similarity vectors for `相似段落检索`; the vector layer is in V1. Indexing grants no Run Source Scope and transmission stays bounded by each Task's plan (ADR 0077).
+- **V2-UX-KB-010**: `知识库 › 工序与规则` lists expert 工序 by professional outcome with version, state (`已启用`, `待验证`, `已停用`), use and last change one step away (REUSE-029/030), and the `快速开始` Default Execution Rules with what each makes 快速开始 do, who set it and when, and `查看` / `修改` / `停用` (TASK-019, TASK-022, TASK-027) (ADR 0077).
 
 ## Findings center
 
@@ -405,9 +417,9 @@ Added by [ADR 0076](../adr/0076-align-editor-facing-surfaces-to-the-owner-s-sept
 - **V2-UX-TASK-014**: A material goal change marks the existing Native DSH Artifact Recommendation as needing update and never silently replaces one selected exact revision with another.
 - **V2-UX-TASK-015**: When no suitable enabled native DSH artifact exists, AI7 states `暂无适合的可用工序` and permits intent revision or available-artifact browsing; it never executes through unbounded generic chat fallback.
 - **V2-UX-TASK-016**: Editorial surfaces name native DSH artifacts by professional outcome while keeping package mechanics, Harness concepts, unresolved trust implementation, and developer diagnostics out of the normal selection experience; exact native identity, kind, version and AI7-sidecar consequences remain inspectable.
-- **V2-UX-TASK-017**: The composer offers a distinct `快速开始` option that can skip the separate Task Intent review surface and begin execution from the compact entry.
+- **V2-UX-TASK-017**: The composer offers a distinct `快速开始` option that skips the plan surface and starts the Task under the task pattern's Default Execution Rule — or, when no rule exists, under the selected 工序's built-in default plan — and shows a quiet notice naming the rule and its version with a route to `知识库 › 工序与规则`; the identical frozen plan remains reachable from the Task (PLAN-008, ADR 0077).
 - **V2-UX-TASK-018**: Quick Start still creates and binds an exact Task Intent, Execution Plan, Plan Envelope, and Run Authorization before execution and never grants Proposal Decision, Review Decision, Effect Approval, Signoff Record, or Public Release Permission.
-- **V2-UX-TASK-019**: After developing Task Pattern Confidence, a user can explicitly approve a Default Execution Rule so future user-initiated matching Tasks start without repeated separate Task Intent review when deterministic preflight passes.
+- **V2-UX-TASK-019**: A Default Execution Rule is created only by the explicit `设为快速开始默认` action taken from a viewed plan; it governs what `快速开始` does for that task pattern and nothing else, is managed in `知识库 › 工序与规则` (view, edit into a new version, disable), and never starts a Task by itself (TASK-028). Task Pattern Confidence may recommend saving a rule but never creates one (ADR 0077).
 - **V2-UX-TASK-020**: Every default-executed Task still receives its own exact Task Intent, Execution Plan, Plan Envelope, Run Authorization, and provenance link to the governing Default Execution Rule version.
 - **V2-UX-TASK-021**: Task Pattern Confidence reduces repeated Run-review interaction only; it never establishes factual correctness or grants Proposal Decision, Review Decision, Effect Approval, Signoff Record, Public Release Permission, or Effect completion.
 - **V2-UX-TASK-022**: A Default Execution Rule binds the exact eligible native artifact revision, required field constraints, allowed variability, applicability scope, per-Run source-scope rule, Provider/outbound-data constraints, exact Run Budget Ceiling state—including `未设置`—outcome classes, and permitted Effect classes.
@@ -514,15 +526,20 @@ Added by [ADR 0076](../adr/0076-align-editor-facing-surfaces-to-the-owner-s-sept
 - **V2-UX-PLAN-007**: Plan Preview is persistently labeled `计划说明，不是运行授权` and no interaction within its expandable detail silently authorizes a Run or Effect.
 - **V2-UX-PLAN-008**: Quick Start and Default-executed Runs need not open Plan Preview before dispatch, but store and expose the identical frozen human-readable preview and exact plan/envelope from Run details.
 - **V2-UX-PLAN-009**: When a material plan field changes, the prior and proposed values appear as a concise Plan Revision diff; the old preview never silently refreshes while retaining its authorization state.
+- **V2-UX-PLAN-010**: The plan surface has two modes. `精简` (the default, remembered per editor) shows only the LAYER-002 minimum — `处理`, `发送` with estimated cost and the Run Budget Ceiling state, `会得到`, `不会`, `中途` — plus the goal and the authorization bar; `完整` shows the six PLAN-002 sections. PLAN-001's single-scroll view applies to `完整` (ADR 0077).
+- **V2-UX-PLAN-011**: In `完整` mode the editor edits the plan in place: business steps (edit text, delete, reorder, add), the adaptations AI7 may make on its own (edit, remove, or move into the ask-first column) and the reference materials. The material fields PLAN-004 lists stay locked and can never become adaptations. Any edit marks the plan `你改了 N 处` and replaces the start action with `更新计划`, which regenerates the plan as the next plan version through the PLAN-009 path; `撤销修改` restores the prior version; edited items carry a `你改的` tag and the edit is recorded with actor and time (ADR 0077).
+- **V2-UX-PLAN-012**: The Plan Boundary Split's two columns read `运行中 AI7 可以自己调整` and `这些一变就先停下来问你`; material drift reads `计划的关键内容已变化` with `关键内容` / `随之变化` in its diff; the plan lives in the right-side Task Drawer beside the visible manuscript and is shared by every Task kind (ADR 0077).
 - **V2-UX-AUTH-001**: Standard Plan Preview ends with an Inline Run Authorization Bar showing exact Book/target, plan version, provider, exact Run Budget Ceiling state, expected outcome, and possible Effect classes.
-- **V2-UX-AUTH-002**: When immediate readiness is valid, the one primary action is `授权并开始任务`; an eligible offline/deferred state instead offers `授权并在联网后开始`. Secondary actions are `返回修改` and the applicable draft-save action. The surface never shows both start actions ambiguously or substitutes generic `批准`, `确认`, or an unlabeled send action.
-- **V2-UX-AUTH-003**: The bar states `仅授权本次任务按当前计划运行；不代表接受提案、批准受控动作、保存里程碑版本或设为发稿版本`.
+- **V2-UX-AUTH-002**: When immediate readiness is valid, the one primary action is `开始任务`; an eligible offline/deferred state instead offers `联网后开始任务`. Secondary actions are `返回修改` and the applicable draft-save action. One activation still creates the exact Run Authorization and Run Record (AUTH-004); the word 授权 is not on the button. The surface never shows both start actions ambiguously or substitutes generic `批准`, `确认`, or an unlabeled send action (ADR 0077).
+- **V2-UX-AUTH-003**: The bar states `只是让 AI7 按这份计划做这一次；接受修改建议、批准受控动作、保存里程碑版本、设为发稿版本都仍由你另行决定` (ADR 0077; the earlier wording `仅授权本次任务按当前计划运行；不代表接受提案、批准受控动作、保存里程碑版本或设为发稿版本` has the same meaning and may appear in technical detail).
 - **V2-UX-AUTH-004**: One activation creates the exact Run Authorization and Run Record without a second modal confirmation, then either hands an immediately ready Run to the AI7 scheduler or places an explicitly deferred Run in Connectivity Wait State.
 - **V2-UX-AUTH-005**: Immediate Run Authorization Readiness requires current exact target/source versions, unchanged plan/envelope, exact provider/fallback and outbound boundaries, a valid exact Run Budget Ceiling state, governing constraints, and live credential/service readiness. Deferred readiness requires those locally fixed boundaries plus an exact Credential Reference; live readiness is revalidated by Reconnect Preflight.
 - **V2-UX-AUTH-006**: Any material drift removes/disables the applicable start action and presents `查看计划修订`; stale Plan Preview cannot retain a live authorization control.
 - **V2-UX-AUTH-007**: After authorization, the same region transitions to `等待网络`/`等待模型服务`, `正在排队`, or `运行中` according to exact state and immediately exposes the controls valid for that state: cancel while waiting, and pause/cancel once schedulable or running.
 - **V2-UX-AUTH-008**: Expandable authorization detail shows actor, time, plan version, target/source/outbound/Run Budget Ceiling boundary, and record identity without making hashes or Harness technical records default content.
 - **V2-UX-AUTH-009**: Standard Run Authorization never silently creates or changes a Default Execution Rule; that rule requires its separately named explicit user action.
+- **V2-UX-AUTH-010**: A running Run is never edited in place. Its controls are `暂停` (then `续行`), `取消任务` after one inline Cancellation Impact Summary, and `改计划重做`, which redoes the work as a new Task under the changed plan carrying the results so far; a plan change while paused routes through Plan Revision and renewed authorization or through `改计划重做` (ADR 0077).
+- **V2-UX-AUTH-011**: After activation the same region becomes the status and control bar (AUTH-007) and an activity card above the plan shows the editorial phase, current object, elapsed time, attempt state, last update and milestones (RUN-001 to 004, LIVE-001 to 003); `本步骤用时已超过通常水平`, `任务等待你的说明` and `任务运行预算已达上限` keep their own wording and actions (ADR 0077).
 - **V2-UX-MODEL-001**: The primary Task surface uses one compact Model Selection Strip whose editable controls are Model Role and user-understandable Model Capability Requirements.
 - **V2-UX-MODEL-002**: Model Role choices use the accepted preferred labels `快速交互角色`, `主编辑角色`, `疑难升级角色`, and `前沿模型角色` and explain intended work without presenting a truth or quality hierarchy.
 - **V2-UX-MODEL-003**: Model Capability Requirements express editorial needs and preferences and remain visibly distinct from AI7 Capabilities, Capability Grants, native DSH artifacts, scoped enablement, and authority.
@@ -866,6 +883,7 @@ Added by [ADR 0071](../adr/0071-state-the-decision-layer-and-run-liveness-rules.
 - **V2-UX-WORK-010**: A profile update creates no silent instance change. `查看新版本` shows an exact phase/gate/default diff, and migration requires a separate explicitly authorized deterministic command with retained prior profile pin.
 - **V2-UX-WORK-011**: Opening/completing/reopening/skipping a phase grants no factual authority, Review Decision, Effect Approval, Signoff, delivery proof, Public Release Permission, or Learning Eligibility.
 - **V2-UX-WORK-012**: Workflow lens state, phase expansion, active filters, and return positions survive workspace switching/restart without becoming the source of authoritative Workflow state.
+- **V2-UX-WORK-013**: The Production Document types a Book may hold are house-configured (V1 baseline 新闻稿, 宣传文章, 评论文章, 发布会材料, 营销要点), each bound to a Workflow Profile; a type may be marked `本书不做` for one Book, which removes it from the Book delivery package's conditions without deleting history (ADR 0077).
 
 ## Workflow Gate interaction
 
@@ -896,6 +914,7 @@ Added by [ADR 0071](../adr/0071-state-the-decision-layer-and-run-liveness-rules.
 - **V2-UX-MILE-011**: The target-house profile contains no separate exception Signoff or re-signing ceremony. Post-designation Correction, Errata, Supersession, Withdrawal, Reissue, and Archive work belongs to exact versioned Maintenance Cases rather than mutating milestone/internal records; later versions and milestone labels remain separate editorial states.
 - **V2-UX-MILE-012**: Creating a Milestone Version uses deterministic local domain commands and requires neither model/provider access nor a native-artifact Run.
 - **V2-UX-MILE-013**: Publication Version is a specialized exact designation over an existing immutable Milestone Version, not a free-form milestone label, latest-draft alias, phase status, or automatic consequence of choosing a publication-related purpose.
+- **V2-UX-MILE-014**: Milestone Versions and the Publication Version belong to the primary Manuscript only. Production Documents use versions and Delivery Records (DELIV-001 to 007) and never show 里程碑, 签发 or 发稿 language; the Manuscript's `设为发稿版本` is reachable from its version history, its save menu and the 交付物 overview (ADR 0077).
 
 ## Delivery Package preparation
 
@@ -913,6 +932,28 @@ Added by [ADR 0071](../adr/0071-state-the-decision-layer-and-run-liveness-rules.
 - **V2-UX-DPKG-012**: The ordinary surface identifies the selected exact Editorial Deliverable Revision and, when present, its identifying Milestone Version; it never requires the editor to understand the linked internal Signoff Record.
 - **V2-UX-DPKG-013**: Delivery Package identity excludes output representation, filename, Local Export Destination, Export Fidelity Disposition, Effect Approval, and Effect Receipt. Its immutable identity is the exact content manifest, unconditional one-Editorial-Deliverable-Revision binding, optional identifying Milestone Version, stated purpose, included artifacts, applicable Gate/Signoff references, exclusions, and limitations.
 - **V2-UX-DPKG-014**: One Prepared Delivery Package may feed zero or more separately frozen Local Export Preparations and per-file Effect Receipts. Every preparation/receipt links back to the exact package version without modifying it, and a changed format or destination creates a new export preparation rather than a package revision.
+- **V2-UX-DPKG-015**: Under ADR 0077 the Delivery Package is the Book delivery package of BUNDLE-001 to 005: DPKG-009's binding to one Editorial Deliverable Revision is superseded by a binding to the Book's Publication Version plus the latest delivered version of every Production Document, and DPKG-001 to 008 and 010 to 014 apply to that package. A single document's handover is a Delivery Record, not a package.
+## Production document delivery
+
+Added by [ADR 0077](../adr/0077-adopt-the-editor-facing-surface-specification-as-the-execution-standard.md).
+
+- **V2-UX-DELIV-001**: The `交付物` destination shows three things apart: the Manuscript's 发稿 state (its Milestone Versions and `设为发稿版本…`), one card per Production Document (`下一项需要处理`, the seven parallel phases, the delivery state, `打开` / `处理关口` / `交付…` / `再交付…`), and the Book delivery package's conditions. No Book, document or package percentage appears (WORK-007).
+- **V2-UX-DELIV-002**: A Production Document is edited on the same surface as the manuscript with the same marks, selection menu and navigation; its right column is the Deliverable Workflow Lens (WORK-001 to 006) with a `版本与交付` section listing versions and Delivery Records and a `这份文档的材料` section listing its Editorial Artifacts and the Exemplars it referenced.
+- **V2-UX-DELIV-003**: `交付` selects one exact version (the current working state is saved as a version first), one recipient from a house list (宣传部 / 编辑部 / 外部媒体 / 其他 / 自行输入) and an optional note, names the profile's delivery conditions with any missing item linked, and on activation appends one Delivery Record and opens the export surface (EXP-001 to 024) for that version; the terminal state is the Delivery Record plus `已导出到所选位置`. A delivery never designates, publishes or sends anything and never changes the Manuscript's 发稿 state.
+- **V2-UX-DELIV-004**: An edit after a delivery creates a new document version shown as `交付后有修改`; the document may be delivered again, and every earlier Delivery Record stays immutable.
+- **V2-UX-DELIV-005**: A Workflow Gate that the profile places before delivery keeps WGATE-001 to 011: readiness is computed only, dispositions are unselected, AI7's suggestion is shown and never preselected, and `记录关口决定` is a deterministic command.
+- **V2-UX-DELIV-006**: A document's post-delivery correction is a new version and a new delivery; Maintenance Cases (MAINT-001 to 012) apply to the Manuscript's Publication Version only.
+- **V2-UX-DELIV-007**: `新建文档 · 写作任务` drafts a Production Document from the manuscript synopsis and characters, the Evaluation Record's conclusion and marketing points, house Exemplars organized by Book, Book metadata and the editor's audience, channel and requirements; it shows the four consequence rows of the plan's 精简 mode and offers `先看计划` and `快速开始`; its output is an Editorial Artifact draft in the `起草` phase, and an Exemplar is referenced, never copied (KB-004).
+
+## Book delivery package
+
+Added by [ADR 0077](../adr/0077-adopt-the-editor-facing-surface-specification-as-the-execution-standard.md).
+
+- **V2-UX-BUNDLE-001**: The Book delivery package is the Book-level total of the work documents: the Publication Version of the Manuscript, the latest delivered version of every Production Document not marked `本书不做`, the finalized 审稿意见, the Evaluation Record, the review Reports, and each document's Editorial Artifacts and Delivery Records. It excludes 备注, 资料库 originals and intermediate Manuscript Revisions; retained external sources may be attached on request.
+- **V2-UX-BUNDLE-002**: A condition table lists each requirement with its state and a route: the Publication Version designated, each document delivered (a document with `交付后有修改` may be delivered again or the delivered version used as is), each excluded type marked `本书不做`, and the work records present. `准备图书交付包` is unavailable until every condition holds and names the unmet ones.
+- **V2-UX-BUNDLE-003**: `准备图书交付包` computes the manifest and freezes package v1 with stable identity and integrity; it creates no file, chooses no destination and grants no export, delivery, publication or release authority (DPKG-007/010). The prepared state reads `图书交付包已准备` with `暂无导出记录` until an export receipt exists (DPKG-011).
+- **V2-UX-BUNDLE-004**: Any change to an included version, an included type, a condition or the manifest after freeze creates package v2 with lineage; v1 stays immutable (DPKG-008). Export of a package uses the export surface as a folder or archive and produces per-file receipts (EXP-010 to 022).
+- **V2-UX-BUNDLE-005**: The package is neither 发稿 nor 交付 and proves neither; its copy states that it bundles completed work and changes no record.
 
 ## Local export formats and fidelity
 
@@ -939,6 +980,7 @@ Added by [ADR 0071](../adr/0071-state-the-decision-layer-and-run-liveness-rules.
 - **V2-UX-EXP-021**: Target change after native resolution invalidates stale Effect Approval and reopens the native conflict workflow. After commit AI7 reconciles the actual final path and verified created/replaced outcome into one per-file Effect Receipt; an ambiguous OS outcome becomes `结果待确认` and blocks blind retry.
 - **V2-UX-EXP-022**: Windows and macOS retain the same normalized target, cancellation, approval, receipt, and no-blind-retry semantics while native wording, ordering, geometry, accessibility, system language, and equivalent rename/replace mechanics may differ. A native apply-to-all choice can bind only the exact currently enumerated colliding files and never grants standing overwrite authority for unseen or future files.
 - **V2-UX-EXP-023**: Export of a Manuscript offers `不含批注` and `不含修改建议` as explicit options; 备注 is never exported (MARK-006). Selecting an option changes the exported file only and never the manuscript or its marks (ADR 0076).
+- **V2-UX-EXP-024**: `含批注` and `含修改建议（作为修订）` are on by default; a 修改建议 exports as a tracked change and a 批注 as a comment with its author name. Exporting a Production Document as part of a delivery (DELIV-003) uses the same export surface and receipt (ADR 0077).
 
 ## Publication Version
 
@@ -1038,6 +1080,7 @@ Added by [ADR 0071](../adr/0071-state-the-decision-layer-and-run-liveness-rules.
 - **V2-UX-FDBK-010**: `质量与学习` is passive history for ordinary feedback and becomes action-oriented only for a real governed Learning Material, eligibility, memory, or audit decision; the design of those later decisions remains separate.
 - **V2-UX-FDBK-011**: Capturing or displaying feedback does not by itself create a Learning Eligibility Decision, approve a Memory Candidate, activate House/Series/Book memory, expand Run Source Scope, train/fine-tune a Foundation Model, or authorize any Effect/publication.
 - **V2-UX-FDBK-012**: Editor feedback may express taste, style, usefulness, or editorial judgment but never establishes Reference Integrity, Claim Support, or Factual Verification. Any locally retained excerpt remains governed by the accepted egress boundary.
+- **V2-UX-FDBK-013**: Feedback History View, Learning Eligibility records and House Editorial Memory entries carry the Book's author and editor as attribution dimensions, filterable beside Book, origin, time and Editorial Dimension; AI7's suggestions may cite the same author's or editor's earlier dispositions (ADR 0077).
 
 ## Learning Material eligibility
 
@@ -1103,6 +1146,9 @@ Added by [ADR 0071](../adr/0071-state-the-decision-layer-and-run-liveness-rules.
 - **V2-UX-DSTO-013**: Any future arbitrary/custom/network data root, credential-carrying portable mode or automatic cross-channel migration protocol requires a new storage-authority decision rather than being introduced as a Settings toggle.
 - **V2-UX-DSTO-014**: On macOS the Product Data Location is the OS-resolved per-user Application Support location for `io.github.zhouy1017.ai7`, never beside the `.app`; an unavailable or noncanonical location fails closed with exact remediation and no silent fallback.
 - **V2-UX-DSTO-015**: Product Data Location projects the one canonical Agent Data Root shared by the application/service instance and every window. Application binaries, OS-disposable state, and the Protected Secret Store remain outside it; bounded footprint presentation creates no persistent inventory.
+- **V2-UX-DSTO-016**: `设置 › 数据与存储` shows the software version and the Data Version separately. The Data Version is frozen at each release and changed only when necessary; every store and export package records it; a software update that keeps it says so, and one that must change it backs the data up first, states what changes and offers rollback (ADR 0077).
+- **V2-UX-DSTO-017**: `导出数据库` packages every Book, manuscript and history, knowledge-base item and setting into one file without Model Service credentials and records the Data Version and the export time; `导入数据库` previews the package's contents, Data Version compatibility and origin, then offers `替换本机全部数据（先自动备份，可回退）` or `只导入其中的图书，与本机合并（重名的另存）`, neither preselected (ADR 0077).
+- **V2-UX-DSTO-018**: `定期自动备份` is a switch that is off by default; on, AI7 backs the product data up once a day to the local backup location, keeps fourteen days, and never includes credentials (ADR 0077).
 
 ## Keyboard commands and action discoverability
 

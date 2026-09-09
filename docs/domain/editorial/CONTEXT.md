@@ -523,6 +523,41 @@ A past real document — a published Reader's Report, a news release, a writing 
 _中文_: 范例
 _Avoid_: Source Version of a Book, template, training data
 
+**Production Document**:
+An Editorial Deliverable other than the primary Manuscript — a news release, promotion article, review article, launch materials, marketing points, or another house-configured type — with its own versions, Workflow Instance, gates and Delivery Records; it never carries Milestone Version, Signoff or Publication Version language ([ADR 0077](../../adr/0077-adopt-the-editor-facing-surface-specification-as-the-execution-standard.md)).
+_中文_: 生产文档
+_Avoid_: the Manuscript, an Editorial Artifact of a document, a Delivery Package, a Task Outcome
+
+**Delivery Record**:
+One handover of one exact Production Document version to a named recipient, with actor, time, note, the profile conditions it met and the linked Local Export Receipt; independent of the Manuscript's Publication Version, immutable, and repeated by a new record after a later version ([ADR 0077](../../adr/0077-adopt-the-editor-facing-surface-specification-as-the-execution-standard.md)).
+_中文_: 交付记录
+_Avoid_: Publication Version, Delivery Package, Effect Approval, external delivery proof
+
+**Book Delivery Package**:
+The Book-level frozen bundle of the Manuscript's Publication Version, the latest delivered version of every Production Document not marked 本书不做, the finalized Reader's Report, the Evaluation Record, the review Reports and each document's artifacts and Delivery Records; prepared only when every condition holds, versioned on any change, with a separate export history ([ADR 0077](../../adr/0077-adopt-the-editor-facing-surface-specification-as-the-execution-standard.md)).
+_中文_: 图书交付包
+_Avoid_: a per-document package, an exported file, 发稿, 交付, release proof
+
+**Materials Library Item**:
+An editor-collected book, paper, document or web capture held in the Knowledge Base with its original, metadata, attribution to a Book, Series or the house, a Learning Eligibility decision and a Material Index; readable by a Task only when attributed and listed under 允许参考 ([ADR 0077](../../adr/0077-adopt-the-editor-facing-surface-specification-as-the-execution-standard.md)).
+_中文_: 资料条目
+_Avoid_: Source Version of a Book, Working Corpus entry, Run Source Scope, factual evidence by itself
+
+**Material Index**:
+The locally built five-layer index of a Materials Library Item or a retained external source: the original, metadata, extracted text with recognition and a labeled Source Translation, segments with page or position anchors citable at sentence level, and similarity vectors for 相似段落检索 ([ADR 0077](../../adr/0077-adopt-the-editor-facing-surface-specification-as-the-execution-standard.md)).
+_中文_: 资料索引
+_Avoid_: Manuscript Retrieval Chunk, a model context, a Run Source Scope grant, a cloud index
+
+**Book People**:
+A Book's 作者, 责编 and 相关人 — authors and editors possibly several, a 相关人 a name with a role from the house list — recorded on the Book and used as attribution dimensions in Editorial Learning and House Editorial Memory ([ADR 0077](../../adr/0077-adopt-the-editor-facing-surface-specification-as-the-execution-standard.md)).
+_中文_: 图书人员
+_Avoid_: an account, a permission, a Series member, a Learning Eligibility Decision
+
+**Writing Task**:
+A Task that drafts a Production Document from the manuscript synopsis and characters, the Evaluation Record's conclusion and marketing points, house Exemplars organized by Book and Book metadata under the editor's audience, channel and requirements; its Task Outcome is an Editorial Artifact draft in the 起草 phase, and an Exemplar is referenced, never copied ([ADR 0077](../../adr/0077-adopt-the-editor-facing-surface-specification-as-the-execution-standard.md)).
+_中文_: 写作任务
+_Avoid_: a delivery, a publication, an Exemplar copy, a Reader's Report task
+
 **Source Translation**:
 A machine translation into the working language of a non-Chinese Source Version, stored beside it with segment alignment, labeled as translation, and never replacing the original or serving as evidence on its own (ADR 0076).
 _中文_: 来源译文

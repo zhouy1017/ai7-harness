@@ -567,7 +567,7 @@ Upstream checking is metadata-only. A candidate remains inert until explicit ado
 
 ## Quick Start and default execution
 
-- `快速开始` is distinct from `准备任务` and must be explicitly invoked by the editor.
+- `快速开始` is distinct from `准备任务` and must be explicitly invoked by the editor; it starts under the task pattern's Default Execution Rule and shows a quiet notice naming it (TASK-017, [ADR 0077](../adr/0077-adopt-the-editor-facing-surface-specification-as-the-execution-standard.md)).
 - It skips the separate Task Intent review screen but still creates the exact Task Intent, Execution Plan, Plan Envelope, and Run Authorization before dispatch.
 - It cannot imply Proposal Decision, Review Decision, Effect Approval, Signoff Record, Public Release Permission, or Effect completion.
 - A user may approve a Default Execution Rule after developing Task Pattern Confidence; future user-initiated matching Tasks may then start after deterministic preflight without a separate Task Intent review screen.
@@ -631,16 +631,19 @@ Task Pattern Confidence governs reduced Run-review burden only. Output remains a
 - The preview footer states `计划说明，不是运行授权` until the separate authorization interaction occurs.
 - A material edit creates a new Plan Revision diff; the previous preview remains immutable and linked to any prior Run Authorization.
 - Quick/default execution exposes this identical frozen preview from Run detail after dispatch.
+- The surface opens in `精简` mode (处理 / 发送 / 会得到 / 不会 / 中途) and switches to `完整`; the choice is remembered (PLAN-010, [ADR 0077](../adr/0077-adopt-the-editor-facing-surface-specification-as-the-execution-standard.md)).
+- In `完整` mode steps, adaptations and reference materials are editable in place; the PLAN-004 material fields are locked; an edit shows `你改了 N 处` and turns the start action into `更新计划`, which yields the next plan version (PLAN-011).
+- The two boundary columns read `运行中 AI7 可以自己调整` and `这些一变就先停下来问你` (PLAN-012).
 
 ## Standard Run Authorization
 
 | State | Primary action/status | Behavior |
 | --- | --- | --- |
-| Plan current; preflight valid | `授权并开始任务` | One activation creates exact Run Authorization and Run Record and hands Run to scheduler |
+| Plan current; preflight valid | `开始任务` | One activation creates exact Run Authorization and Run Record and hands Run to scheduler ([ADR 0077](../adr/0077-adopt-the-editor-facing-surface-specification-as-the-execution-standard.md)) |
 | Draft needs editing | `返回修改` | Returns to Task Intent/source/plan editing without authorizing |
 | Editor stops for now | `保存草稿` | Persists draft/preview without Run Authorization |
 | Offline; exact boundary not locally identifiable | `仅保存任务草稿` | No Run or authorization; live-dependent fields remain `待联网确认` |
-| Offline; exact boundary locally identifiable | `授权并在联网后开始` or `仅保存任务草稿` | Explicit choice; first creates exact Run/authorization in Connectivity Wait State |
+| Offline; exact boundary locally identifiable | `联网后开始任务` or `仅保存任务草稿` | Explicit choice; first creates exact Run/authorization in Connectivity Wait State ([ADR 0077](../adr/0077-adopt-the-editor-facing-surface-specification-as-the-execution-standard.md)) |
 | Any material drift | `查看计划修订` | Shows exact diff; old plan cannot be authorized |
 | Authorized, waiting for connectivity | `等待网络` or `等待模型服务` plus cancel | No provider work, usage, or cost has begun |
 | Connectivity returns; preflight unchanged, including no new effective source restriction | `联网恢复预检` then ordinary queue/run state | Same exact authorized Run may dispatch automatically |
@@ -662,7 +665,7 @@ Task Pattern Confidence governs reduced Run-review burden only. Output remains a
 ### Offline preparation and reconnect
 
 - Offline Plan Preview distinguishes locally authoritative plan facts from `待联网确认` live provider facts. Unknown data is never shown as a zero-cost or ready state.
-- `授权并在联网后开始` summarizes the same exact target, source, outbound, provider/fallback, Run Budget Ceiling state, outcome, and Effect boundary as ordinary Run Authorization and explicitly states `当前不会调用模型`.
+- `联网后开始任务` summarizes the same exact target, source, outbound, provider/fallback, Run Budget Ceiling state, outcome, and Effect boundary as ordinary Run Authorization and explicitly states `当前不会调用模型`.
 - After activation, the bar becomes a Connectivity Wait status card. Cancel remains immediate; there is no background toggle that silently changes future drafts.
 - Reconnect Preflight runs only while the supervised AI7 service is active. Network return does not launch the desktop application.
 - Unchanged preflight hands the existing Run to the normal scheduler. A new effective Series Retrieval Exclusion is material restriction even though the historical binding is unchanged, so it replaces auto-start with Plan Revision and renewed authorization or cancellation. Other material boundary drift does the same; credential or provider-service readiness failure under an otherwise unchanged permissible binding preserves the authorization, names the blocker, and routes to connection remediation before preflight runs again.
