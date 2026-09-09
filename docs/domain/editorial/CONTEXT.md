@@ -461,3 +461,84 @@ _Avoid_: Manuscript Block, Source Index Chunk, a quotation source, a truth path
 The deterministic resolution of an already-authorized stable reference against one exact pinned Manuscript Revision or Source Version, returning authoritative text for that record plus exact identity, range or offsets when applicable, and digest. It is never the name for initial external-research retrieval and grants no factual truth, Run Source Scope, provider transmission, mutation, learning, or publication authority.
 _中文_: 精确获取
 _Avoid_: source search, initial web/research retrieval, fuzzy match, factual verification, retrieval or egress permission
+
+
+**Annotation**:
+An exportable comment bound to an exact Manuscript Revision range, authored by an editor, by AI7 from a named Task, review category or analysis, or carried in from an imported file with its original author. It may be converted to a Proposal Change Item by an editor and is exported unless the export excludes annotations ([ADR 0076](../../adr/0076-align-editor-facing-surfaces-to-the-owner-s-september-decisions.md)).
+_中文_: 批注
+_Avoid_: Editor Note, Proposal Change Item, Editorial Error Finding without a location, model context
+
+**Editor Note**:
+An editor-private note bound to an exact Manuscript Revision range that is never exported, never transmitted to a Provider and never part of a Run Source Scope; it may be converted to an Annotation explicitly (ADR 0076).
+_中文_: 备注
+_Avoid_: Annotation, exported comment, learning material by default
+
+**Personal Highlight**:
+An editor-applied highlight in one of three house-fixed personal colors carrying no product meaning, convertible to an Editor Note, Annotation or Proposal Change Item (ADR 0076).
+_中文_: 自选高亮
+_Avoid_: system mark color, review severity, finding
+
+**Review Run**:
+One Book-owned execution of Editorial Review over selected review categories and one scope against an exact Manuscript Revision, recording the Review Guideline Document and skill versions it used, its findings with severity and disposition, and its Report (ADR 0076).
+_中文_: 审阅记录
+_Avoid_: Baseline Manuscript Analysis, one Task alone, Review Decision, Report alone
+
+**Review Guideline Document**:
+A versioned, house- or authority-issued document with numbered clauses that review categories apply and findings cite, managed in the Knowledge Base and selected by Books; it is Professional Editorial Knowledge, not a Policy Document (ADR 0076).
+_中文_: 审阅规范文件
+_Avoid_: Policy Document, prompt fragment, Editorial Profile, style sheet artifact of one Book
+
+**Finding Disposition**:
+The editor's recorded handling of one Editorial Error Finding or Annotation — handled, reviewed, ignored with reason, or converted — shared by the manuscript mark, the Review Workspace and the Findings Center as one record (ADR 0076).
+_中文_: 发现处置
+_Avoid_: Proposal Decision, Review Decision, Effect Approval, dismissal of a projection
+
+**Evaluation Record**:
+A versioned Book-owned assessment of one Manuscript Revision: scored items with AI7 and editor scores and the editor's as record, risk items, readiness, conclusion, market section, labeled predictions, and its finalization actor and time; a later version compares item by item with the prior one (ADR 0076).
+_中文_: 评估记录
+_Avoid_: Delivery Quality Metric, Review Decision, factual truth, Editorial Review findings
+
+**Evaluation Profile**:
+The house-owned configuration of an Evaluation Record: scored items as a subset of Editorial Dimensions with their share of the 100-point total, band anchors, risk items, conclusion options; every Evaluation Record snapshots the version it used (ADR 0076, root ADR 0001).
+_中文_: 评估方案
+_Avoid_: Editorial Profile, universal rubric, exposed weights
+
+**Reader's Report**:
+The Editorial Artifact drafted from a finalized Evaluation Record by a fixed special task under one of two V1 templates — for the author, or for the editorial board — and then edited by the editor; it is the manuscript profile's revision letter or developmental review (ADR 0076).
+_中文_: 审稿意见
+_Avoid_: Review Article, Review Decision, Evaluation Record itself, marketing copy
+
+**Report**:
+The versioned, exportable document family shared by Review Runs (审阅报告), Evaluation Records and Reader's Reports, attachable to a Delivery Package and edited as an Editorial Artifact (ADR 0076).
+_中文_: 报告
+_Avoid_: Task Outcome, Effect Receipt, Delivery Package, transient notice
+
+**Knowledge Base**:
+The house-managed, centralized collection of professional material Books select from: Review Guideline Documents, Evaluation Profiles, expert skills, House Editorial Memory and Exemplars, each versioned and snapshotted by the work that uses it (ADR 0076).
+_中文_: 知识库
+_Avoid_: Working Corpus, Series Knowledge, Settings, a Book's own sources
+
+**Exemplar**:
+A past real document — a published Reader's Report, a news release, a writing sample — retained in the Knowledge Base under Learning Eligibility governance to seed Reader's Reports and writing tasks; it is never copied into a manuscript or deliverable (ADR 0076).
+_中文_: 范例
+_Avoid_: Source Version of a Book, template, training data
+
+**Source Translation**:
+A machine translation into the working language of a non-Chinese Source Version, stored beside it with segment alignment, labeled as translation, and never replacing the original or serving as evidence on its own (ADR 0076).
+_中文_: 来源译文
+_Avoid_: Source Version, verified quotation, editor-authored text
+
+**Evidence Sentence Link**:
+A sentence-level Evidence Link between one manuscript sentence range and one passage of a Source Version or its Source Translation, created by the External Evidence Retention Procedure and shown in evidence comparison (ADR 0076).
+_中文_: 证据对应
+_Avoid_: fuzzy citation, Manuscript Retrieval Chunk, factual verdict
+
+**External Evidence Retention Procedure**:
+A built-in skill used by review categories and evaluation that retains every external source a Task uses as a Book-owned Source Version with snapshot, link, time and route, creates Evidence Sentence Links, and produces Source Translations; its house settings cover retention, target language and enabled categories, and it decides how evidence is stored, not what counts as evidence (ADR 0076).
+_中文_: 外部来源取证工序
+_Avoid_: Factual Verification Policy Document, Exact Fetch, editor-initiated 保存为来源材料
+
+**Pricing and First-print Actuals**:
+The editor-entered price and first print run recorded after a Publication Version is designated; prediction of these values is disabled until a house-adjustable number of Books carry actuals (ADR 0076).
+_中文_: 定价与首印实际数据
+_Avoid_: prediction, market estimate, Delivery Package field

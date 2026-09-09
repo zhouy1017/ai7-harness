@@ -8,6 +8,7 @@ Status: **frozen design reference as of `dev@4c50ce31b0f15ff2bfadd2af17fc914c317
 - The normalized package comes from exact frozen source `design-doc@6895f02d2983865516d267809d8cdda77026f62c` through the Issue #20 allowlist. Git history preserves the earlier Issue #5, #8, and #12 design lineage; those old integration routes are complete and are not current work.
 - ADR 0028 governs one AI7 product on Windows and macOS with shared outcomes and explicit native variation. ADR 0052 selects macOS 15+ on arm64, bundle `io.github.zhouy1017.ai7`, direct-download Developer ID-signed/hardened/notarized DMG, manual application replacement, per-user Application Support data with no silent fallback, and Keychain separation. It grants no packaging, signing-secret, notarization-upload or release action.
 - Issue #86 normalization preserves the target baseline and records successor presentation for native DSH artifacts, Agent Workspace, covered analysis, Enrollment and Apply. It does not itself grant provider processing, external export, Public Release Permission, implementation, release, or promotion to `main`.
+- [ADR 0076](../adr/0076-align-editor-facing-surfaces-to-the-owner-s-september-decisions.md) (2026-09-09) aligns the editor-facing surfaces to the Owner's design-session decisions — manuscript-first entry, marks, review, evaluation, knowledge base, findings center, external evidence retention — and names every clause it changes. The per-screen handoff that turns it into renderer work is a separate document.
 
 ## Package map
 

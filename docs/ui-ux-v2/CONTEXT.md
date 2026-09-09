@@ -1081,3 +1081,52 @@ _Avoid_: mutable activity feed, publication history replacement, merged authorit
 **Internal-only Maintenance Notice** (`仅内部维护提示`):
 The persistent consequence copy attached to Withdrawal or Archive stating `仅在 AI7 内记录；不代表已撤稿、下架、召回、通知接收方或删除外部文件` and granting no external outcome.
 _Avoid_: external withdrawal confirmation, takedown receipt, delete warning, Public Release revocation
+
+
+**Editorial Mark** (`编辑标记`):
+The presentation family of objects attached to exact manuscript text — Change Suggestion, Annotation, Editor Note, Personal Highlight — each with one fixed system color (highlights excepted), a visible author or source tag, a margin line, a rail marker, a left-click Mark Card and a kind-specific right-click menu ([ADR 0076](../adr/0076-align-editor-facing-surfaces-to-the-owner-s-september-decisions.md)).
+_Avoid_: generic comment, decoration, a Task, ambient AI activity
+
+**Change Suggestion** (`修改建议`):
+The editor-facing form of a canonical [Proposal Change Item](../domain/editorial/CONTEXT.md#correction-proposal): exact text to be replaced, previewed in place as `预览 · 未应用` and decided on its Mark Card with `接受并应用`, `拒绝`, or `修改后接受`; `提案` stays the record term (ADR 0076).
+_Avoid_: applied change, silent rewrite, editor typing, 批注
+
+**Annotation** (`批注`):
+The presentation of a canonical Annotation: an exportable comment on exact text from the editor, from AI7 with its originating Task, review category or analysis, or from an imported file's author (ADR 0076).
+_Avoid_: 备注, 修改建议, finding without a location, private note
+
+**Editor Note** (`备注`):
+The presentation of a canonical Editor Note: an editor-private note on exact text that is never exported, never sent to a model and never in a Task's readable scope (ADR 0076).
+_Avoid_: 批注, exported comment, model context
+
+**Personal Highlight** (`自选高亮`):
+One of three editor-chosen highlight colors with no fixed meaning, convertible to 备注, 批注 or 修改建议 from its right-click menu (ADR 0076).
+_Avoid_: system mark color, status, finding
+
+**Mark Card** (`标记浮卡`):
+The card that opens on left-click below the marked paragraph, aligned to the text column, carrying the mark's author or source, content, basis and actions; for a Change Suggestion it keeps the four regions of a Manuscript-anchored Proposal Card (ADR 0076).
+_Avoid_: modal, side panel replacement, chat bubble
+
+**Return Chip** (`回到跳转前`):
+The persistent context-header control shown after any jump away from the reading position — from a result, a finding, a mark or the outline — that returns to the exact prior position in one click (ADR 0076).
+_Avoid_: browser back, undo, history navigation
+
+**Task Panel** (`任务面`):
+The right-column side surface listing the current Book's Tasks as `等你处理`, `进行中`, `最近完成`, with dialogue Tasks opening as dialogue and non-dialogue Tasks as content-and-state cards, plus `发起全书任务` (ADR 0076).
+_Avoid_: Global Attention, Task Ledger, chat thread list, persistent composer
+
+**Unified Manuscript Navigation** (`整体导航`):
+The one right column that combines the `导航` entry (outline plus search and jump), the `审阅` and `任务` entries, and the always-visible Whole-manuscript Position Rail with chapter ticks and mark markers; the local scrollbar appears only while scrolling (ADR 0076).
+_Avoid_: two parallel scrollbars, minimap, separate 大纲 and 搜索与跳转 entries
+
+**Review Workspace** (`审阅工作面`):
+The Book-level destination for canonical Review Runs: coverage matrix, configuration by category and scope, per-category progress, results grouped by category, and the 审阅报告 (ADR 0076).
+_Avoid_: analysis overview, factual-verification lens alone, generic task list
+
+**Evaluation Workspace** (`评估工作面`):
+The Book-level destination for canonical Evaluation Records: 100-point total, scored items with AI7 and editor scores, risk and readiness items, market section with the labeled prediction block, versions, and the 审稿意见 task (ADR 0076).
+_Avoid_: analysis overview, workflow gate, Delivery Quality Metric dashboard
+
+**Findings Center** (`发现`):
+The Book-level projection aggregating every unresolved finding from analysis gaps, review categories, evaluation risk items and other checks; it navigates to exact records and owns no disposition of its own (ADR 0076).
+_Avoid_: Global Attention View, a second ledger, dismissal as resolution

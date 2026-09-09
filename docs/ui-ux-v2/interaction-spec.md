@@ -192,7 +192,7 @@ The overview may use visually prominent cards and quiet state summaries in the C
 
 | State or interaction | Visible behavior | Mutation rule |
 | --- | --- | --- |
-| Open `大纲` | Expands the Manuscript Outline Navigator in the one contextual supporting surface | Navigation only |
+| Open `导航` (outline) | Expands the Unified Manuscript Navigation — outline, search and jump — in the one contextual supporting surface while the position rail stays visible (ADR 0076) | Navigation only |
 | Follow editor position | Marks the current heading without forcibly scrolling away from the editor's manually browsed outline location | No mutation |
 | Click an outline entry | Loads and focuses the exact indexed manuscript location | No approximate targeting when the projection is stale |
 | Enter `调整结构` | Changes the outline to an explicit structural-edit state and exposes affected-range disclosure | Enables editor-authored deterministic structural commands only |
@@ -208,7 +208,7 @@ The overview may use visually prominent cards and quiet state summaries in the C
 
 ### Search and Jump Entry
 
-`搜索与跳转` remains present in the right contextual navigation alongside `大纲`. Opening it uses the same single supporting surface and keeps the Manuscript central.
+Search and jump opens inside the same `导航` column as the outline ([ADR 0076](../adr/0076-align-editor-facing-surfaces-to-the-owner-s-september-decisions.md)); it uses the single supporting surface, keeps the Manuscript central, and lands its hits on the position rail.
 
 | Mode | Accepted input | Result behavior |
 | --- | --- | --- |
@@ -443,8 +443,8 @@ Analysis Quality Metrics are presented separately from Delivery Quality Metrics 
 
 | Entry | Seeded context | Result |
 | --- | --- | --- |
-| Bottom composer from active manuscript/deliverable | Exact Book and Active Work Object; no inferred text range | Editable composer text with visible context chips |
-| Selection action | Explicit Pinned Manuscript Range, or journal-newer range labeled `待保存修订版` | Adds only that exact or pending range to the Task Intent Draft context; the pending form grants no exact pin |
+| `任务` panel `发起全书任务` from the active manuscript/deliverable | Exact Book and Active Work Object; no inferred text range | Editable composer text with visible context chips; the composer is on demand, not a persistent field (ADR 0076) |
+| Selection menu `就这段发起任务…` | Explicit Pinned Manuscript Range, or journal-newer range labeled `待保存修订版` | Opens the composer anchored to the selection with only that exact or pending range; further ranges join through `再选一段加入`; the pending form grants no exact pin (ADR 0076) |
 | Finding/Evidence/Proposal action | Exact selected record and its permitted target reference | Does not inherit every related source or range |
 | Book Work Overview action | Explicitly selected Manuscript or Editorial Deliverable | No implicit whole-Manuscript source scope |
 | `准备任务` | Current visible composer text and exact context | Persist/open Task Intent Draft in the right surface; no model, provider, Run, or authority transition |

@@ -13,7 +13,7 @@ AI7 should be recognizably its own Chinese professional editorial product while 
 - a persistent but collapsible navigation surface;
 - one visually dominant central work surface;
 - contextual supporting information that appears without replacing the primary object;
-- a compact bottom task-entry pattern that can expand when needed;
+- an on-demand task-entry pattern that opens from a selection or from the `任务` panel rather than a persistent field ([ADR 0076](../adr/0076-align-editor-facing-surfaces-to-the-owner-s-september-decisions.md));
 - progressive activity, interruption, clarification, history, and review close to the work;
 - concise action and outcome cards rather than modal-heavy interaction; and
 - strong whitespace, readable rhythm, and subdued status treatment suitable for long sessions.
@@ -72,9 +72,9 @@ Book-bound Agent Workspace is an additional explicit central presentation, not a
 
 Mode transitions should feel spatially continuous and preserve object identity, location, and focus. They must not use celebratory motion or attention-stealing transitions when a background Run changes state.
 
-The right contextual navigation keeps `大纲` and `搜索与跳转` continuously discoverable through restrained icon-and-label entries. The Whole-manuscript Position Rail is visually quieter than the local editing surface and reveals marker detail on focus, hover, or selection rather than becoming a colorful permanent minimap.
+The right column keeps one `导航` entry (outline plus search and jump), an `审阅` entry and a `任务` entry as restrained icon-and-label entries above an always-visible Whole-manuscript Position Rail; the rail is visually quieter than the local editing surface, carries chapter ticks on one side and marks on the other, and reveals marker detail on focus, hover, or selection rather than becoming a colorful permanent minimap. The local scrollbar appears only while scrolling (ADR 0076).
 
-The bottom task composer may closely echo the reference's compact floating field and circular arrow rhythm, but its content chips, tooltip, accessible name, and expansion behavior identify it as `准备任务`. No visual sending or streaming state begins until later Run Authorization and dispatch actually occur.
+The task composer is not a persistent bottom field: it opens anchored to a text selection from `就这段发起任务…` or inside the `任务` panel as `发起全书任务`, may echo the reference's compact field and circular arrow rhythm, and its content chips, tooltip, accessible name, and expansion behavior identify it as `准备任务` (ADR 0076). No visual sending or streaming state begins until later Run Authorization and dispatch actually occur.
 
 When acknowledged journal state must become exact `Task Input / 任务输入`, `为任务保存修订版` appears as a brief local persistence transition in the existing Task surface. It uses neither milestone ceremony nor provider animation; success quietly returns to planning with the exact revision visible, while failure keeps both text and draft in place and gives the local blocker appropriate prominence.
 
@@ -124,7 +124,9 @@ Within the active card, `修改内容` carries manuscript typography and visual 
 
 Conflict resolution may borrow the efficiency of professional Diff-Merge tools without inheriting developer jargon. Three source states and the editable Resolution Draft stay spatially and textually distinct; compact labeled arrows/actions support rapid take-current, take-proposed, ordered keep-both, undo/redo, and next-conflict flow. Quick actions remain calm and reversible, while structural ambiguity receives explanation rather than a visually dominant `resolve all` shortcut.
 
-Proposal Decision uses a quiet review-queue rhythm: compact labeled dispositions, visible keyboard hints, immediate reversible state, and restrained auto-advance. A sticky summary appears only when the editor is ready to `记录提案决定`; batch scope and exclusions are textual, not hidden behind selection color. Recorded `已采纳 · 尚未应用` status must remain visually distinct from manuscript text and from the later Apply action.
+Proposal Decision uses a quiet review-queue rhythm: compact labeled dispositions, visible keyboard hints, immediate reversible state, and restrained auto-advance. A sticky summary appears only when the editor is ready to `记录提案决定`; batch scope and exclusions are textual, not hidden behind selection color. Recorded `已采纳 · 尚未应用` status must remain visually distinct from manuscript text and from the later Apply action; it belongs to batch review only, because one inline 修改建议 has the single primary action `接受并应用` on its Mark Card (ADR 0076).
+
+Editorial marks use one fixed color per kind — 修改建议, 批注, 备注 — plus three personal highlight colors with no meaning; every mark shows its author or source as a small tag, its paragraph carries a thin margin line in the kind's color, and the Mark Card sits below the paragraph aligned to the text column with a pointer notch. Floating windows for task results and task detail are centered on the text column and aligned to its edges; a jump away from the reading position leaves a `回到<位置>` chip in the context header (ADR 0076).
 
 AI7 Apply Preparation visually shifts from editorial judgment to exact consequence preview without becoming a technical payload inspector. For every formal agent-originated Manuscript mutation it keeps exact Book, base pin, diff, targets, included/excluded changes, current versus expected text, atomic scope and `尚未批准应用` continuously legible. Direct typing/import remain visually separate; artifact, Rule, Enrollment, Session, Plugin, Result Set and Run surfaces never borrow Apply styling.
 
