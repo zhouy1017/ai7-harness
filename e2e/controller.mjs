@@ -94,6 +94,13 @@ if (isJourneyRunner) {
 
 export const ADMITTED_JOURNEYS = Object.freeze(['J-01', 'J-02', 'J-08', 'J-12', 'J-15', 'J-03', 'J-04']);
 
+// The bounded pull-request subset of ADMITTED_JOURNEYS under ADR 0075. Every member launches the
+// same production-shaped subject, so a broken build, launch, IPC, data root, or service still fails
+// the pull request; J-01 and J-02 are excluded on cost alone and run in the nightly full Gate. This
+// is a subset of ADMITTED_JOURNEYS, never a separate admission list: a Journey enters here only
+// after it is admitted there.
+export const GATE_JOURNEYS = Object.freeze(['J-08', 'J-12', 'J-15', 'J-03', 'J-04']);
+
 const J01_COMMON_COMPLETION_PHASES = Object.freeze([
   'imported-transition',
   'content-contract',
