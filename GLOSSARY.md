@@ -183,6 +183,22 @@ This maintained bilingual reference routes readers to target-qualified definitio
 | Manuscript Analysis Result Set Revision | 稿件分析结果集修订版 | [AI7 Editorial](./docs/domain/editorial/CONTEXT.md) |
 | Analysis Quality Metric | 分析质量度量 | [AI7 Editorial](./docs/domain/editorial/CONTEXT.md) |
 | Manuscript Retrieval Chunk | 稿件检索片段 | [AI7 Editorial](./docs/domain/editorial/CONTEXT.md) |
+| Annotation | 批注 | [AI7 Editorial](./docs/domain/editorial/CONTEXT.md) |
+| Editor Note | 备注 | [AI7 Editorial](./docs/domain/editorial/CONTEXT.md) |
+| Personal Highlight | 自选高亮 | [AI7 Editorial](./docs/domain/editorial/CONTEXT.md) |
+| Review Run | 审阅记录 | [AI7 Editorial](./docs/domain/editorial/CONTEXT.md) |
+| Review Guideline Document | 审阅规范文件 | [AI7 Editorial](./docs/domain/editorial/CONTEXT.md) |
+| Finding Disposition | 发现处置 | [AI7 Editorial](./docs/domain/editorial/CONTEXT.md) |
+| Evaluation Record | 评估记录 | [AI7 Editorial](./docs/domain/editorial/CONTEXT.md) |
+| Evaluation Profile | 评估方案 | [AI7 Editorial](./docs/domain/editorial/CONTEXT.md) |
+| Reader's Report | 审稿意见 | [AI7 Editorial](./docs/domain/editorial/CONTEXT.md) |
+| Report | 报告 | [AI7 Editorial](./docs/domain/editorial/CONTEXT.md) |
+| Knowledge Base | 知识库 | [AI7 Editorial](./docs/domain/editorial/CONTEXT.md) |
+| Exemplar | 范例 | [AI7 Editorial](./docs/domain/editorial/CONTEXT.md) |
+| Source Translation | 来源译文 | [AI7 Editorial](./docs/domain/editorial/CONTEXT.md) |
+| Evidence Sentence Link | 证据对应 | [AI7 Editorial](./docs/domain/editorial/CONTEXT.md) |
+| External Evidence Retention Procedure | 外部来源取证工序 | [AI7 Editorial](./docs/domain/editorial/CONTEXT.md) |
+| Pricing and First-print Actuals | 定价与首印实际数据 | [AI7 Editorial](./docs/domain/editorial/CONTEXT.md) |
 | Run Authorization | 任务运行授权 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |
 | Default Execution Rule | 默认执行规则 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |
 | Background Analysis Enrollment | 后台分析登记 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |
@@ -329,6 +345,19 @@ The inheritance audit resolved the definition owners for these terms. They remai
 | Manuscript Analysis Result Set | Task Outcome / Editorial Artifact / retrieval index or cache / Workflow Instance / current manuscript truth |
 | Manuscript Analysis Result Set Revision | mutable cache entry / model transcript / automatically promoted Editorial Artifact |
 | Manuscript Retrieval Chunk | Manuscript Block / Analysis Unit / editor window / Exact Fetch range / a quotation source |
+| Annotation | Editor Note / Proposal Change Item / Editorial Error Finding without a location / model context |
+| Editor Note | Annotation / exported comment / Learning Material by default |
+| Review Run | Baseline Manuscript Analysis / one Task alone / Review Decision / Report alone |
+| Review Guideline Document | Policy Document / prompt fragment / Editorial Profile / one Book's style sheet |
+| Finding Disposition | Proposal Decision / Review Decision / Effect Approval / dismissal of a projection |
+| Evaluation Record | Delivery Quality Metric / Review Decision / factual truth / Editorial Review findings |
+| Evaluation Profile | Editorial Profile / universal rubric / exposed weights |
+| Reader's Report | Review Article / Review Decision / the Evaluation Record itself / marketing copy |
+| Report | Task Outcome / Effect Receipt / Delivery Package / transient notice |
+| Knowledge Base | Working Corpus / Series Knowledge / Settings / a Book's own sources |
+| Exemplar | Source Version of a Book / template / training data |
+| Source Translation | Source Version / verified quotation / editor-authored text |
+| External Evidence Retention Procedure | Factual Verification Policy Document / Exact Fetch / editor-initiated 保存为来源材料 |
 | Review Decision | Proposal Decision / Effect Approval / a Repository Development Dispatch reviewer report |
 
 `Task Skill`, `Task Skill Manifest/Package/Candidate`, `Installed Task Skill Version`, `Task Skill Enablement/Activation`, `Harness Skill Projection`, `Third-Party DSH Plugin`, `Plugin Admission Snapshot`, and `Local Plugin Pin` are legacy-only language preserved in superseded ADRs 0010/0042 and historical target commits. Do not use them as current AI7 object names. Their responsibilities now route to native DSH artifact identities plus separate AI7-owned provenance, compatibility, scope, authority, audit, rollback, update, enablement, per-Run activation, and Apply seams; exact implementation-facing sidecar and activation record names remain deliberately unresolved.

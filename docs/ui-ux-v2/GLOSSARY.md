@@ -139,6 +139,18 @@ Shared artifact, analysis, Enrollment and Apply meanings route to root contexts;
 | Cooperative Run Pause | 协作式任务暂停 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Cancellation Impact Summary | 取消影响摘要 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Terminal Run Cancellation | 终止任务 | [AI7 V2 UI/UX](./CONTEXT.md) |
+| Editorial Mark | 编辑标记 | [AI7 V2 UI/UX](./CONTEXT.md) |
+| Change Suggestion | 修改建议 | [AI7 V2 UI/UX](./CONTEXT.md) |
+| Annotation (presentation) | 批注 | [AI7 V2 UI/UX](./CONTEXT.md) |
+| Editor Note (presentation) | 备注 | [AI7 V2 UI/UX](./CONTEXT.md) |
+| Personal Highlight | 自选高亮 | [AI7 V2 UI/UX](./CONTEXT.md) |
+| Mark Card | 标记浮卡 | [AI7 V2 UI/UX](./CONTEXT.md) |
+| Return Chip | 回到跳转前 | [AI7 V2 UI/UX](./CONTEXT.md) |
+| Task Panel | 任务面 | [AI7 V2 UI/UX](./CONTEXT.md) |
+| Unified Manuscript Navigation | 整体导航 | [AI7 V2 UI/UX](./CONTEXT.md) |
+| Review Workspace | 审阅工作面 | [AI7 V2 UI/UX](./CONTEXT.md) |
+| Evaluation Workspace | 评估工作面 | [AI7 V2 UI/UX](./CONTEXT.md) |
+| Findings Center | 发现 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Context-bound Clarification Card | 上下文绑定澄清卡 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Choice-first Input Card | 选项优先输入卡 | [AI7 V2 UI/UX](./CONTEXT.md) |
 | Clarification Blocking Scope | 澄清阻塞范围 | [AI7 V2 UI/UX](./CONTEXT.md) |
@@ -447,6 +459,18 @@ Shared artifact, analysis, Enrollment and Apply meanings route to root contexts;
 | Cooperative Run Pause | Immediate process termination, Run cancellation, authorization revocation, rollback, or undo. |
 | Cancellation Impact Summary | A generic danger modal, deletion confirmation, promise to reverse Effects, or Public Release revocation. |
 | Terminal Run Cancellation | Pause, deletion of history, rollback of committed Effects, Retry, or Redo. |
+| Editorial Mark | A Task, ambient AI activity, decoration, or a finding without a location. |
+| Change Suggestion | An applied change, a silent rewrite, editor typing, or an Annotation. |
+| Annotation (presentation) | An Editor Note, a Change Suggestion, or a private remark. |
+| Editor Note (presentation) | An exported comment, model context, or an Annotation. |
+| Personal Highlight | A system mark color, a status, or a finding. |
+| Mark Card | A modal, a side-panel replacement, or a chat bubble. |
+| Return Chip | Browser back, undo, or history navigation. |
+| Task Panel | Global Attention, the Task Ledger, a chat thread list, or a persistent composer. |
+| Unified Manuscript Navigation | Two parallel scrollbars, a minimap, or separate 大纲 and 搜索与跳转 entries. |
+| Review Workspace | The analysis overview, the factual-verification lens alone, or a generic task list. |
+| Evaluation Workspace | The analysis overview, a Workflow Gate, or a Delivery Quality Metric dashboard. |
+| Findings Center | The Global Attention View, a second ledger, or dismissal as resolution. |
 | Context-bound Clarification Card | Generic chat, a transient model question, Run Authorization, Proposal Decision, or notification alone. |
 | Choice-first Input Card | Forced-choice-only input, a preselected answer, tab navigation, or one generic approval interaction. |
 | Clarification Blocking Scope | Run Source Scope, mutation scope, the whole Run by default, or permission for independent work to exceed the envelope. |

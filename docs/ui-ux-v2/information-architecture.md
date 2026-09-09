@@ -19,6 +19,7 @@ AI7 desktop shell
 │  │  ├─ 待我处理
 │  │  ├─ 书库
 │  │  ├─ 书系
+│  │  ├─ 知识库 · ADR 0076
 │  │  └─ 质量与学习
 │  ├─ Book Convenience View
 │  │  ├─ pinned Books
@@ -29,7 +30,7 @@ AI7 desktop shell
 ├─ central Active Work Object
 │  └─ or explicit Book-bound Agent Workspace presentation
 ├─ contextual supporting surface
-├─ context-bound task entry
+├─ on-demand task entry · selection menu / 任务 panel · ADR 0076
 ├─ reachable native-artifact / Rule management projection
 │  └─ final global label and placement deferred
 └─ separately disclosed Background Analysis Enrollment presentation
@@ -148,8 +149,8 @@ Multiple affected Books remain separate `恢复待确认状态` items rather tha
 
 AI7 uses one Two-level Contextual Sidebar rather than a global sidebar plus a second Book sidebar:
 
-- the stable global layer contains `待我处理`, `书库`, `书系`, and `质量与学习`; Issue #86 does not place the native-artifact/Rule management projection or the separately disclosed Background Analysis Enrollment presentation in this layer and fixes neither final label nor entry point;
-- the Book layer contains pinned Books, recent Books, and navigation scoped to the current Book;
+- the stable global layer contains `待我处理`, `书库`, `书系`, `知识库`, and `质量与学习`; [ADR 0076](../adr/0076-align-editor-facing-surfaces-to-the-owner-s-september-decisions.md) places the native-artifact/Rule management projection inside `知识库`, while the separately disclosed Background Analysis Enrollment presentation still has no fixed entry point;
+- the Book layer contains pinned Books, recent Books, and navigation scoped to the current Book grouped `工作`（稿件 / 审阅 / 评估 / 交付物）, `处理`（发现）, and `资料与记录`（分析 / 来源与证据 / 工作概览 / 历史与恢复）; the collapsed state persists and a toggle sits in the manuscript context header (ADR 0076);
 - the searchable library provides the complete Book collection;
 - the bottom application/account area contains Settings; and
 - collapsed navigation retains global destination recognition, current Book identity, and the Global Attention count.
@@ -456,6 +457,8 @@ Book Work Overview
    └─ History and recovery
 ```
 
+The overview is the sidebar destination `工作概览`. Opening a Book that has a primary Manuscript enters the Manuscript at the last position (`## Default landing priority`); the overview is the entry only for a zero-Manuscript Book, and the task, authorization and analysis cards it once carried are destinations or sub-surfaces of their own ([ADR 0076](../adr/0076-align-editor-facing-surfaces-to-the-owner-s-september-decisions.md)).
+
 The Manuscript receives the strongest visual priority because it is the central long-form work of the Book. This priority does not collapse the other Editorial Deliverables into its revision or Workflow Instance. AI7 therefore shows each deliverable's own phase and next action and never displays a single Book-wide completion percentage.
 
 Task, Evidence, Proposal, and Workflow summaries are navigation lenses. They may expose counts, state, and next actions, but a consequential interaction opens or resolves against the exact authoritative record.
@@ -525,20 +528,21 @@ The local scroll affordance and the whole-manuscript position control never impe
 
 ## Right-side manuscript navigation
 
-The manuscript's right contextual navigation contains at least two persistent entries:
+The manuscript's right column is one Unified Manuscript Navigation ([ADR 0076](../adr/0076-align-editor-facing-surfaces-to-the-owner-s-september-decisions.md)):
 
 ```text
-right contextual navigation
-├─ 大纲
-│  └─ Manuscript Outline Navigator
-└─ 搜索与跳转
-   └─ manuscript-wide indexed search and location controls
-
-editor edge
-└─ Whole-manuscript Position Rail
+right column
+├─ entries
+│  ├─ 导航 · outline + search and jump
+│  ├─ 审阅 · findings on this manuscript
+│  └─ 任务 · this Book's Tasks
+└─ Whole-manuscript Position Rail · always visible
+   ├─ chapter ticks on one side
+   ├─ marks on the other · 修改建议 / 批注 / 备注 / 未分析到 / search hits
+   └─ current position
 ```
 
-Only one supporting side surface expands at a time. `大纲` opens a virtualized hierarchical navigator; `搜索与跳转` opens manuscript-wide discovery and location controls while preserving the Manuscript in the center. The Whole-manuscript Position Rail stays compact and uses sparse markers rather than reproducing the whole document.
+Only one supporting side surface expands at a time. `导航` opens the virtualized outline and, in the same panel, manuscript-wide search and location controls; the rail stays visible while the panel is open or closed and uses sparse markers rather than reproducing the whole document. The local scrollbar appears only while scrolling, so the rail is the one persistent whole-manuscript control; the two navigation scales remain distinct.
 
 The outline is navigation-first. Structural mutation is unavailable until the editor explicitly enters Structure Adjustment Mode, which discloses affected headings and text ranges and retains durable undo. Model-authored structure changes remain Proposals and follow proposal review/application semantics.
 
@@ -791,7 +795,7 @@ Search snippets, incomplete retrievals, model answers, attachments and mere Task
 
 ## Coverage-aware manuscript analysis
 
-Analysis is a Book/revision-bound product-record surface, separate from candidate retrieval and factual verification:
+Analysis is a Book/revision-bound product-record surface, separate from candidate retrieval, factual verification and review. Its overview shows what the baseline is for — 梗概, 各章, 人物与名称, 事件, 关系, 设定 — with the four axes as four sentences; conflicts and unresolved items feed the review category 情节逻辑与前后一致 instead of appearing here, and the destination sits under `资料与记录` ([ADR 0076](../adr/0076-align-editor-facing-surfaces-to-the-owner-s-september-decisions.md)):
 
 ```text
 exact Book + Manuscript Revision
@@ -837,9 +841,114 @@ editor considering a Background Analysis Enrollment
 
 Baseline is preselected only within the separately disclosed Enrollment decision; the eight Editorial Dimensions and Plugin/user-defined kinds remain independent. Enrollment is revocable, but Issue #86 does not settle pause/disable mechanics. Model Service setup, import, artifact lifecycle, Workflow Profile activation, Default Execution Rule and DSH Session membership never create this authority. Moving the same already-authorized Run out of the foreground changes presentation only; a new idle, scheduled, import-triggered, post-checkpoint or cross-Run Provider dispatch requires a matching active Enrollment.
 
+## Editorial marks
+
+Added by [ADR 0076](../adr/0076-align-editor-facing-surfaces-to-the-owner-s-september-decisions.md). The same objects serve the editor, AI7 and an imported file's author:
+
+```text
+manuscript text
+├─ 修改建议 · replaces exact text · fixed color · Proposal Change Item
+│  └─ left-click → in-place preview 预览 · 未应用 + Mark Card
+│     ├─ 修改内容 / 修改理由 / 依据与核查 / 你的处理
+│     └─ 接受并应用 · 拒绝 · 修改后接受（optional 为什么这样改）
+├─ 批注 · exportable comment · fixed color
+│  └─ 回复 · 标记为已处理 · 转为修改建议 · 查看任务 · 删除
+├─ 备注 · editor-private · never exported or sent · fixed color
+│  └─ 编辑 · 转为批注 · 提出修改建议 · 删除
+└─ 高亮 · three personal colors · no meaning
+   └─ 换颜色 · 取消高亮 · 转为备注 / 批注 / 修改建议
+
+every mark
+├─ author or source tag · 你 / AI7 + originating Task, review or analysis / imported author
+├─ margin line in the kind's color · marker on the position rail
+└─ right-click menu also offers 复制这段 · 就这段发起任务…
+```
+
+Review findings and marks are one record family; a disposition made on the manuscript, in `审阅` or in `发现` is one record.
+
+## Manuscript review workspace
+
+Added by [ADR 0076](../adr/0076-align-editor-facing-surfaces-to-the-owner-s-september-decisions.md). `审阅` is a Book-level destination:
+
+```text
+审阅
+├─ coverage matrix · category × current revision · 需复审 after edits
+├─ Review Runs · 第 N 次 · categories · scope · findings · Report
+├─ 新建审阅
+│  ├─ categories · 错别字与规范用语 / 体例与格式 / 情节逻辑与前后一致 / 事实核查 /
+│  │              学术道德与引用 / 出版政策与风险 / 文学性与表达改进 / 跨交付物一致性
+│  │  └─ each names its basis · Review Guideline Documents · 工序 · search-engine use
+│  ├─ scope · 全书 / 选章 / 改动过的章 / 当前选区
+│  ├─ 会读取 / 会发送 / 不会做 / 费用
+│  └─ 开始审阅 · 先看计划
+├─ running · per-category progress · completed categories actionable
+├─ results · grouped by category · filters category / severity / status / chapter
+│  ├─ finding · severity 必须处理 / 建议处理 / 提示 · basis · exact location
+│  ├─ 修改建议 categories → 接受并应用 · batch 接受并应用全部 → inline 确认应用 strip
+│  └─ 批注 categories → 标记为已处理 · 转为修改建议 · 忽略并说明
+└─ 审阅报告 · Report · versioned · exportable · attachable to a Delivery Package
+```
+
+学术道德与引用 and 出版政策与风险 mark only `需人工复核的风险点`. A category's search-engine use is stated once in its description.
+
+## Manuscript evaluation workspace
+
+Added by [ADR 0076](../adr/0076-align-editor-facing-surfaces-to-the-owner-s-september-decisions.md). `评估` is a Book-level destination:
+
+```text
+评估 · Evaluation Record · bound to one Manuscript Revision
+├─ total · N / 100 · band · 结论（推荐出版 / 修改后再议 / 暂缓 / 不推荐）· risks · readiness
+├─ strengths / weaknesses · each with dimension and source
+├─ scored items · 满分 by Evaluation Profile share · AI7 score · editor score · 依据充分度
+│  └─ comment with sources · pros / cons · next step · editor comment · adjustment reason
+├─ risk items · 事实与来源 / 法律、权利、伦理与出版政策 · 低 / 中 / 高 · cap the conclusion
+├─ readiness · 距离可出版还差什么
+├─ market · readers · differentiation · strategy · comparable books with sources
+│  ├─ 预测 · 低确定性 · 市场回报 / 评奖可能性 · basis or 暂无法预测
+│  └─ 定价与首印 · actuals entered after 发稿版本 · prediction enableable in Settings
+├─ AI7 draft → editor calibration → 定稿 → 重新评估 with item-by-item comparison
+└─ 审稿意见 · fixed special task · 给作者的修改意见 / 给编辑部的审读报告 · Editorial Artifact
+```
+
+`按我的评分重写评语` changes text, never numbers. Calibration runs in the background and is disclosed under `设置 › 评估校准`.
+
+## Knowledge Base
+
+Added by [ADR 0076](../adr/0076-align-editor-facing-surfaces-to-the-owner-s-september-decisions.md). `知识库` is a global destination:
+
+```text
+知识库
+├─ 审阅规范文件 · versioned · numbered clauses findings cite
+├─ 评估方案 · items, shares, anchors, conclusion options
+├─ 专家经验工序 · native skills by professional outcome
+├─ 社级编辑记忆
+├─ 范例 · past real 审稿意见 / 新闻稿 / writing samples · Learning Eligibility governed
+└─ native artifact / Rule management projection
+```
+
+Books, Review Runs, Evaluation Records and Tasks select from `知识库` and snapshot the versions they use.
+
+## Findings center
+
+Added by [ADR 0076](../adr/0076-align-editor-facing-surfaces-to-the-owner-s-september-decisions.md). `发现` is the Book-level aggregate of every unresolved finding — analysis gaps, review findings, evaluation risk items, other checks — grouped by category with counts; each item opens its exact record, and a disposition is one record wherever it is made. `待我处理` keeps only cross-Book decisions.
+
+## External evidence retention
+
+Added by [ADR 0076](../adr/0076-align-editor-facing-surfaces-to-the-owner-s-september-decisions.md). A built-in 工序 shared by 事实核查, 学术道德与引用, 出版政策与风险 and the evaluation's market section:
+
+```text
+external source used by a Task
+├─ retained as a Book-owned Source Version · snapshot · link · time · route
+├─ Evidence Sentence Links · manuscript sentence ↔ source passage
+├─ 来源译文 for a non-Chinese source · beside the original · labeled machine translation
+└─ shown in evidence comparison, on the source card, and in the category description
+```
+
+The Factual Verification Policy Document keeps deciding what counts as evidence; this 工序 decides how evidence is fetched, stored, aligned and translated.
+
 ## Task capture entry
 
-The bottom composer is a Context-bound Task Composer, not a chat transcript:
+The Context-bound Task Composer opens on demand — from a selection's context menu as `就这段发起任务…`, anchored to the selection, or from the `任务` panel as `发起全书任务` — and is neither a persistent bottom field nor a chat transcript ([ADR 0076](../adr/0076-align-editor-facing-surfaces-to-the-owner-s-september-decisions.md)):
 
 ```text
 active Book/work object
@@ -1333,7 +1442,7 @@ large / structural / cross-chapter / multi-range Proposal
       └─ expandable rationale / source / evidence / verification
 ```
 
-Every route displays Proposal base revision, current revision, and proposed state as distinct identities. Every Proposal Change Item keeps one exact anchor and decision identity across the manuscript-adjacent and Dedicated Work Workspace routes. Adjacent items may share one card group but not one disposition; only an explicitly explained Atomic Proposal Change Group is indivisible. Only the active or nearby card expands; the renderer loads only the active range and bounded context while collapsed anchors and the virtualized navigator preserve reachability. Proposal Review Return Position restores both manuscript and review state. Proposal Decision and Apply remain later, separately labeled interactions.
+Every route displays Proposal base revision, current revision, and proposed state as distinct identities. Every Proposal Change Item keeps one exact anchor and decision identity across the manuscript-adjacent and Dedicated Work Workspace routes. Adjacent items may share one card group but not one disposition; only an explicitly explained Atomic Proposal Change Group is indivisible. Only the active or nearby card expands; the renderer loads only the active range and bounded context while collapsed anchors and the virtualized navigator preserve reachability. Proposal Review Return Position restores both manuscript and review state. For one inline 修改建议 a single `接受并应用` interaction records the Proposal Decision and the Effect Approval and dispatches the Apply; batch review keeps `记录提案决定` and `准备应用` as separately labeled interactions, the latter presented as one inline confirmation strip ([ADR 0076](../adr/0076-align-editor-facing-surfaces-to-the-owner-s-september-decisions.md)).
 
 The four card regions retain one stable semantic order even when secondary detail collapses responsively. Proposed wording remains the primary reading object; AI7's rationale, supporting evidence/verification and the editor's own disposition reason never merge into a conversational transcript or one generic `说明` section.
 
