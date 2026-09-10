@@ -594,6 +594,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'plan-revision-dispatch',
     'plan-revision-edit-unchanged',
     'zero-activity',
+    'plan-revision-revert',
   ]),
 });
 

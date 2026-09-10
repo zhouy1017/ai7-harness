@@ -2009,6 +2009,104 @@ async function main() {
     at('zero-activity');
     await assertRenderer(renderer, `(() => { const card=document.querySelector('.baseline-analysis-card'); return card?.dataset.analysisState==='settled' && card.dataset.resultRevisionOrdinal==='6' && ${ONLY_ANALYSIS_ACTIONS} && !document.querySelector('[data-analysis-action="prepare"], [data-analysis-action="authorize"]') && !Object.keys(window.ai7).some((key)=>/provider|session|scheduler|payload|egress|effect|enrol|apply|export/i.test(key)); })()`, 'no-execution-surface');
     requireJourney(loopback.healthy() && loopback.observedRequests() === 0, 'zero-network-provider-session');
+
+    // ---- Issue #281: the revert path of a pending Plan Revision ---------------------------------------
+    at('plan-revision-revert');
+    cancellation.throwIfRequested();
+    // A fresh 重新分析所选范围 Task over one range freezes version 1 on the same Book (every earlier Task
+    // has a Run); re-preparing over a second range whose reuse-plan counts differ records the drifting
+    // pending revision; re-preparing with the frozen range reverts — the store records the reverting
+    // revision, whose proposed inputs are the frozen version's own and whose field diff is therefore
+    // empty, and the earlier pending revision is superseded durably, derived from the appended rows;
+    // 重新确认计划 then writes version 2, resolves the reverting revision, and restores the start action.
+    // The task is never authorized, so no further Run or fixture turn is spent and the loopback stays
+    // as quiet as `zero-activity` left it. The scenario lives after `zero-activity` because it needs a
+    // Task of its own: every earlier plan-version position is pinned by the stages above.
+    const revertBase = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    const revertOptions = revertBase?.updateControls?.actions?.['reanalyze-range']?.options ?? [];
+    requireJourney(Array.isArray(revertOptions) && revertOptions.length >= 2, 'plan-revision-revert-options', revertOptions);
+    const revertA = revertOptions[0];
+    const revertB = revertOptions.find((option) => option.unitOrdinal !== revertA.unitOrdinal && !sameRecord(option.expected, revertA.expected));
+    requireJourney(revertB !== undefined && revertA.startPosition !== revertB.startPosition && !sameRecord(revertA.expected, revertB.expected),
+      'plan-revision-revert-range', revertOptions);
+    const revertRangeA = { startPosition: revertA.startPosition, endPosition: revertA.endPosition };
+    const revertRangeB = { startPosition: revertB.startPosition, endPosition: revertB.endPosition };
+
+    // Version 1 over the frozen range A.
+    await assertRenderer(renderer, `(() => { const radio=document.querySelector('.baseline-analysis-card [data-update-action="reanalyze-range"] #analysis-range-${revertA.unitOrdinal}'); if(!(radio instanceof HTMLInputElement)||radio.checked)return false; radio.click(); return radio.checked; })()`, 'plan-revision-revert-frozen-select');
+    await click(renderer, '重新分析所选范围', 'plan-revision-revert-prepare');
+    await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='prepared' && document.querySelector('.baseline-analysis-card')?.dataset.taskIntentId!==${JSON.stringify(preparedDrift.taskIntent.taskIntentId)}`, 'plan-revision-revert-prepared', 120_000);
+    const revertPrepared = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    const revertV1Digest = revertPrepared?.planEnvelope?.digest;
+    requireJourney(revertPrepared?.taskIntent?.taskIntentId !== preparedDrift.taskIntent.taskIntentId && sameRecord(revertPrepared.update?.selectedRange, revertRangeA) &&
+      DIGEST_PATTERN.test(revertV1Digest) && revertPrepared.planVersion?.ordinal === 1 && revertPrepared.planVersion?.state === 'current' &&
+      revertPrepared.planVersion?.planRevisionId === null && revertPrepared.planVersions?.length === 1 && revertPrepared.planRevisions?.length === 0 &&
+      revertPrepared.planRevision === null && revertPrepared.actions?.canAuthorize === true && revertPrepared.actions?.canReconfirmPlan === false,
+    'plan-revision-revert-prepared', { update: revertPrepared?.update, planVersion: revertPrepared?.planVersion, actions: revertPrepared?.actions });
+
+    // Range B drifts: one stored pending revision on the same version, which cannot be authorized.
+    await assertRenderer(renderer, `(() => { const radio=document.querySelector('.baseline-analysis-card [data-update-action="reanalyze-range"] #analysis-range-${revertB.unitOrdinal}'); if(!(radio instanceof HTMLInputElement)||radio.checked)return false; radio.click(); return radio.checked; })()`, 'plan-revision-revert-drift-select');
+    await click(renderer, '重新分析所选范围', 'plan-revision-revert-drift');
+    await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.planRevisionPending==='true'`, 'plan-revision-revert-drift-pending', 120_000);
+    const revertDrifted = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    const revertDriftRevision = revertDrifted?.planRevision;
+    requireJourney(revertDrifted?.taskIntent?.taskIntentId === revertPrepared.taskIntent.taskIntentId && revertDrifted.planEnvelope?.digest === revertV1Digest &&
+      revertDrifted.planVersion?.ordinal === 1 && revertDrifted.planVersion?.state === 'superseded' && revertDrifted.planVersions?.length === 1 && revertDrifted.planRevisions?.length === 1 &&
+      UUID_PATTERN.test(revertDriftRevision?.planRevisionId) && revertDriftRevision.trigger === 'prepare' && revertDriftRevision.resolved === false && revertDriftRevision.superseded === false &&
+      JSON.stringify(revertDriftRevision.changedFields) === JSON.stringify(['selectedRange', 'reusePlan.counts']) && sameRecord(revertDriftRevision.proposed?.selectedRange, revertRangeB) &&
+      revertDrifted.actions?.canAuthorize === false && revertDrifted.actions?.canReconfirmPlan === true,
+    'plan-revision-revert-drift', { planRevision: revertDriftRevision, planVersion: revertDrifted?.planVersion, actions: revertDrifted?.actions });
+
+    // The frozen range again: the drift has reverted. The reverting revision proposes the frozen
+    // inputs themselves — no field differs — and the drifting revision is superseded, read from the
+    // rows that stay append-only.
+    await assertRenderer(renderer, `(() => { const radio=document.querySelector('.baseline-analysis-card [data-update-action="reanalyze-range"] #analysis-range-${revertA.unitOrdinal}'); if(!(radio instanceof HTMLInputElement)||radio.checked)return false; radio.click(); return radio.checked; })()`, 'plan-revision-revert-back-select');
+    await click(renderer, '重新分析所选范围', 'plan-revision-revert-back');
+    // The revision list is the one card reading that distinguishes two pending revisions from one.
+    await waitFor(renderer, `document.querySelectorAll('.baseline-analysis-card .analysis-plan-revision-list [data-plan-revision-prior="1"]').length===2`, 'plan-revision-revert-pending', 120_000);
+    const reverted = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    const revertRevision = reverted?.planRevision;
+    requireJourney(reverted?.taskIntent?.taskIntentId === revertPrepared.taskIntent.taskIntentId && reverted.planEnvelope?.digest === revertV1Digest &&
+      reverted.planVersion?.ordinal === 1 && reverted.planVersion?.state === 'superseded' && reverted.planVersions?.length === 1 && reverted.planRevisions?.length === 2 &&
+      UUID_PATTERN.test(revertRevision?.planRevisionId) && revertRevision.planRevisionId !== revertDriftRevision.planRevisionId &&
+      revertRevision.trigger === 'reconfirm' && revertRevision.resolved === false && revertRevision.superseded === false &&
+      revertRevision.changedFields?.length === 0 && revertRevision.diff?.length === 0 &&
+      sameRecord(revertRevision.proposed?.selectedRange, revertRangeA) && revertRevision.proposed?.runBudgetCeiling === 'unset' &&
+      revertRevision.proposed?.outboundDataCategory === 'public-or-synthetic' &&
+      sameRecord(revertRevision.proposed?.providerBinding, revertPrepared.planVersion?.materialInputs?.providerBinding) &&
+      sameRecord(revertRevision.proposed?.artifactPin, revertPrepared.planVersion?.materialInputs?.artifactPin) &&
+      revertRevision.label === '计划修订 · 版本 1 → 2（待重新确认）' &&
+      reverted.planRevisions[0].planRevisionId === revertDriftRevision.planRevisionId && reverted.planRevisions[0].resolved === false && reverted.planRevisions[0].superseded === true &&
+      reverted.actions?.canAuthorize === false && reverted.actions?.canReconfirmPlan === true,
+    'plan-revision-revert-pending', { planRevision: revertRevision, planRevisions: reverted?.planRevisions, actions: reverted?.actions });
+    await assertRenderer(renderer, `(() => {
+      const card=document.querySelector('.baseline-analysis-card');
+      const block=card?.querySelector('.analysis-plan-revision');
+      const view=block?.querySelector('[data-analysis-action="view-plan-revision"]');
+      const diff=block?.querySelector('.analysis-plan-revision-diff');
+      return card?.dataset.planRevisionPending==='true' && block?.dataset.planRevisionState==='pending' && block.dataset.planRevisionFields==='' && view instanceof HTMLButtonElement && diff instanceof HTMLElement && diff.hidden &&
+        diff.querySelectorAll('[data-plan-revision-field]').length===0 && block.querySelector('[data-analysis-action="reconfirm-plan"]') instanceof HTMLButtonElement &&
+        card.querySelector('.analysis-plan-versions [data-plan-revision-prior="1"][data-plan-revision-resolved="false"]')!==null && !card.querySelector('[data-analysis-action="authorize"]');
+    })()`, 'plan-revision-revert-surface');
+
+    // 重新确认计划 accepts the reverting revision — its proposed inputs are what durable state reads —
+    // writes version 2, resolves it, and restores the start action. Version 2 is materially version 1.
+    await click(renderer, '重新确认计划', 'plan-revision-revert-reconfirm-click');
+    await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.planVersion==='2'`, 'plan-revision-revert-version-2', 120_000);
+    const revertReconfirmed = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    const revertV2Digest = revertReconfirmed?.planEnvelope?.digest;
+    requireJourney(revertReconfirmed?.taskIntent?.taskIntentId === revertPrepared.taskIntent.taskIntentId && DIGEST_PATTERN.test(revertV2Digest) && revertV2Digest !== revertV1Digest &&
+      revertReconfirmed.planVersion?.ordinal === 2 && revertReconfirmed.planVersion?.state === 'current' && revertReconfirmed.planVersion?.planRevisionId === revertRevision.planRevisionId &&
+      JSON.stringify(revertReconfirmed.planVersions?.map((version) => [version.ordinal, version.state])) === JSON.stringify([[1, 'superseded'], [2, 'current']]) &&
+      revertReconfirmed.planRevisions?.length === 2 &&
+      JSON.stringify(revertReconfirmed.planRevisions.map((revision) => [revision.priorOrdinal, revision.nextOrdinal, revision.resolved, revision.superseded])) === JSON.stringify([[1, null, false, true], [1, 2, true, false]]) &&
+      JSON.stringify(revertReconfirmed.planVersion.materialInputs) === JSON.stringify(revertPrepared.planVersion.materialInputs) &&
+      sameRecord(revertReconfirmed.update?.selectedRange, revertRangeA) && revertReconfirmed.planRevision === null &&
+      revertReconfirmed.actions?.canAuthorize === true && revertReconfirmed.actions?.canReconfirmPlan === false,
+    'plan-revision-revert-reconfirmed', { planVersion: revertReconfirmed?.planVersion, planRevisions: revertReconfirmed?.planRevisions, update: revertReconfirmed?.update, actions: revertReconfirmed?.actions });
+    await assertRenderer(renderer, `(() => { const card=document.querySelector('.baseline-analysis-card'); const authorize=card?.querySelector('[data-analysis-action="authorize"]'); return card?.dataset.planVersion==='2' && card.dataset.planVersionCount==='2' && card.dataset.planRevisionPending==='false' && card.dataset.planEnvelopeDigest===${JSON.stringify(revertV2Digest)} && card.querySelector('[data-plan-version-ordinal="1"][data-plan-version-state="superseded"]')!==null && card.querySelector('[data-plan-version-ordinal="2"][data-plan-version-state="current"]')!==null && !card.querySelector('.analysis-plan-revision') && authorize instanceof HTMLButtonElement && !authorize.disabled && authorize.textContent==='授权并开始任务'; })()`, 'plan-revision-revert-version-2-surface');
+    requireJourney(loopback.healthy() && loopback.observedRequests() === 0, 'plan-revision-revert-zero-network');
+    cancellation.throwIfRequested();
   } finally {
     finalCleanupRequested = true;
     try { await cancellation.cleanup(); } finally { cancellation.dispose(); }

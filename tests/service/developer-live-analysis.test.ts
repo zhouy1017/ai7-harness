@@ -755,6 +755,51 @@ describe('the developer-live scope over exact sample1 with a stub transport', ()
   });
 
   /**
+   * Issue #281: the drift derivation reads every material field from durable state — the ceiling and
+   * the outbound category from the Provider Resolution Plan component, the expected outcome class from
+   * the Task Intent record — so a ceiling the launch bound differently is proven by the store's own
+   * diff rather than by constants compared with themselves. A live drift the inspect finds and the
+   * editor then reconfirms is recorded with the `inspect` trigger, the provenance it was detected with.
+   */
+  it('derives ceiling drift from the frozen component and records the reconfirmed live drift with the inspect trigger', async () => {
+    const { store, bookId, prepared } = await prepareLive(roots.dataRoot);
+    const rebinding: DeveloperLiveCeiling = { kind: 'tokens', maxTotalTokens: 250_000 };
+
+    // The frozen side reads durable state: the component's ceiling, the component's category, and the
+    // Task Intent record's expected outcome class — never the kind constant or a bare literal.
+    expect(prepared.planVersion!.materialInputs).toMatchObject({
+      runBudgetCeiling: CEILING,
+      outboundDataCategory: 'public-or-synthetic',
+      expectedOutcome: prepared.taskIntent!.expectedOutcome,
+    });
+
+    // Rebinding the launch at a different bound ceiling drifts durable state: the store itself derives
+    // the one-field diff through the frozen component, and the stale version keeps no start action.
+    store.baselineAnalysisLedger.bindLaunch(liveBinding(rebinding));
+    const drifted = store.inspectBaselineAnalysis(bookId);
+    expect(drifted.planEnvelope!.digest).toBe(prepared.planEnvelope!.digest);
+    expect(drifted.actions).toEqual({ canPrepare: false, canAuthorize: false, canReconfirmPlan: true });
+    const live = drifted.planRevision!;
+    expect(live).toMatchObject({ planRevisionId: null, detectedAt: null, trigger: 'inspect', resolved: false, superseded: false, changedFields: ['runBudgetCeiling'] });
+    expect(live.diff).toEqual([{ field: 'runBudgetCeiling', label: expect.any(String), prior: CEILING, proposed: rebinding, materiality: 'material' }]);
+    expect(live.proposed.runBudgetCeiling).toEqual(rebinding);
+
+    // `重新确认计划` records that live drift as the row its provenance names — `inspect`, the live
+    // drift resolved at reconfirmation — and writes version 2 under the newly bound ceiling.
+    let progress = store.createBaselineAnalysisPreparationWork(bookId, BASELINE_ANALYSIS_TASK_GOAL, null, launchPolicy, true);
+    while (!progress.done) progress = store.advanceBaselineAnalysisPreparationWork(progress.workId!);
+    const reconfirmed = progress.projection!;
+    expect(reconfirmed.planVersion!.ordinal).toBe(2);
+    expect(reconfirmed.planEnvelope!.digest).not.toBe(prepared.planEnvelope!.digest);
+    expect(reconfirmed.planRevisions).toHaveLength(1);
+    expect(reconfirmed.planRevisions[0]).toMatchObject({ trigger: 'inspect', resolved: true, superseded: false, nextOrdinal: 2, changedFields: ['runBudgetCeiling'] });
+    expect(reconfirmed.planVersion!.materialInputs.runBudgetCeiling).toEqual(rebinding);
+    expect(reconfirmed.planRevision).toBeNull();
+    expect(reconfirmed.actions).toEqual({ canPrepare: false, canAuthorize: true, canReconfirmPlan: false });
+    await store.close();
+  });
+
+  /**
    * The same bound default, against a Run whose first unit alone spends more than the resolved total.
    * The ceiling is a precondition of the transmit decision, so the second unit never forms a request:
    * the Run stops, names `run-budget-ceiling-reached`, and transmits nothing further.

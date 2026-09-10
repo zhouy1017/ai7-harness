@@ -882,6 +882,133 @@ describe('baseline manuscript analysis over the real store on exact sample1', ()
     }
   }, 300_000);
 
+  /**
+   * Issue #281: a pending Plan Revision gains a revert path. Prepared again with inputs equal to the
+   * frozen version, the store records the reverting revision — its proposed inputs are the frozen
+   * version's own, so it changed no field, and its trigger is `reconfirm`, the editor's return to the
+   * frozen plan. A later pending revision on the same prior version durably supersedes the earlier one
+   * (append-only: the flag is derived from the rows on every read), and `重新确认计划` writes the
+   * version that resolves the reverting revision — materially the version it supersedes — so the start
+   * action returns.
+   */
+  it('records the reverting revision when a drift reverts and durably supersedes the earlier pending revision', async () => {
+    await requireExactSample1(roots.codeRoot);
+    const store = await openWithRoute(roots.dataRoot, fixture);
+    const owner = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: fakeSecretResolver() });
+    const reconfirm = (bookId: string, update: BaselineAnalysisUpdateRequest): BaselineAnalysisProjection => {
+      const result = store.createBaselineAnalysisPreparationWork(bookId, BASELINE_ANALYSIS_MODE_GOALS[update.mode], update, launchPolicy, true);
+      expect(result.done).toBe(true);
+      return result.projection!;
+    };
+    let bookId: string;
+    let taskIntentId: string;
+    let v2Digest: string;
+    try {
+      const imported = await importSample1Book(store, roots.codeRoot, 'L2 sample1 计划修订回退');
+      bookId = imported.bookId;
+      await pinEditorialWorkspaceProfileRevision2(store, bookId);
+      recordMissingCredentialConnection(store, 'L2 主编辑连接');
+      const first = await runToSettled(store, owner, bookId, null);
+      const options = first.settled.updateControls!.actions['reanalyze-range'].options;
+      const rangeA = { startPosition: options[2]!.startPosition, endPosition: options[2]!.endPosition };
+      const rangeB = { startPosition: options[7]!.startPosition, endPosition: options[7]!.endPosition };
+      const rangeC = { startPosition: options[0]!.startPosition, endPosition: options[0]!.endPosition };
+
+      // Version 1 of a `重新分析所选范围` Task over range A.
+      const prepared = prepare(store, bookId, { mode: 'reanalyze-range', selectedRange: rangeA });
+      taskIntentId = prepared.taskIntent!.taskIntentId;
+      const v1Digest = prepared.planEnvelope!.digest;
+      const frozenInputs = prepared.planVersion!.materialInputs;
+
+      // Range B drifts; range C drifts again. Each becomes a pending revision on the same version 1,
+      // and the earlier one no longer awaits confirmation — it is superseded, read from the rows.
+      const driftB = prepare(store, bookId, { mode: 'reanalyze-range', selectedRange: rangeB });
+      const revisionB = driftB.planRevision!;
+      expect(revisionB).toMatchObject({ trigger: 'prepare', resolved: false, superseded: false, nextOrdinal: null, changedFields: ['selectedRange', 'reusePlan.counts'] });
+      const driftC = prepare(store, bookId, { mode: 'reanalyze-range', selectedRange: rangeC });
+      const revisionC = driftC.planRevision!;
+      expect(revisionC.planRevisionId).not.toBe(revisionB.planRevisionId);
+      expect(revisionC).toMatchObject({ trigger: 'prepare', resolved: false, superseded: false, nextOrdinal: null });
+      expect(revisionC.changedFields).toContain('selectedRange');
+      expect(driftC.planRevisions).toHaveLength(2);
+      expect(driftC.planRevisions[0]).toMatchObject({ planRevisionId: revisionB.planRevisionId, resolved: false, superseded: true });
+      expect(driftC.actions).toEqual({ canPrepare: false, canAuthorize: false, canReconfirmPlan: true });
+
+      // Prepared again with the frozen range A the drift has reverted: the reverting revision proposes
+      // the frozen inputs themselves — no field differs — and supersedes the pending range C revision.
+      const reverted = prepare(store, bookId, { mode: 'reanalyze-range', selectedRange: rangeA });
+      const reverting = reverted.planRevision!;
+      expect(reverted.planEnvelope!.digest).toBe(v1Digest);
+      expect(reverted.planRevisions).toHaveLength(3);
+      expect(reverting.planRevisionId).not.toBe(revisionC.planRevisionId);
+      expect(reverting).toMatchObject({ trigger: 'reconfirm', resolved: false, superseded: false, nextOrdinal: null, changedFields: [] });
+      expect(reverting.diff).toEqual([]);
+      expect(reverting.label).toBe('计划修订 · 版本 1 → 2（待重新确认）');
+      expect(reverting.proposed).toEqual(frozenInputs);
+      expect(reverted.planRevisions.map((revision) => [revision.planRevisionId, revision.resolved, revision.superseded])).toEqual([
+        [revisionB.planRevisionId, false, true],
+        [revisionC.planRevisionId, false, true],
+        [reverting.planRevisionId, false, false],
+      ]);
+      // Preparing the frozen range again records nothing further: the reverting revision stands.
+      expect(prepare(store, bookId, { mode: 'reanalyze-range', selectedRange: rangeA }).planRevisions).toHaveLength(3);
+
+      // `重新确认计划` accepts the reverting revision — its proposed inputs are what durable state reads —
+      // writes version 2 on the same Task Intent, resolves it, and restores the start action.
+      const confirmed = reconfirm(bookId, { mode: 'reanalyze-range', selectedRange: rangeA });
+      v2Digest = confirmed.planEnvelope!.digest;
+      expect(v2Digest).not.toBe(v1Digest);
+      expect(confirmed.planVersion).toMatchObject({ ordinal: 2, state: 'current', planRevisionId: reverting.planRevisionId, planEnvelopeDigest: v2Digest });
+      expect(confirmed.planVersion!.materialInputs).toEqual(frozenInputs);
+      expect(confirmed.update).toMatchObject({ selectedRange: rangeA, reusePlan: { counts: { reused: 5, recomputed: 3, invalidated: 1, bypassed: 2 } } });
+      expect(confirmed.planRevisions.map((revision) => [revision.priorOrdinal, revision.nextOrdinal, revision.resolved, revision.superseded])).toEqual([
+        [1, null, false, true],
+        [1, null, false, true],
+        [1, 2, true, false],
+      ]);
+      expect(confirmed.planRevision).toBeNull();
+      expect(confirmed.actions).toEqual({ canPrepare: false, canAuthorize: true, canReconfirmPlan: false });
+      store.markCleanShutdown();
+    } finally {
+      await owner.dispose();
+      store.close();
+    }
+    // Restart: the appended rows reopen unchanged, and the superseded reading holds without a rewrite.
+    const reopened = await openWithRoute(roots.dataRoot, fixture);
+    try {
+      const restarted = reopened.inspectBaselineAnalysis(bookId);
+      expect(restarted.taskIntent?.taskIntentId).toBe(taskIntentId);
+      expect(restarted.planVersions.map((version) => [version.ordinal, version.state])).toEqual([[1, 'superseded'], [2, 'current']]);
+      expect(restarted.planEnvelope?.digest).toBe(v2Digest);
+      expect(restarted.planRevisions.map((revision) => [revision.trigger, revision.resolved, revision.superseded])).toEqual([
+        ['prepare', false, true],
+        ['prepare', false, true],
+        ['reconfirm', true, false],
+      ]);
+      expect(restarted.actions).toEqual({ canPrepare: false, canAuthorize: true, canReconfirmPlan: false });
+      reopened.markCleanShutdown();
+    } finally {
+      reopened.close();
+    }
+    // The rows are exactly what was appended — two versions, three revisions — and every revision row
+    // is immutable: the superseded flags were derived on read, never written.
+    const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+    try {
+      expect(database.prepare('SELECT ordinal FROM analysis_plan_versions WHERE task_intent_id = ? ORDER BY ordinal').all(taskIntentId)).toEqual([{ ordinal: 1 }, { ordinal: 2 }]);
+      expect(database.prepare('SELECT prior_ordinal, trigger_kind FROM analysis_plan_revisions WHERE task_intent_id = ? ORDER BY rowid').all(taskIntentId)).toEqual([
+        { prior_ordinal: 1, trigger_kind: 'prepare' },
+        { prior_ordinal: 1, trigger_kind: 'prepare' },
+        { prior_ordinal: 1, trigger_kind: 'reconfirm' },
+      ]);
+      for (const table of ['analysis_plan_versions', 'analysis_plan_revisions', 'analysis_plan_records']) {
+        expect(() => database.prepare(`UPDATE ${table} SET sha256 = sha256`).run()).toThrowError(/TASK_LEDGER_IMMUTABLE/u);
+        expect(() => database.prepare(`DELETE FROM ${table}`).run()).toThrowError(/TASK_LEDGER_IMMUTABLE/u);
+      }
+    } finally {
+      database.close();
+    }
+  }, 300_000);
+
   it('records the authorized Run as blocked before dispatch when no local deterministic route is bound', async () => {
     await requireExactSample1(roots.codeRoot);
     const store = await openWithRoute(roots.dataRoot, null);

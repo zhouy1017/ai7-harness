@@ -9,6 +9,7 @@ import {
   PLAN_REVISION_REQUIRED_REASON,
   buildPlanAdaptationRecord,
   diffMaterialPlanInputs,
+  expectedOutcomeOfIntentRecord,
   materialPlanInputsOfComponents,
   planAdaptationLabel,
   planBoundarySplit,
@@ -23,6 +24,8 @@ import type { MaterialPlanField, MaterialPlanInputsProjection } from '../../src/
 // line; a derived consequence (the reuse-plan counts) is reported beside them, never as material.
 
 const EXPECTED_OUTCOME = '稿件分析结果集修订版（基线稿件分析契约 v1）';
+/** The Task Intent record the material-input derivation reads its expected outcome class from (Issue #281). */
+const INTENT_RECORD: Readonly<Record<string, unknown>> = { expectedOutcome: EXPECTED_OUTCOME };
 const RANGE_A = { startPosition: 26, endPosition: 43 };
 const RANGE_B = { startPosition: 93, endPosition: 97 };
 const PREDECESSOR = { revisionId: randomUUID(), ordinal: 1, digest: 'c'.repeat(64) };
@@ -109,6 +112,9 @@ describe('material plan drift', () => {
   it('labels a revision by its versions and changed fields and an adaptation by unit and classified reason', () => {
     expect(planRevisionLabel(1, 2, ['selectedRange', 'reusePlan.counts'])).toBe('计划修订 · 版本 1 → 2 · selectedRange、reusePlan.counts');
     expect(planRevisionLabel(3, null, ['providerBinding.credentialReference'])).toBe('计划修订 · 版本 3 → 4（待重新确认） · providerBinding.credentialReference');
+    // A reverting revision changed no field: its label carries no field list.
+    expect(planRevisionLabel(1, null, [])).toBe('计划修订 · 版本 1 → 2（待重新确认）');
+    expect(planRevisionLabel(2, 3, [])).toBe('计划修订 · 版本 2 → 3');
     expect(planAdaptationLabel(5, '适配器失败（PROVIDER_ERROR · 503）。')).toBe('计划内调整 · 单元 5 安全重试 1 次 · 适配器失败（PROVIDER_ERROR · 503）。');
     expect(PLAN_REVISION_REQUIRED_REASON).toBe('plan-revision-required');
   });
@@ -138,32 +144,48 @@ describe('plan boundary split', () => {
 });
 
 describe('material inputs of plan components', () => {
-  const components = (reusePlan: Record<string, unknown> | null): Record<string, unknown> => ({
+  const components = (reusePlan: Record<string, unknown> | null, overrides: Record<string, unknown> = {}): Record<string, unknown> => ({
     'provider-resolution-plan': {
       role: 'Main Editorial Role',
       remoteBinding: { providerId: 'deepseek-open-platform', modelId: 'deepseek-v4-pro', adapterRevision: 1, configurationRevision: 1, credentialReference: '11111111-1111-4111-8111-111111111111', credentialReadiness: 'missing' },
       outboundDataCategory: 'public-or-synthetic',
       runBudgetCeiling: 'unset',
+      ...overrides,
     },
     'artifact-pin': { identity: '@ai7/editorial-workspace-profile', version: '1.0.0', nativeCarrierSha256: 'a'.repeat(64), sidecarIdentity: 'ai7.editorial-workspace-profile.authority', sidecarRevision: 2, sidecarSha256: 'b'.repeat(64) },
     ...(reusePlan === null ? {} : { 'reuse-plan': reusePlan }),
   });
 
   it('reads the binding, the pin, and the reuse plan back into the material inputs, ignoring credential readiness', () => {
-    const read = materialPlanInputsOfComponents(components({ selectedRange: RANGE_A, predecessor: { ...PREDECESSOR, contractVersion: 'x', coverageManifestDigest: 'y', unitCount: 8 } }), EXPECTED_OUTCOME);
+    const read = materialPlanInputsOfComponents(components({ selectedRange: RANGE_A, predecessor: { ...PREDECESSOR, contractVersion: 'x', coverageManifestDigest: 'y', unitCount: 8 } }), INTENT_RECORD);
     expect(read).toEqual(inputs());
   });
 
+  it('reads the ceiling and the outbound category from the component, never from a constant (Issue #281)', () => {
+    const explicit = components(null, { runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 1234 } });
+    expect(materialPlanInputsOfComponents(explicit, INTENT_RECORD).runBudgetCeiling).toEqual({ kind: 'tokens', maxTotalTokens: 1234 });
+    expect(materialPlanInputsOfComponents(components(null), INTENT_RECORD).runBudgetCeiling).toBe('unset');
+    // The component's own outbound category is read, not assumed: a record without the admitted value is refused.
+    expect(materialPlanInputsOfComponents(components(null), INTENT_RECORD).outboundDataCategory).toBe('public-or-synthetic');
+    expect(() => materialPlanInputsOfComponents(components(null, { outboundDataCategory: undefined }), INTENT_RECORD)).toThrowError(/外发数据类别/u);
+  });
+
+  it('reads the expected outcome class from the Task Intent record, never from the kind constant (Issue #281)', () => {
+    expect(expectedOutcomeOfIntentRecord({ expectedOutcome: EXPECTED_OUTCOME })).toBe(EXPECTED_OUTCOME);
+    expect(materialPlanInputsOfComponents(components(null), { expectedOutcome: '另一结果类别' }).expectedOutcome).toBe('另一结果类别');
+    expect(() => materialPlanInputsOfComponents(components(null), { goal: '缺少结果类别' })).toThrowError(/预期结果类别/u);
+  });
+
   it('yields a null range and predecessor for a first baseline and for an update without a range', () => {
-    expect(materialPlanInputsOfComponents(components(null), EXPECTED_OUTCOME)).toEqual({ ...inputs(), selectedRange: null, predecessorRevision: null });
-    expect(materialPlanInputsOfComponents(components({ selectedRange: null, predecessor: PREDECESSOR }), EXPECTED_OUTCOME)).toEqual({ ...inputs(), selectedRange: null });
+    expect(materialPlanInputsOfComponents(components(null), INTENT_RECORD)).toEqual({ ...inputs(), selectedRange: null, predecessorRevision: null });
+    expect(materialPlanInputsOfComponents(components({ selectedRange: null, predecessor: PREDECESSOR }), INTENT_RECORD)).toEqual({ ...inputs(), selectedRange: null });
   });
 
   it('rejects components without a remote binding or with a malformed pin', () => {
-    expect(() => materialPlanInputsOfComponents({ 'artifact-pin': components(null)['artifact-pin'] }, EXPECTED_OUTCOME)).toThrowError(AnalysisError);
+    expect(() => materialPlanInputsOfComponents({ 'artifact-pin': components(null)['artifact-pin'] }, INTENT_RECORD)).toThrowError(AnalysisError);
     const malformed = components(null);
     malformed['artifact-pin'] = { ...(malformed['artifact-pin'] as Record<string, unknown>), sidecarRevision: 'two' };
-    expect(() => materialPlanInputsOfComponents(malformed, EXPECTED_OUTCOME)).toThrowError(/构件 pin 记录无效/u);
+    expect(() => materialPlanInputsOfComponents(malformed, INTENT_RECORD)).toThrowError(/构件 pin 记录无效/u);
   });
 });
 

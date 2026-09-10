@@ -47,6 +47,7 @@ import {
   PLAN_REVISION_REQUIRED_REASON,
   buildPlanAdaptationRecord,
   diffMaterialPlanInputs,
+  expectedOutcomeOfIntentRecord,
   materialPlanInputsOfComponents,
   planAdaptationLabel,
   planBoundarySplit,
@@ -151,6 +152,8 @@ interface IntentFacts {
   readonly createdAt: string;
   readonly predecessorRevisionId: string | null;
   readonly selectedRange: BaselineAnalysisSelectedRange | null;
+  /** The parsed canonical Task Intent record; the expected outcome class every material-input reading uses is read from it (Issue #281). */
+  readonly record: Readonly<Record<string, unknown>>;
 }
 
 /**
@@ -577,7 +580,7 @@ export class BaselineAnalysisStore {
     const taskIntent = {
       taskIntentId: intent.taskIntentId,
       goal: intent.goal,
-      expectedOutcome: this.#definition.expectedOutcome,
+      expectedOutcome: expectedOutcomeOfIntentRecord(intent.record),
       createdAt: intent.createdAt,
       mode: intent.mode,
       modeLabel: this.#definition.mode(intent.mode).label,
@@ -631,13 +634,13 @@ export class BaselineAnalysisStore {
     // Drift detection (Issue #48): before authorization the material inputs are re-derived from durable
     // state and compared with the frozen version; a stored pending Plan Revision takes precedence over a
     // live difference. After authorization the bound plan is final for its Run and nothing is compared.
-    const materialInputs = materialPlanInputsOfComponents(plan, this.#definition.expectedOutcome);
+    const materialInputs = materialPlanInputsOfComponents(plan, intent.record);
     const revisions = this.#planRevisionProjections(intent.taskIntentId, versions);
     let planRevision: BaselineAnalysisPlanRevisionProjection | null = null;
     if (authorization === undefined) {
       planRevision = revisions.filter((entry) => !entry.resolved && entry.priorPlanVersionId === currentVersion.planVersionId).at(-1) ?? null;
       if (planRevision === null) {
-        const live = this.#currentMaterialInputs(bookId, intent.mode, materialInputs.selectedRange, manifest.units.length);
+        const live = this.#currentMaterialInputs(bookId, intent.mode, materialInputs.selectedRange, manifest.units.length, expectedOutcomeOfIntentRecord(intent.record));
         const diff = diffMaterialPlanInputs(materialInputs, live);
         if (diff.length > 0) {
           const changedFields = diff.map((entry) => entry.field);
@@ -652,6 +655,7 @@ export class BaselineAnalysisStore {
             diff,
             proposed: live,
             resolved: false,
+            superseded: false,
             label: planRevisionLabel(currentVersion.ordinal, null, changedFields),
           };
         }
@@ -864,16 +868,23 @@ export class BaselineAnalysisStore {
     return row === undefined ? undefined : asString(row.plan_envelope_sha256);
   }
 
-  /** Every Plan Revision of a Task in detection order; resolved when a later version links back to it. */
+  /**
+   * Every Plan Revision of a Task in detection order; resolved when a later version links back to it,
+   * superseded when a later revision on the same prior version followed it without a version resolving
+   * it. Superseded is a reading of the immutable rows, so it holds on every reopen without any row
+   * ever being rewritten (Issue #281).
+   */
   #planRevisionProjections(taskIntentId: string, versions: ReadonlyArray<PlanVersionFacts>): BaselineAnalysisPlanRevisionProjection[] {
     const rows = this.#db.prepare('SELECT * FROM analysis_plan_revisions WHERE task_intent_id = ? ORDER BY rowid').all(taskIntentId) as SqlRow[];
-    return rows.map((row) => {
+    return rows.map((row, index) => {
       const record = parseCanonicalJson(asString(row.canonical_json)) as Record<string, unknown>;
       const planRevisionId = asString(row.plan_revision_id);
       requireAnalysis(record.planRevisionId === planRevisionId && Array.isArray(record.diff) && isRecord(record.proposed), 'ANALYSIS_RECORD_INVALID', '计划修订记录无效。');
       const diff = record.diff as PlanRevisionDiffEntryProjection[];
       const changedFields = diff.map((entry) => entry.field);
       const resolvedBy = versions.find((entry) => entry.planRevisionId === planRevisionId);
+      const superseded = resolvedBy === undefined && rows.slice(index + 1)
+        .some((later) => asString(later.prior_plan_version_id) === asString(row.prior_plan_version_id));
       const priorOrdinal = asNumber(row.prior_ordinal);
       const nextOrdinal = resolvedBy?.ordinal ?? null;
       return {
@@ -887,6 +898,7 @@ export class BaselineAnalysisStore {
         diff,
         proposed: record.proposed as unknown as MaterialPlanInputsProjection,
         resolved: resolvedBy !== undefined,
+        superseded,
         label: planRevisionLabel(priorOrdinal, nextOrdinal, changedFields),
       };
     });
@@ -896,12 +908,13 @@ export class BaselineAnalysisStore {
    * The material plan inputs as durable state holds them now: the Main Editorial Role connection
    * (provider, model, adapter and configuration revisions, Credential Reference — never its readiness),
    * the highest pinned authority sidecar with its native carrier, the range the caller names, the
-   * Book's latest Result Set Revision for an update Task, and the fixed ceiling, category, and outcome
-   * class. Read leniently so a drifted pin or binding yields a diff rather than a refusal. The unit
-   * count is the frozen Coverage Manifest's, so the policy's per-frozen-unit default resolves to the
-   * same total the freeze wrote.
+   * Book's latest Result Set Revision for an update Task, the ceiling the bound launch resolves, the
+   * fixed outbound category, and the expected outcome class the Task Intent record carries. Read
+   * leniently so a drifted pin or binding yields a diff rather than a refusal. The unit count is the
+   * frozen Coverage Manifest's, so the policy's per-frozen-unit default resolves to the same total the
+   * freeze wrote.
    */
-  #currentMaterialInputs(bookId: string, mode: AnalysisTaskMode, selectedRange: BaselineAnalysisSelectedRange | null, unitCount: number): MaterialPlanInputsProjection {
+  #currentMaterialInputs(bookId: string, mode: AnalysisTaskMode, selectedRange: BaselineAnalysisSelectedRange | null, unitCount: number, expectedOutcome: string): MaterialPlanInputsProjection {
     const connection = this.#db.prepare(
       `SELECT provider_id, model_id, adapter_revision, configuration_revision, credential_reference
        FROM model_service_connections WHERE connection_id = 'main-editorial-deepseek-v4-pro'`,
@@ -948,7 +961,7 @@ export class BaselineAnalysisStore {
       predecessorRevision: latest === undefined ? null : { revisionId: asString(latest.revision_id), ordinal: asNumber(latest.ordinal), digest: asString(latest.sha256) },
       runBudgetCeiling: live === null ? 'unset' : resolveDeveloperLiveCeiling(live.runBudgetCeiling, unitCount),
       outboundDataCategory: 'public-or-synthetic',
-      expectedOutcome: this.#definition.expectedOutcome,
+      expectedOutcome,
     };
   }
 
@@ -971,7 +984,7 @@ export class BaselineAnalysisStore {
     priorInputs: MaterialPlanInputsProjection;
     proposed: MaterialPlanInputsProjection;
     diff: ReadonlyArray<PlanRevisionDiffEntryProjection>;
-    trigger: 'prepare' | 'reconfirm';
+    trigger: 'prepare' | 'inspect' | 'reconfirm';
     instant: string;
   }): string {
     const planRevisionId = randomUUID();
@@ -1000,6 +1013,14 @@ export class BaselineAnalysisStore {
    * with its field-level diff and the derived reuse-plan counts; the prepared version is thereby
    * superseded and cannot be authorized. `重新确认计划` (`reconfirm`) resolves the pending revision — or
    * records the live drift as one — and writes the next plan version on the same Task Intent.
+   *
+   * The revert path (Issue #281): prepared again with inputs equal to the frozen version while a
+   * pending revision still proposes different ones, the drift has reverted, and the store records the
+   * reverting revision — proposed inputs are the frozen version's own, so its diff is empty — with
+   * `reconfirm` as its trigger, the editor's return to the frozen plan. The later pending revision
+   * supersedes the earlier one, and `重新确认计划` writes the version that resolves the reverting
+   * revision, materially equal to the version it supersedes, so the start action returns. Preparing
+   * the same frozen inputs again records nothing further.
    */
   #revisePreparedPlan(
     bookId: string,
@@ -1014,7 +1035,7 @@ export class BaselineAnalysisStore {
     const pending = existing.planRevision;
     const instant = new Date().toISOString();
     const manifest = existing.coverageManifest;
-    const proposed = this.#currentMaterialInputs(bookId, intent.mode, requestedRange, manifest.units.length);
+    const proposed = this.#currentMaterialInputs(bookId, intent.mode, requestedRange, manifest.units.length, expectedOutcomeOfIntentRecord(intent.record));
     const diffFor = (): PlanRevisionDiffEntryProjection[] => {
       const entries = diffMaterialPlanInputs(stored, proposed);
       const storedCounts = existing.update?.reusePlan?.counts ?? null;
@@ -1023,7 +1044,15 @@ export class BaselineAnalysisStore {
       return derived === null ? entries : [...entries, derived];
     };
     if (!reconfirm) {
-      if (sameMaterialPlanInputs(stored, proposed)) return existing;
+      if (sameMaterialPlanInputs(stored, proposed)) {
+        // The durable-state readings are back to the frozen version. A stored pending revision that
+        // proposes different inputs is reverted by a later one proposing the frozen inputs; a pending
+        // revision that already proposes exactly those (the reverting revision itself) or none at all
+        // records nothing.
+        if (pending === null || pending.planRevisionId === null || sameMaterialPlanInputs(pending.proposed, stored)) return existing;
+        transact(this.#db, () => this.#insertPlanRevision({ taskIntentId: intent.taskIntentId, prior: current, priorInputs: stored, proposed, diff: diffFor(), trigger: 'reconfirm', instant }));
+        return this.inspect(bookId);
+      }
       if (pending !== null && pending.planRevisionId !== null && sameMaterialPlanInputs(pending.proposed, proposed)) return existing;
       const diff = diffFor();
       requireAnalysis(!diff.some((entry) => entry.field === 'predecessorRevision'), 'ANALYSIS_PREDECESSOR_DRIFT',
@@ -1047,8 +1076,10 @@ export class BaselineAnalysisStore {
       createdForDirtyJournal: asNumber(checkpointRow.created_for_dirty_journal) === 1,
     };
     transact(this.#db, () => {
+      // A live drift — one the inspect found and never stored — is recorded now, and its row keeps the
+      // provenance it was detected with: `inspect` (Issue #281's live-drift trigger).
       const planRevisionId = pending.planRevisionId ??
-        this.#insertPlanRevision({ taskIntentId: intent.taskIntentId, prior: current, priorInputs: stored, proposed, diff: diffFor(), trigger: 'reconfirm', instant });
+        this.#insertPlanRevision({ taskIntentId: intent.taskIntentId, prior: current, priorInputs: stored, proposed, diff: diffFor(), trigger: 'inspect', instant });
       this.#writePlanVersion({
         intent,
         checkpoint,
@@ -1082,6 +1113,8 @@ export class BaselineAnalysisStore {
     const mode = asString(row.mode) as AnalysisTaskMode;
     const goal = asString(row.goal);
     requireAnalysis(goal === this.#definition.mode(mode).goal, 'ANALYSIS_RECORD_INVALID', '任务意图的目标与更新方式不一致。');
+    const record = parseCanonicalJson(asString(row.canonical_json)) as Record<string, unknown>;
+    requireAnalysis(isRecord(record) && record.taskIntentId === asString(row.task_intent_id), 'ANALYSIS_RECORD_INVALID', '任务意图记录无效。');
     const start = row.selected_start_position;
     const end = row.selected_end_position;
     return {
@@ -1092,6 +1125,7 @@ export class BaselineAnalysisStore {
       createdAt: asString(row.created_at),
       predecessorRevisionId: row.predecessor_revision_id === null ? null : asString(row.predecessor_revision_id),
       selectedRange: start === null || end === null ? null : { startPosition: asNumber(start), endPosition: asNumber(end) },
+      record,
     };
   }
 

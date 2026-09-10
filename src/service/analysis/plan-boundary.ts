@@ -126,12 +126,14 @@ function asString(value: unknown, message: string): string {
 }
 
 /**
- * The material inputs a frozen plan version carries, re-read from its own plan components: the
- * remote binding of the Provider Resolution Plan, the artifact pin, the reuse plan's selected range
- * and predecessor (absent for the first baseline), the ceiling and outbound category, and the
- * expected outcome class of the Task Intent.
+ * The material inputs a frozen plan version carries, re-read from the plan components themselves and
+ * the Task Intent record (Issue #281): the remote binding, the outbound data category and the Run
+ * Budget Ceiling state of the Provider Resolution Plan, the artifact pin, the reuse plan's selected
+ * range and predecessor (absent for the first baseline), and the expected outcome class of the Task
+ * Intent record. Every material field on this side is read from durable state, so the drift
+ * derivation never compares a constant with itself.
  */
-export function materialPlanInputsOfComponents(components: Readonly<Record<string, unknown>>, expectedOutcome: string): MaterialPlanInputsProjection {
+export function materialPlanInputsOfComponents(components: Readonly<Record<string, unknown>>, intentRecord: Readonly<Record<string, unknown>>): MaterialPlanInputsProjection {
   const providerPlan = components['provider-resolution-plan'];
   const artifactPin = components['artifact-pin'];
   const reusePlan = components['reuse-plan'];
@@ -161,21 +163,37 @@ export function materialPlanInputsOfComponents(components: Readonly<Record<strin
       digest: asString(predecessor.digest, '前一修订版记录无效。'),
     },
     runBudgetCeiling: runBudgetCeilingOf(providerPlan.runBudgetCeiling),
-    outboundDataCategory: 'public-or-synthetic',
-    expectedOutcome,
+    outboundDataCategory: outboundDataCategoryOf(providerPlan.outboundDataCategory),
+    expectedOutcome: expectedOutcomeOfIntentRecord(intentRecord),
   };
 }
 
 /**
- * The exact ceiling state the frozen plan carries. It is a material field (ADR 0009), so drift
- * detection must compare the real value rather than a constant: under `developer-live` a plan version
- * froze an explicit token ceiling, and re-preparing at a different ceiling is a Plan Revision. The
- * remaining Issue #281 fields stay derived from the constants they already use.
+ * The exact ceiling state a frozen plan carries, read from the Provider Resolution Plan. It is a
+ * material field (ADR 0009), so drift detection must compare the real value rather than a constant:
+ * under `developer-live` a plan version froze an explicit token ceiling, and re-preparing at a
+ * different bound ceiling is a Plan Revision.
  */
 function runBudgetCeilingOf(value: unknown): MaterialPlanInputsProjection['runBudgetCeiling'] {
   if (value === 'unset') return 'unset';
   requireAnalysis(isRecord(value) && value.kind === 'tokens', 'ANALYSIS_RECORD_INVALID', 'Run Budget Ceiling 记录无效。');
   return { kind: 'tokens', maxTotalTokens: asNumber(value.maxTotalTokens, 'Run Budget Ceiling 记录无效。') };
+}
+
+/**
+ * The outbound data category a frozen plan carries, read from its Provider Resolution Plan. The
+ * protocol admits exactly one value today; reading the component means the frozen side states what
+ * that version actually recorded and refuses a record without the admitted value, instead of
+ * silently substituting a constant (Issue #281).
+ */
+function outboundDataCategoryOf(value: unknown): MaterialPlanInputsProjection['outboundDataCategory'] {
+  requireAnalysis(value === 'public-or-synthetic', 'ANALYSIS_RECORD_INVALID', '外发数据类别记录无效。');
+  return value;
+}
+
+/** The expected outcome class a Task Intent record carries; the one reading of that durable field (Issue #281). */
+export function expectedOutcomeOfIntentRecord(intentRecord: Readonly<Record<string, unknown>>): string {
+  return asString(intentRecord['expectedOutcome'], '任务意图记录缺少预期结果类别。');
 }
 
 export interface PlanAdaptationRecordInput {
@@ -237,10 +255,16 @@ export function planAdaptationLabel(unitOrdinal: number, classifiedReason: strin
   return `计划内调整 · 单元 ${unitOrdinal} 安全重试 1 次 · ${classifiedReason}`;
 }
 
-/** The wording of one Plan Revision: `计划修订 · 版本 m → m+1 · <changed fields>`; a pending revision names the next version it will yield. */
+/**
+ * The wording of one Plan Revision: `计划修订 · 版本 m → m+1 · <changed fields>`; a pending revision
+ * names the next version it will yield. A reverting revision — one whose proposed inputs are the
+ * frozen version's own, recorded when a drift reverted — changed no field, so it carries no field
+ * list (Issue #281).
+ */
 export function planRevisionLabel(priorOrdinal: number, nextOrdinal: number | null, changedFields: ReadonlyArray<string>): string {
   const next = nextOrdinal ?? priorOrdinal + 1;
-  return `计划修订 · 版本 ${priorOrdinal} → ${next}${nextOrdinal === null ? '（待重新确认）' : ''} · ${changedFields.join('、')}`;
+  const fields = changedFields.length === 0 ? '' : ` · ${changedFields.join('、')}`;
+  return `计划修订 · 版本 ${priorOrdinal} → ${next}${nextOrdinal === null ? '（待重新确认）' : ''}${fields}`;
 }
 
 export function selectedRangeEquals(left: BaselineAnalysisSelectedRange | null, right: BaselineAnalysisSelectedRange | null): boolean {

@@ -1,4 +1,4 @@
-export const SERVICE_PROTOCOL_VERSION = 28 as const;
+export const SERVICE_PROTOCOL_VERSION = 29 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -1876,7 +1876,9 @@ export interface BaselineAnalysisPlanVersionProjection {
  * One Plan Revision: the immutable field-level diff between a prior plan version and the inputs
  * proposed for the next one. A stored pending revision (`planRevisionId` set, `resolved` false)
  * awaits `重新确认计划`; a live entry (`planRevisionId` null) reports durable-state drift the store
- * detected on inspect and records at reconfirmation.
+ * detected on inspect and records at reconfirmation. A revision that a later pending revision on the
+ * same prior version followed is `superseded`: the fact is derived from the immutable rows on every
+ * read (append-only, Issue #281), never from an update to the earlier row.
  */
 export interface BaselineAnalysisPlanRevisionProjection {
   planRevisionId: string | null;
@@ -1890,6 +1892,8 @@ export interface BaselineAnalysisPlanRevisionProjection {
   diff: ReadonlyArray<PlanRevisionDiffEntryProjection>;
   proposed: MaterialPlanInputsProjection;
   resolved: boolean;
+  /** A later Plan Revision on the same prior version followed this one without a later version resolving it. */
+  superseded: boolean;
   label: string;
 }
 
