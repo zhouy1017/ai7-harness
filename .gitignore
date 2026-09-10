@@ -1,14 +1,21 @@
 # Manuscripts and private sample Books remain local-only. Document formats
-# are ignored everywhere by default. ADR 0043 permits only exact-root
-# SampleBooks files that the Owner separately designates through an
-# authorized Issue and pull request; placement alone is not admission.
+# are ignored everywhere by default. ADR 0043, as narrowed by ADR 0079 §5,
+# admits under exact-root SampleBooks/ only exact `sample1.docx` beside this
+# directory's README; placement alone is never admission. The five former
+# SampleBooks are local-only test material and are refused by name below.
 *.doc
 *.docx
 *.odt
 *.rtf
 *.pdf
-!/SampleBooks/
-!/SampleBooks/**
+/SampleBooks/*
+!/SampleBooks/README.md
+!/SampleBooks/sample1.docx
+/SampleBooks/1蟠虺（修订290326字).docx
+/SampleBooks/2听漏（定稿368544字）.docx
+/SampleBooks/3天兽（定稿395870字)##＊.doc
+/SampleBooks/春歌(一次通读后电子版).pdf
+/SampleBooks/蟠虺.docx
 
 # Local secrets and credential material never enter the repository.
 .env

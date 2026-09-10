@@ -4,22 +4,24 @@ import { createServer } from 'node:http';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { arch, platform, release, tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { ADMITTED_SMALL_DOCX, composeAdmittedDocx } from './composed-docx.mjs';
+import { ADMITTED_BASELINE_DOCX, composeAdmittedDocx } from './composed-docx.mjs';
 import { attachProductOutput, installJourneyCancellationCleanup, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect } from './controller.mjs';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const DEBUG_SELECTORS = new Set(['DEBUG', 'DEBUG_FILE', 'PWDEBUG', 'PWDEBUGIMPL']);
 const OBJECT_PATTERN = /^[0-9a-f]{64}\.snapshot$/;
 // This Journey's subject is recovery of edited text, so its three inputs are composed at run time from
-// the admitted small Public SampleBook rather than generated, under the content rule in
-// docs/agents/ci-test-boundaries.md. The three ranges do not overlap, so the three Books carry distinct
-// digests, and each title is authored here: none is ever taken from the source. The affected Book's
-// range stays long enough for the bounded read-only recovery view to remain a real bound at 32 blocks;
-// the other two are only imported, opened, and edited at their first block. The composer defers its
-// third-party carriers to first use, so composition still happens after the network denial below.
-const EXCERPT_A = Object.freeze({ source: ADMITTED_SMALL_DOCX, startBlock: 1, blocks: 40, title: '恢复边界甲' });
-const EXCERPT_B = Object.freeze({ source: ADMITTED_SMALL_DOCX, startBlock: 41, blocks: 30, title: '无关工作乙' });
-const EXCERPT_C = Object.freeze({ source: ADMITTED_SMALL_DOCX, startBlock: 71, blocks: 25, title: '待处理导入丙' });
+// the one admitted Public SampleBook — exact `sample1.docx` (ADR 0043 as narrowed by ADR 0079 §5) —
+// rather than generated, under the content rule in docs/agents/ci-test-boundaries.md. Blocks 1–40,
+// 41–70, and 71–97 of its 97 exhaust the source, and the three ranges do not overlap, so the three
+// Books carry distinct digests, and each title is authored here: none is ever taken from the source.
+// The affected Book's range stays long enough for the bounded read-only recovery view to remain a real
+// bound at 32 blocks; the other two are only imported, opened, and edited at their first block. The
+// composer defers its third-party carriers to first use, so composition still happens after the
+// network denial below.
+const EXCERPT_A = Object.freeze({ source: ADMITTED_BASELINE_DOCX, startBlock: 1, blocks: 40, title: '恢复边界甲' });
+const EXCERPT_B = Object.freeze({ source: ADMITTED_BASELINE_DOCX, startBlock: 41, blocks: 30, title: '无关工作乙' });
+const EXCERPT_C = Object.freeze({ source: ADMITTED_BASELINE_DOCX, startBlock: 71, blocks: 27, title: '待处理导入丙' });
 let location = 'entry';
 let electronExecutable;
 

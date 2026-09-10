@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { existsSync } from 'node:fs';
 import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -14,16 +15,19 @@ import type { ConversionLoss } from '../../src/service/text-manuscript.js';
 import { MAX_BLOCK_CODE_UNITS, MAX_BLOCK_GRAPHEMES } from '../../src/shared/protocol.js';
 
 // The subject here is the conversion of a legacy binary Word document, which only a real one can
-// be the subject of, so this suite reads the one admitted `.doc` Public SampleBook (ADR 0043) in
-// place and speaks of it in counts and digests alone. No block text, no document title, and no part
-// of the file's name enters a test name, an assertion, or a failure message; the synthetic inputs
-// below carry the refusals, where no real document would say anything a made-up one does not.
+// be the subject of, so this suite reads the local-only `.doc` test material (ADR 0079 §5: it left the
+// tree with S88 #438) in place and speaks of it in counts and digests alone. The cases that read the
+// file run only where an exact local copy is present under `SampleBooks/` and are reported as skipped
+// on a fresh checkout; the synthetic inputs below carry the refusals, where no real document would say
+// anything a made-up one does not. No block text, no document title, and no part of the file's name
+// enters a test name, an assertion, or a failure message.
 
 const SAMPLE_BOOKS_ROOT = fileURLToPath(new URL('../../SampleBooks/', import.meta.url));
-/** Exact path under `SampleBooks/`, with the identity `SampleBooks/README.md` admits it under. */
+/** Exact path under `SampleBooks/`, with the identity `SampleBooks/README.md` records for it. */
 const ADMITTED_DOC = join(SAMPLE_BOOKS_ROOT, '3天兽（定稿395870字)##＊.doc');
 const ADMITTED_DOC_BYTES = 1_173_504;
 const ADMITTED_DOC_SHA256 = '931d8035946f7689aaaa25c14c5822f46eedc59d23925081ded7b06618d9e4d2';
+const LOCAL_DOC_PRESENT = existsSync(ADMITTED_DOC);
 
 /**
  * What this document converts to, at this converter identity. The working representation is a
@@ -79,13 +83,13 @@ describe('convertDocManuscript', () => {
     expect(DOC_CONVERTER_IDENTITY).toBe('ai7-doc-to-docx/1');
   });
 
-  it('reads the admitted document at exactly the identity it was admitted under', async () => {
+  it.skipIf(!LOCAL_DOC_PRESENT)('reads the admitted document at exactly the identity it was admitted under', async () => {
     const bytes = await readFile(ADMITTED_DOC);
     expect((await stat(ADMITTED_DOC)).size).toBe(ADMITTED_DOC_BYTES);
     expect(sha256(bytes)).toBe(ADMITTED_DOC_SHA256);
   });
 
-  it('converts the same bytes to the same bytes', async () => {
+  it.skipIf(!LOCAL_DOC_PRESENT)('converts the same bytes to the same bytes', async () => {
     const bytes = await readFile(ADMITTED_DOC);
     const first = await convertDocManuscript(bytes);
     const second = await convertDocManuscript(bytes);
@@ -94,14 +98,14 @@ describe('convertDocManuscript', () => {
     expect(first.loss).toEqual(second.loss);
   });
 
-  it('counts what the reader exposes and claims nothing it cannot see', async () => {
+  it.skipIf(!LOCAL_DOC_PRESENT)('counts what the reader exposes and claims nothing it cannot see', async () => {
     const { loss } = await convertDocManuscript(await readFile(ADMITTED_DOC));
     // The reader resolves Word's markers as it extracts, so the body reaches the converter with no
     // marker left to count: every class below is what the parts the reader does expose carried.
     expect(loss).toEqual({ ...NO_LOSS, headersFooters: 1 });
   });
 
-  it('gives the DOCX parser a package it reads inside its own bounds, with no signal of its own', async () => {
+  it.skipIf(!LOCAL_DOC_PRESENT)('gives the DOCX parser a package it reads inside its own bounds, with no signal of its own', async () => {
     const { docx } = await convertDocManuscript(await readFile(ADMITTED_DOC));
     const { blocks, parsed } = await parseConverted(docx);
     expect(parsed.blockCount).toBe(WORKING_BLOCKS);

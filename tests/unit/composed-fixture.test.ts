@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { existsSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
@@ -17,16 +18,24 @@ import { SAMPLE1_SHA256 } from '../support/sample1-baseline.js';
 // Unit suite (L1) for the composed-fixture builder. Every assertion is a count, a block kind, a heading
 // level, or a digest: no excerpt's text is asserted, named, or printed, so a failing case reports a
 // number or a boolean rather than manuscript prose.
+//
+// Exact `sample1.docx` is the only admitted source (ADR 0079 §5), and the cases below that read it run
+// wherever the repository is checked out. The cases that read `蟠虺.docx` or `2听漏（定稿368544字）.docx`
+// are local-only: those files left the tree with S88 (#438), so each such case runs only where an exact
+// local copy is present under `SampleBooks/` and is reported as skipped on a fresh checkout.
 
 const TITLE = '组稿测试标题';
-/** The small source, preferred wherever size is not the subject. */
+/** The local-only small source, where a developer keeps it. */
 const EXCERPT: ComposedManuscriptRequest = { source: ADMITTED_SMALL_DOCX, startBlock: 1, blocks: 12, title: TITLE };
 /**
- * Exact `2听漏（定稿368544字）.docx` is the only admitted file whose blocks carry heading styles — its
- * first block is a level-1 heading and its fourth a level-3 one — so the style mapping can be proven
- * from real material only here. No admitted file carries a title block, so `Title` stays unexercised.
+ * Exact `2听漏（定稿368544字）.docx` is the only file whose blocks carry heading styles — its first
+ * block is a level-1 heading and its fourth a level-3 one — so the style mapping can be proven from
+ * real material only on the one local-only source where it exists. No admitted file carries a title
+ * block, so `Title` stays unexercised.
  */
 const HEADING_EXCERPT: ComposedManuscriptRequest = { source: ADMITTED_LARGE_FINAL_DOCX, startBlock: 1, blocks: 6, title: TITLE };
+const LOCAL_SMALL_PRESENT = existsSync(admittedSourcePath(ADMITTED_SMALL_DOCX));
+const LOCAL_HEADING_PRESENT = existsSync(admittedSourcePath(ADMITTED_LARGE_FINAL_DOCX));
 
 let sandbox: string;
 
@@ -56,25 +65,25 @@ async function shapeOf(path: string): Promise<{
 }
 
 describe('composeManuscriptDocx', () => {
-  it('writes the same bytes for the same request', async () => {
+  it.skipIf(!LOCAL_SMALL_PRESENT)('writes the same bytes for the same request', async () => {
     const first = await composedDigest('first.docx', EXCERPT);
     const second = await composedDigest('second.docx', EXCERPT);
     expect(second).toBe(first);
   });
 
-  it('gives a different digest to a different excerpt of the same source', async () => {
+  it.skipIf(!LOCAL_SMALL_PRESENT)('gives a different digest to a different excerpt of the same source', async () => {
     const base = await composedDigest('base.docx', EXCERPT);
     expect(await composedDigest('later.docx', { ...EXCERPT, startBlock: EXCERPT.startBlock + EXCERPT.blocks })).not.toBe(base);
     expect(await composedDigest('shorter.docx', { ...EXCERPT, blocks: EXCERPT.blocks - 1 })).not.toBe(base);
     expect(await composedDigest('retitled.docx', { ...EXCERPT, title: `${TITLE}（二）` })).not.toBe(base);
   });
 
-  it('never reproduces the exact sample1 digest, not even when composing from sample1 itself', async () => {
+  it.skipIf(!LOCAL_SMALL_PRESENT)('never reproduces the exact sample1 digest, not even when composing from sample1 itself', async () => {
     expect(await composedDigest('small.docx', EXCERPT)).not.toBe(SAMPLE1_SHA256);
     expect(await composedDigest('baseline.docx', { ...EXCERPT, source: ADMITTED_BASELINE_DOCX })).not.toBe(SAMPLE1_SHA256);
   });
 
-  it('carries every excerpt block kind and heading level into the composed package', async () => {
+  it.skipIf(!LOCAL_HEADING_PRESENT)('carries every excerpt block kind and heading level into the composed package', async () => {
     const source = await shapeOf(admittedSourcePath(HEADING_EXCERPT.source));
     const from = HEADING_EXCERPT.startBlock - 1;
     const expectedKinds = source.kinds.slice(from, from + HEADING_EXCERPT.blocks);
@@ -98,7 +107,7 @@ describe('composeManuscriptDocx', () => {
       .toEqual({ outcome: 'clean-import-no-round-trip', degradations: [] });
   });
 
-  it('refuses an excerpt that runs past the end of its source', async () => {
+  it.skipIf(!LOCAL_SMALL_PRESENT)('refuses an excerpt that runs past the end of its source', async () => {
     // Far past any admitted source's block count, so the case pins the refusal and not a source length.
     await expect(composeManuscriptDocx(join(sandbox, 'past-end.docx'), { ...EXCERPT, blocks: 10_000 }))
       .rejects.toThrow(/composed excerpt out of range/u);

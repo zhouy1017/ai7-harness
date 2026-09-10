@@ -1,6 +1,8 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { existsSync } from 'node:fs';
 import { readdir, writeFile } from 'node:fs/promises';
 import { extname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { EditorialStore } from '../../src/service/store.js';
@@ -15,10 +17,12 @@ import { syntheticPdfBytes } from '../support/synthetic-pdf.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 
 // Service-integration suite (L2) for multi-format intake (ADR 0072 §1–2). It drives the real
-// `EditorialStore` on a temporary Agent Data Root without Electron. The admitted material it reads
-// is exact `sample1`, through the shared baseline support, and the one admitted legacy `.doc`,
-// which only a real legacy document can stand for; every other input is synthetic. The admitted
-// files are read in place and spoken of in counts and digests alone.
+// `EditorialStore` on a temporary Agent Data Root without Electron. The one admitted material it
+// reads is exact `sample1`, through the shared baseline support; the legacy `.doc` cases read the
+// local-only `.doc` test material (ADR 0079 §5: it left the tree with S88 #438), which only a real
+// legacy document can stand for, and run only where an exact local copy is present under
+// `SampleBooks/`, reported as skipped on a fresh checkout. Every other input is synthetic. The files
+// are read in place and spoken of in counts and digests alone.
 
 type Row = Record<string, SQLOutputValue>;
 
@@ -315,12 +319,19 @@ const OBJECT_EXTENSIONS: Readonly<Record<SourceFormat, string>> = {
 };
 
 const DOC_CONVERTER = 'ai7-doc-to-docx/1';
-/** Exact path under `SampleBooks/`, with the identity `SampleBooks/README.md` admits it under. */
+/** Exact path under `SampleBooks/`, with the identity `SampleBooks/README.md` records for it. */
 const ADMITTED_DOC_SHA256 = '931d8035946f7689aaaa25c14c5822f46eedc59d23925081ded7b06618d9e4d2';
 const ADMITTED_DOC_BYTES = 1_173_504;
 /** What this converter makes of it: a derived object's digest, and its body paragraph count. */
 const ADMITTED_DOC_WORKING_SHA256 = 'ea5068a74444217fbca9ece5ab572933c007b0d8797f0d1cd3f815314a8213a1';
 const ADMITTED_DOC_BLOCKS = 5_815;
+// The file name carries `#`, which `new URL` would read as a fragment, so the directory URL is
+// resolved first and the name joined onto it.
+const LOCAL_DOC_PATH = join(
+  fileURLToPath(new URL('../../SampleBooks/', import.meta.url)),
+  '3天兽（定稿395870字)##＊.doc',
+);
+const LOCAL_DOC_PRESENT = existsSync(LOCAL_DOC_PATH);
 
 function admittedDocPath(codeRoot: string): string {
   return join(codeRoot, 'SampleBooks', '3天兽（定稿395870字)##＊.doc');
@@ -425,7 +436,7 @@ describe('conversion to a DOCX working representation over the real store', () =
     120_000,
   );
 
-  it('stages the admitted legacy .doc as an editable draft and commits both links', async () => {
+  it.skipIf(!LOCAL_DOC_PRESENT)('stages the admitted legacy .doc as an editable draft and commits both links', async () => {
     const selectedPath = admittedDocPath(roots.codeRoot);
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     const commitId = randomUUID();
@@ -497,7 +508,7 @@ describe('conversion to a DOCX working representation over the real store', () =
     }
   }, 180_000);
 
-  it('removes both objects when a converted legacy .doc draft is abandoned', async () => {
+  it.skipIf(!LOCAL_DOC_PRESENT)('removes both objects when a converted legacy .doc draft is abandoned', async () => {
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     try {
       const staged = await store.stageSelectedManuscript(randomUUID(), admittedDocPath(roots.codeRoot));

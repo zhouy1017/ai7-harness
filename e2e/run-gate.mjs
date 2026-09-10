@@ -1,6 +1,7 @@
 import {
   GATE_JOURNEYS,
   classifyJourneyResult,
+  localOnlySkips,
   normalizePnpmArgs,
   runJourneyProcess,
 } from './controller.mjs';
@@ -29,6 +30,11 @@ if (args.length !== 0) {
       break;
     }
     console.log(`GATE_COMPLETION/${journey}/pass`);
+    // A local-only scenario whose input is absent from the checkout (ADR 0079 §5) is disclosed as
+    // skipped, never reported as passed.
+    for (const scenario of localOnlySkips(result, journey)) {
+      console.log(`GATE_COMPLETION/${journey}/local-only-skip/${scenario}`);
+    }
   }
   if (!process.exitCode) console.log('GATE_COMPLETION/gate/pass');
 }

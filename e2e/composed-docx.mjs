@@ -4,23 +4,24 @@ import { fileURLToPath } from 'node:url';
 
 // Composed manuscript inputs for the Journey runners: the plain-JS twin of the vitest builder
 // `tests/support/composed-fixture.ts`. A Journey whose subject is manuscript content composes its DOCX
-// at run time from a contiguous excerpt of an admitted Public SampleBook (ADR 0043) instead of
-// generating prose, per the content-versus-container rule in `docs/agents/ci-test-boundaries.md`. The
-// two files exist because a runner cannot reach the vitest one: that builder is TypeScript importing
-// `src/service/docx.ts` under vitest, and the built carrier set exposes no parseable service module —
-// `dist/service/index.mjs` is the bundled service entry, not a parser. So this file mirrors the block
-// rule of `src/service/docx.ts` (text only inside a `w:t` within a `w:p`, tabs and breaks as
-// whitespace, NFC and whitespace normalization, a paragraph that normalizes to nothing is not a block)
-// closely enough that its 1-based positions agree with the block counts `SampleBooks/README.md`
-// records. Nothing leaves `SampleBooks/`: the composed bytes are written only to the path the runner
-// names under its own disposable root, and a runner speaks of its source, its block range, digests, and
-// counts rather than of any excerpt's text, so no assertion, stage name, or failure line can carry
-// manuscript content. A Journey whose subject is the DOCX container keeps generating its own fixture.
+// at run time from a contiguous excerpt of the one admitted Public SampleBook (ADR 0043 as narrowed by
+// ADR 0079 §5: exact `sample1.docx`) instead of generating prose, per the content-versus-container rule
+// in `docs/agents/ci-test-boundaries.md`. The two files exist because a runner cannot reach the vitest
+// one: that builder is TypeScript importing `src/service/docx.ts` under vitest, and the built carrier
+// set exposes no parseable service module — `dist/service/index.mjs` is the bundled service entry, not
+// a parser. So this file mirrors the block rule of `src/service/docx.ts` (text only inside a `w:t`
+// within a `w:p`, tabs and breaks as whitespace, NFC and whitespace normalization, a paragraph that
+// normalizes to nothing is not a block) closely enough that its 1-based positions agree with the block
+// count `SampleBooks/README.md` records. Nothing leaves `SampleBooks/`: the composed bytes are written
+// only to the path the runner names under its own disposable root, and a runner speaks of its source,
+// its block range, digests, and counts rather than of any excerpt's text, so no assertion, stage name,
+// or failure line can carry manuscript content. A Journey whose subject is the DOCX container keeps
+// generating its own fixture.
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 
-/** The small admitted source, preferred wherever size is not the subject; 100 blocks. */
-export const ADMITTED_SMALL_DOCX = '蟠虺.docx';
+/** The one admitted source, exact `sample1.docx`, the ADR 0044 compatibility baseline; 97 blocks. */
+export const ADMITTED_BASELINE_DOCX = 'sample1.docx';
 
 /** The admitted file itself. Reading it is what ADR 0043 admitted it for; copying it is not admitted. */
 function admittedSourcePath(source) {

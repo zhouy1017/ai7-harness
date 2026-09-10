@@ -166,6 +166,30 @@ export function createJ01CompletionLocation(scenario) {
   };
 }
 
+// A local-only scenario's input is not in the repository (ADR 0079 §5): it runs only where a
+// developer keeps an exact local copy, and it reports the skip on stdout with this fixed marker.
+// The orchestrators surface the marker, so a passing run in which the scenario did not execute is
+// never read as that scenario passing. A scenario enters this map only with its own Issue authority.
+const LOCAL_ONLY_SKIP_MARKER = 'JOURNEY_LOCAL_ONLY_SKIP';
+const LOCAL_ONLY_SCENARIOS = Object.freeze({
+  'J-01': Object.freeze(['doc-manuscript']),
+});
+
+export function reportLocalOnlySkip(journey, scenario) {
+  if (LOCAL_ONLY_SCENARIOS[journey]?.includes(scenario) !== true) {
+    throw new TypeError('Local-only scenario is not admitted.');
+  }
+  console.log(`${LOCAL_ONLY_SKIP_MARKER}/${journey}/${scenario}`);
+}
+
+/** The admitted local-only scenarios a finished run disclosed as skipped, in admitted order. */
+export function localOnlySkips(result, journey) {
+  const lines = result.stdout.split(/\r?\n/u);
+  return (LOCAL_ONLY_SCENARIOS[journey] ?? []).filter((scenario) =>
+    lines.includes(`${LOCAL_ONLY_SKIP_MARKER}/${journey}/${scenario}`),
+  );
+}
+
 const JOURNEY_MODULES = Object.freeze({
   'J-01': new URL('./run-j01.mjs', import.meta.url),
   'J-02': new URL('./run-j02.mjs', import.meta.url),

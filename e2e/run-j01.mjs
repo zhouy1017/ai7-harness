@@ -5,21 +5,24 @@ import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep 
 import { arch, platform, release, tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { strToU8, zipSync } from 'fflate';
-import { admittedParagraphs, ADMITTED_SMALL_DOCX } from './composed-docx.mjs';
-import { attachProductOutput, awaitWithinDeadline, createJ01CompletionLocation, installJourneyCancellationCleanup, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect } from './controller.mjs';
+import { admittedParagraphs, ADMITTED_BASELINE_DOCX } from './composed-docx.mjs';
+import { attachProductOutput, awaitWithinDeadline, createJ01CompletionLocation, installJourneyCancellationCleanup, localDebugEnabled, recordDebugDetail, reportJourneyFailure, reportLocalOnlySkip, settleOnBrowserDisconnect } from './controller.mjs';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const PRODUCT_RENDERER_URL = pathToFileURL(resolve(ROOT, 'dist', 'renderer', 'index.html')).href;
 const SAMPLE1_PATH = resolve(ROOT, 'SampleBooks', 'sample1.docx');
 const SAMPLE1_BYTES = 29_550;
 const SAMPLE1_SHA256 = 'b8a3dbde0aa8a1ec7265f9ae3fe47877759e7947c5ab69682cd0a8f424a8d483';
-// The one admitted legacy `.doc` Public SampleBook (ADR 0043), which the converted intake of a
-// binary Word document can only be shown on. It is read in place and named only here.
+// The legacy binary `.doc` is local-only test material since ADR 0079 §5: the repository no longer
+// carries it, so the converted-intake scenario below runs only where a developer keeps an exact local
+// copy under SampleBooks/ (untracked and refused by .gitignore), and its absence is reported as a
+// disclosed skip rather than a pass. The identity pins stay: a local copy that is not exact is refused.
 const ADMITTED_DOC_PATH = resolve(ROOT, 'SampleBooks', '3天兽（定稿395870字)##＊.doc');
 const ADMITTED_DOC_BYTES = 1_173_504;
 const ADMITTED_DOC_SHA256 = '931d8035946f7689aaaa25c14c5822f46eedc59d23925081ded7b06618d9e4d2';
 /** What this converter makes of it: a derived object's digest and its body paragraph count. */
 const ADMITTED_DOC_BLOCKS = 5_815;
+const LOCAL_DOC_PRESENT = existsSync(ADMITTED_DOC_PATH);
 const DEBUG_SELECTORS = new Set(['DEBUG', 'DEBUG_FILE', 'PWDEBUG', 'PWDEBUGIMPL']);
 const BROWSER_LAUNCH_TIMEOUT_MS = 35_000;
 const BROWSER_CLOSE_TIMEOUT_MS = 25_000;
@@ -1877,12 +1880,13 @@ async function main() {
         (await realpath(syntheticPdfPath)) === syntheticPdfPath && syntheticPdfInfo.size > 0,
       'synthetic-pdf-identity',
     );
-    // The `.txt` intake scenario reads real admitted manuscript text (ADR 0043) instead of authored
-    // sentences: twelve paragraphs of the small admitted source, extracted at run time and never
-    // committed. `admittedBlocks` already excludes any paragraph that normalizes to nothing, so the
-    // trim-and-drop below is a defensive check over an admitted source, not an expected occurrence.
+    // The `.txt` intake scenario reads real admitted manuscript text (ADR 0043 as narrowed by ADR
+    // 0079 §5: exact `sample1.docx`) instead of authored sentences: twelve paragraphs of it,
+    // extracted at run time and never committed. The composer already excludes any paragraph that
+    // normalizes to nothing, so the trim-and-drop below is a defensive check over the admitted
+    // source, not an expected occurrence.
     const textManuscriptParagraphs = (
-      await admittedParagraphs({ source: ADMITTED_SMALL_DOCX, startBlock: 1, blocks: 12 })
+      await admittedParagraphs({ source: ADMITTED_BASELINE_DOCX, startBlock: 1, blocks: 12 })
     ).map((paragraph) => paragraph.trim()).filter((paragraph) => paragraph.length > 0);
     const syntheticTxtPath = resolve(syntheticRoot, 'text-manuscript.txt');
     await writeFile(syntheticTxtPath, strToU8(`${textManuscriptParagraphs.join('\n\n')}\n`));
@@ -1893,15 +1897,19 @@ async function main() {
         (await realpath(syntheticTxtPath)) === syntheticTxtPath && syntheticTxtInfo.size > 0,
       'synthetic-txt-identity',
     );
-    const admittedDocInfo = await lstat(ADMITTED_DOC_PATH);
-    requireJourney(
-      admittedDocInfo.isFile() &&
-        !admittedDocInfo.isSymbolicLink() &&
-        admittedDocInfo.size === ADMITTED_DOC_BYTES &&
-        (await realpath(ADMITTED_DOC_PATH)) === ADMITTED_DOC_PATH &&
-        (await digestFile(ADMITTED_DOC_PATH)) === ADMITTED_DOC_SHA256,
-      'admitted-doc-identity',
-    );
+    // The local-only `.doc` is verified exactly when it is present; a local copy that is not exact
+    // fails loudly here rather than being silently skipped or half-used.
+    if (LOCAL_DOC_PRESENT) {
+      const admittedDocInfo = await lstat(ADMITTED_DOC_PATH);
+      requireJourney(
+        admittedDocInfo.isFile() &&
+          !admittedDocInfo.isSymbolicLink() &&
+          admittedDocInfo.size === ADMITTED_DOC_BYTES &&
+          (await realpath(ADMITTED_DOC_PATH)) === ADMITTED_DOC_PATH &&
+          (await digestFile(ADMITTED_DOC_PATH)) === ADMITTED_DOC_SHA256,
+        'admitted-doc-identity',
+      );
+    }
     await createSyntheticDocx(syntheticAPath, 'a');
     await createSyntheticDocx(syntheticBPath, 'b');
     await createSyntheticDocx(syntheticCPath, 'c');
@@ -2493,109 +2501,115 @@ async function main() {
 
     // A legacy binary `.doc` takes the same route through a converter the product itself runs
     // (ADR 0072 §5), and arrives with loss the review names as the conversion's: what that reader
-    // could not carry across is dropped content, not characters kept as the author typed them.
-    const docManuscriptRoot = await createCanonicalExternalDataRoot(resolve(runRoot, 'doc-manuscript-data'), checkoutRoot);
-    const docManuscriptStarted = Date.now();
-    renderer = await launchProduct({
-      dataRoot: docManuscriptRoot,
-      pickerPath: ADMITTED_DOC_PATH,
-      launchScenario: 'doc-manuscript',
-    });
-    await waitFor(
-      renderer,
-      `document.documentElement.dataset.ai7ProductReady === 'true' && document.querySelector('[data-screen="landing"]')`,
-      'doc-manuscript-landing',
-    );
-    await clickExactButton(renderer, '导入稿件', 'doc-manuscript-stage');
-    await waitFor(renderer, `document.querySelector('[data-screen="target"]')`, 'doc-manuscript-target');
-    await assertRenderer(
-      renderer,
-      `document.querySelector('[data-source-format]')?.dataset.sourceFormat === 'DOC' && document.querySelector('[data-source-sha256]')?.textContent === ${JSON.stringify(ADMITTED_DOC_SHA256)} && document.querySelector('[data-source-bytes]')?.textContent === ${JSON.stringify(String(ADMITTED_DOC_BYTES))}`,
-      'doc-manuscript-format',
-    );
-    await assertRenderer(
-      renderer,
-      `(() => { const target = document.querySelector('[data-import-target-choice="new-book"]'); if (!target) return false; target.click(); return true; })()`,
-      'doc-manuscript-target-select',
-    );
-    await waitFor(renderer, `document.querySelector('[data-screen="relationship"]')`, 'doc-manuscript-relationship');
-    // A converted `.doc` is an editable Manuscript, so both relationships are on offer, exactly as
-    // they are for a DOCX; source-only stays a real answer for it too.
-    await assertRenderer(
-      renderer,
-      `(() => { const manuscript = document.querySelector('[data-import-relationship="first-manuscript"]'); const source = document.querySelector('[data-import-relationship="source-only"]'); return manuscript && source && !manuscript.checked && !source.checked; })()`,
-      'doc-manuscript-relationship-both',
-    );
-    await assertRenderer(
-      renderer,
-      `(() => { const manuscript = document.querySelector('[data-import-relationship="first-manuscript"]'); if (!manuscript) return false; manuscript.click(); return true; })()`,
-      'doc-manuscript-relationship-select',
-    );
-    await waitFor(renderer, `document.querySelector('[data-screen="title"] #book-title')`, 'doc-manuscript-title');
-    await assertRenderer(
-      renderer,
-      `document.querySelector('[data-import-conversion-note]')?.dataset.importConversionNote === 'DOC' && document.querySelector('[data-import-conversion-note]')?.textContent === '本稿件由 ai7-doc-to-docx/1 从 DOC 转换为 DOCX 工作表示后读取；下列损失由转换造成，原始文件原样保留。'`,
-      'doc-manuscript-conversion-note',
-    );
-    // The reader exposed one footer and no other part, so exactly one class carries loss, and its
-    // detail says the conversion could not keep it rather than that it kept the characters.
-    await assertRenderer(
-      renderer,
-      `(() => { const rows = Array.from(document.querySelectorAll('[data-fidelity-category]')); if (rows.length !== 8) return false; const degraded = rows.filter((row) => !row.querySelector('.count')?.textContent.includes('· 0 项')); if (degraded.length !== 1 || degraded[0].dataset.fidelityCategory !== 'headers-footers') return false; return degraded[0].querySelector('.count')?.textContent.includes('· 1 项') && degraded[0].querySelector('.status-pill')?.classList.contains('status-degraded') && degraded[0].textContent.includes('由 ai7-doc-to-docx/1 从 DOC 转换时未能保留：') && !degraded[0].textContent.includes('转换保留为原文字符'); })()`,
-      'doc-manuscript-fidelity-degraded',
-    );
-    await assertRenderer(
-      renderer,
-      `document.body.textContent.includes('${ADMITTED_DOC_BLOCKS} 个可编辑内容块')`,
-      'doc-manuscript-blocks',
-    );
-    await clickExactButton(renderer, '确认书名并复核', 'doc-manuscript-review-action');
-    await waitFor(renderer, `document.querySelector('[data-screen="review"]')`, 'doc-manuscript-review');
-    await assertRenderer(
-      renderer,
-      `(() => { const note = document.querySelector('[data-screen="review"] [data-import-conversion-note]'); return note?.dataset.importConversionNote === 'DOC' && document.querySelector('[data-screen="review"] [data-source-sha256]')?.textContent === ${JSON.stringify(ADMITTED_DOC_SHA256)}; })()`,
-      'doc-manuscript-review-conversion-note',
-    );
-    // Conversion loss is degradation like any other: the editor decides it explicitly, from a
-    // control that starts unselected (V2-UX-IMP-005).
-    await assertRenderer(
-      renderer,
-      `(() => { const acceptance = document.querySelector('#accept-import-degradation'); if (!acceptance || acceptance.checked) return false; acceptance.click(); return true; })()`,
-      'doc-manuscript-degradation-accept',
-    );
-    await waitFor(
-      renderer,
-      `document.querySelector('#accept-import-degradation')?.checked && Array.from(document.querySelectorAll('button')).some((button) => button.textContent === '按上述降级方式新建图书并导入稿件' && !button.disabled)`,
-      'doc-manuscript-degradation-accepted',
-    );
-    await clickExactButton(renderer, '按上述降级方式新建图书并导入稿件', 'doc-manuscript-commit');
-    await waitFor(renderer, `document.querySelector('[data-screen="imported"]')`, 'doc-manuscript-imported');
-    await waitFor(
-      renderer,
-      `document.documentElement.dataset.ai7ImportCompletionAcknowledged === 'true'`,
-      'doc-manuscript-completion-acknowledged',
-    );
-    await assertRenderer(
-      renderer,
-      `document.querySelector('[data-screen="imported"]')?.textContent.includes('稿件已导入') && document.querySelector('[data-screen="imported"]')?.textContent.includes('图书工作概览')`,
-      'doc-manuscript-completion-wording',
-    );
-    await clickExactButton(renderer, '来源版本与来源记录', 'doc-manuscript-view-source');
-    const docManuscriptRecord = await renderer.evaluate(`(() => { const detail = document.querySelector('.record-detail[data-record-kind="source"]'); const values = {}; for (const label of detail?.querySelectorAll('dt') ?? []) values[label.textContent] = label.nextElementSibling?.textContent; return values; })()`);
-    // The record names the original as the digest of record and the working representation beside
-    // it, never instead of it; the two digests are different objects (ADR 0072 §2).
-    requireJourney(
-      docManuscriptRecord?.['格式'] === 'DOC' &&
-        docManuscriptRecord?.['原文件 SHA-256'] === ADMITTED_DOC_SHA256 &&
-        docManuscriptRecord?.['解析器'] === 'ai7-docx-fflate-saxes/1' &&
-        docManuscriptRecord?.['转换器'] === 'ai7-doc-to-docx/1' &&
-        /^[0-9a-f]{64}$/.test(docManuscriptRecord?.['工作表示 SHA-256'] ?? '') &&
-        docManuscriptRecord?.['工作表示 SHA-256'] !== ADMITTED_DOC_SHA256,
-      'doc-manuscript-record-conversion',
-    );
-    await closeProduct();
-    if (localDebugEnabled()) {
-      recordDebugDetail('J-01', `doc-manuscript scenario took ${Date.now() - docManuscriptStarted} ms`);
+    // could not carry across is dropped content, not characters kept as the author typed them. The
+    // input is local-only since ADR 0079 §5: the scenario runs only where an exact local copy is
+    // present, and its absence is reported as a disclosed skip instead of a pass.
+    if (!LOCAL_DOC_PRESENT) {
+      reportLocalOnlySkip('J-01', 'doc-manuscript');
+    } else {
+      const docManuscriptRoot = await createCanonicalExternalDataRoot(resolve(runRoot, 'doc-manuscript-data'), checkoutRoot);
+      const docManuscriptStarted = Date.now();
+      renderer = await launchProduct({
+        dataRoot: docManuscriptRoot,
+        pickerPath: ADMITTED_DOC_PATH,
+        launchScenario: 'doc-manuscript',
+      });
+      await waitFor(
+        renderer,
+        `document.documentElement.dataset.ai7ProductReady === 'true' && document.querySelector('[data-screen="landing"]')`,
+        'doc-manuscript-landing',
+      );
+      await clickExactButton(renderer, '导入稿件', 'doc-manuscript-stage');
+      await waitFor(renderer, `document.querySelector('[data-screen="target"]')`, 'doc-manuscript-target');
+      await assertRenderer(
+        renderer,
+        `document.querySelector('[data-source-format]')?.dataset.sourceFormat === 'DOC' && document.querySelector('[data-source-sha256]')?.textContent === ${JSON.stringify(ADMITTED_DOC_SHA256)} && document.querySelector('[data-source-bytes]')?.textContent === ${JSON.stringify(String(ADMITTED_DOC_BYTES))}`,
+        'doc-manuscript-format',
+      );
+      await assertRenderer(
+        renderer,
+        `(() => { const target = document.querySelector('[data-import-target-choice="new-book"]'); if (!target) return false; target.click(); return true; })()`,
+        'doc-manuscript-target-select',
+      );
+      await waitFor(renderer, `document.querySelector('[data-screen="relationship"]')`, 'doc-manuscript-relationship');
+      // A converted `.doc` is an editable Manuscript, so both relationships are on offer, exactly as
+      // they are for a DOCX; source-only stays a real answer for it too.
+      await assertRenderer(
+        renderer,
+        `(() => { const manuscript = document.querySelector('[data-import-relationship="first-manuscript"]'); const source = document.querySelector('[data-import-relationship="source-only"]'); return manuscript && source && !manuscript.checked && !source.checked; })()`,
+        'doc-manuscript-relationship-both',
+      );
+      await assertRenderer(
+        renderer,
+        `(() => { const manuscript = document.querySelector('[data-import-relationship="first-manuscript"]'); if (!manuscript) return false; manuscript.click(); return true; })()`,
+        'doc-manuscript-relationship-select',
+      );
+      await waitFor(renderer, `document.querySelector('[data-screen="title"] #book-title')`, 'doc-manuscript-title');
+      await assertRenderer(
+        renderer,
+        `document.querySelector('[data-import-conversion-note]')?.dataset.importConversionNote === 'DOC' && document.querySelector('[data-import-conversion-note]')?.textContent === '本稿件由 ai7-doc-to-docx/1 从 DOC 转换为 DOCX 工作表示后读取；下列损失由转换造成，原始文件原样保留。'`,
+        'doc-manuscript-conversion-note',
+      );
+      // The reader exposed one footer and no other part, so exactly one class carries loss, and its
+      // detail says the conversion could not keep it rather than that it kept the characters.
+      await assertRenderer(
+        renderer,
+        `(() => { const rows = Array.from(document.querySelectorAll('[data-fidelity-category]')); if (rows.length !== 8) return false; const degraded = rows.filter((row) => !row.querySelector('.count')?.textContent.includes('· 0 项')); if (degraded.length !== 1 || degraded[0].dataset.fidelityCategory !== 'headers-footers') return false; return degraded[0].querySelector('.count')?.textContent.includes('· 1 项') && degraded[0].querySelector('.status-pill')?.classList.contains('status-degraded') && degraded[0].textContent.includes('由 ai7-doc-to-docx/1 从 DOC 转换时未能保留：') && !degraded[0].textContent.includes('转换保留为原文字符'); })()`,
+        'doc-manuscript-fidelity-degraded',
+      );
+      await assertRenderer(
+        renderer,
+        `document.body.textContent.includes('${ADMITTED_DOC_BLOCKS} 个可编辑内容块')`,
+        'doc-manuscript-blocks',
+      );
+      await clickExactButton(renderer, '确认书名并复核', 'doc-manuscript-review-action');
+      await waitFor(renderer, `document.querySelector('[data-screen="review"]')`, 'doc-manuscript-review');
+      await assertRenderer(
+        renderer,
+        `(() => { const note = document.querySelector('[data-screen="review"] [data-import-conversion-note]'); return note?.dataset.importConversionNote === 'DOC' && document.querySelector('[data-screen="review"] [data-source-sha256]')?.textContent === ${JSON.stringify(ADMITTED_DOC_SHA256)}; })()`,
+        'doc-manuscript-review-conversion-note',
+      );
+      // Conversion loss is degradation like any other: the editor decides it explicitly, from a
+      // control that starts unselected (V2-UX-IMP-005).
+      await assertRenderer(
+        renderer,
+        `(() => { const acceptance = document.querySelector('#accept-import-degradation'); if (!acceptance || acceptance.checked) return false; acceptance.click(); return true; })()`,
+        'doc-manuscript-degradation-accept',
+      );
+      await waitFor(
+        renderer,
+        `document.querySelector('#accept-import-degradation')?.checked && Array.from(document.querySelectorAll('button')).some((button) => button.textContent === '按上述降级方式新建图书并导入稿件' && !button.disabled)`,
+        'doc-manuscript-degradation-accepted',
+      );
+      await clickExactButton(renderer, '按上述降级方式新建图书并导入稿件', 'doc-manuscript-commit');
+      await waitFor(renderer, `document.querySelector('[data-screen="imported"]')`, 'doc-manuscript-imported');
+      await waitFor(
+        renderer,
+        `document.documentElement.dataset.ai7ImportCompletionAcknowledged === 'true'`,
+        'doc-manuscript-completion-acknowledged',
+      );
+      await assertRenderer(
+        renderer,
+        `document.querySelector('[data-screen="imported"]')?.textContent.includes('稿件已导入') && document.querySelector('[data-screen="imported"]')?.textContent.includes('图书工作概览')`,
+        'doc-manuscript-completion-wording',
+      );
+      await clickExactButton(renderer, '来源版本与来源记录', 'doc-manuscript-view-source');
+      const docManuscriptRecord = await renderer.evaluate(`(() => { const detail = document.querySelector('.record-detail[data-record-kind="source"]'); const values = {}; for (const label of detail?.querySelectorAll('dt') ?? []) values[label.textContent] = label.nextElementSibling?.textContent; return values; })()`);
+      // The record names the original as the digest of record and the working representation beside
+      // it, never instead of it; the two digests are different objects (ADR 0072 §2).
+      requireJourney(
+        docManuscriptRecord?.['格式'] === 'DOC' &&
+          docManuscriptRecord?.['原文件 SHA-256'] === ADMITTED_DOC_SHA256 &&
+          docManuscriptRecord?.['解析器'] === 'ai7-docx-fflate-saxes/1' &&
+          docManuscriptRecord?.['转换器'] === 'ai7-doc-to-docx/1' &&
+          /^[0-9a-f]{64}$/.test(docManuscriptRecord?.['工作表示 SHA-256'] ?? '') &&
+          docManuscriptRecord?.['工作表示 SHA-256'] !== ADMITTED_DOC_SHA256,
+        'doc-manuscript-record-conversion',
+      );
+      await closeProduct();
+      if (localDebugEnabled()) {
+        recordDebugDetail('J-01', `doc-manuscript scenario took ${Date.now() - docManuscriptStarted} ms`);
+      }
     }
 
     renderer = await launchProduct({ dataRoot: sourceRoot, pickerPath: docx, launchScenario: 'source-same-book-reuse' });

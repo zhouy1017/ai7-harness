@@ -1,6 +1,7 @@
 import {
   ADMITTED_JOURNEYS,
   classifyJourneyResult,
+  localOnlySkips,
   normalizePnpmArgs,
   runJourneyProcess,
 } from './controller.mjs';
@@ -28,6 +29,11 @@ if (args.length !== 0) {
       break;
     }
     console.log(`LOCAL_COMPLETION/${journey}/pass`);
+    // A passing run's output is unchanged except for this disclosure: a local-only scenario whose
+    // input is absent from the checkout (ADR 0079 §5) is reported as skipped, never as passed.
+    for (const scenario of localOnlySkips(result, journey)) {
+      console.log(`LOCAL_COMPLETION/${journey}/local-only-skip/${scenario}`);
+    }
   }
   if (!process.exitCode) console.log('LOCAL_COMPLETION/all/pass');
 }
