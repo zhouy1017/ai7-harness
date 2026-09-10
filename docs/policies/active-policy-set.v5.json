@@ -55,7 +55,7 @@
       "policyType": "external-export",
       "version": "v2",
       "canonicalPath": "docs/policies/external-export-policy.v2.json",
-      "sha256": "2eae5a473010afb0999a89a6bf202ca83430b26f4ba2b93a362d9a23d7e18b3e"
+      "sha256": "162441cc3e5d30b0cafb00a0d04ca5ab32b64c5039baafc8952a9925bd7984b6"
     }
   }
 }

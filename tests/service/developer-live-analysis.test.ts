@@ -44,6 +44,7 @@ import {
   BASELINE_ANALYSIS_MODE_GOALS,
   BASELINE_ANALYSIS_TASK_GOAL,
   type BaselineAnalysisProjection,
+  type DeveloperLiveCeiling,
   type LaunchPolicyProjection,
 } from '../../src/shared/protocol.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
@@ -62,8 +63,14 @@ import {
 // no credential value beyond a local placeholder exists. The manuscript is exact `sample1` (ADR 0043).
 
 const FIXTURES_ROOT = resolve(fileURLToPath(new URL('../fixtures/model/', import.meta.url)));
-type Ceiling = { readonly kind: 'tokens'; readonly maxTotalTokens: number };
+/** Either bound form: an explicit launch total, or the policy's per-frozen-unit default (ADR 0070). */
+type Ceiling = DeveloperLiveCeiling;
 const CEILING: Ceiling = { kind: 'tokens', maxTotalTokens: 500_000 };
+/** What a developer-live launch binds when the form names no ceiling: 30,000 tokens per frozen unit. */
+const POLICY_DEFAULT_CEILING: Ceiling = {
+  kind: 'tokens-per-frozen-unit',
+  tokensPerFrozenUnit: DEVELOPER_LIVE_POLICY_BINDING.defaultRunBudgetCeilingTokensPerFrozenUnit,
+};
 /** Eight unit turns, one reduction turn, one assurance-sampling anchor turn, one reflection turn. */
 const FULL_CHAIN_TURNS = SAMPLE1_UNITS + 3;
 type UnitAnswer = { text: string; usage: { inputTokens: number; outputTokens: number } };
@@ -711,6 +718,79 @@ describe('the developer-live scope over exact sample1 with a stub transport', ()
     expect(report.stages[2]!.wallMs).toBeNull();
     expect(report.ifRedone.state).toBe('not-run');
     expect(report.ifRedone.items).toEqual([]);
+    await store.close();
+  });
+
+  /**
+   * The launch form named no ceiling, so the launch bound the policy's per-frozen-unit default and
+   * nothing resolved it into a total until this Run's Coverage Manifest froze (ADR 0070, ADR 0079
+   * §2.3). What the frozen Provider Resolution Plan carries must therefore be this manuscript's own
+   * arithmetic — 30,000 tokens times the units the manifest actually holds — and not a constant.
+   */
+  it('freezes the per-frozen-unit default into the total this frozen manifest sizes', async () => {
+    const calls: StubCall[] = [];
+    const { store, bookId, prepared } = await prepareLive(roots.dataRoot, POLICY_DEFAULT_CEILING);
+    const { units: responses, named } = await unitAnswers(prepared);
+    const settled = await runLive(store, bookId, prepared, owner(store, stubTransport({ calls, responses, named }), POLICY_DEFAULT_CEILING));
+
+    // The unit count is read from the frozen manifest, never restated as a literal: a manuscript of a
+    // different length would move this number and the assertion with it.
+    const unitCount = settled.coverageManifest!.units.length;
+    expect(unitCount).toBe(SAMPLE1_UNITS);
+    expect(settled.providerResolutionPlan!.runBudgetCeiling).toEqual({
+      kind: 'tokens',
+      maxTotalTokens: DEVELOPER_LIVE_POLICY_BINDING.defaultRunBudgetCeilingTokensPerFrozenUnit * unitCount,
+    });
+    // The plan carries a total, never the formula: the ceiling the gate reads can hold no unit count.
+    expect(settled.providerResolutionPlan!.runBudgetCeiling).not.toHaveProperty('tokensPerFrozenUnit');
+
+    // Every surface that names the ceiling states that same resolved total, and the Run spent far less
+    // than it, so the whole declared chain ran inside the default.
+    const resolved = `任务运行预算上限 ${DEVELOPER_LIVE_POLICY_BINDING.defaultRunBudgetCeilingTokensPerFrozenUnit * unitCount} tokens`;
+    expect(settled.namedNonEffects.find((statement) => statement.includes('Provider Processing'))).toContain(resolved);
+    expect(settled.updateControls!.providerConsequence).toContain(resolved);
+    expect(calls).toHaveLength(FULL_CHAIN_TURNS);
+    expect(settled.run!.state).toBe('completed');
+    await store.close();
+  });
+
+  /**
+   * The same bound default, against a Run whose first unit alone spends more than the resolved total.
+   * The ceiling is a precondition of the transmit decision, so the second unit never forms a request:
+   * the Run stops, names `run-budget-ceiling-reached`, and transmits nothing further.
+   */
+  it('stops at the resolved per-frozen-unit ceiling and transmits nothing past it', async () => {
+    const calls: StubCall[] = [];
+    const { store, bookId, prepared } = await prepareLive(roots.dataRoot, POLICY_DEFAULT_CEILING);
+    const resolvedCeiling = DEVELOPER_LIVE_POLICY_BINDING.defaultRunBudgetCeilingTokensPerFrozenUnit * prepared.coverageManifest!.units.length;
+    // One unit's usage past the whole Run's resolved ceiling; the next unit is refused before it forms.
+    const perUnit = { inputTokens: resolvedCeiling, outputTokens: 10_000 };
+    const { units: responses } = await unitAnswers(prepared, perUnit);
+    const settled = await runLive(store, bookId, prepared, owner(store, stubTransport({ calls, responses }), POLICY_DEFAULT_CEILING));
+
+    expect(settled.providerResolutionPlan!.runBudgetCeiling).toEqual({ kind: 'tokens', maxTotalTokens: resolvedCeiling });
+    // Exactly one transmission: the gate's ceiling precondition holds against the resolved total.
+    expect(calls).toHaveLength(1);
+    expect(settled.run!.state).toBe('interrupted');
+    expect(settled.taskOutcome!.classification).toBe('interrupted');
+    expect(settled.run!.transitions.at(-1)!.detail).toContain('run-budget-ceiling-reached');
+    expect(settled.taskOutcome!.safeNextAction).toContain('--run-budget-ceiling');
+    expect(settled.taskOutcome!.safeNextAction).not.toContain('账户限额');
+
+    // The partial revision survives with the one unit it paid for, and the reduction and sampling
+    // turns the policy names never dispatched either.
+    const revision = settled.resultSetRevision!;
+    expect(revision.coverage.unitsClosed).toBe(1);
+    expect(revision.coverage.unitsTotal).toBe(SAMPLE1_UNITS);
+    expect(revision.usage.inputTokens + revision.usage.outputTokens).toBe(perUnit.inputTokens + perUnit.outputTokens);
+    const report = settled.taskOutcome!.report!;
+    expect(report.usagePerStage['cross-unit-reduction']).toEqual({ requests: 0, inputTokens: 0, outputTokens: 0 });
+    expect(report.usagePerStage['assurance-sampling']).toEqual({ requests: 0, inputTokens: 0, outputTokens: 0 });
+    expect(report.unitRows.filter((row) => row.gapCode === 'not-attempted')).toHaveLength(SAMPLE1_UNITS - 1);
+
+    // Nothing left the host past the one transmission: the ledger carries exactly that line.
+    const lines = await ledgerLines(cacheRoot);
+    expect(lines.filter((line) => line.outcome === 'transmitted')).toHaveLength(1);
     await store.close();
   });
 

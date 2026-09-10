@@ -34,7 +34,7 @@
         "target": {
           "exactIdentityRequired": true,
           "eligibleKinds": [
-            "manuscript-revision",
+            "editorial-deliverable-revision",
             "production-document-version",
             "book-delivery-package-version",
             "report",
@@ -67,6 +67,8 @@
       "mayLeaveWithTarget": true,
       "retainedWithSourceVersion": true,
       "restoredOnExport": true,
+      "defaultIncluded": true,
+      "editorMayExclude": true,
       "contentClasses": [
         "headers-and-footers",
         "page-setup",
@@ -75,8 +77,12 @@
         "images"
       ]
     },
+    "editorNotes": {
+      "mayLeaveWithTarget": true,
+      "defaultIncluded": false,
+      "editorMayInclude": true
+    },
     "hardExclusions": {
-      "editorNotesNeverExport": true,
       "retainedExternalSourcesNeverExport": true,
       "evidenceLinksNeverExport": true
     }
@@ -85,6 +91,9 @@
     "folderDestinationAllowed": true,
     "destinationObjectKind": "folder",
     "destinationSelection": "platform-native-user-selector",
+    "packageMemberSelection": "editor-chosen-subset",
+    "membersSeparatelyExportable": true,
+    "wholePackageImplicitlyCovered": false,
     "enumeratedFileSetFrozenBeforeApproval": true,
     "oneApprovalCoversExactEnumeratedFileSet": true,
     "perFilePreparationRequired": true,

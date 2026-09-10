@@ -17,7 +17,7 @@ const CARRIER_PATH = 'config/source-checkout-launch-authority.json';
 const CARRIER_VERSION = 2;
 export const ACTIVE_SET_VERSION = 'v5' as const;
 const ACTIVE_SET_PATH = 'docs/policies/active-policy-set.v5.json';
-const ACTIVE_SET_SHA256 = '33edf6c0581eea859af77bd2aaba3068df36a875b268cf0ab2e5ec27994e4620';
+const ACTIVE_SET_SHA256 = '8329eda368d4870c552bdc792a74f0035a2dc8da818c37617902fa0af7368f8a';
 const PROVIDER_PINS = {
   'development-ci': {
     version: 'v1',
@@ -43,7 +43,7 @@ const PROVIDER_PINS = {
 const EXTERNAL_PIN = {
   version: 'v2',
   canonicalPath: 'docs/policies/external-export-policy.v2.json',
-  sha256: '2eae5a473010afb0999a89a6bf202ca83430b26f4ba2b93a362d9a23d7e18b3e',
+  sha256: '162441cc3e5d30b0cafb00a0d04ca5ab32b64c5039baafc8952a9925bd7984b6',
 } as const;
 
 /** The exact developer-live binding Provider Processing v5 declares; the resolver verifies the policy bytes say the same. */

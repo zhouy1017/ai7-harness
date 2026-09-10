@@ -30,8 +30,8 @@ const EXPECTED_PINS = {
   'developer-live': ['v5', 'docs/policies/provider-processing-policy.v5.json', '4b7356aaa36a75b3085d6eecb593fb3bd765682073e37fa21b5abf7bc78ea0bb'],
 } as const;
 /** ADR 0079 §3 decides External Export v2; active-set v5 pins its exact bytes. */
-const EXPECTED_EXTERNAL_PIN = ['v2', 'docs/policies/external-export-policy.v2.json', '2eae5a473010afb0999a89a6bf202ca83430b26f4ba2b93a362d9a23d7e18b3e'] as const;
-const ACTIVE_SET_SHA256 = '33edf6c0581eea859af77bd2aaba3068df36a875b268cf0ab2e5ec27994e4620';
+const EXPECTED_EXTERNAL_PIN = ['v2', 'docs/policies/external-export-policy.v2.json', '162441cc3e5d30b0cafb00a0d04ca5ab32b64c5039baafc8952a9925bd7984b6'] as const;
+const ACTIVE_SET_SHA256 = '8329eda368d4870c552bdc792a74f0035a2dc8da818c37617902fa0af7368f8a';
 
 let sandbox: string;
 let codeRoot: string;

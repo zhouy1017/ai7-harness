@@ -19,7 +19,7 @@ The immutable [`v1`](external-export-policy.v1.json) record remains byte-preserv
 
 V2 has exactly one policy-eligibility rule. The user must choose the local-filesystem destination through the platform-native selector, and each exact target object must be one of five kinds, exactly identified:
 
-1. a Manuscript version (an Editorial Deliverable Revision);
+1. an Editorial Deliverable Revision — the exact-version boundary a Manuscript Revision realizes for the manuscript and Promotion Article, News Report and Review Article revisions share ([Editorial context](../domain/editorial/CONTEXT.md)), so the finalized main manuscript and every other revised related document is exportable on its own;
 2. a Production Document version;
 3. a Book Delivery Package version;
 4. a Report — a review, an evaluation, or a 审稿意见 ([ADR 0077](../adr/0077-adopt-the-editor-facing-surface-specification-as-the-execution-standard.md));
@@ -33,12 +33,13 @@ What may leave with a file is enumerated; anything not enumerated stays.
 
 - **批注** may leave with the target as comments, with their author names. They are included by default and the editor may exclude them (`不含批注`).
 - **修改建议** may leave with the target as tracked changes. They are included by default and the editor may exclude them (`不含修改建议`).
-- The file-level DOCX content retained with the Source Version may leave with the target: headers and footers, page setup, style sheets, text boxes, and images. It is restored on export; the manuscript surface edits only body text and marks ([ADR 0077](../adr/0077-adopt-the-editor-facing-surface-specification-as-the-execution-standard.md)).
-- **备注 never export.** Retained external sources and Evidence Links do not export in v2. These are hard exclusions, not defaults the editor can override.
+- The file-level DOCX content retained with the Source Version may leave with the target: headers and footers, page setup, style sheets, text boxes, and images. It is included by default, the editor may exclude it, and it is restored on export; the manuscript surface edits only body text and marks ([ADR 0077](../adr/0077-adopt-the-editor-facing-surface-specification-as-the-execution-standard.md)).
+- **备注** may leave with the target. They are **not** included by default and the editor may include them per export.
+- Retained external sources and Evidence Links do not export in v2. These are hard exclusions, not defaults the editor can override.
 
 ## Multi-file exports and reports
 
-A multi-file export — a 图书交付包 as a folder — is covered by one approval over the enumerated file set, with per-file receipts. The set is frozen and enumerated before approval, every member still requires its own frozen Local Export Preparation, and a set or member drift invalidates the approval and requires a new enumerated set. The enumerated set is never standing permission: unseen or future files are not covered, and no native apply-to-all choice may bind beyond the exact currently enumerated colliding files.
+A multi-file export — a 图书交付包 as a folder — is covered by one approval over the enumerated file set, with per-file receipts. The enumerated set is exactly the members the editor chose: the package is never covered whole and implicitly, and each member remains separately exportable on its own. The set is frozen and enumerated before approval, every member still requires its own frozen Local Export Preparation, and a set or member drift invalidates the approval and requires a new enumerated set. The enumerated set is never standing permission: unseen or future files are not covered, and no native apply-to-all choice may bind beyond the exact currently enumerated colliding files.
 
 Reports export with the manuscript's formats and fidelity rules: DOCX primary, PDF optional, Markdown fallback.
 

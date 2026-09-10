@@ -40,11 +40,13 @@ This section is the storage-authority decision V2-UX-DSTO-013 asks for. S85 (#43
 
 ### 3 · External Export Policy v2 (S64 #413)
 
-1. Eligible target kinds: a Manuscript version (an Editorial Deliverable Revision), a Production Document version, a Book Delivery Package version, a Report (review, evaluation, 审稿意见), and a database export package (§1.7).
-2. Attached content that may leave with a file: 批注 as comments with author names, 修改建议 as tracked changes, and the file-level DOCX content retained with the Source Version — headers and footers, page setup, style sheets, text boxes, images. 备注 never leave; retained external sources and Evidence Links do not export in v2.
-3. A multi-file export — a 图书交付包 as a folder — is covered by one approval over the enumerated file set with per-file receipts; the enumerated set is never standing permission.
+**Amended on 2026-09-10** by the Owner's byte review of the v2 document in the pull request that lands it (#440), which came before S64 rather than at it. Two clauses the session had written narrower than the Owner intended are restated below. **Eligibility** (clause 1): 「一个完整默认交付包内包含定稿的主稿件+其他修订的相关文档，但是同时无论是定稿的主稿件还是其他修订的文档都可以单独导出，交付包也可以选择哪些导出哪些不导出」 — the deliverable kind is the Editorial Deliverable Revision, not the manuscript alone, and a package export is the editor's chosen subset of its members. **Attached content** (clause 2): 「允许逐项排除，默认都带，只有对外不可见的编辑备注默认不随导出」 — 备注 are a default-off item the editor may include per export, not a hard exclusion. This amendment reaches export only: §4.4 and the provider-transmission strip it states — 责编 and 相关人 names and roles, 备注 and internal notes stripped before transmission — are untouched, as are V2-UX-EGR-004 and MARK-006's model and Task-scope sentences.
+
+1. Eligible target kinds: an Editorial Deliverable Revision — the exact-version boundary a Manuscript Revision realizes for the manuscript and Promotion Article, News Report and Review Article revisions share ([Editorial context](../domain/editorial/CONTEXT.md)), so the finalized main manuscript and every other revised related document is exportable on its own — a Production Document version, a Book Delivery Package version, a Report (review, evaluation, 审稿意见), and a database export package (§1.7).
+2. Attached content that may leave with a file: 批注 as comments with author names, 修改建议 as tracked changes, and the file-level DOCX content retained with the Source Version — headers and footers, page setup, style sheets, text boxes, images. All three are included by default and the editor may exclude each one. 备注 may leave with the target but are not included by default; the editor may include them per export. Retained external sources and Evidence Links do not export in v2, and those two are hard exclusions.
+3. A multi-file export — a 图书交付包 as a folder — is covered by one approval over the enumerated file set with per-file receipts; the enumerated set is exactly the members the editor chose, never the whole package implicitly, and it is never standing permission.
 4. Reports export with the manuscript's formats and fidelity rules (DOCX primary, PDF optional, Markdown fallback).
-5. The Owner's confirmation when S64 is reached is the byte review of v2.
+5. The Owner reviewed the v2 bytes on 2026-09-10 against #440 and directed the two corrections above; S64 implements against those reviewed bytes and needs no second confirmation of them.
 
 ### 4 · Network egress in the product
 
@@ -67,7 +69,8 @@ Before any web-search-enabled slice and before the production binding changes, t
 
 ## Clauses changed
 
-- `docs/ui-ux-v2/requirements.md`: V2-UX-SRC-013 gains the retention-fetch and degrade sentence; V2-UX-DSTO-017 gains the export-policy sentence; new section `## Network egress` (V2-UX-EGR-001 to 005).
+- `docs/ui-ux-v2/requirements.md`: V2-UX-SRC-013 gains the retention-fetch and degrade sentence; V2-UX-DSTO-017 gains the export-policy sentence; new section `## Network egress` (V2-UX-EGR-001 to 005). Under the §3 amendment, V2-UX-MARK-006 and V2-UX-EXP-023 change for export only — 备注 do not leave by default and the editor may include them — and MARK-006's model and Task-scope sentences and V2-UX-EGR-004 stay exactly as they are.
+- `docs/ui-ux-v2/editor-surfaces.md`: under the §3 amendment, the mark table's 备注 row and the 导出 paragraph state the same export-only change; every other clause of both is unchanged.
 - [ADR 0043](./0043-allow-public-samplebooks-in-repository-and-ci.md): partial supersession by §5, noted in its header; `SampleBooks/README.md` carries the status until S88 lands.
 - ADR 0066 §Research budget and ADR 0074 §2 and §3: read under §4.3 for the model-tool path; the records are not edited.
 - The development plan and the tracker: S87 (#437) and S88 (#438) opened; S85, S86 and #387 unblocked; S70's remaining gate is S87; S64's confirmation is the v2 byte review.

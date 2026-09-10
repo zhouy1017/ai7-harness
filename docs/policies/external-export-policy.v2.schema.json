@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "AI7 External Export Policy v2",
-  "description": "Validates the exact default-deny External Export Policy v2: the v1 local-filesystem eligibility rule carried unchanged in structure, the five eligible target kinds of ADR 0079 §3.1, the attached-content rules of §3.2, the multi-file set rules of §3.3, the report format rules of §3.4, the unchanged v1 per-file Effect safeguards and the unchanged authority separations.",
+  "description": "Validates the exact default-deny External Export Policy v2 as ADR 0079 §3 decides it under the Owner's byte review of 2026-09-10: the v1 local-filesystem eligibility rule carried unchanged in structure, the five eligible target kinds of §3.1 with Editorial Deliverable Revision as the deliverable kind, the attached-content rules of §3.2 with 备注 default-off rather than hard-excluded, the multi-file set rules of §3.3 over the editor's chosen package members, the report format rules of §3.4, the unchanged v1 per-file Effect safeguards and the unchanged authority separations.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -312,7 +312,7 @@
               "uniqueItems": true,
               "items": {
                 "enum": [
-                  "manuscript-revision",
+                  "editorial-deliverable-revision",
                   "production-document-version",
                   "book-delivery-package-version",
                   "report",
@@ -331,6 +331,7 @@
         "annotations",
         "changeSuggestions",
         "sourceVersionDocxContent",
+        "editorNotes",
         "hardExclusions"
       ],
       "properties": {
@@ -393,6 +394,8 @@
             "mayLeaveWithTarget",
             "retainedWithSourceVersion",
             "restoredOnExport",
+            "defaultIncluded",
+            "editorMayExclude",
             "contentClasses"
           ],
           "properties": {
@@ -403,6 +406,12 @@
               "$ref": "#/definitions/trueValue"
             },
             "restoredOnExport": {
+              "$ref": "#/definitions/trueValue"
+            },
+            "defaultIncluded": {
+              "$ref": "#/definitions/trueValue"
+            },
+            "editorMayExclude": {
               "$ref": "#/definitions/trueValue"
             },
             "contentClasses": {
@@ -422,18 +431,34 @@
             }
           }
         },
+        "editorNotes": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "mayLeaveWithTarget",
+            "defaultIncluded",
+            "editorMayInclude"
+          ],
+          "properties": {
+            "mayLeaveWithTarget": {
+              "$ref": "#/definitions/trueValue"
+            },
+            "defaultIncluded": {
+              "$ref": "#/definitions/falseValue"
+            },
+            "editorMayInclude": {
+              "$ref": "#/definitions/trueValue"
+            }
+          }
+        },
         "hardExclusions": {
           "type": "object",
           "additionalProperties": false,
           "required": [
-            "editorNotesNeverExport",
             "retainedExternalSourcesNeverExport",
             "evidenceLinksNeverExport"
           ],
           "properties": {
-            "editorNotesNeverExport": {
-              "$ref": "#/definitions/trueValue"
-            },
             "retainedExternalSourcesNeverExport": {
               "$ref": "#/definitions/trueValue"
             },
@@ -451,6 +476,9 @@
         "folderDestinationAllowed",
         "destinationObjectKind",
         "destinationSelection",
+        "packageMemberSelection",
+        "membersSeparatelyExportable",
+        "wholePackageImplicitlyCovered",
         "enumeratedFileSetFrozenBeforeApproval",
         "oneApprovalCoversExactEnumeratedFileSet",
         "perFilePreparationRequired",
@@ -472,6 +500,17 @@
           "enum": [
             "platform-native-user-selector"
           ]
+        },
+        "packageMemberSelection": {
+          "enum": [
+            "editor-chosen-subset"
+          ]
+        },
+        "membersSeparatelyExportable": {
+          "$ref": "#/definitions/trueValue"
+        },
+        "wholePackageImplicitlyCovered": {
+          "$ref": "#/definitions/falseValue"
         },
         "enumeratedFileSetFrozenBeforeApproval": {
           "$ref": "#/definitions/trueValue"
