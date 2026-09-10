@@ -4,7 +4,7 @@ Status: **Owner-accepted delivery order under [ADR 0064](../adr/0064-reweight-re
 
 ## Why this order
 
-Phase 1 completed the analysis pipeline on real model output service-side: unit results, cross-unit findings, factual assertions with Reference Integrity, an assurance estimate and a Run Report. The Owner then settled every editor-facing screen and asked that the backend be aligned to the confirmed flows. What the editor pays for next is, in order: opening a Book into the manuscript and working with marks; reviewing by category with findings that land on the manuscript as 修改建议 and 批注 and are accepted in one click; bringing a DOCX in with everything retained and sending it out again; 发稿, 交付 and the 图书交付包. Only then do the one shared Task Drawer, run governance, the knowledge base, evaluation and learning follow, because they govern and enrich work that will by then exist. Each row below names the specification's screen and the §11 row it implements.
+Phase 1 completed the analysis pipeline on real model output service-side: unit results, cross-unit findings, factual assertions with Reference Integrity, an assurance estimate and a Run Report. The Owner then settled every editor-facing screen and asked that the backend be aligned to the confirmed flows. What the editor pays for next is, in order: opening a Book into the manuscript and working with marks; reviewing by category with findings that land on the manuscript as 修改建议 and 批注 and are accepted in one click; bringing a DOCX in with everything retained and sending it out again; 发稿, 交付 and the 图书交付包. Only then do the one shared Task Drawer, run governance, the knowledge base, evaluation and learning follow, because they govern and enrich work that will by then exist. Each row below names the specification's screen and the §11 row it implements. S88 comes first in Phase 2 because every later Journey input must be `sample1` or generated (ADR 0079 §5).
 
 ## How an agent executes this plan
 
@@ -57,14 +57,15 @@ Exit criterion: one `developer-live` Run on exact `sample1` produces unit result
 | 1c.11 | S55b | opened when reached | T3 | — | Tier 2, agent-driven discovery as repository tooling for a provider matching no implemented format | S55a | deferred |
 | 1c.12 | S56 | #324 | T1 | none | Retire a merged branch by a sequence that works, and verify it | — | integrated (PR #326) |
 
-## Storage decisions — before their Phase 2 rows
+## Owner decisions taken and design tasks
 
-Both rows implement ⑤ 设置 › 数据与存储 and need the storage ADR that V2-UX-DSTO-013 and ADR 0077 §7 require; the Commander proposes it and the Owner accepts it before either is dispatched.
+The storage rows implement ⑤ 设置 › 数据与存储; the storage decision V2-UX-DSTO-013 requires is [ADR 0079](../adr/0079-record-the-owner-s-decisions-of-2026-09-10-on-storage-policies-export-egress-providers-and-samplebooks.md) §1, so both are dispatchable when reached. S87 is the consolidated provider assignment design ADR 0079 §6 defers the web-search binding to; it runs with the Owner before any search-enabled slice.
 
 | Order | Slice | Issue | Class | Journey | Outcome | Depends on | Status |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| — | S85 | #433 | T3 | J-12 | 数据版本 shown apart from the software version, frozen at release, changed only with backup, disclosure and rollback (B24) | the storage ADR | Owner decision first |
-| — | S86 | #434 | T3 | J-12 | 导出数据库 / 导入数据库 with preview, 替换 after an automatic backup or 合并; 定期自动备份 off by default (B25) | S85 | Owner decision first |
+| — | S85 | #433 | T3 | J-12 | 数据版本 shown apart from the software version, frozen at release, changed only with backup, disclosure and rollback (B24) | ADR 0079 §1 | planned |
+| — | S86 | #434 | T3 | J-12 | 导出数据库 / 导入数据库 with preview, 替换 after an automatic backup or 合并; 定期自动备份 off by default (B25) | S85 | planned |
+| — | S87 | #437 | T0 | — | Provider assignment design: every provider-involving task, its Model Role, the capabilities it needs (including the web-search tool), provider and model per scope, the credential slots to enroll (ADR 0079 §6) | ADR 0073, ADR 0079 | Owner + Commander session |
 
 ## Phase 2 — the manuscript surface, review, files and delivery
 
@@ -72,6 +73,7 @@ Exit criterion: an editor opens a Book into the manuscript at the last position,
 
 | Order | Slice | Issue | Class | Journey | Outcome | Depends on | Status |
 | --- | --- | --- | --- | --- | --- | --- | --- |
+| 2.0 | S88 | #438 | T3 | J-01, J-08 | Keep only `sample1` in the repository; the other five SampleBooks become local-only test material; J-01's `.doc` scenario, J-08's inputs and the service builders retarget (ADR 0079 §5) | — | planned (first) |
 | 2.1 | S57 | #405 | T2 | J-12 | ① Open a Book into the manuscript at its last position; 工作概览 becomes a destination (B1) | — | planned |
 | 2.2 | S71 | #406 | T2 | J-04 | ①b / ②A The finished analysis chain in editorial language, including the Run Report (S42b, S44b) | Phase 1, S57 | planned |
 | 2.3 | S58 | #407 | T3 | J-05 | ① Editorial marks: 批注, 备注, 高亮 and 修改建议 as Proposal Change Items (B2) | S57 | planned |
@@ -82,7 +84,7 @@ Exit criterion: an editor opens a Book into the manuscript at the last position,
 | 2.8 | S61 | #410 | T3 | J-01 | ④ DOCX content retained with the Source Version by default; 保留 / 并入 per class (B14) | — | planned |
 | 2.9 | S62 | #411 | T2 | J-01 | ④ Imported comments and tracked changes enter as marks (B15) | S58, S61 | planned |
 | 2.10 | S63 | #412 | T3 | J-01 | ④ Chapter-level reimport with four verbs; marks migrate; return to the manuscript (B16) | S58 | planned |
-| 2.11 | S64 | #413 | T3 | J-07 | ④ Export to DOCX / PDF / Markdown with 含批注 / 含修改建议, fidelity table, system picker, receipt (B17) | S58, S61; External Export Policy v2 | Owner confirmation |
+| 2.11 | S64 | #413 | T3 | J-07 | ④ Export to DOCX / PDF / Markdown with 含批注 / 含修改建议, fidelity table, system picker, receipt (B17) | S58, S61; the External Export Policy v2 bytes (ADR 0079 §3) | Owner confirmation (the v2 byte review) |
 | 2.12 | S65 | #414 | T3 | J-07 | ⑥ 发稿: Manuscript-only milestones and 设为发稿版本 (B26) | — | planned |
 | 2.13 | S66 | #415 | T3 | J-07 | ⑥ Production Documents: types, versions, workflow and gates, Delivery Records, 交付后有修改, 本书不做 (B27) | S64, S58 | planned |
 | 2.14 | S67 | #416 | T3 | J-07 | ⑥ 图书交付包: conditions, frozen manifest, versions, export history (B28) | S64, S65, S66 | planned |
@@ -106,7 +108,7 @@ Exit criterion: any Task shows its plan in the Task Drawer in 精简 or 完整 m
 | 3.9 | S78 | #424 | T2 | J-09 | ⑤ 待我处理: four cross-Book groups (B18) | S72 | planned |
 | 3.10 | S14 | #49 | T3 | J-09 | Concurrent Book work without focus or scope leakage | S78, S16 | planned |
 | 3.11 | S39 | #95 | T3 | J-09 | Background Analysis Enrollment and revocation | S14 | planned |
-| 3.12 | S70 | #425 | T3 | J-04 | ②B / ⑤ External Evidence Retention Procedure; the live research path of 事实核查 (B13) | S69; ADR 0074 (accepted 2026-09-10, PR #391); the `ordinary-production` search-egress decision | Owner decision first (the egress policy) |
+| 3.12 | S70 | #425 | T3 | J-04 | ②B / ⑤ External Evidence Retention Procedure; the live research path of 事实核查 (B13) | S69; ADR 0074 (accepted 2026-09-10, PR #391); S87's web-search binding (ADR 0079 §4) | after S87 |
 | 3.13 | S68 | #426 | T2 | J-07 | ⑥ 维护事项 (B30) | S65, S59 | planned |
 
 ## Phase 4 — the knowledge base, evaluation and learning
@@ -166,4 +168,4 @@ The human-attended `sample1` recording is scheduled after the Phase 1 exit crite
 
 ## Deferred and out of scope
 
-Packaging, signing, notarization, release, `dev` to `main` promotion, Word integration, additional platforms, private manuscripts in any development scope, and the self-hosted Gate remain outside this plan and need their own Owner decisions. Policy Documents are runtime records the Owner reviews: policy v5 for the two analysis suboperations, External Export Policy v2 for the new export objects, and any policy for search-engine egress under `ordinary-production` are decisions named in `PROGRESS.md`, not slices in these tables until decided.
+Packaging, signing, notarization, release, `dev` to `main` promotion, Word integration, additional platforms, private manuscripts in any development scope, and the self-hosted Gate remain outside this plan and need their own Owner decisions. Policy Documents are runtime records the Owner reviews byte by byte: the documents ADR 0079 decides — Provider Processing v5 and the production successor of v3, External Export Policy v2, the egress document beside the Factual Verification Policy v1 — are written by the Commander and bundled into as few active-set versions as their timing allows; they are not slices in these tables.

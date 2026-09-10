@@ -4,6 +4,8 @@ The Owner designated the six files in this directory for public test use through
 [Issue #32](https://github.com/zhouy1017/ai7-harness/issues/32), under the narrow
 admission rule in [ADR 0043](../docs/adr/0043-allow-public-samplebooks-in-repository-and-ci.md).
 
+> **Status (2026-09-10, [ADR 0079](../docs/adr/0079-record-the-owner-s-decisions-of-2026-09-10-on-storage-policies-export-egress-providers-and-samplebooks.md) §5):** only exact `sample1.docx` remains admitted to the repository, CI and fixtures. The five other files listed below are local-only test material from this date; slice S88 (#438) removes them from the tree, after which this table is history. No derivative of them enters the repository, and the developer-live transmittable set stays exact `sample1`.
+
 The original source is the ignored, untracked `SampleBooks/` directory in the local
 worktree `C:\Users\Chooo\codebase\ai7-harness` beside
 `main@c8cbe26c4cccc4a912b3bbc05bd5b23fbf5468b9`. Because those files were not Git
