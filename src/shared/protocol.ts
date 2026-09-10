@@ -1,4 +1,4 @@
-export const SERVICE_PROTOCOL_VERSION = 28 as const;
+export const SERVICE_PROTOCOL_VERSION = 29 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -1874,14 +1874,21 @@ export interface BaselineAnalysisPlanVersionProjection {
 
 /**
  * One Plan Revision: the immutable field-level diff between a prior plan version and the inputs
- * proposed for the next one. A stored pending revision (`planRevisionId` set, `resolved` false)
+ * proposed for the next one. A stored pending revision (`planRevisionId` set, `state` `pending`)
  * awaits `重新确认计划`; a live entry (`planRevisionId` null) reports durable-state drift the store
  * detected on inspect and records at reconfirmation.
+ *
+ * A revision leaves `pending` in exactly three durable ways (Issue #281): `resolved` when a later
+ * plan version links back to it, `superseded` when a later revision on the same prior version names
+ * it in `supersedes`, and `reverted` when the revision is itself the way back — the plan returned to
+ * the inputs its prior version froze, so that version stands and no new one is written. Nothing is
+ * ever rewritten to say so: the later row carries the fact and every state here is derived from it.
  */
 export interface BaselineAnalysisPlanRevisionProjection {
   planRevisionId: string | null;
   priorPlanVersionId: string;
   priorOrdinal: number;
+  /** The version this revision yielded: the next one for `resolved`, the restored prior one for `reverted`, else `null`. */
   nextOrdinal: number | null;
   trigger: 'prepare' | 'inspect' | 'reconfirm';
   /** The record time of a stored revision; `null` for a live entry derived on inspect. */
@@ -1889,9 +1896,17 @@ export interface BaselineAnalysisPlanRevisionProjection {
   changedFields: ReadonlyArray<string>;
   diff: ReadonlyArray<PlanRevisionDiffEntryProjection>;
   proposed: MaterialPlanInputsProjection;
+  /** How this revision was settled, or that it still awaits the editor. */
+  state: PlanRevisionState;
+  /** The earlier pending revisions on the same prior version this one settled; empty for every other row. */
+  supersedes: ReadonlyArray<string>;
+  /** Settled in any of the three ways — `state !== 'pending'`; a settled revision asks the editor for nothing. */
   resolved: boolean;
   label: string;
 }
+
+/** How a Plan Revision stands: awaiting the editor, or settled by a later version, a later revision, or the way back. */
+export type PlanRevisionState = 'pending' | 'resolved' | 'superseded' | 'reverted';
 
 /** One durable `safe-retry` Plan Adaptation of a Run: written before the retry is dispatched, inside the unchanged envelope and binding. */
 export interface BaselineAnalysisPlanAdaptationProjection {

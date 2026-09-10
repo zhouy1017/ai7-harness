@@ -7,6 +7,7 @@ import type {
   PlanBoundarySplitProjection,
   PlanRevisionDiffEntryProjection,
   PlanRevisionDiffValue,
+  PlanRevisionState,
 } from '../../shared/protocol.js';
 import { DIGEST_PATTERN, UUID_PATTERN, canonicalJson, canonicalRecord, isRecord, requireAnalysis } from './canonical.js';
 
@@ -126,12 +127,19 @@ function asString(value: unknown, message: string): string {
 }
 
 /**
- * The material inputs a frozen plan version carries, re-read from its own plan components: the
- * remote binding of the Provider Resolution Plan, the artifact pin, the reuse plan's selected range
- * and predecessor (absent for the first baseline), the ceiling and outbound category, and the
- * expected outcome class of the Task Intent.
+ * The material inputs a frozen plan version carries, re-read from the durable records that froze
+ * them: the remote binding of the Provider Resolution Plan, the artifact pin, the reuse plan's
+ * selected range and predecessor (absent for the first baseline), the ceiling and the outbound
+ * category of that same component, and the expected outcome class of the Task Intent record.
+ *
+ * All fifteen come from state (Issue #281). Reading a constant here instead would compare a constant
+ * with itself: a plan frozen at one Run Budget Ceiling would keep reporting whatever the code says
+ * today, and the settable ceiling of S16 (#51) would drift silently rather than suspend the plan.
  */
-export function materialPlanInputsOfComponents(components: Readonly<Record<string, unknown>>, expectedOutcome: string): MaterialPlanInputsProjection {
+export function materialPlanInputsOfComponents(
+  components: Readonly<Record<string, unknown>>,
+  taskIntent: Readonly<Record<string, unknown>>,
+): MaterialPlanInputsProjection {
   const providerPlan = components['provider-resolution-plan'];
   const artifactPin = components['artifact-pin'];
   const reusePlan = components['reuse-plan'];
@@ -161,16 +169,21 @@ export function materialPlanInputsOfComponents(components: Readonly<Record<strin
       digest: asString(predecessor.digest, '前一修订版记录无效。'),
     },
     runBudgetCeiling: runBudgetCeilingOf(providerPlan.runBudgetCeiling),
-    outboundDataCategory: 'public-or-synthetic',
-    expectedOutcome,
+    outboundDataCategory: outboundDataCategoryOf(providerPlan.outboundDataCategory),
+    expectedOutcome: asString(taskIntent.expectedOutcome, '任务意图记录无效。'),
   };
+}
+
+/** The outbound data category the frozen component names; the only category any scope declares today. */
+function outboundDataCategoryOf(value: unknown): MaterialPlanInputsProjection['outboundDataCategory'] {
+  requireAnalysis(value === 'public-or-synthetic', 'ANALYSIS_RECORD_INVALID', '外发数据类别记录无效。');
+  return value;
 }
 
 /**
  * The exact ceiling state the frozen plan carries. It is a material field (ADR 0009), so drift
  * detection must compare the real value rather than a constant: under `developer-live` a plan version
- * froze an explicit token ceiling, and re-preparing at a different ceiling is a Plan Revision. The
- * remaining Issue #281 fields stay derived from the constants they already use.
+ * froze an explicit token ceiling, and re-preparing at a different ceiling is a Plan Revision.
  */
 function runBudgetCeilingOf(value: unknown): MaterialPlanInputsProjection['runBudgetCeiling'] {
   if (value === 'unset') return 'unset';
@@ -237,10 +250,22 @@ export function planAdaptationLabel(unitOrdinal: number, classifiedReason: strin
   return `计划内调整 · 单元 ${unitOrdinal} 安全重试 1 次 · ${classifiedReason}`;
 }
 
-/** The wording of one Plan Revision: `计划修订 · 版本 m → m+1 · <changed fields>`; a pending revision names the next version it will yield. */
-export function planRevisionLabel(priorOrdinal: number, nextOrdinal: number | null, changedFields: ReadonlyArray<string>): string {
+/**
+ * The wording of one Plan Revision: `计划修订 · 版本 m → n · <changed fields>`. A pending revision names the
+ * next version it will yield and says it is still waiting; a settled one says how it was settled, so
+ * a revision the editor no longer has to act on never reads as one that is still asking (Issue #281).
+ */
+export function planRevisionLabel(
+  priorOrdinal: number,
+  nextOrdinal: number | null,
+  changedFields: ReadonlyArray<string>,
+  state: PlanRevisionState = nextOrdinal === null ? 'pending' : 'resolved',
+): string {
   const next = nextOrdinal ?? priorOrdinal + 1;
-  return `计划修订 · 版本 ${priorOrdinal} → ${next}${nextOrdinal === null ? '（待重新确认）' : ''} · ${changedFields.join('、')}`;
+  const suffix = state === 'pending' ? '（待重新确认）'
+    : state === 'superseded' ? '（已被后一次修订取代）'
+      : state === 'reverted' ? '（已回退）' : '';
+  return `计划修订 · 版本 ${priorOrdinal} → ${next}${suffix} · ${changedFields.join('、')}`;
 }
 
 export function selectedRangeEquals(left: BaselineAnalysisSelectedRange | null, right: BaselineAnalysisSelectedRange | null): boolean {

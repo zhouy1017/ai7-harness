@@ -23,6 +23,8 @@ import type { MaterialPlanField, MaterialPlanInputsProjection } from '../../src/
 // line; a derived consequence (the reuse-plan counts) is reported beside them, never as material.
 
 const EXPECTED_OUTCOME = '稿件分析结果集修订版（基线稿件分析契约 v1）';
+/** The durable Task Intent record the frozen expected outcome class is read from (Issue #281). */
+const INTENT: Readonly<Record<string, unknown>> = { taskIntentId: randomUUID(), expectedOutcome: EXPECTED_OUTCOME };
 const RANGE_A = { startPosition: 26, endPosition: 43 };
 const RANGE_B = { startPosition: 93, endPosition: 97 };
 const PREDECESSOR = { revisionId: randomUUID(), ordinal: 1, digest: 'c'.repeat(64) };
@@ -112,6 +114,17 @@ describe('material plan drift', () => {
     expect(planAdaptationLabel(5, '适配器失败（PROVIDER_ERROR · 503）。')).toBe('计划内调整 · 单元 5 安全重试 1 次 · 适配器失败（PROVIDER_ERROR · 503）。');
     expect(PLAN_REVISION_REQUIRED_REASON).toBe('plan-revision-required');
   });
+
+  it('says how a settled revision was settled, so no one is asked to reconfirm what no longer waits', () => {
+    // The three durable ways out of `pending` each read differently, and only `pending` still asks.
+    expect(planRevisionLabel(1, 2, ['selectedRange'], 'resolved')).toBe('计划修订 · 版本 1 → 2 · selectedRange');
+    expect(planRevisionLabel(1, null, ['selectedRange'], 'pending')).toBe('计划修订 · 版本 1 → 2（待重新确认） · selectedRange');
+    expect(planRevisionLabel(1, null, ['selectedRange'], 'superseded')).toBe('计划修订 · 版本 1 → 2（已被后一次修订取代） · selectedRange');
+    expect(planRevisionLabel(1, 1, ['selectedRange'], 'reverted')).toBe('计划修订 · 版本 1 → 1（已回退） · selectedRange');
+    // The default keeps every caller that names no state on the wording it already had.
+    expect(planRevisionLabel(1, 2, ['selectedRange'])).toBe(planRevisionLabel(1, 2, ['selectedRange'], 'resolved'));
+    expect(planRevisionLabel(1, null, ['selectedRange'])).toBe(planRevisionLabel(1, null, ['selectedRange'], 'pending'));
+  });
 });
 
 describe('plan boundary split', () => {
@@ -150,20 +163,48 @@ describe('material inputs of plan components', () => {
   });
 
   it('reads the binding, the pin, and the reuse plan back into the material inputs, ignoring credential readiness', () => {
-    const read = materialPlanInputsOfComponents(components({ selectedRange: RANGE_A, predecessor: { ...PREDECESSOR, contractVersion: 'x', coverageManifestDigest: 'y', unitCount: 8 } }), EXPECTED_OUTCOME);
+    const read = materialPlanInputsOfComponents(components({ selectedRange: RANGE_A, predecessor: { ...PREDECESSOR, contractVersion: 'x', coverageManifestDigest: 'y', unitCount: 8 } }), INTENT);
     expect(read).toEqual(inputs());
   });
 
   it('yields a null range and predecessor for a first baseline and for an update without a range', () => {
-    expect(materialPlanInputsOfComponents(components(null), EXPECTED_OUTCOME)).toEqual({ ...inputs(), selectedRange: null, predecessorRevision: null });
-    expect(materialPlanInputsOfComponents(components({ selectedRange: null, predecessor: PREDECESSOR }), EXPECTED_OUTCOME)).toEqual({ ...inputs(), selectedRange: null });
+    expect(materialPlanInputsOfComponents(components(null), INTENT)).toEqual({ ...inputs(), selectedRange: null, predecessorRevision: null });
+    expect(materialPlanInputsOfComponents(components({ selectedRange: null, predecessor: PREDECESSOR }), INTENT)).toEqual({ ...inputs(), selectedRange: null });
   });
 
   it('rejects components without a remote binding or with a malformed pin', () => {
-    expect(() => materialPlanInputsOfComponents({ 'artifact-pin': components(null)['artifact-pin'] }, EXPECTED_OUTCOME)).toThrowError(AnalysisError);
+    expect(() => materialPlanInputsOfComponents({ 'artifact-pin': components(null)['artifact-pin'] }, INTENT)).toThrowError(AnalysisError);
     const malformed = components(null);
     malformed['artifact-pin'] = { ...(malformed['artifact-pin'] as Record<string, unknown>), sidecarRevision: 'two' };
-    expect(() => materialPlanInputsOfComponents(malformed, EXPECTED_OUTCOME)).toThrowError(/构件 pin 记录无效/u);
+    expect(() => materialPlanInputsOfComponents(malformed, INTENT)).toThrowError(/构件 pin 记录无效/u);
+  });
+
+  // Issue #281: all fifteen come from the records that froze them. A constant read here would compare
+  // itself with itself, and the settable ceiling of S16 (#51) would move without suspending anything.
+  it('reads the ceiling, the outbound category and the expected outcome from the frozen records, not from constants', () => {
+    const ceiling = components(null);
+    (ceiling['provider-resolution-plan'] as Record<string, unknown>)['runBudgetCeiling'] = { kind: 'tokens', maxTotalTokens: 240_000 };
+    const readCeiling = materialPlanInputsOfComponents(ceiling, INTENT);
+    expect(readCeiling.runBudgetCeiling).toEqual({ kind: 'tokens', maxTotalTokens: 240_000 });
+    expect(diffMaterialPlanInputs(materialPlanInputsOfComponents(components(null), INTENT), readCeiling).map((entry) => entry.field)).toEqual(['runBudgetCeiling']);
+
+    const outcome = materialPlanInputsOfComponents(components(null), { ...INTENT, expectedOutcome: '其他结果类别' });
+    expect(outcome.expectedOutcome).toBe('其他结果类别');
+    expect(diffMaterialPlanInputs(materialPlanInputsOfComponents(components(null), INTENT), outcome).map((entry) => entry.field)).toEqual(['expectedOutcome']);
+
+    const category = components(null);
+    (category['provider-resolution-plan'] as Record<string, unknown>)['outboundDataCategory'] = 'public-or-synthetic';
+    expect(materialPlanInputsOfComponents(category, INTENT).outboundDataCategory).toBe('public-or-synthetic');
+  });
+
+  it('refuses a component or an intent record that carries no such field rather than inventing the value', () => {
+    const withoutCategory = components(null);
+    delete (withoutCategory['provider-resolution-plan'] as Record<string, unknown>)['outboundDataCategory'];
+    expect(() => materialPlanInputsOfComponents(withoutCategory, INTENT)).toThrowError(/外发数据类别记录无效/u);
+    const otherCategory = components(null);
+    (otherCategory['provider-resolution-plan'] as Record<string, unknown>)['outboundDataCategory'] = 'house-confidential';
+    expect(() => materialPlanInputsOfComponents(otherCategory, INTENT)).toThrowError(AnalysisError);
+    expect(() => materialPlanInputsOfComponents(components(null), {})).toThrowError(/任务意图记录无效/u);
   });
 });
 

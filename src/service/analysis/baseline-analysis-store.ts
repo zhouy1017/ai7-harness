@@ -37,6 +37,7 @@ import {
   type ModelCredentialOperationState,
   type PlanBoundarySplitProjection,
   type PlanRevisionDiffEntryProjection,
+  type PlanRevisionState,
   type CredentialSlotId,
   type ExecutionRouteId,
   type ResultSetPolicyPin,
@@ -142,7 +143,7 @@ interface PreparationWork {
   total: number;
 }
 
-/** The facts one `analysis_task_intents` row carries. */
+/** The facts one `analysis_task_intents` row carries, with the canonical record they were read from. */
 interface IntentFacts {
   readonly taskIntentId: string;
   readonly bookId: string;
@@ -151,6 +152,9 @@ interface IntentFacts {
   readonly createdAt: string;
   readonly predecessorRevisionId: string | null;
   readonly selectedRange: BaselineAnalysisSelectedRange | null;
+  /** The immutable Task Intent record; the expected outcome class the Task froze is read from here, never from the kind's constant. */
+  readonly record: Readonly<Record<string, unknown>>;
+  readonly expectedOutcome: string;
 }
 
 /**
@@ -577,7 +581,7 @@ export class BaselineAnalysisStore {
     const taskIntent = {
       taskIntentId: intent.taskIntentId,
       goal: intent.goal,
-      expectedOutcome: this.#definition.expectedOutcome,
+      expectedOutcome: intent.expectedOutcome,
       createdAt: intent.createdAt,
       mode: intent.mode,
       modeLabel: this.#definition.mode(intent.mode).label,
@@ -631,11 +635,11 @@ export class BaselineAnalysisStore {
     // Drift detection (Issue #48): before authorization the material inputs are re-derived from durable
     // state and compared with the frozen version; a stored pending Plan Revision takes precedence over a
     // live difference. After authorization the bound plan is final for its Run and nothing is compared.
-    const materialInputs = materialPlanInputsOfComponents(plan, this.#definition.expectedOutcome);
+    const materialInputs = materialPlanInputsOfComponents(plan, intent.record);
     const revisions = this.#planRevisionProjections(intent.taskIntentId, versions);
     let planRevision: BaselineAnalysisPlanRevisionProjection | null = null;
     if (authorization === undefined) {
-      planRevision = revisions.filter((entry) => !entry.resolved && entry.priorPlanVersionId === currentVersion.planVersionId).at(-1) ?? null;
+      planRevision = revisions.filter((entry) => entry.state === 'pending' && entry.priorPlanVersionId === currentVersion.planVersionId).at(-1) ?? null;
       if (planRevision === null) {
         const live = this.#currentMaterialInputs(bookId, intent.mode, materialInputs.selectedRange, manifest.units.length);
         const diff = diffMaterialPlanInputs(materialInputs, live);
@@ -651,8 +655,10 @@ export class BaselineAnalysisStore {
             changedFields,
             diff,
             proposed: live,
+            state: 'pending',
+            supersedes: [],
             resolved: false,
-            label: planRevisionLabel(currentVersion.ordinal, null, changedFields),
+            label: planRevisionLabel(currentVersion.ordinal, null, changedFields, 'pending'),
           };
         }
       }
@@ -864,18 +870,37 @@ export class BaselineAnalysisStore {
     return row === undefined ? undefined : asString(row.plan_envelope_sha256);
   }
 
-  /** Every Plan Revision of a Task in detection order; resolved when a later version links back to it. */
+  /**
+   * Every Plan Revision of a Task in detection order, each with how it was settled.
+   *
+   * The rows are append-only and their immutability triggers stand, so a settled revision is never
+   * rewritten to say it is settled: the later row carries the fact and this read derives it (Issue
+   * #281). A revision is `resolved` when a later plan version links back to it, `reverted` when it is
+   * itself the way back to the inputs its prior version froze, `superseded` when a later revision on
+   * the same prior version names it in `supersedes`, and `pending` only while none of the three holds
+   * — which is what keeps an abandoned proposal from asking the editor to reconfirm it forever.
+   */
   #planRevisionProjections(taskIntentId: string, versions: ReadonlyArray<PlanVersionFacts>): BaselineAnalysisPlanRevisionProjection[] {
     const rows = this.#db.prepare('SELECT * FROM analysis_plan_revisions WHERE task_intent_id = ? ORDER BY rowid').all(taskIntentId) as SqlRow[];
-    return rows.map((row) => {
+    const parsed = rows.map((row) => {
       const record = parseCanonicalJson(asString(row.canonical_json)) as Record<string, unknown>;
       const planRevisionId = asString(row.plan_revision_id);
       requireAnalysis(record.planRevisionId === planRevisionId && Array.isArray(record.diff) && isRecord(record.proposed), 'ANALYSIS_RECORD_INVALID', '计划修订记录无效。');
+      const supersedes = record.supersedes === undefined ? [] : record.supersedes;
+      requireAnalysis(Array.isArray(supersedes) && supersedes.every((entry) => typeof entry === 'string') &&
+        (record.revert === undefined || record.revert === true), 'ANALYSIS_RECORD_INVALID', '计划修订记录无效。');
+      return { row, record, planRevisionId, supersedes: supersedes as string[], revert: record.revert === true };
+    });
+    const settledByLater = new Set(parsed.flatMap((entry) => entry.supersedes));
+    return parsed.map(({ row, record, planRevisionId, supersedes, revert }) => {
       const diff = record.diff as PlanRevisionDiffEntryProjection[];
       const changedFields = diff.map((entry) => entry.field);
       const resolvedBy = versions.find((entry) => entry.planRevisionId === planRevisionId);
       const priorOrdinal = asNumber(row.prior_ordinal);
-      const nextOrdinal = resolvedBy?.ordinal ?? null;
+      const state: PlanRevisionState = resolvedBy !== undefined ? 'resolved'
+        : revert ? 'reverted'
+          : settledByLater.has(planRevisionId) ? 'superseded' : 'pending';
+      const nextOrdinal = resolvedBy?.ordinal ?? (revert ? priorOrdinal : null);
       return {
         planRevisionId,
         priorPlanVersionId: asString(row.prior_plan_version_id),
@@ -886,20 +911,28 @@ export class BaselineAnalysisStore {
         changedFields,
         diff,
         proposed: record.proposed as unknown as MaterialPlanInputsProjection,
-        resolved: resolvedBy !== undefined,
-        label: planRevisionLabel(priorOrdinal, nextOrdinal, changedFields),
+        state,
+        supersedes,
+        resolved: state !== 'pending',
+        label: planRevisionLabel(priorOrdinal, nextOrdinal, changedFields, state),
       };
     });
   }
 
   /**
-   * The material plan inputs as durable state holds them now: the Main Editorial Role connection
+   * The material plan inputs a plan prepared **now** would freeze: the Main Editorial Role connection
    * (provider, model, adapter and configuration revisions, Credential Reference — never its readiness),
    * the highest pinned authority sidecar with its native carrier, the range the caller names, the
-   * Book's latest Result Set Revision for an update Task, and the fixed ceiling, category, and outcome
-   * class. Read leniently so a drifted pin or binding yields a diff rather than a refusal. The unit
-   * count is the frozen Coverage Manifest's, so the policy's per-frozen-unit default resolves to the
-   * same total the freeze wrote.
+   * Book's latest Result Set Revision for an update Task, the launch's ceiling, and the outbound
+   * category and expected outcome class this kind's plan builder and definition would declare. Read
+   * leniently so a drifted pin or binding yields a diff rather than a refusal. The unit count is the
+   * frozen Coverage Manifest's, so the policy's per-frozen-unit default resolves to the same total the
+   * freeze wrote.
+   *
+   * This is the live half of the comparison; the frozen half is read from the plan components and the
+   * Task Intent record (Issue #281). The two halves therefore differ whenever durable state moved —
+   * a re-bound ceiling, a re-pinned sidecar, a contract that now promises another outcome class —
+   * which is exactly when ADR 0009 suspends the plan for a Plan Revision.
    */
   #currentMaterialInputs(bookId: string, mode: AnalysisTaskMode, selectedRange: BaselineAnalysisSelectedRange | null, unitCount: number): MaterialPlanInputsProjection {
     const connection = this.#db.prepare(
@@ -965,16 +998,25 @@ export class BaselineAnalysisStore {
     }).counts;
   }
 
+  /**
+   * One immutable Plan Revision row. `supersedes` names the pending revisions on the same prior
+   * version this one settles and `revert` marks the way back to the frozen inputs; both are omitted
+   * when they do not apply, so an ordinary drift row keeps exactly the canonical bytes it has always
+   * had and no existing row is touched to record either fact (Issue #281).
+   */
   #insertPlanRevision(input: {
     taskIntentId: string;
     prior: PlanVersionFacts;
     priorInputs: MaterialPlanInputsProjection;
     proposed: MaterialPlanInputsProjection;
     diff: ReadonlyArray<PlanRevisionDiffEntryProjection>;
-    trigger: 'prepare' | 'reconfirm';
+    trigger: 'prepare' | 'inspect' | 'reconfirm';
     instant: string;
+    supersedes?: ReadonlyArray<string>;
+    revert?: true;
   }): string {
     const planRevisionId = randomUUID();
+    const supersedes = input.supersedes === undefined || input.supersedes.length === 0 ? undefined : [...input.supersedes];
     const record = canonicalRecord({
       planRevisionId,
       taskIntentId: input.taskIntentId,
@@ -985,6 +1027,8 @@ export class BaselineAnalysisStore {
       prior: input.priorInputs,
       proposed: input.proposed,
       diff: input.diff,
+      supersedes,
+      revert: input.revert,
     });
     this.#db.prepare(
       `INSERT INTO analysis_plan_revisions(plan_revision_id, task_intent_id, prior_plan_version_id, prior_ordinal, trigger_kind, detected_at, canonical_json, sha256)
@@ -1000,6 +1044,13 @@ export class BaselineAnalysisStore {
    * with its field-level diff and the derived reuse-plan counts; the prepared version is thereby
    * superseded and cannot be authorized. `重新确认计划` (`reconfirm`) resolves the pending revision — or
    * records the live drift as one — and writes the next plan version on the same Task Intent.
+   *
+   * There is also a way back (Issue #281). Proposing the inputs the frozen version already holds — by
+   * preparing again at them, or by reconfirming while they stand — records the revert as its own
+   * append-only revision, settles the pending one, and restores the start action on the version that
+   * was never replaced. No plan version is written for a revert: its envelope would repeat the frozen
+   * one, and a plan version's envelope digest is unique. A second differing proposal settles the first
+   * the same way, so at most one revision is ever pending on a version.
    */
   #revisePreparedPlan(
     bookId: string,
@@ -1015,24 +1066,53 @@ export class BaselineAnalysisStore {
     const instant = new Date().toISOString();
     const manifest = existing.coverageManifest;
     const proposed = this.#currentMaterialInputs(bookId, intent.mode, requestedRange, manifest.units.length);
-    const diffFor = (): PlanRevisionDiffEntryProjection[] => {
-      const entries = diffMaterialPlanInputs(stored, proposed);
-      const storedCounts = existing.update?.reusePlan?.counts ?? null;
-      const proposedCounts = this.#reusePlanCountsFor(bookId, intent.mode, manifest, proposed.selectedRange);
-      const derived = storedCounts === null || proposedCounts === null ? null : reusePlanCountsDiffEntry(storedCounts, proposedCounts);
+    const storedCounts = existing.update?.reusePlan?.counts ?? null;
+    const countsFor = (inputs: MaterialPlanInputsProjection): AnalysisReusePlanCounts | null =>
+      this.#reusePlanCountsFor(bookId, intent.mode, manifest, inputs.selectedRange);
+    const withDerived = (
+      entries: PlanRevisionDiffEntryProjection[],
+      priorCounts: AnalysisReusePlanCounts | null,
+      proposedCounts: AnalysisReusePlanCounts | null,
+    ): PlanRevisionDiffEntryProjection[] => {
+      const derived = priorCounts === null || proposedCounts === null ? null : reusePlanCountsDiffEntry(priorCounts, proposedCounts);
       return derived === null ? entries : [...entries, derived];
     };
+    const diffFor = (): PlanRevisionDiffEntryProjection[] =>
+      withDerived(diffMaterialPlanInputs(stored, proposed), storedCounts, countsFor(proposed));
+    // The pending revisions this proposal settles: every one still waiting on the frozen version.
+    const pendingIds = existing.planRevisions
+      .filter((entry) => entry.state === 'pending' && entry.planRevisionId !== null && entry.priorPlanVersionId === current.planVersionId)
+      .map((entry) => entry.planRevisionId!);
+    // The way back: the proposal restates the frozen version's own inputs while a revision is pending.
+    // The record reads from the abandoned proposal back to what stands, which is what the editor sees.
+    const insertRevert = (trigger: 'prepare' | 'reconfirm'): void => {
+      const abandoned = pending!.proposed;
+      const diff = withDerived(diffMaterialPlanInputs(abandoned, proposed), countsFor(abandoned), storedCounts);
+      transact(this.#db, () => this.#insertPlanRevision({
+        taskIntentId: intent.taskIntentId, prior: current, priorInputs: abandoned, proposed, diff, trigger, instant, supersedes: pendingIds, revert: true,
+      }));
+    };
     if (!reconfirm) {
-      if (sameMaterialPlanInputs(stored, proposed)) return existing;
+      if (sameMaterialPlanInputs(stored, proposed)) {
+        if (pending === null || pendingIds.length === 0) return existing;
+        insertRevert('prepare');
+        return this.inspect(bookId);
+      }
       if (pending !== null && pending.planRevisionId !== null && sameMaterialPlanInputs(pending.proposed, proposed)) return existing;
       const diff = diffFor();
       requireAnalysis(!diff.some((entry) => entry.field === 'predecessorRevision'), 'ANALYSIS_PREDECESSOR_DRIFT',
         '该任务的前一修订版已不再是结果集的最新修订版；请基于最新修订版重新准备更新。');
-      transact(this.#db, () => this.#insertPlanRevision({ taskIntentId: intent.taskIntentId, prior: current, priorInputs: stored, proposed, diff, trigger: 'prepare', instant }));
+      transact(this.#db, () => this.#insertPlanRevision({
+        taskIntentId: intent.taskIntentId, prior: current, priorInputs: stored, proposed, diff, trigger: 'prepare', instant, supersedes: pendingIds,
+      }));
       return this.inspect(bookId);
     }
     requireAnalysis(pending !== null, 'ANALYSIS_PLAN_REVISION_ABSENT', '当前计划没有待重新确认的计划修订。');
     requireAnalysis(existing.actions.canReconfirmPlan, 'ANALYSIS_PREDECESSOR_DRIFT', '该任务的前一修订版已不再是结果集的最新修订版；请基于最新修订版重新准备更新。');
+    if (pendingIds.length > 0 && sameMaterialPlanInputs(stored, proposed)) {
+      insertRevert('reconfirm');
+      return this.inspect(bookId);
+    }
     requireAnalysis(sameMaterialPlanInputs(pending.proposed, proposed), 'ANALYSIS_PLAN_REVISION_STALE', '计划修订已过期；请重新查看计划修订后再确认。');
     const checkpointRow = this.#db.prepare('SELECT * FROM analysis_task_input_checkpoints WHERE task_intent_id = ?').get(intent.taskIntentId) as SqlRow | undefined;
     requireAnalysis(checkpointRow !== undefined, 'ANALYSIS_RECORD_INVALID', '任务输入固定点缺失。');
@@ -1047,8 +1127,10 @@ export class BaselineAnalysisStore {
       createdForDirtyJournal: asNumber(checkpointRow.created_for_dirty_journal) === 1,
     };
     transact(this.#db, () => {
+      // A live drift has no stored row yet: recording it here names `inspect`, the read that detected
+      // it, rather than the reconfirmation that is settling it (Issue #281).
       const planRevisionId = pending.planRevisionId ??
-        this.#insertPlanRevision({ taskIntentId: intent.taskIntentId, prior: current, priorInputs: stored, proposed, diff: diffFor(), trigger: 'reconfirm', instant });
+        this.#insertPlanRevision({ taskIntentId: intent.taskIntentId, prior: current, priorInputs: stored, proposed, diff: diffFor(), trigger: 'inspect', instant });
       this.#writePlanVersion({
         intent,
         checkpoint,
@@ -1082,6 +1164,9 @@ export class BaselineAnalysisStore {
     const mode = asString(row.mode) as AnalysisTaskMode;
     const goal = asString(row.goal);
     requireAnalysis(goal === this.#definition.mode(mode).goal, 'ANALYSIS_RECORD_INVALID', '任务意图的目标与更新方式不一致。');
+    const record = parseCanonicalJson(asString(row.canonical_json));
+    requireAnalysis(isRecord(record) && record.taskIntentId === row.task_intent_id && typeof record.expectedOutcome === 'string',
+      'ANALYSIS_RECORD_INVALID', '任务意图记录无效。');
     const start = row.selected_start_position;
     const end = row.selected_end_position;
     return {
@@ -1092,6 +1177,8 @@ export class BaselineAnalysisStore {
       createdAt: asString(row.created_at),
       predecessorRevisionId: row.predecessor_revision_id === null ? null : asString(row.predecessor_revision_id),
       selectedRange: start === null || end === null ? null : { startPosition: asNumber(start), endPosition: asNumber(end) },
+      record,
+      expectedOutcome: record.expectedOutcome,
     };
   }
 
