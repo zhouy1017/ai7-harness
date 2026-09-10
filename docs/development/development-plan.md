@@ -53,7 +53,7 @@ Exit criterion: one `developer-live` Run on exact `sample1` produces unit result
 | 1c.7 | S52 | #316 | T2 | J-03 | The provider-denied Task kind's scope statements derived from the bound launch | #303 | integrated (PR #331) |
 | 1c.8 | S53 | #318 | T1 | none | The delivery Gate fires on a pull request opened directly as ready | — | integrated (PR #319) |
 | 1c.9 | S54 | #321 | T3 | J-04, J-12 | The explicit provider support list as inert profiles across four request shapes | #310 | five units integrated (PRs #340, #348, #359, #364, #366); #321 closed 2026-09-10 |
-| 1c.10 | S55a | #435 | T3 | J-12 | Tier 1 of provider configuration: a provider whose format AI7 implements is configured by a schema-validated repository document and a generator (ADR 0073) | #321; ADR 0073 accepted | ADR 0073 proposed (PR #377); waits for the Owner; #322 closed 2026-09-10 |
+| 1c.10 | S55a | #435 | T3 | J-12 | Tier 1 of provider configuration: a provider whose format AI7 implements is configured by a schema-validated repository document and a generator (ADR 0073) | #321; ADR 0073 accepted | ADR 0073 accepted (PR #377, 2026-09-10); dispatchable when reached; #322 closed 2026-09-10 |
 | 1c.11 | S55b | opened when reached | T3 | — | Tier 2, agent-driven discovery as repository tooling for a provider matching no implemented format | S55a | deferred |
 | 1c.12 | S56 | #324 | T1 | none | Retire a merged branch by a sequence that works, and verify it | — | integrated (PR #326) |
 
@@ -106,7 +106,7 @@ Exit criterion: any Task shows its plan in the Task Drawer in 精简 or 完整 m
 | 3.9 | S78 | #424 | T2 | J-09 | ⑤ 待我处理: four cross-Book groups (B18) | S72 | planned |
 | 3.10 | S14 | #49 | T3 | J-09 | Concurrent Book work without focus or scope leakage | S78, S16 | planned |
 | 3.11 | S39 | #95 | T3 | J-09 | Background Analysis Enrollment and revocation | S14 | planned |
-| 3.12 | S70 | #425 | T3 | J-04 | ②B / ⑤ External Evidence Retention Procedure; the live research path of 事实核查 (B13) | S69; ADR 0074 amended and accepted; the `ordinary-production` egress decision | Owner decisions first |
+| 3.12 | S70 | #425 | T3 | J-04 | ②B / ⑤ External Evidence Retention Procedure; the live research path of 事实核查 (B13) | S69; ADR 0074 (accepted 2026-09-10, PR #391); the `ordinary-production` search-egress decision | Owner decision first (the egress policy) |
 | 3.13 | S68 | #426 | T2 | J-07 | ⑥ 维护事项 (B30) | S65, S59 | planned |
 
 ## Phase 4 — the knowledge base, evaluation and learning
