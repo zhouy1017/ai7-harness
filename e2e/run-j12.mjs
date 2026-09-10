@@ -1271,7 +1271,7 @@ async function main() {
         firstConnection.policy?.activePolicySetVersion === 'v5' &&
         firstConnection.policy?.providerProcessing?.version === 'v1' &&
         firstConnection.policy?.providerProcessing?.authorizedLiveTransmissionCount === 0 &&
-        firstConnection.policy?.externalExport?.version === 'v1' &&
+        firstConnection.policy?.externalExport?.version === 'v2' &&
         firstConnection.policy?.externalExport?.policyEligibilityIsEffectApproval === false &&
         firstConnection.policy?.publicReleasePermission?.present === false,
       'model-first-nonsecret-projection',

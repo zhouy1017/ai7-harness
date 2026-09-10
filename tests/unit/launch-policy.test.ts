@@ -20,6 +20,7 @@ const CARRIED_PATHS = [
   'docs/policies/provider-processing-policy.v5.json',
   'docs/policies/provider-processing-policy.v6.json',
   'docs/policies/external-export-policy.v1.json',
+  'docs/policies/external-export-policy.v2.json',
 ] as const;
 /** The exact pins active-set v5 records; the resolver and the carrier must agree with the bytes. */
 const EXPECTED_PINS = {
@@ -28,7 +29,9 @@ const EXPECTED_PINS = {
   'ordinary-production': ['v6', 'docs/policies/provider-processing-policy.v6.json', '10e69a5d7b027d077728ec1bc7393dc0583b99a05246b4e883098b9d96b221a4'],
   'developer-live': ['v5', 'docs/policies/provider-processing-policy.v5.json', '4b7356aaa36a75b3085d6eecb593fb3bd765682073e37fa21b5abf7bc78ea0bb'],
 } as const;
-const ACTIVE_SET_SHA256 = '4574c3a15a1edf5bb1e9064fbaacc87cd2032516117b59c74d4e550c46958178';
+/** ADR 0079 §3 decides External Export v2; active-set v5 pins its exact bytes. */
+const EXPECTED_EXTERNAL_PIN = ['v2', 'docs/policies/external-export-policy.v2.json', '2eae5a473010afb0999a89a6bf202ca83430b26f4ba2b93a362d9a23d7e18b3e'] as const;
+const ACTIVE_SET_SHA256 = '33edf6c0581eea859af77bd2aaba3068df36a875b268cf0ab2e5ec27994e4620';
 
 let sandbox: string;
 let codeRoot: string;
@@ -103,7 +106,10 @@ describe('active policy set v5', () => {
     expect(await sha256Of(ACTIVE_SET_PATH)).toBe(ACTIVE_SET_SHA256);
     const activeSet = JSON.parse(await readFile(join(REPO_ROOT, ...ACTIVE_SET_PATH.split('/')), 'utf8')) as {
       version: string;
-      activePolicies: { 'provider-processing-policy': { scopePins: Record<string, { version: string; canonicalPath: string; sha256: string }> } };
+      activePolicies: {
+        'provider-processing-policy': { scopePins: Record<string, { version: string; canonicalPath: string; sha256: string }> };
+        'external-export-policy': { version: string; canonicalPath: string; sha256: string };
+      };
     };
     expect(activeSet.version).toBe('v5');
     const pins = activeSet.activePolicies['provider-processing-policy'].scopePins;
@@ -112,6 +118,13 @@ describe('active policy set v5', () => {
       expect(pins[scope]).toMatchObject({ version, canonicalPath, sha256 });
       expect(await sha256Of(canonicalPath)).toBe(sha256);
     }
+    const [externalVersion, externalPath, externalSha256] = EXPECTED_EXTERNAL_PIN;
+    expect(activeSet.activePolicies['external-export-policy']).toMatchObject({
+      version: externalVersion,
+      canonicalPath: externalPath,
+      sha256: externalSha256,
+    });
+    expect(await sha256Of(externalPath)).toBe(externalSha256);
   });
 
   it('declares the exact developer-live binding the v5 policy bytes carry', () => {
@@ -135,7 +148,7 @@ describe('resolveSourceCheckoutLaunchPolicy', () => {
     expect(projection.activePolicySetVersion).toBe('v5');
     expect(projection.providerProcessing.version).toBe('v1');
     expect(projection.providerProcessing.label).toBe('开发与持续集成：零次实时传输');
-    expect(projection.externalExport.version).toBe('v1');
+    expect(projection.externalExport.version).toBe('v2');
     expectZeroTransmission(projection);
     expect(await resolveSourceCheckoutLaunchPolicy(codeRoot, 'development-ci')).toEqual(projection);
   });
@@ -160,7 +173,7 @@ describe('resolveSourceCheckoutLaunchPolicy', () => {
       runReportReflectionAllowed: true,
       label: '开发者实时：实时传输受运行边界约束',
     });
-    expect(projection.externalExport.version).toBe('v1');
+    expect(projection.externalExport.version).toBe('v2');
     expect(projection.externalExport.currentExportEffectAvailable).toBe(false);
     expect(projection.publicReleasePermission.present).toBe(false);
   });
@@ -278,7 +291,7 @@ describe('resolveSourceCheckoutLaunchPolicy', () => {
 
   it('denies a checkout whose pinned policy document is missing', async () => {
     await placeValidCheckout();
-    await rm(join(codeRoot, 'docs', 'policies', 'external-export-policy.v1.json'));
+    await rm(join(codeRoot, 'docs', 'policies', 'external-export-policy.v2.json'));
 
     const projection = await resolveSourceCheckoutLaunchPolicy(codeRoot);
     expect(projection.integrityState).toBe('denied');

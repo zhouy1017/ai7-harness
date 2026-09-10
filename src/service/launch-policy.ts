@@ -17,7 +17,7 @@ const CARRIER_PATH = 'config/source-checkout-launch-authority.json';
 const CARRIER_VERSION = 2;
 export const ACTIVE_SET_VERSION = 'v5' as const;
 const ACTIVE_SET_PATH = 'docs/policies/active-policy-set.v5.json';
-const ACTIVE_SET_SHA256 = '4574c3a15a1edf5bb1e9064fbaacc87cd2032516117b59c74d4e550c46958178';
+const ACTIVE_SET_SHA256 = '33edf6c0581eea859af77bd2aaba3068df36a875b268cf0ab2e5ec27994e4620';
 const PROVIDER_PINS = {
   'development-ci': {
     version: 'v1',
@@ -41,9 +41,9 @@ const PROVIDER_PINS = {
   },
 } as const;
 const EXTERNAL_PIN = {
-  version: 'v1',
-  canonicalPath: 'docs/policies/external-export-policy.v1.json',
-  sha256: 'b66fa0f2ad7d721f879c91e3cbb8e84f6a7bb08b107424d87871ab07937242de',
+  version: 'v2',
+  canonicalPath: 'docs/policies/external-export-policy.v2.json',
+  sha256: '2eae5a473010afb0999a89a6bf202ca83430b26f4ba2b93a362d9a23d7e18b3e',
 } as const;
 
 /** The exact developer-live binding Provider Processing v5 declares; the resolver verifies the policy bytes say the same. */
@@ -413,14 +413,14 @@ export async function resolveSourceCheckoutLaunchPolicy(
       externalPolicy['documentType'] === 'ai7-policy-document' &&
         externalPolicy['policyId'] === 'external-export-policy' &&
         externalPolicy['policyType'] === 'external-export' &&
-        externalPolicy['version'] === 'v1' &&
+        externalPolicy['version'] === EXTERNAL_PIN.version &&
         externalPolicy['canonicalPath'] === EXTERNAL_PIN.canonicalPath &&
         isRecord(externalPolicy['authoritySeparations']) &&
         externalPolicy['authoritySeparations']['policyEligibilityIsEffectApproval'] === false,
     );
 
     const externalExport = {
-      version: 'v1' as const,
+      version: 'v2' as const,
       policyEligibilityIsEffectApproval: false as const,
       currentExportEffectAvailable: false as const,
       label: '对外导出策略独立；当前未提供导出受控动作' as const,

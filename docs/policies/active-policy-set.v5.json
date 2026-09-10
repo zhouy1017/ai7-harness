@@ -53,9 +53,9 @@
     "external-export-policy": {
       "policyId": "external-export-policy",
       "policyType": "external-export",
-      "version": "v1",
-      "canonicalPath": "docs/policies/external-export-policy.v1.json",
-      "sha256": "b66fa0f2ad7d721f879c91e3cbb8e84f6a7bb08b107424d87871ab07937242de"
+      "version": "v2",
+      "canonicalPath": "docs/policies/external-export-policy.v2.json",
+      "sha256": "2eae5a473010afb0999a89a6bf202ca83430b26f4ba2b93a362d9a23d7e18b3e"
     }
   }
 }

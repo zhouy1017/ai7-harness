@@ -34,7 +34,7 @@ function launch(scope: 'development-ci' | 'developer-live'): LaunchPolicyProject
       label: live ? '开发者实时：实时传输受运行边界约束' : '开发与持续集成：零次实时传输',
     },
     externalExport: {
-      version: 'v1',
+      version: 'v2',
       policyEligibilityIsEffectApproval: false,
       currentExportEffectAvailable: false,
       label: '对外导出策略独立；当前未提供导出受控动作',

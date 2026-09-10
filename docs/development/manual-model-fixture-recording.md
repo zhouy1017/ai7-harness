@@ -49,7 +49,7 @@ The public recording instruction must be human-confirmed, exact, frozen and clas
 Before the single transmission:
 
 1. Freeze the exact Provider Binding, empty fallback chain, Provider Preflight, Plan Envelope, Run Source Scope, Run Authorization, `maxCalls: 1`, non-`unset` Run Budget Ceiling and prompt-contract digest.
-2. Reconfirm the active-set pin selects exact Provider Processing v2 and unchanged External Export v1.
+2. Reconfirm the active-set pin selects exact Provider Processing v2 and External Export v2.
 3. Create protected local recording staging outside every repository, working tree, sync/shared directory, log root, CI root and distribution root.
 4. Configure recording-specific raw request/response capture only in that protected staging. Do not enable general payload logging.
 5. Confirm the Credential Reference resolves only through the Credential Broker at the final Provider adapter.

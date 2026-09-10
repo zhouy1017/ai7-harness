@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "AI7 Active Policy Set v5",
-  "description": "Validates the trusted operational-scope mapping for Provider Processing v1, v2, v6 and v5 plus unchanged External Export v1. Digest equality is verified separately against canonical file bytes.",
+  "description": "Validates the trusted operational-scope mapping for Provider Processing v1, v2, v6 and v5 plus External Export v2. Digest equality is verified separately against canonical file bytes.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -235,10 +235,10 @@
           "const": "external-export"
         },
         "version": {
-          "const": "v1"
+          "const": "v2"
         },
         "canonicalPath": {
-          "const": "docs/policies/external-export-policy.v1.json"
+          "const": "docs/policies/external-export-policy.v2.json"
         },
         "sha256": {
           "$ref": "#/definitions/sha256"
