@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 ---
 
 # Configure a compatible provider by declaring its format in a repository document, and defer agent-driven discovery
@@ -51,4 +51,4 @@ A discovery agent (1c.11) probes with synthetic content under a bounded budget, 
 
 ## Status
 
-Proposed by the Commander on 2026-09-08, against the Owner's decision of the same day on #322. The decisions that are the Owner's alone are §2's choice of a repository document over an in-product form for the first tier and §5's five configurations; §3 and §4 restate rules that already govern the provider layer. Slot 1c.10's T3 Brief is written against this ADR once accepted.
+Proposed by the Commander on 2026-09-08, against the Owner's decision of the same day on #322. The decisions that are the Owner's alone are §2's choice of a repository document over an in-product form for the first tier and §5's five configurations; §3 and §4 restate rules that already govern the provider layer. Accepted by the Owner on 2026-09-10 by merging PR #377, after the evaluation of ADR 0078 found it compatible with the editor-facing surface specification (`设置 › 模型服务` shows a configured provider only when a Model Role can bind to it, V2-UX-MSET-006 and MSET-007); the status line was set to `accepted` in the pull request of ADR 0074. Slot 1c.10's T3 Brief (#435) is written against this ADR.

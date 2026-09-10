@@ -268,4 +268,4 @@ AI7 keeps discovery, acquisition/pinning, compatibility/conversion validation, s
 - Never use unqualified “Provider / 提供方”: distinguish **模型服务提供方**, Capability Implementation, Harness Skill Provider, credential backend, and MCP endpoint.
 - **权限上限**, **能力使用许可**, **单次执行许可**, and **受控动作批准** answer four different authority questions.
 - Model processing, external export, and public release cannot imply one another; **公开发布许可** remains the only public-release term.
-- Provider Processing v1/v2/v3 are immutable records selected respectively for development/CI, exact fixture recording, and ordinary production by trusted launch authority. Operational scope is not a user, environment, Provider, artifact, or Plugin toggle, and selection implements no Provider call.
+- Provider Processing v1/v2/v3/v4 are immutable records selected respectively for development/CI, exact fixture recording, ordinary production, and the developer-live scope (ADR 0065) by trusted launch authority. Operational scope is not a user, environment, Provider, artifact, or Plugin toggle, and selection implements no Provider call.
