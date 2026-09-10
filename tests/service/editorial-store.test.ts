@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto';
+import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { EditorialStore } from '../../src/service/store.js';
+import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { MAX_WINDOW_BLOCKS } from '../../src/shared/protocol.js';
 import {
   ADMITTED_SMALL_DOCX,
@@ -148,6 +149,35 @@ describe('EditorialStore on a temporary Agent Data Root', () => {
     } finally {
       store.close();
     }
+  }, 120_000);
+
+  it('closes its DatabaseSync handle on a refused open, so the invalid root can be removed immediately', async () => {
+    // A first, ordinary open establishes the terminal schema (including the reimport-mappings
+    // table the induced control below tampers with) so the reopen below fails validation rather
+    // than a raw "no such table" error from a control checked against a store that never opened.
+    const first = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    first.markCleanShutdown();
+    first.close();
+
+    let refused: unknown;
+    try {
+      await EditorialStore.open(roots.dataRoot, roots.codeRoot, {
+        induceUnprovableReconciliation: false,
+        persistLegacyReviewedDraft: false,
+        induceReimportProofTamper: true,
+        induceAbandonObjectRemovalFailure: false,
+        interruptAfterAbandonObjectRemoval: false,
+        baselineAnalysisRoute: null,
+      });
+    } catch (error) {
+      refused = error;
+    }
+    expect(refused).toBeInstanceOf(StoreError);
+    expect((refused as StoreError).code).toBe('E2E_CONTROL_INVALID');
+
+    // No retry, no timeout: a DatabaseSync handle a refused open forgot to close would keep this
+    // file locked on Windows, and this removal would fail rather than complete immediately.
+    await rm(roots.dataRoot, { recursive: true });
   }, 120_000);
 
   it('imports a new Book, pages the window, replaces, undoes, saves a milestone, and reads back after restart', async () => {
