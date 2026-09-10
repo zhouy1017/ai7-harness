@@ -6,27 +6,28 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { deriveImportFidelityPlan, parseDocx, type ParsedDocxBlock } from '../../src/service/docx.js';
 import {
   ADMITTED_BASELINE_DOCX,
-  ADMITTED_LARGE_FINAL_DOCX,
-  ADMITTED_SMALL_DOCX,
+  LOCAL_ONLY_HEADING_SOURCE,
   admittedSourcePath,
   composeManuscriptDocx,
   type ComposedManuscriptRequest,
 } from '../support/composed-fixture.js';
-import { SAMPLE1_SHA256 } from '../support/sample1-baseline.js';
+import { localOnlyAvailable } from '../support/local-only-manuscripts.js';
+import { SAMPLE1_BLOCKS, SAMPLE1_SHA256 } from '../support/sample1-baseline.js';
 
 // Unit suite (L1) for the composed-fixture builder. Every assertion is a count, a block kind, a heading
 // level, or a digest: no excerpt's text is asserted, named, or printed, so a failing case reports a
 // number or a boolean rather than manuscript prose.
 
 const TITLE = '组稿测试标题';
-/** The small source, preferred wherever size is not the subject. */
-const EXCERPT: ComposedManuscriptRequest = { source: ADMITTED_SMALL_DOCX, startBlock: 1, blocks: 12, title: TITLE };
+/** The one admitted source (ADR 0079 §5), excerpted short wherever size is not the subject. */
+const EXCERPT: ComposedManuscriptRequest = { source: ADMITTED_BASELINE_DOCX, startBlock: 1, blocks: 12, title: TITLE };
 /**
- * Exact `2听漏（定稿368544字）.docx` is the only admitted file whose blocks carry heading styles — its
- * first block is a level-1 heading and its fourth a level-3 one — so the style mapping can be proven
- * from real material only here. No admitted file carries a title block, so `Title` stays unexercised.
+ * Style mapping needs blocks that carry heading styles, and exact `sample1` carries none: after the
+ * narrowing, the only material whose first block is a level-1 heading and whose fourth is a level-3
+ * one is local-only, so this one case is gated on the developer having it and skipped everywhere
+ * else. No source carries a title block, so `Title` stays unexercised either way.
  */
-const HEADING_EXCERPT: ComposedManuscriptRequest = { source: ADMITTED_LARGE_FINAL_DOCX, startBlock: 1, blocks: 6, title: TITLE };
+const HEADING_EXCERPT: ComposedManuscriptRequest = { source: LOCAL_ONLY_HEADING_SOURCE.name, startBlock: 1, blocks: 6, title: TITLE };
 
 let sandbox: string;
 
@@ -69,12 +70,14 @@ describe('composeManuscriptDocx', () => {
     expect(await composedDigest('retitled.docx', { ...EXCERPT, title: `${TITLE}（二）` })).not.toBe(base);
   });
 
-  it('never reproduces the exact sample1 digest, not even when composing from sample1 itself', async () => {
-    expect(await composedDigest('small.docx', EXCERPT)).not.toBe(SAMPLE1_SHA256);
-    expect(await composedDigest('baseline.docx', { ...EXCERPT, source: ADMITTED_BASELINE_DOCX })).not.toBe(SAMPLE1_SHA256);
+  it('never reproduces the exact sample1 digest, not even when composing every block of sample1', async () => {
+    expect(await composedDigest('excerpt.docx', EXCERPT)).not.toBe(SAMPLE1_SHA256);
+    // The whole source, which is the closest a composed package can come to the file it excerpts:
+    // the container is the builder's own, so the ADR 0044 baseline's identity stays unreachable.
+    expect(await composedDigest('whole.docx', { ...EXCERPT, startBlock: 1, blocks: SAMPLE1_BLOCKS })).not.toBe(SAMPLE1_SHA256);
   });
 
-  it('carries every excerpt block kind and heading level into the composed package', async () => {
+  it.skipIf(!localOnlyAvailable(LOCAL_ONLY_HEADING_SOURCE))('carries every excerpt block kind and heading level into the composed package', async () => {
     const source = await shapeOf(admittedSourcePath(HEADING_EXCERPT.source));
     const from = HEADING_EXCERPT.startBlock - 1;
     const expectedKinds = source.kinds.slice(from, from + HEADING_EXCERPT.blocks);

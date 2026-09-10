@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
-import { appendFileSync, createWriteStream, mkdirSync, writeFileSync } from 'node:fs';
-import { relative, resolve, sep } from 'node:path';
+import { appendFileSync, createWriteStream, mkdirSync, statSync, writeFileSync } from 'node:fs';
+import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
@@ -321,7 +321,9 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'text-manuscript-record-conversion',
     // The converted intake of a legacy `.doc`: identified from its content, read through the
     // legacy-Word converter, and committed under the degradation decision the conversion caused.
-    'admitted-doc-identity',
+    // Local-only material (ADR 0079 §5), so these locations are reachable only where the developer
+    // has the document; absent, the Journey discloses the skip instead of reaching any of them.
+    'local-doc-identity',
     'doc-manuscript-landing',
     'doc-manuscript-stage',
     'doc-manuscript-target',
@@ -597,6 +599,80 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'zero-activity',
   ]),
 });
+
+// ---- Local-only manuscript material and disclosed skips (ADR 0079 §5) -------------------------
+
+// Slice S88 (#438) narrowed the repository admission to exact `sample1.docx`. A scenario whose
+// subject only one of the five withdrawn files can be — legacy binary `.doc` intake, for which no
+// generator exists — reads the file where the developer keeps it and is skipped everywhere else,
+// which includes every hosted occurrence: `docs/agents/ci-test-boundaries.md` admits no untracked
+// source, personal path, or ambient payload as a Gate input, so the absence is the normal case
+// there. A skipped scenario is never silently absent: the runner names it from the bounded
+// vocabulary below, and each Gate occurrence prints it beside the Journey's result. The plain-JS
+// twin of `tests/support/local-only-manuscripts.ts`, with the same environment variable.
+const LOCAL_SAMPLEBOOKS_ENV = 'AI7_LOCAL_SAMPLEBOOKS';
+
+/**
+ * Where a developer keeps the local-only files: `AI7_LOCAL_SAMPLEBOOKS` when it names an absolute
+ * directory, and otherwise the checkout's own `SampleBooks/`, which now ignores these exact names.
+ */
+function localManuscriptRoot() {
+  const declared = process.env[LOCAL_SAMPLEBOOKS_ENV];
+  return declared !== undefined && declared.length > 0 && isAbsolute(declared)
+    ? declared
+    : resolve(ROOT, 'SampleBooks');
+}
+
+/** The one legacy binary `.doc`, by the exact name and byte count `SampleBooks/README.md` records. */
+export const LOCAL_ONLY_DOC = Object.freeze({
+  name: '3天兽（定稿395870字)##＊.doc',
+  bytes: 1_173_504,
+});
+
+/** The absolute path the developer's copy would occupy. Reading it is a local-only act. */
+export function localManuscriptPath(manuscript) {
+  return join(localManuscriptRoot(), manuscript.name);
+}
+
+/**
+ * True only when a regular file of exactly the recorded size sits at that path. Size alone decides
+ * whether the scenario runs; the scenario itself still proves identity by digest before launching.
+ */
+export function localManuscriptAvailable(manuscript) {
+  try {
+    const metadata = statSync(localManuscriptPath(manuscript));
+    return metadata.isFile() && metadata.size === manuscript.bytes;
+  } catch {
+    return false;
+  }
+}
+
+/** Bounded per-Journey disclosure vocabulary: no path, name, or manuscript-derived string. */
+export const JOURNEY_DISCLOSURES = Object.freeze({
+  'J-01': Object.freeze(['doc-manuscript-local-only-absent']),
+});
+const DISCLOSURE_PREFIX = 'DISCLOSED_SKIP';
+
+export function isAdmittedDisclosure(journey, disclosure) {
+  return JOURNEY_DISCLOSURES[journey]?.includes(disclosure) === true;
+}
+
+/** Name a skipped scenario on the runner's own stdout, where every orchestration can read it. */
+export function discloseJourneySkip(journey, disclosure) {
+  if (!isAdmittedDisclosure(journey, disclosure)) {
+    throw new TypeError('Journey disclosure is not admitted.');
+  }
+  console.log(`${DISCLOSURE_PREFIX}/${journey}/${disclosure}`);
+}
+
+/** The admitted disclosures a finished journey process named, in the order it named them. */
+export function collectJourneyDisclosures(result, journey) {
+  const prefix = `${DISCLOSURE_PREFIX}/${journey}/`;
+  return result.stdout
+    .split(/\r?\n/u)
+    .map((line) => (line.startsWith(prefix) ? line.slice(prefix.length) : null))
+    .filter((disclosure) => disclosure !== null && isAdmittedDisclosure(journey, disclosure));
+}
 
 export function normalizePnpmArgs(args) {
   const normalized = [...args];

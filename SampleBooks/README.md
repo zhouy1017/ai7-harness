@@ -1,16 +1,68 @@
 # Public SampleBooks
 
-The Owner designated the six files in this directory for public test use through
-[Issue #32](https://github.com/zhouy1017/ai7-harness/issues/32), under the narrow
-admission rule in [ADR 0043](../docs/adr/0043-allow-public-samplebooks-in-repository-and-ci.md).
+The repository admits exactly one manuscript file: `sample1.docx`.
 
-> **Status (2026-09-10, [ADR 0079](../docs/adr/0079-record-the-owner-s-decisions-of-2026-09-10-on-storage-policies-export-egress-providers-and-samplebooks.md) §5):** only exact `sample1.docx` remains admitted to the repository, CI and fixtures. The five other files listed below are local-only test material from this date; slice S88 (#438) removes them from the tree, after which this table is history. No derivative of them enters the repository, and the developer-live transmittable set stays exact `sample1`.
+Under [ADR 0079](../docs/adr/0079-record-the-owner-s-decisions-of-2026-09-10-on-storage-policies-export-egress-providers-and-samplebooks.md) §5, decided by the Owner on 2026-09-10, the admission
+[ADR 0043](../docs/adr/0043-allow-public-samplebooks-in-repository-and-ci.md) granted to the six files
+[Issue #32](https://github.com/zhouy1017/ai7-harness/issues/32) designated is superseded for five of
+them. Slice S88 ([#438](https://github.com/zhouy1017/ai7-harness/issues/438)) removed those five from
+the tree; `.gitignore` refuses them by name and refuses any other manuscript, derivative, or
+subdirectory under `SampleBooks/`. Git history was not rewritten: the files were the Owner's own
+designation, and a history purge on the protected lines is a separate Owner action if ever wanted.
+
+## What the five files are now
+
+They are **local-only test material**. A developer who has them keeps them in the untracked source
+directory named under "The admitted file" below — or, equivalently, beside `sample1.docx` in this
+directory, which Git now refuses — and the tests and Journey runners that can only be shown on one
+of them look for it there:
+
+- `AI7_LOCAL_SAMPLEBOOKS`, when set to an absolute directory, names where they live.
+- Otherwise the checkout's own `SampleBooks/` is searched, so dropping a file back beside `sample1`
+  is enough to run the gated cases.
+
+Absent, every such case skips rather than fails, and a skipped Journey scenario is disclosed by name
+in the run output rather than left invisible. That is the normal state on every CI host: the hosted
+Gate admits no untracked source or personal path as an input
+([CI and test boundaries](../docs/agents/ci-test-boundaries.md)). What is gated today:
+
+| Local-only material | What only it can be the subject of |
+| --- | --- |
+| `3天兽（定稿395870字)##＊.doc` | Legacy binary `.doc` conversion — J-01's `doc-manuscript` scenario, `tests/unit/doc-manuscript.test.ts`, and the `.doc` group of `tests/service/manuscript-intake.test.ts`. No generator for the format exists. |
+| `2听漏（定稿368544字）.docx` | Blocks carrying real heading styles, which exact `sample1` has none of — the style-mapping case in `tests/unit/composed-fixture.test.ts`. |
+
+No derivative of the five ever enters the repository: not a fixture, not a cache export, not any
+generated text carrying their content. Local tests may read the local files. The `developer-live`
+transmittable set stays exact `sample1` alone, and none of the five may be transmitted to a model
+under any scope.
+
+## What still composes from admitted content
+
+Every composed manuscript fixture and every content-bearing Journey input now excerpts exact
+`sample1`: J-08's three non-overlapping inputs (blocks 1–40, 41–70 and 71–95 of its 97), J-01's
+`.txt` intake text, and the `tests/service` builders of
+[Issue #311](https://github.com/zhouy1017/ai7-harness/issues/311). Composing from `sample1` does not
+produce `sample1`: the builder writes its own container, whose digest is pinned as never equal to
+`sample1`'s, so a composed input can never stand in for the ADR 0044 baseline.
+
+## The admitted file
 
 The original source is the ignored, untracked `SampleBooks/` directory in the local
 worktree `C:\Users\Chooo\codebase\ai7-harness` beside
 `main@c8cbe26c4cccc4a912b3bbc05bd5b23fbf5468b9`. Because those files were not Git
 objects, their source identity is the Owner designation plus the exact path, size,
-and SHA-256 allowlist below. The repository copies are byte-for-byte identical.
+and SHA-256 allowlist below. The repository copy of `sample1.docx` is byte-for-byte identical.
+
+| Exact path under `SampleBooks/` | Bytes | SHA-256 |
+| --- | ---: | --- |
+| `sample1.docx` | 29550 | `b8a3dbde0aa8a1ec7265f9ae3fe47877759e7947c5ab69682cd0a8f424a8d483` |
+
+Total in the repository: 1 file, 29,550 bytes.
+
+### History: the six-file allowlist ADR 0043 admitted
+
+Kept as the record of what was designated and measured. Five of these six rows describe local-only
+material today; only the `sample1.docx` row still describes a repository file.
 
 | Exact path under `SampleBooks/` | Bytes | SHA-256 |
 | --- | ---: | --- |
@@ -21,17 +73,19 @@ and SHA-256 allowlist below. The repository copies are byte-for-byte identical.
 | `蟠虺.docx` | 43661 | `a45283e6132f8992e71aa924b3ad3504a65c8651895fa92ad8c087305f2fb183` |
 | `sample1.docx` | 29550 | `b8a3dbde0aa8a1ec7265f9ae3fe47877759e7947c5ab69682cd0a8f424a8d483` |
 
-Total: 6 files, 6,755,431 bytes.
+Total as designated: 6 files, 6,755,431 bytes.
 
 Under [ADR 0044](../docs/adr/0044-use-sample1-as-compatibility-and-recording-baseline.md), exact `sample1.docx` is also the standing **Sample1 Compatibility Baseline / sample1 兼容性基线** for manuscript-dependent supported journeys. Downstream components consume its imported Book/Manuscript/Revision state rather than each reparsing DOCX. Every exact fidelity signal must be truthfully preserved or disclosed through an explicit initially-unselected degradation decision; a newly discovered representable signal is not a reason to reject or replace this exact baseline. This invariant is not full J-01 or one giant test.
 
-These files may be used as provider-free input to local and hosted-CI tests,
-including authoring synthetic test data. A consuming scenario must still bind the
-exact admitted input in its own authorized Change Brief.
+Exact `sample1.docx` may be used as provider-free input to local and hosted-CI
+tests, including authoring synthetic test data. A consuming scenario must still
+bind the exact admitted input in its own authorized Change Brief. The five
+local-only files may be read by local tests alone: no hosted occurrence, no
+fixture, no derivative, and no transmission.
 
 This admission does not authorize raw manuscript payload in logs, diagnostics,
-screenshots, traces, videos, or uploaded artifacts. For the other five files it
-also grants no live-provider use. Exact `sample1` alone has ADR 0044's future,
+screenshots, traces, videos, or uploaded artifacts. The five local-only files
+have no live-provider use of any kind. Exact `sample1` alone has ADR 0044's future,
 separately authorized local manual recording eligibility under Provider Processing
 v2; no call, credential setup, or fixture exists now. Raw recording stays in
 protected local staging outside repositories, and only a normalized, sanitized,
@@ -42,6 +96,11 @@ Permission, or release-asset use. Runtime derivatives remain confined to
 disposable external test data roots under the existing cleanup lifecycle.
 
 ## Import verdicts
+
+History, kept as the record these measurements were taken as. Every row but exact
+`sample1`'s now describes local-only material, and the `Test input today` column is
+superseded by the narrowing above; the counts themselves are unchanged and are what
+the gated local-only cases still assert.
 
 Measured at `dev@2b5d3eeed81afbdf4d1cce4c1c84a467fafca92a` with parser identity
 `ai7-docx-fflate-saxes/1`, by calling `parseDocx` once per admitted file exactly as

@@ -1,14 +1,32 @@
 # Manuscripts and private sample Books remain local-only. Document formats
-# are ignored everywhere by default. ADR 0043 permits only exact-root
-# SampleBooks files that the Owner separately designates through an
-# authorized Issue and pull request; placement alone is not admission.
+# are ignored everywhere by default. ADR 0043 permitted exact-root SampleBooks
+# files that the Owner separately designated through an authorized Issue and
+# pull request; ADR 0079 §5 narrowed that admission to exact `sample1.docx`,
+# so `SampleBooks/` now admits exactly two paths and refuses everything else.
+# Placement alone was never admission, and is now refusal.
 *.doc
 *.docx
 *.odt
 *.rtf
 *.pdf
-!/SampleBooks/
-!/SampleBooks/**
+
+# `SampleBooks/` admits exactly two paths. Any other manuscript, derivative,
+# or subdirectory under it is refused, so a file that lands there is never
+# committed by accident. Widening this list is an Owner decision through its
+# own ADR, Issue and pull request.
+/SampleBooks/*
+!/SampleBooks/README.md
+!/SampleBooks/sample1.docx
+
+# The five files Issue #32 designated left the tree with slice S88 (#438) and
+# remain local-only test material. They are named last so this decision wins
+# over any later re-inclusion, and so `git check-ignore -v` on one of them
+# reports the rule that refuses it by name.
+/SampleBooks/1蟠虺（修订290326字).docx
+/SampleBooks/2听漏（定稿368544字）.docx
+/SampleBooks/3天兽（定稿395870字)##＊.doc
+/SampleBooks/春歌(一次通读后电子版).pdf
+/SampleBooks/蟠虺.docx
 
 # Local secrets and credential material never enter the repository.
 .env
