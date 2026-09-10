@@ -50,9 +50,10 @@ describe('parseTrustedLaunchForm', () => {
 describe('resolveDeveloperLiveLaunch', () => {
   const checkout = resolve(REPO_ROOT);
 
-  it('applies the 500,000-token default ceiling and the sibling cache directory of the checkout', () => {
+  it('binds the policy per-frozen-unit default ceiling and the sibling cache directory of the checkout', () => {
     const launch = resolveDeveloperLiveLaunch({ trustedOperationalScope: 'developer-live', runBudgetCeiling: null, providerCacheRoot: null }, checkout);
-    expect(launch.runBudgetCeiling).toEqual({ kind: 'tokens', maxTotalTokens: 500_000 });
+    // ADR 0070: 30,000 tokens per frozen Coverage Manifest unit, resolved once the manifest freezes.
+    expect(launch.runBudgetCeiling).toEqual({ kind: 'tokens-per-frozen-unit', tokensPerFrozenUnit: 30_000 });
     expect(launch.providerCacheRoot).toBe(resolve(checkout, '..', DEFAULT_PROVIDER_CACHE_DIRECTORY));
     expect(DEFAULT_PROVIDER_CACHE_DIRECTORY).toBe('ai7-harness-provider-cache');
   });

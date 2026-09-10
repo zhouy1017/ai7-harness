@@ -378,7 +378,7 @@ describe('baseline manuscript analysis over the real store on exact sample1', ()
       expect(revision.manuscriptPin.revisionId).toBe(imported.revisionId);
       expect(revision.coverageManifestDigest).toBe(manifest.digest);
       expect(revision.bindingPin).toMatchObject({ attemptId, bindingDigest: binding.bindingDigest, harnessSessionId: binding.harnessSessionId });
-      expect(revision.policyPin).toEqual({ operationalScope: 'development-ci', providerProcessingVersion: 'v1', activePolicySetVersion: 'v4', liveTransmissions: 0 });
+      expect(revision.policyPin).toEqual({ operationalScope: 'development-ci', providerProcessingVersion: 'v1', activePolicySetVersion: 'v5', liveTransmissions: 0 });
       // Synchronized delta (#274, #275): eight unit turns, the one cross-unit reduction turn after
       // them, and one assurance sampling turn — both cross-unit findings are anchored in unit 1, so
       // the sample of this Run is one turn.

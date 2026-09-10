@@ -22,12 +22,12 @@ function readPair(policyFile: string, schemaFile: string) {
 }
 
 describe('validateAllPolicies', () => {
-  it('discovers all nine current pairs and validates every one at this base', () => {
+  it('discovers all twelve current pairs and validates every one at this base', () => {
     const pairs = discoverPolicyPairs(POLICIES_DIR);
-    expect(pairs).toHaveLength(9);
+    expect(pairs).toHaveLength(12);
 
     const results = validateAllPolicies(POLICIES_DIR);
-    expect(results).toHaveLength(9);
+    expect(results).toHaveLength(12);
     for (const result of results) {
       expect(result.ok, `${result.policyFile}: ${result.reason ?? ''}`).toBe(true);
     }

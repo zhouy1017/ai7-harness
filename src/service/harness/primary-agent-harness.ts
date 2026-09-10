@@ -84,7 +84,7 @@ export interface HarnessTurnOutcome {
 /**
  * How many technical Sessions one attempt composes. `single` is the production and deterministic
  * composition: one accumulating Session carries every unit. `per-unit` is the developer-live
- * composition Provider Processing v4 requires: every unit gets a fresh agent and Session inside the
+ * composition Provider Processing v5 requires: every unit gets a fresh agent and Session inside the
  * same Cordis context, so no unit's material ever appears in another unit's request, and the gateway
  * caches per Session. The Execution Binding's `harnessSessionId` stays the lineage root either way.
  */

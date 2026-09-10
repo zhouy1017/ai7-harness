@@ -9,7 +9,7 @@ import type { LaunchPolicyProjection, TrustedOperationalScope } from '../../src/
 
 const REPO_ROOT = fileURLToPath(new URL('../../', import.meta.url));
 const CARRIER_PATH = 'config/source-checkout-launch-authority.json';
-const ACTIVE_SET_PATH = 'docs/policies/active-policy-set.v4.json';
+const ACTIVE_SET_PATH = 'docs/policies/active-policy-set.v5.json';
 const CARRIED_PATHS = [
   CARRIER_PATH,
   ACTIVE_SET_PATH,
@@ -17,16 +17,18 @@ const CARRIED_PATHS = [
   'docs/policies/provider-processing-policy.v2.json',
   'docs/policies/provider-processing-policy.v3.json',
   'docs/policies/provider-processing-policy.v4.json',
+  'docs/policies/provider-processing-policy.v5.json',
+  'docs/policies/provider-processing-policy.v6.json',
   'docs/policies/external-export-policy.v1.json',
 ] as const;
-/** The exact pins active-set v4 records (Issue #272 step 1); the resolver and the carrier must agree with the bytes. */
+/** The exact pins active-set v5 records; the resolver and the carrier must agree with the bytes. */
 const EXPECTED_PINS = {
   'development-ci': ['v1', 'docs/policies/provider-processing-policy.v1.json', 'd9dfe8c13a58649d8d9f607364030468ae71832b94c9436291d29000795d725a'],
   'fixture-recording': ['v2', 'docs/policies/provider-processing-policy.v2.json', 'd0e3996ce7ba091200d83178b48fb578090bf73b509406182a2d5403ab2a4ebc'],
-  'ordinary-production': ['v3', 'docs/policies/provider-processing-policy.v3.json', '7ee954e6a9afdd7941839668a0020a5b03f463f68b998e03dc0c333bc35e767b'],
-  'developer-live': ['v4', 'docs/policies/provider-processing-policy.v4.json', '41e1da732c52ee299ad51c8c718e43640387d9dbcb28f20b05632669257e413a'],
+  'ordinary-production': ['v6', 'docs/policies/provider-processing-policy.v6.json', '10e69a5d7b027d077728ec1bc7393dc0583b99a05246b4e883098b9d96b221a4'],
+  'developer-live': ['v5', 'docs/policies/provider-processing-policy.v5.json', '4b7356aaa36a75b3085d6eecb593fb3bd765682073e37fa21b5abf7bc78ea0bb'],
 } as const;
-const ACTIVE_SET_SHA256 = '5f738a97c5057abd7d20f06167be274aadeeb3e91f3e14f9cdc1ce4b044966eb';
+const ACTIVE_SET_SHA256 = '4574c3a15a1edf5bb1e9064fbaacc87cd2032516117b59c74d4e550c46958178';
 
 let sandbox: string;
 let codeRoot: string;
@@ -41,19 +43,27 @@ async function placeValidCheckout(): Promise<void> {
   for (const relativePath of CARRIED_PATHS) await placeBuiltFile(relativePath);
 }
 
-const V4_PATH = 'docs/policies/provider-processing-policy.v4.json';
+const V5_PATH = 'docs/policies/provider-processing-policy.v5.json';
 
 /**
- * The exact v4 document with the given `transmissions` keys overridden. The digests the resolver
- * checks are constants of `launch-policy.ts`, so a policy revision that named a suboperation could
- * never be fed through `resolveSourceCheckoutLaunchPolicy`; the reading of those two optional keys is
- * therefore pinned against the verification function itself, over the real bytes with one key varied.
+ * The exact v5 document with the given rule fields overridden. The digests the resolver checks are
+ * constants of `launch-policy.ts`, so a policy revision could never be fed through
+ * `resolveSourceCheckoutLaunchPolicy`; the reading of the rule's exact fields is therefore pinned
+ * against the verification function itself, over the real bytes with one field varied.
  */
-async function v4PolicyWithTransmissions(overrides: Readonly<Record<string, unknown>>): Promise<Record<string, unknown>> {
-  const v4 = JSON.parse(await readFile(join(REPO_ROOT, ...V4_PATH.split('/')), 'utf8')) as Record<string, unknown>;
-  const rule = (v4.decision as { providerAllowRules: Array<Record<string, unknown>> }).providerAllowRules[0]!;
+async function v5PolicyWithRule(overrides: Readonly<Record<string, unknown>>): Promise<Record<string, unknown>> {
+  const v5 = JSON.parse(await readFile(join(REPO_ROOT, ...V5_PATH.split('/')), 'utf8')) as Record<string, unknown>;
+  const rule = (v5.decision as { providerAllowRules: Array<Record<string, unknown>> }).providerAllowRules[0]!;
+  Object.assign(rule, overrides);
+  return v5;
+}
+
+/** The exact v5 document with the given `transmissions` keys overridden. */
+async function v5PolicyWithTransmissions(overrides: Readonly<Record<string, unknown>>): Promise<Record<string, unknown>> {
+  const v5 = JSON.parse(await readFile(join(REPO_ROOT, ...V5_PATH.split('/')), 'utf8')) as Record<string, unknown>;
+  const rule = (v5.decision as { providerAllowRules: Array<Record<string, unknown>> }).providerAllowRules[0]!;
   rule.transmissions = { ...(rule.transmissions as Record<string, unknown>), ...overrides };
-  return v4;
+  return v5;
 }
 
 function expectZeroTransmission(projection: LaunchPolicyProjection): void {
@@ -79,7 +89,7 @@ afterEach(async () => {
   await rm(sandbox, { recursive: true, force: true });
 });
 
-describe('active policy set v4', () => {
+describe('active policy set v5', () => {
   it('is the sole active set: the carrier pins it, it maps all four scopes, and every pin matches the exact bytes', async () => {
     const carrier = JSON.parse(await readFile(join(REPO_ROOT, ...CARRIER_PATH.split('/')), 'utf8')) as Record<string, unknown>;
     expect(carrier).toEqual({
@@ -88,14 +98,14 @@ describe('active policy set v4', () => {
       runtimeForm: 'source-checkout',
       trustedOperationalScope: 'development-ci',
       launchSelectableScopes: ['development-ci', 'developer-live'],
-      activePolicySet: { version: 'v4', canonicalPath: ACTIVE_SET_PATH, sha256: ACTIVE_SET_SHA256 },
+      activePolicySet: { version: 'v5', canonicalPath: ACTIVE_SET_PATH, sha256: ACTIVE_SET_SHA256 },
     });
     expect(await sha256Of(ACTIVE_SET_PATH)).toBe(ACTIVE_SET_SHA256);
     const activeSet = JSON.parse(await readFile(join(REPO_ROOT, ...ACTIVE_SET_PATH.split('/')), 'utf8')) as {
       version: string;
       activePolicies: { 'provider-processing-policy': { scopePins: Record<string, { version: string; canonicalPath: string; sha256: string }> } };
     };
-    expect(activeSet.version).toBe('v4');
+    expect(activeSet.version).toBe('v5');
     const pins = activeSet.activePolicies['provider-processing-policy'].scopePins;
     expect(Object.keys(pins)).toEqual(Object.keys(EXPECTED_PINS));
     for (const [scope, [version, canonicalPath, sha256]] of Object.entries(EXPECTED_PINS)) {
@@ -104,12 +114,13 @@ describe('active policy set v4', () => {
     }
   });
 
-  it('declares the exact developer-live binding the v4 policy bytes carry', () => {
+  it('declares the exact developer-live binding the v5 policy bytes carry', () => {
     expect(DEVELOPER_LIVE_POLICY_BINDING.route).toBe('opencode-go');
     expect(DEVELOPER_LIVE_POLICY_BINDING.model).toBe('deepseek-v4-flash');
     expect(DEVELOPER_LIVE_POLICY_BINDING.endpoint).toBe('https://opencode.ai/zen/go/v1/chat/completions');
     expect(DEVELOPER_LIVE_POLICY_BINDING.credentialSlot).toBe('opencode-go');
-    expect(DEVELOPER_LIVE_POLICY_BINDING.defaultRunBudgetCeilingTotalTokens).toBe(500_000);
+    // ADR 0070 as ADR 0079 §2.3 lands it: 30,000 tokens per frozen unit, never the flat 500,000.
+    expect(DEVELOPER_LIVE_POLICY_BINDING.defaultRunBudgetCeilingTokensPerFrozenUnit).toBe(30_000);
   });
 });
 
@@ -121,7 +132,7 @@ describe('resolveSourceCheckoutLaunchPolicy', () => {
     expect(projection.integrityState).toBe('verified');
     expect(projection.denialReason).toBeNull();
     expect(projection.operationalScope).toBe('development-ci');
-    expect(projection.activePolicySetVersion).toBe('v4');
+    expect(projection.activePolicySetVersion).toBe('v5');
     expect(projection.providerProcessing.version).toBe('v1');
     expect(projection.providerProcessing.label).toBe('开发与持续集成：零次实时传输');
     expect(projection.externalExport.version).toBe('v1');
@@ -129,30 +140,24 @@ describe('resolveSourceCheckoutLaunchPolicy', () => {
     expect(await resolveSourceCheckoutLaunchPolicy(codeRoot, 'development-ci')).toEqual(projection);
   });
 
-  it('binds the developer-live scope to Provider Processing v4 as eligible-only with the bounded-by-run token', async () => {
+  it('binds the developer-live scope to Provider Processing v5 as eligible-only with the three named suboperations', async () => {
     await placeValidCheckout();
     const projection = await resolveSourceCheckoutLaunchPolicy(codeRoot, 'developer-live');
 
     expect(projection.integrityState).toBe('verified');
     expect(projection.denialReason).toBeNull();
     expect(projection.operationalScope).toBe('developer-live');
-    expect(projection.activePolicySetVersion).toBe('v4');
+    expect(projection.activePolicySetVersion).toBe('v5');
     expect(projection.providerProcessing).toEqual({
-      version: 'v4',
+      version: 'v5',
       decision: 'eligible-only',
       authorizedLiveTransmissionCount: 'bounded-by-run',
       liveTransmissionAllowed: true,
-      // Issue #274: v4 authorizes one transmission per Analysis Unit and names no cross-unit
-      // reduction, so the reduction does not dispatch under this scope. A v5 that names it is the
-      // Owner's decision; until then the exact policy bytes this pin verifies say `false`.
-      crossUnitReductionAllowed: false,
-      // Issue #275: v4 names the assurance sampling suboperation no more than it names the
-      // reduction, and a sampling turn is one more transmission per anchor unit, so it does not
-      // dispatch either. The Owner's policy v5 is what would name both.
-      assuranceSamplingAllowed: false,
-      // Issue #276: the Run Report's reflection turn is one more transmission still, and v4 names it
-      // no more than it names the other two. It therefore does not dispatch under this scope either.
-      runReportReflectionAllowed: false,
+      // ADR 0079 §2.1: v5 names all three declared suboperations (ADR 0066) `true`; the reduction,
+      // the assurance sample and the reflection turn each dispatch inside the bound of §2.2.
+      crossUnitReductionAllowed: true,
+      assuranceSamplingAllowed: true,
+      runReportReflectionAllowed: true,
       label: '开发者实时：实时传输受运行边界约束',
     });
     expect(projection.externalExport.version).toBe('v1');
@@ -160,15 +165,16 @@ describe('resolveSourceCheckoutLaunchPolicy', () => {
     expect(projection.publicReleasePermission.present).toBe(false);
   });
 
-  it('reads no declared suboperation’s transmission under either selectable scope', async () => {
+  it('reads the three named suboperations under developer-live and none under development-ci', async () => {
     await placeValidCheckout();
     for (const scope of ['development-ci', 'developer-live'] as const) {
       const projection = await resolveSourceCheckoutLaunchPolicy(codeRoot, scope);
       expect(projection.integrityState).toBe('verified');
-      expect(projection.providerProcessing.crossUnitReductionAllowed).toBe(false);
-      // Absent from the exact v4 bytes, which is exactly what `false` means here.
-      expect(projection.providerProcessing.assuranceSamplingAllowed).toBe(false);
-      expect(projection.providerProcessing.runReportReflectionAllowed).toBe(false);
+      // v1 authorizes zero transmissions; the v5 bytes name all three.
+      const named = scope === 'developer-live';
+      expect(projection.providerProcessing.crossUnitReductionAllowed).toBe(named);
+      expect(projection.providerProcessing.assuranceSamplingAllowed).toBe(named);
+      expect(projection.providerProcessing.runReportReflectionAllowed).toBe(named);
     }
     // The denial carries the same reading, so no unreadable launch can turn any step on.
     const denied = await resolveSourceCheckoutLaunchPolicy(codeRoot, 'ordinary-production' as TrustedOperationalScope);
@@ -178,45 +184,33 @@ describe('resolveSourceCheckoutLaunchPolicy', () => {
     expect(denied.providerProcessing.runReportReflectionAllowed).toBe(false);
   });
 
-  it('reads assuranceSamplingAllowed as absent, false, or true, and refuses a non-boolean', async () => {
-    // Absent is the v4 document as it stands, and it reads exactly as an explicit `false` does.
-    const asIs = JSON.parse(await readFile(join(REPO_ROOT, ...V4_PATH.split('/')), 'utf8')) as Record<string, unknown>;
-    const none = { crossUnitReductionAllowed: false, assuranceSamplingAllowed: false, runReportReflectionAllowed: false };
-    expect(verifyDeveloperLivePolicy(asIs)).toEqual(none);
-    expect(verifyDeveloperLivePolicy(await v4PolicyWithTransmissions({ assuranceSamplingAllowed: false }))).toEqual(none);
+  it('refuses any v5 reading whose named fields are not the pinned bytes', async () => {
+    // The exact document names all three suboperations and refuses web search.
+    const asIs = JSON.parse(await readFile(join(REPO_ROOT, ...V5_PATH.split('/')), 'utf8')) as Record<string, unknown>;
+    expect(verifyDeveloperLivePolicy(asIs)).toEqual({
+      crossUnitReductionAllowed: true, assuranceSamplingAllowed: true, runReportReflectionAllowed: true,
+    });
 
-    // A policy revision that names the suboperation is read as naming it, and moves nothing else.
-    expect(verifyDeveloperLivePolicy(await v4PolicyWithTransmissions({ assuranceSamplingAllowed: true })))
-      .toEqual({ ...none, assuranceSamplingAllowed: true });
-    expect(verifyDeveloperLivePolicy(await v4PolicyWithTransmissions({ assuranceSamplingAllowed: true, crossUnitReductionAllowed: true })))
-      .toEqual({ ...none, assuranceSamplingAllowed: true, crossUnitReductionAllowed: true });
-
-    // A key that is present but not a boolean is a policy the launch cannot read, and an unreadable
-    // policy is refused outright — never read as a permissive default.
-    for (const value of ['true', 1, null, {}, []]) {
-      await expect(v4PolicyWithTransmissions({ assuranceSamplingAllowed: value }).then(verifyDeveloperLivePolicy))
-        .rejects.toThrow('LAUNCH_POLICY_INVALID');
+    // Every one of the three, falsified or made unreadable, is a policy the launch cannot read: the
+    // reading is the exact v5 bytes, never a permissive default.
+    for (const key of ['crossUnitReductionAllowed', 'assuranceSamplingAllowed', 'runReportReflectionAllowed'] as const) {
+      for (const value of [false, undefined, 'true', 1, null, {}, []]) {
+        await expect(v5PolicyWithTransmissions({ [key]: value }).then(verifyDeveloperLivePolicy))
+          .rejects.toThrow('LAUNCH_POLICY_INVALID');
+      }
     }
-  });
-
-  it('reads runReportReflectionAllowed as absent, false, or true, and refuses a non-boolean', async () => {
-    const none = { crossUnitReductionAllowed: false, assuranceSamplingAllowed: false, runReportReflectionAllowed: false };
-    // Absent from the exact v4 bytes; the key is read exactly as the two beside it are.
-    const asIs = JSON.parse(await readFile(join(REPO_ROOT, ...V4_PATH.split('/')), 'utf8')) as Record<string, unknown>;
-    expect(verifyDeveloperLivePolicy(asIs).runReportReflectionAllowed).toBe(false);
-    expect(verifyDeveloperLivePolicy(await v4PolicyWithTransmissions({ runReportReflectionAllowed: false }))).toEqual(none);
-
-    // A policy revision that names the reflection turn names it alone, and moves neither other key.
-    expect(verifyDeveloperLivePolicy(await v4PolicyWithTransmissions({ runReportReflectionAllowed: true })))
-      .toEqual({ ...none, runReportReflectionAllowed: true });
-    expect(verifyDeveloperLivePolicy(await v4PolicyWithTransmissions({
-      runReportReflectionAllowed: true, assuranceSamplingAllowed: true, crossUnitReductionAllowed: true,
-    }))).toEqual({ crossUnitReductionAllowed: true, assuranceSamplingAllowed: true, runReportReflectionAllowed: true });
-
-    for (const value of ['true', 1, null, {}, []]) {
-      await expect(v4PolicyWithTransmissions({ runReportReflectionAllowed: value }).then(verifyDeveloperLivePolicy))
-        .rejects.toThrow('LAUNCH_POLICY_INVALID');
-    }
+    // The web-search allowance is `false` in v5 (ADR 0079 §4.2, §6); an enabled flag is unreadable.
+    await expect(v5PolicyWithTransmissions({ webSearchToolAllowed: true }).then(verifyDeveloperLivePolicy))
+      .rejects.toThrow('LAUNCH_POLICY_INVALID');
+    // The house-people redaction rule is part of the pinned document too.
+    await expect(v5PolicyWithRule({ redaction: undefined }).then(verifyDeveloperLivePolicy)).rejects.toThrow('LAUNCH_POLICY_INVALID');
+    await expect(v5PolicyWithRule({ redaction: { housePeopleNamesAndRolesStripped: false, remarksAndInternalNotesStripped: true, authorInformationAllowed: true, houseNameAllowed: true } }).then(verifyDeveloperLivePolicy))
+      .rejects.toThrow('LAUNCH_POLICY_INVALID');
+    // And the per-frozen-unit default is the one ADR 0070 derives, not the replaced flat 500,000.
+    const flat = JSON.parse(await readFile(join(REPO_ROOT, ...V5_PATH.split('/')), 'utf8')) as Record<string, unknown>;
+    const flatRule = (flat.decision as { providerAllowRules: Array<Record<string, unknown>> }).providerAllowRules[0]!;
+    (flatRule.authorizationPreconditions as Record<string, unknown>)['defaultRunBudgetCeilingTokensPerFrozenUnit'] = 500_000;
+    expect(() => verifyDeveloperLivePolicy(flat)).toThrow('LAUNCH_POLICY_INVALID');
   });
 
   it('denies the scopes the source checkout cannot select and any unknown scope', async () => {
@@ -271,9 +265,9 @@ describe('resolveSourceCheckoutLaunchPolicy', () => {
     }
   });
 
-  it('denies a developer-live launch whose v4 policy bytes drifted, while development-ci still verifies', async () => {
+  it('denies a developer-live launch whose v5 policy bytes drifted, while development-ci still verifies', async () => {
     await placeValidCheckout();
-    const target = join(codeRoot, 'docs', 'policies', 'provider-processing-policy.v4.json');
+    const target = join(codeRoot, 'docs', 'policies', 'provider-processing-policy.v5.json');
     await writeFile(target, `${await readFile(target, 'utf8')}\n`);
 
     const live = await resolveSourceCheckoutLaunchPolicy(codeRoot, 'developer-live');

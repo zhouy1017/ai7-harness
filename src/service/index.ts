@@ -718,7 +718,7 @@ async function run(): Promise<void> {
     const launchPolicy = await resolveSourceCheckoutLaunchPolicy(codeRoot, launchForm.trustedOperationalScope);
     // The developer-live runtime exists only when the requested scope actually verified; a denied policy
     // keeps the product provider-free exactly like development-ci, and the ceiling is never `unset` under
-    // v4. The captured `fetch` travels with the launch facts and reaches no other owner.
+    // v5. The captured `fetch` travels with the launch facts and reaches no other owner.
     const developerLive: DeveloperLiveRuntime | null = launchPolicy.operationalScope === 'developer-live'
       ? { launch: resolveDeveloperLiveLaunch(launchForm, resolve(codeRoot, '..')), nativeFetch }
       : null;

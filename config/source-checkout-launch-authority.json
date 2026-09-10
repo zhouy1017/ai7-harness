@@ -5,8 +5,8 @@
   "trustedOperationalScope": "development-ci",
   "launchSelectableScopes": ["development-ci", "developer-live"],
   "activePolicySet": {
-    "version": "v4",
-    "canonicalPath": "docs/policies/active-policy-set.v4.json",
-    "sha256": "5f738a97c5057abd7d20f06167be274aadeeb3e91f3e14f9cdc1ce4b044966eb"
+    "version": "v5",
+    "canonicalPath": "docs/policies/active-policy-set.v5.json",
+    "sha256": "4574c3a15a1edf5bb1e9064fbaacc87cd2032516117b59c74d4e550c46958178"
   }
 }

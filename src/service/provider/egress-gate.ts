@@ -14,7 +14,7 @@ export const LOCAL_DETERMINISTIC_ROUTE = 'ai7-local-deterministic' as const;
 export const LOCAL_DETERMINISTIC_MODEL = 'ai7-deterministic-fixture' as const;
 export const DEEPSEEK_ROUTE = 'deepseek-open-platform' as const;
 export const DEEPSEEK_MODEL = 'deepseek-v4-pro' as const;
-/** The developer-live route of Provider Processing v4 (ADR 0065, ADR 0067): OpenCode Go with the bare model id. */
+/** The developer-live route of Provider Processing v5 (ADR 0065, ADR 0067): OpenCode Go with the bare model id. */
 export const OPENCODE_GO_ROUTE = 'opencode-go' as const;
 export const OPENCODE_GO_MODEL = 'deepseek-v4-flash' as const;
 /**
@@ -47,7 +47,7 @@ export type RemoteExecutionRoute =
 export type CredentialSlot = 'deepseek-api-key' | 'opencode-go';
 
 /**
- * The trusted scope's Provider Processing pin, as the gate sees it. v1 denies every remote route; v4
+ * The trusted scope's Provider Processing pin, as the gate sees it. v1 denies every remote route; v5
  * admits exactly one, and only while the Run's own bounds still hold.
  */
 export type EgressPolicyPin =
@@ -59,14 +59,14 @@ export type EgressPolicyPin =
     }
   | {
       readonly operationalScope: 'developer-live';
-      readonly providerProcessingVersion: 'v4';
+      readonly providerProcessingVersion: 'v5';
       readonly liveTransmissionAllowed: true;
       readonly authorizedLiveTransmissionCount: 'bounded-by-run';
     };
 
 /**
  * The Run Budget Ceiling as the gate must see it immediately before a transmission: `unset` is a
- * refusal under v4, because Provider Processing v4 requires a non-`unset` ceiling, and `reached`
+ * refusal under v5, because Provider Processing v5 requires a non-`unset` ceiling, and `reached`
  * refuses because the Run has spent its bound.
  */
 export type EgressCeilingState = 'unset' | 'within' | 'reached';
@@ -172,11 +172,11 @@ export function evaluateEgress(
   if (binding.policy.operationalScope === 'development-ci') {
     return refuse('remote-route-denied-under-v1', 'development-ci · Provider Processing v1 允许 0 次实时传输；未发送任何内容。');
   }
-  // Under v4 the ceiling is a precondition of the decision itself, evaluated here from accumulated
+  // Under v5 the ceiling is a precondition of the decision itself, evaluated here from accumulated
   // usage, so no dispatch can precede it and no ceiling state can be assumed from an earlier turn.
   const ceiling = scope.ceilingState?.() ?? 'unset';
   if (ceiling === 'unset') {
-    return refuse('run-budget-ceiling-unset', 'Provider Processing v4 要求非 unset 的任务运行预算上限；未发送任何内容。');
+    return refuse('run-budget-ceiling-unset', 'Provider Processing v5 要求非 unset 的任务运行预算上限；未发送任何内容。');
   }
   if (ceiling === 'reached') {
     return refuse('run-budget-ceiling-reached', '任务运行预算上限已达到；未发送任何内容。');
