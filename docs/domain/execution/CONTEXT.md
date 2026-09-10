@@ -370,7 +370,7 @@ _Target-qualified accepted route_: [`external-export-policy.v2.json`](../../poli
 
 <a id="local-export-preparation"></a>
 **Local Export Preparation**:
-A frozen per-file pre-Effect record created after platform-native destination and collision resolution, binding one exact eligible target — a Manuscript version, a Production Document version, a Book Delivery Package version, a Report, or a database export package — rendered format, filename, final local path, fidelity disposition, payload digest, create-or-replace disposition, and applicable External Export Policy. It supplies the exact target for a separate Effect Intent and Effect Approval; a changed path or disposition requires a new preparation.
+A frozen per-file pre-Effect record created after platform-native destination and collision resolution, binding one exact eligible target — an Editorial Deliverable Revision, a Production Document version, a Book Delivery Package version, a Report, or a database export package — rendered format, filename, final local path, fidelity disposition, payload digest, create-or-replace disposition, and applicable External Export Policy. It supplies the exact target for a separate Effect Intent and Effect Approval; a changed path or disposition requires a new preparation.
 _中文_: 本地导出准备
 _Avoid_: Delivery Package, mutable file-dialog state, standing overwrite permission, Effect Approval, Effect Receipt, exported file
 

@@ -469,7 +469,7 @@ _中文_: 批注
 _Avoid_: Editor Note, Proposal Change Item, Editorial Error Finding without a location, model context
 
 **Editor Note**:
-An editor-private note bound to an exact Manuscript Revision range that is never exported, never transmitted to a Provider and never part of a Run Source Scope; it may be converted to an Annotation explicitly (ADR 0076).
+An editor-private note bound to an exact Manuscript Revision range that does not leave with an export by default and leaves only when the editor includes it in that export, is never transmitted to a Provider and is never part of a Run Source Scope; it may be converted to an Annotation explicitly (ADR 0076).
 _中文_: 备注
 _Avoid_: Annotation, exported comment, learning material by default
 
