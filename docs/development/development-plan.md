@@ -84,7 +84,7 @@ Exit criterion: an editor opens a Book into the manuscript at the last position,
 | 2.8 | S61 | #410 | T3 | J-01 | ④ DOCX content retained with the Source Version by default; 保留 / 并入 per class (B14) | — | planned |
 | 2.9 | S62 | #411 | T2 | J-01 | ④ Imported comments and tracked changes enter as marks (B15) | S58, S61 | planned |
 | 2.10 | S63 | #412 | T3 | J-01 | ④ Chapter-level reimport with four verbs; marks migrate; return to the manuscript (B16) | S58 | planned |
-| 2.11 | S64 | #413 | T3 | J-07 | ④ Export to DOCX / PDF / Markdown with 含批注 / 含修改建议, fidelity table, system picker, receipt (B17) | S58, S61; the External Export Policy v2 bytes (ADR 0079 §3) | Owner confirmation (the v2 byte review) |
+| 2.11 | S64 | #413 | T3 | J-07 | ④ Export to DOCX / PDF / Markdown with 含批注 / 含修改建议, fidelity table, system picker, receipt (B17) | S58, S61 (the External Export Policy v2 bytes are integrated, PR #440) | planned |
 | 2.12 | S65 | #414 | T3 | J-07 | ⑥ 发稿: Manuscript-only milestones and 设为发稿版本 (B26) | — | planned |
 | 2.13 | S66 | #415 | T3 | J-07 | ⑥ Production Documents: types, versions, workflow and gates, Delivery Records, 交付后有修改, 本书不做 (B27) | S64, S58 | planned |
 | 2.14 | S67 | #416 | T3 | J-07 | ⑥ 图书交付包: conditions, frozen manifest, versions, export history (B28) | S64, S65, S66 | planned |
@@ -168,4 +168,4 @@ The human-attended `sample1` recording is scheduled after the Phase 1 exit crite
 
 ## Deferred and out of scope
 
-Packaging, signing, notarization, release, `dev` to `main` promotion, Word integration, additional platforms, private manuscripts in any development scope, and the self-hosted Gate remain outside this plan and need their own Owner decisions. Policy Documents are runtime records the Owner reviews byte by byte: the documents ADR 0079 decides — Provider Processing v5 and the production successor of v3, External Export Policy v2, the egress document beside the Factual Verification Policy v1 — are written by the Commander and bundled into as few active-set versions as their timing allows; they are not slices in these tables.
+Packaging, signing, notarization, release, `dev` to `main` promotion, Word integration, additional platforms, private manuscripts in any development scope, and the self-hosted Gate remain outside this plan and need their own Owner decisions. Policy Documents are runtime records the Owner reviews byte by byte: the documents ADR 0079 decides are written by the Commander and bundled into as few active-set versions as their timing allows; they are not slices in these tables. Provider Processing v5 and v6 and External Export Policy v2 are integrated under active-policy-set v5 (PR #440, the Owner reviewing their bytes and amending ADR 0079 §3 in the same review); the egress document beside the Factual Verification Policy v1 remains.
