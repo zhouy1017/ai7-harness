@@ -31,3 +31,4 @@ Archived lifecycle nodes are historical records excluded from ordinary current-s
 - [Issue #209 J-02 effect-based edit — 2026-09-04](issue-209-j02-effect-based-edit-2026-09-04/INDEX.md): merged Issue #209 / PR #214 closure snapshot and consumed root routing.
 - [Issue #262 agent-guidance baseline — 2026-08-25](agent-guidance-baseline-2026-08-25/INDEX.md): consumed 2026-08-17 handoff bundle superseded by the current `AGENTS.md` router baseline.
 - [Value-first reorganization — 2026-09-06](reorg-value-first-2026-09-06/INDEX.md): the pre-reorganization root routers superseded by ADR 0064, the development plan, and the new `PROGRESS.md`.
+- [Editor-facing surface specification adopted — 2026-09-10](editor-surfaces-standard-2026-09-10/INDEX.md): the `PROGRESS.md` and development plan superseded when ADR 0077 was integrated and ADR 0078 re-cut the order and the tracker from `editor-surfaces.md` §11.

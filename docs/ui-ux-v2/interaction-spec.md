@@ -1215,7 +1215,7 @@ Here, incremental assurance means that independently completed check records bec
 | --- | --- | --- |
 | Manuscript journal newer than immutable revision | Validate and persist checkpoint from exact journal state | New Manuscript Revision + milestone metadata + internal stated-use record |
 | Exact current Manuscript Revision already exists | Bind designation without duplicating text | Milestone metadata + internal stated-use record on existing revision |
-| Other exact versioned Deliverable exists | Bind designation to exact Deliverable version | Milestone metadata + internal stated-use record |
+| A Production Document version | No milestone: a document's exact version is handed over through `交付` (DELIV-002, ADR 0077) | No milestone metadata |
 | Persistence/validation unresolved | Block with exact issue and recovery action | No partial revision, milestone, or internal record |
 
 ### Milestone rules
@@ -1230,9 +1230,11 @@ Here, incremental assurance means that independently completed check records bec
 
 ## Delivery Package Preparation
 
+Under [ADR 0077](../adr/0077-adopt-the-editor-facing-surface-specification-as-the-execution-standard.md) this section governs the 图书交付包; a Production Document's handover is a Delivery Record (DELIV-004).
+
 | Preparation state | Presentation | Consequence |
 | --- | --- | --- |
-| No milestone selected | Unselected milestone cards; latest delivery candidate may be recommended | No package target |
+| A condition unmet | The condition table names it: 发稿版本 not set, a document neither delivered nor 本书不做, a work record missing | No package target |
 | Selected revision has later edits | Exact change-exclusion notice; use Milestone Change Exclusion Notice when a Milestone Version identifies it | Continue with the selected revision or explicitly select/save a newer exact revision |
 | Required item missing | Exact item, profile requirement, safe route | Package freeze unavailable until requirement/profile exception resolves |
 | Content manifest ready | Full destination-/format-independent Delivery Package Manifest Preview | `准备交付包` available; still no export or external action |
@@ -1240,14 +1242,14 @@ Here, incremental assurance means that independently completed check records bec
 
 ### Package rules
 
-- The milestone selector shows label, purpose, exact version, author/time, later-edit relation, and recommendation reason. Selection remains explicit.
+- The condition table shows the Publication Version and, per document, the delivered versions to choose from with author/time and later-edit relation. Selection remains explicit.
 - Delivery Package Purpose names the package's intended editorial use without collecting a recipient, output format, filename, Local Export Destination, or external-channel target. Those export choices occur later through a separate preparation and the current platform's system picker.
 - Included content/artifacts show type, originating exact version, requirement source, status, applicable Gate/Signoff reference, and limitation. Exclusions remain a first-class list; ordinary users see familiar Gate/milestone language rather than internal Signoff jargon.
 - Version/change/source/factual supporting materials remain typed Editorial Artifacts and never merge with the public-facing Deliverable text.
 - Format-specific fidelity is absent from package identity. DOCX, PDF, Markdown, filenames, path, and Export Fidelity Disposition are selected only in each later Local Export Preparation.
 - Local preparation validates content-manifest completeness and exact integrity identities and provides product-level inspect actions without exposing internal storage paths or generating a user-facing export file.
 - If one required content/artifact/reference is unavailable, no immutable prepared package version is recorded. The user may inspect the exact failure and retry preparation safely.
-- Freeze records Package ID/version, one selected exact Editorial Deliverable Revision, its optional identifying Milestone Version, purpose, exact content manifest, exclusions, limitations, applicable Gate/Signoff references, and artifact/decision lineage—never another Deliverable, whole-Book content, output format, destination, fidelity disposition, approval, or receipt.
+- Freeze records Package ID/version, the exact Publication Version, the exact delivered version of every included document, purpose, exact content manifest, exclusions, limitations, applicable Gate/Signoff references, and artifact/decision lineage—never an undelivered working state, output format, destination, fidelity disposition, approval, or receipt.
 - Post-freeze content-manifest changes use `创建新交付包版本`; the previous package stays immutable. Export history is a separate 0..N projection rather than one exported/unexported package state.
 - Preparing or previewing never emits a success term such as `已交付` and never creates Export authority or Public Release Permission.
 
@@ -1256,7 +1258,7 @@ Here, incremental assurance means that independently completed check records bec
 | Export state | Presentation | Available action |
 | --- | --- | --- |
 | Exact milestone selected for standalone export | DOCX recommended; PDF visible; Markdown under `备用格式` | Choose one or more formats |
-| Prepared package selected | Exact content manifest and Delivery Package Purpose shown separately; no format/path inherited | Choose export-specific eligible format(s) |
+| Prepared 图书交付包 selected | Exact content manifest and Delivery Package Purpose shown separately; no format/path inherited | Choose export-specific eligible format(s) |
 | Fidelity calculating | Progressive per-format/content-class rows | Inspect completed rows; no premature approval |
 | Material degradation | Exact transformed/lost classes; acceptance unselected | Accept for this exact export, change format, or return |
 | Required class unavailable | Affected format and reason | Choose valid format or resolve the source/package requirement |
@@ -1274,7 +1276,7 @@ Here, incremental assurance means that independently completed check records bec
 - PDF preview emphasizes page/print result and states `固定版式，不支持可编辑往返`; it is never represented as a proof, factual authority, or release state.
 - Markdown fallback states which structure and rich-document semantics are flattened, externalized, or omitted. A DOCX failure never silently substitutes Markdown.
 - Fidelity rows cover every applicable content class and remain summarized when fully preserved. Any degraded/unavailable class expands automatically and places its consequence beside the choice.
-- The remembered destination is a user-recognizable recent location hint only. Final export still uses the current platform's system picker; choosing a format, filename, or destination freezes a separate Local Export Preparation and never changes the Delivery Package.
+- The remembered destination is a user-recognizable recent location hint only. Final export still uses the current platform's system picker; choosing a format, filename, or destination freezes a separate Local Export Preparation and never changes the 图书交付包.
 - When the selected target exists, Windows or macOS owns the save/copy conflict dialog, localized wording, action order, geometry, accessibility, and equivalent rename/replace mechanics. AI7 does not imitate it, translate it into a second custom dialog, or ask the collision choice again.
 - Alternative name/path returns one Resolved Local Export Target; native cancellation returns to the safe export context with no Effect Approval or attempted Effect; replacement returns the exact existing target plus replace disposition. Only then may the existing single exact export approval bind the target before commit.
 - A native apply-to-all choice covers only the exact colliding files already enumerated in that interaction. Each receives its own target-bound approval and receipt; the choice is never saved as a future overwrite preference.
@@ -1310,22 +1312,22 @@ Here, incremental assurance means that independently completed check records bec
 
 | Maintenance state | Presentation | Safe next action / consequence |
 | --- | --- | --- |
-| No case draft | Exact Publication Version / Deliverable revision context | `记录维护事项` opens an uncommitted draft |
+| No case draft | Exact Publication Version / Manuscript Revision context | `记录维护事项` opens an uncommitted draft |
 | Draft | Unselected `更正` / `勘误` / `替代` / `撤回` / `再版` / `归档`, reason/evidence, actor/time | Record first immutable case revision or cancel with no case |
 | Correction selected | Exact target and current Case Timeline | Create/attach Correction Proposal; normal Decision/Apply path creates any new revision |
 | Errata selected | Versioned Errata Editorial Artifact | Link artifact; changing content still follows Correction Proposal/Apply |
 | Supersession/Reissue waiting | No successor assumption | Select/save exact milestone, then separately `设为发稿版本` |
 | Withdrawal/Archive recorded | Internal-only Maintenance Notice | Change only future AI7 use/visibility; no external action |
-| New local output needed | Prior package/export history remains immutable | Begin a separate Delivery Package version only if content manifest changed, then a separate Local Export Preparation |
+| New local output needed | Prior package/export history remains immutable | Begin a new 图书交付包 version only if its manifest changed, then a separate Local Export Preparation |
 | Resolved/closed internally | Latest immutable Maintenance Case Revision + retained unresolved detail | Append `记录维护事项结论`; claim only the internal record outcome |
 
 ### Maintenance rules
 
-- Entry is contextual to one exact Publication Version and exact Editorial Deliverable revision from version history or the `维护` phase. The Workflow phase is navigation/state context, never the Maintenance Case authority.
+- Entry is contextual to one exact Publication Version and exact Manuscript Revision from version history or the `维护` phase. The Workflow phase is navigation/state context, never the Maintenance Case authority.
 - The six classifications begin unselected. `记录维护事项` commits one stable case plus its first immutable revision or reports no case; selection, editing, or cancellation remains draft-only.
 - Every later reason, evidence, classification, status, link, or outcome change appends a Maintenance Case Revision. The timeline never edits a previous case revision, Publication Version, Public Release Permission, package, export, approval, or receipt.
 - Correction follows the existing Correction Proposal → Proposal Decision → Apply Preparation → Effect Approval → Effect Receipt flow. Errata stays a versioned Editorial Artifact. Neither one proves factual resolution merely because the Maintenance Case exists.
-- A resulting exact Deliverable revision gains no milestone or publication designation automatically. Supersession and Reissue may link only a separately manually designated newer Publication Version.
+- A resulting exact Manuscript Revision gains no milestone or publication designation automatically. Supersession and Reissue may link only a separately manually designated newer Publication Version.
 - Withdrawal and Archive present `仅在 AI7 内记录；不代表已撤稿、下架、召回、通知接收方或删除外部文件`. They offer no send, recall, takedown, recipient, or local-file-delete control and produce no external Effect Receipt.
 - A corrected/reissued export begins a new Local Export Preparation and receives new per-file receipts. Existing files and receipts remain unchanged even when an internal case is later closed.
 - Only a current unresolved named action appears in Global Attention as `维护事项待处理`. Completion wording is `维护事项已记录` or `维护事项结论已记录`, never `已更正发布`, `已撤稿`, `已下架`, `已召回`, or `已再版`.

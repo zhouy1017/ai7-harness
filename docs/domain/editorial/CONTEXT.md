@@ -28,11 +28,11 @@ _中文_: 图书
 _Avoid_: Manuscript, multi-work container, filesystem folder, workspace, generic project, publication status
 
 **Editorial Deliverable**:
-A Book-related text prepared or revised through editorial work, including a Manuscript, Promotion Article, News Report, or Review Article.
-_Avoid_: Edited manuscript when referring to the whole deliverable family, Generated output
+A Book-related text prepared or revised through editorial work: the primary Manuscript and the Book's Production Documents (news release, promotion article, review article, launch materials, marketing points and other house-configured types). The Manuscript alone carries Milestone Versions and a Publication Version; a Production Document carries versions and Delivery Records ([ADR 0077](../../adr/0077-adopt-the-editor-facing-surface-specification-as-the-execution-standard.md)).
+_Avoid_: Edited manuscript when referring to the whole deliverable family, Generated output, a Delivery Package
 
 **Editorial Deliverable Revision**:
-An immutable exact content version of one Editorial Deliverable with stable identity, provenance, and revision lineage. Manuscript Revision is the authoritative manuscript realization of this term; Promotion Article, News Report, and Review Article revisions use the same exact-version boundary without becoming Manuscript Revisions.
+An immutable exact content version of one Editorial Deliverable with stable identity, provenance, and revision lineage. Manuscript Revision is the authoritative manuscript realization of this term; Promotion Article, News Report, and Review Article revisions use the same exact-version boundary without becoming Manuscript Revisions. Milestone Versions, Publication Versions and Maintenance Cases bind Manuscript Revisions only; a Production Document's exact version is handed over through a Delivery Record ([ADR 0077](../../adr/0077-adopt-the-editor-facing-surface-specification-as-the-execution-standard.md)).
 _中文_: 编辑交付成果修订版
 _Avoid_: Editorial Deliverable identity, latest working state, Source Version, Delivery Package
 
@@ -94,28 +94,28 @@ _Avoid_: Public Release Permission, factual proof, generic approval
 <a id="milestone-version"></a>
 
 **Milestone Version**:
-An immutable user-designated exact Editorial Deliverable Revision carrying a label, stated next-use purpose, actor and time, and optional note. It may be created alongside a separate Signoff Record but grants no workflow, export, delivery, factual, learning, or public-release authority.
+An immutable user-designated exact Manuscript Revision carrying a label, stated next-use purpose, actor and time, and optional note. It may be created alongside a separate Signoff Record but grants no workflow, export, delivery, factual, learning, or public-release authority. Under [ADR 0077](../../adr/0077-adopt-the-editor-facing-surface-specification-as-the-execution-standard.md) only the primary Manuscript has Milestone Versions (V2-UX-MILE-014); a Production Document has versions and Delivery Records.
 _中文_: 里程碑版本
-_Avoid_: Manuscript Checkpoint, latest draft, Signoff Record, Delivery Package, Publication Version
+_Avoid_: Manuscript Checkpoint, latest draft, Signoff Record, Delivery Package, Publication Version, a Production Document version
 
 <a id="delivery-package"></a>
 
 **Delivery Package**:
-A versioned destination- and format-independent prepared content manifest for one exact immutable Editorial Deliverable Revision, optionally identified by an exact Milestone Version, and one stated purpose. It binds exact included Editorial Artifacts, applicable Workflow Gate and Signoff references, exclusions, and limitations. Formats, filenames, paths, fidelity dispositions, Local Export Preparations, Effect Approvals, and Effect Receipts belong to separate local exports; the package copies no authority and proves no export, delivery, or publication.
+Superseded as a per-deliverable object by [ADR 0077](../../adr/0077-adopt-the-editor-facing-surface-specification-as-the-execution-standard.md): a Production Document is handed over through a Delivery Record, and the one package is the Book Delivery Package. The term survives for the manifest rules the Book Delivery Package inherits (V2-UX-DPKG-001 to 015): a versioned destination- and format-independent prepared content manifest binding exact included Editorial Artifacts, applicable Workflow Gate and Signoff references, exclusions, and limitations, whose formats, filenames, paths, fidelity dispositions, Local Export Preparations, Effect Approvals, and Effect Receipts belong to separate local exports; the package copies no authority and proves no export, delivery, or publication.
 _中文_: 交付包
-_Avoid_: Exported file, Local Export Preparation, destination-bound archive, Effect Approval, Effect Receipt, proof of delivery or public release
+_Avoid_: Exported file, Local Export Preparation, destination-bound archive, Effect Approval, Effect Receipt, proof of delivery or public release, a per-deliverable package, a Delivery Record
 
 <a id="publication-version"></a>
 
 **Publication Version**:
-An append-only exact designation over one Milestone Version for a stated publication scope, linked to but distinct from a separate Public Release Permission. It performs no export, sending, delivery, or publication, and later edits or designations never retarget its exact content.
+An append-only exact designation over one Milestone Version of the primary Manuscript (发稿) for a stated publication scope, linked to but distinct from a separate Public Release Permission ([ADR 0077](../../adr/0077-adopt-the-editor-facing-surface-specification-as-the-execution-standard.md)). It performs no export, sending, delivery, or publication, and later edits or designations never retarget its exact content.
 _中文_: 发稿版本
 _Avoid_: Latest draft, published artifact, local export, Public Release Permission, delivery proof
 
 <a id="maintenance-case"></a>
 
 **Maintenance Case**:
-A stable Book-owned identity for one post-designation editorial maintenance matter bound permanently to one exact Publication Version and its exact Editorial Deliverable Revision, with one stable Maintenance Classification. Its target and classification never move to a later revision; related work is linked through immutable Maintenance Case Revisions.
+A stable Book-owned identity for one post-designation editorial maintenance matter bound permanently to one exact Publication Version and its exact Manuscript Revision, with one stable Maintenance Classification ([ADR 0077](../../adr/0077-adopt-the-editor-facing-surface-specification-as-the-execution-standard.md)). Its target and classification never move to a later revision; related work is linked through immutable Maintenance Case Revisions.
 _中文_: 维护事项
 _Avoid_: Workflow Phase, free-form note, mutable Publication Version, external recall request, moving target
 
@@ -287,7 +287,7 @@ A revision-bound, evidence-linked record of a suspected factual or semantic defe
 _Avoid_: Model verdict, applied correction
 
 **Correction Proposal**:
-A suggested change bound to one exact Editorial Deliverable Revision that addresses an Editorial Error Finding without altering active deliverable content until accepted through its applicable mutation workflow. For a Manuscript, it remains exact-Manuscript-Revision-bound and model-generated changes still begin on a Proposal Branch.
+A suggested change bound to one exact Editorial Deliverable Revision that addresses an Editorial Error Finding without altering active deliverable content until accepted through its applicable mutation workflow. For a Manuscript, it remains exact-Manuscript-Revision-bound and model-generated changes still begin on a Proposal Branch; the editor sees it as a 修改建议 mark and accepts it through one-click 接受并应用 ([ADR 0076](../../adr/0076-align-editor-facing-surfaces-to-the-owner-s-september-decisions.md)).
 _Avoid_: Silent rewrite, completed fix
 
 **Source Version**:

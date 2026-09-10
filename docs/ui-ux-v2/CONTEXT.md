@@ -993,11 +993,11 @@ The stated next use for which the editor designates the exact version as ready, 
 _Avoid_: Delivery Permission, Public Release Permission, phase completion
 
 **Delivery Package Preparation** (`交付包准备`):
-The local content-manifest surface that selects one exact Editorial Deliverable Revision, optionally identified by an exact Milestone Version, and one stated Delivery Package Purpose; it composes required artifacts, applicable Gate/Signoff references, exclusions, and limitations, and freezes one canonical [Delivery Package](../domain/editorial/CONTEXT.md#delivery-package) version without choosing formats, filenames, fidelity disposition, or Local Export Destination.
+The local content-manifest surface of the 图书交付包 ([ADR 0077](../adr/0077-adopt-the-editor-facing-surface-specification-as-the-execution-standard.md)): it takes the Manuscript's Publication Version, the exact delivered version of every Production Document not marked 本书不做 and the work records, composes required artifacts, applicable Gate/Signoff references, exclusions, and limitations, and freezes one canonical [Book Delivery Package](../domain/editorial/CONTEXT.md#book-delivery-package) version without choosing formats, filenames, fidelity disposition, or Local Export Destination; a single document's handover is a Delivery Record.
 _Avoid_: export, Public Release, folder compression alone
 
 **Delivery Package Purpose** (`交付包用途`):
-The concise user-facing presentation of the canonical Delivery Package's stated purpose, such as internal review copy, archive copy, or delivery candidate, without recording a recipient, output format, external channel, transmission event, or Local Export Destination.
+The concise user-facing presentation of the canonical Book Delivery Package's stated purpose, such as internal review copy, archive copy, or delivery candidate, without recording a recipient, output format, external channel, transmission event, or Local Export Destination.
 _Avoid_: Milestone Purpose, handoff record, delivery proof, Public Release purpose, Effect target
 
 **Milestone Change Exclusion Notice** (`里程碑后修改排除提示`):
@@ -1005,7 +1005,7 @@ The explicit statement, used when a Milestone Version identifies the selected Ed
 _Avoid_: stale warning alone, auto-update, data-loss notice
 
 **Delivery Package Manifest Preview** (`交付包清单预览`):
-The user-readable exact list of included/excluded content, Editorial Artifacts, applicable Gate/Signoff references, version/source/factual materials, and limitations before one destination- and format-independent Delivery Package version is frozen.
+The user-readable exact list of included/excluded content, Editorial Artifacts, applicable Gate/Signoff references, version/source/factual materials, and limitations before one destination- and format-independent 图书交付包 version is frozen.
 _Avoid_: output-format selector, filesystem tree, archive contents after export, Effect payload log
 
 **Prepared Delivery Package** (`已准备交付包`):
