@@ -1,23 +1,23 @@
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
-import { LAUNCH_SELECTABLE_SCOPES, isTrustedOperationalScope, type LaunchPolicyProjection, type TrustedLaunchForm, type TrustedOperationalScope } from '../shared/protocol.js';
+import { LAUNCH_SELECTABLE_SCOPES, isTrustedOperationalScope, type DeveloperLiveCeiling, type LaunchPolicyProjection, type TrustedLaunchForm, type TrustedOperationalScope } from '../shared/protocol.js';
 
 /**
  * The source-checkout launch authority (ADR 0046, ADR 0065): the build-embedded carrier pins active
- * policy set v4, the sole active set for all four Provider Processing scopes, and names the two
+ * policy set v5, the sole active set for all four Provider Processing scopes, and names the two
  * scopes the built entry may bind from its launch form. `development-ci` is the default and binds
  * Provider Processing v1 (zero live transmissions); `developer-live` is bound only by the launch
  * argument `--trusted-operational-scope developer-live` on a developer host and binds the immutable
- * Provider Processing v4. `fixture-recording` and `ordinary-production` are pinned by the active set
+ * Provider Processing v5. `fixture-recording` and `ordinary-production` are pinned by the active set
  * but are not selectable from the source checkout. No environment variable or product setting
  * selects a scope; every invalid state resolves to the zero-transmission denial.
  */
 const CARRIER_PATH = 'config/source-checkout-launch-authority.json';
 const CARRIER_VERSION = 2;
-export const ACTIVE_SET_VERSION = 'v4' as const;
-const ACTIVE_SET_PATH = 'docs/policies/active-policy-set.v4.json';
-const ACTIVE_SET_SHA256 = '5f738a97c5057abd7d20f06167be274aadeeb3e91f3e14f9cdc1ce4b044966eb';
+export const ACTIVE_SET_VERSION = 'v5' as const;
+const ACTIVE_SET_PATH = 'docs/policies/active-policy-set.v5.json';
+const ACTIVE_SET_SHA256 = '8329eda368d4870c552bdc792a74f0035a2dc8da818c37617902fa0af7368f8a';
 const PROVIDER_PINS = {
   'development-ci': {
     version: 'v1',
@@ -30,23 +30,23 @@ const PROVIDER_PINS = {
     sha256: 'd0e3996ce7ba091200d83178b48fb578090bf73b509406182a2d5403ab2a4ebc',
   },
   'ordinary-production': {
-    version: 'v3',
-    canonicalPath: 'docs/policies/provider-processing-policy.v3.json',
-    sha256: '7ee954e6a9afdd7941839668a0020a5b03f463f68b998e03dc0c333bc35e767b',
+    version: 'v6',
+    canonicalPath: 'docs/policies/provider-processing-policy.v6.json',
+    sha256: '10e69a5d7b027d077728ec1bc7393dc0583b99a05246b4e883098b9d96b221a4',
   },
   'developer-live': {
-    version: 'v4',
-    canonicalPath: 'docs/policies/provider-processing-policy.v4.json',
-    sha256: '41e1da732c52ee299ad51c8c718e43640387d9dbcb28f20b05632669257e413a',
+    version: 'v5',
+    canonicalPath: 'docs/policies/provider-processing-policy.v5.json',
+    sha256: '4b7356aaa36a75b3085d6eecb593fb3bd765682073e37fa21b5abf7bc78ea0bb',
   },
 } as const;
 const EXTERNAL_PIN = {
-  version: 'v1',
-  canonicalPath: 'docs/policies/external-export-policy.v1.json',
-  sha256: 'b66fa0f2ad7d721f879c91e3cbb8e84f6a7bb08b107424d87871ab07937242de',
+  version: 'v2',
+  canonicalPath: 'docs/policies/external-export-policy.v2.json',
+  sha256: '162441cc3e5d30b0cafb00a0d04ca5ab32b64c5039baafc8952a9925bd7984b6',
 } as const;
 
-/** The exact developer-live binding Provider Processing v4 declares; the resolver verifies the policy bytes say the same. */
+/** The exact developer-live binding Provider Processing v5 declares; the resolver verifies the policy bytes say the same. */
 export const DEVELOPER_LIVE_POLICY_BINDING = {
   ruleId: 'developer-live-public-samplebook-analysis',
   launchArgument: '--trusted-operational-scope developer-live',
@@ -54,7 +54,7 @@ export const DEVELOPER_LIVE_POLICY_BINDING = {
   endpoint: 'https://opencode.ai/zen/go/v1/chat/completions',
   model: 'deepseek-v4-flash',
   credentialSlot: 'opencode-go',
-  defaultRunBudgetCeilingTotalTokens: 500_000,
+  defaultRunBudgetCeilingTokensPerFrozenUnit: 30_000,
   providerAccountLimitClassification: 'quota-exhausted',
 } as const;
 
@@ -63,7 +63,8 @@ export const DEFAULT_PROVIDER_CACHE_DIRECTORY = 'ai7-harness-provider-cache';
 
 /** The developer-live launch facts derived from the form: the required ceiling and the cache root outside the checkout. */
 export interface DeveloperLiveLaunch {
-  readonly runBudgetCeiling: { readonly kind: 'tokens'; readonly maxTotalTokens: number };
+  /** The explicit form ceiling, or the policy's per-frozen-unit default when the form left it unset. */
+  readonly runBudgetCeiling: DeveloperLiveCeiling;
   readonly providerCacheRoot: string;
 }
 
@@ -85,18 +86,23 @@ function isInsideOrEqual(root: string, candidate: string): boolean {
 }
 
 /**
- * Resolve the developer-live launch facts. The ceiling defaults to the policy's development default
- * and is never `unset`; the cache root defaults to the checkout's sibling directory and must lie
- * outside the checkout so raw Provider material never enters a working tree.
+ * Resolve the developer-live launch facts. An explicit form ceiling is bound as the total; when the
+ * form leaves it unset, the policy's default is bound as 30,000 tokens per frozen Coverage Manifest
+ * unit (ADR 0070), computed once the manifest freezes. Whatever is bound, the ceiling is never
+ * `unset`; the cache root defaults to the checkout's sibling directory and must lie outside the
+ * checkout so raw Provider material never enters a working tree.
  */
 export function resolveDeveloperLiveLaunch(form: TrustedLaunchForm, checkoutRoot: string): DeveloperLiveLaunch {
   if (form.trustedOperationalScope !== 'developer-live' || !isAbsolute(checkoutRoot)) throw new Error('LAUNCH_FORM_INVALID');
-  const maxTotalTokens = form.runBudgetCeiling ?? DEVELOPER_LIVE_POLICY_BINDING.defaultRunBudgetCeilingTotalTokens;
-  if (!Number.isSafeInteger(maxTotalTokens) || maxTotalTokens <= 0) throw new Error('LAUNCH_FORM_INVALID');
+  const explicit = form.runBudgetCeiling;
+  if (explicit !== null && (!Number.isSafeInteger(explicit) || explicit <= 0)) throw new Error('LAUNCH_FORM_INVALID');
+  const runBudgetCeiling: DeveloperLiveCeiling = explicit === null
+    ? { kind: 'tokens-per-frozen-unit', tokensPerFrozenUnit: DEVELOPER_LIVE_POLICY_BINDING.defaultRunBudgetCeilingTokensPerFrozenUnit }
+    : { kind: 'tokens', maxTotalTokens: explicit };
   if (form.providerCacheRoot !== null && !isAbsolute(form.providerCacheRoot)) throw new Error('LAUNCH_FORM_INVALID');
   const providerCacheRoot = resolve(form.providerCacheRoot ?? resolve(checkoutRoot, '..', DEFAULT_PROVIDER_CACHE_DIRECTORY));
   if (isInsideOrEqual(resolve(checkoutRoot), providerCacheRoot)) throw new Error('PROVIDER_CACHE_ROOT_INSIDE_CHECKOUT');
-  return { runBudgetCeiling: { kind: 'tokens', maxTotalTokens }, providerCacheRoot };
+  return { runBudgetCeiling, providerCacheRoot };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -196,14 +202,16 @@ function verifyDevelopmentCiPolicy(policy: Record<string, unknown>): void {
 }
 
 /**
- * Provider Processing v4: default deny with exactly the one developer-live eligible-only rule and its
- * exact binding. Returns whether the rule names each of the two declared suboperations' transmissions
- * (ADR 0066); v4 names neither, so both read `false` until a policy revision says otherwise.
+ * Provider Processing v5: default deny with exactly the one developer-live eligible-only rule and its
+ * exact binding, the three declared suboperations of ADR 0066, the per-frozen-unit Run Budget Ceiling
+ * default of ADR 0070, and the house-people redaction rule of ADR 0079 §4.4. v5 names all three
+ * suboperations `true` and the web-search flag `false`; the projection reads exactly those bytes, and
+ * a field that does not match is a policy the launch cannot read — the zero-transmission denial.
  *
- * Exported so the reading of those two optional keys can be pinned against the exact v4 bytes with one
- * key varied. The document digests this resolver checks are constants of this module, so a policy
- * revision that named a suboperation could not be fed through `resolveSourceCheckoutLaunchPolicy` at
- * all — which is the point of the pins, and why the reading is tested here instead.
+ * Exported so the reading of the rule's exact fields can be pinned against the real v5 bytes with one
+ * field varied. The document digests this resolver checks are constants of this module, so a policy
+ * revision could not be fed through `resolveSourceCheckoutLaunchPolicy` at all — which is the point
+ * of the pins, and why the reading is tested here instead.
  */
 export function verifyDeveloperLivePolicy(policy: Record<string, unknown>): {
   crossUnitReductionAllowed: boolean;
@@ -226,6 +234,16 @@ export function verifyDeveloperLivePolicy(policy: Record<string, unknown>): {
   requirePolicy(isRecord(decision) && decision['default'] === 'deny' && Array.isArray(decision['providerAllowRules']) && decision['providerAllowRules'].length === 1);
   const rule: unknown = decision['providerAllowRules'][0];
   requirePolicy(isRecord(rule) && rule['ruleId'] === DEVELOPER_LIVE_POLICY_BINDING.ruleId && rule['policyResult'] === 'eligible-only');
+  // The house-people redaction rule (ADR 0079 §4.4): the identity of the house's people never leaves,
+  // while the author's information and the house name may.
+  const redaction = rule['redaction'];
+  requirePolicy(
+    isRecord(redaction) &&
+      redaction['housePeopleNamesAndRolesStripped'] === true &&
+      redaction['remarksAndInternalNotesStripped'] === true &&
+      redaction['authorInformationAllowed'] === true &&
+      redaction['houseNameAllowed'] === true,
+  );
   const binding = rule['providerBinding'];
   requirePolicy(
     isRecord(binding) &&
@@ -241,29 +259,33 @@ export function verifyDeveloperLivePolicy(policy: Record<string, unknown>): {
   const transmissions = rule['transmissions'];
   requirePolicy(
     isRecord(transmissions) &&
+      // The transmission bound of ADR 0079 §2.2, term by term.
+      transmissions['boundedByCoverageManifestUnitCount'] === true &&
+      transmissions['plusDeclaredSafeRetryAdaptations'] === true &&
+      transmissions['plusCrossUnitReductionTopicSections'] === true &&
+      transmissions['plusAssuranceSampleAnchorUnits'] === true &&
+      transmissions['plusOneRunReportReflectionTurn'] === true &&
       transmissions['oneTechnicalSessionPerAnalysisUnit'] === true &&
       transmissions['accumulatingSingleSessionAllowed'] === false &&
       transmissions['identicalRequestReplaysFromProviderResultCache'] === true &&
-      transmissions['repeatedTestItemIdentifierAllowed'] === false,
+      transmissions['repeatedTestItemIdentifierAllowed'] === false &&
+      // No web-search allowance yet (ADR 0079 §4.2, §6): the model-tool path waits for the provider
+      // assignment design, so a document that enabled it would be one this launch cannot read.
+      transmissions['webSearchToolAllowed'] === false,
   );
-  // The cross-unit reduction's transmission (ADR 0066), which v4 does not name. An absent key is the
-  // v4 document as it stands and means `false`; a key that is present but not a boolean is a policy
-  // the launch cannot read, and an unreadable policy is the zero-transmission denial.
-  const crossUnitReductionAllowed = (transmissions as Record<string, unknown>)['crossUnitReductionAllowed'];
-  requirePolicy(crossUnitReductionAllowed === undefined || typeof crossUnitReductionAllowed === 'boolean');
-  // The assurance sampling suboperation's transmissions (ADR 0066), which v4 does not name either.
-  // Read exactly as the reduction's key is, for exactly the same reason.
-  const assuranceSamplingAllowed = (transmissions as Record<string, unknown>)['assuranceSamplingAllowed'];
-  requirePolicy(assuranceSamplingAllowed === undefined || typeof assuranceSamplingAllowed === 'boolean');
-  // The Run Report's reflection turn (ADR 0066 §Run Report), which v4 does not name either. Read
-  // exactly as the two above are, for exactly the same reason.
-  const runReportReflectionAllowed = (transmissions as Record<string, unknown>)['runReportReflectionAllowed'];
-  requirePolicy(runReportReflectionAllowed === undefined || typeof runReportReflectionAllowed === 'boolean');
+  // The three suboperations ADR 0066 declares, which v5 names `true`. An absent or non-`true` key is
+  // not the pinned document; reading anything but the exact bytes is the zero-transmission denial.
+  requirePolicy(
+    transmissions['crossUnitReductionAllowed'] === true &&
+      transmissions['assuranceSamplingAllowed'] === true &&
+      transmissions['runReportReflectionAllowed'] === true,
+  );
   const preconditions = rule['authorizationPreconditions'];
   requirePolicy(
     isRecord(preconditions) &&
       preconditions['unsetRunBudgetCeilingAllowed'] === false &&
-      preconditions['defaultRunBudgetCeilingTotalTokens'] === DEVELOPER_LIVE_POLICY_BINDING.defaultRunBudgetCeilingTotalTokens &&
+      preconditions['defaultRunBudgetCeilingTokensPerFrozenUnit'] === DEVELOPER_LIVE_POLICY_BINDING.defaultRunBudgetCeilingTokensPerFrozenUnit &&
+      preconditions['defaultRunBudgetCeilingComputedAfterCoverageManifestFreeze'] === true &&
       preconditions['ceilingEvaluatedBeforeEveryDispatch'] === true &&
       preconditions['finalProviderPayloadEgressGateRequired'] === true,
   );
@@ -281,9 +303,9 @@ export function verifyDeveloperLivePolicy(policy: Record<string, unknown>): {
   const capture = rule['capture'];
   requirePolicy(isRecord(capture) && capture['fixtureEmissionAllowed'] === false && capture['uploadAllowed'] === false && capture['providerResultCacheAllowed'] === true);
   return {
-    crossUnitReductionAllowed: crossUnitReductionAllowed === true,
-    assuranceSamplingAllowed: assuranceSamplingAllowed === true,
-    runReportReflectionAllowed: runReportReflectionAllowed === true,
+    crossUnitReductionAllowed: true,
+    assuranceSamplingAllowed: true,
+    runReportReflectionAllowed: true,
   };
 }
 
@@ -391,14 +413,14 @@ export async function resolveSourceCheckoutLaunchPolicy(
       externalPolicy['documentType'] === 'ai7-policy-document' &&
         externalPolicy['policyId'] === 'external-export-policy' &&
         externalPolicy['policyType'] === 'external-export' &&
-        externalPolicy['version'] === 'v1' &&
+        externalPolicy['version'] === EXTERNAL_PIN.version &&
         externalPolicy['canonicalPath'] === EXTERNAL_PIN.canonicalPath &&
         isRecord(externalPolicy['authoritySeparations']) &&
         externalPolicy['authoritySeparations']['policyEligibilityIsEffectApproval'] === false,
     );
 
     const externalExport = {
-      version: 'v1' as const,
+      version: 'v2' as const,
       policyEligibilityIsEffectApproval: false as const,
       currentExportEffectAvailable: false as const,
       label: '对外导出策略独立；当前未提供导出受控动作' as const,
@@ -412,7 +434,7 @@ export async function resolveSourceCheckoutLaunchPolicy(
         operationalScope: 'developer-live',
         activePolicySetVersion: ACTIVE_SET_VERSION,
         providerProcessing: {
-          version: 'v4',
+          version: 'v5',
           decision: 'eligible-only',
           authorizedLiveTransmissionCount: 'bounded-by-run',
           liveTransmissionAllowed: true,

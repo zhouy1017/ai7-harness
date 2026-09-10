@@ -1,0 +1,782 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "AI7 External Export Policy v2",
+  "description": "Validates the exact default-deny External Export Policy v2 as ADR 0079 §3 decides it under the Owner's byte review of 2026-09-10: the v1 local-filesystem eligibility rule carried unchanged in structure, the five eligible target kinds of §3.1 with Editorial Deliverable Revision as the deliverable kind, the attached-content rules of §3.2 with 备注 default-off rather than hard-excluded, the multi-file set rules of §3.3 over the editor's chosen package members, the report format rules of §3.4, the unchanged v1 per-file Effect safeguards and the unchanged authority separations.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaDialect",
+    "schemaPath",
+    "documentType",
+    "policyId",
+    "policyType",
+    "version",
+    "lifecycleStatus",
+    "predecessorVersion",
+    "predecessorCanonicalPath",
+    "canonicalPath",
+    "humanProjectionPath",
+    "authorityBasis",
+    "decision",
+    "attachedContent",
+    "multiFileSetExport",
+    "reportExport",
+    "perFileEffectRequirements",
+    "authoritySeparations"
+  ],
+  "properties": {
+    "schemaDialect": {
+      "enum": [
+        "http://json-schema.org/draft-07/schema#"
+      ]
+    },
+    "schemaPath": {
+      "enum": [
+        "docs/policies/external-export-policy.v2.schema.json"
+      ]
+    },
+    "documentType": {
+      "enum": [
+        "ai7-policy-document"
+      ]
+    },
+    "policyId": {
+      "enum": [
+        "external-export-policy"
+      ]
+    },
+    "policyType": {
+      "enum": [
+        "external-export"
+      ]
+    },
+    "version": {
+      "enum": [
+        "v2"
+      ]
+    },
+    "lifecycleStatus": {
+      "enum": [
+        "active"
+      ]
+    },
+    "predecessorVersion": {
+      "enum": [
+        "v1"
+      ]
+    },
+    "predecessorCanonicalPath": {
+      "enum": [
+        "docs/policies/external-export-policy.v1.json"
+      ]
+    },
+    "canonicalPath": {
+      "enum": [
+        "docs/policies/external-export-policy.v2.json"
+      ]
+    },
+    "humanProjectionPath": {
+      "enum": [
+        "docs/policies/external-export-policy.v2.md"
+      ]
+    },
+    "authorityBasis": {
+      "type": "array",
+      "minItems": 7,
+      "maxItems": 7,
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "docs/domain/execution/CONTEXT.md",
+          "docs/adr/0007-separate-decisions-authority-and-effect-proof.md",
+          "docs/adr/0018-tiered-activation-for-agent-authored-revisions.md",
+          "docs/adr/0038-separate-delivery-package-identity-from-local-export.md",
+          "docs/adr/0039-delegate-local-export-collisions-to-native-os-workflows.md",
+          "docs/adr/0079-record-the-owner-s-decisions-of-2026-09-10-on-storage-policies-export-egress-providers-and-samplebooks.md",
+          "docs/architecture-v2/HARNESS-INTEGRATION.md"
+        ]
+      }
+    },
+    "decision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "default",
+        "allowRules",
+        "excludedDestinationKinds"
+      ],
+      "properties": {
+        "default": {
+          "enum": [
+            "deny"
+          ]
+        },
+        "allowRules": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 1,
+          "items": {
+            "$ref": "#/definitions/localFilesystemRule"
+          }
+        },
+        "excludedDestinationKinds": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "network",
+            "cloud",
+            "email"
+          ],
+          "properties": {
+            "network": {
+              "$ref": "#/definitions/trueValue"
+            },
+            "cloud": {
+              "$ref": "#/definitions/trueValue"
+            },
+            "email": {
+              "$ref": "#/definitions/trueValue"
+            }
+          }
+        }
+      }
+    },
+    "attachedContent": {
+      "$ref": "#/definitions/attachedContent"
+    },
+    "multiFileSetExport": {
+      "$ref": "#/definitions/multiFileSetExport"
+    },
+    "reportExport": {
+      "$ref": "#/definitions/reportExport"
+    },
+    "perFileEffectRequirements": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "localExportPreparation",
+        "effectIntent",
+        "effectApproval",
+        "commitAndVerification",
+        "outcomeEvidence",
+        "driftInvalidation",
+        "cancellation",
+        "nativeBatchChoice"
+      ],
+      "properties": {
+        "localExportPreparation": {
+          "$ref": "#/definitions/localExportPreparation"
+        },
+        "effectIntent": {
+          "$ref": "#/definitions/effectIntent"
+        },
+        "effectApproval": {
+          "$ref": "#/definitions/effectApproval"
+        },
+        "commitAndVerification": {
+          "$ref": "#/definitions/commitAndVerification"
+        },
+        "outcomeEvidence": {
+          "$ref": "#/definitions/outcomeEvidence"
+        },
+        "driftInvalidation": {
+          "$ref": "#/definitions/driftInvalidation"
+        },
+        "cancellation": {
+          "$ref": "#/definitions/cancellation"
+        },
+        "nativeBatchChoice": {
+          "$ref": "#/definitions/nativeBatchChoice"
+        }
+      }
+    },
+    "authoritySeparations": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "policyEligibilityIsEffectApproval",
+        "localExportGrantsPublicReleasePermission",
+        "localExportProvesPublicReleasePermission",
+        "localExportProvesSending",
+        "localExportProvesDelivery",
+        "localExportProvesPublication",
+        "platformResponseIsEffectReceipt",
+        "harnessOrToolResultIsEffectReceipt"
+      ],
+      "properties": {
+        "policyEligibilityIsEffectApproval": {
+          "$ref": "#/definitions/falseValue"
+        },
+        "localExportGrantsPublicReleasePermission": {
+          "$ref": "#/definitions/falseValue"
+        },
+        "localExportProvesPublicReleasePermission": {
+          "$ref": "#/definitions/falseValue"
+        },
+        "localExportProvesSending": {
+          "$ref": "#/definitions/falseValue"
+        },
+        "localExportProvesDelivery": {
+          "$ref": "#/definitions/falseValue"
+        },
+        "localExportProvesPublication": {
+          "$ref": "#/definitions/falseValue"
+        },
+        "platformResponseIsEffectReceipt": {
+          "$ref": "#/definitions/falseValue"
+        },
+        "harnessOrToolResultIsEffectReceipt": {
+          "$ref": "#/definitions/falseValue"
+        }
+      }
+    }
+  },
+  "definitions": {
+    "trueValue": {
+      "enum": [
+        true
+      ]
+    },
+    "falseValue": {
+      "enum": [
+        false
+      ]
+    },
+    "localFilesystemRule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ruleId",
+        "policyResult",
+        "effectKind",
+        "destination",
+        "target"
+      ],
+      "properties": {
+        "ruleId": {
+          "enum": [
+            "user-selected-local-filesystem-file"
+          ]
+        },
+        "policyResult": {
+          "enum": [
+            "eligible-only"
+          ]
+        },
+        "effectKind": {
+          "enum": [
+            "file-effect"
+          ]
+        },
+        "destination": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "objectKind",
+            "selection"
+          ],
+          "properties": {
+            "kind": {
+              "enum": [
+                "local-filesystem"
+              ]
+            },
+            "objectKind": {
+              "enum": [
+                "file"
+              ]
+            },
+            "selection": {
+              "enum": [
+                "platform-native-user-selector"
+              ]
+            }
+          }
+        },
+        "target": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "exactIdentityRequired",
+            "eligibleKinds"
+          ],
+          "properties": {
+            "exactIdentityRequired": {
+              "$ref": "#/definitions/trueValue"
+            },
+            "eligibleKinds": {
+              "type": "array",
+              "minItems": 5,
+              "maxItems": 5,
+              "uniqueItems": true,
+              "items": {
+                "enum": [
+                  "editorial-deliverable-revision",
+                  "production-document-version",
+                  "book-delivery-package-version",
+                  "report",
+                  "database-export-package"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "attachedContent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "annotations",
+        "changeSuggestions",
+        "sourceVersionDocxContent",
+        "editorNotes",
+        "hardExclusions"
+      ],
+      "properties": {
+        "annotations": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "mayLeaveWithTarget",
+            "renderedAsComments",
+            "authorNamesIncluded",
+            "defaultIncluded",
+            "editorMayExclude"
+          ],
+          "properties": {
+            "mayLeaveWithTarget": {
+              "$ref": "#/definitions/trueValue"
+            },
+            "renderedAsComments": {
+              "$ref": "#/definitions/trueValue"
+            },
+            "authorNamesIncluded": {
+              "$ref": "#/definitions/trueValue"
+            },
+            "defaultIncluded": {
+              "$ref": "#/definitions/trueValue"
+            },
+            "editorMayExclude": {
+              "$ref": "#/definitions/trueValue"
+            }
+          }
+        },
+        "changeSuggestions": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "mayLeaveWithTarget",
+            "renderedAsTrackedChanges",
+            "defaultIncluded",
+            "editorMayExclude"
+          ],
+          "properties": {
+            "mayLeaveWithTarget": {
+              "$ref": "#/definitions/trueValue"
+            },
+            "renderedAsTrackedChanges": {
+              "$ref": "#/definitions/trueValue"
+            },
+            "defaultIncluded": {
+              "$ref": "#/definitions/trueValue"
+            },
+            "editorMayExclude": {
+              "$ref": "#/definitions/trueValue"
+            }
+          }
+        },
+        "sourceVersionDocxContent": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "mayLeaveWithTarget",
+            "retainedWithSourceVersion",
+            "restoredOnExport",
+            "defaultIncluded",
+            "editorMayExclude",
+            "contentClasses"
+          ],
+          "properties": {
+            "mayLeaveWithTarget": {
+              "$ref": "#/definitions/trueValue"
+            },
+            "retainedWithSourceVersion": {
+              "$ref": "#/definitions/trueValue"
+            },
+            "restoredOnExport": {
+              "$ref": "#/definitions/trueValue"
+            },
+            "defaultIncluded": {
+              "$ref": "#/definitions/trueValue"
+            },
+            "editorMayExclude": {
+              "$ref": "#/definitions/trueValue"
+            },
+            "contentClasses": {
+              "type": "array",
+              "minItems": 5,
+              "maxItems": 5,
+              "uniqueItems": true,
+              "items": {
+                "enum": [
+                  "headers-and-footers",
+                  "page-setup",
+                  "style-sheets",
+                  "text-boxes",
+                  "images"
+                ]
+              }
+            }
+          }
+        },
+        "editorNotes": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "mayLeaveWithTarget",
+            "defaultIncluded",
+            "editorMayInclude"
+          ],
+          "properties": {
+            "mayLeaveWithTarget": {
+              "$ref": "#/definitions/trueValue"
+            },
+            "defaultIncluded": {
+              "$ref": "#/definitions/falseValue"
+            },
+            "editorMayInclude": {
+              "$ref": "#/definitions/trueValue"
+            }
+          }
+        },
+        "hardExclusions": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "retainedExternalSourcesNeverExport",
+            "evidenceLinksNeverExport"
+          ],
+          "properties": {
+            "retainedExternalSourcesNeverExport": {
+              "$ref": "#/definitions/trueValue"
+            },
+            "evidenceLinksNeverExport": {
+              "$ref": "#/definitions/trueValue"
+            }
+          }
+        }
+      }
+    },
+    "multiFileSetExport": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "folderDestinationAllowed",
+        "destinationObjectKind",
+        "destinationSelection",
+        "packageMemberSelection",
+        "membersSeparatelyExportable",
+        "wholePackageImplicitlyCovered",
+        "enumeratedFileSetFrozenBeforeApproval",
+        "oneApprovalCoversExactEnumeratedFileSet",
+        "perFilePreparationRequired",
+        "perFileReceiptRequired",
+        "enumeratedFileSetIsStandingPermission",
+        "unseenOrFutureFilesCovered",
+        "memberOrSetDriftInvalidatesApproval"
+      ],
+      "properties": {
+        "folderDestinationAllowed": {
+          "$ref": "#/definitions/trueValue"
+        },
+        "destinationObjectKind": {
+          "enum": [
+            "folder"
+          ]
+        },
+        "destinationSelection": {
+          "enum": [
+            "platform-native-user-selector"
+          ]
+        },
+        "packageMemberSelection": {
+          "enum": [
+            "editor-chosen-subset"
+          ]
+        },
+        "membersSeparatelyExportable": {
+          "$ref": "#/definitions/trueValue"
+        },
+        "wholePackageImplicitlyCovered": {
+          "$ref": "#/definitions/falseValue"
+        },
+        "enumeratedFileSetFrozenBeforeApproval": {
+          "$ref": "#/definitions/trueValue"
+        },
+        "oneApprovalCoversExactEnumeratedFileSet": {
+          "$ref": "#/definitions/trueValue"
+        },
+        "perFilePreparationRequired": {
+          "$ref": "#/definitions/trueValue"
+        },
+        "perFileReceiptRequired": {
+          "$ref": "#/definitions/trueValue"
+        },
+        "enumeratedFileSetIsStandingPermission": {
+          "$ref": "#/definitions/falseValue"
+        },
+        "unseenOrFutureFilesCovered": {
+          "$ref": "#/definitions/falseValue"
+        },
+        "memberOrSetDriftInvalidatesApproval": {
+          "$ref": "#/definitions/trueValue"
+        }
+      }
+    },
+    "reportExport": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "manuscriptFormatAndFidelityRulesApply",
+        "docxPrimary",
+        "pdfOptional",
+        "markdownFallback"
+      ],
+      "properties": {
+        "manuscriptFormatAndFidelityRulesApply": {
+          "$ref": "#/definitions/trueValue"
+        },
+        "docxPrimary": {
+          "$ref": "#/definitions/trueValue"
+        },
+        "pdfOptional": {
+          "$ref": "#/definitions/trueValue"
+        },
+        "markdownFallback": {
+          "$ref": "#/definitions/trueValue"
+        }
+      }
+    },
+    "localExportPreparation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "required",
+        "perFile",
+        "frozen",
+        "createdAfterNativeDestinationAndCollisionResolution",
+        "bindings"
+      ],
+      "properties": {
+        "required": {
+          "$ref": "#/definitions/trueValue"
+        },
+        "perFile": {
+          "$ref": "#/definitions/trueValue"
+        },
+        "frozen": {
+          "$ref": "#/definitions/trueValue"
+        },
+        "createdAfterNativeDestinationAndCollisionResolution": {
+          "$ref": "#/definitions/trueValue"
+        },
+        "bindings": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "exactTargetObjectAndVersionOrRevision",
+            "renderedFormat",
+            "filename",
+            "finalLocalPath",
+            "fidelityDisposition",
+            "payloadDigest",
+            "createOrReplaceDisposition",
+            "externalExportPolicyIdAndVersion"
+          ],
+          "properties": {
+            "exactTargetObjectAndVersionOrRevision": {
+              "$ref": "#/definitions/trueValue"
+            },
+            "renderedFormat": {
+              "$ref": "#/definitions/trueValue"
+            },
+            "filename": {
+              "$ref": "#/definitions/trueValue"
+            },
+            "finalLocalPath": {
+              "$ref": "#/definitions/trueValue"
+            },
+            "fidelityDisposition": {
+              "$ref": "#/definitions/trueValue"
+            },
+            "payloadDigest": {
+              "$ref": "#/definitions/trueValue"
+            },
+            "createOrReplaceDisposition": {
+              "$ref": "#/definitions/trueValue"
+            },
+            "externalExportPolicyIdAndVersion": {
+              "$ref": "#/definitions/trueValue"
+            }
+          }
+        }
+      }
+    },
+    "effectIntent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "required",
+        "stableIdentityRequired",
+        "bindsExactLocalExportPreparation",
+        "bindsExactTargetPayloadAndPolicy"
+      ],
+      "properties": {
+        "required": {
+          "$ref": "#/definitions/trueValue"
+        },
+        "stableIdentityRequired": {
+          "$ref": "#/definitions/trueValue"
+        },
+        "bindsExactLocalExportPreparation": {
+          "$ref": "#/definitions/trueValue"
+        },
+        "bindsExactTargetPayloadAndPolicy": {
+          "$ref": "#/definitions/trueValue"
+        }
+      }
+    },
+    "effectApproval": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "required",
+        "exactEffectIntentOnly",
+        "separateFromPolicyEligibility",
+        "requiredBeforeCommit"
+      ],
+      "properties": {
+        "required": {
+          "$ref": "#/definitions/trueValue"
+        },
+        "exactEffectIntentOnly": {
+          "$ref": "#/definitions/trueValue"
+        },
+        "separateFromPolicyEligibility": {
+          "$ref": "#/definitions/trueValue"
+        },
+        "requiredBeforeCommit": {
+          "$ref": "#/definitions/trueValue"
+        }
+      }
+    },
+    "commitAndVerification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "stageBeforeTargetMutation",
+        "atomicFileCommit",
+        "verifyFinalLocalOutcome",
+        "receiptOnlyAfterVerification"
+      ],
+      "properties": {
+        "stageBeforeTargetMutation": {
+          "$ref": "#/definitions/trueValue"
+        },
+        "atomicFileCommit": {
+          "$ref": "#/definitions/trueValue"
+        },
+        "verifyFinalLocalOutcome": {
+          "$ref": "#/definitions/trueValue"
+        },
+        "receiptOnlyAfterVerification": {
+          "$ref": "#/definitions/trueValue"
+        }
+      }
+    },
+    "outcomeEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "perFile",
+        "successRequiresEffectReceipt",
+        "nonSuccessRequiresClassifiedOutcome",
+        "ambiguousOutcomeAllowsAutomaticRetry",
+        "ambiguousOutcomeRequiresReconciliation"
+      ],
+      "properties": {
+        "perFile": {
+          "$ref": "#/definitions/trueValue"
+        },
+        "successRequiresEffectReceipt": {
+          "$ref": "#/definitions/trueValue"
+        },
+        "nonSuccessRequiresClassifiedOutcome": {
+          "$ref": "#/definitions/trueValue"
+        },
+        "ambiguousOutcomeAllowsAutomaticRetry": {
+          "$ref": "#/definitions/falseValue"
+        },
+        "ambiguousOutcomeRequiresReconciliation": {
+          "$ref": "#/definitions/trueValue"
+        }
+      }
+    },
+    "driftInvalidation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "materialTargetPayloadOrPolicyDriftInvalidatesPreparationIntentAndApproval",
+        "pathOrDispositionChangeRequiresNewNativeResolution"
+      ],
+      "properties": {
+        "materialTargetPayloadOrPolicyDriftInvalidatesPreparationIntentAndApproval": {
+          "$ref": "#/definitions/trueValue"
+        },
+        "pathOrDispositionChangeRequiresNewNativeResolution": {
+          "$ref": "#/definitions/trueValue"
+        }
+      }
+    },
+    "cancellation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "classification",
+        "attemptedFileEffect",
+        "effectReceipt"
+      ],
+      "properties": {
+        "classification": {
+          "enum": [
+            "no-effect"
+          ]
+        },
+        "attemptedFileEffect": {
+          "$ref": "#/definitions/falseValue"
+        },
+        "effectReceipt": {
+          "$ref": "#/definitions/falseValue"
+        }
+      }
+    },
+    "nativeBatchChoice": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "onlyExactCurrentlyEnumeratedCollisions",
+        "standingOverwritePermission"
+      ],
+      "properties": {
+        "onlyExactCurrentlyEnumeratedCollisions": {
+          "$ref": "#/definitions/trueValue"
+        },
+        "standingOverwritePermission": {
+          "$ref": "#/definitions/falseValue"
+        }
+      }
+    }
+  }
+}

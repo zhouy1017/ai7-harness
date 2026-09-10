@@ -41,13 +41,13 @@ const DENIED_PIN: ProviderProcessingPin = {
   operationalScope: 'development-ci', version: 'v1', decision: 'deny', authorizedLiveTransmissionCount: 0,
 };
 const ELIGIBLE_PIN: ProviderProcessingPin = {
-  operationalScope: 'developer-live', version: 'v4', decision: 'eligible-only', authorizedLiveTransmissionCount: 'bounded-by-run',
+  operationalScope: 'developer-live', version: 'v5', decision: 'eligible-only', authorizedLiveTransmissionCount: 'bounded-by-run',
 };
 const DENIED_POLICY_PIN: ResultSetPolicyPin = {
-  operationalScope: 'development-ci', providerProcessingVersion: 'v1', activePolicySetVersion: 'v4', liveTransmissions: 0,
+  operationalScope: 'development-ci', providerProcessingVersion: 'v1', activePolicySetVersion: 'v5', liveTransmissions: 0,
 };
 const ELIGIBLE_POLICY_PIN: ResultSetPolicyPin = {
-  operationalScope: 'developer-live', providerProcessingVersion: 'v4', activePolicySetVersion: 'v4', liveTransmissions: 'bounded-by-run',
+  operationalScope: 'developer-live', providerProcessingVersion: 'v5', activePolicySetVersion: 'v5', liveTransmissions: 'bounded-by-run',
 };
 
 describe('runBudgetCeilingLabel', () => {
@@ -65,8 +65,8 @@ describe('providerProcessingLabel', () => {
   });
 
   it('renders a developer-live pin with the bounded-by-run token verbatim', () => {
-    const pin: ProviderProcessingPin = { operationalScope: 'developer-live', version: 'v4', decision: 'eligible-only', authorizedLiveTransmissionCount: 'bounded-by-run' };
-    expect(providerProcessingLabel(pin)).toBe('developer-live · v4 · eligible-only · bounded-by-run 次实时传输');
+    const pin: ProviderProcessingPin = { operationalScope: 'developer-live', version: 'v5', decision: 'eligible-only', authorizedLiveTransmissionCount: 'bounded-by-run' };
+    expect(providerProcessingLabel(pin)).toBe('developer-live · v5 · eligible-only · bounded-by-run 次实时传输');
   });
 });
 
@@ -76,7 +76,7 @@ describe('remoteBindingPolicyReading', () => {
   });
 
   it('states a developer-live pin as the bound it is, never as a transmission count', () => {
-    expect(remoteBindingPolicyReading(ELIGIBLE_PIN)).toBe('developer-live · v4 · 受运行边界约束');
+    expect(remoteBindingPolicyReading(ELIGIBLE_PIN)).toBe('developer-live · v5 · 受运行边界约束');
     expect(remoteBindingPolicyReading(ELIGIBLE_PIN)).not.toContain('次实时传输');
   });
 });
@@ -98,7 +98,7 @@ describe('taskAuthorizationDispatchNote', () => {
 
   it('states the bounded live permission of an eligible-only plan instead of a fixed refusal', () => {
     expect(taskAuthorizationDispatchNote(ELIGIBLE_PIN))
-      .toBe('本流程只冻结并记录本次标准直接授权；Provider Processing v4 仅允许运行边界内的实时传输。');
+      .toBe('本流程只冻结并记录本次标准直接授权；Provider Processing v5 仅允许运行边界内的实时传输。');
   });
 
   it('states only what the flow does before a plan has frozen a pin', () => {
@@ -117,7 +117,7 @@ describe('analysisKindSubtitle', () => {
   });
 
   it('states an eligible-only binding from either pin shape', () => {
-    const eligible = '一个精确版本化的覆盖式分析种类；远程绑定在 Provider Processing v4 下仅限资格，结果集修订版不修改稿件。';
+    const eligible = '一个精确版本化的覆盖式分析种类；远程绑定在 Provider Processing v5 下仅限资格，结果集修订版不修改稿件。';
     expect(analysisKindSubtitle(ELIGIBLE_PIN)).toBe(eligible);
     expect(analysisKindSubtitle(ELIGIBLE_POLICY_PIN)).toBe(eligible);
   });

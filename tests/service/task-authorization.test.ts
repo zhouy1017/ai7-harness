@@ -52,7 +52,7 @@ const DEVELOPMENT_CI_PIN: ProviderProcessingPin = {
   operationalScope: 'development-ci', version: 'v1', decision: 'deny', authorizedLiveTransmissionCount: 0,
 };
 const DEVELOPER_LIVE_PIN: ProviderProcessingPin = {
-  operationalScope: 'developer-live', version: 'v4', decision: 'eligible-only', authorizedLiveTransmissionCount: 'bounded-by-run',
+  operationalScope: 'developer-live', version: 'v5', decision: 'eligible-only', authorizedLiveTransmissionCount: 'bounded-by-run',
 };
 
 let roots: ServiceTestRoots;

@@ -29,7 +29,7 @@ import { normalizeModelResponse, type CanonicalModelResult } from './response-no
  * models, so a model's capabilities cannot hang off the route that carries it.
  * `deepseek-open-platform` is the unchanged production route
  * (`POST https://api.deepseek.com/chat/completions`, model `deepseek-v4-pro`, thinking enabled at
- * high reasoning effort). `opencode-go` is the developer-live route of Provider Processing v4
+ * high reasoning effort). `opencode-go` is the developer-live route of Provider Processing v5
  * (`POST https://opencode.ai/zen/go/v1/chat/completions`, bare model id `deepseek-v4-flash`, a
  * standard chat-completions body with no DeepSeek-specific parameters, and the technical Session id
  * in `x-opencode-session` for the gateway's prompt cache). `opencode-go-messages` and

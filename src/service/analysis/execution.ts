@@ -126,7 +126,7 @@ export interface ExecutionOwnerDependencies {
   readonly launchPolicy: LaunchPolicyProjection;
   readonly fixture: ResolvedModelFixture | null;
   readonly secretResolver: SecretResolver;
-  /** The developer-live launch facts and captured transport; present exactly when the policy bound v4. */
+  /** The developer-live launch facts and captured transport; present exactly when the policy bound v5. */
   readonly developerLive?: DeveloperLiveRuntime | null;
 }
 
@@ -267,7 +267,7 @@ export function unparsableAssuranceSamplingAnswerGapReason(code: AssuranceSampli
 }
 
 /**
- * The transmittable set under v4: exact `sample1` and nothing else (settlement l). ADR 0065 admits
+ * The transmittable set under v5: exact `sample1` and nothing else (settlement l). ADR 0065 admits
  * only Owner-designated Public SampleBooks, and this slice fixes the set to the one Book whose
  * lineage the plan already pins. Any other Book refuses before dispatch rather than at the gate, so
  * no unadmitted manuscript is ever assembled into a payload at all.
@@ -281,7 +281,7 @@ export class BaselineAnalysisExecutionOwner {
   #disposed = false;
 
   constructor(deps: ExecutionOwnerDependencies) {
-    // The developer-live runtime and the bound scope are one fact: a v4 launch that reached this owner
+    // The developer-live runtime and the bound scope are one fact: a v5 launch that reached this owner
     // without its launch facts and captured transport could never enforce the ceiling or the cache, and a
     // runtime under any other scope would be a transport nothing may use.
     const live = deps.developerLive ?? null;
@@ -422,7 +422,8 @@ export class BaselineAnalysisExecutionOwner {
     if (context.stopped || active.interrupted) return runReportReflectionNotRun(RUN_REPORT_REFLECTION_NOT_REACHED);
     if (live !== null && policy.providerProcessing.runReportReflectionAllowed !== true) {
       // The reflection is a transmission the active Provider Processing policy does not name, so it
-      // never forms a request at all. Policy v4 authorizes one transmission per Analysis Unit.
+      // never forms a request at all. The verified v5 document names it; a projection that does not
+      // is exactly the policy-bounded case this guard exists for.
       return { ifRedone: { state: 'policy-bounded', items: [], reason: RUN_REPORT_REFLECTION_POLICY_BOUNDED }, usage: RUN_REPORT_NO_USAGE };
     }
     if (context.ceilingState() === 'reached') {
@@ -484,9 +485,9 @@ export class BaselineAnalysisExecutionOwner {
       if (policy.operationalScope !== 'development-ci' || policy.providerProcessing.version !== 'v1' || policy.providerProcessing.liveTransmissionAllowed !== false) {
         throw new ExecutionAdmissionError('EXECUTION_POLICY_INVALID', '当前可信策略不是 development-ci · Provider Processing v1。');
       }
-    } else if (policy.operationalScope !== 'developer-live' || policy.providerProcessing.version !== 'v4' ||
+    } else if (policy.operationalScope !== 'developer-live' || policy.providerProcessing.version !== 'v5' ||
         policy.providerProcessing.decision !== 'eligible-only' || policy.providerProcessing.liveTransmissionAllowed !== true) {
-      throw new ExecutionAdmissionError('EXECUTION_POLICY_INVALID', '当前可信策略不是 developer-live · Provider Processing v4。');
+      throw new ExecutionAdmissionError('EXECUTION_POLICY_INVALID', '当前可信策略不是 developer-live · Provider Processing v5。');
     }
     const fixture = this.#deps.fixture;
     // The route the plan froze, resolved once: the deterministic fixture, or the live route profile.
@@ -494,7 +495,9 @@ export class BaselineAnalysisExecutionOwner {
     const model = live === null ? LOCAL_DETERMINISTIC_MODEL : OPENCODE_GO_V4_FLASH_PROFILE.model;
     const credentialSlot = live === null ? 'deepseek-api-key' as const : OPENCODE_GO_ROUTE_PROFILE.credentialSlot;
     const credentialReference = live === null ? facts.credentialReference : DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE;
-    const runBudgetCeiling: RunBudgetCeiling = live === null ? { kind: 'unset' } : live.launch.runBudgetCeiling;
+    // The ceiling the frozen plan carries, already resolved: an explicit launch total, or the policy's
+    // per-frozen-unit default against this Run's own frozen unit count. Never re-derived at dispatch.
+    const runBudgetCeiling: RunBudgetCeiling = facts.runBudgetCeiling === 'unset' ? { kind: 'unset' } : facts.runBudgetCeiling;
     // The test item purpose is the Task mode, so a first baseline and each update mode number their
     // live calls separately and a repeated purpose can never collide with an unrelated test.
     const testItemPurpose = facts.update === null ? 'first-baseline' : facts.update.mode;
@@ -546,7 +549,7 @@ export class BaselineAnalysisExecutionOwner {
       model,
       systemPrompt: definition.systemPrompt,
       promptContractDigest,
-      // One technical Session per Analysis Unit under v4; the deterministic route keeps its single
+      // One technical Session per Analysis Unit under v5; the deterministic route keeps its single
       // accumulating Session, so J-04's proven composition is untouched.
       ...(live === null ? {} : { sessionMode: 'per-unit' as const }),
       adapterFactory: (codes) => {
@@ -620,8 +623,8 @@ export class BaselineAnalysisExecutionOwner {
         credentialSlot: { modelRole: 'Main Editorial Role', slot: credentialSlot, credentialReference },
         outboundDataCategory: 'public-or-synthetic',
         policyPin: live === null
-          ? { operationalScope: 'development-ci', providerProcessingVersion: 'v1', activePolicySetVersion: 'v4', liveTransmissions: 0 }
-          : { operationalScope: 'developer-live', providerProcessingVersion: 'v4', activePolicySetVersion: 'v4', liveTransmissions: 'bounded-by-run' },
+          ? { operationalScope: 'development-ci', providerProcessingVersion: 'v1', activePolicySetVersion: 'v5', liveTransmissions: 0 }
+          : { operationalScope: 'developer-live', providerProcessingVersion: 'v5', activePolicySetVersion: 'v5', liveTransmissions: 'bounded-by-run' },
         runBudgetCeiling: runBudgetCeiling.kind === 'unset' ? 'unset' : runBudgetCeiling,
         dispatchAttribution: 'Dispatch',
         boundAt,
@@ -652,7 +655,7 @@ export class BaselineAnalysisExecutionOwner {
         outboundDataCategory: 'public-or-synthetic',
         policy: live === null
           ? { operationalScope: 'development-ci', providerProcessingVersion: 'v1', liveTransmissionAllowed: false, authorizedLiveTransmissionCount: 0 }
-          : { operationalScope: 'developer-live', providerProcessingVersion: 'v4', liveTransmissionAllowed: true, authorizedLiveTransmissionCount: 'bounded-by-run' },
+          : { operationalScope: 'developer-live', providerProcessingVersion: 'v5', liveTransmissionAllowed: true, authorizedLiveTransmissionCount: 'bounded-by-run' },
         admittedUserMessages,
       };
       harness.bindExecution({ harnessSessionId, behaviorCompositionDigest: harness.composition.digest, promptContractDigest });
@@ -891,7 +894,8 @@ export class BaselineAnalysisExecutionOwner {
           ({ state: 'gap', code, reason, requestDigest });
         if (live !== null && policy.providerProcessing.crossUnitReductionAllowed !== true) {
           // The reduction is a transmission the active Provider Processing policy does not name, so it
-          // never forms a request at all. Policy v4 authorizes one transmission per Analysis Unit.
+          // never forms a request at all. The verified v5 document names it; a projection that does not
+          // is exactly the policy-bounded case this guard exists for.
           crossUnit = gap('policy-bounded', '跨单元归纳未派发：当前 Provider Processing 策略仅授权单元数内的传输');
         } else if (ceilingState() === 'reached') {
           // The ceiling is evaluated before this dispatch exactly as before a unit's, so a Run that has
@@ -1078,7 +1082,8 @@ export class BaselineAnalysisExecutionOwner {
     const sampled = { inputTokens: 0, outputTokens: 0, turnsWithUsage: 0 };
     if (live !== null && policy.providerProcessing.assuranceSamplingAllowed !== true) {
       // The sampling turns are transmissions the active Provider Processing policy does not name, so
-      // none of them forms a request. Policy v4 authorizes one transmission per Analysis Unit.
+      // none of them forms a request. The verified v5 document names them; a projection that does not
+      // is exactly the policy-bounded case this guard exists for.
       return assuranceSampleOutcome(draw, [], null, [ASSURANCE_SAMPLING_POLICY_BOUNDED]);
     }
     for (const turn of assuranceSamplingTurns(draw.sampled)) {

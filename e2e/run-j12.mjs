@@ -1268,10 +1268,10 @@ async function main() {
         firstConnection.binding?.credentialSlot === 'deepseek-api-key' &&
         firstConnection.binding?.approvedFallbackChain?.length === 0 &&
         firstConnection.policy?.operationalScope === 'development-ci' &&
-        firstConnection.policy?.activePolicySetVersion === 'v4' &&
+        firstConnection.policy?.activePolicySetVersion === 'v5' &&
         firstConnection.policy?.providerProcessing?.version === 'v1' &&
         firstConnection.policy?.providerProcessing?.authorizedLiveTransmissionCount === 0 &&
-        firstConnection.policy?.externalExport?.version === 'v1' &&
+        firstConnection.policy?.externalExport?.version === 'v2' &&
         firstConnection.policy?.externalExport?.policyEligibilityIsEffectApproval === false &&
         firstConnection.policy?.publicReleasePermission?.present === false,
       'model-first-nonsecret-projection',

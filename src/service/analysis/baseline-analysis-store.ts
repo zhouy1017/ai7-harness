@@ -31,6 +31,7 @@ import {
   type BaselineAnalysisUpdateProjection,
   type BaselineAnalysisUpdateRequest,
   type CoverageManifestProjection,
+  type DeveloperLiveCeiling,
   type LaunchPolicyProjection,
   type MaterialPlanInputsProjection,
   type ModelCredentialOperationState,
@@ -286,6 +287,8 @@ export interface ExecutionPlanFacts {
   readonly artifactPin: { nativeCarrierSha256: string; sidecarRevision: 2; sidecarSha256: string };
   readonly promptContractDigest: string;
   readonly behaviorCompositionDigest: string;
+  /** The ceiling the frozen Provider Resolution Plan carries, already resolved against the frozen unit count. */
+  readonly runBudgetCeiling: RunBudgetCeilingState;
   /** `null` for the first baseline; the verified reuse plan for an update Task. */
   readonly update: ExecutionUpdateFacts | null;
 }
@@ -394,9 +397,10 @@ function runIsActive(state: BaselineAnalysisRunState | null): boolean {
  * The launch facts a Run's plan must freeze, handed to the ledger once by the service entry. Under
  * `development-ci` the plan stays exactly what it was: the denied production binding, the local
  * deterministic route when one is bound, and an `unset` ceiling. Under `developer-live` the plan
- * freezes the v4 binding — the `opencode-go` route, its bare model id, its fixed development
- * Credential Reference, and the required token ceiling — because every one of those is a material
- * plan input that must be pinned before authorization, not chosen at dispatch.
+ * freezes the v5 binding — the `opencode-go` route, its bare model id, its fixed development
+ * Credential Reference, and the required token ceiling, explicit or the policy's per-frozen-unit
+ * default — because every one of those is a material plan input that must be pinned before
+ * authorization, not chosen at dispatch.
  */
 export interface LaunchBinding {
   readonly operationalScope: 'development-ci' | 'developer-live';
@@ -406,11 +410,43 @@ export interface LaunchBinding {
     readonly endpoint: string;
     readonly credentialSlot: 'opencode-go';
     readonly credentialReference: string;
-    readonly runBudgetCeiling: { readonly kind: 'tokens'; readonly maxTotalTokens: number };
+    readonly runBudgetCeiling: DeveloperLiveCeiling;
   } | null;
 }
 
 const DEVELOPMENT_CI_LAUNCH: LaunchBinding = { operationalScope: 'development-ci', live: null };
+
+/**
+ * Resolve the bound ceiling against the frozen Coverage Manifest unit count: an explicit form
+ * ceiling is already a total, and the policy default is 30,000 tokens times the unit count
+ * (ADR 0070), computed here — after the manifest is frozen and before the plan is.
+ */
+export function resolveDeveloperLiveCeiling(ceiling: DeveloperLiveCeiling, unitCount: number): { kind: 'tokens'; maxTotalTokens: number } {
+  return ceiling.kind === 'tokens'
+    ? ceiling
+    : { kind: 'tokens', maxTotalTokens: ceiling.tokensPerFrozenUnit * unitCount };
+}
+
+/** The exact ceiling state a frozen Provider Resolution Plan carries; the plan writes only this shape. */
+function runBudgetCeilingStateOf(value: unknown): RunBudgetCeilingState {
+  if (value === 'unset') return 'unset';
+  const maxTotalTokens = isRecord(value) ? value['maxTotalTokens'] : null;
+  requireAnalysis(isRecord(value) && value['kind'] === 'tokens' && typeof maxTotalTokens === 'number' && Number.isSafeInteger(maxTotalTokens) && maxTotalTokens > 0,
+    'ANALYSIS_RECORD_INVALID', 'Run Budget Ceiling 记录无效。');
+  return { kind: 'tokens', maxTotalTokens };
+}
+
+/**
+ * The one reading every developer-live surface states for the bound ceiling. An explicit ceiling is
+ * its total; the per-frozen-unit default states the formula before a manifest exists and the computed
+ * total once one does.
+ */
+function ceilingReading(ceiling: DeveloperLiveCeiling, unitCount: number | null): string {
+  if (ceiling.kind === 'tokens') return `${ceiling.maxTotalTokens} tokens`;
+  return unitCount === null
+    ? `${ceiling.tokensPerFrozenUnit} tokens × 冻结单元数`
+    : `${ceiling.tokensPerFrozenUnit * unitCount} tokens（${ceiling.tokensPerFrozenUnit} × ${unitCount} 个冻结单元）`;
+}
 
 /**
  * Every statement a Task surface makes about the trusted scope, the Provider Processing version, the
@@ -421,36 +457,37 @@ const DEVELOPMENT_CI_LAUNCH: LaunchBinding = { operationalScope: 'development-ci
  * transmission one row above the endpoint the Run was calling is the defect these derive away.
  *
  * The three are exported so a test can compare both readings against the captured base text directly,
- * without standing up the Run each surface would otherwise need.
+ * without standing up the Run each surface would otherwise need. `unitCount` is the frozen Coverage
+ * Manifest count when one exists, so the per-frozen-unit default can state its computed total.
  */
-export function namedNonEffects(live: LaunchBinding['live']): ReadonlyArray<string> {
+export function namedNonEffects(live: LaunchBinding['live'], unitCount: number | null = null): ReadonlyArray<string> {
   return [
     '不修改稿件，不创建修订版或事实判定',
     '不创建学习资格、策略激活、Enrollment、Apply 或 Effect',
     '只读取当前图书的任务输入修订版，不读取其他图书',
     live === null
       ? 'development-ci · Provider Processing v1：0 次实时传输，远程绑定被拒绝'
-      : `developer-live · Provider Processing v4：实时传输受运行边界约束（任务运行预算上限 ${live.runBudgetCeiling.maxTotalTokens} tokens），远程绑定 ${live.route} · ${live.model} 已获准`,
+      : `developer-live · Provider Processing v5：实时传输受运行边界约束（任务运行预算上限 ${ceilingReading(live.runBudgetCeiling, unitCount)}），远程绑定 ${live.route} · ${live.model} 已获准`,
     '凭据值不进入任务账本、协议帧、日志、诊断或 Session 内容',
   ];
 }
 
 /** Why a Run that cannot dispatch was blocked; only the first reason states the launch's own facts. */
-export function blockedReasons(live: LaunchBinding['live']): ReadonlyArray<string> {
+export function blockedReasons(live: LaunchBinding['live'], unitCount: number | null = null): ReadonlyArray<string> {
   return [
     live === null
       ? '当前可信启动范围为 development-ci，Provider Processing v1 允许 0 次实时传输；远程 DeepSeek 绑定被拒绝。'
-      : `当前可信启动范围为 developer-live，Provider Processing v4 允许的实时传输受运行边界约束（任务运行预算上限 ${live.runBudgetCeiling.maxTotalTokens} tokens）；远程绑定 ${live.route} · ${live.model} 已获准。`,
+      : `当前可信启动范围为 developer-live，Provider Processing v5 允许的实时传输受运行边界约束（任务运行预算上限 ${ceilingReading(live.runBudgetCeiling, unitCount)}）；远程绑定 ${live.route} · ${live.model} 已获准。`,
     '未提供 J-04 专用的本地确定性模型适配器控制，因此没有可执行的本地路由。',
     '运行授权已记录；派发前阻止，未创建 Session、未构造 Provider payload、未访问网络。',
   ];
 }
 
 /** What an analysis update does to the Provider, stated for the launch the next Run would execute under. */
-export function providerConsequence(live: LaunchBinding['live']): string {
+export function providerConsequence(live: LaunchBinding['live'], unitCount: number | null = null): string {
   return live === null
     ? '与首次基线分析相同：远程 DeepSeek 绑定被 development-ci · Provider Processing v1 拒绝（0 次实时传输），只有 J-04 控制绑定的 AI7 本地确定性模型适配器可执行；外发数据类别 public-or-synthetic；未设置任务预算上限；只有重算单元形成模型请求并计入用量，复用单元不形成任何模型负载。'
-    : `与首次基线分析相同：远程绑定 ${live.route} · ${live.model} 在 developer-live · Provider Processing v4 下可执行，实时传输受运行边界约束；外发数据类别 public-or-synthetic；任务运行预算上限 ${live.runBudgetCeiling.maxTotalTokens} tokens；每个重算单元形成一次实时传输并计入用量，复用单元不形成任何模型负载。`;
+    : `与首次基线分析相同：远程绑定 ${live.route} · ${live.model} 在 developer-live · Provider Processing v5 下可执行，实时传输受运行边界约束；外发数据类别 public-or-synthetic；任务运行预算上限 ${ceilingReading(live.runBudgetCeiling, unitCount)}；每个重算单元形成一次实时传输并计入用量，复用单元不形成任何模型负载。`;
 }
 
 /**
@@ -507,9 +544,12 @@ export class BaselineAnalysisStore {
   bindLaunch(launch: LaunchBinding): void {
     requireAnalysis((launch.operationalScope === 'developer-live') === (launch.live !== null),
       'ANALYSIS_LAUNCH_BINDING_INVALID', '可信区间与开发者实时绑定不一致。');
+    const ceiling = launch.live?.runBudgetCeiling ?? null;
     requireAnalysis(launch.live === null ||
-      (launch.live.runBudgetCeiling.kind === 'tokens' && Number.isSafeInteger(launch.live.runBudgetCeiling.maxTotalTokens) &&
-        launch.live.runBudgetCeiling.maxTotalTokens > 0 && UUID_PATTERN.test(launch.live.credentialReference)),
+      ((ceiling!.kind === 'tokens'
+        ? Number.isSafeInteger(ceiling!.maxTotalTokens) && ceiling!.maxTotalTokens > 0
+        : Number.isSafeInteger(ceiling!.tokensPerFrozenUnit) && ceiling!.tokensPerFrozenUnit > 0) &&
+        UUID_PATTERN.test(launch.live.credentialReference)),
     'ANALYSIS_LAUNCH_BINDING_INVALID', '开发者实时绑定缺少必需的运行预算上限或凭据引用。');
     this.#launch = launch;
   }
@@ -597,7 +637,7 @@ export class BaselineAnalysisStore {
     if (authorization === undefined) {
       planRevision = revisions.filter((entry) => !entry.resolved && entry.priorPlanVersionId === currentVersion.planVersionId).at(-1) ?? null;
       if (planRevision === null) {
-        const live = this.#currentMaterialInputs(bookId, intent.mode, materialInputs.selectedRange);
+        const live = this.#currentMaterialInputs(bookId, intent.mode, materialInputs.selectedRange, manifest.units.length);
         const diff = diffMaterialPlanInputs(materialInputs, live);
         if (diff.length > 0) {
           const changedFields = diff.map((entry) => entry.field);
@@ -692,7 +732,7 @@ export class BaselineAnalysisStore {
         canAuthorize: authorization === undefined && (update === null || update.predecessorCurrent) && planRevision === null,
         canReconfirmPlan,
       },
-      namedNonEffects: namedNonEffects(this.#launch.live),
+      namedNonEffects: namedNonEffects(this.#launch.live, manifest.units.length),
     });
   }
 
@@ -857,9 +897,11 @@ export class BaselineAnalysisStore {
    * (provider, model, adapter and configuration revisions, Credential Reference — never its readiness),
    * the highest pinned authority sidecar with its native carrier, the range the caller names, the
    * Book's latest Result Set Revision for an update Task, and the fixed ceiling, category, and outcome
-   * class. Read leniently so a drifted pin or binding yields a diff rather than a refusal.
+   * class. Read leniently so a drifted pin or binding yields a diff rather than a refusal. The unit
+   * count is the frozen Coverage Manifest's, so the policy's per-frozen-unit default resolves to the
+   * same total the freeze wrote.
    */
-  #currentMaterialInputs(bookId: string, mode: AnalysisTaskMode, selectedRange: BaselineAnalysisSelectedRange | null): MaterialPlanInputsProjection {
+  #currentMaterialInputs(bookId: string, mode: AnalysisTaskMode, selectedRange: BaselineAnalysisSelectedRange | null, unitCount: number): MaterialPlanInputsProjection {
     const connection = this.#db.prepare(
       `SELECT provider_id, model_id, adapter_revision, configuration_revision, credential_reference
        FROM model_service_connections WHERE connection_id = 'main-editorial-deepseek-v4-pro'`,
@@ -904,7 +946,7 @@ export class BaselineAnalysisStore {
       },
       selectedRange: this.#definition.mode(mode).rangeBound ? selectedRange : null,
       predecessorRevision: latest === undefined ? null : { revisionId: asString(latest.revision_id), ordinal: asNumber(latest.ordinal), digest: asString(latest.sha256) },
-      runBudgetCeiling: live === null ? 'unset' : live.runBudgetCeiling,
+      runBudgetCeiling: live === null ? 'unset' : resolveDeveloperLiveCeiling(live.runBudgetCeiling, unitCount),
       outboundDataCategory: 'public-or-synthetic',
       expectedOutcome: this.#definition.expectedOutcome,
     };
@@ -969,10 +1011,10 @@ export class BaselineAnalysisStore {
     const current = this.#planVersionFacts(intent.taskIntentId).at(-1);
     requireAnalysis(current !== undefined && existing.planVersion !== null && existing.coverageManifest !== null, 'ANALYSIS_RECORD_INVALID', '任务计划缺少计划版本。');
     const stored = existing.planVersion.materialInputs;
-    const proposed = this.#currentMaterialInputs(bookId, intent.mode, requestedRange);
     const pending = existing.planRevision;
     const instant = new Date().toISOString();
     const manifest = existing.coverageManifest;
+    const proposed = this.#currentMaterialInputs(bookId, intent.mode, requestedRange, manifest.units.length);
     const diffFor = (): PlanRevisionDiffEntryProjection[] => {
       const entries = diffMaterialPlanInputs(stored, proposed);
       const storedCounts = existing.update?.reusePlan?.counts ?? null;
@@ -1480,7 +1522,7 @@ export class BaselineAnalysisStore {
         'reanalyze-range': { ...action('reanalyze-range', true, null, null), options },
         'reanalyze-book': action('reanalyze-book', true, null, expected('reanalyze-book', null)),
       },
-      providerConsequence: providerConsequence(this.#launch.live),
+      providerConsequence: providerConsequence(this.#launch.live, preview.units.length),
       successorBehavior: SUCCESSOR_BEHAVIOR,
     };
   }
@@ -1698,7 +1740,7 @@ export class BaselineAnalysisStore {
       },
     };
     // The plan freezes whichever binding the launch bound: the denied production binding on the
-    // deterministic route, or the v4 live binding. Both are frozen before authorization, never chosen
+    // deterministic route, or the v5 live binding. Both are frozen before authorization, never chosen
     // at dispatch, so an authorized Run can never transmit somewhere its plan did not name.
     const live = this.#launch.live;
     const promptContractDigest = this.#definition.promptContractDigest;
@@ -1729,7 +1771,7 @@ export class BaselineAnalysisStore {
             credentialSlot: live.credentialSlot,
             credentialReference: live.credentialReference,
             credentialReadiness: facts.credentialOperationState,
-            providerProcessing: { operationalScope: 'developer-live', version: 'v4', decision: 'eligible-only', authorizedLiveTransmissionCount: 'bounded-by-run' },
+            providerProcessing: { operationalScope: 'developer-live', version: 'v5', decision: 'eligible-only', authorizedLiveTransmissionCount: 'bounded-by-run' },
           },
       executionRoute: live !== null
         ? { kind: live.route, model: live.model, endpoint: live.endpoint }
@@ -1743,11 +1785,11 @@ export class BaselineAnalysisStore {
               fixtureLineage: this.#route.fixtureLineage,
             },
       outboundDataCategory: 'public-or-synthetic',
-      runBudgetCeiling: live === null ? 'unset' : live.runBudgetCeiling,
+      runBudgetCeiling: live === null ? 'unset' : resolveDeveloperLiveCeiling(live.runBudgetCeiling, manifest.units.length),
     };
     const dispatchAllowed = live !== null || this.#route !== null;
     const stopCondition = live !== null
-      ? 'Provider Processing v4 binds opencode-go under developer-live; the Run Budget Ceiling and the Coverage Manifest unit count bound every transmission'
+      ? 'Provider Processing v5 binds opencode-go under developer-live; the Run Budget Ceiling and the Coverage Manifest unit count bound every transmission'
       : dispatchAllowed
         ? 'Provider Processing v1 denies the remote route; execution binds only ai7-local-deterministic'
         : 'Provider Processing v1 denies the remote route and no local deterministic route is bound';
@@ -1777,7 +1819,7 @@ export class BaselineAnalysisStore {
         : dispatchAllowed ? 'remote-denied-local-deterministic' : 'remote-denied-no-route',
       dispatchAllowed,
       summary: live !== null
-        ? `计划已冻结；developer-live · Provider Processing v4 允许绑定 ${live.route} · ${live.model}，实时传输受运行边界约束`
+        ? `计划已冻结；developer-live · Provider Processing v5 允许绑定 ${live.route} · ${live.model}，实时传输受运行边界约束`
         : dispatchAllowed
           ? '计划已冻结；远程绑定被 Provider Processing v1 拒绝，执行绑定至 AI7 本地确定性模型适配器'
           : '计划已冻结；远程绑定被 Provider Processing v1 拒绝，且没有可执行的本地路由',
@@ -1919,6 +1961,7 @@ export class BaselineAnalysisStore {
     const manifest = plan['coverage-manifest'] as CoverageManifestProjection;
     requireAnalysis(manifestDigestIsExact(manifest), 'ANALYSIS_RECORD_INVALID', '覆盖清单记录无效。');
     const providerPlan = plan['provider-resolution-plan'] as NonNullable<BaselineAnalysisProjection['providerResolutionPlan']>;
+    const runBudgetCeiling = runBudgetCeilingStateOf(providerPlan.runBudgetCeiling);
     // The route the plan froze must still be the route this launch binds. A developer-live plan
     // cannot execute under a provider-free launch, and a deterministic plan cannot execute live.
     const live = this.#launch.live;
@@ -1926,7 +1969,7 @@ export class BaselineAnalysisStore {
       requireAnalysis(providerPlan.executionRoute.kind === live.route && providerPlan.executionRoute.model === live.model &&
         providerPlan.executionRoute.endpoint === live.endpoint, 'ANALYSIS_ROUTE_STALE', '当前启动的实时路由与冻结计划不一致。');
       requireAnalysis(providerPlan.remoteBinding.credentialReference === live.credentialReference &&
-        canonicalJson(providerPlan.runBudgetCeiling) === canonicalJson(live.runBudgetCeiling),
+        canonicalJson(runBudgetCeiling) === canonicalJson(resolveDeveloperLiveCeiling(live.runBudgetCeiling, manifest.units.length)),
       'ANALYSIS_ROUTE_STALE', '当前启动的凭据引用或运行预算上限与冻结计划不一致。');
     } else {
       requireAnalysis(providerPlan.executionRoute.kind === LOCAL_DETERMINISTIC_ROUTE, 'ANALYSIS_ROUTE_ABSENT', '计划没有可执行的本地路由。');
@@ -1990,6 +2033,7 @@ export class BaselineAnalysisStore {
       artifactPin: { nativeCarrierSha256: artifactPin.nativeCarrierSha256, sidecarRevision: 2, sidecarSha256: artifactPin.sidecarSha256 },
       promptContractDigest: asString(envelope.promptContractDigest),
       behaviorCompositionDigest: asString(envelope.behaviorCompositionDigest),
+      runBudgetCeiling,
       update,
     };
   }
@@ -2199,8 +2243,8 @@ export class BaselineAnalysisStore {
           promptContractDigest: facts.promptContractDigest,
         },
         policyPin: live === null
-          ? { operationalScope: 'development-ci', providerProcessingVersion: 'v1', activePolicySetVersion: 'v4', liveTransmissions: 0 }
-          : { operationalScope: 'developer-live', providerProcessingVersion: 'v4', activePolicySetVersion: 'v4', liveTransmissions: 'bounded-by-run' },
+          ? { operationalScope: 'development-ci', providerProcessingVersion: 'v1', activePolicySetVersion: 'v5', liveTransmissions: 0 }
+          : { operationalScope: 'developer-live', providerProcessingVersion: 'v5', activePolicySetVersion: 'v5', liveTransmissions: 'bounded-by-run' },
         provenance: {
           taskIntentId: facts.taskIntentId,
           runRecordId: facts.runRecordId,
@@ -2339,17 +2383,17 @@ export class BaselineAnalysisStore {
 
   /**
    * A plan may be frozen only under a verified launch policy that matches the bound launch: the
-   * provider-free `development-ci` v1 denial, or the `developer-live` v4 eligibility whose live
+   * provider-free `development-ci` v1 denial, or the `developer-live` v5 eligibility whose live
    * binding this store already holds. An unverified or mismatched policy freezes nothing.
    */
   #requireDeniedPolicy(policy: LaunchPolicyProjection): void {
     requireAnalysis(policy.integrityState === 'verified' && policy.denialReason === null &&
-      policy.operationalScope === this.#launch.operationalScope && policy.activePolicySetVersion === 'v4',
+      policy.operationalScope === this.#launch.operationalScope && policy.activePolicySetVersion === 'v5',
     'ANALYSIS_POLICY_UNAVAILABLE', '可信启动策略与已绑定的可信区间不一致。');
     if (this.#launch.live !== null) {
-      requireAnalysis(policy.providerProcessing.version === 'v4' && policy.providerProcessing.decision === 'eligible-only' &&
+      requireAnalysis(policy.providerProcessing.version === 'v5' && policy.providerProcessing.decision === 'eligible-only' &&
         policy.providerProcessing.authorizedLiveTransmissionCount === 'bounded-by-run' && policy.providerProcessing.liveTransmissionAllowed === true,
-      'ANALYSIS_POLICY_UNAVAILABLE', '无法建立可信的 developer-live Provider Processing v4 记录。');
+      'ANALYSIS_POLICY_UNAVAILABLE', '无法建立可信的 developer-live Provider Processing v5 记录。');
       return;
     }
     requireAnalysis(policy.providerProcessing.version === 'v1' && policy.providerProcessing.decision === 'deny' &&

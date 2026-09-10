@@ -22,12 +22,12 @@ function readPair(policyFile: string, schemaFile: string) {
 }
 
 describe('validateAllPolicies', () => {
-  it('discovers all nine current pairs and validates every one at this base', () => {
+  it('discovers all thirteen current pairs and validates every one at this base', () => {
     const pairs = discoverPolicyPairs(POLICIES_DIR);
-    expect(pairs).toHaveLength(9);
+    expect(pairs).toHaveLength(13);
 
     const results = validateAllPolicies(POLICIES_DIR);
-    expect(results).toHaveLength(9);
+    expect(results).toHaveLength(13);
     for (const result of results) {
       expect(result.ok, `${result.policyFile}: ${result.reason ?? ''}`).toBe(true);
     }
@@ -50,6 +50,26 @@ describe('validatePolicyDocument mutation failures', () => {
     expect(() => validatePolicyDocument(mutated, schemaData)).toThrowError(
       /Value at #\/properties\/digestAlgorithm is not one of the enumerated values\./,
     );
+  });
+
+  it('rejects an External Export v2 document that drops one of the ADR 0079 §3.2 hard exclusions', () => {
+    const { policyData, schemaData } = readPair('external-export-policy.v2.json', 'external-export-policy.v2.schema.json');
+    const mutated = JSON.parse(JSON.stringify(policyData)) as { attachedContent: { hardExclusions: Record<string, unknown> } };
+    delete mutated.attachedContent.hardExclusions.evidenceLinksNeverExport;
+
+    expect(() => validatePolicyDocument(mutated, schemaData)).toThrowError(
+      /Required property "evidenceLinksNeverExport" is missing/,
+    );
+  });
+
+  it('rejects an External Export v2 document whose eligible target kinds are not the five of ADR 0079 §3.1', () => {
+    const { policyData, schemaData } = readPair('external-export-policy.v2.json', 'external-export-policy.v2.schema.json');
+    const mutated = JSON.parse(JSON.stringify(policyData)) as {
+      decision: { allowRules: Array<{ target: { eligibleKinds: string[] } }> };
+    };
+    mutated.decision.allowRules[0]!.target.eligibleKinds[0] = 'delivery-package-version';
+
+    expect(() => validatePolicyDocument(mutated, schemaData)).toThrowError(/is not one of the enumerated values/);
   });
 });
 

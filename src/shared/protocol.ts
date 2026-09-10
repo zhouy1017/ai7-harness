@@ -933,9 +933,17 @@ export interface ModelServiceConnectionProjection {
  * `fixture-recording` and `ordinary-production` stay unselectable from the source checkout.
  */
 export type TrustedOperationalScope = 'development-ci' | 'developer-live';
-export type ProviderProcessingVersion = 'v1' | 'v4';
+export type ProviderProcessingVersion = 'v1' | 'v5';
 /** Exact Run Budget Ceiling state: `unset` under development-ci, an explicit total-token ceiling under developer-live. */
 export type RunBudgetCeilingState = 'unset' | { kind: 'tokens'; maxTotalTokens: number };
+/**
+ * The Run Budget Ceiling a developer-live launch binds: an explicit form ceiling as a total, or the
+ * Provider Processing v5 default of 30,000 tokens per frozen Coverage Manifest unit (ADR 0070),
+ * resolved once the manifest freezes and before the plan does.
+ */
+export type DeveloperLiveCeiling =
+  | { readonly kind: 'tokens'; readonly maxTotalTokens: number }
+  | { readonly kind: 'tokens-per-frozen-unit'; readonly tokensPerFrozenUnit: number };
 /** The execution route an analysis Run binds: the in-process deterministic adapter or the developer-live OpenCode Go route. */
 export type ExecutionRouteId = 'ai7-local-deterministic' | 'opencode-go';
 /** A remote Provider route a Provider Resolution Plan may name. */
@@ -945,11 +953,11 @@ export type CredentialSlotId = 'deepseek-api-key' | 'opencode-go';
 /** The Provider Processing pin a Provider Resolution Plan carries for its trusted scope. */
 export type ProviderProcessingPin =
   | { operationalScope: 'development-ci'; version: 'v1'; decision: 'deny'; authorizedLiveTransmissionCount: 0 }
-  | { operationalScope: 'developer-live'; version: 'v4'; decision: 'eligible-only'; authorizedLiveTransmissionCount: 'bounded-by-run' };
+  | { operationalScope: 'developer-live'; version: 'v5'; decision: 'eligible-only'; authorizedLiveTransmissionCount: 'bounded-by-run' };
 /** The policy pin a Result Set Revision records; `liveTransmissions` is the policy's bound, never a usage count. */
 export type ResultSetPolicyPin =
-  | { operationalScope: 'development-ci'; providerProcessingVersion: 'v1'; activePolicySetVersion: 'v4'; liveTransmissions: 0 }
-  | { operationalScope: 'developer-live'; providerProcessingVersion: 'v4'; activePolicySetVersion: 'v4'; liveTransmissions: 'bounded-by-run' };
+  | { operationalScope: 'development-ci'; providerProcessingVersion: 'v1'; activePolicySetVersion: 'v5'; liveTransmissions: 0 }
+  | { operationalScope: 'developer-live'; providerProcessingVersion: 'v5'; activePolicySetVersion: 'v5'; liveTransmissions: 'bounded-by-run' };
 
 /** The three launch-form arguments the built entry accepts beside `--data-root`; carried by argv only, never by an environment variable or setting. */
 export const TRUSTED_SCOPE_ARGUMENT = '--trusted-operational-scope';
@@ -1006,7 +1014,7 @@ export interface LaunchPolicyProjection {
   integrityState: 'verified' | 'denied';
   denialReason: string | null;
   operationalScope: TrustedOperationalScope | null;
-  activePolicySetVersion: 'v4' | null;
+  activePolicySetVersion: 'v5' | null;
   providerProcessing: {
     version: ProviderProcessingVersion | null;
     decision: 'deny' | 'eligible-only';
@@ -1015,29 +1023,28 @@ export interface LaunchPolicyProjection {
     liveTransmissionAllowed: boolean;
     /**
      * Whether the active Provider Processing policy names the cross-unit reduction's transmission
-     * (ADR 0066). Optional exactly as the policy key is, and read the same way: anything but `true`
-     * — absent included — means the reduction does not dispatch, because v4 authorizes one
-     * transmission per Analysis Unit and a step it does not name is not among them.
+     * (ADR 0066). Optional so a denial can carry the same reading; under the verified v5 document it
+     * is `true`, and anything else — absent included — means the reduction does not dispatch.
      */
     crossUnitReductionAllowed?: boolean;
     /**
      * Whether the active Provider Processing policy names the assurance sampling suboperation's
-     * transmissions (ADR 0066). Read exactly as `crossUnitReductionAllowed` is: a sampling turn is
-     * one more transmission per anchor unit, still beyond v4's per-unit bound, so anything but
-     * `true` — absent included — means the suboperation does not dispatch at all.
+     * transmissions (ADR 0066). Read exactly as `crossUnitReductionAllowed` is: under the verified v5
+     * document it is `true`; anything else — absent included — means the suboperation does not
+     * dispatch at all.
      */
     assuranceSamplingAllowed?: boolean;
     /**
      * Whether the active Provider Processing policy names the Run Report's reflection turn (ADR
-     * 0066 §Run Report). Read exactly as the two keys above are: the reflection is one more
-     * transmission beyond v4's per-unit bound, so anything but `true` — absent included — means the
-     * turn does not dispatch and the report records `policy-bounded` with its reason.
+     * 0066 §Run Report). Read exactly as the two keys above are: under the verified v5 document it is
+     * `true`; anything else — absent included — means the turn does not dispatch and the report
+     * records `policy-bounded` with its reason.
      */
     runReportReflectionAllowed?: boolean;
     label: '开发与持续集成：零次实时传输' | '开发者实时：实时传输受运行边界约束';
   };
   externalExport: {
-    version: 'v1' | null;
+    version: 'v2' | null;
     policyEligibilityIsEffectApproval: false;
     currentExportEffectAvailable: false;
     label: '对外导出策略独立；当前未提供导出受控动作';

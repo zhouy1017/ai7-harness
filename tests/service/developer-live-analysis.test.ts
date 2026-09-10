@@ -14,9 +14,20 @@ import {
   providerConsequence,
 } from '../../src/service/analysis/baseline-analysis-store.js';
 import { BASELINE_PROMPT_CONTRACT_DIGEST, unitRequestDigest } from '../../src/service/analysis/contract.js';
-import { loadModelFixture, resolveFixtureEntry } from '../../src/service/provider/model-fixture.js';
-import { ownBlockIdsOf, substituteBlockPlaceholders, substituteCrossUnitBlockPlaceholders } from '../../src/service/provider/local-deterministic-adapter.js';
-import { parseCrossUnitCitedBlocks, parseCrossUnitMessageHeader } from '../../src/service/analysis/cross-unit-contract.js';
+import {
+  ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST,
+  assuranceSamplingRequestDigest,
+  parseAssuranceSamplingListedRefs,
+  parseAssuranceSamplingMessageHeader,
+} from '../../src/service/analysis/assurance-sampling-contract.js';
+import { loadModelFixture, resolveFixtureEntry, type ModelFixture } from '../../src/service/provider/model-fixture.js';
+import {
+  ownBlockIdsOf,
+  substituteAssuranceSamplingRefPlaceholders,
+  substituteBlockPlaceholders,
+  substituteCrossUnitBlockPlaceholders,
+} from '../../src/service/provider/local-deterministic-adapter.js';
+import { BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST, crossUnitRequestDigest, parseCrossUnitCitedBlocks, parseCrossUnitMessageHeader } from '../../src/service/analysis/cross-unit-contract.js';
 import { runReportUsageReconciles } from '../../src/service/analysis/run-report.js';
 import {
   OPENCODE_GO_ENDPOINT,
@@ -33,6 +44,7 @@ import {
   BASELINE_ANALYSIS_MODE_GOALS,
   BASELINE_ANALYSIS_TASK_GOAL,
   type BaselineAnalysisProjection,
+  type DeveloperLiveCeiling,
   type LaunchPolicyProjection,
 } from '../../src/shared/protocol.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
@@ -51,8 +63,16 @@ import {
 // no credential value beyond a local placeholder exists. The manuscript is exact `sample1` (ADR 0043).
 
 const FIXTURES_ROOT = resolve(fileURLToPath(new URL('../fixtures/model/', import.meta.url)));
-type Ceiling = { readonly kind: 'tokens'; readonly maxTotalTokens: number };
+/** Either bound form: an explicit launch total, or the policy's per-frozen-unit default (ADR 0070). */
+type Ceiling = DeveloperLiveCeiling;
 const CEILING: Ceiling = { kind: 'tokens', maxTotalTokens: 500_000 };
+/** What a developer-live launch binds when the form names no ceiling: 30,000 tokens per frozen unit. */
+const POLICY_DEFAULT_CEILING: Ceiling = {
+  kind: 'tokens-per-frozen-unit',
+  tokensPerFrozenUnit: DEVELOPER_LIVE_POLICY_BINDING.defaultRunBudgetCeilingTokensPerFrozenUnit,
+};
+/** Eight unit turns, one reduction turn, one assurance-sampling anchor turn, one reflection turn. */
+const FULL_CHAIN_TURNS = SAMPLE1_UNITS + 3;
 type UnitAnswer = { text: string; usage: { inputTokens: number; outputTokens: number } };
 
 interface StubCall {
@@ -118,45 +138,83 @@ async function openLiveStore(dataRoot: string, ceiling: Ceiling = CEILING): Prom
   return store;
 }
 
+/** One synthetic answer and the usage it reports, whatever turn it serves. */
+interface StubAnswer extends UnitAnswer {}
+
 /**
- * A stub transport standing in for the captured native `fetch`. It answers each unit with the
- * synthetic unit result the deterministic fixture already carries for that unit, so the contract,
- * the reducers, and the coverage axes see exactly the material they see on the local route.
+ * The deterministic fixture's answers for the whole v5 chain: the eight unit results, and the
+ * reduction and assurance-sampling entries keyed by the request digest the deterministic adapter
+ * computes. The fixture carries no reflection entry, so the stub synthesizes a valid one — a
+ * deterministic stand-in that keeps the chain closed without inventing fixture bytes.
+ */
+interface ChainAnswers {
+  readonly units: Map<number, UnitAnswer>;
+  readonly named: Map<string, UnitAnswer>;
+}
+
+const SYNTHETIC_REFLECTION: StubAnswer = {
+  text: JSON.stringify({
+    schema: 'ai7.analysis.run-report-reflection-result/1',
+    items: [{ suggestion: '下次运行按单元预算复查重算范围，并保留跨单元归纳的主题分段。', basis: '本次账目显示单元数、重算数与归纳分段均为已知计数。' }],
+  }),
+  usage: { inputTokens: 30, outputTokens: 20 },
+};
+
+/**
+ * A stub transport standing in for the captured native `fetch`. It answers the whole v5 chain with
+ * the synthetic results the deterministic fixture already carries, so the contract, the reducers,
+ * the reducers' suboperations, and the coverage axes see exactly the material they see on the local
+ * route. Block and finding identities are minted per import, so the stub substitutes exactly as the
+ * deterministic adapter does, which is what makes the two routes comparable.
  */
 function stubTransport(options: {
   calls: StubCall[];
   responses: Map<number, UnitAnswer>;
+  /** The reduction and sampling answers, keyed by their request digests; absent means a 500 refusal. */
+  named?: Map<string, UnitAnswer>;
   override?: (ordinal: number) => { status: number; body: unknown } | null;
-  /** The synthetic cross-unit result, for a policy that names the reduction's transmission. */
-  crossUnit?: UnitAnswer;
+  /** The reflection answer, when the policy names the reflection turn; defaults to the synthetic one. */
+  reflection?: StubAnswer;
 }): typeof fetch {
   const transport = async (url: string, init: { headers: Record<string, string>; body: string }) => {
     options.calls.push({ url, headers: { ...init.headers }, body: init.body });
     const request = JSON.parse(init.body) as { messages: Array<{ role: string; content: string }> };
     const last = request.messages.at(-1)!;
-    if (parseCrossUnitMessageHeader(last.content) !== null && options.crossUnit !== undefined) {
-      const reduction = substituteCrossUnitBlockPlaceholders(options.crossUnit.text, parseCrossUnitCitedBlocks(last.content));
+    const text = last.content;
+    const crossUnit = parseCrossUnitMessageHeader(text);
+    const sampling = crossUnit === null ? parseAssuranceSamplingMessageHeader(text) : null;
+    const reflection = crossUnit === null && sampling === null && text.startsWith('运行反思 ');
+    if (crossUnit !== null || sampling !== null || reflection) {
+      const answer = reflection
+        ? options.reflection ?? SYNTHETIC_REFLECTION
+        : options.named?.get(crossUnit !== null
+          ? crossUnitRequestDigest(BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST, crossUnit.unitSetDigest)
+          : assuranceSamplingRequestDigest(ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST, sampling!.unitOrdinal, sampling!.unitDigest, sampling!.sampleDigest));
+      if (answer === undefined) return { status: 500, json: async () => ({ error: { message: 'no synthetic named answer' } }) };
+      const content = crossUnit !== null
+        ? substituteCrossUnitBlockPlaceholders(answer.text, parseCrossUnitCitedBlocks(text))
+        : sampling !== null
+          ? substituteAssuranceSamplingRefPlaceholders(answer.text, parseAssuranceSamplingListedRefs(text))
+          : answer.text;
       return {
         status: 200,
         json: async () => ({
-          choices: [{ message: { content: reduction } }],
-          usage: { prompt_tokens: options.crossUnit!.usage.inputTokens, completion_tokens: options.crossUnit!.usage.outputTokens },
+          choices: [{ message: { content } }],
+          usage: { prompt_tokens: answer.usage.inputTokens, completion_tokens: answer.usage.outputTokens },
         }),
       };
     }
-    const ordinal = Number(/^分析单元 (\d+)\//u.exec(last.content)?.[1] ?? '0');
+    const ordinal = Number(/^分析单元 (\d+)\//u.exec(text)?.[1] ?? '0');
     const forced = options.override?.(ordinal) ?? null;
     if (forced !== null) return { status: forced.status, json: async () => forced.body };
     const answer = options.responses.get(ordinal);
     if (answer === undefined) return { status: 500, json: async () => ({ error: { message: 'no synthetic answer' } }) };
     // Block identities are minted per import, so a hand-written fixture cites them by placeholder.
-    // The stub substitutes exactly as the deterministic adapter does, which is what makes the two
-    // routes comparable: the same synthetic result, cited against this import's own blocks.
-    const text = substituteBlockPlaceholders(answer.text, ownBlockIdsOf(last.content));
+    const substituted = substituteBlockPlaceholders(answer.text, ownBlockIdsOf(text));
     return {
       status: 200,
       json: async () => ({
-        choices: [{ message: { content: text } }],
+        choices: [{ message: { content: substituted } }],
         usage: { prompt_tokens: answer.usage.inputTokens, completion_tokens: answer.usage.outputTokens },
       }),
     };
@@ -170,7 +228,11 @@ function stubTransport(options: {
  * between units — which is the whole question the Run Liveness Signal answers. A released call
  * answers exactly as `stubTransport` would; nothing about the request changes.
  */
-function heldTransport(options: { calls: StubCall[]; responses: Map<number, UnitAnswer> }): {
+function heldTransport(options: {
+  calls: StubCall[];
+  responses: Map<number, UnitAnswer>;
+  named?: Map<string, UnitAnswer>;
+}): {
   transport: typeof fetch;
   arrived(index: number): Promise<void>;
   release(index: number): void;
@@ -236,20 +298,28 @@ async function prepareLive(dataRoot: string, ceiling: Ceiling = CEILING): Promis
 }
 
 /**
- * The synthetic answer for each unit of a frozen plan, taken from the deterministic fixture so the
- * contract, the reducers, and the coverage axes see the same material they see on the local route.
+ * The synthetic answers for a frozen plan, taken from the deterministic fixture so the contract, the
+ * reducers, and the coverage axes see the same material they see on the local route: every unit's
+ * result, plus the reduction and assurance-sampling entries keyed by the request digest the
+ * deterministic adapter computes.
  */
-async function unitAnswers(prepared: BaselineAnalysisProjection, usage?: { inputTokens: number; outputTokens: number }): Promise<Map<number, UnitAnswer>> {
+async function unitAnswers(prepared: BaselineAnalysisProjection, usage?: { inputTokens: number; outputTokens: number }): Promise<ChainAnswers> {
   const fixture = await loadModelFixture(FIXTURES_ROOT, 'sample1-baseline-happy');
-  const answers = new Map<number, UnitAnswer>();
+  const units = new Map<number, UnitAnswer>();
   for (const unit of prepared.coverageManifest!.units) {
     const digest = unitRequestDigest(BASELINE_PROMPT_CONTRACT_DIGEST, unit.ordinal, unit.digest);
     const entry = resolveFixtureEntry(fixture.entries, unit.ordinal, digest, 1);
     expect(entry?.response.kind, `fixture answer for unit ${unit.ordinal}`).toBe('unit-result');
     const response = entry!.response as { kind: 'unit-result'; text: string; usage: { inputTokens: number; outputTokens: number } };
-    answers.set(unit.ordinal, { text: response.text, usage: usage ?? response.usage });
+    units.set(unit.ordinal, { text: response.text, usage: usage ?? response.usage });
   }
-  return answers;
+  const named = new Map<string, UnitAnswer>();
+  for (const entry of fixture.entries.values()) {
+    if (entry.unitOrdinal === 0 && entry.response.kind === 'unit-result') {
+      named.set(entry.requestDigest, { text: entry.response.text, usage: entry.response.usage });
+    }
+  }
+  return { units, named };
 }
 
 async function runLive(
@@ -280,11 +350,11 @@ async function ledgerLines(root: string): Promise<Array<Record<string, unknown>>
 }
 
 describe('the developer-live scope over exact sample1 with a stub transport', () => {
-  it('freezes the v4 plan, transmits once per unit through the gate, and opens one Session per unit', async () => {
+  it('freezes the v5 plan and transmits the full declared chain through the gate', async () => {
     const calls: StubCall[] = [];
     const { store, bookId, prepared } = await prepareLive(roots.dataRoot);
-    const responses = await unitAnswers(prepared);
-    const execution = owner(store, stubTransport({ calls, responses }));
+    const { units: responses, named } = await unitAnswers(prepared);
+    const execution = owner(store, stubTransport({ calls, responses, named }));
     const settled = await runLive(store, bookId, prepared, execution);
 
     // The frozen plan names the live binding, not the denied production one.
@@ -294,15 +364,16 @@ describe('the developer-live scope over exact sample1 with a stub transport', ()
       modelId: 'deepseek-v4-flash',
       credentialSlot: 'opencode-go',
       credentialReference: DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE,
-      providerProcessing: { operationalScope: 'developer-live', version: 'v4', decision: 'eligible-only', authorizedLiveTransmissionCount: 'bounded-by-run' },
+      providerProcessing: { operationalScope: 'developer-live', version: 'v5', decision: 'eligible-only', authorizedLiveTransmissionCount: 'bounded-by-run' },
     });
     expect(provider.executionRoute).toEqual({ kind: 'opencode-go', model: 'deepseek-v4-flash', endpoint: OPENCODE_GO_ENDPOINT });
     expect(provider.runBudgetCeiling).toEqual(CEILING);
     expect(settled.planEnvelope!.providerStatus).toBe('remote-eligible-developer-live');
     expect(settled.planEnvelope!.dispatchAllowed).toBe(true);
 
-    // The gate admitted exactly one transmission per unit, and every one carried the route's headers.
-    expect(calls).toHaveLength(SAMPLE1_UNITS);
+    // The gate admitted the whole chain ADR 0079 §2.2 bounds: eight unit turns, the reduction's one
+    // topic-section turn, the sample's one anchor-unit turn, and the one report reflection turn.
+    expect(calls).toHaveLength(FULL_CHAIN_TURNS);
     for (const call of calls) {
       expect(call.url).toBe(OPENCODE_GO_ENDPOINT);
       expect(call.headers.authorization).toBe('Bearer placeholder-development-key');
@@ -318,31 +389,40 @@ describe('the developer-live scope over exact sample1 with a stub transport', ()
       expect(call.body).not.toContain('placeholder-development-key');
     }
 
-    // One technical Session per Analysis Unit: every unit's request carries its own Session id, and
-    // the spans record the same ones, with the binding's own id as the lineage root above them.
+    // One technical Session per turn: every turn carries its own Session id, and the unit-only spans
+    // record exactly the unit turns' ones, with the binding's own id as the lineage root above them.
     const sessionHeaders = calls.map((call) => call.headers[OPENCODE_GO_SESSION_HEADER]!);
-    expect(new Set(sessionHeaders).size).toBe(SAMPLE1_UNITS);
+    expect(new Set(sessionHeaders).size).toBe(FULL_CHAIN_TURNS);
     const attempt = settled.run!.attempt!;
     const spanSessions = attempt.spans.map((span) => span.harnessSessionId);
     expect(new Set(spanSessions).size).toBe(SAMPLE1_UNITS);
-    expect(spanSessions).toEqual(sessionHeaders);
+    expect(spanSessions).toEqual(sessionHeaders.slice(0, SAMPLE1_UNITS));
     expect(spanSessions).not.toContain(attempt.executionBinding!.harnessSessionId);
     expect(attempt.credentialReadinessCheck).toMatchObject({ slot: 'opencode-go', readiness: 'present', valueReleased: false });
 
-    // The revision records the live route and the v4 policy pin, through the existing real path.
+    // The revision records the live route and the v5 policy pin, through the existing real path.
     const revision = settled.resultSetRevision!;
     expect(revision.adapterPin).toEqual({ route: 'opencode-go', model: 'deepseek-v4-flash', fixtureIdentity: null, fixtureSha256: null });
     expect(revision.policyPin).toEqual({
-      operationalScope: 'developer-live', providerProcessingVersion: 'v4', activePolicySetVersion: 'v4', liveTransmissions: 'bounded-by-run',
+      operationalScope: 'developer-live', providerProcessingVersion: 'v5', activePolicySetVersion: 'v5', liveTransmissions: 'bounded-by-run',
     });
-    expect(revision.usage.requests).toBe(SAMPLE1_UNITS);
+    // The revision counts the three revision-facing stages: eight unit turns, the reduction turn and
+    // the sampling turn. The reflection turn is dispatched after the revision is persisted, so its
+    // usage is recorded on the Run Report alone. Every turn is a distinct technical Session.
+    expect(revision.usage.requests).toBe(FULL_CHAIN_TURNS - 1);
+    expect(settled.taskOutcome!.report!.usagePerStage['run-report-reflection'].requests).toBe(1);
     expect(revision.gaps).toEqual([]);
+    expect(revision.crossUnitReduction.state).toBe('closed');
+    expect(revision.crossUnitFindings).toHaveLength(2);
+    expect(revision.assuranceSample.state).toBe('closed');
+    expect(revision.reducerClosure.stages.at(-1)?.stage).toBe('assurance-sampling');
+    expect(settled.taskOutcome!.report!.ifRedone.state).toBe('closed');
     expect(settled.run!.state).toBe('completed');
 
     // Every live call is a named test item, numbered by the ledger under the Task mode's purpose.
     const lines = await ledgerLines(cacheRoot);
     expect(lines.map((line) => line.itemId)).toEqual(
-      Array.from({ length: SAMPLE1_UNITS }, (_unused, index) => `S40/first-baseline/${index + 1}`),
+      Array.from({ length: FULL_CHAIN_TURNS }, (_unused, index) => `S40/first-baseline/${index + 1}`),
     );
     expect(new Set(lines.map((line) => line.outcome))).toEqual(new Set(['transmitted']));
     expect(lines.every((line) => line.promptContractDigest === BASELINE_PROMPT_CONTRACT_DIGEST)).toBe(true);
@@ -356,28 +436,25 @@ describe('the developer-live scope over exact sample1 with a stub transport', ()
   });
 
   /**
-   * The two declared suboperations are gated one key each. Under the v4 bytes as they stand neither
-   * key is present, so the reduction never dispatches and the sample has no findings to draw — the
-   * case above already shows the transmission count staying at the unit count. This is the other half:
-   * a policy that names the reduction and not the sample, which is the exact shape of the policy v5
-   * question the Owner has been asked, and the only configuration in which the sampling policy guard
-   * is the thing that stops the step.
+   * The three declared suboperations are gated one key each. Under the verified v5 bytes all three
+   * are named, so this is the fail-closed half: a projection that names the reduction and neither the
+   * sample nor the reflection. The reduction closes, the sample is drawn but not dispatched, and the
+   * report says exactly which policy stopped each step.
    */
   it('records policy-bounded and transmits nothing for a sample the active policy does not name', async () => {
     const calls: StubCall[] = [];
     const { store, bookId, prepared } = await prepareLive(roots.dataRoot);
-    const fixture = await loadModelFixture(FIXTURES_ROOT, 'sample1-baseline-happy');
-    const reduction = [...fixture.entries.values()].find((entry) => entry.unitOrdinal === 0 && entry.response.kind === 'unit-result' &&
-      entry.response.text.includes('cross-unit-result/1'))!;
+    const { units: responses, named } = await unitAnswers(prepared);
     const namesReductionOnly: LaunchPolicyProjection = {
       ...launchPolicy,
-      providerProcessing: { ...launchPolicy.providerProcessing, crossUnitReductionAllowed: true, assuranceSamplingAllowed: false },
+      providerProcessing: {
+        ...launchPolicy.providerProcessing,
+        crossUnitReductionAllowed: true,
+        assuranceSamplingAllowed: false,
+        runReportReflectionAllowed: false,
+      },
     };
-    const transport = stubTransport({
-      calls,
-      responses: await unitAnswers(prepared),
-      crossUnit: (reduction.response as { kind: 'unit-result'; text: string; usage: { inputTokens: number; outputTokens: number } }),
-    });
+    const transport = stubTransport({ calls, responses, named });
     const settled = await runLive(store, bookId, prepared, owner(store, transport, CEILING, namesReductionOnly));
 
     // Eight unit turns and the one reduction turn the policy names; not one sampling turn.
@@ -424,8 +501,8 @@ describe('the developer-live scope over exact sample1 with a stub transport', ()
   it('answers what the Run is doing while a unit is in flight, and measures each step as it settles', async () => {
     const calls: StubCall[] = [];
     const { store, bookId, prepared } = await prepareLive(roots.dataRoot);
-    const responses = await unitAnswers(prepared);
-    const held = heldTransport({ calls, responses });
+    const { units: responses, named } = await unitAnswers(prepared);
+    const held = heldTransport({ calls, responses, named });
     const execution = owner(store, held.transport);
     const authorized = store.authorizeBaselineAnalysis(bookId, prepared.taskIntent!.taskIntentId, prepared.planEnvelope!.digest);
     const runRecordId = authorized.dispatchRunRecordId!;
@@ -465,7 +542,7 @@ describe('the developer-live scope over exact sample1 with a stub transport', ()
     expect(nextUnit.currentUnitStartedAt).not.toBe(inFlight.currentUnitStartedAt);
     expect(nextUnit.attemptState).toBe('awaiting-response');
 
-    for (let index = 1; index <= SAMPLE1_UNITS; index += 1) held.release(index);
+    for (let index = 1; index < FULL_CHAIN_TURNS; index += 1) held.release(index);
     await execution.whenIdle();
 
     // A settled Run projects no progress at all: the signal ends with the state that produced it,
@@ -474,19 +551,19 @@ describe('the developer-live scope over exact sample1 with a stub transport', ()
     expect(settled.run!.state).toBe('completed');
     expect(settled.run!.progress).toBeNull();
     expect(execution.progressFor(runRecordId)).toBeNull();
-    expect(calls).toHaveLength(SAMPLE1_UNITS);
+    expect(calls).toHaveLength(FULL_CHAIN_TURNS);
     await store.close();
   });
 
   it('replays an identical request from the cache without transmitting', async () => {
     const { store, bookId, prepared } = await prepareLive(roots.dataRoot);
     const firstCalls: StubCall[] = [];
-    const responses = await unitAnswers(prepared);
-    await runLive(store, bookId, prepared, owner(store, stubTransport({ calls: firstCalls, responses })));
-    expect(firstCalls).toHaveLength(SAMPLE1_UNITS);
+    const { units: responses, named } = await unitAnswers(prepared);
+    await runLive(store, bookId, prepared, owner(store, stubTransport({ calls: firstCalls, responses, named })));
+    expect(firstCalls).toHaveLength(FULL_CHAIN_TURNS);
 
     // `重新分析全书` over an unedited manuscript recomputes every unit from the same Coverage Manifest,
-    // so every unit message — and therefore every canonical request body — is byte-identical to the
+    // so every turn's message — and therefore every canonical request body — is byte-identical to the
     // first Run's. Every one replays from the cache and the transport is never called again.
     let progress = store.createBaselineAnalysisPreparationWork(
       bookId, BASELINE_ANALYSIS_MODE_GOALS['reanalyze-book'], { mode: 'reanalyze-book', selectedRange: null }, launchPolicy,
@@ -495,21 +572,27 @@ describe('the developer-live scope over exact sample1 with a stub transport', ()
     const again = progress.projection!;
     expect(again.update!.reusePlan!.counts.recomputed).toBe(SAMPLE1_UNITS);
     const secondCalls: StubCall[] = [];
-    const settled = await runLive(store, bookId, again, owner(store, stubTransport({ calls: secondCalls, responses })));
+    const settled = await runLive(store, bookId, again, owner(store, stubTransport({ calls: secondCalls, responses, named })));
 
-    expect(secondCalls).toEqual([]);
     expect(settled.run!.state).toBe('completed');
-    expect(settled.resultSetRevision!.usage.requests).toBe(SAMPLE1_UNITS);
+    expect(settled.resultSetRevision!.usage.requests).toBe(FULL_CHAIN_TURNS - 1);
+
+    // The reduction and sampling turns are byte-identical to the first Run's and replay from the
+    // cache; the reflection turn's message carries this Run's own Run Record identity, which no
+    // fixture or previous request can pin, so exactly that one turn transmits again.
+    expect(secondCalls).toHaveLength(1);
+    expect(secondCalls[0]!.body).toContain('运行反思');
+    expect(secondCalls[0]!.body).toContain('账目摘要');
 
     const lines = await ledgerLines(cacheRoot);
-    expect(lines.filter((line) => line.outcome === 'transmitted')).toHaveLength(SAMPLE1_UNITS);
-    expect(lines.filter((line) => line.outcome === 'replayed')).toHaveLength(SAMPLE1_UNITS);
+    expect(lines.filter((line) => line.outcome === 'transmitted')).toHaveLength(FULL_CHAIN_TURNS + 1);
+    expect(lines.filter((line) => line.outcome === 'replayed')).toHaveLength(FULL_CHAIN_TURNS - 1);
     // The replayed calls are named under their own Task mode, numbered from one.
-    expect(lines.slice(SAMPLE1_UNITS).map((line) => line.itemId)).toEqual(
-      Array.from({ length: SAMPLE1_UNITS }, (_unused, index) => `S40/reanalyze-book/${index + 1}`),
+    expect(lines.slice(FULL_CHAIN_TURNS).map((line) => line.itemId)).toEqual(
+      Array.from({ length: FULL_CHAIN_TURNS }, (_unused, index) => `S40/reanalyze-book/${index + 1}`),
     );
-    // A replay is recorded with the cached usage and never re-stores the entry.
-    expect(lines.at(-1)).toMatchObject({ outcome: 'replayed', status: 200 });
+    // The reflection is the last line, its own transmission replayed from nothing.
+    expect(lines.at(-1)).toMatchObject({ outcome: 'transmitted', status: 200 });
     await store.close();
   });
 
@@ -552,10 +635,11 @@ describe('the developer-live scope over exact sample1 with a stub transport', ()
   it('records an empty answer as its own outcome instead of handing the contract an empty string', async () => {
     const calls: StubCall[] = [];
     const { store, bookId, prepared } = await prepareLive(roots.dataRoot);
-    const responses = await unitAnswers(prepared);
+    const { units: responses, named } = await unitAnswers(prepared);
     const execution = owner(store, stubTransport({
       calls,
       responses,
+      named,
       // The shape the first live Run produced for three of its eight units (#306, #307): the declared
       // answer channel present and empty, beside a reasoning channel that had content. Before the
       // normalization boundary existed this reached `parseUnitResult` as `''`, whose only reading of
@@ -581,9 +665,11 @@ describe('the developer-live scope over exact sample1 with a stub transport', ()
     );
     // The mislabel this replaces: an empty answer is not a model that produced something unparseable.
     expect(gaps[0]!.reason).not.toContain('不是 JSON');
-    // The Run continues and the empty unit's usage still counts: nothing about it is a failure.
+    // The Run continues and the empty unit's usage still counts: nothing about it is a failure. The
+    // seven closed units form a reduction request the fixture cannot key, and the report reflection
+    // is the chain's last turn; neither is a unit transmission.
     expect(settled.resultSetRevision!.coverage.unitsClosed).toBe(SAMPLE1_UNITS - 1);
-    expect(calls).toHaveLength(SAMPLE1_UNITS);
+    expect(calls).toHaveLength(SAMPLE1_UNITS + 2);
     await store.close();
   });
 
@@ -593,7 +679,7 @@ describe('the developer-live scope over exact sample1 with a stub transport', ()
     // because the ceiling is evaluated from accumulated usage before the unit forms its request.
     const ceiling: Ceiling = { kind: 'tokens', maxTotalTokens: 100 };
     const { store, bookId, prepared } = await prepareLive(roots.dataRoot, ceiling);
-    const responses = await unitAnswers(prepared, { inputTokens: 60, outputTokens: 40 });
+    const { units: responses } = await unitAnswers(prepared, { inputTokens: 60, outputTokens: 40 });
     const execution = owner(store, stubTransport({ calls, responses }), ceiling);
     const settled = await runLive(store, bookId, prepared, execution);
 
@@ -635,10 +721,83 @@ describe('the developer-live scope over exact sample1 with a stub transport', ()
     await store.close();
   });
 
+  /**
+   * The launch form named no ceiling, so the launch bound the policy's per-frozen-unit default and
+   * nothing resolved it into a total until this Run's Coverage Manifest froze (ADR 0070, ADR 0079
+   * §2.3). What the frozen Provider Resolution Plan carries must therefore be this manuscript's own
+   * arithmetic — 30,000 tokens times the units the manifest actually holds — and not a constant.
+   */
+  it('freezes the per-frozen-unit default into the total this frozen manifest sizes', async () => {
+    const calls: StubCall[] = [];
+    const { store, bookId, prepared } = await prepareLive(roots.dataRoot, POLICY_DEFAULT_CEILING);
+    const { units: responses, named } = await unitAnswers(prepared);
+    const settled = await runLive(store, bookId, prepared, owner(store, stubTransport({ calls, responses, named }), POLICY_DEFAULT_CEILING));
+
+    // The unit count is read from the frozen manifest, never restated as a literal: a manuscript of a
+    // different length would move this number and the assertion with it.
+    const unitCount = settled.coverageManifest!.units.length;
+    expect(unitCount).toBe(SAMPLE1_UNITS);
+    expect(settled.providerResolutionPlan!.runBudgetCeiling).toEqual({
+      kind: 'tokens',
+      maxTotalTokens: DEVELOPER_LIVE_POLICY_BINDING.defaultRunBudgetCeilingTokensPerFrozenUnit * unitCount,
+    });
+    // The plan carries a total, never the formula: the ceiling the gate reads can hold no unit count.
+    expect(settled.providerResolutionPlan!.runBudgetCeiling).not.toHaveProperty('tokensPerFrozenUnit');
+
+    // Every surface that names the ceiling states that same resolved total, and the Run spent far less
+    // than it, so the whole declared chain ran inside the default.
+    const resolved = `任务运行预算上限 ${DEVELOPER_LIVE_POLICY_BINDING.defaultRunBudgetCeilingTokensPerFrozenUnit * unitCount} tokens`;
+    expect(settled.namedNonEffects.find((statement) => statement.includes('Provider Processing'))).toContain(resolved);
+    expect(settled.updateControls!.providerConsequence).toContain(resolved);
+    expect(calls).toHaveLength(FULL_CHAIN_TURNS);
+    expect(settled.run!.state).toBe('completed');
+    await store.close();
+  });
+
+  /**
+   * The same bound default, against a Run whose first unit alone spends more than the resolved total.
+   * The ceiling is a precondition of the transmit decision, so the second unit never forms a request:
+   * the Run stops, names `run-budget-ceiling-reached`, and transmits nothing further.
+   */
+  it('stops at the resolved per-frozen-unit ceiling and transmits nothing past it', async () => {
+    const calls: StubCall[] = [];
+    const { store, bookId, prepared } = await prepareLive(roots.dataRoot, POLICY_DEFAULT_CEILING);
+    const resolvedCeiling = DEVELOPER_LIVE_POLICY_BINDING.defaultRunBudgetCeilingTokensPerFrozenUnit * prepared.coverageManifest!.units.length;
+    // One unit's usage past the whole Run's resolved ceiling; the next unit is refused before it forms.
+    const perUnit = { inputTokens: resolvedCeiling, outputTokens: 10_000 };
+    const { units: responses } = await unitAnswers(prepared, perUnit);
+    const settled = await runLive(store, bookId, prepared, owner(store, stubTransport({ calls, responses }), POLICY_DEFAULT_CEILING));
+
+    expect(settled.providerResolutionPlan!.runBudgetCeiling).toEqual({ kind: 'tokens', maxTotalTokens: resolvedCeiling });
+    // Exactly one transmission: the gate's ceiling precondition holds against the resolved total.
+    expect(calls).toHaveLength(1);
+    expect(settled.run!.state).toBe('interrupted');
+    expect(settled.taskOutcome!.classification).toBe('interrupted');
+    expect(settled.run!.transitions.at(-1)!.detail).toContain('run-budget-ceiling-reached');
+    expect(settled.taskOutcome!.safeNextAction).toContain('--run-budget-ceiling');
+    expect(settled.taskOutcome!.safeNextAction).not.toContain('账户限额');
+
+    // The partial revision survives with the one unit it paid for, and the reduction and sampling
+    // turns the policy names never dispatched either.
+    const revision = settled.resultSetRevision!;
+    expect(revision.coverage.unitsClosed).toBe(1);
+    expect(revision.coverage.unitsTotal).toBe(SAMPLE1_UNITS);
+    expect(revision.usage.inputTokens + revision.usage.outputTokens).toBe(perUnit.inputTokens + perUnit.outputTokens);
+    const report = settled.taskOutcome!.report!;
+    expect(report.usagePerStage['cross-unit-reduction']).toEqual({ requests: 0, inputTokens: 0, outputTokens: 0 });
+    expect(report.usagePerStage['assurance-sampling']).toEqual({ requests: 0, inputTokens: 0, outputTokens: 0 });
+    expect(report.unitRows.filter((row) => row.gapCode === 'not-attempted')).toHaveLength(SAMPLE1_UNITS - 1);
+
+    // Nothing left the host past the one transmission: the ledger carries exactly that line.
+    const lines = await ledgerLines(cacheRoot);
+    expect(lines.filter((line) => line.outcome === 'transmitted')).toHaveLength(1);
+    await store.close();
+  });
+
   it('ends the Run on a Provider Account Limit with no retry, fallback, or second model', async () => {
     const calls: StubCall[] = [];
     const { store, bookId, prepared } = await prepareLive(roots.dataRoot);
-    const responses = await unitAnswers(prepared);
+    const { units: responses } = await unitAnswers(prepared);
     const execution = owner(store, stubTransport({
       calls,
       responses,
@@ -667,9 +826,9 @@ describe('the developer-live scope over exact sample1 with a stub transport', ()
   it('states the bound scope, version, route, and ceiling on every reading that names them', async () => {
     const calls: StubCall[] = [];
     const { store, bookId, prepared } = await prepareLive(roots.dataRoot);
-    const responses = await unitAnswers(prepared);
-    const settled = await runLive(store, bookId, prepared, owner(store, stubTransport({ calls, responses })));
-    expect(calls).toHaveLength(SAMPLE1_UNITS);
+    const { units: responses, named } = await unitAnswers(prepared);
+    const settled = await runLive(store, bookId, prepared, owner(store, stubTransport({ calls, responses, named })));
+    expect(calls).toHaveLength(FULL_CHAIN_TURNS);
 
     // Not one surface may say the remote binding was refused or that nothing was transmitted while
     // this Run was transmitting: that contradiction is the defect (#307 problem P2).
@@ -682,10 +841,10 @@ describe('the developer-live scope over exact sample1 with a stub transport', ()
 
     // The scope, the version, the bound route, and the ceiling as the number the launch froze.
     const scopeStatement = settled.namedNonEffects.find((statement) => statement.includes('Provider Processing'))!;
-    expect(scopeStatement).toContain('developer-live · Provider Processing v4');
+    expect(scopeStatement).toContain('developer-live · Provider Processing v5');
     expect(scopeStatement).toContain('任务运行预算上限 500000 tokens');
     expect(scopeStatement).toContain('opencode-go · deepseek-v4-flash');
-    expect(consequence).toContain('developer-live · Provider Processing v4');
+    expect(consequence).toContain('developer-live · Provider Processing v5');
     expect(consequence).toContain('任务运行预算上限 500000 tokens');
     expect(consequence).toContain('opencode-go · deepseek-v4-flash');
     // The transmission count an update states is the recomputed unit count, never zero.

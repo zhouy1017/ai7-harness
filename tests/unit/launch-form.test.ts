@@ -2,12 +2,14 @@ import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_PROVIDER_CACHE_DIRECTORY, resolveDeveloperLiveLaunch } from '../../src/service/launch-policy.js';
+import { resolveDeveloperLiveCeiling } from '../../src/service/analysis/baseline-analysis-store.js';
 import {
   PROVIDER_CACHE_ROOT_ARGUMENT,
   RUN_BUDGET_CEILING_ARGUMENT,
   RUN_BUDGET_CEILING_PATTERN,
   TRUSTED_SCOPE_ARGUMENT,
   parseTrustedLaunchForm,
+  type DeveloperLiveCeiling,
 } from '../../src/shared/protocol.js';
 
 // The launch form is argv only (ADR 0065): the launcher, Electron main, and the service parse the same
@@ -50,9 +52,10 @@ describe('parseTrustedLaunchForm', () => {
 describe('resolveDeveloperLiveLaunch', () => {
   const checkout = resolve(REPO_ROOT);
 
-  it('applies the 500,000-token default ceiling and the sibling cache directory of the checkout', () => {
+  it('binds the policy per-frozen-unit default ceiling and the sibling cache directory of the checkout', () => {
     const launch = resolveDeveloperLiveLaunch({ trustedOperationalScope: 'developer-live', runBudgetCeiling: null, providerCacheRoot: null }, checkout);
-    expect(launch.runBudgetCeiling).toEqual({ kind: 'tokens', maxTotalTokens: 500_000 });
+    // ADR 0070: 30,000 tokens per frozen Coverage Manifest unit, resolved once the manifest freezes.
+    expect(launch.runBudgetCeiling).toEqual({ kind: 'tokens-per-frozen-unit', tokensPerFrozenUnit: 30_000 });
     expect(launch.providerCacheRoot).toBe(resolve(checkout, '..', DEFAULT_PROVIDER_CACHE_DIRECTORY));
     expect(DEFAULT_PROVIDER_CACHE_DIRECTORY).toBe('ai7-harness-provider-cache');
   });
@@ -67,6 +70,31 @@ describe('resolveDeveloperLiveLaunch', () => {
     }
     expect(() => resolveDeveloperLiveLaunch({ trustedOperationalScope: 'development-ci', runBudgetCeiling: null, providerCacheRoot: null }, checkout)).toThrowError(/LAUNCH_FORM_INVALID/u);
     expect(() => resolveDeveloperLiveLaunch({ trustedOperationalScope: 'developer-live', runBudgetCeiling: null, providerCacheRoot: 'relative' }, checkout)).toThrowError(/LAUNCH_FORM_INVALID/u);
+  });
+});
+
+/*
+ * The other half of the same ceiling: the launch binds the formula, and this resolves it against the
+ * Run's own frozen Coverage Manifest unit count (ADR 0070, ADR 0079 §2.3). The store calls it once the
+ * manifest is frozen and before the plan is, so the plan carries a total and nothing re-derives one at
+ * dispatch.
+ */
+describe('resolveDeveloperLiveCeiling', () => {
+  it('passes an explicit total through unchanged, whatever the unit count is', () => {
+    const explicit: DeveloperLiveCeiling = { kind: 'tokens', maxTotalTokens: 250_000 };
+    expect(resolveDeveloperLiveCeiling(explicit, 8)).toEqual({ kind: 'tokens', maxTotalTokens: 250_000 });
+    expect(resolveDeveloperLiveCeiling(explicit, 1)).toEqual({ kind: 'tokens', maxTotalTokens: 250_000 });
+  });
+
+  it('multiplies the per-frozen-unit default by the frozen unit count of this Run', () => {
+    const perUnit: DeveloperLiveCeiling = { kind: 'tokens-per-frozen-unit', tokensPerFrozenUnit: 30_000 };
+    // A manuscript of eight units and one of three get different totals from the same bound default:
+    // the ceiling sizes with the work, which is the whole point of the per-unit form.
+    expect(resolveDeveloperLiveCeiling(perUnit, 8)).toEqual({ kind: 'tokens', maxTotalTokens: 240_000 });
+    expect(resolveDeveloperLiveCeiling(perUnit, 3)).toEqual({ kind: 'tokens', maxTotalTokens: 90_000 });
+    // The policy default itself is the one `resolveDeveloperLiveLaunch` binds, not a second constant.
+    const bound = resolveDeveloperLiveLaunch({ trustedOperationalScope: 'developer-live', runBudgetCeiling: null, providerCacheRoot: null }, resolve(REPO_ROOT)).runBudgetCeiling;
+    expect(resolveDeveloperLiveCeiling(bound, 8)).toEqual({ kind: 'tokens', maxTotalTokens: 240_000 });
   });
 });
 

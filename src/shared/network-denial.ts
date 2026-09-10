@@ -15,7 +15,7 @@ let networkDenialInstalled = false;
 
 /**
  * The one single-host allowance of the developer-live scope (ADR 0065, Issue #272). It is armed by
- * the service entry only under Provider Processing v4 and only before the denial is installed, so
+ * the service entry only under Provider Processing v5 and only before the denial is installed, so
  * the denial's own replacements consult it at call time: exactly the armed host and port may open a
  * TLS or TCP connection and resolve their name; every other primitive, host, and port stays denied,
  * and the global `fetch`, HTTP clients, servers, datagrams, and WebSockets are denied regardless.

@@ -32,7 +32,7 @@ Artifact discovery/acquisition/validation/install/scoped enablement, Artifact Up
 
 ## Current implementation route
 
-The Issue #86 policy successor preserves Provider Processing v1 and v2 byte-for-byte and maps trusted operational scopes as development/CI → v1, exact fixture recording → v2, and ordinary production → new v3; External Export remains pinned to unchanged v1. ADR 0065 later added the `developer-live` scope → v4 through active-policy-set v4. This is a selection/policy contract only. It provides no trusted launch-selector implementation, credential, endpoint, live Provider call, runtime enforcement, external export, policy activation or cross-scope fallback authority.
+The Issue #86 policy successor preserves Provider Processing v1 and v2 byte-for-byte and maps trusted operational scopes as development/CI → v1, exact fixture recording → v2, and ordinary production → new v3; External Export remains pinned to unchanged v1. ADR 0065 later added the `developer-live` scope → v4 through active-policy-set v4, and ADR 0079 §2 and §3 then moved `developer-live` → v5, `ordinary-production` → v6 and External Export → v2 through active-policy-set v5, keeping v3 and v4 as immutable predecessors. This is a selection/policy contract only. It provides no trusted launch-selector implementation, credential, endpoint, live Provider call, runtime enforcement, external export, policy activation or cross-scope fallback authority.
 
 Implementation status lives only in root `PROGRESS.md` and `docs/development/e2e-journeys.md` under ADR 0064; this package claims no implementation.
 

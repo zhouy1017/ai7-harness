@@ -3,7 +3,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 // A minimal JSON Schema Draft-7 validator against the installed closure only (no dependency).
-// It supports exactly the keyword set the nine policy schemas use, verified at
+// It supports exactly the keyword set the policy schemas use, verified at
 // docs/policies/README.md's Local validation section, and it fails loudly on any other keyword
 // rather than silently ignoring it.
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');

@@ -1096,7 +1096,7 @@ The presentation of a canonical Annotation: an exportable comment on exact text 
 _Avoid_: 备注, 修改建议, finding without a location, private note
 
 **Editor Note** (`备注`):
-The presentation of a canonical Editor Note: an editor-private note on exact text that is never exported, never sent to a model and never in a Task's readable scope (ADR 0076).
+The presentation of a canonical Editor Note: an editor-private note on exact text that does not leave with an export by default and leaves only when the editor includes it in that export, is never sent to a model and is never in a Task's readable scope (ADR 0076; ADR 0079 §3 as amended 2026-09-10).
 _Avoid_: 批注, exported comment, model context
 
 **Personal Highlight** (`自选高亮`):

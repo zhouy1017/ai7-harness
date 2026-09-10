@@ -858,7 +858,7 @@ manuscript text
 │     └─ 接受并应用 · 拒绝 · 修改后接受（optional 为什么这样改）
 ├─ 批注 · exportable comment · fixed color
 │  └─ 回复 · 标记为已处理 · 转为修改建议 · 查看任务 · 删除
-├─ 备注 · editor-private · never exported or sent · fixed color
+├─ 备注 · editor-private · not exported by default, never sent · fixed color
 │  └─ 编辑 · 转为批注 · 提出修改建议 · 删除
 └─ 高亮 · three personal colors · no meaning
    └─ 换颜色 · 取消高亮 · 转为备注 / 批注 / 修改建议
