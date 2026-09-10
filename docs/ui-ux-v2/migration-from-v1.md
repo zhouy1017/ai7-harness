@@ -30,6 +30,26 @@ This table does not invent V1 antecedents. It records which earlier V2 presentat
 | Provider setup or a Default Execution Rule as possible low-ceremony background authority | Provider setup remains non-authorizing; a Rule can match only a newly user-initiated Task. New autonomous Provider-backed manuscript analysis requires an active exact Background Analysis Enrollment, while the same existing authorized Run may continue backgrounded unchanged. |
 | Manuscript Apply described mainly inside Proposal-specific interaction | Keep the Proposal path and make it the universal formal agent-originated mutation boundary: one single-use AI7 Apply bound to exact Book/base pin/diff/targets, drift recheck, explicit editor confirmation and verified receipt. Direct typing and deterministic import/domain commands remain separate. |
 
+## ADR 0076 / ADR 0077 successor normalization
+
+Recorded by [ADR 0078](../adr/0078-align-the-remaining-references-the-plan-and-the-tracker-to-the-editor-facing-specification.md). Earlier V2 presentation assumptions that are no longer current after the September 2026 design session; provenance stays in Git history and in the decision records named.
+
+| Earlier V2 assumption | Successor disposition |
+| --- | --- |
+| Book Work Overview as the entry of a Book with a Manuscript | Retire as entry: opening the Book enters the manuscript at its last position; the overview is the sidebar destination 工作概览 and the entry only for a zero-Manuscript Book (ADR 0076 §1). |
+| Two persistent right-side entries (outline, search) beside a position rail | One 导航 column with outline, search and the Whole-manuscript Position Rail carrying three mark lanes (ADR 0076 §3). |
+| A persistent bottom Task Composer | On demand: the selection menu's 就这段发起任务… and the 任务 panel's 发起全书任务 (ADR 0076 §3). |
+| Proposal Cards with a separate Proposal Decision and a separate 准备应用 | 修改建议 as a mark previewed in place, one-click 接受并应用, batch through one confirmation strip; the three records stay separate (ADR 0076 §4). |
+| A consolidated automation projection of deferred label and placement (自动化中心) | 知识库 › 工序与规则, beside guidelines, evaluation profiles, house memory, exemplars, the materials library and external retention (ADR 0076 §2, ADR 0077 §3). |
+| Quick Start with a three-question intake remembered as the rule | 快速开始 runs the pattern's Default Execution Rule; a rule is created only by 设为快速开始默认 from a viewed plan (ADR 0077 §2). |
+| One six-part Plan Preview | 精简 (default) and 完整 modes in the Task Drawer; the plan is editable in place into a new plan version (ADR 0077 §2). |
+| Rewind, Retry and Replay as editor-facing Run controls | A running Run offers 暂停, 取消 and 改计划重做, and 续行 after interruption; the append-only history model (UI ADR 0002) stays behind them (ADR 0077 §2). |
+| Milestone Versions and Signoff projections for any Editorial Deliverable | Manuscript only: 保存为里程碑版本 and 设为发稿版本 (发稿); a Production Document has versions and Delivery Records (交付) (ADR 0077 §6). |
+| One Delivery Package per deliverable revision | A Delivery Record per document handover and one Book-level 图书交付包 after 发稿 and every delivery (ADR 0077 §6). |
+| Explicit `保存为来源材料` as the only retention of external material | The External Evidence Retention Procedure retains, aligns and translates within the authorizing Task; explicit retention governs editor-initiated material (ADR 0076 §8). |
+| Working Corpus as the editor-facing corpus label | 资料库 with attribution to a Book, a Series or the house and a Learning Eligibility decision; Working Corpus remains the learning-scope term (ADR 0077 §3). |
+| The analysis overview carrying conflicts and leads | Baseline analysis shows what the baseline is for; conflicts feed the review category 情节逻辑与前后一致 (ADR 0076 §5). |
+
 ## Retain
 
 | Frozen semantic asset | V2 disposition | Candidate destination |
@@ -53,7 +73,7 @@ This table does not invent V1 antecedents. It records which earlier V2 presentat
 | Candidate A/B/C three-column shell hypotheses | Book-anchored AI7 Workbench with one collapsible contextual sidebar, dominant active work object, contextual side surface, dedicated workspaces and detached manuscript-page transfer |
 | Work queue organized around old screen assumptions | Action-first Global Attention groups: exceptions/results, exact decisions, running/paused and recent outcomes |
 | Selection-aware task entry as a mostly manual review flow | Exact Task Intent/target/source scope plus Native DSH Artifact Recommendation/manual exact revision, Plan Preview, Quick Start, user-initiated Default Execution Rule matching and exact Plan Revision boundary |
-| No frozen centralized reusable-automation/version-management baseline | Add one carrier-neutral native-artifact/Rule/proposal management projection with typed exact revision history, linked work/deliveries and history-preserving removal; keep Enrollment outside and separately disclosed, defer both presentations' final label/placement and create no generic automation runtime |
+| No frozen centralized reusable-automation/version-management baseline | Add one carrier-neutral native-artifact/Rule/proposal management projection with typed exact revision history, linked work/deliveries and history-preserving removal; keep Enrollment outside and separately disclosed, defer both presentations' final label/placement and create no generic automation runtime; placed in 知识库 › 工序与规则 by ADR 0076 |
 | No frozen foreground contextual-question-answering presentation contract | Add Book/work-object-bound Interactive Editorial Dialogue with Waiting Only as the product default, a foreground-only Interactive Stream exception, background `等待回答`, durable answer history, and explicit promotion into governed objects |
 | No frozen Book-bound DSH-composed agent surface | Add explicit Agent Workspace as a contained AI7-shell presentation that preserves Book/safety/prior work-object context and grants no DSH-owned product authority |
 | No frozen whole-revision covered-analysis persistence contract | Add deterministic coverage/reduction, immutable Result Set revisions, three explicit update meanings, separate feedback/metrics and a separately explicit, revocable Background Analysis Enrollment whose compact controls remain deferred |
@@ -61,7 +81,7 @@ This table does not invent V1 antecedents. It records which earlier V2 presentat
 | Detached reading as a separate view hypothesis | One editable manuscript subpage transferred between workbench and Detached Manuscript Window; no parallel editor |
 | Formal editor-facing `签发` | User-facing `保存为里程碑版本` while the separate internal Signoff Record remains exact |
 | Public Release Permission terminology in ordinary export flow | Explicit exact-version `发稿版本` projection; ordinary local export has no release interaction |
-| Signoff-to-delivery journey with external handoff semantics | Milestone Version + destination-/format-independent Delivery Package + separate native-targeted Local Export Preparation/receipt; no direct send, recipient, handoff log or delivery tracking |
+| Signoff-to-delivery journey with external handoff semantics | Milestone Version + destination-/format-independent Delivery Package + separate native-targeted Local Export Preparation/receipt; no direct send, recipient, handoff log or delivery tracking; re-cut by ADR 0077 into 发稿, 交付 (Delivery Records) and the Book-level 图书交付包 |
 | Equal-format export framing | DOCX as primary user format, Markdown as internal/fallback and secondary user option, PDF as optional fixed-layout export |
 | No durable post-designation maintenance object | Versioned Maintenance Cases bound to exact Publication Version/Deliverable revision; Correction/Errata/Supersession/Withdrawal/Reissue/Archive preserve history and make Withdrawal/Archive internal-only |
 | Broad learning/feedback surface | Quiet contextual reason prompts, Book-first explicit Learning Material eligibility, governed Series/House scope and object-centered bidirectional Learning Audit |

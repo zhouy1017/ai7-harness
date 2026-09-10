@@ -1742,7 +1742,7 @@ Conditional outstanding items remain projected into the affected Workflow phases
 The target-house workflow projects the internal exact-next-use record through familiar version language:
 
 ```text
-current Deliverable / Manuscript working state
+current Manuscript working state
 └─ 保存为里程碑版本
    ├─ required Milestone Version Label
    ├─ required Milestone Purpose
@@ -1759,7 +1759,7 @@ current Deliverable / Manuscript working state
 version history
 ├─ multiple labeled Milestone Versions
 ├─ current working state · 自「{标签}」后有修改
-└─ later Delivery preparation selects one exact milestone
+└─ 设为发稿版本 selects one exact milestone; the 图书交付包 takes the Publication Version
 ```
 
 Ordinary UI never presents `签发`, Signoff readiness, or signing exceptions. The milestone creates neither Delivery Package nor Public Release Permission and cannot move to later content after edits. Under [ADR 0077](../adr/0077-adopt-the-editor-facing-surface-specification-as-the-execution-standard.md) Milestone Versions and the Publication Version belong to the primary Manuscript only (MILE-014).
@@ -1771,7 +1771,7 @@ The target-house publication authority appears as an exact version designation r
 ```text
 exact Milestone Version
 └─ 设为发稿版本
-   ├─ exact Deliverable/version
+   ├─ exact Manuscript milestone
    ├─ identified publication scope/public channel
    ├─ actor/time + basis/note
    ├─ 此版本可用于发稿 · AI7 不会发布或发送
@@ -1783,14 +1783,14 @@ exact Milestone Version
          └─ Maintenance Case Workspace
 ```
 
-The action lives in version/history and only enters Global Attention as `发稿版本待设定` when a pinned Workflow/Profile creates a real unresolved editor action. It never appears in ordinary local export. Publication Version may be referenced by a later Delivery Package or Maintenance Case, but package preparation, format choice, local Effect Approval, Effect Receipt, or maintenance status cannot create, retarget, or infer it.
+The action lives in version/history and only enters Global Attention as `发稿版本待设定` when a pinned Workflow/Profile creates a real unresolved editor action. It never appears in ordinary local export. Publication Version is the manuscript half of a later 图书交付包 and the anchor of a Maintenance Case, but package preparation, format choice, local Effect Approval, Effect Receipt, or maintenance status cannot create, retarget, or infer it.
 
 ## Post-designation Maintenance Cases
 
 Maintenance is one versioned exact record path, not a note field or mutation of publication history:
 
 ```text
-exact Publication Version + exact Editorial Deliverable revision
+exact Publication Version + exact Manuscript Revision
 └─ 记录维护事项
    ├─ exact Book / version identity
    ├─ classification · unselected
@@ -1812,18 +1812,18 @@ exact Publication Version + exact Editorial Deliverable revision
          └─ 记录维护事项结论 → append another case revision
 ```
 
-The earlier Publication Version, Public Release Permission, Delivery Packages, exports and receipts stay immutable. Only a real unresolved next action appears in Global Attention as `维护事项待处理`. Withdrawal and Archive remain internal AI7 state and never branch to external recall, takedown, recipient notification, or file deletion.
+The earlier Publication Version, Public Release Permission, 图书交付包 versions, exports and receipts stay immutable. Only a real unresolved next action appears in Global Attention as `维护事项待处理`. Withdrawal and Archive remain internal AI7 state and never branch to external recall, takedown, recipient notification, or file deletion.
 
-## Delivery Package Preparation
+## Delivery Package Preparation (the 图书交付包)
 
-One exact Editorial Deliverable Revision, optionally identified by an exact Milestone Version, and one editorial preparation purpose own a destination- and format-independent package context:
+Under [ADR 0077](../adr/0077-adopt-the-editor-facing-surface-specification-as-the-execution-standard.md) the one package is Book-level: the Manuscript's Publication Version, the latest delivered version of every Production Document (or 本书不做) and the work records own a destination- and format-independent package context; a single document's handover is a Delivery Record (DELIV-004):
 
 ```text
-Editorial Deliverable → 准备交付
+Book → 交付物 → 准备图书交付包
 └─ Delivery Package Preparation
-   ├─ select one exact Editorial Deliverable Revision
-   │  ├─ optional identifying Milestone Version
-   │  └─ change-exclusion notice when later edits exist
+   ├─ condition table: 发稿版本已设 · every document delivered or 本书不做 · work records
+   │  ├─ choose which delivered version of a document to include
+   │  └─ change notice when the manuscript or a document changed after 发稿 / 交付
    ├─ Delivery Package Purpose
    ├─ Delivery Package Manifest Preview
    │  ├─ included content + required Editorial Artifacts
@@ -1834,9 +1834,9 @@ Editorial Deliverable → 准备交付
    └─ 准备交付包
       └─ Prepared Delivery Package
          ├─ stable Package ID/version
-         ├─ exact Editorial Deliverable Revision + optional Milestone Version + Delivery Package Purpose
+         ├─ exact Publication Version + exact delivered document versions + Delivery Package Purpose
          ├─ immutable content-manifest integrity
-         ├─ 交付包已准备
+         ├─ 图书交付包已准备
          └─ Package Export History
             ├─ 暂无导出记录
             └─ 0..N exact Local Export Preparations / Receipts
@@ -1872,7 +1872,7 @@ Added by [ADR 0077](../adr/0077-adopt-the-editor-facing-surface-specification-as
 User-facing format hierarchy and internal agent exchange are deliberately different:
 
 ```text
-exact Milestone Version or Prepared Delivery Package
+exact Manuscript version, Production Document version or prepared 图书交付包
 └─ Local Export Preparation
    ├─ format
    │  ├─ DOCX · 主要可编辑格式

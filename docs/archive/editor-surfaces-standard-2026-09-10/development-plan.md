@@ -1,0 +1,141 @@
+# AI7 development plan
+
+Status: **Owner-accepted delivery order under [ADR 0064](../adr/0064-reweight-repository-development-toward-value-first-delivery.md), written on `dev@4c50ce31b0f15ff2bfadd2af17fc914c317e0f22` on 2026-09-06.** This file is the only place the order lives. Root [`PROGRESS.md`](../../PROGRESS.md) names the next slice; every slice Issue carries its plan slot. The order changes only through a Commander pull request that edits this file and states the reason; a change that alters product authority also needs an ADR.
+
+## Why this order
+
+The prompt-only review practice of 2026-09-06 delivered what an editor pays for in one session: extract every unit, cross-check across the whole book, verify claims against institutional sources, sample the result adversarially, and render deliverables. AI7 already has the extract stage and the record model on synthetic fixtures. Phase 1 completes that pipeline on real model output; Phase 2 turns findings into applied corrections and exported files; only then do run governance, learning, and ecosystem slices follow, because they govern Runs that will by then exist.
+
+## How an agent executes this plan
+
+1. The Commander reads `PROGRESS.md`, takes the next slice from the phase tables below, and opens its Issue.
+2. The Commander writes the one-page Brief on the then-current `dev` head in the form of [`docs/agents/change-brief.md`](../agents/change-brief.md), reusing the slice detail below, labels the Issue `ready-for-agent`, and dispatches one fresh Task Session under [Repository Development Dispatch](../../kick-in/27-repository-development-dispatch.md) with the class binding in the table.
+3. The Worker runs the Local Verification Ladder at the exact head; the Commander posts the schema-v5 Return Receipt, pushes, marks the pull request Ready, waits for the paired Gate, squash-merges, updates `PROGRESS.md` in the same or its own pull request, and marks the slice `integrated` here.
+4. A slice that exposes a design gap stops `needs-commander`; the Commander records the gap in `PROGRESS.md`, writes an ADR if authority changes, and edits this plan.
+5. Slices marked `Owner confirmation` are not dispatched until the Owner confirms them in writing when they are reached.
+
+Product integration stays serial. Slices in different phases never run in parallel; two slices in the same phase may run in parallel only when the table shows no dependency between them and they touch different owners.
+
+## Phase 0 — in flight
+
+| Order | Slice | Issue | Class | Journey | Outcome | Depends on | Status |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 0.1 | S13 | #48 | T3 | J-04 | Plan Revision on material drift and the `safe-retry` in-envelope adaptation on the executing analysis Task | — | integrated (PR #280, `dev@f417e50`) |
+
+## Phase 1 — real analysis loop on `sample1`
+
+Exit criterion: one `developer-live` Run on exact `sample1` produces unit results, model-driven cross-unit findings, sourced factual findings, a sampled assurance estimate, and a Run Report; fixtures generated from that Run replay the same path in J-04; the Owner has read at least one Run Report and its findings. The first live Run, `S40/smoke/1` of 2026-09-07 ([#307](https://github.com/zhouy1017/ai7-harness/issues/307)), met the transport half of this and not the result half: it transmitted eight units under the bound ceiling, kept every enforcement guarantee, and produced a Result Set Revision, but three of the eight failed the unit contract. Slice 1.1a closed on 2026-09-08: the constraint is declared on the live profile and one live item showed the failed unit answering under it. The result half of the criterion — cross-unit findings, factual findings, an assurance estimate, a Run Report — waits on S41 to S44.
+
+| Order | Slice | Issue | Class | Journey | Outcome | Depends on | Status |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 1.1 | S40 | #272 | T3 | J-04 | `developer-live` scope: Provider Processing v4, active set v4, trusted launch form, per-unit Session, required ceiling, `deepseek-v4-flash` through the `opencode-go` route, the ADR 0067 enrollment helper, Provider Test Ledger and Result Cache, quota classification, Egress Gate `transmit-remote` | S13 | integrated (PR #285, `dev@3c3d820`); the live smoke run is deferred |
+| 1.1a | S40-f6 | #306 | T3 | J-04 | Diagnose and fix the `contract-invalid (not-json)` failures the first live Run produced in three of eight units, from the cached responses and without a new live call | S40, #310 | integrated (PR #330, `dev@37dd88243acf3e5e516d64c23032e4337b5b8396`); the format constraint verified by one live item, `S40/reanalyze-range/1` |
+| 1.1b | S40-f5 | #303 | T2 | J-03, J-04 | Derive every scope, policy-version, transmission-count, ceiling, and binding statement from the bound launch, and sweep for every remaining hardcoded one | S40 | integrated (PR #315) |
+| 1.2 | S41 | #273 | T2 | J-04 | Fixture generation from the Provider Result Cache with echo checks; content-digest resolution for unit and service tests | S40 | integrated (PR #376, `dev@af7d2b18`): the tool and the content-digest mode, proven on a synthetic cache; the first real generation is a Commander unit |
+| 1.3 | S42 | #274 | T3 | J-04 | Baseline Cross-Unit Reduction Contract v1 over topic-reorganized unit results; `reducer`-lineage findings | S40 | S42a (the service: contract, stage, protocol 25, fixtures, J-04) integrated (PR #393, `dev@f2d587a5`); S42b (the Overview's rendering) waits for the editor-surface handoff under a new Issue; #274 closed with its service side |
+| 1.4 | S18 | #53 | T3 | J-04 | Factual review: assertion markers, Factual Review Contract v1, research capability with a per-Run search budget and institutional-source list, independent Reference Integrity / Claim Support / Factual Verification, the ADR 0066 finding record | S40 | S18a (the service: kind, contract, Reference Integrity, finding record, refusing research capability, revision 20, protocol 26) integrated (PR #395, `dev@abb7bbb2`); S18b (surfaces) after the editor-surface handoff; S18c (live research) under ADR 0074 once accepted |
+| 1.5 | S19 | #54 | T3 | J-04 | `保存为来源材料` research snapshot into a Book-owned Source Version; exact-revision Correction Proposal from a finding | S18 | planned |
+| 1.6 | S43 | #275 | T2 | J-04 | Assurance sampling over cross-unit and factual findings feeding the assurance axis | S42, S18 | integrated 2026-09-09 as T3 (PR #397, `dev@7b8f626d`); dispositions render beside findings in S42b and S18b |
+| 1.7 | S44 | #276 | T2 | J-04 | Durable Run Report linked from the Task Outcome | S43 | S44a (the service step) integrated 2026-09-09 as T3 (PR #399, `dev@a9154593`); S44b (opening the report from the Overview and the Task Outcome) after the editor-surface handoff |
+
+### Slice detail
+
+**S40 (#272).** Extend `src/service/launch-policy.ts`, the policy directory, `src/service/provider/egress-gate.ts`, `credential-broker.ts`, `deepseek-adapter.ts`, `src/service/harness/primary-agent-harness.ts` (one Session per unit), `src/service/analysis/execution.ts` (ceiling enforcement before dispatch), and the `deepseek-v4-pro` literals in the ledger CHECKs, `src/shared/protocol.ts`, `src/main/application.ts`, and the J-03, J-12, and J-04 runner pins. Add route `opencode-go` (`https://opencode.ai/zen/go/v1/chat/completions`, Bearer key from the Protected Secret Store) beside the production route, `tools/enroll-dev-credential.mjs` as the only reader of the Owner's key file, and the Provider Test Ledger and Result Cache in the host-level cache root outside every checkout, so an identical request replays and a repeated test item is refused (ADR 0067). Only admitted Public SampleBooks are transmittable. J-04 stays on the deterministic route; a service suite proves the v4 gate decision and the ceiling refusal with a stub transport. No socket in any test.
+
+**S41 (#273).** New tool `tools/generate-model-fixture.mjs --from-cache` reading the ADR 0067 cache and ledger; extend `src/service/provider/model-fixture.ts` with a `content-digest` resolution mode used only under `tests/`. Existing fixtures untouched. A generated fixture enters the repository only after human review of every free-text field, recorded in the closure.
+
+**S42 (#274).** New contract module beside `contract.ts`; extend `reducers.ts`, `execution.ts`, `result-set-schema.ts`, the protocol projections, the Overview, and J-04 with one fixture-driven cross-unit finding. Topic axes split by topic when they exceed one unit budget. Deterministic conflict kinds stay as a pre-filter.
+
+**S18 (#53).** New Task kind `factual-review` on the same real path (Task Intent through Result Set Revision). New contract module for assertion listing and verdicts. New owner `src/service/capabilities/research.ts`: under `development-ci` it replays research fixtures, under `developer-live` it fetches through the capability facade with the Plan Envelope's search budget (allocated by severity tier) and a curated institutional-source list that includes Chinese historical sources. Reference Integrity is verified deterministically against block text; Claim Support and Factual Verification are model-judged and shown independently. Findings use the ADR 0066 record shape; conflicts and unresolved evidence are preserved; `回到稿件范围` returns to the exact range. J-04 gains fixture-driven factual stages. Non-goals: source retention, proposals, Series. Delivery in three steps, decided 2026-09-08: **S18a** first — the Task kind, the Factual Review Contract, deterministic Reference Integrity, the ADR 0066 finding record, and a research capability that replays fixtures and otherwise refuses with a disclosed state — provider-free, every model-judged finding at `未外部复核`; **S18b** the editor surfaces after the editor-surface handoff; **S18c** the live research path, only under ADR 0074 once the Owner accepts it.
+
+**S19 (#54).** `保存为来源材料` commits a retention-permitted research snapshot into a Book-owned Source Version with a Source Acquisition Record (ADR 0035); a finding offers `提出更正提议`, which creates an exact-revision Correction Proposal on a Proposal Branch without applying it. J-04 asserts both. Non-goals: Proposal Decision and Apply (Phase 2).
+
+**S43 (#275)** and **S44 (#276)** are specified in their Issues.
+
+## Phase 1c — what the first live Run exposed
+
+Exit criterion: the display and liveness rules are stated in `docs/ui-ux-v2/`, every surface of the seven executable Journeys carries a verdict against them, and no surface tells an editor something that is not derived from current state.
+
+These slices come from [#307](https://github.com/zhouy1017/ai7-harness/issues/307), the record of `S40/smoke/1`. They sit **before Phase 2** deliberately. Phase 2 builds Proposal review, Apply, conflict resolution, and export — four families of new surfaces. Building them before these rules exist means applying today's habits four more times and paying to undo them later. A rule is cheap to state and expensive to retrofit, which is the same argument slice 1.1b makes about sweeps: the cost of a wrong pattern is the number of places it has been copied to.
+
+| Order | Slice | Issue | Class | Journey | Outcome | Depends on | Status |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 1c.1 | S46 | #304 | T3 | all | State the decision-layer / technical-identity rule with persistent primary actions, local time, and the editorial vocabulary; then survey every surface of the seven Journeys with a per-surface verdict | 1.1b | rule stated (ADR 0071); survey posted on #304 (44 surfaces, 15 conforming); #332 (the systemic family) integrated (PR #347, `dev@e21acad`); #335 integrated (PR #355, `dev@3105b208`); #333 and #334 re-scoped on 2026-09-08 to the residue #332 left; #333 integrated (PR #380, `dev@32055cc2`); #334 integrated (PR #383, `dev@c5e7ff42`); #336 integrated (PR #386, `dev@5f3c4b44`); #337 integrated (PR #392, `dev@4743c57b`) — the seven families are all applied |
+| 1c.2 | S47 | #305 | T3 | J-04 | Define the liveness signal beside Measured Run Progress from facts the system already holds, with a sampling obligation, a stale case, and the lifetime of a transient indicator | 1.1b | integrated (rule ADR 0071 / PR #329; implementation PR #341, `dev@4254345`, protocol 21) |
+| 1c.3 | S48 | #308 | T1 | — | `--check` answers `present`, `absent`, or `unavailable`, so a failed check is distinguishable from a missing credential without revealing anything about a value | — | integrated (PR #314) |
+| 1c.8 | S53 | #318 | T1 | none | The delivery Gate fires on a pull request opened directly as ready, not only on the draft-then-ready route | — | integrated (PR #319) |
+| 1c.4 | S49 | #310 | T3 | J-04 | Model capability profiles keyed by route and model, with the adapter normalizing every response into one canonical result — so a second vendor is a profile, not a branch | S40 | integrated (PR #320) |
+| 1c.5 | S50 | #311 | T2 | J-01, J-04, J-12 | Test manuscripts composed from admitted SampleBook content rather than invented text | #352 | integrated (PR #365, `dev@55299e40`); J-08's conversion #360 integrated (PR #369, `dev@2117689f`) |
+| 1c.6 | S51 | #313 | T3 | J-01 | Multi-format manuscript intake normalizing to DOCX, with the Source Version always keeping the original | #297 | split into four units on the Issue under ADR 0072: S51a #352 integrated (PR #357, `dev@1c5168fc`); S51b-1 #350 integrated (PR #370, `dev@4d8a9723`; schema revision 18, protocol 22; the rename moved to #363); #363 integrated (PR #374, `dev@ec467128b22ff012a3bac9f3bb394aeb0aa6a190`; the intake path reads `stageSelectedManuscript` end to end, protocol 23); S51b-2 #356 integrated (PR #378, `dev@4b3b6ff4`; schema revision 19, protocol 24); S51c #351 integrated (PR #382, `dev@7f6c6262`; `word-extractor@1.0.4` under ADR 0070 §3; §5 narrows to paragraphs for `.doc`) — all four units in |
+| 1c.7 | S52 | #316 | T2 | J-03 | The provider-denied Task kind's scope statements derived from the bound launch, as #303 did for the analysis store | #303 | integrated (PR #331, `dev@dd1ce674ef6375cc9945d1b1c4b84199113342c4`) |
+| 1c.9 | S54 | #321 | T3 | J-04, J-12 | The explicit provider support list — Gemini, OpenCode Go with every plan model, DeepSeek official, OpenAI, Claude, Qwen, HY — implementing the request shapes #310 named and refused | #310 | split into five units on the Issue: S54a #338 integrated (PR #340, `dev@0794a71`); S54b #342 integrated (PR #348, `dev@fcbaf3a`); S54c #354 integrated (PR #359, `dev@2bab1589`); S54d #362 (`google-generate-content`, T3, the shape against test-local profiles because Gemini has no Go route) integrated (PR #366, `dev@3f2fbbb3`); S54e #358 integrated (PR #364, `dev@c990b72f`). Claude, Qwen, and HY official endpoints are 1c.10's first format-selected configurations |
+| 1c.10 | S55a | #322 | T3 | J-12 | Tier 1 of provider configuration: an unlisted provider whose compatibility format AI7 already implements is configured by selecting that format and supplying endpoint, credential slot, and model ids — no agent, and a selected format claims the request shape only | #321 | ADR 0073 proposed (PR #377); waits for the Owner |
+| 1c.11 | S55b | #322 | T3 | — | Tier 2, agent-driven discovery as repository tooling for a provider matching no implemented format: probes with synthetic content under a bounded budget, records shapes never bodies, emits a profile proposal a person admits | S55a | planned |
+| 1c.12 | S56 | #324 | T1 | none | Retire a merged branch by a sequence that actually works, and verify it, since `--delete-branch` fails silently for a branch checked out in a worktree | — | integrated (PR #326, `dev@b073905`) |
+
+**S46 (#304)** and **S47 (#305)** are rule-first: the Commander settles the rule and the survey method, and only then dispatches per-surface application, which can run as T1 or T2 units against a rule that already exists. Neither removes any exact identity from the product; both change where it sits and what else must be true beside it.
+
+**S48 (#308)** is independent of the other two and can run at any time.
+
+## Unscheduled backlog
+
+Open, recorded, and deliberately not ordered — the Commander schedules them when the Owner reaches them. Listing them here keeps them visible without implying a delivery position.
+
+- **From the parallel T1 wave of 2026-09-07:** #286 (the retried unit's payload digest on the Plan Adaptation), #287 (durable-state drift proven beyond unit tests), #288 (the Task Intent range versus later plan versions), #301 (extract the Plan Preview label helpers so their test needs no DOM stub). #297 was scheduled ahead of 1c.6 as its input and is integrated (PR #327, `dev@eacffb9`): three of the four admitted DOCX files refuse at the same `sample1`-shaped condition, with a second gate behind it; #313's design decides the widening.
+- **From wave 4 of 2026-09-08:** #328 (`EditorialStore.open` leaks its database handle when ledger validation fails).
+- **From the advisory review of #48:** #281 (S13-f1), already carried at slot 3.2a below.
+
+## Phase 2 — from proposal to delivered files
+
+Exit criterion: an editor decides a Correction Proposal, applies it through one single-use AI7 Apply with a verified Effect Receipt, and exports the manuscript with its findings to local files through native collision handling.
+
+| Order | Slice | Issue | Class | Journey | Outcome | Depends on | Status |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 2.1 | S20 | #55 | T3 | J-05 | Review and decide persistent Proposal Change Items without applying | S19 | planned |
+| 2.2 | S21 | #56 | T3 | J-05 | Single-use AI7 Apply with drift recheck and Effect Receipt | S20 | planned |
+| 2.3 | S23 | #58 | T2 | J-07 | Destination-independent Delivery Package over an exact revision | S21 | planned |
+| 2.4 | S24 | #59 | T3 | J-07 | Local file export with per-file preparation, approval, atomic commit, and receipt; deliverable forms include the annotated DOCX and a findings ledger | S23 | Owner confirmation |
+| 2.5 | S22 | #57 | T3 | J-06 | Same-block and structural conflicts resolved all-or-none | S21 | planned |
+
+## Phase 3 — run governance
+
+Exit criterion: a Run starts in one action, survives interruption with explicit `续行`, honors budgets and account limits, and two Books run concurrently without focus or scope leakage.
+
+| Order | Slice | Issue | Class | Journey | Outcome | Depends on | Status |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 3.1 | S45 | #277 | T2 | J-03 | Quick Start and Default Execution Rule with a three-question intake | Phase 2 | planned |
+| 3.2 | S15 | #50 | T3 | J-10 | Resume, Retry, Rewind, Redo, Replay with per-unit incremental persistence and the Run Continuation Checkpoint | S13 | planned |
+| 3.2a | S13-f1 | #281 | T2 | J-04 | Read every material plan field from durable state; revert path and durable supersession for pending Plan Revisions; settle the dead `inspect` trigger kind (advisory review of #48) | S13 | planned |
+| 3.3 | S13b | new | T3 | J-04 | Restart-safe Clarification Requests with choice-first answers (prompt contract v2) | S15 | Issue opened when reached |
+| 3.4 | S16 | #51 | T2 | J-10 | Run Budget Ceiling termination, Provider Account Limit recovery, ambiguous outcomes | S15 | planned |
+| 3.5 | S14 | #49 | T3 | J-09 | Concurrent Book work without focus or scope leakage | S16 | planned |
+| 3.6 | S39 | #95 | T3 | J-09 | Background Analysis Enrollment and revocation | S14 | planned |
+
+## Phase 4 — learning and knowledge
+
+| Order | Slice | Issue | Class | Journey | Outcome | Depends on | Status |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 4.1 | S38 | #94 | T2 | J-11 | Analysis feedback Quality Signals and the versioned Analysis Quality Metric | S44 | planned |
+| 4.2 | S26 | #61 | T3 | J-11 | Optional feedback capture and Book-first learning eligibility | S38 | planned |
+| 4.3 | S27 | #62 | T3 | J-11 | Learning Lineage, exclusion, remediation | S26 | planned |
+| 4.4 | S28 | #63 | T3 | J-13 | Series membership and versioned Series Knowledge promotion | Phase 2 | planned |
+| 4.5 | S29 | #64 | T3 | J-13 | Series and Cross-project scope pins and immediate retrieval exclusions | S28, S18 | planned |
+
+## Phase 5 — ecosystem and dialogue
+
+| Order | Slice | Issue | Class | Journey | Outcome | Depends on | Status |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 5.1 | S17 | #52 | T3 | J-16 | Interactive Editorial Dialogue streaming without authority mutation | Phase 3 | planned |
+| 5.2 | S34 | #90 | T3 | J-16 | Book-bound DSH Agent Workspace | S17 | planned |
+| 5.3 | S30 | #65 | T3 | J-15 | Capture and govern a reusable procedure candidate | S45 | planned |
+| 5.4 | S31 | #66 | T3 | J-15 | Resolve, pin, reuse, and retire exact procedure versions | S30 | planned |
+| 5.5 | S33 | #89 | T2 | J-15 | Reconcile and adopt foreign Skill updates | S31 | planned |
+| 5.6 | S25 | #60 | T3 | J-07 | Publication Versions and Maintenance Cases | S24 | Owner confirmation |
+
+## Recording under ADR 0044
+
+The human-attended `sample1` recording is scheduled after the Phase 1 exit criterion, when the unit, cross-unit, and factual contracts have stopped changing. Its sequence is: an ADR for the `fixture-recording` policy successor (transmissions equal to the frozen unit count, per-unit Sessions, the development-interval binding), the recording Issue, and the admission Issue. Until then every fixture comes from S41 generation or hand-writing, and no recording Issue is opened.
+
+## Deferred and out of scope
+
+Packaging, signing, notarization, release, `dev` to `main` promotion, Word integration, additional platforms, private manuscripts in any development scope, and the self-hosted Gate remain outside this plan and need their own Owner decisions.
