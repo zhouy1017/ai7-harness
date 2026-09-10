@@ -17,7 +17,7 @@ Status: **frozen design reference as of `dev@4c50ce31b0f15ff2bfadd2af17fc914c317
 - [`README.md`](./README.md): accepted directions D-001–D-090 and the target-qualified presentation boundary.
 - [`editor-surfaces.md`](./editor-surfaces.md): the execution standard for editor-facing surfaces — per screen the final form, states, wording, data, backend alignment and the Owner's dated decisions (ADR 0077).
 - [`CONTEXT.md`](./CONTEXT.md) and [`GLOSSARY.md`](./GLOSSARY.md): package-local presentation language and bilingual routing.
-- [`requirements.md`](./requirements.md): 998 unique V2 UI/UX requirements.
+- [`requirements.md`](./requirements.md): 1003 unique V2 UI/UX requirements.
 - [`information-architecture.md`](./information-architecture.md), [`interaction-spec.md`](./interaction-spec.md), and [`visual-direction.md`](./visual-direction.md): the Book-anchored workbench, interaction contract, and AI7-owned visual language.
 - [`journeys.md`](./journeys.md): J-01–J-16 design journeys. A journey design is not evidence that its branches are implemented.
 - [`migration-from-v1.md`](./migration-from-v1.md): exact retain/reshape/drop provenance; the excluded V1 UI tree is not a baseline.
