@@ -151,7 +151,7 @@ AI7 uses one Two-level Contextual Sidebar rather than a global sidebar plus a se
 
 - the stable global layer contains `待我处理`, `书库`, `书系`, `知识库`, and `质量与学习`; [ADR 0076](../adr/0076-align-editor-facing-surfaces-to-the-owner-s-september-decisions.md) places the native-artifact/Rule management projection inside `知识库`, while the separately disclosed Background Analysis Enrollment presentation still has no fixed entry point;
 - the Book layer contains pinned Books, recent Books, and navigation scoped to the current Book grouped `工作`（稿件 / 审阅 / 评估 / 交付物）, `处理`（发现）, and `资料与记录`（分析 / 来源与证据 / 工作概览 / 历史与恢复）; the collapsed state persists and a toggle sits in the manuscript context header (ADR 0076);
-- the searchable library provides the complete Book collection;
+- the searchable library provides the complete Book collection; each Book card leads with the manuscript (revision, last position, last work), shows `作者` / `责编` / `相关人` (BOOK-006) and one count per surface, and offers `打开稿件` first ([ADR 0077](../adr/0077-adopt-the-editor-facing-surface-specification-as-the-execution-standard.md));
 - the bottom application/account area contains Settings; and
 - collapsed navigation retains global destination recognition, current Book identity, and the Global Attention count.
 
@@ -304,7 +304,7 @@ Task requiring model processing
                   └─ return to exact Task draft → re-run preflight
 
 bottom application area
-├─ 设置
+├─ 设置 · 服务（模型服务 / 用量）· 编辑工作（评估校准与预测）· 本机（数据与存储 / 外观 / 键盘与无障碍）
 └─ 用量 → aggregate history → exact Run detail
 ```
 
@@ -322,6 +322,9 @@ The Task surface remains role/capability-first. Model Service Settings configure
       ├─ 本机占用
       ├─ 查看数据位置
       ├─ 凭据由当前系统单独保护（Windows Credential Manager / macOS Keychain），不随产品数据复制
+      ├─ 版本：软件版本 · 数据版本（随发布冻结，非必要不改；升级前备份、说明、可回退）
+      ├─ 导出数据库（不含凭据，记数据版本）· 导入数据库（先预览；替换先自动备份 / 合并）
+      ├─ 定期自动备份 · 默认关 · 每天一次 · 保留 14 天
       └─ Data Location Exception State · only when applicable
          ├─ 已改用本机位置 · Windows portable unwritable fallback
          ├─ 此位置可能被同步或备份 · non-blocking
@@ -488,7 +491,7 @@ The accepted projection hierarchy is:
 └─ 最近完成
 ```
 
-Only unresolved items requiring editor action in the first two groups contribute to the Actionable Attention Count. Running, paused, and completed work remains visible without creating a persistent alert badge. Every item is an Attention Projection Item that returns to its exact authoritative record.
+Only unresolved items requiring editor action in the first two groups contribute to the Actionable Attention Count. Material items map into the same groups ([ADR 0077](../adr/0077-adopt-the-editor-facing-surface-specification-as-the-execution-standard.md)): a failed external source retention into `异常与结果待确认`, a pending 资料库 attribution or Learning Eligibility into `等待你的决定`, a completed indexing into `最近完成`. Running, paused, and completed work remains visible without creating a persistent alert badge. Every item is an Attention Projection Item that returns to its exact authoritative record.
 
 ## Manuscript work-surface modes
 
@@ -725,6 +728,8 @@ Every target and relationship starts unselected. Exact matching lists every matc
 
 The import-bound Book Creation Draft becomes authoritative only through the combined final action, which converts it into the exact Book while importing its first Manuscript. Title candidates may be extracted during preflight but are shown and editable only after `新建图书` is selected; non-empty DOCX title metadata is primary, filename stem is the fallback, and bounded title-bearing early content supplies separately labeled alternatives. Relationship-specific Review Before Import or Review Before Source Retention names only its exact created objects and non-effects. `稿件已导入`, `来源材料已导入`, `稿件已重新导入`, and `未发现稿件变化` are distinct completions backed by Manuscript Import Record, Source Import Record, or Manuscript Reimport Record as applicable.
 
+Under [ADR 0077](../adr/0077-adopt-the-editor-facing-surface-specification-as-the-execution-standard.md) DOCX content is retained by default with the Source Version and restored on export (IMP-055); the Import Fidelity Review offers `保留 / 并入` where the editor may fold content into the body and reserves `降级导入` for what cannot be retained. The first import of a Manuscript ends in the Book Work Overview once; a reimport returns to the manuscript (IMP-056). Reimport Comparison maps chapters and resolves ambiguity with `拆分 / 改写与新增 / 删除 / 并入` (IMP-057).
+
 Reimport follows exact manuscript history rather than file replacement:
 
 ```text
@@ -918,15 +923,17 @@ Added by [ADR 0076](../adr/0076-align-editor-facing-surfaces-to-the-owner-s-sept
 
 ```text
 知识库
-├─ 审阅规范文件 · versioned · numbered clauses findings cite
+├─ 审阅规范文件 · versioned · numbered clauses findings cite · 选用 by Book with 可更新
 ├─ 评估方案 · items, shares, anchors, conclusion options
-├─ 专家经验工序 · native skills by professional outcome
-├─ 社级编辑记忆
-├─ 范例 · past real 审稿意见 / 新闻稿 / writing samples · Learning Eligibility governed
-└─ native artifact / Rule management projection
+├─ 工序与规则 · expert 工序 by professional outcome · 快速开始 Default Execution Rules
+├─ 社级编辑记忆 · attributed by author / editor
+├─ 范例 · by Book, mirroring the deliverable structure · auto-archived at Publication Version · 仅本社 default
+├─ 资料库 · editor-collected books / papers / documents / web captures · attribution + Learning Eligibility
+└─ 外部来源留存 · cross-Book index of SRC-013 retained sources · 有效 / 需复核 / 失效
+   └─ Material Index (资料库 and 外部来源留存) · 原件 · 元数据 · 提取全文 + 译文 · 分段与锚点 · 相似段落检索（向量）
 ```
 
-Books, Review Runs, Evaluation Records and Tasks select from `知识库` and snapshot the versions they use.
+Books, Review Runs, Evaluation Records and Tasks select from `知识库` and snapshot the versions they use. The seven classes, the five-layer index and the automatic archiving of Exemplars follow [ADR 0077](../adr/0077-adopt-the-editor-facing-surface-specification-as-the-execution-standard.md) (KB-006 to 010).
 
 ## Findings center
 
@@ -1197,6 +1204,8 @@ Exact source versions, native artifact revision plus AI7 compatibility/authority
 
 Quick/default execution retains the same frozen preview and exact Plan Envelope in Run detail even though it does not require the editor to open the preview before dispatch.
 
+Under [ADR 0077](../adr/0077-adopt-the-editor-facing-surface-specification-as-the-execution-standard.md) the plan lives in the right-side Task Drawer beside the visible manuscript and is shared by every Task kind. It opens in `精简` mode (处理 / 发送 / 会得到 / 不会 / 中途 plus the goal and the authorization bar) and switches to `完整` for the six sections. In `完整` mode the steps, the adaptations AI7 may make on its own and the reference materials are edited in place; the PLAN-004 material fields stay locked; an edit shows `你改了 N 处`, and `更新计划` regenerates the next plan version before the Run can start.
+
 ## Standard Run Authorization
 
 The standard path remains inside the right Task surface:
@@ -1210,11 +1219,11 @@ Editorial Plan Summary
    ├─ 返回修改
    ├─ 保存草稿
    ├─ online + ready
-   │  └─ 授权并开始任务
+   │  └─ 开始任务
    │     ├─ Run Record + exact Run Authorization
    │     └─ scheduler state: 正在排队 / 运行中
    └─ offline + exact boundary locally identifiable
-      └─ 授权并在联网后开始
+      └─ 联网后开始任务
          ├─ Run Record + exact Run Authorization
          ├─ Connectivity Wait State: 等待网络 / 等待模型服务
          └─ Reconnect Preflight
@@ -1225,7 +1234,7 @@ Editorial Plan Summary
 
 No modal repeats the same summary. The bar exists only while Run Authorization Readiness is current. Drift replaces it with the Plan Revision route. After activation, the region becomes a status/control projection and does not continue looking like an unconsumed authorization action.
 
-Quick Start and Default Execution Rules remain separate entry paths and do not appear as hidden checkboxes inside this authorization bar.
+Quick Start and Default Execution Rules remain separate entry paths and do not appear as hidden checkboxes inside this authorization bar. Under [ADR 0077](../adr/0077-adopt-the-editor-facing-surface-specification-as-the-execution-standard.md) `快速开始` starts the Task under the task pattern's Default Execution Rule (or the 工序's built-in default plan when none exists) and shows a quiet notice naming the rule; a rule is created only by `设为快速开始默认` from a viewed plan and is managed in `知识库 › 工序与规则`. A running Run offers only `暂停`, `取消任务` and `改计划重做`.
 
 Offline Task Preparation changes availability, not authority. If exact provider/outbound/Credential Reference/Run Budget Ceiling boundaries cannot be identified locally, the Task remains a draft. A Connectivity Wait Run is grouped beneath its Book like other queued Runs but retains its own wait reason and cancel action; it is never grouped as local durability failure or provider activity. A live connection/credential-readiness or Provider Account Limit blocker preserves the authorization when its exact boundary is unchanged, while material drift alone routes to Plan Revision.
 
@@ -1753,7 +1762,7 @@ version history
 └─ later Delivery preparation selects one exact milestone
 ```
 
-Ordinary UI never presents `签发`, Signoff readiness, or signing exceptions. The milestone creates neither Delivery Package nor Public Release Permission and cannot move to later content after edits.
+Ordinary UI never presents `签发`, Signoff readiness, or signing exceptions. The milestone creates neither Delivery Package nor Public Release Permission and cannot move to later content after edits. Under [ADR 0077](../adr/0077-adopt-the-editor-facing-surface-specification-as-the-execution-standard.md) Milestone Versions and the Publication Version belong to the primary Manuscript only (MILE-014).
 
 ## Publication Version
 
@@ -1834,6 +1843,29 @@ Editorial Deliverable → 准备交付
 ```
 
 The package is browsed through product records, not internal paths. A change to its exact content, artifacts, authority references, purpose, exclusions, or limitations produces a new version; format, filename, path, fidelity disposition, and export outcome never do. V1 continues only to separate local exports and has no transfer, recipient, or delivery-tracking destination.
+
+## Production documents, publication and the Book delivery package
+
+Added by [ADR 0077](../adr/0077-adopt-the-editor-facing-surface-specification-as-the-execution-standard.md). Three things stay apart:
+
+```text
+交付物
+├─ 发稿 · 稿件
+│  └─ Milestone Versions → 设为发稿版本 (scope, basis, 「AI7 不会发布或发送」) → 维护事项
+├─ 交付 · 生产文档 (house-configured types: 新闻稿 / 宣传文章 / 评论文章 / 发布会材料 / 营销要点)
+│  ├─ one card each: 下一项需要处理 · seven parallel phases · delivery state
+│  ├─ same editing surface and marks as the manuscript + Deliverable Workflow Lens
+│  ├─ versions → 交付 (exact version + recipient + note) → Delivery Record + export receipt
+│  ├─ 交付后有修改 → new version → 再交付
+│  └─ 本书不做 marker
+└─ 图书交付包
+   ├─ condition table: Publication Version · every document delivered or 本书不做 · work records
+   ├─ 准备图书交付包 → package v1 (manifest, integrity) · 图书交付包已准备 · 暂无导出记录
+   ├─ export as folder or archive → per-file receipts
+   └─ any change → package v2, v1 immutable
+```
+
+`新建文档 · 写作任务` drafts a Production Document from the manuscript synopsis, the Evaluation Record's conclusion and marketing points, house Exemplars and Book metadata and places the draft in the `起草` phase. The Delivery Package Preparation tree above applies to the Book delivery package; a single document's handover is a Delivery Record.
 
 ## Local Export and Document Representations
 

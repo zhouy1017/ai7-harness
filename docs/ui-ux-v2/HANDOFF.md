@@ -9,12 +9,14 @@ Status: **frozen design reference as of `dev@4c50ce31b0f15ff2bfadd2af17fc914c317
 - ADR 0028 governs one AI7 product on Windows and macOS with shared outcomes and explicit native variation. ADR 0052 selects macOS 15+ on arm64, bundle `io.github.zhouy1017.ai7`, direct-download Developer ID-signed/hardened/notarized DMG, manual application replacement, per-user Application Support data with no silent fallback, and Keychain separation. It grants no packaging, signing-secret, notarization-upload or release action.
 - Issue #86 normalization preserves the target baseline and records successor presentation for native DSH artifacts, Agent Workspace, covered analysis, Enrollment and Apply. It does not itself grant provider processing, external export, Public Release Permission, implementation, release, or promotion to `main`.
 - [ADR 0076](../adr/0076-align-editor-facing-surfaces-to-the-owner-s-september-decisions.md) (2026-09-09) aligns the editor-facing surfaces to the Owner's design-session decisions — manuscript-first entry, marks, review, evaluation, knowledge base, findings center, external evidence retention — and names every clause it changes. The per-screen handoff that turns it into renderer work is a separate document.
+- [ADR 0077](../adr/0077-adopt-the-editor-facing-surface-specification-as-the-execution-standard.md) (2026-09-09) adopts [`editor-surfaces.md`](./editor-surfaces.md) as the execution standard for every editor-facing surface, names the clauses the second half of the design session changed, and carries the backend alignment list the development plan draws from.
 
 ## Package map
 
-- [`README.md`](./README.md): accepted directions D-001–D-087 and the target-qualified presentation boundary.
+- [`README.md`](./README.md): accepted directions D-001–D-090 and the target-qualified presentation boundary.
+- [`editor-surfaces.md`](./editor-surfaces.md): the execution standard for editor-facing surfaces — per screen the final form, states, wording, data, backend alignment and the Owner's dated decisions (ADR 0077).
 - [`CONTEXT.md`](./CONTEXT.md) and [`GLOSSARY.md`](./GLOSSARY.md): package-local presentation language and bilingual routing.
-- [`requirements.md`](./requirements.md): 894 unique V2 UI/UX requirements.
+- [`requirements.md`](./requirements.md): 998 unique V2 UI/UX requirements.
 - [`information-architecture.md`](./information-architecture.md), [`interaction-spec.md`](./interaction-spec.md), and [`visual-direction.md`](./visual-direction.md): the Book-anchored workbench, interaction contract, and AI7-owned visual language.
 - [`journeys.md`](./journeys.md): J-01–J-16 design journeys. A journey design is not evidence that its branches are implemented.
 - [`migration-from-v1.md`](./migration-from-v1.md): exact retain/reshape/drop provenance; the excluded V1 UI tree is not a baseline.

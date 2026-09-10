@@ -198,6 +198,14 @@ This maintained bilingual reference routes readers to target-qualified definitio
 | Source Translation | 来源译文 | [AI7 Editorial](./docs/domain/editorial/CONTEXT.md) |
 | Evidence Sentence Link | 证据对应 | [AI7 Editorial](./docs/domain/editorial/CONTEXT.md) |
 | External Evidence Retention Procedure | 外部来源取证工序 | [AI7 Editorial](./docs/domain/editorial/CONTEXT.md) |
+| Production Document | 生产文档 | [AI7 Editorial](./docs/domain/editorial/CONTEXT.md) |
+| Delivery Record | 交付记录 | [AI7 Editorial](./docs/domain/editorial/CONTEXT.md) |
+| Book Delivery Package | 图书交付包 | [AI7 Editorial](./docs/domain/editorial/CONTEXT.md) |
+| Materials Library Item | 资料条目 | [AI7 Editorial](./docs/domain/editorial/CONTEXT.md) |
+| Material Index | 资料索引 | [AI7 Editorial](./docs/domain/editorial/CONTEXT.md) |
+| Book People | 图书人员 | [AI7 Editorial](./docs/domain/editorial/CONTEXT.md) |
+| Writing Task | 写作任务 | [AI7 Editorial](./docs/domain/editorial/CONTEXT.md) |
+| Data Version | 数据版本 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |
 | Pricing and First-print Actuals | 定价与首印实际数据 | [AI7 Editorial](./docs/domain/editorial/CONTEXT.md) |
 | Run Authorization | 任务运行授权 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |
 | Default Execution Rule | 默认执行规则 | [AI7 Execution](./docs/domain/execution/CONTEXT.md) |
@@ -358,6 +366,14 @@ The inheritance audit resolved the definition owners for these terms. They remai
 | Exemplar | Source Version of a Book / template / training data |
 | Source Translation | Source Version / verified quotation / editor-authored text |
 | External Evidence Retention Procedure | Factual Verification Policy Document / Exact Fetch / editor-initiated 保存为来源材料 |
+| Production Document | the Manuscript / an Editorial Artifact / a Delivery Package / a Task Outcome |
+| Delivery Record | Publication Version / Delivery Package / Effect Approval / external delivery proof |
+| Book Delivery Package | a per-document package / an exported file / 发稿 / 交付 / release proof |
+| Materials Library Item | Source Version of a Book / Working Corpus entry / Run Source Scope / factual evidence |
+| Material Index | Manuscript Retrieval Chunk / model context / Run Source Scope grant / cloud index |
+| Book People | account / permission / Series member / Learning Eligibility Decision |
+| Writing Task | delivery / publication / Exemplar copy / Reader's Report task |
+| Data Version | software version / migration script / Manuscript Revision / Product Data Location |
 | Review Decision | Proposal Decision / Effect Approval / a Repository Development Dispatch reviewer report |
 
 `Task Skill`, `Task Skill Manifest/Package/Candidate`, `Installed Task Skill Version`, `Task Skill Enablement/Activation`, `Harness Skill Projection`, `Third-Party DSH Plugin`, `Plugin Admission Snapshot`, and `Local Plugin Pin` are legacy-only language preserved in superseded ADRs 0010/0042 and historical target commits. Do not use them as current AI7 object names. Their responsibilities now route to native DSH artifact identities plus separate AI7-owned provenance, compatibility, scope, authority, audit, rollback, update, enablement, per-Run activation, and Apply seams; exact implementation-facing sidecar and activation record names remain deliberately unresolved.

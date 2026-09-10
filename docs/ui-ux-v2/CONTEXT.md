@@ -1130,3 +1130,35 @@ _Avoid_: analysis overview, workflow gate, Delivery Quality Metric dashboard
 **Findings Center** (`发现`):
 The Book-level projection aggregating every unresolved finding from analysis gaps, review categories, evaluation risk items and other checks; it navigates to exact records and owns no disposition of its own (ADR 0076).
 _Avoid_: Global Attention View, a second ledger, dismissal as resolution
+
+**Task Drawer** (`任务面`):
+The right-side surface beside the visible manuscript that holds the task list, the composer and, for one Task, its plan, authorization bar and activity card; every Task kind shares it, and it overlays the manuscript on narrow windows ([ADR 0077](../adr/0077-adopt-the-editor-facing-surface-specification-as-the-execution-standard.md)).
+_Avoid_: a modal, a chat panel, a second work surface, the Global Attention View
+
+**Plan Mode** (`精简 / 完整`):
+The two readings of one plan: `精简` shows the LAYER-002 minimum with the goal and the authorization bar; `完整` shows the six PLAN-002 sections and allows editing. The choice is remembered per editor ([ADR 0077](../adr/0077-adopt-the-editor-facing-surface-specification-as-the-execution-standard.md)).
+_Avoid_: two plans, a summary that hides a material fact, a quick-start path
+
+**Editable Plan** (`可编辑计划`):
+The `完整` plan whose steps, own-initiative adaptations and reference materials the editor changes in place, marked `你改了 N 处`, and commits with `更新计划` into the next plan version; material fields stay locked ([ADR 0077](../adr/0077-adopt-the-editor-facing-surface-specification-as-the-execution-standard.md)).
+_Avoid_: editing a running Run, an authorization, a free-text prompt
+
+**Delivery Card** (`交付卡`):
+The overview card of one Production Document: `下一项需要处理`, its seven parallel phases, its delivery state and the actions 打开 / 处理关口 / 交付 / 再交付 ([ADR 0077](../adr/0077-adopt-the-editor-facing-surface-specification-as-the-execution-standard.md)).
+_Avoid_: a Book progress card, a milestone card, a package card
+
+**Book Delivery Package Card** (`图书交付包`):
+The condition table and prepared-package view of the Book-level delivery bundle: what must hold, what version each item contributes, `准备图书交付包`, the frozen package version and its separate export history ([ADR 0077](../adr/0077-adopt-the-editor-facing-surface-specification-as-the-execution-standard.md)).
+_Avoid_: a per-document package, an export dialog, a publication step
+
+**Materials Library View** (`资料库`):
+The Knowledge Base view of editor-collected materials with type, source, attribution, index state and Learning Eligibility, and the item view of original, metadata, extracted text, anchors and uses ([ADR 0077](../adr/0077-adopt-the-editor-facing-surface-specification-as-the-execution-standard.md)).
+_Avoid_: a Book's 来源与证据, a file browser, a Run Source Scope
+
+**External Retention View** (`外部来源留存`):
+The cross-Book index of retained external sources with retrieval, uses, sentence links, translation and state; a failed retention keeps its link and time and is marked `失效` ([ADR 0077](../adr/0077-adopt-the-editor-facing-surface-specification-as-the-execution-standard.md)).
+_Avoid_: the Factual Verification Policy Document, a citation list, a web browser
+
+**Data Version Row** (`数据版本`):
+The `数据与存储` rows that show the software version and the Data Version apart, with the compatibility statement, `导出数据库`, `导入数据库` and the `定期自动备份` switch ([ADR 0077](../adr/0077-adopt-the-editor-facing-surface-specification-as-the-execution-standard.md)).
+_Avoid_: the software version, a migration log, the Product Data Location path
