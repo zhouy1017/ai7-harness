@@ -402,6 +402,20 @@ export function candidateRef(pr, runId) {
   return `refs/heads/nightly/candidate-${pr}-${runId}`;
 }
 
+/**
+ * The identity the prepared commit is written with: the head's own author, as author and committer.
+ * A hosted runner has no configured `user.name`, and `git commit-tree` refuses an empty identity;
+ * taking it from the head keeps the prepared commit reproducible from the head and the dev tip.
+ * `authorLine` is the head's `git log -1 --format=%an%n%ae`.
+ */
+export function commitIdentity(authorLine) {
+  const [name = '', email = ''] = authorLine.split(/\r?\n/u).map((part) => part.trim());
+  if (name.length === 0 || email.length === 0) {
+    throw new Error(`head author identity is incomplete: ${JSON.stringify(authorLine)}`);
+  }
+  return { GIT_AUTHOR_NAME: name, GIT_AUTHOR_EMAIL: email, GIT_COMMITTER_NAME: name, GIT_COMMITTER_EMAIL: email };
+}
+
 function pullRequest(repo, pr) {
   return parseJson(ghOrThrow(['pr', 'view', String(pr), '--repo', repo, '--json', PR_VIEW_FIELDS]), `gh pr view ${pr}`);
 }
@@ -436,12 +450,14 @@ function prepareCommand(options) {
     const trailers = coAuthorTrailers(runOrThrow('git', ['log', '-1', '--format=%B', headRef]));
     const message = squashMessage(record.title, record.body ?? '', trailers);
     const date = runOrThrow('git', ['log', '-1', '--format=%aI', headRef]).trim();
+    const identity = commitIdentity(runOrThrow('git', ['log', '-1', '--format=%an%n%ae', headRef]));
     const tree = runOrThrow('git', ['write-tree'], { cwd: worktree }).trim();
-    // The committer date is the head's own, so a re-run reproduces one commit rather than a new
-    // one and the forced update of a stale temporary ref is a true no-op.
+    // The identity and both dates are the head's own: a hosted runner needs no configured
+    // `user.name`, a re-run reproduces one commit rather than a new one, and the forced update of a
+    // stale temporary ref is a true no-op.
     const commit = runOrThrow('git', ['commit-tree', tree, '-p', devTip, '-F', '-'], {
       cwd: worktree,
-      env: { GIT_AUTHOR_DATE: date, GIT_COMMITTER_DATE: date },
+      env: { ...identity, GIT_AUTHOR_DATE: date, GIT_COMMITTER_DATE: date },
       input: message,
     }).trim();
 

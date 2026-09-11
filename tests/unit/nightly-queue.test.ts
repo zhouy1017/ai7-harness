@@ -48,6 +48,7 @@ const queue = (await import(new URL('../../tools/nightly-queue.mjs', import.meta
   coAuthorTrailers: (message: string) => string[];
   squashMessage: (title: string, body: string, trailers: readonly string[]) => string;
   mergeBody: (body: string, trailers: readonly string[]) => string;
+  commitIdentity: (authorLine: string) => Record<string, string>;
   candidateRef: (pr: number, runId: string) => string;
 };
 
@@ -277,6 +278,16 @@ describe('the tree the queue builds', () => {
       unmergeable: [],
     };
     expect(queue.toMatrix(set)).toEqual({ include: [{ number: 3, merge: true }] });
+  });
+
+  it('writes the prepared commit as the head author, so a runner without a git identity can write it', () => {
+    expect(queue.commitIdentity('A Author\na@example.com\n')).toEqual({
+      GIT_AUTHOR_NAME: 'A Author',
+      GIT_AUTHOR_EMAIL: 'a@example.com',
+      GIT_COMMITTER_NAME: 'A Author',
+      GIT_COMMITTER_EMAIL: 'a@example.com',
+    });
+    expect(() => queue.commitIdentity('\n')).toThrow(/incomplete/u);
   });
 
   it('scopes the temporary ref to the pull request and the run', () => {
