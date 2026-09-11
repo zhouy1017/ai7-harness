@@ -2,6 +2,7 @@ import { writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseDocx, type ParsedDocxBlock } from '../../src/service/docx.js';
+import { LOCAL_ONLY_HEADING_DOCX, localOnlyPath } from './local-only-manuscripts.js';
 import { buildSyntheticDocx, type SyntheticDocxParagraph } from './synthetic-docx.js';
 
 // Composed manuscript fixtures for tests whose subject is manuscript content. The builder assembles a
@@ -13,24 +14,27 @@ import { buildSyntheticDocx, type SyntheticDocxParagraph } from './synthetic-doc
 // itself keeps `./synthetic-docx.js`.
 
 /**
- * The four admitted DOCX Public SampleBooks, by exact path under `SampleBooks/`, with the block count
- * the import-verdict table in `SampleBooks/README.md` records for parser identity
- * `ai7-docx-fflate-saxes/1`. Prefer the small source; reach for a large one only when size is the
- * subject, because every source is parsed in full on first use.
+ * The one admitted DOCX Public SampleBook after ADR 0079 §5 narrowed the repository to exact
+ * `sample1`: the ADR 0044 compatibility baseline, 97 blocks at parser identity
+ * `ai7-docx-fflate-saxes/1`, as the import-verdict table in `SampleBooks/README.md` records. Every
+ * composed fixture excerpts it, and the composed container never reproduces its digest.
  */
-export const ADMITTED_SMALL_DOCX = '蟠虺.docx'; // 100 blocks
-/** Exact `sample1`, the ADR 0044 compatibility baseline; 97 blocks. */
 export const ADMITTED_BASELINE_DOCX = 'sample1.docx';
-/** 4434 blocks. */
-export const ADMITTED_LARGE_REVISED_DOCX = '1蟠虺（修订290326字).docx';
-/** 4577 blocks. */
-export const ADMITTED_LARGE_FINAL_DOCX = '2听漏（定稿368544字）.docx';
+
+/**
+ * A local-only source, admitted to no repository fixture. Only a case whose subject exact `sample1`
+ * cannot be — real heading styles, which `sample1` carries none of — reaches for one, and it skips
+ * wherever the material is absent (`./local-only-manuscripts.js`).
+ */
+export const LOCAL_ONLY_HEADING_SOURCE = LOCAL_ONLY_HEADING_DOCX;
 
 const SAMPLE_BOOKS_ROOT = fileURLToPath(new URL('../../SampleBooks/', import.meta.url));
 
 /** The admitted file itself. Reading it is what ADR 0043 admitted it for; copying it is not admitted. */
 export function admittedSourcePath(source: string): string {
-  return join(SAMPLE_BOOKS_ROOT, source);
+  return source === LOCAL_ONLY_HEADING_SOURCE.name
+    ? localOnlyPath(LOCAL_ONLY_HEADING_SOURCE)
+    : join(SAMPLE_BOOKS_ROOT, source);
 }
 
 /**
@@ -53,7 +57,7 @@ function blocksOf(source: string): Promise<readonly ParsedDocxBlock[]> {
 }
 
 export interface ComposedManuscriptRequest {
-  /** Exact path under `SampleBooks/`; one of the admitted constants above. */
+  /** Exact file name: the admitted constant above, or a local-only source a gated case names. */
   readonly source: string;
   /** 1-based position of the excerpt's first block in the source. */
   readonly startBlock: number;

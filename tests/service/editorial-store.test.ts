@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { MAX_WINDOW_BLOCKS } from '../../src/shared/protocol.js';
 import {
-  ADMITTED_SMALL_DOCX,
+  ADMITTED_BASELINE_DOCX,
   composeManuscriptDocx,
   type ComposedManuscriptRequest,
 } from '../support/composed-fixture.js';
@@ -19,9 +19,9 @@ import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-d
 const TITLE = '组稿书稿标题';
 const REPLACEMENT = '已替换文本';
 // 40 blocks exceed one `MAX_WINDOW_BLOCKS` window, so paging is observable on a manuscript that still
-// stays far below the few-hundred-block ceiling this layer works with. The small admitted source is
+// stays far below the few-hundred-block ceiling this layer works with. The one admitted source is
 // enough, because size is not this suite's subject; its content is.
-const EXCERPT: ComposedManuscriptRequest = { source: ADMITTED_SMALL_DOCX, startBlock: 1, blocks: 40, title: TITLE };
+const EXCERPT: ComposedManuscriptRequest = { source: ADMITTED_BASELINE_DOCX, startBlock: 1, blocks: 40, title: TITLE };
 const QUERY_GRAPHEMES = 4;
 const HAN_GRAPHEME = /^\p{Script=Han}$/u;
 const segmenter = new Intl.Segmenter('zh-CN', { granularity: 'grapheme' });

@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { EditorialStore } from '../../src/service/store.js';
-import { ADMITTED_SMALL_DOCX, composeManuscriptDocx } from '../support/composed-fixture.js';
+import { ADMITTED_BASELINE_DOCX, composeManuscriptDocx } from '../support/composed-fixture.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 
 // Service-integration suite (L2) for the recovery path. An acknowledged journal edit followed by a
@@ -29,9 +29,10 @@ async function importComposedBook(store: EditorialStore): Promise<{
   branchId: string;
 }> {
   const selectedPath = join(roots.inputRoot, 'fixture.docx');
-  // What is recovered here is edited manuscript text, so the manuscript is composed from an admitted
-  // Public SampleBook rather than generated. Six blocks are enough: the subject is the journal, not size.
-  await composeManuscriptDocx(selectedPath, { source: ADMITTED_SMALL_DOCX, startBlock: 1, blocks: 6, title: TITLE });
+  // What is recovered here is edited manuscript text, so the manuscript is composed from the one
+  // admitted Public SampleBook rather than generated. Six blocks are enough: the subject is the
+  // journal, not size, and the composed container never carries exact `sample1`'s own identity.
+  await composeManuscriptDocx(selectedPath, { source: ADMITTED_BASELINE_DOCX, startBlock: 1, blocks: 6, title: TITLE });
   const staged = await store.stageSelectedManuscript(randomUUID(), selectedPath);
   const review = store.prepareNewBookReview(
     staged.draftId,

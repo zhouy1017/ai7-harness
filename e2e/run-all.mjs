@@ -1,9 +1,18 @@
 import {
   ADMITTED_JOURNEYS,
   classifyJourneyResult,
+  collectJourneyDisclosures,
   normalizePnpmArgs,
   runJourneyProcess,
 } from './controller.mjs';
+
+// A scenario a Journey skipped because its local-only material is absent is named here rather than
+// left invisible, so a completion result always says what it did not cover (ADR 0079 §5).
+const reportDisclosures = (journey, result) => {
+  for (const disclosure of collectJourneyDisclosures(result, journey)) {
+    console.log(`LOCAL_COMPLETION/${journey}/disclosed-skip/${disclosure}`);
+  }
+};
 
 const args = normalizePnpmArgs(process.argv.slice(2));
 if (args.length !== 0) {
@@ -18,6 +27,7 @@ if (args.length !== 0) {
       process.exitCode = result.controllerSignal === 'SIGINT' ? 130 : 143;
       break;
     }
+    reportDisclosures(journey, result);
     if (result.spawnError || result.code !== 0 || result.signal !== null) {
       console.error(`LOCAL_COMPLETION/${journey}/fail`);
       // The child's own stage line, reduced to the admitted-location vocabulary, so a sequenced
