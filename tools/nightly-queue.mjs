@@ -438,6 +438,14 @@ function prepareCommand(options) {
   const worktree = mkdtempSync(join(tmpdir(), `ai7-queue-${pr}-`));
   try {
     runOrThrow('git', ['worktree', 'add', '--detach', worktree, `refs/remotes/origin/${dev}`]);
+    // A conflict is a squash that fails with a merge base present. Without one the checkout does
+    // not carry the history — a shallow checkout would report every candidate as a conflict.
+    const base = run('git', ['merge-base', devTip, head]);
+    if (base.status !== 0) {
+      throw new Error(
+        `no merge base between ${dev}@${devTip.slice(0, 12)} and the head ${head.slice(0, 12)} of #${pr}: prepare needs the full history of ${dev} (fetch-depth: 0), not a shallow checkout`,
+      );
+    }
     const merged = run('git', ['merge', '--squash', '--no-commit', headRef], { cwd: worktree });
     if (merged.status !== 0) {
       postComment(repo, pr, formatCandidateComment({ reason: 'conflict', dev, devTip }), {
