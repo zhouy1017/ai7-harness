@@ -29,7 +29,7 @@ type GateResult = {
 const queue = (await import(new URL('../../tools/nightly-queue.mjs', import.meta.url).href)) as {
   selectCandidates: (records: readonly QueueRecord[]) => readonly Candidate[];
   assembleCandidateSet: (records: readonly QueueRecord[]) => CandidateSet;
-  toMatrix: (set: CandidateSet) => { include: readonly Candidate[] };
+  toMatrix: (set: CandidateSet) => { include: ReadonlyArray<{ number: number; merge: boolean }> };
   ownerReservation: (files: readonly { path: string; text?: string }[]) => { kind: string; path: string } | null;
   adrStatus: (text: string) => string | null;
   parseGateLog: (text: string) => GateResult;
@@ -47,6 +47,7 @@ const queue = (await import(new URL('../../tools/nightly-queue.mjs', import.meta
   }) => string[];
   coAuthorTrailers: (message: string) => string[];
   squashMessage: (title: string, body: string, trailers: readonly string[]) => string;
+  mergeBody: (body: string, trailers: readonly string[]) => string;
   candidateRef: (pr: number, runId: string) => string;
 };
 
@@ -258,6 +259,24 @@ describe('the tree the queue builds', () => {
     ]);
     expect(queue.coAuthorTrailers('x\n\nno trailer here\n')).toEqual([]);
     expect(queue.squashMessage('t', '', [])).toBe('t\n');
+  });
+
+  it('merges with the pull request body plus the head commit trailers, and the title only as the subject', () => {
+    expect(queue.mergeBody('the pull request body\n', ['Co-Authored-By: Claude <noreply@anthropic.com>'])).toBe(
+      'the pull request body\n\nCo-Authored-By: Claude <noreply@anthropic.com>\n',
+    );
+    expect(queue.mergeBody('', [])).toBe('\n');
+    expect(queue.mergeBody('', ['Co-Authored-By: A <a@b.c>'])).toBe('Co-Authored-By: A <a@b.c>\n');
+  });
+
+  it('hands the matrix only the number and the merge flag of each candidate', () => {
+    const set: CandidateSet = {
+      count: 1,
+      candidates: [{ number: 3, title: 'a title the matrix must not carry', head: 'a'.repeat(40), merge: true, reserved: null }],
+      mergeable: 1,
+      unmergeable: [],
+    };
+    expect(queue.toMatrix(set)).toEqual({ include: [{ number: 3, merge: true }] });
   });
 
   it('scopes the temporary ref to the pull request and the run', () => {

@@ -199,6 +199,9 @@ jobs:
   merge:
     name: Merge if both platforms passed
     needs: [prepare, windows, macos]
+    # Runs whenever the candidate was prepared, whatever the platforms did: a failed platform is
+    # reported from here, and only the merge step itself requires both to have passed.
+    if: ${{ always() && needs.prepare.result == 'success' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
@@ -244,7 +247,7 @@ jobs:
           --log "$RUNNER_TEMP/gate-lines/gate-lines-macos/gate-lines.log"
 
       - name: Squash-merge the candidate
-        if: ${{ inputs.merge }}
+        if: ${{ inputs.merge && needs.windows.result == 'success' && needs.macos.result == 'success' }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: >-
@@ -254,7 +257,7 @@ jobs:
           --expected-dev-tip "${{ needs.prepare.outputs.dev_tip }}"
 
       - name: Leave an Owner-reserved candidate open
-        if: ${{ !inputs.merge }}
+        if: ${{ !inputs.merge && needs.windows.result == 'success' && needs.macos.result == 'success' }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: >-
@@ -284,6 +287,8 @@ jobs:
           check-latest: false
 
       - name: Delete the temporary candidate ref
+        # A candidate skipped at prepare pushed no ref; there is nothing to delete.
+        if: ${{ needs.prepare.outputs.ref != '' }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: >-

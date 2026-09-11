@@ -100,7 +100,9 @@ export function assembleCandidateSet(records) {
 
 /** The matrix the orchestrator runs one candidate at a time over. */
 export function toMatrix(set) {
-  return { include: set.candidates };
+  // Only what the candidate workflow consumes: a free-text title or a nested reservation object is
+  // nothing the matrix needs to carry.
+  return { include: set.candidates.map(({ number, merge }) => ({ number, merge })) };
 }
 
 // ---- Reading a Gate occurrence's result -----------------------------------------------------
@@ -380,6 +382,21 @@ export function squashMessage(title, body, trailers) {
   return `${parts.join('\n')}\n`;
 }
 
+/**
+ * The body the queue merges with — the pull request's body plus the head commit's own trailers, the
+ * title being the subject — so the landed commit carries exactly the authorship `prepare` recorded.
+ */
+export function mergeBody(body, trailers) {
+  const trimmed = body.replace(/\s+$/u, '');
+  const parts = [];
+  if (trimmed.length > 0) parts.push(trimmed);
+  if (trailers.length > 0) {
+    if (parts.length > 0) parts.push('');
+    parts.push(trailers.join('\n'));
+  }
+  return parts.length === 0 ? '\n' : `${parts.join('\n')}\n`;
+}
+
 /** The ref a candidate is tested on: temporary, run-scoped, deleted after the attempt. */
 export function candidateRef(pr, runId) {
   return `refs/heads/nightly/candidate-${pr}-${runId}`;
@@ -481,12 +498,16 @@ function mergeCommand(options) {
     return 3;
   }
 
+  // The same trailers `prepare` put on the tested commit, read from the same head.
+  const headRef = `refs/remotes/origin/nightly/merge-${pr}`;
+  fetchRef(remote, `refs/pull/${pr}/head`, headRef);
+  const body = mergeBody(record.body ?? '', coAuthorTrailers(runOrThrow('git', ['log', '-1', '--format=%B', headRef])));
   const args = ['pr', 'merge', String(pr), '--repo', repo, '--squash', '--match-head-commit', head, '--subject', record.title, '--body-file', '-'];
   if (dryRun) {
-    process.stdout.write(`[dry-run] gh ${args.join(' ')}\n[dry-run] body:\n${record.body ?? ''}\n`);
+    process.stdout.write(`[dry-run] gh ${args.join(' ')}\n[dry-run] body:\n${body}`);
     return 0;
   }
-  ghOrThrow(args, { input: `${record.body ?? ''}\n` });
+  ghOrThrow(args, { input: body });
   process.stdout.write(`queue: #${pr} squashed onto ${dev}@${devTip.slice(0, 12)}\n`);
   return 0;
 }
