@@ -73,7 +73,7 @@ Exit criterion: an editor opens a Book into the manuscript at the last position,
 
 | Order | Slice | Issue | Class | Journey | Outcome | Depends on | Status |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| 2.0 | S88 | #438 | T3 | J-01, J-08 | Keep only `sample1` in the repository; the other five SampleBooks become local-only test material; J-01's `.doc` scenario, J-08's inputs and the service builders retarget (ADR 0079 §5) | — | planned (first) |
+| 2.0 | S88 | #438 | T3 | J-01, J-08 | Keep only `sample1` in the repository; the other five SampleBooks become local-only test material; J-01's `.doc` scenario, J-08's inputs and the service builders retarget (ADR 0079 §5) | — | integrated (PR #446, `dev@6d1d095`) |
 | 2.1 | S57 | #405 | T2 | J-12 | ① Open a Book into the manuscript at its last position; 工作概览 becomes a destination (B1) | — | planned |
 | 2.2 | S71 | #406 | T2 | J-04 | ①b / ②A The finished analysis chain in editorial language, including the Run Report (S42b, S44b) | Phase 1, S57 | planned |
 | 2.3 | S58 | #407 | T3 | J-05 | ① Editorial marks: 批注, 备注, 高亮 and 修改建议 as Proposal Change Items (B2) | S57 | planned |
@@ -102,7 +102,7 @@ Exit criterion: any Task shows its plan in the Task Drawer in 精简 or 完整 m
 | 3.3 | S74 | #420 | T2 | J-03 | ③ 开始任务 in one click; 联网后开始任务 with Reconnect Preflight (B10) | S72 | planned |
 | 3.4 | S75 | #421 | T3 | J-03 | ③ / ⑤ 快速开始 under a Default Execution Rule; 设为快速开始默认 (B11) | S72, S74 | planned |
 | 3.5 | S76 | #422 | T3 | J-10 | ③ Running-Run controls, Clarification Requests, the activity card, 续行 (B12) | S72, S74 | planned |
-| 3.6 | S13-f1 | #281 | T2 | J-04 | Every material plan field from durable state; the revert path; the dead `inspect` trigger kind | S13 | planned |
+| 3.6 | S13-f1 | #281 | T2 | J-04 | Every material plan field from durable state; the revert path; the dead `inspect` trigger kind | S13 | integrated (PR #445, `dev@6ecffb9`) |
 | 3.7 | S16 | #51 | T2 | J-10 | Run Budget Ceiling termination, Provider Account Limit recovery, ambiguous outcomes | S76 | planned |
 | 3.8 | S77 | #423 | T3 | J-16 | ① The 任务 panel: task list, dialogue tasks, result floating windows, the 回到 chip (B4) | S72, S74 | planned |
 | 3.9 | S78 | #424 | T2 | J-09 | ⑤ 待我处理: four cross-Book groups (B18) | S72 | planned |
@@ -160,7 +160,7 @@ Exit criterion: 知识库 holds the seven classes with versions and selection sn
 
 Open, recorded, and deliberately not ordered — the Commander schedules them when the Owner reaches them.
 
-- #286 (the retried unit's payload digest on the Plan Adaptation), #287 (durable-state drift proven beyond unit tests), #288 (the Task Intent range versus later plan versions; its visible half is satisfied by S72's context chips), #301 (extract the Plan Preview label helpers), #328 (`EditorialStore.open` leaks its database handle when ledger validation fails).
+- #286 (the retried unit's payload digest on the Plan Adaptation), #287 (durable-state drift proven beyond unit tests), #288 (the Task Intent range versus later plan versions; its visible half is satisfied by S72's context chips). #281 (PR #445), #301 (2026-09-07) and #328 (PR #444) are closed; #286 and #287 are dispatchable now that #281 is in.
 
 ## Recording under ADR 0044
 
