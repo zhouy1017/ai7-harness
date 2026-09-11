@@ -49,6 +49,7 @@ const queue = (await import(new URL('../../tools/nightly-queue.mjs', import.meta
   squashMessage: (title: string, body: string, trailers: readonly string[]) => string;
   mergeBody: (body: string, trailers: readonly string[]) => string;
   commitIdentity: (authorLine: string) => Record<string, string>;
+  squashOutcome: (result: { status: number; stdout: string; stderr: string }) => 'merged' | 'conflict' | 'failed';
   candidateRef: (pr: number, runId: string) => string;
 };
 
@@ -288,6 +289,19 @@ describe('the tree the queue builds', () => {
       GIT_COMMITTER_EMAIL: 'a@example.com',
     });
     expect(() => queue.commitIdentity('\n')).toThrow(/incomplete/u);
+  });
+
+  it('reads a squash as a conflict only when git reported one, never for another failure', () => {
+    expect(queue.squashOutcome({ status: 0, stdout: 'Squash commit -- not updating HEAD', stderr: '' })).toBe('merged');
+    expect(
+      queue.squashOutcome({
+        status: 1,
+        stdout: 'Auto-merging PROGRESS.md\nCONFLICT (content): Merge conflict in PROGRESS.md',
+        stderr: 'Automatic merge failed; fix conflicts and then commit the result.',
+      }),
+    ).toBe('conflict');
+    expect(queue.squashOutcome({ status: 128, stdout: '', stderr: 'fatal: no email was given and auto-detection is disabled' })).toBe('failed');
+    expect(queue.squashOutcome({ status: 128, stdout: '', stderr: 'fatal: refusing to merge unrelated histories' })).toBe('failed');
   });
 
   it('scopes the temporary ref to the pull request and the run', () => {

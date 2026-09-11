@@ -397,6 +397,17 @@ export function mergeBody(body, trailers) {
   return parts.length === 0 ? '\n' : `${parts.join('\n')}\n`;
 }
 
+/**
+ * What a `git merge --squash --no-commit` came to: `merged`, a `conflict` git reported as one, or
+ * `failed` for anything else — a missing identity, unrelated histories — which is never the pull
+ * request's fault and is raised as the tool's own error instead of a conflict comment.
+ */
+export function squashOutcome({ status, stdout, stderr }) {
+  if (status === 0) return 'merged';
+  if (/^CONFLICT \(/mu.test(stdout) || /Automatic merge failed/u.test(stderr)) return 'conflict';
+  return 'failed';
+}
+
 /** The ref a candidate is tested on: temporary, run-scoped, deleted after the attempt. */
 export function candidateRef(pr, runId) {
   return `refs/heads/nightly/candidate-${pr}-${runId}`;
@@ -435,6 +446,10 @@ function prepareCommand(options) {
   const head = fetchRef(remote, `refs/pull/${pr}/head`, headRef);
   const devTip = fetchRef(remote, `refs/heads/${dev}`, `refs/remotes/origin/${dev}`);
 
+  // git resolves the committer before a three-way merge, even one that stops before committing, so
+  // the squash and the commit run under the same identity: the head's own.
+  const identity = commitIdentity(runOrThrow('git', ['log', '-1', '--format=%an%n%ae', headRef]));
+
   const worktree = mkdtempSync(join(tmpdir(), `ai7-queue-${pr}-`));
   try {
     runOrThrow('git', ['worktree', 'add', '--detach', worktree, `refs/remotes/origin/${dev}`]);
@@ -446,8 +461,13 @@ function prepareCommand(options) {
         `no merge base between ${dev}@${devTip.slice(0, 12)} and the head ${head.slice(0, 12)} of #${pr}: prepare needs the full history of ${dev} (fetch-depth: 0), not a shallow checkout`,
       );
     }
-    const merged = run('git', ['merge', '--squash', '--no-commit', headRef], { cwd: worktree });
-    if (merged.status !== 0) {
+    const merged = run('git', ['merge', '--squash', '--no-commit', headRef], { cwd: worktree, env: identity });
+    const outcome = squashOutcome(merged);
+    if (outcome === 'failed') {
+      throw new Error(`git merge --squash of #${pr} onto ${dev}@${devTip.slice(0, 12)} failed, and not with a conflict:\n${merged.stderr}${merged.stdout}`);
+    }
+    if (outcome === 'conflict') {
+      process.stdout.write(merged.stdout);
       postComment(repo, pr, formatCandidateComment({ reason: 'conflict', dev, devTip }), {
         dryRun,
         marker: `\`conflict on ${dev}@${devTip.slice(0, 12)}\``,
@@ -458,7 +478,6 @@ function prepareCommand(options) {
     const trailers = coAuthorTrailers(runOrThrow('git', ['log', '-1', '--format=%B', headRef]));
     const message = squashMessage(record.title, record.body ?? '', trailers);
     const date = runOrThrow('git', ['log', '-1', '--format=%aI', headRef]).trim();
-    const identity = commitIdentity(runOrThrow('git', ['log', '-1', '--format=%an%n%ae', headRef]));
     const tree = runOrThrow('git', ['write-tree'], { cwd: worktree }).trim();
     // The identity and both dates are the head's own: a hosted runner needs no configured
     // `user.name`, a re-run reproduces one commit rather than a new one, and the forced update of a
