@@ -1,0 +1,296 @@
+name: E2E Nightly Candidate
+
+# ADR 0081: one candidate of the nightly merge queue — build the tree that would land, run the full
+# admitted Journey set on it on both platforms, merge it if both passed and `dev` has not moved.
+# Called once per open pull request by `e2e-nightly-queue.yml`, serially.
+#
+# The two platform jobs deliberately repeat what `e2e-nightly.yml` runs today — `doctor`,
+# `bootstrap`, `build`, `e2e:all` on the same two runners — so a candidate occurrence is the same
+# Gate over a different tree. A change to one is a synchronized delta of the other.
+
+on:
+  workflow_call:
+    inputs:
+      pr:
+        description: Pull request number under test
+        required: true
+        type: number
+      merge:
+        description: Whether the queue may merge this candidate when both platforms pass
+        required: true
+        type: boolean
+
+# No workflow-level `permissions`. A called workflow cannot widen the caller's token, so this file
+# states each job's need instead: `contents: read` on the two jobs that only test, and
+# `contents: write` plus `pull-requests: write` on the three that push a ref, comment or merge.
+
+jobs:
+  prepare:
+    name: Build the tree that would land
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      pull-requests: write
+    outputs:
+      ref: ${{ steps.prepare.outputs.ref }}
+      commit: ${{ steps.prepare.outputs.commit }}
+      head: ${{ steps.prepare.outputs.head }}
+      dev_tip: ${{ steps.prepare.outputs.devTip }}
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 1
+
+      - name: Select exact Node
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24.18.1
+          architecture: x64
+          check-latest: false
+
+      - name: Squash the candidate onto the current dev tip
+        id: prepare
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          node tools/nightly-queue.mjs prepare
+          --pr "${{ inputs.pr }}" --repo "$GITHUB_REPOSITORY" --output "$GITHUB_OUTPUT"
+
+  windows:
+    name: J-01 + J-02 + J-08 + J-12 + J-15 + J-03 + J-04 (Windows Server 2025 x64 CI)
+    needs: prepare
+    runs-on: windows-2025
+    timeout-minutes: 60
+    env:
+      AI7_CI_WINDOWS_SERVER_2025: '1'
+      NPM_CONFIG_PREFIX: ''
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ needs.prepare.outputs.ref }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Select exact Node
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24.18.1
+          architecture: x64
+          check-latest: false
+
+      - name: Activate repository-pinned pnpm
+        shell: bash
+        run: |
+          corepack enable
+          pnpm --version
+
+      - name: Check supported host and closed inputs
+        run: pnpm run doctor
+
+      - name: Restore optional verified Electron download cache
+        id: electron-cache
+        uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: .cache/bootstrap/electron
+          key: ai7-electron-v1-${{ runner.os }}-x64-${{ hashFiles('config/dependency-artifacts.json') }}
+
+      - name: Restore exact declared inputs
+        run: pnpm run bootstrap
+
+      - name: Save verified Electron download for this occurrence
+        if: ${{ steps.electron-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: .cache/bootstrap/electron
+          key: ${{ steps.electron-cache.outputs.cache-primary-key }}
+
+      - name: Build the production-shaped subject
+        run: pnpm run build
+
+      - name: Run every admitted Journey
+        # The occurrence's own marker lines are kept as well as shown, so the queue can name the
+        # failing Journey and location without quoting anything else the run printed.
+        shell: bash
+        run: |
+          set -o pipefail
+          pnpm run e2e:all 2>&1 | tee "$RUNNER_TEMP/admitted-journeys.log"
+          grep -E '^(LOCAL_COMPLETION|DISCLOSED_SKIP)/' "$RUNNER_TEMP/admitted-journeys.log" > "$RUNNER_TEMP/gate-lines.log" || true
+
+      - name: Keep this platform's payload-safe result
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: gate-lines-windows
+          path: ${{ runner.temp }}/gate-lines.log
+          if-no-files-found: ignore
+          retention-days: 7
+
+  macos:
+    name: J-01 + J-02 + J-08 + J-12 + J-15 + J-03 + J-04 (macOS 15 arm64)
+    needs: prepare
+    runs-on: macos-15
+    timeout-minutes: 60
+    env:
+      AI7_CI_WINDOWS_SERVER_2025: '0'
+      NPM_CONFIG_PREFIX: ''
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ needs.prepare.outputs.ref }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Select exact Node
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24.18.1
+          architecture: arm64
+          check-latest: false
+
+      - name: Activate repository-pinned pnpm
+        shell: bash
+        run: |
+          corepack enable
+          pnpm --version
+
+      - name: Check supported host and closed inputs
+        run: pnpm run doctor
+
+      - name: Restore optional verified Electron download cache
+        id: electron-cache
+        uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: .cache/bootstrap/electron
+          key: ai7-electron-v1-${{ runner.os }}-arm64-${{ hashFiles('config/dependency-artifacts.json') }}
+
+      - name: Restore exact declared inputs
+        run: pnpm run bootstrap
+
+      - name: Save verified Electron download for this occurrence
+        if: ${{ steps.electron-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: .cache/bootstrap/electron
+          key: ${{ steps.electron-cache.outputs.cache-primary-key }}
+
+      - name: Build the production-shaped subject
+        run: pnpm run build
+
+      - name: Run every admitted Journey
+        shell: bash
+        run: |
+          set -o pipefail
+          pnpm run e2e:all 2>&1 | tee "$RUNNER_TEMP/admitted-journeys.log"
+          grep -E '^(LOCAL_COMPLETION|DISCLOSED_SKIP)/' "$RUNNER_TEMP/admitted-journeys.log" > "$RUNNER_TEMP/gate-lines.log" || true
+
+      - name: Keep this platform's payload-safe result
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: gate-lines-macos
+          path: ${{ runner.temp }}/gate-lines.log
+          if-no-files-found: ignore
+          retention-days: 7
+
+  merge:
+    name: Merge if both platforms passed
+    needs: [prepare, windows, macos]
+    # Runs whenever the candidate was prepared, whatever the platforms did: a failed platform is
+    # reported from here, and only the merge step itself requires both to have passed.
+    if: ${{ always() && needs.prepare.result == 'success' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 1
+
+      - name: Select exact Node
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24.18.1
+          architecture: x64
+          check-latest: false
+
+      - name: Read both platforms' payload-safe results
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: gate-lines-*
+          path: ${{ runner.temp }}/gate-lines
+
+      - name: Report what Windows found
+        if: ${{ needs.windows.result != 'success' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          node tools/nightly-queue.mjs report
+          --pr "${{ inputs.pr }}" --repo "$GITHUB_REPOSITORY"
+          --platform 'Windows Server 2025 x64 CI'
+          --log "$RUNNER_TEMP/gate-lines/gate-lines-windows/gate-lines.log"
+
+      - name: Report what macOS found
+        if: ${{ needs.macos.result != 'success' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          node tools/nightly-queue.mjs report
+          --pr "${{ inputs.pr }}" --repo "$GITHUB_REPOSITORY"
+          --platform 'macOS 15 arm64'
+          --log "$RUNNER_TEMP/gate-lines/gate-lines-macos/gate-lines.log"
+
+      - name: Squash-merge the candidate
+        if: ${{ inputs.merge && needs.windows.result == 'success' && needs.macos.result == 'success' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          node tools/nightly-queue.mjs merge
+          --pr "${{ inputs.pr }}" --repo "$GITHUB_REPOSITORY"
+          --head "${{ needs.prepare.outputs.head }}"
+          --expected-dev-tip "${{ needs.prepare.outputs.dev_tip }}"
+
+      - name: Leave an Owner-reserved candidate open
+        if: ${{ !inputs.merge && needs.windows.result == 'success' && needs.macos.result == 'success' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          node tools/nightly-queue.mjs report
+          --pr "${{ inputs.pr }}" --repo "$GITHUB_REPOSITORY"
+          --reason reserved
+
+  cleanup:
+    name: Delete the temporary ref
+    needs: [prepare, windows, macos, merge]
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 1
+
+      - name: Select exact Node
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24.18.1
+          architecture: x64
+          check-latest: false
+
+      - name: Delete the temporary candidate ref
+        # A candidate skipped at prepare pushed no ref; there is nothing to delete.
+        if: ${{ needs.prepare.outputs.ref != '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          node tools/nightly-queue.mjs cleanup
+          --repo "$GITHUB_REPOSITORY" --ref "${{ needs.prepare.outputs.ref }}"

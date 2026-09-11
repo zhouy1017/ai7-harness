@@ -1,0 +1,82 @@
+name: E2E Nightly Merge Queue
+
+# ADR 0081: the nightly is a serial merge queue over the open pull requests, then the daily record
+# over the final `dev`. This orchestrator owns the schedule; `e2e-nightly.yml` keeps
+# `workflow_dispatch` and gains `workflow_call`, so `dev` is not run twice a night.
+
+on:
+  schedule:
+    # 19:00 UTC daily — 03:00 the next day in the Owner's UTC+8 working day, so a red nightly is
+    # waiting at the start of it rather than arriving mid-session.
+    - cron: '0 19 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: e2e-nightly-queue
+  cancel-in-progress: false
+
+jobs:
+  list:
+    name: List open pull requests against dev
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      count: ${{ steps.list.outputs.count }}
+      matrix: ${{ steps.list.outputs.matrix }}
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Select exact Node
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24.18.1
+          architecture: x64
+          check-latest: false
+
+      - name: Read the candidate set
+        id: list
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node tools/nightly-queue.mjs list --repo "$GITHUB_REPOSITORY" --output "$GITHUB_OUTPUT"
+
+  candidates:
+    name: Candidate #${{ matrix.number }}
+    needs: list
+    if: ${{ needs.list.outputs.count != '0' }}
+    # A called workflow can only restrict the caller's token, never widen it: `contents: read` here
+    # would stop `prepare` pushing the candidate ref and `merge` commenting. The candidate jobs that
+    # only test narrow themselves to `contents: read` inside `e2e-candidate.yml`.
+    permissions:
+      contents: write
+      pull-requests: write
+    strategy:
+      fail-fast: false
+      # Candidates are independent runs: one failing never stops the queue, and a merge changes
+      # the tip the next candidate is prepared against only through the serial order below.
+      max-parallel: 1
+      matrix: ${{ fromJSON(needs.list.outputs.matrix) }}
+    uses: ./.github/workflows/e2e-candidate.yml
+    with:
+      pr: ${{ matrix.number }}
+      merge: ${{ matrix.merge }}
+    secrets: inherit
+
+  dev:
+    name: Full Gate over the final dev
+    needs: candidates
+    if: ${{ always() }}
+    permissions:
+      contents: read
+    uses: ./.github/workflows/e2e-nightly.yml
+    with:
+      ref: ${{ github.ref }}
