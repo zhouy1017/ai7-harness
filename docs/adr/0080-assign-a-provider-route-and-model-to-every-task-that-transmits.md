@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted — the Owner merged PR #449 on 2026-09-11, which this record names as its acceptance
 date: 2026-09-11
 deciders: Owner (chooow.yang@gmail.com)
 amends: ADR 0079 §4.2 — search stays model-initiated, and AI7 may execute the model's search call on its behalf through a policy-named public search service without holding a search credential (§5.3, §7); §5.2 as first proposed is corrected by §5.3
