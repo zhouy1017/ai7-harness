@@ -8,6 +8,10 @@ import { ADMITTED_BASELINE_DOCX, composeAdmittedDocx } from './composed-docx.mjs
 import { attachProductOutput, installJourneyCancellationCleanup, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect } from './controller.mjs';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
+
+// THROWAWAY (Commander, first occurrence of the nightly merge queue): this candidate must fail so the
+// queue's failure report is proven. The pull request is closed and its branch deleted afterwards.
+throw new Error('J-08 deliberately broken: throwaway candidate for the first occurrence of the nightly merge queue');
 const DEBUG_SELECTORS = new Set(['DEBUG', 'DEBUG_FILE', 'PWDEBUG', 'PWDEBUGIMPL']);
 const OBJECT_PATTERN = /^[0-9a-f]{64}\.snapshot$/;
 // This Journey's subject is recovery of edited text, so its three inputs are composed at run time from
