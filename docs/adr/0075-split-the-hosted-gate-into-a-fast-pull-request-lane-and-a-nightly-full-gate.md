@@ -2,6 +2,8 @@
 status: accepted
 ---
 
+> Amended by [ADR 0081](./0081-run-the-nightly-full-gate-over-every-open-pull-request-merge-the-ones-that-pass-and-then-over-dev.md): the nightly `schedule` now falls on a serial merge queue that runs this full Gate over every open pull request against `dev`, merges the ones that pass, and then runs it once more over the final `dev` tip. §2's pull-request lane and what each occurrence is evidence of are unchanged; this ADR's nightly trigger and its statement that the Commander alone integrates are not.
+
 # Split the hosted E2E gate into a fast pull-request lane and a nightly full Gate
 
 On 2026-09-09 the Owner directed that the pull-request gate be cut to under three minutes and that the full Journey set run once a day instead of once per pull request.

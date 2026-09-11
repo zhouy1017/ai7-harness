@@ -1,16 +1,24 @@
 name: E2E Nightly Full Gate
 
+# The daily `schedule` moved to `e2e-nightly-queue.yml` under ADR 0081, which runs this full Gate
+# over each open pull request and then calls this workflow once for the final `dev` tip. What this
+# file runs is unchanged, so a dispatched occurrence against an exact ref is byte-for-byte the
+# occurrence ADR 0075 §3 describes.
+
 on:
-  schedule:
-    # 19:00 UTC daily — 03:00 the next day in the Owner's UTC+8 working day, so a red nightly is
-    # waiting at the start of it rather than arriving mid-session.
-    - cron: '0 19 * * *'
   workflow_dispatch:
     inputs:
       ref:
         description: Exact ref to run the full admitted Journey set against
         required: false
         type: string
+  workflow_call:
+    inputs:
+      ref:
+        description: Exact ref to run the full admitted Journey set against
+        required: false
+        type: string
+        default: ''
 
 permissions:
   contents: read

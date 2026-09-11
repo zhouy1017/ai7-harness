@@ -57,8 +57,8 @@ A Reviewer's Return Receipt repeats `reviewed_head` and its `class_match`: on `c
 
 - One Issue owns one branch, one pull request, and one writable Worker.
 - At most three active Worker Task Sessions across all harnesses and modes, only when their slices consume stable owners on current `dev`; never split work to fill slots. Only one Worker may run Electron Journeys on one host at a time; the Commander tells the other to hold its Journey rung.
-- Product integration is serial. After each integration the remaining branches re-resolve base, rebase, and revalidate under the base-drift continuation rule.
-- The Commander alone pushes, manages Draft/Ready, merges, and posts receipts. Root `PROGRESS.md` is updated inside the integrating pull request or by a Commander-authored documentation pull request, without an Issue, Worker, or receipts.
+- Product integration is serial. After each integration the remaining branches re-resolve base, rebase, and revalidate under the base-drift continuation rule. Under [ADR 0081](../docs/adr/0081-run-the-nightly-full-gate-over-every-open-pull-request-merge-the-ones-that-pass-and-then-over-dev.md) the nightly queue performs one part of that integration for the Commander: it alone decides what is open and Ready, and the queue tests each open non-draft pull request as the tree that would land and merges the ones that pass, one at a time.
+- The Commander alone pushes, manages Draft/Ready, and posts receipts; it integrates by hand when it chooses to, and the queue merges serially on its own schedule otherwise. Root `PROGRESS.md` is updated inside the integrating pull request or by a Commander-authored documentation pull request, without an Issue, Worker, or receipts.
 - The live project view is the query-only [Dispatch Register](../docs/agents/dispatch-register.md). No central ledger, daemon, database, launcher script, or workflow is created.
 
 ## Local completion and return
