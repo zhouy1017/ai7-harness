@@ -65,7 +65,7 @@ The storage rows implement ⑤ 设置 › 数据与存储; the storage decision 
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | — | S85 | #433 | T3 | J-12 | 数据版本 shown apart from the software version, frozen at release, changed only with backup, disclosure and rollback (B24) | ADR 0079 §1 | planned |
 | — | S86 | #434 | T3 | J-12 | 导出数据库 / 导入数据库 with preview, 替换 after an automatic backup or 合并; 定期自动备份 off by default (B25) | S85 | planned |
-| — | S87 | #437 | T0 | — | Provider assignment design: every provider-involving task, its Model Role, the capabilities it needs (including the web-search tool), provider and model per scope, the credential slots to enroll (ADR 0079 §6) | ADR 0073, ADR 0079 | Owner + Commander session |
+| — | S87 | #437 | T0 | — | Provider assignment design: every provider-involving task, its Model Role, the capabilities it needs (including the web-search tool), provider and model per scope, the credential slots to enroll (ADR 0079 §6) | ADR 0073, ADR 0079 | integrated as ADR 0080 (PR #449, `dev@ab76db6`); the platform-tools slice of its §7.8 and the Provider Processing v7 bytes follow |
 
 ## Phase 2 — the manuscript surface, review, files and delivery
 
