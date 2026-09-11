@@ -590,6 +590,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'plan-revision-prepare',
     'plan-revision-drift',
     'plan-revision-stale-authorize',
+    'plan-revision-revert',
     'plan-revision-reconfirm',
     'plan-revision-dispatch',
     'plan-revision-edit-unchanged',

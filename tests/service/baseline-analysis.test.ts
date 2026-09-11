@@ -747,6 +747,8 @@ describe('baseline manuscript analysis over the real store on exact sample1', ()
       const options = first.settled.updateControls!.actions['reanalyze-range'].options;
       const rangeA = { startPosition: options[2]!.startPosition, endPosition: options[2]!.endPosition };
       const rangeB = { startPosition: options[7]!.startPosition, endPosition: options[7]!.endPosition };
+      /** A third range, so a later proposal and a stale one are each something other than A or B. */
+      const rangeC = { startPosition: options[4]!.startPosition, endPosition: options[4]!.endPosition };
       expect(options[2]!.expected).toEqual({ reused: 5, recomputed: 3, invalidated: 1, bypassed: 2 });
       expect(options[7]!.expected).toEqual({ reused: 6, recomputed: 2, invalidated: 1, bypassed: 1 });
 
@@ -800,18 +802,101 @@ describe('baseline manuscript analysis over the real store on exact sample1', ()
       expect((refusal as StoreError).message).toContain('plan-revision-required');
       expect(store.inspectBaselineAnalysis(bookId).run).toBeNull();
       expect(store.inspectBaselineAnalysis(bookId).authorization).toBeNull();
-      // Reconfirming a different proposal than the pending one is refused as stale.
-      expect(() => reconfirm(bookId, { mode: 'reanalyze-range', selectedRange: rangeA })).toThrowError(/ANALYSIS_PLAN_REVISION_STALE|已过期/u);
+
+      // Issue #281 — a later proposal settles the earlier one durably. Preparing at a third range
+      // records a second revision naming the first in `supersedes`; the first row itself is never
+      // rewritten, so it keeps the exact diff, proposal, and record time it was written with.
+      const superseding = prepare(store, bookId, { mode: 'reanalyze-range', selectedRange: rangeC });
+      expect(superseding.planRevisions).toHaveLength(2);
+      expect(superseding.planRevisions[0]).toMatchObject({
+        planRevisionId: pending.planRevisionId,
+        state: 'superseded',
+        resolved: true,
+        nextOrdinal: null,
+        detectedAt: pending.detectedAt,
+        label: '计划修订 · 版本 1 → 2（已被后一次修订取代） · selectedRange、reusePlan.counts',
+      });
+      expect(superseding.planRevisions[0]!.diff).toEqual(pending.diff);
+      expect(superseding.planRevisions[0]!.proposed).toEqual(pending.proposed);
+      const supersededBy = superseding.planRevisions[1]!;
+      expect(supersededBy).toMatchObject({ state: 'pending', resolved: false, trigger: 'prepare', supersedes: [pending.planRevisionId] });
+      expect(supersededBy.proposed.selectedRange).toEqual(rangeC);
+      expect(superseding.planRevision?.planRevisionId).toBe(supersededBy.planRevisionId);
+      expect(superseding.actions).toEqual({ canPrepare: false, canAuthorize: false, canReconfirmPlan: true });
+
+      // The way back through 重新分析所选范围: preparing at the inputs version 1 froze records the revert,
+      // settles what was pending, and restores the start action on the version that was never replaced.
+      const revertedByPrepare = prepare(store, bookId, { mode: 'reanalyze-range', selectedRange: rangeA });
+      expect(revertedByPrepare.planRevisions).toHaveLength(3);
+      expect(revertedByPrepare.planRevisions.map((entry) => entry.state)).toEqual(['superseded', 'superseded', 'reverted']);
+      const revertRow = revertedByPrepare.planRevisions[2]!;
+      expect(revertRow).toMatchObject({
+        trigger: 'prepare',
+        priorOrdinal: 1,
+        nextOrdinal: 1,
+        state: 'reverted',
+        resolved: true,
+        supersedes: [supersededBy.planRevisionId],
+        // Unit 5 and unit 3 reuse the same way, so the way back from C names only the range itself.
+        changedFields: ['selectedRange'],
+        label: '计划修订 · 版本 1 → 1（已回退） · selectedRange',
+      });
+      expect(revertRow.diff).toEqual([{ field: 'selectedRange', label: expect.any(String), prior: rangeC, proposed: rangeA, materiality: 'material' }]);
+      expect(revertRow.proposed).toEqual(prepared.planVersion!.materialInputs);
+      expect(revertedByPrepare.planRevision).toBeNull();
+      expect(revertedByPrepare.planVersions).toHaveLength(1);
+      expect(revertedByPrepare.planVersion).toMatchObject({ ordinal: 1, state: 'current', planEnvelopeDigest: v1Digest });
+      expect(revertedByPrepare.planEnvelope?.digest).toBe(v1Digest);
+      expect(revertedByPrepare.update?.selectedRange).toEqual(rangeA);
+      expect(revertedByPrepare.actions).toEqual({ canPrepare: false, canAuthorize: true, canReconfirmPlan: false });
+      // The frozen version is authorizable again, and preparing at the same inputs once more is the
+      // ordinary no-op: nothing is pending, so no revert is recorded.
+      expect(prepare(store, bookId, { mode: 'reanalyze-range', selectedRange: rangeA }).planRevisions).toHaveLength(3);
+
+      // The same way back through 重新确认计划, which is what the revision surface offers: the inputs
+      // equal the frozen version's, so the pending revision is settled and no plan version is written.
+      const driftedAgain = prepare(store, bookId, { mode: 'reanalyze-range', selectedRange: rangeB });
+      expect(driftedAgain.planRevision).toMatchObject({ state: 'pending', supersedes: [] });
+      const revertedByReconfirm = reconfirm(bookId, { mode: 'reanalyze-range', selectedRange: rangeA });
+      expect(revertedByReconfirm.planRevisions).toHaveLength(5);
+      expect(revertedByReconfirm.planRevisions.map((entry) => entry.state)).toEqual(['superseded', 'superseded', 'reverted', 'superseded', 'reverted']);
+      const reconfirmRevert = revertedByReconfirm.planRevisions[4]!;
+      expect(reconfirmRevert).toMatchObject({
+        trigger: 'reconfirm',
+        state: 'reverted',
+        nextOrdinal: 1,
+        supersedes: [driftedAgain.planRevision!.planRevisionId],
+        changedFields: ['selectedRange', 'reusePlan.counts'],
+        label: '计划修订 · 版本 1 → 1（已回退） · selectedRange、reusePlan.counts',
+      });
+      // The way back reads from the proposal that was abandoned to the plan that stands, counts included.
+      expect(reconfirmRevert.diff).toEqual([
+        { field: 'selectedRange', label: expect.any(String), prior: rangeB, proposed: rangeA, materiality: 'material' },
+        { field: 'reusePlan.counts', label: expect.any(String), prior: { reused: 6, recomputed: 2, invalidated: 1, bypassed: 1 }, proposed: { reused: 5, recomputed: 3, invalidated: 1, bypassed: 2 }, materiality: 'derived' },
+      ]);
+      expect(revertedByReconfirm.planVersions).toHaveLength(1);
+      expect(revertedByReconfirm.planEnvelope?.digest).toBe(v1Digest);
+      expect(revertedByReconfirm.actions).toEqual({ canPrepare: false, canAuthorize: true, canReconfirmPlan: false });
+      expect(() => reconfirm(bookId, { mode: 'reanalyze-range', selectedRange: rangeA })).toThrowError(/ANALYSIS_PLAN_REVISION_ABSENT|没有待重新确认/u);
+
+      // Back to the drift the Task actually means to confirm.
+      const pendingFinal = prepare(store, bookId, { mode: 'reanalyze-range', selectedRange: rangeB }).planRevision!;
+      expect(pendingFinal).toMatchObject({ state: 'pending', trigger: 'prepare', supersedes: [] });
+      // Reconfirming a proposal that is neither the pending one nor the frozen version is still stale.
+      expect(() => reconfirm(bookId, { mode: 'reanalyze-range', selectedRange: rangeC })).toThrowError(/ANALYSIS_PLAN_REVISION_STALE|已过期/u);
 
       // `重新确认计划` yields version 2 on the same Task Intent and resolves the revision.
       const reconfirmed = reconfirm(bookId, { mode: 'reanalyze-range', selectedRange: rangeB });
       v2Digest = reconfirmed.planEnvelope!.digest;
       expect(reconfirmed.taskIntent?.taskIntentId).toBe(taskIntentId);
-      expect(reconfirmed.planVersion).toMatchObject({ ordinal: 2, state: 'current', planRevisionId: pending.planRevisionId, planEnvelopeDigest: v2Digest });
+      expect(reconfirmed.planVersion).toMatchObject({ ordinal: 2, state: 'current', planRevisionId: pendingFinal.planRevisionId, planEnvelopeDigest: v2Digest });
       expect(reconfirmed.planVersions.map((version) => [version.ordinal, version.state])).toEqual([[1, 'superseded'], [2, 'current']]);
       expect(reconfirmed.planVersions[0]!.planEnvelopeDigest).toBe(v1Digest);
-      expect(reconfirmed.planRevisions).toHaveLength(1);
-      expect(reconfirmed.planRevisions[0]).toMatchObject({ planRevisionId: pending.planRevisionId, priorOrdinal: 1, nextOrdinal: 2, resolved: true, label: '计划修订 · 版本 1 → 2 · selectedRange、reusePlan.counts' });
+      expect(reconfirmed.planRevisions).toHaveLength(6);
+      expect(reconfirmed.planRevisions.map((entry) => entry.state)).toEqual(['superseded', 'superseded', 'reverted', 'superseded', 'reverted', 'resolved']);
+      expect(reconfirmed.planRevisions[5]).toMatchObject({ planRevisionId: pendingFinal.planRevisionId, priorOrdinal: 1, nextOrdinal: 2, state: 'resolved', resolved: true, label: '计划修订 · 版本 1 → 2 · selectedRange、reusePlan.counts' });
+      // Every revision of this Task, whichever way it was settled, asks the editor for nothing now.
+      expect(reconfirmed.planRevisions.every((entry) => entry.resolved)).toBe(true);
       expect(reconfirmed.planRevision).toBeNull();
       expect(v2Digest).not.toBe(v1Digest);
       expect(reconfirmed.planEnvelope?.planVersion).toBe(2);
@@ -844,7 +929,7 @@ describe('baseline manuscript analysis over the real store on exact sample1', ()
       appendToFirstBlock(store, imported.manuscriptId, imported.branchId, J04_EDIT_SUFFIX);
       const edited = store.inspectBaselineAnalysis(bookId);
       expect(edited.planVersions.map((version) => [version.ordinal, version.state])).toEqual([[1, 'superseded'], [2, 'bound']]);
-      expect(edited.planRevisions).toHaveLength(1);
+      expect(edited.planRevisions).toHaveLength(6);
       expect(edited.planRevision).toBeNull();
       expect(edited.planEnvelope?.digest).toBe(v2Digest);
       expect(edited.run?.attempt?.executionBinding?.bindingDigest).toBe(boundBinding);
@@ -860,7 +945,7 @@ describe('baseline manuscript analysis over the real store on exact sample1', ()
       const restarted = reopened.inspectBaselineAnalysis(bookId);
       expect(restarted.taskIntent?.taskIntentId).toBe(taskIntentId);
       expect(restarted.planVersions.map((version) => [version.ordinal, version.state])).toEqual([[1, 'superseded'], [2, 'bound']]);
-      expect(restarted.planRevisions[0]).toMatchObject({ priorOrdinal: 1, nextOrdinal: 2, resolved: true });
+      expect(restarted.planRevisions[5]).toMatchObject({ priorOrdinal: 1, nextOrdinal: 2, state: 'resolved', resolved: true });
       expect(restarted.authorization?.planVersionOrdinal).toBe(2);
       expect(restarted.planEnvelope?.digest).toBe(v2Digest);
       reopened.markCleanShutdown();
@@ -871,7 +956,17 @@ describe('baseline manuscript analysis over the real store on exact sample1', ()
     try {
       expect(database.prepare('SELECT ordinal FROM analysis_plan_versions WHERE task_intent_id = ? ORDER BY ordinal').all(taskIntentId)).toEqual([{ ordinal: 1 }, { ordinal: 2 }]);
       expect((database.prepare('SELECT count(*) total FROM analysis_plan_versions').get() as { total: number }).total).toBe(3);
-      expect((database.prepare('SELECT count(*) total FROM analysis_plan_revisions').get() as { total: number }).total).toBe(1);
+      expect((database.prepare('SELECT count(*) total FROM analysis_plan_revisions').get() as { total: number }).total).toBe(6);
+      // Six append-only rows for one supersession, two reverts, and the confirmed drift; the trigger
+      // kinds are the paths that recorded them, and only the confirmed one yielded a plan version.
+      expect(database.prepare('SELECT trigger_kind, prior_ordinal FROM analysis_plan_revisions ORDER BY rowid').all()).toEqual([
+        { trigger_kind: 'prepare', prior_ordinal: 1 },
+        { trigger_kind: 'prepare', prior_ordinal: 1 },
+        { trigger_kind: 'prepare', prior_ordinal: 1 },
+        { trigger_kind: 'prepare', prior_ordinal: 1 },
+        { trigger_kind: 'reconfirm', prior_ordinal: 1 },
+        { trigger_kind: 'prepare', prior_ordinal: 1 },
+      ]);
       expect((database.prepare('SELECT count(*) total FROM analysis_plan_records WHERE task_intent_id = ? AND plan_version = 2').get(taskIntentId) as { total: number }).total).toBe(8);
       for (const table of ['analysis_plan_versions', 'analysis_plan_revisions', 'analysis_plan_records']) {
         expect(() => database.prepare(`UPDATE ${table} SET sha256 = sha256`).run()).toThrowError(/TASK_LEDGER_IMMUTABLE/u);

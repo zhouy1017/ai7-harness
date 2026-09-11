@@ -15,7 +15,8 @@ import { attachProductOutput, installJourneyCancellationCleanup, localDebugEnabl
 // Issue #48 (S13) extends it again: the product relaunches with a second fixture identity so one unit's
 // transient first-attempt failure is retried once in-envelope as a recorded `safe-retry` Plan
 // Adaptation, and a prepared `重新分析所选范围` Task whose range changes before authorization is
-// superseded by a Plan Revision, refuses its stale version, and is reconfirmed as version 2.
+// superseded by a Plan Revision, refuses its stale version, takes the way back to the version it froze,
+// and is reconfirmed as version 2.
 // Inputs: exact ADR 0043 SampleBooks/sample1.docx plus the hand-written synthetic model fixtures under
 // tests/fixtures/model/. The product executes every Run over the in-process ai7-local-deterministic route;
 // the remote DeepSeek binding stays denied under Provider Processing v1 and no socket is opened.
@@ -1913,7 +1914,8 @@ async function main() {
     await click(renderer, '重新分析所选范围', 'plan-revision-drift-click');
     await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.planRevisionPending==='true'`, 'plan-revision-pending', 120_000);
     const drifted = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
-    const pendingRevision = drifted?.planRevision;
+    // Rebound by the revert stage below, which settles this revision and drifts the plan again.
+    let pendingRevision = drifted?.planRevision;
     requireJourney(drifted?.taskIntent?.taskIntentId === preparedDrift.taskIntent.taskIntentId && drifted.state === 'prepared' && drifted.planEnvelope?.digest === v1Digest &&
       drifted.planVersion?.ordinal === 1 && drifted.planVersion?.state === 'superseded' && drifted.planVersions?.length === 1 && drifted.planRevisions?.length === 1 &&
       UUID_PATTERN.test(pendingRevision?.planRevisionId) && pendingRevision.priorOrdinal === 1 && pendingRevision.nextOrdinal === null && pendingRevision.resolved === false && pendingRevision.trigger === 'prepare' &&
@@ -1952,6 +1954,62 @@ async function main() {
     requireJourney(afterRefusal?.authorization === null && afterRefusal.run === null && afterRefusal.planRevision?.planRevisionId === pendingRevision.planRevisionId &&
       afterRefusal.planVersions?.length === 1 && afterRefusal.planEnvelope?.digest === v1Digest, 'plan-revision-no-run');
 
+    at('plan-revision-revert');
+    cancellation.throwIfRequested();
+    // (iv) The way back (Issue #281). Preparing again at the range version 1 froze records the revert
+    // as its own append-only revision, settles the pending one, and returns 授权并开始任务 to the version
+    // that was never replaced: the same envelope digest, still one plan version, nothing rewritten.
+    await assertRenderer(renderer, `(() => { const radio=document.querySelector('.baseline-analysis-card [data-update-action="reanalyze-range"] #analysis-range-3'); if(!(radio instanceof HTMLInputElement)||radio.checked)return false; radio.click(); return radio.checked; })()`, 'plan-revision-revert-select-a');
+    await click(renderer, '重新分析所选范围', 'plan-revision-revert-click');
+    await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.planRevisionPending==='false'`, 'plan-revision-reverted', 120_000);
+    const reverted = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    const supersededRevision = reverted?.planRevisions?.[0];
+    const revertRevision = reverted?.planRevisions?.[1];
+    requireJourney(reverted?.taskIntent?.taskIntentId === preparedDrift.taskIntent.taskIntentId && reverted.state === 'prepared' && reverted.planEnvelope?.digest === v1Digest &&
+      reverted.planVersions?.length === 1 && reverted.planVersion?.ordinal === 1 && reverted.planVersion?.state === 'current' && reverted.planRevisions?.length === 2 &&
+      supersededRevision?.planRevisionId === pendingRevision.planRevisionId && supersededRevision.state === 'superseded' && supersededRevision.resolved === true &&
+      supersededRevision.nextOrdinal === null && supersededRevision.detectedAt === pendingRevision.detectedAt &&
+      JSON.stringify(supersededRevision.diff) === JSON.stringify(pendingRevision.diff) &&
+      JSON.stringify(supersededRevision.proposed) === JSON.stringify(pendingRevision.proposed) &&
+      supersededRevision.label === '计划修订 · 版本 1 → 2（已被后一次修订取代） · selectedRange、reusePlan.counts' &&
+      revertRevision?.state === 'reverted' && revertRevision.resolved === true && revertRevision.trigger === 'prepare' && revertRevision.priorOrdinal === 1 && revertRevision.nextOrdinal === 1 &&
+      UUID_PATTERN.test(revertRevision.planRevisionId) && JSON.stringify(revertRevision.supersedes) === JSON.stringify([pendingRevision.planRevisionId]) &&
+      JSON.stringify(revertRevision.changedFields) === JSON.stringify(['selectedRange', 'reusePlan.counts']) &&
+      sameRecord(revertRevision.diff?.[0]?.prior, rangeB) && sameRecord(revertRevision.diff[0].proposed, rangeA) &&
+      sameRecord(revertRevision.diff?.[1]?.prior, driftOptionB.expected) && sameRecord(revertRevision.diff[1].proposed, driftOptionA.expected) &&
+      revertRevision.label === '计划修订 · 版本 1 → 1（已回退） · selectedRange、reusePlan.counts' &&
+      reverted.planRevision === null && sameRecord(reverted.update?.selectedRange, rangeA) && reverted.authorization === null && reverted.run === null &&
+      reverted.actions?.canAuthorize === true && reverted.actions?.canReconfirmPlan === false,
+    'plan-revision-revert-record', { planRevisions: reverted?.planRevisions, planVersions: reverted?.planVersions, actions: reverted?.actions });
+    // The 计划已被取代 block is gone, both revisions read as settled, and the start action is back.
+    await assertRenderer(renderer, `(() => {
+      const card=document.querySelector('.baseline-analysis-card');
+      const authorize=card?.querySelector('[data-analysis-action="authorize"]');
+      return card?.dataset.planVersion==='1' && card.dataset.planVersionCount==='1' && card.dataset.planRevisionPending==='false' &&
+        card.dataset.planEnvelopeDigest===${JSON.stringify(v1Digest)} && card.querySelector('[data-plan-version-ordinal="1"][data-plan-version-state="current"]')!==null &&
+        card.querySelector('.analysis-plan-versions')?.dataset.planRevisionCount==='2' &&
+        card.querySelectorAll('.analysis-plan-revision-list li').length===2 &&
+        card.querySelectorAll('.analysis-plan-versions [data-plan-revision-resolved="true"]').length===2 &&
+        card.querySelector('.analysis-plan-versions [data-plan-revision-prior="1"][data-plan-revision-next="1"][data-plan-revision-resolved="true"]')!==null &&
+        card.querySelectorAll('.analysis-plan-revision-list li')[1]?.textContent.includes(${JSON.stringify(revertRevision.label)})===true &&
+        !card.querySelector('.analysis-plan-revision') && !card.querySelector('[data-analysis-action="view-plan-revision"], [data-analysis-action="reconfirm-plan"]') &&
+        authorize instanceof HTMLButtonElement && !authorize.disabled && authorize.textContent==='授权并开始任务';
+    })()`, 'plan-revision-revert-surface');
+    // Back to the change this Task means to confirm: the same range drift, pending on its own again.
+    await assertRenderer(renderer, `(() => { const radio=document.querySelector('.baseline-analysis-card [data-update-action="reanalyze-range"] #analysis-range-8'); if(!(radio instanceof HTMLInputElement)||radio.checked)return false; radio.click(); return radio.checked; })()`, 'plan-revision-revert-select-b');
+    await click(renderer, '重新分析所选范围', 'plan-revision-redrift-click');
+    await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.planRevisionPending==='true'`, 'plan-revision-redrift-pending', 120_000);
+    const redrifted = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    pendingRevision = redrifted?.planRevision;
+    requireJourney(redrifted?.planRevisions?.length === 3 && UUID_PATTERN.test(pendingRevision?.planRevisionId) &&
+      pendingRevision.planRevisionId !== supersededRevision.planRevisionId && pendingRevision.planRevisionId !== revertRevision.planRevisionId &&
+      pendingRevision.state === 'pending' && pendingRevision.resolved === false && pendingRevision.trigger === 'prepare' &&
+      JSON.stringify(pendingRevision.supersedes) === JSON.stringify([]) && sameRecord(pendingRevision.proposed?.selectedRange, rangeB) &&
+      pendingRevision.label === '计划修订 · 版本 1 → 2（待重新确认） · selectedRange、reusePlan.counts' &&
+      redrifted.planVersions?.length === 1 && redrifted.planEnvelope?.digest === v1Digest &&
+      redrifted.actions?.canAuthorize === false && redrifted.actions?.canReconfirmPlan === true,
+    'plan-revision-redrift', { planRevisions: redrifted?.planRevisions, actions: redrifted?.actions });
+
     at('plan-revision-reconfirm');
     cancellation.throwIfRequested();
     await click(renderer, '重新确认计划', 'plan-revision-reconfirm-click');
@@ -1961,8 +2019,9 @@ async function main() {
     requireJourney(reconfirmed?.taskIntent?.taskIntentId === preparedDrift.taskIntent.taskIntentId && reconfirmed.state === 'prepared' && DIGEST_PATTERN.test(v2Digest) && v2Digest !== v1Digest &&
       reconfirmed.planEnvelope?.planVersion === 2 && reconfirmed.planVersion?.ordinal === 2 && reconfirmed.planVersion?.state === 'current' && reconfirmed.planVersion?.planRevisionId === pendingRevision.planRevisionId &&
       JSON.stringify(reconfirmed.planVersions?.map((version) => [version.ordinal, version.state, version.planEnvelopeDigest])) === JSON.stringify([[1, 'superseded', v1Digest], [2, 'current', v2Digest]]) &&
-      reconfirmed.planRevisions?.length === 1 && reconfirmed.planRevisions[0].planRevisionId === pendingRevision.planRevisionId && reconfirmed.planRevisions[0].resolved === true && reconfirmed.planRevisions[0].nextOrdinal === 2 &&
-      reconfirmed.planRevisions[0].label === '计划修订 · 版本 1 → 2 · selectedRange、reusePlan.counts' && reconfirmed.planRevision === null &&
+      reconfirmed.planRevisions?.length === 3 && reconfirmed.planRevisions[2].planRevisionId === pendingRevision.planRevisionId && reconfirmed.planRevisions[2].resolved === true && reconfirmed.planRevisions[2].nextOrdinal === 2 &&
+      reconfirmed.planRevisions[2].state === 'resolved' && reconfirmed.planRevisions.every((entry) => entry.resolved === true) &&
+      reconfirmed.planRevisions[2].label === '计划修订 · 版本 1 → 2 · selectedRange、reusePlan.counts' && reconfirmed.planRevision === null &&
       sameRecord(reconfirmed.update?.selectedRange, rangeB) && sameRecord(reconfirmed.update?.reusePlan?.counts, driftOptionB.expected) &&
       reconfirmed.coverageManifest?.digest === preparedDrift.coverageManifest.digest && reconfirmed.checkpoint?.revisionId === preparedDrift.checkpoint.revisionId &&
       JSON.stringify(reconfirmed.runSourceScope?.unitScope?.recomputedUnitOrdinals) === JSON.stringify([2, 8]) &&
@@ -1998,7 +2057,7 @@ async function main() {
     const afterEdit = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
     requireJourney(afterEdit?.taskIntent?.taskIntentId === preparedDrift.taskIntent.taskIntentId && afterEdit.planEnvelope?.digest === v2Digest &&
       JSON.stringify(afterEdit.planVersions?.map((version) => [version.ordinal, version.state])) === JSON.stringify([[1, 'superseded'], [2, 'bound']]) &&
-      afterEdit.planRevisions?.length === 1 && afterEdit.planRevision === null && afterEdit.authorization?.planEnvelopeDigest === v2Digest &&
+      afterEdit.planRevisions?.length === 3 && afterEdit.planRevision === null && afterEdit.authorization?.planEnvelopeDigest === v2Digest &&
       afterEdit.run?.attempt?.executionBinding?.bindingDigest === attemptDrift.executionBinding.bindingDigest && afterEdit.run?.runRecordId === settledDrift.run.runRecordId &&
       afterEdit.resultSetRevision?.revisionId === revision6.revisionId && afterEdit.resultSetRevision?.freshness?.state === 'stale' && afterEdit.resultSetRevision?.freshness?.currentJournalSequence === nextSequence &&
       afterEdit.checkpoint?.revisionId === settledDrift.checkpoint.revisionId,

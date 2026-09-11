@@ -755,6 +755,77 @@ describe('the developer-live scope over exact sample1 with a stub transport', ()
   });
 
   /**
+   * The Run Budget Ceiling is a material plan field (ADR 0009), and this is the only scope that binds
+   * an explicit one. So this is where Issue #281's derivation is provable: the frozen half of the
+   * comparison is read from the Provider Resolution Plan the version froze, not from a constant. A
+   * launch re-bound at another ceiling therefore suspends the plan instead of silently reading
+   * `unset` — which is the hole the settable ceiling of S16 (#51) would otherwise fall into.
+   */
+  it('suspends a frozen plan when the launch re-binds another Run Budget Ceiling, and takes the way back', async () => {
+    const { store, bookId, prepared } = await prepareLive(roots.dataRoot, CEILING);
+    const ledger = store.baselineAnalysisLedger;
+    const goal = prepared.taskIntent!.goal;
+    const prepareAgain = (reconfirm: boolean): BaselineAnalysisProjection => {
+      const result = store.createBaselineAnalysisPreparationWork(bookId, goal, null, launchPolicy, reconfirm);
+      expect(result.done).toBe(true);
+      return result.projection!;
+    };
+    const OTHER: Ceiling = { kind: 'tokens', maxTotalTokens: 250_000 };
+    const THIRD: Ceiling = { kind: 'tokens', maxTotalTokens: 125_000 };
+
+    // What version 1 froze is the launch's own ceiling, read back out of the plan component.
+    expect(prepared.providerResolutionPlan!.runBudgetCeiling).toEqual(CEILING);
+    expect(prepared.planVersion!.materialInputs.runBudgetCeiling).toEqual(CEILING);
+    expect(prepared.planVersion!.materialInputs.expectedOutcome).toBe(prepared.taskIntent!.expectedOutcome);
+    expect(prepared.planVersion!.materialInputs.outboundDataCategory).toBe('public-or-synthetic');
+    expect(prepared.actions).toEqual({ canPrepare: false, canAuthorize: true, canReconfirmPlan: false });
+
+    // Re-binding the launch at another ceiling is durable-state drift the next read detects on its own.
+    ledger.bindLaunch(liveBinding(OTHER));
+    const drifted = store.inspectBaselineAnalysis(bookId);
+    const live = drifted.planRevision!;
+    expect(live).toMatchObject({ planRevisionId: null, trigger: 'inspect', detectedAt: null, state: 'pending', resolved: false, supersedes: [], priorOrdinal: 1 });
+    expect(live.changedFields).toEqual(['runBudgetCeiling']);
+    expect(live.diff).toEqual([{ field: 'runBudgetCeiling', label: expect.any(String), prior: CEILING, proposed: OTHER, materiality: 'material' }]);
+    expect(drifted.planVersion).toMatchObject({ ordinal: 1, state: 'superseded' });
+    expect(drifted.actions).toEqual({ canPrepare: false, canAuthorize: false, canReconfirmPlan: true });
+
+    // Reconfirming records the drift the read detected: `inspect` is the trigger kind that names it,
+    // and version 2 freezes the ceiling now bound.
+    const reconfirmed = prepareAgain(true);
+    expect(reconfirmed.planVersion).toMatchObject({ ordinal: 2, state: 'current' });
+    expect(reconfirmed.providerResolutionPlan!.runBudgetCeiling).toEqual(OTHER);
+    expect(reconfirmed.planVersion!.materialInputs.runBudgetCeiling).toEqual(OTHER);
+    expect(reconfirmed.planRevisions).toHaveLength(1);
+    expect(reconfirmed.planRevisions[0]).toMatchObject({ trigger: 'inspect', state: 'resolved', resolved: true, priorOrdinal: 1, nextOrdinal: 2 });
+    expect(reconfirmed.planRevisions[0]!.detectedAt).not.toBeNull();
+    expect(reconfirmed.planRevisions[0]!.diff).toEqual(live.diff);
+    expect(reconfirmed.planRevision).toBeNull();
+    expect(reconfirmed.actions).toEqual({ canPrepare: false, canAuthorize: true, canReconfirmPlan: false });
+
+    // A third ceiling drifts version 2; preparing again at the ceiling version 2 froze is the way back.
+    ledger.bindLaunch(liveBinding(THIRD));
+    const secondDrift = prepareAgain(false);
+    const pending = secondDrift.planRevision!;
+    expect(pending).toMatchObject({ trigger: 'prepare', state: 'pending', resolved: false, priorOrdinal: 2, supersedes: [] });
+    expect(pending.changedFields).toEqual(['runBudgetCeiling']);
+    expect(secondDrift.actions.canAuthorize).toBe(false);
+
+    ledger.bindLaunch(liveBinding(OTHER));
+    const reverted = prepareAgain(false);
+    expect(reverted.planRevisions).toHaveLength(3);
+    expect(reverted.planRevisions.map((entry) => entry.state)).toEqual(['resolved', 'superseded', 'reverted']);
+    expect(reverted.planRevisions[2]).toMatchObject({ trigger: 'prepare', priorOrdinal: 2, nextOrdinal: 2, supersedes: [pending.planRevisionId] });
+    expect(reverted.planRevisions[2]!.diff).toEqual([{ field: 'runBudgetCeiling', label: expect.any(String), prior: THIRD, proposed: OTHER, materiality: 'material' }]);
+    // Version 2 was never replaced: it stands, it is authorizable again, and no third version exists.
+    expect(reverted.planVersions.map((version) => [version.ordinal, version.state])).toEqual([[1, 'superseded'], [2, 'current']]);
+    expect(reverted.planEnvelope!.digest).toBe(reconfirmed.planEnvelope!.digest);
+    expect(reverted.planRevision).toBeNull();
+    expect(reverted.actions).toEqual({ canPrepare: false, canAuthorize: true, canReconfirmPlan: false });
+    await store.close();
+  });
+
+  /**
    * The same bound default, against a Run whose first unit alone spends more than the resolved total.
    * The ceiling is a precondition of the transmit decision, so the second unit never forms a request:
    * the Run stops, names `run-budget-ceiling-reached`, and transmits nothing further.
