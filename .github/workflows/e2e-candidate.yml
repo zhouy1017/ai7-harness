@@ -118,14 +118,20 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          pnpm run e2e:all 2>&1 | tee "$RUNNER_TEMP/admitted-journeys.log"
+          # The result lines are kept whatever the outcome: a failed run is exactly the one the
+          # merge job reports from, and the shell's -e would otherwise end the script at the failure.
+          status=0
+          pnpm run e2e:all 2>&1 | tee "$RUNNER_TEMP/admitted-journeys.log" || status=$?
           grep -E '^(LOCAL_COMPLETION|DISCLOSED_SKIP)/' "$RUNNER_TEMP/admitted-journeys.log" > "$RUNNER_TEMP/gate-lines.log" || true
+          exit "$status"
 
       - name: Keep this platform's payload-safe result
         if: ${{ always() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: gate-lines-windows
+          # One name per candidate: artifact names are unique within a run, and every candidate of
+          # the night shares this run.
+          name: gate-lines-windows-${{ inputs.pr }}
           path: ${{ runner.temp }}/gate-lines.log
           if-no-files-found: ignore
           retention-days: 7
@@ -186,14 +192,18 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          pnpm run e2e:all 2>&1 | tee "$RUNNER_TEMP/admitted-journeys.log"
+          # The result lines are kept whatever the outcome: a failed run is exactly the one the
+          # merge job reports from, and the shell's -e would otherwise end the script at the failure.
+          status=0
+          pnpm run e2e:all 2>&1 | tee "$RUNNER_TEMP/admitted-journeys.log" || status=$?
           grep -E '^(LOCAL_COMPLETION|DISCLOSED_SKIP)/' "$RUNNER_TEMP/admitted-journeys.log" > "$RUNNER_TEMP/gate-lines.log" || true
+          exit "$status"
 
       - name: Keep this platform's payload-safe result
         if: ${{ always() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: gate-lines-macos
+          name: gate-lines-macos-${{ inputs.pr }}
           path: ${{ runner.temp }}/gate-lines.log
           if-no-files-found: ignore
           retention-days: 7
@@ -225,7 +235,7 @@ jobs:
       - name: Read both platforms' payload-safe results
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          pattern: gate-lines-*
+          pattern: gate-lines-*-${{ inputs.pr }}
           path: ${{ runner.temp }}/gate-lines
 
       - name: Report what Windows found
@@ -236,7 +246,7 @@ jobs:
           node tools/nightly-queue.mjs report
           --pr "${{ inputs.pr }}" --repo "$GITHUB_REPOSITORY"
           --platform 'Windows Server 2025 x64 CI'
-          --log "$RUNNER_TEMP/gate-lines/gate-lines-windows/gate-lines.log"
+          --log "$RUNNER_TEMP/gate-lines/gate-lines-windows-${{ inputs.pr }}/gate-lines.log"
 
       - name: Report what macOS found
         if: ${{ needs.macos.result != 'success' }}
@@ -246,7 +256,7 @@ jobs:
           node tools/nightly-queue.mjs report
           --pr "${{ inputs.pr }}" --repo "$GITHUB_REPOSITORY"
           --platform 'macOS 15 arm64'
-          --log "$RUNNER_TEMP/gate-lines/gate-lines-macos/gate-lines.log"
+          --log "$RUNNER_TEMP/gate-lines/gate-lines-macos-${{ inputs.pr }}/gate-lines.log"
 
       - name: Squash-merge the candidate
         if: ${{ inputs.merge && needs.windows.result == 'success' && needs.macos.result == 'success' }}
