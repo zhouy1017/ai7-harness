@@ -2868,6 +2868,20 @@ function reconstructReviewedTargetChoice(
   return null;
 }
 
+/**
+ * Close one database handle a refusing `EditorialStore.open` has already opened. A failure to close
+ * it must never replace the refusal the caller is owed: the handle is unreachable either way, and
+ * the original error is thrown immediately after.
+ */
+function closeDatabaseQuietly(db: DatabaseSync | null): void {
+  if (db === null) return;
+  try {
+    db.close();
+  } catch {
+    // The refusal that ended the open is the error the caller must see.
+  }
+}
+
 export class EditorialStore {
   readonly #dataRoot: string;
   readonly #objectsRoot: string;
@@ -2950,66 +2964,78 @@ export class EditorialStore {
       await inspectCanonicalDataFile(dataRoot, storeRoot, sidecar);
     }
     const authority = new DatabaseSync(databasePath);
-    configureDatabase(authority, 'FILE');
-    initializeSchema(authority);
-    initializeBoundedSchema(authority, workflowProfile);
-    initializeSourceImportSchema(authority, workflowProfile);
-    if (control.induceReimportProofTamper) {
-      requireStore(authority.prepare(
-        `UPDATE manuscript_reimport_mappings SET staged_text = staged_text || '篡改'
-         WHERE mapping_id = (SELECT mapping_id FROM manuscript_reimport_mappings ORDER BY mapping_id LIMIT 1)`,
-      ).run().changes === 1, 'E2E_CONTROL_INVALID', '没有可用于启动校验的重新导入证明。');
+    let journal: DatabaseSync | null = null;
+    let ingest: DatabaseSync | null = null;
+    try {
+      configureDatabase(authority, 'FILE');
+      initializeSchema(authority);
+      initializeBoundedSchema(authority, workflowProfile);
+      initializeSourceImportSchema(authority, workflowProfile);
+      if (control.induceReimportProofTamper) {
+        requireStore(authority.prepare(
+          `UPDATE manuscript_reimport_mappings SET staged_text = staged_text || '篡改'
+           WHERE mapping_id = (SELECT mapping_id FROM manuscript_reimport_mappings ORDER BY mapping_id LIMIT 1)`,
+        ).run().changes === 1, 'E2E_CONTROL_INVALID', '没有可用于启动校验的重新导入证明。');
+      }
+      initializeManuscriptReimportSchema(authority, workflowProfile);
+      // A store already at the terminal version is validated whole exactly twice per open: once above,
+      // before any cleanup write, and once below, after the E2E control injection, the layered
+      // initializers, and native-artifact partial recovery. The initializers between those two points
+      // would otherwise repeat the same whole-store validation over an unchanged store.
+      initializeModelServiceSchema(authority, workflowProfile, false);
+      initializeEditorialWorkspaceProfileSchema(authority);
+      initializeBoundedSchema(authority, workflowProfile, false);
+      const editorialWorkspaceProfile = await EditorialWorkspaceProfileStore.open(authority, dataRoot, codeRoot);
+      // The intake relations widen before the terminal version moves, so the version and the shape it
+      // names change together for every store that reaches revision 18, and again for revision 19.
+      initializeManuscriptIntakeSchema(authority);
+      initializeTextConversionSchema(authority);
+      initializeTaskAuthorizationSchema(authority);
+      initializeBoundedSchema(authority, workflowProfile);
+      validateEditorialWorkspaceProfileSchema(authority);
+      validateTaskAuthorizationSchema(authority);
+      journal = new DatabaseSync(databasePath);
+      configureDatabase(journal);
+      ingest = new DatabaseSync(databasePath);
+      configureDatabase(ingest);
+      const lifetimeId = randomUUID();
+      const boundedAuthority = new BoundedManuscriptStore(authority);
+      const store = new EditorialStore(
+        dataRoot,
+        objectsRoot,
+        authority,
+        journal,
+        ingest,
+        boundedAuthority,
+        new BoundedManuscriptStore(journal),
+        recoveryObjects,
+        editorialWorkspaceProfile,
+        new TaskAuthorizationStore(authority, boundedAuthority),
+        new BaselineAnalysisStore(authority, boundedAuthority, control.baselineAnalysisRoute),
+        new BaselineAnalysisStore(authority, boundedAuthority, control.baselineAnalysisRoute, factualReviewKindDefinition()),
+        workflowProfile,
+        lifetimeId,
+        control,
+      );
+      store.#transaction(authority, () => {
+        authority.prepare('DELETE FROM import_ingest_blocks').run();
+      });
+      await store.#resumeAbandonmentCleanupIntents();
+      store.#normalizeMigratedReviewedTargets();
+      await store.#sweepUnreferencedContentObjects();
+      await recoveryObjects.cleanup((relativeKey) =>
+        store.#boundedCall(() => store.#boundedAuthority.isRecoveryObjectReferenced(relativeKey)));
+      store.#boundedCall(() => store.#boundedAuthority.startServiceLifetime(lifetimeId, new Date().toISOString()));
+      return store;
+    } catch (error) {
+      // A refused open leaves no handle behind, so the caller can remove the Agent Data Root
+      // immediately: on Windows an open SQLite handle is what blocks that removal. The refusal
+      // itself is rethrown unchanged, in code and message.
+      closeDatabaseQuietly(ingest);
+      closeDatabaseQuietly(journal);
+      closeDatabaseQuietly(authority);
+      throw error;
     }
-    initializeManuscriptReimportSchema(authority, workflowProfile);
-    // A store already at the terminal version is validated whole exactly twice per open: once above,
-    // before any cleanup write, and once below, after the E2E control injection, the layered
-    // initializers, and native-artifact partial recovery. The initializers between those two points
-    // would otherwise repeat the same whole-store validation over an unchanged store.
-    initializeModelServiceSchema(authority, workflowProfile, false);
-    initializeEditorialWorkspaceProfileSchema(authority);
-    initializeBoundedSchema(authority, workflowProfile, false);
-    const editorialWorkspaceProfile = await EditorialWorkspaceProfileStore.open(authority, dataRoot, codeRoot);
-    // The intake relations widen before the terminal version moves, so the version and the shape it
-    // names change together for every store that reaches revision 18, and again for revision 19.
-    initializeManuscriptIntakeSchema(authority);
-    initializeTextConversionSchema(authority);
-    initializeTaskAuthorizationSchema(authority);
-    initializeBoundedSchema(authority, workflowProfile);
-    validateEditorialWorkspaceProfileSchema(authority);
-    validateTaskAuthorizationSchema(authority);
-    const journal = new DatabaseSync(databasePath);
-    configureDatabase(journal);
-    const ingest = new DatabaseSync(databasePath);
-    configureDatabase(ingest);
-    const lifetimeId = randomUUID();
-    const boundedAuthority = new BoundedManuscriptStore(authority);
-    const store = new EditorialStore(
-      dataRoot,
-      objectsRoot,
-      authority,
-      journal,
-      ingest,
-      boundedAuthority,
-      new BoundedManuscriptStore(journal),
-      recoveryObjects,
-      editorialWorkspaceProfile,
-      new TaskAuthorizationStore(authority, boundedAuthority),
-      new BaselineAnalysisStore(authority, boundedAuthority, control.baselineAnalysisRoute),
-      new BaselineAnalysisStore(authority, boundedAuthority, control.baselineAnalysisRoute, factualReviewKindDefinition()),
-      workflowProfile,
-      lifetimeId,
-      control,
-    );
-    store.#transaction(authority, () => {
-      authority.prepare('DELETE FROM import_ingest_blocks').run();
-    });
-    await store.#resumeAbandonmentCleanupIntents();
-    store.#normalizeMigratedReviewedTargets();
-    await store.#sweepUnreferencedContentObjects();
-    await recoveryObjects.cleanup((relativeKey) =>
-      store.#boundedCall(() => store.#boundedAuthority.isRecoveryObjectReferenced(relativeKey)));
-    store.#boundedCall(() => store.#boundedAuthority.startServiceLifetime(lifetimeId, new Date().toISOString()));
-    return store;
   }
 
   markCleanShutdown(): void {

@@ -1,7 +1,9 @@
 import { randomUUID } from 'node:crypto';
+import { mkdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { EditorialStore } from '../../src/service/store.js';
+import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { MAX_WINDOW_BLOCKS } from '../../src/shared/protocol.js';
 import {
   ADMITTED_SMALL_DOCX,
@@ -281,4 +283,28 @@ describe('EditorialStore on a temporary Agent Data Root', () => {
       second.close();
     }
   }, 300_000);
+
+  it('refuses an unsupported store version and leaves the Agent Data Root removable immediately', async () => {
+    // A deliberately invalid root: real SQLite, carrying a schema version no revision uses, so the
+    // first validation refuses it — with the `ai7.sqlite` handle already open.
+    const storeDirectory = join(roots.dataRoot, 'store');
+    await mkdir(storeDirectory, { recursive: true });
+    const planted = new DatabaseSync(join(storeDirectory, 'ai7.sqlite'));
+    planted.exec('PRAGMA user_version = 9999');
+    planted.close();
+
+    let refusal: unknown;
+    try {
+      await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    } catch (error) {
+      refusal = error;
+    }
+    expect(refusal).toBeInstanceOf(StoreError);
+    expect((refusal as StoreError).code).toBe('SCHEMA_UNSUPPORTED');
+
+    // No retry and no timeout, deliberately: on Windows an open SQLite handle is what would make this
+    // removal fail, so one immediate success is the assertion that the refused open closed what it
+    // opened. The suite's `afterEach` retries, so only an unretried removal proves the handle is gone.
+    await rm(roots.dataRoot, { recursive: true });
+  }, 120_000);
 });
