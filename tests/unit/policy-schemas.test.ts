@@ -22,12 +22,12 @@ function readPair(policyFile: string, schemaFile: string) {
 }
 
 describe('validateAllPolicies', () => {
-  it('discovers all thirteen current pairs and validates every one at this base', () => {
+  it('discovers all fourteen current pairs and validates every one at this base', () => {
     const pairs = discoverPolicyPairs(POLICIES_DIR);
-    expect(pairs).toHaveLength(13);
+    expect(pairs).toHaveLength(14);
 
     const results = validateAllPolicies(POLICIES_DIR);
-    expect(results).toHaveLength(13);
+    expect(results).toHaveLength(14);
     for (const result of results) {
       expect(result.ok, `${result.policyFile}: ${result.reason ?? ''}`).toBe(true);
     }
@@ -70,6 +70,30 @@ describe('validatePolicyDocument mutation failures', () => {
     mutated.decision.allowRules[0]!.target.eligibleKinds[0] = 'delivery-package-version';
 
     expect(() => validatePolicyDocument(mutated, schemaData)).toThrowError(/is not one of the enumerated values/);
+  });
+
+  it('rejects a Provider Processing v7 document whose rule drops the ADR 0080 §7.5 platform tools', () => {
+    const { policyData, schemaData } = readPair('provider-processing-policy.v7.json', 'provider-processing-policy.v7.schema.json');
+    const mutated = JSON.parse(JSON.stringify(policyData)) as {
+      decision: { providerAllowRules: Array<Record<string, unknown>> };
+    };
+    delete mutated.decision.providerAllowRules[0]!.platformTools;
+
+    expect(() => validatePolicyDocument(mutated, schemaData)).toThrowError(
+      /Required property "platformTools" is missing at #\/definitions\/developerLiveRule\./,
+    );
+  });
+
+  it('rejects a Provider Processing v7 document that turns the web-search switch back off', () => {
+    const { policyData, schemaData } = readPair('provider-processing-policy.v7.json', 'provider-processing-policy.v7.schema.json');
+    const mutated = JSON.parse(JSON.stringify(policyData)) as {
+      decision: { providerAllowRules: Array<{ transmissions: { webSearchToolAllowed: boolean } }> };
+    };
+    mutated.decision.providerAllowRules[0]!.transmissions.webSearchToolAllowed = false;
+
+    expect(() => validatePolicyDocument(mutated, schemaData)).toThrowError(
+      /Value at #\/definitions\/developerLiveRule\/properties\/transmissions does not equal the required const\./,
+    );
   });
 });
 
