@@ -867,6 +867,10 @@ async function main() {
     await launchForCleanup();
     await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'restart-ready');
     await assertRenderer(renderer, `(() => { const button=document.querySelector('button[data-book-id=${JSON.stringify(imported.bookId)}]'); if(!(button instanceof HTMLButtonElement))return false; button.click(); return true; })()`, 'restart-open-book');
+    // Synchronized delta with Issue #405: the Book route enters the manuscript now
+    // (V2-UX-RET-002); this card lives on 工作概览, reached back through 资料与记录 (V2-UX-IA-012).
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(imported.bookId)}]')`, 'restart-open-book-manuscript');
+    await click(renderer, '返回图书工作概览', 'restart-open-book-to-overview');
     await waitFor(renderer, `document.querySelector('.task-authorization-card')?.dataset.taskAuthorizationState==='authorized'`, 'restart-record-visible');
     const restarted = await renderer.evaluate(`window.ai7.inspectTaskAuthorization()`);
     requireJourney(restarted?.taskIntent?.taskIntentId === authorized.taskIntent.taskIntentId &&
@@ -896,6 +900,10 @@ async function main() {
     await launchForCleanup(false, true);
     await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'interruption-restart-ready');
     await assertRenderer(renderer, `(() => { const button=document.querySelector('button[data-book-id=${JSON.stringify(imported.bookId)}]'); if(!(button instanceof HTMLButtonElement))return false; button.click(); return true; })()`, 'interruption-open-book');
+    // Synchronized delta with Issue #405: the Book route enters the manuscript now
+    // (V2-UX-RET-002); this card lives on 工作概览, reached back through 资料与记录 (V2-UX-IA-012).
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(imported.bookId)}]')`, 'interruption-open-book-manuscript');
+    await click(renderer, '返回图书工作概览', 'interruption-open-book-to-overview');
     await waitFor(renderer, `document.querySelector('.task-authorization-card')?.dataset.taskAuthorizationState==='authorized'`, 'interruption-record-visible');
     await click(renderer, '核对前台执行边界（不派发）', 'interruption-boundary-click');
     await waitFor(renderer, `document.documentElement.dataset.ai7ServiceState==='interrupted' &&
