@@ -1588,6 +1588,19 @@ function registerRendererHandlers(
       });
     }),
   );
+  // The remembered position is editor state about a manuscript, so it is gated exactly as reading or
+  // writing that manuscript is: only the window that holds this manuscript's capability under the
+  // current route may move it, and a window that lost the route moves nothing.
+  ipcMain.handle(
+    IPC_CHANNELS.recordManuscriptEntryPosition,
+    (event, input: ServiceOperationMap['recordManuscriptEntryPosition']['input']) =>
+      envelope(async () => {
+        const owned = requireSender(event);
+        requireAuthority();
+        requireManuscriptCapability(owned, input);
+        return service.call('recordManuscriptEntryPosition', input);
+      }),
+  );
   ipcMain.handle(IPC_CHANNELS.openBookWorkbench, (event, input: BookWorkbenchRoute) =>
     envelope(async () => {
       const owned = requireSender(event);

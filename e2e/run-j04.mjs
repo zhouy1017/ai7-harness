@@ -984,6 +984,10 @@ async function main() {
     at('book-reopen');
     cancellation.throwIfRequested();
     await assertRenderer(renderer, `(() => { const button=document.querySelector('button[data-book-id=${JSON.stringify(imported.bookId)}]'); if(!(button instanceof HTMLButtonElement))return false; button.click(); return true; })()`, 'book-reopen');
+    // Synchronized delta with Issue #405: the Book route enters the manuscript now (V2-UX-RET-002),
+    // and 工作概览 is reached back through the manuscript's 资料与记录 group (V2-UX-IA-012).
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(imported.bookId)}]')`, 'book-reopened-manuscript');
+    await click(renderer, '返回图书工作概览', 'book-reopened-to-overview');
     await waitFor(renderer, `document.querySelector('.book-overview[data-book-id=${JSON.stringify(imported.bookId)}]')`, 'book-reopened');
     await waitFor(renderer, `document.querySelector('.baseline-analysis-card[data-analysis-state="available"]')`, 'analysis-available');
     await assertRenderer(renderer, `(() => { const card=document.querySelector('.baseline-analysis-card'); const goal=card?.querySelector('#j04-analysis-goal'); const start=card?.querySelector('[data-analysis-action="prepare"]'); return goal instanceof HTMLInputElement && goal.readOnly && goal.value===${JSON.stringify(TASK_GOAL)} && start instanceof HTMLButtonElement && !start.disabled && start.textContent==='开始基线稿件分析' && !card.querySelector('[data-analysis-action="authorize"]'); })()`, 'analysis-available-surface');
@@ -1413,6 +1417,10 @@ async function main() {
     await launchForCleanup();
     await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'restart-ready');
     await assertRenderer(renderer, `(() => { const button=document.querySelector('button[data-book-id=${JSON.stringify(imported.bookId)}]'); if(!(button instanceof HTMLButtonElement))return false; button.click(); return true; })()`, 'restart-open-book');
+    // Synchronized delta with Issue #405: the Book route enters the manuscript now
+    // (V2-UX-RET-002); this card lives on 工作概览, reached back through 资料与记录 (V2-UX-IA-012).
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(imported.bookId)}]')`, 'restart-open-book-manuscript');
+    await click(renderer, '返回图书工作概览', 'restart-open-book-to-overview');
     await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='settled'`, 'restart-record-visible');
     const restarted = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
     requireJourney(JSON.stringify(restarted) === JSON.stringify(settled), 'restart-record-immutable');
@@ -1777,6 +1785,10 @@ async function main() {
     await launchForCleanup();
     await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'restart-history-ready');
     await assertRenderer(renderer, `(() => { const button=document.querySelector('button[data-book-id=${JSON.stringify(imported.bookId)}]'); if(!(button instanceof HTMLButtonElement))return false; button.click(); return true; })()`, 'restart-history-open-book');
+    // Synchronized delta with Issue #405: the Book route enters the manuscript now
+    // (V2-UX-RET-002); this card lives on the overview, reached back through 资料与记录.
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(imported.bookId)}]')`, 'restart-history-open-book-manuscript');
+    await click(renderer, '返回图书工作概览', 'restart-history-open-book-to-overview');
     await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='settled' && document.querySelector('.baseline-analysis-card')?.dataset.resultRevisionOrdinal==='4'`, 'restart-history-visible');
     const restartedHistory = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
     requireJourney(JSON.stringify(restartedHistory) === JSON.stringify(settledBook), 'restart-history-immutable');
@@ -1799,6 +1811,10 @@ async function main() {
     await launchForCleanup();
     await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'safe-retry-ready');
     await assertRenderer(renderer, `(() => { const button=document.querySelector('button[data-book-id=${JSON.stringify(imported.bookId)}]'); if(!(button instanceof HTMLButtonElement))return false; button.click(); return true; })()`, 'safe-retry-open-book');
+    // Synchronized delta with Issue #405: the Book route enters the manuscript now
+    // (V2-UX-RET-002); this card lives on the overview, reached back through 资料与记录.
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(imported.bookId)}]')`, 'safe-retry-open-book-manuscript');
+    await click(renderer, '返回图书工作概览', 'safe-retry-open-book-to-overview');
     await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='settled' && document.querySelector('.baseline-analysis-card')?.dataset.resultRevisionOrdinal==='4'`, 'safe-retry-book-visible');
     const relaunched = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
     requireJourney(JSON.stringify(relaunched) === JSON.stringify(settledBook), 'safe-retry-relaunch-immutable');

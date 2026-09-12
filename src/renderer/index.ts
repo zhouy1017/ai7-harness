@@ -10,6 +10,7 @@ import type {
   PlanBoundarySplitProjection,
   PlanRevisionDiffValue,
   BookCreationReviewProjection,
+  BookManuscriptAnchorProjection,
   BookRecordPresentation,
   BookSummaryPageProjection,
   BookWorkbenchRoute,
@@ -158,6 +159,23 @@ function setCloseRisk(risk: boolean): void {
   document.documentElement.dataset['ai7CloseRisk'] = risk ? 'true' : 'false';
 }
 
+/** How long the entry notice stays before it removes itself (V2-UX-COPY-015). */
+const ENTRY_NOTICE_MS = 6_000;
+
+/**
+ * V2-UX-COPY-015's transient floating notice: it floats over the surface rather than taking a row in
+ * it, it disappears on its own without any editor action, and it settles nothing — removing it reads
+ * nothing and writes nothing, so an editor who never looks at it loses no decision. It is announced
+ * politely rather than asserted, so a screen reader hears it without being interrupted.
+ */
+function showEntryNotice(host: HTMLElement, message: string): void {
+  const notice = element('p', 'entry-notice', message);
+  notice.setAttribute('role', 'status');
+  notice.dataset['entryNotice'] = 'visible';
+  host.append(notice);
+  window.setTimeout(() => notice.remove(), ENTRY_NOTICE_MS);
+}
+
 function applyAuthorityInterruption(): void {
   if (authorityInterrupted) return;
   authorityInterrupted = true;
@@ -209,15 +227,49 @@ function appendRecoveryReturnAction(content: HTMLElement, context: RecoveryRetur
   content.append(actions);
 }
 
+/**
+ * The one transient notice an entry shows (V2-UX-COPY-015). It names where the manuscript opened and
+ * it is the only place a `nearest-anchor` resolution is spoken: a position whose block the current
+ * Revision no longer holds is said to have moved, never presented as the position the editor left.
+ */
+function manuscriptEntryNotice(anchor: BookManuscriptAnchorProjection): string {
+  if (anchor.entry === null) return '从稿件开头打开；这本图书还没有记录上次位置。';
+  if (anchor.entry.state === 'nearest-anchor') {
+    return `上次位置所在的内容块已不在当前修订版，已回到最近的位置 · ${anchor.entry.label}`;
+  }
+  return `回到上次位置 · ${anchor.entry.label}`;
+}
+
+/**
+ * Opening a Book that has a primary Manuscript enters the manuscript at the position the editor left
+ * it at; 工作概览 is a destination reached from 资料与记录, not the way in (V2-UX-RET-002, IA-012).
+ * A Book with no Manuscript still enters the overview, which is where 导入首份稿件 is (BOOK-001).
+ *
+ * The position rides in the overview projection this route already reads, so entering needs no
+ * surface member of its own: the anchor answers both which surface to show and where to open it.
+ * `blockId` goes straight into a `block` window target, which is the granularity the remembered
+ * position is defined at.
+ */
 async function renderResolvedBookWorkbenchRoute(
   route: ResolvedBookWorkbenchRoute,
   recoveryReturn?: RecoveryReturnContext,
 ): Promise<void> {
   if (route.kind === 'book') {
-    renderBookOverview(
-      await window.ai7.getBookOverview({ bookId: route.bookId, historyCursor: null }),
-      undefined,
-      recoveryReturn,
+    const overview = await window.ai7.getBookOverview({ bookId: route.bookId, historyCursor: null });
+    const anchor = overview.manuscriptAnchor;
+    if (anchor === null) {
+      renderBookOverview(overview, undefined, recoveryReturn);
+      return;
+    }
+    renderEditorWindow(
+      await window.ai7.getManuscriptWindowAt({
+        manuscriptId: anchor.manuscriptId,
+        branchId: anchor.branchId,
+        target: anchor.entry === null ? { kind: 'start' } : { kind: 'block', blockId: anchor.entry.blockId },
+      }),
+      overview.book.title,
+      recoveryReturn?.attentionId,
+      manuscriptEntryNotice(anchor),
     );
     return;
   }
@@ -1352,6 +1404,39 @@ function renderBookOverview(
     content.append(element('p', 'success-note', '稿件已导入；以下为这本图书的精确结果记录。'));
   }
   else if (emptyBookCreated) content.append(element('p', 'success-note', '图书已创建；尚未创建任何稿件或导入记录。'));
+  // V2-UX-BOOK-001: with a primary Manuscript the overview leads with it — the Revision, where the
+  // editor last was, and whether the edits are in the journal — above the Book's own identity and
+  // every record below. Its continuation action is `打开稿件`, the first action of the sticky
+  // `.workbench-actions` region, which V2-UX-LAYER-005 keeps on screen for the whole surface; the
+  // anchor therefore states the three readings and does not repeat the action's label beside them.
+  const anchor = overview.manuscriptAnchor;
+  if (anchor !== null) {
+    const anchorSection = element('section', 'source-card manuscript-anchor');
+    anchorSection.dataset['manuscriptAnchor'] = anchor.entry === null ? 'no-entry-position' : anchor.entry.state;
+    const anchorValues = element('dl');
+    anchorValues.append(
+      element('dt', undefined, '修订版'), element('dd', undefined, anchor.revisionLabel),
+      element('dt', undefined, '上次位置'),
+      element('dd', undefined, anchor.entry === null
+        ? '尚未记录；打开稿件时从稿件开头开始'
+        : anchor.entry.state === 'nearest-anchor'
+          ? `${anchor.entry.label}（上次位置所在的内容块已不在当前修订版，落到最近的位置）`
+          : anchor.entry.label),
+      element('dt', undefined, '保存状态'), element('dd', undefined, anchor.journalLabel),
+    );
+    anchorSection.append(element('h3', undefined, '稿件'), anchorValues, technicalDetails(
+      undefined,
+      element('dt', undefined, '稿件 ID'), element('dd', 'technical-identity', anchor.manuscriptId),
+      element('dt', undefined, '分支 ID'), element('dd', 'technical-identity', anchor.branchId),
+      element('dt', undefined, '修订版 ID'), element('dd', 'technical-identity', anchor.revisionId),
+      element('dt', undefined, '修订日志序号'), element('dd', 'technical-identity', String(anchor.journalSequence)),
+      element('dt', undefined, '上次位置内容块 ID'),
+      element('dd', 'technical-identity', anchor.entry === null ? '—' : anchor.entry.blockId),
+      element('dt', undefined, '上次位置字素'),
+      element('dd', 'technical-identity', anchor.entry === null ? '—' : String(anchor.entry.grapheme)),
+    ));
+    content.append(anchorSection);
+  }
   const identity = element('section', 'source-card');
   const identityValues = element('dl');
   identityValues.append(
@@ -3433,18 +3518,10 @@ function renderLanding(
             await returnToRecoveryComparison(item.recoveryAttention.attentionId);
             return;
           }
-          await requestBookWorkbenchRoute(
-            { kind: 'book', bookId: item.bookId },
-            async () => {
-              const windowProjection = await window.ai7.getManuscriptWindowAt({
-                manuscriptId: item.manuscriptId,
-                branchId: item.branchId,
-                target: { kind: 'start' },
-              });
-              renderEditorWindow(windowProjection, item.bookTitle, activeRecoveryReturn?.attentionId);
-            },
-            activeRecoveryReturn,
-          );
+          // The startup return takes the Book route like 书库 does, rather than opening this
+          // manuscript at its start: V2-UX-RET-002 asks both ways in to arrive at the same place, the
+          // position the editor left, and one route is what keeps them from drifting apart.
+          await requestBookWorkbenchRoute({ kind: 'book', bookId: item.bookId }, undefined, activeRecoveryReturn);
         } catch (error) {
           open.disabled = false;
           setStatus(rendererErrorMessage(error, '无法重新打开稿件。'), 'error');
@@ -4783,9 +4860,13 @@ function renderEditorWindow(
   initialWindow: ManuscriptWindowProjection,
   bookTitle: string,
   recoveryAttentionId?: string,
+  entryNotice?: string,
 ): void {
   const content = panel();
   content.classList.add('editor-shell');
+  // The manuscript is now a Book's entry surface, so it says which Book it belongs to exactly as the
+  // overview does — a window is identified by the Book it holds, not by the surface it happens to show.
+  content.dataset['bookId'] = initialWindow.bookId;
   const toolbar = element('header', 'editor-toolbar');
   const title = element('div');
   title.append(element('p', 'section-label', `${bookTitle} · 主分支`), element('h2', undefined, `稿件修订版 ${initialWindow.revisionLabel}`));
@@ -4812,6 +4893,10 @@ function renderEditorWindow(
         backToOverview.disabled = false;
         return;
       }
+      // Leaving the manuscript is the last moment the caret is still where the editor left it, so the
+      // position is taken here, and taken before the overview is read, so the 上次位置 the overview
+      // states is the one the editor just left rather than the one before it (V2-UX-RET-002).
+      await rememberEntryPosition();
       renderBookOverview(await window.ai7.getBookOverview({ bookId: currentWindow.bookId, historyCursor: null }));
     } catch (error) {
       backToOverview.disabled = false;
@@ -4829,7 +4914,13 @@ function renderEditorWindow(
       }
     }));
   }
-  toolbarActions.append(backToOverview, undo, redo, save, retryAuthoritativeRefreshButton);
+  // IA-012's `资料与记录` group, as much of it as this surface owns: 工作概览 is reached from here,
+  // which is what makes it a destination rather than the way in. The action keeps its own label so
+  // the group names where it leads without renaming what it does.
+  const recordsGroup = element('nav', 'book-records-group');
+  recordsGroup.setAttribute('aria-label', '资料与记录');
+  recordsGroup.append(element('span', 'section-label', '资料与记录'), backToOverview);
+  toolbarActions.append(recordsGroup, undo, redo, save, retryAuthoritativeRefreshButton);
   toolbar.append(title, toolbarActions);
 
   const workspace = element('div', 'editor-workspace');
@@ -4958,6 +5049,7 @@ function renderEditorWindow(
   identities.append(identityGrid);
   content.append(toolbar, workspace, identities);
   replaceScreen('editor', content);
+  if (entryNotice !== undefined) showEntryNotice(content, entryNotice);
 
   let currentWindow = initialWindow;
   let dirty = false;
@@ -5062,6 +5154,40 @@ function renderEditorWindow(
     }
     if (dirty || saving || retryRequired) await editor?.flush();
     return !dirty && !saving && !retryRequired;
+  }
+
+  /**
+   * Remember where the editor is, so the next entry into this Book comes back here (V2-UX-RET-002).
+   * It is taken when the editor arrives at a window and again when it leaves the manuscript — never
+   * while typing — so it costs one write per place the editor goes to and none per keystroke, and a
+   * product that stops between two of those moments still knows the window the editor was reading.
+   *
+   * The pair is the editor's own caret in the window projection's vocabulary, so what is read back
+   * opens as a `block` target with no translation. A remembered position settles nothing, so a
+   * failure to write one is not allowed to take the editor's place away from them: the surface keeps
+   * working and the previous position stands.
+   *
+   * Paging and leaving await it, so the position is durable before the surface says where it arrived
+   * and before the overview it leaves for is read — an editor who pages and closes the product in the
+   * same breath still comes back to the window they moved to, and the overview never states a position
+   * the editor has already moved off. Arriving does not await, because a window just fetched is the
+   * position a caller already reached and nothing downstream reads it back.
+   */
+  async function rememberEntryPosition(): Promise<void> {
+    if (!editor || authorityInterrupted) return;
+    const point = editor.captureContinuity().anchor;
+    // Paging with 向前浏览 / 向后浏览 deliberately leaves the caret where it was, off the window now on
+    // screen, so the window's own first block answers for the position rather than a caret the editor
+    // can no longer see. Anywhere else the caret is the position.
+    const carried = currentWindow.blocks.some((block) => block.blockId === point.blockId);
+    const blockId = carried ? point.blockId : currentWindow.blocks[0]?.blockId;
+    if (blockId === undefined) return;
+    await window.ai7.recordManuscriptEntryPosition({
+      manuscriptId: currentWindow.manuscriptId,
+      branchId: currentWindow.branchId,
+      blockId,
+      grapheme: carried ? point.grapheme : 0,
+    }).catch(() => undefined);
   }
 
   type AuthoritativeResult = {
@@ -5225,6 +5351,7 @@ function renderEditorWindow(
       if (!loaded) return false;
       currentWindow = next;
       updateWindowChrome();
+      await rememberEntryPosition();
       setStatus(`已到达${next.position.structureLabel ? `“${next.position.structureLabel}”附近，` : ''}${next.position.label}。`, 'success');
       await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
       return true;
@@ -5779,6 +5906,9 @@ function renderEditorWindow(
   updateWindowChrome();
   void loadOutline(null);
   editor.focus();
+  // Arriving is itself a position worth remembering: a manuscript opened and then left by closing the
+  // product never reaches an exit this surface can see, and the entry is what should answer then.
+  void rememberEntryPosition();
   setStatus(`稿件窗口已打开；${initialWindow.position.label}。`);
 }
 

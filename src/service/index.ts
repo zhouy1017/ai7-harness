@@ -457,6 +457,14 @@ async function dispatch(
       };
     case 'flushJournalEdit':
       return { id: request.id, ok: true, op: request.op, result: store.flushJournalEdit(request.input) };
+    case 'recordManuscriptEntryPosition':
+      store.recordManuscriptEntryPosition(
+        request.input.manuscriptId,
+        request.input.branchId,
+        request.input.blockId,
+        request.input.grapheme,
+      );
+      return { id: request.id, ok: true, op: request.op, result: { state: 'recorded' } };
     case 'listPriorWork':
       return { id: request.id, ok: true, op: request.op, result: store.listPriorWork() };
     case 'getManuscriptWindowAt':
