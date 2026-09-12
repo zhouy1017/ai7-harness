@@ -18,7 +18,7 @@ import {
   ANALYSIS_LEDGER_TRIGGER_SQL,
   J04_BASELINE_ANALYSIS_SCHEMA_VERSION,
   SUCCESSIVE_TASK_SCHEMA_VERSION,
-  FACTUAL_REVIEW_SCHEMA_VERSION,
+  MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION,
   TEXT_CONVERSION_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_SQL,
 } from '../../src/service/task-authorization.js';
@@ -175,6 +175,14 @@ function downgradePlanRecordsToRevision16(database: DatabaseSync): void {
   database.exec(ANALYSIS_LEDGER_TRIGGER_SQL['analysis_plan_records_no_delete']!);
 }
 
+/**
+ * Revision 21's entry-position relation is simply not there below it, so a store taken back to any
+ * earlier revision loses it again — otherwise the downgraded store is not the shape it claims.
+ */
+function dropEntryPositionRelation(database: DatabaseSync): void {
+  database.exec('DROP TABLE manuscript_entry_positions');
+}
+
 /** Rebuild the revision-17 store in its exact revision-16 shape and stamp it as revision 16. */
 function downgradeToRevision16(databasePath: string): void {
   const database = new DatabaseSync(databasePath);
@@ -182,6 +190,7 @@ function downgradeToRevision16(databasePath: string): void {
     database.exec('PRAGMA foreign_keys = OFF');
     database.exec('BEGIN IMMEDIATE');
     downgradePlanRecordsToRevision16(database);
+    dropEntryPositionRelation(database);
     database.exec(`PRAGMA user_version = ${SUCCESSIVE_TASK_SCHEMA_VERSION}`);
     database.exec('COMMIT');
     database.exec('PRAGMA foreign_keys = ON');
@@ -251,6 +260,7 @@ function downgradeToRevision19(databasePath: string): void {
     downgradeRelation(database, 'analysis_result_set_revisions', ANALYSIS_LEDGER_REVISION_19_SQL.analysis_result_set_revisions, RESULT_SET_REVISION_COLUMNS);
     downgradeRelation(database, 'analysis_result_sets', ANALYSIS_LEDGER_REVISION_19_SQL.analysis_result_sets, RESULT_SET_COLUMNS);
     downgradeRelation(database, 'analysis_task_intents', ANALYSIS_LEDGER_REVISION_19_SQL.analysis_task_intents, REVISION_19_INTENT_COLUMNS);
+    dropEntryPositionRelation(database);
     database.exec(`PRAGMA user_version = ${TEXT_CONVERSION_SCHEMA_VERSION}`);
     database.exec('COMMIT');
     database.exec('PRAGMA foreign_keys = ON');
@@ -280,6 +290,7 @@ function downgradeToRevision15(databasePath: string): void {
     database.exec('DROP TABLE temp.downgrade_plans_15');
     database.exec(ANALYSIS_LEDGER_TRIGGER_SQL['analysis_plan_records_no_update']!);
     database.exec(ANALYSIS_LEDGER_TRIGGER_SQL['analysis_plan_records_no_delete']!);
+    dropEntryPositionRelation(database);
     database.exec(`PRAGMA user_version = ${J04_BASELINE_ANALYSIS_SCHEMA_VERSION}`);
     database.exec('COMMIT');
     database.exec('PRAGMA foreign_keys = ON');
@@ -571,7 +582,7 @@ describe('baseline manuscript analysis over the real store on exact sample1', ()
     // drift or a retry-safe failure leaves the Plan Revision and Plan Adaptation relations empty.
     const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
     try {
-      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(FACTUAL_REVIEW_SCHEMA_VERSION);
+      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION);
       const expectedEmpty = new Set(['analysis_plan_revisions', 'analysis_plan_adaptations']);
       for (const table of Object.keys(ANALYSIS_LEDGER_SCHEMA_SQL)) {
         const total = (database.prepare(`SELECT count(*) total FROM ${table}`).get() as { total: number }).total;
@@ -1288,7 +1299,7 @@ describe('baseline manuscript analysis over the real store on exact sample1', ()
       try {
         const after = new DatabaseSync(databasePath, { readOnly: true });
         try {
-          expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(FACTUAL_REVIEW_SCHEMA_VERSION);
+          expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION);
           for (const table of j03Tables) expect(tableRows(after, table)).toEqual(j03Before[table]);
           for (const table of analysisTables) {
             expect(tableRows(after, table, table === 'analysis_task_intents' ? REVISION_15_INTENT_COLUMNS : '*')).toEqual(analysisBefore[table]);
@@ -1373,7 +1384,7 @@ describe('baseline manuscript analysis over the real store on exact sample1', ()
     try {
       const after = new DatabaseSync(databasePath, { readOnly: true });
       try {
-        expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(FACTUAL_REVIEW_SCHEMA_VERSION);
+        expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION);
         for (const table of j03Tables) expect(tableRows(after, table)).toEqual(j03Before[table]);
         for (const table of analysisTables) expect(tableRows(after, table)).toEqual(analysisBefore[table]);
         // The widened CHECKs are in place: the second kind is admissible where it was not before.
@@ -1405,6 +1416,7 @@ describe('baseline manuscript analysis over the real store on exact sample1', ()
       // Rebuild the exact revision-14 shape: drop only the additive relations and their triggers.
       for (const name of Object.keys(ANALYSIS_LEDGER_TRIGGER_SQL)) database.exec(`DROP TRIGGER ${name}`);
       for (const name of Object.keys(ANALYSIS_LEDGER_SCHEMA_SQL).reverse()) database.exec(`DROP TABLE ${name}`);
+      dropEntryPositionRelation(database);
       database.exec('PRAGMA user_version = 14');
     } finally {
       database.close();
@@ -1418,7 +1430,7 @@ describe('baseline manuscript analysis over the real store on exact sample1', ()
     }
     const verify = new DatabaseSync(databasePath);
     try {
-      expect((verify.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(FACTUAL_REVIEW_SCHEMA_VERSION);
+      expect((verify.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION);
       for (const table of Object.keys(ANALYSIS_LEDGER_SCHEMA_SQL)) {
         expect((verify.prepare(`SELECT count(*) total FROM ${table}`).get() as { total: number }).total).toBe(0);
       }

@@ -844,6 +844,25 @@ export interface ManuscriptWindowProjection {
   blocks: ReadonlyArray<ManuscriptBlockProjection>;
 }
 
+/**
+ * Where an editor last entered a Book's primary Manuscript, already resolved against the working
+ * state the branch holds now. It speaks the window projection's own vocabulary — a block identity
+ * and a grapheme offset inside it — so a caller passes `blockId` straight to a `block` window target.
+ * `state` says which of the two the resolution was: `exact` when the recorded Revision is still the
+ * branch's base Revision and the block it names is still there, `nearest-anchor` when the recorded
+ * position was superseded and the nearest surviving block answered for it.
+ */
+export interface ManuscriptEntryPositionProjection {
+  bookId: string;
+  manuscriptId: string;
+  branchId: string;
+  blockId: string;
+  grapheme: number;
+  /** The Manuscript Revision the stored position was recorded against. */
+  recordedRevisionId: string;
+  state: 'exact' | 'nearest-anchor';
+}
+
 export type BookWorkbenchRoute =
   | { kind: 'book'; bookId: string }
   | { kind: 'revision'; revisionId: string };

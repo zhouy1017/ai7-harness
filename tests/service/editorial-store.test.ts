@@ -1,9 +1,13 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
-import { DatabaseSync } from 'node:sqlite';
+import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
+import {
+  FACTUAL_REVIEW_SCHEMA_VERSION,
+  MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION,
+} from '../../src/service/task-authorization.js';
 import { MAX_WINDOW_BLOCKS } from '../../src/shared/protocol.js';
 import {
   ADMITTED_BASELINE_DOCX,
@@ -23,6 +27,9 @@ const REPLACEMENT = '已替换文本';
 // enough, because size is not this suite's subject; its content is.
 const EXCERPT: ComposedManuscriptRequest = { source: ADMITTED_BASELINE_DOCX, startBlock: 1, blocks: 40, title: TITLE };
 const QUERY_GRAPHEMES = 4;
+// A whole-manuscript character far enough in to land inside a block rather than at its first
+// grapheme, and far short of the 40-block excerpt's length.
+const ENTRY_CHARACTER = 42;
 const HAN_GRAPHEME = /^\p{Script=Han}$/u;
 const segmenter = new Intl.Segmenter('zh-CN', { granularity: 'grapheme' });
 
@@ -138,6 +145,51 @@ function commitPreparedReplacement(store: EditorialStore, searchId: string): {
     committedCount: committed.committedCount,
     workingDigest: committed.workingDigest,
   };
+}
+
+/** Take a store back to the revision-20 shape: the entry-position relation is simply not there. */
+function downgradeToRevision20(databasePath: string): void {
+  const database = new DatabaseSync(databasePath);
+  try {
+    database.exec(`BEGIN IMMEDIATE;
+      DROP TABLE manuscript_entry_positions;
+      PRAGMA user_version = ${FACTUAL_REVIEW_SCHEMA_VERSION};
+      COMMIT;`);
+  } finally {
+    database.close();
+  }
+}
+
+/**
+ * Every relation the store holds, with its exact `CREATE` text and a digest over its whole content
+ * in row order. Relations hold manuscript text, so the content is compared as a row count and a hex
+ * digest: a failure reports those rather than the manuscript.
+ */
+function relationTruth(database: DatabaseSync): Map<string, { sql: string; content: string }> {
+  const relations = database.prepare(
+    "SELECT name, sql FROM sqlite_schema WHERE type = 'table' ORDER BY name",
+  ).all() as { name: string; sql: string | null }[];
+  return new Map(relations.map((relation) => {
+    const rows = database.prepare(`SELECT * FROM "${relation.name}"`).all() as Record<string, SQLOutputValue>[];
+    const hash = createHash('sha256');
+    for (const row of rows) {
+      for (const column of Object.keys(row).sort()) {
+        hash.update(JSON.stringify([column, digestible(row[column]!)]));
+      }
+    }
+    return [relation.name, { sql: String(relation.sql), content: `${rows.length}:${hash.digest('hex')}` }];
+  }));
+}
+
+/** One column value in a form `JSON.stringify` frames unambiguously, blobs and integers included. */
+function digestible(value: SQLOutputValue): unknown {
+  if (value instanceof Uint8Array) return [...value];
+  return typeof value === 'bigint' ? value.toString() : value;
+}
+
+/** The row count a `relationTruth` content string carries. */
+function rowCount(content: string): number {
+  return Number(content.slice(0, content.indexOf(':')));
 }
 
 describe('EditorialStore on a temporary Agent Data Root', () => {
@@ -281,6 +333,192 @@ describe('EditorialStore on a temporary Agent Data Root', () => {
       second.markCleanShutdown();
     } finally {
       second.close();
+    }
+  }, 300_000);
+
+  it('remembers where the editor entered, and answers a superseded Revision with the nearest anchor', async () => {
+    const databasePath = join(roots.dataRoot, 'store', 'ai7.sqlite');
+    const first = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    let imported: Awaited<ReturnType<typeof importComposedBook>>;
+    let entryBlockId: string;
+    let entryGrapheme: number;
+    let firstRevisionId: string;
+    try {
+      imported = await importComposedBook(first);
+      const window = first.getManuscriptWindow(imported.manuscriptId, imported.branchId, null);
+      firstRevisionId = window.revisionId;
+
+      // Nothing is remembered until an entry position is recorded, and the window itself still
+      // derives its focus from the target it is asked for.
+      expect(first.readManuscriptEntryPosition(imported.manuscriptId, imported.branchId)).toBeNull();
+      expect(window.focusBlockId).toBeNull();
+
+      // The position recorded is the one the window projection itself resolves for a whole-manuscript
+      // character, so the block and the offset inside it are the product's own pair, not invented.
+      const focused = first.getManuscriptWindowAt(imported.manuscriptId, imported.branchId, { kind: 'character', character: ENTRY_CHARACTER });
+      expect(focused.focusBlockId).not.toBeNull();
+      expect(focused.focusGrapheme).not.toBeNull();
+      entryBlockId = focused.focusBlockId!;
+      entryGrapheme = focused.focusGrapheme!;
+
+      first.recordManuscriptEntryPosition(imported.manuscriptId, imported.branchId, entryBlockId, entryGrapheme);
+      expect(first.readManuscriptEntryPosition(imported.manuscriptId, imported.branchId)).toEqual({
+        bookId: imported.bookId,
+        manuscriptId: imported.manuscriptId,
+        branchId: imported.branchId,
+        blockId: entryBlockId,
+        grapheme: entryGrapheme,
+        recordedRevisionId: firstRevisionId,
+        state: 'exact',
+      });
+      first.markCleanShutdown();
+    } finally {
+      first.close();
+    }
+
+    const second = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      // The position is durable: the restart reads back exactly what was written.
+      expect(second.readManuscriptEntryPosition(imported.manuscriptId, imported.branchId)).toMatchObject({
+        blockId: entryBlockId,
+        grapheme: entryGrapheme,
+        recordedRevisionId: firstRevisionId,
+        state: 'exact',
+      });
+
+      // One acknowledged edit makes the branch dirty, so the milestone freezes a new Revision and the
+      // recorded position now belongs to a superseded one.
+      const before = second.getManuscriptWindow(imported.manuscriptId, imported.branchId, null);
+      const edited = before.blocks[0]!;
+      second.flushJournalEdit({
+        clientEditId: randomUUID(),
+        manuscriptId: imported.manuscriptId,
+        branchId: imported.branchId,
+        baseRevisionId: before.revisionId,
+        blockId: edited.blockId,
+        windowStartBlockId: edited.blockId,
+        baseBlockDigest: edited.digest,
+        expectedJournalSequence: before.journalSequence,
+        fromGrapheme: 0,
+        toGrapheme: 0,
+        insertText: REPLACEMENT,
+      });
+      await second.saveMilestone(
+        imported.manuscriptId,
+        imported.branchId,
+        '里程碑一',
+        '入稿位置校验',
+        '由 L2 套件组稿的公开样书选段。',
+      );
+      const advanced = second.getManuscriptWindow(imported.manuscriptId, imported.branchId, null);
+      expect(advanced.revisionId).not.toBe(firstRevisionId);
+
+      // The superseded position resolves to an anchor rather than to nothing: the block it names is
+      // still in the working state, so that block answers, and the answer says it was resolved.
+      expect(second.readManuscriptEntryPosition(imported.manuscriptId, imported.branchId)).toEqual({
+        bookId: imported.bookId,
+        manuscriptId: imported.manuscriptId,
+        branchId: imported.branchId,
+        blockId: entryBlockId,
+        grapheme: entryGrapheme,
+        recordedRevisionId: firstRevisionId,
+        state: 'nearest-anchor',
+      });
+
+      // Entering again records against the Revision the branch works on now.
+      const advancedBlockId = advanced.blocks[5]!.blockId;
+      second.recordManuscriptEntryPosition(imported.manuscriptId, imported.branchId, advancedBlockId, 0);
+      expect(second.readManuscriptEntryPosition(imported.manuscriptId, imported.branchId)).toEqual({
+        bookId: imported.bookId,
+        manuscriptId: imported.manuscriptId,
+        branchId: imported.branchId,
+        blockId: advancedBlockId,
+        grapheme: 0,
+        recordedRevisionId: advanced.revisionId,
+        state: 'exact',
+      });
+      second.markCleanShutdown();
+    } finally {
+      second.close();
+    }
+
+    const database = new DatabaseSync(databasePath, { readOnly: true });
+    try {
+      // One row per Book and Revision, and the superseded row is still the row it was written as.
+      expect((database.prepare('SELECT count(*) total FROM manuscript_entry_positions').get() as { total: number }).total)
+        .toBe(2);
+      expect((database.prepare(
+        `SELECT count(*) total FROM manuscript_entry_positions
+         WHERE book_id = ? AND revision_id = ? AND block_id = ? AND grapheme = ?`,
+      ).get(imported.bookId, firstRevisionId, entryBlockId, entryGrapheme) as { total: number }).total).toBe(1);
+    } finally {
+      database.close();
+    }
+  }, 300_000);
+
+  it('migrates a populated revision-20 store forward, adding one empty relation and moving nothing else', async () => {
+    const databasePath = join(roots.dataRoot, 'store', 'ai7.sqlite');
+    const first = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    let imported: Awaited<ReturnType<typeof importComposedBook>>;
+    try {
+      imported = await importComposedBook(first);
+      const window = first.getManuscriptWindow(imported.manuscriptId, imported.branchId, null);
+      first.recordManuscriptEntryPosition(imported.manuscriptId, imported.branchId, window.blocks[2]!.blockId, 1);
+      first.markCleanShutdown();
+    } finally {
+      first.close();
+    }
+
+    downgradeToRevision20(databasePath);
+
+    const downgraded = new DatabaseSync(databasePath, { readOnly: true });
+    let truthBefore: Map<string, { sql: string; content: string }>;
+    try {
+      expect((downgraded.prepare('PRAGMA user_version').get() as { user_version: number }).user_version)
+        .toBe(FACTUAL_REVIEW_SCHEMA_VERSION);
+      // At revision 20 the relation is simply not there, which is what the migration answers.
+      expect(() => downgraded.prepare('SELECT 1 FROM manuscript_entry_positions').all()).toThrow();
+      truthBefore = relationTruth(downgraded);
+      expect(truthBefore.size).toBeGreaterThan(0);
+    } finally {
+      downgraded.close();
+    }
+
+    const migrated = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      // The Book the store read before the downgrade is the Book it reads after the migration.
+      expect(migrated.listBooks(null).items.map((item) => item.bookId)).toEqual([imported.bookId]);
+      expect(migrated.getManuscriptWindow(imported.manuscriptId, imported.branchId, null).position.totalBlocks)
+        .toBe(imported.detectedBlockCount);
+      // The migration adds a relation; it does not invent a position the downgraded store never held.
+      expect(migrated.readManuscriptEntryPosition(imported.manuscriptId, imported.branchId)).toBeNull();
+      migrated.markCleanShutdown();
+    } finally {
+      migrated.close();
+    }
+
+    const after = new DatabaseSync(databasePath, { readOnly: true });
+    try {
+      expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version)
+        .toBe(MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION);
+      const truthAfter = relationTruth(after);
+      // Exactly one relation appears, and it appears empty.
+      expect([...truthAfter.keys()]).toEqual([...truthBefore.keys(), 'manuscript_entry_positions'].sort());
+      expect(truthAfter.get('manuscript_entry_positions')?.content).toMatch(/^0:/);
+      // No relation the revision-20 store held changed shape, and the only one whose content moved is
+      // the one every open appends to — the migration itself rewrites nothing. Both assertions report
+      // relation names, so a failure names the relation rather than printing the manuscript.
+      const reshaped = [...truthBefore]
+        .filter(([name, before]) => truthAfter.get(name)!.sql !== before.sql).map(([name]) => name);
+      expect(reshaped).toEqual([]);
+      const rewritten = [...truthBefore]
+        .filter(([name, before]) => truthAfter.get(name)!.content !== before.content).map(([name]) => name);
+      expect(rewritten).toEqual(['service_lifetimes']);
+      expect(rowCount(truthAfter.get('service_lifetimes')!.content))
+        .toBe(rowCount(truthBefore.get('service_lifetimes')!.content) + 1);
+      expect(after.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
+    } finally {
+      after.close();
     }
   }, 300_000);
 
