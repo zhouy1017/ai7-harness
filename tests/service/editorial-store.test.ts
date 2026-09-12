@@ -456,6 +456,114 @@ describe('EditorialStore on a temporary Agent Data Root', () => {
     }
   }, 300_000);
 
+  it('leads the Book Work Overview with the manuscript anchor and returns to it after a restart', async () => {
+    const first = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    let imported: Awaited<ReturnType<typeof importComposedBook>>;
+    let entryBlockId: string;
+    let entryGrapheme: number;
+    let emptyBookId: string;
+    try {
+      imported = await importComposedBook(first);
+
+      // A Book with no Manuscript has no anchor at all, so the overview it enters states 尚无稿件 and
+      // offers the first import instead of a position it does not have (V2-UX-BOOK-001).
+      const creation = first.prepareBookCreation('空图书', null);
+      emptyBookId = first.commitBookCreation({ ...creation.proposed, reviewDigest: creation.reviewDigest })
+        .overview.book.bookId;
+      expect(first.getBookOverview(emptyBookId).manuscriptAnchor).toBeNull();
+
+      // Before any position is remembered the anchor still leads with the Revision and the journal
+      // state, and it says the position is absent rather than naming one the editor never left.
+      expect(first.getBookOverview(imported.bookId).manuscriptAnchor).toMatchObject({
+        manuscriptId: imported.manuscriptId,
+        branchId: imported.branchId,
+        revisionLabel: 'r1',
+        journalSequence: 0,
+        journalLabel: '与当前修订版一致',
+        entry: null,
+      });
+
+      // The pair recorded is the window projection's own, so nothing is invented between the two.
+      const focused = first.getManuscriptWindowAt(
+        imported.manuscriptId,
+        imported.branchId,
+        { kind: 'character', character: ENTRY_CHARACTER },
+      );
+      entryBlockId = focused.focusBlockId!;
+      entryGrapheme = focused.focusGrapheme!;
+      first.recordManuscriptEntryPosition(imported.manuscriptId, imported.branchId, entryBlockId, entryGrapheme);
+
+      const entry = first.getBookOverview(imported.bookId).manuscriptAnchor!.entry!;
+      expect(entry).toMatchObject({ blockId: entryBlockId, grapheme: entryGrapheme, state: 'exact' });
+      // What an editor reads is the block's place in the manuscript; the identity stays technical
+      // (V2-UX-LAYER-001), so the reading never carries it.
+      expect(entry.blockPosition).toBeGreaterThan(1);
+      expect(entry.blockPosition).toBeLessThanOrEqual(entry.totalBlocks);
+      expect(entry.label).toContain(`第 ${entry.blockPosition} / ${entry.totalBlocks} 个内容块`);
+      expect(entry.label).not.toContain(entryBlockId);
+
+      // The anchor's block opens as a `block` window target with no translation, which is what the
+      // Book route does with it (V2-UX-RET-002).
+      const entered = first.getManuscriptWindowAt(
+        imported.manuscriptId,
+        imported.branchId,
+        { kind: 'block', blockId: entry.blockId },
+      );
+      expect(entered.focusBlockId).toBe(entryBlockId);
+      expect(entered.blocks.some((block) => block.blockId === entryBlockId)).toBe(true);
+
+      // A caret resting after a block's last grapheme is a real place to leave from, and it is
+      // remembered at the end of that block rather than refused.
+      const block = entered.blocks.find((candidate) => candidate.blockId === entryBlockId)!;
+      const length = [...segmenter.segment(block.text)].length;
+      first.recordManuscriptEntryPosition(imported.manuscriptId, imported.branchId, entryBlockId, length);
+      expect(first.readManuscriptEntryPosition(imported.manuscriptId, imported.branchId)).toMatchObject({
+        blockId: entryBlockId,
+        grapheme: length - 1,
+      });
+
+      first.recordManuscriptEntryPosition(imported.manuscriptId, imported.branchId, entryBlockId, entryGrapheme);
+      first.markCleanShutdown();
+    } finally {
+      first.close();
+    }
+
+    const second = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      // The position survives the restart, which is what the Book route reads to enter the manuscript
+      // instead of the overview.
+      expect(second.getBookOverview(imported.bookId).manuscriptAnchor).toMatchObject({
+        revisionLabel: 'r1',
+        entry: { blockId: entryBlockId, grapheme: entryGrapheme, state: 'exact' },
+      });
+      expect(second.getBookOverview(emptyBookId).manuscriptAnchor).toBeNull();
+
+      // One acknowledged edit is journaled but not yet checkpointed, and the anchor says so.
+      const before = second.getManuscriptWindow(imported.manuscriptId, imported.branchId, null);
+      const edited = before.blocks[0]!;
+      second.flushJournalEdit({
+        clientEditId: randomUUID(),
+        manuscriptId: imported.manuscriptId,
+        branchId: imported.branchId,
+        baseRevisionId: before.revisionId,
+        blockId: edited.blockId,
+        windowStartBlockId: edited.blockId,
+        baseBlockDigest: edited.digest,
+        expectedJournalSequence: before.journalSequence,
+        fromGrapheme: 0,
+        toGrapheme: 0,
+        insertText: REPLACEMENT,
+      });
+      expect(second.getBookOverview(imported.bookId).manuscriptAnchor).toMatchObject({
+        journalSequence: before.journalSequence + 1,
+        journalLabel: '已写入修订日志',
+      });
+      second.markCleanShutdown();
+    } finally {
+      second.close();
+    }
+  }, 300_000);
+
   it('migrates a populated revision-20 store forward, adding one empty relation and moving nothing else', async () => {
     const databasePath = join(roots.dataRoot, 'store', 'ai7.sqlite');
     const first = await EditorialStore.open(roots.dataRoot, roots.codeRoot);

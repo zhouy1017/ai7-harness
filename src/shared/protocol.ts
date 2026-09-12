@@ -73,6 +73,7 @@ export const IPC_CHANNELS = {
   acknowledgeImportCompletion: 'ai7:j01:acknowledge-import-completion',
   getManuscriptWindow: 'ai7:j01:get-manuscript-window',
   flushJournalEdit: 'ai7:j01:flush-journal-edit',
+  recordManuscriptEntryPosition: 'ai7:j12:record-manuscript-entry-position',
   listPriorWork: 'ai7:j02:list-prior-work',
   getManuscriptWindowAt: 'ai7:j02:get-manuscript-window-at',
   getOutline: 'ai7:j02:get-outline',
@@ -360,6 +361,43 @@ export interface BookHistoryCursor {
   direction: 'forward' | 'backward';
 }
 
+/**
+ * The Manuscript Visual Anchor a Book Work Overview leads with (V2-UX-BOOK-001): the Revision the
+ * branch works on, where the editor last was, and whether the local edits are already in the journal
+ * — the three readings that belong above every record the overview carries, with `打开稿件` as their
+ * continuation action.
+ *
+ * `entry` is the same value the Book route enters the Manuscript at (V2-UX-RET-002), which is why it
+ * rides here rather than behind a surface member of its own: the entry route already reads this
+ * projection, so it needs nothing else to know where to go. `null` means the Book has no remembered
+ * position and the Manuscript opens at its start. Everything in it speaks the window projection's own
+ * vocabulary, so `blockId` goes straight into a `block` window target with no translation.
+ */
+export interface BookManuscriptAnchorProjection {
+  manuscriptId: string;
+  branchId: string;
+  revisionId: string;
+  revisionLabel: string;
+  journalSequence: number;
+  journalLabel: '已写入修订日志' | '与当前修订版一致';
+  entry: null | {
+    blockId: string;
+    grapheme: number;
+    blockPosition: number;
+    totalBlocks: number;
+    structureLabel: string | null;
+    /** How an editor reads that position. The block identity is never the reading (V2-UX-LAYER-001). */
+    label: string;
+    /**
+     * `exact` when the recorded Revision is still the branch's own and the block it named is still
+     * there; `nearest-anchor` when the position was superseded and the nearest surviving block
+     * answered for it (Issue #467). A surface says which it was rather than presenting the second
+     * as the first.
+     */
+    state: 'exact' | 'nearest-anchor';
+  };
+}
+
 export interface BookWorkOverviewProjection {
   book: {
     bookId: string;
@@ -374,6 +412,8 @@ export interface BookWorkOverviewProjection {
   primaryAction:
     | { kind: 'import-first-manuscript'; label: '导入首份稿件'; bookId: string }
     | { kind: 'open-manuscript'; label: '打开稿件'; manuscriptId: string; branchId: string };
+  /** `null` for a Book with no primary Manuscript, which states 尚无稿件 and offers the first import. */
+  manuscriptAnchor: BookManuscriptAnchorProjection | null;
   records: ReadonlyArray<BookRecordPresentation>;
   historyPage: {
     previousCursor: BookHistoryCursor | null;
@@ -3197,6 +3237,16 @@ export interface ServiceOperationMap {
     output: ManuscriptWindowProjection;
   };
   flushJournalEdit: { input: JournalEditInput; output: JournalAcknowledgement };
+  /**
+   * Remember where the editor is, so the next entry into this Book returns there (V2-UX-RET-002).
+   * The pair is the editor's own caret, in the window projection's vocabulary; what it answers is
+   * only that the position was taken, because a remembered position settles nothing and a surface
+   * has nothing to decide on it.
+   */
+  recordManuscriptEntryPosition: {
+    input: { manuscriptId: string; branchId: string; blockId: string; grapheme: number };
+    output: { state: 'recorded' };
+  };
   listPriorWork: { input: Record<string, never>; output: ReadonlyArray<PriorWorkItemProjection> };
   getManuscriptWindowAt: {
     input: { manuscriptId: string; branchId: string; target: ManuscriptWindowTarget };
@@ -3359,6 +3409,9 @@ export interface RendererApi {
   acknowledgeImportCompletion(input: ServiceOperationMap['acknowledgeImportCompletion']['input']): Promise<{ state: 'acknowledged' }>;
   getManuscriptWindow(input: ServiceOperationMap['getManuscriptWindow']['input']): Promise<ManuscriptWindowProjection>;
   flushJournalEdit(input: JournalEditInput): Promise<JournalAcknowledgement>;
+  recordManuscriptEntryPosition(
+    input: ServiceOperationMap['recordManuscriptEntryPosition']['input'],
+  ): Promise<{ state: 'recorded' }>;
   listPriorWork(): Promise<ReadonlyArray<PriorWorkItemProjection>>;
   getManuscriptWindowAt(input: ServiceOperationMap['getManuscriptWindowAt']['input']): Promise<ManuscriptWindowProjection>;
   getOutline(input: ServiceOperationMap['getOutline']['input']): Promise<OutlineProjection>;

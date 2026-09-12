@@ -254,6 +254,11 @@ const api: RendererApi = Object.freeze({
   listPriorWork: () => invoke<ServiceOperationMap['listPriorWork']['output']>(IPC_CHANNELS.listPriorWork, {}),
   getManuscriptWindowAt: (input: ServiceOperationMap['getManuscriptWindowAt']['input']) =>
     invoke<ServiceOperationMap['getManuscriptWindowAt']['output']>(IPC_CHANNELS.getManuscriptWindowAt, input),
+  recordManuscriptEntryPosition: (input: ServiceOperationMap['recordManuscriptEntryPosition']['input']) =>
+    invoke<ServiceOperationMap['recordManuscriptEntryPosition']['output']>(
+      IPC_CHANNELS.recordManuscriptEntryPosition,
+      input,
+    ),
   getOutline: (input: ServiceOperationMap['getOutline']['input']) =>
     invoke<ServiceOperationMap['getOutline']['output']>(IPC_CHANNELS.getOutline, input),
   startSearch: (input: ServiceOperationMap['startSearch']['input']) =>

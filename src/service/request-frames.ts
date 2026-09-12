@@ -473,6 +473,21 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       }
       break;
     }
+    case 'recordManuscriptEntryPosition': {
+      const input = requireInput(value.input, ['manuscriptId', 'branchId', 'blockId', 'grapheme'], tentativeId);
+      if (
+        !isBoundedString(input.manuscriptId, 36) ||
+        !UUID_PATTERN.test(input.manuscriptId) ||
+        !isBoundedString(input.branchId, 36) ||
+        !UUID_PATTERN.test(input.branchId) ||
+        !isBoundedString(input.blockId, 28) ||
+        !/^blk_[0-9a-f]{24}$/.test(input.blockId) ||
+        !isSafeInteger(input.grapheme, 0)
+      ) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
     case 'flushJournalEdit': {
       const input = requireInput(
         value.input,

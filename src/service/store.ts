@@ -10,6 +10,7 @@ import type {
   BookHistoryCursor,
   BookSummaryCursor,
   BookSummaryPageProjection,
+  BookManuscriptAnchorProjection,
   BookRecordPresentation,
   BookWorkOverviewProjection,
   EditorialWorkspaceProfileProjection,
@@ -3464,6 +3465,7 @@ export class EditorialStore {
         book: bookProjection,
         manuscriptState: { state: 'empty', label: '尚无稿件' },
         primaryAction: { kind: 'import-first-manuscript', label: '导入首份稿件', bookId },
+        manuscriptAnchor: null,
         records: [bookRecord, ...sourceImportRecords],
         historyPage: history.page,
       });
@@ -3534,6 +3536,7 @@ export class EditorialStore {
       book: bookProjection,
       manuscriptState: { state: 'populated', label: '已有主稿件', manuscriptId },
       primaryAction: { kind: 'open-manuscript', label: '打开稿件', manuscriptId, branchId },
+      manuscriptAnchor: this.#manuscriptAnchor(manuscriptId, branchId),
       records: [
         bookRecord,
         { kind: 'manuscript', label: '主稿件', manuscriptId, bookId, role: 'primary', createdAt: asString(row.created_at) },
@@ -3576,6 +3579,77 @@ export class EditorialStore {
       ],
       historyPage: history.page,
     });
+  }
+
+  /**
+   * The overview's Manuscript Visual Anchor (V2-UX-BOOK-001), and with it the position the Book route
+   * enters the Manuscript at (V2-UX-RET-002). Both readings come from the same three facts, so they
+   * are read once here rather than twice through two surfaces: the branch's own Revision and journal
+   * state, and the remembered entry position Issue #467 resolves against the working state now.
+   *
+   * `readManuscriptEntryPosition` answers in block identity and grapheme offset; what an editor reads
+   * is the block's place in the manuscript and the structure it sits under, so the ordinal, the total
+   * and the nearest preceding outline entry are resolved here and the identity stays technical.
+   */
+  #manuscriptAnchor(manuscriptId: string, branchId: string): BookManuscriptAnchorProjection {
+    const state = one(
+      this.#authority.prepare(
+        `SELECT bws.base_revision_id, bws.journal_sequence, bws.last_checkpoint_sequence, mr.revision_label
+         FROM branch_working_state bws
+         JOIN manuscript_revisions mr ON mr.revision_id = bws.base_revision_id
+         WHERE bws.manuscript_id = ? AND bws.branch_id = ?`,
+      ).all(manuscriptId, branchId) as SqlRow[],
+      'BOOK_RECORD_GRAPH_INVALID',
+      '稿件工作状态不完整。',
+    );
+    const journalSequence = asNumber(state.journal_sequence);
+    const anchor: BookManuscriptAnchorProjection = {
+      manuscriptId,
+      branchId,
+      revisionId: asString(state.base_revision_id),
+      revisionLabel: asString(state.revision_label),
+      journalSequence,
+      journalLabel: journalSequence > asNumber(state.last_checkpoint_sequence) ? '已写入修订日志' : '与当前修订版一致',
+      entry: null,
+    };
+    // The authority connection, not the read one: `commitNewBookImport` builds the overview it
+    // returns inside its own transaction, where the Book being described is not yet visible to any
+    // other connection. Everything else this projection reads comes from the same connection.
+    const position = this.#boundedCall(() => this.#boundedAuthority.readManuscriptEntryPosition(manuscriptId, branchId));
+    if (position === null) return anchor;
+    const block = this.#authority.prepare(
+      'SELECT position FROM working_blocks WHERE branch_id = ? AND block_id = ?',
+    ).get(branchId, position.blockId) as SqlRow | undefined;
+    // The resolution already answered against the working state, so a block it named that is not in
+    // the working state means the two disagree: the overview then leads with the Revision alone
+    // rather than with a position no window could open.
+    if (block === undefined) return anchor;
+    const blockPosition = asNumber(block.position);
+    // The last working position, the same total the window projection reports, so the anchor's reading
+    // and the window the entry opens count the manuscript the same way.
+    const totalBlocks = asNumber(one(
+      this.#authority.prepare(
+        'SELECT position FROM working_blocks WHERE branch_id = ? ORDER BY position DESC LIMIT 1',
+      ).all(branchId) as SqlRow[],
+      'BOOK_RECORD_GRAPH_INVALID',
+      '稿件工作稿内容块不完整。',
+    ).position);
+    const structure = this.#authority.prepare(
+      'SELECT text FROM manuscript_outline WHERE branch_id = ? AND position <= ? ORDER BY position DESC LIMIT 1',
+    ).get(branchId, blockPosition) as SqlRow | undefined;
+    const structureLabel = structure === undefined ? null : asString(structure.text);
+    return {
+      ...anchor,
+      entry: {
+        blockId: position.blockId,
+        grapheme: position.grapheme,
+        blockPosition,
+        totalBlocks,
+        structureLabel,
+        label: `${structureLabel === null ? '' : `${structureLabel} · `}第 ${blockPosition} / ${totalBlocks} 个内容块`,
+        state: position.state,
+      },
+    };
   }
 
   #bookHistorySelection(bookId: string, cursor: BookHistoryCursor | null): {
@@ -7548,9 +7622,23 @@ export class EditorialStore {
       manuscriptId,
       branchId,
       blockId,
-      grapheme,
+      this.#addressableGrapheme(branchId, blockId, grapheme),
       new Date().toISOString(),
     ));
+  }
+
+  /**
+   * A caret resting after a block's last grapheme is a real place to leave from, but a block addresses
+   * `[0, length)`, so the last addressable offset answers for it and the editor is remembered at the
+   * end of that block rather than not remembered at all. A block the working state does not hold is
+   * left untouched for the bounded store to refuse, which is where `稿件位置不存在` belongs.
+   */
+  #addressableGrapheme(branchId: string, blockId: string, grapheme: number): number {
+    if (!Number.isSafeInteger(grapheme) || grapheme < 0) return grapheme;
+    const block = this.#authority.prepare(
+      'SELECT grapheme_length FROM working_blocks WHERE branch_id = ? AND block_id = ?',
+    ).get(branchId, blockId) as SqlRow | undefined;
+    return block === undefined ? grapheme : Math.min(grapheme, Math.max(0, asNumber(block.grapheme_length) - 1));
   }
 
   /** Where the editor last was, resolved against the working state now, or `null` if never recorded. */
