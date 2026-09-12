@@ -737,6 +737,10 @@ async function main() {
     const crossBookId = await createEmptyBook(renderer, cancellation);
     cancellation.throwIfRequested();
     await assertRenderer(renderer, `(() => { const button=document.querySelector('button[data-book-id=${JSON.stringify(imported.bookId)}]'); if(!(button instanceof HTMLButtonElement))return false; button.click(); return true; })()`, 'book-reopen');
+    // Synchronized delta with Issue #405: the Book route enters the manuscript now (V2-UX-RET-002),
+    // and 工作概览 is reached back through the manuscript's 资料与记录 group (V2-UX-IA-012).
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(imported.bookId)}]')`, 'book-reopened-manuscript');
+    await click(renderer, '返回图书工作概览', 'book-reopened-to-overview');
     await waitFor(renderer, `document.querySelector('.book-overview[data-book-id=${JSON.stringify(imported.bookId)}]')`, 'book-reopened');
 
     at('acknowledged-edit');

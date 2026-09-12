@@ -2259,6 +2259,10 @@ async function main() {
       `(() => { const button = document.querySelector('[data-screen="landing"] [data-book-id=${JSON.stringify(populatedBookId)}]'); if (!button) return false; button.click(); return true; })()`,
       'populated-book-open-before-source',
     );
+    // Synchronized delta with Issue #405: the Book route enters the manuscript now (V2-UX-RET-002),
+    // and 工作概览 is reached back through the manuscript's 资料与记录 group (V2-UX-IA-012).
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(populatedBookId)}]')`, 'populated-book-manuscript-before-source');
+    await clickExactButton(renderer, '返回图书工作概览', 'populated-book-to-overview-before-source');
     await waitFor(renderer, `document.querySelector('[data-screen="book-overview"]')`, 'populated-book-overview-before-source');
     const populatedBefore = await renderer.evaluate(`Array.from(document.querySelectorAll('.record-navigation button[data-record-kind]'), (button) => ({ kind: button.dataset.recordKind, id: button.dataset.recordId }))`);
     const populatedSourceVersionId = populatedBefore.find((record) => record.kind === 'source')?.id;
@@ -2909,6 +2913,10 @@ async function main() {
       `(() => { const book = document.querySelector('[data-screen="landing"] [data-book-id=${JSON.stringify(reimportBookId)}]'); if (!book) return false; book.click(); return true; })()`,
       'reimport-no-change-lineage-restart-open',
     );
+    // Synchronized delta with Issue #405: the Book route enters the manuscript now (V2-UX-RET-002),
+    // and 工作概览 is reached back through the manuscript's 资料与记录 group (V2-UX-IA-012).
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(reimportBookId)}]')`, 'reimport-no-change-lineage-restart-manuscript');
+    await clickExactButton(renderer, '返回图书工作概览', 'reimport-no-change-lineage-restart-to-overview');
     await waitFor(renderer, `document.querySelector('[data-screen="book-overview"]')`, 'reimport-no-change-lineage-restart-overview');
     await assertRenderer(
       renderer,
