@@ -19,6 +19,7 @@ import {
   type JournalAcknowledgement,
   type JournalEditInput,
   type ManuscriptBlockProjection,
+  type ManuscriptEntryPositionProjection,
   type ManuscriptWindowProjection,
   type ManuscriptWindowTarget,
   type MilestoneProjection,
@@ -57,6 +58,7 @@ import {
   ANALYSIS_LEDGER_TRIGGER_SQL,
   J03_TASK_AUTHORIZATION_SCHEMA_VERSION,
   J04_BASELINE_ANALYSIS_SCHEMA_VERSION,
+  MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION,
   MANUSCRIPT_INTAKE_SCHEMA_VERSION,
   SUCCESSIVE_TASK_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_SQL,
@@ -143,6 +145,29 @@ export const MODEL_SERVICE_CONNECTION_SCHEMA_SQL = `CREATE TABLE model_service_c
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   credential_updated_at TEXT NOT NULL
+) STRICT`;
+
+/**
+ * Revision 21 (Issue #467): where an editor last entered a Book's primary Manuscript, one row per
+ * Book and Manuscript Revision. The position is the window projection's own pair — a block identity
+ * and a grapheme offset inside it — and `revision_id` names the Revision it was taken against, so a
+ * position recorded before the Manuscript moved on is recognisable as superseded instead of being
+ * mistaken for a current one. It is editor state, not a record of the work: it may be rewritten in
+ * place for the same Book and Revision, and it carries no canonical JSON and no digest.
+ *
+ * `block_id` references the durable block identity rather than the working block, because a block
+ * that leaves the working state must still be readable here — that is what the nearest-anchor
+ * resolution in `readManuscriptEntryPosition` reads it for.
+ */
+export const MANUSCRIPT_ENTRY_POSITION_SCHEMA_SQL = `CREATE TABLE manuscript_entry_positions (
+  book_id TEXT NOT NULL REFERENCES books(book_id),
+  manuscript_id TEXT NOT NULL REFERENCES manuscripts(manuscript_id),
+  branch_id TEXT NOT NULL REFERENCES manuscript_branches(branch_id),
+  revision_id TEXT NOT NULL REFERENCES manuscript_revisions(revision_id),
+  block_id TEXT NOT NULL REFERENCES manuscript_blocks(block_id),
+  grapheme INTEGER NOT NULL CHECK(grapheme >= 0),
+  recorded_at TEXT NOT NULL,
+  PRIMARY KEY(book_id, revision_id)
 ) STRICT`;
 
 type SqlRow = Record<string, SQLOutputValue>;
@@ -1621,6 +1646,15 @@ const SCHEMA_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
     'run_record_id>analysis_run_records.run_record_id:NO ACTION/NO ACTION/NONE',
     'task_intent_id>analysis_task_intents.task_intent_id:NO ACTION/NO ACTION/NONE',
   ],
+  // Revision 21 (Issue #467): the remembered entry position names the Book, its Manuscript, the
+  // branch, the Revision it belongs to, and the durable block identity it points at.
+  manuscript_entry_positions: [
+    'block_id>manuscript_blocks.block_id:NO ACTION/NO ACTION/NONE',
+    'book_id>books.book_id:NO ACTION/NO ACTION/NONE',
+    'branch_id>manuscript_branches.branch_id:NO ACTION/NO ACTION/NONE',
+    'manuscript_id>manuscripts.manuscript_id:NO ACTION/NO ACTION/NONE',
+    'revision_id>manuscript_revisions.revision_id:NO ACTION/NO ACTION/NONE',
+  ],
   editorial_workspace_profile_sidecar_revisions: [
     'native_artifact_id>native_artifact_installations.artifact_id:NO ACTION/NO ACTION/NONE',
   ],
@@ -2215,6 +2249,7 @@ function requireManuscriptReimportTargetSchema(
   includeTaskAuthorizationTables = false,
   includeAnalysisLedgerTables = false,
   includePlanVersionTables = false,
+  includeManuscriptEntryPositionTable = false,
 ): void {
   const analysisTables = includePlanVersionTables ? ANALYSIS_LEDGER_EXPECTED_SCHEMA_SQL : PRE_17_ANALYSIS_LEDGER_EXPECTED_SCHEMA_SQL;
   const analysisTriggers = includePlanVersionTables ? ANALYSIS_LEDGER_TRIGGER_SQL : PRE_17_ANALYSIS_LEDGER_TRIGGER_SQL;
@@ -2238,6 +2273,9 @@ function requireManuscriptReimportTargetSchema(
         : {}),
       ...(includeTaskAuthorizationTables ? TASK_AUTHORIZATION_SCHEMA_SQL : {}),
       ...(includeAnalysisLedgerTables ? analysisTables : {}),
+      ...(includeManuscriptEntryPositionTable
+        ? { manuscript_entry_positions: MANUSCRIPT_ENTRY_POSITION_SCHEMA_SQL }
+        : {}),
     },
     MANUSCRIPT_REIMPORT_INDEX_SQL,
     true,
@@ -4889,6 +4927,7 @@ export function validateManuscriptReimportSchemaTruth(
   includeTaskAuthorizationTables = false,
   includeAnalysisLedgerTables = false,
   includePlanVersionTables = false,
+  includeManuscriptEntryPositionTable = false,
 ): void {
   requireManuscriptReimportTargetSchema(
     db,
@@ -4898,6 +4937,7 @@ export function validateManuscriptReimportSchemaTruth(
     includeTaskAuthorizationTables,
     includeAnalysisLedgerTables,
     includePlanVersionTables,
+    includeManuscriptEntryPositionTable,
   );
   validateSchemaAuthorityIds(db);
   validateWorkflowSemanticTruth(db, profile);
@@ -4911,6 +4951,28 @@ export function validateManuscriptReimportSchemaTruth(
   validateRecoveryTruth(db);
   const violations = db.prepare('PRAGMA foreign_key_check').all();
   requireBounded(violations.length === 0, 'SCHEMA_MIGRATION_FAILED', '数据库引用校验失败。');
+}
+
+/**
+ * Revision 21's entry-position relation (Issue #467). It is created and never rebuilt: no existing
+ * relation is touched, no row is copied, and a store that predates the revision simply gains one
+ * empty table. Like revisions 18 and 19 this runs before the version moves in `task-authorization.ts`
+ * and is shape-detected, so a store created fresh at revision 21 does no work here and an
+ * interruption between the creation and the version bump repeats only the bump on the next open.
+ */
+export function initializeManuscriptEntryPositionSchema(db: DatabaseSync): void {
+  const existing = db.prepare(
+    "SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'manuscript_entry_positions'",
+  ).get();
+  if (existing !== undefined) return;
+  transact(db, () => {
+    db.exec(MANUSCRIPT_ENTRY_POSITION_SCHEMA_SQL);
+  });
+  requireBounded(
+    db.prepare('PRAGMA foreign_key_check').all().length === 0,
+    'SCHEMA_MIGRATION_FAILED',
+    '数据库引用校验失败。',
+  );
 }
 
 /**
@@ -4934,7 +4996,8 @@ export function initializeBoundedSchema(
       version === AUTHORITY_SIDECAR_SCHEMA_VERSION || version === J03_TASK_AUTHORIZATION_SCHEMA_VERSION ||
       version === J04_BASELINE_ANALYSIS_SCHEMA_VERSION || version === SUCCESSIVE_TASK_SCHEMA_VERSION ||
       version === TASK_AUTHORIZATION_SCHEMA_VERSION || version === MANUSCRIPT_INTAKE_SCHEMA_VERSION ||
-      version === TEXT_CONVERSION_SCHEMA_VERSION || version === FACTUAL_REVIEW_SCHEMA_VERSION,
+      version === TEXT_CONVERSION_SCHEMA_VERSION || version === FACTUAL_REVIEW_SCHEMA_VERSION ||
+      version === MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -4943,9 +5006,9 @@ export function initializeBoundedSchema(
       version === J03_TASK_AUTHORIZATION_SCHEMA_VERSION || version === J04_BASELINE_ANALYSIS_SCHEMA_VERSION ||
       version === SUCCESSIVE_TASK_SCHEMA_VERSION || version === TASK_AUTHORIZATION_SCHEMA_VERSION ||
       version === MANUSCRIPT_INTAKE_SCHEMA_VERSION || version === TEXT_CONVERSION_SCHEMA_VERSION ||
-      version === FACTUAL_REVIEW_SCHEMA_VERSION) {
+      version === FACTUAL_REVIEW_SCHEMA_VERSION || version === MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION) {
     transact(db, () => {
-      if (validateStoreTruth || version !== FACTUAL_REVIEW_SCHEMA_VERSION) {
+      if (validateStoreTruth || version !== MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION) {
         validateManuscriptReimportSchemaTruth(
           db,
           profile,
@@ -4955,6 +5018,7 @@ export function initializeBoundedSchema(
           version >= J03_TASK_AUTHORIZATION_SCHEMA_VERSION,
           version >= J04_BASELINE_ANALYSIS_SCHEMA_VERSION,
           version >= TASK_AUTHORIZATION_SCHEMA_VERSION,
+          version >= MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION,
         );
       }
       terminalizeOrphanedReplacementPreviews(db);
@@ -6480,6 +6544,84 @@ export class BoundedManuscriptStore {
       blocks,
     };
     return projection;
+  }
+
+  /**
+   * Remember where the editor is in this Book's primary Manuscript, against the Revision the branch
+   * is working on now. The pair is the window projection's own: a block the working state holds and
+   * a grapheme inside that block, which is `0` for an empty one. One row per Book and Revision:
+   * entering the same Revision again rewrites that row in place, and a position taken against an
+   * earlier Revision stays exactly as it was recorded.
+   */
+  recordManuscriptEntryPosition(
+    manuscriptId: string,
+    branchId: string,
+    blockId: string,
+    grapheme: number,
+    recordedAt: string,
+  ): void {
+    const binding = this.#binding(manuscriptId, branchId);
+    requireBounded(BLOCK_PATTERN.test(blockId), 'WINDOW_INVALID', '稿件位置无效。');
+    const block = one(
+      this.#db.prepare('SELECT grapheme_length FROM working_blocks WHERE branch_id = ? AND block_id = ?')
+        .all(branchId, blockId) as SqlRow[],
+      'WINDOW_NOT_FOUND',
+      '稿件位置不存在。',
+    );
+    requireBounded(
+      Number.isSafeInteger(grapheme) && grapheme >= 0 && grapheme < Math.max(1, asNumber(block.grapheme_length)),
+      'WINDOW_INVALID',
+      '稿件位置无效。',
+    );
+    this.#db.prepare(
+      `INSERT INTO manuscript_entry_positions(
+         book_id, manuscript_id, branch_id, revision_id, block_id, grapheme, recorded_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(book_id, revision_id) DO UPDATE SET
+         manuscript_id = excluded.manuscript_id, branch_id = excluded.branch_id,
+         block_id = excluded.block_id, grapheme = excluded.grapheme, recorded_at = excluded.recorded_at`,
+    ).run(binding.bookId, manuscriptId, branchId, binding.revisionId, blockId, grapheme, recordedAt);
+  }
+
+  /**
+   * Where the editor last was, resolved against the working state the branch holds now. The position
+   * recorded against the branch's own Revision is preferred; failing that, the most recently recorded
+   * one answers, which is what makes a superseded Revision resolve to somewhere rather than to
+   * nothing. The block is then looked up in the working state: when it is still there the offset is
+   * clamped to what the block now holds, and when it is gone the block's place in the Revision it was
+   * recorded against picks the nearest surviving block instead, at its start. `null` only when the
+   * Book has no remembered position at all.
+   */
+  readManuscriptEntryPosition(manuscriptId: string, branchId: string): ManuscriptEntryPositionProjection | null {
+    const binding = this.#binding(manuscriptId, branchId);
+    const select = `SELECT revision_id, block_id, grapheme FROM manuscript_entry_positions WHERE book_id = ?`;
+    const recorded = (this.#db.prepare(`${select} AND revision_id = ?`).get(binding.bookId, binding.revisionId)
+      ?? this.#db.prepare(`${select} ORDER BY recorded_at DESC, rowid DESC LIMIT 1`).get(binding.bookId)) as SqlRow | undefined;
+    if (recorded === undefined) return null;
+    const recordedRevisionId = asString(recorded.revision_id);
+    const recordedBlockId = asString(recorded.block_id);
+    const recordedGrapheme = asNumber(recorded.grapheme);
+    const working = this.#db.prepare(
+      'SELECT grapheme_length FROM working_blocks WHERE branch_id = ? AND block_id = ?',
+    ).get(branchId, recordedBlockId) as SqlRow | undefined;
+    const base = { bookId: binding.bookId, manuscriptId, branchId, recordedRevisionId };
+    if (working !== undefined) {
+      const length = asNumber(working.grapheme_length);
+      return {
+        ...base,
+        blockId: recordedBlockId,
+        grapheme: Math.min(recordedGrapheme, Math.max(0, length - 1)),
+        state: recordedRevisionId === binding.revisionId ? 'exact' : 'nearest-anchor',
+      };
+    }
+    const recordedPosition = this.#db.prepare(
+      'SELECT position FROM manuscript_block_versions WHERE revision_id = ? AND block_id = ?',
+    ).get(recordedRevisionId, recordedBlockId) as SqlRow | undefined;
+    const nearest = this.#db.prepare(
+      'SELECT block_id FROM working_blocks WHERE branch_id = ? ORDER BY abs(position - ?), position LIMIT 1',
+    ).get(branchId, recordedPosition === undefined ? 1 : asNumber(recordedPosition.position)) as SqlRow | undefined;
+    if (nearest === undefined) return null;
+    return { ...base, blockId: asString(nearest.block_id), grapheme: 0, state: 'nearest-anchor' };
   }
 
   getOutline(manuscriptId: string, branchId: string, cursor: string | null): OutlineProjection {

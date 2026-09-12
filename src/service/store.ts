@@ -28,6 +28,7 @@ import type {
   JournalAcknowledgement,
   JournalEditInput,
   ManuscriptConversionProjection,
+  ManuscriptEntryPositionProjection,
   ManuscriptWindowProjection,
   ModelCredentialOperationState,
   ModelServiceConnectionProjection,
@@ -111,6 +112,7 @@ import {
   BoundedStoreError,
   BoundedStoreFatalError,
   initializeBoundedSchema,
+  initializeManuscriptEntryPositionSchema,
   MODEL_SERVICE_CONNECTION_SCHEMA_SQL,
   validateManuscriptReimportSchemaTruth,
   validateSourceImportSchemaTruth,
@@ -143,6 +145,7 @@ import {
   initializeTaskAuthorizationSchema,
   J03_TASK_AUTHORIZATION_SCHEMA_VERSION,
   J04_BASELINE_ANALYSIS_SCHEMA_VERSION,
+  MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION,
   MANUSCRIPT_INTAKE_SCHEMA_VERSION,
   SUCCESSIVE_TASK_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_VERSION,
@@ -1334,7 +1337,8 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === TASK_AUTHORIZATION_SCHEMA_VERSION ||
       currentVersion === MANUSCRIPT_INTAKE_SCHEMA_VERSION ||
       currentVersion === TEXT_CONVERSION_SCHEMA_VERSION ||
-      currentVersion === FACTUAL_REVIEW_SCHEMA_VERSION,
+      currentVersion === FACTUAL_REVIEW_SCHEMA_VERSION ||
+      currentVersion === MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -1354,7 +1358,8 @@ function initializeSchema(db: DatabaseSync): void {
     currentVersion === TASK_AUTHORIZATION_SCHEMA_VERSION ||
     currentVersion === MANUSCRIPT_INTAKE_SCHEMA_VERSION ||
     currentVersion === TEXT_CONVERSION_SCHEMA_VERSION ||
-    currentVersion === FACTUAL_REVIEW_SCHEMA_VERSION
+    currentVersion === FACTUAL_REVIEW_SCHEMA_VERSION ||
+    currentVersion === MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION
   ) return;
   if (currentVersion === 1) {
     migrateSchemaV1ToV2(db);
@@ -1689,7 +1694,8 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION || version === J03_TASK_AUTHORIZATION_SCHEMA_VERSION ||
       version === J04_BASELINE_ANALYSIS_SCHEMA_VERSION || version === SUCCESSIVE_TASK_SCHEMA_VERSION ||
       version === TASK_AUTHORIZATION_SCHEMA_VERSION || version === MANUSCRIPT_INTAKE_SCHEMA_VERSION ||
-      version === TEXT_CONVERSION_SCHEMA_VERSION || version === FACTUAL_REVIEW_SCHEMA_VERSION,
+      version === TEXT_CONVERSION_SCHEMA_VERSION || version === FACTUAL_REVIEW_SCHEMA_VERSION ||
+      version === MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -1699,7 +1705,8 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION || version === J03_TASK_AUTHORIZATION_SCHEMA_VERSION ||
       version === J04_BASELINE_ANALYSIS_SCHEMA_VERSION || version === SUCCESSIVE_TASK_SCHEMA_VERSION ||
       version === TASK_AUTHORIZATION_SCHEMA_VERSION || version === MANUSCRIPT_INTAKE_SCHEMA_VERSION ||
-      version === TEXT_CONVERSION_SCHEMA_VERSION || version === FACTUAL_REVIEW_SCHEMA_VERSION) return;
+      version === TEXT_CONVERSION_SCHEMA_VERSION || version === FACTUAL_REVIEW_SCHEMA_VERSION ||
+      version === MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION) return;
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
   );
@@ -1801,7 +1808,8 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION || version === J03_TASK_AUTHORIZATION_SCHEMA_VERSION ||
       version === J04_BASELINE_ANALYSIS_SCHEMA_VERSION || version === SUCCESSIVE_TASK_SCHEMA_VERSION ||
       version === TASK_AUTHORIZATION_SCHEMA_VERSION || version === MANUSCRIPT_INTAKE_SCHEMA_VERSION ||
-      version === TEXT_CONVERSION_SCHEMA_VERSION || version === FACTUAL_REVIEW_SCHEMA_VERSION,
+      version === TEXT_CONVERSION_SCHEMA_VERSION || version === FACTUAL_REVIEW_SCHEMA_VERSION ||
+      version === MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -1810,7 +1818,8 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION || version === J03_TASK_AUTHORIZATION_SCHEMA_VERSION ||
       version === J04_BASELINE_ANALYSIS_SCHEMA_VERSION || version === SUCCESSIVE_TASK_SCHEMA_VERSION ||
       version === TASK_AUTHORIZATION_SCHEMA_VERSION || version === MANUSCRIPT_INTAKE_SCHEMA_VERSION ||
-      version === TEXT_CONVERSION_SCHEMA_VERSION || version === FACTUAL_REVIEW_SCHEMA_VERSION) return;
+      version === TEXT_CONVERSION_SCHEMA_VERSION || version === FACTUAL_REVIEW_SCHEMA_VERSION ||
+      version === MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION) return;
   validateSourceImportSchemaTruth(db, profile);
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
@@ -2103,7 +2112,7 @@ function validateModelServiceSchema(
   const version = asNumber(
     one(db.prepare('PRAGMA user_version').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取数据库版本。').user_version,
   );
-  if (validateStoreTruth || version !== FACTUAL_REVIEW_SCHEMA_VERSION) {
+  if (validateStoreTruth || version !== MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION) {
     validateManuscriptReimportSchemaTruth(
       db,
       profile,
@@ -2113,6 +2122,7 @@ function validateModelServiceSchema(
       version >= J03_TASK_AUTHORIZATION_SCHEMA_VERSION,
       version >= J04_BASELINE_ANALYSIS_SCHEMA_VERSION,
       version >= TASK_AUTHORIZATION_SCHEMA_VERSION,
+      version >= MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION,
     );
   }
   const invalid = db.prepare(
@@ -2149,7 +2159,8 @@ function initializeModelServiceSchema(
       version === EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION || version === J03_TASK_AUTHORIZATION_SCHEMA_VERSION ||
       version === J04_BASELINE_ANALYSIS_SCHEMA_VERSION || version === SUCCESSIVE_TASK_SCHEMA_VERSION ||
       version === TASK_AUTHORIZATION_SCHEMA_VERSION || version === MANUSCRIPT_INTAKE_SCHEMA_VERSION ||
-      version === TEXT_CONVERSION_SCHEMA_VERSION || version === FACTUAL_REVIEW_SCHEMA_VERSION,
+      version === TEXT_CONVERSION_SCHEMA_VERSION || version === FACTUAL_REVIEW_SCHEMA_VERSION ||
+      version === MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2158,7 +2169,8 @@ function initializeModelServiceSchema(
       version === EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION || version === J03_TASK_AUTHORIZATION_SCHEMA_VERSION ||
       version === J04_BASELINE_ANALYSIS_SCHEMA_VERSION || version === SUCCESSIVE_TASK_SCHEMA_VERSION ||
       version === TASK_AUTHORIZATION_SCHEMA_VERSION || version === MANUSCRIPT_INTAKE_SCHEMA_VERSION ||
-      version === TEXT_CONVERSION_SCHEMA_VERSION || version === FACTUAL_REVIEW_SCHEMA_VERSION) {
+      version === TEXT_CONVERSION_SCHEMA_VERSION || version === FACTUAL_REVIEW_SCHEMA_VERSION ||
+      version === MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION) {
     validateModelServiceSchema(db, profile, validateStoreTruth);
     if (version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION) {
       validateEditorialWorkspaceProfileNativeSchema(db);
@@ -2987,9 +2999,11 @@ export class EditorialStore {
       initializeBoundedSchema(authority, workflowProfile, false);
       const editorialWorkspaceProfile = await EditorialWorkspaceProfileStore.open(authority, dataRoot, codeRoot);
       // The intake relations widen before the terminal version moves, so the version and the shape it
-      // names change together for every store that reaches revision 18, and again for revision 19.
+      // names change together for every store that reaches revision 18, and again for revision 19,
+      // and again for the entry-position relation revision 21 adds.
       initializeManuscriptIntakeSchema(authority);
       initializeTextConversionSchema(authority);
+      initializeManuscriptEntryPositionSchema(authority);
       initializeTaskAuthorizationSchema(authority);
       initializeBoundedSchema(authority, workflowProfile);
       validateEditorialWorkspaceProfileSchema(authority);
@@ -7522,6 +7536,26 @@ export class EditorialStore {
         cursor === null ? { kind: 'start' } : { kind: 'cursor', cursor },
       ),
     );
+  }
+
+  /**
+   * Remember where the editor is in this Manuscript, against the Revision the branch works on now.
+   * The position is durable editor state, not a record of the work: it is written on the authority
+   * connection and rewritten in place for the same Book and Revision.
+   */
+  recordManuscriptEntryPosition(manuscriptId: string, branchId: string, blockId: string, grapheme: number): void {
+    this.#boundedCall(() => this.#boundedAuthority.recordManuscriptEntryPosition(
+      manuscriptId,
+      branchId,
+      blockId,
+      grapheme,
+      new Date().toISOString(),
+    ));
+  }
+
+  /** Where the editor last was, resolved against the working state now, or `null` if never recorded. */
+  readManuscriptEntryPosition(manuscriptId: string, branchId: string): ManuscriptEntryPositionProjection | null {
+    return this.#boundedCall(() => this.#bounded.readManuscriptEntryPosition(manuscriptId, branchId));
   }
 
   flushJournalEdit(input: JournalEditInput): JournalAcknowledgement {
