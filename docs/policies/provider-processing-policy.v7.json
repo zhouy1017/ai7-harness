@@ -125,7 +125,7 @@
           "declaredOperationClassesRequired": true,
           "exactRunBudgetCeilingStateRequired": true,
           "unsetRunBudgetCeilingAllowed": false,
-          "defaultRunBudgetCeilingTokensPerFrozenUnit": 60000,
+          "defaultRunBudgetCeilingTokensPerFrozenUnit": 90000,
           "defaultRunBudgetCeilingComputedAfterCoverageManifestFreeze": true,
           "ceilingEvaluatedBeforeEveryDispatch": true,
           "finalProviderPayloadEgressGateRequired": true,
