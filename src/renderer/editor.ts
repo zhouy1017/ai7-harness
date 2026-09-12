@@ -648,6 +648,13 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
   view.dom.setAttribute('data-testid', 'manuscript-editor');
   applyEditableState();
   announceState();
+  // A window that names its own focus is one a caller asked to arrive at — the entry route's remembered
+  // position, or a jump to an analysed range. Mounting honours it exactly as `loadWindow` does: without
+  // this the editor would sit at the window's first block while the window it mounted says the caller
+  // arrived somewhere else, and anything that then reads the caret back would read the wrong place.
+  if (windowProjection.focusBlockId !== null) {
+    restoreContinuity(makeState(), undefined, windowProjection.focusBlockId, windowProjection.focusGrapheme, false);
+  }
 
   return {
     focus: () => view.focus(),

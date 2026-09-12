@@ -861,10 +861,20 @@ async function main() {
 
     at('background-state-no-focus-and-later-revision');
     // Synchronized delta with Issue #405: the Book route already arrived in the manuscript, so there is
-    // no `打开稿件` step left to take here — the entry is the surface.
+    // no `打开稿件` step left to take here — the entry is the surface. That click did one other thing
+    // the close-risk stages below still need, and the raw `openBookWorkbench` calls above cannot do it
+    // because they never render the route they request: assigning a route clears the window's manuscript
+    // capabilities, so the capability the entry took is gone by now and this window takes it again under
+    // the generation in force, exactly as a renderer does when it renders the route it was handed. Both
+    // halves are asserted, because the second is what gives `close-risk-capability-preservation` its
+    // subject: a *rejected* route request must preserve what a successful one clears.
     await waitFor(primary, `document.querySelector('[data-screen="editor"] [data-testid="manuscript-editor"]')`, 'editor-ready');
     const bookAWork = await primary.evaluate(`(async()=>{ const item=(await window.ai7.listPriorWork()).find((entry)=>entry.bookId===${JSON.stringify(bookA)}); return item ? {manuscriptId:item.manuscriptId,branchId:item.branchId} : null; })()`);
     requireJourney(UUID_PATTERN.test(bookAWork?.manuscriptId) && UUID_PATTERN.test(bookAWork?.branchId), 'book-a-manuscript-route-identity');
+    const clearedByRouteAssignment = await primary.evaluate(`window.ai7.getOutline({manuscriptId:${JSON.stringify(bookAWork.manuscriptId)},branchId:${JSON.stringify(bookAWork.branchId)},cursor:null}).then(()=>null,(error)=>error?.code??null)`);
+    requireJourney(clearedByRouteAssignment === 'AI7_EDITOR_CAPABILITY_INVALID', 'route-assignment-cleared-the-entry-capability');
+    const retakenCapability = await primary.evaluate(`window.ai7.getManuscriptWindow({manuscriptId:${JSON.stringify(bookAWork.manuscriptId)},branchId:${JSON.stringify(bookAWork.branchId)},cursor:null}).then((page)=>page.bookId,()=>null)`);
+    requireJourney(retakenCapability === bookA, 'book-a-editor-capability-retaken-under-the-current-route');
     at('close-risk-route-preservation');
     const routeRiskSuffix = '，J12 路由风险保护';
     const riskyEditInserted = await primary.evaluate(`(() => { const editor=document.querySelector('[data-testid="manuscript-editor"]'); const block=editor?.querySelector('[data-block-id]'); if(!(block instanceof HTMLElement))return false; block.focus(); const range=document.createRange(); range.selectNodeContents(block); range.collapse(false); const selection=getSelection(); selection.removeAllRanges(); selection.addRange(range); document.execCommand('insertText',false,${JSON.stringify(routeRiskSuffix)}); return block.textContent?.endsWith(${JSON.stringify(routeRiskSuffix)}); })()`);
@@ -1004,9 +1014,13 @@ async function main() {
     // Synchronized delta with Issue #405: move the editor off the manuscript's start, so that what the
     // restart below returns to is a position this editor chose rather than the place every manuscript
     // opens at. The 40-block synthetic manuscript is longer than one window, so paging forward has
-    // somewhere to go, and the moved-to window is what is remembered.
+    // somewhere to go, and the moved-to window is what is remembered. `已到达` is written after the
+    // position is durable, so reading it is enough to know the product may be closed; the overview is
+    // then asked what it would enter at, because that is what the restart below has to match.
     await click(primary, '向后浏览', 'page-away-from-start');
     await waitFor(primary, `document.querySelector('#persistence-status')?.textContent.startsWith('已到达')`, 'paged-away-from-start');
+    const pagedAwayPosition = await primary.evaluate(`window.ai7.getBookOverview({bookId:${JSON.stringify(bookA)},historyCursor:null}).then((overview)=>overview.manuscriptAnchor?.entry?.blockPosition??null,()=>null)`);
+    requireJourney(Number.isSafeInteger(pagedAwayPosition) && pagedAwayPosition > 1, 'paged-away-position-remembered-off-the-start');
 
     at('sender-owned-import-draft');
     await close();
@@ -1017,6 +1031,30 @@ async function main() {
     // Synchronized delta with Issue #405: 甲 enters the manuscript, and 工作概览 is reached from the
     // manuscript's `资料与记录` group (V2-UX-IA-012) — this is where that way back is exercised.
     await waitFor(primary, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(bookA)}]')`, 'draft-a-manuscript');
+    // The editor arrives *at* the remembered block, not merely in the window that contains it: the caret
+    // sits on that block and the block is not the window's first, which is what the position paged away
+    // to above. Entering without landing on it would also overwrite the memory with the window's start,
+    // so this reads the position back afterwards and finds it unmoved.
+    const landedOnRemembered = await primary.evaluate(`(async()=>{
+      const entry=(await window.ai7.getBookOverview({bookId:${JSON.stringify(bookA)},historyCursor:null})).manuscriptAnchor?.entry??null;
+      const selection=getSelection();
+      const node=selection&&selection.anchorNode
+        ?(selection.anchorNode.nodeType===1?selection.anchorNode:selection.anchorNode.parentElement)
+        :null;
+      const caret=node?node.closest('[data-block-id]'):null;
+      const first=document.querySelector('[data-testid="manuscript-editor"] > [data-block-id]');
+      return {
+        remembered:entry===null?null:entry.blockPosition,
+        caretOnRemembered:entry!==null&&caret?.dataset.blockId===entry.blockId,
+        rememberedIsNotTheWindowStart:entry!==null&&first?.dataset.blockId!==entry.blockId,
+      };
+    })()`);
+    requireJourney(
+      landedOnRemembered?.remembered === pagedAwayPosition &&
+        landedOnRemembered.caretOnRemembered === true &&
+        landedOnRemembered.rememberedIsNotTheWindowStart === true,
+      'entry-lands-on-the-remembered-block',
+    );
     await click(primary, '返回图书工作概览', 'draft-a-to-overview');
     await waitFor(primary, `document.querySelector('.book-overview[data-book-id=${JSON.stringify(bookA)}]')`, 'draft-a-overview');
     await click(primary, '打开另一本图书', 'draft-open-other');
@@ -1194,7 +1232,12 @@ async function main() {
     await waitFor(primary, `document.querySelector('[data-screen="book-workbench-chooser"]')`, 'preflight-chooser');
     await clickBook(primary, bookB, 'preflight-open-b');
     await waitForRendererCount(manager, 2, 'preflight-two-books');
-    const bookBRendererForPreflight = await findRenderer(manager, `document.querySelector('.book-overview[data-book-id=${JSON.stringify(bookB)}]')`, 'preflight-b-window');
+    // Synchronized delta with Issue #405: 乙 has had a primary Manuscript since
+    // `sender-owned-editor-capabilities-import-b`, so by now its Book route enters the manuscript as 甲's
+    // does; the overview this stage later works from is reached back through `资料与记录`.
+    const bookBRendererForPreflight = await findRenderer(manager, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(bookB)}]')`, 'preflight-b-window');
+    await click(bookBRendererForPreflight, '返回图书工作概览', 'preflight-b-to-overview');
+    await waitFor(bookBRendererForPreflight, `document.querySelector('.book-overview[data-book-id=${JSON.stringify(bookB)}]')`, 'preflight-b-overview');
     await click(primary, '返回当前图书', 'preflight-return-a');
     await waitFor(primary, `document.querySelector('.book-overview[data-book-id=${JSON.stringify(bookA)}]')`, 'preflight-a-returned');
     await click(primary, '返回图书列表', 'preflight-release-a');
@@ -1238,7 +1281,8 @@ async function main() {
       const notice=document.querySelector('[data-entry-notice]')?.textContent??'';
       const place=/第 (\\d+) \\/ (\\d+) 个内容块/.exec(notice);
       return notice.startsWith('回到上次位置 · ') && place!==null &&
-        Number(place[1])>1 && Number(place[1])<=Number(place[2]) && !/blk_[0-9a-f]{24}/.test(notice);
+        Number(place[1])===${JSON.stringify(pagedAwayPosition)} && Number(place[1])<=Number(place[2]) &&
+        !/blk_[0-9a-f]{24}/.test(notice);
     })()`, 'restart-entry-notice-returns-to-remembered-position');
     await click(primary, '返回图书工作概览', 'restart-back-overview');
     await waitFor(primary, `document.querySelector('[data-screen="book-overview"]')`, 'restart-overview');

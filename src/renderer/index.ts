@@ -4894,8 +4894,9 @@ function renderEditorWindow(
         return;
       }
       // Leaving the manuscript is the last moment the caret is still where the editor left it, so the
-      // position is taken here, before the surface is replaced (V2-UX-RET-002).
-      rememberEntryPosition();
+      // position is taken here, and taken before the overview is read, so the 上次位置 the overview
+      // states is the one the editor just left rather than the one before it (V2-UX-RET-002).
+      await rememberEntryPosition();
       renderBookOverview(await window.ai7.getBookOverview({ bookId: currentWindow.bookId, historyCursor: null }));
     } catch (error) {
       backToOverview.disabled = false;
@@ -5165,8 +5166,14 @@ function renderEditorWindow(
    * opens as a `block` target with no translation. A remembered position settles nothing, so a
    * failure to write one is not allowed to take the editor's place away from them: the surface keeps
    * working and the previous position stands.
+   *
+   * Paging and leaving await it, so the position is durable before the surface says where it arrived
+   * and before the overview it leaves for is read — an editor who pages and closes the product in the
+   * same breath still comes back to the window they moved to, and the overview never states a position
+   * the editor has already moved off. Arriving does not await, because a window just fetched is the
+   * position a caller already reached and nothing downstream reads it back.
    */
-  function rememberEntryPosition(): void {
+  async function rememberEntryPosition(): Promise<void> {
     if (!editor || authorityInterrupted) return;
     const point = editor.captureContinuity().anchor;
     // Paging with 向前浏览 / 向后浏览 deliberately leaves the caret where it was, off the window now on
@@ -5175,7 +5182,7 @@ function renderEditorWindow(
     const carried = currentWindow.blocks.some((block) => block.blockId === point.blockId);
     const blockId = carried ? point.blockId : currentWindow.blocks[0]?.blockId;
     if (blockId === undefined) return;
-    void window.ai7.recordManuscriptEntryPosition({
+    await window.ai7.recordManuscriptEntryPosition({
       manuscriptId: currentWindow.manuscriptId,
       branchId: currentWindow.branchId,
       blockId,
@@ -5344,7 +5351,7 @@ function renderEditorWindow(
       if (!loaded) return false;
       currentWindow = next;
       updateWindowChrome();
-      rememberEntryPosition();
+      await rememberEntryPosition();
       setStatus(`已到达${next.position.structureLabel ? `“${next.position.structureLabel}”附近，` : ''}${next.position.label}。`, 'success');
       await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
       return true;
@@ -5901,7 +5908,7 @@ function renderEditorWindow(
   editor.focus();
   // Arriving is itself a position worth remembering: a manuscript opened and then left by closing the
   // product never reaches an exit this surface can see, and the entry is what should answer then.
-  rememberEntryPosition();
+  void rememberEntryPosition();
   setStatus(`稿件窗口已打开；${initialWindow.position.label}。`);
 }
 
