@@ -94,6 +94,25 @@ export type ReasoningChannel =
 /** Whether the reported output tokens include reasoning tokens; `unknown` until something has measured it. */
 export type UsageAttribution = 'includes-reasoning' | 'separate' | 'unknown';
 
+/**
+ * Whether the model, on the request shape its route speaks, accepts function tool definitions and
+ * returns calls the client executes: `tools[].type: "function"` / `tool_calls` / `role: "tool"` on
+ * OpenAI chat completions; `tools` / `tool_use` / `tool_result` on Anthropic messages; `function_call`
+ * / `function_call_output` on Responses; `functionDeclarations` / `functionCall` / `functionResponse`
+ * on Gemini (ADR 0080 §2). This is the capability every AI7 platform tool (§7 of that record) rides
+ * on; nothing in this slice registers one.
+ */
+export type ToolCalling = 'none' | 'function';
+
+/**
+ * A **server-side** search tool of the model's own provider (Claude's `web_search_*`, OpenAI's
+ * `web_search`, Gemini's `google_search`, and their kind — ADR 0080 §2). There is no `platform-tool`
+ * value here: AI7's own `websearch` / `webfetch` tools are not a property of any binding — they ride
+ * on `toolCalling: 'function'` instead, wherever a policy rule names them (ADR 0080 §7.5) — so a
+ * profile only ever states whether its *provider* supplies a search tool of its own.
+ */
+export type WebSearchTool = 'none' | 'provider-tool';
+
 export interface ModelCapabilities {
   readonly requestShape: RequestShape;
   readonly reasoningControl: ReasoningControl;
@@ -101,6 +120,8 @@ export interface ModelCapabilities {
   readonly answerChannel: AnswerChannel;
   readonly reasoningChannel: ReasoningChannel;
   readonly usageAttribution: UsageAttribution;
+  readonly toolCalling: ToolCalling;
+  readonly webSearchTool: WebSearchTool;
 }
 
 /**
@@ -201,6 +222,44 @@ export const PRODUCTION_BASELINE: CapabilityEvidence = { kind: 'frozen-request-b
 const UNVERIFIED: CapabilityEvidence = { kind: 'unverified' };
 
 /**
+ * DeepSeek official's Tool Calls guide, read 2026-09-11 (ADR 0080 §2, §3): it documents function
+ * tools with `strict` JSON-schema parameters and states "From DeepSeek-V3.2, the API supports tool
+ * use in the thinking mode." The `tool_choice` values and the thinking-mode round-trip rules are not
+ * on that page and remain for the first live item to establish.
+ */
+const DEEPSEEK_TOOL_CALLS_DOCUMENTATION: CapabilityEvidence = {
+  kind: 'vendor-documentation',
+  source: 'DeepSeek official Tool Calls guide, api-docs.deepseek.com/guides/tool_calls',
+  readOn: '2026-09-11',
+};
+
+/**
+ * DeepSeek official's own pages, read 2026-09-10 (ADR 0080 §3), affirmatively documenting no search
+ * tool: the Tool Calls guide admits only `"type": "function"` ("the model itself does not execute
+ * specific functions"), the Chat Completions reference states "Currently, only functions are
+ * supported as a tool", and the Responses API guide marks `web_search` `Ignored`.
+ */
+const DEEPSEEK_NO_WEB_SEARCH_DOCUMENTATION: CapabilityEvidence = {
+  kind: 'vendor-documentation',
+  source: 'DeepSeek official — Tool Calls guide, Chat Completions reference, Responses API guide (api-docs.deepseek.com)',
+  readOn: '2026-09-10',
+};
+
+/**
+ * The OpenCode Go / Zen documentation and source, read 2026-09-10 and 2026-09-11 (ADR 0080 §3):
+ * neither gateway page prints a capability table or mentions tools, web search or web fetch anywhere,
+ * and the source (`anomalyco/opencode`, `packages/opencode/src/tool/{websearch,webfetch,mcp-websearch}.ts`)
+ * shows `websearch` / `webfetch` are client-side tools of the opencode agent, not of the gateway wire
+ * API. The gateway wire API therefore carries no search tool for any model reached through it,
+ * whichever of the three paths reaches it.
+ */
+const OPENCODE_GATEWAY_NO_SEARCH_TOOL_DOCUMENTATION: CapabilityEvidence = {
+  kind: 'vendor-documentation',
+  source: 'OpenCode Go https://opencode.ai/docs/go/ · Zen https://opencode.ai/docs/zen/ · Tools https://opencode.ai/docs/tools/',
+  readOn: '2026-09-11',
+};
+
+/**
  * The production model. Its request side is exactly what adapter revision 1 has always sent; its
  * response side has never been observed, because no Run has ever transmitted on this route, so every
  * read-side capability is declared absent.
@@ -217,6 +276,8 @@ export const DEEPSEEK_V4_PRO_PROFILE: ProviderModelProfile = {
     answerChannel: 'message-content-string',
     reasoningChannel: 'none',
     usageAttribution: 'unknown',
+    toolCalling: 'function',
+    webSearchTool: 'none',
   },
   evidence: {
     requestShape: PRODUCTION_BASELINE,
@@ -225,6 +286,8 @@ export const DEEPSEEK_V4_PRO_PROFILE: ProviderModelProfile = {
     answerChannel: PRODUCTION_BASELINE,
     reasoningChannel: UNVERIFIED,
     usageAttribution: UNVERIFIED,
+    toolCalling: DEEPSEEK_TOOL_CALLS_DOCUMENTATION,
+    webSearchTool: DEEPSEEK_NO_WEB_SEARCH_DOCUMENTATION,
   },
 };
 
@@ -256,6 +319,11 @@ export const OPENCODE_GO_V4_FLASH_PROFILE: ProviderModelProfile = {
     answerChannel: 'message-content-string',
     reasoningChannel: 'message-reasoning-content',
     usageAttribution: 'includes-reasoning',
+    // ADR 0080 §2: the Owner's own session observed a well-formed client tool call through this
+    // gateway on the Anthropic shape, but that observation is not yet a recorded live-test item, so
+    // this stays `none` until an item repeats it on the record.
+    toolCalling: 'none',
+    webSearchTool: 'none',
   },
   evidence: {
     requestShape: ADR_0067_DOCUMENTATION,
@@ -264,6 +332,8 @@ export const OPENCODE_GO_V4_FLASH_PROFILE: ProviderModelProfile = {
     answerChannel: FIRST_LIVE_RUN,
     reasoningChannel: FIRST_LIVE_RUN,
     usageAttribution: FIRST_LIVE_RUN,
+    toolCalling: UNVERIFIED,
+    webSearchTool: OPENCODE_GATEWAY_NO_SEARCH_TOOL_DOCUMENTATION,
   },
 };
 
@@ -285,6 +355,8 @@ export const OPENCODE_GO_V4_PRO_PROFILE: ProviderModelProfile = {
     answerChannel: 'none',
     reasoningChannel: 'none',
     usageAttribution: 'unknown',
+    toolCalling: 'none',
+    webSearchTool: 'none',
   },
   evidence: {
     requestShape: ADR_0067_DOCUMENTATION,
@@ -293,6 +365,8 @@ export const OPENCODE_GO_V4_PRO_PROFILE: ProviderModelProfile = {
     answerChannel: UNVERIFIED,
     reasoningChannel: UNVERIFIED,
     usageAttribution: UNVERIFIED,
+    toolCalling: UNVERIFIED,
+    webSearchTool: OPENCODE_GATEWAY_NO_SEARCH_TOOL_DOCUMENTATION,
   },
 };
 
@@ -351,6 +425,8 @@ function inertOpenCodeGoModel(path: OpenCodeGoPath, model: string, productName: 
       answerChannel: 'none',
       reasoningChannel: 'none',
       usageAttribution: 'unknown',
+      toolCalling: 'none',
+      webSearchTool: 'none',
     },
     evidence: {
       requestShape: path.documentation,
@@ -359,6 +435,8 @@ function inertOpenCodeGoModel(path: OpenCodeGoPath, model: string, productName: 
       answerChannel: UNVERIFIED,
       reasoningChannel: UNVERIFIED,
       usageAttribution: UNVERIFIED,
+      toolCalling: UNVERIFIED,
+      webSearchTool: OPENCODE_GATEWAY_NO_SEARCH_TOOL_DOCUMENTATION,
     },
   };
 }

@@ -19,13 +19,23 @@ Derived from `dev@203ed692ac60daa8771b31721003c964a92bbe26`: `src/service/provid
 
 Admitted model:
 
-| Model id | Display name | Request-shape evidence |
-| --- | --- | --- |
-| `deepseek-v4-pro` | DeepSeek V4 Pro High | `frozen-request-baseline`, since `adapter revision 1` |
+| Model id | Display name | Request-shape evidence | Tool calling | Web search tool |
+| --- | --- | --- | --- | --- |
+| `deepseek-v4-pro` | DeepSeek V4 Pro High | `frozen-request-baseline`, since `adapter revision 1` | `function` | `none` |
 
 Live-verified: none. Not established: `structuredOutput`, `reasoningChannel`, and `usageAttribution` are all `unverified`/`none` — no Run has ever transmitted on this route, so every read-side capability beyond the request-side `answerChannel` (`message-content-string`, also `frozen-request-baseline`) and `reasoningControl` (`deepseek-thinking`, also `frozen-request-baseline`) is unestablished.
 
+`toolCalling` and `webSearchTool` (ADR 0080 §2, §3, §7.8 step 1; this slice is inert — nothing consumes either field yet):
+
+- `toolCalling: function` — `vendor-documentation`, DeepSeek official Tool Calls guide (api-docs.deepseek.com/guides/tool_calls), read 2026-09-11: it documents function tools with `strict` JSON-schema parameters and states tool use is supported in thinking mode from DeepSeek-V3.2; the `tool_choice` values and the thinking-mode round-trip rules are not on that page and remain for the first live item.
+- `webSearchTool: none` — `vendor-documentation`, the Tool Calls guide, the Chat Completions reference and the Responses API guide (api-docs.deepseek.com), read 2026-09-10: the Tool Calls guide admits only `"type": "function"` ("the model itself does not execute specific functions"), the Chat Completions reference states "Currently, only functions are supported as a tool", and the Responses API guide marks `web_search` `Ignored`.
+
 ## OpenCode Go
+
+`toolCalling` and `webSearchTool` (ADR 0080 §2, §3, §7.8 step 1; this slice is inert — nothing consumes either field yet) are declared the same way on every model on every path below:
+
+- `toolCalling: none` — `unverified` for every model on every path. On `chat/completions`, `deepseek-v4-flash` carries the same value for a more specific reason: ADR 0080 §5.3 records the Owner's own Claude Code session observing a well-formed client tool call through this gateway (`deepseek-v4.1-flash`, Anthropic shape), but that is an informal observation, not a recorded live-test item, so it stays `none` until an item repeats it on the record.
+- `webSearchTool: none` — `vendor-documentation`, the OpenCode Go and Zen pages plus the Tools page and the opencode source (`anomalyco/opencode` branch `dev`, `packages/opencode/src/tool/{websearch,webfetch,mcp-websearch}.ts`), read 2026-09-10 and 2026-09-11: neither gateway page prints a capability table or mentions tools, web search or web fetch anywhere, and the source shows `websearch` / `webfetch` are client-side tools of the opencode agent, not of the gateway wire API. The gateway wire API therefore carries no search tool for any model reached through it (ADR 0080 §3, §5.2).
 
 ### `chat/completions`
 

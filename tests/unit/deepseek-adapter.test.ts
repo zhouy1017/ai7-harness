@@ -329,6 +329,10 @@ describe('model capability profiles', () => {
       // This route has never transmitted, so nothing about how it answers has been observed.
       reasoningChannel: 'none',
       usageAttribution: 'unknown',
+      // DeepSeek official's own Tool Calls guide documents function tools (ADR 0080 §2); its pages
+      // document no search tool of its own.
+      toolCalling: 'function',
+      webSearchTool: 'none',
     });
     expect(OPENCODE_GO_V4_FLASH_PROFILE.capabilities).toEqual({
       requestShape: 'openai-chat-completions',
@@ -338,6 +342,9 @@ describe('model capability profiles', () => {
       answerChannel: 'message-content-string',
       reasoningChannel: 'message-reasoning-content',
       usageAttribution: 'includes-reasoning',
+      // The gateway wire API is undocumented for tool calling and carries no search tool (ADR 0080 §2, §3).
+      toolCalling: 'none',
+      webSearchTool: 'none',
     });
     // Exactly these two are active, and the table's size is pinned beside them so that declaring a
     // model cannot enlarge the active set: a new row arrives inert or the count moves and this fails.
@@ -363,13 +370,20 @@ describe('model capability profiles', () => {
   it('records how every capability was established, and calls every absent one unverified', () => {
     for (const profile of Object.values(PROVIDER_MODEL_PROFILES)) {
       const capabilities = Object.entries(profile.capabilities) as Array<[keyof typeof profile.capabilities, string]>;
-      expect(capabilities).toHaveLength(6);
+      expect(capabilities).toHaveLength(8);
       for (const [capability, value] of capabilities) {
         const evidence = profile.evidence[capability];
         expect(evidence, `${profile.key} · ${capability}`).toBeDefined();
         // An absent capability is absent because nobody verified it; a present one names a source.
-        if (value === 'none' || value === 'unknown') expect(evidence, `${profile.key} · ${capability}`).toEqual({ kind: 'unverified' });
-        else expect(evidence.kind, `${profile.key} · ${capability}`).not.toBe('unverified');
+        // `webSearchTool` is the one exception (ADR 0080 §2, §3): a vendor page may affirmatively
+        // establish that no search tool exists, which is stronger than nobody having looked.
+        if (capability === 'webSearchTool' && value === 'none') {
+          expect(['unverified', 'vendor-documentation'], `${profile.key} · ${capability}`).toContain(evidence.kind);
+        } else if (value === 'none' || value === 'unknown') {
+          expect(evidence, `${profile.key} · ${capability}`).toEqual({ kind: 'unverified' });
+        } else {
+          expect(evidence.kind, `${profile.key} · ${capability}`).not.toBe('unverified');
+        }
       }
     }
     expect(OPENCODE_GO_V4_FLASH_PROFILE.evidence.answerChannel).toMatchObject({ kind: 'live-test-item', observedOn: '2026-09-07' });
@@ -386,6 +400,8 @@ describe('model capability profiles', () => {
       answerChannel: 'none',
       reasoningChannel: 'none',
       usageAttribution: 'unknown',
+      toolCalling: 'none',
+      webSearchTool: 'none',
     });
     // Inactive means inactive: no route profile, no binding, and no policy names it.
     expect(OPENCODE_GO_ROUTE_PROFILE).not.toHaveProperty('model');
