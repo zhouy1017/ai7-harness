@@ -1,6 +1,6 @@
 # AI7 development plan
 
-Status: **Owner-accepted delivery order under [ADR 0064](../adr/0064-reweight-repository-development-toward-value-first-delivery.md), re-cut on `dev@28cc1dd800cf55b17947cceb64a3bce4d81ccfef` on 2026-09-10 from the backend alignment list of the [editor-facing surface specification](../ui-ux-v2/editor-surfaces.md) §11 ([ADR 0077](../adr/0077-adopt-the-editor-facing-surface-specification-as-the-execution-standard.md) §7, [ADR 0078](../adr/0078-align-the-remaining-references-the-plan-and-the-tracker-to-the-editor-facing-specification.md)).** This file is the only place the order lives. Root [`PROGRESS.md`](../../PROGRESS.md) names the next slice; every slice Issue carries its plan slot. The order changes only through a Commander pull request that edits this file and states the reason; a change that alters product authority also needs an ADR. The order as it stood before the re-cut is archived at [docs/archive/editor-surfaces-standard-2026-09-10](../archive/editor-surfaces-standard-2026-09-10/INDEX.md).
+Status: **Owner-accepted delivery order under [ADR 0064](../adr/0064-reweight-repository-development-toward-value-first-delivery.md), re-cut on `dev@28cc1dd800cf55b17947cceb64a3bce4d81ccfef` on 2026-09-10 from the backend alignment list of the [editor-facing surface specification](../ui-ux-v2/editor-surfaces.md) §11 ([ADR 0077](../adr/0077-adopt-the-editor-facing-surface-specification-as-the-execution-standard.md) §7, [ADR 0078](../adr/0078-align-the-remaining-references-the-plan-and-the-tracker-to-the-editor-facing-specification.md)).** This file is the only place the order lives. Status columns were refreshed at `dev@d3c04b3` on 2026-09-17 by the agent-readiness review; no order changed. Root [`PROGRESS.md`](../../PROGRESS.md) names the next slice; every slice Issue carries its plan slot. The order changes only through a Commander pull request that edits this file and states the reason; a change that alters product authority also needs an ADR. The order as it stood before the re-cut is archived at [docs/archive/editor-surfaces-standard-2026-09-10](../archive/editor-surfaces-standard-2026-09-10/INDEX.md).
 
 ## Why this order
 
@@ -38,7 +38,7 @@ Exit criterion: one `developer-live` Run on exact `sample1` produces unit result
 | 1.5 | S19 | #54 | T3 | J-04 | `保存为来源材料` research snapshot; exact-revision Correction Proposal | S18 | superseded: retention → S70, the Correction Proposal as 修改建议 → S58 and S59; #54 closed 2026-09-10 |
 | 1.6 | S43 | #275 | T3 | J-04 | Assurance Sampling Contract v1 over the Run's own findings | S42, S18 | integrated (PR #397, `dev@7b8f626d`); dispositions render in S69 and S71 |
 | 1.7 | S44 | #276 | T3 | J-04 | Durable Run Report inside every Task Outcome | S43 | S44a integrated (PR #399, `dev@a9154593`); S44b (opening it) → S71; #276 closed 2026-09-10 |
-| 1.8 | S41-f1 | #387 | Commander | J-04 | Replay the model's real analysis of `sample1` in J-04 from the Provider Result Cache | S41 | waits for the Owner's answer on the fixture tool's manuscript-echo bound |
+| 1.8 | S41-f1 | #387 | Commander | J-04 | Replay the model's real analysis of `sample1` in J-04 from the Provider Result Cache | S41 | unblocked by ADR 0079 §5 (2026-09-10: exact `sample1` is exempt from the echo rule); units 4 and 7 still need one named live item each (ADR 0070); not yet run |
 
 ## Phase 1c — what the first live Run exposed (closed except the provider line)
 
@@ -65,7 +65,10 @@ The storage rows implement ⑤ 设置 › 数据与存储; the storage decision 
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | — | S85 | #433 | T3 | J-12 | 数据版本 shown apart from the software version, frozen at release, changed only with backup, disclosure and rollback (B24) | ADR 0079 §1 | planned |
 | — | S86 | #434 | T3 | J-12 | 导出数据库 / 导入数据库 with preview, 替换 after an automatic backup or 合并; 定期自动备份 off by default (B25) | S85 | planned |
-| — | S87 | #437 | T0 | — | Provider assignment design: every provider-involving task, its Model Role, the capabilities it needs (including the web-search tool), provider and model per scope, the credential slots to enroll (ADR 0079 §6) | ADR 0073, ADR 0079 | integrated as ADR 0080 (PR #449, `dev@ab76db6`); the platform-tools slice of its §7.8 and the Provider Processing v7 bytes follow |
+| — | S87 | #437 | T0 | — | Provider assignment design: every provider-involving task, its Model Role, the capabilities it needs (including the web-search tool), provider and model per scope, the credential slots to enroll (ADR 0079 §6) | ADR 0073, ADR 0079 | integrated as ADR 0080 (PR #449, `dev@ab76db6`); #437 closed as completed on 2026-09-17 |
+| — | S87-f1 | #464 | T1 | J-04 | `toolCalling` and `webSearchTool` declared in every model capability profile with their evidence, inert (ADR 0080 §7.8 step 1) | S87 | integrated (PR #468) |
+| — | S87-f2 | #465 | T2 | — | Provider Processing v7 bytes for `developer-live`: the two platform tools on the eligible-only rule, selected by no active set (ADR 0080 §7.8 step 2) | S87-f1 | integrated (PR #466); the Owner's byte decisions of 2026-09-12 — Parallel as the service, 90,000 tokens per frozen unit |
+| — | S87-f3 | #473 | T3 | J-04 | AI7 platform tools `websearch` and `webfetch`: the Egress Gate narrowings, the network-denial allowance set, the `tool` payload source, their ledger and cache, and active-policy-set v6 selecting v7 (ADR 0080 §7.8 step 3) | S87-f2; ADR 0074 §3 | planned; the provider line's next unit, ahead of S70 or as its first half; the active-set v6 bytes are the Owner's byte review at Ready |
 
 ## Phase 2 — the manuscript surface, review, files and delivery
 
@@ -74,22 +77,23 @@ Exit criterion: an editor opens a Book into the manuscript at the last position,
 | Order | Slice | Issue | Class | Journey | Outcome | Depends on | Status |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | 2.0 | S88 | #438 | T3 | J-01, J-08 | Keep only `sample1` in the repository; the other five SampleBooks become local-only test material; J-01's `.doc` scenario, J-08's inputs and the service builders retarget (ADR 0079 §5) | — | integrated (PR #446, `dev@6d1d095`) |
-| 2.1 | S57 | #405 | T2 | J-12 | ① Open a Book into the manuscript at its last position; 工作概览 becomes a destination (B1) | — | planned |
+| 2.1 | S57 | #405 | T2 | J-12 | ① Open a Book into the manuscript at its last position; 工作概览 becomes a destination (B1) | S57-s | integrated (PR #470, `dev@1860641`); its `e2e:all` rung was withheld under the wave of 2026-09-12, and the hosted nightly has failed J-02 at `j14-behavior` on most runs since — #474 |
+| 2.1a | S57-s | #467 | T3 | J-12 | Remember a manuscript's entry position: the additive record at schema revision 21, written on arrival, paging and leaving | — | integrated (PR #469, `dev@6327643`) |
 | 2.2 | S71 | #406 | T2 | J-04 | ①b / ②A The finished analysis chain in editorial language, including the Run Report (S42b, S44b) | Phase 1, S57 | planned |
-| 2.3 | S58 | #407 | T3 | J-05 | ① Editorial marks: 批注, 备注, 高亮 and 修改建议 as Proposal Change Items (B2) | S57 | planned |
+| 2.3 | S58 | #407 | T3 | J-05 | ① Editorial marks: 批注, 备注, 高亮 and 修改建议 as Proposal Change Items (B2) | S57 | planned · **Owner routing decision first**: J-05 has no runner, and admitting one is the Owner's explicit routing decision ([CI and test boundaries](../agents/ci-test-boundaries.md); ADR 0055 and ADR 0056 are the precedents) |
 | 2.4 | S59 | #408 | T3 | J-05 | ① / ②B One-click 接受并应用 with the three records kept apart (B3) | S58 | planned |
 | 2.5 | S60 | #409 | T2 | J-02 | ① Position rail lanes in the unified 导航 column (B5) | S58 | planned |
 | 2.6 | S69 | #417 | T3 | J-04 | ②B 审阅: multi-category Review Runs, coverage matrix, Reports, findings synced to marks, 书系一致性 (B6) | S58, S18a | planned |
-| 2.7 | S22 | #57 | T3 | J-06 | Same-block and structural conflicts resolved all-or-none, returning through 接受并应用 | S59 | planned |
+| 2.7 | S22 | #57 | T3 | J-06 | Same-block and structural conflicts resolved all-or-none, returning through 接受并应用 | S59 | planned · **Owner routing decision first**: J-06 has no runner (as 2.3) |
 | 2.8 | S61 | #410 | T3 | J-01 | ④ DOCX content retained with the Source Version by default; 保留 / 并入 per class (B14) | — | planned |
 | 2.9 | S62 | #411 | T2 | J-01 | ④ Imported comments and tracked changes enter as marks (B15) | S58, S61 | planned |
 | 2.10 | S63 | #412 | T3 | J-01 | ④ Chapter-level reimport with four verbs; marks migrate; return to the manuscript (B16) | S58 | planned |
-| 2.11 | S64 | #413 | T3 | J-07 | ④ Export to DOCX / PDF / Markdown with 含批注 / 含修改建议, fidelity table, system picker, receipt (B17) | S58, S61 (the External Export Policy v2 bytes are integrated, PR #440) | planned |
+| 2.11 | S64 | #413 | T3 | J-07 | ④ Export to DOCX / PDF / Markdown with 含批注 / 含修改建议, fidelity table, system picker, receipt (B17) | S58, S61 (the External Export Policy v2 bytes are integrated, PR #440, and need no further confirmation) | planned · **Owner routing decision first**: J-07 has no runner (as 2.3) |
 | 2.12 | S65 | #414 | T3 | J-07 | ⑥ 发稿: Manuscript-only milestones and 设为发稿版本 (B26) | — | planned |
 | 2.13 | S66 | #415 | T3 | J-07 | ⑥ Production Documents: types, versions, workflow and gates, Delivery Records, 交付后有修改, 本书不做 (B27) | S64, S58 | planned |
 | 2.14 | S67 | #416 | T3 | J-07 | ⑥ 图书交付包: conditions, frozen manifest, versions, export history (B28) | S64, S65, S66 | planned |
 
-Each slice's detail is in its Issue and in the specification's screen section; this table carries only the order and the dependencies.
+Each slice's detail is in its Issue and in the specification's screen section; this table carries only the order and the dependencies. J-05, J-06 and J-07 have no runner today: under [CI and test boundaries](../agents/ci-test-boundaries.md) admitting one is an explicit Owner routing decision, taken when 2.3, 2.7 and 2.11 are reached, and the recommended shape is recorded in `PROGRESS.md` — the runner, `ADMITTED_JOURNEYS`, `JOURNEY_MODULES`, `JOURNEY_LOCATIONS`, `e2e/run-all.mjs` and the nightly's full set cut over atomically in the first slice's pull request, `GATE_JOURNEYS` unchanged. Phases 3 to 5 meet the same decision at J-09, J-10, J-11, J-13 and J-16.
 
 ## Phase 3 — one Task Drawer and run governance
 
@@ -108,7 +112,7 @@ Exit criterion: any Task shows its plan in the Task Drawer in 精简 or 完整 m
 | 3.9 | S78 | #424 | T2 | J-09 | ⑤ 待我处理: four cross-Book groups (B18) | S72 | planned |
 | 3.10 | S14 | #49 | T3 | J-09 | Concurrent Book work without focus or scope leakage | S78, S16 | planned |
 | 3.11 | S39 | #95 | T3 | J-09 | Background Analysis Enrollment and revocation | S14 | planned |
-| 3.12 | S70 | #425 | T3 | J-04 | ②B / ⑤ External Evidence Retention Procedure; the live research path of 事实核查 (B13) | S69; ADR 0074 (accepted 2026-09-10, PR #391); S87's web-search binding (ADR 0079 §4) | after S87 |
+| 3.12 | S70 | #425 | T3 | J-04 | ②B / ⑤ External Evidence Retention Procedure; the live research path of 事实核查 (B13) | S69; ADR 0074 (accepted 2026-09-10, PR #391); S87-f3 (#473) | after S87-f3; the Factual Verification Policy v1 bytes and the egress document it writes are the Owner's byte review at Ready |
 | 3.13 | S68 | #426 | T2 | J-07 | ⑥ 维护事项 (B30) | S65, S59 | planned |
 
 ## Phase 4 — the knowledge base, evaluation and learning
@@ -160,7 +164,8 @@ Exit criterion: 知识库 holds the seven classes with versions and selection sn
 
 Open, recorded, and deliberately not ordered — the Commander schedules them when the Owner reaches them.
 
-- #286 (the retried unit's payload digest on the Plan Adaptation), #287 (durable-state drift proven beyond unit tests), #288 (the Task Intent range versus later plan versions; its visible half is satisfied by S72's context chips). #281 (PR #445), #301 (2026-09-07) and #328 (PR #444) are closed; #286 and #287 are dispatchable now that #281 is in.
+- **Gate health, ahead of every unit below and of Phase 2's 2.2:** #474 (J-02 fails at `j14-behavior` on five of the six hosted nightly platform runs since PR #470 and passes on the developer host) and #475 (J-01 fails on hosted Windows on three of five nights). Under ADR 0081 the queue tests every candidate as the tree that would land, which contains `dev`, so the nightly merges nothing until the nightly over `dev` is green again.
+- #286 (the retried unit's payload digest on the Plan Adaptation) and #288 (the Task Intent range versus later plan versions; its visible half is satisfied by S72's context chips); #286 is dispatchable now that #281 is in. #287 (durable-state drift proven beyond unit tests) is **parked** since 2026-09-12: attempt A1 proved its premise unreachable today — the sidecar pin is immutable and four of five Provider Binding columns are CHECK-pinned — and it is re-cut when S87-f3 (#473) or S55a (#435) makes a second admitted binding possible, or a sidecar Revision 3 exists. #452 (the provider literals) is routed, not scheduled: the union and profile share to S55a, the gate and store share to S87-f3, the schema share its own T3. #281 (PR #445), #301 (2026-09-07) and #328 (PR #444) are closed.
 
 ## Recording under ADR 0044
 
