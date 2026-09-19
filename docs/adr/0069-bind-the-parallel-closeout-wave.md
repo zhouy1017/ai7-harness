@@ -2,6 +2,8 @@
 status: accepted
 ---
 
+> Amended by [ADR 0083](./0083-run-every-agent-s-electron-journeys-on-the-background-test-guests.md): Electron Journeys run on the background test guests, one run per guest at a time, which replaces the single E2E slot. The `ready-for-e2e` hand-off applies only while no guest is idle, and an attempt that waits never runs a Journey on the development host's own desktop instead. The bindings and the file-disjoint rule are unchanged.
+
 # Bind the parallel closeout wave to an Opus Commander and Sonnet T1 Workers at high effort
 
 On 2026-09-07, after the governance closeout of that day, the Owner resumed development in a different shape: split the standing design and Issue backlog into units a `claude-sonnet-5 @ high` Worker can finish, run several of them in parallel, and have the Commander at `claude-opus-5 @ high` review every result and merge every pull request. Three things in force do not admit that as written — the T1 effort of [ADR 0061](./0061-route-repository-dispatch-by-commander-harness.md), the Commander binding of [ADR 0068](./0068-rebind-the-t3-worker-and-reserve-fable-for-the-commander-and-reviewer.md), and the absence of any rule about running two Electron Journeys on one host — so this decision records all three.

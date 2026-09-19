@@ -2,6 +2,8 @@
 status: accepted
 ---
 
+> Amended by [ADR 0083](./0083-run-every-agent-s-electron-journeys-on-the-background-test-guests.md): for an agent, the "actual supported development host" on which the ladder runs is a background test guest reached through the host runner, never the development host's own desktop, and the full-fidelity artifacts of a guest `e2e:debug` or `e2e:repeat` run are also kept, zipped, in the runner's results directories outside every repository. The layers, their order and what each is evidence of are unchanged.
+
 # Adopt a local verification ladder with CI as the delivery gate
 
 On 2026-09-04 the Owner reviewed the development test process and found it inverted: the only automated surface was the fourteen-minute Hosted E2E Functional Gate, local runs discarded every error detail, and the Gate had become the debugger (43 of the last 100 runs failed, one branch ran it 22 times, and five consecutive Issues added diagnostic markers for one intermittent Windows-only J-02 failure without a root cause). This decision amends [ADR 0027](./0027-concentrate-ci-on-e2e-functionality.md)'s engineering-rigor trade-off for local development, amends [ADR 0049](./0049-bound-hosted-actions-consumption-inside-the-e2e-gate.md)'s local feedback loop and [ADR 0053](./0053-preserve-local-first-development-through-a-bounded-ci-degraded-mode.md)'s Local diagnostic clause, and leaves the Gate itself unchanged as the per-Ready-pull-request delivery gate.

@@ -54,9 +54,11 @@ Send only: the Issue URL, the preallocated `dispatch_id`, the Brief revision (an
 ### Change closure
 - Outcome delivered; Journey and Gate disposition
 - Planned vs actual change: owners touched, new owner and why, synchronized deltas
-- Local Verification Ladder: exact head, host, outcome per available layer (product work); `N/A` for documentation only
+- Local Verification Ladder: exact head, host (for agent-run work the background test guest that ran it, ADR 0083), outcome per available layer, and every disclosed skip (product work); `N/A` for documentation only
 - Migration and cleanup; unresolved matters; safe next action
 - `PROGRESS.md` updated in this pull request: yes | no
 ```
+
+For agent-run work the ladder line's host is the background test guest that ran it; [CI and test boundaries](./ci-test-boundaries.md#where-the-ladder-runs) owns the rule under [ADR 0083](../adr/0083-run-every-agent-s-electron-journeys-on-the-background-test-guests.md).
 
 Work that exceeds the allowed change is not ready for integration until the Issue is re-scoped.
