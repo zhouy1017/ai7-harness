@@ -1007,25 +1007,34 @@ async function runRestartJourney(renderer) {
 }
 
 async function runAccessibilityJourney(renderer) {
-  at('j14-behavior');
+  // One `at()` per step: the hosted marker names only `at()` stages, and a stage that holds eight
+  // assertions behind one name cannot say which of them a hosted runner failed (#474).
   const modifier = process.platform === 'darwin' ? 4 : 2;
+  at('j14-composition-focus');
   await assertRenderer(renderer, `(() => { const editor = document.querySelector('[data-testid="manuscript-editor"]'); if (!(editor instanceof HTMLElement)) return false; editor.focus(); return document.activeElement === editor; })()`, 'composition-focus');
+  at('j14-ime-command-guard');
   await renderer.send('Input.imeSetComposition', { text: '编', selectionStart: 1, selectionEnd: 1, replacementStart: 0, replacementEnd: 0 });
   await press(renderer, 'f', modifier);
   await assertRenderer(renderer, `document.activeElement?.id !== 'manuscript-search' && document.querySelector('#persistence-status')?.textContent.includes('输入法组合尚未结束')`, 'ime-command-guard');
+  at('j14-keyboard-search-focus');
   await renderer.send('Input.imeSetComposition', { text: '', selectionStart: 0, selectionEnd: 0, replacementStart: 0, replacementEnd: 1 });
   await press(renderer, 'f', modifier);
   await waitFor(renderer, `document.activeElement?.id === 'manuscript-search'`, 'keyboard-search-focus');
+  at('j14-visible-focus');
   await assertRenderer(renderer, `(() => { const input = document.querySelector('#manuscript-search'); return input?.matches(':focus-visible') && getComputedStyle(input).outlineStyle !== 'none'; })()`, 'visible-focus');
+  at('j14-keyboard-window-crossing');
   await renderer.evaluate(`(() => { const editor = document.querySelector('[data-testid="manuscript-editor"]'); editor?.focus(); globalThis.__ai7BeforePageKey = editor?.firstElementChild?.dataset.blockId; })()`);
   await press(renderer, 'PageDown');
   await waitFor(renderer, `document.querySelector('[data-testid="manuscript-editor"]')?.firstElementChild?.dataset.blockId !== globalThis.__ai7BeforePageKey`, 'keyboard-window-crossing');
+  at('j14-fine-scroll-window-crossing');
   await renderer.evaluate(`new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
   await renderer.evaluate(`(() => { const surface = document.querySelector('.editor-window'); globalThis.__ai7BeforeFineScroll = document.querySelector('[data-testid="manuscript-editor"]')?.firstElementChild?.dataset.blockId; surface.scrollTop = surface.scrollHeight; })()`);
   await waitFor(renderer, `document.querySelector('[data-testid="manuscript-editor"]')?.firstElementChild?.dataset.blockId !== globalThis.__ai7BeforeFineScroll`, 'fine-scroll-window-crossing');
+  at('j14-zoom-200-reflow');
   await renderer.send('Emulation.setDeviceMetricsOverride', { width: 640, height: 800, deviceScaleFactor: 2, mobile: false });
   await renderer.send('Emulation.setPageScaleFactor', { pageScaleFactor: 2 });
   await assertRenderer(renderer, `getComputedStyle(document.querySelector('.editor-workspace')).gridTemplateColumns.split(' ').length === 1 && document.documentElement.scrollWidth <= document.documentElement.clientWidth + 2`, 'zoom-200-reflow');
+  at('j14-forced-colors');
   await renderer.send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'active' }] });
   await assertRenderer(renderer, `matchMedia('(forced-colors: active)').matches && getComputedStyle(document.querySelector('.editor-shell')).boxShadow === 'none' && getComputedStyle(document.querySelector('button')).borderStyle !== 'none'`, 'forced-colors');
 }
@@ -1049,6 +1058,7 @@ async function main() {
   let runRootAcquisition;
   let browser;
   let browserAcquisition;
+  let journeyCompleted = false;
   const closeOwnedBrowser = async () => {
     const ownedBrowser = browser ?? (browserAcquisition === undefined ? undefined : await browserAcquisition.catch(() => undefined));
     await ownedBrowser?.close().catch(() => undefined);
@@ -1100,11 +1110,18 @@ async function main() {
     renderer = await launch('restart');
     await runRestartJourney(renderer);
     await runAccessibilityJourney(renderer);
+    // The close and what follows it are their own stages: left under the last j14 step, a failure to
+    // shut the product down or to clear the run root would read as an accessibility failure (#474).
+    at('completion-browser-close');
     await browser.close();
     browser = undefined;
+    at('completion-fixture-survived');
     requireJourney((await stat(docx)).size > CHARACTER_COUNT, 'fixture-survived-until-completion');
+    journeyCompleted = true;
   } finally {
     try {
+      // Only a Journey that finished names its cleanup; one that failed keeps the stage it failed at.
+      if (journeyCompleted) at('completion-cleanup');
       await cancellation.cleanup();
     } finally {
       cancellation.dispose();
