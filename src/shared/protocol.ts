@@ -1,4 +1,4 @@
-export const SERVICE_PROTOCOL_VERSION = 29 as const;
+export const SERVICE_PROTOCOL_VERSION = 30 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -2132,6 +2132,14 @@ export interface BaselineAnalysisHistoryEntryProjection {
   predecessor: null | { revisionId: string; ordinal: number; digest: string };
   reusePlanDigest: string | null;
   producingRun: { taskIntentId: string; runRecordId: string; attemptId: string; classification: 'completed' | 'completed-with-gaps' | 'failed' | 'interrupted' | null };
+  /**
+   * The Run Report of the Run that produced this revision (ADR 0066 §Run Report), read from that Run's
+   * own Task Outcome, so 历史与更新 opens the report of every Run and not only the latest Task's. `null`
+   * for a revision whose outcome was recorded before the report existed, or whose Run recorded none.
+   */
+  report: RunReportProjection | null;
+  /** Why there is no report to read; `null` exactly when there is one. */
+  reportAbsentReason: string | null;
   usage: { inputTokens: number; outputTokens: number; requests: number };
   unitsTotal: number;
   unitsClosed: number;

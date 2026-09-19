@@ -138,6 +138,9 @@ export interface RunReportFacts {
 /** The reading a Task Outcome recorded before this slice carries; it is history and is never rewritten. */
 export const PRE_RUN_REPORT_REASON = '该任务结果由未生成运行报告的运行产生。' as const;
 
+/** The reading of a revision whose producing Run recorded no Task Outcome at all, so there is no report to open. */
+export const NO_TASK_OUTCOME_REASON = '产出该修订版的运行没有记录任务结果，因此没有运行报告。' as const;
+
 function tally<T>(items: ReadonlyArray<T>, key: (item: T) => string): Array<{ key: string; count: number }> {
   const counts = new Map<string, number>();
   for (const item of items) {
