@@ -6,6 +6,8 @@ supersedes: ADR 0043 in part (§5: the repository admission narrows to exact `sa
 amends: ADR 0066 §Research budget and ADR 0074 §2, §3 (read under §4.3 for the model-tool path); V2-UX-SRC-013 and DSTO-017; `requirements.md` gains `## Network egress` (EGR-001 to 005); the development plan and the tracker (S87, S88)
 ---
 
+> Amended by [ADR 0084](./0084-admit-the-legacy-doc-to-the-background-test-guests-for-j-01.md): §5.1's "keeps them as local-only test material in the untracked source directory" additionally lets a background test guest on the development host hold the one legacy `.doc`, outside its checkout, for J-01's `.doc` scenario. The repository admission, the no-derivative rule and the `developer-live` transmittable set are unchanged.
+
 # 0079 · Record the Owner's decisions of 2026-09-10 on storage, policy revisions, export objects, network egress, provider assignment and the repository SampleBooks
 
 ## Context

@@ -21,6 +21,16 @@ of them look for it there:
 - Otherwise the checkout's own `SampleBooks/` is searched, so dropping a file back beside `sample1`
   is enough to run the gated cases.
 
+Under [ADR 0084](../docs/adr/0084-admit-the-legacy-doc-to-the-background-test-guests-for-j-01.md),
+decided by the Owner on 2026-09-19, one of the five — the legacy `.doc` — is also held by each
+background test guest on the development host, outside the guest's checkout at
+`C:\ai7\local-samplebooks\`, so that J-01's `doc-manuscript` scenario runs there. It is placed
+there only as an Owner action: materialized from the repository history the guest's clone already
+holds, and accepted only when the byte count and SHA-256 match the allowlist row below. The guest
+runner names that directory in `AI7_LOCAL_SAMPLEBOOKS`, so the `.doc`-gated unit and service cases
+in the table below find it there too. The other four files are never materialized on a guest, and
+no agent copies any of the five to a guest or extracts one from repository history.
+
 Absent, every such case skips rather than fails, and a skipped Journey scenario is disclosed by name
 in the run output rather than left invisible. That is the normal state on every CI host: the hosted
 Gate admits no untracked source or personal path as an input
@@ -81,7 +91,9 @@ Exact `sample1.docx` may be used as provider-free input to local and hosted-CI
 tests, including authoring synthetic test data. A consuming scenario must still
 bind the exact admitted input in its own authorized Change Brief. The five
 local-only files may be read by local tests alone: no hosted occurrence, no
-fixture, no derivative, and no transmission.
+fixture, no derivative, and no transmission. A background test guest that holds the legacy `.doc`
+under ADR 0084 is, for that file, a local test host within this sentence, not a hosted occurrence or
+a transmission.
 
 This admission does not authorize raw manuscript payload in logs, diagnostics,
 screenshots, traces, videos, or uploaded artifacts. The five local-only files
