@@ -56,7 +56,7 @@ For this one file a background test guest on the development host counts as a lo
 
 ## Consequences
 
-- Legacy `.doc` intake is covered by every guest ladder again, at no cost to the Owner's desktop. On 2026-09-19, at `dev@bf94f03` (PR #477), `ai7-testbed-02` ran J-01 alone with the file in place: pass in 128 s, with no disclosure. At the head of the pull request that lands this record, `ai7-testbed-01` ran the complete ladder: every layer passed, no disclosed-skip marker was printed, and the `.doc`-gated unit and service cases ran unskipped.
+- Legacy `.doc` intake is covered by every guest ladder again, at no cost to the Owner's desktop. On 2026-09-19, at `dev@bf94f03` (PR #477), `ai7-testbed-02` ran J-01 alone with the file in place: pass in 128 s, with no disclosure. While the pull request that lands this record was prepared, both guests ran the complete ladder with the file in place: every layer passed, no disclosed-skip marker was printed, and the `.doc`-gated unit and service cases ran unskipped.
 - A guest now holds one full manuscript outside its checkout. The self-check bounds that directory to exactly this file; the guests still hold no credential and never call a Provider (they keep the outbound NAT adapter of ADR 0083 §2).
 - Nothing fails silently. If the directory is absent, J-01 discloses the skip and the closure repeats it; if it exists without exactly that file, the self-check blocks the run.
 - An agent cannot read the artifacts of a failing `doc-manuscript` stage, so a failure there that the payload-safe output does not explain goes to the Owner.
