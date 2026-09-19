@@ -36,10 +36,17 @@ const RANGE_GOAL = '重新分析所选范围：绕过所选内容块范围及其
 const BOOK_GOAL = '重新分析全书：绕过全部既有模型结果，按当前覆盖清单重算每个分析单元，追加一个结果集修订版。';
 const REUSE_PLAN_SCHEMA = 'ai7.baseline-manuscript-analysis.reuse-plan/1';
 /** Every button the settled card may carry: navigation, the three update controls, history, the plan-revision controls, and the hidden cancel. */
-const ANALYSIS_ACTIONS = ['return-to-range', 'sync-current', 'reanalyze-range', 'reanalyze-book', 'open-revision', 'close-revision', 'cancel-preparation', 'view-plan-revision', 'reconfirm-plan'];
+// Synchronized delta (#406): ②A's tabs, the four sentences' shortcuts to the tab their next action is
+// taken on, and each update mode's own button with the two ways to begin behind it.
+const ANALYSIS_ACTIONS = ['return-to-range', 'sync-current', 'reanalyze-range', 'reanalyze-book', 'open-revision', 'close-revision', 'cancel-preparation', 'view-plan-revision', 'reconfirm-plan',
+  'select-tab', 'go-history', 'go-chapters', 'choose-sync-current', 'choose-reanalyze-range', 'choose-reanalyze-book', 'quick-sync-current', 'quick-reanalyze-range', 'quick-reanalyze-book'];
 const ONLY_ANALYSIS_ACTIONS = `Array.from(card.querySelectorAll('button')).every((button)=>${JSON.stringify(ANALYSIS_ACTIONS)}.includes(button.dataset.analysisAction))`;
-/** The Book workbench's own primary actions, in the order the populated workbench builds them. */
-const WORKBENCH_ACTIONS = ['打开稿件', '打开另一本图书', '返回图书列表'];
+/** The 分析 destination's own persistent actions, in the order it builds them (#406, V2-UX-LAYER-005). */
+const ANALYSIS_DESTINATION_ACTIONS = ['打开稿件', '工作概览'];
+/** ②A's seven tabs in the specification's order (editor-surfaces §3). */
+const ANALYSIS_TAB_LABELS = ['梗概', '人物与名称', '事件', '关系', '设定', '各章', '历史与更新'];
+/** The four sentences' headings in the order V2-UX-ANALYSIS-025 fixes. */
+const ANALYSIS_SENTENCE_HEADINGS = ['覆盖范围', '全书综合', '与当前稿件', '可信程度'];
 const ASSURANCE_STATEMENT = '仅为模型输出的结构化归纳；不构成事实判定、编辑评审或稿件变更。';
 /**
  * The reducer stages in the order the Run performs them. Synchronized delta (#274): the model-driven
@@ -416,6 +423,37 @@ async function assertRenderer(renderer, expression, name) {
   requireJourney(await renderer.evaluate(`Promise.resolve(${expression}).then((value)=>Boolean(value))`), name);
 }
 
+/**
+ * Synchronized delta (#406): the analysis is its own destination under the manuscript's 资料与记录
+ * group (editor-surfaces §3); 工作概览 no longer hosts the card, it names the analysis in one line.
+ */
+async function openAnalysisDestination(renderer, name) {
+  await assertRenderer(renderer, `(() => { const group=document.querySelector('.editor-shell nav.book-records-group'); const open=group?.querySelector('button[data-records-destination="analysis"]'); if(!(open instanceof HTMLButtonElement)||open.disabled||open.textContent!=='分析')return false; open.click(); return true; })()`, name);
+  await waitFor(renderer, `document.querySelector('[data-screen="book-analysis"] .book-analysis .baseline-analysis-card')`, `${name}-destination`);
+}
+
+/**
+ * Synchronized delta (#406): a mode's own button opens the two ways to begin. 先看计划 prepares the Task
+ * and shows its plan; the quick start is a Default Execution Rule's to give (S75), so until one exists
+ * it is shown disabled with the reason, and no Run starts behind a plan nobody has seen.
+ */
+async function startUpdate(renderer, mode, label, name) {
+  // The three modes live under 历史与更新, so the editor goes there first, as they would.
+  await assertRenderer(renderer, `(() => { const card=document.querySelector('.baseline-analysis-card'); const tab=card?.querySelector('[role="tab"][data-analysis-tab="history"]'); if(!(tab instanceof HTMLButtonElement))return false; tab.click(); return tab.getAttribute('aria-selected')==='true' && !card.querySelector('[data-analysis-panel="history"]').hidden; })()`, `${name}-history-tab`);
+  await click(renderer, label, `${name}-choose`);
+  await assertRenderer(renderer, `(() => {
+    const block=document.querySelector('.baseline-analysis-card [data-update-action=${JSON.stringify(mode)}]');
+    const chooser=block?.querySelector('[data-analysis-action=${JSON.stringify(`choose-${mode}`)}]');
+    const choice=block?.querySelector('.analysis-update-choice');
+    const quick=choice?.querySelector('[data-analysis-action=${JSON.stringify(`quick-${mode}`)}]');
+    const plan=choice?.querySelector('[data-analysis-action=${JSON.stringify(mode)}]');
+    if(!(chooser instanceof HTMLButtonElement)||!(choice instanceof HTMLElement)||!(quick instanceof HTMLButtonElement)||!(plan instanceof HTMLButtonElement)) return false;
+    if(choice.hidden||chooser.getAttribute('aria-expanded')!=='true'||!quick.disabled||plan.disabled||plan.textContent!=='先看计划'||!choice.textContent.includes('快速开始默认')) return false;
+    plan.click();
+    return true;
+  })()`, name);
+}
+
 async function click(renderer, label, name) {
   await assertRenderer(
     renderer,
@@ -487,8 +525,7 @@ async function saveEditorSuffix(renderer, suffix, expectedSequence, cancellation
   await waitFor(renderer, `document.querySelector('#persistence-status')?.dataset.tone==='success' && document.querySelector('#persistence-status')?.textContent.includes('修订日志')`, 'edit-durable', 120_000);
   cancellation.throwIfRequested();
   await assertRenderer(renderer, `document.querySelector('.editor-meta')?.textContent.includes(${JSON.stringify(`修订日志序号 ${expectedSequence}`)})`, 'edit-sequence');
-  await click(renderer, '返回图书工作概览', 'edit-return');
-  await waitFor(renderer, `document.querySelector('[data-screen="book-overview"]')`, 'edit-returned');
+  await openAnalysisDestination(renderer, 'edit-return');
 }
 
 function sameRange(unit, expected) {
@@ -895,7 +932,8 @@ async function main() {
     cancellation.throwIfRequested();
 
     at('analysis-prerequisites-unavailable');
-    await waitFor(renderer, `document.querySelector('.baseline-analysis-card[data-analysis-state="unavailable"]')`, 'analysis-unavailable-before-prerequisites');
+    // Synchronized delta (#406): on 工作概览 the analysis is one line, not the card.
+    await waitFor(renderer, `document.querySelector('.book-overview .book-analysis-summary[data-analysis-state="unavailable"]') && !document.querySelector('.baseline-analysis-card')`, 'analysis-unavailable-before-prerequisites');
     await assertRenderer(renderer, `!document.querySelector('[data-analysis-action]') && !Array.from(document.querySelectorAll('button')).some((button)=>button.textContent==='开始基线稿件分析')`, 'analysis-no-premature-prepare');
 
     at('artifact-revision2');
@@ -987,8 +1025,12 @@ async function main() {
     // Synchronized delta with Issue #405: the Book route enters the manuscript now (V2-UX-RET-002),
     // and 工作概览 is reached back through the manuscript's 资料与记录 group (V2-UX-IA-012).
     await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(imported.bookId)}]')`, 'book-reopened-manuscript');
+    // Synchronized delta (#406): 工作概览 still opens from 资料与记录 and now names the analysis in one
+    // line that leads to its destination; the card itself is reached through 分析.
     await click(renderer, '返回图书工作概览', 'book-reopened-to-overview');
-    await waitFor(renderer, `document.querySelector('.book-overview[data-book-id=${JSON.stringify(imported.bookId)}]')`, 'book-reopened');
+    await waitFor(renderer, `document.querySelector('.book-overview[data-book-id=${JSON.stringify(imported.bookId)}] .book-analysis-summary[data-analysis-state="available"] [data-analysis-action="open-analysis"]') && !document.querySelector('.baseline-analysis-card')`, 'book-reopened');
+    await click(renderer, '打开分析', 'book-reopened-open-analysis');
+    await waitFor(renderer, `document.querySelector('[data-screen="book-analysis"] .book-analysis[data-book-id=${JSON.stringify(imported.bookId)}]')`, 'book-reopened-analysis');
     await waitFor(renderer, `document.querySelector('.baseline-analysis-card[data-analysis-state="available"]')`, 'analysis-available');
     await assertRenderer(renderer, `(() => { const card=document.querySelector('.baseline-analysis-card'); const goal=card?.querySelector('#j04-analysis-goal'); const start=card?.querySelector('[data-analysis-action="prepare"]'); return goal instanceof HTMLInputElement && goal.readOnly && goal.value===${JSON.stringify(TASK_GOAL)} && start instanceof HTMLButtonElement && !start.disabled && start.textContent==='开始基线稿件分析' && !card.querySelector('[data-analysis-action="authorize"]'); })()`, 'analysis-available-surface');
 
@@ -1110,6 +1152,62 @@ async function main() {
         !card.querySelector('[data-analysis-action="prepare"], [data-analysis-action="authorize"]');
     })()`, 'settled-overview-surface');
 
+    // Synchronized delta (#406), V2-UX-ANALYSIS-025 and V2-UX-LAYER-008: the settled revision reads as
+    // ②A's seven tabs with 梗概 selected, four sentences in editorial Chinese under their fixed
+    // headings, and the contradictions counted and pointed at 审阅 rather than listed. The decision
+    // layer of 梗概 carries no block identifier, digest or unit name; the technical layer, closed, still
+    // carries every exact value the assertion above pins. It stays inside `result-set-revision`:
+    // reading the settled revision's own surface is what that stage already is.
+    const leads = revision.assurance.unresolvedConflictCount + revision.assurance.crossUnitFindingCount;
+    await assertRenderer(renderer, `(() => {
+      const card=document.querySelector('.baseline-analysis-card');
+      const tabs=Array.from(card?.querySelectorAll('[role="tablist"] > [role="tab"]')??[]);
+      const panels=Array.from(card?.querySelectorAll('[role="tabpanel"]')??[]);
+      if(JSON.stringify(tabs.map((tab)=>tab.textContent))!==${JSON.stringify(JSON.stringify(ANALYSIS_TAB_LABELS))} || panels.length!==7) return false;
+      if(tabs.filter((tab)=>tab.getAttribute('aria-selected')==='true').length!==1 || tabs[0].getAttribute('aria-selected')!=='true' || card.dataset.analysisTab!=='synopsis') return false;
+      if(panels.filter((panel)=>!panel.hidden).length!==1 || panels[0].hidden || tabs.some((tab,index)=>tab.getAttribute('aria-controls')!==panels[index].id || (tab.tabIndex===0)!==(index===0))) return false;
+      const synopsis=card.querySelector('[data-analysis-panel="synopsis"]');
+      const axes=Array.from(synopsis.querySelectorAll('[data-analysis-axis]'));
+      if(JSON.stringify(axes.map((axis)=>axis.querySelector('h5')?.textContent))!==${JSON.stringify(JSON.stringify(ANALYSIS_SENTENCE_HEADINGS))}) return false;
+      const sentence=(axis)=>axes.find((item)=>item.dataset.analysisAxis===axis)?.querySelector('.analysis-axis-sentence')?.textContent??'';
+      const technical=synopsis.querySelector('details.analysis-revision-technical');
+      if(!(technical instanceof HTMLDetailsElement) || technical.open) return false;
+      const decision=synopsis.cloneNode(true);
+      for(const details of decision.querySelectorAll('details')) details.remove();
+      return sentence('coverage')===${JSON.stringify(`全稿分成 ${revision.coverage.unitsTotal} 个阅读范围，已读完 ${revision.coverage.unitsClosed} 个；还有 ${revision.coverage.gapCount} 个没有读成，在「各章」里标为尚未分析。`)} &&
+        sentence('freshness')===${JSON.stringify(`这份分析读的是 ${revision.manuscriptPin.revisionLabel}，稿件此后没有改动。`)} &&
+        sentence('reducer-closure').includes('没有读成的范围不在其中') &&
+        sentence('assurance').startsWith(${JSON.stringify(ASSURANCE_STATEMENT)}) &&
+        sentence('assurance').includes(${JSON.stringify(`另有 ${leads} 处前后不一致的线索、${revision.assurance.unresolvedItemCount} 项未决事项，归入审阅的「情节逻辑与前后一致」`)}) &&
+        axes.every((axis)=>axis.querySelector('.analysis-axis-next')?.textContent.startsWith('下一步：')) &&
+        decision.querySelector('.analysis-synopsis')?.textContent===${JSON.stringify(revision.synthesis.synopsis)} &&
+        !/blk_|[0-9a-f]{64}/u.test(decision.textContent) && !/单元|Revision|归约|reducer|摘要/u.test(axes.map((axis)=>axis.textContent).join('')) &&
+        !decision.querySelector('.analysis-conflict-list, .analysis-unresolved-list, [data-analysis-conflict-kind]') &&
+        technical.querySelectorAll('[data-analysis-conflict-kind]').length===${revision.conflicts.length} &&
+        technical.textContent.includes(${JSON.stringify(revision.digest)}) && technical.textContent.includes(${JSON.stringify(revision.coverageManifestDigest)}) &&
+        card.querySelectorAll('[data-analysis-panel="chapters"] [data-analysis-unit] > h5').length===${SAMPLE1_UNITS} &&
+        card.querySelector('[data-analysis-panel="chapters"] [data-analysis-unit="2"] .attention-note')?.textContent.startsWith('尚未分析：') &&
+        card.querySelectorAll('[data-analysis-panel="events"] .analysis-event-list > li').length===${revision.synthesis.events.length || 1} &&
+        card.querySelectorAll('[data-analysis-panel="relationships"] .analysis-relationship-list > li').length===${revision.synthesis.relationships.length || 1} &&
+        card.querySelectorAll('[data-analysis-panel="settings"] .analysis-setting-list > li').length===${revision.synthesis.settingClaims.length || 1};
+    })()`, 'analysis-decision-layer-surface');
+
+    // A tab is chosen with the keyboard as a tab list is (arrow keys, one tab stop), and the choice
+    // survives the card's next re-render; the first tab is restored so the rest of the Journey reads
+    // the card exactly as an editor who never touched the tabs would.
+    await assertRenderer(renderer, `(() => {
+      const card=document.querySelector('.baseline-analysis-card');
+      const first=card?.querySelector('[role="tab"][data-analysis-tab="synopsis"]');
+      if(!(first instanceof HTMLButtonElement)) return false;
+      first.focus();
+      first.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowRight',bubbles:true,cancelable:true}));
+      const second=card.querySelector('[role="tab"][data-analysis-tab="entities"]');
+      const moved=document.activeElement===second && second.getAttribute('aria-selected')==='true' && card.dataset.analysisTab==='entities' &&
+        !card.querySelector('[data-analysis-panel="entities"]').hidden && card.querySelector('[data-analysis-panel="synopsis"]').hidden;
+      second.dispatchEvent(new KeyboardEvent('keydown',{key:'Home',bubbles:true,cancelable:true}));
+      return moved && document.activeElement===first && card.dataset.analysisTab==='synopsis';
+    })()`, 'analysis-tabs-keyboard');
+
     // V2-UX-LAYER-006 and 008 on the card's two provenance lists (#333). The Decision Layer reads an
     // entity's provenance as its units and a block count and a conflict's as its kind in the editor's
     // language, so no identifier wall interrupts either list; the exact ranges are still carried,
@@ -1125,7 +1223,7 @@ async function main() {
     await assertRenderer(renderer, `(() => {
       const card=document.querySelector('.baseline-analysis-card');
       const labels=${JSON.stringify(CONFLICT_KIND_LABELS)};
-      const entityList=card?.querySelector('.analysis-synthesis .analysis-list');
+      const entityList=card?.querySelector('[data-analysis-panel="entities"] .analysis-entity-list');
       const entity=Array.from(entityList?.children??[]).find((item)=>item.textContent.startsWith(${JSON.stringify(`${provenanceEntity.name}（`)}));
       const entityExact=entityList?.nextElementSibling;
       const conflictList=card?.querySelector('.analysis-conflict-list');
@@ -1133,8 +1231,10 @@ async function main() {
       const conflictExact=conflictList?.nextElementSibling;
       if(!(entity instanceof HTMLElement) || conflicts.length!==4) return false;
       if(!(entityExact instanceof HTMLDetailsElement) || !(conflictExact instanceof HTMLDetailsElement)) return false;
-      return entity.textContent.endsWith(${JSON.stringify(`）· 来自单元 ${provenanceUnits} · ${provenanceBlocks} 个内容块`)}) &&
+      return entity.querySelector('span')?.textContent.trimEnd().endsWith(${JSON.stringify(`）· 来自单元 ${provenanceUnits} · ${provenanceBlocks} 个内容块`)}) &&
+        !entity.textContent.includes('person') && entity.textContent.includes('（') &&
         !entityList.textContent.includes('blk_') && !conflictList.textContent.includes('blk_') &&
+        conflictList.closest('details.analysis-revision-technical')?.open===false &&
         !entityExact.open && !conflictExact.open &&
         entityExact.querySelector('dl > dd.technical-identity')!==null && conflictExact.querySelector('dl > dd.technical-identity')!==null &&
         entityExact.textContent.includes(${JSON.stringify(provenanceBlockId)}) && conflictExact.textContent.includes(${JSON.stringify(conflictBlockId)}) &&
@@ -1148,10 +1248,10 @@ async function main() {
     // three actions are read by label, enabled state and container — never by document position — and
     // the region is asserted to be genuinely sticky rather than merely to carry the class.
     await assertRenderer(renderer, `(() => {
-      const region=document.querySelector('.book-overview .workbench-actions');
+      const region=document.querySelector('.book-analysis .workbench-actions');
       if(!region) return false;
       const buttons=Array.from(region.querySelectorAll(':scope > button'));
-      return JSON.stringify(buttons.map((button)=>button.textContent))===JSON.stringify(${JSON.stringify(WORKBENCH_ACTIONS)}) &&
+      return JSON.stringify(buttons.map((button)=>button.textContent))===JSON.stringify(${JSON.stringify(ANALYSIS_DESTINATION_ACTIONS)}) &&
         buttons.every((button)=>!button.disabled) &&
         getComputedStyle(region).position==='sticky';
     })()`, 'workbench-actions-persistent');
@@ -1400,14 +1500,44 @@ async function main() {
       reportJson.includes('"wallMs"') && reportJson.includes('"startedAt"') && reportJson.includes('"settledAt"'),
       'run-report-digests', { reportDigest, accountingDigest: report.accountingDigest });
 
+    // Synchronized delta (#406): the report is no longer readable only through the service. The Task
+    // Outcome opens it under 历史与更新: closed by default, its decision layer in the editor's words —
+    // the four stages by name and state, the reading ranges as one sentence of the record's own counts,
+    // the sample, the failures, the adjustments and the `if redone` list — and its technical layer, one
+    // step further, carrying both digests, the instants, the usage per stage and every per-range row.
+    await assertRenderer(renderer, `(() => {
+      const card=document.querySelector('.baseline-analysis-card');
+      const outcome=card?.querySelector('[data-analysis-panel="history"] .analysis-outcome');
+      const opened=outcome?.querySelector(':scope > details.analysis-run-report');
+      if(!(opened instanceof HTMLDetailsElement) || opened.open) return false;
+      const exact=opened.querySelector(':scope > details.technical-details');
+      if(!(exact instanceof HTMLDetailsElement) || exact.open) return false;
+      const decision=opened.cloneNode(true);
+      for(const details of decision.querySelectorAll('details')) details.remove();
+      const stages=Array.from(opened.querySelectorAll('[data-run-report-stage]'));
+      return opened.dataset.runReportDigest===${JSON.stringify(reportDigest)} && opened.dataset.runReportRun===${JSON.stringify(report.runRecordId)} &&
+        opened.dataset.runReportClassification==='completed-with-gaps' &&
+        opened.querySelector(':scope > summary')?.textContent.startsWith('查看运行报告 · 已完成，保留了没读成的部分 · ') &&
+        JSON.stringify(stages.map((stage)=>[stage.dataset.runReportStage, stage.dataset.runReportStageState]))===${JSON.stringify(JSON.stringify(report.stages.map((stage) => [stage.stage, stage.state])))} &&
+        stages[0].textContent.startsWith('逐个阅读范围分析：完成，有没读成的部分') && stages[1].textContent.startsWith('跨范围比对：完成') &&
+        opened.querySelector('.analysis-run-report-units')?.textContent===${JSON.stringify(`共 ${report.units.submitted} 个阅读范围：沿用上一份 ${report.units.reused} 个，重新分析 ${report.units.recomputed} 个，其中 ${report.units.gaps} 个没有读成，${report.units.retried} 个安全重试过。`)} &&
+        opened.querySelector('[data-run-report-if-redone]')?.dataset.runReportIfRedone===${JSON.stringify(report.ifRedone.state)} &&
+        !/[0-9a-f]{64}|[0-9a-f]{8}-[0-9a-f]{4}-|T\\d{2}:\\d{2}:\\d{2}/u.test(decision.textContent) &&
+        exact.textContent.includes(${JSON.stringify(reportDigest)}) && exact.textContent.includes(${JSON.stringify(report.accountingDigest)}) &&
+        exact.textContent.includes(${JSON.stringify(report.recordedAt)}) && exact.textContent.includes(${JSON.stringify(report.runRecordId)}) &&
+        exact.textContent.includes(${JSON.stringify(`${report.usagePerStage.units.requests} 次模型请求 · 输入 ${report.usagePerStage.units.inputTokens} · 输出 ${report.usagePerStage.units.outputTokens}`)}) &&
+        !outcome.querySelector(':scope > p.technical-identity') &&
+        outcome.querySelector(':scope > details.technical-details')?.textContent.includes(${JSON.stringify(settled.taskOutcome.outcomeId)});
+    })()`, 'run-report-surface');
+
     at('return-to-range');
     cancellation.throwIfRequested();
     const gapBlockId = revision.gaps[0].blockIds[0];
     await assertRenderer(renderer, `(() => { const button=document.querySelector('[data-analysis-gap-unit="2"] [data-analysis-action="return-to-range"]'); if(!(button instanceof HTMLButtonElement)||button.disabled||button.dataset.analysisBlockId!==${JSON.stringify(gapBlockId)})return false; button.click(); return true; })()`, 'return-to-range-click');
     await waitFor(renderer, `document.querySelector('[data-screen="editor"] [data-testid="manuscript-editor"] [data-block-id=${JSON.stringify(gapBlockId)}]')`, 'return-to-range-editor', 120_000);
     cancellation.throwIfRequested();
-    await click(renderer, '返回图书工作概览', 'return-to-range-back');
-    await waitFor(renderer, `document.querySelector('[data-screen="book-overview"]') && document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='settled'`, 'return-to-range-overview');
+    await openAnalysisDestination(renderer, 'return-to-range-back');
+    await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='settled'`, 'return-to-range-overview');
     const afterReturn = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
     requireJourney(JSON.stringify(afterReturn) === JSON.stringify(settled), 'return-to-range-read-only');
 
@@ -1418,9 +1548,9 @@ async function main() {
     await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'restart-ready');
     await assertRenderer(renderer, `(() => { const button=document.querySelector('button[data-book-id=${JSON.stringify(imported.bookId)}]'); if(!(button instanceof HTMLButtonElement))return false; button.click(); return true; })()`, 'restart-open-book');
     // Synchronized delta with Issue #405: the Book route enters the manuscript now
-    // (V2-UX-RET-002); this card lives on 工作概览, reached back through 资料与记录 (V2-UX-IA-012).
+    // (V2-UX-RET-002); since #406 this card lives on 资料与记录 › 分析, reached from the manuscript.
     await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(imported.bookId)}]')`, 'restart-open-book-manuscript');
-    await click(renderer, '返回图书工作概览', 'restart-open-book-to-overview');
+    await openAnalysisDestination(renderer, 'restart-open-book-to-overview');
     await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='settled'`, 'restart-record-visible');
     const restarted = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
     requireJourney(JSON.stringify(restarted) === JSON.stringify(settled), 'restart-record-immutable');
@@ -1497,7 +1627,7 @@ async function main() {
 
     at('sync-current-prepare');
     cancellation.throwIfRequested();
-    await click(renderer, '同步到当前稿件', 'sync-click');
+    await startUpdate(renderer, 'sync-current', '同步到当前稿件', 'sync-click');
     await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='prepared'`, 'sync-prepared', 120_000);
     const preparedSync = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
     const syncManifest = preparedSync?.coverageManifest;
@@ -1604,7 +1734,7 @@ async function main() {
 
     at('reanalyze-range-prepare');
     cancellation.throwIfRequested();
-    await click(renderer, '重新分析所选范围', 'range-click');
+    await startUpdate(renderer, 'reanalyze-range', '重新分析所选范围', 'range-click');
     await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='prepared'`, 'range-prepared', 120_000);
     const preparedRange = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
     const rangeManifest = preparedRange?.coverageManifest;
@@ -1651,7 +1781,7 @@ async function main() {
     at('reanalyze-book-prepare');
     cancellation.throwIfRequested();
     await assertRenderer(renderer, `(() => { const whole=document.querySelector('.baseline-analysis-card [data-update-action="reanalyze-book"]'); return whole?.dataset.updateAvailable==='true' && whole.dataset.expectedReused==='0' && whole.dataset.expectedRecomputed==='8' && whole.dataset.expectedInvalidated==='1' && whole.dataset.expectedBypassed==='7' && !whole.querySelector('[data-analysis-action="reanalyze-book"]').disabled; })()`, 'book-control');
-    await click(renderer, '重新分析全书', 'book-click');
+    await startUpdate(renderer, 'reanalyze-book', '重新分析全书', 'book-click');
     await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='prepared'`, 'book-prepared', 120_000);
     const preparedBook = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
     const bookManifest = preparedBook?.coverageManifest;
@@ -1717,7 +1847,7 @@ async function main() {
         entries.map((entry)=>entry.dataset.historyCurrent).join(',')==='false,false,false,true' && entries.map((entry)=>entry.dataset.historyFreshness).join(',')==='superseded,superseded,superseded,current' &&
         entries.map((entry)=>entry.dataset.historyPredecessorOrdinal).join(',')===',1,2,3' &&
         entries.every((entry)=>entry.querySelector('[data-analysis-action="open-revision"]') instanceof HTMLButtonElement && !entry.querySelector('[data-analysis-action="open-revision"]').disabled) &&
-        section.textContent.includes(${JSON.stringify(revision.revisionId)}) && section.textContent.includes(${JSON.stringify(revision4.digest)}) && section.textContent.includes('首次基线分析') && section.textContent.includes('已被取代 · 按原始 pin 保留') &&
+        section.textContent.includes(${JSON.stringify(revision.revisionId)}) && section.textContent.includes(${JSON.stringify(revision4.digest)}) && section.textContent.includes('首次基线分析') && section.textContent.includes('已被后来的分析取代 · 按原样保留') &&
         !section.querySelector('[data-analysis-action="close-revision"]');
     })()`, 'history-surface');
 
@@ -1736,8 +1866,16 @@ async function main() {
       return !section.querySelector('.field-note.technical-identity') &&
         section.querySelectorAll(':scope > details.technical-details').length===1 && !setExact.open &&
         setExact.textContent.includes(${JSON.stringify(revision.resultSetId)}) && setExact.textContent.includes('baseline-manuscript-analysis') &&
-        Array.from(section.querySelectorAll(':scope > p')).some((line)=>line.textContent==='4 个修订版 · 最新 Revision 4') &&
-        entries.every((entry)=>entry.querySelectorAll('details.technical-details').length===1 && entry.querySelectorAll(':scope > p').length===2) &&
+        Array.from(section.querySelectorAll(':scope > p')).some((line)=>line.textContent==='共 4 份分析 · 最新的是第 4 份') &&
+        // Synchronized delta (#406): an entry's two readings speak of 份 and 阅读范围; Revision ordinals,
+        // lineage counts and the exact creation instant are in the entry's own disclosure.
+        entries.every((entry)=>{ const lines=Array.from(entry.querySelectorAll(':scope > p')); const exact=entry.querySelector(':scope > details.technical-details'); return lines[0].textContent.startsWith('第 '+entry.dataset.historyOrdinal+' 份 · ') && !/Revision|单元|pin/u.test(lines[0].textContent+lines[1].textContent) && exact.textContent.includes('Revision '+entry.dataset.historyOrdinal+' · ') && exact.textContent.includes('复用 '); }) &&
+        entries.every((entry)=>entry.querySelectorAll(':scope > details.technical-details').length===1 && entry.querySelectorAll(':scope > p').length===2) &&
+        // Synchronized delta (#406): each entry also opens the report of the Run that produced it — its
+        // own Run's, bound to its own revision, closed by default — so the entry's own identity
+        // disclosure is counted as a direct child and the report's is its own.
+        entries.every((entry)=>{ const opened=entry.querySelector(':scope > details.analysis-run-report'); return opened instanceof HTMLDetailsElement && !opened.open && /^[0-9a-f]{64}$/u.test(opened.dataset.runReportDigest??'') && opened.querySelector('details.technical-details')?.textContent.includes(entry.dataset.historyRevisionId); }) &&
+        new Set(entries.map((entry)=>entry.querySelector(':scope > details.analysis-run-report')?.dataset.runReportDigest)).size===entries.length &&
         firstExact.textContent.includes(${JSON.stringify(revision.revisionId)}) && firstExact.textContent.includes(${JSON.stringify(revision.digest)}) &&
         !first.querySelector(':scope > p').textContent.includes(${JSON.stringify(revision.revisionId)});
     })()`, 'history-identity-disclosure-surface');
@@ -1768,13 +1906,14 @@ async function main() {
     await assertRenderer(renderer, `(() => { const button=document.querySelector('[data-analysis-gap-unit="2"] [data-analysis-action="return-to-range"]'); if(!(button instanceof HTMLButtonElement)||button.disabled||button.dataset.analysisBlockId!==${JSON.stringify(gapBlockId)})return false; button.click(); return true; })()`, 'history-return-to-range-click');
     await waitFor(renderer, `document.querySelector('[data-screen="editor"] [data-testid="manuscript-editor"] [data-block-id=${JSON.stringify(gapBlockId)}]')`, 'history-return-to-range-editor', 120_000);
     cancellation.throwIfRequested();
-    await click(renderer, '返回图书工作概览', 'history-return-back');
-    await waitFor(renderer, `document.querySelector('[data-screen="book-overview"]') && document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='settled'`, 'history-return-overview');
+    await openAnalysisDestination(renderer, 'history-return-back');
+    await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='settled'`, 'history-return-overview');
     await assertRenderer(renderer, `(() => { const card=document.querySelector('.baseline-analysis-card'); return !card?.dataset.inspectedRevisionOrdinal && card?.dataset.resultRevisionOrdinal==='4'; })()`, 'history-latest-restored');
     // Opening another revision and closing it explicitly returns to the latest as well.
     await assertRenderer(renderer, `(() => { const button=document.querySelector('[data-analysis-action="open-revision"][data-analysis-revision-ordinal="2"]'); if(!(button instanceof HTMLButtonElement)||button.disabled)return false; button.click(); return true; })()`, 'history-open-second-click');
     await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.inspectedRevisionOrdinal==='2' && document.querySelector('.baseline-analysis-card')?.dataset.updateMode==='sync-current'`, 'history-open-second-rendered');
-    await click(renderer, '返回最新修订版', 'history-close-click');
+    // Synchronized delta (#406): the action speaks of 份, as the history it sits under does.
+    await click(renderer, '返回最新的一份', 'history-close-click');
     await waitFor(renderer, `!document.querySelector('.baseline-analysis-card')?.dataset.inspectedRevisionOrdinal && document.querySelector('.baseline-analysis-card')?.dataset.resultRevisionOrdinal==='4' && document.querySelector('.baseline-analysis-card')?.dataset.updateMode==='reanalyze-book'`, 'history-closed');
     const afterHistory = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
     requireJourney(JSON.stringify(afterHistory) === JSON.stringify(settledBook), 'history-read-only');
@@ -1786,9 +1925,9 @@ async function main() {
     await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'restart-history-ready');
     await assertRenderer(renderer, `(() => { const button=document.querySelector('button[data-book-id=${JSON.stringify(imported.bookId)}]'); if(!(button instanceof HTMLButtonElement))return false; button.click(); return true; })()`, 'restart-history-open-book');
     // Synchronized delta with Issue #405: the Book route enters the manuscript now
-    // (V2-UX-RET-002); this card lives on the overview, reached back through 资料与记录.
+    // (V2-UX-RET-002); since #406 this card lives on 资料与记录 › 分析, reached from the manuscript.
     await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(imported.bookId)}]')`, 'restart-history-open-book-manuscript');
-    await click(renderer, '返回图书工作概览', 'restart-history-open-book-to-overview');
+    await openAnalysisDestination(renderer, 'restart-history-open-book-to-overview');
     await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='settled' && document.querySelector('.baseline-analysis-card')?.dataset.resultRevisionOrdinal==='4'`, 'restart-history-visible');
     const restartedHistory = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
     requireJourney(JSON.stringify(restartedHistory) === JSON.stringify(settledBook), 'restart-history-immutable');
@@ -1812,9 +1951,9 @@ async function main() {
     await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'safe-retry-ready');
     await assertRenderer(renderer, `(() => { const button=document.querySelector('button[data-book-id=${JSON.stringify(imported.bookId)}]'); if(!(button instanceof HTMLButtonElement))return false; button.click(); return true; })()`, 'safe-retry-open-book');
     // Synchronized delta with Issue #405: the Book route enters the manuscript now
-    // (V2-UX-RET-002); this card lives on the overview, reached back through 资料与记录.
+    // (V2-UX-RET-002); since #406 this card lives on 资料与记录 › 分析, reached from the manuscript.
     await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(imported.bookId)}]')`, 'safe-retry-open-book-manuscript');
-    await click(renderer, '返回图书工作概览', 'safe-retry-open-book-to-overview');
+    await openAnalysisDestination(renderer, 'safe-retry-open-book-to-overview');
     await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='settled' && document.querySelector('.baseline-analysis-card')?.dataset.resultRevisionOrdinal==='4'`, 'safe-retry-book-visible');
     const relaunched = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
     requireJourney(JSON.stringify(relaunched) === JSON.stringify(settledBook), 'safe-retry-relaunch-immutable');
@@ -1827,7 +1966,7 @@ async function main() {
       sameRecord(retryOption.expected, { reused: 5, recomputed: 3, invalidated: 1, bypassed: 2 }), 'safe-retry-option', settledBook.updateControls);
     const retryRange = { startPosition: retryOption.startPosition, endPosition: retryOption.endPosition };
     await assertRenderer(renderer, `(() => { const radio=document.querySelector('.baseline-analysis-card [data-update-action="reanalyze-range"] #analysis-range-5'); if(!(radio instanceof HTMLInputElement)||radio.checked)return false; radio.click(); return radio.checked; })()`, 'safe-retry-range-select');
-    await click(renderer, '重新分析所选范围', 'safe-retry-range-click');
+    await startUpdate(renderer, 'reanalyze-range', '重新分析所选范围', 'safe-retry-range-click');
     await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='prepared'`, 'safe-retry-prepared', 120_000);
     const preparedRetry = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
     const retryBoundary = preparedRetry?.planEnvelope?.boundary;
@@ -1916,7 +2055,7 @@ async function main() {
     const rangeA = { startPosition: driftOptionA.startPosition, endPosition: driftOptionA.endPosition };
     const rangeB = { startPosition: driftOptionB.startPosition, endPosition: driftOptionB.endPosition };
     await assertRenderer(renderer, `(() => { const radio=document.querySelector('.baseline-analysis-card [data-update-action="reanalyze-range"] #analysis-range-3'); if(!(radio instanceof HTMLInputElement)||radio.checked)return false; radio.click(); return radio.checked; })()`, 'plan-revision-select-a');
-    await click(renderer, '重新分析所选范围', 'plan-revision-prepare-click');
+    await startUpdate(renderer, 'reanalyze-range', '重新分析所选范围', 'plan-revision-prepare-click');
     await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='prepared' && document.querySelector('.baseline-analysis-card')?.dataset.taskIntentId!==${JSON.stringify(preparedRetry.taskIntent.taskIntentId)}`, 'plan-revision-prepared', 120_000);
     const preparedDrift = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
     const v1Digest = preparedDrift?.planEnvelope?.digest;
@@ -1931,7 +2070,7 @@ async function main() {
     cancellation.throwIfRequested();
     // The material change before authorization: the selected range moves to unit 8 and the same prepared Task is prepared again.
     await assertRenderer(renderer, `(() => { const radio=document.querySelector('.baseline-analysis-card [data-update-action="reanalyze-range"] #analysis-range-8'); if(!(radio instanceof HTMLInputElement)||radio.checked)return false; radio.click(); return radio.checked; })()`, 'plan-revision-select-b');
-    await click(renderer, '重新分析所选范围', 'plan-revision-drift-click');
+    await startUpdate(renderer, 'reanalyze-range', '重新分析所选范围', 'plan-revision-drift-click');
     await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.planRevisionPending==='true'`, 'plan-revision-pending', 120_000);
     const drifted = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
     // Rebound by the revert stage below, which settles this revision and drifts the plan again.
@@ -1980,7 +2119,7 @@ async function main() {
     // as its own append-only revision, settles the pending one, and returns 授权并开始任务 to the version
     // that was never replaced: the same envelope digest, still one plan version, nothing rewritten.
     await assertRenderer(renderer, `(() => { const radio=document.querySelector('.baseline-analysis-card [data-update-action="reanalyze-range"] #analysis-range-3'); if(!(radio instanceof HTMLInputElement)||radio.checked)return false; radio.click(); return radio.checked; })()`, 'plan-revision-revert-select-a');
-    await click(renderer, '重新分析所选范围', 'plan-revision-revert-click');
+    await startUpdate(renderer, 'reanalyze-range', '重新分析所选范围', 'plan-revision-revert-click');
     await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.planRevisionPending==='false'`, 'plan-revision-reverted', 120_000);
     const reverted = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
     const supersededRevision = reverted?.planRevisions?.[0];
@@ -2017,7 +2156,7 @@ async function main() {
     })()`, 'plan-revision-revert-surface');
     // Back to the change this Task means to confirm: the same range drift, pending on its own again.
     await assertRenderer(renderer, `(() => { const radio=document.querySelector('.baseline-analysis-card [data-update-action="reanalyze-range"] #analysis-range-8'); if(!(radio instanceof HTMLInputElement)||radio.checked)return false; radio.click(); return radio.checked; })()`, 'plan-revision-revert-select-b');
-    await click(renderer, '重新分析所选范围', 'plan-revision-redrift-click');
+    await startUpdate(renderer, 'reanalyze-range', '重新分析所选范围', 'plan-revision-redrift-click');
     await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.planRevisionPending==='true'`, 'plan-revision-redrift-pending', 120_000);
     const redrifted = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
     pendingRevision = redrifted?.planRevision;
