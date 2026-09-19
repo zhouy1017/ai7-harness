@@ -1,11 +1,20 @@
 import type {
+  AnalysisAssuranceAxis,
   AnalysisConflictProjection,
+  AnalysisCoverageAxis,
+  AnalysisEntityKind,
+  AnalysisFreshnessAxis,
+  AnalysisReducerClosureAxis,
   AnalysisSourceRangeProjection,
   LaunchPolicyProjection,
   ProviderProcessingPin,
   ResultSetPolicyPin,
   RunAttemptState,
   RunBudgetCeilingState,
+  RunReportRecordProjection,
+  RunReportStageId,
+  RunReportStageProjection,
+  RunReportUnitAccountingProjection,
 } from '../shared/protocol.js';
 
 /**
@@ -171,3 +180,127 @@ export const ANALYSIS_CONFLICT_KIND_LABELS: Record<AnalysisConflictProjection['k
   'entity-kind-divergence': '实体类别分歧',
   'setting-claim-divergence': '设定声明分歧',
 };
+
+/** The editor's word for each entity kind (V2-UX-LAYER-003); the contract's token stays on the record. */
+export const ANALYSIS_ENTITY_KIND_LABELS: Record<AnalysisEntityKind, string> = {
+  person: '人物',
+  place: '地点',
+  organization: '机构',
+  object: '物品',
+  term: '名称',
+  other: '其他',
+};
+
+/** Where a sentence's safe next action is taken, when it is taken on the analysis surface itself. */
+export type AnalysisSentenceTarget = 'chapters' | 'history' | null;
+
+/** One of the four sentences of V2-UX-ANALYSIS-025: its axis, its heading, what it says, and the one safe next action. */
+export interface AnalysisSentence {
+  axis: 'coverage' | 'reducer-closure' | 'freshness' | 'assurance';
+  heading: '覆盖范围' | '全书综合' | '与当前稿件' | '可信程度';
+  sentence: string;
+  nextAction: string;
+  target: AnalysisSentenceTarget;
+}
+
+/**
+ * The four axes as four sentences in editorial Chinese (V2-UX-ANALYSIS-025): what the analysis read,
+ * what it made of it, how it stands against the manuscript now, and how far it can be trusted — each
+ * with one safe next action. Nothing here counts units by their technical name, names a digest or a
+ * reducer stage; those stay one step away. The contradictions and open questions the analysis found
+ * are counted and pointed at 审阅, never listed: they are that category's leads (V2-UX-REV-011).
+ */
+export function analysisFourSentences(revision: {
+  coverage: Pick<AnalysisCoverageAxis, 'state' | 'unitsTotal' | 'unitsClosed' | 'gapCount'>;
+  reducerClosure: Pick<AnalysisReducerClosureAxis, 'state'>;
+  freshness: Pick<AnalysisFreshnessAxis, 'state'>;
+  assurance: Pick<AnalysisAssuranceAxis, 'unresolvedConflictCount' | 'unresolvedItemCount' | 'lowConfidenceUnitCount' | 'crossUnitFindingCount' | 'sampledPrecision' | 'statement'>;
+  manuscriptPin: { revisionLabel: string };
+}): AnalysisSentence[] {
+  const { coverage, reducerClosure, freshness, assurance } = revision;
+  const read = revision.manuscriptPin.revisionLabel;
+  const leads = assurance.unresolvedConflictCount + assurance.crossUnitFindingCount;
+  const trust = [
+    assurance.statement,
+    ...(assurance.lowConfidenceUnitCount === 0 ? [] : [`其中 ${assurance.lowConfidenceUnitCount} 个阅读范围模型自评把握较低。`]),
+    ...(assurance.sampledPrecision === null ? [] : [`抽样复核了 ${assurance.sampledPrecision.size} 条，${assurance.sampledPrecision.upheld} 条成立。`]),
+    ...(leads === 0 && assurance.unresolvedItemCount === 0
+      ? []
+      : [`另有 ${leads} 处前后不一致的线索、${assurance.unresolvedItemCount} 项未决事项，归入审阅的「情节逻辑与前后一致」，不在这里列出。`]),
+  ].join('');
+  return [
+    coverage.state === 'complete'
+      ? { axis: 'coverage', heading: '覆盖范围', sentence: `全稿分成 ${coverage.unitsTotal} 个阅读范围，全部读完。`, nextAction: '无需处理。', target: null }
+      : {
+          axis: 'coverage',
+          heading: '覆盖范围',
+          sentence: `全稿分成 ${coverage.unitsTotal} 个阅读范围，已读完 ${coverage.unitsClosed} 个；还有 ${coverage.gapCount} 个没有读成，在「各章」里标为尚未分析。`,
+          nextAction: '可在「历史与更新」里重新分析所选范围。',
+          target: 'history',
+        },
+    reducerClosure.state === 'open'
+      ? { axis: 'reducer-closure', heading: '全书综合', sentence: '还没有读完的范围可以合并，所以没有全书梗概。', nextAction: '先补齐尚未分析的范围。', target: 'history' }
+      : {
+          axis: 'reducer-closure',
+          heading: '全书综合',
+          sentence: reducerClosure.state === 'closed'
+            ? '已把读完的范围合并成一份梗概，以及人物与名称、事件、关系、设定四份清单。'
+            : '已把读完的范围合并成一份梗概，以及人物与名称、事件、关系、设定四份清单；没有读成的范围不在其中。',
+          nextAction: reducerClosure.state === 'closed' ? '无需处理。' : '补齐尚未分析的范围后会重新合并。',
+          target: reducerClosure.state === 'closed' ? null : 'chapters',
+        },
+    freshness.state === 'current'
+      ? { axis: 'freshness', heading: '与当前稿件', sentence: `这份分析读的是 ${read}，稿件此后没有改动。`, nextAction: '无需处理。', target: null }
+      : freshness.state === 'stale'
+        ? { axis: 'freshness', heading: '与当前稿件', sentence: `这份分析读的是 ${read}，稿件此后有改动，分析已不是最新。`, nextAction: '可在「历史与更新」里同步到当前稿件。', target: 'history' }
+        : { axis: 'freshness', heading: '与当前稿件', sentence: `这是较早的一份分析，读的是 ${read}；之后已有更新的分析，它按原样保留。`, nextAction: '可在「历史与更新」里返回最新的一份。', target: 'history' },
+    { axis: 'assurance', heading: '可信程度', sentence: trust, nextAction: '需要核实的地方，到「审阅」的「情节逻辑与前后一致」处理。', target: null },
+  ];
+}
+
+/** The Run Report's four stages in the editor's words; `阅读范围` is what the record calls a unit. */
+export const RUN_REPORT_STAGE_LABELS: Record<RunReportStageId, string> = {
+  units: '逐个阅读范围分析',
+  'cross-unit-reduction': '跨范围比对',
+  'assurance-sampling': '抽样复核',
+  reduction: '合并整理',
+};
+
+export const RUN_REPORT_STAGE_STATE_LABELS: Record<RunReportStageProjection['state'], string> = {
+  closed: '完成',
+  'closed-with-gaps': '完成，有没读成的部分',
+  gap: '没有完成',
+  'not-run': '没有运行',
+};
+
+export const RUN_REPORT_CLASSIFICATION_LABELS: Record<RunReportRecordProjection['classification'], string> = {
+  completed: '已完成',
+  'completed-with-gaps': '已完成，保留了没读成的部分',
+  failed: '失败',
+  interrupted: '已中断',
+};
+
+/** How long a stage's own work took, in the reader's units; a stage that never ran has no duration to state. */
+export function durationLabel(wallMs: number | null): string {
+  if (wallMs === null) return '—';
+  if (wallMs < 1000) return '不到 1 秒';
+  const seconds = Math.round(wallMs / 1000);
+  return seconds < 60 ? `${seconds} 秒` : `${Math.floor(seconds / 60)} 分 ${seconds % 60} 秒`;
+}
+
+/**
+ * The step a Run is in, as the Run Liveness Signal names it (V2-UX-LIVE-001, editor-surfaces §10): a
+ * stage and its current object, never `分析单元进度`. The reflection turn runs last, after the revision is
+ * already kept, which is what its label says so that an editor never reads it as the analysis still open.
+ */
+export const RUN_LIVENESS_STAGE_LABELS: Record<'units' | 'cross-unit-reduction' | 'assurance-sampling' | 'run-report-reflection', string> = {
+  units: '正在逐个阅读范围分析',
+  'cross-unit-reduction': '正在跨范围比对',
+  'assurance-sampling': '正在抽样复核',
+  'run-report-reflection': '分析已保存，正在写运行报告',
+};
+
+/** The report's unit accounting as one sentence; every figure is the record's own count. */
+export function runReportUnitsSentence(units: RunReportUnitAccountingProjection): string {
+  return `共 ${units.submitted} 个阅读范围：沿用上一份 ${units.reused} 个，重新分析 ${units.recomputed} 个，其中 ${units.gaps} 个没有读成，${units.retried} 个安全重试过。`;
+}
