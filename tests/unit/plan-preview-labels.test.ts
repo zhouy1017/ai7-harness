@@ -7,6 +7,11 @@ import type {
 } from '../../src/shared/protocol.js';
 import {
   ANALYSIS_CONFLICT_KIND_LABELS,
+  ANALYSIS_ENTITY_KIND_LABELS,
+  RUN_REPORT_STAGE_LABELS,
+  analysisFourSentences,
+  durationLabel,
+  runReportUnitsSentence,
   RUN_LIVENESS_UNMEASURED_STALE_MS,
   analysisBlockCountLabel,
   analysisKindSubtitle,
@@ -269,5 +274,74 @@ describe('ANALYSIS_CONFLICT_KIND_LABELS', () => {
       expect(labels[index]).not.toBe(kind);
     }
     expect(new Set(labels).size).toBe(ANALYSIS_CONFLICT_KINDS.length);
+  });
+});
+
+describe('analysisFourSentences', () => {
+  const STATEMENT = '仅为模型输出的结构化归纳；不构成事实判定、编辑评审或稿件变更。' as const;
+  const settled = {
+    coverage: { state: 'partial', unitsTotal: 8, unitsClosed: 7, gapCount: 1 },
+    reducerClosure: { state: 'closed-with-gaps' },
+    freshness: { state: 'current' },
+    assurance: { unresolvedConflictCount: 4, unresolvedItemCount: 2, lowConfidenceUnitCount: 1, crossUnitFindingCount: 3, sampledPrecision: { size: 5, upheld: 4, estimate: 0.8 }, statement: STATEMENT },
+    manuscriptPin: { revisionLabel: 'r1' },
+  } as const;
+
+  it('reads the four axes in the order and under the headings ANALYSIS-025 fixes', () => {
+    const sentences = analysisFourSentences(settled);
+    expect(sentences.map((sentence) => [sentence.axis, sentence.heading])).toEqual([
+      ['coverage', '覆盖范围'], ['reducer-closure', '全书综合'], ['freshness', '与当前稿件'], ['assurance', '可信程度'],
+    ]);
+    expect(sentences.every((sentence) => sentence.nextAction.length > 0)).toBe(true);
+  });
+
+  it('says what was not read and sends the editor to where it is fixed', () => {
+    const [coverage, synthesis] = analysisFourSentences(settled);
+    expect(coverage!.sentence).toBe('全稿分成 8 个阅读范围，已读完 7 个；还有 1 个没有读成，在「各章」里标为尚未分析。');
+    expect(coverage!.target).toBe('history');
+    expect(synthesis!.sentence).toContain('没有读成的范围不在其中');
+    const complete = analysisFourSentences({ ...settled, coverage: { state: 'complete', unitsTotal: 8, unitsClosed: 8, gapCount: 0 }, reducerClosure: { state: 'closed' } });
+    expect(complete[0]!.sentence).toBe('全稿分成 8 个阅读范围，全部读完。');
+    expect([complete[0]!.target, complete[1]!.target]).toEqual([null, null]);
+  });
+
+  it('states freshness against the manuscript the analysis read, in all three states', () => {
+    const reading = (state: 'current' | 'stale' | 'superseded'): string => analysisFourSentences({ ...settled, freshness: { state } })[2]!.sentence;
+    expect(reading('current')).toBe('这份分析读的是 r1，稿件此后没有改动。');
+    expect(reading('stale')).toBe('这份分析读的是 r1，稿件此后有改动，分析已不是最新。');
+    expect(reading('superseded')).toContain('之后已有更新的分析');
+  });
+
+  it('counts the leads and points at 审阅 without listing them, and keeps the kind’s own statement whole', () => {
+    const trust = analysisFourSentences(settled)[3]!;
+    expect(trust.sentence.startsWith(STATEMENT)).toBe(true);
+    // Deterministic conflicts and model-driven cross-unit findings are one reading for the editor: leads.
+    expect(trust.sentence).toContain('另有 7 处前后不一致的线索、2 项未决事项，归入审阅的「情节逻辑与前后一致」');
+    expect(trust.sentence).toContain('抽样复核了 5 条，4 条成立。');
+    expect(trust.sentence).toContain('其中 1 个阅读范围模型自评把握较低。');
+    const clean = analysisFourSentences({ ...settled, assurance: { ...settled.assurance, unresolvedConflictCount: 0, unresolvedItemCount: 0, crossUnitFindingCount: 0, lowConfidenceUnitCount: 0, sampledPrecision: null } })[3]!;
+    expect(clean.sentence).toBe(STATEMENT);
+  });
+
+  it('never speaks a technical word in the decision layer', () => {
+    const text = analysisFourSentences(settled).map((sentence) => sentence.sentence + sentence.nextAction).join('');
+    for (const word of ['单元', 'Revision', 'reducer', '归约', '摘要', 'digest', 'token']) expect(text).not.toContain(word);
+  });
+});
+
+describe('Run Report labels', () => {
+  it('names every stage and entity kind in editorial Chinese', () => {
+    expect(Object.values(RUN_REPORT_STAGE_LABELS)).toEqual(['逐个阅读范围分析', '跨范围比对', '抽样复核', '合并整理']);
+    expect(Object.values(ANALYSIS_ENTITY_KIND_LABELS).every((label) => /^[一-鿿]+$/u.test(label))).toBe(true);
+  });
+
+  it('states a duration in the reader’s units and never invents one', () => {
+    expect([durationLabel(null), durationLabel(0), durationLabel(999), durationLabel(1500), durationLabel(61_000), durationLabel(125_400)])
+      .toEqual(['—', '不到 1 秒', '不到 1 秒', '2 秒', '1 分 1 秒', '2 分 5 秒']);
+  });
+
+  it('reads the unit accounting as one sentence of the record’s own counts', () => {
+    expect(runReportUnitsSentence({ submitted: 8, reused: 6, recomputed: 2, gaps: 1, retried: 1 }))
+      .toBe('共 8 个阅读范围：沿用上一份 6 个，重新分析 2 个，其中 1 个没有读成，1 个安全重试过。');
   });
 });
