@@ -2,6 +2,8 @@
 status: accepted
 ---
 
+> Amended by [ADR 0084](./0084-admit-the-legacy-doc-to-the-background-test-guests-for-j-01.md): the one legacy `.doc` is admitted to the guests, outside the checkout, so J-01's `.doc` scenario runs there. §5's "Local-only SampleBooks" and "Protected material" bullets, §4's statement that a guest always discloses that skip, the Consequences bullet on the `.doc` scenario and the rejected alternative of copying the file to a guest are read under that decision. Everything else stands.
+
 # Run every agent's Electron Journeys on the background test guests
 
 On 2026-09-19 the Owner directed: 「把 e2e 测试使用后台 VM 完成的规则写入并合并进入项目，要求 agents 严格遵守」 — write into the project, and merge, the rule that E2E tests are completed on the background virtual machines, and require agents to follow it strictly. The Owner's direction to write and land this record is its acceptance, as it was for [ADR 0081](./0081-run-the-nightly-full-gate-over-every-open-pull-request-merge-the-ones-that-pass-and-then-over-dev.md) and [ADR 0082](./0082-hold-the-dispatch-rules-for-implementation-work.md).
