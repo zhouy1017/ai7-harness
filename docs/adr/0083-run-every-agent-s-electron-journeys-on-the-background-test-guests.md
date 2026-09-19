@@ -2,7 +2,7 @@
 status: accepted
 ---
 
-> Amended by [ADR 0084](./0084-admit-the-legacy-doc-to-the-background-test-guests-for-j-01.md): the one legacy `.doc` is admitted to the guests, outside the checkout, so J-01's `.doc` scenario runs there. §5's "Local-only SampleBooks" and "Protected material" bullets, §4's statement that a guest always discloses that skip, the Consequences bullet on the `.doc` scenario and the rejected alternative of copying the file to a guest are read under that decision. Everything else stands.
+> Amended by [ADR 0084](./0084-admit-the-legacy-doc-to-the-background-test-guests-for-j-01.md): the one legacy `.doc` is admitted to the guests, outside the checkout and placed only as an Owner action, so J-01's `.doc` scenario runs there; no agent copies it. §5's "Local-only SampleBooks" and "Protected material" bullets, §4's statement that a guest always discloses that skip, the Consequences bullet on the `.doc` scenario and the rejected alternative of copying the file to a guest are read under that decision, which also names the history objects every bundle carries and keeps the Owner-run J-01 and the Draft wait for a guest run that disclosed the skip. Everything else stands.
 
 # Run every agent's Electron Journeys on the background test guests
 
