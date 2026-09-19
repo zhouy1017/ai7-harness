@@ -1203,6 +1203,12 @@ describe('baseline manuscript analysis over the real store on exact sample1', ()
       expect(history.entries.map((entry) => entry.counts)).toEqual([revision1.update.counts, plan2.counts, plan3.counts, plan4.counts]);
       expect(history.entries.map((entry) => entry.digest)).toEqual([revision1.digest, revision2.digest, revision3.digest, revision4.digest]);
       expect(history.entries.every((entry) => entry.gapCount === 1 && entry.conflictCount === 4 && entry.producingRun.classification === 'completed-with-gaps')).toBe(true);
+      // Every entry opens the report of the Run that produced it (#406), not only the latest Task's:
+      // each is bound to its own Run and revision, and the latest is the very report the outcome carries.
+      expect(history.entries.map((entry) => [entry.report?.runRecordId, entry.report?.resultSetRevisionId, entry.reportAbsentReason]))
+        .toEqual(history.entries.map((entry) => [entry.producingRun.runRecordId, entry.revisionId, null]));
+      expect(new Set(history.entries.map((entry) => entry.report?.reportDigest)).size).toBe(4);
+      expect(history.entries[3]!.report).toEqual(whole.settled.taskOutcome!.report);
       revisionIds = history.entries.map((entry) => entry.revisionId);
       digests = history.entries.map((entry) => entry.digest);
       store.markCleanShutdown();
