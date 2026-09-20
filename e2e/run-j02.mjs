@@ -23,6 +23,10 @@ const OVERLAP_QUERY = '哈哈';
 const EXCLUSION_TEXT = '边界排除校验';
 const EXPECTED_EXCLUSION_MATCHES = 1_001;
 const MILESTONE_RECOVERY_SNAPSHOT_TIMEOUT = 10 * 60_000;
+// Staging parses and snapshots the whole ten-million-character file. A hosted Windows runner usually
+// finishes the entire Journey in three to five minutes, and on 2026-09-19 one spent more than the
+// former 240 s on this wait alone; the bound exists to end a hang, so it sits well clear of a slow night.
+const IMPORT_STAGE_TIMEOUT = 8 * 60_000;
 // The product's own startup readiness deadline, src/main/service-client.ts STARTUP_READY_TIMEOUT_MS.
 const PRODUCT_STARTUP_READY_TIMEOUT = 2 * 60_000;
 // Margin for the renderer paint and the landing screen's service IPC, which follow the main process's readiness signal.
@@ -442,16 +446,22 @@ async function importAndOpen(renderer) {
   await waitForRendererReady(renderer);
   await assertRenderer(renderer, `typeof globalThis.process === 'undefined' && typeof globalThis.require === 'undefined'`, 'renderer-isolation');
   requireJourney(await renderer.evaluate(`(async () => { try { await fetch('http://127.0.0.1:9/j02-denial'); return false; } catch { return true; } })()`), 'renderer-network-denial');
+  // The import is three long waits over a ten-million-character file; under the one name
+  // `renderer-ready` a hosted runner that ran out of one of them read as a product that never started
+  // (the queue run of 2026-09-19 lost 240 s here on Windows). Each wait now has its own stage (#474).
+  at('import-stage');
   await clickButton(renderer, '导入稿件', 'stage-click');
-  await waitFor(renderer, `document.querySelector('[data-screen="target"]')`, 'stage-target', 240_000);
+  await waitFor(renderer, `document.querySelector('[data-screen="target"]')`, 'stage-target', IMPORT_STAGE_TIMEOUT);
   await assertRenderer(renderer, `document.querySelector('.source-card')?.textContent.includes('${BLOCK_COUNT} 个可编辑内容块')`, 'exact-block-count');
   await assertRenderer(renderer, `(() => { const radio = document.querySelector('input[aria-label="新建图书"]'); if (!radio) return false; radio.click(); return true; })()`, 'target-select');
   await assertRenderer(renderer, `(() => { const radio = document.querySelector('input[aria-label="作为首份稿件导入"]'); if (!radio || radio.checked) return false; radio.click(); return true; })()`, 'relationship-select');
+  at('import-review');
   await waitFor(renderer, `document.querySelector('#book-title')`, 'title');
   await fill(renderer, '#book-title', '千万字有界编辑校验', 'title-fill');
   await clickButton(renderer, '确认书名并复核', 'review-click');
   await waitFor(renderer, `document.querySelector('[data-screen="review"]')`, 'review');
   await assertRenderer(renderer, `!document.querySelector('#accept-import-degradation') && Array.from(document.querySelectorAll('[data-fidelity-category]')).every((row) => row.dataset.fidelityCategory === 'round-trip-export' || row.querySelector('.status-preserved'))`, 'clean-fidelity');
+  at('import-commit');
   await clickButton(renderer, '新建图书并导入稿件', 'commit-click');
   await waitFor(renderer, `document.querySelector('[data-screen="imported"]')`, 'imported', 300_000);
   await waitFor(
@@ -460,6 +470,7 @@ async function importAndOpen(renderer) {
     'completion-acknowledged-before-open',
     300_000,
   );
+  at('import-editor-open');
   await clickButton(renderer, '打开稿件', 'editor-open');
   await waitFor(renderer, `document.querySelector('[data-screen="editor"]')`, 'editor');
 }
