@@ -5872,7 +5872,11 @@ function renderEditorWindow(
 
   positionRail.addEventListener('change', () => void navigate({ kind: 'proportion', proportion: Number(positionRail.value) / 1_000_000 }));
   editorWindow.addEventListener('scroll', () => {
-    if (authoritativeMutationBusy() || edgeNavigation || editor?.isComposing()) return;
+    // Paging at an edge answers the reader's scroll. A position the editor restored itself — after an
+    // arrival, a journal acknowledgement or an authoritative refresh — is not that, even when it rests
+    // at the pane's top or bottom: the guards below lapse as soon as their operation ends, which can be
+    // a frame before the restore's own `scroll` event arrives (#474).
+    if (authoritativeMutationBusy() || edgeNavigation || editor?.isComposing() || editor?.isOwnScroll()) return;
     const atStart = editorWindow.scrollTop <= 0 && currentWindow.previousCursor !== null;
     const atEnd = editorWindow.scrollTop + editorWindow.clientHeight >= editorWindow.scrollHeight - 1 && currentWindow.nextCursor !== null;
     if (!atStart && !atEnd) return;
