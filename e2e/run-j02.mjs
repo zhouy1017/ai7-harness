@@ -23,6 +23,10 @@ const OVERLAP_QUERY = '哈哈';
 const EXCLUSION_TEXT = '边界排除校验';
 const EXPECTED_EXCLUSION_MATCHES = 1_001;
 const MILESTONE_RECOVERY_SNAPSHOT_TIMEOUT = 10 * 60_000;
+// Staging parses and snapshots the whole ten-million-character file. A hosted Windows runner usually
+// finishes the entire Journey in three to five minutes, and on 2026-09-19 one spent more than the
+// former 240 s on this wait alone; the bound exists to end a hang, so it sits well clear of a slow night.
+const IMPORT_STAGE_TIMEOUT = 8 * 60_000;
 // The product's own startup readiness deadline, src/main/service-client.ts STARTUP_READY_TIMEOUT_MS.
 const PRODUCT_STARTUP_READY_TIMEOUT = 2 * 60_000;
 // Margin for the renderer paint and the landing screen's service IPC, which follow the main process's readiness signal.
@@ -442,16 +446,22 @@ async function importAndOpen(renderer) {
   await waitForRendererReady(renderer);
   await assertRenderer(renderer, `typeof globalThis.process === 'undefined' && typeof globalThis.require === 'undefined'`, 'renderer-isolation');
   requireJourney(await renderer.evaluate(`(async () => { try { await fetch('http://127.0.0.1:9/j02-denial'); return false; } catch { return true; } })()`), 'renderer-network-denial');
+  // The import is three long waits over a ten-million-character file; under the one name
+  // `renderer-ready` a hosted runner that ran out of one of them read as a product that never started
+  // (the queue run of 2026-09-19 lost 240 s here on Windows). Each wait now has its own stage (#474).
+  at('import-stage');
   await clickButton(renderer, '导入稿件', 'stage-click');
-  await waitFor(renderer, `document.querySelector('[data-screen="target"]')`, 'stage-target', 240_000);
+  await waitFor(renderer, `document.querySelector('[data-screen="target"]')`, 'stage-target', IMPORT_STAGE_TIMEOUT);
   await assertRenderer(renderer, `document.querySelector('.source-card')?.textContent.includes('${BLOCK_COUNT} 个可编辑内容块')`, 'exact-block-count');
   await assertRenderer(renderer, `(() => { const radio = document.querySelector('input[aria-label="新建图书"]'); if (!radio) return false; radio.click(); return true; })()`, 'target-select');
   await assertRenderer(renderer, `(() => { const radio = document.querySelector('input[aria-label="作为首份稿件导入"]'); if (!radio || radio.checked) return false; radio.click(); return true; })()`, 'relationship-select');
+  at('import-review');
   await waitFor(renderer, `document.querySelector('#book-title')`, 'title');
   await fill(renderer, '#book-title', '千万字有界编辑校验', 'title-fill');
   await clickButton(renderer, '确认书名并复核', 'review-click');
   await waitFor(renderer, `document.querySelector('[data-screen="review"]')`, 'review');
   await assertRenderer(renderer, `!document.querySelector('#accept-import-degradation') && Array.from(document.querySelectorAll('[data-fidelity-category]')).every((row) => row.dataset.fidelityCategory === 'round-trip-export' || row.querySelector('.status-preserved'))`, 'clean-fidelity');
+  at('import-commit');
   await clickButton(renderer, '新建图书并导入稿件', 'commit-click');
   await waitFor(renderer, `document.querySelector('[data-screen="imported"]')`, 'imported', 300_000);
   await waitFor(
@@ -460,6 +470,7 @@ async function importAndOpen(renderer) {
     'completion-acknowledged-before-open',
     300_000,
   );
+  at('import-editor-open');
   await clickButton(renderer, '打开稿件', 'editor-open');
   await waitFor(renderer, `document.querySelector('[data-screen="editor"]')`, 'editor');
 }
@@ -1007,25 +1018,45 @@ async function runRestartJourney(renderer) {
 }
 
 async function runAccessibilityJourney(renderer) {
-  at('j14-behavior');
+  // One `at()` per step: the hosted marker names only `at()` stages, and a stage that holds eight
+  // assertions behind one name cannot say which of them a hosted runner failed (#474).
   const modifier = process.platform === 'darwin' ? 4 : 2;
+  at('j14-composition-focus');
   await assertRenderer(renderer, `(() => { const editor = document.querySelector('[data-testid="manuscript-editor"]'); if (!(editor instanceof HTMLElement)) return false; editor.focus(); return document.activeElement === editor; })()`, 'composition-focus');
+  at('j14-ime-command-guard');
   await renderer.send('Input.imeSetComposition', { text: '编', selectionStart: 1, selectionEnd: 1, replacementStart: 0, replacementEnd: 0 });
+  // The guard can only be judged against a composition that exists, so what the composition did is
+  // read before the key is pressed, and a failure names the precondition that was missing (#474).
+  const composed = await renderer.evaluate(`(() => { const editor = document.querySelector('[data-testid="manuscript-editor"]'); return { windowFocused: document.hasFocus(), editorFocused: document.activeElement === editor, composed: editor?.textContent.includes('编') === true }; })()`);
   await press(renderer, 'f', modifier);
-  await assertRenderer(renderer, `document.activeElement?.id !== 'manuscript-search' && document.querySelector('#persistence-status')?.textContent.includes('输入法组合尚未结束')`, 'ime-command-guard');
+  const guarded = await renderer.evaluate(`({ commandRan: document.activeElement?.id === 'manuscript-search', status: document.querySelector('#persistence-status')?.textContent.includes('输入法组合尚未结束') === true })`);
+  if (guarded?.commandRan !== false || guarded?.status !== true) {
+    if (composed?.windowFocused !== true) at('j14-ime-command-guard-window-unfocused');
+    else if (composed?.editorFocused !== true) at('j14-ime-command-guard-editor-unfocused');
+    else if (composed?.composed !== true) at('j14-ime-command-guard-composition-absent');
+    else if (guarded?.commandRan === true) at('j14-ime-command-guard-command-ran');
+    else at('j14-ime-command-guard-status-missing');
+    requireJourney(false, 'ime-command-guard', { composed, guarded });
+  }
+  at('j14-keyboard-search-focus');
   await renderer.send('Input.imeSetComposition', { text: '', selectionStart: 0, selectionEnd: 0, replacementStart: 0, replacementEnd: 1 });
   await press(renderer, 'f', modifier);
   await waitFor(renderer, `document.activeElement?.id === 'manuscript-search'`, 'keyboard-search-focus');
+  at('j14-visible-focus');
   await assertRenderer(renderer, `(() => { const input = document.querySelector('#manuscript-search'); return input?.matches(':focus-visible') && getComputedStyle(input).outlineStyle !== 'none'; })()`, 'visible-focus');
+  at('j14-keyboard-window-crossing');
   await renderer.evaluate(`(() => { const editor = document.querySelector('[data-testid="manuscript-editor"]'); editor?.focus(); globalThis.__ai7BeforePageKey = editor?.firstElementChild?.dataset.blockId; })()`);
   await press(renderer, 'PageDown');
   await waitFor(renderer, `document.querySelector('[data-testid="manuscript-editor"]')?.firstElementChild?.dataset.blockId !== globalThis.__ai7BeforePageKey`, 'keyboard-window-crossing');
+  at('j14-fine-scroll-window-crossing');
   await renderer.evaluate(`new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
   await renderer.evaluate(`(() => { const surface = document.querySelector('.editor-window'); globalThis.__ai7BeforeFineScroll = document.querySelector('[data-testid="manuscript-editor"]')?.firstElementChild?.dataset.blockId; surface.scrollTop = surface.scrollHeight; })()`);
   await waitFor(renderer, `document.querySelector('[data-testid="manuscript-editor"]')?.firstElementChild?.dataset.blockId !== globalThis.__ai7BeforeFineScroll`, 'fine-scroll-window-crossing');
+  at('j14-zoom-200-reflow');
   await renderer.send('Emulation.setDeviceMetricsOverride', { width: 640, height: 800, deviceScaleFactor: 2, mobile: false });
   await renderer.send('Emulation.setPageScaleFactor', { pageScaleFactor: 2 });
   await assertRenderer(renderer, `getComputedStyle(document.querySelector('.editor-workspace')).gridTemplateColumns.split(' ').length === 1 && document.documentElement.scrollWidth <= document.documentElement.clientWidth + 2`, 'zoom-200-reflow');
+  at('j14-forced-colors');
   await renderer.send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'active' }] });
   await assertRenderer(renderer, `matchMedia('(forced-colors: active)').matches && getComputedStyle(document.querySelector('.editor-shell')).boxShadow === 'none' && getComputedStyle(document.querySelector('button')).borderStyle !== 'none'`, 'forced-colors');
 }
@@ -1049,6 +1080,7 @@ async function main() {
   let runRootAcquisition;
   let browser;
   let browserAcquisition;
+  let journeyCompleted = false;
   const closeOwnedBrowser = async () => {
     const ownedBrowser = browser ?? (browserAcquisition === undefined ? undefined : await browserAcquisition.catch(() => undefined));
     await ownedBrowser?.close().catch(() => undefined);
@@ -1100,11 +1132,18 @@ async function main() {
     renderer = await launch('restart');
     await runRestartJourney(renderer);
     await runAccessibilityJourney(renderer);
+    // The close and what follows it are their own stages: left under the last j14 step, a failure to
+    // shut the product down or to clear the run root would read as an accessibility failure (#474).
+    at('completion-browser-close');
     await browser.close();
     browser = undefined;
+    at('completion-fixture-survived');
     requireJourney((await stat(docx)).size > CHARACTER_COUNT, 'fixture-survived-until-completion');
+    journeyCompleted = true;
   } finally {
     try {
+      // Only a Journey that finished names its cleanup; one that failed keeps the stage it failed at.
+      if (journeyCompleted) at('completion-cleanup');
       await cancellation.cleanup();
     } finally {
       cancellation.dispose();

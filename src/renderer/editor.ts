@@ -37,6 +37,12 @@ export interface BoundedEditor {
   selectRange(blockId: string, fromGrapheme: number, toGrapheme: number): boolean;
   currentWindow(): ManuscriptWindowProjection;
   isComposing(): boolean;
+  /**
+   * Whether the scroll container is where this editor itself last put it and the `scroll` event for
+   * that has not been seen yet. The surface pages at the pane's edges, and a restored position is not
+   * the editor reaching an edge: read as one, it pages away from the window just restored (#474).
+   */
+  isOwnScroll(): boolean;
   setOperationLocked(locked: boolean): void;
   interrupt(): void;
   destroy(): void;
@@ -282,6 +288,10 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
   let composing = false;
   let operationLocked = false;
   let deferredNavigationContinuity: EditorContinuity | undefined;
+  // The restore scheduled for the next frame and not yet run, and the pane position the last restore
+  // left behind while its `scroll` event is still to come.
+  let pendingRestore: { frame: number; run: () => void } | undefined;
+  let ownScroll: { top: number } | undefined;
 
   const isEditable = (): boolean =>
     !retryRequired && !interrupted && !operationLocked && deferredNavigationContinuity === undefined;
@@ -347,6 +357,7 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
   };
 
   const captureRenderedContinuity = (): EditorContinuity => {
+    settlePendingRestore();
     const selection = view.state.selection;
     const containerRect = options.scrollContainer.getBoundingClientRect();
     const rendered = Array.from(view.dom.querySelectorAll<HTMLElement>('[data-block-id]'));
@@ -412,7 +423,11 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
     }
     view.updateState(nextState);
     applyEditableState();
-    requestAnimationFrame(() => {
+    // A restore superseded before its frame never runs: the later one speaks for the window now shown.
+    if (pendingRestore) cancelAnimationFrame(pendingRestore.frame);
+    const run = (): void => {
+      pendingRestore = undefined;
+      if (destroyed) return;
       const scrollId = selectionRestored ? continuity?.scrollAnchor.blockId : focusBlockId;
       const target = scrollId ? view.dom.querySelector<HTMLElement>(`[data-block-id="${scrollId}"]`) : undefined;
       if (target && continuity && selectionRestored) {
@@ -425,7 +440,28 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
         if (deferredNavigationContinuity) view.dom.focus({ preventScroll: true });
         else view.focus();
       }
-    });
+      // Where this restore left the pane is the editor's doing, not the reader's. The mark lapses two
+      // frames on — past the frame that dispatches its `scroll` event, and past it even when the position
+      // did not change and no event comes — so it never swallows the next scroll the reader makes.
+      const mark = { top: options.scrollContainer.scrollTop };
+      ownScroll = mark;
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        if (ownScroll === mark) ownScroll = undefined;
+      }));
+    };
+    pendingRestore = { frame: requestAnimationFrame(run), run };
+  };
+
+  /**
+   * A position is captured from what is on screen, so every capture first runs a restore that is still
+   * waiting for its frame. Otherwise an action taken in the same frame as an arrival records the pane
+   * as it stood before the arrival was shown, and restoring that afterwards throws the editor to the
+   * window's top while the caret stays where the arrival put it (#474).
+   */
+  const settlePendingRestore = (): void => {
+    if (!pendingRestore) return;
+    cancelAnimationFrame(pendingRestore.frame);
+    pendingRestore.run();
   };
 
   const waitForComposition = async (): Promise<void> => {
@@ -708,6 +744,7 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
     },
     currentWindow: () => windowProjection,
     isComposing: () => composing,
+    isOwnScroll: () => ownScroll !== undefined && options.scrollContainer.scrollTop === ownScroll.top,
     setOperationLocked: (locked) => {
       if (locked) {
         requireEditor(!saving && !retryRequired && !composing && changedBlocks(view.state.doc).length === 0, '无法在未确认本地编辑时锁定稿件。');
@@ -728,6 +765,8 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
     },
     destroy: () => {
       destroyed = true;
+      if (pendingRestore) cancelAnimationFrame(pendingRestore.frame);
+      pendingRestore = undefined;
       if (autoFlushTimer !== undefined) window.clearTimeout(autoFlushTimer);
       const waiting = compositionWaiters;
       compositionWaiters = [];

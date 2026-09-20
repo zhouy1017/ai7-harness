@@ -5333,6 +5333,14 @@ function renderEditorWindow(
   ): Promise<boolean> {
     if (authoritativeMutationBusy() || edgeNavigation || !editor) return false;
     edgeNavigation = true;
+    // Released by this call alone and only once: a later navigation may already hold the guard again
+    // by the time this one returns, and must not have it taken away.
+    let guardHeld = true;
+    const releaseGuard = (): void => {
+      if (!guardHeld) return;
+      guardHeld = false;
+      edgeNavigation = false;
+    };
     try {
       if (!(await settleLocalEdit()) || !editor) return false;
       const navigation = typeof targetOrPrepare === 'function'
@@ -5351,15 +5359,27 @@ function renderEditorWindow(
       if (!loaded) return false;
       currentWindow = next;
       updateWindowChrome();
-      await rememberEntryPosition();
-      setStatus(`已到达${next.position.structureLabel ? `“${next.position.structureLabel}”附近，` : ''}${next.position.label}。`, 'success');
+      // The position write starts the moment the window is on screen, and the status that names the
+      // arrival still waits for it — the guard does not. `edgeNavigation` covers the window load and
+      // the two frames in which the load's own scroll restoration fires `scroll` events this surface
+      // must not read as the editor reaching an edge. Held across the write as well, it made every
+      // paging command that arrived while the disk was busy vanish without a word: a second PageDown,
+      // 向后浏览 or a scroll to the window's end was dropped rather than deferred (#474).
+      const remembered = rememberEntryPosition();
       await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+      releaseGuard();
+      await remembered;
+      // With the guard released a later navigation may already have put its own window on screen; its
+      // arrival is then the one to name, and naming this one over it would state a place already left.
+      if (currentWindow === next) {
+        setStatus(`已到达${next.position.structureLabel ? `“${next.position.structureLabel}”附近，` : ''}${next.position.label}。`, 'success');
+      }
       return true;
     } catch (error) {
       setStatus(rendererErrorMessage(error, '无法移动到该稿件位置。'), 'error');
       return false;
     } finally {
-      edgeNavigation = false;
+      releaseGuard();
     }
   }
 
@@ -5852,7 +5872,11 @@ function renderEditorWindow(
 
   positionRail.addEventListener('change', () => void navigate({ kind: 'proportion', proportion: Number(positionRail.value) / 1_000_000 }));
   editorWindow.addEventListener('scroll', () => {
-    if (authoritativeMutationBusy() || edgeNavigation || editor?.isComposing()) return;
+    // Paging at an edge answers the reader's scroll. A position the editor restored itself — after an
+    // arrival, a journal acknowledgement or an authoritative refresh — is not that, even when it rests
+    // at the pane's top or bottom: the guards below lapse as soon as their operation ends, which can be
+    // a frame before the restore's own `scroll` event arrives (#474).
+    if (authoritativeMutationBusy() || edgeNavigation || editor?.isComposing() || editor?.isOwnScroll()) return;
     const atStart = editorWindow.scrollTop <= 0 && currentWindow.previousCursor !== null;
     const atEnd = editorWindow.scrollTop + editorWindow.clientHeight >= editorWindow.scrollHeight - 1 && currentWindow.nextCursor !== null;
     if (!atStart && !atEnd) return;
