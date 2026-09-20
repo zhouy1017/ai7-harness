@@ -36,6 +36,7 @@ import type {
   ReviewBeforeImportProjection,
   ReviewBeforeManuscriptReimportProjection,
   ReviewBeforeSourceImportProjection,
+  RunReportProjection,
   SearchResultsProjection,
   ServiceJobProjection,
   SourceImportCommitProjection,
@@ -47,10 +48,17 @@ import { BASELINE_ANALYSIS_TASK_GOAL, J03_TASK_GOAL, MAX_REPLACEMENT_EXCLUSIONS 
 import { mountBoundedEditor, type BoundedEditor, type EditorContinuity } from './editor.js';
 import {
   ANALYSIS_CONFLICT_KIND_LABELS,
+  ANALYSIS_ENTITY_KIND_LABELS,
+  RUN_LIVENESS_STAGE_LABELS,
+  RUN_REPORT_CLASSIFICATION_LABELS,
+  RUN_REPORT_STAGE_LABELS,
+  RUN_REPORT_STAGE_STATE_LABELS,
   analysisBlockCountLabel,
+  analysisFourSentences,
   analysisKindSubtitle,
   analysisProvenanceSummary,
   attemptStateLabel,
+  durationLabel,
   elapsedLabel,
   launchPolicyIntegritySentence,
   localInstantLabel,
@@ -58,6 +66,7 @@ import {
   remoteBindingPolicyReading,
   remoteBindingRowLabel,
   runBudgetCeilingLabel,
+  runReportUnitsSentence,
   runStepIsStale,
   taskAuthorizationDispatchNote,
 } from './plan-preview-labels.js';
@@ -1369,6 +1378,65 @@ async function renderBookWorkbenchChooser(
   }
 }
 
+/**
+ * ②A: the baseline analysis as its own destination under 资料与记录 (editor-surfaces §3, ADR 0076 §5).
+ * It is reached from the manuscript's 资料与记录 group and from 工作概览, never on the way into a Book.
+ * The way back to the manuscript and to the overview sits in a persistent region, because a settled
+ * result set is the longest thing this product renders and its way out must survive it (LAYER-005).
+ */
+function renderBookAnalysis(bookId: string, bookTitle: string): void {
+  const content = panel();
+  content.classList.add('book-analysis');
+  content.dataset['bookId'] = bookId;
+  content.append(
+    element('p', 'section-label', '资料与记录 · 分析'),
+    element('h2', undefined, bookTitle),
+    element('p', 'lede', '基线分析是其他任务的底稿：全书梗概、人物与名称、事件、关系、设定和各章。它只读稿件，不改稿件。'),
+  );
+  const host = element('div');
+  host.dataset['analysisBookId'] = bookId;
+  const actions = element('div', 'button-row workbench-actions');
+  const openManuscript = button('打开稿件', 'primary', async () => {
+    openManuscript.disabled = true;
+    setStatus('正在打开稿件…', 'busy');
+    try {
+      await renderResolvedBookWorkbenchRoute({ kind: 'book', bookId, bookTitle });
+    } catch (error) {
+      openManuscript.disabled = false;
+      setStatus(rendererErrorMessage(error, '无法打开稿件。'), 'error');
+    }
+  });
+  const openOverview = button('工作概览', 'secondary', async () => {
+    openOverview.disabled = true;
+    setStatus('正在打开图书工作概览…', 'busy');
+    try {
+      renderBookOverview(await window.ai7.getBookOverview({ bookId, historyCursor: null }));
+    } catch (error) {
+      openOverview.disabled = false;
+      setStatus(rendererErrorMessage(error, '无法打开图书工作概览。'), 'error');
+    }
+  });
+  actions.append(openManuscript, openOverview);
+  content.append(host, actions);
+  replaceScreen('book-analysis', content);
+  setStatus('分析已打开');
+  void window.ai7.inspectBaselineAnalysis().then(
+    (projection) => {
+      if (host.isConnected && projection.bookId === host.dataset['analysisBookId']) renderBaselineAnalysis(host, projection, bookTitle);
+    },
+    (error) => {
+      if (!host.isConnected) return;
+      const unavailable = element('section', 'baseline-analysis-card attention-note');
+      unavailable.dataset['analysisState'] = 'unavailable';
+      unavailable.append(
+        element('h3', undefined, '基线稿件分析'),
+        element('p', undefined, rendererErrorMessage(error, '无法读取本地图书的基线稿件分析记录。')),
+      );
+      host.replaceChildren(unavailable);
+    },
+  );
+}
+
 function renderBookOverview(
   overview: BookWorkOverviewProjection,
   completion?: ImportCommitProjection,
@@ -1493,25 +1561,33 @@ function renderBookOverview(
       },
     );
   };
-  const analysisHost = element('div');
+  // 工作概览 is a destination that shows the Book whole (editor-surfaces §2): the analysis is one line
+  // here — what state it is in — and its own destination under 资料与记录 is one step away (§3).
+  const analysisHost = element('section', 'book-analysis-summary');
   analysisHost.dataset['analysisBookId'] = overview.book.bookId;
   const inspectBaselineAnalysis = (): void => {
     if (!analysisHost.isConnected || overview.manuscriptState.state !== 'populated') return;
+    const open = button('打开分析', 'secondary', () => renderBookAnalysis(overview.book.bookId, overview.book.title));
+    open.dataset['analysisAction'] = 'open-analysis';
     void window.ai7.inspectBaselineAnalysis().then(
       (projection) => {
-        if (analysisHost.isConnected && projection.bookId === analysisHost.dataset['analysisBookId']) {
-          renderBaselineAnalysis(analysisHost, projection, overview.book.title);
-        }
+        if (!analysisHost.isConnected || projection.bookId !== analysisHost.dataset['analysisBookId']) return;
+        analysisHost.dataset['analysisState'] = projection.state;
+        analysisHost.replaceChildren(
+          element('h3', undefined, '分析'),
+          element('p', undefined, projection.resultSetRevision === null
+            ? `基线分析 · ${projection.stateLabel}`
+            : `基线分析 · ${projection.stateLabel} · 读的是 ${projection.resultSetRevision.manuscriptPin.revisionLabel} · ${projection.resultSetRevision.freshness.state === 'current' ? '稿件此后没有改动' : '稿件此后有改动'}`),
+          open,
+        );
       },
       (error) => {
         if (!analysisHost.isConnected) return;
-        const unavailable = element('section', 'baseline-analysis-card attention-note');
-        unavailable.dataset['analysisState'] = 'unavailable';
-        unavailable.append(
-          element('h3', undefined, '基线稿件分析'),
-          element('p', undefined, rendererErrorMessage(error, '无法读取本地图书的基线稿件分析记录。')),
+        analysisHost.dataset['analysisState'] = 'unavailable';
+        analysisHost.replaceChildren(
+          element('h3', undefined, '分析'),
+          element('p', 'attention-note', rendererErrorMessage(error, '无法读取本地图书的基线稿件分析记录。')),
         );
-        analysisHost.replaceChildren(unavailable);
       },
     );
   };
@@ -1713,23 +1789,14 @@ function analysisReturnButton(
   return returnToRange;
 }
 
-function renderAnalysisAxis(
-  axis: BaselineAnalysisResultSetRevisionProjection['coverage' | 'reducerClosure' | 'freshness' | 'assurance'],
-  details: ReadonlyArray<string>,
-): HTMLElement {
-  const section = element('section', `analysis-axis analysis-axis-${axis.axis}`);
-  section.dataset['analysisAxis'] = axis.axis;
-  section.dataset['axisState'] = axis.state;
-  const heading = axis.axis === 'coverage' ? '覆盖' : axis.axis === 'reducer-closure' ? '归约/综合闭合' : axis.axis === 'freshness' ? '精确修订版新鲜度' : '语义/证据保证';
-  section.append(element('h5', undefined, heading), element('p', 'analysis-axis-label', axis.label));
-  const list = element('ul', 'analysis-list');
-  for (const detail of details) list.append(element('li', undefined, detail));
-  section.append(list);
-  return section;
-}
-
 function reuseCountsText(counts: AnalysisReusePlanCounts): string {
   return `复用 ${counts.reused} · 重算 ${counts.recomputed} · 失效 ${counts.invalidated} · 绕过 ${counts.bypassed}`;
+}
+
+/** What an update keeps and what it reads again, in the editor's words; `null` is a plan nobody can state yet. */
+function updateReuseReading(expected: AnalysisReusePlanCounts | null, mode: BaselineAnalysisUpdateMode): string {
+  if (expected === null) return mode === 'reanalyze-range' ? '选好范围后，这里会说明沿用多少、重新分析多少。' : '现在无法说明会沿用多少、重新分析多少。';
+  return `会沿用上一份里 ${expected.reused} 个阅读范围的结果，重新分析 ${expected.recomputed} 个。`;
 }
 
 function rangeText(range: BaselineAnalysisSelectedRange | null): string {
@@ -1741,8 +1808,201 @@ function analysisBranchId(projection: BaselineAnalysisProjection): string | null
   return projection.checkpoint?.branchId ?? projection.updateControls?.working.branchId ?? null;
 }
 
+/**
+ * ②A's seven tabs (editor-surfaces §3). The first six are what the baseline is for; the last holds
+ * everything about how it was made and how it is brought up to date. The order is the specification's.
+ */
+const ANALYSIS_TABS = [
+  ['synopsis', '梗概'],
+  ['entities', '人物与名称'],
+  ['events', '事件'],
+  ['relationships', '关系'],
+  ['settings', '设定'],
+  ['chapters', '各章'],
+  ['history', '历史与更新'],
+] as const;
+type AnalysisTabId = (typeof ANALYSIS_TABS)[number][0];
+
+/**
+ * The tab the editor chose, per Book. The card re-renders on every refresh while a Run executes, and a
+ * re-render that threw the editor back to the first tab would take their place away four times a second.
+ */
+const analysisTabChoice = new Map<string, AnalysisTabId>();
+
+/**
+ * The tab strip and its panels. Every panel is always in the document and only `hidden` changes, so a
+ * record on an unselected tab is still there to be read, searched and asserted (V2-UX-LAYER-007). Arrow
+ * keys move between tabs and only the selected tab is in the Tab order, the pattern a tab list is read by.
+ */
+function analysisTabs(card: HTMLElement, bookId: string, initial: AnalysisTabId): { panels: Record<AnalysisTabId, HTMLElement>; select: (tab: AnalysisTabId) => void } {
+  const list = element('div', 'analysis-tabs');
+  list.setAttribute('role', 'tablist');
+  list.setAttribute('aria-label', '基线分析');
+  const tabs = {} as Record<AnalysisTabId, HTMLButtonElement>;
+  const panels = {} as Record<AnalysisTabId, HTMLElement>;
+  const select = (chosen: AnalysisTabId): void => {
+    card.dataset['analysisTab'] = chosen;
+    for (const [id] of ANALYSIS_TABS) {
+      const selected = id === chosen;
+      tabs[id].setAttribute('aria-selected', selected ? 'true' : 'false');
+      tabs[id].tabIndex = selected ? 0 : -1;
+      panels[id].hidden = !selected;
+    }
+  };
+  ANALYSIS_TABS.forEach(([id, label], index) => {
+    const tab = element('button', 'analysis-tab', label);
+    tab.type = 'button';
+    tab.id = `analysis-tab-${id}`;
+    tab.dataset['analysisTab'] = id;
+    tab.dataset['analysisAction'] = 'select-tab';
+    tab.setAttribute('role', 'tab');
+    tab.setAttribute('aria-controls', `analysis-panel-${id}`);
+    tab.addEventListener('click', () => {
+      analysisTabChoice.set(bookId, id);
+      select(id);
+    });
+    tab.addEventListener('keydown', (event) => {
+      const step = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0;
+      const target = event.key === 'Home' ? 0 : event.key === 'End' ? ANALYSIS_TABS.length - 1
+        : step === 0 ? null : (index + step + ANALYSIS_TABS.length) % ANALYSIS_TABS.length;
+      if (target === null) return;
+      event.preventDefault();
+      const next = ANALYSIS_TABS[target]![0];
+      analysisTabChoice.set(bookId, next);
+      select(next);
+      tabs[next].focus();
+    });
+    const panel = element('section', 'analysis-panel');
+    panel.id = `analysis-panel-${id}`;
+    panel.dataset['analysisPanel'] = id;
+    panel.setAttribute('role', 'tabpanel');
+    panel.setAttribute('aria-labelledby', tab.id);
+    tabs[id] = tab;
+    panels[id] = panel;
+    list.append(tab);
+  });
+  card.append(list, ...ANALYSIS_TABS.map(([id]) => panels[id]));
+  select(analysisTabChoice.get(bookId) ?? initial);
+  return { panels, select };
+}
+
+/** One list tab: its reading of how many there are, the items, and their exact ranges one step away. */
+function renderAnalysisListPanel(
+  panel: HTMLElement,
+  heading: string,
+  emptyReading: string,
+  items: ReadonlyArray<{ reading: string; name: string; ranges: BaselineAnalysisResultSetRevisionProjection['synthesis']['entities'][number]['sourceRanges']; blockId: string | undefined }>,
+  returnButton: (blockId: string) => HTMLButtonElement,
+): HTMLElement {
+  panel.append(element('h4', undefined, `${heading} · ${items.length}`));
+  const list = element('ul', 'analysis-list');
+  if (items.length === 0) list.append(element('li', undefined, emptyReading));
+  const exact: HTMLElement[] = [];
+  for (const entry of items) {
+    const item = element('li');
+    item.append(element('span', undefined, `${entry.reading} `));
+    if (entry.blockId !== undefined) item.append(returnButton(entry.blockId));
+    list.append(item);
+    exact.push(element('dt', undefined, entry.name), element('dd', 'technical-identity', analysisRanges(entry.ranges)));
+  }
+  panel.append(list);
+  if (exact.length > 0) panel.append(technicalDetails('analysis-facts', ...exact));
+  return list;
+}
+
+/**
+ * A Run Report as an editor reads it (ADR 0066 §Run Report): what each stage did and how long it took,
+ * how the reading ranges were accounted for, what failed and what was adjusted, what the sample found,
+ * and what the model would do differently next time. The report counts and never restates, so nothing
+ * here can carry manuscript text. Token usage, per-range rows, instants, identities and both digests
+ * stay one step away, exact and unabridged (V2-UX-ANALYSIS-025, V2-UX-LAYER-007).
+ */
+function renderRunReport(report: RunReportProjection): HTMLElement {
+  const disclosure = element('details', 'analysis-run-report');
+  disclosure.dataset['runReportDigest'] = report.reportDigest;
+  disclosure.dataset['runReportRun'] = report.runRecordId;
+  disclosure.dataset['runReportClassification'] = report.classification;
+  disclosure.append(element('summary', undefined, `查看运行报告 · ${RUN_REPORT_CLASSIFICATION_LABELS[report.classification]} · ${localInstantLabel(report.recordedAt)}`));
+  const stages = element('ul', 'analysis-list analysis-run-report-stages');
+  for (const stage of report.stages) {
+    const item = element('li', undefined, `${RUN_REPORT_STAGE_LABELS[stage.stage]}：${RUN_REPORT_STAGE_STATE_LABELS[stage.state]}${stage.wallMs === null ? '' : ` · 用时 ${durationLabel(stage.wallMs)}`}`);
+    item.dataset['runReportStage'] = stage.stage;
+    item.dataset['runReportStageState'] = stage.state;
+    stages.append(item);
+  }
+  const failures = element('ul', 'analysis-list analysis-run-report-failures');
+  if (report.failures.length === 0) failures.append(element('li', undefined, '无'));
+  for (const failure of report.failures) {
+    const item = element('li', undefined, `${RUN_REPORT_STAGE_LABELS[failure.stage]}：${failure.reason}`);
+    item.dataset['runReportFailureCode'] = failure.code;
+    failures.append(item);
+  }
+  const adaptations = element('ul', 'analysis-list analysis-run-report-adaptations');
+  if (report.adaptations.length === 0) adaptations.append(element('li', undefined, '无'));
+  for (const adaptation of report.adaptations) {
+    adaptations.append(element('li', undefined, `第 ${adaptation.unitOrdinal} 个阅读范围安全重试一次 · ${localInstantLabel(adaptation.recordedAt)}`));
+  }
+  const sample = report.assurance;
+  const sampleReading = sample.state === 'not-run' || sample.size === 0
+    ? '这次运行没有抽样复核。'
+    : `从 ${sample.candidateCount} 条发现中抽了 ${sample.size} 条复核，${sample.upheld} 条成立。`;
+  const redone = element('ul', 'analysis-list analysis-run-report-if-redone');
+  redone.dataset['runReportIfRedone'] = report.ifRedone.state;
+  if (report.ifRedone.state === 'closed') {
+    if (report.ifRedone.items.length === 0) redone.append(element('li', undefined, '模型没有提出不同的做法。'));
+    for (const suggestion of report.ifRedone.items) redone.append(element('li', undefined, `${suggestion.suggestion}（依据：${suggestion.basis}）`));
+  } else {
+    redone.append(element('li', undefined, report.ifRedone.reason));
+  }
+  const findings = report.findingCounts.length === 0
+    ? '这次运行没有记录发现。'
+    : `这次运行共记录 ${report.findingCounts.reduce((total, entry) => total + entry.count, 0)} 条发现，分 ${report.findingCounts.length} 类。`;
+  const usageRows = (Object.keys(report.usagePerStage) as Array<keyof typeof report.usagePerStage>).flatMap((stage) => {
+    const usage = report.usagePerStage[stage];
+    return [element('dt', undefined, `用量 · ${stage}`), element('dd', 'technical-identity', `${usage.requests} 次模型请求 · 输入 ${usage.inputTokens} · 输出 ${usage.outputTokens}`)];
+  });
+  disclosure.append(
+    element('h5', undefined, '各阶段'), stages,
+    element('h5', undefined, '阅读范围'), element('p', 'analysis-run-report-units', runReportUnitsSentence(report.units)),
+    element('h5', undefined, '发现与抽样复核'), element('p', undefined, findings), element('p', 'analysis-run-report-sample', sampleReading),
+    element('h5', undefined, '失败'), failures,
+    element('h5', undefined, '运行中的调整'), adaptations,
+    element('h5', undefined, '如果重做'), redone,
+    technicalDetails(
+      'analysis-facts',
+      element('dt', undefined, '运行报告'), element('dd', 'technical-identity', `${report.schema} · 摘要 ${report.reportDigest} · 账目摘要 ${report.accountingDigest}`),
+      element('dt', undefined, '绑定'), element('dd', 'technical-identity', `Run ${report.runRecordId} · Task Intent ${report.taskIntentId} · 执行尝试 ${report.attemptId ?? '无'} · 结果集修订版 ${report.resultSetRevisionId ?? '无'}`),
+      element('dt', undefined, '记录时刻'), element('dd', 'technical-identity', report.recordedAt),
+      element('dt', undefined, '阶段时刻'), element('dd', 'technical-identity', report.stages.map((stage) => `${stage.stage} ${stage.startedAt ?? '—'} → ${stage.settledAt ?? '—'} · ${stage.wallMs ?? '—'} ms`).join('；')),
+      ...usageRows,
+      element('dt', undefined, '发现分类'), element('dd', 'technical-identity', report.findingCounts.length === 0 ? '无' : report.findingCounts.map((entry) => `${entry.kind} ${entry.count}`).join('；')),
+      element('dt', undefined, '抽样'), element('dd', 'technical-identity', `${sample.state} · seed ${sample.seed ?? '无'} · ${sample.size}/${sample.candidateCount}`),
+      element('dt', undefined, '逐范围账目'), element('dd', 'technical-identity', report.unitRows.map((row) => `单元 ${row.unitOrdinal} ${row.state}/${row.lineage} · ${row.attempts} 回合 · ${row.wallMs ?? '—'} ms${row.usage === null ? '' : ` · ${row.usage.inputTokens}/${row.usage.outputTokens}`}${row.gapCode === null ? '' : ` · ${row.gapCode}`}`).join('；')),
+    ),
+  );
+  return disclosure;
+}
+
+/** The report where a Run has one, and the exact reason in the reader's language where it has none. */
+function runReportOrReason(report: RunReportProjection | null, absentReason: string | null): HTMLElement {
+  if (report !== null) return renderRunReport(report);
+  const absent = element('p', 'field-note analysis-run-report-absent', absentReason ?? '没有运行报告。');
+  absent.dataset['runReportAbsent'] = 'true';
+  return absent;
+}
+
+/**
+ * The six reading tabs of one Result Set Revision (V2-UX-ANALYSIS-001, 004, 025). The decision layer
+ * is the four sentences, the synopsis, the four lists and the chapters with what is still unread; the
+ * units' technical names, lineage, digests, reducer stages, reuse counts and token usage wait one step
+ * away. The revision's contradictions and open questions are not listed: they are the model-free leads
+ * of 审阅's 情节逻辑与前后一致 (V2-UX-REV-011). Until that destination exists they stay reachable and
+ * exact in the technical layer, so none disappears (V2-UX-LAYER-007).
+ */
 function renderBaselineAnalysisOverview(
   card: HTMLElement,
+  panels: Record<AnalysisTabId, HTMLElement>,
+  selectTab: (tab: AnalysisTabId) => void,
   projection: BaselineAnalysisProjection,
   revision: BaselineAnalysisResultSetRevisionProjection,
   bookTitle: string,
@@ -1767,27 +2027,132 @@ function renderBaselineAnalysisOverview(
     card.dataset['inspectedRevisionOrdinal'] = String(revision.ordinal);
     card.dataset['inspectedCurrent'] = view.current ? 'true' : 'false';
   }
-  card.append(element('h4', undefined, view.historical
-    ? `Manuscript Analysis Overview / 稿件分析概览 · 历史修订版 Revision ${revision.ordinal}（只读）`
-    : 'Manuscript Analysis Overview / 稿件分析概览'));
+
+  const synopsis = panels.synopsis;
   if (view.historical) {
-    card.append(element('p', 'attention-note', view.current
-      ? `Revision ${revision.ordinal} 是当前最新的结果集修订版；此视图为只读。`
-      : `Revision ${revision.ordinal} 已被后续修订版取代；它按其原始稿件 pin ${revision.manuscriptPin.revisionLabel} 呈现，不是当前事实，也未被删除。`));
+    synopsis.append(
+      element('h4', undefined, `历史修订版 Revision ${revision.ordinal}（只读）`),
+      element('p', 'attention-note', view.current
+        ? `Revision ${revision.ordinal} 是当前最新的结果集修订版；此视图为只读。`
+        : `Revision ${revision.ordinal} 已被后续修订版取代；它按其原始稿件 pin ${revision.manuscriptPin.revisionLabel} 呈现，不是当前事实，也未被删除。`),
+    );
   }
-  const identity = element('dl', 'analysis-facts');
-  identity.append(
-    element('dt', undefined, '更新方式'), element('dd', undefined, revision.update.predecessor === null
-      ? `${revision.update.modeLabel} · 无前一修订版`
-      : `${revision.update.modeLabel} · 后继于 Revision ${revision.update.predecessor.ordinal} · ${rangeText(revision.update.selectedRange)}`),
-    element('dt', undefined, '单元血缘'), element('dd', undefined, reuseCountsText(revision.update.counts)),
-    element('dt', undefined, '策略 pin'), element('dd', undefined, `${revision.policyPin.operationalScope} · Provider Processing ${revision.policyPin.providerProcessingVersion} · ${revision.policyPin.liveTransmissions} 次实时传输`),
-    element('dt', undefined, '用量'), element('dd', undefined, `${revision.usage.requests} 次模型请求（仅重算单元，含安全重试）· 输入 ${revision.usage.inputTokens} · 输出 ${revision.usage.outputTokens}`),
-    element('dt', undefined, '计划版本'), element('dd', undefined, revision.provenance.planVersion === undefined ? '未记录' : `版本 ${revision.provenance.planVersion}（运行授权所绑定）`),
+
+  // The four sentences, each on its own axis so none of them collapses into one badge (ANALYSIS-001).
+  const sentences = element('div', 'analysis-axes');
+  for (const reading of analysisFourSentences(revision)) {
+    const section = element('section', `analysis-axis analysis-axis-${reading.axis}`);
+    const axis = reading.axis === 'coverage' ? revision.coverage : reading.axis === 'reducer-closure' ? revision.reducerClosure
+      : reading.axis === 'freshness' ? revision.freshness : revision.assurance;
+    section.dataset['analysisAxis'] = reading.axis;
+    section.dataset['axisState'] = axis.state;
+    section.append(
+      element('h5', undefined, reading.heading),
+      element('p', 'analysis-axis-sentence', reading.sentence),
+      element('p', 'field-note analysis-axis-next', `下一步：${reading.nextAction}`),
+    );
+    if (reading.target !== null) {
+      const target = reading.target;
+      const go = button(target === 'history' ? '去「历史与更新」' : '去「各章」', 'quiet', () => selectTab(target));
+      go.dataset['analysisAction'] = `go-${target}`;
+      section.append(go);
+    }
+    sentences.append(section);
+  }
+  const synthesis = element('section', 'analysis-synthesis');
+  synthesis.append(
+    element('h4', undefined, '全书梗概'),
+    element('p', 'analysis-synopsis', revision.synthesis.synopsis.length > 0 ? revision.synthesis.synopsis : '（还没有读完的范围可供合并）'),
   );
-  // In-envelope adaptations the producing Run recorded: the Overview discloses their count and units;
-  // the classified reasons come from the Run's own records when it is the latest Task's Run.
+  synopsis.append(sentences, synthesis);
+
+  // Provenance and identity as counts with disclosure (V2-UX-LAYER-006): every list names its items'
+  // ranges as a block count and keeps the identifiers one step below it.
+  const entityList = renderAnalysisListPanel(panels.entities, '人物与名称', '没有记录人物或名称。', revision.synthesis.entities.map((entity) => ({
+    reading: `${entity.name}（${ANALYSIS_ENTITY_KIND_LABELS[entity.kind]}${entity.aliases.length > 0 ? `，别名 ${entity.aliases.join('、')}` : ''}）· ${analysisProvenanceSummary(entity.unitOrdinals, entity.sourceRanges)}`,
+    name: entity.name,
+    ranges: entity.sourceRanges,
+    blockId: entity.sourceRanges[0]?.blockId,
+  })), returnButton);
+  entityList.classList.add('analysis-entity-list');
+  renderAnalysisListPanel(panels.events, '事件', '没有记录事件。', revision.synthesis.events.map((event) => ({
+    reading: `${event.summary}${event.chronology === null ? '' : `（${event.chronology}）`}${event.participants.length === 0 ? '' : ` · ${event.participants.join('、')}`} · ${analysisProvenanceSummary([event.unitOrdinal], event.sourceRanges)}`,
+    name: event.summary,
+    ranges: event.sourceRanges,
+    blockId: event.sourceRanges[0]?.blockId,
+  })), returnButton).classList.add('analysis-event-list');
+  renderAnalysisListPanel(panels.relationships, '关系', '没有记录关系。', revision.synthesis.relationships.map((relationship) => ({
+    reading: `${relationship.subject} — ${relationship.relation} — ${relationship.object} · ${analysisProvenanceSummary(relationship.unitOrdinals, relationship.sourceRanges)}`,
+    name: `${relationship.subject} · ${relationship.object}`,
+    ranges: relationship.sourceRanges,
+    blockId: relationship.sourceRanges[0]?.blockId,
+  })), returnButton).classList.add('analysis-relationship-list');
+  renderAnalysisListPanel(panels.settings, '设定', '没有记录设定。', revision.synthesis.settingClaims.map((claim) => ({
+    reading: `${claim.subject}：${claim.claim} · ${analysisProvenanceSummary([claim.unitOrdinal], claim.sourceRanges)}`,
+    name: claim.subject,
+    ranges: claim.sourceRanges,
+    blockId: claim.sourceRanges[0]?.blockId,
+  })), returnButton).classList.add('analysis-setting-list');
+
+  // 各章: every reading range by the heading the manuscript gives it, with what the analysis made of it
+  // or, where it made nothing, that the range is still unread and why (ANALYSIS-004). The unit's own
+  // name, state, lineage, confidence, request digest and usage are its technical half.
+  const chapters = panels.chapters;
+  const manifestUnits = view.historical ? null : projection.coverageManifest?.units ?? null;
   const adaptedUnits = revision.provenance.adaptations?.unitOrdinals ?? [];
+  const units = element('ul', 'analysis-unit-list');
+  for (const unit of revision.units) {
+    const item = element('li', 'analysis-unit');
+    item.dataset['analysisUnit'] = String(unit.unitOrdinal);
+    item.dataset['analysisUnitState'] = unit.state;
+    item.dataset['analysisUnitLineage'] = unit.lineage.kind;
+    if (unit.lineage.kind === 'reused') item.dataset['analysisUnitReusedFrom'] = `${unit.lineage.revisionOrdinal}/${unit.lineage.unitOrdinal}`;
+    if (adaptedUnits.includes(unit.unitOrdinal)) item.dataset['analysisUnitAdaptations'] = '1';
+    const manifestUnit = manifestUnits?.[unit.unitOrdinal - 1];
+    const title = manifestUnit === undefined
+      ? `第 ${unit.unitOrdinal} 个阅读范围`
+      : `${manifestUnit.headingText === null ? `第 ${unit.unitOrdinal} 个阅读范围` : `「${manifestUnit.headingText}」`}${manifestUnit.subUnitCount > 1 ? `（第 ${manifestUnit.subUnitIndex}/${manifestUnit.subUnitCount} 部分）` : ''} · 内容块 ${manifestUnit.startPosition}–${manifestUnit.endPosition}`;
+    item.append(element('h5', undefined, title));
+    const lineage = unit.lineage.kind === 'reused' ? `复用自 Revision ${unit.lineage.revisionOrdinal} / 单元 ${unit.lineage.unitOrdinal}` : '本次重算';
+    if (unit.state === 'closed') {
+      item.append(element('p', undefined, unit.synopsis));
+      const firstRange = unit.entities.flatMap((entity) => entity.sourceRanges)[0] ?? unit.events.flatMap((event) => event.sourceRanges)[0];
+      if (firstRange !== undefined) item.append(returnButton(firstRange.blockId));
+    } else {
+      item.append(element('p', 'attention-note', `尚未分析：${unit.gap.reason}`));
+      if (unit.gap.blockIds[0] !== undefined) item.append(returnButton(unit.gap.blockIds[0]));
+    }
+    item.append(technicalDetails(
+      'analysis-facts',
+      element('dt', undefined, '分析单元'), element('dd', 'technical-identity', unit.state === 'closed'
+        ? `单元 ${unit.unitOrdinal} · 已闭合 · 置信 ${unit.confidence} · ${lineage}`
+        : `单元 ${unit.unitOrdinal} · 缺口 · ${unit.gap.code} · ${lineage}`),
+      element('dt', undefined, '请求摘要'), element('dd', 'technical-identity', unit.requestDigest),
+      ...(unit.state !== 'closed' ? [] : [
+        element('dt', undefined, '单元内计数'),
+        element('dd', 'technical-identity', `实体 ${unit.entities.length} · 事件 ${unit.events.length} · 关系 ${unit.relationships.length} · 设定声明 ${unit.settingClaims.length} · 单元内冲突 ${unit.conflicts.length} · 未解决 ${unit.unresolved.length}${unit.usage === null ? '' : ` · 用量 ${unit.usage.inputTokens}/${unit.usage.outputTokens}`}`),
+      ]),
+    ));
+    units.append(item);
+  }
+  // The unread ranges once more as their own list, so the editor sees what is missing without reading
+  // every chapter to find it; each returns to the manuscript range it names.
+  const gaps = element('ul', 'analysis-list analysis-gap-list');
+  if (revision.gaps.length === 0) gaps.append(element('li', undefined, '没有尚未分析的范围。'));
+  for (const gap of revision.gaps) {
+    const item = element('li');
+    item.dataset['analysisGapUnit'] = String(gap.unitOrdinal);
+    item.dataset['analysisGapCode'] = gap.code;
+    item.append(element('span', undefined, `第 ${gap.unitOrdinal} 个阅读范围 · 内容块 ${gap.startPosition}–${gap.endPosition} · ${gap.reason} `));
+    if (gap.blockIds[0] !== undefined) item.append(returnButton(gap.blockIds[0]));
+    gaps.append(item);
+  }
+  chapters.append(
+    element('h4', undefined, `尚未分析的范围 · ${revision.gaps.length}`), gaps,
+    element('h4', undefined, `各章 · ${revision.units.length} 个阅读范围`), units,
+  );
+
+  // The technical half of the whole revision, closed by default and complete (V2-UX-LAYER-001, 007).
   const runAdaptations = projection.run !== null && projection.run.runRecordId === revision.provenance.runRecordId ? projection.run.adaptations : [];
   card.dataset['adaptationCount'] = String(revision.provenance.adaptations?.count ?? 0);
   const adaptations = element('ul', 'analysis-list analysis-adaptation-list');
@@ -1799,11 +2164,20 @@ function renderBaselineAnalysisOverview(
     item.dataset['analysisAdaptationClass'] = 'safe-retry';
     adaptations.append(item);
   }
-  identity.append(
-    element('dt', undefined, '计划内调整'),
-    element('dd', undefined, revision.provenance.adaptations === undefined ? '未记录' : `${revision.provenance.adaptations.count} 次${adaptedUnits.length === 0 ? '' : ` · 单元 ${adaptedUnits.join('、')}`}`),
-  );
-  card.append(identity, technicalDetails(
+  const conflicts = element('ul', 'analysis-list analysis-conflict-list');
+  const conflictRanges: HTMLElement[] = [];
+  if (revision.conflicts.length === 0) conflicts.append(element('li', undefined, '无冲突'));
+  for (const conflict of revision.conflicts) {
+    const item = element('li');
+    const kindLabel = ANALYSIS_CONFLICT_KIND_LABELS[conflict.kind];
+    const unitList = conflict.unitOrdinals.join('、');
+    item.dataset['analysisConflictKind'] = conflict.kind;
+    item.append(element('span', undefined, `${kindLabel} · 单元 ${unitList} · ${conflict.description} · ${analysisBlockCountLabel(conflict.sourceRanges)} `));
+    if (conflict.sourceRanges[0] !== undefined) item.append(returnButton(conflict.sourceRanges[0].blockId));
+    conflicts.append(item);
+    conflictRanges.push(element('dt', undefined, `${kindLabel} · 单元 ${unitList}`), element('dd', 'technical-identity', analysisRanges(conflict.sourceRanges)));
+  }
+  const technical = technicalDetails(
     'analysis-facts',
     element('dt', undefined, '分析契约'), element('dd', 'technical-identity', `${projection.kind} · ${revision.contractVersion}`),
     element('dt', undefined, '精确稿件 pin'), element('dd', 'technical-identity', `${revision.manuscriptPin.revisionLabel} · ${revision.manuscriptPin.revisionId} · ${revision.manuscriptPin.revisionDigest}`),
@@ -1813,115 +2187,36 @@ function renderBaselineAnalysisOverview(
     element('dt', undefined, 'Schema / Reducer 摘要'), element('dd', 'technical-identity', `${revision.schemaDigest} · ${revision.reducerDigest}`),
     element('dt', undefined, '模型适配器 pin'), element('dd', 'technical-identity', `${revision.adapterPin.route} · ${revision.adapterPin.model} · ${revision.adapterPin.fixtureIdentity} · ${revision.adapterPin.fixtureSha256}`),
     element('dt', undefined, '执行绑定 pin'), element('dd', 'technical-identity', `${revision.bindingPin.bindingDigest} · Session ${revision.bindingPin.harnessSessionId}`),
+    element('dt', undefined, '更新方式'), element('dd', 'technical-identity', revision.update.predecessor === null
+      ? `${revision.update.modeLabel} · 无前一修订版`
+      : `${revision.update.modeLabel} · 后继于 Revision ${revision.update.predecessor.ordinal} · ${rangeText(revision.update.selectedRange)}`),
+    element('dt', undefined, '单元血缘'), element('dd', 'technical-identity', reuseCountsText(revision.update.counts)),
+    element('dt', undefined, '覆盖'), element('dd', 'technical-identity', `${revision.coverage.unitsClosed}/${revision.coverage.unitsTotal} 个分析单元闭合 · ${revision.coverage.unitsReused} 个按血缘复用 · ${revision.coverage.gapCount} 处缺口 · ${revision.coverage.label}`),
+    element('dt', undefined, '归约/综合闭合'), element('dd', 'technical-identity', `${revision.reducerClosure.label} · ${revision.reducerClosure.stages.map((stage) => `${stage.stage}：${stage.state}（${stage.inputCount} 项输入）`).join('；')}`),
+    element('dt', undefined, '精确修订版新鲜度'), element('dd', 'technical-identity', `${revision.freshness.label} · 绑定修订版 ${revision.freshness.boundRevisionId} · 当前修订版 ${revision.freshness.currentRevisionId} · 修订日志序号 ${revision.freshness.currentJournalSequence} · 仅通过本地确定性比较判定；不调用 Provider`),
+    element('dt', undefined, '语义/证据保证'), element('dd', 'technical-identity', `${revision.assurance.label} · ${revision.assurance.unresolvedConflictCount} 处未解决冲突 · ${revision.assurance.unresolvedItemCount} 项未解决事项 · ${revision.assurance.lowConfidenceUnitCount} 个低置信单元 · ${revision.assurance.crossUnitFindingCount} 条跨单元发现`),
+    element('dt', undefined, '策略 pin'), element('dd', 'technical-identity', `${revision.policyPin.operationalScope} · Provider Processing ${revision.policyPin.providerProcessingVersion} · ${revision.policyPin.liveTransmissions} 次实时传输`),
+    element('dt', undefined, '用量'), element('dd', 'technical-identity', `${revision.usage.requests} 次模型请求（仅重算单元，含安全重试）· 输入 ${revision.usage.inputTokens} · 输出 ${revision.usage.outputTokens}`),
+    element('dt', undefined, '计划版本'), element('dd', 'technical-identity', revision.provenance.planVersion === undefined ? '未记录' : `版本 ${revision.provenance.planVersion}（运行授权所绑定）`),
+    element('dt', undefined, '计划内调整'), element('dd', 'technical-identity', revision.provenance.adaptations === undefined ? '未记录' : `${revision.provenance.adaptations.count} 次${adaptedUnits.length === 0 ? '' : ` · 单元 ${adaptedUnits.join('、')}`}`),
     ...(revision.update.predecessor === null ? [] : [
       element('dt', undefined, '前一修订版'), element('dd', 'technical-identity', `Revision ${revision.update.predecessor.ordinal} · ${revision.update.predecessor.revisionId} · ${revision.update.predecessor.digest}`),
       element('dt', undefined, '复用计划摘要'), element('dd', 'technical-identity', revision.update.reusePlanDigest ?? '无'),
     ]),
-  ), element('h4', undefined, `计划内调整 · ${adaptedUnits.length} 次`), adaptations);
-
-  const axes = element('div', 'analysis-axes');
-  axes.append(
-    renderAnalysisAxis(revision.coverage, [
-      `${revision.coverage.unitsClosed}/${revision.coverage.unitsTotal} 个分析单元闭合`,
-      `${revision.coverage.unitsReused} 个闭合单元按血缘复用自前一修订版`,
-      `${revision.coverage.gapCount} 处缺口（失败、跳过或无效单元）`,
-    ]),
-    renderAnalysisAxis(revision.reducerClosure, revision.reducerClosure.stages.map((stage) => `${stage.stage}：${stage.state}（${stage.inputCount} 项输入）`)),
-    renderAnalysisAxis(revision.freshness, [
-      `绑定修订版 ${revision.freshness.boundRevisionId}`,
-      `当前修订版 ${revision.freshness.currentRevisionId} · 修订日志序号 ${revision.freshness.currentJournalSequence}`,
-      '仅通过本地确定性比较判定；不调用 Provider',
-    ]),
-    renderAnalysisAxis(revision.assurance, [
-      `${revision.assurance.unresolvedConflictCount} 处未解决冲突 · ${revision.assurance.unresolvedItemCount} 项未解决事项 · ${revision.assurance.lowConfidenceUnitCount} 个低置信单元`,
-      revision.assurance.statement,
-    ]),
   );
-  card.append(element('h4', undefined, '四个独立状态轴'), axes);
-
-  const gaps = element('ul', 'analysis-list analysis-gap-list');
-  if (revision.gaps.length === 0) gaps.append(element('li', undefined, '无缺口'));
-  for (const gap of revision.gaps) {
-    const item = element('li');
-    item.dataset['analysisGapUnit'] = String(gap.unitOrdinal);
-    item.dataset['analysisGapCode'] = gap.code;
-    item.append(element('span', undefined, `单元 ${gap.unitOrdinal} · ${gap.code} · 内容块 ${gap.startPosition}–${gap.endPosition} · ${gap.reason} `));
-    if (gap.blockIds[0] !== undefined) item.append(returnButton(gap.blockIds[0]));
-    gaps.append(item);
-  }
-  card.append(element('h4', undefined, `缺口 · ${revision.gaps.length} 处`), gaps);
-
-  // A conflict names its kind in the editor's language (V2-UX-LAYER-003) and its provenance as a block
-  // count; its unit ordinals already stand at full rank beside it, so the summary would only repeat
-  // them. The exact ranges of every conflict sit in the one disclosure below the list.
-  const conflicts = element('ul', 'analysis-list analysis-conflict-list');
-  const conflictRanges: HTMLElement[] = [];
-  if (revision.conflicts.length === 0) conflicts.append(element('li', undefined, '无冲突'));
-  for (const conflict of revision.conflicts) {
-    const item = element('li');
-    const kindLabel = ANALYSIS_CONFLICT_KIND_LABELS[conflict.kind];
-    const units = conflict.unitOrdinals.join('、');
-    item.dataset['analysisConflictKind'] = conflict.kind;
-    item.append(element('span', undefined, `${kindLabel} · 单元 ${units} · ${conflict.description} · ${analysisBlockCountLabel(conflict.sourceRanges)} `));
-    if (conflict.sourceRanges[0] !== undefined) item.append(returnButton(conflict.sourceRanges[0].blockId));
-    conflicts.append(item);
-    conflictRanges.push(element('dt', undefined, `${kindLabel} · 单元 ${units}`), element('dd', 'technical-identity', analysisRanges(conflict.sourceRanges)));
-  }
-  card.append(element('h4', undefined, `冲突 · ${revision.conflicts.length} 处（保持未解决）`), conflicts);
-  if (conflictRanges.length > 0) card.append(technicalDetails('analysis-facts', ...conflictRanges));
-
-  const synthesis = element('section', 'analysis-synthesis');
-  synthesis.append(
-    element('h4', undefined, '全书综合'),
-    element('p', undefined, revision.synthesis.synopsis.length > 0 ? revision.synthesis.synopsis : '（没有闭合单元可供综合）'),
-    element('p', 'field-note', `实体 ${revision.synthesis.entities.length} · 事件 ${revision.synthesis.events.length} · 关系 ${revision.synthesis.relationships.length} · 设定声明 ${revision.synthesis.settingClaims.length} · 未解决事项 ${revision.synthesis.unresolved.length}`),
+  technical.classList.add('analysis-revision-technical');
+  // The leads 审阅 will read, and the Run's in-envelope adjustments: exact, complete, and out of the
+  // decision layer. Each list keeps its own ranges in a disclosure of its own directly after it.
+  technical.append(
+    element('h5', undefined, `计划内调整 · ${adaptedUnits.length} 次`), adaptations,
+    element('h5', undefined, `前后不一致的线索 · ${revision.conflicts.length} 处（归入审阅 · 保持未解决）`), conflicts,
   );
-  // An entity's provenance reads as its units and how many blocks they cover (V2-UX-LAYER-006); the
-  // identifiers themselves never interrupt the list, they wait one step below it.
-  const entities = element('ul', 'analysis-list');
-  const entityRanges: HTMLElement[] = [];
-  for (const entity of revision.synthesis.entities) {
-    entities.append(element('li', undefined, `${entity.name}（${entity.kind}${entity.aliases.length > 0 ? `，别名 ${entity.aliases.join('、')}` : ''}）· ${analysisProvenanceSummary(entity.unitOrdinals, entity.sourceRanges)}`));
-    entityRanges.push(element('dt', undefined, entity.name), element('dd', 'technical-identity', analysisRanges(entity.sourceRanges)));
-  }
-  synthesis.append(entities);
-  if (entityRanges.length > 0) synthesis.append(technicalDetails('analysis-facts', ...entityRanges));
-  card.append(synthesis);
-
-  const units = element('ul', 'analysis-unit-list');
-  const manifestForUnits = view.historical ? null : projection.coverageManifest;
-  for (const unit of revision.units) {
-    const item = element('li', 'analysis-unit');
-    item.dataset['analysisUnit'] = String(unit.unitOrdinal);
-    item.dataset['analysisUnitState'] = unit.state;
-    item.dataset['analysisUnitLineage'] = unit.lineage.kind;
-    if (unit.lineage.kind === 'reused') item.dataset['analysisUnitReusedFrom'] = `${unit.lineage.revisionOrdinal}/${unit.lineage.unitOrdinal}`;
-    if (adaptedUnits.includes(unit.unitOrdinal)) item.dataset['analysisUnitAdaptations'] = '1';
-    const details = element('details');
-    const manifestUnit = manifestForUnits?.units[unit.unitOrdinal - 1];
-    const range = manifestUnit === undefined ? '' : ` · 内容块 ${manifestUnit.startPosition}–${manifestUnit.endPosition}`;
-    const lineage = unit.lineage.kind === 'reused' ? ` · 复用自 Revision ${unit.lineage.revisionOrdinal} / 单元 ${unit.lineage.unitOrdinal}` : ' · 本次重算';
-    details.append(element('summary', undefined, unit.state === 'closed'
-      ? `单元 ${unit.unitOrdinal} · 已闭合 · 置信 ${unit.confidence}${range}${lineage}`
-      : `单元 ${unit.unitOrdinal} · 缺口 · ${unit.gap.code}${range}${lineage}`));
-    const body = element('div');
-    body.append(element('p', 'field-note technical-identity', `请求摘要 ${unit.requestDigest}`));
-    if (unit.state === 'closed') {
-      body.append(
-        element('p', undefined, unit.synopsis),
-        element('p', 'field-note', `实体 ${unit.entities.length} · 事件 ${unit.events.length} · 关系 ${unit.relationships.length} · 设定声明 ${unit.settingClaims.length} · 单元内冲突 ${unit.conflicts.length} · 未解决 ${unit.unresolved.length}${unit.usage === null ? '' : ` · 用量 ${unit.usage.inputTokens}/${unit.usage.outputTokens}`}`),
-      );
-      const firstRange = unit.entities.flatMap((entity) => entity.sourceRanges)[0] ?? unit.events.flatMap((event) => event.sourceRanges)[0];
-      if (firstRange !== undefined) body.append(returnButton(firstRange.blockId));
-    } else {
-      body.append(element('p', 'attention-note', unit.gap.reason));
-      if (unit.gap.blockIds[0] !== undefined) body.append(returnButton(unit.gap.blockIds[0]));
-    }
-    details.append(body);
-    item.append(details);
-    units.append(item);
-  }
-  card.append(element('h4', undefined, `分析单元结果 · ${revision.units.length} 个`), units);
+  if (conflictRanges.length > 0) technical.append(technicalDetails('analysis-facts', ...conflictRanges));
+  const unresolved = element('ul', 'analysis-list analysis-unresolved-list');
+  if (revision.synthesis.unresolved.length === 0) unresolved.append(element('li', undefined, '无未决事项'));
+  for (const entry of revision.synthesis.unresolved) unresolved.append(element('li', undefined, `单元 ${entry.unitOrdinal} · ${entry.description} · ${analysisBlockCountLabel(entry.sourceRanges)}`));
+  technical.append(element('h5', undefined, `未决事项 · ${revision.synthesis.unresolved.length} 项（归入审阅）`), unresolved);
+  synopsis.append(technical);
 }
 
 /** The frozen reuse plan of an update Task, disclosed in Plan Preview before authorization. */
@@ -1929,12 +2224,15 @@ function renderReusePlanPreview(card: HTMLElement, projection: BaselineAnalysisP
   const update = projection.update;
   if (update === null || update.reusePlan === null) return;
   const plan: AnalysisReusePlanProjection = update.reusePlan;
-  card.dataset['reusePlanDigest'] = update.reusePlanDigest ?? '';
-  card.dataset['planReused'] = String(plan.counts.reused);
-  card.dataset['planRecomputed'] = String(plan.counts.recomputed);
-  card.dataset['planInvalidated'] = String(plan.counts.invalidated);
-  card.dataset['planBypassed'] = String(plan.counts.bypassed);
-  card.dataset['planUpdateMode'] = plan.mode;
+  // The plan renders inside 历史与更新 once the Book holds a revision, but what it froze is a fact about
+  // the card's Task, so the readings stay on the card itself wherever the section is placed.
+  const owner = card.closest<HTMLElement>('.baseline-analysis-card') ?? card;
+  owner.dataset['reusePlanDigest'] = update.reusePlanDigest ?? '';
+  owner.dataset['planReused'] = String(plan.counts.reused);
+  owner.dataset['planRecomputed'] = String(plan.counts.recomputed);
+  owner.dataset['planInvalidated'] = String(plan.counts.invalidated);
+  owner.dataset['planBypassed'] = String(plan.counts.bypassed);
+  owner.dataset['planUpdateMode'] = plan.mode;
   const section = element('section', 'analysis-reuse-plan');
   section.dataset['reusePlanMode'] = plan.mode;
   section.append(element('h4', undefined, `复用计划 · ${update.modeLabel}`));
@@ -2230,7 +2528,7 @@ function renderAnalysisUpdateControls(card: HTMLElement, projection: BaselineAna
   section.dataset['updateBlocked'] = controls.blockedByActiveRun ? 'true' : 'false';
   section.dataset['workingUnits'] = String(controls.working.unitCount);
   section.dataset['workingBlocks'] = String(controls.working.totalBlocks);
-  section.append(element('h4', undefined, '分析更新操作'));
+  section.append(element('h4', undefined, '更新这份分析'));
   const facts = element('dl', 'analysis-facts');
   // Freshness and the work an update would cover are what the editor weighs before issuing a Task, so
   // both readings stay at full rank; the digests that identify them go one step away.
@@ -2260,11 +2558,14 @@ function renderAnalysisUpdateControls(card: HTMLElement, projection: BaselineAna
       block.dataset['expectedInvalidated'] = String(action.expected.invalidated);
       block.dataset['expectedBypassed'] = String(action.expected.bypassed);
     }
-    block.append(element('h5', undefined, action.label), element('p', undefined, action.meaning), element('p', 'field-note', `固定任务目标：${action.goal}`));
-    const expected = element('p', 'analysis-update-expected', action.expected === null
-      ? (mode === 'reanalyze-range' ? '预期复用/重算：由所选范围决定（见下方选项）' : '预期复用/重算：不可用')
-      : `预期：${reuseCountsText(action.expected)}`);
-    block.append(expected);
+    // What each mode keeps and what it reads again is the decision (ADR 0076 §5): one sentence in the
+    // editor's words at full rank, the four exact lineage counts and the fixed goal one step away.
+    block.append(element('h5', undefined, action.label), element('p', undefined, action.meaning));
+    const expected = element('p', 'analysis-update-expected', updateReuseReading(action.expected, mode));
+    const expectedExact = element('dd', 'technical-identity', action.expected === null ? '由所选范围决定' : reuseCountsText(action.expected));
+    block.append(expected, technicalDetails('analysis-facts',
+      element('dt', undefined, '预期单元血缘'), expectedExact,
+      element('dt', undefined, '固定任务目标'), element('dd', 'technical-identity', action.goal)));
     if (action.unavailableReason !== null) block.append(element('p', 'attention-note', action.unavailableReason));
     let selectedRange: BaselineAnalysisSelectedRange | null = null;
     if (mode === 'reanalyze-range') {
@@ -2289,17 +2590,18 @@ function renderAnalysisUpdateControls(card: HTMLElement, projection: BaselineAna
           block.dataset['expectedRecomputed'] = String(option.expected.recomputed);
           block.dataset['expectedInvalidated'] = String(option.expected.invalidated);
           block.dataset['expectedBypassed'] = String(option.expected.bypassed);
-          expected.textContent = `预期（内容块 ${option.startPosition}–${option.endPosition}）：${reuseCountsText(option.expected)}`;
+          expected.textContent = `所选内容块 ${option.startPosition}–${option.endPosition}：${updateReuseReading(option.expected, mode)}`;
+          expectedExact.textContent = reuseCountsText(option.expected);
           start.disabled = !action.available;
         });
-        const label = element('label', undefined, `${option.label} · 预期 ${reuseCountsText(option.expected)}`);
+        const label = element('label', undefined, `${option.label} · 重新分析 ${option.expected.recomputed} 个阅读范围，沿用 ${option.expected.reused} 个`);
         label.htmlFor = radio.id;
         row.append(radio, label);
         fieldset.append(row);
       }
       block.append(fieldset);
     }
-    const start = button(action.label, mode === 'sync-current' ? 'primary' : 'secondary', async () => {
+    const start = button('先看计划', 'secondary', async () => {
       const update: BaselineAnalysisUpdateRequest = { mode, selectedRange: mode === 'reanalyze-range' ? selectedRange : null };
       if (mode === 'reanalyze-range' && update.selectedRange === null) {
         setStatus('请先选择要重新分析的范围。', 'error');
@@ -2314,9 +2616,31 @@ function renderAnalysisUpdateControls(card: HTMLElement, projection: BaselineAna
     start.dataset['analysisAction'] = mode;
     start.disabled = !action.available || mode === 'reanalyze-range';
     actionButtons.push(start);
+    // The mode's own button opens the two ways to begin (editor-surfaces §3). 先看计划 prepares the Task
+    // and shows its plan, which is the only way a Run is authorized today. The quick start is a Default
+    // Execution Rule's to give (S75, B11); until one exists it is shown, disabled, with the reason — a
+    // Run never starts behind a plan the editor has not seen and no rule has spoken for.
+    const quick = button(mode === 'sync-current' ? '开始同步' : mode === 'reanalyze-range' ? '开始重新分析' : '开始全部重来', 'primary', () => undefined);
+    quick.dataset['analysisAction'] = `quick-${mode}`;
+    quick.disabled = true;
+    const choice = element('div', 'analysis-update-choice');
+    choice.id = `analysis-update-choice-${mode}`;
+    choice.hidden = true;
+    const choiceActions = element('div', 'button-row analysis-actions');
+    choiceActions.append(quick, start);
+    choice.append(choiceActions, element('p', 'field-note', '快速开始要先有「快速开始默认」，目前还没有设定；请先看计划，再开始任务。'));
+    const chooser = button(action.label, mode === 'sync-current' ? 'primary' : 'secondary', () => {
+      choice.hidden = !choice.hidden;
+      chooser.setAttribute('aria-expanded', choice.hidden ? 'false' : 'true');
+    });
+    chooser.dataset['analysisAction'] = `choose-${mode}`;
+    chooser.setAttribute('aria-expanded', 'false');
+    chooser.setAttribute('aria-controls', choice.id);
+    chooser.disabled = !action.available;
+    actionButtons.push(chooser);
     const actions = element('div', 'button-row analysis-actions');
-    actions.append(start);
-    block.append(actions);
+    actions.append(chooser);
+    block.append(actions, choice);
     section.append(block);
   }
   section.append(cancel);
@@ -2334,8 +2658,8 @@ function renderAnalysisHistory(card: HTMLElement, projection: BaselineAnalysisPr
   // How many revisions there are and which one is latest are decisions, not identities: they stay at
   // full rank, and only the result set's own identity and kind step down into the disclosure.
   section.append(
-    element('h4', undefined, '分析结果修订历史'),
-    element('p', 'field-note', `${history.entries.length} 个修订版 · 最新 Revision ${history.latestOrdinal}`),
+    element('h4', undefined, '历次分析'),
+    element('p', 'field-note', `共 ${history.entries.length} 份分析 · 最新的是第 ${history.latestOrdinal} 份`),
     technicalDetails('analysis-facts',
       element('dt', undefined, '结果集'), element('dd', 'technical-identity', `${history.resultSetId} · ${history.kind}`)),
   );
@@ -2364,16 +2688,21 @@ function renderAnalysisHistory(card: HTMLElement, projection: BaselineAnalysisPr
     // the Run that produced it — travel together in the entry's one disclosure, in the order they read
     // in before (V2-UX-LAYER-001).
     item.append(
-      element('p', undefined, `Revision ${entry.ordinal} · ${entry.modeLabel} · 绑定 ${entry.manuscriptPin.revisionLabel} · ${entry.current ? '当前最新' : '已被取代 · 按原始 pin 保留'} · ${entry.freshnessLabel}`),
-      element('p', 'field-note', `${reuseCountsText(entry.counts)} · 前一修订版 ${entry.predecessor === null ? '无' : `Revision ${entry.predecessor.ordinal}`} · 缺口 ${entry.gapCount} · 冲突 ${entry.conflictCount} · 覆盖 ${entry.unitsClosed}/${entry.unitsTotal}`),
+      element('p', undefined, `第 ${entry.ordinal} 份 · ${entry.modeLabel} · 读的是 ${entry.manuscriptPin.revisionLabel} · ${localInstantLabel(entry.createdAt)} · ${entry.current ? '当前最新' : '已被后来的分析取代 · 按原样保留'}`),
+      element('p', 'field-note', `沿用上一份 ${entry.counts.reused} 个阅读范围，重新分析 ${entry.counts.recomputed} 个；读完 ${entry.unitsClosed} 个，${entry.gapCount} 个没有读成。`),
       technicalDetails('analysis-facts',
+        element('dt', undefined, '修订版'),
+        element('dd', 'technical-identity', `Revision ${entry.ordinal} · ${entry.freshnessLabel} · 前一修订版 ${entry.predecessor === null ? '无' : `Revision ${entry.predecessor.ordinal}`} · 创建于 ${entry.createdAt}`),
+        element('dt', undefined, '单元血缘与计数'),
+        element('dd', 'technical-identity', `${reuseCountsText(entry.counts)} · 缺口 ${entry.gapCount} · 冲突 ${entry.conflictCount} · 覆盖 ${entry.unitsClosed}/${entry.unitsTotal}`),
         element('dt', undefined, '修订版身份'),
         element('dd', 'technical-identity', `${entry.revisionId} · 摘要 ${entry.digest} · 稿件 pin ${entry.manuscriptPin.revisionId} · ${entry.manuscriptPin.revisionDigest}`),
         element('dt', undefined, '产出 Run 与用量'),
         element('dd', 'technical-identity', `Run ${entry.producingRun.runRecordId} · ${entry.producingRun.classification ?? '无结果'} · ${entry.usage.requests} 次模型请求 · 输入 ${entry.usage.inputTokens} · 输出 ${entry.usage.outputTokens}`),
       ),
     );
-    const view = button('查看该修订版（只读）', 'quiet', () => open(entry.revisionId));
+    item.append(runReportOrReason(entry.report, entry.reportAbsentReason));
+    const view = button('查看这一份（只读）', 'quiet', () => open(entry.revisionId));
     view.dataset['analysisAction'] = 'open-revision';
     view.dataset['analysisRevisionId'] = entry.revisionId;
     view.dataset['analysisRevisionOrdinal'] = String(entry.ordinal);
@@ -2383,7 +2712,7 @@ function renderAnalysisHistory(card: HTMLElement, projection: BaselineAnalysisPr
   }
   section.append(list);
   if (projection.inspectedRevision !== null) {
-    const back = button('返回最新修订版', 'quiet', () => open(null));
+    const back = button('返回最新的一份', 'quiet', () => open(null));
     back.dataset['analysisAction'] = 'close-revision';
     section.append(back);
   }
@@ -2455,12 +2784,24 @@ function renderBaselineAnalysis(host: HTMLElement, projection: BaselineAnalysisP
     return;
   }
 
-  if (projection.checkpoint !== null) renderFrozenAnalysisPlan(card, projection, host, bookTitle);
-  if (projection.inspectedRevision !== null) {
-    renderBaselineAnalysisOverview(card, projection, projection.inspectedRevision.revision, bookTitle, { historical: true, current: projection.inspectedRevision.current });
-  } else if (projection.resultSetRevision) {
-    renderBaselineAnalysisOverview(card, projection, projection.resultSetRevision, bookTitle, { historical: false, current: true });
+  // Once the Book holds a revision the card reads as ②A's seven tabs, and everything about how the
+  // analysis was made and is brought up to date — the current Task's plan and Run, its outcome and Run
+  // Report, the three update modes, the history — lives under 历史与更新. Before that there is nothing
+  // to tab through, and the first baseline's plan reads straight down the card as it always has.
+  const revision = projection.inspectedRevision?.revision ?? projection.resultSetRevision;
+  let records: HTMLElement = card;
+  if (revision !== null) {
+    // A Task in flight is what the editor came for, so the card opens where its plan and its Run are;
+    // a choice the editor made themselves always wins over either default.
+    const taskInFlight = projection.state === 'prepared' || projection.state === 'authorized-blocked' ||
+      projection.state === 'admitted' || projection.state === 'executing';
+    const { panels, select } = analysisTabs(card, projection.bookId, taskInFlight ? 'history' : 'synopsis');
+    renderBaselineAnalysisOverview(card, panels, select, projection, revision, bookTitle, projection.inspectedRevision !== null
+      ? { historical: true, current: projection.inspectedRevision.current }
+      : { historical: false, current: true });
+    records = panels.history;
   }
+  if (projection.checkpoint !== null) renderFrozenAnalysisPlan(records, projection, host, bookTitle);
 
   if (projection.taskOutcome) {
     const outcome = element('section', 'success-note analysis-outcome');
@@ -2468,14 +2809,17 @@ function renderBaselineAnalysis(host: HTMLElement, projection: BaselineAnalysisP
     outcome.dataset['taskOutcomeClassification'] = projection.taskOutcome.classification;
     outcome.append(
       element('h4', undefined, projection.taskOutcome.label),
-      element('p', 'technical-identity', `Task Outcome ${projection.taskOutcome.outcomeId} · 链接结果集修订版 ${projection.taskOutcome.resultSetRevisionId ?? '无'}`),
       element('p', undefined, `安全的下一步：${projection.taskOutcome.safeNextAction}`),
+      runReportOrReason(projection.taskOutcome.report, projection.taskOutcome.reportAbsentReason),
+      technicalDetails('analysis-facts',
+        element('dt', undefined, '任务结果'),
+        element('dd', 'technical-identity', `Task Outcome ${projection.taskOutcome.outcomeId} · 链接结果集修订版 ${projection.taskOutcome.resultSetRevisionId ?? '无'}`)),
     );
-    card.append(outcome);
+    records.append(outcome);
   }
 
-  renderAnalysisUpdateControls(card, projection, host, bookTitle);
-  renderAnalysisHistory(card, projection, host, bookTitle);
+  renderAnalysisUpdateControls(records, projection, host, bookTitle);
+  renderAnalysisHistory(records, projection, host, bookTitle);
 
   const nonEffects = element('ul', 'analysis-list');
   for (const statement of projection.namedNonEffects) nonEffects.append(element('li', undefined, statement));
@@ -2631,9 +2975,10 @@ function renderFrozenAnalysisPlan(card: HTMLElement, projection: BaselineAnalysi
       if (stale) progress.dataset['runLiveness'] = 'stale';
       progress.setAttribute('aria-live', 'polite');
       const reading = [
-        `分析单元进度 ${facts.unitsSettled}/${facts.unitsTotal}${projection.update === null ? '' : '（仅重算单元）'}`,
-        ...(facts.currentUnitOrdinal === null ? [] : [`正在处理单元 ${facts.currentUnitOrdinal}`]),
-        ...(elapsedMs === null ? [] : [`本单元已用时 ${elapsedLabel(elapsedMs)}`]),
+        RUN_LIVENESS_STAGE_LABELS[facts.stage],
+        `已读完 ${facts.unitsSettled} / ${facts.unitsTotal} 个阅读范围${projection.update === null ? '' : '（只算要重新分析的）'}`,
+        ...(facts.currentUnitOrdinal === null ? [] : [`正在读第 ${facts.currentUnitOrdinal} 个`]),
+        ...(elapsedMs === null ? [] : [`本步已用时 ${elapsedLabel(elapsedMs)}`]),
         ...(facts.attemptState === null ? [] : [attemptStateLabel(facts.attemptState)]),
         `上次状态更新 ${localInstantLabel(facts.lastTransitionAt)}`,
         `已完成模型回合 ${facts.completedAttempts} 次`,
@@ -4903,6 +5248,23 @@ function renderEditorWindow(
       setStatus(rendererErrorMessage(error, '无法返回图书工作概览。'), 'error');
     }
   });
+  const openAnalysis = button('分析', 'secondary', async () => {
+    openAnalysis.disabled = true;
+    setStatus('正在保存并打开分析…', 'busy');
+    try {
+      if (!(await settleLocalEdit())) {
+        openAnalysis.disabled = false;
+        return;
+      }
+      // Leaving for 分析 is leaving the manuscript, so the position is taken exactly as it is for 工作概览.
+      await rememberEntryPosition();
+      renderBookAnalysis(currentWindow.bookId, bookTitle);
+    } catch (error) {
+      openAnalysis.disabled = false;
+      setStatus(rendererErrorMessage(error, '无法打开分析。'), 'error');
+    }
+  });
+  openAnalysis.dataset['recordsDestination'] = 'analysis';
   const toolbarActions = element('div', 'button-row');
   if (recoveryAttentionId) {
     toolbarActions.append(button('返回恢复待确认', 'secondary', async () => {
@@ -4919,7 +5281,7 @@ function renderEditorWindow(
   // the group names where it leads without renaming what it does.
   const recordsGroup = element('nav', 'book-records-group');
   recordsGroup.setAttribute('aria-label', '资料与记录');
-  recordsGroup.append(element('span', 'section-label', '资料与记录'), backToOverview);
+  recordsGroup.append(element('span', 'section-label', '资料与记录'), openAnalysis, backToOverview);
   toolbarActions.append(recordsGroup, undo, redo, save, retryAuthoritativeRefreshButton);
   toolbar.append(title, toolbarActions);
 
@@ -5110,6 +5472,7 @@ function renderEditorWindow(
     const busy = authoritativeMutationBusy();
     editorHost.dataset['authoritativeMutation'] = authoritativeMutation ? 'true' : 'false';
     backToOverview.disabled = busy;
+    openAnalysis.disabled = busy;
     undo.disabled = busy;
     redo.disabled = busy;
     milestoneButton.disabled = busy;

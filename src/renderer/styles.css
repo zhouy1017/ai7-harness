@@ -113,6 +113,26 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .analysis-axis { min-width: 0; padding: .8rem; border: 1px solid #d5dcd9; border-radius: 10px; background: #fffdf8; }
 .analysis-axis h5 { font-size: .86rem; color: #6b7068; }
 .analysis-axis-label { margin: .35rem 0 0; font-weight: 800; overflow-wrap: anywhere; }
+.analysis-axis-sentence { margin: .35rem 0 0; font-weight: 700; line-height: 1.6; overflow-wrap: anywhere; }
+.analysis-axis-next { margin: .35rem 0 0; }
+.analysis-axis button { margin-top: .45rem; }
+/* ②A's tab strip. It wraps rather than scrolls, so all seven stay reachable at 200% zoom, and the
+   selected tab is told by weight and an underline as well as by colour (V2-UX visual direction). */
+.analysis-tabs { display: flex; flex-wrap: wrap; gap: .25rem .4rem; margin-top: 1rem; border-bottom: 1px solid #c9d6d2; }
+.analysis-tab { min-height: 36px; padding: .4rem .75rem; border: 1px solid transparent; border-bottom: 3px solid transparent; border-radius: 8px 8px 0 0; background: transparent; color: #4e564c; font: inherit; cursor: pointer; }
+.analysis-tab[aria-selected="true"] { border-color: #c9d6d2; border-bottom-color: #2f5d8a; background: #fffdf8; color: #1f2a24; font-weight: 800; }
+.analysis-tab:focus-visible { outline: 2px solid #2f5d8a; outline-offset: 2px; }
+.analysis-panel { min-width: 0; padding-top: .2rem; }
+.analysis-synopsis { line-height: 1.9; overflow-wrap: anywhere; }
+.analysis-unit h5 { font-size: .95rem; overflow-wrap: anywhere; }
+.analysis-run-report { margin-top: .6rem; padding: .6rem .7rem; border: 1px solid #d5dcd9; border-radius: 9px; background: #fffdf8; }
+.analysis-run-report > summary { cursor: pointer; font-weight: 800; overflow-wrap: anywhere; }
+.analysis-run-report h5 { margin-top: .8rem; font-size: .86rem; color: #6b7068; }
+.analysis-run-report p { margin: .35rem 0 0; overflow-wrap: anywhere; }
+.analysis-update-choice { margin-top: .6rem; padding: .7rem; border: 1px dashed #9bb0a8; border-radius: 9px; background: #f4f9f7; }
+.book-analysis-summary { margin-top: 1.3rem; padding: 1rem 1.15rem; border: 1px solid #c9d6d2; border-radius: 12px; background: #f4f9f7; }
+.book-analysis-summary h3 { margin: 0; }
+.book-analysis-summary p { margin: .45rem 0 .7rem; overflow-wrap: anywhere; }
 .analysis-unit-list { display: grid; gap: .5rem; margin: .55rem 0 0; padding: 0; list-style: none; }
 .analysis-unit { padding: .7rem; border: 1px solid #ded9cd; border-radius: 9px; background: #fffdf8; }
 .analysis-unit summary { cursor: pointer; font-weight: 800; }
@@ -327,7 +347,8 @@ legend { margin-bottom: .7rem; font-weight: 800; }
   .search-result, .replacement-review, .recent-work-item, .book-summary-item, .status-bar, .recovery-snapshot-disclosure,
   .recovery-readonly-blocks, .recovered-state-marker, .model-role-card, .native-artifact-card,
   .native-artifact-authority, .task-authorization-card, .baseline-analysis-card, .analysis-axis, .analysis-unit,
-  .analysis-update-action, .analysis-range-options, .analysis-history-entry, .analysis-plan-revision, .entry-notice {
+  .analysis-update-action, .analysis-range-options, .analysis-history-entry, .analysis-plan-revision, .entry-notice,
+  .analysis-run-report, .analysis-update-choice, .book-analysis-summary {
     color: CanvasText;
     background: Canvas;
     border-color: CanvasText;
@@ -339,6 +360,8 @@ legend { margin-bottom: .7rem; font-weight: 800; }
     border: 1px solid ButtonText;
     forced-color-adjust: auto;
   }
+  .analysis-tab { color: ButtonText; background: ButtonFace; border: 1px solid ButtonText; forced-color-adjust: auto; }
+  .analysis-tab[aria-selected="true"] { border-bottom: 3px solid Highlight; }
   button:focus-visible, input:focus-visible, .ProseMirror:focus-visible {
     outline-color: Highlight;
   }

@@ -71,7 +71,7 @@ import { deriveCoverageManifest, manifestCoversEveryBlock, manifestDigestIsExact
 import { TASK_INPUT_CHECKPOINT_PURPOSE } from './identity.js';
 import type { AnalysisKindDefinition, AnalysisReductionResult } from './kind-definition.js';
 import { deriveReusePlan, requireSelectedRange, reusePlanRecord, type ReusePlanPredecessor } from './reuse-plan.js';
-import { PRE_RUN_REPORT_REASON, runReportDigest, runReportProjection, type RunReportRecord } from './run-report.js';
+import { NO_TASK_OUTCOME_REASON, PRE_RUN_REPORT_REASON, runReportDigest, runReportProjection, type RunReportRecord } from './run-report.js';
 import { baselineAnalysisKindDefinition } from './kind-definition.js';
 import { describeComposition } from '../harness/primary-agent-harness.js';
 import { LOCAL_DETERMINISTIC_MODEL, LOCAL_DETERMINISTIC_ROUTE } from '../provider/egress-gate.js';
@@ -1432,7 +1432,10 @@ export class BaselineAnalysisStore {
       const update = this.#revisionUpdate(body, unitDigests.length);
       const pin = body.manuscriptPin as BaselineAnalysisResultSetRevisionProjection['manuscriptPin'];
       const provenance = body.provenance as BaselineAnalysisResultSetRevisionProjection['provenance'];
-      const outcome = this.#db.prepare('SELECT classification FROM analysis_task_outcomes WHERE run_record_id = ?').get(provenance.runRecordId) as SqlRow | undefined;
+      // The whole outcome rather than its classification alone: the entry carries its Run's report, so the
+      // history opens every Run's report through the one reading that checks a report against its digest.
+      const outcomeRow = this.#db.prepare('SELECT * FROM analysis_task_outcomes WHERE run_record_id = ?').get(provenance.runRecordId) as SqlRow | undefined;
+      const outcome = outcomeRow === undefined ? null : this.#outcomeProjection(outcomeRow);
       const coverage = body.coverage as BaselineAnalysisResultSetRevisionProjection['coverage'];
       const freshness = ordinal === latest.ordinal ? latest.freshness : this.#freshness(pin, true);
       return {
@@ -1452,8 +1455,10 @@ export class BaselineAnalysisStore {
           taskIntentId: provenance.taskIntentId,
           runRecordId: provenance.runRecordId,
           attemptId: provenance.attemptId,
-          classification: outcome === undefined ? null : asString(outcome.classification) as BaselineAnalysisHistoryEntryProjection['producingRun']['classification'],
+          classification: outcome === null ? null : outcome.classification,
         },
+        report: outcome === null ? null : outcome.report,
+        reportAbsentReason: outcome === null ? NO_TASK_OUTCOME_REASON : outcome.reportAbsentReason,
         usage: body.usage as BaselineAnalysisResultSetRevisionProjection['usage'],
         unitsTotal: coverage.unitsTotal,
         unitsClosed: coverage.unitsClosed,
