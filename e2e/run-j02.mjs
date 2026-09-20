@@ -1025,8 +1025,19 @@ async function runAccessibilityJourney(renderer) {
   await assertRenderer(renderer, `(() => { const editor = document.querySelector('[data-testid="manuscript-editor"]'); if (!(editor instanceof HTMLElement)) return false; editor.focus(); return document.activeElement === editor; })()`, 'composition-focus');
   at('j14-ime-command-guard');
   await renderer.send('Input.imeSetComposition', { text: '编', selectionStart: 1, selectionEnd: 1, replacementStart: 0, replacementEnd: 0 });
+  // The guard can only be judged against a composition that exists, so what the composition did is
+  // read before the key is pressed, and a failure names the precondition that was missing (#474).
+  const composed = await renderer.evaluate(`(() => { const editor = document.querySelector('[data-testid="manuscript-editor"]'); return { windowFocused: document.hasFocus(), editorFocused: document.activeElement === editor, composed: editor?.textContent.includes('编') === true }; })()`);
   await press(renderer, 'f', modifier);
-  await assertRenderer(renderer, `document.activeElement?.id !== 'manuscript-search' && document.querySelector('#persistence-status')?.textContent.includes('输入法组合尚未结束')`, 'ime-command-guard');
+  const guarded = await renderer.evaluate(`({ commandRan: document.activeElement?.id === 'manuscript-search', status: document.querySelector('#persistence-status')?.textContent.includes('输入法组合尚未结束') === true })`);
+  if (guarded?.commandRan !== false || guarded?.status !== true) {
+    if (composed?.windowFocused !== true) at('j14-ime-command-guard-window-unfocused');
+    else if (composed?.editorFocused !== true) at('j14-ime-command-guard-editor-unfocused');
+    else if (composed?.composed !== true) at('j14-ime-command-guard-composition-absent');
+    else if (guarded?.commandRan === true) at('j14-ime-command-guard-command-ran');
+    else at('j14-ime-command-guard-status-missing');
+    requireJourney(false, 'ime-command-guard', { composed, guarded });
+  }
   at('j14-keyboard-search-focus');
   await renderer.send('Input.imeSetComposition', { text: '', selectionStart: 0, selectionEnd: 0, replacementStart: 0, replacementEnd: 1 });
   await press(renderer, 'f', modifier);
