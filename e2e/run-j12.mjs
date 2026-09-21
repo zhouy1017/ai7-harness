@@ -549,6 +549,8 @@ async function saveEdit(renderer, suffix) {
 }
 
 async function saveMilestone(renderer) {
+  // Synchronized delta with Issue #409: the milestone form lives in the 导航 panel, which opens on demand.
+  await assertRenderer(renderer, `(() => { const entry=document.querySelector('[data-edge-entry="navigation"]'); const panel=document.querySelector('#manuscript-navigation-panel'); if(!(entry instanceof HTMLButtonElement) || !(panel instanceof HTMLElement)) return false; if(entry.getAttribute('aria-expanded')!=='true') entry.click(); return entry.getAttribute('aria-expanded')==='true' && !panel.hidden; })()`, 'milestone-navigation');
   await assertRenderer(renderer, `(() => { const details=document.querySelector('.milestone-section'); if(!(details instanceof HTMLDetailsElement))return false; details.open=true; return true; })()`, 'milestone-open');
   await fill(renderer, '#milestone-label', 'J12 后续修订版', 'milestone-label');
   await fill(renderer, '#milestone-purpose', '验证不可变历史读取', 'milestone-purpose');

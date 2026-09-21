@@ -420,6 +420,16 @@ async function editThenInvokeOnDirty(renderer, suffix, actionLabels, location) {
   requireJourney(started === true, location);
 }
 
+/**
+ * Synchronized delta with Issue #409: the outline, the search and the milestone form are one 导航 panel
+ * that opens on demand from the right edge and is closed when the manuscript opens. The rail stays
+ * visible either way, and the panel is first seen closed.
+ */
+async function openNavigation(renderer, location) {
+  await assertRenderer(renderer, `(() => { const entry = document.querySelector('[data-edge-entry="navigation"]'); const panel = document.querySelector('#manuscript-navigation-panel'); const rail = document.querySelector('.rail-track .position-rail'); return entry?.getAttribute('aria-expanded') === 'false' && panel?.hidden === true && rail instanceof HTMLInputElement && rail.getBoundingClientRect().height > rail.getBoundingClientRect().width; })()`, `${location}-closed-with-rail`);
+  await assertRenderer(renderer, `(() => { const entry = document.querySelector('[data-edge-entry="navigation"]'); const panel = document.querySelector('#manuscript-navigation-panel'); if (!(entry instanceof HTMLButtonElement) || !(panel instanceof HTMLElement)) return false; if (entry.getAttribute('aria-expanded') !== 'true') entry.click(); return entry.getAttribute('aria-expanded') === 'true' && !panel.hidden; })()`, location);
+}
+
 async function clickButton(renderer, label, location) {
   await assertRenderer(
     renderer,
@@ -473,6 +483,7 @@ async function importAndOpen(renderer) {
   at('import-editor-open');
   await clickButton(renderer, '打开稿件', 'editor-open');
   await waitFor(renderer, `document.querySelector('[data-screen="editor"]')`, 'editor');
+  await openNavigation(renderer, 'editor-navigation-open');
 }
 
 async function milestoneObjectTimeoutCategory(dataRoot) {
@@ -1108,7 +1119,10 @@ async function runAccessibilityJourney(renderer) {
   at('j14-zoom-200-reflow');
   await renderer.send('Emulation.setDeviceMetricsOverride', { width: 640, height: 800, deviceScaleFactor: 2, mobile: false });
   await renderer.send('Emulation.setPageScaleFactor', { pageScaleFactor: 2 });
-  await assertRenderer(renderer, `getComputedStyle(document.querySelector('.editor-workspace')).gridTemplateColumns.split(' ').length === 1 && document.documentElement.scrollWidth <= document.documentElement.clientWidth + 2`, 'zoom-200-reflow');
+  // Synchronized delta with Issue #409: at 200% the manuscript keeps the narrow rail beside it — the one
+  // persistent whole-manuscript control — the 导航 panel lies over the manuscript instead of beside it, and
+  // nothing scrolls sideways.
+  await assertRenderer(renderer, `(() => { const columns = getComputedStyle(document.querySelector('.editor-workspace')).gridTemplateColumns.split(' '); const edge = document.querySelector('.editor-edge').getBoundingClientRect(); const panel = document.querySelector('#manuscript-navigation-panel'); return columns.length === 2 && edge.width <= 64 && getComputedStyle(panel).position === 'absolute' && document.documentElement.scrollWidth <= document.documentElement.clientWidth + 2; })()`, 'zoom-200-reflow');
   at('j14-forced-colors');
   await renderer.send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'active' }] });
   await assertRenderer(renderer, `matchMedia('(forced-colors: active)').matches && getComputedStyle(document.querySelector('.editor-shell')).boxShadow === 'none' && getComputedStyle(document.querySelector('button')).borderStyle !== 'none'`, 'forced-colors');

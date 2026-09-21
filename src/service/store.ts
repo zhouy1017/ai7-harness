@@ -7746,7 +7746,7 @@ export class EditorialStore {
    * Result Set Revision's gaps; a Book never analysed has none to show, which is `null`, not empty.
    */
   getManuscriptRail(manuscriptId: string, branchId: string): ManuscriptRailProjection {
-    const bookId = this.#boundedCall(() => this.#bounded.getWindow(manuscriptId, branchId, { kind: 'start' })).bookId;
+    const bookId = this.#boundedCall(() => this.#bounded.bookIdOf(manuscriptId, branchId));
     let unread: Array<{ blockIds: ReadonlyArray<string>; reason: string }> | null = null;
     try {
       const revision = this.#baselineAnalysis.inspect(bookId, undefined, null).resultSetRevision;

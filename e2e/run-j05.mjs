@@ -570,6 +570,14 @@ async function main() {
     // the pane does not take it for the reader reaching the window's end.
     await waitFor(renderer, `(() => { const card = window.__j05.card().getBoundingClientRect(); const pane = document.querySelector('.editor-window').getBoundingClientRect(); return (card.bottom <= pane.bottom + 2 || card.top <= pane.top + 2) && document.querySelector('[data-testid="manuscript-editor"] > [data-block-id]')?.dataset.blockId !== undefined && window.__j05.block(${JSON.stringify(first)}) !== null; })()`, 'card-brought-into-view', 10_000);
 
+    at('rail-lanes');
+    // The right edge's rail marks where the open 修改建议, 批注 and 备注 stand, each kind in its own lane; a
+    // highlight carries no meaning and draws nothing there (Issue #409).
+    await press(renderer, 'Escape');
+    await waitFor(renderer, `(() => { const kinds = Array.from(document.querySelectorAll('.rail-marker')).map((marker) => marker.dataset.railKind + ':' + marker.dataset.railLane).sort(); return kinds.join('|') === 'annotation:2|change-suggestion:1|editor-note:3' && document.querySelector('.rail-track').dataset.railMarks === '3'; })()`, 'rail-shows-the-three-kinds', 15_000);
+    await assertRenderer(renderer, `(() => { const track = document.querySelector('.rail-track'); const markers = Array.from(track.querySelectorAll('.rail-marker')); const lefts = new Set(markers.map((marker) => Math.round(marker.getBoundingClientRect().left))); const entries = Array.from(document.querySelectorAll('.edge-entries button')).map((entry) => entry.textContent + ':' + entry.disabled); return lefts.size === 3 && markers.every((marker) => marker.getAttribute('aria-label').includes('处')) && track.dataset.railAnalysed === 'false' && track.querySelectorAll('.rail-gap').length === 0 && entries.join('|') === '导航:false|分析:false|任务:true' && document.querySelector('#manuscript-navigation-panel').hidden === true; })()`, 'rail-lanes-and-edge-entries');
+    await openMarkCard(renderer, 'change-suggestion', first, 'rail-suggestion-card-again');
+
     at('suggestion-decisions');
     await assertRenderer(renderer, `window.__j05.act('reject')`, 'reject');
     await waitFor(renderer, `window.__j05.card()?.querySelector('[data-mark-decision]')?.dataset.markDecision === 'rejected' && document.querySelector('[data-mark-preview]') === null`, 'rejected-recorded');

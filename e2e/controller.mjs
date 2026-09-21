@@ -639,6 +639,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'mark-annotation',
     'mark-editor-note',
     'mark-change-suggestion',
+    'rail-lanes',
     'suggestion-decisions',
     'apply-accept-and-apply',
     'apply-reverse',

@@ -6634,6 +6634,11 @@ export class BoundedManuscriptStore {
    * read through the offset index, so the cost follows the number of chapters and marks and never the
    * length of the manuscript; both are bounded and the projection says when a bound cut them.
    */
+  /** The Book a manuscript branch belongs to, read from its working state. */
+  bookIdOf(manuscriptId: string, branchId: string): string {
+    return this.#binding(manuscriptId, branchId).bookId;
+  }
+
   getRail(
     manuscriptId: string,
     branchId: string,
