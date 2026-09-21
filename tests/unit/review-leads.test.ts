@@ -53,13 +53,16 @@ describe('the leads of 情节逻辑与前后一致', () => {
     expect(leads[2]!.ranges).toEqual([RANGE_B, RANGE_C]);
   });
 
-  it('mints stable identities from the revision, the kind, the description and the ranges', () => {
+  it('mints stable identities from the kind, the description and the ranges', () => {
     const first = reviewLeadsOf(REVISION).map((lead) => lead.leadId);
-    expect(reviewLeadsOf(REVISION).map((lead) => lead.leadId)).toEqual(first);
     expect(new Set(first).size).toBe(first.length);
     expect(first.every((leadId) => /^lead_[0-9a-f]{24}$/u.test(leadId))).toBe(true);
-    // The same lead read from another baseline revision is another lead.
-    expect(reviewLeadsOf({ ...REVISION, revisionId: '22222222-2222-4222-8222-222222222222' })[0]!.leadId).not.toBe(first[0]);
+    // The same lead a later baseline revision still reports is the same lead, so its 批注 is kept, not repeated.
+    const later = { ...REVISION, revisionId: '22222222-2222-4222-8222-222222222222' };
+    expect(reviewLeadsOf(later).map((lead) => lead.leadId)).toEqual(first);
+    // The same words at another place are another lead.
+    const moved = { ...REVISION, conflicts: [{ ...REVISION.conflicts[0]!, sourceRanges: [RANGE_C] }] };
+    expect(reviewLeadsOf(moved)[0]!.leadId).not.toBe(first[0]);
   });
 
   it('says on the manuscript which kind of lead it is, then the analysis\'s own words', () => {

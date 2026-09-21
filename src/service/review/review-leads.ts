@@ -21,7 +21,11 @@ import { canonicalJson, sha256Hex } from '../analysis/canonical.js';
 export const UNRESOLVED_LEAD_LABEL = '未决事项' as const;
 
 export interface ReviewLead {
-  /** `lead_<sha24>` over the baseline revision, the kind, the description and the ranges. */
+  /**
+   * `lead_<sha24>` over the kind, the description and the ranges. The baseline revision is left out on
+   * purpose: a lead the next baseline revision still reports, at the same places, is the same finding,
+   * and a later Review Run recognises it and keeps its one 批注 rather than adding a second.
+   */
   readonly leadId: string;
   readonly source: 'conflict' | 'cross-unit-finding' | 'unresolved';
   /** The analysis's own token: a conflict kind, a cross-unit kind, or `unresolved`. */
@@ -34,7 +38,7 @@ export interface ReviewLead {
   readonly ranges: ReadonlyArray<AnalysisSourceRangeProjection>;
 }
 
-type LeadSource = Pick<BaselineAnalysisResultSetRevisionProjection, 'revisionId' | 'conflicts' | 'crossUnitFindings' | 'sections' | 'synthesis'>;
+type LeadSource = Pick<BaselineAnalysisResultSetRevisionProjection, 'conflicts' | 'crossUnitFindings' | 'sections' | 'synthesis'>;
 
 function plainRanges(ranges: ReadonlyArray<AnalysisSourceRangeProjection>): AnalysisSourceRangeProjection[] {
   return ranges.map((range) => ({ blockId: range.blockId, fromGrapheme: range.fromGrapheme, toGrapheme: range.toGrapheme }));
@@ -56,7 +60,7 @@ export function reviewLeadsOf(revision: LeadSource): ReviewLead[] {
     if (seen.has(key)) return;
     seen.add(key);
     leads.push({
-      leadId: `lead_${sha256Hex(canonicalJson({ revisionId: revision.revisionId, kind, description, ranges })).slice(0, 24)}`,
+      leadId: `lead_${sha256Hex(canonicalJson({ kind, description, ranges })).slice(0, 24)}`,
       source,
       kind,
       kindLabel,

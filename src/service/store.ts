@@ -89,6 +89,8 @@ import type {
   ReviewCategoryGoal,
   ReviewCategoryProjection,
   ReviewCategoryTaskRequest,
+  ReviewRunScopeRequest,
+  ReviewWorkspaceProjection,
 } from '../shared/protocol.js';
 import {
   AnalysisError,
@@ -124,7 +126,10 @@ import {
   type ConversionLoss,
 } from './text-manuscript.js';
 import { initializeManuscriptEffectSchema, ManuscriptApplyStore } from './manuscript-apply.js';
-import { initializeReviewRunSchema } from './review/review-runs.js';
+import { initializeReviewRunSchema, ReviewRunError, ReviewRunStore, type ReviewRunPreparationProgress } from './review/review-runs.js';
+import type { ReviewRunDriveSteps } from './review/review-run-driver.js';
+import { reviewCategoryContractInput, type ReviewCategoryConfigurationEntry } from './review/category-configuration.js';
+import { reviewCategoryKindDefinition } from './review/review-category-kind.js';
 import {
   EditorialMarkError,
   EditorialMarkStore,
@@ -2958,8 +2963,11 @@ export class EditorialStore {
   readonly #factualReview: BaselineAnalysisStore;
   /** One ledger per review-category kind and frozen category contract, made when first asked for (Issue #417). */
   readonly #reviewCategoryLedgers = new Map<string, BaselineAnalysisStore>();
+  /** The kind definition of each configured category a Review Run snapshotted, by its contract input. */
+  readonly #reviewCategoryDefinitions = new Map<string, AnalysisKindDefinition>();
   readonly #editorialMarks: EditorialMarkStore;
   readonly #manuscriptApply: ManuscriptApplyStore;
+  readonly #reviewRuns: ReviewRunStore;
   readonly #workflowProfile: BuiltInWorkflowProfile;
   readonly #lifetimeId: string;
   readonly #control: StoreControl;
@@ -3003,6 +3011,10 @@ export class EditorialStore {
     this.#factualReview = factualReview;
     this.#editorialMarks = new EditorialMarkStore(authority);
     this.#manuscriptApply = new ManuscriptApplyStore(authority, boundedAuthority, this.#editorialMarks, lifetimeId);
+    this.#reviewRuns = new ReviewRunStore(authority, this.#editorialMarks, {
+      ledgerOf: (entry) => this.#reviewLedgerOf(entry),
+      baseline: () => this.#baselineAnalysis,
+    });
     this.#workflowProfile = workflowProfile;
     this.#lifetimeId = lifetimeId;
     this.#control = control;
@@ -3304,6 +3316,126 @@ export class EditorialStore {
     return { projection: authorized.projection as ReviewCategoryProjection, dispatchRunRecordId: authorized.dispatchRunRecordId };
   }
 
+  // ---- 审阅 Review Runs (Issue #417, plan slice S69) ----------------------------------------------
+
+  /**
+   * The ledger a Task-backed category of a Review Run executes on: the factual kind's for 事实核查, and
+   * otherwise the category's own, built from the configuration entry the Run snapshotted — so a Run keeps
+   * finding the ledger of the exact contract it prepared under.
+   */
+  #reviewLedgerOf(entry: ReviewCategoryConfigurationEntry): BaselineAnalysisStore {
+    if (entry.executor === 'factual-review-kind') return this.#factualReview;
+    requireStore(entry.executor === 'review-category-contract', 'REVIEW_CATEGORY_NOT_TASK_BACKED', '这一类没有自己的任务账本。');
+    const input = reviewCategoryContractInput(entry);
+    const key = JSON.stringify(input);
+    let definition = this.#reviewCategoryDefinitions.get(key);
+    if (definition === undefined) {
+      definition = this.#analysisCall(() => reviewCategoryKindDefinition(input));
+      this.#reviewCategoryDefinitions.set(key, definition);
+    }
+    return this.reviewCategoryLedger(definition);
+  }
+
+  /**
+   * The Book's 审阅 destination (Appendix 1 of the S69 design): the categories with their basis, the
+   * coverage matrix, the scope options, the 审阅记录, and the opened Run — the latest when `reviewRunId`
+   * is `null`. `progress` is the execution owner's reader, exactly as the analysis inspections take it.
+   */
+  inspectReviewWorkspace(bookId: string, reviewRunId: string | null, progress?: ProgressReader): ReviewWorkspaceProjection {
+    return this.#reviewCall(() => this.#reviewRuns.workspace(bookId, reviewRunId, progress));
+  }
+
+  /**
+   * Prepare a Review Run as one cooperative job (B1): each selected Task-backed category's Task on its
+   * own ledger, one per step, then the Run itself. The projection is the workspace with the new Run open.
+   */
+  createReviewRunPreparationWork(
+    bookId: string,
+    categoryIds: ReadonlyArray<string>,
+    scope: ReviewRunScopeRequest,
+    launchPolicy: LaunchPolicyProjection,
+  ): AnalysisPreparationResult<ReviewWorkspaceProjection> {
+    return this.#reviewPreparation(() => this.#reviewRuns.prepare({ phase: 'start', bookId, categoryIds, scope, launchPolicy }));
+  }
+
+  advanceReviewRunPreparationWork(workId: string): AnalysisPreparationResult<ReviewWorkspaceProjection> {
+    return this.#reviewPreparation(() => this.#reviewRuns.prepare({ phase: 'advance', workId }));
+  }
+
+  cancelReviewRunPreparationWork(workId: string): boolean {
+    this.#reviewCall(() => this.#reviewRuns.prepare({ phase: 'cancel', workId }));
+    return true;
+  }
+
+  #reviewPreparation(body: () => ReviewRunPreparationProgress): AnalysisPreparationResult<ReviewWorkspaceProjection> {
+    return this.#reviewCall(() => {
+      const progress = body();
+      return {
+        done: progress.done,
+        workId: progress.workId,
+        completed: progress.completed,
+        total: progress.total,
+        projection: progress.reviewRunId === null || progress.bookId === null ? null : this.#reviewRuns.workspace(progress.bookId, progress.reviewRunId),
+      };
+    });
+  }
+
+  /**
+   * The editor's one approval of a prepared Review Run, naming the exact plan digest of every
+   * Task-backed category (B1). The caller then hands the Run to the drive loop.
+   */
+  authorizeReviewRun(
+    bookId: string,
+    reviewRunId: string,
+    approvedDigests: ReadonlyArray<{ categoryId: string; planEnvelopeDigest: string }>,
+  ): ReviewWorkspaceProjection {
+    return this.#reviewCall(() => {
+      this.#reviewRuns.authorize(bookId, reviewRunId, approvedDigests);
+      return this.#reviewRuns.workspace(bookId, reviewRunId);
+    });
+  }
+
+  /** 忽略并说明: the disposition, its Quality Signal, and the finding's mark set aside, in one transaction (REV-004). */
+  recordReviewFindingDisposition(bookId: string, reviewRunId: string, findingId: string, reason: string): ReviewWorkspaceProjection {
+    return this.#reviewCall(() => {
+      this.#reviewRuns.ignoreFinding(bookId, reviewRunId, findingId, reason);
+      return this.#reviewRuns.workspace(bookId, reviewRunId);
+    });
+  }
+
+  /** The next version of the Run's 审阅报告 (REV-009). */
+  generateReviewReport(bookId: string, reviewRunId: string): ReviewWorkspaceProjection {
+    return this.#reviewCall(() => {
+      this.#reviewRuns.generateReport(bookId, reviewRunId);
+      return this.#reviewRuns.workspace(bookId, reviewRunId);
+    });
+  }
+
+  /** The Review Run and finding a produced mark belongs to, for the Mark Card's `查看任务`; `null` for any other mark. */
+  reviewFindingOfMark(markId: string): { bookId: string; reviewRunId: string; findingId: string } | null {
+    return this.#reviewCall(() => this.#reviewRuns.findingOfMark(markId));
+  }
+
+  /**
+   * The drive loop's steps (B2); service-internal. Each is one call into the Review Run ledger with the
+   * store's own error handling, so a fatal store error poisons the store exactly as any other call does.
+   */
+  get reviewRunDriveSteps(): ReviewRunDriveSteps {
+    const runs = this.#reviewRuns;
+    return {
+      begin: (reviewRunId) => this.#reviewCall(() => runs.beginDrive(reviewRunId)),
+      end: (reviewRunId) => runs.endDrive(reviewRunId),
+      step: (reviewRunId, categoryId) => this.#reviewCall(() => runs.step(reviewRunId, categoryId)),
+      start: (reviewRunId, categoryId) => this.#reviewCall(() => runs.start(reviewRunId, categoryId)),
+      recordDispatch: (reviewRunId, categoryId, runRecordId) => this.#reviewCall(() => runs.recordDispatch(reviewRunId, categoryId, runRecordId)),
+      refuseDispatch: (reviewRunId, categoryId, runRecordId, code, message) =>
+        this.#reviewCall(() => runs.refuseDispatch(reviewRunId, categoryId, runRecordId, code, message)),
+      settle: (reviewRunId, categoryId) => this.#reviewCall(() => runs.settle(reviewRunId, categoryId)),
+      write: (reviewRunId, categoryId) => this.#reviewCall(() => runs.write(reviewRunId, categoryId)),
+      fail: (reviewRunId, categoryId, code, message) => this.#reviewCall(() => runs.fail(reviewRunId, categoryId, code, message)),
+    };
+  }
+
   createBaselineAnalysisPreparationWork(
     bookId: string,
     goal: BaselineAnalysisGoal,
@@ -3347,6 +3479,7 @@ export class EditorialStore {
 
   close(): void {
     this.#taskAuthorization.prepare({ phase: 'cancel-all' });
+    this.#reviewRuns.prepare({ phase: 'cancel-all' });
     this.#baselineAnalysis.prepare({ phase: 'cancel-all' });
     this.#factualReview.prepare({ phase: 'cancel-all' });
     for (const ledger of this.#reviewCategoryLedgers.values()) ledger.prepare({ phase: 'cancel-all' });
@@ -11064,6 +11197,28 @@ export class EditorialStore {
       return operation();
     } catch (error) {
       if (error instanceof TaskAuthorizationError) throw new StoreError(error.code, error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * A Review Run call reaches the category ledgers, the mark store and the bounded manuscript store in
+   * one breath, so every refusal any of them raises is the caller's `StoreError`, and a fatal bounded
+   * error poisons the store exactly as it does anywhere else.
+   */
+  #reviewCall<T>(operation: () => T): T {
+    this.#assertAvailable();
+    try {
+      return operation();
+    } catch (error) {
+      if (error instanceof ReviewRunError || error instanceof AnalysisError || error instanceof EditorialMarkError) {
+        throw new StoreError(error.code, error.message);
+      }
+      if (error instanceof BoundedStoreFatalError) {
+        this.#poisoned = true;
+        throw new StoreFatalError(error);
+      }
+      if (error instanceof BoundedStoreError) throw new StoreError(error.code, error.message);
       throw error;
     }
   }
