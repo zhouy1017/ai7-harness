@@ -43,6 +43,7 @@ import {
 } from '../../src/service/analysis/run-report.js';
 import { RUN_REPORT_STAGES } from '../../src/shared/protocol.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
+import { REVIEW_RUN_RELATIONS_DROP_ORDER } from '../support/review-categories.js';
 import {
   SAMPLE1_BLOCKS,
   SAMPLE1_UNITS,
@@ -176,11 +177,12 @@ function downgradePlanRecordsToRevision16(database: DatabaseSync): void {
 }
 
 /**
- * Revision 21's entry-position relation, revision 22's editorial-mark relations and revision 23's
- * manuscript-effect relations are simply not there below them, so a store taken back to any earlier revision loses them again — otherwise the
+ * Revision 21's entry-position relation, revision 22's editorial-mark relations, revision 23's
+ * manuscript-effect relations and revision 24's Review Run relations are simply not there below them, so a store taken back to any earlier revision loses them again — otherwise the
  * downgraded store is not the shape it claims.
  */
 function dropEntryPositionRelation(database: DatabaseSync): void {
+  for (const relation of REVIEW_RUN_RELATIONS_DROP_ORDER) database.exec(`DROP TABLE ${relation}`);
   for (const relation of ['manuscript_effect_receipts', 'manuscript_effect_dispatches', 'manuscript_effect_approvals', 'manuscript_effect_targets', 'manuscript_effect_intents', 'proposal_decision_reasons', 'proposal_item_decisions', 'proposal_change_items', 'editorial_mark_replies', 'editorial_marks']) {
     database.exec(`DROP TABLE ${relation}`);
   }

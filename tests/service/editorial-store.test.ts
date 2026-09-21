@@ -15,6 +15,7 @@ import {
   type ComposedManuscriptRequest,
 } from '../support/composed-fixture.js';
 import { KIND_COUPLED_ANALYSIS_RELATIONS, downgradeKindCoupledRelationsToRevision23 } from '../support/analysis-ledger-revisions.js';
+import { REVIEW_RUN_RELATIONS_DROP_ORDER } from '../support/review-categories.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 
 // Service-integration suite (L2). It drives the real `EditorialStore` on a temporary Agent Data Root
@@ -149,7 +150,7 @@ function commitPreparedReplacement(store: EditorialStore, searchId: string): {
 }
 
 /**
- * Take a store back to the revision-20 shape: the relations revisions 21 to 23 add are simply not
+ * Take a store back to the revision-20 shape: the relations revisions 21 to 24 add are simply not
  * there, and the three kind-coupled analysis relations revision 24 rebuilt (Issue #417) are the
  * shapes revision 20 gave them.
  */
@@ -158,6 +159,7 @@ function downgradeToRevision20(databasePath: string): void {
   try {
     downgradeKindCoupledRelationsToRevision23(database);
     database.exec(`BEGIN IMMEDIATE;
+      ${REVIEW_RUN_RELATIONS_DROP_ORDER.map((relation) => `DROP TABLE ${relation};`).join('\n      ')}
       DROP TABLE manuscript_effect_receipts;
       DROP TABLE manuscript_effect_dispatches;
       DROP TABLE manuscript_effect_approvals;
@@ -626,11 +628,12 @@ describe('EditorialStore on a temporary Agent Data Root', () => {
       expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version)
         .toBe(EDITORIAL_REVIEW_SCHEMA_VERSION);
       const truthAfter = relationTruth(after);
-      // Exactly the relations revisions 21 to 23 add appear, and each appears empty.
+      // Exactly the relations revisions 21 to 24 add appear, and each appears empty.
       const added = [
         'editorial_mark_replies', 'editorial_marks', 'manuscript_effect_approvals', 'manuscript_effect_dispatches',
         'manuscript_effect_intents', 'manuscript_effect_receipts', 'manuscript_effect_targets', 'manuscript_entry_positions',
         'proposal_change_items', 'proposal_decision_reasons', 'proposal_item_decisions',
+        ...REVIEW_RUN_RELATIONS_DROP_ORDER,
       ];
       expect([...truthAfter.keys()]).toEqual([...truthBefore.keys(), ...added].sort());
       for (const relation of added) expect(truthAfter.get(relation)?.content).toMatch(/^0:/);

@@ -89,6 +89,11 @@ import {
   MANUSCRIPT_EFFECT_SCHEMA_SQL,
   MANUSCRIPT_EFFECT_TRIGGER_SQL,
 } from './manuscript-apply.js';
+import {
+  REVIEW_RUN_FOREIGN_KEYS,
+  REVIEW_RUN_SCHEMA_SQL,
+  REVIEW_RUN_TRIGGER_SQL,
+} from './review/review-runs.js';
 
 /**
  * The analysis ledger as revision 15 created it, as revision 16 rebuilt two of its relations, as
@@ -1727,6 +1732,8 @@ const SCHEMA_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
   ...EDITORIAL_MARK_FOREIGN_KEYS,
   // Revision 23 (Issue #408): the Effect ledger of AI7 Apply, owned and spelled by `manuscript-apply.ts`.
   ...MANUSCRIPT_EFFECT_FOREIGN_KEYS,
+  // Revision 24 (Issue #417): the Review Run relations, owned and spelled by `review/review-runs.ts`.
+  ...REVIEW_RUN_FOREIGN_KEYS,
   editorial_workspace_profile_sidecar_revisions: [
     'native_artifact_id>native_artifact_installations.artifact_id:NO ACTION/NO ACTION/NONE',
   ],
@@ -2324,6 +2331,7 @@ function requireManuscriptReimportTargetSchema(
   includeManuscriptEntryPositionTable = false,
   includeEditorialMarkTables = false,
   includeManuscriptEffectTables = false,
+  includeReviewRunTables = false,
 ): void {
   const analysisTables = includePlanVersionTables ? ANALYSIS_LEDGER_EXPECTED_SCHEMA_SQL : PRE_17_ANALYSIS_LEDGER_EXPECTED_SCHEMA_SQL;
   const analysisTriggers = includePlanVersionTables ? ANALYSIS_LEDGER_TRIGGER_SQL : PRE_17_ANALYSIS_LEDGER_TRIGGER_SQL;
@@ -2356,10 +2364,10 @@ function requireManuscriptReimportTargetSchema(
         ? { ...EDITORIAL_MARK_SCHEMA_SQL, ...(includeManuscriptEffectTables ? {} : EDITORIAL_MARK_REVISION_22_SQL) }
         : {}),
       ...(includeManuscriptEffectTables ? MANUSCRIPT_EFFECT_SCHEMA_SQL : {}),
-      // REVISION-24 SEAM (Issue #417, Stage B): revision 24 also receives the additive Review Run
-      // relations `src/service/review/review-runs.ts` will own. They join this exact table set — and
-      // the trigger set and `SCHEMA_FOREIGN_KEYS` — behind a flag of their own, as revisions 22 and 23
-      // did. Stage A rebuilds three existing relations and adds none, so nothing is included here yet.
+      // Revision 24 (Issue #417) adds the Review Run relations beside the three analysis relations it
+      // rebuilds; they join this exact table set, the trigger set and `SCHEMA_FOREIGN_KEYS` behind a
+      // flag of their own, as revisions 22 and 23 did.
+      ...(includeReviewRunTables ? REVIEW_RUN_SCHEMA_SQL : {}),
     },
     MANUSCRIPT_REIMPORT_INDEX_SQL,
     true,
@@ -2370,6 +2378,7 @@ function requireManuscriptReimportTargetSchema(
       ...(includeAnalysisLedgerTables ? analysisTriggers : {}),
       ...(includeEditorialMarkTables ? EDITORIAL_MARK_TRIGGER_SQL : {}),
       ...(includeManuscriptEffectTables ? MANUSCRIPT_EFFECT_TRIGGER_SQL : {}),
+      ...(includeReviewRunTables ? REVIEW_RUN_TRIGGER_SQL : {}),
     },
   );
 }
@@ -5016,6 +5025,7 @@ export function validateManuscriptReimportSchemaTruth(
   includeManuscriptEntryPositionTable = false,
   includeEditorialMarkTables = false,
   includeManuscriptEffectTables = false,
+  includeReviewRunTables = false,
 ): void {
   requireManuscriptReimportTargetSchema(
     db,
@@ -5028,6 +5038,7 @@ export function validateManuscriptReimportSchemaTruth(
     includeManuscriptEntryPositionTable,
     includeEditorialMarkTables,
     includeManuscriptEffectTables,
+    includeReviewRunTables,
   );
   validateSchemaAuthorityIds(db);
   validateWorkflowSemanticTruth(db, profile);
@@ -5114,6 +5125,7 @@ export function initializeBoundedSchema(
           version >= MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION,
           version >= EDITORIAL_MARK_SCHEMA_VERSION,
           version >= MANUSCRIPT_EFFECT_SCHEMA_VERSION,
+          version >= EDITORIAL_REVIEW_SCHEMA_VERSION,
         );
       }
       terminalizeOrphanedReplacementPreviews(db);

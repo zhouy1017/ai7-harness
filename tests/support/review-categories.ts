@@ -1,5 +1,13 @@
 import { reviewCategoryContractInput, reviewCategoryEntry } from '../../src/service/review/category-configuration.js';
 import type { ReviewCategoryContractInput } from '../../src/service/review/review-category-contract.js';
+import { REVIEW_RUN_SCHEMA_SQL } from '../../src/service/review/review-runs.js';
+
+/**
+ * The seven Review Run relations schema revision 24 adds (Issue #417), in an order that drops every
+ * relation before the one it refers to. A suite that plants a store at an earlier revision drops them
+ * with whatever else later revisions added: a store that old never held them.
+ */
+export const REVIEW_RUN_RELATIONS_DROP_ORDER: ReadonlyArray<string> = Object.keys(REVIEW_RUN_SCHEMA_SQL).reverse();
 
 function builtin(categoryId: string): ReviewCategoryContractInput {
   const entry = reviewCategoryEntry(categoryId);

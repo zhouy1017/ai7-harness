@@ -20,6 +20,7 @@ import {
   type ComposedManuscriptRequest,
 } from '../support/composed-fixture.js';
 import { downgradeKindCoupledRelationsToRevision23 } from '../support/analysis-ledger-revisions.js';
+import { REVIEW_RUN_RELATIONS_DROP_ORDER } from '../support/review-categories.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 
 // Service-integration suite (L2) for Editorial Marks (Issue #407). It drives the real `EditorialStore`
@@ -29,7 +30,11 @@ import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-d
 
 const EXCERPT: ComposedManuscriptRequest = { source: ADMITTED_BASELINE_DOCX, startBlock: 1, blocks: 40, title: '标记组稿' };
 const NOTE_SENTINEL = '仅编辑可见的备注哨兵文本';
-const MARK_RELATIONS = ['manuscript_effect_receipts', 'manuscript_effect_dispatches', 'manuscript_effect_approvals', 'manuscript_effect_targets', 'manuscript_effect_intents', 'proposal_decision_reasons', 'proposal_item_decisions', 'proposal_change_items', 'editorial_mark_replies', 'editorial_marks'];
+const MARK_RELATIONS = [
+  // Revision 24's Review Run relations refer to the marks, so a store taken back below them loses them first.
+  ...REVIEW_RUN_RELATIONS_DROP_ORDER,
+  'manuscript_effect_receipts', 'manuscript_effect_dispatches', 'manuscript_effect_approvals', 'manuscript_effect_targets', 'manuscript_effect_intents', 'proposal_decision_reasons', 'proposal_item_decisions', 'proposal_change_items', 'editorial_mark_replies', 'editorial_marks',
+];
 
 let roots: ServiceTestRoots;
 

@@ -97,8 +97,9 @@ export const MANUSCRIPT_EFFECT_SCHEMA_VERSION = 23;
  * checked in the ledger. The three relations are rebuilt with every row copied byte for byte, and
  * every other relation, trigger, and row is untouched.
  *
- * The same revision is to receive the additive Review Run relations, which `src/service/review/`
- * owns and creates before this version is stamped. This is the terminal version.
+ * The same revision also adds the seven Review Run relations, which `src/service/review/review-runs.ts`
+ * owns and creates before this version is stamped; nothing of this module moves for them. This is the
+ * terminal version.
  */
 export const EDITORIAL_REVIEW_SCHEMA_VERSION = 24;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;

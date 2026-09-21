@@ -13,6 +13,7 @@ import type { SourceFormat } from '../../src/shared/protocol.js';
 import { LOCAL_ONLY_DOC, localOnlyAvailable, localOnlyPath } from '../support/local-only-manuscripts.js';
 import { importSample1Book, requireExactSample1, sample1Path } from '../support/sample1-baseline.js';
 import { syntheticPdfBytes } from '../support/synthetic-pdf.js';
+import { REVIEW_RUN_RELATIONS_DROP_ORDER } from '../support/review-categories.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 
 // Service-integration suite (L2) for multi-format intake (ADR 0072 §1–2). It drives the real
@@ -133,6 +134,7 @@ function downgradeToRevision17(databasePath: string): void {
       ALTER TABLE import_drafts DROP COLUMN working_object_digest;
       ALTER TABLE import_drafts DROP COLUMN converter_identity;
       ALTER TABLE import_abandonment_cleanup_intents DROP COLUMN working_object_digest;
+      ${REVIEW_RUN_RELATIONS_DROP_ORDER.map((relation) => `DROP TABLE ${relation};`).join(' ')}
       DROP TABLE manuscript_effect_receipts;
       DROP TABLE manuscript_effect_dispatches;
       DROP TABLE manuscript_effect_approvals;
@@ -659,6 +661,7 @@ function downgradeToRevision18(databasePath: string): void {
       ALTER TABLE import_drafts DROP COLUMN working_object_digest;
       ALTER TABLE import_drafts DROP COLUMN converter_identity;
       ALTER TABLE import_abandonment_cleanup_intents DROP COLUMN working_object_digest;
+      ${REVIEW_RUN_RELATIONS_DROP_ORDER.map((relation) => `DROP TABLE ${relation};`).join(' ')}
       DROP TABLE manuscript_effect_receipts;
       DROP TABLE manuscript_effect_dispatches;
       DROP TABLE manuscript_effect_approvals;

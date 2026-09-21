@@ -124,6 +124,7 @@ import {
   type ConversionLoss,
 } from './text-manuscript.js';
 import { initializeManuscriptEffectSchema, ManuscriptApplyStore } from './manuscript-apply.js';
+import { initializeReviewRunSchema } from './review/review-runs.js';
 import {
   EditorialMarkError,
   EditorialMarkStore,
@@ -2166,6 +2167,7 @@ function validateModelServiceSchema(
       version >= MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION,
       version >= EDITORIAL_MARK_SCHEMA_VERSION,
       version >= MANUSCRIPT_EFFECT_SCHEMA_VERSION,
+      version >= EDITORIAL_REVIEW_SCHEMA_VERSION,
     );
   }
   const invalid = db.prepare(
@@ -3055,17 +3057,14 @@ export class EditorialStore {
       // names change together for every store that reaches revision 18, and again for revision 19,
       // and again for the entry-position relation revision 21 adds, the editorial-mark relations
       // revision 22 adds and the manuscript-effect relations revision 23 adds. Revision 24 (Issue
-      // #417) moves no relation of this module: `initializeTaskAuthorizationSchema` rebuilds the three
-      // kind-coupled analysis relations for the review-category kind family and stamps the version.
+      // #417) adds the Review Run relations here, and `initializeTaskAuthorizationSchema` rebuilds the
+      // three kind-coupled analysis relations for the review-category kind family and stamps the version.
       initializeManuscriptIntakeSchema(authority);
       initializeTextConversionSchema(authority);
       initializeManuscriptEntryPositionSchema(authority);
       initializeEditorialMarkSchema(authority);
       initializeManuscriptEffectSchema(authority);
-      // REVISION-24 SEAM (Issue #417, Stage B): `initializeReviewRunSchema(authority)` belongs exactly
-      // here — the additive Review Run relations `src/service/review/review-runs.ts` will own, created
-      // shape-detected like the three above and before the version is stamped below. Stage A adds no
-      // relation, so there is nothing to call yet.
+      initializeReviewRunSchema(authority);
       initializeTaskAuthorizationSchema(authority);
       initializeBoundedSchema(authority, workflowProfile);
       validateEditorialWorkspaceProfileSchema(authority);
