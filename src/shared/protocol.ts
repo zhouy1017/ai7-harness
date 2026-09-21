@@ -105,6 +105,8 @@ export const IPC_CHANNELS = {
   startReplacementCommit: 'ai7:j02:start-replacement-commit',
   commitReplacement: 'ai7:j02:commit-replacement',
   saveMilestone: 'ai7:j02:save-milestone',
+  inspectDeliverables: 'ai7:j07:inspect-deliverables',
+  designatePublicationVersion: 'ai7:j07:designate-publication-version',
   undoManuscript: 'ai7:j02:undo-manuscript',
   redoManuscript: 'ai7:j02:redo-manuscript',
   openBookWorkbench: 'ai7:j12:open-book-workbench',
@@ -4918,6 +4920,10 @@ export interface RendererApi {
   startReplacementCommit(input: ServiceOperationMap['startReplacementCommit']['input']): Promise<ServiceJobProjection>;
   commitReplacement(input: ServiceOperationMap['commitReplacement']['input']): Promise<ReplacementCommitProjection>;
   saveMilestone(input: ServiceOperationMap['saveMilestone']['input']): Promise<MilestoneProjection>;
+  /** 交付物 of the Book the window is showing (Issue #414): its Manuscript's milestones and Publication Versions. */
+  inspectDeliverables(): Promise<DeliverablesProjection>;
+  /** 设为发稿版本 over one exact milestone of that Book; an identical repeat of the current one is no change. */
+  designatePublicationVersion(input: Omit<DesignatePublicationVersionInput, 'bookId'>): Promise<PublicationDesignationProjection>;
   undoManuscript(input: ServiceOperationMap['undoManuscript']['input']): Promise<DurableHistoryProjection>;
   redoManuscript(input: ServiceOperationMap['redoManuscript']['input']): Promise<DurableHistoryProjection>;
   openBookWorkbench(input: BookWorkbenchRoute): Promise<BookWorkbenchOpenProjection>;

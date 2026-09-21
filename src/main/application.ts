@@ -29,6 +29,8 @@ import {
   type BookWorkbenchOpenProjection,
   type BookWorkbenchRoute,
   type ContinueImportProjection,
+  type DeliverablesProjection,
+  type DesignatePublicationVersionInput,
   type ImportDraftRecoveryProjection,
   type ImportCommitProjection,
   type InspectReviewFindingOfMarkRendererInput,
@@ -2235,6 +2237,56 @@ function registerRendererHandlers(
       requireCurrentRouteReadEpoch(owned, routeGeneration, routeRequestSequence);
       return result !== null && result.bookId === capability.bookId ? result : null;
     }),
+  );
+  // ⑥ 交付物 (Issue #414, plan slice S65) is a Book destination like 审阅: the renderer never names a Book,
+  // the service is asked within the route's, and every answer must be that Book's. The read is held to the
+  // route's read epoch; 设为发稿版本 is serialized with every other effect of this window's authority and
+  // held to its route generation. The milestone is named by the renderer and checked by the service, which
+  // refuses one that is not a milestone of this Book's primary Manuscript.
+  const requireDeliverablesOfRoute = (
+    route: Extract<ResolvedBookWorkbenchRoute, { kind: 'book' }>,
+    result: DeliverablesProjection,
+  ): DeliverablesProjection => {
+    if (result.bookId !== route.bookId) {
+      throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '交付物不属于当前图书工作台。');
+    }
+    return result;
+  };
+  ipcMain.handle(IPC_CHANNELS.inspectDeliverables, (event) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      requireAuthority();
+      const route = requireCurrentBookRoute(owned);
+      const routeGeneration = owned.routeGeneration;
+      const routeRequestSequence = owned.routeRequestSequence;
+      const result = await service.call('inspectDeliverables', { bookId: route.bookId });
+      requireCurrentRouteReadEpoch(owned, routeGeneration, routeRequestSequence);
+      return requireDeliverablesOfRoute(route, result);
+    }),
+  );
+  ipcMain.handle(
+    IPC_CHANNELS.designatePublicationVersion,
+    (event, input: Omit<DesignatePublicationVersionInput, 'bookId'>) =>
+      envelope(async () => {
+        const owned = requireSender(event);
+        return serializeEffect(async () => {
+          requireAuthority();
+          const route = requireCurrentBookRoute(owned);
+          const routeGeneration = owned.routeGeneration;
+          const result = await service.call('designatePublicationVersion', {
+            milestoneId: input.milestoneId,
+            scope: input.scope,
+            basis: input.basis,
+            bookId: route.bookId,
+          });
+          requireCurrentRouteGeneration(owned, routeGeneration);
+          if (result.bookId !== route.bookId) {
+            throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '发稿版本不属于当前图书工作台。');
+          }
+          requireDeliverablesOfRoute(route, result.deliverables);
+          return result;
+        });
+      }),
   );
   ipcMain.handle(IPC_CHANNELS.startSearch, (event, input: ServiceOperationMap['startSearch']['input']) =>
     envelope(async () => {
