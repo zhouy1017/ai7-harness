@@ -327,8 +327,11 @@ it.runIf(process.env['AI7_REGENERATE_REVIEW_FIXTURE'] === '1')('generates the au
   const body = {
     schema: 'ai7.model-fixture/1',
     identity: 'sample1-review-authored',
-    description: "编辑审阅契约 v1 的人工撰写夹具：逐单元阅读 sample1（ADR 0043 收录的 Public SampleBook）后写成，回答内置审阅类别配置中的三个类别——错别字与规范用语、体例与格式、文学性与表达改进——在全书审阅、只审改动过的章、全书重新审阅、所选范围审阅与所选范围重新审阅下发出的单元请求，也覆盖 J-04 在结果集形成后确认的编辑所改变的单元 1。每条引文都是其所声明内容块的逐字子串；另有四条故意不能唯一定位（三条找不到，一条多处出现），用来证明排除附录，并有三组引文与替换文字都相同的发现出现在相邻单元的重叠内容块中，用来证明合并。unitOrdinal 为 0 的条目回答这些运行发起的保证抽样与运行反思：抽样判定一律为「成立」，理由只说明引文经引文完整性逐字定位于其所声明的内容块，这是这一步能据本单元内容块作出的全部判断。",
-    basedOn: null,
+    description: "编辑审阅契约 v1 的人工撰写夹具：逐单元阅读 sample1（ADR 0043 收录的 Public SampleBook）后写成，回答内置审阅类别配置中的三个类别——错别字与规范用语、体例与格式、文学性与表达改进——在全书审阅、只审改动过的章、全书重新审阅、所选范围审阅与所选范围重新审阅下发出的单元请求，也覆盖 J-04 在结果集形成后确认的编辑所改变的单元 1。每条引文都是其所声明内容块的逐字子串；另有四条故意不能唯一定位（三条找不到，一条多处出现），用来证明排除附录，并有三组引文与替换文字都相同的发现出现在相邻单元的重叠内容块中，用来证明合并。unitOrdinal 为 0 的条目回答这些运行发起的保证抽样与运行反思：抽样判定一律为「成立」，理由只说明引文经引文完整性逐字定位于其所声明的内容块，这是这一步能据本单元内容块作出的全部判断。本夹具叠加在 sample1-baseline-transient-retry 之上：同一次启动既能运行基线分析——审阅「情节逻辑与前后一致」的线索来自它——也能运行这三个审阅类别；两者的请求摘要互不相同，叠加不改变任何条目的键。",
+    // Layered over the baseline's J-04 fixture (Issue #417, Stage B): one launch bound to this fixture
+    // runs the baseline analysis the plot-consistency leads come from and the categories beside it.
+    // `basedOn` changes no request digest, so the generator never needs the base's entries.
+    basedOn: 'sample1-baseline-transient-retry',
     provenance: 'authored',
     provider: 'ai7-local-deterministic',
     model: 'ai7-deterministic-fixture',
