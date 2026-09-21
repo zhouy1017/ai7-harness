@@ -40,4 +40,4 @@ Not proven here: `接受并应用`, its Effect Approval and Effect Receipt, the 
 
 ## J-14 accessibility obligations
 
-J-14 has no runner of its own. Its keyboard, IME, focus, 200% reflow, and forced-colors obligations are asserted inside the Journeys above where they apply; the Mark surface's are J-05's `j14-marks-*` and `marks-keyboard-menu` stages.
+J-14 has no runner of its own. Its keyboard, IME, focus, 200% reflow, and forced-colors obligations are asserted inside the Journeys above where they apply; the Mark surface's are J-05's `j14-marks-*` and `marks-keyboard-menu-*` stages.

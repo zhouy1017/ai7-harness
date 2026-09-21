@@ -179,6 +179,22 @@ async function waitFor(renderer, expression, name, timeout = 60_000) {
 async function assertRenderer(renderer, expression, name) {
   requireJourney(await renderer.evaluate(`Promise.resolve(${expression}).then((value)=>Boolean(value))`), name);
 }
+/** Ask the page which of a step's named states it is in. */
+async function probe(renderer, expression) {
+  const state = await renderer.evaluate(expression);
+  requireJourney(typeof state === 'string', 'probe-state');
+  return state;
+}
+/** The same question, asked until the page answers 'ready' or the step's patience runs out. */
+async function settle(renderer, expression, timeout = 15_000) {
+  const deadline = Date.now() + timeout;
+  let state = await probe(renderer, expression);
+  while (state !== 'ready' && Date.now() < deadline) {
+    await new Promise((resolveWait) => setTimeout(resolveWait, 50));
+    state = await probe(renderer, expression);
+  }
+  return state;
+}
 async function click(renderer, label, name) {
   await assertRenderer(renderer, `(() => { const button = Array.from(document.querySelectorAll('button')).find((item) => item.textContent === ${JSON.stringify(label)}); if (!(button instanceof HTMLButtonElement) || button.disabled) return false; button.click(); return true; })()`, name);
 }
@@ -621,16 +637,38 @@ async function main() {
     await renderer.send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'none' }] });
     await press(renderer, 'Escape');
 
-    at('marks-keyboard-menu');
-    // The menu is reachable without a pointer: the context-menu key on a caret inside a mark.
+    at('marks-keyboard-menu-open');
+    // The menu is reachable without a pointer: the context-menu key on a caret inside a mark. A hosted
+    // runner says nothing but a stage name, so each step names the precondition it found missing.
+    const windowState = await probe(renderer, `(() => { const editor = document.querySelector('[data-testid="manuscript-editor"]'); if (window.__j05.block(${JSON.stringify(first)}) === null) return 'window-moved'; if (editor.getAttribute('aria-readonly') !== 'false') return 'editor-read-only'; return 'ready'; })()`);
+    if (windowState === 'window-moved') at('marks-keyboard-menu-open-window-moved');
+    else if (windowState === 'editor-read-only') at('marks-keyboard-menu-open-editor-read-only');
+    requireJourney(windowState === 'ready', 'keyboard-window-ready');
     await assertRenderer(renderer, `window.__j05.place(${JSON.stringify(first)}, ${RANGES.note[0] + TYPED_BEFORE.length + 2}, ${RANGES.note[0] + TYPED_BEFORE.length + 2})`, 'keyboard-caret-in-note');
     await new Promise((resolveWait) => setTimeout(resolveWait, 80));
     await press(renderer, 'ContextMenu');
-    await waitFor(renderer, `window.__j05.menu()?.dataset.markMenu === 'mark' && window.__j05.menu().getAttribute('aria-label').startsWith('备注') && document.activeElement === window.__j05.item('open-card')`, 'keyboard-opens-the-mark-menu');
+    const opened = await settle(renderer, `(() => { const menu = window.__j05.menu(); if (menu === null) return 'no-menu'; if (menu.dataset.markMenu !== 'mark') return 'selection-menu'; if (!menu.getAttribute('aria-label').startsWith('备注')) return 'other-mark'; return document.activeElement === window.__j05.item('open-card') ? 'ready' : 'unfocused'; })()`);
+    if (opened === 'no-menu') at('marks-keyboard-menu-open-no-menu');
+    else if (opened === 'selection-menu') at('marks-keyboard-menu-open-selection-menu');
+    else if (opened === 'other-mark') at('marks-keyboard-menu-open-other-mark');
+    else if (opened === 'unfocused') at('marks-keyboard-menu-open-unfocused');
+    requireJourney(opened === 'ready', 'keyboard-opens-the-mark-menu');
+
+    at('marks-keyboard-menu-activate');
     await pressEnter(renderer);
-    await waitFor(renderer, `window.__j05.card()?.dataset.markKind === 'editor-note'`, 'keyboard-opens-the-card');
+    const activated = await settle(renderer, `(() => { if (window.__j05.card()?.dataset.markKind === 'editor-note') return 'ready'; return window.__j05.menu() === null ? 'no-card' : 'menu-still-open'; })()`);
+    if (activated === 'menu-still-open') at('marks-keyboard-menu-activate-menu-still-open');
+    else if (activated === 'no-card') at('marks-keyboard-menu-activate-no-card');
+    requireJourney(activated === 'ready', 'keyboard-opens-the-card');
+
+    at('marks-keyboard-menu-return');
     await press(renderer, 'Escape');
-    await waitFor(renderer, `window.__j05.card() === null && document.activeElement === document.querySelector('[data-testid="manuscript-editor"]')`, 'keyboard-returns-to-the-text');
+    const returned = await settle(renderer, `(() => { if (window.__j05.card() !== null) return 'card-still-open'; return document.activeElement === document.querySelector('[data-testid="manuscript-editor"]') ? 'ready' : 'focus-elsewhere'; })()`);
+    if (returned === 'card-still-open') at('marks-keyboard-menu-return-card-still-open');
+    else if (returned === 'focus-elsewhere') at('marks-keyboard-menu-return-focus-elsewhere');
+    requireJourney(returned === 'ready', 'keyboard-returns-to-the-text');
+
+    at('marks-settled-before-restart');
     await settled(renderer, 'before-restart-settled');
     await close();
 
