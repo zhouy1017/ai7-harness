@@ -118,9 +118,14 @@ export class ReviewRunDriver {
     }
   }
 
+  /**
+   * One category to its end. Stopping refuses only new work — no category Run is authorized or handed
+   * over once the service is stopping — while what a Run already came to is still recorded and written:
+   * a Run the owner interrupted is settled as interrupted, and one that completed is put on the
+   * manuscript, which is the manuscript's own quick write and loses nothing a restart would redo.
+   */
   async #category(reviewRunId: string, categoryId: string): Promise<void> {
     for (;;) {
-      if (this.#stopping) return;
       const step = this.#steps.step(reviewRunId, categoryId);
       switch (step.kind) {
         case 'done':
@@ -132,6 +137,7 @@ export class ReviewRunDriver {
           this.#steps.settle(reviewRunId, categoryId);
           break;
         case 'start': {
+          if (this.#stopping) return;
           // The slot first, then the ledger's authorization: a baseline Run holding it is waited for,
           // and the authorization is written only once the category can be handed over at once.
           await this.#owner.whenIdle();
@@ -141,6 +147,7 @@ export class ReviewRunDriver {
           break;
         }
         case 'dispatch':
+          if (this.#stopping) return;
           await this.#owner.whenIdle();
           if (this.#stopping) return;
           await this.#dispatch(reviewRunId, categoryId, step);

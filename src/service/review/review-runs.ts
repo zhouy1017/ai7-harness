@@ -67,6 +67,7 @@ import {
   reviewRunCategoryState,
   reviewRunState,
   reviewRunStateLabel,
+  type ReviewLedgerRunOutcome,
   type ReviewMarkStatus,
   type ReviewRunCategoryEventState,
 } from './review-run-state.js';
@@ -331,6 +332,7 @@ const RISK_POINT_PREFIX = '【需人工复核的风险点】' as const;
 const UNSTARTED_DETAIL = '尚未开始；继续审阅时从这一类接着审。' as const;
 const UNWRITTEN_DETAIL = '运行已结束，发现尚未标到稿件上；继续审阅时写入。' as const;
 const INTERRUPTED_DETAIL = '服务在这一类运行期间停止；继续审阅时记为已中断，再接着审其余类别。' as const;
+const FAILED_UNRECORDED_DETAIL = '这一类的运行失败了；继续审阅时记下这一结果，再接着审其余类别。' as const;
 
 /** ADR 0066's tiers read as V2-UX-REV-004's severities (ambiguity A3, decided by the slice). */
 const FACTUAL_TIER_SEVERITY: Readonly<Record<FactualSeverityTier, ReviewFindingSeverity>> = { A: 'must', B: 'should', C: 'note' };
@@ -616,9 +618,6 @@ const DONE: ReviewRunDriveStep = { kind: 'done' };
 const WRITE: ReviewRunDriveStep = { kind: 'write' };
 const START: ReviewRunDriveStep = { kind: 'start' };
 const SETTLE: ReviewRunDriveStep = { kind: 'settle' };
-
-/** A ledger Run state the Run has left for good. */
-const TERMINAL_LEDGER_STATES: ReadonlySet<string> = new Set(['completed', 'completed-with-gaps', 'failed', 'interrupted', 'blocked-before-dispatch']);
 
 /**
  * The Review Run ledger of one Book database and the 审阅 projection over it (Issue #417, Stage B).
@@ -1045,10 +1044,11 @@ export class ReviewRunStore {
     const last = this.#events(reviewRunId, categoryId).at(-1)?.state ?? null;
     if (last !== null && TERMINAL_CATEGORY_EVENTS.has(last)) return DONE;
     if (category.task === null || last === 'settled') return WRITE;
-    if (last === 'dispatched') return SETTLE;
     const runRecordId = this.#runRecordOf(category.task.taskIntentId);
+    requireReview(runRecordId !== null || last === null, 'REVIEW_RECORD_INVALID', '这一类的运行记录缺失。');
     if (runRecordId === null) return START;
-    // An earlier hand-off reached the ledger and not the owner, or the owner and not this history.
+    // A ledger Run still only authorized is one an earlier hand-off never got to the owner; every other
+    // Run is settled from its own record — including one the owner took that this history never heard of.
     const ledger = this.#ledgers.ledgerOf(category.entry);
     return ledger.currentRunState(runRecordId) === 'authorized' ? { kind: 'dispatch', runRecordId, ledger } : SETTLE;
   }
@@ -1870,17 +1870,20 @@ export class ReviewRunStore {
     const categories = snapshot.categories.map((category): CategoryView => {
       const events = this.#events(snapshot.reviewRunId, category.categoryId);
       const last = events.at(-1) ?? null;
-      let ledgerRunTerminal = false;
+      let ledgerRun: ReviewLedgerRunOutcome = 'unfinished';
       if (last?.state === 'dispatched' && last.runRecordId !== null) {
         try {
-          ledgerRunTerminal = TERMINAL_LEDGER_STATES.has(this.#ledgers.ledgerOf(category.entry).currentRunState(last.runRecordId));
+          const ledgerState = this.#ledgers.ledgerOf(category.entry).currentRunState(last.runRecordId);
+          ledgerRun = ledgerState === 'completed' || ledgerState === 'completed-with-gaps' ? 'completed' : ledgerState === 'failed' ? 'failed' : 'unfinished';
         } catch (error) {
           if (!(error instanceof AnalysisError)) throw error;
         }
       }
-      const { state, pending } = reviewRunCategoryState({ authorized: authorization !== null, driving, lastEvent: last?.state ?? null, ledgerRunTerminal });
+      const { state, pending } = reviewRunCategoryState({ authorized: authorization !== null, driving, lastEvent: last?.state ?? null, ledgerRun });
       const derived = !driving && pending && authorization !== null
-        ? state === 'interrupted' ? INTERRUPTED_DETAIL : state === 'waiting' && last !== null ? UNWRITTEN_DETAIL : UNSTARTED_DETAIL
+        ? state === 'interrupted' ? INTERRUPTED_DETAIL
+          : state === 'failed' ? FAILED_UNRECORDED_DETAIL
+            : last !== null ? UNWRITTEN_DETAIL : UNSTARTED_DETAIL
         : null;
       return {
         category,

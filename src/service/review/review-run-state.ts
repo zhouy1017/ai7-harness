@@ -79,27 +79,36 @@ export const REVIEW_RUN_STATE_LABELS = {
   failed: '未能完成',
 } as const satisfies Record<ReviewRunState, string>;
 
+/**
+ * What a dispatched category's ledger Run came to, as far as a Review Run needs to know before it has
+ * recorded it: it completed (a revision to write), it failed, or it did not finish — interrupted, or
+ * left executing by a service that stopped under it.
+ */
+export type ReviewLedgerRunOutcome = 'completed' | 'failed' | 'unfinished';
+
 export interface ReviewRunCategoryStateInput {
   readonly authorized: boolean;
   /** The Run is being driven in this service lifetime. */
   readonly driving: boolean;
   readonly lastEvent: ReviewRunCategoryEventState | null;
-  /** For a dispatched category: its ledger Run reached a terminal state. */
-  readonly ledgerRunTerminal: boolean;
+  /** For a dispatched category: what its ledger Run came to. */
+  readonly ledgerRun: ReviewLedgerRunOutcome;
 }
 
 /**
  * One category's state as an editor reads it. While the Run is driven, a category between dispatch
- * and materialization is running. When it is not — the service stopped — a category whose Run never
- * finished reads `interrupted`, and one whose Run finished but whose findings were not yet written reads
- * `waiting`: 继续审阅 writes them. `pending` says the category has no terminal event yet.
+ * and materialization is running. When it is not — the service stopped — a dispatched category reads
+ * what its ledger Run came to: `waiting` when it completed and only its findings are left to write,
+ * which 继续审阅 does, `failed` when it failed, and `interrupted` when it never finished. `pending` says
+ * the category has no terminal event yet.
  */
 export function reviewRunCategoryState(input: ReviewRunCategoryStateInput): { state: ReviewRunCategoryState; pending: boolean } {
   switch (input.lastEvent) {
     case null:
       return { state: input.authorized ? 'waiting' : 'prepared', pending: true };
     case 'dispatched':
-      return { state: input.driving ? 'running' : input.ledgerRunTerminal ? 'waiting' : 'interrupted', pending: true };
+      if (input.driving) return { state: 'running', pending: true };
+      return { state: input.ledgerRun === 'completed' ? 'waiting' : input.ledgerRun === 'failed' ? 'failed' : 'interrupted', pending: true };
     case 'settled':
       return { state: input.driving ? 'running' : 'waiting', pending: true };
     case 'materialized':

@@ -43,25 +43,26 @@ describe('a finding\'s status, derived from its mark (MARK-010)', () => {
 
 describe('a category\'s state inside its Run', () => {
   it('is prepared before the approval and waits after it', () => {
-    expect(reviewRunCategoryState({ authorized: false, driving: false, lastEvent: null, ledgerRunTerminal: false })).toEqual({ state: 'prepared', pending: true });
-    expect(reviewRunCategoryState({ authorized: true, driving: true, lastEvent: null, ledgerRunTerminal: false })).toEqual({ state: 'waiting', pending: true });
+    expect(reviewRunCategoryState({ authorized: false, driving: false, lastEvent: null, ledgerRun: 'unfinished' })).toEqual({ state: 'prepared', pending: true });
+    expect(reviewRunCategoryState({ authorized: true, driving: true, lastEvent: null, ledgerRun: 'unfinished' })).toEqual({ state: 'waiting', pending: true });
   });
 
   it('runs from dispatch until its findings are on the manuscript, while the Run is driven', () => {
-    expect(reviewRunCategoryState({ authorized: true, driving: true, lastEvent: 'dispatched', ledgerRunTerminal: false }).state).toBe('running');
-    expect(reviewRunCategoryState({ authorized: true, driving: true, lastEvent: 'settled', ledgerRunTerminal: true }).state).toBe('running');
-    expect(reviewRunCategoryState({ authorized: true, driving: true, lastEvent: 'materialized', ledgerRunTerminal: true })).toEqual({ state: 'settled', pending: false });
+    expect(reviewRunCategoryState({ authorized: true, driving: true, lastEvent: 'dispatched', ledgerRun: 'unfinished' }).state).toBe('running');
+    expect(reviewRunCategoryState({ authorized: true, driving: true, lastEvent: 'settled', ledgerRun: 'completed' }).state).toBe('running');
+    expect(reviewRunCategoryState({ authorized: true, driving: true, lastEvent: 'materialized', ledgerRun: 'completed' })).toEqual({ state: 'settled', pending: false });
   });
 
-  it('reads interrupted when the service stopped under its Run, and waiting when only its findings were left to write', () => {
-    expect(reviewRunCategoryState({ authorized: true, driving: false, lastEvent: 'dispatched', ledgerRunTerminal: false })).toEqual({ state: 'interrupted', pending: true });
-    expect(reviewRunCategoryState({ authorized: true, driving: false, lastEvent: 'dispatched', ledgerRunTerminal: true })).toEqual({ state: 'waiting', pending: true });
-    expect(reviewRunCategoryState({ authorized: true, driving: false, lastEvent: 'settled', ledgerRunTerminal: true })).toEqual({ state: 'waiting', pending: true });
+  it('reads what its ledger Run came to when the service stopped under it, and waits when only its findings were left to write', () => {
+    expect(reviewRunCategoryState({ authorized: true, driving: false, lastEvent: 'dispatched', ledgerRun: 'unfinished' })).toEqual({ state: 'interrupted', pending: true });
+    expect(reviewRunCategoryState({ authorized: true, driving: false, lastEvent: 'dispatched', ledgerRun: 'failed' })).toEqual({ state: 'failed', pending: true });
+    expect(reviewRunCategoryState({ authorized: true, driving: false, lastEvent: 'dispatched', ledgerRun: 'completed' })).toEqual({ state: 'waiting', pending: true });
+    expect(reviewRunCategoryState({ authorized: true, driving: false, lastEvent: 'settled', ledgerRun: 'completed' })).toEqual({ state: 'waiting', pending: true });
   });
 
   it('keeps a finished category finished', () => {
     for (const lastEvent of ['failed', 'interrupted', 'refused'] as const) {
-      expect(reviewRunCategoryState({ authorized: true, driving: true, lastEvent, ledgerRunTerminal: true })).toEqual({ state: lastEvent, pending: false });
+      expect(reviewRunCategoryState({ authorized: true, driving: true, lastEvent, ledgerRun: 'completed' })).toEqual({ state: lastEvent, pending: false });
     }
   });
 });

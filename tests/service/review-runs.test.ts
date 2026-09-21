@@ -631,6 +631,42 @@ describe('a Review Run over the real store on exact sample1', () => {
     }
   }, 300_000);
 
+  it('records a category the owner interrupted on shutdown as interrupted, and 继续审阅 goes on with the rest', async () => {
+    let gated = null as GatedOwner | null;
+    const first = await open('sample1-review-authored', (inner) => { gated = new GatedOwner(inner, 2); return gated; });
+    let book: Book;
+    let reviewRunId: string;
+    try {
+      book = await importBook(first);
+      const prepared = prepare(first, book, [TYPOS, STYLE], WHOLE);
+      reviewRunId = prepared.reviewRunId;
+      first.store.authorizeReviewRun(book.bookId, reviewRunId, approvals(prepared));
+      const loop = first.driver.drive(reviewRunId);
+      // The first category's Run is executing when the service stops: the loop first, then the owner.
+      await gated!.reached;
+      const stopped = first.driver.dispose();
+      await first.owner.dispose();
+      gated!.release();
+      await stopped;
+      await loop;
+      expect(eventTrail(reviewRunId)).toEqual([[TYPOS, 'dispatched'], [TYPOS, 'interrupted']]);
+    } finally {
+      await close(first);
+    }
+
+    const second = await open('sample1-review-authored');
+    try {
+      expect(workspace(second, book, reviewRunId).run).toMatchObject({ state: 'partial', canContinue: true });
+      await second.driver.continue(reviewRunId);
+      const finished = workspace(second, book, reviewRunId).run!;
+      expect(finished).toMatchObject({ state: 'partial', canContinue: false });
+      expect(finished.categories.map((category) => category.state)).toEqual(['interrupted', 'settled']);
+      expect(second.store.inspectReviewCategory(book.bookId, reviewCategoryKindDefinition(TYPOS_AND_USAGE)).run!.state).toBe('interrupted');
+    } finally {
+      await close(second);
+    }
+  }, 300_000);
+
   it('ends a category Run a stopped service left executing, records it interrupted, and finishes the rest', async () => {
     const first = await open('sample1-review-authored');
     let book: Book;
