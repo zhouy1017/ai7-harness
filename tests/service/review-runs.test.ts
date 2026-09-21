@@ -197,6 +197,76 @@ function database(): DatabaseSync {
   return new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
 }
 
+/**
+ * A material plan input moving under a prepared plan: the Main Editorial Role's Credential Reference is
+ * re-enrolled, which every frozen plan names. Written beside the open store, as a re-enrolment would be.
+ */
+function reenrollCredential(): void {
+  const db = database();
+  try {
+    expect(db.prepare("UPDATE model_service_connections SET credential_reference = ? WHERE connection_id = 'main-editorial-deepseek-v4-pro'").run(randomUUID()).changes).toBe(1);
+  } finally {
+    db.close();
+  }
+}
+
+/** The one owner, refusing its first hand-off as a launch without a route would. */
+class RefusingFirstDispatch implements ReviewRunExecutionOwner {
+  readonly #inner: BaselineAnalysisExecutionOwner;
+  #refused = false;
+
+  constructor(inner: BaselineAnalysisExecutionOwner) {
+    this.#inner = inner;
+  }
+
+  admitAndDispatch(runRecordId: string, ledger: BaselineAnalysisStore): void {
+    if (!this.#refused) {
+      this.#refused = true;
+      throw Object.assign(new Error('没有可执行的本地确定性路由。'), { code: 'EXECUTION_ROUTE_ABSENT' });
+    }
+    this.#inner.admitAndDispatch(runRecordId, ledger);
+  }
+
+  whenIdle(): Promise<void> {
+    return this.#inner.whenIdle();
+  }
+}
+
+/** The one owner, holding the loop at its `gateAt`-th wait for the slot until the suite releases it. */
+class GatedOwner implements ReviewRunExecutionOwner {
+  readonly #inner: BaselineAnalysisExecutionOwner;
+  readonly #gateAt: number;
+  readonly reached: Promise<void>;
+  readonly #gate: Promise<void>;
+  #reach: () => void = () => {};
+  #release: () => void = () => {};
+  #waits = 0;
+
+  constructor(inner: BaselineAnalysisExecutionOwner, gateAt: number) {
+    this.#inner = inner;
+    this.#gateAt = gateAt;
+    this.reached = new Promise((resolve) => { this.#reach = resolve; });
+    this.#gate = new Promise((resolve) => { this.#release = resolve; });
+  }
+
+  admitAndDispatch(runRecordId: string, ledger: BaselineAnalysisStore): void {
+    this.#inner.admitAndDispatch(runRecordId, ledger);
+  }
+
+  async whenIdle(): Promise<void> {
+    this.#waits += 1;
+    if (this.#waits === this.#gateAt) {
+      this.#reach();
+      await this.#gate;
+    }
+    return this.#inner.whenIdle();
+  }
+
+  release(): void {
+    this.#release();
+  }
+}
+
 function eventTrail(reviewRunId: string): Array<[string, string]> {
   const db = database();
   try {
@@ -380,7 +450,10 @@ describe('a Review Run over the real store on exact sample1', () => {
   it('reads 选章 by the analysis units of a manuscript without headings, and keeps only the leads anchored there', async () => {
     await withBook('sample1-review-authored', async (session, book) => {
       await runBaseline(session, book);
-      const options = workspace(session, book).scopeOptions.chapters;
+      const ready = workspace(session, book);
+      // The leads read the baseline's whole result, never only the changed chapters.
+      expect(ready.categories.find((category) => category.categoryId === PLOT)!.scopes.changed).toEqual({ available: false, unavailableReason: LEADS_CHANGED_REASON });
+      const options = ready.scopeOptions.chapters;
       // sample1 carries no heading styles, so its chapters are the analysis units every category reads by.
       expect(options).toMatchObject({ available: true, basis: 'analysis-units' });
       expect(options.chapters.map((chapter) => [chapter.position, chapter.endPosition])).toEqual([[1, 15], [16, 25], [26, 43], [44, 59], [60, 68], [69, 75], [76, 92], [93, 97]]);
@@ -459,5 +532,169 @@ describe('a Review Run over the real store on exact sample1', () => {
       expect(after.categories.find((category) => category.categoryId === TYPOS)!.scopes.changed.available).toBe(false);
     });
   }, 300_000);
-// REVIEW-RUNS-TESTS
+  it('refuses an approval over a plan that moved, and refuses at its turn a category whose plan moved after the approval', async () => {
+    await withBook('sample1-review-authored', async (session, book) => {
+      const stale = prepare(session, book, [TYPOS, STYLE], WHOLE);
+      reenrollCredential();
+      expect(storeCode(() => session.store.authorizeReviewRun(book.bookId, stale.reviewRunId, approvals(stale)))).toBe('REVIEW_PLAN_CHANGED');
+      // Preparing again reconfirms each moved plan as its Task's next plan version, and the older Run is superseded.
+      const fresh = prepare(session, book, [TYPOS, STYLE], WHOLE);
+      expect(fresh.ordinal).toBe(2);
+      expect(fresh.categories.map((category) => category.taskIntentId)).toEqual(stale.categories.map((category) => category.taskIntentId));
+      expect(fresh.categories.map((category) => category.planEnvelopeDigest)).not.toEqual(stale.categories.map((category) => category.planEnvelopeDigest));
+      expect(storeCode(() => session.store.authorizeReviewRun(book.bookId, stale.reviewRunId, approvals(stale)))).toBe('REVIEW_RUN_SUPERSEDED');
+      expect(storeCode(() => session.store.authorizeReviewRun(book.bookId, fresh.reviewRunId, approvals(stale)))).toBe('REVIEW_AUTHORIZATION_STALE');
+      session.store.authorizeReviewRun(book.bookId, fresh.reviewRunId, approvals(fresh));
+      // An approval repeated with the same digests records nothing new.
+      session.store.authorizeReviewRun(book.bookId, fresh.reviewRunId, approvals(fresh));
+
+      // The plans move again after the approval: each category is refused at its turn, with the ledger's reason.
+      reenrollCredential();
+      await session.driver.drive(fresh.reviewRunId);
+      const run = workspace(session, book, fresh.reviewRunId).run!;
+      expect(run).toMatchObject({ state: 'failed', canContinue: false });
+      expect(run.categories.map((category) => category.state)).toEqual(['refused', 'refused']);
+      expect(run.categories.every((category) => category.detail!.includes('plan-revision-required'))).toBe(true);
+      expect(eventTrail(fresh.reviewRunId)).toEqual([[TYPOS, 'refused'], [STYLE, 'refused']]);
+      // No Run was recorded on either ledger: a refused approval never leaves a category authorized.
+      expect(session.store.inspectReviewCategory(book.bookId, reviewCategoryKindDefinition(TYPOS_AND_USAGE)).run).toBeNull();
+      expect(run.findings).toEqual([]);
+      expect(workspace(session, book).runs.map((summary) => [summary.ordinal, summary.state])).toEqual([[2, 'failed'], [1, 'prepared']]);
+    });
+  }, 300_000);
+
+  it('keeps going when one category cannot be dispatched, and ends that ledger Run instead of leaving it authorized', async () => {
+    const session = await open('sample1-review-authored', (inner) => new RefusingFirstDispatch(inner));
+    try {
+      const book = await importBook(session);
+      const run = await authorizeAndDrive(session, book, prepare(session, book, [TYPOS, STYLE], WHOLE));
+      expect(run).toMatchObject({ state: 'partial', stateLabel: '部分完成', canContinue: false });
+      expect(run.categories[0]).toMatchObject({ categoryId: TYPOS, state: 'failed', findingsCount: 0 });
+      expect(run.categories[0]!.detail).toContain('EXECUTION_ROUTE_ABSENT');
+      expect(run.categories[1]).toMatchObject({ categoryId: STYLE, state: 'settled' });
+      expect(run.categories[1]!.findingsCount).toBeGreaterThan(0);
+      const typos = session.store.inspectReviewCategory(book.bookId, reviewCategoryKindDefinition(TYPOS_AND_USAGE));
+      expect(typos.run!.state).toBe('failed');
+      // The category is free for its next Task.
+      const next = prepare(session, book, [TYPOS], WHOLE);
+      expect(next.categories[0]!.taskIntentId).not.toBe(run.categories[0]!.taskIntentId);
+    } finally {
+      await close(session);
+    }
+  }, 300_000);
+
+  it('stops between categories, reads partial after a restart, and 继续审阅 finishes the Run where it stopped', async () => {
+    let gated = null as GatedOwner | null;
+    const first = await open('sample1-review-authored', (inner) => { gated = new GatedOwner(inner, 3); return gated; });
+    let book: Book;
+    let reviewRunId: string;
+    try {
+      book = await importBook(first);
+      const prepared = prepare(first, book, [TYPOS, STYLE], WHOLE);
+      reviewRunId = prepared.reviewRunId;
+      first.store.authorizeReviewRun(book.bookId, reviewRunId, approvals(prepared));
+      const loop = first.driver.drive(reviewRunId);
+      // Driven: the Run reads running while the loop holds it, and no second Run of the Book can be prepared.
+      expect(workspace(first, book, reviewRunId).run!.state).toBe('running');
+      expect(workspace(first, book).newReview.available).toBe(false);
+      expect(storeCode(() => first.store.createReviewRunPreparationWork(book.bookId, [LITERARY], WHOLE, launchPolicy))).toBe('REVIEW_RUN_ACTIVE');
+      // The first category is on the manuscript; the service stops before the second starts.
+      await gated!.reached;
+      const stopped = first.driver.dispose();
+      gated!.release();
+      await stopped;
+      await loop;
+      const stoppedRun = workspace(first, book, reviewRunId).run!;
+      expect(stoppedRun.categories.map((category) => category.state)).toEqual(['settled', 'waiting']);
+    } finally {
+      await close(first);
+    }
+
+    const second = await open('sample1-review-authored');
+    try {
+      const partial = workspace(second, book, reviewRunId).run!;
+      expect(partial).toMatchObject({ state: 'partial', stateLabel: '部分完成 · 可继续审阅', canContinue: true });
+      expect(partial.categories[1]).toMatchObject({ state: 'waiting', detail: '尚未开始；继续审阅时从这一类接着审。' });
+      await second.driver.continue(reviewRunId);
+      const finished = workspace(second, book, reviewRunId).run!;
+      expect(finished).toMatchObject({ state: 'settled', canContinue: false });
+      expect(finished.categories.map((category) => category.state)).toEqual(['settled', 'settled']);
+      expect(eventTrail(reviewRunId)).toEqual([
+        [TYPOS, 'dispatched'], [TYPOS, 'settled'], [TYPOS, 'materialized'],
+        [STYLE, 'dispatched'], [STYLE, 'settled'], [STYLE, 'materialized'],
+      ]);
+      // Continuing a finished Run does nothing.
+      await second.driver.continue(reviewRunId);
+      expect(eventTrail(reviewRunId)).toHaveLength(6);
+    } finally {
+      await close(second);
+    }
+  }, 300_000);
+
+  it('ends a category Run a stopped service left executing, records it interrupted, and finishes the rest', async () => {
+    const first = await open('sample1-review-authored');
+    let book: Book;
+    let reviewRunId: string;
+    try {
+      book = await importBook(first);
+      const prepared = prepare(first, book, [TYPOS, STYLE], WHOLE);
+      reviewRunId = prepared.reviewRunId;
+      first.store.authorizeReviewRun(book.bookId, reviewRunId, approvals(prepared));
+      // The hand-off reaches the ledger and the owner admits the Run; then the process dies under it.
+      const steps = first.store.reviewRunDriveSteps;
+      const handOff = steps.start(reviewRunId, TYPOS)!;
+      handOff.ledger.recordRunState(handOff.runRecordId, 'admitted', { detail: '已进入 AI7 调度器（单槽位）。' });
+      handOff.ledger.recordRunState(handOff.runRecordId, 'executing', { detail: '正在执行。' });
+      steps.recordDispatch(reviewRunId, TYPOS, handOff.runRecordId);
+    } finally {
+      await close(first);
+    }
+
+    const second = await open('sample1-review-authored');
+    try {
+      const partial = workspace(second, book, reviewRunId).run!;
+      expect(partial).toMatchObject({ state: 'partial', canContinue: true });
+      expect(partial.categories.map((category) => category.state)).toEqual(['interrupted', 'waiting']);
+      await second.driver.continue(reviewRunId);
+      const finished = workspace(second, book, reviewRunId).run!;
+      expect(finished).toMatchObject({ state: 'partial', canContinue: false });
+      expect(finished.categories.map((category) => category.state)).toEqual(['interrupted', 'settled']);
+      expect(finished.categories[0]!.detail).toContain('服务在这一类运行期间停止');
+      // The category's ledger Run is ended, not left executing: the category can be reviewed again.
+      expect(second.store.inspectReviewCategory(book.bookId, reviewCategoryKindDefinition(TYPOS_AND_USAGE)).run!.state).toBe('interrupted');
+      expect(prepare(second, book, [TYPOS], WHOLE).categories[0]!.modeLabel).toBe('全书审阅');
+    } finally {
+      await close(second);
+    }
+  }, 300_000);
+
+  it('checks facts as 事实核查 over the whole manuscript once, tiers read as severities and every finding 未外部复核', async () => {
+    await withBook('sample1-factual-authored', async (session, book) => {
+      const before = workspace(session, book).categories.find((category) => category.categoryId === FACTUAL)!;
+      expect(before.available).toBe(true);
+      expect(before.scopes).toMatchObject({ whole: { available: true }, chapters: { available: false, unavailableReason: FACTUAL_CHAPTERS_REASON } });
+      expect(before.basisStatement).toContain('会使用搜索引擎');
+
+      const prepared = prepare(session, book, [FACTUAL], WHOLE);
+      expect(prepared.categories[0]!.modeLabel).toBe('全书事实核查');
+      const run = await authorizeAndDrive(session, book, prepared);
+      expect(run.state).toBe('settled');
+      const revision = session.store.inspectFactualReview(book.bookId).resultSetRevision!;
+      expect(run.findings).toHaveLength(revision.findings.length);
+      const tiers = new Map(revision.findings.map((finding) => [finding.quote, finding.severity] as const));
+      for (const finding of run.findings) {
+        expect(finding).toMatchObject({ output: 'annotation', stateLine: '未外部复核', replacement: null, status: 'pending' });
+        expect(finding.severity).toBe({ A: 'must', B: 'should', C: 'note' }[tiers.get(finding.quote)!]);
+        const card = session.store.getEditorialMarkCard(book.manuscriptId, book.branchId, finding.markId!);
+        expect(card.kind).toBe('annotation');
+        expect(card.body.startsWith('【未外部复核】')).toBe(true);
+        expect(card.basis[0]!.label.startsWith('可核查依据')).toBe(true);
+      }
+      // Once checked, 事实核查 says why it cannot check again yet, and its coverage stands.
+      const after = workspace(session, book);
+      expect(after.categories.find((category) => category.categoryId === FACTUAL)).toMatchObject({ available: false, unavailableReason: FACTUAL_AGAIN_REASON });
+      expect(after.coverage.find((row) => row.categoryId === FACTUAL)!.state).toBe('current');
+      expect(storeCode(() => session.store.createReviewRunPreparationWork(book.bookId, [FACTUAL], WHOLE, launchPolicy))).toBe('REVIEW_CATEGORY_UNAVAILABLE');
+    });
+  }, 300_000);
 });
