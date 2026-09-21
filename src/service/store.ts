@@ -3390,7 +3390,7 @@ export class EditorialStore {
     approvedDigests: ReadonlyArray<{ categoryId: string; planEnvelopeDigest: string }>,
   ): ReviewWorkspaceProjection {
     return this.#reviewCall(() => {
-      this.#reviewRuns.authorize(bookId, reviewRunId, approvedDigests);
+      this.#reviewRuns.recordAuthorization(bookId, reviewRunId, approvedDigests);
       return this.#reviewRuns.workspace(bookId, reviewRunId);
     });
   }

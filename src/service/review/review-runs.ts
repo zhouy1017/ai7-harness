@@ -680,6 +680,8 @@ export class ReviewRunStore {
     const head = this.#head(bookId);
     requireReview(head !== null, 'REVIEW_MANUSCRIPT_ABSENT', NO_MANUSCRIPT_REASON);
     requireReview(!this.#bookIsDriving(bookId), 'REVIEW_RUN_ACTIVE', RUN_ACTIVE_REASON);
+    // Two preparations of one Book would prepare the same category ledgers' Tasks under each other.
+    requireReview(!Array.from(this.#work.values()).some((work) => work.bookId === bookId), 'REVIEW_RUN_PREPARING', '这本书有一次审阅正在准备计划；准备完成后再新建。');
     requireReview(Array.isArray(input.categoryIds) && input.categoryIds.length >= 1 && input.categoryIds.length <= this.#configuration.categories.length &&
       new Set(input.categoryIds).size === input.categoryIds.length, 'REVIEW_CATEGORIES_INVALID', '请选择至少一个审阅类别，且不要重复。');
     for (const categoryId of input.categoryIds) {
@@ -864,7 +866,7 @@ export class ReviewRunStore {
    * stale. The ledgers' own authorizations are written later, one category at a time, when the drive
    * loop reaches each; a plan that moves in between is refused there, with the ledger's reason.
    */
-  authorize(bookId: string, reviewRunId: string, planDigests: ReadonlyArray<{ categoryId: string; planEnvelopeDigest: string }>): void {
+  recordAuthorization(bookId: string, reviewRunId: string, planDigests: ReadonlyArray<{ categoryId: string; planEnvelopeDigest: string }>): void {
     const snapshot = this.#runOfBook(bookId, reviewRunId);
     const existing = this.#authorizationOf(reviewRunId);
     const tasks = snapshot.categories.filter((category) => category.task !== null);

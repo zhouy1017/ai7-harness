@@ -296,6 +296,13 @@ describe('a Review Run over the real store on exact sample1', () => {
       await runBaseline(session, book);
       expect(workspace(session, book).categories.find((category) => category.categoryId === PLOT)!.available).toBe(true);
 
+      // One preparation of a Book at a time, one category's plan per step; a cancelled one writes no Run.
+      const pending = session.store.createReviewRunPreparationWork(book.bookId, [TYPOS, STYLE], WHOLE, launchPolicy);
+      expect(pending).toMatchObject({ done: false, completed: 1, total: 3, projection: null });
+      expect(storeCode(() => session.store.createReviewRunPreparationWork(book.bookId, [TYPOS], WHOLE, launchPolicy))).toBe('REVIEW_RUN_PREPARING');
+      expect(session.store.cancelReviewRunPreparationWork(pending.workId!)).toBe(true);
+      expect(workspace(session, book).runs).toEqual([]);
+
       // Ticked in any order, a Run keeps the configuration's order.
       const prepared = prepare(session, book, [LITERARY, PLOT, STYLE, TYPOS], WHOLE);
       expect(prepared).toMatchObject({ ordinal: 1, label: '第 1 次', scope: { kind: 'whole', label: '全书', selectedRange: null }, authorization: null, canContinue: false });
