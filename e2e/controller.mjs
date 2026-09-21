@@ -449,6 +449,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'j14-top-edge-pages-back-once',
     'j14-top-edge-pages-back-once-bounced',
     'j14-keyboard-window-crossing',
+    'j14-keyboard-window-crossing-went-backward',
     'j14-fine-scroll-window-crossing',
     'j14-zoom-200-reflow',
     'j14-forced-colors',
