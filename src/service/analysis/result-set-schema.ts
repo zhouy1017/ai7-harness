@@ -1,5 +1,13 @@
-import { FACTUAL_REVIEW_CONTRACT_VERSION, FACTUAL_REVIEW_KIND } from '../../shared/protocol.js';
+import { EDITORIAL_REVIEW_CONTRACT_VERSION, EDITORIAL_REVIEW_KIND_PREFIX, FACTUAL_REVIEW_CONTRACT_VERSION, FACTUAL_REVIEW_KIND } from '../../shared/protocol.js';
 import { BASELINE_ANALYSIS_CONTRACT_VERSION, BASELINE_ANALYSIS_KIND } from './identity.js';
+
+/**
+ * How the durable schema admits the review-category kind family (Issue #417): by the shape of the kind
+ * identity, `editorial-review/` followed by a lower-case letter. A Review Category is configuration
+ * (V2-UX-REV-002), so no CHECK names one; the full identity pattern is checked where a kind
+ * definition is built (`isReviewCategoryId`), and this pattern is what keeps any other kind out.
+ */
+export const EDITORIAL_REVIEW_KIND_GLOB = `${EDITORIAL_REVIEW_KIND_PREFIX}[a-z]*` as const;
 
 /**
  * Additive immutable relations of the covered-analysis owner inside the Book authority database:
@@ -11,12 +19,14 @@ import { BASELINE_ANALYSIS_CONTRACT_VERSION, BASELINE_ANALYSIS_KIND } from './id
  * The relations were keyed by kind from the start; their CHECKs were not. Schema revision 20 (Issue
  * #53) widens exactly those two CHECKs so a Book may hold the factual-review Result Set beside the
  * baseline one, and the `UNIQUE(book_id, kind)` that has always been here keeps them one apiece.
+ * Revision 24 (Issue #417) widens the same two once more, for one Result Set per Review Category:
+ * the two literal kinds stand as they were, and the family joins them by pattern.
  */
 export const ANALYSIS_RESULT_SET_SCHEMA_SQL = {
   analysis_result_sets: `CREATE TABLE analysis_result_sets (
     result_set_id TEXT PRIMARY KEY,
     book_id TEXT NOT NULL REFERENCES books(book_id),
-    kind TEXT NOT NULL CHECK(kind IN ('${BASELINE_ANALYSIS_KIND}', '${FACTUAL_REVIEW_KIND}')),
+    kind TEXT NOT NULL CHECK(kind IN ('${BASELINE_ANALYSIS_KIND}', '${FACTUAL_REVIEW_KIND}') OR kind GLOB '${EDITORIAL_REVIEW_KIND_GLOB}'),
     created_at TEXT NOT NULL,
     canonical_json TEXT NOT NULL,
     sha256 TEXT NOT NULL UNIQUE CHECK(length(sha256) = 64),
@@ -32,7 +42,7 @@ export const ANALYSIS_RESULT_SET_SCHEMA_SQL = {
     manuscript_revision_id TEXT NOT NULL REFERENCES manuscript_revisions(revision_id),
     manuscript_revision_digest TEXT NOT NULL CHECK(length(manuscript_revision_digest) = 64),
     coverage_manifest_sha256 TEXT NOT NULL CHECK(length(coverage_manifest_sha256) = 64),
-    contract_version TEXT NOT NULL CHECK(contract_version IN ('${BASELINE_ANALYSIS_CONTRACT_VERSION}', '${FACTUAL_REVIEW_CONTRACT_VERSION}')),
+    contract_version TEXT NOT NULL CHECK(contract_version IN ('${BASELINE_ANALYSIS_CONTRACT_VERSION}', '${FACTUAL_REVIEW_CONTRACT_VERSION}', '${EDITORIAL_REVIEW_CONTRACT_VERSION}')),
     created_at TEXT NOT NULL,
     canonical_json TEXT NOT NULL,
     sha256 TEXT NOT NULL UNIQUE CHECK(length(sha256) = 64),

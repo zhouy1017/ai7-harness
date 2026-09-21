@@ -205,11 +205,12 @@ async function recoverSyntheticCredentialCleanupState(dataRoot, runRoot) {
   }
   try {
     database.exec('PRAGMA query_only = ON;');
-    // Synchronized delta with Issues #467, #407 and #408: schema revision 21 added the manuscript
-    // entry-position relation, revision 22 the editorial-mark relations and revision 23 the
-    // manuscript-effect relations, so this pin moves with the terminal version the service stamps
-    // (`MANUSCRIPT_EFFECT_SCHEMA_VERSION`).
-    requireJourney(database.prepare('PRAGMA user_version').get()?.user_version === 23, 'credential-cleanup-metadata-version');
+    // Synchronized delta with Issues #467, #407, #408 and #417: schema revision 21 added the manuscript
+    // entry-position relation, revision 22 the editorial-mark relations, revision 23 the
+    // manuscript-effect relations, and revision 24 rebuilt the three kind-coupled analysis relations
+    // for the review-category kind family, so this pin moves with the terminal version the service
+    // stamps (`EDITORIAL_REVIEW_SCHEMA_VERSION`).
+    requireJourney(database.prepare('PRAGMA user_version').get()?.user_version === 24, 'credential-cleanup-metadata-version');
     const rows = database.prepare(
       `SELECT connection_id, role_id, provider_id, model_id, adapter_revision, configuration_revision,
               approved_fallback_chain, credential_slot, credential_reference, credential_operation_state

@@ -56,12 +56,14 @@ import {
   ANALYSIS_LEDGER_REVISION_15_SQL,
   ANALYSIS_LEDGER_REVISION_16_SQL,
   ANALYSIS_LEDGER_REVISION_19_SQL,
+  ANALYSIS_LEDGER_REVISION_23_SQL,
   ANALYSIS_LEDGER_REVISION_17_TABLES,
   ANALYSIS_LEDGER_SCHEMA_SQL,
   ANALYSIS_LEDGER_TRIGGER_SQL,
   J03_TASK_AUTHORIZATION_SCHEMA_VERSION,
   J04_BASELINE_ANALYSIS_SCHEMA_VERSION,
   EDITORIAL_MARK_SCHEMA_VERSION,
+  EDITORIAL_REVIEW_SCHEMA_VERSION,
   MANUSCRIPT_EFFECT_SCHEMA_VERSION,
   MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION,
   MANUSCRIPT_INTAKE_SCHEMA_VERSION,
@@ -90,20 +92,30 @@ import {
 
 /**
  * The analysis ledger as revision 15 created it, as revision 16 rebuilt two of its relations, as
- * revision 19 left them, and as revision 20 widened the three kind-coupled ones. Every one of those
- * shapes validates exactly, so a store at any of them passes this layer before the forward copy that
- * brings it to the current shape.
+ * revision 19 left them, as revision 20 widened the three kind-coupled ones and revisions 21 to 23
+ * carried them, and as revision 24 widened the same three again for the review-category kind family
+ * (Issue #417). Every one of those shapes validates exactly, so a store at any of them passes this
+ * layer before the forward copy that brings it to the current shape.
  */
 const ANALYSIS_LEDGER_EXPECTED_SCHEMA_SQL: Readonly<Record<string, string | ReadonlyArray<string>>> = {
   ...ANALYSIS_LEDGER_SCHEMA_SQL,
   analysis_task_intents: [
     ANALYSIS_LEDGER_SCHEMA_SQL.analysis_task_intents,
+    ANALYSIS_LEDGER_REVISION_23_SQL.analysis_task_intents,
     ANALYSIS_LEDGER_REVISION_19_SQL.analysis_task_intents,
     ANALYSIS_LEDGER_REVISION_15_SQL.analysis_task_intents,
   ],
   analysis_plan_records: [ANALYSIS_LEDGER_SCHEMA_SQL.analysis_plan_records, ANALYSIS_LEDGER_REVISION_16_SQL.analysis_plan_records, ANALYSIS_LEDGER_REVISION_15_SQL.analysis_plan_records],
-  analysis_result_sets: [ANALYSIS_LEDGER_SCHEMA_SQL.analysis_result_sets, ANALYSIS_LEDGER_REVISION_19_SQL.analysis_result_sets],
-  analysis_result_set_revisions: [ANALYSIS_LEDGER_SCHEMA_SQL.analysis_result_set_revisions, ANALYSIS_LEDGER_REVISION_19_SQL.analysis_result_set_revisions],
+  analysis_result_sets: [
+    ANALYSIS_LEDGER_SCHEMA_SQL.analysis_result_sets,
+    ANALYSIS_LEDGER_REVISION_23_SQL.analysis_result_sets,
+    ANALYSIS_LEDGER_REVISION_19_SQL.analysis_result_sets,
+  ],
+  analysis_result_set_revisions: [
+    ANALYSIS_LEDGER_SCHEMA_SQL.analysis_result_set_revisions,
+    ANALYSIS_LEDGER_REVISION_23_SQL.analysis_result_set_revisions,
+    ANALYSIS_LEDGER_REVISION_19_SQL.analysis_result_set_revisions,
+  ],
 };
 
 /** The analysis ledger before revision 17 (Issue #48): the same relations without the plan-version, Plan Revision, and Plan Adaptation tables and their triggers. */
@@ -2344,6 +2356,10 @@ function requireManuscriptReimportTargetSchema(
         ? { ...EDITORIAL_MARK_SCHEMA_SQL, ...(includeManuscriptEffectTables ? {} : EDITORIAL_MARK_REVISION_22_SQL) }
         : {}),
       ...(includeManuscriptEffectTables ? MANUSCRIPT_EFFECT_SCHEMA_SQL : {}),
+      // REVISION-24 SEAM (Issue #417, Stage B): revision 24 also receives the additive Review Run
+      // relations `src/service/review/review-runs.ts` will own. They join this exact table set — and
+      // the trigger set and `SCHEMA_FOREIGN_KEYS` — behind a flag of their own, as revisions 22 and 23
+      // did. Stage A rebuilds three existing relations and adds none, so nothing is included here yet.
     },
     MANUSCRIPT_REIMPORT_INDEX_SQL,
     true,
@@ -5072,7 +5088,7 @@ export function initializeBoundedSchema(
       version === TASK_AUTHORIZATION_SCHEMA_VERSION || version === MANUSCRIPT_INTAKE_SCHEMA_VERSION ||
       version === TEXT_CONVERSION_SCHEMA_VERSION || version === FACTUAL_REVIEW_SCHEMA_VERSION ||
       version === MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION || version === EDITORIAL_MARK_SCHEMA_VERSION ||
-      version === MANUSCRIPT_EFFECT_SCHEMA_VERSION,
+      version === MANUSCRIPT_EFFECT_SCHEMA_VERSION || version === EDITORIAL_REVIEW_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -5082,9 +5098,10 @@ export function initializeBoundedSchema(
       version === SUCCESSIVE_TASK_SCHEMA_VERSION || version === TASK_AUTHORIZATION_SCHEMA_VERSION ||
       version === MANUSCRIPT_INTAKE_SCHEMA_VERSION || version === TEXT_CONVERSION_SCHEMA_VERSION ||
       version === FACTUAL_REVIEW_SCHEMA_VERSION || version === MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION ||
-      version === EDITORIAL_MARK_SCHEMA_VERSION || version === MANUSCRIPT_EFFECT_SCHEMA_VERSION) {
+      version === EDITORIAL_MARK_SCHEMA_VERSION || version === MANUSCRIPT_EFFECT_SCHEMA_VERSION ||
+      version === EDITORIAL_REVIEW_SCHEMA_VERSION) {
     transact(db, () => {
-      if (validateStoreTruth || version !== MANUSCRIPT_EFFECT_SCHEMA_VERSION) {
+      if (validateStoreTruth || version !== EDITORIAL_REVIEW_SCHEMA_VERSION) {
         validateManuscriptReimportSchemaTruth(
           db,
           profile,

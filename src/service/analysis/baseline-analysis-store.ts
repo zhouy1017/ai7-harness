@@ -41,6 +41,13 @@ import {
   type CredentialSlotId,
   type ExecutionRouteId,
   type ResultSetPolicyPin,
+  type ReviewCategoryHistoryProjection,
+  type ReviewCategoryResultSetRevisionProjection,
+  type ReviewCategoryUnitLineage,
+  type ReviewCategoryUpdateControlsProjection,
+  type ReviewCategoryUpdateProjection,
+  type ReviewScopePlanCounts,
+  type ReviewScopePlanProjection,
   type RunAttemptState,
   type RunBudgetCeilingState,
 } from '../../shared/protocol.js';
@@ -66,11 +73,18 @@ import {
   requireAnalysis,
   sha256Hex,
 } from './canonical.js';
-import { BASELINE_UNIT_RESULT_SCHEMA, unitRequestDigest, type BaselineUnitResult } from './contract.js';
+import { unitRequestDigest } from './contract.js';
 import { deriveCoverageManifest, manifestCoversEveryBlock, manifestDigestIsExact, type ManifestBlockInput } from './coverage-manifest.js';
 import { TASK_INPUT_CHECKPOINT_PURPOSE } from './identity.js';
 import type { AnalysisKindDefinition, AnalysisReductionResult } from './kind-definition.js';
-import { deriveReusePlan, requireSelectedRange, reusePlanRecord, type ReusePlanPredecessor } from './reuse-plan.js';
+import {
+  deriveReusePlan,
+  deriveScopePlan,
+  requireSelectedRange,
+  reusePlanRecord,
+  type ReusePlanPredecessor,
+  type ScopePlanPredecessor,
+} from './reuse-plan.js';
 import { NO_TASK_OUTCOME_REASON, PRE_RUN_REPORT_REASON, runReportDigest, runReportProjection, type RunReportRecord } from './run-report.js';
 import { baselineAnalysisKindDefinition } from './kind-definition.js';
 import { describeComposition } from '../harness/primary-agent-harness.js';
@@ -84,7 +98,15 @@ const NATIVE_CARRIER_DIGEST = 'ae485040c8fa602ab2e98ec91dd122201d40a8be41d8a4f86
 const SIDECAR_DIGEST = '980b565f25bdff29e539365e17344346017b05146a45cfea35c8ed7d528a1bff' as const;
 const SUCCESSOR_BEHAVIOR ='每次更新都是新的用户发起任务，经准备 → 计划预览 → 标准直接授权 → 执行后，在同一结果集上追加下一序号的不可变后继修订版；前一修订版不被改写，且始终可在修订历史中按其原始稿件 pin 查看。' as const;
 const ACTIVE_RUN_REASON = '当前已有分析任务在调度或执行中；在其结束前不能准备新的更新任务。' as const;
-const SYNC_UNAVAILABLE_REASON = '结果集修订版仍绑定当前稿件；只有在已确认编辑使精确修订版新鲜度为“已过期”后才可同步到当前稿件。' as const;
+
+/**
+ * Why a mode that reads only what changed is not on offer: nothing has changed. The mode's own label
+ * closes the sentence, so the baseline kind reads `…后才可同步到当前稿件。` exactly as it always has and
+ * a review category names its own action.
+ */
+function changedModeUnavailableReason(label: string): string {
+  return `结果集修订版仍绑定当前稿件；只有在已确认编辑使精确修订版新鲜度为“已过期”后才可${label}。`;
+}
 
 const RUN_STATE_LABELS: Record<BaselineAnalysisRunState, string> = {
   authorized: '已记录授权',
@@ -178,16 +200,30 @@ type AnalysisProjectionShape = Omit<
     reducerStages: ReadonlyArray<AnalysisReducerStageProjection['stage']>;
     stopCondition: string;
   };
-  resultSetRevision: null | BaselineAnalysisResultSetRevisionProjection | FactualReviewResultSetRevisionProjection;
-  update: null | BaselineAnalysisUpdateProjection;
-  updateControls: null | BaselineAnalysisUpdateControlsProjection;
-  history: null | BaselineAnalysisHistoryProjection | FactualReviewHistoryProjection;
-  inspectedRevision: null | {
-    revision: BaselineAnalysisResultSetRevisionProjection | FactualReviewResultSetRevisionProjection;
-    current: boolean;
-    readOnly: true;
-  };
+  resultSetRevision: null | AnyResultSetRevisionProjection;
+  update: null | BaselineAnalysisUpdateProjection | ReviewCategoryUpdateProjection;
+  updateControls: null | BaselineAnalysisUpdateControlsProjection | ReviewCategoryUpdateControlsProjection;
+  history: null | BaselineAnalysisHistoryProjection | FactualReviewHistoryProjection | ReviewCategoryHistoryProjection;
+  inspectedRevision: null | { revision: AnyResultSetRevisionProjection; current: boolean; readOnly: true };
 };
+
+type AnyResultSetRevisionProjection =
+  | BaselineAnalysisResultSetRevisionProjection
+  | FactualReviewResultSetRevisionProjection
+  | ReviewCategoryResultSetRevisionProjection;
+
+/**
+ * The plan a Task that does not read the whole manuscript afresh freezes: the baseline kind's reuse
+ * plan, or the scope plan of a kind that leaves out-of-scope units unreviewed (Issue #417). Both are
+ * the `reuse-plan` component, and both are re-derived and compared byte for byte before execution.
+ */
+export type AnalysisPlanRecord = AnalysisReusePlanProjection | ReviewScopePlanProjection;
+
+/** What a caller asks the ledger to prepare beside the kind's whole first Task: a mode, and the range a range mode needs. */
+export interface AnalysisModeRequest {
+  readonly mode: AnalysisTaskMode;
+  readonly selectedRange: BaselineAnalysisSelectedRange | null;
+}
 
 /**
  * The progress of one preparation. The projection is the kind's own once a caller that knows which
@@ -204,7 +240,12 @@ export type AnalysisPreparationResult<TProjection = AnalysisProjection> = {
 export type BaselineAnalysisPreparationResult = AnalysisPreparationResult;
 
 export type BaselineAnalysisPrepareInput =
-  | { phase: 'start'; bookId: string; goal: AnalysisGoal; update: BaselineAnalysisUpdateRequest | null; reconfirm: boolean; launchPolicy: LaunchPolicyProjection }
+  /**
+   * `update` is `null` for the kind's whole first Task and otherwise names the mode: one of the kind's
+   * update modes, or — for a kind that declares one — its range-bound first mode, which starts the
+   * Result Set over one selected range (Issue #417).
+   */
+  | { phase: 'start'; bookId: string; goal: AnalysisGoal; update: BaselineAnalysisUpdateRequest | AnalysisModeRequest | null; reconfirm: boolean; launchPolicy: LaunchPolicyProjection }
   | { phase: 'advance'; workId: string }
   | { phase: 'cancel'; workId: string }
   | { phase: 'cancel-all' };
@@ -233,12 +274,16 @@ export type RunProgressStage = 'units' | 'cross-unit-reduction' | 'assurance-sam
 
 export type ProgressReader = (runRecordId: string) => RunProgress | null;
 
-/** The update facts of a frozen update plan, re-derived and verified before execution. */
+/**
+ * The plan facts of a frozen Task that carries a plan, re-derived and verified before execution. The
+ * predecessor is `null` exactly for a range-bound first Task, which has a plan — the units in its
+ * range, and every other unit left unreviewed — and nothing to reuse from.
+ */
 export interface ExecutionUpdateFacts {
-  readonly mode: BaselineAnalysisUpdateMode;
+  readonly mode: AnalysisTaskMode;
   readonly selectedRange: BaselineAnalysisSelectedRange | null;
-  readonly predecessor: { revisionId: string; ordinal: number; digest: string; coverageManifestDigest: string; manifest: CoverageManifestProjection };
-  readonly reusePlan: AnalysisReusePlanProjection;
+  readonly predecessor: null | { revisionId: string; ordinal: number; digest: string; coverageManifestDigest: string; manifest: CoverageManifestProjection };
+  readonly reusePlan: AnalysisPlanRecord;
   readonly reusePlanDigest: string;
 }
 
@@ -326,14 +371,18 @@ export interface ExecutionBindingRecord {
   readonly runBudgetCeiling: RunBudgetCeilingState;
   readonly dispatchAttribution: 'Dispatch';
   readonly boundAt: string;
-  /** The update mode and reuse-plan digest an update attempt executes; absent for the first baseline. */
-  readonly update?: { mode: BaselineAnalysisUpdateMode; predecessorRevisionId: string; reusePlanDigest: string };
+  /**
+   * The mode and reuse-plan digest an attempt with a plan executes; absent for a whole first Task. The
+   * predecessor is `null` only for a range-bound first Task (Issue #417), which no baseline attempt is.
+   */
+  readonly update?: { mode: AnalysisTaskMode; predecessorRevisionId: string | null; reusePlanDigest: string };
 }
 
 export interface UnitResultRecord {
   readonly unitOrdinal: number;
   readonly requestDigest: string;
-  readonly lineage: AnalysisUnitLineage;
+  /** `unreviewed` only under a kind that leaves out-of-scope units unreviewed; the two other kinds never write it. */
+  readonly lineage: ReviewCategoryUnitLineage;
   readonly closed:
     | { state: 'closed'; responseDigest: string; usage: { inputTokens: number; outputTokens: number } | null; result: unknown }
     | { state: 'gap'; gap: BaselineAnalysisProjection['resultSetRevision'] extends infer R ? (R extends { gaps: ReadonlyArray<infer G> } ? G : never) : never };
@@ -345,7 +394,8 @@ export interface PredecessorUnitResult {
   readonly requestDigest: string;
   readonly responseDigest: string;
   readonly usage: { inputTokens: number; outputTokens: number } | null;
-  readonly result: BaselineUnitResult;
+  /** The kind's own typed unit result, read back by the kind's definition; the ledger never looks inside it. */
+  readonly result: unknown;
 }
 
 export interface RevisionPersistInput {
@@ -487,11 +537,15 @@ export function blockedReasons(live: LaunchBinding['live'], unitCount: number | 
   ];
 }
 
-/** What an analysis update does to the Provider, stated for the launch the next Run would execute under. */
-export function providerConsequence(live: LaunchBinding['live'], unitCount: number | null = null): string {
+/**
+ * What an analysis update does to the Provider, stated for the launch the next Run would execute
+ * under. `firstTaskLabel` is the label of the kind's own first Task, which the sentence compares an
+ * update to; it defaults to the baseline kind's, so every existing reading keeps its exact text.
+ */
+export function providerConsequence(live: LaunchBinding['live'], unitCount: number | null = null, firstTaskLabel = '首次基线分析'): string {
   return live === null
-    ? '与首次基线分析相同：远程 DeepSeek 绑定被 development-ci · Provider Processing v1 拒绝（0 次实时传输），只有 J-04 控制绑定的 AI7 本地确定性模型适配器可执行；外发数据类别 public-or-synthetic；未设置任务预算上限；只有重算单元形成模型请求并计入用量，复用单元不形成任何模型负载。'
-    : `与首次基线分析相同：远程绑定 ${live.route} · ${live.model} 在 developer-live · Provider Processing v5 下可执行，实时传输受运行边界约束；外发数据类别 public-or-synthetic；任务运行预算上限 ${ceilingReading(live.runBudgetCeiling, unitCount)}；每个重算单元形成一次实时传输并计入用量，复用单元不形成任何模型负载。`;
+    ? `与${firstTaskLabel}相同：远程 DeepSeek 绑定被 development-ci · Provider Processing v1 拒绝（0 次实时传输），只有 J-04 控制绑定的 AI7 本地确定性模型适配器可执行；外发数据类别 public-or-synthetic；未设置任务预算上限；只有重算单元形成模型请求并计入用量，复用单元不形成任何模型负载。`
+    : `与${firstTaskLabel}相同：远程绑定 ${live.route} · ${live.model} 在 developer-live · Provider Processing v5 下可执行，实时传输受运行边界约束；外发数据类别 public-or-synthetic；任务运行预算上限 ${ceilingReading(live.runBudgetCeiling, unitCount)}；每个重算单元形成一次实时传输并计入用量，复用单元不形成任何模型负载。`;
 }
 
 /**
@@ -595,7 +649,7 @@ export class BaselineAnalysisStore {
     const checkpoint = this.#db.prepare('SELECT * FROM analysis_task_input_checkpoints WHERE task_intent_id = ?').get(intent.taskIntentId) as SqlRow | undefined;
     if (checkpoint === undefined) {
       this.#binding(bookId);
-      const update = this.#isInitial(intent.mode) ? null : this.#updateProjection(intent, null, null, revision);
+      const update = this.#carriesPlan(intent.mode) ? this.#updateProjection(intent, null, null, revision) : null;
       return this.#asProjection({
         ...this.#shape(bookId),
         taskIntent,
@@ -629,9 +683,9 @@ export class BaselineAnalysisStore {
             : run.state === 'completed' || run.state === 'completed-with-gaps' ? 'settled'
               : run.state === 'failed' ? 'failed' : 'interrupted';
     const providerPlan = plan['provider-resolution-plan'] as BaselineAnalysisProjection['providerResolutionPlan'];
-    const initial = this.#isInitial(intent.mode);
-    const reusePlan = initial ? null : plan['reuse-plan'] as AnalysisReusePlanProjection;
-    const update = initial ? null : this.#updateProjection(intent, reusePlan, digests['reuse-plan'] ?? null, revision);
+    const planned = this.#carriesPlan(intent.mode);
+    const reusePlan = planned ? plan['reuse-plan'] as AnalysisPlanRecord : null;
+    const update = planned ? this.#updateProjection(intent, reusePlan, digests['reuse-plan'] ?? null, revision) : null;
     // Drift detection (Issue #48): before authorization the material inputs are re-derived from durable
     // state and compared with the frozen version; a stored pending Plan Revision takes precedence over a
     // live difference. After authorization the bound plan is final for its Run and nothing is compared.
@@ -985,17 +1039,17 @@ export class BaselineAnalysisStore {
     };
   }
 
-  /** The reuse-plan counts a version would derive for the given range against the latest revision; `null` for an initial mode. */
+  /** The reuse-plan counts a version would derive for the given range against the latest revision; `null` for a mode that carries no plan. */
   #reusePlanCountsFor(bookId: string, mode: AnalysisTaskMode, manifest: CoverageManifestProjection, selectedRange: BaselineAnalysisSelectedRange | null): AnalysisReusePlanCounts | null {
-    if (this.#isInitial(mode)) return null;
-    const latestRow = this.#revisionRows(bookId).at(-1);
-    if (latestRow === undefined) return null;
-    return deriveReusePlan({
-      mode: mode as BaselineAnalysisUpdateMode,
-      selectedRange: this.#definition.mode(mode).rangeBound ? selectedRange : null,
+    if (!this.#carriesPlan(mode)) return null;
+    const latestRow = this.#isInitial(mode) ? undefined : this.#revisionRows(bookId).at(-1);
+    if (latestRow === undefined && !this.#isInitial(mode)) return null;
+    return this.#derivePlan(
+      mode,
+      this.#definition.mode(mode).rangeBound ? selectedRange : null,
       manifest,
-      predecessor: this.#predecessorFacts(latestRow),
-    }).counts;
+      latestRow === undefined ? null : this.#planPredecessor(latestRow),
+    ).counts;
   }
 
   /**
@@ -1160,6 +1214,50 @@ export class BaselineAnalysisStore {
     return this.#definition.mode(mode).initial;
   }
 
+  /**
+   * A mode whose Task freezes a `reuse-plan` component: every update mode, and a range-bound first
+   * mode (Issue #417), whose plan has no predecessor and says which units are read and which are left
+   * unreviewed. Only a whole first Task carries none — it reads every unit, and there is nothing to plan.
+   */
+  #carriesPlan(mode: AnalysisTaskMode): boolean {
+    const definition = this.#definition.mode(mode);
+    return !definition.initial || definition.rangeBound;
+  }
+
+  /**
+   * Derive the plan of one mode over one manifest. Which derivation is the kind's to say: a kind that
+   * leaves out-of-scope units unreviewed gets the scope plan, and the baseline kind gets the reuse plan
+   * it has always had, from the same untouched function and therefore with the same bytes.
+   */
+  #derivePlan(
+    mode: AnalysisTaskMode,
+    selectedRange: BaselineAnalysisSelectedRange | null,
+    manifest: CoverageManifestProjection,
+    predecessor: ReusePlanPredecessor | ScopePlanPredecessor | null,
+  ): AnalysisPlanRecord {
+    if (this.#definition.outOfScope === 'leave-unreviewed') {
+      requireAnalysis(predecessor === null || 'schemaDigest' in predecessor, 'ANALYSIS_RECORD_INVALID', '前一修订版缺少审阅范围计划所需的事实。');
+      return deriveScopePlan({
+        kind: this.#definition.kind,
+        contractVersion: this.#definition.contractVersion,
+        schemaDigest: this.#definition.schemaDigest,
+        mode,
+        recompute: this.#definition.mode(mode).recompute,
+        selectedRange,
+        manifest,
+        predecessor: predecessor as ScopePlanPredecessor | null,
+      });
+    }
+    requireAnalysis(predecessor !== null, 'ANALYSIS_RECORD_INVALID', '更新任务缺少前一修订版。');
+    return deriveReusePlan({ mode: mode as BaselineAnalysisUpdateMode, selectedRange, manifest, predecessor });
+  }
+
+  /** The counts a whole first Task's revision states: every unit read, none reused. */
+  #wholeFirstCounts(unitCount: number): AnalysisReusePlanCounts | ReviewScopePlanCounts {
+    const counts = firstBaselineCounts(unitCount);
+    return this.#definition.outOfScope === 'leave-unreviewed' ? { ...counts, unreviewed: 0 } : counts;
+  }
+
   #intentFacts(row: SqlRow): IntentFacts {
     const mode = asString(row.mode) as AnalysisTaskMode;
     const goal = asString(row.goal);
@@ -1188,7 +1286,7 @@ export class BaselineAnalysisStore {
     const records: Record<string, unknown> = {};
     for (const row of rows) records[asString(row.component)] = parseCanonicalJson(asString(row.canonical_json));
     const required = ['manuscript-pin', 'artifact-pin', 'run-source-scope', 'coverage-manifest', 'provider-resolution-plan', 'execution-plan', 'plan-envelope'];
-    if (mode !== 'any' && !this.#isInitial(mode)) required.push('reuse-plan');
+    if (mode !== 'any' && this.#carriesPlan(mode)) required.push('reuse-plan');
     for (const component of required) {
       requireAnalysis(records[component] !== undefined, 'ANALYSIS_RECORD_INVALID', '任务计划记录图不完整。');
     }
@@ -1317,7 +1415,7 @@ export class BaselineAnalysisStore {
         predecessor: null,
         reusePlanDigest: null,
         selectedRange: null,
-        counts: firstBaselineCounts(unitCount),
+        counts: this.#wholeFirstCounts(unitCount),
       };
     }
     const update = body.update as Omit<BaselineAnalysisRevisionUpdateProjection, 'modeLabel'>;
@@ -1501,6 +1599,24 @@ export class BaselineAnalysisStore {
     };
   }
 
+  /**
+   * The predecessor facts this kind's plan derivation reads. A kind that leaves out-of-scope units
+   * unreviewed needs two more than the baseline does: the schema digest the predecessor pinned — the
+   * frozen category contract its units were read under — and which of its gaps were units it was never
+   * asked to read, which a later Run must tell apart from units it lost.
+   */
+  #planPredecessor(row: SqlRow): ReusePlanPredecessor | ScopePlanPredecessor {
+    const facts = this.#predecessorFacts(row);
+    if (this.#definition.outOfScope !== 'leave-unreviewed') return facts;
+    const gapRows = this.#db.prepare("SELECT unit_ordinal, canonical_json FROM analysis_unit_results WHERE revision_id = ? AND state = 'gap' ORDER BY unit_ordinal")
+      .all(facts.revisionId) as SqlRow[];
+    const unreviewedUnitOrdinals = gapRows.filter((unit) => {
+      const record = parseCanonicalJson(asString(unit.canonical_json));
+      return isRecord(record) && isRecord(record.gap) && record.gap.code === 'out-of-scope';
+    }).map((unit) => asNumber(unit.unit_ordinal));
+    return { ...facts, schemaDigest: asString(this.#revisionBody(row).schemaDigest), unreviewedUnitOrdinals };
+  }
+
   #revisionRowById(revisionId: string): SqlRow {
     const row = this.#db.prepare('SELECT * FROM analysis_result_set_revisions WHERE revision_id = ?').get(revisionId) as SqlRow | undefined;
     requireAnalysis(row !== undefined, 'ANALYSIS_RECORD_INVALID', '前一结果集修订版缺失。');
@@ -1509,11 +1625,26 @@ export class BaselineAnalysisStore {
 
   #updateProjection(
     intent: IntentFacts,
-    reusePlan: AnalysisReusePlanProjection | null,
+    reusePlan: AnalysisPlanRecord | null,
     reusePlanDigest: string | null,
     latest: BaselineAnalysisResultSetRevisionProjection | null,
-  ): BaselineAnalysisUpdateProjection {
-    requireAnalysis(!this.#isInitial(intent.mode) && intent.predecessorRevisionId !== null, 'ANALYSIS_RECORD_INVALID', '更新任务缺少前一修订版。');
+  ): BaselineAnalysisUpdateProjection | ReviewCategoryUpdateProjection {
+    requireAnalysis(this.#carriesPlan(intent.mode) && this.#isInitial(intent.mode) === (intent.predecessorRevisionId === null),
+      'ANALYSIS_RECORD_INVALID', '更新任务缺少前一修订版。');
+    if (intent.predecessorRevisionId === null) {
+      // A range-bound first Task (Issue #417): it starts the Result Set, so what authorization must
+      // re-verify is not that a predecessor is still the latest revision but that there is still none.
+      return {
+        mode: intent.mode,
+        modeLabel: this.#definition.mode(intent.mode).label,
+        meaning: this.#definition.mode(intent.mode).meaning,
+        predecessor: null,
+        predecessorCurrent: latest === null,
+        selectedRange: reusePlan === null ? intent.selectedRange : reusePlan.selectedRange,
+        reusePlan,
+        reusePlanDigest,
+      } as ReviewCategoryUpdateProjection;
+    }
     const predecessorRow = this.#revisionRowById(intent.predecessorRevisionId);
     const body = this.#revisionBody(predecessorRow);
     const pin = body.manuscriptPin as BaselineAnalysisResultSetRevisionProjection['manuscriptPin'];
@@ -1532,7 +1663,8 @@ export class BaselineAnalysisStore {
       selectedRange: reusePlan === null ? intent.selectedRange : reusePlan.selectedRange,
       reusePlan,
       reusePlanDigest,
-    };
+      // The plan is the kind's own record version, and the mode one of the kind's own update modes.
+    } as BaselineAnalysisUpdateProjection | ReviewCategoryUpdateProjection;
   }
 
   /**
@@ -1544,7 +1676,7 @@ export class BaselineAnalysisStore {
     bookId: string,
     revision: BaselineAnalysisResultSetRevisionProjection | null,
     blockedByActiveRun: boolean,
-  ): BaselineAnalysisUpdateControlsProjection | null {
+  ): BaselineAnalysisUpdateControlsProjection | ReviewCategoryUpdateControlsProjection | null {
     if (revision === null || this.#definition.updateModes.length === 0) return null;
     return this.#updateControls(bookId, revision, blockedByActiveRun);
   }
@@ -1553,8 +1685,17 @@ export class BaselineAnalysisStore {
    * The Analysis Update Controls: the preview manifest is derived over the current working blocks of
    * the primary branch (exactly what the next Task Input checkpoint would pin), and every expected
    * count is a real reuse-plan derivation against the latest revision, never an estimate.
+   *
+   * The controls are keyed by the kind's own update modes and offered by what each mode means to
+   * read: a mode that reads only what changed is on offer once something has, a range-bound mode
+   * carries one option per structural unit, and a mode that reads everything always stands. For the
+   * baseline kind that is exactly the three actions it has always had, in the order it declares them.
    */
-  #updateControls(bookId: string, latest: BaselineAnalysisResultSetRevisionProjection, blockedByActiveRun: boolean): BaselineAnalysisUpdateControlsProjection {
+  #updateControls(
+    bookId: string,
+    latest: BaselineAnalysisResultSetRevisionProjection,
+    blockedByActiveRun: boolean,
+  ): BaselineAnalysisUpdateControlsProjection | ReviewCategoryUpdateControlsProjection {
     const head = this.#workingHead(latest.manuscriptPin.manuscriptId, bookId);
     const blocks = this.readWorkingBlocks(head.branchId);
     const preview = deriveCoverageManifest({
@@ -1566,11 +1707,11 @@ export class BaselineAnalysisStore {
       revisionDigest: head.currentWorkingDigest,
       blocks,
     });
-    const predecessor = this.#predecessorFacts(this.#revisionRowById(latest.revisionId));
-    const expected = (mode: BaselineAnalysisUpdateMode, selectedRange: BaselineAnalysisSelectedRange | null): AnalysisReusePlanCounts =>
-      deriveReusePlan({ mode, selectedRange, manifest: preview, predecessor }).counts;
+    const predecessor = this.#planPredecessor(this.#revisionRowById(latest.revisionId));
+    const expected = (mode: AnalysisTaskMode, selectedRange: BaselineAnalysisSelectedRange | null): AnalysisReusePlanCounts =>
+      this.#derivePlan(mode, selectedRange, preview, predecessor).counts;
     const freshness = latest.freshness.state === 'stale' ? 'stale' : 'current';
-    const action = (mode: BaselineAnalysisUpdateMode, available: boolean, unavailableReason: string | null, counts: AnalysisReusePlanCounts | null) => ({
+    const action = (mode: AnalysisTaskMode, available: boolean, unavailableReason: string | null, counts: AnalysisReusePlanCounts | null) => ({
       mode,
       label: this.#definition.mode(mode).label,
       goal: this.#definition.mode(mode).goal,
@@ -1579,7 +1720,7 @@ export class BaselineAnalysisStore {
       unavailableReason: blockedByActiveRun ? ACTIVE_RUN_REASON : unavailableReason,
       expected: counts,
     });
-    const options: BaselineAnalysisRangeOptionProjection[] = preview.units.map((unit) => ({
+    const options = (mode: AnalysisTaskMode): BaselineAnalysisRangeOptionProjection[] => preview.units.map((unit) => ({
       unitOrdinal: unit.ordinal,
       sectionOrdinal: unit.sectionOrdinal,
       headingText: unit.headingText,
@@ -1589,7 +1730,16 @@ export class BaselineAnalysisStore {
       endPosition: unit.endPosition,
       graphemes: unit.graphemes,
       label: `结构段 ${unit.sectionOrdinal}${unit.headingText === null ? '' : `「${unit.headingText}」`} · 单元 ${unit.ordinal}/${preview.units.length}（${unit.subUnitIndex}/${unit.subUnitCount}）· 内容块 ${unit.startPosition}–${unit.endPosition} · ${unit.graphemes} 字素`,
-      expected: expected('reanalyze-range', { startPosition: unit.startPosition, endPosition: unit.endPosition }),
+      expected: expected(mode, { startPosition: unit.startPosition, endPosition: unit.endPosition }),
+    }));
+    const actions = Object.fromEntries(this.#definition.updateModes.map((mode) => {
+      const definition = this.#definition.mode(mode);
+      if (definition.recompute === 'changed') {
+        const stale = freshness === 'stale';
+        return [mode, action(mode, stale, stale ? null : changedModeUnavailableReason(definition.label), stale ? expected(mode, null) : null)];
+      }
+      if (definition.recompute === 'selected-range') return [mode, { ...action(mode, true, null, null), options: options(mode) }];
+      return [mode, action(mode, true, null, expected(mode, null))];
     }));
     return {
       target: {
@@ -1609,14 +1759,11 @@ export class BaselineAnalysisStore {
         sectionCount: preview.sectionCount,
       },
       blockedByActiveRun,
-      actions: {
-        'sync-current': action('sync-current', freshness === 'stale', freshness === 'stale' ? null : SYNC_UNAVAILABLE_REASON, freshness === 'stale' ? expected('sync-current', null) : null),
-        'reanalyze-range': { ...action('reanalyze-range', true, null, null), options },
-        'reanalyze-book': action('reanalyze-book', true, null, expected('reanalyze-book', null)),
-      },
-      providerConsequence: providerConsequence(this.#launch.live, preview.units.length),
+      actions,
+      providerConsequence: providerConsequence(this.#launch.live, preview.units.length, this.#definition.mode(this.#definition.initialMode).label),
       successorBehavior: SUCCESSOR_BEHAVIOR,
-    };
+      // Keyed by the kind's own update modes, which is the one thing the two controls shapes differ in.
+    } as BaselineAnalysisUpdateControlsProjection | ReviewCategoryUpdateControlsProjection;
   }
 
   // ---- preparation -----------------------------------------------------------------------------
@@ -1637,7 +1784,11 @@ export class BaselineAnalysisStore {
     if (input.phase === 'advance') return this.#advance(input.workId);
     const update = input.update;
     const mode: AnalysisTaskMode = update === null ? this.#definition.initialMode : update.mode;
-    requireAnalysis(update === null || this.#definition.updateModes.includes(mode), 'ANALYSIS_UPDATE_MODE_UNAVAILABLE', '本分析种类没有该更新方式。');
+    // A named mode is one of the kind's update modes, or the range-bound first mode of a kind that
+    // declares one (Issue #417). The whole first mode is never named: it is what `null` asks for.
+    const modeDefinition = this.#definition.modes.find((entry) => entry.mode === mode);
+    const firstRange = update !== null && modeDefinition !== undefined && modeDefinition.initial && modeDefinition.rangeBound;
+    requireAnalysis(update === null || firstRange || this.#definition.updateModes.includes(mode), 'ANALYSIS_UPDATE_MODE_UNAVAILABLE', '本分析种类没有该更新方式。');
     requireAnalysis(input.goal === this.#definition.mode(mode).goal, 'ANALYSIS_GOAL_INVALID', '任务目标与所选更新方式的固定目标不一致。');
     this.#requireDeniedPolicy(input.launchPolicy);
     const existing = this.inspect(input.bookId);
@@ -1646,11 +1797,18 @@ export class BaselineAnalysisStore {
     let selectedRange: BaselineAnalysisSelectedRange | null = null;
     if (update === null) {
       requireAnalysis(latest === null, 'ANALYSIS_FIRST_BASELINE_EXISTS', '本图书已存在结果集修订版；请使用分析更新操作追加后继修订版。');
+    } else if (firstRange) {
+      // The range is checked against the working manuscript the Task Input checkpoint is about to pin;
+      // there is no revision yet for the update controls to have derived it from.
+      requireAnalysis(latest === null, 'ANALYSIS_FIRST_BASELINE_EXISTS', '本图书已存在结果集修订版；请使用分析更新操作追加后继修订版。');
+      selectedRange = requireSelectedRange(update.selectedRange, this.readWorkingBlocks(this.#binding(input.bookId).branchId).length);
     } else {
-      requireAnalysis(latest !== null && existing.updateControls !== null, 'ANALYSIS_PREDECESSOR_ABSENT', '本图书尚无结果集修订版；请先完成首次基线分析。');
-      const control = existing.updateControls!.actions[update.mode];
-      requireAnalysis(control.available, 'ANALYSIS_UPDATE_MODE_UNAVAILABLE', control.unavailableReason ?? SYNC_UNAVAILABLE_REASON);
-      if (this.#definition.mode(update.mode).rangeBound) {
+      const initialLabel = this.#definition.mode(this.#definition.initialMode).label;
+      requireAnalysis(latest !== null && existing.updateControls !== null, 'ANALYSIS_PREDECESSOR_ABSENT', `本图书尚无结果集修订版；请先完成${initialLabel}。`);
+      const control = (existing.updateControls!.actions as Readonly<Record<string, { available: boolean; unavailableReason: string | null }>>)[mode];
+      requireAnalysis(control !== undefined && control.available, 'ANALYSIS_UPDATE_MODE_UNAVAILABLE',
+        control?.unavailableReason ?? changedModeUnavailableReason(this.#definition.mode(mode).label));
+      if (this.#definition.mode(mode).rangeBound) {
         selectedRange = requireSelectedRange(update.selectedRange, existing.updateControls!.working.totalBlocks);
       } else {
         requireAnalysis(update.selectedRange === null, 'ANALYSIS_SELECTED_RANGE_INVALID', '只有重新分析所选范围可以携带内容块范围。');
@@ -1681,11 +1839,14 @@ export class BaselineAnalysisStore {
         kind: this.#definition.kind,
         taskIntentId,
       };
-      const intent = canonicalRecord(initial ? base : {
+      // A whole first Task's record is the base alone, as it has been since revision 15. Every Task that
+      // carries a plan also states its mode, its predecessor and its range — and a range-bound first
+      // Task states that it has no predecessor rather than leaving the fact to the reader.
+      const intent = canonicalRecord(!this.#carriesPlan(mode) ? base : {
         ...base,
         mode,
-        predecessorRevisionId: latest!.revisionId,
-        predecessorRevisionDigest: latest!.digest,
+        predecessorRevisionId: initial ? null : latest!.revisionId,
+        predecessorRevisionDigest: initial ? null : latest!.digest,
         selectedRange,
       });
       this.#db.prepare(
@@ -1785,18 +1946,25 @@ export class BaselineAnalysisStore {
       revisionDigest: checkpoint.revisionDigest,
       blocks,
     });
-    let reusePlan: AnalysisReusePlanProjection | null = null;
-    if (!this.#isInitial(intent.mode)) {
-      requireAnalysis(intent.predecessorRevisionId !== null, 'ANALYSIS_RECORD_INVALID', '更新任务缺少前一修订版。');
+    let reusePlan: AnalysisPlanRecord | null = null;
+    if (this.#carriesPlan(intent.mode)) {
       const latestRow = this.#revisionRows(checkpoint.bookId).at(-1);
-      requireAnalysis(latestRow !== undefined && asString(latestRow.revision_id) === intent.predecessorRevisionId,
-        'ANALYSIS_PREDECESSOR_DRIFT', '该任务的前一修订版已不再是结果集的最新修订版；请基于最新修订版重新准备更新。');
-      reusePlan = deriveReusePlan({
-        mode: intent.mode as BaselineAnalysisUpdateMode,
-        selectedRange: this.#definition.mode(intent.mode).rangeBound ? requireSelectedRange(input.selectedRange, manifest.totalBlocks) : null,
+      if (this.#isInitial(intent.mode)) {
+        // A range-bound first Task starts the Result Set: a revision that appeared since it was
+        // prepared makes it an update of that revision, which is a different Task.
+        requireAnalysis(intent.predecessorRevisionId === null && latestRow === undefined,
+          'ANALYSIS_PREDECESSOR_DRIFT', '本图书已存在结果集修订版；请基于最新修订版重新准备更新。');
+      } else {
+        requireAnalysis(intent.predecessorRevisionId !== null, 'ANALYSIS_RECORD_INVALID', '更新任务缺少前一修订版。');
+        requireAnalysis(latestRow !== undefined && asString(latestRow.revision_id) === intent.predecessorRevisionId,
+          'ANALYSIS_PREDECESSOR_DRIFT', '该任务的前一修订版已不再是结果集的最新修订版；请基于最新修订版重新准备更新。');
+      }
+      reusePlan = this.#derivePlan(
+        intent.mode,
+        this.#definition.mode(intent.mode).rangeBound ? requireSelectedRange(input.selectedRange, manifest.totalBlocks) : null,
         manifest,
-        predecessor: this.#predecessorFacts(latestRow),
-      });
+        latestRow === undefined ? null : this.#planPredecessor(latestRow),
+      );
     }
     const manuscriptPin = {
       bookId: checkpoint.bookId,
@@ -1822,13 +1990,20 @@ export class BaselineAnalysisStore {
       readableScopeKinds: ['current-book-primary-manuscript-revision'],
       sourceVersionEvidence: { sourceVersionId: facts.sourceVersionId, readable: false },
     };
-    // An update Run admits only the recomputed units' messages; a reused unit never forms a model-bound payload.
+    // An update Run admits only the recomputed units' messages; a reused unit never forms a model-bound
+    // payload, and neither does a unit a scope plan leaves unreviewed — which the scope says in so many
+    // words, and only a scope plan says, so a baseline scope keeps the two lists it has always had.
+    const planUnits: ReadonlyArray<{ unitOrdinal: number; disposition: 'reused' | 'recomputed' | 'unreviewed' }> = reusePlan?.units ?? [];
+    const ordinalsOf = (disposition: 'reused' | 'recomputed' | 'unreviewed'): number[] =>
+      planUnits.filter((unit) => unit.disposition === disposition).map((unit) => unit.unitOrdinal);
+    const unreviewedCount = reusePlan !== null && 'unreviewed' in reusePlan.counts ? reusePlan.counts.unreviewed : null;
     const sourceScope = reusePlan === null ? sourceScopeBase : {
       ...sourceScopeBase,
       unitScope: {
         mode: reusePlan.mode,
-        recomputedUnitOrdinals: reusePlan.units.filter((unit) => unit.disposition === 'recomputed').map((unit) => unit.unitOrdinal),
-        reusedUnitOrdinals: reusePlan.units.filter((unit) => unit.disposition === 'reused').map((unit) => unit.unitOrdinal),
+        recomputedUnitOrdinals: ordinalsOf('recomputed'),
+        reusedUnitOrdinals: ordinalsOf('reused'),
+        ...(unreviewedCount === null ? {} : { unreviewedUnitOrdinals: ordinalsOf('unreviewed') }),
       },
     };
     // The plan freezes whichever binding the launch bound: the denied production binding on the
@@ -1893,6 +2068,7 @@ export class BaselineAnalysisStore {
           unitCount: manifest.units.length,
           recomputedUnitCount: reusePlan.counts.recomputed,
           reusedUnitCount: reusePlan.counts.reused,
+          ...(unreviewedCount === null ? {} : { unreviewedUnitCount: unreviewedCount }),
           reducerStages: this.#definition.reducerStages,
           stopCondition,
         };
@@ -1932,8 +2108,9 @@ export class BaselineAnalysisStore {
     const envelope = canonicalRecord(reusePlan === null ? envelopeBase : {
       ...envelopeBase,
       updateMode: reusePlan.mode,
-      predecessorRevisionId: reusePlan.predecessor.revisionId,
-      predecessorRevisionDigest: reusePlan.predecessor.digest,
+      // `null` only for a range-bound first Task's scope plan; a baseline plan always names its predecessor.
+      predecessorRevisionId: reusePlan.predecessor?.revisionId ?? null,
+      predecessorRevisionDigest: reusePlan.predecessor?.digest ?? null,
       reusePlanDigest: records['reuse-plan']!.digest,
     });
     const insert = this.#db.prepare(
@@ -2071,22 +2248,29 @@ export class BaselineAnalysisStore {
     const envelope = plan['plan-envelope'] as Record<string, unknown>;
     const artifactPin = plan['artifact-pin'] as { nativeCarrierSha256: string; sidecarSha256: string };
     let update: ExecutionUpdateFacts | null = null;
-    if (!this.#isInitial(intent.mode)) {
-      requireAnalysis(intent.predecessorRevisionId !== null, 'ANALYSIS_RECORD_INVALID', '更新任务缺少前一修订版。');
-      const predecessorRow = this.#revisionRowById(intent.predecessorRevisionId);
+    if (this.#carriesPlan(intent.mode)) {
       const latestRow = this.#revisionRows(intent.bookId).at(-1);
-      requireAnalysis(latestRow !== undefined && asString(latestRow.revision_id) === intent.predecessorRevisionId,
-        'ANALYSIS_PREDECESSOR_DRIFT', '该任务的前一修订版已不再是结果集的最新修订版；未开始执行。');
-      const predecessor = this.#predecessorFacts(predecessorRow);
-      const stored = plan['reuse-plan'] as AnalysisReusePlanProjection;
-      const rederived = deriveReusePlan({ mode: intent.mode as BaselineAnalysisUpdateMode, selectedRange: stored.selectedRange, manifest, predecessor });
+      let predecessor: ReusePlanPredecessor | ScopePlanPredecessor | null = null;
+      if (this.#isInitial(intent.mode)) {
+        // A range-bound first Task still starts the Result Set at dispatch, or it does not start.
+        requireAnalysis(intent.predecessorRevisionId === null && latestRow === undefined,
+          'ANALYSIS_PREDECESSOR_DRIFT', '本图书已存在结果集修订版；未开始执行。');
+      } else {
+        requireAnalysis(intent.predecessorRevisionId !== null, 'ANALYSIS_RECORD_INVALID', '更新任务缺少前一修订版。');
+        const predecessorRow = this.#revisionRowById(intent.predecessorRevisionId);
+        requireAnalysis(latestRow !== undefined && asString(latestRow.revision_id) === intent.predecessorRevisionId,
+          'ANALYSIS_PREDECESSOR_DRIFT', '该任务的前一修订版已不再是结果集的最新修订版；未开始执行。');
+        predecessor = this.#planPredecessor(predecessorRow);
+      }
+      const stored = plan['reuse-plan'] as AnalysisPlanRecord;
+      const rederived = this.#derivePlan(intent.mode, stored.selectedRange, manifest, predecessor);
       const record = reusePlanRecord(rederived);
       requireAnalysis(record.digest === digests['reuse-plan'] && canonicalJson(stored) === record.json && envelope.reusePlanDigest === record.digest,
         'ANALYSIS_REUSE_PLAN_DRIFT', '重新推导的复用计划与冻结计划不一致；未开始执行。');
       update = {
-        mode: intent.mode as BaselineAnalysisUpdateMode,
+        mode: intent.mode,
         selectedRange: stored.selectedRange,
-        predecessor: {
+        predecessor: predecessor === null ? null : {
           revisionId: predecessor.revisionId,
           ordinal: predecessor.ordinal,
           digest: predecessor.digest,
@@ -2177,18 +2361,9 @@ export class BaselineAnalysisStore {
         requestDigest: asString(record.requestDigest),
         responseDigest: asString(record.responseDigest),
         usage: record.usage as PredecessorUnitResult['usage'],
-        result: {
-          schema: BASELINE_UNIT_RESULT_SCHEMA,
-          unitOrdinal,
-          synopsis: record.synopsis as string,
-          entities: record.entities as BaselineUnitResult['entities'],
-          events: record.events as BaselineUnitResult['events'],
-          relationships: record.relationships as BaselineUnitResult['relationships'],
-          settingClaims: record.settingClaims as BaselineUnitResult['settingClaims'],
-          conflicts: record.conflicts as BaselineUnitResult['conflicts'],
-          unresolved: record.unresolved as BaselineUnitResult['unresolved'],
-          confidence: record.confidence as BaselineUnitResult['confidence'],
-        },
+        // Which keys a closed unit record carries is the kind's to know: its definition wrote them
+        // (`unitRecord`) and its definition reads them back.
+        result: this.#definition.unitResultOfRecord(record, unitOrdinal),
       });
     }
     return results;
@@ -2284,8 +2459,13 @@ export class BaselineAnalysisStore {
       const ordinalRow = this.#db.prepare('SELECT count(*) total, max(ordinal) latest FROM analysis_result_set_revisions WHERE result_set_id = ?').get(resultSetId) as SqlRow;
       const ordinal = asNumber(ordinalRow.total) + 1;
       if (facts.update !== null) {
-        requireAnalysis(asNumber(ordinalRow.latest) === facts.update.predecessor.ordinal && ordinal === facts.update.predecessor.ordinal + 1,
-          'ANALYSIS_PREDECESSOR_DRIFT', '前一修订版已不再是结果集的最新修订版；后继修订版未写入。');
+        // A plan with a predecessor appends directly after it; a range-bound first Task's plan has none
+        // and must still be the revision that starts the Result Set.
+        const predecessor = facts.update.predecessor;
+        requireAnalysis(predecessor === null
+          ? ordinal === 1
+          : asNumber(ordinalRow.latest) === predecessor.ordinal && ordinal === predecessor.ordinal + 1,
+        'ANALYSIS_PREDECESSOR_DRIFT', '前一修订版已不再是结果集的最新修订版；后继修订版未写入。');
       }
       const revisionId = randomUUID();
       const successor = facts.update !== null;
@@ -2359,7 +2539,9 @@ export class BaselineAnalysisStore {
         ...base,
         update: {
           mode: facts.update.mode,
-          predecessor: { revisionId: facts.update.predecessor.revisionId, ordinal: facts.update.predecessor.ordinal, digest: facts.update.predecessor.digest },
+          predecessor: facts.update.predecessor === null
+            ? null
+            : { revisionId: facts.update.predecessor.revisionId, ordinal: facts.update.predecessor.ordinal, digest: facts.update.predecessor.digest },
           reusePlanDigest: facts.update.reusePlanDigest,
           selectedRange: facts.update.selectedRange,
           counts: facts.update.reusePlan.counts,

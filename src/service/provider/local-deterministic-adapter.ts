@@ -19,6 +19,7 @@ import {
   parseRunReportReflectionMessageHeader,
   runReportReflectionRequestDigest,
 } from '../analysis/run-report-contract.js';
+import { parseReviewCategoryUnitMessageHeader, reviewCategoryRequestDigest } from '../review/review-category-contract.js';
 import { AI7_FAILURE_CODES, type DshFailureCodes } from './classification.js';
 import { LOCAL_DETERMINISTIC_MODEL, LOCAL_DETERMINISTIC_ROUTE } from './egress-gate.js';
 import { lastUserMessageText } from './payload.js';
@@ -44,6 +45,12 @@ import { fixtureEntryKey, resolveFixtureEntry, type ModelFixtureEntry, type Reso
  * same fixture format under its own prompt-contract digest. Its responses need no placeholder: that
  * contract anchors a quotation by the block's 1-based position in the message, and the service
  * locates the quotation in the committed block itself.
+ *
+ * A review-category unit message (Issue #417) is recognized the same way, by the header only that
+ * family writes. Its header also names the category, and so does its request digest: one fixture
+ * answers several categories, and an entry is still keyed by unit ordinal and request digest — the
+ * digest is simply that category's own. Like the factual contract it anchors by block position, so
+ * its responses need no placeholder either.
  *
  * The Run's one cross-unit reduction (ADR 0066) is matched the same way under unit ordinal `0`: its
  * header names the closed unit set, and its request digest is a function of the frozen cross-unit
@@ -201,18 +208,22 @@ export class Ai7LocalDeterministicAdapter implements LlmAdapter {
       return;
     }
     const text = lastUserMessageText(options);
-    // The four headers are disjoint and are tried in turn, so a unit message of either analysis kind
-    // can never be read as the other kind's, as the reduction's, or as a sampling turn's. Which kind a
-    // request belongs to is decided by its header alone; its request digest is then keyed by that
-    // kind's contract digest, which the adapter was constructed with.
+    // The headers are disjoint and are tried in turn, so a unit message of one analysis kind can never
+    // be read as another kind's, as the reduction's, or as a sampling turn's. Which kind a request
+    // belongs to is decided by its header alone; its request digest is then keyed by that kind's
+    // contract digest, which the adapter was constructed with.
     const crossUnit = text === null ? null : parseCrossUnitMessageHeader(text);
     const sampling = text === null || crossUnit !== null ? null : parseAssuranceSamplingMessageHeader(text);
     const reflection = text === null || crossUnit !== null || sampling !== null
       ? null
       : parseRunReportReflectionMessageHeader(text);
-    const header = text === null || crossUnit !== null || sampling !== null || reflection !== null
+    const named = crossUnit !== null || sampling !== null || reflection !== null;
+    // A review-category unit is a unit like the two others, and its header additionally names the
+    // category, which its request digest carries as well.
+    const review = text === null || named ? null : parseReviewCategoryUnitMessageHeader(text);
+    const header = text === null || named
       ? null
-      : parseUnitMessageHeader(text) ?? parseFactualReviewUnitMessageHeader(text);
+      : review ?? parseUnitMessageHeader(text) ?? parseFactualReviewUnitMessageHeader(text);
     if (crossUnit === null && sampling === null && reflection === null && header === null) {
       yield failure(AI7_FAILURE_CODES.FIXTURE_MISMATCH, '请求不含可识别的分析单元消息头。');
       return;
@@ -230,14 +241,15 @@ export class Ai7LocalDeterministicAdapter implements LlmAdapter {
           ? runReportReflectionRequestDigest(RUN_REPORT_REFLECTION_PROMPT_CONTRACT_DIGEST, reflection.accountingDigest)
           : this.#resolveBy === 'content-digest'
             ? unitContentDigest(ownBlockTextsOf(text!))
-            : unitRequestDigest(this.#promptContractDigest, header!.ordinal, header!.unitDigest);
+            : review !== null
+              ? reviewCategoryRequestDigest(this.#promptContractDigest, review.categoryId, review.ordinal, review.unitDigest)
+              : unitRequestDigest(this.#promptContractDigest, header!.ordinal, header!.unitDigest);
     const pairKey = fixtureEntryKey(ordinal, expectedDigest);
     const attempt = (this.#servedByKey.get(pairKey) ?? 0) + 1;
     this.#servedByKey.set(pairKey, attempt);
     const entry = resolveFixtureEntry(this.#entries, ordinal, expectedDigest, attempt);
     if (entry === undefined) {
-      const named = crossUnit !== null || sampling !== null || reflection !== null;
-      const label = !named && this.#resolveBy === 'content-digest' ? '内容摘要' : '请求摘要';
+      const label =!named && this.#resolveBy === 'content-digest' ? '内容摘要' : '请求摘要';
       const subject = crossUnit !== null ? '跨单元归纳'
         : sampling !== null ? `单元 ${sampling.unitOrdinal} 的保证抽样`
           : reflection !== null ? '运行反思'

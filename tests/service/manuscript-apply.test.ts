@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { EDITORIAL_MARK_SCHEMA_VERSION, MANUSCRIPT_EFFECT_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { EDITORIAL_MARK_SCHEMA_VERSION, EDITORIAL_REVIEW_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import { graphemesOf } from '../../src/shared/mark-anchor.js';
 import type { ManuscriptWindowProjection } from '../../src/shared/protocol.js';
 import {
@@ -11,6 +11,7 @@ import {
   composeManuscriptDocx,
   type ComposedManuscriptRequest,
 } from '../support/composed-fixture.js';
+import { downgradeKindCoupledRelationsToRevision23 } from '../support/analysis-ledger-revisions.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { downgradeEditorialMarksToRevision22 } from '../support/editorial-mark-revisions.js';
 import { EDITORIAL_MARK_REVISION_22_SQL, EDITORIAL_MARK_SCHEMA_SQL } from '../../src/service/editorial-marks.js';
@@ -571,6 +572,9 @@ describe('AI7 Apply on a Change Suggestion', () => {
     }
     const downgrade = new DatabaseSync(databasePath);
     try {
+      // A revision-22 store carried the three kind-coupled analysis relations as revision 20 left them;
+      // revision 24 (Issue #417) validates exactly that before it rebuilds them.
+      downgradeKindCoupledRelationsToRevision23(downgrade);
       downgrade.exec(`BEGIN IMMEDIATE;
         ${EFFECT_RELATIONS.map((relation) => `DROP TABLE ${relation};`).join('\n')}
         PRAGMA user_version = ${EDITORIAL_MARK_SCHEMA_VERSION};
@@ -590,7 +594,7 @@ describe('AI7 Apply on a Change Suggestion', () => {
     }
     const after = new DatabaseSync(databasePath, { readOnly: true });
     try {
-      expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(MANUSCRIPT_EFFECT_SCHEMA_VERSION);
+      expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(EDITORIAL_REVIEW_SCHEMA_VERSION);
       expect(after.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
     } finally {
       after.close();

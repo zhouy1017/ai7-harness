@@ -3,7 +3,7 @@ import { closeSync, constants, createReadStream, fstatSync, lstatSync, openSync,
 import { copyFile, lstat, open, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { basename, extname, isAbsolute, posix, relative, resolve, sep } from 'node:path';
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
-import { J03_TASK_GOAL, MAX_BLOCK_CODE_UNITS, MAX_FRAME_BYTES } from '../shared/protocol.js';
+import { J03_TASK_GOAL, MAX_BLOCK_CODE_UNITS, MAX_FRAME_BYTES, isReviewCategoryKindId } from '../shared/protocol.js';
 import type {
   BookCreationCommitProjection,
   BookCreationReviewProjection,
@@ -86,6 +86,9 @@ import type {
   BaselineAnalysisUpdateRequest,
   FactualReviewGoal,
   FactualReviewProjection,
+  ReviewCategoryGoal,
+  ReviewCategoryProjection,
+  ReviewCategoryTaskRequest,
 } from '../shared/protocol.js';
 import {
   AnalysisError,
@@ -95,7 +98,7 @@ import {
   type BaselineAnalysisRouteFacts,
   type ProgressReader,
 } from './analysis/baseline-analysis-store.js';
-import { factualReviewKindDefinition } from './analysis/kind-definition.js';
+import { factualReviewKindDefinition, type AnalysisKindDefinition } from './analysis/kind-definition.js';
 import { convertDocManuscript, isDocConversionRefusal } from './doc-manuscript.js';
 import {
   buildFidelityReport,
@@ -166,6 +169,7 @@ import {
   initializeTaskAuthorizationSchema,
   J03_TASK_AUTHORIZATION_SCHEMA_VERSION,
   EDITORIAL_MARK_SCHEMA_VERSION,
+  EDITORIAL_REVIEW_SCHEMA_VERSION,
   MANUSCRIPT_EFFECT_SCHEMA_VERSION,
   J04_BASELINE_ANALYSIS_SCHEMA_VERSION,
   MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION,
@@ -1363,7 +1367,8 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === FACTUAL_REVIEW_SCHEMA_VERSION ||
       currentVersion === MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION ||
       currentVersion === EDITORIAL_MARK_SCHEMA_VERSION ||
-      currentVersion === MANUSCRIPT_EFFECT_SCHEMA_VERSION,
+      currentVersion === MANUSCRIPT_EFFECT_SCHEMA_VERSION ||
+      currentVersion === EDITORIAL_REVIEW_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -1386,7 +1391,8 @@ function initializeSchema(db: DatabaseSync): void {
     currentVersion === FACTUAL_REVIEW_SCHEMA_VERSION ||
     currentVersion === MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION ||
     currentVersion === EDITORIAL_MARK_SCHEMA_VERSION ||
-    currentVersion === MANUSCRIPT_EFFECT_SCHEMA_VERSION
+    currentVersion === MANUSCRIPT_EFFECT_SCHEMA_VERSION ||
+    currentVersion === EDITORIAL_REVIEW_SCHEMA_VERSION
   ) return;
   if (currentVersion === 1) {
     migrateSchemaV1ToV2(db);
@@ -1723,7 +1729,8 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === TASK_AUTHORIZATION_SCHEMA_VERSION || version === MANUSCRIPT_INTAKE_SCHEMA_VERSION ||
       version === TEXT_CONVERSION_SCHEMA_VERSION || version === FACTUAL_REVIEW_SCHEMA_VERSION ||
       version === MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION || version === EDITORIAL_MARK_SCHEMA_VERSION ||
-      version === MANUSCRIPT_EFFECT_SCHEMA_VERSION,
+      version === MANUSCRIPT_EFFECT_SCHEMA_VERSION ||
+      version === EDITORIAL_REVIEW_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -1735,7 +1742,8 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === TASK_AUTHORIZATION_SCHEMA_VERSION || version === MANUSCRIPT_INTAKE_SCHEMA_VERSION ||
       version === TEXT_CONVERSION_SCHEMA_VERSION || version === FACTUAL_REVIEW_SCHEMA_VERSION ||
       version === MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION || version === EDITORIAL_MARK_SCHEMA_VERSION ||
-      version === MANUSCRIPT_EFFECT_SCHEMA_VERSION) return;
+      version === MANUSCRIPT_EFFECT_SCHEMA_VERSION ||
+      version === EDITORIAL_REVIEW_SCHEMA_VERSION) return;
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
   );
@@ -1839,7 +1847,8 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === TASK_AUTHORIZATION_SCHEMA_VERSION || version === MANUSCRIPT_INTAKE_SCHEMA_VERSION ||
       version === TEXT_CONVERSION_SCHEMA_VERSION || version === FACTUAL_REVIEW_SCHEMA_VERSION ||
       version === MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION || version === EDITORIAL_MARK_SCHEMA_VERSION ||
-      version === MANUSCRIPT_EFFECT_SCHEMA_VERSION,
+      version === MANUSCRIPT_EFFECT_SCHEMA_VERSION ||
+      version === EDITORIAL_REVIEW_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -1850,7 +1859,8 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === TASK_AUTHORIZATION_SCHEMA_VERSION || version === MANUSCRIPT_INTAKE_SCHEMA_VERSION ||
       version === TEXT_CONVERSION_SCHEMA_VERSION || version === FACTUAL_REVIEW_SCHEMA_VERSION ||
       version === MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION || version === EDITORIAL_MARK_SCHEMA_VERSION ||
-      version === MANUSCRIPT_EFFECT_SCHEMA_VERSION) return;
+      version === MANUSCRIPT_EFFECT_SCHEMA_VERSION ||
+      version === EDITORIAL_REVIEW_SCHEMA_VERSION) return;
   validateSourceImportSchemaTruth(db, profile);
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
@@ -2143,7 +2153,7 @@ function validateModelServiceSchema(
   const version = asNumber(
     one(db.prepare('PRAGMA user_version').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取数据库版本。').user_version,
   );
-  if (validateStoreTruth || version !== MANUSCRIPT_EFFECT_SCHEMA_VERSION) {
+  if (validateStoreTruth || version !== EDITORIAL_REVIEW_SCHEMA_VERSION) {
     validateManuscriptReimportSchemaTruth(
       db,
       profile,
@@ -2194,7 +2204,8 @@ function initializeModelServiceSchema(
       version === TASK_AUTHORIZATION_SCHEMA_VERSION || version === MANUSCRIPT_INTAKE_SCHEMA_VERSION ||
       version === TEXT_CONVERSION_SCHEMA_VERSION || version === FACTUAL_REVIEW_SCHEMA_VERSION ||
       version === MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION || version === EDITORIAL_MARK_SCHEMA_VERSION ||
-      version === MANUSCRIPT_EFFECT_SCHEMA_VERSION,
+      version === MANUSCRIPT_EFFECT_SCHEMA_VERSION ||
+      version === EDITORIAL_REVIEW_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2205,7 +2216,8 @@ function initializeModelServiceSchema(
       version === TASK_AUTHORIZATION_SCHEMA_VERSION || version === MANUSCRIPT_INTAKE_SCHEMA_VERSION ||
       version === TEXT_CONVERSION_SCHEMA_VERSION || version === FACTUAL_REVIEW_SCHEMA_VERSION ||
       version === MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION || version === EDITORIAL_MARK_SCHEMA_VERSION ||
-      version === MANUSCRIPT_EFFECT_SCHEMA_VERSION) {
+      version === MANUSCRIPT_EFFECT_SCHEMA_VERSION ||
+      version === EDITORIAL_REVIEW_SCHEMA_VERSION) {
     validateModelServiceSchema(db, profile, validateStoreTruth);
     if (version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION) {
       validateEditorialWorkspaceProfileNativeSchema(db);
@@ -2942,6 +2954,8 @@ export class EditorialStore {
   readonly #taskAuthorization: TaskAuthorizationStore;
   readonly #baselineAnalysis: BaselineAnalysisStore;
   readonly #factualReview: BaselineAnalysisStore;
+  /** One ledger per review-category kind and frozen category contract, made when first asked for (Issue #417). */
+  readonly #reviewCategoryLedgers = new Map<string, BaselineAnalysisStore>();
   readonly #editorialMarks: EditorialMarkStore;
   readonly #manuscriptApply: ManuscriptApplyStore;
   readonly #workflowProfile: BuiltInWorkflowProfile;
@@ -3040,12 +3054,18 @@ export class EditorialStore {
       // The intake relations widen before the terminal version moves, so the version and the shape it
       // names change together for every store that reaches revision 18, and again for revision 19,
       // and again for the entry-position relation revision 21 adds, the editorial-mark relations
-      // revision 22 adds and the manuscript-effect relations revision 23 adds.
+      // revision 22 adds and the manuscript-effect relations revision 23 adds. Revision 24 (Issue
+      // #417) moves no relation of this module: `initializeTaskAuthorizationSchema` rebuilds the three
+      // kind-coupled analysis relations for the review-category kind family and stamps the version.
       initializeManuscriptIntakeSchema(authority);
       initializeTextConversionSchema(authority);
       initializeManuscriptEntryPositionSchema(authority);
       initializeEditorialMarkSchema(authority);
       initializeManuscriptEffectSchema(authority);
+      // REVISION-24 SEAM (Issue #417, Stage B): `initializeReviewRunSchema(authority)` belongs exactly
+      // here — the additive Review Run relations `src/service/review/review-runs.ts` will own, created
+      // shape-detected like the three above and before the version is stamped below. Stage A adds no
+      // relation, so there is nothing to call yet.
       initializeTaskAuthorizationSchema(authority);
       initializeBoundedSchema(authority, workflowProfile);
       validateEditorialWorkspaceProfileSchema(authority);
@@ -3199,6 +3219,92 @@ export class EditorialStore {
     return this.#factualReview;
   }
 
+  // ---- 审阅 review categories (Issue #417, plan slice S69) -----------------------------------------
+
+  /**
+   * The append-only ledger of one Review Category: the same ledger class over the same Book database,
+   * constructed with that category's kind definition. A category is configuration, so its definition
+   * is built by the caller (`reviewCategoryKindDefinition`) and its ledger is made when first asked
+   * for rather than at open. It is kept per kind *and* frozen category contract: a ledger holds the
+   * preparations in flight, so the same definition must keep finding the same ledger, and a category
+   * whose clauses changed is a different contract that must not inherit them.
+   *
+   * The ledger takes the route and the launch the baseline ledger was bound to, so every plan it
+   * freezes names the binding this launch actually bound — which the one execution owner then checks.
+   */
+  reviewCategoryLedger(definition: AnalysisKindDefinition): BaselineAnalysisStore {
+    this.#assertAvailable();
+    requireStore(isReviewCategoryKindId(definition.kind), 'REVIEW_CATEGORY_INVALID', '该分析种类不是审阅类别。');
+    const key = `${definition.kind}\n${definition.promptContractDigest}`;
+    let ledger = this.#reviewCategoryLedgers.get(key);
+    if (ledger === undefined) {
+      ledger = new BaselineAnalysisStore(this.#authority, this.#boundedAuthority, this.#control.baselineAnalysisRoute, definition);
+      ledger.bindLaunch(this.#baselineAnalysis.launch);
+      this.#reviewCategoryLedgers.set(key, ledger);
+    }
+    return ledger;
+  }
+
+  /** One category's Task, latest Result Set Revision, history and update controls; `revisionId` opens one exact revision read-only. */
+  inspectReviewCategory(
+    bookId: string,
+    definition: AnalysisKindDefinition,
+    progress?: ProgressReader,
+    revisionId: string | null = null,
+  ): ReviewCategoryProjection {
+    const ledger = this.reviewCategoryLedger(definition);
+    return this.#analysisCall(() => ledger.inspect(bookId, progress, revisionId)) as ReviewCategoryProjection;
+  }
+
+  /**
+   * Prepare one category's Task in the requested mode. The goal is the definition's own fixed text for
+   * that mode, so a caller names what it wants reviewed and never restates the sentence. `review-first`
+   * is the whole first review; every other mode is named to the ledger, the range-bound first mode
+   * included.
+   */
+  createReviewCategoryPreparationWork(
+    bookId: string,
+    definition: AnalysisKindDefinition,
+    request: ReviewCategoryTaskRequest,
+    launchPolicy: LaunchPolicyProjection,
+    reconfirm = false,
+  ): AnalysisPreparationResult<ReviewCategoryProjection> {
+    const ledger = this.reviewCategoryLedger(definition);
+    const result = this.#analysisCall(() => ledger.prepare({
+      phase: 'start',
+      bookId,
+      goal: definition.mode(request.mode).goal as ReviewCategoryGoal,
+      update: request.mode === definition.initialMode ? null : { mode: request.mode, selectedRange: request.selectedRange },
+      reconfirm,
+      launchPolicy,
+    }));
+    return { ...result, projection: result.projection as ReviewCategoryProjection | null };
+  }
+
+  advanceReviewCategoryPreparationWork(definition: AnalysisKindDefinition, workId: string): AnalysisPreparationResult<ReviewCategoryProjection> {
+    const ledger = this.reviewCategoryLedger(definition);
+    const result = this.#analysisCall(() => ledger.prepare({ phase: 'advance', workId }));
+    return { ...result, projection: result.projection as ReviewCategoryProjection | null };
+  }
+
+  cancelReviewCategoryPreparationWork(definition: AnalysisKindDefinition, workId: string): boolean {
+    const ledger = this.reviewCategoryLedger(definition);
+    this.#analysisCall(() => ledger.prepare({ phase: 'cancel', workId }));
+    return true;
+  }
+
+  /** Records the standard-direct authorization and the Run; the caller hands the Run and this category's ledger to the execution owner. */
+  authorizeReviewCategory(
+    bookId: string,
+    definition: AnalysisKindDefinition,
+    taskIntentId: string,
+    planEnvelopeDigest: string,
+  ): { projection: ReviewCategoryProjection; dispatchRunRecordId: string | null } {
+    const ledger = this.reviewCategoryLedger(definition);
+    const authorized = this.#analysisCall(() => ledger.authorize(bookId, taskIntentId, planEnvelopeDigest));
+    return { projection: authorized.projection as ReviewCategoryProjection, dispatchRunRecordId: authorized.dispatchRunRecordId };
+  }
+
   createBaselineAnalysisPreparationWork(
     bookId: string,
     goal: BaselineAnalysisGoal,
@@ -3244,6 +3350,7 @@ export class EditorialStore {
     this.#taskAuthorization.prepare({ phase: 'cancel-all' });
     this.#baselineAnalysis.prepare({ phase: 'cancel-all' });
     this.#factualReview.prepare({ phase: 'cancel-all' });
+    for (const ledger of this.#reviewCategoryLedgers.values()) ledger.prepare({ phase: 'cancel-all' });
     for (const workId of Array.from(this.#reimportPreparationWork.keys())) {
       this.cancelManuscriptReimportPreparationWork(workId);
     }
