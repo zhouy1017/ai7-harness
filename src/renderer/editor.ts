@@ -44,7 +44,8 @@ export interface BoundedEditor {
   /**
    * Whether the scroll container is where this editor itself last put it and the `scroll` event for
    * that has not been seen yet. The surface pages at the pane's edges, and a restored position is not
-   * the editor reaching an edge: read as one, it pages away from the window just restored (#474).
+   * the editor reaching an edge: read as one, it pages away from the window just restored (#474). The
+   * browser revealing the caret when focus enters the text is the same kind of scroll (#485).
    */
   isOwnScroll(): boolean;
   /**
@@ -320,6 +321,8 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
   let pendingRestore: { frame: number; run: () => void } | undefined;
   let ownScroll: { top: number } | undefined;
   let activeMark: { markId: string; previewText: string | null } | undefined;
+  // Focus has just entered the text and the browser's caret reveal, if it makes one, is still to be heard.
+  let focusReveal: object | undefined;
 
   const isEditable = (): boolean =>
     !retryRequired && !interrupted && !operationLocked && deferredNavigationContinuity === undefined;
@@ -796,6 +799,21 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
         event.preventDefault();
         return true;
       },
+      focus() {
+        // Focus that enters the text from outside — Tab, Shift+Tab, an assistive tool — makes the browser
+        // reveal the caret, and with the caret in the window's first or last paragraph that rests the
+        // pane at an edge. It is the browser's answer to the focus, not the reader's scroll: read as one,
+        // a Tab into the text paged the window away (#485). Where the reveal lands is not known yet, so
+        // the mark holds whatever the position; it lapses two frames on, as a restore's does. The
+        // editor's own `focus()` prevents the scroll and a click puts the caret where it is seen, so
+        // for them the mark hears nothing.
+        const mark = {};
+        focusReveal = mark;
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+          if (focusReveal === mark) focusReveal = undefined;
+        }));
+        return false;
+      },
       compositionstart() {
         composing = true;
         queueMicrotask(announceState);
@@ -880,7 +898,8 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
     },
     currentWindow: () => windowProjection,
     isComposing: () => composing,
-    isOwnScroll: () => ownScroll !== undefined && options.scrollContainer.scrollTop === ownScroll.top,
+    isOwnScroll: () =>
+      focusReveal !== undefined || (ownScroll !== undefined && options.scrollContainer.scrollTop === ownScroll.top),
     setMarks: (marks, truncated) => {
       if (destroyed) return;
       windowProjection = { ...windowProjection, marks, marksTruncated: truncated };
