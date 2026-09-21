@@ -3,6 +3,7 @@ import {
   DECISION_REASON_CHIPS,
   MARK_KIND_LABELS,
   markDriftNote,
+  markPointLabel,
   markSourceLine,
   markStateLabel,
   markTimeLabel,
@@ -71,6 +72,12 @@ describe('the wording of the Mark surface', () => {
     expect(markDriftNote({ pinnedText: '原文', suggestion })).toBe('原文已变：标记时的文字是「原文」，这段文字后来改过，标记仍留在原处。');
     expect(markDriftNote({ pinnedText: '批注的文字', suggestion: null })).toBe('原文已变：标记时的文字是「批注的文字」，这段文字后来改过，标记仍留在原处。');
     expect(markDriftNote({ pinnedText: '', suggestion })).toBe('原文已变：这里删去了「原文」，删去处后来又改过，标记仍留在原处。');
+  });
+
+  it('names the point a mark on no text is drawn as: what was deleted there, or which mark waits there', () => {
+    expect(markPointLabel({ kind: 'change-suggestion', deletedText: '原文' }, false)).toBe('已删去「原文」');
+    expect(markPointLabel({ kind: 'change-suggestion', deletedText: '原文' }, true)).toBe('已删去「原文」 · 原文已变');
+    expect(markPointLabel({ kind: 'annotation', deletedText: null }, true)).toBe('批注 · 原文已变');
   });
 
   it('offers reason chips without a preselection and explains an unavailable mark entry', () => {

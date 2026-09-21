@@ -324,6 +324,8 @@ describe('AI7 Apply on a Change Suggestion', () => {
         blockDigest: applied.window.blocks.find((candidate) => candidate.blockId === block.blockId)!.digest,
       });
       expect(applied.marks.find((mark) => mark.markId === markId)).toMatchObject({ status: 'applied', anchorState: 'exact', fromGrapheme: 6, toGrapheme: 6 });
+      // The window names the words the point stands for, so the surface can draw and name it without a card.
+      expect(applied.marks.find((mark) => mark.markId === markId)!.deletedText === pinned).toBe(true);
 
       // Typing in front of the point moves it, text typed exactly at it lands in front of it, and typing behind it leaves it.
       const [front, at, behind] = ['〔前〕', '〔点〕', '〔后〕'].map(graphemesOf) as [string[], string[], string[]];
@@ -348,6 +350,7 @@ describe('AI7 Apply on a Change Suggestion', () => {
         after: { journalSequence: typed.journalSequence + 1, workingDigest: reversed.window.workingDigest },
       });
       expect(reversed.card).toMatchObject({ status: 'open', anchorState: 'exact', pinnedText: pinned, fromGrapheme: point, toGrapheme: point + length });
+      expect(reversed.marks.find((mark) => mark.markId === markId)!.deletedText).toBeNull();
       expect(reversed.card!.suggestion!.decision).toBeNull();
       // The first Apply and its receipt stay exactly as committed; only the link to the Effect that reversed it is new.
       expect(store.getManuscriptApplyOutcome(book.manuscriptId, book.branchId, applyId))
