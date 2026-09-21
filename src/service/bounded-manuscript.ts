@@ -7339,10 +7339,12 @@ export class BoundedManuscriptStore {
       this.#requireBranchEditable(branchId);
       const byBlock = new Map<string, Array<ExactReplacementTarget & { index: number }>>();
       targets.forEach((target, index) => {
+        // An empty range is an insertion at that point — reversing an Apply that deleted its words: it
+        // expects no text there and brings some.
         requireBounded(
           BLOCK_PATTERN.test(target.blockId) && Number.isSafeInteger(target.fromGrapheme) && Number.isSafeInteger(target.toGrapheme) &&
-            target.fromGrapheme >= 0 && target.toGrapheme > target.fromGrapheme && target.insertText.isWellFormed() &&
-            target.insertText !== target.expectedText,
+            target.fromGrapheme >= 0 && target.toGrapheme >= target.fromGrapheme && target.insertText.isWellFormed() &&
+            target.insertText !== target.expectedText && (target.toGrapheme > target.fromGrapheme || target.expectedText === ''),
           'APPLY_INVALID',
           '应用范围无效。',
         );
@@ -7383,8 +7385,14 @@ export class BoundedManuscriptStore {
         const before = graphemes(beforeText);
         const ordered = byBlock.get(blockId)!.sort((left, right) => left.fromGrapheme - right.fromGrapheme);
         ordered.forEach((target, index) => {
+          // Targets never overlap, and an insertion shares its point with no other target, so where each
+          // one lands never depends on the order they were given in. The recheck of an empty range is
+          // its point lying inside the block.
+          const previous = index === 0 ? undefined : ordered[index - 1]!;
           requireBounded(
-            target.toGrapheme <= before.length && (index === 0 || ordered[index - 1]!.toGrapheme <= target.fromGrapheme) &&
+            target.toGrapheme <= before.length &&
+              (previous === undefined || previous.toGrapheme < target.fromGrapheme ||
+                (previous.toGrapheme === target.fromGrapheme && previous.toGrapheme > previous.fromGrapheme && target.toGrapheme > target.fromGrapheme)) &&
               before.slice(target.fromGrapheme, target.toGrapheme).join('') === target.expectedText,
             'APPLY_TARGET_DRIFTED',
             '原文已变，本次应用没有写入稿件。',

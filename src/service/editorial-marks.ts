@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import {
   followGraphemeEdit,
+  followPoint,
   graphemesOf,
   resolvePinnedRange,
   deriveSpanEdit,
@@ -45,7 +46,9 @@ import {
  *
  * The two vocabularies are written whole here although this revision's commands write only part of
  * them: a plain `accepted` decision and an `applied` mark are what 接受并应用 records (Issue #408), and
- * a CHECK that admits them now spares the next revision a rebuild of relations one revision old.
+ * a CHECK that admits them now spares the next revision a rebuild of relations one revision old. The
+ * same holds for the one pin that is empty: a 修改建议 whose Apply deleted its words is pinned on no
+ * text, at the zero-width range where they were, and is exact there until an edit spans that point.
  */
 export const EDITORIAL_MARK_SCHEMA_SQL = {
   editorial_marks: `CREATE TABLE editorial_marks (
@@ -61,8 +64,8 @@ export const EDITORIAL_MARK_SCHEMA_SQL = {
   pinned_journal_sequence INTEGER NOT NULL CHECK(pinned_journal_sequence >= 0),
   pinned_block_digest TEXT NOT NULL,
   pinned_from_grapheme INTEGER NOT NULL CHECK(pinned_from_grapheme >= 0),
-  pinned_to_grapheme INTEGER NOT NULL CHECK(pinned_to_grapheme > pinned_from_grapheme),
-  pinned_text TEXT NOT NULL CHECK(length(pinned_text) > 0),
+  pinned_to_grapheme INTEGER NOT NULL CHECK(pinned_to_grapheme >= pinned_from_grapheme),
+  pinned_text TEXT NOT NULL,
   pinned_text_digest TEXT NOT NULL,
   from_grapheme INTEGER NOT NULL CHECK(from_grapheme >= 0),
   to_grapheme INTEGER NOT NULL CHECK(to_grapheme >= from_grapheme),
@@ -83,7 +86,9 @@ export const EDITORIAL_MARK_SCHEMA_SQL = {
   CHECK((source_kind = 'ai7') = (source_origin IS NOT NULL)),
   CHECK(source_kind = 'editor' OR source_label IS NOT NULL),
   CHECK(kind NOT IN ('editor-note', 'personal-highlight') OR source_kind = 'editor'),
-  CHECK(anchor_state <> 'exact' OR to_grapheme > from_grapheme),
+  CHECK((pinned_to_grapheme > pinned_from_grapheme) = (pinned_text <> '')),
+  CHECK(pinned_text <> '' OR kind = 'change-suggestion'),
+  CHECK(anchor_state <> 'exact' OR (to_grapheme > from_grapheme) = (pinned_text <> '')),
   UNIQUE(branch_id, block_id, mark_id)
 ) STRICT`,
   editorial_mark_replies: `CREATE TABLE editorial_mark_replies (
@@ -289,7 +294,8 @@ function liveMarksOfBlock(db: DatabaseSync, branchId: string, blockId: string): 
  * `edits` are the spans the caller replaced, each against the text the previous one left; without
  * them the one span between the two texts is derived. Runs on every durable text change — a journal
  * edit, a replacement, an undo or a redo — so a mark's range is never read against text it was not
- * followed through.
+ * followed through. A mark pinned on no text, where an applied suggestion deleted its words, is a
+ * point: it carries its state through the spans (`followPoint`) instead of being found again.
  */
 export function followBlockTextChangeForMarks(
   db: DatabaseSync,
@@ -318,17 +324,21 @@ export function followBlockTextChangeForMarks(
     const next = index === spans.length - 1
       ? finalText
       : [...current.slice(0, span.fromGrapheme), ...span.inserted, ...current.slice(span.toGrapheme)];
+    // Points that stand at one place — two deletions applied side by side — have lost the order between
+    // them: text inserted exactly there could belong between them, so none can say which side it is on.
+    const crowded = followed.filter((mark) => mark.pinned.length === 0 && mark.state === 'exact' &&
+      mark.fromGrapheme === span.fromGrapheme && mark.toGrapheme === span.toGrapheme);
     for (const mark of followed) {
-      const result = followGraphemeEdit(mark, mark.pinned, next, span);
+      const result = mark.pinned.length === 0 ? followPoint(mark, current, next, span) : followGraphemeEdit(mark, mark.pinned, next, span);
       mark.fromGrapheme = result.fromGrapheme;
       mark.toGrapheme = result.toGrapheme;
-      mark.state = result.state;
+      mark.state = crowded.length > 1 && crowded.includes(mark) ? 'drifted' : result.state;
     }
     current = next;
   });
   if (spans.length === 0) {
     for (const mark of followed) {
-      const result = resolvePinnedRange(finalText, mark.pinned, mark, mark);
+      const result = mark.pinned.length === 0 ? followPoint(mark, finalText, finalText, null) : resolvePinnedRange(finalText, mark.pinned, mark, mark);
       mark.fromGrapheme = result.fromGrapheme;
       mark.toGrapheme = result.toGrapheme;
       mark.state = result.state;
@@ -342,7 +352,8 @@ export function followBlockTextChangeForMarks(
  * to follow. Every live mark is resolved against what its block holds now: `exact` where its pinned
  * text stands at its range or stands alone in the block, `drifted` otherwise, and `detached` when
  * the block is no longer part of the working state. A detached mark that finds its block again is
- * resolved like any other.
+ * resolved like any other. A point pinned on no text has nothing to be found by, so it resolves
+ * `drifted`: rewritten text never proves where an applied suggestion deleted its words.
  */
 export function resolveBranchMarksAfterRewrite(db: DatabaseSync, branchId: string): void {
   if (!marksRelationExists(db)) return;
@@ -904,7 +915,8 @@ export class EditorialMarkStore {
   /**
    * Put a mark on the text an Apply — or its reversal — just wrote. The mark is the mutable relation:
    * it is re-pinned to what now stands under it, and what stood there before stays in the Proposal
-   * Change Item and in the Effect's own target record.
+   * Change Item and in the Effect's own target record. An Apply that deleted its words wrote no text:
+   * the mark is pinned, exactly like any other, on the empty range at the point where they were.
    */
   standMarkOn(
     markId: string,

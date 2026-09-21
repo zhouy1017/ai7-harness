@@ -57,13 +57,14 @@ export const MANUSCRIPT_EFFECT_SCHEMA_SQL = {
   decision_id TEXT NOT NULL REFERENCES proposal_item_decisions(decision_id),
   block_id TEXT NOT NULL REFERENCES manuscript_blocks(block_id),
   from_grapheme INTEGER NOT NULL CHECK(from_grapheme >= 0),
-  to_grapheme INTEGER NOT NULL CHECK(to_grapheme > from_grapheme),
+  to_grapheme INTEGER NOT NULL CHECK(to_grapheme >= from_grapheme),
   expected_text_digest TEXT NOT NULL CHECK(length(expected_text_digest) = 64),
   expected_block_digest TEXT NOT NULL CHECK(length(expected_block_digest) = 64),
   replacement_text_digest TEXT NOT NULL CHECK(length(replacement_text_digest) = 64),
   resulting_from_grapheme INTEGER NOT NULL CHECK(resulting_from_grapheme >= 0),
   resulting_to_grapheme INTEGER NOT NULL CHECK(resulting_to_grapheme >= resulting_from_grapheme),
   resulting_block_digest TEXT NOT NULL CHECK(length(resulting_block_digest) = 64),
+  CHECK(to_grapheme > from_grapheme OR resulting_to_grapheme > resulting_from_grapheme),
   PRIMARY KEY(effect_id, ordinal)
 ) STRICT`,
   manuscript_effect_approvals: `CREATE TABLE manuscript_effect_approvals (
@@ -265,7 +266,8 @@ export class ManuscriptApplyStore {
    * 确认撤销本次应用. The inverse of a committed Apply is a new Effect against the text the manuscript
    * holds now; the original Apply and its receipt stay exactly as they were committed. It is refused
    * when the applied text has been changed since — that is a conflict to resolve, never a text to
-   * overwrite (V2-UX-EREC-010 to 012).
+   * overwrite (V2-UX-EREC-010 to 012). The inverse of an Apply that deleted its words inserts them at
+   * the point they left, and is refused only once an edit has spanned that point.
    */
   reverse(input: ReverseAppliedChangeSuggestionInput): ManuscriptApplyCommandProjection {
     this.#requireIdentities(input, [input.markId], input.clientEffectId);
@@ -403,7 +405,9 @@ export class ManuscriptApplyStore {
          ) VALUES (?, ?, ?, 'committed', ?, ?, ?, ?, ?, ?, ?)`,
       ).run(receiptId, effectId, dispatchId, commit.commandGroupId, commit.after.revisionId, commit.after.journalSequence,
         commit.after.workingDigest, planned.length, receiptDigest, now);
-      // Each mark now stands on the text this Effect wrote: the applied text, or the restored original.
+      // Each mark now stands on the text this Effect wrote: the applied text, or the restored original. A
+      // suggestion that deleted its words wrote none, and its mark stands exactly on the empty range they
+      // left — nothing has changed there since — so reversing it is an insertion at that point.
       planned.forEach((target, index) => {
         const written = commit.targets[index]!;
         requireApply(
@@ -411,14 +415,6 @@ export class ManuscriptApplyStore {
           'MARK_STORE_INVALID',
           '应用后的范围无法核对。',
         );
-        if (written.resultingToGrapheme === written.resultingFromGrapheme) {
-          // A suggestion that deleted its text leaves nothing to stand on; the mark rests at the place it left.
-          this.#db.prepare(
-            `UPDATE editorial_marks SET status = ?, from_grapheme = ?, to_grapheme = ?, anchor_state = 'drifted',
-               followed_journal_sequence = ?, updated_at = ? WHERE mark_id = ?`,
-          ).run(target.standsAs, written.resultingFromGrapheme, written.resultingToGrapheme, commit.after.journalSequence, now, target.markId);
-          return;
-        }
         this.#marks.standMarkOn(target.markId, target.standsAs, {
           revisionId: commit.after.revisionId,
           journalSequence: commit.after.journalSequence,

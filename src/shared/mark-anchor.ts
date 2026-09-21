@@ -13,6 +13,10 @@
  * The service applies this inside the transaction that changes the block; the renderer applies the
  * same arithmetic to text it has not flushed yet, so a mark never sits on the wrong characters while
  * someone types in front of it.
+ *
+ * One kind of mark is pinned on no text: a 修改建议 whose Apply deleted its words stands on the empty
+ * range where they were (Issue #408). `followPoint` follows it; the functions that find pinned text
+ * again never find it, because empty text stands everywhere.
  */
 
 export interface GraphemeRange {
@@ -29,6 +33,11 @@ export type FollowedAnchorState = 'exact' | 'drifted';
 
 export interface FollowedAnchor extends GraphemeRange {
   readonly state: FollowedAnchorState;
+}
+
+/** A range as it was last followed. Only a point pinned on no text needs its state: nothing else can tell it. */
+export interface AnchorToFollow extends GraphemeRange {
+  readonly state?: FollowedAnchorState;
 }
 
 const segmenter = new Intl.Segmenter('zh-CN', { granularity: 'grapheme' });
@@ -81,10 +90,18 @@ function holdsAt(text: ReadonlyArray<string>, pinned: ReadonlyArray<string>, at:
   return true;
 }
 
+/** A range that no longer holds what it was pinned on, clamped to the block it is in. */
+function driftedAt(text: ReadonlyArray<string>, range: GraphemeRange): FollowedAnchor {
+  const fromGrapheme = Math.min(Math.max(0, range.fromGrapheme), text.length);
+  const toGrapheme = Math.min(Math.max(fromGrapheme, range.toGrapheme), text.length);
+  return { fromGrapheme, toGrapheme, state: 'drifted' };
+}
+
 /**
  * Resolve a range against the text its block holds now. `exact` when the pinned text stands at the
  * range; otherwise `exact` at the one place inside `within` where the pinned text stands, if there is
- * exactly one; otherwise `drifted`, with the range clamped to the block.
+ * exactly one; otherwise `drifted`, with the range clamped to the block. Empty pinned text is never
+ * found: it would stand at every place, so a point pinned on no text resolves `drifted`.
  */
 export function resolvePinnedRange(
   text: ReadonlyArray<string>,
@@ -110,9 +127,7 @@ export function resolvePinnedRange(
   if (found !== undefined && !ambiguous) {
     return { fromGrapheme: found, toGrapheme: found + pinned.length, state: 'exact' };
   }
-  const fromGrapheme = Math.min(Math.max(0, range.fromGrapheme), text.length);
-  const toGrapheme = Math.min(Math.max(fromGrapheme, range.toGrapheme), text.length);
-  return { fromGrapheme, toGrapheme, state: 'drifted' };
+  return driftedAt(text, range);
 }
 
 /**
@@ -138,19 +153,45 @@ export function followGraphemeEdit(
 }
 
 /**
+ * Follow a point pinned on no text — where an applied 修改建议 deleted its words — through one span
+ * edit, or through none when its block's text did not change. There is nothing at a point to check,
+ * so its state is carried rather than found again. It stays `exact` while the edit leaves it alone —
+ * an edit wholly in front of it, text inserted exactly at it included, shifts it; one wholly behind it
+ * leaves it — and while the graphemes still count as the edit says, since a span whose edge joined a
+ * neighbouring grapheme leaves no point where the arithmetic puts it. An edit that takes graphemes
+ * from both sides of the point makes it `drifted`, and a point that is drifted, or whose state the
+ * caller does not know, is never `exact` again.
+ */
+export function followPoint(
+  anchor: AnchorToFollow,
+  before: ReadonlyArray<string>,
+  after: ReadonlyArray<string>,
+  edit: GraphemeEdit | null,
+): FollowedAnchor {
+  const followed = edit === null ? { ...anchor, touched: false } : followSpanEdit(anchor, edit);
+  const counted = after.length === before.length + (edit === null ? 0 : edit.insertedGraphemes - (edit.toGrapheme - edit.fromGrapheme));
+  const holds = anchor.state === 'exact' && !followed.touched && counted &&
+    followed.fromGrapheme === followed.toGrapheme && followed.fromGrapheme >= 0 && followed.toGrapheme <= after.length;
+  return holds ? { fromGrapheme: followed.fromGrapheme, toGrapheme: followed.toGrapheme, state: 'exact' } : driftedAt(after, followed);
+}
+
+/**
  * Follow one change of a block's text. `edit` is the span the caller already knows; without it the
- * span is derived from the two texts.
+ * span is derived from the two texts. A range pinned on no text is a point, followed with the state
+ * the range carries.
  */
 export function followBlockTextChange(
-  range: GraphemeRange,
+  range: AnchorToFollow,
   pinnedText: string,
   beforeText: string,
   afterText: string,
   edit?: GraphemeEdit,
 ): FollowedAnchor {
+  const before = graphemesOf(beforeText);
   const after = graphemesOf(afterText);
   const pinned = graphemesOf(pinnedText);
-  const span = edit ?? deriveSpanEdit(graphemesOf(beforeText), after);
+  const span = edit ?? deriveSpanEdit(before, after);
+  if (pinned.length === 0) return followPoint(range, before, after, span);
   if (span === null) return resolvePinnedRange(after, pinned, range, range);
   return followGraphemeEdit(range, pinned, after, span);
 }
