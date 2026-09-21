@@ -52,6 +52,8 @@ interface MountOptions {
     'getManuscriptApplyOutcome'
   >;
   busy(): boolean;
+  /** The set of marks changed: whatever counts them elsewhere on the surface reads again. */
+  marksChanged?(): void;
   /**
    * Run one write of the manuscript the way the surface runs every authoritative one — local edits
    * settled, the editor locked, the window reloaded from the service and checked against the state the
@@ -184,6 +186,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
 
   const applyCommand = (result: EditorialMarkCommandProjection): void => {
     editor.setMarks(result.marks, result.marksTruncated);
+    options.marksChanged?.();
   };
 
   /** Run one mark command: refused while another is in flight, and every failure is said in words. */

@@ -302,8 +302,30 @@ legend { margin-bottom: .7rem; font-weight: 800; }
 .book-records-group { display: inline-flex; align-items: center; gap: .5rem; }
 .book-records-group .section-label { margin: 0; }
 .editor-meta { display: flex; flex-wrap: wrap; gap: .55rem 1rem; margin-top: .35rem; color: #61685e; font-size: .82rem; }
-.editor-workspace { display: grid; grid-template-columns: minmax(240px, 300px) minmax(0, 1fr); min-height: 620px; }
-.manuscript-navigator { min-width: 0; padding: 1rem; border-right: 1px solid #ddd8cc; background: #f7f4ec; }
+/* The manuscript is the central object; the right edge carries three entries and the one whole-manuscript
+   rail, and the 导航 panel opens over the manuscript's right side on demand (V2-UX-ED-015). */
+.editor-workspace { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) 4.75rem; min-height: 620px; }
+.manuscript-navigator { position: absolute; top: 0; right: 4.75rem; bottom: 0; z-index: 5; width: min(21rem, calc(100% - 4.75rem)); min-width: 0; padding: 1rem; overflow-y: auto; border-left: 1px solid #ddd8cc; background: #f7f4ec; box-shadow: -14px 0 30px rgba(36, 39, 32, .12); }
+.manuscript-navigator[hidden] { display: none; }
+.editor-edge { display: flex; flex-direction: column; min-width: 0; border-left: 1px solid #ddd8cc; background: #f7f4ec; }
+.edge-entries { display: grid; gap: .25rem; padding: .5rem .3rem; border-bottom: 1px solid #e2ded4; }
+.edge-entries button { width: 100%; padding: .4rem .2rem; font-size: .82rem; }
+.edge-entries button[aria-expanded="true"] { background: #fffefb; box-shadow: inset 0 0 0 1px #cfc9ba; }
+.rail-column { position: relative; display: flex; flex: 1; flex-direction: column; align-items: center; min-height: 12rem; padding: .4rem 0 .6rem; }
+/* Three parallel lanes in one narrow column: chapter ticks and unread ranges, the track with the current
+   position, and the open marks in their fixed colours. The range input lies over them and is the control. */
+.rail-track { position: relative; flex: 1; width: 100%; min-height: 10rem; margin-top: .3rem; }
+.rail-line { position: absolute; top: 0; bottom: 0; left: 50%; width: 4px; margin-left: -2px; border-radius: 2px; background: #d3cdbd; }
+.rail-ticks, .rail-gaps, .rail-lanes { position: absolute; top: 0; bottom: 0; left: 0; right: 0; pointer-events: none; }
+.rail-tick { position: absolute; left: calc(50% - 15px); width: 11px; height: 1px; background: #8f9486; }
+.rail-tick[data-rail-level="1"] { left: calc(50% - 19px); width: 15px; height: 2px; background: #61685e; }
+.rail-gap { position: absolute; left: calc(50% - 9px); width: 5px; min-height: 3px; border-radius: 2px; background: repeating-linear-gradient(45deg, #b3452f 0 3px, transparent 3px 6px); }
+.rail-now { position: absolute; left: calc(50% - 6px); width: 12px; height: 16px; margin-top: -8px; border-radius: 4px; background: #416458; box-shadow: 0 0 0 2px #f7f4ec; pointer-events: none; }
+.rail-marker { position: absolute; z-index: 2; width: 8px; height: 8px; margin-top: -4px; padding: 0; border: 0; border-radius: 50%; cursor: pointer; pointer-events: auto; }
+.rail-marker[data-rail-lane="1"] { left: calc(50% + 7px); background: var(--mark-suggestion); }
+.rail-marker[data-rail-lane="2"] { left: calc(50% + 16px); background: var(--mark-annotation); }
+.rail-marker[data-rail-lane="3"] { left: calc(50% + 25px); background: var(--mark-note); }
+.rail-marker:focus-visible { outline: 2px solid #416458; outline-offset: 2px; }
 .navigator-section { display: grid; gap: .55rem; padding: .9rem 0; border-bottom: 1px solid #ddd8cc; }
 .navigator-section h3, .navigator-section h4 { margin: 0; }
 .navigator-section label { font-size: .84rem; font-weight: 700; }
@@ -405,9 +427,20 @@ legend { margin-bottom: .7rem; font-weight: 800; }
 .editorial-mark-receipt dd { margin: 0 0 .3rem; overflow-wrap: anywhere; font-size: .82rem; }
 .editorial-mark-card .technical-details { margin-top: .8rem; }
 .editorial-mark-card .technical-details dd { overflow-wrap: anywhere; }
-.window-actions { position: sticky; bottom: 0; display: grid; grid-template-columns: auto auto minmax(100px, 1fr) auto; align-items: center; gap: .7rem; padding: .7rem 1rem; border-top: 1px solid #ddd8cc; background: rgba(250, 248, 241, .97); }
-.position-rail-label { font-size: .84rem; font-weight: 700; }
-.position-rail { width: 100%; accent-color: #416458; }
+.window-actions { position: sticky; bottom: 0; display: flex; justify-content: space-between; align-items: center; gap: .7rem; padding: .7rem 1rem; border-top: 1px solid #ddd8cc; background: rgba(250, 248, 241, .97); }
+.position-rail-label { font-size: .7rem; font-weight: 700; color: #61685e; }
+/* The control itself: a vertical range whose own track is unseen, because the lanes behind it are the
+   picture of the manuscript. Its thumb stays, so the pointer and the keyboard have something to hold. */
+.position-rail { position: absolute; z-index: 1; top: 0; bottom: 0; left: calc(50% - 10px); width: 20px; height: 100%; margin: 0; writing-mode: vertical-lr; direction: ltr; appearance: none; background: transparent; accent-color: #416458; cursor: pointer; }
+.position-rail::-webkit-slider-runnable-track { background: transparent; }
+.position-rail::-webkit-slider-thumb { appearance: none; width: 16px; height: 10px; border: 2px solid #f7f4ec; border-radius: 4px; background: #254e3d; }
+/* The pane's own scrollbar is hidden at rest and shows only while the pane scrolls (V2-UX-ED-059); its
+   gutter is always kept, so the text never reflows when it appears. */
+.editor-window { scrollbar-gutter: stable; }
+.editor-window::-webkit-scrollbar { width: 10px; }
+.editor-window::-webkit-scrollbar-track { background: transparent; }
+.editor-window::-webkit-scrollbar-thumb { border-radius: 5px; background: transparent; }
+.editor-window[data-scrolling="true"]::-webkit-scrollbar-thumb { background: #b9b39f; }
 .editor-identities { margin: 0; padding: .8rem 1.25rem; border-top: 1px solid #e2ded4; background: #f7f4ec; }
 .editor-identities summary { cursor: pointer; font-weight: 700; }
 
@@ -423,8 +456,9 @@ legend { margin-bottom: .7rem; font-weight: 800; }
   .screen { width: min(100% - 1.25rem, 900px); margin-top: .75rem; }
   .app-header { align-items: flex-start; padding: 1rem; }
   .editor-toolbar { align-items: flex-start; flex-direction: column; }
-  .editor-workspace { grid-template-columns: 1fr; }
-  .manuscript-navigator { border-right: 0; border-bottom: 1px solid #ddd8cc; }
+  .editor-workspace { grid-template-columns: minmax(0, 1fr) 3.4rem; }
+  .manuscript-navigator { right: 3.4rem; width: min(21rem, calc(100% - 3.4rem)); }
+  .edge-entries button { font-size: .74rem; }
   .outline-list, .search-results { max-height: 150px; }
   .editor-window { padding: 1.25rem; }
   .window-actions { grid-template-columns: auto 1fr auto; }
@@ -452,7 +486,8 @@ legend { margin-bottom: .7rem; font-weight: 800; }
   .native-artifact-authority, .task-authorization-card, .baseline-analysis-card, .analysis-axis, .analysis-unit,
   .analysis-update-action, .analysis-range-options, .analysis-history-entry, .analysis-plan-revision, .entry-notice,
   .analysis-run-report, .analysis-update-choice, .book-analysis-summary,
-  .editorial-mark-menu, .editorial-mark-card, .editorial-mark-composer, .editorial-mark-drifted, .editorial-mark-quote {
+  .editorial-mark-menu, .editorial-mark-card, .editorial-mark-composer, .editorial-mark-drifted, .editorial-mark-quote,
+  .editor-edge, .edge-entries {
     color: CanvasText;
     background: Canvas;
     border-color: CanvasText;
@@ -488,4 +523,11 @@ legend { margin-bottom: .7rem; font-weight: 800; }
   .editorial-mark-menu-item:disabled { color: GrayText; }
   .editorial-mark-swatch { forced-color-adjust: none; }
   .editorial-mark-field textarea:focus-visible { outline-color: Highlight; }
+  /* On the rail, colour cannot say which kind a marker is; its lane and its shape do. */
+  .rail-line, .rail-tick, .rail-now { background: CanvasText; forced-color-adjust: none; }
+  .rail-gap { background: Canvas; border: 1px dashed CanvasText; forced-color-adjust: none; }
+  .rail-marker { background: CanvasText; forced-color-adjust: none; }
+  .rail-marker[data-rail-lane="2"] { border-radius: 0; }
+  .rail-marker[data-rail-lane="3"] { border-radius: 0; transform: rotate(45deg); }
+  .editor-window[data-scrolling="true"]::-webkit-scrollbar-thumb { background: CanvasText; }
 }
