@@ -8,6 +8,7 @@ import type {
   ManuscriptApplyCommandProjection,
   PersonalHighlightColor,
   RendererApi,
+  ReviewFindingOfMarkProjection,
   UpdateEditorialMarkInput,
 } from '../shared/protocol.js';
 import {
@@ -22,6 +23,7 @@ import {
   selectionMenuReason,
 } from './editorial-mark-labels.js';
 import { applyOnce } from './manuscript-apply.js';
+import { REVIEW_VIEW_TASK_ABSENT, REVIEW_VIEW_TASK_RESOLVING } from './review-labels.js';
 
 /**
  * The Editorial Mark surface of the manuscript (Issue #407; editor-surfaces.md §1 标记系统 and 右键菜单;
@@ -33,6 +35,8 @@ import { applyOnce } from './manuscript-apply.js';
 export interface EditorialMarksSurface {
   /** Close whatever is floating: the blocks it was anchored to may be gone. */
   close(): void;
+  /** Open one mark's card, as a click on it would: 审阅's 回到原文 arrives at a finding's mark this way. */
+  openMark(markId: string): Promise<void>;
   /**
    * Whether the pane's position is this surface's doing: a composer or a Mark Card is open — bringing
    * one into view may rest the pane at its edge — or one just closed and the pane, shorter by the
@@ -50,8 +54,13 @@ interface MountOptions {
     RendererApi,
     'createEditorialMark' | 'getEditorialMarkCard' | 'updateEditorialMark' | 'recordChangeSuggestionDecision' |
     'recordProposalDecisionReason' | 'runEditorClipboardCommand' | 'applyChangeSuggestion' | 'reverseAppliedChangeSuggestion' |
-    'getManuscriptApplyOutcome'
+    'getManuscriptApplyOutcome' | 'inspectReviewFindingOfMark'
   >;
+  /**
+   * 查看任务 on a mark a Review Run produced (V2-UX-MARK-008): leave for 审阅 with that Run open and the
+   * finding in view. Without it, 查看任务 stays disabled for every mark.
+   */
+  openReviewFinding?(target: ReviewFindingOfMarkProjection): void;
   busy(): boolean;
   /** The set of marks changed: whatever counts them elsewhere on the surface reads again. */
   marksChanged?(): void;
@@ -91,6 +100,11 @@ interface MenuItem {
   disabledReason?: string;
   swatch?: PersonalHighlightColor;
   run?(): void;
+  /**
+   * An item shown disabled with its reason until this answers what it does; `null` keeps it disabled.
+   * The menu's 查看任务 learns this way whether an AI7 mark came from a Review Run.
+   */
+  resolve?(): Promise<(() => void) | null>;
 }
 
 interface MenuGroup {
@@ -480,6 +494,59 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     return wrap;
   };
 
+  // Which Review Run and finding a mark came from, asked once per mark while this surface stands: only a
+  // later Review Run in 审阅 — a place this surface is gone from by then — can change the answer.
+  const reviewLookups = new Map<string, Promise<ReviewFindingOfMarkProjection | null>>();
+  const reviewFindingOf = (markId: string): Promise<ReviewFindingOfMarkProjection | null> => {
+    let lookup = reviewLookups.get(markId);
+    if (lookup === undefined) {
+      const current = editor.currentWindow();
+      lookup = api.inspectReviewFindingOfMark({ manuscriptId: current.manuscriptId, branchId: current.branchId, markId }).catch(() => {
+        reviewLookups.delete(markId);
+        return null;
+      });
+      reviewLookups.set(markId, lookup);
+    }
+    return lookup;
+  };
+
+  const TASK_CARD_REASON = '任务面接通后可以从这里打开。';
+  /**
+   * 查看任务 on a card (V2-UX-MARK-008). A mark a Review Run produced opens 审阅 on that Run with the
+   * finding in view, once the Run is found; every other AI7 mark keeps the reason it waits for the Task
+   * surface, and so does a review mark whose Run cannot be found.
+   */
+  const viewTaskAction = (card: EditorialMarkCardProjection): HTMLElement => {
+    const openReview = options.openReviewFinding;
+    if (card.source.origin !== 'review-category' || openReview === undefined) return disabledAction('view-task', '查看任务', TASK_CARD_REASON);
+    const waiting = disabledAction('view-task', '查看任务', REVIEW_VIEW_TASK_RESOLVING);
+    void reviewFindingOf(card.markId).then((found) => {
+      if (destroyed || openCardId !== card.markId || !waiting.isConnected) return;
+      if (found === null) {
+        const reason = waiting.querySelector('small');
+        if (reason !== null) reason.textContent = REVIEW_VIEW_TASK_ABSENT;
+        return;
+      }
+      waiting.replaceWith(actionButton('view-task', '查看任务', 'secondary', () => {
+        close();
+        openReview(found);
+      }));
+    });
+    return waiting;
+  };
+
+  /** The mark menu's 查看任务 knows only that a mark is AI7's, so it asks, and comes alive for a review mark. */
+  const viewTaskMenuResolver = (markId: string): Pick<MenuItem, 'resolve'> => {
+    const openReview = options.openReviewFinding;
+    if (openReview === undefined) return {};
+    return {
+      resolve: async () => {
+        const found = await reviewFindingOf(markId);
+        return found === null ? null : () => openReview(found);
+      },
+    };
+  };
+
   const basisList = (card: EditorialMarkCardProjection): HTMLElement => {
     if (card.basis.length === 0) return el('p', 'muted', '这条标记没有附带依据与核查记录。');
     const list = el('ul', 'editorial-mark-basis');
@@ -652,7 +719,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
         }
         if (form) yours.append(buildForm(form(reopen)));
       }
-      if (card.source.kind === 'ai7') yours.append(disabledAction('view-task', '查看任务', '任务面接通后可以从这里打开。'));
+      if (card.source.kind === 'ai7') yours.append(viewTaskAction(card));
       panel.append(yours);
     } else {
       const body = el('p', 'editorial-mark-body', card.body);
@@ -685,7 +752,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
             : actionButton('reopen', '重新打开', 'secondary', () => void change(card.markId, 'set-status', { status: 'open' }, '已重新打开。')),
           convertOrExplain('change-suggestion'),
         );
-        if (card.source.kind === 'ai7') disposition.append(disabledAction('view-task', '查看任务', '任务面接通后可以从这里打开。'));
+        if (card.source.kind === 'ai7') disposition.append(viewTaskAction(card));
       } else {
         disposition.append(convertOrExplain('annotation'), convertOrExplain('change-suggestion'));
       }
@@ -866,6 +933,16 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
           control.disabled = true;
           control.setAttribute('aria-disabled', 'true');
           if (item.disabledReason) control.title = item.disabledReason;
+          void item.resolve?.().then((resolved) => {
+            if (resolved === null || menu !== panel || !control.isConnected) return;
+            control.disabled = false;
+            control.removeAttribute('aria-disabled');
+            control.removeAttribute('title');
+            control.addEventListener('click', () => {
+              closeMenu();
+              resolved();
+            });
+          });
         } else {
           const run = item.run;
           control.addEventListener('click', () => {
@@ -1018,7 +1095,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
           : { action: 'reopen', label: '重新打开', run: () => void change(mark.markId, 'set-status', { status: 'open' }, '已重新打开。') },
         convert('change-suggestion'),
         ...(mark.sourceKind === 'ai7' ? [
-          { action: 'view-task', label: '查看任务', disabledReason: AI7_TASK_REASON },
+          { action: 'view-task', label: '查看任务', disabledReason: AI7_TASK_REASON, ...viewTaskMenuResolver(mark.markId) },
           { action: 'view-basis', label: '看依据', run: () => void openCard(mark.markId) },
         ] : []),
         { action: 'remove', label: '删除', run: () => void change(mark.markId, 'remove', {}, '已删除批注。') },
@@ -1046,7 +1123,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
             : { action: 'accept-and-apply', label: '接受并应用', disabledReason: exact ? '这条修改建议已经处理过' : '原文已变，无法应用' },
         ...(mark.disposition === null && mark.status !== 'applied' ? [convert('annotation')] : []),
         ...(mark.sourceKind === 'ai7' ? [
-          { action: 'view-task', label: '查看任务', disabledReason: AI7_TASK_REASON },
+          { action: 'view-task', label: '查看任务', disabledReason: AI7_TASK_REASON, ...viewTaskMenuResolver(mark.markId) },
           { action: 'view-basis', label: '看依据', run: () => void openCard(mark.markId) },
         ] : []),
       ];
@@ -1128,6 +1205,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
 
   return {
     close,
+    openMark: (markId) => openCard(markId),
     ownsScroll: () => floating !== undefined || (closedAt !== undefined && options.scroll.scrollTop === closedAt.top),
     destroy: () => {
       destroyed = true;
