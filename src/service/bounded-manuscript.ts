@@ -20,6 +20,9 @@ import {
   type JournalEditInput,
   type ManuscriptBlockProjection,
   type ManuscriptEntryPositionProjection,
+  type ManuscriptRailProjection,
+  MAX_RAIL_CHAPTERS,
+  MAX_RAIL_MARKS,
   type ManuscriptWindowProjection,
   type ManuscriptWindowTarget,
   type MilestoneProjection,
@@ -76,6 +79,7 @@ import {
   EDITORIAL_MARK_TRIGGER_SQL,
   followBlockTextChangeForMarks,
   marksOfWindow,
+  openMarkPlaces,
   resolveBranchMarksAfterRewrite,
 } from './editorial-marks.js';
 import {
@@ -6622,6 +6626,79 @@ export class BoundedManuscriptStore {
       ...marksOfWindow(this.#db, branchId, asNumber(first.position)),
     };
     return projection;
+  }
+
+  /**
+   * The Whole-manuscript Position Rail's places (Issue #409): chapter ticks from the outline, the open
+   * marks, and — when the caller knows them — the block runs the analysis left unread. Each place is
+   * read through the offset index, so the cost follows the number of chapters and marks and never the
+   * length of the manuscript; both are bounded and the projection says when a bound cut them.
+   */
+  getRail(
+    manuscriptId: string,
+    branchId: string,
+    unread: ReadonlyArray<{ blockIds: ReadonlyArray<string>; reason: string }> | null,
+  ): ManuscriptRailProjection {
+    const binding = this.#binding(manuscriptId, branchId);
+    const total = Math.max(1, binding.totalCharacters);
+    const proportion = (character: number): number => Math.min(1, Math.max(0, character / total));
+    const outline = this.#db.prepare(
+      `SELECT block_id, position, level, text FROM manuscript_outline WHERE branch_id = ? ORDER BY position LIMIT ?`,
+    ).all(branchId, MAX_RAIL_CHAPTERS + 1) as SqlRow[];
+    const chapters = outline.slice(0, MAX_RAIL_CHAPTERS).map((row) => ({
+      blockId: asString(row.block_id),
+      title: asString(row.text),
+      level: asNumber(row.level),
+      startCharacter: workingOffsetBefore(this.#db, branchId, asNumber(row.position)),
+      suggestions: 0,
+      annotations: 0,
+      notes: 0,
+    }));
+    const places = openMarkPlaces(this.#db, branchId, MAX_RAIL_MARKS + 1);
+    const offsets = new Map<number, number>();
+    const marks = places.slice(0, MAX_RAIL_MARKS).map((place) => {
+      let before = offsets.get(place.position);
+      if (before === undefined) {
+        before = workingOffsetBefore(this.#db, branchId, place.position);
+        offsets.set(place.position, before);
+      }
+      const character = before + place.fromGrapheme;
+      // The chapter a mark belongs to is the last one that starts at or before it.
+      let owner = -1;
+      for (let index = 0; index < chapters.length && chapters[index]!.startCharacter <= character; index += 1) owner = index;
+      if (owner >= 0) {
+        const chapter = chapters[owner]!;
+        if (place.kind === 'change-suggestion') chapter.suggestions += 1;
+        else if (place.kind === 'annotation') chapter.annotations += 1;
+        else chapter.notes += 1;
+      }
+      return { kind: place.kind, blockId: place.blockId, proportion: proportion(character) };
+    });
+    const uncovered = unread === null ? null : unread.flatMap((run) => {
+      if (run.blockIds.length === 0) return [];
+      const span = this.#db.prepare(
+        `SELECT min(position) first, max(position) last FROM working_blocks
+         WHERE branch_id = ? AND block_id IN (${run.blockIds.map(() => '?').join(', ')})`,
+      ).get(branchId, ...run.blockIds) as SqlRow | undefined;
+      if (span === undefined || span.first === null || span.last === null) return [];
+      return [{
+        fromProportion: proportion(workingOffsetBefore(this.#db, branchId, asNumber(span.first))),
+        toProportion: proportion(workingOffsetPrefix(this.#db, branchId, asNumber(span.last))),
+        reason: run.reason,
+      }];
+    });
+    return {
+      manuscriptId,
+      branchId,
+      revisionId: binding.revisionId,
+      journalSequence: binding.journalSequence,
+      totalCharacters: binding.totalCharacters,
+      chapters: chapters.map(({ startCharacter, ...chapter }) => ({ ...chapter, proportion: proportion(startCharacter) })),
+      chaptersTruncated: outline.length > MAX_RAIL_CHAPTERS,
+      marks,
+      marksTruncated: places.length > MAX_RAIL_MARKS,
+      uncovered,
+    };
   }
 
   /**

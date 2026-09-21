@@ -478,6 +478,8 @@ async function dispatch(
       return { id: request.id, ok: true, op: request.op, result: store.applyChangeSuggestionBatch(request.input) };
     case 'reverseAppliedChangeSuggestion':
       return { id: request.id, ok: true, op: request.op, result: store.reverseAppliedChangeSuggestion(request.input) };
+    case 'getManuscriptRail':
+      return { id: request.id, ok: true, op: request.op, result: store.getManuscriptRail(request.input.manuscriptId, request.input.branchId) };
     case 'getManuscriptApplyOutcome':
       return {
         id: request.id,

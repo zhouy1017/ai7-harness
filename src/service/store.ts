@@ -36,6 +36,7 @@ import type {
   ManuscriptApplyCommandProjection,
   ManuscriptApplyOutcomeProjection,
   ManuscriptConversionProjection,
+  ManuscriptRailProjection,
   ManuscriptEntryPositionProjection,
   ManuscriptWindowProjection,
   ModelCredentialOperationState,
@@ -7738,6 +7739,23 @@ export class EditorialStore {
 
   getManuscriptApplyOutcome(manuscriptId: string, branchId: string, clientEffectId: string): ManuscriptApplyOutcomeProjection {
     return this.#markCall(() => this.#manuscriptApply.outcome(manuscriptId, branchId, clientEffectId));
+  }
+
+  /**
+   * The position rail's places (Issue #409). The ranges the analysis left unread come from the latest
+   * Result Set Revision's gaps; a Book never analysed has none to show, which is `null`, not empty.
+   */
+  getManuscriptRail(manuscriptId: string, branchId: string): ManuscriptRailProjection {
+    const bookId = this.#boundedCall(() => this.#bounded.getWindow(manuscriptId, branchId, { kind: 'start' })).bookId;
+    let unread: Array<{ blockIds: ReadonlyArray<string>; reason: string }> | null = null;
+    try {
+      const revision = this.#baselineAnalysis.inspect(bookId, undefined, null).resultSetRevision;
+      if (revision !== null) unread = revision.gaps.map((gap) => ({ blockIds: gap.blockIds, reason: gap.reason }));
+    } catch {
+      // A Book whose analysis cannot be read has no unread ranges the rail can stand behind.
+      unread = null;
+    }
+    return this.#boundedCall(() => this.#bounded.getRail(manuscriptId, branchId, unread));
   }
 
   /** A mark AI7 or an import produces; the manuscript surface is never its caller. */

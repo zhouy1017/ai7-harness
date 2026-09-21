@@ -626,6 +626,16 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       }
       break;
     }
+    case 'getManuscriptRail': {
+      const input = requireInput(value.input, ['manuscriptId', 'branchId'], tentativeId);
+      if (
+        !isBoundedString(input.manuscriptId, 36) || !UUID_PATTERN.test(input.manuscriptId) ||
+        !isBoundedString(input.branchId, 36) || !UUID_PATTERN.test(input.branchId)
+      ) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
     case 'getManuscriptApplyOutcome': {
       const input = requireInput(value.input, ['manuscriptId', 'branchId', 'clientEffectId'], tentativeId);
       if (

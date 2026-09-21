@@ -533,6 +533,29 @@ export function applyProjection(row: SqlRow): ManuscriptApplyProjection {
   };
 }
 
+/**
+ * Where every open 修改建议, 批注 and 备注 of a branch stands, in reading order, for the position rail.
+ * A highlight carries no meaning and draws nothing there; a resolved or applied mark asks for nothing.
+ */
+export function openMarkPlaces(
+  db: DatabaseSync,
+  branchId: string,
+  limit: number,
+): Array<{ kind: 'change-suggestion' | 'annotation' | 'editor-note'; blockId: string; position: number; fromGrapheme: number }> {
+  if (!marksRelationExists(db)) return [];
+  return (db.prepare(
+    `SELECT em.kind, em.block_id, wb.position, em.from_grapheme FROM editorial_marks em
+     JOIN working_blocks wb ON wb.branch_id = em.branch_id AND wb.block_id = em.block_id
+     WHERE em.branch_id = ? AND em.status = 'open' AND em.kind <> 'personal-highlight' AND em.anchor_state IN ('exact', 'drifted')
+     ORDER BY wb.position, em.from_grapheme, em.mark_id LIMIT ?`,
+  ).all(branchId, limit) as SqlRow[]).map((row) => ({
+    kind: text(row.kind) as 'change-suggestion' | 'annotation' | 'editor-note',
+    blockId: text(row.block_id),
+    position: integer(row.position),
+    fromGrapheme: integer(row.from_grapheme),
+  }));
+}
+
 const ANCHOR_SELECT = `SELECT em.mark_id, em.kind, em.block_id, em.from_grapheme, em.to_grapheme, em.anchor_state, em.status,
        em.highlight_color, em.source_kind,
        CASE WHEN em.pinned_text = '' THEN (SELECT i.current_text FROM proposal_change_items i WHERE i.mark_id = em.mark_id) END deleted_text,
