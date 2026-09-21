@@ -285,7 +285,7 @@ function focusKeyOf(node: HTMLElement): string {
     node.dataset['reviewField'] ?? '',
     node.closest<HTMLElement>('[data-finding-id]')?.dataset['findingId'] ?? '',
     node.closest<HTMLElement>('[data-review-category]')?.dataset['reviewCategory'] ?? '',
-    node.closest<HTMLElement>('[data-review-run]')?.dataset['reviewRun'] ?? '',
+    node.closest<HTMLElement>('[data-review-run-id]')?.dataset['reviewRunId'] ?? '',
   ].join('|');
 }
 
@@ -657,8 +657,8 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
 
   function renderRun(next: ReviewWorkspaceProjection, run: ReviewRunProjection): HTMLElement {
     const section = el('section', 'review-run');
-    section.dataset['reviewRun'] = String(run.ordinal);
     section.dataset['reviewRunId'] = run.reviewRunId;
+    section.dataset['reviewRunState'] = run.state;
     const heading = el('div', 'review-run-heading');
     const title = el('h4', undefined, reviewRunHeading(run.label));
     title.tabIndex = -1;
@@ -1639,8 +1639,8 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
           : state.scope === 'chapters' && from !== null && to !== null && to.position < from.position ? REVIEW_CHAPTERS_REVERSED
             : null;
     if (state.problem !== null || state.scope === null) {
+      // The problem line is an alert, so it is heard where the editor stands; focus stays on 先看计划.
       sheetUpdate();
-      sheet.querySelector<HTMLElement>('.review-sheet-problem')?.focus();
       return;
     }
     const scope: ReviewRunScopeRequest = {
