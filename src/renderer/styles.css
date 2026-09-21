@@ -385,7 +385,7 @@ legend { margin-bottom: .7rem; font-weight: 800; }
 .editorial-mark-field textarea { width: 100%; padding: .45rem .55rem; border: 1px solid #b9b39f; border-radius: 6px; font: inherit; font-weight: 400; resize: vertical; }
 .editorial-mark-field textarea:focus-visible { outline: 3px solid #416458; outline-offset: 2px; }
 .editorial-mark-problem { color: #9b2c2c; font-weight: 700; }
-.editorial-mark-unavailable { display: inline-grid; gap: .15rem; max-width: 18rem; }
+.editorial-mark-unavailable { display: inline-flex; flex-direction: column; align-items: flex-start; gap: .15rem; max-width: 18rem; }
 .editorial-mark-basis, .editorial-mark-replies { margin: .25rem 0; padding-left: 1.2rem; }
 .editorial-mark-basis-quote { margin-left: .4rem; color: #4b5148; }
 .editorial-mark-card .technical-details { margin-top: .8rem; }

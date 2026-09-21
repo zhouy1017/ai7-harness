@@ -29,6 +29,12 @@ import {
 export interface EditorialMarksSurface {
   /** Close whatever is floating: the blocks it was anchored to may be gone. */
   close(): void;
+  /**
+   * Whether the pane's position is this surface's doing: a composer or a Mark Card is open — bringing
+   * one into view may rest the pane at its edge — or one just closed and the pane, shorter by the
+   * card's height, was put back where it now ends. Neither is the reader asking for the next window.
+   */
+  ownsScroll(): boolean;
   destroy(): void;
 }
 
@@ -101,9 +107,11 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
   let destroyed = false;
   let menu: HTMLElement | undefined;
   let floating: HTMLElement | undefined;
+  let floatingBlockId: string | undefined;
   let openCardId: string | undefined;
   let collapsedBeforeContextClick = true;
   let working = false;
+  let closedAt: { top: number } | undefined;
 
   const binding = (): { manuscriptId: string; branchId: string; windowStartBlockId: string } => {
     const current = editor.currentWindow();
@@ -129,8 +137,18 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
   };
 
   const closeFloating = (): void => {
-    floating?.remove();
+    if (floating !== undefined) {
+      floating.remove();
+      // Where the pane rests once the card's height is gone. The mark lapses two frames on, past the
+      // frame that dispatches the `scroll` event of that adjustment, exactly as the editor's own does.
+      const mark = { top: options.scroll.scrollTop };
+      closedAt = mark;
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        if (closedAt === mark) closedAt = undefined;
+      }));
+    }
     floating = undefined;
+    floatingBlockId = undefined;
     if (openCardId !== undefined) {
       openCardId = undefined;
       editor.setActiveMark(null);
@@ -237,6 +255,8 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     placeBelowBlock(composer, blockId);
     layer.append(composer);
     floating = composer;
+    floatingBlockId = blockId;
+    composer.scrollIntoView({ block: 'nearest' });
   };
 
   /** Make a mark on what is selected now; the journal is settled first so the range is durable text. */
@@ -605,7 +625,9 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     placeBelowBlock(panel, card.blockId);
     layer.append(panel);
     floating = panel;
+    floatingBlockId = card.blockId;
     openCardId = card.markId;
+    panel.scrollIntoView({ block: 'nearest' });
     const previews = card.suggestion !== null && card.anchorState === 'exact' && card.suggestion.decision?.disposition !== 'rejected';
     editor.setActiveMark({
       markId: card.markId,
@@ -941,6 +963,15 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     editor.focus();
   };
 
+  // The text column moves when the pane reflows and grows when its text does; what floats below a
+  // paragraph follows it, and a menu opened at a pointer position that no longer means anything goes.
+  const reflow = new ResizeObserver(() => {
+    closeMenu();
+    if (floating !== undefined && floatingBlockId !== undefined) placeBelowBlock(floating, floatingBlockId);
+  });
+  reflow.observe(options.scroll);
+  reflow.observe(options.host);
+
   options.host.addEventListener('mousedown', onMouseDown);
   options.host.addEventListener('contextmenu', onContextMenu);
   options.host.addEventListener('keydown', onKeyDown);
@@ -950,8 +981,10 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
 
   return {
     close,
+    ownsScroll: () => floating !== undefined || (closedAt !== undefined && options.scroll.scrollTop === closedAt.top),
     destroy: () => {
       destroyed = true;
+      reflow.disconnect();
       close();
       options.host.removeEventListener('mousedown', onMouseDown);
       options.host.removeEventListener('contextmenu', onContextMenu);

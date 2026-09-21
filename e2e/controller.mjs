@@ -92,7 +92,7 @@ if (isJourneyRunner) {
   }
 }
 
-export const ADMITTED_JOURNEYS = Object.freeze(['J-01', 'J-02', 'J-08', 'J-12', 'J-15', 'J-03', 'J-04']);
+export const ADMITTED_JOURNEYS = Object.freeze(['J-01', 'J-02', 'J-08', 'J-12', 'J-15', 'J-03', 'J-04', 'J-05']);
 
 // The bounded pull-request subset of ADMITTED_JOURNEYS under ADR 0075. Every member launches the
 // same production-shaped subject, so a broken build, launch, IPC, data root, or service still fails
@@ -174,6 +174,7 @@ const JOURNEY_MODULES = Object.freeze({
   'J-15': new URL('./run-j15.mjs', import.meta.url),
   'J-03': new URL('./run-j03.mjs', import.meta.url),
   'J-04': new URL('./run-j04.mjs', import.meta.url),
+  'J-05': new URL('./run-j05.mjs', import.meta.url),
 });
 
 const J01_LAUNCH_SCENARIOS = Object.freeze([
@@ -616,6 +617,29 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'plan-revision-dispatch',
     'plan-revision-edit-unchanged',
     'zero-activity',
+  ]),
+  // J-05, first slice (Issue #407): Editorial Marks. Each stage is one thing an editor does with a
+  // mark, so a hosted failure names the behaviour that broke and not the Journey alone.
+  'J-05': Object.freeze([
+    'entry',
+    'controller-loopback-sentinel',
+    'controller-imports',
+    'import-and-open',
+    'selection-menu',
+    'mark-highlight',
+    'mark-annotation',
+    'mark-editor-note',
+    'mark-change-suggestion',
+    'suggestion-decisions',
+    'mark-conversions',
+    'marks-follow-edits',
+    'clipboard-commands',
+    'j14-marks-zoom-200-reflow',
+    'j14-marks-forced-colors',
+    'marks-keyboard-menu',
+    'marks-survive-restart',
+    'completion-browser-close',
+    'completion-cleanup',
   ]),
 });
 

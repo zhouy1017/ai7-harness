@@ -156,6 +156,7 @@ function parseArguments(argv: string[]): LaunchArguments {
           key === '--j12-picker-path' ||
           key === '--j03-picker-path' ||
           key === '--j04-picker-path' ||
+          key === '--j05-picker-path' ||
           key === '--j01-import-control' ||
           key === '--j03-foreground-execution-control' ||
           key === '--j08-recovery-control' ||
@@ -184,7 +185,8 @@ function parseArguments(argv: string[]): LaunchArguments {
   const j12PickerPath = values.get('--j12-picker-path');
   const j03PickerPath = values.get('--j03-picker-path');
   const j04PickerPath = values.get('--j04-picker-path');
-  requireDesktop([j01PickerPath, j02PickerPath, j08PickerPath, j12PickerPath, j03PickerPath, j04PickerPath].filter(Boolean).length <= 1);
+  const j05PickerPath = values.get('--j05-picker-path');
+  requireDesktop([j01PickerPath, j02PickerPath, j08PickerPath, j12PickerPath, j03PickerPath, j04PickerPath, j05PickerPath].filter(Boolean).length <= 1);
   // The picker-path launch controls carry whatever their Journey selects, in any recognised format
   // or none, so each one asks only that it is its own Journey's absolute path.
   requireDesktop(
@@ -205,7 +207,10 @@ function parseArguments(argv: string[]): LaunchArguments {
   requireDesktop(
     j04PickerPath === undefined || (process.env.AI7_E2E_JOURNEY === 'J-04' && isAbsolute(j04PickerPath)),
   );
-  const injectedPickerPath = j01PickerPath ?? j02PickerPath ?? j08PickerPath ?? j12PickerPath ?? j03PickerPath ?? j04PickerPath;
+  requireDesktop(
+    j05PickerPath === undefined || (process.env.AI7_E2E_JOURNEY === 'J-05' && isAbsolute(j05PickerPath)),
+  );
+  const injectedPickerPath = j01PickerPath ?? j02PickerPath ?? j08PickerPath ?? j12PickerPath ?? j03PickerPath ?? j04PickerPath ?? j05PickerPath;
   const importControlValue = values.get('--j01-import-control');
   const importControl =
     importControlValue === 'before-commit' ||
