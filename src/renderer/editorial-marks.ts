@@ -14,9 +14,11 @@ import {
   DECISION_REASON_CHIPS,
   HIGHLIGHT_COLOR_LABELS,
   MARK_KIND_LABELS,
+  markDriftNote,
   markSourceLine,
   markStateLabel,
   markTimeLabel,
+  reverseApplyNote,
   selectionMenuReason,
 } from './editorial-mark-labels.js';
 
@@ -493,7 +495,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     panel.append(header);
 
     if (card.anchorState !== 'exact') {
-      const drifted = el('p', 'editorial-mark-drifted', `原文已变：标记时的文字是「${card.pinnedText}」，这段文字后来改过，标记仍留在原处。`);
+      const drifted = el('p', 'editorial-mark-drifted', markDriftNote(card));
       drifted.dataset['markDrifted'] = 'true';
       panel.append(drifted);
     }
@@ -569,7 +571,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
             quote: null,
             fields: [],
             submitLabel: '确认撤销本次应用',
-            note: `会把「${shown.length === 0 ? '（删去）' : shown}」换回「${suggestion.currentText}」，并记为一次新的应用；原来的应用记录保留，不会被改写。`,
+            note: reverseApplyNote(shown, suggestion.currentText),
             submit: () => writeManuscript(card.markId, (clientEffectId) => api.reverseAppliedChangeSuggestion({ ...binding(), markId: card.markId, clientEffectId }), '已撤销本次应用；原文已写回稿件。'),
             cancel,
           }))));

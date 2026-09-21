@@ -55,6 +55,26 @@ export function markStateLabel(card: Pick<EditorialMarkCardProjection, 'kind' | 
   return `仅自己可见${drifted}`;
 }
 
+/**
+ * 原文已变 on a Mark Card: the text the mark was made on — or, for a suggestion whose Apply deleted its
+ * words and which is pinned on no text, the words it deleted.
+ */
+export function markDriftNote(card: Pick<EditorialMarkCardProjection, 'pinnedText' | 'suggestion'>): string {
+  if (card.pinnedText.length === 0 && card.suggestion !== null) {
+    return `原文已变：这里删去了「${card.suggestion.currentText}」，删去处后来又改过，标记仍留在原处。`;
+  }
+  return `原文已变：标记时的文字是「${card.pinnedText}」，这段文字后来改过，标记仍留在原处。`;
+}
+
+/**
+ * What 准备撤销本次应用 says it will write, before the button that writes it (V2-UX-EREC-010): the applied
+ * text changed back to the original, or — where the Apply deleted the words — the words written in again.
+ */
+export function reverseApplyNote(appliedText: string, originalText: string): string {
+  const write = appliedText.length === 0 ? `会在原处重新写入「${originalText}」` : `会把「${appliedText}」换回「${originalText}」`;
+  return `${write}，并记为一次新的应用；原来的应用记录保留，不会被改写。`;
+}
+
 export function markTimeLabel(iso: string): string {
   const time = new Date(iso);
   if (Number.isNaN(time.getTime())) return '';

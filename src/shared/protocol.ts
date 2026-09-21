@@ -979,7 +979,10 @@ export interface EditorialMarkCardProjection {
   blockId: string;
   fromGrapheme: number;
   toGrapheme: number;
-  /** The exact text the mark was made on. */
+  /**
+   * The exact text the mark stands on: what it was made on, or what an Apply wrote there. Empty where
+   * an applied 修改建议 deleted its words: the mark is then the point between two graphemes where they were.
+   */
   pinnedText: string;
   source: EditorialMarkSourceProjection;
   body: string;
