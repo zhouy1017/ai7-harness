@@ -46,6 +46,7 @@ import type {
 } from '../shared/protocol.js';
 import { BASELINE_ANALYSIS_TASK_GOAL, J03_TASK_GOAL, MAX_REPLACEMENT_EXCLUSIONS } from '../shared/protocol.js';
 import { mountBoundedEditor, type BoundedEditor, type EditorContinuity } from './editor.js';
+import { mountEditorialMarks, type EditorialMarksSurface } from './editorial-marks.js';
 import {
   ANALYSIS_CONFLICT_KIND_LABELS,
   ANALYSIS_ENTITY_KIND_LABELS,
@@ -82,6 +83,7 @@ const persistenceStatus = requiredElement('#persistence-status');
 if (!window.ai7) throw new Error('AI7_RENDERER_BOOTSTRAP_INVALID');
 
 let editor: BoundedEditor | undefined;
+let editorialMarks: EditorialMarksSurface | undefined;
 let authorityInterrupted = false;
 
 interface RecoveryReturnContext {
@@ -196,6 +198,8 @@ function applyAuthorityInterruption(): void {
 }
 
 function replaceScreen(state: string, content: HTMLElement): void {
+  editorialMarks?.destroy();
+  editorialMarks = undefined;
   editor?.destroy();
   editor = undefined;
   screen.dataset['screen'] = state;
@@ -6289,6 +6293,16 @@ function renderEditorWindow(
       else if (command === 'undo' || command === 'redo') void runHistory(command);
       else void navigateCursor(command === 'previous-window' ? 'previous' : 'next');
     },
+    onWindowLoaded: () => editorialMarks?.close(),
+  });
+  editorialMarks = mountEditorialMarks({
+    scroll: editorWindow,
+    host: editorHost,
+    editor,
+    api: window.ai7,
+    busy: () => authoritativeMutationBusy() || serviceJobBusy(),
+    setStatus,
+    errorMessage: rendererErrorMessage,
   });
   updateWindowChrome();
   void loadOutline(null);

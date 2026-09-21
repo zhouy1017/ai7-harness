@@ -2,13 +2,16 @@ import { baseKeymap } from 'prosemirror-commands';
 import { keymap } from 'prosemirror-keymap';
 import { Schema, type DOMOutputSpec, type Node as ProseMirrorNode } from 'prosemirror-model';
 import { EditorState, Plugin, TextSelection, type Transaction } from 'prosemirror-state';
-import { EditorView } from 'prosemirror-view';
+import { Decoration, DecorationSet, EditorView } from 'prosemirror-view';
+import { deriveSpanEdit, followSpanEdit } from '../shared/mark-anchor.js';
 import {
   MAX_BLOCK_CODE_UNITS,
   MAX_BLOCK_GRAPHEMES,
   MAX_EDIT_CODE_UNITS,
   MAX_EDIT_GRAPHEMES,
   MAX_WINDOW_BLOCKS,
+  type EditorialMarkAnchorProjection,
+  type EditorialMarkKind,
   type JournalAcknowledgement,
   type JournalEditInput,
   type ManuscriptBlockProjection,
@@ -43,10 +46,29 @@ export interface BoundedEditor {
    * the editor reaching an edge: read as one, it pages away from the window just restored (#474).
    */
   isOwnScroll(): boolean;
+  /**
+   * The Editorial Marks this window draws (Issue #407). A window brings its own; a mark command
+   * answers with the window's marks and they are set here. They are decorations: the document the
+   * bounded transaction filter guards never changes for a mark.
+   */
+  setMarks(marks: ReadonlyArray<EditorialMarkAnchorProjection>, truncated: boolean): void;
+  /** The mark whose card is open, and the replacement a Change Suggestion previews in place (预览 · 未应用). */
+  setActiveMark(active: { markId: string; previewText: string | null } | null): void;
+  /**
+   * What the editor has selected, in the window's own vocabulary: one block and a grapheme range of
+   * its durable text. `unsettled` while that block holds text the journal has not acknowledged.
+   */
+  selectedRange(): EditorSelectedRange;
   setOperationLocked(locked: boolean): void;
   interrupt(): void;
   destroy(): void;
 }
+
+export type EditorSelectedRange =
+  | { kind: 'none' }
+  | { kind: 'multiple-blocks' }
+  | { kind: 'unsettled' }
+  | { kind: 'range'; blockId: string; blockDigest: string; fromGrapheme: number; toGrapheme: number; text: string };
 
 export interface EditorPoint {
   blockId: string;
@@ -70,6 +92,8 @@ interface MountOptions {
   onStateChange(state: EditorUiState): void;
   onAnnouncement(message: string, tone: 'busy' | 'success' | 'error'): void;
   onCommand(command: 'search' | 'replace' | 'undo' | 'redo' | 'previous-window' | 'next-window'): void;
+  /** A different window was loaded: anything anchored to the blocks that were on screen is gone. */
+  onWindowLoaded?(): void;
 }
 
 interface BaselineBlock {
@@ -129,6 +153,8 @@ const ai7Schema = new Schema({
   },
   marks: {},
 });
+
+const MARK_LINE_PRIORITY: ReadonlyArray<EditorialMarkKind> = ['change-suggestion', 'annotation', 'editor-note', 'personal-highlight'];
 
 function requireEditor(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
@@ -292,6 +318,7 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
   // left behind while its `scroll` event is still to come.
   let pendingRestore: { frame: number; run: () => void } | undefined;
   let ownScroll: { top: number } | undefined;
+  let activeMark: { markId: string; previewText: string | null } | undefined;
 
   const isEditable = (): boolean =>
     !retryRequired && !interrupted && !operationLocked && deferredNavigationContinuity === undefined;
@@ -339,11 +366,86 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
   };
 
   const transactionFilter = new Plugin({ filterTransaction: candidateIsBounded });
+
+  /**
+   * Marks are drawn over the document, never written into it. Their ranges are grapheme ranges of
+   * the durable text, so text typed and not yet acknowledged is followed here with the arithmetic the
+   * service applies when the edit lands: a mark in front of the caret does not slide onto the wrong
+   * characters while someone types, and one whose own text is being changed shows as drifted at once.
+   */
+  const markDecorations = (document: ProseMirrorNode): DecorationSet => {
+    if (windowProjection.marks.length === 0) return DecorationSet.empty;
+    const byBlock = new Map<string, EditorialMarkAnchorProjection[]>();
+    for (const mark of windowProjection.marks) {
+      const list = byBlock.get(mark.blockId);
+      if (list) list.push(mark);
+      else byBlock.set(mark.blockId, [mark]);
+    }
+    const decorations: Decoration[] = [];
+    document.forEach((node, offset) => {
+      const blockMarks = byBlock.get(String(node.attrs['blockId']));
+      if (!blockMarks) return;
+      const parts = graphemes(node.textContent);
+      const baseline = baselines.get(String(node.attrs['blockId']));
+      const local = baseline && baseline.text !== node.textContent ? deriveSpanEdit(graphemes(baseline.text), parts) : null;
+      const position = (grapheme: number): number =>
+        offset + 1 + parts.slice(0, Math.min(Math.max(0, grapheme), parts.length)).join('').length;
+      let line: EditorialMarkKind | undefined;
+      for (const mark of blockMarks) {
+        const followed = local ? followSpanEdit(mark, local) : { ...mark, touched: false };
+        const drifted = mark.anchorState === 'drifted' || followed.touched;
+        if (mark.status === 'open' && (line === undefined || MARK_LINE_PRIORITY.indexOf(mark.kind) < MARK_LINE_PRIORITY.indexOf(line))) {
+          line = mark.kind;
+        }
+        const from = position(followed.fromGrapheme);
+        const to = position(followed.toGrapheme);
+        if (to <= from) continue;
+        const previewing = activeMark?.markId === mark.markId && activeMark.previewText !== null && !drifted;
+        decorations.push(Decoration.inline(from, to, {
+          class: [
+            'editorial-mark',
+            `editorial-mark-${mark.kind}`,
+            ...(activeMark?.markId === mark.markId ? ['editorial-mark-active'] : []),
+            ...(previewing ? ['editorial-mark-previewed'] : []),
+          ].join(' '),
+          'data-mark-id': mark.markId,
+          'data-mark-kind': mark.kind,
+          'data-mark-source': mark.sourceKind,
+          'data-mark-status': mark.status,
+          'data-mark-anchor': drifted ? 'drifted' : 'exact',
+          ...(mark.highlightColor === null ? {} : { 'data-mark-color': String(mark.highlightColor) }),
+          ...(mark.disposition === null ? {} : { 'data-mark-disposition': mark.disposition }),
+        }));
+        if (previewing) {
+          const previewText = activeMark!.previewText!;
+          decorations.push(Decoration.widget(to, () => {
+            const preview = window.document.createElement('ins');
+            preview.className = 'editorial-mark-preview';
+            preview.contentEditable = 'false';
+            preview.dataset['markPreview'] = mark.markId;
+            const proposed = window.document.createElement('span');
+            proposed.className = 'editorial-mark-preview-text';
+            proposed.textContent = previewText.length === 0 ? '（删去）' : previewText;
+            const label = window.document.createElement('span');
+            label.className = 'editorial-mark-preview-label';
+            label.textContent = '预览 · 未应用';
+            preview.append(proposed, label);
+            return preview;
+          }, { side: 1, key: `preview:${mark.markId}:${previewText}`, ignoreSelection: true }));
+        }
+      }
+      if (line !== undefined) {
+        decorations.push(Decoration.node(offset, offset + node.nodeSize, { class: 'has-editorial-mark', 'data-mark-line': line }));
+      }
+    });
+    return DecorationSet.create(document, decorations);
+  };
+  const markPlugin = new Plugin({ props: { decorations: (state) => markDecorations(state.doc) } });
   const makeState = (blocks: ReadonlyArray<ManuscriptBlockProjection> = windowProjection.blocks): EditorState =>
     EditorState.create({
       schema: ai7Schema,
       doc: createDocument(blocks),
-      plugins: [transactionFilter, keymap(baseKeymap)],
+      plugins: [transactionFilter, markPlugin, keymap(baseKeymap)],
     });
 
   let view: EditorView;
@@ -711,6 +813,7 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
         true,
       );
       announceState();
+      options.onWindowLoaded?.();
       return true;
     },
     loadNavigationWindow: (nextWindow, continuity) => {
@@ -720,6 +823,7 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
       retryPrepared = undefined;
       restoreContinuity(makeState(), continuity, nextWindow.focusBlockId, nextWindow.focusGrapheme, true);
       announceState();
+      options.onWindowLoaded?.();
       return true;
     },
     selectRange: (blockId, fromGrapheme, toGrapheme) => {
@@ -745,6 +849,35 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
     currentWindow: () => windowProjection,
     isComposing: () => composing,
     isOwnScroll: () => ownScroll !== undefined && options.scrollContainer.scrollTop === ownScroll.top,
+    setMarks: (marks, truncated) => {
+      if (destroyed) return;
+      windowProjection = { ...windowProjection, marks, marksTruncated: truncated };
+      view.dispatch(view.state.tr.setMeta('ai7-editorial-marks', true));
+    },
+    setActiveMark: (active) => {
+      if (destroyed) return;
+      activeMark = active ?? undefined;
+      view.dispatch(view.state.tr.setMeta('ai7-editorial-marks', true));
+    },
+    selectedRange: () => {
+      const selection = view.state.selection;
+      if (selection.empty) return { kind: 'none' };
+      const anchor = pointAtPosition(view.state.doc, selection.from);
+      const head = pointAtPosition(view.state.doc, selection.to);
+      if (anchor.blockId !== head.blockId) return { kind: 'multiple-blocks' };
+      const baseline = baselines.get(anchor.blockId);
+      const block = findBlock(view.state.doc, anchor.blockId);
+      if (!baseline || !block || saving || retryRequired || block.textContent !== baseline.text) return { kind: 'unsettled' };
+      if (head.grapheme <= anchor.grapheme) return { kind: 'none' };
+      return {
+        kind: 'range',
+        blockId: anchor.blockId,
+        blockDigest: baseline.digest,
+        fromGrapheme: anchor.grapheme,
+        toGrapheme: head.grapheme,
+        text: graphemes(baseline.text).slice(anchor.grapheme, head.grapheme).join(''),
+      };
+    },
     setOperationLocked: (locked) => {
       if (locked) {
         requireEditor(!saving && !retryRequired && !composing && changedBlocks(view.state.doc).length === 0, '无法在未确认本地编辑时锁定稿件。');
