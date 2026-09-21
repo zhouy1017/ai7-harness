@@ -143,8 +143,7 @@ export function requirePublication(condition: unknown, code: string, message: st
  * The three relations and their ledger triggers, created once and never rebuilt: a store that predates
  * them gains three empty relations and nothing existing moves. Like revisions 21 to 24 this runs before
  * the version is stamped in `task-authorization.ts` and is shape-detected, so a store that already has
- * them does no work here, and an interruption between the creation and the version stamp repeats only
- * the stamp on the next open.
+ * them does no work here.
  */
 export function initializePublicationVersionSchema(db: DatabaseSync): void {
   const existing = db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'publication_versions'").get();

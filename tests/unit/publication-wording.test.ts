@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
+  MAX_DELIVERABLE_MILESTONES,
+  MAX_FRAME_BYTES,
+  MAX_MILESTONE_PURPOSE_CODE_UNITS,
   MAX_PUBLICATION_BASIS_CHARACTERS,
   MAX_PUBLICATION_SCOPE_CHARACTERS,
+  MAX_PUBLICATION_VERSIONS_LISTED,
   PUBLICATION_ACTUALS_PROMPT_LABEL,
   PUBLICATION_ACTUALS_PROMPT_STATE,
   PUBLICATION_CHANGE_NOTICE,
@@ -15,6 +19,10 @@ import {
   publicationDesignatedLabel,
   publicationText,
   publicationUnchangedLabel,
+  type DeliverablesProjection,
+  type MilestoneListItemProjection,
+  type PublicationDesignationProjection,
+  type PublicationVersionProjection,
 } from '../../src/shared/protocol.js';
 
 // The words of ⑥ 发稿 (Issue #414): what the service says a Milestone Version and a Publication Version
@@ -60,5 +68,53 @@ describe('the words of 发稿', () => {
     for (const value of ['', '   ', '\n\t', '\uD800', 42, null, undefined]) {
       expect(publicationText(value, MAX_PUBLICATION_BASIS_CHARACTERS)).toBeNull();
     }
+  });
+
+  it('keep the most 交付物 one answer lists within one service frame, every field at its widest', () => {
+    const identity = '00000000-0000-4000-8000-000000000000';
+    const digest = 'f'.repeat(64);
+    const time = '2026-09-22T00:00:00.000Z';
+    // A label, purpose and note are bounded in code units, so a BMP character is their widest byte for
+    // byte; 发稿范围 and 依据 are bounded in code points, so a supplementary character is theirs.
+    const label = '标'.repeat(80);
+    const milestone: MilestoneListItemProjection = {
+      milestoneId: identity, label, purposeKind: 'custom', purposeLabel: '途'.repeat(MAX_MILESTONE_PURPOSE_CODE_UNITS),
+      revisionId: identity, revisionLabel: 'r9999999', actor: '本机编辑', createdAt: time, note: '注'.repeat(500),
+      changedSince: true, changedSinceLabel: milestoneChangedSinceLabel(label),
+      designation: { publicationVersionId: identity, label: PUBLICATION_VERSION_LABEL }, technical: { signoffRecordId: identity },
+    };
+    const designation: PublicationVersionProjection = {
+      publicationVersionId: identity, ordinal: 9_999_999, current: false, milestoneId: identity, milestoneLabel: label,
+      revisionId: identity, revisionLabel: 'r9999999', scope: '𠀀'.repeat(MAX_PUBLICATION_SCOPE_CHARACTERS),
+      basis: '𠀀'.repeat(MAX_PUBLICATION_BASIS_CHARACTERS), actor: '本机编辑', createdAt: time,
+      technical: {
+        revisionDigest: digest, digest, permissionId: identity,
+        events: [{ eventId: identity, kind: 'actuals-prompt' }, { eventId: identity, kind: 'exemplar-archive' }],
+      },
+    };
+    const deliverables: DeliverablesProjection = {
+      bookId: identity,
+      bookTitle: '书'.repeat(180),
+      manuscript: { manuscriptId: identity, branchId: identity, revisionId: identity, revisionLabel: 'r9999999', journalSequence: 9_999_999, workingDigest: digest },
+      publication: {
+        milestones: Array.from({ length: MAX_DELIVERABLE_MILESTONES }, () => milestone),
+        milestonesTruncated: true,
+        designations: Array.from({ length: MAX_PUBLICATION_VERSIONS_LISTED }, () => designation),
+        designationsTruncated: true,
+        changeNotice: { label: PUBLICATION_CHANGE_NOTICE, publicationVersionId: identity, revisionLabel: 'r9999999' },
+        designate: { available: true, unavailableReason: null },
+        statement: PUBLICATION_VERSION_STATEMENT,
+        actualsPrompt: { eventId: identity, publicationVersionId: identity, label: PUBLICATION_ACTUALS_PROMPT_LABEL, stateLabel: PUBLICATION_ACTUALS_PROMPT_STATE, recordedAt: time },
+      },
+    };
+    const answer: PublicationDesignationProjection = {
+      bookId: identity,
+      outcome: 'designated',
+      completionLabel: publicationDesignatedLabel(label, 'r9999999', designation.scope),
+      publicationVersionId: identity,
+      deliverables,
+    };
+    const response = { id: identity, ok: true, op: 'designatePublicationVersion', result: answer };
+    expect(Buffer.byteLength(JSON.stringify(response), 'utf8')).toBeLessThan(MAX_FRAME_BYTES);
   });
 });

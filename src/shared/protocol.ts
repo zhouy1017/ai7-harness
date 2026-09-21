@@ -4103,9 +4103,9 @@ export const PUBLICATION_FORBIDDEN_WORDS = ['已发布', '已发送', '已交付
 export const MAX_PUBLICATION_SCOPE_CHARACTERS = 80;
 export const MAX_PUBLICATION_BASIS_CHARACTERS = 500;
 /**
- * The most milestones and designations one 交付物 answer lists, newest first. A listed milestone weighs at
- * most about 2.7 KB on the wire and a designation about 2.9 KB, so both lists together stay well under the
- * frame; an older one stays designatable by its identity.
+ * The most milestones and designations one 交付物 answer lists, newest first. At its widest a listed
+ * milestone weighs about 2.8 KB on the wire and a designation about 3.3 KB, so both lists together stay
+ * under 400 KB of the frame; an older milestone stays designatable by its identity.
  */
 export const MAX_DELIVERABLE_MILESTONES = 100;
 export const MAX_PUBLICATION_VERSIONS_LISTED = 30;
