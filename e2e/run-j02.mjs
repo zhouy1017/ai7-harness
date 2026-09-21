@@ -1116,9 +1116,15 @@ async function runAccessibilityJourney(renderer) {
   }
   await assertRenderer(renderer, `Number(document.querySelector('#manuscript-position')?.value) < ${beforeFocus.position}`, 'top-edge-paged-to-an-earlier-window');
   at('j14-keyboard-window-crossing');
-  await renderer.evaluate(`(() => { const editor = document.querySelector('[data-testid="manuscript-editor"]'); editor?.focus(); globalThis.__ai7BeforePageKey = editor?.firstElementChild?.dataset.blockId; })()`);
+  // The caret returns to the text the way a hand puts it there: without moving the pane. A plain
+  // `focus()` scrolls the pane to the editor's top, which the surface rightly reads as the reader
+  // reaching the top edge and answers by paging back — the PageDown under test was then refused, and
+  // this step passed on a navigation it never asked for (found while building Issue #409).
+  await renderer.evaluate(`(() => { const editor = document.querySelector('[data-testid="manuscript-editor"]'); editor?.focus({ preventScroll: true }); globalThis.__ai7BeforePageKey = editor?.firstElementChild?.dataset.blockId; globalThis.__ai7BeforePagePosition = document.querySelector('.editor-meta')?.textContent; })()`);
   await press(renderer, 'PageDown');
   await waitFor(renderer, `document.querySelector('[data-testid="manuscript-editor"]')?.firstElementChild?.dataset.blockId !== globalThis.__ai7BeforePageKey`, 'keyboard-window-crossing');
+  // PageDown moves forward: the window that answered is a later one, not the one before.
+  await assertRenderer(renderer, `(() => { const read = (text) => Number(/全稿 ([0-9.]+)%/.exec(text ?? '')?.[1]); return read(document.querySelector('.editor-meta')?.textContent) > read(globalThis.__ai7BeforePagePosition); })()`, 'keyboard-window-crossing-forward');
   at('j14-fine-scroll-window-crossing');
   await renderer.evaluate(`new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
   await renderer.evaluate(`(async () => { const surface = document.querySelector('.editor-window'); globalThis.__ai7BeforeFineScroll = document.querySelector('[data-testid="manuscript-editor"]')?.firstElementChild?.dataset.blockId; surface.scrollTop = Math.floor((surface.scrollHeight - surface.clientHeight) / 2); await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))); surface.scrollTop = surface.scrollHeight; })()`);
