@@ -1,6 +1,5 @@
 import type {
   AnalysisAssuranceAxis,
-  AnalysisConflictProjection,
   AnalysisCoverageAxis,
   AnalysisEntityKind,
   AnalysisFreshnessAxis,
@@ -170,16 +169,12 @@ export function analysisProvenanceSummary(
 
 /**
  * One editorial Chinese label per conflict kind the analysis can report (V2-UX-LAYER-003): the
- * reducer's token is its own vocabulary, not the editor's. A `Record` over the closed union, so a
- * new kind fails to compile here instead of reaching the card as a raw token; the token itself stays
- * on the entry in `data-analysis-conflict-kind`, where the record and the Journeys read it.
+ * reducer's token is its own vocabulary, not the editor's; the token itself stays on the entry in
+ * `data-analysis-conflict-kind`, where the record and the Journeys read it. The labels live in the
+ * shared protocol since Issue #417, because the 情节逻辑与前后一致 leads the service makes into 批注 name
+ * the same kinds in the same words.
  */
-export const ANALYSIS_CONFLICT_KIND_LABELS: Record<AnalysisConflictProjection['kind'], string> = {
-  'unit-reported': '单元内报告',
-  'alias-collision': '别名冲突',
-  'entity-kind-divergence': '实体类别分歧',
-  'setting-claim-divergence': '设定声明分歧',
-};
+export { ANALYSIS_CONFLICT_KIND_LABELS } from '../shared/protocol.js';
 
 /** The editor's word for each entity kind (V2-UX-LAYER-003); the contract's token stays on the record. */
 export const ANALYSIS_ENTITY_KIND_LABELS: Record<AnalysisEntityKind, string> = {

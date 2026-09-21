@@ -3286,6 +3286,367 @@ export interface ReviewCategoryTaskRequest {
   selectedRange: BaselineAnalysisSelectedRange | null;
 }
 
+// ---- 审阅记录 Review Runs (Issue #417, plan slice S69) ---------------------------------------------
+
+/**
+ * The editor's words for the analysis's own lead tokens (V2-UX-LAYER-003). The deterministic conflict
+ * kinds are ②A's; the four cross-unit kinds read as the 情节逻辑与前后一致 leads they become (REV-011).
+ * `Record`s over the closed unions, so a new kind fails to compile instead of reaching a mark as a token.
+ */
+export const ANALYSIS_CONFLICT_KIND_LABELS: Record<AnalysisConflictProjection['kind'], string> = {
+  'unit-reported': '单元内报告',
+  'alias-collision': '别名冲突',
+  'entity-kind-divergence': '实体类别分歧',
+  'setting-claim-divergence': '设定声明分歧',
+};
+export const ANALYSIS_CROSS_UNIT_FINDING_KIND_LABELS: Record<AnalysisCrossUnitFindingProjection['kind'], string> = {
+  contradiction: '前后矛盾',
+  'continuity-break': '连续性断裂',
+  'alias-identity-divergence': '同名异指',
+  'chronology-conflict': '时间线冲突',
+};
+
+/** V2-UX-REV-001's four scopes: 全书, selected chapters, chapters changed since the last review, the current selection. */
+export type ReviewScopeKind = 'whole' | 'chapters' | 'changed' | 'selection';
+export const REVIEW_SCOPE_KINDS: readonly ReviewScopeKind[] = ['whole', 'chapters', 'changed', 'selection'];
+export const REVIEW_SCOPE_LABELS = {
+  whole: '全书',
+  chapters: '选章',
+  changed: '只审改动过的章',
+  selection: '当前选区',
+} as const satisfies Record<ReviewScopeKind, string>;
+
+/**
+ * What an editor asks a Review Run to read. 选章 names the first and the last chapter of one contiguous
+ * run by the block identity of each chapter's first block; every other scope names neither.
+ */
+export interface ReviewRunScopeRequest {
+  kind: ReviewScopeKind;
+  fromChapterBlockId: string | null;
+  toChapterBlockId: string | null;
+}
+
+/** V2-UX-REV-004's status, derived from the finding's mark and never stored beside it (MARK-010). */
+export type ReviewFindingStatus = 'pending' | 'handled' | 'ignored';
+export const REVIEW_FINDING_STATUS_LABELS = {
+  pending: '待处理',
+  handled: '已处理',
+  ignored: '已忽略',
+} as const satisfies Record<ReviewFindingStatus, string>;
+
+/** Each category against the current manuscript (V2-UX-REV-007). */
+export type ReviewCoverageState = 'never' | 'current' | 'needs-review' | 'unavailable';
+export const REVIEW_COVERAGE_STATE_LABELS = {
+  never: '未审阅',
+  current: '已审阅 · 当前稿件',
+  'needs-review': '需复审',
+  unavailable: '不可用',
+} as const satisfies Record<ReviewCoverageState, string>;
+
+/**
+ * A Review Run as a whole. `partial` is a Run that stopped with some categories finished and others not
+ * — after a restart, `canContinue` says whether 继续审阅 would pick up the categories never finished.
+ */
+export type ReviewRunState = 'prepared' | 'running' | 'settled' | 'partial' | 'failed';
+
+/**
+ * One category inside a Review Run. `settled` means its findings are on the manuscript and actionable
+ * (V2-UX-REV-008); `refused` is a category that could not start — its plan changed, its basis is gone,
+ * or the launch cannot execute it — with the reason in `detail`.
+ */
+export type ReviewRunCategoryState = 'prepared' | 'waiting' | 'running' | 'settled' | 'failed' | 'interrupted' | 'refused';
+
+export interface ReviewAvailabilityProjection {
+  available: boolean;
+  unavailableReason: string | null;
+}
+
+/** One category of the configuration as the 新建审阅 sheet shows it, its basis stated once (REV-010). */
+export interface ReviewWorkspaceCategoryProjection {
+  categoryId: string;
+  label: string;
+  description: string;
+  output: ReviewCategoryOutputKind;
+  riskPointsOnly: boolean;
+  batchApply: boolean;
+  searchEngine: boolean;
+  basisStatement: string;
+  guidelineDocuments: ReadonlyArray<{ documentId: string; title: string; issuer: string; version: string; clauseCount: number }>;
+  procedure: { title: string; version: string };
+  available: boolean;
+  unavailableReason: string | null;
+  /** Which scopes this category can read now; 事实核查 and the leads read fewer than the rest. */
+  scopes: Readonly<Record<ReviewScopeKind, ReviewAvailabilityProjection>>;
+}
+
+/** One row of the coverage matrix: a category against the manuscript as it stands now (REV-007). */
+export interface ReviewCoverageRowProjection {
+  categoryId: string;
+  label: string;
+  state: ReviewCoverageState;
+  stateLabel: string;
+  /** The 第 N 次 whose findings this row stands on; `null` before any. */
+  lastRunOrdinal: number | null;
+  /** The Manuscript Revision that review read; `null` before any. */
+  lastReviewedRevisionLabel: string | null;
+  /** Blocks added, removed or changed since that review; `null` before any. */
+  changedBlocks: number | null;
+  unavailableReason: string | null;
+}
+
+/**
+ * A chapter an editor can start or end 选章 at. From the outline when the manuscript has headings; a
+ * manuscript without any offers its analysis units instead, which is the structure a review reads.
+ */
+export interface ReviewChapterOptionProjection {
+  blockId: string;
+  title: string;
+  level: number;
+  position: number;
+  /** The chapter's last block: the block before the next chapter of the same or a higher level, or the manuscript's last. */
+  endPosition: number;
+}
+
+export interface ReviewScopeOptionsProjection {
+  whole: ReviewAvailabilityProjection;
+  chapters: ReviewAvailabilityProjection & { basis: 'outline' | 'analysis-units'; chapters: ReadonlyArray<ReviewChapterOptionProjection> };
+  changed: ReviewAvailabilityProjection;
+  selection: ReviewAvailabilityProjection;
+}
+
+/** Findings by severity and by derived status; a finding counts once in each. */
+export interface ReviewFindingCountsProjection {
+  must: number;
+  should: number;
+  note: number;
+  pending: number;
+  handled: number;
+  ignored: number;
+}
+
+/** One entry of the 审阅记录 list, newest first: 第 N 次 with its categories, scope and outcome. */
+export interface ReviewRunSummaryProjection {
+  reviewRunId: string;
+  ordinal: number;
+  label: string;
+  createdAt: string;
+  scopeLabel: string;
+  categoryLabels: ReadonlyArray<string>;
+  state: ReviewRunState;
+  stateLabel: string;
+  findingCounts: ReviewFindingCountsProjection;
+  /** The latest 审阅报告 version; `null` before one is generated. */
+  reportVersion: number | null;
+}
+
+/** What a category's Task plan freezes, as the plan screen states it before the one approval. */
+export interface ReviewRunCategoryPlanProjection {
+  units: number;
+  recomputed: number;
+  reused: number;
+  unreviewed: number;
+  taskInputRevisionLabel: string;
+  routeLabel: string;
+  providerStatusLabel: string;
+  budgetCeilingLabel: string;
+}
+
+export interface ReviewRunCategoryProjection {
+  categoryId: string;
+  label: string;
+  position: number;
+  output: ReviewCategoryOutputKind;
+  riskPointsOnly: boolean;
+  batchApply: boolean;
+  basisStatement: string;
+  state: ReviewRunCategoryState;
+  stateLabel: string;
+  detail: string | null;
+  /** The category's Task; `null` for the model-free leads, which have none. */
+  taskIntentId: string | null;
+  planEnvelopeDigest: string | null;
+  modeLabel: string | null;
+  plan: ReviewRunCategoryPlanProjection | null;
+  /** Measured Run Progress while this category's Run executes; `null` otherwise. */
+  progress: NonNullable<BaselineAnalysisProjection['run']>['progress'];
+  findingsCount: number;
+  /** What the category listed that could not be anchored: the excluded appendix, never a mark. */
+  excludedCount: number;
+}
+
+/** One finding of a Review Run: one record with the Editorial Mark it became (MARK-010, FIND-002). */
+export interface ReviewFindingProjection {
+  findingId: string;
+  categoryId: string;
+  categoryLabel: string;
+  ordinal: number;
+  severity: ReviewFindingSeverity;
+  severityLabel: string;
+  output: ReviewCategoryOutputKind;
+  /** Only `需人工复核的风险点`: AI7 states no compliance, plagiarism or policy verdict (REV-003). */
+  riskPoint: boolean;
+  status: ReviewFindingStatus;
+  statusLabel: string;
+  statusDetail: string;
+  blockId: string;
+  /** Where the words stand now: the mark's live range, or the range the review found them at. */
+  fromGrapheme: number;
+  toGrapheme: number;
+  /** The block's position in the working manuscript; `null` once the block is no longer part of it. */
+  blockPosition: number | null;
+  /** The chapter option the block falls in, for the 章 filter; `null` outside every chapter. */
+  chapterBlockId: string | null;
+  chapterTitle: string | null;
+  quote: string;
+  note: string;
+  /** What a 修改建议 proposes in place of the quotation (empty proposes deleting it); `null` for a 批注. */
+  replacement: string | null;
+  clauseRefs: ReadonlyArray<{ documentTitle: string; clauseId: string; text: string }>;
+  /** The finding's own state line, such as 事实核查's `未外部复核`; `null` when it has none. */
+  stateLine: string | null;
+  markId: string | null;
+  markStatus: 'open' | 'resolved' | 'applied' | 'removed' | 'converted' | null;
+  anchorState: 'exact' | 'drifted' | 'detached' | 'anchor-changed';
+  ignoreReason: string | null;
+}
+
+/** The versioned 审阅报告 (REV-009) exactly as recorded, read back with the digest of its canonical JSON. */
+export interface ReviewReportProjection {
+  reportId: string;
+  version: number;
+  generatedAt: string;
+  digest: string;
+  record: ReviewReportRecord;
+}
+
+export interface ReviewReportRecord {
+  schema: 'ai7.review.report/1';
+  reviewRunId: string;
+  version: number;
+  generatedAt: string;
+  run: {
+    ordinal: number;
+    label: string;
+    createdAt: string;
+    scopeLabel: string;
+    manuscript: { revisionId: string; revisionLabel: string; journalSequence: number };
+  };
+  overview: {
+    title: '概览表';
+    rows: ReadonlyArray<{ categoryId: string; label: string; state: ReviewRunCategoryState; stateLabel: string; counts: ReviewFindingCountsProjection }>;
+  };
+  mustItems: {
+    title: '必须处理的事项';
+    items: ReadonlyArray<{
+      findingId: string;
+      categoryId: string;
+      categoryLabel: string;
+      locationLabel: string;
+      quote: string;
+      note: string;
+      status: ReviewFindingStatus;
+      statusLabel: string;
+    }>;
+  };
+  categorySummaries: {
+    title: '各类别摘要';
+    entries: ReadonlyArray<{
+      categoryId: string;
+      label: string;
+      output: ReviewCategoryOutputKind;
+      counts: ReviewFindingCountsProjection;
+      basisStatement: string;
+      excludedCount: number;
+      stateLine: string;
+    }>;
+  };
+  appendix: {
+    title: '附录';
+    configuration: { schema: string; version: string; digest: string };
+    categories: ReadonlyArray<{
+      categoryId: string;
+      label: string;
+      guidelineDocuments: ReadonlyArray<{ documentId: string; title: string; issuer: string; version: string }>;
+      procedure: { procedureId: string; title: string; version: string };
+      planEnvelopeDigest: string | null;
+      resultSetRevisionId: string | null;
+      adapterPin: { route: string; model: string; fixtureIdentity: string | null; fixtureSha256: string | null } | null;
+    }>;
+  };
+}
+
+/** The opened Review Run (the latest when none is named) with its categories, findings and Report. */
+export interface ReviewRunProjection {
+  reviewRunId: string;
+  ordinal: number;
+  label: string;
+  createdAt: string;
+  state: ReviewRunState;
+  stateLabel: string;
+  /** 继续审阅 is offered exactly when an authorized Run stopped with categories never finished. */
+  canContinue: boolean;
+  scope: { kind: ReviewScopeKind; label: string; selectedRange: BaselineAnalysisSelectedRange | null };
+  manuscript: { manuscriptId: string; branchId: string; revisionId: string; revisionLabel: string; journalSequence: number; workingDigest: string };
+  configurationDigest: string;
+  authorization: null | { authorizedAt: string };
+  categories: ReadonlyArray<ReviewRunCategoryProjection>;
+  findings: ReadonlyArray<ReviewFindingProjection>;
+  /** Whether `findings` stops at its bound; the counts always cover every finding. */
+  findingsTruncated: boolean;
+  findingCounts: ReviewFindingCountsProjection;
+  report: ReviewReportProjection | null;
+  reportVersions: ReadonlyArray<{ reportId: string; version: number; generatedAt: string; digest: string }>;
+}
+
+/**
+ * The 审阅 destination of one Book (V2-UX-REV-001 to REV-013): the configured categories with their
+ * basis, the coverage matrix, the scope options, the 审阅记录, and the opened Run.
+ */
+export interface ReviewWorkspaceProjection {
+  bookId: string;
+  /** The Book's primary Manuscript as it stands now; `null` for a Book without one. */
+  manuscript: null | { manuscriptId: string; branchId: string; revisionId: string; revisionLabel: string; journalSequence: number; workingDigest: string; totalBlocks: number };
+  configuration: { schema: string; version: string; digest: string };
+  categories: ReadonlyArray<ReviewWorkspaceCategoryProjection>;
+  coverage: ReadonlyArray<ReviewCoverageRowProjection>;
+  scopeOptions: ReviewScopeOptionsProjection;
+  /** Whether 新建审阅 can prepare a Run now: not while one of this Book's runs is under way. */
+  newReview: ReviewAvailabilityProjection;
+  runs: ReadonlyArray<ReviewRunSummaryProjection>;
+  run: ReviewRunProjection | null;
+}
+
+/** The inputs Stage C's operations will carry; the Book is always the route's, never the renderer's. */
+export interface InspectReviewWorkspaceInput {
+  bookId: string;
+  reviewRunId: string | null;
+}
+
+export interface PrepareReviewRunInput {
+  bookId: string;
+  categoryIds: ReadonlyArray<string>;
+  scope: ReviewRunScopeRequest;
+}
+
+export interface AuthorizeReviewRunInput {
+  bookId: string;
+  reviewRunId: string;
+  planDigests: ReadonlyArray<{ categoryId: string; planEnvelopeDigest: string }>;
+}
+
+export interface RecordReviewFindingDispositionInput {
+  bookId: string;
+  reviewRunId: string;
+  findingId: string;
+  disposition: 'ignored';
+  reason: string;
+}
+
+export interface GenerateReviewReportInput {
+  bookId: string;
+  reviewRunId: string;
+}
+
 /** Every analysis projection, discriminated on `kind`. */
 export type AnalysisProjection = BaselineAnalysisProjection | FactualReviewProjection | ReviewCategoryProjection;
 
