@@ -1539,6 +1539,9 @@ async function main() {
     const gapBlockId = revision.gaps[0].blockIds[0];
     await assertRenderer(renderer, `(() => { const button=document.querySelector('[data-analysis-gap-unit="2"] [data-analysis-action="return-to-range"]'); if(!(button instanceof HTMLButtonElement)||button.disabled||button.dataset.analysisBlockId!==${JSON.stringify(gapBlockId)})return false; button.click(); return true; })()`, 'return-to-range-click');
     await waitFor(renderer, `document.querySelector('[data-screen="editor"] [data-testid="manuscript-editor"] [data-block-id=${JSON.stringify(gapBlockId)}]')`, 'return-to-range-editor', 120_000);
+    // Synchronized delta with Issue #409: the manuscript's position rail marks the range this analysis left
+    // unread, on the chapter side of the track, and says why; a Book never analysed shows no such lane.
+    await waitFor(renderer, `(() => { const track = document.querySelector('.rail-track'); const gaps = Array.from(track?.querySelectorAll('.rail-gap[data-rail-gap="uncovered"]') ?? []); return track?.dataset.railAnalysed === 'true' && gaps.length === 1 && gaps[0].title.startsWith('分析未覆盖：') && gaps[0].getBoundingClientRect().height >= 3; })()`, 'rail-marks-the-unread-range', 30_000);
     cancellation.throwIfRequested();
     await openAnalysisDestination(renderer, 'return-to-range-back');
     await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='settled'`, 'return-to-range-overview');

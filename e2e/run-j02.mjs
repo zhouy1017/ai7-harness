@@ -428,6 +428,13 @@ async function editThenInvokeOnDirty(renderer, suffix, actionLabels, location) {
 async function openNavigation(renderer, location) {
   await assertRenderer(renderer, `(() => { const entry = document.querySelector('[data-edge-entry="navigation"]'); const panel = document.querySelector('#manuscript-navigation-panel'); const rail = document.querySelector('.rail-track .position-rail'); return entry?.getAttribute('aria-expanded') === 'false' && panel?.hidden === true && rail instanceof HTMLInputElement && rail.getBoundingClientRect().height > rail.getBoundingClientRect().width; })()`, `${location}-closed-with-rail`);
   await assertRenderer(renderer, `(() => { const entry = document.querySelector('[data-edge-entry="navigation"]'); const panel = document.querySelector('#manuscript-navigation-panel'); if (!(entry instanceof HTMLButtonElement) || !(panel instanceof HTMLElement)) return false; if (entry.getAttribute('aria-expanded') !== 'true') entry.click(); return entry.getAttribute('aria-expanded') === 'true' && !panel.hidden; })()`, location);
+  // The rail draws the manuscript's chapters as ticks, bounded however long the manuscript is, and says
+  // when the bound cut them; the pane's own scrollbar shows only while the pane scrolls (V2-UX-ED-059).
+  await waitFor(renderer, `(() => { const track = document.querySelector('.rail-track'); const chapters = Number(track?.dataset.railChapters); return chapters > 0 && chapters <= 400 && track.querySelectorAll('.rail-tick').length === chapters && track.dataset.railAnalysed === 'false' && track.querySelectorAll('.rail-marker').length === 0; })()`, `${location}-rail-ticks`, 30_000);
+  await assertRenderer(renderer, `(() => { const pane = document.querySelector('.editor-window'); if (pane.dataset.scrolling !== undefined) return false; pane.scrollTop += 24; return true; })()`, `${location}-scrollbar-at-rest`);
+  await waitFor(renderer, `document.querySelector('.editor-window').dataset.scrolling === 'true'`, `${location}-scrollbar-while-scrolling`, 5_000);
+  await waitFor(renderer, `document.querySelector('.editor-window').dataset.scrolling === undefined`, `${location}-scrollbar-rests-again`, 5_000);
+  await assertRenderer(renderer, `(() => { const pane = document.querySelector('.editor-window'); pane.scrollTop = 0; return true; })()`, `${location}-scroll-back`);
 }
 
 async function clickButton(renderer, label, location) {
