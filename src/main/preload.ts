@@ -5,6 +5,7 @@ import {
   type CommitNewBookRendererInput,
   type CommitManuscriptReimportRendererInput,
   type CommitSourceImportRendererInput,
+  type EditorClipboardCommand,
   type PickerReselectResult,
   type PickerStageResult,
   type RendererApi,
@@ -254,6 +255,18 @@ const api: RendererApi = Object.freeze({
   listPriorWork: () => invoke<ServiceOperationMap['listPriorWork']['output']>(IPC_CHANNELS.listPriorWork, {}),
   getManuscriptWindowAt: (input: ServiceOperationMap['getManuscriptWindowAt']['input']) =>
     invoke<ServiceOperationMap['getManuscriptWindowAt']['output']>(IPC_CHANNELS.getManuscriptWindowAt, input),
+  createEditorialMark: (input: ServiceOperationMap['createEditorialMark']['input']) =>
+    invoke<ServiceOperationMap['createEditorialMark']['output']>(IPC_CHANNELS.createEditorialMark, input),
+  getEditorialMarkCard: (input: ServiceOperationMap['getEditorialMarkCard']['input']) =>
+    invoke<ServiceOperationMap['getEditorialMarkCard']['output']>(IPC_CHANNELS.getEditorialMarkCard, input),
+  updateEditorialMark: (input: ServiceOperationMap['updateEditorialMark']['input']) =>
+    invoke<ServiceOperationMap['updateEditorialMark']['output']>(IPC_CHANNELS.updateEditorialMark, input),
+  recordChangeSuggestionDecision: (input: ServiceOperationMap['recordChangeSuggestionDecision']['input']) =>
+    invoke<ServiceOperationMap['recordChangeSuggestionDecision']['output']>(IPC_CHANNELS.recordChangeSuggestionDecision, input),
+  recordProposalDecisionReason: (input: ServiceOperationMap['recordProposalDecisionReason']['input']) =>
+    invoke<ServiceOperationMap['recordProposalDecisionReason']['output']>(IPC_CHANNELS.recordProposalDecisionReason, input),
+  runEditorClipboardCommand: (input: { command: EditorClipboardCommand }) =>
+    invoke<{ state: 'done' }>(IPC_CHANNELS.runEditorClipboardCommand, input),
   recordManuscriptEntryPosition: (input: ServiceOperationMap['recordManuscriptEntryPosition']['input']) =>
     invoke<ServiceOperationMap['recordManuscriptEntryPosition']['output']>(
       IPC_CHANNELS.recordManuscriptEntryPosition,

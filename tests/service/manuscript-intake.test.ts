@@ -7,7 +7,7 @@ import { EditorialStore } from '../../src/service/store.js';
 import {
   MANUSCRIPT_INTAKE_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_VERSION,
-  MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION,
+  EDITORIAL_MARK_SCHEMA_VERSION,
 } from '../../src/service/task-authorization.js';
 import type { SourceFormat } from '../../src/shared/protocol.js';
 import { LOCAL_ONLY_DOC, localOnlyAvailable, localOnlyPath } from '../support/local-only-manuscripts.js';
@@ -133,6 +133,11 @@ function downgradeToRevision17(databasePath: string): void {
       ALTER TABLE import_drafts DROP COLUMN working_object_digest;
       ALTER TABLE import_drafts DROP COLUMN converter_identity;
       ALTER TABLE import_abandonment_cleanup_intents DROP COLUMN working_object_digest;
+      DROP TABLE proposal_decision_reasons;
+      DROP TABLE proposal_item_decisions;
+      DROP TABLE proposal_change_items;
+      DROP TABLE editorial_mark_replies;
+      DROP TABLE editorial_marks;
       DROP TABLE manuscript_entry_positions;
       PRAGMA user_version = ${TASK_AUTHORIZATION_SCHEMA_VERSION};
       COMMIT;`);
@@ -610,7 +615,7 @@ describe('schema revision 18 over the real store', () => {
     const after = new DatabaseSync(databasePath, { readOnly: true });
     try {
       expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version)
-        .toBe(MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION);
+        .toBe(EDITORIAL_MARK_SCHEMA_VERSION);
       // Every row is the row it was: the parsed DOCX keeps its digests, its parser, and its format.
       expect(tableRows(after, 'source_versions', REVISION_17_SOURCE_VERSION_COLUMNS)).toEqual(sourceVersionsBefore);
       expect(tableRows(after, 'source_provenance', REVISION_17_PROVENANCE_COLUMNS)).toEqual(provenanceBefore);
@@ -649,6 +654,11 @@ function downgradeToRevision18(databasePath: string): void {
       ALTER TABLE import_drafts DROP COLUMN working_object_digest;
       ALTER TABLE import_drafts DROP COLUMN converter_identity;
       ALTER TABLE import_abandonment_cleanup_intents DROP COLUMN working_object_digest;
+      DROP TABLE proposal_decision_reasons;
+      DROP TABLE proposal_item_decisions;
+      DROP TABLE proposal_change_items;
+      DROP TABLE editorial_mark_replies;
+      DROP TABLE editorial_marks;
       DROP TABLE manuscript_entry_positions;
       PRAGMA user_version = ${MANUSCRIPT_INTAKE_SCHEMA_VERSION};
       COMMIT;`);
@@ -700,7 +710,7 @@ describe('schema revision 19 over the real store', () => {
     const after = new DatabaseSync(databasePath, { readOnly: true });
     try {
       expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version)
-        .toBe(MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION);
+        .toBe(EDITORIAL_MARK_SCHEMA_VERSION);
       // Every row is the row it was; a DOCX read natively gains two columns and fills neither.
       expect(tableRows(after, 'source_versions', REVISION_18_SOURCE_VERSION_COLUMNS)).toEqual(sourceVersionsBefore);
       expect(tableRows(after, 'import_drafts', `${REVISION_17_DRAFT_COLUMNS}, source_format`)).toEqual(draftsBefore);

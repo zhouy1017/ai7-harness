@@ -37,6 +37,7 @@ import {
   type ModelServiceSettingsProjection,
   type PickerReselectResult,
   type PickerStageResult,
+  type EditorClipboardCommand,
   type ProductDataLocationProjection,
   type ProductDataLocationRevealProjection,
   type RendererCallResult,
@@ -155,6 +156,7 @@ function parseArguments(argv: string[]): LaunchArguments {
           key === '--j12-picker-path' ||
           key === '--j03-picker-path' ||
           key === '--j04-picker-path' ||
+          key === '--j05-picker-path' ||
           key === '--j01-import-control' ||
           key === '--j03-foreground-execution-control' ||
           key === '--j08-recovery-control' ||
@@ -183,7 +185,8 @@ function parseArguments(argv: string[]): LaunchArguments {
   const j12PickerPath = values.get('--j12-picker-path');
   const j03PickerPath = values.get('--j03-picker-path');
   const j04PickerPath = values.get('--j04-picker-path');
-  requireDesktop([j01PickerPath, j02PickerPath, j08PickerPath, j12PickerPath, j03PickerPath, j04PickerPath].filter(Boolean).length <= 1);
+  const j05PickerPath = values.get('--j05-picker-path');
+  requireDesktop([j01PickerPath, j02PickerPath, j08PickerPath, j12PickerPath, j03PickerPath, j04PickerPath, j05PickerPath].filter(Boolean).length <= 1);
   // The picker-path launch controls carry whatever their Journey selects, in any recognised format
   // or none, so each one asks only that it is its own Journey's absolute path.
   requireDesktop(
@@ -204,7 +207,10 @@ function parseArguments(argv: string[]): LaunchArguments {
   requireDesktop(
     j04PickerPath === undefined || (process.env.AI7_E2E_JOURNEY === 'J-04' && isAbsolute(j04PickerPath)),
   );
-  const injectedPickerPath = j01PickerPath ?? j02PickerPath ?? j08PickerPath ?? j12PickerPath ?? j03PickerPath ?? j04PickerPath;
+  requireDesktop(
+    j05PickerPath === undefined || (process.env.AI7_E2E_JOURNEY === 'J-05' && isAbsolute(j05PickerPath)),
+  );
+  const injectedPickerPath = j01PickerPath ?? j02PickerPath ?? j08PickerPath ?? j12PickerPath ?? j03PickerPath ?? j04PickerPath ?? j05PickerPath;
   const importControlValue = values.get('--j01-import-control');
   const importControl =
     importControlValue === 'before-commit' ||
@@ -1586,6 +1592,76 @@ function registerRendererHandlers(
         rememberManuscriptCapability(owned, result.window, input, owned.routeGeneration);
         return result;
       });
+    }),
+  );
+  // Editorial Marks (Issue #407) are records about one manuscript, so each command is gated exactly
+  // as reading or writing that manuscript is, and the ones that write are serialized with every other
+  // effect of this window's authority.
+  ipcMain.handle(IPC_CHANNELS.createEditorialMark, (event, input: ServiceOperationMap['createEditorialMark']['input']) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      return serializeEffect(async () => {
+        requireAuthority();
+        requireManuscriptCapability(owned, input);
+        return service.call('createEditorialMark', input);
+      });
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.getEditorialMarkCard, (event, input: ServiceOperationMap['getEditorialMarkCard']['input']) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      requireAuthority();
+      requireManuscriptCapability(owned, input);
+      return service.call('getEditorialMarkCard', input);
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.updateEditorialMark, (event, input: ServiceOperationMap['updateEditorialMark']['input']) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      return serializeEffect(async () => {
+        requireAuthority();
+        requireManuscriptCapability(owned, input);
+        return service.call('updateEditorialMark', input);
+      });
+    }),
+  );
+  ipcMain.handle(
+    IPC_CHANNELS.recordChangeSuggestionDecision,
+    (event, input: ServiceOperationMap['recordChangeSuggestionDecision']['input']) =>
+      envelope(async () => {
+        const owned = requireSender(event);
+        return serializeEffect(async () => {
+          requireAuthority();
+          requireManuscriptCapability(owned, input);
+          return service.call('recordChangeSuggestionDecision', input);
+        });
+      }),
+  );
+  ipcMain.handle(
+    IPC_CHANNELS.recordProposalDecisionReason,
+    (event, input: ServiceOperationMap['recordProposalDecisionReason']['input']) =>
+      envelope(async () => {
+        const owned = requireSender(event);
+        return serializeEffect(async () => {
+          requireAuthority();
+          requireManuscriptCapability(owned, input);
+          return service.call('recordProposalDecisionReason', input);
+        });
+      }),
+  );
+  // The selection menu's 文字处理 group. The page holds no clipboard permission, so the window that
+  // owns the focused editor runs the command itself; it reaches no service and takes nothing but the
+  // command's name, and the editor's own paste and cut handling still decides what enters the text.
+  ipcMain.handle(IPC_CHANNELS.runEditorClipboardCommand, (event, input: { command: EditorClipboardCommand }) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      const contents = owned.window.webContents;
+      if (input?.command === 'cut') contents.cut();
+      else if (input?.command === 'copy') contents.copy();
+      else if (input?.command === 'paste') contents.paste();
+      else if (input?.command === 'paste-plain-text') contents.pasteAndMatchStyle();
+      else throw new ServiceCallError('AI7_RENDERER_BOUNDARY_INVALID', '文字处理命令无效。');
+      return { state: 'done' as const };
     }),
   );
   // The remembered position is editor state about a manuscript, so it is gated exactly as reading or

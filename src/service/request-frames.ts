@@ -2,7 +2,9 @@ import { isAbsolute } from 'node:path';
 import {
   BASELINE_ANALYSIS_MODE_GOALS,
   BASELINE_ANALYSIS_UPDATE_MODES,
+  MAX_BLOCK_CODE_UNITS,
   MAX_EDIT_CODE_UNITS,
+  MAX_MARK_BODY_CODE_UNITS,
   MAX_REPLACEMENT_EXCLUSIONS,
   J03_TASK_GOAL,
   type BaselineAnalysisUpdateMode,
@@ -43,6 +45,22 @@ function isBoundedString(value: unknown, maximum: number, allowEmpty = false): v
 function requireInput(value: unknown, keys: readonly string[], requestId: string): Record<string, unknown> {
   if (!isRecord(value) || !hasExactKeys(value, keys)) throw new ProtocolError(requestId);
   return value;
+}
+
+const MARK_BLOCK_PATTERN = /^blk_[0-9a-f]{24}$/;
+
+function validMarkBinding(input: Record<string, unknown>): boolean {
+  return isBoundedString(input.manuscriptId, 36) && UUID_PATTERN.test(input.manuscriptId) &&
+    isBoundedString(input.branchId, 36) && UUID_PATTERN.test(input.branchId) &&
+    isBoundedString(input.windowStartBlockId, 28) && MARK_BLOCK_PATTERN.test(input.windowStartBlockId);
+}
+
+function validMarkKind(value: unknown): boolean {
+  return value === 'change-suggestion' || value === 'annotation' || value === 'editor-note' || value === 'personal-highlight';
+}
+
+function validHighlightColor(value: unknown): boolean {
+  return value === null || value === 1 || value === 2 || value === 3;
 }
 
 function validRecoverySelection(value: unknown): boolean {
@@ -483,6 +501,102 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
         !isBoundedString(input.blockId, 28) ||
         !/^blk_[0-9a-f]{24}$/.test(input.blockId) ||
         !isSafeInteger(input.grapheme, 0)
+      ) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
+    case 'createEditorialMark': {
+      const input = requireInput(
+        value.input,
+        [
+          'manuscriptId', 'branchId', 'windowStartBlockId', 'clientMarkId', 'baseRevisionId', 'expectedJournalSequence',
+          'blockId', 'baseBlockDigest', 'fromGrapheme', 'toGrapheme', 'selectedText', 'kind', 'highlightColor', 'body',
+          'proposedText', 'rationale',
+        ],
+        tentativeId,
+      );
+      if (
+        !validMarkBinding(input) ||
+        !isBoundedString(input.clientMarkId, 36) || !UUID_PATTERN.test(input.clientMarkId) ||
+        !isBoundedString(input.baseRevisionId, 36) || !UUID_PATTERN.test(input.baseRevisionId) ||
+        !isSafeInteger(input.expectedJournalSequence, 0) ||
+        !isBoundedString(input.blockId, 28) || !MARK_BLOCK_PATTERN.test(input.blockId) ||
+        !isBoundedString(input.baseBlockDigest, 64) || !/^[0-9a-f]{64}$/.test(input.baseBlockDigest) ||
+        !isSafeInteger(input.fromGrapheme, 0) || !isSafeInteger(input.toGrapheme, 1) ||
+        !isBoundedString(input.selectedText, MAX_BLOCK_CODE_UNITS) ||
+        !validMarkKind(input.kind) ||
+        !validHighlightColor(input.highlightColor) ||
+        !isBoundedString(input.body, MAX_MARK_BODY_CODE_UNITS, true) ||
+        !(input.proposedText === null || isBoundedString(input.proposedText, MAX_MARK_BODY_CODE_UNITS, true)) ||
+        !(input.rationale === null || isBoundedString(input.rationale, MAX_MARK_BODY_CODE_UNITS, true))
+      ) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
+    case 'getEditorialMarkCard': {
+      const input = requireInput(value.input, ['manuscriptId', 'branchId', 'markId'], tentativeId);
+      if (
+        !isBoundedString(input.manuscriptId, 36) || !UUID_PATTERN.test(input.manuscriptId) ||
+        !isBoundedString(input.branchId, 36) || !UUID_PATTERN.test(input.branchId) ||
+        !isBoundedString(input.markId, 36) || !UUID_PATTERN.test(input.markId)
+      ) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
+    case 'updateEditorialMark': {
+      const input = requireInput(
+        value.input,
+        ['manuscriptId', 'branchId', 'windowStartBlockId', 'markId', 'action', 'body', 'highlightColor', 'status', 'targetKind', 'proposedText', 'rationale'],
+        tentativeId,
+      );
+      if (
+        !validMarkBinding(input) ||
+        !isBoundedString(input.markId, 36) || !UUID_PATTERN.test(input.markId) ||
+        !(typeof input.action === 'string' && ['edit-body', 'recolor', 'set-status', 'reply', 'remove', 'convert'].includes(input.action)) ||
+        !(input.body === null || isBoundedString(input.body, MAX_MARK_BODY_CODE_UNITS, true)) ||
+        !validHighlightColor(input.highlightColor) ||
+        !(input.status === null || input.status === 'open' || input.status === 'resolved') ||
+        !(input.targetKind === null || validMarkKind(input.targetKind)) ||
+        !(input.proposedText === null || isBoundedString(input.proposedText, MAX_MARK_BODY_CODE_UNITS, true)) ||
+        !(input.rationale === null || isBoundedString(input.rationale, MAX_MARK_BODY_CODE_UNITS, true))
+      ) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
+    case 'recordChangeSuggestionDecision': {
+      const input = requireInput(
+        value.input,
+        ['manuscriptId', 'branchId', 'windowStartBlockId', 'markId', 'clientDecisionId', 'disposition', 'editedText', 'reason'],
+        tentativeId,
+      );
+      if (
+        !validMarkBinding(input) ||
+        !isBoundedString(input.markId, 36) || !UUID_PATTERN.test(input.markId) ||
+        !isBoundedString(input.clientDecisionId, 36) || !UUID_PATTERN.test(input.clientDecisionId) ||
+        !(input.disposition === 'rejected' || input.disposition === 'accepted-with-edit' || input.disposition === 'withdrawn') ||
+        !(input.editedText === null || isBoundedString(input.editedText, MAX_MARK_BODY_CODE_UNITS, true)) ||
+        !(input.reason === null || isBoundedString(input.reason, MAX_MARK_BODY_CODE_UNITS))
+      ) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
+    case 'recordProposalDecisionReason': {
+      const input = requireInput(
+        value.input,
+        ['manuscriptId', 'branchId', 'windowStartBlockId', 'markId', 'decisionId', 'reason', 'reasonSource'],
+        tentativeId,
+      );
+      if (
+        !validMarkBinding(input) ||
+        !isBoundedString(input.markId, 36) || !UUID_PATTERN.test(input.markId) ||
+        !isBoundedString(input.decisionId, 36) || !UUID_PATTERN.test(input.decisionId) ||
+        !isBoundedString(input.reason, MAX_MARK_BODY_CODE_UNITS) ||
+        !(input.reasonSource === 'suggested' || input.reasonSource === 'free-text')
       ) {
         throw new ProtocolError(tentativeId);
       }

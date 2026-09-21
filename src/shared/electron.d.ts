@@ -24,6 +24,10 @@ declare module 'electron' {
       send(channel: string): void;
       setWindowOpenHandler(handler: () => { action: 'deny' }): void;
       on(event: string, listener: (...args: any[]) => void): void;
+      cut(): void;
+      copy(): void;
+      paste(): void;
+      pasteAndMatchStyle(): void;
     };
     destroy(): void;
     focus(): void;

@@ -457,6 +457,21 @@ async function dispatch(
       };
     case 'flushJournalEdit':
       return { id: request.id, ok: true, op: request.op, result: store.flushJournalEdit(request.input) };
+    case 'createEditorialMark':
+      return { id: request.id, ok: true, op: request.op, result: store.createEditorialMark(request.input) };
+    case 'getEditorialMarkCard':
+      return {
+        id: request.id,
+        ok: true,
+        op: request.op,
+        result: store.getEditorialMarkCard(request.input.manuscriptId, request.input.branchId, request.input.markId),
+      };
+    case 'updateEditorialMark':
+      return { id: request.id, ok: true, op: request.op, result: store.updateEditorialMark(request.input) };
+    case 'recordChangeSuggestionDecision':
+      return { id: request.id, ok: true, op: request.op, result: store.recordChangeSuggestionDecision(request.input) };
+    case 'recordProposalDecisionReason':
+      return { id: request.id, ok: true, op: request.op, result: store.recordProposalDecisionReason(request.input) };
     case 'recordManuscriptEntryPosition':
       store.recordManuscriptEntryPosition(
         request.input.manuscriptId,

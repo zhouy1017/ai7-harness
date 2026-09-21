@@ -4,6 +4,33 @@
   color: #242720;
   background: #f3efe5;
   font-synthesis: none;
+  /* Editorial Marks (V2-UX-MARK-002): one fixed system color per kind, line and fill, and three
+     personal highlight colors that carry no meaning of their own. */
+  --mark-suggestion: #c4566a;
+  --mark-suggestion-fill: #fbe3e7;
+  --mark-annotation: #3b6ea8;
+  --mark-annotation-fill: #dde9f8;
+  --mark-note: #7a5fb0;
+  --mark-note-fill: #ebe4f7;
+  --mark-highlight-1: #fff1a8;
+  --mark-highlight-2: #ffe0c2;
+  --mark-highlight-3: #d2eedb;
+  --mark-highlight-line: #c9b458;
+}
+
+/* The same set for the dark theme (editor-surfaces.md §0.3: 深色主题成套定义). Nothing selects it until
+   the shell has a dark theme; the marks then need no second pass. */
+:root[data-theme="dark"] {
+  --mark-suggestion: #e58fa0;
+  --mark-suggestion-fill: #4a2530;
+  --mark-annotation: #86b0e0;
+  --mark-annotation-fill: #1f3550;
+  --mark-note: #b49fe0;
+  --mark-note-fill: #332a4a;
+  --mark-highlight-1: #5c5320;
+  --mark-highlight-2: #5a3f22;
+  --mark-highlight-3: #274a36;
+  --mark-highlight-line: #8f8240;
 }
 
 * { box-sizing: border-box; }
@@ -295,13 +322,77 @@ legend { margin-bottom: .7rem; font-weight: 800; }
 .replacement-review ul { max-height: 140px; overflow: auto; padding-left: 1.2rem; }
 .milestone-section summary { cursor: pointer; font-weight: 800; }
 .manuscript-surface { min-width: 0; background: #fffefb; }
-.editor-window { max-height: min(70vh, 760px); overflow: auto; padding: 2.2rem clamp(1.5rem, 5vw, 5rem) 3rem; background: #fffefb; }
+.editor-window { position: relative; max-height: min(70vh, 760px); overflow: auto; padding: 2.2rem clamp(1.5rem, 5vw, 5rem) 3rem; background: #fffefb; }
 .ProseMirror { min-height: 480px; max-width: 760px; margin: 0 auto; line-height: 1.9; font-family: "Noto Serif CJK SC", "Songti SC", serif; font-size: 1.05rem; caret-color: #254e3d; }
 .ProseMirror h1 { font-size: 2rem; line-height: 1.35; }
 .ProseMirror h2, .ProseMirror h3, .ProseMirror h4, .ProseMirror h5, .ProseMirror h6 { margin-top: 1.8em; line-height: 1.5; }
 .ProseMirror p { margin: 1em 0; }
 .ProseMirror [data-block-id] { border-left: 2px solid transparent; padding-left: .65rem; }
 .ProseMirror [data-block-id]:focus-within { border-left-color: #9ab09a; }
+/* A paragraph carrying an open mark shows a 3 px margin line in that mark's color; the text does not shift. */
+.ProseMirror [data-block-id][data-mark-line] { border-left-width: 3px; padding-left: calc(.65rem - 1px); }
+.ProseMirror [data-block-id][data-mark-line="change-suggestion"] { border-left-color: var(--mark-suggestion); }
+.ProseMirror [data-block-id][data-mark-line="annotation"] { border-left-color: var(--mark-annotation); }
+.ProseMirror [data-block-id][data-mark-line="editor-note"] { border-left-color: var(--mark-note); }
+.ProseMirror [data-block-id][data-mark-line="personal-highlight"] { border-left-color: var(--mark-highlight-line); }
+.ProseMirror .editorial-mark { border-radius: 2px; cursor: pointer; }
+.ProseMirror .editorial-mark-change-suggestion { background: var(--mark-suggestion-fill); border-bottom: 2px solid var(--mark-suggestion); }
+.ProseMirror .editorial-mark-annotation { background: var(--mark-annotation-fill); border-bottom: 2px solid var(--mark-annotation); }
+.ProseMirror .editorial-mark-editor-note { background: var(--mark-note-fill); border-bottom: 2px dotted var(--mark-note); }
+.ProseMirror .editorial-mark-personal-highlight { cursor: text; }
+.ProseMirror .editorial-mark-personal-highlight[data-mark-color="1"] { background: var(--mark-highlight-1); }
+.ProseMirror .editorial-mark-personal-highlight[data-mark-color="2"] { background: var(--mark-highlight-2); }
+.ProseMirror .editorial-mark-personal-highlight[data-mark-color="3"] { background: var(--mark-highlight-3); }
+.ProseMirror .editorial-mark[data-mark-status="resolved"] { background: transparent; border-bottom-style: dashed; }
+.ProseMirror .editorial-mark[data-mark-anchor="drifted"] { background: transparent; border-bottom-style: dashed; border-bottom-width: 2px; }
+.ProseMirror .editorial-mark-active { outline: 2px solid #416458; outline-offset: 1px; }
+.ProseMirror .editorial-mark-previewed { text-decoration: line-through; text-decoration-color: var(--mark-suggestion); color: #7b7f76; }
+.ProseMirror .editorial-mark-preview { margin-left: .15em; text-decoration: none; background: var(--mark-suggestion-fill); border-bottom: 2px solid var(--mark-suggestion); border-radius: 2px; }
+.ProseMirror .editorial-mark-preview-label { margin: 0 .2em 0 .35em; padding: 0 .45em; border: 1px solid var(--mark-suggestion); border-radius: 999px; color: var(--mark-suggestion); background: #fffefb; font-family: "Noto Sans CJK SC", "Microsoft YaHei", "PingFang SC", system-ui, sans-serif; font-size: .7rem; font-weight: 700; vertical-align: middle; user-select: none; }
+.editorial-mark-layer { position: absolute; top: 0; left: 0; width: 100%; height: 0; z-index: 4; font-size: .92rem; line-height: 1.6; }
+.editorial-mark-menu-layer { position: fixed; inset: 0; z-index: 40; pointer-events: none; font-size: .92rem; line-height: 1.6; }
+.editorial-mark-menu { position: fixed; max-height: calc(100vh - 16px); overflow-y: auto; pointer-events: auto; }
+.editorial-mark-card, .editorial-mark-composer { position: absolute; }
+.editorial-mark-menu, .editorial-mark-card, .editorial-mark-composer { border: 1px solid #cfc9ba; border-radius: 10px; background: #fffefb; box-shadow: 0 14px 34px rgba(36, 39, 32, .18); }
+.editorial-mark-menu { width: min(19rem, calc(100vw - 2rem)); padding: .35rem; }
+.editorial-mark-menu-group + .editorial-mark-menu-group { margin-top: .3rem; padding-top: .3rem; border-top: 1px solid #e2ded4; }
+.editorial-mark-menu-group > .section-label { margin: .2rem .55rem; font-size: .74rem; }
+.editorial-mark-menu-group > small { display: block; margin: .1rem .55rem .2rem; }
+.editorial-mark-menu-item { display: flex; align-items: baseline; gap: .5rem; width: 100%; padding: .38rem .55rem; border: 0; border-radius: 6px; color: inherit; background: transparent; text-align: left; cursor: pointer; }
+.editorial-mark-menu-item:hover:not(:disabled), .editorial-mark-menu-item:focus-visible { background: #eef2ea; }
+.editorial-mark-menu-item:disabled { color: #8a8f84; cursor: not-allowed; }
+.editorial-mark-menu-item small { margin-left: auto; }
+.editorial-mark-swatch { flex: none; align-self: center; width: .95rem; height: .95rem; border: 1px solid #b9b39f; border-radius: 3px; }
+[data-mark-color="1"] > .editorial-mark-swatch { background: var(--mark-highlight-1); }
+[data-mark-color="2"] > .editorial-mark-swatch { background: var(--mark-highlight-2); }
+[data-mark-color="3"] > .editorial-mark-swatch { background: var(--mark-highlight-3); }
+.editorial-mark-card, .editorial-mark-composer { max-width: 100%; padding: .85rem 1rem 1rem; }
+.editorial-mark-card[data-mark-kind="change-suggestion"] { border-top: 3px solid var(--mark-suggestion); }
+.editorial-mark-card[data-mark-kind="annotation"] { border-top: 3px solid var(--mark-annotation); }
+.editorial-mark-card[data-mark-kind="editor-note"] { border-top: 3px solid var(--mark-note); }
+.editorial-mark-card-header { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem .7rem; }
+.editorial-mark-card-header > button { margin-left: auto; }
+.editorial-mark-kind { font-weight: 800; }
+.editorial-mark-kind-change-suggestion { color: var(--mark-suggestion); }
+.editorial-mark-kind-annotation { color: var(--mark-annotation); }
+.editorial-mark-kind-editor-note { color: var(--mark-note); }
+.editorial-mark-source { color: #61685e; font-size: .84rem; }
+.editorial-mark-region { margin-top: .75rem; }
+.editorial-mark-region > h4, .editorial-mark-form > h4 { margin: 0 0 .25rem; color: #61685e; font-size: .8rem; font-weight: 800; }
+.editorial-mark-region p, .editorial-mark-form p { margin: .25rem 0; }
+.editorial-mark-change del { color: #7b7f76; }
+.editorial-mark-change ins { text-decoration: none; background: var(--mark-suggestion-fill); border-bottom: 2px solid var(--mark-suggestion); }
+.editorial-mark-drifted { margin: .6rem 0 0; padding: .45rem .6rem; border: 1px dashed #b98b2f; border-radius: 6px; background: #fdf6e3; }
+.editorial-mark-quote { margin: .3rem 0 .6rem; padding: .3rem .6rem; border-left: 3px solid #cfc9ba; color: #4b5148; font-family: "Noto Serif CJK SC", "Songti SC", serif; overflow-wrap: anywhere; }
+.editorial-mark-field { display: grid; gap: .2rem; margin: .5rem 0; font-weight: 700; }
+.editorial-mark-field textarea { width: 100%; padding: .45rem .55rem; border: 1px solid #b9b39f; border-radius: 6px; font: inherit; font-weight: 400; resize: vertical; }
+.editorial-mark-field textarea:focus-visible { outline: 3px solid #416458; outline-offset: 2px; }
+.editorial-mark-problem { color: #9b2c2c; font-weight: 700; }
+.editorial-mark-unavailable { display: inline-flex; flex-direction: column; align-items: flex-start; gap: .15rem; max-width: 18rem; }
+.editorial-mark-basis, .editorial-mark-replies { margin: .25rem 0; padding-left: 1.2rem; }
+.editorial-mark-basis-quote { margin-left: .4rem; color: #4b5148; }
+.editorial-mark-card .technical-details { margin-top: .8rem; }
+.editorial-mark-card .technical-details dd { overflow-wrap: anywhere; }
 .window-actions { position: sticky; bottom: 0; display: grid; grid-template-columns: auto auto minmax(100px, 1fr) auto; align-items: center; gap: .7rem; padding: .7rem 1rem; border-top: 1px solid #ddd8cc; background: rgba(250, 248, 241, .97); }
 .position-rail-label { font-size: .84rem; font-weight: 700; }
 .position-rail { width: 100%; accent-color: #416458; }
@@ -348,7 +439,8 @@ legend { margin-bottom: .7rem; font-weight: 800; }
   .recovery-readonly-blocks, .recovered-state-marker, .model-role-card, .native-artifact-card,
   .native-artifact-authority, .task-authorization-card, .baseline-analysis-card, .analysis-axis, .analysis-unit,
   .analysis-update-action, .analysis-range-options, .analysis-history-entry, .analysis-plan-revision, .entry-notice,
-  .analysis-run-report, .analysis-update-choice, .book-analysis-summary {
+  .analysis-run-report, .analysis-update-choice, .book-analysis-summary,
+  .editorial-mark-menu, .editorial-mark-card, .editorial-mark-composer, .editorial-mark-drifted, .editorial-mark-quote {
     color: CanvasText;
     background: Canvas;
     border-color: CanvasText;
@@ -366,4 +458,18 @@ legend { margin-bottom: .7rem; font-weight: 800; }
     outline-color: Highlight;
   }
   .ProseMirror [data-block-id]:focus-within { border-left-color: Highlight; }
+  /* Color cannot carry a mark's kind here, so the line under the text does: solid for a suggestion,
+     double for a comment, dotted for a private note, and an outline for a highlight. */
+  .ProseMirror .editorial-mark { color: CanvasText; background: Canvas; border-bottom: 2px solid CanvasText; forced-color-adjust: none; }
+  .ProseMirror .editorial-mark-annotation { border-bottom: 3px double CanvasText; }
+  .ProseMirror .editorial-mark-editor-note { border-bottom: 2px dotted CanvasText; }
+  .ProseMirror .editorial-mark-personal-highlight { border-bottom: 0; outline: 1px solid CanvasText; }
+  .ProseMirror .editorial-mark[data-mark-anchor="drifted"], .ProseMirror .editorial-mark[data-mark-status="resolved"] { border-bottom-style: dashed; }
+  .ProseMirror .editorial-mark-active { outline: 2px solid Highlight; }
+  .ProseMirror .editorial-mark-preview, .ProseMirror .editorial-mark-preview-label { color: CanvasText; background: Canvas; border-color: CanvasText; forced-color-adjust: none; }
+  .ProseMirror [data-block-id][data-mark-line] { border-left-color: CanvasText; }
+  .editorial-mark-menu-item { color: ButtonText; background: ButtonFace; forced-color-adjust: auto; }
+  .editorial-mark-menu-item:disabled { color: GrayText; }
+  .editorial-mark-swatch { forced-color-adjust: none; }
+  .editorial-mark-field textarea:focus-visible { outline-color: Highlight; }
 }
