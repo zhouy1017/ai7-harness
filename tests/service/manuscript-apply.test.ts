@@ -12,6 +12,8 @@ import {
   type ComposedManuscriptRequest,
 } from '../support/composed-fixture.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
+import { downgradeEditorialMarksToRevision22 } from '../support/editorial-mark-revisions.js';
+import { EDITORIAL_MARK_REVISION_22_SQL, EDITORIAL_MARK_SCHEMA_SQL } from '../../src/service/editorial-marks.js';
 
 // Service-integration suite (L2) for AI7 Apply on Change Suggestions (Issue #408). The manuscript is
 // composed from the one admitted SampleBook; every string written into it is authored here, and
@@ -431,6 +433,87 @@ describe('AI7 Apply on a Change Suggestion', () => {
     }
   }, 300_000);
 
+  it('widens a revision-22 store\'s marks relation with every row as it was, and a deletion then applies and reverses on it', async () => {
+    const databasePath = join(roots.dataRoot, 'store', 'ai7.sqlite');
+    const markRelations = ['editorial_marks', 'editorial_mark_replies', 'proposal_change_items', 'proposal_item_decisions', 'proposal_decision_reasons'];
+    const rowsOf = (database: DatabaseSync): Record<string, unknown[]> =>
+      Object.fromEntries(markRelations.map((relation) => [relation, database.prepare(`SELECT rowid, * FROM ${relation} ORDER BY rowid`).all()]));
+    const markText = (database: DatabaseSync): unknown => database.prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = 'editorial_marks'").get();
+    const first = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    let book: Imported;
+    let blockId: string;
+    try {
+      book = await importBook(first);
+      const window = first.getManuscriptWindow(book.manuscriptId, book.branchId, null);
+      const block = paragraphs(window)[0]!;
+      blockId = block.blockId;
+      const bound = binding(first, book);
+      const mark = (from: number, to: number, kind: 'personal-highlight' | 'annotation', body: string): string => first.createEditorialMark({
+        ...bound, clientMarkId: randomUUID(), baseRevisionId: window.revisionId, expectedJournalSequence: window.journalSequence, blockId,
+        baseBlockDigest: block.digest, fromGrapheme: from, toGrapheme: to, selectedText: graphemesOf(block.text).slice(from, to).join(''), kind,
+        highlightColor: kind === 'personal-highlight' ? 1 : null, body, proposedText: null, rationale: null,
+      }).markId;
+      const update = { highlightColor: null, status: null, targetKind: null, proposedText: null, rationale: null } as const;
+      // A highlight converted to a 备注 (a mark that names the one it came from), a 批注 with a reply,
+      // and a 修改建议 with its Proposal Change Item, a decision and the reason given for it.
+      first.updateEditorialMark({ ...bound, ...update, markId: mark(20, 26, 'personal-highlight', ''), action: 'convert', targetKind: 'editor-note', body: '〔转成备注〕' });
+      first.updateEditorialMark({ ...bound, ...update, markId: mark(30, 36, 'annotation', '〔批注〕'), action: 'reply', body: '〔回复〕' });
+      first.recordChangeSuggestionDecision({
+        ...bound, markId: suggest(first, book, blockId, 2, 5).markId, clientDecisionId: randomUUID(), disposition: 'rejected', editedText: null, reason: '〔原因〕',
+      });
+      first.markCleanShutdown();
+    } finally {
+      first.close();
+    }
+
+    let planted: Record<string, unknown[]> = {};
+    const downgrade = new DatabaseSync(databasePath);
+    try {
+      downgrade.exec(`BEGIN IMMEDIATE;
+        ${EFFECT_RELATIONS.map((relation) => `DROP TABLE ${relation};`).join('\n')}
+        PRAGMA user_version = ${EDITORIAL_MARK_SCHEMA_VERSION};
+        COMMIT;`);
+      downgradeEditorialMarksToRevision22(downgrade);
+      expect(markText(downgrade)).toEqual({ sql: EDITORIAL_MARK_REVISION_22_SQL.editorial_marks });
+      planted = rowsOf(downgrade);
+    } finally {
+      downgrade.close();
+    }
+    expect(markRelations.map((relation) => planted[relation]!.length)).toEqual([4, 1, 1, 1, 1]);
+
+    const migrated = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      migrated.markCleanShutdown();
+    } finally {
+      migrated.close();
+    }
+    const after = new DatabaseSync(databasePath, { readOnly: true });
+    try {
+      // Revision 23: the widened text, every row of the five relations exactly as revision 22 held it, and the Effect relations beside them.
+      expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(MANUSCRIPT_EFFECT_SCHEMA_VERSION);
+      expect(markText(after)).toEqual({ sql: EDITORIAL_MARK_SCHEMA_SQL.editorial_marks });
+      expect(rowsOf(after)).toEqual(planted);
+      expect(after.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
+      expect(after.prepare('SELECT count(*) total FROM manuscript_effect_intents').get()).toEqual({ total: 0 });
+    } finally {
+      after.close();
+    }
+
+    const reopened = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const before = blockText(reopened, book, blockId);
+      const { markId, pinned } = suggest(reopened, book, blockId, 8, 12, '');
+      const applied = reopened.applyChangeSuggestion({ ...binding(reopened, book), markId, clientEffectId: randomUUID(), interaction: 'accept-and-apply', editedText: null, reason: null });
+      expect(applied.card).toMatchObject({ status: 'applied', anchorState: 'exact', pinnedText: '', fromGrapheme: 8, toGrapheme: 8 });
+      const reversed = reopened.reverseAppliedChangeSuggestion({ ...binding(reopened, book), markId, clientEffectId: randomUUID() });
+      expect(blockText(reopened, book, blockId) === before).toBe(true);
+      expect(reversed.card).toMatchObject({ status: 'open', anchorState: 'exact', pinnedText: pinned, fromGrapheme: 8, toGrapheme: 12 });
+      reopened.markCleanShutdown();
+    } finally {
+      reopened.close();
+    }
+  }, 300_000);
+
   it('applies a confirmed batch as one Effect, all or none', async () => {
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     try {
@@ -489,6 +572,7 @@ describe('AI7 Apply on a Change Suggestion', () => {
         ${EFFECT_RELATIONS.map((relation) => `DROP TABLE ${relation};`).join('\n')}
         PRAGMA user_version = ${EDITORIAL_MARK_SCHEMA_VERSION};
         COMMIT;`);
+      downgradeEditorialMarksToRevision22(downgrade);
     } finally {
       downgrade.close();
     }
