@@ -1,4 +1,4 @@
-export const SERVICE_PROTOCOL_VERSION = 34 as const;
+export const SERVICE_PROTOCOL_VERSION = 35 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -3985,6 +3985,67 @@ export interface ReplacementCommitProjection {
   completionLabel: string;
 }
 
+/**
+ * The purpose of a Milestone Version (IA › Milestone Versions; V2-UX-MILE-003, MILE-009): one of the four
+ * frozen purposes — 阶段留档 / 送审候选 / 交付候选 / 其他 — or the editor's own words through 自行输入. A purpose
+ * states the intended next use only and grants nothing.
+ *
+ * The kind is not stored beside the words: a frozen purpose is stored as its own label, so every
+ * milestone ever saved — the free-text purposes of rows saved before the kinds existed included — reads
+ * its kind back from the words it holds (`milestonePurposeKindOf`), and a purpose typed through 自行输入
+ * that is exactly a frozen label is that purpose.
+ */
+export type MilestonePurposeKind = 'stage-archive' | 'review-candidate' | 'delivery-candidate' | 'other' | 'custom';
+export const MILESTONE_PURPOSE_KINDS: readonly MilestonePurposeKind[] = [
+  'stage-archive',
+  'review-candidate',
+  'delivery-candidate',
+  'other',
+  'custom',
+];
+/** Each purpose's own label: the four frozen purposes, and 自行输入 for the editor's own words. */
+export const MILESTONE_PURPOSE_LABELS: Readonly<Record<MilestonePurposeKind, string>> = {
+  'stage-archive': '阶段留档',
+  'review-candidate': '送审候选',
+  'delivery-candidate': '交付候选',
+  other: '其他',
+  custom: '自行输入',
+};
+/** A purpose's words once trimmed, in UTF-16 code units: the bound the store has always kept. */
+export const MAX_MILESTONE_PURPOSE_CODE_UNITS = 120;
+
+/** The kind a stored purpose reads as: a frozen purpose by its exact label, and anything else the editor's own words. */
+export function milestonePurposeKindOf(purpose: string): MilestonePurposeKind {
+  return MILESTONE_PURPOSE_KINDS.find((kind) => kind !== 'custom' && MILESTONE_PURPOSE_LABELS[kind] === purpose) ?? 'custom';
+}
+
+/**
+ * What a save request's purpose comes to, or `null` when it names none: a frozen purpose carries no words
+ * of its own and is stored as its label; 自行输入 carries 1–120 code units once NFC-normalized and trimmed,
+ * and words that are exactly a frozen label are that frozen purpose.
+ */
+export function resolveMilestonePurpose(kind: unknown, purpose: unknown): { kind: MilestonePurposeKind; purpose: string } | null {
+  if (typeof kind !== 'string' || !MILESTONE_PURPOSE_KINDS.includes(kind as MilestonePurposeKind)) return null;
+  const purposeKind = kind as MilestonePurposeKind;
+  if (purposeKind !== 'custom') return purpose === null ? { kind: purposeKind, purpose: MILESTONE_PURPOSE_LABELS[purposeKind] } : null;
+  if (typeof purpose !== 'string' || !purpose.isWellFormed()) return null;
+  const words = purpose.normalize('NFC').trim();
+  if (words.length === 0 || words.length > MAX_MILESTONE_PURPOSE_CODE_UNITS) return null;
+  return { kind: milestonePurposeKindOf(words), purpose: words };
+}
+
+/** 保存里程碑版本 (V2-UX-MILE-003): a label, a purpose, and an optional note. */
+export interface SaveMilestoneInput {
+  manuscriptId: string;
+  branchId: string;
+  label: string;
+  /** One of the four frozen purposes, or `custom` for 自行输入. */
+  purposeKind: MilestonePurposeKind;
+  /** The editor's own words for `custom`; `null` for a frozen purpose, whose label is the purpose. */
+  purpose: string | null;
+  note: string;
+}
+
 export interface MilestoneProjection {
   milestoneId: string;
   manuscriptId: string;
@@ -3992,7 +4053,9 @@ export interface MilestoneProjection {
   revisionId: string;
   revisionLabel: string;
   label: string;
+  /** The purpose as stored: a frozen purpose's label, or the editor's own words. */
   purpose: string;
+  purposeKind: MilestonePurposeKind;
   note: string | null;
   createdAt: string;
   journalSequence: number;
@@ -4500,7 +4563,7 @@ export interface ServiceOperationMap {
   startReplacementCommit: { input: { previewId: string }; output: ServiceJobProjection };
   commitReplacement: { input: { previewId: string }; output: ReplacementCommitProjection };
   saveMilestone: {
-    input: { manuscriptId: string; branchId: string; label: string; purpose: string; note: string };
+    input: SaveMilestoneInput;
     output: MilestoneProjection;
   };
   undoManuscript: {

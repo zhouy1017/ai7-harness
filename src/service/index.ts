@@ -665,6 +665,7 @@ async function dispatch(
           request.input.manuscriptId,
           request.input.branchId,
           request.input.label,
+          request.input.purposeKind,
           request.input.purpose,
           request.input.note,
         ),

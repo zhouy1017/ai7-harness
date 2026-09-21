@@ -6377,10 +6377,13 @@ function renderEditorWindow(
     try {
       const saved = await runAuthoritativeMutation(() => {
         const binding = editor!.currentWindow();
+        // The field's words are 自行输入 until the purpose cards replace it (Issue #414, Stage B); words
+        // that are exactly a frozen purpose read back as that purpose.
         return window.ai7.saveMilestone({
           manuscriptId: binding.manuscriptId,
           branchId: binding.branchId,
           label: milestoneName.value,
+          purposeKind: 'custom',
           purpose: purpose.value,
           note: note.value,
         });

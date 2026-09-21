@@ -3,8 +3,9 @@ import { closeSync, constants, createReadStream, fstatSync, lstatSync, openSync,
 import { copyFile, lstat, open, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { basename, extname, isAbsolute, posix, relative, resolve, sep } from 'node:path';
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
-import { J03_TASK_GOAL, MAX_BLOCK_CODE_UNITS, MAX_FRAME_BYTES, isReviewCategoryKindId } from '../shared/protocol.js';
+import { J03_TASK_GOAL, MAX_BLOCK_CODE_UNITS, MAX_FRAME_BYTES, isReviewCategoryKindId, resolveMilestonePurpose } from '../shared/protocol.js';
 import type {
+  MilestonePurposeKind,
   BookCreationCommitProjection,
   BookCreationReviewProjection,
   BookHistoryCursor,
@@ -8237,18 +8238,26 @@ export class EditorialStore {
     return { previewId, state: 'cancelled' };
   }
 
+  /**
+   * 保存里程碑版本. The purpose is one of the four frozen purposes or the editor's own words (Issue
+   * #414); either way it is stored as words — a frozen purpose as its own label — so the bounded store
+   * keeps its one purpose rule and every milestone reads its kind back from what it holds.
+   */
   async saveMilestone(
     manuscriptId: string,
     branchId: string,
     label: string,
-    purpose: string,
+    purposeKind: MilestonePurposeKind,
+    purpose: string | null,
     note: string,
   ): Promise<MilestoneProjection> {
     this.#assertAvailable();
+    const resolved = resolveMilestonePurpose(purposeKind, purpose);
+    requireStore(resolved !== null, 'MILESTONE_INVALID', '请选择里程碑用途，或自行输入 1–120 个字符。');
     let result: MilestoneProjection | undefined;
     await this.#withRecoveryObjectLifecycle(async () => {
       const plan = this.#boundedCall(() =>
-        this.#boundedAuthority.prepareMilestoneRecoverySnapshot(manuscriptId, branchId, label, purpose, note));
+        this.#boundedAuthority.prepareMilestoneRecoverySnapshot(manuscriptId, branchId, label, resolved.purpose, note));
       const object = await this.#recoveryObjects.form(
         plan,
         (afterPosition) => this.#boundedCall(() =>

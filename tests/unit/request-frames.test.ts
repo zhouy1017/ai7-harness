@@ -6,6 +6,7 @@ import {
   BASELINE_ANALYSIS_MODE_GOALS,
   BASELINE_ANALYSIS_TASK_GOAL,
   MAX_EDIT_CODE_UNITS,
+  MAX_MILESTONE_PURPOSE_CODE_UNITS,
   MAX_REPLACEMENT_EXCLUSIONS,
   MAX_REVIEW_FINDING_REASON_CHARACTERS,
   MAX_REVIEW_RUN_CATEGORIES,
@@ -139,6 +140,16 @@ describe('decodeRequest accepts well-formed frames', () => {
       expect(decodeRequest(frameOf(request))).toEqual(request);
     }
     expect(new Set(inputs.map((entry) => entry.op)).size).toBe(7);
+  });
+
+  it('accepts a milestone save with a frozen purpose and no words, and with 自行输入 and the editor\'s words', () => {
+    const binding = { manuscriptId: randomUUID(), branchId: randomUUID(), label: '二审前', note: '' };
+    for (const purposeKind of ['stage-archive', 'review-candidate', 'delivery-candidate', 'other']) {
+      const request = { id: randomUUID(), op: 'saveMilestone', input: { ...binding, purposeKind, purpose: null } };
+      expect(decodeRequest(frameOf(request))).toEqual(request);
+    }
+    const own = { id: randomUUID(), op: 'saveMilestone', input: { ...binding, purposeKind: 'custom', purpose: '途'.repeat(MAX_MILESTONE_PURPOSE_CODE_UNITS), note: '说明' } };
+    expect(decodeRequest(frameOf(own))).toEqual(own);
   });
 });
 
@@ -394,6 +405,29 @@ describe('decodeRequest rejects malformed frames', () => {
       op: 'recordReviewFindingDisposition',
       input: { bookId: randomUUID(), reviewRunId: randomUUID(), findingId: FINDING_ID, reason: '已人工核对' },
     })).requestId).toBe(id);
+  });
+
+  it('rejects a milestone save whose purpose kind is not a purpose, whose words do not match its kind, or that uses the old key set', () => {
+    const id = randomUUID();
+    const binding = { manuscriptId: randomUUID(), branchId: randomUUID(), label: '二审前', note: '' };
+    const refused: ReadonlyArray<Record<string, unknown>> = [
+      // The key set before the kinds: a purpose without its kind.
+      { ...binding, purpose: '确认结构复核后的状态' },
+      { ...binding, purposeKind: 'final', purpose: null },
+      { ...binding, purposeKind: '阶段留档', purpose: null },
+      { ...binding, purposeKind: null, purpose: '确认结构复核后的状态' },
+      // A frozen purpose carries no words; 自行输入 carries words within the bound.
+      { ...binding, purposeKind: 'stage-archive', purpose: '阶段留档' },
+      { ...binding, purposeKind: 'other', purpose: '' },
+      { ...binding, purposeKind: 'custom', purpose: null },
+      { ...binding, purposeKind: 'custom', purpose: '' },
+      { ...binding, purposeKind: 'custom', purpose: '途'.repeat(MAX_MILESTONE_PURPOSE_CODE_UNITS + 1) },
+      { ...binding, purposeKind: 'custom', purpose: '\uD800' },
+      { ...binding, purposeKind: 'custom', purpose: '确认', extra: 1 },
+    ];
+    for (const input of refused) {
+      expect(rejectionFor(frameOf({ id, op: 'saveMilestone', input })).requestId).toBe(id);
+    }
   });
 
   it('rejects a foreground-boundary inspection whose Run identity or key set is wrong', () => {

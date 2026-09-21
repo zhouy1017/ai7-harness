@@ -13,6 +13,7 @@ import {
   MAX_SEARCH_QUERY_GRAPHEMES,
   MAX_SEARCH_RESULTS,
   MAX_WINDOW_BLOCKS,
+  milestonePurposeKindOf,
   type DurableHistoryProjection,
   type FidelityCategoryProjection,
   type HistoricalRevisionProjection,
@@ -7724,7 +7725,7 @@ export class BoundedManuscriptStore {
       return {
         milestoneId: plan.milestoneId, manuscriptId: plan.manuscriptId, branchId: plan.branchId,
         revisionId: plan.revisionId, revisionLabel: plan.revisionLabel, label: plan.label,
-        purpose: plan.purpose, note: plan.note, createdAt: plan.createdAt,
+        purpose: plan.purpose, purposeKind: milestonePurposeKindOf(plan.purpose), note: plan.note, createdAt: plan.createdAt,
         journalSequence: binding.journalSequence, workingDigest: binding.workingDigest,
         signoffRecordId: plan.signoffRecordId, workflowEvidenceDigest, actor: '本机编辑',
         signedAt: plan.createdAt, statedNextUse: plan.purpose,

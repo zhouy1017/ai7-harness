@@ -5,10 +5,12 @@ import {
   MAX_BLOCK_CODE_UNITS,
   MAX_EDIT_CODE_UNITS,
   MAX_MARK_BODY_CODE_UNITS,
+  MAX_MILESTONE_PURPOSE_CODE_UNITS,
   MAX_REPLACEMENT_EXCLUSIONS,
   MAX_REVIEW_FINDING_REASON_CHARACTERS,
   MAX_REVIEW_RUN_CATEGORIES,
   J03_TASK_GOAL,
+  MILESTONE_PURPOSE_KINDS,
   REVIEW_FINDING_ID_PATTERN,
   REVIEW_FINDING_PAGE_KEYS,
   REVIEW_FINDING_SEVERITIES,
@@ -16,6 +18,7 @@ import {
   REVIEW_SCOPE_KINDS,
   isReviewCategoryId,
   type BaselineAnalysisUpdateMode,
+  type MilestonePurposeKind,
   type ReviewFindingSeverity,
   type ReviewFindingStatus,
   type ReviewScopeKind,
@@ -937,14 +940,16 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       break;
     }
     case 'saveMilestone': {
-      const input = requireInput(value.input, ['manuscriptId', 'branchId', 'label', 'purpose', 'note'], tentativeId);
+      // A frozen purpose carries no words of its own; 自行输入 carries the editor's words (Issue #414).
+      const input = requireInput(value.input, ['manuscriptId', 'branchId', 'label', 'purposeKind', 'purpose', 'note'], tentativeId);
       if (
         !isBoundedString(input.manuscriptId, 36) ||
         !UUID_PATTERN.test(input.manuscriptId) ||
         !isBoundedString(input.branchId, 36) ||
         !UUID_PATTERN.test(input.branchId) ||
         !isBoundedString(input.label, 80) ||
-        !isBoundedString(input.purpose, 120) ||
+        !MILESTONE_PURPOSE_KINDS.includes(input.purposeKind as MilestonePurposeKind) ||
+        (input.purposeKind === 'custom' ? !isBoundedString(input.purpose, MAX_MILESTONE_PURPOSE_CODE_UNITS) : input.purpose !== null) ||
         !isBoundedString(input.note, 500, true)
       ) {
         throw new ProtocolError(tentativeId);

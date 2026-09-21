@@ -315,10 +315,12 @@ describe('EditorialStore on a temporary Agent Data Root', () => {
         imported.manuscriptId,
         imported.branchId,
         milestoneLabel,
+        'custom',
         '服务层集成校验',
         '由 L2 套件组稿的公开样书选段。',
       );
       expect(milestone.label).toBe(milestoneLabel);
+      expect(milestone.purposeKind).toBe('custom');
       expect(milestone.actor).toBe('本机编辑');
       expect(milestone.recoverySnapshot.blockCount).toBe(expectedTotalBlocks);
       expect(milestone.recoverySnapshot.verification).toBe('已独立校验快照对象');
@@ -427,7 +429,8 @@ describe('EditorialStore on a temporary Agent Data Root', () => {
         imported.manuscriptId,
         imported.branchId,
         '里程碑一',
-        '入稿位置校验',
+        'stage-archive',
+        null,
         '由 L2 套件组稿的公开样书选段。',
       );
       const advanced = second.getManuscriptWindow(imported.manuscriptId, imported.branchId, null);
