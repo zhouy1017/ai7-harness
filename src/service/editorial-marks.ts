@@ -40,6 +40,10 @@ import {
  *
  * `block_id` references the durable block identity, not the working block, for the reason the entry
  * position does: a mark whose block leaves the working state must stay readable as `detached`.
+ *
+ * The two vocabularies are written whole here although this revision's commands write only part of
+ * them: a plain `accepted` decision and an `applied` mark are what 接受并应用 records (Issue #408), and
+ * a CHECK that admits them now spares the next revision a rebuild of relations one revision old.
  */
 export const EDITORIAL_MARK_SCHEMA_SQL = {
   editorial_marks: `CREATE TABLE editorial_marks (
@@ -69,7 +73,7 @@ export const EDITORIAL_MARK_SCHEMA_SQL = {
   source_task_id TEXT,
   basis_json TEXT NOT NULL,
   export_disposition TEXT NOT NULL CHECK(export_disposition IN ('exported-by-default', 'only-when-included', 'never-exported')),
-  status TEXT NOT NULL CHECK(status IN ('open', 'resolved', 'removed', 'converted')),
+  status TEXT NOT NULL CHECK(status IN ('open', 'resolved', 'applied', 'removed', 'converted')),
   converted_from_mark_id TEXT REFERENCES editorial_marks(mark_id),
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
@@ -106,7 +110,7 @@ export const EDITORIAL_MARK_SCHEMA_SQL = {
   client_decision_id TEXT NOT NULL UNIQUE,
   item_id TEXT NOT NULL REFERENCES proposal_change_items(item_id),
   ordinal INTEGER NOT NULL CHECK(ordinal >= 1),
-  disposition TEXT NOT NULL CHECK(disposition IN ('rejected', 'accepted-with-edit', 'withdrawn')),
+  disposition TEXT NOT NULL CHECK(disposition IN ('accepted', 'accepted-with-edit', 'rejected', 'withdrawn')),
   edited_text TEXT,
   supersedes_decision_id TEXT REFERENCES proposal_item_decisions(decision_id),
   decided_revision_id TEXT NOT NULL REFERENCES manuscript_revisions(revision_id),
