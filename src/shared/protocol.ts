@@ -942,6 +942,11 @@ export interface EditorialMarkAnchorProjection {
   sourceKind: EditorialMarkSourceProjection['kind'];
   /** The current Proposal Decision of a Change Suggestion, which the surface shows without a card. */
   disposition: ProposalItemDisposition | null;
+  /**
+   * The words an applied 修改建议 deleted, where the mark is the point they left (pinned on no text);
+   * `null` for every other mark. The surface names them on the point it draws there.
+   */
+  deletedText: string | null;
 }
 
 /** One basis a mark or a suggestion rests on: a labelled place in the manuscript, quoted exactly. */

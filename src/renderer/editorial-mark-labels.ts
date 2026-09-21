@@ -1,4 +1,5 @@
 import type {
+  EditorialMarkAnchorProjection,
   EditorialMarkCardProjection,
   EditorialMarkKind,
   PersonalHighlightColor,
@@ -73,6 +74,15 @@ export function markDriftNote(card: Pick<EditorialMarkCardProjection, 'pinnedTex
 export function reverseApplyNote(appliedText: string, originalText: string): string {
   const write = appliedText.length === 0 ? `会在原处重新写入「${originalText}」` : `会把「${appliedText}」换回「${originalText}」`;
   return `${write}，并记为一次新的应用；原来的应用记录保留，不会被改写。`;
+}
+
+/**
+ * The name of the point drawn where a mark stands on no text: the words an applied deletion took away,
+ * or — for a mark whose own words an edit removed — which kind of mark waits there.
+ */
+export function markPointLabel(mark: Pick<EditorialMarkAnchorProjection, 'kind' | 'deletedText'>, drifted: boolean): string {
+  const what = mark.deletedText === null ? MARK_KIND_LABELS[mark.kind] : `已删去「${mark.deletedText}」`;
+  return drifted ? `${what} · 原文已变` : what;
 }
 
 export function markTimeLabel(iso: string): string {

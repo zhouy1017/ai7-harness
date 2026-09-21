@@ -535,6 +535,7 @@ export function applyProjection(row: SqlRow): ManuscriptApplyProjection {
 
 const ANCHOR_SELECT = `SELECT em.mark_id, em.kind, em.block_id, em.from_grapheme, em.to_grapheme, em.anchor_state, em.status,
        em.highlight_color, em.source_kind,
+       CASE WHEN em.pinned_text = '' THEN (SELECT i.current_text FROM proposal_change_items i WHERE i.mark_id = em.mark_id) END deleted_text,
        (SELECT d.disposition FROM proposal_change_items i
           JOIN proposal_item_decisions d ON d.item_id = i.item_id
          WHERE i.mark_id = em.mark_id ORDER BY d.ordinal DESC LIMIT 1) current_disposition
@@ -554,6 +555,7 @@ function anchorProjection(row: SqlRow): EditorialMarkAnchorProjection {
     highlightColor: row.highlight_color === null ? null : integer(row.highlight_color) as PersonalHighlightColor,
     sourceKind: text(row.source_kind) as EditorialMarkSourceProjection['kind'],
     disposition: disposition === null || disposition === 'withdrawn' ? null : disposition as ProposalItemDisposition,
+    deletedText: nullableText(row.deleted_text),
   };
 }
 
