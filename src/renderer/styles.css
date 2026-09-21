@@ -469,6 +469,8 @@ legend { margin-bottom: .7rem; font-weight: 800; }
   .ProseMirror .editorial-mark-editor-note { border-bottom: 2px dotted CanvasText; }
   .ProseMirror .editorial-mark-personal-highlight { border-bottom: 0; outline: 1px solid CanvasText; }
   .ProseMirror .editorial-mark[data-mark-anchor="drifted"], .ProseMirror .editorial-mark[data-mark-status="resolved"] { border-bottom-style: dashed; }
+  /* An applied suggestion is still a suggestion by its line: thinner, never another kind's style. */
+  .ProseMirror .editorial-mark-change-suggestion[data-mark-status="applied"] { border-bottom: 1px solid CanvasText; }
   .ProseMirror .editorial-mark-active { outline: 2px solid Highlight; }
   .ProseMirror .editorial-mark-preview, .ProseMirror .editorial-mark-preview-label { color: CanvasText; background: Canvas; border-color: CanvasText; forced-color-adjust: none; }
   .ProseMirror [data-block-id][data-mark-line] { border-left-color: CanvasText; }
