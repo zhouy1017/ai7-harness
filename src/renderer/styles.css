@@ -194,6 +194,123 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .analysis-state-admitted, .analysis-state-executing { background: #e3ecf6; color: #2f4a6b; }
 .analysis-state-settled { background: #e5f1e7; color: #28533a; }
 .analysis-state-failed, .analysis-state-interrupted { background: #f3e4e0; color: #753a31; }
+/* ②B 审阅 (editor-surfaces §4): the analysis family's card, fill and dividers. One card holds the coverage
+   matrix, the 审阅记录, 新建审阅 and the opened Review Run; everything wraps rather than scrolls sideways. */
+.review-workspace-card { margin-top: 1.3rem; padding: 1.15rem 1.25rem; border: 1px solid #c9d6d2; border-radius: 12px; background: #f4f9f7; overflow-wrap: anywhere; }
+.review-workspace-heading, .review-run-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .5rem .8rem; }
+.review-workspace-card h3, .review-workspace-card h4, .review-workspace-card h5, .review-workspace-card h6 { margin: 0; }
+.review-workspace-card h6 { font-size: .95rem; }
+.review-manuscript-line { margin: .45rem 0 0; }
+.review-coverage-section, .review-runs-section, .review-run, .review-plans, .review-progress-section, .review-results, .review-report { margin-top: 1rem; padding-top: 1rem; border-top: 1px solid #d5dcd9; }
+.review-coverage-section > p, .review-runs-section > p, .review-results > p, .review-report > p { margin: .45rem 0 0; }
+.review-coverage { width: 100%; margin-top: .6rem; border-collapse: collapse; font-size: .92rem; }
+.review-coverage th, .review-coverage td { padding: .45rem .5rem; border-bottom: 1px solid #d5dcd9; text-align: left; vertical-align: top; overflow-wrap: anywhere; }
+.review-coverage thead th { color: #6b7068; font-size: .84rem; }
+.review-coverage .secondary { min-height: 36px; padding: .35rem .7rem; }
+.review-runs { display: grid; gap: .5rem; margin: .55rem 0 0; padding-left: 1.4rem; }
+.review-runs > li { padding: .6rem .7rem; border: 1px solid #d5dcd9; border-radius: 9px; background: #fffdf8; }
+.review-runs > li[aria-current="true"] { border-color: #2f5d8a; box-shadow: inset 3px 0 0 #2f5d8a; }
+.review-runs > li > span { display: block; }
+.review-run-line { font-weight: 800; }
+.review-runs .quiet { min-height: 36px; padding: .25rem .4rem; }
+.review-new-actions { margin-top: 1rem; }
+.review-unavailable { display: inline-flex; flex-direction: column; align-items: flex-start; gap: .15rem; max-width: 22rem; }
+.review-unavailable-reason { margin: 0; }
+.review-run-meta { margin: .35rem 0 0; }
+.review-run-authorized { display: block; }
+.review-run h4:focus-visible { outline: 3px solid #416458; outline-offset: 3px; }
+.review-facts { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: .45rem .8rem; margin: .6rem 0 0; }
+.review-plan, .review-group { margin-top: .8rem; padding: .8rem .9rem; border: 1px solid #d5dcd9; border-radius: 10px; background: #fffdf8; }
+.review-category-basis { margin: .35rem 0 0; color: #4e564c; font-size: .9rem; }
+.review-authorize-note { margin: .9rem 0 0; font-weight: 800; }
+.review-continue .attention-note { margin-bottom: 0; }
+.review-progress { display: grid; gap: .45rem; margin: .55rem 0 0; padding-left: 1.4rem; }
+.review-progress > li { display: flex; flex-wrap: wrap; align-items: center; gap: .3rem .6rem; }
+.review-progress-label { font-weight: 800; }
+.review-progress-detail { flex-basis: 100%; color: #4e564c; font-size: .9rem; }
+.review-filters { display: flex; flex-wrap: wrap; gap: .6rem 1rem; margin-top: .6rem; }
+.review-filter { display: grid; gap: .2rem; min-width: 0; font-size: .86rem; font-weight: 700; }
+.review-filter select, .review-chapter-range select { min-height: 36px; max-width: 100%; padding: .3rem .5rem; border: 1px solid #90998d; border-radius: 8px; background: white; color: #242720; font: inherit; font-weight: 400; }
+.book-review select:focus-visible, .book-review textarea:focus-visible { outline: 3px solid #416458; outline-offset: 2px; }
+.review-group-heading { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem .8rem; }
+.review-group-heading > button { margin-left: auto; }
+.review-finding { margin-top: .7rem; padding: .7rem .8rem; border: 1px solid #ded9cd; border-left-width: 3px; border-radius: 9px; background: #fffefb; }
+.review-finding[data-output="change-suggestion"] { border-left-color: var(--mark-suggestion); }
+.review-finding[data-output="annotation"] { border-left-color: var(--mark-annotation); }
+.review-finding:focus-visible, .review-finding[data-review-focused="true"]:focus { outline: 3px solid #416458; outline-offset: 2px; }
+.review-finding-heading { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem .6rem; }
+.review-finding-location { color: #61685e; font-size: .86rem; }
+.review-risk-point { padding: .1rem .5rem; border: 1px dashed #9b3d35; border-radius: 6px; color: #7a2e27; font-size: .84rem; font-weight: 800; }
+.review-finding-quote { margin: .5rem 0 .3rem; padding: .3rem .6rem; border-left: 3px solid #cfc9ba; color: #4b5148; font-family: "Noto Serif CJK SC", "Songti SC", serif; }
+.review-finding p { margin: .3rem 0 0; }
+.review-finding-replacement { font-weight: 700; }
+.review-finding-basis { color: #4e564c; font-size: .9rem; }
+.review-finding-state { color: #76530f; font-weight: 700; }
+.review-finding-actions { margin-top: .6rem; }
+.review-finding-actions .primary, .review-finding-actions .secondary, .review-finding-actions .quiet, .review-group-heading > button { min-height: 36px; padding: .4rem .8rem; }
+.review-inline-form { margin-top: .6rem; padding: .7rem; border: 1px dashed #9bb0a8; border-radius: 9px; background: #f4f9f7; }
+.review-field { display: grid; gap: .25rem; margin: .4rem 0; font-weight: 700; }
+.review-field textarea { width: 100%; padding: .45rem .55rem; border: 1px solid #90998d; border-radius: 8px; font: inherit; font-weight: 400; resize: vertical; }
+.review-problem { margin: .45rem 0 0; color: #842f28; font-weight: 700; }
+.review-problem[hidden] { display: none; }
+.review-capability p { margin: 0 0 .5rem; }
+/* The batch confirmation strip states the write scope before 确认应用 (V2-UX-REV-006, PDEC-012): drawn in
+   the 修改建议 colour, because every line in it is one. */
+.review-batch-strip { margin-top: .7rem; padding: .8rem .9rem; border: 2px solid var(--mark-suggestion); border-radius: 10px; background: #fffdf8; }
+.review-batch-scope { margin: 0; font-weight: 800; }
+.review-batch-items { margin: .45rem 0 0; padding-left: 1.4rem; line-height: 1.7; }
+.review-report-versions, .review-report-list { margin: .55rem 0 0; padding-left: 1.4rem; line-height: 1.65; }
+.review-report-part { margin-top: .8rem; }
+.review-report-table { width: 100%; margin-top: .45rem; border-collapse: collapse; font-size: .9rem; }
+.review-report-table th, .review-report-table td { padding: .35rem .5rem; border-bottom: 1px solid #ded9cd; text-align: left; vertical-align: top; overflow-wrap: anywhere; }
+.review-report-summary { margin-top: .5rem; padding: .5rem .6rem; border: 1px solid #ded9cd; border-radius: 8px; background: #fffefb; }
+.review-report-summary p { margin: .25rem 0 0; }
+.review-report-summary-title { font-weight: 800; }
+/* The running progress is announced from here; it is heard, not shown, because the list above shows it. */
+.review-live { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
+.book-review-summary { margin-top: 1.3rem; padding: 1rem 1.15rem; border: 1px solid #c9d6d2; border-radius: 12px; background: #f4f9f7; }
+.book-review-summary h3 { margin: 0; }
+.book-review-summary p { margin: .45rem 0 .7rem; overflow-wrap: anywhere; }
+/* 新建审阅: a native modal sheet, so the page behind it is inert and focus stays inside until it closes. */
+.review-sheet { width: min(46rem, calc(100vw - 2rem)); max-height: calc(100vh - 2rem); overflow: auto; padding: 1.2rem 1.4rem; border: 1px solid #c9d6d2; border-radius: 14px; background: #fffdf8; color: #242720; box-shadow: 0 18px 50px rgba(36, 39, 32, .25); overflow-wrap: anywhere; }
+.review-sheet::backdrop { background: rgba(36, 39, 32, .35); }
+.review-sheet h3 { margin: 0 0 .4rem; font-family: "Noto Serif CJK SC", "Songti SC", serif; font-size: 1.35rem; }
+.review-sheet fieldset { margin-top: 1rem; }
+.review-category-options, .review-scope-options { display: grid; gap: .5rem; min-width: 0; }
+.review-category-option, .review-scope-option { display: flex; align-items: flex-start; gap: .6rem; padding: .6rem .7rem; border: 1px solid #d5dcd9; border-radius: 9px; background: white; cursor: pointer; }
+.review-category-option:has(input:checked), .review-scope-option:has(input:checked) { border-color: #416458; box-shadow: inset 0 0 0 1px #416458; background: #f4f7f1; }
+.review-category-option:has(input:disabled), .review-scope-option:has(input:disabled) { background: #f6f5f1; cursor: not-allowed; }
+.review-category-option input, .review-scope-option input { flex: none; width: 18px; height: 18px; margin-top: .25rem; }
+.review-scope-option small { display: block; }
+.review-category-text { display: grid; gap: .2rem; min-width: 0; }
+.review-category-description { color: #4e564c; font-size: .9rem; }
+.review-category-option .review-category-basis { margin: 0; font-size: .86rem; }
+.review-category-reason { color: #76530f; font-size: .86rem; font-weight: 700; }
+.review-category-reason[hidden] { display: none; }
+.review-chapter-range { display: flex; flex-wrap: wrap; gap: .6rem 1rem; }
+.review-chapter-range[hidden] { display: none; }
+.review-chapter-range > .review-field { min-width: 0; max-width: 100%; }
+.review-consequences { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: .45rem .8rem; margin: 1rem 0 0; padding: .8rem; border: 1px solid #d5dcd9; border-radius: 9px; background: #f4f9f7; }
+.review-preparation-progress { margin: .6rem 0 0; font-weight: 800; }
+.review-preparation-progress[hidden] { display: none; }
+.review-sheet-actions { margin-top: 1rem; }
+.review-quick-start-reason { margin: .4rem 0 0; }
+/* State pills speak with a shape as well as their words (editor-surfaces §0.3): the shape is drawn before
+   the words and never replaces them, so a pill still reads without colour and in forced colours. */
+.review-pill::before { content: ""; display: inline-block; flex: none; width: .62em; height: .62em; background: currentColor; }
+.review-pill[data-pill-shape="circle"]::before { border-radius: 50%; }
+.review-pill[data-pill-shape="ring"]::before { border: 2px solid currentColor; border-radius: 50%; background: transparent; }
+.review-pill[data-pill-shape="half"]::before { border: 1.5px solid currentColor; border-radius: 50%; background: linear-gradient(90deg, currentColor 50%, transparent 50%); }
+.review-pill[data-pill-shape="triangle"]::before { clip-path: polygon(50% 0, 100% 100%, 0 100%); }
+.review-pill[data-pill-shape="square"]::before { border-radius: 1px; }
+.review-pill[data-pill-shape="diamond"]::before { transform: rotate(45deg) scale(.85); }
+.review-pill[data-pill-shape="check"]::before { width: .34em; height: .64em; border: solid currentColor; border-width: 0 2px 2px 0; background: transparent; transform: rotate(45deg) translateY(-.08em); }
+.review-pill[data-pill-shape="dash"]::before { height: .2em; border-radius: 1px; }
+.review-pill-good { background: #e5f1e7; color: #28533a; }
+.review-pill-attention { background: #fff0cf; color: #76530f; }
+.review-pill-blocked { background: #f3e4e0; color: #753a31; }
+.review-pill-progress { background: #e3ecf6; color: #2f4a6b; }
+.review-pill-neutral { background: #f1ede3; color: #50574e; }
 dt { color: #6b7068; font-size: .86rem; }
 dd { margin: 0; overflow-wrap: anywhere; }
 /* The Technical Identity Layer (V2-UX-LAYER-001). One rank below the decision content beside it — the
@@ -298,9 +415,10 @@ legend { margin-bottom: .7rem; font-weight: 800; }
 .editor-toolbar h2 { margin: 0; font-size: 1.25rem; }
 .editor-toolbar .button-row { margin-top: 0; flex-shrink: 0; }
 /* IA-012's `资料与记录` group label sits beside the action it leads to, not above it, so the toolbar
-   keeps one row at full width and wraps with the rest of the actions below 760 px. */
-.book-records-group { display: inline-flex; align-items: center; gap: .5rem; }
-.book-records-group .section-label { margin: 0; }
+   keeps one row at full width and wraps with the rest of the actions below 760 px. IA-006's `工作`
+   group (审阅) is drawn the same way beside it. */
+.book-records-group, .book-work-group { display: inline-flex; align-items: center; gap: .5rem; }
+.book-records-group .section-label, .book-work-group .section-label { margin: 0; }
 .editor-meta { display: flex; flex-wrap: wrap; gap: .55rem 1rem; margin-top: .35rem; color: #61685e; font-size: .82rem; }
 /* The manuscript is the central object; the right edge carries three entries and the one whole-manuscript
    rail, and the 导航 panel opens over the manuscript's right side on demand (V2-UX-ED-015). */
@@ -468,9 +586,22 @@ legend { margin-bottom: .7rem; font-weight: 800; }
   .editor-window { padding: 1.25rem; }
   .window-actions { grid-template-columns: auto 1fr auto; }
   .position-rail-label { grid-column: 1 / -1; }
-  .native-artifact-facts, .task-authorization-facts, .analysis-facts { grid-template-columns: 1fr; }
-  .native-artifact-facts dd + dt, .task-authorization-facts dd + dt, .analysis-facts dd + dt { margin-top: .35rem; }
+  .native-artifact-facts, .task-authorization-facts, .analysis-facts, .review-facts, .review-consequences { grid-template-columns: 1fr; }
+  .native-artifact-facts dd + dt, .task-authorization-facts dd + dt, .analysis-facts dd + dt, .review-facts dd + dt, .review-consequences dd + dt { margin-top: .35rem; }
   .analysis-axes { grid-template-columns: 1fr; }
+}
+
+/* 审阅's two tables reflow into one labelled block per row below 760 px, so a 200% zoom never scrolls
+   sideways; each cell names its column itself, and the header row stays for assistive technology. */
+@media (max-width: 760px) {
+  .review-coverage thead, .review-report-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .review-coverage, .review-coverage tbody, .review-coverage tr, .review-coverage th, .review-coverage td,
+  .review-report-table, .review-report-table tbody, .review-report-table tr, .review-report-table th, .review-report-table td { display: block; width: 100%; }
+  .review-coverage tr, .review-report-table tr { padding: .5rem 0; border-bottom: 1px solid #d5dcd9; }
+  .review-coverage th, .review-coverage td, .review-report-table th, .review-report-table td { padding: .15rem 0; border-bottom: 0; }
+  .review-coverage td[data-label]::before, .review-report-table td[data-label]::before { content: attr(data-label) "："; color: #6b7068; font-size: .84rem; }
+  .review-group-heading > button { margin-left: 0; }
+  .review-sheet { padding: 1rem; }
 }
 
 @media (max-width: 560px) {
@@ -492,7 +623,10 @@ legend { margin-bottom: .7rem; font-weight: 800; }
   .analysis-update-action, .analysis-range-options, .analysis-history-entry, .analysis-plan-revision, .entry-notice,
   .analysis-run-report, .analysis-update-choice, .book-analysis-summary,
   .editorial-mark-menu, .editorial-mark-card, .editorial-mark-composer, .editorial-mark-drifted, .editorial-mark-quote,
-  .editor-edge, .edge-entries {
+  .editor-edge, .edge-entries,
+  .review-workspace-card, .review-runs > li, .review-plan, .review-group, .review-finding, .review-finding-quote, .review-risk-point,
+  .review-inline-form, .review-batch-strip, .review-report-summary, .review-sheet, .review-category-option, .review-scope-option,
+  .review-consequences, .book-review-summary {
     color: CanvasText;
     background: Canvas;
     border-color: CanvasText;
@@ -506,6 +640,17 @@ legend { margin-bottom: .7rem; font-weight: 800; }
   }
   .analysis-tab { color: ButtonText; background: ButtonFace; border: 1px solid ButtonText; forced-color-adjust: auto; }
   .analysis-tab[aria-selected="true"] { border-bottom: 3px solid Highlight; }
+  /* A 审阅 pill's shape is its own drawing, so it is drawn in the pill's text colour, never left to vanish. */
+  .review-pill::before { background: ButtonText; forced-color-adjust: none; }
+  .review-pill[data-pill-shape="ring"]::before, .review-pill[data-pill-shape="check"]::before { border-color: ButtonText; background: transparent; }
+  .review-pill[data-pill-shape="half"]::before { border-color: ButtonText; background: linear-gradient(90deg, ButtonText 50%, transparent 50%); }
+  /* Colour cannot tell a 修改建议 finding from a 批注 one here, so its left line does: solid, or double. */
+  .review-finding[data-output] { border-left: 3px solid CanvasText; }
+  .review-finding[data-output="annotation"] { border-left: 4px double CanvasText; }
+  .review-batch-strip { border: 2px solid CanvasText; }
+  .review-runs > li[aria-current="true"] { border-width: 2px; }
+  .review-sheet::backdrop { background: Canvas; opacity: .6; }
+  .book-review select:focus-visible, .book-review textarea:focus-visible, .review-finding:focus-visible, .review-run h4:focus-visible { outline-color: Highlight; }
   button:focus-visible, input:focus-visible, .ProseMirror:focus-visible {
     outline-color: Highlight;
   }
