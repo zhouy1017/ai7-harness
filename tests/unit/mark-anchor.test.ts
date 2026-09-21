@@ -87,3 +87,51 @@ describe('an Editorial Mark follows the text of its block', () => {
     expect(followBlockTextChange(mark, '乙', text, `新${text}`)).toEqual({ fromGrapheme: 3, toGrapheme: 4, state: 'exact' });
   });
 });
+
+describe('the point an applied deletion leaves follows the text around it', () => {
+  // A zero-width anchor pinned on no text, between 丁 and 戊.
+  const around = '甲乙丙丁戊己庚辛';
+  const point = { fromGrapheme: 4, toGrapheme: 4, state: 'exact' } as const;
+  const edited = (from: number, to: number, insert: string): string => {
+    const parts = graphemesOf(around);
+    return [...parts.slice(0, from), ...graphemesOf(insert), ...parts.slice(to)].join('');
+  };
+
+  it('shifts with an edit wholly in front of it, text typed exactly at it included, and stays for one behind it', () => {
+    expect(followBlockTextChange(point, '', around, edited(1, 1, '〔〕'))).toEqual({ fromGrapheme: 6, toGrapheme: 6, state: 'exact' });
+    expect(followBlockTextChange(point, '', around, edited(4, 4, '〔〕'))).toEqual({ fromGrapheme: 6, toGrapheme: 6, state: 'exact' });
+    expect(followBlockTextChange(point, '', around, edited(6, 6, '〔〕'))).toEqual(point);
+    expect(followBlockTextChange(point, '', around, edited(1, 2, ''))).toEqual({ fromGrapheme: 3, toGrapheme: 3, state: 'exact' });
+    expect(followBlockTextChange(point, '', around, edited(6, 8, ''))).toEqual(point);
+    expect(followBlockTextChange(point, '', around, around)).toEqual(point);
+  });
+
+  it('stays exact when only the grapheme on one side of it is taken away or replaced', () => {
+    expect(followBlockTextChange(point, '', around, edited(3, 4, ''))).toEqual({ fromGrapheme: 3, toGrapheme: 3, state: 'exact' });
+    expect(followBlockTextChange(point, '', around, edited(4, 5, ''))).toEqual(point);
+    expect(followBlockTextChange(point, '', around, edited(3, 4, '〔〕'))).toEqual({ fromGrapheme: 5, toGrapheme: 5, state: 'exact' });
+  });
+
+  it('drifts once an edit takes graphemes from both sides of it', () => {
+    expect(followBlockTextChange(point, '', around, edited(3, 5, ''))).toEqual({ fromGrapheme: 3, toGrapheme: 3, state: 'drifted' });
+    expect(followBlockTextChange(point, '', around, edited(2, 6, '〔改〕'))).toEqual({ fromGrapheme: 2, toGrapheme: 5, state: 'drifted' });
+  });
+
+  it('is never found again once drifted, and never taken for exact when its state is not known', () => {
+    // Empty text stands everywhere: undoing the edit brings the text back, not the point.
+    const across = followBlockTextChange(point, '', around, edited(3, 5, ''));
+    expect(followBlockTextChange(across, '', edited(3, 5, ''), around)).toEqual({ fromGrapheme: 5, toGrapheme: 5, state: 'drifted' });
+    expect(followBlockTextChange({ ...point, state: 'drifted' }, '', around, around).state).toBe('drifted');
+    expect(followBlockTextChange({ ...point, state: 'drifted' }, '', around, edited(6, 6, '〔〕')).state).toBe('drifted');
+    expect(followBlockTextChange({ fromGrapheme: 4, toGrapheme: 4 }, '', around, around).state).toBe('drifted');
+    expect(resolvePinnedRange(graphemesOf(around), [], point).state).toBe('drifted');
+    expect(resolvePinnedRange(graphemesOf(around), [], point, { fromGrapheme: 0, toGrapheme: 8 }).state).toBe('drifted');
+  });
+
+  it('drifts when it falls outside its block or the graphemes no longer count as the edit says', () => {
+    expect(followBlockTextChange({ fromGrapheme: 9, toGrapheme: 9, state: 'exact' }, '', around, around)).toEqual({ fromGrapheme: 8, toGrapheme: 8, state: 'drifted' });
+    // A combining mark put at the point joins the grapheme in front of it: no point is where the edit's arithmetic puts it.
+    expect(followBlockTextChange({ fromGrapheme: 2, toGrapheme: 2, state: 'exact' }, '', 'Xa戊', 'Xá戊', { fromGrapheme: 2, toGrapheme: 2, insertedGraphemes: 1 }).state)
+      .toBe('drifted');
+  });
+});

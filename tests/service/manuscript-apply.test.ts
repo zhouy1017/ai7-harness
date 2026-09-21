@@ -102,6 +102,16 @@ function storeError(operation: () => unknown): string {
   return 'no-error';
 }
 
+/** The editor's own typing: one journal edit of one block, against the window as it stands now. */
+function typeInto(store: EditorialStore, book: Imported, blockId: string, from: number, to: number, insertText: string): ManuscriptWindowProjection {
+  const now = store.getManuscriptWindow(book.manuscriptId, book.branchId, null);
+  return store.flushJournalEdit({
+    clientEditId: randomUUID(), ...book, baseRevisionId: now.revisionId, blockId, windowStartBlockId: now.blocks[0]!.blockId,
+    baseBlockDigest: now.blocks.find((candidate) => candidate.blockId === blockId)!.digest, expectedJournalSequence: now.journalSequence,
+    fromGrapheme: from, toGrapheme: to, insertText,
+  }).window;
+}
+
 describe('AI7 Apply on a Change Suggestion', () => {
   it('writes the text with its receipt in one interaction, keeps the three records apart, and never writes twice', async () => {
     const databasePath = join(roots.dataRoot, 'store', 'ai7.sqlite');
@@ -285,6 +295,136 @@ describe('AI7 Apply on a Change Suggestion', () => {
         fromGrapheme: 7, toGrapheme: 7, insertText: '后改',
       });
       expect(storeError(() => store.reverseAppliedChangeSuggestion({ ...binding(store, book), markId, clientEffectId: randomUUID() }))).toBe('APPLY_TARGET_DRIFTED');
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+  }, 300_000);
+
+  it('applies a suggestion that deletes its words, stands exactly where they were, and writes them back there when reversed', async () => {
+    const databasePath = join(roots.dataRoot, 'store', 'ai7.sqlite');
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    let point = 6;
+    let length = 0;
+    try {
+      const book = await importBook(store);
+      const block = paragraphs(store.getManuscriptWindow(book.manuscriptId, book.branchId, null))[0]!;
+      const { markId, pinned } = suggest(store, book, block.blockId, 6, 12, '');
+      length = graphemesOf(pinned).length;
+      const applyId = randomUUID();
+      const applied = store.applyChangeSuggestion({ ...binding(store, book), markId, clientEffectId: applyId, interaction: 'accept-and-apply', editedText: null, reason: null });
+      let text = [...graphemesOf(block.text).slice(0, 6), ...graphemesOf(block.text).slice(12)];
+      expect(blockText(store, book, block.blockId) === text.join('')).toBe(true);
+      // Nothing was changed after the Apply: the mark is 已应用 and exact, pinned on no text at the point the words left.
+      expect(applied.card).toMatchObject({ status: 'applied', anchorState: 'exact', pinnedText: '', fromGrapheme: 6, toGrapheme: 6 });
+      expect(applied.card!.pin).toMatchObject({
+        journalSequence: applied.application.after.journalSequence,
+        blockDigest: applied.window.blocks.find((candidate) => candidate.blockId === block.blockId)!.digest,
+      });
+      expect(applied.marks.find((mark) => mark.markId === markId)).toMatchObject({ status: 'applied', anchorState: 'exact', fromGrapheme: 6, toGrapheme: 6 });
+
+      // Typing in front of the point moves it, text typed exactly at it lands in front of it, and typing behind it leaves it.
+      const [front, at, behind] = ['〔前〕', '〔点〕', '〔后〕'].map(graphemesOf) as [string[], string[], string[]];
+      typeInto(store, book, block.blockId, 2, 2, front.join(''));
+      text = [...text.slice(0, 2), ...front, ...text.slice(2)];
+      point += front.length;
+      typeInto(store, book, block.blockId, point, point, at.join(''));
+      text = [...text.slice(0, point), ...at, ...text.slice(point)];
+      point += at.length;
+      const typed = typeInto(store, book, block.blockId, point + 5, point + 5, behind.join(''));
+      text = [...text.slice(0, point + 5), ...behind, ...text.slice(point + 5)];
+      expect(blockText(store, book, block.blockId) === text.join('')).toBe(true);
+      expect(typed.marks.find((mark) => mark.markId === markId)).toMatchObject({ status: 'applied', anchorState: 'exact', fromGrapheme: point, toGrapheme: point });
+
+      // 确认撤销本次应用 writes the words back at the point as one new Effect, and the mark stands on them, open and exact.
+      const reverseId = randomUUID();
+      const reversed = store.reverseAppliedChangeSuggestion({ ...binding(store, book), markId, clientEffectId: reverseId });
+      expect(blockText(store, book, block.blockId) === [...text.slice(0, point), ...graphemesOf(pinned), ...text.slice(point)].join('')).toBe(true);
+      expect(reversed.application).toMatchObject({
+        kind: 'reverse-apply', interaction: 'confirm-reverse-apply', changeCount: 1, reversesEffectId: applied.application.effectId,
+        before: { journalSequence: typed.journalSequence, workingDigest: typed.workingDigest },
+        after: { journalSequence: typed.journalSequence + 1, workingDigest: reversed.window.workingDigest },
+      });
+      expect(reversed.card).toMatchObject({ status: 'open', anchorState: 'exact', pinnedText: pinned, fromGrapheme: point, toGrapheme: point + length });
+      expect(reversed.card!.suggestion!.decision).toBeNull();
+      // The first Apply and its receipt stay exactly as committed; only the link to the Effect that reversed it is new.
+      expect(store.getManuscriptApplyOutcome(book.manuscriptId, book.branchId, applyId))
+        .toEqual({ state: 'committed', application: { ...applied.application, reversedByEffectId: reversed.application.effectId } });
+      expect(store.reverseAppliedChangeSuggestion({ ...binding(store, book), markId, clientEffectId: reverseId }).application).toEqual(reversed.application);
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+    const database = new DatabaseSync(databasePath, { readOnly: true });
+    try {
+      const targets = (kind: string): unknown => database.prepare(
+        `SELECT t.from_grapheme, t.to_grapheme, t.resulting_from_grapheme, t.resulting_to_grapheme
+         FROM manuscript_effect_targets t JOIN manuscript_effect_intents i ON i.effect_id = t.effect_id WHERE i.kind = ?`,
+      ).all(kind);
+      // The Apply replaced six graphemes with none; its reversal is an insertion into the empty range at the point.
+      expect(targets('apply')).toEqual([{ from_grapheme: 6, to_grapheme: 12, resulting_from_grapheme: 6, resulting_to_grapheme: 6 }]);
+      expect(targets('reverse-apply')).toEqual([{ from_grapheme: point, to_grapheme: point, resulting_from_grapheme: point, resulting_to_grapheme: point + length }]);
+    } finally {
+      database.close();
+    }
+  }, 300_000);
+
+  it('refuses to reverse a deletion once an edit has spanned the point its words left', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const book = await importBook(store);
+      const block = paragraphs(store.getManuscriptWindow(book.manuscriptId, book.branchId, null))[0]!;
+      // 修改后接受 with the field left empty: the editor's own wording deletes the words.
+      const { markId } = suggest(store, book, block.blockId, 6, 12);
+      const applied = store.applyChangeSuggestion({ ...binding(store, book), markId, clientEffectId: randomUUID(), interaction: 'accept-edited-and-apply', editedText: '', reason: null });
+      expect(applied.card).toMatchObject({ status: 'applied', anchorState: 'exact', pinnedText: '', fromGrapheme: 6, toGrapheme: 6 });
+      expect(applied.card!.suggestion!.decision).toMatchObject({ disposition: 'accepted-with-edit', editedText: '' });
+
+      // Taking away the grapheme on one side of the point leaves it exact; an edit taking graphemes from both sides does not.
+      typeInto(store, book, block.blockId, 5, 6, '');
+      expect(store.getEditorialMarkCard(book.manuscriptId, book.branchId, markId)).toMatchObject({ status: 'applied', anchorState: 'exact', fromGrapheme: 5, toGrapheme: 5 });
+      const spanned = typeInto(store, book, block.blockId, 4, 6, '改');
+      expect(spanned.marks.find((mark) => mark.markId === markId)).toMatchObject({ status: 'applied', anchorState: 'drifted' });
+      expect(store.getEditorialMarkCard(book.manuscriptId, book.branchId, markId)).toMatchObject({ status: 'applied', anchorState: 'drifted' });
+
+      const clientEffectId = randomUUID();
+      let refusal: unknown;
+      try {
+        store.reverseAppliedChangeSuggestion({ ...binding(store, book), markId, clientEffectId });
+      } catch (error) {
+        refusal = error;
+      }
+      expect(refusal).toBeInstanceOf(StoreError);
+      expect(refusal).toMatchObject({ code: 'APPLY_TARGET_DRIFTED', message: '应用后的文字又改过，不能直接撤销这次应用。' });
+      expect(store.getManuscriptWindow(book.manuscriptId, book.branchId, null).workingDigest).toBe(spanned.workingDigest);
+      expect(store.getManuscriptApplyOutcome(book.manuscriptId, book.branchId, clientEffectId).state).toBe('not-committed');
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+  }, 300_000);
+
+  it('never guesses which side of each other two deletions applied side by side stood', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const book = await importBook(store);
+      const block = paragraphs(store.getManuscriptWindow(book.manuscriptId, book.branchId, null))[0]!;
+      const parts = graphemesOf(block.text);
+      const first = suggest(store, book, block.blockId, 4, 6, '');
+      const second = suggest(store, book, block.blockId, 6, 9, '');
+      const batch = store.applyChangeSuggestionBatch({ ...binding(store, book), markIds: [first.markId, second.markId], clientEffectId: randomUUID() });
+      expect(blockText(store, book, block.blockId) === [...parts.slice(0, 4), ...parts.slice(9)].join('')).toBe(true);
+      for (const { markId } of [first, second]) {
+        expect(batch.marks.find((mark) => mark.markId === markId)).toMatchObject({ status: 'applied', anchorState: 'exact', fromGrapheme: 4, toGrapheme: 4 });
+      }
+      // The second deletion's words go back at the one point both stand on. Whether the first deletion's
+      // words belong in front of them or behind them is no longer known there, so that one drifts.
+      const reversed = store.reverseAppliedChangeSuggestion({ ...binding(store, book), markId: second.markId, clientEffectId: randomUUID() });
+      expect(blockText(store, book, block.blockId) === [...parts.slice(0, 4), ...parts.slice(6)].join('')).toBe(true);
+      expect(reversed.card).toMatchObject({ status: 'open', anchorState: 'exact', pinnedText: second.pinned, fromGrapheme: 4, toGrapheme: 7 });
+      expect(reversed.marks.find((mark) => mark.markId === first.markId)).toMatchObject({ status: 'applied', anchorState: 'drifted' });
+      expect(storeError(() => store.reverseAppliedChangeSuggestion({ ...binding(store, book), markId: first.markId, clientEffectId: randomUUID() })))
+        .toBe('APPLY_TARGET_DRIFTED');
       store.markCleanShutdown();
     } finally {
       store.close();
