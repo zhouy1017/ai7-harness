@@ -4743,6 +4743,12 @@ export interface ServiceOperationMap {
     input: SaveMilestoneInput;
     output: MilestoneProjection;
   };
+  /**
+   * ⑥ 交付物 · 发稿 (Issue #414, plan slice S65), Book-scoped. The read lists the Manuscript's milestones and
+   * designations; 设为发稿版本 is one deterministic local command that answers with the 交付物 as they stand.
+   */
+  inspectDeliverables: { input: InspectDeliverablesInput; output: DeliverablesProjection };
+  designatePublicationVersion: { input: DesignatePublicationVersionInput; output: PublicationDesignationProjection };
   undoManuscript: {
     input: { manuscriptId: string; branchId: string; expectedWorkingDigest: string };
     output: DurableHistoryProjection;

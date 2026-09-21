@@ -6,6 +6,8 @@ import {
   MAX_EDIT_CODE_UNITS,
   MAX_MARK_BODY_CODE_UNITS,
   MAX_MILESTONE_PURPOSE_CODE_UNITS,
+  MAX_PUBLICATION_BASIS_CHARACTERS,
+  MAX_PUBLICATION_SCOPE_CHARACTERS,
   MAX_REPLACEMENT_EXCLUSIONS,
   MAX_REVIEW_FINDING_REASON_CHARACTERS,
   MAX_REVIEW_RUN_CATEGORIES,
@@ -17,6 +19,7 @@ import {
   REVIEW_FINDING_STATUSES,
   REVIEW_SCOPE_KINDS,
   isReviewCategoryId,
+  publicationText,
   type BaselineAnalysisUpdateMode,
   type MilestonePurposeKind,
   type ReviewFindingSeverity,
@@ -120,6 +123,15 @@ function validReviewFindingReason(value: unknown): boolean {
   if (!isBoundedString(value, MAX_REVIEW_FINDING_REASON_CHARACTERS * 4)) return false;
   const reason = value.trim();
   return reason.length > 0 && [...reason].length <= MAX_REVIEW_FINDING_REASON_CHARACTERS;
+}
+
+/**
+ * 发稿范围 or 依据: not blank, and at most `maximum` characters once normalized and trimmed, counted as the
+ * store counts them. The raw text may carry the whitespace the store trims and characters outside the
+ * Basic Multilingual Plane, so its own ceiling leaves room for both.
+ */
+function validPublicationText(value: unknown, maximum: number): boolean {
+  return isBoundedString(value, maximum * 4) && publicationText(value, maximum) !== null;
 }
 
 function validRecoverySelection(value: unknown): boolean {
@@ -952,6 +964,23 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
         (input.purposeKind === 'custom' ? !isBoundedString(input.purpose, MAX_MILESTONE_PURPOSE_CODE_UNITS) : input.purpose !== null) ||
         !isBoundedString(input.note, 500, true)
       ) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
+    // ⑥ 交付物 · 发稿 (Issue #414). The milestone is named by its identity within the route's Book; whether
+    // it is one of that Book's is the store's to decide. 发稿范围 and 依据 are required and bounded here
+    // exactly as the store bounds them.
+    case 'inspectDeliverables': {
+      const input = requireInput(value.input, ['bookId'], tentativeId);
+      if (!validUuid(input.bookId)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'designatePublicationVersion': {
+      const input = requireInput(value.input, ['bookId', 'milestoneId', 'scope', 'basis'], tentativeId);
+      if (!validUuid(input.bookId) || !validUuid(input.milestoneId) ||
+          !validPublicationText(input.scope, MAX_PUBLICATION_SCOPE_CHARACTERS) ||
+          !validPublicationText(input.basis, MAX_PUBLICATION_BASIS_CHARACTERS)) {
         throw new ProtocolError(tentativeId);
       }
       break;

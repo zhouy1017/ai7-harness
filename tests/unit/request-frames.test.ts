@@ -7,6 +7,8 @@ import {
   BASELINE_ANALYSIS_TASK_GOAL,
   MAX_EDIT_CODE_UNITS,
   MAX_MILESTONE_PURPOSE_CODE_UNITS,
+  MAX_PUBLICATION_BASIS_CHARACTERS,
+  MAX_PUBLICATION_SCOPE_CHARACTERS,
   MAX_REPLACEMENT_EXCLUSIONS,
   MAX_REVIEW_FINDING_REASON_CHARACTERS,
   MAX_REVIEW_RUN_CATEGORIES,
@@ -150,6 +152,25 @@ describe('decodeRequest accepts well-formed frames', () => {
     }
     const own = { id: randomUUID(), op: 'saveMilestone', input: { ...binding, purposeKind: 'custom', purpose: '途'.repeat(MAX_MILESTONE_PURPOSE_CODE_UNITS), note: '说明' } };
     expect(decodeRequest(frameOf(own))).toEqual(own);
+  });
+
+  it('accepts the two 交付物 operations with their exact inputs, 发稿范围 and 依据 at their bounds however padded', () => {
+    const bookId = randomUUID();
+    const milestoneId = randomUUID();
+    const inputs: ReadonlyArray<{ op: string; input: Record<string, unknown> }> = [
+      { op: 'inspectDeliverables', input: { bookId } },
+      { op: 'designatePublicationVersion', input: { bookId, milestoneId, scope: '纸质版首印', basis: '三审通过，社领导同意' } },
+      {
+        op: 'designatePublicationVersion',
+        input: { bookId, milestoneId, scope: `  ${'范'.repeat(MAX_PUBLICATION_SCOPE_CHARACTERS)}\n`, basis: '据'.repeat(MAX_PUBLICATION_BASIS_CHARACTERS) },
+      },
+      // Characters outside the Basic Multilingual Plane count once each, as the store counts them.
+      { op: 'designatePublicationVersion', input: { bookId, milestoneId, scope: '𠀀'.repeat(MAX_PUBLICATION_SCOPE_CHARACTERS), basis: '𠀀'.repeat(MAX_PUBLICATION_BASIS_CHARACTERS) } },
+    ];
+    for (const { op, input } of inputs) {
+      const request = { id: randomUUID(), op, input };
+      expect(decodeRequest(frameOf(request))).toEqual(request);
+    }
   });
 });
 
@@ -427,6 +448,34 @@ describe('decodeRequest rejects malformed frames', () => {
     ];
     for (const input of refused) {
       expect(rejectionFor(frameOf({ id, op: 'saveMilestone', input })).requestId).toBe(id);
+    }
+  });
+
+  it('rejects a 交付物 read or 设为发稿版本 whose identities, key set, 发稿范围 or 依据 are wrong', () => {
+    const id = randomUUID();
+    const bookId = randomUUID();
+    const designation = { bookId, milestoneId: randomUUID(), scope: '纸质版首印', basis: '三审通过' };
+    const refused: ReadonlyArray<{ op: string; input: unknown }> = [
+      { op: 'inspectDeliverables', input: {} },
+      { op: 'inspectDeliverables', input: { bookId: 'not-a-uuid' } },
+      { op: 'inspectDeliverables', input: { bookId, milestoneId: randomUUID() } },
+      // The Book is the route's; the milestone is named, never "the latest".
+      { op: 'designatePublicationVersion', input: { ...designation, milestoneId: null } },
+      { op: 'designatePublicationVersion', input: { ...designation, milestoneId: 'latest' } },
+      { op: 'designatePublicationVersion', input: { milestoneId: designation.milestoneId, scope: '纸质版首印', basis: '三审通过' } },
+      { op: 'designatePublicationVersion', input: { ...designation, revisionId: randomUUID() } },
+      // Both are required, and bounded once trimmed.
+      { op: 'designatePublicationVersion', input: { ...designation, scope: '' } },
+      { op: 'designatePublicationVersion', input: { ...designation, scope: ' \n\t ' } },
+      { op: 'designatePublicationVersion', input: { ...designation, scope: '范'.repeat(MAX_PUBLICATION_SCOPE_CHARACTERS + 1) } },
+      { op: 'designatePublicationVersion', input: { ...designation, scope: '\uD800' } },
+      { op: 'designatePublicationVersion', input: { ...designation, basis: '' } },
+      { op: 'designatePublicationVersion', input: { ...designation, basis: '据'.repeat(MAX_PUBLICATION_BASIS_CHARACTERS + 1) } },
+      { op: 'designatePublicationVersion', input: { ...designation, basis: null } },
+      { op: 'designatePublicationVersion', input: { ...designation, scope: 42 } },
+    ];
+    for (const { op, input } of refused) {
+      expect(rejectionFor(frameOf({ id, op, input })).requestId).toBe(id);
     }
   });
 
