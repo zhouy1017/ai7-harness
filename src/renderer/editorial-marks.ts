@@ -112,6 +112,23 @@ const CONVERT_LABELS: Readonly<Record<EditorialMarkKind, string>> = {
   'personal-highlight': '加高亮',
 };
 
+/**
+ * Where a menu asked for at a point goes so that it stays inside the window on every side. The point
+ * can lie outside the window: the context-menu key speaks for a caret that may have been scrolled out
+ * of view, above the window as easily as below it. A menu larger than the window starts at the margin.
+ */
+export function menuPlacement(
+  at: { x: number; y: number },
+  size: { width: number; height: number },
+  viewport: { width: number; height: number },
+  margin = 8,
+): { left: number; top: number } {
+  return {
+    left: Math.max(margin, Math.min(at.x, viewport.width - margin - size.width)),
+    top: Math.max(margin, Math.min(at.y, viewport.height - margin - size.height)),
+  };
+}
+
 export function mountEditorialMarks(options: MountOptions): EditorialMarksSurface {
   const { editor, api } = options;
   const layer = el('div', 'editorial-mark-layer');
@@ -881,12 +898,10 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     panel.style.top = `${at.y}px`;
     menuLayer.append(panel);
     menu = panel;
-    // Keep the menu inside the window.
     const rect = panel.getBoundingClientRect();
-    const overflowX = rect.right - (window.innerWidth - 8);
-    const overflowY = rect.bottom - (window.innerHeight - 8);
-    if (overflowX > 0) panel.style.left = `${Math.max(8, at.x - overflowX)}px`;
-    if (overflowY > 0) panel.style.top = `${Math.max(8, at.y - overflowY)}px`;
+    const placed = menuPlacement(at, rect, { width: window.innerWidth, height: window.innerHeight });
+    panel.style.left = `${placed.left}px`;
+    panel.style.top = `${placed.top}px`;
     controls.find((control) => !control.disabled)?.focus({ preventScroll: true });
   };
 
