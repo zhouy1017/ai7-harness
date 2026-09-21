@@ -128,6 +128,7 @@ import {
 } from './text-manuscript.js';
 import { initializeManuscriptEffectSchema, ManuscriptApplyStore } from './manuscript-apply.js';
 import { initializeReviewRunSchema, ReviewRunError, ReviewRunStore, type ReviewRunPreparationProgress } from './review/review-runs.js';
+import { initializePublicationVersionSchema } from './publication-versions.js';
 import type { ReviewRunDriveSteps } from './review/review-run-driver.js';
 import { reviewCategoryContractInput, type ReviewCategoryConfigurationEntry } from './review/category-configuration.js';
 import { reviewCategoryKindDefinition } from './review/review-category-kind.js';
@@ -181,6 +182,7 @@ import {
   J04_BASELINE_ANALYSIS_SCHEMA_VERSION,
   MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION,
   MANUSCRIPT_INTAKE_SCHEMA_VERSION,
+  PUBLICATION_VERSION_SCHEMA_VERSION,
   SUCCESSIVE_TASK_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_VERSION,
   TEXT_CONVERSION_SCHEMA_VERSION,
@@ -1375,7 +1377,8 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION ||
       currentVersion === EDITORIAL_MARK_SCHEMA_VERSION ||
       currentVersion === MANUSCRIPT_EFFECT_SCHEMA_VERSION ||
-      currentVersion === EDITORIAL_REVIEW_SCHEMA_VERSION,
+      currentVersion === EDITORIAL_REVIEW_SCHEMA_VERSION ||
+      currentVersion === PUBLICATION_VERSION_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -1399,7 +1402,8 @@ function initializeSchema(db: DatabaseSync): void {
     currentVersion === MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION ||
     currentVersion === EDITORIAL_MARK_SCHEMA_VERSION ||
     currentVersion === MANUSCRIPT_EFFECT_SCHEMA_VERSION ||
-    currentVersion === EDITORIAL_REVIEW_SCHEMA_VERSION
+    currentVersion === EDITORIAL_REVIEW_SCHEMA_VERSION ||
+    currentVersion === PUBLICATION_VERSION_SCHEMA_VERSION
   ) return;
   if (currentVersion === 1) {
     migrateSchemaV1ToV2(db);
@@ -1737,7 +1741,8 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === TEXT_CONVERSION_SCHEMA_VERSION || version === FACTUAL_REVIEW_SCHEMA_VERSION ||
       version === MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION || version === EDITORIAL_MARK_SCHEMA_VERSION ||
       version === MANUSCRIPT_EFFECT_SCHEMA_VERSION ||
-      version === EDITORIAL_REVIEW_SCHEMA_VERSION,
+      version === EDITORIAL_REVIEW_SCHEMA_VERSION ||
+      version === PUBLICATION_VERSION_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -1750,7 +1755,8 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === TEXT_CONVERSION_SCHEMA_VERSION || version === FACTUAL_REVIEW_SCHEMA_VERSION ||
       version === MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION || version === EDITORIAL_MARK_SCHEMA_VERSION ||
       version === MANUSCRIPT_EFFECT_SCHEMA_VERSION ||
-      version === EDITORIAL_REVIEW_SCHEMA_VERSION) return;
+      version === EDITORIAL_REVIEW_SCHEMA_VERSION ||
+      version === PUBLICATION_VERSION_SCHEMA_VERSION) return;
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
   );
@@ -1855,7 +1861,8 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === TEXT_CONVERSION_SCHEMA_VERSION || version === FACTUAL_REVIEW_SCHEMA_VERSION ||
       version === MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION || version === EDITORIAL_MARK_SCHEMA_VERSION ||
       version === MANUSCRIPT_EFFECT_SCHEMA_VERSION ||
-      version === EDITORIAL_REVIEW_SCHEMA_VERSION,
+      version === EDITORIAL_REVIEW_SCHEMA_VERSION ||
+      version === PUBLICATION_VERSION_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -1867,7 +1874,8 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === TEXT_CONVERSION_SCHEMA_VERSION || version === FACTUAL_REVIEW_SCHEMA_VERSION ||
       version === MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION || version === EDITORIAL_MARK_SCHEMA_VERSION ||
       version === MANUSCRIPT_EFFECT_SCHEMA_VERSION ||
-      version === EDITORIAL_REVIEW_SCHEMA_VERSION) return;
+      version === EDITORIAL_REVIEW_SCHEMA_VERSION ||
+      version === PUBLICATION_VERSION_SCHEMA_VERSION) return;
   validateSourceImportSchemaTruth(db, profile);
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
@@ -2160,7 +2168,7 @@ function validateModelServiceSchema(
   const version = asNumber(
     one(db.prepare('PRAGMA user_version').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取数据库版本。').user_version,
   );
-  if (validateStoreTruth || version !== EDITORIAL_REVIEW_SCHEMA_VERSION) {
+  if (validateStoreTruth || version !== PUBLICATION_VERSION_SCHEMA_VERSION) {
     validateManuscriptReimportSchemaTruth(
       db,
       profile,
@@ -2174,6 +2182,7 @@ function validateModelServiceSchema(
       version >= EDITORIAL_MARK_SCHEMA_VERSION,
       version >= MANUSCRIPT_EFFECT_SCHEMA_VERSION,
       version >= EDITORIAL_REVIEW_SCHEMA_VERSION,
+      version >= PUBLICATION_VERSION_SCHEMA_VERSION,
     );
   }
   const invalid = db.prepare(
@@ -2213,7 +2222,8 @@ function initializeModelServiceSchema(
       version === TEXT_CONVERSION_SCHEMA_VERSION || version === FACTUAL_REVIEW_SCHEMA_VERSION ||
       version === MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION || version === EDITORIAL_MARK_SCHEMA_VERSION ||
       version === MANUSCRIPT_EFFECT_SCHEMA_VERSION ||
-      version === EDITORIAL_REVIEW_SCHEMA_VERSION,
+      version === EDITORIAL_REVIEW_SCHEMA_VERSION ||
+      version === PUBLICATION_VERSION_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2225,7 +2235,8 @@ function initializeModelServiceSchema(
       version === TEXT_CONVERSION_SCHEMA_VERSION || version === FACTUAL_REVIEW_SCHEMA_VERSION ||
       version === MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION || version === EDITORIAL_MARK_SCHEMA_VERSION ||
       version === MANUSCRIPT_EFFECT_SCHEMA_VERSION ||
-      version === EDITORIAL_REVIEW_SCHEMA_VERSION) {
+      version === EDITORIAL_REVIEW_SCHEMA_VERSION ||
+      version === PUBLICATION_VERSION_SCHEMA_VERSION) {
     validateModelServiceSchema(db, profile, validateStoreTruth);
     if (version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION) {
       validateEditorialWorkspaceProfileNativeSchema(db);
@@ -3071,13 +3082,15 @@ export class EditorialStore {
       // and again for the entry-position relation revision 21 adds, the editorial-mark relations
       // revision 22 adds and the manuscript-effect relations revision 23 adds. Revision 24 (Issue
       // #417) adds the Review Run relations here, and `initializeTaskAuthorizationSchema` rebuilds the
-      // three kind-coupled analysis relations for the review-category kind family and stamps the version.
+      // three kind-coupled analysis relations for the review-category kind family. Revision 25 (Issue
+      // #414) adds the Publication Version relations here, and the version stamp is the only other move.
       initializeManuscriptIntakeSchema(authority);
       initializeTextConversionSchema(authority);
       initializeManuscriptEntryPositionSchema(authority);
       initializeEditorialMarkSchema(authority);
       initializeManuscriptEffectSchema(authority);
       initializeReviewRunSchema(authority);
+      initializePublicationVersionSchema(authority);
       initializeTaskAuthorizationSchema(authority);
       initializeBoundedSchema(authority, workflowProfile);
       validateEditorialWorkspaceProfileSchema(authority);
