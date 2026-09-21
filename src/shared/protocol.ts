@@ -3378,6 +3378,8 @@ export interface ReviewWorkspaceCategoryProjection {
   riskPointsOnly: boolean;
   batchApply: boolean;
   searchEngine: boolean;
+  /** Whether the category reads without a model and sends nothing: the leads read the baseline analysis. */
+  modelFree: boolean;
   basisStatement: string;
   guidelineDocuments: ReadonlyArray<{ documentId: string; title: string; issuer: string; version: string; clauseCount: number }>;
   procedure: { title: string; version: string };

@@ -1846,6 +1846,7 @@ export class ReviewRunStore {
       riskPointsOnly: entry.riskPointsOnly,
       batchApply: entry.batchApply,
       searchEngine: entry.searchEngine,
+      modelFree: entry.executor === 'baseline-leads',
       basisStatement: reviewCategoryBasisStatement(entry),
       guidelineDocuments: entry.guidelineDocuments.map((document) => ({
         documentId: document.documentId, title: document.title, issuer: document.issuer, version: document.version, clauseCount: document.clauses.length,

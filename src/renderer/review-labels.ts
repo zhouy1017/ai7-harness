@@ -220,12 +220,12 @@ export function reviewReadConsequence(
  * 会发送: the Outbound Data Category at full rank (V2-UX-LAYER-002). The leads read the baseline analysis
  * only; every other category sends what it reads with its own guideline clauses.
  */
-export function reviewSendConsequence(selected: ReadonlyArray<{ readonly categoryId: string; readonly modelFree: boolean }>): string {
+export function reviewSendConsequence(selected: ReadonlyArray<{ readonly label: string; readonly modelFree: boolean }>): string {
   if (selected.length === 0) return '选好类别后显示';
   if (selected.every((category) => category.modelFree)) return '只读基线分析的线索，不发送任何内容。';
-  return selected.some((category) => category.modelFree)
-    ? '所读范围内的稿件正文和所选类别的规范条款，发往为审阅配置的模型服务；「情节逻辑与前后一致」只读基线分析的线索，不发送。'
-    : '所读范围内的稿件正文和所选类别的规范条款，发往为审阅配置的模型服务。';
+  const free = selected.filter((category) => category.modelFree).map((category) => `「${category.label}」`);
+  const sent = '所读范围内的稿件正文和所选类别的规范条款，发往为审阅配置的模型服务';
+  return free.length === 0 ? `${sent}。` : `${sent}；${free.join('、')}只读基线分析的线索，不发送。`;
 }
 
 export function reviewPreparationLine(progress: { completed: number; total: number; label: string }): string {
@@ -434,6 +434,92 @@ export function reviewReportMustItemLine(item: { categoryLabel: string; location
 
 export function reviewReportExcludedLine(excluded: number): string {
   return excluded === 0 ? '列出的发现都已在稿件上定位' : `另有 ${excluded} 条无法在稿件上定位，没有列为发现`;
+}
+
+export const REVIEW_REPORT_OVERVIEW_COLUMNS = ['类别', '状态', '发现'] as const;
+
+export function reviewReportConfigurationLine(version: string): string {
+  return `审阅配置第 ${version} 版`;
+}
+
+/** 附录: what a category applied — its guideline documents and its 工序, each with its version (REV-009, REV-012). */
+export function reviewReportAppendixLine(category: {
+  label: string;
+  guidelineDocuments: ReadonlyArray<{ issuer: string; title: string; version: string }>;
+  procedure: { title: string; version: string };
+}): string {
+  const documents = category.guidelineDocuments.length === 0
+    ? '没有规范文件'
+    : category.guidelineDocuments.map((document) => `${document.issuer} · ${document.title}（第 ${document.version} 版）`).join('、');
+  return `${category.label}：${documents}；工序：${category.procedure.title}（第 ${category.procedure.version} 版）`;
+}
+
+// ---- the opened Run --------------------------------------------------------------------------------
+
+export function reviewRunHeading(label: string): string {
+  return `${label}审阅`;
+}
+
+export function reviewRunMetaLine(scopeLabel: string, revisionLabel: string): string {
+  return `${scopeLabel} · 读的是修订版 ${revisionLabel}`;
+}
+
+export function reviewCreatedLine(localInstant: string): string {
+  return `创建于 ${localInstant}`;
+}
+
+export function reviewAuthorizedLine(localInstant: string): string {
+  return `授权于 ${localInstant}`;
+}
+
+/** What the status line says as each action of the destination starts and ends. */
+export const REVIEW_STATUS_LINES = {
+  opened: '审阅已打开',
+  refreshFailed: '无法刷新审阅。',
+  preparing: '正在准备审阅计划…',
+  prepared: '审阅计划已冻结；请查看计划后授权。',
+  preparationCancelled: '审阅计划准备已取消；稿件与审阅记录保持不变。',
+  preparationFailed: '无法准备审阅计划。',
+  authorizing: '正在记录授权并开始审阅…',
+  authorized: '已授权，开始逐类审阅。',
+  authorizeFailed: '无法授权这次审阅。',
+  continuing: '正在继续审阅…',
+  continued: '已继续审阅。',
+  continueFailed: '无法继续这次审阅。',
+  applying: '正在应用到稿件…',
+  applied: '已应用这条修改建议。',
+  appliedRecovered: '已应用这条修改建议。写入结果已从记录确认。',
+  notApplied: '这次应用没有写入稿件。',
+  applyUnknown: '无法确认这次应用的结果；请刷新审阅后查看。',
+  markingHandled: '正在标记为已处理…',
+  markedHandled: '已标记为已处理。',
+  markFailed: '这条批注未能标记为已处理。',
+  openingConvert: '正在读取这条批注…',
+  convertOpened: '请写出改成什么，再转为修改建议。',
+  converting: '正在转为修改建议…',
+  converted: '已转为修改建议。',
+  convertFailed: '这条批注未能转为修改建议。',
+  ignoring: '正在记录忽略的原因…',
+  ignored: '已忽略这条发现，原因已记录。',
+  ignoreFailed: '这条发现未能忽略。',
+  batchPreparing: '正在列出这一类可以一起应用的修改建议…',
+  batchPrepareFailed: '无法准备这次应用。',
+  reporting: '正在生成审阅报告…',
+  reportFailed: '无法生成审阅报告。',
+  openingText: '正在打开对应的稿件位置…',
+  openTextFailed: '无法打开对应的稿件位置。',
+} as const;
+
+export function reviewBatchReadyLine(count: number): string {
+  return `将把 ${count} 条修改建议写入稿件；请核对后确认应用。`;
+}
+
+export function reviewBatchAppliedLine(count: number, recovered: boolean): string {
+  return `已把 ${count} 条修改建议写入稿件。${recovered ? '写入结果已从记录确认。' : ''}`;
+}
+
+export function reviewReportGeneratedLine(version: number): string {
+  return `已生成审阅报告第 ${version} 版。`;
 }
 
 // ---- entry points ----------------------------------------------------------------------------------

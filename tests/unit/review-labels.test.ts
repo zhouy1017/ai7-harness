@@ -18,14 +18,26 @@ import {
   REVIEW_LEADS_PLAN,
   REVIEW_NOT_DO,
   REVIEW_QUICK_START_REASON,
+  REVIEW_REPORT_OVERVIEW_COLUMNS,
   REVIEW_RISK_POINT,
   REVIEW_RUN_STATE_PILLS,
   REVIEW_SECTION_LABEL,
   REVIEW_SEVERITY_PILLS,
   REVIEW_STAGE_LABELS,
+  REVIEW_STATUS_LINES,
   REVIEW_STATUS_PILLS,
   REVIEW_WORK_GROUP_LABEL,
+  reviewAuthorizedLine,
+  reviewBatchAppliedLine,
   reviewBatchCappedLine,
+  reviewBatchReadyLine,
+  reviewCreatedLine,
+  reviewReportAppendixLine,
+  reviewReportConfigurationLine,
+  reviewReportExcludedLine,
+  reviewReportGeneratedLine,
+  reviewRunHeading,
+  reviewRunMetaLine,
   reviewBatchExcludedLine,
   reviewBatchItemLine,
   reviewBatchScopeLine,
@@ -158,9 +170,9 @@ describe('the words of the 审阅 destination', () => {
     expect(reviewReadConsequence('changed', manuscript, none)).toBe('每一类上次审阅之后改动过的章；没有审阅过的类别不能这样审');
     expect(reviewReadConsequence('selection', manuscript, none)).toBe('稿件里选中的文字');
     expect(reviewSendConsequence([])).toBe('选好类别后显示');
-    expect(reviewSendConsequence([{ categoryId: 'plot-consistency', modelFree: true }])).toBe('只读基线分析的线索，不发送任何内容。');
-    expect(reviewSendConsequence([{ categoryId: 'typos-and-usage', modelFree: false }])).toBe('所读范围内的稿件正文和所选类别的规范条款，发往为审阅配置的模型服务。');
-    expect(reviewSendConsequence([{ categoryId: 'typos-and-usage', modelFree: false }, { categoryId: 'plot-consistency', modelFree: true }]))
+    expect(reviewSendConsequence([{ label: '情节逻辑与前后一致', modelFree: true }])).toBe('只读基线分析的线索，不发送任何内容。');
+    expect(reviewSendConsequence([{ label: '错别字与规范用语', modelFree: false }])).toBe('所读范围内的稿件正文和所选类别的规范条款，发往为审阅配置的模型服务。');
+    expect(reviewSendConsequence([{ label: '错别字与规范用语', modelFree: false }, { label: '情节逻辑与前后一致', modelFree: true }]))
       .toBe('所读范围内的稿件正文和所选类别的规范条款，发往为审阅配置的模型服务；「情节逻辑与前后一致」只读基线分析的线索，不发送。');
     expect(reviewChapterOptionLabel(third)).toBe('第三章（内容块 26–43）');
     expect(reviewPreparationLine({ completed: 1, total: 3, label: '正在冻结「错别字与规范用语」的计划' })).toBe('正在冻结「错别字与规范用语」的计划 · 1 / 3');
@@ -244,6 +256,34 @@ describe('the words of the 审阅 destination', () => {
     expect(reviewReportVersionLine(2, '2026/09/21 18:00:00')).toBe('第 2 版 · 生成于 2026/09/21 18:00:00');
     expect(reviewReportMustItemLine({ categoryLabel: '错别字与规范用语', locationLabel: '内容块 3', quote: '的的', note: '重复。', statusLabel: '待处理' }))
       .toBe('错别字与规范用语 · 内容块 3 · 「的的」 · 重复。 · 待处理');
+    expect(REVIEW_REPORT_OVERVIEW_COLUMNS).toEqual(['类别', '状态', '发现']);
+    expect(reviewReportExcludedLine(0)).toBe('列出的发现都已在稿件上定位');
+    expect(reviewReportExcludedLine(2)).toBe('另有 2 条无法在稿件上定位，没有列为发现');
+    expect(reviewReportConfigurationLine('1')).toBe('审阅配置第 1 版');
+    expect(reviewReportAppendixLine({
+      label: '错别字与规范用语',
+      guidelineDocuments: [{ issuer: 'AI7 内置默认', title: '错别字与规范用语审读要点', version: '1' }],
+      procedure: { title: '逐段审读', version: '1' },
+    })).toBe('错别字与规范用语：AI7 内置默认 · 错别字与规范用语审读要点（第 1 版）；工序：逐段审读（第 1 版）');
+    expect(reviewReportAppendixLine({ label: '情节逻辑与前后一致', guidelineDocuments: [], procedure: { title: '线索转批注', version: '2' } }))
+      .toBe('情节逻辑与前后一致：没有规范文件；工序：线索转批注（第 2 版）');
+    expect(reviewReportGeneratedLine(3)).toBe('已生成审阅报告第 3 版。');
+  });
+
+  it('names the opened Run and says what each action came to', () => {
+    expect(reviewRunHeading('第 3 次')).toBe('第 3 次审阅');
+    expect(reviewRunMetaLine('全书', 'r2')).toBe('全书 · 读的是修订版 r2');
+    expect(reviewCreatedLine('2026/09/21 18:00:00')).toBe('创建于 2026/09/21 18:00:00');
+    expect(reviewAuthorizedLine('2026/09/21 18:01:00')).toBe('授权于 2026/09/21 18:01:00');
+    expect(reviewBatchReadyLine(3)).toBe('将把 3 条修改建议写入稿件；请核对后确认应用。');
+    expect(reviewBatchAppliedLine(3, false)).toBe('已把 3 条修改建议写入稿件。');
+    expect(reviewBatchAppliedLine(3, true)).toBe('已把 3 条修改建议写入稿件。写入结果已从记录确认。');
+    expect(REVIEW_STATUS_LINES.applied).toBe('已应用这条修改建议。');
+    expect(REVIEW_STATUS_LINES.appliedRecovered).toBe('已应用这条修改建议。写入结果已从记录确认。');
+    expect(REVIEW_STATUS_LINES.applyUnknown).toBe('无法确认这次应用的结果；请刷新审阅后查看。');
+    expect(REVIEW_STATUS_LINES.ignored).toBe('已忽略这条发现，原因已记录。');
+    expect(REVIEW_STATUS_LINES.prepared).toBe('审阅计划已冻结；请查看计划后授权。');
+    expect(REVIEW_STATUS_LINES.preparationCancelled).toBe('审阅计划准备已取消；稿件与审阅记录保持不变。');
   });
 
   it('reads 审阅 in one line on 工作概览', () => {

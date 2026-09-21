@@ -292,6 +292,8 @@ describe('a Review Run over the real store on exact sample1', () => {
         'literary-expression', 'series-consistency', 'cross-deliverable-consistency',
       ]);
       expect(before.categories.find((category) => category.categoryId === PLOT)).toMatchObject({ available: false, unavailableReason: LEADS_ABSENT_REASON });
+      // Only the leads read without a model; the sheet says so in its 会发送 line.
+      expect(before.categories.filter((category) => category.modelFree).map((category) => category.categoryId)).toEqual([PLOT]);
       expect(before.categories.find((category) => category.categoryId === 'series-consistency')!.available).toBe(false);
       expect(before.coverage.map((row) => row.state)).toEqual(['never', 'never', 'unavailable', 'never', 'never', 'never', 'never', 'unavailable', 'unavailable']);
       expect(before.scopeOptions.selection).toEqual({ available: false, unavailableReason: SELECTION_UNAVAILABLE_REASON });
