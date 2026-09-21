@@ -625,7 +625,10 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'controller-loopback-sentinel',
     'controller-imports',
     'import-and-open',
-    'selection-menu',
+    'selection-menu-empty',
+    'selection-menu-cross-paragraph',
+    'selection-menu-groups',
+    'selection-menu-keys',
     'mark-highlight',
     'mark-annotation',
     'mark-editor-note',
@@ -635,6 +638,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'marks-follow-edits',
     'clipboard-commands',
     'j14-marks-zoom-200-reflow',
+    'menu-stays-open-at-the-pane-edge',
     'j14-marks-forced-colors',
     // The keyboard path names the precondition a step found missing, because a hosted runner says
     // nothing but the stage: the pattern `cooperative-position-*` set for J-02.

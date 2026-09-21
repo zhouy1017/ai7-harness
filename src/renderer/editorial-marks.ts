@@ -104,6 +104,12 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
   const { editor, api } = options;
   const layer = el('div', 'editorial-mark-layer');
   options.scroll.append(layer);
+  // A composer and a Mark Card belong to their paragraph and scroll with it. A menu belongs to the
+  // pointer: it floats over the window in a layer of its own, so opening one can never change the
+  // text pane's scrollable area — a scrollbar the menu itself brought in used to resize the pane,
+  // and the pane's resize closed the menu the moment it opened on a small window.
+  const menuLayer = el('div', 'editorial-mark-menu-layer');
+  document.body.append(menuLayer);
   let destroyed = false;
   let menu: HTMLElement | undefined;
   let floating: HTMLElement | undefined;
@@ -760,17 +766,16 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       event.preventDefault();
       next?.focus();
     });
-    const base = options.scroll.getBoundingClientRect();
-    panel.style.left = `${at.x - base.left + options.scroll.scrollLeft}px`;
-    panel.style.top = `${at.y - base.top + options.scroll.scrollTop}px`;
-    layer.append(panel);
+    panel.style.left = `${at.x}px`;
+    panel.style.top = `${at.y}px`;
+    menuLayer.append(panel);
     menu = panel;
-    // Keep the menu inside the visible part of the text pane.
+    // Keep the menu inside the window.
     const rect = panel.getBoundingClientRect();
-    const overflowX = rect.right - (base.right - 8);
-    const overflowY = rect.bottom - (base.bottom - 8);
-    if (overflowX > 0) panel.style.left = `${Math.max(options.scroll.scrollLeft + 8, at.x - base.left + options.scroll.scrollLeft - overflowX)}px`;
-    if (overflowY > 0) panel.style.top = `${Math.max(options.scroll.scrollTop + 8, at.y - base.top + options.scroll.scrollTop - overflowY)}px`;
+    const overflowX = rect.right - (window.innerWidth - 8);
+    const overflowY = rect.bottom - (window.innerHeight - 8);
+    if (overflowX > 0) panel.style.left = `${Math.max(8, at.x - overflowX)}px`;
+    if (overflowY > 0) panel.style.top = `${Math.max(8, at.y - overflowY)}px`;
     controls.find((control) => !control.disabled)?.focus({ preventScroll: true });
   };
 
@@ -952,7 +957,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     if (mark !== undefined && mark.markId !== openCardId) void openCard(mark.markId);
   };
   const onDocumentMouseDown = (event: MouseEvent): void => {
-    if (event.target instanceof Node && layer.contains(event.target)) return;
+    if (event.target instanceof Node && (layer.contains(event.target) || menuLayer.contains(event.target))) return;
     closeMenu();
     if (floating !== undefined && !(event.target instanceof Element && event.target.closest('[data-mark-id]'))) closeFloating();
   };
@@ -966,9 +971,13 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
   // The text column moves when the pane reflows and grows when its text does; what floats below a
   // paragraph follows it, and a menu opened at a pointer position that no longer means anything goes.
   const reflow = new ResizeObserver(() => {
-    closeMenu();
     if (floating !== undefined && floatingBlockId !== undefined) placeBelowBlock(floating, floatingBlockId);
   });
+  // A menu points at a place on screen; once the text under it moves, it points at nothing.
+  const onPaneScroll = (): void => closeMenu();
+  const onWindowResize = (): void => closeMenu();
+  options.scroll.addEventListener('scroll', onPaneScroll, { passive: true });
+  window.addEventListener('resize', onWindowResize);
   reflow.observe(options.scroll);
   reflow.observe(options.host);
 
@@ -985,6 +994,8 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     destroy: () => {
       destroyed = true;
       reflow.disconnect();
+      options.scroll.removeEventListener('scroll', onPaneScroll);
+      window.removeEventListener('resize', onWindowResize);
       close();
       options.host.removeEventListener('mousedown', onMouseDown);
       options.host.removeEventListener('contextmenu', onContextMenu);
@@ -993,6 +1004,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       document.removeEventListener('mousedown', onDocumentMouseDown);
       document.removeEventListener('keydown', onDocumentKeyDown);
       layer.remove();
+      menuLayer.remove();
     },
   };
 }

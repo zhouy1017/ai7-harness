@@ -253,10 +253,10 @@ const PAGE_HELPERS = `(() => {
       selection.addRange(range);
       return selection.toString().length === to - from;
     },
-    rightClick: (element) => {
+    rightClick: (element, atRightEdge = false) => {
       if (!(element instanceof HTMLElement)) return false;
       const rect = element.getBoundingClientRect();
-      const init = { bubbles: true, cancelable: true, button: 2, buttons: 2, clientX: rect.left + Math.min(10, rect.width / 2), clientY: rect.top + rect.height / 2 };
+      const init = { bubbles: true, cancelable: true, button: 2, buttons: 2, clientX: atRightEdge ? rect.right - 4 : rect.left + Math.min(10, rect.width / 2), clientY: rect.top + Math.min(24, rect.height / 2) };
       element.dispatchEvent(new MouseEvent('mousedown', init));
       element.dispatchEvent(new MouseEvent('mouseup', { ...init, buttons: 0 }));
       element.dispatchEvent(new MouseEvent('contextmenu', { ...init, buttons: 0 }));
@@ -265,8 +265,8 @@ const PAGE_HELPERS = `(() => {
     block,
     mark: (kind, id) => Array.from(block(id)?.querySelectorAll('.editorial-mark[data-mark-kind="' + kind + '"]') ?? []),
     markText: (kind, id) => window.__j05.mark(kind, id).map((node) => durable(node).map((part) => part.data).join('')).join(''),
-    menu: () => layer()?.querySelector('[data-mark-menu]') ?? null,
-    item: (action) => layer()?.querySelector('[data-mark-menu] [data-mark-action="' + action + '"]') ?? null,
+    menu: () => document.querySelector('.editorial-mark-menu-layer [data-mark-menu]'),
+    item: (action) => document.querySelector('.editorial-mark-menu-layer [data-mark-menu] [data-mark-action="' + action + '"]'),
     card: () => layer()?.querySelector('[data-mark-card]') ?? null,
     composer: () => layer()?.querySelector('[data-mark-composer]') ?? null,
     act: (action) => {
@@ -309,19 +309,30 @@ async function settled(renderer, name) {
 }
 
 /**
- * Select a range and open the selection menu on it. The editor reads the selection a tick after the
- * page sets it, so the menu is asked again until it names the selected length.
+ * Open a menu with the pointer. The editor reads a selection a tick after the page sets it, and a slow
+ * runner makes that tick long, so the menu is asked for again until it shows what was prepared.
  */
-async function openSelectionMenu(renderer, blockId, from, to, name) {
-  const deadline = Date.now() + 20_000;
+async function rightClickUntil(renderer, prepare, target, ready, name) {
+  const deadline = Date.now() + 30_000;
   while (Date.now() < deadline) {
-    await assertRenderer(renderer, `window.__j05.place(${JSON.stringify(blockId)}, ${from}, ${to})`, `${name}-place`);
-    await new Promise((resolveWait) => setTimeout(resolveWait, 60));
-    await assertRenderer(renderer, `window.__j05.rightClick(window.__j05.block(${JSON.stringify(blockId)}))`, `${name}-right-click`);
-    if (await renderer.evaluate(`window.__j05.menu()?.dataset.markMenu === 'selection' && window.__j05.menu().textContent.includes('已选 ${to - from} 字')`)) return;
+    await assertRenderer(renderer, prepare, `${name}-prepare`);
+    await new Promise((resolveWait) => setTimeout(resolveWait, 80));
+    await assertRenderer(renderer, `window.__j05.rightClick(${target})`, `${name}-right-click`);
+    if (await renderer.evaluate(`Boolean(${ready})`)) return;
     await press(renderer, 'Escape');
+    await new Promise((resolveWait) => setTimeout(resolveWait, 120));
   }
   throw new Error(`J-05/${name}`);
+}
+
+async function openSelectionMenu(renderer, blockId, from, to, name) {
+  await rightClickUntil(
+    renderer,
+    `window.__j05.place(${JSON.stringify(blockId)}, ${from}, ${to})`,
+    `window.__j05.block(${JSON.stringify(blockId)})`,
+    `window.__j05.menu()?.dataset.markMenu === 'selection' && window.__j05.menu().textContent.includes('已选 ${to - from} 字')`,
+    name,
+  );
 }
 
 async function chooseMenuItem(renderer, action, name) {
@@ -348,15 +359,13 @@ async function openMarkCard(renderer, kind, blockId, name) {
 }
 
 async function openMarkMenu(renderer, kind, blockId, name) {
-  const deadline = Date.now() + 20_000;
-  while (Date.now() < deadline) {
-    await assertRenderer(renderer, `window.__j05.place(${JSON.stringify(blockId)}, 0, 0)`, `${name}-caret`);
-    await new Promise((resolveWait) => setTimeout(resolveWait, 80));
-    await assertRenderer(renderer, `window.__j05.rightClick(window.__j05.mark(${JSON.stringify(kind)}, ${JSON.stringify(blockId)})[0])`, `${name}-right-click`);
-    if (await renderer.evaluate(`window.__j05.menu()?.dataset.markMenu === 'mark'`)) return;
-    await press(renderer, 'Escape');
-  }
-  throw new Error(`J-05/${name}-menu`);
+  await rightClickUntil(
+    renderer,
+    `window.__j05.place(${JSON.stringify(blockId)}, 0, 0)`,
+    `window.__j05.mark(${JSON.stringify(kind)}, ${JSON.stringify(blockId)})[0]`,
+    `window.__j05.menu()?.dataset.markMenu === 'mark'`,
+    name,
+  );
 }
 
 async function main() {
@@ -454,24 +463,36 @@ async function main() {
     // What the manuscript held before any mark, kept in the page so later comparisons stay booleans.
     await assertRenderer(renderer, `(() => { window.__j05Original = { first: window.__j05.text(${JSON.stringify(first)}), second: window.__j05.text(${JSON.stringify(second)}) }; return typeof window.__j05Original.first === 'string'; })()`, 'original-text-kept');
 
-    at('selection-menu');
+    at('selection-menu-empty');
     // With nothing selected the mark entries explain themselves instead of acting, and only paste stands.
-    await assertRenderer(renderer, `window.__j05.place(${JSON.stringify(first)}, 0, 0)`, 'caret-placed');
-    await new Promise((resolveWait) => setTimeout(resolveWait, 60));
-    await assertRenderer(renderer, `window.__j05.rightClick(window.__j05.block(${JSON.stringify(first)}))`, 'empty-right-click');
-    await waitFor(renderer, `window.__j05.menu()?.dataset.markMenu === 'selection'`, 'empty-menu');
+    await rightClickUntil(
+      renderer,
+      `window.__j05.place(${JSON.stringify(first)}, 0, 0)`,
+      `window.__j05.block(${JSON.stringify(first)})`,
+      `window.__j05.menu()?.dataset.markMenu === 'selection' && window.__j05.menu().textContent.includes('未选中文字')`,
+      'empty-menu',
+    );
     await assertRenderer(renderer, `(() => { const menu = window.__j05.menu(); const groups = Array.from(menu.querySelectorAll('[role="group"]')).map((group) => group.getAttribute('aria-label')); const disabled = (action) => window.__j05.item(action)?.disabled === true; return groups.length === 3 && groups[0].startsWith('文字处理') && groups[1] === '编辑标记' && groups[2] === 'AI7 任务' && disabled('add-annotation') && disabled('add-editor-note') && disabled('add-change-suggestion') && disabled('add-highlight-1') && disabled('cut') && disabled('copy') && !disabled('paste') && menu.textContent.includes('先选中一段文字'); })()`, 'empty-menu-explains');
     await press(renderer, 'Escape');
-    await waitFor(renderer, `window.__j05.menu() === null && document.activeElement === document.querySelector('[data-testid="manuscript-editor"]')`, 'escape-returns-focus');
+    await waitFor(renderer, `window.__j05.menu() === null && document.activeElement === document.querySelector('[data-testid="manuscript-editor"]')`, 'escape-returns-focus', 15_000);
+
+    at('selection-menu-cross-paragraph');
     // A selection across two paragraphs is refused by name: a mark lives inside one paragraph.
-    await assertRenderer(renderer, `(() => { const a = window.__j05.block(${JSON.stringify(first)}); const b = window.__j05.block(${JSON.stringify(second)}); const range = document.createRange(); range.setStart(a.firstChild, 2); range.setEnd(b.firstChild, 2); document.querySelector('[data-testid="manuscript-editor"]').focus(); const selection = getSelection(); selection.removeAllRanges(); selection.addRange(range); return !selection.isCollapsed; })()`, 'cross-paragraph-selected');
-    await new Promise((resolveWait) => setTimeout(resolveWait, 80));
-    await assertRenderer(renderer, `window.__j05.rightClick(window.__j05.block(${JSON.stringify(first)}))`, 'cross-paragraph-right-click');
-    await waitFor(renderer, `window.__j05.menu()?.textContent.includes('同一段落') && window.__j05.item('add-annotation')?.disabled === true && window.__j05.item('copy')?.disabled === false`, 'cross-paragraph-refused');
+    await rightClickUntil(
+      renderer,
+      `(() => { const a = window.__j05.block(${JSON.stringify(first)}); const b = window.__j05.block(${JSON.stringify(second)}); const range = document.createRange(); range.setStart(a.firstChild, 2); range.setEnd(b.firstChild, 2); document.querySelector('[data-testid="manuscript-editor"]').focus(); const selection = getSelection(); selection.removeAllRanges(); selection.addRange(range); return !selection.isCollapsed; })()`,
+      `window.__j05.block(${JSON.stringify(first)})`,
+      `window.__j05.menu()?.textContent.includes('同一段落') && window.__j05.item('add-annotation')?.disabled === true && window.__j05.item('copy')?.disabled === false`,
+      'cross-paragraph-refused',
+    );
     await press(renderer, 'Escape');
+
+    at('selection-menu-groups');
     // The three groups on a real selection; the task entries wait for the task surface and say so.
     await openSelectionMenu(renderer, first, RANGES.highlight[0], RANGES.highlight[1], 'selection-menu-open');
     await assertRenderer(renderer, `(() => { const enabled = (action) => window.__j05.item(action)?.disabled === false; const waiting = ['task-on-selection', 'ask-on-selection', 'preset-polish', 'preset-names', 'preset-continuity'].every((action) => window.__j05.item(action)?.disabled === true); const labels = Array.from(window.__j05.menu().querySelectorAll('[role="menuitem"]')).map((item) => item.firstElementChild?.nextElementSibling?.textContent ?? item.firstElementChild?.textContent); return enabled('cut') && enabled('copy') && enabled('paste') && enabled('paste-plain-text') && enabled('add-change-suggestion') && enabled('add-annotation') && enabled('add-editor-note') && enabled('add-highlight-1') && enabled('add-highlight-3') && waiting && window.__j05.menu().textContent.includes('任务面接通后可用') && !labels.includes('加入任务范围') && !labels.includes('在稿件中搜索') && document.activeElement === window.__j05.item('cut'); })()`, 'selection-menu-groups');
+
+    at('selection-menu-keys');
     await press(renderer, 'ArrowDown');
     await assertRenderer(renderer, `document.activeElement === window.__j05.item('copy')`, 'menu-arrow-moves');
     await press(renderer, 'End');
@@ -627,10 +648,24 @@ async function main() {
     await renderer.send('Emulation.setDeviceMetricsOverride', { width: 640, height: 800, deviceScaleFactor: 2, mobile: false });
     await renderer.send('Emulation.setPageScaleFactor', { pageScaleFactor: 2 });
     await waitFor(renderer, `(() => { const card = window.__j05.card(); const pane = document.querySelector('.editor-window'); const block = window.__j05.block(${JSON.stringify(first)}).getBoundingClientRect(); const box = card.getBoundingClientRect(); return card.scrollWidth <= card.clientWidth + 2 && box.right <= pane.getBoundingClientRect().right + 2 && Math.abs(box.left - block.left) <= 2 && box.top >= block.bottom - 1 && document.documentElement.scrollWidth <= document.documentElement.clientWidth + 2; })()`, 'card-reflows-at-200', 10_000);
+    await press(renderer, 'Escape');
+
+    at('menu-stays-open-at-the-pane-edge');
+    // On a narrow window a menu opened at the text column's right edge has nowhere to go but over the
+    // pane's edge. It floats over the window, so it neither brings a scrollbar into the pane nor is
+    // closed by the pane's own reflow — which is what closed it, the moment it opened, on hosted runners.
+    await assertRenderer(renderer, `window.__j05.place(${JSON.stringify(first)}, 0, 0)`, 'edge-caret');
+    await new Promise((resolveWait) => setTimeout(resolveWait, 120));
+    await assertRenderer(renderer, `(() => { window.__j05Pane = document.querySelector('.editor-window').scrollWidth; return window.__j05.rightClick(window.__j05.block(${JSON.stringify(first)}), true); })()`, 'edge-right-click');
+    await new Promise((resolveWait) => setTimeout(resolveWait, 400));
+    await assertRenderer(renderer, `(() => { const menu = window.__j05.menu(); if (menu === null) return false; const box = menu.getBoundingClientRect(); const pane = document.querySelector('.editor-window'); return box.left >= 0 && box.right <= window.innerWidth && box.top >= 0 && pane.scrollWidth <= window.__j05Pane && document.documentElement.scrollWidth <= document.documentElement.clientWidth + 2; })()`, 'edge-menu-open-and-inside-the-window');
+    await press(renderer, 'Escape');
+    await waitFor(renderer, `window.__j05.menu() === null`, 'edge-menu-closed', 15_000);
     await renderer.send('Emulation.setPageScaleFactor', { pageScaleFactor: 1 });
     await renderer.send('Emulation.clearDeviceMetricsOverride');
 
     at('j14-marks-forced-colors');
+    await openMarkCard(renderer, 'change-suggestion', first, 'forced-colors-card');
     await renderer.send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'active' }] });
     // Without colour, the line under the text says which kind of mark it is.
     await assertRenderer(renderer, `(() => { if (!matchMedia('(forced-colors: active)').matches) return false; const style = (kind) => getComputedStyle(window.__j05.mark(kind, ${JSON.stringify(first)})[0]); const lines = ['change-suggestion', 'annotation', 'editor-note'].map((kind) => style(kind).borderBottomStyle); return new Set(lines).size === 3 && style('personal-highlight').outlineStyle === 'solid' && getComputedStyle(window.__j05.card()).boxShadow === 'none'; })()`, 'kinds-differ-without-colour');
