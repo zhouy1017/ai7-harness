@@ -58,6 +58,7 @@ import {
   ANALYSIS_LEDGER_TRIGGER_SQL,
   J03_TASK_AUTHORIZATION_SCHEMA_VERSION,
   J04_BASELINE_ANALYSIS_SCHEMA_VERSION,
+  EDITORIAL_MARK_SCHEMA_VERSION,
   MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION,
   MANUSCRIPT_INTAKE_SCHEMA_VERSION,
   SUCCESSIVE_TASK_SCHEMA_VERSION,
@@ -67,6 +68,14 @@ import {
   TEXT_CONVERSION_SCHEMA_VERSION,
   FACTUAL_REVIEW_SCHEMA_VERSION,
 } from './task-authorization.js';
+import {
+  EDITORIAL_MARK_FOREIGN_KEYS,
+  EDITORIAL_MARK_SCHEMA_SQL,
+  EDITORIAL_MARK_TRIGGER_SQL,
+  followBlockTextChangeForMarks,
+  marksOfWindow,
+  resolveBranchMarksAfterRewrite,
+} from './editorial-marks.js';
 
 /**
  * The analysis ledger as revision 15 created it, as revision 16 rebuilt two of its relations, as
@@ -1655,6 +1664,9 @@ const SCHEMA_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
     'manuscript_id>manuscripts.manuscript_id:NO ACTION/NO ACTION/NONE',
     'revision_id>manuscript_revisions.revision_id:NO ACTION/NO ACTION/NONE',
   ],
+  // Revision 22 (Issue #407): Editorial Marks and the Proposal Change Item ledgers, owned and spelled
+  // by `editorial-marks.ts`.
+  ...EDITORIAL_MARK_FOREIGN_KEYS,
   editorial_workspace_profile_sidecar_revisions: [
     'native_artifact_id>native_artifact_installations.artifact_id:NO ACTION/NO ACTION/NONE',
   ],
@@ -2250,6 +2262,7 @@ function requireManuscriptReimportTargetSchema(
   includeAnalysisLedgerTables = false,
   includePlanVersionTables = false,
   includeManuscriptEntryPositionTable = false,
+  includeEditorialMarkTables = false,
 ): void {
   const analysisTables = includePlanVersionTables ? ANALYSIS_LEDGER_EXPECTED_SCHEMA_SQL : PRE_17_ANALYSIS_LEDGER_EXPECTED_SCHEMA_SQL;
   const analysisTriggers = includePlanVersionTables ? ANALYSIS_LEDGER_TRIGGER_SQL : PRE_17_ANALYSIS_LEDGER_TRIGGER_SQL;
@@ -2276,6 +2289,7 @@ function requireManuscriptReimportTargetSchema(
       ...(includeManuscriptEntryPositionTable
         ? { manuscript_entry_positions: MANUSCRIPT_ENTRY_POSITION_SCHEMA_SQL }
         : {}),
+      ...(includeEditorialMarkTables ? EDITORIAL_MARK_SCHEMA_SQL : {}),
     },
     MANUSCRIPT_REIMPORT_INDEX_SQL,
     true,
@@ -2284,6 +2298,7 @@ function requireManuscriptReimportTargetSchema(
       ...(includeAuthoritySidecarTables ? EDITORIAL_WORKSPACE_PROFILE_SIDECAR_TRIGGER_SQL : {}),
       ...(includeTaskAuthorizationTables ? TASK_AUTHORIZATION_TRIGGER_SQL : {}),
       ...(includeAnalysisLedgerTables ? analysisTriggers : {}),
+      ...(includeEditorialMarkTables ? EDITORIAL_MARK_TRIGGER_SQL : {}),
     },
   );
 }
@@ -4928,6 +4943,7 @@ export function validateManuscriptReimportSchemaTruth(
   includeAnalysisLedgerTables = false,
   includePlanVersionTables = false,
   includeManuscriptEntryPositionTable = false,
+  includeEditorialMarkTables = false,
 ): void {
   requireManuscriptReimportTargetSchema(
     db,
@@ -4938,6 +4954,7 @@ export function validateManuscriptReimportSchemaTruth(
     includeAnalysisLedgerTables,
     includePlanVersionTables,
     includeManuscriptEntryPositionTable,
+    includeEditorialMarkTables,
   );
   validateSchemaAuthorityIds(db);
   validateWorkflowSemanticTruth(db, profile);
@@ -4997,7 +5014,7 @@ export function initializeBoundedSchema(
       version === J04_BASELINE_ANALYSIS_SCHEMA_VERSION || version === SUCCESSIVE_TASK_SCHEMA_VERSION ||
       version === TASK_AUTHORIZATION_SCHEMA_VERSION || version === MANUSCRIPT_INTAKE_SCHEMA_VERSION ||
       version === TEXT_CONVERSION_SCHEMA_VERSION || version === FACTUAL_REVIEW_SCHEMA_VERSION ||
-      version === MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION,
+      version === MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION || version === EDITORIAL_MARK_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -5006,9 +5023,10 @@ export function initializeBoundedSchema(
       version === J03_TASK_AUTHORIZATION_SCHEMA_VERSION || version === J04_BASELINE_ANALYSIS_SCHEMA_VERSION ||
       version === SUCCESSIVE_TASK_SCHEMA_VERSION || version === TASK_AUTHORIZATION_SCHEMA_VERSION ||
       version === MANUSCRIPT_INTAKE_SCHEMA_VERSION || version === TEXT_CONVERSION_SCHEMA_VERSION ||
-      version === FACTUAL_REVIEW_SCHEMA_VERSION || version === MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION) {
+      version === FACTUAL_REVIEW_SCHEMA_VERSION || version === MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION ||
+      version === EDITORIAL_MARK_SCHEMA_VERSION) {
     transact(db, () => {
-      if (validateStoreTruth || version !== MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION) {
+      if (validateStoreTruth || version !== EDITORIAL_MARK_SCHEMA_VERSION) {
         validateManuscriptReimportSchemaTruth(
           db,
           profile,
@@ -5019,6 +5037,7 @@ export function initializeBoundedSchema(
           version >= J04_BASELINE_ANALYSIS_SCHEMA_VERSION,
           version >= TASK_AUTHORIZATION_SCHEMA_VERSION,
           version >= MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION,
+          version >= EDITORIAL_MARK_SCHEMA_VERSION,
         );
       }
       terminalizeOrphanedReplacementPreviews(db);
@@ -6370,6 +6389,9 @@ export class BoundedManuscriptStore {
         }
         rebuiltTotal = rebuildBranchDerived(this.#db, binding.branchId);
         requireBounded(rebuiltTotal === expectedGraphemes, 'RECOVERY_SOURCE_INVALID', '恢复来源字符总数不一致。');
+        // The working state was replaced whole, so no span exists to follow: every mark is resolved
+        // against the text its block holds now, and one whose block is gone is kept as detached.
+        resolveBranchMarksAfterRewrite(this.#db, binding.branchId);
       }
       this.#db.prepare(
         `INSERT INTO manuscript_revisions(
@@ -6542,6 +6564,7 @@ export class BoundedManuscriptStore {
         label: `${structure ? `${asString(structure.text)} · ` : ''}全稿 ${(proportion * 100).toFixed(3)}%`,
       },
       blocks,
+      ...marksOfWindow(this.#db, branchId, asNumber(first.position)),
     };
     return projection;
   }
@@ -6749,6 +6772,9 @@ export class BoundedManuscriptStore {
       requireBounded(updated.changes === 1, 'EDIT_BLOCK_CHANGED', '内容块在保存时已变化。');
       updateWorkingOffsetNodes(this.#db, input.branchId, asNumber(block.position), delta);
       this.#refreshBlockIndexes(input.branchId, input.blockId, asNumber(block.position), kind, level, afterText, afterDigest);
+      followBlockTextChangeForMarks(this.#db, input.branchId, input.blockId, beforeText, afterText, sequence, [
+        { fromGrapheme: input.fromGrapheme, toGrapheme: input.toGrapheme, insertedGraphemes: inserted.length, inserted },
+      ]);
       this.#db.prepare(
         `INSERT INTO edit_journal_entries(
            journal_entry_id, client_edit_id, request_fingerprint, manuscript_id, branch_id, base_revision_id,
@@ -7163,6 +7189,12 @@ export class BoundedManuscriptStore {
           ).all(previewId, blockId) as SqlRow[];
           const replacement = graphemes(asString(preview.replacement));
           for (const match of matches) text.splice(asNumber(match.from_grapheme), asNumber(match.to_grapheme) - asNumber(match.from_grapheme), ...replacement);
+          const markSpans = matches.map((match) => ({
+            fromGrapheme: asNumber(match.from_grapheme),
+            toGrapheme: asNumber(match.to_grapheme),
+            insertedGraphemes: replacement.length,
+            inserted: replacement,
+          }));
           const afterText = text.join('');
           const after = graphemes(afterText);
           requireBounded(afterText.length <= MAX_BLOCK_CODE_UNITS && after.length <= MAX_BLOCK_GRAPHEMES, 'REPLACEMENT_TOO_LARGE', '替换后内容块超出安全范围。');
@@ -7177,6 +7209,7 @@ export class BoundedManuscriptStore {
           requireBounded(update.changes === 1, 'REPLACEMENT_STALE', '匹配范围在提交时已变化。');
           updateWorkingOffsetNodes(this.#db, binding.branchId, blockCursor, delta);
           this.#refreshBlockIndexes(binding.branchId, blockId, blockCursor, kind, level, afterText, afterDigest);
+          followBlockTextChangeForMarks(this.#db, binding.branchId, blockId, beforeText, afterText, sequence, markSpans);
           totalDelta += delta;
           requireBounded(Number.isSafeInteger(totalDelta), 'REPLACEMENT_TOO_LARGE', '替换后的全稿字符总数无效。');
           firstBlockId ??= blockId;
@@ -7392,7 +7425,7 @@ export class BoundedManuscriptStore {
           const targetText = action === 'undo' ? asString(row.before_text) : asString(row.after_text);
           const targetDigest = action === 'undo' ? asString(row.before_digest) : asString(row.after_digest);
           const current = one(this.#db.prepare(
-            'SELECT position, kind, level, grapheme_length FROM working_blocks WHERE branch_id = ? AND block_id = ?',
+            'SELECT position, kind, level, text, grapheme_length FROM working_blocks WHERE branch_id = ? AND block_id = ?',
           ).all(branchId, asString(row.block_id)) as SqlRow[], 'HISTORY_STALE', '稿件历史内容块缺失。');
           const kind = asString(current.kind) as ManuscriptBlockProjection['kind'];
           const level = current.level === null ? null : asNumber(current.level);
@@ -7404,6 +7437,7 @@ export class BoundedManuscriptStore {
           requireBounded(update.changes === 1, 'HISTORY_STALE', '稿件历史无法在当前状态精确重放。');
           updateWorkingOffsetNodes(this.#db, branchId, asNumber(current.position), delta);
           this.#refreshBlockIndexes(branchId, asString(row.block_id), asNumber(current.position), kind, level, targetText, targetDigest);
+          followBlockTextChangeForMarks(this.#db, branchId, asString(row.block_id), asString(current.text), targetText, binding.journalSequence + 1);
           totalDelta += delta;
           requireBounded(Number.isSafeInteger(totalDelta), 'HISTORY_CORRUPT', '历史命令字符变化无效。');
         }

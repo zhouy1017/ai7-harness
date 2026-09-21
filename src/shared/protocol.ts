@@ -1,4 +1,4 @@
-export const SERVICE_PROTOCOL_VERSION = 30 as const;
+export const SERVICE_PROTOCOL_VERSION = 31 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -74,6 +74,12 @@ export const IPC_CHANNELS = {
   getManuscriptWindow: 'ai7:j01:get-manuscript-window',
   flushJournalEdit: 'ai7:j01:flush-journal-edit',
   recordManuscriptEntryPosition: 'ai7:j12:record-manuscript-entry-position',
+  createEditorialMark: 'ai7:j05:create-editorial-mark',
+  getEditorialMarkCard: 'ai7:j05:get-editorial-mark-card',
+  updateEditorialMark: 'ai7:j05:update-editorial-mark',
+  recordChangeSuggestionDecision: 'ai7:j05:record-change-suggestion-decision',
+  recordProposalDecisionReason: 'ai7:j05:record-proposal-decision-reason',
+  runEditorClipboardCommand: 'ai7:j05:run-editor-clipboard-command',
   listPriorWork: 'ai7:j02:list-prior-work',
   getManuscriptWindowAt: 'ai7:j02:get-manuscript-window-at',
   getOutline: 'ai7:j02:get-outline',
@@ -882,7 +888,190 @@ export interface ManuscriptWindowProjection {
     label: string;
   };
   blocks: ReadonlyArray<ManuscriptBlockProjection>;
+  /**
+   * The Editorial Marks that stand in this window's blocks, as the working state holds them at
+   * `journalSequence` — so the ranges are consistent with `blocks` by construction. At most
+   * `MAX_WINDOW_MARKS`; `marksTruncated` says the window holds more than that.
+   */
+  marks: ReadonlyArray<EditorialMarkAnchorProjection>;
+  marksTruncated: boolean;
 }
+
+/** The most marks one window projection carries; the rest stay reachable once the window moves. */
+export const MAX_WINDOW_MARKS = 400;
+export const MAX_MARK_BODY_CODE_UNITS = 4_000;
+export const MAX_MARK_REPLIES = 100;
+
+/**
+ * The Editorial Mark family of `docs/ui-ux-v2/CONTEXT.md` (V2-UX-MARK-001): a Change Suggestion is
+ * the editor-facing form of a Proposal Change Item, an Annotation is an exportable comment, an Editor
+ * Note is private to the editor, and a Personal Highlight carries no product meaning.
+ */
+export type EditorialMarkKind = 'change-suggestion' | 'annotation' | 'editor-note' | 'personal-highlight';
+export type PersonalHighlightColor = 1 | 2 | 3;
+export type EditorialMarkStatus = 'open' | 'resolved';
+export type ProposalItemDisposition = 'rejected' | 'accepted-with-edit';
+
+/**
+ * Who a mark comes from (V2-UX-MARK-002): the editor, AI7 with what produced it — a Task, a review
+ * category or the analysis — or the author an imported file carried in.
+ */
+export interface EditorialMarkSourceProjection {
+  kind: 'editor' | 'ai7' | 'imported-author';
+  origin: 'task' | 'review-category' | 'analysis' | null;
+  /** The Task's title, the review category's name, or the imported author's name. */
+  label: string | null;
+  taskId: string | null;
+}
+
+/** One mark as the manuscript surface draws it; the card's content is read on demand. */
+export interface EditorialMarkAnchorProjection {
+  markId: string;
+  kind: EditorialMarkKind;
+  blockId: string;
+  fromGrapheme: number;
+  toGrapheme: number;
+  /** `drifted` when the text the mark was made on no longer stands at its range (原文已变). */
+  anchorState: 'exact' | 'drifted';
+  status: EditorialMarkStatus;
+  highlightColor: PersonalHighlightColor | null;
+  sourceKind: EditorialMarkSourceProjection['kind'];
+  /** The current Proposal Decision of a Change Suggestion, which the surface shows without a card. */
+  disposition: ProposalItemDisposition | null;
+}
+
+/** One basis a mark or a suggestion rests on: a labelled place in the manuscript, quoted exactly. */
+export interface EditorialMarkBasisProjection {
+  label: string;
+  blockId: string | null;
+  fromGrapheme: number | null;
+  toGrapheme: number | null;
+  quote: string | null;
+}
+
+export interface ProposalItemDecisionProjection {
+  decisionId: string;
+  disposition: ProposalItemDisposition;
+  /** The text the editor accepted instead of AI7's or their own first wording. */
+  editedText: string | null;
+  /** The editor's Non-blocking Decision Reason and how it was given (V2-UX-PDEC-010). */
+  reason: string | null;
+  reasonSource: 'reason-field' | 'suggested' | 'free-text' | null;
+  recordedAt: string;
+}
+
+/**
+ * Everything a Mark Card shows (V2-UX-MARK-003, MARK-004). A Change Suggestion carries its Proposal
+ * Change Item in the four regions of V2-UX-PROP-022: the exact current and proposed wording, the
+ * rationale, the basis, and the editor's own decision, which is a record apart from the item and
+ * from any change to the manuscript.
+ */
+export interface EditorialMarkCardProjection {
+  markId: string;
+  kind: EditorialMarkKind;
+  status: EditorialMarkStatus;
+  anchorState: 'exact' | 'drifted' | 'detached';
+  highlightColor: PersonalHighlightColor | null;
+  blockId: string;
+  fromGrapheme: number;
+  toGrapheme: number;
+  /** The exact text the mark was made on. */
+  pinnedText: string;
+  source: EditorialMarkSourceProjection;
+  body: string;
+  replies: ReadonlyArray<{ replyId: string; body: string; createdAt: string }>;
+  basis: ReadonlyArray<EditorialMarkBasisProjection>;
+  suggestion: null | {
+    itemId: string;
+    currentText: string;
+    proposedText: string;
+    rationale: string;
+    atomicGroupId: string | null;
+    decision: ProposalItemDecisionProjection | null;
+  };
+  convertedFrom: null | { markId: string; kind: EditorialMarkKind; sourceKind: EditorialMarkSourceProjection['kind'] };
+  /** What an export does with this mark unless the editor says otherwise (V2-UX-MARK-006, MARK-007). */
+  exportDisposition: 'exported-by-default' | 'only-when-included' | 'never-exported';
+  createdAt: string;
+  updatedAt: string;
+  /** The pin itself, for the Technical Identity Layer. */
+  pin: { revisionId: string; revisionLabel: string; journalSequence: number; blockDigest: string };
+}
+
+/** Binds a mark command to the manuscript state the editor saw, and asks for the window's marks back. */
+export interface EditorialMarkBindingInput {
+  manuscriptId: string;
+  branchId: string;
+  windowStartBlockId: string;
+}
+
+export interface CreateEditorialMarkInput extends EditorialMarkBindingInput {
+  clientMarkId: string;
+  baseRevisionId: string;
+  expectedJournalSequence: number;
+  blockId: string;
+  baseBlockDigest: string;
+  fromGrapheme: number;
+  toGrapheme: number;
+  /** The text the editor selected; the service refuses a mark whose range does not hold it. */
+  selectedText: string;
+  kind: EditorialMarkKind;
+  highlightColor: PersonalHighlightColor | null;
+  body: string;
+  proposedText: string | null;
+  rationale: string | null;
+}
+
+/**
+ * One change to a mark. Every field is always present so the frame is exact; a field an action does
+ * not use is `null`. `convert` makes a new mark on the same pinned text and retires this one, so a
+ * mark's kind never changes under a record that points at it.
+ */
+export interface UpdateEditorialMarkInput extends EditorialMarkBindingInput {
+  markId: string;
+  action: 'edit-body' | 'recolor' | 'set-status' | 'reply' | 'remove' | 'convert';
+  body: string | null;
+  highlightColor: PersonalHighlightColor | null;
+  status: EditorialMarkStatus | null;
+  targetKind: EditorialMarkKind | null;
+  proposedText: string | null;
+  rationale: string | null;
+}
+
+/**
+ * The editor's decision on one Change Suggestion (V2-UX-MARK-004, MARK-005). It records a Proposal
+ * Decision and changes no manuscript text: `withdrawn` supersedes the current decision and returns
+ * the item to undecided (V2-UX-PDEC-008).
+ */
+export interface RecordChangeSuggestionDecisionInput extends EditorialMarkBindingInput {
+  markId: string;
+  clientDecisionId: string;
+  disposition: ProposalItemDisposition | 'withdrawn';
+  editedText: string | null;
+  reason: string | null;
+}
+
+/**
+ * The optional reason chips that follow a decision recorded without one (V2-UX-PDEC-009, PDEC-010):
+ * a suggested reason the editor picked, or their own words. One reason per decision; a decision that
+ * already carries one — from the 为什么这样改 field or an earlier chip — is never asked again.
+ */
+export interface RecordProposalDecisionReasonInput extends EditorialMarkBindingInput {
+  markId: string;
+  decisionId: string;
+  reason: string;
+  reasonSource: 'suggested' | 'free-text';
+}
+
+export interface EditorialMarkCommandProjection {
+  markId: string;
+  marks: ReadonlyArray<EditorialMarkAnchorProjection>;
+  marksTruncated: boolean;
+  card: EditorialMarkCardProjection | null;
+}
+
+/** The text-processing commands of the selection menu, run by the window that owns the clipboard. */
+export type EditorClipboardCommand = 'cut' | 'copy' | 'paste' | 'paste-plain-text';
 
 /**
  * Where an editor last entered a Book's primary Manuscript, already resolved against the working
@@ -3246,6 +3435,19 @@ export interface ServiceOperationMap {
   };
   flushJournalEdit: { input: JournalEditInput; output: JournalAcknowledgement };
   /**
+   * Editorial Marks (Issue #407). A mark is made on text the working state holds now, bound to the
+   * Revision, journal position and block digest the editor saw; every command answers with the marks
+   * of the window it was issued from, so the surface redraws from what the service holds.
+   */
+  createEditorialMark: { input: CreateEditorialMarkInput; output: EditorialMarkCommandProjection };
+  getEditorialMarkCard: {
+    input: { manuscriptId: string; branchId: string; markId: string };
+    output: EditorialMarkCardProjection;
+  };
+  updateEditorialMark: { input: UpdateEditorialMarkInput; output: EditorialMarkCommandProjection };
+  recordChangeSuggestionDecision: { input: RecordChangeSuggestionDecisionInput; output: EditorialMarkCommandProjection };
+  recordProposalDecisionReason: { input: RecordProposalDecisionReasonInput; output: EditorialMarkCommandProjection };
+  /**
    * Remember where the editor is, so the next entry into this Book returns there (V2-UX-RET-002).
    * The pair is the editor's own caret, in the window projection's vocabulary; what it answers is
    * only that the position was taken, because a remembered position settles nothing and a surface
@@ -3417,6 +3619,13 @@ export interface RendererApi {
   acknowledgeImportCompletion(input: ServiceOperationMap['acknowledgeImportCompletion']['input']): Promise<{ state: 'acknowledged' }>;
   getManuscriptWindow(input: ServiceOperationMap['getManuscriptWindow']['input']): Promise<ManuscriptWindowProjection>;
   flushJournalEdit(input: JournalEditInput): Promise<JournalAcknowledgement>;
+  createEditorialMark(input: CreateEditorialMarkInput): Promise<EditorialMarkCommandProjection>;
+  getEditorialMarkCard(input: ServiceOperationMap['getEditorialMarkCard']['input']): Promise<EditorialMarkCardProjection>;
+  updateEditorialMark(input: UpdateEditorialMarkInput): Promise<EditorialMarkCommandProjection>;
+  recordChangeSuggestionDecision(input: RecordChangeSuggestionDecisionInput): Promise<EditorialMarkCommandProjection>;
+  recordProposalDecisionReason(input: RecordProposalDecisionReasonInput): Promise<EditorialMarkCommandProjection>;
+  /** Cut, copy or paste in the focused editor through the window itself; the page has no clipboard permission. */
+  runEditorClipboardCommand(input: { command: EditorClipboardCommand }): Promise<{ state: 'done' }>;
   recordManuscriptEntryPosition(
     input: ServiceOperationMap['recordManuscriptEntryPosition']['input'],
   ): Promise<{ state: 'recorded' }>;

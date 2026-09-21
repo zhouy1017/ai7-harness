@@ -26,6 +26,9 @@ import type {
   ManuscriptBlockProjection,
   ManuscriptReimportCommitProjection,
   ManuscriptReimportTargetSelection,
+  CreateEditorialMarkInput,
+  EditorialMarkCardProjection,
+  EditorialMarkCommandProjection,
   JournalAcknowledgement,
   JournalEditInput,
   ManuscriptConversionProjection,
@@ -33,6 +36,9 @@ import type {
   ManuscriptWindowProjection,
   ModelCredentialOperationState,
   ModelServiceConnectionProjection,
+  RecordChangeSuggestionDecisionInput,
+  RecordProposalDecisionReasonInput,
+  UpdateEditorialMarkInput,
   NewBookImportTargetChoiceId,
   OriginalFileAccessProjection,
   ReviewBeforeImportProjection,
@@ -109,6 +115,13 @@ import {
   type ConversionLoss,
 } from './text-manuscript.js';
 import {
+  EditorialMarkError,
+  EditorialMarkStore,
+  initializeEditorialMarkSchema,
+  resolveBranchMarksAfterRewrite,
+  type ProducedEditorialMarkInput,
+} from './editorial-marks.js';
+import {
   BoundedManuscriptStore,
   BoundedStoreError,
   BoundedStoreFatalError,
@@ -145,6 +158,7 @@ import {
 import {
   initializeTaskAuthorizationSchema,
   J03_TASK_AUTHORIZATION_SCHEMA_VERSION,
+  EDITORIAL_MARK_SCHEMA_VERSION,
   J04_BASELINE_ANALYSIS_SCHEMA_VERSION,
   MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION,
   MANUSCRIPT_INTAKE_SCHEMA_VERSION,
@@ -1339,7 +1353,8 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === MANUSCRIPT_INTAKE_SCHEMA_VERSION ||
       currentVersion === TEXT_CONVERSION_SCHEMA_VERSION ||
       currentVersion === FACTUAL_REVIEW_SCHEMA_VERSION ||
-      currentVersion === MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION,
+      currentVersion === MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION ||
+      currentVersion === EDITORIAL_MARK_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -1360,7 +1375,8 @@ function initializeSchema(db: DatabaseSync): void {
     currentVersion === MANUSCRIPT_INTAKE_SCHEMA_VERSION ||
     currentVersion === TEXT_CONVERSION_SCHEMA_VERSION ||
     currentVersion === FACTUAL_REVIEW_SCHEMA_VERSION ||
-    currentVersion === MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION
+    currentVersion === MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION ||
+    currentVersion === EDITORIAL_MARK_SCHEMA_VERSION
   ) return;
   if (currentVersion === 1) {
     migrateSchemaV1ToV2(db);
@@ -1696,7 +1712,7 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === J04_BASELINE_ANALYSIS_SCHEMA_VERSION || version === SUCCESSIVE_TASK_SCHEMA_VERSION ||
       version === TASK_AUTHORIZATION_SCHEMA_VERSION || version === MANUSCRIPT_INTAKE_SCHEMA_VERSION ||
       version === TEXT_CONVERSION_SCHEMA_VERSION || version === FACTUAL_REVIEW_SCHEMA_VERSION ||
-      version === MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION,
+      version === MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION || version === EDITORIAL_MARK_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -1707,7 +1723,7 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === J04_BASELINE_ANALYSIS_SCHEMA_VERSION || version === SUCCESSIVE_TASK_SCHEMA_VERSION ||
       version === TASK_AUTHORIZATION_SCHEMA_VERSION || version === MANUSCRIPT_INTAKE_SCHEMA_VERSION ||
       version === TEXT_CONVERSION_SCHEMA_VERSION || version === FACTUAL_REVIEW_SCHEMA_VERSION ||
-      version === MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION) return;
+      version === MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION || version === EDITORIAL_MARK_SCHEMA_VERSION) return;
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
   );
@@ -1810,7 +1826,7 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === J04_BASELINE_ANALYSIS_SCHEMA_VERSION || version === SUCCESSIVE_TASK_SCHEMA_VERSION ||
       version === TASK_AUTHORIZATION_SCHEMA_VERSION || version === MANUSCRIPT_INTAKE_SCHEMA_VERSION ||
       version === TEXT_CONVERSION_SCHEMA_VERSION || version === FACTUAL_REVIEW_SCHEMA_VERSION ||
-      version === MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION,
+      version === MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION || version === EDITORIAL_MARK_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -1820,7 +1836,7 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === J04_BASELINE_ANALYSIS_SCHEMA_VERSION || version === SUCCESSIVE_TASK_SCHEMA_VERSION ||
       version === TASK_AUTHORIZATION_SCHEMA_VERSION || version === MANUSCRIPT_INTAKE_SCHEMA_VERSION ||
       version === TEXT_CONVERSION_SCHEMA_VERSION || version === FACTUAL_REVIEW_SCHEMA_VERSION ||
-      version === MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION) return;
+      version === MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION || version === EDITORIAL_MARK_SCHEMA_VERSION) return;
   validateSourceImportSchemaTruth(db, profile);
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
@@ -2113,7 +2129,7 @@ function validateModelServiceSchema(
   const version = asNumber(
     one(db.prepare('PRAGMA user_version').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取数据库版本。').user_version,
   );
-  if (validateStoreTruth || version !== MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION) {
+  if (validateStoreTruth || version !== EDITORIAL_MARK_SCHEMA_VERSION) {
     validateManuscriptReimportSchemaTruth(
       db,
       profile,
@@ -2124,6 +2140,7 @@ function validateModelServiceSchema(
       version >= J04_BASELINE_ANALYSIS_SCHEMA_VERSION,
       version >= TASK_AUTHORIZATION_SCHEMA_VERSION,
       version >= MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION,
+      version >= EDITORIAL_MARK_SCHEMA_VERSION,
     );
   }
   const invalid = db.prepare(
@@ -2161,7 +2178,7 @@ function initializeModelServiceSchema(
       version === J04_BASELINE_ANALYSIS_SCHEMA_VERSION || version === SUCCESSIVE_TASK_SCHEMA_VERSION ||
       version === TASK_AUTHORIZATION_SCHEMA_VERSION || version === MANUSCRIPT_INTAKE_SCHEMA_VERSION ||
       version === TEXT_CONVERSION_SCHEMA_VERSION || version === FACTUAL_REVIEW_SCHEMA_VERSION ||
-      version === MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION,
+      version === MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION || version === EDITORIAL_MARK_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2171,7 +2188,7 @@ function initializeModelServiceSchema(
       version === J04_BASELINE_ANALYSIS_SCHEMA_VERSION || version === SUCCESSIVE_TASK_SCHEMA_VERSION ||
       version === TASK_AUTHORIZATION_SCHEMA_VERSION || version === MANUSCRIPT_INTAKE_SCHEMA_VERSION ||
       version === TEXT_CONVERSION_SCHEMA_VERSION || version === FACTUAL_REVIEW_SCHEMA_VERSION ||
-      version === MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION) {
+      version === MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION || version === EDITORIAL_MARK_SCHEMA_VERSION) {
     validateModelServiceSchema(db, profile, validateStoreTruth);
     if (version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION) {
       validateEditorialWorkspaceProfileNativeSchema(db);
@@ -2908,6 +2925,7 @@ export class EditorialStore {
   readonly #taskAuthorization: TaskAuthorizationStore;
   readonly #baselineAnalysis: BaselineAnalysisStore;
   readonly #factualReview: BaselineAnalysisStore;
+  readonly #editorialMarks: EditorialMarkStore;
   readonly #workflowProfile: BuiltInWorkflowProfile;
   readonly #lifetimeId: string;
   readonly #control: StoreControl;
@@ -2949,6 +2967,7 @@ export class EditorialStore {
     this.#taskAuthorization = taskAuthorization;
     this.#baselineAnalysis = baselineAnalysis;
     this.#factualReview = factualReview;
+    this.#editorialMarks = new EditorialMarkStore(authority);
     this.#workflowProfile = workflowProfile;
     this.#lifetimeId = lifetimeId;
     this.#control = control;
@@ -3001,10 +3020,12 @@ export class EditorialStore {
       const editorialWorkspaceProfile = await EditorialWorkspaceProfileStore.open(authority, dataRoot, codeRoot);
       // The intake relations widen before the terminal version moves, so the version and the shape it
       // names change together for every store that reaches revision 18, and again for revision 19,
-      // and again for the entry-position relation revision 21 adds.
+      // and again for the entry-position relation revision 21 adds and the editorial-mark relations
+      // revision 22 adds.
       initializeManuscriptIntakeSchema(authority);
       initializeTextConversionSchema(authority);
       initializeManuscriptEntryPositionSchema(authority);
+      initializeEditorialMarkSchema(authority);
       initializeTaskAuthorizationSchema(authority);
       initializeBoundedSchema(authority, workflowProfile);
       validateEditorialWorkspaceProfileSchema(authority);
@@ -7433,6 +7454,10 @@ export class EditorialStore {
           'UPDATE manuscript_branches SET base_revision_id = ? WHERE branch_id = ? AND base_revision_id = ?',
         ).run(resultingRevisionId, target.branchId, target.checkpoint.revisionId).changes === 1,
         'REIMPORT_TARGET_CHANGED', '重新导入提交时分支已变化。');
+        // Issue #407: the working state was replaced whole. A mark whose block kept its identity is
+        // resolved against the text that block holds now; one whose block was retired stays readable
+        // as detached instead of pointing into a block that is no longer there.
+        resolveBranchMarksAfterRewrite(this.#authority, target.branchId);
       }
 
       const recordDigest = sha256(canonicalJson({
@@ -7648,6 +7673,36 @@ export class EditorialStore {
 
   flushJournalEdit(input: JournalEditInput): JournalAcknowledgement {
     return this.#boundedCall(() => this.#bounded.flushJournalEdit(input, this.#lifetimeId));
+  }
+
+  /**
+   * Editorial Marks (Issue #407). They are records of the work, written on the authority connection;
+   * none of these changes a character of the manuscript, and a Proposal Decision is recorded apart
+   * from the item it decides.
+   */
+  createEditorialMark(input: CreateEditorialMarkInput): EditorialMarkCommandProjection {
+    return this.#markCall(() => this.#editorialMarks.create(input));
+  }
+
+  getEditorialMarkCard(manuscriptId: string, branchId: string, markId: string): EditorialMarkCardProjection {
+    return this.#markCall(() => this.#editorialMarks.card(manuscriptId, branchId, markId));
+  }
+
+  updateEditorialMark(input: UpdateEditorialMarkInput): EditorialMarkCommandProjection {
+    return this.#markCall(() => this.#editorialMarks.update(input));
+  }
+
+  recordChangeSuggestionDecision(input: RecordChangeSuggestionDecisionInput): EditorialMarkCommandProjection {
+    return this.#markCall(() => this.#editorialMarks.decide(input));
+  }
+
+  recordProposalDecisionReason(input: RecordProposalDecisionReasonInput): EditorialMarkCommandProjection {
+    return this.#markCall(() => this.#editorialMarks.recordDecisionReason(input));
+  }
+
+  /** A mark AI7 or an import produces; the manuscript surface is never its caller. */
+  createProducedEditorialMark(input: ProducedEditorialMarkInput): string {
+    return this.#markCall(() => this.#editorialMarks.createProduced(input));
   }
 
   listPriorWork(): ReadonlyArray<PriorWorkItemProjection> {
@@ -10798,6 +10853,16 @@ export class EditorialStore {
       return await operation();
     } finally {
       release();
+    }
+  }
+
+  #markCall<T>(operation: () => T): T {
+    this.#assertAvailable();
+    try {
+      return operation();
+    } catch (error) {
+      if (error instanceof EditorialMarkError) throw new StoreError(error.code, error.message);
+      throw error;
     }
   }
 

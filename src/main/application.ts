@@ -37,6 +37,7 @@ import {
   type ModelServiceSettingsProjection,
   type PickerReselectResult,
   type PickerStageResult,
+  type EditorClipboardCommand,
   type ProductDataLocationProjection,
   type ProductDataLocationRevealProjection,
   type RendererCallResult,
@@ -1586,6 +1587,76 @@ function registerRendererHandlers(
         rememberManuscriptCapability(owned, result.window, input, owned.routeGeneration);
         return result;
       });
+    }),
+  );
+  // Editorial Marks (Issue #407) are records about one manuscript, so each command is gated exactly
+  // as reading or writing that manuscript is, and the ones that write are serialized with every other
+  // effect of this window's authority.
+  ipcMain.handle(IPC_CHANNELS.createEditorialMark, (event, input: ServiceOperationMap['createEditorialMark']['input']) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      return serializeEffect(async () => {
+        requireAuthority();
+        requireManuscriptCapability(owned, input);
+        return service.call('createEditorialMark', input);
+      });
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.getEditorialMarkCard, (event, input: ServiceOperationMap['getEditorialMarkCard']['input']) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      requireAuthority();
+      requireManuscriptCapability(owned, input);
+      return service.call('getEditorialMarkCard', input);
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.updateEditorialMark, (event, input: ServiceOperationMap['updateEditorialMark']['input']) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      return serializeEffect(async () => {
+        requireAuthority();
+        requireManuscriptCapability(owned, input);
+        return service.call('updateEditorialMark', input);
+      });
+    }),
+  );
+  ipcMain.handle(
+    IPC_CHANNELS.recordChangeSuggestionDecision,
+    (event, input: ServiceOperationMap['recordChangeSuggestionDecision']['input']) =>
+      envelope(async () => {
+        const owned = requireSender(event);
+        return serializeEffect(async () => {
+          requireAuthority();
+          requireManuscriptCapability(owned, input);
+          return service.call('recordChangeSuggestionDecision', input);
+        });
+      }),
+  );
+  ipcMain.handle(
+    IPC_CHANNELS.recordProposalDecisionReason,
+    (event, input: ServiceOperationMap['recordProposalDecisionReason']['input']) =>
+      envelope(async () => {
+        const owned = requireSender(event);
+        return serializeEffect(async () => {
+          requireAuthority();
+          requireManuscriptCapability(owned, input);
+          return service.call('recordProposalDecisionReason', input);
+        });
+      }),
+  );
+  // The selection menu's 文字处理 group. The page holds no clipboard permission, so the window that
+  // owns the focused editor runs the command itself; it reaches no service and takes nothing but the
+  // command's name, and the editor's own paste and cut handling still decides what enters the text.
+  ipcMain.handle(IPC_CHANNELS.runEditorClipboardCommand, (event, input: { command: EditorClipboardCommand }) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      const contents = owned.window.webContents;
+      if (input?.command === 'cut') contents.cut();
+      else if (input?.command === 'copy') contents.copy();
+      else if (input?.command === 'paste') contents.paste();
+      else if (input?.command === 'paste-plain-text') contents.pasteAndMatchStyle();
+      else throw new ServiceCallError('AI7_RENDERER_BOUNDARY_INVALID', '文字处理命令无效。');
+      return { state: 'done' as const };
     }),
   );
   // The remembered position is editor state about a manuscript, so it is gated exactly as reading or
