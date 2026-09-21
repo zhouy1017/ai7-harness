@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import {
   DELIVERABLES_DESTINATION_ACTIONS,
@@ -312,5 +314,16 @@ describe('what 交付物 never says', () => {
     for (const word of PUBLICATION_FORBIDDEN_WORDS) expect(said.includes(word)).toBe(false);
     // The internal Public Release Permission and the Signoff Record are never named in ordinary words.
     expect(said.includes('签发')).toBe(false);
+  });
+
+  it('are the words J-07 checks the page for, so the Journey and the service never drift apart', () => {
+    // `e2e/run-j07.mjs` is runner infrastructure outside the typed program, so its pinned words are read
+    // from its source: the fixed sentence, the pending actuals line and the forbidden words.
+    const runner = readFileSync(fileURLToPath(new URL('../../e2e/run-j07.mjs', import.meta.url)), 'utf8');
+    const literal = (name: string): string | undefined => new RegExp(`^const ${name} = '([^']*)';\\r?$`, 'mu').exec(runner)?.[1];
+    expect(literal('STATEMENT')).toBe(PUBLICATION_VERSION_STATEMENT);
+    expect(literal('ACTUALS_PROMPT')).toBe(publicationActualsPromptLine({ label: PUBLICATION_ACTUALS_PROMPT_LABEL, stateLabel: PUBLICATION_ACTUALS_PROMPT_STATE }));
+    const forbidden = /^const FORBIDDEN_WORDS = Object\.freeze\(\[([^\]]*)\]\);\r?$/mu.exec(runner)?.[1];
+    expect(forbidden?.split(',').map((word) => word.trim().replace(/^'|'$/gu, ''))).toEqual([...PUBLICATION_FORBIDDEN_WORDS]);
   });
 });

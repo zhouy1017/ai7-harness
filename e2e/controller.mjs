@@ -92,7 +92,7 @@ if (isJourneyRunner) {
   }
 }
 
-export const ADMITTED_JOURNEYS = Object.freeze(['J-01', 'J-02', 'J-08', 'J-12', 'J-15', 'J-03', 'J-04', 'J-05']);
+export const ADMITTED_JOURNEYS = Object.freeze(['J-01', 'J-02', 'J-08', 'J-12', 'J-15', 'J-03', 'J-04', 'J-05', 'J-07']);
 
 // The bounded pull-request subset of ADMITTED_JOURNEYS under ADR 0075. Every member launches the
 // same production-shaped subject, so a broken build, launch, IPC, data root, or service still fails
@@ -175,6 +175,7 @@ const JOURNEY_MODULES = Object.freeze({
   'J-03': new URL('./run-j03.mjs', import.meta.url),
   'J-04': new URL('./run-j04.mjs', import.meta.url),
   'J-05': new URL('./run-j05.mjs', import.meta.url),
+  'J-07': new URL('./run-j07.mjs', import.meta.url),
 });
 
 const J01_LAUNCH_SCENARIOS = Object.freeze([
@@ -690,6 +691,33 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'marks-settled-before-restart',
     'marks-survive-restart',
     'apply-lost-acknowledgement',
+    'completion-browser-close',
+    'completion-cleanup',
+  ]),
+  // J-07 (Issue #414, plan slice S65): ⑥ 发稿 — Milestone Versions and 设为发稿版本. Each stage is one thing an
+  // editor does or finds on 交付物, so a hosted failure names the behaviour that broke.
+  'J-07': Object.freeze([
+    'entry',
+    'controller-loopback-sentinel',
+    'controller-imports',
+    'import-and-open',
+    'deliverables-before-milestone',
+    'milestone-needs-a-purpose',
+    'milestone-first-saved',
+    'milestone-changed-since',
+    'milestone-second-saved',
+    'milestones-listed',
+    'designate-form',
+    'designate-confirmed',
+    'designate-repeat-unchanged',
+    'change-notice-after-edit',
+    'designate-older-milestone',
+    'restart-keeps-everything',
+    'actuals-prompt-and-words',
+    'j14-designate-keyboard',
+    'j14-deliverables-zoom-200-reflow',
+    'j14-deliverables-forced-colors',
+    'zero-loopback-requests',
     'completion-browser-close',
     'completion-cleanup',
   ]),
