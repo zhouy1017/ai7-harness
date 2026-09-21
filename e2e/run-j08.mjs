@@ -212,9 +212,10 @@ async function saveMilestone(renderer, label, token) {
   await assertRenderer(renderer, `(() => { const entry=document.querySelector('[data-edge-entry="navigation"]'); const panel=document.querySelector('#manuscript-navigation-panel'); if(!(entry instanceof HTMLButtonElement) || !(panel instanceof HTMLElement)) return false; if(entry.getAttribute('aria-expanded')!=='true') entry.click(); return entry.getAttribute('aria-expanded')==='true' && !panel.hidden; })()`, `${token}-navigation`);
   await assertRenderer(renderer, `(() => { const details=document.querySelector('.milestone-section'); if (!(details instanceof HTMLDetailsElement)) return false; details.open=true; return true; })()`, `${token}-details`);
   await fill(renderer, '#milestone-label', label, `${token}-label`);
-  await fill(renderer, '#milestone-purpose', '恢复边界校验', `${token}-purpose`);
+  // Synchronized delta with Issue #414: a purpose is chosen from the unselected cards, not typed.
+  await assertRenderer(renderer, `(() => { const radio=document.querySelector('.milestone-section input[type="radio"][name="milestone-purpose"][value="stage-archive"]'); if (!(radio instanceof HTMLInputElement) || radio.disabled) return false; radio.click(); return radio.checked; })()`, `${token}-purpose`);
   await fill(renderer, '#milestone-note', '本地、提供方免费、无导出。', `${token}-note`);
-  await click(renderer, '保存为里程碑版本', `${token}-save`);
+  await click(renderer, '保存里程碑版本', `${token}-save`);
   await waitFor(renderer, `document.querySelector('#persistence-status')?.textContent.includes(${JSON.stringify(label)})`, `${token}-saved`, 120_000);
 }
 

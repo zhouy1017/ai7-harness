@@ -44,7 +44,28 @@ import type {
   StartupProjection,
   TaskAuthorizationProjection,
 } from '../shared/protocol.js';
-import { BASELINE_ANALYSIS_TASK_GOAL, J03_TASK_GOAL, MAX_REPLACEMENT_EXCLUSIONS } from '../shared/protocol.js';
+import {
+  BASELINE_ANALYSIS_TASK_GOAL,
+  J03_TASK_GOAL,
+  MAX_REPLACEMENT_EXCLUSIONS,
+  MILESTONE_PURPOSE_KINDS,
+  MILESTONE_PURPOSE_LABELS,
+  type MilestonePurposeKind,
+} from '../shared/protocol.js';
+import { mountDeliverables, type DeliverablesSurface } from './deliverables.js';
+import {
+  DELIVERABLES_DESTINATION_ACTIONS,
+  DELIVERABLES_ENTRY_LABEL,
+  DELIVERABLES_STATUS_LINES,
+  DELIVERABLES_UNAVAILABLE,
+  MILESTONE_FORM_WORDS,
+  MILESTONE_PURPOSE_NOTE,
+  PUBLICATION_ACTION_LABELS,
+  deliverablesOverviewLine,
+  milestoneFormBlockers,
+  milestoneSaveReason,
+  publicationStateOf,
+} from './deliverables-labels.js';
 import { mountBoundedEditor, type BoundedEditor, type EditorContinuity } from './editor.js';
 import { mountEditorialMarks, type EditorialMarksSurface } from './editorial-marks.js';
 import { mountPositionRail, type PositionRail } from './position-rail.js';
@@ -97,6 +118,8 @@ let editorialMarks: EditorialMarksSurface | undefined;
 let manuscriptRail: PositionRail | undefined;
 /** ②B 审阅 while it is on screen: its poll and its sheet end with the screen. */
 let reviewWorkspace: ReviewWorkspaceSurface | undefined;
+/** ⑥ 交付物 while it is on screen: nothing still in flight paints once the screen is replaced. */
+let deliverablesSurface: DeliverablesSurface | undefined;
 let authorityInterrupted = false;
 
 interface RecoveryReturnContext {
@@ -217,6 +240,8 @@ function replaceScreen(state: string, content: HTMLElement): void {
   manuscriptRail = undefined;
   reviewWorkspace?.destroy();
   reviewWorkspace = undefined;
+  deliverablesSurface?.destroy();
+  deliverablesSurface = undefined;
   editor?.destroy();
   editor = undefined;
   screen.dataset['screen'] = state;
@@ -1528,6 +1553,53 @@ function renderBookReview(bookId: string, bookTitle: string, focus: ReviewFocus 
   setStatus(REVIEW_STATUS_LINES.opened);
 }
 
+/**
+ * ⑥ 交付物 as its own Book destination under 工作, beside 审阅 (editor-surfaces §9, IA-006). The surface is
+ * `deliverables.ts`; this only routes to it and gives it the workbench's persistent way out, appended last
+ * so the sticky region stays on screen for the whole page (V2-UX-LAYER-005).
+ */
+function renderBookDeliverables(bookId: string, bookTitle: string): void {
+  const content = panel();
+  content.classList.add('book-deliverables');
+  content.dataset['bookId'] = bookId;
+  const surface = mountDeliverables({
+    root: content,
+    bookId,
+    bookTitle,
+    api: window.ai7,
+    technicalDetails,
+    setStatus,
+    errorMessage: rendererErrorMessage,
+  });
+  const actions = element('div', 'button-row workbench-actions');
+  const openManuscript = button(DELIVERABLES_DESTINATION_ACTIONS[0], 'primary', async () => {
+    openManuscript.disabled = true;
+    setStatus('正在打开稿件…', 'busy');
+    try {
+      await renderResolvedBookWorkbenchRoute({ kind: 'book', bookId, bookTitle });
+    } catch (error) {
+      openManuscript.disabled = false;
+      setStatus(rendererErrorMessage(error, '无法打开稿件。'), 'error');
+    }
+  });
+  const openOverview = button(DELIVERABLES_DESTINATION_ACTIONS[1], 'secondary', async () => {
+    openOverview.disabled = true;
+    setStatus('正在打开图书工作概览…', 'busy');
+    try {
+      renderBookOverview(await window.ai7.getBookOverview({ bookId, historyCursor: null }));
+    } catch (error) {
+      openOverview.disabled = false;
+      setStatus(rendererErrorMessage(error, '无法打开图书工作概览。'), 'error');
+    }
+  });
+  actions.append(openManuscript, openOverview);
+  content.append(actions);
+  replaceScreen('book-deliverables', content);
+  deliverablesSurface = surface;
+  surface.start();
+  setStatus(DELIVERABLES_STATUS_LINES.opened);
+}
+
 function renderBookOverview(
   overview: BookWorkOverviewProjection,
   completion?: ImportCommitProjection,
@@ -1709,8 +1781,38 @@ function renderBookOverview(
       },
     );
   };
+  // 交付物 is one line too (editor-surfaces §2: 交付物一行计数): where the manuscript's 发稿 stands — how many
+  // milestones, which 发稿版本, whether the manuscript changed since — one step from its destination under
+  // 工作, after 审阅. No percentage (WORK-007).
+  const deliverablesHost = element('section', 'book-deliverables-summary');
+  deliverablesHost.dataset['deliverablesBookId'] = overview.book.bookId;
+  const inspectDeliverablesSummary = (): void => {
+    if (!deliverablesHost.isConnected || overview.manuscriptState.state !== 'populated') return;
+    const open = button(PUBLICATION_ACTION_LABELS.open, 'secondary', () => renderBookDeliverables(overview.book.bookId, overview.book.title));
+    open.dataset['deliverablesAction'] = 'open';
+    void window.ai7.inspectDeliverables().then(
+      (deliverables) => {
+        if (!deliverablesHost.isConnected || deliverables.bookId !== deliverablesHost.dataset['deliverablesBookId']) return;
+        deliverablesHost.dataset['deliverablesState'] = publicationStateOf(deliverables);
+        deliverablesHost.replaceChildren(
+          element('h3', undefined, DELIVERABLES_ENTRY_LABEL),
+          element('p', undefined, deliverablesOverviewLine(deliverables)),
+          open,
+        );
+      },
+      (error) => {
+        if (!deliverablesHost.isConnected) return;
+        deliverablesHost.dataset['deliverablesState'] = 'unavailable';
+        deliverablesHost.replaceChildren(
+          element('h3', undefined, DELIVERABLES_ENTRY_LABEL),
+          element('p', 'attention-note', rendererErrorMessage(error, DELIVERABLES_UNAVAILABLE)),
+          open,
+        );
+      },
+    );
+  };
   if (overview.manuscriptState.state === 'populated') {
-    content.append(taskHost, reviewHost, analysisHost);
+    content.append(taskHost, reviewHost, deliverablesHost, analysisHost);
   }
 
   const detailHost = element('div');
@@ -1866,11 +1968,13 @@ function renderBookOverview(
       }
       inspectTaskAuthorization();
       inspectReviewSummary();
+      inspectDeliverablesSummary();
       inspectBaselineAnalysis();
     });
   } else {
     inspectTaskAuthorization();
     inspectReviewSummary();
+    inspectDeliverablesSummary();
     inspectBaselineAnalysis();
     setStatus('图书工作概览已打开');
   }
@@ -5393,6 +5497,23 @@ function renderEditorWindow(
     if (!(await leaveForReview(null))) openReview.disabled = authoritativeMutationBusy();
   });
   openReview.dataset['workDestination'] = 'review';
+  // Leaving for 交付物 is leaving the manuscript as well: local edits are settled and the position taken first.
+  const openDeliverables = button(DELIVERABLES_ENTRY_LABEL, 'secondary', async () => {
+    openDeliverables.disabled = true;
+    setStatus(DELIVERABLES_STATUS_LINES.leaving, 'busy');
+    try {
+      if (!(await settleLocalEdit())) {
+        openDeliverables.disabled = authoritativeMutationBusy();
+        return;
+      }
+      await rememberEntryPosition();
+      renderBookDeliverables(currentWindow.bookId, bookTitle);
+    } catch (error) {
+      openDeliverables.disabled = authoritativeMutationBusy();
+      setStatus(rendererErrorMessage(error, DELIVERABLES_STATUS_LINES.openFailed), 'error');
+    }
+  });
+  openDeliverables.dataset['workDestination'] = 'deliverables';
   const toolbarActions = element('div', 'button-row');
   if (recoveryAttentionId) {
     toolbarActions.append(button('返回恢复待确认', 'secondary', async () => {
@@ -5410,12 +5531,12 @@ function renderEditorWindow(
   const recordsGroup = element('nav', 'book-records-group');
   recordsGroup.setAttribute('aria-label', '资料与记录');
   recordsGroup.append(element('span', 'section-label', '资料与记录'), openAnalysis, backToOverview);
-  // IA-006's `工作` group (稿件 / 审阅 / 评估 / 交付物), as much of it as exists: 审阅 (editor-surfaces §4).
-  // It is a destination of the Book beside 资料与记录, never a fourth entry on the right edge, whose three
-  // entries are 导航 / 分析 / 任务.
+  // IA-006's `工作` group (稿件 / 审阅 / 评估 / 交付物), as much of it as exists: 审阅 (editor-surfaces §4) and
+  // 交付物 (§9). They are destinations of the Book beside 资料与记录, never entries on the right edge, whose
+  // three entries are 导航 / 分析 / 任务.
   const workGroup = element('nav', 'book-work-group');
   workGroup.setAttribute('aria-label', REVIEW_WORK_GROUP_LABEL);
-  workGroup.append(element('span', 'section-label', REVIEW_WORK_GROUP_LABEL), openReview);
+  workGroup.append(element('span', 'section-label', REVIEW_WORK_GROUP_LABEL), openReview, openDeliverables);
   toolbarActions.append(workGroup, recordsGroup, undo, redo, save, retryAuthoritativeRefreshButton);
   toolbar.append(title, toolbarActions);
 
@@ -5487,25 +5608,83 @@ function renderEditorWindow(
     replacementReview,
   );
 
+  // 保存为里程碑版本 (V2-UX-MILE-003; interaction spec › Milestone rules): 标签, an unselected purpose card set
+  // — the four frozen purposes and 自行输入, which asks for the editor's own words — and an optional 说明.
+  // Nothing is preselected, and 保存里程碑版本 stays unavailable, its reason in words beside it, until a label
+  // and a purpose are given. A purpose states the next use only and grants nothing (MILE-009).
   const milestoneSection = element('details', 'navigator-section milestone-section');
-  const milestoneSummary = element('summary', undefined, '保存为里程碑版本');
-  const milestoneLabel = element('label', undefined, '里程碑名称');
+  const milestoneSummary = element('summary', undefined, MILESTONE_FORM_WORDS.summary);
+  const milestoneLabel = element('label', undefined, MILESTONE_FORM_WORDS.label);
   milestoneLabel.htmlFor = 'milestone-label';
   const milestoneName = element('input');
   milestoneName.id = 'milestone-label';
   milestoneName.maxLength = 80;
-  const purposeLabel = element('label', undefined, '保存目的');
-  purposeLabel.htmlFor = 'milestone-purpose';
-  const purpose = element('input');
-  purpose.id = 'milestone-purpose';
-  purpose.maxLength = 120;
-  const noteLabel = element('label', undefined, '说明（可选）');
+  const purposeOptions = element('fieldset', 'milestone-purpose-options');
+  purposeOptions.append(element('legend', undefined, MILESTONE_FORM_WORDS.purpose));
+  const purposeRadios = MILESTONE_PURPOSE_KINDS.map((kind) => {
+    const option = element('label', 'milestone-purpose-option');
+    option.dataset['purposeKind'] = kind;
+    const radio = element('input');
+    radio.type = 'radio';
+    radio.name = 'milestone-purpose';
+    radio.value = kind;
+    option.append(radio, element('span', undefined, MILESTONE_PURPOSE_LABELS[kind]));
+    purposeOptions.append(option);
+    return radio;
+  });
+  const purposeNote = element('small', 'field-note milestone-purpose-note', MILESTONE_PURPOSE_NOTE);
+  const customPurposeLabel = element('label', undefined, MILESTONE_FORM_WORDS.customPurpose);
+  customPurposeLabel.htmlFor = 'milestone-purpose-custom';
+  const customPurpose = element('input');
+  customPurpose.id = 'milestone-purpose-custom';
+  customPurpose.maxLength = 120;
+  const noteLabel = element('label', undefined, MILESTONE_FORM_WORDS.note);
   noteLabel.htmlFor = 'milestone-note';
   const note = element('input');
   note.id = 'milestone-note';
   note.maxLength = 500;
-  const milestoneButton = button('保存为里程碑版本', 'secondary', () => void saveMilestone());
-  milestoneSection.append(milestoneSummary, milestoneLabel, milestoneName, purposeLabel, purpose, noteLabel, note, milestoneButton);
+  const milestoneButton = button(MILESTONE_FORM_WORDS.save, 'secondary', () => void saveMilestone());
+  const milestoneReason = element('small', 'field-note milestone-save-reason');
+  milestoneReason.id = 'milestone-save-reason';
+  milestoneButton.setAttribute('aria-describedby', milestoneReason.id);
+  const chosenPurpose = (): MilestonePurposeKind | null => {
+    const checked = purposeRadios.find((radio) => radio.checked);
+    return checked === undefined ? null : checked.value as MilestonePurposeKind;
+  };
+  const milestoneBlockers = (): string[] =>
+    milestoneFormBlockers({ label: milestoneName.value, purposeKind: chosenPurpose(), customWords: customPurpose.value });
+  // Whether the form is complete, and why not; it reads nothing and writes nothing.
+  const syncMilestoneForm = (busy: boolean): void => {
+    const custom = chosenPurpose() === 'custom';
+    customPurposeLabel.hidden = !custom;
+    customPurpose.hidden = !custom;
+    const reason = milestoneSaveReason(milestoneBlockers());
+    milestoneReason.textContent = reason ?? '';
+    milestoneReason.hidden = reason === null;
+    milestoneButton.disabled = busy || reason !== null;
+  };
+  // Each milestone starts again from an unselected purpose (interaction spec › Milestone rules).
+  const resetMilestoneForm = (busy: boolean): void => {
+    milestoneName.value = '';
+    for (const radio of purposeRadios) radio.checked = false;
+    customPurpose.value = '';
+    note.value = '';
+    syncMilestoneForm(busy);
+  };
+  syncMilestoneForm(false);
+  milestoneSection.append(
+    milestoneSummary,
+    milestoneLabel,
+    milestoneName,
+    purposeOptions,
+    purposeNote,
+    customPurposeLabel,
+    customPurpose,
+    noteLabel,
+    note,
+    milestoneButton,
+    milestoneReason,
+  );
   navigator.append(outlineSection, searchSection, milestoneSection);
   // The outline and the search are one 导航 panel, opened on demand over the manuscript's right side and
   // closed by default, so the manuscript stays the central object (V2-UX-ED-015).
@@ -5658,15 +5837,17 @@ function renderEditorWindow(
     backToOverview.disabled = busy;
     openAnalysis.disabled = busy;
     openReview.disabled = busy;
+    openDeliverables.disabled = busy;
     undo.disabled = busy;
     redo.disabled = busy;
-    milestoneButton.disabled = busy;
     positionRail.disabled = busy;
     previousOutline.disabled = busy;
     nextOutline.disabled = busy;
     milestoneName.disabled = busy;
-    purpose.disabled = busy;
+    for (const radio of purposeRadios) radio.disabled = busy;
+    customPurpose.disabled = busy;
     note.disabled = busy;
+    syncMilestoneForm(busy);
     setCloseRisk(busy || dirty || saving || retryRequired);
     updateServiceControls();
     updateWindowChrome();
@@ -6369,26 +6550,28 @@ function renderEditorWindow(
 
   async function saveMilestone(): Promise<void> {
     if (authoritativeMutationBusy() || !editor) return;
-    if (!milestoneName.value.trim() || !purpose.value.trim()) {
-      setStatus('请填写里程碑名称和保存目的。', 'error');
-      (!milestoneName.value.trim() ? milestoneName : purpose).focus();
+    const purposeKind = chosenPurpose();
+    const blockers = milestoneBlockers();
+    if (purposeKind === null || blockers.length > 0) {
+      setStatus(milestoneSaveReason(blockers) ?? '里程碑未保存。', 'error');
+      (milestoneName.value.trim() === '' ? milestoneName : purposeKind === null ? purposeRadios[0]! : customPurpose).focus();
       return;
     }
     try {
       const saved = await runAuthoritativeMutation(() => {
         const binding = editor!.currentWindow();
-        // The field's words are 自行输入 until the purpose cards replace it (Issue #414, Stage B); words
-        // that are exactly a frozen purpose read back as that purpose.
+        // A frozen purpose carries no words of its own; 自行输入 carries the editor's (Issue #414).
         return window.ai7.saveMilestone({
           manuscriptId: binding.manuscriptId,
           branchId: binding.branchId,
           label: milestoneName.value,
-          purposeKind: 'custom',
-          purpose: purpose.value,
+          purposeKind,
+          purpose: purposeKind === 'custom' ? customPurpose.value : null,
           note: note.value,
         });
       }, async () => {
         milestoneSection.open = false;
+        resetMilestoneForm(authoritativeMutationBusy());
         await invalidateSearchIfStale('稿件修订版已变化；先前搜索结果和返回位置已失效。');
         await loadOutline(null, true);
       });
@@ -6422,6 +6605,9 @@ function renderEditorWindow(
   }
 
   positionRail.addEventListener('change', () => void navigate({ kind: 'proportion', proportion: Number(positionRail.value) / 1_000_000 }));
+  milestoneName.addEventListener('input', () => syncMilestoneForm(authoritativeMutationBusy()));
+  for (const radio of purposeRadios) radio.addEventListener('change', () => syncMilestoneForm(authoritativeMutationBusy()));
+  customPurpose.addEventListener('input', () => syncMilestoneForm(authoritativeMutationBusy()));
   editorWindow.addEventListener('scroll', () => {
     // Paging at an edge answers the reader's scroll. A position the editor restored itself — after an
     // arrival, a journal acknowledgement or an authoritative refresh — is not that, even when it rests

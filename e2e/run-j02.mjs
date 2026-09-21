@@ -458,6 +458,15 @@ async function press(renderer, key, modifiers = 0) {
   await renderer.send('Input.dispatchKeyEvent', { type: 'keyUp', key, modifiers });
 }
 
+/** Choose one of the milestone form's purpose cards (Issue #414): the four frozen purposes or 自行输入. */
+async function choosePurpose(renderer, kind, location) {
+  await assertRenderer(
+    renderer,
+    `(() => { const radio = document.querySelector('.milestone-section input[type="radio"][name="milestone-purpose"][value=${JSON.stringify(kind)}]'); if (!(radio instanceof HTMLInputElement) || radio.disabled) return false; radio.click(); return radio.checked; })()`,
+    location,
+  );
+}
+
 async function importAndOpen(renderer) {
   at('renderer-ready');
   await waitForRendererReady(renderer);
@@ -580,7 +589,9 @@ async function runWorkspaceJourney(renderer, dataRoot) {
   at('bounded-workspace');
   await assertRenderer(renderer, `document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]').length === 32`, 'renderer-block-ceiling');
   await assertRenderer(renderer, `document.querySelector('#manuscript-position')?.max === '1000000' && document.querySelector('.editor-meta')?.textContent.includes('全稿 0.000%')`, 'whole-manuscript-position');
-  await assertRenderer(renderer, `document.querySelector('#milestone-label')?.maxLength === 80 && document.querySelector('#milestone-purpose')?.maxLength === 120 && document.querySelector('#milestone-note')?.maxLength === 500`, 'milestone-ui-service-bounds');
+  // Synchronized delta with Issue #414: the purpose is an unselected card set — the four frozen purposes and
+  // 自行输入, whose own field keeps the service's 120-unit bound and shows only once 自行输入 is chosen.
+  await assertRenderer(renderer, `(() => { const radios = Array.from(document.querySelectorAll('.milestone-section input[type="radio"][name="milestone-purpose"]')); const custom = document.querySelector('#milestone-purpose-custom'); return document.querySelector('#milestone-label')?.maxLength === 80 && radios.map((radio) => radio.value).join(',') === 'stage-archive,review-candidate,delivery-candidate,other,custom' && radios.every((radio) => !radio.checked) && custom instanceof HTMLInputElement && custom.maxLength === 120 && custom.hidden && document.querySelector('#milestone-note')?.maxLength === 500; })()`, 'milestone-ui-service-bounds');
   await renderer.evaluate(`globalThis.__ai7FirstBlock = document.querySelector('[data-testid="manuscript-editor"] > [data-block-id]')?.dataset.blockId`);
 
   const positionJump = `(() => { const rail = document.querySelector('#manuscript-position'); rail.value = '${INTERIOR_POSITION_RAIL}'; rail.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`;
@@ -965,11 +976,12 @@ async function runWorkspaceJourney(renderer, dataRoot) {
   at('milestone-form');
   await assertRenderer(renderer, `(() => { const details = document.querySelector('.milestone-section'); details.open = true; return true; })()`, 'milestone-open');
   await fill(renderer, '#milestone-label', '结构复核完成', 'milestone-label');
-  await fill(renderer, '#milestone-purpose', '确认千万字编辑与替换状态', 'milestone-purpose');
+  // Synchronized delta with Issue #414: a purpose is chosen from the cards, not typed.
+  await choosePurpose(renderer, 'stage-archive', 'milestone-purpose');
   await fill(renderer, '#milestone-note', '本地里程碑，不表示导出或发布。', 'milestone-note');
   at('milestone-save-dispatch');
   const milestoneDrainObservation = await renderer.observeIpc();
-  await editThenInvokeOnDirty(renderer, '碑', ['保存为里程碑版本'], 'dirty-milestone-save');
+  await editThenInvokeOnDirty(renderer, '碑', ['保存里程碑版本'], 'dirty-milestone-save');
   try {
     at('milestone-r2-resolution');
     await waitFor(
