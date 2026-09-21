@@ -1044,13 +1044,54 @@ async function runAccessibilityJourney(renderer) {
   await waitFor(renderer, `document.activeElement?.id === 'manuscript-search'`, 'keyboard-search-focus');
   at('j14-visible-focus');
   await assertRenderer(renderer, `(() => { const input = document.querySelector('#manuscript-search'); return input?.matches(':focus-visible') && getComputedStyle(input).outlineStyle !== 'none'; })()`, 'visible-focus');
+  at('j14-keyboard-focus-keeps-window');
+  // Focus that enters the text makes the browser reveal the caret. With the pane scrolled away from a
+  // caret that stands at the window's start — every manuscript reopened after a restart — the reveal
+  // rests the pane at its top, and that is not the reader asking for the window before (#485). The pane
+  // is put between its edges the way a reader scrolls it, and the stop before the text takes focus
+  // without moving anything, so the one Tab below is the only thing that can move the pane.
+  const windowProbe = `(() => { const pane = document.querySelector('.editor-window'); const editor = document.querySelector('[data-testid="manuscript-editor"]'); return { top: Math.round(pane.scrollTop), first: editor?.firstElementChild?.dataset.blockId ?? null, position: Number(document.querySelector('#manuscript-position')?.value), inText: document.activeElement === editor }; })()`;
+  const stopBeforeText = await renderer.evaluate(`(async () => { const pane = document.querySelector('.editor-window'); const editor = document.querySelector('[data-testid="manuscript-editor"]'); pane.scrollTop = Math.floor((pane.scrollHeight - pane.clientHeight) / 2); await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))); const stops = Array.from(document.querySelectorAll('button, input, select, textarea, a[href], [tabindex], [contenteditable="true"]')).filter((stop) => stop === editor || (!stop.disabled && stop.tabIndex >= 0 && stop.offsetParent !== null)); const index = stops.indexOf(editor); if (index <= 0) return false; stops[index - 1].focus({ preventScroll: true }); return document.activeElement === stops[index - 1]; })()`);
+  const beforeFocus = await renderer.evaluate(windowProbe);
+  if (stopBeforeText !== true || !(beforeFocus?.top > 0) || !(beforeFocus?.position > 0) || beforeFocus.inText !== false) {
+    at('j14-keyboard-focus-keeps-window-precondition');
+    requireJourney(false, 'keyboard-focus-precondition', { stopBeforeText, beforeFocus });
+  }
+  await renderer.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 });
+  await renderer.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 });
+  await waitFor(renderer, `document.activeElement === document.querySelector('[data-testid="manuscript-editor"]')`, 'keyboard-focus-in-text', 10_000);
+  // A window paged away arrives a few frames after the scroll that asked for it; this wait is long
+  // enough for it to show on the slowest hosted runner.
+  await new Promise((resolveWait) => setTimeout(resolveWait, 1_500));
+  const afterFocus = await renderer.evaluate(windowProbe);
+  if (afterFocus?.first !== beforeFocus.first || afterFocus?.position !== beforeFocus.position) {
+    at('j14-keyboard-focus-keeps-window-paged');
+    requireJourney(false, 'keyboard-focus-keeps-window', { beforeFocus, afterFocus });
+  }
+  if (afterFocus.top === beforeFocus.top) {
+    // The browser revealed nothing, so nothing was proven: say so rather than pass on it.
+    at('j14-keyboard-focus-keeps-window-no-reveal');
+    requireJourney(false, 'keyboard-focus-reveal', { beforeFocus, afterFocus });
+  }
+  at('j14-top-edge-pages-back-once');
+  // The reader's own scroll to the top edge still asks for the window before — once: the pane then
+  // rests at that window's end, and resting there is not the reader asking to come back.
+  await renderer.evaluate(`(async () => { const pane = document.querySelector('.editor-window'); const editor = document.querySelector('[data-testid="manuscript-editor"]'); const seen = [editor.firstElementChild?.dataset.blockId]; globalThis.__ai7WindowsSeen = seen; const watch = () => { if (globalThis.__ai7WindowsSeen !== seen) return; const first = editor.firstElementChild?.dataset.blockId; if (first !== seen[seen.length - 1]) seen.push(first); if (seen.length < 8) requestAnimationFrame(watch); }; requestAnimationFrame(watch); pane.scrollTop = Math.floor((pane.scrollHeight - pane.clientHeight) / 2); await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))); pane.scrollTop = 0; })()`);
+  await waitFor(renderer, `globalThis.__ai7WindowsSeen.length >= 2`, 'top-edge-pages-back', 30_000);
+  await new Promise((resolveWait) => setTimeout(resolveWait, 1_500));
+  const pagedBack = await renderer.evaluate(`(() => { const seen = globalThis.__ai7WindowsSeen; globalThis.__ai7WindowsSeen = undefined; return { windows: seen.length, position: Number(document.querySelector('#manuscript-position')?.value) }; })()`);
+  if (pagedBack?.windows !== 2) {
+    at('j14-top-edge-pages-back-once-bounced');
+    requireJourney(false, 'top-edge-pages-back-once', { pagedBack, beforeFocus });
+  }
+  await assertRenderer(renderer, `Number(document.querySelector('#manuscript-position')?.value) < ${beforeFocus.position}`, 'top-edge-paged-to-an-earlier-window');
   at('j14-keyboard-window-crossing');
   await renderer.evaluate(`(() => { const editor = document.querySelector('[data-testid="manuscript-editor"]'); editor?.focus(); globalThis.__ai7BeforePageKey = editor?.firstElementChild?.dataset.blockId; })()`);
   await press(renderer, 'PageDown');
   await waitFor(renderer, `document.querySelector('[data-testid="manuscript-editor"]')?.firstElementChild?.dataset.blockId !== globalThis.__ai7BeforePageKey`, 'keyboard-window-crossing');
   at('j14-fine-scroll-window-crossing');
   await renderer.evaluate(`new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
-  await renderer.evaluate(`(() => { const surface = document.querySelector('.editor-window'); globalThis.__ai7BeforeFineScroll = document.querySelector('[data-testid="manuscript-editor"]')?.firstElementChild?.dataset.blockId; surface.scrollTop = surface.scrollHeight; })()`);
+  await renderer.evaluate(`(async () => { const surface = document.querySelector('.editor-window'); globalThis.__ai7BeforeFineScroll = document.querySelector('[data-testid="manuscript-editor"]')?.firstElementChild?.dataset.blockId; surface.scrollTop = Math.floor((surface.scrollHeight - surface.clientHeight) / 2); await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))); surface.scrollTop = surface.scrollHeight; })()`);
   await waitFor(renderer, `document.querySelector('[data-testid="manuscript-editor"]')?.firstElementChild?.dataset.blockId !== globalThis.__ai7BeforeFineScroll`, 'fine-scroll-window-crossing');
   at('j14-zoom-200-reflow');
   await renderer.send('Emulation.setDeviceMetricsOverride', { width: 640, height: 800, deviceScaleFactor: 2, mobile: false });
