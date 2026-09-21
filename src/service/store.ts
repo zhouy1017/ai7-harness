@@ -5,7 +5,10 @@ import { basename, extname, isAbsolute, posix, relative, resolve, sep } from 'no
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
 import { J03_TASK_GOAL, MAX_BLOCK_CODE_UNITS, MAX_FRAME_BYTES, isReviewCategoryKindId, resolveMilestonePurpose } from '../shared/protocol.js';
 import type {
+  DeliverablesProjection,
+  DesignatePublicationVersionInput,
   MilestonePurposeKind,
+  PublicationDesignationProjection,
   BookCreationCommitProjection,
   BookCreationReviewProjection,
   BookHistoryCursor,
@@ -129,7 +132,7 @@ import {
 } from './text-manuscript.js';
 import { initializeManuscriptEffectSchema, ManuscriptApplyStore } from './manuscript-apply.js';
 import { initializeReviewRunSchema, ReviewRunError, ReviewRunStore, type ReviewRunPreparationProgress } from './review/review-runs.js';
-import { initializePublicationVersionSchema } from './publication-versions.js';
+import { initializePublicationVersionSchema, PublicationVersionError, PublicationVersionStore } from './publication-versions.js';
 import type { ReviewRunDriveSteps } from './review/review-run-driver.js';
 import { reviewCategoryContractInput, type ReviewCategoryConfigurationEntry } from './review/category-configuration.js';
 import { reviewCategoryKindDefinition } from './review/review-category-kind.js';
@@ -2981,6 +2984,7 @@ export class EditorialStore {
   readonly #editorialMarks: EditorialMarkStore;
   readonly #manuscriptApply: ManuscriptApplyStore;
   readonly #reviewRuns: ReviewRunStore;
+  readonly #publicationVersions: PublicationVersionStore;
   readonly #workflowProfile: BuiltInWorkflowProfile;
   readonly #lifetimeId: string;
   readonly #control: StoreControl;
@@ -3028,6 +3032,7 @@ export class EditorialStore {
       ledgerOf: (entry) => this.#reviewLedgerOf(entry),
       baseline: () => this.#baselineAnalysis,
     });
+    this.#publicationVersions = new PublicationVersionStore(authority);
     this.#workflowProfile = workflowProfile;
     this.#lifetimeId = lifetimeId;
     this.#control = control;
@@ -8276,6 +8281,21 @@ export class EditorialStore {
     return result;
   }
 
+  // ---- ⑥ 交付物 · 发稿 (Issue #414, plan slice S65) -------------------------------------------------
+
+  /** The 交付物 of one Book: its Manuscript's milestones, its Publication Versions, and what followed them. */
+  inspectDeliverables(bookId: string): DeliverablesProjection {
+    return this.#publicationCall(() => this.#publicationVersions.deliverables(bookId));
+  }
+
+  /**
+   * 设为发稿版本 over one exact milestone of the Book's primary Manuscript: the designation, its internal
+   * Public Release Permission and its two events in one transaction, or no change for an identical repeat.
+   */
+  designatePublicationVersion(input: DesignatePublicationVersionInput): PublicationDesignationProjection {
+    return this.#publicationCall(() => this.#publicationVersions.designate(input));
+  }
+
   undoManuscript(manuscriptId: string, branchId: string, expectedWorkingDigest: string): DurableHistoryProjection {
     return this.#boundedCall(() => this.#bounded.undo(manuscriptId, branchId, expectedWorkingDigest, this.#lifetimeId));
   }
@@ -11262,6 +11282,25 @@ export class EditorialStore {
         throw new StoreFatalError(error);
       }
       if (error instanceof BoundedStoreError) throw new StoreError(error.code, error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * A 交付物 call: a refusal of the publication ledger (or of the canonical form it records in) is the
+   * caller's `StoreError`; a rollback that itself failed leaves the connection in doubt and poisons the
+   * store, exactly as `#transaction` does.
+   */
+  #publicationCall<T>(operation: () => T): T {
+    this.#assertAvailable();
+    try {
+      return operation();
+    } catch (error) {
+      if (error instanceof PublicationVersionError || error instanceof AnalysisError) throw new StoreError(error.code, error.message);
+      if (error instanceof AggregateError) {
+        this.#poisoned = true;
+        throw new StoreFatalError(error);
+      }
       throw error;
     }
   }

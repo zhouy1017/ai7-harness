@@ -4073,6 +4073,183 @@ export interface MilestoneProjection {
   };
 }
 
+// ---- ⑥ 交付物 · 发稿 (Issue #414, plan slice S65) --------------------------------------------------------
+//
+// Milestone Versions and the Publication Version belong to the primary Manuscript only (V2-UX-MILE-014).
+// 设为发稿版本 is one deterministic, local interaction over one exact milestone; it publishes, sends and
+// delivers nothing (V2-UX-PUB-008, PUB-009). The words below are the service's, so the surface shows
+// exactly what the records mean.
+
+/** The fixed sentence beside 设为发稿版本 (V2-UX-PUB-004): what a designation means, and what AI7 will not do. */
+export const PUBLICATION_VERSION_STATEMENT = '仅表示此版本可用于上述发稿范围；AI7 不会发布或发送' as const;
+/** How the milestone the current 发稿版本 designates is marked in the list (interaction spec › Publication Version). */
+export const PUBLICATION_VERSION_LABEL = '发稿版本' as const;
+/** The Publication Version Change Notice: the manuscript changed after the current designation (V2-UX-PUB-006). */
+export const PUBLICATION_CHANGE_NOTICE = '自发稿版本后有修改' as const;
+/** Why 设为发稿版本 cannot be offered yet: it designates an existing milestone, never the current text (PUB-002). */
+export const PUBLICATION_NEEDS_MILESTONE = '先保存里程碑版本' as const;
+export const PUBLICATION_NEEDS_MANUSCRIPT = '先导入稿件，再保存里程碑版本' as const;
+/**
+ * The pending line a designation leaves in the 发稿 block: the reminder to enter the 定价与首印 actuals
+ * (V2-UX-EVAL-010). It is recorded now and offers no action until the evaluation features take it up.
+ */
+export const PUBLICATION_ACTUALS_PROMPT_LABEL = '录入定价与首印' as const;
+export const PUBLICATION_ACTUALS_PROMPT_STATE = '随评估功能提供' as const;
+/** Words AI7 never uses for a Publication Version (V2-UX-PUB-009): no projection of 交付物 contains them. */
+export const PUBLICATION_FORBIDDEN_WORDS = ['已发布', '已发送', '已交付', '已确认送达'] as const;
+/** 发稿范围 and 依据, in characters (code points) once NFC-normalized and trimmed. */
+export const MAX_PUBLICATION_SCOPE_CHARACTERS = 80;
+export const MAX_PUBLICATION_BASIS_CHARACTERS = 500;
+/**
+ * The most milestones and designations one 交付物 answer lists, newest first. A listed milestone weighs at
+ * most about 2.7 KB on the wire and a designation about 2.9 KB, so both lists together stay well under the
+ * frame; an older one stays designatable by its identity.
+ */
+export const MAX_DELIVERABLE_MILESTONES = 100;
+export const MAX_PUBLICATION_VERSIONS_LISTED = 30;
+
+/**
+ * What a designation leaves for later slices, recorded in the same interaction: the prompt to enter the
+ * 定价与首印 actuals (V2-UX-EVAL-010) and the archiving of the Book's 审稿意见 into 范例 (V2-UX-KB-006).
+ */
+export type PublicationEventKind = 'actuals-prompt' | 'exemplar-archive';
+export const PUBLICATION_EVENT_KINDS: readonly PublicationEventKind[] = ['actuals-prompt', 'exemplar-archive'];
+
+/** `自「标签」后有修改` (V2-UX-MILE-007): the manuscript changed after this milestone. */
+export function milestoneChangedSinceLabel(label: string): string {
+  return `自「${label}」后有修改`;
+}
+
+/** The completion of 设为发稿版本 (interaction spec › Publication-version rules): the exact version and scope. */
+export function publicationDesignatedLabel(milestoneLabel: string, revisionLabel: string, scope: string): string {
+  return `已设为发稿版本 · 「${milestoneLabel}」 · ${revisionLabel} · ${scope}`;
+}
+
+/** An identical repeat of the current designation records nothing and says so. */
+export function publicationUnchangedLabel(milestoneLabel: string, revisionLabel: string, scope: string): string {
+  return `已是当前发稿版本 · 「${milestoneLabel}」 · ${revisionLabel} · ${scope}`;
+}
+
+/**
+ * 发稿范围 or 依据 as it is recorded, or `null` when it cannot be: well formed, NFC-normalized and trimmed,
+ * and 1 to `maximum` characters counted as code points — as SQLite's `length()` counts them.
+ */
+export function publicationText(value: unknown, maximum: number): string | null {
+  if (typeof value !== 'string' || !value.isWellFormed()) return null;
+  const text = value.normalize('NFC').trim();
+  const characters = [...text].length;
+  return characters >= 1 && characters <= maximum ? text : null;
+}
+
+/** One Milestone Version of the Book's primary Manuscript as 交付物 lists it (V2-UX-MILE-008). */
+export interface MilestoneListItemProjection {
+  milestoneId: string;
+  label: string;
+  purposeKind: MilestonePurposeKind;
+  /** What the purpose reads as: a frozen purpose's own label, or the editor's own words. */
+  purposeLabel: string;
+  revisionId: string;
+  /** The exact revision the milestone designates, `rN`. */
+  revisionLabel: string;
+  actor: '本机编辑';
+  createdAt: string;
+  note: string | null;
+  /** Whether the manuscript changed after this milestone (V2-UX-MILE-007). Nothing here marks a milestone final (MILE-006). */
+  changedSince: boolean;
+  /** `自「标签」后有修改` exactly when `changedSince`. */
+  changedSinceLabel: string | null;
+  /** `发稿版本` on the milestone the current Publication Version designates; `null` on every other. */
+  designation: null | { publicationVersionId: string; label: typeof PUBLICATION_VERSION_LABEL };
+  /** 查看技术详情 only: the internal Signoff Record saved with the milestone (MILE-005). */
+  technical: { signoffRecordId: string };
+}
+
+/** One 设为发稿版本 as recorded (V2-UX-PUB-003, PUB-007): append-only, and never retargeted. */
+export interface PublicationVersionProjection {
+  publicationVersionId: string;
+  /** 第 N 次 设为发稿版本 of this Book. */
+  ordinal: number;
+  /** The newest designation of the Book is its current 发稿版本. */
+  current: boolean;
+  milestoneId: string;
+  milestoneLabel: string;
+  revisionId: string;
+  revisionLabel: string;
+  scope: string;
+  basis: string;
+  actor: '本机编辑';
+  createdAt: string;
+  /** 查看技术详情 only: the exact identities behind the designation, never ordinary editorial wording. */
+  technical: {
+    revisionDigest: string;
+    digest: string;
+    /** The separately identified internal Public Release Permission recorded with the designation. */
+    permissionId: string;
+    events: ReadonlyArray<{ eventId: string; kind: PublicationEventKind }>;
+  };
+}
+
+/** The pending 录入定价与首印 line the current designation leaves; it offers no action yet. */
+export interface PublicationActualsPromptProjection {
+  eventId: string;
+  publicationVersionId: string;
+  label: typeof PUBLICATION_ACTUALS_PROMPT_LABEL;
+  stateLabel: typeof PUBLICATION_ACTUALS_PROMPT_STATE;
+  recordedAt: string;
+}
+
+/**
+ * The 交付物 destination of one Book, as far as S65 reaches: the 发稿 · 稿件 block (⑥) — the Manuscript's
+ * milestones, 设为发稿版本 and what followed it. Production Documents and the 图书交付包 are later slices'.
+ */
+export interface DeliverablesProjection {
+  bookId: string;
+  bookTitle: string;
+  /** The Book's primary Manuscript as it stands now; `null` for a Book without one. */
+  manuscript: null | { manuscriptId: string; branchId: string; revisionId: string; revisionLabel: string; journalSequence: number; workingDigest: string };
+  publication: {
+    /** The milestones newest first, at most `MAX_DELIVERABLE_MILESTONES`; none is preselected or final. */
+    milestones: ReadonlyArray<MilestoneListItemProjection>;
+    milestonesTruncated: boolean;
+    /** Every designation newest first, at most `MAX_PUBLICATION_VERSIONS_LISTED`; the first is the current 发稿版本. */
+    designations: ReadonlyArray<PublicationVersionProjection>;
+    designationsTruncated: boolean;
+    /** `自发稿版本后有修改` once the manuscript changed after the current designation's exact revision. */
+    changeNotice: null | { label: typeof PUBLICATION_CHANGE_NOTICE; publicationVersionId: string; revisionLabel: string };
+    /** Whether 设为发稿版本 can be offered, and why not. */
+    designate: { available: boolean; unavailableReason: string | null };
+    statement: typeof PUBLICATION_VERSION_STATEMENT;
+    actualsPrompt: PublicationActualsPromptProjection | null;
+  };
+}
+
+/**
+ * The inputs of the 交付物 operations. The Book is always the route's, never the renderer's: every
+ * renderer member takes the input without `bookId`, and the main process supplies the Book its window
+ * is showing.
+ */
+export interface InspectDeliverablesInput {
+  bookId: string;
+}
+
+/** 设为发稿版本: one exact milestone of the Book's primary Manuscript, a 发稿范围 and a 依据 (PUB-002, PUB-004). */
+export interface DesignatePublicationVersionInput {
+  bookId: string;
+  milestoneId: string;
+  scope: string;
+  basis: string;
+}
+
+/** What 设为发稿版本 came to: a separate append, or — for an identical repeat of the current one — no change. */
+export interface PublicationDesignationProjection {
+  bookId: string;
+  outcome: 'designated' | 'unchanged';
+  completionLabel: string;
+  /** The designation the answer is about: the one appended, or the current one an identical repeat named. */
+  publicationVersionId: string;
+  deliverables: DeliverablesProjection;
+}
+
 export interface DurableHistoryProjection {
   action: 'undo' | 'redo';
   branchId: string;
