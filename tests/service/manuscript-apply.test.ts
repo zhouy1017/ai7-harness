@@ -474,8 +474,11 @@ describe('AI7 Apply on a Change Suggestion', () => {
     let planted: Record<string, unknown[]> = {};
     const downgrade = new DatabaseSync(databasePath);
     try {
+      // A revision-22 store also carried the three kind-coupled analysis relations as revision 20 left
+      // them, and none of revision 24's Review Run relations (Issue #417).
+      downgradeKindCoupledRelationsToRevision23(downgrade);
       downgrade.exec(`BEGIN IMMEDIATE;
-        ${EFFECT_RELATIONS.map((relation) => `DROP TABLE ${relation};`).join('\n')}
+        ${[...REVIEW_RUN_RELATIONS_DROP_ORDER, ...EFFECT_RELATIONS].map((relation) => `DROP TABLE ${relation};`).join('\n')}
         PRAGMA user_version = ${EDITORIAL_MARK_SCHEMA_VERSION};
         COMMIT;`);
       downgradeEditorialMarksToRevision22(downgrade);
@@ -494,8 +497,9 @@ describe('AI7 Apply on a Change Suggestion', () => {
     }
     const after = new DatabaseSync(databasePath, { readOnly: true });
     try {
-      // Revision 23: the widened text, every row of the five relations exactly as revision 22 held it, and the Effect relations beside them.
-      expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(MANUSCRIPT_EFFECT_SCHEMA_VERSION);
+      // Through revision 23 to the terminal 24: the widened text, every row of the five relations exactly
+      // as revision 22 held it, and the Effect relations beside them.
+      expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(EDITORIAL_REVIEW_SCHEMA_VERSION);
       expect(markText(after)).toEqual({ sql: EDITORIAL_MARK_SCHEMA_SQL.editorial_marks });
       expect(rowsOf(after)).toEqual(planted);
       expect(after.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
