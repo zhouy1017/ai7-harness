@@ -377,5 +377,87 @@ describe('a Review Run over the real store on exact sample1', () => {
       expect(workspace(session, book).runs[0]!.reportVersion).toBe(2);
     });
   }, 300_000);
+  it('reads 选章 by the analysis units of a manuscript without headings, and keeps only the leads anchored there', async () => {
+    await withBook('sample1-review-authored', async (session, book) => {
+      await runBaseline(session, book);
+      const options = workspace(session, book).scopeOptions.chapters;
+      // sample1 carries no heading styles, so its chapters are the analysis units every category reads by.
+      expect(options).toMatchObject({ available: true, basis: 'analysis-units' });
+      expect(options.chapters.map((chapter) => [chapter.position, chapter.endPosition])).toEqual([[1, 15], [16, 25], [26, 43], [44, 59], [60, 68], [69, 75], [76, 92], [93, 97]]);
+      const scope: ReviewRunScopeRequest = { kind: 'chapters', fromChapterBlockId: options.chapters[1]!.blockId, toChapterBlockId: options.chapters[2]!.blockId };
+      // Chapters out of order are no range at all.
+      expect(storeCode(() => session.store.createReviewRunPreparationWork(book.bookId, [LITERARY], { ...scope, fromChapterBlockId: options.chapters[2]!.blockId, toChapterBlockId: options.chapters[1]!.blockId }, launchPolicy)))
+        .toBe('REVIEW_SCOPE_INVALID');
+
+      const prepared = prepare(session, book, [PLOT, LITERARY], scope);
+      expect(prepared.scope).toEqual({ kind: 'chapters', label: '选章 · 内容块 16–43', selectedRange: { startPosition: 16, endPosition: 43 } });
+      const literaryPlan = prepared.categories.find((category) => category.categoryId === LITERARY)!;
+      expect(literaryPlan.modeLabel).toBe('所选范围审阅');
+      expect(literaryPlan.plan!.unreviewed).toBeGreaterThan(0);
+      expect(literaryPlan.plan!.recomputed + literaryPlan.plan!.unreviewed).toBe(8);
+
+      const run = await authorizeAndDrive(session, book, prepared);
+      expect(run.state).toBe('settled');
+      // A range review's findings are the ones of the units it read, and nothing outside them.
+      const revision = session.store.inspectReviewCategory(book.bookId, reviewCategoryKindDefinition(LITERARY_EXPRESSION));
+      const read = new Set(revision.resultSetRevision!.lineage.filter((unit) => unit.kind === 'recomputed').flatMap((unit) => {
+        const manifestUnit = revision.coverageManifest!.units[unit.unitOrdinal - 1]!;
+        return [...manifestUnit.overlapBlockIds, ...manifestUnit.blockIds];
+      }));
+      const literary = run.findings.filter((finding) => finding.categoryId === LITERARY);
+      expect(literary.length).toBeGreaterThan(0);
+      expect(literary.every((finding) => read.has(finding.blockId))).toBe(true);
+      // The leads kept are exactly those anchored in the chosen chapters.
+      const positions = new Map(session.store.baselineAnalysisLedger.readWorkingBlocks(book.branchId).map((block) => [block.blockId, block.position] as const));
+      const inRange = reviewLeadsOf(session.store.inspectBaselineAnalysis(book.bookId).resultSetRevision!)
+        .filter((lead) => { const position = positions.get(lead.ranges[0]!.blockId)!; return position >= 16 && position <= 43; });
+      const leads = run.findings.filter((finding) => finding.categoryId === PLOT);
+      expect(leads.length).toBeGreaterThan(0);
+      expect(leads.length).toBeLessThan(reviewLeadsOf(session.store.inspectBaselineAnalysis(book.bookId).resultSetRevision!).length);
+      expect(leads.map((finding) => finding.blockId).sort()).toEqual(inRange.map((lead) => lead.ranges[0]!.blockId).sort());
+      expect(leads.every((finding) => finding.blockPosition! >= 16 && finding.blockPosition! <= 43)).toBe(true);
+      // Each finding names the chapter it falls in, for the 章 filter.
+      expect(run.findings.every((finding) => options.chapters.some((chapter) => chapter.blockId === finding.chapterBlockId))).toBe(true);
+    });
+  }, 300_000);
+
+  it('reviews only what changed, names the marks it already made again, and moves the coverage matrix with the manuscript', async () => {
+    await withBook('sample1-review-authored', async (session, book) => {
+      const first = await authorizeAndDrive(session, book, prepare(session, book, [TYPOS], WHOLE));
+      expect(workspace(session, book).coverage.find((row) => row.categoryId === TYPOS)).toMatchObject({ state: 'current', lastRunOrdinal: 1, changedBlocks: 0 });
+
+      appendToFirstBlock(session, book);
+      const edited = workspace(session, book);
+      expect(edited.coverage.find((row) => row.categoryId === TYPOS)).toMatchObject({ state: 'needs-review', stateLabel: '需复审', lastRunOrdinal: 1, changedBlocks: 1 });
+      // What each category can read of the changed chapters: a reviewed one can, a never-reviewed one says why, the leads never do.
+      const scopes = (categoryId: string) => edited.categories.find((category) => category.categoryId === categoryId)!.scopes;
+      expect(scopes(TYPOS).changed).toEqual({ available: true, unavailableReason: null });
+      expect(scopes(STYLE).changed).toEqual({ available: false, unavailableReason: NEVER_REVIEWED_REASON });
+      expect(scopes(PLOT).changed).toEqual({ available: false, unavailableReason: LEADS_ABSENT_REASON });
+      expect(scopes(TYPOS).selection).toEqual({ available: false, unavailableReason: SELECTION_UNAVAILABLE_REASON });
+      expect(storeMessage(() => session.store.createReviewRunPreparationWork(book.bookId, [STYLE], CHANGED, launchPolicy))).toContain(NEVER_REVIEWED_REASON);
+      expect(storeCode(() => session.store.createReviewRunPreparationWork(book.bookId, [TYPOS], SELECTION, launchPolicy))).toBe('REVIEW_SCOPE_UNAVAILABLE');
+
+      const prepared = prepare(session, book, [TYPOS], CHANGED);
+      expect(prepared.categories[0]).toMatchObject({ modeLabel: '只审改动过的章', plan: { recomputed: 1, reused: 7 } });
+      const second = await authorizeAndDrive(session, book, prepared);
+      expect(second).toMatchObject({ ordinal: 2, state: 'settled' });
+      // The findings of the one unit it read, each the same record the first Run made: the same mark, not a second one.
+      const firstMarks = new Map(first.findings.map((finding) => [finding.quote, finding.markId] as const));
+      expect(second.findings.length).toBeGreaterThan(0);
+      expect(second.findings.every((finding) => finding.markId !== null && firstMarks.get(finding.quote) === finding.markId)).toBe(true);
+      const db = database();
+      try {
+        expect((db.prepare("SELECT count(*) total FROM editorial_marks WHERE source_origin = 'review-category'").get() as { total: number }).total).toBe(first.findings.length);
+      } finally {
+        db.close();
+      }
+      const after = workspace(session, book);
+      expect(after.coverage.find((row) => row.categoryId === TYPOS)).toMatchObject({ state: 'current', lastRunOrdinal: 2, changedBlocks: 0 });
+      expect(after.runs.map((run) => [run.ordinal, run.scopeLabel])).toEqual([[2, '只审改动过的章'], [1, '全书']]);
+      // Nothing changed since: the ledger's own reason says so.
+      expect(after.categories.find((category) => category.categoryId === TYPOS)!.scopes.changed.available).toBe(false);
+    });
+  }, 300_000);
 // REVIEW-RUNS-TESTS
 });
