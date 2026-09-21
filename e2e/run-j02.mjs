@@ -1057,9 +1057,21 @@ async function runAccessibilityJourney(renderer) {
     at('j14-keyboard-focus-keeps-window-precondition');
     requireJourney(false, 'keyboard-focus-precondition', { stopBeforeText, beforeFocus });
   }
-  await renderer.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 });
-  await renderer.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 });
-  await waitFor(renderer, `document.activeElement === document.querySelector('[data-testid="manuscript-editor"]')`, 'keyboard-focus-in-text', 10_000);
+  // Tab walks forward from that stop until it enters the text; no stop on the way is inside the pane,
+  // so the pane stays where it was put until the focus that is under test arrives.
+  const walked = [];
+  for (let tabs = 0; tabs < 12; tabs += 1) {
+    await renderer.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 });
+    await renderer.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 });
+    const stop = await renderer.evaluate(`(() => { const active = document.activeElement; const editor = document.querySelector('[data-testid="manuscript-editor"]'); return active === editor ? 'TEXT' : (active?.id || active?.className || active?.tagName || 'none') + ':' + (active?.textContent ?? '').slice(0, 12) + '@' + Math.round(document.querySelector('.editor-window').scrollTop); })()`);
+    walked.push(stop);
+    if (stop === 'TEXT') break;
+  }
+  if (localDebugEnabled()) recordDebugDetail('J-02', `tab walk ${JSON.stringify(walked)}`);
+  if (walked.at(-1) !== 'TEXT') {
+    at('j14-keyboard-focus-keeps-window-precondition');
+    requireJourney(false, 'keyboard-focus-in-text', { walked });
+  }
   // A window paged away arrives a few frames after the scroll that asked for it; this wait is long
   // enough for it to show on the slowest hosted runner.
   await new Promise((resolveWait) => setTimeout(resolveWait, 1_500));
