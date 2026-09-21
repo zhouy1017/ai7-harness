@@ -38,8 +38,10 @@ const REUSE_PLAN_SCHEMA = 'ai7.baseline-manuscript-analysis.reuse-plan/1';
 /** Every button the settled card may carry: navigation, the three update controls, history, the plan-revision controls, and the hidden cancel. */
 // Synchronized delta (#406): ②A's tabs, the four sentences' shortcuts to the tab their next action is
 // taken on, and each update mode's own button with the two ways to begin behind it.
+// Synchronized delta with Issue #417: 可信程度's pointer at 审阅 is a working `打开审阅` now (V2-UX-REV-011).
 const ANALYSIS_ACTIONS = ['return-to-range', 'sync-current', 'reanalyze-range', 'reanalyze-book', 'open-revision', 'close-revision', 'cancel-preparation', 'view-plan-revision', 'reconfirm-plan',
-  'select-tab', 'go-history', 'go-chapters', 'choose-sync-current', 'choose-reanalyze-range', 'choose-reanalyze-book', 'quick-sync-current', 'quick-reanalyze-range', 'quick-reanalyze-book'];
+  'select-tab', 'go-history', 'go-chapters', 'choose-sync-current', 'choose-reanalyze-range', 'choose-reanalyze-book', 'quick-sync-current', 'quick-reanalyze-range', 'quick-reanalyze-book',
+  'open-review'];
 // Synchronized delta with Issue #408: the renderer now carries exactly one Apply surface — AI7 Apply for
 // a Change Suggestion on the manuscript — and the analysis still gains none. Anything else named like an
 // execution, effect, apply or export member remains a failure here.
@@ -95,7 +97,11 @@ function sha256Hex(text) {
 }
 /** The four typed cross-unit finding kinds; this fixture reports the two the deterministic pass cannot reach. */
 const CROSS_UNIT_FINDING_KINDS = ['contradiction', 'continuity-break', 'alias-identity-divergence', 'chronology-conflict'];
-/** The Decision Layer's label for every conflict kind this fixture reports, keyed by the reducer token the record keeps. */
+/**
+ * The Decision Layer's label for every conflict kind this fixture reports, keyed by the reducer token the
+ * record keeps. Synchronized delta with Issue #417: ②A no longer lists the conflicts; these are the words
+ * a lead 批注 of 审阅's 情节逻辑与前后一致 names its kind in (`【线索 · <label>】`), for the 审阅 stages.
+ */
 const CONFLICT_KIND_LABELS = {
   'unit-reported': '单元内报告',
   'alias-collision': '别名冲突',
@@ -1152,7 +1158,8 @@ async function main() {
         card.querySelectorAll('[data-analysis-axis]').length===4 && axis('coverage')==='partial' && axis('reducer-closure')==='closed-with-gaps' &&
         axis('freshness')==='current' && axis('assurance')==='qualified-with-open-conflicts' &&
         card.querySelectorAll('[data-analysis-gap-unit]').length===1 && card.querySelector('[data-analysis-gap-unit="2"][data-analysis-gap-code="adapter-failure"]')!==null &&
-        card.querySelectorAll('[data-analysis-conflict-kind]').length===4 && card.querySelector('[data-analysis-conflict-kind="alias-collision"]')!==null &&
+        !card.querySelector('.analysis-conflict-list, .analysis-unresolved-list, [data-analysis-conflict-kind]') &&
+        card.querySelector('[data-analysis-axis="assurance"] button[data-analysis-action="open-review"]')?.textContent==='打开审阅' &&
         card.querySelectorAll('[data-analysis-unit]').length===${SAMPLE1_UNITS} && card.querySelector('[data-analysis-unit="2"][data-analysis-unit-state="gap"]')!==null &&
         card.querySelectorAll('[data-analysis-unit][data-analysis-unit-state="closed"]').length===${SAMPLE1_UNITS - 1} &&
         card.textContent.includes(${JSON.stringify(ASSURANCE_STATEMENT)}) && card.textContent.includes(${JSON.stringify(revision.revisionId)}) &&
@@ -1170,6 +1177,9 @@ async function main() {
     // layer of 梗概 carries no block identifier, digest or unit name; the technical layer, closed, still
     // carries every exact value the assertion above pins. It stays inside `result-set-revision`:
     // reading the settled revision's own surface is what that stage already is.
+    // Synchronized delta with Issue #417 (V2-UX-REV-011): the leads are listed in neither layer any more —
+    // 审阅's 情节逻辑与前后一致 makes each one a 批注 — and ②A keeps their counts: the card's
+    // data-conflict-count, the 可信程度 sentence, the technical assurance row, and a working 打开审阅.
     const leads = revision.assurance.unresolvedConflictCount + revision.assurance.crossUnitFindingCount;
     await assertRenderer(renderer, `(() => {
       const card=document.querySelector('.baseline-analysis-card');
@@ -1195,7 +1205,9 @@ async function main() {
         decision.querySelector('.analysis-synopsis')?.textContent===${JSON.stringify(revision.synthesis.synopsis)} &&
         !/blk_|[0-9a-f]{64}/u.test(decision.textContent) && !/单元|Revision|归约|reducer|摘要/u.test(axes.map((axis)=>axis.textContent).join('')) &&
         !decision.querySelector('.analysis-conflict-list, .analysis-unresolved-list, [data-analysis-conflict-kind]') &&
-        technical.querySelectorAll('[data-analysis-conflict-kind]').length===${revision.conflicts.length} &&
+        !technical.querySelector('.analysis-conflict-list, .analysis-unresolved-list, [data-analysis-conflict-kind]') &&
+        technical.textContent.includes(${JSON.stringify(`${revision.assurance.unresolvedConflictCount} 处未解决冲突 · ${revision.assurance.unresolvedItemCount} 项未解决事项`)}) &&
+        axes.find((axis)=>axis.dataset.analysisAxis==='assurance')?.querySelector('button[data-analysis-action="open-review"]')?.textContent==='打开审阅' &&
         technical.textContent.includes(${JSON.stringify(revision.digest)}) && technical.textContent.includes(${JSON.stringify(revision.coverageManifestDigest)}) &&
         card.querySelectorAll('[data-analysis-panel="chapters"] [data-analysis-unit] > h5').length===${SAMPLE1_UNITS} &&
         card.querySelector('[data-analysis-panel="chapters"] [data-analysis-unit="2"] .attention-note')?.textContent.startsWith('尚未分析：') &&
@@ -1220,40 +1232,31 @@ async function main() {
       return moved && document.activeElement===first && card.dataset.analysisTab==='synopsis';
     })()`, 'analysis-tabs-keyboard');
 
-    // V2-UX-LAYER-006 and 008 on the card's two provenance lists (#333). The Decision Layer reads an
-    // entity's provenance as its units and a block count and a conflict's as its kind in the editor's
-    // language, so no identifier wall interrupts either list; the exact ranges are still carried,
-    // unabridged, in the one disclosure each list closes with, and the reducer's token still rides on
-    // the entry where the record and every other assertion read it.
+    // V2-UX-LAYER-006 and 008 on the card's provenance lists (#333). The Decision Layer reads an entity's
+    // provenance as its units and a block count, so no identifier wall interrupts the list; the exact
+    // ranges are still carried, unabridged, in the one disclosure the list closes with. Synchronized
+    // delta with Issue #417 (V2-UX-REV-011): the conflict list this assertion also read is gone from ②A —
+    // each conflict is a lead 批注 of 审阅's 情节逻辑与前后一致 now, whose body names its kind in the
+    // same CONFLICT_KIND_LABELS words — so only the entity half remains here.
     const provenanceEntity = revision.synthesis.entities.find((entity) => entity.sourceRanges.length > 0);
     const provenanceBlockId = provenanceEntity?.sourceRanges[0]?.blockId;
     const provenanceUnits = [...new Set(provenanceEntity?.unitOrdinals ?? [])].sort((left, right) => left - right).join('、');
     const provenanceBlocks = new Set((provenanceEntity?.sourceRanges ?? []).map((range) => range.blockId)).size;
-    const conflictBlockId = revision.conflicts[0]?.sourceRanges[0]?.blockId;
-    requireJourney(provenanceEntity !== undefined && provenanceUnits.length > 0 && conflictBlockId !== undefined,
+    requireJourney(provenanceEntity !== undefined && provenanceUnits.length > 0 && revision.conflicts.length > 0,
       'provenance-projection', { entity: provenanceEntity, conflict: revision.conflicts[0] });
     await assertRenderer(renderer, `(() => {
       const card=document.querySelector('.baseline-analysis-card');
-      const labels=${JSON.stringify(CONFLICT_KIND_LABELS)};
       const entityList=card?.querySelector('[data-analysis-panel="entities"] .analysis-entity-list');
       const entity=Array.from(entityList?.children??[]).find((item)=>item.textContent.startsWith(${JSON.stringify(`${provenanceEntity.name}（`)}));
       const entityExact=entityList?.nextElementSibling;
-      const conflictList=card?.querySelector('.analysis-conflict-list');
-      const conflicts=Array.from(conflictList?.children??[]);
-      const conflictExact=conflictList?.nextElementSibling;
-      if(!(entity instanceof HTMLElement) || conflicts.length!==4) return false;
-      if(!(entityExact instanceof HTMLDetailsElement) || !(conflictExact instanceof HTMLDetailsElement)) return false;
+      if(!(entity instanceof HTMLElement) || !(entityExact instanceof HTMLDetailsElement)) return false;
       return entity.querySelector('span')?.textContent.trimEnd().endsWith(${JSON.stringify(`）· 来自单元 ${provenanceUnits} · ${provenanceBlocks} 个内容块`)}) &&
         !entity.textContent.includes('person') && entity.textContent.includes('（') &&
-        !entityList.textContent.includes('blk_') && !conflictList.textContent.includes('blk_') &&
-        conflictList.closest('details.analysis-revision-technical')?.open===false &&
-        !entityExact.open && !conflictExact.open &&
-        entityExact.querySelector('dl > dd.technical-identity')!==null && conflictExact.querySelector('dl > dd.technical-identity')!==null &&
-        entityExact.textContent.includes(${JSON.stringify(provenanceBlockId)}) && conflictExact.textContent.includes(${JSON.stringify(conflictBlockId)}) &&
-        conflicts.every((item)=>typeof labels[item.dataset.analysisConflictKind]==='string' &&
-          item.textContent.startsWith(labels[item.dataset.analysisConflictKind]) &&
-          !item.textContent.includes(item.dataset.analysisConflictKind));
-    })()`, 'analysis-provenance-and-conflict-label-surface');
+        !entityList.textContent.includes('blk_') && !entityExact.open &&
+        entityExact.querySelector('dl > dd.technical-identity')!==null &&
+        entityExact.textContent.includes(${JSON.stringify(provenanceBlockId)}) &&
+        !card.querySelector('.analysis-conflict-list, [data-analysis-conflict-kind]');
+    })()`, 'analysis-provenance-surface');
 
     // V2-UX-LAYER-005, asserted where the rule is hardest to keep: the settled result set is the
     // longest thing this workbench ever renders, and the workbench's own way out must survive it. The

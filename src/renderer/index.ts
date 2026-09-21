@@ -60,13 +60,11 @@ import {
   reviewOverviewLine,
 } from './review-labels.js';
 import {
-  ANALYSIS_CONFLICT_KIND_LABELS,
   ANALYSIS_ENTITY_KIND_LABELS,
   RUN_LIVENESS_STAGE_LABELS,
   RUN_REPORT_CLASSIFICATION_LABELS,
   RUN_REPORT_STAGE_LABELS,
   RUN_REPORT_STAGE_STATE_LABELS,
-  analysisBlockCountLabel,
   analysisFourSentences,
   analysisKindSubtitle,
   analysisProvenanceSummary,
@@ -2117,9 +2115,10 @@ function runReportOrReason(report: RunReportProjection | null, absentReason: str
  * The six reading tabs of one Result Set Revision (V2-UX-ANALYSIS-001, 004, 025). The decision layer
  * is the four sentences, the synopsis, the four lists and the chapters with what is still unread; the
  * units' technical names, lineage, digests, reducer stages, reuse counts and token usage wait one step
- * away. The revision's contradictions and open questions are not listed: they are the model-free leads
- * of 审阅's 情节逻辑与前后一致 (V2-UX-REV-011). Until that destination exists they stay reachable and
- * exact in the technical layer, so none disappears (V2-UX-LAYER-007).
+ * away. The revision's contradictions and open questions are not listed here, in either layer: they are
+ * the model-free leads of 审阅's 情节逻辑与前后一致 (V2-UX-REV-011), which turns each into a 批注 on the
+ * manuscript with its exact ranges as its basis. ②A keeps their counts — the card's `data-conflict-count`,
+ * the 可信程度 sentence and the technical assurance row — and the sentence's pointer opens 审阅.
  */
 function renderBaselineAnalysisOverview(
   card: HTMLElement,
@@ -2178,6 +2177,12 @@ function renderBaselineAnalysisOverview(
       const go = button(target === 'history' ? '去「历史与更新」' : '去「各章」', 'quiet', () => selectTab(target));
       go.dataset['analysisAction'] = `go-${target}`;
       section.append(go);
+    }
+    // 可信程度 points at 审阅's 情节逻辑与前后一致, where the leads it counts are handled (V2-UX-REV-011).
+    if (reading.axis === 'assurance') {
+      const review = button(REVIEW_ACTION_LABELS['open-review'], 'quiet', () => renderBookReview(projection.bookId, bookTitle));
+      review.dataset['analysisAction'] = 'open-review';
+      section.append(review);
     }
     sentences.append(section);
   }
@@ -2286,19 +2291,6 @@ function renderBaselineAnalysisOverview(
     item.dataset['analysisAdaptationClass'] = 'safe-retry';
     adaptations.append(item);
   }
-  const conflicts = element('ul', 'analysis-list analysis-conflict-list');
-  const conflictRanges: HTMLElement[] = [];
-  if (revision.conflicts.length === 0) conflicts.append(element('li', undefined, '无冲突'));
-  for (const conflict of revision.conflicts) {
-    const item = element('li');
-    const kindLabel = ANALYSIS_CONFLICT_KIND_LABELS[conflict.kind];
-    const unitList = conflict.unitOrdinals.join('、');
-    item.dataset['analysisConflictKind'] = conflict.kind;
-    item.append(element('span', undefined, `${kindLabel} · 单元 ${unitList} · ${conflict.description} · ${analysisBlockCountLabel(conflict.sourceRanges)} `));
-    if (conflict.sourceRanges[0] !== undefined) item.append(returnButton(conflict.sourceRanges[0].blockId));
-    conflicts.append(item);
-    conflictRanges.push(element('dt', undefined, `${kindLabel} · 单元 ${unitList}`), element('dd', 'technical-identity', analysisRanges(conflict.sourceRanges)));
-  }
   const technical = technicalDetails(
     'analysis-facts',
     element('dt', undefined, '分析契约'), element('dd', 'technical-identity', `${projection.kind} · ${revision.contractVersion}`),
@@ -2327,17 +2319,9 @@ function renderBaselineAnalysisOverview(
     ]),
   );
   technical.classList.add('analysis-revision-technical');
-  // The leads 审阅 will read, and the Run's in-envelope adjustments: exact, complete, and out of the
-  // decision layer. Each list keeps its own ranges in a disclosure of its own directly after it.
-  technical.append(
-    element('h5', undefined, `计划内调整 · ${adaptedUnits.length} 次`), adaptations,
-    element('h5', undefined, `前后不一致的线索 · ${revision.conflicts.length} 处（归入审阅 · 保持未解决）`), conflicts,
-  );
-  if (conflictRanges.length > 0) technical.append(technicalDetails('analysis-facts', ...conflictRanges));
-  const unresolved = element('ul', 'analysis-list analysis-unresolved-list');
-  if (revision.synthesis.unresolved.length === 0) unresolved.append(element('li', undefined, '无未决事项'));
-  for (const entry of revision.synthesis.unresolved) unresolved.append(element('li', undefined, `单元 ${entry.unitOrdinal} · ${entry.description} · ${analysisBlockCountLabel(entry.sourceRanges)}`));
-  technical.append(element('h5', undefined, `未决事项 · ${revision.synthesis.unresolved.length} 项（归入审阅）`), unresolved);
+  // The Run's in-envelope adjustments: exact, complete, and out of the decision layer. The leads are not
+  // listed here either — 审阅 carries each one as a 批注 with its exact ranges (V2-UX-REV-011).
+  technical.append(element('h5', undefined, `计划内调整 · ${adaptedUnits.length} 次`), adaptations);
   synopsis.append(technical);
 }
 
