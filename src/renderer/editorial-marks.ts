@@ -21,6 +21,7 @@ import {
   reverseApplyNote,
   selectionMenuReason,
 } from './editorial-mark-labels.js';
+import { applyOnce } from './manuscript-apply.js';
 
 /**
  * The Editorial Mark surface of the manuscript (Issue #407; editor-surfaces.md §1 标记系统 and 右键菜单;
@@ -795,9 +796,8 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
   }
 
   /**
-   * One manuscript write through AI7 Apply. The Effect identity is made here, once, before anything is
-   * sent: if the acknowledgement never arrives the same identity is asked about, never sent again as a
-   * new one, so a lost answer cannot become a second Apply (V2-UX-EAPP-006, EREC-004).
+   * One manuscript write through AI7 Apply, with its Effect identity made once and a lost acknowledgement
+   * recovered by that same identity (`applyOnce`, shared with 审阅's results).
    */
   async function writeManuscript(
     markId: string,
@@ -806,17 +806,19 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
   ): Promise<void> {
     if (destroyed || refuseWhileBusy()) return;
     working = true;
-    const clientEffectId = crypto.randomUUID();
-    const current = editor.currentWindow();
     try {
       options.setStatus('正在应用到稿件…', 'busy');
-      const result = await options.writeManuscript(() => run(clientEffectId), done);
-      if (result !== undefined) {
-        if (result.card !== null) showCard(result.card);
+      const applied = await applyOnce(
+        editor.currentWindow(),
+        (clientEffectId) => options.writeManuscript(() => run(clientEffectId), done),
+        (input) => api.getManuscriptApplyOutcome(input),
+      );
+      if (applied.acknowledged) {
+        if (applied.result.card !== null) showCard(applied.result.card);
         return;
       }
-      const outcome = await api.getManuscriptApplyOutcome({ manuscriptId: current.manuscriptId, branchId: current.branchId, clientEffectId });
-      if (outcome.state === 'committed') options.setStatus(`${done}写入结果已从记录确认。`, 'success');
+      if (applied.outcome === null) throw applied.outcomeFailure;
+      if (applied.outcome.state === 'committed') options.setStatus(`${done}写入结果已从记录确认。`, 'success');
       await openCard(markId);
     } catch (error) {
       options.setStatus(options.errorMessage(error, '无法确认这次应用的结果；请重新打开这条修改建议查看。'), 'error');
