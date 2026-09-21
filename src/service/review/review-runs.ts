@@ -1,7 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import {
+  MAX_REVIEW_FINDING_REASON_CHARACTERS,
   REVIEW_COVERAGE_STATE_LABELS,
+  REVIEW_FINDING_ID_PATTERN,
   REVIEW_FINDING_SEVERITY_LABELS,
   REVIEW_FINDING_STATUS_LABELS,
   REVIEW_SCOPE_KINDS,
@@ -322,9 +324,10 @@ const DISPOSITION_SCHEMA = 'ai7.review.finding-disposition/1' as const;
 const QUALITY_SIGNAL_SCHEMA = 'ai7.quality-signal/1' as const;
 /** The findings one projection carries; the counts always cover every finding (Appendix 1). */
 const MAX_PROJECTED_FINDINGS = 2_000;
-const MAX_REASON_CHARACTERS = 500;
+/** The request frame bounds the same reason and finding identity with these very constants (Stage C). */
+const MAX_REASON_CHARACTERS = MAX_REVIEW_FINDING_REASON_CHARACTERS;
 const MAX_CHAPTER_TITLE_GRAPHEMES = 40;
-const FINDING_ID_PATTERN = /^rvf_[0-9a-f]{24}$/u;
+const FINDING_ID_PATTERN = REVIEW_FINDING_ID_PATTERN;
 const NO_MANUSCRIPT_REASON = '这本书还没有稿件；导入稿件后才能审阅。' as const;
 const RUN_ACTIVE_REASON = '这本书有一次审阅正在进行；结束后才能新建审阅。' as const;
 const ORPHANED_RUN_DETAIL = '服务在这一类运行期间停止，运行已中断；已完成单元的结果与缺口保留在该类别的账本中。' as const;
@@ -923,6 +926,11 @@ export class ReviewRunStore {
     const snapshot = this.#run(reviewRunId);
     requireReview(snapshot.bookId === bookId, 'REVIEW_RUN_NOT_FOUND', '这次审阅不属于当前图书。');
     return snapshot;
+  }
+
+  /** The Book check alone, for a caller about to hand a Run to the Book-agnostic drive loop. */
+  requireRunOfBook(bookId: string, reviewRunId: string): void {
+    this.#runOfBook(bookId, reviewRunId);
   }
 
   #snapshotOf(row: SqlRow): RunSnapshot {

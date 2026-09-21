@@ -26,6 +26,8 @@ import type { DormantHarnessRuntime } from './runtime.js';
 import type { EditorialStore } from './store.js';
 import type { CooperativeJobOwner } from './cooperative-jobs.js';
 import type { BaselineAnalysisExecutionOwner } from './analysis/execution.js';
+import type { LaunchBinding } from './analysis/baseline-analysis-store.js';
+import type { ReviewRunDriver } from './review/review-run-driver.js';
 
 async function* readFrames(): AsyncGenerator<Uint8Array> {
   const header = Buffer.allocUnsafe(4);
@@ -96,11 +98,27 @@ async function writeResponse(response: ServiceResponse): Promise<void> {
   });
 }
 
+/**
+ * Hand an approved Review Run to its drive loop (Issue #417, B2). The loop runs on its own and records
+ * whatever each category comes to, so nothing awaits it here; only taking the Run can fail, at once,
+ * and that refusal is the operation's answer. A store refusal is already coded, and a fatal store error
+ * must reach the service's own handling unchanged.
+ */
+function driveReviewRun(reviewRuns: ReviewRunDriver, reviewRunId: string): void {
+  try {
+    void reviewRuns.drive(reviewRunId);
+  } catch (error) {
+    if (error instanceof StoreErrorClass || !(error instanceof Error && 'code' in error && typeof error.code === 'string')) throw error;
+    throw new StoreErrorClass(error.code, error.message.length > 0 ? error.message : '审阅未能开始。');
+  }
+}
+
 async function dispatch(
   store: EditorialStore,
   harness: DormantHarnessRuntime,
   jobs: CooperativeJobOwner,
   analysisExecution: BaselineAnalysisExecutionOwner,
+  reviewRuns: ReviewRunDriver,
   request: ServiceRequest,
   importControl: J01ImportControl | undefined,
   launchPolicy: LaunchPolicyProjection,
@@ -317,6 +335,74 @@ async function dispatch(
         ok: true,
         op: request.op,
         result: store.inspectBaselineAnalysis(request.input.bookId, analysisProgress),
+      };
+    }
+    // 审阅 (Issue #417, plan slice S69). Every answer that shows a Run reads the one owner's progress, so
+    // a category executing now carries its Measured Run Progress.
+    case 'inspectReviewWorkspace':
+      return {
+        id: request.id,
+        ok: true,
+        op: request.op,
+        result: store.inspectReviewWorkspace(request.input.bookId, request.input.reviewRunId, analysisProgress),
+      };
+    case 'prepareReviewRun':
+      return {
+        id: request.id,
+        ok: true,
+        op: request.op,
+        result: jobs.startReviewRunPreparation(request.input.bookId, request.input.categoryIds, request.input.scope, launchPolicy),
+      };
+    case 'authorizeReviewRun':
+      // The one approval, then the drive loop at once: an approved Run nobody drives reads `partial`, so
+      // the answer is read only after the loop has taken the Run and reads it `running`.
+      store.authorizeReviewRun(request.input.bookId, request.input.reviewRunId, request.input.planDigests);
+      driveReviewRun(reviewRuns, request.input.reviewRunId);
+      return {
+        id: request.id,
+        ok: true,
+        op: request.op,
+        result: store.inspectReviewWorkspace(request.input.bookId, request.input.reviewRunId, analysisProgress),
+      };
+    case 'continueReviewRun':
+      // 继续审阅. The loop is service-internal and knows no Book, so the Run is first required to be the
+      // route's Book's; the loop itself refuses a Run never approved or another Run of the Book in flight.
+      store.requireReviewRunOfBook(request.input.bookId, request.input.reviewRunId);
+      driveReviewRun(reviewRuns, request.input.reviewRunId);
+      return {
+        id: request.id,
+        ok: true,
+        op: request.op,
+        result: store.inspectReviewWorkspace(request.input.bookId, request.input.reviewRunId, analysisProgress),
+      };
+    case 'recordReviewFindingDisposition':
+      return {
+        id: request.id,
+        ok: true,
+        op: request.op,
+        result: store.recordReviewFindingDisposition(
+          request.input.bookId,
+          request.input.reviewRunId,
+          request.input.findingId,
+          request.input.reason,
+          analysisProgress,
+        ),
+      };
+    case 'generateReviewReport':
+      return {
+        id: request.id,
+        ok: true,
+        op: request.op,
+        result: store.generateReviewReport(request.input.bookId, request.input.reviewRunId, analysisProgress),
+      };
+    case 'inspectReviewFindingOfMark': {
+      // A mark of another Book answers exactly as a mark no Review Run produced.
+      const found = store.reviewFindingOfMark(request.input.markId);
+      return {
+        id: request.id,
+        ok: true,
+        op: request.op,
+        result: found !== null && found.bookId === request.input.bookId ? found : null,
       };
     }
     case 'listBooks':
@@ -723,6 +809,7 @@ async function run(): Promise<void> {
     { BaselineAnalysisExecutionOwner },
     { loadModelFixture },
     { createKeyringSecretResolver },
+    { ReviewRunDriver },
   ] =
     await Promise.all([
       import('./store.js'),
@@ -732,6 +819,7 @@ async function run(): Promise<void> {
       import('./analysis/execution.js'),
       import('./provider/model-fixture.js'),
       import('./provider/keyring-secret-resolver.js'),
+      import('./review/review-run-driver.js'),
     ]);
   StoreErrorClass = StoreError;
   let stopping = false;
@@ -751,6 +839,7 @@ async function run(): Promise<void> {
   let harness: DormantHarnessRuntime | undefined;
   let jobs: CooperativeJobOwner | undefined;
   let analysisExecution: BaselineAnalysisExecutionOwner | undefined;
+  let reviewRuns: ReviewRunDriver | undefined;
   try {
     const codeRoot = fileURLToPath(new URL('../', import.meta.url));
     const launchPolicy = await resolveSourceCheckoutLaunchPolicy(codeRoot, launchForm.trustedOperationalScope);
@@ -779,7 +868,7 @@ async function run(): Promise<void> {
     });
     // The ledger learns the trusted launch once, before any frame is served, so every plan it freezes
     // names the binding this launch actually bound rather than re-deriving one at dispatch.
-    store.baselineAnalysisLedger.bindLaunch(developerLive === null
+    const launch: LaunchBinding = developerLive === null
       ? { operationalScope: 'development-ci', live: null }
       : {
           operationalScope: 'developer-live',
@@ -791,7 +880,12 @@ async function run(): Promise<void> {
             credentialReference: DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE,
             runBudgetCeiling: developerLive.launch.runBudgetCeiling,
           },
-        });
+        };
+    store.baselineAnalysisLedger.bindLaunch(launch);
+    // 事实核查 is a Review Category executed on the factual kind's own ledger (Issue #417), which the one
+    // owner executes only under the launch it froze its plans for. The review-category ledgers are made
+    // when first asked for and take the baseline ledger's binding then, which is this one.
+    store.factualReviewLedger.bindLaunch(launch);
     harness = await mountDormantHarness();
     jobs = new CooperativeJobOwner(store);
     analysisExecution = new BaselineAnalysisExecutionOwner({
@@ -801,6 +895,8 @@ async function run(): Promise<void> {
       secretResolver: createKeyringSecretResolver(),
       developerLive,
     });
+    // A Review Run's categories take the one owner's single slot one after another.
+    reviewRuns = new ReviewRunDriver(store.reviewRunDriveSteps, analysisExecution);
     for await (const frame of readFrames()) {
       let request: ServiceRequest;
       try {
@@ -812,7 +908,7 @@ async function run(): Promise<void> {
       }
       let response: ServiceResponse;
       try {
-        response = await dispatch(store, harness, jobs, analysisExecution, request, importControl, launchPolicy);
+        response = await dispatch(store, harness, jobs, analysisExecution, reviewRuns, request, importControl, launchPolicy);
       } catch (error) {
         if (error instanceof StoreFatalError) {
           stop();
@@ -849,7 +945,11 @@ async function run(): Promise<void> {
     process.removeListener('SIGINT', stop);
     try {
       jobs?.dispose();
+      // The Review Run loop stops first and starts no further category; the owner then interrupts the
+      // Run in flight, and the loop records what that Run came to before the store closes.
+      const reviewRunsStopped = reviewRuns?.dispose();
       await analysisExecution?.dispose();
+      await reviewRunsStopped;
       await harness?.dispose();
     } finally {
       store?.close();

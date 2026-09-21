@@ -1,4 +1,4 @@
-export const SERVICE_PROTOCOL_VERSION = 33 as const;
+export const SERVICE_PROTOCOL_VERSION = 34 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -3616,9 +3616,25 @@ export interface ReviewWorkspaceProjection {
   run: ReviewRunProjection | null;
 }
 
-/** The inputs Stage C's operations will carry; the Book is always the route's, never the renderer's. */
+/**
+ * The most categories one Review Run request names: the built-in configuration's nine. It bounds a
+ * request frame only — which categories exist is configuration — so a house configuration with more
+ * categories raises it together with its own.
+ */
+export const MAX_REVIEW_RUN_CATEGORIES = 9;
+/** 忽略并说明's reason, in characters once trimmed; a blank one is no reason (V2-UX-REV-004). */
+export const MAX_REVIEW_FINDING_REASON_CHARACTERS = 500;
+/** A finding of a Review Run: `rvf_` and 24 hex digits, content-derived from the Run, the category and the kind-level finding. */
+export const REVIEW_FINDING_ID_PATTERN = /^rvf_[0-9a-f]{24}$/u;
+
+/**
+ * The inputs of the 审阅 operations (Issue #417, plan slice S69, Stage C). The Book is always the
+ * route's, never the renderer's: every renderer member takes the input without `bookId`, and the main
+ * process supplies the Book its window is showing.
+ */
 export interface InspectReviewWorkspaceInput {
   bookId: string;
+  /** The Review Run to open; `null` opens the latest. */
   reviewRunId: string | null;
 }
 
@@ -3631,7 +3647,14 @@ export interface PrepareReviewRunInput {
 export interface AuthorizeReviewRunInput {
   bookId: string;
   reviewRunId: string;
+  /** The exact plan digest of every Task-backed category of the Run; none for a Run of the leads alone. */
   planDigests: ReadonlyArray<{ categoryId: string; planEnvelopeDigest: string }>;
+}
+
+/** 继续审阅: drive again a Run that stopped with categories never finished (after a restart). */
+export interface ContinueReviewRunInput {
+  bookId: string;
+  reviewRunId: string;
 }
 
 export interface RecordReviewFindingDispositionInput {
@@ -3645,6 +3668,33 @@ export interface RecordReviewFindingDispositionInput {
 export interface GenerateReviewReportInput {
   bookId: string;
   reviewRunId: string;
+}
+
+/** 查看任务 on a Mark Card: which Review Run a produced mark came from, asked within the route's Book. */
+export interface InspectReviewFindingOfMarkInput {
+  bookId: string;
+  markId: string;
+}
+
+/**
+ * The renderer's form of the mark lookup: the manuscript and branch the Mark Card was opened on are the
+ * capability its window holds, and the main process asks within that capability's Book.
+ */
+export interface InspectReviewFindingOfMarkRendererInput {
+  manuscriptId: string;
+  branchId: string;
+  markId: string;
+}
+
+/**
+ * The Review Run and finding a `review-category` mark belongs to — the latest Run naming it — so 查看任务
+ * opens that Run with `inspectReviewWorkspace`. The lookup answers `null` for any other mark, and for a
+ * mark of another Book.
+ */
+export interface ReviewFindingOfMarkProjection {
+  bookId: string;
+  reviewRunId: string;
+  findingId: string;
 }
 
 /** Every analysis projection, discriminated on `kind`. */
@@ -3928,12 +3978,17 @@ export interface DurableHistoryProjection {
 
 export interface ServiceJobProjection {
   jobId: string;
+  /**
+   * `review-run-preparation` prepares a Review Run: each selected Task-backed category's plan, one per
+   * step, then the Run itself; `progress` counts the categories' plans plus the Run, and the completed
+   * job's result is the 审阅 workspace with the prepared Run open.
+   */
   kind: 'search' | 'replacement' | 'reimport-preparation' | 'reimport-resolution' | 'reimport-commit' |
-    'task-authorization-preparation' | 'baseline-analysis-preparation';
+    'task-authorization-preparation' | 'baseline-analysis-preparation' | 'review-run-preparation';
   state: 'queued' | 'running' | 'completed' | 'cancelled' | 'failed';
   progress: { completed: number; total: number; label: string };
   result: SearchSummaryProjection | ReplacementPreviewProjection | ReviewBeforeManuscriptReimportProjection |
-    ManuscriptReimportCommitProjection | TaskAuthorizationProjection | BaselineAnalysisProjection | null;
+    ManuscriptReimportCommitProjection | TaskAuthorizationProjection | BaselineAnalysisProjection | ReviewWorkspaceProjection | null;
   failure: null | { code: string; message: string };
 }
 
@@ -4236,6 +4291,19 @@ export interface ServiceOperationMap {
     input: { bookId: string; taskIntentId: string; planEnvelopeDigest: string };
     output: BaselineAnalysisProjection;
   };
+  /**
+   * 审阅 (Issue #417, plan slice S69). The workspace is one read; preparing a Review Run is a
+   * cooperative job; the one approval records the Run's authorization and starts its drive loop at once,
+   * so the answer already reads the Run `running`; 继续审阅 drives a stopped Run again. A finding's
+   * decisions other than 忽略并说明 go through the mark and Apply operations with the finding's `markId`.
+   */
+  inspectReviewWorkspace: { input: InspectReviewWorkspaceInput; output: ReviewWorkspaceProjection };
+  prepareReviewRun: { input: PrepareReviewRunInput; output: ServiceJobProjection };
+  authorizeReviewRun: { input: AuthorizeReviewRunInput; output: ReviewWorkspaceProjection };
+  continueReviewRun: { input: ContinueReviewRunInput; output: ReviewWorkspaceProjection };
+  recordReviewFindingDisposition: { input: RecordReviewFindingDispositionInput; output: ReviewWorkspaceProjection };
+  generateReviewReport: { input: GenerateReviewReportInput; output: ReviewWorkspaceProjection };
+  inspectReviewFindingOfMark: { input: InspectReviewFindingOfMarkInput; output: ReviewFindingOfMarkProjection | null };
   listBooks: {
     input: { after: BookSummaryCursor | null };
     output: BookSummaryPageProjection;

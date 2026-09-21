@@ -3395,25 +3395,43 @@ export class EditorialStore {
     });
   }
 
-  /** 忽略并说明: the disposition, its Quality Signal, and the finding's mark set aside, in one transaction (REV-004). */
-  recordReviewFindingDisposition(bookId: string, reviewRunId: string, findingId: string, reason: string): ReviewWorkspaceProjection {
+  /**
+   * 忽略并说明: the disposition, its Quality Signal, and the finding's mark set aside, in one transaction
+   * (REV-004). A finished category is actionable while the Run goes on (REV-008), so the answer takes the
+   * owner's `progress` reader exactly as the inspection does.
+   */
+  recordReviewFindingDisposition(
+    bookId: string,
+    reviewRunId: string,
+    findingId: string,
+    reason: string,
+    progress?: ProgressReader,
+  ): ReviewWorkspaceProjection {
     return this.#reviewCall(() => {
       this.#reviewRuns.ignoreFinding(bookId, reviewRunId, findingId, reason);
-      return this.#reviewRuns.workspace(bookId, reviewRunId);
+      return this.#reviewRuns.workspace(bookId, reviewRunId, progress);
     });
   }
 
   /** The next version of the Run's 审阅报告 (REV-009). */
-  generateReviewReport(bookId: string, reviewRunId: string): ReviewWorkspaceProjection {
+  generateReviewReport(bookId: string, reviewRunId: string, progress?: ProgressReader): ReviewWorkspaceProjection {
     return this.#reviewCall(() => {
       this.#reviewRuns.generateReport(bookId, reviewRunId);
-      return this.#reviewRuns.workspace(bookId, reviewRunId);
+      return this.#reviewRuns.workspace(bookId, reviewRunId, progress);
     });
   }
 
   /** The Review Run and finding a produced mark belongs to, for the Mark Card's `查看任务`; `null` for any other mark. */
   reviewFindingOfMark(markId: string): { bookId: string; reviewRunId: string; findingId: string } | null {
     return this.#reviewCall(() => this.#reviewRuns.findingOfMark(markId));
+  }
+
+  /**
+   * Refuses a Review Run that is not this Book's. The drive loop is service-internal and knows no Book,
+   * so an operation that hands it a Run the renderer named — 继续审阅 — asks this first.
+   */
+  requireReviewRunOfBook(bookId: string, reviewRunId: string): void {
+    this.#reviewCall(() => this.#reviewRuns.requireRunOfBook(bookId, reviewRunId));
   }
 
   /**

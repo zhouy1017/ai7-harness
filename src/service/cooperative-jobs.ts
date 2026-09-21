@@ -165,6 +165,45 @@ export class CooperativeJobOwner {
     return structuredClone(job.projection);
   }
 
+  /**
+   * 先看计划 of 审阅 (Issue #417): one Review Run's preparation, each selected Task-backed category's plan
+   * one step at a time and then the Run. A selection the store refuses outright fails here, before any
+   * job exists; a Run of the leads alone is written by the first step and completes at once.
+   */
+  startReviewRunPreparation(
+    bookId: Parameters<EditorialStore['createReviewRunPreparationWork']>[0],
+    categoryIds: Parameters<EditorialStore['createReviewRunPreparationWork']>[1],
+    scope: Parameters<EditorialStore['createReviewRunPreparationWork']>[2],
+    launchPolicy: Parameters<EditorialStore['createReviewRunPreparationWork']>[3],
+  ): ServiceJobProjection {
+    this.#requireCapacity();
+    const work = this.#store.createReviewRunPreparationWork(bookId, categoryIds, scope, launchPolicy);
+    const jobId = randomUUID();
+    const job: JobRecord = {
+      subjectId: work.workId ?? bookId,
+      cancelRequested: false,
+      scheduled: false,
+      projection: {
+        jobId,
+        kind: 'review-run-preparation',
+        state: work.done ? 'completed' : 'queued',
+        progress: {
+          completed: work.done ? work.total : 0,
+          total: work.total,
+          label: work.done ? '审阅计划准备完成' : '正在逐类准备审阅计划…',
+        },
+        result: work.projection,
+        failure: null,
+      },
+    };
+    if (work.done) this.#rememberPolledTerminal(jobId, job);
+    else {
+      this.#jobs.set(jobId, job);
+      this.#schedule(job);
+    }
+    return structuredClone(job.projection);
+  }
+
   startReimportResolution(
     draftId: string,
     expectedDraftVersion: number,
@@ -272,7 +311,7 @@ export class CooperativeJobOwner {
       }
     } else if ((job.projection.kind === 'reimport-preparation' || job.projection.kind === 'reimport-resolution' ||
       job.projection.kind === 'task-authorization-preparation' || job.projection.kind === 'baseline-analysis-preparation' ||
-      job.projection.kind === 'reimport-commit') &&
+      job.projection.kind === 'review-run-preparation' || job.projection.kind === 'reimport-commit') &&
       (job.projection.state === 'queued' || job.projection.state === 'running')) {
       job.cancelRequested = true;
       if (job.projection.kind === 'reimport-preparation') {
@@ -281,6 +320,8 @@ export class CooperativeJobOwner {
         this.#store.cancelTaskAuthorizationPreparationWork(job.subjectId);
       } else if (job.projection.kind === 'baseline-analysis-preparation') {
         this.#store.cancelBaselineAnalysisPreparationWork(job.subjectId);
+      } else if (job.projection.kind === 'review-run-preparation') {
+        this.#store.cancelReviewRunPreparationWork(job.subjectId);
       } else if (job.projection.kind === 'reimport-resolution') {
         this.#store.cancelReimportResolutionWork(job.subjectId);
       } else {
@@ -299,6 +340,8 @@ export class CooperativeJobOwner {
               ? '任务授权计划准备已取消'
             : job.projection.kind === 'baseline-analysis-preparation'
               ? '基线稿件分析计划准备已取消'
+            : job.projection.kind === 'review-run-preparation'
+              ? '审阅计划准备已取消'
             : job.projection.kind === 'reimport-resolution'
               ? '结构身份解决已取消'
               : '重新导入提交已取消',
@@ -330,6 +373,8 @@ export class CooperativeJobOwner {
           this.#store.cancelTaskAuthorizationPreparationWork(job.subjectId);
         } else if (job.projection.kind === 'baseline-analysis-preparation') {
           this.#store.cancelBaselineAnalysisPreparationWork(job.subjectId);
+        } else if (job.projection.kind === 'review-run-preparation') {
+          this.#store.cancelReviewRunPreparationWork(job.subjectId);
         } else if (job.projection.kind === 'reimport-resolution') {
           this.#store.cancelReimportResolutionWork(job.subjectId);
         } else {
@@ -419,6 +464,21 @@ export class CooperativeJobOwner {
         if (!progress.done) this.#schedule(job, REIMPORT_BATCH_YIELD_MS);
         return;
       }
+      if (job.projection.kind === 'review-run-preparation') {
+        const progress = this.#store.advanceReviewRunPreparationWork(job.subjectId);
+        job.projection = {
+          ...job.projection,
+          state: progress.done ? 'completed' : 'running',
+          progress: {
+            completed: progress.completed,
+            total: progress.total,
+            label: progress.done ? '审阅计划准备完成' : '正在逐类准备审阅计划…',
+          },
+          result: progress.projection,
+        };
+        if (!progress.done) this.#schedule(job, REIMPORT_BATCH_YIELD_MS);
+        return;
+      }
       if (job.projection.kind === 'reimport-resolution') {
         const progress = this.#store.advanceReimportResolutionWork(job.subjectId);
         job.projection = {
@@ -481,6 +541,8 @@ export class CooperativeJobOwner {
         this.#store.cancelTaskAuthorizationPreparationWork(job.subjectId);
       } else if (job.projection.kind === 'baseline-analysis-preparation') {
         this.#store.cancelBaselineAnalysisPreparationWork(job.subjectId);
+      } else if (job.projection.kind === 'review-run-preparation') {
+        this.#store.cancelReviewRunPreparationWork(job.subjectId);
       } else if (job.projection.kind === 'reimport-resolution') {
         this.#store.cancelReimportResolutionWork(job.subjectId);
       } else {

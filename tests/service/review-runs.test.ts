@@ -4,6 +4,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
+import { CooperativeJobOwner } from '../../src/service/cooperative-jobs.js';
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { BaselineAnalysisExecutionOwner } from '../../src/service/analysis/execution.js';
 import type { BaselineAnalysisStore } from '../../src/service/analysis/baseline-analysis-store.js';
@@ -22,10 +23,12 @@ import {
 } from '../../src/service/review/review-scope.js';
 import {
   BASELINE_ANALYSIS_TASK_GOAL,
+  MAX_FRAME_BYTES,
   type LaunchPolicyProjection,
   type ReviewRunProjection,
   type ReviewRunScopeRequest,
   type ReviewWorkspaceProjection,
+  type ServiceJobProjection,
 } from '../../src/shared/protocol.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { LITERARY_EXPRESSION, STYLE_AND_FORMAT, TYPOS_AND_USAGE } from '../support/review-categories.js';
@@ -755,6 +758,96 @@ describe('a Review Run over the real store on exact sample1', () => {
       expect(after.categories.find((category) => category.categoryId === FACTUAL)).toMatchObject({ available: false, unavailableReason: FACTUAL_AGAIN_REASON });
       expect(after.coverage.find((row) => row.categoryId === FACTUAL)!.state).toBe('current');
       expect(storeCode(() => session.store.createReviewRunPreparationWork(book.bookId, [FACTUAL], WHOLE, launchPolicy))).toBe('REVIEW_CATEGORY_UNAVAILABLE');
+    });
+  }, 300_000);
+});
+
+/** The job owner polled as the renderer polls it through `pollServiceJob`, until the job ends. */
+async function settleJob(jobs: CooperativeJobOwner, started: ServiceJobProjection): Promise<ServiceJobProjection[]> {
+  const trail = [started];
+  let job = started;
+  while (job.state === 'queued' || job.state === 'running') {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    job = jobs.poll(job.jobId);
+    trail.push(job);
+  }
+  return trail;
+}
+
+/** What a projection weighs as the service's response frame carries it. */
+function wireBytes(value: unknown): number {
+  return Buffer.byteLength(JSON.stringify(value), 'utf8');
+}
+
+// Stage C (Issue #417): the service entry's dispatch is not importable, so these cases drive exactly what
+// it calls — the cooperative job owner for 先看计划, the approval followed at once by the drive loop, the
+// Book check before 继续审阅, and the mark lookup behind 查看任务.
+describe('the 审阅 operations as the service entry dispatches them', () => {
+  it('prepares a Review Run as a cooperative service job, cancels one without writing a Run, and completes a Run of the leads alone at once', async () => {
+    await withBook('sample1-review-authored', async (session, book) => {
+      const jobs = new CooperativeJobOwner(session.store);
+      try {
+        // A selection the store refuses fails at once, before any job exists.
+        expect(storeCode(() => jobs.startReviewRunPreparation(book.bookId, ['series-consistency'], WHOLE, launchPolicy))).toBe('REVIEW_CATEGORY_UNAVAILABLE');
+
+        // Cancelled while queued: the store abandons the preparation, so the Book can be prepared again.
+        const cancelled = jobs.startReviewRunPreparation(book.bookId, [TYPOS, STYLE], WHOLE, launchPolicy);
+        expect(cancelled).toMatchObject({ kind: 'review-run-preparation', state: 'queued', progress: { completed: 0, total: 3 }, result: null, failure: null });
+        expect(jobs.cancel(cancelled.jobId)).toMatchObject({ state: 'cancelled', result: null, progress: { label: '审阅计划准备已取消' } });
+        expect(workspace(session, book).runs).toEqual([]);
+
+        // One category's plan per step, then the Run; the progress never goes back and ends at its total.
+        const trail = await settleJob(jobs, jobs.startReviewRunPreparation(book.bookId, [TYPOS, STYLE], WHOLE, launchPolicy));
+        const completed = trail.map((job) => job.progress.completed);
+        expect(trail.every((job) => job.kind === 'review-run-preparation' && job.progress.total === 3)).toBe(true);
+        expect(completed).toEqual([...completed].sort((left, right) => left - right));
+        const done = trail.at(-1)!;
+        expect(done).toMatchObject({ state: 'completed', progress: { completed: 3, total: 3, label: '审阅计划准备完成' }, failure: null });
+        const prepared = done.result as ReviewWorkspaceProjection;
+        expect(prepared.bookId).toBe(book.bookId);
+        expect(prepared.run).toMatchObject({ ordinal: 1, state: 'prepared' });
+        expect(prepared.run!.categories.map((category) => category.categoryId)).toEqual([TYPOS, STYLE]);
+        // The completed job carries the workspace across the service boundary in one frame.
+        expect(wireBytes(done)).toBeLessThan(MAX_FRAME_BYTES);
+
+        // The leads need no plan: their Run is written by the first step, and the job is complete at once.
+        await runBaseline(session, book);
+        const leads = jobs.startReviewRunPreparation(book.bookId, [PLOT], WHOLE, launchPolicy);
+        expect(leads).toMatchObject({ kind: 'review-run-preparation', state: 'completed', progress: { completed: 1, total: 1, label: '审阅计划准备完成' } });
+        expect((leads.result as ReviewWorkspaceProjection).run).toMatchObject({ ordinal: 2, state: 'prepared', categories: [{ categoryId: PLOT, planEnvelopeDigest: null }] });
+      } finally {
+        jobs.dispose();
+      }
+    });
+  }, 300_000);
+
+  it('drives an approved Run before it answers, continues only a Run of the route\'s Book, and finds the Run a produced mark came from', async () => {
+    await withBook('sample1-review-authored', async (session, book) => {
+      const prepared = prepare(session, book, [TYPOS], WHOLE);
+      // Approved and not yet driven, a Run reads partial: the answer is read only once the loop has taken it.
+      session.store.authorizeReviewRun(book.bookId, prepared.reviewRunId, approvals(prepared));
+      expect(workspace(session, book, prepared.reviewRunId).run).toMatchObject({ state: 'partial', canContinue: true });
+      const loop = session.driver.drive(prepared.reviewRunId);
+      expect(workspace(session, book, prepared.reviewRunId).run).toMatchObject({ state: 'running', canContinue: false });
+      await loop;
+
+      // 继续审阅 asks within the route's Book first: the loop itself knows no Book.
+      const creation = session.store.prepareBookCreation('另一本书', null);
+      const otherBookId = session.store.commitBookCreation({ ...creation.proposed, reviewDigest: creation.reviewDigest }).overview.book.bookId;
+      expect(storeCode(() => session.store.requireReviewRunOfBook(otherBookId, prepared.reviewRunId))).toBe('REVIEW_RUN_NOT_FOUND');
+      expect(storeCode(() => session.store.requireReviewRunOfBook(book.bookId, randomUUID()))).toBe('REVIEW_RUN_NOT_FOUND');
+      expect(storeCode(() => session.store.requireReviewRunOfBook(book.bookId, prepared.reviewRunId))).toBe('no-error');
+
+      const settled = workspace(session, book, prepared.reviewRunId).run!;
+      expect(settled.state).toBe('settled');
+      expect(settled.findings.length).toBeGreaterThan(0);
+      // 查看任务: every produced mark names its Run and finding; a mark no Review Run made names none.
+      for (const finding of settled.findings) {
+        expect(session.store.reviewFindingOfMark(finding.markId!)).toEqual({ bookId: book.bookId, reviewRunId: prepared.reviewRunId, findingId: finding.findingId });
+      }
+      expect(session.store.reviewFindingOfMark(randomUUID())).toBeNull();
+      // The settled workspace crosses the service boundary in one frame.
+      expect(wireBytes(workspace(session, book, prepared.reviewRunId))).toBeLessThan(MAX_FRAME_BYTES);
     });
   }, 300_000);
 });
