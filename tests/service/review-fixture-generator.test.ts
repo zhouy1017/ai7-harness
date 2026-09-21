@@ -35,6 +35,9 @@ import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissing
 
 const FIXTURE_PATH = resolve(fileURLToPath(new URL('../fixtures/model/', import.meta.url)), 'sample1-review-authored.json');
 const J04_EDIT_SUFFIX = '，J-04 结果集形成后的确认编辑';
+// J-04 appends a second sentence to the same block before it opens 审阅, so the Review Run it starts
+// reads unit 1 with both (Issue #417).
+const J04_SECOND_EDIT_SUFFIX = '，J-04 计划版本形成后的确认编辑';
 const ZERO = '一九九○年代';
 
 const NOTE_ZERO = '汉字数字中的零应写作“〇”，不用圆圈符号“○”。';
@@ -260,14 +263,14 @@ async function run(
   return { settled, ...harvest(categoryIndex, definition, settled, label) };
 }
 
-function appendToFirstBlock(store: EditorialStore, manuscriptId: string, branchId: string): void {
+function appendToFirstBlock(store: EditorialStore, manuscriptId: string, branchId: string, suffix = J04_EDIT_SUFFIX): void {
   const window = store.getManuscriptWindow(manuscriptId, branchId, null);
   const block = window.blocks[0]!;
   const graphemes = store.baselineAnalysisLedger.readWorkingBlocks(branchId).find((entry) => entry.blockId === block.blockId)!.graphemes;
   store.flushJournalEdit({
     clientEditId: randomUUID(), manuscriptId, branchId, baseRevisionId: window.revisionId, blockId: block.blockId,
     windowStartBlockId: block.blockId, baseBlockDigest: block.digest, expectedJournalSequence: window.journalSequence,
-    fromGrapheme: graphemes, toGrapheme: graphemes, insertText: J04_EDIT_SUFFIX,
+    fromGrapheme: graphemes, toGrapheme: graphemes, insertText: suffix,
   });
 }
 
@@ -308,6 +311,15 @@ async function pass(): Promise<boolean> {
     note((await run(context, 'style-and-format', { mode: 'review-first', selectedRange: null }, 'a-first', 'a')).closed);
     note((await run(context, 'style-and-format', { mode: 'review-again', selectedRange: null }, 'f-again', 'a')).closed);
     note((await run(context, 'literary-expression', { mode: 'review-first', selectedRange: null }, 'a-first', 'a')).closed);
+  });
+  // S4: J-04's end state — both of its edits in the first block — reviewed whole by every category, as
+  // the Review Run J-04 opens in 审阅 does. Units 2 to 8 are unchanged, so only unit 1 is new.
+  await withBook(async (context) => {
+    appendToFirstBlock(context.store, context.manuscriptId, context.branchId);
+    appendToFirstBlock(context.store, context.manuscriptId, context.branchId, J04_SECOND_EDIT_SUFFIX);
+    for (const categoryId of ['typos-and-usage', 'style-and-format', 'literary-expression']) {
+      note((await run(context, categoryId, { mode: 'review-first', selectedRange: null }, 'g-j04-end', 'j')).closed);
+    }
   });
   return allClosed;
 }
