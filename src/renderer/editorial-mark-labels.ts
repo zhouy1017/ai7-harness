@@ -22,6 +22,7 @@ export const HIGHLIGHT_COLOR_LABELS: Readonly<Record<PersonalHighlightColor, str
 
 /** The optional reason chips of V2-UX-PDEC-009; none is ever preselected, and 自行输入 stands beside them. */
 export const DECISION_REASON_CHIPS: Readonly<Record<ProposalItemDisposition, ReadonlyArray<string>>> = {
+  accepted: ['语言更准确', '保持作者风格'],
   rejected: ['证据不足', '方向不合适', '保持作者风格'],
   'accepted-with-edit': ['语言更准确', '保持作者风格'],
 };
@@ -43,6 +44,8 @@ export function markSourceLine(card: Pick<EditorialMarkCardProjection, 'source' 
 export function markStateLabel(card: Pick<EditorialMarkCardProjection, 'kind' | 'status' | 'anchorState' | 'suggestion'>): string {
   const drifted = card.anchorState === 'exact' ? '' : ' · 原文已变';
   if (card.kind === 'change-suggestion') {
+    // 已应用 is the state of a verified Effect Receipt, never of a decision alone (V2-UX-EAPP-011).
+    if (card.status === 'applied') return card.anchorState === 'exact' ? '已应用' : '已应用 · 之后又改过';
     const disposition = card.suggestion?.decision?.disposition;
     if (disposition === 'rejected') return `已拒绝${drifted}`;
     if (disposition === 'accepted-with-edit') return `已记录 · 尚未写入稿件${drifted}`;

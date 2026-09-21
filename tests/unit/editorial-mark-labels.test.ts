@@ -22,6 +22,7 @@ function suggestionState(disposition: 'rejected' | 'accepted-with-edit' | null):
       proposedText: '改后',
       rationale: '',
       atomicGroupId: null,
+      application: null,
       decision: disposition === null ? null : {
         decisionId: 'decision', disposition, editedText: disposition === 'rejected' ? null : '改后二', reason: null, reasonSource: null, recordedAt: '2026-09-21T00:00:00.000Z',
       },
@@ -52,6 +53,8 @@ describe('the wording of the Mark surface', () => {
     expect(markStateLabel(suggestionState('rejected'))).toBe('已拒绝');
     expect(markStateLabel(suggestionState('accepted-with-edit'))).toBe('已记录 · 尚未写入稿件');
     expect(markStateLabel({ ...suggestionState(null), anchorState: 'drifted' })).toBe('待你处理 · 原文已变');
+    expect(markStateLabel({ ...suggestionState(null), status: 'applied' })).toBe('已应用');
+    expect(markStateLabel({ ...suggestionState(null), status: 'applied', anchorState: 'drifted' })).toBe('已应用 · 之后又改过');
     expect(markStateLabel({ kind: 'annotation', status: 'resolved', anchorState: 'exact', suggestion: null })).toBe('已处理');
     expect(markStateLabel({ kind: 'editor-note', status: 'open', anchorState: 'exact', suggestion: null })).toBe('仅自己可见');
   });

@@ -344,6 +344,7 @@ legend { margin-bottom: .7rem; font-weight: 800; }
 .ProseMirror .editorial-mark-personal-highlight[data-mark-color="2"] { background: var(--mark-highlight-2); }
 .ProseMirror .editorial-mark-personal-highlight[data-mark-color="3"] { background: var(--mark-highlight-3); }
 .ProseMirror .editorial-mark[data-mark-status="resolved"] { background: transparent; border-bottom-style: dashed; }
+.ProseMirror .editorial-mark[data-mark-status="applied"] { background: transparent; border-bottom: 1px dotted var(--mark-suggestion); }
 .ProseMirror .editorial-mark[data-mark-anchor="drifted"] { background: transparent; border-bottom-style: dashed; border-bottom-width: 2px; }
 .ProseMirror .editorial-mark-active { outline: 2px solid #416458; outline-offset: 1px; }
 .ProseMirror .editorial-mark-previewed { text-decoration: line-through; text-decoration-color: var(--mark-suggestion); color: #7b7f76; }
@@ -391,6 +392,9 @@ legend { margin-bottom: .7rem; font-weight: 800; }
 .editorial-mark-unavailable { display: inline-flex; flex-direction: column; align-items: flex-start; gap: .15rem; max-width: 18rem; }
 .editorial-mark-basis, .editorial-mark-replies { margin: .25rem 0; padding-left: 1.2rem; }
 .editorial-mark-basis-quote { margin-left: .4rem; color: #4b5148; }
+.editorial-mark-receipt { margin: .4rem 0; }
+.editorial-mark-receipt summary { cursor: pointer; font-weight: 700; }
+.editorial-mark-receipt dd { margin: 0 0 .3rem; overflow-wrap: anywhere; font-size: .82rem; }
 .editorial-mark-card .technical-details { margin-top: .8rem; }
 .editorial-mark-card .technical-details dd { overflow-wrap: anywhere; }
 .window-actions { position: sticky; bottom: 0; display: grid; grid-template-columns: auto auto minmax(100px, 1fr) auto; align-items: center; gap: .7rem; padding: .7rem 1rem; border-top: 1px solid #ddd8cc; background: rgba(250, 248, 241, .97); }

@@ -6302,6 +6302,19 @@ function renderEditorWindow(
     editor,
     api: window.ai7,
     busy: () => authoritativeMutationBusy() || serviceJobBusy(),
+    // An Apply is an authoritative write like a replacement or an undo: the window is reloaded from the
+    // service and must show exactly the manuscript state the Effect Receipt names.
+    writeManuscript: async (operation, done) => {
+      const written = await runAuthoritativeMutation(async () => {
+        const result = await operation();
+        return { ...result, ...result.application.after, completionLabel: done };
+      }, async () => {
+        await invalidateSearchIfStale('稿件已由应用写入；先前搜索结果和返回位置已失效。');
+        await loadOutline(null, true);
+      });
+      if (written) setStatus(done, 'success');
+      return written;
+    },
     setStatus,
     errorMessage: rendererErrorMessage,
   });
