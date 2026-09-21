@@ -43,7 +43,10 @@ const ANALYSIS_ACTIONS = ['return-to-range', 'sync-current', 'reanalyze-range', 
 // Synchronized delta with Issue #408: the renderer now carries exactly one Apply surface — AI7 Apply for
 // a Change Suggestion on the manuscript — and the analysis still gains none. Anything else named like an
 // execution, effect, apply or export member remains a failure here.
-const CHANGE_SUGGESTION_APPLY_MEMBERS = ['applyChangeSuggestion', 'getManuscriptApplyOutcome'];
+// Synchronized delta with Issue #417: the batch confirmation strip of 审阅's results gives the batch
+// Apply its renderer member, `applyChangeSuggestionBatch` — 确认应用 over exactly the suggestions the
+// strip listed, one Effect, all or none. It is the same Apply surface, so it joins this allow-list.
+const CHANGE_SUGGESTION_APPLY_MEMBERS = ['applyChangeSuggestion', 'applyChangeSuggestionBatch', 'getManuscriptApplyOutcome'];
 // Synchronized delta with Issue #417: 审阅's seven members. None is named like an execution, effect,
 // apply or export member, so the two pins below hold them without an exception.
 const REVIEW_MEMBERS = ['inspectReviewWorkspace', 'prepareReviewRun', 'authorizeReviewRun', 'continueReviewRun',

@@ -19,6 +19,7 @@ import {
   J04_MODEL_ADAPTER_CONTROL_PATTERN,
   MAIN_EVENTS,
   PROVIDER_CACHE_ROOT_ARGUMENT,
+  REVIEW_FINDING_PAGE_KEYS,
   RUN_BUDGET_CEILING_ARGUMENT,
   TRUSTED_SCOPE_ARGUMENT,
   parseTrustedLaunchForm,
@@ -44,6 +45,7 @@ import {
   type RendererCallResult,
   type ResolvedBookWorkbenchRoute,
   type ReviewBeforeManuscriptReimportProjection,
+  type ReviewFindingPageRequest,
   type ReviewWorkspaceProjection,
   type ServiceJobProjection,
   type ServiceOperationMap,
@@ -1683,6 +1685,22 @@ function registerRendererHandlers(
       });
     }),
   );
+  // 确认应用 on 审阅's batch confirmation strip (Issue #417): the same gate as one Apply — the window's
+  // manuscript capability, serialized with every other effect — over the exact suggestions the strip
+  // named, and the capability is re-read from the window the Effect answers with. J-05's lost
+  // acknowledgement control speaks for the single Apply only and is not consumed here.
+  ipcMain.handle(IPC_CHANNELS.applyChangeSuggestionBatch, (event, input: ServiceOperationMap['applyChangeSuggestionBatch']['input']) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      return serializeEffect(async () => {
+        requireAuthority();
+        requireManuscriptCapability(owned, input);
+        const result = await service.call('applyChangeSuggestionBatch', input);
+        rememberManuscriptCapability(owned, result.window, input, owned.routeGeneration);
+        return result;
+      });
+    }),
+  );
   ipcMain.handle(
     IPC_CHANNELS.reverseAppliedChangeSuggestion,
     (event, input: ServiceOperationMap['reverseAppliedChangeSuggestion']['input']) =>
@@ -2094,7 +2112,13 @@ function registerRendererHandlers(
         const routeGeneration = owned.routeGeneration;
         const routeRequestSequence = owned.routeRequestSequence;
         const reviewRunId = typeof input?.reviewRunId === 'string' ? input.reviewRunId : null;
-        const result = await service.call('inspectReviewWorkspace', { bookId: route.bookId, reviewRunId });
+        // The page and the four filters travel as the renderer gave them; the request frame is what
+        // decides whether each is well formed, and a key the renderer left out reads as none.
+        const page: Partial<ReviewFindingPageRequest> = {};
+        if (typeof input === 'object' && input !== null) {
+          for (const key of REVIEW_FINDING_PAGE_KEYS) if (Object.hasOwn(input, key)) Object.assign(page, { [key]: input[key] });
+        }
+        const result = await service.call('inspectReviewWorkspace', { ...page, bookId: route.bookId, reviewRunId });
         requireCurrentRouteReadEpoch(owned, routeGeneration, routeRequestSequence);
         return requireReviewWorkspaceOfRoute(route, result, reviewRunId);
       }),

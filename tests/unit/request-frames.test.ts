@@ -107,6 +107,13 @@ describe('decodeRequest accepts well-formed frames', () => {
     const inputs: ReadonlyArray<{ op: string; input: Record<string, unknown> }> = [
       { op: 'inspectReviewWorkspace', input: { bookId, reviewRunId: null } },
       { op: 'inspectReviewWorkspace', input: { bookId, reviewRunId } },
+      // The page cursor and the four filters of the results are each optional, and `null` is none.
+      { op: 'inspectReviewWorkspace', input: { bookId, reviewRunId, findingsAfterOrdinal: 300 } },
+      {
+        op: 'inspectReviewWorkspace',
+        input: { bookId, reviewRunId, findingsAfterOrdinal: null, categoryId: 'typos-and-usage', severity: 'must', status: 'pending', chapterBlockId: CHAPTER_BLOCK },
+      },
+      { op: 'inspectReviewWorkspace', input: { bookId, reviewRunId: null, categoryId: null, severity: null, status: 'ignored', chapterBlockId: null } },
       { op: 'prepareReviewRun', input: { bookId, categoryIds: ['typos-and-usage'], scope: WHOLE_SCOPE } },
       { op: 'prepareReviewRun', input: { bookId, categoryIds: ['typos-and-usage', 'plot-consistency'], scope: { kind: 'chapters', fromChapterBlockId: CHAPTER_BLOCK, toChapterBlockId: `blk_${'2'.repeat(24)}` } } },
       { op: 'prepareReviewRun', input: { bookId, categoryIds: ['literary-expression'], scope: { kind: 'changed', fromChapterBlockId: null, toChapterBlockId: null } } },
@@ -303,6 +310,15 @@ describe('decodeRequest rejects malformed frames', () => {
       { op: 'inspectReviewWorkspace', input: { bookId, reviewRunId: 'not-a-uuid' } },
       { op: 'inspectReviewWorkspace', input: { bookId, reviewRunId: null, extra: 1 } },
       { op: 'inspectReviewWorkspace', input: { bookId: 'not-a-uuid', reviewRunId: null } },
+      // The page cursor is a finding ordinal, and each filter names what a finding can be.
+      { op: 'inspectReviewWorkspace', input: { bookId, reviewRunId: null, findingsAfterOrdinal: 0 } },
+      { op: 'inspectReviewWorkspace', input: { bookId, reviewRunId: null, findingsAfterOrdinal: 1.5 } },
+      { op: 'inspectReviewWorkspace', input: { bookId, reviewRunId: null, findingsAfterOrdinal: '300' } },
+      { op: 'inspectReviewWorkspace', input: { bookId, reviewRunId: null, categoryId: 'Typos' } },
+      { op: 'inspectReviewWorkspace', input: { bookId, reviewRunId: null, severity: '必须处理' } },
+      { op: 'inspectReviewWorkspace', input: { bookId, reviewRunId: null, status: 'open' } },
+      { op: 'inspectReviewWorkspace', input: { bookId, reviewRunId: null, chapterBlockId: 'blk_short' } },
+      { op: 'inspectReviewWorkspace', input: { bookId, reviewRunId: null, filter: { severity: 'must' } } },
       // Only inspecting opens "the latest" Run; every other operation names its Run.
       { op: 'continueReviewRun', input: { bookId, reviewRunId: null } },
       { op: 'continueReviewRun', input: { reviewRunId: randomUUID() } },

@@ -340,11 +340,18 @@ async function dispatch(
     // 审阅 (Issue #417, plan slice S69). Every answer that shows a Run reads the one owner's progress, so
     // a category executing now carries its Measured Run Progress.
     case 'inspectReviewWorkspace':
+      // The page and the four filters of the results; a key the caller left out reads as none.
       return {
         id: request.id,
         ok: true,
         op: request.op,
-        result: store.inspectReviewWorkspace(request.input.bookId, request.input.reviewRunId, analysisProgress),
+        result: store.inspectReviewWorkspace(request.input.bookId, request.input.reviewRunId, analysisProgress, {
+          findingsAfterOrdinal: request.input.findingsAfterOrdinal ?? null,
+          categoryId: request.input.categoryId ?? null,
+          severity: request.input.severity ?? null,
+          status: request.input.status ?? null,
+          chapterBlockId: request.input.chapterBlockId ?? null,
+        }),
       };
     case 'prepareReviewRun':
       return {

@@ -87,6 +87,7 @@ export const IPC_CHANNELS = {
   recordChangeSuggestionDecision: 'ai7:j05:record-change-suggestion-decision',
   recordProposalDecisionReason: 'ai7:j05:record-proposal-decision-reason',
   applyChangeSuggestion: 'ai7:j05:apply-change-suggestion',
+  applyChangeSuggestionBatch: 'ai7:j05:apply-change-suggestion-batch',
   reverseAppliedChangeSuggestion: 'ai7:j05:reverse-applied-change-suggestion',
   getManuscriptApplyOutcome: 'ai7:j05:get-manuscript-apply-outcome',
   getManuscriptRail: 'ai7:j02:get-manuscript-rail',
@@ -3597,9 +3598,18 @@ export interface ReviewRunProjection {
   configurationDigest: string;
   authorization: null | { authorizedAt: string };
   categories: ReadonlyArray<ReviewRunCategoryProjection>;
+  /**
+   * One page of the findings that pass the asked filters, in ordinal order from the asked cursor on: at
+   * most `MAX_REVIEW_FINDINGS_PER_PAGE`, and fewer when their words weigh more, so the workspace always
+   * crosses the service boundary in one frame. The next page is read with `findingsAfterOrdinal` set to
+   * the last ordinal here and the same filters.
+   */
   findings: ReadonlyArray<ReviewFindingProjection>;
-  /** Whether `findings` stops at its bound; the counts always cover every finding. */
+  /** How many findings pass the filters, before any page is taken; unfiltered, every finding of the Run. */
+  findingsTotal: number;
+  /** Whether findings that pass the filters remain after this page. */
   findingsTruncated: boolean;
+  /** Every finding of the Run by severity and status, whatever the filters and the page: a filter is a view (FIND-003). */
   findingCounts: ReviewFindingCountsProjection;
   report: ReviewReportProjection | null;
   reportVersions: ReadonlyArray<{ reportId: string; version: number; generatedAt: string; digest: string }>;
@@ -3619,7 +3629,10 @@ export interface ReviewWorkspaceProjection {
   scopeOptions: ReviewScopeOptionsProjection;
   /** Whether 新建审阅 can prepare a Run now: not while one of this Book's runs is under way. */
   newReview: ReviewAvailabilityProjection;
+  /** The 审阅记录 newest first, at most `MAX_REVIEW_RUN_SUMMARIES` of them. */
   runs: ReadonlyArray<ReviewRunSummaryProjection>;
+  /** Whether older Review Runs exist beyond `runs`; each stays openable by its identity. */
+  runsTruncated: boolean;
   run: ReviewRunProjection | null;
 }
 
@@ -3633,13 +3646,38 @@ export const MAX_REVIEW_RUN_CATEGORIES = 9;
 export const MAX_REVIEW_FINDING_REASON_CHARACTERS = 500;
 /** A finding of a Review Run: `rvf_` and 24 hex digits, content-derived from the Run, the category and the kind-level finding. */
 export const REVIEW_FINDING_ID_PATTERN = /^rvf_[0-9a-f]{24}$/u;
+/** The most findings one workspace answer carries; a finding weighs about a kilobyte on the wire. */
+export const MAX_REVIEW_FINDINGS_PER_PAGE = 300;
+/** The most 审阅记录 entries one workspace answer lists, newest first. */
+export const MAX_REVIEW_RUN_SUMMARIES = 50;
+/** The most 修改建议 one 确认应用 writes: the batch Apply's own bound (Issue #408). */
+export const MAX_BATCH_APPLY_SUGGESTIONS = 500;
+export const REVIEW_FINDING_STATUSES: readonly ReviewFindingStatus[] = ['pending', 'handled', 'ignored'];
+
+/**
+ * Which of the opened Run's findings one workspace answer carries (V2-UX-REV-005, FIND-003): a cursor
+ * and the four filters of the results, each `null` for 全部. Filtering happens in the service so a page
+ * stays small; it is a view only and changes no finding, disposition or mark.
+ */
+export interface ReviewFindingPageRequest {
+  /** The last ordinal the previous page ended at; `null` starts at the first finding. */
+  findingsAfterOrdinal: number | null;
+  categoryId: string | null;
+  severity: ReviewFindingSeverity | null;
+  status: ReviewFindingStatus | null;
+  /** The chapter option (`ReviewChapterOptionProjection.blockId`) a finding falls in. */
+  chapterBlockId: string | null;
+}
+/** The optional keys an inspection of the 审阅 workspace may carry beside the Book and the Run. */
+export const REVIEW_FINDING_PAGE_KEYS = ['findingsAfterOrdinal', 'categoryId', 'severity', 'status', 'chapterBlockId'] as const satisfies
+  ReadonlyArray<keyof ReviewFindingPageRequest>;
 
 /**
  * The inputs of the 审阅 operations (Issue #417, plan slice S69, Stage C). The Book is always the
  * route's, never the renderer's: every renderer member takes the input without `bookId`, and the main
  * process supplies the Book its window is showing.
  */
-export interface InspectReviewWorkspaceInput {
+export interface InspectReviewWorkspaceInput extends Partial<ReviewFindingPageRequest> {
   bookId: string;
   /** The Review Run to open; `null` opens the latest. */
   reviewRunId: string | null;
@@ -4405,8 +4443,8 @@ export interface ServiceOperationMap {
   recordChangeSuggestionDecision: { input: RecordChangeSuggestionDecisionInput; output: EditorialMarkCommandProjection };
   recordProposalDecisionReason: { input: RecordProposalDecisionReasonInput; output: EditorialMarkCommandProjection };
   /**
-   * AI7 Apply for Change Suggestions (Issue #408). The batch form has no renderer member yet: its
-   * confirmation strip belongs to 审阅's results, and until that surface exists only the service runs it.
+   * AI7 Apply for Change Suggestions (Issue #408). The batch form is 确认应用 on 审阅's confirmation
+   * strip (Issue #417): one Effect over exactly the suggestions the strip named, all or none.
    */
   applyChangeSuggestion: { input: ApplyChangeSuggestionInput; output: ManuscriptApplyCommandProjection };
   applyChangeSuggestionBatch: { input: ApplyChangeSuggestionBatchInput; output: ManuscriptApplyCommandProjection };
@@ -4609,6 +4647,8 @@ export interface RendererApi {
   recordChangeSuggestionDecision(input: RecordChangeSuggestionDecisionInput): Promise<EditorialMarkCommandProjection>;
   recordProposalDecisionReason(input: RecordProposalDecisionReasonInput): Promise<EditorialMarkCommandProjection>;
   applyChangeSuggestion(input: ApplyChangeSuggestionInput): Promise<ManuscriptApplyCommandProjection>;
+  /** 确认应用 on 审阅's batch confirmation strip: one Effect over exactly the suggestions the strip listed. */
+  applyChangeSuggestionBatch(input: ApplyChangeSuggestionBatchInput): Promise<ManuscriptApplyCommandProjection>;
   reverseAppliedChangeSuggestion(input: ReverseAppliedChangeSuggestionInput): Promise<ManuscriptApplyCommandProjection>;
   getManuscriptApplyOutcome(input: ServiceOperationMap['getManuscriptApplyOutcome']['input']): Promise<ManuscriptApplyOutcomeProjection>;
   getManuscriptRail(input: ServiceOperationMap['getManuscriptRail']['input']): Promise<ManuscriptRailProjection>;

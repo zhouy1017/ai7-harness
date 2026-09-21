@@ -24,7 +24,10 @@ import {
 import {
   BASELINE_ANALYSIS_TASK_GOAL,
   MAX_FRAME_BYTES,
+  MAX_REVIEW_FINDINGS_PER_PAGE,
+  MAX_REVIEW_RUN_SUMMARIES,
   type LaunchPolicyProjection,
+  type ReviewFindingPageRequest,
   type ReviewRunProjection,
   type ReviewRunScopeRequest,
   type ReviewWorkspaceProjection,
@@ -848,6 +851,114 @@ describe('the 审阅 operations as the service entry dispatches them', () => {
       expect(session.store.reviewFindingOfMark(randomUUID())).toBeNull();
       // The settled workspace crosses the service boundary in one frame.
       expect(wireBytes(workspace(session, book, prepared.reviewRunId))).toBeLessThan(MAX_FRAME_BYTES);
+    });
+  }, 300_000);
+
+  it('pages the findings of a Run too large for one answer, under the frame limit, to the end — filtered in the service', async () => {
+    await withBook('sample1-review-authored', async (session, book) => {
+      const run = await authorizeAndDrive(session, book, prepare(session, book, [TYPOS, STYLE], WHOLE));
+      const made = run.findings.length;
+      expect(made).toBeGreaterThan(0);
+      const clauseId = run.findings.find((finding) => finding.categoryId === TYPOS && finding.clauseRefs.length > 0)?.clauseRefs[0]?.clauseId ?? null;
+      // Beside the findings the Run made, many more written as a materialization writes its rows: light
+      // ones, so the count bounds a page, and ones as heavy as the contract lets a finding be — a whole
+      // quotation, note and replacement and a cited clause — so the weight does. None became a mark.
+      const light = 700;
+      const heavy = 200;
+      const db = database();
+      try {
+        const insert = db.prepare(
+          `INSERT INTO review_findings(review_run_id, finding_id, category_id, ordinal, kind_ref, severity, output, risk_point, block_id,
+             from_grapheme, to_grapheme, quote, note, replacement, clause_ref, state_line, mark_id, anchor, canonical_json, sha256)
+           VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, 0, 1, ?, ?, ?, ?, NULL, NULL, 'anchor-changed', '{}', ?)`,
+        );
+        for (let index = 0; index < light + heavy; index += 1) {
+          const ordinal = made + index + 1;
+          const weighty = index >= light;
+          const suggestion = index % 3 !== 0;
+          insert.run(
+            run.reviewRunId, `rvf_${ordinal.toString(16).padStart(24, '0')}`, suggestion ? TYPOS : STYLE, ordinal,
+            `rfd_${ordinal.toString(16).padStart(24, '0')}`, (['must', 'should', 'note'] as const)[index % 3]!, suggestion ? 'change-suggestion' : 'annotation',
+            run.findings[0]!.blockId, weighty ? '审'.repeat(80) : '审阅页', weighty ? '说'.repeat(200) : '说明',
+            suggestion ? (weighty ? '改'.repeat(200) : '改') : null, suggestion && weighty ? clauseId : null, 'f'.repeat(64),
+          );
+        }
+      } finally {
+        db.close();
+      }
+      const total = made + light + heavy;
+
+      /** Every page of one filter set, each read as the service entry reads it and weighed as its frame carries it. */
+      const pages = (filters: Partial<ReviewFindingPageRequest>): ReviewWorkspaceProjection[] => {
+        const answers: ReviewWorkspaceProjection[] = [];
+        let after: number | null = null;
+        for (;;) {
+          const answer = session.store.inspectReviewWorkspace(book.bookId, run.reviewRunId, undefined, {
+            findingsAfterOrdinal: after, categoryId: null, severity: null, status: null, chapterBlockId: null, ...filters,
+          });
+          answers.push(answer);
+          expect(wireBytes(answer)).toBeLessThan(MAX_FRAME_BYTES);
+          const opened = answer.run!;
+          expect(opened.findings.length).toBeLessThanOrEqual(MAX_REVIEW_FINDINGS_PER_PAGE);
+          // Every page counts every finding, whatever the filters (FIND-003: a filter is a view).
+          expect(opened.findingCounts.pending + opened.findingCounts.handled + opened.findingCounts.ignored).toBe(total);
+          if (!opened.findingsTruncated) return answers;
+          expect(opened.findings.length).toBeGreaterThan(0);
+          after = opened.findings.at(-1)!.ordinal;
+        }
+      };
+
+      const everything = pages({});
+      const read = everything.flatMap((answer) => answer.run!.findings);
+      expect(read.map((finding) => finding.ordinal)).toEqual(Array.from({ length: total }, (_value, index) => index + 1));
+      expect(everything.every((answer) => answer.run!.findingsTotal === total)).toBe(true);
+      // The light findings fill a page to its count; the heavy ones fill it to its weight well before that.
+      expect(everything[0]!.run!.findings.length).toBe(MAX_REVIEW_FINDINGS_PER_PAGE);
+      const heavyPage = everything.find((answer) => answer.run!.findings.some((finding) => finding.ordinal > made + light))!;
+      expect(heavyPage.run!.findings.length).toBeLessThan(MAX_REVIEW_FINDINGS_PER_PAGE);
+      // Unnamed, a page is the first one — which is what every answer after an action carries.
+      expect(workspace(session, book, run.reviewRunId).run!.findings.map((finding) => finding.ordinal))
+        .toEqual(everything[0]!.run!.findings.map((finding) => finding.ordinal));
+
+      // Filtered in the service, a page carries only what passes, still in ordinal order and to the end.
+      const byFilter = (filters: Partial<ReviewFindingPageRequest>, keep: (finding: (typeof read)[number]) => boolean): void => {
+        const answers = pages(filters);
+        const expected = read.filter(keep).map((finding) => finding.findingId);
+        expect(answers.flatMap((answer) => answer.run!.findings.map((finding) => finding.findingId))).toEqual(expected);
+        expect(answers.every((answer) => answer.run!.findingsTotal === expected.length)).toBe(true);
+      };
+      byFilter({ severity: 'must' }, (finding) => finding.severity === 'must');
+      byFilter({ categoryId: STYLE }, (finding) => finding.categoryId === STYLE);
+      byFilter({ categoryId: STYLE, severity: 'note', status: 'pending' }, (finding) => finding.categoryId === STYLE && finding.severity === 'note' && finding.status === 'pending');
+      byFilter({ status: 'ignored' }, () => false);
+      const chapter = everything[0]!.scopeOptions.chapters.chapters.find((option) => read.some((finding) => finding.chapterBlockId === option.blockId))!;
+      byFilter({ chapterBlockId: chapter.blockId }, (finding) => finding.chapterBlockId === chapter.blockId);
+      // A cursor past the last finding answers an empty, final page.
+      const past = session.store.inspectReviewWorkspace(book.bookId, run.reviewRunId, undefined, {
+        findingsAfterOrdinal: total, categoryId: null, severity: null, status: null, chapterBlockId: null,
+      }).run!;
+      expect(past).toMatchObject({ findings: [], findingsTotal: total, findingsTruncated: false });
+      expect(storeCode(() => session.store.inspectReviewWorkspace(book.bookId, run.reviewRunId, undefined, {
+        findingsAfterOrdinal: 0, categoryId: null, severity: null, status: null, chapterBlockId: null,
+      }))).toBe('REVIEW_PAGE_INVALID');
+    });
+  }, 300_000);
+
+  it('lists the newest Review Runs only, and still opens an older one by its identity', async () => {
+    await withBook('sample1-review-authored', async (session, book) => {
+      await runBaseline(session, book);
+      // The leads need no plan, so each of these Runs is prepared by one step.
+      const prepared = Array.from({ length: MAX_REVIEW_RUN_SUMMARIES + 1 }, () => prepare(session, book, [PLOT], WHOLE));
+      const latest = workspace(session, book);
+      expect(latest.runs).toHaveLength(MAX_REVIEW_RUN_SUMMARIES);
+      expect(latest.runsTruncated).toBe(true);
+      expect(latest.runs.map((summary) => summary.ordinal)).toEqual(
+        Array.from({ length: MAX_REVIEW_RUN_SUMMARIES }, (_value, index) => MAX_REVIEW_RUN_SUMMARIES + 1 - index));
+      expect(latest.run!.ordinal).toBe(MAX_REVIEW_RUN_SUMMARIES + 1);
+      const oldest = workspace(session, book, prepared[0]!.reviewRunId);
+      expect(oldest.run).toMatchObject({ reviewRunId: prepared[0]!.reviewRunId, ordinal: 1 });
+      expect(oldest.runs.some((summary) => summary.reviewRunId === prepared[0]!.reviewRunId)).toBe(false);
+      expect(wireBytes(latest)).toBeLessThan(MAX_FRAME_BYTES);
     });
   }, 300_000);
 });

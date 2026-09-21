@@ -89,6 +89,7 @@ import type {
   ReviewCategoryGoal,
   ReviewCategoryProjection,
   ReviewCategoryTaskRequest,
+  ReviewFindingPageRequest,
   ReviewRunScopeRequest,
   ReviewWorkspaceProjection,
 } from '../shared/protocol.js';
@@ -3340,9 +3341,11 @@ export class EditorialStore {
    * The Book's 审阅 destination (Appendix 1 of the S69 design): the categories with their basis, the
    * coverage matrix, the scope options, the 审阅记录, and the opened Run — the latest when `reviewRunId`
    * is `null`. `progress` is the execution owner's reader, exactly as the analysis inspections take it.
+   * `page` chooses which of the opened Run's findings the answer carries — a cursor and the four filters
+   * of the results — and is the first page of every finding when it is left out.
    */
-  inspectReviewWorkspace(bookId: string, reviewRunId: string | null, progress?: ProgressReader): ReviewWorkspaceProjection {
-    return this.#reviewCall(() => this.#reviewRuns.workspace(bookId, reviewRunId, progress));
+  inspectReviewWorkspace(bookId: string, reviewRunId: string | null, progress?: ProgressReader, page?: ReviewFindingPageRequest): ReviewWorkspaceProjection {
+    return this.#reviewCall(() => this.#reviewRuns.workspace(bookId, reviewRunId, progress, page));
   }
 
   /**

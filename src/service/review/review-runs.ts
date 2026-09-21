@@ -1,10 +1,15 @@
 import { randomUUID } from 'node:crypto';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import {
+  MAX_FRAME_BYTES,
   MAX_REVIEW_FINDING_REASON_CHARACTERS,
+  MAX_REVIEW_FINDINGS_PER_PAGE,
+  MAX_REVIEW_RUN_SUMMARIES,
   REVIEW_COVERAGE_STATE_LABELS,
   REVIEW_FINDING_ID_PATTERN,
+  REVIEW_FINDING_SEVERITIES,
   REVIEW_FINDING_SEVERITY_LABELS,
+  REVIEW_FINDING_STATUSES,
   REVIEW_FINDING_STATUS_LABELS,
   REVIEW_SCOPE_KINDS,
   type AnalysisGoal,
@@ -20,6 +25,7 @@ import {
   type ReviewCategoryResultSetRevisionProjection,
   type ReviewChapterOptionProjection,
   type ReviewCoverageRowProjection,
+  type ReviewFindingPageRequest,
   type ReviewFindingProjection,
   type ReviewFindingSeverity,
   type ReviewFindingStatus,
@@ -322,8 +328,53 @@ const EVENT_SCHEMA = 'ai7.review.category-event/1' as const;
 const FINDING_SCHEMA = 'ai7.review.finding/1' as const;
 const DISPOSITION_SCHEMA = 'ai7.review.finding-disposition/1' as const;
 const QUALITY_SIGNAL_SCHEMA = 'ai7.quality-signal/1' as const;
-/** The findings one projection carries; the counts always cover every finding (Appendix 1). */
-const MAX_PROJECTED_FINDINGS = 2_000;
+/**
+ * What one workspace answer spends on its page of findings at most. A finding weighs about a kilobyte on
+ * the wire and up to three with a long note, replacement and clause, so the page is bounded by weight as
+ * well as by count, and never by more than the frame leaves once everything else is in.
+ */
+const FINDINGS_PAGE_BYTES = 256 * 1024;
+/** Room kept beside the workspace for the response envelope and, on the job path, the job around it. */
+const WORKSPACE_WIRE_HEADROOM_BYTES = 8 * 1024;
+/** The first page of every finding: what an answer that names no page carries. */
+const FIRST_FINDING_PAGE: ReviewFindingPageRequest = { findingsAfterOrdinal: null, categoryId: null, severity: null, status: null, chapterBlockId: null };
+
+/** The store's own reading of a page: the request frame already holds a renderer's to the same shape. */
+function validFindingPage(page: ReviewFindingPageRequest): boolean {
+  return isRecord(page) && hasExactKeys(page, ['findingsAfterOrdinal', 'categoryId', 'severity', 'status', 'chapterBlockId']) &&
+    (page.findingsAfterOrdinal === null || (Number.isSafeInteger(page.findingsAfterOrdinal) && page.findingsAfterOrdinal >= 1)) &&
+    (page.categoryId === null || (typeof page.categoryId === 'string' && page.categoryId.length >= 1 && page.categoryId.length <= 48)) &&
+    (page.severity === null || REVIEW_FINDING_SEVERITIES.includes(page.severity)) &&
+    (page.status === null || REVIEW_FINDING_STATUSES.includes(page.status)) &&
+    (page.chapterBlockId === null || (typeof page.chapterBlockId === 'string' && BLOCK_ID_PATTERN.test(page.chapterBlockId)));
+}
+
+function wireBytes(value: unknown): number {
+  return Buffer.byteLength(JSON.stringify(value), 'utf8');
+}
+
+/**
+ * The page of findings one answer carries: from the cursor on, in ordinal order, at most
+ * `MAX_REVIEW_FINDINGS_PER_PAGE`, and no more than the frame leaves once the rest of the workspace is
+ * weighed — but always at least one while any remain, so paging always reaches the end.
+ */
+function findingPage(
+  workspace: ReviewWorkspaceProjection,
+  run: ReviewRunProjection,
+  candidates: ReadonlyArray<ReviewFindingProjection>,
+): ReviewRunProjection {
+  const budget = Math.min(FINDINGS_PAGE_BYTES, MAX_FRAME_BYTES - WORKSPACE_WIRE_HEADROOM_BYTES - wireBytes(workspace));
+  const page: ReviewFindingProjection[] = [];
+  let spent = 0;
+  for (const finding of candidates) {
+    if (page.length >= MAX_REVIEW_FINDINGS_PER_PAGE) break;
+    const weight = wireBytes(finding) + 1;
+    if (page.length > 0 && spent + weight > budget) break;
+    page.push(finding);
+    spent += weight;
+  }
+  return { ...run, findings: page, findingsTruncated: page.length < candidates.length };
+}
 /** The request frame bounds the same reason and finding identity with these very constants (Stage C). */
 const MAX_REASON_CHARACTERS = MAX_REVIEW_FINDING_REASON_CHARACTERS;
 const MAX_CHAPTER_TITLE_GRAPHEMES = 40;
@@ -1623,20 +1674,29 @@ export class ReviewRunStore {
    * none is named. `progress` is the one execution owner's reader, so a category executing now carries
    * its Measured Run Progress.
    */
-  workspace(bookId: string, reviewRunId: string | null, progress?: ProgressReader): ReviewWorkspaceProjection {
+  workspace(bookId: string, reviewRunId: string | null, progress?: ProgressReader, page: ReviewFindingPageRequest = FIRST_FINDING_PAGE): ReviewWorkspaceProjection {
     this.#requireBook(bookId);
     requireReview(reviewRunId === null || (typeof reviewRunId === 'string' && UUID_PATTERN.test(reviewRunId)), 'REVIEW_RUN_INVALID', '审阅记录标识无效。');
+    requireReview(validFindingPage(page), 'REVIEW_PAGE_INVALID', '发现的分页或筛选无效。');
     const head = this.#head(bookId);
     const baseline = head === null ? { revision: null, error: null } : this.#readBaseline(bookId);
     const readings = this.#configuration.categories.map((entry) => this.#readCategory(bookId, head, entry, baseline, progress));
     const chapters = head === null ? { basis: 'outline' as const, chapters: [] } : this.#chapterOptions(bookId, head);
-    const rows = this.#db.prepare('SELECT * FROM review_runs WHERE book_id = ? ORDER BY ordinal DESC').all(bookId) as SqlRow[];
-    const snapshots = rows.map((row) => this.#snapshotOf(row));
-    const views = new Map(snapshots.map((snapshot) => [snapshot.reviewRunId, this.#runView(snapshot)] as const));
-    const opened = reviewRunId === null ? snapshots[0] ?? null : snapshots.find((snapshot) => snapshot.reviewRunId === reviewRunId) ?? null;
+    // The 审阅记录 lists the newest Runs only; a Run beyond them is still opened when it is named.
+    const rows = this.#db.prepare('SELECT * FROM review_runs WHERE book_id = ? ORDER BY ordinal DESC LIMIT ?')
+      .all(bookId, MAX_REVIEW_RUN_SUMMARIES + 1) as SqlRow[];
+    const listed = rows.slice(0, MAX_REVIEW_RUN_SUMMARIES).map((row) => this.#snapshotOf(row));
+    let opened = reviewRunId === null ? listed[0] ?? null : listed.find((snapshot) => snapshot.reviewRunId === reviewRunId) ?? null;
+    if (opened === null && reviewRunId !== null) {
+      const row = this.#db.prepare('SELECT * FROM review_runs WHERE book_id = ? AND review_run_id = ?').get(bookId, reviewRunId) as SqlRow | undefined;
+      opened = row === undefined ? null : this.#snapshotOf(row);
+    }
     requireReview(reviewRunId === null || opened !== null, 'REVIEW_RUN_NOT_FOUND', '这次审阅不属于当前图书。');
+    const views = new Map(listed.map((snapshot) => [snapshot.reviewRunId, this.#runView(snapshot)] as const));
+    if (opened !== null && !views.has(opened.reviewRunId)) views.set(opened.reviewRunId, this.#runView(opened));
     const driving = this.#bookIsDriving(bookId);
-    return {
+    const run = opened === null ? null : this.#runProjection(views.get(opened.reviewRunId)!, readings, chapters, page);
+    const workspace: ReviewWorkspaceProjection = {
       bookId,
       manuscript: head,
       configuration: this.#configurationPin(),
@@ -1646,9 +1706,11 @@ export class ReviewRunStore {
       newReview: head === null
         ? { available: false, unavailableReason: NO_MANUSCRIPT_REASON }
         : driving ? { available: false, unavailableReason: RUN_ACTIVE_REASON } : { available: true, unavailableReason: null },
-      runs: snapshots.map((snapshot) => this.#summary(views.get(snapshot.reviewRunId)!)),
-      run: opened === null ? null : this.#runProjection(views.get(opened.reviewRunId)!, readings, chapters),
+      runs: listed.map((snapshot) => this.#summary(views.get(snapshot.reviewRunId)!)),
+      runsTruncated: rows.length > MAX_REVIEW_RUN_SUMMARIES,
+      run: run?.projection ?? null,
     };
+    return run === null ? workspace : { ...workspace, run: findingPage(workspace, run.projection, run.candidates) };
   }
 
   #head(bookId: string): ManuscriptHead | null {
@@ -1998,7 +2060,16 @@ export class ReviewRunStore {
     };
   }
 
-  #runProjection(view: RunView, readings: ReadonlyArray<CategoryReading>, chapters: ChapterOptions): ReviewRunProjection {
+  /**
+   * The opened Run without its page of findings, and the findings that pass the page's filters from its
+   * cursor on: the caller takes the page once it knows what the rest of the answer weighs.
+   */
+  #runProjection(
+    view: RunView,
+    readings: ReadonlyArray<CategoryReading>,
+    chapters: ChapterOptions,
+    page: ReviewFindingPageRequest,
+  ): { projection: ReviewRunProjection; candidates: ReviewFindingProjection[] } {
     const { snapshot } = view;
     const reports = this.#reports(snapshot.reviewRunId);
     const labels = new Map(snapshot.categories.map((category) => [category.categoryId, category.entry.label] as const));
@@ -2040,7 +2111,7 @@ export class ReviewRunStore {
       }
       return [];
     };
-    const findings = view.findings.slice(0, MAX_PROJECTED_FINDINGS).map((finding): ReviewFindingProjection => {
+    const findings = view.findings.map((finding): ReviewFindingProjection => {
       const chapter = finding.blockPosition === null ? null : chapterOfPosition(chapters.chapters, finding.blockPosition);
       return {
         findingId: finding.findingId,
@@ -2071,24 +2142,36 @@ export class ReviewRunStore {
         ignoreReason: finding.ignoreReason,
       };
     });
+    // The four filters are a view (FIND-003): they choose which findings this answer carries and change
+    // nothing; the counts below keep covering every finding of the Run.
+    const matching = findings.filter((finding) =>
+      (page.categoryId === null || finding.categoryId === page.categoryId) &&
+      (page.severity === null || finding.severity === page.severity) &&
+      (page.status === null || finding.status === page.status) &&
+      (page.chapterBlockId === null || finding.chapterBlockId === page.chapterBlockId));
+    const after = page.findingsAfterOrdinal;
     return {
-      reviewRunId: snapshot.reviewRunId,
-      ordinal: snapshot.ordinal,
-      label: `第 ${snapshot.ordinal} 次`,
-      createdAt: snapshot.createdAt,
-      state: view.state,
-      stateLabel: reviewRunStateLabel(view.state, view.canContinue),
-      canContinue: view.canContinue,
-      scope: { kind: snapshot.scope.kind, label: snapshot.scope.label, selectedRange: snapshot.scope.selectedRange },
-      manuscript: snapshot.manuscript,
-      configurationDigest: snapshot.configuration.digest,
-      authorization: view.authorization === null ? null : { authorizedAt: view.authorization.authorizedAt },
-      categories,
-      findings,
-      findingsTruncated: view.findings.length > MAX_PROJECTED_FINDINGS,
-      findingCounts: reviewFindingCounts(view.findings),
-      report: reports.at(-1) ?? null,
-      reportVersions: reports.map((report) => ({ reportId: report.reportId, version: report.version, generatedAt: report.generatedAt, digest: report.digest })),
+      projection: {
+        reviewRunId: snapshot.reviewRunId,
+        ordinal: snapshot.ordinal,
+        label: `第 ${snapshot.ordinal} 次`,
+        createdAt: snapshot.createdAt,
+        state: view.state,
+        stateLabel: reviewRunStateLabel(view.state, view.canContinue),
+        canContinue: view.canContinue,
+        scope: { kind: snapshot.scope.kind, label: snapshot.scope.label, selectedRange: snapshot.scope.selectedRange },
+        manuscript: snapshot.manuscript,
+        configurationDigest: snapshot.configuration.digest,
+        authorization: view.authorization === null ? null : { authorizedAt: view.authorization.authorizedAt },
+        categories,
+        findings: [],
+        findingsTotal: matching.length,
+        findingsTruncated: false,
+        findingCounts: reviewFindingCounts(view.findings),
+        report: reports.at(-1) ?? null,
+        reportVersions: reports.map((report) => ({ reportId: report.reportId, version: report.version, generatedAt: report.generatedAt, digest: report.digest })),
+      },
+      candidates: after === null ? matching : matching.filter((finding) => finding.ordinal > after),
     };
   }
 }
