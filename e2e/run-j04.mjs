@@ -44,6 +44,10 @@ const ANALYSIS_ACTIONS = ['return-to-range', 'sync-current', 'reanalyze-range', 
 // a Change Suggestion on the manuscript — and the analysis still gains none. Anything else named like an
 // execution, effect, apply or export member remains a failure here.
 const CHANGE_SUGGESTION_APPLY_MEMBERS = ['applyChangeSuggestion', 'getManuscriptApplyOutcome'];
+// Synchronized delta with Issue #417: 审阅's seven members. None is named like an execution, effect,
+// apply or export member, so the two pins below hold them without an exception.
+const REVIEW_MEMBERS = ['inspectReviewWorkspace', 'prepareReviewRun', 'authorizeReviewRun', 'continueReviewRun',
+  'recordReviewFindingDisposition', 'generateReviewReport', 'inspectReviewFindingOfMark'];
 const ONLY_ANALYSIS_ACTIONS = `Array.from(card.querySelectorAll('button')).every((button)=>${JSON.stringify(ANALYSIS_ACTIONS)}.includes(button.dataset.analysisAction))`;
 /** The 分析 destination's own persistent actions, in the order it builds them (#406, V2-UX-LAYER-005). */
 const ANALYSIS_DESTINATION_ACTIONS = ['打开稿件', '工作概览'];
@@ -926,7 +930,8 @@ async function main() {
     at('renderer-analysis-api');
     await assertRenderer(renderer, `typeof window.ai7.inspectBaselineAnalysis==='function' &&
       typeof window.ai7.prepareBaselineAnalysis==='function' &&
-      typeof window.ai7.authorizeBaselineAnalysis==='function'`, 'renderer-analysis-api');
+      typeof window.ai7.authorizeBaselineAnalysis==='function' &&
+      ${JSON.stringify(REVIEW_MEMBERS)}.every((key)=>typeof window.ai7[key]==='function')`, 'renderer-analysis-api');
     at('renderer-zero-execution-api');
     await assertRenderer(renderer, `!Object.keys(window.ai7).some((key)=>/provider|session|scheduler|payload|egress/i.test(key))`, 'renderer-zero-execution-api');
 

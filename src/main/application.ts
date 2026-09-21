@@ -30,6 +30,7 @@ import {
   type ContinueImportProjection,
   type ImportDraftRecoveryProjection,
   type ImportCommitProjection,
+  type InspectReviewFindingOfMarkRendererInput,
   type J01ImportControl,
   type J03ForegroundExecutionControl,
   type J04ModelAdapterControl,
@@ -43,6 +44,7 @@ import {
   type RendererCallResult,
   type ResolvedBookWorkbenchRoute,
   type ReviewBeforeManuscriptReimportProjection,
+  type ReviewWorkspaceProjection,
   type ServiceJobProjection,
   type ServiceOperationMap,
   type TrustedLaunchForm,
@@ -86,7 +88,7 @@ interface ManuscriptCapability {
 
 interface EditorResourceCapability {
   kind: 'job' | 'search' | 'preview';
-  operation: 'search' | 'replacement' | 'reimport' | 'task-authorization' | 'baseline-analysis';
+  operation: 'search' | 'replacement' | 'reimport' | 'task-authorization' | 'baseline-analysis' | 'review-run';
   bookId: string;
   manuscriptId: string | null;
   branchId: string | null;
@@ -527,7 +529,9 @@ function registerRendererHandlers(
           ? 'task-authorization'
           : job.kind === 'baseline-analysis-preparation'
             ? 'baseline-analysis'
-            : 'reimport';
+            : job.kind === 'review-run-preparation'
+              ? 'review-run'
+              : 'reimport';
   const resourceSeed = (
     capability: ManuscriptCapability | EditorResourceCapability,
     operation: EditorResourceCapability['operation'] = 'operation' in capability ? capability.operation : 'search',
@@ -592,6 +596,10 @@ function registerRendererHandlers(
     } else if (result !== null && 'coverageManifest' in result) {
       if (actualOperation !== 'baseline-analysis' || result.bookId !== capability.bookId) {
         throw new ServiceCallError('AI7_EDITOR_CAPABILITY_INVALID', '基线稿件分析准备结果不属于当前图书工作台。');
+      }
+    } else if (result !== null && 'scopeOptions' in result && 'coverage' in result) {
+      if (actualOperation !== 'review-run' || result.bookId !== capability.bookId) {
+        throw new ServiceCallError('AI7_EDITOR_CAPABILITY_INVALID', '审阅计划准备结果不属于当前图书工作台。');
       }
     } else if (result !== null && 'taskIntent' in result) {
       if (actualOperation !== 'task-authorization' || result.bookId !== capability.bookId) {
@@ -2061,6 +2069,148 @@ function registerRendererHandlers(
           return result;
         });
       }),
+  );
+  // 审阅 (Issue #417, plan slice S69) is a Book destination: the renderer never names a Book, the service
+  // is asked within the route's, and every answer must be that Book's — and, where the renderer named a
+  // Review Run, open exactly that Run. Reads are held to the route's read epoch; writes are serialized
+  // with every other effect of this window's authority and held to its route generation.
+  const requireReviewWorkspaceOfRoute = (
+    route: Extract<ResolvedBookWorkbenchRoute, { kind: 'book' }>,
+    result: ReviewWorkspaceProjection,
+    reviewRunId: string | null,
+  ): ReviewWorkspaceProjection => {
+    if (result.bookId !== route.bookId || (reviewRunId !== null && result.run?.reviewRunId !== reviewRunId)) {
+      throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '审阅记录不属于当前图书工作台。');
+    }
+    return result;
+  };
+  ipcMain.handle(
+    IPC_CHANNELS.inspectReviewWorkspace,
+    (event, input?: Omit<ServiceOperationMap['inspectReviewWorkspace']['input'], 'bookId'>) =>
+      envelope(async () => {
+        const owned = requireSender(event);
+        requireAuthority();
+        const route = requireCurrentBookRoute(owned);
+        const routeGeneration = owned.routeGeneration;
+        const routeRequestSequence = owned.routeRequestSequence;
+        const reviewRunId = typeof input?.reviewRunId === 'string' ? input.reviewRunId : null;
+        const result = await service.call('inspectReviewWorkspace', { bookId: route.bookId, reviewRunId });
+        requireCurrentRouteReadEpoch(owned, routeGeneration, routeRequestSequence);
+        return requireReviewWorkspaceOfRoute(route, result, reviewRunId);
+      }),
+  );
+  ipcMain.handle(
+    IPC_CHANNELS.prepareReviewRun,
+    (event, input: Omit<ServiceOperationMap['prepareReviewRun']['input'], 'bookId'>) =>
+      envelope(async () => {
+        const owned = requireSender(event);
+        return serializeEffect(async () => {
+          requireAuthority();
+          const route = requireCurrentBookRoute(owned);
+          const result = await service.call('prepareReviewRun', {
+            categoryIds: input.categoryIds,
+            scope: input.scope,
+            bookId: route.bookId,
+          });
+          // A Run of the leads alone is prepared by the job's first step, so its answer may already carry the workspace.
+          const prepared = result.result;
+          if (result.kind !== 'review-run-preparation' ||
+              (prepared !== null && !('scopeOptions' in prepared && prepared.bookId === route.bookId))) {
+            throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '审阅计划准备结果类型无效或不属于当前图书工作台。');
+          }
+          rememberEditorResource(owned, 'job', result.jobId, {
+            operation: 'review-run',
+            bookId: route.bookId,
+            manuscriptId: null,
+            branchId: null,
+          });
+          return result;
+        });
+      }),
+  );
+  ipcMain.handle(
+    IPC_CHANNELS.authorizeReviewRun,
+    (event, input: Omit<ServiceOperationMap['authorizeReviewRun']['input'], 'bookId'>) =>
+      envelope(async () => {
+        const owned = requireSender(event);
+        return serializeEffect(async () => {
+          requireAuthority();
+          const route = requireCurrentBookRoute(owned);
+          const routeGeneration = owned.routeGeneration;
+          const result = await service.call('authorizeReviewRun', {
+            reviewRunId: input.reviewRunId,
+            planDigests: input.planDigests,
+            bookId: route.bookId,
+          });
+          requireCurrentRouteGeneration(owned, routeGeneration);
+          return requireReviewWorkspaceOfRoute(route, result, input.reviewRunId);
+        });
+      }),
+  );
+  ipcMain.handle(
+    IPC_CHANNELS.continueReviewRun,
+    (event, input: Omit<ServiceOperationMap['continueReviewRun']['input'], 'bookId'>) =>
+      envelope(async () => {
+        const owned = requireSender(event);
+        return serializeEffect(async () => {
+          requireAuthority();
+          const route = requireCurrentBookRoute(owned);
+          const routeGeneration = owned.routeGeneration;
+          const result = await service.call('continueReviewRun', { reviewRunId: input.reviewRunId, bookId: route.bookId });
+          requireCurrentRouteGeneration(owned, routeGeneration);
+          return requireReviewWorkspaceOfRoute(route, result, input.reviewRunId);
+        });
+      }),
+  );
+  ipcMain.handle(
+    IPC_CHANNELS.recordReviewFindingDisposition,
+    (event, input: Omit<ServiceOperationMap['recordReviewFindingDisposition']['input'], 'bookId'>) =>
+      envelope(async () => {
+        const owned = requireSender(event);
+        return serializeEffect(async () => {
+          requireAuthority();
+          const route = requireCurrentBookRoute(owned);
+          const routeGeneration = owned.routeGeneration;
+          const result = await service.call('recordReviewFindingDisposition', {
+            reviewRunId: input.reviewRunId,
+            findingId: input.findingId,
+            disposition: input.disposition,
+            reason: input.reason,
+            bookId: route.bookId,
+          });
+          requireCurrentRouteGeneration(owned, routeGeneration);
+          return requireReviewWorkspaceOfRoute(route, result, input.reviewRunId);
+        });
+      }),
+  );
+  ipcMain.handle(
+    IPC_CHANNELS.generateReviewReport,
+    (event, input: Omit<ServiceOperationMap['generateReviewReport']['input'], 'bookId'>) =>
+      envelope(async () => {
+        const owned = requireSender(event);
+        return serializeEffect(async () => {
+          requireAuthority();
+          const route = requireCurrentBookRoute(owned);
+          const routeGeneration = owned.routeGeneration;
+          const result = await service.call('generateReviewReport', { reviewRunId: input.reviewRunId, bookId: route.bookId });
+          requireCurrentRouteGeneration(owned, routeGeneration);
+          return requireReviewWorkspaceOfRoute(route, result, input.reviewRunId);
+        });
+      }),
+  );
+  // 查看任务 lives on the Mark Card, which was opened on this manuscript: the window proves that
+  // capability within the route, and a mark of any other Book is answered as no Review Run's mark.
+  ipcMain.handle(IPC_CHANNELS.inspectReviewFindingOfMark, (event, input: InspectReviewFindingOfMarkRendererInput) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      requireAuthority();
+      const capability = requireManuscriptCapability(owned, input);
+      const routeGeneration = owned.routeGeneration;
+      const routeRequestSequence = owned.routeRequestSequence;
+      const result = await service.call('inspectReviewFindingOfMark', { bookId: capability.bookId, markId: input.markId });
+      requireCurrentRouteReadEpoch(owned, routeGeneration, routeRequestSequence);
+      return result !== null && result.bookId === capability.bookId ? result : null;
+    }),
   );
   ipcMain.handle(IPC_CHANNELS.startSearch, (event, input: ServiceOperationMap['startSearch']['input']) =>
     envelope(async () => {

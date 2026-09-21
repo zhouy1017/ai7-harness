@@ -6,6 +6,7 @@ import {
   type CommitManuscriptReimportRendererInput,
   type CommitSourceImportRendererInput,
   type EditorClipboardCommand,
+  type InspectReviewFindingOfMarkRendererInput,
   type PickerReselectResult,
   type PickerStageResult,
   type RendererApi,
@@ -222,6 +223,20 @@ const api: RendererApi = Object.freeze({
     invoke<ServiceOperationMap['prepareBaselineAnalysis']['output']>(IPC_CHANNELS.prepareBaselineAnalysis, input),
   authorizeBaselineAnalysis: (input: Omit<ServiceOperationMap['authorizeBaselineAnalysis']['input'], 'bookId'>) =>
     invoke<ServiceOperationMap['authorizeBaselineAnalysis']['output']>(IPC_CHANNELS.authorizeBaselineAnalysis, input),
+  inspectReviewWorkspace: (input?: Omit<ServiceOperationMap['inspectReviewWorkspace']['input'], 'bookId'>) =>
+    invoke<ServiceOperationMap['inspectReviewWorkspace']['output']>(IPC_CHANNELS.inspectReviewWorkspace, input ?? { reviewRunId: null }),
+  prepareReviewRun: (input: Omit<ServiceOperationMap['prepareReviewRun']['input'], 'bookId'>) =>
+    invoke<ServiceOperationMap['prepareReviewRun']['output']>(IPC_CHANNELS.prepareReviewRun, input),
+  authorizeReviewRun: (input: Omit<ServiceOperationMap['authorizeReviewRun']['input'], 'bookId'>) =>
+    invoke<ServiceOperationMap['authorizeReviewRun']['output']>(IPC_CHANNELS.authorizeReviewRun, input),
+  continueReviewRun: (input: Omit<ServiceOperationMap['continueReviewRun']['input'], 'bookId'>) =>
+    invoke<ServiceOperationMap['continueReviewRun']['output']>(IPC_CHANNELS.continueReviewRun, input),
+  recordReviewFindingDisposition: (input: Omit<ServiceOperationMap['recordReviewFindingDisposition']['input'], 'bookId'>) =>
+    invoke<ServiceOperationMap['recordReviewFindingDisposition']['output']>(IPC_CHANNELS.recordReviewFindingDisposition, input),
+  generateReviewReport: (input: Omit<ServiceOperationMap['generateReviewReport']['input'], 'bookId'>) =>
+    invoke<ServiceOperationMap['generateReviewReport']['output']>(IPC_CHANNELS.generateReviewReport, input),
+  inspectReviewFindingOfMark: (input: InspectReviewFindingOfMarkRendererInput) =>
+    invoke<ServiceOperationMap['inspectReviewFindingOfMark']['output']>(IPC_CHANNELS.inspectReviewFindingOfMark, input),
   listBooks: (input: ServiceOperationMap['listBooks']['input']) =>
     invoke<ServiceOperationMap['listBooks']['output']>(IPC_CHANNELS.listBooks, input),
   prepareNewBookReview: (input: ServiceOperationMap['prepareNewBookReview']['input']) =>

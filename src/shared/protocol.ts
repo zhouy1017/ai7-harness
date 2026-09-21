@@ -58,6 +58,13 @@ export const IPC_CHANNELS = {
   inspectBaselineAnalysis: 'ai7:j04:inspect-baseline-analysis',
   prepareBaselineAnalysis: 'ai7:j04:prepare-baseline-analysis',
   authorizeBaselineAnalysis: 'ai7:j04:authorize-baseline-analysis',
+  inspectReviewWorkspace: 'ai7:j04:inspect-review-workspace',
+  prepareReviewRun: 'ai7:j04:prepare-review-run',
+  authorizeReviewRun: 'ai7:j04:authorize-review-run',
+  continueReviewRun: 'ai7:j04:continue-review-run',
+  recordReviewFindingDisposition: 'ai7:j04:record-review-finding-disposition',
+  generateReviewReport: 'ai7:j04:generate-review-report',
+  inspectReviewFindingOfMark: 'ai7:j04:inspect-review-finding-of-mark',
   listBooks: 'ai7:j01:list-books',
   prepareNewBookReview: 'ai7:j01:prepare-new-book-review',
   commitNewBookImport: 'ai7:j01:commit-new-book-import',
@@ -4566,6 +4573,21 @@ export interface RendererApi {
   inspectBaselineAnalysis(input?: { revisionId: string | null }): Promise<BaselineAnalysisProjection>;
   prepareBaselineAnalysis(input: { goal: BaselineAnalysisGoal; update: BaselineAnalysisUpdateRequest | null; reconfirm: boolean }): Promise<ServiceJobProjection>;
   authorizeBaselineAnalysis(input: { taskIntentId: string; planEnvelopeDigest: string }): Promise<BaselineAnalysisProjection>;
+  /**
+   * 审阅 of the Book the window is showing (Issue #417). Inspecting without a Run opens the latest; a
+   * running Run is followed by inspecting it again, and its executing category carries its progress.
+   */
+  inspectReviewWorkspace(input?: Omit<InspectReviewWorkspaceInput, 'bookId'>): Promise<ReviewWorkspaceProjection>;
+  /** 先看计划: a `review-run-preparation` job, followed with `pollServiceJob` and stopped with `cancelServiceJob`. */
+  prepareReviewRun(input: Omit<PrepareReviewRunInput, 'bookId'>): Promise<ServiceJobProjection>;
+  /** 授权并开始审阅: the one approval; the Run is already being driven when the answer arrives. */
+  authorizeReviewRun(input: Omit<AuthorizeReviewRunInput, 'bookId'>): Promise<ReviewWorkspaceProjection>;
+  continueReviewRun(input: Omit<ContinueReviewRunInput, 'bookId'>): Promise<ReviewWorkspaceProjection>;
+  /** 忽略并说明; every other decision on a finding is the mark and Apply operations' with its `markId`. */
+  recordReviewFindingDisposition(input: Omit<RecordReviewFindingDispositionInput, 'bookId'>): Promise<ReviewWorkspaceProjection>;
+  generateReviewReport(input: Omit<GenerateReviewReportInput, 'bookId'>): Promise<ReviewWorkspaceProjection>;
+  /** 查看任务 on a Mark Card: the Run a `review-category` mark came from, `null` for any other mark. */
+  inspectReviewFindingOfMark(input: InspectReviewFindingOfMarkRendererInput): Promise<ReviewFindingOfMarkProjection | null>;
   listBooks(input: ServiceOperationMap['listBooks']['input']): Promise<BookSummaryPageProjection>;
   prepareNewBookReview(input: ServiceOperationMap['prepareNewBookReview']['input']): Promise<ReviewBeforeImportProjection>;
   commitNewBookImport(input: CommitNewBookRendererInput): Promise<ManuscriptImportCommitProjection>;

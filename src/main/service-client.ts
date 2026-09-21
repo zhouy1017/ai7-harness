@@ -219,7 +219,10 @@ export class ServiceClient {
             operation === 'commitManuscriptReimport' || operation === 'commitReplacement' ||
             operation === 'saveMilestone' || operation === 'getStartup' || operation === 'getRecoveryComparison' ||
             operation === 'viewRecoveryCandidate' || operation === 'restoreRecovery' ||
-            operation === 'authorizeBaselineAnalysis'
+            operation === 'authorizeBaselineAnalysis' ||
+            // A Review Run's drive loop starts inside these two answers, and it writes at once whatever
+            // needs no model: the leads, or a category whose Run finished before a restart.
+            operation === 'authorizeReviewRun' || operation === 'continueReviewRun'
           ? LONG_REQUEST_TIMEOUT_MS
           : REQUEST_TIMEOUT_MS);
       timeout.unref();
