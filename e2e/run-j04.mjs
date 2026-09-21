@@ -302,9 +302,9 @@ async function recoverSyntheticCredentialCleanupState(dataRoot, runRoot) {
     database.exec('PRAGMA query_only = ON;');
     // Synchronized delta with Issue #467: this reads the same Agent Data Root store J-03 and J-12
     // read, so the pin moves with the terminal version the service stamps
-    // (`EDITORIAL_MARK_SCHEMA_VERSION` since Issue #407). It read 19 until #467 — one revision
+    // (`MANUSCRIPT_EFFECT_SCHEMA_VERSION` since Issue #408). It read 19 until #467 — one revision
     // behind, because only a failed product cleanup reaches this fallback, so revision 20 never met it.
-    requireJourney(database.prepare('PRAGMA user_version').get()?.user_version === 22, 'credential-cleanup-metadata-version');
+    requireJourney(database.prepare('PRAGMA user_version').get()?.user_version === 23, 'credential-cleanup-metadata-version');
     const rows = database.prepare(
       `SELECT connection_id, role_id, provider_id, model_id, adapter_revision, configuration_revision,
               approved_fallback_chain, credential_slot, credential_reference, credential_operation_state

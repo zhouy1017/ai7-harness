@@ -5,7 +5,7 @@ import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import {
-  EDITORIAL_MARK_SCHEMA_VERSION,
+  MANUSCRIPT_EFFECT_SCHEMA_VERSION,
   FACTUAL_REVIEW_SCHEMA_VERSION,
 } from '../../src/service/task-authorization.js';
 import { MAX_WINDOW_BLOCKS } from '../../src/shared/protocol.js';
@@ -147,11 +147,16 @@ function commitPreparedReplacement(store: EditorialStore, searchId: string): {
   };
 }
 
-/** Take a store back to the revision-20 shape: the relations revisions 21 and 22 add are simply not there. */
+/** Take a store back to the revision-20 shape: the relations revisions 21 to 23 add are simply not there. */
 function downgradeToRevision20(databasePath: string): void {
   const database = new DatabaseSync(databasePath);
   try {
     database.exec(`BEGIN IMMEDIATE;
+      DROP TABLE manuscript_effect_receipts;
+      DROP TABLE manuscript_effect_dispatches;
+      DROP TABLE manuscript_effect_approvals;
+      DROP TABLE manuscript_effect_targets;
+      DROP TABLE manuscript_effect_intents;
       DROP TABLE proposal_decision_reasons;
       DROP TABLE proposal_item_decisions;
       DROP TABLE proposal_change_items;
@@ -569,7 +574,7 @@ describe('EditorialStore on a temporary Agent Data Root', () => {
     }
   }, 300_000);
 
-  it('migrates a populated revision-20 store forward, adding six empty relations and moving nothing else', async () => {
+  it('migrates a populated revision-20 store forward, adding eleven empty relations and moving nothing else', async () => {
     const databasePath = join(roots.dataRoot, 'store', 'ai7.sqlite');
     const first = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     let imported: Awaited<ReturnType<typeof importComposedBook>>;
@@ -613,12 +618,13 @@ describe('EditorialStore on a temporary Agent Data Root', () => {
     const after = new DatabaseSync(databasePath, { readOnly: true });
     try {
       expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version)
-        .toBe(EDITORIAL_MARK_SCHEMA_VERSION);
+        .toBe(MANUSCRIPT_EFFECT_SCHEMA_VERSION);
       const truthAfter = relationTruth(after);
-      // Exactly the relations revisions 21 and 22 add appear, and each appears empty.
+      // Exactly the relations revisions 21 to 23 add appear, and each appears empty.
       const added = [
-        'editorial_mark_replies', 'editorial_marks', 'manuscript_entry_positions', 'proposal_change_items',
-        'proposal_decision_reasons', 'proposal_item_decisions',
+        'editorial_mark_replies', 'editorial_marks', 'manuscript_effect_approvals', 'manuscript_effect_dispatches',
+        'manuscript_effect_intents', 'manuscript_effect_receipts', 'manuscript_effect_targets', 'manuscript_entry_positions',
+        'proposal_change_items', 'proposal_decision_reasons', 'proposal_item_decisions',
       ];
       expect([...truthAfter.keys()]).toEqual([...truthBefore.keys(), ...added].sort());
       for (const relation of added) expect(truthAfter.get(relation)?.content).toMatch(/^0:/);

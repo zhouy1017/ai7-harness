@@ -19,6 +19,8 @@ import {
   type EditorialMarkCommandProjection,
   type EditorialMarkKind,
   type EditorialMarkSourceProjection,
+  type EditorialMarkStatus,
+  type ManuscriptApplyProjection,
   type PersonalHighlightColor,
   type ProposalItemDecisionProjection,
   type ProposalItemDisposition,
@@ -180,7 +182,7 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3
 const BLOCK_PATTERN = /^blk_[0-9a-f]{24}$/;
 const DIGEST_PATTERN = /^[0-9a-f]{64}$/;
 const KINDS: ReadonlyArray<EditorialMarkKind> = ['change-suggestion', 'annotation', 'editor-note', 'personal-highlight'];
-const LIVE_STATUSES = "('open', 'resolved')";
+const LIVE_STATUSES = "('open', 'resolved', 'applied')";
 
 /** What each kind may become (V2-UX-MARK-003, MARK-006, MARK-007); a kind absent here converts to nothing. */
 const CONVERSIONS: Readonly<Record<EditorialMarkKind, ReadonlyArray<EditorialMarkKind>>> = {
@@ -377,6 +379,49 @@ export function resolveBranchMarksAfterRewrite(db: DatabaseSync, branchId: strin
   }
 }
 
+/**
+ * The latest committed Apply of one Proposal Change Item, as its Effect Receipt states it, with the
+ * Reverse Apply that counteracted it when there is one. Read from the Effect ledger revision 23 adds;
+ * a store without it has applied nothing.
+ */
+export function applicationOfItem(db: DatabaseSync, itemId: string): ManuscriptApplyProjection | null {
+  if (db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'manuscript_effect_receipts'").get() === undefined) return null;
+  const row = db.prepare(
+    `SELECT i.effect_id, i.kind, i.payload_digest, i.target_count, i.base_revision_id, i.base_journal_sequence, i.base_working_digest,
+            i.reverses_effect_id, a.approval_id, a.interaction, d.dispatch_id, r.receipt_id, r.receipt_digest, r.committed_at,
+            r.resulting_revision_id, r.resulting_journal_sequence, r.resulting_working_digest,
+            (SELECT x.effect_id FROM manuscript_effect_intents x
+               JOIN manuscript_effect_receipts xr ON xr.effect_id = x.effect_id
+              WHERE x.reverses_effect_id = i.effect_id LIMIT 1) reversed_by
+     FROM manuscript_effect_targets t
+     JOIN manuscript_effect_intents i ON i.effect_id = t.effect_id AND i.kind = 'apply'
+     JOIN manuscript_effect_approvals a ON a.effect_id = i.effect_id
+     JOIN manuscript_effect_dispatches d ON d.effect_id = i.effect_id
+     JOIN manuscript_effect_receipts r ON r.effect_id = i.effect_id
+     WHERE t.item_id = ? ORDER BY r.resulting_journal_sequence DESC LIMIT 1`,
+  ).get(itemId) as SqlRow | undefined;
+  return row === undefined ? null : applyProjection(row);
+}
+
+export function applyProjection(row: SqlRow): ManuscriptApplyProjection {
+  return {
+    effectId: text(row.effect_id),
+    kind: text(row.kind) as ManuscriptApplyProjection['kind'],
+    interaction: text(row.interaction) as ManuscriptApplyProjection['interaction'],
+    approvalId: text(row.approval_id),
+    dispatchId: text(row.dispatch_id),
+    receiptId: text(row.receipt_id),
+    changeCount: integer(row.target_count),
+    payloadDigest: text(row.payload_digest),
+    receiptDigest: text(row.receipt_digest),
+    before: { revisionId: text(row.base_revision_id), journalSequence: integer(row.base_journal_sequence), workingDigest: text(row.base_working_digest) },
+    after: { revisionId: text(row.resulting_revision_id), journalSequence: integer(row.resulting_journal_sequence), workingDigest: text(row.resulting_working_digest) },
+    committedAt: text(row.committed_at),
+    reversesEffectId: nullableText(row.reverses_effect_id),
+    reversedByEffectId: nullableText(row.reversed_by),
+  };
+}
+
 const ANCHOR_SELECT = `SELECT em.mark_id, em.kind, em.block_id, em.from_grapheme, em.to_grapheme, em.anchor_state, em.status,
        em.highlight_color, em.source_kind,
        (SELECT d.disposition FROM proposal_change_items i
@@ -394,7 +439,7 @@ function anchorProjection(row: SqlRow): EditorialMarkAnchorProjection {
     fromGrapheme: integer(row.from_grapheme),
     toGrapheme: integer(row.to_grapheme),
     anchorState: text(row.anchor_state) as 'exact' | 'drifted',
-    status: text(row.status) as 'open' | 'resolved',
+    status: text(row.status) as EditorialMarkStatus,
     highlightColor: row.highlight_color === null ? null : integer(row.highlight_color) as PersonalHighlightColor,
     sourceKind: text(row.source_kind) as EditorialMarkSourceProjection['kind'],
     disposition: disposition === null || disposition === 'withdrawn' ? null : disposition as ProposalItemDisposition,
@@ -529,7 +574,7 @@ export class EditorialMarkStore {
        JOIN manuscript_revisions mr ON mr.revision_id = em.pinned_revision_id
        WHERE em.mark_id = ? AND em.manuscript_id = ? AND em.branch_id = ?`,
     ).get(markId, manuscriptId, branchId) as SqlRow | undefined;
-    requireMark(row !== undefined && (row.status === 'open' || row.status === 'resolved'), 'MARK_NOT_FOUND', '这条标记已不存在。');
+    requireMark(row !== undefined && (row.status === 'open' || row.status === 'resolved' || row.status === 'applied'), 'MARK_NOT_FOUND', '这条标记已不存在。');
     const kind = text(row.kind) as EditorialMarkKind;
     const replies = (this.#db.prepare(
       'SELECT reply_id, body, created_at FROM editorial_mark_replies WHERE mark_id = ? ORDER BY ordinal',
@@ -540,7 +585,7 @@ export class EditorialMarkStore {
     return {
       markId,
       kind,
-      status: text(row.status) as 'open' | 'resolved',
+      status: text(row.status) as EditorialMarkStatus,
       anchorState: text(row.anchor_state) as EditorialMarkCardProjection['anchorState'],
       highlightColor: row.highlight_color === null ? null : integer(row.highlight_color) as PersonalHighlightColor,
       blockId: text(row.block_id),
@@ -625,6 +670,7 @@ export class EditorialMarkStore {
     transact(this.#db, () => {
       const mark = this.#liveMark(input);
       requireMark(mark.kind === 'change-suggestion', 'MARK_ACTION_INVALID', '只有修改建议可以这样处理。');
+      requireMark(mark.status !== 'applied', 'MARK_DECISION_INVALID', '这条修改建议已经应用；要改回去，请准备撤销本次应用。');
       const item = this.#db.prepare('SELECT item_id, current_text FROM proposal_change_items WHERE mark_id = ?').get(input.markId) as SqlRow | undefined;
       requireMark(item !== undefined, 'MARK_STORE_INVALID', '修改建议缺少提案修改项。');
       const itemId = text(item.item_id);
@@ -708,6 +754,7 @@ export class EditorialMarkStore {
   #convert(input: UpdateEditorialMarkInput, mark: SqlRow, kind: EditorialMarkKind, now: string): string {
     const target = input.targetKind;
     requireMark(target !== null && CONVERSIONS[kind].includes(target), 'MARK_ACTION_INVALID', '这种标记不能这样转换。');
+    requireMark(mark.status !== 'applied', 'MARK_ACTION_INVALID', '已经应用的修改建议不能转换。');
     requireMark(mark.anchor_state === 'exact', 'MARK_ANCHOR_CHANGED', '原文已变，请先重新标注再转换。');
     const pinnedText = text(mark.pinned_text);
     let source: EditorialMarkSourceProjection = { kind: 'editor', origin: null, label: null, taskId: null };
@@ -782,7 +829,104 @@ export class EditorialMarkStore {
       rationale: text(item.rationale),
       atomicGroupId: nullableText(item.atomic_group_id),
       decision,
+      application: applicationOfItem(this.#db, text(item.item_id)),
     };
+  }
+
+  /**
+   * The seam the Apply owner works through (Issue #408), always inside its own transaction: what one
+   * Change Suggestion asks to have written, the Proposal Decision the one interaction records, and
+   * where the mark stands once the text under it is the applied text — or the restored one.
+   */
+  suggestionTarget(binding: { manuscriptId: string; branchId: string; markId: string }): {
+    itemId: string; blockId: string; fromGrapheme: number; toGrapheme: number; anchorState: string; status: string;
+    currentText: string; proposedText: string; standingText: string;
+    decision: { decisionId: string; disposition: string; editedText: string | null } | null;
+  } {
+    const mark = this.#liveMark(binding);
+    requireMark(mark.kind === 'change-suggestion', 'MARK_ACTION_INVALID', '只有修改建议可以应用。');
+    const item = this.#db.prepare('SELECT item_id, current_text, proposed_text FROM proposal_change_items WHERE mark_id = ?').get(binding.markId) as SqlRow | undefined;
+    requireMark(item !== undefined, 'MARK_STORE_INVALID', '修改建议缺少提案修改项。');
+    const decision = this.#db.prepare(
+      'SELECT decision_id, disposition, edited_text FROM proposal_item_decisions WHERE item_id = ? ORDER BY ordinal DESC LIMIT 1',
+    ).get(text(item.item_id)) as SqlRow | undefined;
+    return {
+      itemId: text(item.item_id),
+      blockId: text(mark.block_id),
+      fromGrapheme: integer(mark.from_grapheme),
+      toGrapheme: integer(mark.to_grapheme),
+      anchorState: text(mark.anchor_state),
+      status: text(mark.status),
+      currentText: text(item.current_text),
+      proposedText: text(item.proposed_text),
+      standingText: text(mark.pinned_text),
+      decision: decision === undefined || decision.disposition === 'withdrawn' ? null : {
+        decisionId: text(decision.decision_id),
+        disposition: text(decision.disposition),
+        editedText: nullableText(decision.edited_text),
+      },
+    };
+  }
+
+  recordDecisionForApply(
+    binding: { manuscriptId: string; branchId: string },
+    itemId: string,
+    blockId: string,
+    disposition: 'accepted' | 'accepted-with-edit' | 'withdrawn',
+    editedText: string | null,
+    reason: string | null,
+    now: string,
+  ): string {
+    const current = this.#db.prepare(
+      'SELECT decision_id, ordinal FROM proposal_item_decisions WHERE item_id = ? ORDER BY ordinal DESC LIMIT 1',
+    ).get(itemId) as SqlRow | undefined;
+    const state = this.#branchState(binding.manuscriptId, binding.branchId);
+    const block = this.#db.prepare('SELECT digest FROM working_blocks WHERE branch_id = ? AND block_id = ?').get(binding.branchId, blockId) as SqlRow | undefined;
+    const decisionId = randomUUID();
+    this.#db.prepare(
+      `INSERT INTO proposal_item_decisions(
+         decision_id, client_decision_id, item_id, ordinal, disposition, edited_text, supersedes_decision_id,
+         decided_revision_id, decided_journal_sequence, decided_block_digest, actor, recorded_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'editor', ?)`,
+    ).run(
+      decisionId, randomUUID(), itemId, current === undefined ? 1 : integer(current.ordinal) + 1, disposition, editedText,
+      current === undefined ? null : text(current.decision_id), state.revisionId, state.journalSequence,
+      block === undefined ? null : text(block.digest), now,
+    );
+    if (reason !== null) {
+      this.#db.prepare(
+        "INSERT INTO proposal_decision_reasons(decision_id, reason, reason_source, recorded_at) VALUES (?, ?, 'reason-field', ?)",
+      ).run(decisionId, this.#body(reason), now);
+    }
+    return decisionId;
+  }
+
+  /**
+   * Put a mark on the text an Apply — or its reversal — just wrote. The mark is the mutable relation:
+   * it is re-pinned to what now stands under it, and what stood there before stays in the Proposal
+   * Change Item and in the Effect's own target record.
+   */
+  standMarkOn(
+    markId: string,
+    status: 'applied' | 'open',
+    pin: { revisionId: string; journalSequence: number; blockDigest: string; fromGrapheme: number; toGrapheme: number; text: string },
+    now: string,
+  ): void {
+    const updated = this.#db.prepare(
+      `UPDATE editorial_marks SET status = ?, pinned_revision_id = ?, pinned_journal_sequence = ?, pinned_block_digest = ?,
+         pinned_from_grapheme = ?, pinned_to_grapheme = ?, pinned_text = ?, pinned_text_digest = ?,
+         from_grapheme = ?, to_grapheme = ?, anchor_state = 'exact', followed_journal_sequence = ?, updated_at = ?
+       WHERE mark_id = ?`,
+    ).run(
+      status, pin.revisionId, pin.journalSequence, pin.blockDigest, pin.fromGrapheme, pin.toGrapheme, pin.text, sha256(pin.text),
+      pin.fromGrapheme, pin.toGrapheme, pin.journalSequence, now, markId,
+    );
+    requireMark(updated.changes === 1, 'MARK_STORE_INVALID', '标记记录无效。');
+  }
+
+  commandProjection(binding: { manuscriptId: string; branchId: string; windowStartBlockId: string }, markId: string): EditorialMarkCommandProjection {
+    this.#requireBinding(binding);
+    return this.#command(binding, markId);
   }
 
   #command(binding: { manuscriptId: string; branchId: string; windowStartBlockId: string }, markId: string, gone = false): EditorialMarkCommandProjection {

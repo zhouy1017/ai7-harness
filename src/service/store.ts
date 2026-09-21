@@ -26,11 +26,15 @@ import type {
   ManuscriptBlockProjection,
   ManuscriptReimportCommitProjection,
   ManuscriptReimportTargetSelection,
+  ApplyChangeSuggestionBatchInput,
+  ApplyChangeSuggestionInput,
   CreateEditorialMarkInput,
   EditorialMarkCardProjection,
   EditorialMarkCommandProjection,
   JournalAcknowledgement,
   JournalEditInput,
+  ManuscriptApplyCommandProjection,
+  ManuscriptApplyOutcomeProjection,
   ManuscriptConversionProjection,
   ManuscriptEntryPositionProjection,
   ManuscriptWindowProjection,
@@ -38,6 +42,7 @@ import type {
   ModelServiceConnectionProjection,
   RecordChangeSuggestionDecisionInput,
   RecordProposalDecisionReasonInput,
+  ReverseAppliedChangeSuggestionInput,
   UpdateEditorialMarkInput,
   NewBookImportTargetChoiceId,
   OriginalFileAccessProjection,
@@ -114,6 +119,7 @@ import {
   isTextConversionRefusal,
   type ConversionLoss,
 } from './text-manuscript.js';
+import { initializeManuscriptEffectSchema, ManuscriptApplyStore } from './manuscript-apply.js';
 import {
   EditorialMarkError,
   EditorialMarkStore,
@@ -159,6 +165,7 @@ import {
   initializeTaskAuthorizationSchema,
   J03_TASK_AUTHORIZATION_SCHEMA_VERSION,
   EDITORIAL_MARK_SCHEMA_VERSION,
+  MANUSCRIPT_EFFECT_SCHEMA_VERSION,
   J04_BASELINE_ANALYSIS_SCHEMA_VERSION,
   MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION,
   MANUSCRIPT_INTAKE_SCHEMA_VERSION,
@@ -1354,7 +1361,8 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === TEXT_CONVERSION_SCHEMA_VERSION ||
       currentVersion === FACTUAL_REVIEW_SCHEMA_VERSION ||
       currentVersion === MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION ||
-      currentVersion === EDITORIAL_MARK_SCHEMA_VERSION,
+      currentVersion === EDITORIAL_MARK_SCHEMA_VERSION ||
+      currentVersion === MANUSCRIPT_EFFECT_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -1376,7 +1384,8 @@ function initializeSchema(db: DatabaseSync): void {
     currentVersion === TEXT_CONVERSION_SCHEMA_VERSION ||
     currentVersion === FACTUAL_REVIEW_SCHEMA_VERSION ||
     currentVersion === MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION ||
-    currentVersion === EDITORIAL_MARK_SCHEMA_VERSION
+    currentVersion === EDITORIAL_MARK_SCHEMA_VERSION ||
+    currentVersion === MANUSCRIPT_EFFECT_SCHEMA_VERSION
   ) return;
   if (currentVersion === 1) {
     migrateSchemaV1ToV2(db);
@@ -1712,7 +1721,8 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === J04_BASELINE_ANALYSIS_SCHEMA_VERSION || version === SUCCESSIVE_TASK_SCHEMA_VERSION ||
       version === TASK_AUTHORIZATION_SCHEMA_VERSION || version === MANUSCRIPT_INTAKE_SCHEMA_VERSION ||
       version === TEXT_CONVERSION_SCHEMA_VERSION || version === FACTUAL_REVIEW_SCHEMA_VERSION ||
-      version === MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION || version === EDITORIAL_MARK_SCHEMA_VERSION,
+      version === MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION || version === EDITORIAL_MARK_SCHEMA_VERSION ||
+      version === MANUSCRIPT_EFFECT_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -1723,7 +1733,8 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === J04_BASELINE_ANALYSIS_SCHEMA_VERSION || version === SUCCESSIVE_TASK_SCHEMA_VERSION ||
       version === TASK_AUTHORIZATION_SCHEMA_VERSION || version === MANUSCRIPT_INTAKE_SCHEMA_VERSION ||
       version === TEXT_CONVERSION_SCHEMA_VERSION || version === FACTUAL_REVIEW_SCHEMA_VERSION ||
-      version === MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION || version === EDITORIAL_MARK_SCHEMA_VERSION) return;
+      version === MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION || version === EDITORIAL_MARK_SCHEMA_VERSION ||
+      version === MANUSCRIPT_EFFECT_SCHEMA_VERSION) return;
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
   );
@@ -1826,7 +1837,8 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === J04_BASELINE_ANALYSIS_SCHEMA_VERSION || version === SUCCESSIVE_TASK_SCHEMA_VERSION ||
       version === TASK_AUTHORIZATION_SCHEMA_VERSION || version === MANUSCRIPT_INTAKE_SCHEMA_VERSION ||
       version === TEXT_CONVERSION_SCHEMA_VERSION || version === FACTUAL_REVIEW_SCHEMA_VERSION ||
-      version === MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION || version === EDITORIAL_MARK_SCHEMA_VERSION,
+      version === MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION || version === EDITORIAL_MARK_SCHEMA_VERSION ||
+      version === MANUSCRIPT_EFFECT_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -1836,7 +1848,8 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === J04_BASELINE_ANALYSIS_SCHEMA_VERSION || version === SUCCESSIVE_TASK_SCHEMA_VERSION ||
       version === TASK_AUTHORIZATION_SCHEMA_VERSION || version === MANUSCRIPT_INTAKE_SCHEMA_VERSION ||
       version === TEXT_CONVERSION_SCHEMA_VERSION || version === FACTUAL_REVIEW_SCHEMA_VERSION ||
-      version === MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION || version === EDITORIAL_MARK_SCHEMA_VERSION) return;
+      version === MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION || version === EDITORIAL_MARK_SCHEMA_VERSION ||
+      version === MANUSCRIPT_EFFECT_SCHEMA_VERSION) return;
   validateSourceImportSchemaTruth(db, profile);
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
@@ -2129,7 +2142,7 @@ function validateModelServiceSchema(
   const version = asNumber(
     one(db.prepare('PRAGMA user_version').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取数据库版本。').user_version,
   );
-  if (validateStoreTruth || version !== EDITORIAL_MARK_SCHEMA_VERSION) {
+  if (validateStoreTruth || version !== MANUSCRIPT_EFFECT_SCHEMA_VERSION) {
     validateManuscriptReimportSchemaTruth(
       db,
       profile,
@@ -2141,6 +2154,7 @@ function validateModelServiceSchema(
       version >= TASK_AUTHORIZATION_SCHEMA_VERSION,
       version >= MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION,
       version >= EDITORIAL_MARK_SCHEMA_VERSION,
+      version >= MANUSCRIPT_EFFECT_SCHEMA_VERSION,
     );
   }
   const invalid = db.prepare(
@@ -2178,7 +2192,8 @@ function initializeModelServiceSchema(
       version === J04_BASELINE_ANALYSIS_SCHEMA_VERSION || version === SUCCESSIVE_TASK_SCHEMA_VERSION ||
       version === TASK_AUTHORIZATION_SCHEMA_VERSION || version === MANUSCRIPT_INTAKE_SCHEMA_VERSION ||
       version === TEXT_CONVERSION_SCHEMA_VERSION || version === FACTUAL_REVIEW_SCHEMA_VERSION ||
-      version === MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION || version === EDITORIAL_MARK_SCHEMA_VERSION,
+      version === MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION || version === EDITORIAL_MARK_SCHEMA_VERSION ||
+      version === MANUSCRIPT_EFFECT_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2188,7 +2203,8 @@ function initializeModelServiceSchema(
       version === J04_BASELINE_ANALYSIS_SCHEMA_VERSION || version === SUCCESSIVE_TASK_SCHEMA_VERSION ||
       version === TASK_AUTHORIZATION_SCHEMA_VERSION || version === MANUSCRIPT_INTAKE_SCHEMA_VERSION ||
       version === TEXT_CONVERSION_SCHEMA_VERSION || version === FACTUAL_REVIEW_SCHEMA_VERSION ||
-      version === MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION || version === EDITORIAL_MARK_SCHEMA_VERSION) {
+      version === MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION || version === EDITORIAL_MARK_SCHEMA_VERSION ||
+      version === MANUSCRIPT_EFFECT_SCHEMA_VERSION) {
     validateModelServiceSchema(db, profile, validateStoreTruth);
     if (version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION) {
       validateEditorialWorkspaceProfileNativeSchema(db);
@@ -2926,6 +2942,7 @@ export class EditorialStore {
   readonly #baselineAnalysis: BaselineAnalysisStore;
   readonly #factualReview: BaselineAnalysisStore;
   readonly #editorialMarks: EditorialMarkStore;
+  readonly #manuscriptApply: ManuscriptApplyStore;
   readonly #workflowProfile: BuiltInWorkflowProfile;
   readonly #lifetimeId: string;
   readonly #control: StoreControl;
@@ -2968,6 +2985,7 @@ export class EditorialStore {
     this.#baselineAnalysis = baselineAnalysis;
     this.#factualReview = factualReview;
     this.#editorialMarks = new EditorialMarkStore(authority);
+    this.#manuscriptApply = new ManuscriptApplyStore(authority, boundedAuthority, this.#editorialMarks, lifetimeId);
     this.#workflowProfile = workflowProfile;
     this.#lifetimeId = lifetimeId;
     this.#control = control;
@@ -3020,12 +3038,13 @@ export class EditorialStore {
       const editorialWorkspaceProfile = await EditorialWorkspaceProfileStore.open(authority, dataRoot, codeRoot);
       // The intake relations widen before the terminal version moves, so the version and the shape it
       // names change together for every store that reaches revision 18, and again for revision 19,
-      // and again for the entry-position relation revision 21 adds and the editorial-mark relations
-      // revision 22 adds.
+      // and again for the entry-position relation revision 21 adds, the editorial-mark relations
+      // revision 22 adds and the manuscript-effect relations revision 23 adds.
       initializeManuscriptIntakeSchema(authority);
       initializeTextConversionSchema(authority);
       initializeManuscriptEntryPositionSchema(authority);
       initializeEditorialMarkSchema(authority);
+      initializeManuscriptEffectSchema(authority);
       initializeTaskAuthorizationSchema(authority);
       initializeBoundedSchema(authority, workflowProfile);
       validateEditorialWorkspaceProfileSchema(authority);
@@ -7698,6 +7717,27 @@ export class EditorialStore {
 
   recordProposalDecisionReason(input: RecordProposalDecisionReasonInput): EditorialMarkCommandProjection {
     return this.#markCall(() => this.#editorialMarks.recordDecisionReason(input));
+  }
+
+  /**
+   * AI7 Apply for Change Suggestions (Issue #408): the one path by which a suggestion's text reaches
+   * the manuscript, each commit written with its Effect Receipt in one transaction on the authority
+   * connection.
+   */
+  applyChangeSuggestion(input: ApplyChangeSuggestionInput): ManuscriptApplyCommandProjection {
+    return this.#markCall(() => this.#boundedCall(() => this.#manuscriptApply.apply(input)));
+  }
+
+  applyChangeSuggestionBatch(input: ApplyChangeSuggestionBatchInput): ManuscriptApplyCommandProjection {
+    return this.#markCall(() => this.#boundedCall(() => this.#manuscriptApply.applyBatch(input)));
+  }
+
+  reverseAppliedChangeSuggestion(input: ReverseAppliedChangeSuggestionInput): ManuscriptApplyCommandProjection {
+    return this.#markCall(() => this.#boundedCall(() => this.#manuscriptApply.reverse(input)));
+  }
+
+  getManuscriptApplyOutcome(manuscriptId: string, branchId: string, clientEffectId: string): ManuscriptApplyOutcomeProjection {
+    return this.#markCall(() => this.#manuscriptApply.outcome(manuscriptId, branchId, clientEffectId));
   }
 
   /** A mark AI7 or an import produces; the manuscript surface is never its caller. */

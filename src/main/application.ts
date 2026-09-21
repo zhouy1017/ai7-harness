@@ -1649,6 +1649,42 @@ function registerRendererHandlers(
         });
       }),
   );
+  // AI7 Apply (Issue #408) writes the manuscript, so it is gated as a journal write is and serialized
+  // with every other effect; the window's capability is re-read from the window the Apply answers with.
+  ipcMain.handle(IPC_CHANNELS.applyChangeSuggestion, (event, input: ServiceOperationMap['applyChangeSuggestion']['input']) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      return serializeEffect(async () => {
+        requireAuthority();
+        requireManuscriptCapability(owned, input);
+        const result = await service.call('applyChangeSuggestion', input);
+        rememberManuscriptCapability(owned, result.window, input, owned.routeGeneration);
+        return result;
+      });
+    }),
+  );
+  ipcMain.handle(
+    IPC_CHANNELS.reverseAppliedChangeSuggestion,
+    (event, input: ServiceOperationMap['reverseAppliedChangeSuggestion']['input']) =>
+      envelope(async () => {
+        const owned = requireSender(event);
+        return serializeEffect(async () => {
+          requireAuthority();
+          requireManuscriptCapability(owned, input);
+          const result = await service.call('reverseAppliedChangeSuggestion', input);
+          rememberManuscriptCapability(owned, result.window, input, owned.routeGeneration);
+          return result;
+        });
+      }),
+  );
+  ipcMain.handle(IPC_CHANNELS.getManuscriptApplyOutcome, (event, input: ServiceOperationMap['getManuscriptApplyOutcome']['input']) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      requireAuthority();
+      requireManuscriptCapability(owned, input);
+      return service.call('getManuscriptApplyOutcome', input);
+    }),
+  );
   // The selection menu's 文字处理 group. The page holds no clipboard permission, so the window that
   // owns the focused editor runs the command itself; it reaches no service and takes nothing but the
   // command's name, and the editor's own paste and cut handling still decides what enters the text.

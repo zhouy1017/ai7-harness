@@ -585,6 +585,58 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       }
       break;
     }
+    case 'applyChangeSuggestion': {
+      const input = requireInput(
+        value.input,
+        ['manuscriptId', 'branchId', 'windowStartBlockId', 'markId', 'clientEffectId', 'interaction', 'editedText', 'reason'],
+        tentativeId,
+      );
+      if (
+        !validMarkBinding(input) ||
+        !isBoundedString(input.markId, 36) || !UUID_PATTERN.test(input.markId) ||
+        !isBoundedString(input.clientEffectId, 36) || !UUID_PATTERN.test(input.clientEffectId) ||
+        !(input.interaction === 'accept-and-apply' || input.interaction === 'accept-edited-and-apply' || input.interaction === 'apply-recorded-decision') ||
+        !(input.editedText === null || isBoundedString(input.editedText, MAX_MARK_BODY_CODE_UNITS, true)) ||
+        !(input.reason === null || isBoundedString(input.reason, MAX_MARK_BODY_CODE_UNITS))
+      ) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
+    case 'applyChangeSuggestionBatch': {
+      const input = requireInput(value.input, ['manuscriptId', 'branchId', 'windowStartBlockId', 'markIds', 'clientEffectId'], tentativeId);
+      if (
+        !validMarkBinding(input) ||
+        !isBoundedString(input.clientEffectId, 36) || !UUID_PATTERN.test(input.clientEffectId) ||
+        !Array.isArray(input.markIds) || input.markIds.length === 0 || input.markIds.length > 500 ||
+        !input.markIds.every((markId) => isBoundedString(markId, 36) && UUID_PATTERN.test(markId))
+      ) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
+    case 'reverseAppliedChangeSuggestion': {
+      const input = requireInput(value.input, ['manuscriptId', 'branchId', 'windowStartBlockId', 'markId', 'clientEffectId'], tentativeId);
+      if (
+        !validMarkBinding(input) ||
+        !isBoundedString(input.markId, 36) || !UUID_PATTERN.test(input.markId) ||
+        !isBoundedString(input.clientEffectId, 36) || !UUID_PATTERN.test(input.clientEffectId)
+      ) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
+    case 'getManuscriptApplyOutcome': {
+      const input = requireInput(value.input, ['manuscriptId', 'branchId', 'clientEffectId'], tentativeId);
+      if (
+        !isBoundedString(input.manuscriptId, 36) || !UUID_PATTERN.test(input.manuscriptId) ||
+        !isBoundedString(input.branchId, 36) || !UUID_PATTERN.test(input.branchId) ||
+        !isBoundedString(input.clientEffectId, 36) || !UUID_PATTERN.test(input.clientEffectId)
+      ) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
     case 'recordProposalDecisionReason': {
       const input = requireInput(
         value.input,
