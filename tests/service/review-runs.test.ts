@@ -300,5 +300,82 @@ describe('a Review Run over the real store on exact sample1', () => {
       expect(after.run!.reviewRunId).toBe(settled.reviewRunId);
     });
   }, 300_000);
+  it('derives each finding\'s status from its mark, records an ignored finding with its reason and Quality Signal, and versions the Report', async () => {
+    await withBook('sample1-review-authored', async (session, book) => {
+      const run = await authorizeAndDrive(session, book, prepare(session, book, [TYPOS, STYLE], WHOLE));
+      const reviewRunId = run.reviewRunId;
+      const [annotation, anotherAnnotation] = run.findings.filter((finding) => finding.categoryId === STYLE);
+      const [applied, ignored] = run.findings.filter((finding) => finding.categoryId === TYPOS && finding.severity !== 'must');
+      const must = run.findings.filter((finding) => finding.severity === 'must');
+      expect(annotation && anotherAnnotation && applied && ignored).toBeTruthy();
+      expect(must.length).toBeGreaterThan(0);
+
+      // 标记为已处理 on the manuscript is the finding handled in 审阅 (FIND-002: one record, every surface).
+      session.store.updateEditorialMark({
+        ...binding(session, book), markId: annotation!.markId!, action: 'set-status', body: null, highlightColor: null, status: 'resolved',
+        targetKind: null, proposedText: null, rationale: null,
+      });
+      // 接受并应用 through the one Apply path is handled too.
+      session.store.applyChangeSuggestion({ ...binding(session, book), markId: applied!.markId!, clientEffectId: randomUUID(), interaction: 'accept-and-apply', editedText: null, reason: null });
+      let current = workspace(session, book, reviewRunId).run!;
+      const status = (findingId: string) => current.findings.find((finding) => finding.findingId === findingId)!;
+      expect(status(annotation!.findingId)).toMatchObject({ status: 'handled', statusLabel: '已处理', statusDetail: '已标记为已处理', markStatus: 'resolved' });
+      expect(status(applied!.findingId)).toMatchObject({ status: 'handled', statusDetail: '已接受并应用', markStatus: 'applied' });
+
+      // 忽略并说明 needs its reason, and only a pending finding can be ignored.
+      expect(storeCode(() => session.store.recordReviewFindingDisposition(book.bookId, reviewRunId, ignored!.findingId, '   '))).toBe('REVIEW_REASON_REQUIRED');
+      expect(storeCode(() => session.store.recordReviewFindingDisposition(book.bookId, reviewRunId, ignored!.findingId, '字'.repeat(501)))).toBe('REVIEW_REASON_TOO_LONG');
+      expect(storeCode(() => session.store.recordReviewFindingDisposition(book.bookId, reviewRunId, applied!.findingId, '已经应用'))).toBe('REVIEW_FINDING_NOT_PENDING');
+      const reason = '作者坚持保留这一写法，出版社体例允许。';
+      current = session.store.recordReviewFindingDisposition(book.bookId, reviewRunId, ignored!.findingId, `  ${reason}  `).run!;
+      expect(status(ignored!.findingId)).toMatchObject({ status: 'ignored', statusLabel: '已忽略', ignoreReason: reason, markStatus: 'removed' });
+      expect(storeCode(() => session.store.recordReviewFindingDisposition(book.bookId, reviewRunId, ignored!.findingId, reason))).toBe('REVIEW_FINDING_NOT_PENDING');
+      // The ignored finding's mark is set aside: it no longer stands on the manuscript.
+      expect(storeCode(() => session.store.getEditorialMarkCard(book.manuscriptId, book.branchId, ignored!.markId!))).toBe('MARK_NOT_FOUND');
+      expect(current.findingCounts).toMatchObject({ handled: 2, ignored: 1, pending: current.findings.length - 3 });
+
+      const db = database();
+      try {
+        const signals = db.prepare('SELECT * FROM quality_signals').all() as Array<Record<string, unknown>>;
+        expect(signals).toHaveLength(1);
+        expect(signals[0]).toMatchObject({ kind: 'review-finding-ignored', book_id: book.bookId, review_run_id: reviewRunId, category_id: TYPOS, finding_id: ignored!.findingId, mark_id: ignored!.markId, reason });
+        const bound = JSON.parse(signals[0]!.canonical_json as string) as { binding: Record<string, unknown>; disposition: Record<string, unknown> };
+        expect(bound.binding).toMatchObject({ reviewRunId, reviewRunOrdinal: 1, categoryId: TYPOS, findingId: ignored!.findingId, configurationDigest: workspace(session, book).configuration.digest });
+        expect(bound.disposition).toMatchObject({ disposition: 'ignored', reason });
+        expect((db.prepare('SELECT count(*) total FROM review_finding_dispositions').get() as { total: number }).total).toBe(1);
+        // Every relation of the Review Run ledger is append-only.
+        for (const relation of ['review_runs', 'review_run_authorizations', 'review_run_category_events', 'review_findings', 'review_finding_dispositions', 'quality_signals']) {
+          expect(() => db.exec(`UPDATE ${relation} SET rowid = rowid`)).toThrow(/REVIEW_LEDGER_IMMUTABLE/u);
+          expect(() => db.exec(`DELETE FROM ${relation}`)).toThrow(/REVIEW_LEDGER_IMMUTABLE/u);
+        }
+      } finally {
+        db.close();
+      }
+
+      // 审阅报告 version 1, then version 2 over what stands later; the first is never rewritten.
+      const first = session.store.generateReviewReport(book.bookId, reviewRunId).run!;
+      expect(first.reportVersions.map((version) => version.version)).toEqual([1]);
+      const report = first.report!;
+      expect([report.record.overview.title, report.record.mustItems.title, report.record.categorySummaries.title, report.record.appendix.title])
+        .toEqual(['概览表', '必须处理的事项', '各类别摘要', '附录']);
+      expect(report.record.mustItems.items.map((item) => item.findingId).sort()).toEqual(must.map((finding) => finding.findingId).sort());
+      expect(report.record.mustItems.items.every((item) => graphemeCount(item.quote) <= 80 && item.locationLabel.startsWith('内容块 '))).toBe(true);
+      expect(report.record.overview.rows.find((row) => row.categoryId === TYPOS)!.counts).toMatchObject({ handled: 1, ignored: 1 });
+      expect(report.record.appendix.categories.map((category) => [category.categoryId, category.procedure.version, category.guidelineDocuments[0]!.version]))
+        .toEqual([[TYPOS, '1', '1'], [STYLE, '1', '1']]);
+      expect(report.record.appendix.categories[0]!.adapterPin).toMatchObject({ route: 'ai7-local-deterministic', fixtureIdentity: 'sample1-review-authored' });
+      expect(report.record.appendix.configuration.digest).toBe(first.configurationDigest);
+      session.store.updateEditorialMark({
+        ...binding(session, book), markId: anotherAnnotation!.markId!, action: 'set-status', body: null, highlightColor: null, status: 'resolved',
+        targetKind: null, proposedText: null, rationale: null,
+      });
+      const second = session.store.generateReviewReport(book.bookId, reviewRunId).run!;
+      expect(second.reportVersions.map((version) => version.version)).toEqual([1, 2]);
+      expect(second.reportVersions[0]!.digest).toBe(report.digest);
+      expect(second.report!.version).toBe(2);
+      expect(second.report!.record.overview.rows.find((row) => row.categoryId === STYLE)!.counts.handled).toBe(2);
+      expect(workspace(session, book).runs[0]!.reportVersion).toBe(2);
+    });
+  }, 300_000);
 // REVIEW-RUNS-TESTS
 });
