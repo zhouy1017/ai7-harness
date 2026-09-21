@@ -706,17 +706,34 @@ async function main() {
     await renderer.send('Emulation.setDeviceMetricsOverride', { width: 640, height: 800, deviceScaleFactor: 2, mobile: false });
     await renderer.send('Emulation.setPageScaleFactor', { pageScaleFactor: 2 });
     await waitFor(renderer, `(() => { const card = window.__j05.card(); const pane = document.querySelector('.editor-window'); const block = window.__j05.block(${JSON.stringify(first)}).getBoundingClientRect(); const box = card.getBoundingClientRect(); return card.scrollWidth <= card.clientWidth + 2 && box.right <= pane.getBoundingClientRect().right + 2 && Math.abs(box.left - block.left) <= 2 && box.top >= block.bottom - 1 && document.documentElement.scrollWidth <= document.documentElement.clientWidth + 2; })()`, 'card-reflows-at-200', 10_000);
+    // The narrow column still holds all three lanes: no marker hangs over its edge.
+    await assertRenderer(renderer, `(() => { const edge = document.querySelector('.editor-edge').getBoundingClientRect(); const markers = Array.from(document.querySelectorAll('.rail-marker')); return markers.length > 0 && markers.every((marker) => { const box = marker.getBoundingClientRect(); return box.left >= edge.left && box.right <= edge.right + 0.5; }); })()`, 'rail-lanes-inside-the-narrow-column');
     await press(renderer, 'Escape');
 
     at('menu-stays-open-at-the-pane-edge');
     // On a narrow window a menu opened at the text column's right edge has nowhere to go but over the
     // pane's edge. It floats over the window, so it neither brings a scrollbar into the pane nor is
     // closed by the pane's own reflow — which is what closed it, the moment it opened, on hosted runners.
+    // The card that just closed gave its height back to the pane, and the pane settles a frame or more
+    // later — on a hosted runner late enough to arrive after the menu and close it, as any scroll of the
+    // pane rightly does. The step therefore starts from a pane at rest, watches what happens to the menu,
+    // and names what it found: a hosted runner says nothing but a stage name.
+    await renderer.evaluate(`new Promise((resolve) => { const pane = document.querySelector('.editor-window'); let last = pane.scrollTop; let quiet = 0; const tick = () => { if (pane.scrollTop !== last) { last = pane.scrollTop; quiet = 0; } else quiet += 1; if (quiet >= 10) resolve(true); else requestAnimationFrame(tick); }; requestAnimationFrame(tick); })`);
     await assertRenderer(renderer, `window.__j05.place(${JSON.stringify(first)}, 0, 0)`, 'edge-caret');
     await new Promise((resolveWait) => setTimeout(resolveWait, 120));
-    await assertRenderer(renderer, `(() => { window.__j05Pane = document.querySelector('.editor-window').scrollWidth; return window.__j05.rightClick(window.__j05.block(${JSON.stringify(first)}), true); })()`, 'edge-right-click');
+    await assertRenderer(renderer, `(() => { const pane = document.querySelector('.editor-window'); const layer = document.querySelector('.editorial-mark-menu-layer'); const seen = { opened: false, paneScrolled: false, windowResized: false }; const observer = new MutationObserver(() => { if (layer.querySelector('[data-mark-menu]')) seen.opened = true; }); observer.observe(layer, { childList: true, subtree: true }); const onScroll = () => { if (seen.opened) seen.paneScrolled = true; }; const onResize = () => { if (seen.opened) seen.windowResized = true; }; pane.addEventListener('scroll', onScroll, { passive: true }); window.addEventListener('resize', onResize); window.__j05Edge = { seen, stop: () => { observer.disconnect(); pane.removeEventListener('scroll', onScroll); window.removeEventListener('resize', onResize); } }; window.__j05Pane = pane.scrollWidth; return window.__j05.rightClick(window.__j05.block(${JSON.stringify(first)}), true); })()`, 'edge-right-click');
     await new Promise((resolveWait) => setTimeout(resolveWait, 400));
-    await assertRenderer(renderer, `(() => { const menu = window.__j05.menu(); if (menu === null) return false; const box = menu.getBoundingClientRect(); const pane = document.querySelector('.editor-window'); return box.left >= 0 && box.right <= window.innerWidth && box.top >= 0 && pane.scrollWidth <= window.__j05Pane && document.documentElement.scrollWidth <= document.documentElement.clientWidth + 2; })()`, 'edge-menu-open-and-inside-the-window');
+    const edge = await renderer.evaluate(`(() => { const { seen, stop } = window.__j05Edge; stop(); const menu = window.__j05.menu(); const box = menu?.getBoundingClientRect(); const pane = document.querySelector('.editor-window'); return { ...seen, open: menu !== null, inside: menu !== null && box.left >= 0 && box.right <= window.innerWidth && box.top >= 0, paneKept: pane.scrollWidth <= window.__j05Pane, pageKept: document.documentElement.scrollWidth <= document.documentElement.clientWidth + 2 }; })()`);
+    if (edge?.open !== true || edge.inside !== true || edge.paneKept !== true || edge.pageKept !== true) {
+      if (edge?.opened !== true) at('menu-stays-open-at-the-pane-edge-never-opened');
+      else if (edge.open !== true && edge.paneScrolled === true) at('menu-stays-open-at-the-pane-edge-closed-by-pane-scroll');
+      else if (edge.open !== true && edge.windowResized === true) at('menu-stays-open-at-the-pane-edge-closed-by-window-resize');
+      else if (edge.open !== true) at('menu-stays-open-at-the-pane-edge-closed-otherwise');
+      else if (edge.inside !== true) at('menu-stays-open-at-the-pane-edge-outside-the-window');
+      else if (edge.paneKept !== true) at('menu-stays-open-at-the-pane-edge-pane-grew');
+      else at('menu-stays-open-at-the-pane-edge-page-scrolls-sideways');
+      requireJourney(false, 'edge-menu-open-and-inside-the-window', edge);
+    }
     await press(renderer, 'Escape');
     await waitFor(renderer, `window.__j05.menu() === null`, 'edge-menu-closed', 15_000);
     await renderer.send('Emulation.setPageScaleFactor', { pageScaleFactor: 1 });

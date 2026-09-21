@@ -650,6 +650,13 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'clipboard-commands',
     'j14-marks-zoom-200-reflow',
     'menu-stays-open-at-the-pane-edge',
+    'menu-stays-open-at-the-pane-edge-never-opened',
+    'menu-stays-open-at-the-pane-edge-closed-by-pane-scroll',
+    'menu-stays-open-at-the-pane-edge-closed-by-window-resize',
+    'menu-stays-open-at-the-pane-edge-closed-otherwise',
+    'menu-stays-open-at-the-pane-edge-outside-the-window',
+    'menu-stays-open-at-the-pane-edge-pane-grew',
+    'menu-stays-open-at-the-pane-edge-page-scrolls-sideways',
     'j14-marks-forced-colors',
     // The keyboard path names the precondition a step found missing, because a hosted runner says
     // nothing but the stage: the pattern `cooperative-position-*` set for J-02.

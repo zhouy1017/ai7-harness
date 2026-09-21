@@ -458,6 +458,11 @@ legend { margin-bottom: .7rem; font-weight: 800; }
   .editor-toolbar { align-items: flex-start; flex-direction: column; }
   .editor-workspace { grid-template-columns: minmax(0, 1fr) 3.4rem; }
   .manuscript-navigator { right: 3.4rem; width: min(21rem, calc(100% - 3.4rem)); }
+  /* The narrow column keeps all three lanes inside itself: smaller markers, closer lanes. */
+  .rail-marker { width: 6px; height: 6px; margin-top: -3px; }
+  .rail-marker[data-rail-lane="1"] { left: calc(50% + 5px); }
+  .rail-marker[data-rail-lane="2"] { left: calc(50% + 12px); }
+  .rail-marker[data-rail-lane="3"] { left: calc(50% + 19px); }
   .edge-entries button { font-size: .74rem; }
   .outline-list, .search-results { max-height: 150px; }
   .editor-window { padding: 1.25rem; }
