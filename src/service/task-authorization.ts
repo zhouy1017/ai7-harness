@@ -71,7 +71,10 @@ export const EDITORIAL_MARK_SCHEMA_VERSION = 22;
 /**
  * The manuscript-effect revision (Issue #408): five additive, append-only relations hold the Effect
  * Intent with its exact targets, the Effect Approval, the dispatch and the Effect Receipt of every AI7
- * Apply and Reverse Apply. `manuscript-apply.ts` owns them and creates them; nothing existing moves
+ * Apply and Reverse Apply, and `editorial_marks` widens three CHECKs so that a 修改建议 whose Apply
+ * deleted its words can stand exactly on the empty range they left. `manuscript-apply.ts` creates the
+ * relations and, in the same transaction, rebuilds a revision-22 `editorial_marks` with every row
+ * copied byte for byte; no existing row changes and each stays valid, so the revision is additive
  * (ADR 0079: an additive revision keeps the same Data Version). This is the terminal version.
  */
 export const MANUSCRIPT_EFFECT_SCHEMA_VERSION = 23;

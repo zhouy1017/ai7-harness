@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import type { BoundedManuscriptStore, ExactReplacementCommit, ExactReplacementTarget } from './bounded-manuscript.js';
-import { applyProjection, EditorialMarkError, type EditorialMarkStore } from './editorial-marks.js';
+import { applyProjection, EditorialMarkError, editorialMarksShape, widenEditorialMarks, type EditorialMarkStore } from './editorial-marks.js';
 import { graphemesOf } from '../shared/mark-anchor.js';
 import {
   MAX_MARK_BODY_CODE_UNITS,
@@ -152,20 +152,45 @@ function sha256(value: string): string {
   return createHash('sha256').update(value, 'utf8').digest('hex');
 }
 
-/** Created once and never rebuilt; shape-detected, like the relations of revisions 21 and 22. */
+/**
+ * Revision 23, once per store and in one transaction. On a store that revision 22 created,
+ * `editorial_marks` is first rebuilt to the text that admits the empty pin an applied deletion stands
+ * on (`widenEditorialMarks`), with foreign keys off around the transaction; then the five Effect
+ * relations are created, and every reference is checked before anything commits. Shape-detected, like
+ * the relations of revisions 21 and 22: once the Effect relations exist this has been done, and the
+ * mark relation is rebuilt only while it holds revision 22's exact text — a new store creates it
+ * widened, and nothing moves for it.
+ */
 export function initializeManuscriptEffectSchema(db: DatabaseSync): void {
   const existing = db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'manuscript_effect_intents'").get();
   if (existing !== undefined) return;
-  db.exec('BEGIN IMMEDIATE');
-  try {
-    for (const sql of Object.values(MANUSCRIPT_EFFECT_SCHEMA_SQL)) db.exec(sql);
-    for (const sql of Object.values(MANUSCRIPT_EFFECT_TRIGGER_SQL)) db.exec(sql);
-    db.exec('COMMIT');
-  } catch (error) {
-    db.exec('ROLLBACK');
-    throw error;
+  const widen = editorialMarksShape(db) === 'revision-22';
+  const foreignKeys = (): number => Number((db.prepare('PRAGMA foreign_keys').get() as SqlRow).foreign_keys);
+  const restoreForeignKeys = widen && foreignKeys() === 1;
+  if (widen) {
+    db.exec('PRAGMA foreign_keys = OFF');
+    requireApply(foreignKeys() === 0, 'SCHEMA_MIGRATION_FAILED', '无法暂时停用引用校验以迁移数据库。');
   }
-  requireApply(db.prepare('PRAGMA foreign_key_check').all().length === 0, 'SCHEMA_MIGRATION_FAILED', '数据库引用校验失败。');
+  try {
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      if (widen) widenEditorialMarks(db);
+      for (const sql of Object.values(MANUSCRIPT_EFFECT_SCHEMA_SQL)) db.exec(sql);
+      for (const sql of Object.values(MANUSCRIPT_EFFECT_TRIGGER_SQL)) db.exec(sql);
+      requireApply(db.prepare('PRAGMA foreign_key_check').all().length === 0, 'SCHEMA_MIGRATION_FAILED', '数据库引用校验失败。');
+      db.exec('COMMIT');
+    } catch (error) {
+      try { db.exec('ROLLBACK'); } catch (rollbackError) {
+        throw new AggregateError([error, rollbackError], 'Manuscript effect schema rollback failed.');
+      }
+      throw error;
+    }
+  } finally {
+    if (restoreForeignKeys) {
+      db.exec('PRAGMA foreign_keys = ON');
+      requireApply(foreignKeys() === 1, 'SCHEMA_MIGRATION_FAILED', '无法恢复引用校验。');
+    }
+  }
 }
 
 interface PlannedTarget {

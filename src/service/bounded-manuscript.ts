@@ -71,6 +71,7 @@ import {
 } from './task-authorization.js';
 import {
   EDITORIAL_MARK_FOREIGN_KEYS,
+  EDITORIAL_MARK_REVISION_22_SQL,
   EDITORIAL_MARK_SCHEMA_SQL,
   EDITORIAL_MARK_TRIGGER_SQL,
   followBlockTextChangeForMarks,
@@ -2333,7 +2334,11 @@ function requireManuscriptReimportTargetSchema(
       ...(includeManuscriptEntryPositionTable
         ? { manuscript_entry_positions: MANUSCRIPT_ENTRY_POSITION_SCHEMA_SQL }
         : {}),
-      ...(includeEditorialMarkTables ? EDITORIAL_MARK_SCHEMA_SQL : {}),
+      // Revision 23 widened `editorial_marks` in the transaction that created the Effect relations: a
+      // store without them holds revision 22's text of it, and a store with them only the widened one.
+      ...(includeEditorialMarkTables
+        ? { ...EDITORIAL_MARK_SCHEMA_SQL, ...(includeManuscriptEffectTables ? {} : EDITORIAL_MARK_REVISION_22_SQL) }
+        : {}),
       ...(includeManuscriptEffectTables ? MANUSCRIPT_EFFECT_SCHEMA_SQL : {}),
     },
     MANUSCRIPT_REIMPORT_INDEX_SQL,
