@@ -704,6 +704,23 @@ describe('a Review Run over the real store on exact sample1', () => {
     }
   }, 300_000);
 
+  it('reads a Book without a manuscript as having nothing to review, and names why', async () => {
+    const session = await open('sample1-review-authored');
+    try {
+      const creation = session.store.prepareBookCreation('空图书', null);
+      const bookId = session.store.commitBookCreation({ ...creation.proposed, reviewDigest: creation.reviewDigest }).overview.book.bookId;
+      const empty = session.store.inspectReviewWorkspace(bookId, null);
+      expect(empty).toMatchObject({ bookId, manuscript: null, newReview: { available: false }, runs: [], run: null });
+      expect(empty.categories.every((category) => !category.available)).toBe(true);
+      expect(empty.coverage.every((row) => row.state === 'unavailable')).toBe(true);
+      expect(empty.scopeOptions.whole.available).toBe(false);
+      expect(storeCode(() => session.store.createReviewRunPreparationWork(bookId, [TYPOS], WHOLE, launchPolicy))).toBe('REVIEW_MANUSCRIPT_ABSENT');
+      expect(storeCode(() => session.store.inspectReviewWorkspace(randomUUID(), null))).toBe('REVIEW_BOOK_NOT_FOUND');
+    } finally {
+      await close(session);
+    }
+  }, 300_000);
+
   it('checks facts as 事实核查 over the whole manuscript once, tiers read as severities and every finding 未外部复核', async () => {
     await withBook('sample1-factual-authored', async (session, book) => {
       const before = workspace(session, book).categories.find((category) => category.categoryId === FACTUAL)!;
