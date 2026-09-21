@@ -321,14 +321,13 @@ export class PublicationVersionStore {
       requirePublication(this.#milestones(head, 1).length === 1, 'PUBLICATION_MILESTONE_REQUIRED', PUBLICATION_NEEDS_MILESTONE);
       const milestone = this.#milestoneOf(head, milestoneId);
       requirePublication(milestone !== null, 'PUBLICATION_MILESTONE_NOT_FOUND', FOREIGN_MILESTONE_REASON);
-      const current = this.#db.prepare(
-        `SELECT publication_version_id, ordinal, milestone_id, scope, basis FROM publication_versions
-         WHERE book_id = ? ORDER BY ordinal DESC LIMIT 1`,
-      ).get(bookId) as SqlRow | undefined;
-      if (current !== undefined && text(current.milestone_id) === milestoneId && text(current.scope) === scope && text(current.basis) === basis) {
-        return { outcome: 'unchanged' as const, publicationVersionId: text(current.publication_version_id), milestone };
+      // The current designation is read verified, so neither a repeat nor the next ordinal is ever decided
+      // against a record that no longer matches what was written.
+      const current = this.#designations(bookId, head, 1)[0]?.projection ?? null;
+      if (current !== null && current.milestoneId === milestoneId && current.scope === scope && current.basis === basis) {
+        return { outcome: 'unchanged' as const, publicationVersionId: current.publicationVersionId, milestone };
       }
-      const ordinal = current === undefined ? 1 : integer(current.ordinal) + 1;
+      const ordinal = current === null ? 1 : current.ordinal + 1;
       const publicationVersionId = this.#append(bookId, head, milestone, ordinal, scope, basis);
       return { outcome: 'designated' as const, publicationVersionId, milestone };
     });
@@ -521,8 +520,8 @@ export class PublicationVersionStore {
               p.revision_digest permission_revision_digest, p.scope permission_scope, p.actor permission_actor,
               p.created_at permission_created_at, p.canonical_json permission_json, p.sha256 permission_sha256
        FROM publication_versions pv
-       JOIN milestone_versions mv ON mv.milestone_id = pv.milestone_id
-       JOIN manuscript_revisions mr ON mr.revision_id = pv.revision_id
+       LEFT JOIN milestone_versions mv ON mv.milestone_id = pv.milestone_id
+       LEFT JOIN manuscript_revisions mr ON mr.revision_id = pv.revision_id
        LEFT JOIN public_release_permissions p ON p.publication_version_id = pv.publication_version_id
        WHERE pv.book_id = ?
        ORDER BY pv.ordinal DESC

@@ -464,6 +464,31 @@ describe('⑥ 发稿: Milestone Versions and 设为发稿版本', () => {
     }
   }, 300_000);
 
+  it('refuses to show a designation whose stored columns no longer match the record it was written with', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const book = await importBook(store);
+      const milestone = await saveMilestone(store, book, '一审稿', 'stage-archive', null);
+      store.designatePublicationVersion({ bookId: book.bookId, milestoneId: milestone.milestoneId, scope: '纸质版首印', basis: '三审通过' });
+      // Only by lifting the ledger's own guard can a row change; the read then refuses rather than show it,
+      // and a designation refuses rather than decide against it — neither as a repeat nor as an append.
+      const guard = withDatabase(true, (database) =>
+        (database.prepare("SELECT sql FROM sqlite_schema WHERE type = 'trigger' AND name = 'publication_versions_no_update'").get() as { sql: string }).sql);
+      withDatabase(false, (database) => database.exec(`DROP TRIGGER publication_versions_no_update;
+        UPDATE publication_versions SET scope = '电子版';
+        ${guard};`));
+      expect(refusal(() => store.inspectDeliverables(book.bookId)).code).toBe('PUBLICATION_RECORD_INVALID');
+      for (const scope of ['电子版', '纸质版首印']) {
+        expect(refusal(() => store.designatePublicationVersion({ bookId: book.bookId, milestoneId: milestone.milestoneId, scope, basis: '三审通过' })).code)
+          .toBe('PUBLICATION_RECORD_INVALID');
+      }
+      expect(ledgerCounts()).toEqual({ publication_versions: 1, public_release_permissions: 1, publication_events: 2 });
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+  }, 300_000);
+
   it('keeps every milestone and designation across a restart, and the current one stays current', async () => {
     let book: Imported;
     let before: DeliverablesProjection;
