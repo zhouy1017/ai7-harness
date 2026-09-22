@@ -1,4 +1,4 @@
-export const SERVICE_PROTOCOL_VERSION = 36 as const;
+export const SERVICE_PROTOCOL_VERSION = 37 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -3768,8 +3768,47 @@ export interface InspectTaskPlanInput {
   ref: string | null;
 }
 
-/** Where a plan stands, as the drawer's state pill says it (editor-surfaces §6 状态). */
-export type TaskPlanStateKey = 'ready' | 'changed' | 'recorded' | 'blocked' | 'running' | 'settled' | 'stopped';
+/**
+ * Where a plan stands, as the drawer's state pill says it (editor-surfaces §6 状态). `unconnected` is 模型未连接:
+ * the plan's route sends to a model service whose credential is not ready (Issue #420, S74a).
+ */
+export type TaskPlanStateKey = 'ready' | 'changed' | 'unconnected' | 'recorded' | 'blocked' | 'running' | 'settled' | 'stopped';
+
+/**
+ * What the Task Drawer's authorization bar offers for one plan now (Issue #420, plan slice S74a;
+ * editor-surfaces §6 常驻授权条, V2-UX-AUTH-001 to 007, MODEL-008, OFF-009):
+ * - `ready`: one activation of 开始任务 records the exact Run Authorization and Run Record and hands the Run
+ *   to the one execution slot (AUTH-004);
+ * - `record-only`: J-03's fixed task — one activation records the Run, which never enters the scheduler
+ *   (ADR 0055);
+ * - `no-route`: no executable route is bound — one activation records the Run, which is blocked before
+ *   dispatch;
+ * - `needs-connection`: the plan's route sends to a model service and the credential it resolves is not
+ *   ready — 开始任务 is disabled with that reason; this is never plan drift (OFF-009);
+ * - `changed`: the plan's key content changed — 开始任务 is removed (AUTH-006); 重新确认计划 when `reconfirm`
+ *   is set;
+ * - `started`: an authorization exists — the bar is the Run's state (AUTH-007).
+ */
+export type TaskPlanStartReadiness = 'ready' | 'record-only' | 'no-route' | 'needs-connection' | 'changed' | 'started';
+
+/** The authorization bar's facts, derived from the records the plan already reads: nothing here is written. */
+export interface TaskPlanStartProjection {
+  readiness: TaskPlanStartReadiness;
+  /** Whether the plan's route sends to a model service, so starting it needs the credential that route resolves. */
+  needsModelConnection: boolean;
+  /**
+   * The exact Plan Envelope digest one activation binds (ADR 0009, AUTH-005); `null` for a Review Run, which
+   * binds one per category, and whenever 开始任务 is not offered.
+   */
+  planEnvelopeDigest: string | null;
+  /** A Review Run's one approval: each Task-backed category's exact digest; empty for every other kind. */
+  categoryDigests: ReadonlyArray<{ categoryId: string; planEnvelopeDigest: string }>;
+  /**
+   * 重新确认计划: the preparation that yields the next plan version of the same Task Intent (V2-UX-PLAN-009);
+   * `null` unless the plan changed and can be reconfirmed.
+   */
+  reconfirm: null | { goal: BaselineAnalysisGoal; update: BaselineAnalysisUpdateRequest | null };
+}
 
 /** One editorial business step and what it leaves behind (V2-UX-PLAN-003). */
 export interface TaskPlanStepProjection {
@@ -3794,8 +3833,8 @@ export interface TaskPlanDriftEntryProjection {
  * The plan of one Task as the Task Drawer shows it (V2-UX-PLAN-001 to 012, TASK-030, TASK-039/040,
  * LAYER-002, MODEL-013/014). It is a read of records that already exist, in the editor's words: no
  * envelope, row or digest is written or changed to produce it, and every exact identity it names is in
- * `technical`, unabridged. It states the plan and grants nothing (PLAN-007): the actions that record an
- * authorization stay on the surfaces that raise each Task.
+ * `technical`, unabridged. It states the plan and grants nothing (PLAN-007); `start` states what the
+ * drawer's authorization bar offers, and only the bar's own activation records anything (Issue #420).
  */
 export interface TaskPlanProjection {
   bookId: string;
@@ -3856,6 +3895,8 @@ export interface TaskPlanProjection {
   };
   /** Every exact identity of the plan (LAYER-001, LAYER-007), one step below the decision content. */
   technical: ReadonlyArray<{ key: string; label: string; value: string }>;
+  /** The authorization bar: what 开始任务 does for this plan now, and exactly what it binds (Issue #420). */
+  start: TaskPlanStartProjection;
 }
 
 /** Every analysis projection, discriminated on `kind`. */

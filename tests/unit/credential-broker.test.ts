@@ -53,6 +53,19 @@ describe('CredentialBroker', () => {
     await expect(broker.checkReadiness({ ...binding, slot: 'other' as 'deepseek-api-key' })).rejects.toBeInstanceOf(CredentialBrokerError);
     await expect(broker.checkReadiness({ ...binding, credentialReference: 'not-a-reference' })).rejects.toMatchObject({ code: 'CREDENTIAL_BINDING_INVALID' });
   });
+
+  it('reads a plan\'s credential readiness before any binding exists, releasing nothing (Issue #420, S74a A3)', async () => {
+    const reference = randomUUID();
+    const resolver = fakeResolver({ [reference]: 'placeholder-secret' });
+    const broker = new CredentialBroker(resolver);
+    await expect(broker.checkPlanReadiness('opencode-go', reference)).resolves.toBe('present');
+    await expect(broker.checkPlanReadiness('opencode-go', randomUUID())).resolves.toBe('missing');
+    await expect(broker.checkPlanReadiness('other' as 'opencode-go', reference)).rejects.toMatchObject({ code: 'CREDENTIAL_BINDING_INVALID' });
+    await expect(broker.checkPlanReadiness('deepseek-api-key', 'not-a-reference')).rejects.toMatchObject({ code: 'CREDENTIAL_BINDING_INVALID' });
+    // Two reads resolved and discarded; the invalid slot and reference never reached the store.
+    expect(resolver.reads).toHaveLength(2);
+    expect(broker.releaseCount).toBe(0);
+  });
 });
 
 describe('protected secret identity', () => {

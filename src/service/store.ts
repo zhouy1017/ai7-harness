@@ -135,7 +135,7 @@ import {
 import { initializeManuscriptEffectSchema, ManuscriptApplyStore } from './manuscript-apply.js';
 import { initializeReviewRunSchema, ReviewRunError, ReviewRunStore, type ReviewRunPreparationProgress } from './review/review-runs.js';
 import { initializePublicationVersionSchema, PublicationVersionError, PublicationVersionStore } from './publication-versions.js';
-import { baselineAnalysisPlan, fixedTaskPlan, reviewRunPlan, TaskPlanError } from './task-plan.js';
+import { baselineAnalysisPlan, fixedTaskPlan, reviewRunPlan, TaskPlanError, withConnectionReadiness } from './task-plan.js';
 import type { ReviewRunDriveSteps } from './review/review-run-driver.js';
 import { reviewCategoryContractInput, type ReviewCategoryConfigurationEntry } from './review/category-configuration.js';
 import { reviewCategoryKindDefinition } from './review/review-category-kind.js';
@@ -3407,15 +3407,18 @@ export class EditorialStore {
 
   /**
    * The editor's one approval of a prepared Review Run, naming the exact plan digest of every
-   * Task-backed category (B1). The caller then hands the Run to the drive loop.
+   * Task-backed category (B1). The caller then hands the Run to the drive loop. `slotBusy` is the
+   * execution owner's word that another Run holds its one slot: a new approval is refused with
+   * `EXECUTION_BUSY` before anything is written (Issue #420, S74a A2).
    */
   authorizeReviewRun(
     bookId: string,
     reviewRunId: string,
     approvedDigests: ReadonlyArray<{ categoryId: string; planEnvelopeDigest: string }>,
+    slotBusy = false,
   ): ReviewWorkspaceProjection {
     return this.#reviewCall(() => {
-      this.#reviewRuns.recordAuthorization(bookId, reviewRunId, approvedDigests);
+      this.#reviewRuns.recordAuthorization(bookId, reviewRunId, approvedDigests, slotBusy);
       return this.#reviewRuns.workspace(bookId, reviewRunId);
     });
   }
@@ -3520,6 +3523,22 @@ export class EditorialStore {
     return this.#taskPlanCall(() => reviewRunPlan({ bookId: input.bookId, facts, bookTitle, blocks }));
   }
 
+  /**
+   * The plan as the drawer's authorization bar reads it (Issue #420, plan slice S74a A3): `inspectTaskPlan`,
+   * then — only for a plan that could start now and whose route sends to a model service — the readiness of
+   * the credential that route resolves, read through `credentialReadiness`: the execution owner's broker
+   * check, the one dispatch makes, with the value resolved and discarded. A plan whose route sends nothing
+   * asks for no credential at all. A missing credential blocks the start and changes no plan (OFF-009).
+   */
+  async inspectTaskPlanWithConnection(
+    input: InspectTaskPlanInput,
+    credentialReadiness: () => Promise<'present' | 'missing' | null>,
+  ): Promise<TaskPlanProjection> {
+    const plan = this.inspectTaskPlan(input);
+    if (!plan.start.needsModelConnection || plan.start.readiness !== 'ready') return plan;
+    return withConnectionReadiness(plan, await credentialReadiness());
+  }
+
   #taskPlanCall<T>(operation: () => T): T {
     try {
       return operation();
@@ -3554,13 +3573,18 @@ export class EditorialStore {
     return true;
   }
 
-  /** Records the standard-direct authorization and the Run; the caller admits the Run when dispatch is allowed. */
+  /**
+   * Records the standard-direct authorization and the Run; the caller admits the Run when dispatch is
+   * allowed. `slotBusy` is the execution owner's word that another Run holds its one slot: a Run that would
+   * dispatch is then refused with `EXECUTION_BUSY` before anything is recorded (Issue #420, S74a A2).
+   */
   authorizeBaselineAnalysis(
     bookId: string,
     taskIntentId: string,
     planEnvelopeDigest: string,
+    slotBusy = false,
   ): { projection: BaselineAnalysisProjection; dispatchRunRecordId: string | null } {
-    const authorized = this.#analysisCall(() => this.#baselineAnalysis.authorize(bookId, taskIntentId, planEnvelopeDigest));
+    const authorized = this.#analysisCall(() => this.#baselineAnalysis.authorize(bookId, taskIntentId, planEnvelopeDigest, slotBusy));
     return { projection: authorized.projection as BaselineAnalysisProjection, dispatchRunRecordId: authorized.dispatchRunRecordId };
   }
 

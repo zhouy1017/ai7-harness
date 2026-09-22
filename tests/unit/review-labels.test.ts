@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import {
   REVIEW_ACTION_LABELS,
   REVIEW_ANCHOR_CHANGED,
-  REVIEW_AUTHORIZE_NOTE,
   REVIEW_BATCH_ALL_OR_NONE,
   REVIEW_CAPABILITY_REASON,
   REVIEW_CATEGORY_STATE_PILLS,
@@ -99,7 +98,6 @@ describe('the words of the 审阅 destination', () => {
       'quick-start': '开始审阅',
       'cancel-preparation': '取消准备',
       'close-sheet': '取消',
-      authorize: '授权并开始审阅',
       revise: '返回修改',
       continue: '继续审阅',
       'go-to-text': '回到原文',
@@ -180,7 +178,12 @@ describe('the words of the 审阅 destination', () => {
   it('names a prepared plan in one line beside 查看计划, which opens the rest in the Task Drawer (S72)', () => {
     expect(reviewPlanCategoriesLine(3)).toBe('3 个类别，授权一次后逐类审阅');
     expect(REVIEW_ACTION_LABELS['view-plan']).toBe('查看计划');
-    expect(REVIEW_AUTHORIZE_NOTE).toBe('只是让 AI7 按这份计划审这一次；接受修改建议、处理每一条发现都仍由你另行决定。');
+  });
+
+  it('keeps no authorization action of its own: the Run\'s one approval is the drawer bar\'s 开始任务 (S74a A5)', () => {
+    expect(Object.keys(REVIEW_ACTION_LABELS)).not.toContain('authorize');
+    expect(Object.values(REVIEW_ACTION_LABELS)).not.toContain('授权并开始审阅');
+    expect(Object.keys(REVIEW_STATUS_LINES).filter((key) => key.startsWith('authoriz'))).toEqual([]);
   });
 
   it('states a running category by its measured facts and a settled one by what it found', () => {
@@ -277,7 +280,7 @@ describe('the words of the 审阅 destination', () => {
     expect(REVIEW_STATUS_LINES.appliedRecovered).toBe('已应用这条修改建议。写入结果已从记录确认。');
     expect(REVIEW_STATUS_LINES.applyUnknown).toBe('无法确认这次应用的结果；请刷新审阅后查看。');
     expect(REVIEW_STATUS_LINES.ignored).toBe('已忽略这条发现，原因已记录。');
-    expect(REVIEW_STATUS_LINES.prepared).toBe('审阅计划已冻结；请查看计划后授权。');
+    expect(REVIEW_STATUS_LINES.prepared).toBe('审阅计划已冻结；可在任务计划里开始审阅。');
     expect(REVIEW_STATUS_LINES.preparationCancelled).toBe('审阅计划准备已取消；稿件与审阅记录保持不变。');
   });
 

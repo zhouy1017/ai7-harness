@@ -7,7 +7,6 @@ import type {
   BaselineAnalysisSelectedRange,
   BaselineAnalysisUpdateMode,
   BaselineAnalysisUpdateRequest,
-  PlanRevisionDiffValue,
   BookCreationReviewProjection,
   BookManuscriptAnchorProjection,
   BookRecordPresentation,
@@ -43,6 +42,7 @@ import type {
   StartupProjection,
   TaskAuthorizationProjection,
   TaskPlanKind,
+  TaskPlanProjection,
 } from '../shared/protocol.js';
 import {
   BASELINE_ANALYSIS_TASK_GOAL,
@@ -73,11 +73,9 @@ import { mountReviewWorkspace, type ReviewFocus, type ReviewWorkspaceSurface } f
 import { mountTaskDrawer } from './task-drawer.js';
 import {
   TASK_DRAWER_TITLE,
-  TASK_PLAN_DRIFT_COLUMNS,
   TASK_PLAN_DRIFT_HEADING,
-  TASK_PLAN_DRIFT_VIEW,
-  TASK_PLAN_MATERIALITY_LABELS,
   TASK_PLAN_OPEN,
+  TASK_PLAN_OPEN_START,
   taskPlanSummaryLine,
 } from './task-drawer-labels.js';
 import {
@@ -105,7 +103,6 @@ import {
   elapsedLabel,
   launchPolicyIntegritySentence,
   localInstantLabel,
-  runBudgetCeilingLabel,
   runReportUnitsSentence,
   runStepIsStale,
   taskAuthorizationDispatchNote,
@@ -129,8 +126,17 @@ if (!window.ai7) throw new Error('AI7_RENDERER_BOOTSTRAP_INVALID');
 let closeNavigation: (() => void) | null = null;
 
 /**
+ * How each surface on screen that raises a Task reads it again, by the Task's kind: J-03's card on
+ * 工作概览, ②A, ②B, and 工作概览's one-line summaries. The drawer's bar starts a Task or reconfirms its plan
+ * (Issue #420, S74a), so the surface beside it must show that at once. Every screen change clears it; a
+ * surface registers once it is on screen.
+ */
+let taskSurfaceRefresh: Partial<Record<TaskPlanKind, () => void>> = {};
+
+/**
  * The Task Drawer (Issue #418, plan slice S72): mounted once, at the shell, beside whichever central
- * destination of the same Book is on screen (task-drawer.ts). The surfaces that raise a Task only open it.
+ * destination of the same Book is on screen (task-drawer.ts). The surfaces that raise a Task only open it;
+ * since Issue #420 (S74a) its authorization bar is where every Task is started.
  */
 const taskDrawer = mountTaskDrawer({
   root: requiredElement('#task-drawer'),
@@ -138,7 +144,13 @@ const taskDrawer = mountTaskDrawer({
   api: window.ai7,
   technicalDetails,
   errorMessage: rendererErrorMessage,
+  errorCode: (error) => rendererErrorData(error)?.code ?? null,
+  setStatus,
+  awaitServiceJob,
   onOpen: () => closeNavigation?.(),
+  onRecorded: (kind) => taskSurfaceRefresh[kind]?.(),
+  openRunSurface: (plan) => void openTaskRunSurface(plan),
+  openConnectionSettings: () => void renderModelServiceSettings(),
 });
 
 /** Open one Task's plan in the drawer (S72 D4); closing it returns focus to the surface's 查看计划. */
@@ -146,12 +158,30 @@ function openTaskPlan(bookId: string, kind: TaskPlanKind, ref: string | null): v
   taskDrawer.open({ bookId, kind, ref }, () => screen.querySelector<HTMLElement>(`[data-task-plan-open="${kind}"]:not(:disabled)`));
 }
 
-/** The 查看计划 a surface offers beside its one-line summary; each surface adds its own action attribute. */
-function taskPlanOpenButton(kind: TaskPlanKind, open: () => void): HTMLButtonElement {
-  const node = button(TASK_PLAN_OPEN, 'secondary', open);
+/**
+ * The 查看计划 a surface offers beside its one-line summary; each surface adds its own action attribute.
+ * While the Task has not been started it reads 查看计划并开始 (S74a A5): the start is in the drawer's bar.
+ */
+function taskPlanOpenButton(kind: TaskPlanKind, open: () => void, startable = false): HTMLButtonElement {
+  const node = button(startable ? TASK_PLAN_OPEN_START : TASK_PLAN_OPEN, startable ? 'primary' : 'secondary', open);
   node.dataset['taskPlanOpen'] = kind;
   node.setAttribute('aria-controls', 'task-drawer');
   return node;
+}
+
+/**
+ * The started Task's own surface (AUTH-007): J-03's record on 工作概览, the analysis Run on ②A, the Review
+ * Run on ②B with that Run open. The drawer stays beside it, because each is a destination of the same Book.
+ */
+async function openTaskRunSurface(plan: TaskPlanProjection): Promise<void> {
+  setStatus('正在打开运行所在的页面…', 'busy');
+  try {
+    if (plan.kind === 'baseline-analysis') renderBookAnalysis(plan.bookId, plan.goal.chips.book);
+    else if (plan.kind === 'review-run') renderBookReview(plan.bookId, plan.goal.chips.book, { reviewRunId: plan.ref, findingId: null });
+    else renderBookOverview(await window.ai7.getBookOverview({ bookId: plan.bookId, historyCursor: null }));
+  } catch (error) {
+    setStatus(rendererErrorMessage(error, '无法打开运行所在的页面。'), 'error');
+  }
 }
 
 let editor: BoundedEditor | undefined;
@@ -287,6 +317,7 @@ function replaceScreen(state: string, content: HTMLElement): void {
   editor?.destroy();
   editor = undefined;
   closeNavigation = null;
+  taskSurfaceRefresh = {};
   screen.dataset['screen'] = state;
   screen.replaceChildren(content);
   if (authorityInterrupted) {
@@ -1511,21 +1542,30 @@ function renderBookAnalysis(bookId: string, bookTitle: string): void {
   content.append(host, actions);
   replaceScreen('book-analysis', content);
   setStatus('分析已打开');
-  void window.ai7.inspectBaselineAnalysis().then(
-    (projection) => {
-      if (host.isConnected && projection.bookId === host.dataset['analysisBookId']) renderBaselineAnalysis(host, projection, bookTitle);
-    },
-    (error) => {
-      if (!host.isConnected) return;
-      const unavailable = element('section', 'baseline-analysis-card attention-note');
-      unavailable.dataset['analysisState'] = 'unavailable';
-      unavailable.append(
-        element('h3', undefined, '基线稿件分析'),
-        element('p', undefined, rendererErrorMessage(error, '无法读取本地图书的基线稿件分析记录。')),
-      );
-      host.replaceChildren(unavailable);
-    },
-  );
+  const inspect = (first: boolean): void => {
+    void window.ai7.inspectBaselineAnalysis().then(
+      (projection) => {
+        if (host.isConnected && projection.bookId === host.dataset['analysisBookId']) renderBaselineAnalysis(host, projection, bookTitle);
+      },
+      (error) => {
+        if (!host.isConnected) return;
+        if (!first) {
+          setStatus(rendererErrorMessage(error, '无法刷新基线稿件分析状态。'), 'error');
+          return;
+        }
+        const unavailable = element('section', 'baseline-analysis-card attention-note');
+        unavailable.dataset['analysisState'] = 'unavailable';
+        unavailable.append(
+          element('h3', undefined, '基线稿件分析'),
+          element('p', undefined, rendererErrorMessage(error, '无法读取本地图书的基线稿件分析记录。')),
+        );
+        host.replaceChildren(unavailable);
+      },
+    );
+  };
+  // The drawer's bar started this Task or reconfirmed its plan (Issue #420): ②A reads it again.
+  taskSurfaceRefresh = { 'baseline-analysis': () => inspect(false) };
+  inspect(true);
 }
 
 /**
@@ -1596,6 +1636,8 @@ function renderBookReview(bookId: string, bookTitle: string, focus: ReviewFocus 
   content.append(actions);
   replaceScreen('book-review', content);
   reviewWorkspace = surface;
+  // The drawer's bar approved the Run (Issue #420): ②B reads it again and follows it as it runs.
+  taskSurfaceRefresh = { 'review-run': () => surface.refresh() };
   surface.start();
   setStatus(REVIEW_STATUS_LINES.opened);
 }
@@ -2007,6 +2049,12 @@ function renderBookOverview(
   content.append(records, actions);
   appendRecoveryReturnAction(content, recoveryReturn);
   replaceScreen(completion ? 'imported' : 'book-overview', content);
+  // The drawer's bar started a Task of this Book (Issue #420): J-03's card and the one-line summaries read it again.
+  taskSurfaceRefresh = {
+    'fixed-task': inspectTaskAuthorization,
+    'baseline-analysis': inspectBaselineAnalysis,
+    'review-run': inspectReviewSummary,
+  };
   if (completion) {
     void acknowledgeCompletionAfterPaint(completion).then((acknowledged) => {
       if (acknowledged && !authorityInterrupted && content.isConnected) {
@@ -2494,16 +2542,11 @@ function markReusePlan(card: HTMLElement, projection: BaselineAnalysisProjection
   owner.dataset['planUpdateMode'] = plan.mode;
 }
 
-function diffValueText(value: PlanRevisionDiffValue): string {
-  if (value === null) return '无';
-  if (typeof value === 'string' || typeof value === 'number') return String(value);
-  if ('startPosition' in value) return rangeText(value);
-  if ('revisionId' in value) return `Revision ${value.ordinal} · ${value.revisionId} · ${value.digest}`;
-  if ('kind' in value) return runBudgetCeilingLabel(value);
-  return reuseCountsText(value);
-}
-
-/** Every plan version of the Task and every Plan Revision between them, immutable and linked. */
+/**
+ * Every plan version of the Task and every Plan Revision between them, immutable and linked. Since S74a
+ * (A4) the list is ②A's technical layer, closed by default: the plan and its changes read in the drawer,
+ * where 重新确认计划 and 查看计划修订 are, and the list keeps each version's exact identity one step away.
+ */
 function renderPlanVersions(card: HTMLElement, projection: BaselineAnalysisProjection): void {
   const section = element('section', 'analysis-plan-versions');
   section.dataset['planVersionCount'] = String(projection.planVersions.length);
@@ -2511,7 +2554,7 @@ function renderPlanVersions(card: HTMLElement, projection: BaselineAnalysisProje
   section.append(element('h4', undefined, `计划版本 · ${projection.planVersions.length} 个`));
   const versions = element('ol', 'analysis-list analysis-plan-version-list');
   for (const version of projection.planVersions) {
-    const state = version.state === 'bound' ? '已被运行授权绑定' : version.state === 'current' ? '当前 · 待授权' : '已被取代';
+    const state = version.state === 'bound' ? '已被运行授权绑定' : version.state === 'current' ? '当前 · 尚未开始' : '已被取代';
     const item = element('li', undefined, `版本 ${version.ordinal} · ${state} · 信封 ${version.planEnvelopeDigest}${version.planRevisionId === null ? '' : ` · 由计划修订 ${version.planRevisionId} 产生`}`);
     item.dataset['planVersionOrdinal'] = String(version.ordinal);
     item.dataset['planVersionState'] = version.state;
@@ -2533,85 +2576,9 @@ function renderPlanVersions(card: HTMLElement, projection: BaselineAnalysisProje
     }
     section.append(element('h5', undefined, '计划修订'), revisions);
   }
-  card.append(section);
-}
-
-/**
- * Material drift before authorization (V2-UX-AUTH-006 / V2-UX-PLAN-009): the stale preview keeps no
- * start action; `查看计划修订` opens the concise prior-versus-proposed diff and `重新确认计划` yields
- * the next plan version on the same Task Intent.
- */
-function renderPlanRevision(card: HTMLElement, projection: BaselineAnalysisProjection, host: HTMLElement, bookTitle: string): void {
-  const revision = projection.planRevision;
-  if (revision === null) return;
-  const section = element('section', 'attention-note analysis-plan-revision');
-  section.dataset['planRevisionState'] = revision.planRevisionId === null ? 'live' : 'pending';
-  section.dataset['planRevisionPrior'] = String(revision.priorOrdinal);
-  section.dataset['planRevisionFields'] = revision.changedFields.join(',');
-  // §10: 物质变化 · 计划已被取代 reads 计划的关键内容已变化, and 物质字段 / 派生后果 read 关键内容 / 随之变化.
-  section.append(
-    element('h4', undefined, TASK_PLAN_DRIFT_HEADING),
-    element('p', undefined, `${revision.label}。原计划保持不变，不能再按它开始；查看计划修订并重新确认计划后，新的计划版本才能开始。`),
-  );
-  const diff = element('div', 'analysis-plan-revision-diff');
-  diff.hidden = true;
-  const table = element('table', 'analysis-plan-revision-table');
-  const head = element('tr');
-  head.append(...TASK_PLAN_DRIFT_COLUMNS.map((column) => element('th', undefined, column)));
-  table.append(head);
-  for (const entry of revision.diff) {
-    const row = element('tr');
-    row.dataset['planRevisionField'] = entry.field;
-    row.dataset['planRevisionMateriality'] = entry.materiality;
-    row.append(
-      element('td', undefined, entry.label),
-      element('td', 'technical-identity', diffValueText(entry.prior)),
-      element('td', 'technical-identity', diffValueText(entry.proposed)),
-      element('td', undefined, TASK_PLAN_MATERIALITY_LABELS[entry.materiality]),
-    );
-    table.append(row);
-  }
-  diff.append(table);
-  const actions = element('div', 'button-row analysis-actions');
-  const view = button(TASK_PLAN_DRIFT_VIEW, 'secondary', () => {
-    diff.hidden = !diff.hidden;
-    view.setAttribute('aria-expanded', diff.hidden ? 'false' : 'true');
-  });
-  view.dataset['analysisAction'] = 'view-plan-revision';
-  view.setAttribute('aria-expanded', 'false');
-  actions.append(view);
-  if (projection.actions.canReconfirmPlan) {
-    const reconfirm = button('重新确认计划', 'primary', async () => {
-      reconfirm.disabled = true;
-      setStatus('正在按变化后的关键内容重新确认计划…', 'busy');
-      try {
-        const mode = projection.taskIntent!.mode;
-        const update: BaselineAnalysisUpdateRequest | null = mode === 'first-baseline'
-          ? null
-          : { mode, selectedRange: mode === 'reanalyze-range' ? revision.proposed.selectedRange : null };
-        const initial = await window.ai7.prepareBaselineAnalysis({ goal: projection.taskIntent!.goal, update, reconfirm: true });
-        const completed = await awaitServiceJob(initial, (job) => setStatus(job.progress.label, job.state === 'failed' ? 'error' : 'busy'));
-        if (completed.kind !== 'baseline-analysis-preparation' || completed.result === null || !('coverageManifest' in completed.result)) {
-          throw new Error('重新确认计划未返回计划。');
-        }
-        if (host.isConnected && completed.result.bookId === host.dataset['analysisBookId']) {
-          renderBaselineAnalysis(host, completed.result, bookTitle);
-          setStatus(`计划已重新确认为版本 ${completed.result.planVersion?.ordinal ?? '?'}；等待授权。`, 'success');
-          // The next plan version is the plan now: the drawer shows it.
-          openTaskPlan(completed.result.bookId, 'baseline-analysis', completed.result.taskIntent?.taskIntentId ?? null);
-        }
-      } catch (error) {
-        reconfirm.disabled = false;
-        setStatus(rendererErrorMessage(error, '无法重新确认计划。'), 'error');
-      }
-    });
-    reconfirm.dataset['analysisAction'] = 'reconfirm-plan';
-    actions.append(reconfirm);
-  } else {
-    section.append(element('p', 'field-note', '这项变化要基于最新的一份分析重新准备更新任务。'));
-  }
-  section.append(actions, diff);
-  card.append(section);
+  const disclosure = element('details', 'technical-details analysis-plan-versions-technical');
+  disclosure.append(element('summary', undefined, '查看技术详情'), section);
+  card.append(disclosure);
 }
 
 /** The Run's timeline: state transitions and in-envelope Plan Adaptations interleaved by record time. */
@@ -2674,9 +2641,9 @@ async function startAnalysisPreparation(
     if (host.isConnected && completed.result.bookId === host.dataset['analysisBookId']) {
       renderBaselineAnalysis(host, completed.result, bookTitle);
       setStatus(completed.result.planRevision !== null
-        ? '计划的关键内容已变化：请查看计划修订并重新确认计划。'
-        : '任务计划已准备；等待授权。', 'success');
-      // S72 D4: 先看计划 opens the plan the preparation froze in the Task Drawer beside ②A.
+        ? '计划的关键内容已变化：请在任务计划里查看计划修订并重新确认计划。'
+        : '任务计划已准备；可在任务计划里开始任务。', 'success');
+      // S72 D4: 先看计划 opens the plan the preparation froze in the Task Drawer beside ②A, whose bar starts it (S74a).
       openTaskPlan(completed.result.bookId, 'baseline-analysis', completed.result.taskIntent?.taskIntentId ?? null);
     }
   } catch (error) {
@@ -2992,7 +2959,7 @@ function renderBaselineAnalysis(host: HTMLElement, projection: BaselineAnalysisP
       : { historical: false, current: true });
     records = panels.history;
   }
-  if (projection.checkpoint !== null) renderFrozenAnalysisPlan(records, projection, host, bookTitle);
+  if (projection.checkpoint !== null) renderFrozenAnalysisPlan(records, projection);
 
   if (projection.taskOutcome) {
     const outcome = element('section', 'success-note analysis-outcome');
@@ -3028,17 +2995,19 @@ function renderBaselineAnalysis(host: HTMLElement, projection: BaselineAnalysisP
 
 /**
  * The latest Task's plan on ②A (S72 D4): one line naming it and 查看计划, which opens the whole plan in the
- * Task Drawer. The plan's versions and a pending Plan Revision stay here with 重新确认计划 and the
- * authorization action, which S74 moves into the drawer's bar; so does the Run the plan was authorized for.
+ * Task Drawer. Since S74a the drawer's bar is where the Task starts and where a changed plan is reconfirmed
+ * (A4, A5): until the Task is started the card's one action reads 查看计划并开始, a changed plan is said here
+ * in one line, and the plan versions are the card's technical layer. The Run the plan was authorized for
+ * stays here, with its timeline.
  */
-function renderFrozenAnalysisPlan(card: HTMLElement, projection: BaselineAnalysisProjection, host: HTMLElement, bookTitle: string): void {
+function renderFrozenAnalysisPlan(card: HTMLElement, projection: BaselineAnalysisProjection): void {
   const checkpoint = projection.checkpoint!;
   const manifest = projection.coverageManifest!;
-  const envelope = projection.planEnvelope!;
   markReusePlan(card, projection);
   const range = projection.planVersion?.materialInputs.selectedRange ?? null;
   const counts = projection.update?.reusePlan?.counts ?? null;
-  const open = taskPlanOpenButton('baseline-analysis', () => openTaskPlan(projection.bookId, 'baseline-analysis', projection.taskIntent!.taskIntentId));
+  const startable = projection.authorization === null && projection.state === 'prepared';
+  const open = taskPlanOpenButton('baseline-analysis', () => openTaskPlan(projection.bookId, 'baseline-analysis', projection.taskIntent!.taskIntentId), startable);
   open.dataset['analysisAction'] = 'view-plan';
   const summary = element('section', 'task-plan-summary analysis-plan-summary');
   summary.append(
@@ -3050,39 +3019,22 @@ function renderFrozenAnalysisPlan(card: HTMLElement, projection: BaselineAnalysi
       `任务输入修订版 ${checkpoint.revisionLabel}`,
       projection.planVersion === null ? '' : `计划版本 ${projection.planVersion.ordinal}`,
     ])),
-    open,
   );
+  // AUTH-006: a plan whose key content changed cannot start; the card says so, and the drawer's bar holds
+  // 查看计划修订 and 重新确认计划 (§10: 物质变化 · 计划已被取代 reads 计划的关键内容已变化).
+  const revision = projection.authorization === null ? projection.planRevision : null;
+  if (revision !== null) {
+    const note = element('p', 'attention-note analysis-plan-drift-note', projection.actions.canReconfirmPlan
+      ? `${TASK_PLAN_DRIFT_HEADING}：原计划不能再开始；在任务计划里查看计划修订并重新确认计划后，新的计划版本才能开始。`
+      : `${TASK_PLAN_DRIFT_HEADING}：要更新的那一份分析已不是最新的一份；请基于最新的一份重新准备。`);
+    note.dataset['planRevisionState'] = revision.planRevisionId === null ? 'live' : 'pending';
+    note.dataset['planRevisionPrior'] = String(revision.priorOrdinal);
+    note.dataset['planRevisionFields'] = revision.changedFields.join(',');
+    summary.append(note);
+  }
+  summary.append(open);
   card.append(summary);
   renderPlanVersions(card, projection);
-  if (projection.authorization === null) renderPlanRevision(card, projection, host, bookTitle);
-
-  if (projection.actions.canAuthorize) {
-    const actions = element('div', 'button-row analysis-actions');
-    const authorize = button(envelope.dispatchAllowed ? '授权并开始任务' : '记录运行授权（将于派发前阻止）', 'primary', async () => {
-      authorize.disabled = true;
-      setStatus(envelope.dispatchAllowed ? '正在记录标准直接运行授权并进入调度…' : '正在记录标准直接运行授权…', 'busy');
-      try {
-        const authorized = await window.ai7.authorizeBaselineAnalysis({
-          taskIntentId: projection.taskIntent!.taskIntentId,
-          planEnvelopeDigest: envelope.digest,
-        });
-        if (host.isConnected && authorized.bookId === host.dataset['analysisBookId']) {
-          renderBaselineAnalysis(host, authorized, bookTitle);
-          // The refusal is a message about an action that failed, so it belongs in the status line. The
-          // success path's state does not: the card's header pill carries it and re-renders with every
-          // refresh, while a toast reading `已进入调度器` would outlive the state that produced it
-          // (V2-UX-LIVE-004) — which is exactly what the first live Run showed.
-          if (authorized.state === 'authorized-blocked') setStatus(authorized.run?.stateLabel ?? '已记录授权');
-        }
-      } catch (error) {
-        authorize.disabled = false;
-        setStatus(rendererErrorMessage(error, '无法记录基线稿件分析运行授权。'), 'error');
-      }
-    });
-    authorize.dataset['analysisAction'] = 'authorize';
-    actions.append(authorize);
-    card.append(actions);
-  }
 
   const run = projection.run;
   if (run) {
@@ -3210,7 +3162,7 @@ function renderTaskAuthorization(host: HTMLElement, projection: TaskAuthorizatio
     element(
       'span',
       `status-pill task-authorization-status task-authorization-status-${projection.state}`,
-      projection.state === 'available' ? '待准备' : projection.state === 'prepared' ? '计划待授权' : '已记录授权 · 未派发',
+      projection.state === 'available' ? '待准备' : projection.state === 'prepared' ? '计划就绪' : '已记录授权 · 未派发',
     ),
   );
   card.append(
@@ -3255,7 +3207,7 @@ function renderTaskAuthorization(host: HTMLElement, projection: TaskAuthorizatio
             !('runRecord' in completed.result)) throw new Error('任务准备未返回计划。');
         if (host.isConnected && completed.result.bookId === host.dataset['taskAuthorizationBookId']) {
           renderTaskAuthorization(host, completed.result);
-          setStatus('任务计划已准备；当前仍未派发。', 'success');
+          setStatus('任务计划已准备；可在任务计划里开始任务。', 'success');
           // S72 D4: the plan the preparation froze opens in the Task Drawer beside this card.
           openTaskPlan(completed.result.bookId, 'fixed-task', completed.result.taskIntent?.taskIntentId ?? null);
         }
@@ -3283,42 +3235,19 @@ function renderTaskAuthorization(host: HTMLElement, projection: TaskAuthorizatio
     card.append(form);
   } else {
     const checkpoint = projection.checkpoint!;
-    const envelope = projection.planEnvelope!;
     // S72 D4: the plan itself lives in the Task Drawer; the card keeps one line naming it and the way to
     // it. What the plan reads, sends and will not do — the engineer's non-effects included, now in its
-    // 查看技术详情 (§10) — is stated there, and the recording action stays here until S74.
+    // 查看技术详情 (§10) — is stated there. Since S74a (A5) the recording is the drawer bar's 开始任务 too, so
+    // until the Task is recorded the card's one action reads 查看计划并开始.
     const summary = element('section', 'task-plan-summary');
-    const open = taskPlanOpenButton('fixed-task', () => openTaskPlan(projection.bookId, 'fixed-task', projection.taskIntent!.taskIntentId));
+    const open = taskPlanOpenButton('fixed-task', () => openTaskPlan(projection.bookId, 'fixed-task', projection.taskIntent!.taskIntentId),
+      projection.actions.canAuthorize);
     open.dataset['taskAuthorizationAction'] = 'view-plan';
     summary.append(
       element('p', 'task-plan-summary-line', taskPlanSummaryLine(['固定任务', '全书', `任务输入修订版 ${checkpoint.revisionLabel}`, '不发送任何内容'])),
       open,
     );
     card.append(summary);
-    if (projection.actions.canAuthorize) {
-      const actions = element('div', 'button-row task-authorization-actions');
-      const authorize = button('记录本次运行授权（不派发）', 'primary', async () => {
-        authorize.disabled = true;
-        setStatus('正在记录标准直接运行授权…', 'busy');
-        try {
-          const authorized = await window.ai7.authorizeTaskAuthorization({
-            taskIntentId: projection.taskIntent!.taskIntentId,
-            planEnvelopeDigest: envelope.digest,
-          });
-          if (host.isConnected && authorized.bookId === host.dataset['taskAuthorizationBookId']) {
-            renderTaskAuthorization(host, authorized);
-            setStatus('已记录授权 · 未派发', 'success');
-            taskDrawer.refresh('fixed-task');
-          }
-        } catch (error) {
-          authorize.disabled = false;
-          setStatus(rendererErrorMessage(error, '无法记录运行授权。'), 'error');
-        }
-      });
-      authorize.dataset['taskAuthorizationAction'] = 'authorize-no-dispatch';
-      actions.append(authorize);
-      card.append(actions);
-    }
     const runRecord = projection.runRecord;
     if (runRecord) {
       const terminal = element('p', 'success-note task-authorization-terminal', runRecord.terminalLabel);

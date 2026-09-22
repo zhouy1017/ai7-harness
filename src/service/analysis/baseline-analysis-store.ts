@@ -87,6 +87,7 @@ import {
 } from './reuse-plan.js';
 import { NO_TASK_OUTCOME_REASON, PRE_RUN_REPORT_REASON, runReportDigest, runReportProjection, type RunReportRecord } from './run-report.js';
 import { baselineAnalysisKindDefinition } from './kind-definition.js';
+import { EXECUTION_SLOT_BUSY, EXECUTION_SLOT_BUSY_REASON } from './execution-error.js';
 import { describeComposition } from '../harness/primary-agent-harness.js';
 import { LOCAL_DETERMINISTIC_MODEL, LOCAL_DETERMINISTIC_ROUTE } from '../provider/egress-gate.js';
 
@@ -2166,7 +2167,12 @@ export class BaselineAnalysisStore {
 
   // ---- authorization -----------------------------------------------------------------------------
 
-  authorize(bookId: string, taskIntentId: string, planEnvelopeDigest: string): { projection: AnalysisProjection; dispatchRunRecordId: string | null } {
+  /**
+   * `slotBusy` is the execution owner's word that another Run holds its one slot (Issue #420, S74a A2). A
+   * Run that would dispatch is then refused before anything is recorded — no queue — while a repeat of an
+   * authorization already recorded answers as it always has, and a Run that never dispatches is unaffected.
+   */
+  authorize(bookId: string, taskIntentId: string, planEnvelopeDigest: string, slotBusy = false): { projection: AnalysisProjection; dispatchRunRecordId: string | null } {
     requireAnalysis(UUID_PATTERN.test(bookId) && UUID_PATTERN.test(taskIntentId) && DIGEST_PATTERN.test(planEnvelopeDigest),
       'ANALYSIS_AUTHORIZATION_INVALID', '任务运行授权参数无效。');
     const prepared = this.inspect(bookId);
@@ -2187,6 +2193,7 @@ export class BaselineAnalysisStore {
     requireAnalysis(prepared.update === null || prepared.update.predecessorCurrent,
       'ANALYSIS_PREDECESSOR_DRIFT', '该任务的前一修订版已不再是结果集的最新修订版；无法授权。请基于最新修订版重新准备更新。');
     const dispatchAllowed = prepared.planEnvelope.dispatchAllowed;
+    requireAnalysis(!(slotBusy && dispatchAllowed), EXECUTION_SLOT_BUSY, EXECUTION_SLOT_BUSY_REASON);
     const authorizationId = randomUUID();
     const runRecordId = randomUUID();
     const instant = new Date().toISOString();

@@ -380,7 +380,22 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .task-drawer-mode:focus-visible { outline: 3px solid #416458; outline-offset: -3px; }
 .task-drawer-hidden-reason { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
 .task-drawer-body { display: grid; flex: 1 1 auto; align-content: start; gap: .9rem; min-height: 0; padding: .9rem 1rem 1.2rem; overflow-x: hidden; overflow-y: auto; }
-.task-drawer-footer { margin: 0; padding: .6rem 1rem; border-top: 1px solid #d5dcd9; background: #f7f4ec; color: #4e564c; font-size: .86rem; font-weight: 800; }
+/* The footer region and its authorization bar (Issue #420, S74a; §6 常驻授权条, V2-UX-LAYER-005): never scrolled
+   away with the plan. Should the bar's words ever outgrow half the drawer — 200% zoom on a short window — they
+   scroll inside it while its actions stay pinned at its foot, so 开始任务 is always one step away. */
+.task-drawer-foot { flex: none; display: grid; gap: .4rem; max-height: 55%; padding: .6rem 1rem .7rem; overflow-x: hidden; overflow-y: auto; border-top: 1px solid #d5dcd9; background: #f7f4ec; }
+.task-drawer-footer { margin: 0; color: #4e564c; font-size: .86rem; font-weight: 800; }
+.task-drawer-bar { display: grid; gap: .35rem; min-width: 0; }
+.task-drawer-bar[hidden] { display: none; }
+.task-bar-summary { margin: 0; font-size: .9rem; font-weight: 700; line-height: 1.5; overflow-wrap: anywhere; }
+.task-bar-statement { margin: 0; color: #4e564c; font-size: .82rem; line-height: 1.5; }
+.task-bar-note { margin: 0; font-size: .86rem; font-weight: 700; line-height: 1.5; }
+.task-bar-note[data-task-bar-note="needs-connection"], .task-bar-note[data-task-bar-note="changed"], .task-bar-refusal { color: #7a2e1d; }
+.task-bar-refusal { margin: 0; font-size: .86rem; font-weight: 800; }
+.task-bar-status { margin: 0; font-weight: 800; }
+.task-bar-status:focus-visible { outline: 3px solid #416458; outline-offset: 2px; }
+.task-bar-actions { position: sticky; bottom: 0; display: flex; flex-wrap: wrap; align-items: flex-start; gap: .4rem .5rem; padding-top: .15rem; background: #f7f4ec; }
+.task-bar-actions > button { min-height: 36px; }
 .task-plan-goal, .task-plan-compact { padding: .75rem .85rem; border: 1px solid #d5dcd9; border-radius: 10px; background: #f4f9f7; }
 .task-plan-compact { background: #fffdf8; }
 .task-plan-sentence { display: flex; flex-wrap: wrap; align-items: flex-start; gap: .3rem .6rem; }
@@ -745,14 +760,18 @@ legend { margin-bottom: .7rem; font-weight: 800; }
   .publication-designate, .publication-milestone-option, .publication-designate-summary, .publication-statement,
   .book-deliverables-summary, .milestone-section .milestone-purpose-option,
   .task-drawer, .task-drawer-head, .task-drawer-footer, .task-drawer-modes, .task-plan-goal, .task-plan-compact,
-  .task-plan-chip, .task-plan-boundary, .task-plan-lock, .task-plan-section-number {
+  .task-plan-chip, .task-plan-boundary, .task-plan-lock, .task-plan-section-number,
+  .task-drawer-foot, .task-drawer-bar, .task-bar-actions, .task-bar-note, .task-bar-refusal {
     color: CanvasText;
     background: Canvas;
     border-color: CanvasText;
     box-shadow: none;
   }
-  /* Without colour the chosen mode keeps a heavier outline of its own, and the drawer its edge. */
+  /* Without colour the chosen mode keeps a heavier outline of its own, and the drawer its edge; the bar keeps
+     the rule that sets it apart from the plan, and a blocker its own left edge beside the words. */
   .task-drawer { border-left: 2px solid CanvasText; }
+  .task-drawer-foot { border-top: 2px solid CanvasText; }
+  .task-bar-note[data-task-bar-note="needs-connection"], .task-bar-note[data-task-bar-note="changed"], .task-bar-refusal { padding-left: .4rem; border-left: 3px solid CanvasText; }
   .task-drawer-mode { color: ButtonText; background: ButtonFace; forced-color-adjust: auto; }
   .task-drawer-mode[aria-pressed="true"] { outline: 2px solid Highlight; outline-offset: -3px; box-shadow: none; }
   .task-drawer-title:focus-visible, .task-drawer-mode:focus-visible { outline-color: Highlight; }

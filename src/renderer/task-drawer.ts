@@ -1,5 +1,8 @@
-import type { RendererApi, TaskPlanKind, TaskPlanProjection } from '../shared/protocol.js';
+import type { RendererApi, ServiceJobProjection, TaskPlanKind, TaskPlanProjection } from '../shared/protocol.js';
 import {
+  TASK_BAR_SLOT_BUSY,
+  TASK_BAR_START_FAILED,
+  TASK_BAR_SAVED,
   TASK_DRAWER_BACK,
   TASK_DRAWER_BACK_REASON,
   TASK_DRAWER_CLOSE,
@@ -18,7 +21,6 @@ import {
   TASK_PLAN_DEFAULT_RULE_REASON,
   TASK_PLAN_DRIFT_COLUMNS,
   TASK_PLAN_DRIFT_HEADING,
-  TASK_PLAN_DRIFT_VIEW,
   TASK_PLAN_EDIT,
   TASK_PLAN_EDIT_REASON,
   TASK_PLAN_FULL_LINK,
@@ -34,10 +36,12 @@ import {
   TASK_PLAN_SERVICE_TERMS,
   TASK_PLAN_STATE_PILLS,
   TASK_PLAN_TECHNICAL_NOT_DO,
+  taskBarView,
   taskDrawerModeOf,
   taskPlanChips,
   taskPlanCompactRows,
   taskPlanSavedLine,
+  type TaskBarAction,
   type TaskDrawerMode,
 } from './task-drawer-labels.js';
 
@@ -49,10 +53,16 @@ import {
  * it takes a column and the central area makes room for it; below, it lies over the page. It shares the
  * one supporting side slot with 导航: opening one closes the other (IA).
  *
- * It reads the plan and states it; it records nothing. The actions that record an authorization stay on
- * the surfaces that raise each Task until S74 brings the authorization bar here, and the footer says so
- * whatever the drawer shows (PLAN-007). 精简 is the default and the editor's choice is remembered in this
- * renderer's own storage (PLAN-010); every exact identity is in 完整's 查看技术详情 (LAYER-001, LAYER-007).
+ * The plan itself records nothing, and the footer says so whatever the drawer shows (PLAN-007). Since Issue
+ * #420 (S74a) the footer region is also the authorization bar (§6 常驻授权条, V2-UX-AUTH-001 to 007), which
+ * never scrolls away (LAYER-005): the plan's one summary line, AUTH-003's statement, and `开始任务`, whose one
+ * activation records exactly the plan on show through its kind's own authorization — J-03's fixed task
+ * record-only (ADR 0055), the analysis into the one execution slot, a Review Run's one approval into its
+ * drive loop. A changed plan offers `重新确认计划` and `查看计划修订` instead; a route whose model service is
+ * not connected offers `去设置连接` beside the disabled start; once started, the same region is the Run's
+ * state and the way to its surface (AUTH-007). While the Run runs the drawer reads the plan again on its own.
+ * 精简 is the default and the editor's choice is remembered in this renderer's own storage (PLAN-010); every
+ * exact identity is in 完整's 查看技术详情 (LAYER-001, LAYER-007).
  */
 export interface TaskPlanRequest {
   readonly bookId: string;
@@ -74,17 +84,33 @@ export interface TaskDrawerSurface {
   interrupt(): void;
 }
 
+type DrawerApi = Pick<RendererApi, 'inspectTaskPlan' | 'authorizeTaskAuthorization' | 'authorizeBaselineAnalysis' | 'authorizeReviewRun' | 'prepareBaselineAnalysis'>;
+
 export interface MountTaskDrawerOptions {
   /** The shell's own side panel, beside `#screen`. */
   readonly root: HTMLElement;
   /** The element whose `data-task-drawer` says whether the central area makes room for the drawer. */
   readonly shell: HTMLElement;
-  readonly api: Pick<RendererApi, 'inspectTaskPlan'>;
+  readonly api: DrawerApi;
   technicalDetails(gridClass: string | undefined, ...rows: ReadonlyArray<HTMLElement>): HTMLElement;
   errorMessage(error: unknown, fallback: string): string;
+  errorCode(error: unknown): string | null;
+  setStatus(message: string, tone?: 'busy' | 'success' | 'error'): void;
+  awaitServiceJob(initial: ServiceJobProjection, onProgress: (job: ServiceJobProjection) => void): Promise<ServiceJobProjection>;
   /** The one side slot (IA): the drawer is opening, so 导航 closes. */
   onOpen(): void;
+  /** The bar started the Task or reconfirmed its plan: the surfaces of that kind on screen read it again. */
+  onRecorded(kind: TaskPlanKind, bookId: string): void;
+  /** 查看运行 / 查看运行记录 / 查看审阅: the started Task's own surface (AUTH-007). */
+  openRunSurface(plan: TaskPlanProjection): void;
+  /** 去设置连接: 设置's model-service connections (§10, MODEL-008). */
+  openConnectionSettings(): void;
 }
+
+/** How often the drawer reads a running Task's plan again, so the bar follows the Run to its end. */
+const RUNNING_POLL_MS = 1_000;
+/** The diff table the bar's 查看计划修订 shows and hides; one drawer, so one table. */
+const DRIFT_TABLE_ID = 'task-drawer-drift-table';
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string): HTMLElementTagNameMap[K] {
   const node = document.createElement(tag);
@@ -127,11 +153,22 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
   const { root, shell, api } = options;
   let request: TaskPlanRequest | null = null;
   let plan: TaskPlanProjection | null = null;
+  /** The plan as last painted, so a read that brought nothing new repaints nothing the editor has open. */
+  let painted = '';
   let returnFocus: () => HTMLElement | null = () => null;
   let mode: TaskDrawerMode = storedMode();
   let ticket = 0;
   let interrupted = false;
   let focusTitle = false;
+  /** A start or a reconfirmation is under way: every bar action waits for it. */
+  let working = false;
+  /** Why the last start or reconfirmation was refused, beside the actions until the next one or a new plan. */
+  let refusal: string | null = null;
+  /** Whether 查看计划修订 shows the diff; kept across the reads of the same plan version. */
+  let diffShown = false;
+  /** Focus belongs on the bar once the action that had it is gone: the start just replaced by the Run's state. */
+  let focusBar = false;
+  let pollTimer: number | undefined;
 
   root.classList.add('task-drawer');
   root.setAttribute('aria-labelledby', 'task-drawer-title');
@@ -165,8 +202,14 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
   close.addEventListener('click', () => surface.close(true));
   header.append(back, title, pill, modes, close, backReason);
   const body = el('div', 'task-drawer-body');
+  // The footer region never scrolls with the plan (LAYER-005): PLAN-007's line, then the authorization bar.
+  const foot = el('div', 'task-drawer-foot');
   const footer = el('p', 'task-drawer-footer', TASK_DRAWER_FOOTER);
-  root.replaceChildren(header, body, footer);
+  const bar = el('section', 'task-drawer-bar');
+  bar.setAttribute('aria-label', '开始任务');
+  bar.hidden = true;
+  foot.append(footer, bar);
+  root.replaceChildren(header, body, foot);
   root.addEventListener('keydown', (event) => {
     if (event.key !== 'Escape' || event.defaultPrevented || root.hidden) return;
     event.preventDefault();
@@ -183,7 +226,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     mode = next;
     rememberMode(next);
     syncModeButtons();
-    if (plan !== null) paint(plan);
+    if (plan !== null) paint(plan, true);
     if (focusToggle) modeButtons.find((button) => button.dataset['taskDrawerMode'] === next)?.focus();
   }
 
@@ -191,26 +234,45 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     for (const node of root.querySelectorAll<HTMLButtonElement>('button')) node.disabled = true;
   }
 
+  function clearPoll(): void {
+    if (pollTimer !== undefined) window.clearTimeout(pollTimer);
+    pollTimer = undefined;
+  }
+
+  /** While the Run runs, read the plan again on a timer, so the bar follows it to its end wherever the editor is. */
+  function schedulePoll(next: TaskPlanProjection): void {
+    clearPoll();
+    if (next.state.key !== 'running' || interrupted || root.hidden) return;
+    pollTimer = window.setTimeout(() => {
+      pollTimer = undefined;
+      read();
+    }, RUNNING_POLL_MS);
+  }
+
   // ---- reading --------------------------------------------------------------------------------------
 
   function read(): void {
     const asked = request;
     if (asked === null) return;
+    clearPoll();
     const mine = ++ticket;
     void api.inspectTaskPlan({ kind: asked.kind, ref: asked.ref }).then(
       (next) => {
         if (mine !== ticket || request !== asked || root.hidden) return;
         // The first answer names the Task a `null` ref meant, so later reads ask for that Task.
         request = { ...asked, ref: next.ref };
-        paint(next);
+        paint(next, false);
       },
       (error) => {
         if (mine !== ticket || request !== asked || root.hidden) return;
         plan = null;
+        painted = '';
         root.dataset['taskPlanState'] = 'unavailable';
         pill.textContent = '';
         pill.hidden = true;
         body.replaceChildren(el('p', 'attention-note task-drawer-unavailable', options.errorMessage(error, TASK_DRAWER_UNAVAILABLE)));
+        bar.hidden = true;
+        bar.replaceChildren();
         if (focusTitle) {
           focusTitle = false;
           title.focus();
@@ -221,11 +283,24 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
 
   // ---- painting ---------------------------------------------------------------------------------------
 
-  function paint(next: TaskPlanProjection): void {
+  function paint(next: TaskPlanProjection, force: boolean): void {
+    const key = JSON.stringify(next);
+    const sameVersion = plan !== null && plan.ref === next.ref && plan.planVersion === next.planVersion;
+    if (!force && key === painted && plan !== null) {
+      schedulePoll(next);
+      return;
+    }
+    if (!sameVersion) {
+      diffShown = false;
+      refusal = null;
+    }
+    const technicalOpen = sameVersion && body.querySelector<HTMLDetailsElement>('details.task-plan-technical')?.open === true;
     plan = next;
+    painted = key;
     root.dataset['taskPlanKind'] = next.kind;
     root.dataset['taskPlanRef'] = next.ref;
     root.dataset['taskPlanState'] = next.state.key;
+    root.dataset['taskPlanStart'] = next.start.readiness;
     if (next.planVersion === null) delete root.dataset['taskPlanVersion'];
     else root.dataset['taskPlanVersion'] = String(next.planVersion);
     const tone = TASK_PLAN_STATE_PILLS[next.state.key];
@@ -235,21 +310,32 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     pill.dataset['pillShape'] = tone.shape;
     pill.textContent = next.state.label;
     const active = document.activeElement;
-    const restore = active instanceof HTMLElement && body.contains(active) ? active.dataset['taskDrawerControl'] ?? null : null;
+    const restore = active instanceof HTMLElement && (body.contains(active) || bar.contains(active)) ? active.dataset['taskDrawerControl'] ?? null : null;
     body.replaceChildren(goalBlock(next), ...(next.drift === null ? [] : [driftBlock(next.drift)]), mode === 'compact' ? compactBlock(next) : fullBlock(next));
+    if (technicalOpen) {
+      const details = body.querySelector<HTMLDetailsElement>('details.task-plan-technical');
+      if (details) details.open = true;
+    }
+    paintBar(next);
     if (interrupted) disableAll();
     if (focusTitle) {
       focusTitle = false;
       title.focus();
     } else if (restore !== null) {
-      body.querySelector<HTMLElement>(`[data-task-drawer-control="${restore}"]`)?.focus();
+      const again = root.querySelector<HTMLElement>(`[data-task-drawer-control="${restore}"]:not(:disabled)`);
+      if (again) again.focus();
+      else if (focusBar) bar.querySelector<HTMLElement>('button:not(:disabled), .task-bar-status')?.focus();
+    } else if (focusBar) {
+      bar.querySelector<HTMLElement>('button:not(:disabled), .task-bar-status')?.focus();
     }
+    focusBar = false;
+    schedulePoll(next);
   }
 
   /** The disabled action with its reason in words beside it, not only in a tooltip. */
-  function unavailable(label: string, name: string, reason: string): HTMLElement {
+  function unavailable(label: string, name: string, reason: string, className = 'quiet'): HTMLElement {
     const wrap = el('span', 'task-plan-unavailable');
-    const button = control(label, 'quiet', name);
+    const button = control(label, className, name);
     button.disabled = true;
     const why = el('small', 'field-note', reason);
     why.id = uid(name);
@@ -275,6 +361,10 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     return section;
   }
 
+  /**
+   * The plan's key content changed (S72 D8): why, how it is settled, and the diff in the drawer's words.
+   * The table is shown and hidden by the bar's 查看计划修订 (S74a A4), which is where the action lives now.
+   */
   function driftBlock(drift: NonNullable<TaskPlanProjection['drift']>): HTMLElement {
     const section = el('section', 'attention-note task-plan-drift');
     section.dataset['taskPlanDrift'] = drift.entries.length === 0 ? 'reasons' : 'diff';
@@ -283,8 +373,8 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     section.append(el('p', 'task-plan-drift-resolution', drift.resolution));
     if (drift.entries.length === 0) return section;
     const table = el('table', 'task-plan-drift-table');
-    table.id = uid('drift');
-    table.hidden = true;
+    table.id = DRIFT_TABLE_ID;
+    table.hidden = !diffShown;
     const head = el('tr');
     for (const column of TASK_PLAN_DRIFT_COLUMNS) {
       const cell = el('th', undefined, column);
@@ -309,14 +399,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       }
       table.append(row);
     }
-    const view = control(TASK_PLAN_DRIFT_VIEW, 'secondary', 'view-plan-revision');
-    view.setAttribute('aria-expanded', 'false');
-    view.setAttribute('aria-controls', table.id);
-    view.addEventListener('click', () => {
-      table.hidden = !table.hidden;
-      view.setAttribute('aria-expanded', table.hidden ? 'false' : 'true');
-    });
-    section.append(view, table);
+    section.append(table);
     return section;
   }
 
@@ -441,6 +524,183 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     return disclosure;
   }
 
+  // ---- the authorization bar (Issue #420, S74a) -------------------------------------------------------
+
+  /**
+   * §6 常驻授权条: the plan's summary line, AUTH-003's statement and what this state offers (`taskBarView`),
+   * with a refused start's reason beside the actions until the next attempt. Once the Task has started, the
+   * same region states the Run and leads to its surface, and offers nothing that would start it again.
+   */
+  function paintBar(next: TaskPlanProjection): void {
+    const view = taskBarView(next);
+    bar.hidden = false;
+    bar.dataset['taskBar'] = view.readiness;
+    const parts: HTMLElement[] = [el('p', 'task-bar-summary', view.summary)];
+    if (view.status !== null) {
+      const status = el('p', 'task-bar-status', view.status);
+      status.setAttribute('role', 'status');
+      status.tabIndex = -1;
+      parts.push(status);
+    }
+    if (view.statement !== null) parts.push(el('p', 'task-bar-statement', view.statement));
+    let noteId: string | null = null;
+    if (view.note !== null) {
+      const note = el('p', 'task-bar-note', view.note);
+      note.dataset['taskBarNote'] = view.readiness;
+      noteId = uid('bar-note');
+      note.id = noteId;
+      parts.push(note);
+    }
+    if (refusal !== null) {
+      const refused = el('p', 'task-bar-refusal', refusal);
+      refused.setAttribute('role', 'alert');
+      parts.push(refused);
+    }
+    const actions = el('div', 'task-bar-actions');
+    for (const action of view.actions) actions.append(barAction(action, noteId));
+    parts.push(actions);
+    bar.replaceChildren(...parts);
+    if (working) for (const button of bar.querySelectorAll<HTMLButtonElement>('button')) button.disabled = true;
+  }
+
+  function barAction(action: TaskBarAction, noteId: string | null): HTMLElement {
+    if (action.disabledReason !== null) {
+      // The start that waits for a connection says why in the note beside it; the others carry their own reason.
+      if (action.name === 'start' && noteId !== null) {
+        const start = control(action.label, action.tone, action.name);
+        start.disabled = true;
+        start.setAttribute('aria-describedby', noteId);
+        return start;
+      }
+      return unavailable(action.label, action.name, action.disabledReason, action.tone);
+    }
+    const button = control(action.label, action.tone, action.name);
+    switch (action.name) {
+      case 'start':
+        button.addEventListener('click', () => void start());
+        break;
+      case 'reconfirm-plan':
+        button.addEventListener('click', () => void reconfirm());
+        break;
+      case 'view-plan-revision':
+        button.setAttribute('aria-controls', DRIFT_TABLE_ID);
+        button.setAttribute('aria-expanded', diffShown ? 'true' : 'false');
+        button.addEventListener('click', () => {
+          diffShown = !diffShown;
+          const table = body.querySelector<HTMLElement>(`#${DRIFT_TABLE_ID}`);
+          if (table) table.hidden = !diffShown;
+          button.setAttribute('aria-expanded', diffShown ? 'true' : 'false');
+          if (diffShown) table?.scrollIntoView({ block: 'nearest' });
+        });
+        break;
+      case 'connect':
+        button.addEventListener('click', () => options.openConnectionSettings());
+        break;
+      case 'save-draft':
+        button.addEventListener('click', () => {
+          options.setStatus(TASK_BAR_SAVED, 'success');
+          surface.close(true);
+        });
+        break;
+      case 'run-link':
+        button.addEventListener('click', () => {
+          if (plan !== null) options.openRunSurface(plan);
+        });
+        break;
+      case 'revise':
+        break;
+    }
+    return button;
+  }
+
+  /** Every bar action waits while one is under way; the bar is painted again when it ends. */
+  function beginWork(): boolean {
+    if (working || interrupted || plan === null || request === null) return false;
+    working = true;
+    refusal = null;
+    for (const button of bar.querySelectorAll<HTMLButtonElement>('button')) button.disabled = true;
+    return true;
+  }
+
+  /**
+   * The action ended. A refusal is said at once beside the actions, which are offered again with focus back
+   * on the one that was refused; either way the plan is read again — started, reconfirmed, or unchanged.
+   */
+  function endWork(asked: TaskPlanRequest | null): void {
+    working = false;
+    if (interrupted || root.hidden) return;
+    if (refusal !== null && plan !== null) {
+      paintBar(plan);
+      bar.querySelector<HTMLElement>('[data-task-drawer-control="start"]:not(:disabled), [data-task-drawer-control="reconfirm-plan"]:not(:disabled)')?.focus();
+    }
+    if (asked !== null && request === asked) read();
+  }
+
+  /**
+   * 开始任务 (AUTH-002, AUTH-004): one activation records the Run Authorization and the Run Record for exactly
+   * the plan on show — the digests the bar read with it — through the kind's own authorization: J-03's
+   * record-only, the analysis into the one slot, a Review Run's one approval into its drive loop. A refusal
+   * is said beside the actions — the one slot busy in the bar's own words — and nothing waits in a queue.
+   */
+  async function start(): Promise<void> {
+    const current = plan;
+    const asked = request;
+    if (current === null || !beginWork()) return;
+    const recordOnly = current.start.readiness === 'record-only' || current.start.readiness === 'no-route';
+    options.setStatus(recordOnly ? '正在记录运行…' : '正在开始任务…', 'busy');
+    try {
+      if (current.kind === 'review-run') {
+        await api.authorizeReviewRun({ reviewRunId: current.ref, planDigests: current.start.categoryDigests });
+      } else {
+        const planEnvelopeDigest = current.start.planEnvelopeDigest;
+        if (planEnvelopeDigest === null) throw new Error(TASK_BAR_START_FAILED);
+        if (current.kind === 'fixed-task') await api.authorizeTaskAuthorization({ taskIntentId: current.ref, planEnvelopeDigest });
+        else await api.authorizeBaselineAnalysis({ taskIntentId: current.ref, planEnvelopeDigest });
+      }
+      // The status line names the event, never a state the Run will leave (V2-UX-LIVE-004): the bar shows the state.
+      options.setStatus(current.kind === 'fixed-task' ? '已记录授权 · 未派发' : recordOnly ? '已记录运行；派发前会被阻止' : '已开始任务', 'success');
+      focusBar = true;
+      options.onRecorded(current.kind, current.bookId);
+    } catch (error) {
+      refusal = options.errorCode(error) === 'EXECUTION_BUSY' ? TASK_BAR_SLOT_BUSY : options.errorMessage(error, TASK_BAR_START_FAILED);
+      options.setStatus(refusal, 'error');
+    } finally {
+      endWork(asked);
+    }
+  }
+
+  /**
+   * 重新确认计划 (V2-UX-PLAN-009, AUTH-006): prepares the next plan version of the same Task Intent from the
+   * change the pending Plan Revision proposes, exactly as ②A did before the action moved into the bar. The
+   * drawer then reads the next version, whose bar offers 开始任务 again.
+   */
+  async function reconfirm(): Promise<void> {
+    const current = plan;
+    const asked = request;
+    const input = current?.start.reconfirm ?? null;
+    if (current === null || input === null || !beginWork()) return;
+    options.setStatus('正在按变化后的关键内容重新确认计划…', 'busy');
+    try {
+      const initial = await api.prepareBaselineAnalysis({ goal: input.goal, update: input.update, reconfirm: true });
+      const completed = await options.awaitServiceJob(initial, (job) => options.setStatus(job.progress.label, job.state === 'failed' ? 'error' : 'busy'));
+      if (completed.state === 'cancelled') {
+        options.setStatus('重新确认计划已取消；原计划保持不变。', 'success');
+        return;
+      }
+      if (completed.kind !== 'baseline-analysis-preparation' || completed.result === null || !('coverageManifest' in completed.result)) {
+        throw new Error('重新确认计划未返回计划。');
+      }
+      options.setStatus(`计划已重新确认为版本 ${completed.result.planVersion?.ordinal ?? '?'}。`, 'success');
+      focusBar = true;
+      options.onRecorded(current.kind, current.bookId);
+    } catch (error) {
+      refusal = options.errorMessage(error, '无法重新确认计划。');
+      options.setStatus(refusal, 'error');
+    } finally {
+      endWork(asked);
+    }
+  }
+
   // ---- the surface --------------------------------------------------------------------------------------
 
   const surface: TaskDrawerSurface = {
@@ -448,15 +708,22 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       request = next;
       returnFocus = finder;
       plan = null;
+      painted = '';
+      refusal = null;
+      diffShown = false;
+      clearPoll();
       root.hidden = false;
       root.dataset['taskDrawer'] = 'open';
       shell.dataset['taskDrawer'] = 'open';
       root.dataset['taskPlanKind'] = next.kind;
       delete root.dataset['taskPlanRef'];
       delete root.dataset['taskPlanVersion'];
+      delete root.dataset['taskPlanStart'];
       root.dataset['taskPlanState'] = 'loading';
       pill.hidden = true;
       body.replaceChildren(el('p', 'field-note task-drawer-loading', TASK_DRAWER_LOADING));
+      bar.hidden = true;
+      bar.replaceChildren();
       options.onOpen();
       focusTitle = true;
       if (interrupted) disableAll();
@@ -469,8 +736,11 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     close(restoreFocus) {
       if (root.hidden) return;
       ticket += 1;
+      clearPoll();
       request = null;
       plan = null;
+      painted = '';
+      refusal = null;
       root.hidden = true;
       root.dataset['taskDrawer'] = 'closed';
       shell.dataset['taskDrawer'] = 'closed';
@@ -492,6 +762,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     interrupt() {
       interrupted = true;
       ticket += 1;
+      clearPoll();
       disableAll();
     },
   };

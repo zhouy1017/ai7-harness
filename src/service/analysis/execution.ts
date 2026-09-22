@@ -270,6 +270,25 @@ export class BaselineAnalysisExecutionOwner {
   }
 
   /**
+   * Whether a Run holds the one slot now (Issue #420, S74a A2). The editor's start is refused while it
+   * does — before anything is recorded — so nothing ever waits in a queue for the slot to free.
+   */
+  get busy(): boolean {
+    return this.#active !== null;
+  }
+
+  /**
+   * Whether the credential the developer-live route resolves is present now (Issue #420, S74a A3): the
+   * readiness dispatch checks before any transmission, asked before an authorization so a Run that could
+   * not start is never recorded. The value is resolved and discarded by the broker. `null` under
+   * development-ci, whose routes transmit nothing and so need no credential.
+   */
+  async liveCredentialReadiness(): Promise<'present' | 'missing' | null> {
+    if ((this.#deps.developerLive ?? null) === null) return null;
+    return this.#broker.checkPlanReadiness(OPENCODE_GO_ROUTE_PROFILE.credentialSlot, DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE);
+  }
+
+  /**
    * Single-slot admission: one Run per instance; a second dispatch is refused, never queued.
    *
    * `ledger` is the ledger the Run Record belongs to and defaults to the baseline kind's, so every
