@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import {
   MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION,
-  IMPORTED_MARK_SCHEMA_VERSION,
+  EXPORT_LEDGER_SCHEMA_VERSION,
 } from '../../src/service/task-authorization.js';
 import { graphemesOf } from '../../src/shared/mark-anchor.js';
 import type {
@@ -25,6 +25,7 @@ import { PUBLICATION_VERSION_RELATIONS_DROP_ORDER } from '../support/publication
 import { PROPOSAL_CONFLICT_RELATIONS_DROP_ORDER } from '../support/proposal-conflicts.js';
 import { IMPORT_RETENTION_RELATIONS_DROP_ORDER } from '../support/import-retention.js';
 import { IMPORTED_MARK_RELATIONS_DROP_ORDER } from '../support/imported-marks.js';
+import { EXPORT_LEDGER_RELATIONS_DROP_ORDER } from '../support/manuscript-export.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 
 // Service-integration suite (L2) for Editorial Marks (Issue #407). It drives the real `EditorialStore`
@@ -39,6 +40,7 @@ const MARK_RELATIONS = [
   // never held its Publication Version relations.
   // A store taken back below revision 27 never held its import-retention relations, nor one below 28 its
   // staged imported marks.
+  ...EXPORT_LEDGER_RELATIONS_DROP_ORDER,
   ...IMPORTED_MARK_RELATIONS_DROP_ORDER,
   ...IMPORT_RETENTION_RELATIONS_DROP_ORDER,
   ...PROPOSAL_CONFLICT_RELATIONS_DROP_ORDER,
@@ -555,7 +557,7 @@ describe('Editorial Marks on a manuscript', () => {
     }
     const after = new DatabaseSync(databasePath, { readOnly: true });
     try {
-      expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(IMPORTED_MARK_SCHEMA_VERSION);
+      expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(EXPORT_LEDGER_SCHEMA_VERSION);
       expect(after.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
     } finally {
       after.close();

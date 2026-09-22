@@ -227,10 +227,10 @@ function isElement(node: XmlNode): node is XmlElement {
   return typeof node === 'object' && 'name' in node;
 }
 
-const INVALID_XML_CHARACTERS = /[ --￾￿]/gu;
+const INVALID_XML_CHARACTERS = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\uFFFE\uFFFF]/gu;
 
 function escapeText(value: string): string {
-  return value.replace(INVALID_XML_CHARACTERS, '�').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  return value.replace(INVALID_XML_CHARACTERS, '\uFFFD').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
 function escapeAttribute(value: string): string {
@@ -348,7 +348,7 @@ function readPackage(bytes: Uint8Array): { names: string[]; entries: Map<string,
   for (const [name, data] of Object.entries(files)) {
     requireExport(names.length < MAX_ENTRY_COUNT, 'DOCX_EXPORT_SOURCE_INVALID', '原文件条目过多。');
     requireExport(
-      name.length > 0 && name.length <= 240 && !name.includes('\\') && !name.includes(' ') && !name.startsWith('/') &&
+      name.length > 0 && name.length <= 240 && !name.includes('\\') && !name.includes('\u0000') && !name.startsWith('/') &&
         !/^[A-Za-z]:/.test(name) && posix.normalize(name) === name && !name.startsWith('../'),
       'DOCX_EXPORT_SOURCE_INVALID',
       '原文件条目名称无效。',

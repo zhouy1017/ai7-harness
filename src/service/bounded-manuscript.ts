@@ -73,6 +73,7 @@ import {
   PROPOSAL_CONFLICT_SCHEMA_VERSION,
   IMPORT_RETENTION_SCHEMA_VERSION,
   IMPORTED_MARK_SCHEMA_VERSION,
+  EXPORT_LEDGER_SCHEMA_VERSION,
   SUCCESSIVE_TASK_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_SQL,
   TASK_AUTHORIZATION_SCHEMA_VERSION,
@@ -92,6 +93,7 @@ import {
   resolveBranchMarksAfterRewrite,
 } from './editorial-marks.js';
 import { IMPORTED_MARK_FOREIGN_KEYS, IMPORTED_MARK_SCHEMA_SQL } from './imported-marks.js';
+import { EXPORT_LEDGER_FOREIGN_KEYS, EXPORT_LEDGER_SCHEMA_SQL, EXPORT_LEDGER_TRIGGER_SQL } from './manuscript-export.js';
 import {
   MANUSCRIPT_EFFECT_FOREIGN_KEYS,
   MANUSCRIPT_EFFECT_SCHEMA_SQL,
@@ -1761,6 +1763,8 @@ const SCHEMA_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
   ...IMPORT_RETENTION_FOREIGN_KEYS,
   // Revision 28 (Issue #411): the staged imported marks, owned and spelled by `imported-marks.ts`.
   ...IMPORTED_MARK_FOREIGN_KEYS,
+  // Revision 29 (Issue #413): the export ledger, owned and spelled by `manuscript-export.ts`.
+  ...EXPORT_LEDGER_FOREIGN_KEYS,
   editorial_workspace_profile_sidecar_revisions: [
     'native_artifact_id>native_artifact_installations.artifact_id:NO ACTION/NO ACTION/NONE',
   ],
@@ -2363,6 +2367,7 @@ function requireManuscriptReimportTargetSchema(
   includeProposalConflictTables = false,
   includeImportRetentionTables = false,
   includeImportedMarkTables = false,
+  includeExportLedgerTables = false,
 ): void {
   const analysisTables = includePlanVersionTables ? ANALYSIS_LEDGER_EXPECTED_SCHEMA_SQL : PRE_17_ANALYSIS_LEDGER_EXPECTED_SCHEMA_SQL;
   const analysisTriggers = includePlanVersionTables ? ANALYSIS_LEDGER_TRIGGER_SQL : PRE_17_ANALYSIS_LEDGER_TRIGGER_SQL;
@@ -2417,6 +2422,8 @@ function requireManuscriptReimportTargetSchema(
         ? { proposal_change_items: [PROPOSAL_CHANGE_ITEMS_REVISION_27_SQL, EDITORIAL_MARK_SCHEMA_SQL.proposal_change_items] }
         : {}),
       ...(includeImportedMarkTables ? IMPORTED_MARK_SCHEMA_SQL : {}),
+      // Revision 29 (Issue #413) adds the export ledger the same way, behind a flag of its own.
+      ...(includeExportLedgerTables ? EXPORT_LEDGER_SCHEMA_SQL : {}),
     },
     MANUSCRIPT_REIMPORT_INDEX_SQL,
     true,
@@ -2431,6 +2438,7 @@ function requireManuscriptReimportTargetSchema(
       ...(includePublicationVersionTables ? PUBLICATION_VERSION_TRIGGER_SQL : {}),
       ...(includeProposalConflictTables ? PROPOSAL_CONFLICT_TRIGGER_SQL : {}),
       ...(includeImportRetentionTables ? IMPORT_RETENTION_TRIGGER_SQL : {}),
+      ...(includeExportLedgerTables ? EXPORT_LEDGER_TRIGGER_SQL : {}),
     },
   );
 }
@@ -5087,6 +5095,7 @@ export function validateManuscriptReimportSchemaTruth(
   includeProposalConflictTables = false,
   includeImportRetentionTables = false,
   includeImportedMarkTables = false,
+  includeExportLedgerTables = false,
 ): void {
   requireManuscriptReimportTargetSchema(
     db,
@@ -5104,6 +5113,7 @@ export function validateManuscriptReimportSchemaTruth(
     includeProposalConflictTables,
     includeImportRetentionTables,
     includeImportedMarkTables,
+    includeExportLedgerTables,
   );
   validateSchemaAuthorityIds(db);
   validateWorkflowSemanticTruth(db, profile);
@@ -5166,7 +5176,8 @@ export function initializeBoundedSchema(
       version === MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION || version === EDITORIAL_MARK_SCHEMA_VERSION ||
       version === MANUSCRIPT_EFFECT_SCHEMA_VERSION || version === EDITORIAL_REVIEW_SCHEMA_VERSION ||
       version === PUBLICATION_VERSION_SCHEMA_VERSION || version === PROPOSAL_CONFLICT_SCHEMA_VERSION ||
-      version === IMPORT_RETENTION_SCHEMA_VERSION || version === IMPORTED_MARK_SCHEMA_VERSION,
+      version === IMPORT_RETENTION_SCHEMA_VERSION || version === IMPORTED_MARK_SCHEMA_VERSION ||
+      version === EXPORT_LEDGER_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -5179,9 +5190,10 @@ export function initializeBoundedSchema(
       version === EDITORIAL_MARK_SCHEMA_VERSION || version === MANUSCRIPT_EFFECT_SCHEMA_VERSION ||
       version === EDITORIAL_REVIEW_SCHEMA_VERSION ||
       version === PUBLICATION_VERSION_SCHEMA_VERSION || version === PROPOSAL_CONFLICT_SCHEMA_VERSION ||
-      version === IMPORT_RETENTION_SCHEMA_VERSION || version === IMPORTED_MARK_SCHEMA_VERSION) {
+      version === IMPORT_RETENTION_SCHEMA_VERSION || version === IMPORTED_MARK_SCHEMA_VERSION ||
+      version === EXPORT_LEDGER_SCHEMA_VERSION) {
     transact(db, () => {
-      if (validateStoreTruth || version !== IMPORTED_MARK_SCHEMA_VERSION) {
+      if (validateStoreTruth || version !== EXPORT_LEDGER_SCHEMA_VERSION) {
         validateManuscriptReimportSchemaTruth(
           db,
           profile,
@@ -5199,6 +5211,7 @@ export function initializeBoundedSchema(
           version >= PROPOSAL_CONFLICT_SCHEMA_VERSION,
           version >= IMPORT_RETENTION_SCHEMA_VERSION,
           version >= IMPORTED_MARK_SCHEMA_VERSION,
+          version >= EXPORT_LEDGER_SCHEMA_VERSION,
         );
       }
       terminalizeOrphanedReplacementPreviews(db);
@@ -5453,7 +5466,10 @@ interface BranchBinding {
 
 export type ManuscriptCheckpointPurpose =
   | 'Reimport Safety / 重新导入安全固定点'
-  | 'Task Input / 任务输入';
+  | 'Task Input / 任务输入'
+  // Issue #413: a current revision is exported only as an exact Manuscript Revision, so unsaved edits are
+  // saved as one first (V2-UX-TASK-040's low ceremony: no milestone, no signoff, no decision).
+  | 'Export Input / 导出输入';
 
 export interface ManuscriptCheckpointBinding {
   bookId: string;
