@@ -37,10 +37,11 @@ export function taskDrawerModeOf(stored: string | null): TaskDrawerMode {
 }
 
 /**
- * The central destinations the drawer stays open beside (S72 D3): the manuscript, 工作概览, ②A and ②B of
- * the Book whose plan it shows. Any other screen closes it.
+ * The central destinations the drawer stays open beside (S72 D3): the manuscript, 工作概览 (which reads
+ * `imported` while it still carries an import's completion), ②A and ②B of the Book whose plan it shows.
+ * Any other screen closes it.
  */
-export const TASK_DRAWER_SCREENS: ReadonlyArray<string> = ['editor', 'book-overview', 'book-analysis', 'book-review'];
+export const TASK_DRAWER_SCREENS: ReadonlyArray<string> = ['editor', 'book-overview', 'imported', 'book-analysis', 'book-review'];
 
 // ---- the state pill: words and a shape, never colour alone (editor-surfaces §0.3) ---------------------------
 

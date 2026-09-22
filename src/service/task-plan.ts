@@ -435,6 +435,7 @@ export function baselineAnalysisPlan(input: {
       ...(range === null ? [] : [{ key: 'selected-range', label: '所选范围', value: `内容块 ${range.startPosition}–${range.endPosition}` }]),
       ...(update === null || update.reusePlan === null ? [] : [
         { key: 'reuse-plan', label: '复用计划', value: `${update.reusePlanDigest ?? ''} · ${update.reusePlan.units.map((unit) => `单元 ${unit.unitOrdinal} ${unit.disposition}（${unit.reason}）`).join('；')}` },
+        { key: 'reuse-plan-predecessors', label: '前一修订版单元去向', value: update.reusePlan.predecessorUnits.map((unit) => `单元 ${unit.unitOrdinal} ${unit.disposition}`).join('；') },
       ]),
       ...(update === null || update.predecessor === null ? [] : [
         { key: 'predecessor', label: '前一修订版', value: `Revision ${update.predecessor.ordinal} · ${update.predecessor.revisionId} · ${update.predecessor.digest}` },

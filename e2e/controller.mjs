@@ -557,11 +557,21 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'j14-ime-focus',
     'j14-reflow-forced-colors',
     'plan-prepared',
+    // Issue #418 (S72): the Task Drawer beside the card — its two modes, the keyboard, the column at
+    // 1120 px and the overlay below, 200% and forced colours, and the one side slot it shares with 导航.
+    'drawer-plan-compact',
+    'drawer-plan-full',
+    'drawer-keyboard',
+    'drawer-push-overlay',
+    'drawer-reflow-forced-colors',
+    'drawer-one-slot-with-navigation',
     'cross-book-route-guard',
     'authorization-recorded',
+    'drawer-authorization-refresh',
     'foreground-boundary-check',
     'post-authorization-edit',
     'restart-immutable',
+    'drawer-restart-mode',
     'zero-activity',
   ]),
   'J-04': Object.freeze([
@@ -591,6 +601,8 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'book-reopen',
     'j14-reflow-forced-colors',
     'coverage-manifest',
+    // Issue #418 (S72): the plan the preparation froze, in the Task Drawer beside ②A.
+    'analysis-plan-drawer',
     'authorize-dispatch',
     'result-set-revision',
     'cross-unit-reduction',
@@ -619,9 +631,12 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'safe-retry-adaptation',
     'plan-revision-prepare',
     'plan-revision-drift',
+    // Issue #418 (S72 D8): the drift in the drawer's words; then #288's range, the one version 2 froze.
+    'plan-revision-drawer-diff',
     'plan-revision-stale-authorize',
     'plan-revision-revert',
     'plan-revision-reconfirm',
+    'plan-revision-drawer-range',
     'plan-revision-dispatch',
     'plan-revision-edit-unchanged',
     'review-relaunch',

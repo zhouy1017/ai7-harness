@@ -39,9 +39,10 @@ const REUSE_PLAN_SCHEMA = 'ai7.baseline-manuscript-analysis.reuse-plan/1';
 // Synchronized delta (#406): ②A's tabs, the four sentences' shortcuts to the tab their next action is
 // taken on, and each update mode's own button with the two ways to begin behind it.
 // Synchronized delta with Issue #417: 可信程度's pointer at 审阅 is a working `打开审阅` now (V2-UX-REV-011).
+// Synchronized delta with Issue #418 (S72 D4): the plan is one line and `查看计划`, which opens the Task Drawer.
 const ANALYSIS_ACTIONS = ['return-to-range', 'sync-current', 'reanalyze-range', 'reanalyze-book', 'open-revision', 'close-revision', 'cancel-preparation', 'view-plan-revision', 'reconfirm-plan',
   'select-tab', 'go-history', 'go-chapters', 'choose-sync-current', 'choose-reanalyze-range', 'choose-reanalyze-book', 'quick-sync-current', 'quick-reanalyze-range', 'quick-reanalyze-book',
-  'open-review'];
+  'open-review', 'view-plan'];
 // Synchronized delta with Issue #408: the renderer now carries exactly one Apply surface — AI7 Apply for
 // a Change Suggestion on the manuscript — and the analysis still gains none. Anything else named like an
 // execution, effect, apply or export member remains a failure here.
@@ -489,6 +490,67 @@ async function openReviewDestination(renderer, name) {
 async function reviewAction(renderer, selector, name) {
   await assertRenderer(renderer, `(() => { const button=document.querySelector(${JSON.stringify(selector)}); if(!(button instanceof HTMLButtonElement)||button.disabled)return false; button.click(); return true; })()`, name);
 }
+
+/**
+ * The Task Drawer as an editor reads it (Issue #418, S72): its state, the goal block, the rows of 精简 or
+ * the sections of 完整, the two columns, a changed plan's diff, every exact identity of 查看技术详情 by
+ * its key, and the mode this renderer remembers.
+ */
+async function readDrawer(renderer) {
+  return renderer.evaluate(`(() => {
+    const drawer=document.querySelector('#task-drawer');
+    if(!(drawer instanceof HTMLElement))return null;
+    const pairs=(selector,key)=>Object.fromEntries(Array.from(drawer.querySelectorAll(selector)).map((node)=>[node.dataset[key],node.textContent]));
+    const texts=(selector)=>Array.from(drawer.querySelectorAll(selector)).map((node)=>node.textContent);
+    const pill=drawer.querySelector('.task-drawer-pill');
+    const drift=drawer.querySelector('[data-task-plan-drift]');
+    let stored;
+    try { stored=localStorage.getItem('ai7.taskDrawer.mode'); } catch { stored='unavailable'; }
+    return {
+      hidden:drawer.hidden, kind:drawer.dataset.taskPlanKind, ref:drawer.dataset.taskPlanRef, state:drawer.dataset.taskPlanState,
+      version:drawer.dataset.taskPlanVersion??null, mode:drawer.dataset.taskDrawerMode, stored, pill:pill?.textContent,
+      sentence:drawer.querySelector('.task-plan-sentence-text')?.textContent,
+      chips:pairs('[data-task-plan-chip]','taskPlanChip'), saved:drawer.querySelector('.task-plan-saved')?.textContent??null,
+      drift:drift===null?null:{
+        kind:drift.dataset.taskPlanDrift, heading:drift.querySelector('h3')?.textContent,
+        text:Array.from(drift.querySelectorAll(':scope > p')).map((node)=>node.textContent),
+        rows:Array.from(drift.querySelectorAll('tr[data-drift-field]')).map((row)=>[row.dataset.driftField,row.dataset.driftMateriality,...Array.from(row.cells).map((cell)=>cell.textContent)]),
+        tableHidden:drift.querySelector('table')?.hidden??null,
+      },
+      rows:pairs('[data-task-plan-row]','taskPlanRow'), terms:pairs('[data-task-plan-term]','taskPlanTerm'),
+      references:texts('[data-task-plan-term="允许参考"] li'), sections:texts('[data-task-plan-section] > h3'),
+      steps:Array.from(drawer.querySelectorAll('.task-plan-steps > li')).map((item)=>item.querySelector('.task-plan-step')?.textContent+' '+item.querySelector('.task-plan-step-result')?.textContent),
+      participation:texts('.task-plan-participation > li'), outcomes:texts('[data-task-plan-term="可能产生"] li'), notDo:texts('.task-plan-not-do > li'),
+      columns:texts('.task-plan-boundary h4'), adaptable:texts('[data-task-plan-boundary="adaptable"] li'), askFirst:texts('[data-task-plan-boundary="ask-first"] li'),
+      technical:pairs('[data-task-plan-technical]','taskPlanTechnical'), footer:drawer.querySelector('.task-drawer-footer')?.textContent,
+      actions:drawer.querySelectorAll('[data-analysis-action], [data-review-action], [data-task-authorization-action]').length,
+    };
+  })()`);
+}
+
+/** Wait for the drawer to show one Task's plan in one state, then read it. */
+async function drawerShowing(renderer, ref, state, name) {
+  await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanRef===${JSON.stringify(ref)} && document.querySelector('#task-drawer')?.dataset.taskPlanState===${JSON.stringify(state)}`, name);
+  return readDrawer(renderer);
+}
+
+/** A count with its thousands grouped, as the drawer writes it. */
+function groupedCount(value) {
+  return String(value).replace(/\B(?=(\d{3})+(?!\d))/gu, ',');
+}
+
+/** One reuse plan as 查看技术详情 names it: the digest, then every unit's disposition and reason. */
+function reusePlanReading(digest, plan) {
+  return `${digest} · ${plan.units.map((unit) => `单元 ${unit.unitOrdinal} ${unit.disposition}（${unit.reason}）`).join('；')}`;
+}
+
+function predecessorUnitsReading(plan) {
+  return plan.predecessorUnits.map((unit) => `单元 ${unit.unitOrdinal} ${unit.disposition}`).join('；');
+}
+
+/** The editor's words for the one adaptation class the analysis envelopes declare, and the three locked groups. */
+const SAFE_RETRY_ADAPTATION = '模型服务暂时出错时，同一个阅读范围安全地再试一次';
+const LOCKED_BOUNDARY = ['固定要做的事、处理范围、参考范围与所用工序', '固定模型服务、发送内容类别、预算上限', '固定结果类型、受控动作'];
 
 async function click(renderer, label, name) {
   await assertRenderer(
@@ -959,6 +1021,7 @@ async function main() {
     await assertRenderer(renderer, `typeof window.ai7.inspectBaselineAnalysis==='function' &&
       typeof window.ai7.prepareBaselineAnalysis==='function' &&
       typeof window.ai7.authorizeBaselineAnalysis==='function' &&
+      typeof window.ai7.inspectTaskPlan==='function' &&
       ${JSON.stringify(REVIEW_MEMBERS)}.every((key)=>typeof window.ai7[key]==='function')`, 'renderer-analysis-api');
     at('renderer-zero-execution-api');
     await assertRenderer(renderer, `!Object.keys(window.ai7).some((key)=>/provider|session|scheduler|payload|egress/i.test(key))`, 'renderer-zero-execution-api');
@@ -1126,7 +1189,52 @@ async function main() {
       prepared.authorization === null && prepared.run === null && prepared.resultSetRevision === null && prepared.taskOutcome === null &&
       prepared.actions?.canPrepare === false && prepared.actions?.canAuthorize === true,
     'prepared-exact-envelope', { fixtureDigest, plan, executionPlan: prepared.executionPlan, planEnvelope: prepared.planEnvelope, actions: prepared.actions });
-    await assertRenderer(renderer, `(() => { const card=document.querySelector('.baseline-analysis-card'); const authorize=card?.querySelector('[data-analysis-action="authorize"]'); return card?.dataset.coverageManifestDigest===${JSON.stringify(manifest.digest)} && card.dataset.analysisUnits===${JSON.stringify(String(SAMPLE1_UNITS))} && card.dataset.planEnvelopeDigest===${JSON.stringify(prepared.planEnvelope.digest)} && card.querySelectorAll('[data-manifest-unit]').length===${SAMPLE1_UNITS} && card.textContent.includes(${JSON.stringify(manifest.digest)}) && card.textContent.includes(${JSON.stringify(FIXTURE_IDENTITY)}) && card.textContent.includes('0 次实时传输') && authorize instanceof HTMLButtonElement && !authorize.disabled && authorize.textContent==='授权并开始任务' && !card.querySelector('[data-analysis-action="prepare"]'); })()`, 'prepared-preview');
+    // Synchronized delta with Issue #418 (S72 D4): ②A names the plan in one line beside 查看计划. The eight
+    // manifest units, the manifest digest, the fixture route and the policy reading the card used to list
+    // read in the Task Drawer the preparation opened, asserted in the next stage.
+    await assertRenderer(renderer, `(() => { const card=document.querySelector('.baseline-analysis-card'); const authorize=card?.querySelector('[data-analysis-action="authorize"]'); const open=card?.querySelector('.analysis-plan-summary [data-analysis-action="view-plan"]'); return card?.dataset.coverageManifestDigest===${JSON.stringify(manifest.digest)} && card.dataset.analysisUnits===${JSON.stringify(String(SAMPLE1_UNITS))} && card.dataset.planEnvelopeDigest===${JSON.stringify(prepared.planEnvelope.digest)} && card.querySelector('.analysis-plan-summary .task-plan-summary-line')?.textContent===${JSON.stringify(`计划：首次基线分析 · 全书 · ${SAMPLE1_UNITS} 个阅读范围 · 任务输入修订版 r1 · 计划版本 1`)} && open instanceof HTMLButtonElement && open.textContent==='查看计划' && open.dataset.taskPlanOpen==='baseline-analysis' && !card.querySelector('[data-manifest-unit], [data-reuse-plan-unit], .analysis-plan-boundary') && authorize instanceof HTMLButtonElement && !authorize.disabled && authorize.textContent==='授权并开始任务' && !card.querySelector('[data-analysis-action="prepare"]'); })()`, 'prepared-preview');
+
+    at('analysis-plan-drawer');
+    // The plan the preparation froze, in the drawer beside ②A: 精简 first, then 完整, whose 查看技术详情
+    // holds each identity the card used to list, exactly as the plan froze it (Issue #418, S72 D5-D7).
+    const bookName = 'J-04 sample1 基线稿件分析';
+    const wholeCount = groupedCount(manifest.totalGraphemes);
+    const firstDrawer = await drawerShowing(renderer, prepared.taskIntent.taskIntentId, 'ready', 'analysis-drawer-opened');
+    requireJourney(firstDrawer?.hidden === false && firstDrawer.kind === 'baseline-analysis' && firstDrawer.version === '1' && firstDrawer.mode === 'compact' &&
+      firstDrawer.stored === null && firstDrawer.pill === '尚未开始' && firstDrawer.sentence === '为这本书做基线分析：梗概、人物与名称、事件、关系、设定和各章' &&
+      JSON.stringify(firstDrawer.chips) === JSON.stringify({ book: bookName, position: '全书', selected: `已选 ${wholeCount} 字`, revision: '任务输入修订版 r1', procedure: '工序「基线分析」' }) &&
+      firstDrawer.saved === null && firstDrawer.drift === null &&
+      JSON.stringify(firstDrawer.rows) === JSON.stringify({
+        处理: `《${bookName}》全书 · ${wholeCount} 字 · ${SAMPLE1_UNITS} 个阅读范围`,
+        发送: '本环境不连接模型服务，不会发送任何内容 · 用量：不发送，没有模型用量 · 未设置任务预算上限',
+        会得到: '一份基线分析：梗概、人物与名称、事件、关系、设定和各章；这次运行的运行报告',
+        不会: '不会直接修改稿件 · 不导出或发布 · 不存里程碑版本 · 不读这本书以外的内容 · 不作事实判定',
+        中途: '预计无需中途参与',
+      }) && firstDrawer.actions === 0 && firstDrawer.footer === '计划说明，不是运行授权', 'analysis-drawer-compact', firstDrawer);
+    await reviewAction(renderer, '#task-drawer [data-task-drawer-control="mode-full"]', 'analysis-drawer-full');
+    await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskDrawerMode==='full' && document.querySelectorAll('#task-drawer [data-task-plan-section]').length===6`, 'analysis-drawer-full-mode');
+    const firstFull = await readDrawer(renderer);
+    const firstTechnical = firstFull?.technical ?? {};
+    requireJourney(firstFull?.stored === 'full' &&
+      JSON.stringify(firstFull.steps) === JSON.stringify(['逐章读取 → 各章摘要', '汇总全书 → 梗概与人物、事件、关系、设定', '核对与抽检 → 可信程度说明']) &&
+      firstFull.terms['提供方'] === 'DeepSeek 开放平台 · deepseek-v4-pro' &&
+      firstFull.terms['提供方状态'] === '远程模型服务被拒绝（development-ci · v1：0 次实时传输）；由 AI7 本地确定性模型适配器执行' &&
+      firstFull.terms['用量上限'] === '不发送，没有模型用量' && firstFull.terms['预算上限'] === '未设置任务预算上限' && firstFull.terms['账户限额'] === '未知 · 提供方未返回' &&
+      JSON.stringify(firstFull.columns) === JSON.stringify(['运行中 AI7 可以自己调整', '这些一变就先停下来问你']) &&
+      JSON.stringify(firstFull.adaptable) === JSON.stringify([SAFE_RETRY_ADAPTATION]) && JSON.stringify(firstFull.askFirst) === JSON.stringify(LOCKED_BOUNDARY) &&
+      firstTechnical.goal === TASK_GOAL && firstTechnical.mode === '首次基线分析 · first-baseline' &&
+      firstTechnical['coverage-manifest'] === `${SAMPLE1_UNITS} 个分析单元 · 1 个结构段 · ${SAMPLE1_BLOCKS} 个内容块 · ${manifest.totalGraphemes} 字素 · ${manifest.digest}` &&
+      firstTechnical['manifest-units'] === manifest.units.map((unit) => `单元 ${unit.ordinal} · 内容块 ${unit.startPosition}–${unit.endPosition} · ${unit.graphemes} 字素`).join('；') &&
+      firstTechnical['execution-route'] === `ai7-local-deterministic · ai7-deterministic-fixture · 夹具 ${FIXTURE_IDENTITY} · ${fixtureDigest}` &&
+      firstTechnical['provider-binding'] === 'deepseek-open-platform · deepseek-v4-pro · adapter r1 · config r1 · 凭据 missing' &&
+      firstTechnical['credential-reference'] === readyConnection.credentialReference &&
+      firstTechnical['provider-processing'] === 'development-ci · v1 · 拒绝 · 0 次实时传输' &&
+      firstTechnical['prompt-contract'] === PROMPT_CONTRACT_DIGEST && firstTechnical['plan-envelope'] === prepared.planEnvelope.digest &&
+      firstTechnical['material-fields'] === PLAN_MATERIAL_FIELDS.join('、') &&
+      firstTechnical['plan-versions'] === `版本 1 · current · ${prepared.planEnvelope.digest}` &&
+      firstTechnical['not-do'] === prepared.namedNonEffects.join('；') &&
+      firstTechnical['selected-range'] === undefined && firstTechnical['reuse-plan'] === undefined,
+    'analysis-drawer-full-plan', firstFull);
 
     at('authorize-dispatch');
     cancellation.throwIfRequested();
@@ -1166,6 +1274,13 @@ async function main() {
     requireJourney(UUID_PATTERN.test(settled.taskOutcome?.outcomeId) && settled.taskOutcome?.classification === 'completed-with-gaps' &&
       settled.taskOutcome?.label === '任务结果：已完成（保留缺口）' && settled.taskOutcome?.resultSetRevisionId === revision.revisionId &&
       typeof settled.taskOutcome?.safeNextAction === 'string' && settled.taskOutcome.safeNextAction.length > 0, 'settled-task-outcome', settled.taskOutcome);
+    // Synchronized delta with Issue #418: the drawer beside ②A followed the Task to its end, reading the
+    // plan again as the Run moved, and now states the authorization and the Run it bound.
+    const settledDrawer = await drawerShowing(renderer, prepared.taskIntent.taskIntentId, 'settled', 'analysis-drawer-settled');
+    requireJourney(settledDrawer?.pill === '已完成' && settledDrawer.version === '1' &&
+      settledDrawer.technical.authorization?.startsWith(`${settled.authorization.authorizationId} · standard-direct · standard-direct-dispatch · `) &&
+      settledDrawer.technical['run-record']?.startsWith(`${settled.run.runRecordId} · completed-with-gaps · `) &&
+      settledDrawer.technical['plan-versions'] === `版本 1 · bound · ${prepared.planEnvelope.digest}`, 'analysis-drawer-settled-plan', settledDrawer);
     await assertRenderer(renderer, `(() => {
       const card=document.querySelector('.baseline-analysis-card');
       if(!card) return false;
@@ -1697,7 +1812,25 @@ async function main() {
       preparedSync.resultSetRevision?.revisionId === revision.revisionId && preparedSync.authorization === null && preparedSync.run === null && preparedSync.taskOutcome === null &&
       preparedSync.actions?.canPrepare === false && preparedSync.actions?.canAuthorize === true,
     'sync-prepared-plan', { syncExpected, update: preparedSync?.update, unitScope: preparedSync?.runSourceScope?.unitScope, executionPlan: preparedSync?.executionPlan, actions: preparedSync?.actions });
-    await assertRenderer(renderer, `(() => { const card=document.querySelector('.baseline-analysis-card'); return card?.dataset.planUpdateMode==='sync-current' && card.dataset.planReused==='6' && card.dataset.planRecomputed==='2' && card.dataset.planInvalidated==='2' && card.dataset.planBypassed==='0' && card.dataset.reusePlanDigest===${JSON.stringify(preparedSync.update.reusePlanDigest)} && card.dataset.planEnvelopeDigest===${JSON.stringify(preparedSync.planEnvelope.digest)} && card.dataset.coverageManifestDigest===${JSON.stringify(syncManifest.digest)} && card.querySelectorAll('[data-reuse-plan-unit]').length===8 && card.querySelector('[data-reuse-plan-unit="1"][data-reuse-disposition="recomputed"][data-reuse-reason="no-compatible-predecessor"]')!==null && card.querySelector('[data-reuse-plan-unit="2"][data-reuse-disposition="recomputed"][data-reuse-reason="predecessor-gap"]')!==null && card.querySelector('[data-reuse-plan-unit="3"][data-reuse-disposition="reused"][data-reuse-reason="compatible"]')!==null && card.querySelectorAll('[data-reuse-predecessor-disposition="invalidated"]').length===2 && card.querySelectorAll('[data-reuse-predecessor-disposition="reused"]').length===6 && card.textContent.includes(${JSON.stringify(SYNC_GOAL)}) && card.textContent.includes('Revision 1') && card.querySelector('[data-analysis-action="authorize"]') instanceof HTMLButtonElement && !card.querySelector('[data-analysis-action="authorize"]').disabled && !card.querySelector('[data-analysis-action="prepare"]'); })()`, 'sync-plan-preview');
+    // Synchronized delta with Issue #418 (S72 D4): the card keeps the reuse plan's counts and digests as its
+    // own data and names the plan in one line; the plan unit by unit, the goal and the predecessor it names
+    // read in the Task Drawer, which opened in 完整 — the mode chosen before the restart (PLAN-010).
+    await assertRenderer(renderer, `(() => { const card=document.querySelector('.baseline-analysis-card'); return card?.dataset.planUpdateMode==='sync-current' && card.dataset.planReused==='6' && card.dataset.planRecomputed==='2' && card.dataset.planInvalidated==='2' && card.dataset.planBypassed==='0' && card.dataset.reusePlanDigest===${JSON.stringify(preparedSync.update.reusePlanDigest)} && card.dataset.planEnvelopeDigest===${JSON.stringify(preparedSync.planEnvelope.digest)} && card.dataset.coverageManifestDigest===${JSON.stringify(syncManifest.digest)} && card.querySelector('.analysis-plan-summary .task-plan-summary-line')?.textContent===${JSON.stringify(`计划：同步到当前稿件 · 全书 · 重新分析 2 个阅读范围，沿用 6 个 · 任务输入修订版 ${preparedSync.checkpoint.revisionLabel} · 计划版本 1`)} && card.querySelector('[data-analysis-action="authorize"]') instanceof HTMLButtonElement && !card.querySelector('[data-analysis-action="authorize"]').disabled && !card.querySelector('[data-analysis-action="prepare"]'); })()`, 'sync-plan-preview');
+    const syncDrawer = await drawerShowing(renderer, preparedSync.taskIntent.taskIntentId, 'ready', 'sync-drawer');
+    requireJourney(syncDrawer?.mode === 'full' && syncDrawer.stored === 'full' && syncDrawer.chips.position === '全书' &&
+      syncDrawer.chips.revision === `任务输入修订版 ${preparedSync.checkpoint.revisionLabel}` &&
+      syncDrawer.saved === (preparedSync.checkpoint.createdForDirtyJournal ? `已为任务保存修订版 ${preparedSync.checkpoint.revisionLabel}，之后的编辑不影响这项任务。` : null) &&
+      syncDrawer.sentence === '把基线分析同步到当前稿件：只重新分析改动过的阅读范围，其余沿用上一份' &&
+      syncDrawer.terms['要处理'] === `《${bookName}》全书 · ${groupedCount(syncManifest.totalGraphemes)} 字 · 重新分析 2 个阅读范围，沿用 6 个` &&
+      JSON.stringify(syncDrawer.references) === JSON.stringify([`上一份基线分析（第 1 份，读的是 ${revision.manuscriptPin.revisionLabel}）`]) &&
+      syncDrawer.steps[0] === '逐章读取（重新读取 2 个阅读范围，沿用 6 个） → 各章摘要' &&
+      JSON.stringify(syncDrawer.outcomes) === JSON.stringify(['新的一份基线分析，接在第 1 份之后；之前的每一份原样保留', '这次运行的运行报告']) &&
+      syncDrawer.technical.goal === SYNC_GOAL && syncDrawer.technical.predecessor === `Revision 1 · ${revision.revisionId} · ${revision.digest}` &&
+      syncDrawer.technical['reuse-plan'] === reusePlanReading(preparedSync.update.reusePlanDigest, syncPlan) &&
+      syncDrawer.technical['reuse-plan-predecessors'] === predecessorUnitsReading(syncPlan) &&
+      predecessorUnitsReading(syncPlan) === '单元 1 invalidated；单元 2 invalidated；单元 3 reused；单元 4 reused；单元 5 reused；单元 6 reused；单元 7 reused；单元 8 reused' &&
+      syncDrawer.technical['plan-envelope'] === preparedSync.planEnvelope.digest && syncDrawer.actions === 0,
+    'sync-drawer-plan', syncDrawer);
 
     at('sync-current-dispatch');
     cancellation.throwIfRequested();
@@ -1792,7 +1925,18 @@ async function main() {
       preparedRange.executionPlan?.recomputedUnitCount === 3 && preparedRange.executionPlan?.reusedUnitCount === 5 &&
       preparedRange.planEnvelope?.digest !== preparedSync.planEnvelope.digest && preparedRange.actions?.canAuthorize === true,
     'range-prepared-plan', { rangeExpected, update: preparedRange?.update, unitScope: preparedRange?.runSourceScope?.unitScope });
-    await assertRenderer(renderer, `(() => { const card=document.querySelector('.baseline-analysis-card'); return card?.dataset.planUpdateMode==='reanalyze-range' && card.dataset.planReused==='5' && card.dataset.planRecomputed==='3' && card.dataset.planInvalidated==='1' && card.dataset.planBypassed==='2' && card.querySelector('[data-reuse-plan-unit="3"][data-reuse-disposition="recomputed"][data-reuse-reason="bypassed-selected-range"]')!==null && card.querySelector('[data-reuse-plan-unit="4"][data-reuse-disposition="recomputed"][data-reuse-reason="bypassed-selected-range"]')!==null && card.querySelector('[data-reuse-plan-unit="1"][data-reuse-disposition="reused"]')!==null && card.querySelectorAll('[data-reuse-predecessor-disposition="bypassed"]').length===2 && card.textContent.includes(${JSON.stringify(`内容块 ${selectedRange.startPosition}–${selectedRange.endPosition}`)}) && card.querySelector('[data-analysis-action="authorize"]') instanceof HTMLButtonElement; })()`, 'range-plan-preview');
+    // Synchronized delta with Issue #418 (S72 D4, D5): the plan names the range as the paragraphs it holds;
+    // the exact block range and the plan unit by unit read in the drawer's 查看技术详情.
+    await assertRenderer(renderer, `(() => { const card=document.querySelector('.baseline-analysis-card'); return card?.dataset.planUpdateMode==='reanalyze-range' && card.dataset.planReused==='5' && card.dataset.planRecomputed==='3' && card.dataset.planInvalidated==='1' && card.dataset.planBypassed==='2' && card.querySelector('.analysis-plan-summary .task-plan-summary-line')?.textContent===${JSON.stringify(`计划：重新分析所选范围 · 第 ${selectedRange.startPosition}–${selectedRange.endPosition} 段 · 重新分析 3 个阅读范围，沿用 5 个 · 任务输入修订版 ${preparedRange.checkpoint.revisionLabel} · 计划版本 1`)} && card.querySelector('[data-analysis-action="authorize"]') instanceof HTMLButtonElement; })()`, 'range-plan-preview');
+    const rangeDrawer = await drawerShowing(renderer, preparedRange.taskIntent.taskIntentId, 'ready', 'range-drawer');
+    requireJourney(rangeDrawer?.chips.position === `第 ${selectedRange.startPosition}–${selectedRange.endPosition} 段` && /^已选 [\d,]+ 字$/u.test(rangeDrawer.chips.selected ?? '') &&
+      rangeDrawer.sentence === '重新分析所选范围，其余阅读范围沿用上一份' && rangeDrawer.technical.goal === RANGE_GOAL &&
+      rangeDrawer.technical['selected-range'] === `内容块 ${selectedRange.startPosition}–${selectedRange.endPosition}` &&
+      rangeDrawer.technical['reuse-plan'] === reusePlanReading(preparedRange.update.reusePlanDigest, rangePlan) &&
+      rangeDrawer.technical['reuse-plan-predecessors'] === predecessorUnitsReading(rangePlan) &&
+      predecessorUnitsReading(rangePlan) === '单元 1 reused；单元 2 invalidated；单元 3 bypassed；单元 4 bypassed；单元 5 reused；单元 6 reused；单元 7 reused；单元 8 reused' &&
+      rangeDrawer.notDo.includes('不重新读取所选范围以外的正文') && rangeDrawer.technical.predecessor === `Revision 2 · ${revision2.revisionId} · ${revision2.digest}`,
+    'range-drawer-plan', rangeDrawer);
 
     at('reanalyze-range-dispatch');
     cancellation.throwIfRequested();
@@ -1833,7 +1977,15 @@ async function main() {
       JSON.stringify(preparedBook.runSourceScope?.unitScope?.recomputedUnitOrdinals) === JSON.stringify([1, 2, 3, 4, 5, 6, 7, 8]) &&
       preparedBook.executionPlan?.recomputedUnitCount === 8 && preparedBook.executionPlan?.reusedUnitCount === 0 && preparedBook.actions?.canAuthorize === true,
     'book-prepared-plan', { bookExpected, update: preparedBook?.update });
-    await assertRenderer(renderer, `(() => { const card=document.querySelector('.baseline-analysis-card'); return card?.dataset.planUpdateMode==='reanalyze-book' && card.dataset.planReused==='0' && card.dataset.planRecomputed==='8' && card.dataset.planInvalidated==='1' && card.dataset.planBypassed==='7' && card.querySelectorAll('[data-reuse-plan-unit][data-reuse-disposition="recomputed"][data-reuse-reason="bypassed-whole-book"]').length===8 && card.querySelectorAll('[data-reuse-predecessor-disposition="bypassed"]').length===7; })()`, 'book-plan-preview');
+    // Synchronized delta with Issue #418 (S72 D4): the plan unit by unit reads in the drawer.
+    await assertRenderer(renderer, `(() => { const card=document.querySelector('.baseline-analysis-card'); return card?.dataset.planUpdateMode==='reanalyze-book' && card.dataset.planReused==='0' && card.dataset.planRecomputed==='8' && card.dataset.planInvalidated==='1' && card.dataset.planBypassed==='7' && card.querySelector('.analysis-plan-summary .task-plan-summary-line')?.textContent===${JSON.stringify(`计划：重新分析全书 · 全书 · 重新分析 8 个阅读范围，沿用 0 个 · 任务输入修订版 ${preparedBook.checkpoint.revisionLabel} · 计划版本 1`)}; })()`, 'book-plan-preview');
+    const bookDrawer = await drawerShowing(renderer, preparedBook.taskIntent.taskIntentId, 'ready', 'book-drawer');
+    requireJourney(bookDrawer?.chips.position === '全书' && bookDrawer.sentence === '重新分析全书，不沿用以前的结果' && bookDrawer.technical.goal === BOOK_GOAL &&
+      bookDrawer.technical['reuse-plan'] === reusePlanReading(preparedBook.update.reusePlanDigest, bookPlan) &&
+      bookPlan.units.every((unit) => unit.disposition === 'recomputed' && unit.reason === 'bypassed-whole-book') &&
+      bookDrawer.technical['reuse-plan-predecessors'] === predecessorUnitsReading(bookPlan) &&
+      predecessorUnitsReading(bookPlan) === '单元 1 bypassed；单元 2 invalidated；单元 3 bypassed；单元 4 bypassed；单元 5 bypassed；单元 6 bypassed；单元 7 bypassed；单元 8 bypassed',
+    'book-drawer-plan', bookDrawer);
 
     at('reanalyze-book-dispatch');
     cancellation.throwIfRequested();
@@ -2021,21 +2173,27 @@ async function main() {
       preparedRetry.planVersion?.materialInputs?.runBudgetCeiling === 'unset' && preparedRetry.planVersion?.materialInputs?.outboundDataCategory === 'public-or-synthetic' &&
       preparedRetry.actions?.canAuthorize === true && preparedRetry.actions?.canReconfirmPlan === false,
     'safe-retry-prepared-plan', { update: preparedRetry?.update, planVersion: preparedRetry?.planVersion, boundary: retryBoundary, route: preparedRetry?.providerResolutionPlan?.executionRoute, actions: preparedRetry?.actions });
+    // Synchronized delta with Issue #418 (S72 D6, PLAN-012): the Plan Boundary Split reads in the drawer as
+    // its two columns — what AI7 may adjust during the Run, and what makes it stop and ask, each locked —
+    // with the fifteen fields whose change suspends the plan and the fixture route in 查看技术详情. The plan
+    // versions and the recording action stay on ②A until S74.
     await assertRenderer(renderer, `(() => {
       const card=document.querySelector('.baseline-analysis-card');
-      const boundary=card?.querySelector('.analysis-plan-boundary');
       const authorize=card?.querySelector('[data-analysis-action="authorize"]');
       return card?.dataset.planVersion==='1' && card.dataset.planVersionCount==='1' && card.dataset.planRevisionPending==='false' &&
-        boundary?.dataset.planBoundary==='present' && boundary.dataset.adaptationClasses==='safe-retry' && boundary.dataset.materialFieldCount==='15' &&
-        boundary.querySelectorAll('.analysis-plan-adaptable [data-adaptation-class="safe-retry"]').length===1 &&
-        boundary.querySelectorAll('.analysis-plan-material [data-material-field]').length===15 &&
-        boundary.querySelector('[data-material-field="selectedRange"]')!==null && boundary.querySelector('[data-material-field="providerBinding.credentialReference"]')!==null &&
-        boundary.textContent.includes('运行中可调整') && boundary.textContent.includes('变化后必须暂停并重新授权') && boundary.textContent.includes('需要你参与的位置') &&
-        boundary.querySelector('.analysis-plan-participation')?.textContent==='预计无需中途参与' && boundary.textContent.includes('计划说明，不是运行授权') &&
+        !card.querySelector('.analysis-plan-boundary') &&
         card.querySelector('.analysis-plan-versions')?.dataset.planVersionCount==='1' && card.querySelector('[data-plan-version-ordinal="1"][data-plan-version-state="current"]')!==null &&
         !card.querySelector('.analysis-plan-revision') && !card.querySelector('[data-analysis-action="view-plan-revision"], [data-analysis-action="reconfirm-plan"]') &&
-        authorize instanceof HTMLButtonElement && !authorize.disabled && authorize.textContent==='授权并开始任务' && card.textContent.includes(${JSON.stringify(RETRY_FIXTURE_IDENTITY)});
+        authorize instanceof HTMLButtonElement && !authorize.disabled && authorize.textContent==='授权并开始任务';
     })()`, 'safe-retry-plan-preview');
+    const retryDrawer = await drawerShowing(renderer, preparedRetry.taskIntent.taskIntentId, 'ready', 'safe-retry-drawer');
+    requireJourney(retryDrawer?.version === '1' && JSON.stringify(retryDrawer.columns) === JSON.stringify(['运行中 AI7 可以自己调整', '这些一变就先停下来问你']) &&
+      JSON.stringify(retryDrawer.adaptable) === JSON.stringify([SAFE_RETRY_ADAPTATION]) && JSON.stringify(retryDrawer.askFirst) === JSON.stringify(LOCKED_BOUNDARY) &&
+      JSON.stringify(retryDrawer.participation) === JSON.stringify(['预计无需中途参与']) && retryDrawer.footer === '计划说明，不是运行授权' &&
+      retryDrawer.technical['material-fields'] === PLAN_MATERIAL_FIELDS.join('、') &&
+      retryDrawer.technical['execution-route'] === `ai7-local-deterministic · ai7-deterministic-fixture · 夹具 ${RETRY_FIXTURE_IDENTITY} · ${retryFixtureDigest}` &&
+      retryDrawer.technical['plan-versions'] === `版本 1 · current · ${preparedRetry.planEnvelope.digest}` && retryDrawer.actions === 0,
+    'safe-retry-drawer-plan', retryDrawer);
 
     at('safe-retry-dispatch');
     cancellation.throwIfRequested();
@@ -2141,6 +2299,26 @@ async function main() {
         block.textContent.includes(${JSON.stringify(pendingRevision.label)}) && block.querySelector('[data-analysis-action="reconfirm-plan"]') instanceof HTMLButtonElement && ${ONLY_ANALYSIS_ACTIONS};
     })()`, 'plan-revision-surface');
 
+    at('plan-revision-drawer-diff');
+    // S72 D8: the drawer beside ②A reads the same drift in the editor's words, by field key — 处理范围 and
+    // 重新分析与沿用的阅读范围, 关键内容 and 随之变化 — with each range as the paragraphs and characters it
+    // holds. The chips still name the range the superseded version froze.
+    const driftDrawer = await drawerShowing(renderer, preparedDrift.taskIntent.taskIntentId, 'changed', 'plan-revision-drawer');
+    const priorCount = /^已选 ([\d,]+) 字$/u.exec(driftDrawer?.chips?.selected ?? '')?.[1];
+    requireJourney(driftDrawer?.pill === '计划已变化' && driftDrawer.version === '1' && priorCount !== undefined &&
+      driftDrawer.chips.position === `第 ${rangeA.startPosition}–${rangeA.endPosition} 段` &&
+      driftDrawer.drift?.kind === 'diff' && driftDrawer.drift.heading === '计划的关键内容已变化' && driftDrawer.drift.tableHidden === true &&
+      JSON.stringify(driftDrawer.drift.text) === JSON.stringify(['计划冻结之后，它的关键内容已经变化；原计划不能再开始。', '在「分析 › 历史与更新」里重新确认计划后，新的计划版本才能开始。']) &&
+      driftDrawer.actions === 0, 'plan-revision-drawer-diff', driftDrawer);
+    await reviewAction(renderer, '#task-drawer [data-task-drawer-control="view-plan-revision"]', 'plan-revision-drawer-view');
+    const driftTable = (await readDrawer(renderer))?.drift;
+    const driftRange = driftTable?.rows?.[0];
+    const proposedCount = /^第 \d+–\d+ 段 · ([\d,]+) 字$/u.exec(driftRange?.[4] ?? '')?.[1];
+    requireJourney(driftTable?.tableHidden === false && driftTable.rows.length === 2 && proposedCount !== undefined &&
+      JSON.stringify(driftRange) === JSON.stringify(['selectedRange', 'material', '处理范围', `第 ${rangeA.startPosition}–${rangeA.endPosition} 段 · ${priorCount} 字`, `第 ${rangeB.startPosition}–${rangeB.endPosition} 段 · ${proposedCount} 字`, '关键内容']) &&
+      JSON.stringify(driftTable.rows[1]) === JSON.stringify(['reusePlan.counts', 'derived', '重新分析与沿用的阅读范围', `重新分析 ${driftOptionA.expected.recomputed} 个，沿用 ${driftOptionA.expected.reused} 个`, `重新分析 ${driftOptionB.expected.recomputed} 个，沿用 ${driftOptionB.expected.reused} 个`, '随之变化']),
+    'plan-revision-drawer-rows', driftTable);
+
     at('plan-revision-stale-authorize');
     cancellation.throwIfRequested();
     // Authorizing the stale version through the renderer API is refused with the safe reason and creates no Run Record.
@@ -2191,6 +2369,11 @@ async function main() {
         !card.querySelector('.analysis-plan-revision') && !card.querySelector('[data-analysis-action="view-plan-revision"], [data-analysis-action="reconfirm-plan"]') &&
         authorize instanceof HTMLButtonElement && !authorize.disabled && authorize.textContent==='授权并开始任务';
     })()`, 'plan-revision-revert-surface');
+    // The drawer follows the way back: the plan version 1 froze is the plan again, and nothing reads as changed.
+    const revertedDrawer = await drawerShowing(renderer, preparedDrift.taskIntent.taskIntentId, 'ready', 'plan-revision-revert-drawer');
+    requireJourney(revertedDrawer?.drift === null && revertedDrawer.version === '1' && revertedDrawer.pill === '尚未开始' &&
+      revertedDrawer.chips.position === `第 ${rangeA.startPosition}–${rangeA.endPosition} 段` && revertedDrawer.chips.selected === `已选 ${priorCount} 字`,
+    'plan-revision-revert-drawer-plan', revertedDrawer);
     // Back to the change this Task means to confirm: the same range drift, pending on its own again.
     await assertRenderer(renderer, `(() => { const radio=document.querySelector('.baseline-analysis-card [data-update-action="reanalyze-range"] #analysis-range-8'); if(!(radio instanceof HTMLInputElement)||radio.checked)return false; radio.click(); return radio.checked; })()`, 'plan-revision-revert-select-b');
     await startUpdate(renderer, 'reanalyze-range', '重新分析所选范围', 'plan-revision-redrift-click');
@@ -2224,6 +2407,19 @@ async function main() {
       reconfirmed.authorization === null && reconfirmed.actions?.canAuthorize === true && reconfirmed.actions?.canReconfirmPlan === false,
     'plan-revision-reconfirmed', { planVersion: reconfirmed?.planVersion, planVersions: reconfirmed?.planVersions, planRevisions: reconfirmed?.planRevisions, update: reconfirmed?.update });
     await assertRenderer(renderer, `(() => { const card=document.querySelector('.baseline-analysis-card'); const authorize=card?.querySelector('[data-analysis-action="authorize"]'); return card?.dataset.planVersion==='2' && card.dataset.planVersionCount==='2' && card.dataset.planRevisionPending==='false' && card.dataset.planEnvelopeDigest===${JSON.stringify(v2Digest)} && card.dataset.planReused==='6' && card.dataset.planRecomputed==='2' && card.querySelector('[data-plan-version-ordinal="1"][data-plan-version-state="superseded"]')!==null && card.querySelector('[data-plan-version-ordinal="2"][data-plan-version-state="current"]')!==null && card.querySelector('.analysis-plan-versions [data-plan-revision-prior="1"][data-plan-revision-next="2"][data-plan-revision-resolved="true"]')!==null && !card.querySelector('.analysis-plan-revision') && authorize instanceof HTMLButtonElement && !authorize.disabled && authorize.textContent==='授权并开始任务' && card.textContent.includes(${JSON.stringify(`内容块 ${rangeB.startPosition}–${rangeB.endPosition}`)}); })()`, 'plan-revision-version-2-surface');
+
+    at('plan-revision-drawer-range');
+    // #288's visible half: once version 2 is the plan, the range it names is the one version 2 froze —
+    // unit 8's — in the drawer's chips, in its 查看技术详情, and in ②A's one line; never the range the Task
+    // was first prepared with (the L2 suite pins that the Task Intent row keeps that one).
+    const v2Drawer = await drawerShowing(renderer, preparedDrift.taskIntent.taskIntentId, 'ready', 'plan-revision-v2-drawer');
+    requireJourney(v2Drawer?.version === '2' && v2Drawer.drift === null &&
+      v2Drawer.chips.position === `第 ${rangeB.startPosition}–${rangeB.endPosition} 段` && v2Drawer.chips.selected === `已选 ${proposedCount} 字` &&
+      v2Drawer.terms['要处理']?.includes(`第 ${rangeB.startPosition}–${rangeB.endPosition} 段 · ${proposedCount} 字 · 重新分析 ${driftOptionB.expected.recomputed} 个阅读范围，沿用 ${driftOptionB.expected.reused} 个`) &&
+      v2Drawer.technical['selected-range'] === `内容块 ${rangeB.startPosition}–${rangeB.endPosition}` &&
+      v2Drawer.technical['plan-versions'] === `版本 1 · superseded · ${v1Digest}；版本 2 · current · ${v2Digest}` &&
+      v2Drawer.technical['plan-envelope'] === v2Digest, 'plan-revision-drawer-range', v2Drawer);
+    await assertRenderer(renderer, `document.querySelector('.baseline-analysis-card .analysis-plan-summary .task-plan-summary-line')?.textContent===${JSON.stringify(`计划：重新分析所选范围 · 第 ${rangeB.startPosition}–${rangeB.endPosition} 段 · 重新分析 ${driftOptionB.expected.recomputed} 个阅读范围，沿用 ${driftOptionB.expected.reused} 个 · 任务输入修订版 ${reconfirmed.checkpoint.revisionLabel} · 计划版本 2`)}`, 'plan-revision-summary-range');
 
     at('plan-revision-dispatch');
     cancellation.throwIfRequested();
@@ -2286,10 +2482,26 @@ async function main() {
 
     at('review-prepare');
     await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); for (const id of ['typos-and-usage','style-and-format','plot-consistency']) { const box=sheet.querySelector('input[name="review-category"][value="'+id+'"]'); if(!(box instanceof HTMLInputElement)||box.disabled)return false; box.click(); } const whole=sheet.querySelector('input[name="review-scope"][value="whole"]'); if(!(whole instanceof HTMLInputElement)||whole.disabled)return false; whole.click(); const prepare=sheet.querySelector('[data-review-action="prepare"]'); if(!(prepare instanceof HTMLButtonElement)||prepare.disabled)return false; prepare.click(); return true; })()`, 'review-prepare-start');
-    await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState==='prepared' && document.querySelectorAll('section.review-plan[data-review-category]').length===3`, 'review-prepared', 120_000);
-    // One plan per category — the leads read the baseline and freeze no model plan — and one authorization
-    // for the whole Review Run.
-    await assertRenderer(renderer, `(() => { const plans=Array.from(document.querySelectorAll('section.review-plan[data-review-category]')); return JSON.stringify(plans.map((plan)=>plan.dataset.reviewCategory))===JSON.stringify(['typos-and-usage','style-and-format','plot-consistency']) && plans.filter((plan)=>(plan.dataset.planEnvelopeDigest??'').length===64).length===2 && document.querySelectorAll('[data-review-action="authorize"]').length===1 && document.querySelector('dialog.review-sheet')?.open!==true; })()`, 'review-plans');
+    // Synchronized delta with Issue #418 (S72 D4): the prepared Run is one line and 查看计划 on ②B, beside
+    // the one authorization for the whole Run; its plan opens in the Task Drawer.
+    await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState==='prepared' && document.querySelector('section.review-plans')?.dataset.reviewCategories==='typos-and-usage,style-and-format,plot-consistency'`, 'review-prepared', 120_000);
+    const preparedReview = (await renderer.evaluate(`window.ai7.inspectReviewWorkspace()`))?.run;
+    const taskBacked = (preparedReview?.categories ?? []).filter((category) => (category.planEnvelopeDigest ?? '').length === 64);
+    requireJourney(preparedReview?.state === 'prepared' && UUID_PATTERN.test(preparedReview.reviewRunId) &&
+      JSON.stringify(preparedReview.categories.map((category) => category.categoryId)) === JSON.stringify(['typos-and-usage', 'style-and-format', 'plot-consistency']) &&
+      JSON.stringify(taskBacked.map((category) => category.categoryId)) === JSON.stringify(['typos-and-usage', 'style-and-format']), 'review-prepared-run', preparedReview?.categories);
+    await assertRenderer(renderer, `(() => { const plans=document.querySelector('section.review-plans'); const open=plans?.querySelector('[data-review-action="view-plan"]'); return plans?.querySelector('.task-plan-summary-line')?.textContent===${JSON.stringify(`计划：3 个类别，授权一次后逐类审阅 · ${preparedReview.scope.label} · 任务输入修订版 ${preparedReview.manuscript.revisionLabel}`)} && open instanceof HTMLButtonElement && open.textContent==='查看计划' && open.dataset.taskPlanOpen==='review-run' && document.querySelectorAll('[data-review-action="authorize"]').length===1 && document.querySelector('dialog.review-sheet')?.open!==true; })()`, 'review-plans');
+    // One step per category — the leads read the baseline and freeze no model plan — and 汇总; each
+    // model-read category's own frozen plan one step away in 查看技术详情 (S72 D7).
+    const reviewDrawer = await drawerShowing(renderer, preparedReview.reviewRunId, 'ready', 'review-drawer');
+    requireJourney(reviewDrawer?.kind === 'review-run' && reviewDrawer.pill === '尚未开始' && reviewDrawer.version === null &&
+      reviewDrawer.chips.position === '全书' && reviewDrawer.steps.length === 4 &&
+      reviewDrawer.steps[0].startsWith('逐章审读：') && reviewDrawer.steps[1].startsWith('逐章审读：') &&
+      reviewDrawer.steps[2].startsWith('读取基线分析的线索：') && reviewDrawer.steps[3] === '汇总 → 审阅报告' &&
+      taskBacked.every((category) => reviewDrawer.technical[`category:${category.categoryId}`]?.includes(`计划权限边界 ${category.planEnvelopeDigest}`)) &&
+      reviewDrawer.technical['category:plot-consistency']?.endsWith('直接读取基线分析的线索，没有任务') &&
+      JSON.stringify(reviewDrawer.participation) === JSON.stringify(['预计无需中途参与', '结束后：每一类完成后，它的发现立即可以处理：修改建议由你接受并应用，批注由你标记为已处理或忽略并说明']) &&
+      reviewDrawer.actions === 0 && reviewDrawer.footer === '计划说明，不是运行授权', 'review-drawer-plan', reviewDrawer);
 
     at('review-authorize');
     await reviewAction(renderer, '[data-review-action="authorize"]', 'review-authorize-click');
@@ -2305,6 +2517,10 @@ async function main() {
       reviewed.run.findings.filter((finding) => finding.categoryId === 'typos-and-usage').every((finding) => finding.output === 'change-suggestion' && finding.replacement !== null),
     'review-run-settled', { state: reviewed?.run?.state, categories: reviewedCategories.map((category) => [category.categoryId, category.state, category.findingsCount, category.excludedCount]) });
     await assertRenderer(renderer, `document.querySelectorAll('ol.review-progress > li[data-category-state="settled"]').length===3 && document.querySelectorAll('section.review-group[data-review-category]').length>=2`, 'review-groups');
+    // The drawer beside ②B read the plan again as the Run moved; it now states the Run's end.
+    const settledReviewDrawer = await drawerShowing(renderer, preparedReview.reviewRunId, 'settled', 'review-drawer-settled');
+    requireJourney(settledReviewDrawer?.pill === '已完成' && settledReviewDrawer.drift === null && typeof settledReviewDrawer.technical.authorization === 'string',
+      'review-drawer-settled-plan', settledReviewDrawer);
 
     at('review-marks-on-manuscript');
     // A finding of 审阅 is the mark on the manuscript: 回到原文 opens the text at it with its card, which
@@ -2363,7 +2579,9 @@ async function main() {
     cancellation.throwIfRequested();
 
     at('zero-activity');
-    await assertRenderer(renderer, `(() => { const card=document.querySelector('.baseline-analysis-card'); return card?.dataset.analysisState==='settled' && card.dataset.resultRevisionOrdinal==='6' && ${ONLY_ANALYSIS_ACTIONS} && !document.querySelector('[data-analysis-action="prepare"], [data-analysis-action="authorize"]') && !Object.keys(window.ai7).some((key)=>/provider|session|scheduler|payload|egress|effect|enrol|apply|export/i.test(key) && !${JSON.stringify(CHANGE_SUGGESTION_APPLY_MEMBERS)}.includes(key)); })()`, 'no-execution-surface');
+    // Synchronized delta with Issue #418: the Task Drawer, open beside ②A since 审阅, holds no action of
+    // the surfaces that raise a Task — it states a plan and authorizes nothing (PLAN-007).
+    await assertRenderer(renderer, `(() => { const card=document.querySelector('.baseline-analysis-card'); return card?.dataset.analysisState==='settled' && card.dataset.resultRevisionOrdinal==='6' && ${ONLY_ANALYSIS_ACTIONS} && !document.querySelector('[data-analysis-action="prepare"], [data-analysis-action="authorize"]') && !document.querySelector('#task-drawer [data-analysis-action], #task-drawer [data-review-action], #task-drawer [data-task-authorization-action]') && !Object.keys(window.ai7).some((key)=>/provider|session|scheduler|payload|egress|effect|enrol|apply|export/i.test(key) && !${JSON.stringify(CHANGE_SUGGESTION_APPLY_MEMBERS)}.includes(key)); })()`, 'no-execution-surface');
     requireJourney(loopback.healthy() && loopback.observedRequests() === 0, 'zero-network-provider-session');
   } finally {
     finalCleanupRequested = true;

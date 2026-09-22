@@ -293,6 +293,11 @@ describe('the Task Drawer plan projection over the real store on exact sample1',
       expect(planA.goal.chips.selectedGraphemes).toBe(revisionGraphemes(revisionId, rangeA));
       expect(planA.scope.reference).toEqual(['上一份基线分析（第 1 份，读的是 r1）']);
       expect(technical(planA, 'selected-range')).toBe(`内容块 ${rangeA.startPosition}–${rangeA.endPosition}`);
+      // The reuse plan unit by unit, and where each unit of the predecessor goes, as the plan records them.
+      const reusePlan = preparedA.update!.reusePlan!;
+      expect(technical(planA, 'reuse-plan')).toBe(`${preparedA.update!.reusePlanDigest} · ${reusePlan.units.map((unit) => `单元 ${unit.unitOrdinal} ${unit.disposition}（${unit.reason}）`).join('；')}`);
+      expect(technical(planA, 'reuse-plan-predecessors')).toBe(reusePlan.predecessorUnits.map((unit) => `单元 ${unit.unitOrdinal} ${unit.disposition}`).join('；'));
+      expect(reusePlan.predecessorUnits.some((unit) => unit.disposition === 'bypassed')).toBe(true);
 
       // The range moves on the prepared Task: the plan's key content changed, and the chips keep naming
       // version 1's range until the change is reconfirmed. The diff reads in the drawer's words, by key.

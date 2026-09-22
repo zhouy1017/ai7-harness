@@ -90,8 +90,8 @@ describe('the drawer', () => {
     expect(taskDrawerModeOf('')).toBe('compact');
   });
 
-  it('stays beside the manuscript, 工作概览, ②A and ②B only (D3)', () => {
-    expect(TASK_DRAWER_SCREENS).toEqual(['editor', 'book-overview', 'book-analysis', 'book-review']);
+  it('stays beside the manuscript, 工作概览 (also right after an import), ②A and ②B only (D3)', () => {
+    expect(TASK_DRAWER_SCREENS).toEqual(['editor', 'book-overview', 'imported', 'book-analysis', 'book-review']);
   });
 
   it('gives every state a tone and a shape, so the pill never speaks by colour alone', () => {
