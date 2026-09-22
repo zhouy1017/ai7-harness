@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import {
   MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION,
-  IMPORT_RETENTION_SCHEMA_VERSION,
+  IMPORTED_MARK_SCHEMA_VERSION,
 } from '../../src/service/task-authorization.js';
 import { graphemesOf } from '../../src/shared/mark-anchor.js';
 import type {
@@ -24,6 +24,7 @@ import { REVIEW_RUN_RELATIONS_DROP_ORDER } from '../support/review-categories.js
 import { PUBLICATION_VERSION_RELATIONS_DROP_ORDER } from '../support/publication-versions.js';
 import { PROPOSAL_CONFLICT_RELATIONS_DROP_ORDER } from '../support/proposal-conflicts.js';
 import { IMPORT_RETENTION_RELATIONS_DROP_ORDER } from '../support/import-retention.js';
+import { IMPORTED_MARK_RELATIONS_DROP_ORDER } from '../support/imported-marks.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 
 // Service-integration suite (L2) for Editorial Marks (Issue #407). It drives the real `EditorialStore`
@@ -36,7 +37,9 @@ const NOTE_SENTINEL = '仅编辑可见的备注哨兵文本';
 const MARK_RELATIONS = [
   // A store taken back below revision 26 never held its proposal-conflict relations, and one below 25
   // never held its Publication Version relations.
-  // A store taken back below revision 27 never held its import-retention relations.
+  // A store taken back below revision 27 never held its import-retention relations, nor one below 28 its
+  // staged imported marks.
+  ...IMPORTED_MARK_RELATIONS_DROP_ORDER,
   ...IMPORT_RETENTION_RELATIONS_DROP_ORDER,
   ...PROPOSAL_CONFLICT_RELATIONS_DROP_ORDER,
   ...PUBLICATION_VERSION_RELATIONS_DROP_ORDER,
@@ -552,7 +555,7 @@ describe('Editorial Marks on a manuscript', () => {
     }
     const after = new DatabaseSync(databasePath, { readOnly: true });
     try {
-      expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(IMPORT_RETENTION_SCHEMA_VERSION);
+      expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(IMPORTED_MARK_SCHEMA_VERSION);
       expect(after.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
     } finally {
       after.close();

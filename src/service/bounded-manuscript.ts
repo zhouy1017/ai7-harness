@@ -72,6 +72,7 @@ import {
   PUBLICATION_VERSION_SCHEMA_VERSION,
   PROPOSAL_CONFLICT_SCHEMA_VERSION,
   IMPORT_RETENTION_SCHEMA_VERSION,
+  IMPORTED_MARK_SCHEMA_VERSION,
   SUCCESSIVE_TASK_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_SQL,
   TASK_AUTHORIZATION_SCHEMA_VERSION,
@@ -84,11 +85,13 @@ import {
   EDITORIAL_MARK_REVISION_22_SQL,
   EDITORIAL_MARK_SCHEMA_SQL,
   EDITORIAL_MARK_TRIGGER_SQL,
+  PROPOSAL_CHANGE_ITEMS_REVISION_27_SQL,
   followBlockTextChangeForMarks,
   marksOfWindow,
   openMarkPlaces,
   resolveBranchMarksAfterRewrite,
 } from './editorial-marks.js';
+import { IMPORTED_MARK_FOREIGN_KEYS, IMPORTED_MARK_SCHEMA_SQL } from './imported-marks.js';
 import {
   MANUSCRIPT_EFFECT_FOREIGN_KEYS,
   MANUSCRIPT_EFFECT_SCHEMA_SQL,
@@ -1756,6 +1759,8 @@ const SCHEMA_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
   ...PROPOSAL_CONFLICT_FOREIGN_KEYS,
   // Revision 27 (Issue #410): the import-retention relations, owned and spelled by `import-retention.ts`.
   ...IMPORT_RETENTION_FOREIGN_KEYS,
+  // Revision 28 (Issue #411): the staged imported marks, owned and spelled by `imported-marks.ts`.
+  ...IMPORTED_MARK_FOREIGN_KEYS,
   editorial_workspace_profile_sidecar_revisions: [
     'native_artifact_id>native_artifact_installations.artifact_id:NO ACTION/NO ACTION/NONE',
   ],
@@ -2357,6 +2362,7 @@ function requireManuscriptReimportTargetSchema(
   includePublicationVersionTables = false,
   includeProposalConflictTables = false,
   includeImportRetentionTables = false,
+  includeImportedMarkTables = false,
 ): void {
   const analysisTables = includePlanVersionTables ? ANALYSIS_LEDGER_EXPECTED_SCHEMA_SQL : PRE_17_ANALYSIS_LEDGER_EXPECTED_SCHEMA_SQL;
   const analysisTriggers = includePlanVersionTables ? ANALYSIS_LEDGER_TRIGGER_SQL : PRE_17_ANALYSIS_LEDGER_TRIGGER_SQL;
@@ -2403,6 +2409,14 @@ function requireManuscriptReimportTargetSchema(
       ...(includeImportRetentionTables
         ? { ...IMPORT_RETENTION_SCHEMA_SQL, import_fidelity_categories: IMPORT_FIDELITY_CATEGORIES_SQL }
         : {}),
+      // Revision 28 (Issue #411) adds the staged imported marks the same way and widened
+      // `proposal_change_items` in the transaction that created them: a store with them holds only the
+      // widened text, and one below it revision 27's — or, planted from this build, the widened one with the
+      // rows this build wrote, which `initializeImportedMarkSchema` leaves as they are.
+      ...(includeEditorialMarkTables && !includeImportedMarkTables
+        ? { proposal_change_items: [PROPOSAL_CHANGE_ITEMS_REVISION_27_SQL, EDITORIAL_MARK_SCHEMA_SQL.proposal_change_items] }
+        : {}),
+      ...(includeImportedMarkTables ? IMPORTED_MARK_SCHEMA_SQL : {}),
     },
     MANUSCRIPT_REIMPORT_INDEX_SQL,
     true,
@@ -5072,6 +5086,7 @@ export function validateManuscriptReimportSchemaTruth(
   includePublicationVersionTables = false,
   includeProposalConflictTables = false,
   includeImportRetentionTables = false,
+  includeImportedMarkTables = false,
 ): void {
   requireManuscriptReimportTargetSchema(
     db,
@@ -5088,6 +5103,7 @@ export function validateManuscriptReimportSchemaTruth(
     includePublicationVersionTables,
     includeProposalConflictTables,
     includeImportRetentionTables,
+    includeImportedMarkTables,
   );
   validateSchemaAuthorityIds(db);
   validateWorkflowSemanticTruth(db, profile);
@@ -5150,7 +5166,7 @@ export function initializeBoundedSchema(
       version === MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION || version === EDITORIAL_MARK_SCHEMA_VERSION ||
       version === MANUSCRIPT_EFFECT_SCHEMA_VERSION || version === EDITORIAL_REVIEW_SCHEMA_VERSION ||
       version === PUBLICATION_VERSION_SCHEMA_VERSION || version === PROPOSAL_CONFLICT_SCHEMA_VERSION ||
-      version === IMPORT_RETENTION_SCHEMA_VERSION,
+      version === IMPORT_RETENTION_SCHEMA_VERSION || version === IMPORTED_MARK_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -5163,9 +5179,9 @@ export function initializeBoundedSchema(
       version === EDITORIAL_MARK_SCHEMA_VERSION || version === MANUSCRIPT_EFFECT_SCHEMA_VERSION ||
       version === EDITORIAL_REVIEW_SCHEMA_VERSION ||
       version === PUBLICATION_VERSION_SCHEMA_VERSION || version === PROPOSAL_CONFLICT_SCHEMA_VERSION ||
-      version === IMPORT_RETENTION_SCHEMA_VERSION) {
+      version === IMPORT_RETENTION_SCHEMA_VERSION || version === IMPORTED_MARK_SCHEMA_VERSION) {
     transact(db, () => {
-      if (validateStoreTruth || version !== IMPORT_RETENTION_SCHEMA_VERSION) {
+      if (validateStoreTruth || version !== IMPORTED_MARK_SCHEMA_VERSION) {
         validateManuscriptReimportSchemaTruth(
           db,
           profile,
@@ -5182,6 +5198,7 @@ export function initializeBoundedSchema(
           version >= PUBLICATION_VERSION_SCHEMA_VERSION,
           version >= PROPOSAL_CONFLICT_SCHEMA_VERSION,
           version >= IMPORT_RETENTION_SCHEMA_VERSION,
+          version >= IMPORTED_MARK_SCHEMA_VERSION,
         );
       }
       terminalizeOrphanedReplacementPreviews(db);

@@ -124,10 +124,17 @@ export const PROPOSAL_CONFLICT_SCHEMA_VERSION = 26;
  * and four additive relations record the text-box choice of a review, the source paragraph of every
  * staged block and text-box paragraph, and, at commit, which source paragraph each Manuscript block came
  * from. `import-retention.ts` owns them and creates them before this version is stamped; no existing row
- * changes and each stays valid (ADR 0079: an additive revision keeps the same Data Version). This is the
- * terminal version.
+ * changes and each stays valid (ADR 0079: an additive revision keeps the same Data Version).
  */
 export const IMPORT_RETENTION_SCHEMA_VERSION = 27;
+/**
+ * The imported-marks revision (Issue #411, plan slice S62): `proposal_change_items` widens to the `insert`
+ * kind — rebuilt with every row copied byte for byte — and one additive relation stages the marks a DOCX's
+ * comments and tracked changes become, which the import commit creates. `imported-marks.ts` owns them and
+ * creates them before this version is stamped; no existing row changes and each stays valid (ADR 0079: an
+ * additive revision keeps the same Data Version). This is the terminal version.
+ */
+export const IMPORTED_MARK_SCHEMA_VERSION = 28;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const DIGEST_PATTERN = /^[0-9a-f]{64}$/;
 const SAMPLE1_SOURCE_DIGEST = 'b8a3dbde0aa8a1ec7265f9ae3fe47877759e7947c5ab69682cd0a8f424a8d483' as const;
@@ -1052,7 +1059,7 @@ function validateRevision16AnalysisLedgerSchema(db: DatabaseSync): void {
 
 export function validateTaskAuthorizationSchema(db: DatabaseSync): void {
   const version = asNumber((db.prepare('PRAGMA user_version').get() as SqlRow).user_version);
-  requireTask(version === IMPORT_RETENTION_SCHEMA_VERSION, 'SCHEMA_UNSUPPORTED', '数据库版本不受支持。');
+  requireTask(version === IMPORTED_MARK_SCHEMA_VERSION, 'SCHEMA_UNSUPPORTED', '数据库版本不受支持。');
   validateJ03TaskAuthorizationSchema(db);
   validateAnalysisLedgerSchema(db);
 }
@@ -1201,7 +1208,7 @@ function migrateAnalysisLedgerToRevision17(db: DatabaseSync, from: typeof J04_BA
         db.exec(ANALYSIS_LEDGER_TRIGGER_SQL[`${table}_no_delete`]!);
       }
       seedInitialPlanVersions(db);
-      db.exec(`PRAGMA user_version = ${IMPORT_RETENTION_SCHEMA_VERSION}`);
+      db.exec(`PRAGMA user_version = ${IMPORTED_MARK_SCHEMA_VERSION}`);
       requireTask(db.prepare('PRAGMA foreign_key_check').all().length === 0, 'SCHEMA_MIGRATION_FAILED', '分析任务账本迁移后引用校验失败。');
       validateTaskAuthorizationSchema(db);
       db.exec('COMMIT');
@@ -1241,11 +1248,11 @@ function migrateAnalysisLedgerToRevision20(db: DatabaseSync): void {
 }
 
 /**
- * Revision 20, 21, 22 or 23 → 24 → 25 → 26 → 27, landing on the terminal version (Issue #417, Issue
- * #414, Issue #57, Issue #410). Revisions 21 to 23 added `bounded-manuscript.ts`'s, `editorial-marks.ts`'s
- * and `manuscript-apply.ts`'s relations, revision 25 adds `publication-versions.ts`'s, revision 26
- * `proposal-conflicts.ts`'s and revision 27 `import-retention.ts`'s, all of which `EditorialStore.open`
- * creates before this runs, and moved
+ * Revision 20, 21, 22 or 23 → 24 → 25 → 26 → 27 → 28, landing on the terminal version (Issue #417, Issue
+ * #414, Issue #57, Issue #410, Issue #411). Revisions 21 to 23 added `bounded-manuscript.ts`'s,
+ * `editorial-marks.ts`'s and `manuscript-apply.ts`'s relations, revision 25 adds `publication-versions.ts`'s,
+ * revision 26 `proposal-conflicts.ts`'s, revision 27 `import-retention.ts`'s and revision 28
+ * `imported-marks.ts`'s, all of which `EditorialStore.open` creates before this runs, and moved
  * nothing here — so a store at any of the four carries the three kind-coupled relations as revision 20
  * left them. They are rebuilt exactly as revision 20 rebuilt them: from their current exact text, every
  * row copied byte for byte in its original order, in one transaction with foreign keys off. The widened
@@ -1256,20 +1263,21 @@ function migrateAnalysisLedgerToRevision24(db: DatabaseSync): void {
 }
 
 /**
- * Revision 24, 25 or 26 → 27 (Issue #414, Issue #57, Issue #410). The relations revisions 25 to 27 add
- * are `publication-versions.ts`'s, `proposal-conflicts.ts`'s and `import-retention.ts`'s, and
- * `EditorialStore.open` creates them — and rebuilds revision 27's widened fidelity relation — before
- * this runs, so no ledger relation, trigger, or row moves: the version alone advances, inside one
- * transaction that validates the terminal shape first.
+ * Revision 24 to 27 → 28 (Issue #414, Issue #57, Issue #410, Issue #411). The relations revisions 25 to 28
+ * add are `publication-versions.ts`'s, `proposal-conflicts.ts`'s, `import-retention.ts`'s and
+ * `imported-marks.ts`'s, and `EditorialStore.open` creates them — and rebuilds revision 27's widened
+ * fidelity relation and revision 28's widened Proposal Change Items — before this runs, so no ledger
+ * relation, trigger, or row moves: the version alone advances, inside one transaction that validates the
+ * terminal shape first.
  */
 function advanceToTerminalRevision(db: DatabaseSync): void {
-  migrateInTransaction(db, `PRAGMA user_version = ${IMPORT_RETENTION_SCHEMA_VERSION};`, 'Terminal version');
+  migrateInTransaction(db, `PRAGMA user_version = ${IMPORTED_MARK_SCHEMA_VERSION};`, 'Terminal version');
 }
 
 /**
  * The rebuild revisions 20 and 24 share. Both rebuild the same three relations from their *current*
  * exact text, so whichever revision a store starts from, it lands on the terminal shapes — and the
- * terminal version, which revisions 25 to 27 moved without touching them — in this one transaction;
+ * terminal version, which revisions 25 to 28 moved without touching them — in this one transaction;
  * `revision` names the rebuild only for the report of a rollback that itself failed.
  */
 function rebuildKindCoupledAnalysisRelations(db: DatabaseSync, revision: 20 | 24): void {
@@ -1288,7 +1296,7 @@ function rebuildKindCoupledAnalysisRelations(db: DatabaseSync, revision: 20 | 24
                   mode, predecessor_revision_id, selected_start_position, selected_end_position
            FROM temp.migrate_analysis_task_intents ORDER BY migrate_rowid`);
       rebuildResultSetRelations(db);
-      db.exec(`PRAGMA user_version = ${IMPORT_RETENTION_SCHEMA_VERSION}`);
+      db.exec(`PRAGMA user_version = ${IMPORTED_MARK_SCHEMA_VERSION}`);
       requireTask(db.prepare('PRAGMA foreign_key_check').all().length === 0, 'SCHEMA_MIGRATION_FAILED', '分析任务账本迁移后引用校验失败。');
       validateTaskAuthorizationSchema(db);
       db.exec('COMMIT');
@@ -1314,8 +1322,8 @@ function rebuildKindCoupledAnalysisRelations(db: DatabaseSync, revision: 20 | 24
  * revision-17 or revision-18 store has the three kind-coupled relations rebuilt; a revision-19 store
  * is validated whole as revision 19 left it and has them rebuilt; a revision-20, revision-21,
  * revision-22 or revision-23 store is validated whole as revision 20 left it and has them rebuilt
- * again, for the review-category kind family; a revision-24, revision-25 or revision-26 store is
- * validated whole and only moves its version. Every path lands on the terminal version.
+ * again, for the review-category kind family; a revision-24 to revision-27 store is validated whole and
+ * only moves its version. Every path lands on the terminal version.
  */
 export function initializeTaskAuthorizationSchema(db: DatabaseSync): void {
   const version = asNumber((db.prepare('PRAGMA user_version').get() as SqlRow).user_version);
@@ -1327,15 +1335,15 @@ export function initializeTaskAuthorizationSchema(db: DatabaseSync): void {
       version === MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION || version === EDITORIAL_MARK_SCHEMA_VERSION ||
       version === MANUSCRIPT_EFFECT_SCHEMA_VERSION || version === EDITORIAL_REVIEW_SCHEMA_VERSION ||
       version === PUBLICATION_VERSION_SCHEMA_VERSION || version === PROPOSAL_CONFLICT_SCHEMA_VERSION ||
-      version === IMPORT_RETENTION_SCHEMA_VERSION,
+      version === IMPORT_RETENTION_SCHEMA_VERSION || version === IMPORTED_MARK_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED', '数据库版本不受支持。',
   );
-  if (version === IMPORT_RETENTION_SCHEMA_VERSION) return validateTaskAuthorizationSchema(db);
+  if (version === IMPORTED_MARK_SCHEMA_VERSION) return validateTaskAuthorizationSchema(db);
   if (version === EDITORIAL_REVIEW_SCHEMA_VERSION || version === PUBLICATION_VERSION_SCHEMA_VERSION ||
-      version === PROPOSAL_CONFLICT_SCHEMA_VERSION) {
-    // Revisions 25 to 27 add no task-authorization or analysis relation, so the ledger a revision-24,
-    // revision-25 or revision-26 store carries is already the terminal one: it is validated as revision
-    // 24 left it, and nothing but the version moves.
+      version === PROPOSAL_CONFLICT_SCHEMA_VERSION || version === IMPORT_RETENTION_SCHEMA_VERSION) {
+    // Revisions 25 to 28 add no task-authorization or analysis relation, so the ledger a revision-24 to
+    // revision-27 store carries is already the terminal one: it is validated as revision 24 left it, and
+    // nothing but the version moves.
     validateJ03TaskAuthorizationSchema(db);
     validateAnalysisLedgerSchema(db);
     return advanceToTerminalRevision(db);
@@ -1345,7 +1353,7 @@ export function initializeTaskAuthorizationSchema(db: DatabaseSync): void {
     // Revisions 21 to 23 added no task-authorization or analysis relation, so the ledger a store at
     // any of these four carries is the one revision 20 left: it is validated as exactly that, and
     // revision 24's rebuild of the three kind-coupled relations brings it to the terminal shape and
-    // stamps the terminal version, which revisions 25 to 27 moved without touching the ledger.
+    // stamps the terminal version, which revisions 25 to 28 moved without touching the ledger.
     validateJ03TaskAuthorizationSchema(db);
     validateRevision23AnalysisLedgerSchema(db);
     return migrateAnalysisLedgerToRevision24(db);
@@ -1370,7 +1378,7 @@ export function initializeTaskAuthorizationSchema(db: DatabaseSync): void {
   }
   const analysisStatements = `${Object.values(ANALYSIS_LEDGER_SCHEMA_SQL).join(';\n')};
       ${Object.values(ANALYSIS_LEDGER_TRIGGER_SQL).join(';\n')};
-      PRAGMA user_version = ${IMPORT_RETENTION_SCHEMA_VERSION};`;
+      PRAGMA user_version = ${IMPORTED_MARK_SCHEMA_VERSION};`;
   if (version === J03_TASK_AUTHORIZATION_SCHEMA_VERSION) {
     validateJ03TaskAuthorizationSchema(db);
     return migrateInTransaction(db, analysisStatements, 'Analysis ledger');
