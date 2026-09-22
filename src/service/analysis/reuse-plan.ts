@@ -1,11 +1,16 @@
 import type {
+  AnalysisKindId,
   AnalysisReusePlanCounts,
   AnalysisReusePlanPredecessorUnitProjection,
   AnalysisReusePlanProjection,
   AnalysisReusePlanUnitProjection,
+  AnalysisTaskMode,
   BaselineAnalysisSelectedRange,
   BaselineAnalysisUpdateMode,
   CoverageManifestProjection,
+  ReviewScopePlanCounts,
+  ReviewScopePlanProjection,
+  ReviewScopePlanUnitProjection,
 } from '../../shared/protocol.js';
 import { canonicalRecord, requireAnalysis } from './canonical.js';
 import { unitContentKeys } from './coverage-manifest.js';
@@ -148,6 +153,155 @@ export function deriveReusePlan(input: ReusePlanInput): AnalysisReusePlanProject
 }
 
 /** Canonical JSON and digest of a plan; what the `reuse-plan` plan component stores and the envelope pins. */
-export function reusePlanRecord(plan: AnalysisReusePlanProjection): { json: string; digest: string } {
+export function reusePlanRecord(plan: AnalysisReusePlanProjection | ReviewScopePlanProjection): { json: string; digest: string } {
   return canonicalRecord(plan);
+}
+
+// ---- the scope plan of a kind that leaves out-of-scope units unreviewed (Issue #417) ---------------
+
+/**
+ * The second record version of the reuse plan, written only for a kind whose definition declares
+ * `outOfScope: 'leave-unreviewed'` — a review category. `deriveReusePlan` above is untouched and stays
+ * the baseline kind's alone, so every `/1` record, and every digest J-04 derives from one, keeps its
+ * bytes; this derivation shares the compatibility key, the range closure and the range check with it
+ * and differs in exactly four ways.
+ *
+ * A third disposition. A new unit outside the mode's scope that no compatible closed predecessor unit
+ * serves is `unreviewed` (`out-of-scope`): it is never dispatched, and the Run settles it as an
+ * `out-of-scope` gap. The baseline recomputes such a unit, because a baseline revision always covers
+ * the whole manuscript; a review must not, or 选章 would silently send other chapters.
+ *
+ * A predecessor that may be absent. A first review of one range has none, which is what lets
+ * chapter-by-chapter work start without a whole-book Run: every unit in the range's closure is
+ * `recomputed` (`selected-range` — there is nothing to bypass) and every other unit is `unreviewed`.
+ *
+ * `changed` means changed. A unit whose content key matches a predecessor unit that was itself left
+ * unreviewed has not changed since the predecessor saw it; it was never reviewed, and `只审改动过的章`
+ * leaves it that way rather than quietly widening to every chapter nobody has asked about yet. A unit
+ * whose predecessor failed is still retried, exactly as the baseline retries a predecessor gap.
+ *
+ * Compatibility binds the frozen category contract, not only the contract version. Every category is
+ * read under the one version `ai7.editorial-review/1`, and what a category's units were actually read
+ * under — its guideline clauses, its procedure, its output kind — is frozen into its prompt contract,
+ * whose digest the revision's schema digest pins. A predecessor produced under another schema digest
+ * answers a different question, so none of its units is reused (`contract-version-mismatch`).
+ */
+export const SCOPE_PLAN_SCHEMA = 'ai7.analysis.reuse-plan/2' as const;
+
+/** The exact reason of every `out-of-scope` gap, as an editor reads it. */
+export const OUT_OF_SCOPE_GAP_REASON = '不在本次审阅范围内' as const;
+
+export interface ScopePlanPredecessor extends ReusePlanPredecessor {
+  /** The schema digest the predecessor revision pinned: the frozen category contract its units were read under. */
+  readonly schemaDigest: string;
+  /** The predecessor units that were left unreviewed rather than lost: `out-of-scope` gaps. */
+  readonly unreviewedUnitOrdinals: ReadonlyArray<number>;
+}
+
+export interface ScopePlanInput {
+  readonly kind: AnalysisKindId;
+  readonly contractVersion: string;
+  readonly schemaDigest: string;
+  readonly mode: AnalysisTaskMode;
+  /** What the mode means to read, from the kind's own mode table. */
+  readonly recompute: 'everything' | 'changed' | 'selected-range';
+  readonly selectedRange: BaselineAnalysisSelectedRange | null;
+  readonly manifest: CoverageManifestProjection;
+  /** `null` exactly for a mode that starts the Result Set. */
+  readonly predecessor: ScopePlanPredecessor | null;
+}
+
+export function deriveScopePlan(input: ScopePlanInput): ReviewScopePlanProjection {
+  const { mode, recompute, manifest, predecessor } = input;
+  const rangeBound = recompute === 'selected-range';
+  requireAnalysis(!rangeBound || input.selectedRange !== null, 'ANALYSIS_SELECTED_RANGE_INVALID', '所选范围审阅需要一个明确的内容块范围。');
+  requireAnalysis(rangeBound || input.selectedRange === null, 'ANALYSIS_SELECTED_RANGE_INVALID', '只有所选范围审阅可以携带内容块范围。');
+  // A plan with no predecessor is a first range review and nothing else: a whole first review carries
+  // no plan at all, and `changed` has nothing to have changed from.
+  requireAnalysis(predecessor !== null || rangeBound, 'ANALYSIS_RECORD_INVALID', '没有前一修订版的审阅计划只能是所选范围审阅。');
+  const selectedRange = rangeBound ? requireSelectedRange(input.selectedRange, manifest.totalBlocks) : null;
+  const states = new Map((predecessor?.unitStates ?? []).map((unit) => [unit.unitOrdinal, unit.state] as const));
+  requireAnalysis(predecessor === null ||
+    (predecessor.manifest.units.every((unit) => states.has(unit.ordinal)) && states.size === predecessor.manifest.units.length),
+  'ANALYSIS_RECORD_INVALID', '前一修订版的单元结果与其覆盖清单不一致。');
+  const contractCompatible = predecessor !== null &&
+    predecessor.contractVersion === input.contractVersion && predecessor.schemaDigest === input.schemaDigest;
+  const newKeys = unitContentKeys(manifest);
+  const closedByKey = new Map<string, number[]>();
+  const failedKeys = new Set<string>();
+  const unreviewedKeys = new Set<string>();
+  if (predecessor !== null) {
+    const unreviewed = new Set(predecessor.unreviewedUnitOrdinals);
+    const predecessorKeys = unitContentKeys(predecessor.manifest);
+    predecessor.manifest.units.forEach((unit, index) => {
+      const key = predecessorKeys[index]!;
+      if (states.get(unit.ordinal) === 'closed') closedByKey.set(key, [...(closedByKey.get(key) ?? []), unit.ordinal]);
+      else if (unreviewed.has(unit.ordinal)) unreviewedKeys.add(key);
+      else failedKeys.add(key);
+    });
+  }
+  const closure = selectedRange === null ? new Set<number>() : selectedRangeClosure(manifest, selectedRange);
+  const consumed = new Map<number, { disposition: 'reused' | 'bypassed'; successorUnitOrdinal: number }>();
+  const units: ReviewScopePlanUnitProjection[] = manifest.units.map((unit, index) => {
+    const contentKey = newKeys[index]!;
+    const candidates = contractCompatible ? (closedByKey.get(contentKey) ?? []) : [];
+    const candidate = candidates.find((ordinal) => !consumed.has(ordinal)) ?? null;
+    const base = { unitOrdinal: unit.ordinal, startPosition: unit.startPosition, endPosition: unit.endPosition, contentKey };
+    const inScope = recompute === 'everything' || (rangeBound && closure.has(unit.ordinal));
+    if (inScope) {
+      if (candidate !== null) consumed.set(candidate, { disposition: 'bypassed', successorUnitOrdinal: unit.ordinal });
+      const reason: ReviewScopePlanUnitProjection['reason'] = recompute === 'everything'
+        ? 'bypassed-whole-book'
+        : predecessor === null ? 'selected-range' : 'bypassed-selected-range';
+      return { ...base, disposition: 'recomputed', reason, reusedFrom: null };
+    }
+    if (candidate !== null) {
+      consumed.set(candidate, { disposition: 'reused', successorUnitOrdinal: unit.ordinal });
+      return { ...base, disposition: 'reused', reason: 'compatible', reusedFrom: { revisionId: predecessor!.revisionId, revisionOrdinal: predecessor!.ordinal, unitOrdinal: candidate } };
+    }
+    // Outside a range, nothing without a reusable result is read. Under `changed`, neither is a unit
+    // the predecessor saw with this very content and left unreviewed: it has not changed.
+    if (rangeBound || (unreviewedKeys.has(contentKey) && !failedKeys.has(contentKey))) {
+      return { ...base, disposition: 'unreviewed', reason: 'out-of-scope', reusedFrom: null };
+    }
+    const reason: ReviewScopePlanUnitProjection['reason'] = !contractCompatible ? 'contract-version-mismatch'
+      : failedKeys.has(contentKey) ? 'predecessor-gap' : 'no-compatible-predecessor';
+    return { ...base, disposition: 'recomputed', reason, reusedFrom: null };
+  });
+  const predecessorUnits: AnalysisReusePlanPredecessorUnitProjection[] = (predecessor?.manifest.units ?? []).map((unit) => {
+    const use = consumed.get(unit.ordinal);
+    return {
+      unitOrdinal: unit.ordinal,
+      state: states.get(unit.ordinal)!,
+      disposition: use === undefined ? 'invalidated' : use.disposition,
+      successorUnitOrdinal: use === undefined ? null : use.successorUnitOrdinal,
+    };
+  });
+  const counts: ReviewScopePlanCounts = {
+    reused: units.filter((unit) => unit.disposition === 'reused').length,
+    recomputed: units.filter((unit) => unit.disposition === 'recomputed').length,
+    unreviewed: units.filter((unit) => unit.disposition === 'unreviewed').length,
+    invalidated: predecessorUnits.filter((unit) => unit.disposition === 'invalidated').length,
+    bypassed: predecessorUnits.filter((unit) => unit.disposition === 'bypassed').length,
+  };
+  return {
+    schema: SCOPE_PLAN_SCHEMA,
+    kind: input.kind,
+    mode,
+    contractVersion: input.contractVersion,
+    predecessor: predecessor === null ? null : {
+      revisionId: predecessor.revisionId,
+      ordinal: predecessor.ordinal,
+      digest: predecessor.digest,
+      contractVersion: predecessor.contractVersion,
+      coverageManifestDigest: predecessor.coverageManifestDigest,
+      unitCount: predecessor.manifest.units.length,
+    },
+    coverageManifestDigest: manifest.digest,
+    selectedRange,
+    recomputeClosure: Array.from(closure).sort((left, right) => left - right),
+    units,
+    predecessorUnits,
+    counts,
+  };
 }

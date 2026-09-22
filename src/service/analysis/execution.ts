@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { AnalysisAssuranceSampleDispositionProjection, AnalysisGapProjection, AnalysisSourceRangeProjection, CoverageManifestProjection, CoverageManifestUnitProjection, ExecutionRouteId, LaunchPolicyProjection, RunAttemptState, RunReportStageId } from '../../shared/protocol.js';
+import type { AnalysisAssuranceSampleDispositionProjection, AnalysisGapProjection, AnalysisReusePlanUnitProjection, CoverageManifestProjection, CoverageManifestUnitProjection, ExecutionRouteId, LaunchPolicyProjection, ReviewScopePlanUnitProjection, RunAttemptState, RunReportStageId } from '../../shared/protocol.js';
 import { prepareExecution, type HarnessExecutionSpan, type PrimaryAgentHarnessHandle } from '../harness/primary-agent-harness.js';
 import { DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE } from '../../shared/protected-secret-identity.js';
 import type { DeveloperLiveRuntime } from '../launch-policy.js';
@@ -30,6 +30,7 @@ import { canonicalRecord } from './canonical.js';
 import { SAMPLE1_SOURCE_DIGEST, type BaselineAnalysisStore, type ExecutionBindingRecord, type ExecutionPlanFacts, type PredecessorUnitResult, type RunProgress, type RunProgressStage, type UnitResultRecord } from './baseline-analysis-store.js';
 import type { BaselineUnitResult } from './contract.js';
 import type { ManifestBlockInput } from './coverage-manifest.js';
+import { ExecutionAdmissionError } from './execution-error.js';
 import { applyAssuranceSample, type AnalysisKindDefinition, type AnalysisReductionResult } from './kind-definition.js';
 import {
   BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST,
@@ -49,6 +50,7 @@ import {
   type CrossUnitOutcome,
   type GapUnitOutcome,
 } from './reducers.js';
+import { OUT_OF_SCOPE_GAP_REASON } from './reuse-plan.js';
 import {
   buildRunReportReflectionMessage,
   parseRunReportReflectionResult,
@@ -85,43 +87,17 @@ import {
  * byte-identical unit message once through the same Egress Gate evaluation inside the unchanged
  * Execution Binding and envelope; the unit settles from the retry's outcome and both attempts count
  * as usage. A non-retry-safe failure, an interruption, or an ambiguous turn is never retried.
+ *
+ * One owner serves every ledger (Issue #417). `admitAndDispatch` takes the ledger of the Run it is
+ * handed — the baseline ledger it was constructed with when none is named — and the Run in flight
+ * carries that ledger to every write it makes, so a Review Run's category Tasks execute one after
+ * another through this same single slot: a second dispatch of any kind is refused while one runs.
  */
-/**
- * Remap the source ranges of a reused predecessor result onto the new unit: the i-th own block and
- * the i-th overlap block of the predecessor unit correspond to the same positions of the new unit
- * because the compatibility key proved their content digests equal in order. Identities usually
- * coincide; when they differ the remap keeps `回到稿件范围` pointing at the block that carries the
- * same content in the current revision.
- */
-export function remapReusedResult(
-  result: BaselineUnitResult,
-  predecessorUnit: CoverageManifestUnitProjection,
-  newUnit: CoverageManifestUnitProjection,
-): BaselineUnitResult {
-  const from = [...predecessorUnit.blockIds, ...predecessorUnit.overlapBlockIds];
-  const to = [...newUnit.blockIds, ...newUnit.overlapBlockIds];
-  if (from.length !== to.length) throw new ExecutionAdmissionError('EXECUTION_LINEAGE_INVALID', '复用单元与前一单元的内容块数量不一致。');
-  const mapping = new Map(from.map((blockId, index) => [blockId, to[index]!] as const));
-  const ranges = (list: ReadonlyArray<AnalysisSourceRangeProjection>): AnalysisSourceRangeProjection[] => list.map((range) => {
-    const blockId = mapping.get(range.blockId);
-    if (blockId === undefined) throw new ExecutionAdmissionError('EXECUTION_LINEAGE_INVALID', '复用单元的来源范围引用了前一单元之外的内容块。');
-    return { blockId, fromGrapheme: range.fromGrapheme, toGrapheme: range.toGrapheme };
-  });
-  return {
-    schema: result.schema,
-    unitOrdinal: newUnit.ordinal,
-    synopsis: result.synopsis,
-    entities: result.entities.map((entity) => ({ ...entity, aliases: [...entity.aliases], sourceRanges: ranges(entity.sourceRanges) })),
-    events: result.events.map((event) => ({ ...event, participants: [...event.participants], sourceRanges: ranges(event.sourceRanges) })),
-    relationships: result.relationships.map((relationship) => ({ ...relationship, sourceRanges: ranges(relationship.sourceRanges) })),
-    settingClaims: result.settingClaims.map((claim) => ({ ...claim, sourceRanges: ranges(claim.sourceRanges) })),
-    conflicts: result.conflicts.map((note) => ({ ...note, sourceRanges: ranges(note.sourceRanges) })),
-    unresolved: result.unresolved.map((note) => ({ ...note, sourceRanges: ranges(note.sourceRanges) })),
-    confidence: result.confidence,
-  };
-}
+export { ExecutionAdmissionError };
+export { remapReusedResult } from './reused-result.js';
 
 export interface ExecutionOwnerDependencies {
+  /** The baseline kind's ledger: the one a dispatch that names no ledger runs against. */
   readonly ledger: BaselineAnalysisStore;
   readonly launchPolicy: LaunchPolicyProjection;
   readonly fixture: ResolvedModelFixture | null;
@@ -130,15 +106,10 @@ export interface ExecutionOwnerDependencies {
   readonly developerLive?: DeveloperLiveRuntime | null;
 }
 
-export class ExecutionAdmissionError extends Error {
-  constructor(readonly code: string, message: string) {
-    super(message);
-    this.name = 'ExecutionAdmissionError';
-  }
-}
-
 interface ActiveRun {
   readonly runRecordId: string;
+  /** The ledger this Run was dispatched from; every read and write of the Run goes through it. */
+  readonly ledger: BaselineAnalysisStore;
   readonly progress: {
     unitsTotal: number;
     unitsSettled: number;
@@ -298,28 +269,45 @@ export class BaselineAnalysisExecutionOwner {
     return { ...active.progress, attemptState: attemptStateOf(active) };
   }
 
-  /** Single-slot admission: one Run per instance; a second dispatch is refused, never queued. */
-  admitAndDispatch(runRecordId: string): void {
+  /**
+   * Single-slot admission: one Run per instance; a second dispatch is refused, never queued.
+   *
+   * `ledger` is the ledger the Run Record belongs to and defaults to the baseline kind's, so every
+   * caller that has always dispatched a baseline Run still does exactly that. The slot is the owner's
+   * and not a ledger's: a Run of any kind holds it, which is what keeps a Review Run's category Tasks
+   * one after another rather than side by side (Issue #417).
+   */
+  admitAndDispatch(runRecordId: string, ledger: BaselineAnalysisStore = this.#deps.ledger): void {
     if (this.#disposed) throw new ExecutionAdmissionError('EXECUTION_STOPPING', '本地业务服务正在停止。');
     if (this.#active !== null) throw new ExecutionAdmissionError('EXECUTION_BUSY', '当前已有一个运行在执行；本实例一次只执行一个运行。');
     const live = this.#deps.developerLive ?? null;
     if (live === null && this.#deps.fixture === null) throw new ExecutionAdmissionError('EXECUTION_ROUTE_ABSENT', '没有可执行的本地确定性路由。');
-    const facts = this.#deps.ledger.loadExecutionPlan(runRecordId);
+    // Every ledger this owner serves froze its plans under the launch this owner executes under. One
+    // that was bound to another launch would hand over a plan whose route this owner cannot honour.
+    if ((ledger.launch.live !== null) !== (live !== null)) {
+      throw new ExecutionAdmissionError('EXECUTION_LEDGER_LAUNCH_MISMATCH', '该分析账本绑定的可信区间与执行所有者不一致；未开始执行。');
+    }
+    const facts = ledger.loadExecutionPlan(runRecordId);
     // The Public SampleBook check precedes admission, so an unadmitted Book never reaches a payload.
     if (live !== null && !DEVELOPER_LIVE_TRANSMITTABLE_SOURCE_DIGESTS.has(facts.sourceDigest)) {
       throw new ExecutionAdmissionError('EXECUTION_SOURCE_NOT_TRANSMITTABLE', '当前图书不在 developer-live 可传输的 Public SampleBook 集合内；未发起任何传输。');
     }
-    if (this.#deps.ledger.currentRunState(runRecordId) !== 'authorized') {
+    if (ledger.currentRunState(runRecordId) !== 'authorized') {
       throw new ExecutionAdmissionError('EXECUTION_STATE_INVALID', '只有刚记录授权的运行可以进入调度。');
     }
     const submitted = facts.update === null ? facts.manifest.units.length : facts.update.reusePlan.counts.recomputed;
-    this.#deps.ledger.recordRunState(runRecordId, 'admitted', {
+    // A scope plan also says how many units it leaves unreviewed; a baseline plan has no such count,
+    // so its admitted state reads exactly as it always has.
+    const unreviewed = facts.update !== null && 'unreviewed' in facts.update.reusePlan.counts ? facts.update.reusePlan.counts.unreviewed : null;
+    ledger.recordRunState(runRecordId, 'admitted', {
       detail: '已进入 AI7 调度器（单槽位）。',
       unitsTotal: facts.manifest.units.length,
       ...(facts.update === null ? {} : { updateMode: facts.update.mode, unitsRecomputed: submitted, unitsReused: facts.update.reusePlan.counts.reused }),
+      ...(unreviewed === null ? {} : { unitsUnreviewed: unreviewed }),
     });
     const active: ActiveRun = {
       runRecordId,
+      ledger,
       progress: {
         unitsTotal: submitted,
         unitsSettled: 0,
@@ -338,7 +326,7 @@ export class BaselineAnalysisExecutionOwner {
     };
     this.#active = active;
     active.done = this.#execute(active, facts).catch((error: unknown) => {
-      this.#recordFailure(facts, error);
+      this.#recordFailure(ledger, facts, error);
     }).finally(() => {
       if (this.#active === active) this.#active = null;
     });
@@ -362,18 +350,18 @@ export class BaselineAnalysisExecutionOwner {
     await active.done;
   }
 
-  #recordFailure(facts: ExecutionPlanFacts, error: unknown): void {
+  #recordFailure(ledger: BaselineAnalysisStore, facts: ExecutionPlanFacts, error: unknown): void {
     const code = error !== null && typeof error === 'object' && 'code' in error && typeof error.code === 'string' ? error.code : 'EXECUTION_FAILED';
     const reason = `运行在形成结果集修订版前失败（${code}）。`;
     try {
-      this.#deps.ledger.recordRunState(facts.runRecordId, 'failed', { detail: `运行在形成结果前失败（${code}）。`, code });
-      this.#deps.ledger.recordOutcome({
+      ledger.recordRunState(facts.runRecordId, 'failed', { detail: `运行在形成结果前失败（${code}）。`, code });
+      ledger.recordOutcome({
         taskIntentId: facts.taskIntentId,
         runRecordId: facts.runRecordId,
         classification: 'failed',
         resultSetRevisionId: null,
         summary: reason,
-        safeNextAction: SAFE_NEXT_ACTIONS.failed,
+        safeNextAction: (ledger.definition.safeNextActions ?? SAFE_NEXT_ACTIONS).failed,
         // A Run that failed before it formed a revision still leaves a report: four stages that
         // never ran, no units, no usage, and the terminal reason with its classified code.
         report: buildRunReport({
@@ -473,7 +461,7 @@ export class BaselineAnalysisExecutionOwner {
   }
 
   async #execute(active: ActiveRun, facts: ExecutionPlanFacts): Promise<void> {
-    const ledger = this.#deps.ledger;
+    const ledger = active.ledger;
     // Everything kind-specific this Run needs: the frozen system section, the unit message builder and
     // its header, the unit result parser, the reducer, and whether the kind declares a cross-unit
     // suboperation at all. The owner itself is the same owner for every analysis kind.
@@ -499,8 +487,9 @@ export class BaselineAnalysisExecutionOwner {
     // per-frozen-unit default against this Run's own frozen unit count. Never re-derived at dispatch.
     const runBudgetCeiling: RunBudgetCeiling = facts.runBudgetCeiling === 'unset' ? { kind: 'unset' } : facts.runBudgetCeiling;
     // The test item purpose is the Task mode, so a first baseline and each update mode number their
-    // live calls separately and a repeated purpose can never collide with an unrelated test.
-    const testItemPurpose = facts.update === null ? 'first-baseline' : facts.update.mode;
+    // live calls separately and a repeated purpose can never collide with an unrelated test. A Task
+    // without a plan is the kind's own whole first mode — `first-baseline` for the baseline kind.
+    const testItemPurpose = facts.update === null ? definition.initialMode : facts.update.mode;
     let cache: ProviderResultCache | null = null;
     if (live !== null) {
       cache = new ProviderResultCache(live.launch.providerCacheRoot);
@@ -510,14 +499,21 @@ export class BaselineAnalysisExecutionOwner {
     const blocksById = new Map(blocks.map((block) => [block.blockId, block] as const));
     const manifest = facts.manifest;
     const update = facts.update;
+    // The plan's units in one shape: the baseline's reuse plan knows two dispositions and a scope plan
+    // a third, `unreviewed`, which the owner neither submits nor copies.
+    const planUnits: ReadonlyArray<AnalysisReusePlanUnitProjection | ReviewScopePlanUnitProjection> = update === null ? [] : update.reusePlan.units;
     // Only recomputed units form unit messages; the Run Source Scope admits exactly those.
     const recomputedOrdinals = new Set(update === null
       ? manifest.units.map((unit) => unit.ordinal)
-      : update.reusePlan.units.filter((unit) => unit.disposition === 'recomputed').map((unit) => unit.unitOrdinal));
+      : planUnits.filter((unit) => unit.disposition === 'recomputed').map((unit) => unit.unitOrdinal));
     const submittedUnits = manifest.units.filter((unit) => recomputedOrdinals.has(unit.ordinal));
     const unitMessages = new Map(submittedUnits.map((unit) => [unit.ordinal, definition.buildUnitMessage(unit, manifest.units.length, blocksById)] as const));
     const admittedUserMessages = new Set(unitMessages.values());
-    const predecessorResults: ReadonlyMap<number, PredecessorUnitResult> = update === null ? new Map() : ledger.loadPredecessorUnitResults(update.predecessor.revisionId);
+    // A range-bound first Task has a plan and no predecessor, so there is nothing to load or to reuse.
+    const predecessorFacts = update?.predecessor ?? null;
+    const predecessorResults: ReadonlyMap<number, PredecessorUnitResult> = predecessorFacts === null
+      ? new Map()
+      : ledger.loadPredecessorUnitResults(predecessorFacts.revisionId);
     const acceptedOutputDigests = new Set<string>();
     let currentBindingDigest: string | null = null;
     const harnessSessionId = randomUUID();
@@ -628,7 +624,7 @@ export class BaselineAnalysisExecutionOwner {
         runBudgetCeiling: runBudgetCeiling.kind === 'unset' ? 'unset' : runBudgetCeiling,
         dispatchAttribution: 'Dispatch',
         boundAt,
-        ...(update === null ? {} : { update: { mode: update.mode, predecessorRevisionId: update.predecessor.revisionId, reusePlanDigest: update.reusePlanDigest } }),
+        ...(update === null ? {} : { update: { mode: update.mode, predecessorRevisionId: predecessorFacts?.revisionId ?? null, reusePlanDigest: update.reusePlanDigest } }),
       };
       const bindingDigest = canonicalRecord(bindingRecord).digest;
       // Readiness only: the product path reaches the Protected Secret Store and releases no value.
@@ -694,25 +690,42 @@ export class BaselineAnalysisExecutionOwner {
       const unitObservations = new Map<number, RunReportUnitObservation>();
       const reusedOrdinals = new Set<number>();
       // Reused units are copied by lineage before any model call; they never form a request or count usage.
-      if (update !== null) {
-        for (const planUnit of update.reusePlan.units) {
-          if (planUnit.disposition !== 'reused' || planUnit.reusedFrom === null) continue;
-          const source = predecessorResults.get(planUnit.reusedFrom.unitOrdinal);
-          const predecessorUnit = update.predecessor.manifest.units[planUnit.reusedFrom.unitOrdinal - 1];
-          const newUnit = manifest.units[planUnit.unitOrdinal - 1];
-          if (source === undefined || predecessorUnit === undefined || newUnit === undefined) {
-            throw new ExecutionAdmissionError('EXECUTION_LINEAGE_INVALID', '复用计划引用的前一单元结果不存在。');
-          }
-          const result = remapReusedResult(source.result, predecessorUnit, newUnit);
-          reusedOrdinals.add(newUnit.ordinal);
-          outcomes.push({ unitOrdinal: newUnit.ordinal, state: 'closed', result });
+      // Units a scope plan leaves unreviewed are settled here too, and for the same reason: nothing about
+      // them waits on a model. Each is an exact `out-of-scope` gap — the Run was asked not to read it —
+      // recorded with the request digest it would have carried, as every other unread unit is.
+      for (const planUnit of planUnits) {
+        const newUnit = manifest.units[planUnit.unitOrdinal - 1];
+        if (planUnit.disposition === 'unreviewed') {
+          if (newUnit === undefined) throw new ExecutionAdmissionError('EXECUTION_LINEAGE_INVALID', '审阅范围计划引用的单元不在覆盖清单内。');
+          outcomes.push({ unitOrdinal: newUnit.ordinal, state: 'gap', code: 'out-of-scope', reason: OUT_OF_SCOPE_GAP_REASON });
           unitRecords.push({
             unitOrdinal: newUnit.ordinal,
-            requestDigest: source.requestDigest,
-            lineage: { kind: 'reused', revisionId: planUnit.reusedFrom.revisionId, revisionOrdinal: planUnit.reusedFrom.revisionOrdinal, unitOrdinal: planUnit.reusedFrom.unitOrdinal },
-            closed: { state: 'closed', responseDigest: source.responseDigest, usage: source.usage, result: definition.unitRecord(result) },
+            requestDigest: definition.requestDigest(newUnit.ordinal, newUnit.digest),
+            lineage: { kind: 'unreviewed' },
+            closed: {
+              state: 'gap',
+              gap: { unitOrdinal: newUnit.ordinal, code: 'out-of-scope', reason: OUT_OF_SCOPE_GAP_REASON, startPosition: newUnit.startPosition, endPosition: newUnit.endPosition, blockIds: [...newUnit.blockIds] },
+            },
           });
+          continue;
         }
+        if (planUnit.disposition !== 'reused' || planUnit.reusedFrom === null) continue;
+        const source = predecessorResults.get(planUnit.reusedFrom.unitOrdinal);
+        const predecessorUnit = predecessorFacts?.manifest.units[planUnit.reusedFrom.unitOrdinal - 1];
+        if (source === undefined || predecessorUnit === undefined || newUnit === undefined) {
+          throw new ExecutionAdmissionError('EXECUTION_LINEAGE_INVALID', '复用计划引用的前一单元结果不存在。');
+        }
+        // How a reused result is carried onto the new unit is the kind's to say: the baseline contract
+        // cites blocks by identity and remaps them, a positional contract carries its result unchanged.
+        const result = definition.remapReusedResult(source.result, predecessorUnit, newUnit);
+        reusedOrdinals.add(newUnit.ordinal);
+        outcomes.push({ unitOrdinal: newUnit.ordinal, state: 'closed', result });
+        unitRecords.push({
+          unitOrdinal: newUnit.ordinal,
+          requestDigest: source.requestDigest,
+          lineage: { kind: 'reused', revisionId: planUnit.reusedFrom.revisionId, revisionOrdinal: planUnit.reusedFrom.revisionOrdinal, unitOrdinal: planUnit.reusedFrom.unitOrdinal },
+          closed: { state: 'closed', responseDigest: source.responseDigest, usage: source.usage, result: definition.unitRecord(result) },
+        });
       }
       let spanOrdinal = 0;
       let adaptationOrdinal = 0;
@@ -959,7 +972,11 @@ export class BaselineAnalysisExecutionOwner {
       // the four stage totals partition the Run's own work.
       clock.open('reduction');
       const reduced = definition.reduce({ manifest, outcomes, reusedUnitOrdinals: reusedOrdinals, blocks: blocksById, crossUnit });
-      if (terminalClassification === 'completed' && reduced.gaps.length > 0) terminalClassification = 'completed-with-gaps';
+      // A unit the plan left out of scope is a gap in the revision's coverage and not in the Run: a
+      // range review that closed everything it was asked to read completed, without qualification.
+      if (terminalClassification === 'completed' && reduced.gaps.some((gapEntry) => gapEntry.code !== 'out-of-scope')) {
+        terminalClassification = 'completed-with-gaps';
+      }
       clock.close();
 
       // The one declared assurance sampling suboperation (ADR 0066), inside this Run's unchanged
@@ -1045,7 +1062,7 @@ export class BaselineAnalysisExecutionOwner {
         summary: interruption === null
           ? `${reduction.coverage.label}；${reduction.reducerClosure.label}；${reduction.assurance.label}。`
           : `${interruption.summary}${reduction.coverage.label}；${reduction.reducerClosure.label}；${reduction.assurance.label}。`,
-        safeNextAction: interruption === null ? SAFE_NEXT_ACTIONS[terminalClassification] : interruption.safeNextAction,
+        safeNextAction: interruption === null ? (definition.safeNextActions ?? SAFE_NEXT_ACTIONS)[terminalClassification] : interruption.safeNextAction,
         report: buildRunReport(reportFacts, await this.#reflect({
           active, harness, runRecordId: facts.runRecordId, accounting: runReportAccounting(reportFacts),
           admittedUserMessages, acceptedOutputDigests, liveAdapter, accumulated, ceilingState, live, policy,

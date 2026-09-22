@@ -1,9 +1,23 @@
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { ProtocolError, decodeRequest } from '../../src/service/request-frames.js';
-import { BASELINE_ANALYSIS_MODE_GOALS, BASELINE_ANALYSIS_TASK_GOAL, MAX_EDIT_CODE_UNITS, MAX_REPLACEMENT_EXCLUSIONS } from '../../src/shared/protocol.js';
+import { BUILTIN_REVIEW_CATEGORY_CONFIGURATION } from '../../src/service/review/category-configuration.js';
+import {
+  BASELINE_ANALYSIS_MODE_GOALS,
+  BASELINE_ANALYSIS_TASK_GOAL,
+  MAX_EDIT_CODE_UNITS,
+  MAX_REPLACEMENT_EXCLUSIONS,
+  MAX_REVIEW_FINDING_REASON_CHARACTERS,
+  MAX_REVIEW_RUN_CATEGORIES,
+} from '../../src/shared/protocol.js';
 
 const encoder = new TextEncoder();
+
+/** The built-in configuration's categories, in its order; the frame bound must admit all of them at once. */
+const BUILTIN_CATEGORY_IDS = BUILTIN_REVIEW_CATEGORY_CONFIGURATION.categories.map((entry) => entry.categoryId);
+const WHOLE_SCOPE = { kind: 'whole', fromChapterBlockId: null, toChapterBlockId: null };
+const CHAPTER_BLOCK = `blk_${'1'.repeat(24)}`;
+const FINDING_ID = `rvf_${'0'.repeat(24)}`;
 
 function frameOf(value: unknown): Uint8Array {
   return encoder.encode(JSON.stringify(value));
@@ -86,6 +100,46 @@ describe('decodeRequest accepts well-formed frames', () => {
       expect(decodeRequest(frameOf(request))).toEqual(request);
     }
   });
+
+  it('accepts the seven 审阅 operations with their exact inputs', () => {
+    const bookId = randomUUID();
+    const reviewRunId = randomUUID();
+    const inputs: ReadonlyArray<{ op: string; input: Record<string, unknown> }> = [
+      { op: 'inspectReviewWorkspace', input: { bookId, reviewRunId: null } },
+      { op: 'inspectReviewWorkspace', input: { bookId, reviewRunId } },
+      // The page cursor and the four filters of the results are each optional, and `null` is none.
+      { op: 'inspectReviewWorkspace', input: { bookId, reviewRunId, findingsAfterOrdinal: 300 } },
+      {
+        op: 'inspectReviewWorkspace',
+        input: { bookId, reviewRunId, findingsAfterOrdinal: null, categoryId: 'typos-and-usage', severity: 'must', status: 'pending', chapterBlockId: CHAPTER_BLOCK },
+      },
+      { op: 'inspectReviewWorkspace', input: { bookId, reviewRunId: null, categoryId: null, severity: null, status: 'ignored', chapterBlockId: null } },
+      { op: 'prepareReviewRun', input: { bookId, categoryIds: ['typos-and-usage'], scope: WHOLE_SCOPE } },
+      { op: 'prepareReviewRun', input: { bookId, categoryIds: ['typos-and-usage', 'plot-consistency'], scope: { kind: 'chapters', fromChapterBlockId: CHAPTER_BLOCK, toChapterBlockId: `blk_${'2'.repeat(24)}` } } },
+      { op: 'prepareReviewRun', input: { bookId, categoryIds: ['literary-expression'], scope: { kind: 'changed', fromChapterBlockId: null, toChapterBlockId: null } } },
+      // 当前选区 is a well-formed request; the store is the one to say why it cannot be read yet.
+      { op: 'prepareReviewRun', input: { bookId, categoryIds: ['style-and-format'], scope: { kind: 'selection', fromChapterBlockId: null, toChapterBlockId: null } } },
+      // A Run of the leads alone has no Task, so its one approval names no plan.
+      { op: 'authorizeReviewRun', input: { bookId, reviewRunId, planDigests: [] } },
+      {
+        op: 'authorizeReviewRun',
+        input: {
+          bookId,
+          reviewRunId,
+          planDigests: [{ categoryId: 'typos-and-usage', planEnvelopeDigest: 'a'.repeat(64) }, { categoryId: 'factual-review', planEnvelopeDigest: 'b'.repeat(64) }],
+        },
+      },
+      { op: 'continueReviewRun', input: { bookId, reviewRunId } },
+      { op: 'recordReviewFindingDisposition', input: { bookId, reviewRunId, findingId: FINDING_ID, disposition: 'ignored', reason: '与本书体例一致' } },
+      { op: 'generateReviewReport', input: { bookId, reviewRunId } },
+      { op: 'inspectReviewFindingOfMark', input: { bookId, markId: randomUUID() } },
+    ];
+    for (const { op, input } of inputs) {
+      const request = { id: randomUUID(), op, input };
+      expect(decodeRequest(frameOf(request))).toEqual(request);
+    }
+    expect(new Set(inputs.map((entry) => entry.op)).size).toBe(7);
+  });
 });
 
 describe('decodeRequest enforces size limits', () => {
@@ -127,6 +181,43 @@ describe('decodeRequest enforces size limits', () => {
       },
     };
     expect(rejectionFor(frameOf(pastBound)).requestId).toBe(id);
+  });
+
+  it('admits every category of the built-in configuration in one Review Run and refuses one more', () => {
+    expect(BUILTIN_CATEGORY_IDS).toHaveLength(MAX_REVIEW_RUN_CATEGORIES);
+    const id = randomUUID();
+    const bookId = randomUUID();
+    const all = { id, op: 'prepareReviewRun', input: { bookId, categoryIds: BUILTIN_CATEGORY_IDS, scope: WHOLE_SCOPE } };
+    expect(decodeRequest(frameOf(all))).toEqual(all);
+    const oneMore = { id, op: 'prepareReviewRun', input: { bookId, categoryIds: [...BUILTIN_CATEGORY_IDS, 'house-category'], scope: WHOLE_SCOPE } };
+    expect(rejectionFor(frameOf(oneMore)).requestId).toBe(id);
+    const approvals = BUILTIN_CATEGORY_IDS.map((categoryId) => ({ categoryId, planEnvelopeDigest: 'c'.repeat(64) }));
+    const approveAll = { id, op: 'authorizeReviewRun', input: { bookId, reviewRunId: randomUUID(), planDigests: approvals } };
+    expect(decodeRequest(frameOf(approveAll))).toEqual(approveAll);
+    const approveOneMore = { ...approveAll, input: { ...approveAll.input, planDigests: [...approvals, { categoryId: 'house-category', planEnvelopeDigest: 'c'.repeat(64) }] } };
+    expect(rejectionFor(frameOf(approveOneMore)).requestId).toBe(id);
+  });
+
+  it('accepts a reason of 忽略并说明 at its character bound, however it is padded or encoded, and refuses one past it', () => {
+    const id = randomUUID();
+    const bookId = randomUUID();
+    const reviewRunId = randomUUID();
+    const dispose = (reason: string) => ({
+      id,
+      op: 'recordReviewFindingDisposition',
+      input: { bookId, reviewRunId, findingId: FINDING_ID, disposition: 'ignored', reason },
+    });
+    for (const reason of [
+      '理'.repeat(MAX_REVIEW_FINDING_REASON_CHARACTERS),
+      `  ${'理'.repeat(MAX_REVIEW_FINDING_REASON_CHARACTERS)}\n`,
+      // Characters outside the Basic Multilingual Plane count once each, as the store counts them.
+      '𠀀'.repeat(MAX_REVIEW_FINDING_REASON_CHARACTERS),
+    ]) {
+      const request = dispose(reason);
+      expect(decodeRequest(frameOf(request))).toEqual(request);
+    }
+    expect(rejectionFor(frameOf(dispose('理'.repeat(MAX_REVIEW_FINDING_REASON_CHARACTERS + 1)))).requestId).toBe(id);
+    expect(rejectionFor(frameOf(dispose('𠀀'.repeat(MAX_REVIEW_FINDING_REASON_CHARACTERS + 1)))).requestId).toBe(id);
   });
 });
 
@@ -209,6 +300,100 @@ describe('decodeRequest rejects malformed frames', () => {
     expect(rejectionFor(frameOf({ id, op: 'inspectBaselineAnalysis', input: { bookId, extra: 1 } })).requestId).toBe(id);
     expect(rejectionFor(frameOf({ id, op: 'inspectBaselineAnalysis', input: { bookId } })).requestId).toBe(id);
     expect(rejectionFor(frameOf({ id, op: 'inspectBaselineAnalysis', input: { bookId, revisionId: 'not-a-uuid' } })).requestId).toBe(id);
+  });
+
+  it('rejects a 审阅 workspace inspection, continuation, report or mark lookup whose identities or key set are wrong', () => {
+    const id = randomUUID();
+    const bookId = randomUUID();
+    const refused: ReadonlyArray<{ op: string; input: unknown }> = [
+      { op: 'inspectReviewWorkspace', input: { bookId } },
+      { op: 'inspectReviewWorkspace', input: { bookId, reviewRunId: 'not-a-uuid' } },
+      { op: 'inspectReviewWorkspace', input: { bookId, reviewRunId: null, extra: 1 } },
+      { op: 'inspectReviewWorkspace', input: { bookId: 'not-a-uuid', reviewRunId: null } },
+      // The page cursor is a finding ordinal, and each filter names what a finding can be.
+      { op: 'inspectReviewWorkspace', input: { bookId, reviewRunId: null, findingsAfterOrdinal: 0 } },
+      { op: 'inspectReviewWorkspace', input: { bookId, reviewRunId: null, findingsAfterOrdinal: 1.5 } },
+      { op: 'inspectReviewWorkspace', input: { bookId, reviewRunId: null, findingsAfterOrdinal: '300' } },
+      { op: 'inspectReviewWorkspace', input: { bookId, reviewRunId: null, categoryId: 'Typos' } },
+      { op: 'inspectReviewWorkspace', input: { bookId, reviewRunId: null, severity: '必须处理' } },
+      { op: 'inspectReviewWorkspace', input: { bookId, reviewRunId: null, status: 'open' } },
+      { op: 'inspectReviewWorkspace', input: { bookId, reviewRunId: null, chapterBlockId: 'blk_short' } },
+      { op: 'inspectReviewWorkspace', input: { bookId, reviewRunId: null, filter: { severity: 'must' } } },
+      // Only inspecting opens "the latest" Run; every other operation names its Run.
+      { op: 'continueReviewRun', input: { bookId, reviewRunId: null } },
+      { op: 'continueReviewRun', input: { reviewRunId: randomUUID() } },
+      { op: 'generateReviewReport', input: { bookId, reviewRunId: null } },
+      { op: 'generateReviewReport', input: { bookId, reviewRunId: randomUUID(), version: 2 } },
+      { op: 'inspectReviewFindingOfMark', input: { bookId, markId: 'not-a-uuid' } },
+      // The service is asked within the Book only; the manuscript capability is the main process's to check.
+      { op: 'inspectReviewFindingOfMark', input: { bookId, markId: randomUUID(), manuscriptId: randomUUID() } },
+    ];
+    for (const { op, input } of refused) {
+      expect(rejectionFor(frameOf({ id, op, input })).requestId).toBe(id);
+    }
+  });
+
+  it('rejects a Review Run preparation whose categories or scope are malformed', () => {
+    const id = randomUUID();
+    const bookId = randomUUID();
+    const prepare = (categoryIds: unknown, scope: unknown) => frameOf({ id, op: 'prepareReviewRun', input: { bookId, categoryIds, scope } });
+    // No category, a repeated one, one that is not a category identity, and a list that is not a list.
+    expect(rejectionFor(prepare([], WHOLE_SCOPE)).requestId).toBe(id);
+    expect(rejectionFor(prepare(['typos-and-usage', 'typos-and-usage'], WHOLE_SCOPE)).requestId).toBe(id);
+    expect(rejectionFor(prepare(['Typos'], WHOLE_SCOPE)).requestId).toBe(id);
+    expect(rejectionFor(prepare(['editorial-review/typos-and-usage'], WHOLE_SCOPE)).requestId).toBe(id);
+    expect(rejectionFor(prepare(['x'.repeat(49)], WHOLE_SCOPE)).requestId).toBe(id);
+    expect(rejectionFor(prepare('typos-and-usage', WHOLE_SCOPE)).requestId).toBe(id);
+    // 选章 names both chapters by their first blocks; every other scope names neither, and the key set is exact.
+    const categories = ['typos-and-usage'];
+    expect(rejectionFor(prepare(categories, { kind: 'chapters', fromChapterBlockId: null, toChapterBlockId: null })).requestId).toBe(id);
+    expect(rejectionFor(prepare(categories, { kind: 'chapters', fromChapterBlockId: CHAPTER_BLOCK, toChapterBlockId: 'blk_short' })).requestId).toBe(id);
+    expect(rejectionFor(prepare(categories, { kind: 'whole', fromChapterBlockId: CHAPTER_BLOCK, toChapterBlockId: CHAPTER_BLOCK })).requestId).toBe(id);
+    expect(rejectionFor(prepare(categories, { kind: 'selection', fromChapterBlockId: CHAPTER_BLOCK, toChapterBlockId: null })).requestId).toBe(id);
+    expect(rejectionFor(prepare(categories, { kind: 'everything', fromChapterBlockId: null, toChapterBlockId: null })).requestId).toBe(id);
+    expect(rejectionFor(prepare(categories, { kind: 'whole' })).requestId).toBe(id);
+    expect(rejectionFor(prepare(categories, null)).requestId).toBe(id);
+    expect(rejectionFor(frameOf({ id, op: 'prepareReviewRun', input: { bookId, categoryIds: categories } })).requestId).toBe(id);
+  });
+
+  it('rejects a Review Run approval whose plan digests are malformed, repeated or not a list', () => {
+    const id = randomUUID();
+    const authorize = (planDigests: unknown) =>
+      frameOf({ id, op: 'authorizeReviewRun', input: { bookId: randomUUID(), reviewRunId: randomUUID(), planDigests } });
+    const approval = { categoryId: 'typos-and-usage', planEnvelopeDigest: 'a'.repeat(64) };
+    expect(rejectionFor(authorize([{ ...approval, planEnvelopeDigest: 'short' }])).requestId).toBe(id);
+    expect(rejectionFor(authorize([{ ...approval, planEnvelopeDigest: 'A'.repeat(64) }])).requestId).toBe(id);
+    expect(rejectionFor(authorize([approval, { ...approval, planEnvelopeDigest: 'b'.repeat(64) }])).requestId).toBe(id);
+    expect(rejectionFor(authorize([{ ...approval, categoryId: 'Typos' }])).requestId).toBe(id);
+    expect(rejectionFor(authorize([{ ...approval, taskIntentId: randomUUID() }])).requestId).toBe(id);
+    expect(rejectionFor(authorize([{ categoryId: 'typos-and-usage' }])).requestId).toBe(id);
+    expect(rejectionFor(authorize(['a'.repeat(64)])).requestId).toBe(id);
+    expect(rejectionFor(authorize(approval)).requestId).toBe(id);
+    expect(rejectionFor(authorize(null)).requestId).toBe(id);
+    expect(rejectionFor(frameOf({ id, op: 'authorizeReviewRun', input: { bookId: randomUUID(), planDigests: [] } })).requestId).toBe(id);
+  });
+
+  it('rejects 忽略并说明 without a reason, with another disposition, or for an identity that is not a review finding', () => {
+    const id = randomUUID();
+    const dispose = (input: Record<string, unknown>) => frameOf({
+      id,
+      op: 'recordReviewFindingDisposition',
+      input: { bookId: randomUUID(), reviewRunId: randomUUID(), findingId: FINDING_ID, disposition: 'ignored', reason: '已人工核对', ...input },
+    });
+    for (const reason of ['', '   ', '\n\t', '\uD800', 42, null]) {
+      expect(rejectionFor(dispose({ reason })).requestId).toBe(id);
+    }
+    expect(rejectionFor(dispose({ disposition: 'reopened' })).requestId).toBe(id);
+    expect(rejectionFor(dispose({ disposition: 'handled' })).requestId).toBe(id);
+    // The kind-level identities a finding is derived from are not the Review Run's own finding identity.
+    for (const findingId of [`rfd_${'0'.repeat(24)}`, `fnd_${'0'.repeat(24)}`, `lead_${'0'.repeat(24)}`, `rvf_${'0'.repeat(23)}`, `rvf_${'G'.repeat(24)}`]) {
+      expect(rejectionFor(dispose({ findingId })).requestId).toBe(id);
+    }
+    expect(rejectionFor(frameOf({
+      id,
+      op: 'recordReviewFindingDisposition',
+      input: { bookId: randomUUID(), reviewRunId: randomUUID(), findingId: FINDING_ID, reason: '已人工核对' },
+    })).requestId).toBe(id);
   });
 
   it('rejects a foreground-boundary inspection whose Run identity or key set is wrong', () => {

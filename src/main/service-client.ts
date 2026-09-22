@@ -96,7 +96,7 @@ function serviceEnvironment(
 
 function readinessIsExact(value: ServiceReadiness): boolean {
   return (
-    value.protocolVersion === 33 &&
+    value.protocolVersion === 34 &&
     value.state === 'ready' &&
     value.runtime.electron === '43.4.1' &&
     value.runtime.node === '24.18.1' &&
@@ -219,7 +219,10 @@ export class ServiceClient {
             operation === 'commitManuscriptReimport' || operation === 'commitReplacement' ||
             operation === 'saveMilestone' || operation === 'getStartup' || operation === 'getRecoveryComparison' ||
             operation === 'viewRecoveryCandidate' || operation === 'restoreRecovery' ||
-            operation === 'authorizeBaselineAnalysis'
+            operation === 'authorizeBaselineAnalysis' ||
+            // A Review Run's drive loop starts inside these two answers, and it writes at once whatever
+            // needs no model: the leads, or a category whose Run finished before a restart.
+            operation === 'authorizeReviewRun' || operation === 'continueReviewRun'
           ? LONG_REQUEST_TIMEOUT_MS
           : REQUEST_TIMEOUT_MS);
       timeout.unref();

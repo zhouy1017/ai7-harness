@@ -1,4 +1,4 @@
-export const SERVICE_PROTOCOL_VERSION = 33 as const;
+export const SERVICE_PROTOCOL_VERSION = 34 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -58,6 +58,13 @@ export const IPC_CHANNELS = {
   inspectBaselineAnalysis: 'ai7:j04:inspect-baseline-analysis',
   prepareBaselineAnalysis: 'ai7:j04:prepare-baseline-analysis',
   authorizeBaselineAnalysis: 'ai7:j04:authorize-baseline-analysis',
+  inspectReviewWorkspace: 'ai7:j04:inspect-review-workspace',
+  prepareReviewRun: 'ai7:j04:prepare-review-run',
+  authorizeReviewRun: 'ai7:j04:authorize-review-run',
+  continueReviewRun: 'ai7:j04:continue-review-run',
+  recordReviewFindingDisposition: 'ai7:j04:record-review-finding-disposition',
+  generateReviewReport: 'ai7:j04:generate-review-report',
+  inspectReviewFindingOfMark: 'ai7:j04:inspect-review-finding-of-mark',
   listBooks: 'ai7:j01:list-books',
   prepareNewBookReview: 'ai7:j01:prepare-new-book-review',
   commitNewBookImport: 'ai7:j01:commit-new-book-import',
@@ -80,6 +87,7 @@ export const IPC_CHANNELS = {
   recordChangeSuggestionDecision: 'ai7:j05:record-change-suggestion-decision',
   recordProposalDecisionReason: 'ai7:j05:record-proposal-decision-reason',
   applyChangeSuggestion: 'ai7:j05:apply-change-suggestion',
+  applyChangeSuggestionBatch: 'ai7:j05:apply-change-suggestion-batch',
   reverseAppliedChangeSuggestion: 'ai7:j05:reverse-applied-change-suggestion',
   getManuscriptApplyOutcome: 'ai7:j05:get-manuscript-apply-outcome',
   getManuscriptRail: 'ai7:j02:get-manuscript-rail',
@@ -1778,12 +1786,18 @@ export interface RunReportUnitAccountingProjection {
   recomputed: number;
   gaps: number;
   retried: number;
+  /**
+   * Units the Run planned not to read (Issue #417). Present only when there is at least one, so the
+   * accounting — and the digest taken over it — of every Run that has none is exactly what it was.
+   */
+  unreviewed?: number;
 }
 
 export interface RunReportUnitRowProjection {
   unitOrdinal: number;
   state: 'closed' | 'gap';
-  lineage: 'recomputed' | 'reused';
+  /** `unreviewed` is a unit the Run's plan left out of scope: neither recomputed nor reused, and never dispatched. */
+  lineage: 'recomputed' | 'reused' | 'unreviewed';
   /** Model turns this unit cost: `0` for a reused unit and for one an interrupted loop never reached. */
   attempts: number;
   wallMs: number | null;
@@ -1877,7 +1891,13 @@ export interface AnalysisUnresolvedProjection {
 
 export interface AnalysisGapProjection {
   unitOrdinal: number;
-  code: 'adapter-failure' | 'contract-invalid' | 'interrupted' | 'egress-refused' | 'not-attempted';
+  /**
+   * Why the unit carries no result. The first five are things that went wrong or never happened in a
+   * Run that meant to read the unit. `out-of-scope` (Issue #417) is the one that is not a failure: a
+   * kind that leaves out-of-scope units unreviewed planned not to read this unit, never dispatched it,
+   * and says so — `不在本次审阅范围内`. No baseline or factual Run produces it.
+   */
+  code: 'adapter-failure' | 'contract-invalid' | 'interrupted' | 'egress-refused' | 'not-attempted' | 'out-of-scope';
   reason: string;
   startPosition: number;
   endPosition: number;
@@ -1941,6 +1961,12 @@ export interface AnalysisCoverageAxis {
   /** Closed units whose result was reused from the predecessor revision by lineage; disclosed, never hidden. */
   unitsReused: number;
   gapCount: number;
+  /**
+   * How many of `gapCount` are units the Run planned not to read (`out-of-scope`), so a reader can
+   * tell a range review that did everything it was asked from a Run that lost units. Present only on
+   * a revision of a kind that leaves out-of-scope units unreviewed (Issue #417).
+   */
+  unitsOutOfScope?: number;
 }
 
 export interface AnalysisReducerClosureAxis {
@@ -1994,9 +2020,13 @@ export interface AnalysisAssuranceAxis {
 export const BASELINE_ANALYSIS_ASSURANCE_STATEMENT = '仅为模型输出的结构化归纳；不构成事实判定、编辑评审或稿件变更。' as const;
 export const FACTUAL_REVIEW_ASSURANCE_STATEMENT =
   '仅为模型列出的可核查断言与其精确引文位置；未经外部证据核查，不构成事实判定、编辑评审或稿件变更。' as const;
+/** A review category's: findings are located, never decided — the editor disposes of each (V2-UX-REV-003). */
+export const REVIEW_CATEGORY_ASSURANCE_STATEMENT =
+  '仅为模型按审阅依据列出的发现与其精确引文位置；是否采纳由编辑逐条决定，不构成事实判定、合规结论或稿件变更。' as const;
 export type AnalysisAssuranceStatement =
   | typeof BASELINE_ANALYSIS_ASSURANCE_STATEMENT
-  | typeof FACTUAL_REVIEW_ASSURANCE_STATEMENT;
+  | typeof FACTUAL_REVIEW_ASSURANCE_STATEMENT
+  | typeof REVIEW_CATEGORY_ASSURANCE_STATEMENT;
 
 export const BASELINE_ANALYSIS_KIND = 'baseline-manuscript-analysis' as const;
 export const BASELINE_ANALYSIS_CONTRACT_VERSION = 'ai7.baseline-manuscript-analysis/1' as const;
@@ -2061,10 +2091,98 @@ export const FACTUAL_REVIEW_MODE_MEANINGS = {
   range: '仅对所选内容块范围内的分析单元执行事实核查契约 v1，其余单元不进入本次运行。',
 } as const satisfies Record<FactualReviewTaskMode, string>;
 
+/**
+ * The review-category kind family (Issue #417, plan slice S69): one analysis kind per Review Category,
+ * `editorial-review/<categoryId>`, all read under the one exact-versioned contract
+ * `ai7.editorial-review/1`. The categories themselves are configuration (V2-UX-REV-002: a house may
+ * add one), so nothing here — and no durable CHECK — names a category: the family is admitted by the
+ * shape of its kind identity, and the category's identity, label, guideline clauses and procedure are
+ * frozen into each Task's prompt contract instead.
+ */
+export const EDITORIAL_REVIEW_KIND_PREFIX = 'editorial-review/' as const;
+export const EDITORIAL_REVIEW_CONTRACT_VERSION = 'ai7.editorial-review/1' as const;
+export type ReviewCategoryKindId = `${typeof EDITORIAL_REVIEW_KIND_PREFIX}${string}`;
+/** A category identity: lower-case words joined by single hyphens, as the built-in nine are spelled. */
+export const REVIEW_CATEGORY_ID_PATTERN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u;
+export const MAX_REVIEW_CATEGORY_ID_LENGTH = 48;
+
+export function isReviewCategoryId(value: unknown): value is string {
+  return typeof value === 'string' && value.length <= MAX_REVIEW_CATEGORY_ID_LENGTH && REVIEW_CATEGORY_ID_PATTERN.test(value);
+}
+
+export function reviewCategoryKindId(categoryId: string): ReviewCategoryKindId {
+  if (!isReviewCategoryId(categoryId)) throw new Error('REVIEW_CATEGORY_ID_INVALID');
+  return `${EDITORIAL_REVIEW_KIND_PREFIX}${categoryId}`;
+}
+
+/** The category a kind identity of the family names; `null` for every other kind and for a malformed one. */
+export function reviewCategoryIdOfKind(kind: unknown): string | null {
+  if (typeof kind !== 'string' || !kind.startsWith(EDITORIAL_REVIEW_KIND_PREFIX)) return null;
+  const categoryId = kind.slice(EDITORIAL_REVIEW_KIND_PREFIX.length);
+  return isReviewCategoryId(categoryId) ? categoryId : null;
+}
+
+export function isReviewCategoryKindId(kind: unknown): kind is ReviewCategoryKindId {
+  return reviewCategoryIdOfKind(kind) !== null;
+}
+
+/**
+ * The family's five Task modes. Two start a category's Result Set — the whole manuscript, or one
+ * explicitly selected block range with every other unit left unreviewed — and three append to it:
+ * again over the whole manuscript, only what changed since the predecessor, or one selected range.
+ * A range review never reads a unit outside its range: chapter-by-chapter work must not need a
+ * whole-book Run first, and 选章 must not silently send other chapters.
+ */
+export type ReviewCategoryInitialMode = 'review-first' | 'review-first-range';
+export type ReviewCategoryUpdateMode = 'review-sync' | 'review-range' | 'review-again';
+export type ReviewCategoryTaskMode = ReviewCategoryInitialMode | ReviewCategoryUpdateMode;
+export const REVIEW_CATEGORY_TASK_MODES: readonly ReviewCategoryTaskMode[] =
+  ['review-first', 'review-first-range', 'review-again', 'review-sync', 'review-range'];
+export const REVIEW_CATEGORY_UPDATE_MODES: readonly ReviewCategoryUpdateMode[] = ['review-sync', 'review-range', 'review-again'];
+export const REVIEW_CATEGORY_MODE_LABELS = {
+  'review-first': '全书审阅',
+  'review-first-range': '所选范围审阅',
+  'review-again': '全书重新审阅',
+  'review-sync': '只审改动过的章',
+  'review-range': '所选范围重新审阅',
+} as const satisfies Record<ReviewCategoryTaskMode, string>;
+export const REVIEW_CATEGORY_MODE_MEANINGS = {
+  'review-first': '对固定的任务输入修订版派生覆盖清单并逐单元执行编辑审阅契约 v1，列出该类别的发现并按内容块文本确定性定位每条引文，形成首个结果集修订版。',
+  'review-first-range': '仅对所选内容块范围及其重叠闭包内的分析单元执行编辑审阅契约 v1；其余单元不进入本次运行，在结果集修订版中记为“不在本次审阅范围内”。',
+  'review-again': '绕过全部既有单元结果，按当前覆盖清单重审每个分析单元，即使清单与前一修订版完全相同也不复用任何单元。',
+  'review-sync': '复用与前一修订版内容一致的已审单元，仅重审内容改动过的单元；此前未审且内容未变的单元保持未审。',
+  'review-range': '重审所选内容块范围及其重叠闭包内的单元，其余内容一致的已审单元按血缘复用；范围外没有可复用结果的单元不进入本次运行，记为“不在本次审阅范围内”。',
+} as const satisfies Record<ReviewCategoryTaskMode, string>;
+
+/**
+ * The fixed goal text of one mode of one category. It is derived from the category's label and the
+ * mode alone, so the same category and mode always carry the same goal; the durable schema bounds
+ * its length and the ledger checks the text itself (`ANALYSIS_GOAL_INVALID`).
+ */
+export type ReviewCategoryGoal = `${string}「${string}」${string}`;
+export const MAX_REVIEW_CATEGORY_GOAL_LENGTH = 400;
+export function reviewCategoryModeGoal(label: string, mode: ReviewCategoryTaskMode): ReviewCategoryGoal {
+  switch (mode) {
+    case 'review-first':
+      return `对当前书稿执行「${label}」审阅，逐单元列出发现并精确定位其引文，形成结果集修订版。`;
+    case 'review-first-range':
+      return `对所选内容块范围执行「${label}」审阅，逐单元列出发现并精确定位其引文，其余单元保持未审，形成结果集修订版。`;
+    case 'review-again':
+      return `重新执行「${label}」全书审阅：绕过全部既有单元结果，按当前覆盖清单重审每个分析单元，追加一个结果集修订版。`;
+    case 'review-sync':
+      return `将「${label}」审阅同步到当前稿件：复用内容一致的已审单元，仅重审改动过的单元，追加一个结果集修订版。`;
+    case 'review-range':
+      return `重新审阅所选范围的「${label}」：重审所选内容块范围及其重叠闭包，复用其余已审单元，追加一个结果集修订版。`;
+  }
+}
+export function reviewCategoryExpectedOutcome(label: string): string {
+  return `「${label}」审阅结果集修订版（编辑审阅契约 v1）`;
+}
+
 /** Every analysis kind a Book may hold, and every Task mode any of them declares. */
-export type AnalysisKindId = typeof BASELINE_ANALYSIS_KIND | typeof FACTUAL_REVIEW_KIND;
-export type AnalysisTaskMode = BaselineAnalysisTaskMode | FactualReviewTaskMode;
-export type AnalysisGoal = BaselineAnalysisGoal | FactualReviewGoal;
+export type AnalysisKindId = typeof BASELINE_ANALYSIS_KIND | typeof FACTUAL_REVIEW_KIND | ReviewCategoryKindId;
+export type AnalysisTaskMode = BaselineAnalysisTaskMode | FactualReviewTaskMode | ReviewCategoryTaskMode;
+export type AnalysisGoal = BaselineAnalysisGoal | FactualReviewGoal | ReviewCategoryGoal;
 
 /** An explicit editor choice over exact block positions of the Task Input revision (inclusive). */
 export interface BaselineAnalysisSelectedRange {
@@ -2883,8 +3001,751 @@ export interface FactualReviewProjection extends Omit<
   inspectedRevision: null | { revision: FactualReviewResultSetRevisionProjection; current: boolean; readOnly: true };
 }
 
+// ---- 审阅 review categories (Issue #417, plan slice S69) --------------------------------------------
+
+/** V2-UX-REV-004's three severities, as the contract spells them and as an editor reads them. */
+export type ReviewFindingSeverity = 'must' | 'should' | 'note';
+export const REVIEW_FINDING_SEVERITIES: readonly ReviewFindingSeverity[] = ['must', 'should', 'note'];
+export const REVIEW_FINDING_SEVERITY_LABELS = {
+  must: '必须处理',
+  should: '建议处理',
+  note: '提示',
+} as const satisfies Record<ReviewFindingSeverity, string>;
+
+/** What a category's findings become on the manuscript: a 修改建议 with its replacement, or a 批注. */
+export type ReviewCategoryOutputKind = 'change-suggestion' | 'annotation';
+
+/** The category facts a revision states about itself, so a finding never has to repeat them. */
+export interface ReviewCategoryIdentityProjection {
+  categoryId: string;
+  label: string;
+  output: ReviewCategoryOutputKind;
+  /** Findings of this category are only `需人工复核的风险点`: AI7 states no compliance, plagiarism or policy verdict. */
+  riskPointsOnly: boolean;
+}
+
+/** The identity of one listed finding inside its unit: the block it named and its position in the list. */
+export interface ReviewFindingIdentityProjection {
+  unitOrdinal: number;
+  blockOrdinal: number;
+  findingOrdinal: number;
+}
+
+/**
+ * One located review finding. `sourceRange` is the exact grapheme range the service found the
+ * quotation at in the committed block — never an offset the model supplied — which is the anchor an
+ * Editorial Mark is made from. `replacement` is the text a 修改建议 proposes in place of that range
+ * (an empty string proposes deleting it) and is `null` for a 批注.
+ */
+export interface ReviewCategoryFindingProjection {
+  findingId: string;
+  unitOrdinal: number;
+  blockId: string;
+  sourceRange: FactualSourceRangeProjection;
+  quote: string;
+  severity: ReviewFindingSeverity;
+  note: string;
+  replacement: string | null;
+  /** The guideline clause the model named as its basis, when it named one the category lists. */
+  clauseId: string | null;
+  /** The identities of the duplicate findings merged into this record; empty when none were. */
+  mergedFrom: ReadonlyArray<ReviewFindingIdentityProjection>;
+}
+
+/**
+ * Why a listed finding never became one. The first two are Reference Integrity's — the quotation is
+ * not in the block it named, or is there more than once — and the third is a 修改建议 whose replacement
+ * is exactly the text already there, which proposes nothing.
+ */
+export type ReviewFindingExclusionReason = 'quote-not-found' | 'quote-ambiguous' | 'replacement-identical';
+
+/** The excluded appendix: what the model listed that the service could not anchor; never a mark. */
+export interface ReviewCategoryExcludedProjection {
+  findingId: string;
+  unitOrdinal: number;
+  /** The block the model named, when its ordinal resolved to one of the unit's blocks. */
+  blockId: string;
+  blockOrdinal: number;
+  quote: string;
+  severity: ReviewFindingSeverity;
+  note: string;
+  replacement: string | null;
+  clauseId: string | null;
+  reason: ReviewFindingExclusionReason;
+  reasonLabel: string;
+}
+
+/** What the model listed, by severity, before any of it was located; a list, for the reason the factual counts are. */
+export interface ReviewCategoryFindingCountsProjection {
+  listed: number;
+  bySeverity: ReadonlyArray<{ severity: ReviewFindingSeverity; count: number }>;
+  /** Listed findings whose quotation verified, before duplicates merged. */
+  located: number;
+  excluded: number;
+  merged: number;
+}
+
+/** Per-unit lineage of a review-category revision: beside the two every kind has, a unit the plan left unreviewed. */
+export type ReviewCategoryUnitLineage = AnalysisUnitLineage | { kind: 'unreviewed' };
+
+export interface ReviewScopePlanCounts extends AnalysisReusePlanCounts {
+  /** New units the plan leaves out of scope: never dispatched, settled as `out-of-scope` gaps. */
+  unreviewed: number;
+}
+
+export interface ReviewScopePlanUnitProjection {
+  unitOrdinal: number;
+  startPosition: number;
+  endPosition: number;
+  contentKey: string;
+  disposition: 'reused' | 'recomputed' | 'unreviewed';
+  /**
+   * `selected-range` is an in-range unit of a first range review, where there is nothing to bypass;
+   * `out-of-scope` is every `unreviewed` unit. The other six read exactly as the baseline plan's do.
+   */
+  reason:
+    | 'compatible'
+    | 'no-compatible-predecessor'
+    | 'predecessor-gap'
+    | 'contract-version-mismatch'
+    | 'bypassed-selected-range'
+    | 'bypassed-whole-book'
+    | 'selected-range'
+    | 'out-of-scope';
+  reusedFrom: null | { revisionId: string; revisionOrdinal: number; unitOrdinal: number };
+}
+
+/**
+ * The scope plan of a kind that leaves out-of-scope units unreviewed: the reuse plan's second record
+ * version. It differs from `/1` in exactly what such a kind needs — a predecessor that may be absent
+ * (a first range review has none), the `unreviewed` disposition with its count, and the kind it was
+ * derived for — and is never written for the baseline or the factual kind, whose `/1` records keep
+ * their bytes.
+ */
+export interface ReviewScopePlanProjection {
+  schema: 'ai7.analysis.reuse-plan/2';
+  /** The kind the plan was derived for; the record is kind-generic, and only review categories write it today. */
+  kind: AnalysisKindId;
+  mode: AnalysisTaskMode;
+  contractVersion: string;
+  predecessor: null | { revisionId: string; ordinal: number; digest: string; contractVersion: string; coverageManifestDigest: string; unitCount: number };
+  coverageManifestDigest: string;
+  selectedRange: BaselineAnalysisSelectedRange | null;
+  recomputeClosure: ReadonlyArray<number>;
+  units: ReadonlyArray<ReviewScopePlanUnitProjection>;
+  predecessorUnits: ReadonlyArray<AnalysisReusePlanPredecessorUnitProjection>;
+  counts: ReviewScopePlanCounts;
+}
+
+/** How a review-category revision came to be; a first range review has a plan and no predecessor. */
+export interface ReviewCategoryRevisionUpdateProjection {
+  mode: ReviewCategoryTaskMode;
+  modeLabel: string;
+  predecessor: null | { revisionId: string; ordinal: number; digest: string };
+  reusePlanDigest: string | null;
+  selectedRange: BaselineAnalysisSelectedRange | null;
+  counts: ReviewScopePlanCounts;
+}
+
+export type ReviewCategoryUnitProjection =
+  | {
+      unitOrdinal: number;
+      state: 'closed';
+      requestDigest: string;
+      responseDigest: string;
+      usage: { inputTokens: number; outputTokens: number } | null;
+      lineage: ReviewCategoryUnitLineage;
+      findings: ReadonlyArray<{
+        blockOrdinal: number;
+        quote: string;
+        severity: ReviewFindingSeverity;
+        note: string;
+        replacement?: string;
+        clauseId?: string;
+      }>;
+    }
+  | { unitOrdinal: number; state: 'gap'; requestDigest: string; lineage: ReviewCategoryUnitLineage; gap: AnalysisGapProjection };
+
+/**
+ * A review category's Result Set Revision: the located findings, the excluded appendix and the counts,
+ * beside every shared component the other kinds carry, computed by the same reducers.
+ */
+export interface ReviewCategoryResultSetRevisionProjection {
+  resultSetId: string;
+  revisionId: string;
+  ordinal: number;
+  createdAt: string;
+  digest: string;
+  contractVersion: typeof EDITORIAL_REVIEW_CONTRACT_VERSION;
+  manuscriptPin: { bookId: string; manuscriptId: string; revisionId: string; revisionLabel: string; revisionDigest: string };
+  coverageManifestDigest: string;
+  schemaDigest: string;
+  reducerDigest: string;
+  adapterPin: { route: ExecutionRouteId; model: string; fixtureIdentity: string | null; fixtureSha256: string | null };
+  bindingPin: { attemptId: string; bindingDigest: string; harnessSessionId: string; behaviorCompositionDigest: string; promptContractDigest: string };
+  policyPin: ResultSetPolicyPin;
+  provenance: { taskIntentId: string; runRecordId: string; attemptId: string; planVersion?: number; adaptations?: { count: number; unitOrdinals: ReadonlyArray<number> } };
+  usage: { inputTokens: number; outputTokens: number; requests: number };
+  update: ReviewCategoryRevisionUpdateProjection;
+  lineage: ReadonlyArray<{ unitOrdinal: number } & ReviewCategoryUnitLineage>;
+  coverage: AnalysisCoverageAxis;
+  reducerClosure: AnalysisReducerClosureAxis;
+  freshness: AnalysisFreshnessAxis;
+  assurance: AnalysisAssuranceAxis;
+  gaps: ReadonlyArray<AnalysisGapProjection>;
+  category: ReviewCategoryIdentityProjection;
+  findings: ReadonlyArray<ReviewCategoryFindingProjection>;
+  excluded: ReadonlyArray<ReviewCategoryExcludedProjection>;
+  findingCounts: ReviewCategoryFindingCountsProjection;
+  /** The adversarial sample drawn over `findings` after the reduction; it edits none of them. */
+  assuranceSample: AnalysisAssuranceSampleProjection;
+  units: ReadonlyArray<ReviewCategoryUnitProjection>;
+}
+
+/** The latest Task's plan facts when it is any mode but the whole first review. */
+export interface ReviewCategoryUpdateProjection {
+  mode: Exclude<ReviewCategoryTaskMode, 'review-first'>;
+  modeLabel: string;
+  meaning: string;
+  /** `null` for a first range review, which starts the Result Set it would otherwise name. */
+  predecessor: null | {
+    revisionId: string;
+    ordinal: number;
+    digest: string;
+    manuscriptPin: { revisionLabel: string; revisionId: string; revisionDigest: string };
+  };
+  /** Whether the Result Set still stands where the Task found it; authorization re-verifies it. */
+  predecessorCurrent: boolean;
+  selectedRange: BaselineAnalysisSelectedRange | null;
+  reusePlan: ReviewScopePlanProjection | null;
+  reusePlanDigest: string | null;
+}
+
+export interface ReviewCategoryUpdateActionProjection extends Omit<BaselineAnalysisUpdateActionProjection, 'mode' | 'expected'> {
+  mode: ReviewCategoryUpdateMode;
+  expected: ReviewScopePlanCounts | null;
+}
+
+export interface ReviewCategoryRangeOptionProjection extends Omit<BaselineAnalysisRangeOptionProjection, 'expected'> {
+  expected: ReviewScopePlanCounts;
+}
+
+/** The update controls of one category, keyed by its own three update modes. */
+export interface ReviewCategoryUpdateControlsProjection extends Omit<BaselineAnalysisUpdateControlsProjection, 'actions'> {
+  actions: {
+    'review-sync': ReviewCategoryUpdateActionProjection;
+    'review-range': ReviewCategoryUpdateActionProjection & { options: ReadonlyArray<ReviewCategoryRangeOptionProjection> };
+    'review-again': ReviewCategoryUpdateActionProjection;
+  };
+}
+
+export interface ReviewCategoryHistoryEntryProjection extends Omit<BaselineAnalysisHistoryEntryProjection, 'mode' | 'contractVersion' | 'counts'> {
+  mode: ReviewCategoryTaskMode;
+  contractVersion: typeof EDITORIAL_REVIEW_CONTRACT_VERSION;
+  counts: ReviewScopePlanCounts;
+}
+
+export interface ReviewCategoryHistoryProjection {
+  resultSetId: string;
+  kind: ReviewCategoryKindId;
+  createdAt: string;
+  latestOrdinal: number;
+  entries: ReadonlyArray<ReviewCategoryHistoryEntryProjection>;
+}
+
+/**
+ * One review category's Task projection: the third member of the analysis projection union, on the
+ * same real path as the other two and discriminated on `kind` (`isReviewCategoryKindId`).
+ */
+export interface ReviewCategoryProjection extends Omit<
+  BaselineAnalysisProjection,
+  'kind' | 'contractVersion' | 'taskIntent' | 'executionPlan' | 'resultSetRevision' | 'update' | 'updateControls' | 'history' | 'inspectedRevision'
+> {
+  kind: ReviewCategoryKindId;
+  contractVersion: typeof EDITORIAL_REVIEW_CONTRACT_VERSION;
+  taskIntent: null | {
+    taskIntentId: string;
+    goal: ReviewCategoryGoal;
+    expectedOutcome: string;
+    createdAt: string;
+    mode: ReviewCategoryTaskMode;
+    modeLabel: string;
+  };
+  executionPlan: null | {
+    steps: ReadonlyArray<string>;
+    effects: readonly [];
+    unitCount: number;
+    recomputedUnitCount?: number;
+    reusedUnitCount?: number;
+    unreviewedUnitCount?: number;
+    reducerStages: readonly ['unit-validation', 'reference-integrity', 'finding-reduction'];
+    stopCondition: string;
+  };
+  resultSetRevision: null | ReviewCategoryResultSetRevisionProjection;
+  update: null | ReviewCategoryUpdateProjection;
+  updateControls: null | ReviewCategoryUpdateControlsProjection;
+  history: null | ReviewCategoryHistoryProjection;
+  inspectedRevision: null | { revision: ReviewCategoryResultSetRevisionProjection; current: boolean; readOnly: true };
+}
+
+/** What a caller asks a category's ledger to prepare: the mode, and the block range a range mode needs. */
+export interface ReviewCategoryTaskRequest {
+  mode: ReviewCategoryTaskMode;
+  selectedRange: BaselineAnalysisSelectedRange | null;
+}
+
+// ---- 审阅记录 Review Runs (Issue #417, plan slice S69) ---------------------------------------------
+
+/**
+ * The editor's words for the analysis's own lead tokens (V2-UX-LAYER-003). The deterministic conflict
+ * kinds are ②A's; the four cross-unit kinds read as the 情节逻辑与前后一致 leads they become (REV-011).
+ * `Record`s over the closed unions, so a new kind fails to compile instead of reaching a mark as a token.
+ */
+export const ANALYSIS_CONFLICT_KIND_LABELS: Record<AnalysisConflictProjection['kind'], string> = {
+  'unit-reported': '单元内报告',
+  'alias-collision': '别名冲突',
+  'entity-kind-divergence': '实体类别分歧',
+  'setting-claim-divergence': '设定声明分歧',
+};
+export const ANALYSIS_CROSS_UNIT_FINDING_KIND_LABELS: Record<AnalysisCrossUnitFindingProjection['kind'], string> = {
+  contradiction: '前后矛盾',
+  'continuity-break': '连续性断裂',
+  'alias-identity-divergence': '同名异指',
+  'chronology-conflict': '时间线冲突',
+};
+
+/** V2-UX-REV-001's four scopes: 全书, selected chapters, chapters changed since the last review, the current selection. */
+export type ReviewScopeKind = 'whole' | 'chapters' | 'changed' | 'selection';
+export const REVIEW_SCOPE_KINDS: readonly ReviewScopeKind[] = ['whole', 'chapters', 'changed', 'selection'];
+export const REVIEW_SCOPE_LABELS = {
+  whole: '全书',
+  chapters: '选章',
+  changed: '只审改动过的章',
+  selection: '当前选区',
+} as const satisfies Record<ReviewScopeKind, string>;
+
+/**
+ * What an editor asks a Review Run to read. 选章 names the first and the last chapter of one contiguous
+ * run by the block identity of each chapter's first block; every other scope names neither.
+ */
+export interface ReviewRunScopeRequest {
+  kind: ReviewScopeKind;
+  fromChapterBlockId: string | null;
+  toChapterBlockId: string | null;
+}
+
+/** V2-UX-REV-004's status, derived from the finding's mark and never stored beside it (MARK-010). */
+export type ReviewFindingStatus = 'pending' | 'handled' | 'ignored';
+export const REVIEW_FINDING_STATUS_LABELS = {
+  pending: '待处理',
+  handled: '已处理',
+  ignored: '已忽略',
+} as const satisfies Record<ReviewFindingStatus, string>;
+
+/** Each category against the current manuscript (V2-UX-REV-007). */
+export type ReviewCoverageState = 'never' | 'current' | 'needs-review' | 'unavailable';
+export const REVIEW_COVERAGE_STATE_LABELS = {
+  never: '未审阅',
+  current: '已审阅 · 当前稿件',
+  'needs-review': '需复审',
+  unavailable: '不可用',
+} as const satisfies Record<ReviewCoverageState, string>;
+
+/**
+ * A Review Run as a whole. `partial` is a Run that stopped with some categories finished and others not
+ * — after a restart, `canContinue` says whether 继续审阅 would pick up the categories never finished.
+ */
+export type ReviewRunState = 'prepared' | 'running' | 'settled' | 'partial' | 'failed';
+
+/**
+ * One category inside a Review Run. `settled` means its findings are on the manuscript and actionable
+ * (V2-UX-REV-008); `refused` is a category that could not start — its plan changed, its basis is gone,
+ * or the launch cannot execute it — with the reason in `detail`.
+ */
+export type ReviewRunCategoryState = 'prepared' | 'waiting' | 'running' | 'settled' | 'failed' | 'interrupted' | 'refused';
+
+export interface ReviewAvailabilityProjection {
+  available: boolean;
+  unavailableReason: string | null;
+}
+
+/** One category of the configuration as the 新建审阅 sheet shows it, its basis stated once (REV-010). */
+export interface ReviewWorkspaceCategoryProjection {
+  categoryId: string;
+  label: string;
+  description: string;
+  output: ReviewCategoryOutputKind;
+  riskPointsOnly: boolean;
+  batchApply: boolean;
+  searchEngine: boolean;
+  /** Whether the category reads without a model and sends nothing: the leads read the baseline analysis. */
+  modelFree: boolean;
+  basisStatement: string;
+  guidelineDocuments: ReadonlyArray<{ documentId: string; title: string; issuer: string; version: string; clauseCount: number }>;
+  procedure: { title: string; version: string };
+  available: boolean;
+  unavailableReason: string | null;
+  /** Which scopes this category can read now; 事实核查 and the leads read fewer than the rest. */
+  scopes: Readonly<Record<ReviewScopeKind, ReviewAvailabilityProjection>>;
+}
+
+/** One row of the coverage matrix: a category against the manuscript as it stands now (REV-007). */
+export interface ReviewCoverageRowProjection {
+  categoryId: string;
+  label: string;
+  state: ReviewCoverageState;
+  stateLabel: string;
+  /** The 第 N 次 whose findings this row stands on; `null` before any. */
+  lastRunOrdinal: number | null;
+  /** The Manuscript Revision that review read; `null` before any. */
+  lastReviewedRevisionLabel: string | null;
+  /** Blocks added, removed or changed since that review; `null` before any. */
+  changedBlocks: number | null;
+  unavailableReason: string | null;
+}
+
+/**
+ * A chapter an editor can start or end 选章 at. From the outline when the manuscript has headings; a
+ * manuscript without any offers its analysis units instead, which is the structure a review reads.
+ */
+export interface ReviewChapterOptionProjection {
+  blockId: string;
+  title: string;
+  level: number;
+  position: number;
+  /** The chapter's last block: the block before the next chapter of the same or a higher level, or the manuscript's last. */
+  endPosition: number;
+}
+
+export interface ReviewScopeOptionsProjection {
+  whole: ReviewAvailabilityProjection;
+  chapters: ReviewAvailabilityProjection & { basis: 'outline' | 'analysis-units'; chapters: ReadonlyArray<ReviewChapterOptionProjection> };
+  changed: ReviewAvailabilityProjection;
+  selection: ReviewAvailabilityProjection;
+}
+
+/** Findings by severity and by derived status; a finding counts once in each. */
+export interface ReviewFindingCountsProjection {
+  must: number;
+  should: number;
+  note: number;
+  pending: number;
+  handled: number;
+  ignored: number;
+}
+
+/** One entry of the 审阅记录 list, newest first: 第 N 次 with its categories, scope and outcome. */
+export interface ReviewRunSummaryProjection {
+  reviewRunId: string;
+  ordinal: number;
+  label: string;
+  createdAt: string;
+  scopeLabel: string;
+  categoryLabels: ReadonlyArray<string>;
+  state: ReviewRunState;
+  stateLabel: string;
+  findingCounts: ReviewFindingCountsProjection;
+  /** The latest 审阅报告 version; `null` before one is generated. */
+  reportVersion: number | null;
+}
+
+/** What a category's Task plan freezes, as the plan screen states it before the one approval. */
+export interface ReviewRunCategoryPlanProjection {
+  units: number;
+  recomputed: number;
+  reused: number;
+  unreviewed: number;
+  taskInputRevisionLabel: string;
+  routeLabel: string;
+  providerStatusLabel: string;
+  budgetCeilingLabel: string;
+}
+
+export interface ReviewRunCategoryProjection {
+  categoryId: string;
+  label: string;
+  position: number;
+  output: ReviewCategoryOutputKind;
+  riskPointsOnly: boolean;
+  batchApply: boolean;
+  basisStatement: string;
+  state: ReviewRunCategoryState;
+  stateLabel: string;
+  detail: string | null;
+  /** The category's Task; `null` for the model-free leads, which have none. */
+  taskIntentId: string | null;
+  planEnvelopeDigest: string | null;
+  modeLabel: string | null;
+  plan: ReviewRunCategoryPlanProjection | null;
+  /** Measured Run Progress while this category's Run executes; `null` otherwise. */
+  progress: NonNullable<BaselineAnalysisProjection['run']>['progress'];
+  findingsCount: number;
+  /** What the category listed that could not be anchored: the excluded appendix, never a mark. */
+  excludedCount: number;
+}
+
+/** One finding of a Review Run: one record with the Editorial Mark it became (MARK-010, FIND-002). */
+export interface ReviewFindingProjection {
+  findingId: string;
+  categoryId: string;
+  categoryLabel: string;
+  ordinal: number;
+  severity: ReviewFindingSeverity;
+  severityLabel: string;
+  output: ReviewCategoryOutputKind;
+  /** Only `需人工复核的风险点`: AI7 states no compliance, plagiarism or policy verdict (REV-003). */
+  riskPoint: boolean;
+  status: ReviewFindingStatus;
+  statusLabel: string;
+  statusDetail: string;
+  blockId: string;
+  /** Where the words stand now: the mark's live range, or the range the review found them at. */
+  fromGrapheme: number;
+  toGrapheme: number;
+  /** The block's position in the working manuscript; `null` once the block is no longer part of it. */
+  blockPosition: number | null;
+  /** The chapter option the block falls in, for the 章 filter; `null` outside every chapter. */
+  chapterBlockId: string | null;
+  chapterTitle: string | null;
+  quote: string;
+  note: string;
+  /** What a 修改建议 proposes in place of the quotation (empty proposes deleting it); `null` for a 批注. */
+  replacement: string | null;
+  clauseRefs: ReadonlyArray<{ documentTitle: string; clauseId: string; text: string }>;
+  /** The finding's own state line, such as 事实核查's `未外部复核`; `null` when it has none. */
+  stateLine: string | null;
+  markId: string | null;
+  markStatus: 'open' | 'resolved' | 'applied' | 'removed' | 'converted' | null;
+  anchorState: 'exact' | 'drifted' | 'detached' | 'anchor-changed';
+  ignoreReason: string | null;
+}
+
+/** The versioned 审阅报告 (REV-009) exactly as recorded, read back with the digest of its canonical JSON. */
+export interface ReviewReportProjection {
+  reportId: string;
+  version: number;
+  generatedAt: string;
+  digest: string;
+  record: ReviewReportRecord;
+}
+
+export interface ReviewReportRecord {
+  schema: 'ai7.review.report/1';
+  reviewRunId: string;
+  version: number;
+  generatedAt: string;
+  run: {
+    ordinal: number;
+    label: string;
+    createdAt: string;
+    scopeLabel: string;
+    manuscript: { revisionId: string; revisionLabel: string; journalSequence: number };
+  };
+  overview: {
+    title: '概览表';
+    rows: ReadonlyArray<{ categoryId: string; label: string; state: ReviewRunCategoryState; stateLabel: string; counts: ReviewFindingCountsProjection }>;
+  };
+  mustItems: {
+    title: '必须处理的事项';
+    items: ReadonlyArray<{
+      findingId: string;
+      categoryId: string;
+      categoryLabel: string;
+      locationLabel: string;
+      quote: string;
+      note: string;
+      status: ReviewFindingStatus;
+      statusLabel: string;
+    }>;
+  };
+  categorySummaries: {
+    title: '各类别摘要';
+    entries: ReadonlyArray<{
+      categoryId: string;
+      label: string;
+      output: ReviewCategoryOutputKind;
+      counts: ReviewFindingCountsProjection;
+      basisStatement: string;
+      excludedCount: number;
+      stateLine: string;
+    }>;
+  };
+  appendix: {
+    title: '附录';
+    configuration: { schema: string; version: string; digest: string };
+    categories: ReadonlyArray<{
+      categoryId: string;
+      label: string;
+      guidelineDocuments: ReadonlyArray<{ documentId: string; title: string; issuer: string; version: string }>;
+      procedure: { procedureId: string; title: string; version: string };
+      planEnvelopeDigest: string | null;
+      resultSetRevisionId: string | null;
+      adapterPin: { route: string; model: string; fixtureIdentity: string | null; fixtureSha256: string | null } | null;
+    }>;
+  };
+}
+
+/** The opened Review Run (the latest when none is named) with its categories, findings and Report. */
+export interface ReviewRunProjection {
+  reviewRunId: string;
+  ordinal: number;
+  label: string;
+  createdAt: string;
+  state: ReviewRunState;
+  stateLabel: string;
+  /** 继续审阅 is offered exactly when an authorized Run stopped with categories never finished. */
+  canContinue: boolean;
+  scope: { kind: ReviewScopeKind; label: string; selectedRange: BaselineAnalysisSelectedRange | null };
+  manuscript: { manuscriptId: string; branchId: string; revisionId: string; revisionLabel: string; journalSequence: number; workingDigest: string };
+  configurationDigest: string;
+  authorization: null | { authorizedAt: string };
+  categories: ReadonlyArray<ReviewRunCategoryProjection>;
+  /**
+   * One page of the findings that pass the asked filters, in ordinal order from the asked cursor on: at
+   * most `MAX_REVIEW_FINDINGS_PER_PAGE`, and fewer when their words weigh more, so the workspace always
+   * crosses the service boundary in one frame. The next page is read with `findingsAfterOrdinal` set to
+   * the last ordinal here and the same filters.
+   */
+  findings: ReadonlyArray<ReviewFindingProjection>;
+  /** How many findings pass the filters, before any page is taken; unfiltered, every finding of the Run. */
+  findingsTotal: number;
+  /** Whether findings that pass the filters remain after this page. */
+  findingsTruncated: boolean;
+  /** Every finding of the Run by severity and status, whatever the filters and the page: a filter is a view (FIND-003). */
+  findingCounts: ReviewFindingCountsProjection;
+  report: ReviewReportProjection | null;
+  reportVersions: ReadonlyArray<{ reportId: string; version: number; generatedAt: string; digest: string }>;
+}
+
+/**
+ * The 审阅 destination of one Book (V2-UX-REV-001 to REV-013): the configured categories with their
+ * basis, the coverage matrix, the scope options, the 审阅记录, and the opened Run.
+ */
+export interface ReviewWorkspaceProjection {
+  bookId: string;
+  /** The Book's primary Manuscript as it stands now; `null` for a Book without one. */
+  manuscript: null | { manuscriptId: string; branchId: string; revisionId: string; revisionLabel: string; journalSequence: number; workingDigest: string; totalBlocks: number };
+  configuration: { schema: string; version: string; digest: string };
+  categories: ReadonlyArray<ReviewWorkspaceCategoryProjection>;
+  coverage: ReadonlyArray<ReviewCoverageRowProjection>;
+  scopeOptions: ReviewScopeOptionsProjection;
+  /** Whether 新建审阅 can prepare a Run now: not while one of this Book's runs is under way. */
+  newReview: ReviewAvailabilityProjection;
+  /** The 审阅记录 newest first, at most `MAX_REVIEW_RUN_SUMMARIES` of them. */
+  runs: ReadonlyArray<ReviewRunSummaryProjection>;
+  /** Whether older Review Runs exist beyond `runs`; each stays openable by its identity. */
+  runsTruncated: boolean;
+  run: ReviewRunProjection | null;
+}
+
+/**
+ * The most categories one Review Run request names: the built-in configuration's nine. It bounds a
+ * request frame only — which categories exist is configuration — so a house configuration with more
+ * categories raises it together with its own.
+ */
+export const MAX_REVIEW_RUN_CATEGORIES = 9;
+/** 忽略并说明's reason, in characters once trimmed; a blank one is no reason (V2-UX-REV-004). */
+export const MAX_REVIEW_FINDING_REASON_CHARACTERS = 500;
+/** A finding of a Review Run: `rvf_` and 24 hex digits, content-derived from the Run, the category and the kind-level finding. */
+export const REVIEW_FINDING_ID_PATTERN = /^rvf_[0-9a-f]{24}$/u;
+/** The most findings one workspace answer carries; a finding weighs about a kilobyte on the wire. */
+export const MAX_REVIEW_FINDINGS_PER_PAGE = 300;
+/** The most 审阅记录 entries one workspace answer lists, newest first. */
+export const MAX_REVIEW_RUN_SUMMARIES = 50;
+/** The most 修改建议 one 确认应用 writes: the batch Apply's own bound (Issue #408). */
+export const MAX_BATCH_APPLY_SUGGESTIONS = 500;
+export const REVIEW_FINDING_STATUSES: readonly ReviewFindingStatus[] = ['pending', 'handled', 'ignored'];
+
+/**
+ * Which of the opened Run's findings one workspace answer carries (V2-UX-REV-005, FIND-003): a cursor
+ * and the four filters of the results, each `null` for 全部. Filtering happens in the service so a page
+ * stays small; it is a view only and changes no finding, disposition or mark.
+ */
+export interface ReviewFindingPageRequest {
+  /** The last ordinal the previous page ended at; `null` starts at the first finding. */
+  findingsAfterOrdinal: number | null;
+  categoryId: string | null;
+  severity: ReviewFindingSeverity | null;
+  status: ReviewFindingStatus | null;
+  /** The chapter option (`ReviewChapterOptionProjection.blockId`) a finding falls in. */
+  chapterBlockId: string | null;
+}
+/** The optional keys an inspection of the 审阅 workspace may carry beside the Book and the Run. */
+export const REVIEW_FINDING_PAGE_KEYS = ['findingsAfterOrdinal', 'categoryId', 'severity', 'status', 'chapterBlockId'] as const satisfies
+  ReadonlyArray<keyof ReviewFindingPageRequest>;
+
+/**
+ * The inputs of the 审阅 operations (Issue #417, plan slice S69, Stage C). The Book is always the
+ * route's, never the renderer's: every renderer member takes the input without `bookId`, and the main
+ * process supplies the Book its window is showing.
+ */
+export interface InspectReviewWorkspaceInput extends Partial<ReviewFindingPageRequest> {
+  bookId: string;
+  /** The Review Run to open; `null` opens the latest. */
+  reviewRunId: string | null;
+}
+
+export interface PrepareReviewRunInput {
+  bookId: string;
+  categoryIds: ReadonlyArray<string>;
+  scope: ReviewRunScopeRequest;
+}
+
+export interface AuthorizeReviewRunInput {
+  bookId: string;
+  reviewRunId: string;
+  /** The exact plan digest of every Task-backed category of the Run; none for a Run of the leads alone. */
+  planDigests: ReadonlyArray<{ categoryId: string; planEnvelopeDigest: string }>;
+}
+
+/** 继续审阅: drive again a Run that stopped with categories never finished (after a restart). */
+export interface ContinueReviewRunInput {
+  bookId: string;
+  reviewRunId: string;
+}
+
+export interface RecordReviewFindingDispositionInput {
+  bookId: string;
+  reviewRunId: string;
+  findingId: string;
+  disposition: 'ignored';
+  reason: string;
+}
+
+export interface GenerateReviewReportInput {
+  bookId: string;
+  reviewRunId: string;
+}
+
+/** 查看任务 on a Mark Card: which Review Run a produced mark came from, asked within the route's Book. */
+export interface InspectReviewFindingOfMarkInput {
+  bookId: string;
+  markId: string;
+}
+
+/**
+ * The renderer's form of the mark lookup: the manuscript and branch the Mark Card was opened on are the
+ * capability its window holds, and the main process asks within that capability's Book.
+ */
+export interface InspectReviewFindingOfMarkRendererInput {
+  manuscriptId: string;
+  branchId: string;
+  markId: string;
+}
+
+/**
+ * The Review Run and finding a `review-category` mark belongs to — the latest Run naming it — so 查看任务
+ * opens that Run with `inspectReviewWorkspace`. The lookup answers `null` for any other mark, and for a
+ * mark of another Book.
+ */
+export interface ReviewFindingOfMarkProjection {
+  bookId: string;
+  reviewRunId: string;
+  findingId: string;
+}
+
 /** Every analysis projection, discriminated on `kind`. */
-export type AnalysisProjection = BaselineAnalysisProjection | FactualReviewProjection;
+export type AnalysisProjection = BaselineAnalysisProjection | FactualReviewProjection | ReviewCategoryProjection;
 
 export interface HistoricalRevisionProjection {
   mode: 'historical-revision';
@@ -3164,12 +4025,17 @@ export interface DurableHistoryProjection {
 
 export interface ServiceJobProjection {
   jobId: string;
+  /**
+   * `review-run-preparation` prepares a Review Run: each selected Task-backed category's plan, one per
+   * step, then the Run itself; `progress` counts the categories' plans plus the Run, and the completed
+   * job's result is the 审阅 workspace with the prepared Run open.
+   */
   kind: 'search' | 'replacement' | 'reimport-preparation' | 'reimport-resolution' | 'reimport-commit' |
-    'task-authorization-preparation' | 'baseline-analysis-preparation';
+    'task-authorization-preparation' | 'baseline-analysis-preparation' | 'review-run-preparation';
   state: 'queued' | 'running' | 'completed' | 'cancelled' | 'failed';
   progress: { completed: number; total: number; label: string };
   result: SearchSummaryProjection | ReplacementPreviewProjection | ReviewBeforeManuscriptReimportProjection |
-    ManuscriptReimportCommitProjection | TaskAuthorizationProjection | BaselineAnalysisProjection | null;
+    ManuscriptReimportCommitProjection | TaskAuthorizationProjection | BaselineAnalysisProjection | ReviewWorkspaceProjection | null;
   failure: null | { code: string; message: string };
 }
 
@@ -3472,6 +4338,19 @@ export interface ServiceOperationMap {
     input: { bookId: string; taskIntentId: string; planEnvelopeDigest: string };
     output: BaselineAnalysisProjection;
   };
+  /**
+   * 审阅 (Issue #417, plan slice S69). The workspace is one read; preparing a Review Run is a
+   * cooperative job; the one approval records the Run's authorization and starts its drive loop at once,
+   * so the answer already reads the Run `running`; 继续审阅 drives a stopped Run again. A finding's
+   * decisions other than 忽略并说明 go through the mark and Apply operations with the finding's `markId`.
+   */
+  inspectReviewWorkspace: { input: InspectReviewWorkspaceInput; output: ReviewWorkspaceProjection };
+  prepareReviewRun: { input: PrepareReviewRunInput; output: ServiceJobProjection };
+  authorizeReviewRun: { input: AuthorizeReviewRunInput; output: ReviewWorkspaceProjection };
+  continueReviewRun: { input: ContinueReviewRunInput; output: ReviewWorkspaceProjection };
+  recordReviewFindingDisposition: { input: RecordReviewFindingDispositionInput; output: ReviewWorkspaceProjection };
+  generateReviewReport: { input: GenerateReviewReportInput; output: ReviewWorkspaceProjection };
+  inspectReviewFindingOfMark: { input: InspectReviewFindingOfMarkInput; output: ReviewFindingOfMarkProjection | null };
   listBooks: {
     input: { after: BookSummaryCursor | null };
     output: BookSummaryPageProjection;
@@ -3566,8 +4445,8 @@ export interface ServiceOperationMap {
   recordChangeSuggestionDecision: { input: RecordChangeSuggestionDecisionInput; output: EditorialMarkCommandProjection };
   recordProposalDecisionReason: { input: RecordProposalDecisionReasonInput; output: EditorialMarkCommandProjection };
   /**
-   * AI7 Apply for Change Suggestions (Issue #408). The batch form has no renderer member yet: its
-   * confirmation strip belongs to 审阅's results, and until that surface exists only the service runs it.
+   * AI7 Apply for Change Suggestions (Issue #408). The batch form is 确认应用 on 审阅's confirmation
+   * strip (Issue #417): one Effect over exactly the suggestions the strip named, all or none.
    */
   applyChangeSuggestion: { input: ApplyChangeSuggestionInput; output: ManuscriptApplyCommandProjection };
   applyChangeSuggestionBatch: { input: ApplyChangeSuggestionBatchInput; output: ManuscriptApplyCommandProjection };
@@ -3734,6 +4613,21 @@ export interface RendererApi {
   inspectBaselineAnalysis(input?: { revisionId: string | null }): Promise<BaselineAnalysisProjection>;
   prepareBaselineAnalysis(input: { goal: BaselineAnalysisGoal; update: BaselineAnalysisUpdateRequest | null; reconfirm: boolean }): Promise<ServiceJobProjection>;
   authorizeBaselineAnalysis(input: { taskIntentId: string; planEnvelopeDigest: string }): Promise<BaselineAnalysisProjection>;
+  /**
+   * 审阅 of the Book the window is showing (Issue #417). Inspecting without a Run opens the latest; a
+   * running Run is followed by inspecting it again, and its executing category carries its progress.
+   */
+  inspectReviewWorkspace(input?: Omit<InspectReviewWorkspaceInput, 'bookId'>): Promise<ReviewWorkspaceProjection>;
+  /** 先看计划: a `review-run-preparation` job, followed with `pollServiceJob` and stopped with `cancelServiceJob`. */
+  prepareReviewRun(input: Omit<PrepareReviewRunInput, 'bookId'>): Promise<ServiceJobProjection>;
+  /** 授权并开始审阅: the one approval; the Run is already being driven when the answer arrives. */
+  authorizeReviewRun(input: Omit<AuthorizeReviewRunInput, 'bookId'>): Promise<ReviewWorkspaceProjection>;
+  continueReviewRun(input: Omit<ContinueReviewRunInput, 'bookId'>): Promise<ReviewWorkspaceProjection>;
+  /** 忽略并说明; every other decision on a finding is the mark and Apply operations' with its `markId`. */
+  recordReviewFindingDisposition(input: Omit<RecordReviewFindingDispositionInput, 'bookId'>): Promise<ReviewWorkspaceProjection>;
+  generateReviewReport(input: Omit<GenerateReviewReportInput, 'bookId'>): Promise<ReviewWorkspaceProjection>;
+  /** 查看任务 on a Mark Card: the Run a `review-category` mark came from, `null` for any other mark. */
+  inspectReviewFindingOfMark(input: InspectReviewFindingOfMarkRendererInput): Promise<ReviewFindingOfMarkProjection | null>;
   listBooks(input: ServiceOperationMap['listBooks']['input']): Promise<BookSummaryPageProjection>;
   prepareNewBookReview(input: ServiceOperationMap['prepareNewBookReview']['input']): Promise<ReviewBeforeImportProjection>;
   commitNewBookImport(input: CommitNewBookRendererInput): Promise<ManuscriptImportCommitProjection>;
@@ -3755,6 +4649,8 @@ export interface RendererApi {
   recordChangeSuggestionDecision(input: RecordChangeSuggestionDecisionInput): Promise<EditorialMarkCommandProjection>;
   recordProposalDecisionReason(input: RecordProposalDecisionReasonInput): Promise<EditorialMarkCommandProjection>;
   applyChangeSuggestion(input: ApplyChangeSuggestionInput): Promise<ManuscriptApplyCommandProjection>;
+  /** 确认应用 on 审阅's batch confirmation strip: one Effect over exactly the suggestions the strip listed. */
+  applyChangeSuggestionBatch(input: ApplyChangeSuggestionBatchInput): Promise<ManuscriptApplyCommandProjection>;
   reverseAppliedChangeSuggestion(input: ReverseAppliedChangeSuggestionInput): Promise<ManuscriptApplyCommandProjection>;
   getManuscriptApplyOutcome(input: ServiceOperationMap['getManuscriptApplyOutcome']['input']): Promise<ManuscriptApplyOutcomeProjection>;
   getManuscriptRail(input: ServiceOperationMap['getManuscriptRail']['input']): Promise<ManuscriptRailProjection>;

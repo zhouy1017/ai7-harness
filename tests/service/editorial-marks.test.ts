@@ -4,7 +4,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import {
-  MANUSCRIPT_EFFECT_SCHEMA_VERSION,
+  EDITORIAL_REVIEW_SCHEMA_VERSION,
   MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION,
 } from '../../src/service/task-authorization.js';
 import { graphemesOf } from '../../src/shared/mark-anchor.js';
@@ -19,6 +19,8 @@ import {
   composeManuscriptDocx,
   type ComposedManuscriptRequest,
 } from '../support/composed-fixture.js';
+import { downgradeKindCoupledRelationsToRevision23 } from '../support/analysis-ledger-revisions.js';
+import { REVIEW_RUN_RELATIONS_DROP_ORDER } from '../support/review-categories.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 
 // Service-integration suite (L2) for Editorial Marks (Issue #407). It drives the real `EditorialStore`
@@ -28,7 +30,11 @@ import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-d
 
 const EXCERPT: ComposedManuscriptRequest = { source: ADMITTED_BASELINE_DOCX, startBlock: 1, blocks: 40, title: '标记组稿' };
 const NOTE_SENTINEL = '仅编辑可见的备注哨兵文本';
-const MARK_RELATIONS = ['manuscript_effect_receipts', 'manuscript_effect_dispatches', 'manuscript_effect_approvals', 'manuscript_effect_targets', 'manuscript_effect_intents', 'proposal_decision_reasons', 'proposal_item_decisions', 'proposal_change_items', 'editorial_mark_replies', 'editorial_marks'];
+const MARK_RELATIONS = [
+  // Revision 24's Review Run relations refer to the marks, so a store taken back below them loses them first.
+  ...REVIEW_RUN_RELATIONS_DROP_ORDER,
+  'manuscript_effect_receipts', 'manuscript_effect_dispatches', 'manuscript_effect_approvals', 'manuscript_effect_targets', 'manuscript_effect_intents', 'proposal_decision_reasons', 'proposal_item_decisions', 'proposal_change_items', 'editorial_mark_replies', 'editorial_marks',
+];
 
 let roots: ServiceTestRoots;
 
@@ -511,6 +517,9 @@ describe('Editorial Marks on a manuscript', () => {
     }
     const downgrade = new DatabaseSync(databasePath);
     try {
+      // A revision-21 store carried the three kind-coupled analysis relations as revision 20 left them;
+      // revision 24 (Issue #417) validates exactly that before it rebuilds them.
+      downgradeKindCoupledRelationsToRevision23(downgrade);
       downgrade.exec(`BEGIN IMMEDIATE;
         ${MARK_RELATIONS.map((relation) => `DROP TABLE ${relation};`).join('\n')}
         PRAGMA user_version = ${MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION};
@@ -534,7 +543,7 @@ describe('Editorial Marks on a manuscript', () => {
     }
     const after = new DatabaseSync(databasePath, { readOnly: true });
     try {
-      expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(MANUSCRIPT_EFFECT_SCHEMA_VERSION);
+      expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(EDITORIAL_REVIEW_SCHEMA_VERSION);
       expect(after.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
     } finally {
       after.close();

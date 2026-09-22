@@ -38,12 +38,21 @@ const REUSE_PLAN_SCHEMA = 'ai7.baseline-manuscript-analysis.reuse-plan/1';
 /** Every button the settled card may carry: navigation, the three update controls, history, the plan-revision controls, and the hidden cancel. */
 // Synchronized delta (#406): ②A's tabs, the four sentences' shortcuts to the tab their next action is
 // taken on, and each update mode's own button with the two ways to begin behind it.
+// Synchronized delta with Issue #417: 可信程度's pointer at 审阅 is a working `打开审阅` now (V2-UX-REV-011).
 const ANALYSIS_ACTIONS = ['return-to-range', 'sync-current', 'reanalyze-range', 'reanalyze-book', 'open-revision', 'close-revision', 'cancel-preparation', 'view-plan-revision', 'reconfirm-plan',
-  'select-tab', 'go-history', 'go-chapters', 'choose-sync-current', 'choose-reanalyze-range', 'choose-reanalyze-book', 'quick-sync-current', 'quick-reanalyze-range', 'quick-reanalyze-book'];
+  'select-tab', 'go-history', 'go-chapters', 'choose-sync-current', 'choose-reanalyze-range', 'choose-reanalyze-book', 'quick-sync-current', 'quick-reanalyze-range', 'quick-reanalyze-book',
+  'open-review'];
 // Synchronized delta with Issue #408: the renderer now carries exactly one Apply surface — AI7 Apply for
 // a Change Suggestion on the manuscript — and the analysis still gains none. Anything else named like an
 // execution, effect, apply or export member remains a failure here.
-const CHANGE_SUGGESTION_APPLY_MEMBERS = ['applyChangeSuggestion', 'getManuscriptApplyOutcome'];
+// Synchronized delta with Issue #417: the batch confirmation strip of 审阅's results gives the batch
+// Apply its renderer member, `applyChangeSuggestionBatch` — 确认应用 over exactly the suggestions the
+// strip listed, one Effect, all or none. It is the same Apply surface, so it joins this allow-list.
+const CHANGE_SUGGESTION_APPLY_MEMBERS = ['applyChangeSuggestion', 'applyChangeSuggestionBatch', 'getManuscriptApplyOutcome'];
+// Synchronized delta with Issue #417: 审阅's seven members. None is named like an execution, effect,
+// apply or export member, so the two pins below hold them without an exception.
+const REVIEW_MEMBERS = ['inspectReviewWorkspace', 'prepareReviewRun', 'authorizeReviewRun', 'continueReviewRun',
+  'recordReviewFindingDisposition', 'generateReviewReport', 'inspectReviewFindingOfMark'];
 const ONLY_ANALYSIS_ACTIONS = `Array.from(card.querySelectorAll('button')).every((button)=>${JSON.stringify(ANALYSIS_ACTIONS)}.includes(button.dataset.analysisAction))`;
 /** The 分析 destination's own persistent actions, in the order it builds them (#406, V2-UX-LAYER-005). */
 const ANALYSIS_DESTINATION_ACTIONS = ['打开稿件', '工作概览'];
@@ -88,7 +97,11 @@ function sha256Hex(text) {
 }
 /** The four typed cross-unit finding kinds; this fixture reports the two the deterministic pass cannot reach. */
 const CROSS_UNIT_FINDING_KINDS = ['contradiction', 'continuity-break', 'alias-identity-divergence', 'chronology-conflict'];
-/** The Decision Layer's label for every conflict kind this fixture reports, keyed by the reducer token the record keeps. */
+/**
+ * The Decision Layer's label for every conflict kind this fixture reports, keyed by the reducer token the
+ * record keeps. Synchronized delta with Issue #417: ②A no longer lists the conflicts; these are the words
+ * a lead 批注 of 审阅's 情节逻辑与前后一致 names its kind in (`【线索 · <label>】`), for the 审阅 stages.
+ */
 const CONFLICT_KIND_LABELS = {
   'unit-reported': '单元内报告',
   'alias-collision': '别名冲突',
@@ -100,6 +113,10 @@ const FIXTURE_IDENTITY = 'sample1-baseline-one-unit-failure';
 const FIXTURE_BASE_IDENTITY = 'sample1-baseline-happy';
 /** The Issue #48 variant: unit 5's first attempt answers a transient PROVIDER_ERROR 503; layered over the one-unit-failure fixture. */
 const RETRY_FIXTURE_IDENTITY = 'sample1-baseline-transient-retry';
+// The authored review fixture (Issue #417) layers over the transient-retry fixture: one launch answers
+// every request the earlier stages froze and the review categories' requests over the manuscript as this
+// Journey leaves it — both of its edits in the first block.
+const REVIEW_FIXTURE_IDENTITY = 'sample1-review-authored';
 /** The material fields of the Plan Boundary Split, in the order the canonical envelope lists them. */
 const PLAN_MATERIAL_FIELDS = [
   'providerBinding.providerId', 'providerBinding.modelId', 'providerBinding.adapterRevision', 'providerBinding.configurationRevision', 'providerBinding.credentialReference',
@@ -306,9 +323,9 @@ async function recoverSyntheticCredentialCleanupState(dataRoot, runRoot) {
     database.exec('PRAGMA query_only = ON;');
     // Synchronized delta with Issue #467: this reads the same Agent Data Root store J-03 and J-12
     // read, so the pin moves with the terminal version the service stamps
-    // (`MANUSCRIPT_EFFECT_SCHEMA_VERSION` since Issue #408). It read 19 until #467 — one revision
+    // (`EDITORIAL_REVIEW_SCHEMA_VERSION` since Issue #417). It read 19 until #467 — one revision
     // behind, because only a failed product cleanup reaches this fallback, so revision 20 never met it.
-    requireJourney(database.prepare('PRAGMA user_version').get()?.user_version === 23, 'credential-cleanup-metadata-version');
+    requireJourney(database.prepare('PRAGMA user_version').get()?.user_version === 24, 'credential-cleanup-metadata-version');
     const rows = database.prepare(
       `SELECT connection_id, role_id, provider_id, model_id, adapter_revision, configuration_revision,
               approved_fallback_chain, credential_slot, credential_reference, credential_operation_state
@@ -456,6 +473,21 @@ async function startUpdate(renderer, mode, label, name) {
     plan.click();
     return true;
   })()`, name);
+}
+
+/**
+ * Reach 审阅 the way an editor does from the manuscript: the 工作 group's entry (Issue #417,
+ * editor-surfaces §0.3 — 审阅 is 工作, not 资料与记录). The destination answers with its card once the
+ * workspace has been read.
+ */
+async function openReviewDestination(renderer, name) {
+  await assertRenderer(renderer, `(() => { const group=document.querySelector('.editor-shell nav.book-work-group[aria-label="工作"]'); const button=group?.querySelector('button[data-work-destination="review"]'); if(!(button instanceof HTMLButtonElement)||button.disabled||button.textContent!=='审阅')return false; button.click(); return true; })()`, `${name}-entry`);
+  await waitFor(renderer, `document.querySelector('[data-screen="book-review"] .book-review .review-workspace-card')`, `${name}-card`);
+}
+
+/** Press one 审阅 action by its data attribute, refusing one that is missing or disabled. */
+async function reviewAction(renderer, selector, name) {
+  await assertRenderer(renderer, `(() => { const button=document.querySelector(${JSON.stringify(selector)}); if(!(button instanceof HTMLButtonElement)||button.disabled)return false; button.click(); return true; })()`, name);
 }
 
 async function click(renderer, label, name) {
@@ -926,7 +958,8 @@ async function main() {
     at('renderer-analysis-api');
     await assertRenderer(renderer, `typeof window.ai7.inspectBaselineAnalysis==='function' &&
       typeof window.ai7.prepareBaselineAnalysis==='function' &&
-      typeof window.ai7.authorizeBaselineAnalysis==='function'`, 'renderer-analysis-api');
+      typeof window.ai7.authorizeBaselineAnalysis==='function' &&
+      ${JSON.stringify(REVIEW_MEMBERS)}.every((key)=>typeof window.ai7[key]==='function')`, 'renderer-analysis-api');
     at('renderer-zero-execution-api');
     await assertRenderer(renderer, `!Object.keys(window.ai7).some((key)=>/provider|session|scheduler|payload|egress/i.test(key))`, 'renderer-zero-execution-api');
 
@@ -1144,7 +1177,8 @@ async function main() {
         card.querySelectorAll('[data-analysis-axis]').length===4 && axis('coverage')==='partial' && axis('reducer-closure')==='closed-with-gaps' &&
         axis('freshness')==='current' && axis('assurance')==='qualified-with-open-conflicts' &&
         card.querySelectorAll('[data-analysis-gap-unit]').length===1 && card.querySelector('[data-analysis-gap-unit="2"][data-analysis-gap-code="adapter-failure"]')!==null &&
-        card.querySelectorAll('[data-analysis-conflict-kind]').length===4 && card.querySelector('[data-analysis-conflict-kind="alias-collision"]')!==null &&
+        !card.querySelector('.analysis-conflict-list, .analysis-unresolved-list, [data-analysis-conflict-kind]') &&
+        card.querySelector('[data-analysis-axis="assurance"] button[data-analysis-action="open-review"]')?.textContent==='打开审阅' &&
         card.querySelectorAll('[data-analysis-unit]').length===${SAMPLE1_UNITS} && card.querySelector('[data-analysis-unit="2"][data-analysis-unit-state="gap"]')!==null &&
         card.querySelectorAll('[data-analysis-unit][data-analysis-unit-state="closed"]').length===${SAMPLE1_UNITS - 1} &&
         card.textContent.includes(${JSON.stringify(ASSURANCE_STATEMENT)}) && card.textContent.includes(${JSON.stringify(revision.revisionId)}) &&
@@ -1162,6 +1196,9 @@ async function main() {
     // layer of 梗概 carries no block identifier, digest or unit name; the technical layer, closed, still
     // carries every exact value the assertion above pins. It stays inside `result-set-revision`:
     // reading the settled revision's own surface is what that stage already is.
+    // Synchronized delta with Issue #417 (V2-UX-REV-011): the leads are listed in neither layer any more —
+    // 审阅's 情节逻辑与前后一致 makes each one a 批注 — and ②A keeps their counts: the card's
+    // data-conflict-count, the 可信程度 sentence, the technical assurance row, and a working 打开审阅.
     const leads = revision.assurance.unresolvedConflictCount + revision.assurance.crossUnitFindingCount;
     await assertRenderer(renderer, `(() => {
       const card=document.querySelector('.baseline-analysis-card');
@@ -1187,7 +1224,9 @@ async function main() {
         decision.querySelector('.analysis-synopsis')?.textContent===${JSON.stringify(revision.synthesis.synopsis)} &&
         !/blk_|[0-9a-f]{64}/u.test(decision.textContent) && !/单元|Revision|归约|reducer|摘要/u.test(axes.map((axis)=>axis.textContent).join('')) &&
         !decision.querySelector('.analysis-conflict-list, .analysis-unresolved-list, [data-analysis-conflict-kind]') &&
-        technical.querySelectorAll('[data-analysis-conflict-kind]').length===${revision.conflicts.length} &&
+        !technical.querySelector('.analysis-conflict-list, .analysis-unresolved-list, [data-analysis-conflict-kind]') &&
+        technical.textContent.includes(${JSON.stringify(`${revision.assurance.unresolvedConflictCount} 处未解决冲突 · ${revision.assurance.unresolvedItemCount} 项未解决事项`)}) &&
+        axes.find((axis)=>axis.dataset.analysisAxis==='assurance')?.querySelector('button[data-analysis-action="open-review"]')?.textContent==='打开审阅' &&
         technical.textContent.includes(${JSON.stringify(revision.digest)}) && technical.textContent.includes(${JSON.stringify(revision.coverageManifestDigest)}) &&
         card.querySelectorAll('[data-analysis-panel="chapters"] [data-analysis-unit] > h5').length===${SAMPLE1_UNITS} &&
         card.querySelector('[data-analysis-panel="chapters"] [data-analysis-unit="2"] .attention-note')?.textContent.startsWith('尚未分析：') &&
@@ -1212,40 +1251,31 @@ async function main() {
       return moved && document.activeElement===first && card.dataset.analysisTab==='synopsis';
     })()`, 'analysis-tabs-keyboard');
 
-    // V2-UX-LAYER-006 and 008 on the card's two provenance lists (#333). The Decision Layer reads an
-    // entity's provenance as its units and a block count and a conflict's as its kind in the editor's
-    // language, so no identifier wall interrupts either list; the exact ranges are still carried,
-    // unabridged, in the one disclosure each list closes with, and the reducer's token still rides on
-    // the entry where the record and every other assertion read it.
+    // V2-UX-LAYER-006 and 008 on the card's provenance lists (#333). The Decision Layer reads an entity's
+    // provenance as its units and a block count, so no identifier wall interrupts the list; the exact
+    // ranges are still carried, unabridged, in the one disclosure the list closes with. Synchronized
+    // delta with Issue #417 (V2-UX-REV-011): the conflict list this assertion also read is gone from ②A —
+    // each conflict is a lead 批注 of 审阅's 情节逻辑与前后一致 now, whose body names its kind in the
+    // same CONFLICT_KIND_LABELS words — so only the entity half remains here.
     const provenanceEntity = revision.synthesis.entities.find((entity) => entity.sourceRanges.length > 0);
     const provenanceBlockId = provenanceEntity?.sourceRanges[0]?.blockId;
     const provenanceUnits = [...new Set(provenanceEntity?.unitOrdinals ?? [])].sort((left, right) => left - right).join('、');
     const provenanceBlocks = new Set((provenanceEntity?.sourceRanges ?? []).map((range) => range.blockId)).size;
-    const conflictBlockId = revision.conflicts[0]?.sourceRanges[0]?.blockId;
-    requireJourney(provenanceEntity !== undefined && provenanceUnits.length > 0 && conflictBlockId !== undefined,
+    requireJourney(provenanceEntity !== undefined && provenanceUnits.length > 0 && revision.conflicts.length > 0,
       'provenance-projection', { entity: provenanceEntity, conflict: revision.conflicts[0] });
     await assertRenderer(renderer, `(() => {
       const card=document.querySelector('.baseline-analysis-card');
-      const labels=${JSON.stringify(CONFLICT_KIND_LABELS)};
       const entityList=card?.querySelector('[data-analysis-panel="entities"] .analysis-entity-list');
       const entity=Array.from(entityList?.children??[]).find((item)=>item.textContent.startsWith(${JSON.stringify(`${provenanceEntity.name}（`)}));
       const entityExact=entityList?.nextElementSibling;
-      const conflictList=card?.querySelector('.analysis-conflict-list');
-      const conflicts=Array.from(conflictList?.children??[]);
-      const conflictExact=conflictList?.nextElementSibling;
-      if(!(entity instanceof HTMLElement) || conflicts.length!==4) return false;
-      if(!(entityExact instanceof HTMLDetailsElement) || !(conflictExact instanceof HTMLDetailsElement)) return false;
+      if(!(entity instanceof HTMLElement) || !(entityExact instanceof HTMLDetailsElement)) return false;
       return entity.querySelector('span')?.textContent.trimEnd().endsWith(${JSON.stringify(`）· 来自单元 ${provenanceUnits} · ${provenanceBlocks} 个内容块`)}) &&
         !entity.textContent.includes('person') && entity.textContent.includes('（') &&
-        !entityList.textContent.includes('blk_') && !conflictList.textContent.includes('blk_') &&
-        conflictList.closest('details.analysis-revision-technical')?.open===false &&
-        !entityExact.open && !conflictExact.open &&
-        entityExact.querySelector('dl > dd.technical-identity')!==null && conflictExact.querySelector('dl > dd.technical-identity')!==null &&
-        entityExact.textContent.includes(${JSON.stringify(provenanceBlockId)}) && conflictExact.textContent.includes(${JSON.stringify(conflictBlockId)}) &&
-        conflicts.every((item)=>typeof labels[item.dataset.analysisConflictKind]==='string' &&
-          item.textContent.startsWith(labels[item.dataset.analysisConflictKind]) &&
-          !item.textContent.includes(item.dataset.analysisConflictKind));
-    })()`, 'analysis-provenance-and-conflict-label-surface');
+        !entityList.textContent.includes('blk_') && !entityExact.open &&
+        entityExact.querySelector('dl > dd.technical-identity')!==null &&
+        entityExact.textContent.includes(${JSON.stringify(provenanceBlockId)}) &&
+        !card.querySelector('.analysis-conflict-list, [data-analysis-conflict-kind]');
+    })()`, 'analysis-provenance-surface');
 
     // V2-UX-LAYER-005, asserted where the rule is hardest to keep: the settled result set is the
     // longest thing this workbench ever renders, and the workbench's own way out must survive it. The
@@ -2229,6 +2259,107 @@ async function main() {
       afterEdit.checkpoint?.revisionId === settledDrift.checkpoint.revisionId,
     'plan-revision-edit-unchanged', { planVersions: afterEdit?.planVersions, freshness: afterEdit?.resultSetRevision?.freshness, nextSequence });
     await assertRenderer(renderer, `(() => { const card=document.querySelector('.baseline-analysis-card'); return card?.dataset.planVersion==='2' && card.dataset.planVersionCount==='2' && card.dataset.planRevisionPending==='false' && card.dataset.planEnvelopeDigest===${JSON.stringify(v2Digest)} && card.dataset.freshnessState==='stale' && card.dataset.resultRevisionOrdinal==='6'; })()`, 'plan-revision-edit-surface');
+    cancellation.throwIfRequested();
+
+    // ---- 审阅 (Issue #417, plan slice S69; editor-surfaces §4; V2-UX-REV-001 to REV-013, MARK-010) ----
+    at('review-relaunch');
+    await closeOwnedBrowser();
+    cancellation.throwIfRequested();
+    modelAdapterIdentity = REVIEW_FIXTURE_IDENTITY;
+    await launchForCleanup();
+    await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'review-ready');
+    await assertRenderer(renderer, `(() => { const button=document.querySelector('button[data-book-id=${JSON.stringify(imported.bookId)}]'); if(!(button instanceof HTMLButtonElement))return false; button.click(); return true; })()`, 'review-open-book');
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(imported.bookId)}]')`, 'review-open-book-manuscript');
+
+    at('review-destination');
+    await openReviewDestination(renderer, 'review-destination');
+    // Nothing reviewed yet: every category the model reads is 未审阅, and the two whose basis does not exist
+    // yet are 不可用 with their reason (V2-UX-REV-007, REV-013).
+    await assertRenderer(renderer, `(() => { const rows=Array.from(document.querySelectorAll('table.review-coverage tbody tr[data-review-category]')); const state=Object.fromEntries(rows.map((row)=>[row.dataset.reviewCategory, row.dataset.coverage])); return rows.length===9 && document.querySelector('.review-workspace-card')?.dataset.reviewState==='empty' && state['series-consistency']==='unavailable' && state['cross-deliverable-consistency']==='unavailable' && ['typos-and-usage','style-and-format','academic-integrity','publication-risk','literary-expression'].every((id)=>state[id]==='never'); })()`, 'review-coverage-never');
+
+    at('review-sheet');
+    await reviewAction(renderer, '[data-review-action="new-review"]', 'review-new');
+    await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open===true`, 'review-sheet-open');
+    // Nine categories and none preselected, the unavailable two saying why; four scopes and none
+    // preselected; the four consequence lines; the quick start waits for a Default Execution Rule.
+    await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); const boxes=Array.from(sheet.querySelectorAll('input[type=checkbox][name="review-category"]')); const scopes=Array.from(sheet.querySelectorAll('input[name="review-scope"]')); const disabled=boxes.filter((box)=>box.disabled); const quick=sheet.querySelector('[data-review-action="quick-start"]'); const terms=Array.from(sheet.querySelectorAll('dl.review-consequences dt')).map((term)=>term.textContent); return boxes.length===9 && boxes.every((box)=>!box.checked) && JSON.stringify(disabled.map((box)=>box.value).sort())===JSON.stringify(['cross-deliverable-consistency','series-consistency']) && disabled.every((box)=>(box.dataset.unavailableReason??'').length>0) && scopes.length===4 && scopes.every((scope)=>!scope.checked) && quick instanceof HTMLButtonElement && quick.disabled && (sheet.querySelector('.review-quick-start-reason')?.textContent??'').includes('快速开始默认') && JSON.stringify(terms)===JSON.stringify(['会读取','会发送','不会做','费用']); })()`, 'review-sheet-contract');
+
+    at('review-prepare');
+    await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); for (const id of ['typos-and-usage','style-and-format','plot-consistency']) { const box=sheet.querySelector('input[name="review-category"][value="'+id+'"]'); if(!(box instanceof HTMLInputElement)||box.disabled)return false; box.click(); } const whole=sheet.querySelector('input[name="review-scope"][value="whole"]'); if(!(whole instanceof HTMLInputElement)||whole.disabled)return false; whole.click(); const prepare=sheet.querySelector('[data-review-action="prepare"]'); if(!(prepare instanceof HTMLButtonElement)||prepare.disabled)return false; prepare.click(); return true; })()`, 'review-prepare-start');
+    await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState==='prepared' && document.querySelectorAll('section.review-plan[data-review-category]').length===3`, 'review-prepared', 120_000);
+    // One plan per category — the leads read the baseline and freeze no model plan — and one authorization
+    // for the whole Review Run.
+    await assertRenderer(renderer, `(() => { const plans=Array.from(document.querySelectorAll('section.review-plan[data-review-category]')); return JSON.stringify(plans.map((plan)=>plan.dataset.reviewCategory))===JSON.stringify(['typos-and-usage','style-and-format','plot-consistency']) && plans.filter((plan)=>(plan.dataset.planEnvelopeDigest??'').length===64).length===2 && document.querySelectorAll('[data-review-action="authorize"]').length===1 && document.querySelector('dialog.review-sheet')?.open!==true; })()`, 'review-plans');
+
+    at('review-authorize');
+    await reviewAction(renderer, '[data-review-action="authorize"]', 'review-authorize-click');
+    await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState==='settled'`, 'review-settled', 180_000);
+    const reviewed = await renderer.evaluate(`window.ai7.inspectReviewWorkspace()`);
+    const reviewedCategories = reviewed?.run?.categories ?? [];
+    // Each category settled on its own; a quotation that could not be anchored stays out of the marks, and
+    // every other finding of a model-read category became a mark on the manuscript (V2-UX-REV-008, MARK-010).
+    requireJourney(reviewed?.run?.state === 'settled' &&
+      reviewedCategories.map((category) => `${category.categoryId}:${category.state}`).join('|') === 'typos-and-usage:settled|style-and-format:settled|plot-consistency:settled' &&
+      reviewedCategories[0].findingsCount > 0 && reviewedCategories[0].excludedCount === 2 && reviewedCategories[1].findingsCount > 0 && reviewedCategories[1].excludedCount === 1 &&
+      reviewed.run.findings.filter((finding) => finding.categoryId !== 'plot-consistency').every((finding) => finding.markId !== null && finding.status === 'pending') &&
+      reviewed.run.findings.filter((finding) => finding.categoryId === 'typos-and-usage').every((finding) => finding.output === 'change-suggestion' && finding.replacement !== null),
+    'review-run-settled', { state: reviewed?.run?.state, categories: reviewedCategories.map((category) => [category.categoryId, category.state, category.findingsCount, category.excludedCount]) });
+    await assertRenderer(renderer, `document.querySelectorAll('ol.review-progress > li[data-category-state="settled"]').length===3 && document.querySelectorAll('section.review-group[data-review-category]').length>=2`, 'review-groups');
+
+    at('review-marks-on-manuscript');
+    // A finding of 审阅 is the mark on the manuscript: 回到原文 opens the text at it with its card, which
+    // names the category that produced it (MARK-008, MARK-010).
+    const typosFinding = reviewed.run.findings.find((finding) => finding.categoryId === 'typos-and-usage' && finding.markId !== null);
+    requireJourney(typosFinding !== undefined, 'review-typos-finding-marked');
+    await reviewAction(renderer, `article.review-finding[data-finding-id="${typosFinding.findingId}"] [data-review-action="go-to-text"]`, 'review-go-to-text');
+    await waitFor(renderer, `document.querySelector('[data-testid="manuscript-editor"] [data-mark-id="${typosFinding.markId}"]')?.dataset.markSource==='ai7' && (document.querySelector('[data-mark-card]')?.textContent??'').includes('AI7 · 审阅「错别字与规范用语」')`, 'review-mark-and-card', 30_000);
+    await openReviewDestination(renderer, 'review-destination-again');
+    await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState==='settled'`, 'review-destination-again-settled');
+
+    at('review-batch-apply');
+    // 错别字与规范用语 in one confirmation: the strip states the exact write scope before 确认应用, and one
+    // Effect writes every listed suggestion (V2-UX-REV-006, PDEC-012, EAPP-003).
+    const beforeBatch = await renderer.evaluate(`window.ai7.inspectReviewWorkspace()`);
+    const batchable = beforeBatch.run.findings.filter((finding) => finding.categoryId === 'typos-and-usage' && finding.status === 'pending' && finding.markStatus === 'open' && finding.anchorState === 'exact');
+    requireJourney(batchable.length > 1, 'review-batch-candidates', { count: batchable.length });
+    await reviewAction(renderer, 'section.review-group[data-review-category="typos-and-usage"] [data-review-action="batch-prepare"]', 'review-batch-prepare');
+    await waitFor(renderer, `document.querySelector('section.review-batch-strip[data-review-category="typos-and-usage"]')?.dataset.reviewBatchState==='ready'`, 'review-batch-ready');
+    await assertRenderer(renderer, `(() => { const strip=document.querySelector('section.review-batch-strip'); const count=Number(strip?.dataset.reviewBatchCount); return count===${batchable.length} && strip.querySelectorAll('ol.review-batch-items > li[data-finding-id]').length===count && (strip.querySelector('.review-batch-scope')?.textContent??'').startsWith('将把 '+count+' 条修改建议写入稿件') && strip.querySelector('[data-review-action="batch-confirm"]')?.textContent==='确认应用'; })()`, 'review-batch-scope');
+    await reviewAction(renderer, 'section.review-batch-strip [data-review-action="batch-confirm"]', 'review-batch-confirm');
+    await waitFor(renderer, `(() => { const ids=${JSON.stringify(batchable.map((finding) => finding.findingId))}; return ids.every((id)=>document.querySelector('article.review-finding[data-finding-id="'+id+'"]')?.dataset.status==='handled'); })()`, 'review-batch-handled', 60_000);
+    const afterBatch = await renderer.evaluate(`window.ai7.inspectReviewWorkspace()`);
+    requireJourney(afterBatch?.manuscript?.journalSequence === beforeBatch.manuscript.journalSequence + 1 &&
+      batchable.every((finding) => afterBatch.run.findings.find((after) => after.findingId === finding.findingId)?.markStatus === 'applied'),
+    'review-batch-one-effect', { before: beforeBatch.manuscript.journalSequence, after: afterBatch?.manuscript?.journalSequence });
+
+    at('review-ignore-with-reason');
+    // 忽略并说明 needs a reason, recorded as a Quality Signal, and the finding reads 已忽略 (V2-UX-REV-004).
+    const ignorable = afterBatch.run.findings.find((finding) => finding.categoryId === 'style-and-format' && finding.status === 'pending');
+    requireJourney(ignorable !== undefined, 'review-ignorable');
+    const ignoreReason = '体例由编辑部统一处理，这一处保留作者原样。';
+    await reviewAction(renderer, `article.review-finding[data-finding-id="${ignorable.findingId}"] [data-review-action="ignore"]`, 'review-ignore');
+    await assertRenderer(renderer, `(() => { const field=document.querySelector('article.review-finding[data-finding-id="${ignorable.findingId}"] textarea[data-review-field="ignore-reason"]'); if(!(field instanceof HTMLTextAreaElement))return false; field.value=${JSON.stringify(ignoreReason)}; field.dispatchEvent(new Event('input',{bubbles:true})); return true; })()`, 'review-ignore-reason');
+    await reviewAction(renderer, `article.review-finding[data-finding-id="${ignorable.findingId}"] [data-review-action="ignore-confirm"]`, 'review-ignore-confirm');
+    await waitFor(renderer, `document.querySelector('article.review-finding[data-finding-id="${ignorable.findingId}"]')?.dataset.status==='ignored'`, 'review-ignored');
+    const afterIgnore = await renderer.evaluate(`window.ai7.inspectReviewWorkspace()`);
+    const ignored = afterIgnore?.run?.findings?.find((finding) => finding.findingId === ignorable.findingId);
+    requireJourney(ignored?.status === 'ignored' && ignored.ignoreReason === ignoreReason && ignored.markStatus === 'removed', 'review-ignored-recorded', { status: ignored?.status, markStatus: ignored?.markStatus });
+
+    at('review-report');
+    // The versioned 审阅报告 with its four parts; export belongs to the deliverables (V2-UX-REV-009).
+    await reviewAction(renderer, '[data-review-action="generate-report"]', 'review-report-generate');
+    await waitFor(renderer, `document.querySelector('section.review-report')?.dataset.reportVersion==='1'`, 'review-report-version');
+    await assertRenderer(renderer, `(() => { const report=document.querySelector('section.review-report'); const parts=Array.from(report.querySelectorAll('section.review-report-part[data-report-part] > h6')).map((heading)=>heading.textContent); const exporter=report.querySelector('[data-review-action="export"]'); return JSON.stringify(parts)===JSON.stringify(['概览表','必须处理的事项','各类别摘要','附录']) && exporter instanceof HTMLButtonElement && exporter.disabled; })()`, 'review-report-parts');
+
+    at('review-coverage-moves');
+    // The batch wrote the manuscript, so what those two categories read is no longer the current text and
+    // both need review; the row offers only what changed (V2-UX-REV-007).
+    await assertRenderer(renderer, `(() => { const row=(id)=>document.querySelector('table.review-coverage tbody tr[data-review-category="'+id+'"]'); return row('typos-and-usage')?.dataset.coverage==='needs-review' && row('style-and-format')?.dataset.coverage==='needs-review' && row('typos-and-usage').querySelector('[data-review-action="rereview-changed"]')?.textContent==='只审改动过的章'; })()`, 'review-coverage-needs-review');
+
+    at('review-return-to-analysis');
+    await assertRenderer(renderer, `(() => { const button=Array.from(document.querySelectorAll('[data-screen="book-review"] .workbench-actions button')).find((item)=>item.textContent==='打开稿件'); if(!(button instanceof HTMLButtonElement)||button.disabled)return false; button.click(); return true; })()`, 'review-open-manuscript');
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(imported.bookId)}]')`, 'review-manuscript');
+    await openAnalysisDestination(renderer, 'review-return-analysis');
     cancellation.throwIfRequested();
 
     at('zero-activity');

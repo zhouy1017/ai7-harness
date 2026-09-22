@@ -6,8 +6,19 @@ import {
   MAX_EDIT_CODE_UNITS,
   MAX_MARK_BODY_CODE_UNITS,
   MAX_REPLACEMENT_EXCLUSIONS,
+  MAX_REVIEW_FINDING_REASON_CHARACTERS,
+  MAX_REVIEW_RUN_CATEGORIES,
   J03_TASK_GOAL,
+  REVIEW_FINDING_ID_PATTERN,
+  REVIEW_FINDING_PAGE_KEYS,
+  REVIEW_FINDING_SEVERITIES,
+  REVIEW_FINDING_STATUSES,
+  REVIEW_SCOPE_KINDS,
+  isReviewCategoryId,
   type BaselineAnalysisUpdateMode,
+  type ReviewFindingSeverity,
+  type ReviewFindingStatus,
+  type ReviewScopeKind,
   type ServiceRequest,
 } from '../shared/protocol.js';
 
@@ -47,6 +58,20 @@ function requireInput(value: unknown, keys: readonly string[], requestId: string
   return value;
 }
 
+/** Every required key, and nothing beyond them but the optional ones. */
+function requireInputWithOptional(value: unknown, required: readonly string[], optional: readonly string[], requestId: string): Record<string, unknown> {
+  if (!isRecord(value) || !required.every((key) => Object.hasOwn(value, key)) ||
+      !Object.keys(value).every((key) => required.includes(key) || optional.includes(key))) {
+    throw new ProtocolError(requestId);
+  }
+  return value;
+}
+
+/** An optional key is absent, `null`, or a value the check accepts. */
+function optionalOrNull(input: Record<string, unknown>, key: string, check: (value: unknown) => boolean): boolean {
+  return !Object.hasOwn(input, key) || input[key] === null || check(input[key]);
+}
+
 const MARK_BLOCK_PATTERN = /^blk_[0-9a-f]{24}$/;
 
 function validMarkBinding(input: Record<string, unknown>): boolean {
@@ -61,6 +86,37 @@ function validMarkKind(value: unknown): boolean {
 
 function validHighlightColor(value: unknown): boolean {
   return value === null || value === 1 || value === 2 || value === 3;
+}
+
+function validUuid(value: unknown): value is string {
+  return isBoundedString(value, 36) && UUID_PATTERN.test(value);
+}
+
+/** Distinct category identities, between `minimum` and the most one Review Run request names. */
+function validReviewCategoryIds(values: readonly unknown[], minimum: number): boolean {
+  return values.length >= minimum && values.length <= MAX_REVIEW_RUN_CATEGORIES &&
+    values.every((value) => isReviewCategoryId(value)) && new Set(values).size === values.length;
+}
+
+/** 选章 names its first and last chapter by each chapter's first block; every other scope names neither. */
+function validReviewRunScope(value: unknown): boolean {
+  if (!isRecord(value) || !hasExactKeys(value, ['kind', 'fromChapterBlockId', 'toChapterBlockId']) ||
+      !REVIEW_SCOPE_KINDS.includes(value.kind as ReviewScopeKind)) return false;
+  return value.kind === 'chapters'
+    ? isBoundedString(value.fromChapterBlockId, 28) && MARK_BLOCK_PATTERN.test(value.fromChapterBlockId) &&
+      isBoundedString(value.toChapterBlockId, 28) && MARK_BLOCK_PATTERN.test(value.toChapterBlockId)
+    : value.fromChapterBlockId === null && value.toChapterBlockId === null;
+}
+
+/**
+ * 忽略并说明's reason: not blank, and at most the reason's characters once trimmed. The raw text may
+ * carry the whitespace the store trims, so its own ceiling leaves room for that and for characters
+ * outside the Basic Multilingual Plane.
+ */
+function validReviewFindingReason(value: unknown): boolean {
+  if (!isBoundedString(value, MAX_REVIEW_FINDING_REASON_CHARACTERS * 4)) return false;
+  const reason = value.trim();
+  return reason.length > 0 && [...reason].length <= MAX_REVIEW_FINDING_REASON_CHARACTERS;
 }
 
 function validRecoverySelection(value: unknown): boolean {
@@ -321,6 +377,61 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
           !isBoundedString(input.planEnvelopeDigest, 64) || !HEX_DIGEST_PATTERN.test(input.planEnvelopeDigest)) {
         throw new ProtocolError(tentativeId);
       }
+      break;
+    }
+    // 审阅 (Issue #417). A Review Run is named by its identity within the route's Book; which categories
+    // exist, what a scope can read and whether a plan still stands are the store's to decide.
+    case 'inspectReviewWorkspace': {
+      // The Run to open, and — each optional, `null` or absent for none — the page cursor and the four
+      // filters of the results; a filter is a view and never names more than a Run already holds.
+      const input = requireInputWithOptional(value.input, ['bookId', 'reviewRunId'], REVIEW_FINDING_PAGE_KEYS, tentativeId);
+      if (!validUuid(input.bookId) || !(input.reviewRunId === null || validUuid(input.reviewRunId)) ||
+          !optionalOrNull(input, 'findingsAfterOrdinal', (after) => isSafeInteger(after, 1)) ||
+          !optionalOrNull(input, 'categoryId', isReviewCategoryId) ||
+          !optionalOrNull(input, 'severity', (severity) => REVIEW_FINDING_SEVERITIES.includes(severity as ReviewFindingSeverity)) ||
+          !optionalOrNull(input, 'status', (status) => REVIEW_FINDING_STATUSES.includes(status as ReviewFindingStatus)) ||
+          !optionalOrNull(input, 'chapterBlockId', (blockId) => isBoundedString(blockId, 28) && MARK_BLOCK_PATTERN.test(blockId))) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
+    case 'prepareReviewRun': {
+      const input = requireInput(value.input, ['bookId', 'categoryIds', 'scope'], tentativeId);
+      if (!validUuid(input.bookId) || !Array.isArray(input.categoryIds) || !validReviewCategoryIds(input.categoryIds, 1) ||
+          !validReviewRunScope(input.scope)) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
+    case 'authorizeReviewRun': {
+      // One exact plan digest per Task-backed category; a Run of the leads alone approves none.
+      const input = requireInput(value.input, ['bookId', 'reviewRunId', 'planDigests'], tentativeId);
+      if (!validUuid(input.bookId) || !validUuid(input.reviewRunId) || !Array.isArray(input.planDigests) ||
+          !input.planDigests.every((entry) => isRecord(entry) && hasExactKeys(entry, ['categoryId', 'planEnvelopeDigest']) &&
+            isBoundedString(entry.planEnvelopeDigest, 64) && HEX_DIGEST_PATTERN.test(entry.planEnvelopeDigest)) ||
+          !validReviewCategoryIds(input.planDigests.map((entry: Record<string, unknown>) => entry.categoryId), 0)) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
+    case 'continueReviewRun':
+    case 'generateReviewReport': {
+      const input = requireInput(value.input, ['bookId', 'reviewRunId'], tentativeId);
+      if (!validUuid(input.bookId) || !validUuid(input.reviewRunId)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'recordReviewFindingDisposition': {
+      const input = requireInput(value.input, ['bookId', 'reviewRunId', 'findingId', 'disposition', 'reason'], tentativeId);
+      if (!validUuid(input.bookId) || !validUuid(input.reviewRunId) ||
+          !isBoundedString(input.findingId, 28) || !REVIEW_FINDING_ID_PATTERN.test(input.findingId) ||
+          input.disposition !== 'ignored' || !validReviewFindingReason(input.reason)) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
+    case 'inspectReviewFindingOfMark': {
+      const input = requireInput(value.input, ['bookId', 'markId'], tentativeId);
+      if (!validUuid(input.bookId) || !validUuid(input.markId)) throw new ProtocolError(tentativeId);
       break;
     }
     case 'prepareNewBookReview': {

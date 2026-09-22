@@ -48,14 +48,23 @@ import { BASELINE_ANALYSIS_TASK_GOAL, J03_TASK_GOAL, MAX_REPLACEMENT_EXCLUSIONS 
 import { mountBoundedEditor, type BoundedEditor, type EditorContinuity } from './editor.js';
 import { mountEditorialMarks, type EditorialMarksSurface } from './editorial-marks.js';
 import { mountPositionRail, type PositionRail } from './position-rail.js';
+import { mountReviewWorkspace, type ReviewFocus, type ReviewWorkspaceSurface } from './review-workspace.js';
 import {
-  ANALYSIS_CONFLICT_KIND_LABELS,
+  REVIEW_ACTION_LABELS,
+  REVIEW_CARD_HEADING,
+  REVIEW_DESTINATION_ACTIONS,
+  REVIEW_ENTRY_LABEL,
+  REVIEW_STATUS_LINES,
+  REVIEW_WORK_GROUP_LABEL,
+  REVIEW_WORKSPACE_UNAVAILABLE,
+  reviewOverviewLine,
+} from './review-labels.js';
+import {
   ANALYSIS_ENTITY_KIND_LABELS,
   RUN_LIVENESS_STAGE_LABELS,
   RUN_REPORT_CLASSIFICATION_LABELS,
   RUN_REPORT_STAGE_LABELS,
   RUN_REPORT_STAGE_STATE_LABELS,
-  analysisBlockCountLabel,
   analysisFourSentences,
   analysisKindSubtitle,
   analysisProvenanceSummary,
@@ -86,6 +95,8 @@ if (!window.ai7) throw new Error('AI7_RENDERER_BOOTSTRAP_INVALID');
 let editor: BoundedEditor | undefined;
 let editorialMarks: EditorialMarksSurface | undefined;
 let manuscriptRail: PositionRail | undefined;
+/** ②B 审阅 while it is on screen: its poll and its sheet end with the screen. */
+let reviewWorkspace: ReviewWorkspaceSurface | undefined;
 let authorityInterrupted = false;
 
 interface RecoveryReturnContext {
@@ -204,6 +215,8 @@ function replaceScreen(state: string, content: HTMLElement): void {
   editorialMarks = undefined;
   manuscriptRail?.destroy();
   manuscriptRail = undefined;
+  reviewWorkspace?.destroy();
+  reviewWorkspace = undefined;
   editor?.destroy();
   editor = undefined;
   screen.dataset['screen'] = state;
@@ -1445,6 +1458,76 @@ function renderBookAnalysis(bookId: string, bookTitle: string): void {
   );
 }
 
+/**
+ * ②B 审阅 as its own Book destination under 工作 (editor-surfaces §4, V2-UX-REV-001). The surface is
+ * `review-workspace.ts`; this only routes to it and gives it the workbench's persistent way out, appended
+ * last for the same reason ②A's is (LAYER-005). `focus` opens a named Review Run with one finding in
+ * view, which is how a Mark Card's 查看任务 arrives here.
+ */
+function renderBookReview(bookId: string, bookTitle: string, focus: ReviewFocus | null = null): void {
+  const content = panel();
+  content.classList.add('book-review');
+  content.dataset['bookId'] = bookId;
+  const openBook = async (): Promise<void> => {
+    await renderResolvedBookWorkbenchRoute({ kind: 'book', bookId, bookTitle });
+  };
+  const surface = mountReviewWorkspace({
+    root: content,
+    bookId,
+    bookTitle,
+    focus,
+    api: window.ai7,
+    awaitServiceJob,
+    technicalDetails,
+    setStatus,
+    errorMessage: rendererErrorMessage,
+    errorCode: (error) => rendererErrorData(error)?.code ?? null,
+    openManuscript: async () => {
+      setStatus('正在打开稿件…', 'busy');
+      try {
+        await openBook();
+      } catch (error) {
+        setStatus(rendererErrorMessage(error, '无法打开稿件。'), 'error');
+      }
+    },
+    goToText: async (target) => {
+      const opened = await window.ai7.getManuscriptWindowAt({
+        manuscriptId: target.manuscriptId,
+        branchId: target.branchId,
+        target: { kind: 'block', blockId: target.blockId },
+      });
+      renderEditorWindow(opened, bookTitle, undefined, undefined, target.markId ?? undefined);
+    },
+  });
+  const actions = element('div', 'button-row workbench-actions');
+  const openManuscript = button(REVIEW_DESTINATION_ACTIONS[0], 'primary', async () => {
+    openManuscript.disabled = true;
+    setStatus('正在打开稿件…', 'busy');
+    try {
+      await openBook();
+    } catch (error) {
+      openManuscript.disabled = false;
+      setStatus(rendererErrorMessage(error, '无法打开稿件。'), 'error');
+    }
+  });
+  const openOverview = button(REVIEW_DESTINATION_ACTIONS[1], 'secondary', async () => {
+    openOverview.disabled = true;
+    setStatus('正在打开图书工作概览…', 'busy');
+    try {
+      renderBookOverview(await window.ai7.getBookOverview({ bookId, historyCursor: null }));
+    } catch (error) {
+      openOverview.disabled = false;
+      setStatus(rendererErrorMessage(error, '无法打开图书工作概览。'), 'error');
+    }
+  });
+  actions.append(openManuscript, openOverview);
+  content.append(actions);
+  replaceScreen('book-review', content);
+  reviewWorkspace = surface;
+  surface.start();
+  setStatus(REVIEW_STATUS_LINES.opened);
+}
+
 function renderBookOverview(
   overview: BookWorkOverviewProjection,
   completion?: ImportCommitProjection,
@@ -1599,8 +1682,35 @@ function renderBookOverview(
       },
     );
   };
+  // 审阅 is one line here as well (editor-surfaces §2, §4): the latest Review Run and what waits for the
+  // editor, one step from its destination under 工作, which comes before 资料与记录's 分析.
+  const reviewHost = element('section', 'book-review-summary');
+  reviewHost.dataset['reviewBookId'] = overview.book.bookId;
+  const inspectReviewSummary = (): void => {
+    if (!reviewHost.isConnected || overview.manuscriptState.state !== 'populated') return;
+    const open = button(REVIEW_ACTION_LABELS['open-review'], 'secondary', () => renderBookReview(overview.book.bookId, overview.book.title));
+    open.dataset['reviewAction'] = 'open-review';
+    // The line needs the Runs and the coverage only, so it asks for the page after the last finding —
+    // an empty one — and never carries a Run's findings onto the overview.
+    void window.ai7.inspectReviewWorkspace({ reviewRunId: null, findingsAfterOrdinal: Number.MAX_SAFE_INTEGER }).then(
+      (workspace) => {
+        if (!reviewHost.isConnected || workspace.bookId !== reviewHost.dataset['reviewBookId']) return;
+        reviewHost.dataset['reviewState'] = workspace.run === null ? 'empty' : workspace.run.state;
+        reviewHost.replaceChildren(element('h3', undefined, REVIEW_CARD_HEADING), element('p', undefined, reviewOverviewLine(workspace)), open);
+      },
+      (error) => {
+        if (!reviewHost.isConnected) return;
+        reviewHost.dataset['reviewState'] = 'unavailable';
+        reviewHost.replaceChildren(
+          element('h3', undefined, REVIEW_CARD_HEADING),
+          element('p', 'attention-note', rendererErrorMessage(error, REVIEW_WORKSPACE_UNAVAILABLE)),
+          open,
+        );
+      },
+    );
+  };
   if (overview.manuscriptState.state === 'populated') {
-    content.append(taskHost, analysisHost);
+    content.append(taskHost, reviewHost, analysisHost);
   }
 
   const detailHost = element('div');
@@ -1755,10 +1865,12 @@ function renderBookOverview(
         setStatus(completion.completionLabel, 'success');
       }
       inspectTaskAuthorization();
+      inspectReviewSummary();
       inspectBaselineAnalysis();
     });
   } else {
     inspectTaskAuthorization();
+    inspectReviewSummary();
     inspectBaselineAnalysis();
     setStatus('图书工作概览已打开');
   }
@@ -2003,9 +2115,10 @@ function runReportOrReason(report: RunReportProjection | null, absentReason: str
  * The six reading tabs of one Result Set Revision (V2-UX-ANALYSIS-001, 004, 025). The decision layer
  * is the four sentences, the synopsis, the four lists and the chapters with what is still unread; the
  * units' technical names, lineage, digests, reducer stages, reuse counts and token usage wait one step
- * away. The revision's contradictions and open questions are not listed: they are the model-free leads
- * of 审阅's 情节逻辑与前后一致 (V2-UX-REV-011). Until that destination exists they stay reachable and
- * exact in the technical layer, so none disappears (V2-UX-LAYER-007).
+ * away. The revision's contradictions and open questions are not listed here, in either layer: they are
+ * the model-free leads of 审阅's 情节逻辑与前后一致 (V2-UX-REV-011), which turns each into a 批注 on the
+ * manuscript with its exact ranges as its basis. ②A keeps their counts — the card's `data-conflict-count`,
+ * the 可信程度 sentence and the technical assurance row — and the sentence's pointer opens 审阅.
  */
 function renderBaselineAnalysisOverview(
   card: HTMLElement,
@@ -2064,6 +2177,12 @@ function renderBaselineAnalysisOverview(
       const go = button(target === 'history' ? '去「历史与更新」' : '去「各章」', 'quiet', () => selectTab(target));
       go.dataset['analysisAction'] = `go-${target}`;
       section.append(go);
+    }
+    // 可信程度 points at 审阅's 情节逻辑与前后一致, where the leads it counts are handled (V2-UX-REV-011).
+    if (reading.axis === 'assurance') {
+      const review = button(REVIEW_ACTION_LABELS['open-review'], 'quiet', () => renderBookReview(projection.bookId, bookTitle));
+      review.dataset['analysisAction'] = 'open-review';
+      section.append(review);
     }
     sentences.append(section);
   }
@@ -2172,19 +2291,6 @@ function renderBaselineAnalysisOverview(
     item.dataset['analysisAdaptationClass'] = 'safe-retry';
     adaptations.append(item);
   }
-  const conflicts = element('ul', 'analysis-list analysis-conflict-list');
-  const conflictRanges: HTMLElement[] = [];
-  if (revision.conflicts.length === 0) conflicts.append(element('li', undefined, '无冲突'));
-  for (const conflict of revision.conflicts) {
-    const item = element('li');
-    const kindLabel = ANALYSIS_CONFLICT_KIND_LABELS[conflict.kind];
-    const unitList = conflict.unitOrdinals.join('、');
-    item.dataset['analysisConflictKind'] = conflict.kind;
-    item.append(element('span', undefined, `${kindLabel} · 单元 ${unitList} · ${conflict.description} · ${analysisBlockCountLabel(conflict.sourceRanges)} `));
-    if (conflict.sourceRanges[0] !== undefined) item.append(returnButton(conflict.sourceRanges[0].blockId));
-    conflicts.append(item);
-    conflictRanges.push(element('dt', undefined, `${kindLabel} · 单元 ${unitList}`), element('dd', 'technical-identity', analysisRanges(conflict.sourceRanges)));
-  }
   const technical = technicalDetails(
     'analysis-facts',
     element('dt', undefined, '分析契约'), element('dd', 'technical-identity', `${projection.kind} · ${revision.contractVersion}`),
@@ -2213,17 +2319,9 @@ function renderBaselineAnalysisOverview(
     ]),
   );
   technical.classList.add('analysis-revision-technical');
-  // The leads 审阅 will read, and the Run's in-envelope adjustments: exact, complete, and out of the
-  // decision layer. Each list keeps its own ranges in a disclosure of its own directly after it.
-  technical.append(
-    element('h5', undefined, `计划内调整 · ${adaptedUnits.length} 次`), adaptations,
-    element('h5', undefined, `前后不一致的线索 · ${revision.conflicts.length} 处（归入审阅 · 保持未解决）`), conflicts,
-  );
-  if (conflictRanges.length > 0) technical.append(technicalDetails('analysis-facts', ...conflictRanges));
-  const unresolved = element('ul', 'analysis-list analysis-unresolved-list');
-  if (revision.synthesis.unresolved.length === 0) unresolved.append(element('li', undefined, '无未决事项'));
-  for (const entry of revision.synthesis.unresolved) unresolved.append(element('li', undefined, `单元 ${entry.unitOrdinal} · ${entry.description} · ${analysisBlockCountLabel(entry.sourceRanges)}`));
-  technical.append(element('h5', undefined, `未决事项 · ${revision.synthesis.unresolved.length} 项（归入审阅）`), unresolved);
+  // The Run's in-envelope adjustments: exact, complete, and out of the decision layer. The leads are not
+  // listed here either — 审阅 carries each one as a 批注 with its exact ranges (V2-UX-REV-011).
+  technical.append(element('h5', undefined, `计划内调整 · ${adaptedUnits.length} 次`), adaptations);
   synopsis.append(technical);
 }
 
@@ -5185,7 +5283,8 @@ async function awaitServiceJob(
   let previousReimportProgress = initial.progress.completed;
   const requireMonotonicReimportProgress = (next: ServiceJobProjection): void => {
     if (next.kind !== 'reimport-preparation' && next.kind !== 'reimport-resolution' && next.kind !== 'reimport-commit' &&
-        next.kind !== 'task-authorization-preparation' && next.kind !== 'baseline-analysis-preparation') return;
+        next.kind !== 'task-authorization-preparation' && next.kind !== 'baseline-analysis-preparation' &&
+        next.kind !== 'review-run-preparation') return;
     if (!Number.isSafeInteger(next.progress.completed) || !Number.isSafeInteger(next.progress.total) ||
       next.progress.completed < previousReimportProgress || next.progress.completed > next.progress.total ||
       next.progress.total <= 0 ||
@@ -5214,6 +5313,8 @@ function renderEditorWindow(
   bookTitle: string,
   recoveryAttentionId?: string,
   entryNotice?: string,
+  /** 审阅's 回到原文: the mark whose card opens once the window is on screen. */
+  openMarkId?: string,
 ): void {
   const content = panel();
   content.classList.add('editor-shell');
@@ -5273,6 +5374,25 @@ function renderEditorWindow(
     }
   });
   openAnalysis.dataset['recordsDestination'] = 'analysis';
+  // Leaving for 审阅 is leaving the manuscript too: local edits are settled and the position is taken
+  // first, exactly as for 分析. A Mark Card's 查看任务 leaves the same way, for its Review Run and finding.
+  const leaveForReview = async (focus: ReviewFocus | null): Promise<boolean> => {
+    setStatus('正在保存并打开审阅…', 'busy');
+    try {
+      if (!(await settleLocalEdit())) return false;
+      await rememberEntryPosition();
+      renderBookReview(currentWindow.bookId, bookTitle, focus);
+      return true;
+    } catch (error) {
+      setStatus(rendererErrorMessage(error, '无法打开审阅。'), 'error');
+      return false;
+    }
+  };
+  const openReview = button(REVIEW_ENTRY_LABEL, 'secondary', async () => {
+    openReview.disabled = true;
+    if (!(await leaveForReview(null))) openReview.disabled = authoritativeMutationBusy();
+  });
+  openReview.dataset['workDestination'] = 'review';
   const toolbarActions = element('div', 'button-row');
   if (recoveryAttentionId) {
     toolbarActions.append(button('返回恢复待确认', 'secondary', async () => {
@@ -5290,7 +5410,13 @@ function renderEditorWindow(
   const recordsGroup = element('nav', 'book-records-group');
   recordsGroup.setAttribute('aria-label', '资料与记录');
   recordsGroup.append(element('span', 'section-label', '资料与记录'), openAnalysis, backToOverview);
-  toolbarActions.append(recordsGroup, undo, redo, save, retryAuthoritativeRefreshButton);
+  // IA-006's `工作` group (稿件 / 审阅 / 评估 / 交付物), as much of it as exists: 审阅 (editor-surfaces §4).
+  // It is a destination of the Book beside 资料与记录, never a fourth entry on the right edge, whose three
+  // entries are 导航 / 分析 / 任务.
+  const workGroup = element('nav', 'book-work-group');
+  workGroup.setAttribute('aria-label', REVIEW_WORK_GROUP_LABEL);
+  workGroup.append(element('span', 'section-label', REVIEW_WORK_GROUP_LABEL), openReview);
+  toolbarActions.append(workGroup, recordsGroup, undo, redo, save, retryAuthoritativeRefreshButton);
   toolbar.append(title, toolbarActions);
 
   const workspace = element('div', 'editor-workspace');
@@ -5531,6 +5657,7 @@ function renderEditorWindow(
     editorHost.dataset['authoritativeMutation'] = authoritativeMutation ? 'true' : 'false';
     backToOverview.disabled = busy;
     openAnalysis.disabled = busy;
+    openReview.disabled = busy;
     undo.disabled = busy;
     redo.disabled = busy;
     milestoneButton.disabled = busy;
@@ -6379,6 +6506,7 @@ function renderEditorWindow(
     api: window.ai7,
     busy: () => authoritativeMutationBusy() || serviceJobBusy(),
     marksChanged: () => manuscriptRail?.refresh(),
+    openReviewFinding: (target) => void leaveForReview({ reviewRunId: target.reviewRunId, findingId: target.findingId }),
     // An Apply is an authoritative write like a replacement or an undo: the window is reloaded from the
     // service and must show exactly the manuscript state the Effect Receipt names.
     writeManuscript: async (operation, done) => {
@@ -6403,6 +6531,8 @@ function renderEditorWindow(
   // product never reaches an exit this surface can see, and the entry is what should answer then.
   void rememberEntryPosition();
   setStatus(`稿件窗口已打开；${initialWindow.position.label}。`);
+  // 审阅's 回到原文 arrives at a finding's mark: its card opens as a click on it would.
+  if (openMarkId !== undefined) void editorialMarks.openMark(openMarkId);
 }
 
 function renderError(error: unknown, retry: () => void): void {

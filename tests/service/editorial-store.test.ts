@@ -5,7 +5,7 @@ import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import {
-  MANUSCRIPT_EFFECT_SCHEMA_VERSION,
+  EDITORIAL_REVIEW_SCHEMA_VERSION,
   FACTUAL_REVIEW_SCHEMA_VERSION,
 } from '../../src/service/task-authorization.js';
 import { MAX_WINDOW_BLOCKS } from '../../src/shared/protocol.js';
@@ -14,6 +14,8 @@ import {
   composeManuscriptDocx,
   type ComposedManuscriptRequest,
 } from '../support/composed-fixture.js';
+import { KIND_COUPLED_ANALYSIS_RELATIONS, downgradeKindCoupledRelationsToRevision23 } from '../support/analysis-ledger-revisions.js';
+import { REVIEW_RUN_RELATIONS_DROP_ORDER } from '../support/review-categories.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 
 // Service-integration suite (L2). It drives the real `EditorialStore` on a temporary Agent Data Root
@@ -147,11 +149,17 @@ function commitPreparedReplacement(store: EditorialStore, searchId: string): {
   };
 }
 
-/** Take a store back to the revision-20 shape: the relations revisions 21 to 23 add are simply not there. */
+/**
+ * Take a store back to the revision-20 shape: the relations revisions 21 to 24 add are simply not
+ * there, and the three kind-coupled analysis relations revision 24 rebuilt (Issue #417) are the
+ * shapes revision 20 gave them.
+ */
 function downgradeToRevision20(databasePath: string): void {
   const database = new DatabaseSync(databasePath);
   try {
+    downgradeKindCoupledRelationsToRevision23(database);
     database.exec(`BEGIN IMMEDIATE;
+      ${REVIEW_RUN_RELATIONS_DROP_ORDER.map((relation) => `DROP TABLE ${relation};`).join('\n      ')}
       DROP TABLE manuscript_effect_receipts;
       DROP TABLE manuscript_effect_dispatches;
       DROP TABLE manuscript_effect_approvals;
@@ -574,7 +582,7 @@ describe('EditorialStore on a temporary Agent Data Root', () => {
     }
   }, 300_000);
 
-  it('migrates a populated revision-20 store forward, adding eleven empty relations and moving nothing else', async () => {
+  it('migrates a populated revision-20 store forward, adding eleven empty relations, reshaping only the three kind-coupled analysis relations, and moving nothing else', async () => {
     const databasePath = join(roots.dataRoot, 'store', 'ai7.sqlite');
     const first = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     let imported: Awaited<ReturnType<typeof importComposedBook>>;
@@ -618,22 +626,25 @@ describe('EditorialStore on a temporary Agent Data Root', () => {
     const after = new DatabaseSync(databasePath, { readOnly: true });
     try {
       expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version)
-        .toBe(MANUSCRIPT_EFFECT_SCHEMA_VERSION);
+        .toBe(EDITORIAL_REVIEW_SCHEMA_VERSION);
       const truthAfter = relationTruth(after);
-      // Exactly the relations revisions 21 to 23 add appear, and each appears empty.
+      // Exactly the relations revisions 21 to 24 add appear, and each appears empty.
       const added = [
         'editorial_mark_replies', 'editorial_marks', 'manuscript_effect_approvals', 'manuscript_effect_dispatches',
         'manuscript_effect_intents', 'manuscript_effect_receipts', 'manuscript_effect_targets', 'manuscript_entry_positions',
         'proposal_change_items', 'proposal_decision_reasons', 'proposal_item_decisions',
+        ...REVIEW_RUN_RELATIONS_DROP_ORDER,
       ];
       expect([...truthAfter.keys()]).toEqual([...truthBefore.keys(), ...added].sort());
       for (const relation of added) expect(truthAfter.get(relation)?.content).toMatch(/^0:/);
-      // No relation the revision-20 store held changed shape, and the only one whose content moved is
-      // the one every open appends to — the migration itself rewrites nothing. Both assertions report
-      // relation names, so a failure names the relation rather than printing the manuscript.
+      // The only relations the revision-20 store held that changed shape are the three kind-coupled
+      // analysis relations revision 24 rebuilds for the review-category kind family (Issue #417), and
+      // the only one whose content moved is the one every open appends to — the rebuild copies every
+      // row and the migration itself rewrites nothing. Both assertions report relation names, so a
+      // failure names the relation rather than printing the manuscript.
       const reshaped = [...truthBefore]
         .filter(([name, before]) => truthAfter.get(name)!.sql !== before.sql).map(([name]) => name);
-      expect(reshaped).toEqual([]);
+      expect(reshaped).toEqual([...KIND_COUPLED_ANALYSIS_RELATIONS].sort());
       const rewritten = [...truthBefore]
         .filter(([name, before]) => truthAfter.get(name)!.content !== before.content).map(([name]) => name);
       expect(rewritten).toEqual(['service_lifetimes']);

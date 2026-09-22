@@ -677,29 +677,71 @@ export class EditorialMarkStore {
    * state exactly as an editor's is; nothing reaches the manuscript surface unanchored.
    */
   createProduced(input: ProducedEditorialMarkInput): string {
+    return transact(this.#db, () => this.#produce(input));
+  }
+
+  /**
+   * Several produced marks written in one transaction with whatever their producer records beside them
+   * (Issue #417), on the pattern of `commitExactReplacements(…, record)`: `record` runs inside the same
+   * transaction and receives one entry per input, so the marks and the producer's own rows commit
+   * together or not at all. Inside a transaction the caller already holds, this joins it.
+   *
+   * A Review Run materializes a whole category this way. Its findings were located in the revision the
+   * Task read, and the manuscript may have moved on since: an input whose words no longer stand at its
+   * range — its block gone, shorter, or holding other text there — is `null` in the list, never an
+   * error, and never a mark placed on text it does not describe. Every other refusal is thrown and rolls
+   * everything back.
+   */
+  createProducedMany<T>(inputs: ReadonlyArray<ProducedEditorialMarkInput>, record: (markIds: ReadonlyArray<string | null>) => T): T {
+    return transact(this.#db, () => {
+      const markIds = inputs.map((input) => {
+        try {
+          return this.#produce(input);
+        } catch (error) {
+          // Both refusals are raised before anything of this mark is written.
+          if (error instanceof EditorialMarkError && (error.code === 'MARK_ANCHOR_CHANGED' || error.code === 'MARK_RANGE_INVALID')) return null;
+          throw error;
+        }
+      });
+      return record(markIds);
+    });
+  }
+
+  /**
+   * Set an AI7-produced mark aside inside the caller's transaction, because the review finding it
+   * belongs to was ignored with a reason (Issue #417; V2-UX-REV-004). It leaves the manuscript exactly
+   * as a removed mark does, and only from `open`: a mark already handled is not the ignoring's to move.
+   */
+  setAsideProduced(markId: string, now: string): void {
+    requireMark(UUID_PATTERN.test(markId), 'MARK_INVALID', '标记标识无效。');
+    const updated = this.#db.prepare(
+      "UPDATE editorial_marks SET status = 'removed', updated_at = ? WHERE mark_id = ? AND status = 'open' AND source_kind = 'ai7'",
+    ).run(now, markId);
+    requireMark(updated.changes === 1, 'MARK_NOT_FOUND', '这条标记已不存在。');
+  }
+
+  #produce(input: ProducedEditorialMarkInput): string {
     requireMark(UUID_PATTERN.test(input.manuscriptId) && UUID_PATTERN.test(input.branchId) && BLOCK_PATTERN.test(input.blockId), 'MARK_INVALID', '标记标识无效。');
     requireMark(input.kind === 'change-suggestion' || input.kind === 'annotation', 'MARK_INVALID', '标记种类无效。');
     requireMark(input.source.label.trim().length > 0 && input.source.label.length <= 200, 'MARK_INVALID', '标记来源无效。');
     const content = this.#content(input.kind, null, input.body, input.proposedText, input.rationale, input.pinnedText);
     const markId = randomUUID();
-    transact(this.#db, () => {
-      const state = this.#branchState(input.manuscriptId, input.branchId);
-      const block = this.#db.prepare('SELECT digest FROM working_blocks WHERE branch_id = ? AND block_id = ?').get(input.branchId, input.blockId) as SqlRow | undefined;
-      requireMark(block !== undefined, 'MARK_ANCHOR_CHANGED', '所选文字已不在当前稿件中。');
-      const digest = text(block.digest);
-      const pinned = this.#requireRange(input.branchId, input.blockId, digest, input.fromGrapheme, input.toGrapheme, input.pinnedText);
-      const now = new Date().toISOString();
-      const source: EditorialMarkSourceProjection = input.source.kind === 'ai7'
-        ? { kind: 'ai7', origin: input.source.origin, label: input.source.label, taskId: input.source.taskId }
-        : { kind: 'imported-author', origin: null, label: input.source.label, taskId: null };
-      this.#insertMark({
-        markId, clientMarkId: randomUUID(), state, manuscriptId: input.manuscriptId, branchId: input.branchId,
-        blockId: input.blockId, blockDigest: digest, fromGrapheme: input.fromGrapheme, toGrapheme: input.toGrapheme,
-        pinnedText: pinned, kind: input.kind, highlightColor: null, body: content.body, source,
-        basis: input.basis, convertedFrom: null, anchorState: 'exact', now,
-      });
-      if (input.kind === 'change-suggestion') this.#insertItem(markId, pinned, content.proposedText!, content.rationale, input.atomicGroupId, now);
+    const state = this.#branchState(input.manuscriptId, input.branchId);
+    const block = this.#db.prepare('SELECT digest FROM working_blocks WHERE branch_id = ? AND block_id = ?').get(input.branchId, input.blockId) as SqlRow | undefined;
+    requireMark(block !== undefined, 'MARK_ANCHOR_CHANGED', '所选文字已不在当前稿件中。');
+    const digest = text(block.digest);
+    const pinned = this.#requireRange(input.branchId, input.blockId, digest, input.fromGrapheme, input.toGrapheme, input.pinnedText);
+    const now = new Date().toISOString();
+    const source: EditorialMarkSourceProjection = input.source.kind === 'ai7'
+      ? { kind: 'ai7', origin: input.source.origin, label: input.source.label, taskId: input.source.taskId }
+      : { kind: 'imported-author', origin: null, label: input.source.label, taskId: null };
+    this.#insertMark({
+      markId, clientMarkId: randomUUID(), state, manuscriptId: input.manuscriptId, branchId: input.branchId,
+      blockId: input.blockId, blockDigest: digest, fromGrapheme: input.fromGrapheme, toGrapheme: input.toGrapheme,
+      pinnedText: pinned, kind: input.kind, highlightColor: null, body: content.body, source,
+      basis: input.basis, convertedFrom: null, anchorState: 'exact', now,
     });
+    if (input.kind === 'change-suggestion') this.#insertItem(markId, pinned, content.proposedText!, content.rationale, input.atomicGroupId, now);
     return markId;
   }
 

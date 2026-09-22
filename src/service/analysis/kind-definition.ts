@@ -68,6 +68,7 @@ import {
   type FactualReviewUnitResult,
 } from './factual-review-contract.js';
 import { reduceFactualReview, type FactualUnitOutcome } from './factual-review-reducers.js';
+import { carryPositionalResult, remapReusedResult } from './reused-result.js';
 import {
   PRE_ASSURANCE_SAMPLE,
   assuranceSamplingStage,
@@ -103,7 +104,25 @@ export interface AnalysisModeDefinition {
   readonly initial: boolean;
   /** A mode that carries an explicitly selected block range. */
   readonly rangeBound: boolean;
+  /**
+   * Which units the mode means to read, in the one vocabulary every kind's modes share: every unit of
+   * the manifest, only the units no compatible predecessor result serves, or the closure of the
+   * selected range. The ledger offers, plans and admits a mode by this meaning rather than by its
+   * name, which is what lets a kind bring its own mode names (Issue #417).
+   */
+  readonly recompute: ModeRecomputeScope;
 }
+
+export type ModeRecomputeScope = 'everything' | 'changed' | 'selected-range';
+
+/**
+ * What a kind does with a unit its mode does not mean to read and no compatible predecessor result
+ * serves. `recompute` is the baseline's answer and the only one there was: a Result Set Revision
+ * covers the whole manuscript, so such a unit is read anyway. `leave-unreviewed` is a review
+ * category's (Issue #417): the unit is never dispatched and settles as an `out-of-scope` gap, which is
+ * what makes a first review of one range legal and keeps a range review from reading other chapters.
+ */
+export type OutOfScopePolicy = 'recompute' | 'leave-unreviewed';
 
 /** The reduction every kind produces: the shared axes, the gaps, and the kind's own components. */
 export interface AnalysisReductionResult {
@@ -181,6 +200,8 @@ export interface AnalysisKindDefinition {
   readonly modes: ReadonlyArray<AnalysisModeDefinition>;
   /** The update modes an editor may prepare today; empty for a kind whose update surfaces are later work. */
   readonly updateModes: ReadonlyArray<AnalysisTaskMode>;
+  /** What becomes of a unit outside the mode's scope that no compatible predecessor result serves. */
+  readonly outOfScope: OutOfScopePolicy;
   readonly systemPrompt: string;
   readonly promptContractDigest: string;
   readonly unitResultSchema: string;
@@ -218,6 +239,19 @@ export interface AnalysisKindDefinition {
   reduce(input: AnalysisReductionInput): AnalysisReductionResult;
   /** The kind-specific keys one persisted unit result carries, beside the shared identity and lineage. */
   unitRecord(result: unknown): Record<string, unknown>;
+  /** The inverse of `unitRecord`: one stored closed unit record read back as the kind's typed result, for reuse by lineage. */
+  unitResultOfRecord(record: Readonly<Record<string, unknown>>, unitOrdinal: number): unknown;
+  /**
+   * Carry a reused predecessor result onto the successor unit the compatibility key matched it to.
+   * How depends on how the kind's results cite a block: by identity, which must be remapped, or by
+   * position in the unit message, which the key already proves unchanged.
+   */
+  remapReusedResult(result: unknown, predecessorUnit: CoverageManifestUnitProjection, newUnit: CoverageManifestUnitProjection): unknown;
+  /**
+   * What a settled Task tells its editor to do next, when the kind's own surfaces are not the
+   * baseline's. Absent for the two kinds that read the execution owner's long-standing wording.
+   */
+  readonly safeNextActions?: Readonly<Record<'completed' | 'completed-with-gaps' | 'failed' | 'interrupted', string>>;
   /** The kind-specific keys of a stored revision body, read back for the projection. */
   revisionComponents(body: Readonly<Record<string, unknown>>): Record<string, unknown>;
   /** The unresolved-conflict count a stored revision discloses; `0` for a kind with no conflict pass. */
@@ -232,7 +266,7 @@ export interface AnalysisKindDefinition {
  * stable. A class with no member is omitted rather than reported as zero: the accounting counts what
  * the Run produced, and a kind's class set is the kind's business, not the report's.
  */
-function countByClass<T>(
+export function countByClass<T>(
   items: ReadonlyArray<T>,
   component: string,
   classOf: (item: T) => string,
@@ -245,7 +279,7 @@ function countByClass<T>(
   return [...counts.keys()].sort().map((kind) => ({ kind, count: counts.get(kind)! }));
 }
 
-function modeIndex(modes: ReadonlyArray<AnalysisModeDefinition>): (mode: AnalysisTaskMode) => AnalysisModeDefinition {
+export function modeIndex(modes: ReadonlyArray<AnalysisModeDefinition>): (mode: AnalysisTaskMode) => AnalysisModeDefinition {
   const byMode = new Map(modes.map((entry) => [entry.mode, entry] as const));
   return (mode) => {
     const definition = byMode.get(mode);
@@ -293,6 +327,7 @@ const BASELINE_MODES: ReadonlyArray<AnalysisModeDefinition> = BASELINE_ANALYSIS_
   meaning: BASELINE_ANALYSIS_MODE_MEANINGS[mode],
   initial: mode === 'first-baseline',
   rangeBound: mode === 'reanalyze-range',
+  recompute: mode === 'sync-current' ? 'changed' : mode === 'reanalyze-range' ? 'selected-range' : 'everything',
 }));
 
 export function baselineAnalysisKindDefinition(): AnalysisKindDefinition {
@@ -304,6 +339,8 @@ export function baselineAnalysisKindDefinition(): AnalysisKindDefinition {
     initialMode: 'first-baseline',
     modes: BASELINE_MODES,
     updateModes: BASELINE_ANALYSIS_UPDATE_MODES,
+    // A baseline revision always covers the whole manuscript: a unit no predecessor result serves is read.
+    outOfScope: 'recompute',
     systemPrompt: BASELINE_PROMPT_CONTRACT.systemPrompt,
     promptContractDigest: BASELINE_PROMPT_CONTRACT_DIGEST,
     unitResultSchema: BASELINE_UNIT_RESULT_SCHEMA,
@@ -376,6 +413,20 @@ export function baselineAnalysisKindDefinition(): AnalysisKindDefinition {
       const { schema: _schema, unitOrdinal: _unitOrdinal, ...rest } = result as Record<string, unknown>;
       return rest;
     },
+    unitResultOfRecord: (record, unitOrdinal): BaselineUnitResult => ({
+      schema: BASELINE_UNIT_RESULT_SCHEMA,
+      unitOrdinal,
+      synopsis: record.synopsis as string,
+      entities: record.entities as BaselineUnitResult['entities'],
+      events: record.events as BaselineUnitResult['events'],
+      relationships: record.relationships as BaselineUnitResult['relationships'],
+      settingClaims: record.settingClaims as BaselineUnitResult['settingClaims'],
+      conflicts: record.conflicts as BaselineUnitResult['conflicts'],
+      unresolved: record.unresolved as BaselineUnitResult['unresolved'],
+      confidence: record.confidence as BaselineUnitResult['confidence'],
+    }),
+    // The baseline contract cites blocks by identity, so a reused result's ranges are remapped.
+    remapReusedResult: (result, predecessorUnit, newUnit) => remapReusedResult(result as BaselineUnitResult, predecessorUnit, newUnit),
     revisionComponents: (body) => ({
       conflicts: body.conflicts,
       // A revision written before Issue #274 carries neither field; it is immutable history and is
@@ -423,6 +474,7 @@ const FACTUAL_REVIEW_MODES: ReadonlyArray<AnalysisModeDefinition> = FACTUAL_REVI
   meaning: FACTUAL_REVIEW_MODE_MEANINGS[mode],
   initial: mode === 'whole-manuscript',
   rangeBound: mode === 'range',
+  recompute: mode === 'range' ? 'selected-range' : 'everything',
 }));
 
 /**
@@ -440,6 +492,9 @@ export function factualReviewKindDefinition(research: ResearchCapability = new F
     initialMode: 'whole-manuscript',
     modes: FACTUAL_REVIEW_MODES,
     updateModes: [],
+    // The factual kind prepares no update Task yet, so no plan of its own ever asks; it states the
+    // answer every kind had before Issue #417.
+    outOfScope: 'recompute',
     systemPrompt: FACTUAL_REVIEW_PROMPT_CONTRACT.systemPrompt,
     promptContractDigest: FACTUAL_REVIEW_PROMPT_CONTRACT_DIGEST,
     unitResultSchema: FACTUAL_REVIEW_UNIT_RESULT_SCHEMA,
@@ -511,6 +566,13 @@ export function factualReviewKindDefinition(research: ResearchCapability = new F
       };
     },
     unitRecord: (result) => ({ assertions: (result as FactualReviewUnitResult).assertions }),
+    unitResultOfRecord: (record, unitOrdinal): FactualReviewUnitResult => ({
+      schema: FACTUAL_REVIEW_UNIT_RESULT_SCHEMA,
+      unitOrdinal,
+      assertions: record.assertions as FactualReviewUnitResult['assertions'],
+    }),
+    // The factual contract names a block by its position in the unit message, which a reused unit keeps.
+    remapReusedResult: (result, predecessorUnit, newUnit) => carryPositionalResult(result as FactualReviewUnitResult, predecessorUnit, newUnit),
     revisionComponents: (body) => ({
       findings: body.findings,
       excluded: body.excluded,

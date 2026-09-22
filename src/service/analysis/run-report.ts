@@ -156,9 +156,18 @@ function tally<T>(items: ReadonlyArray<T>, key: (item: T) => string): Array<{ ke
  * the reduction's own state — and never a second judgement made here; its instants are present
  * exactly when the owner entered it.
  */
+/**
+ * The gaps a Run lost, as opposed to the units its plan left out of scope (Issue #417). An
+ * `out-of-scope` unit was never meant to be read, so it is neither a gap in the `units` stage nor a
+ * failure; it is counted once, in the unit accounting. No baseline or factual Run has one.
+ */
+function lostGaps(gaps: ReadonlyArray<AnalysisGapProjection>): AnalysisGapProjection[] {
+  return gaps.filter((gap) => gap.code !== 'out-of-scope');
+}
+
 function stageRows(facts: RunReportFacts): RunReportStageProjection[] {
   const submittedAny = facts.submitted > 0;
-  const gapsInUnits = facts.gaps.length > 0;
+  const gapsInUnits = lostGaps(facts.gaps).length > 0;
   const states: Record<RunReportStageId, RunReportStageProjection['state']> = {
     units: !submittedAny && facts.unitRows.length === 0 ? 'not-run' : gapsInUnits ? 'closed-with-gaps' : 'closed',
     'cross-unit-reduction': facts.crossUnit.state,
@@ -185,7 +194,7 @@ function stageRows(facts: RunReportFacts): RunReportStageProjection[] {
  * revision at all. Each names its stage and its classified code; none restates what was lost.
  */
 function failureRows(facts: RunReportFacts): RunReportFailureProjection[] {
-  const rows: RunReportFailureProjection[] = [...facts.gaps]
+  const rows: RunReportFailureProjection[] = lostGaps(facts.gaps)
     .sort((left, right) => left.unitOrdinal - right.unitOrdinal)
     .map((gap) => ({ stage: 'units' as const, code: gap.code, reason: gap.reason }));
   // A stage that never ran is not a failure: `not-run` says there was nothing for it to close, which
@@ -219,6 +228,7 @@ function assembleRunReport(
   accountingDigest: string,
 ): RunReportRecord {
   const reused = facts.unitRows.filter((unit) => unit.lineage === 'reused').length;
+  const unreviewed = facts.unitRows.filter((unit) => unit.lineage === 'unreviewed').length;
   return {
     schema: RUN_REPORT_SCHEMA,
     runRecordId: facts.runRecordId,
@@ -231,9 +241,12 @@ function assembleRunReport(
     units: {
       submitted: facts.submitted,
       reused,
-      recomputed: facts.unitRows.length - reused,
-      gaps: facts.unitRows.filter((unit) => unit.state === 'gap').length,
+      recomputed: facts.unitRows.length - reused - unreviewed,
+      // Gaps the Run lost. A unit left unreviewed is counted below and nowhere else, and the key is
+      // written only when there is one, so every other Run's accounting digest is what it was.
+      gaps: facts.unitRows.filter((unit) => unit.state === 'gap' && unit.lineage !== 'unreviewed').length,
       retried: facts.adaptations.length,
+      ...(unreviewed === 0 ? {} : { unreviewed }),
     },
     unitRows: facts.unitRows,
     adaptations: facts.adaptations,

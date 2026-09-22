@@ -56,12 +56,14 @@ import {
   ANALYSIS_LEDGER_REVISION_15_SQL,
   ANALYSIS_LEDGER_REVISION_16_SQL,
   ANALYSIS_LEDGER_REVISION_19_SQL,
+  ANALYSIS_LEDGER_REVISION_23_SQL,
   ANALYSIS_LEDGER_REVISION_17_TABLES,
   ANALYSIS_LEDGER_SCHEMA_SQL,
   ANALYSIS_LEDGER_TRIGGER_SQL,
   J03_TASK_AUTHORIZATION_SCHEMA_VERSION,
   J04_BASELINE_ANALYSIS_SCHEMA_VERSION,
   EDITORIAL_MARK_SCHEMA_VERSION,
+  EDITORIAL_REVIEW_SCHEMA_VERSION,
   MANUSCRIPT_EFFECT_SCHEMA_VERSION,
   MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION,
   MANUSCRIPT_INTAKE_SCHEMA_VERSION,
@@ -87,23 +89,38 @@ import {
   MANUSCRIPT_EFFECT_SCHEMA_SQL,
   MANUSCRIPT_EFFECT_TRIGGER_SQL,
 } from './manuscript-apply.js';
+import {
+  REVIEW_RUN_FOREIGN_KEYS,
+  REVIEW_RUN_SCHEMA_SQL,
+  REVIEW_RUN_TRIGGER_SQL,
+} from './review/review-runs.js';
 
 /**
  * The analysis ledger as revision 15 created it, as revision 16 rebuilt two of its relations, as
- * revision 19 left them, and as revision 20 widened the three kind-coupled ones. Every one of those
- * shapes validates exactly, so a store at any of them passes this layer before the forward copy that
- * brings it to the current shape.
+ * revision 19 left them, as revision 20 widened the three kind-coupled ones and revisions 21 to 23
+ * carried them, and as revision 24 widened the same three again for the review-category kind family
+ * (Issue #417). Every one of those shapes validates exactly, so a store at any of them passes this
+ * layer before the forward copy that brings it to the current shape.
  */
 const ANALYSIS_LEDGER_EXPECTED_SCHEMA_SQL: Readonly<Record<string, string | ReadonlyArray<string>>> = {
   ...ANALYSIS_LEDGER_SCHEMA_SQL,
   analysis_task_intents: [
     ANALYSIS_LEDGER_SCHEMA_SQL.analysis_task_intents,
+    ANALYSIS_LEDGER_REVISION_23_SQL.analysis_task_intents,
     ANALYSIS_LEDGER_REVISION_19_SQL.analysis_task_intents,
     ANALYSIS_LEDGER_REVISION_15_SQL.analysis_task_intents,
   ],
   analysis_plan_records: [ANALYSIS_LEDGER_SCHEMA_SQL.analysis_plan_records, ANALYSIS_LEDGER_REVISION_16_SQL.analysis_plan_records, ANALYSIS_LEDGER_REVISION_15_SQL.analysis_plan_records],
-  analysis_result_sets: [ANALYSIS_LEDGER_SCHEMA_SQL.analysis_result_sets, ANALYSIS_LEDGER_REVISION_19_SQL.analysis_result_sets],
-  analysis_result_set_revisions: [ANALYSIS_LEDGER_SCHEMA_SQL.analysis_result_set_revisions, ANALYSIS_LEDGER_REVISION_19_SQL.analysis_result_set_revisions],
+  analysis_result_sets: [
+    ANALYSIS_LEDGER_SCHEMA_SQL.analysis_result_sets,
+    ANALYSIS_LEDGER_REVISION_23_SQL.analysis_result_sets,
+    ANALYSIS_LEDGER_REVISION_19_SQL.analysis_result_sets,
+  ],
+  analysis_result_set_revisions: [
+    ANALYSIS_LEDGER_SCHEMA_SQL.analysis_result_set_revisions,
+    ANALYSIS_LEDGER_REVISION_23_SQL.analysis_result_set_revisions,
+    ANALYSIS_LEDGER_REVISION_19_SQL.analysis_result_set_revisions,
+  ],
 };
 
 /** The analysis ledger before revision 17 (Issue #48): the same relations without the plan-version, Plan Revision, and Plan Adaptation tables and their triggers. */
@@ -1715,6 +1732,8 @@ const SCHEMA_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
   ...EDITORIAL_MARK_FOREIGN_KEYS,
   // Revision 23 (Issue #408): the Effect ledger of AI7 Apply, owned and spelled by `manuscript-apply.ts`.
   ...MANUSCRIPT_EFFECT_FOREIGN_KEYS,
+  // Revision 24 (Issue #417): the Review Run relations, owned and spelled by `review/review-runs.ts`.
+  ...REVIEW_RUN_FOREIGN_KEYS,
   editorial_workspace_profile_sidecar_revisions: [
     'native_artifact_id>native_artifact_installations.artifact_id:NO ACTION/NO ACTION/NONE',
   ],
@@ -2312,6 +2331,7 @@ function requireManuscriptReimportTargetSchema(
   includeManuscriptEntryPositionTable = false,
   includeEditorialMarkTables = false,
   includeManuscriptEffectTables = false,
+  includeReviewRunTables = false,
 ): void {
   const analysisTables = includePlanVersionTables ? ANALYSIS_LEDGER_EXPECTED_SCHEMA_SQL : PRE_17_ANALYSIS_LEDGER_EXPECTED_SCHEMA_SQL;
   const analysisTriggers = includePlanVersionTables ? ANALYSIS_LEDGER_TRIGGER_SQL : PRE_17_ANALYSIS_LEDGER_TRIGGER_SQL;
@@ -2344,6 +2364,10 @@ function requireManuscriptReimportTargetSchema(
         ? { ...EDITORIAL_MARK_SCHEMA_SQL, ...(includeManuscriptEffectTables ? {} : EDITORIAL_MARK_REVISION_22_SQL) }
         : {}),
       ...(includeManuscriptEffectTables ? MANUSCRIPT_EFFECT_SCHEMA_SQL : {}),
+      // Revision 24 (Issue #417) adds the Review Run relations beside the three analysis relations it
+      // rebuilds; they join this exact table set, the trigger set and `SCHEMA_FOREIGN_KEYS` behind a
+      // flag of their own, as revisions 22 and 23 did.
+      ...(includeReviewRunTables ? REVIEW_RUN_SCHEMA_SQL : {}),
     },
     MANUSCRIPT_REIMPORT_INDEX_SQL,
     true,
@@ -2354,6 +2378,7 @@ function requireManuscriptReimportTargetSchema(
       ...(includeAnalysisLedgerTables ? analysisTriggers : {}),
       ...(includeEditorialMarkTables ? EDITORIAL_MARK_TRIGGER_SQL : {}),
       ...(includeManuscriptEffectTables ? MANUSCRIPT_EFFECT_TRIGGER_SQL : {}),
+      ...(includeReviewRunTables ? REVIEW_RUN_TRIGGER_SQL : {}),
     },
   );
 }
@@ -5000,6 +5025,7 @@ export function validateManuscriptReimportSchemaTruth(
   includeManuscriptEntryPositionTable = false,
   includeEditorialMarkTables = false,
   includeManuscriptEffectTables = false,
+  includeReviewRunTables = false,
 ): void {
   requireManuscriptReimportTargetSchema(
     db,
@@ -5012,6 +5038,7 @@ export function validateManuscriptReimportSchemaTruth(
     includeManuscriptEntryPositionTable,
     includeEditorialMarkTables,
     includeManuscriptEffectTables,
+    includeReviewRunTables,
   );
   validateSchemaAuthorityIds(db);
   validateWorkflowSemanticTruth(db, profile);
@@ -5072,7 +5099,7 @@ export function initializeBoundedSchema(
       version === TASK_AUTHORIZATION_SCHEMA_VERSION || version === MANUSCRIPT_INTAKE_SCHEMA_VERSION ||
       version === TEXT_CONVERSION_SCHEMA_VERSION || version === FACTUAL_REVIEW_SCHEMA_VERSION ||
       version === MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION || version === EDITORIAL_MARK_SCHEMA_VERSION ||
-      version === MANUSCRIPT_EFFECT_SCHEMA_VERSION,
+      version === MANUSCRIPT_EFFECT_SCHEMA_VERSION || version === EDITORIAL_REVIEW_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -5082,9 +5109,10 @@ export function initializeBoundedSchema(
       version === SUCCESSIVE_TASK_SCHEMA_VERSION || version === TASK_AUTHORIZATION_SCHEMA_VERSION ||
       version === MANUSCRIPT_INTAKE_SCHEMA_VERSION || version === TEXT_CONVERSION_SCHEMA_VERSION ||
       version === FACTUAL_REVIEW_SCHEMA_VERSION || version === MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION ||
-      version === EDITORIAL_MARK_SCHEMA_VERSION || version === MANUSCRIPT_EFFECT_SCHEMA_VERSION) {
+      version === EDITORIAL_MARK_SCHEMA_VERSION || version === MANUSCRIPT_EFFECT_SCHEMA_VERSION ||
+      version === EDITORIAL_REVIEW_SCHEMA_VERSION) {
     transact(db, () => {
-      if (validateStoreTruth || version !== MANUSCRIPT_EFFECT_SCHEMA_VERSION) {
+      if (validateStoreTruth || version !== EDITORIAL_REVIEW_SCHEMA_VERSION) {
         validateManuscriptReimportSchemaTruth(
           db,
           profile,
@@ -5097,6 +5125,7 @@ export function initializeBoundedSchema(
           version >= MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION,
           version >= EDITORIAL_MARK_SCHEMA_VERSION,
           version >= MANUSCRIPT_EFFECT_SCHEMA_VERSION,
+          version >= EDITORIAL_REVIEW_SCHEMA_VERSION,
         );
       }
       terminalizeOrphanedReplacementPreviews(db);
