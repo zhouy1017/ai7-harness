@@ -41,7 +41,7 @@ The Import Fidelity Review records ten classes, in this order:
 9. 域（目录等）
 10. 预计往返
 
-The review shows the first nine as rows under the columns 内容类 · 数量 · 怎样进来 · 例子 · 以后导出. The tenth is shown as a closing 预计往返 card: it summarises what a DOCX export restores, and names the style sheet, which is kept with the file without being counted. The first seven keep the keys and labels the review already uses. A class that is absent reads `完整保留`; `完整保留（随文件保留）` names a class that is present.
+The review shows the first nine as rows under the columns 内容类 · 数量 · 怎样进来 · 例子 · 以后导出. The tenth is shown as a closing 预计往返 card: it summarises what a DOCX export restores, and names the style sheet, which is kept with the file without being counted. The first seven keep the keys the review already uses and their labels, except that 分节 is labelled 分节（含页面设置）, because page setup is counted there. A class that is absent reads `完整保留`; `完整保留（随文件保留）` names a class that is present.
 
 ### 2. The label each class carries
 
@@ -55,7 +55,7 @@ The review shows the first nine as rows under the columns 内容类 · 数量 ·
 | 分节（含页面设置） | `完整保留（随文件保留）`. Page size, margins, columns and the document grid are section properties, so page setup is counted here |
 | 页眉与页脚 | `完整保留（随文件保留）` |
 | 文本框 | `完整保留（随文件保留）`, with `保留为文本框` (the default) or `并入正文`. Kept as a text box, it stays with the file, is not shown in the manuscript, and is restored on export. Merged, its paragraphs enter the manuscript right after the paragraph that anchors it, and export no longer writes the original box. A file with a text box, refused today, can be imported |
-| 域（目录等） | `降级导入`. Every field in the body — a table of contents, a cross-reference, a hyperlink — enters as the text it currently displays, and no longer updates |
+| 域（目录等） | `降级导入`. Every field in the body — a table of contents, a cross-reference, a page number — enters as the text it currently displays, and no longer updates. A link is not counted here: it keeps its text in the manuscript, the link itself stays with the file like an inline style, and it counts among 行内样式 |
 
 Only a `降级导入` class requires IMP-005's unselected decision. A file with none imports without it, and sample1 is such a file: its 266 inline-style items and one section become `完整保留（随文件保留）`.
 
