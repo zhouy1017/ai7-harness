@@ -5,7 +5,17 @@ import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep 
 import { arch, platform, release, tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { strToU8, zipSync } from 'fflate';
-import { admittedParagraphs, composeAdmittedDocx, ADMITTED_BASELINE_DOCX } from './composed-docx.mjs';
+import {
+  admittedParagraphs,
+  admittedSpanText,
+  composeAdmittedDocx,
+  composeRevisedAdmittedDocx,
+  ADMITTED_BASELINE_DOCX,
+  IMPORTED_MARKS_AUTHOR,
+  IMPORTED_MARKS_COUNT,
+  IMPORTED_MARKS_RECIPE,
+  IMPORTED_MARKS_REJECTED_BLOCKS,
+} from './composed-docx.mjs';
 import { attachProductOutput, awaitWithinDeadline, createJ01CompletionLocation, discloseJourneySkip, installJourneyCancellationCleanup, LOCAL_ONLY_DOC, localDebugEnabled, localManuscriptAvailable, localManuscriptPath, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect } from './controller.mjs';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
@@ -1235,6 +1245,7 @@ async function runJourney(
     fidelityRows = CLEAN_FIDELITY_ROWS,
     degradationItems = [],
     textBoxDisposition = null,
+    importedMarks = 0,
   } = expectation;
   const {
     start = 'landing',
@@ -1413,9 +1424,17 @@ async function runJourney(
     `(() => { const card = document.querySelector('.roundtrip-card[data-fidelity-category="round-trip-export"]'); return card?.textContent.includes('DOCX 导出将在后续提供') && card.textContent.includes('样式表随文件保留') && !document.body.textContent.includes('不提供往返保证') && !document.body.textContent.includes('不承诺 DOCX 往返'); })()`,
     'review-roundtrip-non-effect',
   );
+  // Issue #411: an import that converts a file's comments and tracked changes also creates them, right
+  // after the block-source mapping they stand on.
+  const expectedRecords = [
+    '图书与稳定标识', '图书编辑维度集（8 项）', '源材料版本与来源记录', '导入保真审阅', ...(degraded ? ['导入降级决定'] : []),
+    '主稿件', '稿件分支', '稿件修订版 r1 与有序稳定内容块', '来源段落对应',
+    ...(importedMarks > 0 ? [`来自文件作者的批注与修改建议 ${importedMarks} 条`] : []),
+    '工作流程实例与精确方案版本绑定', '稿件导入记录',
+  ];
   await assertRenderer(
     renderer,
-    `(() => { const sections = Array.from(document.querySelectorAll('.review-section')); const exact = (heading, expected) => { const section = sections.find((item) => item.querySelector('h3')?.textContent === heading); const actual = Array.from(section?.querySelectorAll('li') ?? [], (item) => item.textContent); return actual.length === expected.length && actual.every((item, index) => item === expected[index]); }; return exact('将创建的记录', ${JSON.stringify(degraded ? ['图书与稳定标识','图书编辑维度集（8 项）','源材料版本与来源记录','导入保真审阅','导入降级决定','主稿件','稿件分支','稿件修订版 r1 与有序稳定内容块','来源段落对应','工作流程实例与精确方案版本绑定','稿件导入记录'] : ['图书与稳定标识','图书编辑维度集（8 项）','源材料版本与来源记录','导入保真审阅','主稿件','稿件分支','稿件修订版 r1 与有序稳定内容块','来源段落对应','工作流程实例与精确方案版本绑定','稿件导入记录'])}) && exact('明确不会发生', ${JSON.stringify(expectedNonEffects)}); })()`,
+    `(() => { const sections = Array.from(document.querySelectorAll('.review-section')); const exact = (heading, expected) => { const section = sections.find((item) => item.querySelector('h3')?.textContent === heading); const actual = Array.from(section?.querySelectorAll('li') ?? [], (item) => item.textContent); return actual.length === expected.length && actual.every((item, index) => item === expected[index]); }; return exact('将创建的记录', ${JSON.stringify(expectedRecords)}) && exact('明确不会发生', ${JSON.stringify(expectedNonEffects)}); })()`,
     'review-exact-effects',
   );
   await assertRenderer(
@@ -2030,6 +2049,28 @@ async function main() {
         composedDegradedSha256 !== composedTextBoxSha256,
       'composed-retention-identities',
     );
+    // Issue #411 (D8): comments, a reply, a done comment, a deletion, an insertion, a replacement, a whole
+    // paragraph inserted, a move and a formatting change, every word sample1's own and every author neutral.
+    // What the manuscript must read — the source's blocks, and one of them once the insertion is applied — is
+    // derived here from the same source and compared in the renderer, never printed.
+    const composedRevisedPath = resolve(syntheticRoot, 'imported-marks.docx');
+    await composeRevisedAdmittedDocx(composedRevisedPath, { source: ADMITTED_BASELINE_DOCX, title: '批注与修订组稿', ...IMPORTED_MARKS_RECIPE });
+    const composedRevisedInfo = await lstat(composedRevisedPath);
+    const composedRevisedSha256 = await digestFile(composedRevisedPath);
+    requireJourney(
+      composedRevisedInfo.isFile() && !composedRevisedInfo.isSymbolicLink() && composedRevisedSha256 !== SAMPLE1_SHA256 &&
+        composedRevisedSha256 !== composedDegradedSha256 && composedRevisedSha256 !== composedTextBoxSha256,
+      'composed-imported-marks-identity',
+    );
+    const importedMarksRejected = await Promise.all(IMPORTED_MARKS_REJECTED_BLOCKS.map((block) => admittedSpanText(ADMITTED_BASELINE_DOCX, { block })));
+    // The recipe's second paragraph inserts its second run's words at grapheme 20 of the source's block.
+    const insertionRun = IMPORTED_MARKS_RECIPE.paragraphs[1].runs[1];
+    requireJourney(insertionRun.revision?.kind === 'ins' && IMPORTED_MARKS_RECIPE.paragraphs[1].runs[0].text.to === 20, 'composed-imported-marks-recipe');
+    const insertedWords = await admittedSpanText(ADMITTED_BASELINE_DOCX, insertionRun.text);
+    const insertionHost = Array.from(new Intl.Segmenter('zh-CN', { granularity: 'grapheme' }).segment(importedMarksRejected[1]), ({ segment }) => segment);
+    const importedMarksAfterInsertion = importedMarksRejected.map((text, index) => index === 1
+      ? [...insertionHost.slice(0, 20), insertedWords, ...insertionHost.slice(20)].join('')
+      : text);
     const executable = electronExecutable();
     const entry = resolve(ROOT, 'dist', 'main', 'index.cjs');
     const launchProduct = async ({ dataRoot, pickerPath, importControl, launchScenario }) => {
@@ -2135,6 +2176,17 @@ async function main() {
       sourceBytes: composedTextBoxInfo.size,
       degraded: false,
       fidelityRows: CLEAN_FIDELITY_ROWS.map(([key]) => key === 'text-boxes' ? [key, 1, 'status-retained'] : [key, 0, 'status-preserved']),
+    };
+    // Issue #411 (D4): 批注与修订 is 完整保留, counted as the marks it becomes, and asks for no decision; the
+    // formatting change's bold run is the one inline style kept with the file.
+    const importedMarksExpectation = {
+      sourceSha256: composedRevisedSha256,
+      sourceBytes: composedRevisedInfo.size,
+      degraded: false,
+      fidelityRows: CLEAN_FIDELITY_ROWS.map(([key]) => key === 'inline-styles'
+        ? [key, 1, 'status-retained']
+        : key === 'comments-revisions' ? [key, IMPORTED_MARKS_COUNT, 'status-preserved'] : [key, 0, 'status-preserved']),
+      importedMarks: IMPORTED_MARKS_COUNT,
     };
     const exactSample1Expectation = {
       ...sample1Expectation,
@@ -2446,6 +2498,60 @@ async function main() {
       );
       await closeProduct();
     }
+
+    // Issue #411: a DOCX's comments and tracked changes enter as 批注 and 修改建议 whose source is the file's
+    // author (V2-UX-MARK-009). The manuscript reads as the file reads with every revision rejected, nothing
+    // is applied by importing, and 接受并应用 on the imported insertion writes its words.
+    const blockTextsExpression = (expected) =>
+      `(() => { const blocks = Array.from(document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]')); const expected = ${JSON.stringify(expected)}; return blocks.length === expected.length && blocks.every((block, index) => block.textContent === expected[index]); })()`;
+    const importedMarksRoot = await createCanonicalExternalDataRoot(resolve(runRoot, 'imported-marks-data'), checkoutRoot);
+    renderer = await launchProduct({ dataRoot: importedMarksRoot, pickerPath: composedRevisedPath, launchScenario: 'imported-marks' });
+    await runJourney(renderer, importedMarksExpectation, {
+      diagnosticReviewLocation: 'imported-marks-review',
+      diagnosticScenario: 'imported-marks',
+    });
+    at('imported-marks-record');
+    await clickExactButton(renderer, '稿件导入记录', 'imported-marks-record-open');
+    await assertRenderer(
+      renderer,
+      `(() => { const record = document.querySelector('.record-detail[data-record-kind="import-record"]'); return record?.textContent.includes('转为稿件上的批注 / 修改建议（来源：文件作者）') && record.textContent.includes('完整保留 · 原文件随来源版本保留') && !record.textContent.includes('含已接受的降级'); })()`,
+      'imported-marks-record-row',
+    );
+    at('imported-marks-editor');
+    await clickExactButton(renderer, '打开稿件', 'imported-marks-editor-open');
+    await waitFor(
+      renderer,
+      `document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]').length === ${IMPORTED_MARKS_REJECTED_BLOCKS.length}`,
+      'imported-marks-blocks',
+    );
+    await assertRenderer(renderer, blockTextsExpression(importedMarksRejected), 'imported-marks-rejected-reading');
+    // Seven marks, all the file's author's: three 修改建议 and four 批注, the insertion drawn as a point named by
+    // the words it would write and the done comment drawn resolved.
+    await waitFor(
+      renderer,
+      `(() => { const editor = document.querySelector('[data-testid="manuscript-editor"]'); const nodes = Array.from(editor?.querySelectorAll('[data-mark-id]') ?? []); const idsOf = (kind) => new Set(nodes.filter((node) => node.dataset.markKind === kind).map((node) => node.dataset.markId)); const point = editor?.querySelector('[data-mark-point="insertion"]'); return new Set(nodes.map((node) => node.dataset.markId)).size === ${IMPORTED_MARKS_COUNT} && nodes.every((node) => node.dataset.markSource === 'imported-author') && idsOf('change-suggestion').size === 3 && idsOf('annotation').size === 4 && point?.getAttribute('aria-label')?.startsWith('待插入「') === true && point.dataset.markStatus === 'open' && nodes.some((node) => node.dataset.markKind === 'annotation' && node.dataset.markStatus === 'resolved'); })()`,
+      'imported-marks-drawn',
+    );
+    at('imported-marks-apply');
+    await assertRenderer(
+      renderer,
+      `(() => { const point = document.querySelector('[data-testid="manuscript-editor"] [data-mark-point="insertion"]'); if (!point) return false; point.click(); return true; })()`,
+      'imported-marks-insertion-open',
+    );
+    await waitFor(
+      renderer,
+      `(() => { const card = document.querySelector('[data-mark-card]'); return card?.querySelector('[data-mark-change="insert"]')?.textContent.startsWith('在此插入「') === true && card.querySelector('.editorial-mark-source')?.textContent.startsWith(${JSON.stringify(`${IMPORTED_MARKS_AUTHOR}（导入文件的作者）`)}) === true && card.querySelector('[data-mark-state]')?.textContent === '待你处理' && card.querySelector('[data-mark-action="convert-annotation"]')?.disabled === true && document.querySelector('[data-mark-preview]') !== null; })()`,
+      'imported-marks-insertion-card',
+    );
+    // Opening the card previewed the insertion; the manuscript itself is still the rejected reading.
+    await assertRenderer(
+      renderer,
+      `(() => { const accept = document.querySelector('[data-mark-card] [data-mark-action="accept-and-apply"]'); if (!(accept instanceof HTMLButtonElement) || accept.disabled) return false; accept.click(); return true; })()`,
+      'imported-marks-accept-and-apply',
+    );
+    await waitFor(renderer, `document.querySelector('[data-mark-card] [data-mark-state]')?.textContent === '已应用' && document.querySelector('[data-mark-preview]') === null`, 'imported-marks-applied');
+    await assertRenderer(renderer, blockTextsExpression(importedMarksAfterInsertion), 'imported-marks-insertion-written');
+    await closeProduct();
 
     // A PDF has no honest editable round trip, so intake identifies it from its bytes, refuses it as
     // an editable Manuscript with the reason stated, and offers only source-only retention
