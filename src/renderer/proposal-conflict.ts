@@ -715,15 +715,19 @@ export function mountProposalConflict(options: MountProposalConflictOptions): Pr
     return unit === undefined ? `toolbar:${action}` : `${unit}:${action}`;
   }
 
+  /**
+   * Focus stays on the control that acted, once drawn again; a control that is gone or now unavailable —
+   * 撤销 with nothing left to undo — hands focus to its unit's heading, or the first unit's.
+   */
   function restoreFocus(section: HTMLElement, key: string): void {
     const [scope, action] = key.split(':');
     const within = scope === 'toolbar' ? section.querySelector<HTMLElement>('[data-draft-toolbar]') : section.querySelector<HTMLElement>(`[data-draft-unit="${scope}"]`);
     const target = within?.querySelector<HTMLElement>(`[data-conflict-action="${action}"]`);
-    if (target instanceof HTMLButtonElement && target.disabled) {
-      within?.querySelector<HTMLElement>('[data-draft-unit-heading]')?.focus();
+    if (target === null || target === undefined || (target instanceof HTMLButtonElement && target.disabled)) {
+      (within?.querySelector<HTMLElement>('[data-draft-unit-heading]') ?? section.querySelector<HTMLElement>('[data-draft-unit-heading]'))?.focus();
       return;
     }
-    target?.focus();
+    target.focus();
   }
 
   function onKeyDown(event: KeyboardEvent): void {
