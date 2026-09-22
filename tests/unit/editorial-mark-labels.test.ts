@@ -2,6 +2,9 @@ import { describe, expect, it } from 'vitest';
 import {
   DECISION_REASON_CHIPS,
   MARK_KIND_LABELS,
+  RESOLVE_CONFLICT_LABEL,
+  REVERSAL_CORRECTION_LINE,
+  SAFE_MERGE_LINE,
   markDriftNote,
   markPointLabel,
   markSourceLine,
@@ -60,6 +63,37 @@ describe('the wording of the Mark surface', () => {
     expect(markStateLabel({ ...suggestionState(null), status: 'applied', anchorState: 'drifted' })).toBe('已应用 · 之后又改过');
     expect(markStateLabel({ kind: 'annotation', status: 'resolved', anchorState: 'exact', suggestion: null })).toBe('已处理');
     expect(markStateLabel({ kind: 'editor-note', status: 'open', anchorState: 'exact', suggestion: null })).toBe('仅自己可见');
+  });
+
+  it('names a version saved from a conflict for what it came from, not as a conversion (Issue #57)', () => {
+    const convertedFrom = { markId: 'mark', kind: 'change-suggestion', sourceKind: 'ai7' } as const;
+    expect(markSourceLine({ source: editor, convertedFrom, resolvedFrom: { markId: 'mark', conflictKind: 'suggestion' } })).toBe('你 · 由冲突解决生成的新版本');
+    expect(markSourceLine({ source: editor, convertedFrom: null, resolvedFrom: { markId: 'mark', conflictKind: 'reversal' } })).toBe('你 · 由撤销冲突生成的更正建议');
+    expect(markSourceLine({ source: editor, convertedFrom, resolvedFrom: null })).toBe('你 · 由 AI7 的修改建议转来');
+  });
+
+  it('says where a conflict stands on the card: deferred with its time, and kept as the manuscript is (ADR 0085 §3)', () => {
+    const deferredAt = new Date(2026, 8, 22, 9, 5).toISOString();
+    const conflict = (state: 'unresolved' | 'deferred' | 'resolved', outcome: 'keep-current' | 'new-version' | null, kind: 'suggestion' | 'reversal' = 'suggestion') => ({
+      kind, state, deferredAt: state === 'deferred' ? deferredAt : null, outcome, newMarkId: null, resolvedAt: null,
+    });
+    const drifted = { ...suggestionState(null), anchorState: 'drifted' as const };
+    expect(markStateLabel({ ...drifted, conflict: conflict('unresolved', null) })).toBe('待你处理 · 原文已变');
+    expect(markStateLabel({ ...drifted, conflict: conflict('deferred', null) })).toBe('待你处理 · 原文已变 · 暂不处理 · 9月22日 09:05');
+    expect(markStateLabel({ ...suggestionState('accepted-with-edit'), anchorState: 'drifted', conflict: conflict('deferred', null) }))
+      .toBe('已记录 · 尚未写入稿件 · 原文已变 · 暂不处理 · 9月22日 09:05');
+    expect(markStateLabel({ ...suggestionState('rejected'), anchorState: 'drifted', conflict: conflict('resolved', 'keep-current') })).toBe('已拒绝 · 保留当前稿件');
+    expect(markStateLabel({ ...suggestionState('rejected'), anchorState: 'drifted', conflict: null })).toBe('已拒绝 · 原文已变');
+    const applied = { ...suggestionState(null), status: 'applied' as const, anchorState: 'drifted' as const };
+    expect(markStateLabel({ ...applied, conflict: conflict('deferred', null, 'reversal') })).toBe('已应用 · 之后又改过 · 暂不处理 · 9月22日 09:05');
+    expect(markStateLabel({ ...applied, conflict: conflict('resolved', 'keep-current', 'reversal') })).toBe('已保留当前稿件');
+    expect(markStateLabel({ ...applied, conflict: conflict('resolved', 'new-version', 'reversal') })).toBe('已应用 · 之后又改过');
+  });
+
+  it('words the conflict entry, the §2 line and a reversal\'s correction exactly', () => {
+    expect(RESOLVE_CONFLICT_LABEL).toBe('解决冲突…');
+    expect(SAFE_MERGE_LINE).toBe('本段后来改过别处，没有碰到这条建议的原文');
+    expect(REVERSAL_CORRECTION_LINE).toBe('已为这处冲突生成更正建议；它在稿件上等你处理，尚未应用。');
   });
 
   it('says what reversing an Apply will write, and writes a deletion\'s words in again where they were', () => {
