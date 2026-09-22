@@ -213,10 +213,19 @@ export function recordParagraphText(
   });
 }
 
-/** One block as the collector needs it: its position, and its text split into graphemes. */
-interface CollectedBlock {
-  position: number;
-  graphemes: string[];
+/**
+ * One block as the collector needs it: its position and text, split into graphemes only once a mark needs
+ * them, so a file without comments or revisions segments nothing it did not already segment.
+ */
+class CollectedBlock {
+  #graphemes: string[] | undefined;
+
+  constructor(readonly position: number, readonly text: string) {}
+
+  get graphemes(): string[] {
+    this.#graphemes ??= graphemesOf(this.text);
+    return this.#graphemes;
+  }
 }
 
 /** The grapheme index of a raw offset into a paragraph whose block text is `text`. */
@@ -376,7 +385,7 @@ export class ImportedMarkCollector {
    * text. `raw` is its rejected-reading text before normalization and `text` the block text.
    */
   closeParagraph(revisions: ParagraphRevisions, raw: string, block: { position: number; text: string } | null): void {
-    const collected = block === null ? null : { position: block.position, graphemes: graphemesOf(block.text) };
+    const collected = block === null ? null : new CollectedBlock(block.position, block.text);
     if (collected !== null) {
       for (const id of this.#waiting.splice(0)) {
         const anchor = this.#comments.get(id);
@@ -388,13 +397,19 @@ export class ImportedMarkCollector {
     const at = (offset: number): number => block === null ? 0 : graphemeAt(raw, offset, block.text, collected!.graphemes);
     for (const marker of revisions.commentMarkers) this.#commentMarker(marker.id, marker.role, collected, at(marker.raw));
 
-    const accept = normalizeParagraph(revisions.accept);
+    // A paragraph no revision touches reads the same both ways: its accepted reading is its block text.
+    const revised = revisions.markRevision !== null || revisions.segments.some((segment) => segment.kind !== 'plain');
+    const accept = revised ? normalizeParagraph(revisions.accept) : block?.text ?? '';
     const kept = collected !== null && accept.length > 0;
     const pending = this.#pendingParagraphMark;
     this.#pendingParagraphMark = undefined;
     if (pending !== undefined && kept) {
       this.#note(pending.block, 'last', pending.kind === 'del' ? PARAGRAPH_MERGE_BODY : PARAGRAPH_SPLIT_BODY, pending.identity,
         pending.kind === 'del' ? 'paragraph-merge' : 'paragraph-split');
+    }
+    if (!revised) {
+      if (collected !== null) this.#lastBlock = collected;
+      return;
     }
 
     const first = (kind: Segment['kind']): Segment | undefined => revisions.segments.find((segment) => segment.kind === kind);
