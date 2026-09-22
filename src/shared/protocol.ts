@@ -1,6 +1,6 @@
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 
-export const SERVICE_PROTOCOL_VERSION = 37 as const;
+export const SERVICE_PROTOCOL_VERSION = 38 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -93,6 +93,9 @@ export const IPC_CHANNELS = {
   applyChangeSuggestionBatch: 'ai7:j05:apply-change-suggestion-batch',
   reverseAppliedChangeSuggestion: 'ai7:j05:reverse-applied-change-suggestion',
   getManuscriptApplyOutcome: 'ai7:j05:get-manuscript-apply-outcome',
+  inspectProposalConflict: 'ai7:j06:inspect-proposal-conflict',
+  saveProposalConflictDraft: 'ai7:j06:save-proposal-conflict-draft',
+  resolveProposalConflict: 'ai7:j06:resolve-proposal-conflict',
   getManuscriptRail: 'ai7:j02:get-manuscript-rail',
   runEditorClipboardCommand: 'ai7:j05:run-editor-clipboard-command',
   listPriorWork: 'ai7:j02:list-prior-work',
@@ -4987,6 +4990,14 @@ export interface ServiceOperationMap {
     input: { manuscriptId: string; branchId: string; clientEffectId: string };
     output: ManuscriptApplyOutcomeProjection;
   };
+  /**
+   * 稿件冲突 of one 修改建议 (Issue #57, plan slice S22; ADR 0085). The read compares the three texts; the
+   * Resolution Draft is saved on exactly the basis the editor saw; the conflict is left by 保留当前稿件,
+   * 暂不处理 or 保存为新提案版本. None of them writes the manuscript.
+   */
+  inspectProposalConflict: { input: ProposalConflictBindingInput; output: ProposalConflictProjection };
+  saveProposalConflictDraft: { input: SaveProposalConflictDraftInput; output: ProposalConflictDraftSaveProjection };
+  resolveProposalConflict: { input: ResolveProposalConflictInput; output: ProposalConflictResolutionProjection };
   getManuscriptRail: { input: { manuscriptId: string; branchId: string }; output: ManuscriptRailProjection };
   /**
    * Remember where the editor is, so the next entry into this Book returns there (V2-UX-RET-002).
@@ -5202,6 +5213,12 @@ export interface RendererApi {
   applyChangeSuggestionBatch(input: ApplyChangeSuggestionBatchInput): Promise<ManuscriptApplyCommandProjection>;
   reverseAppliedChangeSuggestion(input: ReverseAppliedChangeSuggestionInput): Promise<ManuscriptApplyCommandProjection>;
   getManuscriptApplyOutcome(input: ServiceOperationMap['getManuscriptApplyOutcome']['input']): Promise<ManuscriptApplyOutcomeProjection>;
+  /** 稿件冲突 of one 修改建议 of the manuscript the window is showing (Issue #57). */
+  inspectProposalConflict(input: ProposalConflictBindingInput): Promise<ProposalConflictProjection>;
+  /** Save the Resolution Draft; it never writes the manuscript. */
+  saveProposalConflictDraft(input: SaveProposalConflictDraftInput): Promise<ProposalConflictDraftSaveProjection>;
+  /** 确认保留当前稿件, 暂不处理, or 保存为新提案版本; none of them writes the manuscript. */
+  resolveProposalConflict(input: ResolveProposalConflictInput): Promise<ProposalConflictResolutionProjection>;
   getManuscriptRail(input: ServiceOperationMap['getManuscriptRail']['input']): Promise<ManuscriptRailProjection>;
   /** Cut, copy or paste in the focused editor through the window itself; the page has no clipboard permission. */
   runEditorClipboardCommand(input: { command: EditorClipboardCommand }): Promise<{ state: 'done' }>;

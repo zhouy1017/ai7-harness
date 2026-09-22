@@ -594,6 +594,13 @@ async function dispatch(
         op: request.op,
         result: store.getManuscriptApplyOutcome(request.input.manuscriptId, request.input.branchId, request.input.clientEffectId),
       };
+    // 稿件冲突 (Issue #57, plan slice S22): one read and two records, none of which writes the manuscript.
+    case 'inspectProposalConflict':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectProposalConflict(request.input) };
+    case 'saveProposalConflictDraft':
+      return { id: request.id, ok: true, op: request.op, result: store.saveProposalConflictDraft(request.input) };
+    case 'resolveProposalConflict':
+      return { id: request.id, ok: true, op: request.op, result: store.resolveProposalConflict(request.input) };
     case 'recordManuscriptEntryPosition':
       store.recordManuscriptEntryPosition(
         request.input.manuscriptId,

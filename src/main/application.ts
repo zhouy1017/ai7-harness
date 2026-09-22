@@ -1734,6 +1734,53 @@ function registerRendererHandlers(
       return service.call('getManuscriptApplyOutcome', input);
     }),
   );
+  // 稿件冲突 (Issue #57, plan slice S22) is a record about one manuscript's 修改建议, so each operation is gated
+  // exactly as the mark commands are — the window's manuscript capability within the route's Book — and
+  // the two that record are serialized with every other effect of this window's authority. The answer
+  // must be of that Book and that manuscript. None of them writes the manuscript.
+  const requireConflictOfCapability = <T extends { manuscriptId: string; branchId: string }>(
+    capability: { bookId: string; manuscriptId: string; branchId: string },
+    result: T & { bookId?: string },
+  ): T => {
+    if (result.bookId !== undefined && result.bookId !== capability.bookId) {
+      throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '稿件冲突不属于当前图书工作台。');
+    }
+    requireResourceIdentity(capability, result);
+    return result;
+  };
+  ipcMain.handle(IPC_CHANNELS.inspectProposalConflict, (event, input: ServiceOperationMap['inspectProposalConflict']['input']) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      requireAuthority();
+      const capability = requireManuscriptCapability(owned, input);
+      return requireConflictOfCapability(capability, await service.call('inspectProposalConflict', input));
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.saveProposalConflictDraft, (event, input: ServiceOperationMap['saveProposalConflictDraft']['input']) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      return serializeEffect(async () => {
+        requireAuthority();
+        const capability = requireManuscriptCapability(owned, input);
+        const result = await service.call('saveProposalConflictDraft', input);
+        if (result.markId !== input.markId) throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '解决草稿不属于这处冲突。');
+        requireConflictOfCapability(capability, { manuscriptId: input.manuscriptId, branchId: input.branchId });
+        return result;
+      });
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.resolveProposalConflict, (event, input: ServiceOperationMap['resolveProposalConflict']['input']) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      return serializeEffect(async () => {
+        requireAuthority();
+        requireManuscriptCapability(owned, input);
+        const result = await service.call('resolveProposalConflict', input);
+        if (result.markId !== input.markId) throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '处理结果不属于这处冲突。');
+        return result;
+      });
+    }),
+  );
   ipcMain.handle(IPC_CHANNELS.getManuscriptRail, (event, input: ServiceOperationMap['getManuscriptRail']['input']) =>
     envelope(async () => {
       const owned = requireSender(event);
