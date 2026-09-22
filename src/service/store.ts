@@ -3,8 +3,12 @@ import { closeSync, constants, createReadStream, fstatSync, lstatSync, openSync,
 import { copyFile, lstat, open, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { basename, extname, isAbsolute, posix, relative, resolve, sep } from 'node:path';
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
-import { J03_TASK_GOAL, MAX_BLOCK_CODE_UNITS, MAX_FRAME_BYTES, isReviewCategoryKindId } from '../shared/protocol.js';
+import { J03_TASK_GOAL, MAX_BLOCK_CODE_UNITS, MAX_FRAME_BYTES, isReviewCategoryKindId, resolveMilestonePurpose } from '../shared/protocol.js';
 import type {
+  DeliverablesProjection,
+  DesignatePublicationVersionInput,
+  MilestonePurposeKind,
+  PublicationDesignationProjection,
   BookCreationCommitProjection,
   BookCreationReviewProjection,
   BookHistoryCursor,
@@ -128,6 +132,7 @@ import {
 } from './text-manuscript.js';
 import { initializeManuscriptEffectSchema, ManuscriptApplyStore } from './manuscript-apply.js';
 import { initializeReviewRunSchema, ReviewRunError, ReviewRunStore, type ReviewRunPreparationProgress } from './review/review-runs.js';
+import { initializePublicationVersionSchema, PublicationVersionError, PublicationVersionStore } from './publication-versions.js';
 import type { ReviewRunDriveSteps } from './review/review-run-driver.js';
 import { reviewCategoryContractInput, type ReviewCategoryConfigurationEntry } from './review/category-configuration.js';
 import { reviewCategoryKindDefinition } from './review/review-category-kind.js';
@@ -181,6 +186,7 @@ import {
   J04_BASELINE_ANALYSIS_SCHEMA_VERSION,
   MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION,
   MANUSCRIPT_INTAKE_SCHEMA_VERSION,
+  PUBLICATION_VERSION_SCHEMA_VERSION,
   SUCCESSIVE_TASK_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_VERSION,
   TEXT_CONVERSION_SCHEMA_VERSION,
@@ -1375,7 +1381,8 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION ||
       currentVersion === EDITORIAL_MARK_SCHEMA_VERSION ||
       currentVersion === MANUSCRIPT_EFFECT_SCHEMA_VERSION ||
-      currentVersion === EDITORIAL_REVIEW_SCHEMA_VERSION,
+      currentVersion === EDITORIAL_REVIEW_SCHEMA_VERSION ||
+      currentVersion === PUBLICATION_VERSION_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -1399,7 +1406,8 @@ function initializeSchema(db: DatabaseSync): void {
     currentVersion === MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION ||
     currentVersion === EDITORIAL_MARK_SCHEMA_VERSION ||
     currentVersion === MANUSCRIPT_EFFECT_SCHEMA_VERSION ||
-    currentVersion === EDITORIAL_REVIEW_SCHEMA_VERSION
+    currentVersion === EDITORIAL_REVIEW_SCHEMA_VERSION ||
+    currentVersion === PUBLICATION_VERSION_SCHEMA_VERSION
   ) return;
   if (currentVersion === 1) {
     migrateSchemaV1ToV2(db);
@@ -1737,7 +1745,8 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === TEXT_CONVERSION_SCHEMA_VERSION || version === FACTUAL_REVIEW_SCHEMA_VERSION ||
       version === MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION || version === EDITORIAL_MARK_SCHEMA_VERSION ||
       version === MANUSCRIPT_EFFECT_SCHEMA_VERSION ||
-      version === EDITORIAL_REVIEW_SCHEMA_VERSION,
+      version === EDITORIAL_REVIEW_SCHEMA_VERSION ||
+      version === PUBLICATION_VERSION_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -1750,7 +1759,8 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === TEXT_CONVERSION_SCHEMA_VERSION || version === FACTUAL_REVIEW_SCHEMA_VERSION ||
       version === MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION || version === EDITORIAL_MARK_SCHEMA_VERSION ||
       version === MANUSCRIPT_EFFECT_SCHEMA_VERSION ||
-      version === EDITORIAL_REVIEW_SCHEMA_VERSION) return;
+      version === EDITORIAL_REVIEW_SCHEMA_VERSION ||
+      version === PUBLICATION_VERSION_SCHEMA_VERSION) return;
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
   );
@@ -1855,7 +1865,8 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === TEXT_CONVERSION_SCHEMA_VERSION || version === FACTUAL_REVIEW_SCHEMA_VERSION ||
       version === MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION || version === EDITORIAL_MARK_SCHEMA_VERSION ||
       version === MANUSCRIPT_EFFECT_SCHEMA_VERSION ||
-      version === EDITORIAL_REVIEW_SCHEMA_VERSION,
+      version === EDITORIAL_REVIEW_SCHEMA_VERSION ||
+      version === PUBLICATION_VERSION_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -1867,7 +1878,8 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === TEXT_CONVERSION_SCHEMA_VERSION || version === FACTUAL_REVIEW_SCHEMA_VERSION ||
       version === MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION || version === EDITORIAL_MARK_SCHEMA_VERSION ||
       version === MANUSCRIPT_EFFECT_SCHEMA_VERSION ||
-      version === EDITORIAL_REVIEW_SCHEMA_VERSION) return;
+      version === EDITORIAL_REVIEW_SCHEMA_VERSION ||
+      version === PUBLICATION_VERSION_SCHEMA_VERSION) return;
   validateSourceImportSchemaTruth(db, profile);
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
@@ -2160,7 +2172,7 @@ function validateModelServiceSchema(
   const version = asNumber(
     one(db.prepare('PRAGMA user_version').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取数据库版本。').user_version,
   );
-  if (validateStoreTruth || version !== EDITORIAL_REVIEW_SCHEMA_VERSION) {
+  if (validateStoreTruth || version !== PUBLICATION_VERSION_SCHEMA_VERSION) {
     validateManuscriptReimportSchemaTruth(
       db,
       profile,
@@ -2174,6 +2186,7 @@ function validateModelServiceSchema(
       version >= EDITORIAL_MARK_SCHEMA_VERSION,
       version >= MANUSCRIPT_EFFECT_SCHEMA_VERSION,
       version >= EDITORIAL_REVIEW_SCHEMA_VERSION,
+      version >= PUBLICATION_VERSION_SCHEMA_VERSION,
     );
   }
   const invalid = db.prepare(
@@ -2213,7 +2226,8 @@ function initializeModelServiceSchema(
       version === TEXT_CONVERSION_SCHEMA_VERSION || version === FACTUAL_REVIEW_SCHEMA_VERSION ||
       version === MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION || version === EDITORIAL_MARK_SCHEMA_VERSION ||
       version === MANUSCRIPT_EFFECT_SCHEMA_VERSION ||
-      version === EDITORIAL_REVIEW_SCHEMA_VERSION,
+      version === EDITORIAL_REVIEW_SCHEMA_VERSION ||
+      version === PUBLICATION_VERSION_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2225,7 +2239,8 @@ function initializeModelServiceSchema(
       version === TEXT_CONVERSION_SCHEMA_VERSION || version === FACTUAL_REVIEW_SCHEMA_VERSION ||
       version === MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION || version === EDITORIAL_MARK_SCHEMA_VERSION ||
       version === MANUSCRIPT_EFFECT_SCHEMA_VERSION ||
-      version === EDITORIAL_REVIEW_SCHEMA_VERSION) {
+      version === EDITORIAL_REVIEW_SCHEMA_VERSION ||
+      version === PUBLICATION_VERSION_SCHEMA_VERSION) {
     validateModelServiceSchema(db, profile, validateStoreTruth);
     if (version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION) {
       validateEditorialWorkspaceProfileNativeSchema(db);
@@ -2969,6 +2984,7 @@ export class EditorialStore {
   readonly #editorialMarks: EditorialMarkStore;
   readonly #manuscriptApply: ManuscriptApplyStore;
   readonly #reviewRuns: ReviewRunStore;
+  readonly #publicationVersions: PublicationVersionStore;
   readonly #workflowProfile: BuiltInWorkflowProfile;
   readonly #lifetimeId: string;
   readonly #control: StoreControl;
@@ -3016,6 +3032,7 @@ export class EditorialStore {
       ledgerOf: (entry) => this.#reviewLedgerOf(entry),
       baseline: () => this.#baselineAnalysis,
     });
+    this.#publicationVersions = new PublicationVersionStore(authority);
     this.#workflowProfile = workflowProfile;
     this.#lifetimeId = lifetimeId;
     this.#control = control;
@@ -3071,13 +3088,15 @@ export class EditorialStore {
       // and again for the entry-position relation revision 21 adds, the editorial-mark relations
       // revision 22 adds and the manuscript-effect relations revision 23 adds. Revision 24 (Issue
       // #417) adds the Review Run relations here, and `initializeTaskAuthorizationSchema` rebuilds the
-      // three kind-coupled analysis relations for the review-category kind family and stamps the version.
+      // three kind-coupled analysis relations for the review-category kind family. Revision 25 (Issue
+      // #414) adds the Publication Version relations here, and the version stamp is the only other move.
       initializeManuscriptIntakeSchema(authority);
       initializeTextConversionSchema(authority);
       initializeManuscriptEntryPositionSchema(authority);
       initializeEditorialMarkSchema(authority);
       initializeManuscriptEffectSchema(authority);
       initializeReviewRunSchema(authority);
+      initializePublicationVersionSchema(authority);
       initializeTaskAuthorizationSchema(authority);
       initializeBoundedSchema(authority, workflowProfile);
       validateEditorialWorkspaceProfileSchema(authority);
@@ -8224,18 +8243,26 @@ export class EditorialStore {
     return { previewId, state: 'cancelled' };
   }
 
+  /**
+   * 保存里程碑版本. The purpose is one of the four frozen purposes or the editor's own words (Issue
+   * #414); either way it is stored as words — a frozen purpose as its own label — so the bounded store
+   * keeps its one purpose rule and every milestone reads its kind back from what it holds.
+   */
   async saveMilestone(
     manuscriptId: string,
     branchId: string,
     label: string,
-    purpose: string,
+    purposeKind: MilestonePurposeKind,
+    purpose: string | null,
     note: string,
   ): Promise<MilestoneProjection> {
     this.#assertAvailable();
+    const resolved = resolveMilestonePurpose(purposeKind, purpose);
+    requireStore(resolved !== null, 'MILESTONE_INVALID', '请选择里程碑用途，或自行输入 1–120 个字符。');
     let result: MilestoneProjection | undefined;
     await this.#withRecoveryObjectLifecycle(async () => {
       const plan = this.#boundedCall(() =>
-        this.#boundedAuthority.prepareMilestoneRecoverySnapshot(manuscriptId, branchId, label, purpose, note));
+        this.#boundedAuthority.prepareMilestoneRecoverySnapshot(manuscriptId, branchId, label, resolved.purpose, note));
       const object = await this.#recoveryObjects.form(
         plan,
         (afterPosition) => this.#boundedCall(() =>
@@ -8252,6 +8279,21 @@ export class EditorialStore {
     });
     requireStore(result !== undefined, 'MILESTONE_INVALID', '里程碑与恢复快照未产生结果。');
     return result;
+  }
+
+  // ---- ⑥ 交付物 · 发稿 (Issue #414, plan slice S65) -------------------------------------------------
+
+  /** The 交付物 of one Book: its Manuscript's milestones, its Publication Versions, and what followed them. */
+  inspectDeliverables(bookId: string): DeliverablesProjection {
+    return this.#publicationCall(() => this.#publicationVersions.deliverables(bookId));
+  }
+
+  /**
+   * 设为发稿版本 over one exact milestone of the Book's primary Manuscript: the designation, its internal
+   * Public Release Permission and its two events in one transaction, or no change for an identical repeat.
+   */
+  designatePublicationVersion(input: DesignatePublicationVersionInput): PublicationDesignationProjection {
+    return this.#publicationCall(() => this.#publicationVersions.designate(input));
   }
 
   undoManuscript(manuscriptId: string, branchId: string, expectedWorkingDigest: string): DurableHistoryProjection {
@@ -11240,6 +11282,25 @@ export class EditorialStore {
         throw new StoreFatalError(error);
       }
       if (error instanceof BoundedStoreError) throw new StoreError(error.code, error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * A 交付物 call: a refusal of the publication ledger (or of the canonical form it records in) is the
+   * caller's `StoreError`; a rollback that itself failed leaves the connection in doubt and poisons the
+   * store, exactly as `#transaction` does.
+   */
+  #publicationCall<T>(operation: () => T): T {
+    this.#assertAvailable();
+    try {
+      return operation();
+    } catch (error) {
+      if (error instanceof PublicationVersionError || error instanceof AnalysisError) throw new StoreError(error.code, error.message);
+      if (error instanceof AggregateError) {
+        this.#poisoned = true;
+        throw new StoreFatalError(error);
+      }
       throw error;
     }
   }

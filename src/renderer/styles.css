@@ -311,6 +311,52 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .review-pill-blocked { background: #f3e4e0; color: #753a31; }
 .review-pill-progress { background: #e3ecf6; color: #2f4a6b; }
 .review-pill-neutral { background: #f1ede3; color: #50574e; }
+/* ⑥ 交付物 (editor-surfaces §9): the 发稿 · 稿件 block in the analysis family's card. Its lists and its form
+   wrap rather than scroll sideways, and the 发稿版本 mark, the current item and the change notice each speak
+   by a border and their words as well as by colour, so they still read in forced colours. */
+.deliverables-publication { margin-top: 1.3rem; padding: 1.15rem 1.25rem; border: 1px solid #c9d6d2; border-radius: 12px; background: #f4f9f7; overflow-wrap: anywhere; }
+.deliverables-publication h3, .deliverables-publication h4 { margin: 0; }
+.deliverables-manuscript-line { margin: .45rem 0 0; }
+.milestone-list-section, .publication-versions-section, .publication-designate-area { margin-top: 1rem; padding-top: 1rem; border-top: 1px solid #d5dcd9; }
+.milestone-list-section > p, .publication-versions-section > p { margin: .45rem 0 0; }
+.milestone-list, .publication-versions { display: grid; gap: .5rem; margin: .55rem 0 0; padding-left: 1.4rem; }
+.milestone-list > li, .publication-versions > li { min-width: 0; padding: .6rem .7rem; border: 1px solid #d5dcd9; border-radius: 9px; background: #fffdf8; }
+.milestone-list > li[data-publication-current="true"], .publication-versions > li[data-publication-current="true"] { border-color: #2f5d8a; box-shadow: inset 3px 0 0 #2f5d8a; }
+.milestone-heading, .publication-version-heading { display: flex; flex-wrap: wrap; align-items: center; gap: .3rem .6rem; }
+.milestone-list p, .publication-versions p { margin: .3rem 0 0; }
+.milestone-meta, .publication-recorded { color: #4e564c; font-size: .9rem; }
+.milestone-changed-since { color: #76530f; font-weight: 700; }
+.publication-version-mark, .publication-current-mark { display: inline-flex; align-items: center; padding: .1rem .55rem; border: 1.5px solid #2f5d8a; border-radius: 999px; background: #e3ecf6; color: #2f4a6b; font-size: .84rem; font-weight: 800; }
+.publication-change-notice { margin: .8rem 0 0; }
+.publication-actuals-prompt { margin: 1rem 0 0; padding: .55rem .7rem; border: 1px dashed #9bb0a8; border-radius: 9px; background: #fffdf8; color: #4e564c; }
+.publication-designate-row { margin-top: 0; }
+.publication-unavailable-reason { margin: 0; }
+.publication-designate { margin-top: .8rem; padding: .8rem .9rem; border: 1px dashed #9bb0a8; border-radius: 10px; background: #fffdf8; }
+.publication-designate h4 { margin: 0; }
+.publication-designate fieldset { min-width: 0; margin: .7rem 0 0; }
+.publication-designate legend { margin-bottom: .45rem; font-size: .95rem; }
+.publication-milestone-options { display: grid; gap: .45rem; }
+.publication-milestone-option { display: flex; align-items: flex-start; gap: .6rem; min-width: 0; padding: .55rem .7rem; border: 1px solid #d5dcd9; border-radius: 9px; background: white; cursor: pointer; }
+.publication-milestone-option:has(input:checked) { border-color: #416458; box-shadow: inset 0 0 0 1px #416458; background: #f4f7f1; }
+.publication-milestone-option input { flex: none; width: 18px; height: 18px; margin-top: .2rem; }
+.publication-milestone-option-text { display: grid; gap: .15rem; min-width: 0; }
+.publication-milestone-option-meta { color: #4e564c; font-size: .9rem; }
+.publication-designate-summary { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: .45rem .8rem; margin: .8rem 0 0; padding: .7rem .8rem; border: 1px solid #d5dcd9; border-radius: 9px; background: #f4f9f7; }
+.publication-field { display: grid; gap: .25rem; margin: .8rem 0 0; font-weight: 700; }
+.publication-field input, .publication-field textarea { width: 100%; padding: .55rem .65rem; border: 1px solid #90998d; border-radius: 8px; background: white; color: #242720; font: inherit; font-weight: 400; }
+.publication-field textarea { resize: vertical; }
+.publication-field [aria-invalid="true"] { border-color: #9b3d35; box-shadow: 0 0 0 1px #9b3d35; }
+.publication-field .field-note { margin-top: 0; font-weight: 400; }
+.publication-field-problem, .publication-problem { margin: .35rem 0 0; color: #842f28; font-weight: 700; }
+.publication-field-problem[hidden], .publication-problem[hidden], .publication-confirm-reason[hidden] { display: none; }
+.publication-statement { margin: .9rem 0 0; padding: .6rem .75rem; border-left: 4px solid #416458; background: #f1f4ec; font-weight: 800; }
+.publication-designate-actions { margin-top: .7rem; }
+.publication-confirm-reason { margin: 0; }
+.book-deliverables textarea:focus-visible { outline: 3px solid #416458; outline-offset: 2px; }
+.deliverables-facts { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: .45rem .8rem; margin: .6rem 0 0; }
+.book-deliverables-summary { margin-top: 1.3rem; padding: 1rem 1.15rem; border: 1px solid #c9d6d2; border-radius: 12px; background: #f4f9f7; }
+.book-deliverables-summary h3 { margin: 0; }
+.book-deliverables-summary p { margin: .45rem 0 .7rem; overflow-wrap: anywhere; }
 dt { color: #6b7068; font-size: .86rem; }
 dd { margin: 0; overflow-wrap: anywhere; }
 /* The Technical Identity Layer (V2-UX-LAYER-001). One rank below the decision content beside it — the
@@ -337,7 +383,7 @@ legend { margin-bottom: .7rem; font-weight: 800; }
 
 .form-row { margin-top: 1.35rem; }
 .form-row label { display: block; margin-bottom: .45rem; font-weight: 800; }
-.form-row input, .navigator-section input:not([type="checkbox"]):not([type="range"]) { width: 100%; border: 1px solid #90998d; border-radius: 8px; padding: .72rem .8rem; background: white; color: #242720; }
+.form-row input, .navigator-section input:not([type="checkbox"]):not([type="radio"]):not([type="range"]) { width: 100%; border: 1px solid #90998d; border-radius: 8px; padding: .72rem .8rem; background: white; color: #242720; }
 .form-row input[aria-invalid="true"] { border-color: #9b3d35; box-shadow: 0 0 0 1px #9b3d35; }
 .field-error { margin: .4rem 0 .8rem; color: #842f28; font-size: .88rem; font-weight: 700; }
 .field-error[hidden] { display: none; }
@@ -461,6 +507,15 @@ legend { margin-bottom: .7rem; font-weight: 800; }
 .replacement-review p { margin: .35rem 0; overflow-wrap: anywhere; }
 .replacement-review ul { max-height: 140px; overflow: auto; padding-left: 1.2rem; }
 .milestone-section summary { cursor: pointer; font-weight: 800; }
+/* The milestone form's purpose cards (V2-UX-MILE-003): four frozen purposes and 自行输入, none preselected;
+   a chosen card is told by its border and weight as well as its fill. */
+.milestone-purpose-options { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 7.5rem), 1fr)); gap: .4rem; min-width: 0; margin: 0; }
+.milestone-purpose-options legend { margin-bottom: .35rem; font-size: .84rem; font-weight: 700; }
+.milestone-section .milestone-purpose-option { display: flex; align-items: center; gap: .45rem; min-width: 0; min-height: 40px; padding: .4rem .55rem; border: 1px solid #bfc6ba; border-radius: 8px; background: #fff; font-size: .9rem; font-weight: 400; cursor: pointer; }
+.milestone-section .milestone-purpose-option:has(input:checked) { border-color: #416458; box-shadow: inset 0 0 0 1px #416458; background: #f4f7f1; font-weight: 800; }
+.milestone-purpose-option input { flex: none; width: 16px; height: 16px; margin: 0; }
+.milestone-purpose-note, .milestone-save-reason { margin-top: 0; }
+.milestone-save-reason[hidden] { display: none; }
 .manuscript-surface { min-width: 0; background: #fffefb; }
 .editor-window { position: relative; max-height: min(70vh, 760px); overflow: auto; padding: 2.2rem clamp(1.5rem, 5vw, 5rem) 3rem; background: #fffefb; }
 .ProseMirror { min-height: 480px; max-width: 760px; margin: 0 auto; line-height: 1.9; font-family: "Noto Serif CJK SC", "Songti SC", serif; font-size: 1.05rem; caret-color: #254e3d; }
@@ -586,8 +641,10 @@ legend { margin-bottom: .7rem; font-weight: 800; }
   .editor-window { padding: 1.25rem; }
   .window-actions { grid-template-columns: auto 1fr auto; }
   .position-rail-label { grid-column: 1 / -1; }
-  .native-artifact-facts, .task-authorization-facts, .analysis-facts, .review-facts, .review-consequences { grid-template-columns: 1fr; }
-  .native-artifact-facts dd + dt, .task-authorization-facts dd + dt, .analysis-facts dd + dt, .review-facts dd + dt, .review-consequences dd + dt { margin-top: .35rem; }
+  .native-artifact-facts, .task-authorization-facts, .analysis-facts, .review-facts, .review-consequences,
+  .deliverables-facts, .publication-designate-summary { grid-template-columns: 1fr; }
+  .native-artifact-facts dd + dt, .task-authorization-facts dd + dt, .analysis-facts dd + dt, .review-facts dd + dt, .review-consequences dd + dt,
+  .deliverables-facts dd + dt, .publication-designate-summary dd + dt { margin-top: .35rem; }
   .analysis-axes { grid-template-columns: 1fr; }
 }
 
@@ -626,12 +683,23 @@ legend { margin-bottom: .7rem; font-weight: 800; }
   .editor-edge, .edge-entries,
   .review-workspace-card, .review-runs > li, .review-plan, .review-group, .review-finding, .review-finding-quote, .review-risk-point,
   .review-inline-form, .review-batch-strip, .review-report-summary, .review-sheet, .review-category-option, .review-scope-option,
-  .review-consequences, .book-review-summary {
+  .review-consequences, .book-review-summary,
+  .deliverables-publication, .milestone-list > li, .publication-versions > li, .publication-change-notice, .publication-actuals-prompt,
+  .publication-designate, .publication-milestone-option, .publication-designate-summary, .publication-statement,
+  .book-deliverables-summary, .milestone-section .milestone-purpose-option {
     color: CanvasText;
     background: Canvas;
     border-color: CanvasText;
     box-shadow: none;
   }
+  /* Without colour, the 发稿版本 mark keeps its outline and the item it marks a heavier border; a chosen card
+     or milestone keeps a heavier border too. */
+  .publication-version-mark, .publication-current-mark { color: CanvasText; background: Canvas; border: 2px solid CanvasText; forced-color-adjust: none; }
+  .milestone-list > li[data-publication-current="true"], .publication-versions > li[data-publication-current="true"] { border-width: 3px; }
+  .publication-milestone-option:has(input:checked), .milestone-section .milestone-purpose-option:has(input:checked) { border-width: 3px; }
+  .publication-change-notice { border: 2px solid CanvasText; }
+  .publication-statement { border-left: 4px solid CanvasText; }
+  .book-deliverables textarea:focus-visible { outline-color: Highlight; }
   .primary, .secondary, .quiet, .status-pill {
     color: ButtonText;
     background: ButtonFace;

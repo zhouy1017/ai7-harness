@@ -5,8 +5,8 @@ import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import {
-  EDITORIAL_REVIEW_SCHEMA_VERSION,
   FACTUAL_REVIEW_SCHEMA_VERSION,
+  PUBLICATION_VERSION_SCHEMA_VERSION,
 } from '../../src/service/task-authorization.js';
 import { MAX_WINDOW_BLOCKS } from '../../src/shared/protocol.js';
 import {
@@ -16,6 +16,7 @@ import {
 } from '../support/composed-fixture.js';
 import { KIND_COUPLED_ANALYSIS_RELATIONS, downgradeKindCoupledRelationsToRevision23 } from '../support/analysis-ledger-revisions.js';
 import { REVIEW_RUN_RELATIONS_DROP_ORDER } from '../support/review-categories.js';
+import { PUBLICATION_VERSION_RELATIONS_DROP_ORDER } from '../support/publication-versions.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 
 // Service-integration suite (L2). It drives the real `EditorialStore` on a temporary Agent Data Root
@@ -150,7 +151,7 @@ function commitPreparedReplacement(store: EditorialStore, searchId: string): {
 }
 
 /**
- * Take a store back to the revision-20 shape: the relations revisions 21 to 24 add are simply not
+ * Take a store back to the revision-20 shape: the relations revisions 21 to 25 add are simply not
  * there, and the three kind-coupled analysis relations revision 24 rebuilt (Issue #417) are the
  * shapes revision 20 gave them.
  */
@@ -159,6 +160,7 @@ function downgradeToRevision20(databasePath: string): void {
   try {
     downgradeKindCoupledRelationsToRevision23(database);
     database.exec(`BEGIN IMMEDIATE;
+      ${PUBLICATION_VERSION_RELATIONS_DROP_ORDER.map((relation) => `DROP TABLE ${relation};`).join('\n      ')}
       ${REVIEW_RUN_RELATIONS_DROP_ORDER.map((relation) => `DROP TABLE ${relation};`).join('\n      ')}
       DROP TABLE manuscript_effect_receipts;
       DROP TABLE manuscript_effect_dispatches;
@@ -313,10 +315,12 @@ describe('EditorialStore on a temporary Agent Data Root', () => {
         imported.manuscriptId,
         imported.branchId,
         milestoneLabel,
+        'custom',
         '服务层集成校验',
         '由 L2 套件组稿的公开样书选段。',
       );
       expect(milestone.label).toBe(milestoneLabel);
+      expect(milestone.purposeKind).toBe('custom');
       expect(milestone.actor).toBe('本机编辑');
       expect(milestone.recoverySnapshot.blockCount).toBe(expectedTotalBlocks);
       expect(milestone.recoverySnapshot.verification).toBe('已独立校验快照对象');
@@ -425,7 +429,8 @@ describe('EditorialStore on a temporary Agent Data Root', () => {
         imported.manuscriptId,
         imported.branchId,
         '里程碑一',
-        '入稿位置校验',
+        'stage-archive',
+        null,
         '由 L2 套件组稿的公开样书选段。',
       );
       const advanced = second.getManuscriptWindow(imported.manuscriptId, imported.branchId, null);
@@ -626,14 +631,15 @@ describe('EditorialStore on a temporary Agent Data Root', () => {
     const after = new DatabaseSync(databasePath, { readOnly: true });
     try {
       expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version)
-        .toBe(EDITORIAL_REVIEW_SCHEMA_VERSION);
+        .toBe(PUBLICATION_VERSION_SCHEMA_VERSION);
       const truthAfter = relationTruth(after);
-      // Exactly the relations revisions 21 to 24 add appear, and each appears empty.
+      // Exactly the relations revisions 21 to 25 add appear, and each appears empty.
       const added = [
         'editorial_mark_replies', 'editorial_marks', 'manuscript_effect_approvals', 'manuscript_effect_dispatches',
         'manuscript_effect_intents', 'manuscript_effect_receipts', 'manuscript_effect_targets', 'manuscript_entry_positions',
         'proposal_change_items', 'proposal_decision_reasons', 'proposal_item_decisions',
         ...REVIEW_RUN_RELATIONS_DROP_ORDER,
+        ...PUBLICATION_VERSION_RELATIONS_DROP_ORDER,
       ];
       expect([...truthAfter.keys()]).toEqual([...truthBefore.keys(), ...added].sort());
       for (const relation of added) expect(truthAfter.get(relation)?.content).toMatch(/^0:/);

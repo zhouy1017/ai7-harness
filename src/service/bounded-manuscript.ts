@@ -13,6 +13,7 @@ import {
   MAX_SEARCH_QUERY_GRAPHEMES,
   MAX_SEARCH_RESULTS,
   MAX_WINDOW_BLOCKS,
+  milestonePurposeKindOf,
   type DurableHistoryProjection,
   type FidelityCategoryProjection,
   type HistoricalRevisionProjection,
@@ -67,6 +68,7 @@ import {
   MANUSCRIPT_EFFECT_SCHEMA_VERSION,
   MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION,
   MANUSCRIPT_INTAKE_SCHEMA_VERSION,
+  PUBLICATION_VERSION_SCHEMA_VERSION,
   SUCCESSIVE_TASK_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_SQL,
   TASK_AUTHORIZATION_SCHEMA_VERSION,
@@ -94,6 +96,11 @@ import {
   REVIEW_RUN_SCHEMA_SQL,
   REVIEW_RUN_TRIGGER_SQL,
 } from './review/review-runs.js';
+import {
+  PUBLICATION_VERSION_FOREIGN_KEYS,
+  PUBLICATION_VERSION_SCHEMA_SQL,
+  PUBLICATION_VERSION_TRIGGER_SQL,
+} from './publication-versions.js';
 
 /**
  * The analysis ledger as revision 15 created it, as revision 16 rebuilt two of its relations, as
@@ -1734,6 +1741,8 @@ const SCHEMA_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
   ...MANUSCRIPT_EFFECT_FOREIGN_KEYS,
   // Revision 24 (Issue #417): the Review Run relations, owned and spelled by `review/review-runs.ts`.
   ...REVIEW_RUN_FOREIGN_KEYS,
+  // Revision 25 (Issue #414): the Publication Version relations, owned and spelled by `publication-versions.ts`.
+  ...PUBLICATION_VERSION_FOREIGN_KEYS,
   editorial_workspace_profile_sidecar_revisions: [
     'native_artifact_id>native_artifact_installations.artifact_id:NO ACTION/NO ACTION/NONE',
   ],
@@ -2332,6 +2341,7 @@ function requireManuscriptReimportTargetSchema(
   includeEditorialMarkTables = false,
   includeManuscriptEffectTables = false,
   includeReviewRunTables = false,
+  includePublicationVersionTables = false,
 ): void {
   const analysisTables = includePlanVersionTables ? ANALYSIS_LEDGER_EXPECTED_SCHEMA_SQL : PRE_17_ANALYSIS_LEDGER_EXPECTED_SCHEMA_SQL;
   const analysisTriggers = includePlanVersionTables ? ANALYSIS_LEDGER_TRIGGER_SQL : PRE_17_ANALYSIS_LEDGER_TRIGGER_SQL;
@@ -2368,6 +2378,9 @@ function requireManuscriptReimportTargetSchema(
       // rebuilds; they join this exact table set, the trigger set and `SCHEMA_FOREIGN_KEYS` behind a
       // flag of their own, as revisions 22 and 23 did.
       ...(includeReviewRunTables ? REVIEW_RUN_SCHEMA_SQL : {}),
+      // Revision 25 (Issue #414) adds the Publication Version relations the same way, behind a flag of
+      // their own.
+      ...(includePublicationVersionTables ? PUBLICATION_VERSION_SCHEMA_SQL : {}),
     },
     MANUSCRIPT_REIMPORT_INDEX_SQL,
     true,
@@ -2379,6 +2392,7 @@ function requireManuscriptReimportTargetSchema(
       ...(includeEditorialMarkTables ? EDITORIAL_MARK_TRIGGER_SQL : {}),
       ...(includeManuscriptEffectTables ? MANUSCRIPT_EFFECT_TRIGGER_SQL : {}),
       ...(includeReviewRunTables ? REVIEW_RUN_TRIGGER_SQL : {}),
+      ...(includePublicationVersionTables ? PUBLICATION_VERSION_TRIGGER_SQL : {}),
     },
   );
 }
@@ -5026,6 +5040,7 @@ export function validateManuscriptReimportSchemaTruth(
   includeEditorialMarkTables = false,
   includeManuscriptEffectTables = false,
   includeReviewRunTables = false,
+  includePublicationVersionTables = false,
 ): void {
   requireManuscriptReimportTargetSchema(
     db,
@@ -5039,6 +5054,7 @@ export function validateManuscriptReimportSchemaTruth(
     includeEditorialMarkTables,
     includeManuscriptEffectTables,
     includeReviewRunTables,
+    includePublicationVersionTables,
   );
   validateSchemaAuthorityIds(db);
   validateWorkflowSemanticTruth(db, profile);
@@ -5099,7 +5115,8 @@ export function initializeBoundedSchema(
       version === TASK_AUTHORIZATION_SCHEMA_VERSION || version === MANUSCRIPT_INTAKE_SCHEMA_VERSION ||
       version === TEXT_CONVERSION_SCHEMA_VERSION || version === FACTUAL_REVIEW_SCHEMA_VERSION ||
       version === MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION || version === EDITORIAL_MARK_SCHEMA_VERSION ||
-      version === MANUSCRIPT_EFFECT_SCHEMA_VERSION || version === EDITORIAL_REVIEW_SCHEMA_VERSION,
+      version === MANUSCRIPT_EFFECT_SCHEMA_VERSION || version === EDITORIAL_REVIEW_SCHEMA_VERSION ||
+      version === PUBLICATION_VERSION_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -5110,9 +5127,10 @@ export function initializeBoundedSchema(
       version === MANUSCRIPT_INTAKE_SCHEMA_VERSION || version === TEXT_CONVERSION_SCHEMA_VERSION ||
       version === FACTUAL_REVIEW_SCHEMA_VERSION || version === MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION ||
       version === EDITORIAL_MARK_SCHEMA_VERSION || version === MANUSCRIPT_EFFECT_SCHEMA_VERSION ||
-      version === EDITORIAL_REVIEW_SCHEMA_VERSION) {
+      version === EDITORIAL_REVIEW_SCHEMA_VERSION ||
+      version === PUBLICATION_VERSION_SCHEMA_VERSION) {
     transact(db, () => {
-      if (validateStoreTruth || version !== EDITORIAL_REVIEW_SCHEMA_VERSION) {
+      if (validateStoreTruth || version !== PUBLICATION_VERSION_SCHEMA_VERSION) {
         validateManuscriptReimportSchemaTruth(
           db,
           profile,
@@ -5126,6 +5144,7 @@ export function initializeBoundedSchema(
           version >= EDITORIAL_MARK_SCHEMA_VERSION,
           version >= MANUSCRIPT_EFFECT_SCHEMA_VERSION,
           version >= EDITORIAL_REVIEW_SCHEMA_VERSION,
+          version >= PUBLICATION_VERSION_SCHEMA_VERSION,
         );
       }
       terminalizeOrphanedReplacementPreviews(db);
@@ -7706,7 +7725,7 @@ export class BoundedManuscriptStore {
       return {
         milestoneId: plan.milestoneId, manuscriptId: plan.manuscriptId, branchId: plan.branchId,
         revisionId: plan.revisionId, revisionLabel: plan.revisionLabel, label: plan.label,
-        purpose: plan.purpose, note: plan.note, createdAt: plan.createdAt,
+        purpose: plan.purpose, purposeKind: milestonePurposeKindOf(plan.purpose), note: plan.note, createdAt: plan.createdAt,
         journalSequence: binding.journalSequence, workingDigest: binding.workingDigest,
         signoffRecordId: plan.signoffRecordId, workflowEvidenceDigest, actor: '本机编辑',
         signedAt: plan.createdAt, statedNextUse: plan.purpose,
