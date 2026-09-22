@@ -53,6 +53,28 @@ export function reviewFindingStatus(input: ReviewFindingStatusInput): { status: 
   }
 }
 
+/**
+ * The version of a finding's 修改建议 the finding reads (Issue #57; MARK-010). Saving the Resolution Draft of
+ * a Three-way Proposal Conflict retires a 修改建议 as `converted` into its next version, and that version is
+ * the same finding's suggestion — not a conversion into something else — so the finding follows every such
+ * step to the newest version and reads that one's state, never 已转为修改建议. A conversion into a 批注, or
+ * from one, stays a conversion. `next` answers the 修改建议 made from a mark as its next version, or `null`;
+ * at most `limit` steps are taken.
+ */
+export function newestSuggestionVersion<T extends { readonly kind: EditorialMarkKind | null; readonly markStatus: ReviewMarkStatus | null }>(
+  start: T,
+  next: (mark: T) => T | null,
+  limit = 64,
+): T {
+  let mark = start;
+  for (let step = 0; step < limit && mark.kind === 'change-suggestion' && mark.markStatus === 'converted'; step += 1) {
+    const version = next(mark);
+    if (version === null || version.kind !== 'change-suggestion') break;
+    mark = version;
+  }
+  return mark;
+}
+
 /** The events a category of a Review Run records, in the order they can happen. */
 export type ReviewRunCategoryEventState = 'dispatched' | 'settled' | 'failed' | 'interrupted' | 'refused' | 'materialized';
 export const REVIEW_RUN_CATEGORY_EVENT_STATES: readonly ReviewRunCategoryEventState[] =

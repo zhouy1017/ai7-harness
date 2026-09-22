@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { EDITORIAL_MARK_SCHEMA_VERSION, PUBLICATION_VERSION_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { EDITORIAL_MARK_SCHEMA_VERSION, PROPOSAL_CONFLICT_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import { graphemesOf } from '../../src/shared/mark-anchor.js';
 import type { ManuscriptWindowProjection } from '../../src/shared/protocol.js';
 import {
@@ -14,6 +14,7 @@ import {
 import { downgradeKindCoupledRelationsToRevision23 } from '../support/analysis-ledger-revisions.js';
 import { REVIEW_RUN_RELATIONS_DROP_ORDER } from '../support/review-categories.js';
 import { PUBLICATION_VERSION_RELATIONS_DROP_ORDER } from '../support/publication-versions.js';
+import { PROPOSAL_CONFLICT_RELATIONS_DROP_ORDER } from '../support/proposal-conflicts.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { downgradeEditorialMarksToRevision22 } from '../support/editorial-mark-revisions.js';
 import { EDITORIAL_MARK_REVISION_22_SQL, EDITORIAL_MARK_SCHEMA_SQL } from '../../src/service/editorial-marks.js';
@@ -479,7 +480,7 @@ describe('AI7 Apply on a Change Suggestion', () => {
       // them, and none of revision 24's Review Run relations (Issue #417).
       downgradeKindCoupledRelationsToRevision23(downgrade);
       downgrade.exec(`BEGIN IMMEDIATE;
-        ${[...PUBLICATION_VERSION_RELATIONS_DROP_ORDER, ...REVIEW_RUN_RELATIONS_DROP_ORDER, ...EFFECT_RELATIONS].map((relation) => `DROP TABLE ${relation};`).join('\n')}
+        ${[...PROPOSAL_CONFLICT_RELATIONS_DROP_ORDER, ...PUBLICATION_VERSION_RELATIONS_DROP_ORDER, ...REVIEW_RUN_RELATIONS_DROP_ORDER, ...EFFECT_RELATIONS].map((relation) => `DROP TABLE ${relation};`).join('\n')}
         PRAGMA user_version = ${EDITORIAL_MARK_SCHEMA_VERSION};
         COMMIT;`);
       downgradeEditorialMarksToRevision22(downgrade);
@@ -498,9 +499,9 @@ describe('AI7 Apply on a Change Suggestion', () => {
     }
     const after = new DatabaseSync(databasePath, { readOnly: true });
     try {
-      // Through revisions 23 and 24 to the terminal 25: the widened text, every row of the five relations exactly
+      // Through revisions 23 to 25 to the terminal 26: the widened text, every row of the five relations exactly
       // as revision 22 held it, and the Effect relations beside them.
-      expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(PUBLICATION_VERSION_SCHEMA_VERSION);
+      expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(PROPOSAL_CONFLICT_SCHEMA_VERSION);
       expect(markText(after)).toEqual({ sql: EDITORIAL_MARK_SCHEMA_SQL.editorial_marks });
       expect(rowsOf(after)).toEqual(planted);
       expect(after.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
@@ -583,7 +584,7 @@ describe('AI7 Apply on a Change Suggestion', () => {
       // relations, which a store that old never held.
       downgradeKindCoupledRelationsToRevision23(downgrade);
       downgrade.exec(`BEGIN IMMEDIATE;
-        ${[...PUBLICATION_VERSION_RELATIONS_DROP_ORDER, ...REVIEW_RUN_RELATIONS_DROP_ORDER, ...EFFECT_RELATIONS].map((relation) => `DROP TABLE ${relation};`).join('\n')}
+        ${[...PROPOSAL_CONFLICT_RELATIONS_DROP_ORDER, ...PUBLICATION_VERSION_RELATIONS_DROP_ORDER, ...REVIEW_RUN_RELATIONS_DROP_ORDER, ...EFFECT_RELATIONS].map((relation) => `DROP TABLE ${relation};`).join('\n')}
         PRAGMA user_version = ${EDITORIAL_MARK_SCHEMA_VERSION};
         COMMIT;`);
       downgradeEditorialMarksToRevision22(downgrade);
@@ -601,7 +602,7 @@ describe('AI7 Apply on a Change Suggestion', () => {
     }
     const after = new DatabaseSync(databasePath, { readOnly: true });
     try {
-      expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(PUBLICATION_VERSION_SCHEMA_VERSION);
+      expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(PROPOSAL_CONFLICT_SCHEMA_VERSION);
       expect(after.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
     } finally {
       after.close();

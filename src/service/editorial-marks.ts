@@ -29,6 +29,13 @@ import {
   type RecordProposalDecisionReasonInput,
   type UpdateEditorialMarkInput,
 } from '../shared/protocol.js';
+import {
+  ANCHOR_CONFLICT_STATE_SQL,
+  decisionResolvesConflict,
+  markConflictOf,
+  proposalConflictRelationsExist,
+  resolvedFromOf,
+} from './proposal-conflicts.js';
 
 /**
  * Editorial Marks and the Proposal Change Items behind 修改建议 (Issue #407, schema revision 22).
@@ -556,14 +563,22 @@ export function openMarkPlaces(
   }));
 }
 
-const ANCHOR_SELECT = `SELECT em.mark_id, em.kind, em.block_id, em.from_grapheme, em.to_grapheme, em.anchor_state, em.status,
+/**
+ * The marks of a window with what the surface draws without a card. Where a store has reached revision
+ * 26, each 修改建议 also says where its Three-way Proposal Conflict stands (Issue #57), which the mark menu
+ * offers 解决冲突… by.
+ */
+function anchorSelect(withConflicts: boolean): string {
+  return `SELECT em.mark_id, em.kind, em.block_id, em.from_grapheme, em.to_grapheme, em.anchor_state, em.status,
        em.highlight_color, em.source_kind,
        CASE WHEN em.pinned_text = '' THEN (SELECT i.current_text FROM proposal_change_items i WHERE i.mark_id = em.mark_id) END deleted_text,
        (SELECT d.disposition FROM proposal_change_items i
           JOIN proposal_item_decisions d ON d.item_id = i.item_id
-         WHERE i.mark_id = em.mark_id ORDER BY d.ordinal DESC LIMIT 1) current_disposition
+         WHERE i.mark_id = em.mark_id ORDER BY d.ordinal DESC LIMIT 1) current_disposition,
+       ${withConflicts ? ANCHOR_CONFLICT_STATE_SQL : 'NULL'} conflict_state
      FROM editorial_marks em
      JOIN working_blocks wb ON wb.branch_id = em.branch_id AND wb.block_id = em.block_id`;
+}
 
 function anchorProjection(row: SqlRow): EditorialMarkAnchorProjection {
   const disposition = nullableText(row.current_disposition);
@@ -579,6 +594,7 @@ function anchorProjection(row: SqlRow): EditorialMarkAnchorProjection {
     sourceKind: text(row.source_kind) as EditorialMarkSourceProjection['kind'],
     disposition: disposition === null || disposition === 'withdrawn' ? null : disposition as ProposalItemDisposition,
     deletedText: nullableText(row.deleted_text),
+    conflict: nullableText(row.conflict_state) as EditorialMarkAnchorProjection['conflict'],
   };
 }
 
@@ -594,7 +610,7 @@ export function marksOfWindow(
 ): { marks: EditorialMarkAnchorProjection[]; marksTruncated: boolean } {
   if (!marksRelationExists(db)) return { marks: [], marksTruncated: false };
   const rows = db.prepare(
-    `${ANCHOR_SELECT}
+    `${anchorSelect(proposalConflictRelationsExist(db))}
      WHERE em.branch_id = ? AND em.status IN ${LIVE_STATUSES} AND em.anchor_state IN ('exact', 'drifted')
        AND wb.position >= ? AND wb.position < ?
      ORDER BY wb.position, em.from_grapheme, em.to_grapheme DESC, em.created_at, em.mark_id
@@ -748,8 +764,9 @@ export class EditorialMarkStore {
   card(manuscriptId: string, branchId: string, markId: string): EditorialMarkCardProjection {
     requireMark(UUID_PATTERN.test(manuscriptId) && UUID_PATTERN.test(branchId) && UUID_PATTERN.test(markId), 'MARK_INVALID', '标记标识无效。');
     const row = this.#db.prepare(
-      `SELECT em.*, mr.revision_label FROM editorial_marks em
+      `SELECT em.*, mr.revision_label, wb.digest current_block_digest FROM editorial_marks em
        JOIN manuscript_revisions mr ON mr.revision_id = em.pinned_revision_id
+       LEFT JOIN working_blocks wb ON wb.branch_id = em.branch_id AND wb.block_id = em.block_id
        WHERE em.mark_id = ? AND em.manuscript_id = ? AND em.branch_id = ?`,
     ).get(markId, manuscriptId, branchId) as SqlRow | undefined;
     requireMark(row !== undefined && (row.status === 'open' || row.status === 'resolved' || row.status === 'applied'), 'MARK_NOT_FOUND', '这条标记已不存在。');
@@ -785,6 +802,15 @@ export class EditorialMarkStore {
         kind: text(converted.kind) as EditorialMarkKind,
         sourceKind: text(converted.source_kind) as EditorialMarkSourceProjection['kind'],
       },
+      // ADR 0085 §2: the words stand exactly where the suggestion was made, and the paragraph around them
+      // is no longer the one it was made in.
+      changedElsewhere: kind === 'change-suggestion' && row.anchor_state === 'exact' &&
+        row.current_block_digest !== null && row.current_block_digest !== undefined &&
+        text(row.current_block_digest) !== text(row.pinned_block_digest),
+      conflict: kind === 'change-suggestion'
+        ? markConflictOf(this.#db, { markId, kind, status: text(row.status), anchorState: text(row.anchor_state) })
+        : null,
+      resolvedFrom: kind === 'change-suggestion' ? resolvedFromOf(this.#db, markId) : null,
       exportDisposition: text(row.export_disposition) as EditorialMarkCardProjection['exportDisposition'],
       createdAt: text(row.created_at),
       updatedAt: text(row.updated_at),
@@ -859,6 +885,8 @@ export class EditorialMarkStore {
       let editedText: string | null = null;
       if (input.disposition === 'withdrawn') {
         requireMark(decided && input.editedText === null && input.reason === null, 'MARK_DECISION_INVALID', '没有可以撤回的处理。');
+        // 保留当前稿件 resolved a conflict with this rejection (Issue #57); the resolution is final.
+        requireMark(!decisionResolvesConflict(this.#db, text(current.decision_id)), 'MARK_DECISION_INVALID', '这条修改建议的冲突已按「保留当前稿件」处理，不能撤回。');
       } else {
         requireMark(!decided, 'MARK_DECISION_INVALID', '这条修改建议已经处理过，请先撤回。');
         if (input.disposition === 'accepted-with-edit') {
@@ -1101,6 +1129,76 @@ export class EditorialMarkStore {
       pin.fromGrapheme, pin.toGrapheme, pin.journalSequence, now, markId,
     );
     requireMark(updated.changes === 1, 'MARK_STORE_INVALID', '标记记录无效。');
+  }
+
+  /**
+   * 保留当前稿件 on a suggestion conflict (Issue #57, ADR 0085 §3), inside the caller's transaction: the
+   * 修改建议's rejection, with `reason` recorded as a suggested reason so later counts can tell it from an
+   * ordinary rejection. It supersedes whatever decision stands — an accepted edit not yet applied included
+   * — and the manuscript does not change.
+   */
+  rejectForConflict(binding: { manuscriptId: string; branchId: string }, markId: string, reason: string, now: string): string {
+    const mark = this.#liveMark({ ...binding, markId });
+    requireMark(mark.kind === 'change-suggestion' && mark.status === 'open', 'MARK_DECISION_INVALID', '这条修改建议已经处理过。');
+    const item = this.#db.prepare('SELECT item_id FROM proposal_change_items WHERE mark_id = ?').get(markId) as SqlRow | undefined;
+    requireMark(item !== undefined, 'MARK_STORE_INVALID', '修改建议缺少提案修改项。');
+    const itemId = text(item.item_id);
+    const current = this.#db.prepare(
+      'SELECT decision_id, ordinal FROM proposal_item_decisions WHERE item_id = ? ORDER BY ordinal DESC LIMIT 1',
+    ).get(itemId) as SqlRow | undefined;
+    const state = this.#branchState(binding.manuscriptId, binding.branchId);
+    const block = this.#db.prepare('SELECT digest FROM working_blocks WHERE branch_id = ? AND block_id = ?').get(binding.branchId, text(mark.block_id)) as SqlRow | undefined;
+    const decisionId = randomUUID();
+    this.#db.prepare(
+      `INSERT INTO proposal_item_decisions(
+         decision_id, client_decision_id, item_id, ordinal, disposition, edited_text, supersedes_decision_id,
+         decided_revision_id, decided_journal_sequence, decided_block_digest, actor, recorded_at
+       ) VALUES (?, ?, ?, ?, 'rejected', NULL, ?, ?, ?, ?, 'editor', ?)`,
+    ).run(
+      decisionId, randomUUID(), itemId, current === undefined ? 1 : integer(current.ordinal) + 1,
+      current === undefined ? null : text(current.decision_id), state.revisionId, state.journalSequence,
+      block === undefined ? null : text(block.digest), now,
+    );
+    this.#db.prepare(
+      "INSERT INTO proposal_decision_reasons(decision_id, reason, reason_source, recorded_at) VALUES (?, ?, 'suggested', ?)",
+    ).run(decisionId, this.#body(reason), now);
+    this.#db.prepare("UPDATE editorial_marks SET status = 'resolved', updated_at = ? WHERE mark_id = ?").run(now, markId);
+    return decisionId;
+  }
+
+  /**
+   * 保存为新提案版本 (Issue #57; V2-UX-CONFLICT-011, CONFLICT-013, PROP-013), inside the caller's transaction:
+   * a new 修改建议 pinned on the current working state, exactly over the words its conflict compared —
+   * `currentText` must stand at the range of the block as it is now — proposing the Resolution Draft's
+   * text. It is the editor's, carries the old suggestion's rationale and basis, and is open: nothing is
+   * accepted or applied. `convertedFrom` names the suggestion it is the next version of, which is retired
+   * as `converted`; a Correction Proposal made while reversing an Apply names none, and the applied
+   * suggestion stays applied.
+   */
+  createConflictVersion(input: {
+    manuscriptId: string; branchId: string; blockId: string; blockDigest: string; fromGrapheme: number; toGrapheme: number;
+    currentText: string; proposedText: string; rationale: string; basisJson: string; convertedFrom: string | null; now: string;
+  }): string {
+    const pinned = this.#requireRange(input.branchId, input.blockId, input.blockDigest, input.fromGrapheme, input.toGrapheme, input.currentText);
+    const content = this.#content('change-suggestion', null, '', input.proposedText, input.rationale, pinned);
+    const state = this.#branchState(input.manuscriptId, input.branchId);
+    const markId = randomUUID();
+    this.#insertMark({
+      markId, clientMarkId: randomUUID(), state, manuscriptId: input.manuscriptId, branchId: input.branchId,
+      blockId: input.blockId, blockDigest: input.blockDigest, fromGrapheme: input.fromGrapheme, toGrapheme: input.toGrapheme,
+      pinnedText: pinned, kind: 'change-suggestion', highlightColor: null, body: '',
+      source: { kind: 'editor', origin: null, label: null, taskId: null },
+      basis: JSON.parse(input.basisJson) as EditorialMarkBasisProjection[], convertedFrom: input.convertedFrom,
+      anchorState: 'exact', now: input.now,
+    });
+    this.#insertItem(markId, pinned, content.proposedText!, content.rationale, null, input.now);
+    if (input.convertedFrom !== null) {
+      const retired = this.#db.prepare(
+        "UPDATE editorial_marks SET status = 'converted', updated_at = ? WHERE mark_id = ? AND status = 'open' AND kind = 'change-suggestion'",
+      ).run(input.now, input.convertedFrom);
+      requireMark(retired.changes === 1, 'MARK_NOT_FOUND', '这条修改建议已不存在。');
+    }
+    return markId;
   }
 
   commandProjection(binding: { manuscriptId: string; branchId: string; windowStartBlockId: string }, markId: string): EditorialMarkCommandProjection {

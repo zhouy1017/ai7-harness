@@ -1,3 +1,5 @@
+import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
+
 export const SERVICE_PROTOCOL_VERSION = 37 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
@@ -991,6 +993,8 @@ export interface EditorialMarkAnchorProjection {
    * `null` for every other mark. The surface names them on the point it draws there.
    */
   deletedText: string | null;
+  /** Where a 修改建议's Three-way Proposal Conflict stands (Issue #57); `null` for a mark that has none. */
+  conflict: ProposalConflictState | null;
 }
 
 /** One basis a mark or a suggestion rests on: a labelled place in the manuscript, quoted exactly. */
@@ -1048,6 +1052,15 @@ export interface EditorialMarkCardProjection {
     application: ManuscriptApplyProjection | null;
   };
   convertedFrom: null | { markId: string; kind: EditorialMarkKind; sourceKind: EditorialMarkSourceProjection['kind'] };
+  /**
+   * ADR 0085 §2: the paragraph of this 修改建议 changed elsewhere after its base while its own words stayed
+   * exact — a Safe Non-interacting Merge. A label only; it records and decides nothing.
+   */
+  changedElsewhere: boolean;
+  /** The mark's Three-way Proposal Conflict (Issue #57), or `null` when it has none. */
+  conflict: EditorialMarkConflictProjection | null;
+  /** The conflict this 修改建议 was saved from as a new Proposal version, or `null`. */
+  resolvedFrom: null | { markId: string; conflictKind: ProposalConflictKind };
   /** What an export does with this mark unless the editor says otherwise (V2-UX-MARK-006, MARK-007). */
   exportDisposition: 'exported-by-default' | 'only-when-included' | 'never-exported';
   createdAt: string;
@@ -1197,6 +1210,125 @@ export interface ManuscriptApplyCommandProjection extends EditorialMarkCommandPr
 export interface ManuscriptApplyOutcomeProjection {
   state: 'committed' | 'not-committed';
   application: ManuscriptApplyProjection | null;
+}
+
+/**
+ * 稿件冲突 (Issue #57, plan slice S22; ADR 0085; V2-UX-CONFLICT-001 to 013). A 修改建议 is in a Three-way
+ * Proposal Conflict when the words it replaces changed after its base — its anchor drifted, 原文已变 —
+ * while it is undecided or accepted and not yet applied (`suggestion`), or when the words its Apply wrote
+ * were edited afterwards, so that reversing the Apply meets them (`reversal`, V2-UX-EREC-012). A change
+ * elsewhere in its paragraph is not a conflict (ADR 0085 §1). A conflict is `deferred` once 暂不处理 was
+ * recorded and stays unresolved; it is `resolved` by its one outcome, 保留当前稿件 or 保存为新提案版本.
+ */
+export type ProposalConflictKind = 'suggestion' | 'reversal';
+export type ProposalConflictState = 'unresolved' | 'deferred' | 'resolved';
+export type ProposalConflictOutcome = 'keep-current' | 'new-version';
+export type { ConflictResolution, ConflictUnit, ConflictUnitKind, ConflictUnitResolution } from './conflict-units.js';
+
+/** The most unresolved conflicts the navigator of 稿件冲突 lists across one manuscript. */
+export const MAX_PROPOSAL_CONFLICT_NAVIGATOR = 200;
+/** How many graphemes of the current paragraph stand on each side of the conflicting words. */
+export const PROPOSAL_CONFLICT_CONTEXT_GRAPHEMES = 30;
+/** The Resolution Drafts one conflict keeps; a draft is appended per save and never rewritten. */
+export const MAX_PROPOSAL_CONFLICT_DRAFTS = 5_000;
+/** The 暂不处理 records one conflict keeps. */
+export const MAX_PROPOSAL_CONFLICT_DEFERRALS = 1_000;
+/** The most units one conflict's texts can be cut into, which bounds a draft's request frame. */
+export const MAX_PROPOSAL_CONFLICT_UNITS = 8_192;
+
+/** What a Mark Card says of its mark's conflict, and whether 解决冲突… is offered for it. */
+export interface EditorialMarkConflictProjection {
+  kind: ProposalConflictKind;
+  state: ProposalConflictState;
+  /** The latest 暂不处理, while the conflict is unresolved. */
+  deferredAt: string | null;
+  outcome: ProposalConflictOutcome | null;
+  /** The 修改建议 保存为新提案版本 created. */
+  newMarkId: string | null;
+  resolvedAt: string | null;
+}
+
+export interface ProposalConflictBindingInput {
+  manuscriptId: string;
+  branchId: string;
+  markId: string;
+}
+
+/** A Resolution Draft as saved: one entry per unit of the comparison, index for index. */
+export interface ProposalConflictDraftProjection {
+  draftId: string;
+  ordinal: number;
+  resolutions: ReadonlyArray<ConflictUnitResolution>;
+  text: string;
+  /** Every changed unit has a resolution; only then can it be saved as a new Proposal version. */
+  complete: boolean;
+  savedAt: string;
+}
+
+/**
+ * 稿件冲突 for one 修改建议 (V2-UX-CONFLICT-004): the three texts, persistently distinct — 提案基准 (`base`),
+ * 当前权威稿件 (`current`) and 提议内容 (`proposed`) — the bounded context around them, which is the current
+ * paragraph's, the units they compare in, the latest Resolution Draft saved on exactly this basis, and
+ * the other unresolved conflicts of the manuscript. `basisDigest` binds every command to these texts: a
+ * later change of the paragraph makes it stale, and nothing is ever retargeted.
+ */
+export interface ProposalConflictProjection {
+  markId: string;
+  manuscriptId: string;
+  branchId: string;
+  bookId: string;
+  conflictKind: ProposalConflictKind;
+  deferral: { deferralId: string; deferredAt: string } | null;
+  blockId: string;
+  fromGrapheme: number;
+  toGrapheme: number;
+  basisDigest: string;
+  base: string;
+  current: string;
+  proposed: string;
+  context: { before: string; after: string };
+  units: ReadonlyArray<ConflictUnit>;
+  draft: ProposalConflictDraftProjection | null;
+  /** A Resolution Draft was saved against an earlier state of the paragraph; it is kept and not loaded. */
+  draftOnEarlierBasis: boolean;
+  /** 保存为新提案版本 needs words to stand on: where they were deleted, only the other paths are open. */
+  newVersion: { available: boolean; blocker: 'target-deleted' | null };
+  suggestion: { itemId: string; rationale: string; source: EditorialMarkSourceProjection };
+  /** The manuscript's unresolved conflicts in reading order, this one included; at most `MAX_PROPOSAL_CONFLICT_NAVIGATOR`. */
+  navigator: {
+    entries: ReadonlyArray<{ markId: string; blockId: string; conflictKind: ProposalConflictKind; deferred: boolean }>;
+    truncated: boolean;
+  };
+}
+
+export interface SaveProposalConflictDraftInput extends ProposalConflictBindingInput {
+  basisDigest: string;
+  units: ReadonlyArray<ConflictUnitResolution>;
+}
+
+export interface ProposalConflictDraftSaveProjection {
+  markId: string;
+  basisDigest: string;
+  draft: ProposalConflictDraftProjection;
+}
+
+/**
+ * 确认保留当前稿件, 暂不处理, or 保存为新提案版本 from the saved draft `draftOrdinal` (V2-UX-CONFLICT-005,
+ * CONFLICT-011, CONFLICT-013). None of them writes the manuscript.
+ */
+export interface ResolveProposalConflictInput extends ProposalConflictBindingInput {
+  basisDigest: string;
+  outcome: 'keep-current' | 'defer' | 'new-version';
+  draftOrdinal: number | null;
+}
+
+export interface ProposalConflictResolutionProjection {
+  markId: string;
+  outcome: ResolveProposalConflictInput['outcome'];
+  /** The new 修改建议 a new version created, not accepted and not applied; `null` for the other two. */
+  newMarkId: string | null;
+  blockId: string;
+  recordedAt: string;
 }
 
 /** The text-processing commands of the selection menu, run by the window that owns the clipboard. */
