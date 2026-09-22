@@ -216,9 +216,12 @@ jobs:
     if: ${{ always() && needs.prepare.result == 'success' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    # `issues: write` closes the Issues the merged pull request links, which a merge made with this
+    # token does not close by itself (#496).
     permissions:
       contents: write
       pull-requests: write
+      issues: write
     steps:
       - name: Check out exact source
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6

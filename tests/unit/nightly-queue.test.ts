@@ -51,6 +51,8 @@ const queue = (await import(new URL('../../tools/nightly-queue.mjs', import.meta
   commitIdentity: (authorLine: string) => Record<string, string>;
   squashOutcome: (result: { status: number; stdout: string; stderr: string }) => 'merged' | 'conflict' | 'failed';
   candidateRef: (pr: number, runId: string) => string;
+  linkedIssues: (references: unknown, repo: string) => number[];
+  closingComment: (options: { pr: number; dev: string; commit: string }) => string;
 };
 
 const record = (overrides: Partial<QueueRecord> = {}): QueueRecord => ({
@@ -241,6 +243,30 @@ describe('the queue reads the marker lines as printed', () => {
       .join('\n');
     expect(body).toContain('docs/adr/0080-assign-a-provider-route-and-model.md');
     expect(body).toContain('left to the Owner');
+  });
+});
+
+describe('the Issues a merged pull request links', () => {
+  const reference = (number: number, owner = 'zhouy1017', name = 'ai7-harness') => ({
+    id: `I_${number}`,
+    number,
+    repository: { id: 'R', name, owner: { id: 'U', login: owner } },
+    url: `https://github.com/${owner}/${name}/issues/${number}`,
+  });
+
+  it('lists this repository\'s linked Issues once each, in ascending order', () => {
+    expect(queue.linkedIssues([reference(411), reference(407), reference(411)], 'zhouy1017/ai7-harness')).toEqual([407, 411]);
+  });
+
+  it('ignores an Issue in another repository and anything that is not a reference', () => {
+    expect(queue.linkedIssues([reference(7, 'someone', 'elsewhere'), null, { number: 'x' }, reference(0)], 'zhouy1017/ai7-harness')).toEqual([]);
+    expect(queue.linkedIssues(undefined, 'zhouy1017/ai7-harness')).toEqual([]);
+  });
+
+  it('closes with a comment naming only the pull request, the line and the commit', () => {
+    const comment = queue.closingComment({ pr: 482, dev: 'dev', commit: 'cf9b0a5d97de7220b46763b6267ae4da4cf4774f' });
+    expect(comment).toBe('Integrated by pull request #482, squashed onto `dev` by the nightly merge queue (ADR 0081) as `cf9b0a5d97de`. ' +
+      'A merge made with the workflow\'s token does not close the Issues a pull request links, so the queue closes this one (#496).');
   });
 });
 
