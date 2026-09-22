@@ -54,6 +54,14 @@ import {
   type MilestonePurposeKind,
 } from '../shared/protocol.js';
 import { mountDeliverables, type DeliverablesSurface } from './deliverables.js';
+import { renderFidelityReview } from './import-fidelity.js';
+import {
+  commitNote,
+  fidelityDisclosureSummary,
+  fidelityOutcomeLabel,
+  fidelityReviewHeading,
+  reimportFidelityHeading,
+} from './import-fidelity-labels.js';
 import { mountProposalConflict, type ProposalConflictSurface } from './proposal-conflict.js';
 import {
   DELIVERABLES_DESTINATION_ACTIONS,
@@ -647,64 +655,6 @@ function identityFindingDisclosure(
     disclosure.append(item);
   }
   return disclosure;
-}
-
-function statusIcon(status: FidelityCategoryProjection['status']): string {
-  if (status === 'preserved') return '✓';
-  if (status === 'degraded') return '△';
-  return '⊘';
-}
-
-/**
- * A converted file says so above its Import Fidelity Review: what it was read through, that the
- * losses below are the conversion's, and that the original file is kept as it was (ADR 0072 §3).
- * Nothing on this surface presents a converted file as one the product read natively.
- */
-function conversionNote(conversion: ManuscriptConversionProjection): HTMLElement {
-  const note = element(
-    'p',
-    'attention-note',
-    `本稿件由 ${conversion.converterIdentity} 从 ${conversion.sourceFormat} 转换为 DOCX 工作表示后读取；` +
-      '下列损失由转换造成，原始文件原样保留。',
-  );
-  note.dataset['importConversionNote'] = conversion.sourceFormat;
-  return note;
-}
-
-/** The review's eight classes, with the conversion that caused their counts named above them. */
-function fidelitySection(
-  fidelity: ReadonlyArray<FidelityCategoryProjection>,
-  conversion: ManuscriptConversionProjection | null,
-): ReadonlyArray<HTMLElement> {
-  return conversion === null ? [fidelityTable(fidelity)] : [conversionNote(conversion), fidelityTable(fidelity)];
-}
-
-function fidelityTable(fidelity: ReadonlyArray<FidelityCategoryProjection>): HTMLElement {
-  const table = element('div', 'fidelity-list');
-  table.setAttribute('role', 'table');
-  table.setAttribute('aria-label', '导入保真审阅');
-  for (const category of fidelity) {
-    const row = element('div', 'fidelity-row');
-    row.setAttribute('role', 'row');
-    row.dataset['fidelityCategory'] = category.key;
-    const name = element('div', 'fidelity-name');
-    name.setAttribute('role', 'cell');
-    name.append(document.createTextNode(category.label), element('span', 'count', ` · ${category.count} 项`));
-    const status = element(
-      'div',
-      `status-pill status-${category.status}`,
-      `${statusIcon(category.status)} ${category.statusLabel}`,
-    );
-    status.setAttribute('role', 'cell');
-    const detail = element('div', 'fidelity-detail', category.detail);
-    detail.setAttribute('role', 'cell');
-    if (category.key === 'round-trip-export') {
-      detail.append(element('span', 'roundtrip-note', '不提供往返保证；此能力限制不阻止本次符合范围的文本导入。'));
-    }
-    row.append(name, status, detail);
-    table.append(row);
-  }
-  return table;
 }
 
 function productIsVisibleAndReady(): boolean {
@@ -1464,7 +1414,7 @@ function recordPresentation(record: BookRecordPresentation): HTMLElement {
       appendRecordField(
         values,
         '保真结果',
-        record.fidelityOutcome === 'degraded-import-no-round-trip' ? '含已接受的降级 · 不提供 DOCX 往返保证' : '完整保留 · 不提供 DOCX 往返保证',
+        fidelityOutcomeLabel(record.fidelityOutcome),
       );
       appendRecordField(values, '导入降级决定 ID', record.degradationDecisionId, true);
       appendRecordField(values, '结果修订版 ID', record.resultingRevisionId, true);
@@ -1514,9 +1464,7 @@ function recordPresentation(record: BookRecordPresentation): HTMLElement {
       appendRecordField(values, '比较摘要', record.comparisonDigest, true);
       appendRecordField(values, '解决摘要', record.resolutionDigest, true);
       appendRecordField(values, '导入保真审阅 ID', record.fidelityReviewId, true);
-      appendRecordField(values, '保真结果', record.fidelityOutcome === 'degraded-import-no-round-trip'
-        ? '含已接受的降级 · 不提供 DOCX 往返保证'
-        : '完整保留 · 不提供 DOCX 往返保证');
+      appendRecordField(values, '保真结果', fidelityOutcomeLabel(record.fidelityOutcome));
       appendRecordField(values, '导入降级决定 ID', record.degradationDecisionId, true);
       appendRecordField(values, '记录摘要', record.recordDigest, true);
       appendRecordInstant(values, '导入时间', record.importedAt);
@@ -1525,7 +1473,7 @@ function recordPresentation(record: BookRecordPresentation): HTMLElement {
   detail.append(values);
   if (record.kind === 'import-record' || record.kind === 'manuscript-reimport-record') {
     const fidelity = element('details', 'degradation-disclosure');
-    fidelity.append(element('summary', undefined, '查看导入保真审阅 · 8 类'));
+    fidelity.append(element('summary', undefined, fidelityDisclosureSummary(record.fidelityCategories)));
     const categories = element('ul', 'degradation-list');
     for (const category of record.fidelityCategories) {
       categories.append(element(
@@ -4297,6 +4245,7 @@ function renderTargetChoice(
     title.required = true;
     title.value = staged.titleSuggestion.value;
     const note = element('span', 'field-note', `建议来源：${staged.titleSuggestion.sourceLabel}。这是可编辑建议，不会自动创建图书。`);
+    const fidelityView = renderFidelityReview(staged.fidelity, staged.source.conversion, { kind: 'offer' });
     const confirm = button('确认书名并复核', 'primary', async () => {
       const confirmedTitle = title.value.normalize('NFC').replace(/\s+/g, ' ').trim();
       if (!confirmedTitle || confirmedTitle.length > 180) {
@@ -4326,7 +4275,7 @@ function renderTargetChoice(
             expectedDraftVersion: staged.draftVersion,
             target: { kind: 'new-book', choiceId: selectedChoice.id, confirmedTitle },
             acceptDegradation: false,
-            textBoxDisposition: 'retain',
+            textBoxDisposition: fidelityView.textBoxDisposition(),
           });
           renderReview(review, recoveryNotice, recoveryReturn);
         }
@@ -4339,14 +4288,15 @@ function renderTargetChoice(
     actions.append(confirm, cancelImport);
     form.append(label, title, note);
     if (relationshipSelection === 'first-manuscript') {
-      form.append(...fidelitySection(staged.fidelity, staged.source.conversion));
+      form.append(...fidelityView.elements);
     }
     form.append(actions);
     content.append(form);
     revealedControl = title;
   } else if (selectedChoice?.kind === 'existing-book' && relationshipSelection === 'first-manuscript') {
     if (selectedChoice.manuscriptState !== 'empty') throw new Error('AI7_IMPORT_RELATIONSHIP_INVALID');
-    content.append(...fidelitySection(staged.fidelity, staged.source.conversion));
+    const fidelityView = renderFidelityReview(staged.fidelity, staged.source.conversion, { kind: 'offer' });
+    content.append(...fidelityView.elements);
     const actions = element('div', 'button-row');
     const confirm = button('复核导入到所选图书', 'primary', async () => {
       confirm.disabled = true;
@@ -4357,7 +4307,7 @@ function renderTargetChoice(
           expectedDraftVersion: staged.draftVersion,
           target: { kind: 'existing-book', bookId: selectedChoice.bookId, relationship: 'first-manuscript' },
           acceptDegradation: false,
-          textBoxDisposition: 'retain',
+          textBoxDisposition: fidelityView.textBoxDisposition(),
         });
         renderReview(review, recoveryNotice, recoveryReturn);
         setStatus('导入前复核已准备', 'success');
@@ -4905,7 +4855,7 @@ function renderManuscriptReimportReview(
   content.append(summary);
 
   const fidelity = element('section', 'review-section');
-  fidelity.append(element('h3', undefined, '重新导入保真审阅 · 8 类'));
+  fidelity.append(element('h3', undefined, reimportFidelityHeading(review.fidelity)));
   const fidelityList = element('ul', 'degradation-list');
   for (const category of review.fidelity) {
     fidelityList.append(element('li', undefined,
@@ -5247,8 +5197,11 @@ function renderReview(
 
   const fidelity = element('section', 'review-section');
   fidelity.append(
-    element('h3', undefined, '导入保真审阅 · 8 类'),
-    ...fidelitySection(review.fidelity, review.source.conversion),
+    element('h3', undefined, fidelityReviewHeading(review.fidelity)),
+    ...renderFidelityReview(review.fidelity, review.source.conversion, {
+      kind: 'stated',
+      disposition: review.textBoxDisposition,
+    }).elements,
   );
   content.append(fidelity);
 
@@ -5342,13 +5295,7 @@ function renderReview(
     const acceptedDegradation = review.degradationDecision.state === 'accepted-complete-set';
     explanation.append(
       element('strong', undefined, '一次提交，不能部分创建'),
-      element(
-        'div',
-        'field-note',
-        acceptedDegradation
-          ? '已接受的完整降级集合、保真审阅、降级决定和稿件导入记录会原子关联；不提供 DOCX 往返保证。'
-          : '本次符合范围的导入不创建导入降级决定，也不提供 DOCX 往返保证。',
-      ),
+      element('div', 'field-note', commitNote(acceptedDegradation)),
     );
     const commitButton = button(finalActionLabel, 'primary', async () => {
       commitButton.disabled = true;
