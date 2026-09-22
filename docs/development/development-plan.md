@@ -80,20 +80,20 @@ Exit criterion: an editor opens a Book into the manuscript at the last position,
 | 2.1 | S57 | #405 | T2 | J-12 | ① Open a Book into the manuscript at its last position; 工作概览 becomes a destination (B1) | S57-s | integrated (PR #470, `dev@1860641`); its `e2e:all` rung was withheld under the wave of 2026-09-12, and the hosted nightly has failed J-02 at `j14-behavior` on most runs since — #474 |
 | 2.1a | S57-s | #467 | T3 | J-12 | Remember a manuscript's entry position: the additive record at schema revision 21, written on arrival, paging and leaving | — | integrated (PR #469, `dev@6327643`) |
 | 2.2 | S71 | #406 | T2 | J-04 | ①b / ②A The finished analysis chain in editorial language, including the Run Report (S42b, S44b) | Phase 1, S57 | integrated (PR #480, `dev@50e7a6b`); the quick start on ②A is shown disabled until S75 (the Owner, 2026-09-20) |
-| 2.3 | S58 | #407 | T3 | J-05 | ① Editorial marks: 批注, 备注, 高亮 and 修改建议 as Proposal Change Items (B2) | S57 | planned · J-05 admitted by the Owner on 2026-09-20 ("admit as you need"): this slice's pull request supplies the runner and cuts it over atomically ([CI and test boundaries](../agents/ci-test-boundaries.md)) |
-| 2.4 | S59 | #408 | T3 | J-05 | ① / ②B One-click 接受并应用 with the three records kept apart (B3) | S58 | planned |
-| 2.5 | S60 | #409 | T2 | J-02 | ① Position rail lanes in the unified 导航 column (B5) | S58 | planned |
-| 2.6 | S69 | #417 | T3 | J-04 | ②B 审阅: multi-category Review Runs, coverage matrix, Reports, findings synced to marks, 书系一致性 (B6) | S58, S18a | planned |
-| 2.7 | S22 | #57 | T3 | J-06 | Same-block and structural conflicts resolved all-or-none, returning through 接受并应用 | S59 | planned · J-06 admitted on 2026-09-20 (as 2.3) |
-| 2.8 | S61 | #410 | T3 | J-01 | ④ DOCX content retained with the Source Version by default; 保留 / 并入 per class (B14) | — | planned |
-| 2.9 | S62 | #411 | T2 | J-01 | ④ Imported comments and tracked changes enter as marks (B15) | S58, S61 | planned |
+| 2.3 | S58 | #407 | T3 | J-05 | ① Editorial marks: 批注, 备注, 高亮 and 修改建议 as Proposal Change Items (B2) | S57 | integrated (PR #482, `dev@cf9b0a5`); admits J-05 |
+| 2.4 | S59 | #408 | T3 | J-05 | ① / ②B One-click 接受并应用 with the three records kept apart (B3) | S58 | integrated (PR #483, `dev@07cdc7f`) |
+| 2.5 | S60 | #409 | T2 | J-02 | ① Position rail lanes in the unified 导航 column (B5) | S58 | integrated (PR #484, `dev@65d15b3`) |
+| 2.6 | S69 | #417 | T3 | J-04 | ②B 审阅: multi-category Review Runs, coverage matrix, Reports, findings synced to marks, 书系一致性 (B6) | S58, S18a | integrated (PR #487, `dev@1c600a8`) |
+| 2.7 | S22 | #57 | T3 | J-06 | Same-block and structural conflicts resolved all-or-none, returning through 接受并应用 | S59 | attested (PR #491, admits J-06); waits for ADR 0085 (#489) |
+| 2.8 | S61 | #410 | T3 | J-01 | ④ DOCX content retained with the Source Version by default; 保留 / 并入 per class (B14) | — | attested (PR #492); waits for ADR 0086 (#490) |
+| 2.9 | S62 | #411 | T2 | J-01 | ④ Imported comments and tracked changes enter as marks (B15) | S58, S61 | being built on S61 (2026-09-22) |
 | 2.10 | S63 | #412 | T3 | J-01 | ④ Chapter-level reimport with four verbs; marks migrate; return to the manuscript (B16) | S58 | planned |
 | 2.11 | S64 | #413 | T3 | J-07 | ④ Export to DOCX / PDF / Markdown with 含批注 / 含修改建议, fidelity table, system picker, receipt (B17) | S58, S61 (the External Export Policy v2 bytes are integrated, PR #440, and need no further confirmation) | planned · J-07 admitted on 2026-09-20 (as 2.3) |
-| 2.12 | S65 | #414 | T3 | J-07 | ⑥ 发稿: Manuscript-only milestones and 设为发稿版本 (B26) | — | planned |
+| 2.12 | S65 | #414 | T3 | J-07 | ⑥ 发稿: Manuscript-only milestones and 设为发稿版本 (B26) | — | integrated (PR #488, `dev@f169695`), taken ahead of S64; admits J-07 |
 | 2.13 | S66 | #415 | T3 | J-07 | ⑥ Production Documents: types, versions, workflow and gates, Delivery Records, 交付后有修改, 本书不做 (B27) | S64, S58 | planned |
 | 2.14 | S67 | #416 | T3 | J-07 | ⑥ 图书交付包: conditions, frozen manifest, versions, export history (B28) | S64, S65, S66 | planned |
 
-Each slice's detail is in its Issue and in the specification's screen section; this table carries only the order and the dependencies. J-05, J-06 and J-07 have no runner today. Under [CI and test boundaries](../agents/ci-test-boundaries.md) admitting one is an explicit Owner routing decision, and on 2026-09-20 the Owner gave it for these and for J-09, J-10, J-11, J-13 and J-16 ("admit as you need"): the first slice of each supplies the real runner in its own pull request and cuts it over atomically into `ADMITTED_JOURNEYS`, `JOURNEY_MODULES`, `JOURNEY_LOCATIONS`, `e2e/run-all.mjs` and the nightly's full set, `GATE_JOURNEYS` unchanged.
+Each slice's detail is in its Issue and in the specification's screen section; this table carries only the order and the dependencies. J-05 and J-07 are admitted by S58 and S65, and J-06 by S22's pull request (#491). Under [CI and test boundaries](../agents/ci-test-boundaries.md) admitting one is an explicit Owner routing decision, and on 2026-09-20 the Owner gave it for these and for J-09, J-10, J-11, J-13 and J-16 ("admit as you need"): the first slice of each supplies the real runner in its own pull request and cuts it over atomically into `ADMITTED_JOURNEYS`, `JOURNEY_MODULES`, `JOURNEY_LOCATIONS`, `e2e/run-all.mjs` and the nightly's full set, `GATE_JOURNEYS` unchanged.
 
 ## Phase 3 — one Task Drawer and run governance
 
