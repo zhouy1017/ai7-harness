@@ -629,11 +629,23 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
   function endWork(asked: TaskPlanRequest | null): void {
     working = false;
     if (interrupted || root.hidden) return;
+    // A read replaces the request object; compare the Task identity, not object identity.
+    const sameTask = asked !== null && request !== null
+      && asked.bookId === request.bookId && asked.kind === request.kind && asked.ref === request.ref;
+    if (!sameTask) {
+      // An old action must not put its refusal or focus into a different Task's drawer.
+      refusal = null;
+      focusBar = false;
+    }
     if (refusal !== null && plan !== null) {
       paintBar(plan);
       bar.querySelector<HTMLElement>('[data-task-drawer-control="start"]:not(:disabled), [data-task-drawer-control="reconfirm-plan"]:not(:disabled)')?.focus();
     }
-    if (asked !== null && request === asked) read();
+    // `working` is not part of the projection cache key. Even an unchanged plan must repaint
+    // after cancellation, an intervening read, or opening another Task while this action ran.
+    // Keep successful actions disabled until the fresh authority read has completed.
+    painted = '';
+    if (request !== null) read();
   }
 
   /**
