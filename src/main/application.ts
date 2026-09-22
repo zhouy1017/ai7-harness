@@ -165,6 +165,7 @@ function parseArguments(argv: string[]): LaunchArguments {
           key === '--j03-picker-path' ||
           key === '--j04-picker-path' ||
           key === '--j05-picker-path' ||
+          key === '--j06-picker-path' ||
           key === '--j07-picker-path' ||
           key === '--j01-import-control' ||
           key === '--j03-foreground-execution-control' ||
@@ -196,9 +197,10 @@ function parseArguments(argv: string[]): LaunchArguments {
   const j03PickerPath = values.get('--j03-picker-path');
   const j04PickerPath = values.get('--j04-picker-path');
   const j05PickerPath = values.get('--j05-picker-path');
+  const j06PickerPath = values.get('--j06-picker-path');
   const j07PickerPath = values.get('--j07-picker-path');
   requireDesktop(
-    [j01PickerPath, j02PickerPath, j08PickerPath, j12PickerPath, j03PickerPath, j04PickerPath, j05PickerPath, j07PickerPath]
+    [j01PickerPath, j02PickerPath, j08PickerPath, j12PickerPath, j03PickerPath, j04PickerPath, j05PickerPath, j06PickerPath, j07PickerPath]
       .filter(Boolean).length <= 1,
   );
   // The picker-path launch controls carry whatever their Journey selects, in any recognised format
@@ -225,10 +227,13 @@ function parseArguments(argv: string[]): LaunchArguments {
     j05PickerPath === undefined || (process.env.AI7_E2E_JOURNEY === 'J-05' && isAbsolute(j05PickerPath)),
   );
   requireDesktop(
+    j06PickerPath === undefined || (process.env.AI7_E2E_JOURNEY === 'J-06' && isAbsolute(j06PickerPath)),
+  );
+  requireDesktop(
     j07PickerPath === undefined || (process.env.AI7_E2E_JOURNEY === 'J-07' && isAbsolute(j07PickerPath)),
   );
   const injectedPickerPath =
-    j01PickerPath ?? j02PickerPath ?? j08PickerPath ?? j12PickerPath ?? j03PickerPath ?? j04PickerPath ?? j05PickerPath ?? j07PickerPath;
+    j01PickerPath ?? j02PickerPath ?? j08PickerPath ?? j12PickerPath ?? j03PickerPath ?? j04PickerPath ?? j05PickerPath ?? j06PickerPath ?? j07PickerPath;
   const importControlValue = values.get('--j01-import-control');
   const importControl =
     importControlValue === 'before-commit' ||

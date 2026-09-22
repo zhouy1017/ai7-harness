@@ -1,4 +1,8 @@
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import { RESOLVE_CONFLICT_LABEL, SAFE_MERGE_LINE, markSourceLine, markStateLabel } from '../../src/renderer/editorial-mark-labels.js';
+import type { EditorialMarkCardProjection } from '../../src/shared/protocol.js';
 import {
   CONFLICT_COMPLETION,
   CONFLICT_CONFIRM_LABELS,
@@ -27,6 +31,19 @@ import {
 
 // Unit suite for the words of 稿件冲突 (Issue #57, plan slice S22; ADR 0085; V2-UX-CONFLICT-004 to 013).
 // J-06 reads these sentences on screen; they are pinned here byte for byte.
+
+const EDITOR = { kind: 'editor', origin: null, label: null, taskId: null } as const;
+/** A 修改建议 whose conflict 保留当前稿件 resolved: rejected, with that outcome on record. */
+const KEPT_CARD: Pick<EditorialMarkCardProjection, 'kind' | 'status' | 'anchorState' | 'suggestion' | 'conflict'> = {
+  kind: 'change-suggestion',
+  status: 'resolved',
+  anchorState: 'drifted',
+  suggestion: {
+    itemId: 'item', currentText: '原文', proposedText: '改后', rationale: '', atomicGroupId: null, application: null,
+    decision: { decisionId: 'decision', disposition: 'rejected', editedText: null, reason: '保留当前稿件', reasonSource: 'suggested', recordedAt: '2026-09-22T00:00:00.000Z' },
+  },
+  conflict: { kind: 'suggestion', state: 'resolved', deferredAt: null, outcome: 'keep-current', newMarkId: null, resolvedAt: '2026-09-22T00:00:00.000Z' },
+};
 
 describe('the words of 稿件冲突', () => {
   it('names the workspace, its classification and a reversal conflict in the editor\'s words', () => {
@@ -85,6 +102,33 @@ describe('the words of 稿件冲突', () => {
     expect(conflictSaveReason('unresolved', 2)).toBe('还有 2 处未解决；每一处都选定后才能保存为新提案版本。');
     expect(conflictSaveReason('unchanged', 0)).toBe('解决结果与当前稿件相同，请选「保留当前稿件」。');
     expect(conflictSaveReason('target-deleted', 1)).toBe('原文已被删去，不能在原处生成新版本；可选「保留当前稿件」或「暂不处理」。');
+  });
+
+  it('are the words J-06 checks the page for, so the Journey and the surface never drift apart', () => {
+    // `e2e/run-j06.mjs` is runner infrastructure outside the typed program, so its pinned words are read
+    // from its source, one `const NAME = '…';` line each.
+    const runner = readFileSync(fileURLToPath(new URL('../../e2e/run-j06.mjs', import.meta.url)), 'utf8');
+    const literal = (name: string): string | undefined => new RegExp(`^const ${name} = '([^']*)';\\r?$`, 'mu').exec(runner)?.[1];
+    const expected: Readonly<Record<string, string>> = {
+      TITLE: PROPOSAL_CONFLICT_TITLE,
+      CLASSIFICATION: PROPOSAL_CONFLICT_CLASSIFICATION,
+      REVERSAL_LINE: REVERSAL_CONFLICT_LINE,
+      REVERSAL_PROPOSED_LABEL: conflictPaneLabels('reversal').proposed,
+      CONTEXT_NOTE: CONFLICT_CONTEXT_NOTE,
+      REGENERATE_REASON: CONFLICT_REGENERATE_REASON,
+      RESOLVE_CONFLICT: RESOLVE_CONFLICT_LABEL,
+      SAFE_MERGE: SAFE_MERGE_LINE,
+      DRAFT_SAVED: CONFLICT_DRAFT_STATUS.saved,
+      UNRESOLVED_REASON: conflictSaveReason('unresolved', 1)!,
+      UNCHANGED_REASON: conflictSaveReason('unchanged', 0)!,
+      NEW_VERSION_DONE: CONFLICT_COMPLETION.newVersion,
+      KEEP_CURRENT_DONE: CONFLICT_COMPLETION.keepCurrent,
+      DEFER_DONE: CONFLICT_COMPLETION.defer,
+      KEPT_STATE: markStateLabel({ ...KEPT_CARD }),
+      NEW_VERSION_SOURCE: markSourceLine({ source: EDITOR, convertedFrom: null, resolvedFrom: { markId: 'mark', conflictKind: 'suggestion' } }).replace('你 · ', ''),
+      CORRECTION_SOURCE: markSourceLine({ source: EDITOR, convertedFrom: null, resolvedFrom: { markId: 'mark', conflictKind: 'reversal' } }).replace('你 · ', ''),
+    };
+    for (const [name, words] of Object.entries(expected)) expect(literal(name), name).toBe(words);
   });
 
   it('says whether the draft is durable, and what each way out did', () => {
