@@ -12,6 +12,19 @@ import {
   type TextBoxDisposition,
 } from '../shared/protocol.js';
 import type { ConversionLoss } from './text-manuscript.js';
+import {
+  ImportedMarkCollector,
+  MAX_COMMENT_PART_BYTES,
+  emptyParagraphRevisions,
+  recordParagraphText,
+  type CommentMarkerRole,
+  type ParagraphRevisions,
+  type ParsedImportedMark,
+  type RevisionKind,
+  type TextPlace,
+} from './docx-marks.js';
+
+export type { ParsedImportedMark };
 
 /**
  * How a text box enters the Manuscript (ADR 0086 §2): kept as a text box with the Source Version, the
@@ -40,13 +53,19 @@ const MAX_TEXT_BOXES = 10_000;
  */
 const HYPERLINK_FIELD = 'HYPERLINK';
 /**
- * The parser identity every review is rebuilt under (ADR 0086). Revision 2 reads text boxes instead of
- * refusing the file, counts fields — and a link as an inline style — records which source paragraph
- * every block came from, and reports ten content classes; revision 1's eight-row report stays
- * rebuildable through its frozen builder, so a review recorded under it still reads back exactly
- * (`buildFidelityReportV1`).
+ * The parser identity every review is rebuilt under (ADR 0086; Issue #411). Revision 3 reads a revised file
+ * as it reads with every revision rejected — deleted and moved-away text present, inserted and moved-in text
+ * absent — reads its comments and tracked changes into marks (`docx-marks.ts`), no longer refuses a
+ * formatting revision, and reports 批注与修订 as 完整保留 when the file carries any. A file without comments or
+ * revisions reads exactly as revision 2 read it. Revision 2's report and revision 1's eight rows stay
+ * rebuildable through their frozen builders, so a review recorded under either still reads back exactly.
  */
-export const DOCX_PARSER_IDENTITY = 'ai7-docx-fflate-saxes/2';
+export const DOCX_PARSER_IDENTITY = 'ai7-docx-fflate-saxes/3';
+/**
+ * The identity of every review written between ADR 0086 and Issue #411: ten classes, comments and revisions
+ * 不支持导入, rebuilt by the frozen builder (`buildFidelityReportV2`).
+ */
+export const DOCX_PARSER_IDENTITY_V2 = 'ai7-docx-fflate-saxes/2';
 /** The identity of every review written before revision 2: eight classes, rebuilt by the frozen builder. */
 export const DOCX_PARSER_IDENTITY_V1 = 'ai7-docx-fflate-saxes/1';
 
@@ -65,6 +84,11 @@ export interface ImportFidelityPlan {
    * revision-1 report (which refused every file that had one).
    */
   textBoxDisposition: TextBoxDisposition | null;
+  /**
+   * How many marks the file's comments and tracked changes become when this review commits (Issue #411):
+   * the 批注与修订 count of a revision-3 report that converts them, and 0 for any other report.
+   */
+  importedMarks: number;
 }
 
 export interface ParsedDocxBlock {
@@ -118,6 +142,11 @@ export interface ParsedDocx {
   characterCount: number;
   fidelity: FidelityCategoryProjection[];
   textBoxes: ParsedTextBox[];
+  /**
+   * The marks the file's comments and tracked changes become (Issue #411), pinned in the blocks this parse
+   * produced; the 批注与修订 class counts exactly these.
+   */
+  importedMarks: ParsedImportedMark[];
   titleSuggestion: {
     value: string;
     sourceLabel: 'DOCX 标题元数据' | '文件名';
@@ -130,7 +159,13 @@ export interface DocumentSignals {
    * field whose instruction is HYPERLINK. Every other field counts in `fields`.
    */
   inlineStyles: number;
+  /** Under revision 3, the marks the comments and tracked changes become; under revision 2, their elements. */
   commentsRevisions: number;
+  /**
+   * Revision 3: whether the file carries a comment or revision at all — a formatting revision, or one inside
+   * a text box or a note, becomes no mark but still stays with the file. Absent means `commentsRevisions > 0`.
+   */
+  commentsRevisionsPresent?: boolean;
   notes: number;
   tables: number;
   imagesCaptions: number;
@@ -139,8 +174,10 @@ export interface DocumentSignals {
   fields: number;
 }
 
+/** The eight body signals a revision-2 report counted; kept only to rebuild such a report exactly. */
+type DocumentSignalsV2 = Omit<DocumentSignals, 'commentsRevisionsPresent'>;
 /** The six body signals a revision-1 report counted; kept only to rebuild such a report exactly. */
-type DocumentSignalsV1 = Omit<DocumentSignals, 'textBoxes' | 'fields'>;
+type DocumentSignalsV1 = Omit<DocumentSignalsV2, 'textBoxes' | 'fields'>;
 
 /**
  * A conversion whose loss the report counts and names (ADR 0072 §3). The labels stay the class's:
@@ -189,7 +226,38 @@ interface DocumentParseResult {
   structureDigest: string;
   signals: DocumentSignals;
   textBoxes: ParsedTextBox[];
+  importedMarks: ParsedImportedMark[];
 }
+
+/** The parts that carry a file's comments, read whole beside `word/document.xml` (Issue #411). */
+const COMMENTS_PART = 'word/comments.xml';
+const COMMENTS_EXTENDED_PART = 'word/commentsExtended.xml';
+
+/**
+ * Revision markup that holds no text of either reading: a formatting revision keeps the properties the text
+ * had before it, a table or numbering revision the structure. Revision 3 skips what such an element holds —
+ * the formatting stays with the file — where revision 2 refused the file for its nested properties.
+ */
+const SKIPPED_REVISION_ELEMENTS: ReadonlySet<string> = new Set([
+  'rPrChange', 'pPrChange', 'sectPrChange', 'tblPrChange', 'trPrChange', 'tcPrChange', 'tblGridChange',
+  'tblPrExChange', 'numberingChange',
+]);
+
+/** Revision markers that only say a revision is there: a table cell's, a move's range, custom XML's. */
+const REVISION_MARKER_ELEMENTS: ReadonlySet<string> = new Set([
+  'cellIns', 'cellDel', 'cellMerge', 'moveFromRangeStart', 'moveFromRangeEnd', 'moveToRangeStart', 'moveToRangeEnd',
+  'customXmlInsRangeStart', 'customXmlInsRangeEnd', 'customXmlDelRangeStart', 'customXmlDelRangeEnd',
+  'customXmlMoveFromRangeStart', 'customXmlMoveFromRangeEnd', 'customXmlMoveToRangeStart', 'customXmlMoveToRangeEnd',
+]);
+
+/** The parents under which `w:ins` and its kin mark a property rather than hold runs. */
+const REVISION_PROPERTY_PARENTS: ReadonlySet<string> = new Set(['rPr', 'trPr', 'numPr']);
+
+const COMMENT_MARKER_ROLES: Readonly<Record<string, CommentMarkerRole>> = {
+  commentRangeStart: 'start',
+  commentRangeEnd: 'end',
+  commentReference: 'reference',
+};
 
 function requireDocx(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(`DOCX_REJECTED:${message}`);
@@ -287,9 +355,12 @@ function parseCoreTitle(xml: string | undefined): string | undefined {
 }
 
 interface OpenParagraph {
+  /** The paragraph's text as it reads with every revision rejected. */
   text: string;
   style: string | undefined;
   sourceParagraphIndex: number;
+  /** A body paragraph's revisions and comment anchors; a text box's paragraph carries none into marks. */
+  revisions: ParagraphRevisions | undefined;
 }
 
 /** What a paragraph style makes of a block: a title, a heading of level 1 to 6, or a body paragraph. */
@@ -312,10 +383,18 @@ function paragraphBlockText(open: OpenParagraph): string {
  * its own instead of being refused, and its paragraphs are kept apart from the body (ADR 0086 §2).
  * Markup-compatibility alternatives are read once: the first `mc:Choice` of an `mc:AlternateContent`,
  * never its `mc:Fallback`, which repeats the same content — so a Word text box is one box, not two.
+ *
+ * Revision 3 (Issue #411): text is read as the file reads with every revision rejected. Text inside `w:ins`
+ * or `w:moveTo` is not the paragraph's; `w:delText` inside `w:del` or `w:moveFrom` is; text both inserted
+ * and deleted is neither. What each body paragraph's revisions and comment anchors were is handed to the
+ * mark collector as the paragraph closes.
  */
 function createDocumentParser(
   onBlock: (block: ParsedDocxBlock) => void,
-): { write(chunk: Uint8Array, final: boolean): void; finish(): DocumentParseResult } {
+): {
+  write(chunk: Uint8Array, final: boolean): void;
+  finish(comments: { comments?: string; commentsExtended?: string }): DocumentParseResult;
+} {
   const signals: DocumentSignals = {
     inlineStyles: 0,
     commentsRevisions: 0,
@@ -334,7 +413,11 @@ function createDocumentParser(
   let characterCount = 0;
   let blockCount = 0;
   let textDepth = 0;
+  let deletedTextDepth = 0;
   let instructionDepth = 0;
+  // The revision containers open around the current position, innermost last.
+  const revisions: Array<{ kind: RevisionKind; identity: { author: string; date: string }; depth: number }> = [];
+  const marks = new ImportedMarkCollector();
   // A complex field's instruction follows its begin mark in `w:instrText`, possibly split across runs. It
   // is read only until its first word is known, and the field is counted then — or at its separate or end
   // mark, or at the end of the part, when the instruction never finished that word.
@@ -405,9 +488,7 @@ function createDocumentParser(
     fieldInstruction = undefined;
   };
 
-  const appendParagraphText = (addition: string): void => {
-    const target = openParagraph();
-    if (!target || addition.length === 0) return;
+  const appendParagraphText = (target: OpenParagraph, addition: string): void => {
     requireDocx(addition.length <= MAX_BLOCK_CODE_UNITS, 'paragraph text chunk exceeds the bounded block size');
     requireDocx(
       target.text.length <= MAX_BLOCK_CODE_UNITS - addition.length,
@@ -418,6 +499,49 @@ function createDocumentParser(
     requireDocx(graphemeCount(nextText) <= MAX_BLOCK_GRAPHEMES, 'paragraph exceeds the bounded block size');
     target.text = nextText;
     textCodeUnits += addition.length;
+  };
+
+  /** Where text at the current position falls between the rejected and the accepted readings. */
+  const textPlace = (): TextPlace => {
+    let innermost: (typeof revisions)[number] | undefined;
+    let inserted = false;
+    let deleted = false;
+    for (const frame of revisions) {
+      if (frame.kind === 'ins' || frame.kind === 'moveTo') inserted = true;
+      else deleted = true;
+      innermost = frame;
+    }
+    if (innermost === undefined) return { kind: 'plain' };
+    if (inserted && deleted) return { kind: 'hidden' };
+    return { kind: innermost.kind, identity: innermost.identity };
+  };
+
+  /**
+   * Text of the paragraph at the current position: the rejected reading keeps it unless it is inserted or
+   * moved in, and a body paragraph records where it fell. `deleted` is `w:delText`, which only a deletion or
+   * a move away holds; anywhere else it is dropped, as revision 2 dropped every `w:delText`.
+   */
+  const routeParagraphText = (addition: string, deleted: boolean): void => {
+    const target = openParagraph();
+    if (!target || addition.length === 0) return;
+    const place = textPlace();
+    if (place.kind === 'hidden') return;
+    if (deleted && place.kind !== 'del' && place.kind !== 'moveFrom') return;
+    const before = target.text.length;
+    if (place.kind === 'ins' || place.kind === 'moveTo') {
+      if (target.revisions === undefined) return;
+      requireDocx(addition.length <= MAX_BLOCK_CODE_UNITS && target.revisions.accept.length <= MAX_BLOCK_CODE_UNITS - addition.length,
+        'paragraph exceeds the bounded block size');
+      requireDocx(textCodeUnits <= MAX_TEXT_CODE_UNITS - addition.length, 'document text is too large');
+      textCodeUnits += addition.length;
+    } else {
+      appendParagraphText(target, addition);
+    }
+    if (target.revisions !== undefined) {
+      requireDocx(place.kind !== 'plain' || target.revisions.accept.length <= MAX_BLOCK_CODE_UNITS - addition.length,
+        'paragraph exceeds the bounded block size');
+      recordParagraphText(target.revisions, place, addition, before, target.text.length);
+    }
   };
 
   const parser = new SaxesParser({ xmlns: true });
@@ -434,7 +558,17 @@ function createDocumentParser(
     const grandparent = ancestors.at(-2);
     if (terminalSectionSeen && parent === 'body') requireDocx(false, 'terminal section properties are not terminal');
     if (terminalSection && tag.local !== 'sectPr') terminalSection.descendantCount += 1;
-    if (runProperties) runProperties.styled = true;
+    // A revision recorded in run properties — the paragraph mark's own, or a formatting change — sets no
+    // formatting of the text as it stands.
+    const revisionMarkup = SKIPPED_REVISION_ELEMENTS.has(tag.local) ||
+      (parent === 'rPr' && (tag.local === 'ins' || tag.local === 'del' || tag.local === 'moveFrom' || tag.local === 'moveTo'));
+    if (runProperties && !revisionMarkup) runProperties.styled = true;
+    if (SKIPPED_REVISION_ELEMENTS.has(tag.local)) {
+      marks.markPresent();
+      skippedFrom = ancestors.length;
+      ancestors.push(tag.local);
+      return;
+    }
     switch (tag.local) {
       case 'AlternateContent':
         alternates.push({ depth: ancestors.length, choiceRead: false });
@@ -451,10 +585,10 @@ function createDocumentParser(
       case 'p':
         if (textBox === undefined) {
           requireDocx(paragraph === undefined, 'nested paragraph');
-          paragraph = { text: '', style: undefined, sourceParagraphIndex };
+          paragraph = { text: '', style: undefined, sourceParagraphIndex, revisions: emptyParagraphRevisions() };
         } else {
           requireDocx(boxParagraph === undefined, 'nested paragraph');
-          boxParagraph = { text: '', style: undefined, sourceParagraphIndex };
+          boxParagraph = { text: '', style: undefined, sourceParagraphIndex, revisions: undefined };
         }
         break;
       case 'pStyle': {
@@ -465,16 +599,19 @@ function createDocumentParser(
       case 't':
         textDepth += 1;
         break;
+      case 'delText':
+        deletedTextDepth += 1;
+        break;
       case 'rPr':
         requireDocx(runProperties === undefined, 'nested run properties');
         runProperties = { depth: ancestors.length, styled: false };
         break;
       case 'tab':
-        appendParagraphText('\t');
+        routeParagraphText('\t', false);
         break;
       case 'br':
       case 'cr':
-        appendParagraphText('\n');
+        routeParagraphText('\n', false);
         break;
       case 'b':
       case 'i':
@@ -485,11 +622,33 @@ function createDocumentParser(
         if (!runProperties) signals.inlineStyles += 1;
         break;
       case 'commentRangeStart':
-      case 'commentReference':
+      case 'commentRangeEnd':
+      case 'commentReference': {
+        // A comment in a text box stays with the file; one in the body is anchored where its range lies.
+        marks.markPresent();
+        const id = attributeValue(tag, 'id');
+        if (id === undefined || textBox !== undefined) break;
+        const role = COMMENT_MARKER_ROLES[tag.local]!;
+        if (paragraph !== undefined) paragraph.revisions!.commentMarkers.push({ id, role, raw: paragraph.text.length });
+        else marks.markerBetweenParagraphs(id, role);
+        break;
+      }
       case 'ins':
       case 'del':
-        signals.commentsRevisions += 1;
+      case 'moveFrom':
+      case 'moveTo': {
+        marks.markPresent();
+        const identity = { author: attributeValue(tag, 'author') ?? '', date: attributeValue(tag, 'date') ?? '' };
+        if (parent !== undefined && REVISION_PROPERTY_PARENTS.has(parent)) {
+          // The paragraph mark's own revision: a paragraph inserted, deleted, split or joined.
+          if (parent === 'rPr' && grandparent === 'pPr' && textBox === undefined && paragraph !== undefined) {
+            paragraph.revisions!.markRevision = { kind: tag.local, identity };
+          }
+        } else {
+          revisions.push({ kind: tag.local, identity, depth: ancestors.length });
+        }
         break;
+      }
       case 'footnoteReference':
       case 'endnoteReference':
         signals.notes += 1;
@@ -549,13 +708,15 @@ function createDocumentParser(
         else requireDocx(false, 'unsupported section properties');
         break;
       default:
+        if (REVISION_MARKER_ELEMENTS.has(tag.local)) marks.markPresent();
         break;
     }
     ancestors.push(tag.local);
   });
   parser.on('text', (text) => {
     if (skippedFrom !== undefined) return;
-    if (textDepth > 0) appendParagraphText(text);
+    if (textDepth > 0) routeParagraphText(text, false);
+    if (deletedTextDepth > 0) routeParagraphText(text, true);
     if (instructionDepth > 0 && fieldInstruction !== undefined) {
       // Only the first word counts, so no more than one character past HYPERLINK is ever kept.
       fieldInstruction = (fieldInstruction + text).trimStart().slice(0, HYPERLINK_FIELD.length + 1);
@@ -569,7 +730,9 @@ function createDocumentParser(
       return;
     }
     if (tag.local === 't') textDepth -= 1;
+    if (tag.local === 'delText') deletedTextDepth -= 1;
     if (tag.local === 'instrText') instructionDepth -= 1;
+    if (revisions.at(-1)?.depth === ancestors.length && revisions.at(-1)!.kind === tag.local) revisions.pop();
     if (tag.local === 'rPr') {
       requireDocx(runProperties?.depth === ancestors.length, 'run properties state mismatch');
       if (runProperties.styled) signals.inlineStyles += 1;
@@ -615,6 +778,8 @@ function createDocumentParser(
     }
     requireDocx(paragraph, 'paragraph state missing');
     const text = paragraphBlockText(paragraph);
+    const closing = paragraph;
+    let emitted: { position: number; text: string } | null = null;
     if (text.length > 0) {
       const blockGraphemes = graphemeCount(text);
       requireDocx(text.length <= MAX_BLOCK_CODE_UNITS && blockGraphemes <= MAX_BLOCK_GRAPHEMES, 'paragraph exceeds the bounded block size');
@@ -639,8 +804,10 @@ function createDocumentParser(
       blockCount += 1;
       characterCount += blockGraphemes;
       onBlock(block);
+      emitted = { position, text };
     }
     paragraph = undefined;
+    marks.closeParagraph(closing.revisions!, closing.text, emitted);
   });
 
   return {
@@ -664,17 +831,21 @@ function createDocumentParser(
         closed = true;
       }
     },
-    finish() {
+    finish(comments) {
       requireDocx(closed, 'document XML stream incomplete');
       requireDocx(
         paragraph === undefined && boxParagraph === undefined && textBox === undefined && skippedFrom === undefined &&
-          drawings.length === 0 && alternates.length === 0 && textDepth === 0 && instructionDepth === 0 &&
-          ancestors.length === 0 && runProperties === undefined && terminalSection === undefined,
+          drawings.length === 0 && alternates.length === 0 && textDepth === 0 && deletedTextDepth === 0 &&
+          instructionDepth === 0 && revisions.length === 0 && ancestors.length === 0 && runProperties === undefined &&
+          terminalSection === undefined,
         'incomplete document XML state',
       );
       requireDocx(blockCount > 0, 'DOCX contains no editable text blocks');
       // A field left open at the end of the part is still one field.
       settleField();
+      const importedMarks = marks.finish(comments.comments, comments.commentsExtended);
+      signals.commentsRevisions = importedMarks.length;
+      signals.commentsRevisionsPresent = marks.present;
       return {
         blockCount,
         characterCount,
@@ -682,6 +853,7 @@ function createDocumentParser(
         structureDigest: structureHash.update(']').digest('hex'),
         signals,
         textBoxes,
+        importedMarks,
       };
     },
   };
@@ -698,7 +870,13 @@ async function readStreamingArchive(
   metadata: Map<string, Uint8Array>;
   document: DocumentParseResult;
 }> {
-  const metadataNames = new Set(['[Content_Types].xml', 'docProps/core.xml']);
+  // The parts read whole, each under its own bound: the package metadata, and the comments (Issue #411).
+  const keptLimits = new Map<string, number>([
+    ['[Content_Types].xml', MAX_METADATA_XML_BYTES],
+    ['docProps/core.xml', MAX_METADATA_XML_BYTES],
+    [COMMENTS_PART, MAX_COMMENT_PART_BYTES],
+    [COMMENTS_EXTENDED_PART, MAX_COMMENT_PART_BYTES],
+  ]);
   const metadata = new Map<string, Uint8Array>();
   const entryNames: string[] = [];
   const seen = new Set<string>();
@@ -741,7 +919,8 @@ async function readStreamingArchive(
         file.start();
         return;
       }
-      if (!metadataNames.has(name)) {
+      const keptLimit = keptLimits.get(name);
+      if (keptLimit === undefined) {
         file.ondata = (error, chunk) => {
           try {
             if (error) throw error;
@@ -755,7 +934,7 @@ async function readStreamingArchive(
         return;
       }
       if (file.originalSize !== undefined && file.originalSize > 0) {
-        requireDocx(file.originalSize <= MAX_METADATA_XML_BYTES, 'metadata XML entry is too large');
+        requireDocx(file.originalSize <= keptLimit, 'metadata XML entry is too large');
       }
       const chunks: Uint8Array[] = [];
       let received = 0;
@@ -764,7 +943,7 @@ async function readStreamingArchive(
             if (error) throw error;
             received += chunk.byteLength;
             expandedBytes += chunk.byteLength;
-            requireDocx(received <= MAX_METADATA_XML_BYTES && expandedBytes <= MAX_EXPANDED_BYTES, 'metadata XML exceeded its bound');
+            requireDocx(received <= keptLimit && expandedBytes <= MAX_EXPANDED_BYTES, 'metadata XML exceeded its bound');
           chunks.push(chunk);
           if (final) {
             const joined = new Uint8Array(received);
@@ -800,12 +979,17 @@ async function readStreamingArchive(
   if (callbackFailure) throw callbackFailure;
   if (expandedBytes > 1_048_576) requireDocx(expandedBytes / archiveBytes <= MAX_ZIP_RATIO, 'suspicious ZIP ratio');
   requireDocx(metadata.has('[Content_Types].xml') && documentSeen, 'not a WordprocessingML DOCX');
+  const commentsPart = metadata.get(COMMENTS_PART);
+  const commentsExtendedPart = metadata.get(COMMENTS_EXTENDED_PART);
   return {
     sourceDigest: sourceHash.digest('hex'),
     archiveBytes,
     entryNames,
     metadata,
-    document: documentParser.finish(),
+    document: documentParser.finish({
+      ...(commentsPart === undefined ? {} : { comments: decodeMetadataXml(commentsPart) }),
+      ...(commentsExtendedPart === undefined ? {} : { commentsExtended: decodeMetadataXml(commentsExtendedPart) }),
+    }),
   };
 }
 
@@ -832,8 +1016,62 @@ const TEXT_BOX_DETAILS: Readonly<Record<TextBoxDisposition, string>> = {
 };
 
 /**
- * The ten content classes with their counts, labels, and details (V2-UX-IMP-002 to 004, ADR 0086). Nine
- * are rows; the tenth, `round-trip-export`, is the closing 预计往返 card and always counts nothing.
+ * The 批注与修订 row of a revision-3 report whose file carries comments or revisions (Issue #411, D4): they
+ * become marks on the manuscript whose source is the file's author, and what cannot — a formatting
+ * revision, or a comment or revision inside a text box or a note — stays with the file. Not a degradation.
+ */
+export const COMMENTS_REVISIONS_DETAIL =
+  '转为稿件上的批注 / 修改建议（来源：文件作者）；格式修订，以及文本框与脚注中的批注和修订，随原文件保留。';
+/**
+ * The same row as a reimport states it: a reimport creates no mark (that is S63's, V2-UX-IMP-057), so the
+ * class stays `不支持导入` there, with the marks it would have made as its count.
+ */
+export const REIMPORT_COMMENTS_REVISIONS_DETAIL =
+  '重新导入暂不把文件中的批注与修订转为稿件上的标记；它们随原文件保留。';
+
+/** Which form a revision-3 report's 批注与修订 row takes: none found, converted to marks, or a reimport's. */
+type CommentsRevisionsVariant = 'absent' | 'converted' | 'reimport';
+
+/**
+ * The ten content classes with their counts, labels, and details (V2-UX-IMP-002 to 004, ADR 0086), as parser
+ * identity `ai7-docx-fflate-saxes/3` reports them: revision 2's classes, with 批注与修订 `完整保留` when the
+ * file carries any comment or revision — counted as the marks they become — and the reimport's `不支持导入`
+ * form beside it (`reimportFidelityReport`). A converter's loss keeps revision 2's wording for the class.
+ */
+export function buildFidelityReport(
+  signals: DocumentSignals,
+  headersFooters: number,
+  conversion?: FidelityConversion,
+  textBoxDisposition: TextBoxDisposition = 'retain',
+): FidelityCategoryProjection[] {
+  const present = signals.commentsRevisionsPresent ?? signals.commentsRevisions > 0;
+  const variant: CommentsRevisionsVariant = present ? 'converted' : 'absent';
+  return withCommentsRevisionsVariant(buildFidelityReportV2(signals, headersFooters, conversion, textBoxDisposition), variant, conversion);
+}
+
+/**
+ * A revision-3 report with its 批注与修订 row in `variant`, unless a converter's loss is what the row counts:
+ * such a row is the converter's, worded as revision 2 worded it (ADR 0072 §3).
+ */
+function withCommentsRevisionsVariant(
+  report: FidelityCategoryProjection[],
+  variant: CommentsRevisionsVariant,
+  conversion: Pick<FidelityConversion, 'identity'> | undefined,
+): FidelityCategoryProjection[] {
+  return report.map((category) => {
+    if (category.key !== 'comments-revisions' || variant === 'absent') return category;
+    if (conversion !== undefined && category.count > 0) return category;
+    return variant === 'converted'
+      ? { ...category, ...PRESERVED, detail: COMMENTS_REVISIONS_DETAIL }
+      : { ...category, ...UNSUPPORTED, detail: REIMPORT_COMMENTS_REVISIONS_DETAIL };
+  });
+}
+
+/**
+ * The ten content classes exactly as parser identity `ai7-docx-fflate-saxes/2` reported them (ADR 0086).
+ * Frozen: it exists so that a review recorded under revision 2 — staged, committed, or reimported — still
+ * rebuilds byte for byte from its counts, and revision 3 derives its own report from it. Nine are rows;
+ * the tenth, `round-trip-export`, is the closing 预计往返 card and always counts nothing.
  *
  * A class present in a natively read file is `完整保留（随文件保留）` when its content stays with the Source
  * Version and is restored on export — inline styles (links among them), tables, images, sections, headers
@@ -845,8 +1083,8 @@ const TEXT_BOX_DETAILS: Readonly<Record<TextBoxDisposition, string>> = {
  * converter lost is not in the working representation, so it cannot be retained: such a class keeps the
  * label it carried before ADR 0086, and the two new classes read `降级导入` (ADR 0086 §3).
  */
-export function buildFidelityReport(
-  signals: DocumentSignals,
+function buildFidelityReportV2(
+  signals: DocumentSignalsV2,
   headersFooters: number,
   conversion?: FidelityConversion,
   textBoxDisposition: TextBoxDisposition = 'retain',
@@ -1049,11 +1287,18 @@ function candidateCounts(value: unknown, rows: number): number[] | undefined {
  * can rebuild. A converted report is rebuilt from the other side of the same addition: the parser
  * contributed nothing, so every count is the conversion's loss.
  */
+interface CandidateReport {
+  report: FidelityCategoryProjection[];
+  textBoxDisposition: TextBoxDisposition | null;
+  /** The form of a revision-3 report's 批注与修订 row; `absent` for every report before revision 3. */
+  commentsRevisions: CommentsRevisionsVariant;
+}
+
 function reportsForCandidateCounts(
   value: unknown,
   conversion: FidelityConversionIdentity | undefined,
   parserIdentity: string,
-): Array<{ report: FidelityCategoryProjection[]; textBoxDisposition: TextBoxDisposition | null }> {
+): CandidateReport[] {
   // A converter this build cannot phrase is not one whose report this build can rebuild.
   if (conversion !== undefined && CONVERSION_LOSS_PHRASES[conversion.identity] === undefined) return [];
   if (parserIdentity === DOCX_PARSER_IDENTITY_V1) {
@@ -1070,36 +1315,55 @@ function reportsForCandidateCounts(
         0,
         { ...conversion, loss: { ...signals, headersFooters: counts[6]! } },
       );
-    return [{ report, textBoxDisposition: null }];
+    return [{ report, textBoxDisposition: null, commentsRevisions: 'absent' }];
   }
-  if (parserIdentity !== DOCX_PARSER_IDENTITY) return [];
+  if (parserIdentity !== DOCX_PARSER_IDENTITY && parserIdentity !== DOCX_PARSER_IDENTITY_V2) return [];
   const counts = candidateCounts(value, 10);
   if (counts === undefined) return [];
-  const signals: DocumentSignals = {
+  const signals: DocumentSignalsV2 = {
     inlineStyles: counts[0]!, commentsRevisions: counts[1]!, notes: counts[2]!, tables: counts[3]!,
     imagesCaptions: counts[4]!, sections: counts[5]!, textBoxes: counts[7]!, fields: counts[8]!,
   };
+  const current = parserIdentity === DOCX_PARSER_IDENTITY;
   if (conversion !== undefined) {
     const { textBoxes, fields, ...rest } = signals;
+    const withLoss = { ...conversion, loss: { ...rest, headersFooters: counts[6]!, textBoxes, fields } };
     return [{
-      report: buildFidelityReport(NO_SIGNALS, 0, {
-        ...conversion,
-        loss: { ...rest, headersFooters: counts[6]!, textBoxes, fields },
-      }),
+      report: current ? buildFidelityReport(NO_SIGNALS, 0, withLoss) : buildFidelityReportV2(NO_SIGNALS, 0, withLoss),
       textBoxDisposition: null,
+      commentsRevisions: 'absent',
     }];
   }
-  if (signals.textBoxes === 0) return [{ report: buildFidelityReport(signals, counts[6]!), textBoxDisposition: null }];
-  return (['retain', 'merge'] as const).map((disposition) => ({
-    report: buildFidelityReport(signals, counts[6]!, undefined, disposition),
-    textBoxDisposition: disposition,
-  }));
+  const dispositions: ReadonlyArray<TextBoxDisposition | null> = signals.textBoxes === 0 ? [null] : ['retain', 'merge'];
+  // Revision 3 rebuilds the 批注与修订 row in every form its count admits: with no mark it may be absent or
+  // present (a formatting revision alone), and a reimport states it as its own.
+  const variants: ReadonlyArray<CommentsRevisionsVariant> = !current
+    ? ['absent']
+    : signals.commentsRevisions > 0 ? ['converted', 'reimport'] : ['absent', 'converted', 'reimport'];
+  return dispositions.flatMap((disposition) => {
+    const base = buildFidelityReportV2(signals, counts[6]!, undefined, disposition ?? 'retain');
+    return variants.map((variant) => ({
+      report: current ? withCommentsRevisionsVariant(base, variant, undefined) : base,
+      textBoxDisposition: disposition,
+      commentsRevisions: variant,
+    }));
+  });
+}
+
+function matchingCandidate(
+  fidelity: unknown,
+  conversion: FidelityConversionIdentity | undefined,
+  parserIdentity: string,
+): { match: CandidateReport; candidates: CandidateReport[] } | undefined {
+  const candidates = reportsForCandidateCounts(fidelity, conversion, parserIdentity);
+  const match = candidates.find((candidate) => hasExactFidelityProjection(fidelity, candidate.report));
+  return match === undefined ? undefined : { match, candidates };
 }
 
 /**
  * Plans any well-formed fidelity report (ADR 0072 §4, ADR 0086). A report whose classes carry the keys,
  * labels, statuses, status labels, details, and non-negative integer counts the builder of its parser
- * identity would emit — the ten classes of `ai7-docx-fflate-saxes/2`, or the frozen eight of `/1` — yields
+ * identity would emit — the ten classes of `ai7-docx-fflate-saxes/3` or the frozen `/2`, or the frozen eight of `/1` — yields
  * `degraded-import-no-round-trip` when some class is `降级导入` or `不支持导入` with a positive count, listing
  * each such class in report order, and `clean-import-no-round-trip` otherwise: a class retained with the
  * file asks for no Import Degradation Decision. Anything that is not such a report yields `undefined`.
@@ -1108,8 +1372,9 @@ function reportsForCandidateCounts(
  *
  * A report a converter's loss was merged into is planned by passing the same `conversion` its details
  * name (ADR 0072 §3): without it the merged details do not reconstruct and the report refuses as
- * malformed, so a converted review can never be read back as if it had been parsed. A revision-2 report
- * of a natively read file with text boxes rebuilds under exactly one disposition, which the plan states.
+ * malformed, so a converted review can never be read back as if it had been parsed. A report of a natively
+ * read file with text boxes rebuilds under exactly one disposition, which the plan states; a revision-3
+ * report whose 批注与修订 are converted states how many marks the import creates (Issue #411).
  */
 export function deriveImportFidelityPlan(
   fidelity: unknown,
@@ -1118,8 +1383,7 @@ export function deriveImportFidelityPlan(
   conversion?: FidelityConversionIdentity,
   parserIdentity: string = DOCX_PARSER_IDENTITY,
 ): ImportFidelityPlan | undefined {
-  const match = reportsForCandidateCounts(fidelity, conversion, parserIdentity)
-    .find((candidate) => hasExactFidelityProjection(fidelity, candidate.report));
+  const match = matchingCandidate(fidelity, conversion, parserIdentity)?.match;
   if (match === undefined) return undefined;
   const degradations = match.report
     .filter((category) => (category.status === 'degraded' || category.status === 'unsupported') && category.count > 0)
@@ -1128,14 +1392,17 @@ export function deriveImportFidelityPlan(
     outcome: degradations.length === 0 ? 'clean-import-no-round-trip' : 'degraded-import-no-round-trip',
     degradations,
     textBoxDisposition: match.textBoxDisposition,
+    importedMarks: match.commentsRevisions === 'converted'
+      ? match.report.find((category) => category.key === 'comments-revisions')!.count
+      : 0,
   };
 }
 
 /**
  * The same report stating `disposition` for its text boxes (ADR 0086 §2), or `undefined` when `fidelity`
- * is not a report this build can rebuild or the choice is not one it can state: only a revision-2
- * report of a natively read file with a text box can be merged, and any other keeps its text boxes, if
- * it has any, as they are.
+ * is not a report this build can rebuild or the choice is not one it can state: only a report of a natively
+ * read file with a text box can be merged, and any other keeps its text boxes, if it has any, as they are.
+ * Every other class stays exactly as it was.
  */
 export function withTextBoxDisposition(
   fidelity: unknown,
@@ -1143,10 +1410,29 @@ export function withTextBoxDisposition(
   conversion?: FidelityConversionIdentity,
   parserIdentity: string = DOCX_PARSER_IDENTITY,
 ): FidelityCategoryProjection[] | undefined {
-  const candidates = reportsForCandidateCounts(fidelity, conversion, parserIdentity);
-  if (!candidates.some((candidate) => hasExactFidelityProjection(fidelity, candidate.report))) return undefined;
-  const chosen = candidates.find((candidate) => (candidate.textBoxDisposition ?? 'retain') === disposition);
+  const found = matchingCandidate(fidelity, conversion, parserIdentity);
+  if (found === undefined) return undefined;
+  const chosen = found.candidates.find((candidate) => (candidate.textBoxDisposition ?? 'retain') === disposition &&
+    candidate.commentsRevisions === found.match.commentsRevisions);
   return chosen?.report;
+}
+
+/**
+ * The report a reimport states (Issue #411): a reimport makes no mark of the file's comments and revisions —
+ * that is S63's — so a revision-3 report that would convert them states the class `不支持导入` instead, with
+ * the same count, and the reimport needs the editor's decision for it. Any other report is what it was;
+ * `undefined` when `fidelity` is not a report this build can rebuild.
+ */
+export function reimportFidelityReport(
+  fidelity: unknown,
+  conversion?: FidelityConversionIdentity,
+  parserIdentity: string = DOCX_PARSER_IDENTITY,
+): FidelityCategoryProjection[] | undefined {
+  const found = matchingCandidate(fidelity, conversion, parserIdentity);
+  if (found === undefined) return undefined;
+  if (found.match.commentsRevisions !== 'converted') return found.match.report;
+  return found.candidates.find((candidate) => candidate.textBoxDisposition === found.match.textBoxDisposition &&
+    candidate.commentsRevisions === 'reimport')?.report;
 }
 
 export async function parseDocx(
@@ -1182,6 +1468,7 @@ export async function parseDocx(
     characterCount: archive.document.characterCount,
     fidelity,
     textBoxes: archive.document.textBoxes,
+    importedMarks: archive.document.importedMarks,
     titleSuggestion,
   };
 }

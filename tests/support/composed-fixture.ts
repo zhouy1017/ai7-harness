@@ -157,6 +157,175 @@ function retentionParts(
   return parts;
 }
 
+// ---- comments and tracked changes (Issue #411) -------------------------------------------------------
+
+/** Graphemes `[from, to)` of the admitted source's `block`-th block (1-based); the whole block by default. */
+export interface SourceSpan {
+  readonly block: number;
+  readonly from?: number;
+  readonly to?: number;
+}
+
+/** A tracked-change container around a run, possibly holding another — a deletion inside an insertion. */
+export interface ComposedRevisionWrap {
+  readonly kind: 'ins' | 'del' | 'moveFrom' | 'moveTo';
+  readonly author: string;
+  readonly date: string;
+  readonly inner?: ComposedRevisionWrap;
+}
+
+export type ComposedRevisedRun =
+  | { readonly text: SourceSpan; readonly revision?: ComposedRevisionWrap }
+  | { readonly comment: 'start' | 'end' | 'reference'; readonly id: number };
+
+export interface ComposedRevisedParagraph {
+  readonly runs: ReadonlyArray<ComposedRevisedRun>;
+  /** A revision on the paragraph mark itself: the paragraph inserted, deleted, split or joined. */
+  readonly markRevision?: { readonly kind: 'ins' | 'del' | 'moveFrom' | 'moveTo'; readonly author: string; readonly date: string };
+  /** A formatting revision on the paragraph (`w:pPrChange`) and on its first run (`w:rPrChange`). */
+  readonly formattingRevision?: { readonly author: string; readonly date: string };
+  /** Paragraphs of a text box anchored in this paragraph, with comments or revisions of their own. */
+  readonly textBox?: ReadonlyArray<ComposedRevisedParagraph>;
+}
+
+/** One comment of `word/comments.xml`: its paragraphs are source spans; a reply names the comment it answers. */
+export interface ComposedComment {
+  readonly id: number;
+  readonly author: string;
+  readonly text: ReadonlyArray<SourceSpan>;
+  readonly replyTo?: number;
+  readonly done?: boolean;
+}
+
+export interface ComposedRevisedRequest {
+  readonly source: string;
+  readonly title: string;
+  readonly paragraphs: ReadonlyArray<ComposedRevisedParagraph>;
+  readonly comments?: ReadonlyArray<ComposedComment>;
+  /** A section-property revision in the terminal `w:sectPr`. */
+  readonly sectionRevision?: { readonly author: string; readonly date: string };
+}
+
+const segmenter = new Intl.Segmenter('zh-CN', { granularity: 'grapheme' });
+
+/** The exact text a span names, read from the admitted source through the product's parser. */
+export async function sourceSpanText(source: string, span: SourceSpan): Promise<string> {
+  const available = await blocksOf(source);
+  const block = available[span.block - 1];
+  if (block === undefined) throw new Error('composed span outside the source');
+  const graphemes = Array.from(segmenter.segment(block.text), ({ segment }) => segment);
+  const from = span.from ?? 0;
+  const to = span.to ?? graphemes.length;
+  if (from < 0 || to > graphemes.length || to <= from) throw new Error('composed span outside its block');
+  return graphemes.slice(from, to).join('');
+}
+
+const W14 = 'xmlns:w14="http://schemas.microsoft.com/office/word/2010/wordml"';
+const W15 = 'xmlns:w15="http://schemas.microsoft.com/office/word/2012/wordml"';
+
+function paragraphId(commentId: number): string {
+  return (0x10000000 + commentId).toString(16).toUpperCase();
+}
+
+/**
+ * Compose a DOCX whose paragraphs carry comments and tracked changes, every word of it a span of the admitted
+ * source, written the way Word writes them: `w:ins`/`w:del`/`w:moveFrom`/`w:moveTo` around runs, deleted text
+ * in `w:delText`, the paragraph mark's revision in `w:pPr/w:rPr`, comment ranges and references in the body,
+ * and the comments in `word/comments.xml` with their threads and 已处理 in `word/commentsExtended.xml`.
+ * Author names are the caller's, neutral by convention. Returns the archive bytes.
+ */
+export async function composeRevisedDocx(path: string, request: ComposedRevisedRequest): Promise<Uint8Array> {
+  let revisionId = 1000;
+  const attributes = (author: string, date: string): string =>
+    ` w:id="${revisionId++}" w:author="${escapeXml(author)}" w:date="${escapeXml(date)}"`;
+  const runXml = async (span: SourceSpan, wrap: ComposedRevisionWrap | undefined): Promise<string> => {
+    const text = escapeXml(await sourceSpanText(request.source, span));
+    let innermost = wrap;
+    while (innermost?.inner !== undefined) innermost = innermost.inner;
+    const deleted = innermost?.kind === 'del';
+    let xml = `<w:r>${deleted ? `<w:delText xml:space="preserve">${text}</w:delText>` : `<w:t xml:space="preserve">${text}</w:t>`}</w:r>`;
+    const chain: ComposedRevisionWrap[] = [];
+    for (let current = wrap; current !== undefined; current = current.inner) chain.push(current);
+    for (const layer of chain.reverse()) xml = `<w:${layer.kind}${attributes(layer.author, layer.date)}>${xml}</w:${layer.kind}>`;
+    return xml;
+  };
+  const paragraphXml = async (paragraph: ComposedRevisedParagraph): Promise<string> => {
+    const properties: string[] = [];
+    if (paragraph.formattingRevision !== undefined) {
+      const { author, date } = paragraph.formattingRevision;
+      properties.push(`<w:pPrChange${attributes(author, date)}><w:pPr><w:pStyle w:val="Heading1"/></w:pPr></w:pPrChange>`);
+    }
+    if (paragraph.markRevision !== undefined) {
+      const { kind, author, date } = paragraph.markRevision;
+      properties.push(`<w:rPr><w:${kind}${attributes(author, date)}/></w:rPr>`);
+    }
+    const runs: string[] = [];
+    for (const [index, run] of paragraph.runs.entries()) {
+      if ('comment' in run) {
+        runs.push(run.comment === 'start'
+          ? `<w:commentRangeStart w:id="${run.id}"/>`
+          : run.comment === 'end'
+            ? `<w:commentRangeEnd w:id="${run.id}"/>`
+            : `<w:r><w:commentReference w:id="${run.id}"/></w:r>`);
+        continue;
+      }
+      let xml = await runXml(run.text, run.revision);
+      if (index === 0 && paragraph.formattingRevision !== undefined) {
+        const { author, date } = paragraph.formattingRevision;
+        xml = xml.replace('<w:r>', `<w:r><w:rPr><w:b/><w:rPrChange${attributes(author, date)}><w:rPr/></w:rPrChange></w:rPr>`);
+      }
+      runs.push(xml);
+    }
+    if (paragraph.textBox !== undefined) {
+      const box = (await Promise.all(paragraph.textBox.map(paragraphXml))).join('');
+      runs.push(`<w:r><mc:AlternateContent ${MC}><mc:Choice Requires="wps"><w:drawing><wp:anchor ${WP}><a:graphic ${A}>` +
+        `<a:graphicData><wps:wsp ${WPS}><wps:txbx><w:txbxContent>${box}</w:txbxContent></wps:txbx></wps:wsp></a:graphicData>` +
+        '</a:graphic></wp:anchor></w:drawing></mc:Choice></mc:AlternateContent></w:r>');
+    }
+    const pPr = properties.length === 0 ? '' : `<w:pPr>${properties.join('')}</w:pPr>`;
+    return `<w:p>${pPr}${runs.join('')}</w:p>`;
+  };
+  const body = (await Promise.all(request.paragraphs.map(paragraphXml))).join('');
+  const section = request.sectionRevision === undefined
+    ? '<w:sectPr/>'
+    : `<w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:sectPrChange${attributes(request.sectionRevision.author, request.sectionRevision.date)}><w:sectPr/></w:sectPrChange></w:sectPr>`;
+  const encoder = new TextEncoder();
+  const entries: Record<string, Uint8Array> = {
+    'word/document.xml': encoder.encode(
+      '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+      '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>' +
+      `${body}${section}</w:body></w:document>`,
+    ),
+  };
+  const comments = request.comments ?? [];
+  if (comments.length > 0) {
+    const commentXml: string[] = [];
+    for (const comment of comments) {
+      const paragraphs: string[] = [];
+      for (const [index, span] of comment.text.entries()) {
+        const id = index === comment.text.length - 1 ? ` w14:paraId="${paragraphId(comment.id)}"` : '';
+        paragraphs.push(`<w:p${id}><w:r><w:t xml:space="preserve">${escapeXml(await sourceSpanText(request.source, span))}</w:t></w:r></w:p>`);
+      }
+      if (comment.text.length === 0) paragraphs.push(`<w:p w14:paraId="${paragraphId(comment.id)}"/>`);
+      commentXml.push(`<w:comment w:id="${comment.id}" w:author="${escapeXml(comment.author)}" w:date="2026-09-01T00:00:00Z" w:initials="示">${paragraphs.join('')}</w:comment>`);
+    }
+    entries['word/comments.xml'] = encoder.encode(
+      '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+      `<w:comments xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" ${W14}>${commentXml.join('')}</w:comments>`,
+    );
+    const threads = comments.map((comment) => {
+      const parent = comment.replyTo === undefined ? '' : ` w15:paraIdParent="${paragraphId(comment.replyTo)}"`;
+      return `<w15:commentEx w15:paraId="${paragraphId(comment.id)}"${parent} w15:done="${comment.done === true ? 1 : 0}"/>`;
+    });
+    entries['word/commentsExtended.xml'] = encoder.encode(
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w15:commentsEx ${W15}>${threads.join('')}</w15:commentsEx>`,
+    );
+  }
+  const archive = buildSyntheticDocx({ paragraphs: [], coreTitle: request.title, extraEntries: entries });
+  await writeFile(path, archive);
+  return archive;
+}
+
 /**
  * Compose one DOCX at `path` from the requested excerpt and return its bytes. The same request yields
  * the same bytes — the excerpt is deterministic and `buildSyntheticDocx` fixes the archive mtime — so a
